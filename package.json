@@ -1,0 +1,15 @@
+{
+  "name": "hata",
+  "version": "0.1.0-dev",
+  "description": "A home server in a single file",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "module": "src/index.ts",
+  "scripts": {
+    "start": "bun src/index.ts",
+    "dev": "bun --watch src/index.ts",
+    "test": "bun test",
+    "build": "bun scripts/build.ts"
+  }
+}

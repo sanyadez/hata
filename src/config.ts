@@ -1,0 +1,102 @@
+/**
+ * Paths and settings. The source of truth for settings is data/settings.json (edited through the web UI);
+ * environment variables only override where the server listens.
+ */
+import { mkdirSync } from "node:fs";
+import { homedir } from "node:os";
+import { join, resolve } from "node:path";
+import { isPlainObject, readJsonFile, writeJsonAtomic } from "./fsutil";
+import { COMPILED } from "./version";
+
+/**
+ * State directory. A run from source keeps it in the working copy; the binary uses the system location
+ * (the same one the service uses), so `hata setup-url` finds the state of the running service.
+ */
+function defaultDataDir(): string {
+  if (!COMPILED) return join(process.cwd(), "data");
+  return process.getuid?.() === 0 ? "/var/lib/hata" : join(homedir(), ".local", "share", "hata");
+}
+
+export const DATA_DIR = resolve(process.env.HATA_DATA_DIR || defaultDataDir());
+mkdirSync(DATA_DIR, { recursive: true, mode: 0o700 });
+
+const SETTINGS_FILE = join(DATA_DIR, "settings.json");
+
+export interface StoreSource {
+  /** Short key used in URLs and on disk */
+  id: string;
+  /** GitHub repository URL of a CasaOS-compatible store */
+  url: string;
+}
+
+export interface Settings {
+  /** Root for app data: store apps expect `<dataRoot>/AppData/<app>` and `<dataRoot>/Media` */
+  dataRoot: string;
+  /** User and group that apps run as (the `$PUID` / `$PGID` variables of store apps) */
+  puid: number;
+  pgid: number;
+  /** `$TZ` for apps; "" — the system time zone */
+  timezone: string;
+  /** UI language when the browser's language is not available */
+  language: string;
+  stores: StoreSource[];
+}
+
+const DEFAULTS: Settings = {
+  dataRoot: "/DATA",
+  puid: 1000,
+  pgid: 1000,
+  timezone: "",
+  language: "en",
+  stores: [{ id: "casaos", url: "https://github.com/IceWhaleTech/CasaOS-AppStore" }],
+};
+
+export const settings: Settings = {
+  ...DEFAULTS,
+  ...readJsonFile<Partial<Settings>>(SETTINGS_FILE, {}, isPlainObject),
+};
+
+export function timezone(): string {
+  return settings.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+}
+
+/** Validates and applies a partial update; returns an error code or null */
+export function updateSettings(patch: Record<string, unknown>): string | null {
+  const next = { ...settings };
+  if ("dataRoot" in patch) {
+    const v = patch.dataRoot;
+    if (typeof v !== "string" || !/^\/[^\0]*$/.test(v) || v.split("/").includes("..")) return "settings.badDataRoot";
+    next.dataRoot = v.length > 1 ? v.replace(/\/+$/, "") : v;
+  }
+  for (const key of ["puid", "pgid"] as const) {
+    if (!(key in patch)) continue;
+    const v = patch[key];
+    if (typeof v !== "number" || !Number.isInteger(v) || v < 0 || v > 65534) return "settings.badId";
+    next[key] = v;
+  }
+  if ("timezone" in patch) {
+    const v = patch.timezone;
+    if (typeof v !== "string") return "settings.badTimezone";
+    if (v) {
+      try {
+        new Intl.DateTimeFormat("en", { timeZone: v });
+      } catch {
+        return "settings.badTimezone";
+      }
+    }
+    next.timezone = v;
+  }
+  if ("language" in patch) {
+    if (typeof patch.language !== "string" || !/^[a-z]{2}$/.test(patch.language)) return "settings.badLanguage";
+    next.language = patch.language;
+  }
+  Object.assign(settings, next);
+  writeJsonAtomic(SETTINGS_FILE, settings);
+  return null;
+}
+
+/** Where the server listens: port 80 needs root, so an unprivileged run falls back to 8080 */
+export function listenAddress(): { port: number; hostname: string } {
+  const port = Number(process.env.HATA_PORT ?? process.env.PORT ?? (process.getuid?.() === 0 ? 80 : 8080));
+  return { port, hostname: process.env.HATA_HOST ?? "0.0.0.0" };
+}
