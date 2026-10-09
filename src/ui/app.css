@@ -705,7 +705,9 @@ input[type="range"] { accent-color: var(--accent); width: 100%; }
 .zone, .zone.side { display: flex; flex-wrap: wrap; align-items: stretch; gap: 16px; }
 .zone > .widget { flex: 1 1 100%; min-width: 0; position: relative; }
 .zone > .widget.small { flex: 1 1 170px; }
-.widget.small > .stat { border: 0; height: 100%; }
+/* the one column is as wide as the card and no wider: a chart gives way instead of sticking out */
+.widget.small > .stat { border: 0; height: 100%; grid-template-columns: minmax(0, 1fr); }
+.widget.small { overflow: hidden; }
 .block-remove { position: absolute; top: 6px; right: 6px; width: 24px; height: 24px; z-index: 1; }
 .widget:is(:hover, :focus-within) > .block-remove { opacity: 1; }
 .widget.drop-before { box-shadow: -4px 0 0 var(--accent); }
