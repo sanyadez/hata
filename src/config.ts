@@ -5,6 +5,7 @@
 import { mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
+import { cleanLayout, type Layout } from "./dashboard";
 import { isPlainObject, readJsonFile, writeJsonAtomic } from "./fsutil";
 import { COMPILED } from "./version";
 
@@ -48,6 +49,8 @@ export interface Settings {
   https: HttpsSettings;
   /** Folders put on the dashboard from the file manager, absolute paths */
   folders: string[];
+  /** How the dashboard is arranged: groups, links, folders of tiles */
+  dashboard: Layout;
 }
 
 export interface HttpsSettings {
@@ -101,6 +104,7 @@ const DEFAULTS: Settings = {
   access: {},
   https: { mode: "off", domain: "", email: "" },
   folders: [],
+  dashboard: { groups: [] },
 };
 
 const saved = readJsonFile<Partial<Settings>>(SETTINGS_FILE, {}, isPlainObject);
@@ -112,6 +116,7 @@ export const settings: Settings = {
   backup: { ...DEFAULTS.backup, ...(isPlainObject(saved.backup) ? saved.backup : {}) },
   access: isPlainObject(saved.access) ? (saved.access as Record<string, AppAccess>) : {},
   folders: Array.isArray(saved.folders) ? saved.folders.filter((path): path is string => typeof path === "string") : [],
+  dashboard: cleanLayout(saved.dashboard),
   https: { ...DEFAULTS.https, ...(isPlainObject(saved.https) ? saved.https : {}) },
 };
 

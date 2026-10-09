@@ -59,7 +59,8 @@ import {
   setupToken,
 } from "./auth";
 import { bus } from "./bus";
-import { DATA_DIR, listenAddress, settings, timezone, updateSettings } from "./config";
+import { DATA_DIR, listenAddress, saveSettings, settings, timezone, updateSettings } from "./config";
+import { arrange, cleanLayout } from "./dashboard";
 import { dockerInfo, listContainers, watchEvents } from "./docker";
 import { abortUpload, archivePlan, list as listFiles, makeFolder, pinFolder, pinnedFolders, readable, readText, remove as removeFiles, rename as renameFile, summary as filesSummary, transfer, upload, writeText } from "./files";
 import { adoptProject, casaosState, containerDraft, importCount, importList, moveInCasaos, projectDraft, rebuildContainer } from "./import";
@@ -126,7 +127,7 @@ const ETAGS = new Map(Object.entries(STATIC).map(([path, file]) => [path, `"${Bu
 
 /** Scripts and styles only from this server; images also from anywhere over HTTPS (store icons) */
 const SECURITY_HEADERS = {
-  "content-security-policy": "default-src 'self'; img-src 'self' https: data:; font-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+  "content-security-policy": "default-src 'self'; img-src 'self' https: http: data:; font-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
   "x-content-type-options": "nosniff",
   "x-frame-options": "DENY",
   "referrer-policy": "no-referrer",
@@ -494,8 +495,16 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
       importable: admin ? importCount(containers) : 0,
       // folders an administrator put on the dashboard from the file manager
       folders: admin ? pinnedFolders() : [],
+      dashboard: arrange(settings.dashboard, apps.map((app) => app.name), admin ? settings.folders : []),
       jobs: admin ? listJobs().filter((j) => j.status === "running").map(({ log: _, ...job }) => job) : [],
     });
+  }
+
+  if (path === "/api/dashboard" && method === "PUT") {
+    settings.dashboard = cleanLayout(await body(req));
+    saveSettings();
+    bus.publish("apps");
+    return json({ ok: true });
   }
 
   if (path === "/api/activity" && method === "GET") {

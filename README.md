@@ -17,6 +17,9 @@ Early development. What works today:
 - dashboard: CPU, memory, disk, network and temperature with history, app tiles with live state, a
   "needs attention" list (an app that keeps restarting, a failed install or update, a disk filling up) and
   recent activity;
+- the dashboard is yours to arrange: plain links next to the apps, named groups, folders of tiles that
+  open in place like on a phone — by dragging (mouse or finger) or from each tile's menu; a tile opens
+  the app, the small button next to it leads to its page in Hata;
 - app store: reads the CasaOS store (`x-casaos`), search and categories, a form for ports, folders and
   variables, install with live progress;
 - custom apps: paste any compose file;

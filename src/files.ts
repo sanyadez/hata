@@ -19,6 +19,7 @@ import { lstat, open, readdir, readFile, rm, stat } from "node:fs/promises";
 import { basename, dirname, extname, join, resolve, sep } from "node:path";
 import { AppError } from "./apps";
 import { DATA_DIR, saveSettings, settings } from "./config";
+import { movePath } from "./dashboard";
 import { ZIP_MAX_BYTES, ZIP_MAX_ENTRIES, type ZipSource } from "./zip";
 
 /** A folder's listing holds at most this many entries */
@@ -245,6 +246,7 @@ function repin(from: string, to: string | null): void {
   const next = settings.folders.flatMap((path) => (!inside(path, from) ? [path] : to === null ? [] : [to + path.slice(from.length)]));
   if (next.join("\n") === settings.folders.join("\n")) return;
   settings.folders = [...new Set(next)];
+  settings.dashboard = movePath(settings.dashboard, from, to);
   saveSettings();
 }
 
