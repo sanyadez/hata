@@ -651,7 +651,7 @@ function appTile(app) {
   return h(
     "div",
     { class: "tile " + st },
-    h("a", { class: "tile-main", href: `#/apps/${app.name}` }, appIcon(app), h("span", { class: "tile-text" }, h("span", { class: "tile-name" }, app.title), h("span", { class: "tile-sub" }, h("i", { class: "dot " + st }), sub, app.protected && h("span", { class: "lock", title: t("access.protected") }, icon("lock"))))),
+    h("a", { class: "tile-main", href: `#/apps/${app.name}` }, appIcon(app), h("span", { class: "tile-text" }, h("span", { class: "tile-top" }, h("span", { class: "tile-name" }, app.title), app.protected && h("span", { class: "lock", title: t("access.protected") }, icon("lock")), app.update && isAdmin() && h("span", { class: "lock", title: t("app.storeUpdate") }, icon("up"))), h("span", { class: "tile-sub" }, h("i", { class: "dot " + st }), sub))),
     url && h("a", { class: "tile-open", href: url, target: "_blank", rel: "noopener noreferrer", title: t("app.open"), "aria-label": `${t("app.open")}: ${app.title}` }, icon("external")),
   );
 }
@@ -802,6 +802,7 @@ function renderAppHead() {
         !isAdmin() && url && h("a", { class: "btn primary", href: url, target: "_blank", rel: "noopener noreferrer" }, icon("external"), h("span", null, t("app.open"))),
         ...(!isAdmin() ? [] : [
         app.job && button(t("status.busy"), { onclick: () => jobDialog(app.job.id, app.job.kind, app.title) }, "terminal"),
+        app.update && !app.job && button(t("app.storeUpdate"), { class: "accent", onclick: () => storeUpdateDialog(app) }, "up"),
         isUp(app) && button(t("app.restart"), { disabled: !!app.job, onclick: () => startAction(app, "restart") }, "refresh"),
         isUp(app) ? button(t("app.stop"), { disabled: !!app.job, onclick: () => startAction(app, "stop") }, "stop") : button(t("app.start"), { class: url ? "" : "primary", disabled: !!app.job, onclick: () => startAction(app, "start") }, "play"),
         url && h("a", { class: "btn primary", href: url, target: "_blank", rel: "noopener noreferrer" }, icon("external"), h("span", null, t("app.open"))),
@@ -810,6 +811,45 @@ function renderAppHead() {
       ),
     ),
     isAdmin() && h("div", { class: "tabs" }, tab("overview", "grid"), tab("logs", "logs"), tab("compose", "code"), tab("backups", "archive")),
+  );
+}
+
+/** What the store's newer version changes in the app's compose file, before anything happens */
+async function storeUpdateDialog(app) {
+  let plan;
+  try {
+    plan = await api("GET", `/api/apps/${app.name}/storeupdate`);
+  } catch (e) {
+    return toast(errorText(e), "error");
+  }
+  const rows = (kind) => plan.changes.filter((c) => c.kind === kind && !c.path.startsWith("x-casaos")).map((c) => h("tr", null, h("td", { class: "mono small" }, c.path), h("td", { class: "mono small" }, h("div", { class: "muted clip" }, c.from || "—"), h("div", { class: "clip" }, c.to || t("update.removed")))));
+  const table = (kind) => h("div", { class: "card table-wrap" }, h("table", { class: "changes" }, h("tbody", null, rows(kind))));
+  const fromStore = rows("store");
+  const conflicts = rows("conflict");
+  const dialog = openDialog(
+    "wide",
+    h("header", null, h("div", { class: "grow" }, h("h2", null, t("update.title", { title: app.title })), h("p", { class: "muted small" }, t("update.lead", { store: plan.store }))), closeX(() => dialog)),
+    !plan.exact && h("p", { class: "banner small" }, t(plan.recorded ? "update.guessed" : "update.matched", { store: plan.store })),
+    fromStore.length > 0 && h("div", { class: "stack" }, h("h3", null, t("update.changes")), table("store")),
+    conflicts.length > 0 && h("div", { class: "stack" }, h("h3", null, t("update.conflicts")), h("p", { class: "muted small" }, t("update.conflictsLead")), table("conflict")),
+    h("details", null, h("summary", { class: "muted small" }, t("update.file")), h("textarea", { class: "code", spellcheck: false, wrap: "off", readOnly: true, value: plan.compose, "aria-label": "compose.yml" })),
+    h(
+      "footer",
+      null,
+      closeButton(() => dialog, t("common.cancel")),
+      button(t(fromStore.length ? "update.apply" : "update.keep"), {
+        class: "primary",
+        onclick: async () => {
+          dialog.close();
+          try {
+            const res = await api("POST", `/api/apps/${app.name}/storeupdate`, {});
+            jobDialog(res.job, "update", app.title, () => loadApp(true));
+          } catch (e) {
+            toast(errorText(e), "error");
+          }
+        },
+      }, "up"),
+    ),
   );
 }
 

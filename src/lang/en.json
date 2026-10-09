@@ -479,5 +479,18 @@
   "import.casaos.done": "Moved in from CasaOS: {n}.",
   "import.casaos.stuck": "Could not stop: {units}",
   "error.import.notFound": "It is no longer there, or it is already an app.",
-  "error.import.autoRemove": "This container was started with --rm: it disappears when stopped, so there is nothing to rebuild."
+  "error.import.autoRemove": "This container was started with --rm: it disappears when stopped, so there is nothing to rebuild.",
+  "app.storeUpdate": "Update available",
+  "update.title": "Update {title}",
+  "update.lead": "The {store} store has a newer version. This is what changes in the app's compose file; what you changed yourself stays.",
+  "update.guessed": "This app was installed before Hata kept the store's original file, so only your ports, folders and variable values are known to be yours. Anything else edited by hand follows the store — check the list.",
+  "update.matched": "This app does not say where it came from; the {store} store has an app of the same name. Only its ports, folders and variable values are kept; anything else follows the store — check the list.",
+  "update.changes": "From the store",
+  "update.conflicts": "Kept as you set it",
+  "update.conflictsLead": "You and the store changed the same thing. Your value stays; the store's new value is shown under it.",
+  "update.removed": "(removed)",
+  "update.file": "The compose file after the update",
+  "update.apply": "Update",
+  "update.keep": "Keep mine",
+  "error.app.noUpdate": "The store has no newer version of this app."
 }

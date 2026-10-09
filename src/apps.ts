@@ -1,8 +1,10 @@
 /**
  * Installed apps. An app is a directory `data/apps/<name>/` with a plain `compose.yml` and a `.env`
  * next to it — `docker compose up -d` in that directory works by hand, with or without Hata running.
- * Nothing about an app is stored anywhere else: its tile data is the `x-casaos` block of the file, its
- * state is whatever Docker reports for the compose project of the same name.
+ * The compose file is the user's: its tile data is the `x-casaos` block, its state is whatever Docker
+ * reports for the compose project of the same name. What Hata itself knows about a store app — which
+ * store, and the store's file it was installed from — lies next to it in `hata.yml`, which compose never
+ * reads; a newer store version is merged into the app from there (`merge.ts`).
  */
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -12,7 +14,8 @@ import { DATA_DIR, settings, timezone } from "./config";
 import { record } from "./activity";
 import { compose as runCompose, composeCmd, containerStats, listContainers, PROJECT_LABEL, SERVICE_LABEL, type ContainerStats, type ContainerSummary } from "./docker";
 import { writeTextAtomic } from "./fsutil";
-import { storeApp } from "./store";
+import { guessBase, merge3, same, type MergeChange } from "./merge";
+import { findStoreApp, storeApp } from "./store";
 
 export const APPS_DIR = join(DATA_DIR, "apps");
 mkdirSync(APPS_DIR, { recursive: true });
@@ -154,6 +157,8 @@ export interface InstalledApp extends Pick<AppMeta, "title" | "icon" | "port" | 
   status: AppStatus;
   /** Store the app came from; "" — a custom app */
   store: string;
+  /** The store has a newer version of the app */
+  update: boolean;
   /** Behind Hata's sign-in */
   protected: boolean;
   /** Running operation, if any */
@@ -186,7 +191,8 @@ function describeApp(name: string, containers: ContainerSummary[] | null, lang: 
     scheme: meta.scheme,
     hostname: meta.hostname,
     status: containers === null ? "unknown" : running === 0 ? "stopped" : running === own.length ? "running" : "partial",
-    store: typeof compose?.["x-hata"]?.store === "string" ? compose["x-hata"].store : "",
+    store: recordedStore(name, compose),
+    update: planStoreUpdate(name) !== null,
     protected: settings.access[name]?.protect === true,
     job: job ? { id: job.id, kind: job.kind } : null,
     containers: own.map((c) => ({
@@ -316,11 +322,12 @@ async function assertPortsFree(compose: Compose): Promise<void> {
   }
 }
 
-async function install(name: string, text: string, compose: Compose, log: Log): Promise<void> {
+async function install(name: string, text: string, compose: Compose, log: Log, origin?: { store: string; base: Compose }): Promise<void> {
   const dir = appDir(name);
   mkdirSync(dir, { recursive: true });
   try {
     writeTextAtomic(composeFile(name), text);
+    if (origin) writeHataFile(name, origin.store, origin.base);
     writeEnv(name);
     await dc(name, ["config", "--quiet"], log);
     createDataDirs(compose);
@@ -341,8 +348,8 @@ export async function installFromStore(store: string, name: string, form: unknow
   const error = applyForm(compose, form ?? {});
   if (error) throw new AppError(error);
   await assertPortsFree(compose);
-  compose["x-hata"] = { store };
-  return startJob(name, "install", user, (log) => install(name, dumpCompose(compose), compose, log));
+  const origin = { store, base: structuredClone(storeApp(store, name)!.compose) };
+  return startJob(name, "install", user, (log) => install(name, dumpCompose(compose), compose, log, origin));
 }
 
 /** Installs a compose file pasted by the user; the text is stored exactly as given */
@@ -398,6 +405,119 @@ export function appAction(name: string, action: string, user: string): Job {
   }
 }
 
+// --- Where an app came from, and the store's newer version of it --------------------------------------
+
+const hataFile = (name: string) => join(appDir(name), "hata.yml");
+const HATA_FILE_HEADER = "# Written by Hata: the store this app came from and the store's compose file it was installed from.\n# compose.yml next to this file is yours to edit; this one is not, and docker compose never reads it.\n";
+
+function writeHataFile(name: string, store: string, base: Compose): void {
+  writeTextAtomic(hataFile(name), HATA_FILE_HEADER + dumpCompose({ store, base }));
+}
+
+interface HataFile {
+  store: string;
+  /** The store's compose file as the store had it; null when it was not kept */
+  base: Compose | null;
+}
+
+const hataFiles = new Map<string, { mtime: number; value: HataFile | null }>();
+
+function readHataFile(name: string): HataFile | null {
+  let mtime: number;
+  try {
+    mtime = statSync(hataFile(name)).mtimeMs;
+  } catch {
+    hataFiles.delete(name);
+    return null;
+  }
+  const hit = hataFiles.get(name);
+  if (hit?.mtime === mtime) return hit.value;
+  let value: HataFile | null = null;
+  try {
+    const doc = Bun.YAML.parse(readFileSync(hataFile(name), "utf8")) as Compose | null;
+    if (typeof doc?.store === "string") value = { store: doc.store, base: typeof doc.base?.services === "object" && doc.base.services ? doc.base : null };
+  } catch {
+    // a damaged file only means the app is treated as one that does not say where it came from
+  }
+  hataFiles.set(name, { mtime, value });
+  return value;
+}
+
+/** The store written down for the app: in `hata.yml`, or in the `x-hata` block older versions put into the compose file */
+function recordedStore(name: string, compose: Compose | null): string {
+  return readHataFile(name)?.store ?? (typeof compose?.["x-hata"]?.store === "string" ? compose["x-hata"].store : "");
+}
+
+export interface StoreUpdate {
+  store: string;
+  /** False when the store was found by the app's name only (an app moved in from CasaOS) */
+  recorded: boolean;
+  /** False when the store file the app was installed from is not known: only the form's answers are surely kept */
+  exact: boolean;
+  changes: MergeChange[];
+  merged: Compose;
+  /** The store's file as it is today — the next base */
+  base: Compose;
+}
+
+const plans = new Map<string, { compose: Compose; origin: HataFile | null; theirs: Compose; plan: StoreUpdate | null }>();
+
+/** The store's newer version merged into the app's compose file; null when there is nothing new */
+export function planStoreUpdate(name: string): StoreUpdate | null {
+  const compose = readCompose(name);
+  if (!compose) return null;
+  const origin = readHataFile(name);
+  const store = recordedStore(name, compose);
+  const app = store ? storeApp(store, name) : findStoreApp(name);
+  if (!app) return null;
+  // parsed files are cached objects: the same three mean the same answer
+  const hit = plans.get(name);
+  if (hit && hit.compose === compose && hit.origin === origin && hit.theirs === app.compose) return hit.plan;
+
+  const prepared = (source: Compose) => {
+    const copy = structuredClone(source);
+    normalize(copy, settings.dataRoot, name);
+    return copy;
+  };
+  const [ours, theirs] = [prepared(compose), prepared(app.compose)];
+  const images = (c: Compose) => Object.entries(c.services).map(([service, s]) => [service, (s as Compose).image]);
+  let plan: StoreUpdate | null = null;
+  // Without the file the app was installed from, only a new image says "newer": the rest of the
+  // difference may be the user's edits, or CasaOS's.
+  if (origin?.base || !same(images(ours), images(theirs))) {
+    const { merged, changes } = merge3(origin?.base ? prepared(origin.base) : guessBase(ours, theirs), ours, theirs);
+    // a store that only rewrote a description has no new version of the app
+    if (changes.some((change) => !change.path.startsWith("x-casaos"))) {
+      plan = { store: app.store, recorded: store !== "", exact: !!origin?.base, changes, merged, base: structuredClone(app.compose) };
+    }
+  }
+  plans.set(name, { compose, origin, theirs: app.compose, plan });
+  return plan;
+}
+
+/** Moves the app to the store's newer version, keeping what the user changed */
+export function applyStoreUpdate(name: string, user: string): Job {
+  assertInstalled(name);
+  const plan = planStoreUpdate(name);
+  if (!plan) throw new AppError("app.noUpdate", 409);
+  return startJob(name, "update", user, async (log) => {
+    await beforeUpdate?.(name, log);
+    const previous = [composeFile(name), hataFile(name)].map((file) => ({ file, text: existsSync(file) ? readFileSync(file, "utf8") : null }));
+    writeTextAtomic(composeFile(name), dumpCompose(plan.merged));
+    writeHataFile(name, plan.store, plan.base);
+    writeEnv(name);
+    try {
+      await dc(name, ["config", "--quiet"], log);
+    } catch (e) {
+      for (const { file, text } of previous) text === null ? rmSync(file, { force: true }) : writeTextAtomic(file, text);
+      throw e;
+    }
+    createDataDirs(plan.merged);
+    await dc(name, ["pull"], log);
+    await dc(name, ["up", "-d", "--remove-orphans"], log);
+  });
+}
+
 /** Replaces the compose file and applies it; a file that compose rejects is not kept */
 export function applyCompose(name: string, text: unknown, user: string): Job {
   assertInstalled(name);
@@ -428,6 +548,7 @@ export function removeApp(name: string, withData: boolean, user: string): Job {
     await dc(name, ["down", "--remove-orphans", ...(withData ? ["--volumes"] : [])], log);
     rmSync(appDir(name), { recursive: true, force: true });
     parsed.delete(name);
+    plans.delete(name);
     for (const hook of removedHooks) hook(name);
     if (withData) {
       const data = join(settings.dataRoot, "AppData", name);

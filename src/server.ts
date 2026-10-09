@@ -10,11 +10,11 @@
 import { networkInterfaces } from "node:os";
 import type { Server } from "bun";
 import { recent, record } from "./activity";
-import { AppError, appAction, appDetail, appLogs, appStats, applyCompose, composeText, getJob, installCustom, installFromStore, listApps, listJobs, onAppRemoved, readCompose, removeApp, storeAppDetail } from "./apps";
+import { AppError, appAction, appDetail, appLogs, appStats, applyCompose, applyStoreUpdate, composeText, getJob, installCustom, installFromStore, listApps, listJobs, onAppRemoved, planStoreUpdate, readCompose, removeApp, storeAppDetail } from "./apps";
 import { certificateStates, challengeResponse, ensureCertificates, loadCertificates } from "./acme";
 import { attention } from "./attention";
 import { backupApp, backupOverview, deleteSnapshot, listSnapshots, restoreSnapshot, runBackups, scheduleBackups } from "./backup";
-import { APP_NAME_RE } from "./appform";
+import { APP_NAME_RE, dumpCompose } from "./appform";
 import {
   acceptInvite,
   beginTotp,
@@ -533,6 +533,12 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
     if (sub === "stats" && method === "GET") return json(await appStats(name));
     if (sub === "backups" && method === "GET") return json(listSnapshots(name));
     if (sub === "backup" && method === "POST") return json({ job: backupApp(name, user.name).id }, 202);
+    if (sub === "storeupdate" && method === "GET") {
+      const plan = planStoreUpdate(name);
+      if (!plan) return fail(404, "app.noUpdate");
+      return json({ store: plan.store, recorded: plan.recorded, exact: plan.exact, changes: plan.changes, compose: dumpCompose(plan.merged) });
+    }
+    if (sub === "storeupdate" && method === "POST") return json({ job: applyStoreUpdate(name, user.name).id }, 202);
     if (sub === "compose" && method === "GET") return json({ compose: composeText(name) });
     if (sub === "compose" && method === "PUT") return json({ job: applyCompose(name, (await body(req)).compose, user.name).id }, 202);
     if (sub === "logs" && method === "GET") {

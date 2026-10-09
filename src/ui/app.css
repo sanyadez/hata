@@ -276,6 +276,7 @@ textarea.code.page { min-height: 60dvh; background: var(--surface); padding: 16p
 .tile.add { border-style: dashed; }
 .tile-main { flex: 1; display: flex; align-items: center; gap: 10px; padding: 14px 12px; min-width: 0; border-radius: var(--radius-md); }
 .tile-text { display: grid; gap: 3px; min-width: 0; }
+.tile-top { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .tile-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
 .tile-sub { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .tile.add .tile-sub { white-space: normal; }
@@ -347,6 +348,10 @@ td .clip { max-width: 320px; }
 .strong { font-weight: 600; }
 a.strong:hover { color: var(--accent-text); }
 .block { display: block; }
+.changes td:first-child { width: 42%; overflow-wrap: anywhere; }
+.changes td { vertical-align: top; }
+details > summary { cursor: pointer; margin-bottom: 8px; }
+.btn.accent { border-color: var(--accent); color: var(--accent-text); }
 .steps { margin: 0; padding-left: 20px; display: grid; gap: 4px; }
 .import .card.pad > footer { align-items: center; }
 .row-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
@@ -359,7 +364,7 @@ tr.removed .app-icon { opacity: 0.5; }
 .chip.accent { border-color: transparent; background: var(--accent-soft); color: var(--accent-text); }
 .setting .chip { margin-left: 8px; }
 
-.lock { display: inline-flex; color: var(--accent-text); }
+.lock { display: inline-flex; flex: none; color: var(--accent-text); }
 .lock .ico { width: 12px; height: 12px; }
 .matrix th, .matrix td { padding-left: 14px; padding-right: 14px; }
 .matrix th:not(:first-child), .matrix td:not(:first-child) { text-align: center; }

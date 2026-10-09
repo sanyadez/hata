@@ -240,3 +240,12 @@ export function catalogue(lang: string): Catalogue {
 export function storeApp(store: string, name: string): StoreApp | null {
   return loaded().find((s) => s.source.id === store)?.apps.get(name) ?? null;
 }
+
+/** The app of this name in whichever store has it — for apps that do not say where they came from */
+export function findStoreApp(name: string): StoreApp | null {
+  for (const s of loaded()) {
+    const app = s.apps.get(name);
+    if (app) return app;
+  }
+  return null;
+}

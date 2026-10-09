@@ -24,6 +24,9 @@ Early development. What works today:
   container started with `docker run` is rebuilt into an app from a compose file written out of its settings
   (shown and editable before anything happens), on the same volumes, with the old container put back if the
   new one does not come up;
+- store updates that keep your changes: when the store has a newer version of an app, Hata shows what
+  changes in its compose file and merges it in — your ports, folders, variables and edits by hand stay, and
+  where you and the store changed the same line, yours wins and the difference is shown;
 - per app, on its own page: start, stop, restart, image update, CPU and memory per container, live logs,
   editing the compose file, removal with or without data;
 - backups: a snapshot of an app (compose file, its folders, its Docker volumes) as a plain `tar.gz`, daily
@@ -54,7 +57,8 @@ creating the administrator. Run it again to update. If port 80 is taken, Hata pi
 says which; `--port <number>` chooses one.
 
 State lives in `/var/lib/hata`; every app is a plain compose project in `/var/lib/hata/apps/<name>/` that
-keeps working without Hata.
+keeps working without Hata. Next to an app's `compose.yml`, which is yours to edit, `hata.yml` holds what Hata
+itself knows about it — the store it came from and the store's original file; `docker compose` never reads it.
 
 ### Moving in from CasaOS
 
