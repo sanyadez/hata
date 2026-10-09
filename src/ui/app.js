@@ -1436,7 +1436,10 @@ function tileToBoard(key, slot) {
   if (!item || item.type === "widget") return;
   const id = newId();
   layout.groups.push({ id, title: "", bare: true, items: [item] });
-  layout.blocks = [...boardBlocks(layout).filter((block) => block.id !== "group:" + id), { id: "group:" + id, ...slot }];
+  // the slot is in rows of the board as it is shown, so the other blocks are taken as shown too: rows
+  // kept from an earlier save only say what comes above what, and the tile would land under all of them
+  const shown = homeUi.board.filter((block) => block.id !== "group:" + id);
+  layout.blocks = boardAsSaved(move([...shown, { id: "group:" + id, ...slot, h: 9 }], "group:" + id, slot.x, slot.y, COLUMNS));
   return saveLayout(layout);
 }
 
