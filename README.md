@@ -29,9 +29,12 @@ Early development. What works today:
   sessions with sign-out per device; a sign-in log;
 - sign-in in front of any app: Hata takes over the app's port and lets through only people who are signed
   in to Hata and allowed to open that app — no domain or HTTPS needed, the app's address stays the same;
+- HTTPS, your choice of three: none (address and ports, for a home network); behind your own proxy (nginx,
+  Caddy, Traefik) with a check that the proxy is set up right; or by Hata itself with certificates from
+  Let's Encrypt. With a domain, every app has its own address, `<app>.<domain>`;
 - English and Ukrainian UI, light and dark, phone-friendly.
 
-Not there yet: domains and HTTPS, backups to another machine, import of
+Not there yet: passkeys, wildcard certificates (DNS challenge), backups to another machine, import of
 containers that have no compose file, file manager.
 
 ## Install

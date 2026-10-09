@@ -11,6 +11,7 @@ import { networkInterfaces } from "node:os";
 import type { Server } from "bun";
 import { recent, record } from "./activity";
 import { AppError, appAction, appDetail, appLogs, appStats, applyCompose, composeText, getJob, installCustom, installFromStore, listApps, listJobs, onAppRemoved, readCompose, removeApp, storeAppDetail } from "./apps";
+import { certificateStates, challengeResponse, ensureCertificates, loadCertificates } from "./acme";
 import { attention } from "./attention";
 import { backupApp, backupOverview, deleteSnapshot, listSnapshots, restoreSnapshot, runBackups, scheduleBackups } from "./backup";
 import { APP_NAME_RE } from "./appform";
@@ -429,11 +430,22 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
   if (path === "/api/settings") {
     if (method === "GET") return json(publicSettings());
     if (method === "PUT") {
-      const error = updateSettings(await body(req));
-      return error ? fail(400, error) : json(publicSettings());
+      const patch = await body(req);
+      const error = updateSettings(patch);
+      if (error) return fail(400, error);
+      // certificates take a while: the page asks for their state
+      if ("https" in patch) void refreshHttps(true);
+      return json(publicSettings());
     }
   }
 
+  if (path === "/api/https" && method === "GET") {
+    return json({ mode: settings.https.mode, listening: !!httpsServer, error: httpsError, httpPort: listenAddress().port, certificates: certificateStates(await httpsNames()) });
+  }
+  if (path === "/api/https/retry" && method === "POST") {
+    void refreshHttps(true);
+    return json({ started: true }, 202);
+  }
   if (path === "/api/https/check" && method === "POST") {
     const domain = siteDomain();
     if (!domain) return fail(400, "settings.needDomain");
@@ -554,8 +566,78 @@ async function serveApp(req: Request, server: Server, label: string): Promise<Re
   return passToApp(req, server, upstream, proto, clientIp(req, server));
 }
 
+// --- HTTPS served by Hata itself --------------------------------------------------------------------
+
+const HTTPS_PORT = Number(process.env.HATA_HTTPS_PORT ?? 443);
+let httpsServer: Server | null = null;
+let httpsError = "";
+
+/** Every name that needs a certificate: Hata's own and one per app that has a web page */
+async function httpsNames(): Promise<string[]> {
+  const domain = siteDomain();
+  if (settings.https.mode !== "acme" || !domain) return [];
+  const apps = await listApps("en");
+  return [domain, ...apps.filter((app) => app.port).map((app) => appHost(app.name))];
+}
+
+/** (Re)starts the HTTPS listener with the certificates there are; without any, there is nothing to serve */
+function restartHttps(names: string[]): void {
+  httpsServer?.stop();
+  httpsServer = null;
+  httpsError = "";
+  // Hata's own name first: a client that sends no name gets that certificate
+  const certs = loadCertificates().filter((c) => names.includes(c.name)).sort((a, b) => names.indexOf(a.name) - names.indexOf(b.name));
+  if (!certs.length) return;
+  try {
+    httpsServer = Bun.serve({
+      port: HTTPS_PORT,
+      hostname: listenAddress().hostname,
+      tls: certs.map((c) => ({ serverName: c.name, cert: c.cert, key: c.key })),
+      maxRequestBodySize: MAX_APP_BODY,
+      fetch: handle,
+      websocket: tunnelHandlers,
+    });
+  } catch (e) {
+    httpsError = e instanceof Error ? e.message : String(e);
+    console.error(`Cannot serve HTTPS on port ${HTTPS_PORT}: ${httpsError}`);
+  }
+}
+
+let refreshing: Promise<void> | null = null;
+
+/** Brings certificates and the HTTPS listener in line with the settings and the installed apps */
+function refreshHttps(force = false): Promise<void> {
+  refreshing ??= (async () => {
+    const names = await httpsNames();
+    if (!names.length) {
+      httpsServer?.stop();
+      httpsServer = null;
+      return;
+    }
+    const served = new Set((httpsServer as unknown as { names?: string[] } | null)?.names ?? []);
+    const changed = await ensureCertificates(names, force);
+    const have = loadCertificates().filter((c) => names.includes(c.name)).map((c) => c.name);
+    if (changed || !httpsServer || have.length !== served.size || have.some((n) => !served.has(n))) {
+      restartHttps(names);
+      if (httpsServer) (httpsServer as unknown as { names: string[] }).names = have;
+    }
+  })().finally(() => {
+    refreshing = null;
+  });
+  return refreshing;
+}
+
 async function handle(req: Request, server: Server): Promise<Response> {
   const url = new URL(req.url);
+  const challenge = /^\/\.well-known\/acme-challenge\/([A-Za-z0-9_-]+)$/.exec(url.pathname);
+  if (challenge) {
+    const answer = challengeResponse(challenge[1]!);
+    return answer ? new Response(answer, { headers: { "content-type": "application/octet-stream" } }) : new Response("Not found", { status: 404 });
+  }
+  // we serve HTTPS for this name: a plain request for it is sent there (by address, HTTP keeps working)
+  if (httpsServer && url.protocol === "http:" && (httpsServer as unknown as { names?: string[] }).names?.includes(requestHost(req))) {
+    return Response.redirect(`https://${requestHost(req)}${HTTPS_PORT === 443 ? "" : ":" + HTTPS_PORT}${url.pathname}${url.search}`, 301);
+  }
   if (url.pathname === "/.well-known/hata-check") return json({ instance: INSTANCE, host: requestHost(req), proto: requestProto(req) });
   const host = classifyHost(requestHost(req));
   if (host.kind === "app") return serveApp(req, server, host.label);
@@ -617,5 +699,14 @@ export async function serve(): Promise<void> {
   scheduleStoreSync();
   scheduleBackups();
   startGates();
+  void refreshHttps();
+  setInterval(() => void refreshHttps(), 10 * 60_000);
+  // a newly installed app needs a certificate for its name
+  let appsChanged: Timer | null = null;
+  bus.subscribe((event) => {
+    if (event.type !== "apps" || settings.https.mode !== "acme") return;
+    if (appsChanged) clearTimeout(appsChanged);
+    appsChanged = setTimeout(() => void refreshHttps(), 20_000);
+  });
   void watchEvents();
 }

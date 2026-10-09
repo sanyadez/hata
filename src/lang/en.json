@@ -425,5 +425,12 @@
   "error.settings.badDomain": "A domain looks like home.example.com.",
   "error.settings.needDomain": "Enter the domain first.",
   "error.settings.badEmail": "This does not look like an email address.",
-  "error.request.tooLarge": "The request is too large."
+  "error.request.tooLarge": "The request is too large.",
+  "https.certificates": "Certificates",
+  "https.certificatesLead": "One per name, renewed a month before it expires. A name must lead to this server's port 80 for the certificate authority to confirm it.",
+  "https.retry": "Request again",
+  "https.cert.working": "requesting…",
+  "https.cert.valid": "valid until {date} · {issuer}",
+  "https.cert.none": "no certificate yet",
+  "https.needPort80": "Hata listens on port {port}, but the certificate authority checks names on port 80. Move Hata to port 80: sudo hata install --port 80"
 }

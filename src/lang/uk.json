@@ -425,5 +425,12 @@
   "error.settings.badDomain": "Домен виглядає як home.example.com.",
   "error.settings.needDomain": "Спершу вкажіть домен.",
   "error.settings.badEmail": "Це не схоже на адресу пошти.",
-  "error.request.tooLarge": "Запит завеликий."
+  "error.request.tooLarge": "Запит завеликий.",
+  "https.certificates": "Сертифікати",
+  "https.certificatesLead": "По одному на ім'я, поновлюються за місяць до закінчення. Щоб центр сертифікації підтвердив ім'я, воно має вести на порт 80 цього сервера.",
+  "https.retry": "Запросити ще раз",
+  "https.cert.working": "запитується…",
+  "https.cert.valid": "чинний до {date} · {issuer}",
+  "https.cert.none": "сертифіката ще немає",
+  "https.needPort80": "Хата слухає порт {port}, а центр сертифікації перевіряє імена на порту 80. Перенесіть Хату на порт 80: sudo hata install --port 80"
 }

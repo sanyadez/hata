@@ -1574,7 +1574,7 @@ function settingsSection(section) {
   ];
 }
 
-const HTTPS_MODES = ["off", "proxy"];
+const HTTPS_MODES = ["off", "proxy", "acme"];
 /** Settings → HTTPS and domain: how Hata is reached */
 function httpsSection(save, error) {
   const https = state.settings.https;
@@ -1606,6 +1606,29 @@ function httpsSection(save, error) {
     },
   });
   const here = state.overview?.site?.domain;
+  // certificates are requested in the background: the card keeps asking until nothing is in progress
+  const certs = h("div", { class: "stack" });
+  let alive = true;
+  cleanups.push(() => (alive = false));
+  const paintCerts = async () => {
+    const status = await api("GET", "/api/https").catch(() => null);
+    if (!alive || !status) return;
+    certs.replaceChildren(
+      status.httpPort !== 80 && h("p", { class: "banner" }, t("https.needPort80", { port: status.httpPort })),
+      status.error && h("p", { class: "error" }, status.error),
+      ...status.certificates.map((c) =>
+        h(
+          "div",
+          { class: "activity-item" },
+          icon(c.working ? "refresh" : c.notAfter ? "check" : "x", c.working ? "" : c.notAfter ? "ok" : "danger"),
+          h("div", { class: "grow" }, h("div", { class: "mono" }, c.name), h("div", { class: "muted small" }, c.working ? t("https.cert.working") : c.notAfter ? t("https.cert.valid", { date: new Date(c.notAfter).toLocaleDateString(state.lang, { day: "numeric", month: "long", year: "numeric" }), issuer: c.issuer }) : t("https.cert.none")), c.error && h("div", { class: "error small" }, c.error)),
+        ),
+      ),
+    );
+    if (status.certificates.some((c) => c.working)) setTimeout(paintCerts, 2000);
+  };
+  if (https.mode === "acme") void paintCerts();
+  const retry = button(t("https.retry"), { onclick: async () => (await api("POST", "/api/https/retry", {}).catch((e) => toast(errorText(e), "error")), setTimeout(paintCerts, 800)) }, "refresh");
   return [
     h(
       "form",
@@ -1627,6 +1650,7 @@ function httpsSection(save, error) {
       error,
       h("footer", null, h("button", { class: "btn primary" }, t("settings.save"))),
     ),
+    https.mode === "acme" && h("section", { class: "card pad" }, h("div", { class: "section-head" }, h("h2", null, t("https.certificates")), retry), h("p", { class: "muted small" }, t("https.certificatesLead")), certs),
     here && h("section", { class: "card pad" }, h("div", { class: "section-head" }, h("h2", null, t("https.checkTitle")), check), h("p", { class: "muted small" }, t("https.checkLead", { domain: here })), results),
     here && h("section", { class: "card pad" }, h("h2", null, t("https.addresses")), h("p", { class: "muted small" }, t("https.addressesLead")), settingRow("Hata", "", h("a", { class: "link mono", href: `https://${here}/` }, here)), (state.overview?.apps ?? []).filter((a) => a.port).map((a) => settingRow(a.title, a.protected ? t("access.protected") : "", h("a", { class: "link mono", href: `https://${a.name.replace(/_/g, "-")}.${here}/`, target: "_blank", rel: "noopener noreferrer" }, `${a.name.replace(/_/g, "-")}.${here}`)))),
   ];
