@@ -7,7 +7,7 @@
  * - everything else under `/api/` needs a session cookie;
  * - a request that changes something must come from this origin (CSRF) and carry JSON.
  */
-import { existsSync } from "node:fs";
+import { existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { homedir, networkInterfaces } from "node:os";
 import type { Server, ServerWebSocket } from "bun";
@@ -643,6 +643,14 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
     if (!kind) return fail(400, "appearance.notImage");
     await Bun.write(WALLPAPER_FILE, bytes);
     settings.appearance = { ...settings.appearance, custom: kind, stamp: Date.now(), wallpaper: "custom" };
+    saveSettings();
+    return json(publicSettings());
+  }
+
+  if (path === "/api/appearance/wallpaper" && method === "DELETE") {
+    rmSync(WALLPAPER_FILE, { force: true });
+    const look = settings.appearance;
+    settings.appearance = { ...look, custom: "", stamp: 0, wallpaper: look.wallpaper === "custom" ? "" : look.wallpaper };
     saveSettings();
     return json(publicSettings());
   }

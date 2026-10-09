@@ -3265,7 +3265,27 @@ function appearanceSection(error) {
       "section",
       { class: "card pad" },
       h("h2", null, t("appearance.picture")),
-      h("div", { class: "walls" }, wall("", t("appearance.none")), state.wallpapers.map((name) => wall(name, t("appearance.wall." + name))), look.custom && wall("custom", t("appearance.yours")), h("button", { type: "button", class: "wall add", onclick: () => file.click() }, h("span", null, icon("upload"), " ", t(look.custom ? "appearance.replace" : "appearance.upload"))), file),
+      h("div", { class: "walls" }, wall("", t("appearance.none")), state.wallpapers.map((name) => wall(name, t("appearance.wall." + name))), look.custom &&
+          h(
+            "div",
+            { class: "wall-own" },
+            wall("custom", t("appearance.yours")),
+            h("button", {
+              type: "button",
+              class: "icon-btn wall-remove",
+              title: t("appearance.remove"),
+              "aria-label": t("appearance.remove"),
+              onclick: async () => {
+                try {
+                  state.settings = await api("DELETE", "/api/appearance/wallpaper");
+                  applyAppearance((state.appearance = state.settings.appearance));
+                  renderSettings();
+                } catch (e) {
+                  toast(errorText(e), "error");
+                }
+              },
+            }, icon("trash")),
+          ), h("button", { type: "button", class: "wall add", onclick: () => file.click() }, h("span", null, icon("upload"), " ", t(look.custom ? "appearance.replace" : "appearance.upload"))), file),
       look.wallpaper && settingRow(t("appearance.dim"), t("appearance.dimHint"), dim),
       error,
     ),

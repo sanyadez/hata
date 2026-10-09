@@ -718,5 +718,6 @@
   "activity.system.backup.done": "Server's state backed up",
   "activity.system.restore.done": "Server restored from a backup: {target} apps",
   "activity.system.restore.failed": "Restoring the server failed for: {target}",
-  "activity.byRestore": "while restoring the server"
+  "activity.byRestore": "while restoring the server",
+  "appearance.remove": "Delete the uploaded picture"
 }

@@ -635,7 +635,7 @@ body.term-page { margin: 0; height: 100dvh; display: flex; flex-direction: colum
 
 /* the picture lies behind everything, under a veil of the background colour that keeps text readable */
 :root.has-wallpaper body::before { content: ""; position: fixed; inset: 0; z-index: -1; background: linear-gradient(color-mix(in srgb, var(--bg) var(--wallpaper-dim), transparent), color-mix(in srgb, var(--bg) var(--wallpaper-dim), transparent)), var(--wallpaper) center / cover no-repeat; }
-:root.has-wallpaper :is(.card, .tile, .arrange-bar) { background: color-mix(in srgb, var(--surface) 78%, transparent); backdrop-filter: blur(16px); }
+:root.has-wallpaper :is(.card, .tile, .arrange-bar) { background: color-mix(in srgb, var(--surface) 88%, transparent); backdrop-filter: blur(16px); }
 :root.has-wallpaper .tile.drag-ghost { background: var(--surface); }
 .swatches { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 .swatch { width: 28px; height: 28px; padding: 0; border-radius: 50%; border: 2px solid var(--border-strong); cursor: pointer; }
@@ -652,3 +652,18 @@ input[type="range"] { accent-color: var(--accent); width: 100%; }
 .btn.danger-text { color: var(--danger); }
 .setting.plain { border-top: 0; padding: 0; }
 #backup-apps .section-head:not(:first-child) { margin-top: 12px; }
+.wall-own { position: relative; display: grid; }
+.wall-remove { position: absolute; top: 6px; right: 6px; width: 28px; height: 28px; background: rgb(0 0 0 / 55%); color: #fff; }
+.wall-remove:hover { background: var(--danger); color: #fff; }
+/* Text that lies on the picture itself: what stands alone gets a pane of its own, the rest a halo of the
+   background colour — the picture may be of any brightness */
+:root.has-wallpaper #view { text-shadow: 0 0 2px var(--bg), 0 0 6px var(--bg), 0 0 16px var(--bg); }
+:root.has-wallpaper #view :is(.card, .tile, .arrange-bar, .btn, .page-head, .side > .pad-x, .section-head, #app-head, input, select, textarea, table, pre, .cats, .tabs) { text-shadow: none; }
+:root.has-wallpaper :is(.page-head, .side > .pad-x, .cats, #app-head, #view .section-head:not(:is(.card, .side > .pad-x, #app-head) *)) { background: color-mix(in srgb, var(--surface) 88%, transparent); backdrop-filter: blur(16px); border: 1px solid var(--border); border-radius: var(--radius-lg); }
+:root.has-wallpaper :is(.page-head, .side > .pad-x) { padding: 18px 20px; }
+:root.has-wallpaper #app-head { padding: 18px 20px 0; }
+:root.has-wallpaper #app-head .tabs { box-shadow: none; }
+:root.has-wallpaper #view .section-head:not(:is(.card, .side > .pad-x, #app-head) *) { padding: 8px 14px; border-radius: var(--radius-md); }
+:root.has-wallpaper #view .ico { filter: drop-shadow(0 0 3px var(--bg)); }
+:root.has-wallpaper #view :is(.card, .tile, .btn, .page-head, .side > .pad-x, .section-head, .cats, #app-head) .ico { filter: none; }
+:root.has-wallpaper .cats.cats { padding: 8px; }

@@ -718,5 +718,6 @@
   "activity.system.backup.done": "Зроблено копію стану сервера",
   "activity.system.restore.done": "Сервер відновлено з копії, застосунків: {target}",
   "activity.system.restore.failed": "Не вдалося відновити: {target}",
-  "activity.byRestore": "під час відновлення сервера"
+  "activity.byRestore": "під час відновлення сервера",
+  "appearance.remove": "Видалити завантажене зображення"
 }
