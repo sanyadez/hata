@@ -531,14 +531,17 @@ async function signOut() {
   render();
 }
 
-function userMenu() {
+function userMenu(e) {
   let dialog;
+  const anchor = e.currentTarget.getBoundingClientRect();
   dialog = openDialog(
-    "menu",
+    "menu dropdown",
     h("header", null, h("span", { class: "avatar" }, state.user.name.slice(0, 1).toUpperCase()), h("div", null, h("h2", null, state.user.name), h("span", { class: "muted small" }, t("user.role." + state.user.role)))),
     h("a", { class: "menu-item", href: "#/settings/account", onclick: () => dialog.close() }, icon("user"), t("settings.account")),
     h("button", { type: "button", class: "menu-item", onclick: () => (dialog.close(), signOut()) }, icon("signout"), t("nav.signOut")),
-  );
+  );  // it hangs under the button it was opened from, by its right edge
+  dialog.style.top = anchor.bottom + 8 + "px";
+  dialog.style.right = Math.max(8, document.documentElement.clientWidth - anchor.right) + "px";
 }
 
 /** The search field of the header: installed apps first, then the store */

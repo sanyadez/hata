@@ -533,6 +533,11 @@ dialog h2 { font-size: 18px; }
 
 .menu[open] { gap: 2px; }
 .menu header { margin-bottom: 12px; }
+dialog.dropdown { position: fixed; margin: 0; left: auto; bottom: auto; width: min(calc(100vw - 16px), 260px); box-shadow: 0 12px 40px rgb(0 0 0 / 40%); }
+dialog.dropdown[open] { padding: 12px; }
+dialog.dropdown::backdrop { background: transparent; }
+dialog.dropdown h2 { font-size: 15px; }
+dialog.dropdown header { padding: 4px 6px; margin-bottom: 8px; }
 .menu-item { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; border: 0; background: transparent; padding: 10px; border-radius: var(--radius-sm); color: var(--text); }
 .menu-item:hover:not(:disabled) { background: var(--surface-2); }
 .menu-item:disabled { opacity: 0.5; cursor: default; }
