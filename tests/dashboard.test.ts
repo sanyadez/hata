@@ -130,3 +130,18 @@ test("Hata's own tiles are always there for those who have them, wherever they w
   const moved = cleanLayout({ groups: [{ id: "main", title: "", items: [{ type: "builtin", id: "add" }, { type: "app", name: "memos" }] }] });
   expect(arrange(moved, ["memos", "new"], [], ["store", "add"]).groups[0]!.items).toEqual([{ type: "builtin", id: "add" }, { type: "app", name: "memos" }, { type: "app", name: "new" }, { type: "builtin", id: "store" }]);
 });
+
+test("a number of the system may stand among the tiles, and then it is nowhere else", () => {
+  const layout = cleanLayout({
+    groups: [{ id: "main", title: "", items: [{ type: "app", name: "memos" }, { type: "widget", id: "cpu" }, { type: "widget", id: "cpu" }, { type: "widget", id: "attention" }, { type: "folder", id: "f", title: "", items: [{ type: "widget", id: "disk" }, { type: "app", name: "gitea" }] }] }],
+    widgets: { top: ["cpu", "memory", "disk"], hidden: ["cpu", "network"] },
+  });
+  // once among the tiles; the lists are not tiles; a folder holds no numbers
+  expect(layout.groups[0]!.items).toEqual([{ type: "app", name: "memos" }, { type: "widget", id: "cpu" }, { type: "folder", id: "f", title: "", items: [{ type: "app", name: "gitea" }] }]);
+  expect(layout.widgets).toMatchObject({ top: ["memory", "disk", "temp"], hidden: ["network"] });
+  // it is there for everyone, like a link, and survives the text form
+  const seen = arrange(layout, [], []);
+  expect(seen.groups[0]!.items).toEqual([{ type: "widget", id: "cpu" }]);
+  expect(seen.widgets.top).toEqual(["memory", "disk", "temp"]);
+  expect(parseLayoutText(layoutText(layout))).toEqual(layout);
+});

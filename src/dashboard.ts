@@ -11,7 +11,9 @@ export type Entry =
   | { type: "link"; id: string; title: string; url: string; icon: string }
   | { type: "files"; path: string }
   /** A tile of Hata's own, which can be moved but not taken off: the store, the "Add" tile */
-  | { type: "builtin"; id: string };
+  | { type: "builtin"; id: string }
+  /** A number of the system standing among the tiles instead of in a place of its own */
+  | { type: "widget"; id: string };
 
 export const BUILTINS = ["store", "add"] as const;
 export type Item = Entry | { type: "folder"; id: string; title: string; items: Entry[] };
@@ -46,12 +48,13 @@ const usualZone = (id: string): Zone => (id === "attention" || id === "activity"
 /**
  * Blocks named twice or not known are dropped; one that is named nowhere goes to its usual place — a
  * group of tiles to the main column, after the groups already there. `stats` is what the five numbers
- * of the system were while they were one block.
+ * of the system were while they were one block; `tiles` are the numbers that stand among the tiles.
  */
-export function cleanWidgets(input: unknown, groups: string[] = []): Widgets {
+export function cleanWidgets(input: unknown, groups: string[] = [], tiles: string[] = []): Widgets {
   const out: Widgets = { top: [], left: [], main: [], side: [], bottom: [], hidden: [] };
   const known = new Set<string>([...WIDGETS, ...groups.map((id) => "group:" + id)]);
-  const seen = new Set<string>();
+  // a number that stands among the tiles of a group is there and nowhere else
+  const seen = new Set<string>(tiles);
   const named = (zone: string): string[] => (isObject(input) && Array.isArray(input[zone]) ? input[zone] : []).flatMap((id: unknown) => (id === "stats" ? [...STATS] : typeof id === "string" ? [id] : []));
   for (const zone of ZONES) for (const id of named(zone)) if (known.has(id) && !seen.has(id) && seen.add(id)) out[zone].push(id);
   // only Hata's own blocks can be put away: a group that is not wanted is removed
@@ -59,6 +62,13 @@ export function cleanWidgets(input: unknown, groups: string[] = []): Widgets {
   for (const id of WIDGETS) if (!seen.has(id)) out[usualZone(id)].push(id);
   for (const id of groups) if (!seen.has("group:" + id)) out.main.push("group:" + id);
   return out;
+}
+
+const STAT_IDS: readonly string[] = STATS;
+
+/** The numbers of the system that stand among the tiles of the groups */
+function amongTiles(groups: Group[]): string[] {
+  return groups.flatMap((group) => group.items.flatMap((item) => (item.type === "widget" ? [item.id] : [])));
 }
 
 /** The layout as text an administrator can edit, and back; what does not fit is dropped as anywhere else */
@@ -121,6 +131,7 @@ export function cleanLayout(input: unknown): Layout {
       const url = webUrl(raw.url);
       if (url) made = { type: "link", id: id(raw.id), title: text(raw.title, MAX_TITLE) || new URL(url).host, url, icon: webUrl(raw.icon) };
     }
+    if (raw.type === "widget" && typeof raw.id === "string" && STAT_IDS.includes(raw.id) && !inFolder && once("widget " + raw.id)) made = { type: "widget", id: raw.id };
     if (made) tiles++;
     return made;
   };
@@ -135,7 +146,7 @@ export function cleanLayout(input: unknown): Layout {
     .filter(isObject)
     .slice(0, MAX_GROUPS)
     .map((raw): Group => ({ id: id(raw.id), title: text(raw.title, MAX_TITLE), items: (Array.isArray(raw.items) ? raw.items : []).map(item).filter((i): i is Item => i !== null) }));
-  return { groups, widgets: cleanWidgets(isObject(input) ? input.widgets : null, groups.map((group) => group.id)) };
+  return { groups, widgets: cleanWidgets(isObject(input) ? input.widgets : null, groups.map((group) => group.id), amongTiles(groups)) };
 }
 
 /**
@@ -147,7 +158,7 @@ export function arrange(layout: Layout, apps: string[], folders: string[], built
   const there = new Set([...apps.map((name) => "app " + name), ...folders.map((path) => "files " + path), ...builtins.map((id) => "builtin " + id)]);
   const key = (e: Entry) => (e.type === "app" ? "app " + e.name : e.type === "files" ? "files " + e.path : e.type === "builtin" ? "builtin " + e.id : "");
   const placed = new Set<string>();
-  const keep = (e: Entry) => e.type === "link" || (there.has(key(e)) && !!placed.add(key(e)));
+  const keep = (e: Entry) => e.type === "link" || e.type === "widget" || (there.has(key(e)) && !!placed.add(key(e)));
 
   const groups = layout.groups.map((group): Group => ({
     ...group,
@@ -165,7 +176,7 @@ export function arrange(layout: Layout, apps: string[], folders: string[], built
   const last = first.at(-1);
   const tail = last?.type === "builtin" && last.id === "add" ? first.splice(-1) : [];
   groups[0] = { ...groups[0]!, items: [...first, ...rest, ...own, ...tail] };
-  return { groups, widgets: cleanWidgets(layout.widgets, groups.map((group) => group.id)) };
+  return { groups, widgets: cleanWidgets(layout.widgets, groups.map((group) => group.id), amongTiles(groups)) };
 }
 
 /** The layout after a folder of the file manager was moved or renamed (`to`), or removed (`to` is null) */

@@ -712,7 +712,10 @@ input[type="range"] { accent-color: var(--accent); width: 100%; }
 .widget:is(:hover, :focus-within) > .block-remove { opacity: 1; }
 .widget.drop-before { box-shadow: -4px 0 0 var(--accent); }
 .widget.drop-after { box-shadow: 4px 0 0 var(--accent); }
-.zone.movable .widget.small { cursor: grab; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+.widget.small.movable { cursor: grab; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+.widget { position: relative; }
+/* a number among the tiles keeps to the size of a tile */
+.tiles > .widget.small > .stat { padding: 12px 14px; gap: 3px; }
 .dragging-widget .zone.vacant { display: grid; }
 
 /* An empty place that shows when a block is picked up must not push the page about under the pointer:

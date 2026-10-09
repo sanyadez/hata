@@ -780,6 +780,8 @@ const homeUi = { folder: null, drag: null, stale: false, widgets: null };
 const tileKey = (item) => item.type + ":" + (item.type === "app" ? item.name : item.type === "files" ? item.path : item.id);
 /** The "Add" tile: a doorway, which is moved about but never put into a folder */
 const isAddTile = (item) => item.type === "builtin" && item.id === "add";
+/** What never goes into a folder of tiles: "Add", and a number of the system standing among the tiles */
+const staysOut = (item) => isAddTile(item) || item.type === "widget";
 const newId = () => Array.from(crypto.getRandomValues(new Uint8Array(6)), (byte) => byte.toString(16).padStart(2, "0")).join("");
 const linkHost = (url) => {
   try {
@@ -822,6 +824,8 @@ function tileIcon(item, size = "") {
 }
 
 function tile(item) {
+  // a number of the system among the tiles is the same block that would stand in a place of its own
+  if (item.type === "widget") return homeUi.widgets?.[item.id] ?? null;
   const target = tileTarget(item);
   if (!target) return null;
   const admin = isAdmin();
@@ -919,11 +923,11 @@ function moveTile(key, where) {
   if (!item) return;
   if (where.before || where.after) {
     const at = locate(layout, where.before ?? where.after);
-    if (!at || (at.folder && (item.type === "folder" || isAddTile(item)))) return;
+    if (!at || (at.folder && (item.type === "folder" || staysOut(item)))) return;
     at.list.splice(at.index + (where.after ? 1 : 0), 0, item);
   } else if (where.folder) {
     const folder = allFolders(layout).find((f) => f.id === where.folder);
-    if (!folder || item.type === "folder" || isAddTile(item)) return;
+    if (!folder || item.type === "folder" || staysOut(item)) return;
     folder.items.push(item);
   } else {
     const group = layout.groups.find((g) => g.id === where.group) ?? layout.groups[0];
@@ -936,7 +940,7 @@ function moveTile(key, where) {
 function makeFolder(key, ontoKey, title = "") {
   const layout = layoutCopy();
   const own = locate(layout, key);
-  if (!own || own.item.type === "folder" || isAddTile(own.item)) return;
+  if (!own || own.item.type === "folder" || staysOut(own.item)) return;
   const folder = { type: "folder", id: newId(), title, items: [own.item] };
   if (!ontoKey) {
     if (own.folder) return;
@@ -945,7 +949,7 @@ function makeFolder(key, ontoKey, title = "") {
   }
   takeTile(layout, key);
   const at = locate(layout, ontoKey);
-  if (!at || at.folder || at.item.type === "folder" || isAddTile(at.item)) return;
+  if (!at || at.folder || at.item.type === "folder" || staysOut(at.item)) return;
   folder.items.unshift(at.item);
   at.list[at.index] = folder;
   return saveLayout(layout);
@@ -1129,7 +1133,8 @@ function groupBlock(group, index) {
  */
 function blockPlaces(layout) {
   const groups = new Set(layout.groups.map((group) => "group:" + group.id));
-  const seen = new Set();
+  // a number standing among the tiles of a group is there and nowhere else
+  const seen = new Set(layout.groups.flatMap((group) => group.items.filter((item) => item.type === "widget").map((item) => item.id)));
   const places = {};
   for (const name of ZONES) places[name] = (layout.widgets[name] ?? []).filter((id) => (groups.has(id) || id in homeUi.widgets) && !seen.has(id) && seen.add(id));
   for (const id of groups) if (!seen.has(id)) places.main.push(id);
@@ -1259,12 +1264,12 @@ const WIDGET_DRAG = {
   name: "widget",
   ignore: "button, a, input",
   find: (drag) => {
-    const beside = besideBlock(drag, ".widget[data-widget]", "widget");
+    const beside = besideBlock(drag, ".zone > .widget[data-widget]", "widget");
     if (beside) return beside;
     // not over a block: the free room of a place takes the block at its end
     const under = document.elementFromPoint(drag.x, drag.y);
     const zone = under?.closest("[data-zone]");
-    return zone && !under.closest(".widget") ? { el: zone, cls: "drop-end", zone: zone.dataset.zone } : null;
+    return zone && !under.closest(".zone > .widget") ? { el: zone, cls: "drop-end", zone: zone.dataset.zone } : null;
   },
   drop: (drag, target) =>
     changeLayout((layout) => {
@@ -1274,6 +1279,42 @@ const WIDGET_DRAG = {
       const zone = beside ? Object.values(zones).find((list) => list.includes(beside)) : zones[target.zone];
       if (!zone) return false;
       zone.splice(beside ? zone.indexOf(beside) + (target.after ? 1 : 0) : zone.length, 0, drag.key);
+    }),
+};
+
+/** Takes one of Hata's own blocks from wherever it is — a place, the put-away list, among the tiles — and gives the places back */
+function takeBlock(layout, id) {
+  for (const group of layout.groups) group.items = group.items.filter((item) => !(item.type === "widget" && item.id === id));
+  const places = (layout.widgets = blockPlaces(layout));
+  for (const name of [...ZONES, "hidden"]) places[name] = places[name].filter((block) => block !== id);
+  return places;
+}
+
+/** A number of the system is small enough to go either way: among the blocks, or among the tiles of a group */
+const NUMBER_DRAG = {
+  name: "widget",
+  ignore: "button, a, input",
+  find: (drag) => {
+    if (!document.elementFromPoint(drag.x, drag.y)?.closest(".tiles[data-group]")) return WIDGET_DRAG.find(drag);
+    const target = dropTarget(drag);
+    return target && { ...target, tile: true };
+  },
+  drop: (drag, target) =>
+    changeLayout((layout) => {
+      const id = drag.item.id;
+      const places = takeBlock(layout, id);
+      const beside = target.before ?? target.after;
+      // next to a tile, or at the end of a group: it becomes a tile
+      if (target.tile) {
+        const at = beside && locate(layout, beside);
+        if (beside ? !at || at.folder : !layout.groups.some((group) => group.id === target.group)) return false;
+        if (at) at.list.splice(at.index + (target.after ? 1 : 0), 0, { type: "widget", id });
+        else layout.groups.find((group) => group.id === target.group).items.push({ type: "widget", id });
+        return;
+      }
+      const zone = beside ? Object.values(places).find((list) => list.includes(beside)) : places[target.zone];
+      if (!zone) return false;
+      zone.splice(beside ? zone.indexOf(beside) + (target.after ? 1 : 0) : zone.length, 0, id);
     }),
 };
 
@@ -1304,12 +1345,12 @@ function dropTarget(drag) {
     }
     if (!open.dialog.contains(under)) return null;
   }
-  const over = under.closest(".tile[data-key]");
+  const over = under.closest(".tiles [data-key]");
   if (over && over !== drag.el && !over.classList.contains("drag-ghost")) {
     const rect = over.getBoundingClientRect();
     const part = (drag.x - rect.left) / rect.width;
     const key = over.dataset.key;
-    const mayJoin = !open && drag.item.type !== "folder" && !isAddTile(drag.item) && key !== "builtin:add";
+    const mayJoin = !open && drag.item.type !== "folder" && !staysOut(drag.item) && key !== "builtin:add" && !key.startsWith("widget:");
     if (mayJoin && part > 0.28 && part < 0.72) return key.startsWith("folder:") ? { el: over, cls: "drop-into", folder: key.slice(7) } : { el: over, cls: "drop-into", onto: key };
     return part < 0.5 ? { el: over, cls: "drop-before", before: key } : { el: over, cls: "drop-after", after: key };
   }
@@ -1393,11 +1434,15 @@ function renderHome() {
     el.classList.add("widget");
     el.dataset.widget = id;
     // the numbers are dragged by any part of them; a list with text to read and select, by its heading
-    el.addEventListener("pointerdown", (e) => isAdmin() && (el.classList.contains("small") || e.target.closest(".section-head")) && dragStart(e, id, WIDGET_DRAG, el));
+    el.addEventListener("pointerdown", (e) => {
+      if (!isAdmin()) return;
+      if (el.classList.contains("small")) dragStart(e, { type: "widget", id }, NUMBER_DRAG, el);
+      else if (e.target.closest(".section-head")) dragStart(e, id, WIDGET_DRAG, el);
+    });
     return el;
   };
   // the blocks are made once and then only moved and refilled: the numbers of the system live in one of them
-  const number = (id, iconName, label) => widget(id, h("section", { class: "card small" }, statCell(id, iconName, label), blockRemover(id, label)));
+  const number = (id, iconName, label) => widget(id, h("section", { class: "card small" + (isAdmin() ? " movable" : ""), "data-key": "widget:" + id }, statCell(id, iconName, label), blockRemover(id, label)));
   homeUi.widgets = {
     cpu: number("cpu", "cpu", t("sys.cpu")),
     memory: number("memory", "memory", t("sys.memory")),
@@ -1454,9 +1499,7 @@ function blockRemover(id, label) {
     "aria-label": `${t("home.removeBlock")}: ${label}`,
     onclick: () =>
       changeLayout((layout) => {
-        const places = (layout.widgets = blockPlaces(layout));
-        for (const name of ZONES) places[name] = places[name].filter((block) => block !== id);
-        places.hidden.push(id);
+        takeBlock(layout, id).hidden.push(id);
       }),
   }, icon("x"));
 }
