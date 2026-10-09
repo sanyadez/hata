@@ -479,6 +479,9 @@ dialog.xwide textarea.code { min-height: 56dvh; }
 .setting strong { font-weight: 600; }
 .setting .muted { margin-top: 3px; overflow-wrap: anywhere; }
 .setting-control { width: 280px; max-width: 100%; display: flex; justify-content: flex-end; }
+/* a row of buttons takes the room it needs instead of spilling over the text */
+.setting-control:has(.row-actions) { width: auto; flex: none; }
+.setting-control .row-actions { flex-wrap: wrap; }
 .settings footer { display: flex; justify-content: flex-end; padding-top: 14px; border-top: 1px solid var(--border); }
 
 /* --- Dialogs ----------------------------------------------------------------------------------- */
@@ -559,7 +562,8 @@ dialog h2 { font-size: 18px; }
   .cards { grid-template-columns: minmax(0, 1fr); }
   .form-row { grid-template-columns: minmax(0, 1fr); gap: 4px; }
   .form-label { padding-top: 0; }
-  .setting-control { width: 100%; justify-content: flex-start; }
+  .setting-control, .setting-control:has(.row-actions) { width: 100%; justify-content: flex-start; }
+  .setting-control .row-actions { justify-content: flex-start; }
   .app-head .actions { width: 100%; }
   dialog[open] { padding: 18px; }
   th, td { padding-left: 14px; padding-right: 14px; }
