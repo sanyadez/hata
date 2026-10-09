@@ -351,6 +351,12 @@ a.strong:hover { color: var(--accent-text); }
 tr.removed .app-icon { opacity: 0.5; }
 .side form footer { display: flex; justify-content: flex-end; }
 
+.qr-box { display: grid; place-items: center; }
+.qr { width: 200px; height: 200px; border-radius: var(--radius-md); }
+.codes { margin: 0; padding: 14px 16px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-md); columns: 2; font-size: 14px; line-height: 1.9; }
+.chip.accent { border-color: transparent; background: var(--accent-soft); color: var(--accent-text); }
+.setting .chip { margin-left: 8px; }
+
 /* --- Store ------------------------------------------------------------------------------------- */
 
 .store, .settings { display: grid; grid-template-columns: 208px minmax(0, 1fr); gap: 32px; align-items: start; }

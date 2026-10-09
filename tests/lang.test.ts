@@ -27,9 +27,10 @@ test("strings chosen at run time exist for every value the server can send", () 
     ...["running", "partial", "restarting", "stopped", "unknown", "busy"].map((s) => `status.${s}`),
     ...["install", "update", "start", "stop", "restart", "remove", "apply", "backup", "restore"].flatMap((k) => [`job.${k}`, `activity.app.${k}.done`, `activity.app.${k}.failed`]),
     ...["docker", "restarting", "partial", "disk", "memory", "temperature", "failed.install", "failed.update", "failed.apply", "failed.start", "failed.backup", "failed.restore"].flatMap((c) => [`attention.${c}.title`, `attention.${c}.text`]),
-    ...["home", "store", "backups", "settings"].map((v) => `nav.${v}`),
+    ...["home", "store", "backups", "users", "settings"].map((v) => `nav.${v}`),
+    ...["admin", "member"].map((v) => `user.role.${v}`),
     ...["manual", "schedule", "pre-update"].map((v) => `backup.reason.${v}`),
-    ...["general", "apps", "stores", "about"].map((v) => `settings.${v}`),
+    ...["account", "general", "apps", "stores", "about"].map((v) => `settings.${v}`),
     ...["overview", "logs", "compose", "backups"].map((v) => `app.tab.${v}`),
   ];
   expect(need.filter((key) => !(key in en))).toEqual([]);

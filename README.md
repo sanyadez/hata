@@ -24,9 +24,11 @@ Early development. What works today:
   editing the compose file, removal with or without data;
 - backups: a snapshot of an app (compose file, its folders, its Docker volumes) as a plain `tar.gz`, daily
   on a schedule and before every update, restore to any snapshot — also of an app that was removed;
+- users: administrators and members (who see the apps and open them, nothing more), two-factor sign-in
+  with an authenticator app and recovery codes, a list of one's sessions with sign-out per device;
 - English and Ukrainian UI, light and dark, phone-friendly.
 
-Not there yet: reverse proxy and HTTPS, more users and 2FA, backups to another machine, import of
+Not there yet: reverse proxy and HTTPS, sign-in in front of an app, backups to another machine, import of
 containers that have no compose file, file manager.
 
 ## Install

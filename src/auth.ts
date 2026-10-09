@@ -11,6 +11,7 @@ import { chmodSync, existsSync, readFileSync, rmSync, writeFileSync } from "node
 import { join } from "node:path";
 import { DATA_DIR } from "./config";
 import { readJsonFile, writeJsonAtomic } from "./fsutil";
+import { newSecret, otpauthUri, verifyTotp } from "./totp";
 
 const USERS_FILE = join(DATA_DIR, "users.json");
 const SESSIONS_FILE = join(DATA_DIR, "sessions.json");
@@ -21,24 +22,47 @@ const SESSION_TTL_MS = 30 * 24 * 3600 * 1000;
 const MAX_SESSIONS = 50;
 export const MIN_PASSWORD_LENGTH = 8;
 
+export type Role = "admin" | "member";
+
 export interface User {
   id: string;
   name: string;
-  role: "admin";
+  /** An administrator manages the server; a member sees the apps and opens them */
+  role: Role;
   passwordHash: string;
   createdAt: number;
+  lastSignIn?: number;
+  /** Two-factor sign-in, once switched on */
+  totp?: {
+    secret: string;
+    /** SHA-256 of the recovery codes that are still unused */
+    recovery: string[];
+    /** The time step of the last accepted code: a code works once */
+    lastStep: number;
+  };
+  /** A secret shown to the user but not confirmed with a code yet */
+  totpPending?: string;
 }
 
 interface Session {
+  /** Public handle of the session, for the list of sessions */
+  id: string;
   /** SHA-256 of the cookie token, hex */
   hash: string;
   userId: string;
   /** Expiry, ms since epoch */
   exp: number;
+  createdAt: number;
+  lastSeen: number;
+  ip: string;
+  userAgent: string;
 }
 
-const users: User[] = readJsonFile<User[]>(USERS_FILE, [], Array.isArray);
-let sessions: Session[] = readJsonFile<Session[]>(SESSIONS_FILE, [], Array.isArray).filter((s) => s.exp > Date.now());
+const users: User[] = readJsonFile<User[]>(USERS_FILE, [], Array.isArray).map((u) => ({ ...u, role: u.role === "member" ? "member" : "admin" }));
+let sessions: Session[] = readJsonFile<Session[]>(SESSIONS_FILE, [], Array.isArray)
+  .filter((s) => s.exp > Date.now())
+  // sessions written by a version without these fields
+  .map((s) => ({ ...s, id: s.id ?? crypto.randomUUID(), createdAt: s.createdAt ?? Date.now(), lastSeen: s.lastSeen ?? Date.now(), ip: s.ip ?? "", userAgent: s.userAgent ?? "" }));
 
 const sha256 = (text: string): string => new Bun.CryptoHasher("sha256").update(text).digest("hex");
 const randomToken = (): string => Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("hex");
@@ -107,13 +131,15 @@ function saveSessions(): void {
   writeJsonAtomic(SESSIONS_FILE, sessions);
 }
 
-export function createSession(user: User): string {
+export function createSession(user: User, client: { ip: string; userAgent: string }): string {
   const now = Date.now();
   const token = randomToken();
   sessions = sessions.filter((s) => s.exp > now);
-  sessions.push({ hash: sha256(token), userId: user.id, exp: now + SESSION_TTL_MS });
+  sessions.push({ id: crypto.randomUUID(), hash: sha256(token), userId: user.id, exp: now + SESSION_TTL_MS, createdAt: now, lastSeen: now, ip: client.ip, userAgent: client.userAgent.slice(0, 300) });
   if (sessions.length > MAX_SESSIONS) sessions = sessions.slice(-MAX_SESSIONS);
   saveSessions();
+  user.lastSignIn = now;
+  saveUsers();
   return token;
 }
 
@@ -122,12 +148,58 @@ function cookieToken(req: Request): string | null {
   return match?.[1] ?? null;
 }
 
+const SEEN_EVERY_MS = 5 * 60_000;
+
 export function sessionUser(req: Request): User | null {
   const token = cookieToken(req);
   if (!token) return null;
   const hash = sha256(token);
-  const session = sessions.find((s) => s.hash === hash && s.exp > Date.now());
-  return (session && users.find((u) => u.id === session.userId)) ?? null;
+  const now = Date.now();
+  const session = sessions.find((s) => s.hash === hash && s.exp > now);
+  if (!session) return null;
+  // "last seen" is for the list of sessions: minute precision is plenty, a write per request is not
+  if (now - session.lastSeen > SEEN_EVERY_MS) {
+    session.lastSeen = now;
+    saveSessions();
+  }
+  return users.find((u) => u.id === session.userId) ?? null;
+}
+
+export interface SessionInfo {
+  id: string;
+  createdAt: number;
+  lastSeen: number;
+  ip: string;
+  userAgent: string;
+  /** The session this request came with */
+  current: boolean;
+}
+
+export function listSessions(user: User, req: Request): SessionInfo[] {
+  const token = cookieToken(req);
+  const hash = token ? sha256(token) : "";
+  const now = Date.now();
+  return sessions
+    .filter((s) => s.userId === user.id && s.exp > now)
+    .map((s) => ({ id: s.id, createdAt: s.createdAt, lastSeen: s.lastSeen, ip: s.ip, userAgent: s.userAgent, current: s.hash === hash }))
+    .sort((a, b) => Number(b.current) - Number(a.current) || b.lastSeen - a.lastSeen);
+}
+
+/** Ends one of the user's sessions; false if there is no such session */
+export function revokeSession(user: User, id: string): boolean {
+  const before = sessions.length;
+  sessions = sessions.filter((s) => !(s.userId === user.id && s.id === id));
+  if (sessions.length === before) return false;
+  saveSessions();
+  return true;
+}
+
+/** Ends the user's sessions, except the one of `keep` (a request) if given */
+export function revokeSessions(user: User, keep?: Request): void {
+  const token = keep ? cookieToken(keep) : null;
+  const hash = token ? sha256(token) : "";
+  sessions = sessions.filter((s) => s.userId !== user.id || s.hash === hash);
+  saveSessions();
 }
 
 export function destroySession(req: Request): void {
@@ -147,7 +219,152 @@ export function clearSessionCookie(): string {
   return `${COOKIE_NAME}=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0`;
 }
 
-export const publicUser = (u: User) => ({ id: u.id, name: u.name, role: u.role });
+export const publicUser = (u: User) => ({ id: u.id, name: u.name, role: u.role, twoFactor: !!u.totp });
+
+// --- Users ------------------------------------------------------------------------------------------
+
+function saveUsers(): void {
+  writeJsonAtomic(USERS_FILE, users);
+}
+
+const isRole = (role: unknown): role is Role => role === "admin" || role === "member";
+const admins = (): User[] => users.filter((u) => u.role === "admin");
+export const findUser = (id: string): User | null => users.find((u) => u.id === id) ?? null;
+
+export interface UserInfo {
+  id: string;
+  name: string;
+  role: Role;
+  twoFactor: boolean;
+  createdAt: number;
+  lastSignIn: number | null;
+  sessions: number;
+}
+
+export function listUsers(): UserInfo[] {
+  const now = Date.now();
+  return users.map((u) => ({
+    id: u.id,
+    name: u.name,
+    role: u.role,
+    twoFactor: !!u.totp,
+    createdAt: u.createdAt,
+    lastSignIn: u.lastSignIn ?? null,
+    sessions: sessions.filter((s) => s.userId === u.id && s.exp > now).length,
+  }));
+}
+
+/** Returns the new user or an error code */
+export async function createUser(name: unknown, password: unknown, role: unknown): Promise<User | string> {
+  if (!validName(name)) return "auth.badName";
+  if (!validPassword(password)) return "auth.weakPassword";
+  if (!isRole(role)) return "users.badRole";
+  if (users.some((u) => u.name.toLowerCase() === name.toLowerCase())) return "users.nameTaken";
+  const user: User = { id: crypto.randomUUID(), name, role, passwordHash: await Bun.password.hash(password), createdAt: Date.now() };
+  users.push(user);
+  saveUsers();
+  return user;
+}
+
+/**
+ * An administrator changes another user: the role, a new password, switching 2FA off (for someone who
+ * lost their phone). Returns an error code or null. The last administrator cannot be demoted.
+ */
+export async function updateUser(id: string, patch: Record<string, unknown>): Promise<string | null> {
+  const user = findUser(id);
+  if (!user) return "users.notFound";
+  if ("role" in patch) {
+    if (!isRole(patch.role)) return "users.badRole";
+    if (user.role === "admin" && patch.role !== "admin" && admins().length === 1) return "users.lastAdmin";
+  }
+  if ("password" in patch && !validPassword(patch.password)) return "auth.weakPassword";
+  if ("role" in patch) user.role = patch.role as Role;
+  if ("password" in patch) {
+    user.passwordHash = await Bun.password.hash(patch.password as string);
+    // whoever knew the old password must not stay signed in
+    revokeSessions(user);
+  }
+  if (patch.twoFactor === false) {
+    delete user.totp;
+    delete user.totpPending;
+  }
+  saveUsers();
+  return null;
+}
+
+export function deleteUser(id: string, acting: User): string | null {
+  const user = findUser(id);
+  if (!user) return "users.notFound";
+  if (user.id === acting.id) return "users.self";
+  if (user.role === "admin" && admins().length === 1) return "users.lastAdmin";
+  users.splice(users.indexOf(user), 1);
+  saveUsers();
+  revokeSessions(user);
+  return null;
+}
+
+/** The user changes their own password; other sessions end, the one of `req` stays */
+export async function changePassword(user: User, current: unknown, next: unknown, req: Request): Promise<string | null> {
+  if (typeof current !== "string" || !(await Bun.password.verify(current, user.passwordHash).catch(() => false))) return "auth.wrongPassword";
+  if (!validPassword(next)) return "auth.weakPassword";
+  user.passwordHash = await Bun.password.hash(next);
+  saveUsers();
+  revokeSessions(user, req);
+  return null;
+}
+
+// --- Two-factor sign-in -----------------------------------------------------------------------------
+
+const RECOVERY_CODES = 8;
+const recoveryHash = (code: string): string => sha256(code.toLowerCase().replace(/[\s-]/g, ""));
+
+/** Starts switching 2FA on: a fresh secret that takes effect once confirmed with a code */
+export function beginTotp(user: User): { secret: string; uri: string } {
+  user.totpPending = newSecret();
+  saveUsers();
+  return { secret: user.totpPending, uri: otpauthUri(user.name, user.totpPending) };
+}
+
+/** Confirms the pending secret. Returns the recovery codes (shown once) or an error code. */
+export function enableTotp(user: User, code: unknown): string[] | string {
+  if (!user.totpPending) return "totp.notStarted";
+  const step = typeof code === "string" ? verifyTotp(user.totpPending, code, Date.now()) : null;
+  if (step === null) return "totp.wrongCode";
+  const codes = Array.from({ length: RECOVERY_CODES }, () => {
+    const raw = Buffer.from(crypto.getRandomValues(new Uint8Array(5))).toString("hex");
+    return `${raw.slice(0, 5)}-${raw.slice(5)}`;
+  });
+  user.totp = { secret: user.totpPending, recovery: codes.map(recoveryHash), lastStep: step };
+  delete user.totpPending;
+  saveUsers();
+  return codes;
+}
+
+export async function disableTotp(user: User, password: unknown): Promise<string | null> {
+  if (typeof password !== "string" || !(await Bun.password.verify(password, user.passwordHash).catch(() => false))) return "auth.wrongPassword";
+  delete user.totp;
+  delete user.totpPending;
+  saveUsers();
+  return null;
+}
+
+/** The second step of signing in: a code from the app, or a recovery code (which is then used up) */
+export function checkSecondFactor(user: User, code: unknown): boolean {
+  if (!user.totp || typeof code !== "string" || code.length > 64) return false;
+  const step = verifyTotp(user.totp.secret, code, Date.now(), user.totp.lastStep);
+  if (step !== null) {
+    user.totp.lastStep = step;
+    saveUsers();
+    return true;
+  }
+  const at = user.totp.recovery.indexOf(recoveryHash(code));
+  if (at < 0) return false;
+  user.totp.recovery.splice(at, 1);
+  saveUsers();
+  return true;
+}
+
+export const recoveryCodesLeft = (user: User): number => user.totp?.recovery.length ?? 0;
 
 // --- Sign-in attempt limiting -----------------------------------------------------------------------
 

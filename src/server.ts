@@ -15,11 +15,24 @@ import { attention } from "./attention";
 import { backupApp, backupOverview, deleteSnapshot, listSnapshots, restoreSnapshot, runBackups, scheduleBackups } from "./backup";
 import { APP_NAME_RE } from "./appform";
 import {
+  beginTotp,
+  changePassword,
   checkPassword,
+  checkSecondFactor,
   clearSessionCookie,
   completeSetup,
   createSession,
+  createUser,
+  deleteUser,
   destroySession,
+  disableTotp,
+  enableTotp,
+  findUser,
+  listSessions,
+  listUsers,
+  recoveryCodesLeft,
+  revokeSession,
+  updateUser,
   loginBlockedFor,
   needsSetup,
   publicUser,
@@ -32,6 +45,7 @@ import {
 import { bus } from "./bus";
 import { DATA_DIR, listenAddress, settings, timezone, updateSettings } from "./config";
 import { dockerInfo, watchEvents } from "./docker";
+import { qrMatrix } from "./qr";
 import { ARCH, catalogue, scheduleStoreSync, syncStore } from "./store";
 import { startSampler, systemStatus } from "./system";
 import { VERSION } from "./version";
@@ -149,7 +163,17 @@ const publicSettings = () => ({ ...settings, systemTimezone: timezone(), languag
 
 // --- Events -----------------------------------------------------------------------------------------
 
-function events(req: Request, server: Server): Response {
+/** What a member may do: look at the apps and manage their own account. Everything else is an administrator's. */
+export function memberMay(method: string, path: string): boolean {
+  if (path === "/api/logout" || path.startsWith("/api/account")) return true;
+  if (method !== "GET") return false;
+  return ["/api/events", "/api/overview", "/api/apps", "/api/store"].includes(path) || /^\/api\/apps\/[a-z0-9_-]+(\/stats)?$/.test(path) || /^\/api\/store\/[a-z0-9-]+\/apps\/[a-z0-9_-]+$/.test(path);
+}
+
+/** Events a member's page receives: job output and the activity log are not for them */
+const MEMBER_EVENTS = new Set(["system", "apps", "store"]);
+
+function events(req: Request, server: Server, admin: boolean): Response {
   // an event stream is silent for long stretches; the default idle timeout would cut it
   server.timeout(req, 0);
   const encoder = new TextEncoder();
@@ -168,7 +192,9 @@ function events(req: Request, server: Server): Response {
         unsubscribe();
         clearInterval(heartbeat);
       };
-      unsubscribe = bus.subscribe((event) => send(`data: ${JSON.stringify(event)}\n\n`));
+      unsubscribe = bus.subscribe((event) => {
+        if (admin || MEMBER_EVENTS.has(event.type)) send(`data: ${JSON.stringify(event)}\n\n`);
+      });
       heartbeat = setInterval(() => send(": ping\n\n"), 25_000);
       req.signal.addEventListener("abort", close, { once: true });
       send("retry: 2000\n\n");
@@ -191,6 +217,7 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
   const write = method !== "GET" && method !== "HEAD";
   if (write && !sameOrigin(req, url)) return fail(403, "request.crossSite");
   const ip = server.requestIP(req)?.address ?? "unknown";
+  const client = { ip, userAgent: req.headers.get("user-agent") ?? "" };
 
   if (path === "/api/state" && method === "GET") {
     const user = sessionUser(req);
@@ -214,7 +241,7 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
     }
     console.log(`Administrator "${result.name}" created from ${ip}`);
     record("auth.setup", { user: result.name, detail: ip });
-    return json({ user: publicUser(result) }, 200, { "set-cookie": sessionCookie(createSession(result), isHttps(req, url)) });
+    return json({ user: publicUser(result) }, 200, { "set-cookie": sessionCookie(createSession(result, client), isHttps(req, url)) });
   }
 
   if (path === "/api/login" && method === "POST") {
@@ -226,21 +253,86 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
       registerLoginFailure(ip);
       return fail(401, "auth.wrong");
     }
+    if (user.totp) {
+      // the password was right: now the code from the app, or a recovery code
+      if (data.code === undefined || data.code === "") return fail(401, "auth.codeRequired");
+      if (!checkSecondFactor(user, data.code)) {
+        registerLoginFailure(ip);
+        return fail(401, "auth.wrongCode");
+      }
+    }
     registerLoginSuccess(ip);
     record("auth.signin", { user: user.name, detail: ip });
-    return json({ user: publicUser(user) }, 200, { "set-cookie": sessionCookie(createSession(user), isHttps(req, url)) });
+    return json({ user: publicUser(user) }, 200, { "set-cookie": sessionCookie(createSession(user, client), isHttps(req, url)) });
   }
 
   // ---- everything below needs a session ----
   const user = sessionUser(req);
   if (!user) return fail(401, "auth.required");
+  const admin = user.role === "admin";
+  if (!admin && !memberMay(method, path)) return fail(403, "auth.forbidden");
+
+  // ---- the signed-in user's own account ----
+  if (path === "/api/account" && method === "GET") {
+    return json({ user: publicUser(user), sessions: listSessions(user, req), recoveryCodes: recoveryCodesLeft(user) });
+  }
+  if (path === "/api/account/password" && method === "POST") {
+    const data = await body(req);
+    const error = await changePassword(user, data.current, data.password, req);
+    if (error) return fail(400, error);
+    record("auth.password", { user: user.name });
+    return json({ ok: true });
+  }
+  const session = /^\/api\/account\/sessions\/([0-9a-f-]{36})$/.exec(path);
+  if (session && method === "DELETE") return revokeSession(user, session[1]!) ? json({ ok: true }) : fail(404, "auth.noSession");
+  if (path === "/api/account/totp/begin" && method === "POST") {
+    if (user.totp) return fail(409, "totp.alreadyOn");
+    const { secret, uri } = beginTotp(user);
+    return json({ secret, uri, qr: qrMatrix(uri).map((row) => row.map((dark) => (dark ? "1" : "0")).join("")) });
+  }
+  if (path === "/api/account/totp/enable" && method === "POST") {
+    const result = enableTotp(user, (await body(req)).code);
+    if (typeof result === "string") return fail(400, result);
+    record("auth.twoFactorOn", { user: user.name });
+    return json({ recovery: result });
+  }
+  if (path === "/api/account/totp/disable" && method === "POST") {
+    const error = await disableTotp(user, (await body(req)).password);
+    if (error) return fail(400, error);
+    record("auth.twoFactorOff", { user: user.name });
+    return json({ ok: true });
+  }
+
+  // ---- users (administrators only: members were turned away above) ----
+  if (path === "/api/users") {
+    if (method === "GET") return json(listUsers());
+    if (method === "POST") {
+      const data = await body(req);
+      const created = await createUser(data.name, data.password, data.role);
+      if (typeof created === "string") return fail(created === "users.nameTaken" ? 409 : 400, created);
+      record("users.create", { user: user.name, detail: created.name });
+      return json(publicUser(created), 201);
+    }
+  }
+  const target = /^\/api\/users\/([0-9a-f-]{36})$/.exec(path);
+  if (target && method === "PUT") {
+    const error = await updateUser(target[1]!, await body(req));
+    return error ? fail(error === "users.notFound" ? 404 : 400, error) : json({ ok: true });
+  }
+  if (target && method === "DELETE") {
+    const name = findUser(target[1]!)?.name ?? "";
+    const error = deleteUser(target[1]!, user);
+    if (error) return fail(error === "users.notFound" ? 404 : 400, error);
+    record("users.remove", { user: user.name, detail: name });
+    return json({ ok: true });
+  }
 
   if (path === "/api/logout" && method === "POST") {
     destroySession(req);
     return json({ ok: true }, 200, { "set-cookie": clearSessionCookie() });
   }
 
-  if (path === "/api/events" && method === "GET") return events(req, server);
+  if (path === "/api/events" && method === "GET") return events(req, server, admin);
 
   if (path === "/api/overview" && method === "GET") {
     const [docker, apps] = await Promise.all([dockerInfo(), listApps(language(url))]);
@@ -251,8 +343,9 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
       apps,
       arch: ARCH,
       attention: attention({ system, docker, apps, activity: recent(100) }),
-      activity: recent(8),
-      jobs: listJobs().filter((j) => j.status === "running").map(({ log: _, ...job }) => job),
+      // who signed in from where, and what was installed by whom, is the administrators' business
+      activity: admin ? recent(8) : [],
+      jobs: admin ? listJobs().filter((j) => j.status === "running").map(({ log: _, ...job }) => job) : [],
     });
   }
 
