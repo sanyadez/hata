@@ -2,7 +2,7 @@
   "name": "hata",
   "version": "0.1.0-alpha.3",
   "description": "A home server in a single file",
-  "license": "MIT",
+  "license": "PolyForm-Noncommercial-1.0.0",
   "private": true,
   "type": "module",
   "module": "src/index.ts",

@@ -96,4 +96,9 @@ bun run build    # dist/hata-linux-x64 and dist/hata-linux-arm64
 
 ## License
 
-[MIT](LICENSE)
+[PolyForm Noncommercial 1.0.0](LICENSE). You may use, change and share Hata for any noncommercial purpose —
+at home, for study, in a noncommercial organisation — as long as every copy keeps the licence and the
+notice naming the author. Commercial use needs a separate licence from the author: open an issue to ask.
+
+Versions up to 0.1.0-alpha.3 were released under the MIT licence. The fonts in `src/ui/fonts` keep their own
+licence (SIL Open Font License).
