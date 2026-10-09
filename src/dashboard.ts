@@ -23,9 +23,13 @@ export interface Group {
   items: Item[];
 }
 
-/** The blocks of the dashboard besides the tiles, and the places they can stand in */
+/**
+ * The blocks of the dashboard and the places they can stand in. A block is one of Hata's own (`stats`,
+ * `attention`, `activity`) or a group of tiles (`group:<id>`); the places are a row across the top, three
+ * columns (left, main, side) and a row across the bottom.
+ */
 export const WIDGETS = ["stats", "attention", "activity"] as const;
-export const ZONES = ["top", "side", "bottom"] as const;
+export const ZONES = ["top", "left", "main", "side", "bottom"] as const;
 export type Widgets = Record<(typeof ZONES)[number], string[]>;
 
 export interface Layout {
@@ -36,15 +40,20 @@ export interface Layout {
 
 const DEFAULT_ZONE: Record<string, (typeof ZONES)[number]> = { stats: "top", attention: "side", activity: "side" };
 
-/** Blocks named twice or not known are dropped; one that is named nowhere goes to its usual place */
-export function cleanWidgets(input: unknown): Widgets {
-  const out: Widgets = { top: [], side: [], bottom: [] };
+/**
+ * Blocks named twice or not known are dropped; one that is named nowhere goes to its usual place — a
+ * group of tiles to the main column, after the groups already there.
+ */
+export function cleanWidgets(input: unknown, groups: string[] = []): Widgets {
+  const out: Widgets = { top: [], left: [], main: [], side: [], bottom: [] };
+  const known = new Set<string>([...WIDGETS, ...groups.map((id) => "group:" + id)]);
   const seen = new Set<string>();
   for (const zone of ZONES) {
     const list = isObject(input) && Array.isArray(input[zone]) ? input[zone] : [];
-    for (const id of list) if (typeof id === "string" && (WIDGETS as readonly string[]).includes(id) && !seen.has(id) && seen.add(id)) out[zone].push(id);
+    for (const id of list) if (typeof id === "string" && known.has(id) && !seen.has(id) && seen.add(id)) out[zone].push(id);
   }
   for (const id of WIDGETS) if (!seen.has(id)) out[DEFAULT_ZONE[id]!].push(id);
+  for (const id of groups) if (!seen.has("group:" + id)) out.main.push("group:" + id);
   return out;
 }
 
@@ -110,7 +119,7 @@ export function cleanLayout(input: unknown): Layout {
     .filter(isObject)
     .slice(0, MAX_GROUPS)
     .map((raw): Group => ({ id: id(raw.id), title: text(raw.title, MAX_TITLE), items: (Array.isArray(raw.items) ? raw.items : []).map(item).filter((i): i is Item => i !== null) }));
-  return { groups, widgets: cleanWidgets(isObject(input) ? input.widgets : null) };
+  return { groups, widgets: cleanWidgets(isObject(input) ? input.widgets : null, groups.map((group) => group.id)) };
 }
 
 /**
@@ -140,7 +149,7 @@ export function arrange(layout: Layout, apps: string[], folders: string[], built
   const last = first.at(-1);
   const tail = last?.type === "builtin" && last.id === "add" ? first.splice(-1) : [];
   groups[0] = { ...groups[0]!, items: [...first, ...rest, ...own, ...tail] };
-  return { groups, widgets: layout.widgets };
+  return { groups, widgets: cleanWidgets(layout.widgets, groups.map((group) => group.id)) };
 }
 
 /** The layout after a folder of the file manager was moved or renamed (`to`), or removed (`to` is null) */

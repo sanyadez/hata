@@ -71,13 +71,23 @@ test("a pinned folder keeps its place when it is renamed and leaves when it is r
 });
 
 test("every block of the dashboard stands in exactly one place", () => {
-  const usual = { top: ["stats"], side: ["attention", "activity"], bottom: [] };
+  const usual = { top: ["stats"], left: [], main: [], side: ["attention", "activity"], bottom: [] };
   expect(cleanWidgets(null)).toEqual(usual);
   expect(cleanLayout({ groups: [] }).widgets).toEqual(usual);
-  expect(cleanWidgets({ top: ["activity", "nope", "activity"], side: "x", bottom: ["stats", "activity"] })).toEqual({ top: ["activity"], side: ["attention"], bottom: ["stats"] });
-  // the layout carries them through arranging and through a folder being renamed
-  const layout = cleanLayout({ groups: [], widgets: { top: [], side: ["stats"], bottom: ["activity", "attention"] } });
-  expect(arrange(layout, [], []).widgets).toEqual({ top: [], side: ["stats"], bottom: ["activity", "attention"] });
+  expect(cleanWidgets({ top: ["activity", "nope", "activity"], side: "x", bottom: ["stats", "activity"] })).toEqual({ top: ["activity"], left: [], main: [], side: ["attention"], bottom: ["stats"] });
+  // a layout saved before there was a left column, or before groups were blocks, is made whole
+  expect(cleanWidgets({ top: ["stats"], side: ["attention", "activity"], bottom: [] }, ["a", "b"])).toEqual({ ...usual, main: ["group:a", "group:b"] });
+});
+
+test("groups of tiles are blocks too: anywhere, once, and never lost", () => {
+  const layout = cleanLayout({
+    groups: [{ id: "main", title: "", items: [] }, { id: "net", title: "Network", items: [] }, { id: "media", title: "Media", items: [] }],
+    widgets: { top: ["group:net", "stats"], left: ["activity", "group:gone", "group:net"], main: [], side: ["group:main"], bottom: ["attention"] },
+  });
+  expect(layout.widgets).toEqual({ top: ["group:net", "stats"], left: ["activity"], main: ["group:media"], side: ["group:main"], bottom: ["attention"] });
+  // arranging keeps the places, and a group that had to be made gets one
+  expect(arrange(layout, [], []).widgets).toEqual(layout.widgets);
+  expect(arrange(cleanLayout(null), ["memos"], []).widgets.main).toEqual(["group:main"]);
   expect(movePath(layout, "/a", "/b").widgets).toEqual(layout.widgets);
 });
 

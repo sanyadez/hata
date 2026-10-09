@@ -19,7 +19,8 @@ Early development. What works today:
   recent activity;
 - the dashboard is yours to arrange: plain links next to the apps, named groups, folders of tiles that
   open in place like on a phone — all by dragging, mouse or finger, with no editing mode to enter; groups
-  and the blocks of the page (system numbers, what needs attention, activity) are dragged too; a tile opens
+  and the other blocks of the page (system numbers, what needs attention, activity) are dragged between
+  a top row, three columns and a bottom row; a tile opens
   the app, the small button next to it leads to its page in Hata;
 - terminal in the browser, for administrators: a shell on the server (it keeps running when the page is
   closed and shows the latest output when you come back) and a shell inside a container of an app;

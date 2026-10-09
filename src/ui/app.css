@@ -442,7 +442,6 @@ select.sort { width: auto; }
 .seg .btn:last-child { border-radius: 0 var(--radius-sm) var(--radius-sm) 0; margin-left: -1px; }
 .seg .btn.active { background: var(--surface-2); color: var(--text); }
 .actions > .btn.square.active { border-color: var(--accent); color: var(--accent-text); }
-#home-apps .group:not(:first-child) { margin-top: 12px; }
 .group { display: grid; gap: 16px; border-radius: var(--radius-md); }
 button.tile-open { border: 0; background: transparent; }
 
@@ -684,8 +683,18 @@ input[type="range"] { accent-color: var(--accent); width: 100%; }
 .drop-above { box-shadow: 0 -4px 0 var(--accent); }
 .drop-below { box-shadow: 0 4px 0 var(--accent); }
 .drag-ghost:is(.widget, .group) { position: fixed; left: 0; top: 0; z-index: 50; margin: 0; pointer-events: none; opacity: 0.9; max-height: 160px; overflow: hidden; border-radius: var(--radius-lg); background: var(--surface); box-shadow: 0 12px 32px rgb(0 0 0 / 45%); outline: 1px solid var(--accent); }
-/* with nothing in the side column the tiles take its room — until a block is picked up: then the column
-   is back, empty, to be dropped into */
-:root:not(.dragging-widget) .columns.no-side { grid-template-columns: minmax(0, 1fr); }
-.dragging-widget .zone.side.empty { min-height: 180px; align-self: stretch; }
+/* Three columns side by side: a column with nothing in it is not there and the others take its room —
+   until a block is picked up: then every place is back, empty, to be dropped into */
+.columns.three { display: flex; gap: 32px; align-items: flex-start; }
+.columns.three > .zone.side { flex: 0 0 372px; }
+.columns.three > #zone-main { flex: 1 1 0; }
+.columns.three.no-main > .zone.side { flex: 1 1 0; }
+.dragging-widget .columns.three > .zone.empty { min-height: 180px; align-self: stretch; }
+.dragging-widget .columns.three > .zone.side.empty { flex: 0 0 372px; }
+.group.widget > .section-head.handle { cursor: grab; }
 .side .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@media (max-width: 1080px) {
+  /* one column: the places follow one another down the page */
+  .columns.three { flex-direction: column; align-items: stretch; gap: 16px; }
+  .columns.three > .zone, .columns.three.no-main > .zone.side, .dragging-widget .columns.three > .zone.side.empty { flex: none; }
+}

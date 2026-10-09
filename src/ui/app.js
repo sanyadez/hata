@@ -1097,35 +1097,33 @@ function addDialog() {
   );
 }
 
-function renderDashboard(box) {
-  const o = state.overview;
+/** A group of tiles as a block of the page; null when this user has nothing in it */
+function groupBlock(group, index) {
   const admin = isAdmin();
-  const groups = o.dashboard.groups;
-  put(
-    box,
-    groups.map((group, index) => {
-      const tiles = group.items.map(tile).filter(Boolean);
-      // a group with nothing in it for this user is not theirs to see
-      if (!tiles.length && !admin) return null;
-      const head = groupHead(group, index, o.apps.length);
-      if (admin && groups.length > 1) {
-        head.classList.add("handle");
-        head.addEventListener("pointerdown", (e) => dragStart(e, group.id, GROUP_DRAG, head.parentElement));
-      }
-      return h(
-        "div",
-        { class: "group", "data-group-id": group.id },
-        head,
-        h(
-          "div",
-          { class: "tiles", "data-group": group.id },
-          tiles,
-          admin && !tiles.length && h("p", { class: "muted small drop-hint" }, t("home.emptyGroup")),
-        ),
-      );
-    }),
-  );
-  renderFolder();
+  const tiles = group.items.map(tile).filter(Boolean);
+  // a group with nothing in it for this user is not theirs to see
+  if (!tiles.length && !admin) return null;
+  const head = groupHead(group, index, state.overview.apps.length);
+  const block = h("div", { class: "group widget", "data-widget": "group:" + group.id, "data-group-id": group.id }, head, h("div", { class: "tiles", "data-group": group.id }, tiles, admin && !tiles.length && h("p", { class: "muted small drop-hint" }, t("home.emptyGroup"))));
+  if (admin) {
+    head.classList.add("handle");
+    head.addEventListener("pointerdown", (e) => dragStart(e, "group:" + group.id, WIDGET_DRAG, block));
+  }
+  return block;
+}
+
+/**
+ * Where every block stands. The server keeps this whole; a change made here a moment ago (a new group,
+ * a removed one) is not through it yet, so the same rule is applied: a group named nowhere joins the main
+ * column, a name without a group is skipped.
+ */
+function blockPlaces(layout) {
+  const groups = new Set(layout.groups.map((group) => "group:" + group.id));
+  const seen = new Set();
+  const places = {};
+  for (const name of ZONES) places[name] = (layout.widgets[name] ?? []).filter((id) => (groups.has(id) || id in homeUi.widgets) && !seen.has(id) && seen.add(id));
+  for (const id of groups) if (!seen.has(id)) places.main.push(id);
+  return places;
 }
 
 // --- A folder of tiles, opened ----------------------------------------------------------------------
@@ -1237,21 +1235,10 @@ function besideBlock(drag, selector, name) {
   return { el: over, cls: above ? "drop-above" : "drop-below", [above ? "before" : "after"]: over.dataset[name] };
 }
 
-/** A group is moved among the groups */
-const GROUP_DRAG = {
-  name: "group",
-  ignore: "button, a, input",
-  find: (drag) => besideBlock(drag, ".group[data-group-id]", "groupId"),
-  drop: (drag, target) =>
-    changeLayout((layout) => {
-      const [group] = layout.groups.splice(layout.groups.findIndex((g) => g.id === drag.key), 1);
-      const at = layout.groups.findIndex((g) => g.id === (target.before ?? target.after));
-      if (!group || at < 0) return false;
-      layout.groups.splice(at + (target.after ? 1 : 0), 0, group);
-    }),
-};
-
-/** A block — the system's numbers, what needs attention, the activity — is moved among the blocks and the places for them */
+/**
+ * A block — the system's numbers, what needs attention, the activity, a group of tiles — is moved among
+ * the blocks and the places for them
+ */
 const WIDGET_DRAG = {
   name: "widget",
   ignore: "button, a, input",
@@ -1265,7 +1252,7 @@ const WIDGET_DRAG = {
   },
   drop: (drag, target) =>
     changeLayout((layout) => {
-      const zones = layout.widgets;
+      const zones = (layout.widgets = blockPlaces(layout));
       for (const zone of Object.values(zones)) if (zone.includes(drag.key)) zone.splice(zone.indexOf(drag.key), 1);
       const beside = target.before ?? target.after;
       const zone = beside ? Object.values(zones).find((list) => list.includes(beside)) : zones[target.zone];
@@ -1390,7 +1377,7 @@ function renderHome() {
     el.classList.add("widget");
     el.dataset.widget = id;
     // the numbers are dragged by any part of them; a list with text to read and select, by its heading
-    el.addEventListener("pointerdown", (e) => isAdmin() && (id === "stats" || e.target.closest(".section-head")) && dragStart(e, id, WIDGET_DRAG));
+    el.addEventListener("pointerdown", (e) => isAdmin() && (id === "stats" || e.target.closest(".section-head")) && dragStart(e, id, WIDGET_DRAG, el));
     return el;
   };
   // the blocks are made once and then only moved and refilled: the numbers of the system live in one of them
@@ -1399,11 +1386,11 @@ function renderHome() {
     attention: widget("attention", h("section", { class: "card pad" })),
     activity: widget("activity", h("section", { class: "pad-x loose" })),
   };
-  const zone = (name, tag = "div") => h(tag, { class: "zone" + (name === "side" ? " side" : ""), id: "zone-" + name, "data-zone": name });
+  const zone = (name, tag = "div") => h(tag, { class: "zone" + (name === "side" || name === "left" ? " side" : ""), id: "zone-" + name, "data-zone": name });
   shell(
     h("div", { class: "page-head" }, h("div", null, h("h1", null, greeting), h("p", { class: "meta", id: "host" }, " ")), h("div", { class: "counts", id: "counts" })),
     zone("top"),
-    h("div", { class: "columns", id: "home-columns" }, h("section", { id: "home-apps" }), zone("side", "aside")),
+    h("div", { class: "columns three", id: "home-columns" }, zone("left", "aside"), zone("main", "section"), zone("side", "aside")),
     zone("bottom"),
   );
   renderHomeBody();
@@ -1411,40 +1398,43 @@ function renderHome() {
 
 function renderHomeBody() {
   const o = state.overview;
-  const appsBox = document.getElementById("home-apps");
-  if (!o || !appsBox || !homeUi.widgets) return;
+  if (!o || !homeUi.widgets || !document.getElementById("zone-main")) return;
   const apps = o.apps;
 
   const count = (st) => apps.filter((a) => appState(a) === st).length;
   const counts = [["running", count("running")], ["restarting", count("restarting")], ["partial", count("partial")], ["stopped", count("stopped")]].filter(([, n]) => n > 0);
   document.getElementById("counts")?.replaceChildren(...counts.map(([st, n]) => h("span", { class: "count" }, h("i", { class: "dot " + st }), t("home.count." + st, { n }))));
 
-  // a tile in the air belongs to the page as it is; the news is drawn when it lands
+  put(homeUi.widgets.attention, h("div", { class: "section-head" }, h("h2", null, t("attention.title"), o.attention.length > 0 && h("span", { class: "pill" }, o.attention.length))), o.attention.length ? o.attention.map(attentionItem) : h("p", { class: "all-good" }, icon("check", "ok"), t("attention.none")));
+  put(homeUi.widgets.activity, h("div", { class: "section-head" }, h("h2", null, t("activity.title"))), o.activity.length ? o.activity.map(activityItem) : h("p", { class: "muted small" }, t("activity.none")));
+  // something in the air belongs to the page as it is; the news is drawn when it lands
   if (homeUi.drag?.active) homeUi.stale = true;
   else {
     homeUi.stale = false;
-    renderDashboard(appsBox);
+    placeBlocks();
+    renderFolder();
   }
-
-  put(homeUi.widgets.attention, h("div", { class: "section-head" }, h("h2", null, t("attention.title"), o.attention.length > 0 && h("span", { class: "pill" }, o.attention.length))), o.attention.length ? o.attention.map(attentionItem) : h("p", { class: "all-good" }, icon("check", "ok"), t("attention.none")));
-  put(homeUi.widgets.activity, h("div", { class: "section-head" }, h("h2", null, t("activity.title"))), o.activity.length ? o.activity.map(activityItem) : h("p", { class: "muted small" }, t("activity.none")));
-  if (!homeUi.drag?.active) placeWidgets();
   renderSystem();
 }
 
+const ZONES = ["top", "left", "main", "side", "bottom"];
+
 /** Puts every block into its place; a place with nothing in it shows only while a block is in the air */
-function placeWidgets() {
-  for (const [name, ids] of Object.entries(state.overview.dashboard.widgets)) {
+function placeBlocks() {
+  const layout = state.overview.dashboard;
+  const places = blockPlaces(layout);
+  for (const name of ZONES) {
     const zone = document.getElementById("zone-" + name);
     if (!zone) continue;
-    const blocks = ids.map((id) => homeUi.widgets[id]).filter(Boolean);
-    // only what changed is moved: a block taken out and put back would lose its scroll and focus
-    if (blocks.length !== zone.children.length || blocks.some((block, i) => zone.children[i] !== block)) zone.replaceChildren(...blocks);
+    const blocks = places[name].map((id) => homeUi.widgets[id] ?? groupBlock(layout.groups.find((group) => "group:" + group.id === id), layout.groups.findIndex((group) => "group:" + group.id === id))).filter(Boolean);
+    zone.replaceChildren(...blocks);
     zone.classList.toggle("empty", !blocks.length);
     zone.classList.toggle("movable", isAdmin());
     zone.dataset.hint = t("home.dropBlock");
   }
-  document.getElementById("home-columns")?.classList.toggle("no-side", !state.overview.dashboard.widgets.side.length);
+  // a side column with nothing in it gives its room to the others
+  const columns = document.getElementById("home-columns");
+  for (const name of ["left", "main", "side"]) columns?.classList.toggle("no-" + name, !document.getElementById("zone-" + name)?.children.length);
 }
 
 // --- App page -----------------------------------------------------------------------------------
