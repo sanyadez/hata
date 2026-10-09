@@ -1133,7 +1133,7 @@ function renderBackupsBody() {
       },
       h("h2", null, t("backup.schedule")),
       h("label", { class: "check" }, enabled, h("span", null, h("strong", null, t("backup.enable")), h("span", { class: "muted small block" }, t("backup.enableHint")))),
-      h("div", { class: "pair" }, field(t("backup.time"), time, b.timezone), field(t("backup.keep"), keep)),
+      h("div", { class: "field-row" }, field(`${t("backup.time")} · ${b.timezone}`, time), field(t("backup.keep"), keep)),
       field(t("backup.dir"), dir, t("backup.dirHint")),
       h("label", { class: "check" }, beforeUpdate, h("span", null, h("strong", null, t("backup.beforeUpdate")), h("span", { class: "muted small block" }, t("backup.beforeUpdateHint")))),
       error,

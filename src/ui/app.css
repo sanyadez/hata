@@ -149,6 +149,9 @@ textarea.code.page { min-height: 60dvh; background: var(--surface); padding: 16p
 .field .label { color: var(--muted); font-size: 12px; }
 .hint { color: var(--faint); font-size: 12px; }
 .pair { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+/* fields side by side: labels on one line, inputs on the next, whatever the label lengths */
+.field-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: end; }
+.field-row input { width: 100%; }
 .check { display: flex; gap: 10px; align-items: flex-start; overflow-wrap: anywhere; }
 
 .chip { display: inline-flex; align-items: center; gap: 4px; height: 24px; padding: 0 10px; border-radius: var(--radius-sm); border: 1px solid var(--border-strong); font-size: 12px; font-weight: 600; white-space: nowrap; }
