@@ -22,6 +22,8 @@ Early development. What works today:
   the app, the small button next to it leads to its page in Hata;
 - terminal in the browser, for administrators: a shell on the server (it keeps running when the page is
   closed and shows the latest output when you come back) and a shell inside a container of an app;
+- the look is yours as well: accent and background colours (a light background turns the page light), a
+  background picture — one of the built-in ones or your own;
 - app store: reads the CasaOS store (`x-casaos`), search and categories, a form for ports, folders and
   variables, install with live progress;
 - custom apps: paste any compose file;

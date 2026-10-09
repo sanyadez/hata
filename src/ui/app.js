@@ -191,6 +191,33 @@ const button = (label, attrs = {}, iconName) => h("button", { type: "button", ..
 const closeButton = (dialog, label = t("common.close")) => button(label, { onclick: () => dialog().close() });
 const closeX = (dialog) => h("button", { type: "button", class: "icon-btn", "aria-label": t("common.close"), onclick: () => dialog().close() }, icon("x"));
 
+// --- The look: colours and the background picture chosen in the settings -------------------------
+
+/** How light a `#rrggbb` colour is to the eye, 0–1 */
+function lightness(hex) {
+  const [r, g, b] = [1, 3, 5].map((at) => parseInt(hex.slice(at, at + 2), 16) / 255).map((c) => (c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4));
+  return 0.2126 * r + 0.7152 * g + 0.0722 * b;
+}
+
+const wallpaperUrl = (look, name = look.wallpaper) => (name === "custom" ? `/api/wallpaper?v=${look.stamp}` : name ? `/wallpapers/${name}.svg` : "");
+
+function applyAppearance(look) {
+  const root = document.documentElement;
+  const set = (name, value) => (value ? root.style.setProperty(name, value) : root.style.removeProperty(name));
+  set("--accent", look?.accent);
+  // text on the accent colour is dark or white, whichever reads
+  set("--on-accent", look?.accent && (lightness(look.accent) > 0.4 ? "#1a1206" : "#ffffff"));
+  root.toggleAttribute("data-accent", !!look?.accent);
+  set("--bg", look?.background);
+  // a colour of the user's decides between the light and the dark set; without one the system does
+  root.style.colorScheme = look?.background ? (lightness(look.background) > 0.35 ? "light" : "dark") : "";
+  root.toggleAttribute("data-bg", !!look?.background);
+  const picture = look ? wallpaperUrl(look) : "";
+  set("--wallpaper", picture && `url("${picture}")`);
+  set("--wallpaper-dim", picture && look.dim + "%");
+  root.classList.toggle("has-wallpaper", !!picture);
+}
+
 // --- State --------------------------------------------------------------------------------------
 
 const state = {
@@ -2983,6 +3010,7 @@ const LANGUAGE_NAMES = { en: "English", uk: "Українська" };
 const SECTIONS = [
   { id: "account", icon: "user" },
   { id: "general", icon: "sliders" },
+  { id: "appearance", icon: "image", admin: true },
   { id: "apps", icon: "grid", admin: true },
   { id: "stores", icon: "store", admin: true },
   { id: "https", icon: "lock", admin: true },
@@ -3069,6 +3097,7 @@ function settingsSection(section) {
   };
 
   if (section === "account") return accountSection();
+  if (section === "appearance") return appearanceSection(error);
   if (section === "general") {
     const language = h(
       "select",
@@ -3141,6 +3170,79 @@ function settingsSection(section) {
 
 const HTTPS_MODES = ["off", "proxy", "acme"];
 /** Settings → HTTPS and domain: how Hata is reached */
+const ACCENTS = ["#f5a524", "#ec6a5e", "#e0559a", "#9b6cf0", "#4f8ff7", "#22b8cf", "#3fbf7f", "#a3b82e"];
+const BACKGROUNDS = ["#131110", "#0e1116", "#0f1a17", "#17121c", "#1a1212", "#000000", "#f6f3ef", "#eef2f6"];
+
+function appearanceSection(error) {
+  const look = state.settings.appearance;
+  /** Shows the change at once and saves it; a refused one is taken back */
+  const change = async (patch, redraw = true) => {
+    const before = state.settings.appearance;
+    state.settings.appearance = state.appearance = { ...before, ...patch };
+    applyAppearance(state.appearance);
+    if (redraw) renderSettings();
+    try {
+      state.settings = await api("PUT", "/api/settings", { appearance: patch });
+      state.appearance = state.settings.appearance;
+    } catch (e) {
+      state.settings.appearance = state.appearance = before;
+      applyAppearance(before);
+      renderSettings();
+      toast(errorText(e), "error");
+    }
+  };
+  const colours = (key, presets, fallback) => {
+    const current = look[key];
+    const custom = h("input", { type: "color", value: current || fallback, title: t("appearance.custom"), "aria-label": t("appearance.custom"), oninput: () => applyAppearance({ ...state.appearance, [key]: custom.value }), onchange: () => change({ [key]: custom.value }) });
+    return h(
+      "div",
+      { class: "swatches" },
+      presets.map((colour, i) => {
+        // the first one is Hata's own: choosing it means "no colour of mine"
+        const on = i === 0 ? !current : current === colour;
+        const swatch = h("button", { type: "button", class: "swatch" + (on ? " on" : ""), title: i === 0 ? t("appearance.default") : colour, "aria-label": i === 0 ? t("appearance.default") : colour, "aria-pressed": String(on), onclick: () => change({ [key]: i === 0 ? "" : colour }) });
+        swatch.style.background = colour;
+        return swatch;
+      }),
+      custom,
+    );
+  };
+  const wall = (name, label) =>
+    h("button", { type: "button", class: "wall" + (look.wallpaper === name ? " on" : ""), "aria-pressed": String(look.wallpaper === name), onclick: () => change({ wallpaper: name }) }, name && h("img", { src: wallpaperUrl(look, name), alt: "", loading: "lazy" }), h("span", null, label));
+  const file = h("input", {
+    type: "file",
+    accept: "image/jpeg,image/png,image/webp,image/avif",
+    hidden: true,
+    onchange: async () => {
+      const picture = file.files[0];
+      if (!picture) return;
+      error.textContent = "";
+      try {
+        const res = await fetch("/api/appearance/wallpaper", { method: "PUT", body: picture, headers: { "content-type": "application/octet-stream" } });
+        const data = await res.json().catch(() => null);
+        if (!res.ok) throw new ApiError(res.status, data?.error?.code ?? "request.failed", data?.error?.detail ?? {});
+        state.settings = data;
+        applyAppearance((state.appearance = data.appearance));
+        renderSettings();
+      } catch (e) {
+        error.textContent = errorText(e);
+      }
+    },
+  });
+  const dim = h("input", { type: "range", min: 0, max: 90, step: 5, value: look.dim, "aria-label": t("appearance.dim"), oninput: () => applyAppearance({ ...state.appearance, dim: Number(dim.value) }), onchange: () => change({ dim: Number(dim.value) }, false) });
+  return [
+    h("section", { class: "card pad" }, h("h2", null, t("appearance.colours")), settingRow(t("appearance.accent"), t("appearance.accentHint"), colours("accent", ACCENTS, ACCENTS[0])), settingRow(t("appearance.background"), t("appearance.backgroundHint"), colours("background", BACKGROUNDS, BACKGROUNDS[0]))),
+    h(
+      "section",
+      { class: "card pad" },
+      h("h2", null, t("appearance.picture")),
+      h("div", { class: "walls" }, wall("", t("appearance.none")), state.wallpapers.map((name) => wall(name, t("appearance.wall." + name))), look.custom && wall("custom", t("appearance.yours")), h("button", { type: "button", class: "wall add", onclick: () => file.click() }, h("span", null, icon("upload"), " ", t(look.custom ? "appearance.replace" : "appearance.upload"))), file),
+      look.wallpaper && settingRow(t("appearance.dim"), t("appearance.dimHint"), dim),
+      error,
+    ),
+  ];
+}
+
 function httpsSection(save, error) {
   const https = state.settings.https;
   const mode = h("select", null, HTTPS_MODES.map((id) => h("option", { value: id, selected: https.mode === id }, t("https.mode." + id))));
@@ -3729,6 +3831,8 @@ async function main() {
     $app.replaceChildren(h("main", { class: "center" }, h("p", { class: "banner" }, t("error.network"))));
     return setTimeout(main, 3000);
   }
+  applyAppearance((state.appearance = server.appearance ?? null));
+  state.wallpapers = server.wallpapers ?? [];
   Object.assign(state, { version: server.version, setup: server.setup, user: server.user, languages: server.languages, passkeys: !!server.passkeys && !!window.PublicKeyCredential });
   await loadLanguage(pickLanguage(server));
   if (state.user) await enter();

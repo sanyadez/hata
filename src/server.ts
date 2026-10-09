@@ -8,6 +8,7 @@
  * - a request that changes something must come from this origin (CSRF) and carry JSON.
  */
 import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { homedir, networkInterfaces } from "node:os";
 import type { Server, ServerWebSocket } from "bun";
 import { recent, record } from "./activity";
@@ -69,6 +70,7 @@ import { accessOf, dropAccess, dropUser, gateTarget, guard, mayOpen, MAX_APP_BOD
 import { appHost, appLabel, classifyHost, clientIp, cookieDomain, requestHost, requestProto, siteDomain } from "./site";
 import { newChallenge, PASSKEY_ALGORITHMS, spendChallenge, verifyAssertion, verifyRegistration } from "./passkey";
 import { qrMatrix } from "./qr";
+import { IMAGE_MIME, imageType, wallpaperSvg, WALLPAPERS } from "./wallpapers";
 import { containerCommand, shellCommand, TerminalError, TerminalManager, terminalEnv, type TerminalClient, type TerminalStart } from "./terminal";
 import { ARCH, catalogue, scheduleStoreSync, syncStore } from "./store";
 import { startSampler, systemStatus } from "./system";
@@ -128,6 +130,7 @@ const STATIC: Record<string, { body: string; type: string; headers?: Record<stri
   "/vendor/xterm.js": { body: xtermJs, type: "text/javascript; charset=utf-8" },
   "/vendor/xterm-addon-fit.js": { body: xtermFit, type: "text/javascript; charset=utf-8" },
   "/vendor/xterm.css": { body: xtermCss, type: "text/css; charset=utf-8" },
+  ...Object.fromEntries(WALLPAPERS.map((id) => [`/wallpapers/${id}.svg`, { body: wallpaperSvg(id)!, type: "image/svg+xml" }])),
   "/logo.svg": { body: logoSvg, type: "image/svg+xml" },
   "/favicon.ico": { body: logoSvg, type: "image/svg+xml" },
   "/manifest.webmanifest": { body: MANIFEST, type: "application/manifest+json; charset=utf-8" },
@@ -267,6 +270,10 @@ function events(req: Request, server: Server, admin: boolean): Response {
   });
 }
 
+/** The background picture an administrator uploaded */
+const WALLPAPER_FILE = join(DATA_DIR, "wallpaper");
+const MAX_WALLPAPER = 12 * 1024 * 1024;
+
 // --- Terminals --------------------------------------------------------------------------------------
 
 const terminals = new TerminalManager();
@@ -364,7 +371,7 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
   if (write && !sameOrigin(req, url)) return fail(403, "request.crossSite");
   const ip = clientIp(req, server);
   // the API takes small JSON bodies; the server's own limit is the apps' (they upload files through it)
-  if (write && path !== "/api/files/upload" && Number(req.headers.get("content-length") ?? 0) > MAX_API_BODY) return fail(413, "request.tooLarge");
+  if (write && path !== "/api/files/upload" && path !== "/api/appearance/wallpaper" && Number(req.headers.get("content-length") ?? 0) > MAX_API_BODY) return fail(413, "request.tooLarge");
   const cookie = (token: string) => sessionCookie(token, requestProto(req) === "https", cookieDomain(requestHost(req)));
   const client = { ip, userAgent: req.headers.get("user-agent") ?? "" };
 
@@ -377,7 +384,18 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
       language: settings.language,
       languages: Object.keys(LANGUAGES),
       passkeys: passkeyDomain(req) !== "",
+      // the sign-in page looks like the rest
+      appearance: settings.appearance,
+      wallpapers: WALLPAPERS,
     });
+  }
+
+  // the uploaded background: part of the look, shown before sign-in as well
+  if (path === "/api/wallpaper" && method === "GET") {
+    const kind = settings.appearance.custom;
+    const file = kind ? Bun.file(WALLPAPER_FILE) : null;
+    if (!kind || !file || !(await file.exists())) return fail(404, "request.notFound");
+    return new Response(file, { headers: { ...SECURITY_HEADERS, "content-type": IMAGE_MIME[kind], "cache-control": "public, max-age=31536000, immutable" } });
   }
 
   if (path === "/api/setup" && method === "POST") {
@@ -614,6 +632,19 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
   if (path === "/api/terminal" && method === "DELETE") {
     const key = url.searchParams.get("key") ?? "";
     return json({ closed: terminals.kill(key) });
+  }
+
+  if (path === "/api/appearance/wallpaper" && method === "PUT") {
+    // without a stated length there is no telling how much is coming
+    if (!(Number(req.headers.get("content-length")) <= MAX_WALLPAPER)) return fail(413, "appearance.tooLarge", { max: MAX_WALLPAPER / 1024 / 1024 });
+    const bytes = new Uint8Array(await req.arrayBuffer());
+    if (bytes.length > MAX_WALLPAPER) return fail(413, "appearance.tooLarge", { max: MAX_WALLPAPER / 1024 / 1024 });
+    const kind = imageType(bytes.subarray(0, 16));
+    if (!kind) return fail(400, "appearance.notImage");
+    await Bun.write(WALLPAPER_FILE, bytes);
+    settings.appearance = { ...settings.appearance, custom: kind, stamp: Date.now(), wallpaper: "custom" };
+    saveSettings();
+    return json(publicSettings());
   }
 
   if (path === "/api/dashboard" && method === "PUT") {

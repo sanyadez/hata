@@ -6,6 +6,7 @@ import { mkdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { cleanLayout, type Layout } from "./dashboard";
+import { changeAppearance, cleanAppearance, DEFAULT_APPEARANCE, type Appearance } from "./wallpapers";
 import { isPlainObject, readJsonFile, writeJsonAtomic } from "./fsutil";
 import { COMPILED } from "./version";
 
@@ -51,6 +52,8 @@ export interface Settings {
   folders: string[];
   /** How the dashboard is arranged: groups, links, folders of tiles */
   dashboard: Layout;
+  /** Colours and the background picture of the UI */
+  appearance: Appearance;
 }
 
 export interface HttpsSettings {
@@ -105,6 +108,7 @@ const DEFAULTS: Settings = {
   https: { mode: "off", domain: "", email: "" },
   folders: [],
   dashboard: { groups: [] },
+  appearance: DEFAULT_APPEARANCE,
 };
 
 const saved = readJsonFile<Partial<Settings>>(SETTINGS_FILE, {}, isPlainObject);
@@ -117,6 +121,7 @@ export const settings: Settings = {
   access: isPlainObject(saved.access) ? (saved.access as Record<string, AppAccess>) : {},
   folders: Array.isArray(saved.folders) ? saved.folders.filter((path): path is string => typeof path === "string") : [],
   dashboard: cleanLayout(saved.dashboard),
+  appearance: cleanAppearance(saved.appearance),
   https: { ...DEFAULTS.https, ...(isPlainObject(saved.https) ? saved.https : {}) },
 };
 
@@ -206,6 +211,11 @@ export function updateSettings(patch: Record<string, unknown>): string | null {
     }
     if (https.mode !== "off" && !https.domain) return "settings.needDomain";
     next.https = https;
+  }
+  if ("appearance" in patch) {
+    const appearance = isPlainObject(patch.appearance) ? changeAppearance(next.appearance, patch.appearance) : null;
+    if (!appearance) return "settings.badAppearance";
+    next.appearance = appearance;
   }
   if ("language" in patch) {
     if (typeof patch.language !== "string" || !/^[a-z]{2}$/.test(patch.language)) return "settings.badLanguage";
