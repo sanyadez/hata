@@ -14,12 +14,14 @@ Early development. What works today:
 - one-line move from CasaOS: its apps are taken over where they are, with an undo;
 - first run creates the administrator — there are no default credentials, and the setup needs a code
   that only the server's console shows;
-- dashboard: CPU, memory, disk, network, temperature, app tiles with live state;
+- dashboard: CPU, memory, disk, network and temperature with history, app tiles with live state, a
+  "needs attention" list (an app that keeps restarting, a failed install or update, a disk filling up) and
+  recent activity;
 - app store: reads the CasaOS store (`x-casaos`), search and categories, a form for ports, folders and
   variables, install with live progress;
 - custom apps: paste any compose file;
-- per app: start, stop, restart, image update, live logs, editing the compose file, removal with or
-  without data;
+- per app, on its own page: start, stop, restart, image update, CPU and memory per container, live logs,
+  editing the compose file, removal with or without data;
 - English and Ukrainian UI, light and dark, phone-friendly.
 
 Not there yet: reverse proxy and HTTPS, more users and 2FA, backups, import of containers that have no

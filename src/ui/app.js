@@ -22,9 +22,60 @@ function h(tag, attrs, ...children) {
   return el;
 }
 
+// Line icons on a 24×24 grid, drawn for this UI.
+const ICONS = {
+  home: "M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z",
+  grid: "M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z",
+  sliders: "M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1M15 4v4M9 10v4M17 16v4",
+  search: "M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM20 20l-4-4",
+  cpu: "M7 7h10v10H7zM10 3v4M14 3v4M10 17v4M14 17v4M3 10h4M3 14h4M17 10h4M17 14h4",
+  memory: "M3 8h18v8H3zM7 16v3M12 16v3M17 16v3M7 11v2M12 11v2M17 11v2",
+  disk: "M4 13h16v6H4zM4 13l3-8h10l3 8M8 16h.01M12 16h.01",
+  network: "M8 4v14M8 18l-3-3M8 18l3-3M16 20V6M16 6l-3 3M16 6l3 3",
+  temp: "M12 3a2 2 0 0 0-2 2v9.5a4 4 0 1 0 4 0V5a2 2 0 0 0-2-2z",
+  plus: "M12 5v14M5 12h14",
+  external: "M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5",
+  refresh: "M20 11a8 8 0 0 0-14.9-3M4 5v3h3M4 13a8 8 0 0 0 14.9 3M20 19v-3h-3",
+  stop: "M6 6h12v12H6z",
+  play: "M7 5l12 7-12 7z",
+  more: "M5 12h.01M12 12h.01M19 12h.01",
+  logs: "M6 3h9l4 4v14H6zM14 3v5h5M9 13h7M9 17h7",
+  code: "M9 8l-4 4 4 4M15 8l4 4-4 4",
+  trash: "M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 11v6M14 11v6",
+  check: "M5 12l5 5 9-10",
+  alert: "M12 4l9 16H3zM12 10v4M12 17h.01",
+  x: "M6 6l12 12M18 6L6 18",
+  arrow: "M5 12h14M13 6l6 6-6 6",
+  up: "M12 19V5M6 11l6-6 6 6",
+  box: "M12 3l8 4.5v9L12 21l-8-4.5v-9zM4 7.5l8 4.5 8-4.5M12 12v9",
+  user: "M12 12a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM4 21a8 8 0 0 1 16 0",
+  folder: "M3 6h6l2 2h10v11H3z",
+  download: "M12 4v11M7 11l5 5 5-5M5 20h14",
+  signin: "M14 4h5v16h-5M4 12h11M11 8l4 4-4 4",
+  signout: "M10 4H5v16h5M20 12H9M16 8l4 4-4 4",
+  chevron: "M9 6l6 6-6 6",
+  info: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 11v5M12 8h.01",
+  globe: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM3 12h18M12 3c3 3.5 3 14.5 0 18M12 3c-3 3.5-3 14.5 0 18",
+  terminal: "M5 8l4 4-4 4M12 16h7",
+  store: "M5 8h14l-1 12H6zM9 8V6a3 3 0 0 1 6 0v2",
+};
+
+const SVG_NS = "http://www.w3.org/2000/svg";
+function icon(name, className = "") {
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("class", "ico " + className);
+  svg.setAttribute("aria-hidden", "true");
+  const path = document.createElementNS(SVG_NS, "path");
+  path.setAttribute("d", ICONS[name] ?? ICONS.box);
+  svg.append(path);
+  return svg;
+}
+
 let dict = {};
 let fallbackDict = {};
 
+const has = (key) => key in dict || key in fallbackDict;
 function t(key, vars = {}) {
   const text = dict[key] ?? fallbackDict[key] ?? key;
   return text.replace(/\{(\w+)\}/g, (_, name) => (name in vars ? vars[name] : ""));
@@ -42,7 +93,7 @@ class ApiError extends Error {
 function errorText(e) {
   if (!(e instanceof ApiError)) return t("error.network");
   const key = "error." + e.code;
-  return key in dict || key in fallbackDict ? t(key, e.detail).trim() : e.detail.message || e.code;
+  return has(key) ? t(key, e.detail).trim() : e.detail.message || e.code;
 }
 
 async function api(method, path, data) {
@@ -86,11 +137,25 @@ function bytes(n) {
   return (i === 0 || n >= 100 ? Math.round(n) : n.toFixed(1)) + " " + UNITS[i];
 }
 
+/** A number and its unit apart, for the big figures of the status strip */
+function bytesParts(n) {
+  const [value, unit] = bytes(n).split(" ");
+  return { value, unit };
+}
+
 function duration(seconds) {
   const d = Math.floor(seconds / 86400);
   const hrs = Math.floor((seconds % 86400) / 3600);
   const min = Math.floor((seconds % 3600) / 60);
-  return d ? `${d}d ${hrs}h` : hrs ? `${hrs}h ${min}m` : `${min}m`;
+  return d ? t("time.days", { n: d }) : hrs ? t("time.hours", { n: hrs }) + " " + t("time.minutes", { n: min }) : t("time.minutes", { n: min });
+}
+
+function ago(ts) {
+  const seconds = Math.max(0, Math.floor((Date.now() - ts) / 1000));
+  if (seconds < 60) return t("time.now");
+  if (seconds < 3600) return t("time.ago", { time: t("time.minutes", { n: Math.floor(seconds / 60) }) });
+  if (seconds < 86400) return t("time.ago", { time: t("time.hours", { n: Math.floor(seconds / 3600) }) });
+  return new Date(ts).toLocaleDateString(state.lang, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
 }
 
 /** Opens a modal dialog; it is removed from the page when closed */
@@ -106,7 +171,9 @@ function openDialog(className, ...content) {
   return dialog;
 }
 
-const closeButton = (dialog, label = t("common.close")) => h("button", { type: "button", class: "ghost", onclick: () => dialog().close() }, label);
+const button = (label, attrs = {}, iconName) => h("button", { type: "button", ...attrs, class: "btn " + (attrs.class ?? "") }, iconName && icon(iconName), label && h("span", null, label));
+const closeButton = (dialog, label = t("common.close")) => button(label, { onclick: () => dialog().close() });
+const closeX = (dialog) => h("button", { type: "button", class: "icon-btn", "aria-label": t("common.close"), onclick: () => dialog().close() }, icon("x"));
 
 // --- State --------------------------------------------------------------------------------------
 
@@ -116,11 +183,12 @@ const state = {
   user: null,
   lang: "en",
   languages: ["en"],
-  view: "home",
+  route: { view: "home" },
   overview: null,
   store: null,
   storeFilter: { query: "", category: "" },
   settings: null,
+  app: null,
 };
 
 async function loadLanguage(lang) {
@@ -137,6 +205,42 @@ function pickLanguage(server) {
   return [saved, browser, server.language, "en"].find((l) => l && server.languages.includes(l));
 }
 
+// --- Routes -------------------------------------------------------------------------------------
+// The address after `#` is the view: #/ · #/store · #/apps/<name>/<tab> · #/settings/<section>
+
+function parseRoute() {
+  const parts = location.hash.replace(/^#\/?/, "").split("/").filter(Boolean).map(decodeURIComponent);
+  if (parts[0] === "store") return { view: "store" };
+  if (parts[0] === "apps" && parts[1]) return { view: "app", name: parts[1], tab: ["logs", "compose"].includes(parts[2]) ? parts[2] : "overview" };
+  if (parts[0] === "settings") return { view: "settings", section: ["apps", "stores", "about"].includes(parts[1]) ? parts[1] : "general" };
+  return { view: "home" };
+}
+
+function go(hash) {
+  if (location.hash === hash) onRoute();
+  else location.hash = hash;
+}
+
+function onRoute() {
+  if (/^#setup=/.test(location.hash)) return;
+  leaveView();
+  state.route = parseRoute();
+  render();
+  if (!state.user) return;
+  if (state.route.view === "store") void loadStore();
+  if (state.route.view === "settings") void loadSettings();
+  if (state.route.view === "app") void loadApp();
+  window.scrollTo(0, 0);
+}
+window.addEventListener("hashchange", onRoute);
+
+/** Things a view started that must not outlive it: log streams, stats polling */
+let cleanups = [];
+function leaveView() {
+  for (const stop of cleanups) stop();
+  cleanups = [];
+}
+
 // --- Live events --------------------------------------------------------------------------------
 
 let source = null;
@@ -151,17 +255,17 @@ function startEvents() {
     if (event.type === "system" && state.overview) {
       state.overview.system = event.system;
       renderSystem();
-    } else if (event.type === "apps") {
+    } else if (event.type === "apps" || event.type === "activity") {
       clearTimeout(appsTimer);
-      appsTimer = setTimeout(refreshOverview, 150);
+      appsTimer = setTimeout(refresh, 150);
     } else if (event.type === "job") {
       for (const listener of jobListeners) listener(event);
-    } else if (event.type === "store" && state.view === "store") {
+    } else if (event.type === "store" && state.route.view === "store") {
       void loadStore();
     }
   };
   // after a reconnect anything may have changed while we were away
-  source.onopen = () => void refreshOverview();
+  source.onopen = () => void refresh();
 }
 
 function stopEvents() {
@@ -169,14 +273,17 @@ function stopEvents() {
   source = null;
 }
 
-async function refreshOverview() {
+/** Reloads what the current view shows about apps */
+async function refresh() {
   if (!state.user) return;
   try {
     state.overview = await api("GET", `/api/overview?lang=${state.lang}`);
   } catch {
     return;
   }
-  if (state.view === "home") renderHome();
+  if (state.route.view === "home") renderHomeBody();
+  if (state.route.view === "store") renderStoreList();
+  if (state.route.view === "app") void loadApp(true);
 }
 
 // --- Sign-in and setup --------------------------------------------------------------------------
@@ -192,7 +299,7 @@ function authScreen() {
   const name = h("input", { name: "name", autocomplete: "username", required: true, autocapitalize: "none", spellcheck: false });
   const password = h("input", { name: "password", type: "password", autocomplete: setup ? "new-password" : "current-password", required: true, minLength: setup ? 8 : 1 });
   const error = h("p", { class: "error", role: "alert" });
-  const submit = h("button", { class: "primary" }, t(setup ? "setup.create" : "auth.signIn"));
+  const submit = h("button", { class: "btn primary wide" }, t(setup ? "setup.create" : "auth.signIn"));
 
   const form = h(
     "form",
@@ -205,7 +312,7 @@ function authScreen() {
         try {
           const data = { name: name.value.trim(), password: password.value };
           const res = setup ? await api("POST", "/api/setup", { ...data, token: token.value.trim() }) : await api("POST", "/api/login", data);
-          history.replaceState(null, "", location.pathname);
+          history.replaceState(null, "", location.pathname + (setup ? "" : location.hash));
           state.user = res.user;
           state.setup = false;
           await enter();
@@ -215,9 +322,9 @@ function authScreen() {
         }
       },
     },
-    h("img", { class: "logo", src: "/logo.svg", alt: "" }),
+    h("div", { class: "brand big" }, h("img", { src: "/logo.svg", alt: "" }), "hata"),
     h("h1", null, t(setup ? "setup.title" : "auth.title")),
-    setup && h("p", { class: "lead" }, t("setup.lead")),
+    setup && h("p", { class: "muted" }, t("setup.lead")),
     setup && !tokenFromLink && field(t("setup.token"), token, t("setup.tokenHint")),
     field(t("auth.name"), name),
     field(t("auth.password"), password, setup && t("auth.passwordHint")),
@@ -230,86 +337,122 @@ function authScreen() {
 
 // --- Shell --------------------------------------------------------------------------------------
 
-const VIEWS = ["home", "store", "settings"];
+const NAV = [
+  { view: "home", hash: "#/", icon: "home" },
+  { view: "store", hash: "#/store", icon: "grid" },
+  { view: "settings", hash: "#/settings", icon: "sliders" },
+];
 
-function shell(content) {
-  const nav = VIEWS.map((view) =>
-    h("button", { type: "button", class: "tab" + (state.view === view ? " active" : ""), "aria-current": state.view === view ? "page" : null, onclick: () => go(view) }, t("nav." + view)),
+function navLinks(className) {
+  const current = state.route.view === "app" ? "home" : state.route.view;
+  return NAV.map((item) =>
+    h("a", { class: className + (current === item.view ? " active" : ""), href: item.hash, "aria-current": current === item.view ? "page" : null }, icon(item.icon), h("span", null, t("nav." + item.view))),
   );
+}
+
+async function signOut() {
+  await api("POST", "/api/logout", {}).catch(() => {});
+  state.user = null;
+  stopEvents();
+  leaveView();
+  render();
+}
+
+function userMenu() {
+  let dialog;
+  dialog = openDialog(
+    "menu",
+    h("header", null, h("span", { class: "avatar" }, state.user.name.slice(0, 1).toUpperCase()), h("div", null, h("h2", null, state.user.name), h("span", { class: "muted small" }, t("user.role." + state.user.role)))),
+    h("a", { class: "menu-item", href: "#/settings", onclick: () => dialog.close() }, icon("sliders"), t("nav.settings")),
+    h("button", { type: "button", class: "menu-item", onclick: () => (dialog.close(), signOut()) }, icon("signout"), t("nav.signOut")),
+  );
+}
+
+/** The search field of the header: installed apps first, then the store */
+function globalSearch() {
+  const results = h("div", { class: "search-results", hidden: true });
+  const input = h("input", { type: "search", placeholder: t("search.placeholder"), "aria-label": t("search.placeholder"), autocomplete: "off", spellcheck: false });
+  let hits = [];
+  const openHit = (hit) => {
+    input.value = "";
+    results.hidden = true;
+    input.blur();
+    if (hit.installed) go(`#/apps/${hit.name}`);
+    else {
+      go("#/store");
+      void storeDialog(hit);
+    }
+  };
+  const update = async () => {
+    const q = input.value.trim().toLowerCase();
+    if (!q) return void (results.hidden = true);
+    if (!state.store) state.store = await api("GET", `/api/store?lang=${state.lang}`).catch(() => null);
+    const match = (a) => `${a.title} ${a.name}`.toLowerCase().includes(q);
+    const installed = (state.overview?.apps ?? []).filter(match).map((a) => ({ ...a, installed: true }));
+    const names = new Set(installed.map((a) => a.name));
+    hits = [...installed, ...(state.store?.apps ?? []).filter((a) => match(a) && !names.has(a.name))].slice(0, 7);
+    results.replaceChildren(
+      ...(hits.length
+        ? hits.map((hit) => h("button", { type: "button", class: "search-hit", onmousedown: (e) => (e.preventDefault(), openHit(hit)) }, appIcon(hit, "sm"), h("span", { class: "grow" }, hit.title), h("span", { class: "muted small" }, t(hit.installed ? "search.installed" : "search.store"))))
+        : [h("p", { class: "muted small pad" }, t("store.nothing"))]),
+    );
+    results.hidden = false;
+  };
+  input.addEventListener("input", update);
+  input.addEventListener("focus", update);
+  input.addEventListener("blur", () => (results.hidden = true));
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && hits[0]) openHit(hits[0]);
+    if (e.key === "Escape") input.blur();
+  });
+  return h("div", { class: "search" }, icon("search"), input, h("kbd", null, "/"), results);
+}
+
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "/" || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName ?? "") || document.querySelector("dialog[open]")) return;
+  const input = document.querySelector(".top .search input");
+  if (input) {
+    e.preventDefault();
+    input.focus();
+  }
+});
+
+function shell(...content) {
   $app.replaceChildren(
     h(
       "header",
       { class: "top" },
-      h("a", { class: "brand", href: "/", onclick: (e) => (e.preventDefault(), go("home")) }, h("img", { src: "/logo.svg", alt: "" }), "Hata"),
-      h("nav", null, nav),
-      h(
-        "button",
-        {
-          type: "button",
-          class: "ghost signout",
-          title: state.user.name,
-          onclick: async () => {
-            await api("POST", "/api/logout", {}).catch(() => {});
-            state.user = null;
-            stopEvents();
-            render();
-          },
-        },
-        t("nav.signOut"),
-      ),
+      h("a", { class: "brand", href: "#/" }, h("img", { src: "/logo.svg", alt: "" }), "hata"),
+      h("nav", { class: "nav" }, navLinks("nav-link")),
+      h("div", { class: "top-right" }, globalSearch(), h("button", { type: "button", class: "user", onclick: userMenu }, h("span", { class: "avatar" }, state.user.name.slice(0, 1).toUpperCase()), h("span", { class: "user-name" }, state.user.name))),
     ),
     h("main", { id: "view" }, content),
+    h("nav", { class: "bottom-bar" }, navLinks("bottom-link")),
   );
-}
-
-function go(view) {
-  state.view = view;
-  render();
-  if (view === "store") void loadStore();
-  if (view === "settings") void loadSettings();
 }
 
 function render() {
   if (state.setup || !state.user) return authScreen();
-  if (state.view === "store") return renderStore();
-  if (state.view === "settings") return renderSettings();
+  const view = state.route.view;
+  if (view === "store") return renderStore();
+  if (view === "settings") return renderSettings();
+  if (view === "app") return renderApp();
   renderHome();
 }
 
-// --- Home ---------------------------------------------------------------------------------------
+// --- Apps: shared pieces ------------------------------------------------------------------------
 
-function meter(id, label) {
-  return h(
-    "section",
-    { class: "meter card", id: "meter-" + id },
-    h("div", { class: "meter-head" }, h("span", { class: "label" }, label), h("strong", { class: "value" }, "—")),
-    h("div", { class: "bar" }, h("i")),
-    h("div", { class: "hint" }, " "),
-  );
-}
+const TILE_COLORS = ["#7B5CD6", "#3B82C4", "#1D8FD1", "#2FA7C4", "#C44A3F", "#4B63B8", "#4E8A9B", "#3F9B6B", "#C4862A", "#B8612F"];
 
-function setMeter(id, value, percent, hint) {
-  const el = document.getElementById("meter-" + id);
-  if (!el) return;
-  el.querySelector(".value").textContent = value;
-  const bar = el.querySelector(".bar i");
-  bar.style.width = percent == null ? "0" : Math.min(100, Math.max(0, percent)) + "%";
-  bar.className = percent >= 90 ? "high" : percent >= 75 ? "warn" : "";
-  el.querySelector(".hint").textContent = hint || " ";
-}
-
-function renderSystem() {
-  const s = state.overview?.system;
-  if (!s) return;
-  const host = document.getElementById("host");
-  if (host) host.textContent = `${s.hostname} · ${t("sys.uptime", { time: duration(s.uptime) })}`;
-  const temp = s.temperature == null ? "" : ` · ${s.temperature}°C`;
-  setMeter("cpu", s.cpu == null ? "—" : s.cpu + "%", s.cpu, t("sys.cores", { n: s.cores }) + " · " + t("sys.load", { load: s.load[0] }) + temp);
-  const mem = s.memory;
-  setMeter("memory", mem.total ? Math.round((mem.used / mem.total) * 100) + "%" : "—", mem.total ? (mem.used / mem.total) * 100 : null, t("sys.of", { used: bytes(mem.used), total: bytes(mem.total) }));
-  const disk = s.disks[s.disks.length - 1];
-  if (disk) setMeter("disk", Math.round((disk.used / disk.total) * 100) + "%", (disk.used / disk.total) * 100, `${disk.path} · ` + t("sys.of", { used: bytes(disk.used), total: bytes(disk.total) }));
-  setMeter("network", s.net ? "↓ " + bytes(s.net.rx) + "/s" : "—", null, s.net ? "↑ " + bytes(s.net.tx) + "/s" : "");
+function appIcon(app, size = "") {
+  const title = app.title || app.name || "?";
+  let hash = 0;
+  for (const ch of app.name ?? title) hash = (hash * 31 + ch.charCodeAt(0)) >>> 0;
+  const letter = h("span", { class: `app-icon letter ${size}` }, title.slice(0, 1).toUpperCase());
+  letter.style.background = TILE_COLORS[hash % TILE_COLORS.length];
+  if (!app.icon) return letter;
+  return h("img", { class: `app-icon ${size}`, src: app.icon, alt: "", loading: "lazy", referrerPolicy: "no-referrer", onerror: (e) => e.target.replaceWith(letter) });
 }
 
 function appUrl(app) {
@@ -317,84 +460,372 @@ function appUrl(app) {
   return `${app.scheme}://${app.hostname || location.hostname}:${app.port}${app.index}`;
 }
 
-function appIcon(app) {
-  const letter = h("span", { class: "icon letter" }, (app.title || app.name).slice(0, 1).toUpperCase());
-  if (!app.icon) return letter;
-  return h("img", { class: "icon", src: app.icon, alt: "", loading: "lazy", referrerPolicy: "no-referrer", onerror: (e) => e.target.replaceWith(letter) });
+/** What the tile shows under the name: where the app answers */
+function appAddress(app) {
+  return app.port ? `${app.hostname || location.hostname}:${app.port}` : "";
+}
+
+const isUp = (app) => app.status === "running" || app.status === "partial";
+const appState = (app) => (app.job ? "busy" : app.containers?.some((c) => c.state === "restarting") ? "restarting" : app.status);
+const stateChip = (app) => h("span", { class: "state " + appState(app) }, t("status." + appState(app)));
+
+// --- Home ---------------------------------------------------------------------------------------
+
+function sparkline(values, max) {
+  const top = max ?? Math.max(1, ...values);
+  const bars = values.slice(-28).map((v, i, list) => {
+    const bar = h("i", { class: i === list.length - 1 ? "last" : "" });
+    bar.style.height = Math.max(6, Math.round((v / top) * 100)) + "%";
+    return bar;
+  });
+  return h("div", { class: "spark", "aria-hidden": "true" }, bars);
+}
+
+function statCell(id, iconName, label) {
+  return h(
+    "div",
+    { class: "stat", id: "stat-" + id },
+    h("div", { class: "stat-label" }, icon(iconName), label),
+    h("div", { class: "stat-row" }, h("div", { class: "stat-value" }, h("strong", null, "—"), h("span", { class: "unit" })), h("div", { class: "stat-chart" })),
+    h("div", { class: "stat-hint" }, " "),
+  );
+}
+
+function setStat(id, value, unit, hint, chart, level = "") {
+  const el = document.getElementById("stat-" + id);
+  if (!el) return;
+  const strong = el.querySelector("strong");
+  strong.textContent = value;
+  strong.className = level;
+  el.querySelector(".unit").textContent = unit;
+  el.querySelector(".stat-hint").textContent = hint || " ";
+  el.querySelector(".stat-chart").replaceChildren(chart ?? "");
+}
+
+const level = (percent) => (percent >= 95 ? "danger" : percent >= 85 ? "warn" : "");
+
+function renderSystem() {
+  const s = state.overview?.system;
+  if (!s || state.route.view !== "home") return;
+  const meta = document.getElementById("host");
+  if (meta) meta.replaceChildren(...[s.hostname, location.host, t("sys.uptime", { time: duration(s.uptime) }), "Hata " + state.version].flatMap((part, i) => (i ? [h("span", { class: "dot-sep" }, "·"), part] : [part])));
+
+  setStat("cpu", s.cpu == null ? "—" : String(s.cpu), "%", t("sys.cores", { n: s.cores }) + " · " + t("sys.load", { load: s.load[0] }), sparkline(s.history.cpu, 100));
+  const mem = s.memory;
+  const memPercent = mem.total ? Math.round((mem.used / mem.total) * 100) : 0;
+  const used = bytesParts(mem.used);
+  setStat("memory", used.value, used.unit, t("sys.ofPercent", { total: bytes(mem.total), percent: memPercent }), sparkline(s.history.memory, 100), level(memPercent));
+  const disk = s.disks[s.disks.length - 1];
+  if (disk) {
+    const percent = Math.round((disk.used / disk.total) * 100);
+    const fill = h("i", { class: level(percent) });
+    fill.style.width = percent + "%";
+    setStat("disk", String(percent), "%", t("sys.free", { free: bytes(disk.total - disk.used), total: bytes(disk.total) }), h("div", { class: "bar" }, fill), level(percent));
+    const label = document.querySelector("#stat-disk .stat-label");
+    if (label) label.lastChild.textContent = `${t("sys.disk")} ${disk.path}`;
+  }
+  const net = s.net ? bytesParts(s.net.rx + s.net.tx) : null;
+  setStat("network", net ? net.value : "—", net ? net.unit + "/s" : "", s.net ? `↓ ${bytes(s.net.rx)}/s · ↑ ${bytes(s.net.tx)}/s` : "", sparkline(s.history.net));
+  const temp = document.getElementById("stat-temp");
+  if (temp) temp.hidden = s.temperature == null;
+  if (s.temperature != null) setStat("temp", String(s.temperature), "°C", t("sys.cpu"), null, s.temperature >= 85 ? "warn" : "");
 }
 
 function appTile(app) {
-  const url = app.status === "running" || app.status === "partial" ? appUrl(app) : null;
-  const status = app.job ? "busy" : app.status;
-  const body = [appIcon(app), h("span", { class: "title" }, app.title), h("span", { class: "status " + status }, t("status." + status))];
+  const url = isUp(app) ? appUrl(app) : null;
+  const st = appState(app);
+  const sub = st === "running" && appAddress(app) ? appAddress(app) : t("status." + st);
   return h(
     "div",
-    { class: "tile card" },
-    url ? h("a", { class: "tile-main", href: url, target: "_blank", rel: "noopener noreferrer" }, body) : h("button", { type: "button", class: "tile-main", onclick: () => appMenu(app) }, body),
-    h("button", { type: "button", class: "more ghost", "aria-label": t("app.menu", { title: app.title }), onclick: () => appMenu(app) }, "⋯"),
+    { class: "tile " + st },
+    h("a", { class: "tile-main", href: `#/apps/${app.name}` }, appIcon(app), h("span", { class: "tile-text" }, h("span", { class: "tile-name" }, app.title), h("span", { class: "tile-sub" }, h("i", { class: "dot " + st }), sub))),
+    url && h("a", { class: "tile-open", href: url, target: "_blank", rel: "noopener noreferrer", title: t("app.open"), "aria-label": `${t("app.open")}: ${app.title}` }, icon("external")),
+  );
+}
+
+const ATTENTION_ICONS = { docker: "box", restarting: "refresh", partial: "alert", disk: "disk", memory: "memory", temperature: "temp" };
+
+function attentionItem(item) {
+  const detail = { ...item.detail, free: item.detail.free == null ? "" : bytes(item.detail.free) };
+  const base = "attention." + item.code;
+  return h(
+    "div",
+    { class: "attention-item" },
+    h("span", { class: "badge-icon " + item.severity }, icon(ATTENTION_ICONS[item.code] ?? "alert")),
+    h("div", { class: "grow" }, h("strong", null, t(base + ".title", detail)), h("p", { class: "muted small" }, t(base + ".text", detail).trim())),
+    item.app && h("a", { class: "btn small", href: `#/apps/${item.app}${item.code === "restarting" || item.code === "partial" ? "/logs" : ""}` }, t(item.code === "restarting" || item.code === "partial" ? "app.logs" : "common.open")),
+  );
+}
+
+const ACTIVITY_ICONS = { install: "download", update: "up", start: "play", stop: "stop", restart: "refresh", remove: "trash", apply: "code" };
+
+function activityItem(entry) {
+  const [group, kind, outcome] = entry.code.split(".");
+  const failed = outcome === "failed";
+  const key = "activity." + entry.code;
+  const title = state.overview?.apps.find((a) => a.name === entry.app)?.title ?? entry.app ?? "";
+  const meta = [ago(entry.ts), entry.user && group === "app" ? t("activity.by", { user: entry.user }) : null, group === "auth" ? entry.detail : null].filter(Boolean).join(" · ");
+  return h(
+    "div",
+    { class: "activity-item" },
+    icon(group === "auth" ? "signin" : failed ? "x" : (ACTIVITY_ICONS[kind] ?? "check"), failed ? "danger" : ""),
+    h("div", { class: "grow" }, h("div", null, has(key) ? t(key, { app: title, user: entry.user ?? "" }) : entry.code), h("div", { class: "muted small" }, meta), failed && entry.detail && h("div", { class: "muted small clip" }, entry.detail)),
   );
 }
 
 function renderHome() {
+  const hour = new Date().getHours();
+  const greeting = t(hour < 5 ? "home.night" : hour < 12 ? "home.morning" : hour < 18 ? "home.afternoon" : "home.evening", { name: state.user.name });
+  shell(
+    h("div", { class: "page-head" }, h("div", null, h("h1", null, greeting), h("p", { class: "meta", id: "host" }, " ")), h("div", { class: "counts", id: "counts" })),
+    h("section", { class: "stats card" }, statCell("cpu", "cpu", t("sys.cpu")), statCell("memory", "memory", t("sys.memory")), statCell("disk", "disk", t("sys.disk")), statCell("network", "network", t("sys.network")), h("div", { class: "stat", id: "stat-temp", hidden: true }, h("div", { class: "stat-label" }, icon("temp"), t("sys.temperature")), h("div", { class: "stat-row" }, h("div", { class: "stat-value" }, h("strong", null, "—"), h("span", { class: "unit" })), h("div", { class: "stat-chart" })), h("div", { class: "stat-hint" }, " "))),
+    h("div", { class: "columns" }, h("section", { id: "home-apps" }), h("aside", { class: "side", id: "home-side" })),
+  );
+  renderHomeBody();
+}
+
+function renderHomeBody() {
   const o = state.overview;
-  const apps = o?.apps ?? [];
-  shell([
-    h("p", { class: "host", id: "host" }, " "),
-    h("div", { class: "meters" }, meter("cpu", t("sys.cpu")), meter("memory", t("sys.memory")), meter("disk", t("sys.disk")), meter("network", t("sys.network"))),
-    o && !o.docker.available && h("p", { class: "banner" }, t("home.noDocker"), " ", h("small", null, o.docker.error)),
-    h("h2", null, t("home.apps")),
-    apps.length
-      ? h("div", { class: "tiles" }, apps.map(appTile))
-      : o && h("div", { class: "empty" }, h("p", null, t("home.empty")), h("button", { type: "button", class: "primary", onclick: () => go("store") }, t("home.openStore"))),
-  ]);
+  const appsBox = document.getElementById("home-apps");
+  const side = document.getElementById("home-side");
+  if (!o || !appsBox || !side) return;
+  const apps = o.apps;
+
+  const count = (st) => apps.filter((a) => appState(a) === st).length;
+  const counts = [["running", count("running")], ["restarting", count("restarting")], ["partial", count("partial")], ["stopped", count("stopped")]].filter(([, n]) => n > 0);
+  document.getElementById("counts")?.replaceChildren(...counts.map(([st, n]) => h("span", { class: "count" }, h("i", { class: "dot " + st }), t("home.count." + st, { n }))));
+
+  appsBox.replaceChildren(
+    h("div", { class: "section-head" }, h("h2", null, t("home.apps"), h("span", { class: "muted small" }, t("home.installed", { n: apps.length }))), h("a", { class: "link", href: "#/store" }, t("home.store"), icon("arrow"))),
+    h("div", { class: "tiles" }, apps.map(appTile), h("a", { class: "tile add", href: "#/store" }, h("span", { class: "tile-main" }, h("span", { class: "app-icon plus" }, icon("plus")), h("span", { class: "tile-text" }, h("span", { class: "tile-name" }, t("home.addApp")), h("span", { class: "tile-sub" }, t("home.addAppHint")))))),
+  );
+
+  side.replaceChildren(
+    h(
+      "section",
+      { class: "card pad" },
+      h("div", { class: "section-head" }, h("h2", null, t("attention.title"), o.attention.length > 0 && h("span", { class: "pill" }, o.attention.length))),
+      o.attention.length ? o.attention.map(attentionItem) : h("p", { class: "all-good" }, icon("check", "ok"), t("attention.none")),
+    ),
+    h("section", { class: "pad-x" }, h("div", { class: "section-head" }, h("h2", null, t("activity.title"))), o.activity.length ? o.activity.map(activityItem) : h("p", { class: "muted small" }, t("activity.none"))),
+  );
   renderSystem();
 }
 
-// --- App actions --------------------------------------------------------------------------------
+// --- App page -----------------------------------------------------------------------------------
 
-function appMenu(app) {
-  const url = appUrl(app);
-  const running = app.status === "running" || app.status === "partial";
-  let dialog;
-  const item = (label, action, opts = {}) =>
-    h(
-      "button",
-      {
-        type: "button",
-        class: "menu-item" + (opts.danger ? " danger" : ""),
-        disabled: opts.disabled,
-        onclick: () => {
-          dialog.close();
-          action();
-        },
-      },
-      label,
-    );
-  const act = (action) => () => startAction(app, action);
-  dialog = openDialog(
-    "menu",
-    h("header", null, appIcon(app), h("div", null, h("h2", null, app.title), h("span", { class: "status " + app.status }, t("status." + app.status)))),
-    url && running && h("a", { class: "menu-item", href: url, target: "_blank", rel: "noopener noreferrer", onclick: () => dialog.close() }, t("app.open")),
-    running ? item(t("app.stop"), act("stop"), { disabled: !!app.job }) : item(t("app.start"), act("start"), { disabled: !!app.job }),
-    item(t("app.restart"), act("restart"), { disabled: !!app.job || !running }),
-    item(t("app.update"), act("update"), { disabled: !!app.job }),
-    item(t("app.logs"), () => logsDialog(app)),
-    item(t("app.compose"), () => composeDialog(app)),
-    item(t("app.remove"), () => removeDialog(app), { danger: true, disabled: !!app.job }),
-    app.job && item(t("status.busy"), () => jobDialog(app.job.id, app.job.kind, app.title)),
-    app.containers.length > 0 &&
-      h("details", null, h("summary", null, t("app.containers")), h("ul", { class: "containers" }, app.containers.map((c) => h("li", null, h("code", null, c.name), " ", h("span", { class: "hint" }, `${c.image} · ${c.status}`))))),
-  );
+async function loadApp(quiet = false) {
+  const { name } = state.route;
+  try {
+    const [app, activity] = await Promise.all([api("GET", `/api/apps/${name}?lang=${state.lang}`), api("GET", `/api/activity?app=${name}`)]);
+    if (state.route.view !== "app" || state.route.name !== name) return;
+    const same = state.app?.name === name ? state.app : null;
+    state.app = { ...app, activity, stats: same?.stats ?? null, history: same?.history ?? { cpu: [], memory: [] } };
+  } catch (e) {
+    if (state.route.view !== "app" || state.route.name !== name) return;
+    // removed (by us a moment ago, or by hand): there is no page to show any more
+    if (e instanceof ApiError && e.status === 404) return go("#/");
+    if (!quiet) toast(errorText(e), "error");
+    return;
+  }
+  renderAppHead();
+  // the compose editor and the log console keep what the user is doing in them
+  if (!quiet || state.route.tab === "overview") renderAppTab();
+}
+
+function renderApp() {
+  if (state.app?.name !== state.route.name) state.app = null;
+  shell(h("div", { id: "app-head" }), h("div", { id: "app-tab" }));
+  if (state.app) {
+    renderAppHead();
+    renderAppTab();
+  }
 }
 
 async function startAction(app, action) {
   try {
     const res = await api("POST", `/api/apps/${app.name}/${action}`, {});
     jobDialog(res.job, action, app.title);
-    void refreshOverview();
+    void refresh();
   } catch (e) {
     toast(errorText(e), "error");
   }
+}
+
+function appMoreMenu(app) {
+  let dialog;
+  const item = (label, iconName, action, cls = "") => h("button", { type: "button", class: "menu-item " + cls, disabled: !!app.job, onclick: () => (dialog.close(), action()) }, icon(iconName), label);
+  dialog = openDialog(
+    "menu",
+    h("header", null, appIcon(app), h("div", null, h("h2", null, app.title), stateChip(app))),
+    item(t("app.update"), "up", () => startAction(app, "update")),
+    item(t("app.remove"), "trash", () => removeDialog(app), "danger"),
+  );
+}
+
+function renderAppHead() {
+  const app = state.app;
+  const head = document.getElementById("app-head");
+  if (!app || !head) return;
+  const url = isUp(app) ? appUrl(app) : null;
+  const tab = (id, iconName) => h("a", { class: "tab" + (state.route.tab === id ? " active" : ""), href: `#/apps/${app.name}${id === "overview" ? "" : "/" + id}` }, icon(iconName), t("app.tab." + id));
+  head.replaceChildren(
+    h("nav", { class: "crumbs" }, h("a", { href: "#/" }, t("home.apps")), icon("chevron"), h("span", null, app.title)),
+    h(
+      "div",
+      { class: "app-head" },
+      appIcon(app, "lg"),
+      h(
+        "div",
+        { class: "grow" },
+        h("div", { class: "app-title" }, h("h1", null, app.title), stateChip(app)),
+        h("p", { class: "meta" }, url ? h("a", { href: url, target: "_blank", rel: "noopener noreferrer" }, url.replace(/\/$/, ""), icon("external")) : null, url && h("span", { class: "dot-sep" }, "·"), t("app.containersCount", { n: app.containers.length }), app.store && h("span", { class: "dot-sep" }, "·"), app.store && t("app.fromStore", { store: app.store })),
+      ),
+      h(
+        "div",
+        { class: "actions" },
+        app.job && button(t("status.busy"), { onclick: () => jobDialog(app.job.id, app.job.kind, app.title) }, "terminal"),
+        isUp(app) && button(t("app.restart"), { disabled: !!app.job, onclick: () => startAction(app, "restart") }, "refresh"),
+        isUp(app) ? button(t("app.stop"), { disabled: !!app.job, onclick: () => startAction(app, "stop") }, "stop") : button(t("app.start"), { class: url ? "" : "primary", disabled: !!app.job, onclick: () => startAction(app, "start") }, "play"),
+        url && h("a", { class: "btn primary", href: url, target: "_blank", rel: "noopener noreferrer" }, icon("external"), h("span", null, t("app.open"))),
+        h("button", { type: "button", class: "btn square", "aria-label": t("app.more"), onclick: () => appMoreMenu(app) }, icon("more")),
+      ),
+    ),
+    h("div", { class: "tabs" }, tab("overview", "grid"), tab("logs", "logs"), tab("compose", "code")),
+  );
+}
+
+function renderAppTab() {
+  const app = state.app;
+  const box = document.getElementById("app-tab");
+  if (!app || !box) return;
+  leaveView();
+  if (state.route.tab === "logs") return appLogsTab(app, box);
+  if (state.route.tab === "compose") return appComposeTab(app, box);
+  appOverviewTab(app, box);
+}
+
+function appOverviewTab(app, box) {
+  const row = (label, value, mono) => h("div", { class: "kv" }, h("span", { class: "muted" }, label), h("span", { class: mono ? "mono" : "" }, value));
+  const statsBox = h("div", { class: "stats card three" }, statCell("app-cpu", "cpu", t("sys.cpu")), statCell("app-memory", "memory", t("sys.memory")), h("div", { class: "stat" }, h("div", { class: "stat-label" }, icon("box"), t("app.containers")), h("div", { class: "stat-row" }, h("div", { class: "stat-value" }, h("strong", null, String(app.containers.filter((c) => c.state === "running").length)), h("span", { class: "unit" }, "/ " + app.containers.length))), h("div", { class: "stat-hint" }, t("status." + app.status))));
+
+  const containerRow = (c) => {
+    const s = app.stats?.[c.name];
+    return h("tr", null, h("td", null, h("div", { class: "mono" }, c.name), h("div", { class: "muted small mono clip" }, c.image)), h("td", null, h("span", { class: "state " + (c.state === "running" ? "running" : c.state === "restarting" ? "restarting" : "stopped") }, c.status)), h("td", { class: "num" }, s ? s.cpu.toFixed(1) + " %" : "—"), h("td", { class: "num" }, s ? bytes(s.memory) : "—"), h("td", { class: "mono small" }, c.ports.join(", ") || "—"));
+  };
+
+  box.replaceChildren(
+    h(
+      "div",
+      { class: "columns" },
+      h(
+        "div",
+        { class: "stack" },
+        h("div", { class: "section-head" }, h("h2", null, t("app.resources"))),
+        statsBox,
+        h("div", { class: "section-head" }, h("h2", null, t("app.containers"))),
+        app.containers.length
+          ? h("div", { class: "card table-wrap" }, h("table", null, h("thead", null, h("tr", null, h("th", null, t("app.col.container")), h("th", null, t("app.col.state")), h("th", { class: "num" }, t("sys.cpu")), h("th", { class: "num" }, t("sys.memory")), h("th", null, t("app.col.ports")))), h("tbody", { id: "containers" }, app.containers.map(containerRow))), h("p", { class: "cmd" }, icon("terminal"), `docker compose -p ${app.name} ps`))
+          : h("p", { class: "card pad muted" }, t("app.noContainers")),
+      ),
+      h(
+        "aside",
+        { class: "side" },
+        h("section", { class: "card pad" }, h("div", { class: "section-head" }, h("h2", null, t("app.glance"))), app.port && row(t("app.address"), appAddress(app), true), row(t("app.composeFile"), app.composeFile, true), app.folders.map((f, i) => row(i ? "" : t("app.folders"), f, true)), row(t("app.source"), app.store ? t("app.fromStore", { store: app.store }) : t("app.custom")), row(t("app.installed"), new Date(app.installedAt).toLocaleDateString(state.lang, { day: "numeric", month: "short", year: "numeric" }))),
+        h("section", { class: "pad-x" }, h("div", { class: "section-head" }, h("h2", null, t("activity.title"))), app.activity.length ? app.activity.slice(0, 6).map(activityItem) : h("p", { class: "muted small" }, t("activity.none"))),
+      ),
+    ),
+  );
+
+  // per-container figures: Docker needs about a second per sample, so this is polled gently
+  const history = app.history;
+  let stopped = false;
+  const paint = () => {
+    const list = Object.values(app.stats ?? {});
+    const cpu = list.reduce((sum, s) => sum + s.cpu, 0);
+    const memory = list.reduce((sum, s) => sum + s.memory, 0);
+    const parts = bytesParts(memory);
+    setStat("app-cpu", list.length ? cpu.toFixed(1) : "—", "%", t("app.cpuHint", { n: state.overview?.system.cores ?? "" }), sparkline(history.cpu));
+    setStat("app-memory", list.length ? parts.value : "—", list.length ? parts.unit : "", state.overview ? t("app.memoryHint", { total: bytes(state.overview.system.memory.total) }) : "", sparkline(history.memory));
+    document.getElementById("containers")?.replaceChildren(...app.containers.map(containerRow));
+  };
+  const poll = async () => {
+    while (!stopped) {
+      if (isUp(app) && !document.hidden) {
+        const stats = await api("GET", `/api/apps/${app.name}/stats`).catch(() => null);
+        if (stopped) return;
+        if (stats && state.app?.name === app.name) {
+          state.app.stats = app.stats = stats;
+          const list = Object.values(stats);
+          history.cpu.push(list.reduce((sum, s) => sum + s.cpu, 0));
+          history.memory.push(list.reduce((sum, s) => sum + s.memory, 0));
+          if (history.cpu.length > 40) history.cpu.shift(), history.memory.shift();
+          paint();
+        }
+      }
+      await new Promise((r) => setTimeout(r, 3000));
+    }
+  };
+  cleanups.push(() => (stopped = true));
+  paint();
+  void poll();
+}
+
+function streamLogs(app, log, signal) {
+  return (async () => {
+    try {
+      const res = await fetch(`/api/apps/${app.name}/logs`, { signal });
+      if (!res.ok) throw new ApiError(res.status, (await res.json().catch(() => ({}))).error?.code ?? "request.failed");
+      const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        const stick = log.scrollTop + log.clientHeight >= log.scrollHeight - 8;
+        log.append(value);
+        // a chatty container must not grow the page without bound
+        if (log.textContent.length > 400_000) log.textContent = log.textContent.slice(-300_000);
+        if (stick) log.scrollTop = log.scrollHeight;
+      }
+    } catch (e) {
+      if (!signal.aborted) log.append("\n" + errorText(e));
+    }
+  })();
+}
+
+function appLogsTab(app, box) {
+  const log = h("pre", { class: "console page" });
+  const abort = new AbortController();
+  cleanups.push(() => abort.abort());
+  box.replaceChildren(h("p", { class: "cmd" }, icon("terminal"), `docker compose -p ${app.name} logs --follow --tail 200`), log);
+  void streamLogs(app, log, abort.signal);
+}
+
+async function appComposeTab(app, box) {
+  let text;
+  try {
+    text = (await api("GET", `/api/apps/${app.name}/compose`)).compose;
+  } catch (e) {
+    return box.replaceChildren(h("p", { class: "error" }, errorText(e)));
+  }
+  const area = h("textarea", { class: "code page", spellcheck: false, value: text, wrap: "off", "aria-label": "compose.yml" });
+  const error = h("p", { class: "error", role: "alert" });
+  const save = button(t("app.saveApply"), {
+    class: "primary",
+    disabled: true,
+    onclick: async () => {
+      error.textContent = "";
+      try {
+        const res = await api("PUT", `/api/apps/${app.name}/compose`, { compose: area.value });
+        text = area.value;
+        save.disabled = true;
+        jobDialog(res.job, "apply", app.title);
+      } catch (e) {
+        error.textContent = errorText(e);
+      }
+    },
+  });
+  area.addEventListener("input", () => (save.disabled = area.value === text));
+  box.replaceChildren(h("div", { class: "editor-head" }, h("div", { class: "grow" }, h("p", { class: "mono small" }, app.composeFile), h("p", { class: "muted small" }, t("app.composeLead"))), save), area, error, h("p", { class: "cmd" }, icon("terminal"), `docker compose -p ${app.name} up -d --remove-orphans`));
 }
 
 /** Shows a running operation: its console output and how it ended */
@@ -402,7 +833,7 @@ async function jobDialog(id, kind, title, onDone) {
   const log = h("pre", { class: "console" });
   const status = h("p", { class: "job-status running" }, t("job.running"));
   let dialog;
-  const close = h("button", { type: "button", class: "ghost", onclick: () => dialog.close() }, t("job.hide"));
+  const close = button(t("job.hide"), { onclick: () => dialog.close() });
 
   const append = (line) => {
     const stick = log.scrollTop + log.clientHeight >= log.scrollHeight - 8;
@@ -412,7 +843,7 @@ async function jobDialog(id, kind, title, onDone) {
   const finish = (job) => {
     status.className = "job-status " + job.status;
     status.textContent = job.status === "done" ? t("job.done") : t("job.failed");
-    close.textContent = t("common.close");
+    close.lastChild.textContent = t("common.close");
     jobListeners.delete(listener);
     if (job.status === "done") onDone?.();
   };
@@ -435,7 +866,7 @@ async function jobDialog(id, kind, title, onDone) {
   };
   jobListeners.add(listener);
 
-  dialog = openDialog("job", h("h2", null, t("job." + kind, { app: title })), log, h("footer", null, status, close));
+  dialog = openDialog("wide", h("h2", null, t("job." + kind, { app: title })), log, h("footer", null, status, close));
   dialog.addEventListener("close", () => jobListeners.delete(listener));
 
   try {
@@ -450,98 +881,31 @@ async function jobDialog(id, kind, title, onDone) {
   }
 }
 
-async function logsDialog(app) {
-  const log = h("pre", { class: "console tall" });
-  const abort = new AbortController();
-  const dialog = openDialog("job", h("h2", null, `${app.title} — ${t("app.logs")}`), log, h("footer", null, h("span"), closeButton(() => dialog)));
-  dialog.addEventListener("close", () => abort.abort());
-  try {
-    const res = await fetch(`/api/apps/${app.name}/logs`, { signal: abort.signal });
-    if (!res.ok) throw new ApiError(res.status, (await res.json().catch(() => ({}))).error?.code ?? "request.failed");
-    const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
-    for (;;) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      const stick = log.scrollTop + log.clientHeight >= log.scrollHeight - 8;
-      log.append(value);
-      // a chatty container must not grow the page without bound
-      if (log.textContent.length > 400_000) log.textContent = log.textContent.slice(-300_000);
-      if (stick) log.scrollTop = log.scrollHeight;
-    }
-  } catch (e) {
-    if (!abort.signal.aborted) log.append("\n" + errorText(e));
-  }
-}
-
-async function composeDialog(app) {
-  let text;
-  try {
-    text = (await api("GET", `/api/apps/${app.name}/compose`)).compose;
-  } catch (e) {
-    return toast(errorText(e), "error");
-  }
-  const area = h("textarea", { class: "code", spellcheck: false, value: text, wrap: "off" });
-  const error = h("p", { class: "error", role: "alert" });
-  const dialog = openDialog(
-    "wide",
-    h("h2", null, `${app.title} — compose.yml`),
-    h("p", { class: "hint" }, t("app.composeLead")),
-    area,
-    error,
-    h(
-      "footer",
-      null,
-      closeButton(() => dialog, t("common.cancel")),
-      h(
-        "button",
-        {
-          type: "button",
-          class: "primary",
-          onclick: async () => {
-            try {
-              const res = await api("PUT", `/api/apps/${app.name}/compose`, { compose: area.value });
-              dialog.close();
-              jobDialog(res.job, "apply", app.title);
-            } catch (e) {
-              error.textContent = errorText(e);
-            }
-          },
-        },
-        t("app.saveApply"),
-      ),
-    ),
-  );
-}
-
 function removeDialog(app) {
   const path = `${state.settings?.dataRoot ?? ""}/AppData/${app.name}`.replace(/^\/\//, "/");
   const withData = h("input", { type: "checkbox" });
   const dialog = openDialog(
     "confirm",
     h("h2", null, t("app.removeTitle", { title: app.title })),
-    h("p", null, t("app.removeLead")),
-    h("label", { class: "check" }, withData, t("app.removeData", { path })),
+    h("p", { class: "muted" }, t("app.removeLead")),
+    h("label", { class: "check" }, withData, h("span", null, t("app.removeData", { path }))),
+    h("p", { class: "cmd" }, icon("terminal"), `docker compose -p ${app.name} down`),
     h(
       "footer",
       null,
       closeButton(() => dialog, t("common.cancel")),
-      h(
-        "button",
-        {
-          type: "button",
-          class: "danger",
-          onclick: async () => {
-            dialog.close();
-            try {
-              const res = await api("DELETE", `/api/apps/${app.name}${withData.checked ? "?data=1" : ""}`);
-              jobDialog(res.job, "remove", app.title);
-            } catch (e) {
-              toast(errorText(e), "error");
-            }
-          },
+      button(t("app.remove"), {
+        class: "danger",
+        onclick: async () => {
+          dialog.close();
+          try {
+            const res = await api("DELETE", `/api/apps/${app.name}${withData.checked ? "?data=1" : ""}`);
+            jobDialog(res.job, "remove", app.title, () => go("#/"));
+          } catch (e) {
+            toast(errorText(e), "error");
+          }
         },
-        t("app.remove"),
-      ),
+      }),
     ),
   );
 }
@@ -554,12 +918,12 @@ async function loadStore() {
   } catch (e) {
     return toast(errorText(e), "error");
   }
-  if (state.view === "store") renderStoreList();
+  if (state.route.view === "store") renderStoreList();
 }
 
 async function syncStores() {
   toast(t("store.syncing"));
-  for (const store of state.store?.stores ?? []) {
+  for (const store of state.store?.stores ?? state.settings?.stores ?? []) {
     try {
       const res = await api("POST", `/api/store/${store.id}/sync`, {});
       toast(res.ok ? t("store.synced", { apps: res.apps }) : res.error, res.ok ? "info" : "error");
@@ -568,12 +932,12 @@ async function syncStores() {
     }
   }
   await loadStore();
+  if (state.route.view === "settings") renderSettings();
 }
 
 function renderStore() {
   const search = h("input", {
     type: "search",
-    class: "search",
     placeholder: t("store.search"),
     "aria-label": t("store.search"),
     value: state.storeFilter.query,
@@ -582,64 +946,76 @@ function renderStore() {
       renderStoreList();
     },
   });
-  shell([
-    h("div", { class: "toolbar" }, search, h("button", { type: "button", onclick: customDialog }, t("store.custom")), h("button", { type: "button", class: "ghost", onclick: syncStores }, t("store.sync"))),
-    h("div", { class: "chips", id: "chips" }),
-    h("div", { id: "store-list" }),
-  ]);
+  shell(
+    h("div", { class: "page-head" }, h("div", null, h("h1", null, t("nav.store")), h("p", { class: "meta", id: "store-meta" }, " ")), h("div", { class: "actions" }, button(t("store.sync"), { class: "ghost", onclick: syncStores }, "refresh"), button(t("store.custom"), { onclick: customDialog }, "plus"))),
+    h("div", { class: "search wide" }, icon("search"), search),
+    h("div", { class: "store" }, h("nav", { class: "cats", id: "cats", "aria-label": t("store.categories") }), h("div", { id: "store-list" })),
+  );
   renderStoreList();
 }
 
 function renderStoreList() {
   const list = document.getElementById("store-list");
-  const chips = document.getElementById("chips");
+  const cats = document.getElementById("cats");
   if (!list || !state.store) return;
   const { query, category } = state.storeFilter;
+  const all = state.store.apps;
   const installed = new Set((state.overview?.apps ?? []).map((a) => a.name));
 
-  const chip = (value, label) =>
+  const synced = Math.max(0, ...state.store.stores.map((s) => s.syncedAt));
+  document.getElementById("store-meta")?.replaceChildren(t("store.meta", { stores: state.store.stores.length, apps: all.length }), synced ? h("span", { class: "dot-sep" }, "·") : "", synced ? t("store.syncedAgo", { time: ago(synced) }) : "");
+
+  const cat = (value, label, n) =>
     h(
       "button",
       {
         type: "button",
-        class: "chip" + (category === value ? " active" : ""),
+        class: "cat" + (category === value ? " active" : ""),
         "aria-pressed": String(category === value),
         onclick: () => {
           state.storeFilter.category = value;
           renderStoreList();
         },
       },
-      label,
+      h("span", null, label),
+      h("span", { class: "muted small" }, n),
     );
-  chips.replaceChildren(chip("", t("store.all")), chip("*", t("store.recommended")), ...state.store.categories.map((c) => chip(c, c)));
+  cats.replaceChildren(
+    h("div", { class: "cat-title" }, t("store.categories")),
+    cat("", t("store.all"), all.length),
+    cat("*", t("store.recommended"), all.filter((a) => a.recommended).length),
+    ...state.store.categories.map((c) => cat(c, c, all.filter((a) => a.category === c).length)).filter((_, i) => all.some((a) => a.category === state.store.categories[i])),
+    h("div", { class: "cat-title" }, t("store.onServer")),
+    cat("+", t("store.installed"), all.filter((a) => installed.has(a.name)).length),
+  );
 
   const q = query.trim().toLowerCase();
-  const apps = state.store.apps.filter(
-    (a) => (!q || `${a.title} ${a.name} ${a.tagline}`.toLowerCase().includes(q)) && (category === "" || (category === "*" ? a.recommended : a.category === category)),
-  );
-  if (!state.store.apps.length) {
+  const inCategory = (a) => category === "" || (category === "*" ? a.recommended : category === "+" ? installed.has(a.name) : a.category === category);
+  const apps = all.filter((a) => (!q || `${a.title} ${a.name} ${a.tagline}`.toLowerCase().includes(q)) && inCategory(a));
+  if (!all.length) {
     const busy = state.store.stores.some((s) => s.syncing);
-    return list.replaceChildren(h("div", { class: "empty" }, h("p", null, t(busy ? "store.syncing" : "store.empty")), !busy && h("button", { type: "button", class: "primary", onclick: syncStores }, t("store.sync"))));
+    return list.replaceChildren(h("div", { class: "empty" }, h("p", null, t(busy ? "store.syncing" : "store.empty")), !busy && button(t("store.sync"), { class: "primary", onclick: syncStores }, "refresh")));
   }
   if (!apps.length) return list.replaceChildren(h("p", { class: "empty" }, t("store.nothing")));
   list.replaceChildren(
+    h("div", { class: "section-head" }, h("h2", null, category && category !== "*" && category !== "+" ? category : t(category === "*" ? "store.recommended" : category === "+" ? "store.installed" : "store.allApps"), h("span", { class: "muted small" }, apps.length))),
     h(
       "div",
       { class: "cards" },
       apps.map((a) =>
         h(
           "button",
-          { type: "button", class: "store-card card" + (a.supported ? "" : " unsupported"), onclick: () => storeDialog(a) },
-          appIcon(a),
-          h("span", { class: "text" }, h("span", { class: "title" }, a.title, installed.has(a.name) && h("span", { class: "badge" }, t("store.installed"))), h("span", { class: "tagline" }, a.tagline)),
+          { type: "button", class: "store-card" + (a.supported ? "" : " unsupported"), onclick: () => (installed.has(a.name) ? go(`#/apps/${a.name}`) : storeDialog(a)) },
+          h("span", { class: "store-card-head" }, appIcon(a), h("span", { class: "grow" }, h("span", { class: "tile-name" }, a.title), h("span", { class: "muted small" }, a.category)), installed.has(a.name) ? h("span", { class: "chip ok" }, icon("check"), t("store.installed")) : h("span", { class: "chip" }, t("store.install"))),
+          h("span", { class: "tagline" }, a.tagline),
         ),
       ),
     ),
   );
 }
 
-function formSection(title, rows) {
-  return rows.length > 0 && h("fieldset", null, h("legend", null, title), rows);
+function formSection(title, hint, rows) {
+  return rows.length > 0 && h("section", { class: "form-section" }, h("div", { class: "form-head" }, h("h3", null, title), hint && h("span", { class: "muted small" }, hint)), rows);
 }
 
 async function storeDialog(entry) {
@@ -651,69 +1027,76 @@ async function storeDialog(entry) {
   }
   const supported = app.architectures.length === 0 || app.architectures.includes(state.overview?.arch);
   const inputs = { ports: [], volumes: [], envs: [] };
+  const formRow = (label, control, note) => h("label", { class: "form-row" }, h("span", { class: "form-label" }, label), h("span", { class: "form-control" }, control, note && h("span", { class: "muted small" }, note)));
 
   const ports = app.form.ports.map((p) => {
-    const input = h("input", { value: p.published, inputMode: "numeric", pattern: "[0-9]*", class: "short" });
+    const input = h("input", { value: p.published, inputMode: "numeric", pattern: "[0-9]*", class: "short mono" });
     inputs.ports.push({ service: p.service, target: p.target, protocol: p.protocol, input });
-    return field(p.description || `${p.target}/${p.protocol}`, h("span", { class: "pair" }, input, h("span", { class: "hint" }, `→ ${p.target}/${p.protocol}`), p.busy && h("span", { class: "badge warn" }, t("store.portBusy"))));
+    return formRow(p.description || t("store.port"), h("span", { class: "pair" }, input, h("span", { class: "muted small mono" }, `→ ${p.target}/${p.protocol}`), p.busy && h("span", { class: "chip warn" }, t("store.portBusy"))));
   });
   const volumes = app.form.volumes.map((v) => {
-    const input = h("input", { value: v.source, spellcheck: false });
+    const input = h("input", { value: v.source, spellcheck: false, class: "mono" });
     inputs.volumes.push({ service: v.service, target: v.target, input });
-    return field(v.description || v.target, input, `→ ${v.target}`);
+    return formRow(v.description || v.target, input, `→ ${v.target}`);
   });
   const envs = app.form.envs.map((e) => {
     const secret = /pass|secret|token|key/i.test(e.name);
-    const input = h("input", { value: e.value, spellcheck: false, autocomplete: "off", type: secret && e.value === "" ? "password" : "text" });
+    const input = h("input", { value: e.value, spellcheck: false, autocomplete: "off", class: "mono", type: secret && e.value === "" ? "password" : "text" });
     inputs.envs.push({ service: e.service, name: e.name, input });
-    return field(e.name, input, e.description);
+    return formRow(h("span", { class: "mono small" }, e.name), input, e.description);
   });
 
   const error = h("p", { class: "error", role: "alert" });
   let dialog;
-  const install = h(
-    "button",
-    {
-      type: "button",
-      class: "primary",
-      disabled: app.installed || !supported,
-      onclick: async () => {
-        install.disabled = true;
-        error.textContent = "";
-        const form = {
-          ports: inputs.ports.map(({ input, ...p }) => ({ ...p, published: input.value })),
-          volumes: inputs.volumes.map(({ input, ...v }) => ({ ...v, source: input.value })),
-          envs: inputs.envs.map(({ input, ...e }) => ({ ...e, value: input.value })),
-        };
-        try {
-          const res = await api("POST", "/api/apps", { store: app.store, name: app.name, form });
-          dialog.close();
-          jobDialog(res.job, "install", app.title, () => go("home"));
-        } catch (e) {
-          error.textContent = errorText(e);
-          install.disabled = false;
-        }
-      },
+  const install = button(t(app.installed ? "store.installed" : "store.install"), {
+    class: "primary",
+    disabled: app.installed || !supported,
+    onclick: async () => {
+      install.disabled = true;
+      error.textContent = "";
+      const form = {
+        ports: inputs.ports.map(({ input, ...p }) => ({ ...p, published: input.value })),
+        volumes: inputs.volumes.map(({ input, ...v }) => ({ ...v, source: input.value })),
+        envs: inputs.envs.map(({ input, ...e }) => ({ ...e, value: input.value })),
+      };
+      try {
+        const res = await api("POST", "/api/apps", { store: app.store, name: app.name, form });
+        dialog.close();
+        jobDialog(res.job, "install", app.title, () => go(`#/apps/${app.name}`));
+      } catch (e) {
+        error.textContent = errorText(e);
+        install.disabled = false;
+      }
     },
-    t(app.installed ? "store.installed" : "store.install"),
-  );
+  });
 
+  const hasForm = ports.length + volumes.length + envs.length > 0;
   dialog = openDialog(
-    "wide store-app",
-    h("header", null, appIcon(app), h("div", null, h("h2", null, app.title), h("p", { class: "tagline" }, app.tagline), h("p", { class: "hint" }, [app.category, app.developer && t("store.by", { developer: app.developer })].filter(Boolean).join(" · ")))),
+    "xwide store-app",
+    h("header", null, appIcon(app, "lg"), h("div", { class: "grow" }, h("h2", null, app.title), h("p", { class: "muted" }, app.tagline), h("p", { class: "muted small" }, [app.category, app.developer && t("store.by", { developer: app.developer })].filter(Boolean).join(" · "))), closeX(() => dialog)),
     !supported && h("p", { class: "banner" }, t("store.unsupported", { arch: state.overview?.arch ?? "" })),
-    app.screenshots.length > 0 && h("div", { class: "shots" }, app.screenshots.map((src) => h("img", { src, alt: "", loading: "lazy", referrerPolicy: "no-referrer" }))),
-    h("p", { class: "description" }, app.description),
-    app.tips && h("div", { class: "tips" }, h("strong", null, t("store.tips")), h("p", null, app.tips)),
-    (ports.length || volumes.length || envs.length) > 0 &&
-      h("details", { class: "form", open: app.form.ports.some((p) => p.busy) }, h("summary", null, t("store.settings")), formSection(t("store.ports"), ports), formSection(t("store.volumes"), volumes), formSection(t("store.envs"), envs)),
+    h(
+      "div",
+      { class: "store-app-body" },
+      h(
+        "div",
+        { class: "stack" },
+        app.screenshots.length > 0 && h("div", { class: "shots" }, app.screenshots.map((src) => h("img", { src, alt: "", loading: "lazy", referrerPolicy: "no-referrer" }))),
+        h("p", { class: "description" }, app.description),
+        app.tips && h("div", { class: "tips" }, h("strong", null, t("store.tips")), h("p", null, app.tips)),
+        app.website && h("a", { class: "link", href: app.website, target: "_blank", rel: "noopener noreferrer" }, app.website.replace(/^https?:\/\//, "").replace(/\/$/, ""), icon("external")),
+      ),
+      hasForm && h("div", { class: "stack install-form" }, formSection(t("store.ports"), t("store.portsHint"), ports), formSection(t("store.volumes"), state.settings ? t("store.volumesHint", { path: state.settings.dataRoot }) : "", volumes), formSection(t("store.envs"), t("store.envsHint"), envs)),
+    ),
     error,
-    h("footer", null, closeButton(() => dialog, t("common.cancel")), install),
+    h("footer", null, h("p", { class: "cmd grow" }, icon("terminal"), `docker compose -p ${app.name} up -d`), closeButton(() => dialog, t("common.cancel")), install),
   );
+  // the dialog would otherwise put the focus ring on its close button
+  (install.disabled ? dialog : install).focus();
 }
 
 function customDialog() {
-  const name = h("input", { required: true, pattern: "[a-z0-9][a-z0-9_-]*", autocapitalize: "none", spellcheck: false });
+  const name = h("input", { required: true, pattern: "[a-z0-9][a-z0-9_-]*", autocapitalize: "none", spellcheck: false, class: "mono" });
   const area = h("textarea", { class: "code", spellcheck: false, wrap: "off", required: true, placeholder: "services:\n  web:\n    image: nginx:alpine\n    ports:\n      - 8088:80\n" });
   const error = h("p", { class: "error", role: "alert" });
   const dialog = openDialog(
@@ -727,18 +1110,17 @@ function customDialog() {
           try {
             const res = await api("POST", "/api/apps", { name: name.value.trim(), compose: area.value });
             dialog.close();
-            jobDialog(res.job, "install", name.value.trim(), () => go("home"));
+            jobDialog(res.job, "install", name.value.trim(), () => go(`#/apps/${name.value.trim()}`));
           } catch (err) {
             error.textContent = errorText(err);
           }
         },
       },
-      h("h2", null, t("store.customTitle")),
-      h("p", { class: "hint" }, t("store.customLead")),
+      h("header", null, h("div", { class: "grow" }, h("h2", null, t("store.customTitle")), h("p", { class: "muted small" }, t("store.customLead"))), closeX(() => dialog)),
       field(t("store.customName"), name, t("store.customNameHint")),
       field(t("store.customCompose"), area),
       error,
-      h("footer", null, closeButton(() => dialog, t("common.cancel")), h("button", { class: "primary" }, t("store.install"))),
+      h("footer", null, closeButton(() => dialog, t("common.cancel")), h("button", { class: "btn primary" }, t("store.install"))),
     ),
   );
   name.focus();
@@ -749,73 +1131,129 @@ function customDialog() {
 async function loadSettings() {
   try {
     state.settings = await api("GET", "/api/settings");
+    if (!state.store) state.store = await api("GET", `/api/store?lang=${state.lang}`).catch(() => null);
   } catch (e) {
     return toast(errorText(e), "error");
   }
-  if (state.view === "settings") renderSettings();
+  if (state.route.view === "settings") renderSettings();
 }
 
 const LANGUAGE_NAMES = { en: "English", uk: "Українська" };
+const SECTIONS = [
+  { id: "general", icon: "sliders" },
+  { id: "apps", icon: "grid" },
+  { id: "stores", icon: "store" },
+  { id: "about", icon: "info" },
+];
 
-function renderSettings() {
+function settingRow(title, hint, control) {
+  return h("div", { class: "setting" }, h("div", { class: "grow" }, h("strong", null, title), hint && h("p", { class: "muted small" }, hint)), h("div", { class: "setting-control" }, control));
+}
+
+function settingsSection(section) {
   const s = state.settings;
-  const language = h(
-    "select",
-    {
-      onchange: async () => {
-        localStorage.setItem("hata.lang", language.value);
-        await loadLanguage(language.value);
-        await refreshOverview();
-        render();
-      },
-    },
-    state.languages.map((code) => h("option", { value: code, selected: code === state.lang }, LANGUAGE_NAMES[code] ?? code)),
-  );
-  if (!s) return shell(h("section", { class: "card settings" }, field(t("settings.language"), language)));
-
-  const dataRoot = h("input", { value: s.dataRoot, spellcheck: false, required: true });
-  const puid = h("input", { value: s.puid, type: "number", min: 0, max: 65534, class: "short", required: true });
-  const pgid = h("input", { value: s.pgid, type: "number", min: 0, max: 65534, class: "short", required: true });
-  const tz = h("input", { value: s.timezone, spellcheck: false, placeholder: s.systemTimezone });
-  const error = h("p", { class: "error", role: "alert" });
   const d = state.overview?.docker;
+  const error = h("p", { class: "error", role: "alert" });
+  const save = async (patch) => {
+    error.textContent = "";
+    try {
+      state.settings = await api("PUT", "/api/settings", patch);
+      toast(t("settings.saved"));
+    } catch (err) {
+      error.textContent = errorText(err);
+    }
+  };
 
-  shell([
-    h("section", { class: "card settings" }, field(t("settings.language"), language)),
-    h(
-      "form",
+  if (section === "general") {
+    const language = h(
+      "select",
       {
-        class: "card settings",
-        onsubmit: async (e) => {
-          e.preventDefault();
-          error.textContent = "";
-          try {
-            state.settings = await api("PUT", "/api/settings", { dataRoot: dataRoot.value.trim(), puid: Number(puid.value), pgid: Number(pgid.value), timezone: tz.value.trim() });
-            toast(t("settings.saved"));
-          } catch (err) {
-            error.textContent = errorText(err);
-          }
+        onchange: async () => {
+          localStorage.setItem("hata.lang", language.value);
+          await loadLanguage(language.value);
+          state.store = null;
+          await refresh();
+          render();
+          void loadSettings();
         },
       },
-      h("h2", null, t("settings.apps")),
-      field(t("settings.dataRoot"), dataRoot, t("settings.dataRootHint")),
-      h("div", { class: "row" }, field(t("settings.puid"), puid), field(t("settings.pgid"), pgid)),
-      field(t("settings.timezone"), tz, t("settings.timezoneHint", { tz: s.systemTimezone })),
-      error,
-      h("footer", null, h("button", { class: "primary" }, t("settings.save"))),
+      state.languages.map((code) => h("option", { value: code, selected: code === state.lang }, LANGUAGE_NAMES[code] ?? code)),
+    );
+    const port = h("input", { type: "number", min: 1, max: 65535, class: "short mono", value: s.port || "", placeholder: String(location.port || 80) });
+    return [
+      h("section", { class: "card pad" }, h("h2", null, t("settings.general")), settingRow(t("settings.language"), t("settings.languageHint"), language), settingRow(t("settings.port"), t("settings.portHint"), h("span", { class: "pair" }, port, button(t("settings.save"), { onclick: () => save({ port: Number(port.value) || 0 }) }))), error),
+    ];
+  }
+  if (section === "apps") {
+    const dataRoot = h("input", { value: s.dataRoot, spellcheck: false, required: true, class: "mono" });
+    const puid = h("input", { value: s.puid, type: "number", min: 0, max: 65534, class: "short mono", required: true });
+    const pgid = h("input", { value: s.pgid, type: "number", min: 0, max: 65534, class: "short mono", required: true });
+    const tz = h("input", { value: s.timezone, spellcheck: false, placeholder: s.systemTimezone, class: "mono" });
+    return [
+      h(
+        "form",
+        {
+          class: "card pad",
+          onsubmit: (e) => {
+            e.preventDefault();
+            void save({ dataRoot: dataRoot.value.trim(), puid: Number(puid.value), pgid: Number(pgid.value), timezone: tz.value.trim() });
+          },
+        },
+        h("h2", null, t("settings.apps")),
+        settingRow(t("settings.dataRoot"), t("settings.dataRootHint"), dataRoot),
+        settingRow(t("settings.ids"), t("settings.idsHint"), h("span", { class: "pair" }, puid, pgid)),
+        settingRow(t("settings.timezone"), t("settings.timezoneHint", { tz: s.systemTimezone }), tz),
+        error,
+        h("footer", null, h("button", { class: "btn primary" }, t("settings.save"))),
+      ),
+    ];
+  }
+  if (section === "stores") {
+    const stores = state.store?.stores ?? [];
+    return [
+      h(
+        "section",
+        { class: "card pad" },
+        h("div", { class: "section-head" }, h("h2", null, t("settings.stores")), button(t("store.sync"), { onclick: syncStores }, "refresh")),
+        stores.map((store) => settingRow(store.id, store.url, h("span", { class: "muted small" }, t("settings.storeApps", { n: store.apps }) + (store.syncedAt ? " · " + ago(store.syncedAt) : "")))),
+        h("p", { class: "muted small" }, t("settings.storesHint")),
+      ),
+    ];
+  }
+  return [
+    h(
+      "section",
+      { class: "card pad" },
+      h("h2", null, t("settings.about")),
+      settingRow("Hata", t("settings.aboutHint"), h("span", { class: "mono" }, state.version)),
+      settingRow("Docker", d?.available ? "" : (d?.error ?? ""), h("span", { class: "mono" }, d?.available ? `${d.version} · compose ${d.compose}` : "—")),
+      settingRow(t("settings.source"), "", h("a", { class: "link", href: "https://github.com/sanyadez/hata", target: "_blank", rel: "noopener noreferrer" }, "github.com/sanyadez/hata", icon("external"))),
     ),
-    h("section", { class: "card settings" }, h("h2", null, t("settings.about")), h("p", null, t("settings.version", { version: state.version })), d?.available && h("p", { class: "hint" }, t("settings.docker", d))),
-  ]);
+  ];
+}
+
+function renderSettings() {
+  const section = state.route.section;
+  shell(
+    h("div", { class: "page-head" }, h("div", null, h("h1", null, t("nav.settings")), h("p", { class: "meta" }, `Hata ${state.version}`))),
+    h(
+      "div",
+      { class: "settings" },
+      h("nav", { class: "cats" }, SECTIONS.map((item) => h("a", { class: "cat" + (section === item.id ? " active" : ""), href: `#/settings/${item.id}` }, h("span", { class: "with-icon" }, icon(item.icon), t("settings." + item.id))))),
+      h("div", { class: "stack" }, state.settings ? settingsSection(section) : h("p", { class: "muted" }, "…")),
+    ),
+  );
 }
 
 // --- Start --------------------------------------------------------------------------------------
 
 async function enter() {
-  state.view = "home";
+  state.route = parseRoute();
   render();
-  await refreshOverview();
+  await refresh();
   startEvents();
   api("GET", "/api/settings").then((s) => (state.settings = s), () => {});
+  onRoute();
 }
 
 async function main() {

@@ -9,7 +9,8 @@ import { join } from "node:path";
 import { APP_NAME_RE, appMeta, applyForm, bindSources, buildForm, dumpCompose, normalize, parseCompose, publishedPorts, type AppForm, type AppMeta, type Compose } from "./appform";
 import { bus } from "./bus";
 import { DATA_DIR, settings, timezone } from "./config";
-import { compose as runCompose, composeCmd, listContainers, PROJECT_LABEL, SERVICE_LABEL, type ContainerSummary } from "./docker";
+import { record } from "./activity";
+import { compose as runCompose, composeCmd, containerStats, listContainers, PROJECT_LABEL, SERVICE_LABEL, type ContainerStats, type ContainerSummary } from "./docker";
 import { writeTextAtomic } from "./fsutil";
 import { storeApp } from "./store";
 
@@ -69,7 +70,7 @@ export const listJobs = (): Job[] => [...jobs.values()];
 type Log = (line: string) => void;
 
 /** Starts a long operation on an app; one app runs one operation at a time */
-function startJob(app: string, kind: JobKind, work: (log: Log) => Promise<void>): Job {
+function startJob(app: string, kind: JobKind, user: string, work: (log: Log) => Promise<void>): Job {
   if (busy.has(app)) throw new AppError("app.busy", 409);
   const job: Job = { id: crypto.randomUUID(), app, kind, status: "running", log: [], lineCount: 0, startedAt: Date.now() };
   jobs.set(job.id, job);
@@ -92,6 +93,7 @@ function startJob(app: string, kind: JobKind, work: (log: Log) => Promise<void>)
     })
     .finally(() => {
       job.finishedAt = Date.now();
+      record(`app.${kind}.${job.status}`, { app, user, detail: job.status === "failed" ? job.error?.trim().split("\n")[0]?.trim().slice(0, 300) : undefined });
       busy.delete(app);
       const finished = [...jobs.values()].filter((j) => j.status !== "running");
       for (const old of finished.slice(0, Math.max(0, finished.length - KEEP_FINISHED_JOBS))) jobs.delete(old.id);
@@ -149,7 +151,7 @@ export interface InstalledApp extends Pick<AppMeta, "title" | "icon" | "port" | 
   store: string;
   /** Running operation, if any */
   job: { id: string; kind: JobKind } | null;
-  containers: { name: string; service: string; image: string; state: string; status: string }[];
+  containers: { id: string; name: string; service: string; image: string; state: string; status: string; ports: string[] }[];
 }
 
 function firstPublishedPort(compose: Compose | null): string {
@@ -180,6 +182,8 @@ function describeApp(name: string, containers: ContainerSummary[] | null, lang: 
     store: typeof compose?.["x-hata"]?.store === "string" ? compose["x-hata"].store : "",
     job: job ? { id: job.id, kind: job.kind } : null,
     containers: own.map((c) => ({
+      id: c.Id.slice(0, 12),
+      ports: [...new Set(c.Ports.filter((p) => p.PublicPort).map((p) => `${p.PublicPort}:${p.PrivatePort}/${p.Type}`))],
       name: (c.Names[0] ?? "").replace(/^\//, ""),
       service: c.Labels[SERVICE_LABEL] ?? "",
       image: c.Image,
@@ -192,6 +196,39 @@ function describeApp(name: string, containers: ContainerSummary[] | null, lang: 
 export async function listApps(lang: string): Promise<InstalledApp[]> {
   const containers = await listContainers().catch(() => null);
   return installedNames().map((name) => describeApp(name, containers, lang));
+}
+
+export interface AppDetail extends InstalledApp {
+  /** Where the app's compose file lies on disk */
+  composeFile: string;
+  /** Host folders the app keeps data in */
+  folders: string[];
+  installedAt: number;
+}
+
+export async function appDetail(name: string, lang: string): Promise<AppDetail> {
+  assertInstalled(name);
+  const containers = await listContainers().catch(() => null);
+  const compose = readCompose(name);
+  let folders: string[] = [];
+  if (compose) {
+    const copy = structuredClone(compose);
+    normalize(copy, settings.dataRoot, name);
+    folders = bindSources(copy).filter((f) => !/^\/(dev|proc|sys|run|var\/run|etc)(\/|$)/.test(f));
+  }
+  return { ...describeApp(name, containers, lang), composeFile: composeFile(name), folders, installedAt: Math.round(statSync(appDir(name)).birthtimeMs) };
+}
+
+/** A stats sample of each running container of the app, keyed by container name */
+export async function appStats(name: string): Promise<Record<string, ContainerStats>> {
+  assertInstalled(name);
+  const containers = (await listContainers().catch(() => [])).filter((c) => c.Labels[PROJECT_LABEL] === name && c.State === "running");
+  const samples = await Promise.all(containers.map((c) => containerStats(c.Id)));
+  const out: Record<string, ContainerStats> = {};
+  containers.forEach((c, i) => {
+    if (samples[i]) out[(c.Names[0] ?? "").replace(/^\//, "")] = samples[i]!;
+  });
+  return out;
 }
 
 export function composeText(name: string): string {
@@ -289,7 +326,7 @@ async function install(name: string, text: string, compose: Compose, log: Log): 
   }
 }
 
-export async function installFromStore(store: string, name: string, form: unknown): Promise<Job> {
+export async function installFromStore(store: string, name: string, form: unknown, user: string): Promise<Job> {
   assertName(name);
   const compose = storeCompose(store, name);
   if (existsSync(appDir(name))) throw new AppError("app.exists", 409);
@@ -297,11 +334,11 @@ export async function installFromStore(store: string, name: string, form: unknow
   if (error) throw new AppError(error);
   await assertPortsFree(compose);
   compose["x-hata"] = { store };
-  return startJob(name, "install", (log) => install(name, dumpCompose(compose), compose, log));
+  return startJob(name, "install", user, (log) => install(name, dumpCompose(compose), compose, log));
 }
 
 /** Installs a compose file pasted by the user; the text is stored exactly as given */
-export async function installCustom(name: unknown, text: unknown): Promise<Job> {
+export async function installCustom(name: unknown, text: unknown, user: string): Promise<Job> {
   if (typeof text !== "string" || text.length > 512 * 1024) throw new AppError("app.badCompose");
   let compose: Compose;
   try {
@@ -314,23 +351,23 @@ export async function installCustom(name: unknown, text: unknown): Promise<Job> 
   if (existsSync(appDir(appName))) throw new AppError("app.exists", 409);
   normalize(compose, settings.dataRoot);
   await assertPortsFree(compose);
-  return startJob(appName, "install", (log) => install(appName, text, compose, log));
+  return startJob(appName, "install", user, (log) => install(appName, text, compose, log));
 }
 
-export function appAction(name: string, action: string): Job {
+export function appAction(name: string, action: string, user: string): Job {
   assertInstalled(name);
   switch (action) {
     case "start":
-      return startJob(name, "start", async (log) => {
+      return startJob(name, "start", user, async (log) => {
         writeEnv(name);
         await dc(name, ["up", "-d", "--remove-orphans"], log);
       });
     case "stop":
-      return startJob(name, "stop", (log) => dc(name, ["stop"], log));
+      return startJob(name, "stop", user, (log) => dc(name, ["stop"], log));
     case "restart":
-      return startJob(name, "restart", (log) => dc(name, ["restart"], log));
+      return startJob(name, "restart", user, (log) => dc(name, ["restart"], log));
     case "update":
-      return startJob(name, "update", async (log) => {
+      return startJob(name, "update", user, async (log) => {
         writeEnv(name);
         await dc(name, ["pull"], log);
         await dc(name, ["up", "-d", "--remove-orphans"], log);
@@ -341,7 +378,7 @@ export function appAction(name: string, action: string): Job {
 }
 
 /** Replaces the compose file and applies it; a file that compose rejects is not kept */
-export function applyCompose(name: string, text: unknown): Job {
+export function applyCompose(name: string, text: unknown, user: string): Job {
   assertInstalled(name);
   if (typeof text !== "string" || text.length > 512 * 1024) throw new AppError("app.badCompose");
   try {
@@ -349,7 +386,7 @@ export function applyCompose(name: string, text: unknown): Job {
   } catch (e) {
     throw new AppError("app.badCompose", 400, { message: e instanceof Error ? e.message : String(e) });
   }
-  return startJob(name, "apply", async (log) => {
+  return startJob(name, "apply", user, async (log) => {
     const previous = readFileSync(composeFile(name), "utf8");
     writeTextAtomic(composeFile(name), text);
     writeEnv(name);
@@ -364,9 +401,9 @@ export function applyCompose(name: string, text: unknown): Job {
 }
 
 /** Removes the app; `withData` also deletes its named volumes and `<dataRoot>/AppData/<name>` */
-export function removeApp(name: string, withData: boolean): Job {
+export function removeApp(name: string, withData: boolean, user: string): Job {
   assertInstalled(name);
-  return startJob(name, "remove", async (log) => {
+  return startJob(name, "remove", user, async (log) => {
     await dc(name, ["down", "--remove-orphans", ...(withData ? ["--volumes"] : [])], log);
     rmSync(appDir(name), { recursive: true, force: true });
     parsed.delete(name);

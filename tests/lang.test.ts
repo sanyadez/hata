@@ -16,6 +16,20 @@ for (const file of readdirSync(dir).filter((f) => f.endsWith(".json") && f !== "
 
 test("every string the UI asks for exists", async () => {
   const js = await Bun.file(join(import.meta.dir, "../src/ui/app.js")).text();
-  const used = [...js.matchAll(/\bt\("([a-zA-Z.]+)"/g)].map((m) => m[1]!).filter((k) => !k.endsWith("."));
-  expect(used.filter((key) => !(key in en))).toEqual([]);
+  const used = [...js.matchAll(/\bt\("([a-zA-Z.]+)"/g)].map((m) => m[1]!);
+  // a key ending with a dot is a prefix completed at run time: at least one such string must exist
+  const missing = used.filter((key) => (key.endsWith(".") ? !Object.keys(en).some((k) => k.startsWith(key)) : !(key in en)));
+  expect(missing).toEqual([]);
+});
+
+test("strings chosen at run time exist for every value the server can send", () => {
+  const need = [
+    ...["running", "partial", "restarting", "stopped", "unknown", "busy"].map((s) => `status.${s}`),
+    ...["install", "update", "start", "stop", "restart", "remove", "apply"].flatMap((k) => [`job.${k}`, `activity.app.${k}.done`, `activity.app.${k}.failed`]),
+    ...["docker", "restarting", "partial", "disk", "memory", "temperature", "failed.install", "failed.update", "failed.apply", "failed.start"].flatMap((c) => [`attention.${c}.title`, `attention.${c}.text`]),
+    ...["home", "store", "settings"].map((v) => `nav.${v}`),
+    ...["general", "apps", "stores", "about"].map((v) => `settings.${v}`),
+    ...["overview", "logs", "compose"].map((v) => `app.tab.${v}`),
+  ];
+  expect(need.filter((key) => !(key in en))).toEqual([]);
 });

@@ -121,6 +121,16 @@ export interface SystemStatus {
   /** Bytes per second since the previous sample; null on the first sample */
   net: { rx: number; tx: number } | null;
   temperature: number | null;
+  /** The last minute or so of samples, oldest first, for the sparklines: percentages and bytes per second */
+  history: { cpu: number[]; memory: number[]; net: number[] };
+}
+
+const HISTORY = 40;
+const history: SystemStatus["history"] = { cpu: [], memory: [], net: [] };
+
+function remember(list: number[], value: number): void {
+  list.push(value);
+  if (list.length > HISTORY) list.shift();
 }
 
 let prev: { at: number; cpu: CpuTimes | null; net: NetTotals } | null = null;
@@ -141,16 +151,21 @@ export function sample(): SystemStatus {
     net = { rx: Math.max(0, Math.round((netTotals.rx - prev.net.rx) / seconds)), tx: Math.max(0, Math.round((netTotals.tx - prev.net.tx) / seconds)) };
   }
   prev = { at: now, cpu: cpuTimes, net: netTotals };
+  const memory = parseMemory(read("/proc/meminfo"));
+  if (cpu !== null) remember(history.cpu, cpu);
+  if (net) remember(history.net, net.rx + net.tx);
+  remember(history.memory, memory.total ? Math.round((memory.used / memory.total) * 100) : 0);
   last = {
     hostname: hostname(),
     uptime: Math.floor(Number(read("/proc/uptime").split(" ")[0]) || 0),
     cores: navigator.hardwareConcurrency,
     load: loadavg().map((l) => Math.round(l * 100) / 100),
     cpu,
-    memory: parseMemory(read("/proc/meminfo")),
+    memory,
     disks: disks(),
     net,
     temperature: temperature(),
+    history,
   };
   return last;
 }

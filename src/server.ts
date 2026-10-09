@@ -9,7 +9,9 @@
  */
 import { networkInterfaces } from "node:os";
 import type { Server } from "bun";
-import { AppError, appAction, appLogs, applyCompose, composeText, getJob, installCustom, installFromStore, listApps, listJobs, removeApp, storeAppDetail } from "./apps";
+import { recent, record } from "./activity";
+import { AppError, appAction, appDetail, appLogs, appStats, applyCompose, composeText, getJob, installCustom, installFromStore, listApps, listJobs, removeApp, storeAppDetail } from "./apps";
+import { attention } from "./attention";
 import { APP_NAME_RE } from "./appform";
 import {
   checkPassword,
@@ -37,6 +39,12 @@ import appCss from "./ui/app.css" with { type: "text" };
 import appJs from "./ui/app.js" with { type: "text" };
 import indexHtml from "./ui/index.html" with { type: "text" };
 import logoSvg from "./ui/logo.svg" with { type: "text" };
+import interCyrillic from "./ui/fonts/inter-cyrillic.woff2" with { type: "file" };
+import interLatinExt from "./ui/fonts/inter-latin-ext.woff2" with { type: "file" };
+import interLatin from "./ui/fonts/inter-latin.woff2" with { type: "file" };
+import manropeCyrillic from "./ui/fonts/manrope-cyrillic.woff2" with { type: "file" };
+import manropeLatinExt from "./ui/fonts/manrope-latin-ext.woff2" with { type: "file" };
+import manropeLatin from "./ui/fonts/manrope-latin.woff2" with { type: "file" };
 import en from "./lang/en.json";
 import uk from "./lang/uk.json";
 
@@ -49,8 +57,8 @@ const MANIFEST = JSON.stringify({
   short_name: "Hata",
   start_url: "/",
   display: "standalone",
-  background_color: "#0f1216",
-  theme_color: "#0f1216",
+  background_color: "#131110",
+  theme_color: "#131110",
   icons: [{ src: "/logo.svg", sizes: "any", type: "image/svg+xml", purpose: "any" }],
 });
 
@@ -64,17 +72,30 @@ const STATIC: Record<string, { body: string; type: string }> = {
   ...Object.fromEntries(Object.entries(LANGUAGES).map(([code, dict]) => [`/lang/${code}.json`, { body: JSON.stringify(dict), type: "application/json; charset=utf-8" }])),
 };
 
+/** Binary files of the UI: embedded in the binary, read from it on request */
+const FONTS: Record<string, string> = {
+  "/fonts/inter-latin.woff2": interLatin,
+  "/fonts/inter-latin-ext.woff2": interLatinExt,
+  "/fonts/inter-cyrillic.woff2": interCyrillic,
+  "/fonts/manrope-latin.woff2": manropeLatin,
+  "/fonts/manrope-latin-ext.woff2": manropeLatinExt,
+  "/fonts/manrope-cyrillic.woff2": manropeCyrillic,
+};
+
 const ETAGS = new Map(Object.entries(STATIC).map(([path, file]) => [path, `"${Bun.hash(file.body).toString(36)}"`]));
 
 /** Scripts and styles only from this server; images also from anywhere over HTTPS (store icons) */
 const SECURITY_HEADERS = {
-  "content-security-policy": "default-src 'self'; img-src 'self' https: data:; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
+  "content-security-policy": "default-src 'self'; img-src 'self' https: data:; font-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'none'; form-action 'self'",
   "x-content-type-options": "nosniff",
   "x-frame-options": "DENY",
   "referrer-policy": "no-referrer",
 };
 
 function serveStatic(req: Request, path: string): Response | null {
+  if (Object.hasOwn(FONTS, path)) {
+    return new Response(Bun.file(FONTS[path]!), { headers: { ...SECURITY_HEADERS, "content-type": "font/woff2", "cache-control": "public, max-age=604800" } });
+  }
   if (!Object.hasOwn(STATIC, path)) return null;
   const file = STATIC[path]!;
   const etag = ETAGS.get(path)!;
@@ -191,6 +212,7 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
       return fail(result === "setup.done" ? 409 : 400, result);
     }
     console.log(`Administrator "${result.name}" created from ${ip}`);
+    record("auth.setup", { user: result.name, detail: ip });
     return json({ user: publicUser(result) }, 200, { "set-cookie": sessionCookie(createSession(result), isHttps(req, url)) });
   }
 
@@ -204,6 +226,7 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
       return fail(401, "auth.wrong");
     }
     registerLoginSuccess(ip);
+    record("auth.signin", { user: user.name, detail: ip });
     return json({ user: publicUser(user) }, 200, { "set-cookie": sessionCookie(createSession(user), isHttps(req, url)) });
   }
 
@@ -220,7 +243,21 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
 
   if (path === "/api/overview" && method === "GET") {
     const [docker, apps] = await Promise.all([dockerInfo(), listApps(language(url))]);
-    return json({ system: systemStatus(), docker, apps, arch: ARCH, jobs: listJobs().filter((j) => j.status === "running").map(({ log: _, ...job }) => job) });
+    const system = systemStatus();
+    return json({
+      system,
+      docker,
+      apps,
+      arch: ARCH,
+      attention: attention({ system, docker, apps, activity: recent(100) }),
+      activity: recent(8),
+      jobs: listJobs().filter((j) => j.status === "running").map(({ log: _, ...job }) => job),
+    });
+  }
+
+  if (path === "/api/activity" && method === "GET") {
+    const app = url.searchParams.get("app") ?? undefined;
+    return json(recent(app ? 20 : 100, app));
   }
 
   if (path === "/api/settings") {
@@ -245,8 +282,8 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
       const data = await body(req);
       const job =
         typeof data.store === "string"
-          ? await installFromStore(data.store, String(data.name ?? ""), data.form)
-          : await installCustom(data.name, data.compose);
+          ? await installFromStore(data.store, String(data.name ?? ""), data.form, user.name)
+          : await installCustom(data.name, data.compose, user.name);
       return json({ job: job.id, app: job.app }, 202);
     }
   }
@@ -262,16 +299,18 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
     const name = m[1]!;
     const sub = m[2];
     if (!APP_NAME_RE.test(name)) return fail(400, "app.badName");
-    if (!sub && method === "DELETE") return json({ job: removeApp(name, url.searchParams.get("data") === "1").id }, 202);
+    if (!sub && method === "GET") return json(await appDetail(name, language(url)));
+    if (!sub && method === "DELETE") return json({ job: removeApp(name, url.searchParams.get("data") === "1", user.name).id }, 202);
+    if (sub === "stats" && method === "GET") return json(await appStats(name));
     if (sub === "compose" && method === "GET") return json({ compose: composeText(name) });
-    if (sub === "compose" && method === "PUT") return json({ job: applyCompose(name, (await body(req)).compose).id }, 202);
+    if (sub === "compose" && method === "PUT") return json({ job: applyCompose(name, (await body(req)).compose, user.name).id }, 202);
     if (sub === "logs" && method === "GET") {
       server.timeout(req, 0);
       return new Response(appLogs(name, req.signal), {
         headers: { ...SECURITY_HEADERS, "content-type": "text/plain; charset=utf-8", "cache-control": "no-store", "x-accel-buffering": "no" },
       });
     }
-    if (sub && method === "POST") return json({ job: appAction(name, sub).id }, 202);
+    if (sub && method === "POST") return json({ job: appAction(name, sub, user.name).id }, 202);
   }
 
   return fail(404, "request.notFound");

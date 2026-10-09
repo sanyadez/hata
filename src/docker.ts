@@ -78,6 +78,38 @@ export function listContainers(): Promise<ContainerSummary[]> {
   return api<ContainerSummary[]>("/containers/json?all=1");
 }
 
+export interface ContainerStats {
+  /** Share of one core, percent: 250 means two and a half cores busy */
+  cpu: number;
+  memory: number;
+  memoryLimit: number;
+}
+
+interface RawStats {
+  cpu_stats: { cpu_usage: { total_usage: number }; system_cpu_usage?: number; online_cpus?: number };
+  precpu_stats: { cpu_usage: { total_usage: number }; system_cpu_usage?: number };
+  memory_stats: { usage?: number; limit?: number; stats?: { inactive_file?: number; total_inactive_file?: number } };
+}
+
+/** CPU and memory out of a Docker stats sample, the way `docker stats` computes them */
+export function parseStats(raw: RawStats): ContainerStats {
+  const cpuDelta = raw.cpu_stats.cpu_usage.total_usage - raw.precpu_stats.cpu_usage.total_usage;
+  const systemDelta = (raw.cpu_stats.system_cpu_usage ?? 0) - (raw.precpu_stats.system_cpu_usage ?? 0);
+  const cpu = cpuDelta > 0 && systemDelta > 0 ? (cpuDelta / systemDelta) * (raw.cpu_stats.online_cpus ?? 1) * 100 : 0;
+  // page cache that can be dropped is not memory the container needs
+  const cache = raw.memory_stats.stats?.inactive_file ?? raw.memory_stats.stats?.total_inactive_file ?? 0;
+  return { cpu: Math.round(cpu * 10) / 10, memory: Math.max(0, (raw.memory_stats.usage ?? 0) - cache), memoryLimit: raw.memory_stats.limit ?? 0 };
+}
+
+/** One stats sample of a running container; Docker takes about a second to produce it */
+export async function containerStats(id: string): Promise<ContainerStats | null> {
+  try {
+    return parseStats(await api<RawStats>(`/containers/${id}/stats?stream=false`));
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Follows Docker's container events and announces `apps` on the bus (debounced: one `up` produces
  * a burst of events). Reconnects forever: Docker may be restarted or installed later.
