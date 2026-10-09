@@ -29,7 +29,7 @@ test("strings chosen at run time exist for every value the server can send", () 
     ...["update", "docker", "restarting", "partial", "disk", "memory", "temperature", "failed.install", "failed.update", "failed.apply", "failed.start", "failed.backup", "failed.restore"].flatMap((c) => [`attention.${c}.title`, `attention.${c}.text`]),
     ...["home", "store", "backups", "users", "settings"].map((v) => `nav.${v}`),
     ...["admin", "member", "guest"].map((v) => `user.role.${v}`),
-    ...["ok", "wrongPassword", "wrongCode", "locked"].map((v) => `signins.${v}`),
+    ...["ok", "wrongPassword", "wrongCode", "wrongPasskey", "locked"].map((v) => `signins.${v}`),
     ...["noPort", "hostNetwork"].map((v) => `access.cannot.${v}`),
     ...["off", "proxy", "acme"].flatMap((v) => [`https.mode.${v}`, `https.explain.${v}`]),
     ...["manual", "schedule", "pre-update"].map((v) => `backup.reason.${v}`),

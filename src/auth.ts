@@ -11,6 +11,7 @@ import { chmodSync, existsSync, readFileSync, rmSync, writeFileSync } from "node
 import { join } from "node:path";
 import { DATA_DIR } from "./config";
 import { readJsonFile, writeJsonAtomic } from "./fsutil";
+import type { StoredPasskey } from "./passkey";
 import { newSecret, otpauthUri, verifyTotp } from "./totp";
 
 const USERS_FILE = join(DATA_DIR, "users.json");
@@ -45,6 +46,8 @@ export interface User {
   };
   /** A secret shown to the user but not confirmed with a code yet */
   totpPending?: string;
+  /** Passkeys that sign this user in without a password */
+  passkeys?: StoredPasskey[];
 }
 
 interface Session {
@@ -225,7 +228,7 @@ export function clearSessionCookie(domain?: string): string {
   return `${COOKIE_NAME}=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0${domain ? "; Domain=" + domain : ""}`;
 }
 
-export const publicUser = (u: User) => ({ id: u.id, name: u.name, role: u.role, twoFactor: !!u.totp });
+export const publicUser = (u: User) => ({ id: u.id, name: u.name, role: u.role, twoFactor: !!u.totp, passkeys: u.passkeys?.length ?? 0 });
 
 // --- Users ------------------------------------------------------------------------------------------
 
@@ -330,7 +333,7 @@ export interface SignIn {
   /** The name as typed — it may not be a user */
   name: string;
   ip: string;
-  outcome: "ok" | "wrongPassword" | "wrongCode" | "locked";
+  outcome: "ok" | "wrongPassword" | "wrongCode" | "wrongPasskey" | "locked";
 }
 
 let signIns: SignIn[] = readJsonFile<SignIn[]>(SIGNINS_FILE, [], Array.isArray);
@@ -464,6 +467,50 @@ export function checkSecondFactor(user: User, code: unknown): boolean {
 }
 
 export const recoveryCodesLeft = (user: User): number => user.totp?.recovery.length ?? 0;
+
+// --- Passkeys ---------------------------------------------------------------------------------------
+
+const MAX_PASSKEYS = 20;
+
+export const listPasskeys = (user: User) => (user.passkeys ?? []).map(({ id, name, createdAt, lastUsed }) => ({ id, name, createdAt, lastUsed: lastUsed ?? null }));
+
+export const checkOwnPassword = (user: User, password: unknown): Promise<boolean> =>
+  typeof password === "string" && password.length <= 256 ? Bun.password.verify(password, user.passwordHash).catch(() => false) : Promise.resolve(false);
+
+/** Stores a verified passkey for the user; returns an error code or null */
+export function addPasskey(user: User, key: Pick<StoredPasskey, "id" | "publicKey" | "alg" | "counter">, name: unknown): string | null {
+  if (users.some((u) => u.passkeys?.some((k) => k.id === key.id))) return "passkey.exists";
+  if ((user.passkeys?.length ?? 0) >= MAX_PASSKEYS) return "passkey.tooMany";
+  const label = typeof name === "string" ? name.trim().slice(0, 40) : "";
+  (user.passkeys ??= []).push({ ...key, name: label, createdAt: Date.now() });
+  saveUsers();
+  return null;
+}
+
+export function removePasskey(user: User, id: string): boolean {
+  const at = user.passkeys?.findIndex((k) => k.id === id) ?? -1;
+  if (at < 0) return false;
+  user.passkeys!.splice(at, 1);
+  saveUsers();
+  return true;
+}
+
+/** Whose passkey a credential id is */
+export function findPasskey(id: unknown): { user: User; key: StoredPasskey } | null {
+  if (typeof id !== "string") return null;
+  for (const user of users) {
+    const key = user.passkeys?.find((k) => k.id === id);
+    if (key) return { user, key };
+  }
+  return null;
+}
+
+/** A passkey was used: remember when, and how far its counter got */
+export function passkeyUsed(key: StoredPasskey, counter: number): void {
+  key.counter = counter;
+  key.lastUsed = Date.now();
+  saveUsers();
+}
 
 // --- Sign-in attempt limiting -----------------------------------------------------------------------
 

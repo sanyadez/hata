@@ -17,6 +17,12 @@ import { backupApp, backupOverview, deleteSnapshot, listSnapshots, restoreSnapsh
 import { APP_NAME_RE, dumpCompose } from "./appform";
 import {
   acceptInvite,
+  addPasskey,
+  checkOwnPassword,
+  findPasskey,
+  listPasskeys,
+  passkeyUsed,
+  removePasskey,
   beginTotp,
   createInvite,
   inviteInfo,
@@ -58,6 +64,7 @@ import { dockerInfo, listContainers, watchEvents } from "./docker";
 import { adoptProject, casaosState, containerDraft, importCount, importList, moveInCasaos, projectDraft, rebuildContainer } from "./import";
 import { accessOf, dropAccess, dropUser, gateTarget, guard, mayOpen, MAX_APP_BODY, page, passToApp, setAccess, startGates, tunnelHandlers } from "./gate";
 import { appHost, appLabel, classifyHost, clientIp, cookieDomain, requestHost, requestProto, siteDomain } from "./site";
+import { newChallenge, PASSKEY_ALGORITHMS, spendChallenge, verifyAssertion, verifyRegistration } from "./passkey";
 import { qrMatrix } from "./qr";
 import { ARCH, catalogue, scheduleStoreSync, syncStore } from "./store";
 import { startSampler, systemStatus } from "./system";
@@ -174,6 +181,15 @@ function language(url: URL): string {
   return /^[a-z]{2}$/.test(lang) ? lang : settings.language;
 }
 
+/**
+ * The domain passkeys belong to, when this request can use them: browsers offer WebAuthn only over HTTPS,
+ * and a passkey is tied to the name it was made for — so only on Hata's own domain. "" — not here.
+ */
+function passkeyDomain(req: Request): string {
+  const domain = siteDomain();
+  return domain && requestProto(req) === "https" && requestHost(req) === domain ? domain : "";
+}
+
 const publicSettings = () => ({ ...settings, systemTimezone: timezone(), languages: Object.keys(LANGUAGES) });
 
 // --- Events -----------------------------------------------------------------------------------------
@@ -248,6 +264,7 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
       user: user ? publicUser(user) : null,
       language: settings.language,
       languages: Object.keys(LANGUAGES),
+      passkeys: passkeyDomain(req) !== "",
     });
   }
 
@@ -293,6 +310,32 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
     return json({ user: publicUser(user) }, 200, { "set-cookie": cookie(createSession(user, client)) });
   }
 
+  // signing in with a passkey: the browser signs our challenge with a key only that device holds
+  if (path === "/api/login/passkey/begin" && method === "POST") {
+    const rpId = passkeyDomain(req);
+    return rpId ? json({ challenge: newChallenge("signin"), rpId }) : fail(400, "passkey.unavailable");
+  }
+  if (path === "/api/login/passkey" && method === "POST") {
+    const data = await body(req);
+    const rpId = passkeyDomain(req);
+    if (!rpId) return fail(400, "passkey.unavailable");
+    const blocked = loginBlockedFor(ip);
+    if (blocked > 0) return fail(429, "auth.locked", { seconds: Math.ceil(blocked / 1000) });
+    const challenge = spendChallenge(data.clientDataJSON, "signin");
+    const found = findPasskey(data.id);
+    const verified = challenge && found ? await verifyAssertion(data, found.key, { challenge, rpId }) : null;
+    if (!found || !verified) {
+      registerLoginFailure(ip);
+      recordSignIn(found?.user.name ?? "", ip, "wrongPasskey");
+      return fail(401, "passkey.rejected");
+    }
+    passkeyUsed(found.key, verified.counter);
+    registerLoginSuccess(ip);
+    recordSignIn(found.user.name, ip, "ok");
+    record("auth.signin", { user: found.user.name, detail: ip });
+    return json({ user: publicUser(found.user) }, 200, { "set-cookie": cookie(createSession(found.user, client)) });
+  }
+
   // an invitation link: the page asks what it is for, then creates the account
   if (path === "/api/invite" && method === "GET") {
     const info = inviteInfo(url.searchParams.get("token"));
@@ -319,7 +362,7 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
 
   // ---- the signed-in user's own account ----
   if (path === "/api/account" && method === "GET") {
-    return json({ user: publicUser(user), sessions: listSessions(user, req), recoveryCodes: recoveryCodesLeft(user) });
+    return json({ user: publicUser(user), sessions: listSessions(user, req), recoveryCodes: recoveryCodesLeft(user), passkeys: listPasskeys(user), passkeysHere: passkeyDomain(req) !== "" });
   }
   if (path === "/api/account/password" && method === "POST") {
     const data = await body(req);
@@ -349,6 +392,31 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
     const error = await disableTotp(user, (await body(req)).password);
     if (error) return fail(400, error);
     record("auth.twoFactorOff", { user: user.name });
+    return json({ ok: true });
+  }
+
+  // a new passkey is as good as the password, so adding one asks for the password
+  if (path === "/api/account/passkeys/begin" && method === "POST") {
+    const rpId = passkeyDomain(req);
+    if (!rpId) return fail(400, "passkey.unavailable");
+    if (!(await checkOwnPassword(user, (await body(req)).password))) return fail(400, "auth.wrongPassword");
+    return json({ challenge: newChallenge(`add:${user.id}`), rpId, user: { id: user.id, name: user.name }, algorithms: PASSKEY_ALGORITHMS, exclude: listPasskeys(user).map((k) => k.id) });
+  }
+  if (path === "/api/account/passkeys" && method === "POST") {
+    const data = await body(req);
+    const rpId = passkeyDomain(req);
+    const challenge = rpId && spendChallenge(data.clientDataJSON, `add:${user.id}`);
+    const key = challenge ? await verifyRegistration(data as never, { challenge, rpId }) : null;
+    if (!key) return fail(400, "passkey.rejected");
+    const error = addPasskey(user, key, data.name);
+    if (error) return fail(409, error);
+    record("auth.passkeyAdded", { user: user.name });
+    return json({ ok: true }, 201);
+  }
+  const passkey = /^\/api\/account\/passkeys\/([A-Za-z0-9_-]{1,1400})$/.exec(path);
+  if (passkey && method === "DELETE") {
+    if (!removePasskey(user, passkey[1]!)) return fail(404, "passkey.notFound");
+    record("auth.passkeyRemoved", { user: user.name });
     return json({ ok: true });
   }
 

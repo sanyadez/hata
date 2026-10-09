@@ -187,6 +187,8 @@ const state = {
   user: null,
   lang: "en",
   languages: ["en"],
+  /** Passkeys can be used on this address (the domain, over HTTPS) and in this browser */
+  passkeys: false,
   route: { view: "home" },
   overview: null,
   store: null,
@@ -324,6 +326,40 @@ async function refresh() {
 
 // --- Sign-in and setup --------------------------------------------------------------------------
 
+// --- Passkeys: bytes travel as base64url ----------------------------------------------------------
+
+const toB64url = (buffer) => btoa(String.fromCharCode(...new Uint8Array(buffer))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+const fromB64url = (text) => Uint8Array.from(atob(text.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0));
+/** The browser's own refusals (cancelled, timed out, no such key) are not errors to show as ours */
+const passkeyCancelled = (e) => e instanceof DOMException && ["NotAllowedError", "AbortError"].includes(e.name);
+
+async function passkeySignIn() {
+  const begin = await api("POST", "/api/login/passkey/begin", {});
+  const cred = await navigator.credentials.get({ publicKey: { challenge: fromB64url(begin.challenge), rpId: begin.rpId, userVerification: "required", timeout: 120000 } });
+  const r = cred.response;
+  return api("POST", "/api/login/passkey", { id: toB64url(cred.rawId), clientDataJSON: toB64url(r.clientDataJSON), authenticatorData: toB64url(r.authenticatorData), signature: toB64url(r.signature) });
+}
+
+async function passkeyCreate(password, name) {
+  const begin = await api("POST", "/api/account/passkeys/begin", { password });
+  const cred = await navigator.credentials.create({
+    publicKey: {
+      challenge: fromB64url(begin.challenge),
+      rp: { id: begin.rpId, name: "Hata" },
+      user: { id: new TextEncoder().encode(begin.user.id), name: begin.user.name, displayName: begin.user.name },
+      pubKeyCredParams: begin.algorithms.map((alg) => ({ type: "public-key", alg })),
+      authenticatorSelection: { residentKey: "required", userVerification: "required" },
+      excludeCredentials: begin.exclude.map((id) => ({ type: "public-key", id: fromB64url(id) })),
+      attestation: "none",
+      timeout: 120000,
+    },
+  });
+  const r = cred.response;
+  const publicKey = r.getPublicKey?.();
+  if (!publicKey) throw new ApiError(400, "passkey.rejected");
+  await api("POST", "/api/account/passkeys", { name, clientDataJSON: toB64url(r.clientDataJSON), authenticatorData: toB64url(r.getAuthenticatorData()), publicKey: toB64url(publicKey), alg: r.getPublicKeyAlgorithm() });
+}
+
 function field(label, input, hint) {
   return h("label", { class: "field" }, h("span", { class: "label" }, label), input, hint && h("span", { class: "hint" }, hint));
 }
@@ -428,6 +464,22 @@ function authScreen() {
     codeField,
     error,
     submit,
+    !setup &&
+      state.passkeys &&
+      button(t("passkey.signIn"), {
+        class: "wide",
+        onclick: async () => {
+          error.textContent = "";
+          try {
+            const res = await passkeySignIn();
+            history.replaceState(null, "", location.pathname + location.hash);
+            state.user = res.user;
+            await enter();
+          } catch (err) {
+            if (!passkeyCancelled(err)) error.textContent = errorText(err);
+          }
+        },
+      }, "lock"),
   );
   $app.replaceChildren(h("main", { class: "center" }, form));
   (setup && !tokenFromLink ? token : name).focus();
@@ -2047,7 +2099,7 @@ function recoveryDialog(codes) {
   );
 }
 
-function passwordPrompt(title, lead, confirmLabel, action) {
+function passwordPrompt(title, lead, confirmLabel, action, extra = null, kind = "danger") {
   const password = passwordInput("current-password");
   const error = h("p", { class: "error", role: "alert" });
   const dialog = openDialog(
@@ -2069,8 +2121,9 @@ function passwordPrompt(title, lead, confirmLabel, action) {
       h("h2", null, title),
       h("p", { class: "muted" }, lead),
       field(t("auth.password"), password),
+      extra,
       error,
-      h("footer", null, closeButton(() => dialog, t("common.cancel")), h("button", { class: "btn danger" }, confirmLabel)),
+      h("footer", null, closeButton(() => dialog, t("common.cancel")), h("button", { class: "btn " + kind }, confirmLabel)),
     ),
   );
   password.focus();
@@ -2148,8 +2201,46 @@ function accountSection() {
           : button(t("twofa.setUp"), { class: "primary", onclick: twoFactorSetup }),
       ),
     ),
+    passkeysCard(account),
     sessionsCard,
   ];
+}
+
+function passkeysCard(account) {
+  const here = account.passkeysHere && !!window.PublicKeyCredential;
+  if (!here && !account.passkeys.length) return h("section", { class: "card pad" }, h("h2", null, t("passkey.title")), h("p", { class: "muted" }, t("passkey.needDomain")));
+  const add = () => {
+    const name = h("input", { maxLength: 40, placeholder: deviceName(navigator.userAgent) });
+    passwordPrompt(t("passkey.addTitle"), t("passkey.addLead"), t("passkey.add"), async (password) => {
+      try {
+        await passkeyCreate(password, name.value.trim() || deviceName(navigator.userAgent));
+      } catch (e) {
+        if (passkeyCancelled(e)) return;
+        throw e;
+      }
+      toast(t("passkey.added"));
+      void loadSettings();
+    }, field(t("passkey.name"), name, t("passkey.nameHint")), "primary");
+  };
+  return h(
+    "section",
+    { class: "card pad" },
+    h("div", { class: "section-head" }, h("h2", null, t("passkey.title")), here && button(t("passkey.add"), { class: "small primary", onclick: add }, "plus")),
+    h("p", { class: "muted small" }, t(here ? "passkey.lead" : "passkey.needDomain")),
+    account.passkeys.map((key) =>
+      settingRow(
+        key.name || t("passkey.unnamed"),
+        [t("passkey.created", { date: new Date(key.createdAt).toLocaleDateString(state.lang, { day: "numeric", month: "short", year: "numeric" }) }), key.lastUsed && t("passkey.used", { time: ago(key.lastUsed) })].filter(Boolean).join(" · "),
+        button(t("app.remove"), {
+          class: "small",
+          onclick: async () => {
+            await api("DELETE", `/api/account/passkeys/${key.id}`).catch((e) => toast(errorText(e), "error"));
+            void loadSettings();
+          },
+        }),
+      ),
+    ),
+  );
 }
 
 async function loadUsers() {
@@ -2419,7 +2510,7 @@ async function main() {
     $app.replaceChildren(h("main", { class: "center" }, h("p", { class: "banner" }, t("error.network"))));
     return setTimeout(main, 3000);
   }
-  Object.assign(state, { version: server.version, setup: server.setup, user: server.user, languages: server.languages });
+  Object.assign(state, { version: server.version, setup: server.setup, user: server.user, languages: server.languages, passkeys: !!server.passkeys && !!window.PublicKeyCredential });
   await loadLanguage(pickLanguage(server));
   if (state.user) await enter();
   else render();
