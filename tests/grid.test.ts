@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { fit, move, narrow, settle } from "../src/ui/grid.js";
+import { fit, move, narrow, reflow, settle } from "../src/ui/grid.js";
 
 const block = (id: string, x: number, y: number, w: number, h = 2) => ({ id, x, y, w, h });
 const rows = (blocks: { id: string; x: number; y: number }[]) => Object.fromEntries(blocks.map((b) => [b.id, [b.x, b.y]]));
@@ -54,4 +54,11 @@ test("on a narrow screen the blocks follow one another, small ones two to a row"
   const phone = narrow(board, small);
   expect(phone.map((b) => [b.id, b.x, b.y, b.w])).toEqual([["cpu", 0, 0, 1], ["memory", 1, 0, 1], ["disk", 0, 3, 1], ["group", 0, 6, 2], ["attention", 0, 16, 2]]);
   expect(overlapping(phone)).toBe(false);
+});
+
+test("on a window too narrow for twelve columns the blocks fill rows of six, in the same order", () => {
+  const board = [block("a", 0, 0, 2), block("b", 2, 0, 2), block("c", 4, 0, 2), block("disk", 6, 0, 3), block("d", 9, 0, 2), block("group", 1, 1, 9, 10), block("list", 0, 2, 12, 5)];
+  const half = reflow(board, 6, (b) => b.w);
+  expect(half.map((b) => [b.id, b.x, b.y, b.w])).toEqual([["a", 0, 0, 2], ["b", 2, 0, 2], ["c", 4, 0, 2], ["disk", 0, 2, 3], ["d", 3, 2, 2], ["group", 0, 4, 6], ["list", 0, 14, 6]]);
+  expect(overlapping(half)).toBe(false);
 });

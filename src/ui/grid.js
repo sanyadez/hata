@@ -42,18 +42,24 @@ export function move(blocks, id, x, y, columns) {
 }
 
 /**
- * The same board on a narrow screen: two columns, the blocks one after another in the order they have
- * on the wide one (top to bottom, left to right). A `small` block takes one column, any other both.
+ * The same board where there is no room for its columns: `columns` of them, the blocks one after
+ * another in the order they have on the wide board (top to bottom, left to right), each `width(block)`
+ * columns wide, a row begun anew when the next block does not fit.
  */
-export function narrow(blocks, small) {
+export function reflow(blocks, columns, width) {
   const order = [...blocks].sort((a, b) => a.y - b.y || a.x - b.x);
   let column = 0;
+  let row = 0;
   return settle(
-    order.map((block, row) => {
-      const one = small(block.id);
-      const placed = { ...block, x: one ? column : 0, w: one ? 1 : 2, y: row };
-      column = one ? 1 - column : 0;
+    order.map((block) => {
+      const w = Math.min(columns, Math.max(1, width(block)));
+      if (column + w > columns) (column = 0), row++;
+      const placed = { ...block, x: column, w, y: row };
+      column += w;
       return placed;
     }),
   );
 }
+
+/** On a phone: two columns, a `small` block takes one, any other both */
+export const narrow = (blocks, small) => reflow(blocks, 2, (block) => (small(block.id) ? 1 : 2));

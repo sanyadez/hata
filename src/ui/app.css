@@ -674,6 +674,7 @@ input[type="range"] { accent-color: var(--accent); width: 100%; }
    height stand close under one another. Column and rows of every block are set by the script. */
 #board { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); grid-auto-rows: 8px; column-gap: 16px; row-gap: 0; align-items: start; position: relative; }
 #board.narrow { grid-template-columns: repeat(2, minmax(0, 1fr)); column-gap: 10px; }
+#board.half { grid-template-columns: repeat(6, minmax(0, 1fr)); }
 /* while heights are taken every block stands in a row of its own making */
 #board.measuring > * { grid-row: auto !important; align-self: start !important; margin-bottom: 0 !important; }
 /* a block fills the rows it was given, less the room under it: blocks of one row end level */
@@ -689,7 +690,9 @@ input[type="range"] { accent-color: var(--accent); width: 100%; }
 .widget.small .stat-hint { grid-area: hint; text-align: right; align-self: center; }
 .widget.small .stat-row { grid-area: row; }
 .widget.small .stat-value strong { font-size: 21px; }
-.widget.small { overflow: hidden; }
+.widget.small { overflow: hidden; min-height: 80px; }
+/* every tile is 80px tall: a row of tiles and numbers is one line whatever is in it */
+.tile { min-height: 80px; }
 
 /* what an administrator can do to a block: take it by its heading (a number by any part), pull its right
    edge to make it wider or narrower, take it off */

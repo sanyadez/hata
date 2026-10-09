@@ -1,7 +1,7 @@
 // Hata web UI. No build step and no framework: the DOM is built with h() below, which only ever sets
 // text and attributes — store content (titles, descriptions) never reaches the page as markup.
 
-import { fit, move, narrow, settle } from "/grid.js";
+import { fit, move, narrow, reflow, settle } from "/grid.js";
 
 // --- Small tools --------------------------------------------------------------------------------
 
@@ -1170,7 +1170,7 @@ function boardBlocks(layout) {
 /** The size of the board's cells right now: how wide a column with its gap is, how many there are */
 function boardCells() {
   const board = document.getElementById("board");
-  const columns = board.classList.contains("narrow") ? 2 : COLUMNS;
+  const columns = board.classList.contains("narrow") ? 2 : board.classList.contains("half") ? COLUMNS / 2 : COLUMNS;
   const gap = parseFloat(getComputedStyle(board).columnGap) || 0;
   return { board, columns, step: (board.clientWidth + gap) / columns, rect: board.getBoundingClientRect() };
 }
@@ -1192,11 +1192,17 @@ function showBoard(blocks) {
 function layoutBoard(blocks = homeUi.blocks) {
   const board = document.getElementById("board");
   if (!board || !homeUi.els) return;
-  const slim = board.clientWidth < 720;
+  // Twelve columns need room. On a window too narrow for them the board has six and the blocks fill
+  // its rows one after another, each as many columns wide as on the wide board (so twice the share of
+  // the width); on a phone it has two. The board is arranged where all twelve columns are there.
+  const slim = board.clientWidth < 700;
+  const half = !slim && board.clientWidth < 1136;
   board.classList.toggle("narrow", slim);
+  board.classList.toggle("half", half);
   // a block that has nothing to show (no temperature on this machine) takes no room
   let placed = blocks.filter((block) => homeUi.els.has(block.id) && !homeUi.els.get(block.id).hidden);
   if (slim) placed = narrow(placed.map((block) => ({ ...block, h: 1 })), (id) => id in BLOCKS && BLOCKS[id].small);
+  if (half) placed = reflow(placed.map((block) => ({ ...block, h: 1 })), COLUMNS / 2, (block) => block.w);
   board.classList.add("measuring");
   for (const block of placed) homeUi.els.get(block.id).style.gridColumn = `${block.x + 1} / span ${block.w}`;
   const tall = placed.map((block) => ({ ...block, h: Math.max(1, Math.ceil((homeUi.els.get(block.id).offsetHeight + BOARD_GAP) / BOARD_ROW)) }));
@@ -1231,6 +1237,8 @@ function takeBlock(layout, id) {
 
 /** The board as it is shown, as the layout keeps it: where every block stands, without the heights */
 const boardAsSaved = (blocks) => blocks.map(({ id, x, y, w }) => ({ id, x, y, w }));
+/** Blocks are moved and sized where the board has all its columns; narrower, they only follow one another */
+const boardIsWide = () => !document.getElementById("board")?.matches(".narrow, .half");
 
 /** Where on the board the block in the air is aimed: the column and row of its top left corner */
 function boardAim(drag) {
@@ -1246,9 +1254,7 @@ const BLOCK_DRAG = {
   name: "widget",
   ignore: "a, input, button:not(.block-grip)",
   find: (drag) => {
-    const { board } = boardCells();
-    // on a narrow screen the blocks follow one another: there is nowhere else for one to go
-    if (board.classList.contains("narrow")) return null;
+    if (!boardIsWide()) return null;
     const aim = boardAim(drag);
     const base = homeUi.board.some((block) => block.id === drag.key) ? homeUi.board : [...homeUi.board, { ...drag.fresh, h: drag.rows }];
     const preview = move(base, drag.key, aim.x, aim.y, aim.columns);
@@ -1266,7 +1272,9 @@ const NUMBER_DRAG = {
   name: "widget",
   ignore: "button, a, input",
   find: (drag) => {
-    if (document.elementFromPoint(drag.x, drag.y)?.closest(".tiles[data-group]")) {
+    // among the tiles of a group with a heading it becomes a tile; tiles standing by themselves are
+    // blocks like itself, and next to them it stays one
+    if (document.elementFromPoint(drag.x, drag.y)?.closest(".group:not(.bare) > .tiles[data-group]")) {
       // among tiles it is a tile that joins no folder
       const target = dropTarget({ ...drag, item: { type: "widget", id: drag.key } });
       return target && !target.slot ? { ...target, tile: true } : null;
@@ -1433,7 +1441,7 @@ function dropTarget(drag) {
   if (list && !over) return { el: list, cls: "drop-end", group: list.dataset.group };
   // free room of the board: the tile will stand there by itself
   const { board, rect, step, columns } = boardCells();
-  if (open || board.classList.contains("narrow") || (under !== board && under.closest(".widget")) || drag.y < rect.top || drag.x < rect.left || drag.x > rect.right) return null;
+  if (open || !boardIsWide() || (under !== board && under.closest(".widget")) || drag.y < rect.top || drag.x < rect.left || drag.x > rect.right) return null;
   const cell = fit(Math.floor((drag.x - rect.left) / step), 2, columns);
   return { slot: { x: cell.x, y: Math.max(0, Math.round((drag.y - rect.top) / BOARD_ROW)), w: cell.w } };
 }
@@ -1680,7 +1688,8 @@ function renderBoard() {
  */
 function boardResizing(board) {
   const edgeOf = (e) => {
-    if (e.pointerType !== "mouse" || board.classList.contains("narrow") || homeUi.drag) return null;
+    // a width is a number of the twelve columns: it is set where they are all there
+    if (e.pointerType !== "mouse" || !boardIsWide() || homeUi.drag) return null;
     const el = [...homeUi.els.values()].find((block) => block.contains(e.target)) ?? null;
     return el && el.getBoundingClientRect().right - e.clientX < 9 ? el : null;
   };
