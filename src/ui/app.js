@@ -175,9 +175,17 @@ function ago(ts) {
 function openDialog(className, ...content) {
   const dialog = h("dialog", { class: className }, ...content);
   dialog.addEventListener("close", () => dialog.remove());
-  // a click on the backdrop (the dialog element itself, outside its content box) closes it
+  // a click on the backdrop (the dialog element itself, outside its content box) closes it — a press
+  // that began inside and was let go outside (selecting text, a slip of the hand) is not such a click
+  // the dialog's own padding is the dialog element too, so "outside" is told by where the pointer is
+  const outside = (e) => {
+    const box = dialog.getBoundingClientRect();
+    return e.target === dialog && (e.clientX < box.left || e.clientX > box.right || e.clientY < box.top || e.clientY > box.bottom);
+  };
+  let pressedOutside = false;
+  dialog.addEventListener("pointerdown", (e) => (pressedOutside = outside(e)));
   dialog.addEventListener("click", (e) => {
-    if (e.target === dialog) dialog.close();
+    if (pressedOutside && outside(e)) dialog.close();
   });
   document.body.append(dialog);
   dialog.showModal();
