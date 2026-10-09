@@ -54,7 +54,8 @@ import {
 import { bus } from "./bus";
 import { DATA_DIR, listenAddress, settings, timezone, updateSettings } from "./config";
 import { dockerInfo, watchEvents } from "./docker";
-import { accessOf, dropAccess, dropUser, gateTarget, mayOpen, setAccess, startGates } from "./gate";
+import { accessOf, dropAccess, dropUser, gateTarget, guard, mayOpen, MAX_APP_BODY, page, passToApp, setAccess, startGates, tunnelHandlers } from "./gate";
+import { appHost, appLabel, classifyHost, clientIp, cookieDomain, requestHost, requestProto, siteDomain } from "./site";
 import { qrMatrix } from "./qr";
 import { ARCH, catalogue, scheduleStoreSync, syncStore } from "./store";
 import { startSampler, systemStatus } from "./system";
@@ -164,7 +165,6 @@ function sameOrigin(req: Request, url: URL): boolean {
   }
 }
 
-const isHttps = (req: Request, url: URL): boolean => url.protocol === "https:" || req.headers.get("x-forwarded-proto") === "https";
 
 function language(url: URL): string {
   const lang = url.searchParams.get("lang") ?? "";
@@ -231,7 +231,10 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
   const method = req.method;
   const write = method !== "GET" && method !== "HEAD";
   if (write && !sameOrigin(req, url)) return fail(403, "request.crossSite");
-  const ip = server.requestIP(req)?.address ?? "unknown";
+  const ip = clientIp(req, server);
+  // the API takes small JSON bodies; the server's own limit is the apps' (they upload files through it)
+  if (write && Number(req.headers.get("content-length") ?? 0) > MAX_API_BODY) return fail(413, "request.tooLarge");
+  const cookie = (token: string) => sessionCookie(token, requestProto(req) === "https", cookieDomain(requestHost(req)));
   const client = { ip, userAgent: req.headers.get("user-agent") ?? "" };
 
   if (path === "/api/state" && method === "GET") {
@@ -256,7 +259,7 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
     }
     console.log(`Administrator "${result.name}" created from ${ip}`);
     record("auth.setup", { user: result.name, detail: ip });
-    return json({ user: publicUser(result) }, 200, { "set-cookie": sessionCookie(createSession(result, client), isHttps(req, url)) });
+    return json({ user: publicUser(result) }, 200, { "set-cookie": cookie(createSession(result, client)) });
   }
 
   if (path === "/api/login" && method === "POST") {
@@ -284,7 +287,7 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
     registerLoginSuccess(ip);
     recordSignIn(user.name, ip, "ok");
     record("auth.signin", { user: user.name, detail: ip });
-    return json({ user: publicUser(user) }, 200, { "set-cookie": sessionCookie(createSession(user, client), isHttps(req, url)) });
+    return json({ user: publicUser(user) }, 200, { "set-cookie": cookie(createSession(user, client)) });
   }
 
   // an invitation link: the page asks what it is for, then creates the account
@@ -302,7 +305,7 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
       return fail(result === "users.nameTaken" ? 409 : 400, result);
     }
     record("users.joined", { user: result.name, detail: ip });
-    return json({ user: publicUser(result) }, 200, { "set-cookie": sessionCookie(createSession(result, client), isHttps(req, url)) });
+    return json({ user: publicUser(result) }, 200, { "set-cookie": cookie(createSession(result, client)) });
   }
 
   // ---- everything below needs a session ----
@@ -373,7 +376,7 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
 
   if (path === "/api/logout" && method === "POST") {
     destroySession(req);
-    return json({ ok: true }, 200, { "set-cookie": clearSessionCookie() });
+    return json({ ok: true }, 200, { "set-cookie": clearSessionCookie(cookieDomain(requestHost(req))) });
   }
 
   if (path === "/api/invites") {
@@ -409,6 +412,8 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
       docker,
       apps,
       arch: ARCH,
+      // with a domain, apps are opened at <label>.<domain> when Hata itself is opened by that domain
+      site: { domain: siteDomain(), mode: settings.https.mode },
       attention: admin ? attention({ system, docker, apps, activity: recent(100) }) : [],
       // who signed in from where, and what was installed by whom, is the administrators' business
       activity: admin ? recent(8) : [],
@@ -427,6 +432,12 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
       const error = updateSettings(await body(req));
       return error ? fail(400, error) : json(publicSettings());
     }
+  }
+
+  if (path === "/api/https/check" && method === "POST") {
+    const domain = siteDomain();
+    if (!domain) return fail(400, "settings.needDomain");
+    return json(await Promise.all([checkDomain(domain), checkDomain(`hata-check.${domain}`)]));
   }
 
   if (path === "/api/backups" && method === "GET") return json(backupOverview(language(url)));
@@ -502,8 +513,52 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
   return fail(404, "request.notFound");
 }
 
+const MAX_API_BODY = 2 * 1024 * 1024;
+
+/**
+ * Asks the domain for this very process, the way a browser would: does the name lead here, over HTTPS,
+ * with the host name kept? Run for Hata's own name and for a made-up subdomain (the apps' addresses).
+ */
+async function checkDomain(host: string): Promise<{ host: string; ok: boolean; problem?: string }> {
+  try {
+    const res = await fetch(`https://${host}/.well-known/hata-check`, { signal: AbortSignal.timeout(8000), redirect: "manual" });
+    if (!res.ok) return { host, ok: false, problem: `answered ${res.status}` };
+    const seen = (await res.json().catch(() => null)) as { instance?: string; host?: string; proto?: string } | null;
+    if (seen?.instance !== INSTANCE) return { host, ok: false, problem: "the name leads to another server" };
+    if (seen.host !== host) return { host, ok: false, problem: `the proxy passes the host name as "${seen.host}", not as it was asked` };
+    if (seen.proto !== "https") return { host, ok: false, problem: "the proxy does not send X-Forwarded-Proto: https" };
+    return { host, ok: true };
+  } catch (e) {
+    return { host, ok: false, problem: e instanceof Error ? e.message : String(e) };
+  }
+}
+
+/** A random mark of this process: the HTTPS check asks the domain for it to see that the domain leads here */
+const INSTANCE = crypto.randomUUID();
+
+/** A request for `<app>.<domain>`: the app itself, behind sign-in if the app asks for it */
+async function serveApp(req: Request, server: Server, label: string): Promise<Response> {
+  const apps = await listApps("en");
+  const app = apps.find((a) => appLabel(a.name) === label);
+  if (!app) return page(404, "No such app", `Nothing is installed at ${requestHost(req)}.`);
+  const access = accessOf(app.name);
+  const upstream = access.protect && access.upstream ? access.upstream : Number(app.port);
+  if (!upstream) return page(404, "No web page", `${app.title} has no web port to open.`);
+  const proto = requestProto(req);
+  const url = new URL(req.url);
+  if (access.protect || access.allowed !== "all") {
+    const here = `${proto}://${req.headers.get("host") ?? url.host}${url.pathname}${url.search}`;
+    const refusal = guard(req, app.name, `${proto}://${siteDomain()}/?next=${encodeURIComponent(here)}`);
+    if (refusal) return refusal;
+  }
+  return passToApp(req, server, upstream, proto, clientIp(req, server));
+}
+
 async function handle(req: Request, server: Server): Promise<Response> {
   const url = new URL(req.url);
+  if (url.pathname === "/.well-known/hata-check") return json({ instance: INSTANCE, host: requestHost(req), proto: requestProto(req) });
+  const host = classifyHost(requestHost(req));
+  if (host.kind === "app") return serveApp(req, server, host.label);
   if (!url.pathname.startsWith("/api/")) {
     if (req.method !== "GET" && req.method !== "HEAD") return fail(405, "request.notFound");
     return serveStatic(req, url.pathname) ?? new Response("Not found", { status: 404, headers: SECURITY_HEADERS });
@@ -545,7 +600,7 @@ export async function serve(): Promise<void> {
   const { port, hostname } = listenAddress();
   let server: Server;
   try {
-    server = Bun.serve({ port, hostname, maxRequestBodySize: 2 * 1024 * 1024, fetch: handle });
+    server = Bun.serve({ port, hostname, maxRequestBodySize: MAX_APP_BODY, fetch: handle, websocket: tunnelHandlers });
   } catch (e) {
     console.error(`Cannot listen on ${hostname}:${port}: ${e instanceof Error ? e.message : e}`);
     console.error("Set HATA_PORT to use another port.");

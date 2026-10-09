@@ -238,7 +238,9 @@ function nextAddress() {
   const next = new URLSearchParams(location.search).get("next");
   try {
     const url = new URL(next);
-    return url.hostname === location.hostname && /^https?:$/.test(url.protocol) ? url.href : null;
+    // an app's own address under our domain, or another port of this host
+    const ours = url.hostname === location.hostname || url.hostname.endsWith("." + location.hostname);
+    return ours && /^https?:$/.test(url.protocol) ? url.href : null;
   } catch {
     return null;
   }
@@ -553,14 +555,22 @@ function appIcon(app, size = "") {
   return h("img", { class: `app-icon ${size}`, src: app.icon, alt: "", loading: "lazy", referrerPolicy: "no-referrer", onerror: (e) => e.target.replaceWith(letter) });
 }
 
+/** The app's own name under the domain, when Hata itself is opened by that domain; otherwise null */
+function appDomain(app) {
+  const domain = state.overview?.site?.domain;
+  return domain && location.hostname === domain && !app.hostname ? `${app.name.replace(/_/g, "-")}.${domain}` : null;
+}
+
 function appUrl(app) {
   if (!app.port) return null;
+  const host = appDomain(app);
+  if (host) return `${location.protocol}//${host}${app.index}`;
   return `${app.scheme}://${app.hostname || location.hostname}:${app.port}${app.index}`;
 }
 
 /** What the tile shows under the name: where the app answers */
 function appAddress(app) {
-  return app.port ? `${app.hostname || location.hostname}:${app.port}` : "";
+  return app.port ? (appDomain(app) ?? `${app.hostname || location.hostname}:${app.port}`) : "";
 }
 
 const isUp = (app) => app.status === "running" || app.status === "partial";
@@ -1471,6 +1481,7 @@ const SECTIONS = [
   { id: "general", icon: "sliders" },
   { id: "apps", icon: "grid", admin: true },
   { id: "stores", icon: "store", admin: true },
+  { id: "https", icon: "lock", admin: true },
   { id: "about", icon: "info" },
 ];
 const sections = () => SECTIONS.filter((item) => !item.admin || isAdmin());
@@ -1538,6 +1549,7 @@ function settingsSection(section) {
       ),
     ];
   }
+  if (section === "https") return httpsSection(save, error);
   if (section === "stores") {
     const stores = state.store?.stores ?? [];
     return [
@@ -1559,6 +1571,64 @@ function settingsSection(section) {
       settingRow("Docker", d?.available ? "" : (d?.error ?? ""), h("span", { class: "mono" }, d?.available ? `${d.version} · compose ${d.compose}` : "—")),
       settingRow(t("settings.source"), "", h("a", { class: "link", href: "https://github.com/sanyadez/hata", target: "_blank", rel: "noopener noreferrer" }, "github.com/sanyadez/hata", icon("external"))),
     ),
+  ];
+}
+
+const HTTPS_MODES = ["off", "proxy"];
+/** Settings → HTTPS and domain: how Hata is reached */
+function httpsSection(save, error) {
+  const https = state.settings.https;
+  const mode = h("select", null, HTTPS_MODES.map((id) => h("option", { value: id, selected: https.mode === id }, t("https.mode." + id))));
+  const domain = h("input", { value: https.domain, placeholder: "home.example.com", spellcheck: false, autocapitalize: "none", class: "mono" });
+  const email = h("input", { type: "email", value: https.email, placeholder: "you@example.com", spellcheck: false });
+  const explain = h("p", { class: "muted small" });
+  const emailRow = settingRow(t("https.email"), t("https.emailHint"), email);
+  const domainRow = settingRow(t("https.domain"), t("https.domainHint"), domain);
+  const results = h("div", { class: "stack" });
+  const sync = () => {
+    explain.textContent = t("https.explain." + mode.value);
+    domainRow.hidden = mode.value === "off";
+    emailRow.hidden = mode.value !== "acme";
+  };
+  mode.addEventListener("change", sync);
+  sync();
+  const check = button(t("https.check"), {
+    onclick: async () => {
+      check.disabled = true;
+      results.replaceChildren(h("p", { class: "muted small" }, t("https.checking")));
+      try {
+        const list = await api("POST", "/api/https/check", {});
+        results.replaceChildren(...list.map((r) => h("div", { class: "activity-item" }, icon(r.ok ? "check" : "x", r.ok ? "ok" : "danger"), h("div", { class: "grow" }, h("div", { class: "mono" }, r.host), !r.ok && h("div", { class: "muted small" }, r.problem)))));
+      } catch (e) {
+        results.replaceChildren(h("p", { class: "error" }, errorText(e)));
+      }
+      check.disabled = false;
+    },
+  });
+  const here = state.overview?.site?.domain;
+  return [
+    h(
+      "form",
+      {
+        class: "card pad",
+        onsubmit: async (e) => {
+          e.preventDefault();
+          await save({ https: { mode: mode.value, domain: domain.value.trim(), email: email.value.trim() } });
+          await refresh();
+          render();
+          void loadSettings();
+        },
+      },
+      h("h2", null, t("settings.https")),
+      settingRow(t("https.mode"), "", mode),
+      explain,
+      domainRow,
+      emailRow,
+      error,
+      h("footer", null, h("button", { class: "btn primary" }, t("settings.save"))),
+    ),
+    here && h("section", { class: "card pad" }, h("div", { class: "section-head" }, h("h2", null, t("https.checkTitle")), check), h("p", { class: "muted small" }, t("https.checkLead", { domain: here })), results),
+    here && h("section", { class: "card pad" }, h("h2", null, t("https.addresses")), h("p", { class: "muted small" }, t("https.addressesLead")), settingRow("Hata", "", h("a", { class: "link mono", href: `https://${here}/` }, here)), (state.overview?.apps ?? []).filter((a) => a.port).map((a) => settingRow(a.title, a.protected ? t("access.protected") : "", h("a", { class: "link mono", href: `https://${a.name.replace(/_/g, "-")}.${here}/`, target: "_blank", rel: "noopener noreferrer" }, `${a.name.replace(/_/g, "-")}.${here}`)))),
   ];
 }
 

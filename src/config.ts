@@ -45,6 +45,21 @@ export interface Settings {
   backup: BackupSettings;
   /** Who may open which app, and which apps are behind Hata's sign-in; an app not listed is open to members */
   access: Record<string, AppAccess>;
+  https: HttpsSettings;
+}
+
+export interface HttpsSettings {
+  /**
+   * off — plain HTTP, reached by address and port;
+   * proxy — a reverse proxy of the user's (nginx, Caddy, Traefik) holds the certificate and passes
+   *   requests on to Hata over HTTP;
+   * acme — Hata gets certificates from Let's Encrypt and serves HTTPS itself
+   */
+  mode: "off" | "proxy" | "acme";
+  /** The name Hata is reached by; apps are at `<app>.<domain>` */
+  domain: string;
+  /** Contact for the certificate authority (acme) */
+  email: string;
 }
 
 export interface AppAccess {
@@ -82,6 +97,7 @@ const DEFAULTS: Settings = {
   stores: [{ id: "casaos", url: "https://github.com/IceWhaleTech/CasaOS-AppStore" }],
   backup: { enabled: false, time: "03:00", keep: 7, dir: "", beforeUpdate: true, exclude: [] },
   access: {},
+  https: { mode: "off", domain: "", email: "" },
 };
 
 const saved = readJsonFile<Partial<Settings>>(SETTINGS_FILE, {}, isPlainObject);
@@ -92,6 +108,7 @@ export const settings: Settings = {
   // a settings file written by an older version has no such section, or only part of it
   backup: { ...DEFAULTS.backup, ...(isPlainObject(saved.backup) ? saved.backup : {}) },
   access: isPlainObject(saved.access) ? (saved.access as Record<string, AppAccess>) : {},
+  https: { ...DEFAULTS.https, ...(isPlainObject(saved.https) ? saved.https : {}) },
 };
 
 /** Writes the settings after a change made in place (the access rules are edited that way) */
@@ -102,6 +119,9 @@ export function saveSettings(): void {
 export function timezone(): string {
   return settings.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
 }
+
+/** A host name with at least two labels: letters, digits and hyphens */
+export const DOMAIN_RE = /^(?=.{4,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
 
 /** Validates and applies a partial update; returns an error code or null */
 export function updateSettings(patch: Record<string, unknown>): string | null {
@@ -157,6 +177,26 @@ export function updateSettings(patch: Record<string, unknown>): string | null {
       backup.exclude = [...new Set(b.exclude as string[])];
     }
     next.backup = backup;
+  }
+  if ("https" in patch) {
+    const h = patch.https;
+    if (!isPlainObject(h)) return "settings.badHttps";
+    const https = { ...next.https };
+    if ("mode" in h) {
+      if (h.mode !== "off" && h.mode !== "proxy" && h.mode !== "acme") return "settings.badHttps";
+      https.mode = h.mode;
+    }
+    if ("domain" in h) {
+      const domain = typeof h.domain === "string" ? h.domain.trim().toLowerCase() : null;
+      if (domain === null || (domain !== "" && !DOMAIN_RE.test(domain))) return "settings.badDomain";
+      https.domain = domain;
+    }
+    if ("email" in h) {
+      if (typeof h.email !== "string" || (h.email !== "" && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(h.email))) return "settings.badEmail";
+      https.email = h.email.trim();
+    }
+    if (https.mode !== "off" && !https.domain) return "settings.needDomain";
+    next.https = https;
   }
   if ("language" in patch) {
     if (typeof patch.language !== "string" || !/^[a-z]{2}$/.test(patch.language)) return "settings.badLanguage";

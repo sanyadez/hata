@@ -213,13 +213,16 @@ export function destroySession(req: Request): void {
   saveSessions();
 }
 
-/** `secure` — the request came over HTTPS, so the cookie must not travel over plain HTTP */
-export function sessionCookie(token: string, secure: boolean): string {
-  return `${COOKIE_NAME}=${token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${SESSION_TTL_MS / 1000}${secure ? "; Secure" : ""}`;
+/**
+ * `secure` — the request came over HTTPS, so the cookie must not travel over plain HTTP;
+ * `domain` — also send it to subdomains (the apps' addresses)
+ */
+export function sessionCookie(token: string, secure: boolean, domain?: string): string {
+  return `${COOKIE_NAME}=${token}; HttpOnly; Path=/; SameSite=Lax; Max-Age=${SESSION_TTL_MS / 1000}${secure ? "; Secure" : ""}${domain ? "; Domain=" + domain : ""}`;
 }
 
-export function clearSessionCookie(): string {
-  return `${COOKIE_NAME}=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0`;
+export function clearSessionCookie(domain?: string): string {
+  return `${COOKIE_NAME}=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0${domain ? "; Domain=" + domain : ""}`;
 }
 
 export const publicUser = (u: User) => ({ id: u.id, name: u.name, role: u.role, twoFactor: !!u.totp });

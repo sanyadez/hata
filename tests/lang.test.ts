@@ -31,8 +31,9 @@ test("strings chosen at run time exist for every value the server can send", () 
     ...["admin", "member", "guest"].map((v) => `user.role.${v}`),
     ...["ok", "wrongPassword", "wrongCode", "locked"].map((v) => `signins.${v}`),
     ...["noPort", "hostNetwork"].map((v) => `access.cannot.${v}`),
+    ...["off", "proxy", "acme"].flatMap((v) => [`https.mode.${v}`, `https.explain.${v}`]),
     ...["manual", "schedule", "pre-update"].map((v) => `backup.reason.${v}`),
-    ...["account", "general", "apps", "stores", "about"].map((v) => `settings.${v}`),
+    ...["account", "general", "apps", "stores", "https", "about"].map((v) => `settings.${v}`),
     ...["overview", "logs", "compose", "backups"].map((v) => `app.tab.${v}`),
   ];
   expect(need.filter((key) => !(key in en))).toEqual([]);

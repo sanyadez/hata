@@ -102,7 +102,10 @@ function freeLocalPort(preferred: number): number {
 
 // --- The listeners ----------------------------------------------------------------------------------
 
-interface Tunnel {
+/** The largest request body passed on to an app */
+export const MAX_APP_BODY = 64 * 1024 ** 3;
+
+export interface Tunnel {
   /** The upstream WebSocket and what arrived for it before it opened */
   upstream: WebSocket;
   queue: (string | Uint8Array)[];
@@ -113,96 +116,111 @@ const listeners = new Map<string, Server>();
 const HOP_HEADERS = ["connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailer", "transfer-encoding", "upgrade", "content-length"];
 
 /** The request headers for the app: without our own cookie, with the usual proxy headers */
-function forwardHeaders(req: Request, ip: string): Headers {
+function forwardHeaders(req: Request, ip: string, proto: string): Headers {
   const headers = new Headers(req.headers);
   const cookies = (headers.get("cookie") ?? "").split(/;\s*/).filter((c) => c && !c.startsWith(COOKIE_NAME + "="));
   if (cookies.length) headers.set("cookie", cookies.join("; "));
   else headers.delete("cookie");
   headers.set("x-forwarded-for", [req.headers.get("x-forwarded-for"), ip].filter(Boolean).join(", "));
   headers.set("x-forwarded-host", req.headers.get("host") ?? "");
-  headers.set("x-forwarded-proto", "http");
+  headers.set("x-forwarded-proto", proto);
   return headers;
 }
 
-function page(status: number, title: string, text: string): Response {
+export function page(status: number, title: string, text: string): Response {
   const escape = (s: string) => s.replace(/[&<>"]/g, (c) => `&#${c.charCodeAt(0)};`);
   const html = `<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escape(title)}</title><body style="font:16px system-ui;background:#131110;color:#f3eee8;display:grid;place-items:center;min-height:100vh;margin:0"><main style="max-width:26rem;padding:2rem;text-align:center"><h1 style="font-size:1.3rem">${escape(title)}</h1><p style="color:#a8a099">${escape(text)}</p></main>`;
   return new Response(html, { status, headers: { "content-type": "text/html; charset=utf-8", "cache-control": "no-store" } });
 }
 
+/** WebSocket plumbing shared by every server that passes connections on to an app */
+export const tunnelHandlers = {
+  open(ws: ServerWebSocket<Tunnel>) {
+    const { upstream: target, queue } = ws.data;
+    target.onopen = () => {
+      for (const message of queue.splice(0)) target.send(message);
+    };
+    target.onmessage = (event) => {
+      ws.send(typeof event.data === "string" ? event.data : new Uint8Array(event.data as ArrayBuffer));
+    };
+    target.onclose = (event) => ws.close(event.code === 1005 || event.code === 1006 ? 1011 : event.code, event.reason);
+    target.onerror = () => ws.close(1011);
+  },
+  message(ws: ServerWebSocket<Tunnel>, message: string | Buffer) {
+    const { upstream: target, queue } = ws.data;
+    const data = typeof message === "string" ? message : new Uint8Array(message);
+    if (target.readyState === WebSocket.OPEN) target.send(data);
+    else queue.push(data);
+  },
+  close(ws: ServerWebSocket<Tunnel>, code: number, reason: string) {
+    const target = ws.data.upstream;
+    if (target.readyState === WebSocket.OPEN || target.readyState === WebSocket.CONNECTING) target.close(code === 1005 || code === 1006 ? 1000 : code, reason);
+  },
+};
+
+/**
+ * Decides whether a request may reach an app that asks for sign-in. Returns null to let it through, or
+ * the answer to give instead: a redirect to `signIn` for a page, a refusal for anything else.
+ */
+export function guard(req: Request, name: string, signIn: string): Response | null {
+  const user = sessionUser(req);
+  if (!user) {
+    // a page can be sent to sign in; a script's request can only be told why it failed
+    return req.method === "GET" && (req.headers.get("accept") ?? "").includes("text/html") ? Response.redirect(signIn, 302) : new Response("Sign in to Hata first", { status: 401 });
+  }
+  return mayOpen(user, name) ? null : page(403, "No access", `${user.name} may not open this app. Ask an administrator of this server.`);
+}
+
+/** Passes a request (or a WebSocket upgrade) on to an app listening on a local port */
+export async function passToApp(req: Request, server: Server, upstream: number, proto: "http" | "https", ip: string): Promise<Response> {
+  const url = new URL(req.url);
+  const headers = forwardHeaders(req, ip, proto);
+  if (req.headers.get("upgrade")?.toLowerCase() === "websocket") {
+    const protocols = req.headers.get("sec-websocket-protocol")?.split(",").map((p) => p.trim()).filter(Boolean);
+    for (const h of ["upgrade", "connection", "sec-websocket-key", "sec-websocket-version", "sec-websocket-extensions", "sec-websocket-protocol"]) headers.delete(h);
+    const target = new WebSocket(`ws://127.0.0.1:${upstream}${url.pathname}${url.search}`, { headers: Object.fromEntries(headers), protocols } as never);
+    target.binaryType = "arraybuffer";
+    if (server.upgrade(req, { data: { upstream: target, queue: [] } })) return undefined as never;
+    target.close();
+    return new Response("WebSocket upgrade failed", { status: 400 });
+  }
+  // a download or an event stream may be silent for a long time
+  server.timeout(req, 0);
+  try {
+    const res = await fetch(`http://127.0.0.1:${upstream}${url.pathname}${url.search}`, {
+      method: req.method,
+      headers,
+      body: req.body,
+      redirect: "manual",
+      // pass the body through exactly as the app sent it, compressed or not
+      decompress: false,
+      signal: req.signal,
+    } as RequestInit);
+    const out = new Headers(res.headers);
+    for (const h of HOP_HEADERS) if (h !== "content-length") out.delete(h);
+    return new Response(res.body, { status: res.status, statusText: res.statusText, headers: out });
+  } catch (e) {
+    if (req.signal.aborted) return new Response(null, { status: 499 });
+    return page(502, "The app is not answering", e instanceof Error ? e.message : String(e));
+  }
+}
+
 function startListener(name: string, port: number, upstream: number): void {
   listeners.get(name)?.stop(true);
-  const origin = `http://127.0.0.1:${upstream}`;
   const server = Bun.serve<Tunnel, never>({
     port,
     hostname: "0.0.0.0",
     // uploads to a photo library or a cloud drive are large; the app sets its own limits
-    maxRequestBodySize: 64 * 1024 ** 3,
+    maxRequestBodySize: MAX_APP_BODY,
     idleTimeout: 0,
     async fetch(req, self) {
       const url = new URL(req.url);
-      const user = sessionUser(req);
-      if (!user) {
-        const host = (req.headers.get("host") ?? url.host).replace(/:\d+$/, "");
-        const hata = listenAddress().port;
-        const signIn = `http://${host}${hata === 80 ? "" : ":" + hata}/?next=${encodeURIComponent(`http://${req.headers.get("host") ?? url.host}${url.pathname}${url.search}`)}`;
-        // a page can be sent to sign in; a script's request can only be told why it failed
-        return req.method === "GET" && (req.headers.get("accept") ?? "").includes("text/html") ? Response.redirect(signIn, 302) : new Response("Sign in to Hata first", { status: 401 });
-      }
-      if (!mayOpen(user, name)) return page(403, "No access", `${user.name} may not open this app. Ask an administrator of this server.`);
-
-      const ip = self.requestIP(req)?.address ?? "";
-      const headers = forwardHeaders(req, ip);
-      if (req.headers.get("upgrade")?.toLowerCase() === "websocket") {
-        const protocols = req.headers.get("sec-websocket-protocol")?.split(",").map((p) => p.trim()).filter(Boolean);
-        for (const h of ["upgrade", "connection", "sec-websocket-key", "sec-websocket-version", "sec-websocket-extensions", "sec-websocket-protocol"]) headers.delete(h);
-        const target = new WebSocket(`ws://127.0.0.1:${upstream}${url.pathname}${url.search}`, { headers: Object.fromEntries(headers), protocols } as never);
-        target.binaryType = "arraybuffer";
-        if (self.upgrade(req, { data: { upstream: target, queue: [] } })) return undefined as never;
-        target.close();
-        return new Response("WebSocket upgrade failed", { status: 400 });
-      }
-      try {
-        const res = await fetch(origin + url.pathname + url.search, {
-          method: req.method,
-          headers,
-          body: req.body,
-          redirect: "manual",
-          // pass the body through exactly as the app sent it, compressed or not
-          decompress: false,
-          signal: req.signal,
-        } as RequestInit);
-        const out = new Headers(res.headers);
-        for (const h of HOP_HEADERS) if (h !== "content-length") out.delete(h);
-        return new Response(res.body, { status: res.status, statusText: res.statusText, headers: out });
-      } catch (e) {
-        if (req.signal.aborted) return new Response(null, { status: 499 });
-        return page(502, "The app is not answering", e instanceof Error ? e.message : String(e));
-      }
+      const host = (req.headers.get("host") ?? url.host).replace(/:\d+$/, "");
+      const hata = listenAddress().port;
+      const signIn = `http://${host}${hata === 80 ? "" : ":" + hata}/?next=${encodeURIComponent(`http://${req.headers.get("host") ?? url.host}${url.pathname}${url.search}`)}`;
+      return guard(req, name, signIn) ?? passToApp(req, self, upstream, "http", self.requestIP(req)?.address ?? "");
     },
-    websocket: {
-      open(ws: ServerWebSocket<Tunnel>) {
-        const { upstream: target, queue } = ws.data;
-        target.onopen = () => {
-          for (const message of queue.splice(0)) target.send(message);
-        };
-        target.onmessage = (event) => {
-          ws.send(typeof event.data === "string" ? event.data : new Uint8Array(event.data as ArrayBuffer));
-        };
-        target.onclose = (event) => ws.close(event.code === 1005 || event.code === 1006 ? 1011 : event.code, event.reason);
-        target.onerror = () => ws.close(1011);
-      },
-      message(ws: ServerWebSocket<Tunnel>, message) {
-        const { upstream: target, queue } = ws.data;
-        const data = typeof message === "string" ? message : new Uint8Array(message);
-        if (target.readyState === WebSocket.OPEN) target.send(data);
-        else queue.push(data);
-      },
-      close(ws: ServerWebSocket<Tunnel>, code, reason) {
-        const target = ws.data.upstream;
-        if (target.readyState === WebSocket.OPEN || target.readyState === WebSocket.CONNECTING) target.close(code === 1005 || code === 1006 ? 1000 : code, reason);
-      },
-    },
+    websocket: tunnelHandlers,
   });
   listeners.set(name, server);
 }
