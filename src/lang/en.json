@@ -624,7 +624,7 @@
   "error.files.tooManyPinned": "The dashboard holds {max} folders at most. Remove one first.",
   "home.manage": "Manage",
   "home.arrange": "Arrange",
-  "home.arrangeHint": "Drag a tile to move it (on a touch screen, hold it first); drop it on another one to make a folder. Each tile's menu does the same without dragging.",
+  "home.arrangeHint": "Drag a tile to move it (on a touch screen, hold it first); drop it on another one to make a folder. Groups are dragged by their heading, the blocks of the page by themselves. Each tile's menu does the same without dragging.",
   "home.done": "Done",
   "home.addLink": "Add a link",
   "home.editLink": "Edit the link",
@@ -719,5 +719,6 @@
   "activity.system.restore.done": "Server restored from a backup: {target} apps",
   "activity.system.restore.failed": "Restoring the server failed for: {target}",
   "activity.byRestore": "while restoring the server",
-  "appearance.remove": "Delete the uploaded picture"
+  "appearance.remove": "Delete the uploaded picture",
+  "home.dropBlock": "Drop a block here"
 }

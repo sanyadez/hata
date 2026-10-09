@@ -16,8 +16,29 @@ export interface Group {
   items: Item[];
 }
 
+/** The blocks of the dashboard besides the tiles, and the places they can stand in */
+export const WIDGETS = ["stats", "attention", "activity"] as const;
+export const ZONES = ["top", "side", "bottom"] as const;
+export type Widgets = Record<(typeof ZONES)[number], string[]>;
+
 export interface Layout {
   groups: Group[];
+  /** Which block stands where, in order; every block is in exactly one place */
+  widgets: Widgets;
+}
+
+const DEFAULT_ZONE: Record<string, (typeof ZONES)[number]> = { stats: "top", attention: "side", activity: "side" };
+
+/** Blocks named twice or not known are dropped; one that is named nowhere goes to its usual place */
+export function cleanWidgets(input: unknown): Widgets {
+  const out: Widgets = { top: [], side: [], bottom: [] };
+  const seen = new Set<string>();
+  for (const zone of ZONES) {
+    const list = isObject(input) && Array.isArray(input[zone]) ? input[zone] : [];
+    for (const id of list) if (typeof id === "string" && (WIDGETS as readonly string[]).includes(id) && !seen.has(id) && seen.add(id)) out[zone].push(id);
+  }
+  for (const id of WIDGETS) if (!seen.has(id)) out[DEFAULT_ZONE[id]!].push(id);
+  return out;
 }
 
 const MAX_GROUPS = 24;
@@ -80,7 +101,7 @@ export function cleanLayout(input: unknown): Layout {
     .filter(isObject)
     .slice(0, MAX_GROUPS)
     .map((raw): Group => ({ id: id(raw.id), title: text(raw.title, MAX_TITLE), items: (Array.isArray(raw.items) ? raw.items : []).map(item).filter((i): i is Item => i !== null) }));
-  return { groups };
+  return { groups, widgets: cleanWidgets(isObject(input) ? input.widgets : null) };
 }
 
 /**
@@ -105,12 +126,12 @@ export function arrange(layout: Layout, apps: string[], folders: string[]): Layo
   if (!groups.length) groups.push({ id: "main", title: "", items: [] });
   const rest: Entry[] = [...apps.filter((name) => !placed.has("app " + name)).map((name): Entry => ({ type: "app", name })), ...folders.filter((path) => !placed.has("files " + path)).map((path): Entry => ({ type: "files", path }))];
   groups[0] = { ...groups[0]!, items: [...groups[0]!.items, ...rest] };
-  return { groups };
+  return { groups, widgets: layout.widgets };
 }
 
 /** The layout after a folder of the file manager was moved or renamed (`to`), or removed (`to` is null) */
 export function movePath(layout: Layout, from: string, to: string | null): Layout {
   const inside = (path: string) => path === from || path.startsWith(from.endsWith("/") ? from : from + "/");
   const entry = (e: Entry): Entry[] => (e.type !== "files" || !inside(e.path) ? [e] : to === null ? [] : [{ type: "files", path: to + e.path.slice(from.length) }]);
-  return cleanLayout({ groups: layout.groups.map((group) => ({ ...group, items: group.items.flatMap((item) => (item.type === "folder" ? [{ ...item, items: item.items.flatMap(entry) }] : entry(item))) })) });
+  return cleanLayout({ widgets: layout.widgets, groups: layout.groups.map((group) => ({ ...group, items: group.items.flatMap((item) => (item.type === "folder" ? [{ ...item, items: item.items.flatMap(entry) }] : entry(item))) })) });
 }

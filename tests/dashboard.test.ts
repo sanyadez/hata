@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { arrange, cleanLayout, movePath, webUrl } from "../src/dashboard";
+import { arrange, cleanLayout, cleanWidgets, movePath, webUrl } from "../src/dashboard";
 
 const link = (title: string, url = "https://example.com/") => ({ type: "link", id: title.toLowerCase(), title, url, icon: "" });
 
@@ -20,8 +20,8 @@ test("what does not fit a layout is dropped", () => {
   expect(layout.groups.map((g) => g.title)).toEqual(["Home media", "Second"]);
   expect(layout.groups[0]!.items).toEqual([{ type: "app", name: "jellyfin" }, { type: "link", id: "router", title: "Router", url: "http://192.168.1.1/", icon: "" }]);
   expect(layout.groups[1]!.id).toMatch(/^[a-z0-9-]+$/);
-  expect(cleanLayout(null)).toEqual({ groups: [] });
-  expect(cleanLayout({ groups: {} })).toEqual({ groups: [] });
+  expect(cleanLayout(null).groups).toEqual([]);
+  expect(cleanLayout({ groups: {} }).groups).toEqual([]);
 });
 
 test("an app is on the dashboard once, ids are unique, a link without a title takes its host", () => {
@@ -56,7 +56,7 @@ test("arranging: what is gone is left out, what is new comes last in the first g
 });
 
 test("arranging an empty layout gives one group with everything", () => {
-  expect(arrange({ groups: [] }, ["b", "a"], ["/x"])).toEqual({ groups: [{ id: "main", title: "", items: [{ type: "app", name: "b" }, { type: "app", name: "a" }, { type: "files", path: "/x" }] }] });
+  expect(arrange(cleanLayout(null), ["b", "a"], ["/x"])).toMatchObject({ groups: [{ id: "main", title: "", items: [{ type: "app", name: "b" }, { type: "app", name: "a" }, { type: "files", path: "/x" }] }] });
   // a member sees the links and their own apps
   const layout = cleanLayout({ groups: [{ id: "main", title: "", items: [link("Router"), { type: "files", path: "/DATA" }, { type: "app", name: "private" }] }] });
   expect(arrange(layout, [], []).groups[0]!.items).toEqual([link("Router") as never]);
@@ -68,4 +68,15 @@ test("a pinned folder keeps its place when it is renamed and leaves when it is r
   expect(renamed.groups[0]!.items).toEqual([{ type: "files", path: "/DATA/Video" }, { type: "folder", id: "f", title: "", items: [{ type: "files", path: "/DATA/Video/Films" }, { type: "files", path: "/DATA/Mediator" }] }]);
   const removed = movePath(layout, "/DATA/Media", null);
   expect(removed.groups[0]!.items).toEqual([{ type: "folder", id: "f", title: "", items: [{ type: "files", path: "/DATA/Mediator" }] }]);
+});
+
+test("every block of the dashboard stands in exactly one place", () => {
+  const usual = { top: ["stats"], side: ["attention", "activity"], bottom: [] };
+  expect(cleanWidgets(null)).toEqual(usual);
+  expect(cleanLayout({ groups: [] }).widgets).toEqual(usual);
+  expect(cleanWidgets({ top: ["activity", "nope", "activity"], side: "x", bottom: ["stats", "activity"] })).toEqual({ top: ["activity"], side: ["attention"], bottom: ["stats"] });
+  // the layout carries them through arranging and through a folder being renamed
+  const layout = cleanLayout({ groups: [], widgets: { top: [], side: ["stats"], bottom: ["activity", "attention"] } });
+  expect(arrange(layout, [], []).widgets).toEqual({ top: [], side: ["stats"], bottom: ["activity", "attention"] });
+  expect(movePath(layout, "/a", "/b").widgets).toEqual(layout.widgets);
 });

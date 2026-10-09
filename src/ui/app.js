@@ -1093,8 +1093,15 @@ function renderDashboard(box) {
       const tiles = group.items.map(tile).filter(Boolean);
       // a group with nothing in it for this user is not theirs to see
       if (!tiles.length && index > 0 && !editing) return null;
-      return [
-        groupHead(group, index, o.apps.length),
+      const head = groupHead(group, index, o.apps.length);
+      if (editing && groups.length > 1) {
+        head.classList.add("handle");
+        head.addEventListener("pointerdown", (e) => dragStart(e, group.id, GROUP_DRAG, head.parentElement));
+      }
+      return h(
+        "div",
+        { class: "group", "data-group-id": group.id },
+        head,
         h(
           "div",
           { class: "tiles" + (editing ? " editing" : ""), "data-group": group.id },
@@ -1102,7 +1109,7 @@ function renderDashboard(box) {
           index === 0 && !editing && isAdmin() && h("button", { type: "button", class: "tile add", onclick: addDialog }, h("span", { class: "tile-main" }, h("span", { class: "app-icon plus" }, icon("plus")), h("span", { class: "tile-text" }, h("span", { class: "tile-name" }, t("home.add")), h("span", { class: "tile-sub" }, t("home.addHint"))))),
           editing && !tiles.length && h("p", { class: "muted small drop-hint" }, t("home.emptyGroup")),
         ),
-      ];
+      );
     }),
   );
   renderFolder();
@@ -1138,13 +1145,16 @@ function renderFolder() {
 
 // --- Dragging a tile (mouse, pen and finger alike) -------------------------------------------------
 
-const DROP_CLASSES = ["drop-before", "drop-after", "drop-into", "drop-end"];
+const DROP_CLASSES = ["drop-before", "drop-after", "drop-into", "drop-end", "drop-above", "drop-below"];
 
-/** A press on a tile: a mouse drags once it moves, a finger after holding still — moving first is scrolling */
-function dragStart(e, item) {
-  if (homeUi.drag || e.button > 0 || e.target.closest(".tile-open")) return;
-  const el = e.currentTarget;
-  const drag = (homeUi.drag = { item, key: tileKey(item), el, id: e.pointerId, x: e.clientX, y: e.clientY, active: false, moved: false, target: null, ghost: null, marked: null, timer: 0, scroll: 0 });
+/**
+ * A press on something that can be moved — a tile, a group (by its heading), a block of the dashboard:
+ * a mouse drags once it moves, a finger after holding still — moving first is scrolling. `kind` says
+ * where it may land (`find`) and what a drop does (`drop`).
+ */
+function dragStart(e, item, kind = TILE_DRAG, el = e.currentTarget) {
+  if (homeUi.drag || e.button > 0 || e.target.closest(kind.ignore)) return;
+  const drag = (homeUi.drag = { kind, item, key: kind === TILE_DRAG ? tileKey(item) : item, el, id: e.pointerId, x: e.clientX, y: e.clientY, active: false, moved: false, target: null, ghost: null, marked: null, timer: 0, scroll: 0 });
   const begin = () => {
     if (homeUi.drag !== drag || drag.active) return;
     drag.active = true;
@@ -1154,6 +1164,8 @@ function dragStart(e, item) {
     drag.ghost = el.cloneNode(true);
     drag.ghost.classList.add("drag-ghost");
     drag.ghost.style.width = rect.width + "px";
+    drag.ghost.removeAttribute("id");
+    for (const marked of drag.ghost.querySelectorAll("[id]")) marked.removeAttribute("id");
     // a modal dialog is drawn above everything else on the page
     (homeUi.folder?.dialog ?? document.body).append(drag.ghost);
     el.classList.add("dragging");
@@ -1203,6 +1215,63 @@ function dragStart(e, item) {
   addEventListener("touchmove", still, { passive: false });
 }
 
+/** Above or below the block under the pointer, by which half of it the pointer is in */
+function besideBlock(drag, selector, name) {
+  const over = document.elementFromPoint(drag.x, drag.y)?.closest(selector);
+  if (!over || over === drag.el || over.classList.contains("drag-ghost")) return null;
+  const rect = over.getBoundingClientRect();
+  const above = drag.y < rect.top + rect.height / 2;
+  return { el: over, cls: above ? "drop-above" : "drop-below", [above ? "before" : "after"]: over.dataset[name] };
+}
+
+/** A group is moved among the groups */
+const GROUP_DRAG = {
+  ignore: "button, a, input",
+  find: (drag) => besideBlock(drag, ".group[data-group-id]", "groupId"),
+  drop: (drag, target) =>
+    changeLayout((layout) => {
+      const [group] = layout.groups.splice(layout.groups.findIndex((g) => g.id === drag.key), 1);
+      const at = layout.groups.findIndex((g) => g.id === (target.before ?? target.after));
+      if (!group || at < 0) return false;
+      layout.groups.splice(at + (target.after ? 1 : 0), 0, group);
+    }),
+};
+
+/** A block — the system's numbers, what needs attention, the activity — is moved among the blocks and the places for them */
+const WIDGET_DRAG = {
+  ignore: "button, a, input",
+  find: (drag) => {
+    const beside = besideBlock(drag, ".widget[data-widget]", "widget");
+    if (beside) return beside;
+    // not over a block: the free room of a place takes the block at its end
+    const under = document.elementFromPoint(drag.x, drag.y);
+    const zone = under?.closest("[data-zone]");
+    return zone && !under.closest(".widget") ? { el: zone, cls: "drop-end", zone: zone.dataset.zone } : null;
+  },
+  drop: (drag, target) =>
+    changeLayout((layout) => {
+      const zones = layout.widgets;
+      for (const zone of Object.values(zones)) if (zone.includes(drag.key)) zone.splice(zone.indexOf(drag.key), 1);
+      const beside = target.before ?? target.after;
+      const zone = beside ? Object.values(zones).find((list) => list.includes(beside)) : zones[target.zone];
+      if (!zone) return false;
+      zone.splice(beside ? zone.indexOf(beside) + (target.after ? 1 : 0) : zone.length, 0, drag.key);
+    }),
+};
+
+/** A tile is moved among the tiles, into a folder, onto another tile (which makes a folder), out of an open folder */
+const TILE_DRAG = {
+  ignore: ".tile-open",
+  find: dropTarget,
+  drop: (drag, target) => {
+    if (target.out) {
+      homeUi.folder?.dialog.close();
+      outOfFolder(drag.key);
+    } else if (target.onto) makeFolder(drag.key, target.onto);
+    else moveTile(drag.key, target);
+  },
+};
+
 /** Where the tile would land if it were let go here */
 function dropTarget(drag) {
   const under = document.elementFromPoint(drag.x, drag.y);
@@ -1232,7 +1301,7 @@ function dropTarget(drag) {
 
 function dragMove(drag) {
   drag.ghost.style.transform = `translate(${drag.x - drag.dx}px, ${drag.y - drag.dy}px)`;
-  const target = dropTarget(drag);
+  const target = drag.kind.find(drag);
   drag.marked?.classList.remove(...DROP_CLASSES);
   homeUi.folder?.dialog.classList.toggle("drop-out", !!target?.out);
   drag.marked = target?.el ?? null;
@@ -1251,7 +1320,12 @@ function dragEnd(drop) {
   drag.el.classList.remove("dragging");
   document.documentElement.classList.remove("tile-dragging");
   homeUi.folder?.dialog.classList.remove("drop-out");
-  // the click that ends a drag is not a click on the tile
+  // the click that ends a drag is not a click on what was dragged
+  if (drag.active) {
+    const swallow = (e) => (e.preventDefault(), e.stopPropagation());
+    addEventListener("click", swallow, { capture: true, once: true });
+    setTimeout(() => removeEventListener("click", swallow, { capture: true }));
+  }
   setTimeout(() => homeUi.drag === drag && (homeUi.drag = null));
   const target = drop && drag.active ? drag.target : null;
   if (!target) {
@@ -1259,11 +1333,7 @@ function dragEnd(drop) {
     return;
   }
   homeUi.drag = null;
-  if (target.out) {
-    homeUi.folder?.dialog.close();
-    outOfFolder(drag.key);
-  } else if (target.onto) makeFolder(drag.key, target.onto);
-  else moveTile(drag.key, target);
+  drag.kind.drop(drag, target);
 }
 
 const ATTENTION_ICONS = { update: "up", docker: "box", restarting: "refresh", partial: "alert", disk: "disk", memory: "memory", temperature: "temp" };
@@ -1300,10 +1370,24 @@ function activityItem(entry) {
 function renderHome() {
   const hour = new Date().getHours();
   const greeting = t(hour < 5 ? "home.night" : hour < 12 ? "home.morning" : hour < 18 ? "home.afternoon" : "home.evening", { name: state.user.name });
+  const widget = (id, el) => {
+    el.classList.add("widget");
+    el.dataset.widget = id;
+    el.addEventListener("pointerdown", (e) => homeUi.editing && dragStart(e, id, WIDGET_DRAG));
+    return el;
+  };
+  // the blocks are made once and then only moved and refilled: the numbers of the system live in one of them
+  homeUi.widgets = {
+    stats: widget("stats", h("section", { class: "stats card" }, statCell("cpu", "cpu", t("sys.cpu")), statCell("memory", "memory", t("sys.memory")), statCell("disk", "disk", t("sys.disk")), statCell("network", "network", t("sys.network")), h("div", { class: "stat", id: "stat-temp", hidden: true }, h("div", { class: "stat-label" }, icon("temp"), t("sys.temperature")), h("div", { class: "stat-row" }, h("div", { class: "stat-value" }, h("strong", null, "—"), h("span", { class: "unit" })), h("div", { class: "stat-chart" })), h("div", { class: "stat-hint" }, " ")))),
+    attention: widget("attention", h("section", { class: "card pad" })),
+    activity: widget("activity", h("section", { class: "pad-x loose" })),
+  };
+  const zone = (name, tag = "div") => h(tag, { class: "zone" + (name === "side" ? " side" : ""), id: "zone-" + name, "data-zone": name });
   shell(
-    h("div", { class: "page-head" }, h("div", null, h("h1", null, greeting), h("p", { class: "meta", id: "host" }, " ")), h("div", { class: "counts", id: "counts" })),
-    h("section", { class: "stats card" }, statCell("cpu", "cpu", t("sys.cpu")), statCell("memory", "memory", t("sys.memory")), statCell("disk", "disk", t("sys.disk")), statCell("network", "network", t("sys.network")), h("div", { class: "stat", id: "stat-temp", hidden: true }, h("div", { class: "stat-label" }, icon("temp"), t("sys.temperature")), h("div", { class: "stat-row" }, h("div", { class: "stat-value" }, h("strong", null, "—"), h("span", { class: "unit" })), h("div", { class: "stat-chart" })), h("div", { class: "stat-hint" }, " "))),
-    h("div", { class: "columns" }, h("section", { id: "home-apps" }), h("aside", { class: "side", id: "home-side" })),
+    h("div", { class: "page-head" }, h("div", null, h("h1", null, greeting), h("p", { class: "meta", id: "host" }, " ")), h("div", { class: "counts", id: "counts" })),
+    zone("top"),
+    h("div", { class: "columns", id: "home-columns" }, h("section", { id: "home-apps" }), zone("side", "aside")),
+    zone("bottom"),
   );
   renderHomeBody();
 }
@@ -1311,8 +1395,7 @@ function renderHome() {
 function renderHomeBody() {
   const o = state.overview;
   const appsBox = document.getElementById("home-apps");
-  const side = document.getElementById("home-side");
-  if (!o || !appsBox || !side) return;
+  if (!o || !appsBox || !homeUi.widgets) return;
   const apps = o.apps;
 
   const count = (st) => apps.filter((a) => appState(a) === st).length;
@@ -1326,16 +1409,26 @@ function renderHomeBody() {
     renderDashboard(appsBox);
   }
 
-  side.replaceChildren(
-    h(
-      "section",
-      { class: "card pad" },
-      h("div", { class: "section-head" }, h("h2", null, t("attention.title"), o.attention.length > 0 && h("span", { class: "pill" }, o.attention.length))),
-      o.attention.length ? o.attention.map(attentionItem) : h("p", { class: "all-good" }, icon("check", "ok"), t("attention.none")),
-    ),
-    h("section", { class: "pad-x" }, h("div", { class: "section-head" }, h("h2", null, t("activity.title"))), o.activity.length ? o.activity.map(activityItem) : h("p", { class: "muted small" }, t("activity.none"))),
-  );
+  put(homeUi.widgets.attention, h("div", { class: "section-head" }, h("h2", null, t("attention.title"), o.attention.length > 0 && h("span", { class: "pill" }, o.attention.length))), o.attention.length ? o.attention.map(attentionItem) : h("p", { class: "all-good" }, icon("check", "ok"), t("attention.none")));
+  put(homeUi.widgets.activity, h("div", { class: "section-head" }, h("h2", null, t("activity.title"))), o.activity.length ? o.activity.map(activityItem) : h("p", { class: "muted small" }, t("activity.none")));
+  if (!homeUi.drag?.active) placeWidgets();
   renderSystem();
+}
+
+/** Puts every block into its place; a place with nothing in it shows only while arranging */
+function placeWidgets() {
+  const editing = homeUi.editing && isAdmin();
+  for (const [name, ids] of Object.entries(state.overview.dashboard.widgets)) {
+    const zone = document.getElementById("zone-" + name);
+    if (!zone) continue;
+    const blocks = ids.map((id) => homeUi.widgets[id]).filter(Boolean);
+    // only what changed is moved: a block taken out and put back would lose its scroll and focus
+    if (blocks.length !== zone.children.length || blocks.some((block, i) => zone.children[i] !== block)) zone.replaceChildren(...blocks);
+    zone.classList.toggle("empty", !blocks.length);
+    zone.classList.toggle("editing", editing);
+    zone.dataset.hint = t("home.dropBlock");
+  }
+  document.getElementById("home-columns")?.classList.toggle("no-side", !editing && !state.overview.dashboard.widgets.side.length);
 }
 
 // --- App page -----------------------------------------------------------------------------------

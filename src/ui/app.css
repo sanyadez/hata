@@ -440,7 +440,8 @@ select.sort { width: auto; }
 .seg .btn:last-child { border-radius: 0 var(--radius-sm) var(--radius-sm) 0; margin-left: -1px; }
 .seg .btn.active { background: var(--surface-2); color: var(--text); }
 .actions > .btn.square.active { border-color: var(--accent); color: var(--accent-text); }
-#home-apps .section-head:not(:first-child) { margin-top: 12px; }
+#home-apps .group:not(:first-child), #home-apps .arrange-bar + .group { margin-top: 12px; }
+.group { display: grid; gap: 16px; border-radius: var(--radius-md); }
 button.tile-open { border: 0; background: transparent; }
 
 .selection { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 10px 12px 10px 16px; border-color: var(--accent); position: sticky; top: 76px; z-index: 4; }
@@ -658,12 +659,28 @@ input[type="range"] { accent-color: var(--accent); width: 100%; }
 /* Text that lies on the picture itself: what stands alone gets a pane of its own, the rest a halo of the
    background colour — the picture may be of any brightness */
 :root.has-wallpaper #view { text-shadow: 0 0 2px var(--bg), 0 0 6px var(--bg), 0 0 16px var(--bg); }
-:root.has-wallpaper #view :is(.card, .tile, .arrange-bar, .btn, .page-head, .side > .pad-x, .section-head, #app-head, input, select, textarea, table, pre, .cats, .tabs) { text-shadow: none; }
-:root.has-wallpaper :is(.page-head, .side > .pad-x, .cats, #app-head, #view .section-head:not(:is(.card, .side > .pad-x, #app-head) *)) { background: color-mix(in srgb, var(--surface) 88%, transparent); backdrop-filter: blur(16px); border: 1px solid var(--border); border-radius: var(--radius-lg); }
-:root.has-wallpaper :is(.page-head, .side > .pad-x) { padding: 18px 20px; }
+:root.has-wallpaper #view :is(.card, .tile, .arrange-bar, .btn, .page-head, :is(.side > .pad-x, .loose), .section-head, #app-head, input, select, textarea, table, pre, .cats, .tabs) { text-shadow: none; }
+:root.has-wallpaper :is(.page-head, :is(.side > .pad-x, .loose), .cats, #app-head, #view .section-head:not(:is(.card, :is(.side > .pad-x, .loose), #app-head) *)) { background: color-mix(in srgb, var(--surface) 88%, transparent); backdrop-filter: blur(16px); border: 1px solid var(--border); border-radius: var(--radius-lg); }
+:root.has-wallpaper :is(.page-head, :is(.side > .pad-x, .loose)) { padding: 18px 20px; }
 :root.has-wallpaper #app-head { padding: 18px 20px 0; }
 :root.has-wallpaper #app-head .tabs { box-shadow: none; }
-:root.has-wallpaper #view .section-head:not(:is(.card, .side > .pad-x, #app-head) *) { padding: 8px 14px; border-radius: var(--radius-md); }
+:root.has-wallpaper #view .section-head:not(:is(.card, :is(.side > .pad-x, .loose), #app-head) *) { padding: 8px 14px; border-radius: var(--radius-md); }
 :root.has-wallpaper #view .ico { filter: drop-shadow(0 0 3px var(--bg)); }
-:root.has-wallpaper #view :is(.card, .tile, .btn, .page-head, .side > .pad-x, .section-head, .cats, #app-head) .ico { filter: none; }
+:root.has-wallpaper #view :is(.card, .tile, .btn, .page-head, :is(.side > .pad-x, .loose), .section-head, .cats, #app-head) .ico { filter: none; }
 :root.has-wallpaper .cats.cats { padding: 8px; }
+
+/* --- Moving groups and blocks of the dashboard -------------------------------------------------- */
+
+.zone { display: grid; gap: 16px; min-width: 0; align-content: start; }
+.zone.empty:not(.editing) { display: none; }
+.zone.editing { min-height: 72px; border-radius: var(--radius-lg); }
+.zone.editing.empty { border: 1px dashed var(--border-strong); place-items: center; }
+.zone.editing.empty::before { content: attr(data-hint); color: var(--faint); font-size: 12px; }
+.zone.editing .widget, .section-head.handle { cursor: grab; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+.zone.drop-end { outline: 2px dashed var(--accent); outline-offset: 4px; }
+.widget.dragging, .group.dragging { opacity: 0.3; }
+.drop-above { box-shadow: 0 -4px 0 var(--accent); }
+.drop-below { box-shadow: 0 4px 0 var(--accent); }
+.drag-ghost:is(.widget, .group) { position: fixed; left: 0; top: 0; z-index: 50; margin: 0; pointer-events: none; opacity: 0.9; max-height: 160px; overflow: hidden; border-radius: var(--radius-lg); background: var(--surface); box-shadow: 0 12px 32px rgb(0 0 0 / 45%); outline: 1px solid var(--accent); }
+.columns.no-side { grid-template-columns: minmax(0, 1fr); }
+.side .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }

@@ -107,7 +107,7 @@ const DEFAULTS: Settings = {
   access: {},
   https: { mode: "off", domain: "", email: "" },
   folders: [],
-  dashboard: { groups: [] },
+  dashboard: cleanLayout(null),
   appearance: DEFAULT_APPEARANCE,
 };
 
