@@ -80,3 +80,24 @@ test("every block of the dashboard stands in exactly one place", () => {
   expect(arrange(layout, [], []).widgets).toEqual({ top: [], side: ["stats"], bottom: ["activity", "attention"] });
   expect(movePath(layout, "/a", "/b").widgets).toEqual(layout.widgets);
 });
+
+test("Hata's own tiles are always there for those who have them, wherever they were put", () => {
+  // never arranged: after everything else, "Add" last
+  expect(arrange(cleanLayout(null), ["memos"], ["/x"], ["store", "add"]).groups[0]!.items).toEqual([{ type: "app", name: "memos" }, { type: "files", path: "/x" }, { type: "builtin", id: "store" }, { type: "builtin", id: "add" }]);
+  const layout = cleanLayout({
+    groups: [
+      { id: "main", title: "", items: [{ type: "builtin", id: "store" }, { type: "app", name: "memos" }, { type: "builtin", id: "add" }] },
+      { id: "more", title: "More", items: [{ type: "builtin", id: "store" }, { type: "builtin", id: "nope" }, { type: "folder", id: "f", title: "", items: [{ type: "builtin", id: "add" }, { type: "app", name: "gitea" }] }] },
+    ],
+  });
+  // named once, unknown ones dropped, "Add" does not live in a folder
+  expect(layout.groups[1]!.items).toEqual([{ type: "folder", id: "f", title: "", items: [{ type: "app", name: "gitea" }] }]);
+  // a new app comes before an "Add" that closes the first group
+  expect(arrange(layout, ["memos", "gitea", "new"], [], ["store", "add"]).groups[0]!.items).toEqual([{ type: "builtin", id: "store" }, { type: "app", name: "memos" }, { type: "app", name: "new" }, { type: "builtin", id: "add" }]);
+  // a member has the store and no "Add", a guest neither
+  expect(arrange(layout, ["memos"], [], ["store"]).groups[0]!.items).toEqual([{ type: "builtin", id: "store" }, { type: "app", name: "memos" }]);
+  expect(arrange(layout, ["memos"], []).groups[0]!.items).toEqual([{ type: "app", name: "memos" }]);
+  // moved elsewhere, "Add" stays where it was put
+  const moved = cleanLayout({ groups: [{ id: "main", title: "", items: [{ type: "builtin", id: "add" }, { type: "app", name: "memos" }] }] });
+  expect(arrange(moved, ["memos", "new"], [], ["store", "add"]).groups[0]!.items).toEqual([{ type: "builtin", id: "add" }, { type: "app", name: "memos" }, { type: "app", name: "new" }, { type: "builtin", id: "store" }]);
+});

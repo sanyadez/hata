@@ -6,7 +6,14 @@
  * in the layout itself.
  */
 
-export type Entry = { type: "app"; name: string } | { type: "link"; id: string; title: string; url: string; icon: string } | { type: "files"; path: string };
+export type Entry =
+  | { type: "app"; name: string }
+  | { type: "link"; id: string; title: string; url: string; icon: string }
+  | { type: "files"; path: string }
+  /** A tile of Hata's own, which can be moved but not taken off: the store, the "Add" tile */
+  | { type: "builtin"; id: string };
+
+export const BUILTINS = ["store", "add"] as const;
 export type Item = Entry | { type: "folder"; id: string; title: string; items: Entry[] };
 
 export interface Group {
@@ -78,9 +85,11 @@ export function cleanLayout(input: unknown): Layout {
   };
   const once = (key: string) => !seen.has(key) && !!seen.add(key);
 
-  const entry = (raw: unknown): Entry | null => {
+  const entry = (raw: unknown, inFolder = false): Entry | null => {
     if (!isObject(raw) || tiles >= MAX_TILES) return null;
     let made: Entry | null = null;
+    // "Add" is a doorway, not a thing to keep in a folder
+    if (raw.type === "builtin" && typeof raw.id === "string" && (BUILTINS as readonly string[]).includes(raw.id) && !(inFolder && raw.id === "add") && once("builtin " + raw.id)) made = { type: "builtin", id: raw.id };
     if (raw.type === "app" && typeof raw.name === "string" && APP_RE.test(raw.name) && once("app " + raw.name)) made = { type: "app", name: raw.name };
     if (raw.type === "files" && typeof raw.path === "string" && raw.path.startsWith("/") && raw.path.length <= 4096 && once("files " + raw.path)) made = { type: "files", path: raw.path };
     if (raw.type === "link") {
@@ -92,7 +101,7 @@ export function cleanLayout(input: unknown): Layout {
   };
   const item = (raw: unknown): Item | null => {
     if (!isObject(raw) || raw.type !== "folder") return entry(raw);
-    const items = (Array.isArray(raw.items) ? raw.items : []).map(entry).filter((e): e is Entry => e !== null);
+    const items = (Array.isArray(raw.items) ? raw.items : []).map((inner) => entry(inner, true)).filter((e): e is Entry => e !== null);
     // a folder is its tiles: with none left there is nothing to open
     return items.length ? { type: "folder", id: id(raw.id), title: text(raw.title, MAX_TITLE), items } : null;
   };
@@ -107,11 +116,11 @@ export function cleanLayout(input: unknown): Layout {
 /**
  * The layout as one user sees it: tiles of apps and folders that are not there (removed, not theirs to
  * open) are left out, and those not placed yet come at the end of the first group — a newly installed app
- * needs no arranging to show up.
+ * needs no arranging to show up. `builtins` are Hata's own tiles this user has: they are always there.
  */
-export function arrange(layout: Layout, apps: string[], folders: string[]): Layout {
-  const there = new Set([...apps.map((name) => "app " + name), ...folders.map((path) => "files " + path)]);
-  const key = (e: Entry) => (e.type === "app" ? "app " + e.name : e.type === "files" ? "files " + e.path : "");
+export function arrange(layout: Layout, apps: string[], folders: string[], builtins: string[] = []): Layout {
+  const there = new Set([...apps.map((name) => "app " + name), ...folders.map((path) => "files " + path), ...builtins.map((id) => "builtin " + id)]);
+  const key = (e: Entry) => (e.type === "app" ? "app " + e.name : e.type === "files" ? "files " + e.path : e.type === "builtin" ? "builtin " + e.id : "");
   const placed = new Set<string>();
   const keep = (e: Entry) => e.type === "link" || (there.has(key(e)) && !!placed.add(key(e)));
 
@@ -125,7 +134,12 @@ export function arrange(layout: Layout, apps: string[], folders: string[]): Layo
   }));
   if (!groups.length) groups.push({ id: "main", title: "", items: [] });
   const rest: Entry[] = [...apps.filter((name) => !placed.has("app " + name)).map((name): Entry => ({ type: "app", name })), ...folders.filter((path) => !placed.has("files " + path)).map((path): Entry => ({ type: "files", path }))];
-  groups[0] = { ...groups[0]!, items: [...groups[0]!.items, ...rest] };
+  const own = builtins.filter((id) => !placed.has("builtin " + id)).map((id): Entry => ({ type: "builtin", id }));
+  const first = [...groups[0]!.items];
+  // "Add" left at the very end stays there: what is new comes before it
+  const last = first.at(-1);
+  const tail = last?.type === "builtin" && last.id === "add" ? first.splice(-1) : [];
+  groups[0] = { ...groups[0]!, items: [...first, ...rest, ...own, ...tail] };
   return { groups, widgets: layout.widgets };
 }
 

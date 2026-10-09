@@ -716,5 +716,6 @@
   "appearance.remove": "Видалити завантажене зображення",
   "home.dropBlock": "Киньте блок сюди",
   "home.addGroupItem": "Група",
-  "home.addGroupHint": "Розділ дашборда з назвою"
+  "home.addGroupHint": "Розділ дашборда з назвою",
+  "home.storeHint": "Застосунки для встановлення"
 }

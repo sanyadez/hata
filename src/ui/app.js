@@ -778,6 +778,8 @@ function renderSystem() {
 const homeUi = { folder: null, drag: null, stale: false, widgets: null };
 
 const tileKey = (item) => item.type + ":" + (item.type === "app" ? item.name : item.type === "files" ? item.path : item.id);
+/** The "Add" tile: a doorway, which is moved about but never put into a folder */
+const isAddTile = (item) => item.type === "builtin" && item.id === "add";
 const newId = () => Array.from(crypto.getRandomValues(new Uint8Array(6)), (byte) => byte.toString(16).padStart(2, "0")).join("");
 const linkHost = (url) => {
   try {
@@ -806,6 +808,7 @@ function tileTarget(item) {
 
 const tileTitle = (item) => {
   const target = tileTarget(item);
+  if (item.type === "builtin") return t(item.id === "store" ? "home.store" : "home.add");
   return item.type === "app" ? (target?.title ?? item.name) : item.type === "files" ? (target?.name ?? item.path) : item.title || (item.type === "folder" ? t("home.folder") : linkHost(item.url));
 };
 
@@ -814,6 +817,7 @@ function tileIcon(item, size = "") {
   if (item.type === "app") return appIcon(target ?? { name: item.name }, size);
   if (item.type === "link") return appIcon({ name: item.id, title: tileTitle(item), icon: linkIcon(item) }, size);
   if (item.type === "files") return h("span", { class: `app-icon plus ${size}` }, icon("folder"));
+  if (item.type === "builtin") return h("span", { class: `app-icon plus ${size}` }, icon(item.id === "store" ? "store" : "plus"));
   return h("span", { class: "app-icon stack" }, item.items.filter(tileTarget).slice(0, 4).map((inner) => tileIcon(inner, "mini")));
 }
 
@@ -843,6 +847,11 @@ function tile(item) {
     external = true;
     sub = linkHost(item.url);
     side = isAdmin() && h("button", { type: "button", class: "tile-open", title: t("home.editLink"), "aria-label": `${t("home.editLink")}: ${title}`, onclick: () => linkDialog(item) }, icon("sliders"));
+  } else if (item.type === "builtin") {
+    // Hata's own tiles: the store opens like an app, "Add" asks what to add
+    href = "#/store";
+    cls = item.id === "add" ? "add" : "";
+    sub = t(item.id === "store" ? "home.storeHint" : "home.addHint");
   } else if (item.type === "files") {
     cls = target.missing ? "stopped" : "";
     href = filesHash(item.path);
@@ -853,12 +862,12 @@ function tile(item) {
     sub = t("home.items", { n: shown });
   }
   // what has no page of its own to manage it gets a menu: where to move it, how to take it off
-  if (admin && !side) side = h("button", { type: "button", class: "tile-open", title: t("home.tileActions"), "aria-label": `${t("home.tileActions")}: ${title}`, onclick: () => tileMenu(item) }, icon("more"));
+  if (admin && !side && !isAddTile(item)) side = h("button", { type: "button", class: "tile-open", title: t("home.tileActions"), "aria-label": `${t("home.tileActions")}: ${title}`, onclick: () => tileMenu(item) }, icon("more"));
   const content = [tileIcon(item), h("span", { class: "tile-text" }, h("span", { class: "tile-top" }, h("span", { class: "tile-name" }, title), badges), h("span", { class: "tile-sub" }, sub))];
   const key = tileKey(item);
   const main =
-    item.type === "folder"
-      ? h("button", { type: "button", class: "tile-main", onclick: () => homeUi.drag?.moved || openFolder(item.id) }, content)
+    item.type === "folder" || isAddTile(item)
+      ? h("button", { type: "button", class: "tile-main", onclick: () => homeUi.drag?.moved || (isAddTile(item) ? addDialog() : openFolder(item.id)) }, content)
       : h("a", { class: "tile-main", href, draggable: false, ...(external ? { target: "_blank", rel: "noopener noreferrer" } : {}) }, content);
   if (!admin) return h("div", { class: `tile kind-${item.type} ${cls}`, "data-key": key }, main, side);
   // an administrator moves tiles by dragging them; a long press of a finger is the start of that, not a menu
@@ -910,11 +919,11 @@ function moveTile(key, where) {
   if (!item) return;
   if (where.before || where.after) {
     const at = locate(layout, where.before ?? where.after);
-    if (!at || (at.folder && item.type === "folder")) return;
+    if (!at || (at.folder && (item.type === "folder" || isAddTile(item)))) return;
     at.list.splice(at.index + (where.after ? 1 : 0), 0, item);
   } else if (where.folder) {
     const folder = allFolders(layout).find((f) => f.id === where.folder);
-    if (!folder || item.type === "folder") return;
+    if (!folder || item.type === "folder" || isAddTile(item)) return;
     folder.items.push(item);
   } else {
     const group = layout.groups.find((g) => g.id === where.group) ?? layout.groups[0];
@@ -927,7 +936,7 @@ function moveTile(key, where) {
 function makeFolder(key, ontoKey, title = "") {
   const layout = layoutCopy();
   const own = locate(layout, key);
-  if (!own || own.item.type === "folder") return;
+  if (!own || own.item.type === "folder" || isAddTile(own.item)) return;
   const folder = { type: "folder", id: newId(), title, items: [own.item] };
   if (!ontoKey) {
     if (own.folder) return;
@@ -936,7 +945,7 @@ function makeFolder(key, ontoKey, title = "") {
   }
   takeTile(layout, key);
   const at = locate(layout, ontoKey);
-  if (!at || at.folder || at.item.type === "folder") return;
+  if (!at || at.folder || at.item.type === "folder" || isAddTile(at.item)) return;
   folder.items.unshift(at.item);
   at.list[at.index] = folder;
   return saveLayout(layout);
@@ -1045,8 +1054,8 @@ function tileMenu(item) {
     neighbour(-1) && entry(t("home.moveEarlier"), "arrow", () => moveTile(key, { before: tileKey(neighbour(-1)) }), "flip"),
     neighbour(1) && entry(t("home.moveLater"), "arrow", () => moveTile(key, { after: tileKey(neighbour(1)) })),
     at.folder && entry(t("home.outOfFolder"), "signout", () => outOfFolder(key)),
-    item.type !== "folder" && allFolders(layout).filter((folder) => folder !== at.folder).map((folder) => entry(t("home.intoFolder", { name: folder.title || t("home.folder") }), "folder", () => moveTile(key, { folder: folder.id }))),
-    item.type !== "folder" && !at.folder && entry(t("home.newFolder"), "plus", () => nameDialog(t("home.newFolder"), "", t("files.create"), (title) => makeFolder(key, null, title))),
+    item.type !== "folder" && !isAddTile(item) && allFolders(layout).filter((folder) => folder !== at.folder).map((folder) => entry(t("home.intoFolder", { name: folder.title || t("home.folder") }), "folder", () => moveTile(key, { folder: folder.id }))),
+    item.type !== "folder" && !isAddTile(item) && !at.folder && entry(t("home.newFolder"), "plus", () => nameDialog(t("home.newFolder"), "", t("files.create"), (title) => makeFolder(key, null, title))),
     layout.groups.filter((group) => group !== at.group || at.folder).map((group) => entry(t("home.toGroup", { name: groupName(group) }), "grid", () => moveTile(key, { group: group.id }))),
     entry(t("home.toNewGroup"), "plus", () => newGroupDialog((id) => moveTile(key, { group: id }))),
     item.type === "folder" && entry(t("home.ungroup"), "x", () => changeLayout((next) => void locate(next, key).list.splice(at.index, 1, ...item.items))),
@@ -1068,7 +1077,6 @@ function groupHead(group, index, count) {
       // its tiles go to the group that takes its place at the top, or to the first one
       layout.groups.length > 1 && tool(t("home.removeGroup"), "trash", () => changeLayout((next) => void next.groups[first ? 1 : 0].items.push(...next.groups.splice(index, 1)[0].items)), { class: "quiet" }),
     ],
-    first && state.user.role !== "guest" && h("a", { class: "link", href: "#/store" }, t("home.store"), icon("arrow")),
   );
   return h("div", { class: "section-head" }, h("h2", null, title, first && !group.title && h("span", { class: "muted small" }, t("home.installed", { n: count }))), tools);
 }
@@ -1098,7 +1106,7 @@ function renderDashboard(box) {
     groups.map((group, index) => {
       const tiles = group.items.map(tile).filter(Boolean);
       // a group with nothing in it for this user is not theirs to see
-      if (!tiles.length && index > 0 && !admin) return null;
+      if (!tiles.length && !admin) return null;
       const head = groupHead(group, index, o.apps.length);
       if (admin && groups.length > 1) {
         head.classList.add("handle");
@@ -1112,8 +1120,7 @@ function renderDashboard(box) {
           "div",
           { class: "tiles", "data-group": group.id },
           tiles,
-          index === 0 && admin && h("button", { type: "button", class: "tile add", onclick: addDialog }, h("span", { class: "tile-main" }, h("span", { class: "app-icon plus" }, icon("plus")), h("span", { class: "tile-text" }, h("span", { class: "tile-name" }, t("home.add")), h("span", { class: "tile-sub" }, t("home.addHint"))))),
-          admin && !tiles.length && index > 0 && h("p", { class: "muted small drop-hint" }, t("home.emptyGroup")),
+          admin && !tiles.length && h("p", { class: "muted small drop-hint" }, t("home.emptyGroup")),
         ),
       );
     }),
@@ -1299,7 +1306,7 @@ function dropTarget(drag) {
     const rect = over.getBoundingClientRect();
     const part = (drag.x - rect.left) / rect.width;
     const key = over.dataset.key;
-    const mayJoin = !open && drag.item.type !== "folder";
+    const mayJoin = !open && drag.item.type !== "folder" && !isAddTile(drag.item) && key !== "builtin:add";
     if (mayJoin && part > 0.28 && part < 0.72) return key.startsWith("folder:") ? { el: over, cls: "drop-into", folder: key.slice(7) } : { el: over, cls: "drop-into", onto: key };
     return part < 0.5 ? { el: over, cls: "drop-before", before: key } : { el: over, cls: "drop-after", after: key };
   }

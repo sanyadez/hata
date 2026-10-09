@@ -716,5 +716,6 @@
   "appearance.remove": "Delete the uploaded picture",
   "home.dropBlock": "Drop a block here",
   "home.addGroupItem": "Group",
-  "home.addGroupHint": "A named section of the dashboard"
+  "home.addGroupHint": "A named section of the dashboard",
+  "home.storeHint": "Apps to install"
 }

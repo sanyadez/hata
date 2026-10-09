@@ -622,7 +622,7 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
       importable: admin ? importCount(containers) : 0,
       // folders an administrator put on the dashboard from the file manager
       folders: admin ? pinnedFolders() : [],
-      dashboard: arrange(settings.dashboard, apps.map((app) => app.name), admin ? settings.folders : []),
+      dashboard: arrange(settings.dashboard, apps.map((app) => app.name), admin ? settings.folders : [], admin ? ["store", "add"] : user.role === "guest" ? [] : ["store"]),
       jobs: admin ? listJobs().filter((j) => j.status === "running").map(({ log: _, ...job }) => job) : [],
     });
   }
