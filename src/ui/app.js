@@ -817,6 +817,7 @@ function tile(item) {
     href = item.url;
     external = true;
     sub = linkHost(item.url);
+    side = isAdmin() && h("button", { type: "button", class: "tile-open", title: t("home.editLink"), "aria-label": `${t("home.editLink")}: ${title}`, onclick: () => linkDialog(item) }, icon("sliders"));
   } else if (item.type === "files") {
     cls = target.missing ? "stopped" : "";
     href = filesHash(item.path);
@@ -983,7 +984,13 @@ function linkDialog(link) {
       field(t("home.linkTitle"), title, t("home.linkTitleHint")),
       field(t("home.linkIcon"), picture, t("home.linkIconHint")),
       error,
-      h("footer", null, closeButton(() => dialog, t("common.cancel")), h("button", { class: "btn primary" }, t(link ? "home.saveLink" : "home.add"))),
+      h(
+        "footer",
+        null,
+        link && button(t("home.removeLink"), { class: "ghost danger-text", onclick: () => (dialog.close(), changeLayout((layout) => void takeTile(layout, tileKey(link)))) }, "trash"),
+        closeButton(() => dialog, t("common.cancel")),
+        h("button", { class: "btn primary" }, t(link ? "home.saveLink" : "home.add")),
+      ),
     ),
   );
   url.focus();
@@ -1281,7 +1288,7 @@ function activityItem(entry) {
   const failed = outcome === "failed";
   const key = "activity." + entry.code;
   const title = state.overview?.apps.find((a) => a.name === entry.app)?.title ?? entry.app ?? "";
-  const meta = [ago(entry.ts), entry.user && group !== "auth" ? (entry.user === "schedule" ? t("activity.bySchedule") : t("activity.by", { user: entry.user })) : null, group === "auth" ? entry.detail : null].filter(Boolean).join(" · ");
+  const meta = [ago(entry.ts), entry.user && group !== "auth" ? (entry.user === "schedule" ? t("activity.bySchedule") : entry.user === "restore" ? t("activity.byRestore") : t("activity.by", { user: entry.user })) : null, group === "auth" ? entry.detail : null].filter(Boolean).join(" · ");
   return h(
     "div",
     { class: "activity-item" },
@@ -1828,7 +1835,7 @@ function renderBackupsBody() {
   document.getElementById("backup-actions").replaceChildren(
     button(t(b.running ? "backup.running" : "backup.allNow"), {
       class: "primary",
-      disabled: b.running || !b.apps.some((a) => a.installed && a.included),
+      disabled: b.running,
       onclick: async () => {
         await api("POST", "/api/backups/run", {}).catch((e) => toast(errorText(e), "error"));
         toast(t("backup.started"));
@@ -1876,7 +1883,29 @@ function renderBackupsBody() {
       h("td", null, h("div", { class: "row-actions" }, app.snapshots.length > 0 && button(t("backup.restore"), { class: "small", onclick: () => snapshotsDialog(app) }, "undo"), app.installed && h("button", { type: "button", class: "icon-btn", title: t("backup.now"), "aria-label": `${t("backup.now")}: ${app.title}`, onclick: () => backupNow(app) }, icon("archive")))),
     );
   };
+  const newest = b.server[0];
+  const serverNow = button(t("backup.now"), {
+    class: "small",
+    onclick: async () => {
+      serverNow.disabled = true;
+      try {
+        state.backups = await api("POST", "/api/backups/server", {});
+        toast(t("backup.serverDone"));
+      } catch (e) {
+        toast(errorText(e), "error");
+      }
+      renderBackupsBody();
+    },
+  }, "archive");
   box.replaceChildren(
+    h("div", { class: "section-head" }, h("h2", null, t("backup.server"))),
+    h(
+      "div",
+      { class: "card pad stack" },
+      h("div", { class: "setting plain" }, h("div", { class: "grow" }, h("strong", null, newest ? t("backup.serverLast", { when: ago(newest.at), size: bytes(newest.size), n: b.server.length }) : t("backup.serverNone")), h("p", { class: "muted small" }, t("backup.serverHint"))), h("div", { class: "row-actions" }, serverNow)),
+      h("p", { class: "muted small" }, t("backup.serverRestore")),
+      h("p", { class: "cmd" }, icon("terminal"), `sudo hata restore ${b.dir}`),
+    ),
     h("div", { class: "section-head" }, h("h2", null, t("home.apps"))),
     b.apps.length
       ? h("div", { class: "card table-wrap" }, h("table", null, h("thead", null, h("tr", null, h("th", null, t("backup.col.app")), h("th", null, t("backup.col.last")), h("th", { class: "num" }, t("backup.col.size")), h("th", { class: "num" }, t("backup.col.count")), h("th", null, t("backup.col.daily")), h("th"))), h("tbody", null, b.apps.map(row))))

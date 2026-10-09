@@ -10,13 +10,16 @@
  * started again whatever happens. `tar` does the work: it keeps owners and permissions, which the apps
  * depend on.
  */
-import { existsSync, mkdirSync, readdirSync, renameSync, rmSync, statfsSync, statSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statfsSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { APP_NAME_RE, appMeta, bindSources, normalize } from "./appform";
-import { AppError, appDir, dc, installedNames, jobFinished, onBeforeUpdate, readCompose, startJob, type Job, type Log } from "./apps";
+import { AppError, appAction, appDir, dc, installedNames, jobFinished, onBeforeUpdate, readCompose, startJob, type Job, type Log } from "./apps";
+import { record } from "./activity";
 import { DATA_DIR, settings } from "./config";
 import { listContainers, PROJECT_LABEL, run } from "./docker";
 import { readJsonFile, writeJsonAtomic } from "./fsutil";
+import { listServerSnapshots, RESTORE_MARK, SERVER_DIR, stateExcludes, type ServerSnapshot } from "./restore";
+import { VERSION } from "./version";
 
 export type SnapshotReason = "manual" | "schedule" | "pre-update";
 
@@ -204,6 +207,67 @@ export function restoreSnapshot(name: string, id: string, user: string): Job {
   });
 }
 
+// --- The server itself ------------------------------------------------------------------------------
+
+/**
+ * Snapshots Hata's own state: settings, users, the apps' compose files, certificates. With the apps'
+ * snapshots next to it, this is what `hata restore` rebuilds a server from. It holds password hashes
+ * and keys, so it is as private as the state directory itself.
+ */
+export async function takeServerSnapshot(reason: ServerSnapshot["reason"]): Promise<ServerSnapshot> {
+  const dir = join(backupDir(), SERVER_DIR);
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  const at = new Date();
+  const id = snapshotId(at);
+  const archive = join(dir, id + ".tar.gz");
+  const partial = archive + ".partial";
+  try {
+    const tar = await run(["tar", "--numeric-owner", "-czf", partial, ...stateExcludes(DATA_DIR, backupDir()).map((path) => "--exclude=" + path), "-C", DATA_DIR, "."]);
+    // 1 is "a file changed while it was read": the state is written atomically, the archive is whole
+    if (tar.code > 1) throw new Error(tar.output.split("\n").slice(-3).join("\n") || `tar exited with ${tar.code}`);
+    // password hashes and keys are inside
+    chmodSync(partial, 0o600);
+    renameSync(partial, archive);
+  } catch (e) {
+    rmSync(partial, { force: true });
+    throw e;
+  }
+  const snapshot: ServerSnapshot = { id, at: at.getTime(), reason, size: statSync(archive).size, version: VERSION, apps: installedNames() };
+  writeJsonAtomic(join(dir, id + ".json"), snapshot);
+  // the same rule as for apps: scheduled ones beyond `keep` go, manual ones are the user's
+  const old = listServerSnapshots(backupDir()).filter((s) => s.reason === "schedule").slice(settings.backup.keep);
+  for (const { id: gone } of old) {
+    rmSync(join(dir, gone + ".tar.gz"), { force: true });
+    rmSync(join(dir, gone + ".json"), { force: true });
+  }
+  return snapshot;
+}
+
+/**
+ * Finishes what `hata restore` began: the state is back, now every app comes back from its latest
+ * snapshot — or, having none, is at least started from its compose file.
+ */
+export async function resumeRestore(): Promise<void> {
+  const mark = join(DATA_DIR, RESTORE_MARK);
+  if (!existsSync(mark)) return;
+  // taken away first: a restore that fails must not start over at every start of the server
+  rmSync(mark, { force: true });
+  const failed: string[] = [];
+  const names = installedNames();
+  for (const name of names) {
+    try {
+      const latest = listSnapshots(name)[0];
+      const job = latest ? restoreSnapshot(name, latest.id, "restore") : appAction(name, "start", "restore");
+      await jobFinished(job);
+      if (job.status !== "done") failed.push(name);
+    } catch (e) {
+      console.error(`Could not restore ${name}:`, e instanceof Error ? e.message : e);
+      failed.push(name);
+    }
+  }
+  record(failed.length ? "system.restore.failed" : "system.restore.done", { detail: failed.length ? failed.join(", ") : String(names.length) });
+}
+
 // a snapshot before every update is what makes an update undoable
 onBeforeUpdate(async (name, log) => {
   if (!settings.backup.beforeUpdate) return;
@@ -234,6 +298,8 @@ export interface BackupOverview {
   /** Next scheduled run, ms since epoch; null — the schedule is off */
   nextRun: number | null;
   running: boolean;
+  /** Snapshots of Hata's own state, the newest first */
+  server: ServerSnapshot[];
   /** The server's time zone: the schedule's time is in it, not in the browser's */
   timezone: string;
   apps: BackupApp[];
@@ -285,6 +351,7 @@ export function backupOverview(lang: string): BackupOverview {
     lastRun: state.lastRun,
     nextRun: settings.backup.enabled ? nextRun(settings.backup.time, new Date()).getTime() : null,
     running,
+    server: listServerSnapshots(dir),
     timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
     // a removed app with no snapshots left has nothing to show
     apps: apps.filter((app) => app.installed || app.snapshots.length > 0),
@@ -312,6 +379,11 @@ export async function runBackups(user: string, reason: SnapshotReason = "schedul
         failed.push(name);
       }
     }
+    // the server's own state last: it is small, and the run is whole only with it
+    await takeServerSnapshot(reason === "manual" ? "manual" : "schedule").catch((e) => {
+      console.error("Could not back up the server's state:", e instanceof Error ? e.message : e);
+      failed.push("Hata");
+    });
   } finally {
     running = false;
     state.lastRun = { at: Date.now(), ok, failed };

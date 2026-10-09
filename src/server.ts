@@ -15,7 +15,7 @@ import { recent, record } from "./activity";
 import { AppError, appAction, appDetail, appLogs, appStats, applyCompose, applyStoreUpdate, composeText, getJob, installCustom, installFromStore, listApps, listJobs, onAppRemoved, planStoreUpdate, readCompose, removeApp, storeAppDetail } from "./apps";
 import { certificateStates, challengeResponse, ensureCertificates, loadCertificates } from "./acme";
 import { attention } from "./attention";
-import { backupApp, backupOverview, deleteSnapshot, listSnapshots, restoreSnapshot, runBackups, scheduleBackups } from "./backup";
+import { backupApp, backupOverview, deleteSnapshot, listSnapshots, restoreSnapshot, resumeRestore, runBackups, scheduleBackups, takeServerSnapshot } from "./backup";
 import { APP_NAME_RE, dumpCompose } from "./appform";
 import {
   acceptInvite,
@@ -697,6 +697,11 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
     void runBackups(user.name);
     return json({ started: true }, 202);
   }
+  if (path === "/api/backups/server" && method === "POST") {
+    await takeServerSnapshot("manual");
+    record("system.backup.done", { user: user.name });
+    return json(backupOverview(language(url)), 201);
+  }
   const b = /^\/api\/backups\/([a-z0-9_-]+)\/(\d{8}-\d{6})(\/restore)?$/.exec(path);
   if (b && b[3] && method === "POST") return json({ job: restoreSnapshot(b[1]!, b[2]!, user.name).id }, 202);
   if (b && !b[3] && method === "DELETE") {
@@ -1061,6 +1066,7 @@ export async function serve(): Promise<void> {
   startSampler();
   scheduleStoreSync();
   scheduleBackups();
+  void resumeRestore();
   startGates();
   void refreshHttps();
   setInterval(() => void refreshHttps(), 10 * 60_000);

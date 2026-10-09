@@ -708,5 +708,15 @@
   "appearance.wall.contours": "Контури",
   "error.settings.badAppearance": "Такий вигляд зберегти не можна.",
   "error.appearance.tooLarge": "Зображення завелике: щонайбільше {max} МБ.",
-  "error.appearance.notImage": "Це не зображення, яке Hata вміє показати: JPEG, PNG, WebP або AVIF."
+  "error.appearance.notImage": "Це не зображення, яке Hata вміє показати: JPEG, PNG, WebP або AVIF.",
+  "backup.server": "Сам сервер",
+  "backup.serverLast": "Копію зроблено {when} · {size} · зберігається: {n}",
+  "backup.serverNone": "Копії ще немає",
+  "backup.serverHint": "Налаштування Hata, користувачі, дашборд і compose-файли застосунків. Робиться з кожним запуском; разом зі знімками застосунків нижче це весь сервер.",
+  "backup.serverRestore": "Щоб повернути сервер на новій машині: встановіть Hata, покладіть туди цю теку з копіями й виконайте",
+  "backup.serverDone": "Копію стану сервера зроблено",
+  "activity.system.backup.done": "Зроблено копію стану сервера",
+  "activity.system.restore.done": "Сервер відновлено з копії, застосунків: {target}",
+  "activity.system.restore.failed": "Не вдалося відновити: {target}",
+  "activity.byRestore": "під час відновлення сервера"
 }

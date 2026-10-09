@@ -38,6 +38,9 @@ Early development. What works today:
   editing the compose file, removal with or without data;
 - backups: a snapshot of an app (compose file, its folders, its Docker volumes) as a plain `tar.gz`, daily
   on a schedule and before every update, restore to any snapshot — also of an app that was removed;
+- a backup of the whole server: with every run Hata's own state (settings, users, the dashboard, the
+  apps' compose files) is saved next to the apps' snapshots, and `sudo hata restore <backup folder>` on a
+  new machine brings back Hata and then every app from its latest snapshot;
 - files: the server's files in the browser, opened in the data folder and reaching everywhere — folders,
   upload by drag and drop (whole folders too, large files in parts), download of a file or of a folder as a
   ZIP archive, rename, move, copy, delete, copying a path, putting a folder on the dashboard, pictures, video and sound opened in place, text

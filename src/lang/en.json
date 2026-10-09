@@ -708,5 +708,15 @@
   "appearance.wall.contours": "Contours",
   "error.settings.badAppearance": "This look cannot be saved.",
   "error.appearance.tooLarge": "The picture is too large: {max} MB at most.",
-  "error.appearance.notImage": "This is not a picture Hata can show: JPEG, PNG, WebP or AVIF."
+  "error.appearance.notImage": "This is not a picture Hata can show: JPEG, PNG, WebP or AVIF.",
+  "backup.server": "The server itself",
+  "backup.serverLast": "Backed up {when} · {size} · {n} kept",
+  "backup.serverNone": "Not backed up yet",
+  "backup.serverHint": "Hata's settings, users, the dashboard and the apps' compose files. It is made with every run; together with the snapshots of the apps below it is the whole server.",
+  "backup.serverRestore": "To bring the server back on a new machine: install Hata, put this folder with the backups there and run",
+  "backup.serverDone": "The server's state is backed up",
+  "activity.system.backup.done": "Server's state backed up",
+  "activity.system.restore.done": "Server restored from a backup: {target} apps",
+  "activity.system.restore.failed": "Restoring the server failed for: {target}",
+  "activity.byRestore": "while restoring the server"
 }

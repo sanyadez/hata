@@ -16,6 +16,9 @@ Usage:
                     take over the apps of a CasaOS install on this machine (needs root);
                     --dry-run shows the plan, --yes does not ask, --keep-casaos leaves
                     CasaOS running, --undo gives the apps back
+  hata restore <backup folder>
+                    bring the server back from its backup: Hata's settings and users, then
+                    every app from its latest snapshot (needs root); --yes does not ask
   hata setup-url    print the address for creating the first administrator
   hata version      print the version
 `;
@@ -45,6 +48,11 @@ switch (command) {
     }
     const { migrateCasaos } = await import("./migrate");
     process.exit(await migrateCasaos(process.argv.slice(4)));
+    break;
+  }
+  case "restore": {
+    const { restoreServer } = await import("./restore");
+    process.exit(await restoreServer(process.argv.slice(3)));
     break;
   }
   case "update-watch": {

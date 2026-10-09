@@ -1,6 +1,10 @@
 import { expect, test } from "bun:test";
 import { appDir } from "../src/apps";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { expired, nextRun, restorable, withoutNested, type Snapshot } from "../src/backup";
+import { listServerSnapshots, stateExcludes, strayMembers } from "../src/restore";
 
 const snap = (id: string, at: number, reason: Snapshot["reason"]): Snapshot => ({ id, app: "a", at, reason, size: 1, paths: [], images: [] });
 
@@ -41,4 +45,32 @@ test("the next daily run is today if its time is still ahead, else tomorrow", ()
   expect(nextRun("03:00", at(2, 59)).toString()).toBe(new Date(2026, 9, 9, 3, 0).toString());
   expect(nextRun("03:00", at(3, 0)).toString()).toBe(new Date(2026, 9, 10, 3, 0).toString());
   expect(nextRun("23:30", at(12, 0)).getDate()).toBe(9);
+});
+
+test("the server's snapshot leaves out what must not travel, and the backups themselves", () => {
+  expect(stateExcludes("/var/lib/hata", "/DATA/Backups")).toEqual(["./sessions.json", "./stores", "./update.json", "./restore.json"]);
+  expect(stateExcludes("/var/lib/hata", "/var/lib/hata/backups")).toContain("./backups");
+  expect(stateExcludes("/var/lib/hata", "/var/lib/hata")).toHaveLength(4);
+});
+
+test("a state archive may only hold what unpacks inside the state directory", () => {
+  expect(strayMembers("./\n./settings.json\n./apps/\n./apps/memos/compose.yml\n")).toEqual([]);
+  expect(strayMembers("./settings.json\n/etc/passwd\n")).toEqual(["/etc/passwd"]);
+  expect(strayMembers("./apps/../../etc/cron.d/x\n")).toEqual(["./apps/../../etc/cron.d/x"]);
+  expect(strayMembers("etc/passwd\n")).toEqual(["etc/passwd"]);
+});
+
+test("snapshots of the server are found by their description and archive, newest first", () => {
+  const dir = mkdtempSync(join(tmpdir(), "hata-server-"));
+  mkdirSync(join(dir, "_server"));
+  const put = (id: string, at: number, archive = true) => {
+    writeFileSync(join(dir, "_server", id + ".json"), JSON.stringify({ id, at, reason: "schedule", size: 1, version: "0.1.1", apps: ["memos"] }));
+    if (archive) writeFileSync(join(dir, "_server", id + ".tar.gz"), "x");
+  };
+  put("20261001-030000", 1);
+  put("20261002-030000", 2);
+  put("20261003-030000", 3, false);
+  writeFileSync(join(dir, "_server", "notes.json"), "{}");
+  expect(listServerSnapshots(dir).map((s) => s.id)).toEqual(["20261002-030000", "20261001-030000"]);
+  expect(listServerSnapshots(join(dir, "nope"))).toEqual([]);
 });

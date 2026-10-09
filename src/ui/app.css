@@ -649,3 +649,6 @@ body.term-page { margin: 0; height: 100dvh; display: flex; flex-direction: colum
 .wall.on { border-color: var(--accent); }
 .wall.add { border-style: dashed; }
 input[type="range"] { accent-color: var(--accent); width: 100%; }
+.btn.danger-text { color: var(--danger); }
+.setting.plain { border-top: 0; padding: 0; }
+#backup-apps .section-head:not(:first-child) { margin-top: 12px; }
