@@ -22,12 +22,15 @@ const SESSION_TTL_MS = 30 * 24 * 3600 * 1000;
 const MAX_SESSIONS = 50;
 export const MIN_PASSWORD_LENGTH = 8;
 
-export type Role = "admin" | "member";
+export type Role = "admin" | "member" | "guest";
 
 export interface User {
   id: string;
   name: string;
-  /** An administrator manages the server; a member sees the apps and opens them */
+  /**
+   * An administrator manages the server; a member sees the apps and opens them; a guest is a shared
+   * account (the TV in the living room) that opens only the apps it is named for and cannot change itself
+   */
   role: Role;
   passwordHash: string;
   createdAt: number;
@@ -58,7 +61,7 @@ interface Session {
   userAgent: string;
 }
 
-const users: User[] = readJsonFile<User[]>(USERS_FILE, [], Array.isArray).map((u) => ({ ...u, role: u.role === "member" ? "member" : "admin" }));
+const users: User[] = readJsonFile<User[]>(USERS_FILE, [], Array.isArray).map((u) => ({ ...u, role: u.role === "member" || u.role === "guest" ? u.role : "admin" }));
 let sessions: Session[] = readJsonFile<Session[]>(SESSIONS_FILE, [], Array.isArray)
   .filter((s) => s.exp > Date.now())
   // sessions written by a version without these fields
@@ -227,7 +230,7 @@ function saveUsers(): void {
   writeJsonAtomic(USERS_FILE, users);
 }
 
-const isRole = (role: unknown): role is Role => role === "admin" || role === "member";
+const isRole = (role: unknown): role is Role => role === "admin" || role === "member" || role === "guest";
 const admins = (): User[] => users.filter((u) => u.role === "admin");
 export const findUser = (id: string): User | null => users.find((u) => u.id === id) ?? null;
 
@@ -311,6 +314,99 @@ export async function changePassword(user: User, current: unknown, next: unknown
   saveUsers();
   revokeSessions(user, req);
   return null;
+}
+
+// --- Sign-in log ------------------------------------------------------------------------------------
+// Kept apart from the activity log: a stranger guessing passwords must not push everything else out of it.
+
+const SIGNINS_FILE = join(DATA_DIR, "signins.json");
+const KEEP_SIGNINS = 200;
+
+export interface SignIn {
+  ts: number;
+  /** The name as typed — it may not be a user */
+  name: string;
+  ip: string;
+  outcome: "ok" | "wrongPassword" | "wrongCode" | "locked";
+}
+
+let signIns: SignIn[] = readJsonFile<SignIn[]>(SIGNINS_FILE, [], Array.isArray);
+
+export function recordSignIn(name: unknown, ip: string, outcome: SignIn["outcome"]): void {
+  signIns.push({ ts: Date.now(), name: typeof name === "string" ? name.slice(0, 32) : "", ip, outcome });
+  if (signIns.length > KEEP_SIGNINS) signIns = signIns.slice(-KEEP_SIGNINS);
+  try {
+    writeJsonAtomic(SIGNINS_FILE, signIns);
+  } catch {}
+}
+
+/** Newest first */
+export const listSignIns = (limit = 50): SignIn[] => signIns.slice(-limit).reverse();
+
+// --- Invitations ------------------------------------------------------------------------------------
+
+const INVITES_FILE = join(DATA_DIR, "invites.json");
+const INVITE_TTL_MS = 7 * 24 * 3600 * 1000;
+
+interface Invite {
+  id: string;
+  /** SHA-256 of the token in the link */
+  hash: string;
+  role: Role;
+  /** A note for the administrator: who the link is for */
+  note: string;
+  createdBy: string;
+  exp: number;
+}
+
+let invites: Invite[] = readJsonFile<Invite[]>(INVITES_FILE, [], Array.isArray).filter((i) => i.exp > Date.now());
+
+function saveInvites(): void {
+  writeJsonAtomic(INVITES_FILE, invites);
+}
+
+export const listInvites = () => invites.filter((i) => i.exp > Date.now()).map(({ hash: _, ...invite }) => invite);
+
+/** Creates a single-use link token for a new account. Administrators are not made by link. */
+export function createInvite(role: unknown, note: unknown, by: User): { token: string; id: string } | string {
+  if (role !== "member" && role !== "guest") return "users.badRole";
+  const token = randomToken().slice(0, 40);
+  const invite: Invite = { id: crypto.randomUUID(), hash: sha256(token), role, note: typeof note === "string" ? note.slice(0, 80) : "", createdBy: by.name, exp: Date.now() + INVITE_TTL_MS };
+  invites = [...invites.filter((i) => i.exp > Date.now()), invite];
+  saveInvites();
+  return { token, id: invite.id };
+}
+
+export function revokeInvite(id: string): boolean {
+  const before = invites.length;
+  invites = invites.filter((i) => i.id !== id);
+  saveInvites();
+  return invites.length !== before;
+}
+
+const findInvite = (token: unknown): Invite | null => (typeof token === "string" ? (invites.find((i) => i.hash === sha256(token) && i.exp > Date.now()) ?? null) : null);
+
+/** What the invitation page shows before the account exists; null — the link is wrong, used or expired */
+export const inviteInfo = (token: unknown): { role: Role } | null => {
+  const invite = findInvite(token);
+  return invite ? { role: invite.role } : null;
+};
+
+/** Creates the account an invitation is for and uses the invitation up */
+export async function acceptInvite(token: unknown, name: unknown, password: unknown): Promise<User | string> {
+  const invite = findInvite(token);
+  if (!invite) return "invite.invalid";
+  const user = await createUser(name, password, invite.role);
+  if (typeof user === "string") return user;
+  // two requests with the same link: the first to finish hashing wins, the other account is taken back
+  if (!invites.includes(invite)) {
+    users.splice(users.indexOf(user), 1);
+    saveUsers();
+    return "invite.invalid";
+  }
+  invites = invites.filter((i) => i !== invite);
+  saveInvites();
+  return user;
 }
 
 // --- Two-factor sign-in -----------------------------------------------------------------------------

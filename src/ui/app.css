@@ -357,6 +357,12 @@ tr.removed .app-icon { opacity: 0.5; }
 .chip.accent { border-color: transparent; background: var(--accent-soft); color: var(--accent-text); }
 .setting .chip { margin-left: 8px; }
 
+.lock { display: inline-flex; color: var(--accent-text); }
+.lock .ico { width: 12px; height: 12px; }
+.matrix th, .matrix td { padding-left: 14px; padding-right: 14px; }
+.matrix th:not(:first-child), .matrix td:not(:first-child) { text-align: center; }
+.matrix input[type="checkbox"] { margin: 0; }
+
 /* --- Store ------------------------------------------------------------------------------------- */
 
 .store, .settings { display: grid; grid-template-columns: 208px minmax(0, 1fr); gap: 32px; align-items: start; }

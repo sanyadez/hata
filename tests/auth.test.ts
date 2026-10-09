@@ -170,4 +170,35 @@ test("a member may look, not touch", async () => {
   const no: [string, string][] = [["POST", "/api/apps"], ["DELETE", "/api/apps/memos"], ["POST", "/api/apps/memos/stop"], ["GET", "/api/apps/memos/logs"], ["GET", "/api/apps/memos/compose"], ["GET", "/api/apps/memos/backups"], ["GET", "/api/settings"], ["PUT", "/api/settings"], ["GET", "/api/users"], ["POST", "/api/users"], ["GET", "/api/backups"], ["GET", "/api/activity"], ["GET", "/api/jobs/00000000-0000-0000-0000-000000000000"], ["POST", "/api/store/casaos/sync"]];
   for (const [method, path] of yes) expect([method, path, memberMay(method, path)]).toEqual([method, path, true]);
   for (const [method, path] of no) expect([method, path, memberMay(method, path)]).toEqual([method, path, false]);
+  // a guest is a shared account: it opens its apps and nothing else
+  expect(memberMay("GET", "/api/overview", "guest")).toBe(true);
+  expect(memberMay("GET", "/api/account", "guest")).toBe(true);
+  expect(memberMay("POST", "/api/account/password", "guest")).toBe(false);
+  expect(memberMay("POST", "/api/account/totp/begin", "guest")).toBe(false);
+  expect(memberMay("GET", "/api/store", "guest")).toBe(false);
+});
+
+test("invitations are single-use links for members and guests", async () => {
+  const { createInvite, acceptInvite, inviteInfo, listInvites, revokeInvite } = await import("../src/auth");
+  const admin = (await checkPassword("admin", "long enough"))!;
+  expect(createInvite("admin", "", admin)).toBe("users.badRole");
+  const invite = createInvite("guest", "living room TV", admin);
+  if (typeof invite === "string") throw new Error(invite);
+  expect(inviteInfo(invite.token)).toEqual({ role: "guest" });
+  expect(inviteInfo("wrong")).toBeNull();
+  expect(listInvites().map((i) => [i.role, i.note, i.createdBy])).toEqual([["guest", "living room TV", "admin"]]);
+  expect(JSON.stringify(listInvites())).not.toContain(invite.token);
+
+  expect(await acceptInvite(invite.token, "admin", "long enough 3")).toBe("users.nameTaken");
+  expect(await acceptInvite(invite.token, "tv", "short")).toBe("auth.weakPassword");
+  const user = await acceptInvite(invite.token, "tv", "long enough 3");
+  expect(typeof user === "object" && user.role).toBe("guest");
+  expect(await acceptInvite(invite.token, "tv2", "long enough 3")).toBe("invite.invalid");
+  expect(listInvites()).toEqual([]);
+
+  const second = createInvite("member", "", admin);
+  if (typeof second === "string") throw new Error(second);
+  expect(revokeInvite(second.id)).toBe(true);
+  expect(inviteInfo(second.token)).toBeNull();
+  if (typeof user === "object") deleteUser(user.id, admin);
 });

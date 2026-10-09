@@ -43,6 +43,18 @@ export interface Settings {
   language: string;
   stores: StoreSource[];
   backup: BackupSettings;
+  /** Who may open which app, and which apps are behind Hata's sign-in; an app not listed is open to members */
+  access: Record<string, AppAccess>;
+}
+
+export interface AppAccess {
+  /** "all" — every member; a list — only these users (ids). Administrators may always. */
+  allowed: "all" | string[];
+  /** Hata listens on the app's port and lets only signed-in, allowed users through */
+  protect: boolean;
+  /** With `protect`: the port people open, and the local port the app really listens on */
+  port?: number;
+  upstream?: number;
 }
 
 export interface BackupSettings {
@@ -69,6 +81,7 @@ const DEFAULTS: Settings = {
   language: "en",
   stores: [{ id: "casaos", url: "https://github.com/IceWhaleTech/CasaOS-AppStore" }],
   backup: { enabled: false, time: "03:00", keep: 7, dir: "", beforeUpdate: true, exclude: [] },
+  access: {},
 };
 
 const saved = readJsonFile<Partial<Settings>>(SETTINGS_FILE, {}, isPlainObject);
@@ -78,7 +91,13 @@ export const settings: Settings = {
   ...saved,
   // a settings file written by an older version has no such section, or only part of it
   backup: { ...DEFAULTS.backup, ...(isPlainObject(saved.backup) ? saved.backup : {}) },
+  access: isPlainObject(saved.access) ? (saved.access as Record<string, AppAccess>) : {},
 };
+
+/** Writes the settings after a change made in place (the access rules are edited that way) */
+export function saveSettings(): void {
+  writeJsonAtomic(SETTINGS_FILE, settings);
+}
 
 export function timezone(): string {
   return settings.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";

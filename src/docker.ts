@@ -7,6 +7,7 @@
  *
  * The socket is never exposed to the browser: only the specific calls below exist.
  */
+import { existsSync } from "node:fs";
 import { bus } from "./bus";
 
 export const DOCKER_SOCK = process.env.HATA_DOCKER_SOCK ?? "/var/run/docker.sock";
@@ -182,7 +183,9 @@ export async function run(cmd: string[], opts: { cwd?: string; onLine?: (line: s
 
 /** The `docker compose` command line for a project directory holding `compose.yml` */
 export function composeCmd(project: string, dir: string, args: string[]): string[] {
-  return ["docker", "compose", "--ansi", "never", "--progress", "plain", "-p", project, "--project-directory", dir, "-f", `${dir}/compose.yml`, ...args];
+  // with explicit -f, compose no longer looks for the override file on its own
+  const override = existsSync(`${dir}/compose.override.yml`) ? ["-f", `${dir}/compose.override.yml`] : [];
+  return ["docker", "compose", "--ansi", "never", "--progress", "plain", "-p", project, "--project-directory", dir, "-f", `${dir}/compose.yml`, ...override, ...args];
 }
 
 export function compose(project: string, dir: string, args: string[], onLine?: (line: string) => void): Promise<RunResult> {

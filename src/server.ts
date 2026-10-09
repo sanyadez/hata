@@ -10,12 +10,21 @@
 import { networkInterfaces } from "node:os";
 import type { Server } from "bun";
 import { recent, record } from "./activity";
-import { AppError, appAction, appDetail, appLogs, appStats, applyCompose, composeText, getJob, installCustom, installFromStore, listApps, listJobs, removeApp, storeAppDetail } from "./apps";
+import { AppError, appAction, appDetail, appLogs, appStats, applyCompose, composeText, getJob, installCustom, installFromStore, listApps, listJobs, onAppRemoved, readCompose, removeApp, storeAppDetail } from "./apps";
 import { attention } from "./attention";
 import { backupApp, backupOverview, deleteSnapshot, listSnapshots, restoreSnapshot, runBackups, scheduleBackups } from "./backup";
 import { APP_NAME_RE } from "./appform";
 import {
+  acceptInvite,
   beginTotp,
+  createInvite,
+  inviteInfo,
+  listInvites,
+  listSignIns,
+  recordSignIn,
+  revokeInvite,
+  revokeSessions,
+  type Role,
   changePassword,
   checkPassword,
   checkSecondFactor,
@@ -45,6 +54,7 @@ import {
 import { bus } from "./bus";
 import { DATA_DIR, listenAddress, settings, timezone, updateSettings } from "./config";
 import { dockerInfo, watchEvents } from "./docker";
+import { accessOf, dropAccess, dropUser, gateTarget, mayOpen, setAccess, startGates } from "./gate";
 import { qrMatrix } from "./qr";
 import { ARCH, catalogue, scheduleStoreSync, syncStore } from "./store";
 import { startSampler, systemStatus } from "./system";
@@ -62,6 +72,8 @@ import manropeLatinExt from "./ui/fonts/manrope-latin-ext.woff2" with { type: "f
 import manropeLatin from "./ui/fonts/manrope-latin.woff2" with { type: "file" };
 import en from "./lang/en.json";
 import uk from "./lang/uk.json";
+
+onAppRemoved(dropAccess);
 
 // --- Static files -----------------------------------------------------------------------------------
 
@@ -164,10 +176,13 @@ const publicSettings = () => ({ ...settings, systemTimezone: timezone(), languag
 // --- Events -----------------------------------------------------------------------------------------
 
 /** What a member may do: look at the apps and manage their own account. Everything else is an administrator's. */
-export function memberMay(method: string, path: string): boolean {
-  if (path === "/api/logout" || path.startsWith("/api/account")) return true;
+export function memberMay(method: string, path: string, role: Role = "member"): boolean {
+  if (path === "/api/logout" || path === "/api/account") return true;
+  // a guest is a shared account: whoever holds it must not be able to lock the others out of it
+  if (path.startsWith("/api/account/")) return role !== "guest";
   if (method !== "GET") return false;
-  return ["/api/events", "/api/overview", "/api/apps", "/api/store"].includes(path) || /^\/api\/apps\/[a-z0-9_-]+(\/stats)?$/.test(path) || /^\/api\/store\/[a-z0-9-]+\/apps\/[a-z0-9_-]+$/.test(path);
+  if (["/api/events", "/api/overview", "/api/apps"].includes(path) || /^\/api\/apps\/[a-z0-9_-]+(\/stats)?$/.test(path)) return true;
+  return role === "member" && (path === "/api/store" || /^\/api\/store\/[a-z0-9-]+\/apps\/[a-z0-9_-]+$/.test(path));
 }
 
 /** Events a member's page receives: job output and the activity log are not for them */
@@ -247,10 +262,14 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
   if (path === "/api/login" && method === "POST") {
     const data = await body(req);
     const blocked = loginBlockedFor(ip);
-    if (blocked > 0) return fail(429, "auth.locked", { seconds: Math.ceil(blocked / 1000) });
+    if (blocked > 0) {
+      recordSignIn(data.name, ip, "locked");
+      return fail(429, "auth.locked", { seconds: Math.ceil(blocked / 1000) });
+    }
     const user = await checkPassword(data.name, data.password);
     if (!user) {
       registerLoginFailure(ip);
+      recordSignIn(data.name, ip, "wrongPassword");
       return fail(401, "auth.wrong");
     }
     if (user.totp) {
@@ -258,19 +277,39 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
       if (data.code === undefined || data.code === "") return fail(401, "auth.codeRequired");
       if (!checkSecondFactor(user, data.code)) {
         registerLoginFailure(ip);
+        recordSignIn(data.name, ip, "wrongCode");
         return fail(401, "auth.wrongCode");
       }
     }
     registerLoginSuccess(ip);
+    recordSignIn(user.name, ip, "ok");
     record("auth.signin", { user: user.name, detail: ip });
     return json({ user: publicUser(user) }, 200, { "set-cookie": sessionCookie(createSession(user, client), isHttps(req, url)) });
+  }
+
+  // an invitation link: the page asks what it is for, then creates the account
+  if (path === "/api/invite" && method === "GET") {
+    const info = inviteInfo(url.searchParams.get("token"));
+    return info ? json(info) : fail(404, "invite.invalid");
+  }
+  if (path === "/api/invite" && method === "POST") {
+    const data = await body(req);
+    const blocked = loginBlockedFor(ip);
+    if (blocked > 0) return fail(429, "auth.locked", { seconds: Math.ceil(blocked / 1000) });
+    const result = await acceptInvite(data.token, data.name, data.password);
+    if (typeof result === "string") {
+      if (result === "invite.invalid") registerLoginFailure(ip);
+      return fail(result === "users.nameTaken" ? 409 : 400, result);
+    }
+    record("users.joined", { user: result.name, detail: ip });
+    return json({ user: publicUser(result) }, 200, { "set-cookie": sessionCookie(createSession(result, client), isHttps(req, url)) });
   }
 
   // ---- everything below needs a session ----
   const user = sessionUser(req);
   if (!user) return fail(401, "auth.required");
   const admin = user.role === "admin";
-  if (!admin && !memberMay(method, path)) return fail(403, "auth.forbidden");
+  if (!admin && !memberMay(method, path, user.role)) return fail(403, "auth.forbidden");
 
   // ---- the signed-in user's own account ----
   if (path === "/api/account" && method === "GET") {
@@ -281,6 +320,10 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
     const error = await changePassword(user, data.current, data.password, req);
     if (error) return fail(400, error);
     record("auth.password", { user: user.name });
+    return json({ ok: true });
+  }
+  if (path === "/api/account/sessions/others" && method === "DELETE") {
+    revokeSessions(user, req);
     return json({ ok: true });
   }
   const session = /^\/api\/account\/sessions\/([0-9a-f-]{36})$/.exec(path);
@@ -323,6 +366,7 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
     const name = findUser(target[1]!)?.name ?? "";
     const error = deleteUser(target[1]!, user);
     if (error) return fail(error === "users.notFound" ? 404 : 400, error);
+    dropUser(target[1]!);
     record("users.remove", { user: user.name, detail: name });
     return json({ ok: true });
   }
@@ -332,17 +376,40 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
     return json({ ok: true }, 200, { "set-cookie": clearSessionCookie() });
   }
 
+  if (path === "/api/invites") {
+    if (method === "GET") return json(listInvites());
+    if (method === "POST") {
+      const data = await body(req);
+      const invite = createInvite(data.role, data.note, user);
+      return typeof invite === "string" ? fail(400, invite) : json(invite, 201);
+    }
+  }
+  const invite = /^\/api\/invites\/([0-9a-f-]{36})$/.exec(path);
+  if (invite && method === "DELETE") return revokeInvite(invite[1]!) ? json({ ok: true }) : fail(404, "invite.invalid");
+  if (path === "/api/signins" && method === "GET") return json(listSignIns());
+
+  // ---- who may open what ----
+  if (path === "/api/access" && method === "GET") {
+    const apps = (await listApps(language(url))).map((app) => {
+      const compose = readCompose(app.name);
+      const gate = compose ? gateTarget(compose, settings.dataRoot) : "noPort";
+      return { name: app.name, title: app.title, icon: app.icon, ...accessOf(app.name), cannotProtect: typeof gate === "string" ? gate : null };
+    });
+    return json({ apps, users: listUsers().map(({ id, name, role }) => ({ id, name, role })) });
+  }
+
   if (path === "/api/events" && method === "GET") return events(req, server, admin);
 
   if (path === "/api/overview" && method === "GET") {
-    const [docker, apps] = await Promise.all([dockerInfo(), listApps(language(url))]);
+    const [docker, all] = await Promise.all([dockerInfo(), listApps(language(url))]);
+    const apps = all.filter((app) => mayOpen(user, app.name));
     const system = systemStatus();
     return json({
       system,
       docker,
       apps,
       arch: ARCH,
-      attention: attention({ system, docker, apps, activity: recent(100) }),
+      attention: admin ? attention({ system, docker, apps, activity: recent(100) }) : [],
       // who signed in from where, and what was installed by whom, is the administrators' business
       activity: admin ? recent(8) : [],
       jobs: admin ? listJobs().filter((j) => j.status === "running").map(({ log: _, ...job }) => job) : [],
@@ -384,7 +451,7 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
   if (m && method === "GET") return json(await storeAppDetail(m[1]!, m[2]!, language(url)));
 
   if (path === "/api/apps") {
-    if (method === "GET") return json(await listApps(language(url)));
+    if (method === "GET") return json((await listApps(language(url))).filter((app) => mayOpen(user, app.name)));
     if (method === "POST") {
       const data = await body(req);
       const job =
@@ -406,6 +473,16 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
     const name = m[1]!;
     const sub = m[2];
     if (!APP_NAME_RE.test(name)) return fail(400, "app.badName");
+    // an app the user may not open does not exist for them
+    if (!mayOpen(user, name)) return fail(404, "app.notFound");
+    if (sub === "access" && method === "PUT") {
+      const data = await body(req);
+      const ids = new Set(listUsers().map((u) => u.id));
+      const allowed = data.allowed === "all" ? "all" : Array.isArray(data.allowed) ? [...new Set(data.allowed.filter((id): id is string => typeof id === "string" && ids.has(id)))] : null;
+      if (allowed === null) return fail(400, "gate.badAccess");
+      const job = setAccess(name, { allowed, protect: data.protect === true }, user.name);
+      return json({ job: job?.id ?? null }, job ? 202 : 200);
+    }
     if (!sub && method === "GET") return json(await appDetail(name, language(url)));
     if (!sub && method === "DELETE") return json({ job: removeApp(name, url.searchParams.get("data") === "1", user.name).id }, 202);
     if (sub === "stats" && method === "GET") return json(await appStats(name));
@@ -484,5 +561,6 @@ export async function serve(): Promise<void> {
   startSampler();
   scheduleStoreSync();
   scheduleBackups();
+  startGates();
   void watchEvents();
 }

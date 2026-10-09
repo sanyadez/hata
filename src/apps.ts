@@ -154,6 +154,8 @@ export interface InstalledApp extends Pick<AppMeta, "title" | "icon" | "port" | 
   status: AppStatus;
   /** Store the app came from; "" — a custom app */
   store: string;
+  /** Behind Hata's sign-in */
+  protected: boolean;
   /** Running operation, if any */
   job: { id: string; kind: JobKind } | null;
   containers: { id: string; name: string; service: string; image: string; state: string; status: string; ports: string[] }[];
@@ -185,6 +187,7 @@ function describeApp(name: string, containers: ContainerSummary[] | null, lang: 
     hostname: meta.hostname,
     status: containers === null ? "unknown" : running === 0 ? "stopped" : running === own.length ? "running" : "partial",
     store: typeof compose?.["x-hata"]?.store === "string" ? compose["x-hata"].store : "",
+    protected: settings.access[name]?.protect === true,
     job: job ? { id: job.id, kind: job.kind } : null,
     containers: own.map((c) => ({
       id: c.Id.slice(0, 12),
@@ -359,6 +362,12 @@ export async function installCustom(name: unknown, text: unknown, user: string):
   return startJob(appName, "install", user, (log) => install(appName, text, compose, log));
 }
 
+/** Called after an app is removed, for modules that keep something about it */
+const removedHooks: ((name: string) => void)[] = [];
+export function onAppRemoved(hook: (name: string) => void): void {
+  removedHooks.push(hook);
+}
+
 /** Runs inside an update, before anything changes — the backup module snapshots the app here */
 let beforeUpdate: ((name: string, log: Log) => Promise<void>) | null = null;
 export function onBeforeUpdate(hook: (name: string, log: Log) => Promise<void>): void {
@@ -419,6 +428,7 @@ export function removeApp(name: string, withData: boolean, user: string): Job {
     await dc(name, ["down", "--remove-orphans", ...(withData ? ["--volumes"] : [])], log);
     rmSync(appDir(name), { recursive: true, force: true });
     parsed.delete(name);
+    for (const hook of removedHooks) hook(name);
     if (withData) {
       const data = join(settings.dataRoot, "AppData", name);
       log(`Removing ${data}`);

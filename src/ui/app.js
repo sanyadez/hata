@@ -60,6 +60,8 @@ const ICONS = {
   store: "M5 8h14l-1 12H6zM9 8V6a3 3 0 0 1 6 0v2",
   archive: "M3 5h18v4H3zM5 9v10h14V9M10 13h4",
   undo: "M9 7 4 12l5 5M4 12h11a5 5 0 0 1 0 10h-2",
+  lock: "M6 11h12v9H6zM8.5 11V8a3.5 3.5 0 0 1 7 0v3",
+  link: "M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1",
 };
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -192,6 +194,9 @@ const state = {
   settings: null,
   account: null,
   users: null,
+  invites: null,
+  access: null,
+  signIns: null,
   backups: null,
   app: null,
 };
@@ -215,7 +220,7 @@ function pickLanguage(server) {
 
 function parseRoute() {
   const parts = location.hash.replace(/^#\/?/, "").split("/").filter(Boolean).map(decodeURIComponent);
-  if (parts[0] === "store") return { view: "store" };
+  if (parts[0] === "store" && state.user?.role !== "guest") return { view: "store" };
   if (parts[0] === "backups" && isAdmin()) return { view: "backups" };
   if (parts[0] === "users" && isAdmin()) return { view: "users" };
   if (parts[0] === "apps" && parts[1]) return { view: "app", name: parts[1], tab: isAdmin() && ["logs", "compose", "backups"].includes(parts[2]) ? parts[2] : "overview" };
@@ -228,8 +233,22 @@ function go(hash) {
   else location.hash = hash;
 }
 
+/** The address a protected app sent the visitor from, if it is on this server */
+function nextAddress() {
+  const next = new URLSearchParams(location.search).get("next");
+  try {
+    const url = new URL(next);
+    return url.hostname === location.hostname && /^https?:$/.test(url.protocol) ? url.href : null;
+  } catch {
+    return null;
+  }
+}
+
+// read once: the sign-in form tidies the address bar before the visitor is let in
+const NEXT = nextAddress();
+
 function onRoute() {
-  if (/^#setup=/.test(location.hash)) return;
+  if (/^#(setup|invite)=/.test(location.hash)) return;
   leaveView();
   state.route = parseRoute();
   render();
@@ -302,7 +321,57 @@ function field(label, input, hint) {
   return h("label", { class: "field" }, h("span", { class: "label" }, label), input, hint && h("span", { class: "hint" }, hint));
 }
 
+async function inviteScreen(token) {
+  let invite = null;
+  try {
+    invite = await api("GET", `/api/invite?token=${token}`);
+  } catch {}
+  if (!invite) {
+    return $app.replaceChildren(h("main", { class: "center" }, h("div", { class: "auth card" }, h("div", { class: "brand big" }, h("img", { src: "/logo.svg", alt: "" }), "hata"), h("h1", null, t("invite.invalidTitle")), h("p", { class: "muted" }, t("invite.invalid")), h("a", { class: "btn wide", href: "/" }, t("auth.signIn")))));
+  }
+  const name = h("input", { name: "name", autocomplete: "username", required: true, autocapitalize: "none", spellcheck: false });
+  const password = h("input", { name: "password", type: "password", autocomplete: "new-password", required: true, minLength: 8 });
+  const error = h("p", { class: "error", role: "alert" });
+  const submit = h("button", { class: "btn primary wide" }, t("invite.join"));
+  $app.replaceChildren(
+    h(
+      "main",
+      { class: "center" },
+      h(
+        "form",
+        {
+          class: "auth card",
+          onsubmit: async (e) => {
+            e.preventDefault();
+            submit.disabled = true;
+            error.textContent = "";
+            try {
+              const res = await api("POST", "/api/invite", { token, name: name.value.trim(), password: password.value });
+              history.replaceState(null, "", location.pathname);
+              state.user = res.user;
+              await enter();
+            } catch (err) {
+              error.textContent = errorText(err);
+              submit.disabled = false;
+            }
+          },
+        },
+        h("div", { class: "brand big" }, h("img", { src: "/logo.svg", alt: "" }), "hata"),
+        h("h1", null, t("invite.title")),
+        h("p", { class: "muted" }, t("invite.lead", { role: t("user.role." + invite.role) })),
+        field(t("auth.name"), name),
+        field(t("auth.password"), password, t("auth.passwordHint")),
+        error,
+        submit,
+      ),
+    ),
+  );
+  name.focus();
+}
+
 function authScreen() {
+  const invite = /^#invite=([0-9a-f]+)$/.exec(location.hash)?.[1];
+  if (invite && !state.setup) return void inviteScreen(invite);
   const setup = state.setup;
   const tokenFromLink = /^#setup=([0-9a-f]+)$/.exec(location.hash)?.[1] ?? "";
   const token = h("input", { name: "token", value: tokenFromLink, autocomplete: "off", required: true, spellcheck: false });
@@ -345,6 +414,7 @@ function authScreen() {
     h("div", { class: "brand big" }, h("img", { src: "/logo.svg", alt: "" }), "hata"),
     h("h1", null, t(setup ? "setup.title" : "auth.title")),
     setup && h("p", { class: "muted" }, t("setup.lead")),
+    !setup && NEXT && h("p", { class: "muted" }, t("auth.nextLead", { address: new URL(NEXT).host })),
     setup && !tokenFromLink && field(t("setup.token"), token, t("setup.tokenHint")),
     field(t("auth.name"), name),
     field(t("auth.password"), password, setup && t("auth.passwordHint")),
@@ -360,7 +430,7 @@ function authScreen() {
 
 const NAV = [
   { view: "home", hash: "#/", icon: "home" },
-  { view: "store", hash: "#/store", icon: "grid" },
+  { view: "store", hash: "#/store", icon: "grid", guest: false },
   { view: "backups", hash: "#/backups", icon: "archive", admin: true },
   { view: "users", hash: "#/users", icon: "user", admin: true },
   { view: "settings", hash: "#/settings", icon: "sliders" },
@@ -371,7 +441,7 @@ const isAdmin = () => state.user?.role === "admin";
 
 function navLinks(className) {
   const current = state.route.view === "app" ? "home" : state.route.view;
-  return NAV.filter((item) => !item.admin || isAdmin()).map((item) =>
+  return NAV.filter((item) => (!item.admin || isAdmin()) && (item.guest !== false || state.user.role !== "guest")).map((item) =>
     h("a", { class: className + (current === item.view ? " active" : ""), href: item.hash, "aria-current": current === item.view ? "page" : null }, icon(item.icon), h("span", null, t("nav." + item.view))),
   );
 }
@@ -412,7 +482,7 @@ function globalSearch() {
   const update = async () => {
     const q = input.value.trim().toLowerCase();
     if (!q) return void (results.hidden = true);
-    if (!state.store) state.store = await api("GET", `/api/store?lang=${state.lang}`).catch(() => null);
+    if (!state.store && state.user.role !== "guest") state.store = await api("GET", `/api/store?lang=${state.lang}`).catch(() => null);
     const match = (a) => `${a.title} ${a.name}`.toLowerCase().includes(q);
     const installed = (state.overview?.apps ?? []).filter(match).map((a) => ({ ...a, installed: true }));
     const names = new Set(installed.map((a) => a.name));
@@ -566,7 +636,7 @@ function appTile(app) {
   return h(
     "div",
     { class: "tile " + st },
-    h("a", { class: "tile-main", href: `#/apps/${app.name}` }, appIcon(app), h("span", { class: "tile-text" }, h("span", { class: "tile-name" }, app.title), h("span", { class: "tile-sub" }, h("i", { class: "dot " + st }), sub))),
+    h("a", { class: "tile-main", href: `#/apps/${app.name}` }, appIcon(app), h("span", { class: "tile-text" }, h("span", { class: "tile-name" }, app.title), h("span", { class: "tile-sub" }, h("i", { class: "dot " + st }), sub, app.protected && h("span", { class: "lock", title: t("access.protected") }, icon("lock"))))),
     url && h("a", { class: "tile-open", href: url, target: "_blank", rel: "noopener noreferrer", title: t("app.open"), "aria-label": `${t("app.open")}: ${app.title}` }, icon("external")),
   );
 }
@@ -624,7 +694,7 @@ function renderHomeBody() {
   document.getElementById("counts")?.replaceChildren(...counts.map(([st, n]) => h("span", { class: "count" }, h("i", { class: "dot " + st }), t("home.count." + st, { n }))));
 
   appsBox.replaceChildren(
-    h("div", { class: "section-head" }, h("h2", null, t("home.apps"), h("span", { class: "muted small" }, t("home.installed", { n: apps.length }))), h("a", { class: "link", href: "#/store" }, t("home.store"), icon("arrow"))),
+    h("div", { class: "section-head" }, h("h2", null, t("home.apps"), h("span", { class: "muted small" }, t("home.installed", { n: apps.length }))), state.user.role !== "guest" && h("a", { class: "link", href: "#/store" }, t("home.store"), icon("arrow"))),
     h("div", { class: "tiles" }, apps.map(appTile), isAdmin() && h("a", { class: "tile add", href: "#/store" }, h("span", { class: "tile-main" }, h("span", { class: "app-icon plus" }, icon("plus")), h("span", { class: "tile-text" }, h("span", { class: "tile-name" }, t("home.addApp")), h("span", { class: "tile-sub" }, t("home.addAppHint")))))),
   );
 
@@ -1388,7 +1458,7 @@ async function loadSettings() {
   try {
     state.account = await api("GET", "/api/account");
     if (isAdmin()) state.settings = await api("GET", "/api/settings");
-    if (!state.store) state.store = await api("GET", `/api/store?lang=${state.lang}`).catch(() => null);
+    if (!state.store && isAdmin()) state.store = await api("GET", `/api/store?lang=${state.lang}`).catch(() => null);
   } catch (e) {
     return toast(errorText(e), "error");
   }
@@ -1620,6 +1690,28 @@ function passwordPrompt(title, lead, confirmLabel, action) {
 
 function accountSection() {
   const account = state.account;
+  const sessionsCard = h(
+    "section",
+    { class: "card pad" },
+    h("div", { class: "section-head" }, h("h2", null, t("account.sessions")), account.sessions.length > 1 && state.user.role !== "guest" && button(t("account.signOutOthers"), { class: "small", onclick: async () => (await api("DELETE", "/api/account/sessions/others").catch((e) => toast(errorText(e), "error")), loadSettings()) })),
+    account.sessions.map((session) =>
+      settingRow(
+        h("span", null, deviceName(session.userAgent), session.current && h("span", { class: "chip ok" }, t("account.thisDevice"))),
+        [session.ip, t("account.lastSeen", { time: ago(session.lastSeen) })].filter(Boolean).join(" · "),
+        !session.current &&
+          state.user.role !== "guest" &&
+          button(t("account.signOutDevice"), {
+            class: "small",
+            onclick: async () => {
+              await api("DELETE", `/api/account/sessions/${session.id}`).catch((e) => toast(errorText(e), "error"));
+              void loadSettings();
+            },
+          }),
+      ),
+    ),
+  );
+  // a guest account is shared: the people using it do not manage it
+  if (state.user.role === "guest") return [h("section", { class: "card pad" }, h("h2", null, state.user.name), h("p", { class: "muted" }, t("account.guest"))), sessionsCard];
   const current = passwordInput("current-password");
   const next = passwordInput("new-password");
   const error = h("p", { class: "error", role: "alert" });
@@ -1668,31 +1760,14 @@ function accountSection() {
           : button(t("twofa.setUp"), { class: "primary", onclick: twoFactorSetup }),
       ),
     ),
-    h(
-      "section",
-      { class: "card pad" },
-      h("h2", null, t("account.sessions")),
-      account.sessions.map((session) =>
-        settingRow(
-          h("span", null, deviceName(session.userAgent), session.current && h("span", { class: "chip ok" }, t("account.thisDevice"))),
-          [session.ip, t("account.lastSeen", { time: ago(session.lastSeen) })].filter(Boolean).join(" · "),
-          !session.current &&
-            button(t("account.signOutDevice"), {
-              class: "small",
-              onclick: async () => {
-                await api("DELETE", `/api/account/sessions/${session.id}`).catch((e) => toast(errorText(e), "error"));
-                void loadSettings();
-              },
-            }),
-        ),
-      ),
-    ),
+    sessionsCard,
   ];
 }
 
 async function loadUsers() {
   try {
-    state.users = await api("GET", "/api/users");
+    const [users, invites, access, signIns] = await Promise.all([api("GET", "/api/users"), api("GET", "/api/invites"), api("GET", `/api/access?lang=${state.lang}`), api("GET", "/api/signins")]);
+    Object.assign(state, { users, invites, access, signIns });
   } catch (e) {
     return toast(errorText(e), "error");
   }
@@ -1702,7 +1777,7 @@ async function loadUsers() {
 function userDialog() {
   const name = h("input", { required: true, autocapitalize: "none", spellcheck: false, autocomplete: "off" });
   const password = passwordInput("new-password");
-  const role = h("select", null, h("option", { value: "member" }, t("user.role.member")), h("option", { value: "admin" }, t("user.role.admin")));
+  const role = h("select", null, h("option", { value: "member" }, t("user.role.member")), h("option", { value: "guest" }, t("user.role.guest")), h("option", { value: "admin" }, t("user.role.admin")));
   const error = h("p", { class: "error", role: "alert" });
   const dialog = openDialog(
     "",
@@ -1748,7 +1823,9 @@ function userMenuFor(user) {
   dialog = openDialog(
     "menu",
     h("header", null, h("span", { class: "avatar" }, user.name.slice(0, 1).toUpperCase()), h("div", null, h("h2", null, user.name), h("span", { class: "muted small" }, t("user.role." + user.role)))),
-    user.role === "admin" ? item(t("users.makeMember"), "user", () => change({ role: "member" })) : item(t("users.makeAdmin"), "sliders", () => change({ role: "admin" })),
+    user.role !== "member" && item(t("users.makeMember"), "user", () => change({ role: "member" })),
+    user.role !== "guest" && item(t("users.makeGuest"), "user", () => change({ role: "guest" })),
+    user.role !== "admin" && item(t("users.makeAdmin"), "sliders", () => change({ role: "admin" })),
     item(t("users.setPassword"), "refresh", () => {
       const password = passwordInput("new-password");
       const error = h("p", { class: "error", role: "alert" });
@@ -1823,12 +1900,120 @@ function renderUsers() {
       ),
     ),
     h("p", { class: "muted small" }, t("users.rolesHint")),
+    h("div", { class: "columns" }, h("section", null, accessMatrix()), h("aside", { class: "side" }, invitesCard(), signInLog())),
   );
+}
+
+function inviteDialog() {
+  const role = h("select", null, h("option", { value: "member" }, t("user.role.member")), h("option", { value: "guest" }, t("user.role.guest")));
+  const note = h("input", { maxLength: 80, placeholder: t("invite.notePlaceholder") });
+  const error = h("p", { class: "error", role: "alert" });
+  const dialog = openDialog(
+    "",
+    h(
+      "form",
+      {
+        onsubmit: async (e) => {
+          e.preventDefault();
+          try {
+            const res = await api("POST", "/api/invites", { role: role.value, note: note.value.trim() });
+            dialog.close();
+            const link = `${location.origin}/#invite=${res.token}`;
+            const box = h("input", { readOnly: true, value: link, class: "mono", onfocus: (ev) => ev.target.select() });
+            const shown = openDialog("", h("h2", null, t("invite.linkTitle")), h("p", { class: "muted" }, t("invite.linkLead")), box, h("footer", null, button(t("twofa.copy"), { onclick: () => navigator.clipboard?.writeText(link).then(() => toast(t("twofa.copied"))) }, "link"), button(t("common.close"), { class: "primary", onclick: () => shown.close() })));
+            box.focus();
+            void loadUsers();
+          } catch (err) {
+            error.textContent = errorText(err);
+          }
+        },
+      },
+      h("header", null, h("div", { class: "grow" }, h("h2", null, t("invite.new")), h("p", { class: "muted small" }, t("invite.newLead"))), closeX(() => dialog)),
+      field(t("users.role"), role, t("users.roleHint")),
+      field(t("invite.note"), note),
+      error,
+      h("footer", null, closeButton(() => dialog, t("common.cancel")), h("button", { class: "btn primary" }, t("invite.create"))),
+    ),
+  );
+}
+
+function invitesCard() {
+  const invites = state.invites ?? [];
+  return h(
+    "section",
+    { class: "card pad" },
+    h("div", { class: "section-head" }, h("h2", null, t("invite.title2"), invites.length > 0 && h("span", { class: "pill" }, invites.length)), button(t("invite.new"), { class: "small", onclick: inviteDialog }, "link")),
+    invites.length
+      ? invites.map((invite) =>
+          h(
+            "div",
+            { class: "snapshot" },
+            h("div", { class: "grow" }, h("strong", null, invite.note || t("user.role." + invite.role)), h("div", { class: "muted small" }, `${t("user.role." + invite.role)} · ${t("invite.expires", { time: new Date(invite.exp).toLocaleDateString(state.lang, { day: "numeric", month: "short" }) })}`)),
+            h("button", { type: "button", class: "icon-btn", "aria-label": t("invite.revoke"), title: t("invite.revoke"), onclick: async () => (await api("DELETE", `/api/invites/${invite.id}`).catch((e) => toast(errorText(e), "error")), loadUsers()) }, icon("trash")),
+          ),
+        )
+      : h("p", { class: "muted small" }, t("invite.none")),
+  );
+}
+
+function signInLog() {
+  const list = (state.signIns ?? []).slice(0, 8);
+  return h(
+    "section",
+    { class: "pad-x" },
+    h("div", { class: "section-head" }, h("h2", null, t("signins.title"))),
+    list.length
+      ? list.map((entry) => h("div", { class: "activity-item" }, icon(entry.outcome === "ok" ? "signin" : "x", entry.outcome === "ok" ? "" : "danger"), h("div", { class: "grow" }, h("div", null, t("signins." + entry.outcome, { name: entry.name || "?" })), h("div", { class: "muted small" }, `${ago(entry.ts)} · ${entry.ip}`))))
+      : h("p", { class: "muted small" }, t("activity.none")),
+  );
+}
+
+/** Who may open what: a row per app, a column per person who is not an administrator */
+function accessMatrix() {
+  const access = state.access;
+  if (!access) return null;
+  const people = access.users.filter((u) => u.role !== "admin");
+  const update = async (app, patch) => {
+    try {
+      const res = await api("PUT", `/api/apps/${app.name}/access`, { protect: app.protect, allowed: app.allowed, ...patch });
+      if (res.job) jobDialog(res.job, "apply", app.title, () => void loadUsers());
+      else void loadUsers();
+    } catch (e) {
+      toast(errorText(e), "error");
+      void loadUsers();
+    }
+  };
+  const row = (app) => {
+    const everyone = app.allowed === "all";
+    const list = everyone ? [] : app.allowed;
+    const toggle = (user, on) => {
+      // leaving "every member" starts from the people who could open the app until now
+      const base = everyone ? people.filter((u) => u.role === "member").map((u) => u.id) : list;
+      update(app, { allowed: on ? [...new Set([...base, user.id])] : base.filter((id) => id !== user.id) });
+    };
+    return h(
+      "tr",
+      null,
+      h("td", null, h("div", { class: "with-icon" }, appIcon(app, "sm"), h("div", null, h("a", { class: "strong", href: `#/apps/${app.name}` }, app.title), !everyone && !app.protect && h("div", { class: "muted small" }, t("access.onlyHidden"))))),
+      h("td", null, h("input", { type: "checkbox", checked: app.protect, disabled: !!app.cannotProtect, title: app.cannotProtect ? t("access.cannot." + app.cannotProtect) : "", "aria-label": t("access.protectApp", { title: app.title }), onchange: (e) => update(app, { protect: e.target.checked }) })),
+      h("td", null, h("input", { type: "checkbox", checked: everyone, "aria-label": t("access.everyone"), onchange: (e) => update(app, { allowed: e.target.checked ? "all" : people.filter((u) => u.role === "member").map((u) => u.id) }) })),
+      people.map((user) => h("td", null, h("input", { type: "checkbox", checked: everyone ? user.role === "member" : list.includes(user.id), "aria-label": `${user.name}: ${app.title}`, onchange: (e) => toggle(user, e.target.checked) }))),
+    );
+  };
+  return [
+    h("div", { class: "section-head" }, h("h2", null, t("access.title"))),
+    access.apps.length
+      ? h("div", { class: "card table-wrap" }, h("table", { class: "matrix" }, h("thead", null, h("tr", null, h("th", null, t("backup.col.app")), h("th", null, t("access.signIn")), h("th", null, t("access.everyone")), people.map((u) => h("th", null, u.name, u.role === "guest" && h("span", { class: "muted" }, ` · ${t("user.role.guest")}`))))), h("tbody", null, access.apps.map(row))))
+      : h("p", { class: "card pad muted" }, t("backup.noApps")),
+    h("p", { class: "muted small" }, t("access.how")),
+  ];
 }
 
 // --- Start --------------------------------------------------------------------------------------
 
 async function enter() {
+  // sent here by a protected app: now that the visitor is signed in, back to it
+  if (NEXT) return location.replace(NEXT);
   state.route = parseRoute();
   render();
   await refresh();
