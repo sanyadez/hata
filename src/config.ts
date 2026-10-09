@@ -46,6 +46,8 @@ export interface Settings {
   /** Who may open which app, and which apps are behind Hata's sign-in; an app not listed is open to members */
   access: Record<string, AppAccess>;
   https: HttpsSettings;
+  /** Folders put on the dashboard from the file manager, absolute paths */
+  folders: string[];
 }
 
 export interface HttpsSettings {
@@ -98,6 +100,7 @@ const DEFAULTS: Settings = {
   backup: { enabled: false, time: "03:00", keep: 7, dir: "", beforeUpdate: true, exclude: [] },
   access: {},
   https: { mode: "off", domain: "", email: "" },
+  folders: [],
 };
 
 const saved = readJsonFile<Partial<Settings>>(SETTINGS_FILE, {}, isPlainObject);
@@ -108,6 +111,7 @@ export const settings: Settings = {
   // a settings file written by an older version has no such section, or only part of it
   backup: { ...DEFAULTS.backup, ...(isPlainObject(saved.backup) ? saved.backup : {}) },
   access: isPlainObject(saved.access) ? (saved.access as Record<string, AppAccess>) : {},
+  folders: Array.isArray(saved.folders) ? saved.folders.filter((path): path is string => typeof path === "string") : [],
   https: { ...DEFAULTS.https, ...(isPlainObject(saved.https) ? saved.https : {}) },
 };
 

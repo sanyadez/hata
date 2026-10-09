@@ -31,6 +31,11 @@ Early development. What works today:
   editing the compose file, removal with or without data;
 - backups: a snapshot of an app (compose file, its folders, its Docker volumes) as a plain `tar.gz`, daily
   on a schedule and before every update, restore to any snapshot — also of an app that was removed;
+- files: the server's files in the browser, opened in the data folder and reaching everywhere — folders,
+  upload by drag and drop (whole folders too, large files in parts), download of a file or of a folder as a
+  ZIP archive, rename, move, copy, delete, copying a path, putting a folder on the dashboard, pictures, video and sound opened in place, text
+  files edited in place. What is uploaded into an app's folder belongs to the same user the app runs as;
+  the system's own folders cannot be deleted by a slip of the hand;
 - users: administrators, members (who see the apps and open them, nothing more) and shared guest accounts;
   invitations by link; two-factor sign-in with an authenticator app and recovery codes; passkeys (sign in with the
   device's fingerprint, face or PIN) when Hata is reached by a domain over HTTPS; a list of one's
@@ -44,7 +49,8 @@ Early development. What works today:
   started; if it does not come up, the previous version is put back by itself. Apps keep running meanwhile;
 - English and Ukrainian UI, light and dark, phone-friendly.
 
-Not there yet: wildcard certificates (DNS challenge), backups to another machine, file manager.
+Not there yet: wildcard certificates (DNS challenge), backups to another machine, a trash and share links
+for files.
 
 ## Install
 

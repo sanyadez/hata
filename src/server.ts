@@ -61,6 +61,7 @@ import {
 import { bus } from "./bus";
 import { DATA_DIR, listenAddress, settings, timezone, updateSettings } from "./config";
 import { dockerInfo, listContainers, watchEvents } from "./docker";
+import { abortUpload, archivePlan, list as listFiles, makeFolder, pinFolder, pinnedFolders, readable, readText, remove as removeFiles, rename as renameFile, summary as filesSummary, transfer, upload, writeText } from "./files";
 import { adoptProject, casaosState, containerDraft, importCount, importList, moveInCasaos, projectDraft, rebuildContainer } from "./import";
 import { accessOf, dropAccess, dropUser, gateTarget, guard, mayOpen, MAX_APP_BODY, page, passToApp, setAccess, startGates, tunnelHandlers } from "./gate";
 import { appHost, appLabel, classifyHost, clientIp, cookieDomain, requestHost, requestProto, siteDomain } from "./site";
@@ -70,6 +71,7 @@ import { ARCH, catalogue, scheduleStoreSync, syncStore } from "./store";
 import { startSampler, systemStatus } from "./system";
 import { availableUpdate, checkForUpdate, confirmUpdate, scheduleUpdateChecks, startUpdate, updateStatus } from "./update";
 import { VERSION } from "./version";
+import { zipStream } from "./zip";
 
 import appCss from "./ui/app.css" with { type: "text" };
 import appJs from "./ui/app.js" with { type: "text" };
@@ -252,7 +254,7 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
   if (write && !sameOrigin(req, url)) return fail(403, "request.crossSite");
   const ip = clientIp(req, server);
   // the API takes small JSON bodies; the server's own limit is the apps' (they upload files through it)
-  if (write && Number(req.headers.get("content-length") ?? 0) > MAX_API_BODY) return fail(413, "request.tooLarge");
+  if (write && path !== "/api/files/upload" && Number(req.headers.get("content-length") ?? 0) > MAX_API_BODY) return fail(413, "request.tooLarge");
   const cookie = (token: string) => sessionCookie(token, requestProto(req) === "https", cookieDomain(requestHost(req)));
   const client = { ip, userAgent: req.headers.get("user-agent") ?? "" };
 
@@ -490,6 +492,8 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
       activity: admin ? recent(8) : [],
       // containers and compose projects on this machine that are not apps here yet
       importable: admin ? importCount(containers) : 0,
+      // folders an administrator put on the dashboard from the file manager
+      folders: admin ? pinnedFolders() : [],
       jobs: admin ? listJobs().filter((j) => j.status === "running").map(({ log: _, ...job }) => job) : [],
     });
   }
@@ -542,6 +546,12 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
   if (b && !b[3] && method === "DELETE") {
     deleteSnapshot(b[1]!, b[2]!);
     return json({ ok: true });
+  }
+
+  // ---- files (administrators only: members were turned away above) ----
+  if (path.startsWith("/api/files")) {
+    const response = await files(req, url, server);
+    if (response) return response;
   }
 
   if (path === "/api/store" && method === "GET") return json(catalogue(language(url)));
@@ -630,6 +640,96 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
 }
 
 const MAX_API_BODY = 2 * 1024 * 1024;
+
+/** A file name for the Content-Disposition header, whatever letters it has */
+function disposition(kind: "inline" | "attachment", name: string): string {
+  return `${kind}; filename="${name.replace(/[^\x20-\x7e]|["\\]/g, "_")}"; filename*=UTF-8''${encodeURIComponent(name).replace(/['()*]/g, (c) => "%" + c.charCodeAt(0).toString(16).toUpperCase())}`;
+}
+
+/**
+ * A file of the user's, sent to the browser. It is somebody's upload, not a page of ours: the type is
+ * never guessed from the content, and nothing in it may run — a file opened in a tab is sandboxed.
+ */
+function sendFile(req: Request, path: string | null, download: boolean): Response {
+  const file = readable(path);
+  const inline = !download && file.inline !== "";
+  const etag = `"${file.size.toString(36)}-${file.modified.toString(36)}"`;
+  const headers: Record<string, string> = {
+    "x-content-type-options": "nosniff",
+    "referrer-policy": "no-referrer",
+    // the PDF viewer of the browser does not start in a sandbox
+    "content-security-policy": file.inline === "application/pdf" ? "default-src 'none'; style-src 'unsafe-inline'; object-src 'self'" : "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:; media-src 'self'",
+    "content-type": inline ? file.inline : "application/octet-stream",
+    "content-disposition": disposition(inline ? "inline" : "attachment", file.name),
+    "cache-control": "private, no-cache",
+    "accept-ranges": "bytes",
+    etag,
+  };
+  if (req.headers.get("if-none-match") === etag) return new Response(null, { status: 304, headers });
+  // players ask for a video piece by piece
+  const range = /^bytes=(\d*)-(\d*)$/.exec(req.headers.get("range") ?? "");
+  if (range && (range[1] || range[2]) && file.size > 0) {
+    const start = range[1] ? Number(range[1]) : Math.max(0, file.size - Number(range[2]));
+    const end = range[1] && range[2] ? Math.min(Number(range[2]), file.size - 1) : file.size - 1;
+    if (start > end || start >= file.size) return new Response(null, { status: 416, headers: { ...headers, "content-range": `bytes */${file.size}` } });
+    return new Response(Bun.file(file.file).slice(start, end + 1), { status: 206, headers: { ...headers, "content-range": `bytes ${start}-${end}/${file.size}`, "content-length": String(end - start + 1) } });
+  }
+  return new Response(Bun.file(file.file), { headers });
+}
+
+async function files(req: Request, url: URL, server: Server): Promise<Response | null> {
+  const path = url.pathname;
+  const method = req.method;
+  const q = url.searchParams;
+  if (path === "/api/files" && method === "GET") return json(await listFiles(q.get("path") ?? ""));
+  if (path === "/api/files/raw" && method === "GET") return sendFile(req, q.get("path"), q.get("download") === "1");
+  if (path === "/api/files/summary" && method === "POST") return json(await filesSummary((await body(req)).paths));
+  if (path === "/api/files/zip" && method === "GET") {
+    const plan = await archivePlan(q.getAll("path"));
+    server.timeout(req, 0);
+    return new Response(zipStream(plan.sources), { headers: { "x-content-type-options": "nosniff", "content-type": "application/zip", "content-disposition": disposition("attachment", plan.name), "cache-control": "no-store" } });
+  }
+  if (path === "/api/files/text" && method === "GET") return json(await readText(q.get("path")));
+  if (path === "/api/files/text" && method === "PUT") {
+    const data = await body(req);
+    return json(await writeText(data.path, data.content, data.modified));
+  }
+  if (path === "/api/files/folder" && method === "POST") {
+    const data = await body(req);
+    return json({ path: makeFolder(data.path, data.name) }, 201);
+  }
+  if (path === "/api/files/pin" && method === "POST") {
+    const data = await body(req);
+    pinFolder(data.path, data.pinned === true);
+    return json({ pinned: pinnedFolders().map((folder) => folder.path) });
+  }
+  if (path === "/api/files/rename" && method === "POST") {
+    const data = await body(req);
+    return json({ path: renameFile(data.path, data.name) });
+  }
+  if ((path === "/api/files/move" || path === "/api/files/copy") && method === "POST") {
+    const data = await body(req);
+    // a large folder takes its time, and more so across disks
+    server.timeout(req, 0);
+    await transfer(data.paths, data.to, path.endsWith("copy"));
+    return json({ ok: true });
+  }
+  if (path === "/api/files/delete" && method === "POST") {
+    server.timeout(req, 0);
+    await removeFiles((await body(req)).paths);
+    return json({ ok: true });
+  }
+  if (path === "/api/files/upload" && method === "PUT") {
+    server.timeout(req, 0);
+    const part = { dir: q.get("dir"), name: q.get("name"), sub: q.get("sub") ?? "", id: q.get("id") ?? "", offset: Number(q.get("offset") ?? 0), last: q.get("last") === "1", overwrite: q.get("overwrite") === "1" };
+    return json(await upload(part, req.body));
+  }
+  if (path === "/api/files/upload" && method === "DELETE") {
+    abortUpload(q.get("dir"), q.get("sub") ?? "", q.get("id") ?? "");
+    return json({ ok: true });
+  }
+  return null;
+}
 
 /**
  * Asks the domain for this very process, the way a browser would: does the name lead here, over HTTPS,

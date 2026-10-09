@@ -61,6 +61,15 @@ const ICONS = {
   archive: "M3 5h18v4H3zM5 9v10h14V9M10 13h4",
   undo: "M9 7 4 12l5 5M4 12h11a5 5 0 0 1 0 10h-2",
   lock: "M6 11h12v9H6zM8.5 11V8a3.5 3.5 0 0 1 7 0v3",
+  file: "M6 3h9l4 4v14H6zM14 3v5h5",
+  image: "M4 5h16v14H4zM4 16l5-5 4 4 3-3 4 4M15 9h.01",
+  film: "M4 5h16v14H4zM10 9l5 3-5 3z",
+  music: "M9 18V5l10-2v13M9 18a3 3 0 1 1-6 0 3 3 0 0 1 6 0zM19 16a3 3 0 1 1-6 0 3 3 0 0 1 6 0z",
+  upload: "M12 16V5M7 9l5-5 5 5M5 20h14",
+  list: "M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01",
+  edit: "M4 20h4L19 9l-4-4L4 16zM13 7l4 4",
+  copy: "M9 9h11v11H9zM5 15H4V4h11v1",
+  pin: "M12 17v5M8 3h8l-1 6 3 4H6l3-4z",
   link: "M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1",
 };
 
@@ -175,6 +184,9 @@ function openDialog(className, ...content) {
   return dialog;
 }
 
+/** Replaces what an element holds; like h(), it takes arrays and skips what is false or missing */
+const put = (el, ...children) => el.replaceChildren(...h("div", null, children).childNodes);
+
 const button = (label, attrs = {}, iconName) => h("button", { type: "button", ...attrs, class: "btn " + (attrs.class ?? "") }, iconName && icon(iconName), label && h("span", null, label));
 const closeButton = (dialog, label = t("common.close")) => button(label, { onclick: () => dialog().close() });
 const closeX = (dialog) => h("button", { type: "button", class: "icon-btn", "aria-label": t("common.close"), onclick: () => dialog().close() }, icon("x"));
@@ -200,6 +212,7 @@ const state = {
   access: null,
   signIns: null,
   backups: null,
+  files: null,
   import: null,
   update: null,
   app: null,
@@ -220,11 +233,13 @@ function pickLanguage(server) {
 }
 
 // --- Routes -------------------------------------------------------------------------------------
-// The address after `#` is the view: #/ · #/store · #/import · #/apps/<name>/<tab> · #/settings/<section>
+// The address after `#` is the view: #/ · #/store · #/import · #/files/<folders> · #/apps/<name>/<tab> · #/settings/<section>
 
 function parseRoute() {
   const parts = location.hash.replace(/^#\/?/, "").split("/").filter(Boolean).map(decodeURIComponent);
   if (parts[0] === "store" && state.user?.role !== "guest") return { view: "store" };
+  // "#/files" is the data root, wherever it is; "#/files/" is the root of the server
+  if (parts[0] === "files" && isAdmin()) return { view: "files", path: /^#\/?files$/.test(location.hash) ? "" : "/" + parts.slice(1).join("/") };
   if (parts[0] === "backups" && isAdmin()) return { view: "backups" };
   if (parts[0] === "users" && isAdmin()) return { view: "users" };
   if (parts[0] === "import" && isAdmin()) return { view: "import" };
@@ -262,6 +277,7 @@ function onRoute() {
   if (!state.user) return;
   if (state.route.view === "store") void loadStore();
   if (state.route.view === "settings") void loadSettings();
+  if (state.route.view === "files") void loadFiles();
   if (state.route.view === "backups") void loadBackups();
   if (state.route.view === "users") void loadUsers();
   if (state.route.view === "import") void loadImport();
@@ -490,6 +506,7 @@ function authScreen() {
 const NAV = [
   { view: "home", hash: "#/", icon: "home" },
   { view: "store", hash: "#/store", icon: "grid", guest: false },
+  { view: "files", hash: "#/files", icon: "folder", admin: true },
   { view: "backups", hash: "#/backups", icon: "archive", admin: true },
   { view: "users", hash: "#/users", icon: "user", admin: true },
   { view: "settings", hash: "#/settings", icon: "sliders" },
@@ -592,6 +609,7 @@ function render() {
   const view = state.route.view;
   if (view === "store") return renderStore();
   if (view === "settings") return renderSettings();
+  if (view === "files") return renderFiles();
   if (view === "backups") return renderBackups();
   if (view === "users") return renderUsers();
   if (view === "import") return renderImport();
@@ -768,6 +786,25 @@ function renderHomeBody() {
       isAdmin() && o.importable > 0 && h("a", { class: "tile add", href: "#/import" }, h("span", { class: "tile-main" }, h("span", { class: "app-icon plus" }, icon("download")), h("span", { class: "tile-text" }, h("span", { class: "tile-name" }, t("home.import")), h("span", { class: "tile-sub" }, t("home.importHint", { n: o.importable }))))),
     ),
   );
+
+  const folders = o.folders ?? [];
+  if (folders.length) {
+    appsBox.append(
+      h("div", { class: "section-head" }, h("h2", null, t("home.folders")), h("a", { class: "link", href: "#/files" }, t("nav.files"), icon("arrow"))),
+      h(
+        "div",
+        { class: "tiles" },
+        folders.map((folder) =>
+          h(
+            "div",
+            { class: "tile" + (folder.missing ? " stopped" : "") },
+            h("a", { class: "tile-main", href: filesHash(folder.path) }, h("span", { class: "app-icon plus" }, icon("folder")), h("span", { class: "tile-text" }, h("span", { class: "tile-name" }, folder.name), h("span", { class: "tile-sub mono", title: folder.path }, folder.missing ? t("home.folderMissing") : folder.path))),
+            h("button", { type: "button", class: "tile-open", title: t("files.unpin"), "aria-label": `${t("files.unpin")}: ${folder.name}`, onclick: () => pinFolder(folder.path, false) }, icon("x")),
+          ),
+        ),
+      ),
+    );
+  }
 
   side.replaceChildren(
     h(
@@ -1344,6 +1381,668 @@ function renderBackupsBody() {
       h("footer", null, h("button", { class: "btn primary" }, t("settings.save"))),
     ),
     h("p", { class: "muted small pad-x" }, t("backup.how")),
+  );
+}
+
+// --- Files --------------------------------------------------------------------------------------
+// The server's files. Paths are the real ones; the page opens in the data root.
+
+const filesUi = {
+  mode: localStorage.getItem("hata.files.mode") === "grid" ? "grid" : "list",
+  sort: ["name", "modified", "size"].find((key) => key === localStorage.getItem("hata.files.sort")) ?? "name",
+  /** Names selected in the folder on screen */
+  selected: new Set(),
+};
+
+const filesHash = (path) => "#/files" + (path.split("/").filter(Boolean).map((part) => "/" + encodeURIComponent(part)).join("") || "/");
+const within = (path, dir) => path === dir || path.startsWith(dir === "/" ? "/" : dir + "/");
+
+/** Puts text on the clipboard; on plain HTTP browsers offer no clipboard API, so the old way steps in */
+function copyText(text) {
+  try {
+    void navigator.clipboard.writeText(text);
+  } catch {
+    const area = h("textarea", { class: "offscreen", value: text, readOnly: true });
+    document.body.append(area);
+    area.select();
+    document.execCommand("copy");
+    area.remove();
+  }
+  toast(t("files.pathCopied", { path: text }));
+}
+const joinPath = (dir, name) => (dir === "/" ? "" : dir) + "/" + name;
+const rawUrl = (path, download = false) => `/api/files/raw?path=${encodeURIComponent(path)}${download ? "&download=1" : ""}`;
+
+// What the browser can show itself; the rest is downloaded.
+const FILE_KINDS = {
+  image: "jpg jpeg png gif webp avif bmp svg ico",
+  video: "mp4 m4v webm mov mkv ogv",
+  audio: "mp3 m4a aac ogg oga opus wav flac",
+  pdf: "pdf",
+  text: "txt md log csv json yml yaml toml ini conf cfg env xml html css js ts sh py service properties list sql",
+};
+const KIND_BY_EXT = Object.fromEntries(Object.entries(FILE_KINDS).flatMap(([kind, list]) => list.split(" ").map((ext) => [ext, kind])));
+const KIND_ICONS = { dir: "folder", image: "image", video: "film", audio: "music" };
+/** Images up to this size are shown as their own thumbnails: there is no smaller copy of them */
+const THUMB_MAX = 6 * 1024 * 1024;
+const TEXT_MAX = 1024 * 1024;
+
+function fileKind(entry) {
+  if (entry.type !== "file") return entry.type;
+  const dot = entry.name.lastIndexOf(".");
+  return KIND_BY_EXT[dot >= 0 ? entry.name.slice(dot + 1).toLowerCase() : ""] ?? "file";
+}
+
+const fileIcon = (entry) => icon(KIND_ICONS[fileKind(entry)] ?? "file", entry.type === "dir" ? "folder-ico" : "");
+const fileTime = (ts) => (new Date(ts).getFullYear() === new Date().getFullYear() ? dateTime(ts) : new Date(ts).toLocaleDateString(state.lang, { day: "numeric", month: "short", year: "numeric" }));
+
+function sortedEntries(entries) {
+  const collator = new Intl.Collator(state.lang, { numeric: true, sensitivity: "base" });
+  const by = { name: () => 0, modified: (a, b) => b.modified - a.modified, size: (a, b) => b.size - a.size }[filesUi.sort];
+  return [...entries].sort((a, b) => ((a.type === "dir") === (b.type === "dir") ? by(a, b) || collator.compare(a.name, b.name) : a.type === "dir" ? -1 : 1));
+}
+
+/** Puts a folder on the dashboard or takes it off */
+async function pinFolder(path, pinned) {
+  try {
+    const res = await api("POST", "/api/files/pin", { path, pinned });
+    if (state.files) state.files.pinned = res.pinned;
+    toast(t(pinned ? "files.pinnedDone" : "files.unpinnedDone", { name: path.split("/").pop() || "/" }));
+  } catch (e) {
+    return toast(errorText(e), "error");
+  }
+  await refresh();
+  if (state.route.view === "files") renderFilesBody();
+}
+
+const onFiles = (path) => state.route.view === "files" && state.route.path === path;
+
+async function loadFiles() {
+  const path = state.route.path;
+  let listing;
+  try {
+    listing = await api("GET", `/api/files?path=${encodeURIComponent(path)}`);
+  } catch (e) {
+    listing = { path, home: state.files?.home ?? "", entries: [], places: state.files?.places ?? [], disk: state.files?.disk ?? null, error: errorText(e) };
+  }
+  if (!onFiles(path)) return;
+  if (path !== listing.path) {
+    // the page was opened without a folder: the address becomes the data root's
+    state.route.path = listing.path;
+    history.replaceState(null, "", filesHash(listing.path));
+  }
+  const names = new Set(listing.entries.map((entry) => entry.name));
+  filesUi.selected = new Set(state.files?.path === listing.path ? [...filesUi.selected].filter((name) => names.has(name)) : []);
+  state.files = listing;
+  renderFilesBody();
+}
+
+function renderFiles() {
+  const box = h("div", { class: "files" }, h("aside", { class: "cats", id: "files-places" }), h("section", { class: "stack", id: "files-main" }));
+  // files and folders dropped anywhere on the page go into the folder on screen
+  let depth = 0;
+  const dragging = (e) => [...(e.dataTransfer?.types ?? [])].includes("Files");
+  box.addEventListener("dragenter", (e) => dragging(e) && (e.preventDefault(), depth++, box.classList.add("dropping")));
+  box.addEventListener("dragover", (e) => dragging(e) && e.preventDefault());
+  box.addEventListener("dragleave", (e) => dragging(e) && --depth <= 0 && ((depth = 0), box.classList.remove("dropping")));
+  box.addEventListener("drop", async (e) => {
+    if (!dragging(e)) return;
+    e.preventDefault();
+    depth = 0;
+    box.classList.remove("dropping");
+    const dir = state.route.path;
+    queueUpload(dir, await droppedFiles(e.dataTransfer));
+  });
+  shell(box);
+  renderFilesBody();
+}
+
+function renderFilesBody() {
+  const main = document.getElementById("files-main");
+  if (!main) return;
+  const path = state.route.path;
+  const listing = state.files?.path === path ? state.files : null;
+  const parts = path.split("/").filter(Boolean);
+
+  const home = state.files?.home ?? "";
+  const inHome = home !== "" && within(path, home);
+  const place = (label, to, iconName, active) => h("a", { class: "cat" + (active ? " active" : ""), href: filesHash(to) }, h("span", { class: "with-icon" }, icon(iconName), h("span", { class: "clip" }, label)));
+  const disk = state.files?.disk;
+  const used = disk ? Math.round(((disk.total - disk.free) / disk.total) * 100) : 0;
+  const fill = h("i", { class: level(used) });
+  fill.style.width = used + "%";
+  put(
+    document.getElementById("files-places"),
+    h("div", { class: "cat-title" }, t("files.places")),
+    home && place(t("files.home"), home, "home", path === home),
+    home && (state.files?.places ?? []).map((name) => place(name, joinPath(home, name), name === "AppData" ? "box" : "folder", within(path, joinPath(home, name)))),
+    place(t("files.root"), "/", "disk", path !== "" && !inHome),
+    disk && h("div", { class: "cat-title" }, t("files.disk")),
+    disk && h("div", { class: "files-disk" }, h("div", { class: "bar" }, fill), h("span", { class: "muted small" }, t("files.free", { free: bytes(disk.free), total: bytes(disk.total) }))),
+  );
+
+  const crumbs = h(
+    "h1",
+    { class: "path" },
+    parts.length ? h("a", { href: filesHash("/"), title: t("files.root"), "aria-label": t("files.root") }, "/") : h("span", null, path ? t("files.root") : " "),
+    parts.map((part, i) => [i > 0 && icon("chevron"), i === parts.length - 1 ? h("span", null, part) : h("a", { href: filesHash("/" + parts.slice(0, i + 1).join("/")) }, part)]),
+  );
+  const entries = listing ? sortedEntries(listing.entries) : [];
+  const dirs = entries.filter((entry) => entry.type === "dir");
+  const rest = entries.filter((entry) => entry.type !== "dir");
+  const picker = h("input", { type: "file", multiple: true, hidden: true, onchange: () => (queueUpload(path, [...picker.files].map((file) => ({ file, sub: "" }))), (picker.value = "")) });
+  const setMode = (mode) => {
+    filesUi.mode = mode;
+    localStorage.setItem("hata.files.mode", mode);
+    renderFilesBody();
+  };
+  const modeButton = (mode, iconName) => h("button", { type: "button", class: "btn square" + (filesUi.mode === mode ? " active" : ""), title: t("files.view." + mode), "aria-label": t("files.view." + mode), "aria-pressed": String(filesUi.mode === mode), onclick: () => setMode(mode) }, icon(iconName));
+  const sort = h(
+    "select",
+    { class: "sort", "aria-label": t("files.sort"), onchange: () => ((filesUi.sort = sort.value), localStorage.setItem("hata.files.sort", sort.value), renderFilesBody()) },
+    ["name", "modified", "size"].map((key) => h("option", { value: key, selected: filesUi.sort === key }, t("files.sort." + key))),
+  );
+
+  const isPinned = (listing?.pinned ?? []).includes(path);
+  const head = h(
+    "div",
+    { class: "page-head" },
+    h(
+      "div",
+      null,
+      crumbs,
+      h("p", { class: "meta" }, path && h("button", { type: "button", class: "copy-path", title: t("files.copyPath"), "aria-label": t("files.copyPath"), onclick: () => copyText(path) }, h("span", null, path), icon("copy")), listing?.readOnly && h("span", { class: "chip warn" }, t("files.readOnly")), listing && !listing.error && h("span", { class: "dot-sep" }, "·"), listing && !listing.error && t("files.count", { dirs: dirs.length, files: rest.length }), rest.length > 0 && h("span", { class: "dot-sep" }, "·"), rest.length > 0 && bytes(rest.reduce((n, entry) => n + entry.size, 0))),
+    ),
+    h("div", { class: "actions" }, listing && !listing.error && h("button", { type: "button", class: "btn square" + (isPinned ? " active" : ""), title: t(isPinned ? "files.unpin" : "files.pin"), "aria-label": t(isPinned ? "files.unpin" : "files.pin"), "aria-pressed": String(isPinned), onclick: () => pinFolder(path, !isPinned) }, icon("pin")), sort, h("div", { class: "seg" }, modeButton("list", "list"), modeButton("grid", "grid")), button(t("files.newFolder"), { disabled: !listing || !!listing.error || listing.readOnly, onclick: () => newFolderDialog(path, loadFiles) }, "folder"), button(t("files.upload"), { class: "primary", disabled: !listing || !!listing.error || listing.readOnly, onclick: () => picker.click() }, "upload"), picker),
+  );
+
+  const selection = h("div", { class: "card selection", id: "files-selection", hidden: true });
+  let body;
+  if (!listing) body = h("p", { class: "muted" }, " ");
+  else if (listing.error) body = h("p", { class: "card pad error" }, listing.error);
+  else if (!entries.length) body = h("div", { class: "card empty" }, icon("folder"), h("p", null, t("files.empty")), h("p", { class: "small" }, t("files.dropHint")));
+  else body = filesUi.mode === "grid" ? filesGrid(dirs, rest) : filesTable(entries);
+
+  put(main, head, selection, body, listing?.truncated && h("p", { class: "muted small" }, t("files.truncated")), uploadBox);
+  renderSelection();
+}
+
+const selectedEntries = () => (state.files?.entries ?? []).filter((entry) => filesUi.selected.has(entry.name));
+
+function toggleSelected(entry, on) {
+  if (on) filesUi.selected.add(entry.name);
+  else filesUi.selected.delete(entry.name);
+  for (const el of document.querySelectorAll("#files-main [data-name]")) {
+    if (el.dataset.name !== entry.name) continue;
+    el.classList.toggle("selected", on);
+    el.querySelector("input[type=checkbox]").checked = on;
+  }
+  renderSelection();
+}
+
+function renderSelection() {
+  const box = document.getElementById("files-selection");
+  if (!box) return;
+  const chosen = selectedEntries();
+  box.hidden = !chosen.length;
+  const all = document.getElementById("files-all");
+  if (all) {
+    all.checked = chosen.length > 0 && chosen.length === state.files.entries.length;
+    all.indeterminate = chosen.length > 0 && !all.checked;
+  }
+  if (!chosen.length) return;
+  put(box,
+    h("strong", { class: "grow" }, t("files.selected", { n: chosen.length }), h("span", { class: "muted small" }, " · " + bytes(chosen.reduce((n, entry) => n + entry.size, 0)))),
+    button(t("files.download"), { class: "small", onclick: () => downloadEntries(chosen) }, "download"),
+    button(t("files.move"), { class: "small", onclick: () => transferDialog(chosen, false) }, "arrow"),
+    button(t("files.copy"), { class: "small", onclick: () => transferDialog(chosen, true) }, "copy"),
+    button(t("files.delete"), { class: "small", onclick: () => deleteDialog(chosen) }, "trash"),
+    h("button", { type: "button", class: "icon-btn", "aria-label": t("files.clearSelection"), title: t("files.clearSelection"), onclick: () => ((filesUi.selected = new Set()), renderFilesBody()) }, icon("x")),
+  );
+}
+
+const entryCheckbox = (entry) => h("input", { type: "checkbox", checked: filesUi.selected.has(entry.name), "aria-label": entry.name, onclick: (e) => e.stopPropagation(), onchange: (e) => toggleSelected(entry, e.target.checked) });
+const entryMore = (entry) => h("button", { type: "button", class: "icon-btn", "aria-label": `${t("files.actions")}: ${entry.name}`, title: t("files.actions"), onclick: (e) => (e.preventDefault(), e.stopPropagation(), entryMenu(entry)) }, icon("more"));
+/** A folder is a link (so it opens in a new tab too); a file opens in place */
+const entryOpener = (entry, className, ...content) =>
+  entry.type === "dir"
+    ? h("a", { class: className, href: filesHash(joinPath(state.files.path, entry.name)) }, content)
+    : h("button", { type: "button", class: className, onclick: () => openEntry(entry) }, content);
+
+function filesTable(entries) {
+  const all = h("input", {
+    type: "checkbox",
+    id: "files-all",
+    "aria-label": t("files.selectAll"),
+    onchange: () => ((filesUi.selected = new Set(all.checked ? entries.map((entry) => entry.name) : [])), renderFilesBody()),
+  });
+  const row = (entry) =>
+    h(
+      "tr",
+      { class: filesUi.selected.has(entry.name) ? "selected" : "", "data-name": entry.name },
+      h("td", { class: "tick" }, entryCheckbox(entry)),
+      h("td", { class: "name" }, entryOpener(entry, "file-name", fileIcon(entry), h("span", { class: "clip" }, entry.name), entry.link && icon("link", "faint"))),
+      h("td", { class: "num muted" }, entry.type === "file" ? bytes(entry.size) : "—"),
+      h("td", { class: "muted when" }, fileTime(entry.modified)),
+      h("td", { class: "tick" }, entryMore(entry)),
+    );
+  return h("div", { class: "card table-wrap" }, h("table", { class: "file-table" }, h("thead", null, h("tr", null, h("th", { class: "tick" }, all), h("th", null, t("files.col.name")), h("th", { class: "num" }, t("files.col.size")), h("th", { class: "when" }, t("files.col.modified")), h("th"))), h("tbody", null, entries.map(row))));
+}
+
+function filesGrid(dirs, rest) {
+  const tile = (entry) => {
+    const thumb = fileKind(entry) === "image" && entry.size <= THUMB_MAX ? h("img", { src: rawUrl(joinPath(state.files.path, entry.name)), alt: "", loading: "lazy", decoding: "async" }) : fileIcon(entry);
+    return h(
+      "div",
+      { class: "file-tile" + (entry.type === "dir" ? " dir" : "") + (filesUi.selected.has(entry.name) ? " selected" : ""), "data-name": entry.name },
+      entryOpener(entry, "file-open", entry.type !== "dir" && h("span", { class: "thumb" }, thumb), entry.type === "dir" && fileIcon(entry), h("span", { class: "file-text" }, h("span", { class: "clip strong" }, entry.name), h("span", { class: "muted small clip" }, entry.type === "file" ? `${bytes(entry.size)} · ${fileTime(entry.modified)}` : fileTime(entry.modified)))),
+      h("span", { class: "file-tick" }, entryCheckbox(entry)),
+      h("span", { class: "file-more" }, entryMore(entry)),
+    );
+  };
+  return h(
+    "div",
+    { class: "stack" },
+    dirs.length > 0 && h("div", { class: "cat-title" }, t("files.folders")),
+    dirs.length > 0 && h("div", { class: "file-grid dirs" }, dirs.map(tile)),
+    rest.length > 0 && h("div", { class: "cat-title" }, t("files.files")),
+    rest.length > 0 && h("div", { class: "file-grid" }, rest.map(tile)),
+  );
+}
+
+function openEntry(entry) {
+  const kind = fileKind(entry);
+  const path = joinPath(state.files.path, entry.name);
+  if (kind === "image" || kind === "video" || kind === "audio") return mediaDialog(entry);
+  if (kind === "pdf") return void window.open(rawUrl(path), "_blank", "noopener");
+  if (kind === "text" && entry.size <= TEXT_MAX) return void textDialog(path);
+  entryMenu(entry);
+}
+
+/** One or several files and folders: a single file as it is, anything else as a ZIP archive */
+async function downloadEntries(entries) {
+  const dir = state.files.path;
+  const save = (href) => h("a", { href, download: "" }).click();
+  if (entries.length === 1 && entries[0].type === "file") return save(rawUrl(joinPath(dir, entries[0].name), true));
+  try {
+    // the archive is streamed, so its limits are checked before it starts
+    const sum = await api("POST", "/api/files/summary", { paths: entries.map((entry) => joinPath(dir, entry.name)) });
+    if (sum.truncated || sum.size > 3.8 * 1024 ** 3 || sum.files + sum.dirs > 60000) return toast(t("error.files.archiveTooLarge"), "error");
+  } catch (e) {
+    return toast(errorText(e), "error");
+  }
+  save("/api/files/zip?" + entries.map((entry) => "path=" + encodeURIComponent(joinPath(dir, entry.name))).join("&"));
+}
+
+function entryMenu(entry) {
+  let dialog;
+  const kind = fileKind(entry);
+  const path = joinPath(state.files.path, entry.name);
+  const item = (label, iconName, action, cls = "") => h("button", { type: "button", class: "menu-item " + cls, onclick: () => (dialog.close(), action()) }, icon(iconName), label);
+  dialog = openDialog(
+    "menu",
+    h("header", null, h("span", { class: "badge-icon plain" }, fileIcon(entry)), h("div", null, h("h2", { class: "clip" }, entry.name), h("span", { class: "muted small" }, entry.type === "file" ? `${bytes(entry.size)} · ${fileTime(entry.modified)}` : fileTime(entry.modified)))),
+    entry.type === "dir" && item(t("common.open"), "folder", () => go(filesHash(path))),
+    ["image", "video", "audio", "pdf"].includes(kind) && item(t("common.open"), "external", () => openEntry(entry)),
+    entry.type === "file" && entry.size <= TEXT_MAX && !["image", "video", "audio", "pdf"].includes(kind) && item(t("files.edit"), "edit", () => textDialog(path)),
+    entry.type !== "other" && item(t(entry.type === "dir" ? "files.downloadZip" : "files.download"), "download", () => downloadEntries([entry])),
+    item(t("files.copyPath"), "link", () => copyText(path)),
+    entry.type === "dir" && (state.files.pinned.includes(path) ? item(t("files.unpin"), "pin", () => pinFolder(path, false)) : item(t("files.pin"), "pin", () => pinFolder(path, true))),
+    item(t("files.rename"), "edit", () => renameDialog(entry)),
+    item(t("files.move"), "arrow", () => transferDialog([entry], false)),
+    item(t("files.copy"), "copy", () => transferDialog([entry], true)),
+    item(t("files.delete"), "trash", () => deleteDialog([entry]), "danger"),
+  );
+}
+
+/** Asks for one name: a new folder, a new name */
+function nameDialog(title, value, confirmLabel, action) {
+  const input = h("input", { value, required: true, maxLength: 255, spellcheck: false, autocomplete: "off" });
+  const error = h("p", { class: "error", role: "alert" });
+  let dialog;
+  dialog = openDialog(
+    "confirm",
+    h(
+      "form",
+      {
+        onsubmit: async (e) => {
+          e.preventDefault();
+          error.textContent = "";
+          try {
+            await action(input.value.trim());
+            dialog.close();
+          } catch (err) {
+            error.textContent = errorText(err);
+          }
+        },
+      },
+      h("h2", null, title),
+      input,
+      error,
+      h("footer", null, closeButton(() => dialog, t("common.cancel")), h("button", { class: "btn primary" }, confirmLabel)),
+    ),
+  );
+  input.focus();
+  // the name without its extension is what gets retyped
+  const dot = value.lastIndexOf(".");
+  input.setSelectionRange(0, dot > 0 ? dot : value.length);
+}
+
+const newFolderDialog = (dir, done) =>
+  nameDialog(t("files.newFolder"), "", t("files.create"), async (name) => {
+    await api("POST", "/api/files/folder", { path: dir, name });
+    await done();
+  });
+
+const renameDialog = (entry) =>
+  nameDialog(t("files.renameTitle", { name: entry.name }), entry.name, t("files.rename"), async (name) => {
+    await api("POST", "/api/files/rename", { path: joinPath(state.files.path, entry.name), name });
+    await loadFiles();
+  });
+
+async function deleteDialog(entries) {
+  const dir = state.files.path;
+  const paths = entries.map((entry) => joinPath(dir, entry.name));
+  let sum;
+  try {
+    sum = await api("POST", "/api/files/summary", { paths });
+  } catch (e) {
+    return toast(errorText(e), "error");
+  }
+  const dialog = openDialog(
+    "confirm",
+    h("h2", { class: "wrap" }, entries.length === 1 ? t("files.deleteTitle", { name: entries[0].name }) : t("files.deleteMany", { n: entries.length })),
+    h("p", { class: "muted" }, t("files.deleteLead", { files: sum.truncated ? sum.files + "+" : sum.files, dirs: sum.dirs, size: bytes(sum.size) })),
+    within(dir, joinPath(state.files.home, "AppData")) ? h("p", { class: "banner small" }, t("files.deleteAppData")) : null,
+    h(
+      "footer",
+      null,
+      closeButton(() => dialog, t("common.cancel")),
+      button(t("files.deleteForever"), {
+        class: "danger",
+        onclick: async (e) => {
+          e.currentTarget.disabled = true;
+          try {
+            await api("POST", "/api/files/delete", { paths });
+          } catch (err) {
+            toast(errorText(err), "error");
+          }
+          dialog.close();
+          await loadFiles();
+        },
+      }, "trash"),
+    ),
+  );
+}
+
+/** Picks the folder to move or copy into */
+function transferDialog(entries, copy) {
+  const from = state.files.path;
+  const paths = entries.map((entry) => joinPath(from, entry.name));
+  let at = from;
+  let dialog;
+  const crumbs = h("div", { class: "crumbs wrap" });
+  const folders = h("div", { class: "picker" });
+  const error = h("p", { class: "error", role: "alert" });
+  const confirm = button(t(copy ? "files.copyHere" : "files.moveHere"), {
+    class: "primary",
+    onclick: async () => {
+      confirm.disabled = true;
+      error.textContent = "";
+      try {
+        await api("POST", copy ? "/api/files/copy" : "/api/files/move", { paths, to: at });
+        dialog.close();
+        toast(t(copy ? "files.copied" : "files.moved", { n: entries.length, to: at === "/" ? "/" : at.split("/").pop() }));
+        await loadFiles();
+      } catch (e) {
+        error.textContent = errorText(e);
+        confirm.disabled = false;
+      }
+    },
+  });
+  const show = async (path) => {
+    let listing;
+    try {
+      listing = await api("GET", `/api/files?path=${encodeURIComponent(path)}`);
+    } catch (e) {
+      return void (error.textContent = errorText(e));
+    }
+    at = listing.path;
+    error.textContent = "";
+    const parts = at.split("/").filter(Boolean);
+    const crumb = (label, to) => h("button", { type: "button", class: "crumb", onclick: () => show(to) }, label);
+    put(crumbs, crumb("/", "/"), parts.map((part, i) => [i > 0 && icon("chevron"), crumb(part, "/" + parts.slice(0, i + 1).join("/"))]));
+    // a folder cannot go into itself
+    const inner = sortedEntries(listing.entries).filter((entry) => entry.type === "dir" && (copy || !paths.includes(joinPath(at, entry.name))));
+    put(folders, inner.length ? inner.map((entry) => h("button", { type: "button", class: "menu-item", onclick: () => show(joinPath(at, entry.name)) }, icon("folder", "folder-ico"), h("span", { class: "clip grow" }, entry.name), icon("chevron", "faint"))) : h("p", { class: "muted small pad" }, t("files.noFolders")));
+    confirm.disabled = !copy && at === from;
+  };
+  dialog = openDialog(
+    "wide",
+    h("h2", { class: "wrap" }, t(copy ? "files.copyTitle" : "files.moveTitle", { what: entries.length === 1 ? entries[0].name : t("files.items", { n: entries.length }) })),
+    crumbs,
+    folders,
+    error,
+    h("footer", null, button(t("files.newFolder"), { onclick: () => newFolderDialog(at, () => show(at)) }, "folder"), closeButton(() => dialog, t("common.cancel")), confirm),
+  );
+  void show(at);
+}
+
+/** A picture, a video or a sound, with the pictures of the folder one keypress apart */
+function mediaDialog(entry) {
+  const list = sortedEntries(state.files.entries).filter((item) => ["image", "video", "audio"].includes(fileKind(item)));
+  const dir = state.files.path;
+  let current = entry;
+  let dialog;
+  const stage = h("div", { class: "stage" });
+  const title = h("h2", { class: "clip" });
+  const sub = h("p", { class: "muted small" });
+  const step = (by) => {
+    const next = list[list.findIndex((item) => item.name === current.name) + by];
+    if (next) show(next);
+  };
+  const prev = h("button", { type: "button", class: "icon-btn", "aria-label": t("files.previous"), title: t("files.previous"), onclick: () => step(-1) }, icon("chevron", "flip"));
+  const next = h("button", { type: "button", class: "icon-btn", "aria-label": t("files.next"), title: t("files.next"), onclick: () => step(1) }, icon("chevron"));
+  const show = (item) => {
+    current = item;
+    const src = rawUrl(joinPath(dir, item.name));
+    const kind = fileKind(item);
+    put(stage, kind === "image" ? h("img", { src, alt: item.name }) : kind === "video" ? h("video", { src, controls: true, autoplay: true, playsInline: true }) : h("audio", { src, controls: true, autoplay: true }));
+    title.textContent = item.name;
+    sub.textContent = `${bytes(item.size)} · ${fileTime(item.modified)}`;
+    const index = list.findIndex((other) => other.name === item.name);
+    prev.disabled = index <= 0;
+    next.disabled = index >= list.length - 1;
+  };
+  dialog = openDialog(
+    "xwide viewer",
+    h("header", null, h("div", { class: "grow" }, title, sub), list.length > 1 && prev, list.length > 1 && next, h("button", { type: "button", class: "icon-btn", "aria-label": t("files.download"), title: t("files.download"), onclick: () => downloadEntries([current]) }, icon("download")), closeX(() => dialog)),
+    stage,
+  );
+  // the keys work wherever the focus is while the viewer is open
+  const keys = (e) => {
+    if (e.target instanceof HTMLMediaElement) return;
+    if (e.key === "ArrowLeft") step(-1);
+    if (e.key === "ArrowRight") step(1);
+  };
+  document.addEventListener("keydown", keys);
+  // a video must not keep playing behind a closed dialog
+  dialog.addEventListener("close", () => (document.removeEventListener("keydown", keys), put(stage)));
+  show(entry);
+}
+
+async function textDialog(path) {
+  let file;
+  try {
+    file = await api("GET", `/api/files/text?path=${encodeURIComponent(path)}`);
+  } catch (e) {
+    return toast(errorText(e), "error");
+  }
+  let dialog;
+  const area = h("textarea", { class: "code", spellcheck: false, value: file.content, wrap: "off", "aria-label": path });
+  const error = h("p", { class: "error", role: "alert" });
+  const save = button(t("settings.save"), {
+    class: "primary",
+    disabled: true,
+    onclick: async () => {
+      error.textContent = "";
+      try {
+        file = await api("PUT", "/api/files/text", { path, content: area.value, modified: file.modified });
+        save.disabled = true;
+        toast(t("settings.saved"));
+        if (onFiles(state.files?.path)) void loadFiles();
+      } catch (e) {
+        error.textContent = errorText(e);
+      }
+    },
+  });
+  area.addEventListener("input", () => (save.disabled = area.value === file.content));
+  dialog = openDialog("xwide", h("header", null, h("div", { class: "grow" }, h("h2", { class: "clip" }, path.split("/").pop()), h("p", { class: "muted small mono clip" }, path)), closeX(() => dialog)), area, error, h("footer", null, closeButton(() => dialog), save));
+  // unsaved text is not lost to a stray click outside, the close button or Escape
+  const keep = () => !save.disabled && !confirm(t("files.discard"));
+  const close = dialog.close.bind(dialog);
+  dialog.close = () => void (keep() || close());
+  dialog.addEventListener("cancel", (e) => keep() && e.preventDefault());
+}
+
+// --- Files: upload ------------------------------------------------------------------------------
+// Files go one after another, each in parts: a part is small enough for any proxy in front of Hata,
+// and what has arrived is not lost when one part fails.
+
+const UPLOAD_PART = 8 * 1024 * 1024;
+const uploadBox = h("div", { class: "card upload", hidden: true });
+const uploads = { queue: [], running: false, xhr: null, cancelled: false, count: 0, done: 0, bytes: 0, sent: 0, started: 0, failed: [], conflicts: [] };
+
+/** Everything in a drop: files, and folders with what is in them */
+async function droppedFiles(transfer) {
+  const out = [];
+  // entries must be taken before the first await: the drop's data is gone after it
+  const entries = [...transfer.items].map((item) => item.webkitGetAsEntry?.()).filter(Boolean);
+  if (!entries.length) return [...transfer.files].map((file) => ({ file, sub: "" }));
+  const walk = async (entry, sub) => {
+    if (entry.isFile) out.push({ file: await new Promise((ok, no) => entry.file(ok, no)), sub });
+    else if (entry.isDirectory) {
+      const reader = entry.createReader();
+      for (;;) {
+        // a folder is read in batches; an empty batch ends it
+        const batch = await new Promise((ok, no) => reader.readEntries(ok, no));
+        if (!batch.length) break;
+        for (const child of batch) await walk(child, sub ? `${sub}/${entry.name}` : entry.name);
+      }
+    }
+  };
+  for (const entry of entries) await walk(entry, "").catch(() => {});
+  return out;
+}
+
+function sendPart(url, blob, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    uploads.xhr = xhr;
+    xhr.open("PUT", url);
+    xhr.upload.onprogress = (e) => onProgress(e.loaded);
+    xhr.onerror = xhr.onabort = () => reject(new ApiError(0, "network"));
+    xhr.onload = () => {
+      let payload = {};
+      try {
+        payload = JSON.parse(xhr.responseText);
+      } catch {}
+      if (xhr.status >= 200 && xhr.status < 300) resolve(payload);
+      else reject(new ApiError(xhr.status, payload.error?.code ?? "request.failed", payload.error?.detail));
+    };
+    xhr.send(blob);
+  });
+}
+
+async function uploadOne({ dir, file, sub, overwrite }) {
+  const id = crypto.getRandomValues(new Uint32Array(3)).reduce((text, n) => text + n.toString(36), "").padEnd(8, "0").slice(0, 24);
+  const base = uploads.sent;
+  let offset = 0;
+  do {
+    const blob = file.slice(offset, offset + UPLOAD_PART);
+    const last = offset + blob.size >= file.size;
+    const query = new URLSearchParams({ dir, name: file.name, sub, id, offset, last: last ? "1" : "0", overwrite: overwrite ? "1" : "0" });
+    try {
+      await sendPart("/api/files/upload?" + query, blob, (loaded) => ((uploads.sent = base + offset + loaded), paintUpload()));
+    } catch (e) {
+      if (offset > 0 || uploads.cancelled) void fetch(`/api/files/upload?${new URLSearchParams({ dir, sub, id })}`, { method: "DELETE" }).catch(() => {});
+      uploads.sent = base + file.size;
+      throw e;
+    }
+    offset += blob.size;
+  } while (offset < file.size);
+  uploads.sent = base + file.size;
+}
+
+function paintUpload() {
+  const { count, done, bytes: total, sent, started } = uploads;
+  const percent = total ? Math.min(100, Math.round((sent / total) * 100)) : 100;
+  const seconds = (Date.now() - started) / 1000;
+  const speed = seconds > 1 ? sent / seconds : 0;
+  const fill = h("i");
+  fill.style.width = percent + "%";
+  put(uploadBox,
+    icon("upload"),
+    h("div", { class: "grow stack-s" }, h("div", { class: "upload-line" }, h("strong", { class: "grow clip" }, t("files.uploading", { done: Math.min(done + 1, count), n: count })), h("span", { class: "muted small mono" }, [percent + "%", speed && `${bytes(speed)}/s`, speed && sent < total && duration(Math.max(60, (total - sent) / speed))].filter(Boolean).join(" · "))), h("div", { class: "bar" }, fill)),
+    h("button", { type: "button", class: "icon-btn", "aria-label": t("common.cancel"), title: t("common.cancel"), onclick: () => ((uploads.cancelled = true), (uploads.queue = []), uploads.xhr?.abort()) }, icon("x")),
+  );
+}
+
+function queueUpload(dir, items, overwrite = false) {
+  if (!items.length) return;
+  if (!uploads.running) Object.assign(uploads, { count: 0, done: 0, bytes: 0, sent: 0, started: Date.now(), failed: [], conflicts: [], cancelled: false });
+  for (const item of items) {
+    uploads.queue.push({ dir, overwrite, ...item });
+    uploads.count++;
+    uploads.bytes += item.file.size;
+  }
+  if (!uploads.running) void runUploads();
+}
+
+async function runUploads() {
+  uploads.running = true;
+  uploadBox.hidden = false;
+  // leaving the page would cut the upload short
+  const warn = (e) => e.preventDefault();
+  window.addEventListener("beforeunload", warn);
+  const touched = new Set();
+  let item;
+  while ((item = uploads.queue.shift())) {
+    paintUpload();
+    try {
+      // a name that is plainly taken is not sent just to be refused
+      if (!item.overwrite && !item.sub && state.files?.path === item.dir && state.files.entries.some((entry) => entry.name === item.file.name)) {
+        uploads.sent += item.file.size;
+        throw new ApiError(409, "files.exists");
+      }
+      await uploadOne(item);
+      touched.add(item.dir);
+    } catch (e) {
+      if (uploads.cancelled) break;
+      if (e.code === "files.exists" && !item.overwrite) uploads.conflicts.push(item);
+      else uploads.failed.push({ item, error: errorText(e) });
+    }
+    uploads.done++;
+  }
+  window.removeEventListener("beforeunload", warn);
+  uploads.running = false;
+  uploadBox.hidden = true;
+  const { failed, conflicts, cancelled } = uploads;
+  const ok = uploads.done - failed.length - conflicts.length;
+  if (cancelled) toast(t("files.uploadCancelled"));
+  else if (failed.length) toast(t("files.uploadFailed", { name: failed[0].item.file.name, n: failed.length, error: failed[0].error }), "error");
+  else if (ok > 0) toast(t("files.uploaded", { n: ok }));
+  if (state.route.view === "files") void loadFiles();
+  if (conflicts.length && !cancelled) replaceDialog(conflicts);
+}
+
+/** Files that are already there are never replaced without a question */
+function replaceDialog(conflicts) {
+  const dialog = openDialog(
+    "confirm",
+    h("h2", null, t("files.replaceTitle", { n: conflicts.length })),
+    h("ul", { class: "paths small" }, conflicts.slice(0, 8).map((item) => h("li", null, item.sub ? `${item.sub}/${item.file.name}` : item.file.name)), conflicts.length > 8 && h("li", null, "…")),
+    h("footer", null, closeButton(() => dialog, t("files.skip")), button(t("files.replace"), { class: "danger", onclick: () => (dialog.close(), queueUpload(conflicts[0].dir, conflicts.map(({ file, sub }) => ({ file, sub })), true)) })),
   );
 }
 
