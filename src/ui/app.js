@@ -1015,6 +1015,21 @@ function groupHead(group, index, count) {
   return h("div", { class: "section-head" }, h("h2", null, title, first && !group.title && h("span", { class: "muted small" }, t("home.installed", { n: count }))), tools);
 }
 
+/** What can be put on the dashboard, to choose from */
+function addDialog() {
+  let dialog;
+  const entry = (label, hint, iconName, action) => h("button", { type: "button", class: "menu-item", onclick: () => (dialog.close(), action()) }, h("span", { class: "app-icon plus" }, icon(iconName)), h("span", { class: "tile-text" }, h("span", { class: "tile-name" }, label), h("span", { class: "muted small" }, hint)));
+  const pinned = () => (state.overview.folders ?? []).map((folder) => folder.path);
+  dialog = openDialog(
+    "menu",
+    h("header", null, h("h2", null, t("home.addTitle"))),
+    entry(t("home.addApp"), t("home.addAppHint"), "store", () => go("#/store")),
+    state.overview.importable > 0 && entry(t("home.import"), t("home.importHint", { n: state.overview.importable }), "download", () => go("#/import")),
+    entry(t("home.addLinkItem"), t("home.addLinkHint"), "link", () => linkDialog()),
+    entry(t("home.addFolder"), t("home.addFolderHint"), "folder", () => folderPicker({ title: t("home.addFolderTitle"), start: "", confirmLabel: t("home.addFolderHere"), allowed: (at) => !pinned().includes(at), action: (at) => pinFolder(at, true, false) })),
+  );
+}
+
 function setEditing(on) {
   homeUi.editing = on;
   renderHomeBody();
@@ -1024,7 +1039,6 @@ function renderDashboard(box) {
   const o = state.overview;
   const editing = (homeUi.editing &&= isAdmin());
   const groups = o.dashboard.groups;
-  const add = (href, iconName, title, hint) => h("a", { class: "tile add", href }, h("span", { class: "tile-main" }, h("span", { class: "app-icon plus" }, icon(iconName)), h("span", { class: "tile-text" }, h("span", { class: "tile-name" }, title), h("span", { class: "tile-sub" }, hint))));
   put(
     box,
     editing &&
@@ -1046,7 +1060,7 @@ function renderDashboard(box) {
           "div",
           { class: "tiles" + (editing ? " editing" : ""), "data-group": group.id },
           tiles,
-          index === 0 && !editing && isAdmin() && [add("#/store", "plus", t("home.addApp"), t("home.addAppHint")), o.importable > 0 && add("#/import", "download", t("home.import"), t("home.importHint", { n: o.importable }))],
+          index === 0 && !editing && isAdmin() && h("button", { type: "button", class: "tile add", onclick: addDialog }, h("span", { class: "tile-main" }, h("span", { class: "app-icon plus" }, icon("plus")), h("span", { class: "tile-text" }, h("span", { class: "tile-name" }, t("home.add")), h("span", { class: "tile-sub" }, t("home.addHint"))))),
           editing && !tiles.length && h("p", { class: "muted small drop-hint" }, t("home.emptyGroup")),
         ),
       ];
@@ -1910,12 +1924,14 @@ function sortedEntries(entries) {
 }
 
 /** Puts a folder on the dashboard or takes it off */
-async function pinFolder(path, pinned) {
+async function pinFolder(path, pinned, quiet = true) {
   try {
     const res = await api("POST", "/api/files/pin", { path, pinned });
     if (state.files) state.files.pinned = res.pinned;
     toast(t(pinned ? "files.pinnedDone" : "files.unpinnedDone", { name: path.split("/").pop() || "/" }));
   } catch (e) {
+    // a dialog shows the reason itself
+    if (!quiet) throw e;
     return toast(errorText(e), "error");
   }
   await refresh();
@@ -2243,24 +2259,21 @@ async function deleteDialog(entries) {
 }
 
 /** Picks the folder to move or copy into */
-function transferDialog(entries, copy) {
-  const from = state.files.path;
-  const paths = entries.map((entry) => joinPath(from, entry.name));
-  let at = from;
+/** Walks the folders of the server to choose one: `allowed(at)` says whether the current one will do */
+function folderPicker({ title, start, confirmLabel, action, allowed = () => true, shown = () => true }) {
+  let at = start;
   let dialog;
   const crumbs = h("div", { class: "crumbs wrap" });
   const folders = h("div", { class: "picker" });
   const error = h("p", { class: "error", role: "alert" });
-  const confirm = button(t(copy ? "files.copyHere" : "files.moveHere"), {
+  const confirm = button(confirmLabel, {
     class: "primary",
     onclick: async () => {
       confirm.disabled = true;
       error.textContent = "";
       try {
-        await api("POST", copy ? "/api/files/copy" : "/api/files/move", { paths, to: at });
+        await action(at);
         dialog.close();
-        toast(t(copy ? "files.copied" : "files.moved", { n: entries.length, to: at === "/" ? "/" : at.split("/").pop() }));
-        await loadFiles();
       } catch (e) {
         error.textContent = errorText(e);
         confirm.disabled = false;
@@ -2279,20 +2292,30 @@ function transferDialog(entries, copy) {
     const parts = at.split("/").filter(Boolean);
     const crumb = (label, to) => h("button", { type: "button", class: "crumb", onclick: () => show(to) }, label);
     put(crumbs, crumb("/", "/"), parts.map((part, i) => [i > 0 && icon("chevron"), crumb(part, "/" + parts.slice(0, i + 1).join("/"))]));
-    // a folder cannot go into itself
-    const inner = sortedEntries(listing.entries).filter((entry) => entry.type === "dir" && (copy || !paths.includes(joinPath(at, entry.name))));
+    const inner = sortedEntries(listing.entries).filter((entry) => entry.type === "dir" && shown(joinPath(at, entry.name)));
     put(folders, inner.length ? inner.map((entry) => h("button", { type: "button", class: "menu-item", onclick: () => show(joinPath(at, entry.name)) }, icon("folder", "folder-ico"), h("span", { class: "clip grow" }, entry.name), icon("chevron", "faint"))) : h("p", { class: "muted small pad" }, t("files.noFolders")));
-    confirm.disabled = !copy && at === from;
+    confirm.disabled = !allowed(at);
   };
-  dialog = openDialog(
-    "wide",
-    h("h2", { class: "wrap" }, t(copy ? "files.copyTitle" : "files.moveTitle", { what: entries.length === 1 ? entries[0].name : t("files.items", { n: entries.length }) })),
-    crumbs,
-    folders,
-    error,
-    h("footer", null, button(t("files.newFolder"), { onclick: () => newFolderDialog(at, () => show(at)) }, "folder"), closeButton(() => dialog, t("common.cancel")), confirm),
-  );
+  dialog = openDialog("wide", h("h2", { class: "wrap" }, title), crumbs, folders, error, h("footer", null, button(t("files.newFolder"), { onclick: () => newFolderDialog(at, () => show(at)) }, "folder"), closeButton(() => dialog, t("common.cancel")), confirm));
   void show(at);
+}
+
+function transferDialog(entries, copy) {
+  const from = state.files.path;
+  const paths = entries.map((entry) => joinPath(from, entry.name));
+  folderPicker({
+    title: t(copy ? "files.copyTitle" : "files.moveTitle", { what: entries.length === 1 ? entries[0].name : t("files.items", { n: entries.length }) }),
+    start: from,
+    confirmLabel: t(copy ? "files.copyHere" : "files.moveHere"),
+    allowed: (at) => copy || at !== from,
+    // a folder cannot go into itself
+    shown: (path) => copy || !paths.includes(path),
+    action: async (to) => {
+      await api("POST", copy ? "/api/files/copy" : "/api/files/move", { paths, to });
+      toast(t(copy ? "files.copied" : "files.moved", { n: entries.length, to: to === "/" ? "/" : to.split("/").pop() }));
+      await loadFiles();
+    },
+  });
 }
 
 /** A picture, a video or a sound, with the pictures of the folder one keypress apart */
