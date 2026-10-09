@@ -684,5 +684,8 @@ input[type="range"] { accent-color: var(--accent); width: 100%; }
 .drop-above { box-shadow: 0 -4px 0 var(--accent); }
 .drop-below { box-shadow: 0 4px 0 var(--accent); }
 .drag-ghost:is(.widget, .group) { position: fixed; left: 0; top: 0; z-index: 50; margin: 0; pointer-events: none; opacity: 0.9; max-height: 160px; overflow: hidden; border-radius: var(--radius-lg); background: var(--surface); box-shadow: 0 12px 32px rgb(0 0 0 / 45%); outline: 1px solid var(--accent); }
-.columns.no-side { grid-template-columns: minmax(0, 1fr); }
+/* with nothing in the side column the tiles take its room — until a block is picked up: then the column
+   is back, empty, to be dropped into */
+:root:not(.dragging-widget) .columns.no-side { grid-template-columns: minmax(0, 1fr); }
+.dragging-widget .zone.side.empty { min-height: 180px; align-self: stretch; }
 .side .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
