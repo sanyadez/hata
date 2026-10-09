@@ -673,11 +673,11 @@ input[type="range"] { accent-color: var(--accent); width: 100%; }
 
 .zone { display: grid; gap: 16px; min-width: 0; align-content: start; }
 .zone { border-radius: var(--radius-lg); }
-.zone.empty { display: none; }
+:root:not(.dragging-widget) .zone.vacant { display: none; }
 /* a place with nothing in it appears when a block is picked up, to be dropped into */
-.dragging-widget .zone.empty { display: grid; min-height: 64px; border: 1px dashed var(--border-strong); place-items: center; }
-.dragging-widget .zone.empty::before { content: attr(data-hint); color: var(--faint); font-size: 12px; }
-.zone.movable .widget[data-widget="stats"], .zone.movable .widget > .section-head, .section-head.handle { cursor: grab; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+.dragging-widget .zone.vacant { display: grid; min-height: 64px; border: 1px dashed var(--border-strong); place-items: center; }
+.dragging-widget .zone.vacant::before { content: attr(data-hint); color: var(--faint); font-size: 12px; }
+.zone.movable .widget > .section-head, .section-head.handle { cursor: grab; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
 .zone.drop-end { outline: 2px dashed var(--accent); outline-offset: 4px; }
 .widget.dragging, .group.dragging { opacity: 0.3; }
 .drop-above { box-shadow: 0 -4px 0 var(--accent); }
@@ -689,12 +689,42 @@ input[type="range"] { accent-color: var(--accent); width: 100%; }
 .columns.three > .zone.side { flex: 0 0 372px; }
 .columns.three > #zone-main { flex: 1 1 0; }
 .columns.three.no-main > .zone.side { flex: 1 1 0; }
-.dragging-widget .columns.three > .zone.empty { min-height: 180px; align-self: stretch; }
-.dragging-widget .columns.three > .zone.side.empty { flex: 0 0 372px; }
+.dragging-widget .columns.three > .zone.vacant { min-height: 180px; align-self: stretch; }
+.dragging-widget .columns.three > .zone.side.vacant { flex: 0 0 372px; }
 .group.widget > .section-head.handle { cursor: grab; }
-.side .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 @media (max-width: 1080px) {
   /* one column: the places follow one another down the page */
   .columns.three { flex-direction: column; align-items: stretch; gap: 16px; }
-  .columns.three > .zone, .columns.three.no-main > .zone.side, .dragging-widget .columns.three > .zone.side.empty { flex: none; }
+  .columns.three > .zone, .columns.three.no-main > .zone.side, .dragging-widget .columns.three > .zone.side.vacant { flex: none; }
+}
+
+/* --- Blocks side by side ----------------------------------------------------------------------- */
+
+/* a place holds its blocks in rows: a small one (a number of the system) shares its row with others,
+   the rest take a whole row each */
+.zone, .zone.side { display: flex; flex-wrap: wrap; align-items: stretch; gap: 16px; }
+.zone > .widget { flex: 1 1 100%; min-width: 0; position: relative; }
+.zone > .widget.small { flex: 1 1 170px; }
+.widget.small > .stat { border: 0; height: 100%; }
+.block-remove { position: absolute; top: 6px; right: 6px; width: 24px; height: 24px; z-index: 1; }
+.widget:is(:hover, :focus-within) > .block-remove { opacity: 1; }
+.widget.drop-before { box-shadow: -4px 0 0 var(--accent); }
+.widget.drop-after { box-shadow: 4px 0 0 var(--accent); }
+.zone.movable .widget.small { cursor: grab; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+.dragging-widget .zone.vacant { display: grid; }
+
+/* An empty place that shows when a block is picked up must not push the page about under the pointer:
+   the top one is a strip in the gap above the columns, the side ones strips in the page's margins */
+#view { position: relative; }
+/* out of the flow and tied to the row of the columns: it lies in the gap above them and adds nothing */
+.dragging-widget #zone-top.vacant { position: absolute; grid-row: 2; grid-column: 1; top: -22px; left: 0; right: 0; min-height: 0; height: 20px; z-index: 2; }
+.dragging-widget #zone-top.vacant::before { font-size: 11px; line-height: 1; }
+@media (min-width: 1081px) {
+  .columns.three { position: relative; }
+  .dragging-widget .columns.three > .zone.side.vacant { position: absolute; top: 0; bottom: 0; width: 24px; min-height: 0; flex: none; }
+  .dragging-widget .columns.three > #zone-left.vacant { left: -28px; }
+  .dragging-widget .columns.three > #zone-side.vacant { right: -28px; }
+  .dragging-widget .columns.three > .zone.side.vacant::before { content: ""; }
+  /* with one side column empty, the other must not be taken for the whole row */
+  .dragging-widget .columns.three.no-main > .zone.side:not(.vacant) { flex: 1 1 0; }
 }

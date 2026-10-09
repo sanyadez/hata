@@ -717,5 +717,12 @@
   "home.dropBlock": "Киньте блок сюди",
   "home.addGroupItem": "Група",
   "home.addGroupHint": "Розділ дашборда з назвою",
-  "home.storeHint": "Застосунки для встановлення"
+  "home.storeHint": "Застосунки для встановлення",
+  "home.removeBlock": "Прибрати з дашборда",
+  "home.addBlockHint": "Блок дашборда",
+  "home.layoutText": "Розкладка текстом",
+  "home.layoutTextHint": "Усе, що є на дашборді, для редагування вручну",
+  "home.layoutTextLead": "Групи, плитки й місце кожного блока у форматі YAML. Те, що не є частиною розкладки, під час збереження відкидається.",
+  "home.saveLayout": "Зберегти",
+  "error.dashboard.badText": "Цей текст не є розкладкою: {message}"
 }

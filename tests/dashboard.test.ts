@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { arrange, cleanLayout, cleanWidgets, movePath, webUrl } from "../src/dashboard";
+import { arrange, cleanLayout, cleanWidgets, layoutText, movePath, parseLayoutText, webUrl } from "../src/dashboard";
 
 const link = (title: string, url = "https://example.com/") => ({ type: "link", id: title.toLowerCase(), title, url, icon: "" });
 
@@ -70,25 +70,44 @@ test("a pinned folder keeps its place when it is renamed and leaves when it is r
   expect(removed.groups[0]!.items).toEqual([{ type: "folder", id: "f", title: "", items: [{ type: "files", path: "/DATA/Mediator" }] }]);
 });
 
-test("every block of the dashboard stands in exactly one place", () => {
-  const usual = { top: ["stats"], left: [], main: [], side: ["attention", "activity"], bottom: [] };
+const NUMBERS = ["cpu", "memory", "disk", "network", "temp"];
+
+test("every block of the dashboard stands in exactly one place, or is put away", () => {
+  const usual = { top: NUMBERS, left: [], main: [], side: ["attention", "activity"], bottom: [], hidden: [] };
   expect(cleanWidgets(null)).toEqual(usual);
   expect(cleanLayout({ groups: [] }).widgets).toEqual(usual);
-  expect(cleanWidgets({ top: ["activity", "nope", "activity"], side: "x", bottom: ["stats", "activity"] })).toEqual({ top: ["activity"], left: [], main: [], side: ["attention"], bottom: ["stats"] });
-  // a layout saved before there was a left column, or before groups were blocks, is made whole
-  expect(cleanWidgets({ top: ["stats"], side: ["attention", "activity"], bottom: [] }, ["a", "b"])).toEqual({ ...usual, main: ["group:a", "group:b"] });
+  expect(cleanWidgets({ top: ["activity", "nope", "activity"], side: "x", bottom: ["cpu", "activity"], hidden: ["temp", "cpu", "group:a", "nope"] })).toEqual({ top: ["activity", "memory", "disk", "network"], left: [], main: [], side: ["attention"], bottom: ["cpu"], hidden: ["temp"] });
+  // a layout saved while the numbers were one block, before the left column and before groups were blocks
+  expect(cleanWidgets({ top: [], side: ["attention", "stats", "activity"], bottom: [] }, ["a", "b"])).toEqual({ ...usual, top: [], main: ["group:a", "group:b"], side: ["attention", ...NUMBERS, "activity"] });
 });
 
 test("groups of tiles are blocks too: anywhere, once, and never lost", () => {
   const layout = cleanLayout({
     groups: [{ id: "main", title: "", items: [] }, { id: "net", title: "Network", items: [] }, { id: "media", title: "Media", items: [] }],
-    widgets: { top: ["group:net", "stats"], left: ["activity", "group:gone", "group:net"], main: [], side: ["group:main"], bottom: ["attention"] },
+    widgets: { top: ["group:net", "cpu"], left: ["activity", "group:gone", "group:net"], main: [], side: ["group:main"], bottom: ["attention"], hidden: ["memory", "disk", "network", "temp", "group:media"] },
   });
-  expect(layout.widgets).toEqual({ top: ["group:net", "stats"], left: ["activity"], main: ["group:media"], side: ["group:main"], bottom: ["attention"] });
+  expect(layout.widgets).toEqual({ top: ["group:net", "cpu"], left: ["activity"], main: ["group:media"], side: ["group:main"], bottom: ["attention"], hidden: ["memory", "disk", "network", "temp"] });
   // arranging keeps the places, and a group that had to be made gets one
   expect(arrange(layout, [], []).widgets).toEqual(layout.widgets);
   expect(arrange(cleanLayout(null), ["memos"], []).widgets.main).toEqual(["group:main"]);
   expect(movePath(layout, "/a", "/b").widgets).toEqual(layout.widgets);
+});
+
+test("the layout goes to text and back unchanged; text that is not a layout is refused", () => {
+  const layout = cleanLayout({
+    groups: [{ id: "main", title: "", items: [{ type: "app", name: "memos" }, { type: "link", id: "r", title: "Router: home", url: "http://192.168.1.1/", icon: "" }, { type: "folder", id: "f", title: "Tools", items: [{ type: "files", path: "/DATA/Media" }] }, { type: "builtin", id: "add" }] }],
+    widgets: { top: ["cpu"], side: ["group:main"], hidden: ["temp"] },
+  });
+  const text = layoutText(layout);
+  expect(text).toContain("title: \"Router: home\"");
+  expect(text).toContain("  left: []\n");
+  expect(text).toContain("  hidden:\n    - temp\n");
+  expect(parseLayoutText(text)).toEqual(layout);
+  // an edit by hand: a link added, a tile that is nothing dropped
+  const edited = parseLayoutText(text.replace("groups:", "groups:\n  - id: links\n    title: Links\n    items:\n      - type: link\n        url: https://example.com\n      - type: nothing"));
+  expect(edited.groups[0]).toMatchObject({ id: "links", title: "Links", items: [{ type: "link", title: "example.com", url: "https://example.com/" }] });
+  expect(edited.widgets.main).toEqual(["group:links"]);
+  for (const bad of ["", "just text", "- a\n- b", "groups: 5", "groups: [\n"]) expect(() => parseLayoutText(bad)).toThrow();
 });
 
 test("Hata's own tiles are always there for those who have them, wherever they were put", () => {

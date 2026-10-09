@@ -24,37 +24,53 @@ export interface Group {
 }
 
 /**
- * The blocks of the dashboard and the places they can stand in. A block is one of Hata's own (`stats`,
- * `attention`, `activity`) or a group of tiles (`group:<id>`); the places are a row across the top, three
- * columns (left, main, side) and a row across the bottom.
+ * The blocks of the dashboard and the places they can stand in. A block is one of Hata's own (a number
+ * of the system, `attention`, `activity`) or a group of tiles (`group:<id>`); the places are a row
+ * across the top, three columns (left, main, side) and a row across the bottom. One of Hata's own blocks
+ * may also be put away (`hidden`): it is offered again in the "Add" menu.
  */
-export const WIDGETS = ["stats", "attention", "activity"] as const;
+export const STATS = ["cpu", "memory", "disk", "network", "temp"] as const;
+export const WIDGETS = [...STATS, "attention", "activity"] as const;
 export const ZONES = ["top", "left", "main", "side", "bottom"] as const;
-export type Widgets = Record<(typeof ZONES)[number], string[]>;
+export type Zone = (typeof ZONES)[number];
+export type Widgets = Record<Zone, string[]> & { hidden: string[] };
 
 export interface Layout {
   groups: Group[];
-  /** Which block stands where, in order; every block is in exactly one place */
+  /** Which block stands where, in order; every block is in exactly one place, or put away */
   widgets: Widgets;
 }
 
-const DEFAULT_ZONE: Record<string, (typeof ZONES)[number]> = { stats: "top", attention: "side", activity: "side" };
+const usualZone = (id: string): Zone => (id === "attention" || id === "activity" ? "side" : "top");
 
 /**
  * Blocks named twice or not known are dropped; one that is named nowhere goes to its usual place — a
- * group of tiles to the main column, after the groups already there.
+ * group of tiles to the main column, after the groups already there. `stats` is what the five numbers
+ * of the system were while they were one block.
  */
 export function cleanWidgets(input: unknown, groups: string[] = []): Widgets {
-  const out: Widgets = { top: [], left: [], main: [], side: [], bottom: [] };
+  const out: Widgets = { top: [], left: [], main: [], side: [], bottom: [], hidden: [] };
   const known = new Set<string>([...WIDGETS, ...groups.map((id) => "group:" + id)]);
   const seen = new Set<string>();
-  for (const zone of ZONES) {
-    const list = isObject(input) && Array.isArray(input[zone]) ? input[zone] : [];
-    for (const id of list) if (typeof id === "string" && known.has(id) && !seen.has(id) && seen.add(id)) out[zone].push(id);
-  }
-  for (const id of WIDGETS) if (!seen.has(id)) out[DEFAULT_ZONE[id]!].push(id);
+  const named = (zone: string): string[] => (isObject(input) && Array.isArray(input[zone]) ? input[zone] : []).flatMap((id: unknown) => (id === "stats" ? [...STATS] : typeof id === "string" ? [id] : []));
+  for (const zone of ZONES) for (const id of named(zone)) if (known.has(id) && !seen.has(id) && seen.add(id)) out[zone].push(id);
+  // only Hata's own blocks can be put away: a group that is not wanted is removed
+  for (const id of named("hidden")) if ((WIDGETS as readonly string[]).includes(id) && !seen.has(id) && seen.add(id)) out.hidden.push(id);
+  for (const id of WIDGETS) if (!seen.has(id)) out[usualZone(id)].push(id);
   for (const id of groups) if (!seen.has("group:" + id)) out.main.push("group:" + id);
   return out;
+}
+
+/** The layout as text an administrator can edit, and back; what does not fit is dropped as anywhere else */
+export function layoutText(layout: Layout): string {
+  // Bun puts an empty list on a line of its own; next to its key it reads as what it is
+  return Bun.YAML.stringify(layout, null, 2).replace(/[ \t]+$/gm, "").replace(/:\n\s+\[\]$/gm, ": []") + "\n";
+}
+
+export function parseLayoutText(text: string): Layout {
+  const doc: unknown = Bun.YAML.parse(text);
+  if (!isObject(doc) || !Array.isArray(doc.groups)) throw new Error("The text must be a mapping with a list of groups");
+  return cleanLayout(doc);
 }
 
 const MAX_GROUPS = 24;

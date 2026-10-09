@@ -62,7 +62,7 @@ import {
 } from "./auth";
 import { bus } from "./bus";
 import { DATA_DIR, listenAddress, saveSettings, settings, timezone, updateSettings } from "./config";
-import { arrange, cleanLayout } from "./dashboard";
+import { arrange, cleanLayout, layoutText, parseLayoutText } from "./dashboard";
 import { dockerInfo, listContainers, watchEvents } from "./docker";
 import { abortUpload, archivePlan, list as listFiles, makeFolder, pinFolder, pinnedFolders, readable, readText, remove as removeFiles, rename as renameFile, summary as filesSummary, transfer, upload, writeText } from "./files";
 import { adoptProject, casaosState, containerDraft, importCount, importList, moveInCasaos, projectDraft, rebuildContainer } from "./import";
@@ -653,6 +653,23 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
     settings.appearance = { ...look, custom: "", stamp: 0, wallpaper: look.wallpaper === "custom" ? "" : look.wallpaper };
     saveSettings();
     return json(publicSettings());
+  }
+
+  // the layout as text: everything that is on the dashboard, for an editor instead of a mouse
+  if (path === "/api/dashboard/text" && method === "GET") {
+    const apps = await listApps("en");
+    return json({ text: layoutText(arrange(settings.dashboard, apps.map((app) => app.name), settings.folders, ["store", "add"])) });
+  }
+  if (path === "/api/dashboard/text" && method === "PUT") {
+    const data = await body(req);
+    try {
+      settings.dashboard = parseLayoutText(typeof data.text === "string" ? data.text : "");
+    } catch (e) {
+      return fail(400, "dashboard.badText", { message: e instanceof Error ? e.message.split("\n")[0]! : String(e) });
+    }
+    saveSettings();
+    bus.publish("apps");
+    return json({ ok: true });
   }
 
   if (path === "/api/dashboard" && method === "PUT") {

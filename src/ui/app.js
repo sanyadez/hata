@@ -768,7 +768,7 @@ function renderSystem() {
   const net = s.net ? bytesParts(s.net.rx + s.net.tx) : null;
   setStat("network", net ? net.value : "—", net ? net.unit + "/s" : "", s.net ? `↓ ${bytes(s.net.rx)}/s · ↑ ${bytes(s.net.tx)}/s` : "", sparkline(s.history.net));
   const temp = document.getElementById("stat-temp");
-  if (temp) temp.hidden = s.temperature == null;
+  if (temp) (temp.closest(".widget") ?? temp).hidden = s.temperature == null;
   if (s.temperature != null) setStat("temp", String(s.temperature), "°C", t("sys.cpu"), null, s.temperature >= 85 ? "warn" : "");
 }
 
@@ -1093,6 +1093,16 @@ function addDialog() {
     state.overview.importable > 0 && entry(t("home.import"), t("home.importHint", { n: state.overview.importable }), "download", () => go("#/import")),
     entry(t("home.addLinkItem"), t("home.addLinkHint"), "link", () => linkDialog()),
     entry(t("home.addGroupItem"), t("home.addGroupHint"), "grid", () => newGroupDialog()),
+    blockPlaces(state.overview.dashboard).hidden.map((id) =>
+      entry(blockTitle(id), t("home.addBlockHint"), id === "attention" ? "alert" : id === "activity" ? "list" : id, () =>
+        changeLayout((layout) => {
+          const places = (layout.widgets = blockPlaces(layout));
+          places.hidden = places.hidden.filter((block) => block !== id);
+          places[BLOCKS[id]].push(id);
+        }),
+      ),
+    ),
+    entry(t("home.layoutText"), t("home.layoutTextHint"), "code", layoutTextDialog),
     entry(t("home.addFolder"), t("home.addFolderHint"), "folder", () => folderPicker({ title: t("home.addFolderTitle"), start: "", confirmLabel: t("home.addFolderHere"), allowed: (at) => !pinned().includes(at), action: (at) => pinFolder(at, true, false) })),
   );
 }
@@ -1123,6 +1133,7 @@ function blockPlaces(layout) {
   const places = {};
   for (const name of ZONES) places[name] = (layout.widgets[name] ?? []).filter((id) => (groups.has(id) || id in homeUi.widgets) && !seen.has(id) && seen.add(id));
   for (const id of groups) if (!seen.has(id)) places.main.push(id);
+  places.hidden = (layout.widgets.hidden ?? []).filter((id) => id in BLOCKS && !seen.has(id));
   return places;
 }
 
@@ -1231,6 +1242,11 @@ function besideBlock(drag, selector, name) {
   const over = document.elementFromPoint(drag.x, drag.y)?.closest(selector);
   if (!over || over === drag.el || over.classList.contains("drag-ghost")) return null;
   const rect = over.getBoundingClientRect();
+  // small blocks stand side by side: the place next to one is to its left or right
+  if (over.classList.contains("small") && drag.el.classList.contains("small")) {
+    const left = drag.x < rect.left + rect.width / 2;
+    return { el: over, cls: left ? "drop-before" : "drop-after", [left ? "before" : "after"]: over.dataset[name] };
+  }
   const above = drag.y < rect.top + rect.height / 2;
   return { el: over, cls: above ? "drop-above" : "drop-below", [above ? "before" : "after"]: over.dataset[name] };
 }
@@ -1377,15 +1393,21 @@ function renderHome() {
     el.classList.add("widget");
     el.dataset.widget = id;
     // the numbers are dragged by any part of them; a list with text to read and select, by its heading
-    el.addEventListener("pointerdown", (e) => isAdmin() && (id === "stats" || e.target.closest(".section-head")) && dragStart(e, id, WIDGET_DRAG, el));
+    el.addEventListener("pointerdown", (e) => isAdmin() && (el.classList.contains("small") || e.target.closest(".section-head")) && dragStart(e, id, WIDGET_DRAG, el));
     return el;
   };
   // the blocks are made once and then only moved and refilled: the numbers of the system live in one of them
+  const number = (id, iconName, label) => widget(id, h("section", { class: "card small" }, statCell(id, iconName, label), blockRemover(id, label)));
   homeUi.widgets = {
-    stats: widget("stats", h("section", { class: "stats card" }, statCell("cpu", "cpu", t("sys.cpu")), statCell("memory", "memory", t("sys.memory")), statCell("disk", "disk", t("sys.disk")), statCell("network", "network", t("sys.network")), h("div", { class: "stat", id: "stat-temp", hidden: true }, h("div", { class: "stat-label" }, icon("temp"), t("sys.temperature")), h("div", { class: "stat-row" }, h("div", { class: "stat-value" }, h("strong", null, "—"), h("span", { class: "unit" })), h("div", { class: "stat-chart" })), h("div", { class: "stat-hint" }, " ")))),
+    cpu: number("cpu", "cpu", t("sys.cpu")),
+    memory: number("memory", "memory", t("sys.memory")),
+    disk: number("disk", "disk", t("sys.disk")),
+    network: number("network", "network", t("sys.network")),
+    temp: number("temp", "temp", t("sys.temperature")),
     attention: widget("attention", h("section", { class: "card pad" })),
     activity: widget("activity", h("section", { class: "pad-x loose" })),
   };
+  homeUi.widgets.temp.hidden = true;
   const zone = (name, tag = "div") => h(tag, { class: "zone" + (name === "side" || name === "left" ? " side" : ""), id: "zone-" + name, "data-zone": name });
   shell(
     h("div", { class: "page-head" }, h("div", null, h("h1", null, greeting), h("p", { class: "meta", id: "host" }, " ")), h("div", { class: "counts", id: "counts" })),
@@ -1405,8 +1427,8 @@ function renderHomeBody() {
   const counts = [["running", count("running")], ["restarting", count("restarting")], ["partial", count("partial")], ["stopped", count("stopped")]].filter(([, n]) => n > 0);
   document.getElementById("counts")?.replaceChildren(...counts.map(([st, n]) => h("span", { class: "count" }, h("i", { class: "dot " + st }), t("home.count." + st, { n }))));
 
-  put(homeUi.widgets.attention, h("div", { class: "section-head" }, h("h2", null, t("attention.title"), o.attention.length > 0 && h("span", { class: "pill" }, o.attention.length))), o.attention.length ? o.attention.map(attentionItem) : h("p", { class: "all-good" }, icon("check", "ok"), t("attention.none")));
-  put(homeUi.widgets.activity, h("div", { class: "section-head" }, h("h2", null, t("activity.title"))), o.activity.length ? o.activity.map(activityItem) : h("p", { class: "muted small" }, t("activity.none")));
+  put(homeUi.widgets.attention, blockRemover("attention", t("attention.title")), h("div", { class: "section-head" }, h("h2", null, t("attention.title"), o.attention.length > 0 && h("span", { class: "pill" }, o.attention.length))), o.attention.length ? o.attention.map(attentionItem) : h("p", { class: "all-good" }, icon("check", "ok"), t("attention.none")));
+  put(homeUi.widgets.activity, blockRemover("activity", t("activity.title")), h("div", { class: "section-head" }, h("h2", null, t("activity.title"))), o.activity.length ? o.activity.map(activityItem) : h("p", { class: "muted small" }, t("activity.none")));
   // something in the air belongs to the page as it is; the news is drawn when it lands
   if (homeUi.drag?.active) homeUi.stale = true;
   else {
@@ -1418,6 +1440,55 @@ function renderHomeBody() {
 }
 
 const ZONES = ["top", "left", "main", "side", "bottom"];
+/** Hata's own blocks and where one goes when it is put back on the dashboard */
+const BLOCKS = { cpu: "top", memory: "top", disk: "top", network: "top", temp: "top", attention: "side", activity: "side" };
+const blockTitle = (id) => (id === "attention" || id === "activity" ? t(id + ".title") : t("sys." + (id === "temp" ? "temperature" : id)));
+
+/** The small button that takes one of Hata's own blocks off the dashboard; the "Add" menu brings it back */
+function blockRemover(id, label) {
+  if (!isAdmin()) return null;
+  return h("button", {
+    type: "button",
+    class: "icon-btn quiet block-remove",
+    title: t("home.removeBlock"),
+    "aria-label": `${t("home.removeBlock")}: ${label}`,
+    onclick: () =>
+      changeLayout((layout) => {
+        const places = (layout.widgets = blockPlaces(layout));
+        for (const name of ZONES) places[name] = places[name].filter((block) => block !== id);
+        places.hidden.push(id);
+      }),
+  }, icon("x"));
+}
+
+function layoutTextDialog() {
+  const area = h("textarea", { class: "code", spellcheck: false, wrap: "off", "aria-label": t("home.layoutText"), disabled: true });
+  const error = h("p", { class: "error", role: "alert" });
+  let dialog;
+  const save = button(t("home.saveLayout"), {
+    class: "primary",
+    disabled: true,
+    onclick: async () => {
+      error.textContent = "";
+      try {
+        await api("PUT", "/api/dashboard/text", { text: area.value });
+        dialog.close();
+        await refresh();
+      } catch (e) {
+        error.textContent = errorText(e);
+      }
+    },
+  });
+  dialog = openDialog("xwide", h("header", null, h("div", null, h("h2", null, t("home.layoutText")), h("p", { class: "muted small" }, t("home.layoutTextLead")))), area, error, h("footer", null, closeButton(() => dialog, t("common.cancel")), save));
+  api("GET", "/api/dashboard/text").then(
+    ({ text }) => {
+      area.value = text;
+      area.disabled = false;
+      area.addEventListener("input", () => (save.disabled = area.value === text));
+    },
+    (e) => (error.textContent = errorText(e)),
+  );
+}
 
 /** Puts every block into its place; a place with nothing in it shows only while a block is in the air */
 function placeBlocks() {
@@ -1428,7 +1499,7 @@ function placeBlocks() {
     if (!zone) continue;
     const blocks = places[name].map((id) => homeUi.widgets[id] ?? groupBlock(layout.groups.find((group) => "group:" + group.id === id), layout.groups.findIndex((group) => "group:" + group.id === id))).filter(Boolean);
     zone.replaceChildren(...blocks);
-    zone.classList.toggle("empty", !blocks.length);
+    zone.classList.toggle("vacant", !blocks.length);
     zone.classList.toggle("movable", isAdmin());
     zone.dataset.hint = t("home.dropBlock");
   }

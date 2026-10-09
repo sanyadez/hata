@@ -717,5 +717,12 @@
   "home.dropBlock": "Drop a block here",
   "home.addGroupItem": "Group",
   "home.addGroupHint": "A named section of the dashboard",
-  "home.storeHint": "Apps to install"
+  "home.storeHint": "Apps to install",
+  "home.removeBlock": "Take off the dashboard",
+  "home.addBlockHint": "A block of the dashboard",
+  "home.layoutText": "Layout as text",
+  "home.layoutTextHint": "Everything on the dashboard, to edit by hand",
+  "home.layoutTextLead": "Groups, tiles and where every block stands, as YAML. What does not fit a layout is dropped on saving.",
+  "home.saveLayout": "Save",
+  "error.dashboard.badText": "This text is not a layout: {message}"
 }
