@@ -85,6 +85,20 @@ function icon(name, className = "") {
   return svg;
 }
 
+/** Hata's mark, drawn in the page so that it takes the accent colour of the settings */
+function logo() {
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("viewBox", "0 0 64 64");
+  svg.setAttribute("class", "logo");
+  svg.setAttribute("aria-hidden", "true");
+  const plate = document.createElementNS(SVG_NS, "rect");
+  for (const [name, value] of Object.entries({ width: 64, height: 64, rx: 15 })) plate.setAttribute(name, value);
+  const house = document.createElementNS(SVG_NS, "path");
+  house.setAttribute("d", "M32 13 11 31h6v19h11V38h8v12h11V31h6z");
+  svg.append(plate, house);
+  return svg;
+}
+
 let dict = {};
 let fallbackDict = {};
 
@@ -224,6 +238,9 @@ function applyAppearance(look) {
   set("--wallpaper", picture && `url("${picture}")`);
   set("--wallpaper-dim", picture && look.dim + "%");
   root.classList.toggle("has-wallpaper", !!picture);
+  // the icon of the tab is the same mark in the same colour
+  const mark = look?.accent ? `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="15" fill="${look.accent}"/><path d="M32 13 11 31h6v19h11V38h8v12h11V31h6z" fill="${lightness(look.accent) > 0.4 ? "#1a1206" : "#ffffff"}"/></svg>`)}` : "/logo.svg";
+  document.querySelector('link[rel="icon"]')?.setAttribute("href", mark);
 }
 
 // --- State --------------------------------------------------------------------------------------
@@ -422,7 +439,7 @@ async function inviteScreen(token) {
     invite = await api("GET", `/api/invite?token=${token}`);
   } catch {}
   if (!invite) {
-    return $app.replaceChildren(h("main", { class: "center" }, h("div", { class: "auth card" }, h("div", { class: "brand big" }, h("img", { src: "/logo.svg", alt: "" }), "hata"), h("h1", null, t("invite.invalidTitle")), h("p", { class: "muted" }, t("invite.invalid")), h("a", { class: "btn wide", href: "/" }, t("auth.signIn")))));
+    return $app.replaceChildren(h("main", { class: "center" }, h("div", { class: "auth card" }, h("div", { class: "brand big" }, logo(), "hata"), h("h1", null, t("invite.invalidTitle")), h("p", { class: "muted" }, t("invite.invalid")), h("a", { class: "btn wide", href: "/" }, t("auth.signIn")))));
   }
   const name = h("input", { name: "name", autocomplete: "username", required: true, autocapitalize: "none", spellcheck: false });
   const password = h("input", { name: "password", type: "password", autocomplete: "new-password", required: true, minLength: 8 });
@@ -451,7 +468,7 @@ async function inviteScreen(token) {
             }
           },
         },
-        h("div", { class: "brand big" }, h("img", { src: "/logo.svg", alt: "" }), "hata"),
+        h("div", { class: "brand big" }, logo(), "hata"),
         h("h1", null, t("invite.title")),
         h("p", { class: "muted" }, t("invite.lead", { role: t("user.role." + invite.role) })),
         field(t("auth.name"), name),
@@ -506,7 +523,7 @@ function authScreen() {
         }
       },
     },
-    h("div", { class: "brand big" }, h("img", { src: "/logo.svg", alt: "" }), "hata"),
+    h("div", { class: "brand big" }, logo(), "hata"),
     h("h1", null, t(setup ? "setup.title" : "auth.title")),
     setup && h("p", { class: "muted" }, t("setup.lead")),
     !setup && NEXT && h("p", { class: "muted" }, t("auth.nextLead", { address: new URL(NEXT).host })),
@@ -634,7 +651,7 @@ function shell(...content) {
     h(
       "header",
       { class: "top" },
-      h("a", { class: "brand", href: "#/" }, h("img", { src: "/logo.svg", alt: "" }), "hata"),
+      h("a", { class: "brand", href: "#/" }, logo(), "hata"),
       h("nav", { class: "nav" }, navLinks("nav-link")),
       h("div", { class: "top-right" }, globalSearch(), isAdmin() && h("a", { class: "icon-btn top-tool" + (state.route.view === "terminal" ? " active" : ""), href: "#/terminal", title: t("terminal.title"), "aria-label": t("terminal.title") }, icon("terminal")), h("button", { type: "button", class: "user", onclick: userMenu }, h("span", { class: "avatar" }, state.user.name.slice(0, 1).toUpperCase()), h("span", { class: "user-name" }, state.user.name))),
     ),

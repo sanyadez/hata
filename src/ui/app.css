@@ -175,7 +175,9 @@ textarea.code.page { min-height: 60dvh; background: var(--surface); padding: 16p
 /* --- Shell ------------------------------------------------------------------------------------- */
 
 .brand { display: flex; align-items: center; gap: 10px; font: 700 22px var(--font-heading); letter-spacing: -0.02em; }
-.brand img { width: 28px; height: 28px; border-radius: 7px; }
+.logo { width: 28px; height: 28px; flex: none; }
+.logo rect { fill: var(--accent); }
+.logo path { fill: var(--on-accent); }
 .brand.big { font-size: 26px; }
 
 .top {
