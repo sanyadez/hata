@@ -742,6 +742,8 @@ function setStat(id, value, unit, hint, chart, level = "") {
   strong.className = level;
   el.querySelector(".unit").textContent = unit;
   el.querySelector(".stat-hint").textContent = hint || " ";
+  // on a narrow card the note is cut short: the whole of it is a hover away
+  el.querySelector(".stat-hint").title = hint || "";
   el.querySelector(".stat-chart").replaceChildren(chart ?? "");
 }
 

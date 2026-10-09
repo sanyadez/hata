@@ -683,10 +683,13 @@ input[type="range"] { accent-color: var(--accent); width: 100%; }
 .group { display: grid; gap: 16px; border-radius: var(--radius-md); align-content: start; }
 .group.bare { align-content: stretch; }
 /* the one column is as wide as the card and no wider: a chart gives way instead of sticking out */
-.widget.small > .stat { border: 0; height: 100%; grid-template-columns: minmax(0, 1fr); }
+.widget.small > .stat { border: 0; height: 100%; padding: 12px 14px; gap: 2px 10px; grid-template-columns: auto minmax(0, 1fr); grid-template-areas: "label hint" "row row"; align-content: center; }
+/* a number on the board is as tall as a tile: what it is and the note about it share the first line */
+.widget.small .stat-label { grid-area: label; white-space: nowrap; }
+.widget.small .stat-hint { grid-area: hint; text-align: right; align-self: center; }
+.widget.small .stat-row { grid-area: row; }
+.widget.small .stat-value strong { font-size: 21px; }
 .widget.small { overflow: hidden; }
-/* a number among the tiles keeps to the size of a tile */
-.tiles > .widget.small > .stat { padding: 12px 14px; gap: 3px; }
 
 /* what an administrator can do to a block: take it by its heading (a number by any part), pull its right
    edge to make it wider or narrower, take it off */
