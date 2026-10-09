@@ -39,6 +39,8 @@ Early development. What works today:
 - HTTPS, your choice of three: none (address and ports, for a home network); behind your own proxy (nginx,
   Caddy, Traefik) with a check that the proxy is set up right; or by Hata itself with certificates from
   Let's Encrypt. With a domain, every app has its own address, `<app>.<domain>`;
+- updates of Hata itself from the web UI: a newer release is downloaded, checked against its checksums and
+  started; if it does not come up, the previous version is put back by itself. Apps keep running meanwhile;
 - English and Ukrainian UI, light and dark, phone-friendly.
 
 Not there yet: passkeys, wildcard certificates (DNS challenge), backups to another machine, file manager.
@@ -53,7 +55,7 @@ curl -fsSL https://raw.githubusercontent.com/sanyadez/hata/main/install.sh | sud
 
 The script downloads the binary of the latest release and checks it against the release's checksums,
 installs Docker if it is missing, and starts the `hata` service. It ends by printing the address for
-creating the administrator. Run it again to update. If port 80 is taken, Hata picks the next free port and
+creating the administrator. To update, use Settings → About in the web UI, or run it again. If port 80 is taken, Hata picks the next free port and
 says which; `--port <number>` chooses one.
 
 State lives in `/var/lib/hata`; every app is a plain compose project in `/var/lib/hata/apps/<name>/` that

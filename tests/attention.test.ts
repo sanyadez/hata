@@ -83,3 +83,8 @@ test("parseStats computes what `docker stats` shows", () => {
   // the first sample of a container has nothing to compare with
   expect(parseStats({ cpu_stats: { cpu_usage: { total_usage: 5 } }, precpu_stats: { cpu_usage: { total_usage: 0 } }, memory_stats: {} }).cpu).toBe(0);
 });
+
+test("a newer version of Hata is mentioned", () => {
+  const items = attention({ system: system(), docker: { available: true }, apps: [], activity: [], update: "0.2.0" });
+  expect(items).toEqual([{ id: "update", severity: "warn", code: "update", detail: { version: "0.2.0" } }]);
+});

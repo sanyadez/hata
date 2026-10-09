@@ -26,7 +26,7 @@ test("strings chosen at run time exist for every value the server can send", () 
   const need = [
     ...["running", "partial", "restarting", "stopped", "unknown", "busy"].map((s) => `status.${s}`),
     ...["install", "update", "start", "stop", "restart", "remove", "apply", "backup", "restore", "import"].flatMap((k) => [`job.${k}`, `activity.app.${k}.done`, `activity.app.${k}.failed`]),
-    ...["docker", "restarting", "partial", "disk", "memory", "temperature", "failed.install", "failed.update", "failed.apply", "failed.start", "failed.backup", "failed.restore"].flatMap((c) => [`attention.${c}.title`, `attention.${c}.text`]),
+    ...["update", "docker", "restarting", "partial", "disk", "memory", "temperature", "failed.install", "failed.update", "failed.apply", "failed.start", "failed.backup", "failed.restore"].flatMap((c) => [`attention.${c}.title`, `attention.${c}.text`]),
     ...["home", "store", "backups", "users", "settings"].map((v) => `nav.${v}`),
     ...["admin", "member", "guest"].map((v) => `user.role.${v}`),
     ...["ok", "wrongPassword", "wrongCode", "locked"].map((v) => `signins.${v}`),
@@ -35,6 +35,7 @@ test("strings chosen at run time exist for every value the server can send", () 
     ...["manual", "schedule", "pre-update"].map((v) => `backup.reason.${v}`),
     ...["account", "general", "apps", "stores", "https", "about"].map((v) => `settings.${v}`),
     ...["overview", "logs", "compose", "backups"].map((v) => `app.tab.${v}`),
+    ...["download", "restart"].map((v) => `update.stage.${v}`),
     ...["links", "volumesFrom", "sharedNetwork"].map((v) => `import.warn.${v}`),
     ...["file", "resolved", "containers"].map((v) => `import.source.${v}`),
     ...["badName", "exists", "autoRemove"].map((v) => `import.problem.${v}`),

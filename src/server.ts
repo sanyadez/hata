@@ -61,6 +61,7 @@ import { appHost, appLabel, classifyHost, clientIp, cookieDomain, requestHost, r
 import { qrMatrix } from "./qr";
 import { ARCH, catalogue, scheduleStoreSync, syncStore } from "./store";
 import { startSampler, systemStatus } from "./system";
+import { availableUpdate, checkForUpdate, confirmUpdate, scheduleUpdateChecks, startUpdate, updateStatus } from "./update";
 import { VERSION } from "./version";
 
 import appCss from "./ui/app.css" with { type: "text" };
@@ -416,7 +417,7 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
       arch: ARCH,
       // with a domain, apps are opened at <label>.<domain> when Hata itself is opened by that domain
       site: { domain: siteDomain(), mode: settings.https.mode },
-      attention: admin ? attention({ system, docker, apps, activity: recent(100) }) : [],
+      attention: admin ? attention({ system, docker, apps, activity: recent(100), update: availableUpdate() }) : [],
       // who signed in from where, and what was installed by whom, is the administrators' business
       activity: admin ? recent(8) : [],
       // containers and compose projects on this machine that are not apps here yet
@@ -453,6 +454,13 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
     const domain = siteDomain();
     if (!domain) return fail(400, "settings.needDomain");
     return json(await Promise.all([checkDomain(domain), checkDomain(`hata-check.${domain}`)]));
+  }
+
+  if (path === "/api/update" && method === "GET") return json(updateStatus());
+  if (path === "/api/update/check" && method === "POST") return json(await checkForUpdate());
+  if (path === "/api/update/install" && method === "POST") {
+    const error = startUpdate(user.name);
+    return error ? fail(409, error) : json({ started: true }, 202);
   }
 
   if (path === "/api/backups" && method === "GET") return json(backupOverview(language(url)));
@@ -723,6 +731,8 @@ export async function serve(): Promise<void> {
   const docker = await dockerInfo();
   console.log(docker.available ? `Docker ${docker.version}, compose ${docker.compose}` : `Docker is not available: ${docker.error}`);
 
+  confirmUpdate();
+  scheduleUpdateChecks();
   startSampler();
   scheduleStoreSync();
   scheduleBackups();

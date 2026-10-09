@@ -199,6 +199,7 @@ const state = {
   signIns: null,
   backups: null,
   import: null,
+  update: null,
   app: null,
 };
 
@@ -656,7 +657,7 @@ function appTile(app) {
   );
 }
 
-const ATTENTION_ICONS = { docker: "box", restarting: "refresh", partial: "alert", disk: "disk", memory: "memory", temperature: "temp" };
+const ATTENTION_ICONS = { update: "up", docker: "box", restarting: "refresh", partial: "alert", disk: "disk", memory: "memory", temperature: "temp" };
 
 function attentionItem(item) {
   const detail = { ...item.detail, free: item.detail.free == null ? "" : bytes(item.detail.free) };
@@ -666,6 +667,7 @@ function attentionItem(item) {
     { class: "attention-item" },
     h("span", { class: "badge-icon " + item.severity }, icon(ATTENTION_ICONS[item.code] ?? "alert")),
     h("div", { class: "grow" }, h("strong", null, t(base + ".title", detail)), h("p", { class: "muted small" }, t(base + ".text", detail).trim())),
+    item.code === "update" && h("a", { class: "btn small", href: "#/settings/about" }, t("common.open")),
     item.app && h("a", { class: "btn small", href: `#/apps/${item.app}${item.code === "restarting" || item.code === "partial" ? "/logs" : ""}` }, t(item.code === "restarting" || item.code === "partial" ? "app.logs" : "common.open")),
   );
 }
@@ -1698,6 +1700,7 @@ async function loadSettings() {
   try {
     state.account = await api("GET", "/api/account");
     if (isAdmin()) state.settings = await api("GET", "/api/settings");
+    if (isAdmin()) state.update = await api("GET", "/api/update").catch(() => null);
     if (!state.store && isAdmin()) state.store = await api("GET", `/api/store?lang=${state.lang}`).catch(() => null);
   } catch (e) {
     return toast(errorText(e), "error");
@@ -1718,6 +1721,66 @@ const sections = () => SECTIONS.filter((item) => !item.admin || isAdmin());
 
 function settingRow(title, hint, control) {
   return h("div", { class: "setting" }, h("div", { class: "grow" }, h("strong", null, title), hint && h("p", { class: "muted small" }, hint)), h("div", { class: "setting-control" }, control));
+}
+
+/** Asks until the server answers with another version (the update went through) or says why it did not */
+async function followUpdate(target) {
+  const started = Date.now();
+  while (Date.now() - started < 4 * 60_000) {
+    await new Promise((r) => setTimeout(r, 2000));
+    const now = await fetch("/api/state").then((r) => (r.ok ? r.json() : null), () => null);
+    // the new version brings a new UI with it
+    if (now?.version === target) return location.reload();
+    const status = await api("GET", "/api/update").catch(() => null);
+    if (!status) continue;
+    state.update = status;
+    if (!status.stage && (status.error || status.last?.status === "rolledBack")) break;
+  }
+  if (state.route.view === "settings") renderSettings();
+}
+
+function updateRow() {
+  const u = state.update;
+  if (!u) return null;
+  const busy = !!u.stage;
+  const failed = !busy && u.last?.status === "rolledBack" && u.latest?.version === u.last.to;
+  const hint = busy
+    ? t("update.stage." + u.stage)
+    : failed
+      ? t("update.rolledBack", { version: u.last.to })
+      : u.error
+        ? t("update.error", { message: u.error })
+        : u.available
+          ? u.unsupported ? t("update.manual") : t("update.availableHint")
+          : u.checkedAt ? t("update.upToDate", { time: ago(u.checkedAt) }) : t("update.notChecked");
+  const check = button(t("update.check"), {
+    class: "small ghost",
+    disabled: busy,
+    onclick: async () => {
+      check.disabled = true;
+      state.update = await api("POST", "/api/update/check", {}).catch(() => state.update);
+      renderSettings();
+    },
+  }, "refresh");
+  const install = u.available && !u.unsupported && button(t("update.install", { version: u.latest.version }), {
+    class: "small primary",
+    disabled: busy,
+    onclick: async () => {
+      try {
+        await api("POST", "/api/update/install", {});
+        state.update = { ...u, stage: "download", error: "" };
+        renderSettings();
+        void followUpdate(u.latest.version);
+      } catch (e) {
+        toast(errorText(e), "error");
+      }
+    },
+  }, "up");
+  return settingRow(
+    u.available ? t("update.available", { version: u.latest.version }) : t("update.title2"),
+    hint,
+    h("div", { class: "row-actions" }, u.available && u.latest.url && h("a", { class: "link small", href: u.latest.url, target: "_blank", rel: "noopener noreferrer" }, t("update.notes"), icon("external")), check, install),
+  );
 }
 
 function settingsSection(section) {
@@ -1798,6 +1861,7 @@ function settingsSection(section) {
       { class: "card pad" },
       h("h2", null, t("settings.about")),
       settingRow("Hata", t("settings.aboutHint"), h("span", { class: "mono" }, state.version)),
+      updateRow(),
       settingRow("Docker", d?.available ? "" : (d?.error ?? ""), h("span", { class: "mono" }, d?.available ? `${d.version} · compose ${d.compose}` : "—")),
       settingRow(t("settings.source"), "", h("a", { class: "link", href: "https://github.com/sanyadez/hata", target: "_blank", rel: "noopener noreferrer" }, "github.com/sanyadez/hata", icon("external"))),
     ),

@@ -47,6 +47,12 @@ switch (command) {
     process.exit(await migrateCasaos(process.argv.slice(4)));
     break;
   }
+  case "update-watch": {
+    // not for people: started by a running Hata that is updating itself (see update.ts)
+    const { watchUpdate } = await import("./update");
+    process.exit(await watchUpdate());
+    break;
+  }
   case "setup-url": {
     const { setupUrl } = await import("./server");
     const url = setupUrl();
