@@ -130,6 +130,7 @@
   "error.settings.badId": "ID — це число від 0 до 65534.",
   "error.settings.badTimezone": "Невідомий часовий пояс.",
   "error.settings.badLanguage": "Невідома мова.",
+  "error.settings.badPort": "Порт — це число від 1 до 65535.",
   "error.request.crossSite": "Запит надійшов з іншого сайту, його відхилено.",
   "error.request.failed": "Щось пішло не так: {message}",
   "error.network": "Сервер недоступний."

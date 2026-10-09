@@ -238,16 +238,23 @@ export async function storeAppDetail(store: string, name: string, lang: string):
 
 // --- Operations -------------------------------------------------------------------------------------
 
-function writeEnv(name: string): void {
-  const text = [
-    "# Variables for compose.yml. Written by Hata on every install, update and settings change of the app.",
-    `AppID=${name}`,
-    `PUID=${settings.puid}`,
-    `PGID=${settings.pgid}`,
-    `TZ=${timezone()}`,
-    "",
-  ].join("\n");
-  writeTextAtomic(join(appDir(name), ".env"), text);
+const ENV_HEADER = "# Variables for compose.yml. Hata keeps AppID, PUID, PGID and TZ up to date; other lines are yours.";
+const OWN_ENV_KEYS = new Set(["AppID", "PUID", "PGID", "TZ"]);
+
+/** The text of an app's `.env`: our variables, then whatever else the file already held */
+export function envText(name: string, previous: string, extra: Record<string, string> = {}): string {
+  const kept = previous.split("\n").filter((line) => {
+    const key = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=/.exec(line)?.[1];
+    return key ? !OWN_ENV_KEYS.has(key) && !(key in extra) : line.trim() !== "" && line !== ENV_HEADER && !line.startsWith("# Variables for compose.yml.");
+  });
+  const added = Object.entries(extra).filter(([key]) => !OWN_ENV_KEYS.has(key)).map(([key, value]) => `${key}=${value}`);
+  return [ENV_HEADER, `AppID=${name}`, `PUID=${settings.puid}`, `PGID=${settings.pgid}`, `TZ=${timezone()}`, ...kept, ...added, ""].join("\n");
+}
+
+export function writeEnv(name: string, extra: Record<string, string> = {}): void {
+  const file = join(appDir(name), ".env");
+  const previous = existsSync(file) ? readFileSync(file, "utf8") : "";
+  writeTextAtomic(file, envText(name, previous, extra));
 }
 
 /** Creates the app's missing bind directories — only inside the data root; devices and sockets are not ours */

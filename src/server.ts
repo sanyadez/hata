@@ -302,7 +302,7 @@ function lanAddress(): string {
   return "localhost";
 }
 
-function baseUrl(): string {
+export function baseUrl(): string {
   const { port } = listenAddress();
   return `http://${lanAddress()}${port === 80 ? "" : ":" + port}/`;
 }

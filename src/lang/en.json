@@ -130,6 +130,7 @@
   "error.settings.badId": "An ID is a number from 0 to 65534.",
   "error.settings.badTimezone": "Unknown time zone.",
   "error.settings.badLanguage": "Unknown language.",
+  "error.settings.badPort": "A port is a number from 1 to 65535.",
   "error.request.crossSite": "The request came from another site and was refused.",
   "error.request.failed": "Something went wrong: {message}",
   "error.network": "The server is not reachable."

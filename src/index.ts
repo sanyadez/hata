@@ -9,8 +9,13 @@ const USAGE = `Hata ${VERSION} — a home server in a single file
 
 Usage:
   hata              run the server
-  hata install      install as a systemd service and start it (needs root)
+  hata install      install as a systemd service and start it (needs root);
+                    --port <number> sets the port of the web UI
   hata uninstall    stop and remove the service (apps and data stay)
+  hata migrate casaos
+                    take over the apps of a CasaOS install on this machine (needs root);
+                    --dry-run shows the plan, --yes does not ask, --keep-casaos leaves
+                    CasaOS running, --undo gives the apps back
   hata setup-url    print the address for creating the first administrator
   hata version      print the version
 `;
@@ -26,7 +31,20 @@ switch (command) {
   case "install":
   case "uninstall": {
     const service = await import("./service");
-    process.exit(await (command === "install" ? service.installService() : service.uninstallService()));
+    process.exit(await (command === "install" ? service.installService(process.argv.slice(3)) : service.uninstallService()));
+    break;
+  }
+  case "migrate": {
+    if (process.argv[3] !== "casaos") {
+      console.error("Usage: hata migrate casaos [--dry-run] [--yes] [--keep-casaos] [--undo]");
+      process.exit(2);
+    }
+    if (process.getuid?.() !== 0) {
+      console.error("This needs root: run it with sudo.");
+      process.exit(1);
+    }
+    const { migrateCasaos } = await import("./migrate");
+    process.exit(await migrateCasaos(process.argv.slice(4)));
     break;
   }
   case "setup-url": {

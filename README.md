@@ -10,7 +10,8 @@ no database server next to it and no npm packages. Compatible with the CasaOS ap
 
 Early development. What works today:
 
-- one binary that installs itself as a systemd service (`hata install`);
+- one-line install: one binary that sets itself up as a systemd service;
+- one-line move from CasaOS: its apps are taken over where they are, with an undo;
 - first run creates the administrator — there are no default credentials, and the setup needs a code
   that only the server's console shows;
 - dashboard: CPU, memory, disk, network, temperature, app tiles with live state;
@@ -21,31 +22,55 @@ Early development. What works today:
   without data;
 - English and Ukrainian UI, light and dark, phone-friendly.
 
-Not there yet: reverse proxy and HTTPS, more users and 2FA, backups, import of existing containers and
-CasaOS installs, file manager.
+Not there yet: reverse proxy and HTTPS, more users and 2FA, backups, import of containers that have no
+compose file, file manager.
 
 ## Install
 
-On a Linux machine (x64 or arm64) with Docker Engine and the compose plugin:
+On a Linux machine with systemd (x86_64 or arm64):
 
 ```sh
-sudo ./hata-linux-x64 install
+curl -fsSL https://raw.githubusercontent.com/sanyadez/hata/main/install.sh | sudo sh
 ```
 
-It copies itself to `/usr/local/bin/hata`, starts the `hata` service and prints the address for creating
-the administrator. State lives in `/var/lib/hata`; every app is a plain compose project in
-`/var/lib/hata/apps/<name>/` that keeps working without Hata.
+The script downloads the binary of the latest release and checks it against the release's checksums,
+installs Docker if it is missing, and starts the `hata` service. It ends by printing the address for
+creating the administrator. Run it again to update. If port 80 is taken, Hata picks the next free port and
+says which; `--port <number>` chooses one.
+
+State lives in `/var/lib/hata`; every app is a plain compose project in `/var/lib/hata/apps/<name>/` that
+keeps working without Hata.
+
+### Moving in from CasaOS
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/sanyadez/hata/main/install.sh | sudo sh -s -- --migrate-casaos
+```
+
+Hata takes over the apps CasaOS installed — the same compose files, the same containers, the same data in
+`/DATA` — then stops CasaOS and takes port 80. Containers are not recreated during the move, and nothing of
+CasaOS is deleted, so it can be taken back:
+
+```sh
+sudo hata migrate casaos --dry-run   # only show what would happen
+sudo hata migrate casaos --undo      # give the apps back to CasaOS
+```
+
+Not moved yet: containers CasaOS shows that were started without a compose file ("legacy" apps), and
+CasaOS's own settings and users.
+
+### Commands
 
 ```
-hata              run the server
-hata install      install as a systemd service and start it (needs root)
-hata uninstall    stop and remove the service (apps and data stay)
-hata setup-url    print the address for creating the first administrator
-hata version      print the version
+hata                    run the server
+hata install            install as a systemd service and start it; --port <number>
+hata uninstall          stop and remove the service (apps and data stay)
+hata migrate casaos     take over the apps of a CasaOS install; --dry-run, --yes, --keep-casaos, --undo
+hata setup-url          print the address for creating the first administrator
+hata version            print the version
 ```
 
-`HATA_PORT`, `HATA_HOST` and `HATA_DATA_DIR` override where the server listens (default: port 80 as root,
-8080 otherwise) and where it keeps its state.
+`HATA_PORT`, `HATA_HOST` and `HATA_DATA_DIR` override where the server listens and where it keeps its state.
 
 ## Development
 

@@ -36,10 +36,52 @@ function preflight(): string | null {
   return null;
 }
 
-export async function installService(): Promise<number> {
+function portFree(port: number): boolean {
+  try {
+    Bun.listen({ hostname: "0.0.0.0", port, socket: { data() {} } }).stop(true);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Ports tried, in order, when the web UI's usual port is taken by something else */
+const FALLBACK_PORTS = [8080, 8090, 8888, 9080];
+
+/**
+ * The port the service will listen on. An explicit `--port` wins; a running Hata keeps the port it has;
+ * a new install takes 80, or the first free fallback when another web server (CasaOS, nginx) holds it.
+ */
+async function choosePort(args: string[]): Promise<number | string> {
+  const { settings, updateSettings } = await import("./config");
+  const at = args.indexOf("--port");
+  if (at >= 0) {
+    const port = Number(args[at + 1]);
+    if (!Number.isInteger(port) || port < 1 || port > 65535) return "`--port` needs a number from 1 to 65535.";
+    updateSettings({ port });
+    return port;
+  }
+  const running = Bun.spawnSync({ cmd: ["systemctl", "is-active", "--quiet", "hata.service"] }).exitCode === 0;
+  if (running || settings.port) return settings.port || 80;
+  if (portFree(80)) return 80;
+  const port = FALLBACK_PORTS.find(portFree);
+  if (!port) return "Port 80 and the usual alternatives are taken: choose one with `hata install --port <number>`.";
+  console.log(`Port 80 is taken by another program, so Hata will use port ${port}. Change it later with \`hata install --port <number>\`.`);
+  updateSettings({ port });
+  return port;
+}
+
+export async function installService(args: string[] = []): Promise<number> {
   const problem = preflight() ?? (COMPILED ? null : "Run `hata install` from the built binary (bun run build), not from source.");
   if (problem) {
     console.error(problem);
+    return 1;
+  }
+  // the settings read and written here must be the service's own
+  process.env.HATA_DATA_DIR = SERVICE_DATA_DIR;
+  const port = await choosePort(args);
+  if (typeof port === "string") {
+    console.error(port);
     return 1;
   }
   if (process.execPath !== BIN) {
@@ -54,9 +96,9 @@ export async function installService(): Promise<number> {
   if (!Bun.which("docker")) console.log("Docker was not found: install Docker Engine with the compose plugin to run apps.");
 
   // the service prints the same address to its log; show it here so nobody has to look for it
-  const out = Bun.spawnSync({ cmd: [BIN, "setup-url"], env: { ...process.env, HATA_DATA_DIR: SERVICE_DATA_DIR } });
-  const text = out.stdout.toString().trim();
-  if (text) console.log(text.startsWith("http") ? `Open this address to create the administrator:\n  ${text}` : text);
+  const { setupUrl, baseUrl } = await import("./server");
+  const url = setupUrl();
+  console.log(url ? `Open this address to create the administrator:\n  ${url}` : `Open ${baseUrl()}`);
   return 0;
 }
 

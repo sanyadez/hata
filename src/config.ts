@@ -30,6 +30,8 @@ export interface StoreSource {
 }
 
 export interface Settings {
+  /** Port of the web UI; 0 — the default (80 as root, 8080 otherwise). Applies after a restart */
+  port: number;
   /** Root for app data: store apps expect `<dataRoot>/AppData/<app>` and `<dataRoot>/Media` */
   dataRoot: string;
   /** User and group that apps run as (the `$PUID` / `$PGID` variables of store apps) */
@@ -43,6 +45,7 @@ export interface Settings {
 }
 
 const DEFAULTS: Settings = {
+  port: 0,
   dataRoot: "/DATA",
   puid: 1000,
   pgid: 1000,
@@ -86,6 +89,11 @@ export function updateSettings(patch: Record<string, unknown>): string | null {
     }
     next.timezone = v;
   }
+  if ("port" in patch) {
+    const v = patch.port;
+    if (typeof v !== "number" || !Number.isInteger(v) || v < 0 || v > 65535) return "settings.badPort";
+    next.port = v;
+  }
   if ("language" in patch) {
     if (typeof patch.language !== "string" || !/^[a-z]{2}$/.test(patch.language)) return "settings.badLanguage";
     next.language = patch.language;
@@ -95,8 +103,10 @@ export function updateSettings(patch: Record<string, unknown>): string | null {
   return null;
 }
 
-/** Where the server listens: port 80 needs root, so an unprivileged run falls back to 8080 */
+export const DEFAULT_PORT = process.getuid?.() === 0 ? 80 : 8080;
+
+/** Where the server listens: the environment wins over the settings, port 80 needs root */
 export function listenAddress(): { port: number; hostname: string } {
-  const port = Number(process.env.HATA_PORT ?? process.env.PORT ?? (process.getuid?.() === 0 ? 80 : 8080));
+  const port = Number(process.env.HATA_PORT ?? process.env.PORT ?? (settings.port || DEFAULT_PORT));
   return { port, hostname: process.env.HATA_HOST ?? "0.0.0.0" };
 }
