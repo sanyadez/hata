@@ -227,6 +227,7 @@
   "activity.app.backup.failed": "Не вдалося зробити копію {app}",
   "activity.app.restore.done": "{app} відновлено з копії",
   "activity.app.restore.failed": "Не вдалося відновити {app}",
+  "activity.app.snapshot.remove": "Видалено копію {app}",
   "attention.failed.backup.title": "Не вдалося зробити копію {title}",
   "attention.failed.backup.text": "{message}",
   "attention.failed.restore.title": "Не вдалося відновити {title}",

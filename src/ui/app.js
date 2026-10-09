@@ -742,7 +742,7 @@ function attentionItem(item) {
   );
 }
 
-const ACTIVITY_ICONS = { install: "download", update: "up", start: "play", stop: "stop", restart: "refresh", remove: "trash", apply: "code", backup: "archive", restore: "undo", import: "download" };
+const ACTIVITY_ICONS = { install: "download", update: "up", start: "play", stop: "stop", restart: "refresh", remove: "trash", apply: "code", backup: "archive", restore: "undo", snapshot: "trash", import: "download" };
 
 function activityItem(entry) {
   const [group, kind, outcome] = entry.code.split(".");

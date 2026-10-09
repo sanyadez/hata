@@ -227,6 +227,7 @@
   "activity.app.backup.failed": "Backup of {app} failed",
   "activity.app.restore.done": "{app} restored from a snapshot",
   "activity.app.restore.failed": "Restoring {app} failed",
+  "activity.app.snapshot.remove": "Snapshot of {app} deleted",
   "attention.failed.backup.title": "Backup of {title} failed",
   "attention.failed.backup.text": "{message}",
   "attention.failed.restore.title": "Restoring {title} failed",

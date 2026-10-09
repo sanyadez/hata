@@ -545,6 +545,7 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
   if (b && b[3] && method === "POST") return json({ job: restoreSnapshot(b[1]!, b[2]!, user.name).id }, 202);
   if (b && !b[3] && method === "DELETE") {
     deleteSnapshot(b[1]!, b[2]!);
+    record("app.snapshot.remove", { app: b[1]!, user: user.name });
     return json({ ok: true });
   }
 
