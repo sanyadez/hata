@@ -22,10 +22,12 @@ Early development. What works today:
 - custom apps: paste any compose file;
 - per app, on its own page: start, stop, restart, image update, CPU and memory per container, live logs,
   editing the compose file, removal with or without data;
+- backups: a snapshot of an app (compose file, its folders, its Docker volumes) as a plain `tar.gz`, daily
+  on a schedule and before every update, restore to any snapshot — also of an app that was removed;
 - English and Ukrainian UI, light and dark, phone-friendly.
 
-Not there yet: reverse proxy and HTTPS, more users and 2FA, backups, import of containers that have no
-compose file, file manager.
+Not there yet: reverse proxy and HTTPS, more users and 2FA, backups to another machine, import of
+containers that have no compose file, file manager.
 
 ## Install
 

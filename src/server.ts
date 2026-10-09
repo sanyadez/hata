@@ -12,6 +12,7 @@ import type { Server } from "bun";
 import { recent, record } from "./activity";
 import { AppError, appAction, appDetail, appLogs, appStats, applyCompose, composeText, getJob, installCustom, installFromStore, listApps, listJobs, removeApp, storeAppDetail } from "./apps";
 import { attention } from "./attention";
+import { backupApp, backupOverview, deleteSnapshot, listSnapshots, restoreSnapshot, runBackups, scheduleBackups } from "./backup";
 import { APP_NAME_RE } from "./appform";
 import {
   checkPassword,
@@ -268,6 +269,19 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
     }
   }
 
+  if (path === "/api/backups" && method === "GET") return json(backupOverview(language(url)));
+  if (path === "/api/backups/run" && method === "POST") {
+    // the run takes minutes; its progress shows up as jobs and in the overview
+    void runBackups(user.name);
+    return json({ started: true }, 202);
+  }
+  const b = /^\/api\/backups\/([a-z0-9_-]+)\/(\d{8}-\d{6})(\/restore)?$/.exec(path);
+  if (b && b[3] && method === "POST") return json({ job: restoreSnapshot(b[1]!, b[2]!, user.name).id }, 202);
+  if (b && !b[3] && method === "DELETE") {
+    deleteSnapshot(b[1]!, b[2]!);
+    return json({ ok: true });
+  }
+
   if (path === "/api/store" && method === "GET") return json(catalogue(language(url)));
 
   let m = /^\/api\/store\/([a-z0-9-]+)\/sync$/.exec(path);
@@ -302,6 +316,8 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
     if (!sub && method === "GET") return json(await appDetail(name, language(url)));
     if (!sub && method === "DELETE") return json({ job: removeApp(name, url.searchParams.get("data") === "1", user.name).id }, 202);
     if (sub === "stats" && method === "GET") return json(await appStats(name));
+    if (sub === "backups" && method === "GET") return json(listSnapshots(name));
+    if (sub === "backup" && method === "POST") return json({ job: backupApp(name, user.name).id }, 202);
     if (sub === "compose" && method === "GET") return json({ compose: composeText(name) });
     if (sub === "compose" && method === "PUT") return json({ job: applyCompose(name, (await body(req)).compose, user.name).id }, 202);
     if (sub === "logs" && method === "GET") {
@@ -374,5 +390,6 @@ export async function serve(): Promise<void> {
 
   startSampler();
   scheduleStoreSync();
+  scheduleBackups();
   void watchEvents();
 }

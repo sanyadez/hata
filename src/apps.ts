@@ -28,7 +28,7 @@ export class AppError extends Error {
   }
 }
 
-const appDir = (name: string) => join(APPS_DIR, name);
+export const appDir = (name: string) => join(APPS_DIR, name);
 const composeFile = (name: string) => join(appDir(name), "compose.yml");
 
 function assertName(name: string): void {
@@ -42,7 +42,7 @@ function assertInstalled(name: string): void {
 
 // --- Jobs -------------------------------------------------------------------------------------------
 
-export type JobKind = "install" | "update" | "start" | "stop" | "restart" | "remove" | "apply";
+export type JobKind = "install" | "update" | "start" | "stop" | "restart" | "remove" | "apply" | "backup" | "restore";
 
 export interface Job {
   id: string;
@@ -67,10 +67,14 @@ const busy = new Map<string, string>();
 export const getJob = (id: string): Job | null => jobs.get(id) ?? null;
 export const listJobs = (): Job[] => [...jobs.values()];
 
-type Log = (line: string) => void;
+export type Log = (line: string) => void;
+
+/** Resolves when the job has finished, whatever the outcome */
+const finished = new WeakMap<Job, Promise<void>>();
+export const jobFinished = (job: Job): Promise<void> => finished.get(job) ?? Promise.resolve();
 
 /** Starts a long operation on an app; one app runs one operation at a time */
-function startJob(app: string, kind: JobKind, user: string, work: (log: Log) => Promise<void>): Job {
+export function startJob(app: string, kind: JobKind, user: string, work: (log: Log) => Promise<void>): Job {
   if (busy.has(app)) throw new AppError("app.busy", 409);
   const job: Job = { id: crypto.randomUUID(), app, kind, status: "running", log: [], lineCount: 0, startedAt: Date.now() };
   jobs.set(job.id, job);
@@ -82,7 +86,7 @@ function startJob(app: string, kind: JobKind, user: string, work: (log: Log) => 
     bus.publish("job", { job: summary(), line, n: job.lineCount++ });
   };
   bus.publish("job", { job: summary() });
-  void work(log)
+  const run = work(log)
     .then(() => {
       job.status = "done";
     })
@@ -95,16 +99,17 @@ function startJob(app: string, kind: JobKind, user: string, work: (log: Log) => 
       job.finishedAt = Date.now();
       record(`app.${kind}.${job.status}`, { app, user, detail: job.status === "failed" ? job.error?.trim().split("\n")[0]?.trim().slice(0, 300) : undefined });
       busy.delete(app);
-      const finished = [...jobs.values()].filter((j) => j.status !== "running");
-      for (const old of finished.slice(0, Math.max(0, finished.length - KEEP_FINISHED_JOBS))) jobs.delete(old.id);
+      const over = [...jobs.values()].filter((j) => j.status !== "running");
+      for (const old of over.slice(0, Math.max(0, over.length - KEEP_FINISHED_JOBS))) jobs.delete(old.id);
       bus.publish("job", { job: summary() });
       bus.publish("apps");
     });
+  finished.set(job, run);
   return job;
 }
 
 /** Runs `docker compose …` for an app, failing the job on a non-zero exit */
-async function dc(name: string, args: string[], log: Log): Promise<void> {
+export async function dc(name: string, args: string[], log: Log): Promise<void> {
   log(`$ docker compose ${args.join(" ")}`);
   const { code, output } = await runCompose(name, appDir(name), args, log);
   if (code !== 0) throw new Error(output.split("\n").slice(-3).join("\n") || `docker compose exited with ${code}`);
@@ -114,7 +119,7 @@ async function dc(name: string, args: string[], log: Log): Promise<void> {
 
 const parsed = new Map<string, { mtime: number; compose: Compose | null }>();
 
-function readCompose(name: string): Compose | null {
+export function readCompose(name: string): Compose | null {
   const file = composeFile(name);
   let mtime: number;
   try {
@@ -135,7 +140,7 @@ function readCompose(name: string): Compose | null {
   return compose;
 }
 
-function installedNames(): string[] {
+export function installedNames(): string[] {
   return readdirSync(APPS_DIR, { withFileTypes: true })
     .filter((e) => e.isDirectory() && APP_NAME_RE.test(e.name) && existsSync(composeFile(e.name)))
     .map((e) => e.name)
@@ -354,6 +359,12 @@ export async function installCustom(name: unknown, text: unknown, user: string):
   return startJob(appName, "install", user, (log) => install(appName, text, compose, log));
 }
 
+/** Runs inside an update, before anything changes — the backup module snapshots the app here */
+let beforeUpdate: ((name: string, log: Log) => Promise<void>) | null = null;
+export function onBeforeUpdate(hook: (name: string, log: Log) => Promise<void>): void {
+  beforeUpdate = hook;
+}
+
 export function appAction(name: string, action: string, user: string): Job {
   assertInstalled(name);
   switch (action) {
@@ -369,6 +380,7 @@ export function appAction(name: string, action: string, user: string): Job {
     case "update":
       return startJob(name, "update", user, async (log) => {
         writeEnv(name);
+        await beforeUpdate?.(name, log);
         await dc(name, ["pull"], log);
         await dc(name, ["up", "-d", "--remove-orphans"], log);
       });

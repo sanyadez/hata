@@ -41,18 +41,23 @@ export function attention(input: { system: SystemStatus; docker: DockerInfo; app
     }
   }
 
-  // the latest outcome per app decides: a failure followed by a success is history, not a problem
+  // The latest outcome decides: a failure followed by a success is history, not a problem. Running the
+  // app and backing it up are judged apart — a good start says nothing about a failed backup.
   const latest = new Map<string, Activity>();
   for (const entry of activity) {
-    if (entry.app && /^app\.(install|update|apply|start)\.(done|failed)$/.test(entry.code) && !latest.has(entry.app)) latest.set(entry.app, entry);
+    const m = /^app\.(install|update|apply|start|backup|restore)\.(done|failed)$/.exec(entry.code);
+    if (!entry.app || !m) continue;
+    const key = `${m[1] === "backup" ? "backup" : "run"}:${entry.app}`;
+    if (!latest.has(key)) latest.set(key, entry);
   }
-  for (const [name, entry] of latest) {
+  for (const [key, entry] of latest) {
     if (!entry.code.endsWith(".failed") || now - entry.ts > FAILURE_WINDOW_MS) continue;
+    const name = entry.app!;
     const app = apps.find((a) => a.name === name);
     const kind = entry.code.split(".")[1]!;
     // a failed install leaves no app behind, so there is nothing to link to
     if (!app && kind !== "install") continue;
-    items.push({ id: `failed:${name}`, severity: "warn", code: `failed.${kind}`, detail: { title: app?.title ?? name, message: entry.detail ?? "" }, app: app?.name });
+    items.push({ id: `failed:${key}`, severity: "warn", code: `failed.${kind}`, detail: { title: app?.title ?? name, message: entry.detail ?? "" }, app: app?.name });
   }
 
   for (const disk of system.disks) {

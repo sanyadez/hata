@@ -336,6 +336,18 @@ td .clip { max-width: 320px; }
 .job-status.failed { color: var(--danger); }
 .job-status.running { color: var(--muted); }
 
+.snapshot-list { display: grid; }
+.snapshot { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-top: 1px solid var(--border); }
+.snapshot:first-child { border-top: 0; padding-top: 0; }
+.snapshot:last-child { padding-bottom: 0; }
+.paths { margin: 0; padding-left: 18px; color: var(--muted); display: grid; gap: 4px; overflow-wrap: anywhere; }
+.strong { font-weight: 600; }
+a.strong:hover { color: var(--accent-text); }
+.block { display: block; }
+.row-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
+tr.removed .app-icon { opacity: 0.5; }
+.side form footer { display: flex; justify-content: flex-end; }
+
 /* --- Store ------------------------------------------------------------------------------------- */
 
 .store, .settings { display: grid; grid-template-columns: 208px minmax(0, 1fr); gap: 32px; align-items: start; }

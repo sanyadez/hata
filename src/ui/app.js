@@ -58,6 +58,8 @@ const ICONS = {
   globe: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM3 12h18M12 3c3 3.5 3 14.5 0 18M12 3c-3 3.5-3 14.5 0 18",
   terminal: "M5 8l4 4-4 4M12 16h7",
   store: "M5 8h14l-1 12H6zM9 8V6a3 3 0 0 1 6 0v2",
+  archive: "M3 5h18v4H3zM5 9v10h14V9M10 13h4",
+  undo: "M9 7 4 12l5 5M4 12h11a5 5 0 0 1 0 10h-2",
 };
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -188,6 +190,7 @@ const state = {
   store: null,
   storeFilter: { query: "", category: "" },
   settings: null,
+  backups: null,
   app: null,
 };
 
@@ -211,7 +214,8 @@ function pickLanguage(server) {
 function parseRoute() {
   const parts = location.hash.replace(/^#\/?/, "").split("/").filter(Boolean).map(decodeURIComponent);
   if (parts[0] === "store") return { view: "store" };
-  if (parts[0] === "apps" && parts[1]) return { view: "app", name: parts[1], tab: ["logs", "compose"].includes(parts[2]) ? parts[2] : "overview" };
+  if (parts[0] === "backups") return { view: "backups" };
+  if (parts[0] === "apps" && parts[1]) return { view: "app", name: parts[1], tab: ["logs", "compose", "backups"].includes(parts[2]) ? parts[2] : "overview" };
   if (parts[0] === "settings") return { view: "settings", section: ["apps", "stores", "about"].includes(parts[1]) ? parts[1] : "general" };
   return { view: "home" };
 }
@@ -229,6 +233,7 @@ function onRoute() {
   if (!state.user) return;
   if (state.route.view === "store") void loadStore();
   if (state.route.view === "settings") void loadSettings();
+  if (state.route.view === "backups") void loadBackups();
   if (state.route.view === "app") void loadApp();
   window.scrollTo(0, 0);
 }
@@ -284,6 +289,7 @@ async function refresh() {
   if (state.route.view === "home") renderHomeBody();
   if (state.route.view === "store") renderStoreList();
   if (state.route.view === "app") void loadApp(true);
+  if (state.route.view === "backups") void loadBackups();
 }
 
 // --- Sign-in and setup --------------------------------------------------------------------------
@@ -340,6 +346,7 @@ function authScreen() {
 const NAV = [
   { view: "home", hash: "#/", icon: "home" },
   { view: "store", hash: "#/store", icon: "grid" },
+  { view: "backups", hash: "#/backups", icon: "archive" },
   { view: "settings", hash: "#/settings", icon: "sliders" },
 ];
 
@@ -437,6 +444,7 @@ function render() {
   const view = state.route.view;
   if (view === "store") return renderStore();
   if (view === "settings") return renderSettings();
+  if (view === "backups") return renderBackups();
   if (view === "app") return renderApp();
   renderHome();
 }
@@ -557,14 +565,14 @@ function attentionItem(item) {
   );
 }
 
-const ACTIVITY_ICONS = { install: "download", update: "up", start: "play", stop: "stop", restart: "refresh", remove: "trash", apply: "code" };
+const ACTIVITY_ICONS = { install: "download", update: "up", start: "play", stop: "stop", restart: "refresh", remove: "trash", apply: "code", backup: "archive", restore: "undo" };
 
 function activityItem(entry) {
   const [group, kind, outcome] = entry.code.split(".");
   const failed = outcome === "failed";
   const key = "activity." + entry.code;
   const title = state.overview?.apps.find((a) => a.name === entry.app)?.title ?? entry.app ?? "";
-  const meta = [ago(entry.ts), entry.user && group === "app" ? t("activity.by", { user: entry.user }) : null, group === "auth" ? entry.detail : null].filter(Boolean).join(" · ");
+  const meta = [ago(entry.ts), entry.user && group === "app" ? (entry.user === "schedule" ? t("activity.bySchedule") : t("activity.by", { user: entry.user })) : null, group === "auth" ? entry.detail : null].filter(Boolean).join(" · ");
   return h(
     "div",
     { class: "activity-item" },
@@ -630,7 +638,7 @@ async function loadApp(quiet = false) {
   }
   renderAppHead();
   // the compose editor and the log console keep what the user is doing in them
-  if (!quiet || state.route.tab === "overview") renderAppTab();
+  if (!quiet || state.route.tab === "overview" || state.route.tab === "backups") renderAppTab();
 }
 
 function renderApp() {
@@ -691,7 +699,7 @@ function renderAppHead() {
         h("button", { type: "button", class: "btn square", "aria-label": t("app.more"), onclick: () => appMoreMenu(app) }, icon("more")),
       ),
     ),
-    h("div", { class: "tabs" }, tab("overview", "grid"), tab("logs", "logs"), tab("compose", "code")),
+    h("div", { class: "tabs" }, tab("overview", "grid"), tab("logs", "logs"), tab("compose", "code"), tab("backups", "archive")),
   );
 }
 
@@ -702,6 +710,7 @@ function renderAppTab() {
   leaveView();
   if (state.route.tab === "logs") return appLogsTab(app, box);
   if (state.route.tab === "compose") return appComposeTab(app, box);
+  if (state.route.tab === "backups") return appBackupsTab(app, box);
   appOverviewTab(app, box);
 }
 
@@ -907,6 +916,230 @@ function removeDialog(app) {
         },
       }),
     ),
+  );
+}
+
+// --- Backups ------------------------------------------------------------------------------------
+
+async function loadBackups() {
+  try {
+    state.backups = await api("GET", `/api/backups?lang=${state.lang}`);
+    if (!state.settings) state.settings = await api("GET", "/api/settings");
+  } catch (e) {
+    return toast(errorText(e), "error");
+  }
+  if (state.route.view === "backups") renderBackupsBody();
+}
+
+const dateTime = (ts) => new Date(ts).toLocaleString(state.lang, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+
+async function backupNow(app) {
+  try {
+    const res = await api("POST", `/api/apps/${app.name}/backup`, {});
+    jobDialog(res.job, "backup", app.title, () => (state.route.view === "backups" ? loadBackups() : loadApp(true)));
+  } catch (e) {
+    toast(errorText(e), "error");
+  }
+}
+
+function restoreDialog(app, snapshot) {
+  const dialog = openDialog(
+    "confirm",
+    h("h2", null, t("backup.restoreTitle", { title: app.title })),
+    h("p", { class: "muted" }, t("backup.restoreLead", { time: dateTime(snapshot.at) })),
+    h("ul", { class: "paths mono small" }, snapshot.paths.map((path) => h("li", null, path))),
+    h("p", { class: "cmd" }, icon("terminal"), `tar -xzf ${snapshot.id}.tar.gz -C /`),
+    h(
+      "footer",
+      null,
+      closeButton(() => dialog, t("common.cancel")),
+      button(t("backup.restore"), {
+        class: "primary",
+        onclick: async () => {
+          dialog.close();
+          document.querySelector("dialog.snapshots")?.close();
+          try {
+            const res = await api("POST", `/api/backups/${app.name}/${snapshot.id}/restore`, {});
+            jobDialog(res.job, "restore", app.title, () => void refresh());
+          } catch (e) {
+            toast(errorText(e), "error");
+          }
+        },
+      }, "undo"),
+    ),
+  );
+}
+
+/** The snapshots of one app, newest first, each with what can be done to it */
+function snapshotList(app, snapshots, reload) {
+  if (!snapshots.length) return h("p", { class: "muted" }, t("backup.none"));
+  return h(
+    "div",
+    { class: "snapshot-list" },
+    snapshots.map((s) =>
+      h(
+        "div",
+        { class: "snapshot" },
+        h("div", { class: "grow" }, h("strong", null, dateTime(s.at)), h("div", { class: "muted small" }, [t("backup.reason." + s.reason), bytes(s.size), s.images[0]].filter(Boolean).join(" · "))),
+        button(t("backup.restore"), { class: "small", onclick: () => restoreDialog(app, s) }, "undo"),
+        h(
+          "button",
+          {
+            type: "button",
+            class: "icon-btn",
+            "aria-label": t("backup.delete"),
+            title: t("backup.delete"),
+            onclick: async () => {
+              try {
+                await api("DELETE", `/api/backups/${app.name}/${s.id}`);
+                reload();
+              } catch (e) {
+                toast(errorText(e), "error");
+              }
+            },
+          },
+          icon("trash"),
+        ),
+      ),
+    ),
+  );
+}
+
+function snapshotsDialog(app) {
+  const body = h("div");
+  let dialog;
+  const paint = () => {
+    const current = state.backups?.apps.find((a) => a.name === app.name);
+    if (!current) return dialog?.close();
+    body.replaceChildren(snapshotList(current, current.snapshots, async () => (await loadBackups(), paint())));
+  };
+  dialog = openDialog("wide snapshots", h("header", null, appIcon(app), h("div", { class: "grow" }, h("h2", null, app.title), h("p", { class: "muted small" }, t("backup.snapshotsOf", { n: app.snapshots.length }))), closeX(() => dialog)), body);
+  paint();
+}
+
+async function appBackupsTab(app, box) {
+  let snapshots;
+  try {
+    snapshots = await api("GET", `/api/apps/${app.name}/backups`);
+  } catch (e) {
+    return box.replaceChildren(h("p", { class: "error" }, errorText(e)));
+  }
+  box.replaceChildren(
+    h("div", { class: "editor-head" }, h("div", { class: "grow" }, h("p", null, t("backup.appLead")), h("p", { class: "muted small" }, app.folders.join(" · "))), button(t("backup.now"), { class: "primary", disabled: !!app.job, onclick: () => backupNow(app) }, "archive")),
+    h("div", { class: "card pad" }, snapshotList(app, snapshots, () => renderAppTab())),
+  );
+}
+
+function renderBackups() {
+  shell(
+    h("div", { class: "page-head" }, h("div", null, h("h1", null, t("nav.backups")), h("p", { class: "meta", id: "backup-meta" }, " ")), h("div", { class: "actions", id: "backup-actions" })),
+    h("section", { class: "stats card", id: "backup-stats" }),
+    h("div", { class: "columns" }, h("section", { id: "backup-apps" }), h("aside", { class: "side", id: "backup-side" })),
+  );
+  renderBackupsBody();
+}
+
+function renderBackupsBody() {
+  const b = state.backups;
+  const s = state.settings?.backup;
+  const box = document.getElementById("backup-apps");
+  if (!b || !s || !box) return;
+
+  document.getElementById("backup-meta").replaceChildren(b.dir, h("span", { class: "dot-sep" }, "·"), s.enabled ? t("backup.daily", { time: s.time, keep: s.keep }) : t("backup.scheduleOff"));
+  document.getElementById("backup-actions").replaceChildren(
+    button(t(b.running ? "backup.running" : "backup.allNow"), {
+      class: "primary",
+      disabled: b.running || !b.apps.some((a) => a.installed && a.included),
+      onclick: async () => {
+        await api("POST", "/api/backups/run", {}).catch((e) => toast(errorText(e), "error"));
+        toast(t("backup.started"));
+        setTimeout(loadBackups, 500);
+      },
+    }, "play"),
+  );
+
+  const stat = (iconName, label, value, unit, hint, cls = "") => h("div", { class: "stat" }, h("div", { class: "stat-label" }, icon(iconName), label), h("div", { class: "stat-row" }, h("div", { class: "stat-value" }, h("strong", { class: cls }, value), h("span", { class: "unit" }, unit))), h("div", { class: "stat-hint" }, hint || " "));
+  const last = b.lastRun;
+  const count = b.apps.reduce((n, a) => n + a.snapshots.length, 0);
+  const stored = bytesParts(b.stored);
+  const free = b.free == null ? null : bytesParts(b.free);
+  const installed = b.apps.filter((a) => a.installed);
+  document.getElementById("backup-stats").replaceChildren(
+    stat(last?.failed.length ? "alert" : "check", t("backup.lastRun"), last ? ago(last.at) : "—", "", last ? (last.failed.length ? t("backup.lastFailed", { ok: last.ok, failed: last.failed.join(", ") }) : t("backup.lastOk", { ok: last.ok })) : t("backup.never"), last?.failed.length ? "warn" : ""),
+    stat("refresh", t("backup.nextRun"), b.nextRun ? s.time : "—", "", b.nextRun ? `${new Date(b.nextRun).toLocaleDateString(state.lang, { weekday: "long", timeZone: b.timezone })} · ${t("backup.serverTime", { tz: b.timezone })}` : t("backup.scheduleOff")),
+    stat("archive", t("backup.stored"), stored.value, stored.unit, t("backup.snapshots", { n: count })),
+    stat("check", t("backup.protected"), String(installed.filter((a) => a.included).length), t("backup.ofApps", { n: installed.length }), ""),
+    stat("disk", t("backup.destination"), free ? free.value : "—", free ? free.unit : "", free ? t("backup.freeAt", { path: b.dir }) : t("backup.noDir")),
+  );
+
+  const toggleInclude = async (app, included) => {
+    const exclude = new Set(s.exclude);
+    if (included) exclude.delete(app.name);
+    else exclude.add(app.name);
+    try {
+      state.settings = await api("PUT", "/api/settings", { backup: { exclude: [...exclude] } });
+      await loadBackups();
+    } catch (e) {
+      toast(errorText(e), "error");
+    }
+  };
+  const row = (app) => {
+    const newest = app.snapshots[0];
+    const size = app.snapshots.reduce((n, x) => n + x.size, 0);
+    return h(
+      "tr",
+      { class: app.installed ? "" : "removed" },
+      h("td", null, h("div", { class: "with-icon" }, appIcon(app, "sm"), h("div", null, app.installed ? h("a", { class: "strong", href: `#/apps/${app.name}/backups` }, app.title) : h("span", { class: "strong" }, app.title), !app.installed && h("div", { class: "muted small" }, t("backup.removedApp")), app.otherFolders.length > 0 && h("div", { class: "muted small", title: app.otherFolders.join("\n") }, t("backup.notIncluded", { n: app.otherFolders.length }))))),
+      h("td", null, newest ? h("div", null, ago(newest.at), h("div", { class: "muted small" }, t("backup.reason." + newest.reason))) : h("span", { class: "muted" }, t("backup.noneShort"))),
+      h("td", { class: "num" }, size ? bytes(size) : "—"),
+      h("td", { class: "num" }, app.snapshots.length || "—"),
+      h("td", null, app.installed && h("input", { type: "checkbox", checked: app.included, "aria-label": t("backup.include", { title: app.title }), onchange: (e) => toggleInclude(app, e.target.checked) })),
+      h("td", null, h("div", { class: "row-actions" }, app.snapshots.length > 0 && button(t("backup.restore"), { class: "small", onclick: () => snapshotsDialog(app) }, "undo"), app.installed && h("button", { type: "button", class: "icon-btn", title: t("backup.now"), "aria-label": `${t("backup.now")}: ${app.title}`, onclick: () => backupNow(app) }, icon("archive")))),
+    );
+  };
+  box.replaceChildren(
+    h("div", { class: "section-head" }, h("h2", null, t("home.apps"))),
+    b.apps.length
+      ? h("div", { class: "card table-wrap" }, h("table", null, h("thead", null, h("tr", null, h("th", null, t("backup.col.app")), h("th", null, t("backup.col.last")), h("th", { class: "num" }, t("backup.col.size")), h("th", { class: "num" }, t("backup.col.count")), h("th", null, t("backup.col.daily")), h("th"))), h("tbody", null, b.apps.map(row))))
+      : h("p", { class: "card pad muted" }, t("backup.noApps")),
+  );
+
+  // the schedule form is redrawn only when it is not being edited
+  const side = document.getElementById("backup-side");
+  if (side.contains(document.activeElement)) return;
+  const enabled = h("input", { type: "checkbox", checked: s.enabled });
+  const time = h("input", { type: "time", value: s.time, class: "short mono", required: true });
+  const keep = h("input", { type: "number", min: 1, max: 365, value: s.keep, class: "short mono", required: true });
+  const dir = h("input", { value: s.dir, placeholder: b.dir, spellcheck: false, class: "mono" });
+  const beforeUpdate = h("input", { type: "checkbox", checked: s.beforeUpdate });
+  const error = h("p", { class: "error", role: "alert" });
+  side.replaceChildren(
+    h(
+      "form",
+      {
+        class: "card pad stack",
+        onsubmit: async (e) => {
+          e.preventDefault();
+          error.textContent = "";
+          try {
+            state.settings = await api("PUT", "/api/settings", { backup: { enabled: enabled.checked, time: time.value, keep: Number(keep.value), dir: dir.value.trim(), beforeUpdate: beforeUpdate.checked } });
+            toast(t("settings.saved"));
+            document.activeElement?.blur();
+            await loadBackups();
+          } catch (err) {
+            error.textContent = errorText(err);
+          }
+        },
+      },
+      h("h2", null, t("backup.schedule")),
+      h("label", { class: "check" }, enabled, h("span", null, h("strong", null, t("backup.enable")), h("span", { class: "muted small block" }, t("backup.enableHint")))),
+      h("div", { class: "pair" }, field(t("backup.time"), time, b.timezone), field(t("backup.keep"), keep)),
+      field(t("backup.dir"), dir, t("backup.dirHint")),
+      h("label", { class: "check" }, beforeUpdate, h("span", null, h("strong", null, t("backup.beforeUpdate")), h("span", { class: "muted small block" }, t("backup.beforeUpdateHint")))),
+      error,
+      h("footer", null, h("button", { class: "btn primary" }, t("settings.save"))),
+    ),
+    h("p", { class: "muted small pad-x" }, t("backup.how")),
   );
 }
 

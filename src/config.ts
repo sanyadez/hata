@@ -42,6 +42,22 @@ export interface Settings {
   /** UI language when the browser's language is not available */
   language: string;
   stores: StoreSource[];
+  backup: BackupSettings;
+}
+
+export interface BackupSettings {
+  /** Back up every included app once a day */
+  enabled: boolean;
+  /** Local time of the daily run, HH:MM */
+  time: string;
+  /** How many scheduled snapshots of an app to keep */
+  keep: number;
+  /** Where snapshots are stored; "" — `<dataRoot>/Backups` */
+  dir: string;
+  /** Take a snapshot of an app before updating it, so the update can be undone */
+  beforeUpdate: boolean;
+  /** Apps left out of the scheduled run */
+  exclude: string[];
 }
 
 const DEFAULTS: Settings = {
@@ -52,11 +68,16 @@ const DEFAULTS: Settings = {
   timezone: "",
   language: "en",
   stores: [{ id: "casaos", url: "https://github.com/IceWhaleTech/CasaOS-AppStore" }],
+  backup: { enabled: false, time: "03:00", keep: 7, dir: "", beforeUpdate: true, exclude: [] },
 };
+
+const saved = readJsonFile<Partial<Settings>>(SETTINGS_FILE, {}, isPlainObject);
 
 export const settings: Settings = {
   ...DEFAULTS,
-  ...readJsonFile<Partial<Settings>>(SETTINGS_FILE, {}, isPlainObject),
+  ...saved,
+  // a settings file written by an older version has no such section, or only part of it
+  backup: { ...DEFAULTS.backup, ...(isPlainObject(saved.backup) ? saved.backup : {}) },
 };
 
 export function timezone(): string {
@@ -93,6 +114,30 @@ export function updateSettings(patch: Record<string, unknown>): string | null {
     const v = patch.port;
     if (typeof v !== "number" || !Number.isInteger(v) || v < 0 || v > 65535) return "settings.badPort";
     next.port = v;
+  }
+  if ("backup" in patch) {
+    const b = patch.backup;
+    if (!isPlainObject(b)) return "settings.badBackup";
+    const backup = { ...next.backup };
+    if ("enabled" in b) backup.enabled = b.enabled === true;
+    if ("beforeUpdate" in b) backup.beforeUpdate = b.beforeUpdate === true;
+    if ("time" in b) {
+      if (typeof b.time !== "string" || !/^([01]\d|2[0-3]):[0-5]\d$/.test(b.time)) return "settings.badTime";
+      backup.time = b.time;
+    }
+    if ("keep" in b) {
+      if (typeof b.keep !== "number" || !Number.isInteger(b.keep) || b.keep < 1 || b.keep > 365) return "settings.badKeep";
+      backup.keep = b.keep;
+    }
+    if ("dir" in b) {
+      if (typeof b.dir !== "string" || (b.dir !== "" && (!/^\/[^\0]*$/.test(b.dir) || b.dir.split("/").includes("..")))) return "settings.badBackupDir";
+      backup.dir = b.dir.length > 1 ? b.dir.replace(/\/+$/, "") : b.dir;
+    }
+    if ("exclude" in b) {
+      if (!Array.isArray(b.exclude) || b.exclude.some((n) => typeof n !== "string" || !/^[a-z0-9][a-z0-9_-]{0,62}$/.test(n))) return "settings.badBackup";
+      backup.exclude = [...new Set(b.exclude as string[])];
+    }
+    next.backup = backup;
   }
   if ("language" in patch) {
     if (typeof patch.language !== "string" || !/^[a-z]{2}$/.test(patch.language)) return "settings.badLanguage";
