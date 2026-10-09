@@ -1199,8 +1199,25 @@ function layoutBoard(blocks = homeUi.blocks) {
   for (const block of placed) homeUi.els.get(block.id).style.gridColumn = `${block.x + 1} / span ${block.w}`;
   const tall = placed.map((block) => ({ ...block, h: Math.max(1, Math.ceil((homeUi.els.get(block.id).offsetHeight + BOARD_GAP) / BOARD_ROW)) }));
   board.classList.remove("measuring");
-  homeUi.board = settle(tall, homeUi.drag?.active ? homeUi.drag.key : null);
+  homeUi.board = evenRows(tall, homeUi.drag?.active ? homeUi.drag.key : null);
   showBoard(homeUi.board);
+}
+
+/**
+ * Settles the board and makes the small blocks that start a row together — numbers of the system, tiles
+ * standing by themselves — as tall as the tallest of them: side by side they read as one row, not as steps.
+ */
+function evenRows(blocks, first) {
+  const small = (id) => BLOCKS[id]?.small || homeUi.els.get(id)?.classList.contains("bare");
+  let board = settle(blocks, first);
+  // making some taller moves what is under them, which may bring others level: a few rounds settle it
+  for (let round = 0; round < 4; round++) {
+    const tallest = new Map();
+    for (const block of board) if (small(block.id)) tallest.set(block.y, Math.max(tallest.get(block.y) ?? 0, block.h));
+    if (!board.some((block) => small(block.id) && block.h < tallest.get(block.y))) break;
+    board = settle(board.map((block) => (small(block.id) ? { ...block, h: tallest.get(block.y) } : block)), first);
+  }
+  return board;
 }
 
 /** Takes one of Hata's own blocks from wherever it is — the board, the put-away list, among the tiles */
