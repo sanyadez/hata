@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Hata</title>
+<link rel="stylesheet" href="/app.css">
+<link rel="stylesheet" href="/vendor/xterm.css">
+</head>
+<body class="term-page">
+<div class="term-bar">
+  <span class="term-status" id="status"></span>
+  <button type="button" class="btn small ghost" id="restart"></button>
+</div>
+<div class="term-note" id="note" hidden><span id="note-text"></span><button type="button" class="btn small" id="note-btn"></button></div>
+<div class="term-box" id="box"></div>
+<div class="term-keys" id="keys" hidden></div>
+<script src="/vendor/xterm.js"></script>
+<script src="/vendor/xterm-addon-fit.js"></script>
+<script src="/terminal.js"></script>
+</body>
+</html>

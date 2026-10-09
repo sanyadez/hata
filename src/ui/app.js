@@ -243,7 +243,8 @@ function parseRoute() {
   if (parts[0] === "backups" && isAdmin()) return { view: "backups" };
   if (parts[0] === "users" && isAdmin()) return { view: "users" };
   if (parts[0] === "import" && isAdmin()) return { view: "import" };
-  if (parts[0] === "apps" && parts[1]) return { view: "app", name: parts[1], tab: isAdmin() && ["logs", "compose", "backups"].includes(parts[2]) ? parts[2] : "overview" };
+  if (parts[0] === "terminal" && isAdmin()) return { view: "terminal" };
+  if (parts[0] === "apps" && parts[1]) return { view: "app", name: parts[1], tab: isAdmin() && ["logs", "compose", "backups", "terminal"].includes(parts[2]) ? parts[2] : "overview" };
   if (parts[0] === "settings") return { view: "settings", section: sections().some((item) => item.id === parts[1]) ? parts[1] : "account" };
   return { view: "home" };
 }
@@ -597,7 +598,7 @@ function shell(...content) {
       { class: "top" },
       h("a", { class: "brand", href: "#/" }, h("img", { src: "/logo.svg", alt: "" }), "hata"),
       h("nav", { class: "nav" }, navLinks("nav-link")),
-      h("div", { class: "top-right" }, globalSearch(), h("button", { type: "button", class: "user", onclick: userMenu }, h("span", { class: "avatar" }, state.user.name.slice(0, 1).toUpperCase()), h("span", { class: "user-name" }, state.user.name))),
+      h("div", { class: "top-right" }, globalSearch(), isAdmin() && h("a", { class: "icon-btn top-tool" + (state.route.view === "terminal" ? " active" : ""), href: "#/terminal", title: t("terminal.title"), "aria-label": t("terminal.title") }, icon("terminal")), h("button", { type: "button", class: "user", onclick: userMenu }, h("span", { class: "avatar" }, state.user.name.slice(0, 1).toUpperCase()), h("span", { class: "user-name" }, state.user.name))),
     ),
     h("main", { id: "view" }, content),
     h("nav", { class: "bottom-bar" }, navLinks("bottom-link")),
@@ -613,6 +614,7 @@ function render() {
   if (view === "backups") return renderBackups();
   if (view === "users") return renderUsers();
   if (view === "import") return renderImport();
+  if (view === "terminal") return renderTerminal();
   if (view === "app") return renderApp();
   renderHome();
 }
@@ -1242,7 +1244,7 @@ function attentionItem(item) {
   );
 }
 
-const ACTIVITY_ICONS = { install: "download", update: "up", start: "play", stop: "stop", restart: "refresh", remove: "trash", apply: "code", backup: "archive", restore: "undo", snapshot: "trash", import: "download" };
+const ACTIVITY_ICONS = { terminal: "terminal", install: "download", update: "up", start: "play", stop: "stop", restart: "refresh", remove: "trash", apply: "code", backup: "archive", restore: "undo", snapshot: "trash", import: "download" };
 
 function activityItem(entry) {
   const [group, kind, outcome] = entry.code.split(".");
@@ -1382,7 +1384,7 @@ function renderAppHead() {
         ]),
       ),
     ),
-    isAdmin() && h("div", { class: "tabs" }, tab("overview", "grid"), tab("logs", "logs"), tab("compose", "code"), tab("backups", "archive")),
+    isAdmin() && h("div", { class: "tabs" }, tab("overview", "grid"), tab("logs", "logs"), tab("compose", "code"), tab("backups", "archive"), tab("terminal", "terminal")),
   );
 }
 
@@ -1433,6 +1435,7 @@ function renderAppTab() {
   if (state.route.tab === "logs") return appLogsTab(app, box);
   if (state.route.tab === "compose") return appComposeTab(app, box);
   if (state.route.tab === "backups") return appBackupsTab(app, box);
+  if (state.route.tab === "terminal") return appTerminalTab(app, box);
   appOverviewTab(app, box);
 }
 
@@ -1529,6 +1532,30 @@ function appLogsTab(app, box) {
   cleanups.push(() => abort.abort());
   box.replaceChildren(h("p", { class: "cmd" }, icon("terminal"), `docker compose -p ${app.name} logs --follow --tail 200`), log);
   void streamLogs(app, log, abort.signal);
+}
+
+// --- Terminal ---------------------------------------------------------------------------------------
+
+/** The terminal lives in a page of its own (the emulator needs a looser content policy), shown in a frame */
+function terminalFrame(query = {}) {
+  const params = new URLSearchParams({ ...query, lang: state.lang });
+  return h("iframe", { class: "term-frame", src: "/terminal.html?" + params, title: t("terminal.title") });
+}
+
+function renderTerminal() {
+  shell(h("div", { class: "page-head" }, h("div", null, h("h1", null, t("terminal.title")), h("p", { class: "meta" }, t("terminal.hostHint")))), terminalFrame());
+  document.getElementById("view").classList.add("fill");
+}
+
+function appTerminalTab(app, box) {
+  const running = app.containers.filter((c) => c.state === "running");
+  if (!running.length) return box.replaceChildren(h("p", { class: "muted" }, t("error.terminal.notRunning")));
+  const frame = h("div", { class: "term-holder" });
+  const open = (name) => frame.replaceChildren(terminalFrame({ app: app.name, container: name }));
+  const pick = running.length > 1 && h("select", { "aria-label": t("terminal.container"), onchange: (e) => open(e.target.value) }, running.map((c) => h("option", { value: c.name }, c.service || c.name)));
+  box.replaceChildren(h("div", { class: "cmd-row" }, h("p", { class: "cmd grow" }, icon("terminal"), `docker exec -it ${running[0].name} sh`), pick), frame);
+  if (pick) pick.addEventListener("change", () => (box.querySelector(".cmd").lastChild.textContent = `docker exec -it ${pick.value} sh`));
+  open(running[0].name);
 }
 
 async function appComposeTab(app, box) {

@@ -7,8 +7,9 @@
  * - everything else under `/api/` needs a session cookie;
  * - a request that changes something must come from this origin (CSRF) and carry JSON.
  */
-import { networkInterfaces } from "node:os";
-import type { Server } from "bun";
+import { existsSync } from "node:fs";
+import { homedir, networkInterfaces } from "node:os";
+import type { Server, ServerWebSocket } from "bun";
 import { recent, record } from "./activity";
 import { AppError, appAction, appDetail, appLogs, appStats, applyCompose, applyStoreUpdate, composeText, getJob, installCustom, installFromStore, listApps, listJobs, onAppRemoved, planStoreUpdate, readCompose, removeApp, storeAppDetail } from "./apps";
 import { certificateStates, challengeResponse, ensureCertificates, loadCertificates } from "./acme";
@@ -68,6 +69,7 @@ import { accessOf, dropAccess, dropUser, gateTarget, guard, mayOpen, MAX_APP_BOD
 import { appHost, appLabel, classifyHost, clientIp, cookieDomain, requestHost, requestProto, siteDomain } from "./site";
 import { newChallenge, PASSKEY_ALGORITHMS, spendChallenge, verifyAssertion, verifyRegistration } from "./passkey";
 import { qrMatrix } from "./qr";
+import { containerCommand, shellCommand, TerminalError, TerminalManager, terminalEnv, type TerminalClient, type TerminalStart } from "./terminal";
 import { ARCH, catalogue, scheduleStoreSync, syncStore } from "./store";
 import { startSampler, systemStatus } from "./system";
 import { availableUpdate, checkForUpdate, confirmUpdate, scheduleUpdateChecks, startUpdate, updateStatus } from "./update";
@@ -77,6 +79,11 @@ import { zipStream } from "./zip";
 import appCss from "./ui/app.css" with { type: "text" };
 import appJs from "./ui/app.js" with { type: "text" };
 import indexHtml from "./ui/index.html" with { type: "text" };
+import terminalHtml from "./ui/terminal.html" with { type: "text" };
+import terminalJs from "./ui/terminal.js" with { type: "text" };
+import xtermFit from "./ui/vendor/xterm-addon-fit.js" with { type: "text" };
+import xtermCss from "./ui/vendor/xterm.css" with { type: "text" };
+import xtermJs from "./ui/vendor/xterm.js" with { type: "text" };
 import logoSvg from "./ui/logo.svg" with { type: "text" };
 import interCyrillic from "./ui/fonts/inter-cyrillic.woff2" with { type: "file" };
 import interLatinExt from "./ui/fonts/inter-latin-ext.woff2" with { type: "file" };
@@ -103,10 +110,24 @@ const MANIFEST = JSON.stringify({
   icons: [{ src: "/logo.svg", sizes: "any", type: "image/svg+xml", purpose: "any" }],
 });
 
-const STATIC: Record<string, { body: string; type: string }> = {
+const STATIC: Record<string, { body: string; type: string; headers?: Record<string, string> }> = {
   "/": { body: indexHtml, type: "text/html; charset=utf-8" },
   "/app.css": { body: appCss, type: "text/css; charset=utf-8" },
   "/app.js": { body: appJs, type: "text/javascript; charset=utf-8" },
+  // the terminal is a page of its own, shown in a frame: its emulator writes styles into the page, which
+  // the UI's policy forbids — here it is allowed, and nothing but the emulator lives there
+  "/terminal.html": {
+    body: terminalHtml,
+    type: "text/html; charset=utf-8",
+    headers: {
+      "content-security-policy": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'self'; form-action 'none'",
+      "x-frame-options": "SAMEORIGIN",
+    },
+  },
+  "/terminal.js": { body: terminalJs, type: "text/javascript; charset=utf-8" },
+  "/vendor/xterm.js": { body: xtermJs, type: "text/javascript; charset=utf-8" },
+  "/vendor/xterm-addon-fit.js": { body: xtermFit, type: "text/javascript; charset=utf-8" },
+  "/vendor/xterm.css": { body: xtermCss, type: "text/css; charset=utf-8" },
   "/logo.svg": { body: logoSvg, type: "image/svg+xml" },
   "/favicon.ico": { body: logoSvg, type: "image/svg+xml" },
   "/manifest.webmanifest": { body: MANIFEST, type: "application/manifest+json; charset=utf-8" },
@@ -141,7 +162,7 @@ function serveStatic(req: Request, path: string): Response | null {
   const file = STATIC[path]!;
   const etag = ETAGS.get(path)!;
   // always revalidate: after an update the browser must not keep running the old UI
-  const headers = { ...SECURITY_HEADERS, "content-type": file.type, "cache-control": "no-cache", etag };
+  const headers = { ...SECURITY_HEADERS, ...file.headers, "content-type": file.type, "cache-control": "no-cache", etag };
   if (req.headers.get("if-none-match") === etag) return new Response(null, { status: 304, headers });
   return new Response(file.body, { headers });
 }
@@ -245,6 +266,94 @@ function events(req: Request, server: Server, admin: boolean): Response {
     headers: { ...SECURITY_HEADERS, "content-type": "text/event-stream", "cache-control": "no-store", "x-accel-buffering": "no" },
   });
 }
+
+// --- Terminals --------------------------------------------------------------------------------------
+
+const terminals = new TerminalManager();
+
+interface TerminalSocket {
+  kind: "terminal";
+  key: string;
+  cols: string | null;
+  rows: string | null;
+  start: () => TerminalStart;
+  /** Written to the activity log when a shell is really started */
+  opened: () => void;
+}
+
+/** The largest input message: a paste arrives in parts of this size at most */
+const MAX_TERMINAL_INPUT = 128 * 1024;
+
+/**
+ * Opens the WebSocket of a terminal: the server's own shell, or (with `app` and `container`) a shell
+ * inside a running container of that app. Administrators only — the caller has checked.
+ */
+async function openTerminal(req: Request, url: URL, server: Server, user: string): Promise<Response> {
+  const upgrade = req.headers.get("upgrade")?.toLowerCase() === "websocket";
+  // a page of another site can open a WebSocket here with our cookie; it cannot fake where it comes from
+  if (upgrade && (req.headers.get("origin") === null || !sameOrigin(req, url))) return fail(403, "request.crossSite");
+  const app = url.searchParams.get("app");
+  let key = "host";
+  let start = (): TerminalStart => ({ cmd: shellCommand(), cwd: existsSync(homedir()) ? homedir() : "/", env: terminalEnv() });
+  if (app !== null) {
+    if (!APP_NAME_RE.test(app)) return fail(404, "app.notFound");
+    const found = (await listApps("en")).find((a) => a.name === app);
+    if (!found) return fail(404, "app.notFound");
+    const container = found.containers.find((c) => c.name === url.searchParams.get("container")) ?? found.containers.find((c) => c.state === "running");
+    if (!container || container.state !== "running") return fail(409, "terminal.notRunning");
+    key = `app:${app}:${container.name}`;
+    start = () => ({ cmd: containerCommand(container.id), cwd: "/", env: terminalEnv() });
+  }
+  if (!terminals.supported()) return fail(501, "terminal.unsupported");
+  // a plain request is the page asking why its connection was refused: nothing stands in the way
+  if (!upgrade) return json({ ok: true });
+  const data: TerminalSocket = {
+    kind: "terminal",
+    key,
+    cols: url.searchParams.get("cols"),
+    rows: url.searchParams.get("rows"),
+    start,
+    opened: () => record(app === null ? "system.terminal.host" : "system.terminal.app", { user, app: app ?? undefined }),
+  };
+  if (server.upgrade(req, { data })) return undefined as never;
+  return fail(400, "request.notFound");
+}
+
+type AnySocket = ServerWebSocket<TerminalSocket | Parameters<typeof tunnelHandlers.open>[0]["data"]>;
+const isTerminal = (ws: AnySocket): ws is ServerWebSocket<TerminalSocket> => (ws.data as { kind?: string }).kind === "terminal";
+
+/** The sockets of Hata's own listeners: terminals, and connections passed on to apps */
+const sockets = {
+  open(ws: AnySocket) {
+    if (!isTerminal(ws)) return tunnelHandlers.open(ws as never);
+    const client = ws as unknown as TerminalClient;
+    try {
+      if (terminals.attach(client, ws.data.key, ws.data.cols, ws.data.rows, ws.data.start)) ws.data.opened();
+    } catch (e) {
+      const kind = e instanceof TerminalError ? e.kind : "spawn";
+      ws.send(JSON.stringify({ type: "error", code: "terminal." + kind, message: e instanceof Error ? e.message : String(e) }));
+      ws.close(1011, kind);
+    }
+  },
+  message(ws: AnySocket, message: string | Buffer) {
+    if (!isTerminal(ws)) return tunnelHandlers.message(ws as never, message);
+    const client = ws as unknown as TerminalClient;
+    if (typeof message !== "string") {
+      if (message.length <= MAX_TERMINAL_INPUT) terminals.input(client, new Uint8Array(message));
+      return;
+    }
+    try {
+      const data = JSON.parse(message) as { type?: string; cols?: unknown; rows?: unknown };
+      if (data.type === "resize") terminals.resize(client, data.cols, data.rows);
+    } catch {
+      // not ours to understand
+    }
+  },
+  close(ws: AnySocket, code: number, reason: string) {
+    if (!isTerminal(ws)) return tunnelHandlers.close(ws as never, code, reason);
+    terminals.detach(ws as unknown as TerminalClient);
+  },
+};
 
 // --- API --------------------------------------------------------------------------------------------
 
@@ -498,6 +607,13 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
       dashboard: arrange(settings.dashboard, apps.map((app) => app.name), admin ? settings.folders : []),
       jobs: admin ? listJobs().filter((j) => j.status === "running").map(({ log: _, ...job }) => job) : [],
     });
+  }
+
+  if (path === "/api/terminal/ws" && method === "GET") return openTerminal(req, url, server, user.name);
+  if (path === "/api/terminal" && method === "GET") return json({ supported: terminals.supported(), terminals: terminals.list().map(({ key, startedAt, clients }) => ({ key, startedAt, clients })) });
+  if (path === "/api/terminal" && method === "DELETE") {
+    const key = url.searchParams.get("key") ?? "";
+    return json({ closed: terminals.kill(key) });
   }
 
   if (path === "/api/dashboard" && method === "PUT") {
@@ -809,7 +925,7 @@ function restartHttps(names: string[]): void {
       tls: certs.map((c) => ({ serverName: c.name, cert: c.cert, key: c.key })),
       maxRequestBodySize: MAX_APP_BODY,
       fetch: handle,
-      websocket: tunnelHandlers,
+      websocket: sockets,
     });
   } catch (e) {
     httpsError = e instanceof Error ? e.message : String(e);
@@ -896,7 +1012,7 @@ export async function serve(): Promise<void> {
   const { port, hostname } = listenAddress();
   let server: Server;
   try {
-    server = Bun.serve({ port, hostname, maxRequestBodySize: MAX_APP_BODY, fetch: handle, websocket: tunnelHandlers });
+    server = Bun.serve({ port, hostname, maxRequestBodySize: MAX_APP_BODY, fetch: handle, websocket: sockets });
   } catch (e) {
     console.error(`Cannot listen on ${hostname}:${port}: ${e instanceof Error ? e.message : e}`);
     console.error("Set HATA_PORT to use another port.");

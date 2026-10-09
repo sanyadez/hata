@@ -606,3 +606,32 @@ dialog h2 { font-size: 18px; }
 @media (prefers-reduced-motion: reduce) {
   .dot.busy { animation: none; }
 }
+
+/* --- Terminal ---------------------------------------------------------------------------------- */
+
+.top-tool { color: var(--muted); }
+.top-tool.active { color: var(--accent-text); background: var(--surface); }
+#view.fill { display: flex; flex-direction: column; height: calc(100dvh - 65px); padding-bottom: 24px; }
+.term-frame { display: block; width: 100%; flex: 1; min-height: 360px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--console); }
+.term-holder { display: flex; height: max(360px, calc(100dvh - 410px)); }
+.cmd-row { display: flex; align-items: center; gap: 12px; }
+body.term-page { margin: 0; height: 100dvh; display: flex; flex-direction: column; background: var(--console); color: #d9d2c9; overflow: hidden; }
+.term-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 8px 6px 14px; border-bottom: 1px solid #ffffff14; font-size: 12px; }
+.term-bar .btn { color: #a8a099; }
+.term-status { color: #a8a099; display: flex; align-items: center; gap: 8px; }
+.term-status::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: #736c65; }
+.term-status.live::before { background: var(--ok); }
+.term-status.bad::before { background: var(--danger); }
+.term-note { display: flex; align-items: center; gap: 12px; padding: 8px 14px; background: #ffffff0d; font-size: 13px; }
+.term-note[hidden], .term-keys[hidden] { display: none; }
+.term-note span { flex: 1; overflow-wrap: anywhere; }
+.term-box { flex: 1; min-height: 0; padding: 8px 4px 8px 10px; }
+.term-box .xterm { height: 100%; }
+.term-keys { display: flex; gap: 4px; padding: 6px; overflow-x: auto; border-top: 1px solid #ffffff14; scrollbar-width: none; }
+.term-keys button { flex: 1 0 auto; min-width: 40px; height: 34px; border: 1px solid #ffffff1f; border-radius: var(--radius-sm); background: #ffffff0d; color: #d9d2c9; font: 500 13px var(--font-mono); }
+.term-keys button.on { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+@media (max-width: 760px) {
+  /* the bottom bar lies over the page: the terminal ends above it */
+  #view.fill { height: calc(100dvh - 57px); padding-bottom: 96px; }
+  .term-frame { min-height: 0; }
+}
