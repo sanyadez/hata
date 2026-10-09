@@ -4,6 +4,8 @@
  * - State, events and anything read-only goes to the Engine API over the unix socket.
  * - Everything that changes a compose project goes through the `docker compose` CLI plugin: it is the
  *   reference implementation of the compose format, so an app behaves here exactly as it does by hand.
+ * - A container that belongs to no compose project is touched in one place only: when it is rebuilt into
+ *   an app (stop, rename, remove — see `import.ts`).
  *
  * The socket is never exposed to the browser: only the specific calls below exist.
  */
@@ -36,7 +38,9 @@ async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
     } catch {}
     throw new DockerError(message || `Docker answered ${res.status}`, res.status);
   }
-  return (await res.json()) as T;
+  // the calls that change a container answer with an empty body
+  const text = await res.text();
+  return (text ? JSON.parse(text) : null) as T;
 }
 
 export interface DockerInfo {
@@ -78,6 +82,53 @@ export const SERVICE_LABEL = "com.docker.compose.service";
 export function listContainers(): Promise<ContainerSummary[]> {
   return api<ContainerSummary[]>("/containers/json?all=1");
 }
+
+/** What `docker inspect` tells about a container — the parts a compose file can be written from */
+export interface ContainerInspect {
+  Id: string;
+  Name: string;
+  /** Id of the image the container was created from */
+  Image: string;
+  State: { Running: boolean };
+  Config: {
+    Image: string;
+    Hostname?: string;
+    Domainname?: string;
+    User?: string;
+    WorkingDir?: string;
+    Env?: string[] | null;
+    Cmd?: string[] | null;
+    Entrypoint?: string[] | null;
+    Labels?: Record<string, string> | null;
+    Tty?: boolean;
+    OpenStdin?: boolean;
+    StopSignal?: string;
+    StopTimeout?: number | null;
+    Healthcheck?: { Test?: string[]; Interval?: number; Timeout?: number; StartPeriod?: number; Retries?: number } | null;
+  };
+  HostConfig: Record<string, any>;
+  Mounts?: { Type: string; Name?: string; Source: string; Destination: string; RW: boolean }[];
+  NetworkSettings?: { Networks?: Record<string, { Aliases?: string[] | null; IPAMConfig?: { IPv4Address?: string } | null }> };
+}
+
+export const inspectContainer = (id: string) => api<ContainerInspect>(`/containers/${encodeURIComponent(id)}/json`);
+
+/** The image's own configuration: what a container gets without being told */
+export async function imageConfig(id: string): Promise<ContainerInspect["Config"] | null> {
+  try {
+    return (await api<{ Config?: ContainerInspect["Config"] }>(`/images/${id}/json`)).Config ?? null;
+  } catch {
+    return null;
+  }
+}
+
+const post = (path: string) => api<null>(path, { method: "POST" });
+/** Waits for the container to stop: Docker gives it its stop timeout, then kills it */
+export const stopContainer = (id: string) => post(`/containers/${id}/stop`);
+export const startContainer = (id: string) => post(`/containers/${id}/start`);
+export const renameContainer = (id: string, name: string) => post(`/containers/${id}/rename?name=${encodeURIComponent(name)}`);
+/** Removes a stopped container; its volumes, anonymous ones too, stay */
+export const removeContainer = (id: string) => api<null>(`/containers/${id}`, { method: "DELETE" });
 
 export interface ContainerStats {
   /** Share of one core, percent: 250 means two and a half cores busy */

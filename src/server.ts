@@ -54,7 +54,8 @@ import {
 } from "./auth";
 import { bus } from "./bus";
 import { DATA_DIR, listenAddress, settings, timezone, updateSettings } from "./config";
-import { dockerInfo, watchEvents } from "./docker";
+import { dockerInfo, listContainers, watchEvents } from "./docker";
+import { adoptProject, casaosState, containerDraft, importCount, importList, moveInCasaos, projectDraft, rebuildContainer } from "./import";
 import { accessOf, dropAccess, dropUser, gateTarget, guard, mayOpen, MAX_APP_BODY, page, passToApp, setAccess, startGates, tunnelHandlers } from "./gate";
 import { appHost, appLabel, classifyHost, clientIp, cookieDomain, requestHost, requestProto, siteDomain } from "./site";
 import { qrMatrix } from "./qr";
@@ -405,7 +406,7 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
   if (path === "/api/events" && method === "GET") return events(req, server, admin);
 
   if (path === "/api/overview" && method === "GET") {
-    const [docker, all] = await Promise.all([dockerInfo(), listApps(language(url))]);
+    const [docker, all, containers] = await Promise.all([dockerInfo(), listApps(language(url)), admin ? listContainers().catch(() => []) : []]);
     const apps = all.filter((app) => mayOpen(user, app.name));
     const system = systemStatus();
     return json({
@@ -418,6 +419,8 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
       attention: admin ? attention({ system, docker, apps, activity: recent(100) }) : [],
       // who signed in from where, and what was installed by whom, is the administrators' business
       activity: admin ? recent(8) : [],
+      // containers and compose projects on this machine that are not apps here yet
+      importable: admin ? importCount(containers) : 0,
       jobs: admin ? listJobs().filter((j) => j.status === "running").map(({ log: _, ...job }) => job) : [],
     });
   }
@@ -483,6 +486,25 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
           : await installCustom(data.name, data.compose, user.name);
       return json({ job: job.id, app: job.app }, 202);
     }
+  }
+
+  if (path === "/api/import" && method === "GET") return json({ casaos: casaosState(), ...(await importList()) });
+  if (path === "/api/import/casaos" && method === "POST") return json(await moveInCasaos((await body(req)).stop === true, user.name));
+  m = /^\/api\/import\/projects\/([a-z0-9][a-z0-9_-]*)$/.exec(path);
+  if (m && method === "GET") {
+    const { env: _, ...draft } = await projectDraft(m[1]!);
+    return json(draft);
+  }
+  if (m && method === "POST") {
+    await adoptProject(m[1]!, user.name);
+    return json({ app: m[1] }, 201);
+  }
+  m = /^\/api\/import\/containers\/([0-9a-f]{12,64})$/.exec(path);
+  if (m && method === "GET") return json(await containerDraft(m[1]!));
+  if (m && method === "POST") {
+    const data = await body(req);
+    const job = await rebuildContainer(m[1]!, data.name, data.compose, user.name);
+    return json({ job: job.id, app: job.app }, 202);
   }
 
   m = /^\/api\/jobs\/([0-9a-f-]{36})$/.exec(path);

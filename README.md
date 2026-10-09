@@ -20,6 +20,10 @@ Early development. What works today:
 - app store: reads the CasaOS store (`x-casaos`), search and categories, a form for ports, folders and
   variables, install with live progress;
 - custom apps: paste any compose file;
+- import of what already runs: a compose project started elsewhere becomes an app without a restart; a
+  container started with `docker run` is rebuilt into an app from a compose file written out of its settings
+  (shown and editable before anything happens), on the same volumes, with the old container put back if the
+  new one does not come up;
 - per app, on its own page: start, stop, restart, image update, CPU and memory per container, live logs,
   editing the compose file, removal with or without data;
 - backups: a snapshot of an app (compose file, its folders, its Docker volumes) as a plain `tar.gz`, daily
@@ -34,8 +38,7 @@ Early development. What works today:
   Let's Encrypt. With a domain, every app has its own address, `<app>.<domain>`;
 - English and Ukrainian UI, light and dark, phone-friendly.
 
-Not there yet: passkeys, wildcard certificates (DNS challenge), backups to another machine, import of
-containers that have no compose file, file manager.
+Not there yet: passkeys, wildcard certificates (DNS challenge), backups to another machine, file manager.
 
 ## Install
 
@@ -68,8 +71,12 @@ sudo hata migrate casaos --dry-run   # only show what would happen
 sudo hata migrate casaos --undo      # give the apps back to CasaOS
 ```
 
-Not moved yet: containers CasaOS shows that were started without a compose file ("legacy" apps), and
-CasaOS's own settings and users.
+The same move can be made later from the web UI (Apps → Import), which also offers what else runs on the
+machine: compose projects started elsewhere are taken over without a restart, and containers started
+without a compose file — CasaOS's "legacy" apps among them — are rebuilt into apps on the same volumes and
+folders.
+
+Not moved: CasaOS's own settings and users.
 
 ### Commands
 

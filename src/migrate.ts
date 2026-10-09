@@ -32,6 +32,12 @@ export function parseEnvFile(text: string): Record<string, string> {
   return out;
 }
 
+/** Where CasaOS keeps its apps, by its own configuration */
+export function casaosAppsPath(): string {
+  const conf = existsSync(CASAOS_CONF) ? readFileSync(CASAOS_CONF, "utf8") : "";
+  return iniValue(conf, "AppsPath") ?? DEFAULT_APPS_PATH;
+}
+
 export type PlanStatus = "ready" | "exists" | "badName" | "badCompose";
 
 export interface PlannedApp {
@@ -114,13 +120,48 @@ function sh(...cmd: string[]): { ok: boolean; out: string } {
 }
 
 /** CasaOS's systemd services that are running or set to start at boot */
-function casaosUnits(): string[] {
+export function casaosUnits(): string[] {
   const listed = sh("systemctl", "list-unit-files", "casaos*.service", "--no-legend", "--plain").out;
   return listed
     .split("\n")
     .map((line) => line.trim().split(/\s+/)[0] ?? "")
     .filter((unit) => /^casaos[a-z-]*\.service$/.test(unit))
     .filter((unit) => sh("systemctl", "is-active", "--quiet", unit).ok || sh("systemctl", "is-enabled", "--quiet", unit).ok);
+}
+
+const recordFile = (dataDir: string) => join(dataDir, "migrations", "casaos.json");
+
+export interface MoveResult {
+  moved: string[];
+  stopped: string[];
+  /** Units that would not stop */
+  stuck: string[];
+}
+
+/**
+ * The move itself: copies the ready apps of the plan, stops and disables the given CasaOS units, and
+ * writes down what was done so that `--undo` can take it back.
+ */
+export async function moveCasaos(plan: PlannedApp[], units: string[]): Promise<MoveResult> {
+  const { DATA_DIR } = await import("./config");
+  const { APPS_DIR, writeEnv } = await import("./apps");
+  // variables CasaOS gave to every app (its /etc/casaos/env) go into each app's own .env
+  const shared = existsSync(CASAOS_ENV) ? parseEnvFile(readFileSync(CASAOS_ENV, "utf8")) : {};
+  const moved = copyApps(plan, APPS_DIR, (name) => writeEnv(name, shared));
+  const stopped: string[] = [];
+  const stuck: string[] = [];
+  for (const unit of units) (sh("systemctl", "disable", "--now", unit).ok ? stopped : stuck).push(unit);
+
+  const file = recordFile(DATA_DIR);
+  const previous = readJsonFile<MigrationRecord | null>(file, null);
+  mkdirSync(join(DATA_DIR, "migrations"), { recursive: true });
+  writeJsonAtomic(file, {
+    at: Date.now(),
+    casaosApps: casaosAppsPath(),
+    apps: [...new Set([...(previous?.apps ?? []), ...moved])],
+    units: [...new Set([...(previous?.units ?? []), ...stopped])],
+  } satisfies MigrationRecord);
+  return { moved, stopped, stuck };
 }
 
 function confirm(question: string): boolean {
@@ -137,14 +178,12 @@ export async function migrateCasaos(args: string[]): Promise<number> {
     return 2;
   }
   const { DATA_DIR } = await import("./config");
-  const { APPS_DIR, writeEnv } = await import("./apps");
-  const recordFile = join(DATA_DIR, "migrations", "casaos.json");
+  const { APPS_DIR } = await import("./apps");
 
-  if (flags.has("--undo")) return undo(recordFile, APPS_DIR, flags.has("--yes"));
+  if (flags.has("--undo")) return undo(recordFile(DATA_DIR), APPS_DIR, flags.has("--yes"));
 
-  const conf = existsSync(CASAOS_CONF) ? readFileSync(CASAOS_CONF, "utf8") : "";
-  const casaosApps = iniValue(conf, "AppsPath") ?? DEFAULT_APPS_PATH;
-  if (!existsSync(casaosApps) && !conf) {
+  const casaosApps = casaosAppsPath();
+  if (!existsSync(casaosApps) && !existsSync(CASAOS_CONF)) {
     console.error(`CasaOS was not found on this machine (no ${CASAOS_CONF}, no ${DEFAULT_APPS_PATH}).`);
     return 1;
   }
@@ -174,26 +213,10 @@ export async function migrateCasaos(args: string[]): Promise<number> {
     return 1;
   }
 
-  // variables CasaOS gave to every app (its /etc/casaos/env) go into each app's own .env
-  const shared = existsSync(CASAOS_ENV) ? parseEnvFile(readFileSync(CASAOS_ENV, "utf8")) : {};
-  const moved = copyApps(plan, APPS_DIR, (name) => writeEnv(name, shared));
+  const { moved, stopped, stuck } = await moveCasaos(plan, units);
   for (const name of moved) console.log(`Moved ${name}`);
-
-  const stopped: string[] = [];
-  for (const unit of units) {
-    if (sh("systemctl", "disable", "--now", unit).ok) stopped.push(unit);
-    else console.error(`Could not stop ${unit}; stop it yourself with: systemctl disable --now ${unit}`);
-  }
+  for (const unit of stuck) console.error(`Could not stop ${unit}; stop it yourself with: systemctl disable --now ${unit}`);
   if (stopped.length) console.log(`Stopped CasaOS (${stopped.length} services).`);
-
-  const previous = readJsonFile<MigrationRecord | null>(recordFile, null);
-  mkdirSync(join(DATA_DIR, "migrations"), { recursive: true });
-  writeJsonAtomic(recordFile, {
-    at: Date.now(),
-    casaosApps,
-    apps: [...new Set([...(previous?.apps ?? []), ...moved])],
-    units: [...new Set([...(previous?.units ?? []), ...stopped])],
-  } satisfies MigrationRecord);
 
   console.log(`\nDone: ${moved.length} app(s) are now managed by Hata.`);
   if (sh("systemctl", "is-active", "--quiet", "hata.service").ok) {

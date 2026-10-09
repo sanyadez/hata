@@ -198,6 +198,7 @@ const state = {
   access: null,
   signIns: null,
   backups: null,
+  import: null,
   app: null,
 };
 
@@ -216,13 +217,14 @@ function pickLanguage(server) {
 }
 
 // --- Routes -------------------------------------------------------------------------------------
-// The address after `#` is the view: #/ · #/store · #/apps/<name>/<tab> · #/settings/<section>
+// The address after `#` is the view: #/ · #/store · #/import · #/apps/<name>/<tab> · #/settings/<section>
 
 function parseRoute() {
   const parts = location.hash.replace(/^#\/?/, "").split("/").filter(Boolean).map(decodeURIComponent);
   if (parts[0] === "store" && state.user?.role !== "guest") return { view: "store" };
   if (parts[0] === "backups" && isAdmin()) return { view: "backups" };
   if (parts[0] === "users" && isAdmin()) return { view: "users" };
+  if (parts[0] === "import" && isAdmin()) return { view: "import" };
   if (parts[0] === "apps" && parts[1]) return { view: "app", name: parts[1], tab: isAdmin() && ["logs", "compose", "backups"].includes(parts[2]) ? parts[2] : "overview" };
   if (parts[0] === "settings") return { view: "settings", section: sections().some((item) => item.id === parts[1]) ? parts[1] : "account" };
   return { view: "home" };
@@ -259,6 +261,7 @@ function onRoute() {
   if (state.route.view === "settings") void loadSettings();
   if (state.route.view === "backups") void loadBackups();
   if (state.route.view === "users") void loadUsers();
+  if (state.route.view === "import") void loadImport();
   if (state.route.view === "app") void loadApp();
   window.scrollTo(0, 0);
 }
@@ -315,6 +318,7 @@ async function refresh() {
   if (state.route.view === "store") renderStoreList();
   if (state.route.view === "app") void loadApp(true);
   if (state.route.view === "backups") void loadBackups();
+  if (state.route.view === "import") void loadImport();
 }
 
 // --- Sign-in and setup --------------------------------------------------------------------------
@@ -442,7 +446,7 @@ const NAV = [
 const isAdmin = () => state.user?.role === "admin";
 
 function navLinks(className) {
-  const current = state.route.view === "app" ? "home" : state.route.view;
+  const current = state.route.view === "app" ? "home" : state.route.view === "import" ? "store" : state.route.view;
   return NAV.filter((item) => (!item.admin || isAdmin()) && (item.guest !== false || state.user.role !== "guest")).map((item) =>
     h("a", { class: className + (current === item.view ? " active" : ""), href: item.hash, "aria-current": current === item.view ? "page" : null }, icon(item.icon), h("span", null, t("nav." + item.view))),
   );
@@ -537,6 +541,7 @@ function render() {
   if (view === "settings") return renderSettings();
   if (view === "backups") return renderBackups();
   if (view === "users") return renderUsers();
+  if (view === "import") return renderImport();
   if (view === "app") return renderApp();
   renderHome();
 }
@@ -665,7 +670,7 @@ function attentionItem(item) {
   );
 }
 
-const ACTIVITY_ICONS = { install: "download", update: "up", start: "play", stop: "stop", restart: "refresh", remove: "trash", apply: "code", backup: "archive", restore: "undo" };
+const ACTIVITY_ICONS = { install: "download", update: "up", start: "play", stop: "stop", restart: "refresh", remove: "trash", apply: "code", backup: "archive", restore: "undo", import: "download" };
 
 function activityItem(entry) {
   const [group, kind, outcome] = entry.code.split(".");
@@ -705,7 +710,9 @@ function renderHomeBody() {
 
   appsBox.replaceChildren(
     h("div", { class: "section-head" }, h("h2", null, t("home.apps"), h("span", { class: "muted small" }, t("home.installed", { n: apps.length }))), state.user.role !== "guest" && h("a", { class: "link", href: "#/store" }, t("home.store"), icon("arrow"))),
-    h("div", { class: "tiles" }, apps.map(appTile), isAdmin() && h("a", { class: "tile add", href: "#/store" }, h("span", { class: "tile-main" }, h("span", { class: "app-icon plus" }, icon("plus")), h("span", { class: "tile-text" }, h("span", { class: "tile-name" }, t("home.addApp")), h("span", { class: "tile-sub" }, t("home.addAppHint")))))),
+    h("div", { class: "tiles" }, apps.map(appTile), isAdmin() && h("a", { class: "tile add", href: "#/store" }, h("span", { class: "tile-main" }, h("span", { class: "app-icon plus" }, icon("plus")), h("span", { class: "tile-text" }, h("span", { class: "tile-name" }, t("home.addApp")), h("span", { class: "tile-sub" }, t("home.addAppHint"))))),
+      isAdmin() && o.importable > 0 && h("a", { class: "tile add", href: "#/import" }, h("span", { class: "tile-main" }, h("span", { class: "app-icon plus" }, icon("download")), h("span", { class: "tile-text" }, h("span", { class: "tile-name" }, t("home.import")), h("span", { class: "tile-sub" }, t("home.importHint", { n: o.importable }))))),
+    ),
   );
 
   side.replaceChildren(
@@ -1283,7 +1290,7 @@ function renderStore() {
     },
   });
   shell(
-    h("div", { class: "page-head" }, h("div", null, h("h1", null, t("nav.store")), h("p", { class: "meta", id: "store-meta" }, " ")), isAdmin() && h("div", { class: "actions" }, button(t("store.sync"), { class: "ghost", onclick: syncStores }, "refresh"), button(t("store.custom"), { onclick: customDialog }, "plus"))),
+    h("div", { class: "page-head" }, h("div", null, h("h1", null, t("nav.store")), h("p", { class: "meta", id: "store-meta" }, " ")), isAdmin() && h("div", { class: "actions" }, button(t("store.sync"), { class: "ghost", onclick: syncStores }, "refresh"), h("a", { class: "btn", href: "#/import" }, icon("download"), h("span", null, t("import.open"))), button(t("store.custom"), { onclick: customDialog }, "plus"))),
     h("div", { class: "search wide" }, icon("search"), search),
     h("div", { class: "store" }, h("nav", { class: "cats", id: "cats", "aria-label": t("store.categories") }), h("div", { id: "store-list" })),
   );
@@ -1432,7 +1439,7 @@ async function storeDialog(entry) {
 }
 
 function customDialog() {
-  const name = h("input", { required: true, pattern: "[a-z0-9][a-z0-9_-]*", autocapitalize: "none", spellcheck: false, class: "mono" });
+  const name = h("input", { required: true, pattern: "[a-z0-9][a-z0-9_\\-]*", autocapitalize: "none", spellcheck: false, class: "mono" });
   const area = h("textarea", { class: "code", spellcheck: false, wrap: "off", required: true, placeholder: "services:\n  web:\n    image: nginx:alpine\n    ports:\n      - 8088:80\n" });
   const error = h("p", { class: "error", role: "alert" });
   const dialog = openDialog(
@@ -1460,6 +1467,189 @@ function customDialog() {
     ),
   );
   name.focus();
+}
+
+// --- Import -------------------------------------------------------------------------------------
+// What already runs on the machine and is not an app here yet: CasaOS's apps, compose projects started
+// elsewhere, containers without a compose file.
+
+async function loadImport() {
+  try {
+    state.import = await api("GET", "/api/import");
+  } catch (e) {
+    return toast(errorText(e), "error");
+  }
+  if (state.route.view === "import") renderImportBody();
+}
+
+function renderImport() {
+  shell(
+    h("nav", { class: "crumbs" }, h("a", { href: "#/store" }, t("nav.store")), icon("chevron"), h("span", null, t("import.title"))),
+    h("div", { class: "page-head" }, h("div", null, h("h1", null, t("import.title")), h("p", { class: "muted" }, t("import.lead")))),
+    h("div", { class: "stack import", id: "import-body" }),
+  );
+  renderImportBody();
+}
+
+const importWarnings = (warnings) => warnings.length > 0 && h("div", { class: "banner stack" }, warnings.map((code) => h("p", { class: "small" }, t("import.warn." + code))));
+
+/** Shows the compose file an import would write; `confirm` gets the (possibly edited) text and the name */
+function importDialog({ title, lead, name, compose, warnings, editable, action, steps, confirm }) {
+  const nameInput = name != null && h("input", { required: true, pattern: "[a-z0-9][a-z0-9_\\-]*", autocapitalize: "none", spellcheck: false, class: "mono", value: name });
+  const area = h("textarea", { class: "code", spellcheck: false, wrap: "off", required: true, readOnly: !editable, value: compose, "aria-label": "compose.yml" });
+  const error = h("p", { class: "error", role: "alert" });
+  const dialog = openDialog(
+    "wide",
+    h(
+      "form",
+      {
+        onsubmit: async (e) => {
+          e.preventDefault();
+          error.textContent = "";
+          try {
+            await confirm(nameInput ? nameInput.value.trim() : null, area.value, () => dialog.close());
+          } catch (err) {
+            error.textContent = errorText(err);
+          }
+        },
+      },
+      h("header", null, h("div", { class: "grow" }, h("h2", null, title), h("p", { class: "muted small" }, lead)), closeX(() => dialog)),
+      importWarnings(warnings),
+      nameInput && field(t("store.customName"), nameInput, t("store.customNameHint")),
+      field(t("store.customCompose"), area),
+      steps && h("ol", { class: "steps muted small" }, steps.map((step) => h("li", null, step))),
+      error,
+      h("footer", null, closeButton(() => dialog, t("common.cancel")), h("button", { class: "btn primary" }, action)),
+    ),
+  );
+}
+
+async function importProject(project) {
+  let draft;
+  try {
+    draft = await api("GET", `/api/import/projects/${project.name}`);
+  } catch (e) {
+    return toast(errorText(e), "error");
+  }
+  importDialog({
+    title: t("import.projectTitle", { name: project.name }),
+    lead: t("import.source." + draft.source),
+    compose: draft.compose,
+    warnings: draft.warnings,
+    editable: false,
+    action: t("import.take"),
+    confirm: async (_name, _text, close) => {
+      await api("POST", `/api/import/projects/${project.name}`, {});
+      close();
+      toast(t("import.taken", { name: project.name }));
+      go(`#/apps/${project.name}`);
+    },
+  });
+}
+
+async function importContainer(container) {
+  let draft;
+  try {
+    draft = await api("GET", `/api/import/containers/${container.id}`);
+  } catch (e) {
+    return toast(errorText(e), "error");
+  }
+  importDialog({
+    title: t("import.containerTitle", { name: draft.container }),
+    lead: t("import.containerLead"),
+    name: draft.name,
+    compose: draft.compose,
+    warnings: draft.warnings,
+    editable: true,
+    action: t("import.rebuild"),
+    steps: [t("import.step.stop", { name: draft.container }), t("import.step.start"), t("import.step.remove"), t("import.step.undo")],
+    confirm: async (name, text, close) => {
+      const res = await api("POST", `/api/import/containers/${container.id}`, { name, compose: text });
+      close();
+      jobDialog(res.job, "import", name, () => go(`#/apps/${name}`));
+    },
+  });
+}
+
+function casaosCard(casaos) {
+  const ready = casaos.apps.filter((app) => app.status === "ready");
+  const stop = h("input", { type: "checkbox", checked: casaos.units.length > 0, disabled: casaos.units.length === 0 });
+  const error = h("p", { class: "error", role: "alert" });
+  const move = button(ready.length ? t("import.casaos.move", { n: ready.length }) : t("import.casaos.stopOnly"), {
+    class: "primary",
+    onclick: async () => {
+      error.textContent = "";
+      move.disabled = true;
+      try {
+        const result = await api("POST", "/api/import/casaos", { stop: stop.checked });
+        toast(t("import.casaos.done", { n: result.moved.length }));
+        if (result.stuck.length) toast(t("import.casaos.stuck", { units: result.stuck.join(", ") }), "error");
+        await refresh();
+      } catch (e) {
+        error.textContent = errorText(e);
+        move.disabled = false;
+      }
+    },
+  }, "arrow");
+  return h(
+    "section",
+    { class: "card pad stack" },
+    h("div", { class: "section-head" }, h("h2", null, t("import.casaos.title", { n: ready.length }))),
+    h("p", { class: "muted" }, t("import.casaos.lead")),
+    casaos.apps.length > 0 &&
+      h("div", { class: "table-wrap" }, h("table", null, h("tbody", null, casaos.apps.map((app) => h("tr", null, h("td", null, h("div", { class: "strong" }, app.title), h("div", { class: "muted small mono" }, app.source)), h("td", { class: "num" }, h("span", { class: "chip" + (app.status === "ready" ? " ok" : " warn") }, app.status === "ready" && icon("check"), t("import.casaos.status." + app.status)))))))),
+    h("label", { class: "check" }, stop, h("span", null, h("strong", null, t("import.casaos.stop")), h("span", { class: "muted small block" }, casaos.units.length ? t("import.casaos.stopHint", { units: casaos.units.join(", ") }) : t("import.casaos.stopped")))),
+    error,
+    h("footer", { class: "section-head" }, h("p", { class: "cmd" }, icon("terminal"), "sudo hata migrate casaos --undo"), move),
+  );
+}
+
+function renderImportBody() {
+  const box = document.getElementById("import-body");
+  const data = state.import;
+  if (!box || !data) return;
+  const problem = (item) => item.problem && h("span", { class: "chip warn", title: t("import.problem." + item.problem) }, t("import.problem." + item.problem));
+  const table = (rows) => h("div", { class: "card table-wrap" }, h("table", null, h("tbody", null, rows)));
+
+  const parts = [
+    data.casaos && casaosCard(data.casaos),
+    data.projects.length > 0 &&
+      h(
+        "section",
+        { class: "stack" },
+        h("div", { class: "section-head" }, h("h2", null, t("import.projects"), h("span", { class: "muted small" }, t("import.projectsHint")))),
+        table(
+          data.projects.map((p) =>
+            h(
+              "tr",
+              null,
+              h("td", null, h("div", { class: "strong" }, p.name), h("div", { class: "muted small mono clip" }, p.files.length ? p.files.join(", ") : p.images.join(", "))),
+              h("td", null, h("span", { class: "state " + (p.running === 0 ? "stopped" : p.running === p.containers ? "running" : "partial") }, t("import.running", { running: p.running, n: p.containers }))),
+              h("td", null, h("div", { class: "row-actions" }, problem(p) || button(t("import.take"), { class: "small", onclick: () => importProject(p) }))),
+            ),
+          ),
+        ),
+      ),
+    data.containers.length > 0 &&
+      h(
+        "section",
+        { class: "stack" },
+        h("div", { class: "section-head" }, h("h2", null, t("import.containers"), h("span", { class: "muted small" }, t("import.containersHint")))),
+        table(
+          data.containers.map((c) =>
+            h(
+              "tr",
+              null,
+              h("td", null, h("div", { class: "strong" }, c.name), h("div", { class: "muted small mono clip" }, c.image)),
+              h("td", null, h("span", { class: "state " + (c.state === "running" ? "running" : c.state === "restarting" ? "restarting" : "stopped"), title: c.status }, c.status)),
+              h("td", null, h("div", { class: "row-actions" }, problem(c) || button(t("import.rebuild"), { class: "small", onclick: () => importContainer(c) }))),
+            ),
+          ),
+        ),
+      ),
+    !data.casaos && !data.projects.length && !data.containers.length && h("div", { class: "card empty" }, icon("check", "ok"), h("p", null, t("import.nothing"))),
+  ];
+  box.replaceChildren(...parts.filter(Boolean));
 }
 
 // --- Settings -----------------------------------------------------------------------------------
