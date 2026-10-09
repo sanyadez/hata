@@ -1,6 +1,6 @@
 {
   "name": "hata",
-  "version": "0.1.0-alpha.3",
+  "version": "0.1.0",
   "description": "A home server in a single file",
   "license": "PolyForm-Noncommercial-1.0.0",
   "private": true,
