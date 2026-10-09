@@ -714,7 +714,6 @@
   "activity.system.restore.failed": "Не вдалося відновити: {target}",
   "activity.byRestore": "під час відновлення сервера",
   "appearance.remove": "Видалити завантажене зображення",
-  "home.dropBlock": "Киньте блок сюди",
   "home.addGroupItem": "Група",
   "home.addGroupHint": "Розділ дашборда з назвою",
   "home.storeHint": "Застосунки для встановлення",
@@ -724,5 +723,6 @@
   "home.layoutTextHint": "Усе, що є на дашборді, для редагування вручну",
   "home.layoutTextLead": "Групи, плитки й місце кожного блока у форматі YAML. Те, що не є частиною розкладки, під час збереження відкидається.",
   "home.saveLayout": "Зберегти",
-  "error.dashboard.badText": "Цей текст не є розкладкою: {message}"
+  "error.dashboard.badText": "Цей текст не є розкладкою: {message}",
+  "home.moveBlock": "Перемістити"
 }

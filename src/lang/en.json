@@ -714,7 +714,6 @@
   "activity.system.restore.failed": "Restoring the server failed for: {target}",
   "activity.byRestore": "while restoring the server",
   "appearance.remove": "Delete the uploaded picture",
-  "home.dropBlock": "Drop a block here",
   "home.addGroupItem": "Group",
   "home.addGroupHint": "A named section of the dashboard",
   "home.storeHint": "Apps to install",
@@ -724,5 +723,6 @@
   "home.layoutTextHint": "Everything on the dashboard, to edit by hand",
   "home.layoutTextLead": "Groups, tiles and where every block stands, as YAML. What does not fit a layout is dropped on saving.",
   "home.saveLayout": "Save",
-  "error.dashboard.badText": "This text is not a layout: {message}"
+  "error.dashboard.badText": "This text is not a layout: {message}",
+  "home.moveBlock": "Move"
 }

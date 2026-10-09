@@ -22,46 +22,106 @@ export interface Group {
   id: string;
   /** "" — the first group under its default heading */
   title: string;
+  /** Tiles standing on the board by themselves, without a heading; with no tiles left such a group is gone */
+  bare?: boolean;
   items: Item[];
 }
 
 /**
- * The blocks of the dashboard and the places they can stand in. A block is one of Hata's own (a number
- * of the system, `attention`, `activity`) or a group of tiles (`group:<id>`); the places are a row
- * across the top, three columns (left, main, side) and a row across the bottom. One of Hata's own blocks
- * may also be put away (`hidden`): it is offered again in the "Add" menu.
+ * The board is a grid of twelve columns. A block is one of Hata's own (a number of the system,
+ * `attention`, `activity`) or a group of tiles (`group:<id>`); it has a column, a width in columns and a
+ * row. How tall a block is depends on what is in it and on the width of the window, so rows are settled
+ * in the browser (`src/ui/grid.js`): `y` here says what comes above what. One of Hata's own blocks may
+ * also be put away (`hidden`): it is offered again in the "Add" menu.
  */
 export const STATS = ["cpu", "memory", "disk", "network", "temp"] as const;
 export const WIDGETS = [...STATS, "attention", "activity"] as const;
-export const ZONES = ["top", "left", "main", "side", "bottom"] as const;
-export type Zone = (typeof ZONES)[number];
-export type Widgets = Record<Zone, string[]> & { hidden: string[] };
+export const COLUMNS = 12;
+
+export interface Block {
+  id: string;
+  x: number;
+  y: number;
+  w: number;
+}
 
 export interface Layout {
   groups: Group[];
-  /** Which block stands where, in order; every block is in exactly one place, or put away */
-  widgets: Widgets;
+  /** Every block that is on the board; each one once */
+  blocks: Block[];
+  hidden: string[];
 }
 
-const usualZone = (id: string): Zone => (id === "attention" || id === "activity" ? "side" : "top");
+/** Where a block of Hata's own stands until it is moved: the numbers in a row, the lists down the right */
+const USUAL: Record<string, Omit<Block, "id">> = {
+  cpu: { x: 0, y: 0, w: 3 },
+  memory: { x: 3, y: 0, w: 2 },
+  disk: { x: 5, y: 0, w: 2 },
+  network: { x: 7, y: 0, w: 3 },
+  temp: { x: 10, y: 0, w: 2 },
+  attention: { x: 8, y: 1, w: 4 },
+  activity: { x: 8, y: 2, w: 4 },
+};
+const GROUP_WIDTH = 8;
+const MAX_ROW = 100_000;
+
+export const minWidth = (id: string): number => (id === "attention" || id === "activity" ? 3 : 2);
+const isOwn = (id: string) => (WIDGETS as readonly string[]).includes(id);
+
+/** What a layout saved while blocks stood in five places (a row, three columns, a row) is on the grid */
+function fromPlaces(places: Record<string, unknown>): Block[] {
+  const named = (place: string): string[] => (Array.isArray(places[place]) ? places[place] : []).flatMap((id: unknown) => (id === "stats" ? [...STATS] : typeof id === "string" ? [id] : []));
+  const out: Block[] = [];
+  let y = 0;
+  const row = (ids: string[]) => {
+    let x = 0;
+    for (const id of ids) {
+      const w = (STATS as readonly string[]).includes(id) ? 2 : COLUMNS;
+      if (x + w > COLUMNS) (x = 0), y++;
+      out.push({ id, x, y, w });
+      x += w;
+    }
+    if (ids.length) y++;
+  };
+  row(named("top"));
+  const [left, main, side] = [named("left"), named("main"), named("side")];
+  const [lw, sw] = [left.length ? 3 : 0, side.length ? 3 : 0];
+  left.forEach((id, i) => out.push({ id, x: 0, y: y + i, w: 3 }));
+  main.forEach((id, i) => out.push({ id, x: lw, y: y + i, w: COLUMNS - lw - sw }));
+  side.forEach((id, i) => out.push({ id, x: COLUMNS - 3, y: y + i, w: 3 }));
+  y += Math.max(left.length, main.length, side.length);
+  row(named("bottom"));
+  return out;
+}
 
 /**
- * Blocks named twice or not known are dropped; one that is named nowhere goes to its usual place — a
- * group of tiles to the main column, after the groups already there. `stats` is what the five numbers
- * of the system were while they were one block; `tiles` are the numbers that stand among the tiles.
+ * The blocks of a layout, made whole: one named twice or not known is dropped, sizes are brought within
+ * the grid, and what is on the board but named nowhere is put on it — a block of Hata's own at its usual
+ * spot, a group of tiles under everything else. `tiles` are the numbers that stand among the tiles of a
+ * group: they are there and nowhere else.
  */
-export function cleanWidgets(input: unknown, groups: string[] = [], tiles: string[] = []): Widgets {
-  const out: Widgets = { top: [], left: [], main: [], side: [], bottom: [], hidden: [] };
+export function cleanBlocks(input: unknown, groups: string[] = [], tiles: string[] = []): Pick<Layout, "blocks" | "hidden"> {
+  const raw = isObject(input) ? input : {};
   const known = new Set<string>([...WIDGETS, ...groups.map((id) => "group:" + id)]);
-  // a number that stands among the tiles of a group is there and nowhere else
   const seen = new Set<string>(tiles);
-  const named = (zone: string): string[] => (isObject(input) && Array.isArray(input[zone]) ? input[zone] : []).flatMap((id: unknown) => (id === "stats" ? [...STATS] : typeof id === "string" ? [id] : []));
-  for (const zone of ZONES) for (const id of named(zone)) if (known.has(id) && !seen.has(id) && seen.add(id)) out[zone].push(id);
+  const whole = (value: unknown, min: number, max: number) => (typeof value === "number" && Number.isFinite(value) ? Math.min(max, Math.max(min, Math.round(value))) : min);
+  const listed: unknown[] = Array.isArray(raw.blocks) ? raw.blocks : isObject(raw.widgets) ? fromPlaces(raw.widgets) : [];
+  const blocks: Block[] = [];
+  for (const one of listed) {
+    if (!isObject(one) || typeof one.id !== "string" || !known.has(one.id) || seen.has(one.id)) continue;
+    seen.add(one.id);
+    const w = whole(one.w, minWidth(one.id), COLUMNS);
+    blocks.push({ id: one.id, x: whole(one.x, 0, COLUMNS - w), y: whole(one.y, 0, MAX_ROW), w });
+  }
   // only Hata's own blocks can be put away: a group that is not wanted is removed
-  for (const id of named("hidden")) if ((WIDGETS as readonly string[]).includes(id) && !seen.has(id) && seen.add(id)) out.hidden.push(id);
-  for (const id of WIDGETS) if (!seen.has(id)) out[usualZone(id)].push(id);
-  for (const id of groups) if (!seen.has("group:" + id)) out.main.push("group:" + id);
-  return out;
+  const away: unknown[] = Array.isArray(raw.hidden) ? raw.hidden : isObject(raw.widgets) && Array.isArray(raw.widgets.hidden) ? raw.widgets.hidden : [];
+  const hidden = away.filter((id): id is string => typeof id === "string" && isOwn(id) && !seen.has(id) && !!seen.add(id));
+  const fresh = blocks.length === 0;
+  let below = blocks.reduce((max, block) => Math.max(max, block.y), 0) + 1;
+  for (const id of WIDGETS) if (!seen.has(id)) blocks.push({ id, ...USUAL[id]!, y: fresh ? USUAL[id]!.y : below++ });
+  // on a board nobody has arranged yet the groups go down the left, next to the lists
+  for (const [i, id] of groups.entries()) if (!seen.has("group:" + id)) blocks.push({ id: "group:" + id, x: 0, y: fresh ? 1 + i : below++, w: fresh ? GROUP_WIDTH : COLUMNS });
+  return { blocks, hidden };
 }
 
 const STAT_IDS: readonly string[] = STATS;
@@ -145,8 +205,10 @@ export function cleanLayout(input: unknown): Layout {
   const groups = (isObject(input) && Array.isArray(input.groups) ? input.groups : [])
     .filter(isObject)
     .slice(0, MAX_GROUPS)
-    .map((raw): Group => ({ id: id(raw.id), title: text(raw.title, MAX_TITLE), items: (Array.isArray(raw.items) ? raw.items : []).map(item).filter((i): i is Item => i !== null) }));
-  return { groups, widgets: cleanWidgets(isObject(input) ? input.widgets : null, groups.map((group) => group.id), amongTiles(groups)) };
+    .map((raw): Group => ({ id: id(raw.id), title: text(raw.title, MAX_TITLE), ...(raw.bare === true ? { bare: true } : {}), items: (Array.isArray(raw.items) ? raw.items : []).map(item).filter((i): i is Item => i !== null) }))
+    // tiles standing by themselves are their group: with none left there is no group
+    .filter((group) => !group.bare || group.items.length > 0);
+  return { groups, ...cleanBlocks(input, groups.map((group) => group.id), amongTiles(groups)) };
 }
 
 /**
@@ -168,20 +230,22 @@ export function arrange(layout: Layout, apps: string[], folders: string[], built
       return items.length ? [{ ...item, items }] : [];
     }),
   }));
-  if (!groups.length) groups.push({ id: "main", title: "", items: [] });
+  // what is new goes to the first group that has a heading; tiles standing by themselves are not a home
+  let home = groups.findIndex((group) => !group.bare);
+  if (home < 0) home = groups.push({ id: groups.some((group) => group.id === "main") ? crypto.randomUUID().slice(0, 13) : "main", title: "", items: [] }) - 1;
   const rest: Entry[] = [...apps.filter((name) => !placed.has("app " + name)).map((name): Entry => ({ type: "app", name })), ...folders.filter((path) => !placed.has("files " + path)).map((path): Entry => ({ type: "files", path }))];
   const own = builtins.filter((id) => !placed.has("builtin " + id)).map((id): Entry => ({ type: "builtin", id }));
-  const first = [...groups[0]!.items];
+  const first = [...groups[home]!.items];
   // "Add" left at the very end stays there: what is new comes before it
   const last = first.at(-1);
   const tail = last?.type === "builtin" && last.id === "add" ? first.splice(-1) : [];
-  groups[0] = { ...groups[0]!, items: [...first, ...rest, ...own, ...tail] };
-  return { groups, widgets: cleanWidgets(layout.widgets, groups.map((group) => group.id), amongTiles(groups)) };
+  groups[home] = { ...groups[home]!, items: [...first, ...rest, ...own, ...tail] };
+  return { groups, ...cleanBlocks(layout, groups.map((group) => group.id), amongTiles(groups)) };
 }
 
 /** The layout after a folder of the file manager was moved or renamed (`to`), or removed (`to` is null) */
 export function movePath(layout: Layout, from: string, to: string | null): Layout {
   const inside = (path: string) => path === from || path.startsWith(from.endsWith("/") ? from : from + "/");
   const entry = (e: Entry): Entry[] => (e.type !== "files" || !inside(e.path) ? [e] : to === null ? [] : [{ type: "files", path: to + e.path.slice(from.length) }]);
-  return cleanLayout({ widgets: layout.widgets, groups: layout.groups.map((group) => ({ ...group, items: group.items.flatMap((item) => (item.type === "folder" ? [{ ...item, items: item.items.flatMap(entry) }] : entry(item))) })) });
+  return cleanLayout({ blocks: layout.blocks, hidden: layout.hidden, groups: layout.groups.map((group) => ({ ...group, items: group.items.flatMap((item) => (item.type === "folder" ? [{ ...item, items: item.items.flatMap(entry) }] : entry(item))) })) });
 }

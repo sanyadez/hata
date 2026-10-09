@@ -1,6 +1,8 @@
 // Hata web UI. No build step and no framework: the DOM is built with h() below, which only ever sets
 // text and attributes — store content (titles, descriptions) never reaches the page as markup.
 
+import { fit, move, narrow, settle } from "/grid.js";
+
 // --- Small tools --------------------------------------------------------------------------------
 
 const $app = document.getElementById("app");
@@ -768,7 +770,11 @@ function renderSystem() {
   const net = s.net ? bytesParts(s.net.rx + s.net.tx) : null;
   setStat("network", net ? net.value : "—", net ? net.unit + "/s" : "", s.net ? `↓ ${bytes(s.net.rx)}/s · ↑ ${bytes(s.net.tx)}/s` : "", sparkline(s.history.net));
   const temp = document.getElementById("stat-temp");
-  if (temp) (temp.closest(".widget") ?? temp).hidden = s.temperature == null;
+  const tempBlock = temp?.closest(".widget");
+  if (tempBlock && tempBlock.hidden !== (s.temperature == null)) {
+    tempBlock.hidden = s.temperature == null;
+    if (!homeUi.drag?.active) layoutBoard();
+  }
   if (s.temperature != null) setStat("temp", String(s.temperature), "°C", t("sys.cpu"), null, s.temperature >= 85 ? "warn" : "");
 }
 
@@ -825,7 +831,12 @@ function tileIcon(item, size = "") {
 
 function tile(item) {
   // a number of the system among the tiles is the same block that would stand in a place of its own
-  if (item.type === "widget") return homeUi.widgets?.[item.id] ?? null;
+  if (item.type === "widget") {
+    const el = homeUi.widgets?.[item.id] ?? null;
+    // where it stood on the board says nothing in the grid of a group
+    if (el) el.style.gridColumn = el.style.gridRow = "";
+    return el;
+  }
   const target = tileTarget(item);
   if (!target) return null;
   const admin = isAdmin();
@@ -906,6 +917,9 @@ function takeTile(layout, key) {
 }
 
 async function saveLayout(layout) {
+  // tiles standing by themselves are their group: with none left there is no group
+  layout.groups = layout.groups.filter((group) => !group.bare || group.items.length > 0);
+  layout.blocks = boardBlocks(layout);
   state.overview.dashboard = layout;
   renderHomeBody();
   try {
@@ -1097,12 +1111,12 @@ function addDialog() {
     state.overview.importable > 0 && entry(t("home.import"), t("home.importHint", { n: state.overview.importable }), "download", () => go("#/import")),
     entry(t("home.addLinkItem"), t("home.addLinkHint"), "link", () => linkDialog()),
     entry(t("home.addGroupItem"), t("home.addGroupHint"), "grid", () => newGroupDialog()),
-    blockPlaces(state.overview.dashboard).hidden.map((id) =>
+    (state.overview.dashboard.hidden ?? []).filter((id) => id in BLOCKS).map((id) =>
       entry(blockTitle(id), t("home.addBlockHint"), id === "attention" ? "alert" : id === "activity" ? "list" : id, () =>
         changeLayout((layout) => {
-          const places = (layout.widgets = blockPlaces(layout));
-          places.hidden = places.hidden.filter((block) => block !== id);
-          places[BLOCKS[id]].push(id);
+          takeBlock(layout, id);
+          // under everything else in its usual columns; it is dragged from there
+          layout.blocks.push(usualBlock(id, layout.blocks.reduce((max, block) => Math.max(max, block.y), 0) + 1));
         }),
       ),
     ),
@@ -1111,36 +1125,153 @@ function addDialog() {
   );
 }
 
-/** A group of tiles as a block of the page; null when this user has nothing in it */
+/** A group of tiles as a block of the board; null when this user has nothing in it */
 function groupBlock(group, index) {
   const admin = isAdmin();
   const tiles = group.items.map(tile).filter(Boolean);
   // a group with nothing in it for this user is not theirs to see
   if (!tiles.length && !admin) return null;
+  const id = "group:" + group.id;
+  const grid = h("div", { class: "tiles", "data-group": group.id }, tiles, admin && !tiles.length && h("p", { class: "muted small drop-hint" }, t("home.emptyGroup")));
+  // tiles standing by themselves have no heading: a small grip takes its place
+  if (group.bare) {
+    const block = h("div", { class: "group widget bare", "data-widget": id, "data-group-id": group.id }, grid);
+    if (admin) block.prepend(h("button", { type: "button", class: "icon-btn quiet block-grip", title: t("home.moveBlock"), "aria-label": t("home.moveBlock"), onpointerdown: (e) => dragStart(e, id, BLOCK_DRAG, block) }, icon("more")));
+    return block;
+  }
   const head = groupHead(group, index, state.overview.apps.length);
-  const block = h("div", { class: "group widget", "data-widget": "group:" + group.id, "data-group-id": group.id }, head, h("div", { class: "tiles", "data-group": group.id }, tiles, admin && !tiles.length && h("p", { class: "muted small drop-hint" }, t("home.emptyGroup"))));
+  const block = h("div", { class: "group widget", "data-widget": id, "data-group-id": group.id }, head, grid);
   if (admin) {
     head.classList.add("handle");
-    head.addEventListener("pointerdown", (e) => dragStart(e, "group:" + group.id, WIDGET_DRAG, block));
+    head.addEventListener("pointerdown", (e) => dragStart(e, id, BLOCK_DRAG, block));
   }
   return block;
 }
 
 /**
- * Where every block stands. The server keeps this whole; a change made here a moment ago (a new group,
- * a removed one) is not through it yet, so the same rule is applied: a group named nowhere joins the main
- * column, a name without a group is skipped.
+ * The blocks that are on the board. The server keeps this whole; a change made here a moment ago (a new
+ * group, a removed one) is not through it yet, so the same rule is applied: what is not there is skipped,
+ * what is named nowhere comes under everything else.
  */
-function blockPlaces(layout) {
+function boardBlocks(layout) {
   const groups = new Set(layout.groups.map((group) => "group:" + group.id));
-  // a number standing among the tiles of a group is there and nowhere else
-  const seen = new Set(layout.groups.flatMap((group) => group.items.filter((item) => item.type === "widget").map((item) => item.id)));
-  const places = {};
-  for (const name of ZONES) places[name] = (layout.widgets[name] ?? []).filter((id) => (groups.has(id) || id in homeUi.widgets) && !seen.has(id) && seen.add(id));
-  for (const id of groups) if (!seen.has(id)) places.main.push(id);
-  places.hidden = (layout.widgets.hidden ?? []).filter((id) => id in BLOCKS && !seen.has(id));
-  return places;
+  // a number standing among the tiles of a group, or put away, is not on the board
+  const away = new Set([...(layout.hidden ?? []), ...layout.groups.flatMap((group) => group.items.filter((item) => item.type === "widget").map((item) => item.id))]);
+  const seen = new Set();
+  const out = (layout.blocks ?? []).filter((block) => (groups.has(block.id) || (block.id in BLOCKS && !away.has(block.id))) && !seen.has(block.id) && seen.add(block.id)).map((block) => ({ ...block }));
+  let below = out.reduce((max, block) => Math.max(max, block.y), 0) + 1;
+  for (const id of Object.keys(BLOCKS)) if (!seen.has(id) && !away.has(id)) out.push(usualBlock(id, below++));
+  for (const id of groups) if (!seen.has(id)) out.push({ id, x: 0, y: below++, w: 8 });
+  return out;
 }
+
+/** The size of the board's cells right now: how wide a column with its gap is, how many there are */
+function boardCells() {
+  const board = document.getElementById("board");
+  const columns = board.classList.contains("narrow") ? 2 : COLUMNS;
+  const gap = parseFloat(getComputedStyle(board).columnGap) || 0;
+  return { board, columns, step: (board.clientWidth + gap) / columns, rect: board.getBoundingClientRect() };
+}
+
+/** Shows the blocks where `blocks` says (settled, with heights): the board as it is, or as it would be */
+function showBoard(blocks) {
+  for (const block of blocks) {
+    const el = homeUi.els.get(block.id);
+    if (!el) continue;
+    el.style.gridColumn = `${block.x + 1} / span ${block.w}`;
+    el.style.gridRow = `${block.y + 1} / span ${block.h}`;
+  }
+}
+
+/**
+ * Lays the board out: every block gets its column and width, its height is taken from what is in it, and
+ * the rows are settled from that. On a narrow screen the same blocks follow one another in two columns.
+ */
+function layoutBoard(blocks = homeUi.blocks) {
+  const board = document.getElementById("board");
+  if (!board || !homeUi.els) return;
+  const slim = board.clientWidth < 720;
+  board.classList.toggle("narrow", slim);
+  // a block that has nothing to show (no temperature on this machine) takes no room
+  let placed = blocks.filter((block) => homeUi.els.has(block.id) && !homeUi.els.get(block.id).hidden);
+  if (slim) placed = narrow(placed.map((block) => ({ ...block, h: 1 })), (id) => id in BLOCKS && BLOCKS[id].small);
+  board.classList.add("measuring");
+  for (const block of placed) homeUi.els.get(block.id).style.gridColumn = `${block.x + 1} / span ${block.w}`;
+  const tall = placed.map((block) => ({ ...block, h: Math.max(1, Math.ceil((homeUi.els.get(block.id).offsetHeight + BOARD_GAP) / BOARD_ROW)) }));
+  board.classList.remove("measuring");
+  homeUi.board = settle(tall, homeUi.drag?.active ? homeUi.drag.key : null);
+  showBoard(homeUi.board);
+}
+
+/** Takes one of Hata's own blocks from wherever it is — the board, the put-away list, among the tiles */
+function takeBlock(layout, id) {
+  for (const group of layout.groups) group.items = group.items.filter((item) => !(item.type === "widget" && item.id === id));
+  layout.blocks = boardBlocks(layout).filter((block) => block.id !== id);
+  layout.hidden = (layout.hidden ?? []).filter((block) => block !== id);
+}
+
+/** The board as it is shown, as the layout keeps it: where every block stands, without the heights */
+const boardAsSaved = (blocks) => blocks.map(({ id, x, y, w }) => ({ id, x, y, w }));
+
+/** Where on the board the block in the air is aimed: the column and row of its top left corner */
+function boardAim(drag) {
+  const { rect, step, columns } = boardCells();
+  return { x: Math.round((drag.x - drag.dx - rect.left) / step), y: Math.round((drag.y - drag.dy - rect.top) / BOARD_ROW), columns };
+}
+
+/**
+ * A block — the system's numbers, what needs attention, the activity, a group of tiles — is moved about
+ * the board: the others make room as it goes, and it is left where it is shown
+ */
+const BLOCK_DRAG = {
+  name: "widget",
+  ignore: "a, input, button:not(.block-grip)",
+  find: (drag) => {
+    const { board } = boardCells();
+    // on a narrow screen the blocks follow one another: there is nowhere else for one to go
+    if (board.classList.contains("narrow")) return null;
+    const aim = boardAim(drag);
+    const base = homeUi.board.some((block) => block.id === drag.key) ? homeUi.board : [...homeUi.board, { ...drag.fresh, h: drag.rows }];
+    const preview = move(base, drag.key, aim.x, aim.y, aim.columns);
+    showBoard(preview);
+    return { board: preview };
+  },
+  drop: (drag, target) =>
+    changeLayout((layout) => {
+      layout.blocks = boardAsSaved(target.board);
+    }),
+};
+
+/** A number of the system is small enough to go either way: about the board, or among the tiles of a group */
+const NUMBER_DRAG = {
+  name: "widget",
+  ignore: "button, a, input",
+  find: (drag) => {
+    if (document.elementFromPoint(drag.x, drag.y)?.closest(".tiles[data-group]")) {
+      // among tiles it is a tile that joins no folder
+      const target = dropTarget({ ...drag, item: { type: "widget", id: drag.key } });
+      return target && !target.slot ? { ...target, tile: true } : null;
+    }
+    // from among the tiles onto the board: it is a block again, of its usual width
+    if (!homeUi.board.some((block) => block.id === drag.key)) {
+      drag.fresh = usualBlock(drag.key, 0);
+      drag.rows = Math.ceil((drag.el.offsetHeight + BOARD_GAP) / BOARD_ROW);
+    }
+    return BLOCK_DRAG.find(drag);
+  },
+  drop: (drag, target) =>
+    changeLayout((layout) => {
+      const id = drag.key;
+      takeBlock(layout, id);
+      if (target.board) return void (layout.blocks = boardAsSaved(target.board));
+      // next to a tile, or at the end of a group: it becomes a tile
+      const beside = target.before ?? target.after;
+      const at = beside && locate(layout, beside);
+      if (beside ? !at || at.folder : !layout.groups.some((group) => group.id === target.group)) return false;
+      if (at) at.list.splice(at.index + (target.after ? 1 : 0), 0, { type: "widget", id });
+      else layout.groups.find((group) => group.id === target.group).items.push({ type: "widget", id });
+    }),
+};
 
 // --- A folder of tiles, opened ----------------------------------------------------------------------
 
@@ -1242,88 +1373,13 @@ function dragStart(e, item, kind = TILE_DRAG, el = e.currentTarget) {
   addEventListener("touchmove", still, { passive: false });
 }
 
-/** Above or below the block under the pointer, by which half of it the pointer is in */
-function besideBlock(drag, selector, name) {
-  const over = document.elementFromPoint(drag.x, drag.y)?.closest(selector);
-  if (!over || over === drag.el || over.classList.contains("drag-ghost")) return null;
-  const rect = over.getBoundingClientRect();
-  // small blocks stand side by side: the place next to one is to its left or right
-  if (over.classList.contains("small") && drag.el.classList.contains("small")) {
-    const left = drag.x < rect.left + rect.width / 2;
-    return { el: over, cls: left ? "drop-before" : "drop-after", [left ? "before" : "after"]: over.dataset[name] };
-  }
-  const above = drag.y < rect.top + rect.height / 2;
-  return { el: over, cls: above ? "drop-above" : "drop-below", [above ? "before" : "after"]: over.dataset[name] };
-}
-
-/**
- * A block — the system's numbers, what needs attention, the activity, a group of tiles — is moved among
- * the blocks and the places for them
- */
-const WIDGET_DRAG = {
-  name: "widget",
-  ignore: "button, a, input",
-  find: (drag) => {
-    const beside = besideBlock(drag, ".zone > .widget[data-widget]", "widget");
-    if (beside) return beside;
-    // not over a block: the free room of a place takes the block at its end
-    const under = document.elementFromPoint(drag.x, drag.y);
-    const zone = under?.closest("[data-zone]");
-    return zone && !under.closest(".zone > .widget") ? { el: zone, cls: "drop-end", zone: zone.dataset.zone } : null;
-  },
-  drop: (drag, target) =>
-    changeLayout((layout) => {
-      const zones = (layout.widgets = blockPlaces(layout));
-      for (const zone of Object.values(zones)) if (zone.includes(drag.key)) zone.splice(zone.indexOf(drag.key), 1);
-      const beside = target.before ?? target.after;
-      const zone = beside ? Object.values(zones).find((list) => list.includes(beside)) : zones[target.zone];
-      if (!zone) return false;
-      zone.splice(beside ? zone.indexOf(beside) + (target.after ? 1 : 0) : zone.length, 0, drag.key);
-    }),
-};
-
-/** Takes one of Hata's own blocks from wherever it is — a place, the put-away list, among the tiles — and gives the places back */
-function takeBlock(layout, id) {
-  for (const group of layout.groups) group.items = group.items.filter((item) => !(item.type === "widget" && item.id === id));
-  const places = (layout.widgets = blockPlaces(layout));
-  for (const name of [...ZONES, "hidden"]) places[name] = places[name].filter((block) => block !== id);
-  return places;
-}
-
-/** A number of the system is small enough to go either way: among the blocks, or among the tiles of a group */
-const NUMBER_DRAG = {
-  name: "widget",
-  ignore: "button, a, input",
-  find: (drag) => {
-    if (!document.elementFromPoint(drag.x, drag.y)?.closest(".tiles[data-group]")) return WIDGET_DRAG.find(drag);
-    const target = dropTarget(drag);
-    return target && { ...target, tile: true };
-  },
-  drop: (drag, target) =>
-    changeLayout((layout) => {
-      const id = drag.item.id;
-      const places = takeBlock(layout, id);
-      const beside = target.before ?? target.after;
-      // next to a tile, or at the end of a group: it becomes a tile
-      if (target.tile) {
-        const at = beside && locate(layout, beside);
-        if (beside ? !at || at.folder : !layout.groups.some((group) => group.id === target.group)) return false;
-        if (at) at.list.splice(at.index + (target.after ? 1 : 0), 0, { type: "widget", id });
-        else layout.groups.find((group) => group.id === target.group).items.push({ type: "widget", id });
-        return;
-      }
-      const zone = beside ? Object.values(places).find((list) => list.includes(beside)) : places[target.zone];
-      if (!zone) return false;
-      zone.splice(beside ? zone.indexOf(beside) + (target.after ? 1 : 0) : zone.length, 0, id);
-    }),
-};
-
 /** A tile is moved among the tiles, into a folder, onto another tile (which makes a folder), out of an open folder */
 const TILE_DRAG = {
   name: "tile",
   ignore: ".tile-open",
   find: dropTarget,
   drop: (drag, target) => {
+    if (target.slot) return tileToBoard(drag.key, target.slot);
     if (target.out) {
       homeUi.folder?.dialog.close();
       outOfFolder(drag.key);
@@ -1356,7 +1412,32 @@ function dropTarget(drag) {
   }
   const list = under.closest(".tiles[data-group]");
   if (list && !over) return { el: list, cls: "drop-end", group: list.dataset.group };
-  return null;
+  // free room of the board: the tile will stand there by itself
+  const { board, rect, step, columns } = boardCells();
+  if (open || board.classList.contains("narrow") || (under !== board && under.closest(".widget")) || drag.y < rect.top || drag.x < rect.left || drag.x > rect.right) return null;
+  const cell = fit(Math.floor((drag.x - rect.left) / step), 2, columns);
+  return { slot: { x: cell.x, y: Math.max(0, Math.round((drag.y - rect.top) / BOARD_ROW)), w: cell.w } };
+}
+
+/** The outline of where a tile dropped on free room of the board will stand */
+function showSlot(slot) {
+  const board = document.getElementById("board");
+  let outline = board?.querySelector(".slot-preview");
+  if (!slot) return outline?.remove();
+  if (!outline) board.append((outline = h("div", { class: "slot-preview" })));
+  outline.style.gridColumn = `${slot.x + 1} / span ${slot.w}`;
+  outline.style.gridRow = `${slot.y + 1} / span 9`;
+}
+
+/** A tile leaves its group to stand on the board by itself: a group without a heading is made for it */
+function tileToBoard(key, slot) {
+  const layout = layoutCopy();
+  const item = takeTile(layout, key);
+  if (!item || item.type === "widget") return;
+  const id = newId();
+  layout.groups.push({ id, title: "", bare: true, items: [item] });
+  layout.blocks = [...boardBlocks(layout).filter((block) => block.id !== "group:" + id), { id: "group:" + id, ...slot }];
+  return saveLayout(layout);
 }
 
 function dragMove(drag) {
@@ -1366,6 +1447,7 @@ function dragMove(drag) {
   homeUi.folder?.dialog.classList.toggle("drop-out", !!target?.out);
   drag.marked = target?.el ?? null;
   if (target?.el) target.el.classList.add(target.cls);
+  showSlot(target?.slot ?? null);
   drag.target = target;
 }
 
@@ -1380,6 +1462,7 @@ function dragEnd(drop) {
   drag.el.classList.remove("dragging");
   document.documentElement.classList.remove("tile-dragging", "dragging-" + drag.kind.name);
   homeUi.folder?.dialog.classList.remove("drop-out");
+  showSlot(null);
   // the click that ends a drag is not a click on what was dragged
   if (drag.active) {
     const swallow = (e) => (e.preventDefault(), e.stopPropagation());
@@ -1389,7 +1472,8 @@ function dragEnd(drop) {
   setTimeout(() => homeUi.drag === drag && (homeUi.drag = null));
   const target = drop && drag.active ? drag.target : null;
   if (!target) {
-    if (homeUi.stale) setTimeout(renderHomeBody);
+    // the board may have been shown as it would be: back to as it is
+    setTimeout(homeUi.stale ? renderHomeBody : () => layoutBoard());
     return;
   }
   homeUi.drag = null;
@@ -1436,8 +1520,8 @@ function renderHome() {
     // the numbers are dragged by any part of them; a list with text to read and select, by its heading
     el.addEventListener("pointerdown", (e) => {
       if (!isAdmin()) return;
-      if (el.classList.contains("small")) dragStart(e, { type: "widget", id }, NUMBER_DRAG, el);
-      else if (e.target.closest(".section-head")) dragStart(e, id, WIDGET_DRAG, el);
+      if (el.classList.contains("small")) dragStart(e, id, NUMBER_DRAG, el);
+      else if (e.target.closest(".section-head")) dragStart(e, id, BLOCK_DRAG, el);
     });
     return el;
   };
@@ -1453,19 +1537,24 @@ function renderHome() {
     activity: widget("activity", h("section", { class: "pad-x loose" })),
   };
   homeUi.widgets.temp.hidden = true;
-  const zone = (name, tag = "div") => h(tag, { class: "zone" + (name === "side" || name === "left" ? " side" : ""), id: "zone-" + name, "data-zone": name });
-  shell(
-    h("div", { class: "page-head" }, h("div", null, h("h1", null, greeting), h("p", { class: "meta", id: "host" }, " ")), h("div", { class: "counts", id: "counts" })),
-    zone("top"),
-    h("div", { class: "columns three", id: "home-columns" }, zone("left", "aside"), zone("main", "section"), zone("side", "aside")),
-    zone("bottom"),
-  );
+  const board = h("div", { id: "board" });
+  shell(h("div", { class: "page-head" }, h("div", null, h("h1", null, greeting), h("p", { class: "meta", id: "host" }, " ")), h("div", { class: "counts", id: "counts" })), board);
+  if (isAdmin()) boardResizing(board);
+  // the width of the window decides how wide a column is, and with it how tall every block
+  let width = 0;
+  const watcher = new ResizeObserver(() => {
+    if (board.clientWidth === width || homeUi.drag?.active) return;
+    width = board.clientWidth;
+    layoutBoard();
+  });
+  watcher.observe(board);
+  cleanups.push(() => watcher.disconnect());
   renderHomeBody();
 }
 
 function renderHomeBody() {
   const o = state.overview;
-  if (!o || !homeUi.widgets || !document.getElementById("zone-main")) return;
+  if (!o || !homeUi.widgets || !document.getElementById("board")) return;
   const apps = o.apps;
 
   const count = (st) => apps.filter((a) => appState(a) === st).length;
@@ -1478,15 +1567,29 @@ function renderHomeBody() {
   if (homeUi.drag?.active) homeUi.stale = true;
   else {
     homeUi.stale = false;
-    placeBlocks();
+    renderBoard();
     renderFolder();
   }
   renderSystem();
 }
 
-const ZONES = ["top", "left", "main", "side", "bottom"];
-/** Hata's own blocks and where one goes when it is put back on the dashboard */
-const BLOCKS = { cpu: "top", memory: "top", disk: "top", network: "top", temp: "top", attention: "side", activity: "side" };
+const COLUMNS = 12;
+/** The height of a row of the board and the room left under a block, px (as in the stylesheet) */
+const BOARD_ROW = 8;
+const BOARD_GAP = 16;
+/** Hata's own blocks: the columns one takes when it is put (back) on the board, the narrowest it can be */
+const BLOCKS = {
+  cpu: { x: 0, w: 3, small: true },
+  memory: { x: 3, w: 2, small: true },
+  disk: { x: 5, w: 2, small: true },
+  network: { x: 7, w: 3, small: true },
+  temp: { x: 10, w: 2, small: true },
+  attention: { x: 8, w: 4 },
+  activity: { x: 8, w: 4 },
+};
+/** The usual columns of one of Hata's own blocks, in row `y` */
+const usualBlock = (id, y) => ({ id, x: BLOCKS[id].x, w: BLOCKS[id].w, y });
+const blockMinWidth = (id) => (id === "attention" || id === "activity" ? 3 : 2);
 const blockTitle = (id) => (id === "attention" || id === "activity" ? t(id + ".title") : t("sys." + (id === "temp" ? "temperature" : id)));
 
 /** The small button that takes one of Hata's own blocks off the dashboard; the "Add" menu brings it back */
@@ -1499,7 +1602,8 @@ function blockRemover(id, label) {
     "aria-label": `${t("home.removeBlock")}: ${label}`,
     onclick: () =>
       changeLayout((layout) => {
-        takeBlock(layout, id).hidden.push(id);
+        takeBlock(layout, id);
+        layout.hidden.push(id);
       }),
   }, icon("x"));
 }
@@ -1533,22 +1637,74 @@ function layoutTextDialog() {
   );
 }
 
-/** Puts every block into its place; a place with nothing in it shows only while a block is in the air */
-function placeBlocks() {
+/** Puts the blocks on the board: Hata's own are the same elements every time, the groups are drawn anew */
+function renderBoard() {
+  const board = document.getElementById("board");
   const layout = state.overview.dashboard;
-  const places = blockPlaces(layout);
-  for (const name of ZONES) {
-    const zone = document.getElementById("zone-" + name);
-    if (!zone) continue;
-    const blocks = places[name].map((id) => homeUi.widgets[id] ?? groupBlock(layout.groups.find((group) => "group:" + group.id === id), layout.groups.findIndex((group) => "group:" + group.id === id))).filter(Boolean);
-    zone.replaceChildren(...blocks);
-    zone.classList.toggle("vacant", !blocks.length);
-    zone.classList.toggle("movable", isAdmin());
-    zone.dataset.hint = t("home.dropBlock");
+  homeUi.blocks = boardBlocks(layout);
+  homeUi.els = new Map();
+  for (const block of homeUi.blocks) {
+    const index = layout.groups.findIndex((group) => "group:" + group.id === block.id);
+    const el = homeUi.widgets[block.id] ?? (index >= 0 ? groupBlock(layout.groups[index], index) : null);
+    if (el) homeUi.els.set(block.id, el);
   }
-  // a side column with nothing in it gives its room to the others
-  const columns = document.getElementById("home-columns");
-  for (const name of ["left", "main", "side"]) columns?.classList.toggle("no-" + name, !document.getElementById("zone-" + name)?.children.length);
+  board.replaceChildren(...homeUi.els.values());
+  layoutBoard();
+}
+
+/**
+ * Making a block wider or narrower by its right edge (a mouse only: a finger has no edge to find). The
+ * block keeps its column; how tall it becomes, and where the others go, is laid out as the edge moves.
+ */
+function boardResizing(board) {
+  const edgeOf = (e) => {
+    if (e.pointerType !== "mouse" || board.classList.contains("narrow") || homeUi.drag) return null;
+    const el = [...homeUi.els.values()].find((block) => block.contains(e.target)) ?? null;
+    return el && el.getBoundingClientRect().right - e.clientX < 9 ? el : null;
+  };
+  board.addEventListener("pointermove", (e) => board.classList.contains("resizing") || board.classList.toggle("at-edge", !!edgeOf(e)));
+  board.addEventListener("pointerleave", () => board.classList.remove("at-edge"));
+  board.addEventListener(
+    "pointerdown",
+    (e) => {
+      const el = e.button === 0 ? edgeOf(e) : null;
+      if (!el) return;
+      // the edge is the edge: not the start of dragging the block, not a click on what is under it
+      e.preventDefault();
+      e.stopPropagation();
+      const id = el.dataset.widget;
+      const { step, columns } = boardCells();
+      const left = el.getBoundingClientRect().left;
+      const original = homeUi.blocks;
+      let wide = original;
+      board.classList.add("resizing");
+      el.classList.add("resizing");
+      const pull = (ev) => {
+        wide = original.map((block) => (block.id === id ? { ...block, w: Math.min(columns - block.x, Math.max(blockMinWidth(id), Math.round((ev.clientX - left) / step))) } : block));
+        layoutBoard(wide);
+      };
+      const done = (ev) => {
+        removeEventListener("pointermove", pull);
+        removeEventListener("pointerup", done);
+        removeEventListener("pointercancel", done);
+        board.classList.remove("resizing", "at-edge");
+        el.classList.remove("resizing");
+        const changed = ev.type === "pointerup" && wide.find((block) => block.id === id).w !== original.find((block) => block.id === id).w;
+        if (!changed) return layoutBoard();
+        // the click that ends the pull is not a click on the block
+        const swallow = (click) => (click.preventDefault(), click.stopPropagation());
+        addEventListener("click", swallow, { capture: true, once: true });
+        setTimeout(() => removeEventListener("click", swallow, { capture: true }));
+        void changeLayout((layout) => {
+          layout.blocks = boardAsSaved(homeUi.board);
+        });
+      };
+      addEventListener("pointermove", pull);
+      addEventListener("pointerup", done);
+      addEventListener("pointercancel", done);
+    },
+    { capture: true },
+  );
 }
 
 // --- App page -----------------------------------------------------------------------------------

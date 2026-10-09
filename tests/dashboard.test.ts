@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { arrange, cleanLayout, cleanWidgets, layoutText, movePath, parseLayoutText, webUrl } from "../src/dashboard";
+import { arrange, cleanBlocks, cleanLayout, layoutText, movePath, parseLayoutText, webUrl } from "../src/dashboard";
 
 const link = (title: string, url = "https://example.com/") => ({ type: "link", id: title.toLowerCase(), title, url, icon: "" });
 
@@ -70,43 +70,88 @@ test("a pinned folder keeps its place when it is renamed and leaves when it is r
   expect(removed.groups[0]!.items).toEqual([{ type: "folder", id: "f", title: "", items: [{ type: "files", path: "/DATA/Mediator" }] }]);
 });
 
-const NUMBERS = ["cpu", "memory", "disk", "network", "temp"];
+const at = (blocks: { id: string; x: number; y: number; w: number }[], id: string) => blocks.find((block) => block.id === id);
 
-test("every block of the dashboard stands in exactly one place, or is put away", () => {
-  const usual = { top: NUMBERS, left: [], main: [], side: ["attention", "activity"], bottom: [], hidden: [] };
-  expect(cleanWidgets(null)).toEqual(usual);
-  expect(cleanLayout({ groups: [] }).widgets).toEqual(usual);
-  expect(cleanWidgets({ top: ["activity", "nope", "activity"], side: "x", bottom: ["cpu", "activity"], hidden: ["temp", "cpu", "group:a", "nope"] })).toEqual({ top: ["activity", "memory", "disk", "network"], left: [], main: [], side: ["attention"], bottom: ["cpu"], hidden: ["temp"] });
-  // a layout saved while the numbers were one block, before the left column and before groups were blocks
-  expect(cleanWidgets({ top: [], side: ["attention", "stats", "activity"], bottom: [] }, ["a", "b"])).toEqual({ ...usual, top: [], main: ["group:a", "group:b"], side: ["attention", ...NUMBERS, "activity"] });
+test("a board nobody arranged: the numbers in a row, groups down the left, the lists down the right", () => {
+  const { blocks, hidden } = cleanBlocks(null, ["main", "more"]);
+  expect(hidden).toEqual([]);
+  expect(blocks.map((block) => block.id).sort()).toEqual(["activity", "attention", "cpu", "disk", "group:main", "group:more", "memory", "network", "temp"]);
+  // the row of numbers fills the twelve columns
+  const numbers = blocks.filter((block) => block.y === 0).sort((a, b) => a.x - b.x);
+  expect(numbers.map((block) => block.id)).toEqual(["cpu", "memory", "disk", "network", "temp"]);
+  expect(numbers.reduce((sum, block) => sum + block.w, 0)).toBe(12);
+  expect(at(blocks, "group:main")).toEqual({ id: "group:main", x: 0, y: 1, w: 8 });
+  expect(at(blocks, "attention")).toMatchObject({ x: 8, w: 4 });
+  expect(at(blocks, "activity")!.y).toBeGreaterThan(at(blocks, "attention")!.y);
 });
 
-test("groups of tiles are blocks too: anywhere, once, and never lost", () => {
+test("every block is on the board once, within the grid, or put away", () => {
+  const { blocks, hidden } = cleanBlocks(
+    { blocks: [{ id: "cpu", x: 10, y: 3, w: 9 }, { id: "cpu", x: 0, y: 0, w: 2 }, { id: "nope", x: 0, y: 0, w: 2 }, { id: "attention", x: -4, y: 2.6, w: 1 }, { id: "group:a", x: "1", y: null, w: 40 }, "text"], hidden: ["temp", "cpu", "group:a", "nope"] },
+    ["a", "b"],
+  );
+  expect(at(blocks, "cpu")).toEqual({ id: "cpu", x: 3, y: 3, w: 9 });
+  expect(at(blocks, "attention")).toEqual({ id: "attention", x: 0, y: 3, w: 3 });
+  expect(at(blocks, "group:a")).toEqual({ id: "group:a", x: 0, y: 0, w: 12 });
+  expect(hidden).toEqual(["temp"]);
+  // what was named nowhere comes under everything else, each in a row of its own
+  const added = ["memory", "disk", "network", "activity", "group:b"].map((id) => at(blocks, id)!);
+  expect(added.every((block) => block.y > 3)).toBe(true);
+  expect(new Set(added.map((block) => block.y)).size).toBe(added.length);
+  expect(at(blocks, "group:b")!.w).toBe(12);
+  expect(blocks.filter((block) => block.id === "cpu")).toHaveLength(1);
+});
+
+test("a layout saved while blocks stood in five places comes onto the grid", () => {
+  const { blocks, hidden } = cleanBlocks({ widgets: { top: ["stats"], left: ["activity"], main: ["group:a", "group:b"], side: ["attention"], bottom: [], hidden: [] } }, ["a", "b"]);
+  expect(hidden).toEqual([]);
+  expect(blocks.filter((block) => block.y === 0).map((block) => block.id)).toEqual(["cpu", "memory", "disk", "network", "temp"]);
+  expect(at(blocks, "activity")).toMatchObject({ x: 0, w: 3 });
+  expect(at(blocks, "group:a")).toMatchObject({ x: 3, w: 6 });
+  expect(at(blocks, "group:b")!.y).toBeGreaterThan(at(blocks, "group:a")!.y);
+  expect(at(blocks, "attention")).toMatchObject({ x: 9, w: 3 });
+  // a hidden one stays hidden
+  expect(cleanBlocks({ widgets: { top: ["cpu"], hidden: ["temp"] } }).hidden).toEqual(["temp"]);
+});
+
+test("groups: placed once, never lost; tiles standing by themselves are gone with their last tile", () => {
   const layout = cleanLayout({
-    groups: [{ id: "main", title: "", items: [] }, { id: "net", title: "Network", items: [] }, { id: "media", title: "Media", items: [] }],
-    widgets: { top: ["group:net", "cpu"], left: ["activity", "group:gone", "group:net"], main: [], side: ["group:main"], bottom: ["attention"], hidden: ["memory", "disk", "network", "temp", "group:media"] },
+    groups: [{ id: "main", title: "", items: [] }, { id: "lone", title: "", bare: true, items: [{ type: "app", name: "memos" }] }, { id: "empty", title: "", bare: true, items: [] }],
+    blocks: [{ id: "group:lone", x: 4, y: 2, w: 2 }, { id: "group:empty", x: 0, y: 0, w: 2 }, { id: "group:gone", x: 0, y: 0, w: 2 }],
   });
-  expect(layout.widgets).toEqual({ top: ["group:net", "cpu"], left: ["activity"], main: ["group:media"], side: ["group:main"], bottom: ["attention"], hidden: ["memory", "disk", "network", "temp"] });
-  // arranging keeps the places, and a group that had to be made gets one
-  expect(arrange(layout, [], []).widgets).toEqual(layout.widgets);
-  expect(arrange(cleanLayout(null), ["memos"], []).widgets.main).toEqual(["group:main"]);
-  expect(movePath(layout, "/a", "/b").widgets).toEqual(layout.widgets);
+  expect(layout.groups.map((group) => group.id)).toEqual(["main", "lone"]);
+  expect(layout.groups[1]!.bare).toBe(true);
+  expect(at(layout.blocks, "group:lone")).toEqual({ id: "group:lone", x: 4, y: 2, w: 2 });
+  expect(at(layout.blocks, "group:main")).toBeDefined();
+  expect(at(layout.blocks, "group:empty")).toBeUndefined();
+  // arranging keeps the places; what is new goes to the group with a heading, not to the lone tiles
+  const seen = arrange(layout, ["memos", "new"], []);
+  expect(seen.blocks).toEqual(layout.blocks);
+  expect(seen.groups[0]!.items).toEqual([{ type: "app", name: "new" }]);
+  expect(seen.groups[1]!.items).toEqual([{ type: "app", name: "memos" }]);
+  // with only lone tiles on the board a home for new things is made
+  const lone = cleanLayout({ groups: [{ id: "main", title: "", bare: true, items: [{ type: "app", name: "memos" }] }] });
+  const made = arrange(lone, ["memos", "new"], []);
+  expect(made.groups).toHaveLength(2);
+  expect(made.groups[1]).toMatchObject({ title: "", items: [{ type: "app", name: "new" }] });
+  expect(at(made.blocks, "group:" + made.groups[1]!.id)).toBeDefined();
+  expect(movePath(layout, "/a", "/b").blocks).toEqual(layout.blocks);
 });
 
 test("the layout goes to text and back unchanged; text that is not a layout is refused", () => {
   const layout = cleanLayout({
     groups: [{ id: "main", title: "", items: [{ type: "app", name: "memos" }, { type: "link", id: "r", title: "Router: home", url: "http://192.168.1.1/", icon: "" }, { type: "folder", id: "f", title: "Tools", items: [{ type: "files", path: "/DATA/Media" }] }, { type: "builtin", id: "add" }] }],
-    widgets: { top: ["cpu"], side: ["group:main"], hidden: ["temp"] },
+    blocks: [{ id: "cpu", x: 0, y: 0, w: 4 }, { id: "group:main", x: 4, y: 0, w: 8 }],
+    hidden: ["temp"],
   });
   const text = layoutText(layout);
   expect(text).toContain("title: \"Router: home\"");
-  expect(text).toContain("  left: []\n");
-  expect(text).toContain("  hidden:\n    - temp\n");
+  expect(text).toContain("hidden:\n  - temp\n");
   expect(parseLayoutText(text)).toEqual(layout);
   // an edit by hand: a link added, a tile that is nothing dropped
   const edited = parseLayoutText(text.replace("groups:", "groups:\n  - id: links\n    title: Links\n    items:\n      - type: link\n        url: https://example.com\n      - type: nothing"));
   expect(edited.groups[0]).toMatchObject({ id: "links", title: "Links", items: [{ type: "link", title: "example.com", url: "https://example.com/" }] });
-  expect(edited.widgets.main).toEqual(["group:links"]);
+  expect(at(edited.blocks, "group:links")).toBeDefined();
   for (const bad of ["", "just text", "- a\n- b", "groups: 5", "groups: [\n"]) expect(() => parseLayoutText(bad)).toThrow();
 });
 
@@ -134,14 +179,17 @@ test("Hata's own tiles are always there for those who have them, wherever they w
 test("a number of the system may stand among the tiles, and then it is nowhere else", () => {
   const layout = cleanLayout({
     groups: [{ id: "main", title: "", items: [{ type: "app", name: "memos" }, { type: "widget", id: "cpu" }, { type: "widget", id: "cpu" }, { type: "widget", id: "attention" }, { type: "folder", id: "f", title: "", items: [{ type: "widget", id: "disk" }, { type: "app", name: "gitea" }] }] }],
-    widgets: { top: ["cpu", "memory", "disk"], hidden: ["cpu", "network"] },
+    blocks: [{ id: "cpu", x: 0, y: 0, w: 2 }, { id: "memory", x: 2, y: 0, w: 2 }],
+    hidden: ["cpu", "network"],
   });
   // once among the tiles; the lists are not tiles; a folder holds no numbers
   expect(layout.groups[0]!.items).toEqual([{ type: "app", name: "memos" }, { type: "widget", id: "cpu" }, { type: "folder", id: "f", title: "", items: [{ type: "app", name: "gitea" }] }]);
-  expect(layout.widgets).toMatchObject({ top: ["memory", "disk", "temp"], hidden: ["network"] });
+  expect(at(layout.blocks, "cpu")).toBeUndefined();
+  expect(at(layout.blocks, "memory")).toBeDefined();
+  expect(layout.hidden).toEqual(["network"]);
   // it is there for everyone, like a link, and survives the text form
   const seen = arrange(layout, [], []);
   expect(seen.groups[0]!.items).toEqual([{ type: "widget", id: "cpu" }]);
-  expect(seen.widgets.top).toEqual(["memory", "disk", "temp"]);
+  expect(at(seen.blocks, "cpu")).toBeUndefined();
   expect(parseLayoutText(layoutText(layout))).toEqual(layout);
 });
