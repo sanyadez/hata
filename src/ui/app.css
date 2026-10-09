@@ -291,15 +291,15 @@ button.link { border: 0; background: transparent; padding: 0; font: inherit; cur
 .group-tools .link + .link { margin-left: 14px; }
 .icon-btn.turn .ico { transform: rotate(180deg); }
 .menu-item.flip .ico { transform: scaleX(-1); }
-.arrange-bar { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 10px 12px; margin-bottom: 4px; border: 1px dashed var(--border-strong); border-radius: var(--radius-md); }
-.arrange-bar .grow { flex-basis: 200px; }
 /* a site's own icon is small and often dark: it sits on a light plate */
 .tile.kind-link img.app-icon:not(.mini) { background: #fff; padding: 6px; }
 .app-icon.stack img.mini { background: #fff; }
-.tiles.editing { user-select: none; -webkit-user-select: none; min-height: 72px; border-radius: var(--radius-md); }
-.tiles.editing .tile { cursor: grab; -webkit-touch-callout: none; }
-.tiles.editing .tile-main { pointer-events: none; }
-.tiles.editing .tile.kind-folder .tile-main { pointer-events: auto; cursor: inherit; }
+.tiles { border-radius: var(--radius-md); }
+.tiles:has(> .drop-hint) { min-height: 72px; border: 1px dashed var(--border); }
+.tile.movable { user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+.icon-btn.quiet { opacity: 0; }
+.section-head:is(:hover, :focus-within) .icon-btn.quiet { opacity: 1; }
+@media (pointer: coarse) { .icon-btn.quiet { opacity: 0.6; } }
 .tile.dragging { opacity: 0.3; }
 .tile.drag-ghost { position: fixed; left: 0; top: 0; z-index: 50; margin: 0; pointer-events: none; opacity: 0.92; border-color: var(--accent); box-shadow: 0 12px 32px rgb(0 0 0 / 45%); }
 .tile.drop-before { box-shadow: -4px 0 0 var(--accent); }
@@ -310,7 +310,7 @@ button.link { border: 0; background: transparent; padding: 0; font: inherit; cur
 .tile-dragging, .tile-dragging * { cursor: grabbing !important; }
 dialog.tile-folder header { justify-content: space-between; }
 dialog.tile-folder .drag-out { display: none; text-align: center; }
-dialog.tile-folder.editing .drag-out { display: block; }
+dialog.tile-folder.movable .drag-out { display: block; }
 dialog.tile-folder.drop-out { border-style: dashed; border-color: var(--accent); }
 dialog.tile-folder.drop-out .tiles { opacity: 0.5; }
 
@@ -440,7 +440,7 @@ select.sort { width: auto; }
 .seg .btn:last-child { border-radius: 0 var(--radius-sm) var(--radius-sm) 0; margin-left: -1px; }
 .seg .btn.active { background: var(--surface-2); color: var(--text); }
 .actions > .btn.square.active { border-color: var(--accent); color: var(--accent-text); }
-#home-apps .group:not(:first-child), #home-apps .arrange-bar + .group { margin-top: 12px; }
+#home-apps .group:not(:first-child) { margin-top: 12px; }
 .group { display: grid; gap: 16px; border-radius: var(--radius-md); }
 button.tile-open { border: 0; background: transparent; }
 
@@ -580,7 +580,6 @@ dialog.dropdown header { padding: 4px 6px; margin-bottom: 8px; }
   .stat:last-child { border-bottom: 0; }
   .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
   .tile-main { flex-direction: column; align-items: flex-start; }
-  .arrange-bar .grow { flex-basis: 100%; }
   .tile-open { position: absolute; top: 4px; right: 4px; width: 32px; height: 32px; border-radius: var(--radius-sm); }
   .store, .settings, .files { grid-template-columns: minmax(0, 1fr); gap: 16px; }
   .files-disk, .file-table .when, .sort { display: none; }
@@ -636,7 +635,7 @@ body.term-page { margin: 0; height: 100dvh; display: flex; flex-direction: colum
 
 /* the picture lies behind everything, under a veil of the background colour that keeps text readable */
 :root.has-wallpaper body::before { content: ""; position: fixed; inset: 0; z-index: -1; background: linear-gradient(color-mix(in srgb, var(--bg) var(--wallpaper-dim), transparent), color-mix(in srgb, var(--bg) var(--wallpaper-dim), transparent)), var(--wallpaper) center / cover no-repeat; }
-:root.has-wallpaper :is(.card, .tile, .arrange-bar) { background: color-mix(in srgb, var(--surface) 88%, transparent); backdrop-filter: blur(16px); }
+:root.has-wallpaper :is(.card, .tile) { background: color-mix(in srgb, var(--surface) 88%, transparent); backdrop-filter: blur(16px); }
 :root.has-wallpaper .tile.drag-ghost { background: var(--surface); }
 .swatches { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 .swatch { width: 28px; height: 28px; padding: 0; border-radius: 50%; border: 2px solid var(--border-strong); cursor: pointer; }
@@ -659,7 +658,7 @@ input[type="range"] { accent-color: var(--accent); width: 100%; }
 /* Text that lies on the picture itself: what stands alone gets a pane of its own, the rest a halo of the
    background colour — the picture may be of any brightness */
 :root.has-wallpaper #view { text-shadow: 0 0 2px var(--bg), 0 0 6px var(--bg), 0 0 16px var(--bg); }
-:root.has-wallpaper #view :is(.card, .tile, .arrange-bar, .btn, .page-head, :is(.side > .pad-x, .loose), .section-head, #app-head, input, select, textarea, table, pre, .cats, .tabs) { text-shadow: none; }
+:root.has-wallpaper #view :is(.card, .tile, .btn, .page-head, :is(.side > .pad-x, .loose), .section-head, #app-head, input, select, textarea, table, pre, .cats, .tabs) { text-shadow: none; }
 :root.has-wallpaper :is(.page-head, :is(.side > .pad-x, .loose), .cats, #app-head, #view .section-head:not(:is(.card, :is(.side > .pad-x, .loose), #app-head) *)) { background: color-mix(in srgb, var(--surface) 88%, transparent); backdrop-filter: blur(16px); border: 1px solid var(--border); border-radius: var(--radius-lg); }
 :root.has-wallpaper :is(.page-head, :is(.side > .pad-x, .loose)) { padding: 18px 20px; }
 :root.has-wallpaper #app-head { padding: 18px 20px 0; }
@@ -672,11 +671,12 @@ input[type="range"] { accent-color: var(--accent); width: 100%; }
 /* --- Moving groups and blocks of the dashboard -------------------------------------------------- */
 
 .zone { display: grid; gap: 16px; min-width: 0; align-content: start; }
-.zone.empty:not(.editing) { display: none; }
-.zone.editing { min-height: 72px; border-radius: var(--radius-lg); }
-.zone.editing.empty { border: 1px dashed var(--border-strong); place-items: center; }
-.zone.editing.empty::before { content: attr(data-hint); color: var(--faint); font-size: 12px; }
-.zone.editing .widget, .section-head.handle { cursor: grab; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+.zone { border-radius: var(--radius-lg); }
+.zone.empty { display: none; }
+/* a place with nothing in it appears when a block is picked up, to be dropped into */
+.dragging-widget .zone.empty { display: grid; min-height: 64px; border: 1px dashed var(--border-strong); place-items: center; }
+.dragging-widget .zone.empty::before { content: attr(data-hint); color: var(--faint); font-size: 12px; }
+.zone.movable .widget[data-widget="stats"], .zone.movable .widget > .section-head, .section-head.handle { cursor: grab; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
 .zone.drop-end { outline: 2px dashed var(--accent); outline-offset: 4px; }
 .widget.dragging, .group.dragging { opacity: 0.3; }
 .drop-above { box-shadow: 0 -4px 0 var(--accent); }

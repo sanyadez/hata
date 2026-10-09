@@ -623,9 +623,6 @@
   "files.unpinnedDone": "“{name}” is off the dashboard",
   "error.files.tooManyPinned": "The dashboard holds {max} folders at most. Remove one first.",
   "home.manage": "Manage",
-  "home.arrange": "Arrange",
-  "home.arrangeHint": "Drag a tile to move it (on a touch screen, hold it first); drop it on another one to make a folder. Groups are dragged by their heading, the blocks of the page by themselves. Each tile's menu does the same without dragging.",
-  "home.done": "Done",
   "home.addLink": "Add a link",
   "home.editLink": "Edit the link",
   "home.saveLink": "Save",
@@ -637,12 +634,9 @@
   "home.linkIcon": "Picture address",
   "home.linkIconHint": "Empty — the site's own icon.",
   "home.badLink": "An address starts with http:// or https://",
-  "home.addGroup": "Add a group",
   "home.newGroup": "New group",
   "home.renameGroup": "Rename the group",
   "home.removeGroup": "Remove the group",
-  "home.groupUp": "Move up",
-  "home.groupDown": "Move down",
   "home.emptyGroup": "Nothing here yet — drag tiles in.",
   "home.folder": "Folder",
   "home.newFolder": "New folder",
@@ -720,5 +714,7 @@
   "activity.system.restore.failed": "Restoring the server failed for: {target}",
   "activity.byRestore": "while restoring the server",
   "appearance.remove": "Delete the uploaded picture",
-  "home.dropBlock": "Drop a block here"
+  "home.dropBlock": "Drop a block here",
+  "home.addGroupItem": "Group",
+  "home.addGroupHint": "A named section of the dashboard"
 }

@@ -749,8 +749,8 @@ function renderSystem() {
 
 // --- Dashboard: tiles, groups, folders of tiles -------------------------------------------------
 
-/** `editing` — tiles are being arranged; `folder` — the open folder of tiles; `drag` — the tile in the air */
-const homeUi = { editing: false, folder: null, drag: null, stale: false };
+/** `folder` — the open folder of tiles; `drag` — what is in the air; `widgets` — the blocks of the page */
+const homeUi = { folder: null, drag: null, stale: false, widgets: null };
 
 const tileKey = (item) => item.type + ":" + (item.type === "app" ? item.name : item.type === "files" ? item.path : item.id);
 const newId = () => Array.from(crypto.getRandomValues(new Uint8Array(6)), (byte) => byte.toString(16).padStart(2, "0")).join("");
@@ -795,7 +795,7 @@ function tileIcon(item, size = "") {
 function tile(item) {
   const target = tileTarget(item);
   if (!target) return null;
-  const editing = homeUi.editing;
+  const admin = isAdmin();
   const title = tileTitle(item);
   let cls = "";
   let href = null;
@@ -827,21 +827,17 @@ function tile(item) {
     if (!shown) return null;
     sub = t("home.items", { n: shown });
   }
+  // what has no page of its own to manage it gets a menu: where to move it, how to take it off
+  if (admin && !side) side = h("button", { type: "button", class: "tile-open", title: t("home.tileActions"), "aria-label": `${t("home.tileActions")}: ${title}`, onclick: () => tileMenu(item) }, icon("more"));
   const content = [tileIcon(item), h("span", { class: "tile-text" }, h("span", { class: "tile-top" }, h("span", { class: "tile-name" }, title), badges), h("span", { class: "tile-sub" }, sub))];
   const key = tileKey(item);
   const main =
     item.type === "folder"
       ? h("button", { type: "button", class: "tile-main", onclick: () => homeUi.drag?.moved || openFolder(item.id) }, content)
-      : editing
-        ? h("div", { class: "tile-main" }, content)
-        : h("a", { class: "tile-main", href, ...(external ? { target: "_blank", rel: "noopener noreferrer" } : {}) }, content);
-  if (!editing) return h("div", { class: `tile kind-${item.type} ${cls}`, "data-key": key }, main, side);
-  return h(
-    "div",
-    { class: `tile kind-${item.type} ${cls} editing`, "data-key": key, onpointerdown: (e) => dragStart(e, item), oncontextmenu: (e) => e.preventDefault(), ondragstart: (e) => e.preventDefault() },
-    main,
-    h("button", { type: "button", class: "tile-open", title: t("home.tileActions"), "aria-label": `${t("home.tileActions")}: ${title}`, onclick: () => tileMenu(item) }, icon("more")),
-  );
+      : h("a", { class: "tile-main", href, draggable: false, ...(external ? { target: "_blank", rel: "noopener noreferrer" } : {}) }, content);
+  if (!admin) return h("div", { class: `tile kind-${item.type} ${cls}`, "data-key": key }, main, side);
+  // an administrator moves tiles by dragging them; a long press of a finger is the start of that, not a menu
+  return h("div", { class: `tile kind-${item.type} ${cls} movable`, "data-key": key, onpointerdown: (e) => dragStart(e, item), oncontextmenu: (e) => homeUi.drag?.active && e.preventDefault(), ondragstart: (e) => e.preventDefault() }, main, side);
 }
 
 // --- Changing the layout: every change is made on a copy, shown at once and sent to the server ----
@@ -1039,18 +1035,16 @@ function groupHead(group, index, count) {
   const first = index === 0;
   const title = group.title || t("home.apps");
   const tool = (label, iconName, action, attrs = {}) => h("button", { type: "button", class: "icon-btn " + (attrs.class ?? ""), title: label, "aria-label": `${label}: ${title}`, disabled: attrs.disabled, onclick: action }, icon(iconName));
-  const swap = (step) => changeLayout((next) => void next.groups.splice(index + step, 0, next.groups.splice(index, 1)[0]));
-  const tools = homeUi.editing
-    ? h(
-        "div",
-        { class: "group-tools" },
-        tool(t("files.rename"), "edit", () => nameDialog(t("home.renameGroup"), title, t("files.rename"), (name) => changeLayout((next) => void (next.groups[index].title = name)))),
-        tool(t("home.groupUp"), "up", () => swap(-1), { disabled: first }),
-        tool(t("home.groupDown"), "up", () => swap(1), { disabled: index === layout.groups.length - 1, class: "turn" }),
-        // its tiles go to the group that takes its place at the top, or to the first one
-        tool(t("home.removeGroup"), "trash", () => changeLayout((next) => void next.groups[first ? 1 : 0].items.push(...next.groups.splice(index, 1)[0].items)), { disabled: layout.groups.length < 2 }),
-      )
-    : first && h("div", { class: "group-tools" }, isAdmin() && h("button", { type: "button", class: "link", onclick: () => setEditing(true) }, t("home.arrange"), icon("edit")), state.user.role !== "guest" && h("a", { class: "link", href: "#/store" }, t("home.store"), icon("arrow")));
+  const tools = h(
+    "div",
+    { class: "group-tools" },
+    isAdmin() && [
+      tool(t("files.rename"), "edit", () => nameDialog(t("home.renameGroup"), title, t("files.rename"), (name) => changeLayout((next) => void (next.groups[index].title = name))), { class: "quiet" }),
+      // its tiles go to the group that takes its place at the top, or to the first one
+      layout.groups.length > 1 && tool(t("home.removeGroup"), "trash", () => changeLayout((next) => void next.groups[first ? 1 : 0].items.push(...next.groups.splice(index, 1)[0].items)), { class: "quiet" }),
+    ],
+    first && state.user.role !== "guest" && h("a", { class: "link", href: "#/store" }, t("home.store"), icon("arrow")),
+  );
   return h("div", { class: "section-head" }, h("h2", null, title, first && !group.title && h("span", { class: "muted small" }, t("home.installed", { n: count }))), tools);
 }
 
@@ -1065,36 +1059,23 @@ function addDialog() {
     entry(t("home.addApp"), t("home.addAppHint"), "store", () => go("#/store")),
     state.overview.importable > 0 && entry(t("home.import"), t("home.importHint", { n: state.overview.importable }), "download", () => go("#/import")),
     entry(t("home.addLinkItem"), t("home.addLinkHint"), "link", () => linkDialog()),
+    entry(t("home.addGroupItem"), t("home.addGroupHint"), "grid", () => newGroupDialog()),
     entry(t("home.addFolder"), t("home.addFolderHint"), "folder", () => folderPicker({ title: t("home.addFolderTitle"), start: "", confirmLabel: t("home.addFolderHere"), allowed: (at) => !pinned().includes(at), action: (at) => pinFolder(at, true, false) })),
   );
 }
 
-function setEditing(on) {
-  homeUi.editing = on;
-  renderHomeBody();
-}
-
 function renderDashboard(box) {
   const o = state.overview;
-  const editing = (homeUi.editing &&= isAdmin());
+  const admin = isAdmin();
   const groups = o.dashboard.groups;
   put(
     box,
-    editing &&
-      h(
-        "div",
-        { class: "arrange-bar" },
-        h("p", { class: "muted small grow" }, t("home.arrangeHint")),
-        button(t("home.addLink"), { class: "small", onclick: () => linkDialog() }, "link"),
-        button(t("home.addGroup"), { class: "small", onclick: () => newGroupDialog() }, "plus"),
-        button(t("home.done"), { class: "small primary", onclick: () => setEditing(false) }, "check"),
-      ),
     groups.map((group, index) => {
       const tiles = group.items.map(tile).filter(Boolean);
       // a group with nothing in it for this user is not theirs to see
-      if (!tiles.length && index > 0 && !editing) return null;
+      if (!tiles.length && index > 0 && !admin) return null;
       const head = groupHead(group, index, o.apps.length);
-      if (editing && groups.length > 1) {
+      if (admin && groups.length > 1) {
         head.classList.add("handle");
         head.addEventListener("pointerdown", (e) => dragStart(e, group.id, GROUP_DRAG, head.parentElement));
       }
@@ -1104,10 +1085,10 @@ function renderDashboard(box) {
         head,
         h(
           "div",
-          { class: "tiles" + (editing ? " editing" : ""), "data-group": group.id },
+          { class: "tiles", "data-group": group.id },
           tiles,
-          index === 0 && !editing && isAdmin() && h("button", { type: "button", class: "tile add", onclick: addDialog }, h("span", { class: "tile-main" }, h("span", { class: "app-icon plus" }, icon("plus")), h("span", { class: "tile-text" }, h("span", { class: "tile-name" }, t("home.add")), h("span", { class: "tile-sub" }, t("home.addHint"))))),
-          editing && !tiles.length && h("p", { class: "muted small drop-hint" }, t("home.emptyGroup")),
+          index === 0 && admin && h("button", { type: "button", class: "tile add", onclick: addDialog }, h("span", { class: "tile-main" }, h("span", { class: "app-icon plus" }, icon("plus")), h("span", { class: "tile-text" }, h("span", { class: "tile-name" }, t("home.add")), h("span", { class: "tile-sub" }, t("home.addHint"))))),
+          admin && !tiles.length && index > 0 && h("p", { class: "muted small drop-hint" }, t("home.emptyGroup")),
         ),
       );
     }),
@@ -1119,7 +1100,7 @@ function renderDashboard(box) {
 
 function openFolder(id) {
   if (homeUi.folder) return;
-  const body = h("div", { class: "tiles" + (homeUi.editing ? " editing" : ""), "data-folder": id });
+  const body = h("div", { class: "tiles", "data-folder": id });
   const head = h("h2", { class: "clip grow" });
   const rename = h("button", { type: "button", class: "icon-btn", title: t("files.rename"), "aria-label": t("files.rename"), onclick: () => renameFolderDialog(homeUi.folder.item) }, icon("edit"));
   const dialog = openDialog("wide tile-folder", h("header", null, head, rename, closeX(() => dialog)), body, h("p", { class: "muted small drag-out" }, t("home.dragOut")));
@@ -1138,8 +1119,8 @@ function renderFolder() {
   if (!tiles.length) return open.dialog.close();
   open.item = item;
   open.head.textContent = item.title || t("home.folder");
-  open.rename.hidden = !homeUi.editing;
-  open.dialog.classList.toggle("editing", homeUi.editing);
+  open.rename.hidden = !isAdmin();
+  open.dialog.classList.toggle("movable", isAdmin());
   open.body.replaceChildren(...tiles);
 }
 
@@ -1169,7 +1150,7 @@ function dragStart(e, item, kind = TILE_DRAG, el = e.currentTarget) {
     // a modal dialog is drawn above everything else on the page
     (homeUi.folder?.dialog ?? document.body).append(drag.ghost);
     el.classList.add("dragging");
-    document.documentElement.classList.add("tile-dragging");
+    document.documentElement.classList.add("tile-dragging", "dragging-" + kind.name);
     dragMove(drag);
     const step = () => {
       if (homeUi.drag !== drag) return;
@@ -1226,6 +1207,7 @@ function besideBlock(drag, selector, name) {
 
 /** A group is moved among the groups */
 const GROUP_DRAG = {
+  name: "group",
   ignore: "button, a, input",
   find: (drag) => besideBlock(drag, ".group[data-group-id]", "groupId"),
   drop: (drag, target) =>
@@ -1239,6 +1221,7 @@ const GROUP_DRAG = {
 
 /** A block — the system's numbers, what needs attention, the activity — is moved among the blocks and the places for them */
 const WIDGET_DRAG = {
+  name: "widget",
   ignore: "button, a, input",
   find: (drag) => {
     const beside = besideBlock(drag, ".widget[data-widget]", "widget");
@@ -1261,6 +1244,7 @@ const WIDGET_DRAG = {
 
 /** A tile is moved among the tiles, into a folder, onto another tile (which makes a folder), out of an open folder */
 const TILE_DRAG = {
+  name: "tile",
   ignore: ".tile-open",
   find: dropTarget,
   drop: (drag, target) => {
@@ -1318,7 +1302,7 @@ function dragEnd(drop) {
   drag.ghost?.remove();
   drag.marked?.classList.remove(...DROP_CLASSES);
   drag.el.classList.remove("dragging");
-  document.documentElement.classList.remove("tile-dragging");
+  document.documentElement.classList.remove("tile-dragging", "dragging-" + drag.kind.name);
   homeUi.folder?.dialog.classList.remove("drop-out");
   // the click that ends a drag is not a click on what was dragged
   if (drag.active) {
@@ -1373,7 +1357,8 @@ function renderHome() {
   const widget = (id, el) => {
     el.classList.add("widget");
     el.dataset.widget = id;
-    el.addEventListener("pointerdown", (e) => homeUi.editing && dragStart(e, id, WIDGET_DRAG));
+    // the numbers are dragged by any part of them; a list with text to read and select, by its heading
+    el.addEventListener("pointerdown", (e) => isAdmin() && (id === "stats" || e.target.closest(".section-head")) && dragStart(e, id, WIDGET_DRAG));
     return el;
   };
   // the blocks are made once and then only moved and refilled: the numbers of the system live in one of them
@@ -1415,9 +1400,8 @@ function renderHomeBody() {
   renderSystem();
 }
 
-/** Puts every block into its place; a place with nothing in it shows only while arranging */
+/** Puts every block into its place; a place with nothing in it shows only while a block is in the air */
 function placeWidgets() {
-  const editing = homeUi.editing && isAdmin();
   for (const [name, ids] of Object.entries(state.overview.dashboard.widgets)) {
     const zone = document.getElementById("zone-" + name);
     if (!zone) continue;
@@ -1425,10 +1409,10 @@ function placeWidgets() {
     // only what changed is moved: a block taken out and put back would lose its scroll and focus
     if (blocks.length !== zone.children.length || blocks.some((block, i) => zone.children[i] !== block)) zone.replaceChildren(...blocks);
     zone.classList.toggle("empty", !blocks.length);
-    zone.classList.toggle("editing", editing);
+    zone.classList.toggle("movable", isAdmin());
     zone.dataset.hint = t("home.dropBlock");
   }
-  document.getElementById("home-columns")?.classList.toggle("no-side", !editing && !state.overview.dashboard.widgets.side.length);
+  document.getElementById("home-columns")?.classList.toggle("no-side", !state.overview.dashboard.widgets.side.length);
 }
 
 // --- App page -----------------------------------------------------------------------------------
