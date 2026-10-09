@@ -724,5 +724,6 @@
   "home.layoutTextLead": "Групи, плитки й місце кожного блока у форматі YAML. Те, що не є частиною розкладки, під час збереження відкидається.",
   "home.saveLayout": "Зберегти",
   "error.dashboard.badText": "Цей текст не є розкладкою: {message}",
-  "home.moveBlock": "Перемістити"
+  "home.dropBlock": "Киньте блок сюди",
+  "home.statsBlock": "Показники системи"
 }

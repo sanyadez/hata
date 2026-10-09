@@ -80,7 +80,6 @@ import { zipStream } from "./zip";
 
 import appCss from "./ui/app.css" with { type: "text" };
 import appJs from "./ui/app.js" with { type: "text" };
-import gridJs from "./ui/grid.js" with { type: "text" };
 import indexHtml from "./ui/index.html" with { type: "text" };
 import terminalHtml from "./ui/terminal.html" with { type: "text" };
 import terminalJs from "./ui/terminal.js" with { type: "text" };
@@ -117,7 +116,6 @@ const STATIC: Record<string, { body: string; type: string; headers?: Record<stri
   "/": { body: indexHtml, type: "text/html; charset=utf-8" },
   "/app.css": { body: appCss, type: "text/css; charset=utf-8" },
   "/app.js": { body: appJs, type: "text/javascript; charset=utf-8" },
-  "/grid.js": { body: gridJs, type: "text/javascript; charset=utf-8" },
   // the terminal is a page of its own, shown in a frame: its emulator writes styles into the page, which
   // the UI's policy forbids — here it is allowed, and nothing but the emulator lives there
   "/terminal.html": {

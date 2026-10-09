@@ -17,12 +17,11 @@ Early development. What works today:
 - dashboard: CPU, memory, disk, network and temperature with history, app tiles with live state, a
   "needs attention" list (an app that keeps restarting, a failed install or update, a disk filling up) and
   recent activity;
-- the dashboard is yours to arrange, with no editing mode to enter: it is a grid on which everything is
-  dragged anywhere (mouse or finger) and made wider or narrower by its edge — the numbers of the system
-  each on its own, what needs attention, the activity, groups of tiles, single tiles standing by
-  themselves; plain links next to the apps, folders of tiles that open in place like on a phone; Hata's
-  own blocks can be taken off and added back; the whole layout can also be edited as text (YAML); a tile
-  opens the app, the small button next to it leads to its page in Hata;
+- the dashboard is yours to arrange: plain links next to the apps, named groups, folders of tiles that
+  open in place like on a phone — all by dragging, mouse or finger, with no editing mode to enter; groups
+  and the blocks of the page (system numbers, what needs attention, activity) are dragged too, and can be
+  taken off and added back; the whole layout can also be edited as text (YAML); a tile opens the app, the
+  small button next to it leads to its page in Hata;
 - terminal in the browser, for administrators: a shell on the server (it keeps running when the page is
   closed and shows the latest output when you come back) and a shell inside a container of an app;
 - the look is yours as well: accent and background colours (a light background turns the page light), a

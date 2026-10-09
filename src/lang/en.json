@@ -724,5 +724,6 @@
   "home.layoutTextLead": "Groups, tiles and where every block stands, as YAML. What does not fit a layout is dropped on saving.",
   "home.saveLayout": "Save",
   "error.dashboard.badText": "This text is not a layout: {message}",
-  "home.moveBlock": "Move"
+  "home.dropBlock": "Drop a block here",
+  "home.statsBlock": "System numbers"
 }
