@@ -1,6 +1,6 @@
 {
   "name": "hata",
-  "version": "0.1.0-alpha.1",
+  "version": "0.1.0-alpha.2",
   "description": "A home server in a single file",
   "license": "MIT",
   "private": true,

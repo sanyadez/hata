@@ -1,4 +1,4 @@
-export const VERSION = "0.1.0-alpha.1";
+export const VERSION = "0.1.0-alpha.2";
 
 /** true — running as the single-file binary (`bun build --compile`), not from source */
 export const COMPILED = Bun.main.startsWith("/$bunfs/");
