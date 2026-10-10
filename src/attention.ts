@@ -26,7 +26,7 @@ const MEMORY_WARN = 92;
 const TEMPERATURE_WARN = 85;
 const FAILURE_WINDOW_MS = 24 * 3600 * 1000;
 
-export function attention(input: { system: SystemStatus; docker: DockerInfo; apps: InstalledApp[]; activity: Activity[]; update?: string | null; now?: number }): AttentionItem[] {
+export function attention(input: { system: SystemStatus; docker: DockerInfo; apps: InstalledApp[]; activity: Activity[]; update?: string | null; offsite?: { error: string } | null; now?: number }): AttentionItem[] {
   const { system, docker, apps, activity } = input;
   const now = input.now ?? Date.now();
   const items: AttentionItem[] = [];
@@ -74,6 +74,9 @@ export function attention(input: { system: SystemStatus; docker: DockerInfo; app
   if (system.temperature !== null && system.temperature >= TEMPERATURE_WARN) {
     items.push({ id: "temperature", severity: "warn", code: "temperature", detail: { degrees: system.temperature } });
   }
+
+  // the second copy of the backups is behind: it stays on the list until a run gets through
+  if (input.offsite) items.push({ id: "offsite", severity: "warn", code: "offsite", detail: { message: input.offsite.error } });
 
   if (input.update) items.push({ id: "update", severity: "warn", code: "update", detail: { version: input.update } });
 

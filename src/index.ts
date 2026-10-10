@@ -18,7 +18,10 @@ Usage:
                     CasaOS running, --undo gives the apps back
   hata restore <backup folder>
                     bring the server back from its backup: Hata's settings and users, then
-                    every app from its latest snapshot (needs root); --yes does not ask
+                    every app from its latest snapshot (needs root); --yes does not ask.
+                    A copy sealed with a passphrase is opened first
+  hata unseal <file.enc> [<output file>]
+                    open one file of a sealed backup by hand
   hata setup-url    print the address for creating the first administrator
   hata version      print the version
 `;
@@ -49,6 +52,10 @@ switch (command) {
     const { migrateCasaos } = await import("./migrate");
     process.exit(await migrateCasaos(process.argv.slice(4)));
     break;
+  }
+  case "unseal": {
+    const { unseal } = await import("./restore");
+    process.exit(await unseal(process.argv.slice(3)));
   }
   case "restore": {
     const { restoreServer } = await import("./restore");

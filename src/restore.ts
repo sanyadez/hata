@@ -12,6 +12,7 @@ import { MOVED_MARK, serviceStateDir } from "./statedir";
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { join, relative } from "node:path";
 import { readJsonFile, writeJsonAtomic } from "./fsutil";
+import { openFile, SEALED_EXT, SealError } from "./seal";
 import { COMPILED, VERSION } from "./version";
 
 export const SERVER_DIR = "_server";
@@ -79,6 +80,91 @@ function confirm(question: string): boolean {
 
 const USAGE = "Usage: hata restore <backup folder> [--yes]";
 
+/**
+ * Of a folder that came back from another machine sealed: the files of its latest snapshot, if that one
+ * is not open yet. Older ones stay sealed — a restore takes the latest, and they can be opened by hand.
+ */
+export function sealedToOpen(names: string[]): string[] {
+  const ids = [...new Set(names.map((name) => /^(\d{8}-\d{6})\.(tar\.gz|json)(\.enc)?$/.exec(name)?.[1]).filter((id): id is string => !!id))].sort();
+  const latest = ids.findLast((id) => ["tar.gz", "json"].every((kind) => names.includes(`${id}.${kind}`) || names.includes(`${id}.${kind}${SEALED_EXT}`)));
+  if (!latest) return [];
+  return ["json", "tar.gz"].filter((kind) => !names.includes(`${latest}.${kind}`)).map((kind) => `${latest}.${kind}${SEALED_EXT}`);
+}
+
+/** Asks without showing what is typed */
+function askSecret(question: string): string {
+  if (!process.stdin.isTTY) return "";
+  const stty = (mode: string) => Bun.spawnSync({ cmd: ["stty", mode], stdin: "inherit", stdout: "ignore", stderr: "ignore" });
+  stty("-echo");
+  try {
+    return prompt(question) ?? "";
+  } finally {
+    stty("echo");
+    console.log("");
+  }
+}
+
+const passphrase = (): string => process.env.HATA_PASSPHRASE || askSecret("Passphrase of the backups:");
+
+/** Opens the latest snapshot of every folder of a sealed copy, next to the sealed files. False — it could not */
+async function openSealedCopy(from: string): Promise<boolean> {
+  const work: string[] = [];
+  let dirs: string[] = [];
+  try {
+    dirs = readdirSync(from, { withFileTypes: true }).filter((e) => e.isDirectory() && (e.name === SERVER_DIR || /^[a-z0-9][a-z0-9_-]*$/.test(e.name))).map((e) => e.name);
+  } catch {}
+  // the server's own first: it is small, and a wrong passphrase shows at once
+  for (const dir of dirs.sort((a, b) => Number(b === SERVER_DIR) - Number(a === SERVER_DIR))) work.push(...sealedToOpen(readdirSync(join(from, dir))).map((name) => join(from, dir, name)));
+  if (!work.length) return true;
+  console.log("These backups are sealed with a passphrase.");
+  const secret = passphrase();
+  if (!secret) {
+    console.error("A passphrase is needed: type it when asked, or give it in HATA_PASSPHRASE.");
+    return false;
+  }
+  for (const file of work) {
+    console.log(`Opening ${file}`);
+    try {
+      await openFile(file, file.slice(0, -SEALED_EXT.length), secret);
+    } catch (e) {
+      console.error(e instanceof SealError ? e.message : `Could not open ${file}: ${e instanceof Error ? e.message : e}`);
+      return false;
+    }
+  }
+  return true;
+}
+
+/** `hata unseal <file> [<output>]`: opens one sealed file by hand */
+export async function unseal(args: string[]): Promise<number> {
+  const [file, output, ...extra] = args;
+  if (!file || extra.length || file.startsWith("--")) {
+    console.error("Usage: hata unseal <file.enc> [<output file>]");
+    return 2;
+  }
+  const to = output ?? (file.endsWith(SEALED_EXT) ? file.slice(0, -SEALED_EXT.length) : file + ".open");
+  if (!existsSync(file)) {
+    console.error(`There is no file ${file}.`);
+    return 1;
+  }
+  if (existsSync(to)) {
+    console.error(`${to} already exists.`);
+    return 1;
+  }
+  const secret = passphrase();
+  if (!secret) {
+    console.error("A passphrase is needed: type it when asked, or give it in HATA_PASSPHRASE.");
+    return 1;
+  }
+  try {
+    await openFile(file, to, secret);
+  } catch (e) {
+    console.error(e instanceof Error ? e.message : String(e));
+    return 1;
+  }
+  console.log(to);
+  return 0;
+}
+
 /** `hata restore <backup folder>`: puts Hata's state back from the latest snapshot of the server found there */
 export async function restoreServer(args: string[]): Promise<number> {
   const flags = args.filter((a) => a.startsWith("--"));
@@ -96,6 +182,7 @@ export async function restoreServer(args: string[]): Promise<number> {
   const { DATA_DIR, SECRETS_DIR, SECRET_NAMES } = await import("./config");
   const apart = SECRETS_DIR !== DATA_DIR;
 
+  if (!(await openSealedCopy(from))) return 1;
   const snapshot = listServerSnapshots(from)[0];
   if (!snapshot) {
     console.error(`No backup of the server was found in ${join(from, SERVER_DIR)}.\nGive the folder Hata kept its backups in (by default <data folder>/Backups).`);

@@ -2405,7 +2405,108 @@ function renderBackupsBody() {
       error,
       h("footer", null, h("button", { class: "btn primary" }, t("settings.save"))),
     ),
+    offsiteCard(b.offsite),
     h("p", { class: "muted small pad-x" }, t("backup.how")),
+  );
+  // a run of the copy shows no job: look again until it ends
+  clearTimeout(offsiteTimer);
+  if (b.offsite.running) offsiteTimer = setTimeout(() => state.route.view === "backups" && loadBackups(), 3000);
+}
+
+let offsiteTimer = 0;
+
+/** Connects to the other machine; seen for the first time, its key is shown and has to be confirmed */
+async function offsiteCheck(trust) {
+  const result = await api("POST", "/api/backups/offsite/check", trust ? { trust } : {});
+  if (result.status !== "unknownHost") return result;
+  return new Promise((resolve) => {
+    let answered = false;
+    const dialog = openDialog(
+      "confirm",
+      h("h2", null, t("offsite.hostTitle")),
+      h("p", { class: "muted" }, t("offsite.hostLead")),
+      h("p", { class: "cmd whole" }, icon("lock"), `${result.keyType} ${result.fingerprint}`),
+      h("p", { class: "muted small" }, t("offsite.hostHint")),
+      h("p", { class: "cmd whole" }, icon("terminal"), "for f in /etc/ssh/ssh_host_*_key.pub; do ssh-keygen -lf $f; done"),
+      h(
+        "footer",
+        null,
+        closeButton(() => dialog, t("common.cancel")),
+        button(t("offsite.hostTrust"), {
+          class: "primary",
+          onclick: () => {
+            answered = true;
+            dialog.close();
+            resolve(offsiteCheck(result.fingerprint));
+          },
+        }),
+      ),
+    );
+    dialog.addEventListener("close", () => answered || resolve({ status: "cancelled" }));
+  });
+}
+
+function offsiteCard(o) {
+  const enabled = h("input", { type: "checkbox", checked: o.enabled });
+  const host = h("input", { value: o.host, placeholder: "nas.lan", spellcheck: false, autocapitalize: "off", class: "mono", required: true });
+  const port = h("input", { type: "number", min: 1, max: 65535, value: o.port, class: "short mono", required: true });
+  const user = h("input", { value: o.user, placeholder: "backup", spellcheck: false, autocapitalize: "off", class: "mono", required: true });
+  const path = h("input", { value: o.path, spellcheck: false, class: "mono", required: true });
+  const seal = h("input", { type: "checkbox", checked: o.sealed });
+  const passphrase = h("input", { type: "password", autocomplete: "new-password", minlength: 8, placeholder: o.sealed ? t("offsite.passphraseKept") : "", class: "mono" });
+  const error = h("p", { class: "error", role: "alert" });
+  const last = o.last;
+  const status = !o.available
+    ? h("p", { class: "error" }, t("offsite.noSftp"))
+    : o.running
+      ? h("p", { class: "muted small" }, t("offsite.running"))
+      : last && o.enabled && h("p", { class: last.error ? "error" : "muted small" }, last.error ? t("offsite.failed", { when: ago(last.at), message: last.error }) : t("offsite.inStep", { when: ago(last.at) }));
+  const save = async (e) => {
+    e.preventDefault();
+    error.textContent = "";
+    if (seal.checked && !o.sealed && !passphrase.value) return void (error.textContent = t("error.offsite.badPassphrase"));
+    const data = { enabled: enabled.checked, host: host.value.trim(), port: Number(port.value), user: user.value.trim(), path: path.value.trim() };
+    if (!seal.checked) data.passphrase = "";
+    else if (passphrase.value) data.passphrase = passphrase.value;
+    try {
+      state.backups = await api("PUT", "/api/backups/offsite", data);
+      document.activeElement?.blur();
+      const result = await offsiteCheck();
+      if (result.status === "ok") {
+        toast(t("offsite.connected"));
+        if (enabled.checked) await api("POST", "/api/backups/offsite/sync", {});
+      }
+      await loadBackups();
+      // after the page is drawn anew: the message belongs to the form that is there now
+      const shown = document.querySelector("#offsite-form .error[role=alert]");
+      if (shown && result.status === "denied") shown.textContent = t("offsite.denied");
+      if (shown && result.status === "failed") shown.textContent = result.message;
+    } catch (err) {
+      error.textContent = errorText(err);
+    }
+  };
+  return h(
+    "form",
+    { class: "card pad stack", id: "offsite-form", onsubmit: save },
+    h("h2", null, t("offsite.title")),
+    h("label", { class: "check" }, enabled, h("span", null, h("strong", null, t("offsite.enable")), h("span", { class: "muted small block" }, t("offsite.enableHint")))),
+    h("div", { class: "field-row" }, field(t("offsite.host"), host), field(t("offsite.port"), port)),
+    field(t("offsite.user"), user),
+    field(t("offsite.path"), path, t("offsite.pathHint")),
+    o.publicKey &&
+      h(
+        "div",
+        { class: "field" },
+        h("span", { class: "label" }, t("offsite.key")),
+        h("p", { class: "cmd" }, h("span", { class: "grow clip" }, o.publicKey), h("button", { type: "button", class: "icon-btn", title: t("twofa.copy"), "aria-label": t("twofa.copy"), onclick: () => copyText(o.publicKey) }, icon("copy"))),
+        h("span", { class: "hint" }, t("offsite.keyHint", { user: o.user || "backup" })),
+      ),
+    h("label", { class: "check" }, seal, h("span", null, h("strong", null, t("offsite.seal")), h("span", { class: "muted small block" }, t("offsite.sealHint")))),
+    field(t("offsite.passphrase"), passphrase, t("offsite.passphraseHint")),
+    o.fingerprint && h("p", { class: "muted small" }, t("offsite.hostKnown", { fingerprint: o.fingerprint })),
+    status,
+    error,
+    h("footer", null, h("button", { class: "btn primary", disabled: !o.available }, t("offsite.save"))),
   );
 }
 

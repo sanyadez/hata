@@ -152,6 +152,9 @@ textarea.code.page { min-height: 60dvh; background: var(--surface); padding: 16p
 .banner { background: var(--warn-soft); border: 1px solid var(--warn); border-radius: var(--radius-md); padding: 12px 16px; }
 .empty { text-align: center; color: var(--muted); padding: 56px 16px; display: grid; gap: 16px; justify-items: center; }
 .cmd { display: flex; align-items: center; gap: 8px; color: var(--faint); font-family: var(--font-mono); font-size: 12px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; min-width: 0; }
+/* a line that has to be read whole: a key's fingerprint, a command to type */
+.cmd.whole { white-space: normal; overflow-wrap: anywhere; align-items: flex-start; }
+.cmd.whole svg { flex: none; margin-top: 2px; }
 
 .dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--faint); flex: none; }
 .dot.running { background: var(--ok); }

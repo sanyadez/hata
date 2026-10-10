@@ -88,3 +88,9 @@ test("a newer version of Hata is mentioned", () => {
   const items = attention({ system: system(), docker: { available: true }, apps: [], activity: [], update: "0.2.0" });
   expect(items).toEqual([{ id: "update", severity: "warn", code: "update", detail: { version: "0.2.0" } }]);
 });
+
+test("the copy of the backups on another machine is behind: one item, whatever the run that failed", () => {
+  expect(codes({ offsite: null })).toEqual([]);
+  const [item] = attention({ system: system(), docker, apps: [], activity: [], offsite: { error: "Connection refused" } });
+  expect(item).toEqual({ id: "offsite", severity: "warn", code: "offsite", detail: { message: "Connection refused" } });
+});

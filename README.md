@@ -53,6 +53,11 @@ Early development. What works today:
 - a backup of the whole server: with every run Hata's own state (settings, users, the dashboard, the
   apps' compose files) is saved next to the apps' snapshots, and `sudo hata restore <backup folder>` on a
   new machine brings back Hata and then every app from its latest snapshot;
+- a second copy of the backups on another machine: every snapshot is sent over SFTP to a NAS, a rented
+  storage box or another server — with a key Hata makes for itself, never a password. With a passphrase
+  the files are encrypted before they leave, so the other machine cannot read them. A day the other
+  machine was off is caught up the next time, and a copy that falls behind shows up under "needs
+  attention". `hata restore` opens such a copy when given the passphrase;
 - files: the server's files in the browser, opened in the data folder and reaching everywhere — folders,
   upload by drag and drop (whole folders too, large files in parts), download of a file or of a folder as a
   ZIP archive, rename, move, copy, delete, copying a path, putting a folder on the dashboard, pictures, video and sound opened in place, text
@@ -75,8 +80,7 @@ Early development. What works today:
   started; if it does not come up, the previous version is put back by itself. Apps keep running meanwhile;
 - English and Ukrainian UI, light and dark, phone-friendly.
 
-Not there yet: wildcard certificates (DNS challenge), backups to another machine, a trash and share links
-for files.
+Not there yet: wildcard certificates (DNS challenge), a trash and share links for files.
 
 ## Install
 

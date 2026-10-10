@@ -15,7 +15,8 @@ import { recent, record } from "./activity";
 import { AppError, appAction, appDetail, appLogs, appIcon, appSettings, appStats, applyCompose, ICON_MIME, MAX_ICON, removeAppIcon, setAppIcon, applySettings, installFromSettings, applyStoreUpdate, composeText, getJob, installCustom, installFromStore, listApps, listJobs, onAppRemoved, planStoreUpdate, readCompose, removeApp, storeAppDetail } from "./apps";
 import { certificateStates, challengeResponse, ensureCertificates, loadCertificates } from "./acme";
 import { attention } from "./attention";
-import { backupApp, backupOverview, deleteSnapshot, listSnapshots, restoreSnapshot, resumeRestore, runBackups, scheduleBackups, takeServerSnapshot } from "./backup";
+import { backupApp, backupOverview, deleteSnapshot, listSnapshots, mirror, restoreSnapshot, resumeRestore, runBackups, scheduleBackups, takeServerSnapshot } from "./backup";
+import { checkOffsite, forgetHost, offsiteFailure, saveOffsite } from "./offsite";
 import { APP_NAME_RE, dumpCompose } from "./appform";
 import {
   acceptInvite,
@@ -622,7 +623,7 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
       arch: ARCH,
       // with a domain, apps are opened at <label>.<domain> when Hata itself is opened by that domain
       site: { domain: siteDomain(), mode: settings.https.mode, local: localDomain() },
-      attention: admin ? attention({ system, docker, apps, activity: recent(100), update: availableUpdate() }) : [],
+      attention: admin ? attention({ system, docker, apps, activity: recent(100), update: availableUpdate(), offsite: offsiteFailure() }) : [],
       // who signed in from where, and what was installed by whom, is the administrators' business
       activity: admin ? recent(8) : [],
       // containers and compose projects on this machine that are not apps here yet
@@ -767,7 +768,7 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
     return error ? fail(409, error) : json({ started: true }, 202);
   }
 
-  if (path === "/api/backups" && method === "GET") return json(backupOverview(language(url)));
+  if (path === "/api/backups" && method === "GET") return json(await backupOverview(language(url)));
   if (path === "/api/backups/run" && method === "POST") {
     // the run takes minutes; its progress shows up as jobs and in the overview
     void runBackups(user.name);
@@ -776,7 +777,23 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
   if (path === "/api/backups/server" && method === "POST") {
     await takeServerSnapshot("manual");
     record("system.backup.done", { user: user.name });
-    return json(backupOverview(language(url)), 201);
+    return json(await backupOverview(language(url)), 201);
+  }
+  if (path === "/api/backups/offsite" && method === "PUT") {
+    const error = saveOffsite(await body(req));
+    return error ? fail(400, error) : json(await backupOverview(language(url)));
+  }
+  if (path === "/api/backups/offsite/check" && method === "POST") {
+    const trust = (await body(req)).trust;
+    return json(await checkOffsite(typeof trust === "string" ? trust : undefined));
+  }
+  if (path === "/api/backups/offsite/host" && method === "DELETE") {
+    forgetHost();
+    return json(await backupOverview(language(url)));
+  }
+  if (path === "/api/backups/offsite/sync" && method === "POST") {
+    mirror();
+    return json({ started: true }, 202);
   }
   const b = /^\/api\/backups\/([a-z0-9_-]+)\/(\d{8}-\d{6})(\/restore)?$/.exec(path);
   if (b && b[3] && method === "POST") return json({ job: restoreSnapshot(b[1]!, b[2]!, user.name).id }, 202);
@@ -1187,7 +1204,7 @@ export async function serve(): Promise<void> {
   void refreshHttps();
   refreshLocalNames();
   startNotifications({
-    attention: async () => attention({ system: systemStatus(), docker: await dockerInfo(), apps: await listApps("en"), activity: recent(100), update: availableUpdate() }),
+    attention: async () => attention({ system: systemStatus(), docker: await dockerInfo(), apps: await listApps("en"), activity: recent(100), update: availableUpdate(), offsite: offsiteFailure() }),
     baseUrl: publicUrl,
     isAdmin: (id) => findUser(id)?.role === "admin",
   });

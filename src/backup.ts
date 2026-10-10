@@ -18,6 +18,7 @@ import { record } from "./activity";
 import { DATA_DIR, SECRET_NAMES, SECRETS_DIR, settings } from "./config";
 import { listContainers, PROJECT_LABEL, run } from "./docker";
 import { readJsonFile, writeJsonAtomic } from "./fsutil";
+import { forgetSnapshot, offsiteStatus, syncOffsite, type LocalSet, type OffsiteStatus } from "./offsite";
 import { listServerSnapshots, RESTORE_MARK, SERVER_DIR, stateExcludes, type ServerSnapshot } from "./restore";
 import { VERSION } from "./version";
 
@@ -127,12 +128,35 @@ export function listSnapshots(name: string): Snapshot[] {
 function deleteFiles(name: string, id: string): void {
   rmSync(join(appBackupDir(name), id + ".tar.gz"), { force: true });
   rmSync(join(appBackupDir(name), id + ".json"), { force: true });
+  forgetSnapshot(name, id);
 }
 
 export function deleteSnapshot(name: string, id: string): void {
   if (!APP_NAME_RE.test(name) || !SNAPSHOT_ID_RE.test(id)) throw new AppError("backup.notFound", 404);
   if (!listSnapshots(name).some((s) => s.id === id)) throw new AppError("backup.notFound", 404);
   deleteFiles(name, id);
+  mirror();
+}
+
+/** Every folder of the backup directory with the snapshots it holds: what the copy on another machine is made of */
+function localSets(): { root: string; sets: LocalSet[] } {
+  const root = backupDir();
+  let apps: string[] = [];
+  try {
+    apps = readdirSync(root, { withFileTypes: true }).filter((e) => e.isDirectory() && APP_NAME_RE.test(e.name)).map((e) => e.name);
+  } catch {}
+  const sets = apps.map((name) => ({ dir: name, ids: listSnapshots(name).map((s) => s.id) }));
+  sets.push({ dir: SERVER_DIR, ids: listServerSnapshots(root).map((s) => s.id) });
+  return { root, sets };
+}
+
+/** Brings the copy on another machine in step, if there is one; a failure is told once, when it begins */
+let offsiteFailing = false;
+export function mirror(): void {
+  syncOffsite(localSets, (result) => {
+    if (result.error && !offsiteFailing) record("system.offsite.failed", { detail: result.error });
+    offsiteFailing = result.error !== "";
+  });
 }
 
 /** Which snapshots to delete after a new one: scheduled ones beyond `keep`, pre-update ones beyond three */
@@ -189,6 +213,8 @@ export function backupApp(name: string, user: string, reason: SnapshotReason = "
   if (!APP_NAME_RE.test(name) || !existsSync(join(appDir(name), "compose.yml"))) throw new AppError("app.notFound", 404);
   return startJob(name, "backup", user, async (log) => {
     await takeSnapshot(name, reason, log);
+    // a run sends everything at its end; a snapshot taken on its own goes now
+    if (!running) mirror();
   });
 }
 
@@ -265,7 +291,9 @@ export async function takeServerSnapshot(reason: ServerSnapshot["reason"]): Prom
   for (const { id: gone } of old) {
     rmSync(join(dir, gone + ".tar.gz"), { force: true });
     rmSync(join(dir, gone + ".json"), { force: true });
+    forgetSnapshot(SERVER_DIR, gone);
   }
+  if (!running) mirror();
   return snapshot;
 }
 
@@ -299,6 +327,7 @@ onBeforeUpdate(async (name, log) => {
   if (!settings.backup.beforeUpdate) return;
   log("Snapshot before the update");
   await takeSnapshot(name, "pre-update", log);
+  mirror();
 });
 
 // --- Overview ---------------------------------------------------------------------------------------
@@ -328,6 +357,8 @@ export interface BackupOverview {
   server: ServerSnapshot[];
   /** The server's time zone: the schedule's time is in it, not in the browser's */
   timezone: string;
+  /** The copy on another machine */
+  offsite: OffsiteStatus;
   apps: BackupApp[];
 }
 
@@ -346,7 +377,7 @@ export function nextRun(time: string, now: Date): Date {
   return next;
 }
 
-export function backupOverview(lang: string): BackupOverview {
+export async function backupOverview(lang: string): Promise<BackupOverview> {
   const dir = backupDir();
   const installed = installedNames();
   let stored: string[] = [];
@@ -379,6 +410,7 @@ export function backupOverview(lang: string): BackupOverview {
     running,
     server: listServerSnapshots(dir),
     timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+    offsite: await offsiteStatus(),
     // a removed app with no snapshots left has nothing to show
     apps: apps.filter((app) => app.installed || app.snapshots.length > 0),
   };
@@ -414,6 +446,7 @@ export async function runBackups(user: string, reason: SnapshotReason = "schedul
     running = false;
     state.lastRun = { at: Date.now(), ok, failed };
     writeJsonAtomic(STATE_FILE, state);
+    mirror();
   }
   return true;
 }
