@@ -60,6 +60,10 @@ Early development. What works today:
 - HTTPS, your choice of three: none (address and ports, for a home network); behind your own proxy (nginx,
   Caddy, Traefik) with a check that the proxy is set up right; or by Hata itself with certificates from
   Let's Encrypt. With a domain, every app has its own address, `<app>.<domain>`;
+- notifications: what the home page lists as needing attention also reaches you where you are — on your
+  phone or computer (a notification from the browser, when Hata is opened over HTTPS), in Telegram through
+  a bot of your own, in an ntfy topic, or as a webhook for your own automation. Each problem is told once,
+  after it has lasted a minute and a half, in the words of the home page;
 - updates of Hata itself from the web UI: a newer release is downloaded, checked against its checksums and
   started; if it does not come up, the previous version is put back by itself. Apps keep running meanwhile;
 - English and Ukrainian UI, light and dark, phone-friendly.

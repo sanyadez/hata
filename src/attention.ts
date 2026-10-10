@@ -16,6 +16,8 @@ export interface AttentionItem {
   detail: Record<string, string | number>;
   /** App the item is about — the UI links to its page */
   app?: string;
+  /** When it happened, for an item about an event (a failed backup) rather than a state (a full disk) */
+  at?: number;
 }
 
 const DISK_WARN = 85;
@@ -57,7 +59,7 @@ export function attention(input: { system: SystemStatus; docker: DockerInfo; app
     const kind = entry.code.split(".")[1]!;
     // a failed install leaves no app behind, so there is nothing to link to
     if (!app && kind !== "install") continue;
-    items.push({ id: `failed:${key}`, severity: "warn", code: `failed.${kind}`, detail: { title: app?.title ?? name, message: entry.detail ?? "" }, app: app?.name });
+    items.push({ id: `failed:${key}`, severity: "warn", code: `failed.${kind}`, detail: { title: app?.title ?? name, message: entry.detail ?? "" }, app: app?.name, at: entry.ts });
   }
 
   for (const disk of system.disks) {

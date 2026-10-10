@@ -68,6 +68,7 @@ import { abortUpload, archivePlan, list as listFiles, makeFolder, pinFolder, pin
 import { adoptProject, casaosState, containerDraft, importCount, importList, moveInCasaos, projectDraft, rebuildContainer } from "./import";
 import { accessOf, dropAccess, dropUser, gateTarget, guard, mayOpen, MAX_APP_BODY, page, passToApp, setAccess, startGates, tunnelHandlers } from "./gate";
 import { localNamesStatus, refreshLocalNames } from "./mdns";
+import { addDevice, CHANNELS, listDevices, notifyStatus, pushKey, removeDevice, sendTest, startNotifications, telegramChats, updateNotify } from "./notify";
 import { appHost, appLabel, classifyHost, clientIp, cookieDomain, domainOf, localDomain, requestHost, requestPort, requestProto, siteDomain } from "./site";
 import { newChallenge, PASSKEY_ALGORITHMS, spendChallenge, verifyAssertion, verifyRegistration } from "./passkey";
 import { qrMatrix } from "./qr";
@@ -94,6 +95,7 @@ import interLatin from "./ui/fonts/inter-latin.woff2" with { type: "file" };
 import manropeCyrillic from "./ui/fonts/manrope-cyrillic.woff2" with { type: "file" };
 import manropeLatinExt from "./ui/fonts/manrope-latin-ext.woff2" with { type: "file" };
 import manropeLatin from "./ui/fonts/manrope-latin.woff2" with { type: "file" };
+import swJs from "./ui/sw.js" with { type: "text" };
 import en from "./lang/en.json";
 import uk from "./lang/uk.json";
 
@@ -127,6 +129,7 @@ const STATIC: Record<string, { body: string; type: string; headers?: Record<stri
       "x-frame-options": "SAMEORIGIN",
     },
   },
+  "/sw.js": { body: swJs, type: "text/javascript; charset=utf-8" },
   "/terminal.js": { body: terminalJs, type: "text/javascript; charset=utf-8" },
   "/vendor/xterm.js": { body: xtermJs, type: "text/javascript; charset=utf-8" },
   "/vendor/xterm-addon-fit.js": { body: xtermFit, type: "text/javascript; charset=utf-8" },
@@ -698,6 +701,38 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
     }
   }
 
+  if (path === "/api/notify") {
+    if (method === "GET") return json(notifyStatus());
+    if (method === "PUT") {
+      const error = updateNotify(await body(req));
+      return error ? fail(400, error) : json(notifyStatus());
+    }
+  }
+  if (path === "/api/notify/test" && method === "POST") {
+    const data = await body(req);
+    const channel = CHANNELS.find((c) => c === data.channel);
+    if (!channel) return fail(400, "notify.bad");
+    const message = await sendTest(channel, user.id, typeof data.device === "string" ? data.device : undefined);
+    return message ? fail(502, "notify.failed", { message }) : json(notifyStatus());
+  }
+  if (path === "/api/notify/telegram/chats" && method === "POST") {
+    const chats = await telegramChats((await body(req)).token);
+    return typeof chats === "string" ? fail(400, chats) : json(chats);
+  }
+  if (path === "/api/notify/push") {
+    if (method === "GET") return json({ key: await pushKey(), devices: listDevices(user.id) });
+    if (method === "POST") {
+      const data = await body(req);
+      // a push service wants to know who is sending: the address this device reaches Hata by
+      const error = addDevice(user.id, { subscription: data.subscription, label: data.label, lang: language(url), origin: `https://${requestHost(req)}` });
+      return error ? fail(400, error) : json({ devices: listDevices(user.id) }, 201);
+    }
+    if (method === "DELETE") {
+      removeDevice(user.id, url.searchParams.get("id") ?? "");
+      return json({ devices: listDevices(user.id) });
+    }
+  }
+
   if (path === "/api/local" && method === "GET") return json({ ...(await localNamesStatus()), port: listenAddress().port });
 
   if (path === "/api/https" && method === "GET") {
@@ -1060,6 +1095,14 @@ function lanAddress(): string {
   return "localhost";
 }
 
+/** The address to put into a message that is read elsewhere: the domain when there is one */
+function publicUrl(): string {
+  const domain = siteDomain();
+  if (domain) return `https://${domain}/`;
+  const { port } = listenAddress();
+  return localDomain() ? `http://${localDomain()}${port === 80 ? "" : ":" + port}/` : baseUrl();
+}
+
 export function baseUrl(): string {
   const { port } = listenAddress();
   return `http://${lanAddress()}${port === 80 ? "" : ":" + port}/`;
@@ -1100,6 +1143,11 @@ export async function serve(): Promise<void> {
   startGates();
   void refreshHttps();
   refreshLocalNames();
+  startNotifications({
+    attention: async () => attention({ system: systemStatus(), docker: await dockerInfo(), apps: await listApps("en"), activity: recent(100), update: availableUpdate() }),
+    baseUrl: publicUrl,
+    isAdmin: (id) => findUser(id)?.role === "admin",
+  });
   setInterval(() => void refreshHttps(), 10 * 60_000);
   // a newly installed app needs a certificate for its name
   let appsChanged: Timer | null = null;

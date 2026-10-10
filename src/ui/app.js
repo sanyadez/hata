@@ -61,6 +61,7 @@ const ICONS = {
   archive: "M3 5h18v4H3zM5 9v10h14V9M10 13h4",
   undo: "M9 7 4 12l5 5M4 12h11a5 5 0 0 1 0 10h-2",
   lock: "M6 11h12v9H6zM8.5 11V8a3.5 3.5 0 0 1 7 0v3",
+  bell: "M6 17V11a6 6 0 0 1 12 0v6l2 2H4zM10 21h4",
   file: "M6 3h9l4 4v14H6zM14 3v5h5",
   image: "M4 5h16v14H4zM4 16l5-5 4 4 3-3 4 4M15 9h.01",
   film: "M4 5h16v14H4zM10 9l5 3-5 3z",
@@ -3198,6 +3199,7 @@ async function loadSettings() {
     state.account = await api("GET", "/api/account");
     if (isAdmin()) state.settings = await api("GET", "/api/settings");
     if (isAdmin()) state.update = await api("GET", "/api/update").catch(() => null);
+    if (isAdmin()) state.notify = await api("GET", "/api/notify").catch(() => null);
     if (!state.store && isAdmin()) state.store = await api("GET", `/api/store?lang=${state.lang}`).catch(() => null);
   } catch (e) {
     return toast(errorText(e), "error");
@@ -3213,6 +3215,7 @@ const SECTIONS = [
   { id: "apps", icon: "grid", admin: true },
   { id: "stores", icon: "store", admin: true },
   { id: "https", icon: "lock", admin: true },
+  { id: "notifications", icon: "bell", admin: true },
   { id: "about", icon: "info" },
 ];
 const sections = () => SECTIONS.filter((item) => !item.admin || isAdmin());
@@ -3342,6 +3345,7 @@ function settingsSection(section) {
     ];
   }
   if (section === "https") return httpsSection(save, error);
+  if (section === "notifications") return notificationsSection();
   if (section === "stores") {
     const stores = state.store?.stores ?? [];
     return [
@@ -3599,6 +3603,148 @@ function httpsSection(save, error) {
     https.mode === "acme" && h("section", { class: "card pad" }, h("div", { class: "section-head" }, h("h2", null, t("https.certificates")), retry), h("p", { class: "muted small" }, t("https.certificatesLead")), certs),
     here && h("section", { class: "card pad" }, h("div", { class: "section-head" }, h("h2", null, t("https.checkTitle")), check), h("p", { class: "muted small" }, t("https.checkLead", { domain: here })), results),
     here && h("section", { class: "card pad" }, h("h2", null, t("https.addresses")), h("p", { class: "muted small" }, t("https.addressesLead")), settingRow("Hata", "", h("a", { class: "link mono", href: `https://${here}/` }, here)), (state.overview?.apps ?? []).filter((a) => a.port).map((a) => settingRow(a.title, a.protected ? t("access.protected") : "", h("a", { class: "link mono", href: `https://${a.name.replace(/_/g, "-")}.${here}/`, target: "_blank", rel: "noopener noreferrer" }, `${a.name.replace(/_/g, "-")}.${here}`)))),
+  ];
+}
+
+// --- Notifications ------------------------------------------------------------------------------
+
+/** Browsers offer notifications only to a page opened over HTTPS */
+const pushSupported = () => window.isSecureContext && "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+const keyBytes = (text) => Uint8Array.from(atob(text.replace(/-/g, "+").replace(/_/g, "/")), (c) => c.charCodeAt(0));
+
+async function pushSubscription() {
+  const registration = await navigator.serviceWorker.getRegistration("/");
+  return (await registration?.pushManager.getSubscription()) ?? null;
+}
+
+async function pushSubscribe(key) {
+  if ((await Notification.requestPermission()) !== "granted") throw new Error("denied");
+  await navigator.serviceWorker.register("/sw.js");
+  const registration = await navigator.serviceWorker.ready;
+  // a subscription made for another server key (Hata was set up anew) cannot be carried over
+  const old = await registration.pushManager.getSubscription();
+  if (old) await old.unsubscribe();
+  const subscription = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(key) });
+  await api("POST", `/api/notify/push?lang=${state.lang}`, { subscription: subscription.toJSON(), label: deviceName(navigator.userAgent) });
+}
+
+function devicesCard() {
+  const box = h("div", { class: "stack" });
+  const error = h("p", { class: "error", role: "alert" });
+  let alive = true;
+  cleanups.push(() => (alive = false));
+  const attempt = async (action) => {
+    error.textContent = "";
+    try {
+      await action();
+    } catch (e) {
+      error.textContent = e instanceof ApiError ? errorText(e) : t(e.message === "denied" ? "notify.denied" : "notify.pushFailed", { message: e.message });
+    }
+    void paint();
+  };
+  const paint = async () => {
+    if (!pushSupported()) return put(box, h("p", { class: "muted" }, t(window.isSecureContext ? "notify.pushUnsupported" : "notify.pushNeedsHttps")));
+    const [info, sub] = await Promise.all([api("GET", "/api/notify/push").catch(() => null), pushSubscription().catch(() => null)]);
+    if (!alive || !info) return;
+    const here = sub && info.devices.some((d) => d.endpoint === sub.endpoint);
+    put(
+      box,
+      info.devices.map((device) => {
+        const own = sub?.endpoint === device.endpoint;
+        return settingRow(
+          device.label + (own ? ` · ${t("account.thisDevice")}` : ""),
+          `${device.service} · ${dateTime(device.createdAt)}`,
+          h(
+            "span",
+            { class: "row-actions" },
+            button(t("notify.test"), { class: "small", onclick: () => attempt(async () => (await api("POST", "/api/notify/test", { channel: "push", device: device.id }), toast(t("notify.testSent")))) }),
+            button(t("app.remove"), { class: "small", onclick: () => attempt(async () => (own && (await sub.unsubscribe().catch(() => {})), await api("DELETE", `/api/notify/push?id=${device.id}`))) }),
+          ),
+        );
+      }),
+      !here && h("div", null, button(t("notify.pushHere"), { class: "primary", onclick: () => attempt(() => pushSubscribe(info.key)) }, "bell")),
+    );
+  };
+  void paint();
+  return h("section", { class: "card pad" }, h("h2", null, t("notify.push.title")), h("p", { class: "muted small" }, t("notify.push.lead")), box, error);
+}
+
+function channelCard(channel, rows, values) {
+  const config = state.notify.config[channel];
+  const last = state.notify.last[channel];
+  const enabled = h("input", { type: "checkbox", checked: config.enabled });
+  const error = h("p", { class: "error", role: "alert" });
+  const attempt = async (test) => {
+    error.textContent = "";
+    try {
+      state.notify = await api("PUT", "/api/notify", { [channel]: { enabled: enabled.checked, ...values() } });
+      if (test) state.notify = await api("POST", "/api/notify/test", { channel });
+      toast(t(test ? "notify.testSent" : "settings.saved"));
+      renderSettings();
+    } catch (err) {
+      error.textContent = errorText(err);
+    }
+  };
+  return h(
+    "form",
+    { class: "card pad", onsubmit: (e) => (e.preventDefault(), void attempt(false)) },
+    h("h2", null, t(`notify.${channel}.title`)),
+    h("p", { class: "muted small" }, t(`notify.${channel}.lead`)),
+    settingRow(t("notify.enabled"), "", enabled),
+    rows,
+    last?.error && h("p", { class: "error" }, t("notify.lastError", { time: ago(last.at), message: last.error })),
+    error,
+    h("footer", { class: "pair" }, button(t("notify.test"), { onclick: () => attempt(true) }), h("button", { class: "btn primary" }, t("settings.save"))),
+  );
+}
+
+function telegramCard() {
+  const config = state.notify.config.telegram;
+  const token = h("input", { type: "password", value: config.token, autocomplete: "off", spellcheck: false, class: "mono", placeholder: "123456789:AA…" });
+  const chat = h("input", { value: config.chat, spellcheck: false, class: "mono", placeholder: "123456789" });
+  const found = h("div", { class: "pair" });
+  const find = async () => {
+    try {
+      const chats = await api("POST", "/api/notify/telegram/chats", { token: token.value.trim() });
+      if (chats.length === 1) chat.value = chats[0].id;
+      put(found, chats.length === 0 ? h("p", { class: "muted small" }, t("notify.telegram.noChats")) : chats.length > 1 && chats.map((c) => button(c.title, { class: "small", onclick: () => (chat.value = c.id) })));
+    } catch (e) {
+      put(found, h("p", { class: "error" }, errorText(e)));
+    }
+  };
+  return channelCard(
+    "telegram",
+    [settingRow(t("notify.telegram.token"), t("notify.telegram.tokenHint"), token), settingRow(t("notify.telegram.chat"), t("notify.telegram.chatHint"), h("span", { class: "pair" }, chat, button(t("notify.telegram.find"), { class: "small", onclick: find }, "search"))), found],
+    () => ({ token: token.value, chat: chat.value }),
+  );
+}
+
+function notificationsSection() {
+  const n = state.notify;
+  if (!n) return [h("p", { class: "muted" }, "…")];
+  const error = h("p", { class: "error", role: "alert" });
+  const problems = h("input", {
+    type: "checkbox",
+    checked: n.config.problems,
+    onchange: async () => {
+      error.textContent = "";
+      try {
+        state.notify = await api("PUT", "/api/notify", { problems: problems.checked });
+        toast(t("settings.saved"));
+      } catch (err) {
+        error.textContent = errorText(err);
+      }
+    },
+  });
+  const ntfyUrl = h("input", { type: "url", value: n.config.ntfy.url, spellcheck: false, class: "mono", placeholder: "https://ntfy.sh/my-topic" });
+  const ntfyToken = h("input", { type: "password", value: n.config.ntfy.token, autocomplete: "off", spellcheck: false, class: "mono" });
+  const hook = h("input", { type: "url", value: n.config.webhook.url, spellcheck: false, class: "mono", placeholder: "https://…" });
+  return [
+    h("section", { class: "card pad" }, h("h2", null, t("settings.notifications")), h("p", { class: "muted small" }, t("notify.lead")), settingRow(t("notify.problems"), t("notify.problemsHint"), problems), error),
+    devicesCard(),
+    telegramCard(),
+    channelCard("ntfy", [settingRow(t("notify.ntfy.url"), t("notify.ntfy.urlHint"), ntfyUrl), settingRow(t("notify.ntfy.token"), t("notify.ntfy.tokenHint"), ntfyToken)], () => ({ url: ntfyUrl.value, token: ntfyToken.value })),
+    channelCard("webhook", [settingRow(t("notify.webhook.url"), t("notify.webhook.urlHint"), hook)], () => ({ url: hook.value })),
   ];
 }
 
