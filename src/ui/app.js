@@ -688,16 +688,17 @@ function appIcon(app, size = "") {
   return h("img", { class: `app-icon ${size}`, src: app.icon, alt: "", loading: "lazy", referrerPolicy: "no-referrer", onerror: (e) => e.target.replaceWith(letter) });
 }
 
-/** The app's own name under the domain, when Hata itself is opened by that domain; otherwise null */
+/** The app's own name under the domain (the one that is set, or the local one), when Hata itself is opened by that domain; otherwise null */
 function appDomain(app) {
-  const domain = state.overview?.site?.domain;
-  return domain && location.hostname === domain && !app.hostname ? `${app.name.replace(/_/g, "-")}.${domain}` : null;
+  const site = state.overview?.site;
+  const domain = [site?.domain, site?.local].find((name) => name && location.hostname === name);
+  return domain && !app.hostname ? `${app.name.replace(/_/g, "-")}.${domain}` : null;
 }
 
 function appUrl(app) {
   if (!app.port) return null;
   const host = appDomain(app);
-  if (host) return `${location.protocol}//${host}${app.index}`;
+  if (host) return `${location.protocol}//${host}${location.port ? ":" + location.port : ""}${app.index}`;
   return `${app.scheme}://${app.hostname || location.hostname}:${app.port}${app.index}`;
 }
 
@@ -3461,6 +3462,60 @@ function appearanceSection(error) {
   ];
 }
 
+/** Settings → HTTPS and domain: the name on the home network, which needs no domain and no setting up */
+function localNameCard() {
+  const local = state.settings.local;
+  const enabled = h("input", { type: "checkbox", checked: local.enabled });
+  const name = h("input", { value: local.name, maxLength: 63, spellcheck: false, autocapitalize: "none", class: "short mono", required: true, "aria-label": t("local.name") });
+  const error = h("p", { class: "error", role: "alert" });
+  const status = h("div", { class: "stack" });
+  let alive = true;
+  cleanups.push(() => (alive = false));
+  const paint = async () => {
+    const s = await api("GET", "/api/local").catch(() => null);
+    if (!alive || !s) return;
+    const port = s.port === 80 ? "" : ":" + s.port;
+    const address = (host) => h("a", { class: "link mono", href: `http://${host}${port}/` }, host + port);
+    status.replaceChildren(
+      ...(!s.enabled
+        ? []
+        : !s.listening
+          ? [h("p", { class: "error" }, t("local.failed", { message: s.error || "…" }))]
+          : [
+              h("div", { class: "activity-item" }, icon("check", "ok"), h("div", { class: "grow" }, h("div", null, address(s.domain)), h("div", { class: "muted small" }, t("local.answers", { addresses: s.addresses.join(", ") || "—" })))),
+              (state.overview?.apps ?? []).some((a) => a.port) && h("p", { class: "muted small" }, t("local.apps", { example: `${(state.overview.apps.find((a) => a.port).name).replace(/_/g, "-")}.${s.domain}${port}` })),
+            ]),
+    );
+  };
+  void paint();
+  return h(
+    "form",
+    {
+      class: "card pad",
+      onsubmit: async (e) => {
+        e.preventDefault();
+        error.textContent = "";
+        try {
+          state.settings = await api("PUT", "/api/settings", { local: { enabled: enabled.checked, name: name.value } });
+          toast(t("settings.saved"));
+          await refresh();
+          // the responder takes a moment to start listening
+          setTimeout(paint, 600);
+        } catch (err) {
+          error.textContent = errorText(err);
+        }
+      },
+    },
+    h("h2", null, t("local.title")),
+    h("p", { class: "muted small" }, t("local.lead")),
+    settingRow(t("local.enabled"), t("local.enabledHint"), enabled),
+    settingRow(t("local.name"), t("local.nameHint"), h("span", { class: "with-icon" }, name, h("span", { class: "mono muted" }, ".local"))),
+    status,
+    error,
+    h("footer", null, h("button", { class: "btn primary" }, t("settings.save"))),
+  );
+}
+
 function httpsSection(save, error) {
   const https = state.settings.https;
   const mode = h("select", null, HTTPS_MODES.map((id) => h("option", { value: id, selected: https.mode === id }, t("https.mode." + id))));
@@ -3515,6 +3570,7 @@ function httpsSection(save, error) {
   if (https.mode === "acme") void paintCerts();
   const retry = button(t("https.retry"), { onclick: async () => (await api("POST", "/api/https/retry", {}).catch((e) => toast(errorText(e), "error")), setTimeout(paintCerts, 800)) }, "refresh");
   return [
+    localNameCard(),
     h(
       "form",
       {

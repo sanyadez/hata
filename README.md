@@ -22,6 +22,8 @@ Early development. What works today:
   and the blocks of the page (system numbers, what needs attention, activity) are dragged too, and can be
   taken off and added back; the whole layout can also be edited as text (YAML); a tile opens the app, the
   small button next to it leads to its page in Hata;
+- a name on the home network: Hata answers to `hata.local` (the name is yours to change) and every app to
+  `<app>.hata.local` over multicast DNS — nothing to set up on phones, computers or the router;
 - terminal in the browser, for administrators: a shell on the server (it keeps running when the page is
   closed and shows the latest output when you come back) and a shell inside a container of an app;
 - the look is yours as well: accent and background colours (a light background turns the page light), a

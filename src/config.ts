@@ -48,6 +48,8 @@ export interface Settings {
   /** Who may open which app, and which apps are behind Hata's sign-in; an app not listed is open to members */
   access: Record<string, AppAccess>;
   https: HttpsSettings;
+  /** The name on the home network: `<name>.local` and `<app>.<name>.local`, answered over multicast DNS */
+  local: { enabled: boolean; name: string };
   /** Folders put on the dashboard from the file manager, absolute paths */
   folders: string[];
   /** How the dashboard is arranged: groups, links, folders of tiles */
@@ -106,6 +108,7 @@ const DEFAULTS: Settings = {
   backup: { enabled: false, time: "03:00", keep: 7, dir: "", beforeUpdate: true, exclude: [] },
   access: {},
   https: { mode: "off", domain: "", email: "" },
+  local: { enabled: true, name: "hata" },
   folders: [],
   dashboard: cleanLayout(null),
   appearance: DEFAULT_APPEARANCE,
@@ -123,6 +126,7 @@ export const settings: Settings = {
   dashboard: cleanLayout(saved.dashboard),
   appearance: cleanAppearance(saved.appearance),
   https: { ...DEFAULTS.https, ...(isPlainObject(saved.https) ? saved.https : {}) },
+  local: { ...DEFAULTS.local, ...(isPlainObject(saved.local) ? saved.local : {}) },
 };
 
 /** Writes the settings after a change made in place (the access rules are edited that way) */
@@ -133,6 +137,9 @@ export function saveSettings(): void {
 export function timezone(): string {
   return settings.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
 }
+
+/** One label of a host name: what the server is called on the home network, before `.local` */
+export const LOCAL_NAME_RE = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
 
 /** A host name with at least two labels: letters, digits and hyphens */
 export const DOMAIN_RE = /^(?=.{4,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
@@ -211,6 +218,18 @@ export function updateSettings(patch: Record<string, unknown>): string | null {
     }
     if (https.mode !== "off" && !https.domain) return "settings.needDomain";
     next.https = https;
+  }
+  if ("local" in patch) {
+    const l = patch.local;
+    if (!isPlainObject(l)) return "settings.badLocalName";
+    const local = { ...next.local };
+    if ("enabled" in l) local.enabled = l.enabled === true;
+    if ("name" in l) {
+      const name = typeof l.name === "string" ? l.name.trim().toLowerCase().replace(/\.local$/, "") : "";
+      if (!LOCAL_NAME_RE.test(name)) return "settings.badLocalName";
+      local.name = name;
+    }
+    next.local = local;
   }
   if ("appearance" in patch) {
     const appearance = isPlainObject(patch.appearance) ? changeAppearance(next.appearance, patch.appearance) : null;

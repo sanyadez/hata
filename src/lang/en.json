@@ -725,5 +725,15 @@
   "home.saveLayout": "Save",
   "error.dashboard.badText": "This text is not a layout: {message}",
   "home.dropBlock": "Drop a block here",
-  "home.statsBlock": "System numbers"
+  "home.statsBlock": "System numbers",
+  "local.title": "Name on the home network",
+  "local.lead": "Hata answers to a name on your home network, so nobody has to remember the address. Phones and computers find names ending in .local by themselves; nothing is set up on them or on the router.",
+  "local.enabled": "Answer to a local name",
+  "local.enabledHint": "Over multicast DNS (mDNS), on the networks this server is connected to.",
+  "local.name": "Name",
+  "local.nameHint": "Letters, digits and hyphens. With two servers at home, give them different names.",
+  "local.answers": "answers on {addresses}",
+  "local.apps": "Each app with a web page has a name of its own, like {example}. Open Hata by its local name and the tiles lead there.",
+  "local.failed": "The name is not answered: {message}",
+  "error.settings.badLocalName": "The name may hold letters, digits and hyphens, up to 63 characters."
 }

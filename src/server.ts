@@ -67,7 +67,8 @@ import { dockerInfo, listContainers, watchEvents } from "./docker";
 import { abortUpload, archivePlan, list as listFiles, makeFolder, pinFolder, pinnedFolders, readable, readText, remove as removeFiles, rename as renameFile, summary as filesSummary, transfer, upload, writeText } from "./files";
 import { adoptProject, casaosState, containerDraft, importCount, importList, moveInCasaos, projectDraft, rebuildContainer } from "./import";
 import { accessOf, dropAccess, dropUser, gateTarget, guard, mayOpen, MAX_APP_BODY, page, passToApp, setAccess, startGates, tunnelHandlers } from "./gate";
-import { appHost, appLabel, classifyHost, clientIp, cookieDomain, requestHost, requestProto, siteDomain } from "./site";
+import { localNamesStatus, refreshLocalNames } from "./mdns";
+import { appHost, appLabel, classifyHost, clientIp, cookieDomain, domainOf, localDomain, requestHost, requestPort, requestProto, siteDomain } from "./site";
 import { newChallenge, PASSKEY_ALGORITHMS, spendChallenge, verifyAssertion, verifyRegistration } from "./passkey";
 import { qrMatrix } from "./qr";
 import { IMAGE_MIME, imageType, wallpaperSvg, WALLPAPERS } from "./wallpapers";
@@ -614,7 +615,7 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
       apps,
       arch: ARCH,
       // with a domain, apps are opened at <label>.<domain> when Hata itself is opened by that domain
-      site: { domain: siteDomain(), mode: settings.https.mode },
+      site: { domain: siteDomain(), mode: settings.https.mode, local: localDomain() },
       attention: admin ? attention({ system, docker, apps, activity: recent(100), update: availableUpdate() }) : [],
       // who signed in from where, and what was installed by whom, is the administrators' business
       activity: admin ? recent(8) : [],
@@ -692,9 +693,12 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
       if (error) return fail(400, error);
       // certificates take a while: the page asks for their state
       if ("https" in patch) void refreshHttps(true);
+      if ("local" in patch) refreshLocalNames();
       return json(publicSettings());
     }
   }
+
+  if (path === "/api/local" && method === "GET") return json({ ...localNamesStatus(), port: listenAddress().port });
 
   if (path === "/api/https" && method === "GET") {
     return json({ mode: settings.https.mode, listening: !!httpsServer, error: httpsError, httpPort: listenAddress().port, certificates: certificateStates(await httpsNames()) });
@@ -951,7 +955,8 @@ async function serveApp(req: Request, server: Server, label: string): Promise<Re
   const url = new URL(req.url);
   if (access.protect || access.allowed !== "all") {
     const here = `${proto}://${req.headers.get("host") ?? url.host}${url.pathname}${url.search}`;
-    const refusal = guard(req, app.name, `${proto}://${siteDomain()}/?next=${encodeURIComponent(here)}`);
+    // sign-in is on Hata's own name of the same domain: the cookie it sets reaches this address too
+    const refusal = guard(req, app.name, `${proto}://${domainOf(requestHost(req))}${requestPort(req)}/?next=${encodeURIComponent(here)}`);
     if (refusal) return refusal;
   }
   return passToApp(req, server, upstream, proto, clientIp(req, server));
@@ -1094,6 +1099,7 @@ export async function serve(): Promise<void> {
   void resumeRestore();
   startGates();
   void refreshHttps();
+  refreshLocalNames();
   setInterval(() => void refreshHttps(), 10 * 60_000);
   // a newly installed app needs a certificate for its name
   let appsChanged: Timer | null = null;

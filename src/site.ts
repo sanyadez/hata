@@ -1,7 +1,7 @@
 /**
  * How Hata is reached: by address and port, or by a domain name over HTTPS — and then either behind the
  * user's own reverse proxy or with Hata serving HTTPS itself. With a domain, every app has an address
- * of its own: `<app>.<domain>`.
+ * of its own: `<app>.<domain>`. The same goes for the name on the home network, `<name>.local`.
  */
 import type { Server } from "bun";
 import { settings } from "./config";
@@ -10,6 +10,9 @@ const withoutPort = (host: string): string => host.replace(/:\d+$/, "").toLowerC
 
 /** The host the browser asked for */
 export const requestHost = (req: Request): string => withoutPort(req.headers.get("host") ?? new URL(req.url).host);
+
+/** The port the browser asked for, as `:8080`; "" when it is the usual one of the protocol */
+export const requestPort = (req: Request): string => /:\d+$/.exec(req.headers.get("host") ?? "")?.[0] ?? "";
 
 /** Headers a proxy adds are believed only when the settings say there is a proxy */
 const behindProxy = (): boolean => settings.https.mode === "proxy";
@@ -29,6 +32,15 @@ export function clientIp(req: Request, server: Server): string {
 /** The domain in use, or "" when Hata is reached by address only */
 export const siteDomain = (): string => (settings.https.mode === "off" ? "" : settings.https.domain);
 
+/** The name on the home network, answered over multicast DNS; "" when that is switched off */
+export const localDomain = (): string => (settings.local.enabled ? `${settings.local.name}.local` : "");
+
+/** The domain of ours a host name belongs to — the one that is set, or the local one; "" for an address */
+export function domainOf(host: string): string {
+  for (const domain of [siteDomain(), localDomain()]) if (domain && (host === domain || host.endsWith("." + domain))) return domain;
+  return "";
+}
+
 /** The label of an app's subdomain: app names may hold `_`, host names may not */
 export const appLabel = (name: string): string => name.replace(/_/g, "-");
 
@@ -40,8 +52,8 @@ export const appHost = (name: string): string => `${appLabel(name)}.${siteDomain
  * the caller looks up), or a name we do not serve.
  */
 export function classifyHost(host: string): { kind: "hata" } | { kind: "app"; label: string } {
-  const domain = siteDomain();
-  if (!domain || host === domain || !host.endsWith("." + domain)) return { kind: "hata" };
+  const domain = domainOf(host);
+  if (!domain || host === domain) return { kind: "hata" };
   const label = host.slice(0, -domain.length - 1);
   // one label only: `a.b.<domain>` is not an app
   return label.includes(".") ? { kind: "hata" } : { kind: "app", label };
@@ -52,6 +64,5 @@ export function classifyHost(host: string): { kind: "hata" } | { kind: "app"; la
  * subdomains, where Hata checks it before letting a request through. Undefined — a host-only cookie.
  */
 export function cookieDomain(host: string): string | undefined {
-  const domain = siteDomain();
-  return domain && (host === domain || host.endsWith("." + domain)) ? domain : undefined;
+  return domainOf(host) || undefined;
 }
