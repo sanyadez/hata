@@ -1902,7 +1902,7 @@ function appSettingsForm(model, memoryTotal) {
           { class: "mode tab-mode" + (i === shown ? " active" : "") },
           h("button", { type: "button", class: "mode-name", onclick: () => ((shown = i), paint()) }, label),
           // the last service stays: an app without one is removed as a whole
-          services.length > 1 && h("button", { type: "button", class: "mode-x", title: t("edit.removeService"), "aria-label": `${t("edit.removeService")}: ${label}`, onclick: () => removeService(i) }, icon("x")),
+          services.length > 1 && h("button", { type: "button", class: "mode-x", title: t("edit.removeService"), "aria-label": `${t("edit.removeService")}: ${label}`, onclick: () => confirmRemove(i, label) }, icon("x")),
         );
       }),
       button(t("edit.addService"), { class: "small ghost", onclick: addService }, "plus"),
@@ -1918,6 +1918,14 @@ function appSettingsForm(model, memoryTotal) {
       shown = services.length - 1;
       paint();
     });
+  const confirmRemove = (index, label) => {
+    const dialog = openDialog(
+      "confirm",
+      h("h2", null, t("edit.removeServiceTitle", { name: label })),
+      h("p", { class: "muted" }, t("edit.removeServiceLead")),
+      h("footer", null, closeButton(() => dialog, t("common.cancel")), button(t("app.remove"), { class: "danger", onclick: () => (dialog.close(), removeService(index)) })),
+    );
+  };
   const removeService = (index) => {
     services.splice(index, 1)[0].form.el.remove();
     shown = Math.min(index < shown ? shown - 1 : shown, services.length - 1);

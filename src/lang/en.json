@@ -851,5 +851,7 @@
   "run.read": "Fill in the form",
   "run.ignored": "These options have no field in the form and were left out — add them on the Compose tab afterwards if the app needs them:",
   "error.run.notRun": "This is not a docker run command.",
-  "error.run.noImage": "The command names no image."
+  "error.run.noImage": "The command names no image.",
+  "edit.removeServiceTitle": "Remove the service {name}?",
+  "edit.removeServiceLead": "It leaves the form with everything set for it. Its container is stopped and removed once the form is saved; its folders and volumes stay."
 }
