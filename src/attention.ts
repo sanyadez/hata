@@ -26,8 +26,10 @@ const DISK_DANGER = 95;
 const MEMORY_WARN = 92;
 const TEMPERATURE_WARN = 85;
 const FAILURE_WINDOW_MS = 24 * 3600 * 1000;
+/** A trash smaller than this is not worth a word when its disk fills up, bytes */
+const TRASH_WORTH = 100 * 1024 * 1024;
 
-export function attention(input: { system: SystemStatus; docker: DockerInfo; apps: InstalledApp[]; activity: Activity[]; update?: string | null; offsite?: { error: string } | null; disks?: DiskReport[]; now?: number }): AttentionItem[] {
+export function attention(input: { system: SystemStatus; docker: DockerInfo; apps: InstalledApp[]; activity: Activity[]; update?: string | null; offsite?: { error: string } | null; disks?: DiskReport[]; trash?: (path: string) => number; now?: number }): AttentionItem[] {
   const { system, docker, apps, activity } = input;
   const now = input.now ?? Date.now();
   const items: AttentionItem[] = [];
@@ -66,7 +68,9 @@ export function attention(input: { system: SystemStatus; docker: DockerInfo; app
   for (const disk of system.disks) {
     const percent = Math.round((disk.used / disk.total) * 100);
     if (percent >= DISK_WARN) {
-      items.push({ id: `disk:${disk.path}`, severity: percent >= DISK_DANGER ? "danger" : "warn", code: "disk", detail: { path: disk.path, percent, free: disk.total - disk.used } });
+      // what lies in the trash of this very disk is room to be had at once (`trash` is asked only now: it reads the disk)
+      const trash = input.trash?.(disk.path) ?? 0;
+      items.push({ id: `disk:${disk.path}`, severity: percent >= DISK_DANGER ? "danger" : "warn", code: trash >= TRASH_WORTH ? "disk.trash" : "disk", detail: { path: disk.path, percent, free: disk.total - disk.used, ...(trash >= TRASH_WORTH ? { trash } : {}) } });
     }
   }
 

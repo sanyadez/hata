@@ -169,13 +169,13 @@ const SEPARATE = 3;
 /** The messages for the items to send, in the words of the home page */
 export function wording(items: AttentionItem[], lang: string): Message[] {
   const one = (item: AttentionItem): Message => {
-    const detail = { ...item.detail, free: typeof item.detail.free === "number" ? bytes(item.detail.free) : "" };
+    const detail = { ...item.detail, free: typeof item.detail.free === "number" ? bytes(item.detail.free) : "", trash: typeof item.detail.trash === "number" ? bytes(item.detail.trash) : "" };
     const tab = item.code === "restarting" || item.code === "partial" ? "/logs" : "";
     return {
       title: tr(lang, `attention.${item.code}.title`, detail),
       text: tr(lang, `attention.${item.code}.text`, detail).trim(),
       severity: item.severity,
-      route: item.app ? `#/apps/${item.app}${tab}` : item.code === "update" ? "#/settings/about" : "#/",
+      route: item.app ? `#/apps/${item.app}${tab}` : item.code === "update" ? "#/settings/about" : item.code === "disk.trash" ? "#/trash" : "#/",
       tag: keyOf(item),
       code: item.code,
       app: item.app,

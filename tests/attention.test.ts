@@ -56,6 +56,12 @@ test("disk, memory and temperature thresholds", () => {
   expect(codes({ system: system({ disks: [{ path: "/", total: 100, used: 84 }] }) })).toEqual([]);
   const full = attention({ system: system({ disks: [{ path: "/", total: 100, used: 86 }, { path: "/DATA", total: 100, used: 97 }] }), docker, apps: [], activity: [], now: NOW });
   expect(full.map((i) => [i.detail.path, i.severity])).toEqual([["/DATA", "danger"], ["/", "warn"]]);
+  // what lies in the trash of a filling disk is said with it — when it is worth saying, and only for that disk
+  const asked: string[] = [];
+  const trash = (path: string) => (asked.push(path), path === "/DATA" ? 50 * GB : 1024);
+  const withTrash = attention({ system: system({ disks: [{ path: "/", total: 100, used: 86 }, { path: "/DATA", total: 100, used: 97 }, { path: "/mnt", total: 100, used: 10 }] }), docker, apps: [], activity: [], trash, now: NOW });
+  expect(withTrash.map((i) => [i.id, i.code, i.detail.trash])).toEqual([["disk:/DATA", "disk.trash", 50 * GB], ["disk:/", "disk", undefined]]);
+  expect(asked.sort()).toEqual(["/", "/DATA"]);
   expect(codes({ system: system({ memory: { total: 100, used: 95, swapTotal: 0, swapUsed: 0 } }) })).toEqual(["memory"]);
   expect(codes({ system: system({ temperature: 90 }) })).toEqual(["temperature"]);
   expect(codes({ system: system({ temperature: null }) })).toEqual([]);

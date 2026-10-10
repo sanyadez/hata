@@ -69,6 +69,8 @@
   "attention.failed.start.text": "{message}",
   "attention.disk.title": "Диск {path} заповнено на {percent}%",
   "attention.disk.text": "Лишилось {free}.",
+  "attention.disk.trash.title": "Диск {path} заповнено на {percent}%",
+  "attention.disk.trash.text": "Лишилось {free}. Із зайнятого {trash} лежить у кошику: очистіть його — і стільки одразу звільниться.",
   "attention.memory.title": "Пам'ять зайнято на {percent}%",
   "attention.memory.text": "Коли вона скінчиться, система може зупиняти застосунки.",
   "attention.temperature.title": "Сервер гарячий: {degrees} °C",

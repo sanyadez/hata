@@ -190,6 +190,12 @@ export function putInTrash(path: string, info: Pick<TrashItem, "type" | "size" |
   return item;
 }
 
+/** How much lies in the trashes of the file system `path` is on, bytes */
+export function trashSizeOn(path: string): number {
+  const device = deviceOf(path);
+  return device === null ? 0 : entries().reduce((sum, entry) => sum + (deviceOf(entry.root) === device ? entry.item.size : 0), 0);
+}
+
 export const findInTrash = (id: string): TrashItem | null => entries().find((entry) => entry.item.id === id)?.item ?? null;
 
 /** Moves an entry out of the trash to `to`, where nothing may lie; false when there is no such entry */

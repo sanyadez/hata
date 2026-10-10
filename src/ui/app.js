@@ -1370,7 +1370,7 @@ function dragEnd(drop) {
 const ATTENTION_ICONS = { update: "up", docker: "box", restarting: "refresh", partial: "alert", disk: "disk", smart: "disk", memory: "memory", temperature: "temp" };
 
 function attentionItem(item) {
-  const detail = { ...item.detail, free: item.detail.free == null ? "" : bytes(item.detail.free) };
+  const detail = { ...item.detail, free: item.detail.free == null ? "" : bytes(item.detail.free), trash: item.detail.trash == null ? "" : bytes(item.detail.trash) };
   const base = "attention." + item.code;
   return h(
     "div",
@@ -1378,6 +1378,7 @@ function attentionItem(item) {
     h("span", { class: "badge-icon " + item.severity }, icon(ATTENTION_ICONS[item.code.split(".")[0]] ?? "alert")),
     h("div", { class: "grow" }, h("strong", null, t(base + ".title", detail)), h("p", { class: "muted small" }, t(base + ".text", detail).trim())),
     item.code === "update" && h("a", { class: "btn small", href: "#/settings/about" }, t("common.open")),
+    item.code === "disk.trash" && h("a", { class: "btn small", href: "#/trash" }, t("trash.title")),
     item.code.startsWith("smart.") && h("a", { class: "btn small", href: "#/settings/storage" }, t("common.open")),
     item.app && h("a", { class: "btn small", href: `#/apps/${item.app}${item.code === "restarting" || item.code === "partial" ? "/logs" : ""}` }, t(item.code === "restarting" || item.code === "partial" ? "app.logs" : "common.open")),
   );
