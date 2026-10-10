@@ -3,13 +3,13 @@
  * one unit file — nothing else is put on the system.
  */
 import { chmodSync, copyFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { serviceStateDir } from "./statedir";
 import { COMPILED } from "./version";
 
 const BIN = "/usr/local/bin/hata";
 const UNIT = "/etc/systemd/system/hata.service";
-const SERVICE_DATA_DIR = "/var/lib/hata";
 
-const unit = (exec: string) => `[Unit]
+const unit = (exec: string, stateDir: string) => `[Unit]
 Description=Hata home server
 Documentation=https://github.com/sanyadez/hata
 After=network-online.target docker.service
@@ -17,7 +17,7 @@ Wants=network-online.target
 
 [Service]
 ExecStart=${exec}
-Environment=HATA_DATA_DIR=${SERVICE_DATA_DIR}
+Environment=HATA_DATA_DIR=${stateDir}
 Restart=on-failure
 RestartSec=2
 
@@ -71,6 +71,12 @@ async function choosePort(args: string[]): Promise<number | string> {
   return port;
 }
 
+/** Points the installed service at another state folder; it takes effect on its next start */
+export function rewriteUnit(stateDir: string): void {
+  writeFileSync(UNIT, unit(BIN, stateDir));
+  if (!systemctl("daemon-reload")) throw new Error("systemctl daemon-reload failed");
+}
+
 export async function installService(args: string[] = []): Promise<number> {
   const problem = preflight() ?? (COMPILED ? null : "Run `hata install` from the built binary (bun run build), not from source.");
   if (problem) {
@@ -78,7 +84,8 @@ export async function installService(args: string[] = []): Promise<number> {
     return 1;
   }
   // the settings read and written here must be the service's own
-  process.env.HATA_DATA_DIR = SERVICE_DATA_DIR;
+  const stateDir = serviceStateDir();
+  process.env.HATA_DATA_DIR = stateDir;
   const port = await choosePort(args);
   if (typeof port === "string") {
     console.error(port);
@@ -90,9 +97,9 @@ export async function installService(args: string[] = []): Promise<number> {
     chmodSync(BIN + ".new", 0o755);
     renameSync(BIN + ".new", BIN);
   }
-  writeFileSync(UNIT, unit(BIN));
+  writeFileSync(UNIT, unit(BIN, stateDir));
   if (!systemctl("daemon-reload") || !systemctl("enable", "hata.service") || !systemctl("restart", "hata.service")) return 1;
-  console.log(`Hata is installed: ${BIN}, state in ${SERVICE_DATA_DIR}.`);
+  console.log(`Hata is installed: ${BIN}, state in ${stateDir}.`);
   if (!Bun.which("docker")) console.log("Docker was not found: install Docker Engine with the compose plugin to run apps.");
 
   // the service prints the same address to its log; show it here so nobody has to look for it
@@ -112,6 +119,6 @@ export async function uninstallService(): Promise<number> {
   rmSync(UNIT, { force: true });
   systemctl("daemon-reload");
   rmSync(BIN, { force: true });
-  console.log(`Hata is removed. Apps keep running; their compose files and the state stay in ${SERVICE_DATA_DIR}.`);
+  console.log(`Hata is removed. Apps keep running; their compose files and the state stay in ${serviceStateDir()}.`);
   return 0;
 }

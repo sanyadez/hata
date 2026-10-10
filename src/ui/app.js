@@ -3639,6 +3639,62 @@ function updateRow() {
   );
 }
 
+/** The configuration folder: where it is, and moving it — which restarts Hata in the new place */
+function stateDirCard() {
+  const s = state.settings;
+  const path = h("input", { value: s.stateDir, spellcheck: false, required: true, class: "mono", "aria-label": t("state.title") });
+  const error = h("p", { class: "error", role: "alert" });
+  const move = button(t("state.move"), { disabled: true, onclick: () => confirmMove() });
+  path.addEventListener("input", () => (move.disabled = !s.stateMovable || path.value.trim().replace(/\/+$/, "") === s.stateDir));
+  const confirmMove = () => {
+    const target = path.value.trim().replace(/\/+$/, "");
+    const inData = target === s.dataRoot || target.startsWith(s.dataRoot.replace(/\/$/, "") + "/");
+    const dialog = openDialog(
+      "confirm",
+      h("h2", null, t("state.moveTitle")),
+      h("p", { class: "muted" }, t("state.moveLead", { from: s.stateDir, to: target })),
+      inData && h("p", { class: "banner" }, t("state.inDataRoot", { path: s.dataRoot })),
+      h(
+        "footer",
+        null,
+        closeButton(() => dialog, t("common.cancel")),
+        button(t("state.moveConfirm"), {
+          class: "primary",
+          onclick: async () => {
+            dialog.close();
+            error.textContent = "";
+            try {
+              await api("POST", "/api/state-dir", { path: target });
+            } catch (e) {
+              return (error.textContent = errorText(e));
+            }
+            move.disabled = path.disabled = true;
+            toast(t("state.moving"));
+            // the service is back when it answers from the new folder
+            for (let i = 0; i < 60; i++) {
+              await new Promise((r) => setTimeout(r, 1500));
+              const now = await fetch("/api/settings").then((r) => (r.ok ? r.json() : null), () => null);
+              if (now?.stateDir === target) {
+                toast(t("state.moved", { path: target }));
+                return location.reload();
+              }
+            }
+            error.textContent = t("state.notBack");
+          },
+        }),
+      ),
+    );
+  };
+  return h(
+    "section",
+    { class: "card pad" },
+    h("h2", null, t("state.title")),
+    h("p", { class: "muted small" }, t("state.lead")),
+    settingRow(t("state.folder"), t(s.stateMovable ? "state.folderHint" : "state.notMovable"), h("span", { class: "pair" }, path, move)),
+    error,
+  );
+}
+
 function settingsSection(section) {
   const s = state.settings;
   const d = state.overview?.docker;
@@ -3697,6 +3753,7 @@ function settingsSection(section) {
         error,
         h("footer", null, h("button", { class: "btn primary" }, t("settings.save"))),
       ),
+      stateDirCard(),
     ];
   }
   if (section === "https") return httpsSection(save, error);

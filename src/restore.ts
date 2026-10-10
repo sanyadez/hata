@@ -8,6 +8,7 @@
  *
  * This file is what the command line needs and nothing more: it must run before there is any state.
  */
+import { serviceStateDir } from "./statedir";
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { join, relative } from "node:path";
 import { readJsonFile, writeJsonAtomic } from "./fsutil";
@@ -90,7 +91,7 @@ export async function restoreServer(args: string[]): Promise<number> {
     return 1;
   }
   // the state restored here must be the service's own
-  if (COMPILED) process.env.HATA_DATA_DIR ??= "/var/lib/hata";
+  if (COMPILED) process.env.HATA_DATA_DIR ??= serviceStateDir();
   const { DATA_DIR } = await import("./config");
 
   const snapshot = listServerSnapshots(from)[0];

@@ -130,7 +130,7 @@ fi
 if [ "$MIGRATE_CASAOS" -eq 1 ]; then
   step "Moving in from CasaOS"
   HATA_INSTALLER=1 "$TMP/$FILE" migrate casaos --yes || die "the move from CasaOS failed; nothing of CasaOS was removed. See the messages above."
-elif [ -d /var/lib/casaos/apps ] && [ ! -f /var/lib/hata/migrations/casaos.json ]; then
+elif [ -d /var/lib/casaos/apps ] && [ ! -f "$(cat /etc/hata/state-dir 2>/dev/null || echo /var/lib/hata)/migrations/casaos.json" ]; then
   say ""
   say "CasaOS is installed on this machine. To take its apps over, run:  sudo hata migrate casaos"
 fi

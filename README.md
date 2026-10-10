@@ -91,8 +91,9 @@ installs Docker if it is missing, and starts the `hata` service. It ends by prin
 creating the administrator. To update, use Settings → About in the web UI, or run it again. If port 80 is taken, Hata picks the next free port and
 says which; `--port <number>` chooses one.
 
-State lives in `/var/lib/hata`; every app is a plain compose project in `/var/lib/hata/apps/<name>/` that
-keeps working without Hata. Next to an app's `compose.yml`, which is yours to edit, `hata.yml` holds what Hata
+State lives in `/var/lib/hata` — the configuration folder; every app is a plain compose project in
+`/var/lib/hata/apps/<name>/` that keeps working without Hata. The folder can be moved from Settings → Apps
+(to another disk, say): everything is copied, Hata restarts there, the apps keep running. Next to an app's `compose.yml`, which is yours to edit, `hata.yml` holds what Hata
 itself knows about it — the store it came from and the store's original file; `docker compose` never reads it.
 
 ### Moving in from CasaOS

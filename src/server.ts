@@ -68,6 +68,7 @@ import { abortUpload, archivePlan, list as listFiles, makeFolder, pinFolder, pin
 import { adoptProject, casaosState, containerDraft, importCount, importList, moveInCasaos, projectDraft, rebuildContainer } from "./import";
 import { accessOf, dropAccess, dropUser, gateTarget, guard, mayOpen, MAX_APP_BODY, page, passToApp, setAccess, startGates, tunnelHandlers } from "./gate";
 import { parseDockerRun } from "./dockerrun";
+import { cannotMove, finishMove, moveState } from "./relocate";
 import { isPlainObject } from "./fsutil";
 import { localNamesStatus, refreshLocalNames } from "./mdns";
 import { addDevice, CHANNELS, listDevices, notifyStatus, pushKey, removeDevice, sendTest, startNotifications, telegramChats, updateNotify } from "./notify";
@@ -223,7 +224,7 @@ function passkeyDomain(req: Request): string {
   return domain && requestProto(req) === "https" && requestHost(req) === domain ? domain : "";
 }
 
-const publicSettings = () => ({ ...settings, systemTimezone: timezone(), languages: Object.keys(LANGUAGES) });
+const publicSettings = () => ({ ...settings, systemTimezone: timezone(), languages: Object.keys(LANGUAGES), stateDir: DATA_DIR, stateMovable: cannotMove() === null });
 
 // --- Events -----------------------------------------------------------------------------------------
 
@@ -735,6 +736,15 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
     }
   }
 
+  // the configuration folder moves as a whole, and the service restarts in the new place
+  if (path === "/api/state-dir" && method === "POST") {
+    const from = DATA_DIR;
+    const failed = moveState((await body(req)).path);
+    if (failed) return fail(failed.error === "state.busy" ? 409 : 400, failed.error, failed.detail);
+    console.log(`The configuration folder is moved from ${from} by ${user.name}; restarting`);
+    return json({ restarting: true }, 202);
+  }
+
   if (path === "/api/local" && method === "GET") return json({ ...(await localNamesStatus()), port: listenAddress().port });
 
   if (path === "/api/https" && method === "GET") {
@@ -1161,6 +1171,11 @@ export async function serve(): Promise<void> {
   const docker = await dockerInfo();
   console.log(docker.available ? `Docker ${docker.version}, compose ${docker.compose}` : `Docker is not available: ${docker.error}`);
 
+  const aside = finishMove();
+  if (aside) {
+    console.log(`The configuration folder was moved here; the old one is kept as ${aside}`);
+    record("system.stateMoved", { detail: DATA_DIR });
+  }
   confirmUpdate();
   scheduleUpdateChecks();
   startSampler();

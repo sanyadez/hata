@@ -8,6 +8,7 @@ import { join, resolve } from "node:path";
 import { cleanLayout, type Layout } from "./dashboard";
 import { changeAppearance, cleanAppearance, DEFAULT_APPEARANCE, type Appearance } from "./wallpapers";
 import { isPlainObject, readJsonFile, writeJsonAtomic } from "./fsutil";
+import { POINTER_FILE, serviceStateDir, stateIsMissing } from "./statedir";
 import { COMPILED } from "./version";
 
 /**
@@ -16,10 +17,14 @@ import { COMPILED } from "./version";
  */
 function defaultDataDir(): string {
   if (!COMPILED) return join(process.cwd(), "data");
-  return process.getuid?.() === 0 ? "/var/lib/hata" : join(homedir(), ".local", "share", "hata");
+  return process.getuid?.() === 0 ? serviceStateDir() : join(homedir(), ".local", "share", "hata");
 }
 
 export const DATA_DIR = resolve(process.env.HATA_DATA_DIR || defaultDataDir());
+if (stateIsMissing(DATA_DIR)) {
+  console.error(`The configuration folder ${DATA_DIR} is not there — is its disk mounted?\nHata will not start with an empty one. To begin anew on purpose, remove ${POINTER_FILE}.`);
+  process.exit(1);
+}
 mkdirSync(DATA_DIR, { recursive: true, mode: 0o700 });
 
 const SETTINGS_FILE = join(DATA_DIR, "settings.json");
