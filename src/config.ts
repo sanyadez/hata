@@ -6,6 +6,7 @@ import { chmodSync, cpSync, existsSync, mkdirSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { cleanLayout, type Layout } from "./dashboard";
+import { cleanShares, type Share } from "./smbconf";
 import { changeAppearance, cleanAppearance, DEFAULT_APPEARANCE, type Appearance } from "./wallpapers";
 import { isPlainObject, readJsonFile, writeJsonAtomic } from "./fsutil";
 import { POINTER_FILE, serviceStateDir, stateIsMissing, SYSTEM_SECRETS_DIR } from "./statedir";
@@ -86,6 +87,8 @@ export interface Settings {
   local: { enabled: boolean; name: string };
   /** Folders put on the dashboard from the file manager, absolute paths */
   folders: string[];
+  /** Folders shared over the network (SMB) */
+  shares: Share[];
   /** How the dashboard is arranged: groups, links, folders of tiles */
   dashboard: Layout;
   /** Colours and the background picture of the UI */
@@ -144,6 +147,7 @@ const DEFAULTS: Settings = {
   https: { mode: "off", domain: "", email: "" },
   local: { enabled: true, name: "hata.local" },
   folders: [],
+  shares: [],
   dashboard: cleanLayout(null),
   appearance: DEFAULT_APPEARANCE,
 };
@@ -168,6 +172,7 @@ export const settings: Settings = {
   backup: { ...DEFAULTS.backup, ...(isPlainObject(saved.backup) ? saved.backup : {}) },
   access: isPlainObject(saved.access) ? (saved.access as Record<string, AppAccess>) : {},
   folders: Array.isArray(saved.folders) ? saved.folders.filter((path): path is string => typeof path === "string") : [],
+  shares: cleanShares(saved.shares),
   dashboard: cleanLayout(saved.dashboard),
   appearance: cleanAppearance(saved.appearance),
   https: { ...DEFAULTS.https, ...(isPlainObject(saved.https) ? saved.https : {}) },

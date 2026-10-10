@@ -10,6 +10,7 @@
  * disk's own self-test.
  */
 import { existsSync, readFileSync, statfsSync } from "node:fs";
+import { installCommand, installPackage, PATH, run } from "./packages";
 
 // ---- what is connected (lsblk) ----
 
@@ -286,7 +287,7 @@ export type ToolState = "ok" | "missing" | "denied";
 
 const CHECK_EVERY_MS = 30 * 60_000;
 const TEST_POLL_MS = 60_000;
-const PATH = `${process.env.PATH ?? ""}:/usr/sbin:/sbin`;
+const PACKAGE = "smartmontools";
 
 interface Reading {
   smart: Smart | null;
@@ -295,16 +296,6 @@ interface Reading {
 const readings = new Map<string, Reading>();
 let known: Disk[] = [];
 let tool: ToolState = "ok";
-
-async function run(cmd: string[], timeout = 30_000, env: Record<string, string> = {}): Promise<{ code: number; out: string; err: string }> {
-  try {
-    const proc = Bun.spawn({ cmd, stdout: "pipe", stderr: "pipe", stdin: "ignore", timeout, env: { ...process.env, PATH, LC_ALL: "C", ...env } });
-    const [out, err, code] = await Promise.all([new Response(proc.stdout).text(), new Response(proc.stderr).text(), proc.exited]);
-    return { code, out, err };
-  } catch (e) {
-    return { code: -1, out: "", err: e instanceof Error ? e.message : String(e) };
-  }
-}
 
 const COLUMNS = "NAME,PATH,TYPE,SIZE,MODEL,SERIAL,TRAN,ROTA,RM,HOTPLUG,FSTYPE,LABEL,FSSIZE,FSUSED";
 
@@ -419,7 +410,7 @@ export async function listDisks(): Promise<{ disks: DiskReport[]; mounts: MountR
   // the same count as everywhere else in Hata: used is what is not free to an ordinary program
   const disks = known.map(report).map((disk) => ({ ...disk, volumes: disk.volumes.map((v) => ({ ...v, ...((v.mounts[0] && usage(v.mounts[0])) || {}) })) }));
   const state: ToolState = outOfReach(known) ? "denied" : smartctl() ? (tool === "missing" ? "ok" : tool) : "missing";
-  return { disks, mounts, tool: state, install: state === "missing" ? installCommand() : "" };
+  return { disks, mounts, tool: state, install: state === "missing" ? installCommand(PACKAGE) : "" };
 }
 
 /** Starts the disk's own self-test; the outcome shows up in its SMART data when it is done */
@@ -436,41 +427,14 @@ export async function startSelfTest(name: string, type: "short" | "long"): Promi
   return null;
 }
 
-const INSTALLERS: [string, string[]][] = [
-  ["apt-get", ["install", "-y", "--no-install-recommends", "smartmontools"]],
-  ["dnf", ["install", "-y", "smartmontools"]],
-  ["yum", ["install", "-y", "smartmontools"]],
-  ["zypper", ["--non-interactive", "install", "smartmontools"]],
-  ["pacman", ["-S", "--noconfirm", "--needed", "smartmontools"]],
-  ["apk", ["add", "smartmontools"]],
-];
-
-const installer = () => INSTALLERS.find(([manager]) => Bun.which(manager, { PATH }));
-
-/** The command the "Install" button runs, shown next to it; empty when this system's package manager is not one we know */
-export const installCommand = (): string => {
-  const found = installer();
-  return found ? [found[0], ...found[1]].join(" ") : "";
-};
-
 /**
  * Installs smartmontools with the system's package manager; returns what went wrong, or null.
  * Only ever called for the button: Hata installs nothing on its own.
  */
 export async function installTool(): Promise<string | null> {
   if (!smartctl()) {
-    const found = installer();
-    if (!found) return "No known package manager was found. Install the smartmontools package by hand.";
-    const [manager, args] = found;
-    const bin = Bun.which(manager, { PATH })!;
-    const env = { DEBIAN_FRONTEND: "noninteractive" };
-    let result = await run([bin, ...args], 5 * 60_000, env);
-    // a package list that was never fetched, or is too old to hold the file
-    if (result.code !== 0 && manager === "apt-get") {
-      await run([bin, "update"], 3 * 60_000, env);
-      result = await run([bin, ...args], 5 * 60_000, env);
-    }
-    if (result.code !== 0 || !smartctl()) return (result.err.trim() || result.out.trim()).split("\n").slice(-3).join("\n") || `${manager} exited with ${result.code}`;
+    const failed = await installPackage(PACKAGE);
+    if (failed || !smartctl()) return failed ?? `${PACKAGE} is installed, but smartctl is not there`;
   }
   await checkDisks(true);
   return null;

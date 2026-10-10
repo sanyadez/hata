@@ -64,6 +64,11 @@ Early development. What works today:
   without waking a disk that sleeps, a disk in trouble shows up under "needs attention" and is sent as a
   notification, and a disk can be told to test itself. It needs `smartmontools`, which Hata offers to
   install; nothing on a disk is changed;
+- folders shared over the network (Settings → Network folders, or a folder's menu in Files): a folder of
+  the server opens in Explorer, Finder or a phone's file manager like a network disk (SMB) — with one name
+  and password, or for anyone at home; only to look, or to change. What lands there takes the owner of
+  its folder, so apps still reach it. It needs Samba, which Hata offers to install; your own `smb.conf`
+  stays yours — Hata adds one line to it and takes it out again when removed;
 - files: the server's files in the browser, opened in the data folder and reaching everywhere — folders,
   upload by drag and drop (whole folders too, large files in parts), download of a file or of a folder as a
   ZIP archive, rename, move, copy, delete, copying a path, putting a folder on the dashboard, pictures, video and sound opened in place, text

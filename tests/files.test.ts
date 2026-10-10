@@ -1,9 +1,9 @@
 import { beforeEach, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { DATA_DIR, settings } from "../src/config";
-import { archivePlan, freeName, list, pinFolder, pinnedFolders, locate, makeFolder, readable, readText, remove, rename, summary, transfer, upload, validName, writeText, type UploadPart } from "../src/files";
+import { archivePlan, freeName, list, mustBeSharable, onSharesMoved, pinFolder, pinnedFolders, locate, makeFolder, readable, readText, remove, rename, summary, transfer, upload, validName, writeText, type UploadPart } from "../src/files";
 import { zipChunks } from "../src/zip";
 
 let root = "";
@@ -144,6 +144,32 @@ test("a folder on the dashboard follows a rename and a move, and goes with a rem
   expect(settings.folders).toEqual([at("/Films")]);
   pinFolder(at("/Films"), false);
   expect(settings.folders).toEqual([]);
+});
+
+test("a shared folder follows a rename and a move, and is not shared once removed", async () => {
+  let told = 0;
+  onSharesMoved(() => told++);
+  mkdirSync(at("/Shared/Docs"), { recursive: true });
+  settings.shares = [{ name: "Docs", path: at("/Shared/Docs"), guest: false, readOnly: true }];
+  expect((await list(at("/Shared"))).shared).toEqual([at("/Shared/Docs")]);
+  rename(at("/Shared"), "Given");
+  expect(settings.shares).toEqual([{ name: "Docs", path: at("/Given/Docs"), guest: false, readOnly: true }]);
+  // a name Samba's file cannot hold ends the sharing
+  rename(at("/Given/Docs"), "100%");
+  expect(settings.shares).toEqual([]);
+  settings.shares = [{ name: "Given", path: at("/Given"), guest: true, readOnly: false }];
+  await remove([at("/Given/100%")]);
+  expect(settings.shares.length).toBe(1);
+  await remove([at("/Given")]);
+  expect(settings.shares).toEqual([]);
+  expect(told).toBe(3);
+  onSharesMoved(() => {});
+});
+
+test("what may be shared: a folder, but not the system's own and not what holds Hata's state", () => {
+  mustBeSharable(at("/AppData"));
+  expect(code(() => mustBeSharable(at("/nothing")))).toBe("files.notFound");
+  for (const path of ["/", "/etc", "/etc/ssh", "/usr/share", "/home", "/proc/1", DATA_DIR, dirname(DATA_DIR)]) expect(code(() => mustBeSharable(path))).toBe("shares.protected");
 });
 
 test("the next free name", () => {

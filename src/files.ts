@@ -20,6 +20,7 @@ import { basename, dirname, extname, join, resolve, sep } from "node:path";
 import { AppError } from "./apps";
 import { DATA_DIR, saveSettings, SECRETS_DIR, settings } from "./config";
 import { movePath } from "./dashboard";
+import { writablePath } from "./smbconf";
 import { ZIP_MAX_BYTES, ZIP_MAX_ENTRIES, type ZipSource } from "./zip";
 
 /** A folder's listing holds at most this many entries */
@@ -56,6 +57,8 @@ export interface Listing {
   truncated: boolean;
   /** Folders that are on the dashboard */
   pinned: string[];
+  /** Folders shared over the network */
+  shared: string[];
   /** Folders at the top of the data root: the places of the sidebar */
   places: string[];
   disk: { total: number; free: number } | null;
@@ -126,6 +129,17 @@ function mustBeMovable(abs: string): void {
   mustWrite(abs);
   const real = join(realish(dirname(abs)), basename(abs));
   if (abs === "/" || SYSTEM_DIRS.has(abs) || SYSTEM_DIRS.has(real) || keystones().some((key) => inside(key, abs) || inside(realish(key), real))) throw new AppError("files.protected", 403);
+}
+
+/** What is the system's own all the way down: nothing in there is a folder to hand out */
+const CLOSED = "bin boot etc lib lib32 lib64 libx32 run sbin usr".split(" ").map((name) => "/" + name);
+
+/** A folder that may go out to the network: not `/`, not the system's, nothing that holds Hata's state or lies in it */
+export function mustBeSharable(abs: string): void {
+  mustBeDir(abs);
+  const real = realish(abs);
+  const state = [DATA_DIR, SECRETS_DIR].map(realish);
+  if (real === "/" || SYSTEM_DIRS.has(real) || isVirtual(abs) || CLOSED.some((dir) => inside(real, dir)) || state.some((dir) => inside(dir, real) || inside(real, dir))) throw new AppError("shares.protected", 403);
 }
 
 /** A name for a new file or folder: one path segment */
@@ -213,6 +227,7 @@ export async function list(path: unknown): Promise<Listing> {
     readOnly: !isWritable(dir),
     home,
     pinned: settings.folders,
+    shared: settings.shares.map((share) => share.path),
     entries,
     truncated: shown.length > LIST_LIMIT,
     places: top.filter((e) => e.type === "dir" && !e.name.startsWith(".")).map((e) => e.name).sort((a, b) => a.localeCompare(b, undefined, { numeric: true })).slice(0, 40),
@@ -248,6 +263,22 @@ function repin(from: string, to: string | null): void {
   settings.folders = [...new Set(next)];
   settings.dashboard = movePath(settings.dashboard, from, to);
   saveSettings();
+}
+
+let sharesMoved: () => void = () => {};
+
+/** Called when a shared folder was moved, renamed or removed and the list of shares changed with it */
+export function onSharesMoved(listener: () => void): void {
+  sharesMoved = listener;
+}
+
+/** A shared folder that was moved or renamed (or one inside what was) stays shared; a removed one is not any more */
+function reshare(from: string, to: string | null): void {
+  const next = settings.shares.flatMap((share) => (!inside(share.path, from) ? [share] : to === null ? [] : [{ ...share, path: to + share.path.slice(from.length) }])).filter((share) => writablePath(share.path));
+  if (next.map((share) => share.path).join("\n") === settings.shares.map((share) => share.path).join("\n")) return;
+  settings.shares = next;
+  saveSettings();
+  sharesMoved();
 }
 
 function diskOf(path: string): Listing["disk"] {
@@ -315,6 +346,7 @@ export function rename(path: unknown, name: unknown): string {
     throw fsError(e);
   }
   repin(from, to);
+  reshare(from, to);
   return to;
 }
 
@@ -356,6 +388,7 @@ export async function transfer(paths: unknown, to: unknown, copy: boolean): Prom
       try {
         renameSync(from, dest);
         repin(from, dest);
+        reshare(from, dest);
       } catch (e) {
         if ((e as NodeJS.ErrnoException).code !== "EXDEV") throw fsError(e);
         // another disk: a copy, then the original is removed
@@ -364,6 +397,7 @@ export async function transfer(paths: unknown, to: unknown, copy: boolean): Prom
           throw fsError(e2);
         });
         repin(from, dest);
+        reshare(from, dest);
       }
     }
   }
@@ -392,6 +426,7 @@ export async function remove(paths: unknown): Promise<void> {
       throw fsError(e);
     }
     repin(abs, null);
+    reshare(abs, null);
   }
 }
 

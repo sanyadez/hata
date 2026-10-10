@@ -2,7 +2,8 @@
  * `hata install` / `hata uninstall`: the systemd service. Installing is copying the binary and writing
  * one unit file — nothing else is put on the system.
  */
-import { chmodSync, copyFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { HATA_CONF, hasInclude, SMB_CONF, withoutInclude } from "./smbconf";
 import { serviceStateDir } from "./statedir";
 import { COMPILED } from "./version";
 
@@ -109,6 +110,22 @@ export async function installService(args: string[] = []): Promise<number> {
   return 0;
 }
 
+/** Samba gets its configuration back as it was: the folders shared from Hata go with Hata */
+function unshare(): void {
+  try {
+    if (existsSync(SMB_CONF)) {
+      const conf = readFileSync(SMB_CONF, "utf8");
+      if (hasInclude(conf)) writeFileSync(SMB_CONF, withoutInclude(conf));
+    }
+    if (!existsSync(HATA_CONF)) return;
+    rmSync(HATA_CONF, { force: true });
+    Bun.spawnSync({ cmd: ["smbcontrol", "all", "reload-config"], stdout: "ignore", stderr: "ignore" });
+    console.log("The folders shared over the network are not shared any more; Samba itself stays installed.");
+  } catch (e) {
+    console.error(`Could not take the shared folders out of ${SMB_CONF}:`, e instanceof Error ? e.message : e);
+  }
+}
+
 export async function uninstallService(): Promise<number> {
   const problem = preflight();
   if (problem) {
@@ -119,6 +136,7 @@ export async function uninstallService(): Promise<number> {
   rmSync(UNIT, { force: true });
   systemctl("daemon-reload");
   rmSync(BIN, { force: true });
+  unshare();
   console.log(`Hata is removed. Apps keep running; their compose files and the state stay in ${serviceStateDir()}, the users and keys in /etc/hata.`);
   return 0;
 }

@@ -71,6 +71,7 @@ const ICONS = {
   edit: "M4 20h4L19 9l-4-4L4 16zM13 7l4 4",
   copy: "M9 9h11v11H9zM5 15H4V4h11v1",
   pin: "M12 17v5M8 3h8l-1 6 3 4H6l3-4z",
+  share: "M18 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM6 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM18 22a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM8.6 13.5l6.8 4M15.4 6.5l-6.8 4",
   link: "M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1",
 };
 
@@ -2673,6 +2674,7 @@ function renderFilesBody() {
   );
 
   const isPinned = (listing?.pinned ?? []).includes(path);
+  const isShared = (listing?.shared ?? []).includes(listing?.path);
   const head = h(
     "div",
     { class: "page-head" },
@@ -2682,7 +2684,7 @@ function renderFilesBody() {
       crumbs,
       h("p", { class: "meta" }, path && h("button", { type: "button", class: "copy-path", title: t("files.copyPath"), "aria-label": t("files.copyPath"), onclick: () => copyText(path) }, h("span", null, path), icon("copy")), listing?.readOnly && h("span", { class: "chip warn" }, t("files.readOnly")), listing && !listing.error && h("span", { class: "dot-sep" }, "·"), listing && !listing.error && t("files.count", { dirs: dirs.length, files: rest.length }), rest.length > 0 && h("span", { class: "dot-sep" }, "·"), rest.length > 0 && bytes(rest.reduce((n, entry) => n + entry.size, 0))),
     ),
-    h("div", { class: "actions" }, listing && !listing.error && h("button", { type: "button", class: "btn square" + (isPinned ? " active" : ""), title: t(isPinned ? "files.unpin" : "files.pin"), "aria-label": t(isPinned ? "files.unpin" : "files.pin"), "aria-pressed": String(isPinned), onclick: () => pinFolder(path, !isPinned) }, icon("pin")), sort, h("div", { class: "seg" }, modeButton("list", "list"), modeButton("grid", "grid")), button(t("files.newFolder"), { disabled: !listing || !!listing.error || listing.readOnly, onclick: () => newFolderDialog(path, loadFiles) }, "folder"), button(t("files.upload"), { class: "primary", disabled: !listing || !!listing.error || listing.readOnly, onclick: () => picker.click() }, "upload"), picker),
+    h("div", { class: "actions" }, listing && !listing.error && h("button", { type: "button", class: "btn square" + (isPinned ? " active" : ""), title: t(isPinned ? "files.unpin" : "files.pin"), "aria-label": t(isPinned ? "files.unpin" : "files.pin"), "aria-pressed": String(isPinned), onclick: () => pinFolder(path, !isPinned) }, icon("pin")), listing && !listing.error && h("button", { type: "button", class: "btn square" + (isShared ? " active" : ""), title: t(isShared ? "files.shareSettings" : "files.share"), "aria-label": t(isShared ? "files.shareSettings" : "files.share"), onclick: () => shareDialog(path) }, icon("share")), sort, h("div", { class: "seg" }, modeButton("list", "list"), modeButton("grid", "grid")), button(t("files.newFolder"), { disabled: !listing || !!listing.error || listing.readOnly, onclick: () => newFolderDialog(path, loadFiles) }, "folder"), button(t("files.upload"), { class: "primary", disabled: !listing || !!listing.error || listing.readOnly, onclick: () => picker.click() }, "upload"), picker),
   );
 
   const selection = h("div", { class: "card selection", id: "files-selection", hidden: true });
@@ -2738,6 +2740,8 @@ const entryOpener = (entry, className, ...content) =>
     ? h("a", { class: className, href: filesHash(joinPath(state.files.path, entry.name)) }, content)
     : h("button", { type: "button", class: className, onclick: () => openEntry(entry) }, content);
 
+const sharedMark = (entry) => entry.type === "dir" && state.files.shared.includes(joinPath(state.files.path, entry.name)) && h("span", { class: "shared-mark", title: t("files.sharedMark") }, icon("share"));
+
 function filesTable(entries) {
   const all = h("input", {
     type: "checkbox",
@@ -2750,7 +2754,7 @@ function filesTable(entries) {
       "tr",
       { class: filesUi.selected.has(entry.name) ? "selected" : "", "data-name": entry.name },
       h("td", { class: "tick" }, entryCheckbox(entry)),
-      h("td", { class: "name" }, entryOpener(entry, "file-name", fileIcon(entry), h("span", { class: "clip" }, entry.name), entry.link && icon("link", "faint"))),
+      h("td", { class: "name" }, entryOpener(entry, "file-name", fileIcon(entry), h("span", { class: "clip" }, entry.name), entry.link && icon("link", "faint"), sharedMark(entry))),
       h("td", { class: "num muted" }, entry.type === "file" ? bytes(entry.size) : "—"),
       h("td", { class: "muted when" }, fileTime(entry.modified)),
       h("td", { class: "tick" }, entryMore(entry)),
@@ -2817,6 +2821,7 @@ function entryMenu(entry) {
     entry.type !== "other" && item(t(entry.type === "dir" ? "files.downloadZip" : "files.download"), "download", () => downloadEntries([entry])),
     item(t("files.copyPath"), "link", () => copyText(path)),
     entry.type === "dir" && (state.files.pinned.includes(path) ? item(t("files.unpin"), "pin", () => pinFolder(path, false)) : item(t("files.pin"), "pin", () => pinFolder(path, true))),
+    entry.type === "dir" && item(t(state.files.shared.includes(path) ? "files.shareSettings" : "files.share"), "share", () => shareDialog(path)),
     item(t("files.rename"), "edit", () => renameDialog(entry)),
     item(t("files.move"), "arrow", () => transferDialog([entry], false)),
     item(t("files.copy"), "copy", () => transferDialog([entry], true)),
@@ -3658,6 +3663,7 @@ async function loadSettings() {
     if (isAdmin()) state.update = await api("GET", "/api/update").catch(() => null);
     if (isAdmin()) state.notify = await api("GET", "/api/notify").catch(() => null);
     if (isAdmin() && state.route.section === "storage") state.disks = await api("GET", "/api/disks").catch(() => null);
+    if (isAdmin() && state.route.section === "shares") state.shares = await api("GET", "/api/shares").catch(() => null);
     if (!state.store && isAdmin()) state.store = await api("GET", `/api/store?lang=${state.lang}`).catch(() => null);
   } catch (e) {
     return toast(errorText(e), "error");
@@ -3673,6 +3679,7 @@ const SECTIONS = [
   { id: "apps", icon: "grid", admin: true },
   { id: "stores", icon: "store", admin: true },
   { id: "storage", icon: "disk", admin: true },
+  { id: "shares", icon: "share", admin: true },
   { id: "https", icon: "lock", admin: true },
   { id: "notifications", icon: "bell", admin: true },
   { id: "about", icon: "info" },
@@ -3863,6 +3870,7 @@ function settingsSection(section) {
   if (section === "https") return httpsSection(save, error);
   if (section === "notifications") return notificationsSection();
   if (section === "storage") return storageSection();
+  if (section === "shares") return sharesSection();
   if (section === "stores") {
     const stores = state.store?.stores ?? [];
     return [
@@ -4440,6 +4448,170 @@ function storageSection() {
         h("table", { class: "disks" }, h("thead", null, h("tr", null, h("th", null, t("disks.fs.col.path")), h("th", null, t("disks.fs.col.source")), h("th", null, t("disks.col.usage")))), h("tbody", null, data.mounts.map(fsRow))),
       ),
   ].filter(Boolean);
+}
+
+// --- Folders shared over the network ----------------------------------------------------------------
+
+function setShares(data) {
+  state.shares = data;
+  if (state.files) state.files.shared = data.shares.map((share) => share.path);
+  if (state.route.view === "settings" && state.route.section === "shares") renderSettings();
+  if (state.route.view === "files") renderFilesBody();
+}
+
+/** The two ways a shared folder is written: for Explorer, and for everything else */
+const shareAddresses = (host, name = "") => ({ windows: `\\\\${host}${name && "\\" + name}`, url: `smb://${host}${name && "/" + name.replaceAll(" ", "%20")}` });
+
+const copyLine = (text) => h("div", { class: "copy-line" }, h("span", { class: "mono clip" }, text), h("button", { type: "button", class: "icon-btn", title: t("files.copyPath"), "aria-label": t("files.copyPath"), onclick: () => copyText(text) }, icon("copy")));
+
+/** Sharing of one folder: turning it on, how it is shared, turning it off */
+async function shareDialog(path) {
+  let data;
+  try {
+    data = state.shares = await api("GET", "/api/shares");
+  } catch (e) {
+    return toast(errorText(e), "error");
+  }
+  const share = data.shares.find((one) => one.path === path);
+  const folder = path.split("/").pop() || "/";
+  let dialog;
+  if (data.tool === "missing") {
+    dialog = openDialog("confirm", h("h2", null, t("shares.dialog.new", { name: folder })), h("p", { class: "muted" }, t("shares.tool.note")), h("footer", null, closeButton(() => dialog, t("common.cancel")), h("a", { class: "btn primary", href: "#/settings/shares", onclick: () => dialog.close() }, t("shares.tool.open"))));
+    return;
+  }
+  const name = h("input", { value: share?.name ?? "", placeholder: folder, maxLength: 40, spellcheck: false, autocomplete: "off" });
+  const who = (guest) => h("input", { type: "radio", name: "who", value: guest ? "guest" : "password", checked: (share?.guest ?? false) === guest });
+  const withPassword = who(false);
+  const guest = who(true);
+  const readOnly = h("input", { type: "checkbox", checked: share?.readOnly ?? false });
+  const error = h("p", { class: "error", role: "alert" });
+  const send = async (method, url, body, done) => {
+    error.textContent = "";
+    try {
+      setShares(await api(method, url, body));
+      dialog.close();
+      toast(done);
+    } catch (e) {
+      error.textContent = errorText(e);
+    }
+  };
+  const settings = () => ({ name: name.value.trim(), guest: guest.checked, readOnly: readOnly.checked });
+  const address = share && data.hosts[0] && shareAddresses(data.hosts[0], share.name);
+  dialog = openDialog(
+    "confirm",
+    h(
+      "form",
+      {
+        onsubmit: (e) => {
+          e.preventDefault();
+          if (share) return send("PUT", `/api/shares/${encodeURIComponent(share.name)}`, settings(), t("shares.saved"));
+          return send("POST", "/api/shares", { path, ...settings() }, t("shares.sharedDone", { name: folder }));
+        },
+      },
+      h("header", null, h("span", { class: "badge-icon plain" }, icon("share")), h("div", null, h("h2", null, t(share ? "shares.dialog.edit" : "shares.dialog.new", { name: folder })), h("span", { class: "muted small mono clip" }, path))),
+      address && h("div", { class: "stack-s" }, copyLine(address.windows), copyLine(address.url)),
+      field(t("shares.name"), name, t("shares.nameHint")),
+      h(
+        "div",
+        { class: "field" },
+        h("span", { class: "label" }, t("shares.who")),
+        h("label", { class: "check" }, withPassword, h("span", null, t("shares.who.password"), h("span", { class: "muted small block" }, t("shares.who.passwordHint", { user: data.account.name })))),
+        h("label", { class: "check" }, guest, h("span", null, t("shares.who.guest"), h("span", { class: "muted small block" }, t("shares.who.guestHint")))),
+      ),
+      h("label", { class: "check" }, readOnly, h("span", null, t("shares.readOnlyLabel"), h("span", { class: "muted small block" }, t("shares.readOnlyHint")))),
+      !data.account.set && h("p", { class: "banner small" }, t("shares.needPassword"), " ", h("a", { class: "link", href: "#/settings/shares", onclick: () => dialog.close() }, t("shares.tool.open"))),
+      error,
+      h("footer", null, share ? button(t("shares.stop"), { class: "danger", onclick: () => send("DELETE", `/api/shares/${encodeURIComponent(share.name)}`, undefined, t("shares.stoppedDone", { name: share.name })) }) : h("span"), closeButton(() => dialog, t("common.cancel")), h("button", { class: "btn primary" }, t(share ? "shares.save" : "shares.share"))),
+    ),
+  );
+}
+
+function sharesSection() {
+  const data = state.shares;
+  if (!data) return [h("p", { class: "muted" }, "…")];
+  const error = h("p", { class: "error", role: "alert" });
+  if (data.tool === "missing") {
+    const install = async (e) => {
+      const el = e.currentTarget;
+      error.textContent = "";
+      el.disabled = true;
+      el.lastChild.textContent = t("shares.tool.installing");
+      try {
+        setShares(await api("POST", "/api/shares/tool", {}));
+        toast(t("shares.tool.installed"));
+      } catch (err) {
+        el.disabled = false;
+        el.lastChild.textContent = t("shares.tool.install");
+        error.textContent = errorText(err);
+      }
+    };
+    return [
+      h(
+        "section",
+        { class: "card pad" },
+        h("h2", null, t("shares.tool.missing")),
+        h("p", { class: "muted" }, t("shares.lead")),
+        h("p", { class: "muted" }, t("shares.tool.what")),
+        h("p", { class: "muted" }, t("shares.tool.why")),
+        data.install ? [h("p", { class: "muted" }, t("shares.tool.how")), h("p", { class: "cmd" }, icon("terminal"), data.install)] : h("p", { class: "muted" }, t("shares.tool.byHand")),
+        error,
+        data.install && h("footer", null, button(t("shares.tool.install"), { class: "primary", onclick: install }, "download")),
+      ),
+    ];
+  }
+  const host = data.hosts[0] ?? location.hostname;
+  const taken = data.shares.map((share) => share.path);
+  const add = () => folderPicker({ title: t("shares.addTitle"), start: "", confirmLabel: t("shares.addHere"), allowed: (at) => !taken.includes(at), action: (at) => void setTimeout(() => shareDialog(at)) });
+  const row = (share) => {
+    const address = shareAddresses(host, share.name);
+    return h(
+      "tr",
+      null,
+      h("td", null, h("div", { class: "strong" }, share.name), share.missing ? h("div", { class: "small danger-text" }, t("shares.missing")) : h("a", { class: "muted small mono clip block", href: filesHash(share.path) }, share.path)),
+      h("td", null, h("div", null, t(share.guest ? "shares.access.guest" : "shares.access.password")), h("div", { class: "muted small" }, t(share.readOnly ? "shares.readOnly" : "shares.writable"))),
+      h("td", null, copyLine(address.windows), copyLine(address.url)),
+      h("td", null, h("div", { class: "row-actions" }, button(t("shares.settings"), { class: "small", onclick: () => shareDialog(share.path) }))),
+    );
+  };
+  const password = h("input", { type: "password", autocomplete: "new-password", minLength: 8, maxLength: 127, required: true, class: "mono" });
+  const setPassword = async (e) => {
+    e.preventDefault();
+    error.textContent = "";
+    try {
+      setShares(await api("POST", "/api/shares/password", { password: password.value }));
+      toast(t("shares.account.saved"));
+    } catch (err) {
+      error.textContent = errorText(err);
+    }
+  };
+  const all = shareAddresses(host);
+  return [
+    h(
+      "section",
+      { class: "card table-wrap" },
+      h(
+        "div",
+        { class: "pad card-head" },
+        h("div", { class: "section-head" }, h("h2", null, t("shares.title"), data.shares.length > 0 && h("span", { class: "state " + (data.running ? "running" : "restarting") }, t(data.running ? "shares.running" : "shares.stopped"))), button(t("shares.add"), { class: "small primary", onclick: add }, "plus")),
+        h("p", { class: "muted small" }, t(data.shares.length ? "shares.lead" : "shares.none")),
+        data.error && h("p", { class: "banner danger" }, t("shares.error", { message: data.error })),
+        !data.account.set && data.shares.some((share) => !share.guest) && h("p", { class: "banner" }, t("shares.needPassword")),
+      ),
+      data.shares.length > 0 && h("table", { class: "disks shares" }, h("thead", null, h("tr", null, h("th", null, t("shares.col.name")), h("th", null, t("shares.col.access")), h("th", null, t("shares.col.address")), h("th"))), h("tbody", null, data.shares.map(row))),
+    ),
+    h(
+      "form",
+      { class: "card pad stack", onsubmit: setPassword },
+      h("h2", null, t("shares.account.title")),
+      h("p", { class: "muted" }, t("shares.account.lead")),
+      settingRow(t("shares.account.name"), "", h("span", { class: "mono" }, data.account.name)),
+      settingRow(t("shares.account.password"), "", h("span", { class: data.account.set ? "muted" : "state restarting" }, t(data.account.set ? "shares.account.set" : "shares.account.unset"))),
+      field(t("shares.account.new"), password, t("shares.account.newHint", { user: data.account.name })),
+      error,
+      h("footer", null, h("button", { class: "btn primary" }, t("shares.account.save"))),
+    ),
+    h("section", { class: "card pad stack-s" }, h("h2", null, t("shares.how.title")), h("p", { class: "muted" }, t("shares.how.windows", { address: all.windows })), h("p", { class: "muted" }, t("shares.how.mac", { address: all.url })), h("p", { class: "muted" }, t("shares.how.phone"))),
+  ];
 }
 
 function renderSettings() {
