@@ -43,8 +43,10 @@ Early development. What works today:
   editing the compose file, removal with or without data;
 - app settings as a form, the one known from CasaOS: image, title and icon, the web UI's address, network,
   ports, volumes, environment variables, devices, command, privileges, memory limit, CPU shares, restart
-  policy, capabilities, host name — for every service of the app. It edits the same compose file: what the
-  form does not show stays as written. A custom app can be described in this form instead of a compose file;
+  policy, capabilities, host name — for every service of the app, and services are added and removed as
+  tabs. It edits the same compose file: what the form does not show stays as written. A custom app can be
+  described in this form instead of a compose file, and the form can be filled in from a `docker run`
+  command pasted from an app's instructions;
 - backups: a snapshot of an app (compose file, its folders, its Docker volumes) as a plain `tar.gz`, daily
   on a schedule and before every update, restore to any snapshot — also of an app that was removed;
 - a backup of the whole server: with every run Hata's own state (settings, users, the dashboard, the

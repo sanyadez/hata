@@ -186,9 +186,27 @@ test("what cannot be right is refused", () => {
   expect(bad((f) => (f.services[0]!.capAdd = ["NET ADMIN"]))).toBe("edit.badCapability");
   expect(bad((f) => (f.icon = "javascript:alert(1)"))).toBe("edit.badIcon");
   expect(bad((f) => (f.web.port = "http"))).toBe("edit.badWeb");
-  expect(bad((f) => (f.services[0]!.name = "other"))).toBe("edit.unknownService");
+  expect(bad((f) => (f.services[0]!.name = "bad name"))).toBe("edit.badService");
+  expect(bad((f) => (f.services[1]!.name = "web"))).toBe("edit.badService");
+  expect(bad((f) => (f.services = []))).toBe("edit.badService");
   expect(bad((f) => f.services[0]!.ports.push({ raw: "1-2:1-2", host: "", container: "", protocol: "tcp" }))).toBe("edit.invalid");
   expect(applyEdit(fresh(), "x", "en")).toBe("edit.invalid");
+});
+
+test("services are added and taken out", () => {
+  const compose = fresh();
+  compose.services.web.depends_on = ["db"];
+  compose["x-casaos"].main = "db";
+  const { error } = edit((form) => {
+    form.services = [form.services[0]!, { ...readEdit(blankCompose("cache"), "en").services[0]!, image: "redis:7", ports: [{ host: "", container: "6379", protocol: "tcp" }] }];
+  }, compose);
+  expect(error).toBeNull();
+  expect(Object.keys(compose.services)).toEqual(["web", "cache"]);
+  expect(compose.services.cache).toEqual({ image: "redis:7", restart: "unless-stopped", ports: ["6379"] });
+  expect("depends_on" in compose.services.web).toBe(false);
+  expect(compose["x-casaos"].main).toBe("web");
+  // the rest of the service that stayed is untouched
+  expect(compose.services.web.ports).toEqual(fresh().services.web.ports);
 });
 
 test("a new app starts from an empty form", () => {

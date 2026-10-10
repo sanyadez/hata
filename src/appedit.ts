@@ -1,7 +1,7 @@
 /**
  * The compose file of an app as the form people know from CasaOS: image, title and icon, the web UI's
  * address, network, ports, volumes, variables, devices, command, privileges, limits, restart policy,
- * capabilities, host name — per service.
+ * capabilities, host name — per service; services are added and taken out.
  *
  * `readEdit` shows a compose file that way and `applyEdit` puts the answers back (in place). The file is
  * richer than the form, so the rule is: what the user did not change stays exactly as written. A list
@@ -129,7 +129,7 @@ export function megabytes(value: unknown): number {
   return m ? Math.round((Number(m[1]) * UNITS[(m[2] ?? "b").toLowerCase()]!) / UNITS.m!) : 0;
 }
 
-function readService(name: string, service: Compose): ServiceEdit {
+export function readService(name: string, service: Compose): ServiceEdit {
   const command = service.command;
   return {
     name,
@@ -168,6 +168,7 @@ export function readEdit(compose: Compose, lang: string): AppEdit {
 
 const validPort = (v: string): boolean => /^\d{1,5}$/.test(v) && Number(v) >= 1 && Number(v) <= 65535;
 const cleanText = (v: unknown): string | null => (typeof v === "string" && !/[\0\r\n]/.test(v) ? v.trim() : null);
+const SERVICE_NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9_.-]{0,62}$/;
 const VOLUME_NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/;
 const hostPath = (v: string): boolean => v.startsWith("/") && !v.split("/").includes("..");
 const same = (a: unknown, b: unknown): boolean => JSON.stringify(a) === JSON.stringify(b);
@@ -343,7 +344,7 @@ function applyService(compose: Compose, service: Compose, input: Record<string, 
 
 /**
  * Applies the form to the compose file (in place — on an error the file is left half changed, so give
- * it a copy). Services cannot be added or removed here. Returns an error code or null.
+ * it a copy). Returns an error code or null.
  */
 export function applyEdit(compose: Compose, input: unknown, lang: string): string | null {
   if (!isObject(input) || !Array.isArray(input.services) || !isObject(input.web)) return "edit.invalid";
@@ -368,9 +369,30 @@ export function applyEdit(compose: Compose, input: unknown, lang: string): strin
     if (web.path !== before.web.path) x.index = web.path;
   }
 
+  // the services of the form are the services of the app: one that is not listed is taken out, a new one is made
+  const names: string[] = [];
   for (const item of input.services) {
-    if (!isObject(item) || typeof item.name !== "string" || !Object.hasOwn(compose.services, item.name)) return "edit.unknownService";
-    const error = applyService(compose, compose.services[item.name], item, before.services.find((s) => s.name === item.name)!);
+    if (!isObject(item) || typeof item.name !== "string" || !SERVICE_NAME_RE.test(item.name) || names.includes(item.name)) return "edit.badService";
+    names.push(item.name);
+  }
+  if (names.length === 0) return "edit.badService";
+  for (const name of Object.keys(compose.services)) {
+    if (names.includes(name)) continue;
+    delete compose.services[name];
+    for (const other of Object.values(compose.services) as Compose[]) {
+      // nothing can wait for a service that is no more
+      if (Array.isArray(other.depends_on)) setOrDelete(other, "depends_on", other.depends_on.filter((d: unknown) => d !== name));
+      else if (isObject(other.depends_on)) {
+        delete other.depends_on[name];
+        if (Object.keys(other.depends_on).length === 0) delete other.depends_on;
+      }
+    }
+    const x = compose["x-casaos"];
+    if (isObject(x) && x.main === name) x.main = names[0];
+  }
+  for (const item of input.services) {
+    const service: Compose = Object.hasOwn(compose.services, item.name) ? compose.services[item.name] : (compose.services[item.name] = {});
+    const error = applyService(compose, service, item, before.services.find((s) => s.name === item.name) ?? readService(item.name, {}));
     if (error) return error;
   }
   return null;

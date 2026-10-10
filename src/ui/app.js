@@ -1803,7 +1803,7 @@ function rowList(title, hint, items, cells) {
   items.forEach((item) => add(item));
   const blank = Object.fromEntries(cells.map((c) => [c.key, c.options ? c.options[0][0] : ""]));
   return {
-    el: h("section", { class: "form-section" }, h("div", { class: "form-head" }, h("div", null, h("h3", null, title), hint && h("p", { class: "muted small" }, hint)), button(t("edit.add"), { class: "small", onclick: () => add(blank, true) }, "plus")), box),
+    el: h("div", { class: "form-row" }, h("span", { class: "form-label" }, title), h("div", { class: "form-control" }, box, h("div", null, button(t("edit.add"), { class: "small", onclick: () => add(blank, true) }, "plus")), hint && h("span", { class: "muted small" }, hint))),
     value: () => rows.filter((row) => !row.empty?.()).map((row) => row.value()),
   };
 }
@@ -1812,11 +1812,11 @@ const CAPABILITIES = "AUDIT_CONTROL AUDIT_WRITE BLOCK_SUSPEND CHOWN DAC_OVERRIDE
 
 function serviceForm(service, memoryTotal) {
   const text = (value, attrs = {}) => h("input", { value, spellcheck: false, autocapitalize: "none", autocomplete: "off", class: "mono", ...attrs });
-  const image = text(service.image, { required: true, placeholder: "nginx:alpine" });
+  const image = text(service.image, { placeholder: "nginx:alpine" });
   const network = choice(service.network, [["", t("edit.networkOwn")], ["bridge", "bridge"], ["host", "host"], ["none", "none"]], t("edit.network"));
   const ports = rowList(t("edit.ports"), "", service.ports, [
-    { key: "host", label: t("edit.host"), class: "short" },
-    { key: "container", label: t("edit.container"), class: "short" },
+    { key: "host", label: t("edit.host") },
+    { key: "container", label: t("edit.container") },
     { key: "protocol", label: t("edit.protocol"), options: [["tcp", "TCP"], ["udp", "UDP"], ["both", "TCP + UDP"]] },
   ]);
   const pair = [
@@ -1861,7 +1861,6 @@ function serviceForm(service, memoryTotal) {
       formRow(t("edit.hostname"), hostname),
     ),
     value: () => ({
-      name: service.name,
       image: image.value,
       network: network.value,
       ports: ports.value(),
@@ -1879,6 +1878,8 @@ function serviceForm(service, memoryTotal) {
   };
 }
 
+const blankService = (name) => ({ name, image: "", network: "", ports: [], volumes: [], envs: [], devices: [], command: [], privileged: false, memory: 0, cpuShares: 0, restart: "unless-stopped", capAdd: [], hostname: "" });
+
 function appSettingsForm(model, memoryTotal) {
   const title = h("input", { value: model.title, maxLength: 80 });
   const iconUrl = h("input", { value: model.icon, type: "url", spellcheck: false, class: "mono", placeholder: "https://…" });
@@ -1886,17 +1887,35 @@ function appSettingsForm(model, memoryTotal) {
   const host = h("input", { value: model.web.host, spellcheck: false, autocapitalize: "none", class: "mono", placeholder: location.hostname, "aria-label": t("edit.webHost") });
   const port = h("input", { value: model.web.port, inputMode: "numeric", class: "short mono", placeholder: t("edit.port"), "aria-label": t("edit.port") });
   const path = h("input", { value: model.web.path, spellcheck: false, autocapitalize: "none", class: "mono", placeholder: "/", "aria-label": t("edit.webPath") });
-  const services = model.services.map((service) => serviceForm(service, memoryTotal));
+  // the services are tabs: one is added by name, the one shown can be taken out
+  const services = model.services.map((service) => ({ name: service.name, form: serviceForm(service, memoryTotal) }));
   let shown = 0;
   const tabs = h("div", { class: "modes" });
-  const body = h("div");
-  const show = (index) => {
-    shown = index;
-    put(tabs, model.services.map((service, i) => h("button", { type: "button", class: "mode" + (i === index ? " active" : ""), onclick: () => show(i) }, service.name)));
-    services.forEach((service, i) => (service.el.hidden = i !== index));
+  const body = h("div", null, services.map((service) => service.form.el));
+  const paint = () => {
+    put(
+      tabs,
+      services.map((service, i) => h("button", { type: "button", class: "mode" + (i === shown ? " active" : ""), onclick: () => ((shown = i), paint()) }, service.name || t("edit.mainService"))),
+      button(t("edit.addService"), { class: "small ghost", onclick: addService }, "plus"),
+      services.length > 1 && button(t("edit.removeService"), { class: "small ghost", onclick: removeService }, "trash"),
+    );
+    services.forEach((service, i) => (service.form.el.hidden = i !== shown));
   };
-  body.append(...services.map((service) => service.el));
-  show(shown);
+  const addService = () =>
+    nameDialog(t("edit.addService"), "", t("edit.add"), (name) => {
+      if (!/^[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(name) || services.some((service) => service.name === name)) throw new ApiError(400, "edit.badService");
+      const service = { name, form: serviceForm(blankService(name), memoryTotal) };
+      services.push(service);
+      body.append(service.form.el);
+      shown = services.length - 1;
+      paint();
+    });
+  const removeService = () => {
+    services.splice(shown, 1)[0].form.el.remove();
+    shown = Math.max(0, shown - 1);
+    paint();
+  };
+  paint();
   return {
     el: h(
       "div",
@@ -1905,10 +1924,10 @@ function appSettingsForm(model, memoryTotal) {
       formRow(t("edit.title"), title),
       formRow(t("edit.icon"), iconUrl),
       formRow(t("edit.webUi"), h("span", { class: "web-address" }, scheme, host, h("span", { class: "muted" }, ":"), port, path), t("edit.webUiHint")),
-      model.services.length > 1 && tabs,
+      h("div", { class: "form-row services-row" }, h("span", { class: "form-label" }, t("edit.services")), tabs),
       body,
     ),
-    value: () => ({ title: title.value, icon: iconUrl.value, web: { scheme: scheme.value, host: host.value, port: port.value, path: path.value }, services: services.map((service) => service.value()) }),
+    value: () => ({ title: title.value, icon: iconUrl.value, web: { scheme: scheme.value, host: host.value, port: port.value, path: path.value }, services: services.map((service) => ({ name: service.name, ...service.form.value() })) }),
   };
 }
 
@@ -3155,25 +3174,68 @@ async function storeDialog(entry) {
   (install.disabled ? dialog : install).focus();
 }
 
+/** Asks for a `docker run` command and hands over what the server read out of it */
+function dockerRunDialog(then) {
+  const area = h("textarea", { class: "code", spellcheck: false, required: true, placeholder: "docker run -d --name whoami -p 8088:80 traefik/whoami" });
+  const error = h("p", { class: "error", role: "alert" });
+  const dialog = openDialog(
+    "wide",
+    h(
+      "form",
+      {
+        onsubmit: async (e) => {
+          e.preventDefault();
+          error.textContent = "";
+          try {
+            then(await api("POST", "/api/dockerrun", { command: area.value }));
+            dialog.close();
+          } catch (err) {
+            error.textContent = errorText(err);
+          }
+        },
+      },
+      h("header", null, h("div", { class: "grow" }, h("h2", null, t("run.title")), h("p", { class: "muted small" }, t("run.lead"))), closeX(() => dialog)),
+      area,
+      error,
+      h("footer", null, closeButton(() => dialog, t("common.cancel")), h("button", { class: "btn primary" }, t("run.read"))),
+    ),
+  );
+  area.focus();
+}
+
 function customDialog() {
   const name = h("input", { required: true, pattern: "[a-z0-9][a-z0-9_\\-]*", autocapitalize: "none", spellcheck: false, class: "mono" });
   const area = h("textarea", { class: "code", spellcheck: false, wrap: "off", required: true, placeholder: "services:\n  web:\n    image: nginx:alpine\n    ports:\n      - 8088:80\n" });
-  const blank = { name: "", image: "", network: "", ports: [], volumes: [], envs: [], devices: [], command: [], privileged: false, memory: 0, cpuShares: 0, restart: "unless-stopped", capAdd: [], hostname: "" };
-  const form = appSettingsForm({ title: "", icon: "", web: { scheme: "http", host: "", port: "", path: "/" }, services: [blank] }, Math.round((state.overview?.system.memory.total ?? 0) / 1024 / 1024));
+  const memoryTotal = Math.round((state.overview?.system.memory.total ?? 0) / 1024 / 1024);
+  // the first service of a new app has no name of its own: it takes the app's
+  let form = appSettingsForm({ title: "", icon: "", web: { scheme: "http", host: "", port: "", path: "/" }, services: [blankService("")] }, memoryTotal);
+  const holder = h("div", null, form.el);
   const error = h("p", { class: "error", role: "alert" });
   const lead = h("p", { class: "muted small" });
   const modes = h("div", { class: "modes" });
+  const notice = h("div", { class: "banner stack", hidden: true });
   const file = field(t("store.customCompose"), area);
   let asForm = true;
+  const fromRun = (run) => {
+    form = appSettingsForm({ ...run.edit, services: run.edit.services.map((service) => ({ ...service, name: "" })) }, memoryTotal);
+    holder.replaceChildren(form.el);
+    if (!name.value.trim()) name.value = run.name;
+    notice.hidden = run.ignored.length === 0;
+    put(notice, h("p", { class: "small" }, t("run.ignored")), run.ignored.map((option) => h("p", { class: "mono small" }, option)));
+  };
   const mode = (on) => {
     asForm = on;
-    put(modes, [true, false].map((value) => h("button", { type: "button", class: "mode" + (value === on ? " active" : ""), onclick: () => mode(value) }, t(value ? "store.customForm" : "store.customFile"))));
+    put(
+      modes,
+      [true, false].map((value) => h("button", { type: "button", class: "mode" + (value === on ? " active" : ""), onclick: () => mode(value) }, t(value ? "store.customForm" : "store.customFile"))),
+      on && button(t("run.import"), { class: "small ghost", onclick: () => dockerRunDialog(fromRun) }, "terminal"),
+    );
     lead.textContent = t(on ? "store.customFormLead" : "store.customLead");
-    form.el.hidden = !on;
+    holder.hidden = !on;
+    notice.hidden = !on || !notice.hasChildNodes();
     file.hidden = on;
     // a hidden field must not hold the form back
     area.required = !on;
-    for (const input of form.el.querySelectorAll("[required]")) input.disabled = !on;
   };
   const dialog = openDialog(
     "wide",
@@ -3186,11 +3248,10 @@ function customDialog() {
           const app = name.value.trim();
           try {
             const settings = form.value();
-            // the one service of a new app is named after the app
-            settings.services[0].name = app;
+            for (const service of settings.services) service.name ||= app;
             const res = await api("POST", `/api/apps?lang=${state.lang}`, asForm ? { name: app, settings } : { name: app, compose: area.value });
             dialog.close();
-            jobDialog(res.job, "install", settings.title || app, () => go(`#/apps/${app}`));
+            jobDialog(res.job, "install", (asForm && settings.title) || app, () => go(`#/apps/${app}`));
           } catch (err) {
             error.textContent = errorText(err);
           }
@@ -3198,8 +3259,9 @@ function customDialog() {
       },
       h("header", null, h("div", { class: "grow" }, h("h2", null, t("store.customTitle")), lead), closeX(() => dialog)),
       modes,
+      notice,
       field(t("store.customName"), name, t("store.customNameHint")),
-      form.el,
+      holder,
       file,
       error,
       h("footer", null, closeButton(() => dialog, t("common.cancel")), h("button", { class: "btn primary" }, t("store.install"))),

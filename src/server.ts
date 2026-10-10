@@ -67,6 +67,7 @@ import { dockerInfo, listContainers, watchEvents } from "./docker";
 import { abortUpload, archivePlan, list as listFiles, makeFolder, pinFolder, pinnedFolders, readable, readText, remove as removeFiles, rename as renameFile, summary as filesSummary, transfer, upload, writeText } from "./files";
 import { adoptProject, casaosState, containerDraft, importCount, importList, moveInCasaos, projectDraft, rebuildContainer } from "./import";
 import { accessOf, dropAccess, dropUser, gateTarget, guard, mayOpen, MAX_APP_BODY, page, passToApp, setAccess, startGates, tunnelHandlers } from "./gate";
+import { parseDockerRun } from "./dockerrun";
 import { isPlainObject } from "./fsutil";
 import { localNamesStatus, refreshLocalNames } from "./mdns";
 import { addDevice, CHANNELS, listDevices, notifyStatus, pushKey, removeDevice, sendTest, startNotifications, telegramChats, updateNotify } from "./notify";
@@ -788,6 +789,12 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
 
   m = /^\/api\/store\/([a-z0-9-]+)\/apps\/([a-z0-9_-]+)$/.exec(path);
   if (m && method === "GET") return json(await storeAppDetail(m[1]!, m[2]!, language(url)));
+
+  // a `docker run` command read into the form of a custom app; nothing is installed here
+  if (path === "/api/dockerrun" && method === "POST") {
+    const run = parseDockerRun((await body(req)).command);
+    return typeof run === "string" ? fail(400, run) : json(run);
+  }
 
   if (path === "/api/apps") {
     if (method === "GET") return json((await listApps(language(url))).filter((app) => mayOpen(user, app.name)));

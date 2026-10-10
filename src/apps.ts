@@ -231,7 +231,14 @@ export async function appDetail(name: string, lang: string): Promise<AppDetail> 
     normalize(copy, settings.dataRoot, name);
     folders = bindSources(copy).filter((f) => !/^\/(dev|proc|sys|run|var\/run|etc)(\/|$)/.test(f));
   }
-  return { ...describeApp(name, containers, lang), composeFile: composeFile(name), folders, installedAt: Math.round(statSync(appDir(name)).birthtimeMs) };
+  let installedAt: number;
+  try {
+    installedAt = Math.round(statSync(appDir(name)).birthtimeMs);
+  } catch {
+    // removed while this was being put together
+    throw new AppError("app.notFound", 404);
+  }
+  return { ...describeApp(name, containers, lang), composeFile: composeFile(name), folders, installedAt };
 }
 
 /** A stats sample of each running container of the app, keyed by container name */

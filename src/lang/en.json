@@ -840,5 +840,16 @@
   "error.edit.badCapability": "Capabilities are names like NET_ADMIN, separated by commas.",
   "error.edit.badIcon": "The icon has to be a web address starting with http:// or https://.",
   "error.edit.badWeb": "The Web UI address is a host name, a port from 1 to 65535 and a path.",
-  "error.edit.unknownService": "The compose file has changed meanwhile — reload the page."
+  "error.edit.badService": "A service needs a name of its own made of letters, digits, - and _, and an app needs at least one service.",
+  "edit.services": "Services",
+  "edit.mainService": "main",
+  "edit.addService": "Add a service",
+  "edit.removeService": "Remove this service",
+  "run.import": "From a docker run command",
+  "run.title": "Fill in from a docker run command",
+  "run.lead": "Paste the command from the app's instructions. It is only read into the form — nothing is started until you install.",
+  "run.read": "Fill in the form",
+  "run.ignored": "These options have no field in the form and were left out — add them on the Compose tab afterwards if the app needs them:",
+  "error.run.notRun": "This is not a docker run command.",
+  "error.run.noImage": "The command names no image."
 }

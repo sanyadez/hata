@@ -694,24 +694,24 @@ input[type="range"] { accent-color: var(--accent); width: 100%; }
 .side .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 
 /* the settings form of an app */
-.edit-form { gap: 16px; max-width: 860px; }
-.edit-service { gap: 16px; }
-.edit-form .form-section { padding-top: 14px; border-top: 1px solid var(--border); }
-.edit-form .form-head { align-items: center; }
-.edit-rows { display: grid; gap: 8px; }
+.edit-form, .edit-service { gap: 14px; }
+.edit-form .form-row { grid-template-columns: 200px minmax(0, 1fr); }
+.edit-rows { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
+.edit-rows:empty { display: none; }
 .edit-row { display: flex; align-items: center; gap: 8px; }
-.edit-row > input:not(.short) { flex: 1; min-width: 0; }
-.edit-row > select { flex: none; width: auto; }
+.edit-row > input { flex: 1 1 0; min-width: 0; }
+.edit-row > select { flex: 0 1 auto; width: auto; min-width: 0; }
 .edit-row .raw { padding: 8px 12px; border: 1px dashed var(--border); border-radius: var(--radius-sm); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .web-address { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
 .web-address select { width: auto; flex: none; }
 .web-address input:not(.short) { flex: 1; min-width: 120px; }
 .edit-form input[type="range"] { flex: 1; min-width: 140px; padding: 0; accent-color: var(--accent); }
-.modes { display: flex; flex-wrap: wrap; gap: 6px; }
+.services-row { padding: 14px 0; border-block: 1px solid var(--border); align-items: center; }
+.services-row .form-label { padding-top: 0; }
+.modes { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .mode { padding: 7px 14px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: transparent; color: var(--muted); font: 500 14px var(--font-body); cursor: pointer; }
 .mode:hover { color: var(--text); }
 .mode.active { background: var(--surface-2, var(--surface)); border-color: var(--accent); color: var(--text); }
-.edit-row > input.short { flex: 0 1 110px; min-width: 56px; }
-.edit-form .form-section, .edit-rows { min-width: 0; }
-.edit-rows { grid-template-columns: minmax(0, 1fr); }
-.edit-row > select { min-width: 0; flex: 0 1 auto; }
+@media (max-width: 760px) {
+  .edit-form .form-row { grid-template-columns: minmax(0, 1fr); }
+}
