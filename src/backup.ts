@@ -15,7 +15,7 @@ import { join } from "node:path";
 import { APP_NAME_RE, appMeta, bindSources, normalize } from "./appform";
 import { AppError, appAction, appDir, dc, installedNames, jobFinished, onBeforeUpdate, readCompose, startJob, type Job, type Log } from "./apps";
 import { record } from "./activity";
-import { DATA_DIR, settings } from "./config";
+import { DATA_DIR, SECRET_NAMES, SECRETS_DIR, settings } from "./config";
 import { listContainers, PROJECT_LABEL, run } from "./docker";
 import { readJsonFile, writeJsonAtomic } from "./fsutil";
 import { listServerSnapshots, RESTORE_MARK, SERVER_DIR, stateExcludes, type ServerSnapshot } from "./restore";
@@ -214,6 +214,13 @@ export function restoreSnapshot(name: string, id: string, user: string): Job {
  * snapshots next to it, this is what `hata restore` rebuilds a server from. It holds password hashes
  * and keys, so it is as private as the state directory itself.
  */
+/** The secrets lie apart from the state on an installed service; in the archive they sit with the rest */
+function secretsForArchive(): string[] {
+  if (SECRETS_DIR === DATA_DIR) return [];
+  const names = SECRET_NAMES.filter((name) => name !== "sessions.json" && name !== "setup-token" && existsSync(join(SECRETS_DIR, name)));
+  return names.length ? ["-C", SECRETS_DIR, ...names.map((name) => "./" + name)] : [];
+}
+
 export async function takeServerSnapshot(reason: ServerSnapshot["reason"]): Promise<ServerSnapshot> {
   const dir = join(backupDir(), SERVER_DIR);
   mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -222,7 +229,7 @@ export async function takeServerSnapshot(reason: ServerSnapshot["reason"]): Prom
   const archive = join(dir, id + ".tar.gz");
   const partial = archive + ".partial";
   try {
-    const tar = await run(["tar", "--numeric-owner", "-czf", partial, ...stateExcludes(DATA_DIR, backupDir()).map((path) => "--exclude=" + path), "-C", DATA_DIR, "."]);
+    const tar = await run(["tar", "--numeric-owner", "-czf", partial, ...stateExcludes(DATA_DIR, backupDir()).map((path) => "--exclude=" + path), "-C", DATA_DIR, ".", ...secretsForArchive()]);
     // 1 is "a file changed while it was read": the state is written atomically, the archive is whole
     if (tar.code > 1) throw new Error(tar.output.split("\n").slice(-3).join("\n") || `tar exited with ${tar.code}`);
     // password hashes and keys are inside

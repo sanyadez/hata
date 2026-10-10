@@ -119,6 +119,6 @@ export async function uninstallService(): Promise<number> {
   rmSync(UNIT, { force: true });
   systemctl("daemon-reload");
   rmSync(BIN, { force: true });
-  console.log(`Hata is removed. Apps keep running; their compose files and the state stay in ${serviceStateDir()}.`);
+  console.log(`Hata is removed. Apps keep running; their compose files and the state stay in ${serviceStateDir()}, the users and keys in /etc/hata.`);
   return 0;
 }

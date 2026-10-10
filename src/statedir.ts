@@ -8,6 +8,8 @@ import { existsSync, readFileSync } from "node:fs";
 import { isAbsolute, join, relative, resolve } from "node:path";
 
 export const DEFAULT_STATE_DIR = "/var/lib/hata";
+/** The service's secrets, and the pointer below, lie here whatever the configuration folder is */
+export const SYSTEM_SECRETS_DIR = "/etc/hata";
 export const POINTER_FILE = "/etc/hata/state-dir";
 /** Lies in a folder the state was moved to: `{ from }`, the folder it came from */
 export const MOVED_MARK = ".hata-state";

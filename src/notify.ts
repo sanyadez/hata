@@ -9,7 +9,7 @@
 import { hostname } from "node:os";
 import { join } from "node:path";
 import type { AttentionItem } from "./attention";
-import { DATA_DIR, settings } from "./config";
+import { SECRETS_DIR, settings } from "./config";
 import { isPlainObject, readJsonFile, writeJsonAtomic } from "./fsutil";
 import { cleanSubscription, generateVapid, sendPush, type PushTarget, type VapidKeys } from "./push";
 import en from "./lang/en.json";
@@ -283,7 +283,7 @@ interface State {
   last: Partial<Record<Channel, { at: number; error?: string }>>;
 }
 
-const FILE = join(DATA_DIR, "notify.json");
+const FILE = join(SECRETS_DIR, "notify.json");
 const MAX_DEVICES = 50;
 
 const saved = readJsonFile<Partial<State>>(FILE, {}, isPlainObject);

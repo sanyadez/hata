@@ -8,7 +8,7 @@
  *
  * This file is what the command line needs and nothing more: it must run before there is any state.
  */
-import { serviceStateDir } from "./statedir";
+import { MOVED_MARK, serviceStateDir } from "./statedir";
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { join, relative } from "node:path";
 import { readJsonFile, writeJsonAtomic } from "./fsutil";
@@ -54,7 +54,8 @@ export function listServerSnapshots(backupDir: string): ServerSnapshot[] {
  * progress — and the backups themselves, when they are kept inside.
  */
 export function stateExcludes(dataDir: string, backupDir: string): string[] {
-  const skip = ["./sessions.json", "./stores", "./update.json", "./" + RESTORE_MARK];
+  // the mark of a moved folder belongs to this machine: a restore must neither bring one nor take it away
+  const skip = ["./sessions.json", "./stores", "./update.json", "./" + RESTORE_MARK, "./" + MOVED_MARK];
   const inside = relative(dataDir, backupDir);
   if (inside && !inside.startsWith("..") && !inside.startsWith("/")) skip.push("./" + inside);
   return skip;
@@ -92,7 +93,8 @@ export async function restoreServer(args: string[]): Promise<number> {
   }
   // the state restored here must be the service's own
   if (COMPILED) process.env.HATA_DATA_DIR ??= serviceStateDir();
-  const { DATA_DIR } = await import("./config");
+  const { DATA_DIR, SECRETS_DIR, SECRET_NAMES } = await import("./config");
+  const apart = SECRETS_DIR !== DATA_DIR;
 
   const snapshot = listServerSnapshots(from)[0];
   if (!snapshot) {
@@ -133,6 +135,8 @@ export async function restoreServer(args: string[]): Promise<number> {
   const aside = DATA_DIR + ".before-restore";
   rmSync(aside, { recursive: true, force: true });
   if (existsSync(DATA_DIR)) cpSync(DATA_DIR, aside, { recursive: true, preserveTimestamps: true });
+  // the secrets lie apart from the state: what is there now is kept with the rest of it
+  if (apart) for (const name of SECRET_NAMES) if (existsSync(join(SECRETS_DIR, name))) cpSync(join(SECRETS_DIR, name), join(aside, name), { recursive: true, preserveTimestamps: true });
   mkdirSync(DATA_DIR, { recursive: true, mode: 0o700 });
   // everything a snapshot holds goes; what it leaves out (the stores) may stay
   const kept = new Set(stateExcludes(DATA_DIR, from).map((path) => path.slice(2).split("/")[0]));
@@ -141,6 +145,17 @@ export async function restoreServer(args: string[]): Promise<number> {
   if (!unpacked.ok) {
     console.error(`Unpacking failed: ${unpacked.error}\nThe previous state is in ${aside}.`);
     return 1;
+  }
+
+  // the archive holds the secrets with the rest; here they have a place of their own, and the restored ones win
+  if (apart) {
+    for (const name of SECRET_NAMES) {
+      if (name === "sessions.json" || name === "setup-token") continue;
+      rmSync(join(SECRETS_DIR, name), { recursive: true, force: true });
+      if (!existsSync(join(DATA_DIR, name))) continue;
+      cpSync(join(DATA_DIR, name), join(SECRETS_DIR, name), { recursive: true, preserveTimestamps: true });
+      rmSync(join(DATA_DIR, name), { recursive: true, force: true });
+    }
   }
 
   // the backups may lie elsewhere on this machine than on the one they were made on

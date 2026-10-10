@@ -61,7 +61,7 @@ import {
   setupToken,
 } from "./auth";
 import { bus } from "./bus";
-import { DATA_DIR, listenAddress, saveSettings, settings, timezone, updateSettings } from "./config";
+import { DATA_DIR, dropOldSecrets, listenAddress, saveSettings, settings, timezone, updateSettings } from "./config";
 import { arrange, cleanLayout, layoutText, parseLayoutText } from "./dashboard";
 import { dockerInfo, listContainers, watchEvents } from "./docker";
 import { abortUpload, archivePlan, list as listFiles, makeFolder, pinFolder, pinnedFolders, readable, readText, remove as removeFiles, rename as renameFile, summary as filesSummary, transfer, upload, writeText } from "./files";
@@ -1177,6 +1177,7 @@ export async function serve(): Promise<void> {
     record("system.stateMoved", { detail: DATA_DIR });
   }
   confirmUpdate();
+  dropOldSecrets();
   scheduleUpdateChecks();
   startSampler();
   scheduleStoreSync();

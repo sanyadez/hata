@@ -48,9 +48,9 @@ test("the next daily run is today if its time is still ahead, else tomorrow", ()
 });
 
 test("the server's snapshot leaves out what must not travel, and the backups themselves", () => {
-  expect(stateExcludes("/var/lib/hata", "/DATA/Backups")).toEqual(["./sessions.json", "./stores", "./update.json", "./restore.json"]);
+  expect(stateExcludes("/var/lib/hata", "/DATA/Backups")).toEqual(["./sessions.json", "./stores", "./update.json", "./restore.json", "./.hata-state"]);
   expect(stateExcludes("/var/lib/hata", "/var/lib/hata/backups")).toContain("./backups");
-  expect(stateExcludes("/var/lib/hata", "/var/lib/hata")).toHaveLength(4);
+  expect(stateExcludes("/var/lib/hata", "/var/lib/hata")).toHaveLength(5);
 });
 
 test("a state archive may only hold what unpacks inside the state directory", () => {

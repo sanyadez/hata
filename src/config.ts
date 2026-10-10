@@ -2,13 +2,13 @@
  * Paths and settings. The source of truth for settings is data/settings.json (edited through the web UI);
  * environment variables only override where the server listens.
  */
-import { mkdirSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, mkdirSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { cleanLayout, type Layout } from "./dashboard";
 import { changeAppearance, cleanAppearance, DEFAULT_APPEARANCE, type Appearance } from "./wallpapers";
 import { isPlainObject, readJsonFile, writeJsonAtomic } from "./fsutil";
-import { POINTER_FILE, serviceStateDir, stateIsMissing } from "./statedir";
+import { POINTER_FILE, serviceStateDir, stateIsMissing, SYSTEM_SECRETS_DIR } from "./statedir";
 import { COMPILED } from "./version";
 
 /**
@@ -26,6 +26,32 @@ if (stateIsMissing(DATA_DIR)) {
   process.exit(1);
 }
 mkdirSync(DATA_DIR, { recursive: true, mode: 0o700 });
+
+/** What must not be read by anyone but Hata: password hashes, sessions, keys, tokens */
+export const SECRET_NAMES = ["users.json", "sessions.json", "setup-token", "invites.json", "notify.json", "certs"];
+
+/**
+ * Where the secrets lie. For the installed service that is `/etc/hata`, whatever the configuration
+ * folder is: that one can be moved to a disk apps are given, this one never leaves the system. A run
+ * from source or by a plain user keeps everything in one place.
+ */
+export const SECRETS_DIR = resolve(process.env.HATA_SECRETS_DIR || (COMPILED && process.getuid?.() === 0 ? SYSTEM_SECRETS_DIR : DATA_DIR));
+mkdirSync(SECRETS_DIR, { recursive: true, mode: 0o700 });
+if (SECRETS_DIR !== DATA_DIR) {
+  chmodSync(SECRETS_DIR, 0o700);
+  // a version that kept them with the rest left them there: taken over, not yet removed —
+  // the version before this one must still find them if this one is rolled back
+  for (const name of SECRET_NAMES) {
+    const old = join(DATA_DIR, name);
+    if (existsSync(old) && !existsSync(join(SECRETS_DIR, name))) cpSync(old, join(SECRETS_DIR, name), { recursive: true, preserveTimestamps: true });
+  }
+}
+
+/** Once this version is known to run: the copies of the secrets left in the configuration folder go */
+export function dropOldSecrets(): void {
+  if (SECRETS_DIR === DATA_DIR) return;
+  for (const name of SECRET_NAMES) rmSync(join(DATA_DIR, name), { recursive: true, force: true });
+}
 
 const SETTINGS_FILE = join(DATA_DIR, "settings.json");
 

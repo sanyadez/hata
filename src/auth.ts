@@ -9,14 +9,14 @@
  */
 import { chmodSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { DATA_DIR } from "./config";
+import { DATA_DIR, SECRETS_DIR } from "./config";
 import { readJsonFile, writeJsonAtomic } from "./fsutil";
 import type { StoredPasskey } from "./passkey";
 import { newSecret, otpauthUri, verifyTotp } from "./totp";
 
-const USERS_FILE = join(DATA_DIR, "users.json");
-const SESSIONS_FILE = join(DATA_DIR, "sessions.json");
-const SETUP_TOKEN_FILE = join(DATA_DIR, "setup-token");
+const USERS_FILE = join(SECRETS_DIR, "users.json");
+const SESSIONS_FILE = join(SECRETS_DIR, "sessions.json");
+const SETUP_TOKEN_FILE = join(SECRETS_DIR, "setup-token");
 
 export const COOKIE_NAME = "hata_session";
 const SESSION_TTL_MS = 30 * 24 * 3600 * 1000;
@@ -351,7 +351,7 @@ export const listSignIns = (limit = 50): SignIn[] => signIns.slice(-limit).rever
 
 // --- Invitations ------------------------------------------------------------------------------------
 
-const INVITES_FILE = join(DATA_DIR, "invites.json");
+const INVITES_FILE = join(SECRETS_DIR, "invites.json");
 const INVITE_TTL_MS = 7 * 24 * 3600 * 1000;
 
 interface Invite {

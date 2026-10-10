@@ -18,7 +18,7 @@ import { chmodSync, chownSync, existsSync, lchownSync, lstatSync, mkdirSync, rea
 import { lstat, open, readdir, readFile, rm, stat } from "node:fs/promises";
 import { basename, dirname, extname, join, resolve, sep } from "node:path";
 import { AppError } from "./apps";
-import { DATA_DIR, saveSettings, settings } from "./config";
+import { DATA_DIR, saveSettings, SECRETS_DIR, settings } from "./config";
 import { movePath } from "./dashboard";
 import { ZIP_MAX_BYTES, ZIP_MAX_ENTRIES, type ZipSource } from "./zip";
 
@@ -107,7 +107,7 @@ function isVirtual(abs: string): boolean {
 
 /** May something be created, changed or removed at this path? */
 function isWritable(abs: string): boolean {
-  return !isVirtual(abs) && !inside(abs, DATA_DIR) && !inside(realish(abs), realish(DATA_DIR));
+  return !isVirtual(abs) && ![DATA_DIR, SECRETS_DIR].some((dir) => inside(abs, dir) || inside(realish(abs), realish(dir)));
 }
 
 function mustWrite(abs: string): void {

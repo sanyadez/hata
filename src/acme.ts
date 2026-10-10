@@ -8,10 +8,10 @@
 import { X509Certificate } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
-import { DATA_DIR, DOMAIN_RE, settings } from "./config";
+import { DOMAIN_RE, SECRETS_DIR, settings } from "./config";
 import { readJsonFile, writeJsonAtomic } from "./fsutil";
 
-const CERTS_DIR = join(DATA_DIR, "certs");
+const CERTS_DIR = join(SECRETS_DIR, "certs");
 const ACCOUNT_FILE = join(CERTS_DIR, "account.json");
 const LETS_ENCRYPT = "https://acme-v02.api.letsencrypt.org/directory";
 

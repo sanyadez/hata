@@ -93,7 +93,9 @@ says which; `--port <number>` chooses one.
 
 State lives in `/var/lib/hata` — the configuration folder; every app is a plain compose project in
 `/var/lib/hata/apps/<name>/` that keeps working without Hata. The folder can be moved from Settings → Apps
-(to another disk, say): everything is copied, Hata restarts there, the apps keep running. Next to an app's `compose.yml`, which is yours to edit, `hata.yml` holds what Hata
+(to another disk, say): everything is copied, Hata restarts there, the apps keep running.
+What must stay private — password hashes, sessions, certificate keys, the notification tokens — is kept
+apart in `/etc/hata` and does not move with it. Next to an app's `compose.yml`, which is yours to edit, `hata.yml` holds what Hata
 itself knows about it — the store it came from and the store's original file; `docker compose` never reads it.
 
 ### Moving in from CasaOS
