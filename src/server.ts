@@ -67,7 +67,7 @@ import { bus } from "./bus";
 import { DATA_DIR, dropOldSecrets, listenAddress, saveSettings, settings, timezone, updateSettings } from "./config";
 import { arrange, cleanLayout, layoutText, parseLayoutText } from "./dashboard";
 import { dockerInfo, listContainers, watchEvents } from "./docker";
-import { abortUpload, archivePlan, list as listFiles, makeFolder, pinFolder, pinnedFolders, readable, readText, remove as removeFiles, rename as renameFile, summary as filesSummary, transfer, upload, writeText } from "./files";
+import { abortUpload, archivePlan, emptyTrash, list as listFiles, makeFolder, pinFolder, pinnedFolders, readable, readText, remove as removeFiles, rename as renameFile, restore as restoreFiles, startTrash, summary as filesSummary, transfer, trash, upload, writeText } from "./files";
 import { adoptProject, casaosState, containerDraft, importCount, importList, moveInCasaos, projectDraft, rebuildContainer } from "./import";
 import { accessOf, dropAccess, dropUser, gateTarget, guard, mayOpen, MAX_APP_BODY, page, passToApp, setAccess, startGates, tunnelHandlers } from "./gate";
 import { parseDockerRun } from "./dockerrun";
@@ -850,7 +850,7 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
 
   // ---- files (administrators only: members were turned away above) ----
   if (path.startsWith("/api/files")) {
-    const response = await files(req, url, server);
+    const response = await files(req, url, server, user.name);
     if (response) return response;
   }
 
@@ -1002,7 +1002,7 @@ function sendFile(req: Request, path: string | null, download: boolean): Respons
   return new Response(Bun.file(file.file), { headers });
 }
 
-async function files(req: Request, url: URL, server: Server): Promise<Response | null> {
+async function files(req: Request, url: URL, server: Server, by: string): Promise<Response | null> {
   const path = url.pathname;
   const method = req.method;
   const q = url.searchParams;
@@ -1041,8 +1041,15 @@ async function files(req: Request, url: URL, server: Server): Promise<Response |
   }
   if (path === "/api/files/delete" && method === "POST") {
     server.timeout(req, 0);
-    await removeFiles((await body(req)).paths);
+    const data = await body(req);
+    await removeFiles(data.paths, data.forever === true, by);
     return json({ ok: true });
+  }
+  if (path === "/api/files/trash" && method === "GET") return json(trash());
+  if (path === "/api/files/trash/restore" && method === "POST") return json({ restored: restoreFiles((await body(req)).ids) });
+  if (path === "/api/files/trash/delete" && method === "POST") {
+    server.timeout(req, 0);
+    return json({ removed: await emptyTrash((await body(req)).ids) });
   }
   if (path === "/api/files/upload" && method === "PUT") {
     server.timeout(req, 0);
@@ -1244,6 +1251,7 @@ export async function serve(): Promise<void> {
   startSampler();
   startDisks();
   startShares();
+  startTrash();
   scheduleStoreSync();
   scheduleBackups();
   void resumeRestore();

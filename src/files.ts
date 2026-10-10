@@ -9,6 +9,7 @@
  * - Hata's state directory can be looked at but not changed: the server holds that state in memory and
  *   would write over an edit;
  * - `/proc`, `/sys` and `/dev` are listed and that is all — reading some of those files never ends.
+ * What is deleted goes to the trash (`trash.ts`) unless told otherwise, and can be put back from there.
  * Every check is made on the path as written and on the real one (`realpath`), so a symbolic link does
  * not get around them. Hata runs as root while apps run as `PUID:PGID`, so whatever is created here takes
  * the owner of the folder it is created in — otherwise an app could not touch a file uploaded into its
@@ -21,6 +22,7 @@ import { AppError } from "./apps";
 import { DATA_DIR, saveSettings, SECRETS_DIR, settings } from "./config";
 import { movePath } from "./dashboard";
 import { writablePath } from "./smbconf";
+import { findInTrash, inTrash, KEEP_DAYS, listTrash, purgeTrash, putInTrash, sweepTrash, takeFromTrash, TRASH_DIR, type TrashItem } from "./trash";
 import { ZIP_MAX_BYTES, ZIP_MAX_ENTRIES, type ZipSource } from "./zip";
 
 /** A folder's listing holds at most this many entries */
@@ -128,7 +130,7 @@ const SYSTEM_DIRS = new Set("bin boot dev etc home lib lib32 lib64 libx32 media 
 function mustBeMovable(abs: string): void {
   mustWrite(abs);
   const real = join(realish(dirname(abs)), basename(abs));
-  if (abs === "/" || SYSTEM_DIRS.has(abs) || SYSTEM_DIRS.has(real) || keystones().some((key) => inside(key, abs) || inside(realish(key), real))) throw new AppError("files.protected", 403);
+  if (abs === "/" || basename(abs) === TRASH_DIR || SYSTEM_DIRS.has(abs) || SYSTEM_DIRS.has(real) || keystones().some((key) => inside(key, abs) || inside(realish(key), real))) throw new AppError("files.protected", 403);
 }
 
 /** What is the system's own all the way down: nothing in there is a folder to hand out */
@@ -215,6 +217,8 @@ export async function list(path: unknown): Promise<Listing> {
   }
   const shown: string[] = [];
   for (const name of names) {
+    // the trash has a page of its own
+    if (name === TRASH_DIR) continue;
     if (!PART_RE.test(name)) shown.push(name);
     // an upload abandoned a day ago will not be continued
     else if (Date.now() - (lstatOrNull(join(dir, name))?.mtimeMs ?? Date.now()) > PART_MAX_AGE) rm(join(dir, name), { force: true }).catch(() => {});
@@ -412,22 +416,100 @@ async function copyTree(from: string, dest: string): Promise<void> {
   throw new AppError("files.failed", 500, { code: err.trim().split("\n").pop() || `cp exited with ${code}` });
 }
 
-/** Removes files, links (the link, not its target) and folders with everything in them — for good */
-export async function remove(paths: unknown): Promise<void> {
+/**
+ * Deletes files, links (the link, not its target) and folders with everything in them. They go to the
+ * trash of their disk; `forever` — or lying in a trash already — removes them for good.
+ */
+export async function remove(paths: unknown, forever = false, by = ""): Promise<void> {
   const all = pathList(paths).map((path) => {
     const abs = locate(path);
     mustBeMovable(abs);
     return abs;
   });
   for (const abs of all) {
-    try {
-      await rm(abs, { recursive: true, force: false });
-    } catch (e) {
-      throw fsError(e);
+    const st = lstatOrNull(abs);
+    if (!st) throw new AppError("files.notFound", 404);
+    if (forever || inTrash(abs)) {
+      try {
+        await rm(abs, { recursive: true, force: false });
+      } catch (e) {
+        throw fsError(e);
+      }
+    } else {
+      const sum = await summary([abs]);
+      try {
+        putInTrash(abs, { type: st.isDirectory() ? "dir" : st.isFile() ? "file" : "other", size: sum.size, files: sum.files }, by);
+      } catch (e) {
+        const code = (e as NodeJS.ErrnoException).code ?? "";
+        if (code === "ENOENT") throw fsError(e);
+        // a disk that takes no trash (read-only, another one beneath a link): the page offers to delete for good
+        throw new AppError("files.noTrash", 409, { name: basename(abs), code });
+      }
     }
     repin(abs, null);
     reshare(abs, null);
   }
+}
+
+// --- The trash --------------------------------------------------------------------------------------
+
+export interface Trash {
+  items: TrashItem[];
+  /** Bytes in all of it */
+  size: number;
+  /** Days a deleted thing is kept */
+  keepDays: number;
+}
+
+export function trash(): Trash {
+  const items = listTrash();
+  return { items, size: items.reduce((sum, item) => sum + item.size, 0), keepDays: KEEP_DAYS };
+}
+
+const idList = (ids: unknown): string[] => {
+  if (!Array.isArray(ids) || !ids.length || ids.length > 5000 || ids.some((id) => typeof id !== "string")) throw new AppError("files.badPath");
+  return ids as string[];
+};
+
+/** Makes the folders of a path that are not there, each owned as the folder it is made in */
+function makeFolders(dir: string): void {
+  if (lstatOrNull(dir)) return;
+  makeFolders(dirname(dir));
+  mkdirSync(dir);
+  inheritOwner(dir);
+}
+
+/**
+ * Puts deleted things back where they lay. A folder that is gone is made again; where the name has been
+ * taken since, the thing comes back under the next free one. Returns where each one is now.
+ */
+export function restore(ids: unknown): { id: string; path: string }[] {
+  const out: { id: string; path: string }[] = [];
+  for (const id of idList(ids)) {
+    const item = findInTrash(id);
+    if (!item) throw new AppError("files.notFound", 404);
+    const dir = dirname(item.from);
+    mustWrite(dir);
+    try {
+      makeFolders(dir);
+      const path = join(dir, freeName(dir, item.name));
+      takeFromTrash(id, path);
+      out.push({ id, path });
+    } catch (e) {
+      throw fsError(e);
+    }
+  }
+  return out;
+}
+
+/** Removes from the trash for good: the entries named, or everything */
+export const emptyTrash = (ids: unknown): Promise<number> => purgeTrash(ids === undefined || ids === null ? null : idList(ids));
+
+/** On start and a few times a day: what was deleted long enough ago goes for good */
+export function startTrash(): void {
+  const sweep = () => void sweepTrash().catch((e) => console.error("Could not tidy the trash:", e instanceof Error ? e.message : e));
+  sweep();
+  setInterval(sweep, 6 * 3600_000).unref();
 }
 
 // --- Upload -----------------------------------------------------------------------------------------
@@ -626,7 +708,7 @@ export async function archivePlan(paths: unknown): Promise<ArchivePlan> {
     else if (st.isDirectory()) {
       add({ name: name + "/", mode: st.mode & 0o7777, mtime: st.mtime }, 0);
       for (const child of (await readdir(abs).catch(() => [] as string[])).sort()) {
-        if (!PART_RE.test(child)) await walk(join(abs, child), `${name}/${child}`);
+        if (!PART_RE.test(child) && child !== TRASH_DIR) await walk(join(abs, child), `${name}/${child}`);
       }
     }
   };

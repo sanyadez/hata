@@ -3,13 +3,15 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, symlinkS
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { DATA_DIR, settings } from "../src/config";
-import { archivePlan, freeName, list, mustBeSharable, onSharesMoved, pinFolder, pinnedFolders, locate, makeFolder, readable, readText, remove, rename, summary, transfer, upload, validName, writeText, type UploadPart } from "../src/files";
+import { archivePlan, emptyTrash, freeName, list, mustBeSharable, onSharesMoved, pinFolder, pinnedFolders, locate, makeFolder, readable, readText, remove, rename, restore, summary, transfer, trash, upload, validName, writeText, type UploadPart } from "../src/files";
+import { world } from "../src/trash";
 import { zipChunks } from "../src/zip";
 
 let root = "";
 let outside = "";
 
 beforeEach(() => {
+  world.remembered.clear();
   root = mkdtempSync(join(tmpdir(), "hata-files-"));
   outside = mkdtempSync(join(tmpdir(), "hata-outside-"));
   settings.dataRoot = root;
@@ -86,7 +88,7 @@ test("what the server stands on stays where it is", async () => {
   // an app's own folder is the user's to remove
   expect(await summary([at("/Media")])).toEqual({ files: 1, dirs: 2, size: 5, truncated: false });
   await remove([at("/AppData/memos"), at("/Media")]);
-  expect(readdirSync(root)).toEqual(["AppData"]);
+  expect(readdirSync(root).sort()).toEqual([".hata-trash", "AppData"]);
 });
 
 test("names are one path segment", () => {
@@ -234,4 +236,61 @@ test("a folder becomes a ZIP archive", async () => {
   expect(end.readUInt16LE(10)).toBe(4);
   // compressed: 4000 bytes of "one one one" take far less
   expect(zip.length).toBeLessThan(1000);
+});
+
+// --- The trash ---
+
+test("what is deleted goes to the trash of the data folder and comes back where it lay", async () => {
+  mkdirSync(at("/Media/Photos/2026"), { recursive: true });
+  writeFileSync(at("/Media/Photos/2026/one.jpg"), "12345678");
+  await remove([at("/Media/Photos"), at("/Media/a.txt")], false, "olena");
+  expect(existsSync(at("/Media/Photos"))).toBe(false);
+  const { items, size, keepDays } = trash();
+  expect(items.map((item) => [item.name, item.from, item.type, item.size, item.files, item.by]).sort()).toEqual([
+    ["Photos", at("/Media/Photos"), "dir", 8, 1, "olena"],
+    ["a.txt", at("/Media/a.txt"), "file", 5, 1, "olena"],
+  ]);
+  expect([size, keepDays]).toEqual([13, 30]);
+  // the trash is not a folder to walk into, to download or to delete
+  expect((await list(root)).entries.map((e) => e.name).sort()).toEqual(["AppData", "Media"]);
+  expect((await archivePlan([root])).sources.some((source) => source.name.includes(".hata-trash"))).toBe(false);
+  expect(await rejects(remove([at("/.hata-trash")]))).toBe("files.protected");
+
+  const photos = items.find((item) => item.name === "Photos")!;
+  expect(restore([photos.id])).toEqual([{ id: photos.id, path: at("/Media/Photos") }]);
+  expect(readFileSync(at("/Media/Photos/2026/one.jpg"), "utf8")).toBe("12345678");
+  expect(trash().items.map((item) => item.name)).toEqual(["a.txt"]);
+  expect(code(() => restore([photos.id]))).toBe("files.notFound");
+});
+
+test("a thing comes back even when its folder is gone or its name was taken", async () => {
+  writeFileSync(at("/Media/Photos/b.txt"), "old");
+  await remove([at("/Media/Photos/b.txt")]);
+  await remove([at("/Media/Photos")]);
+  writeFileSync(at("/Media/a.txt"), "newer");
+  await remove([at("/Media/a.txt")]);
+  writeFileSync(at("/Media/a.txt"), "newest");
+  const id = (name: string) => trash().items.find((item) => item.name === name)!.id;
+  // the folder it lay in is made again
+  expect(restore([id("b.txt")])[0]!.path).toBe(at("/Media/Photos/b.txt"));
+  // the folder itself is back by now, so the deleted one comes next to it
+  expect(restore([id("Photos")])[0]!.path).toBe(at("/Media/Photos (2)"));
+  expect(restore([id("a.txt")])[0]!.path).toBe(at("/Media/a (2).txt"));
+  expect(readFileSync(at("/Media/a.txt"), "utf8")).toBe("newest");
+  expect(trash().items).toEqual([]);
+});
+
+test("deleting for good skips the trash; the trash is emptied by entry or whole", async () => {
+  writeFileSync(at("/Media/b.txt"), "b");
+  writeFileSync(at("/Media/c.txt"), "c");
+  await remove([at("/Media/a.txt")], true);
+  expect(trash().items).toEqual([]);
+  await remove([at("/Media/b.txt"), at("/Media/c.txt"), at("/Media/Photos")]);
+  const b = trash().items.find((item) => item.name === "b.txt")!;
+  expect(await emptyTrash([b.id])).toBe(1);
+  expect(trash().items.map((item) => item.name).sort()).toEqual(["Photos", "c.txt"]);
+  expect(await emptyTrash(null)).toBe(2);
+  expect(trash().items).toEqual([]);
+  expect(readdirSync(at("/.hata-trash"))).toEqual([]);
+  expect(await rejects(emptyTrash(["../x"]).then(() => restore("nope")))).toBe("files.badPath");
 });

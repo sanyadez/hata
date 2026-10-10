@@ -126,6 +126,8 @@ export function smbConf(shares: Share[], accounts: Account[], server: Server = {
     "   disable spoolss = yes",
     "   log file = /var/log/samba/log.%m",
     "   max log size = 1000",
+    // the trash of Hata's file manager, at the top of a disk: not to be seen or reached over the network
+    "   veto files = /.hata-trash/",
   ];
   if (netbiosName(server.name)) lines.push(`   netbios name = ${netbiosName(server.name)}`);
   if (server.announced) lines.push("   multicast dns register = no");

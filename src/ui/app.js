@@ -287,13 +287,14 @@ function pickLanguage(server) {
 }
 
 // --- Routes -------------------------------------------------------------------------------------
-// The address after `#` is the view: #/ · #/store · #/import · #/files/<folders> · #/apps/<name>/<tab> · #/settings/<section>
+// The address after `#` is the view: #/ · #/store · #/import · #/files/<folders> · #/trash · #/apps/<name>/<tab> · #/settings/<section>
 
 function parseRoute() {
   const parts = location.hash.replace(/^#\/?/, "").split("/").filter(Boolean).map(decodeURIComponent);
   if (parts[0] === "store" && state.user?.role !== "guest") return { view: "store" };
   // "#/files" is the data root, wherever it is; "#/files/" is the root of the server
   if (parts[0] === "files" && isAdmin()) return { view: "files", path: /^#\/?files$/.test(location.hash) ? "" : "/" + parts.slice(1).join("/") };
+  if (parts[0] === "trash" && isAdmin()) return { view: "trash" };
   if (parts[0] === "backups" && isAdmin()) return { view: "backups" };
   if (parts[0] === "users" && isAdmin()) return { view: "users" };
   if (parts[0] === "import" && isAdmin()) return { view: "import" };
@@ -333,6 +334,7 @@ function onRoute() {
   if (state.route.view === "store") void loadStore();
   if (state.route.view === "settings") void loadSettings();
   if (state.route.view === "files") void loadFiles();
+  if (state.route.view === "trash") void loadTrash();
   if (state.route.view === "backups") void loadBackups();
   if (state.route.view === "users") void loadUsers();
   if (state.route.view === "import") void loadImport();
@@ -571,7 +573,7 @@ const NAV = [
 const isAdmin = () => state.user?.role === "admin";
 
 function navLinks(className) {
-  const current = state.route.view === "app" ? "home" : state.route.view === "import" ? "store" : state.route.view;
+  const current = state.route.view === "app" ? "home" : state.route.view === "import" ? "store" : state.route.view === "trash" ? "files" : state.route.view;
   return NAV.filter((item) => (!item.admin || isAdmin()) && (item.guest !== false || state.user.role !== "guest")).map((item) =>
     h("a", { class: className + (current === item.view ? " active" : ""), href: item.hash, "aria-current": current === item.view ? "page" : null }, icon(item.icon), h("span", null, t("nav." + item.view))),
   );
@@ -668,6 +670,7 @@ function render() {
   if (view === "store") return renderStore();
   if (view === "settings") return renderSettings();
   if (view === "files") return renderFiles();
+  if (view === "trash") return renderTrash();
   if (view === "backups") return renderBackups();
   if (view === "users") return renderUsers();
   if (view === "import") return renderImport();
@@ -2647,6 +2650,7 @@ function renderFilesBody() {
     home && place(t("files.home"), home, "home", path === home),
     home && (state.files?.places ?? []).map((name) => place(name, joinPath(home, name), name === "AppData" ? "box" : "folder", within(path, joinPath(home, name)))),
     place(t("files.root"), "/", "disk", path !== "" && !inHome),
+    h("a", { class: "cat", href: "#/trash" }, h("span", { class: "with-icon" }, icon("trash"), h("span", { class: "clip" }, t("trash.title")))),
     disk && h("div", { class: "cat-title" }, t("files.disk")),
     disk && h("div", { class: "files-disk" }, h("div", { class: "bar" }, fill), h("span", { class: "muted small" }, t("files.free", { free: bytes(disk.free), total: bytes(disk.total) }))),
   );
@@ -2883,28 +2887,98 @@ async function deleteDialog(entries) {
   } catch (e) {
     return toast(errorText(e), "error");
   }
+  const note = h("p", { class: "muted" }, t("files.deleteLead", { files: sum.truncated ? sum.files + "+" : sum.files, dirs: sum.dirs, size: bytes(sum.size) }));
+  const run = async (e, forever) => {
+    const pressed = e.currentTarget;
+    pressed.disabled = true;
+    try {
+      await api("POST", "/api/files/delete", { paths, forever });
+      toast(t(forever ? "files.deletedForever" : "files.trashed", { n: paths.length }));
+    } catch (err) {
+      // a disk that keeps no trash: what is left is to delete for good, and the dialog says so
+      if (err.code === "files.noTrash" && !forever) {
+        pressed.hidden = true;
+        note.className = "banner small";
+        note.textContent = errorText(err);
+        return void loadFiles();
+      }
+      toast(errorText(err), "error");
+    }
+    dialog.close();
+    await loadFiles();
+  };
   const dialog = openDialog(
     "confirm",
     h("h2", { class: "wrap" }, entries.length === 1 ? t("files.deleteTitle", { name: entries[0].name }) : t("files.deleteMany", { n: entries.length })),
-    h("p", { class: "muted" }, t("files.deleteLead", { files: sum.truncated ? sum.files + "+" : sum.files, dirs: sum.dirs, size: bytes(sum.size) })),
+    note,
     within(dir, joinPath(state.files.home, "AppData")) ? h("p", { class: "banner small" }, t("files.deleteAppData")) : null,
+    h("footer", null, button(t("files.deleteForever"), { class: "ghost danger-text small", onclick: (e) => run(e, true) }), closeButton(() => dialog, t("common.cancel")), button(t("files.toTrash"), { class: "primary", autofocus: true, onclick: (e) => run(e, false) }, "trash")),
+  );
+}
+
+// --- The trash: what was deleted in Files, to be put back or removed for good ---
+
+async function loadTrash() {
+  try {
+    state.trash = await api("GET", "/api/files/trash");
+  } catch (e) {
+    return toast(errorText(e), "error");
+  }
+  if (state.route.view === "trash") renderTrash();
+}
+
+function renderTrash() {
+  const data = state.trash;
+  const items = data?.items ?? [];
+  const act = async (el, work) => {
+    el.disabled = true;
+    try {
+      await work();
+    } catch (e) {
+      toast(errorText(e), "error");
+    }
+    await loadTrash();
+  };
+  const back = (item) => (e) =>
+    act(e.currentTarget, async () => {
+      const { restored } = await api("POST", "/api/files/trash/restore", { ids: [item.id] });
+      toast(t("trash.restored", { path: restored[0].path }));
+    });
+  const forever = (ids, title, lead) => {
+    const dialog = openDialog(
+      "confirm",
+      h("h2", { class: "wrap" }, title),
+      h("p", { class: "muted" }, lead),
+      h("footer", null, closeButton(() => dialog, t("common.cancel")), button(t("files.deleteForever"), { class: "danger", onclick: (e) => act(e.currentTarget, () => api("POST", "/api/files/trash/delete", ids ? { ids } : {})).then(() => dialog.close()) }, "trash")),
+    );
+  };
+  const folderOf = (path) => path.slice(0, path.lastIndexOf("/")) || "/";
+  const row = (item) =>
     h(
-      "footer",
+      "tr",
       null,
-      closeButton(() => dialog, t("common.cancel")),
-      button(t("files.deleteForever"), {
-        class: "danger",
-        onclick: async (e) => {
-          e.currentTarget.disabled = true;
-          try {
-            await api("POST", "/api/files/delete", { paths });
-          } catch (err) {
-            toast(errorText(err), "error");
-          }
-          dialog.close();
-          await loadFiles();
-        },
-      }, "trash"),
+      h("td", null, h("div", { class: "with-icon strong" }, icon(item.type === "dir" ? "folder" : "file"), h("span", { class: "clip" }, item.name))),
+      h("td", null, h("a", { class: "muted small mono clip block", href: filesHash(folderOf(item.from)) }, folderOf(item.from))),
+      h("td", null, h("div", null, ago(item.at)), item.by && h("div", { class: "muted small" }, item.by)),
+      h("td", { class: "num" }, bytes(item.size), item.type === "dir" && h("div", { class: "muted small" }, t("trash.files", { n: item.files }))),
+      h("td", null, h("div", { class: "row-actions" }, button(t("trash.restore"), { class: "small", onclick: back(item) }, "undo"), button("", { class: "small icon-btn", title: t("files.deleteForever"), "aria-label": t("files.deleteForever"), onclick: () => forever([item.id], t("trash.deleteTitle", { name: item.name }), t("trash.deleteLead")) }, "trash"))),
+    );
+  shell(
+    h(
+      "div",
+      { class: "page-head" },
+      h("div", null, h("h1", null, t("trash.title")), h("p", { class: "meta" }, h("a", { href: "#/files" }, t("nav.files")), h("span", { class: "dot-sep" }, "·"), t("trash.meta", { n: items.length, size: bytes(data?.size ?? 0) }))),
+      h("div", { class: "actions" }, items.length > 0 && button(t("trash.empty"), { class: "danger", onclick: () => forever(null, t("trash.emptyTitle"), t("trash.emptyLead", { n: items.length, size: bytes(data.size) })) }, "trash")),
+    ),
+    h(
+      "div",
+      { class: "card table-wrap" },
+      h("p", { class: "pad muted small" }, t("trash.lead", { days: data?.keepDays ?? 30 })),
+      !data
+        ? null
+        : items.length === 0
+          ? h("p", { class: "empty" }, t("trash.nothing"))
+          : h("table", { class: "disks trash" }, h("thead", null, h("tr", null, h("th", null, t("files.col.name")), h("th", null, t("trash.col.from")), h("th", null, t("trash.col.deleted")), h("th", { class: "num" }, t("files.col.size")), h("th"))), h("tbody", null, items.map(row))),
     ),
   );
 }
