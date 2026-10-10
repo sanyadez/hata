@@ -4480,10 +4480,10 @@ async function shareDialog(path) {
     return;
   }
   const name = h("input", { value: share?.name ?? "", placeholder: folder, maxLength: 40, spellcheck: false, autocomplete: "off" });
-  const who = (guest) => h("input", { type: "radio", name: "who", value: guest ? "guest" : "password", checked: (share?.guest ?? false) === guest });
-  const withPassword = who(false);
-  const guest = who(true);
-  const readOnly = h("input", { type: "checkbox", checked: share?.readOnly ?? false });
+  const choice = (value) => h("select", null, ["none", "read", "write"].map((access) => h("option", { value: access, selected: access === value }, t("shares.access." + access))));
+  // a folder shared for the first time is open to whoever shares it
+  const users = data.users.map((user) => ({ user, select: choice(share ? (share.users[user.id] ?? "none") : user.id === state.user.id ? "write" : "none") }));
+  const guest = choice(share?.guest ?? "none");
   const error = h("p", { class: "error", role: "alert" });
   const send = async (method, url, body, done) => {
     error.textContent = "";
@@ -4495,7 +4495,7 @@ async function shareDialog(path) {
       error.textContent = errorText(e);
     }
   };
-  const settings = () => ({ name: name.value.trim(), guest: guest.checked, readOnly: readOnly.checked });
+  const settings = () => ({ name: name.value.trim(), guest: guest.value, users: Object.fromEntries(users.map(({ user, select }) => [user.id, select.value])) });
   const address = share && data.hosts[0] && shareAddresses(data.hosts[0], share.name);
   dialog = openDialog(
     "confirm",
@@ -4515,11 +4515,13 @@ async function shareDialog(path) {
         "div",
         { class: "field" },
         h("span", { class: "label" }, t("shares.who")),
-        h("label", { class: "check" }, withPassword, h("span", null, t("shares.who.password"), h("span", { class: "muted small block" }, t("shares.who.passwordHint", { user: data.account.name })))),
-        h("label", { class: "check" }, guest, h("span", null, t("shares.who.guest"), h("span", { class: "muted small block" }, t("shares.who.guestHint")))),
+        h(
+          "div",
+          { class: "share-access" },
+          users.map(({ user, select }) => h("label", null, h("span", { class: "grow" }, h("strong", null, user.name), !user.ready && h("span", { class: "muted small block" }, t("shares.notReadyHint"))), select)),
+          h("label", null, h("span", { class: "grow" }, h("strong", null, t("shares.guest")), h("span", { class: "muted small block" }, t("shares.guestHint"))), guest),
+        ),
       ),
-      h("label", { class: "check" }, readOnly, h("span", null, t("shares.readOnlyLabel"), h("span", { class: "muted small block" }, t("shares.readOnlyHint")))),
-      !data.account.set && h("p", { class: "banner small" }, t("shares.needPassword"), " ", h("a", { class: "link", href: "#/settings/shares", onclick: () => dialog.close() }, t("shares.tool.open"))),
       error,
       h("footer", null, share ? button(t("shares.stop"), { class: "danger", onclick: () => send("DELETE", `/api/shares/${encodeURIComponent(share.name)}`, undefined, t("shares.stoppedDone", { name: share.name })) }) : h("span"), closeButton(() => dialog, t("common.cancel")), h("button", { class: "btn primary" }, t(share ? "shares.save" : "shares.share"))),
     ),
@@ -4562,27 +4564,22 @@ function sharesSection() {
   const host = data.hosts[0] ?? location.hostname;
   const taken = data.shares.map((share) => share.path);
   const add = () => folderPicker({ title: t("shares.addTitle"), start: "", confirmLabel: t("shares.addHere"), allowed: (at) => !taken.includes(at), action: (at) => void setTimeout(() => shareDialog(at)) });
+  const line = (label, access) => h("div", null, label, h("span", { class: "muted small" }, " · " + t("shares.access." + access)));
+  const who = (share) => {
+    const named = data.users.filter((user) => share.users[user.id]).map((user) => line(user.name, share.users[user.id]));
+    if (share.guest !== "none") named.push(line(t("shares.guest"), share.guest));
+    return named.length ? named : h("span", { class: "muted" }, t("shares.nobody"));
+  };
   const row = (share) => {
     const address = shareAddresses(host, share.name);
     return h(
       "tr",
       null,
       h("td", null, h("div", { class: "strong" }, share.name), share.missing ? h("div", { class: "small danger-text" }, t("shares.missing")) : h("a", { class: "muted small mono clip block", href: filesHash(share.path) }, share.path)),
-      h("td", null, h("div", null, t(share.guest ? "shares.access.guest" : "shares.access.password")), h("div", { class: "muted small" }, t(share.readOnly ? "shares.readOnly" : "shares.writable"))),
+      h("td", null, who(share)),
       h("td", null, copyLine(address.windows), copyLine(address.url)),
       h("td", null, h("div", { class: "row-actions" }, button(t("shares.settings"), { class: "small", onclick: () => shareDialog(share.path) }))),
     );
-  };
-  const password = h("input", { type: "password", autocomplete: "new-password", minLength: 8, maxLength: 127, required: true, class: "mono" });
-  const setPassword = async (e) => {
-    e.preventDefault();
-    error.textContent = "";
-    try {
-      setShares(await api("POST", "/api/shares/password", { password: password.value }));
-      toast(t("shares.account.saved"));
-    } catch (err) {
-      error.textContent = errorText(err);
-    }
   };
   const all = shareAddresses(host);
   return [
@@ -4595,20 +4592,16 @@ function sharesSection() {
         h("div", { class: "section-head" }, h("h2", null, t("shares.title"), data.shares.length > 0 && h("span", { class: "state " + (data.running ? "running" : "restarting") }, t(data.running ? "shares.running" : "shares.stopped"))), button(t("shares.add"), { class: "small primary", onclick: add }, "plus")),
         h("p", { class: "muted small" }, t(data.shares.length ? "shares.lead" : "shares.none")),
         data.error && h("p", { class: "banner danger" }, t("shares.error", { message: data.error })),
-        !data.account.set && data.shares.some((share) => !share.guest) && h("p", { class: "banner" }, t("shares.needPassword")),
       ),
       data.shares.length > 0 && h("table", { class: "disks shares" }, h("thead", null, h("tr", null, h("th", null, t("shares.col.name")), h("th", null, t("shares.col.access")), h("th", null, t("shares.col.address")), h("th"))), h("tbody", null, data.shares.map(row))),
     ),
     h(
-      "form",
-      { class: "card pad stack", onsubmit: setPassword },
-      h("h2", null, t("shares.account.title")),
-      h("p", { class: "muted" }, t("shares.account.lead")),
-      settingRow(t("shares.account.name"), "", h("span", { class: "mono" }, data.account.name)),
-      settingRow(t("shares.account.password"), "", h("span", { class: data.account.set ? "muted" : "state restarting" }, t(data.account.set ? "shares.account.set" : "shares.account.unset"))),
-      field(t("shares.account.new"), password, t("shares.account.newHint", { user: data.account.name })),
-      error,
-      h("footer", null, h("button", { class: "btn primary" }, t("shares.account.save"))),
+      "section",
+      { class: "card pad" },
+      h("h2", null, t("shares.users.title")),
+      h("p", { class: "muted" }, t("shares.users.lead")),
+      h("p", { class: "muted small" }, t("shares.users.note")),
+      data.users.map((user) => settingRow(user.name, t("shares.users.folders", { n: data.shares.filter((share) => share.users[user.id]).length }), h("span", { class: user.ready ? "state running" : "state" }, t(user.ready ? "shares.users.ready" : "shares.users.notReady")))),
     ),
     h("section", { class: "card pad stack-s" }, h("h2", null, t("shares.how.title")), h("p", { class: "muted" }, t("shares.how.windows", { address: all.windows })), h("p", { class: "muted" }, t("shares.how.mac", { address: all.url })), h("p", { class: "muted" }, t("shares.how.phone"))),
   ];

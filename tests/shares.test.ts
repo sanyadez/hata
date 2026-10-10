@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { cleanShares, hasInclude, HATA_CONF, nameFor, parseUsers, shareName, smbConf, withInclude, withoutInclude, writablePath } from "../src/smbconf";
+import { cleanShares, isOurs, nameFor, parseUsers, shareName, smbConf, UNIX_NAME_RE, unixName, userMap, writablePath, type Share } from "../src/smbconf";
 
 test("shareName: letters of any alphabet, digits, spaces; nothing Samba reads as its own", () => {
   expect(shareName("  Media  ")).toBe("Media");
@@ -27,76 +27,68 @@ test("writablePath: what would change the meaning of Samba's file is refused", (
 test("cleanShares: what is not a share is dropped, names and folders are unique", () => {
   expect(
     cleanShares([
-      { name: "Media", path: "/DATA/Media", guest: true },
+      { name: "Media", path: "/DATA/Media", guest: "read", users: { a: "write", b: "read", c: "none", d: 1 } },
       { name: "media", path: "/DATA/Other" },
       { name: "Again", path: "/DATA/Media" },
       { name: "bad/name", path: "/DATA/x" },
       { name: "Docs", path: "/DATA/%U" },
-      { name: "Docs", path: "/DATA/Docs", readOnly: true, extra: 1 },
+      { name: "Docs", path: "/DATA/Docs", guest: true, users: [], extra: 1 },
       null,
       "x",
     ]),
   ).toEqual([
-    { name: "Media", path: "/DATA/Media", guest: true, readOnly: false },
-    { name: "Docs", path: "/DATA/Docs", guest: false, readOnly: true },
+    { name: "Media", path: "/DATA/Media", guest: "read", users: { a: "write", b: "read" } },
+    { name: "Docs", path: "/DATA/Docs", guest: "none", users: {} },
   ]);
   expect(cleanShares(undefined)).toEqual([]);
 });
 
-test("smbConf: a share with a password, a share for everyone", () => {
-  const conf = smbConf([
-    { name: "Media", path: "/DATA/Media", guest: false, readOnly: false },
-    { name: "Films for all", path: "/DATA/My Films", guest: true, readOnly: true },
-  ]);
-  expect(conf).toBe(`# Written by Hata: the folders shared over the network.
-# Changes made here by hand are overwritten; shares of your own belong in smb.conf.
+const ANNA = { id: "11111111-aaaa-4bbb-8ccc-000000000001", name: "anna" };
+const TV = { id: "22222222-aaaa-4bbb-8ccc-000000000002", name: "TV" };
+const share = (rest: Partial<Share>): Share => ({ name: "Media", path: "/DATA/Media", guest: "none", users: {}, ...rest });
+const section = (conf: string, name: string) => conf.split("\n\n").find((part) => part.startsWith(`[${name}]`))!.split("\n").slice(1).map((line) => line.trim()).filter(Boolean);
 
-[global]
-   map to guest = Bad User
-
-[Media]
-   path = /DATA/Media
-   browseable = yes
-   read only = no
-   guest ok = no
-   valid users = hata
-   force user = root
-   inherit owner = yes
-   inherit permissions = yes
-   map archive = no
-
-[Films for all]
-   path = /DATA/My Films
-   browseable = yes
-   read only = yes
-   guest ok = yes
-   force user = root
-   inherit owner = yes
-   inherit permissions = yes
-   map archive = no
-`);
-  // Samba's own settings are touched only for the sake of a share without a password
-  expect(smbConf([{ name: "Media", path: "/DATA/Media", guest: false, readOnly: false }])).not.toContain("[global]");
-  expect(smbConf([])).not.toContain("[");
+test("unixName: a system account made from the user's id", () => {
+  expect(unixName(ANNA.id)).toBe("hata-11111111");
+  expect(UNIX_NAME_RE.test(unixName(crypto.randomUUID()))).toBe(true);
+  expect(UNIX_NAME_RE.test("hata")).toBe(false);
 });
 
-test("withInclude / withoutInclude: one line at the end of Samba's file, taken out without a trace", () => {
-  const theirs = "[global]\n   workgroup = HOME\n\n[printers]\n   path = /var/tmp\n";
-  const ours = withInclude(theirs);
-  expect(ours).toBe(`${theirs}\n# The folders shared from Hata\ninclude = ${HATA_CONF}\n`);
-  expect(hasInclude(theirs)).toBe(false);
-  expect(hasInclude(ours)).toBe(true);
-  expect(withInclude(ours)).toBe(ours);
-  expect(withoutInclude(ours)).toBe(theirs);
-  expect(withoutInclude(theirs)).toBe(theirs);
-  // written by hand with other spacing, it is still the same line
-  expect(hasInclude(`[global]\n\tinclude  =  ${HATA_CONF}\n`)).toBe(true);
-  // no smb.conf at all (Arch): the least Samba starts with
-  expect(withInclude(null)).toStartWith("[global]\n");
-  expect(hasInclude(withInclude(null))).toBe(true);
+test("smbConf: the whole of Samba's configuration, nothing on but what Hata offers", () => {
+  const conf = smbConf([], [ANNA]);
+  expect(isOurs(conf)).toBe(true);
+  expect(isOurs("[global]\n   workgroup = HOME\n")).toBe(false);
+  expect(section(conf, "global")).toContain("map to guest = Never");
+  expect(section(conf, "global")).toContain("username map = /etc/samba/hata-users.map");
+  expect(section(conf, "global")).toContain("load printers = no");
+  expect(conf.match(/^\[/gm)).toEqual(["["]);
+});
+
+test("smbConf: who may open a folder and who may change it", () => {
+  const conf = smbConf(
+    [
+      share({ name: "Named", users: { [ANNA.id]: "write", [TV.id]: "read", gone: "write" } }),
+      share({ name: "Nobody", path: "/DATA/n" }),
+      share({ name: "Look", path: "/DATA/l", guest: "read", users: { [ANNA.id]: "write", [TV.id]: "read" } }),
+      share({ name: "Free for all", path: "/DATA/My Films", guest: "write", users: { [ANNA.id]: "read" } }),
+    ],
+    [ANNA, TV],
+  );
+  expect(section(conf, "global")).toContain("map to guest = Bad User");
+  expect(section(conf, "Named")).toEqual(["path = /DATA/Media", "browseable = yes", "guest ok = no", "read only = yes", "valid users = hata-11111111 hata-22222222", "write list = hata-11111111", "force user = root", "inherit owner = yes", "inherit permissions = yes", "map archive = no"]);
+  // a folder nobody is named for is closed, not open to everyone
+  expect(section(conf, "Nobody")).toContain("available = no");
+  expect(section(conf, "Nobody").some((line) => line.startsWith("valid users"))).toBe(false);
+  // open to anyone to look at: those named for more still may change
+  expect(section(conf, "Look")).toEqual(["path = /DATA/l", "browseable = yes", "guest ok = yes", "read only = yes", "write list = hata-11111111", "force user = root", "inherit owner = yes", "inherit permissions = yes", "map archive = no"]);
+  expect(section(conf, "Free for all")).toEqual(["path = /DATA/My Films", "browseable = yes", "guest ok = yes", "read only = no", "force user = root", "inherit owner = yes", "inherit permissions = yes", "map archive = no"]);
+});
+
+test("userMap: the name typed in leads to the system account", () => {
+  expect(userMap([ANNA, TV])).toEndWith("hata-11111111 = anna\nhata-22222222 = TV\n");
 });
 
 test("parseUsers: the names of pdbedit -L", () => {
-  expect(parseUsers("hata:999:\noleksandr:1000:Oleksandr\n")).toEqual(["hata", "oleksandr"]);
+  expect(parseUsers("hata-11111111:999:Hata: anna\noleksandr:1000:Oleksandr\n")).toEqual(["hata-11111111", "oleksandr"]);
   expect(parseUsers("")).toEqual([]);
 });

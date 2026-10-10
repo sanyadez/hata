@@ -3,7 +3,7 @@
  * one unit file — nothing else is put on the system.
  */
 import { chmodSync, copyFileSync, existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { HATA_CONF, hasInclude, SMB_CONF, withoutInclude } from "./smbconf";
+import { isOurs, SMB_CONF, SMB_CONF_BEFORE, USER_MAP } from "./smbconf";
 import { serviceStateDir } from "./statedir";
 import { COMPILED } from "./version";
 
@@ -110,19 +110,17 @@ export async function installService(args: string[] = []): Promise<number> {
   return 0;
 }
 
-/** Samba gets its configuration back as it was: the folders shared from Hata go with Hata */
+/** Samba gets back the configuration it had before Hata; without one, it is left with nothing shared */
 function unshare(): void {
   try {
-    if (existsSync(SMB_CONF)) {
-      const conf = readFileSync(SMB_CONF, "utf8");
-      if (hasInclude(conf)) writeFileSync(SMB_CONF, withoutInclude(conf));
-    }
-    if (!existsSync(HATA_CONF)) return;
-    rmSync(HATA_CONF, { force: true });
+    if (!existsSync(SMB_CONF) || !isOurs(readFileSync(SMB_CONF, "utf8"))) return;
+    if (existsSync(SMB_CONF_BEFORE)) renameSync(SMB_CONF_BEFORE, SMB_CONF);
+    else writeFileSync(SMB_CONF, "[global]\n   server role = standalone server\n");
+    rmSync(USER_MAP, { force: true });
     Bun.spawnSync({ cmd: ["smbcontrol", "all", "reload-config"], stdout: "ignore", stderr: "ignore" });
     console.log("The folders shared over the network are not shared any more; Samba itself stays installed.");
   } catch (e) {
-    console.error(`Could not take the shared folders out of ${SMB_CONF}:`, e instanceof Error ? e.message : e);
+    console.error(`Could not put ${SMB_CONF} back:`, e instanceof Error ? e.message : e);
   }
 }
 

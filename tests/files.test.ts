@@ -150,14 +150,14 @@ test("a shared folder follows a rename and a move, and is not shared once remove
   let told = 0;
   onSharesMoved(() => told++);
   mkdirSync(at("/Shared/Docs"), { recursive: true });
-  settings.shares = [{ name: "Docs", path: at("/Shared/Docs"), guest: false, readOnly: true }];
+  settings.shares = [{ name: "Docs", path: at("/Shared/Docs"), guest: "none", users: { u1: "read" } }];
   expect((await list(at("/Shared"))).shared).toEqual([at("/Shared/Docs")]);
   rename(at("/Shared"), "Given");
-  expect(settings.shares).toEqual([{ name: "Docs", path: at("/Given/Docs"), guest: false, readOnly: true }]);
+  expect(settings.shares).toEqual([{ name: "Docs", path: at("/Given/Docs"), guest: "none", users: { u1: "read" } }]);
   // a name Samba's file cannot hold ends the sharing
   rename(at("/Given/Docs"), "100%");
   expect(settings.shares).toEqual([]);
-  settings.shares = [{ name: "Given", path: at("/Given"), guest: true, readOnly: false }];
+  settings.shares = [{ name: "Given", path: at("/Given"), guest: "write", users: {} }];
   await remove([at("/Given/100%")]);
   expect(settings.shares.length).toBe(1);
   await remove([at("/Given")]);

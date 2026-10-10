@@ -18,7 +18,7 @@ import { attention } from "./attention";
 import { backupApp, backupOverview, deleteSnapshot, listSnapshots, mirror, restoreSnapshot, resumeRestore, runBackups, scheduleBackups, takeServerSnapshot } from "./backup";
 import { checkOffsite, forgetHost, offsiteFailure, saveOffsite } from "./offsite";
 import { APP_NAME_RE, dumpCompose } from "./appform";
-import { addShare, changeShare, installSamba, listShares, removeShare, setPassword as setSharePassword, startShares } from "./shares";
+import { addShare, changeShare, installSamba, listShares, removeShare, startShares } from "./shares";
 import { checkDisks, diskHealth, installTool, listDisks, startDisks, startSelfTest } from "./disks";
 import {
   acceptInvite,
@@ -787,12 +787,11 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
 
   // ---- folders shared over the network ----
   if (path === "/api/shares" && method === "GET") return json(await listShares());
-  if (path === "/api/shares" && method === "POST") return json(await addShare(await body(req), user.name), 201);
+  if (path === "/api/shares" && method === "POST") return json(await addShare(await body(req), user), 201);
   if (path === "/api/shares/tool" && method === "POST") {
     server.timeout(req, 0);
     return json(await installSamba());
   }
-  if (path === "/api/shares/password" && method === "POST") return json(await setSharePassword((await body(req)).password));
   if (path.startsWith("/api/shares/") && (method === "PUT" || method === "DELETE")) {
     let name: string;
     try {
@@ -800,7 +799,7 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
     } catch {
       return fail(404, "shares.notFound");
     }
-    return json(method === "PUT" ? await changeShare(name, await body(req)) : await removeShare(name, user.name));
+    return json(method === "PUT" ? await changeShare(name, await body(req)) : await removeShare(name, user));
   }
 
   if (path === "/api/update" && method === "GET") return json(updateStatus());

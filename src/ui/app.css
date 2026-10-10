@@ -755,3 +755,7 @@ input[type="range"] { accent-color: var(--accent); width: 100%; }
 table.shares td { vertical-align: top; }
 .banner.small { padding: 10px 12px; }
 .section-head h2 .state { margin-left: 10px; vertical-align: middle; }
+.share-access { display: grid; border: 1px solid var(--border); border-radius: var(--radius-md); }
+.share-access label { display: flex; align-items: center; gap: 12px; padding: 10px 12px; }
+.share-access label + label { border-top: 1px solid var(--border); }
+.share-access select { width: auto; flex: none; }

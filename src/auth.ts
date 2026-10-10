@@ -96,6 +96,19 @@ export function setupToken(): string | null {
   return token;
 }
 
+/**
+ * Whoever keeps accounts of their own for Hata's users (Samba does) hears of a password at the only
+ * moments it is known — when it is set and when it is typed in rightly — and of users that changed.
+ */
+type PasswordListener = (user: User, password: string) => void;
+let passwordSeen: PasswordListener = () => {};
+let usersChanged: () => void = () => {};
+
+export function onPasswords(seen: PasswordListener, changed: () => void): void {
+  passwordSeen = seen;
+  usersChanged = changed;
+}
+
 export function validName(name: unknown): name is string {
   return typeof name === "string" && /^[a-z0-9][a-z0-9._-]{0,31}$/i.test(name);
 }
@@ -118,6 +131,7 @@ export async function completeSetup(token: unknown, name: unknown, password: unk
   users.push(user);
   writeJsonAtomic(USERS_FILE, users);
   rmSync(SETUP_TOKEN_FILE, { force: true });
+  passwordSeen(user, password);
   return user;
 }
 
@@ -130,7 +144,9 @@ export async function checkPassword(name: unknown, password: unknown): Promise<U
   if (typeof name !== "string" || typeof password !== "string" || password.length > 256) return null;
   const user = users.find((u) => u.name.toLowerCase() === name.toLowerCase());
   const ok = await Bun.password.verify(password, user?.passwordHash ?? (await DUMMY_HASH)).catch(() => false);
-  return user && ok ? user : null;
+  if (!user || !ok) return null;
+  passwordSeen(user, password);
+  return user;
 }
 
 function saveSessions(): void {
@@ -272,6 +288,7 @@ export async function createUser(name: unknown, password: unknown, role: unknown
   const user: User = { id: crypto.randomUUID(), name, role, passwordHash: await Bun.password.hash(password), createdAt: Date.now() };
   users.push(user);
   saveUsers();
+  passwordSeen(user, password);
   return user;
 }
 
@@ -292,6 +309,7 @@ export async function updateUser(id: string, patch: Record<string, unknown>): Pr
     user.passwordHash = await Bun.password.hash(patch.password as string);
     // whoever knew the old password must not stay signed in
     revokeSessions(user);
+    passwordSeen(user, patch.password as string);
   }
   if (patch.twoFactor === false) {
     delete user.totp;
@@ -309,6 +327,7 @@ export function deleteUser(id: string, acting: User): string | null {
   users.splice(users.indexOf(user), 1);
   saveUsers();
   revokeSessions(user);
+  usersChanged();
   return null;
 }
 
@@ -319,6 +338,7 @@ export async function changePassword(user: User, current: unknown, next: unknown
   user.passwordHash = await Bun.password.hash(next);
   saveUsers();
   revokeSessions(user, req);
+  passwordSeen(user, next);
   return null;
 }
 
@@ -408,6 +428,7 @@ export async function acceptInvite(token: unknown, name: unknown, password: unkn
   if (!invites.includes(invite)) {
     users.splice(users.indexOf(user), 1);
     saveUsers();
+    usersChanged();
     return "invite.invalid";
   }
   invites = invites.filter((i) => i !== invite);
