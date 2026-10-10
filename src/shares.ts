@@ -8,6 +8,7 @@
  * when it is typed in rightly at sign-in.
  */
 import { existsSync, readFileSync, rmSync, statSync } from "node:fs";
+import { hostname } from "node:os";
 import { join } from "node:path";
 import { record } from "./activity";
 import { AppError } from "./apps";
@@ -15,13 +16,26 @@ import { findUser, listUsers, onPasswords, type Role, type User } from "./auth";
 import { DATA_DIR, saveSettings, settings } from "./config";
 import { locate, mustBeSharable, onSharesMoved } from "./files";
 import { readJsonFile, writeJsonAtomic, writeTextAtomic } from "./fsutil";
-import { answersItself, homeLinks } from "./mdns";
+import { answersItself, homeLinks, offer, offering, type Service } from "./mdns";
 import { installCommand, installPackage, PATH, run } from "./packages";
 import { localDomain } from "./site";
-import { isOurs, nameFor, parseUsers, shareName, SMB_CONF, SMB_CONF_BEFORE, smbConf, UNIX_NAME_RE, unixName, USER_MAP, userMap, writablePath, type Access, type Share } from "./smbconf";
+import { isOurs, nameFor, nameLine, parseUsers, shareName, SMB_CONF, SMB_CONF_BEFORE, smbConf, UNIX_NAME_RE, unixName, USER_MAP, userMap, writablePath, type Access, type Share } from "./smbconf";
+import { refreshWsd, wsdStatus } from "./wsd";
 
 const PACKAGE = "samba";
 const MAX_SHARES = 40;
+
+/**
+ * What those who browse the network are told (Finder, the file managers of phones): the folders, and
+ * that this is a server — which gives it a server's picture in Finder.
+ */
+const SERVICES: Service[] = [
+  { type: "_smb._tcp", port: 445 },
+  { type: "_device-info._tcp", port: 0, txt: ["model=RackMac"] },
+];
+
+/** The computer's name on the network: the first word of the name on the home network, or the system's */
+export const serverName = (): string => (localDomain() || hostname()).split(".")[0]!.toLowerCase();
 
 const installed = (): boolean => Bun.which("smbd", { PATH }) !== null;
 
@@ -89,7 +103,7 @@ async function sync(): Promise<void> {
   writeJsonAtomic(KNOWN_FILE, known);
 
   const accounts = listUsers().map((user) => ({ id: user.id, name: user.name }));
-  const conf = smbConf(settings.shares, accounts);
+  const conf = smbConf(settings.shares, accounts, { name: serverName(), announced: answersItself(localDomain()) });
   const map = userMap(accounts);
   const before = read(SMB_CONF);
   const mapBefore = read(USER_MAP);
@@ -108,7 +122,11 @@ async function sync(): Promise<void> {
   }
   const name = await unit();
   if (!name) return;
-  if (await isActive(name)) await run(["smbcontrol", "all", "reload-config"], 10_000);
+  if (await isActive(name)) {
+    // a new name of the computer is taken only at a start: of Samba, and of its part that answers to the name
+    if (nameLine(conf) !== nameLine(before)) for (const one of [name, name === "smbd" ? "nmbd" : "nmb"]) await run(["systemctl", "try-restart", `${one}.service`], 60_000);
+    else await run(["smbcontrol", "all", "reload-config"], 10_000);
+  }
   // a stopped Samba is started only when there is something to serve
   else if (settings.shares.length) {
     const started = await run(["systemctl", "enable", "--now", `${name}.service`], 60_000);
@@ -124,8 +142,18 @@ const queued = (work: () => Promise<void>): Promise<void> => {
   return queue;
 };
 
+/** The server shows up by itself where people look for network folders — while there is something to open */
+async function announce(): Promise<void> {
+  const on = installed() && settings.shares.length > 0 && (await isActive(await unit()));
+  offer(on ? SERVICES : []);
+  refreshWsd(on ? serverName() : null);
+}
+
 /** Brings Samba in line with the settings and the users, one change at a time */
-const apply = (): Promise<void> => queued(sync);
+const apply = (): Promise<void> => queued(() => sync().finally(announce));
+
+/** The name on the home network changed: Samba and the announcements follow it */
+export const refreshShares = (): void => void apply();
 
 /** A password Hata has just seen is given to Samba, unless Samba has that very one */
 function learn(user: User, password: string): void {
@@ -162,6 +190,11 @@ export interface SharesReport {
   users: { id: string; name: string; role: Role; ready: boolean }[];
   /** How this server is called from another machine: the name on the home network first, then its addresses */
   hosts: string[];
+  /**
+   * Whether the server shows up by itself, and as what: `browse` — in Finder and on phones (multicast
+   * DNS), `windows` — under "Network" in Explorer (WS-Discovery); `error` — why Windows is not told
+   */
+  announced: { name: string; browse: boolean; windows: boolean; error: string };
   shares: ShareReport[];
 }
 
@@ -189,6 +222,7 @@ export async function listShares(): Promise<SharesReport> {
     error: failure,
     users: listUsers().map((user) => ({ id: user.id, name: user.name, role: user.role, ready: ready(user.id) })),
     hosts,
+    announced: { name: serverName(), browse: offering(), windows: wsdStatus().on, error: wsdStatus().error },
     shares: settings.shares.map((share) => ({ ...share, missing: !isDir(share.path) })),
   };
 }

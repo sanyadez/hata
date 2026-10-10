@@ -18,7 +18,7 @@ import { attention } from "./attention";
 import { backupApp, backupOverview, deleteSnapshot, listSnapshots, mirror, restoreSnapshot, resumeRestore, runBackups, scheduleBackups, takeServerSnapshot } from "./backup";
 import { checkOffsite, forgetHost, offsiteFailure, saveOffsite } from "./offsite";
 import { APP_NAME_RE, dumpCompose } from "./appform";
-import { addShare, changeShare, installSamba, listShares, removeShare, startShares } from "./shares";
+import { addShare, changeShare, installSamba, listShares, refreshShares, removeShare, startShares } from "./shares";
 import { checkDisks, diskHealth, installTool, listDisks, startDisks, startSelfTest } from "./disks";
 import {
   acceptInvite,
@@ -702,7 +702,11 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
       if (error) return fail(400, error);
       // certificates take a while: the page asks for their state
       if ("https" in patch) void refreshHttps(true);
-      if ("local" in patch) refreshLocalNames();
+      if ("local" in patch) {
+        refreshLocalNames();
+        // the shared folders are announced under the same name
+        refreshShares();
+      }
       return json(publicSettings());
     }
   }

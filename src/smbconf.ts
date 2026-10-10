@@ -88,12 +88,26 @@ const MARK = "# Written by Hata from its settings (Settings → Network folders)
 /** Whether this `smb.conf` is one Hata wrote */
 export const isOurs = (conf: string): boolean => conf.startsWith(MARK);
 
+/** How the server is called on the network, as Samba is told */
+export interface Server {
+  /** The computer's name, the one Hata announces; "" leaves it to Samba (the system's host name) */
+  name: string;
+  /** Hata tells those who browse the network of the folders itself, so Samba must not (through Avahi) */
+  announced: boolean;
+}
+
+/** A computer's name in the old Windows way: fifteen characters at most */
+export const netbiosName = (name: string): string => name.toUpperCase().replace(/[^A-Z0-9-]/g, "").slice(0, 15);
+
+/** The line of a configuration that names the computer; "" when there is none */
+export const nameLine = (conf: string | null): string => /^\s*netbios name\s*=.*$/m.exec(conf ?? "")?.[0].trim() ?? "";
+
 /**
  * Samba's whole configuration. Only what Hata offers is on: no printers, no home folders, no SMB1.
  * Files are written as root and take the owner of the folder they land in — the same as in Hata's file
  * manager, whoever connects.
  */
-export function smbConf(shares: Share[], accounts: Account[]): string {
+export function smbConf(shares: Share[], accounts: Account[], server: Server = { name: "", announced: false }): string {
   const lines = [
     MARK,
     "# Changes made here by hand are overwritten.",
@@ -113,6 +127,8 @@ export function smbConf(shares: Share[], accounts: Account[]): string {
     "   log file = /var/log/samba/log.%m",
     "   max log size = 1000",
   ];
+  if (netbiosName(server.name)) lines.push(`   netbios name = ${netbiosName(server.name)}`);
+  if (server.announced) lines.push("   multicast dns register = no");
   const known = new Map(accounts.map((account) => [account.id, unixName(account.id)]));
   for (const share of shares) {
     const granted = Object.entries(share.users).filter(([id]) => known.has(id));

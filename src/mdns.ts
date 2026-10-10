@@ -4,6 +4,9 @@
  * computers ask the whole network for names ending in `.local`, so nothing is set up on them. A name
  * with another ending (`hata.lan`) is not ours to answer: the home's DNS has to know it.
  *
+ * The same way it tells what this machine serves (DNS-SD, RFC 6763): the shared folders, so that the
+ * server shows up by itself in Finder and in the file managers of phones.
+ *
  * The packets are pure functions; the responder below them listens on UDP 5353 next to whatever else
  * does (Avahi, systemd-resolved) and answers only for its own names.
  */
@@ -16,7 +19,10 @@ import { localDomain } from "./site";
 const GROUP = "224.0.0.251";
 const PORT = 5353;
 const TYPE_A = 1;
+const TYPE_PTR = 12;
+const TYPE_TXT = 16;
 const TYPE_AAAA = 28;
+const TYPE_SRV = 33;
 const TYPE_NSEC = 47;
 const TYPE_ANY = 255;
 /** How long an answer may be remembered, seconds: short, so a changed address is noticed */
@@ -88,29 +94,96 @@ function encodeName(name: string): number[] {
 const u16 = (n: number) => [(n >> 8) & 0xff, n & 0xff];
 const u32 = (n: number) => [...u16(n >>> 16), ...u16(n & 0xffff)];
 
+/** Something this machine serves, to be found by browsing the network */
+export interface Service {
+  /** The kind, as browsers ask for it: `_smb._tcp` */
+  type: string;
+  /** 0 — nothing to connect to, only a description (`_device-info._tcp`) */
+  port: number;
+  txt?: string[];
+}
+
+/** What is served and under which name: the host (`hata.local`), whose first label names every service */
+export interface Offer {
+  host: string;
+  services: Service[];
+}
+
+/** The question a browser asks to learn which kinds of services there are at all */
+const KINDS = "_services._dns-sd._udp.local";
+
+const instanceOf = (offer: Offer, service: Service): string => `${offer.host.split(".")[0]}.${service.type}.local`;
+
+const txtData = (strings: string[] = []): number[] => {
+  const out = strings.flatMap((text) => {
+    const bytes = [...new TextEncoder().encode(text)].slice(0, 255);
+    return [bytes.length, ...bytes];
+  });
+  // a description with nothing in it is still one empty string
+  return out.length ? out : [0];
+};
+
 /**
  * The answer to a query, or null when it asks for nothing of ours. `ours` says whether a name is one we
  * answer for; `address` is this machine's IPv4 address as the asker reaches it. A question for the IPv6
  * address gets "there is only an IPv4 one" (an NSEC record), so the asker does not wait for more.
  * `legacy` — the asker is an ordinary DNS client (not on port 5353): it gets its id and question back.
+ * With an `offer`, questions about its services are answered too; whoever asks who serves a kind is
+ * told, in the same packet, where that is (port, description, address). `ttl` 0 takes the records back.
  */
-export function answerQuery(query: Query, ours: (name: string) => boolean, address: string, legacy = false): Uint8Array | null {
+export function answerQuery(query: Query, ours: (name: string) => boolean, address: string, legacy = false, offer: Offer | null = null, ttl = TTL): Uint8Array | null {
   const ip = address.split(".").map(Number);
   if (ip.length !== 4 || ip.some((n) => !Number.isInteger(n) || n < 0 || n > 255)) return null;
-  const mine = query.questions.filter((q) => ours(q.name) && [TYPE_A, TYPE_AAAA, TYPE_ANY].includes(q.type));
-  if (!mine.length) return null;
-  // an ordinary client knows nothing of the "flush what you had" bit and must not keep the answer long
-  const cls = u16(legacy ? 1 : 0x8001);
-  const ttl = u32(legacy ? 10 : TTL);
-  const records = new Map<string, number[]>();
-  for (const q of mine) {
-    const name = encodeName(q.name);
-    if (q.type !== TYPE_AAAA) records.set(q.name + " A", [...name, ...u16(TYPE_A), ...cls, ...ttl, ...u16(4), ...ip]);
-    // the name itself as "the next one", and a bitmap with the one type it has: A
-    else records.set(q.name + " NSEC", [...name, ...u16(TYPE_NSEC), ...cls, ...ttl, ...u16(name.length + 3), ...name, 0, 1, 0x40]);
+  // an ordinary client knows nothing of the "flush what you had" bit and must not keep the answer long;
+  // a record others may hold as well (who serves a kind) never carries that bit
+  const record = (name: string, type: number, data: number[], shared = false): number[] => [...encodeName(name), ...u16(type), ...u16(legacy || shared ? 1 : 0x8001), ...u32(legacy ? Math.min(ttl, 10) : ttl), ...u16(data.length), ...data];
+  const a = (name: string) => record(name, TYPE_A, ip);
+  const srv = (service: Service) => record(instanceOf(offer!, service), TYPE_SRV, [...u16(0), ...u16(0), ...u16(service.port), ...encodeName(offer!.host)]);
+  const txt = (service: Service) => record(instanceOf(offer!, service), TYPE_TXT, txtData(service.txt));
+
+  const answers = new Map<string, number[]>();
+  const extras = new Map<string, number[]>();
+  const mine: Question[] = [];
+  for (const q of query.questions) {
+    const before = answers.size;
+    const wants = (type: number) => q.type === type || q.type === TYPE_ANY;
+    if (ours(q.name)) {
+      if (wants(TYPE_A)) answers.set(q.name + " A", a(q.name));
+      // the name itself as "the next one", and a bitmap with the one type it has: A
+      else if (q.type === TYPE_AAAA) answers.set(q.name + " NSEC", record(q.name, TYPE_NSEC, [...encodeName(q.name), 0, 1, 0x40]));
+    }
+    for (const service of offer?.services ?? []) {
+      const kind = `${service.type}.local`;
+      const instance = instanceOf(offer!, service);
+      if (service.port && wants(TYPE_PTR)) {
+        if (q.name === KINDS) answers.set(kind + " KIND", record(KINDS, TYPE_PTR, encodeName(kind), true));
+        if (q.name === kind) {
+          answers.set(instance + " PTR", record(kind, TYPE_PTR, encodeName(instance), true));
+          extras.set(instance + " SRV", srv(service)).set(instance + " TXT", txt(service)).set(offer!.host + " A", a(offer!.host));
+        }
+      }
+      if (q.name !== instance) continue;
+      if (service.port && wants(TYPE_SRV)) {
+        answers.set(instance + " SRV", srv(service));
+        extras.set(offer!.host + " A", a(offer!.host));
+      }
+      if (wants(TYPE_TXT)) answers.set(instance + " TXT", txt(service));
+    }
+    if (answers.size > before) mine.push(q);
   }
+  if (!answers.size) return null;
+  for (const key of answers.keys()) extras.delete(key);
+  // taking a service back must not take the machine's name with it
+  if (!ttl) extras.clear();
   const asked = legacy ? mine.flatMap((q) => [...encodeName(q.name), ...u16(q.type), ...u16(1)]) : [];
-  return new Uint8Array([...u16(legacy ? query.id : 0), ...u16(0x8400), ...u16(legacy ? mine.length : 0), ...u16(records.size), ...u16(0), ...u16(0), ...asked, ...[...records.values()].flat()]);
+  return new Uint8Array([...u16(legacy ? query.id : 0), ...u16(0x8400), ...u16(legacy ? mine.length : 0), ...u16(answers.size), ...u16(0), ...u16(extras.size), ...asked, ...[...answers.values()].flat(), ...[...extras.values()].flat()]);
+}
+
+/** Everything of ours said at once, unasked: the name and what is served under it */
+export function announcement(host: string, services: Service[], address: string, ttl = TTL): Uint8Array | null {
+  const offer = { host, services };
+  const questions = [...(ttl ? [{ name: host, type: TYPE_A, unicast: false }] : []), ...services.flatMap((service) => [{ name: `${service.type}.local`, type: TYPE_PTR, unicast: false }, { name: instanceOf(offer, service), type: TYPE_ANY, unicast: false }])];
+  return answerQuery({ id: 0, questions }, (name) => name === host, address, false, offer, ttl);
 }
 
 /** Whether `name` is the local domain itself or one label under it (an app's) */
@@ -151,6 +224,21 @@ let listening = false;
 let failure = "";
 let joined = new Set<string>();
 let upkeep: Timer | null = null;
+let services: Service[] = [];
+
+function sendAll(packetFor: (address: string) => Uint8Array | null): void {
+  if (!socket || !listening) return;
+  for (const link of homeLinks()) {
+    const packet = packetFor(link.address);
+    if (!packet) continue;
+    try {
+      socket.setMulticastInterface(link.address);
+      socket.send(packet, PORT, GROUP);
+    } catch {
+      // a network that just went away
+    }
+  }
+}
 
 /** Joins the multicast group on every network that appeared since the last look */
 function join(): void {
@@ -167,21 +255,27 @@ function join(): void {
   joined = now;
 }
 
-/** Tells the networks our name without being asked: whoever remembered another address forgets it */
+/** Tells the networks our name and what we serve without being asked: whoever remembered otherwise forgets it */
 function announce(): void {
   const domain = localDomain();
-  if (!socket || !listening || !domain) return;
-  for (const link of homeLinks()) {
-    const packet = answerQuery({ id: 0, questions: [{ name: domain, type: TYPE_A, unicast: false }] }, () => true, link.address);
-    if (!packet) continue;
-    try {
-      socket.setMulticastInterface(link.address);
-      socket.send(packet, PORT, GROUP);
-    } catch {
-      // a network that just went away
-    }
-  }
+  if (domain) sendAll((address) => announcement(domain, services, address));
 }
+
+/**
+ * What this machine serves, for those who browse the network; an empty list takes it all back. The
+ * services go by the first label of the local name, and are told only while Hata answers for that name.
+ */
+export function offer(list: Service[]): void {
+  const domain = localDomain();
+  const gone = services.filter((old) => !list.some((service) => service.type === old.type));
+  // a goodbye: the same records with no time to live
+  if (domain && gone.length) sendAll((address) => announcement(domain, gone, address, 0));
+  services = list;
+  announce();
+}
+
+/** Whether those who browse the network are being told what is served */
+export const offering = (): boolean => listening && services.length > 0;
 
 function onPacket(packet: Uint8Array, remote: { address: string; port: number }): void {
   const domain = localDomain();
@@ -191,7 +285,7 @@ function onPacket(packet: Uint8Array, remote: { address: string; port: number })
   const address = addressFor(remote.address, homeLinks());
   if (!address) return;
   const legacy = remote.port !== PORT;
-  const answer = answerQuery(query, (name) => isLocalName(name, domain), address, legacy);
+  const answer = answerQuery(query, (name) => isLocalName(name, domain), address, legacy, { host: domain, services });
   if (!answer) return;
   try {
     if (legacy || query.questions.every((q) => q.unicast)) socket.send(answer, remote.port, remote.address);

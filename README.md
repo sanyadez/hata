@@ -69,7 +69,9 @@ Early development. What works today:
   with the name and password they sign in to Hata with; for every folder each user may look, change or
   nothing at all, and so may "anyone without a password". What lands there takes the owner of its
   folder, so apps still reach it. Samba does the serving: the installer puts it in and Hata sets it up
-  whole — the `smb.conf` that was there is kept next to it and put back when Hata is removed;
+  whole — the `smb.conf` that was there is kept next to it and put back when Hata is removed. No address
+  has to be typed: while something is shared, the server shows up by itself under "Network" in Explorer on
+  Windows, in the sidebar of Finder and in the Files app of a phone, under its name on the home network;
 - files: the server's files in the browser, opened in the data folder and reaching everywhere — folders,
   upload by drag and drop (whole folders too, large files in parts), download of a file or of a folder as a
   ZIP archive, rename, move, copy, delete, copying a path, putting a folder on the dashboard, pictures, video and sound opened in place, text

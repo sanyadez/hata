@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { cleanShares, isOurs, nameFor, parseUsers, shareName, smbConf, UNIX_NAME_RE, unixName, userMap, writablePath, type Share } from "../src/smbconf";
+import { cleanShares, isOurs, nameFor, nameLine, netbiosName, parseUsers, shareName, smbConf, UNIX_NAME_RE, unixName, userMap, writablePath, type Share } from "../src/smbconf";
 
 test("shareName: letters of any alphabet, digits, spaces; nothing Samba reads as its own", () => {
   expect(shareName("  Media  ")).toBe("Media");
@@ -91,4 +91,17 @@ test("userMap: the name typed in leads to the system account", () => {
 test("parseUsers: the names of pdbedit -L", () => {
   expect(parseUsers("hata-11111111:999:Hata: anna\noleksandr:1000:Oleksandr\n")).toEqual(["hata-11111111", "oleksandr"]);
   expect(parseUsers("")).toEqual([]);
+});
+
+test("the computer's name and who announces the folders are told to Samba", () => {
+  expect(smbConf([], [])).not.toMatch(/netbios name|multicast dns/);
+  const conf = smbConf([], [], { name: "hata", announced: true });
+  expect(conf).toContain("   netbios name = HATA\n");
+  expect(conf).toContain("   multicast dns register = no\n");
+  expect(nameLine(conf)).toBe("netbios name = HATA");
+  expect(nameLine(smbConf([], []))).toBe("");
+  expect(nameLine(null)).toBe("");
+  // fifteen characters, and nothing a name of that kind cannot hold
+  expect(netbiosName("my-home-server-in-the-attic")).toBe("MY-HOME-SERVER-");
+  expect(netbiosName("дім")).toBe("");
 });
