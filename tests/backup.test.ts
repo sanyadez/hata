@@ -3,7 +3,7 @@ import { appDir } from "../src/apps";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expired, nextRun, restorable, withoutNested, type Snapshot } from "../src/backup";
+import { expired, movedAppDir, nextRun, restorable, tarMove, withoutNested, type Snapshot } from "../src/backup";
 import { listServerSnapshots, stateExcludes, strayMembers } from "../src/restore";
 
 const snap = (id: string, at: number, reason: Snapshot["reason"]): Snapshot => ({ id, app: "a", at, reason, size: 1, paths: [], images: [] });
@@ -73,4 +73,15 @@ test("snapshots of the server are found by their description and archive, newest
   writeFileSync(join(dir, "_server", "notes.json"), "{}");
   expect(listServerSnapshots(dir).map((s) => s.id)).toEqual(["20261002-030000", "20261001-030000"]);
   expect(listServerSnapshots(join(dir, "nope"))).toEqual([]);
+});
+
+test("a snapshot taken where the apps used to be kept is restored to where they are kept now", () => {
+  const paths = ["/var/lib/hata/apps/memos", "/DATA/AppData/memos"];
+  expect(movedAppDir(paths, "memos", "/mnt/disk/hata/apps/memos")).toBe("/var/lib/hata/apps/memos");
+  expect(movedAppDir(paths, "memos", "/var/lib/hata/apps/memos")).toBeNull();
+  expect(movedAppDir(["/DATA/AppData/memos"], "memos", "/x/apps/memos")).toBeNull();
+  // another app's directory is not this app's, and never becomes restorable by this route
+  expect(movedAppDir(["/var/lib/hata/apps/other"], "memos", "/x/apps/memos")).toBeNull();
+  expect(tarMove("/var/lib/hata/apps/memos", "/mnt/my disk/hata.d/apps/memos")).toBe("--transform=s|^var/lib/hata/apps/memos|mnt/my disk/hata.d/apps/memos|rh");
+  expect(tarMove("/srv/a.b/apps/memos", "/srv/a&b|c/apps/memos")).toBe("--transform=s|^srv/a\\.b/apps/memos|srv/a\\&b\\|c/apps/memos|rh");
 });

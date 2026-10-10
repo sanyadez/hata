@@ -11,7 +11,7 @@
  * depend on.
  */
 import { chmodSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statfsSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { APP_NAME_RE, appMeta, bindSources, normalize } from "./appform";
 import { AppError, appAction, appDir, dc, installedNames, jobFinished, onBeforeUpdate, readCompose, startJob, type Job, type Log } from "./apps";
 import { record } from "./activity";
@@ -86,6 +86,22 @@ export function restorable(path: string, name: string, dataRoot = settings.dataR
   const appData = (dataRoot === "/" ? "" : dataRoot) + "/AppData/";
   if (path.startsWith(appData) && path.length > appData.length) return true;
   return /^\/var\/lib\/docker\/volumes\/[A-Za-z0-9][A-Za-z0-9_.-]*\/_data$/.test(path);
+}
+
+/**
+ * The app's own directory as a snapshot knows it, when that is no longer where it lies: the
+ * configuration folder was moved since, or the snapshot comes from another machine. Null — it is in place.
+ */
+export function movedAppDir(paths: string[], name: string, current = appDir(name)): string | null {
+  const then = paths.find((p) => p.endsWith(`/apps/${name}`) && !p.split("/").includes(".."));
+  return then && then !== current ? then : null;
+}
+
+/** tar's `--transform` that unpacks what lay in `from` into `to`; file names only, links keep their targets */
+export function tarMove(from: string, to: string): string {
+  const pattern = tarPath(from).replace(/[.[\]*^$\\|]/g, "\\$&");
+  const replacement = tarPath(to).replace(/[\\|&]/g, "\\$&");
+  return `--transform=s|^${pattern}|${replacement}|rh`;
 }
 
 // --- Snapshots on disk ------------------------------------------------------------------------------
@@ -186,7 +202,9 @@ export function restoreSnapshot(name: string, id: string, user: string): Job {
   if (!snapshot) throw new AppError("backup.notFound", 404);
   const archive = join(appBackupDir(name), id + ".tar.gz");
   return startJob(name, "restore", user, async (log) => {
-    const refused = snapshot.paths.filter((p) => !restorable(p, name));
+    // the app's directory goes to where the apps are kept now, wherever they were when the snapshot was taken
+    const moved = movedAppDir(snapshot.paths, name);
+    const refused = snapshot.paths.filter((p) => p !== moved && !restorable(p, name));
     if (refused.length) throw new Error(`The snapshot holds paths a restore must not touch: ${refused.join(", ")}`);
     // the archive is ours, but it has been lying on a disk: check it holds what its description says
     const listing = await run(["tar", "-tzf", archive]);
@@ -196,12 +214,13 @@ export function restoreSnapshot(name: string, id: string, user: string): Job {
     if (stray.length) throw new Error(`The archive holds files outside the app: ${stray[0]}`);
 
     if (existsSync(join(appDir(name), "compose.yml"))) await dc(name, ["stop"], log);
-    for (const path of snapshot.paths) {
+    for (const path of snapshot.paths.map((p) => (p === moved ? appDir(name) : p))) {
       log(`Replacing ${path}`);
       rmSync(path, { recursive: true, force: true });
     }
-    log(`$ tar -xzf ${archive} -C /`);
-    const tar = await run(["tar", "--numeric-owner", "-xzpf", archive, "-C", "/"]);
+    if (moved) mkdirSync(dirname(appDir(name)), { recursive: true });
+    log(`$ tar -xzf ${archive} -C /${moved ? `  (${moved} → ${appDir(name)})` : ""}`);
+    const tar = await run(["tar", "--numeric-owner", "-xzpf", archive, "-C", "/", ...(moved ? [tarMove(moved, appDir(name))] : [])]);
     if (tar.code !== 0) throw new Error(tar.output.split("\n").slice(-3).join("\n") || `tar exited with ${tar.code}`);
     await dc(name, ["up", "-d", "--remove-orphans"], log);
   });
