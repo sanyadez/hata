@@ -464,7 +464,7 @@ export function enableTotp(user: User, code: unknown): string[] | string {
 }
 
 export async function disableTotp(user: User, password: unknown): Promise<string | null> {
-  if (typeof password !== "string" || !(await Bun.password.verify(password, user.passwordHash).catch(() => false))) return "auth.wrongPassword";
+  if (!(await checkOwnPassword(user, password))) return "auth.wrongPassword";
   delete user.totp;
   delete user.totpPending;
   saveUsers();
@@ -495,8 +495,11 @@ const MAX_PASSKEYS = 20;
 
 export const listPasskeys = (user: User) => (user.passkeys ?? []).map(({ id, name, createdAt, lastUsed }) => ({ id, name, createdAt, lastUsed: lastUsed ?? null }));
 
-export const checkOwnPassword = (user: User, password: unknown): Promise<boolean> =>
-  typeof password === "string" && password.length <= 256 ? Bun.password.verify(password, user.passwordHash).catch(() => false) : Promise.resolve(false);
+export async function checkOwnPassword(user: User, password: unknown): Promise<boolean> {
+  if (typeof password !== "string" || password.length > 256 || !(await Bun.password.verify(password, user.passwordHash).catch(() => false))) return false;
+  passwordSeen(user, password);
+  return true;
+}
 
 /** Stores a verified passkey for the user; returns an error code or null */
 export function addPasskey(user: User, key: Pick<StoredPasskey, "id" | "publicKey" | "alg" | "counter">, name: unknown): string | null {
