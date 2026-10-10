@@ -940,7 +940,7 @@
   "disks.usedOf": "{used} of {total}",
   "disks.none": "No disks are visible from here. Inside a container Hata sees only the file systems it was given.",
   "disks.details": "Details",
-  "disks.tool.missing": "The disks' health cannot be read yet",
+  "disks.tool.missing": "smartmontools is not installed",
   "disks.tool.missingHint": "It is read with smartctl from the smartmontools package, which is not installed on this server.",
   "disks.tool.install": "Install smartmontools",
   "disks.tool.installing": "Installing…",
@@ -1024,5 +1024,9 @@
   "attention.smart.worn.title": "Disk {disk} is near the end of its rated life",
   "attention.smart.worn.text": "{n}% of the rated writes are used. Plan a replacement.",
   "attention.smart.hot.title": "Disk {disk} is hot: {n} °C",
-  "attention.smart.hot.text": "Heat shortens its life — check the airflow around it."
+  "attention.smart.hot.text": "Heat shortens its life — check the airflow around it.",
+  "disks.tool.what": "What it is: a small system package with the smartctl program, which asks a disk for its own health record (SMART).",
+  "disks.tool.why": "What for: without it Hata shows the disks, but cannot tell a healthy one from one that is wearing out, show their temperature or warn you before a disk fails.",
+  "disks.tool.how": "What the button does: runs the command below on this server. On Debian and Ubuntu the package also starts its own background service, smartd. Hata installs nothing until you press it.",
+  "disks.tool.byHand": "Hata does not know this system's package manager: install the smartmontools package yourself, and the disks' health will show up here."
 }

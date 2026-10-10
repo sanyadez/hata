@@ -399,7 +399,7 @@ const report = (disk: Disk): DiskReport => {
 /** The disks as last seen, with their health — for the "needs attention" list */
 export const diskHealth = (): DiskReport[] => known.map(report);
 
-export async function listDisks(): Promise<{ disks: DiskReport[]; mounts: MountReport[]; tool: ToolState }> {
+export async function listDisks(): Promise<{ disks: DiskReport[]; mounts: MountReport[]; tool: ToolState; install: string }> {
   // what is plugged in and mounted is cheap to ask and changes under our feet; SMART is the cached part
   const now = await connected();
   if (now.length || !known.length) known = now;
@@ -418,7 +418,8 @@ export async function listDisks(): Promise<{ disks: DiskReport[]; mounts: MountR
   }
   // the same count as everywhere else in Hata: used is what is not free to an ordinary program
   const disks = known.map(report).map((disk) => ({ ...disk, volumes: disk.volumes.map((v) => ({ ...v, ...((v.mounts[0] && usage(v.mounts[0])) || {}) })) }));
-  return { disks, mounts, tool: outOfReach(known) ? "denied" : smartctl() ? (tool === "missing" ? "ok" : tool) : "missing" };
+  const state: ToolState = outOfReach(known) ? "denied" : smartctl() ? (tool === "missing" ? "ok" : tool) : "missing";
+  return { disks, mounts, tool: state, install: state === "missing" ? installCommand() : "" };
 }
 
 /** Starts the disk's own self-test; the outcome shows up in its SMART data when it is done */
@@ -444,10 +445,21 @@ const INSTALLERS: [string, string[]][] = [
   ["apk", ["add", "smartmontools"]],
 ];
 
-/** Installs smartmontools with the system's package manager; returns what went wrong, or null */
+const installer = () => INSTALLERS.find(([manager]) => Bun.which(manager, { PATH }));
+
+/** The command the "Install" button runs, shown next to it; empty when this system's package manager is not one we know */
+export const installCommand = (): string => {
+  const found = installer();
+  return found ? [found[0], ...found[1]].join(" ") : "";
+};
+
+/**
+ * Installs smartmontools with the system's package manager; returns what went wrong, or null.
+ * Only ever called for the button: Hata installs nothing on its own.
+ */
 export async function installTool(): Promise<string | null> {
   if (!smartctl()) {
-    const found = INSTALLERS.find(([manager]) => Bun.which(manager, { PATH }));
+    const found = installer();
     if (!found) return "No known package manager was found. Install the smartmontools package by hand.";
     const [manager, args] = found;
     const bin = Bun.which(manager, { PATH })!;

@@ -4410,7 +4410,15 @@ function storageSection() {
   return [
     data.tool === "missing" &&
       data.disks.length > 0 &&
-      h("section", { class: "card pad" }, settingRow(t("disks.tool.missing"), t("disks.tool.missingHint"), h("div", { class: "row-actions" }, button(t("disks.tool.install"), { class: "primary", onclick: busy(t("disks.tool.installing"), { path: "/api/disks/tool", toast: t("disks.tool.installed") }) }, "download")))),
+      h(
+        "section",
+        { class: "card pad" },
+        h("h2", null, t("disks.tool.missing")),
+        h("p", { class: "muted" }, t("disks.tool.what")),
+        h("p", { class: "muted" }, t("disks.tool.why")),
+        data.install ? [h("p", { class: "muted" }, t("disks.tool.how")), h("p", { class: "cmd" }, icon("terminal"), data.install)] : h("p", { class: "muted" }, t("disks.tool.byHand")),
+        data.install && h("footer", null, button(t("disks.tool.install"), { class: "primary", onclick: busy(t("disks.tool.installing"), { path: "/api/disks/tool", toast: t("disks.tool.installed") }) }, "download")),
+      ),
     data.tool === "denied" && data.disks.length > 0 && h("section", { class: "card pad" }, h("strong", null, t("disks.tool.denied")), h("p", { class: "muted small" }, t("disks.tool.deniedHint"))),
     h(
       "section",

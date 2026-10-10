@@ -505,6 +505,7 @@ dialog.xwide textarea.code { min-height: 56dvh; }
 .settings .card { display: grid; gap: 4px; }
 .settings .card > h2, .settings .card > .section-head { margin-bottom: 10px; }
 .settings .card.table-wrap { display: block; }
+.settings .card > .cmd { padding: 8px 0 14px; color: var(--muted); }
 .card-head { display: grid; gap: 6px; padding-bottom: 8px; }
 .card-head .section-head .row-actions { gap: 12px; }
 .card-head .section-head { flex-wrap: wrap; }
