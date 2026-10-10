@@ -58,6 +58,12 @@ Early development. What works today:
   the files are encrypted before they leave, so the other machine cannot read them. A day the other
   machine was off is caught up the next time, and a copy that falls behind shows up under "needs
   attention". `hata restore` opens such a copy when given the passphrase;
+- disks and their health (Settings → Storage): every disk with what it says about itself (SMART) in plain
+  words — healthy, wearing out or failing, and why — its temperature, how full it is and where it is
+  mounted; the file systems of the server, network folders included. Health is read every half an hour
+  without waking a disk that sleeps, a disk in trouble shows up under "needs attention" and is sent as a
+  notification, and a disk can be told to test itself. It needs `smartmontools`, which Hata offers to
+  install; nothing on a disk is changed;
 - files: the server's files in the browser, opened in the data folder and reaching everywhere — folders,
   upload by drag and drop (whole folders too, large files in parts), download of a file or of a folder as a
   ZIP archive, rename, move, copy, delete, copying a path, putting a folder on the dashboard, pictures, video and sound opened in place, text

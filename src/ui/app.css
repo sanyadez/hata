@@ -504,6 +504,21 @@ dialog.xwide textarea.code { min-height: 56dvh; }
 
 .settings .card { display: grid; gap: 4px; }
 .settings .card > h2, .settings .card > .section-head { margin-bottom: 10px; }
+.settings .card.table-wrap { display: block; }
+.card-head { display: grid; gap: 6px; padding-bottom: 8px; }
+.card-head .section-head .row-actions { gap: 12px; }
+.card-head .section-head { flex-wrap: wrap; }
+.card-head .section-head .small { white-space: nowrap; }
+table.disks td:last-child { padding-left: 0; }
+tr.clickable { cursor: pointer; }
+tr.clickable:hover td { background: var(--surface-2); }
+.usage { min-width: 150px; display: grid; gap: 6px; }
+.usage .bar { margin: 0; }
+.usage-text { display: flex; justify-content: space-between; gap: 12px; font-size: 12.5px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+.bad { color: var(--warn); }
+.banner.danger { background: var(--danger-soft); border-color: var(--danger); }
+.kv-list .kv { border-top: 1px solid var(--border); padding: 10px 0; align-items: center; }
+dialog.disk header .state { flex: none; }
 .setting { display: flex; align-items: center; gap: 24px; padding: 14px 0; border-top: 1px solid var(--border); flex-wrap: wrap; }
 .setting strong { font-weight: 600; }
 .setting .muted { margin-top: 3px; overflow-wrap: anywhere; }

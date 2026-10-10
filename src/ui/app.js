@@ -1363,7 +1363,7 @@ function dragEnd(drop) {
   drag.kind.drop(drag, target);
 }
 
-const ATTENTION_ICONS = { update: "up", docker: "box", restarting: "refresh", partial: "alert", disk: "disk", memory: "memory", temperature: "temp" };
+const ATTENTION_ICONS = { update: "up", docker: "box", restarting: "refresh", partial: "alert", disk: "disk", smart: "disk", memory: "memory", temperature: "temp" };
 
 function attentionItem(item) {
   const detail = { ...item.detail, free: item.detail.free == null ? "" : bytes(item.detail.free) };
@@ -1371,9 +1371,10 @@ function attentionItem(item) {
   return h(
     "div",
     { class: "attention-item" },
-    h("span", { class: "badge-icon " + item.severity }, icon(ATTENTION_ICONS[item.code] ?? "alert")),
+    h("span", { class: "badge-icon " + item.severity }, icon(ATTENTION_ICONS[item.code.split(".")[0]] ?? "alert")),
     h("div", { class: "grow" }, h("strong", null, t(base + ".title", detail)), h("p", { class: "muted small" }, t(base + ".text", detail).trim())),
     item.code === "update" && h("a", { class: "btn small", href: "#/settings/about" }, t("common.open")),
+    item.code.startsWith("smart.") && h("a", { class: "btn small", href: "#/settings/storage" }, t("common.open")),
     item.app && h("a", { class: "btn small", href: `#/apps/${item.app}${item.code === "restarting" || item.code === "partial" ? "/logs" : ""}` }, t(item.code === "restarting" || item.code === "partial" ? "app.logs" : "common.open")),
   );
 }
@@ -3656,6 +3657,7 @@ async function loadSettings() {
     if (isAdmin()) state.settings = await api("GET", "/api/settings");
     if (isAdmin()) state.update = await api("GET", "/api/update").catch(() => null);
     if (isAdmin()) state.notify = await api("GET", "/api/notify").catch(() => null);
+    if (isAdmin() && state.route.section === "storage") state.disks = await api("GET", "/api/disks").catch(() => null);
     if (!state.store && isAdmin()) state.store = await api("GET", `/api/store?lang=${state.lang}`).catch(() => null);
   } catch (e) {
     return toast(errorText(e), "error");
@@ -3670,6 +3672,7 @@ const SECTIONS = [
   { id: "appearance", icon: "image", admin: true },
   { id: "apps", icon: "grid", admin: true },
   { id: "stores", icon: "store", admin: true },
+  { id: "storage", icon: "disk", admin: true },
   { id: "https", icon: "lock", admin: true },
   { id: "notifications", icon: "bell", admin: true },
   { id: "about", icon: "info" },
@@ -3859,6 +3862,7 @@ function settingsSection(section) {
   }
   if (section === "https") return httpsSection(save, error);
   if (section === "notifications") return notificationsSection();
+  if (section === "storage") return storageSection();
   if (section === "stores") {
     const stores = state.store?.stores ?? [];
     return [
@@ -4259,6 +4263,175 @@ function notificationsSection() {
     channelCard("ntfy", [settingRow(t("notify.ntfy.url"), t("notify.ntfy.urlHint"), ntfyUrl), settingRow(t("notify.ntfy.token"), t("notify.ntfy.tokenHint"), ntfyToken)], () => ({ url: ntfyUrl.value, token: ntfyToken.value })),
     channelCard("webhook", [settingRow(t("notify.webhook.url"), t("notify.webhook.urlHint"), hook)], () => ({ url: hook.value })),
   ];
+}
+
+// --- Disks --------------------------------------------------------------------------------------
+
+// the colours of an app's state say the same three things about a disk
+const HEALTH_STATE = { ok: "running", warn: "partial", danger: "restarting", unknown: "" };
+const healthChip = (disk) => h("span", { class: "state " + HEALTH_STATE[disk.health] }, t("disks.health." + disk.health));
+const diskTitle = (disk) => disk.model || disk.name;
+const diskMeta = (disk) => [bytes(disk.size), disk.name, disk.transport === "nvme" ? "NVMe" : disk.transport.toUpperCase(), disk.transport !== "nvme" && t(disk.rotational ? "disks.kind.hdd" : "disks.kind.ssd"), disk.removable && t("disks.removable")].filter(Boolean).join(" · ");
+
+function usageBar(used, total) {
+  const percent = Math.round((used / total) * 100);
+  const fill = h("i", { class: level(percent) });
+  fill.style.width = percent + "%";
+  return h("div", { class: "usage" }, h("div", { class: "usage-text" }, h("span", null, t("disks.usedOf", { used: bytes(used), total: bytes(total) })), h("span", { class: "muted" }, percent + "%")), h("div", { class: "bar" }, fill));
+}
+
+/** How long a disk has been switched on, from its count of hours */
+function powerOnTime(hours) {
+  const days = Math.floor(hours / 24);
+  if (days < 2) return t("time.hours", { n: hours });
+  if (days < 60) return t("time.days", { n: days });
+  const months = Math.floor(days / 30.44);
+  return [months >= 12 && t("time.years", { n: Math.floor(months / 12) }), months % 12 > 0 && t("time.months", { n: months % 12 })].filter(Boolean).join(" ");
+}
+
+let diskDialogPaint = null;
+
+function setDisks(data) {
+  state.disks = data;
+  if (state.route.view === "settings" && state.route.section === "storage") renderSettings();
+  diskDialogPaint?.();
+}
+
+function diskDialog(name) {
+  const body = h("div", { class: "stack" });
+  const error = h("p", { class: "error", role: "alert" });
+  let dialog;
+  const test = (type) => async (e) => {
+    error.textContent = "";
+    e.currentTarget.disabled = true;
+    try {
+      setDisks(await api("POST", `/api/disks/${name}/test`, { type }));
+      toast(t("disks.test.started"));
+    } catch (err) {
+      error.textContent = errorText(err);
+      paint();
+    }
+  };
+  const paint = () => {
+    const disk = state.disks?.disks.find((d) => d.name === name);
+    if (!disk) return dialog?.close();
+    const s = disk.smart;
+    const value = (label, hint, shown, bad = false) => h("div", { class: "kv" }, h("div", null, label, hint && h("div", { class: "muted small" }, hint)), h("strong", { class: bad ? "bad" : "" }, shown));
+    const count = (key, n) => n != null && value(t(`disks.value.${key}`), t(`disks.value.${key}Hint`), String(n), n > 0 && key !== "crc");
+    const last = s?.lastTest;
+    put(
+      body,
+      h("header", null, h("span", { class: "badge-icon " + (disk.health === "ok" || disk.health === "unknown" ? "plain" : disk.health) }, icon("disk")), h("div", { class: "grow" }, h("h2", null, diskTitle(disk)), h("p", { class: "muted small" }, diskMeta(disk))), healthChip(disk), closeX(() => dialog)),
+      !s && h("p", { class: "muted" }, t(state.disks.tool === "ok" ? "disks.noSmart" : `disks.tool.${state.disks.tool}Hint`)),
+      s && (disk.findings.length ? disk.findings.map((f) => h("p", { class: "banner" + (f.severity === "danger" ? " danger" : "") }, t("disks.finding." + f.code, { n: f.n ?? 0 }))) : h("p", { class: "muted" }, t("disks.fine"))),
+      s?.testing != null && h("p", { class: "with-icon" }, icon("refresh"), t("disks.test.running", { n: s.testing })),
+      s &&
+        h(
+          "div",
+          { class: "kv-list" },
+          s.passed != null && value(t("disks.value.passed"), "", t(s.passed ? "disks.value.passedYes" : "disks.value.passedNo"), !s.passed),
+          count("reallocated", s.reallocated),
+          count("pending", s.pending),
+          count("uncorrectable", s.uncorrectable),
+          count("media", s.mediaErrors),
+          count("crc", s.crc),
+          s.wear != null && value(t("disks.value.wear"), t("disks.value.wearHint"), s.wear + "%", s.wear >= 90),
+          s.spare && value(t("disks.value.spare"), t("disks.value.spareHint", { n: s.spare.threshold }), s.spare.left + "%", s.spare.left < s.spare.threshold),
+          s.temperature != null && value(t("disks.value.temperature"), "", s.temperature + " °C", disk.findings.some((f) => f.code === "hot")),
+          s.powerOnHours != null && value(t("disks.value.powerOn"), t("disks.value.powerOnHint", { hours: s.powerOnHours, cycles: s.powerCycles ?? "—" }), powerOnTime(s.powerOnHours)),
+          value(t("disks.value.lastTest"), last ? t("disks.value.testWhen", { type: has("disks.test." + last.type) ? t("disks.test." + last.type) : last.type, hours: Math.max(0, (s.powerOnHours ?? 0) - (last.hours ?? 0)) }) : "", last ? t(last.passed ? "disks.value.testPassed" : "disks.value.testFailed") : t("disks.value.testNever"), last && !last.passed),
+        ),
+      s && h("p", { class: "muted small" }, t("disks.test.hint")),
+      error,
+      s && h("footer", null, h("span", { class: "muted small" }, disk.checkedAt ? t("disks.checked", { when: ago(disk.checkedAt) }) : ""), button(t("disks.test.runShort"), { disabled: s.testing != null, onclick: test("short") }), button(t("disks.test.runLong"), { disabled: s.testing != null, onclick: test("long") })),
+    );
+  };
+  dialog = openDialog("wide disk", body);
+  diskDialogPaint = paint;
+  dialog.addEventListener("close", () => (diskDialogPaint = null));
+  paint();
+}
+
+let disksTimer = 0;
+
+function storageSection() {
+  const data = state.disks;
+  if (!data) return [h("p", { class: "muted" }, "…")];
+  const error = h("p", { class: "error", role: "alert" });
+  const busy = (label, done) => async (e) => {
+    const el = e.currentTarget;
+    error.textContent = "";
+    el.disabled = true;
+    el.lastChild.textContent = label;
+    try {
+      setDisks(await api("POST", done.path, {}));
+      if (done.toast) toast(done.toast);
+    } catch (err) {
+      setDisks(state.disks);
+      document.querySelector("#disks-error")?.replaceChildren(errorText(err));
+    }
+  };
+  error.id = "disks-error";
+
+  // while a disk tests itself, its progress is worth watching
+  clearTimeout(disksTimer);
+  if (data.disks.some((d) => d.smart?.testing != null)) {
+    disksTimer = setTimeout(async () => {
+      if (state.route.view === "settings" && state.route.section === "storage") setDisks(await api("GET", "/api/disks").catch(() => state.disks));
+    }, 20_000);
+  }
+
+  const row = (disk) => {
+    const mounted = disk.volumes.filter((v) => v.total != null);
+    const total = mounted.reduce((n, v) => n + v.total, 0);
+    const used = mounted.reduce((n, v) => n + v.used, 0);
+    const mounts = disk.volumes.flatMap((v) => v.mounts);
+    const hot = disk.findings.some((f) => f.code === "hot");
+    return h(
+      "tr",
+      { class: "clickable", onclick: () => diskDialog(disk.name) },
+      h("td", null, h("div", { class: "with-icon" }, h("span", { class: "badge-icon " + (disk.health === "ok" || disk.health === "unknown" ? "plain" : disk.health) }, icon("disk")), h("div", null, h("div", { class: "strong" }, diskTitle(disk)), h("div", { class: "muted small mono" }, diskMeta(disk))))),
+      h("td", null, healthChip(disk)),
+      h("td", { class: "num" + (hot ? " bad" : "") }, disk.smart?.temperature != null ? disk.smart.temperature + " °C" : "—"),
+      h("td", null, total ? usageBar(used, total) : h("span", { class: "muted" }, "—")),
+      h("td", { class: "mono" }, mounts.length ? mounts.map((m) => h("div", { class: "clip" }, m)) : h("span", { class: "muted" }, t("disks.notMounted"))),
+      h("td", null, h("div", { class: "row-actions" }, button(t("disks.details"), { class: "small", onclick: (e) => (e.stopPropagation(), diskDialog(disk.name)) }))),
+    );
+  };
+  const checked = Math.max(0, ...data.disks.map((d) => d.checkedAt ?? 0));
+  const fsRow = (m) =>
+    h(
+      "tr",
+      null,
+      h("td", null, h("a", { class: "strong mono", href: filesHash(m.path), title: t("disks.fs.browse") }, m.path)),
+      h("td", null, h("div", { class: "mono clip" }, m.device), h("div", { class: "muted small" }, [m.fstype, m.network && t("disks.fs.network"), m.readOnly && t("disks.fs.readOnly")].filter(Boolean).join(" · "))),
+      h("td", null, usageBar(m.used, m.total)),
+    );
+  return [
+    data.tool === "missing" &&
+      data.disks.length > 0 &&
+      h("section", { class: "card pad" }, settingRow(t("disks.tool.missing"), t("disks.tool.missingHint"), h("div", { class: "row-actions" }, button(t("disks.tool.install"), { class: "primary", onclick: busy(t("disks.tool.installing"), { path: "/api/disks/tool", toast: t("disks.tool.installed") }) }, "download")))),
+    data.tool === "denied" && data.disks.length > 0 && h("section", { class: "card pad" }, h("strong", null, t("disks.tool.denied")), h("p", { class: "muted small" }, t("disks.tool.deniedHint"))),
+    h(
+      "section",
+      { class: "card table-wrap" },
+      h(
+        "div",
+        { class: "pad card-head" },
+        h("div", { class: "section-head" }, h("h2", null, t("disks.title"), h("span", { class: "muted" }, t("disks.connected", { n: data.disks.length }))), data.tool === "ok" && data.disks.length > 0 && h("div", { class: "row-actions" }, checked > 0 && h("span", { class: "muted small" }, t("disks.checked", { when: ago(checked) })), button(t("disks.checkNow"), { class: "small", onclick: busy("…", { path: "/api/disks/check" }) }, "refresh"))),
+        h("p", { class: "muted small" }, t(data.disks.length ? "disks.lead" : "disks.none")),
+        error,
+      ),
+      data.disks.length > 0 && h("table", { class: "disks" }, h("thead", null, h("tr", null, h("th", null, t("disks.col.disk")), h("th", null, t("disks.col.health")), h("th", { class: "num" }, t("disks.col.temp")), h("th", null, t("disks.col.usage")), h("th", null, t("disks.col.mounted")), h("th"))), h("tbody", null, data.disks.map(row))),
+    ),
+    data.mounts.length > 0 &&
+      h(
+        "section",
+        { class: "card table-wrap" },
+        h("div", { class: "pad card-head" }, h("h2", null, t("disks.fs.title")), h("p", { class: "muted small" }, t("disks.fs.lead"))),
+        h("table", { class: "disks" }, h("thead", null, h("tr", null, h("th", null, t("disks.fs.col.path")), h("th", null, t("disks.fs.col.source")), h("th", null, t("disks.col.usage")))), h("tbody", null, data.mounts.map(fsRow))),
+      ),
+  ].filter(Boolean);
 }
 
 function renderSettings() {

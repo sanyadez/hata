@@ -4,6 +4,7 @@
  */
 import type { Activity } from "./activity";
 import type { InstalledApp } from "./apps";
+import { diskLabel, type DiskReport } from "./disks";
 import type { DockerInfo } from "./docker";
 import type { SystemStatus } from "./system";
 
@@ -26,7 +27,7 @@ const MEMORY_WARN = 92;
 const TEMPERATURE_WARN = 85;
 const FAILURE_WINDOW_MS = 24 * 3600 * 1000;
 
-export function attention(input: { system: SystemStatus; docker: DockerInfo; apps: InstalledApp[]; activity: Activity[]; update?: string | null; offsite?: { error: string } | null; now?: number }): AttentionItem[] {
+export function attention(input: { system: SystemStatus; docker: DockerInfo; apps: InstalledApp[]; activity: Activity[]; update?: string | null; offsite?: { error: string } | null; disks?: DiskReport[]; now?: number }): AttentionItem[] {
   const { system, docker, apps, activity } = input;
   const now = input.now ?? Date.now();
   const items: AttentionItem[] = [];
@@ -67,6 +68,12 @@ export function attention(input: { system: SystemStatus; docker: DockerInfo; app
     if (percent >= DISK_WARN) {
       items.push({ id: `disk:${disk.path}`, severity: percent >= DISK_DANGER ? "danger" : "warn", code: "disk", detail: { path: disk.path, percent, free: disk.total - disk.used } });
     }
+  }
+
+  // a disk that says it is in trouble: one line per disk, about the worst thing it reports
+  for (const disk of input.disks ?? []) {
+    const worst = disk.findings.find((f) => f.severity === "danger") ?? disk.findings[0];
+    if (worst) items.push({ id: `smart:${disk.serial || disk.name}`, severity: worst.severity, code: `smart.${worst.code}`, detail: { disk: diskLabel(disk), n: worst.n ?? 0 } });
   }
 
   const memory = system.memory.total ? Math.round((system.memory.used / system.memory.total) * 100) : 0;
