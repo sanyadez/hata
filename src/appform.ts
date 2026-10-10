@@ -37,10 +37,12 @@ export function dumpCompose(compose: Compose): string {
   return Bun.YAML.stringify(compose, null, 2).replace(/[ \t]+$/gm, "") + "\n";
 }
 
-/** Picks a translation out of an `{ en_US: … }` map: the requested language, then English, then any */
+/** Picks a translation out of an `{ en_US: … }` map: `custom`, the requested language, then English, then any */
 export function localize(value: unknown, lang: string): string {
   if (typeof value === "string") return value;
   if (!isObject(value)) return "";
+  // what the user typed over the store's words, the way CasaOS keeps it
+  if (typeof value.custom === "string" && value.custom) return value.custom;
   const entries = Object.entries(value).filter((e): e is [string, string] => typeof e[1] === "string");
   const find = (prefix: string) => entries.find(([k]) => k.toLowerCase().startsWith(prefix))?.[1];
   return find(lang.toLowerCase() + "_") ?? find("en_us") ?? find("en_") ?? entries[0]?.[1] ?? "";

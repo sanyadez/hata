@@ -9,6 +9,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { APP_NAME_RE, appMeta, applyForm, bindSources, buildForm, dumpCompose, normalize, parseCompose, publishedPorts, type AppForm, type AppMeta, type Compose } from "./appform";
+import { applyEdit, blankCompose, readEdit, type AppEdit } from "./appedit";
 import { bus } from "./bus";
 import { DATA_DIR, settings, timezone } from "./config";
 import { record } from "./activity";
@@ -539,6 +540,39 @@ export function applyCompose(name: string, text: unknown, user: string): Job {
     }
     await dc(name, ["up", "-d", "--remove-orphans"], log);
   });
+}
+
+/** The app's compose file as the settings form shows it */
+export function appSettings(name: string, lang: string): AppEdit {
+  assertInstalled(name);
+  const compose = readCompose(name);
+  if (!compose) throw new AppError("app.badCompose", 409, { message: "" });
+  return readEdit(compose, lang);
+}
+
+function editedCompose(compose: Compose, input: unknown, lang: string): Compose {
+  const error = applyEdit(compose, input, lang);
+  if (error) throw new AppError(error);
+  // folders named in the form are made the way an install makes them
+  const copy = structuredClone(compose);
+  normalize(copy, settings.dataRoot);
+  createDataDirs(copy);
+  return compose;
+}
+
+/** Applies the settings form: the answers go into the compose file, which is then applied as if edited by hand */
+export function applySettings(name: string, input: unknown, user: string, lang: string): Job {
+  assertInstalled(name);
+  const compose = structuredClone(readCompose(name));
+  if (!compose) throw new AppError("app.badCompose", 409, { message: "" });
+  return applyCompose(name, dumpCompose(editedCompose(compose, input, lang)), user);
+}
+
+/** Installs an app described in the settings form instead of a compose file */
+export async function installFromSettings(name: unknown, input: unknown, user: string, lang: string): Promise<Job> {
+  assertName(typeof name === "string" ? name : "");
+  if (existsSync(appDir(name as string))) throw new AppError("app.exists", 409);
+  return installCustom(name, dumpCompose(editedCompose(blankCompose(name as string), input, lang)), user);
 }
 
 /** Removes the app; `withData` also deletes its named volumes and `<dataRoot>/AppData/<name>` */

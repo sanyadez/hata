@@ -12,7 +12,7 @@ import { join } from "node:path";
 import { homedir, networkInterfaces } from "node:os";
 import type { Server, ServerWebSocket } from "bun";
 import { recent, record } from "./activity";
-import { AppError, appAction, appDetail, appLogs, appStats, applyCompose, applyStoreUpdate, composeText, getJob, installCustom, installFromStore, listApps, listJobs, onAppRemoved, planStoreUpdate, readCompose, removeApp, storeAppDetail } from "./apps";
+import { AppError, appAction, appDetail, appLogs, appSettings, appStats, applyCompose, applySettings, installFromSettings, applyStoreUpdate, composeText, getJob, installCustom, installFromStore, listApps, listJobs, onAppRemoved, planStoreUpdate, readCompose, removeApp, storeAppDetail } from "./apps";
 import { certificateStates, challengeResponse, ensureCertificates, loadCertificates } from "./acme";
 import { attention } from "./attention";
 import { backupApp, backupOverview, deleteSnapshot, listSnapshots, restoreSnapshot, resumeRestore, runBackups, scheduleBackups, takeServerSnapshot } from "./backup";
@@ -67,6 +67,7 @@ import { dockerInfo, listContainers, watchEvents } from "./docker";
 import { abortUpload, archivePlan, list as listFiles, makeFolder, pinFolder, pinnedFolders, readable, readText, remove as removeFiles, rename as renameFile, summary as filesSummary, transfer, upload, writeText } from "./files";
 import { adoptProject, casaosState, containerDraft, importCount, importList, moveInCasaos, projectDraft, rebuildContainer } from "./import";
 import { accessOf, dropAccess, dropUser, gateTarget, guard, mayOpen, MAX_APP_BODY, page, passToApp, setAccess, startGates, tunnelHandlers } from "./gate";
+import { isPlainObject } from "./fsutil";
 import { localNamesStatus, refreshLocalNames } from "./mdns";
 import { addDevice, CHANNELS, listDevices, notifyStatus, pushKey, removeDevice, sendTest, startNotifications, telegramChats, updateNotify } from "./notify";
 import { appHost, appLabel, classifyHost, clientIp, cookieDomain, domainOf, localDomain, requestHost, requestPort, requestProto, siteDomain } from "./site";
@@ -795,7 +796,9 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
       const job =
         typeof data.store === "string"
           ? await installFromStore(data.store, String(data.name ?? ""), data.form, user.name)
-          : await installCustom(data.name, data.compose, user.name);
+          : isPlainObject(data.settings)
+            ? await installFromSettings(data.name, data.settings, user.name, language(url))
+            : await installCustom(data.name, data.compose, user.name);
       return json({ job: job.id, app: job.app }, 202);
     }
   }
@@ -851,6 +854,8 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
       return json({ store: plan.store, recorded: plan.recorded, exact: plan.exact, changes: plan.changes, compose: dumpCompose(plan.merged) });
     }
     if (sub === "storeupdate" && method === "POST") return json({ job: applyStoreUpdate(name, user.name).id }, 202);
+    if (sub === "settings" && method === "GET") return json({ ...appSettings(name, language(url)), memoryTotal: Math.round(systemStatus().memory.total / 1024 ** 2) });
+    if (sub === "settings" && method === "PUT") return json({ job: applySettings(name, await body(req), user.name, language(url)).id }, 202);
     if (sub === "compose" && method === "GET") return json({ compose: composeText(name) });
     if (sub === "compose" && method === "PUT") return json({ job: applyCompose(name, (await body(req)).compose, user.name).id }, 202);
     if (sub === "logs" && method === "GET") {
