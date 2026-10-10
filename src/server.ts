@@ -12,7 +12,7 @@ import { join } from "node:path";
 import { homedir, networkInterfaces } from "node:os";
 import type { Server, ServerWebSocket } from "bun";
 import { recent, record } from "./activity";
-import { AppError, appAction, appDetail, appLogs, appSettings, appStats, applyCompose, applySettings, installFromSettings, applyStoreUpdate, composeText, getJob, installCustom, installFromStore, listApps, listJobs, onAppRemoved, planStoreUpdate, readCompose, removeApp, storeAppDetail } from "./apps";
+import { AppError, appAction, appDetail, appLogs, appIcon, appSettings, appStats, applyCompose, ICON_MIME, MAX_ICON, removeAppIcon, setAppIcon, applySettings, installFromSettings, applyStoreUpdate, composeText, getJob, installCustom, installFromStore, listApps, listJobs, onAppRemoved, planStoreUpdate, readCompose, removeApp, storeAppDetail } from "./apps";
 import { certificateStates, challengeResponse, ensureCertificates, loadCertificates } from "./acme";
 import { attention } from "./attention";
 import { backupApp, backupOverview, deleteSnapshot, listSnapshots, restoreSnapshot, resumeRestore, runBackups, scheduleBackups, takeServerSnapshot } from "./backup";
@@ -233,7 +233,7 @@ export function memberMay(method: string, path: string, role: Role = "member"): 
   // a guest is a shared account: whoever holds it must not be able to lock the others out of it
   if (path.startsWith("/api/account/")) return role !== "guest";
   if (method !== "GET") return false;
-  if (["/api/events", "/api/overview", "/api/apps"].includes(path) || /^\/api\/apps\/[a-z0-9_-]+(\/stats)?$/.test(path)) return true;
+  if (["/api/events", "/api/overview", "/api/apps"].includes(path) || /^\/api\/apps\/[a-z0-9_-]+(\/(stats|icon))?$/.test(path)) return true;
   return role === "member" && (path === "/api/store" || /^\/api\/store\/[a-z0-9-]+\/apps\/[a-z0-9_-]+$/.test(path));
 }
 
@@ -861,6 +861,21 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
       return json({ store: plan.store, recorded: plan.recorded, exact: plan.exact, changes: plan.changes, compose: dumpCompose(plan.merged) });
     }
     if (sub === "storeupdate" && method === "POST") return json({ job: applyStoreUpdate(name, user.name).id }, 202);
+    if (sub === "icon" && method === "GET") {
+      const icon = appIcon(name);
+      if (!icon) return fail(404, "request.notFound");
+      // an SVG can carry a script: it is shown as a picture, and opened by itself it may do nothing
+      return new Response(Bun.file(icon.path), { headers: { ...SECURITY_HEADERS, "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox", "content-type": ICON_MIME[icon.type], "cache-control": "private, max-age=31536000, immutable" } });
+    }
+    if (sub === "icon" && method === "PUT") {
+      if (!(Number(req.headers.get("content-length")) <= MAX_ICON)) return fail(413, "icon.tooLarge", { max: MAX_ICON / 1024 / 1024 });
+      setAppIcon(name, new Uint8Array(await req.arrayBuffer()));
+      return json({ icon: appSettings(name, language(url)).ownIcon });
+    }
+    if (sub === "icon" && method === "DELETE") {
+      removeAppIcon(name);
+      return json({ icon: "" });
+    }
     if (sub === "settings" && method === "GET") return json({ ...appSettings(name, language(url)), memoryTotal: Math.round(systemStatus().memory.total / 1024 ** 2) });
     if (sub === "settings" && method === "PUT") return json({ job: applySettings(name, await body(req), user.name, language(url)).id }, 202);
     if (sub === "compose" && method === "GET") return json({ compose: composeText(name) });

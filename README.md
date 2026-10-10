@@ -46,7 +46,8 @@ Early development. What works today:
   policy, capabilities, host name — for every service of the app, and services are added and removed as
   tabs. It edits the same compose file: what the form does not show stays as written. A custom app can be
   described in this form instead of a compose file, and the form can be filled in from a `docker run`
-  command pasted from an app's instructions;
+  command pasted from an app's instructions. An app's icon can be a picture of your own: it is kept next
+  to the compose file as `icon.*` and used instead of the store's;
 - backups: a snapshot of an app (compose file, its folders, its Docker volumes) as a plain `tar.gz`, daily
   on a schedule and before every update, restore to any snapshot — also of an app that was removed;
 - a backup of the whole server: with every run Hata's own state (settings, users, the dashboard, the

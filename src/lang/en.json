@@ -790,7 +790,7 @@
   "edit.lead": "The app's compose file as a form. What the form does not show stays in the file as it is; comments in the file are not kept. The Compose tab has the whole file.",
   "edit.broken": "The compose file of this app cannot be read as YAML — fix it on the Compose tab.",
   "edit.title": "Title",
-  "edit.icon": "Icon URL",
+  "edit.icon": "Icon",
   "edit.webUi": "Web UI",
   "edit.webUiHint": "Where the tile of the app leads: the address, the port and the path. Leave the address empty for this server and the port empty for an app without a page.",
   "edit.webHost": "Address",
@@ -853,5 +853,13 @@
   "error.run.notRun": "This is not a docker run command.",
   "error.run.noImage": "The command names no image.",
   "edit.removeServiceTitle": "Remove the service {name}?",
-  "edit.removeServiceLead": "It leaves the form with everything set for it. Its container is stopped and removed once the form is saved; its folders and volumes stay."
+  "edit.removeServiceLead": "It leaves the form with everything set for it. Its container is stopped and removed once the form is saved; its folders and volumes stay.",
+  "edit.iconUrl": "Icon address",
+  "edit.iconUpload": "Upload",
+  "edit.iconReplace": "Replace",
+  "edit.iconRemove": "Remove",
+  "edit.iconHint": "The address of a picture, or a picture of your own: PNG, JPEG, WebP, AVIF or SVG, up to 1 MB.",
+  "edit.iconOwn": "Your own picture is used; it is kept next to the app's compose file as icon.*. Remove it to go back to the address.",
+  "error.icon.tooLarge": "The picture is too large: {max} MB at most.",
+  "error.icon.notImage": "This is not a picture Hata can show: PNG, JPEG, WebP, AVIF or SVG."
 }

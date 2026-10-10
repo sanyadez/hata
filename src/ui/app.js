@@ -1880,9 +1880,81 @@ function serviceForm(service, memoryTotal) {
 
 const blankService = (name) => ({ name, image: "", network: "", ports: [], volumes: [], envs: [], devices: [], command: [], privileged: false, memory: 0, cpuShares: 0, restart: "unless-stopped", capAdd: [], hostname: "" });
 
-function appSettingsForm(model, memoryTotal) {
+/** Sends a picture as the app's own icon; returns its address */
+async function uploadAppIcon(name, picture) {
+  const res = await fetch(`/api/apps/${name}/icon`, { method: "PUT", body: picture, headers: { "content-type": "application/octet-stream" } });
+  const data = await res.json().catch(() => null);
+  if (!res.ok) throw new ApiError(res.status, data?.error?.code ?? "request.failed", data?.error?.detail ?? {});
+  return data.icon;
+}
+
+/**
+ * The icon of the form: an address, or a picture of one's own, which wins. For an installed app (`app`)
+ * the picture is saved at once; for an app that is not there yet it waits in `picked` until it is.
+ */
+function iconField(model, app) {
+  const url = h("input", { value: model.icon, type: "url", spellcheck: false, class: "mono", placeholder: "https://…", "aria-label": t("edit.iconUrl"), oninput: () => paint() });
+  const file = h("input", { type: "file", accept: "image/png,image/jpeg,image/webp,image/avif,image/svg+xml", hidden: true });
+  const preview = h("span", { class: "icon-preview" });
+  const actions = h("span", { class: "pair" });
+  const note = h("span", { class: "muted small" });
+  const field = { el: null, url, picked: null };
+  let own = model.ownIcon ?? "";
+  const paint = () => {
+    const src = own || url.value.trim();
+    put(preview, src ? h("img", { src, alt: "", referrerPolicy: "no-referrer", onerror: (e) => e.target.remove() }) : icon("image"));
+    put(actions, button(t(own ? "edit.iconReplace" : "edit.iconUpload"), { class: "small", onclick: () => file.click() }, "upload"), own && button(t("edit.iconRemove"), { class: "small ghost", onclick: remove }, "trash"));
+    note.textContent = t(own ? "edit.iconOwn" : "edit.iconHint");
+    note.classList.remove("error");
+  };
+  const fail = (e) => {
+    note.textContent = errorText(e);
+    note.classList.add("error");
+  };
+  const remove = async () => {
+    try {
+      if (app) await api("DELETE", `/api/apps/${app}/icon`);
+      field.picked = null;
+      own = "";
+      paint();
+      if (app) void loadApp(true);
+    } catch (e) {
+      fail(e);
+    }
+  };
+  file.addEventListener("change", async () => {
+    const picture = file.files[0];
+    file.value = "";
+    if (!picture) return;
+    try {
+      if (app) {
+        own = await uploadAppIcon(app, picture);
+        void loadApp(true);
+      } else {
+        if (picture.size > 1024 * 1024) throw new ApiError(413, "icon.tooLarge", { max: 1 });
+        field.picked = picture;
+        // shown from memory until there is an app to keep it
+        own = await new Promise((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => resolve(reader.result);
+          reader.onerror = () => reject(new ApiError(400, "icon.notImage"));
+          reader.readAsDataURL(picture);
+        });
+      }
+      paint();
+    } catch (e) {
+      fail(e);
+    }
+  });
+  paint();
+  field.el = h("div", { class: "form-row" }, h("span", { class: "form-label" }, t("edit.icon")), h("div", { class: "form-control" }, h("div", { class: "icon-field" }, preview, url, actions, file), note));
+  return field;
+}
+
+function appSettingsForm(model, memoryTotal, app) {
   const title = h("input", { value: model.title, maxLength: 80 });
-  const iconUrl = h("input", { value: model.icon, type: "url", spellcheck: false, class: "mono", placeholder: "https://…" });
+  const iconField_ = iconField(model, app);
+  const iconUrl = iconField_.url;
   const scheme = choice(model.web.scheme, [["http", "http://"], ["https", "https://"]], t("edit.webUi"));
   const host = h("input", { value: model.web.host, spellcheck: false, autocapitalize: "none", class: "mono", placeholder: location.hostname, "aria-label": t("edit.webHost") });
   const port = h("input", { value: model.web.port, inputMode: "numeric", class: "short mono", placeholder: t("edit.port"), "aria-label": t("edit.port") });
@@ -1938,11 +2010,12 @@ function appSettingsForm(model, memoryTotal) {
       { class: "stack edit-form" },
       h("datalist", { id: "capabilities" }, CAPABILITIES.map((cap) => h("option", { value: cap }))),
       formRow(t("edit.title"), title),
-      formRow(t("edit.icon"), iconUrl),
+      iconField_.el,
       formRow(t("edit.webUi"), h("span", { class: "web-address" }, scheme, host, h("span", { class: "muted" }, ":"), port, path), t("edit.webUiHint")),
       h("div", { class: "form-row services-row" }, h("span", { class: "form-label" }, t("edit.services")), tabs),
       body,
     ),
+    pickedIcon: () => iconField_.picked,
     value: () => ({ title: title.value, icon: iconUrl.value, web: { scheme: scheme.value, host: host.value, port: port.value, path: path.value }, services: services.map((service) => ({ name: service.name, ...service.form.value() })) }),
   };
 }
@@ -1954,7 +2027,7 @@ async function appSettingsTab(app, box) {
   } catch (e) {
     return box.replaceChildren(h("p", { class: "error" }, e.code === "app.badCompose" ? t("edit.broken") : errorText(e)));
   }
-  const form = appSettingsForm(model, model.memoryTotal);
+  const form = appSettingsForm(model, model.memoryTotal, app.name);
   const error = h("p", { class: "error", role: "alert" });
   box.replaceChildren(
     h(
@@ -3267,7 +3340,11 @@ function customDialog() {
             for (const service of settings.services) service.name ||= app;
             const res = await api("POST", `/api/apps?lang=${state.lang}`, asForm ? { name: app, settings } : { name: app, compose: area.value });
             dialog.close();
-            jobDialog(res.job, "install", (asForm && settings.title) || app, () => go(`#/apps/${app}`));
+            const picture = asForm ? form.pickedIcon() : null;
+            jobDialog(res.job, "install", (asForm && settings.title) || app, async () => {
+              if (picture) await uploadAppIcon(app, picture).catch((err) => toast(errorText(err), "error"));
+              go(`#/apps/${app}`);
+            });
           } catch (err) {
             error.textContent = errorText(err);
           }

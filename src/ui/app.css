@@ -721,3 +721,7 @@ input[type="range"] { accent-color: var(--accent); width: 100%; }
 @media (max-width: 760px) {
   .edit-form .form-row { grid-template-columns: minmax(0, 1fr); }
 }
+.icon-field { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.icon-field > input { flex: 1; min-width: 180px; }
+.icon-preview { display: grid; place-items: center; flex: none; width: 38px; height: 38px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg); color: var(--faint); overflow: hidden; }
+.icon-preview img { width: 100%; height: 100%; object-fit: contain; }

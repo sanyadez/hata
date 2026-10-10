@@ -6,11 +6,12 @@
  * store, and the store's file it was installed from — lies next to it in `hata.yml`, which compose never
  * reads; a newer store version is merged into the app from there (`merge.ts`).
  */
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { APP_NAME_RE, appMeta, applyForm, bindSources, buildForm, dumpCompose, normalize, parseCompose, publishedPorts, type AppForm, type AppMeta, type Compose } from "./appform";
 import { applyEdit, blankCompose, readEdit, type AppEdit } from "./appedit";
 import { bus } from "./bus";
+import { IMAGE_MIME, imageType } from "./wallpapers";
 import { DATA_DIR, settings, timezone } from "./config";
 import { record } from "./activity";
 import { compose as runCompose, composeCmd, containerStats, listContainers, PROJECT_LABEL, SERVICE_LABEL, type ContainerStats, type ContainerSummary } from "./docker";
@@ -119,6 +120,56 @@ export async function dc(name: string, args: string[], log: Log): Promise<void> 
   if (code !== 0) throw new Error(output.split("\n").slice(-3).join("\n") || `docker compose exited with ${code}`);
 }
 
+// --- The app's own icon ---------------------------------------------------------------------------
+// A picture uploaded for the app lies next to its compose file as `icon.<type>`, whatever the file was
+// called, and wins over the address the compose file names.
+
+export const ICON_MIME = { ...IMAGE_MIME, svg: "image/svg+xml" } as const;
+export const MAX_ICON = 1024 * 1024;
+type IconType = keyof typeof ICON_MIME;
+
+/** What kind of picture an icon is; SVG is text, so it is told by its opening tag */
+export function iconType(bytes: Uint8Array): IconType | "" {
+  const known = imageType(bytes.subarray(0, 16));
+  if (known) return known;
+  const head = new TextDecoder().decode(bytes.subarray(0, 1024)).replace(/^\uFEFF/, "").trimStart();
+  return /^(<\?xml[^>]*>\s*)?(<!--[\s\S]*?-->\s*)*(<!DOCTYPE svg[^>]*>\s*)?<svg[\s>]/i.test(head) ? "svg" : "";
+}
+
+export function appIcon(name: string): { path: string; type: IconType; mtime: number } | null {
+  for (const type of Object.keys(ICON_MIME) as IconType[]) {
+    const path = join(appDir(name), `icon.${type}`);
+    try {
+      return { path, type, mtime: Math.round(statSync(path).mtimeMs) };
+    } catch {}
+  }
+  return null;
+}
+
+/** The address of the uploaded icon for the page; it changes with the file, so a new one is not hidden by the cache */
+const ownIconUrl = (name: string): string => {
+  const icon = appIcon(name);
+  return icon ? `/api/apps/${name}/icon?v=${icon.mtime}` : "";
+};
+
+export function removeAppIcon(name: string): void {
+  assertInstalled(name);
+  for (const type of Object.keys(ICON_MIME)) rmSync(join(appDir(name), `icon.${type}`), { force: true });
+  parsed.delete(name);
+  bus.publish("apps");
+}
+
+export function setAppIcon(name: string, bytes: Uint8Array): void {
+  assertInstalled(name);
+  if (bytes.length > MAX_ICON) throw new AppError("icon.tooLarge", 413, { max: MAX_ICON / 1024 / 1024 });
+  const type = iconType(bytes);
+  if (!type) throw new AppError("icon.notImage");
+  // one icon per app: a PNG must not stay behind a new SVG
+  for (const other of Object.keys(ICON_MIME)) rmSync(join(appDir(name), `icon.${other}`), { force: true });
+  writeFileSync(join(appDir(name), `icon.${type}`), bytes, { mode: 0o644 });
+  bus.publish("apps");
+}
+
 // --- Reading ----------------------------------------------------------------------------------------
 
 const parsed = new Map<string, { mtime: number; compose: Compose | null }>();
@@ -185,7 +236,7 @@ function describeApp(name: string, containers: ContainerSummary[] | null, lang: 
   return {
     name,
     title: meta.title || name,
-    icon: meta.icon,
+    icon: ownIconUrl(name) || meta.icon,
     // an app without store metadata still gets a working tile: its first published TCP port
     port: meta.port || firstPublishedPort(compose),
     index: meta.index,
@@ -550,11 +601,11 @@ export function applyCompose(name: string, text: unknown, user: string): Job {
 }
 
 /** The app's compose file as the settings form shows it */
-export function appSettings(name: string, lang: string): AppEdit {
+export function appSettings(name: string, lang: string): AppEdit & { ownIcon: string } {
   assertInstalled(name);
   const compose = readCompose(name);
   if (!compose) throw new AppError("app.badCompose", 409, { message: "" });
-  return readEdit(compose, lang);
+  return { ...readEdit(compose, lang), ownIcon: ownIconUrl(name) };
 }
 
 function editedCompose(compose: Compose, input: unknown, lang: string): Compose {
