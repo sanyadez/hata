@@ -844,7 +844,7 @@
   "edit.services": "Services",
   "edit.mainService": "main",
   "edit.addService": "Add a service",
-  "edit.removeService": "Remove this service",
+  "edit.removeService": "Remove the service",
   "run.import": "From a docker run command",
   "run.title": "Fill in from a docker run command",
   "run.lead": "Paste the command from the app's instructions. It is only read into the form — nothing is started until you install.",

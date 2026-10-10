@@ -711,6 +711,12 @@ input[type="range"] { accent-color: var(--accent); width: 100%; }
 .modes { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .mode { padding: 7px 14px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: transparent; color: var(--muted); font: 500 14px var(--font-body); cursor: pointer; }
 .mode:hover { color: var(--text); }
+.tab-mode { display: inline-flex; align-items: center; padding: 0; }
+.mode-name { padding: 7px 14px; border: 0; background: transparent; color: inherit; font: inherit; cursor: pointer; }
+.mode-name:not(:last-child) { padding-right: 6px; }
+.mode-x { display: grid; place-items: center; width: 24px; height: 24px; margin-right: 5px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--muted); cursor: pointer; }
+.mode-x:hover { color: var(--danger); background: color-mix(in srgb, var(--danger) 14%, transparent); }
+.mode-x .ico { width: 14px; height: 14px; }
 .mode.active { background: var(--surface-2, var(--surface)); border-color: var(--accent); color: var(--text); }
 @media (max-width: 760px) {
   .edit-form .form-row { grid-template-columns: minmax(0, 1fr); }

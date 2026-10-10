@@ -844,7 +844,7 @@
   "edit.services": "Сервіси",
   "edit.mainService": "основний",
   "edit.addService": "Додати сервіс",
-  "edit.removeService": "Прибрати цей сервіс",
+  "edit.removeService": "Прибрати сервіс",
   "run.import": "З команди docker run",
   "run.title": "Заповнити з команди docker run",
   "run.lead": "Вставте команду з інструкції до застосунку. Вона лише читається у форму — нічого не запуститься, доки ви не встановите.",
