@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { addressFor, answerQuery, isLocalName, parseQuery } from "../src/mdns";
+import { addressFor, answerQuery, answersItself, isLocalName, parseQuery } from "../src/mdns";
 
 /** A query as a resolver sends it: one question per name, optionally with the "answer me alone" bit */
 function query(names: [string, number][], id = 0, unicast = false): Uint8Array {
@@ -29,6 +29,8 @@ test("a query is read: names in any case, compressed names, the unicast bit; ans
 
 test("only the name itself and one label under it are ours", () => {
   expect(["hata.local", "memos.hata.local", "a.b.hata.local", "nothata.local", "other.local", "local"].map(ours)).toEqual([true, true, false, false, false, false]);
+  // multicast DNS knows no other ending
+  expect(["hata.local", "hata.lan", "local.example.com", ""].map(answersItself)).toEqual([true, false, false, false]);
 });
 
 test("an address question is answered with this machine's address, and nothing else is answered", () => {

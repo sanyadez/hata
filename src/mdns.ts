@@ -1,12 +1,14 @@
 /**
  * Names on the home network without a DNS server: Hata answers multicast DNS (RFC 6762) for
  * `<name>.local` and for every `<app>.<name>.local` with the address of this machine. Phones and
- * computers ask the whole network for names ending in `.local`, so nothing is set up on them.
+ * computers ask the whole network for names ending in `.local`, so nothing is set up on them. A name
+ * with another ending (`hata.lan`) is not ours to answer: the home's DNS has to know it.
  *
  * The packets are pure functions; the responder below them listens on UDP 5353 next to whatever else
  * does (Avahi, systemd-resolved) and answers only for its own names.
  */
 import { createSocket, type Socket } from "node:dgram";
+import { lookup } from "node:dns/promises";
 import { networkInterfaces } from "node:os";
 import { settings } from "./config";
 import { localDomain } from "./site";
@@ -141,6 +143,9 @@ export function homeLinks(): Link[] {
   return Object.entries(networkInterfaces()).flatMap(([name, list]) => (INSIDE.test(name) ? [] : (list ?? []).filter((a) => a.family === "IPv4" && !a.internal).map((a) => ({ address: a.address, netmask: a.netmask }))));
 }
 
+/** Multicast DNS is for names ending in `.local` only: any other name is the business of the home's DNS */
+export const answersItself = (domain: string): boolean => domain.endsWith(".local");
+
 let socket: Socket | null = null;
 let listening = false;
 let failure = "";
@@ -199,9 +204,9 @@ function onPacket(packet: Uint8Array, remote: { address: string; port: number })
   }
 }
 
-/** Brings the responder in line with the settings: listening when local names are on, silent otherwise */
+/** Brings the responder in line with the settings: listening when there is a name of ours to answer for */
 export function refreshLocalNames(): void {
-  if (!settings.local.enabled) {
+  if (!answersItself(localDomain())) {
     socket?.close();
     socket = null;
     listening = false;
@@ -234,6 +239,19 @@ export function refreshLocalNames(): void {
   upkeep ??= setInterval(() => (socket ? join() : refreshLocalNames()), 60_000);
 }
 
-export function localNamesStatus(): { enabled: boolean; name: string; domain: string; listening: boolean; error: string; addresses: string[] } {
-  return { enabled: settings.local.enabled, name: settings.local.name, domain: localDomain(), listening, error: failure, addresses: homeLinks().map((link) => link.address) };
+/** Where a name leads according to the DNS this machine uses — usually the router's, the same the home asks */
+async function leadsHere(host: string, addresses: string[]): Promise<{ host: string; ok: boolean; found: string[] }> {
+  const found = await lookup(host, { family: 4, all: true }).then((list) => list.map((one) => one.address), () => []);
+  return { host, ok: found.some((address) => addresses.includes(address)), found };
+}
+
+/**
+ * How the name on the home network is doing. One we answer for ourselves: whether the responder listens.
+ * Any other: whether it, and a made-up app name under it, lead to this machine.
+ */
+export async function localNamesStatus() {
+  const domain = localDomain();
+  const addresses = homeLinks().map((link) => link.address);
+  const own = answersItself(domain);
+  return { enabled: settings.local.enabled, name: settings.local.name, domain, own, listening, error: failure, addresses, checks: domain && !own ? await Promise.all([leadsHere(domain, addresses), leadsHere(`hata-check.${domain}`, addresses)]) : [] };
 }

@@ -3466,7 +3466,7 @@ function appearanceSection(error) {
 function localNameCard() {
   const local = state.settings.local;
   const enabled = h("input", { type: "checkbox", checked: local.enabled });
-  const name = h("input", { value: local.name, maxLength: 63, spellcheck: false, autocapitalize: "none", class: "short mono", required: true, "aria-label": t("local.name") });
+  const name = h("input", { value: local.name, maxLength: 253, placeholder: "hata.local", spellcheck: false, autocapitalize: "none", class: "mono", required: true, "aria-label": t("local.name") });
   const error = h("p", { class: "error", role: "alert" });
   const status = h("div", { class: "stack" });
   let alive = true;
@@ -3479,12 +3479,17 @@ function localNameCard() {
     status.replaceChildren(
       ...(!s.enabled
         ? []
-        : !s.listening
-          ? [h("p", { class: "error" }, t("local.failed", { message: s.error || "…" }))]
-          : [
+        : !s.own
+          ? [
+              h("p", { class: "muted small" }, t("local.otherLead", { domain: s.domain, address: s.addresses[0] ?? "—" })),
+              ...s.checks.map((c) => h("div", { class: "activity-item" }, icon(c.ok ? "check" : "x", c.ok ? "ok" : "danger"), h("div", { class: "grow" }, h("div", null, c.ok ? address(c.host) : h("span", { class: "mono" }, c.host)), h("div", { class: "muted small" }, c.ok ? t("local.leadsHere") : c.found.length ? t("local.leadsElsewhere", { addresses: c.found.join(", ") }) : t("local.unknown"))))),
+            ]
+          : !s.listening
+            ? [h("p", { class: "error" }, t("local.failed", { message: s.error || "…" }))]
+            : [
               h("div", { class: "activity-item" }, icon("check", "ok"), h("div", { class: "grow" }, h("div", null, address(s.domain)), h("div", { class: "muted small" }, t("local.answers", { addresses: s.addresses.join(", ") || "—" })))),
-              (state.overview?.apps ?? []).some((a) => a.port) && h("p", { class: "muted small" }, t("local.apps", { example: `${(state.overview.apps.find((a) => a.port).name).replace(/_/g, "-")}.${s.domain}${port}` })),
-            ]),
+                (state.overview?.apps ?? []).some((a) => a.port) && h("p", { class: "muted small" }, t("local.apps", { example: `${(state.overview.apps.find((a) => a.port).name).replace(/_/g, "-")}.${s.domain}${port}` })),
+              ]),
     );
   };
   void paint();
@@ -3509,7 +3514,7 @@ function localNameCard() {
     h("h2", null, t("local.title")),
     h("p", { class: "muted small" }, t("local.lead")),
     settingRow(t("local.enabled"), t("local.enabledHint"), enabled),
-    settingRow(t("local.name"), t("local.nameHint"), h("span", { class: "with-icon" }, name, h("span", { class: "mono muted" }, ".local"))),
+    settingRow(t("local.name"), t("local.nameHint"), name),
     status,
     error,
     h("footer", null, h("button", { class: "btn primary" }, t("settings.save"))),

@@ -32,8 +32,8 @@ export function clientIp(req: Request, server: Server): string {
 /** The domain in use, or "" when Hata is reached by address only */
 export const siteDomain = (): string => (settings.https.mode === "off" ? "" : settings.https.domain);
 
-/** The name on the home network, answered over multicast DNS; "" when that is switched off */
-export const localDomain = (): string => (settings.local.enabled ? `${settings.local.name}.local` : "");
+/** The name on the home network; "" when that is switched off */
+export const localDomain = (): string => (settings.local.enabled ? settings.local.name : "");
 
 /** The domain of ours a host name belongs to — the one that is set, or the local one; "" for an address */
 export function domainOf(host: string): string {

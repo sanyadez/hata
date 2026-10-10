@@ -698,7 +698,7 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
     }
   }
 
-  if (path === "/api/local" && method === "GET") return json({ ...localNamesStatus(), port: listenAddress().port });
+  if (path === "/api/local" && method === "GET") return json({ ...(await localNamesStatus()), port: listenAddress().port });
 
   if (path === "/api/https" && method === "GET") {
     return json({ mode: settings.https.mode, listening: !!httpsServer, error: httpsError, httpPort: listenAddress().port, certificates: certificateStates(await httpsNames()) });

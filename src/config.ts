@@ -48,7 +48,10 @@ export interface Settings {
   /** Who may open which app, and which apps are behind Hata's sign-in; an app not listed is open to members */
   access: Record<string, AppAccess>;
   https: HttpsSettings;
-  /** The name on the home network: `<name>.local` and `<app>.<name>.local`, answered over multicast DNS */
+  /**
+   * The name on the home network, and `<app>.<name>` for every app. One ending in `.local` Hata answers
+   * for itself over multicast DNS; any other (`hata.lan`) the home's own DNS has to point here.
+   */
   local: { enabled: boolean; name: string };
   /** Folders put on the dashboard from the file manager, absolute paths */
   folders: string[];
@@ -108,11 +111,22 @@ const DEFAULTS: Settings = {
   backup: { enabled: false, time: "03:00", keep: 7, dir: "", beforeUpdate: true, exclude: [] },
   access: {},
   https: { mode: "off", domain: "", email: "" },
-  local: { enabled: true, name: "hata" },
+  local: { enabled: true, name: "hata.local" },
   folders: [],
   dashboard: cleanLayout(null),
   appearance: DEFAULT_APPEARANCE,
 };
+
+/** A host name with at least two labels: letters, digits and hyphens */
+export const DOMAIN_RE = /^(?=.{4,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
+
+/** The name on the home network as it is kept: a whole host name; a single word means `<word>.local` */
+export function localName(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const name = value.trim().toLowerCase().replace(/\.$/, "");
+  const whole = name.includes(".") ? name : name + ".local";
+  return DOMAIN_RE.test(whole) ? whole : null;
+}
 
 const saved = readJsonFile<Partial<Settings>>(SETTINGS_FILE, {}, isPlainObject);
 
@@ -128,6 +142,7 @@ export const settings: Settings = {
   https: { ...DEFAULTS.https, ...(isPlainObject(saved.https) ? saved.https : {}) },
   local: { ...DEFAULTS.local, ...(isPlainObject(saved.local) ? saved.local : {}) },
 };
+settings.local.name = localName(settings.local.name) ?? DEFAULTS.local.name;
 
 /** Writes the settings after a change made in place (the access rules are edited that way) */
 export function saveSettings(): void {
@@ -137,12 +152,6 @@ export function saveSettings(): void {
 export function timezone(): string {
   return settings.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
 }
-
-/** One label of a host name: what the server is called on the home network, before `.local` */
-export const LOCAL_NAME_RE = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
-
-/** A host name with at least two labels: letters, digits and hyphens */
-export const DOMAIN_RE = /^(?=.{4,253}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/;
 
 /** Validates and applies a partial update; returns an error code or null */
 export function updateSettings(patch: Record<string, unknown>): string | null {
@@ -225,8 +234,8 @@ export function updateSettings(patch: Record<string, unknown>): string | null {
     const local = { ...next.local };
     if ("enabled" in l) local.enabled = l.enabled === true;
     if ("name" in l) {
-      const name = typeof l.name === "string" ? l.name.trim().toLowerCase().replace(/\.local$/, "") : "";
-      if (!LOCAL_NAME_RE.test(name)) return "settings.badLocalName";
+      const name = localName(l.name);
+      if (!name) return "settings.badLocalName";
       local.name = name;
     }
     next.local = local;
