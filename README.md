@@ -90,11 +90,17 @@ Early development. What works today:
   phone or computer (a notification from the browser, when Hata is opened over HTTPS), in Telegram through
   a bot of your own, in an ntfy topic, or as a webhook for your own automation. Each problem is told once,
   after it has lasted a minute and a half, in the words of the home page;
+- an MCP server for AI agents: an agent that speaks MCP can say why an app is down (state of the
+  containers, the tail of the log and the likely causes in one answer), update apps, install from the store,
+  take and restore snapshots. It connects with an access key made in the settings, and a key has one of
+  three levels — look, operate, everything; no level reaches users, passwords, files or a shell. Secrets in
+  compose files are hidden from keys that may not change them, and what an agent did is in the activity log
+  under the key's name;
 - updates of Hata itself from the web UI: a newer release is downloaded, checked against its checksums and
   started; if it does not come up, the previous version is put back by itself. Apps keep running meanwhile;
 - English and Ukrainian UI, light and dark, phone-friendly.
 
-Not there yet: wildcard certificates (DNS challenge), a trash and share links for files.
+Not there yet: wildcard certificates (DNS challenge), share links for files.
 
 ## Install
 

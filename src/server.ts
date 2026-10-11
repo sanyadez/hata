@@ -12,6 +12,7 @@ import { join } from "node:path";
 import { homedir, networkInterfaces } from "node:os";
 import type { Server, ServerWebSocket } from "bun";
 import { recent, record } from "./activity";
+import { agentUser, createKey, keyOf, listKeys, removeKey } from "./agents";
 import { AppError, appAction, appDetail, appLogs, appIcon, appSettings, appStats, applyCompose, ICON_MIME, MAX_ICON, removeAppIcon, setAppIcon, applySettings, installFromSettings, applyStoreUpdate, composeText, getJob, installCustom, installFromStore, listApps, listJobs, onAppRemoved, planStoreUpdate, readCompose, removeApp, storeAppDetail } from "./apps";
 import { certificateStates, challengeResponse, ensureCertificates, loadCertificates } from "./acme";
 import { attention } from "./attention";
@@ -74,6 +75,8 @@ import { accessOf, dropAccess, dropUser, gateTarget, guard, mayOpen, MAX_APP_BOD
 import { parseDockerRun } from "./dockerrun";
 import { cannotMove, finishMove, moveState } from "./relocate";
 import { isPlainObject } from "./fsutil";
+import { mcpResponse } from "./mcp";
+import { instructions as mcpInstructions, TOOLS } from "./mcptools";
 import { localNamesStatus, refreshLocalNames } from "./mdns";
 import { addDevice, CHANNELS, listDevices, notifyStatus, pushKey, removeDevice, sendTest, startNotifications, telegramChats, updateNotify } from "./notify";
 import { appHost, appLabel, classifyHost, clientIp, cookieDomain, domainOf, localDomain, requestHost, requestPort, requestProto, siteDomain } from "./site";
@@ -603,6 +606,25 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
   if (invite && method === "DELETE") return revokeInvite(invite[1]!) ? json({ ok: true }) : fail(404, "invite.invalid");
   if (path === "/api/signins" && method === "GET") return json(listSignIns());
 
+  // ---- access keys of agents (the MCP server) ----
+  if (path === "/api/agents") {
+    if (method === "GET") return json(listKeys());
+    if (method === "POST") {
+      const data = await body(req);
+      const made = createKey(data.name, data.level, user.name);
+      if (typeof made === "string") return fail(made === "agents.nameTaken" ? 409 : 400, made);
+      record("agents.create", { user: user.name, detail: made.info.name });
+      return json(made, 201);
+    }
+  }
+  const agent = /^\/api\/agents\/([0-9a-f-]{36})$/.exec(path);
+  if (agent && method === "DELETE") {
+    const gone = removeKey(agent[1]!);
+    if (!gone) return fail(404, "agents.notFound");
+    record("agents.remove", { user: user.name, detail: gone.name });
+    return json({ ok: true });
+  }
+
   // ---- who may open what ----
   if (path === "/api/access" && method === "GET") {
     const apps = (await listApps(language(url))).map((app) => {
@@ -967,6 +989,19 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
 
 const MAX_API_BODY = 2 * 1024 * 1024;
 
+/**
+ * The MCP server, for agents. It is not part of `/api/`: nothing here goes by a session cookie, so a
+ * page in somebody's browser has no way in — only the holder of an access key, sent as a Bearer token.
+ */
+async function mcp(req: Request, server: Server): Promise<Response> {
+  const key = keyOf(req, clientIp(req, server));
+  if (!key) return new Response(JSON.stringify({ error: "An access key is required: Authorization: Bearer <key>. Keys are made in Hata, Settings → Agents." }), { status: 401, headers: { "content-type": "application/json", "www-authenticate": "Bearer", "cache-control": "no-store" } });
+  if (Number(req.headers.get("content-length") ?? 0) > MAX_API_BODY) return new Response(null, { status: 413 });
+  // a tool waits for an operation for half a minute; the default idle timeout would cut the answer
+  server.timeout(req, 120);
+  return mcpResponse(req, TOOLS, { name: key.name, level: key.level, user: agentUser(key) }, { version: VERSION, instructions: mcpInstructions });
+}
+
 /** A file name for the Content-Disposition header, whatever letters it has */
 function disposition(kind: "inline" | "attachment", name: string): string {
   return `${kind}; filename="${name.replace(/[^\x20-\x7e]|["\\]/g, "_")}"; filename*=UTF-8''${encodeURIComponent(name).replace(/['()*]/g, (c) => "%" + c.charCodeAt(0).toString(16).toUpperCase())}`;
@@ -1179,6 +1214,7 @@ async function handle(req: Request, server: Server): Promise<Response> {
   if (url.pathname === "/.well-known/hata-check") return json({ instance: INSTANCE, host: requestHost(req), proto: requestProto(req) });
   const host = classifyHost(requestHost(req));
   if (host.kind === "app") return serveApp(req, server, host.label);
+  if (url.pathname === "/mcp") return mcp(req, server);
   if (!url.pathname.startsWith("/api/")) {
     if (req.method !== "GET" && req.method !== "HEAD") return fail(405, "request.notFound");
     return serveStatic(req, url.pathname) ?? new Response("Not found", { status: 404, headers: SECURITY_HEADERS });

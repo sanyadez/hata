@@ -89,7 +89,8 @@ export interface ContainerInspect {
   Name: string;
   /** Id of the image the container was created from */
   Image: string;
-  State: { Running: boolean };
+  State: { Running: boolean; Status?: string; ExitCode?: number; OOMKilled?: boolean; Error?: string; StartedAt?: string; FinishedAt?: string; Health?: { Status?: string } | null };
+  RestartCount?: number;
   Config: {
     Image: string;
     Hostname?: string;

@@ -73,6 +73,7 @@ const ICONS = {
   pin: "M12 17v5M8 3h8l-1 6 3 4H6l3-4z",
   share: "M18 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM6 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM18 22a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM8.6 13.5l6.8 4M15.4 6.5l-6.8 4",
   link: "M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1",
+  key: "M8 16a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM12 12h9M18 12v3M21 12v2",
 };
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -263,6 +264,7 @@ const state = {
   account: null,
   users: null,
   invites: null,
+  agents: null,
   access: null,
   signIns: null,
   backups: null,
@@ -1391,7 +1393,7 @@ function activityItem(entry) {
   const failed = outcome === "failed";
   const key = "activity." + entry.code;
   const title = state.overview?.apps.find((a) => a.name === entry.app)?.title ?? entry.app ?? "";
-  const meta = [ago(entry.ts), entry.user && group !== "auth" ? (entry.user === "schedule" ? t("activity.bySchedule") : entry.user === "restore" ? t("activity.byRestore") : t("activity.by", { user: entry.user })) : null, group === "auth" ? entry.detail : null].filter(Boolean).join(" · ");
+  const meta = [ago(entry.ts), entry.user && group !== "auth" ? (entry.user === "schedule" ? t("activity.bySchedule") : entry.user === "restore" ? t("activity.byRestore") : entry.user.startsWith("agent:") ? t("activity.byAgent", { name: entry.user.slice(6) }) : t("activity.by", { user: entry.user })) : null, group === "auth" ? entry.detail : null].filter(Boolean).join(" · ");
   return h(
     "div",
     { class: "activity-item" },
@@ -3739,6 +3741,7 @@ async function loadSettings() {
     if (isAdmin()) state.notify = await api("GET", "/api/notify").catch(() => null);
     if (isAdmin() && state.route.section === "storage") state.disks = await api("GET", "/api/disks").catch(() => null);
     if (isAdmin() && state.route.section === "shares") state.shares = await api("GET", "/api/shares").catch(() => null);
+    if (isAdmin() && state.route.section === "agents") state.agents = await api("GET", "/api/agents").catch(() => null);
     if (!state.store && isAdmin()) state.store = await api("GET", `/api/store?lang=${state.lang}`).catch(() => null);
   } catch (e) {
     return toast(errorText(e), "error");
@@ -3757,6 +3760,7 @@ const SECTIONS = [
   { id: "shares", icon: "share", admin: true },
   { id: "https", icon: "lock", admin: true },
   { id: "notifications", icon: "bell", admin: true },
+  { id: "agents", icon: "key", admin: true },
   { id: "about", icon: "info" },
 ];
 const sections = () => SECTIONS.filter((item) => !item.admin || isAdmin());
@@ -3946,6 +3950,7 @@ function settingsSection(section) {
   if (section === "notifications") return notificationsSection();
   if (section === "storage") return storageSection();
   if (section === "shares") return sharesSection();
+  if (section === "agents") return agentsSection();
   if (section === "stores") {
     const stores = state.store?.stores ?? [];
     return [
@@ -4681,6 +4686,138 @@ function sharesSection() {
       data.users.map((user) => settingRow(user.name, t("shares.users.folders", { n: data.shares.filter((share) => share.users[user.id]).length }), h("span", { class: user.ready ? "state running" : "state" }, t(user.ready ? "shares.users.ready" : "shares.users.notReady")))),
     ),
     h("section", { class: "card pad stack-s" }, h("h2", null, t("shares.how.title")), found && h("p", null, t("shares.found." + found, { name: data.announced.name })), data.announced.error && data.shares.length > 0 && h("p", { class: "muted small" }, t("shares.found.error", { message: data.announced.error })), h("p", { class: "muted" }, t("shares.how.windows", { address: all.windows })), h("p", { class: "muted" }, t("shares.how.mac", { address: all.url })), h("p", { class: "muted" }, t("shares.how.phone"))),
+  ];
+}
+
+// --- Access keys of agents (the MCP server) ---------------------------------------------------------
+
+const AGENT_LEVELS = ["read", "operate", "full"];
+const mcpAddress = () => `${location.origin}/mcp`;
+
+/** A line of text to take away: shown whole, with a button that copies it */
+function copyBox(text, rows = 1) {
+  const box = rows > 1 ? h("textarea", { readOnly: true, rows, class: "mono", value: text }) : h("input", { readOnly: true, class: "mono", value: text });
+  box.addEventListener("focus", () => box.select());
+  const copy = () => {
+    try {
+      void navigator.clipboard.writeText(text);
+    } catch {
+      // plain HTTP has no clipboard API
+      box.select();
+      document.execCommand("copy");
+    }
+    toast(t("twofa.copied"));
+  };
+  return h("div", { class: "copy-box" }, box, h("button", { type: "button", class: "icon-btn", "aria-label": t("twofa.copy"), title: t("twofa.copy"), onclick: copy }, icon("copy")));
+}
+
+/** The key, shown the only time it can be, with what to paste into the agent */
+function agentKeyDialog(made) {
+  const url = mcpAddress();
+  const command = `claude mcp add --transport http hata ${url} --header "Authorization: Bearer ${made.key}"`;
+  const config = JSON.stringify({ mcpServers: { hata: { type: "http", url, headers: { Authorization: `Bearer ${made.key}` } } } }, null, 2);
+  const dialog = openDialog(
+    "wide",
+    h("header", null, h("div", { class: "grow" }, h("h2", null, t("agents.made.title", { name: made.info.name })), h("p", { class: "muted small" }, t("agents.made.lead"))), closeX(() => dialog)),
+    field(t("agents.made.key"), copyBox(made.key)),
+    field(t("agents.made.claude"), copyBox(command, 3), t("agents.made.claudeHint")),
+    field(t("agents.made.config"), copyBox(config, 11), t("agents.made.configHint")),
+    h("footer", null, button(t("agents.made.done"), { class: "primary", onclick: () => dialog.close() })),
+  );
+}
+
+function agentDialog() {
+  const name = h("input", { maxLength: 40, required: true, placeholder: t("agents.new.namePlaceholder") });
+  const level = h("select", null, AGENT_LEVELS.map((id) => h("option", { value: id }, t("agents.level." + id))));
+  const hint = h("span", { class: "hint" }, t("agents.level.read.hint"));
+  level.addEventListener("change", () => (hint.textContent = t(`agents.level.${level.value}.hint`)));
+  const error = h("p", { class: "error", role: "alert" });
+  const dialog = openDialog(
+    "",
+    h(
+      "form",
+      {
+        onsubmit: async (e) => {
+          e.preventDefault();
+          try {
+            const made = await api("POST", "/api/agents", { name: name.value.trim(), level: level.value });
+            dialog.close();
+            agentKeyDialog(made);
+            void loadSettings();
+          } catch (err) {
+            error.textContent = errorText(err);
+          }
+        },
+      },
+      h("header", null, h("div", { class: "grow" }, h("h2", null, t("agents.new")), h("p", { class: "muted small" }, t("agents.new.lead"))), closeX(() => dialog)),
+      field(t("agents.new.name"), name, t("agents.new.nameHint")),
+      h("label", { class: "field" }, h("span", { class: "label" }, t("agents.new.level")), level, hint),
+      error,
+      h("footer", null, closeButton(() => dialog, t("common.cancel")), h("button", { class: "btn primary" }, t("agents.new.create"))),
+    ),
+  );
+  name.focus();
+}
+
+function removeAgentKey(key) {
+  const dialog = openDialog(
+    "confirm",
+    h("h2", null, t("agents.remove.title", { name: key.name })),
+    h("p", { class: "muted" }, t("agents.remove.lead")),
+    h(
+      "footer",
+      null,
+      closeButton(() => dialog, t("common.cancel")),
+      button(t("agents.remove"), {
+        class: "danger",
+        onclick: async () => {
+          await api("DELETE", `/api/agents/${key.id}`).catch((e) => toast(errorText(e), "error"));
+          dialog.close();
+          void loadSettings();
+        },
+      }),
+    ),
+  );
+}
+
+function agentsSection() {
+  const keys = state.agents;
+  if (!keys) return h("p", { class: "muted" }, "…");
+  const row = (key) =>
+    h(
+      "div",
+      { class: "snapshot" },
+      h(
+        "div",
+        { class: "grow" },
+        h("strong", null, key.name, h("span", { class: "state agent-level " + key.level }, t("agents.level." + key.level))),
+        h("div", { class: "muted small" }, [`hata_…${key.hint}`, t("agents.createdBy", { user: key.createdBy, when: ago(key.createdAt) }), key.lastUsed ? t("agents.lastUsed", { when: ago(key.lastUsed), ip: key.lastIp }) : t("agents.neverUsed")].join(" · ")),
+      ),
+      h("button", { type: "button", class: "icon-btn", "aria-label": t("agents.remove"), title: t("agents.remove"), onclick: () => removeAgentKey(key) }, icon("trash")),
+    );
+  return [
+    h(
+      "section",
+      { class: "card pad" },
+      h("div", { class: "section-head" }, h("h2", null, t("agents.title")), button(t("agents.new"), { class: "small primary", onclick: agentDialog }, "plus")),
+      h("p", { class: "muted" }, t("agents.lead")),
+      keys.length ? h("div", { class: "snapshot-list agent-keys" }, keys.map(row)) : h("p", { class: "muted small" }, t("agents.none")),
+    ),
+    h(
+      "section",
+      { class: "card pad stack-s" },
+      h("h2", null, t("agents.how.title")),
+      h("p", { class: "muted" }, t("agents.how.address")),
+      copyBox(mcpAddress()),
+      location.protocol === "http:" && h("p", { class: "muted small" }, t("agents.how.plain")),
+    ),
+    h(
+      "section",
+      { class: "card pad" },
+      h("h2", null, t("agents.levels.title")),
+      AGENT_LEVELS.map((id) => h("div", { class: "setting" }, h("div", { class: "grow" }, h("strong", null, t("agents.level." + id)), h("p", { class: "muted small" }, t(`agents.level.${id}.hint`))))),
+      h("p", { class: "muted small agent-never" }, t("agents.never")),
+    ),
   ];
 }
 

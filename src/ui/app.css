@@ -759,3 +759,11 @@ table.shares td { vertical-align: top; }
 .share-access label { display: flex; align-items: center; gap: 12px; padding: 10px 12px; }
 .share-access label + label { border-top: 1px solid var(--border); }
 .share-access select { width: auto; flex: none; }
+.copy-box { display: flex; align-items: flex-start; gap: 6px; min-width: 0; }
+.copy-box :is(input, textarea) { flex: 1; min-width: 0; font-size: 12px; }
+.copy-box textarea { resize: none; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; }
+.agent-keys { margin-top: 14px; }
+.agent-level { margin-left: 10px; vertical-align: 1px; }
+.agent-level.operate { background: var(--warn-soft); color: var(--warn); }
+.agent-level.full { background: var(--danger-soft); color: var(--danger); }
+.agent-never { margin-top: 14px; }
