@@ -65,6 +65,12 @@ Early development. What works today:
   notification, and a disk can be told to test itself. The counters that matter are remembered: a disk's
   page says "was 0 until 14 Sep", and a counter that grows is sent as a notification again. It needs
   `smartmontools`, which Hata offers to install; nothing on a disk is changed;
+- putting a disk to use (same page): a new disk is prepared in one dialog — one partition, ext4, a folder
+  under `/mnt`, a line in `/etc/fstab` that does not hold up the start when the disk is absent; a disk that
+  already holds files (ext4, XFS, Btrfs, FAT, exFAT, NTFS) is connected as it is, nothing on it changed;
+  a USB disk can be connected by itself when plugged in, and is ejected before it is pulled out. Erasing
+  asks for the disk's name and your password, and is never offered for the system's disk, a disk in use
+  or a member of an array;
 - what fills the data folder (same page): measured once a day — its folders, the data of each app, the
   trash — with how much each grew over the week and, when the disk is filling up, in how long it will
   be full at this pace;

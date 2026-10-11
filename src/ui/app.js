@@ -4439,12 +4439,203 @@ function diskDialog(name) {
       s && h("p", { class: "muted small" }, t("disks.test.hint")),
       error,
       s && h("footer", null, h("span", { class: "muted small" }, disk.checkedAt ? t("disks.checked", { when: ago(disk.checkedAt) }) : ""), button(t("disks.test.runShort"), { disabled: s.testing != null, onclick: test("short") }), button(t("disks.test.runLong"), { disabled: s.testing != null, onclick: test("long") })),
+      state.disks.mounting?.possible &&
+        h(
+          "div",
+          { class: "disk-use" },
+          h("h3", null, t("mounting.title")),
+          disk.volumes.map((v) =>
+            h(
+              "div",
+              { class: "kv" },
+              h("div", null, h("span", { class: "mono" }, v.name), h("div", { class: "muted small" }, [bytes(v.size), v.fstype || t("mounting.noFs"), v.label].filter(Boolean).join(" · "))),
+              v.mounts.length ? h("span", { class: "mono" }, v.mounts[0]) : state.disks.mounting.mountable.includes(v.path) ? button(t("mounting.connect"), { class: "small", onclick: () => (dialog.close(), connectDialog(disk, v)) }) : h("span", { class: "muted" }, t(v.swap ? "mounting.swap" : "disks.notMounted")),
+            ),
+          ),
+          canPrepare(disk) ? h("footer", null, h("span", { class: "muted small" }, t("mounting.prepareHint")), button(t("mounting.prepare"), { onclick: () => (dialog.close(), prepareDialog(disk)) })) : h("p", { class: "muted small" }, t("mounting.blocked." + (state.disks.mounting.blockers[disk.name]?.[0] ?? "mounted"))),
+        ),
     );
   };
   dialog = openDialog("wide disk", body);
   diskDialogPaint = paint;
   dialog.addEventListener("close", () => (diskDialogPaint = null));
   paint();
+}
+
+// --- Putting a disk to use ---------------------------------------------------------------------------
+
+const canPrepare = (disk) => state.disks?.mounting?.possible && state.disks.mounting.blockers[disk.name]?.length === 0;
+const canConnect = (disk) => (state.disks?.mounting?.possible ? disk.volumes.filter((v) => state.disks.mounting.mountable.includes(v.path)) : []);
+const MOUNT_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$/;
+const mountName = (text) => text.normalize("NFKD").replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^[^A-Za-z0-9]+|[-._]+$/g, "").slice(0, 24).replace(/[-._]+$/, "") || "disk";
+
+/** The reason, the command and the button for a package an action turned out to need */
+function packageCard(detail, retry) {
+  const error = h("p", { class: "error", role: "alert" });
+  return h(
+    "div",
+    { class: "banner stack" },
+    h("strong", null, t(`mounting.needs.${detail.package}.what`)),
+    h("p", { class: "muted small" }, t(`mounting.needs.${detail.package}.why`)),
+    detail.install ? h("p", { class: "cmd" }, icon("terminal"), detail.install) : h("p", { class: "muted small" }, t("mounting.needs.byHand", { package: detail.package })),
+    error,
+    detail.install &&
+      button(
+        t("mounting.needs.install", { package: detail.package }),
+        {
+          class: "small",
+          onclick: async (e) => {
+            e.currentTarget.disabled = true;
+            try {
+              setDisks(await api("POST", "/api/disks/package", { package: detail.package }));
+              retry();
+            } catch (err) {
+              error.textContent = errorText(err);
+              e.target.closest("button").disabled = false;
+            }
+          },
+        },
+        "download",
+      ),
+  );
+}
+
+/** Runs a disk action from a dialog: the button waits, an error stays in the dialog, a missing package is offered */
+function diskAction(dialogOf, slot, request, done) {
+  const run = async (e) => {
+    const el = e?.currentTarget ?? slot.closest("dialog").querySelector("footer .btn:last-child");
+    el.disabled = true;
+    put(slot);
+    try {
+      const data = await request();
+      setDisks(data);
+      done(data);
+    } catch (err) {
+      el.disabled = false;
+      put(slot, err instanceof ApiError && err.detail?.package ? packageCard(err.detail, () => run()) : h("p", { class: "error", role: "alert" }, errorText(err)));
+    }
+  };
+  return run;
+}
+
+function prepareDialog(disk) {
+  const name = h("input", { type: "text", value: mountName(disk.model || "disk"), maxlength: 32, spellcheck: false });
+  const typed = h("input", { type: "text", autocomplete: "off", spellcheck: false, placeholder: disk.name });
+  const password = h("input", { type: "password", autocomplete: "current-password" });
+  const where = h("span", { class: "hint mono" });
+  const slot = h("div");
+  const holds = disk.volumes.filter((v) => v.fstype);
+  let dialog;
+  const go = button(t("mounting.prepareGo"), { class: "danger", disabled: true });
+  const check = () => {
+    where.textContent = "/mnt/" + name.value;
+    go.disabled = !MOUNT_NAME.test(name.value) || typed.value.trim() !== disk.name || !password.value;
+  };
+  for (const input of [name, typed, password]) input.addEventListener("input", check);
+  go.onclick = diskAction(
+    () => dialog,
+    slot,
+    () => api("POST", `/api/disks/${disk.name}/prepare`, { serial: disk.serial, size: disk.size, name: name.value, password: password.value }),
+    () => {
+      dialog.close();
+      preparedDialog("/mnt/" + name.value);
+    },
+  );
+  dialog = openDialog(
+    "wide",
+    h("h2", null, t("mounting.prepareTitle", { disk: diskTitle(disk) })),
+    h("p", { class: "muted small" }, diskMeta(disk)),
+    h("p", { class: "banner danger" }, t(holds.length ? "mounting.prepareErases" : "mounting.prepareEmpty"), holds.length > 0 && h("span", { class: "block mono small" }, holds.map((v) => [v.name, v.fstype, v.label, bytes(v.size)].filter(Boolean).join(" · ")).join("; "))),
+    h("p", { class: "muted" }, t("mounting.prepareLead")),
+    h("label", { class: "field" }, h("span", { class: "label" }, t("mounting.name")), name, where, h("span", { class: "hint" }, t("mounting.nameHint"))),
+    field(t("mounting.typeName", { name: disk.name }), typed),
+    field(t("account.password"), password, t("mounting.passwordHint")),
+    h("p", { class: "cmd" }, icon("terminal"), `sfdisk ${disk.path}; mkfs.ext4 ${disk.path}1; /etc/fstab`),
+    slot,
+    h("footer", null, closeButton(() => dialog, t("common.cancel")), go),
+  );
+  check();
+}
+
+function preparedDialog(path) {
+  const backups = `${path}/Backups`;
+  let dialog;
+  dialog = openDialog(
+    "confirm",
+    h("h2", null, t("mounting.readyTitle")),
+    h("p", { class: "muted" }, t("mounting.readyLead", { path })),
+    h(
+      "footer",
+      null,
+      closeButton(() => dialog, t("common.close")),
+      h("a", { class: "btn", href: filesHash(path), onclick: () => dialog.close() }, t("disks.fs.browse")),
+      button(t("mounting.useForBackups"), {
+        class: "primary",
+        onclick: async () => {
+          try {
+            state.settings = await api("PUT", "/api/settings", { backup: { dir: backups } });
+            dialog.close();
+            toast(t("mounting.backupsThere", { path: backups }));
+          } catch (e) {
+            toast(errorText(e), "error");
+          }
+        },
+      }),
+    ),
+  );
+}
+
+function connectDialog(disk, volume) {
+  const removable = disk.removable || disk.transport === "usb";
+  const name = h("input", { type: "text", value: mountName(volume.label || disk.model || "disk"), maxlength: 32, spellcheck: false });
+  const keep = h("input", { type: "checkbox", checked: !removable });
+  const where = h("span", { class: "hint mono" });
+  const slot = h("div");
+  let dialog;
+  const go = button(t("mounting.connect"), { class: "primary" });
+  const check = () => {
+    where.textContent = "/mnt/" + name.value;
+    go.disabled = !MOUNT_NAME.test(name.value);
+  };
+  name.addEventListener("input", check);
+  go.onclick = diskAction(
+    () => dialog,
+    slot,
+    () => api("POST", "/api/disks/connect", { device: volume.path, name: name.value, keep: keep.checked }),
+    () => {
+      dialog.close();
+      toast(t("mounting.connected", { path: "/mnt/" + name.value }));
+    },
+  );
+  dialog = openDialog(
+    "wide",
+    h("h2", null, t("mounting.connectTitle", { disk: volume.label || diskTitle(disk) })),
+    h("p", { class: "muted small" }, [volume.name, volume.fstype, bytes(volume.size)].join(" · ")),
+    h("p", { class: "muted" }, t("mounting.connectLead")),
+    /^(vfat|exfat|ntfs)$/.test(volume.fstype) && h("p", { class: "banner" }, t("mounting.noOwners", { fs: volume.fstype })),
+    h("label", { class: "field" }, h("span", { class: "label" }, t("mounting.name")), name, where, h("span", { class: "hint" }, t("mounting.nameHint"))),
+    h("label", { class: "check" }, keep, h("span", null, h("strong", null, t("mounting.keep")), h("span", { class: "muted small block" }, t("mounting.keepHint")))),
+    slot,
+    h("footer", null, closeButton(() => dialog, t("common.cancel")), go),
+  );
+  check();
+}
+
+function disconnectDialog(mount) {
+  const removable = state.disks.disks.some((d) => d.name === mount.disk && (d.removable || d.transport === "usb"));
+  const slot = h("div");
+  let dialog;
+  const go = button(t(removable ? "mounting.eject" : "mounting.disconnect"), { class: "primary" });
+  go.onclick = diskAction(
+    () => dialog,
+    slot,
+    () => api("POST", "/api/disks/disconnect", { path: mount.path }),
+    () => {
+      dialog.close();
+      toast(t(removable ? "mounting.ejected" : "mounting.disconnected", { path: mount.path }));
+    },
+  );
+  dialog = openDialog("confirm", h("h2", null, t(removable ? "mounting.ejectTitle" : "mounting.disconnectTitle", { path: mount.path })), h("p", { class: "muted" }, t(removable ? "mounting.ejectLead" : "mounting.disconnectLead")), slot, h("footer", null, closeButton(() => dialog, t("common.cancel")), go));
 }
 
 let disksTimer = 0;
@@ -4493,7 +4684,7 @@ function storageSection() {
       h("td", { class: "num" + (hot ? " bad" : "") }, disk.smart?.temperature != null ? disk.smart.temperature + " °C" : "—"),
       h("td", null, total ? usageBar(used, total) : h("span", { class: "muted" }, "—")),
       h("td", { class: "mono" }, mounts.length ? mounts.map((m) => h("div", { class: "clip" }, m)) : h("span", { class: "muted" }, t("disks.notMounted"))),
-      h("td", null, h("div", { class: "row-actions" }, button(t("disks.details"), { class: "small", onclick: (e) => (e.stopPropagation(), diskDialog(disk.name)) }))),
+      h("td", null, h("div", { class: "row-actions" }, canPrepare(disk) && !mounts.length && !canConnect(disk).length && button(t("mounting.prepare"), { class: "small primary", onclick: (e) => (e.stopPropagation(), prepareDialog(disk)) }), canConnect(disk).length > 0 && button(t("mounting.connect"), { class: "small primary", onclick: (e) => (e.stopPropagation(), connectDialog(disk, canConnect(disk)[0])) }), button(t("disks.details"), { class: "small", onclick: (e) => (e.stopPropagation(), diskDialog(disk.name)) }))),
     );
   };
   const checked = Math.max(0, ...data.disks.map((d) => d.checkedAt ?? 0));
@@ -4504,7 +4695,25 @@ function storageSection() {
       h("td", null, h("a", { class: "strong mono", href: filesHash(m.path), title: t("disks.fs.browse") }, m.path)),
       h("td", null, h("div", { class: "mono clip" }, m.device), h("div", { class: "muted small" }, [m.fstype, m.network && t("disks.fs.network"), m.readOnly && t("disks.fs.readOnly")].filter(Boolean).join(" · "))),
       h("td", null, usageBar(m.used, m.total)),
+      h("td", null, data.mounting?.ours[m.path] && h("div", { class: "row-actions" }, button(t(ejectable(m) ? "mounting.eject" : "mounting.disconnect"), { class: "small", onclick: () => disconnectDialog(m) }))),
     );
+  // a folder kept in /etc/fstab whose disk is not there now: still Hata's to forget
+  const absent = Object.keys(data.mounting?.ours ?? {}).filter((path) => !data.mounts.some((m) => m.path === path));
+  const absentRow = (path) => h("tr", null, h("td", null, h("span", { class: "strong mono" }, path)), h("td", { class: "muted" }, t("mounting.absent")), h("td"), h("td", null, h("div", { class: "row-actions" }, button(t("mounting.disconnect"), { class: "small", onclick: () => disconnectDialog({ path, disk: "" }) }))));
+  const ejectable = (m) => data.disks.some((d) => d.name === m.disk && (d.removable || d.transport === "usb"));
+  const automount = h("input", {
+    type: "checkbox",
+    checked: data.mounting?.automount,
+    onchange: async (e) => {
+      try {
+        state.settings = await api("PUT", "/api/settings", { storage: { automount: e.target.checked } });
+        setDisks(await api("GET", "/api/disks"));
+      } catch (err) {
+        e.target.checked = !e.target.checked;
+        toast(errorText(err), "error");
+      }
+    },
+  });
   return [
     data.tool === "missing" &&
       data.disks.length > 0 &&
@@ -4530,13 +4739,14 @@ function storageSection() {
       ),
       data.disks.length > 0 && h("table", { class: "disks" }, h("thead", null, h("tr", null, h("th", null, t("disks.col.disk")), h("th", null, t("disks.col.health")), h("th", { class: "num" }, t("disks.col.temp")), h("th", null, t("disks.col.usage")), h("th", null, t("disks.col.mounted")), h("th"))), h("tbody", null, data.disks.map(row))),
     ),
-    data.mounts.length > 0 &&
+    (data.mounts.length > 0 || absent.length > 0) &&
       h(
         "section",
         { class: "card table-wrap" },
         h("div", { class: "pad card-head" }, h("h2", null, t("disks.fs.title")), h("p", { class: "muted small" }, t("disks.fs.lead"))),
-        h("table", { class: "disks" }, h("thead", null, h("tr", null, h("th", null, t("disks.fs.col.path")), h("th", null, t("disks.fs.col.source")), h("th", null, t("disks.col.usage")))), h("tbody", null, data.mounts.map(fsRow))),
+        h("table", { class: "disks" }, h("thead", null, h("tr", null, h("th", null, t("disks.fs.col.path")), h("th", null, t("disks.fs.col.source")), h("th", null, t("disks.col.usage")), h("th"))), h("tbody", null, data.mounts.map(fsRow), absent.map(absentRow))),
       ),
+    data.mounting?.possible && h("section", { class: "card pad" }, h("label", { class: "check" }, automount, h("span", null, h("strong", null, t("mounting.automount")), h("span", { class: "muted small block" }, t("mounting.automountHint"))))),
     data.fills && fillsCard(data.fills, busy),
   ].filter(Boolean);
 }

@@ -85,6 +85,8 @@ export interface Settings {
    * for itself over multicast DNS; any other (`hata.lan`) the home's own DNS has to point here.
    */
   local: { enabled: boolean; name: string };
+  /** Disks: whether a USB disk that is plugged in is mounted by itself */
+  storage: { automount: boolean };
   /** Folders put on the dashboard from the file manager, absolute paths */
   folders: string[];
   /** Folders shared over the network (SMB) */
@@ -146,6 +148,7 @@ const DEFAULTS: Settings = {
   access: {},
   https: { mode: "off", domain: "", email: "" },
   local: { enabled: true, name: "hata.local" },
+  storage: { automount: false },
   folders: [],
   shares: [],
   dashboard: cleanLayout(null),
@@ -177,6 +180,7 @@ export const settings: Settings = {
   appearance: cleanAppearance(saved.appearance),
   https: { ...DEFAULTS.https, ...(isPlainObject(saved.https) ? saved.https : {}) },
   local: { ...DEFAULTS.local, ...(isPlainObject(saved.local) ? saved.local : {}) },
+  storage: { automount: isPlainObject(saved.storage) && saved.storage.automount === true },
 };
 settings.local.name = localName(settings.local.name) ?? DEFAULTS.local.name;
 
@@ -275,6 +279,10 @@ export function updateSettings(patch: Record<string, unknown>): string | null {
       local.name = name;
     }
     next.local = local;
+  }
+  if ("storage" in patch) {
+    if (!isPlainObject(patch.storage)) return "settings.badStorage";
+    next.storage = { ...next.storage, ...("automount" in patch.storage ? { automount: patch.storage.automount === true } : {}) };
   }
   if ("appearance" in patch) {
     const appearance = isPlainObject(patch.appearance) ? changeAppearance(next.appearance, patch.appearance) : null;

@@ -58,14 +58,14 @@ test("parseLsblk: disks with their partitions, without loop, zram and optical de
   });
   expect(disks.map((d) => d.name)).toEqual(["sda", "nvme0n1", "sdb"]);
   expect(disks[0]).toMatchObject({ model: "WDC WD40EFRX-68N32N0", transport: "sata", rotational: true, removable: false });
-  expect(disks[0]!.volumes).toEqual([
+  expect(disks[0]!.volumes).toMatchObject([
     { name: "sda1", path: "/dev/sda1", kind: "part", size: 4000 * GB, fstype: "ext4", label: "data", mounts: ["/DATA"], total: 3900 * GB, used: 100 * GB },
     { name: "sda2", path: "/dev/sda2", kind: "part", size: GB, fstype: "swap", label: "", mounts: [], total: null, used: null },
   ]);
   // what is stacked on a partition is listed next to it
   expect(disks[1]!.volumes.map((v) => [v.name, v.kind, v.mounts[0] ?? ""])).toEqual([["nvme0n1p2", "part", ""], ["root", "crypt", "/"]]);
   expect(disks[2]).toMatchObject({ path: "/dev/sdb", removable: true, rotational: false, size: 16000000000 });
-  expect(disks[2]!.volumes).toEqual([{ name: "sdb", path: "/dev/sdb", kind: "disk", size: 16000000000, fstype: "exfat", label: "STICK", mounts: ["/mnt/stick"], total: 15000000000, used: 1000 }]);
+  expect(disks[2]!.volumes).toMatchObject([{ name: "sdb", path: "/dev/sdb", kind: "disk", size: 16000000000, fstype: "exfat", label: "STICK", mounts: ["/mnt/stick"], total: 15000000000, used: 1000 }]);
   expect(parseLsblk(null)).toEqual([]);
   expect(parseLsblk({})).toEqual([]);
 });

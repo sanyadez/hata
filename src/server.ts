@@ -23,6 +23,8 @@ import { trashSizeOn } from "./trash";
 import { addShare, changeShare, installSamba, listShares, refreshShares, removeShare, startShares } from "./shares";
 import { checkDisks, diskHealth, installTool, listDisks, startDisks, startSelfTest } from "./disks";
 import { fills, measureFills, startFills } from "./fills";
+import { connectVolume, disconnect, mountingReport, prepareDisk, startMounting, type Outcome } from "./mounting";
+import { installPackage } from "./packages";
 import {
   acceptInvite,
   addPasskey,
@@ -792,7 +794,11 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
   }
 
   // ---- disks and their health ----
-  const storage = async () => json({ ...(await listDisks()), fills: fills() });
+  const storage = async () => {
+    const listed = await listDisks();
+    return json({ ...listed, fills: fills(), mounting: mountingReport(listed.disks) });
+  };
+  const changed = (outcome: Outcome) => ("error" in outcome ? fail(400, outcome.error, { message: outcome.message ?? "", ...(outcome.needs ?? {}) }) : storage());
   if (path === "/api/disks" && method === "GET") return storage();
   if (path === "/api/disks/check" && method === "POST") {
     // a disk that sleeps takes its time to spin up
@@ -805,6 +811,33 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
     const message = await installTool();
     if (message) return fail(500, "disk.installFailed", { message });
     return storage();
+  }
+  // what a disk action said it lacks, installed by the button next to the reason and the command
+  if (path === "/api/disks/package" && method === "POST") {
+    const name = (await body(req)).package;
+    if (typeof name !== "string" || !["ntfs-3g", "fdisk", "sfdisk", "util-linux", "e2fsprogs"].includes(name)) return fail(400, "disk.packageFailed", { message: "not a package Hata installs" });
+    server.timeout(req, 0);
+    const message = await installPackage(name);
+    if (message) return fail(500, "disk.packageFailed", { message });
+    return storage();
+  }
+  // erasing a disk asks for the password, like everything that cannot be undone by a second click
+  const diskPrepare = /^\/api\/disks\/([A-Za-z0-9_-]+)\/prepare$/.exec(path);
+  if (diskPrepare && method === "POST") {
+    const data = await body(req);
+    if (!(await checkOwnPassword(user, data.password))) return fail(400, "auth.wrongPassword");
+    // a large disk takes its time
+    server.timeout(req, 0);
+    return changed(await prepareDisk(diskPrepare[1]!, { serial: String(data.serial ?? ""), size: Number(data.size) }, String(data.name ?? ""), user.name));
+  }
+  if (path === "/api/disks/connect" && method === "POST") {
+    const data = await body(req);
+    server.timeout(req, 0);
+    return changed(await connectVolume(String(data.device ?? ""), String(data.name ?? ""), data.keep === true, user.name));
+  }
+  if (path === "/api/disks/disconnect" && method === "POST") {
+    server.timeout(req, 0);
+    return changed(await disconnect(String((await body(req)).path ?? ""), user.name));
   }
   // the answer does not wait for the measuring: the page asks again while it runs
   if (path === "/api/disks/fills" && method === "POST") {
@@ -1295,6 +1328,7 @@ export async function serve(): Promise<void> {
   startSampler();
   startDisks();
   startFills();
+  startMounting();
   startShares();
   startTrash();
   scheduleStoreSync();

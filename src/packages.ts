@@ -33,6 +33,9 @@ const INSTALLERS: [string, string[]][] = [
 
 const installer = () => INSTALLERS.find(([manager]) => Bun.which(manager, { PATH }));
 
+/** The package manager of this system, as the name of its program; "" when it is not one we know */
+export const packageManager = (): string => installer()?.[0] ?? "";
+
 /** The command the "Install" button runs, shown next to it; empty when this system's package manager is not one we know */
 export const installCommand = (pkg: string): string => {
   const found = installer();

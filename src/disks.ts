@@ -26,7 +26,11 @@ export interface Volume {
   size: number;
   fstype: string;
   label: string;
+  /** The file system's own id — what /etc/fstab names it by */
+  uuid: string;
   mounts: string[];
+  /** In use as swap space */
+  swap: boolean;
   /** Size and use of the file system, when it is mounted */
   total: number | null;
   used: number | null;
@@ -42,6 +46,7 @@ export interface Disk {
   transport: string;
   rotational: boolean;
   removable: boolean;
+  readOnly: boolean;
   volumes: Volume[];
 }
 
@@ -57,7 +62,8 @@ function mountsOf(row: Row): string[] {
 }
 
 function volume(row: Row, kind: string): Volume {
-  return { name: text(row.name), path: text(row.path) || "/dev/" + text(row.name), kind, size: amount(row.size) ?? 0, fstype: text(row.fstype), label: text(row.label), mounts: mountsOf(row), total: amount(row.fssize), used: amount(row.fsused) };
+  const places = Array.isArray(row.mountpoints) ? row.mountpoints : [row.mountpoint];
+  return { name: text(row.name), path: text(row.path) || "/dev/" + text(row.name), kind, size: amount(row.size) ?? 0, fstype: text(row.fstype), label: text(row.label), uuid: text(row.uuid), mounts: mountsOf(row), swap: places.some((m) => text(m) === "[SWAP]"), total: amount(row.fssize), used: amount(row.fsused) };
 }
 
 /** `lsblk -J -b` into disks; partitions and what is stacked on them (LVM, LUKS, RAID) become one flat list */
@@ -90,6 +96,7 @@ export function parseLsblk(json: unknown): Disk[] {
       transport: text(row.tran),
       rotational: flag(row.rota),
       removable: flag(row.rm) || flag(row.hotplug),
+      readOnly: flag(row.ro),
       volumes,
     });
   }
@@ -351,9 +358,10 @@ const idOf = (disk: Pick<Disk, "serial" | "name">): string => disk.serial || dis
 let known: Disk[] = [];
 let tool: ToolState = "ok";
 
-const COLUMNS = "NAME,PATH,TYPE,SIZE,MODEL,SERIAL,TRAN,ROTA,RM,HOTPLUG,FSTYPE,LABEL,FSSIZE,FSUSED";
+const COLUMNS = "NAME,PATH,TYPE,SIZE,MODEL,SERIAL,TRAN,ROTA,RM,HOTPLUG,RO,FSTYPE,LABEL,UUID,FSSIZE,FSUSED";
 
-async function connected(): Promise<Disk[]> {
+/** The disks as they are this very moment */
+export async function connected(): Promise<Disk[]> {
   // MOUNTPOINTS (every place a file system is mounted at) came with util-linux 2.37
   for (const mounts of ["MOUNTPOINTS", "MOUNTPOINT"]) {
     const result = await run(["lsblk", "-J", "-b", "-o", `${COLUMNS},${mounts}`], 10_000);

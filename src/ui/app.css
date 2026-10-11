@@ -520,6 +520,10 @@ tr.clickable:hover td { background: var(--surface-2); }
 .banner.danger { background: var(--danger-soft); border-color: var(--danger); }
 .kv-list .kv { border-top: 1px solid var(--border); padding: 10px 0; align-items: center; }
 dialog.disk header .state { flex: none; }
+.disk-use { display: grid; gap: 4px; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border); }
+.disk-use h3 { font: 600 13px var(--font-heading); margin: 0 0 4px; }
+.banner .block { display: block; margin-top: 6px; }
+.banner.stack { display: grid; gap: 8px; justify-items: start; }
 .fills-bar { display: flex; gap: 2px; height: 10px; margin-top: 8px; border-radius: 3px; background: var(--surface-2); overflow: hidden; }
 .fills-bar i { flex: none; min-width: 2px; height: 100%; }
 .fills .dot { flex: none; width: 10px; height: 10px; border-radius: 3px; }
