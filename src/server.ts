@@ -23,7 +23,8 @@ import { trashSizeOn } from "./trash";
 import { addShare, changeShare, installSamba, listShares, refreshShares, removeShare, startShares } from "./shares";
 import { checkDisks, diskHealth, installTool, listDisks, startDisks, startSelfTest } from "./disks";
 import { fills, measureFills, startFills } from "./fills";
-import { connectVolume, disconnect, mountingReport, prepareDisk, startMounting, type Outcome } from "./mounting";
+import { connectVolume, disconnect, mergeFolders, mountingReport, prepareDisk, startMounting, type Outcome } from "./mounting";
+import { moveData } from "./movedata";
 import { installPackage } from "./packages";
 import {
   acceptInvite,
@@ -769,6 +770,12 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
     }
   }
 
+  // the data folder moves as a job: the apps are stopped, the files copied, the apps pointed at them
+  if (path === "/api/data-root/move" && method === "POST") {
+    const job = moveData((await body(req)).path, user.name);
+    return json({ job: job.id, app: job.app }, 202);
+  }
+
   // the configuration folder moves as a whole, and the service restarts in the new place
   if (path === "/api/state-dir" && method === "POST") {
     const from = DATA_DIR;
@@ -815,7 +822,7 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
   // what a disk action said it lacks, installed by the button next to the reason and the command
   if (path === "/api/disks/package" && method === "POST") {
     const name = (await body(req)).package;
-    if (typeof name !== "string" || !["ntfs-3g", "fdisk", "sfdisk", "util-linux", "e2fsprogs"].includes(name)) return fail(400, "disk.packageFailed", { message: "not a package Hata installs" });
+    if (typeof name !== "string" || !["ntfs-3g", "fdisk", "sfdisk", "util-linux", "e2fsprogs", "mergerfs"].includes(name)) return fail(400, "disk.packageFailed", { message: "not a package Hata installs" });
     server.timeout(req, 0);
     const message = await installPackage(name);
     if (message) return fail(500, "disk.packageFailed", { message });
@@ -834,6 +841,10 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
     const data = await body(req);
     server.timeout(req, 0);
     return changed(await connectVolume(String(data.device ?? ""), String(data.name ?? ""), data.keep === true, user.name));
+  }
+  if (path === "/api/disks/merge" && method === "POST") {
+    const data = await body(req);
+    return changed(await mergeFolders(data.folders, String(data.name ?? ""), user.name));
   }
   if (path === "/api/disks/disconnect" && method === "POST") {
     server.timeout(req, 0);

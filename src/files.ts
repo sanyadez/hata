@@ -15,12 +15,13 @@
  * the owner of the folder it is created in — otherwise an app could not touch a file uploaded into its
  * own folder.
  */
-import { chmodSync, chownSync, existsSync, lchownSync, lstatSync, mkdirSync, realpathSync, renameSync, statfsSync, statSync, unlinkSync, writeFileSync, type Stats } from "node:fs";
+import { chmodSync, chownSync, existsSync, lchownSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, statfsSync, statSync, unlinkSync, writeFileSync, type Stats } from "node:fs";
 import { lstat, open, readdir, readFile, rm, stat } from "node:fs/promises";
 import { basename, dirname, extname, join, resolve, sep } from "node:path";
 import { AppError } from "./apps";
 import { DATA_DIR, saveSettings, SECRETS_DIR, settings } from "./config";
 import { movePath } from "./dashboard";
+import { parseMounts } from "./disks";
 import { writablePath } from "./smbconf";
 import { findInTrash, inTrash, KEEP_DAYS, listTrash, purgeTrash, putInTrash, sweepTrash, takeFromTrash, TRASH_DIR, type TrashItem } from "./trash";
 import { ZIP_MAX_BYTES, ZIP_MAX_ENTRIES, type ZipSource } from "./zip";
@@ -63,6 +64,8 @@ export interface Listing {
   shared: string[];
   /** Folders at the top of the data root: the places of the sidebar */
   places: string[];
+  /** The other file systems of the server — disks and network folders — by the folder they are mounted at */
+  disks: string[];
   disk: { total: number; free: number } | null;
 }
 
@@ -235,8 +238,17 @@ export async function list(path: unknown): Promise<Listing> {
     entries,
     truncated: shown.length > LIST_LIMIT,
     places: top.filter((e) => e.type === "dir" && !e.name.startsWith(".")).map((e) => e.name).sort((a, b) => a.localeCompare(b, undefined, { numeric: true })).slice(0, 40),
+    disks: otherDisks(home),
     disk: diskOf(dir),
   };
+}
+
+function otherDisks(home: string): string[] {
+  try {
+    return parseMounts(readFileSync("/proc/mounts", "utf8")).map((mount) => mount.path).filter((path) => path !== "/" && path !== home).slice(0, 20);
+  } catch {
+    return [];
+  }
 }
 
 // --- Folders on the dashboard -----------------------------------------------------------------------
@@ -267,6 +279,12 @@ function repin(from: string, to: string | null): void {
   settings.folders = [...new Set(next)];
   settings.dashboard = movePath(settings.dashboard, from, to);
   saveSettings();
+}
+
+/** A folder that was moved by something other than the file manager: what pointed into it follows */
+export function folderMoved(from: string, to: string): void {
+  repin(from, to);
+  reshare(from, to);
 }
 
 let sharesMoved: () => void = () => {};

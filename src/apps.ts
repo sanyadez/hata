@@ -34,7 +34,7 @@ export class AppError extends Error {
 }
 
 export const appDir = (name: string) => join(APPS_DIR, name);
-const composeFile = (name: string) => join(appDir(name), "compose.yml");
+export const composeFile = (name: string) => join(appDir(name), "compose.yml");
 
 function assertName(name: string): void {
   if (!APP_NAME_RE.test(name)) throw new AppError("app.badName");
@@ -47,7 +47,7 @@ function assertInstalled(name: string): void {
 
 // --- Jobs -------------------------------------------------------------------------------------------
 
-export type JobKind = "install" | "update" | "start" | "stop" | "restart" | "remove" | "apply" | "backup" | "restore" | "import";
+export type JobKind = "install" | "update" | "start" | "stop" | "restart" | "remove" | "apply" | "backup" | "restore" | "import" | "move";
 
 export interface Job {
   id: string;

@@ -524,6 +524,9 @@ dialog.disk header .state { flex: none; }
 .disk-use h3 { font: 600 13px var(--font-heading); margin: 0 0 4px; }
 .banner .block { display: block; margin-top: 6px; }
 .banner.stack { display: grid; gap: 8px; justify-items: start; }
+.new-disk { display: flex !important; align-items: center; gap: 14px; border-color: var(--accent); background: var(--accent-soft); }
+.new-disk .row-actions { flex: none; }
+.row-actions.wrap { flex-wrap: wrap; justify-content: flex-start; }
 .fills-bar { display: flex; gap: 2px; height: 10px; margin-top: 8px; border-radius: 3px; background: var(--surface-2); overflow: hidden; }
 .fills-bar i { flex: none; min-width: 2px; height: 100%; }
 .fills .dot { flex: none; width: 10px; height: 10px; border-radius: 3px; }

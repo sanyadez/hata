@@ -95,3 +95,21 @@ test("holds: what of Hata lives on a folder", () => {
   expect(holds("/mnt/bi", uses)).toBeNull();
   expect(holds("/mnt/other", { ...uses, backupDir: "" })).toBeNull();
 });
+
+test("pools: merged folders are read back from Hata's lines; what can be merged", async () => {
+  const { mergeable, poolOptions, pools, POOL_FS } = await import("../src/mounting");
+  let text = FSTAB;
+  for (const name of ["a", "b", "c"]) text = withMount(text, { spec: `UUID=${name}`, path: `/mnt/${name}`, fstype: "ext4", options: optionsFor("ext4", true) });
+  text = withMount(text, { spec: "UUID=w", path: "/mnt/win", fstype: "ntfs3", options: optionsFor("ntfs", true) });
+  const mounted = ["/", "/mnt/a", "/mnt/b", "/mnt/win"];
+  // not the one that is not there now, not the one without owners, not what Hata did not connect
+  expect(mergeable(parseFstab(text), mounted)).toEqual(["/mnt/a", "/mnt/b"]);
+  const merged = withMount(text, { spec: "/mnt/a:/mnt/b", path: "/mnt/storage", fstype: POOL_FS, options: poolOptions("storage", ["/mnt/a", "/mnt/b"]) });
+  expect(pools(parseFstab(merged))).toEqual({ "/mnt/storage": ["/mnt/a", "/mnt/b"] });
+  expect(merged.trimEnd().split("\n").at(-1)).toBe("/mnt/a:/mnt/b /mnt/storage fuse.mergerfs cache.files=off,category.create=mfs,moveonenospc=true,minfreespace=1G,allow_other,fsname=storage,nofail,x-systemd.requires-mounts-for=/mnt/a,x-systemd.requires-mounts-for=/mnt/b 0 0");
+  // a disk in a merged folder is not offered again, and the merged folder itself never
+  expect(mergeable(parseFstab(merged), [...mounted, "/mnt/c", "/mnt/storage"])).toEqual(["/mnt/c"]);
+  expect(pools(parseFstab(withoutMount(merged, "/mnt/storage")))).toEqual({});
+  // somebody's own mergerfs line is not Hata's
+  expect(pools(parseFstab("/a:/b /mnt/x fuse.mergerfs defaults 0 0\n"))).toEqual({});
+});

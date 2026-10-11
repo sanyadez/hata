@@ -358,6 +358,8 @@ let source = null;
 let appsTimer = null;
 const jobListeners = new Set();
 
+let disksEventTimer = 0;
+
 function startEvents() {
   if (source) return;
   source = new EventSource("/api/events");
@@ -371,6 +373,13 @@ function startEvents() {
       appsTimer = setTimeout(refresh, 150);
     } else if (event.type === "job") {
       for (const listener of jobListeners) listener(event);
+    } else if (event.type === "disks") {
+      // a disk was plugged in, pulled out, connected: the pages that list disks look again
+      clearTimeout(disksEventTimer);
+      disksEventTimer = setTimeout(async () => {
+        if (state.route.view === "settings" && state.route.section === "storage") setDisks(await api("GET", "/api/disks").catch(() => state.disks));
+        else if (state.route.view === "files") void loadFiles?.();
+      }, 1200);
     } else if (event.type === "store" && state.route.view === "store") {
       void loadStore();
     }
@@ -2652,8 +2661,10 @@ function renderFilesBody() {
     h("div", { class: "cat-title" }, t("files.places")),
     home && place(t("files.home"), home, "home", path === home),
     home && (state.files?.places ?? []).map((name) => place(name, joinPath(home, name), name === "AppData" ? "box" : "folder", within(path, joinPath(home, name)))),
-    place(t("files.root"), "/", "disk", path !== "" && !inHome),
+    place(t("files.root"), "/", "disk", path !== "" && !inHome && !(state.files?.disks ?? []).some((d) => within(path, d))),
     h("a", { class: "cat", href: "#/trash" }, h("span", { class: "with-icon" }, icon("trash"), h("span", { class: "clip" }, t("trash.title")))),
+    (state.files?.disks ?? []).length > 0 && h("div", { class: "cat-title" }, t("files.disks")),
+    (state.files?.disks ?? []).map((d) => place(d.split("/").pop(), d, "disk", within(path, d))),
     disk && h("div", { class: "cat-title" }, t("files.disk")),
     disk && h("div", { class: "files-disk" }, h("div", { class: "bar" }, fill), h("span", { class: "muted small" }, t("files.free", { free: bytes(disk.free), total: bytes(disk.total) }))),
   );
@@ -3830,6 +3841,45 @@ function updateRow() {
 }
 
 /** The configuration folder: where it is, and moving it — which restarts Hata in the new place */
+/** Moves the data folder with everything in it; `suggested` — a folder to offer (a disk just prepared) */
+async function moveDataDialog(suggested = "") {
+  const s = state.settings;
+  const target = h("input", { type: "text", value: suggested, spellcheck: false, class: "mono", placeholder: "/mnt/disk/DATA" });
+  const error = h("p", { class: "error", role: "alert" });
+  const go = button(t("data.moveGo"), { class: "primary", disabled: !suggested });
+  target.addEventListener("input", () => (go.disabled = !target.value.trim().startsWith("/")));
+  // the disks Hata connected are where the folder usually goes
+  const disks = await api("GET", "/api/disks").catch(() => null);
+  const branches = Object.values(disks?.mounting?.pools ?? {}).flat();
+  const places = Object.keys(disks?.mounting?.ours ?? {}).filter((path) => !(s.dataRoot + "/").startsWith(path + "/") && !branches.includes(path));
+  let dialog;
+  go.onclick = async () => {
+    error.textContent = "";
+    go.disabled = true;
+    try {
+      const res = await api("POST", "/api/data-root/move", { path: target.value.trim() });
+      dialog.close();
+      jobDialog(res.job, "move", "", async () => {
+        state.settings = await api("GET", "/api/settings");
+        if (state.route.view === "settings") renderSettings();
+      });
+    } catch (e) {
+      error.textContent = errorText(e);
+      go.disabled = false;
+    }
+  };
+  dialog = openDialog(
+    "wide",
+    h("h2", null, t("data.moveTitle")),
+    h("p", { class: "muted" }, t("data.moveLead", { from: s.dataRoot })),
+    field(t("data.target"), target, t("data.targetHint")),
+    places.length > 0 && h("div", { class: "row-actions wrap" }, places.map((path) => button(`${path}/DATA`, { class: "small mono", onclick: () => ((target.value = `${path}/DATA`), (go.disabled = false)) }))),
+    h("p", { class: "banner" }, t("data.moveWarn")),
+    error,
+    h("footer", null, closeButton(() => dialog, t("common.cancel")), go),
+  );
+}
+
 function stateDirCard() {
   const s = state.settings;
   const path = h("input", { value: s.stateDir, spellcheck: false, required: true, class: "mono", "aria-label": t("state.title") });
@@ -3937,7 +3987,7 @@ function settingsSection(section) {
           },
         },
         h("h2", null, t("settings.apps")),
-        settingRow(t("settings.dataRoot"), t("settings.dataRootHint"), dataRoot),
+        settingRow(t("settings.dataRoot"), t("settings.dataRootHint"), h("span", { class: "pair" }, dataRoot, button(t("data.move"), { onclick: () => moveDataDialog() }))),
         settingRow(t("settings.ids"), t("settings.idsHint"), h("span", { class: "pair" }, puid, pgid)),
         settingRow(t("settings.timezone"), t("settings.timezoneHint", { tz: s.systemTimezone }), tz),
         error,
@@ -4569,6 +4619,7 @@ function preparedDialog(path) {
       null,
       closeButton(() => dialog, t("common.close")),
       h("a", { class: "btn", href: filesHash(path), onclick: () => dialog.close() }, t("disks.fs.browse")),
+      button(t("data.moveHere"), { onclick: () => (dialog.close(), moveDataDialog(`${path}/DATA`)) }),
       button(t("mounting.useForBackups"), {
         class: "primary",
         onclick: async () => {
@@ -4615,6 +4666,41 @@ function connectDialog(disk, volume) {
     /^(vfat|exfat|ntfs)$/.test(volume.fstype) && h("p", { class: "banner" }, t("mounting.noOwners", { fs: volume.fstype })),
     h("label", { class: "field" }, h("span", { class: "label" }, t("mounting.name")), name, where, h("span", { class: "hint" }, t("mounting.nameHint"))),
     h("label", { class: "check" }, keep, h("span", null, h("strong", null, t("mounting.keep")), h("span", { class: "muted small block" }, t("mounting.keepHint")))),
+    slot,
+    h("footer", null, closeButton(() => dialog, t("common.cancel")), go),
+  );
+  check();
+}
+
+function mergeDialog() {
+  const folders = state.disks.mounting.mergeable;
+  const boxes = folders.map((path) => h("input", { type: "checkbox", checked: true, value: path }));
+  const name = h("input", { type: "text", value: "storage", maxlength: 32, spellcheck: false });
+  const where = h("span", { class: "hint mono" });
+  const slot = h("div");
+  let dialog;
+  const go = button(t("mounting.mergeGo"), { class: "primary" });
+  const check = () => {
+    where.textContent = "/mnt/" + name.value;
+    go.disabled = !MOUNT_NAME.test(name.value) || boxes.filter((b) => b.checked).length < 2;
+  };
+  for (const input of [name, ...boxes]) input.addEventListener("input", check);
+  go.onclick = diskAction(
+    () => dialog,
+    slot,
+    () => api("POST", "/api/disks/merge", { folders: boxes.filter((b) => b.checked).map((b) => b.value), name: name.value }),
+    () => {
+      dialog.close();
+      toast(t("mounting.mergedAs", { path: "/mnt/" + name.value }));
+    },
+  );
+  dialog = openDialog(
+    "wide",
+    h("h2", null, t("mounting.mergeTitle")),
+    h("p", { class: "muted" }, t("mounting.mergeLead")),
+    boxes.map((box) => h("label", { class: "check" }, box, h("span", { class: "mono" }, box.value))),
+    h("label", { class: "field" }, h("span", { class: "label" }, t("mounting.name")), name, where, h("span", { class: "hint" }, t("mounting.nameHint"))),
+    h("p", { class: "banner" }, t("mounting.mergeWarn")),
     slot,
     h("footer", null, closeButton(() => dialog, t("common.cancel")), go),
   );
@@ -4693,13 +4779,15 @@ function storageSection() {
       "tr",
       null,
       h("td", null, h("a", { class: "strong mono", href: filesHash(m.path), title: t("disks.fs.browse") }, m.path)),
-      h("td", null, h("div", { class: "mono clip" }, m.device), h("div", { class: "muted small" }, [m.fstype, m.network && t("disks.fs.network"), m.readOnly && t("disks.fs.readOnly")].filter(Boolean).join(" · "))),
+      h("td", null, h("div", { class: "mono clip" }, data.mounting?.pools[m.path]?.join(" + ") ?? m.device), h("div", { class: "muted small" }, [data.mounting?.pools[m.path] ? t("mounting.merged") : m.fstype, m.network && t("disks.fs.network"), m.readOnly && t("disks.fs.readOnly")].filter(Boolean).join(" · "))),
       h("td", null, usageBar(m.used, m.total)),
-      h("td", null, data.mounting?.ours[m.path] && h("div", { class: "row-actions" }, button(t(ejectable(m) ? "mounting.eject" : "mounting.disconnect"), { class: "small", onclick: () => disconnectDialog(m) }))),
+      h("td", null, data.mounting?.ours[m.path] && !inPool(m.path) && h("div", { class: "row-actions" }, button(t(ejectable(m) ? "mounting.eject" : "mounting.disconnect"), { class: "small", onclick: () => disconnectDialog(m) }))),
     );
   // a folder kept in /etc/fstab whose disk is not there now: still Hata's to forget
   const absent = Object.keys(data.mounting?.ours ?? {}).filter((path) => !data.mounts.some((m) => m.path === path));
   const absentRow = (path) => h("tr", null, h("td", null, h("span", { class: "strong mono" }, path)), h("td", { class: "muted" }, t("mounting.absent")), h("td"), h("td", null, h("div", { class: "row-actions" }, button(t("mounting.disconnect"), { class: "small", onclick: () => disconnectDialog({ path, disk: "" }) }))));
+  // a disk of a merged folder is taken out through the merged folder
+  const inPool = (path) => Object.values(data.mounting?.pools ?? {}).some((folders) => folders.includes(path));
   const ejectable = (m) => data.disks.some((d) => d.name === m.disk && (d.removable || d.transport === "usb"));
   const automount = h("input", {
     type: "checkbox",
@@ -4714,7 +4802,28 @@ function storageSection() {
       }
     },
   });
+  // a disk nothing uses yet is said so at the top, until it is put to use or waved away
+  const ignored = JSON.parse(localStorage.getItem("hata.disks.ignored") || "[]");
+  const fresh = data.disks.filter((d) => canPrepare(d) && !ignored.includes(d.serial || d.name));
+  const freshCard = (disk) => {
+    const holds = disk.volumes.filter((v) => v.fstype);
+    const connectable = canConnect(disk);
+    return h(
+      "section",
+      { class: "card pad new-disk" },
+      h("span", { class: "badge-icon warn" }, icon("disk")),
+      h("div", { class: "grow" }, h("strong", null, t("mounting.found", { disk: diskTitle(disk), size: bytes(disk.size) })), h("p", { class: "muted small" }, holds.length ? t("mounting.foundHolds", { what: holds.map((v) => [v.label, v.fstype].filter(Boolean).join(" · ")).join("; ") }) : t("mounting.foundEmpty"))),
+      h(
+        "div",
+        { class: "row-actions" },
+        button(t("mounting.ignore"), { class: "small quiet", onclick: () => (localStorage.setItem("hata.disks.ignored", JSON.stringify([...ignored, disk.serial || disk.name].slice(-50))), renderSettings()) }),
+        connectable.length > 0 && button(t("mounting.connect"), { class: "small", onclick: () => connectDialog(disk, connectable[0]) }),
+        button(t("mounting.prepare"), { class: "small" + (connectable.length ? "" : " primary"), onclick: () => prepareDialog(disk) }),
+      ),
+    );
+  };
   return [
+    fresh.map(freshCard),
     data.tool === "missing" &&
       data.disks.length > 0 &&
       h(
@@ -4733,7 +4842,7 @@ function storageSection() {
       h(
         "div",
         { class: "pad card-head" },
-        h("div", { class: "section-head" }, h("h2", null, t("disks.title"), h("span", { class: "muted" }, t("disks.connected", { n: data.disks.length }))), data.tool === "ok" && data.disks.length > 0 && h("div", { class: "row-actions" }, checked > 0 && h("span", { class: "muted small" }, t("disks.checked", { when: ago(checked) })), button(t("disks.checkNow"), { class: "small", onclick: busy("…", { path: "/api/disks/check" }) }, "refresh"))),
+        h("div", { class: "section-head" }, h("h2", null, t("disks.title"), h("span", { class: "muted" }, t("disks.connected", { n: data.disks.length }))), h("div", { class: "row-actions" }, (data.mounting?.mergeable.length ?? 0) > 1 && button(t("mounting.merge"), { class: "small", onclick: () => mergeDialog() }), data.tool === "ok" && data.disks.length > 0 && checked > 0 && h("span", { class: "muted small" }, t("disks.checked", { when: ago(checked) })), data.tool === "ok" && data.disks.length > 0 && button(t("disks.checkNow"), { class: "small", onclick: busy("…", { path: "/api/disks/check" }) }, "refresh"))),
         h("p", { class: "muted small" }, t(data.disks.length ? "disks.lead" : "disks.none")),
         error,
       ),

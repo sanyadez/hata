@@ -8,6 +8,8 @@
  * - **Disconnect** unmounts what Hata itself connected and takes its line out of /etc/fstab; a
  *   removable disk is also powered down, safe to pull out.
  * - A USB disk plugged in is connected by itself when the setting is on.
+ * - **Merge** shows several connected disks as one folder (mergerfs): a new file goes to the disk with
+ *   the most free room, the files stay plain files on their own disks, and there is no second copy.
  *
  * Which disks may never be touched (`blockers`), the lines of /etc/fstab and the mount options are pure
  * functions. Hata's lines in /etc/fstab carry a comment above them; no other line is ever changed.
@@ -15,6 +17,7 @@
 import { chmodSync, chownSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { record } from "./activity";
+import { bus } from "./bus";
 import { DATA_DIR, SECRETS_DIR, settings } from "./config";
 import { connected, diskLabel, type Disk, type Volume } from "./disks";
 import { isPlainObject, readJsonFile, writeJsonAtomic, writeTextAtomic } from "./fsutil";
@@ -127,6 +130,28 @@ export function withMount(text: string, entry: Omit<FstabEntry, "ours">): string
 export function optionsFor(fstype: string, keep: boolean): string {
   const own = POSIX_FS.test(fstype) ? ["defaults", "noatime"] : ["rw", "umask=000", ...(fstype === "vfat" ? ["utf8"] : [])];
   return [...own, ...(keep ? ["nofail", "x-systemd.device-timeout=10s"] : [])].join(",");
+}
+
+// ---- several disks as one folder ----
+
+export const POOL_FS = "fuse.mergerfs";
+
+/** The merged folders Hata made, with the folders each is made of */
+export const pools = (entries: FstabEntry[]): Record<string, string[]> => Object.fromEntries(entries.filter((e) => e.ours && e.fstype === POOL_FS).map((e) => [e.path, e.spec.split(":")]));
+
+/**
+ * The options of a merged folder: a new file goes to the disk with the most free room, and one that
+ * outgrows its disk moves to another. It waits for every disk it is made of — merged without one, new
+ * files would land on the system's disk, in the empty folder the missing one leaves.
+ */
+export function poolOptions(name: string, branches: string[]): string {
+  return ["cache.files=off", "category.create=mfs", "moveonenospc=true", "minfreespace=1G", "allow_other", `fsname=${name}`, "nofail", ...branches.map((b) => `x-systemd.requires-mounts-for=${b}`)].join(",");
+}
+
+/** The connected folders that can be merged: Hata's own, kept, of a file system with owners, in no merged folder yet */
+export function mergeable(entries: FstabEntry[], mounted: string[]): string[] {
+  const taken = new Set(Object.values(pools(entries)).flat());
+  return entries.filter((e) => e.ours && POSIX_FS.test(e.fstype) && mounted.includes(e.path) && !taken.has(e.path)).map((e) => e.path);
 }
 
 // ---- the running part ----
@@ -337,6 +362,38 @@ export function connectVolume(device: string, label: string, keep: boolean, user
   });
 }
 
+/** Shows several connected folders as one, at /mnt/<name> */
+export function mergeFolders(branches: unknown, label: string, user: string): Promise<Outcome> {
+  return oneAtATime(async () => {
+    if (!NAME_RE.test(label)) return { error: "disk.badName" };
+    const lines = fstab();
+    const can = mergeable(lines, [...mountedAt().keys()]);
+    const chosen = Array.isArray(branches) ? [...new Set(branches.filter((b): b is string => typeof b === "string"))] : [];
+    if (chosen.length < 2 || chosen.some((b) => !can.includes(b))) return { error: "disk.badMerge" };
+    if (!has("mergerfs")) return { error: "disk.noMergeTool", needs: { package: "mergerfs", install: installCommand("mergerfs") } };
+    const path = join(MOUNT_ROOT, label);
+    if (!freeFolder(path) || lines.some((e) => e.path === path)) return { error: "disk.folderTaken" };
+    const made = !existsSync(path);
+    mkdirSync(path, { recursive: true });
+    const before = readText(FSTAB);
+    writeFstab(withMount(before, { spec: chosen.join(":"), path, fstype: POOL_FS, options: poolOptions(label, chosen) }));
+    await reload();
+    const result = await run(["mount", path], 60_000);
+    if (result.code !== 0) {
+      writeFstab(before);
+      await reload();
+      if (made) {
+        try {
+          rmdirSync(path);
+        } catch {}
+      }
+      return { error: "disk.mountFailed", message: said(result) };
+    }
+    record("system.disk.merge", { user, detail: `${chosen.join(" + ")} → ${path}` });
+    return { path };
+  });
+}
+
 const within = (path: string, root: string): boolean => path === root || path.startsWith(root.endsWith("/") ? root : root + "/");
 
 /** What of Hata lives on a mounted folder — it cannot be taken away from under it */
@@ -364,6 +421,7 @@ export function disconnect(path: string, user: string): Promise<Outcome> {
     const kept = fstab().find((e) => e.ours && e.path === path);
     const index = temporary.findIndex((t) => t.path === path);
     if (!kept && index < 0) return { error: "disk.notOurs" };
+    if (Object.values(pools(fstab())).some((branches) => branches.includes(path))) return { error: "disk.holds.pool" };
     const used = holds(path, { dataRoot: settings.dataRoot, backupDir: settings.backup.dir, state: [DATA_DIR, SECRETS_DIR], shares: settings.shares.map((s) => s.path) });
     if (used) return { error: `disk.holds.${used}` };
     const device = mountedAt().get(path);
@@ -453,6 +511,7 @@ const SLOW_LOOK = 10;
 /** Watches the kernel's list of partitions — cheap to read — and looks closer when it changes */
 export function startMounting(): void {
   let last = "";
+  let mounts = "";
   let again = 1;
   let ticks = 0;
   let automount = settings.storage.automount;
@@ -460,6 +519,10 @@ export function startMounting(): void {
     const now = readText("/proc/partitions");
     // a file system made on a disk that is already plugged in changes no partition: seen at the slow look
     if (now !== last || automount !== settings.storage.automount || (settings.storage.automount && ++ticks % SLOW_LOOK === 0)) again = Math.max(again, now !== last ? LOOK_AGAIN : 1);
+    // the page shows the disks and where they are mounted: it is told when either changed
+    const mounted = readText("/proc/mounts");
+    if ((last && now !== last) || (mounts && mounted !== mounts)) bus.publish("disks");
+    mounts = mounted;
     last = now;
     automount = settings.storage.automount;
     if (again > 0) {
@@ -481,11 +544,16 @@ export interface MountingReport {
   mountable: string[];
   /** The folders Hata connected: kept in /etc/fstab, or until the disk is unplugged */
   ours: Record<string, "kept" | "temporary">;
+  /** The merged folders, with the folders each is made of */
+  pools: Record<string, string[]>;
+  /** The connected folders that can be merged into one */
+  mergeable: string[];
 }
 
 export function mountingReport(disks: Disk[]): MountingReport {
   const ours: MountingReport["ours"] = {};
-  for (const entry of fstab()) if (entry.ours) ours[entry.path] = "kept";
+  const lines = fstab();
+  for (const entry of lines) if (entry.ours) ours[entry.path] = "kept";
   for (const entry of temporary) ours[entry.path] = "temporary";
   return {
     possible: disks.some((d) => existsSync(d.path)),
@@ -493,5 +561,7 @@ export function mountingReport(disks: Disk[]): MountingReport {
     blockers: Object.fromEntries(disks.map((d) => [d.name, blockers(d)])),
     mountable: disks.flatMap((d) => d.volumes.filter(mountable).map((v) => v.path)),
     ours,
+    pools: pools(lines),
+    mergeable: mergeable(lines, [...mountedAt().keys()]),
   };
 }

@@ -71,6 +71,13 @@ Early development. What works today:
   a USB disk can be connected by itself when plugged in, and is ejected before it is pulled out. Erasing
   asks for the disk's name and your password, and is never offered for the system's disk, a disk in use
   or a member of an array;
+- the data folder moves to a disk with one button (Settings → Apps, or right after preparing a disk):
+  the apps are stopped, everything is copied, the apps' compose files — comments and all —, the backups,
+  the shared folders and the folders on the dashboard are pointed at the new place, and the apps start
+  again; the old folder is kept until you delete it, and a snapshot taken before the move still restores;
+- several disks as one folder (mergerfs, installed on request): a new file goes to the disk with the most
+  free room, every file stays a plain file on one of the disks. A disk that is plugged in shows up on the
+  page by itself, and the disks are in the sidebar of Files;
 - what fills the data folder (same page): measured once a day — its folders, the data of each app, the
   trash — with how much each grew over the week and, when the disk is filling up, in how long it will
   be full at this pace;

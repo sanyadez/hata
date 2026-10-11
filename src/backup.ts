@@ -10,15 +10,16 @@
  * started again whatever happens. `tar` does the work: it keeps owners and permissions, which the apps
  * depend on.
  */
-import { chmodSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statfsSync, statSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statfsSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { APP_NAME_RE, appMeta, bindSources, normalize } from "./appform";
 import { AppError, appAction, appDir, dc, installedNames, jobFinished, onBeforeUpdate, readCompose, startJob, type Job, type Log } from "./apps";
 import { record } from "./activity";
 import { DATA_DIR, SECRET_NAMES, SECRETS_DIR, settings } from "./config";
 import { listContainers, PROJECT_LABEL, run } from "./docker";
-import { readJsonFile, writeJsonAtomic } from "./fsutil";
+import { readJsonFile, writeJsonAtomic, writeTextAtomic } from "./fsutil";
 import { forgetSnapshot, offsiteStatus, syncOffsite, type LocalSet, type OffsiteStatus } from "./offsite";
+import { rebaseCompose, rebaseEnv, rebasePath } from "./rebase";
 import { listServerSnapshots, RESTORE_MARK, SERVER_DIR, stateExcludes, type ServerSnapshot } from "./restore";
 import { VERSION } from "./version";
 
@@ -36,6 +37,8 @@ export interface Snapshot {
   paths: string[];
   /** Images the app was running, for the record */
   images: string[];
+  /** The data folder of that moment; older snapshots do not say */
+  dataRoot?: string;
 }
 
 const KEEP_PRE_UPDATE = 3;
@@ -96,6 +99,16 @@ export function restorable(path: string, name: string, dataRoot = settings.dataR
 export function movedAppDir(paths: string[], name: string, current = appDir(name)): string | null {
   const then = paths.find((p) => p.endsWith(`/apps/${name}`) && !p.split("/").includes(".."));
   return then && then !== current ? then : null;
+}
+
+/**
+ * The data folder a snapshot was taken in, when it is not the one of now: it was moved since. A
+ * snapshot that does not say is read by its paths — `<data folder>/AppData/<app's folder>`.
+ */
+export function movedDataRoot(snapshot: Pick<Snapshot, "paths" | "dataRoot">, name: string, current = settings.dataRoot): string | null {
+  const data = snapshot.paths.find((p) => p.includes("/AppData/") && !p.startsWith("/var/lib/docker/") && !p.endsWith(`/apps/${name}`));
+  const then = snapshot.dataRoot ?? (data ? data.slice(0, data.indexOf("/AppData/")) : "");
+  return then && then !== "/" && current !== "/" && then !== current ? then : null;
 }
 
 /** tar's `--transform` that unpacks what lay in `from` into `to`; file names only, links keep their targets */
@@ -199,7 +212,7 @@ export async function takeSnapshot(name: string, reason: SnapshotReason, log: Lo
     if (wasRunning) await dc(name, ["start"], log).catch((e) => log(`Could not start the app again: ${e instanceof Error ? e.message : e}`));
   }
 
-  const snapshot: Snapshot = { id, app: name, at: at.getTime(), reason, size: statSync(archive).size, paths, images: [...new Set(containers.map((c) => c.Image))] };
+  const snapshot: Snapshot = { id, app: name, at: at.getTime(), reason, size: statSync(archive).size, paths, images: [...new Set(containers.map((c) => c.Image))], dataRoot: settings.dataRoot };
   writeJsonAtomic(join(dir, id + ".json"), snapshot);
   log(`Snapshot ${id}: ${(snapshot.size / 1024 / 1024).toFixed(1)} MB`);
   for (const old of expired(listSnapshots(name), settings.backup.keep)) {
@@ -230,7 +243,11 @@ export function restoreSnapshot(name: string, id: string, user: string): Job {
   return startJob(name, "restore", user, async (log) => {
     // the app's directory goes to where the apps are kept now, wherever they were when the snapshot was taken
     const moved = movedAppDir(snapshot.paths, name);
-    const refused = snapshot.paths.filter((p) => p !== moved && !restorable(p, name));
+    // and its data to where the data folder is now
+    const formerRoot = movedDataRoot(snapshot, name);
+    const place = (p: string): string => (p === moved ? appDir(name) : ((formerRoot && rebasePath(p, formerRoot, settings.dataRoot)) ?? p));
+    const elsewhere = snapshot.paths.filter((p) => place(p) !== p);
+    const refused = snapshot.paths.filter((p) => p !== moved && !restorable(place(p), name));
     if (refused.length) throw new Error(`The snapshot holds paths a restore must not touch: ${refused.join(", ")}`);
     // the archive is ours, but it has been lying on a disk: check it holds what its description says
     const listing = await run(["tar", "-tzf", archive]);
@@ -240,14 +257,24 @@ export function restoreSnapshot(name: string, id: string, user: string): Job {
     if (stray.length) throw new Error(`The archive holds files outside the app: ${stray[0]}`);
 
     if (existsSync(join(appDir(name), "compose.yml"))) await dc(name, ["stop"], log);
-    for (const path of snapshot.paths.map((p) => (p === moved ? appDir(name) : p))) {
+    for (const path of snapshot.paths.map(place)) {
       log(`Replacing ${path}`);
       rmSync(path, { recursive: true, force: true });
     }
     if (moved) mkdirSync(dirname(appDir(name)), { recursive: true });
-    log(`$ tar -xzf ${archive} -C /${moved ? `  (${moved} → ${appDir(name)})` : ""}`);
-    const tar = await run(["tar", "--numeric-owner", "-xzpf", archive, "-C", "/", ...(moved ? [tarMove(moved, appDir(name))] : [])]);
+    log(`$ tar -xzf ${archive} -C /${elsewhere.map((p) => `  (${p} → ${place(p)})`).join("")}`);
+    const tar = await run(["tar", "--numeric-owner", "-xzpf", archive, "-C", "/", ...elsewhere.map((p) => tarMove(p, place(p)))]);
     if (tar.code !== 0) throw new Error(tar.output.split("\n").slice(-3).join("\n") || `tar exited with ${tar.code}`);
+    // the compose file of that moment names the folders of that moment
+    if (formerRoot) {
+      for (const file of ["compose.yml", ".env"]) {
+        const path = join(appDir(name), file);
+        if (!existsSync(path)) continue;
+        const text = readFileSync(path, "utf8");
+        const next = file === ".env" ? rebaseEnv(text, formerRoot, settings.dataRoot) : rebaseCompose(text, formerRoot, settings.dataRoot);
+        if (next !== text) writeTextAtomic(path, next);
+      }
+    }
     await dc(name, ["up", "-d", "--remove-orphans"], log);
   });
 }
