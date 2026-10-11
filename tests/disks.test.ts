@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { attention } from "../src/attention";
-import { healthOf, parseLsblk, parseMounts, parseSmart, verdict, type DiskReport, type Smart } from "../src/disks";
+import { healthOf, parseLsblk, parseMounts, parseSmart, remember, verdict, type DiskReport, type Smart } from "../src/disks";
+import { keyOf } from "../src/notify";
 import type { SystemStatus } from "../src/system";
 
 const GB = 1024 ** 3;
@@ -180,4 +181,70 @@ test("attention: one line per disk in trouble, about the worst it reports", () =
     { id: "smart:S-sdb", severity: "danger", code: "smart.failing", detail: { disk: "Seagate", n: 0 } },
     { id: "smart:sdc", severity: "warn", code: "smart.pending", detail: { disk: "sdc", n: 3 } },
   ]);
+});
+
+const reading = (patch: Partial<Smart> = {}): Smart => ({ passed: true, temperature: 30, powerOnHours: 100, powerCycles: 5, reallocated: 0, pending: 0, uncorrectable: 0, crc: 0, mediaErrors: null, wear: null, spare: null, critical: false, lastTest: null, testing: null, ...patch });
+const DAY = 24 * 3600_000;
+
+test("remember: a counter is logged when first seen and at every change, and its growth is news once a day", () => {
+  let record = remember(undefined, reading(), 1000);
+  expect(record.log.reallocated).toEqual([{ at: 1000, value: 0 }]);
+  expect(record.log.mediaErrors).toBeUndefined();
+  expect(record.grew).toBeUndefined();
+
+  record = remember(record, reading(), 2000);
+  expect(record.log.reallocated).toHaveLength(1);
+  expect(record.at).toBe(2000);
+
+  record = remember(record, reading({ reallocated: 8 }), 3000);
+  expect(record.log.reallocated).toEqual([
+    { at: 1000, value: 0 },
+    { at: 3000, value: 8 },
+  ]);
+  expect(record.grew).toBe(3000);
+
+  // the same day: logged, but not news again
+  record = remember(record, reading({ reallocated: 9, pending: 2 }), 4000);
+  expect(record.log.reallocated).toHaveLength(3);
+  expect(record.grew).toBe(3000);
+
+  record = remember(record, reading({ reallocated: 200, pending: 2 }), 3000 + DAY);
+  expect(record.grew).toBe(3000 + DAY);
+});
+
+test("remember: a disk that came with bad sectors is no news, nor is a cable, nor a counter that fell", () => {
+  let record = remember(undefined, reading({ reallocated: 8 }), 1000);
+  expect(record.grew).toBeUndefined();
+  record = remember(record, reading({ reallocated: 8, crc: 40 }), 2000);
+  expect(record.log.crc).toHaveLength(2);
+  expect(record.grew).toBeUndefined();
+  record = remember(record, reading({ reallocated: 8, crc: 40, pending: 3 }), 3000);
+  expect(record.grew).toBe(3000);
+  record = remember(record, reading({ reallocated: 8, crc: 40, pending: 0 }), 3000 + 2 * DAY);
+  expect(record.log.pending!.at(-1)).toEqual({ at: 3000 + 2 * DAY, value: 0 });
+  expect(record.grew).toBe(3000);
+});
+
+test("remember: the hottest reading is kept, a reading without data keeps the history, the log does not grow without end", () => {
+  let record = remember(undefined, reading({ temperature: 40 }), 1000);
+  record = remember(record, reading({ temperature: 51 }), 2000);
+  record = remember(record, reading({ temperature: 44 }), 3000);
+  expect(record.hottest).toEqual({ at: 2000, value: 51 });
+  record = remember(record, null, 4000);
+  expect(record.smart).toBeNull();
+  expect(record.hottest?.value).toBe(51);
+  expect(record.log.reallocated).toHaveLength(1);
+  for (let i = 1; i <= 100; i++) record = remember(record, reading({ reallocated: i }), 4000 + i);
+  expect(record.log.reallocated).toHaveLength(40);
+  expect(record.log.reallocated![0]).toEqual({ at: 1000, value: 0 });
+  expect(record.log.reallocated!.at(-1)!.value).toBe(100);
+});
+
+test("attention: a counter that grew makes the disk's item news again", () => {
+  const system = { cpu: { percent: 0 }, memory: { total: 0, used: 0 }, disks: [], temperature: null } as unknown as SystemStatus;
+  const disk = (grew: number | null) => ({ name: "sda", model: "WD Red", serial: "WD-1", findings: [{ code: "reallocated", severity: "warn", n: 8 }], grew }) as unknown as DiskReport;
+  const item = (grew: number | null) => attention({ system, docker: { available: true } as never, apps: [], activity: [], disks: [disk(grew)] })[0]!;
+  expect(item(null).at).toBeUndefined();
+  expect(keyOf(item(null))).toBe("smart:WD-1");
+  expect(keyOf(item(5000))).toBe("smart:WD-1@5000");
 });

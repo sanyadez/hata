@@ -4377,6 +4377,8 @@ function powerOnTime(hours) {
   return [months >= 12 && t("time.years", { n: Math.floor(months / 12) }), months % 12 > 0 && t("time.months", { n: months % 12 })].filter(Boolean).join(" ");
 }
 
+const shortDate = (ts) => new Date(ts).toLocaleDateString(state.lang, { day: "numeric", month: "short", ...(new Date(ts).getFullYear() === new Date().getFullYear() ? {} : { year: "numeric" }) });
+
 let diskDialogPaint = null;
 
 function setDisks(data) {
@@ -4405,7 +4407,12 @@ function diskDialog(name) {
     if (!disk) return dialog?.close();
     const s = disk.smart;
     const value = (label, hint, shown, bad = false) => h("div", { class: "kv" }, h("div", null, label, hint && h("div", { class: "muted small" }, hint)), h("strong", { class: bad ? "bad" : "" }, shown));
-    const count = (key, n) => n != null && value(t(`disks.value.${key}`), t(`disks.value.${key}Hint`), String(n), n > 0 && key !== "crc");
+    // a counter Hata saw at another value says so: "was 0 until 14 Sep"
+    const moved = (key) => {
+      const log = disk.log?.[key === "media" ? "mediaErrors" : key] ?? [];
+      return log.length > 1 ? t("disks.value.was", { n: log.at(-2).value, date: shortDate(log.at(-1).at) }) : "";
+    };
+    const count = (key, n) => n != null && value(t(`disks.value.${key}`), moved(key) || t(`disks.value.${key}Hint`), String(n), n > 0 && key !== "crc");
     const last = s?.lastTest;
     put(
       body,
@@ -4425,7 +4432,7 @@ function diskDialog(name) {
           count("crc", s.crc),
           s.wear != null && value(t("disks.value.wear"), t("disks.value.wearHint"), s.wear + "%", s.wear >= 90),
           s.spare && value(t("disks.value.spare"), t("disks.value.spareHint", { n: s.spare.threshold }), s.spare.left + "%", s.spare.left < s.spare.threshold),
-          s.temperature != null && value(t("disks.value.temperature"), "", s.temperature + " °C", disk.findings.some((f) => f.code === "hot")),
+          s.temperature != null && value(t("disks.value.temperature"), disk.hottest && disk.hottest.value > s.temperature ? t("disks.value.hottest", { n: disk.hottest.value, date: shortDate(disk.hottest.at) }) : "", s.temperature + " °C", disk.findings.some((f) => f.code === "hot")),
           s.powerOnHours != null && value(t("disks.value.powerOn"), t("disks.value.powerOnHint", { hours: s.powerOnHours, cycles: s.powerCycles ?? "—" }), powerOnTime(s.powerOnHours)),
           value(t("disks.value.lastTest"), last ? t("disks.value.testWhen", { type: has("disks.test." + last.type) ? t("disks.test." + last.type) : last.type, hours: Math.max(0, (s.powerOnHours ?? 0) - (last.hours ?? 0)) }) : "", last ? t(last.passed ? "disks.value.testPassed" : "disks.value.testFailed") : t("disks.value.testNever"), last && !last.passed),
         ),
@@ -4461,12 +4468,15 @@ function storageSection() {
   };
   error.id = "disks-error";
 
-  // while a disk tests itself, its progress is worth watching
+  // while a disk tests itself or the data folder is measured, the progress is worth watching
   clearTimeout(disksTimer);
-  if (data.disks.some((d) => d.smart?.testing != null)) {
-    disksTimer = setTimeout(async () => {
-      if (state.route.view === "settings" && state.route.section === "storage") setDisks(await api("GET", "/api/disks").catch(() => state.disks));
-    }, 20_000);
+  if (data.fills?.running || data.disks.some((d) => d.smart?.testing != null)) {
+    disksTimer = setTimeout(
+      async () => {
+        if (state.route.view === "settings" && state.route.section === "storage") setDisks(await api("GET", "/api/disks").catch(() => state.disks));
+      },
+      data.fills?.running ? 3000 : 20_000,
+    );
   }
 
   const row = (disk) => {
@@ -4527,7 +4537,90 @@ function storageSection() {
         h("div", { class: "pad card-head" }, h("h2", null, t("disks.fs.title")), h("p", { class: "muted small" }, t("disks.fs.lead"))),
         h("table", { class: "disks" }, h("thead", null, h("tr", null, h("th", null, t("disks.fs.col.path")), h("th", null, t("disks.fs.col.source")), h("th", null, t("disks.col.usage")))), h("tbody", null, data.mounts.map(fsRow))),
       ),
+    data.fills && fillsCard(data.fills, busy),
   ].filter(Boolean);
+}
+
+const FILLS_COLOURS = 6;
+// below this share a folder is one of "the smaller ones", unless it is among the first few
+const FILLS_SMALL = 0.01;
+const FILLS_ALWAYS = 6;
+
+/** "in about 3 wk": days as days, weeks or months */
+const aboutDays = (days) => (days < 14 ? t("time.days", { n: Math.max(days, 1) }) : days < 70 ? t("time.weeks", { n: Math.round(days / 7) }) : t("time.months", { n: Math.round(days / 30.44) }));
+
+function fillsCard(fills, busy) {
+  const used = fills.used;
+  const apps = new Map((state.overview?.apps ?? []).map((app) => [app.name, app]));
+  let parts = fills.parts.filter((part) => part.kind !== "mount");
+  const small = parts.filter((part, i) => part.kind !== "rest" && i >= FILLS_ALWAYS && part.size / used < FILLS_SMALL);
+  if (small.length > 1) {
+    const week = small.some((part) => part.week != null) ? small.reduce((sum, part) => sum + (part.week ?? 0), 0) : null;
+    parts = [...parts.filter((part) => !small.includes(part)), { kind: "small", path: "", name: "", size: small.reduce((sum, part) => sum + part.size, 0), week, n: small.length }];
+  }
+  // what the file system holds beside the data folder: the system, Docker's images, other folders
+  const outside = fills.at && used - fills.size > Math.max(used * 0.02, 1024 ** 3) ? used - fills.size : 0;
+  if (outside) parts.push({ kind: "outside", path: "", name: "", size: outside, week: null });
+  parts.push(...fills.parts.filter((part) => part.kind === "mount"));
+
+  const colour = (i, part) => (part.kind === "outside" || part.kind === "small" || part.kind === "rest" || i >= FILLS_COLOURS ? "c-rest" : "c" + i);
+  const share = (size) => (size / fills.total) * 100;
+  const bar = h(
+    "div",
+    { class: "fills-bar" },
+    parts.map((part, i) => {
+      if (part.kind === "mount") return null;
+      const seg = h("i", { class: colour(i, part), title: `${partName(part)} · ${bytes(part.size)}` });
+      seg.style.width = share(part.size) + "%";
+      return seg;
+    }),
+  );
+  function partName(part) {
+    if (part.kind === "app") return apps.get(part.name)?.title ?? part.name;
+    if (part.kind === "trash") return t("trash.title");
+    if (part.kind === "rest") return t("fills.rest");
+    if (part.kind === "small") return t("fills.small", { n: part.n });
+    if (part.kind === "outside") return t("fills.outside");
+    return part.name;
+  }
+  const trend = (part) => {
+    if (part.kind === "mount") return h("span", { class: "muted" }, t("fills.mount"));
+    if (part.week == null) return h("span", { class: "muted" }, "—");
+    // a change too small to mean anything is "steady"
+    if (Math.abs(part.week) < Math.max(part.size * 0.005, 50 * 1024 ** 2)) return h("span", { class: "muted" }, t("fills.steady"));
+    return h("span", { class: part.week > 0 ? "" : "muted" }, t("fills.week", { size: (part.week > 0 ? "+" : "−") + bytes(Math.abs(part.week)) }));
+  };
+  const row = (part, i) => {
+    const href = part.kind === "app" && apps.has(part.name) ? `#/apps/${part.name}` : part.kind === "trash" ? "#/trash" : part.path ? filesHash(part.path) : "";
+    const name = partName(part);
+    const percent = (part.size / used) * 100;
+    return h(
+      "tr",
+      null,
+      h("td", null, h("div", { class: "with-icon" }, h("i", { class: "dot " + (part.kind === "mount" ? "c-rest" : colour(i, part)) }), h("div", null, href ? h("a", { class: "strong", href }, name) : h("div", { class: "strong" }, name), part.kind === "outside" ? h("div", { class: "muted small" }, t("fills.outsideHint")) : part.path && h("div", { class: "muted small mono clip" }, part.path)))),
+      h("td", { class: "num" }, part.kind === "mount" ? "" : bytes(part.size)),
+      h("td", { class: "num muted" }, part.kind === "mount" ? "" : percent < 1 ? "<1%" : Math.round(percent) + "%"),
+      h("td", null, trend(part)),
+    );
+  };
+  const measure = busy(t("fills.measuring"), { path: "/api/disks/fills" });
+  return h(
+    "section",
+    { class: "card table-wrap fills" },
+    h(
+      "div",
+      { class: "pad card-head" },
+      h(
+        "div",
+        { class: "section-head" },
+        h("h2", null, t("fills.title", { path: fills.root }), h("span", { class: "muted" }, t("disks.usedOf", { used: bytes(used), total: bytes(fills.total) }))),
+        h("div", { class: "row-actions" }, fills.fullIn != null && h("span", { class: "chip warn" }, t("fills.fullIn", { time: aboutDays(fills.fullIn) })), fills.at && !fills.running && h("span", { class: "muted small" }, t("fills.measured", { when: ago(fills.at) })), button(t(fills.running ? "fills.measuring" : fills.at ? "fills.again" : "fills.measure"), { class: "small", disabled: fills.running, onclick: measure }, "refresh")),
+      ),
+      h("p", { class: "muted small" }, t(fills.at ? "fills.lead" : "fills.never")),
+      fills.at && bar,
+    ),
+    fills.at && h("table", { class: "disks" }, h("thead", null, h("tr", null, h("th", null, t("fills.col.folder")), h("th", { class: "num" }, t("fills.col.size")), h("th", { class: "num" }, t("fills.col.share")), h("th", null, t("fills.col.week")))), h("tbody", null, parts.map(row))),
+  );
 }
 
 // --- Folders shared over the network ----------------------------------------------------------------

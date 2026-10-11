@@ -520,6 +520,16 @@ tr.clickable:hover td { background: var(--surface-2); }
 .banner.danger { background: var(--danger-soft); border-color: var(--danger); }
 .kv-list .kv { border-top: 1px solid var(--border); padding: 10px 0; align-items: center; }
 dialog.disk header .state { flex: none; }
+.fills-bar { display: flex; gap: 2px; height: 10px; margin-top: 8px; border-radius: 3px; background: var(--surface-2); overflow: hidden; }
+.fills-bar i { flex: none; min-width: 2px; height: 100%; }
+.fills .dot { flex: none; width: 10px; height: 10px; border-radius: 3px; }
+.fills .c0 { background: #8b6cf0; }
+.fills .c1 { background: var(--info); }
+.fills .c2 { background: var(--danger); }
+.fills .c3 { background: #2fb3c4; }
+.fills .c4 { background: var(--accent); }
+.fills .c5 { background: var(--ok); }
+.fills .c-rest { background: var(--faint); }
 .setting { display: flex; align-items: center; gap: 24px; padding: 14px 0; border-top: 1px solid var(--border); flex-wrap: wrap; }
 .setting strong { font-weight: 600; }
 .setting .muted { margin-top: 3px; overflow-wrap: anywhere; }

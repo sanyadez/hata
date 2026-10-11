@@ -22,6 +22,7 @@ import { APP_NAME_RE, dumpCompose } from "./appform";
 import { trashSizeOn } from "./trash";
 import { addShare, changeShare, installSamba, listShares, refreshShares, removeShare, startShares } from "./shares";
 import { checkDisks, diskHealth, installTool, listDisks, startDisks, startSelfTest } from "./disks";
+import { fills, measureFills, startFills } from "./fills";
 import {
   acceptInvite,
   addPasskey,
@@ -791,25 +792,31 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
   }
 
   // ---- disks and their health ----
-  if (path === "/api/disks" && method === "GET") return json(await listDisks());
+  const storage = async () => json({ ...(await listDisks()), fills: fills() });
+  if (path === "/api/disks" && method === "GET") return storage();
   if (path === "/api/disks/check" && method === "POST") {
     // a disk that sleeps takes its time to spin up
     server.timeout(req, 0);
     await checkDisks(true);
-    return json(await listDisks());
+    return storage();
   }
   if (path === "/api/disks/tool" && method === "POST") {
     server.timeout(req, 0);
     const message = await installTool();
     if (message) return fail(500, "disk.installFailed", { message });
-    return json(await listDisks());
+    return storage();
+  }
+  // the answer does not wait for the measuring: the page asks again while it runs
+  if (path === "/api/disks/fills" && method === "POST") {
+    void measureFills();
+    return storage();
   }
   const diskTest = /^\/api\/disks\/([A-Za-z0-9_-]+)\/test$/.exec(path);
   if (diskTest && method === "POST") {
     const type = (await body(req)).type === "long" ? "long" : "short";
     const failed = await startSelfTest(diskTest[1]!, type);
     if (failed) return fail(failed === "disk.unknown" ? 404 : 400, failed);
-    return json(await listDisks());
+    return storage();
   }
 
   // ---- folders shared over the network ----
@@ -1287,6 +1294,7 @@ export async function serve(): Promise<void> {
   scheduleUpdateChecks();
   startSampler();
   startDisks();
+  startFills();
   startShares();
   startTrash();
   scheduleStoreSync();

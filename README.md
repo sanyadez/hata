@@ -62,8 +62,12 @@ Early development. What works today:
   words — healthy, wearing out or failing, and why — its temperature, how full it is and where it is
   mounted; the file systems of the server, network folders included. Health is read every half an hour
   without waking a disk that sleeps, a disk in trouble shows up under "needs attention" and is sent as a
-  notification, and a disk can be told to test itself. It needs `smartmontools`, which Hata offers to
-  install; nothing on a disk is changed;
+  notification, and a disk can be told to test itself. The counters that matter are remembered: a disk's
+  page says "was 0 until 14 Sep", and a counter that grows is sent as a notification again. It needs
+  `smartmontools`, which Hata offers to install; nothing on a disk is changed;
+- what fills the data folder (same page): measured once a day — its folders, the data of each app, the
+  trash — with how much each grew over the week and, when the disk is filling up, in how long it will
+  be full at this pace;
 - folders shared over the network (Settings → Network folders, or a folder's menu in Files): a folder of
   the server opens in Explorer, Finder or a phone's file manager like a network disk (SMB). People connect
   with the name and password they sign in to Hata with; for every folder each user may look, change or

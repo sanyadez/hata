@@ -3,13 +3,17 @@
  *
  * What is connected comes from `lsblk`, what is mounted from /proc/mounts, and what a disk says about
  * itself (SMART) from `smartctl` of smartmontools — when it is installed. Reading their output and
- * judging a disk (`verdict`) are pure functions; the rest keeps the latest reading of every disk in
- * memory and refreshes it every half an hour without waking a disk that sleeps.
+ * judging a disk (`verdict`) are pure functions; the rest keeps the latest reading of every disk and
+ * refreshes it every half an hour without waking a disk that sleeps. The readings and how the
+ * counters moved (`remember`) are kept in `disks.json`, by serial number, so they outlive a restart.
  *
  * Nothing here changes a disk: no formatting, no mounting. The one thing that can be started is the
  * disk's own self-test.
  */
 import { existsSync, readFileSync, statfsSync } from "node:fs";
+import { join } from "node:path";
+import { DATA_DIR } from "./config";
+import { isPlainObject, readJsonFile, writeJsonAtomic } from "./fsutil";
 import { installCommand, installPackage, PATH, run } from "./packages";
 
 // ---- what is connected (lsblk) ----
@@ -265,6 +269,52 @@ export const healthOf = (findings: Finding[] | null): Health => (!findings ? "un
 /** The name a person knows a disk by: its model, or the device when it has none */
 export const diskLabel = (disk: Pick<Disk, "model" | "name">): string => disk.model || disk.name;
 
+// ---- how the counters moved ----
+
+/** The counters worth a history: they stand still on a healthy disk */
+export type Counter = "reallocated" | "pending" | "uncorrectable" | "mediaErrors" | "crc";
+const COUNTERS: Counter[] = ["reallocated", "pending", "uncorrectable", "mediaErrors", "crc"];
+
+export interface Change {
+  at: number;
+  value: number;
+}
+
+/** What is kept about a disk between readings */
+export interface DiskRecord {
+  smart: Smart | null;
+  at: number;
+  /** Per counter: its value when first seen and at every change since, oldest first */
+  log: Partial<Record<Counter, Change[]>>;
+  /** When a counter last grew — the news of the "needs attention" item */
+  grew?: number;
+  hottest?: Change;
+}
+
+const LOG_KEEPS = 40;
+const DAY_MS = 24 * 3600_000;
+
+/**
+ * A new reading added to what is known about a disk. A growing counter is news, but at most once a
+ * day: a dying disk moves its counters with every reading. Connection errors are a cable — logged, no news.
+ */
+export function remember(old: DiskRecord | undefined, smart: Smart | null, now: number): DiskRecord {
+  const record: DiskRecord = { smart, at: now, log: { ...old?.log }, ...(old?.grew ? { grew: old.grew } : {}), ...(old?.hottest ? { hottest: old.hottest } : {}) };
+  if (!smart) return record;
+  for (const counter of COUNTERS) {
+    const value = smart[counter];
+    if (value === null) continue;
+    const log = record.log[counter] ?? [];
+    const last = log.at(-1);
+    if (last && last.value === value) continue;
+    if (last && value > last.value && counter !== "crc" && (!record.grew || now - record.grew >= DAY_MS)) record.grew = now;
+    // the first entry says what the disk came with, so it stays
+    record.log[counter] = [...log.slice(0, 1), ...log.slice(1).slice(-(LOG_KEEPS - 2)), { at: now, value }];
+  }
+  if (smart.temperature !== null && (!record.hottest || smart.temperature > record.hottest.value)) record.hottest = { at: now, value: smart.temperature };
+  return record;
+}
+
 // ---- the running part ----
 
 export interface DiskReport extends Disk {
@@ -273,6 +323,9 @@ export interface DiskReport extends Disk {
   findings: Finding[];
   /** When SMART was last read */
   checkedAt: number | null;
+  log: Partial<Record<Counter, Change[]>>;
+  grew: number | null;
+  hottest: Change | null;
 }
 
 export interface MountReport extends Mount {
@@ -289,11 +342,12 @@ const CHECK_EVERY_MS = 30 * 60_000;
 const TEST_POLL_MS = 60_000;
 const PACKAGE = "smartmontools";
 
-interface Reading {
-  smart: Smart | null;
-  at: number;
-}
-const readings = new Map<string, Reading>();
+const FILE = join(DATA_DIR, "disks.json");
+// a disk that was not seen for this long is forgotten
+const FORGET_MS = 400 * DAY_MS;
+/** By serial number, so a disk keeps its history when its letter changes; by name when it has none */
+const records = readJsonFile<Record<string, DiskRecord>>(FILE, {}, isPlainObject);
+const idOf = (disk: Pick<Disk, "serial" | "name">): string => disk.serial || disk.name;
 let known: Disk[] = [];
 let tool: ToolState = "ok";
 
@@ -344,7 +398,6 @@ let queue: Promise<void> = Promise.resolve();
 
 async function check(wake: boolean, only?: (disk: Disk) => boolean): Promise<void> {
   known = await connected();
-  for (const name of [...readings.keys()]) if (!known.some((d) => d.name === name)) readings.delete(name);
   if (outOfReach(known)) {
     tool = "denied";
     return;
@@ -360,7 +413,13 @@ async function check(wake: boolean, only?: (disk: Disk) => boolean): Promise<voi
     const outcome = await readSmart(bin, disk, wake);
     if (outcome === "denied") denied = true;
     // a sleeping disk keeps what it said when it was last awake
-    else if (outcome !== "asleep") readings.set(disk.name, { smart: outcome.smart, at: Date.now() });
+    else if (outcome !== "asleep") records[idOf(disk)] = remember(records[idOf(disk)], outcome.smart, Date.now());
+  }
+  for (const [id, record] of Object.entries(records)) if (Date.now() - record.at > FORGET_MS && !known.some((d) => idOf(d) === id)) delete records[id];
+  try {
+    writeJsonAtomic(FILE, records);
+  } catch (e) {
+    console.error("Could not save the disks' readings:", e instanceof Error ? e.message : e);
   }
   tool = denied ? "denied" : "ok";
 }
@@ -382,9 +441,9 @@ function usage(path: string): { total: number; used: number } | null {
 }
 
 const report = (disk: Disk): DiskReport => {
-  const reading = readings.get(disk.name);
+  const reading = records[idOf(disk)];
   const findings = reading?.smart ? verdict(reading.smart, disk.rotational) : null;
-  return { ...disk, smart: reading?.smart ?? null, health: healthOf(findings), findings: findings ?? [], checkedAt: reading?.at ?? null };
+  return { ...disk, smart: reading?.smart ?? null, health: healthOf(findings), findings: findings ?? [], checkedAt: reading?.at ?? null, log: reading?.log ?? {}, grew: reading?.grew ?? null, hottest: reading?.hottest ?? null };
 };
 
 /** The disks as last seen, with their health — for the "needs attention" list */
@@ -419,7 +478,7 @@ export async function startSelfTest(name: string, type: "short" | "long"): Promi
   if (!disk) return "disk.unknown";
   const bin = smartctl();
   if (!bin) return "disk.noTool";
-  if (!readings.get(name)?.smart) return "disk.noSmart";
+  if (!records[idOf(disk)]?.smart) return "disk.noSmart";
   let result = await run([bin, "-t", type, disk.path]);
   if (result.code !== 0 && disk.transport === "usb") result = await run([bin, "-d", "sat", "-t", type, disk.path]);
   if (result.code !== 0) return "disk.testFailed";
@@ -445,7 +504,7 @@ export function startDisks(): void {
   void checkDisks();
   setInterval(() => void checkDisks(), CHECK_EVERY_MS);
   setInterval(() => {
-    const testing = (disk: Disk) => readings.get(disk.name)?.smart?.testing != null;
+    const testing = (disk: Disk) => records[idOf(disk)]?.smart?.testing != null;
     if (known.some(testing)) void checkDisks(true, testing);
   }, TEST_POLL_MS);
 }

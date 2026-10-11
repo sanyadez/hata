@@ -77,7 +77,8 @@ export function attention(input: { system: SystemStatus; docker: DockerInfo; app
   // a disk that says it is in trouble: one line per disk, about the worst thing it reports
   for (const disk of input.disks ?? []) {
     const worst = disk.findings.find((f) => f.severity === "danger") ?? disk.findings[0];
-    if (worst) items.push({ id: `smart:${disk.serial || disk.name}`, severity: worst.severity, code: `smart.${worst.code}`, detail: { disk: diskLabel(disk), n: worst.n ?? 0 } });
+    // a counter that grew since is news again (`at`), also when the worst thing about the disk stays the same
+    if (worst) items.push({ id: `smart:${disk.serial || disk.name}`, severity: worst.severity, code: `smart.${worst.code}`, detail: { disk: diskLabel(disk), n: worst.n ?? 0 }, ...(disk.grew ? { at: disk.grew } : {}) });
   }
 
   const memory = system.memory.total ? Math.round((system.memory.used / system.memory.total) * 100) : 0;
