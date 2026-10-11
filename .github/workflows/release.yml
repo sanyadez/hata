@@ -27,6 +27,18 @@ jobs:
             exit 1
           fi
 
+      # The notes of a release are the message of its tag below the first line: what was done, in short.
+      # The checkout leaves the tag pointing at the commit, so the tag itself is fetched again.
+      - name: Release notes from the tag
+        run: |
+          git fetch --force --depth=1 origin "+refs/tags/$GITHUB_REF_NAME:refs/tags/$GITHUB_REF_NAME"
+          git for-each-ref --format='%(contents:body)' "refs/tags/$GITHUB_REF_NAME" > notes.md
+          if [ "$(git cat-file -t "$GITHUB_REF_NAME")" != tag ] || ! grep -q '[^[:space:]]' notes.md; then
+            echo "Tag $GITHUB_REF_NAME has no notes: make it with git tag -a and say what was done" >&2
+            exit 1
+          fi
+          cat notes.md
+
       - run: bun test
 
       - run: bun run build
@@ -41,4 +53,4 @@ jobs:
         run: |
           gh release create "$GITHUB_REF_NAME" \
             dist/hata-linux-x64 dist/hata-linux-arm64 dist/SHA256SUMS install.sh \
-            --title "Hata ${GITHUB_REF_NAME#v}" --generate-notes
+            --title "Hata ${GITHUB_REF_NAME#v}" --notes-file notes.md
