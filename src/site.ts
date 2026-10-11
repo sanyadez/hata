@@ -23,8 +23,11 @@ export function requestProto(req: Request): "http" | "https" {
 }
 
 /** The visitor's address: behind a proxy it is the last hop the proxy recorded, not the proxy itself */
+/** An IPv4 address as a listener on both families reports it (`::ffff:192.168.1.5`), in its usual form */
+export const plainIp = (address: string): string => address.replace(/^::ffff:(?=\d+\.\d+\.\d+\.\d+$)/i, "");
+
 export function clientIp(req: Request, server: Server): string {
-  const direct = server.requestIP(req)?.address ?? "unknown";
+  const direct = plainIp(server.requestIP(req)?.address ?? "unknown");
   if (!behindProxy()) return direct;
   return req.headers.get("x-forwarded-for")?.split(",").pop()?.trim() || direct;
 }

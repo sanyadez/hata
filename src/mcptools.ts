@@ -98,6 +98,7 @@ export interface ContainerState {
 
 const LOG_SIGNS: [RegExp, string][] = [
   [/address already in use|port is already allocated|bind: address/i, "A port the app wants is taken by something else on this machine. Give the app another port (its compose file) or stop what holds it."],
+  [/error while creating mount source path/i, "A folder of the app could not be made. When its data lies on a separate disk, that disk is probably not connected: Hata keeps the empty folder of an absent disk closed, so that the app does not start empty on the system's disk."],
   [/no space left on device/i, "The disk is full: the app could not write."],
   [/permission denied|operation not permitted|EACCES/i, "The app was refused access to a file or folder. Usual cause: its data folder belongs to another user than the app runs as (PUID/PGID)."],
   [/no such file or directory|ENOENT/i, "A file or folder the app expects is missing: a wrong path in the compose file, or a data folder that is not there."],

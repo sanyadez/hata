@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { Disk, Volume } from "../src/disks";
-import { blockers, holds, mountable, NAME_RE, optionsFor, parseFstab, suggestName, withMount, withoutMount } from "../src/mounting";
+import { blockers, holds, mountable, NAME_RE, optionsFor, parseFstab, upgradeLines, suggestName, withMount, withoutMount } from "../src/mounting";
 
 const volume = (patch: Partial<Volume> = {}): Volume => ({ name: "sdb1", path: "/dev/sdb1", kind: "part", size: 1e9, fstype: "ext4", label: "", uuid: "u-1", mounts: [], swap: false, total: null, used: null, ...patch });
 const disk = (volumes: Volume[] = [], patch: Partial<Disk> = {}): Disk => ({ name: "sdb", path: "/dev/sdb", model: "Disk", serial: "S1", size: 4e9, transport: "sata", rotational: true, removable: false, readOnly: false, volumes, ...patch });
@@ -57,16 +57,16 @@ test("fstab: lines are read, Hata's own are told apart", () => {
     { spec: "UUID=aaaa", path: "/", fstype: "ext4", options: "errors=remount-ro", ours: false },
     { spec: "UUID=bbbb", path: "none", fstype: "swap", options: "sw", ours: false },
     { spec: "//nas/media", path: "/mnt/with space", fstype: "cifs", options: "credentials=/root/.smb", ours: false },
-    { spec: "UUID=cccc", path: "/mnt/media", fstype: "ext4", options: "defaults,noatime,nofail,x-systemd.device-timeout=10s", ours: true },
+    { spec: "UUID=cccc", path: "/mnt/media", fstype: "ext4", options: "defaults,noatime,nofail,x-systemd.device-timeout=10s,x-systemd.before=docker.service", ours: true },
   ]);
   expect(text.startsWith(FSTAB)).toBe(true);
-  expect(text.endsWith("UUID=cccc /mnt/media ext4 defaults,noatime,nofail,x-systemd.device-timeout=10s 0 2\n")).toBe(true);
+  expect(text.endsWith("UUID=cccc /mnt/media ext4 defaults,noatime,nofail,x-systemd.device-timeout=10s,x-systemd.before=docker.service 0 2\n")).toBe(true);
 });
 
 test("fstab: adding again replaces, removing gives the file back as it was, foreign lines are never touched", () => {
   const once = withMount(FSTAB, { spec: "UUID=cccc", path: "/mnt/media", fstype: "ext4", options: "defaults" });
   const twice = withMount(once, { spec: "UUID=dddd", path: "/mnt/media", fstype: "ntfs3", options: optionsFor("ntfs", true) });
-  expect(parseFstab(twice).filter((e) => e.path === "/mnt/media")).toEqual([{ spec: "UUID=dddd", path: "/mnt/media", fstype: "ntfs3", options: "rw,umask=000,nofail,x-systemd.device-timeout=10s", ours: true }]);
+  expect(parseFstab(twice).filter((e) => e.path === "/mnt/media")).toEqual([{ spec: "UUID=dddd", path: "/mnt/media", fstype: "ntfs3", options: "rw,umask=000,nofail,x-systemd.device-timeout=10s,x-systemd.before=docker.service", ours: true }]);
   expect(twice.endsWith(" 0 0\n")).toBe(true);
   expect(withoutMount(twice, "/mnt/media")).toBe(FSTAB);
   // a line somebody else wrote for a folder is theirs, also when asked to remove it
@@ -83,7 +83,7 @@ test("fstab: adding again replaces, removing gives the file back as it was, fore
 test("optionsFor: only a kept line waits for nobody; file systems without owners are open to all", () => {
   expect(optionsFor("ext4", false)).toBe("defaults,noatime");
   expect(optionsFor("vfat", false)).toBe("rw,umask=000,utf8");
-  expect(optionsFor("exfat", true)).toBe("rw,umask=000,nofail,x-systemd.device-timeout=10s");
+  expect(optionsFor("exfat", true)).toBe("rw,umask=000,nofail,x-systemd.device-timeout=10s,x-systemd.before=docker.service");
 });
 
 test("holds: what of Hata lives on a folder", () => {
@@ -106,10 +106,25 @@ test("pools: merged folders are read back from Hata's lines; what can be merged"
   expect(mergeable(parseFstab(text), mounted)).toEqual(["/mnt/a", "/mnt/b"]);
   const merged = withMount(text, { spec: "/mnt/a:/mnt/b", path: "/mnt/storage", fstype: POOL_FS, options: poolOptions("storage", ["/mnt/a", "/mnt/b"]) });
   expect(pools(parseFstab(merged))).toEqual({ "/mnt/storage": ["/mnt/a", "/mnt/b"] });
-  expect(merged.trimEnd().split("\n").at(-1)).toBe("/mnt/a:/mnt/b /mnt/storage fuse.mergerfs cache.files=off,category.create=mfs,moveonenospc=true,minfreespace=1G,allow_other,fsname=storage,nofail,x-systemd.requires-mounts-for=/mnt/a,x-systemd.requires-mounts-for=/mnt/b 0 0");
+  expect(merged.trimEnd().split("\n").at(-1)).toBe("/mnt/a:/mnt/b /mnt/storage fuse.mergerfs cache.files=off,category.create=mfs,moveonenospc=true,minfreespace=1G,allow_other,fsname=storage,nofail,x-systemd.before=docker.service,x-systemd.requires-mounts-for=/mnt/a,x-systemd.requires-mounts-for=/mnt/b 0 0");
   // a disk in a merged folder is not offered again, and the merged folder itself never
   expect(mergeable(parseFstab(merged), [...mounted, "/mnt/c", "/mnt/storage"])).toEqual(["/mnt/c"]);
   expect(pools(parseFstab(withoutMount(merged, "/mnt/storage")))).toEqual({});
   // somebody's own mergerfs line is not Hata's
   expect(pools(parseFstab("/a:/b /mnt/x fuse.mergerfs defaults 0 0\n"))).toEqual({});
+});
+
+test("upgradeLines: Hata's own kept lines get the order of the start, nothing else is touched", () => {
+  const old = [
+    "UUID=aaaa / ext4 errors=remount-ro 0 1",
+    "UUID=bbbb /mnt/their ext4 defaults,nofail 0 2",
+    "# Hata: connected by Hata (Settings, Storage). Disconnect it there, or delete this line and the next one.",
+    "UUID=cccc /mnt/media ext4 defaults,noatime,nofail,x-systemd.device-timeout=10s 0 2",
+    "",
+  ].join("\n");
+  const next = upgradeLines(old);
+  expect(next.split("\n")[3]).toBe("UUID=cccc /mnt/media ext4 defaults,noatime,nofail,x-systemd.device-timeout=10s,x-systemd.before=docker.service 0 2");
+  expect(next.split("\n").filter((_, i) => i !== 3)).toEqual(old.split("\n").filter((_, i) => i !== 3));
+  expect(upgradeLines(next)).toBe(next);
+  expect(parseFstab(next).find((e) => e.path === "/mnt/media")?.ours).toBe(true);
 });

@@ -14,8 +14,8 @@
  * Which disks may never be touched (`blockers`), the lines of /etc/fstab and the mount options are pure
  * functions. Hata's lines in /etc/fstab carry a comment above them; no other line is ever changed.
  */
-import { chmodSync, chownSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { chmodSync, chownSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmdirSync, writeFileSync } from "node:fs";
+import { basename, dirname, join } from "node:path";
 import { record } from "./activity";
 import { bus } from "./bus";
 import { DATA_DIR, SECRETS_DIR, settings } from "./config";
@@ -129,7 +129,27 @@ export function withMount(text: string, entry: Omit<FstabEntry, "ours">): string
  */
 export function optionsFor(fstype: string, keep: boolean): string {
   const own = POSIX_FS.test(fstype) ? ["defaults", "noatime"] : ["rw", "umask=000", ...(fstype === "vfat" ? ["utf8"] : [])];
-  return [...own, ...(keep ? ["nofail", "x-systemd.device-timeout=10s"] : [])].join(",");
+  return [...own, ...(keep ? ["nofail", "x-systemd.device-timeout=10s", BEFORE_DOCKER] : [])].join(",");
+}
+
+/**
+ * `nofail` takes a disk out of the order of the start, and Docker may then start an app before the disk
+ * with its data is mounted — the app would make its folders anew, on the system's disk. With this the
+ * mount is tried first (for as long as the device timeout allows) and Docker starts after it.
+ */
+export const BEFORE_DOCKER = "x-systemd.before=docker.service";
+
+/** /etc/fstab with Hata's own lines brought up to what Hata writes today; other lines stay as they are */
+export function upgradeLines(text: string): string {
+  const lines = text.split("\n");
+  for (let i = 1; i < lines.length; i++) {
+    if (!lines[i - 1]!.trim().startsWith(MARK)) continue;
+    const fields = lines[i]!.trim().split(/\s+/);
+    if (fields.length < 4 || fields[3]!.split(",").includes(BEFORE_DOCKER) || !fields[3]!.split(",").includes("nofail")) continue;
+    fields[3] += "," + BEFORE_DOCKER;
+    lines[i] = fields.join(" ");
+  }
+  return lines.join("\n");
 }
 
 // ---- several disks as one folder ----
@@ -145,7 +165,7 @@ export const pools = (entries: FstabEntry[]): Record<string, string[]> => Object
  * files would land on the system's disk, in the empty folder the missing one leaves.
  */
 export function poolOptions(name: string, branches: string[]): string {
-  return ["cache.files=off", "category.create=mfs", "moveonenospc=true", "minfreespace=1G", "allow_other", `fsname=${name}`, "nofail", ...branches.map((b) => `x-systemd.requires-mounts-for=${b}`)].join(",");
+  return ["cache.files=off", "category.create=mfs", "moveonenospc=true", "minfreespace=1G", "allow_other", `fsname=${name}`, "nofail", BEFORE_DOCKER, ...branches.map((b) => `x-systemd.requires-mounts-for=${b}`)].join(",");
 }
 
 /** The connected folders that can be merged: Hata's own, kept, of a file system with owners, in no merged folder yet */
@@ -173,17 +193,17 @@ interface Temporary {
   uuid: string;
   device: string;
 }
+const saved = readJsonFile<{ temporary?: Temporary[]; sealed?: string[] }>(FILE, {}, isPlainObject);
 /** File systems connected until their disk is unplugged — they are in no /etc/fstab */
-const temporary: Temporary[] = (() => {
-  const saved = readJsonFile<{ temporary?: Temporary[] }>(FILE, {}, isPlainObject);
-  return Array.isArray(saved.temporary) ? saved.temporary.filter((t) => typeof t?.path === "string" && typeof t.device === "string") : [];
-})();
+const temporary: Temporary[] = Array.isArray(saved.temporary) ? saved.temporary.filter((t) => typeof t?.path === "string" && typeof t.device === "string") : [];
+/** Kept folders whose own directory was closed for writing (`seal`), or where that was tried */
+const sealed: string[] = Array.isArray(saved.sealed) ? saved.sealed.filter((p) => typeof p === "string") : [];
 /** Disconnected by hand: not to be connected again by itself while it stays plugged in */
 const ejected = new Set<string>();
 
 const save = () => {
   try {
-    writeJsonAtomic(FILE, { temporary });
+    writeJsonAtomic(FILE, { temporary, sealed });
   } catch (e) {
     console.error("Could not save the list of connected disks:", e instanceof Error ? e.message : e);
   }
@@ -211,6 +231,50 @@ function writeFstab(text: string): void {
 const reload = async (): Promise<void> => {
   if (has("systemctl")) await run(["systemctl", "daemon-reload"], 30_000);
 };
+
+/**
+ * Closes the directory a kept disk is mounted at: with the disk absent, nothing can be written into the
+ * empty folder it leaves. Without this Docker makes an app's missing folders there — on the system's
+ * disk — and the app starts empty; with it the app does not start until its disk is back. The mark is
+ * on the directory underneath: a mounted disk covers it and is not affected.
+ */
+async function seal(path: string): Promise<void> {
+  if (!has("chattr") || sealed.includes(path)) return;
+  sealed.push(path);
+  save();
+  if (!mountedAt().has(path)) {
+    await run(["chattr", "+i", path], 10_000);
+    return;
+  }
+  // mounted already: the directory underneath is reached through a second view of the folder it lies in
+  const parent = dirname(path);
+  let view = "";
+  try {
+    view = mkdtempSync("/run/hata-under-");
+    if ((await run(["mount", "--bind", parent, view], 10_000)).code !== 0) return;
+    await run(["chattr", "+i", join(view, basename(path))], 10_000);
+    await run(["umount", view], 10_000);
+  } catch {
+  } finally {
+    try {
+      if (view) rmdirSync(view);
+    } catch {}
+  }
+}
+
+/** Opens such a directory again and, unless it was there before Hata, removes it when empty */
+async function removeFolder(path: string, ours = true): Promise<void> {
+  const at = sealed.indexOf(path);
+  if (at >= 0) {
+    if (has("chattr")) await run(["chattr", "-i", path], 10_000);
+    sealed.splice(at, 1);
+    save();
+  }
+  if (!ours) return;
+  try {
+    rmdirSync(path);
+  } catch {}
+}
 
 // one change of the disks at a time
 let queue: Promise<unknown> = Promise.resolve();
@@ -267,6 +331,7 @@ async function attach(volume: { path: string; uuid: string; fstype: string }, pa
   const before = readText(FSTAB);
   let result;
   if (keep) {
+    await seal(path);
     writeFstab(withMount(before, { spec: volume.uuid ? `UUID=${volume.uuid}` : volume.path, path, fstype: type, options }));
     await reload();
     result = await run(["mount", path], 60_000);
@@ -278,11 +343,7 @@ async function attach(volume: { path: string; uuid: string; fstype: string }, pa
       writeFstab(before);
       await reload();
     }
-    if (made) {
-      try {
-        rmdirSync(path);
-      } catch {}
-    }
+    await removeFolder(path, made);
     return { error: "disk.mountFailed", message: said(result) };
   }
   if (!keep) {
@@ -376,17 +437,14 @@ export function mergeFolders(branches: unknown, label: string, user: string): Pr
     const made = !existsSync(path);
     mkdirSync(path, { recursive: true });
     const before = readText(FSTAB);
+    await seal(path);
     writeFstab(withMount(before, { spec: chosen.join(":"), path, fstype: POOL_FS, options: poolOptions(label, chosen) }));
     await reload();
     const result = await run(["mount", path], 60_000);
     if (result.code !== 0) {
       writeFstab(before);
       await reload();
-      if (made) {
-        try {
-          rmdirSync(path);
-        } catch {}
-      }
+      await removeFolder(path, made);
       return { error: "disk.mountFailed", message: said(result) };
     }
     record("system.disk.merge", { user, detail: `${chosen.join(" + ")} → ${path}` });
@@ -437,9 +495,7 @@ export function disconnect(path: string, user: string): Promise<Outcome> {
       temporary.splice(index, 1);
       save();
     }
-    try {
-      rmdirSync(path);
-    } catch {}
+    await removeFolder(path);
     if (device) {
       // taken out by hand: not to be connected again by itself while it stays plugged in
       const volume = (await connected()).flatMap((d) => d.volumes).find((v) => v.path === device);
@@ -448,6 +504,31 @@ export function disconnect(path: string, user: string): Promise<Outcome> {
     }
     record("system.disk.disconnect", { user, detail: path });
     return { path };
+  });
+}
+
+/**
+ * Folders of kept disks that are not connected now — the disk is unplugged, off or broken — with what of
+ * Hata's lies there.
+ */
+export function absent(): { path: string; holds: ReturnType<typeof holds> }[] {
+  const mounted = mountedAt();
+  if (!mounted.size) return [];
+  const uses = { dataRoot: settings.dataRoot, backupDir: settings.backup.dir, state: [DATA_DIR, SECRETS_DIR], shares: settings.shares.map((s) => s.path) };
+  return fstab().filter((e) => e.ours && !mounted.has(e.path)).map((e) => ({ path: e.path, holds: holds(e.path, uses) }));
+}
+
+/** Brings what older versions wrote up to date: the order of the start, the closed directories */
+function upgradeKept(): Promise<void> {
+  return oneAtATime(async () => {
+    if (process.getuid?.() !== 0 || !existsSync(FSTAB)) return;
+    const text = readText(FSTAB);
+    const next = upgradeLines(text);
+    if (next !== text) {
+      writeFstab(next);
+      await reload();
+    }
+    for (const entry of fstab()) if (entry.ours && existsSync(entry.path)) await seal(entry.path);
   });
 }
 
@@ -510,6 +591,7 @@ const SLOW_LOOK = 10;
 
 /** Watches the kernel's list of partitions — cheap to read — and looks closer when it changes */
 export function startMounting(): void {
+  void upgradeKept().catch((e) => console.error("Could not bring /etc/fstab up to date:", e instanceof Error ? e.message : e));
   let last = "";
   let mounts = "";
   let again = 1;

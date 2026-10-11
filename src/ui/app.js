@@ -4353,9 +4353,12 @@ function channelCard(channel, rows, values) {
   );
 }
 
+/** A saved token never comes back to the page: only one typed anew is sent, an empty field keeps what is saved */
+const typedToken = (input) => (input.value.trim() ? { token: input.value } : {});
+
 function telegramCard() {
   const config = state.notify.config.telegram;
-  const token = h("input", { type: "password", value: config.token, autocomplete: "off", spellcheck: false, class: "mono", placeholder: "123456789:AA…" });
+  const token = h("input", { type: "password", autocomplete: "off", spellcheck: false, class: "mono", placeholder: config.saved ? t("notify.tokenSaved") : "123456789:AA…" });
   const chat = h("input", { value: config.chat, spellcheck: false, class: "mono", placeholder: "123456789" });
   const found = h("div", { class: "pair" });
   const find = async () => {
@@ -4370,7 +4373,7 @@ function telegramCard() {
   return channelCard(
     "telegram",
     [settingRow(t("notify.telegram.token"), t("notify.telegram.tokenHint"), token), settingRow(t("notify.telegram.chat"), t("notify.telegram.chatHint"), h("span", { class: "pair" }, chat, button(t("notify.telegram.find"), { class: "small", onclick: find }, "search"))), found],
-    () => ({ token: token.value, chat: chat.value }),
+    () => ({ ...typedToken(token), chat: chat.value }),
   );
 }
 
@@ -4392,13 +4395,22 @@ function notificationsSection() {
     },
   });
   const ntfyUrl = h("input", { type: "url", value: n.config.ntfy.url, spellcheck: false, class: "mono", placeholder: "https://ntfy.sh/my-topic" });
-  const ntfyToken = h("input", { type: "password", value: n.config.ntfy.token, autocomplete: "off", spellcheck: false, class: "mono" });
+  const ntfyToken = h("input", { type: "password", autocomplete: "off", spellcheck: false, class: "mono", placeholder: n.config.ntfy.saved ? t("notify.tokenSaved") : "" });
+  const forget = n.config.ntfy.saved && button(t("notify.tokenForget"), { class: "small", onclick: () => attemptForget() });
+  const attemptForget = async () => {
+    try {
+      state.notify = await api("PUT", "/api/notify", { ntfy: { token: "" } });
+      renderSettings();
+    } catch (err) {
+      toast(errorText(err), "error");
+    }
+  };
   const hook = h("input", { type: "url", value: n.config.webhook.url, spellcheck: false, class: "mono", placeholder: "https://…" });
   return [
     h("section", { class: "card pad" }, h("h2", null, t("settings.notifications")), h("p", { class: "muted small" }, t("notify.lead")), settingRow(t("notify.problems"), t("notify.problemsHint"), problems), error),
     devicesCard(),
     telegramCard(),
-    channelCard("ntfy", [settingRow(t("notify.ntfy.url"), t("notify.ntfy.urlHint"), ntfyUrl), settingRow(t("notify.ntfy.token"), t("notify.ntfy.tokenHint"), ntfyToken)], () => ({ url: ntfyUrl.value, token: ntfyToken.value })),
+    channelCard("ntfy", [settingRow(t("notify.ntfy.url"), t("notify.ntfy.urlHint"), ntfyUrl), settingRow(t("notify.ntfy.token"), t("notify.ntfy.tokenHint"), forget ? h("span", { class: "pair" }, ntfyToken, forget) : ntfyToken)], () => ({ url: ntfyUrl.value, ...typedToken(ntfyToken) })),
     channelCard("webhook", [settingRow(t("notify.webhook.url"), t("notify.webhook.urlHint"), hook)], () => ({ url: hook.value })),
   ];
 }
@@ -5693,6 +5705,21 @@ function accessMatrix() {
       void loadUsers();
     }
   };
+  // sign-in stands in front of the web port; the app's other ports are listed so that nobody takes them for closed
+  const otherPorts = (app) =>
+    h(
+      "div",
+      { class: "muted small other-ports" },
+      t("access.others"),
+      app.others.map((o) =>
+        h(
+          "label",
+          null,
+          h("input", { type: "checkbox", checked: o.guarded, onchange: (e) => update(app, { ports: app.others.filter((x) => (x.port === o.port ? e.target.checked : x.guarded)).map((x) => x.port) }) }),
+          String(o.port),
+        ),
+      ),
+    );
   const row = (app) => {
     const everyone = app.allowed === "all";
     const list = everyone ? [] : app.allowed;
@@ -5704,7 +5731,7 @@ function accessMatrix() {
     return h(
       "tr",
       null,
-      h("td", null, h("div", { class: "with-icon" }, appIcon(app, "sm"), h("div", null, h("a", { class: "strong", href: `#/apps/${app.name}` }, app.title), !everyone && !app.protect && h("div", { class: "muted small" }, t("access.onlyHidden"))))),
+      h("td", null, h("div", { class: "with-icon" }, appIcon(app, "sm"), h("div", null, h("a", { class: "strong", href: `#/apps/${app.name}` }, app.title), !everyone && !app.protect && h("div", { class: "muted small" }, t("access.onlyHidden")), app.protect && app.others.length > 0 && otherPorts(app)))),
       h("td", null, h("input", { type: "checkbox", checked: app.protect, disabled: !!app.cannotProtect, title: app.cannotProtect ? t("access.cannot." + app.cannotProtect) : "", "aria-label": t("access.protectApp", { title: app.title }), onchange: (e) => update(app, { protect: e.target.checked }) })),
       h("td", null, h("input", { type: "checkbox", checked: everyone, "aria-label": t("access.everyone"), onchange: (e) => update(app, { allowed: e.target.checked ? "all" : people.filter((u) => u.role === "member").map((u) => u.id) }) })),
       people.map((user) => h("td", null, h("input", { type: "checkbox", checked: everyone ? user.role === "member" : list.includes(user.id), "aria-label": `${user.name}: ${app.title}`, onchange: (e) => toggle(user, e.target.checked) }))),

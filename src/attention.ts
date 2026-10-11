@@ -29,7 +29,7 @@ const FAILURE_WINDOW_MS = 24 * 3600 * 1000;
 /** A trash smaller than this is not worth a word when its disk fills up, bytes */
 const TRASH_WORTH = 100 * 1024 * 1024;
 
-export function attention(input: { system: SystemStatus; docker: DockerInfo; apps: InstalledApp[]; activity: Activity[]; update?: string | null; offsite?: { error: string } | null; disks?: DiskReport[]; trash?: (path: string) => number; now?: number }): AttentionItem[] {
+export function attention(input: { system: SystemStatus; docker: DockerInfo; apps: InstalledApp[]; activity: Activity[]; update?: string | null; offsite?: { error: string } | null; disks?: DiskReport[]; trash?: (path: string) => number; absent?: { path: string; holds: string | null }[]; now?: number }): AttentionItem[] {
   const { system, docker, apps, activity } = input;
   const now = input.now ?? Date.now();
   const items: AttentionItem[] = [];
@@ -79,6 +79,11 @@ export function attention(input: { system: SystemStatus; docker: DockerInfo; app
     const worst = disk.findings.find((f) => f.severity === "danger") ?? disk.findings[0];
     // a counter that grew since is news again (`at`), also when the worst thing about the disk stays the same
     if (worst) items.push({ id: `smart:${disk.serial || disk.name}`, severity: worst.severity, code: `smart.${worst.code}`, detail: { disk: diskLabel(disk), n: worst.n ?? 0 }, ...(disk.grew ? { at: disk.grew } : {}) });
+  }
+
+  // a disk Hata connected for good is not there: with the data folder on it, apps cannot start
+  for (const folder of input.absent ?? []) {
+    items.push({ id: `absent:${folder.path}`, severity: folder.holds === "data" ? "danger" : "warn", code: folder.holds === "data" ? "absent.data" : "absent", detail: { path: folder.path } });
   }
 
   const memory = system.memory.total ? Math.round((system.memory.used / system.memory.total) * 100) : 0;

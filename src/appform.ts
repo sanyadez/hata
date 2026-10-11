@@ -304,6 +304,49 @@ export function bindSources(compose: Compose): string[] {
   return [...out];
 }
 
+/** The variables of an app's `.env` file */
+export function parseEnv(text: string): Record<string, string> {
+  const env: Record<string, string> = {};
+  for (const line of text.split("\n")) {
+    const m = /^\s*(?:export\s+)?([A-Za-z_][A-Za-z0-9_]*)\s*=\s*(.*?)\s*$/.exec(line);
+    if (!m) continue;
+    const quoted = /^(["'])(.*)\1$/.exec(m[2]);
+    // an unquoted value ends at a comment
+    env[m[1]] = quoted ? quoted[2] : m[2].replace(/\s+#.*$/, "");
+  }
+  return env;
+}
+
+const VARIABLE_RE = /\$(?:\{([A-Za-z_][A-Za-z0-9_]*)(?:(:?[-?+])([^}]*))?\}|([A-Za-z_][A-Za-z0-9_]*))/g;
+
+/** A compose value with its variables filled in the way `docker compose` does it; an unknown one becomes "" */
+export function interpolate(value: string, env: Record<string, string>): string {
+  return value.replace(VARIABLE_RE, (_, braced: string | undefined, op: string | undefined, word: string | undefined, bare: string | undefined) => {
+    const set = env[braced ?? bare!];
+    if (!op) return set ?? "";
+    const present = op.startsWith(":") ? !!set : set !== undefined;
+    if (op.endsWith("+")) return present ? word! : "";
+    return present ? set! : op.endsWith("-") ? word! : "";
+  });
+}
+
+/**
+ * Fills the variables in the ports of a compose file (in place, before `normalize`): `${WEB_PORT}:80` is a
+ * port people open like any other, and only the `.env` next to the file knows its number.
+ */
+export function resolvePorts(compose: Compose, env: Record<string, string>): void {
+  for (const service of Object.values(compose.services) as Compose[]) {
+    if (!Array.isArray(service.ports)) continue;
+    service.ports = service.ports.map((p) => {
+      if (typeof p === "string") return p.includes("$") ? interpolate(p, env) : p;
+      if (!isObject(p)) return p;
+      const filled: Compose = { ...p };
+      for (const key of ["published", "target", "host_ip"]) if (typeof filled[key] === "string" && filled[key].includes("$")) filled[key] = interpolate(filled[key], env);
+      return filled;
+    });
+  }
+}
+
 /** Published TCP/UDP ports of the app, as numbers */
 export function publishedPorts(compose: Compose): { port: number; protocol: string }[] {
   const out: { port: number; protocol: string }[] = [];

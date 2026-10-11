@@ -2,7 +2,7 @@
  * Paths and settings. The source of truth for settings is data/settings.json (edited through the web UI);
  * environment variables only override where the server listens.
  */
-import { chmodSync, cpSync, existsSync, mkdirSync, rmSync } from "node:fs";
+import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { cleanLayout, type Layout } from "./dashboard";
@@ -119,6 +119,8 @@ export interface AppAccess {
   /** With `protect`: the port people open, and the local port the app really listens on */
   port?: number;
   upstream?: number;
+  /** Other ports of the app guarded the same way */
+  extra?: { port: number; upstream: number }[];
 }
 
 export interface BackupSettings {
@@ -303,5 +305,23 @@ export const DEFAULT_PORT = process.getuid?.() === 0 ? 80 : 8080;
 /** Where the server listens: the environment wins over the settings, port 80 needs root */
 export function listenAddress(): { port: number; hostname: string } {
   const port = Number(process.env.HATA_PORT ?? process.env.PORT ?? (settings.port || DEFAULT_PORT));
-  return { port, hostname: process.env.HATA_HOST ?? "0.0.0.0" };
+  return { port, hostname: process.env.HATA_HOST ?? anyAddress() };
+}
+
+let any: string | undefined;
+
+/**
+ * The address that means "every address of this machine": `::` where one socket takes IPv4 and IPv6
+ * together (Docker publishes an app's port on both, so must whoever stands in front of it), otherwise
+ * `0.0.0.0` — a kernel without IPv6, or one told to keep the two apart.
+ */
+export function anyAddress(): string {
+  if (any === undefined) {
+    try {
+      any = existsSync("/proc/net/if_inet6") && readFileSync("/proc/sys/net/ipv6/bindv6only", "utf8").trim() === "0" ? "::" : "0.0.0.0";
+    } catch {
+      any = "0.0.0.0";
+    }
+  }
+  return any;
 }

@@ -13,7 +13,7 @@ import { homedir, networkInterfaces } from "node:os";
 import type { Server, ServerWebSocket } from "bun";
 import { recent, record } from "./activity";
 import { agentUser, createKey, keyOf, listKeys, removeKey } from "./agents";
-import { AppError, appAction, appDetail, appLogs, appIcon, appSettings, appStats, applyCompose, ICON_MIME, MAX_ICON, removeAppIcon, setAppIcon, applySettings, installFromSettings, applyStoreUpdate, composeText, getJob, installCustom, installFromStore, listApps, listJobs, onAppRemoved, planStoreUpdate, readCompose, removeApp, storeAppDetail } from "./apps";
+import { AppError, appAction, appEnv, appDetail, appLogs, appIcon, appSettings, appStats, applyCompose, ICON_MIME, MAX_ICON, removeAppIcon, setAppIcon, applySettings, installFromSettings, applyStoreUpdate, composeText, getJob, installCustom, installFromStore, listApps, listJobs, onAppRemoved, planStoreUpdate, readCompose, removeApp, storeAppDetail } from "./apps";
 import { certificateStates, challengeResponse, ensureCertificates, loadCertificates } from "./acme";
 import { attention } from "./attention";
 import { backupApp, backupOverview, deleteSnapshot, listSnapshots, mirror, restoreSnapshot, resumeRestore, runBackups, scheduleBackups, takeServerSnapshot } from "./backup";
@@ -23,7 +23,7 @@ import { trashSizeOn } from "./trash";
 import { addShare, changeShare, installSamba, listShares, refreshShares, removeShare, startShares } from "./shares";
 import { checkDisks, diskHealth, installTool, listDisks, startDisks, startSelfTest } from "./disks";
 import { fills, measureFills, startFills } from "./fills";
-import { connectVolume, disconnect, mergeFolders, mountingReport, prepareDisk, startMounting, type Outcome } from "./mounting";
+import { absent, connectVolume, disconnect, mergeFolders, mountingReport, prepareDisk, startMounting, type Outcome } from "./mounting";
 import { moveData } from "./movedata";
 import { installPackage } from "./packages";
 import {
@@ -75,7 +75,7 @@ import { arrange, cleanLayout, layoutText, parseLayoutText } from "./dashboard";
 import { dockerInfo, listContainers, watchEvents } from "./docker";
 import { abortUpload, archivePlan, emptyTrash, list as listFiles, makeFolder, pinFolder, pinnedFolders, readable, readText, remove as removeFiles, rename as renameFile, restore as restoreFiles, startTrash, summary as filesSummary, transfer, trash, upload, writeText } from "./files";
 import { adoptProject, casaosState, containerDraft, importCount, importList, moveInCasaos, projectDraft, rebuildContainer } from "./import";
-import { accessOf, dropAccess, dropUser, gateTarget, guard, mayOpen, MAX_APP_BODY, page, passToApp, setAccess, startGates, tunnelHandlers } from "./gate";
+import { accessOf, dropAccess, dropUser, gateTarget, guard, guardsOf, mayOpen, otherPorts, MAX_APP_BODY, page, passToApp, setAccess, startGates, tunnelHandlers } from "./gate";
 import { parseDockerRun } from "./dockerrun";
 import { cannotMove, finishMove, moveState } from "./relocate";
 import { isPlainObject } from "./fsutil";
@@ -633,8 +633,12 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
   if (path === "/api/access" && method === "GET") {
     const apps = (await listApps(language(url))).map((app) => {
       const compose = readCompose(app.name);
-      const gate = compose ? gateTarget(compose, settings.dataRoot) : "noPort";
-      return { name: app.name, title: app.title, icon: app.icon, ...accessOf(app.name), cannotProtect: typeof gate === "string" ? gate : null };
+      const env = appEnv(app.name);
+      const gate = compose ? gateTarget(compose, settings.dataRoot, env) : "noPort";
+      const access = accessOf(app.name);
+      // the app's other published ports: sign-in in front of the web port does not close them
+      const others = compose ? otherPorts(compose, settings.dataRoot, env).map((p) => ({ port: p.port, guarded: guardsOf(access).some((g) => g.port === p.port) })) : [];
+      return { name: app.name, title: app.title, icon: app.icon, allowed: access.allowed, protect: access.protect, cannotProtect: typeof gate === "string" ? gate : null, others };
     });
     return json({ apps, users: listUsers().map(({ id, name, role }) => ({ id, name, role })) });
   }
@@ -652,7 +656,7 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
       arch: ARCH,
       // with a domain, apps are opened at <label>.<domain> when Hata itself is opened by that domain
       site: { domain: siteDomain(), mode: settings.https.mode, local: localDomain() },
-      attention: admin ? attention({ system, docker, apps, activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn }) : [],
+      attention: admin ? attention({ system, docker, apps, activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent() }) : [],
       // who signed in from where, and what was installed by whom, is the administrators' business
       activity: admin ? recent(8) : [],
       // containers and compose projects on this machine that are not apps here yet
@@ -993,7 +997,8 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
       const ids = new Set(listUsers().map((u) => u.id));
       const allowed = data.allowed === "all" ? "all" : Array.isArray(data.allowed) ? [...new Set(data.allowed.filter((id): id is string => typeof id === "string" && ids.has(id)))] : null;
       if (allowed === null) return fail(400, "gate.badAccess");
-      const job = setAccess(name, { allowed, protect: data.protect === true }, user.name);
+      const ports = Array.isArray(data.ports) ? data.ports.filter((p): p is number => Number.isInteger(p)) : undefined;
+      const job = setAccess(name, { allowed, protect: data.protect === true, ports }, user.name);
       return json({ job: job?.id ?? null }, job ? 202 : 200);
     }
     if (!sub && method === "GET") return json(await appDetail(name, language(url)));
@@ -1321,7 +1326,7 @@ export async function serve(): Promise<void> {
     console.error("Set HATA_PORT to use another port.");
     process.exit(1);
   }
-  console.log(`Hata ${VERSION} is listening on ${hostname}:${server.port}; state in ${DATA_DIR}`);
+  console.log(`Hata ${VERSION} is listening on ${hostname.includes(":") ? `[${hostname}]` : hostname}:${server.port}; state in ${DATA_DIR}`);
   const url = setupUrl();
   console.log(url ? `No administrator yet. Create one at:\n  ${url}` : `Open ${baseUrl()}`);
 
@@ -1349,7 +1354,7 @@ export async function serve(): Promise<void> {
   void refreshHttps();
   refreshLocalNames();
   startNotifications({
-    attention: async () => attention({ system: systemStatus(), docker: await dockerInfo(), apps: await listApps("en"), activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn }),
+    attention: async () => attention({ system: systemStatus(), docker: await dockerInfo(), apps: await listApps("en"), activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent() }),
     baseUrl: publicUrl,
     isAdmin: (id) => findUser(id)?.role === "admin",
   });

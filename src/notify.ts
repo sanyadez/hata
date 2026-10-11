@@ -322,7 +322,13 @@ export function activeChannels(): Channel[] {
 }
 
 export const notifyConfig = (): NotifyConfig => state.config;
-export const notifyStatus = () => ({ config: state.config, last: state.last, active: activeChannels() });
+/** The settings as a page gets them: a token is write-only — `saved` says there is one, the value stays here */
+export function shownConfig(config: NotifyConfig) {
+  const hide = <T extends { token: string }>(channel: T) => ({ ...channel, token: "", saved: channel.token !== "" });
+  return { ...config, telegram: hide(config.telegram), ntfy: hide(config.ntfy) };
+}
+
+export const notifyStatus = () => ({ config: shownConfig(state.config), last: state.last, active: activeChannels() });
 
 export function updateNotify(patch: unknown): string | null {
   const next = changeConfig(state.config, patch);
@@ -418,6 +424,8 @@ export async function sendTest(channel: Channel, user: string, device?: string):
 
 /** Chats that have written to the bot lately — to pick the chat instead of looking its number up */
 export async function telegramChats(token: unknown): Promise<{ id: string; title: string }[] | string> {
+  // the page does not have the saved token: an empty field means that one
+  if (token === undefined || token === "") token = state.config.telegram.token;
   if (typeof token !== "string" || !/^\d+:[\w-]{20,}$/.test(token.trim())) return "notify.badToken";
   const res = await fetch(`https://api.telegram.org/bot${token.trim()}/getUpdates`, { signal: AbortSignal.timeout(SEND_TIMEOUT_MS) }).catch(() => null);
   const data: unknown = await res?.json().catch(() => null);

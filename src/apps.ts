@@ -8,7 +8,7 @@
  */
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { APP_NAME_RE, appMeta, applyForm, bindSources, buildForm, dumpCompose, normalize, parseCompose, publishedPorts, type AppForm, type AppMeta, type Compose } from "./appform";
+import { APP_NAME_RE, appMeta, applyForm, bindSources, buildForm, dumpCompose, normalize, parseCompose, parseEnv, publishedPorts, resolvePorts, type AppForm, type AppMeta, type Compose } from "./appform";
 import { applyEdit, blankCompose, readEdit, type AppEdit } from "./appedit";
 import { bus } from "./bus";
 import { IMAGE_MIME, imageType } from "./wallpapers";
@@ -114,10 +114,26 @@ export function startJob(app: string, kind: JobKind, user: string, work: (log: L
 }
 
 /** Runs `docker compose …` for an app, failing the job on a non-zero exit */
+type ComposeHook = (name: string) => void;
+const composeHooks: { before: ComposeHook; after: ComposeHook }[] = [];
+
+/**
+ * Registers what must happen around `docker compose` reading an app's files: `before` any command (files
+ * of Hata's next to the compose file are brought up to date), `after` an `up`, whether it worked or not.
+ */
+export function onCompose(before: ComposeHook, after: ComposeHook): void {
+  composeHooks.push({ before, after });
+}
+
 export async function dc(name: string, args: string[], log: Log): Promise<void> {
+  for (const hook of composeHooks) hook.before(name);
   log(`$ docker compose ${args.join(" ")}`);
-  const { code, output } = await runCompose(name, appDir(name), args, log);
-  if (code !== 0) throw new Error(output.split("\n").slice(-3).join("\n") || `docker compose exited with ${code}`);
+  try {
+    const { code, output } = await runCompose(name, appDir(name), args, log);
+    if (code !== 0) throw new Error(output.split("\n").slice(-3).join("\n") || `docker compose exited with ${code}`);
+  } finally {
+    if (args[0] === "up") for (const hook of composeHooks) hook.after(name);
+  }
 }
 
 // --- The app's own icon ---------------------------------------------------------------------------
@@ -218,9 +234,19 @@ export interface InstalledApp extends Pick<AppMeta, "title" | "icon" | "port" | 
   containers: { id: string; name: string; service: string; image: string; state: string; status: string; ports: string[] }[];
 }
 
-function firstPublishedPort(compose: Compose | null): string {
+/** The variables `docker compose` fills an app's file with: its `.env` */
+export function appEnv(name: string): Record<string, string> {
+  try {
+    return parseEnv(readFileSync(join(appDir(name), ".env"), "utf8"));
+  } catch {
+    return {};
+  }
+}
+
+function firstPublishedPort(name: string, compose: Compose | null): string {
   if (!compose) return "";
   const copy = structuredClone(compose);
+  resolvePorts(copy, appEnv(name));
   normalize(copy, settings.dataRoot);
   const port = publishedPorts(copy).find((p) => p.protocol === "tcp");
   return port ? String(port.port) : "";
@@ -238,7 +264,7 @@ function describeApp(name: string, containers: ContainerSummary[] | null, lang: 
     title: meta.title || name,
     icon: ownIconUrl(name) || meta.icon,
     // an app without store metadata still gets a working tile: its first published TCP port
-    port: meta.port || firstPublishedPort(compose),
+    port: meta.port || firstPublishedPort(name, compose),
     index: meta.index,
     scheme: meta.scheme,
     hostname: meta.hostname,

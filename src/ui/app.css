@@ -398,6 +398,8 @@ tr.removed .app-icon { opacity: 0.5; }
 .matrix th, .matrix td { padding-left: 14px; padding-right: 14px; }
 .matrix th:not(:first-child), .matrix td:not(:first-child) { text-align: center; }
 .matrix input[type="checkbox"] { margin: 0; }
+.other-ports { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; margin-top: 2px; }
+.other-ports label { display: inline-flex; align-items: center; gap: 5px; font-family: var(--font-mono); }
 
 /* --- Store ------------------------------------------------------------------------------------- */
 

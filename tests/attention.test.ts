@@ -100,3 +100,8 @@ test("the copy of the backups on another machine is behind: one item, whatever t
   const [item] = attention({ system: system(), docker, apps: [], activity: [], offsite: { error: "Connection refused" } });
   expect(item).toEqual({ id: "offsite", severity: "warn", code: "offsite", detail: { message: "Connection refused" } });
 });
+
+test("a kept disk that is not connected: a danger when the data folder lies on it", () => {
+  const items = attention({ system: system(), docker, apps: [], activity: [], now: NOW, absent: [{ path: "/mnt/media", holds: null }, { path: "/mnt/data", holds: "data" }] });
+  expect(items.map((i) => [i.code, i.severity, i.detail.path])).toEqual([["absent.data", "danger", "/mnt/data"], ["absent", "warn", "/mnt/media"]]);
+});

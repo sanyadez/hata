@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { AttentionItem } from "../src/attention";
-import { changeConfig, cleanConfig, DEFAULT_CONFIG, due, keyOf, ntfyRequest, QUIET_MS, SETTLE_MS, telegramRequest, webhookRequest, wording, type Seen } from "../src/notify";
+import { shownConfig, changeConfig, cleanConfig, DEFAULT_CONFIG, due, keyOf, ntfyRequest, QUIET_MS, SETTLE_MS, telegramRequest, webhookRequest, wording, type Seen } from "../src/notify";
 
 const disk = (severity: AttentionItem["severity"] = "warn"): AttentionItem => ({ id: "disk:/", severity, code: "disk", detail: { path: "/", percent: 91, free: 9 * 1024 ** 3 } });
 const restarting: AttentionItem = { id: "restarting:memos", severity: "danger", code: "restarting", detail: { title: "Memos", container: "memos" }, app: "memos" };
@@ -95,4 +95,16 @@ test("the requests to the services", () => {
   const hook = webhookRequest({ enabled: true, url: "http://192.168.1.5:5678/webhook/hata" }, message!, base, Date.UTC(2026, 9, 10));
   expect(hook.url).toBe("http://192.168.1.5:5678/webhook/hata");
   expect(JSON.parse(hook.body)).toMatchObject({ severity: "danger", code: "restarting", app: "memos", url: "https://hata.example/#/apps/memos/logs", time: "2026-10-10T00:00:00.000Z" });
+});
+
+test("a saved token is not shown again, only that there is one", () => {
+  const config = changeConfig(DEFAULT_CONFIG, { telegram: { token: "123456789:AAaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", chat: "1" } });
+  if (typeof config === "string") throw new Error(config);
+  const shown = shownConfig(config);
+  expect(shown.telegram).toEqual({ enabled: false, token: "", chat: "1", saved: true });
+  expect(shown.ntfy.saved).toBe(false);
+  expect(JSON.stringify(shown)).not.toContain("AAaaa");
+  // what the page sends back without a token keeps the saved one
+  const again = changeConfig(config, { telegram: { enabled: true, chat: "2" } });
+  expect(typeof again === "string" ? again : again.telegram.token).toBe(config.telegram.token);
 });

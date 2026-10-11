@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { appMeta, applyForm, bindSources, buildForm, dumpCompose, localize, normalize, parseCompose, publishedPorts } from "../src/appform";
+import { appMeta, applyForm, bindSources, buildForm, dumpCompose, interpolate, localize, normalize, parseCompose, parseEnv, publishedPorts, resolvePorts } from "../src/appform";
 
 const STORE_APP = `
 name: demo
@@ -211,4 +211,16 @@ describe("dumpCompose", () => {
     const compose = { services: { a: { image: "x", environment: { A: "yes", B: "010", C: "1e3", D: "null", E: "a: b", F: "", G: "#x", H: "multi\nline" } } } };
     expect(parseCompose(dumpCompose(compose))).toEqual(compose);
   });
+});
+
+test("variables in ports are filled the way docker compose fills them", () => {
+  const env = parseEnv('# comment\nWEB_PORT=8181\nEMPTY=\nexport NAME="two words" \nPLAIN=value # note\n');
+  expect(env).toEqual({ WEB_PORT: "8181", EMPTY: "", NAME: "two words", PLAIN: "value" });
+  expect(interpolate("${WEB_PORT}:80", env)).toBe("8181:80");
+  expect(interpolate("$WEB_PORT:80", env)).toBe("8181:80");
+  expect(interpolate("${MISSING:-9000}:${EMPTY:-1}:${EMPTY-2}", env)).toBe("9000:1:");
+  expect(interpolate("${WEB_PORT:+set}${MISSING:+set}", env)).toBe("set");
+  const compose = { services: { a: { ports: ["${WEB_PORT}:80", "53:53/udp", { target: 443, published: "${TLS:-8443}" }] } } };
+  resolvePorts(compose, env);
+  expect(compose.services.a.ports).toEqual(["8181:80", "53:53/udp", { target: 443, published: "8443" }]);
 });

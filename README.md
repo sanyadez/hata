@@ -66,7 +66,9 @@ Early development. What works today:
   page says "was 0 until 14 Sep", and a counter that grows is sent as a notification again. It needs
   `smartmontools`, which Hata offers to install; nothing on a disk is changed;
 - putting a disk to use (same page): a new disk is prepared in one dialog — one partition, ext4, a folder
-  under `/mnt`, a line in `/etc/fstab` that does not hold up the start when the disk is absent; a disk that
+  under `/mnt`, a line in `/etc/fstab` that does not hold up the start when the disk is absent (Docker waits for the
+  disk, and without it the apps that keep data there stay stopped instead of starting empty on the
+  system's disk — the home page says which disk is missing); a disk that
   already holds files (ext4, XFS, Btrfs, FAT, exFAT, NTFS) is connected as it is, nothing on it changed;
   a USB disk can be connected by itself when plugged in, and is ejected before it is pulled out. Erasing
   asks for the disk's name and your password, and is never offered for the system's disk, a disk in use
@@ -99,7 +101,9 @@ Early development. What works today:
   device's fingerprint, face or PIN) when Hata is reached by a domain over HTTPS; a list of one's
   sessions with sign-out per device; a sign-in log;
 - sign-in in front of any app: Hata takes over the app's port and lets through only people who are signed
-  in to Hata and allowed to open that app — no domain or HTTPS needed, the app's address stays the same;
+  in to Hata and allowed to open that app — no domain or HTTPS needed, the app's address stays the same. The app's
+  other published ports are listed next to it and can be put behind the same sign-in when they are web
+  pages too;
 - HTTPS, your choice of three: none (address and ports, for a home network); behind your own proxy (nginx,
   Caddy, Traefik) with a check that the proxy is set up right; or by Hata itself with certificates from
   Let's Encrypt. With a domain, every app has its own address, `<app>.<domain>`;
