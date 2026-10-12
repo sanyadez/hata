@@ -1,5 +1,7 @@
 # Hata
 
+**English** · [Українська](README.uk.md)
+
 A home server in a single file: a web dashboard, a Docker app store, files, HTTPS and backups.
 Works with the CasaOS app store and takes a CasaOS install over in one line, with an undo.
 ("Hata" — «хата» — is Ukrainian for "home", the same thing "casa" means.)
