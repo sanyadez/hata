@@ -6,6 +6,14 @@ A home server in a single file — a CasaOS competitor built on Bun with zero de
 Web dashboard, Docker app store, files, HTTPS and backups: one process, one binary, no microservices,
 no database server next to it and no npm packages. Compatible with the CasaOS app store.
 
+![The dashboard: system numbers, app tiles in groups, what needs attention and recent activity](screenshots/dashboard.png)
+
+| | |
+|---|---|
+| ![The app store](screenshots/store.png) The app store | ![An app's page](screenshots/app.png) An app's page |
+| ![An app's settings as a form](screenshots/app-settings.png) An app's settings as a form | ![The file manager](screenshots/files.png) Files |
+| ![Backups](screenshots/backups.png) Backups | <img src="screenshots/phone.png" alt="The dashboard on a phone" width="240"> On a phone |
+
 ## Status
 
 Early development. What works today:
