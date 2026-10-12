@@ -1113,6 +1113,7 @@
   "error.data.isRoot": "The data folder is the whole file system (/), which cannot be moved. Type the new folder in the field and save instead.",
   "error.data.hasMounts": "Another disk is connected inside the data folder: {paths}. Its files would be left behind — disconnect it or connect it elsewhere first.",
   "error.data.noSpace": "There is not enough free room in the new place for everything in the data folder.",
+  "error.data.ownerless": "The file system of that disk ({fstype}) keeps no owners or permissions for files, and apps need them for their data. Prepare the disk in Settings → Storage (that erases it) or choose another one.",
   "mounting.connectTitle": "Connect {disk}",
   "mounting.connectLead": "The files on it stay as they are: nothing is erased or changed. They show up as the folder below.",
   "mounting.noOwners": "A {fs} file system does not know owners and permissions: everything on it will be open for reading and writing to every app and every account of the server.",

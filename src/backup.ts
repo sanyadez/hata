@@ -11,6 +11,7 @@
  * depend on.
  */
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statfsSync, statSync } from "node:fs";
+import { rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { APP_NAME_RE, appMeta, bindSources, normalize } from "./appform";
 import { AppError, appAction, appDir, dc, installedNames, jobFinished, onBeforeUpdate, readCompose, startJob, type Job, type Log } from "./apps";
@@ -259,7 +260,7 @@ export function restoreSnapshot(name: string, id: string, user: string): Job {
     if (existsSync(join(appDir(name), "compose.yml"))) await dc(name, ["stop"], log);
     for (const path of snapshot.paths.map(place)) {
       log(`Replacing ${path}`);
-      rmSync(path, { recursive: true, force: true });
+      await rm(path, { recursive: true, force: true });
     }
     if (moved) mkdirSync(dirname(appDir(name)), { recursive: true });
     log(`$ tar -xzf ${archive} -C /${elsewhere.map((p) => `  (${p} → ${place(p)})`).join("")}`);

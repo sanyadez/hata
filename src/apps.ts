@@ -7,6 +7,7 @@
  * reads; a newer store version is merged into the app from there (`merge.ts`).
  */
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { rm } from "node:fs/promises";
 import { join } from "node:path";
 import { APP_NAME_RE, appMeta, applyForm, bindSources, buildForm, dumpCompose, normalize, parseCompose, parseEnv, publishedPorts, resolvePorts, type AppForm, type AppMeta, type Compose } from "./appform";
 import { applyEdit, blankCompose, readEdit, type AppEdit } from "./appedit";
@@ -671,7 +672,7 @@ export function removeApp(name: string, withData: boolean, user: string): Job {
     if (withData) {
       const data = join(settings.dataRoot, "AppData", name);
       log(`Removing ${data}`);
-      rmSync(data, { recursive: true, force: true });
+      await rm(data, { recursive: true, force: true });
     }
   });
 }

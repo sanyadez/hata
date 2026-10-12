@@ -10,7 +10,8 @@
  * Rewriting a compose file (`rebaseCompose`) is a pure function: only the host side of a bind mount
  * changes, and the file keeps its comments and layout whenever its volumes are written plainly.
  */
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, rmdirSync, statfsSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmdirSync, statfsSync } from "node:fs";
+import { rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { AppError, appDir, composeFile, dc, installedNames, listApps, listJobs, startJob, writeEnv, type Job, type Log } from "./apps";
 import { bus } from "./bus";
@@ -35,13 +36,39 @@ export function cannotMoveData(target: unknown, current: string, state: string[]
   return checked;
 }
 
-const mountPoints = (): string[] => {
+/**
+ * The file system `path` would lie on, when it is one that keeps no owners and permissions (FAT, exFAT,
+ * NTFS): apps' data cannot live there — a database refuses its files, everything is open to everyone.
+ */
+export function ownerless(path: string, mounts: { path: string; fstype: string }[]): string | null {
+  const holder = mounts.filter((mount) => within(path, mount.path)).sort((a, b) => b.path.length - a.path.length)[0];
+  if (!holder) return null;
+  if (/^(vfat|msdos|exfat|ntfs3?)$/.test(holder.fstype)) return holder.fstype;
+  // ntfs-3g and exfat-fuse
+  return holder.fstype === "fuseblk" ? "ntfs" : null;
+}
+
+const mountTable = (): { path: string; fstype: string }[] => {
   try {
-    return readFileSync("/proc/mounts", "utf8").split("\n").map((line) => (line.split(" ")[1] ?? "").replace(/\\([0-7]{3})/g, (_, oct: string) => String.fromCharCode(parseInt(oct, 8)))).filter(Boolean);
+    return readFileSync("/proc/mounts", "utf8")
+      .split("\n")
+      .map((line) => line.split(" "))
+      .filter((fields) => fields[1])
+      .map((fields) => ({ path: fields[1]!.replace(/\\([0-7]{3})/g, (_, oct: string) => String.fromCharCode(parseInt(oct, 8))), fstype: fields[2] ?? "" }));
   } catch {
     return [];
   }
 };
+const mountPoints = (): string[] => mountTable().map((mount) => mount.path);
+
+/** `<path>.moved-<date>`, or the first of `…-2`, `…-3` that is free: an older copy put aside is the person's to delete */
+function asideName(path: string): string {
+  const base = `${path}.moved-${date()}`;
+  for (let n = 1; ; n++) {
+    const name = n === 1 ? base : `${base}-${n}`;
+    if (!existsSync(name)) return name;
+  }
+}
 
 async function sh(cmd: string[], log: Log): Promise<{ code: number; out: string; err: string }> {
   log(`$ ${cmd.join(" ")}`);
@@ -68,6 +95,8 @@ export function moveData(target: unknown, user: string): Job {
   const checked = cannotMoveData(target, from, [DATA_DIR, SECRETS_DIR], mountPoints());
   if ("error" in checked) throw new AppError(checked.error, 400, checked.detail);
   const to = checked.path;
+  const foreign = ownerless(to, mountTable());
+  if (foreign) throw new AppError("data.ownerless", 400, { fstype: foreign });
   if (listJobs().some((job) => job.status === "running")) throw new AppError("data.busy", 409);
   if (existsSync(to) && readdirSync(to).some((name) => name !== "lost+found")) throw new AppError("data.notEmpty", 409);
 
@@ -120,7 +149,7 @@ export function moveData(target: unknown, user: string): Job {
       }
     } catch (e) {
       // nothing was changed yet: the copy is taken away and the apps go on where they were
-      for (const entry of copied) rmSync(join(to, entry), { recursive: true, force: true });
+      for (const entry of copied) await rm(join(to, entry), { recursive: true, force: true }).catch(() => {});
       if (made) {
         try {
           rmdirSync(to);
@@ -141,9 +170,8 @@ export function moveData(target: unknown, user: string): Job {
     if (existsSync(from)) {
       if (mountPoints().includes(from)) log(`${from} is a disk of its own, so the old files stay on it as they are.`);
       else {
-        const aside = `${from}.moved-${date()}`;
+        const aside = asideName(from);
         try {
-          rmSync(aside, { recursive: true, force: true });
           renameSync(from, aside);
           log(`The old folder is kept as ${aside}. Delete it once everything works.`);
         } catch (e) {

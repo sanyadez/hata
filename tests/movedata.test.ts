@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { parseCompose } from "../src/appform";
-import { cannotMoveData } from "../src/movedata";
+import { cannotMoveData, ownerless } from "../src/movedata";
 import { rebaseCompose, rebaseEnv, rebasePath } from "../src/rebase";
 
 test("rebasePath: the folder itself and what lies in it, nothing that only starts alike", () => {
@@ -111,4 +111,22 @@ test("movedDataRoot: the data folder of a snapshot, when it is not the one of no
   expect(movedDataRoot({ paths: ["/var/lib/hata/apps/writer"] }, "writer", "/mnt/big")).toBeNull();
   // a state folder that itself lies under something called AppData is not the data
   expect(movedDataRoot({ paths: ["/x/AppData/state/apps/writer"] }, "writer", "/mnt/big")).toBeNull();
+});
+
+test("ownerless: a disk without owners cannot hold the data folder", () => {
+  const mounts = [
+    { path: "/", fstype: "ext4" },
+    { path: "/mnt/usb", fstype: "exfat" },
+    { path: "/mnt/usb/inner", fstype: "ext4" },
+    { path: "/mnt/win", fstype: "fuseblk" },
+    { path: "/mnt/big", fstype: "ext4" },
+  ];
+  expect(ownerless("/mnt/big/DATA", mounts)).toBeNull();
+  expect(ownerless("/DATA", mounts)).toBeNull();
+  expect(ownerless("/mnt/usb/DATA", mounts)).toBe("exfat");
+  expect(ownerless("/mnt/usb", mounts)).toBe("exfat");
+  expect(ownerless("/mnt/usb/inner/DATA", mounts)).toBeNull();
+  expect(ownerless("/mnt/usbstick", mounts)).toBeNull();
+  expect(ownerless("/mnt/win/DATA", mounts)).toBe("ntfs");
+  expect(ownerless("/DATA", [])).toBeNull();
 });
