@@ -22,6 +22,8 @@ On a Linux machine with systemd, x86_64 or arm64 — see [Install](#install); co
 | ![An app's settings as a form](screenshots/app-settings.png) An app's settings as a form | ![The file manager](screenshots/files.png) Files |
 | ![Backups](screenshots/backups.png) Backups | <img src="screenshots/phone.png" alt="The dashboard on a phone" width="240"> On a phone |
 
+Every page and every look: [Screenshots](#screenshots).
+
 ## Status
 
 Early development. What works today:
@@ -138,6 +140,50 @@ Early development. What works today:
 - English and Ukrainian UI, light and dark, phone-friendly.
 
 Not there yet: wildcard certificates (DNS challenge), share links for files.
+
+## Screenshots
+
+### Pages
+
+| | |
+|---|---|
+| ![Sign-in](screenshots/signin.png) Sign-in | ![The trash: deleted files are kept for 30 days](screenshots/trash.png) The trash: deleted files are kept for 30 days |
+| ![An app's logs](screenshots/app-logs.png) An app's logs | ![An app's compose file](screenshots/app-compose.png) An app's compose file |
+| ![An app's snapshots](screenshots/app-backups.png) An app's snapshots | ![A shell inside an app's container](screenshots/app-terminal.png) A shell inside an app's container |
+| ![The server's terminal](screenshots/terminal.png) The server's terminal | ![Bringing in containers that already run](screenshots/import.png) Bringing in containers that already run |
+| ![Users, who can open what, invitations](screenshots/users.png) Users, who can open what, invitations |  |
+
+### Settings
+
+| | |
+|---|---|
+| ![Account: password, two-factor sign-in, passkeys, sessions](screenshots/settings-account.png) Account: password, two-factor sign-in, passkeys, sessions | ![General](screenshots/settings-general.png) General |
+| ![Appearance](screenshots/settings-appearance.png) Appearance | ![Apps: the data and configuration folders](screenshots/settings-apps.png) Apps: the data and configuration folders |
+| ![App stores](screenshots/settings-stores.png) App stores | ![Storage: disks, file systems, what fills the data folder](screenshots/settings-storage.png) Storage: disks, file systems, what fills the data folder |
+| ![Network folders (SMB)](screenshots/settings-shares.png) Network folders (SMB) | ![HTTPS and domain](screenshots/settings-https.png) HTTPS and domain |
+| ![Notifications](screenshots/settings-notifications.png) Notifications | ![Agents: access keys for the MCP server](screenshots/settings-agents.png) Agents: access keys for the MCP server |
+| ![About and updates](screenshots/settings-about.png) About and updates |  |
+
+### Looks
+
+The look is set in Settings → Appearance: an accent colour and a background colour (eight of each, or any
+colour of your own; a light background turns the whole page light), and a background picture — six built in,
+or your own — with a veil over it that can be made lighter or darker.
+
+Background pictures:
+
+| | | |
+|---|---|---|
+| ![Dusk](screenshots/theme-dusk.png) Dusk | ![Aurora, violet accent](screenshots/theme-aurora.png) Aurora, violet accent | ![Mist, green accent](screenshots/theme-mist.png) Mist, green accent |
+| ![Dunes, coral accent](screenshots/theme-dunes.png) Dunes, coral accent | ![Ocean, blue accent](screenshots/theme-ocean.png) Ocean, blue accent | ![Contours, lime accent](screenshots/theme-contours.png) Contours, lime accent |
+
+Background and accent colours:
+
+| | | |
+|---|---|---|
+| ![Hata's own colours](screenshots/theme-colour-1.png) Hata's own colours | ![Slate, coral accent](screenshots/theme-colour-2.png) Slate, coral accent | ![Pine, pink accent](screenshots/theme-colour-3.png) Pine, pink accent |
+| ![Plum, violet accent](screenshots/theme-colour-4.png) Plum, violet accent | ![Maroon, blue accent](screenshots/theme-colour-5.png) Maroon, blue accent | ![Black, cyan accent](screenshots/theme-colour-6.png) Black, cyan accent |
+| ![Light and warm, green accent](screenshots/theme-colour-7.png) Light and warm, green accent | ![Light and cool, lime accent](screenshots/theme-colour-8.png) Light and cool, lime accent |  |
 
 ## Install
 
