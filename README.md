@@ -24,6 +24,57 @@ On a Linux machine with systemd, x86_64 or arm64 — see [Install](#install); co
 
 Every page and every look: [Screenshots](#screenshots).
 
+## Questions and answers
+
+**What does it do?**
+It turns a Linux machine — an old PC, a mini PC, a Raspberry Pi, a VM — into a home server you run from a
+browser instead of a terminal. You pick an app in the store (Jellyfin, Nextcloud, Home Assistant, Pi-hole
+and well over a hundred more), press "Install", and it runs in Docker. Around the apps Hata does the rest of what
+a home server needs: a dashboard with the state of the machine, a file manager, folders shared over the
+network, disks and their health, backups with restore, users and who may open what, HTTPS, notifications
+when something breaks. The full list is under [Status](#status).
+
+**What is it an alternative to?**
+To CasaOS first of all, and to the others of that kind: Umbrel, Runtipi, Cosmos. Unlike some of them it is
+not an operating system: it is one program installed on the Linux you already have, and removed from it
+just as easily.
+
+**Is it a web UI for CasaOS?**
+No. Hata is a separate program that replaces CasaOS and does not need it. What it shares with CasaOS is
+the app store: Hata reads the same store format, so the same apps install here. If CasaOS is already on the
+machine, Hata can take its apps over as they are — see [Moving in from CasaOS](#moving-in-from-casaos).
+
+**And what is CasaOS?**
+An open-source home server dashboard by IceWhale, the makers of ZimaBoard: a web page with app tiles, a
+Docker app store and a file manager on top of an ordinary Linux. It made the "home server without a
+terminal" idea popular. Hata starts from what CasaOS does and adds what it lacks: backups and restore,
+users with roles and two-factor sign-in, sign-in in front of any app, HTTPS with certificates, disk health,
+store updates that keep your changes, notifications.
+
+**How is it better than Cockpit?**
+It is not better, it does another job. Cockpit administers a Linux server: systemd services, the journal,
+network interfaces, system accounts, packages, virtual machines. Hata is about apps and the people of a
+home: a store, one-click installs, a dashboard of tiles, backups of app data, family members who open
+their apps and nothing else. Cockpit has no app store and no idea of "an app with its data"; Hata does
+not manage services or network interfaces. The two do not get in each other's way and can run on one
+machine.
+
+**Can it manage containers and compose files like Portainer?**
+Apps, yes. Every app is a compose project, and on its page you start, stop and restart it, update its
+images, watch CPU and memory per container, read live logs, open a shell inside a container and edit the
+compose file — as text or as a form. You can paste any compose file or a `docker run` command to make an
+app, and what already runs on the machine (compose projects started elsewhere, single containers) can be
+taken in as apps. What Hata does not have is Portainer's view of Docker itself: there are no lists of
+images, volumes and networks to browse and clean up, no Swarm or Kubernetes, and one Hata looks after one
+machine. Portainer runs fine next to it — as an app from the store.
+
+**Does it check Docker registries for newer images?**
+Not yet. Hata notices when the app store has a newer version of an app and marks the app "Update
+available"; it does not ask a registry by itself whether the tag an app uses — `latest`, say — has a
+newer image behind it. "Update images" on an app's page pulls them whenever you press it, with a
+snapshot of the app's data taken first. Images come from any registry the compose file names; signing in
+to a private registry is not in the UI.
+
 ## Status
 
 Early development. What works today:
