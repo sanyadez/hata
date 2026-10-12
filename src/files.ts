@@ -161,7 +161,8 @@ function fsError(e: unknown): AppError {
   if (code === "EEXIST" || code === "ENOTEMPTY" || code === "ERR_FS_CP_EEXIST") return new AppError("files.exists", 409, { name: "" });
   if (code === "ENOTDIR") return new AppError("files.notDir");
   if (code === "ENOSPC" || code === "EDQUOT") return new AppError("files.noSpace", 507);
-  if (["EACCES", "EPERM", "EROFS", "EBUSY"].includes(code)) return new AppError("files.denied", 403, { code });
+  if (code === "EROFS") return new AppError("files.readOnlyDisk", 403);
+  if (["EACCES", "EPERM", "EBUSY"].includes(code)) return new AppError("files.denied", 403, { code });
   return new AppError("files.failed", 500, { code: code || (e instanceof Error ? e.message : String(e)) });
 }
 
@@ -459,8 +460,9 @@ export async function remove(paths: unknown, forever = false, by = ""): Promise<
         putInTrash(abs, { type: st.isDirectory() ? "dir" : st.isFile() ? "file" : "other", size: sum.size, files: sum.files }, by);
       } catch (e) {
         const code = (e as NodeJS.ErrnoException).code ?? "";
-        if (code === "ENOENT") throw fsError(e);
-        // a disk that takes no trash (read-only, another one beneath a link): the page offers to delete for good
+        // from a read-only disk nothing can be deleted for good either
+        if (code === "ENOENT" || code === "EROFS") throw fsError(e);
+        // a place that takes no trash: the page offers to delete for good
         throw new AppError("files.noTrash", 409, { name: basename(abs), code });
       }
     }

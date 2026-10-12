@@ -636,6 +636,7 @@
   "error.files.changed": "The file was changed by someone else meanwhile. Open it again.",
   "error.files.archiveTooLarge": "Too much for one archive (over 3.8 GB or 60 000 entries). Download it in parts.",
   "error.files.noTrash": "“{name}” lies on a disk that keeps no trash ({code}): it can only be deleted for good.",
+  "error.files.readOnlyDisk": "This disk is read-only: nothing on it can be changed.",
   "error.files.virtual": "These are the kernel's own files (/proc, /sys, /dev): they can be listed, not read or changed.",
   "files.home": "Data",
   "files.copyPath": "Copy the path",
