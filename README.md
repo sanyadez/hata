@@ -1,10 +1,18 @@
 # Hata
 
-A home server in a single file — a CasaOS competitor built on Bun with zero dependencies.
+A home server in a single file: a web dashboard, a Docker app store, files, HTTPS and backups.
+Works with the CasaOS app store and takes a CasaOS install over in one line, with an undo.
 ("Hata" — «хата» — is Ukrainian for "home", the same thing "casa" means.)
 
-Web dashboard, Docker app store, files, HTTPS and backups: one process, one binary, no microservices,
-no database server next to it and no npm packages. Compatible with the CasaOS app store.
+One process, one binary, no microservices, no database server next to it and no npm packages — built
+on Bun with zero dependencies. An app is a plain compose file on disk: Hata does not hide Docker.
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/sanyadez/hata/main/install.sh | sudo sh
+```
+
+On a Linux machine with systemd, x86_64 or arm64 — see [Install](#install); coming from CasaOS, see
+[Moving in from CasaOS](#moving-in-from-casaos).
 
 ![The dashboard: system numbers, app tiles in groups, what needs attention and recent activity](screenshots/dashboard.png)
 
