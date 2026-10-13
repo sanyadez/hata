@@ -167,7 +167,9 @@ Early development. What works today:
   disk, and without it the apps that keep data there stay stopped instead of starting empty on the
   system's disk — the home page says which disk is missing); a disk that
   already holds files (ext4, XFS, Btrfs, FAT, exFAT, NTFS) is connected as it is, nothing on it changed;
-  a USB disk can be connected by itself when plugged in, and is ejected before it is pulled out. Erasing
+  a USB disk can be connected by itself when plugged in, and is ejected before it is pulled out. A disk
+  nothing uses yet is said so on the home page too, and what a plugged-in stick holds can be copied
+  onto the server — all of it or the folders and files you choose, into the folder you choose. Erasing
   asks for the disk's name and your password, and is never offered for the system's disk, a disk in use
   or a member of an array;
 - the data folder moves to a disk with one button (Settings → Apps, or right after preparing a disk):
@@ -221,6 +223,8 @@ Early development. What works today:
   under the key's name;
 - updates of Hata itself from the web UI: a newer release is downloaded, checked against its checksums and
   started; if it does not come up, the previous version is put back by itself. Apps keep running meanwhile;
+- the whole history of what happened on the server and who did it, by day, with a search;
+- Docker itself is installed by a button where it is missing, and started where it is not running;
 - English and Ukrainian UI, light and dark, phone-friendly.
 
 Not there yet: wildcard certificates (DNS challenge), share links for files.

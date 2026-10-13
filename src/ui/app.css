@@ -376,6 +376,13 @@ td .clip { max-width: 320px; }
 .snapshot:last-child { padding-bottom: 0; }
 .console.small-console { height: 180px; margin-top: 8px; font-size: 12px; }
 .kv .with-actions { display: inline-flex; align-items: center; gap: 10px; flex-wrap: wrap; justify-content: flex-end; }
+.row-actions.under { justify-content: flex-start; margin-top: 10px; flex-wrap: wrap; }
+.all-activity { display: inline-flex; align-items: center; gap: 4px; margin-top: 12px; color: var(--muted); }
+.all-activity:hover { color: var(--text); }
+.all-activity .ico { width: 12px; height: 12px; }
+.check.inline { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
+.history-day h3 { margin: 0 0 8px; }
+.center-row { display: flex; justify-content: center; text-align: center; }
 .text-btn { border: 0; background: none; padding: 0; font: inherit; color: inherit; text-align: left; cursor: pointer; }
 .text-btn:hover { text-decoration: underline; }
 .text-btn.small { font-size: 12px; text-decoration: underline; text-decoration-style: dotted; }

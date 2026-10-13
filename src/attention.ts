@@ -30,7 +30,7 @@ const FAILURE_WINDOW_MS = 24 * 3600 * 1000;
 /** A trash smaller than this is not worth a word when its disk fills up, bytes */
 const TRASH_WORTH = 100 * 1024 * 1024;
 
-export function attention(input: { system: SystemStatus; docker: DockerInfo; apps: InstalledApp[]; activity: Activity[]; update?: string | null; offsite?: { error: string } | null; disks?: DiskReport[]; trash?: (path: string) => number; absent?: { path: string; holds: string | null }[]; internet?: Trouble[]; array?: { code: string; detail: Record<string, string | number> }[]; now?: number }): AttentionItem[] {
+export function attention(input: { system: SystemStatus; docker: DockerInfo; apps: InstalledApp[]; activity: Activity[]; update?: string | null; offsite?: { error: string } | null; disks?: DiskReport[]; trash?: (path: string) => number; absent?: { path: string; holds: string | null }[]; internet?: Trouble[]; array?: { code: string; detail: Record<string, string | number> }[]; unused?: { id: string; title: string; size: number; carries: boolean }[]; now?: number }): AttentionItem[] {
   const { system, docker, apps, activity } = input;
   const now = input.now ?? Date.now();
   const items: AttentionItem[] = [];
@@ -96,6 +96,11 @@ export function attention(input: { system: SystemStatus; docker: DockerInfo; app
   // the protection from a disk failure: damage found, a disk that came up empty, a sync that waits or failed
   for (const item of input.array ?? []) {
     items.push({ id: `array.${item.code}`, severity: item.code === "held" || item.code === "failed" ? "warn" : "danger", code: `array.${item.code}`, detail: item.detail });
+  }
+
+  // a disk nothing uses yet: a new one to put to use, or a USB stick with files to copy from
+  for (const disk of input.unused ?? []) {
+    items.push({ id: `newdisk:${disk.id}`, severity: "warn", code: disk.carries ? "disk.usb" : "disk.new", detail: { disk: disk.title, size: disk.size, id: disk.id } });
   }
 
   const memory = system.memory.total ? Math.round((system.memory.used / system.memory.total) * 100) : 0;

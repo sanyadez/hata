@@ -123,3 +123,8 @@ test("Docker: not installed and not running are told apart, each has its own way
   expect([one("missing").code, one("stopped").code, one("noCompose").code, one().code]).toEqual(["docker.missing", "docker.stopped", "docker", "docker"]);
   expect(one("missing")).toMatchObject({ id: "docker", severity: "danger" });
 });
+
+test("a disk nothing uses yet: a new one to put to use, a USB stick with files to copy from", () => {
+  const items = attention({ system: system(), docker, apps: [], activity: [], now: NOW, unused: [{ id: "S1", title: "GOODRAM SSD", size: 120e9, carries: false }, { id: "S2", title: "USB DISK 3.0", size: 31e9, carries: true }] });
+  expect(items.map((i) => [i.id, i.code, i.severity, i.detail.disk])).toEqual([["newdisk:S1", "disk.new", "warn", "GOODRAM SSD"], ["newdisk:S2", "disk.usb", "warn", "USB DISK 3.0"]]);
+});

@@ -18,7 +18,7 @@ import { chmodSync, chownSync, copyFileSync, existsSync, mkdirSync, mkdtempSync,
 import { basename, dirname, join } from "node:path";
 import { record } from "./activity";
 import { bus } from "./bus";
-import { DATA_DIR, SECRETS_DIR, settings } from "./config";
+import { DATA_DIR, SECRETS_DIR, saveSettings, settings } from "./config";
 import { connected, diskLabel, type Disk, type Volume } from "./disks";
 import { isPlainObject, readJsonFile, writeJsonAtomic, writeTextAtomic } from "./fsutil";
 import { installCommand, packageManager, PATH, run } from "./packages";
@@ -549,6 +549,7 @@ function usbFolder(volume: Volume, taken: Set<string>): string {
 function lookAround(): Promise<void> {
   return oneAtATime(async () => {
     const disks = await connected();
+    note(disks);
     const volumes = disks.flatMap((d) => d.volumes);
     const mounted = mountedAt();
     for (const entry of [...temporary]) {
@@ -617,6 +618,50 @@ export function startMounting(): void {
   }, LOOK_EVERY_MS);
 }
 
+// ---- disks nothing uses yet ----
+
+export interface UnusedDisk {
+  /** The serial number, or the name when the disk has none */
+  id: string;
+  title: string;
+  size: number;
+  /** A USB stick or disk with files on it: something to copy from rather than to put to use */
+  carries: boolean;
+}
+
+let unused: UnusedDisk[] = [];
+
+/**
+ * A disk that could be prepared and that nothing uses, unless the person said to leave it be. A USB
+ * disk Hata connected only until it is unplugged (`passing` — those folders) is still one to copy from.
+ */
+export function unusedOf(disks: Disk[], ignored: string[], present: (path: string) => boolean = existsSync, passing: string[] = []): UnusedDisk[] {
+  const usb = (d: Disk) => d.removable || d.transport === "usb";
+  const visiting = (d: Disk) => usb(d) && blockers(d).join() === "mounted" && d.volumes.every((v) => v.mounts.every((path) => passing.includes(path)));
+  return disks
+    .filter((d) => present(d.path) && (blockers(d).length === 0 || visiting(d)) && !ignored.includes(d.serial || d.name))
+    .map((d) => ({ id: d.serial || d.name, title: diskLabel(d), size: d.size, carries: usb(d) && d.volumes.some((v) => mountable(v) || v.mounts.length > 0) }));
+}
+
+function note(disks: Disk[]): void {
+  const now = unusedOf(disks, settings.storage.ignored, existsSync, temporary.map((entry) => entry.path));
+  const changed = JSON.stringify(now) !== JSON.stringify(unused);
+  unused = now;
+  if (changed) bus.publish("apps");
+}
+
+/** What the last look at the disks found unused: for the "needs attention" list */
+export const unusedDisks = (): UnusedDisk[] => unused;
+
+/** Not to be mentioned again: the banner and the home page leave this disk out */
+export function ignoreDisk(id: unknown): void {
+  if (typeof id !== "string" || !id || id.length > 200) return;
+  settings.storage.ignored = [...settings.storage.ignored.filter((other) => other !== id), id].slice(-100);
+  saveSettings();
+  unused = unused.filter((d) => d.id !== id);
+  bus.publish("apps");
+}
+
 // ---- for the page ----
 
 export interface MountingReport {
@@ -633,9 +678,12 @@ export interface MountingReport {
   pools: Record<string, string[]>;
   /** The connected folders that can be merged into one */
   mergeable: string[];
+  /** The disks nothing uses that are said so on top of the page */
+  unused: UnusedDisk[];
 }
 
 export function mountingReport(disks: Disk[]): MountingReport {
+  note(disks);
   const ours: MountingReport["ours"] = {};
   const lines = fstab();
   for (const entry of lines) if (entry.ours) ours[entry.path] = "kept";
@@ -648,5 +696,6 @@ export function mountingReport(disks: Disk[]): MountingReport {
     ours,
     pools: pools(lines),
     mergeable: mergeable(lines, [...mountedAt().keys()]),
+    unused,
   };
 }

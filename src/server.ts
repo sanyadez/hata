@@ -11,7 +11,7 @@ import { existsSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { homedir, networkInterfaces } from "node:os";
 import type { Server, ServerWebSocket } from "bun";
-import { recent, record } from "./activity";
+import { recent, record, history } from "./activity";
 import { agentUser, createKey, keyOf, listKeys, removeKey } from "./agents";
 import { AppError, appAction, installedNames, jobFinished, appEnv, appDetail, appLogs, appIcon, appSettings, appStats, applyCompose, ICON_MIME, MAX_ICON, removeAppIcon, setAppIcon, applySettings, installFromSettings, applyStoreUpdate, composeText, getJob, installCustom, installFromStore, listApps, listJobs, onAppRemoved, planStoreUpdate, readCompose, removeApp, storeAppDetail } from "./apps";
 import { certificateStates, challengeResponse, ensureCertificates, loadCertificates } from "./acme";
@@ -28,7 +28,7 @@ import { checkImages, imagesStatus, startImages } from "./images";
 import { afterPackage, giveBack, internetTrouble, startNetwork, setCheck, setRole, startHotspot, stopHotspot, wifiQrText, changeNic, confirmChange, handOver, NETWORK_PACKAGES, networkReport, NetworkError, revertChange, wifiConnect, wifiForget, wifiNetworks } from "./network";
 import { DOCKER_INSTALL_COMMAND, installDocker, startDocker } from "./dockerinstall";
 import { ArrayError, arrayReport, arrayTrouble, bringBack, rebuild as rebuildParity, repair as repairArray, scrub as scrubArray, setUp as setUpArray, startSnapraid, stop as stopArray, sync as syncArray, turnOff as turnOffArray } from "./snapraid";
-import { absent, connectVolume, disconnect, mergeFolders, mountingReport, prepareDisk, startMounting, type Outcome } from "./mounting";
+import { ignoreDisk, unusedDisks, absent, connectVolume, disconnect, mergeFolders, mountingReport, prepareDisk, startMounting, type Outcome } from "./mounting";
 import { moveData } from "./movedata";
 import { installPackage } from "./packages";
 import {
@@ -78,7 +78,7 @@ import { bus } from "./bus";
 import { DATA_DIR, dropOldSecrets, listenAddress, saveSettings, settings, timezone, updateSettings } from "./config";
 import { arrange, cleanLayout, layoutText, parseLayoutText } from "./dashboard";
 import { dockerInfo, listContainers, watchEvents } from "./docker";
-import { abortUpload, archivePlan, emptyTrash, list as listFiles, makeFolder, pinFolder, pinnedFolders, readable, readText, remove as removeFiles, rename as renameFile, restore as restoreFiles, startTrash, summary as filesSummary, transfer, trash, upload, writeText } from "./files";
+import { abortUpload, copyIn, archivePlan, emptyTrash, list as listFiles, makeFolder, pinFolder, pinnedFolders, readable, readText, remove as removeFiles, rename as renameFile, restore as restoreFiles, startTrash, summary as filesSummary, transfer, trash, upload, writeText } from "./files";
 import { adoptProject, casaosState, containerDraft, importCount, importList, moveInCasaos, projectDraft, rebuildContainer } from "./import";
 import { accessOf, dropAccess, dropUser, gateTarget, guard, guardsOf, mayOpen, otherPorts, MAX_APP_BODY, page, passToApp, setAccess, startGates, tunnelHandlers } from "./gate";
 import { parseDockerRun } from "./dockerrun";
@@ -661,7 +661,7 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
       arch: ARCH,
       // with a domain, apps are opened at <label>.<domain> when Hata itself is opened by that domain
       site: { domain: siteDomain(), mode: settings.https.mode, local: localDomain() },
-      attention: admin ? attention({ system, docker, apps, activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), array: arrayTrouble() }) : [],
+      attention: admin ? attention({ system, docker, apps, activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), array: arrayTrouble(), unused: unusedDisks() }) : [],
       // who signed in from where, and what was installed by whom, is the administrators' business
       activity: admin ? recent(8) : [],
       // containers and compose projects on this machine that are not apps here yet
@@ -727,6 +727,8 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
 
   if (path === "/api/activity" && method === "GET") {
     const app = url.searchParams.get("app") ?? undefined;
+    // the page of the whole history asks for it in parts
+    if (url.searchParams.has("before")) return json(history(Number(url.searchParams.get("before")), 200));
     return json(recent(app ? 20 : 100, app));
   }
 
@@ -955,6 +957,10 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
       if (e instanceof ArrayError) return fail(400, e.code, e.detail);
       throw e;
     }
+  }
+  if (path === "/api/disks/ignore" && method === "POST") {
+    ignoreDisk((await body(req)).id);
+    return storage();
   }
   // the answer does not wait for the measuring: the page asks again while it runs
   if (path === "/api/disks/fills" && method === "POST") {
@@ -1260,6 +1266,11 @@ async function files(req: Request, url: URL, server: Server, by: string): Promis
     const data = await body(req);
     return json({ path: renameFile(data.path, data.name) });
   }
+  // what a plugged-in disk holds, copied onto the server as a job
+  if (path === "/api/files/copy-in" && method === "POST") {
+    const data = await body(req);
+    return json({ job: copyIn(data.paths, data.to, by).id }, 202);
+  }
   if ((path === "/api/files/move" || path === "/api/files/copy") && method === "POST") {
     const data = await body(req);
     // a large folder takes its time, and more so across disks
@@ -1503,7 +1514,7 @@ export async function serve(): Promise<void> {
   void refreshHttps();
   refreshLocalNames();
   startNotifications({
-    attention: async () => attention({ system: systemStatus(), docker: await dockerInfo(), apps: await listApps("en"), activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), array: arrayTrouble() }),
+    attention: async () => attention({ system: systemStatus(), docker: await dockerInfo(), apps: await listApps("en"), activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), array: arrayTrouble(), unused: unusedDisks() }),
     baseUrl: publicUrl,
     isAdmin: (id) => findUser(id)?.role === "admin",
   });

@@ -88,7 +88,8 @@ export interface Settings {
   /** Newer images in the registries: looking for them, and updating the apps by itself */
   images: ImageSettings;
   /** Disks: whether a USB disk that is plugged in is mounted by itself */
-  storage: { automount: boolean };
+  /** `ignored` — disks nothing uses that the person said not to mention again, by serial number */
+  storage: { automount: boolean; ignored: string[] };
   /** Protection from a disk failure: which disk holds parity and which are protected (`snapraid.ts`) */
   snapraid: { parity: string; data: { name: string; path: string }[]; appData: boolean; time: string; scrub: boolean; deleteLimit: number };
   /** Folders put on the dashboard from the file manager, absolute paths */
@@ -168,7 +169,7 @@ const DEFAULTS: Settings = {
   images: { check: true, auto: false, time: "04:30", exclude: [] },
   https: { mode: "off", domain: "", email: "" },
   local: { enabled: true, name: "hata.local" },
-  storage: { automount: false },
+  storage: { automount: false, ignored: [] },
   snapraid: { parity: "", data: [], appData: false, time: "05:00", scrub: true, deleteLimit: 50 },
   folders: [],
   shares: [],
@@ -203,7 +204,7 @@ export const settings: Settings = {
   appearance: cleanAppearance(saved.appearance),
   https: { ...DEFAULTS.https, ...(isPlainObject(saved.https) ? saved.https : {}) },
   local: { ...DEFAULTS.local, ...(isPlainObject(saved.local) ? saved.local : {}) },
-  storage: { automount: isPlainObject(saved.storage) && saved.storage.automount === true },
+  storage: { automount: isPlainObject(saved.storage) && saved.storage.automount === true, ignored: isPlainObject(saved.storage) && Array.isArray(saved.storage.ignored) ? saved.storage.ignored.filter((id): id is string => typeof id === "string") : [] },
 };
 settings.local.name = localName(settings.local.name) ?? DEFAULTS.local.name;
 

@@ -8,7 +8,7 @@ import { DATA_DIR } from "./config";
 import { readJsonFile, writeJsonAtomic } from "./fsutil";
 
 const FILE = join(DATA_DIR, "activity.json");
-const KEEP = 300;
+const KEEP = 3000;
 
 export interface Activity {
   ts: number;
@@ -32,6 +32,12 @@ export function record(code: string, data: Omit<Activity, "ts" | "code"> = {}): 
     console.error("Could not write the activity log:", e instanceof Error ? e.message : e);
   }
   bus.publish("activity");
+}
+
+/** A page of the whole log, newest first: the entries older than `before`, and whether there are more */
+export function history(before: number, limit: number): { entries: Activity[]; more: boolean } {
+  const older = Number.isFinite(before) && before > 0 ? entries.filter((e) => e.ts < before) : entries;
+  return { entries: older.slice(-limit).reverse(), more: older.length > limit };
 }
 
 /** The newest entries first; `app` narrows to one app */

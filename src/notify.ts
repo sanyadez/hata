@@ -169,13 +169,13 @@ const SEPARATE = 3;
 /** The messages for the items to send, in the words of the home page */
 export function wording(items: AttentionItem[], lang: string): Message[] {
   const one = (item: AttentionItem): Message => {
-    const detail = { ...item.detail, free: typeof item.detail.free === "number" ? bytes(item.detail.free) : "", trash: typeof item.detail.trash === "number" ? bytes(item.detail.trash) : "" };
+    const detail = { ...item.detail, free: typeof item.detail.free === "number" ? bytes(item.detail.free) : "", trash: typeof item.detail.trash === "number" ? bytes(item.detail.trash) : "", size: typeof item.detail.size === "number" ? bytes(item.detail.size) : "" };
     const tab = item.code === "restarting" || item.code === "partial" ? "/logs" : "";
     return {
       title: tr(lang, `attention.${item.code}.title`, detail),
       text: tr(lang, `attention.${item.code}.text`, detail).trim(),
       severity: item.severity,
-      route: item.app ? `#/apps/${item.app}${tab}` : item.code === "update" ? "#/settings/about" : item.code === "disk.trash" ? "#/trash" : item.code.startsWith("internet.") ? "#/settings/network" : item.code.startsWith("array.") || item.code.startsWith("smart.") ? "#/settings/storage" : "#/",
+      route: item.app ? `#/apps/${item.app}${tab}` : item.code === "update" ? "#/settings/about" : item.code === "disk.trash" ? "#/trash" : item.code.startsWith("internet.") ? "#/settings/network" : item.code.startsWith("array.") || item.code.startsWith("smart.") || item.code === "disk.new" || item.code === "disk.usb" ? "#/settings/storage" : "#/",
       tag: keyOf(item),
       code: item.code,
       app: item.app,

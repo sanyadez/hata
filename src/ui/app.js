@@ -298,6 +298,7 @@ function parseRoute() {
   // "#/files" is the data root, wherever it is; "#/files/" is the root of the server
   if (parts[0] === "files" && isAdmin()) return { view: "files", path: /^#\/?files$/.test(location.hash) ? "" : "/" + parts.slice(1).join("/") };
   if (parts[0] === "trash" && isAdmin()) return { view: "trash" };
+  if (parts[0] === "activity" && isAdmin()) return { view: "activity" };
   if (parts[0] === "backups" && isAdmin()) return { view: "backups" };
   if (parts[0] === "users" && isAdmin()) return { view: "users" };
   if (parts[0] === "import" && isAdmin()) return { view: "import" };
@@ -685,6 +686,7 @@ function render() {
   if (view === "settings") return renderSettings();
   if (view === "files") return renderFiles();
   if (view === "trash") return renderTrash();
+  if (view === "activity") return renderActivity();
   if (view === "backups") return renderBackups();
   if (view === "users") return renderUsers();
   if (view === "import") return renderImport();
@@ -1384,37 +1386,45 @@ function dragEnd(drop) {
 const ATTENTION_ICONS = { update: "up", docker: "box", restarting: "refresh", partial: "alert", disk: "disk", smart: "disk", memory: "memory", temperature: "temp", internet: "network", array: "disk" };
 
 function attentionItem(item) {
-  const detail = { ...item.detail, free: item.detail.free == null ? "" : bytes(item.detail.free), trash: item.detail.trash == null ? "" : bytes(item.detail.trash) };
+  const detail = { ...item.detail, free: item.detail.free == null ? "" : bytes(item.detail.free), trash: item.detail.trash == null ? "" : bytes(item.detail.trash), size: item.detail.size == null ? "" : bytes(item.detail.size) };
   const base = "attention." + item.code;
+  // a button that does the thing sits under the words: beside them it leaves the words a narrow column
+  const below = [
+    item.code === "docker.missing" && isAdmin() && button(t("docker.install"), { class: "small primary", onclick: () => dockerDialog() }, "download"),
+    item.code === "docker.stopped" && isAdmin() && dockerStartButton(),
+    item.code === "disk.usb" && isAdmin() && button(t("copyin.button"), { class: "small primary", onclick: () => ((state.copyInFrom = item.detail.id), go("#/settings/storage")) }, "download"),
+    item.code === "disk.new" && isAdmin() && h("a", { class: "btn small", href: "#/settings/storage" }, t("attention.disk.open")),
+    (item.code === "disk.new" || item.code === "disk.usb") && isAdmin() && button(t("mounting.ignore"), { class: "small quiet", onclick: () => void api("POST", "/api/disks/ignore", { id: item.detail.id }).then(refresh, (e) => toast(errorText(e), "error")) }),
+  ].filter(Boolean);
   return h(
     "div",
     { class: "attention-item" },
     h("span", { class: "badge-icon " + item.severity }, icon(ATTENTION_ICONS[item.code.split(".")[0]] ?? "alert")),
-    h("div", { class: "grow" }, h("strong", null, t(base + ".title", detail)), h("p", { class: "muted small" }, t(base + ".text", detail).trim())),
+    h("div", { class: "grow" }, h("strong", null, t(base + ".title", detail)), h("p", { class: "muted small" }, t(base + ".text", detail).trim()), below.length > 0 && h("div", { class: "row-actions under" }, below)),
     item.code === "update" && h("a", { class: "btn small", href: "#/settings/about" }, t("common.open")),
-    item.code === "docker.missing" && isAdmin() && button(t("docker.install"), { class: "small primary", onclick: () => dockerDialog() }),
-    item.code === "docker.stopped" &&
-      isAdmin() &&
-      button(t("docker.start"), {
-        class: "small primary",
-        onclick: async (e) => {
-          const el = e.currentTarget;
-          el.disabled = true;
-          try {
-            await api("POST", "/api/docker/start", {});
-            toast(t("docker.started"));
-          } catch (err) {
-            toast(errorText(err), "error");
-          }
-          void refresh();
-        },
-      }),
     item.code === "disk.trash" && h("a", { class: "btn small", href: "#/trash" }, t("trash.title")),
     item.code.startsWith("smart.") && h("a", { class: "btn small", href: "#/settings/storage" }, t("common.open")),
     item.code.startsWith("internet.") && h("a", { class: "btn small", href: "#/settings/network" }, t("common.open")),
     item.code.startsWith("array.") && h("a", { class: "btn small", href: "#/settings/storage" }, t("common.open")),
     item.app && h("a", { class: "btn small", href: `#/apps/${item.app}${item.code === "restarting" || item.code === "partial" ? "/logs" : ""}` }, t(item.code === "restarting" || item.code === "partial" ? "app.logs" : "common.open")),
   );
+}
+
+function dockerStartButton() {
+  return button(t("docker.start"), {
+    class: "small primary",
+    onclick: async (e) => {
+      const el = e.currentTarget;
+      el.disabled = true;
+      try {
+        await api("POST", "/api/docker/start", {});
+        toast(t("docker.started"));
+      } catch (err) {
+        toast(errorText(err), "error");
+      }
+      void refresh();
+    },
+  });
 }
 
 /** Docker is what the apps run in: what it is, the command that installs it, and the button */
@@ -1454,18 +1464,65 @@ async function dockerDialog() {
 
 const ACTIVITY_ICONS = { terminal: "terminal", install: "download", update: "up", start: "play", stop: "stop", restart: "refresh", remove: "trash", apply: "code", backup: "archive", restore: "undo", snapshot: "trash", import: "download" };
 
-function activityItem(entry) {
+function activityItem(entry, when) {
   const [group, kind, outcome] = entry.code.split(".");
   const failed = outcome === "failed";
   const key = "activity." + entry.code;
   const title = state.overview?.apps.find((a) => a.name === entry.app)?.title ?? entry.app ?? "";
-  const meta = [ago(entry.ts), entry.user && group !== "auth" ? (entry.user === "schedule" ? t("activity.bySchedule") : entry.user === "restore" ? t("activity.byRestore") : entry.user.startsWith("agent:") ? t("activity.byAgent", { name: entry.user.slice(6) }) : t("activity.by", { user: entry.user })) : null, group === "auth" ? entry.detail : null].filter(Boolean).join(" · ");
+  const meta = [typeof when === "string" ? when : ago(entry.ts), entry.user && group !== "auth" ? (entry.user === "schedule" ? t("activity.bySchedule") : entry.user === "restore" ? t("activity.byRestore") : entry.user.startsWith("agent:") ? t("activity.byAgent", { name: entry.user.slice(6) }) : t("activity.by", { user: entry.user })) : null, group === "auth" ? entry.detail : null].filter(Boolean).join(" · ");
   return h(
     "div",
     { class: "activity-item" },
     icon(group === "auth" ? "signin" : group === "users" ? "user" : failed ? "x" : (ACTIVITY_ICONS[kind] ?? "check"), failed ? "danger" : ""),
     h("div", { class: "grow" }, h("div", null, has(key) ? t(key, { app: title, user: entry.user ?? "", target: entry.detail ?? "" }) : entry.code), h("div", { class: "muted small" }, meta), failed && entry.detail && h("div", { class: "muted small clip" }, entry.detail)),
   );
+}
+
+// --- The whole history ----------------------------------------------------------------------------
+
+const historyUi = { entries: [], more: false, loaded: false, filter: "", quiet: false };
+
+async function loadHistory(older = false) {
+  const before = older && historyUi.entries.length ? historyUi.entries[historyUi.entries.length - 1].ts : Date.now() + 60_000;
+  try {
+    const page = await api("GET", `/api/activity?before=${before}`);
+    historyUi.entries = older ? [...historyUi.entries, ...page.entries] : page.entries;
+    historyUi.more = page.more;
+    historyUi.loaded = true;
+  } catch (e) {
+    toast(errorText(e), "error");
+  }
+  if (state.route.view === "activity") paintHistory();
+}
+
+function paintHistory() {
+  const box = document.getElementById("history");
+  if (!box) return;
+  if (!historyUi.loaded) return box.replaceChildren(h("p", { class: "muted" }, "…"));
+  // each entry is worded first: the filter looks at what the person reads, in their language
+  const words = historyUi.filter.trim().toLowerCase();
+  const days = new Map();
+  for (const entry of historyUi.entries) {
+    if (historyUi.quiet && entry.code.startsWith("auth.signin")) continue;
+    const row = activityItem(entry, new Date(entry.ts).toLocaleTimeString(state.lang, { hour: "2-digit", minute: "2-digit" }));
+    if (words && !row.textContent.toLowerCase().includes(words)) continue;
+    const day = new Date(entry.ts).toLocaleDateString(state.lang, { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+    if (!days.has(day)) days.set(day, []);
+    days.get(day).push(row);
+  }
+  box.replaceChildren(
+    ...(days.size ? [...days].map(([day, rows]) => h("section", { class: "card pad history-day" }, h("h3", null, day), rows)) : [h("p", { class: "card pad muted" }, t(words ? "activity.noMatch" : "activity.none"))]),
+    historyUi.more && h("div", { class: "center-row" }, button(t("activity.older"), { onclick: (e) => ((e.currentTarget.disabled = true), loadHistory(true)) })),
+    !historyUi.more && days.size > 0 && h("p", { class: "muted small center-row" }, t("activity.start")),
+  );
+}
+
+function renderActivity() {
+  const search = h("input", { type: "search", placeholder: t("activity.search"), value: historyUi.filter, oninput: () => ((historyUi.filter = search.value), paintHistory()) });
+  const quiet = h("input", { type: "checkbox", checked: historyUi.quiet, onchange: () => ((historyUi.quiet = quiet.checked), paintHistory()) });
+  shell(h("div", { class: "page-head" }, h("div", null, h("h1", null, t("activity.history")), h("p", { class: "meta" }, t("activity.historyLead"))), h("div", { class: "actions" }, h("label", { class: "check inline" }, quiet, h("span", null, t("activity.noSignins"))), search)), h("div", { id: "history", class: "stack" }));
+  paintHistory();
+  void loadHistory();
 }
 
 function renderHome() {
@@ -1512,7 +1569,7 @@ function renderHomeBody() {
   }
 
   put(homeUi.widgets.attention, blockRemover("attention"), h("div", { class: "section-head" }, h("h2", null, t("attention.title"), o.attention.length > 0 && h("span", { class: "pill" }, o.attention.length))), o.attention.length ? o.attention.map(attentionItem) : h("p", { class: "all-good" }, icon("check", "ok"), t("attention.none")));
-  put(homeUi.widgets.activity, blockRemover("activity"), h("div", { class: "section-head" }, h("h2", null, t("activity.title"))), o.activity.length ? o.activity.map(activityItem) : h("p", { class: "muted small" }, t("activity.none")));
+  put(homeUi.widgets.activity, blockRemover("activity"), h("div", { class: "section-head" }, h("h2", null, t("activity.title"))), o.activity.length ? o.activity.map(activityItem) : h("p", { class: "muted small" }, t("activity.none")), isAdmin() && o.activity.length > 0 && h("a", { class: "link small all-activity", href: "#/activity" }, t("activity.all"), icon("chevron")));
   if (!homeUi.drag?.active) placeWidgets();
   renderSystem();
 }
@@ -5495,6 +5552,116 @@ function mergeDialog() {
   check();
 }
 
+/**
+ * Copies what a plugged-in disk holds onto the server: which of its file systems, everything or the
+ * chosen folders and files, and where to. The disk is connected for it when it is not yet.
+ */
+function copyInDialog(disk) {
+  const volumes = disk.volumes.filter((v) => v.fstype && (v.mounts.length || state.disks.mounting.mountable.includes(v.path)));
+  if (!volumes.length) return toast(t("copyin.nothing"), "error");
+  const HIDDEN = /^(\.hata-trash|lost\+found|System Volume Information|\$RECYCLE\.BIN|\.Trashes|\.Spotlight-V100|\.fseventsd)$/;
+  const error = h("p", { class: "error", role: "alert" });
+  const which = h("select", { onchange: () => open() }, volumes.map((v, i) => h("option", { value: String(i) }, [v.label || v.name, v.fstype, bytes(v.size)].join(" · "))));
+  const all = h("input", { type: "checkbox", checked: true, onchange: () => paint() });
+  const crumbs = h("div", { class: "crumbs wrap small" });
+  const list = h("div", { class: "snapshot-files" });
+  const sub = h("input", { type: "text", maxlength: 80, spellcheck: false, value: `${(volumes[0].label || disk.model || "USB").trim()} ${new Date().toISOString().slice(0, 10)}`, oninput: () => where() });
+  const target = h("span", { class: "mono" });
+  const go = button(t("copyin.go"), { class: "primary" }, "download");
+  let mount = "";
+  let at = "";
+  let top = [];
+  let entries = [];
+  let into = "";
+  const chosen = new Set();
+  const full = (name, dir = at) => (dir.endsWith("/") ? dir : dir + "/") + name;
+  const where = () => {
+    const name = sub.value.trim().replace(/\//g, "-");
+    target.textContent = name ? full(name, into) : into;
+    go.disabled = !mount || !into || (!all.checked && chosen.size === 0) || (all.checked && top.length === 0);
+    go.lastChild.textContent = all.checked ? t("copyin.goAll") : t("copyin.goChosen", { n: chosen.size });
+  };
+  const paint = () => {
+    const steps = at === mount ? [] : at.slice(mount.length).split("/").filter(Boolean);
+    crumbs.replaceChildren(h("button", { type: "button", class: "text-btn", onclick: () => show(mount) }, volumes[Number(which.value)].label || diskTitle(disk)), ...steps.flatMap((step, i) => [icon("chevron"), h("button", { type: "button", class: "text-btn", onclick: () => show(full(steps.slice(0, i + 1).join("/"), mount)) }, step)]));
+    list.replaceChildren(
+      ...(entries.length
+        ? entries.map((entry) => {
+            const path = full(entry.name);
+            const tick = h("input", { type: "checkbox", checked: all.checked || chosen.has(path), disabled: all.checked, "aria-label": entry.name, onchange: () => ((tick.checked ? chosen.add(path) : chosen.delete(path)), where()) });
+            const dir = entry.type === "dir";
+            return h("div", { class: "snapshot-file" }, tick, icon(dir ? "folder" : "file"), dir ? h("button", { type: "button", class: "text-btn grow name", onclick: () => show(path) }, entry.name) : h("span", { class: "grow name" }, entry.name), h("span", { class: "muted small" }, dir ? "" : bytes(entry.size)), h("span", { class: "muted small when" }, dateTime(entry.modified)));
+          })
+        : [h("p", { class: "muted" }, t("backup.files.empty"))]),
+    );
+    where();
+  };
+  const show = async (path) => {
+    error.textContent = "";
+    try {
+      const listing = await api("GET", `/api/files?path=${encodeURIComponent(path)}`);
+      at = path;
+      entries = listing.entries.filter((e) => !HIDDEN.test(e.name));
+      if (path === mount) top = entries.map((e) => full(e.name, mount));
+      paint();
+    } catch (err) {
+      error.textContent = errorText(err);
+    }
+  };
+  const open = async () => {
+    const volume = volumes[Number(which.value)];
+    chosen.clear();
+    mount = "";
+    list.replaceChildren(h("p", { class: "muted" }, t("copyin.opening")));
+    where();
+    try {
+      // not connected yet: it is, until it is unplugged or ejected
+      let now = state.disks.disks.flatMap((d) => d.volumes).find((v) => v.path === volume.path);
+      if (!now?.mounts.length) {
+        state.disks = await api("POST", "/api/disks/connect", { device: volume.path, name: mountName("usb-" + (volume.label || disk.model || "disk")), keep: false });
+        now = state.disks.disks.flatMap((d) => d.volumes).find((v) => v.path === volume.path);
+      }
+      mount = now.mounts[0];
+      if (!into) into = (await api("GET", "/api/files?path=")).home;
+      await show(mount);
+    } catch (err) {
+      list.replaceChildren();
+      error.textContent = errorText(err);
+    }
+  };
+  go.onclick = async () => {
+    go.disabled = true;
+    error.textContent = "";
+    try {
+      const res = await api("POST", "/api/files/copy-in", { paths: all.checked ? top : [...chosen], to: target.textContent });
+      const to = target.textContent;
+      dialog.close();
+      jobDialog(res.job, "copyin", "", () => {
+        toast(t("copyin.done", { path: to }));
+        if (state.route.view === "settings") void api("GET", "/api/disks").then(setDisks, () => {});
+      });
+    } catch (err) {
+      error.textContent = errorText(err);
+      go.disabled = false;
+    }
+  };
+  const dialog = openDialog(
+    "wide",
+    h("header", null, h("div", { class: "grow" }, h("h2", null, t("copyin.title", { disk: diskTitle(disk) })), h("p", { class: "muted small" }, t("copyin.lead"))), closeX(() => dialog)),
+    volumes.length > 1 && field(t("copyin.which"), which),
+    h("label", { class: "check" }, all, h("span", null, h("strong", null, t("copyin.all")), h("span", { class: "muted small block" }, t("copyin.allHint")))),
+    crumbs,
+    list,
+    h("h3", null, t("copyin.where")),
+    h("div", { class: "kv" }, target, button(t("copyin.choose"), { class: "small", onclick: () => folderPicker({ title: t("copyin.where"), start: into, confirmLabel: t("copyin.here"), action: async (path) => ((into = path), where()), allowed: (path) => !mount || !(path === mount || path.startsWith(mount + "/")) }) }, "folder")),
+    field(t("copyin.sub"), sub, t("copyin.subHint")),
+    error,
+    h("footer", null, closeButton(() => dialog, t("common.cancel")), go),
+  );
+  where();
+  void open();
+}
+
 function disconnectDialog(mount) {
   const removable = state.disks.disks.some((d) => d.name === mount.disk && (d.removable || d.transport === "usb"));
   const slot = h("div");
@@ -5558,7 +5725,7 @@ function storageSection() {
       h("td", { class: "num" + (hot ? " bad" : "") }, disk.smart?.temperature != null ? disk.smart.temperature + " °C" : "—"),
       h("td", null, total ? usageBar(used, total) : h("span", { class: "muted" }, "—")),
       h("td", { class: "mono" }, mounts.length ? mounts.map((m) => h("div", { class: "clip" }, m)) : h("span", { class: "muted" }, t("disks.notMounted"))),
-      h("td", null, h("div", { class: "row-actions" }, canPrepare(disk) && !mounts.length && !canConnect(disk).length && button(t("mounting.prepare"), { class: "small primary", onclick: (e) => (e.stopPropagation(), prepareDialog(disk)) }), canConnect(disk).length > 0 && button(t("mounting.connect"), { class: "small primary", onclick: (e) => (e.stopPropagation(), connectDialog(disk, canConnect(disk)[0])) }), button(t("disks.details"), { class: "small", onclick: (e) => (e.stopPropagation(), diskDialog(disk.name)) }))),
+      h("td", null, h("div", { class: "row-actions" }, canPrepare(disk) && !mounts.length && !canConnect(disk).length && button(t("mounting.prepare"), { class: "small primary", onclick: (e) => (e.stopPropagation(), prepareDialog(disk)) }), (disk.removable || disk.transport === "usb") && state.disks.mounting?.possible && disk.volumes.some((v) => v.fstype && v.mounts.length > 0) && button(t("copyin.button"), { class: "small", onclick: (e) => (e.stopPropagation(), copyInDialog(disk)) }, "download"), canConnect(disk).length > 0 && button(t("mounting.connect"), { class: "small primary", onclick: (e) => (e.stopPropagation(), connectDialog(disk, canConnect(disk)[0])) }), button(t("disks.details"), { class: "small", onclick: (e) => (e.stopPropagation(), diskDialog(disk.name)) }))),
     );
   };
   const checked = Math.max(0, ...data.disks.map((d) => d.checkedAt ?? 0));
@@ -5591,8 +5758,14 @@ function storageSection() {
     },
   });
   // a disk nothing uses yet is said so at the top, until it is put to use or waved away
-  const ignored = JSON.parse(localStorage.getItem("hata.disks.ignored") || "[]");
-  const fresh = data.disks.filter((d) => canPrepare(d) && !ignored.includes(d.serial || d.name));
+  const unused = (data.mounting?.unused ?? []).map((u) => u.id);
+  const fresh = data.disks.filter((d) => canPrepare(d) && unused.includes(d.serial || d.name));
+  // asked for on the home page: the dialog opens as soon as the disks are known
+  if (state.copyInFrom) {
+    const from = data.disks.find((d) => (d.serial || d.name) === state.copyInFrom);
+    state.copyInFrom = null;
+    if (from) setTimeout(() => copyInDialog(from), 0);
+  }
   const freshCard = (disk) => {
     const holds = disk.volumes.filter((v) => v.fstype);
     const connectable = canConnect(disk);
@@ -5604,7 +5777,8 @@ function storageSection() {
       h(
         "div",
         { class: "row-actions" },
-        button(t("mounting.ignore"), { class: "small quiet", onclick: () => (localStorage.setItem("hata.disks.ignored", JSON.stringify([...ignored, disk.serial || disk.name].slice(-50))), renderSettings()) }),
+        button(t("mounting.ignore"), { class: "small quiet", onclick: async () => setDisks(await api("POST", "/api/disks/ignore", { id: disk.serial || disk.name }).catch(() => state.disks)) }),
+        connectable.length > 0 && (disk.removable || disk.transport === "usb") && button(t("copyin.button"), { class: "small primary", onclick: () => copyInDialog(disk) }, "download"),
         connectable.length > 0 && button(t("mounting.connect"), { class: "small", onclick: () => connectDialog(disk, connectable[0]) }),
         button(t("mounting.prepare"), { class: "small" + (connectable.length ? "" : " primary"), onclick: () => prepareDialog(disk) }),
       ),

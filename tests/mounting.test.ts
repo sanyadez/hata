@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { Disk, Volume } from "../src/disks";
-import { blockers, holds, mountable, NAME_RE, optionsFor, parseFstab, upgradeLines, suggestName, withMount, withoutMount } from "../src/mounting";
+import { blockers, holds, mountable, NAME_RE, optionsFor, parseFstab, upgradeLines, suggestName, withMount, withoutMount, unusedOf } from "../src/mounting";
 
 const volume = (patch: Partial<Volume> = {}): Volume => ({ name: "sdb1", path: "/dev/sdb1", kind: "part", size: 1e9, fstype: "ext4", label: "", uuid: "u-1", mounts: [], swap: false, total: null, used: null, ...patch });
 const disk = (volumes: Volume[] = [], patch: Partial<Disk> = {}): Disk => ({ name: "sdb", path: "/dev/sdb", model: "Disk", serial: "S1", size: 4e9, transport: "sata", rotational: true, removable: false, readOnly: false, volumes, ...patch });
@@ -127,4 +127,23 @@ test("upgradeLines: Hata's own kept lines get the order of the start, nothing el
   expect(next.split("\n").filter((_, i) => i !== 3)).toEqual(old.split("\n").filter((_, i) => i !== 3));
   expect(upgradeLines(next)).toBe(next);
   expect(parseFstab(next).find((e) => e.path === "/mnt/media")?.ours).toBe(true);
+});
+
+test("unusedOf: the disks nothing uses, without the ones waved away or in use", () => {
+  const stick = disk([volume({ fstype: "vfat", label: "STICK" })], { name: "sdd", path: "/dev/sdd", serial: "USB1", model: "USB DISK", transport: "usb", removable: true });
+  const blank = disk([], { serial: "NEW1", model: "GOODRAM" });
+  const used = disk([volume({ mounts: ["/"] })], { name: "sda", path: "/dev/sda", serial: "SYS" });
+  const here = () => true;
+  expect(unusedOf([stick, blank, used], [], here)).toEqual([
+    { id: "USB1", title: "USB DISK", size: 4e9, carries: true },
+    { id: "NEW1", title: "GOODRAM", size: 4e9, carries: false },
+  ]);
+  expect(unusedOf([stick, blank], ["USB1"], here).map((d) => d.id)).toEqual(["NEW1"]);
+  // a stick Hata connected until it is unplugged is still one to copy from; one connected for good is in use
+  const visiting = disk([volume({ fstype: "vfat", mounts: ["/mnt/usb-stick"] })], { name: "sde", path: "/dev/sde", serial: "USB2", model: "Stick", transport: "usb", removable: true });
+  expect(unusedOf([visiting], [], here, ["/mnt/usb-stick"])).toEqual([{ id: "USB2", title: "Stick", size: 4e9, carries: true }]);
+  expect(unusedOf([visiting], [], here, [])).toEqual([]);
+  // a container sees the host's disks in the list and has no device to open
+  expect(unusedOf([stick, blank], [], () => false)).toEqual([]);
+  expect(unusedOf([disk([], { serial: "", name: "sdx", path: "/dev/sdx", model: "" })], [], here)[0]).toMatchObject({ id: "sdx", title: "sdx" });
 });

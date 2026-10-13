@@ -18,7 +18,7 @@
 import { chmodSync, chownSync, existsSync, lchownSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, statfsSync, statSync, unlinkSync, writeFileSync, type Stats } from "node:fs";
 import { lstat, open, readdir, readFile, rm, stat } from "node:fs/promises";
 import { basename, dirname, extname, join, resolve, sep } from "node:path";
-import { AppError } from "./apps";
+import { AppError, startJob, type Job } from "./apps";
 import { DATA_DIR, saveSettings, SECRETS_DIR, settings } from "./config";
 import { movePath } from "./dashboard";
 import { parseMounts } from "./disks";
@@ -424,6 +424,75 @@ export async function transfer(paths: unknown, to: unknown, copy: boolean): Prom
       }
     }
   }
+}
+
+/** File systems that keep no owners and no permissions: what comes from them is everybody's and "executable" */
+const OWNERLESS = /^(vfat|msdos|exfat|ntfs|ntfs3|fuseblk|iso9660|udf|hfsplus)$/;
+
+function fstypeAt(path: string): string {
+  let best = { path: "", fstype: "" };
+  for (const line of readFileSync("/proc/mounts", "utf8").split("\n")) {
+    const [, at, fstype] = line.split(" ");
+    const mount = (at ?? "").replace(/\\040/g, " ");
+    if (mount && fstype && inside(path, mount) && mount.length >= best.path.length) best = { path: mount, fstype };
+  }
+  return best.fstype;
+}
+
+const megabytes = (n: number): string => (n >= 1024 ** 3 ? `${(n / 1024 ** 3).toFixed(1)} GB` : `${Math.ceil(n / 1024 ** 2)} MB`);
+
+/**
+ * Copies what a plugged-in disk holds — everything chosen, folders and files — into a folder of the
+ * server, as a job with a log. The folder is made when it is not there; a name that is taken gets
+ * "(2)". From a file system without owners (FAT, exFAT, NTFS) the copies take the owner of the folder
+ * they land in and ordinary permissions; from one with owners they stay as they were.
+ */
+export function copyIn(paths: unknown, to: unknown, user: string): Job {
+  const target = locate(to);
+  const sources = pathList(paths).map((path) => {
+    const from = locate(path);
+    if (!lstatOrNull(from)) throw new AppError("files.notFound", 404);
+    if (isVirtual(from)) throw new AppError("files.virtual", 403);
+    if (inside(realish(target), realish(from))) throw new AppError("files.intoItself");
+    return from;
+  });
+  // the first folder of the way that is there says whether writing is allowed here at all
+  let there = target;
+  while (!lstatOrNull(there)) there = dirname(there);
+  mustBeDir(there);
+  mustWrite(target);
+  return startJob("", "copyin", user, async (log) => {
+    const du = Bun.spawn(["du", "-skxc", "--", ...sources], { stdout: "pipe", stderr: "ignore" });
+    const total = (Number(/^(\d+)\s+total$/m.exec(await new Response(du.stdout).text())?.[1]) || 0) * 1024;
+    makeFolders(target);
+    const room = statfsSync(target);
+    if (total > room.bavail * room.bsize) throw new Error(`Not enough room in ${target}: ${megabytes(total)} to copy, ${megabytes(room.bavail * room.bsize)} free`);
+    log(`Copying ${megabytes(total)} to ${target}`);
+    const before = room.bfree * room.bsize;
+    const tick = setInterval(() => {
+      const now = statfsSync(target);
+      log(`  ${megabytes(Math.max(0, before - now.bfree * now.bsize))} of ${megabytes(total)}`);
+    }, 5000);
+    try {
+      const owner = statSync(target);
+      for (const from of sources) {
+        const dest = join(target, freeName(target, basename(from)));
+        log(`${from} → ${dest}`);
+        const plain = OWNERLESS.test(fstypeAt(from));
+        const cp = Bun.spawn(plain ? ["cp", "-r", "--preserve=timestamps", "--", from, dest] : ["cp", "-a", "--", from, dest], { stdout: "ignore", stderr: "pipe" });
+        const [code, err] = await Promise.all([cp.exited, new Response(cp.stderr).text()]);
+        if (code !== 0) throw new Error(/No space left/i.test(err) ? "The disk is full" : err.trim().split("\n").pop() || `cp exited with ${code}`);
+        if (plain && process.getuid?.() === 0) {
+          await Bun.spawn(["chown", "-R", "-h", `${owner.uid}:${owner.gid}`, "--", dest], { stdout: "ignore", stderr: "ignore" }).exited;
+          await Bun.spawn(["chmod", "-R", "u=rwX,go=rX", "--", dest], { stdout: "ignore", stderr: "ignore" }).exited;
+          await Bun.spawn(["find", dest, "-type", "f", "-exec", "chmod", "644", "{}", "+"], { stdout: "ignore", stderr: "ignore" }).exited;
+        }
+      }
+    } finally {
+      clearInterval(tick);
+    }
+    log(`Done: ${sources.length} copied to ${target}`);
+  });
 }
 
 /** The system's `cp -a`: owners, permissions, times and links stay as they are, which the apps depend on */
