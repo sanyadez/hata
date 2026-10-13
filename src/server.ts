@@ -24,7 +24,7 @@ import { addShare, changeShare, installSamba, listShares, refreshShares, removeS
 import { checkDisks, diskHealth, installTool, listDisks, startDisks, startSelfTest } from "./disks";
 import { fills, measureFills, startFills } from "./fills";
 import { checkImages, imagesStatus, startImages } from "./images";
-import { changeNic, confirmChange, handOver, networkReport, NetworkError, revertChange } from "./network";
+import { afterPackage, changeNic, confirmChange, handOver, NETWORK_PACKAGES, networkReport, NetworkError, revertChange, wifiConnect, wifiForget, wifiNetworks } from "./network";
 import { absent, connectVolume, disconnect, mergeFolders, mountingReport, prepareDisk, startMounting, type Outcome } from "./mounting";
 import { moveData } from "./movedata";
 import { installPackage } from "./packages";
@@ -748,14 +748,27 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
   if (path.startsWith("/api/network")) {
     try {
       if (path === "/api/network/package" && method === "POST") {
+        const name = (await body(req)).package ?? "network-manager";
+        if (typeof name !== "string" || !NETWORK_PACKAGES.includes(name)) return fail(400, "network.failed", { message: "not a package Hata installs" });
         server.timeout(req, 0);
-        const message = await installPackage("network-manager");
+        const message = await installPackage(name);
         if (message) return fail(500, "network.failed", { message });
+        await afterPackage(name);
         return json(await networkReport());
       }
       if (path === "/api/network/confirm" && method === "POST") return (await confirmChange()) ? json(await networkReport()) : fail(409, "network.nothingPending");
       if (path === "/api/network/revert" && method === "POST") {
         await revertChange();
+        return json(await networkReport());
+      }
+      const wifi = /^\/api\/network\/([A-Za-z0-9_.-]{1,15})\/wifi$/.exec(path);
+      if (wifi) {
+        // looking around and joining a network take their time
+        server.timeout(req, 0);
+        if (method === "GET") return json({ networks: await wifiNetworks(wifi[1]!) });
+        if (method === "POST") await wifiConnect(wifi[1]!, await body(req), user.name);
+        else if (method === "DELETE") await wifiForget(wifi[1]!, user.name);
+        else return fail(404, "network.noNic");
         return json(await networkReport());
       }
       const nic = /^\/api\/network\/([A-Za-z0-9_.-]{1,15})(\/handover)?$/.exec(path);

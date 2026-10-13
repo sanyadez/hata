@@ -24,6 +24,10 @@ const TRIAL_S = 90;
 /** Interfaces that are Docker's or a tunnel's, not the server's way to the network */
 const NOT_OURS = /^(lo|docker|br-|veth|virbr|cni|flannel|lxcbr|podman|tun|tap|wg|tailscale|zt)/;
 const PACKAGE = "network-manager";
+/** Without it NetworkManager has a Wi-Fi device and cannot use it */
+const WIFI_PACKAGE = "wpasupplicant";
+export const NETWORK_PACKAGES = [PACKAGE, WIFI_PACKAGE];
+const PROFILES = "/etc/NetworkManager/system-connections";
 const NM = ["org.freedesktop.NetworkManager", "/org/freedesktop/NetworkManager", "org.freedesktop.NetworkManager"];
 const HANDED = (name: string) => `/etc/systemd/network/00-hata-${name}.network`;
 const UDEV_RULE = (name: string) => `/etc/udev/rules.d/99-zz-hata-${name}.rules`;
@@ -49,6 +53,8 @@ export interface Nic {
   speed: number | null;
   /** Who configures it: NetworkManager, systemd-networkd (netplan writes for it too), ifupdown, "" — nobody we know */
   manager: "nm" | "networkd" | "ifupdown" | "";
+  /** A Wi-Fi interface: whether it can be used, what it lacks, the network it is on */
+  wifi?: { ready: boolean; needs: { package: string; install: string } | null; ssid: string; signal: number };
 }
 
 interface IpLink {
@@ -178,6 +184,58 @@ export const handBackScript = (name: string): string =>
     `networkctl reconfigure ${name}`,
     "",
   ].join("\n");
+
+export interface WifiNetwork {
+  ssid: string;
+  /** 0–100 */
+  signal: number;
+  /** A password is asked for */
+  secure: boolean;
+  /** Only WPA3: the password is checked another way (SAE) */
+  wpa3: boolean;
+  band: "2.4" | "5" | "6";
+  /** The interface is on this network now */
+  active: boolean;
+  /** Its password is saved here */
+  known: boolean;
+}
+
+/**
+ * The networks out of `nmcli -t -f IN-USE,SSID,SIGNAL,SECURITY,FREQ device wifi list`: one line per
+ * name — the access point in use, otherwise the strongest — strongest first; nameless ones are left out.
+ */
+export function parseWifi(out: string, known: string[] = []): WifiNetwork[] {
+  const best = new Map<string, WifiNetwork>();
+  for (const line of out.split("\n")) {
+    const [inUse, ssid, signal, security, freq] = terse(line);
+    if (!ssid) continue;
+    const mhz = parseInt(freq ?? "", 10) || 0;
+    const sec = (security ?? "").replace("--", "").trim();
+    const found: WifiNetwork = { ssid, signal: Number(signal) || 0, secure: sec !== "", wpa3: /WPA3/.test(sec) && !/WPA[12]/.test(sec), band: mhz >= 5925 ? "6" : mhz >= 4000 ? "5" : "2.4", active: inUse === "*", known: known.includes(ssid) };
+    const had = best.get(ssid);
+    if (!had || (found.active && !had.active) || (found.active === had.active && found.signal > had.signal)) best.set(ssid, found);
+  }
+  return [...best.values()].sort((a, b) => Number(b.active) - Number(a.active) || b.signal - a.signal);
+}
+
+/** A Wi-Fi password as WPA takes it: 8–63 printable characters */
+export const wifiPassword = (value: unknown): value is string => typeof value === "string" && /^[\x20-\x7e]{8,63}$/.test(value);
+
+/**
+ * The NetworkManager profile of a Wi-Fi network as a file: written with mode 0600, so the password is
+ * never an argument of a command, where every user of the machine could read it.
+ */
+export function wifiProfile(id: string, nic: string, net: { ssid: string; secure: boolean; wpa3: boolean }, password: string): string {
+  // the name as a list of bytes: any characters, nothing to escape
+  const ssid = [...new TextEncoder().encode(net.ssid)].join(";") + ";";
+  const lines = ["[connection]", `id=${id}`, `uuid=${crypto.randomUUID()}`, "type=wifi", `interface-name=${nic}`, "", "[wifi]", "mode=infrastructure", `ssid=${ssid}`, ""];
+  if (net.secure) lines.push("[wifi-security]", `key-mgmt=${net.wpa3 ? "sae" : "wpa-psk"}`, `psk=${password.replace(/\\/g, "\\\\").replace(/^ /, "\\s")}`, "");
+  lines.push("[ipv4]", "method=auto", "", "[ipv6]", "method=auto", "");
+  return lines.join("\n");
+}
+
+/** The name of the profile Hata keeps for a Wi-Fi network: readable, and safe as a file name */
+export const wifiProfileId = (ssid: string): string => "hata-wifi-" + (ssid.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 32) || "network") + "-" + new Bun.CryptoHasher("sha256").update(ssid).digest("hex").slice(0, 6);
 
 const INTERFACES = "/etc/network/interfaces";
 const MARK = "#hata# ";
@@ -310,9 +368,17 @@ export async function networkReport(): Promise<NetworkReport> {
     // "connected (externally)" is NetworkManager only watching what somebody else configured
     const byNm = state !== "" && state !== "unmanaged" && !state.includes("externally");
     const speed = Number(read(`/sys/class/net/${link.name}/speed`));
+    const isWifi = existsSync(`/sys/class/net/${link.name}/wireless`);
+    let wifi: Nic["wifi"];
+    if (isWifi) {
+      const supplicant = !!Bun.which("wpa_supplicant", { PATH });
+      const on = byNm && state !== "unavailable" ? parseWifi((await nmcli(["-t", "-f", "IN-USE,SSID,SIGNAL,SECURITY,FREQ", "device", "wifi", "list", "ifname", link.name, "--rescan", "no"])).out).find((n) => n.active) : undefined;
+      wifi = { ready: byNm && state !== "unavailable", needs: supplicant ? null : { package: WIFI_PACKAGE, install: installCommand(WIFI_PACKAGE) }, ssid: on?.ssid ?? "", signal: on?.signal ?? 0 };
+    }
     nics.push({
       ...link,
-      kind: existsSync(`/sys/class/net/${link.name}/wireless`) ? "wifi" : "ethernet",
+      ...(wifi ? { wifi } : {}),
+      kind: isWifi ? "wifi" : "ethernet",
       dns: link.addresses.length ? await dnsOf(link.name, byNm) : [],
       speed: speed > 0 ? speed : null,
       manager: byNm ? "nm" : networkd.has(link.name) ? "networkd" : ifupdown.has(link.name) ? "ifupdown" : "",
@@ -497,4 +563,84 @@ export async function handOver(name: string, user: string): Promise<Pending> {
       rmSync(saved, { force: true });
     },
   });
+}
+
+// --- Wi-Fi ------------------------------------------------------------------------------------------
+
+/** SSIDs whose profile is saved, with the profile's name */
+async function savedWifi(): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  for (const line of (await nmcli(["-t", "-f", "NAME,TYPE", "connection"])).out.split("\n")) {
+    const [name, type] = terse(line);
+    if (!name || type !== "802-11-wireless") continue;
+    const ssid = terse((await nmcli(["-t", "-f", "802-11-wireless.ssid", "connection", "show", name])).out.trim())[1];
+    if (ssid) out.set(ssid, name);
+  }
+  return out;
+}
+
+async function wifiNic(name: string): Promise<Nic> {
+  const nic = await findNic(name);
+  if (!nic.wifi) throw new NetworkError("network.notWifi");
+  if (nic.manager !== "nm") throw new NetworkError("network.notOurs");
+  return nic;
+}
+
+/** The Wi-Fi networks in reach; looking around takes a few seconds */
+export async function wifiNetworks(name: string): Promise<WifiNetwork[]> {
+  await wifiNic(name);
+  await nmcli(["radio", "wifi", "on"]);
+  const list = await must(nmcli(["-t", "-f", "IN-USE,SSID,SIGNAL,SECURITY,FREQ", "device", "wifi", "list", "ifname", name, "--rescan", "yes"], 40_000));
+  return parseWifi(list, [...(await savedWifi()).keys()]);
+}
+
+/**
+ * Connects to a network. A wrong password or a network out of reach is told within half a minute, and
+ * nothing is kept of the attempt: the interface goes back to the network it was on.
+ */
+export async function wifiConnect(name: string, input: Record<string, unknown>, user: string): Promise<void> {
+  await wifiNic(name);
+  const ssid = typeof input.ssid === "string" ? input.ssid : "";
+  if (!ssid || new TextEncoder().encode(ssid).length > 32) throw new NetworkError("network.badSsid");
+  const saved = (await savedWifi()).get(ssid);
+  const net = (await wifiNetworks(name)).find((n) => n.ssid === ssid);
+  if (!net) throw new NetworkError("network.wifiGone");
+  const fresh = !saved || typeof input.password === "string";
+  let profile = saved ?? wifiProfileId(ssid);
+  if (fresh) {
+    if (net.secure && !wifiPassword(input.password)) throw new NetworkError("network.badWifiPassword");
+    if (saved) await nmcli(["connection", "delete", saved]);
+    profile = wifiProfileId(ssid);
+    const file = `${PROFILES}/${profile}.nmconnection`;
+    mkdirSync(PROFILES, { recursive: true });
+    writeFileSync(file, wifiProfile(profile, name, net, net.secure ? (input.password as string) : ""), { mode: 0o600 });
+    await must(nmcli(["connection", "load", file]));
+  }
+  const up = await nmcli(["--wait", "40", "connection", "up", profile, "ifname", name], 60_000);
+  if (up.code !== 0) {
+    // an attempt that failed leaves no profile behind: it would be tried again on every start
+    if (fresh) await nmcli(["connection", "delete", profile]);
+    const text = up.err + up.out;
+    throw new NetworkError(/secrets were required|802-1x|wrong|password/i.test(text) ? "network.wifiWrongPassword" : "network.wifiFailed", { message: text.trim().split("\n").slice(-1)[0] ?? "" });
+  }
+  record("network.wifi.connected", { user, detail: ssid });
+  bus.publish("network");
+}
+
+/** Leaves the network the interface is on and forgets its password */
+export async function wifiForget(name: string, user: string): Promise<void> {
+  const nic = await wifiNic(name);
+  const profile = nic.wifi!.ssid ? (await savedWifi()).get(nic.wifi!.ssid) : undefined;
+  if (!profile) throw new NetworkError("network.wifiGone");
+  await must(nmcli(["connection", "delete", profile]));
+  record("network.wifi.forgotten", { user, detail: nic.wifi!.ssid });
+  bus.publish("network");
+}
+
+/** NetworkManager notices the program it lacked only when it starts; what it has connected stays connected */
+export async function afterPackage(pkg: string): Promise<void> {
+  if (pkg !== WIFI_PACKAGE || !(await nmRunning())) return;
+  await run(["systemctl", "restart", "NetworkManager"], 60_000);
+  for (let i = 0; i < 20 && !(await nmRunning()); i++) await Bun.sleep(500);
+  await Bun.sleep(2000);
 }

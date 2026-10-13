@@ -117,7 +117,8 @@ Early development. What works today:
 - network: the server's interfaces with address, gateway and DNS; an address is changed from the page —
   fixed or from the router — through NetworkManager (installed on request, an interface the system set
   up is handed over as it is), and every change is on trial: unless the page reaches the server again
-  within a minute and a half, the previous settings come back by themselves;
+  within a minute and a half, the previous settings come back by themselves; Wi-Fi: the networks in
+  reach, joining one with its password, forgetting it;
 - newer images: once a day the registries are asked whether the tags of your apps have moved on, and an
   app with a newer image is marked; on request the running apps are updated by themselves at a set time,
   each after a snapshot of its data;

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { cleanChange, dhcpcdClientId, withoutIface, handBackScript, handedFile, parseLinks, profileArgs, terse, udevRule, waitOnline } from "../src/network";
+import { cleanChange, parseWifi, wifiPassword, wifiProfile, wifiProfileId, dhcpcdClientId, withoutIface, handBackScript, handedFile, parseLinks, profileArgs, terse, udevRule, waitOnline } from "../src/network";
 
 const ADDR = JSON.stringify([
   { ifname: "lo", link_type: "loopback", flags: ["LOOPBACK", "UP", "LOWER_UP"], addr_info: [{ family: "inet", local: "127.0.0.1", prefixlen: 8 }] },
@@ -79,4 +79,37 @@ test("dhcpcdClientId: the name dhcpcd gave the router, for NetworkManager to giv
   expect(dhcpcdClientId("40:8D:5C:33:B9:0F", "00:01:00:01:32:60:b9:d2:40:8d:5c:33:b9:0f\n")).toBe("ff:5c:33:b9:0f:00:01:00:01:32:60:b9:d2:40:8d:5c:33:b9:0f");
   expect(dhcpcdClientId("40:8d:5c:33:b9:0f", "")).toBe("");
   expect(dhcpcdClientId("", "00:01:00:01")).toBe("");
+});
+
+test("parseWifi: one line per network — the one in use, otherwise the strongest — nameless ones left out", () => {
+  const out = [" :Home:40:WPA2:2437 MHz", "*:Home:55:WPA2:5180 MHz", " :Home:90:WPA2:5200 MHz", " ::80:WPA2:2412 MHz", " :Cafe\\: free:30::2462 MHz", " :New:70:WPA3:5955 MHz", " :Mixed:20:WPA2 WPA3:2412 MHz", " :Old:10:--:2412 MHz", ""].join("\n");
+  expect(parseWifi(out, ["Home", "Mixed"])).toEqual([
+    { ssid: "Home", signal: 55, secure: true, wpa3: false, band: "5", active: true, known: true },
+    { ssid: "New", signal: 70, secure: true, wpa3: true, band: "6", active: false, known: false },
+    { ssid: "Cafe: free", signal: 30, secure: false, wpa3: false, band: "2.4", active: false, known: false },
+    { ssid: "Mixed", signal: 20, secure: true, wpa3: false, band: "2.4", active: false, known: true },
+    { ssid: "Old", signal: 10, secure: false, wpa3: false, band: "2.4", active: false, known: false },
+  ]);
+});
+
+test("wifiProfile: the password goes into a file, the name as bytes", () => {
+  const text = wifiProfile("hata-wifi-x", "wlp2s0", { ssid: "Дім;[x]", secure: true, wpa3: false }, "pa\\ss word=1");
+  expect(text).toContain("id=hata-wifi-x\n");
+  expect(text).toContain("interface-name=wlp2s0\n");
+  expect(text).toContain(`ssid=${[...new TextEncoder().encode("Дім;[x]")].join(";")};\n`);
+  expect(text).toContain("[wifi-security]\nkey-mgmt=wpa-psk\npsk=pa\\\\ss word=1\n");
+  expect(wifiProfile("a", "wlan0", { ssid: "Open", secure: false, wpa3: false }, "")).not.toContain("wifi-security");
+  expect(wifiProfile("a", "wlan0", { ssid: "New", secure: true, wpa3: true }, "12345678")).toContain("key-mgmt=sae\n");
+});
+
+test("wifiPassword and wifiProfileId", () => {
+  expect(wifiPassword("12345678")).toBe(true);
+  expect(wifiPassword("1234567")).toBe(false);
+  expect(wifiPassword("x".repeat(64))).toBe(false);
+  expect(wifiPassword("пароль-пароль")).toBe(false);
+  expect(wifiPassword("line\nbreak12")).toBe(false);
+  expect(wifiProfileId("Home Wi-Fi 5G")).toMatch(/^hata-wifi-Home-Wi-Fi-5G-[0-9a-f]{6}$/);
+  expect(wifiProfileId("../../etc")).toMatch(/^hata-wifi-\.\.-\.\.-etc-[0-9a-f]{6}$/);
+  expect(wifiProfileId("Дім")).toMatch(/^hata-wifi-network-[0-9a-f]{6}$/);
+  expect(wifiProfileId("Дім")).not.toBe(wifiProfileId("Дача"));
 });

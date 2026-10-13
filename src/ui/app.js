@@ -4165,6 +4165,72 @@ function handOverDialog(nic) {
   );
 }
 
+/** The Wi-Fi networks in reach of an interface: pick one, type its password */
+function wifiDialog(nic) {
+  const list = h("div", { class: "stack" }, h("p", { class: "muted" }, t("wifi.looking")));
+  const error = h("p", { class: "error", role: "alert" });
+  const bars = (signal) => h("span", { class: "muted small mono" }, `${signal}%`);
+  const join = (net, row) => {
+    const password = h("input", { type: "password", autocomplete: "off", minLength: 8, maxLength: 63, required: true, placeholder: t("wifi.password") });
+    const needs = net.secure && !net.known;
+    const go = button(t("wifi.connect"), { class: "primary small", type: "submit" });
+    const form = h(
+      "form",
+      {
+        class: "pair",
+        onsubmit: async (e) => {
+          e.preventDefault();
+          error.textContent = "";
+          go.disabled = true;
+          go.lastChild.textContent = t("wifi.connecting");
+          try {
+            state.network = await api("POST", `/api/network/${nic.name}/wifi`, { ssid: net.ssid, ...(needs ? { password: password.value } : {}) });
+            dialog.close();
+            toast(t("wifi.connected", { ssid: net.ssid }));
+            renderSettings();
+          } catch (err) {
+            error.textContent = errorText(err);
+            go.disabled = false;
+            go.lastChild.textContent = t("wifi.connect");
+          }
+        },
+      },
+      needs && password,
+      go,
+    );
+    row.after(form);
+    if (needs) password.focus();
+  };
+  const paint = (networks) => {
+    list.replaceChildren(
+      ...(networks.length
+        ? networks.map((net) => {
+            const row = h(
+              "button",
+              { type: "button", class: "menu-item", disabled: net.active, onclick: () => (list.querySelector("form")?.remove(), join(net, row)) },
+              icon(net.secure ? "lock" : "network"),
+              h("span", { class: "grow" }, net.ssid, net.active && h("span", { class: "muted small" }, " · " + t("wifi.active")), !net.active && net.known && h("span", { class: "muted small" }, " · " + t("wifi.known"))),
+              h("span", { class: "muted small" }, `${net.band} GHz`),
+              bars(net.signal),
+            );
+            return row;
+          })
+        : [h("p", { class: "muted" }, t("wifi.none"))]),
+    );
+  };
+  const look = async () => {
+    error.textContent = "";
+    try {
+      paint((await api("GET", `/api/network/${nic.name}/wifi`)).networks);
+    } catch (err) {
+      list.replaceChildren();
+      error.textContent = errorText(err);
+    }
+  };
+  const dialog = openDialog("", h("header", null, h("h2", { class: "grow" }, t("wifi.title", { nic: nic.name })), closeX(() => dialog)), list, error, h("footer", null, button(t("wifi.again"), { onclick: () => (list.replaceChildren(h("p", { class: "muted" }, t("wifi.looking"))), look()) }, "refresh"), closeButton(() => dialog)));
+  void look();
+}
+
 function networkSection() {
   const data = state.network;
   if (!data) return [h("p", { class: "muted" }, "…")];
@@ -4178,9 +4244,23 @@ function networkSection() {
         "div",
         { class: "section-head" },
         h("h2", null, h("span", { class: "with-icon" }, icon("network"), nic.name), " ", h("span", { class: "state " + (nic.up ? "running" : "stopped") }, t(nic.up ? "network.up" : "network.down"))),
-        nic.manager === "nm" && !data.pending && button(t("network.change"), { onclick: () => nicDialog(nic) }, "sliders"),
+        nic.wifi?.ready && button(t("wifi.networks"), { onclick: () => wifiDialog(nic) }, "search"),
+        nic.wifi?.ssid &&
+          button(t("wifi.forget"), {
+            onclick: async () => {
+              try {
+                state.network = await api("DELETE", `/api/network/${nic.name}/wifi`);
+              } catch (err) {
+                toast(errorText(err), "error");
+              }
+              renderSettings();
+            },
+          }),
+        nic.manager === "nm" && !data.pending && (!nic.wifi || nic.wifi.ssid) && button(t("network.change"), { onclick: () => nicDialog(nic) }, "sliders"),
         (nic.manager === "networkd" || nic.manager === "ifupdown") && data.tool === "ok" && !data.pending && button(t("network.handover"), { onclick: () => handOverDialog(nic) }),
       ),
+      nic.wifi && row("Wi-Fi", nic.wifi.ssid ? `${nic.wifi.ssid} · ${nic.wifi.signal}%` : t(nic.wifi.ready ? "wifi.notConnected" : "wifi.notReady"), false),
+      nic.wifi?.needs && data.tool === "ok" && needsCard(nic.wifi.needs, "wifi.needs"),
       row(t("network.address"), nic.addresses.join(", ") + (nic.addresses.length ? ` · ${t(nic.dynamic ? "network.byRouter" : "network.fixed")}` : "")),
       row(t("network.gateway"), nic.gateway),
       row(t("network.dns"), nic.dns.join(", ")),
@@ -4189,22 +4269,21 @@ function networkSection() {
       row(t("network.manager"), t("network.by." + (nic.manager || "none")), false),
       nic.manager !== "nm" && h("p", { class: "muted small" }, t(nic.manager === "networkd" || nic.manager === "ifupdown" ? (data.tool === "ok" ? "network.handoverHint" : "network.needsTool") : "network.readOnly")),
     );
-  const needs =
-    data.needs &&
+  const needsCard = (needs, key) =>
     h(
       "div",
       { class: "banner stack" },
-      h("strong", null, t("network.needs.what")),
-      h("p", { class: "muted small" }, t("network.needs.why")),
-      data.needs.install ? h("p", { class: "cmd" }, icon("terminal"), data.needs.install) : h("p", { class: "muted small" }, t("mounting.needs.byHand", { package: data.needs.package })),
-      error,
-      data.needs.install &&
-        button(t("mounting.needs.install", { package: data.needs.package }), {
+      h("strong", null, t(key + ".what")),
+      h("p", { class: "muted small" }, t(key + ".why")),
+      needs.install ? h("p", { class: "cmd" }, icon("terminal"), needs.install) : h("p", { class: "muted small" }, t("mounting.needs.byHand", { package: needs.package })),
+      needs.install &&
+        button(t("mounting.needs.install", { package: needs.package }), {
           class: "small",
           onclick: async (e) => {
             e.currentTarget.disabled = true;
+            error.textContent = "";
             try {
-              state.network = await api("POST", "/api/network/package", {});
+              state.network = await api("POST", "/api/network/package", { package: needs.package });
               renderSettings();
             } catch (err) {
               error.textContent = errorText(err);
@@ -4213,8 +4292,9 @@ function networkSection() {
           },
         }),
     );
+  const needs = data.needs && needsCard(data.needs, "network.needs");
   return [
-    h("section", { class: "card pad stack" }, h("h2", null, t("settings.network")), h("p", { class: "muted small" }, t("network.lead")), data.tool === "stopped" && h("p", { class: "banner small" }, t("network.stopped")), needs, data.pending && h("div", { class: "banner" }, t("network.trial.title", { nic: data.pending.nic }), " ", button(t("network.trial.show"), { class: "small", onclick: () => trialDialog(data.pending) }))),
+    h("section", { class: "card pad stack" }, h("h2", null, t("settings.network")), h("p", { class: "muted small" }, t("network.lead")), data.tool === "stopped" && h("p", { class: "banner small" }, t("network.stopped")), needs, error, data.pending && h("div", { class: "banner" }, t("network.trial.title", { nic: data.pending.nic }), " ", button(t("network.trial.show"), { class: "small", onclick: () => trialDialog(data.pending) }))),
     ...data.nics.map(card),
     !data.nics.length && h("p", { class: "card pad muted" }, t("network.none")),
   ];
