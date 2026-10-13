@@ -49,7 +49,7 @@ function assertInstalled(name: string): void {
 
 // --- Jobs -------------------------------------------------------------------------------------------
 
-export type JobKind = "install" | "update" | "start" | "stop" | "restart" | "remove" | "apply" | "backup" | "restore" | "import" | "move" | "docker" | "copyin";
+export type JobKind = "install" | "update" | "start" | "stop" | "restart" | "remove" | "apply" | "backup" | "restore" | "import" | "move" | "docker" | "copyin" | "format" | "fsck";
 
 export interface Job {
   id: string;
@@ -61,6 +61,8 @@ export interface Job {
   /** How many lines were logged in total — the number of the next line */
   lineCount: number;
   error?: string;
+  /** What the operation found, for the page that started it */
+  result?: unknown;
   startedAt: number;
   finishedAt?: number;
 }
@@ -80,8 +82,11 @@ export type Log = (line: string) => void;
 const finished = new WeakMap<Job, Promise<void>>();
 export const jobFinished = (job: Job): Promise<void> => finished.get(job) ?? Promise.resolve();
 
-/** Starts a long operation on an app; one app runs one operation at a time */
-export function startJob(app: string, kind: JobKind, user: string, work: (log: Log) => Promise<void>): Job {
+/**
+ * Starts a long operation on an app; one app runs one operation at a time. `quiet` — the operation
+ * writes its own line to the activity log when it works, so only a failure is recorded here.
+ */
+export function startJob(app: string, kind: JobKind, user: string, work: (log: Log) => Promise<void>, quiet = false): Job {
   if (busy.has(app)) throw new AppError("app.busy", 409);
   const job: Job = { id: crypto.randomUUID(), app, kind, status: "running", log: [], lineCount: 0, startedAt: Date.now() };
   jobs.set(job.id, job);
@@ -104,7 +109,7 @@ export function startJob(app: string, kind: JobKind, user: string, work: (log: L
     })
     .finally(() => {
       job.finishedAt = Date.now();
-      record(`app.${kind}.${job.status}`, { app, user, detail: job.status === "failed" ? job.error?.trim().split("\n")[0]?.trim().slice(0, 300) : undefined });
+      if (!quiet || job.status === "failed") record(`app.${kind}.${job.status}`, { app, user, detail: job.status === "failed" ? job.error?.trim().split("\n")[0]?.trim().slice(0, 300) : undefined });
       busy.delete(app);
       const over = [...jobs.values()].filter((j) => j.status !== "running");
       for (const old of over.slice(0, Math.max(0, over.length - KEEP_FINISHED_JOBS))) jobs.delete(old.id);

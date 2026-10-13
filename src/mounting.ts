@@ -23,9 +23,9 @@ import { record } from "./activity";
 import { bus } from "./bus";
 import { DATA_DIR, SECRETS_DIR, saveSettings, settings } from "./config";
 import { connected, diskLabel, type Disk, type Volume } from "./disks";
-import { CHECKERS, checkCommand, checkVerdict, cleanLabel, familyOf, FAT_MAX, FORMATS, FS_NAMES, isFs, labelCommand, LABELLERS, mkfsCommand, partType, tableFor, tableScript, type Fs, type Verdict } from "./format";
+import { CHECKERS, checkCommand, checkVerdict, cleanLabel, familyOf, FAT_MAX, FORMATS, FS_NAMES, isFs, labelCommand, LABELLERS, mkfsCommand, partType, passProgress, tableFor, tableScript, type Fs, type Verdict } from "./format";
 import { isPlainObject, readJsonFile, writeJsonAtomic, writeTextAtomic } from "./fsutil";
-import { installCommand, packageManager, PATH, run } from "./packages";
+import { installCommand, packageManager, PATH, run, runLogged } from "./packages";
 
 // ---- which disks may be touched ----
 
@@ -401,8 +401,9 @@ async function retype(disk: Disk, part: Volume, fs: Fs): Promise<void> {
  * Erases a disk — or one partition of it — and makes a file system there. `seen` is the disk as the
  * person saw it when confirming — a letter that moved to another disk in between must not get that
  * disk erased. What Hata had connected of it is disconnected first; what anything else uses is refused.
+ * `dry` — only says whether it may be done: nothing is touched. `log` hears how it goes.
  */
-export function formatDisk(name: string, seen: { serial: string; size: number }, ask: FormatAsk, user: string): Promise<Outcome> {
+export function formatDisk(name: string, seen: { serial: string; size: number }, ask: FormatAsk, user: string, log: (line: string) => void = () => {}, dry = false): Promise<Outcome> {
   return oneAtATime(async () => {
     if (!isFs(ask.fs)) return { error: "disk.badFs" };
     const fs = ask.fs;
@@ -428,7 +429,9 @@ export function formatDisk(name: string, seen: { serial: string; size: number },
       if (why) return { error: why };
     }
     if (path && !leaving.includes(path) && (!freeFolder(path) || fstab().some((e) => e.path === path))) return { error: "disk.folderTaken" };
+    if (dry) return { path };
     for (const folder of leaving) {
+      log(`Disconnecting ${folder}`);
       const gone = await release(folder);
       if ("error" in gone) return gone;
     }
@@ -436,11 +439,13 @@ export function formatDisk(name: string, seen: { serial: string; size: number },
 
     let target = part;
     if (target) {
+      log(`Clearing ${target.path}`);
       await run(["wipefs", "-a", target.path], 30_000);
       await retype(disk, target, fs);
     } else {
       // old signatures first: a file system found again on the new partition would be mounted as it was
       for (const device of [...disk.volumes.map((v) => v.path), disk.path]) await run(["wipefs", "-a", device], 30_000);
+      log(`Writing a new partition table to ${disk.path} (${tableFor(fs, disk.size, usb(disk))})`);
       const table = await run(["sfdisk", "--wipe", "always", "--wipe-partitions", "always", disk.path], 60_000, {}, tableScript(tableFor(fs, disk.size, usb(disk)), fs));
       if (table.code !== 0) return { error: "disk.formatFailed", message: said(table) };
       await settle();
@@ -451,8 +456,11 @@ export function formatDisk(name: string, seen: { serial: string; size: number },
       if (!target) return { error: "disk.formatFailed", message: "The new partition did not show up." };
     }
     const legacy = fs === "exfat" && !/exfatprogs/.test(Object.values(await run(["mkfs.exfat", "-V"], 10_000)).join(" "));
-    const made = await run(mkfsCommand(fs, label, target.path, { size: target.size, legacy }), 6 * 60 * 60_000, UTF8);
+    const command = mkfsCommand(fs, label, target.path, { size: target.size, legacy });
+    log(`Making the file system: ${command.join(" ")}`);
+    const made = await runLogged(command, log, 6 * 60 * 60_000, UTF8);
     if (made.code !== 0) return { error: "disk.formatFailed", message: said(made) };
+    log("Finishing the writing");
     await run(["sync"], 120_000);
     await settle();
     const uuid = (await run(["blkid", "-s", "UUID", "-o", "value", target.path], 15_000)).out.trim();
@@ -464,6 +472,7 @@ export function formatDisk(name: string, seen: { serial: string; size: number },
       return { path: "" };
     }
     if (!uuid) return { error: "disk.formatFailed", message: "The new file system has no UUID." };
+    log(`Connecting it as ${path}`);
     const failed = await attach({ path: target.path, uuid, fstype: fs }, path, ask.connect === "keep");
     if (failed) return failed;
     // the apps' own user owns the new disk, as it owns their data: an app can write to it at once
@@ -518,23 +527,30 @@ export interface Checked {
   back: string;
 }
 
-/** Looks a file system over; `repair` — and mends what it finds */
-export function checkVolume(device: string, repair: boolean, user: string): Promise<Checked | Failure> {
+/** Looks a file system over; `repair` — and mends what it finds. `dry` — only says whether it may be done */
+export function checkVolume(device: string, repair: boolean, user: string, log: (line: string) => void = () => {}, dry = false): Promise<Checked | Failure> {
   return oneAtATime(async () => {
     const found = await volumeAt(device);
     if ("error" in found) return found;
     const { volume, fs } = found;
     if (!has(CHECKERS[fs])) return lacks("disk.noCheckTool", FORMATS[fs].package);
+    const folder = volume.mounts[0];
+    if (folder && (volume.mounts.length > 1 || keeps(folder))) return { error: volume.mounts.length > 1 ? "disk.inUse" : keeps(folder)! };
+    if (dry) return { device, verdict: "clean", output: "", repaired: repair, back: "" };
     const look = async () => {
+      const command = checkCommand(fs, repair, volume.path);
+      log(command.join(" "));
       // a large disk takes hours
-      const said = await run(checkCommand(fs, repair, volume.path), 12 * 60 * 60_000);
+      const said = await runLogged(command, log, 12 * 60 * 60_000, {}, (line) => passProgress(line) ?? line);
       if (fs !== "ntfs" || repair || said.code !== 0 || !has("ntfsinfo")) return said;
       // ntfsfix does not tell that the volume was not closed properly; ntfsinfo refuses to open such a one
       const opened = await run(["ntfsinfo", "-m", volume.path], 60_000);
       return opened.code === 0 ? said : { code: 1, out: said.out, err: (opened.err.trim() || opened.out.trim()).split("\n")[0] ?? "" };
     };
+    if (folder) log(`Disconnecting ${folder} for the check`);
     const ran = await paused(volume, look);
     if ("error" in ran) return ran;
+    if (folder) log(ran.back ? `Could not connect ${folder} again: ${ran.back}` : `${folder} is connected again`);
     const verdict = checkVerdict(fs, repair, ran.done.code);
     const output = `${ran.done.out}\n${ran.done.err}`.split("\n").map((line) => line.trimEnd()).filter(Boolean).slice(-14).join("\n").slice(-3000);
     if (repair) record("system.disk.repair", { user, detail: volume.label || volume.path });

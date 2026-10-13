@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
-import { checkCommand, checkVerdict, cleanLabel, familyOf, FAT_MAX, isFs, labelCommand, mkfsCommand, partType, tableFor, tableScript } from "../src/format";
+import { pieces } from "../src/packages";
+import { passProgress, checkCommand, checkVerdict, cleanLabel, familyOf, FAT_MAX, isFs, labelCommand, mkfsCommand, partType, tableFor, tableScript } from "../src/format";
 
 test("isFs, familyOf: the file systems Hata makes, and the ones it checks", () => {
   for (const fs of ["ext4", "exfat", "vfat", "ntfs"]) expect(isFs(fs)).toBe(true);
@@ -40,18 +41,18 @@ test("tableFor, partType: the old table for what other devices read, and a type 
 });
 
 test("mkfsCommand: each file system's own program and way to say the label", () => {
-  expect(mkfsCommand("ext4", "media", "/dev/sdb1", { size: 4e9 })).toEqual(["mkfs.ext4", "-F", "-q", "-m", "0", "-L", "media", "/dev/sdb1"]);
-  expect(mkfsCommand("ext4", "", "/dev/sdb1", { size: 4e9 })).toEqual(["mkfs.ext4", "-F", "-q", "-m", "0", "/dev/sdb1"]);
+  expect(mkfsCommand("ext4", "media", "/dev/sdb1", { size: 4e9 })).toEqual(["mkfs.ext4", "-F", "-m", "0", "-L", "media", "/dev/sdb1"]);
+  expect(mkfsCommand("ext4", "", "/dev/sdb1", { size: 4e9 })).toEqual(["mkfs.ext4", "-F", "-m", "0", "/dev/sdb1"]);
   expect(mkfsCommand("vfat", "STICK", "/dev/sdb1", { size: 4e9 })).toEqual(["mkfs.fat", "-F", "32", "-n", "STICK", "/dev/sdb1"]);
   expect(mkfsCommand("vfat", "", "/dev/sdb1", { size: 64e6 })).toEqual(["mkfs.fat", "/dev/sdb1"]);
   expect(mkfsCommand("exfat", "Кіно", "/dev/sdb1", { size: 4e9 })).toEqual(["mkfs.exfat", "-L", "Кіно", "/dev/sdb1"]);
   expect(mkfsCommand("exfat", "x", "/dev/sdb1", { size: 4e9, legacy: true })).toEqual(["mkfs.exfat", "-n", "x", "/dev/sdb1"]);
-  expect(mkfsCommand("ntfs", "Win", "/dev/nvme0n1p2", { size: 4e9 })).toEqual(["mkfs.ntfs", "-Q", "-q", "-L", "Win", "/dev/nvme0n1p2"]);
+  expect(mkfsCommand("ntfs", "Win", "/dev/nvme0n1p2", { size: 4e9 })).toEqual(["mkfs.ntfs", "-Q", "-L", "Win", "/dev/nvme0n1p2"]);
 });
 
 test("checkCommand, labelCommand", () => {
-  expect(checkCommand("ext4", false, "/dev/sdb1")).toEqual(["e2fsck", "-f", "-n", "/dev/sdb1"]);
-  expect(checkCommand("ext4", true, "/dev/sdb1")).toEqual(["e2fsck", "-f", "-y", "/dev/sdb1"]);
+  expect(checkCommand("ext4", false, "/dev/sdb1")).toEqual(["e2fsck", "-f", "-C", "1", "-n", "/dev/sdb1"]);
+  expect(checkCommand("ext4", true, "/dev/sdb1")).toEqual(["e2fsck", "-f", "-C", "1", "-y", "/dev/sdb1"]);
   expect(checkCommand("vfat", true, "/dev/sdb1")).toEqual(["fsck.fat", "-a", "/dev/sdb1"]);
   expect(checkCommand("exfat", false, "/dev/sdb1")).toEqual(["fsck.exfat", "-n", "/dev/sdb1"]);
   expect(checkCommand("ntfs", true, "/dev/sdb1")).toEqual(["ntfsfix", "-d", "/dev/sdb1"]);
@@ -77,4 +78,19 @@ test("checkVerdict: what the exit code of a check says", () => {
   expect(checkVerdict("ntfs", true, 1)).toBe("failed");
   // the program could not be started at all
   expect(checkVerdict("ext4", false, -1)).toBe("failed");
+});
+
+test("passProgress, pieces: how far a long run is, read out of what the programs print", () => {
+  expect(passProgress("1 150 3727 /dev/sdb1")).toBe("pass 1 of 5: 4%");
+  expect(passProgress("5 3727 3727 /dev/sdb1")).toBe("pass 5 of 5: 100%");
+  expect(passProgress("Pass 1: Checking inodes, blocks, and sizes")).toBeNull();
+  expect(passProgress("films: 17/30531584 files")).toBeNull();
+  // mkfs.ext4 rewrites its counter with backspaces
+  expect(pieces("Writing inode tables:    0/3727\b\b\b\b\b\b\b\b\b  12/3727\b\b\b\b\b\b\b\b\bdone\nCreating journal: done\n")).toEqual([
+    { line: "Writing inode tables:    0/3727", progress: false },
+    { line: "  12/3727", progress: true },
+    { line: "done", progress: false },
+    { line: "Creating journal: done", progress: false },
+  ]);
+  expect(pieces("/dev/sdb1: |====    | 34.5%\r\n\n")).toEqual([{ line: "/dev/sdb1: |====    | 34.5%", progress: true }]);
 });

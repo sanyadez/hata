@@ -75,12 +75,12 @@ export const tableScript = (table: "gpt" | "dos", fs: Fs): string => `label: ${t
 export function mkfsCommand(fs: Fs, label: string, device: string, about: { size: number; legacy?: boolean }): string[] {
   const named = (flag: string) => (label ? [flag, label] : []);
   // -m 0: no blocks kept back for root on a disk that holds data, not the system
-  if (fs === "ext4") return ["mkfs.ext4", "-F", "-q", "-m", "0", ...named("-L"), device];
+  if (fs === "ext4") return ["mkfs.ext4", "-F", "-m", "0", ...named("-L"), device];
   // a small one is left to choose FAT16 by itself: FAT32 needs some room
   if (fs === "vfat") return ["mkfs.fat", ...(about.size >= 512 * 1024 * 1024 ? ["-F", "32"] : []), ...named("-n"), device];
   if (fs === "exfat") return ["mkfs.exfat", ...named(about.legacy ? "-n" : "-L"), device];
   // -Q: without writing zeros over the whole partition
-  return ["mkfs.ntfs", "-Q", "-q", ...named("-L"), device];
+  return ["mkfs.ntfs", "-Q", ...named("-L"), device];
 }
 
 /** The program that checks a file system — it comes in the package that makes it */
@@ -88,11 +88,20 @@ export const CHECKERS: Record<Fs, string> = { ext4: "e2fsck", exfat: "fsck.exfat
 
 /** Looking for damage (`repair` false: nothing is written) or mending it */
 export function checkCommand(fs: Fs, repair: boolean, device: string): string[] {
-  if (fs === "ext4") return ["e2fsck", "-f", repair ? "-y" : "-n", device];
+  // -C 1: how far it is, as lines among the rest (`passProgress` reads them)
+  if (fs === "ext4") return ["e2fsck", "-f", "-C", "1", repair ? "-y" : "-n", device];
   if (fs === "vfat") return ["fsck.fat", repair ? "-a" : "-n", device];
   if (fs === "exfat") return ["fsck.exfat", repair ? "-y" : "-n", device];
   // -d also takes off the mark "not closed properly", with which the kernel refuses to open the volume
   return ["ntfsfix", repair ? "-d" : "-n", device];
+}
+
+/** A line of e2fsck's own count ("2 150 3727 /dev/sdb1") in words; null — the line is something else */
+export function passProgress(line: string): string | null {
+  const m = /^(\d) (\d+) (\d+) \S+$/.exec(line.trim());
+  if (!m) return null;
+  const share = Number(m[3]) > 0 ? Math.min(100, Math.round((Number(m[2]) / Number(m[3])) * 100)) : 0;
+  return `pass ${m[1]} of 5: ${share}%`;
 }
 
 /** clean — nothing wrong; fixed — it was and is mended; errors — damage that is still there; failed — the check itself could not run */

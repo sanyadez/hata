@@ -22,6 +22,65 @@ export async function run(cmd: string[], timeout = 30_000, env: Record<string, s
   }
 }
 
+/**
+ * What a program prints, cut into lines the way a terminal would show them: a counter that rewrites
+ * itself (`12/3727`, `34.5%`) is `progress`, the rest are lines to keep.
+ */
+export function pieces(text: string): { line: string; progress: boolean }[] {
+  return text
+    .split(/[\r\n\x08\x01\x02]+/)
+    .map((piece) => piece.replace(/[\x00-\x1f\x7f]/g, "").trimEnd())
+    .filter((piece) => piece.trim())
+    .map((line) => ({ line, progress: /^\s*\d+\/\d+$/.test(line) || /\d(\.\d+)?%\s*$/.test(line) }));
+}
+
+/**
+ * Runs a system program to its end and hands over what it prints as it comes; a counter is passed on
+ * every couple of seconds. `reword` may put a line in other words, or drop it (null).
+ */
+export async function runLogged(cmd: string[], log: (line: string) => void, timeout = 30_000, env: Record<string, string> = {}, reword: (line: string) => string | null = (line) => line): Promise<Ran> {
+  let proc;
+  try {
+    proc = Bun.spawn({ cmd, stdout: "pipe", stderr: "pipe", stdin: "ignore", timeout, env: { ...process.env, PATH, LC_ALL: "C", ...env } });
+  } catch (e) {
+    return { code: -1, out: "", err: e instanceof Error ? e.message : String(e) };
+  }
+  let told = 0;
+  const read = async (stream: ReadableStream<Uint8Array>): Promise<string> => {
+    const kept: string[] = [];
+    const decoder = new TextDecoder();
+    let rest = "";
+    const take = (text: string) => {
+      for (const piece of pieces(text)) {
+        const line = reword(piece.line);
+        if (line === null) continue;
+        if (piece.progress || line !== piece.line) {
+          // a counter: said now and then, never kept
+          if (Date.now() - told < 2000) continue;
+          told = Date.now();
+          log("  " + line.trim());
+        } else {
+          kept.push(line);
+          if (kept.length > 400) kept.shift();
+          log(line);
+        }
+      }
+    };
+    for await (const chunk of stream) {
+      rest += decoder.decode(chunk, { stream: true });
+      // the last piece may be half a line still
+      const cut = Math.max(rest.lastIndexOf("\n"), rest.lastIndexOf("\r"), rest.lastIndexOf("\b"));
+      if (cut < 0) continue;
+      take(rest.slice(0, cut + 1));
+      rest = rest.slice(cut + 1);
+    }
+    take(rest);
+    return kept.join("\n");
+  };
+  const [out, err, code] = await Promise.all([read(proc.stdout), read(proc.stderr), proc.exited]);
+  return { code, out, err };
+}
+
 const INSTALLERS: [string, string[]][] = [
   ["apt-get", ["install", "-y", "--no-install-recommends"]],
   ["dnf", ["install", "-y"]],

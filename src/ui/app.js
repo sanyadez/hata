@@ -2244,6 +2244,34 @@ async function appComposeTab(app, box) {
   box.replaceChildren(h("div", { class: "editor-head" }, h("div", { class: "grow" }, h("p", { class: "mono small" }, app.composeFile), h("p", { class: "muted small" }, t("app.composeLead"))), save), area, error, h("p", { class: "cmd" }, icon("terminal"), `docker compose -p ${app.name} up -d --remove-orphans`));
 }
 
+/** Follows a running operation without a dialog of its own: every line as it comes, then the job as it ended */
+function followJob(id, onLine) {
+  return new Promise((resolve) => {
+    let next = -1;
+    const pending = [];
+    const end = async () => {
+      jobListeners.delete(listener);
+      resolve(await api("GET", `/api/jobs/${id}`).catch((e) => ({ status: "failed", error: errorText(e) })));
+    };
+    const consume = (event) => {
+      if (event.line !== undefined) {
+        if (event.n >= next) (onLine(event.line), (next = event.n + 1));
+      } else if (event.job.status !== "running") void end();
+    };
+    const listener = (event) => event.job.id === id && (next < 0 ? pending.push(event) : consume(event));
+    jobListeners.add(listener);
+    api("GET", `/api/jobs/${id}`).then(
+      (job) => {
+        job.log.forEach(onLine);
+        next = job.lineCount;
+        if (job.status !== "running") void end();
+        else pending.forEach(consume);
+      },
+      () => void end(),
+    );
+  });
+}
+
 /** Shows a running operation: its console output and how it ended */
 async function jobDialog(id, kind, title, onDone) {
   const log = h("pre", { class: "console" });
@@ -5574,7 +5602,7 @@ function diskAction(dialogOf, slot, request, done) {
     put(slot);
     try {
       const data = await request();
-      setDisks(data);
+      if (!data.job) setDisks(data);
       done(data);
     } catch (err) {
       el.disabled = false;
@@ -5631,11 +5659,17 @@ function formatDialog(disk, part) {
     () => dialog,
     slot,
     () => api("POST", `/api/disks/${disk.name}/format`, { serial: disk.serial, size: disk.size, part: part?.path ?? "", fs: fs.value, label: label.value, connect: after.value, name: name.value, password: password.value }),
-    () => {
+    (data) => {
       dialog.close();
       const path = "/mnt/" + name.value;
-      if (after.value === "keep" && fs.value === "ext4") preparedDialog(path);
-      else toast(after.value === "no" ? t("mounting.formatted", { fs: FS_NAMES[fs.value] }) : t("mounting.formattedAt", { fs: FS_NAMES[fs.value], path }));
+      const [kind, into, how] = [fs.value, name.value, after.value];
+      jobDialog(data.job, "format", part ? part.name : diskTitle(disk), async () => {
+        setDisks(await api("GET", "/api/disks").catch(() => state.disks));
+        if (how === "keep" && kind === "ext4") {
+          document.querySelectorAll("dialog[open]").forEach((d) => d.close());
+          preparedDialog("/mnt/" + into);
+        } else toast(how === "no" ? t("mounting.formatted", { fs: FS_NAMES[kind] }) : t("mounting.formattedAt", { fs: FS_NAMES[kind], path }));
+      });
     },
   );
   dialog = openDialog(
@@ -5677,9 +5711,17 @@ function checkDialog(disk, volume) {
       () => dialog,
       slot,
       () => api("POST", "/api/disks/fsck", { device: volume.path, repair }),
-      (data) => {
-        const { verdict, output, back } = data.checked;
+      async (started) => {
+        const lines = h("pre", { class: "said" });
+        put(result, h("p", { class: "with-icon muted" }, icon("refresh"), t(repair ? "fsck.repairing" : "fsck.running")), lines);
+        const job = await followJob(started.job, (line) => {
+          lines.append(line + "\n");
+          lines.scrollTop = lines.scrollHeight;
+        });
         go.disabled = false;
+        setDisks(await api("GET", "/api/disks").catch(() => state.disks));
+        if (job.status !== "done" || !job.result) return put(result, h("p", { class: "banner danger" }, t("fsck.verdict.failed")), h("pre", { class: "said" }, job.error || lines.textContent));
+        const { verdict, output, back } = job.result;
         const mend = verdict === "errors" && !repair;
         put(
           result,

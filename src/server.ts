@@ -16,7 +16,7 @@ import { agentUser, cannotGrant, cleanName, createKey, grantKey, keyOf, listKeys
 import type { Level } from "./agents";
 import { Desk } from "./approvals";
 import { answerCall, assistantConfig, configured as assistantReady, findChat, listChats, ModelError, modelsFor, removeChat, retry as retryAssistant, say as sayToAssistant, shownChat, shownConfig as shownAssistant, stopChat, updateAssistant } from "./assistant";
-import { AppError, appAction, installedNames, jobFinished, appEnv, appDetail, appLogs, appIcon, appSettings, appStats, applyCompose, ICON_MIME, MAX_ICON, removeAppIcon, setAppIcon, applySettings, installFromSettings, applyStoreUpdate, composeText, getJob, installCustom, installFromStore, listApps, listJobs, onAppRemoved, planStoreUpdate, readCompose, removeApp, storeAppDetail } from "./apps";
+import { AppError, appAction, startJob, type Job, installedNames, jobFinished, appEnv, appDetail, appLogs, appIcon, appSettings, appStats, applyCompose, ICON_MIME, MAX_ICON, removeAppIcon, setAppIcon, applySettings, installFromSettings, applyStoreUpdate, composeText, getJob, installCustom, installFromStore, listApps, listJobs, onAppRemoved, planStoreUpdate, readCompose, removeApp, storeAppDetail } from "./apps";
 import { certificateStates, challengeResponse, ensureCertificates, loadCertificates } from "./acme";
 import { attention } from "./attention";
 import { folderSize, restoreFromSnapshot, snapshotFile, snapshotFiles } from "./snapshot";
@@ -967,6 +967,18 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
     return json({ ...listed, fills: fills(), mounting: mountingReport(listed.disks), array: arrayReport(), ...more });
   };
   const refused = (failure: Extract<Outcome, { error: string }>) => fail(400, failure.error, { message: failure.message ?? "", ...(failure.needs ?? {}) });
+  // a long piece of work on a disk: answered at once with the job the page then follows
+  const diskJob = (kind: "format" | "fsck", by: string, work: (log: (line: string) => void) => Promise<void>, started: (job: Job) => void = () => {}) => {
+    try {
+      const job = startJob("", kind, by, work, true);
+      started(job);
+      return json({ job: job.id }, 202);
+    } catch (e) {
+      if (e instanceof AppError && e.code === "app.busy") return fail(409, "disk.working");
+      throw e;
+    }
+  };
+  const failureWords = (failure: Extract<Outcome, { error: string }>) => `${({ "disk.busy": "Something is still using the folder.", "disk.mountFailed": "The disk could not be connected.", "disk.formatFailed": "The disk could not be formatted.", "disk.inUse": "The disk is in use." } as Record<string, string>)[failure.error] ?? failure.error} ${failure.message ?? ""}`.trim();
   const changed = (outcome: Outcome) => ("error" in outcome ? refused(outcome) : storage());
   if (path === "/api/disks" && method === "GET") return storage();
   if (path === "/api/disks/check" && method === "POST") {
@@ -998,14 +1010,30 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
     // a large disk takes its time
     server.timeout(req, 0);
     const ask = { part: String(data.part ?? ""), fs: String(data.fs ?? ""), label: String(data.label ?? ""), connect: data.connect === "keep" || data.connect === "once" ? data.connect : "no", name: String(data.name ?? "") };
-    return changed(await formatDisk(diskFormat[1]!, { serial: String(data.serial ?? ""), size: Number(data.size) }, ask, user.name));
+    const seen = { serial: String(data.serial ?? ""), size: Number(data.size) };
+    // what can be refused is refused at once, in the dialog; the work itself is a job with a log
+    const may = await formatDisk(diskFormat[1]!, seen, ask, user.name, undefined, true);
+    if ("error" in may) return refused(may);
+    return diskJob("format", user.name, async (log) => {
+      const done = await formatDisk(diskFormat[1]!, seen, ask, user.name, log);
+      if ("error" in done) throw new Error(failureWords(done));
+      log(done.path ? `Done: connected as ${done.path}` : "Done");
+    });
   }
   // looking a file system over, and mending it: the answer carries what the program said
   if (path === "/api/disks/fsck" && method === "POST") {
     const data = await body(req);
     server.timeout(req, 0);
-    const checked = await checkVolume(String(data.device ?? ""), data.repair === true, user.name);
-    return "error" in checked ? refused(checked) : storage({ checked });
+    const device = String(data.device ?? "");
+    const may = await checkVolume(device, data.repair === true, user.name, undefined, true);
+    if ("error" in may) return refused(may);
+    let job: Job | undefined;
+    const answer = diskJob("fsck", user.name, async (log) => {
+      const checked = await checkVolume(device, data.repair === true, user.name, log);
+      if ("error" in checked) throw new Error(failureWords(checked));
+      if (job) job.result = checked;
+    }, (started) => (job = started));
+    return answer;
   }
   if (path === "/api/disks/label" && method === "POST") {
     const data = await body(req);
