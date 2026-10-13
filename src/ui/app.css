@@ -812,3 +812,5 @@ table.shares td { vertical-align: top; }
 .agent-level.operate { background: var(--warn-soft); color: var(--warn); }
 .agent-level.full { background: var(--danger-soft); color: var(--danger); }
 .agent-never { margin-top: 14px; }
+.ask-file { max-height: 40vh; overflow: auto; padding: 12px; border: 1px solid var(--border); border-radius: var(--radius-md); font-family: var(--font-mono); font-size: 12px; white-space: pre; }
+.agent-keys .check.small { font-size: 13px; align-items: center; white-space: nowrap; }

@@ -266,6 +266,7 @@ const state = {
   users: null,
   invites: null,
   agents: null,
+  approvals: null,
   access: null,
   signIns: null,
   backups: null,
@@ -382,6 +383,8 @@ function startEvents() {
         if (state.route.view === "settings" && state.route.section === "storage") setDisks(await api("GET", "/api/disks").catch(() => state.disks));
         else if (state.route.view === "files") void loadFiles?.();
       }, 1200);
+    } else if (event.type === "approvals") {
+      void loadApprovals();
     } else if (event.type === "network") {
       if (state.route.view === "settings" && state.route.section === "network") void loadNetwork();
     } else if (event.type === "store" && state.route.view === "store") {
@@ -389,7 +392,10 @@ function startEvents() {
     }
   };
   // after a reconnect anything may have changed while we were away
-  source.onopen = () => void refresh();
+  source.onopen = () => {
+    void refresh();
+    void loadApprovals();
+  };
 }
 
 function stopEvents() {
@@ -6371,11 +6377,73 @@ function agentKeyDialog(made) {
   );
 }
 
+// --- Calls of agents that wait for an administrator's word ------------------------------------------
+
+let askDialog = null;
+/** Requests already shown in a dialog: one put off with "Later" waits in Settings → Agents */
+const asksShown = new Set();
+
+function askedWhat(ask) {
+  const key = `approvals.what.${ask.tool}${ask.tool === "app_remove" && ask.args.deleteData === true ? ".data" : ""}`;
+  return has(key) ? t(key, { app: String(ask.args.app ?? ""), snapshot: String(ask.args.snapshot ?? "") }) : ask.title;
+}
+
+async function answerAsk(ask, allow) {
+  try {
+    await api("POST", `/api/approvals/${ask.id}`, { allow });
+  } catch (e) {
+    toast(errorText(e), "error");
+  }
+  void loadApprovals();
+}
+
+async function loadApprovals() {
+  if (!isAdmin()) return;
+  state.approvals = await api("GET", "/api/approvals").catch(() => state.approvals ?? []);
+  // answered on another device, or lapsed
+  if (askDialog && !state.approvals.some((ask) => ask.id === askDialog.ask)) askDialog.close();
+  const next = state.approvals.find((ask) => !asksShown.has(ask.id));
+  if (next && !askDialog) approvalDialog(next);
+  if (state.route.view === "settings" && state.route.section === "agents") renderSettings();
+}
+
+function approvalDialog(ask) {
+  asksShown.add(ask.id);
+  const answer = (allow) =>
+    button(t(allow ? "approvals.allow" : "approvals.decline"), {
+      class: allow ? "danger" : "",
+      onclick: () => {
+        dialog.close();
+        void answerAsk(ask, allow);
+      },
+    });
+  const dialog = openDialog(
+    "confirm",
+    h("h2", null, t("approvals.title", { agent: ask.agent })),
+    h("p", null, t("approvals.text", { what: askedWhat(ask) })),
+    typeof ask.args.compose === "string" && h("pre", { class: "ask-file" }, ask.args.compose),
+    h("p", { class: "muted small" }, t("approvals.hint")),
+    h("footer", null, closeButton(() => dialog, t("approvals.later")), answer(false), answer(true)),
+  );
+  dialog.ask = ask.id;
+  askDialog = dialog;
+  dialog.addEventListener("close", () => {
+    askDialog = null;
+    const next = (state.approvals ?? []).find((other) => !asksShown.has(other.id));
+    if (next) approvalDialog(next);
+  });
+}
+
 function agentDialog() {
   const name = h("input", { maxLength: 40, required: true, placeholder: t("agents.new.namePlaceholder") });
   const level = h("select", null, AGENT_LEVELS.map((id) => h("option", { value: id }, t("agents.level." + id))));
   const hint = h("span", { class: "hint" }, t("agents.level.read.hint"));
-  level.addEventListener("change", () => (hint.textContent = t(`agents.level.${level.value}.hint`)));
+  const confirm = h("input", { type: "checkbox", checked: true });
+  const asks = h("label", { class: "check", hidden: true }, confirm, h("span", null, t("agents.confirm")));
+  level.addEventListener("change", () => {
+    hint.textContent = t(`agents.level.${level.value}.hint`);
+    asks.hidden = level.value !== "full";
+  });
   const error = h("p", { class: "error", role: "alert" });
   const dialog = openDialog(
     "",
@@ -6385,7 +6453,7 @@ function agentDialog() {
         onsubmit: async (e) => {
           e.preventDefault();
           try {
-            const made = await api("POST", "/api/agents", { name: name.value.trim(), level: level.value });
+            const made = await api("POST", "/api/agents", { name: name.value.trim(), level: level.value, confirm: level.value === "full" && confirm.checked });
             dialog.close();
             agentKeyDialog(made);
             void loadSettings();
@@ -6397,6 +6465,7 @@ function agentDialog() {
       h("header", null, h("div", { class: "grow" }, h("h2", null, t("agents.new")), h("p", { class: "muted small" }, t("agents.new.lead"))), closeX(() => dialog)),
       field(t("agents.new.name"), name, t("agents.new.nameHint")),
       h("label", { class: "field" }, h("span", { class: "label" }, t("agents.new.level")), level, hint),
+      asks,
       error,
       h("footer", null, closeButton(() => dialog, t("common.cancel")), h("button", { class: "btn primary" }, t("agents.new.create"))),
     ),
@@ -6438,9 +6507,45 @@ function agentsSection() {
         h("strong", null, key.name, h("span", { class: "state agent-level " + key.level }, t("agents.level." + key.level))),
         h("div", { class: "muted small" }, [`hata_…${key.hint}`, t("agents.createdBy", { user: key.createdBy, when: ago(key.createdAt) }), key.lastUsed ? t("agents.lastUsed", { when: ago(key.lastUsed), ip: key.lastIp }) : t("agents.neverUsed")].join(" · ")),
       ),
+      key.level === "full" &&
+        h(
+          "label",
+          { class: "check small", title: t("agents.confirm") },
+          h("input", {
+            type: "checkbox",
+            checked: key.confirm,
+            onchange: async (e) => {
+              await api("PATCH", `/api/agents/${key.id}`, { confirm: e.target.checked }).catch((err) => toast(errorText(err), "error"));
+              void loadSettings();
+            },
+          }),
+          h("span", null, t("agents.confirm.short")),
+        ),
       h("button", { type: "button", class: "icon-btn", "aria-label": t("agents.remove"), title: t("agents.remove"), onclick: () => removeAgentKey(key) }, icon("trash")),
     );
+  const waiting = state.approvals ?? [];
   return [
+    waiting.length > 0 &&
+      h(
+        "section",
+        { class: "card pad" },
+        h("h2", null, t("approvals.waiting")),
+        h("p", { class: "muted" }, t("approvals.hint")),
+        h(
+          "div",
+          { class: "snapshot-list agent-keys" },
+          waiting.map((ask) =>
+            h(
+              "div",
+              { class: "snapshot" },
+              h("div", { class: "grow" }, h("strong", null, ask.agent), h("div", { class: "muted small" }, [t("approvals.text", { what: askedWhat(ask) }), ago(ask.at)].join(" · "))),
+              typeof ask.args.compose === "string" && button(t("approvals.look"), { class: "small", onclick: () => approvalDialog(ask) }),
+              button(t("approvals.decline"), { class: "small", onclick: () => answerAsk(ask, false) }),
+              button(t("approvals.allow"), { class: "small danger", onclick: () => answerAsk(ask, true) }),
+            ),
+          ),
+        ),
+      ),
     h(
       "section",
       { class: "card pad" },

@@ -26,6 +26,8 @@ export interface AgentKey {
   id: string;
   name: string;
   level: Level;
+  /** Calls that may destroy something wait for an administrator's word in Hata (`approvals.ts`) */
+  confirm: boolean;
   /** SHA-256 of the key, hex */
   hash: string;
   /** The last characters of the key, to tell one from another in the list */
@@ -45,7 +47,9 @@ const SEEN_EVERY_MS = 60_000;
 
 const sha256 = (text: string): string => new Bun.CryptoHasher("sha256").update(text).digest("hex");
 
-const keys: AgentKey[] = readJsonFile<AgentKey[]>(FILE, [], Array.isArray).filter((k) => LEVELS.includes(k.level));
+const keys: AgentKey[] = readJsonFile<AgentKey[]>(FILE, [], Array.isArray)
+  .filter((k) => LEVELS.includes(k.level))
+  .map((k) => ({ ...k, confirm: k.confirm === true }));
 
 const save = (): void => writeJsonAtomic(FILE, keys);
 
@@ -53,17 +57,26 @@ export const publicKey = ({ hash: _, ...key }: AgentKey) => key;
 export const listKeys = () => keys.map(publicKey);
 
 /** Makes a key; the `key` of the answer is the only time it is seen. A string is an error code. */
-export function createKey(name: unknown, level: unknown, by: string): { key: string; info: ReturnType<typeof publicKey> } | string {
+export function createKey(name: unknown, level: unknown, by: string, confirm = false): { key: string; info: ReturnType<typeof publicKey> } | string {
   const label = typeof name === "string" ? name.trim().replace(/\s+/g, " ") : "";
   if (!label || label.length > 40) return "agents.badName";
   if (!LEVELS.includes(level as Level)) return "agents.badLevel";
   if (keys.some((k) => k.name.toLowerCase() === label.toLowerCase())) return "agents.nameTaken";
   if (keys.length >= MAX_KEYS) return "agents.tooMany";
   const key = PREFIX + Buffer.from(crypto.getRandomValues(new Uint8Array(32))).toString("base64url");
-  const made: AgentKey = { id: crypto.randomUUID(), name: label, level: level as Level, hash: sha256(key), hint: key.slice(-4), createdAt: Date.now(), createdBy: by, lastUsed: 0, lastIp: "" };
+  const made: AgentKey = { id: crypto.randomUUID(), name: label, level: level as Level, confirm, hash: sha256(key), hint: key.slice(-4), createdAt: Date.now(), createdBy: by, lastUsed: 0, lastIp: "" };
   keys.push(made);
   save();
   return { key, info: publicKey(made) };
+}
+
+/** Whether the key asks before it destroys; null — no such key */
+export function setConfirm(id: string, confirm: boolean): AgentKey | null {
+  const key = keys.find((k) => k.id === id);
+  if (!key) return null;
+  key.confirm = confirm;
+  save();
+  return key;
 }
 
 export function removeKey(id: string): AgentKey | null {

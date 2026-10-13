@@ -9,6 +9,7 @@
  * caller is shown — and may call — only the tools of its level.
  */
 import { allows, type Level } from "./agents";
+import { answerOf, type Word } from "./approvals";
 
 /** Who is calling: an access key, as far as the tools need to know it */
 export interface Caller {
@@ -16,6 +17,8 @@ export interface Caller {
   level: Level;
   /** The name operations are written into the activity log under */
   user: string;
+  /** A call that may destroy something waits for an administrator's word */
+  confirm?: boolean;
 }
 
 /** An error the model sees as the result of its call (and can correct), not a failure of the protocol */
@@ -43,6 +46,8 @@ export interface ServerInfo {
   version: string;
   /** Told to the model when it connects */
   instructions?: (caller: Caller) => string;
+  /** Asks an administrator about a destroying call of a caller that must ask; without it nothing is asked */
+  approve?: (tool: Tool, args: Record<string, unknown>, caller: Caller) => Promise<Word>;
 }
 
 const PROTOCOL_VERSIONS = ["2024-11-05", "2025-03-26", "2025-06-18", "2025-11-25"];
@@ -101,6 +106,10 @@ export async function handleMessage(message: unknown, tools: Tool[], caller: Cal
           : error(id, -32602, `Unknown tool: ${String(params.name)}`);
       }
       const args = params.arguments && typeof params.arguments === "object" && !Array.isArray(params.arguments) ? (params.arguments as Record<string, unknown>) : {};
+      if (tool.effect === "destroy" && caller.confirm && info.approve) {
+        const word = await info.approve(tool, args, caller);
+        if (word !== "allowed") return result(id, { content: [{ type: "text", text: answerOf(word, tool.name) }], isError: word === "denied" });
+      }
       try {
         const out = await tool.run(args, caller);
         return result(id, { content: [{ type: "text", text: typeof out === "string" ? out : JSON.stringify(out, null, 1) }] });

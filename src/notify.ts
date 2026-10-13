@@ -8,6 +8,7 @@
  */
 import { hostname } from "node:os";
 import { join } from "node:path";
+import type { Ask } from "./approvals";
 import type { AttentionItem } from "./attention";
 import { SECRETS_DIR, settings } from "./config";
 import { isPlainObject, readJsonFile, writeJsonAtomic } from "./fsutil";
@@ -146,6 +147,8 @@ export interface Message {
   tag: string;
   code: string;
   app?: string;
+  /** A request of an agent that waits for a word: a device that can shows "Allow" and "Decline" with it */
+  ask?: string;
 }
 
 function tr(lang: string, key: string, vars: Record<string, string | number> = {}): string {
@@ -194,6 +197,25 @@ export function wording(items: AttentionItem[], lang: string): Message[] {
     },
   ];
 }
+
+/** What an agent asks to do, as the rest of the sentence "It wants to …" */
+export function askedWhat(ask: Pick<Ask, "tool" | "title" | "args">, lang: string): string {
+  const key = `approvals.what.${ask.tool}${ask.tool === "app_remove" && ask.args.deleteData === true ? ".data" : ""}`;
+  const known = LANGUAGES.en![key] !== undefined;
+  const words = (name: string) => (typeof ask.args[name] === "string" ? (ask.args[name] as string).slice(0, 80) : "");
+  return known ? tr(lang, key, { app: words("app"), snapshot: words("snapshot") }) : ask.title;
+}
+
+/** The message about an agent's call that waits for an administrator's word */
+export const askMessage = (ask: Pick<Ask, "id" | "agent" | "tool" | "title" | "args">, lang: string): Message => ({
+  title: tr(lang, "approvals.title", { agent: ask.agent }),
+  text: tr(lang, "approvals.text", { what: askedWhat(ask, lang) }),
+  severity: "warn",
+  route: "#/settings/agents",
+  tag: "ask:" + ask.id,
+  code: "ask",
+  ask: ask.id,
+});
 
 export const testMessage = (lang: string): Message => ({ title: tr(lang, "notify.test.title"), text: tr(lang, "notify.test.text", { host: hostname() }), severity: "info", route: "#/settings/notifications", tag: "test", code: "test" });
 
@@ -383,7 +405,7 @@ async function toDevices(devices: Device[], message: (lang: string) => Message[]
     devices.flatMap((device) =>
       message(device.lang).map(async (m) => {
         try {
-          const payload = { title: m.title, body: m.text, tag: m.tag, url: "/" + m.route };
+          const payload = { title: m.title, body: m.text, tag: m.tag, url: "/" + m.route, ...(m.ask ? { ask: m.ask, allow: tr(device.lang, "approvals.allow"), decline: tr(device.lang, "approvals.decline") } : {}) };
           if ((await sendPush(device, payload, keys, device.subject)) === "gone") gone.add(device.id);
         } catch (e) {
           errors.push(e instanceof Error ? e.message : String(e));
@@ -420,6 +442,16 @@ export async function sendTest(channel: Channel, user: string, device?: string):
   const own = state.devices.filter((d) => d.user === user && (!device || d.id === device || d.endpoint === device));
   if (channel === "push" && own.length === 0) return "this device is not subscribed";
   return deliver(channel, (lang) => [testMessage(lang)], own);
+}
+
+/**
+ * An agent's call waits for a word: said at once over every channel that is set up. It is a question,
+ * not a problem — the switch of the problems does not silence it.
+ */
+export async function sendAsk(ask: Ask): Promise<void> {
+  const channels = activeChannels();
+  const errors = await Promise.all(channels.map((channel) => deliver(channel, (lang) => [askMessage(ask, lang)])));
+  errors.forEach((error, i) => error && console.error(`Notification over ${channels[i]} failed: ${error}`));
 }
 
 /** Chats that have written to the bot lately — to pick the chat instead of looking its number up */

@@ -12,7 +12,8 @@ import { join } from "node:path";
 import { homedir, networkInterfaces } from "node:os";
 import type { Server, ServerWebSocket } from "bun";
 import { recent, record, history } from "./activity";
-import { agentUser, createKey, keyOf, listKeys, removeKey } from "./agents";
+import { agentUser, createKey, keyOf, listKeys, removeKey, setConfirm } from "./agents";
+import { Desk } from "./approvals";
 import { AppError, appAction, installedNames, jobFinished, appEnv, appDetail, appLogs, appIcon, appSettings, appStats, applyCompose, ICON_MIME, MAX_ICON, removeAppIcon, setAppIcon, applySettings, installFromSettings, applyStoreUpdate, composeText, getJob, installCustom, installFromStore, listApps, listJobs, onAppRemoved, planStoreUpdate, readCompose, removeApp, storeAppDetail } from "./apps";
 import { certificateStates, challengeResponse, ensureCertificates, loadCertificates } from "./acme";
 import { attention } from "./attention";
@@ -88,7 +89,7 @@ import { isPlainObject } from "./fsutil";
 import { mcpResponse } from "./mcp";
 import { instructions as mcpInstructions, TOOLS } from "./mcptools";
 import { localNamesStatus, refreshLocalNames } from "./mdns";
-import { addDevice, CHANNELS, listDevices, notifyStatus, pushKey, removeDevice, sendTest, startNotifications, telegramChats, updateNotify } from "./notify";
+import { addDevice, CHANNELS, listDevices, notifyStatus, pushKey, removeDevice, sendAsk, sendTest, startNotifications, telegramChats, updateNotify } from "./notify";
 import { appHost, appLabel, classifyHost, clientIp, cookieDomain, domainOf, localDomain, requestHost, requestPort, requestProto, siteDomain } from "./site";
 import { newChallenge, PASSKEY_ALGORITHMS, spendChallenge, verifyAssertion, verifyRegistration } from "./passkey";
 import { qrMatrix } from "./qr";
@@ -621,7 +622,7 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
     if (method === "GET") return json(listKeys());
     if (method === "POST") {
       const data = await body(req);
-      const made = createKey(data.name, data.level, user.name);
+      const made = createKey(data.name, data.level, user.name, data.confirm === true);
       if (typeof made === "string") return fail(made === "agents.nameTaken" ? 409 : 400, made);
       record("agents.create", { user: user.name, detail: made.info.name });
       return json(made, 201);
@@ -631,7 +632,24 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
   if (agent && method === "DELETE") {
     const gone = removeKey(agent[1]!);
     if (!gone) return fail(404, "agents.notFound");
+    desk.forget(gone.name);
     record("agents.remove", { user: user.name, detail: gone.name });
+    return json({ ok: true });
+  }
+  if (agent && method === "PATCH") {
+    const key = setConfirm(agent[1]!, (await body(req)).confirm === true);
+    if (!key) return fail(404, "agents.notFound");
+    record(key.confirm ? "agents.asks" : "agents.asksNot", { user: user.name, detail: key.name });
+    return json({ ok: true });
+  }
+
+  // ---- calls of agents that wait for an administrator's word ----
+  if (path === "/api/approvals" && method === "GET") return json(desk.waiting().map(({ print: _, ...ask }) => ask));
+  const asked = /^\/api\/approvals\/([0-9a-f-]{36})$/.exec(path);
+  if (asked && method === "POST") {
+    const ask = desk.decide(asked[1]!, (await body(req)).allow === true, user.name);
+    if (!ask) return fail(404, "approvals.gone");
+    record(ask.state === "allowed" ? "agents.allowed" : "agents.declined", { user: user.name, detail: `${ask.agent}: ${ask.tool}${typeof ask.args.app === "string" ? " " + ask.args.app : ""}` });
     return json({ ok: true });
   }
 
@@ -1207,6 +1225,9 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
 
 const MAX_API_BODY = 2 * 1024 * 1024;
 
+/** Where the destroying calls of agents wait for an administrator's word */
+const desk = new Desk({ asked: (ask) => void sendAsk(ask), changed: () => bus.publish("approvals") });
+
 /**
  * The MCP server, for agents. It is not part of `/api/`: nothing here goes by a session cookie, so a
  * page in somebody's browser has no way in — only the holder of an access key, sent as a Bearer token.
@@ -1217,7 +1238,7 @@ async function mcp(req: Request, server: Server): Promise<Response> {
   if (Number(req.headers.get("content-length") ?? 0) > MAX_API_BODY) return new Response(null, { status: 413 });
   // a tool waits for an operation for half a minute; the default idle timeout would cut the answer
   server.timeout(req, 120);
-  return mcpResponse(req, TOOLS, { name: key.name, level: key.level, user: agentUser(key) }, { version: VERSION, instructions: mcpInstructions });
+  return mcpResponse(req, TOOLS, { name: key.name, level: key.level, user: agentUser(key), confirm: key.confirm }, { version: VERSION, instructions: mcpInstructions, approve: (tool, args, caller) => desk.ask(caller.name, tool, args) });
 }
 
 /** A file name for the Content-Disposition header, whatever letters it has */
