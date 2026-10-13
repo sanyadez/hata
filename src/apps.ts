@@ -49,7 +49,7 @@ function assertInstalled(name: string): void {
 
 // --- Jobs -------------------------------------------------------------------------------------------
 
-export type JobKind = "install" | "update" | "start" | "stop" | "restart" | "remove" | "apply" | "backup" | "restore" | "import" | "move";
+export type JobKind = "install" | "update" | "start" | "stop" | "restart" | "remove" | "apply" | "backup" | "restore" | "import" | "move" | "docker";
 
 export interface Job {
   id: string;
@@ -431,7 +431,13 @@ async function install(name: string, text: string, compose: Compose, log: Log, o
   }
 }
 
+/** An install without Docker would only fail half-way with words nobody can act on */
+function needDocker(): void {
+  if (!Bun.which("docker", { PATH: `${process.env.PATH ?? ""}:/usr/bin:/usr/local/bin` })) throw new AppError("docker.missing", 409);
+}
+
 export async function installFromStore(store: string, name: string, form: unknown, user: string): Promise<Job> {
+  needDocker();
   assertName(name);
   const compose = storeCompose(store, name);
   if (existsSync(appDir(name))) throw new AppError("app.exists", 409);
@@ -444,6 +450,7 @@ export async function installFromStore(store: string, name: string, form: unknow
 
 /** Installs a compose file pasted by the user; the text is stored exactly as given */
 export async function installCustom(name: unknown, text: unknown, user: string): Promise<Job> {
+  needDocker();
   if (typeof text !== "string" || text.length > 512 * 1024) throw new AppError("app.badCompose");
   let compose: Compose;
   try {

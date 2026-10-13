@@ -35,7 +35,8 @@ export function attention(input: { system: SystemStatus; docker: DockerInfo; app
   const now = input.now ?? Date.now();
   const items: AttentionItem[] = [];
 
-  if (!docker.available) items.push({ id: "docker", severity: "danger", code: "docker", detail: { message: docker.error ?? "" } });
+  // not installed and not running are said as what they are: each has a button that puts it right
+  if (!docker.available) items.push({ id: "docker", severity: "danger", code: docker.state === "missing" ? "docker.missing" : docker.state === "stopped" ? "docker.stopped" : "docker", detail: { message: docker.error ?? "" } });
 
   for (const app of apps) {
     const restarting = app.containers.filter((c) => c.state === "restarting");

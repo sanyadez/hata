@@ -1392,11 +1392,63 @@ function attentionItem(item) {
     h("span", { class: "badge-icon " + item.severity }, icon(ATTENTION_ICONS[item.code.split(".")[0]] ?? "alert")),
     h("div", { class: "grow" }, h("strong", null, t(base + ".title", detail)), h("p", { class: "muted small" }, t(base + ".text", detail).trim())),
     item.code === "update" && h("a", { class: "btn small", href: "#/settings/about" }, t("common.open")),
+    item.code === "docker.missing" && isAdmin() && button(t("docker.install"), { class: "small primary", onclick: () => dockerDialog() }),
+    item.code === "docker.stopped" &&
+      isAdmin() &&
+      button(t("docker.start"), {
+        class: "small primary",
+        onclick: async (e) => {
+          const el = e.currentTarget;
+          el.disabled = true;
+          try {
+            await api("POST", "/api/docker/start", {});
+            toast(t("docker.started"));
+          } catch (err) {
+            toast(errorText(err), "error");
+          }
+          void refresh();
+        },
+      }),
     item.code === "disk.trash" && h("a", { class: "btn small", href: "#/trash" }, t("trash.title")),
     item.code.startsWith("smart.") && h("a", { class: "btn small", href: "#/settings/storage" }, t("common.open")),
     item.code.startsWith("internet.") && h("a", { class: "btn small", href: "#/settings/network" }, t("common.open")),
     item.code.startsWith("array.") && h("a", { class: "btn small", href: "#/settings/storage" }, t("common.open")),
     item.app && h("a", { class: "btn small", href: `#/apps/${item.app}${item.code === "restarting" || item.code === "partial" ? "/logs" : ""}` }, t(item.code === "restarting" || item.code === "partial" ? "app.logs" : "common.open")),
+  );
+}
+
+/** Docker is what the apps run in: what it is, the command that installs it, and the button */
+async function dockerDialog() {
+  const info = await api("GET", "/api/docker").catch(() => ({ install: "" }));
+  const error = h("p", { class: "error", role: "alert" });
+  const dialog = openDialog(
+    "",
+    h("header", null, h("h2", { class: "grow" }, t("docker.title")), closeX(() => dialog)),
+    h("p", null, t("docker.what")),
+    h("p", { class: "muted small" }, t("docker.why")),
+    h("p", { class: "cmd" }, icon("terminal"), info.install),
+    h("p", { class: "muted small" }, t("docker.how")),
+    error,
+    h(
+      "footer",
+      null,
+      closeButton(() => dialog, t("common.cancel")),
+      button(t("docker.install"), {
+        class: "primary",
+        onclick: async (e) => {
+          const el = e.currentTarget;
+          el.disabled = true;
+          try {
+            const res = await api("POST", "/api/docker/install", {});
+            dialog.close();
+            jobDialog(res.job, "docker", "", () => void refresh());
+          } catch (err) {
+            error.textContent = errorText(err);
+            el.disabled = false;
+          }
+        },
+      }, "download"),
+    ),
   );
 }
 

@@ -48,9 +48,13 @@ export interface DockerInfo {
   version?: string;
   compose?: string;
   error?: string;
+  /** Why it is not available: not installed at all, installed and not running, or without the compose plugin */
+  state?: "missing" | "stopped" | "noCompose";
 }
 
 let composeVersion: string | undefined;
+/** After Docker was installed or started: what was learnt about the compose plugin is asked anew */
+export const forgetCompose = (): void => void (composeVersion = undefined);
 
 export async function dockerInfo(): Promise<DockerInfo> {
   try {
@@ -59,10 +63,14 @@ export async function dockerInfo(): Promise<DockerInfo> {
       const r = await run(["docker", "compose", "version", "--short"]).catch(() => null);
       composeVersion = r && r.code === 0 ? r.output.trim() : "";
     }
-    if (!composeVersion) return { available: false, version: v.Version, error: "The `docker compose` plugin is not installed" };
+    if (!composeVersion) {
+      // not remembered: it may be installed a minute from now
+      composeVersion = undefined;
+      return { available: false, version: v.Version, error: "The `docker compose` plugin is not installed", state: "noCompose" };
+    }
     return { available: true, version: v.Version, compose: composeVersion };
   } catch (e) {
-    return { available: false, error: e instanceof Error ? e.message : String(e) };
+    return { available: false, error: e instanceof Error ? e.message : String(e), state: Bun.which("docker", { PATH: `${process.env.PATH ?? ""}:/usr/bin:/usr/local/bin` }) ? "stopped" : "missing" };
   }
 }
 

@@ -1625,5 +1625,22 @@
   "activity.array.repair.failed": "Damaged data could not be repaired",
   "activity.array.fix.done": "Files brought back from the parity",
   "activity.array.fix.failed": "Not every file could be brought back from the parity",
-  "activity.array.diskEmpty": "{target} has lost everything it held: the parity sync is stopped"
+  "activity.array.diskEmpty": "{target} has lost everything it held: the parity sync is stopped",
+  "attention.docker.missing.title": "Docker is not installed",
+  "attention.docker.missing.text": "Apps run in Docker; without it nothing from the store can be installed. Hata installs nothing by itself — press the button.",
+  "attention.docker.stopped.title": "Docker is not running",
+  "attention.docker.stopped.text": "It is installed, but does not answer, so the apps are down. {message}",
+  "docker.install": "Install Docker",
+  "docker.start": "Start Docker",
+  "docker.started": "Docker is running",
+  "docker.title": "Docker",
+  "docker.what": "What is missing: Docker Engine with the compose plugin — the program every app here runs in.",
+  "docker.why": "What for: an app is a compose file that Docker runs. Without Docker Hata still shows the server, its files, disks and network, but cannot install or start an app.",
+  "docker.how": "This is Docker's own installer: it adds Docker's package repository for this system and installs the engine. It takes a minute or two and needs the internet; Docker then starts with the system.",
+  "job.docker": "Installing Docker",
+  "activity.app.docker.done": "Docker installed",
+  "activity.app.docker.failed": "Installing Docker failed",
+  "error.docker.missing": "Docker is not installed. Install it from the home page, under “Needs attention”.",
+  "error.docker.installed": "Docker is installed already.",
+  "error.docker.startFailed": "Docker did not start: {message}"
 }

@@ -1625,5 +1625,22 @@
   "activity.array.repair.failed": "Пошкоджені дані полагодити не вдалося",
   "activity.array.fix.done": "Файли повернуто з парності",
   "activity.array.fix.failed": "Не всі файли вдалося повернути з парності",
-  "activity.array.diskEmpty": "На {target} зникло все, що там було: синхронізацію парності зупинено"
+  "activity.array.diskEmpty": "На {target} зникло все, що там було: синхронізацію парності зупинено",
+  "attention.docker.missing.title": "Docker не встановлено",
+  "attention.docker.missing.text": "Застосунки працюють у Docker; без нього нічого з магазину не встановити. Hata сама нічого не встановлює — натисніть кнопку.",
+  "attention.docker.stopped.title": "Docker не працює",
+  "attention.docker.stopped.text": "Його встановлено, але він не відповідає, тож застосунки не працюють. {message}",
+  "docker.install": "Встановити Docker",
+  "docker.start": "Запустити Docker",
+  "docker.started": "Docker працює",
+  "docker.title": "Docker",
+  "docker.what": "Чого бракує: Docker Engine з плагіном compose — програма, у якій працює кожен застосунок.",
+  "docker.why": "Навіщо: застосунок — це compose-файл, який запускає Docker. Без нього Hata далі показує сервер, файли, диски й мережу, але встановити чи запустити застосунок не може.",
+  "docker.how": "Це власний інсталятор Docker: він додає репозиторій пакетів Docker для цієї системи й ставить рушій. Триває хвилину-дві й потребує інтернету; далі Docker запускається разом із системою.",
+  "job.docker": "Встановлення Docker",
+  "activity.app.docker.done": "Docker встановлено",
+  "activity.app.docker.failed": "Не вдалося встановити Docker",
+  "error.docker.missing": "Docker не встановлено. Встановіть його з головної сторінки, у «Потребує уваги».",
+  "error.docker.installed": "Docker уже встановлено.",
+  "error.docker.startFailed": "Docker не запустився: {message}"
 }

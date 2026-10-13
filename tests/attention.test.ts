@@ -117,3 +117,9 @@ test("the protection from a disk failure: damage and a lost disk are dangers, a 
   const items = attention({ system: system(), docker, apps: [], activity: [], now: NOW, array: [{ code: "held", detail: { n: 80 } }, { code: "errors", detail: { n: 3 } }] });
   expect(items.map((i) => [i.id, i.severity, i.detail.n])).toEqual([["array.errors", "danger", 3], ["array.held", "warn", 80]]);
 });
+
+test("Docker: not installed and not running are told apart, each has its own way out", () => {
+  const one = (state?: "missing" | "stopped" | "noCompose") => attention({ system: system(), docker: { available: false, error: "x", state }, apps: [], activity: [], now: NOW })[0]!;
+  expect([one("missing").code, one("stopped").code, one("noCompose").code, one().code]).toEqual(["docker.missing", "docker.stopped", "docker", "docker"]);
+  expect(one("missing")).toMatchObject({ id: "docker", severity: "danger" });
+});

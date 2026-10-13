@@ -26,6 +26,7 @@ import { checkDisks, diskHealth, installTool, listDisks, startDisks, startSelfTe
 import { fills, measureFills, startFills } from "./fills";
 import { checkImages, imagesStatus, startImages } from "./images";
 import { afterPackage, giveBack, internetTrouble, startNetwork, setCheck, setRole, startHotspot, stopHotspot, wifiQrText, changeNic, confirmChange, handOver, NETWORK_PACKAGES, networkReport, NetworkError, revertChange, wifiConnect, wifiForget, wifiNetworks } from "./network";
+import { DOCKER_INSTALL_COMMAND, installDocker, startDocker } from "./dockerinstall";
 import { ArrayError, arrayReport, arrayTrouble, bringBack, rebuild as rebuildParity, repair as repairArray, scrub as scrubArray, setUp as setUpArray, startSnapraid, stop as stopArray, sync as syncArray, turnOff as turnOffArray } from "./snapraid";
 import { absent, connectVolume, disconnect, mergeFolders, mountingReport, prepareDisk, startMounting, type Outcome } from "./mounting";
 import { moveData } from "./movedata";
@@ -924,6 +925,13 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
   if (path === "/api/disks/disconnect" && method === "POST") {
     server.timeout(req, 0);
     return changed(await disconnect(String((await body(req)).path ?? ""), user.name));
+  }
+  // Docker itself, for a server that has none: the button on the home page
+  if (path === "/api/docker" && method === "GET") return json({ ...(await dockerInfo()), install: DOCKER_INSTALL_COMMAND });
+  if (path === "/api/docker/install" && method === "POST") return json({ job: installDocker(user.name).id }, 202);
+  if (path === "/api/docker/start" && method === "POST") {
+    await startDocker();
+    return json(await dockerInfo());
   }
   // protection from a disk failure; the long runs answer at once and the page follows them
   if (path.startsWith("/api/disks/array")) {
