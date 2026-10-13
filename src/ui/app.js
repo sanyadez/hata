@@ -4231,6 +4231,115 @@ function wifiDialog(nic) {
   void look();
 }
 
+/** The server's own Wi-Fi network: its name and password, or — when it is on — how to join it and who has */
+function hotspotDialog(nic) {
+  const spot = nic.wifi.hotspot;
+  const error = h("p", { class: "error", role: "alert" });
+  const done = (data, message) => {
+    state.network = data;
+    dialog.close();
+    toast(message);
+    renderSettings();
+  };
+  let dialog;
+  if (spot) {
+    const code = h("div", { class: "qr-box" });
+    void api("GET", `/api/network/${nic.name}/hotspot`).then((res) => code.replaceChildren(qrSvg(res.qr)), () => {});
+    dialog = openDialog(
+      "",
+      h("header", null, h("h2", { class: "grow" }, t("hotspot.title")), closeX(() => dialog)),
+      code,
+      h("p", { class: "muted small" }, t("hotspot.scan")),
+      h("div", { class: "kv" }, h("span", { class: "muted" }, t("hotspot.name")), h("span", null, spot.ssid)),
+      h("div", { class: "kv" }, h("span", { class: "muted" }, t("wifi.password")), h("span", { class: "mono" }, spot.password)),
+      h("div", { class: "kv" }, h("span", { class: "muted" }, t("hotspot.address")), h("span", { class: "mono" }, `http://${(nic.addresses[0] ?? "").split("/")[0]}${location.port ? ":" + location.port : ""}`)),
+      h("h3", null, t("hotspot.clients", { n: spot.clients.length })),
+      spot.clients.length ? spot.clients.map((c) => h("div", { class: "kv" }, h("span", null, c.name || c.mac), h("span", { class: "mono muted small" }, c.ip))) : h("p", { class: "muted small" }, t("hotspot.nobody")),
+      error,
+      h(
+        "footer",
+        null,
+        button(t("hotspot.off"), {
+          class: "danger",
+          onclick: async (e) => {
+            e.currentTarget.disabled = true;
+            try {
+              done(await api("DELETE", `/api/network/${nic.name}/hotspot`), t("hotspot.stopped"));
+            } catch (err) {
+              error.textContent = errorText(err);
+              e.target.closest("button").disabled = false;
+            }
+          },
+        }),
+        closeButton(() => dialog),
+      ),
+    );
+    return;
+  }
+  const ssid = h("input", { value: "Hata", maxLength: 32, required: true });
+  const password = h("input", { class: "mono", minLength: 8, maxLength: 63, required: true, autocomplete: "off", spellcheck: false });
+  const band = h("select", null, h("option", { value: "2.4" }, t("hotspot.band24")), h("option", { value: "5" }, t("hotspot.band5")));
+  const go = h("button", { class: "btn primary" }, t("hotspot.on"));
+  const needs = h("div");
+  dialog = openDialog(
+    "",
+    h(
+      "form",
+      {
+        class: "stack",
+        onsubmit: async (e) => {
+          e.preventDefault();
+          error.textContent = "";
+          needs.replaceChildren();
+          go.disabled = true;
+          try {
+            done(await api("PUT", `/api/network/${nic.name}/hotspot`, { ssid: ssid.value, password: password.value, band: band.value }), t("hotspot.started", { ssid: ssid.value.trim() }));
+          } catch (err) {
+            if (err.code === "network.needsPackage") needs.replaceChildren(hotspotNeeds(err.detail, error));
+            else error.textContent = errorText(err);
+            go.disabled = false;
+          }
+        },
+      },
+      h("header", null, h("h2", { class: "grow" }, t("hotspot.title")), closeX(() => dialog)),
+      h("p", { class: "muted small" }, t("hotspot.lead")),
+      nic.wifi.ssid && h("p", { class: "banner small" }, t("hotspot.leaves", { ssid: nic.wifi.ssid })),
+      field(t("hotspot.name"), ssid),
+      field(t("wifi.password"), password, t("hotspot.passwordHint")),
+      field(t("hotspot.band"), band, t("hotspot.bandHint")),
+      needs,
+      error,
+      h("footer", null, closeButton(() => dialog, t("common.cancel")), go),
+    ),
+  );
+}
+
+/** What the access point lacks, with the button that installs it */
+function hotspotNeeds(detail, error) {
+  return h(
+    "div",
+    { class: "banner stack" },
+    h("strong", null, t("hotspot.needs.what")),
+    h("p", { class: "muted small" }, t("hotspot.needs.why")),
+    detail.install ? h("p", { class: "cmd" }, icon("terminal"), detail.install) : h("p", { class: "muted small" }, t("mounting.needs.byHand", { package: detail.package })),
+    detail.install &&
+      button(t("mounting.needs.install", { package: detail.package }), {
+        class: "small",
+        onclick: async (e) => {
+          const el = e.currentTarget;
+          el.disabled = true;
+          try {
+            state.network = await api("POST", "/api/network/package", { package: detail.package });
+            el.closest(".banner").replaceChildren(h("p", null, t("hotspot.needs.done")));
+          } catch (err) {
+            error.textContent = errorText(err);
+            el.disabled = false;
+          }
+        },
+      }),
+  );
+}
+
 function networkSection() {
   const data = state.network;
   if (!data) return [h("p", { class: "muted" }, "…")];
@@ -4244,7 +4353,8 @@ function networkSection() {
         "div",
         { class: "section-head" },
         h("h2", null, h("span", { class: "with-icon" }, icon("network"), nic.kind === "modem" ? nic.product || t("network.modem") : nic.name), " ", nic.kind === "modem" && h("span", { class: "muted small mono" }, nic.name + " "), h("span", { class: "state " + (nic.up ? "running" : "stopped") }, t(nic.up ? "network.up" : "network.down"))),
-        nic.wifi?.ready && button(t("wifi.networks"), { onclick: () => wifiDialog(nic) }, "search"),
+        nic.wifi?.ready && nic.wifi.ap && button(t(nic.wifi.hotspot ? "hotspot.show" : "hotspot.make"), { class: nic.wifi.hotspot ? "accent" : "", onclick: () => hotspotDialog(nic) }, "share"),
+        nic.wifi?.ready && !nic.wifi.hotspot && button(t("wifi.networks"), { onclick: () => wifiDialog(nic) }, "search"),
         nic.wifi?.ssid &&
           button(t("wifi.forget"), {
             onclick: async () => {
@@ -4256,10 +4366,10 @@ function networkSection() {
               renderSettings();
             },
           }),
-        nic.manager === "nm" && !data.pending && (!nic.wifi || nic.wifi.ssid) && button(t("network.change"), { onclick: () => nicDialog(nic) }, "sliders"),
+        nic.manager === "nm" && !data.pending && (!nic.wifi || nic.wifi.ssid) && !nic.wifi?.hotspot && button(t("network.change"), { onclick: () => nicDialog(nic) }, "sliders"),
         (nic.manager === "networkd" || nic.manager === "ifupdown") && data.tool === "ok" && !data.pending && button(t("network.handover"), { onclick: () => handOverDialog(nic) }),
       ),
-      nic.wifi && row("Wi-Fi", nic.wifi.ssid ? `${nic.wifi.ssid} · ${nic.wifi.signal}%` : t(nic.wifi.ready ? "wifi.notConnected" : "wifi.notReady"), false),
+      nic.wifi && row("Wi-Fi", nic.wifi.hotspot ? t("hotspot.state", { ssid: nic.wifi.hotspot.ssid, n: nic.wifi.hotspot.clients.length }) : nic.wifi.ssid ? `${nic.wifi.ssid} · ${nic.wifi.signal}%` : t(nic.wifi.ready ? "wifi.notConnected" : "wifi.notReady"), false),
       nic.wifi?.needs && data.tool === "ok" && needsCard(nic.wifi.needs, "wifi.needs"),
       row(t("network.address"), nic.addresses.join(", ") + (nic.addresses.length ? ` · ${t(nic.dynamic ? "network.byRouter" : "network.fixed")}` : "")),
       row(t("network.gateway"), nic.gateway),

@@ -24,7 +24,7 @@ import { addShare, changeShare, installSamba, listShares, refreshShares, removeS
 import { checkDisks, diskHealth, installTool, listDisks, startDisks, startSelfTest } from "./disks";
 import { fills, measureFills, startFills } from "./fills";
 import { checkImages, imagesStatus, startImages } from "./images";
-import { afterPackage, setRole, changeNic, confirmChange, handOver, NETWORK_PACKAGES, networkReport, NetworkError, revertChange, wifiConnect, wifiForget, wifiNetworks } from "./network";
+import { afterPackage, setRole, startHotspot, stopHotspot, wifiQrText, changeNic, confirmChange, handOver, NETWORK_PACKAGES, networkReport, NetworkError, revertChange, wifiConnect, wifiForget, wifiNetworks } from "./network";
 import { absent, connectVolume, disconnect, mergeFolders, mountingReport, prepareDisk, startMounting, type Outcome } from "./mounting";
 import { moveData } from "./movedata";
 import { installPackage } from "./packages";
@@ -770,6 +770,19 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
         else if (method === "DELETE") await wifiForget(wifi[1]!, user.name);
         else return fail(404, "network.noNic");
         return json(await networkReport());
+      }
+      const hotspot = /^\/api\/network\/([A-Za-z0-9_.-]{1,15})\/hotspot$/.exec(path);
+      if (hotspot && (method === "PUT" || method === "DELETE")) {
+        server.timeout(req, 0);
+        if (method === "PUT") await startHotspot(hotspot[1]!, await body(req), user.name);
+        else await stopHotspot(hotspot[1]!, user.name);
+        return json(await networkReport());
+      }
+      // the code a phone's camera reads to join the access point
+      if (hotspot && method === "GET") {
+        const spot = (await networkReport()).nics.find((n) => n.name === hotspot[1])?.wifi?.hotspot;
+        if (!spot) return fail(404, "network.noNic");
+        return json({ qr: qrMatrix(wifiQrText(spot.ssid, spot.password)).map((row) => row.map((dark) => (dark ? "1" : "0")).join("")) });
       }
       const role = /^\/api\/network\/([A-Za-z0-9_.-]{1,15})\/role$/.exec(path);
       if (role && method === "PUT") {

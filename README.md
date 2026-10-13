@@ -120,6 +120,8 @@ Early development. What works today:
   within a minute and a half, the previous settings come back by themselves; Wi-Fi: the networks in
   reach, joining one with its password, forgetting it; a USB modem or a phone sharing its connection is
   recognised, and you choose which interface is the main way to the internet and which a spare one;
+  the Wi-Fi adapter can be an access point of the server's own, joined by a QR code, with the
+  internet shared through the server;
 - newer images: once a day the registries are asked whether the tags of your apps have moved on, and an
   app with a newer image is marked; on request the running apps are updated by themselves at a set time,
   each after a snapshot of its data;

@@ -26,7 +26,10 @@ const NOT_OURS = /^(lo|docker|br-|veth|virbr|cni|flannel|lxcbr|podman|tun|tap|wg
 const PACKAGE = "network-manager";
 /** Without it NetworkManager has a Wi-Fi device and cannot use it */
 const WIFI_PACKAGE = "wpasupplicant";
-export const NETWORK_PACKAGES = [PACKAGE, WIFI_PACKAGE];
+/** NetworkManager starts it to hand out addresses to whoever joins the access point */
+const SHARE_PACKAGE = "dnsmasq-base";
+export const NETWORK_PACKAGES = [PACKAGE, WIFI_PACKAGE, SHARE_PACKAGE];
+const hotspotId = (name: string) => `hata-hotspot-${name}`;
 const PROFILES = "/etc/NetworkManager/system-connections";
 const NM = ["org.freedesktop.NetworkManager", "/org/freedesktop/NetworkManager", "org.freedesktop.NetworkManager"];
 const HANDED = (name: string) => `/etc/systemd/network/00-hata-${name}.network`;
@@ -59,7 +62,7 @@ export interface Nic {
   /** Who configures it: NetworkManager, systemd-networkd (netplan writes for it too), ifupdown, "" — nobody we know */
   manager: "nm" | "networkd" | "ifupdown" | "";
   /** A Wi-Fi interface: whether it can be used, what it lacks, the network it is on */
-  wifi?: { ready: boolean; needs: { package: string; install: string } | null; ssid: string; signal: number };
+  wifi?: { ready: boolean; needs: { package: string; install: string } | null; ssid: string; signal: number; /** The adapter can be an access point */ ap: boolean; hotspot: Hotspot | null };
 }
 
 interface IpLink {
@@ -243,6 +246,59 @@ export function parseWifi(out: string, known: string[] = []): WifiNetwork[] {
   return [...best.values()].sort((a, b) => Number(b.active) - Number(a.active) || b.signal - a.signal);
 }
 
+export interface Hotspot {
+  ssid: string;
+  password: string;
+  band: "2.4" | "5";
+  /** Who has joined: what the address service remembers */
+  clients: { mac: string; ip: string; name: string }[];
+}
+
+/** The profile of an access point of the server's own: its network, with addresses and a way out through the server */
+export function hotspotProfile(id: string, nic: string, spot: { ssid: string; password: string; band: "2.4" | "5" }): string {
+  const ssid = [...new TextEncoder().encode(spot.ssid)].join(";") + ";";
+  return [
+    "[connection]",
+    `id=${id}`,
+    `uuid=${crypto.randomUUID()}`,
+    "type=wifi",
+    `interface-name=${nic}`,
+    // back by itself after a restart, and ahead of the networks the adapter could join instead
+    "autoconnect=true",
+    "autoconnect-priority=10",
+    "",
+    "[wifi]",
+    "mode=ap",
+    `ssid=${ssid}`,
+    `band=${spot.band === "5" ? "a" : "bg"}`,
+    "",
+    "[wifi-security]",
+    "key-mgmt=wpa-psk",
+    "proto=rsn;",
+    "pairwise=ccmp;",
+    `psk=${spot.password.replace(/\\/g, "\\\\").replace(/^ /, "\\s")}`,
+    "",
+    "[ipv4]",
+    "method=shared",
+    "",
+    "[ipv6]",
+    "method=ignore",
+    "",
+  ].join("\n");
+}
+
+/** The leases dnsmasq keeps for an access point: `<expires> <mac> <ip> <name> <client id>` a line */
+export function parseLeases(text: string): Hotspot["clients"] {
+  return text
+    .split("\n")
+    .map((line) => line.trim().split(/\s+/))
+    .filter((f) => f.length >= 4 && /^[0-9a-f]{2}(:[0-9a-f]{2}){5}$/i.test(f[1]!))
+    .map((f) => ({ mac: f[1]!.toLowerCase(), ip: f[2]!, name: f[3] === "*" ? "" : f[3]! }));
+}
+
+/** What a phone's camera reads to join a network: the text of the QR code */
+export const wifiQrText = (ssid: string, password: string): string => `WIFI:T:WPA;S:${ssid.replace(/([\\;,":])/g, "\\$1")};P:${password.replace(/([\\;,":])/g, "\\$1")};;`;
+
 /** A Wi-Fi password as WPA takes it: 8–63 printable characters */
 export const wifiPassword = (value: unknown): value is string => typeof value === "string" && /^[\x20-\x7e]{8,63}$/.test(value);
 
@@ -408,7 +464,19 @@ export async function networkReport(): Promise<NetworkReport> {
     if (isWifi) {
       const supplicant = !!Bun.which("wpa_supplicant", { PATH });
       const on = byNm && state !== "unavailable" ? parseWifi((await nmcli(["-t", "-f", "IN-USE,SSID,SIGNAL,SECURITY,FREQ", "device", "wifi", "list", "ifname", link.name, "--rescan", "no"])).out).find((n) => n.active) : undefined;
-      wifi = { ready: byNm && state !== "unavailable", needs: supplicant ? null : { package: WIFI_PACKAGE, install: installCommand(WIFI_PACKAGE) }, ssid: on?.ssid ?? "", signal: on?.signal ?? 0 };
+      const ready = byNm && state !== "unavailable";
+      let hotspot: Hotspot | null = null;
+      let ap = false;
+      if (ready) {
+        const show = (await nmcli(["-t", "-f", "GENERAL.CONNECTION,WIFI-PROPERTIES.AP", "device", "show", link.name])).out.split("\n").map(terse);
+        ap = show.find((f) => f[0] === "WIFI-PROPERTIES.AP")?.[1] === "yes";
+        if (show.find((f) => f[0] === "GENERAL.CONNECTION")?.[1] === hotspotId(link.name)) {
+          const got = (await nmcli(["-s", "-t", "-f", "802-11-wireless.ssid,802-11-wireless.band,802-11-wireless-security.psk", "connection", "show", hotspotId(link.name)])).out.split("\n").map(terse);
+          const field = (key: string) => got.find((f) => f[0] === key)?.[1] ?? "";
+          hotspot = { ssid: field("802-11-wireless.ssid"), password: field("802-11-wireless-security.psk"), band: field("802-11-wireless.band") === "a" ? "5" : "2.4", clients: parseLeases(read(`/var/lib/NetworkManager/dnsmasq-${link.name}.leases`)) };
+        }
+      }
+      wifi = { ready, needs: supplicant ? null : { package: WIFI_PACKAGE, install: installCommand(WIFI_PACKAGE) }, ssid: hotspot ? "" : (on?.ssid ?? ""), signal: on?.signal ?? 0, ap, hotspot };
     }
     nics.push({
       ...link,
@@ -718,5 +786,43 @@ export async function setRole(name: string, role: unknown, user: string): Promis
     if (!now || !nic.addresses.length || (now.addresses.length && (role === "off" ? now.internet === "none" : now.internet !== "none"))) break;
   }
   record("network.role." + role, { user, detail: name });
+  bus.publish("network");
+}
+
+// --- The server's own access point ------------------------------------------------------------------
+
+/**
+ * Turns the Wi-Fi adapter into an access point: a network of the server's own, with addresses handed
+ * out and the way to the internet shared through the server. An adapter does one thing at a time, so
+ * the network it was on is left — refused when that network is the only way to reach the server.
+ */
+export async function startHotspot(name: string, input: Record<string, unknown>, user: string): Promise<void> {
+  const nic = await wifiNic(name);
+  if (!nic.wifi!.ap) throw new NetworkError("network.noAp");
+  if (!Bun.which("dnsmasq", { PATH })) throw new NetworkError("network.needsPackage", { package: SHARE_PACKAGE, install: installCommand(SHARE_PACKAGE) });
+  const ssid = typeof input.ssid === "string" ? input.ssid.trim() : "";
+  if (!ssid || new TextEncoder().encode(ssid).length > 32 || /[\x00-\x1f]/.test(ssid)) throw new NetworkError("network.badSsid");
+  if (!wifiPassword(input.password)) throw new NetworkError("network.badWifiPassword");
+  const others = (await networkReport()).nics.filter((n) => n.name !== name && n.addresses.length > 0);
+  if (nic.addresses.length && !nic.wifi!.hotspot && !others.length) throw new NetworkError("network.hotspotOnlyWay");
+  const id = hotspotId(name);
+  const file = `${PROFILES}/${id}.nmconnection`;
+  await nmcli(["connection", "delete", id]);
+  mkdirSync(PROFILES, { recursive: true });
+  writeFileSync(file, hotspotProfile(id, name, { ssid, password: input.password, band: input.band === "5" ? "5" : "2.4" }), { mode: 0o600 });
+  await must(nmcli(["connection", "load", file]));
+  const up = await nmcli(["--wait", "40", "connection", "up", id, "ifname", name], 60_000);
+  if (up.code !== 0) {
+    await nmcli(["connection", "delete", id]);
+    throw new NetworkError("network.hotspotFailed", { message: (up.err + up.out).trim().split("\n").slice(-1)[0] ?? "" });
+  }
+  record("network.hotspot.on", { user, detail: ssid });
+  bus.publish("network");
+}
+
+export async function stopHotspot(name: string, user: string): Promise<void> {
+  await wifiNic(name);
+  await must(nmcli(["connection", "delete", hotspotId(name)]));
+  record("network.hotspot.off", { user, detail: name });
   bus.publish("network");
 }

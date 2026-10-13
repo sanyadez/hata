@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { cleanChange, isModem, roleArgs, parseWifi, wifiPassword, wifiProfile, wifiProfileId, dhcpcdClientId, withoutIface, handBackScript, handedFile, parseLinks, profileArgs, terse, udevRule, waitOnline } from "../src/network";
+import { cleanChange, hotspotProfile, parseLeases, wifiQrText, isModem, roleArgs, parseWifi, wifiPassword, wifiProfile, wifiProfileId, dhcpcdClientId, withoutIface, handBackScript, handedFile, parseLinks, profileArgs, terse, udevRule, waitOnline } from "../src/network";
 
 const ADDR = JSON.stringify([
   { ifname: "lo", link_type: "loopback", flags: ["LOOPBACK", "UP", "LOWER_UP"], addr_info: [{ family: "inet", local: "127.0.0.1", prefixlen: 8 }] },
@@ -130,4 +130,25 @@ test("the way to the internet: the lowest metric is the main one, the rest are s
   expect(isModem("usb", "cdc_ether")).toBe(true);
   expect(isModem("usb", "r8152")).toBe(false);
   expect(isModem("pci", "cdc_ether")).toBe(false);
+});
+
+test("hotspotProfile: an access point that shares the server's way out and comes back after a restart", () => {
+  const text = hotspotProfile("hata-hotspot-wlp2s0", "wlp2s0", { ssid: "Hata", password: "horse battery", band: "2.4" });
+  expect(text).toContain("[wifi]\nmode=ap\nssid=72;97;116;97;\nband=bg\n");
+  expect(text).toContain("key-mgmt=wpa-psk\nproto=rsn;\npairwise=ccmp;\npsk=horse battery\n");
+  expect(text).toContain("[ipv4]\nmethod=shared\n");
+  expect(text).toContain("autoconnect=true\nautoconnect-priority=10\n");
+  expect(hotspotProfile("a", "wlan0", { ssid: "x", password: "12345678", band: "5" })).toContain("band=a\n");
+});
+
+test("parseLeases: who has joined the access point", () => {
+  expect(parseLeases("1791890000 AA:bb:cc:dd:ee:01 10.42.0.15 pixel-8 01:aa:bb:cc:dd:ee:01\n1791890001 aa:bb:cc:dd:ee:02 10.42.0.77 * *\nduid 00:01\n\n")).toEqual([
+    { mac: "aa:bb:cc:dd:ee:01", ip: "10.42.0.15", name: "pixel-8" },
+    { mac: "aa:bb:cc:dd:ee:02", ip: "10.42.0.77", name: "" },
+  ]);
+});
+
+test("wifiQrText: what a phone's camera reads, with the signs of the format escaped", () => {
+  expect(wifiQrText("Hata", "horse battery")).toBe("WIFI:T:WPA;S:Hata;P:horse battery;;");
+  expect(wifiQrText("my;net", 'p:a"s\\s,1')).toBe('WIFI:T:WPA;S:my\\;net;P:p\\:a\\"s\\\\s\\,1;;');
 });
