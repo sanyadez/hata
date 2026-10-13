@@ -220,7 +220,10 @@ Early development. What works today:
   take and restore snapshots. It connects with an access key made in the settings, and a key has one of
   three levels — look, operate, everything; no level reaches users, passwords, files or a shell. Secrets in
   compose files are hidden from keys that may not change them, and what an agent did is in the activity log
-  under the key's name;
+  under the key's name. A key can be made to ask first: a call that removes an app, restores a snapshot
+  or replaces a compose file then waits until an administrator allows it — on Hata's page or from the
+  notification. A connector with nowhere to paste a key signs in instead (OAuth): it is given the
+  server's address, and an administrator says in Hata what it may do;
 - updates of Hata itself from the web UI: a newer release is downloaded, checked against its checksums and
   started; if it does not come up, the previous version is put back by itself. Apps keep running meanwhile;
 - the whole history of what happened on the server and who did it, by day, with a search;

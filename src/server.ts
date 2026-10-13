@@ -12,13 +12,15 @@ import { join } from "node:path";
 import { homedir, networkInterfaces } from "node:os";
 import type { Server, ServerWebSocket } from "bun";
 import { recent, record, history } from "./activity";
-import { agentUser, createKey, keyOf, listKeys, removeKey, setConfirm } from "./agents";
+import { agentUser, cannotGrant, createKey, grantKey, keyOf, listKeys, removeKey, renewTokens, setConfirm } from "./agents";
+import type { Level } from "./agents";
 import { Desk } from "./approvals";
 import { AppError, appAction, installedNames, jobFinished, appEnv, appDetail, appLogs, appIcon, appSettings, appStats, applyCompose, ICON_MIME, MAX_ICON, removeAppIcon, setAppIcon, applySettings, installFromSettings, applyStoreUpdate, composeText, getJob, installCustom, installFromStore, listApps, listJobs, onAppRemoved, planStoreUpdate, readCompose, removeApp, storeAppDetail } from "./apps";
 import { certificateStates, challengeResponse, ensureCertificates, loadCertificates } from "./acme";
 import { attention } from "./attention";
 import { folderSize, restoreFromSnapshot, snapshotFile, snapshotFiles } from "./snapshot";
 import { appFolders, extraAllowed, backupApp, backupOverview, deleteSnapshot, listSnapshots, mirror, restoreSnapshot, resumeRestore, runBackups, scheduleBackups, takeServerSnapshot } from "./backup";
+import { allowed as oauthAllowed, declined as oauthDeclined, findClient, holdQuestion, question as oauthQuestion, readAuthorize, register as oauthRegister, resourceMetadata, serverMetadata, spendCode } from "./oauth";
 import { checkOffsite, forgetHost, offsiteFailure, saveOffsite } from "./offsite";
 import { APP_NAME_RE, dumpCompose } from "./appform";
 import { trashSizeOn } from "./trash";
@@ -643,6 +645,24 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
     return json({ ok: true });
   }
 
+  // ---- a connector that signs in: the question put to the administrator (`oauth.ts`) ----
+  const connect = /^\/api\/oauth\/requests\/([0-9a-f-]{36})$/.exec(path);
+  if (connect) {
+    const q = oauthQuestion(connect[1]!);
+    if (!q) return fail(404, "oauth.gone");
+    if (method === "GET") return json({ name: q.name, redirect: q.redirect, level: q.level });
+    if (method === "POST") {
+      const data = await body(req);
+      if (data.allow !== true) return json({ redirect: oauthDeclined(q.id) });
+      // a link is enough to put this question on the screen: only the person who knows the password answers it
+      if (!(await checkOwnPassword(user, data.password))) return fail(400, "auth.wrongPassword");
+      const refused = cannotGrant(data.level);
+      if (refused) return fail(400, refused);
+      record("agents.connect", { user: user.name, detail: q.name });
+      return json({ redirect: oauthAllowed(q.id, { level: data.level as Level, confirm: data.confirm === true, by: user.name }) });
+    }
+  }
+
   // ---- calls of agents that wait for an administrator's word ----
   if (path === "/api/approvals" && method === "GET") return json(desk.waiting().map(({ print: _, ...ask }) => ask));
   const asked = /^\/api\/approvals\/([0-9a-f-]{36})$/.exec(path);
@@ -1225,6 +1245,63 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
 
 const MAX_API_BODY = 2 * 1024 * 1024;
 
+/** The address the caller reached the server at, as the OAuth documents must name it */
+const reachedAt = (req: Request): string => `${requestProto(req)}://${req.headers.get("host") ?? new URL(req.url).host}`;
+
+/** These are read by programs in other people's pages too; nothing here goes by a cookie */
+const OPEN = { "access-control-allow-origin": "*", "access-control-allow-headers": "content-type, authorization, mcp-protocol-version", "access-control-allow-methods": "GET, POST, OPTIONS", "cache-control": "no-store" };
+const open = (data: unknown, status = 200): Response => new Response(JSON.stringify(data), { status, headers: { ...OPEN, "content-type": "application/json" } });
+
+/** A form or JSON, as the token endpoint is sent either */
+async function fields(req: Request): Promise<Record<string, unknown>> {
+  const text = await req.text().catch(() => "");
+  if ((req.headers.get("content-type") ?? "").startsWith("application/json")) {
+    try {
+      const data: unknown = JSON.parse(text);
+      return isPlainObject(data) ? data : {};
+    } catch {
+      return {};
+    }
+  }
+  return Object.fromEntries(new URLSearchParams(text));
+}
+
+/**
+ * The OAuth side of the MCP server (`oauth.ts`): what a connector reads and calls by itself. The one
+ * step with a person in it — `/oauth/authorize` — only notes the question and hands over to the web
+ * UI, where a signed-in administrator answers it. null — not one of these addresses.
+ */
+async function oauth(req: Request, url: URL): Promise<Response | null> {
+  const path = url.pathname;
+  const known = path === "/.well-known/oauth-protected-resource" || path === "/.well-known/oauth-protected-resource/mcp" || path === "/.well-known/oauth-authorization-server" || path.startsWith("/oauth/");
+  if (!known) return null;
+  if (req.method === "OPTIONS") return new Response(null, { status: 204, headers: OPEN });
+  if (Number(req.headers.get("content-length") ?? 0) > 64 * 1024) return new Response(null, { status: 413 });
+  const base = reachedAt(req);
+  if (req.method === "GET" && path.startsWith("/.well-known/oauth-protected-resource")) return open(resourceMetadata(base));
+  if (req.method === "GET" && path === "/.well-known/oauth-authorization-server") return open(serverMetadata(base));
+  if (req.method === "POST" && path === "/oauth/register") {
+    const answer = oauthRegister(await req.json().catch(() => null));
+    return open(answer, "error" in answer ? 400 : 201);
+  }
+  if (req.method === "GET" && path === "/oauth/authorize") {
+    const read = readAuthorize(url.searchParams, findClient(url.searchParams.get("client_id")));
+    if ("refuse" in read) return new Response(read.refuse, { status: 400, headers: { ...SECURITY_HEADERS, "content-type": "text/plain; charset=utf-8" } });
+    return new Response(null, { status: 302, headers: { location: "back" in read ? read.back : `/#/connect/${holdQuestion(read.ask)}`, "cache-control": "no-store" } });
+  }
+  if (req.method === "POST" && path === "/oauth/token") {
+    const data = await fields(req);
+    let tokens;
+    if (data.grant_type === "authorization_code") {
+      const spent = spendCode({ code: data.code, client: data.client_id, redirect: data.redirect_uri, verifier: data.code_verifier });
+      tokens = spent ? grantKey(spent.client, spent.grant) : null;
+    } else if (data.grant_type === "refresh_token") tokens = renewTokens(data.refresh_token, data.client_id);
+    else return open({ error: "unsupported_grant_type" }, 400);
+    return tokens ? open(tokens) : open({ error: "invalid_grant", error_description: "The code or token is wrong, was used already, or its time has passed." }, 400);
+  }
+  return new Response(null, { status: 404, headers: OPEN });
+}
+
 /** Where the destroying calls of agents wait for an administrator's word */
 const desk = new Desk({ asked: (ask) => void sendAsk(ask), changed: () => bus.publish("approvals") });
 
@@ -1234,7 +1311,11 @@ const desk = new Desk({ asked: (ask) => void sendAsk(ask), changed: () => bus.pu
  */
 async function mcp(req: Request, server: Server): Promise<Response> {
   const key = keyOf(req, clientIp(req, server));
-  if (!key) return new Response(JSON.stringify({ error: "An access key is required: Authorization: Bearer <key>. Keys are made in Hata, Settings → Agents." }), { status: 401, headers: { "content-type": "application/json", "www-authenticate": "Bearer", "cache-control": "no-store" } });
+  // a connector that can sign in learns from the header where to; one whose token ran out, that it is time for the next
+  if (!key) {
+    const sent = req.headers.has("authorization");
+    return new Response(JSON.stringify({ error: "An access key is required: Authorization: Bearer <key>. Keys are made in Hata, Settings → Agents." }), { status: 401, headers: { "content-type": "application/json", "www-authenticate": `Bearer ${sent ? 'error="invalid_token", ' : ""}resource_metadata="${reachedAt(req)}/.well-known/oauth-protected-resource"`, "cache-control": "no-store" } });
+  }
   if (Number(req.headers.get("content-length") ?? 0) > MAX_API_BODY) return new Response(null, { status: 413 });
   // a tool waits for an operation for half a minute; the default idle timeout would cut the answer
   server.timeout(req, 120);
@@ -1459,6 +1540,8 @@ async function handle(req: Request, server: Server): Promise<Response> {
   const host = classifyHost(requestHost(req));
   if (host.kind === "app") return serveApp(req, server, host.label);
   if (url.pathname === "/mcp") return mcp(req, server);
+  const signIn = await oauth(req, url);
+  if (signIn) return signIn;
   // a network change on trial is kept by opening this at the server's new address, where no session reaches
   if (url.pathname === "/network/confirm" && req.method === "GET") {
     await confirmChange(url.searchParams.get("token") ?? "");

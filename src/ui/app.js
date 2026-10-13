@@ -295,6 +295,7 @@ function pickLanguage(server) {
 
 function parseRoute() {
   const parts = location.hash.replace(/^#\/?/, "").split("/").filter(Boolean).map(decodeURIComponent);
+  if (parts[0] === "connect" && parts[1]) return { view: "connect", id: parts[1] };
   if (parts[0] === "store" && state.user?.role !== "guest") return { view: "store" };
   // "#/files" is the data root, wherever it is; "#/files/" is the root of the server
   if (parts[0] === "files" && isAdmin()) return { view: "files", path: /^#\/?files$/.test(location.hash) ? "" : "/" + parts.slice(1).join("/") };
@@ -688,6 +689,7 @@ function shell(...content) {
 function render() {
   if (state.setup || !state.user) return authScreen();
   const view = state.route.view;
+  if (view === "connect") return renderConnect();
   if (view === "store") return renderStore();
   if (view === "settings") return renderSettings();
   if (view === "files") return renderFiles();
@@ -6377,6 +6379,76 @@ function agentKeyDialog(made) {
   );
 }
 
+// --- A connector that signs in: the administrator's answer ------------------------------------------
+
+/** Where the connector is sent back to, in words a person can judge */
+function connectWhere(redirect) {
+  try {
+    const url = new URL(redirect);
+    if (["localhost", "127.0.0.1", "[::1]"].includes(url.hostname)) return t("connect.where.local");
+    return /^https?:$/.test(url.protocol) ? url.host : t("connect.where.app", { scheme: url.protocol.slice(0, -1) });
+  } catch {
+    return redirect;
+  }
+}
+
+function renderConnect() {
+  const { id } = state.route;
+  const box = h("section", { class: "card pad stack-s connect" }, h("p", { class: "muted" }, "…"));
+  shell(h("div", { class: "page-head" }, h("div", null, h("h1", null, t("connect.title")))), box);
+  const say = (text) => put(box, h("p", null, text), h("p", null, h("a", { class: "btn", href: "#/settings/agents" }, t("settings.agents"))));
+  if (!isAdmin()) return put(box, h("p", null, t("connect.adminOnly")));
+  const leave = async (answer, error) => {
+    try {
+      const { redirect } = await api("POST", `/api/oauth/requests/${id}`, answer);
+      say(t(answer.allow ? "connect.done" : "connect.declined"));
+      if (redirect) location.href = redirect;
+    } catch (e) {
+      if (e.code === "oauth.gone") say(t("error.oauth.gone"));
+      else error.textContent = errorText(e);
+    }
+  };
+  api("GET", `/api/oauth/requests/${id}`).then(
+    (q) => {
+      const level = h("select", null, AGENT_LEVELS.map((value) => h("option", { value, selected: value === (q.level || "read") }, t("agents.level." + value))));
+      const hint = h("span", { class: "hint" });
+      const confirm = h("input", { type: "checkbox", checked: true });
+      const asks = h("label", { class: "check" }, confirm, h("span", null, t("agents.confirm")));
+      const paint = () => {
+        hint.textContent = t(`agents.level.${level.value}.hint`);
+        asks.hidden = level.value !== "full";
+      };
+      level.addEventListener("change", paint);
+      paint();
+      const password = h("input", { type: "password", autocomplete: "current-password", required: true });
+      const error = h("p", { class: "error", role: "alert" });
+      put(
+        box,
+        h(
+          "form",
+          {
+            class: "stack-s",
+            onsubmit: (e) => {
+              e.preventDefault();
+              void leave({ allow: true, level: level.value, confirm: level.value === "full" && confirm.checked, password: password.value }, error);
+            },
+          },
+          h("h2", null, t("connect.asks", { name: q.name })),
+          h("p", null, t("connect.lead")),
+          h("div", { class: "setting" }, h("div", { class: "grow" }, h("strong", null, t("connect.where")), h("p", { class: "muted small" }, t("connect.whereHint"))), h("code", { class: "mono" }, connectWhere(q.redirect))),
+          h("p", { class: "muted small" }, t("connect.warn")),
+          h("label", { class: "field" }, h("span", { class: "label" }, t("agents.new.level")), level, hint),
+          asks,
+          field(t("connect.password"), password, t("connect.passwordHint")),
+          error,
+          h("footer", null, button(t("approvals.decline"), { onclick: () => leave({ allow: false }, error) }), h("button", { class: "btn primary" }, t("connect.allow"))),
+        ),
+      );
+    },
+    (e) => say(e.code === "oauth.gone" ? t("error.oauth.gone") : errorText(e)),
+  );
+}
+
 // --- Calls of agents that wait for an administrator's word ------------------------------------------
 
 let askDialog = null;
@@ -6505,7 +6577,7 @@ function agentsSection() {
         "div",
         { class: "grow" },
         h("strong", null, key.name, h("span", { class: "state agent-level " + key.level }, t("agents.level." + key.level))),
-        h("div", { class: "muted small" }, [`hata_…${key.hint}`, t("agents.createdBy", { user: key.createdBy, when: ago(key.createdAt) }), key.lastUsed ? t("agents.lastUsed", { when: ago(key.lastUsed), ip: key.lastIp }) : t("agents.neverUsed")].join(" · ")),
+        h("div", { class: "muted small" }, [key.via ? t("agents.via", { client: key.via }) : `hata_…${key.hint}`, t("agents.createdBy", { user: key.createdBy, when: ago(key.createdAt) }), key.lastUsed ? t("agents.lastUsed", { when: ago(key.lastUsed), ip: key.lastIp }) : t("agents.neverUsed")].join(" · ")),
       ),
       key.level === "full" &&
         h(
@@ -6560,6 +6632,7 @@ function agentsSection() {
       h("p", { class: "muted" }, t("agents.how.address")),
       copyBox(mcpAddress()),
       location.protocol === "http:" && h("p", { class: "muted small" }, t("agents.how.plain")),
+      h("p", { class: "muted" }, t("agents.how.signin")),
     ),
     h(
       "section",
