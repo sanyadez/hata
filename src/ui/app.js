@@ -253,6 +253,8 @@ function applyAppearance(look) {
 const state = {
   version: "",
   setup: false,
+  /** A new server whose administrator has not been through the first choices yet */
+  welcome: false,
   user: null,
   lang: "en",
   languages: ["en"],
@@ -298,6 +300,7 @@ function pickLanguage(server) {
 function parseRoute() {
   const parts = location.hash.replace(/^#\/?/, "").split("/").filter(Boolean).map(decodeURIComponent);
   if (parts[0] === "connect" && parts[1]) return { view: "connect", id: parts[1] };
+  if (parts[0] === "welcome" && isAdmin()) return { view: "welcome", step: WELCOME_STEPS.includes(parts[1]) && parts[1] !== "admin" ? parts[1] : "server" };
   if (parts[0] === "store" && state.user?.role !== "guest") return { view: "store" };
   // "#/files" is the data root, wherever it is; "#/files/" is the root of the server
   if (parts[0] === "files" && isAdmin()) return { view: "files", path: /^#\/?files$/.test(location.hash) ? "" : "/" + parts.slice(1).join("/") };
@@ -346,6 +349,7 @@ function onRoute() {
   if (state.route.view === "backups") void loadBackups();
   if (state.route.view === "users") void loadUsers();
   if (state.route.view === "import") void loadImport();
+  if (state.route.view === "welcome") void loadWelcome();
   if (state.route.view === "app") void loadApp();
   window.scrollTo(0, 0);
 }
@@ -421,6 +425,7 @@ async function refresh() {
   if (state.route.view === "app") void loadApp(true);
   if (state.route.view === "backups") void loadBackups();
   if (state.route.view === "import") void loadImport();
+  if (state.route.view === "welcome" && ["existing", "apps"].includes(state.route.step)) paintWelcome();
 }
 
 // --- Sign-in and setup --------------------------------------------------------------------------
@@ -538,6 +543,7 @@ function authScreen() {
           const res = setup ? await api("POST", "/api/setup", { ...data, token: token.value.trim() }) : await api("POST", "/api/login", codeField.hidden ? data : { ...data, code: code.value.trim() });
           history.replaceState(null, "", location.pathname + (setup ? "" : location.hash));
           state.user = res.user;
+          state.welcome = setup;
           state.setup = false;
           await enter();
         } catch (err) {
@@ -553,7 +559,7 @@ function authScreen() {
         }
       },
     },
-    h("div", { class: "brand big" }, logo(), "hata"),
+    !setup && h("div", { class: "brand big" }, logo(), "hata"),
     h("h1", null, t(setup ? "setup.title" : "auth.title")),
     setup && h("p", { class: "muted" }, t("setup.lead")),
     !setup && NEXT && h("p", { class: "muted" }, t("auth.nextLead", { address: new URL(NEXT).host })),
@@ -580,7 +586,8 @@ function authScreen() {
         },
       }, "lock"),
   );
-  $app.replaceChildren(h("main", { class: "center" }, form));
+  if (setup) welcomeFrame("admin", form);
+  else $app.replaceChildren(h("main", { class: "center" }, form));
   (setup && !tokenFromLink ? token : name).focus();
 }
 
@@ -696,6 +703,7 @@ function render() {
   if (state.setup || !state.user) return authScreen();
   const view = state.route.view;
   if (view === "connect") return renderConnect();
+  if (view === "welcome") return renderWelcome();
   if (view === "store") return renderStore();
   if (view === "settings") return renderSettings();
   if (view === "files") return renderFiles();
@@ -3951,6 +3959,7 @@ async function loadImport() {
     return toast(errorText(e), "error");
   }
   if (state.route.view === "import") renderImportBody();
+  if (state.route.view === "welcome") paintWelcome();
 }
 
 function renderImport() {
@@ -4077,8 +4086,12 @@ function casaosCard(casaos) {
 
 function renderImportBody() {
   const box = document.getElementById("import-body");
-  const data = state.import;
-  if (!box || !data) return;
+  if (!box || !state.import) return;
+  box.replaceChildren(...importParts(state.import, h("div", { class: "card empty" }, icon("check", "ok"), h("p", null, t("import.nothing")))));
+}
+
+/** What runs on this machine and is not an app here yet; `nothing` stands in when there is none */
+function importParts(data, nothing) {
   const problem = (item) => item.problem && h("span", { class: "chip warn", title: t("import.problem." + item.problem) }, t("import.problem." + item.problem));
   const table = (rows) => h("div", { class: "card table-wrap" }, h("table", null, h("tbody", null, rows)));
 
@@ -4118,9 +4131,274 @@ function renderImportBody() {
           ),
         ),
       ),
-    !data.casaos && !data.projects.length && !data.containers.length && h("div", { class: "card empty" }, icon("check", "ok"), h("p", null, t("import.nothing"))),
+    !data.casaos && !data.projects.length && !data.containers.length && nothing,
   ];
-  box.replaceChildren(...parts.filter(Boolean));
+  return parts.filter(Boolean);
+}
+
+// --- First run ----------------------------------------------------------------------------------
+// The walk through a new server: every step only opens what the pages have anyway, so nothing here
+// is the one place a thing can be done.
+
+const WELCOME_STEPS = ["admin", "server", "existing", "data", "backups", "apps"];
+
+/** The language of this browser; `then` — what to load again in it */
+function languageSelect(then) {
+  const select = h(
+    "select",
+    {
+      "aria-label": t("settings.language"),
+      onchange: async () => {
+        localStorage.setItem("hata.lang", select.value);
+        await loadLanguage(select.value);
+        state.store = null;
+        await refresh();
+        render();
+        then?.();
+      },
+    },
+    state.languages.map((code) => h("option", { value: code, selected: code === state.lang }, LANGUAGE_NAMES[code] ?? code)),
+  );
+  return select;
+}
+
+async function endWelcome() {
+  if (state.welcome) state.settings = await api("PUT", "/api/settings", { welcome: false });
+  state.welcome = false;
+}
+
+function welcomeFrame(step, ...content) {
+  const at = WELCOME_STEPS.indexOf(step);
+  const item = (id, i) => {
+    const inner = [h("span", { class: "welcome-num" }, i < at ? icon("check") : String(i + 1)), h("span", { class: "grow" }, h("strong", null, t(`welcome.step.${id}`)), h("span", { class: "muted small block" }, id === "admin" && state.user ? state.user.name : t(`welcome.step.${id}.hint`)))];
+    // the administrator is made once; the other steps can be visited in any order
+    return h("li", { class: i === at ? "current" : i < at ? "done" : "" }, state.user && id !== "admin" ? h("a", { href: `#/welcome/${id}`, "aria-current": i === at ? "step" : null }, inner) : h("span", null, inner));
+  };
+  $app.replaceChildren(
+    h(
+      "header",
+      { class: "top" },
+      h("span", { class: "brand" }, logo(), "hata"),
+      h("span", { class: "muted welcome-label" }, t("welcome.title")),
+      h(
+        "div",
+        { class: "top-right" },
+        languageSelect(() => state.user && void loadWelcome()),
+        state.user &&
+          button(t("welcome.leave"), {
+            class: "quiet",
+            onclick: async () => {
+              await endWelcome().catch((e) => toast(errorText(e), "error"));
+              go("#/");
+            },
+          }),
+      ),
+    ),
+    h("div", { class: "welcome" }, h("ol", { class: "welcome-steps" }, WELCOME_STEPS.map(item)), h("main", { class: "welcome-main stack" }, h("p", { class: "eyebrow" }, t("welcome.stepOf", { n: at + 1, of: WELCOME_STEPS.length })), content)),
+  );
+}
+
+function renderWelcome() {
+  welcomeFrame(state.route.step, h("div", { class: "stack", id: "welcome-body" }));
+  paintWelcome();
+}
+
+async function loadWelcome() {
+  const step = state.route.step;
+  const quiet = (path) => api("GET", path).catch(() => null);
+  const [settings, local, found, disks, store] = await Promise.all([
+    quiet("/api/settings"),
+    step === "server" ? quiet("/api/local") : state.local,
+    step === "existing" ? quiet("/api/import") : state.import,
+    step === "data" || step === "backups" ? quiet("/api/disks") : state.disks,
+    step === "apps" ? quiet(`/api/store?lang=${state.lang}`) : state.store,
+  ]);
+  Object.assign(state, { settings: settings ?? state.settings, local, import: found, disks, store });
+  if (state.route.view === "welcome" && state.route.step === step) paintWelcome();
+}
+
+/** The file system a folder lies on: the deepest mount point above it */
+const placeOf = (folder, mounts) => mounts.filter((m) => m.path === "/" || folder === m.path || folder.startsWith(m.path + "/")).sort((a, b) => b.path.length - a.path.length)[0] ?? null;
+
+function welcomeFoot(step, save) {
+  const at = WELCOME_STEPS.indexOf(step);
+  const last = at === WELCOME_STEPS.length - 1;
+  const error = h("p", { class: "error", role: "alert" });
+  const next = button(t(last ? "welcome.finish" : "welcome.next"), {
+    class: "primary",
+    onclick: async () => {
+      next.disabled = true;
+      error.textContent = "";
+      try {
+        await save?.();
+        if (last) await endWelcome();
+        go(last ? "#/" : `#/welcome/${WELCOME_STEPS[at + 1]}`);
+      } catch (e) {
+        error.textContent = errorText(e);
+        next.disabled = false;
+      }
+    },
+  });
+  return [error, h("footer", { class: "welcome-foot" }, at > 1 ? h("a", { class: "btn", href: `#/welcome/${WELCOME_STEPS[at - 1]}` }, t("welcome.back")) : h("span"), next)];
+}
+
+/** Docker in one card: there and running, or what is missing with the button that brings it */
+function welcomeDocker() {
+  const d = state.overview?.docker;
+  if (!d) return null;
+  if (d.available) return h("section", { class: "card pad welcome-fact" }, h("span", { class: "badge-icon ok" }, icon("check")), h("div", { class: "grow" }, h("strong", null, t("welcome.docker.ok")), h("p", { class: "muted small" }, [d.version && `Docker ${d.version}`, d.compose && `Compose ${d.compose}`].filter(Boolean).join(" · "))));
+  const stopped = d.state === "stopped";
+  return h(
+    "section",
+    { class: "card pad welcome-fact" },
+    h("span", { class: "badge-icon warn" }, icon("alert")),
+    h("div", { class: "grow" }, h("strong", null, t(stopped ? "attention.docker.stopped.title" : "attention.docker.missing.title")), h("p", { class: "muted small" }, t(stopped ? "welcome.docker.stopped" : "docker.why"))),
+    stopped ? dockerStartButton() : button(t("docker.install"), { class: "small primary", onclick: dockerDialog }, "download"),
+  );
+}
+
+function paintWelcome() {
+  const box = document.getElementById("welcome-body");
+  const step = state.route.step;
+  const s = state.settings;
+  if (!box) return;
+  const head = [h("h1", null, t(`welcome.${step}.title`)), h("p", { class: "muted welcome-lead" }, t(`welcome.${step}.lead`))];
+  const waiting = h("p", { class: "muted" }, "…");
+
+  if (step === "server") {
+    if (!s) return put(box, ...head, waiting);
+    const name = h("input", { value: s.local.name, maxLength: 253, placeholder: "hata.local", spellcheck: false, autocapitalize: "none", class: "mono", required: true });
+    const tz = h("input", { value: s.timezone, spellcheck: false, placeholder: s.systemTimezone, class: "mono" });
+    const port = state.local && state.local.port !== 80 ? ":" + state.local.port : "";
+    return put(
+      box,
+      ...head,
+      h(
+        "section",
+        { class: "card pad" },
+        settingRow(t("welcome.server.name"), t("local.nameHint"), name),
+        settingRow(t("settings.timezone"), t("settings.timezoneHint", { tz: s.systemTimezone }), tz),
+        state.local?.addresses.length > 0 && settingRow(t("welcome.server.address"), t("welcome.server.addressHint"), h("span", { class: "mono" }, state.local.addresses.map((a) => `http://${a}${port}`).join(", "))),
+      ),
+      ...welcomeFoot(step, async () => {
+        const patch = { timezone: tz.value.trim(), language: state.lang };
+        if (name.value.trim().toLowerCase() !== s.local.name) patch.local = { name: name.value };
+        state.settings = await api("PUT", "/api/settings", patch);
+      }),
+    );
+  }
+
+  if (step === "existing") {
+    const found = state.import;
+    return put(box, ...head, welcomeDocker() ?? waiting, ...(found ? importParts(found, h("section", { class: "card pad welcome-fact" }, h("span", { class: "badge-icon ok" }, icon("check")), h("div", { class: "grow" }, h("strong", null, t("welcome.existing.nothing")), h("p", { class: "muted small" }, t("welcome.existing.nothingHint"))))) : []), ...welcomeFoot(step));
+  }
+
+  if (step === "data") {
+    if (!s) return put(box, ...head, waiting);
+    const disks = state.disks;
+    const place = disks && placeOf(s.dataRoot, disks.mounts);
+    const unused = (disks?.mounting?.unused ?? []).map((u) => u.id);
+    const fresh = (disks?.disks ?? []).filter((d) => unused.includes(d.serial || d.name) && (canPrepare(d) || canConnect(d).length > 0));
+    const diskRow = (disk) => {
+      const holds = disk.volumes.filter((v) => v.fstype);
+      const connectable = canConnect(disk);
+      return h(
+        "section",
+        { class: "card pad welcome-fact" },
+        h("span", { class: "badge-icon" }, icon("disk")),
+        h("div", { class: "grow" }, h("strong", null, diskTitle(disk)), h("p", { class: "muted small" }, diskMeta(disk)), h("p", { class: "muted small" }, holds.length ? t("mounting.foundHolds", { what: holds.map((v) => [v.label, v.fstype].filter(Boolean).join(" · ")).join("; ") }) : t("mounting.foundEmpty"))),
+        h("div", { class: "row-actions" }, connectable.length > 0 && button(t("mounting.connect"), { class: "small", onclick: () => connectDialog(disk, connectable[0]) }), canPrepare(disk) && button(t("mounting.format"), { class: "small", onclick: () => formatDialog(disk) })),
+      );
+    };
+    return put(
+      box,
+      ...head,
+      h(
+        "section",
+        { class: "card pad welcome-fact" },
+        h("span", { class: "badge-icon" }, icon("folder")),
+        h(
+          "div",
+          { class: "grow" },
+          h("strong", { class: "mono" }, s.dataRoot),
+          h("p", { class: "muted small" }, place ? t("welcome.data.on", { device: place.device, path: place.path, free: bytes(Math.max(0, place.total - place.used)), total: bytes(place.total) }) : t("welcome.data.unknown")),
+          place?.path === "/" && h("p", { class: "muted small" }, t("welcome.data.system")),
+        ),
+        button(t("data.move"), { class: "small", onclick: () => moveDataDialog() }),
+      ),
+      h("div", { class: "section-head" }, h("h2", null, t("welcome.data.disks")), h("a", { class: "link small", href: "#/settings/storage" }, t("welcome.data.all"))),
+      !disks ? waiting : fresh.length ? fresh.map(diskRow) : h("p", { class: "muted" }, t("welcome.data.noDisks")),
+      fresh.length > 0 && h("p", { class: "muted small" }, t("welcome.data.how")),
+      ...welcomeFoot(step),
+    );
+  }
+
+  if (step === "backups") {
+    if (!s) return put(box, ...head, waiting);
+    const b = s.backup;
+    const mounts = state.disks?.mounts ?? [];
+    // offered switched on: the step is here to be answered, and the answer is saved only by "Continue"
+    const enabled = h("input", { type: "checkbox", checked: b.enabled || state.welcome });
+    const time = h("input", { type: "time", value: b.time, required: true });
+    const keep = h("input", { type: "number", min: 1, max: 365, value: b.keep, required: true, class: "short" });
+    const dir = h("input", { value: b.dir, spellcheck: false, placeholder: `${s.dataRoot}/Backups`, class: "mono" });
+    const same = h("p", { class: "banner" }, t("welcome.backups.sameDisk"));
+    const check = () => {
+      const [data, copy] = [placeOf(s.dataRoot, mounts), placeOf(dir.value.trim() || `${s.dataRoot}/Backups`, mounts)];
+      same.hidden = !data || !copy || data.path !== copy.path;
+    };
+    dir.addEventListener("input", check);
+    check();
+    const places = Object.keys(state.disks?.mounting?.ours ?? {}).filter((path) => !(s.dataRoot + "/").startsWith(path + "/"));
+    return put(
+      box,
+      ...head,
+      h(
+        "section",
+        { class: "card pad stack" },
+        h("label", { class: "check" }, enabled, h("span", null, h("strong", null, t("backup.enable")), h("span", { class: "muted small block" }, t("backup.enableHint")))),
+        h("div", { class: "field-row" }, field(`${t("backup.time")} · ${s.timezone || s.systemTimezone}`, time), field(t("backup.keep"), keep)),
+        field(t("backup.dir"), dir, t("backup.dirHint")),
+        places.length > 0 && h("div", { class: "row-actions wrap" }, places.map((path) => button(`${path}/Backups`, { class: "small mono", onclick: () => ((dir.value = `${path}/Backups`), check()) }))),
+        same,
+      ),
+      h("p", { class: "muted small" }, t("welcome.backups.more"), " ", h("a", { class: "link", href: "#/backups" }, t("nav.backups"))),
+      ...welcomeFoot(step, async () => {
+        state.settings = await api("PUT", "/api/settings", { backup: { enabled: enabled.checked, time: time.value, keep: Number(keep.value), dir: dir.value.trim() } });
+      }),
+    );
+  }
+
+  // the last step: whoever got here has seen the choices, the server stops opening with them
+  if (state.welcome) void endWelcome().catch(() => {});
+  const store = state.store;
+  const docker = state.overview?.docker;
+  const installed = new Set((state.overview?.apps ?? []).map((a) => a.name));
+  const offered = (store?.apps ?? []).filter((a) => a.recommended && a.supported).slice(0, 9);
+  const busy = store?.stores.some((x) => x.syncing);
+  put(
+    box,
+    ...head,
+    docker && !docker.available && welcomeDocker(),
+    !store
+      ? waiting
+      : offered.length
+        ? h(
+            "div",
+            { class: "cards" },
+            offered.map((a) =>
+              h(
+                "button",
+                { type: "button", class: "store-card", onclick: () => (installed.has(a.name) ? go(`#/apps/${a.name}`) : storeDialog(a)) },
+                h("span", { class: "store-card-head" }, appIcon(a), h("span", { class: "grow" }, h("span", { class: "tile-name" }, a.title), h("span", { class: "muted small" }, a.category)), installed.has(a.name) ? h("span", { class: "chip ok" }, icon("check"), t("store.installed")) : h("span", { class: "chip" }, t("store.install"))),
+                h("span", { class: "tagline" }, a.tagline),
+              ),
+            ),
+          )
+        : h("div", { class: "card empty" }, h("p", null, t(busy ? "store.syncing" : "store.empty")), !busy && button(t("store.sync"), { class: "primary", onclick: async () => (await syncStores(), loadWelcome()) }, "refresh")),
+    h("p", { class: "muted small" }, t("welcome.apps.more"), " ", h("a", { class: "link", href: "#/store" }, t("nav.store"))),
+    ...welcomeFoot(step),
+  );
 }
 
 // --- Settings -----------------------------------------------------------------------------------
@@ -4250,6 +4528,7 @@ async function moveDataDialog(suggested = "") {
       jobDialog(res.job, "move", "", async () => {
         state.settings = await api("GET", "/api/settings");
         if (state.route.view === "settings") renderSettings();
+        if (state.route.view === "welcome") void loadWelcome();
       });
     } catch (e) {
       error.textContent = errorText(e);
@@ -4340,23 +4619,10 @@ function settingsSection(section) {
   if (section === "account") return accountSection();
   if (section === "appearance") return appearanceSection(error);
   if (section === "general") {
-    const language = h(
-      "select",
-      {
-        onchange: async () => {
-          localStorage.setItem("hata.lang", language.value);
-          await loadLanguage(language.value);
-          state.store = null;
-          await refresh();
-          render();
-          void loadSettings();
-        },
-      },
-      state.languages.map((code) => h("option", { value: code, selected: code === state.lang }, LANGUAGE_NAMES[code] ?? code)),
-    );
+    const language = languageSelect(() => void loadSettings());
     const port = h("input", { type: "number", min: 1, max: 65535, class: "short mono", value: s?.port || "", placeholder: String(location.port || 80) });
     return [
-      h("section", { class: "card pad" }, h("h2", null, t("settings.general")), settingRow(t("settings.language"), t("settings.languageHint"), language), isAdmin() && settingRow(t("settings.port"), t("settings.portHint"), h("span", { class: "pair" }, port, button(t("settings.save"), { onclick: () => save({ port: Number(port.value) || 0 }) }))), error),
+      h("section", { class: "card pad" }, h("h2", null, t("settings.general")), settingRow(t("settings.language"), t("settings.languageHint"), language), isAdmin() && settingRow(t("settings.port"), t("settings.portHint"), h("span", { class: "pair" }, port, button(t("settings.save"), { onclick: () => save({ port: Number(port.value) || 0 }) }))), isAdmin() && settingRow(t("welcome.again"), t("welcome.againHint"), h("a", { class: "btn", href: "#/welcome" }, t("common.open"))), error),
     ];
   }
   if (section === "apps") {
@@ -5514,6 +5780,7 @@ let diskDialogPaint = null;
 function setDisks(data) {
   state.disks = data;
   if (state.route.view === "settings" && state.route.section === "storage") renderSettings();
+  if (state.route.view === "welcome") paintWelcome();
   diskDialogPaint?.();
 }
 
@@ -7809,11 +8076,13 @@ function accessMatrix() {
 async function enter() {
   // sent here by a protected app: now that the visitor is signed in, back to it
   if (NEXT) return location.replace(NEXT);
+  // a new server opens with the walk through its first choices; any other address is left alone
+  if (state.welcome && isAdmin() && !/^#\/./.test(location.hash)) history.replaceState(null, "", location.pathname + "#/welcome");
   state.route = parseRoute();
   render();
   await refresh();
   startEvents();
-  if (isAdmin()) api("GET", "/api/settings").then((s) => (state.settings = s), () => {});
+  if (isAdmin() && state.route.view !== "welcome") api("GET", "/api/settings").then((s) => (state.settings = s), () => {});
   onRoute();
 }
 
@@ -7828,7 +8097,7 @@ async function main() {
   }
   applyAppearance((state.appearance = server.appearance ?? null));
   state.wallpapers = server.wallpapers ?? [];
-  Object.assign(state, { version: server.version, setup: server.setup, user: server.user, languages: server.languages, passkeys: !!server.passkeys && !!window.PublicKeyCredential });
+  Object.assign(state, { version: server.version, setup: server.setup, welcome: !!server.welcome, user: server.user, languages: server.languages, passkeys: !!server.passkeys && !!window.PublicKeyCredential });
   await loadLanguage(pickLanguage(server));
   if (state.user) await enter();
   else render();

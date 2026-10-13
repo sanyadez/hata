@@ -418,6 +418,8 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
       language: settings.language,
       languages: Object.keys(LANGUAGES),
       passkeys: passkeyDomain(req) !== "",
+      // a new server: its administrator is walked through the first choices
+      welcome: settings.welcome && user?.role === "admin",
       // the sign-in page looks like the rest
       appearance: settings.appearance,
       wallpapers: WALLPAPERS,
@@ -443,6 +445,7 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
     }
     console.log(`Administrator "${result.name}" created from ${ip}`);
     record("auth.setup", { user: result.name, detail: ip });
+    updateSettings({ welcome: true });
     return json({ user: publicUser(result) }, 200, { "set-cookie": cookie(createSession(result, client)) });
   }
 

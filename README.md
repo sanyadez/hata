@@ -91,7 +91,8 @@ Early development. What works today:
 - one-line install: one binary that sets itself up as a systemd service;
 - one-line move from CasaOS: its apps are taken over where they are, with an undo;
 - first run creates the administrator — there are no default credentials, and the setup needs a code
-  that only the server's console shows;
+  that only the server's console shows; then it walks through the first choices: the server's name, what
+  already runs on the machine, where the data and the backups go, a few apps to start with;
 - dashboard: CPU, memory, disk, network and temperature with history, app tiles with live state, a
   "needs attention" list (an app that keeps restarting, a failed install or update, a disk filling up) and
   recent activity;

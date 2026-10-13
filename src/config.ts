@@ -100,6 +100,8 @@ export interface Settings {
   dashboard: Layout;
   /** Colours and the background picture of the UI */
   appearance: Appearance;
+  /** The walk through a new server is still ahead: set when the first administrator is created */
+  welcome: boolean;
 }
 
 export interface HttpsSettings {
@@ -175,6 +177,7 @@ const DEFAULTS: Settings = {
   shares: [],
   dashboard: cleanLayout(null),
   appearance: DEFAULT_APPEARANCE,
+  welcome: false,
 };
 
 /** A host name with at least two labels: letters, digits and hyphens */
@@ -204,6 +207,7 @@ export const settings: Settings = {
   appearance: cleanAppearance(saved.appearance),
   https: { ...DEFAULTS.https, ...(isPlainObject(saved.https) ? saved.https : {}) },
   local: { ...DEFAULTS.local, ...(isPlainObject(saved.local) ? saved.local : {}) },
+  welcome: saved.welcome === true,
   storage: { automount: isPlainObject(saved.storage) && saved.storage.automount === true, ignored: isPlainObject(saved.storage) && Array.isArray(saved.storage.ignored) ? saved.storage.ignored.filter((id): id is string => typeof id === "string") : [] },
 };
 settings.local.name = localName(settings.local.name) ?? DEFAULTS.local.name;
@@ -348,6 +352,7 @@ export function updateSettings(patch: Record<string, unknown>): string | null {
     if (typeof patch.language !== "string" || !/^[a-z]{2}$/.test(patch.language)) return "settings.badLanguage";
     next.language = patch.language;
   }
+  if ("welcome" in patch) next.welcome = patch.welcome === true;
   Object.assign(settings, next);
   writeJsonAtomic(SETTINGS_FILE, settings);
   return null;
