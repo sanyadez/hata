@@ -31,6 +31,7 @@ const ICONS = {
   cpu: "M7 7h10v10H7zM10 3v4M14 3v4M10 17v4M14 17v4M3 10h4M3 14h4M17 10h4M17 14h4",
   memory: "M3 8h18v8H3zM7 16v3M12 16v3M17 16v3M7 11v2M12 11v2M17 11v2",
   disk: "M4 13h16v6H4zM4 13l3-8h10l3 8M8 16h.01M12 16h.01",
+  network: "M9 3h6v5H9zM3 16h6v5H3zM15 16h6v5h-6zM12 8v4M6 16v-4h12v4",
   network: "M8 4v14M8 18l-3-3M8 18l3-3M16 20V6M16 6l-3 3M16 6l3 3",
   temp: "M12 3a2 2 0 0 0-2 2v9.5a4 4 0 1 0 4 0V5a2 2 0 0 0-2-2z",
   plus: "M12 5v14M5 12h14",
@@ -380,6 +381,8 @@ function startEvents() {
         if (state.route.view === "settings" && state.route.section === "storage") setDisks(await api("GET", "/api/disks").catch(() => state.disks));
         else if (state.route.view === "files") void loadFiles?.();
       }, 1200);
+    } else if (event.type === "network") {
+      if (state.route.view === "settings" && state.route.section === "network") void loadNetwork();
     } else if (event.type === "store" && state.route.view === "store") {
       void loadStore();
     }
@@ -3752,6 +3755,7 @@ async function loadSettings() {
     if (isAdmin()) state.update = await api("GET", "/api/update").catch(() => null);
     if (isAdmin()) state.notify = await api("GET", "/api/notify").catch(() => null);
     if (isAdmin() && state.route.section === "apps") state.images = await api("GET", "/api/images").catch(() => null);
+    if (isAdmin() && state.route.section === "network") state.network = await api("GET", "/api/network").catch(() => null);
     if (isAdmin() && state.route.section === "storage") state.disks = await api("GET", "/api/disks").catch(() => null);
     if (isAdmin() && state.route.section === "shares") state.shares = await api("GET", "/api/shares").catch(() => null);
     if (isAdmin() && state.route.section === "agents") state.agents = await api("GET", "/api/agents").catch(() => null);
@@ -3771,6 +3775,7 @@ const SECTIONS = [
   { id: "stores", icon: "store", admin: true },
   { id: "storage", icon: "disk", admin: true },
   { id: "shares", icon: "share", admin: true },
+  { id: "network", icon: "network", admin: true },
   { id: "https", icon: "lock", admin: true },
   { id: "notifications", icon: "bell", admin: true },
   { id: "agents", icon: "key", admin: true },
@@ -4003,6 +4008,7 @@ function settingsSection(section) {
   if (section === "notifications") return notificationsSection();
   if (section === "storage") return storageSection();
   if (section === "shares") return sharesSection();
+  if (section === "network") return networkSection();
   if (section === "agents") return agentsSection();
   if (section === "stores") {
     const stores = state.store?.stores ?? [];
@@ -4026,6 +4032,191 @@ function settingsSection(section) {
       settingRow("Docker", d?.available ? "" : (d?.error ?? ""), h("span", { class: "mono" }, d?.available ? `${d.version} · compose ${d.compose}` : "—")),
       settingRow(t("settings.source"), "", h("a", { class: "link", href: "https://github.com/sanyadez/hata", target: "_blank", rel: "noopener noreferrer" }, "github.com/sanyadez/hata", icon("external"))),
     ),
+  ];
+}
+
+// --- Settings → Network: the interfaces of the server ---------------------------------------------
+
+async function loadNetwork() {
+  state.network = await api("GET", "/api/network").catch(() => state.network);
+  if (state.route.view === "settings" && state.route.section === "network") renderSettings();
+}
+
+/**
+ * A change of the network is on trial: this page keeps it as soon as it reaches the server again. When
+ * the address itself changed the page cannot follow it — the link with the token does, opened by hand.
+ */
+function trialDialog(pending) {
+  let over = false;
+  const left = h("strong", null, "");
+  const note = h("p", { class: "muted small" }, t("network.trial.checking"));
+  const moved = pending.address && pending.address !== location.hostname && /^[\d.]+$/.test(location.hostname);
+  const link = moved && `http://${pending.address}${location.port ? ":" + location.port : ""}/network/confirm?token=${pending.token}`;
+  const finish = (message, kind) => {
+    over = true;
+    dialog.close();
+    toast(message, kind);
+    void loadNetwork();
+  };
+  const dialog = openDialog(
+    "",
+    h("header", null, h("h2", null, t("network.trial.title", { nic: pending.nic }))),
+    h("p", null, t("network.trial.lead"), " ", left),
+    note,
+    link && h("div", { class: "banner stack" }, h("p", null, t("network.trial.moved", { address: pending.address })), h("a", { class: "link", href: link }, link.replace(/\?.*/, ""), icon("external"))),
+    h(
+      "footer",
+      null,
+      button(t("network.trial.revert"), {
+        onclick: async () => {
+          await api("POST", "/api/network/revert", {}).catch(() => {});
+          finish(t("network.trial.reverted"));
+        },
+      }),
+    ),
+  );
+  dialog.addEventListener("cancel", (e) => e.preventDefault());
+  const tick = async () => {
+    if (over) return;
+    const seconds = Math.round((pending.until - Date.now()) / 1000);
+    left.textContent = t("network.trial.left", { n: Math.max(0, seconds) });
+    // a few seconds for the change to take hold, so that what answers is the new state and not the old
+    if (pending.until - Date.now() < (state.network.trial - 8) * 1000 && seconds % 3 === 0) {
+      const now = await fetch("/api/network").then((r) => (r.ok ? r.json() : null), () => null);
+      if (over) return;
+      if (now?.pending?.token === pending.token) {
+        const kept = await api("POST", "/api/network/confirm", {}).catch(() => null);
+        if (kept) return finish(t("network.trial.kept"));
+      } else if (now && !now.pending) return finish(t(seconds > 0 ? "network.trial.kept" : "network.trial.back"), seconds > 0 ? undefined : "error");
+    }
+    if (seconds < -15) return finish(t("network.trial.back"), "error");
+    setTimeout(tick, 1000);
+  };
+  void tick();
+}
+
+function nicDialog(nic) {
+  const auto = h("input", { type: "radio", name: "method", value: "auto", checked: nic.dynamic });
+  const manual = h("input", { type: "radio", name: "method", value: "manual", checked: !nic.dynamic });
+  const address = h("input", { class: "mono", value: nic.addresses[0] ?? "", placeholder: "192.168.1.10/24", spellcheck: false });
+  const gateway = h("input", { class: "mono", value: nic.gateway, placeholder: "192.168.1.1", spellcheck: false });
+  const dns = h("input", { class: "mono", value: nic.dynamic ? "" : nic.dns.join(", "), placeholder: "192.168.1.1, 1.1.1.1", spellcheck: false });
+  const fixed = h("div", { class: "stack", hidden: nic.dynamic }, field(t("network.address"), address, t("network.addressHint")), field(t("network.gateway"), gateway));
+  auto.onchange = manual.onchange = () => (fixed.hidden = auto.checked);
+  const error = h("p", { class: "error", role: "alert" });
+  const dialog = openDialog(
+    "",
+    h(
+      "form",
+      {
+        class: "stack",
+        onsubmit: async (e) => {
+          e.preventDefault();
+          error.textContent = "";
+          try {
+            const pending = await api("PUT", `/api/network/${nic.name}`, { method: auto.checked ? "auto" : "manual", address: address.value, gateway: gateway.value, dns: dns.value });
+            dialog.close();
+            trialDialog(pending);
+          } catch (err) {
+            error.textContent = errorText(err);
+          }
+        },
+      },
+      h("header", null, h("h2", { class: "grow" }, t("network.change.title", { nic: nic.name })), closeX(() => dialog)),
+      h("label", { class: "check" }, auto, h("span", null, h("strong", null, t("network.auto")), h("span", { class: "muted small block" }, t("network.autoHint")))),
+      h("label", { class: "check" }, manual, h("span", null, h("strong", null, t("network.manual")), h("span", { class: "muted small block" }, t("network.manualHint")))),
+      fixed,
+      field(t("network.dns"), dns, t("network.dnsHint")),
+      h("p", { class: "banner small" }, t("network.trial.promise", { n: state.network.trial })),
+      error,
+      h("footer", null, closeButton(() => dialog, t("common.cancel")), h("button", { class: "btn primary" }, t("network.apply"))),
+    ),
+  );
+}
+
+function handOverDialog(nic) {
+  const error = h("p", { class: "error", role: "alert" });
+  const dialog = openDialog(
+    "",
+    h("header", null, h("h2", { class: "grow" }, t("network.handover.title", { nic: nic.name })), closeX(() => dialog)),
+    h("p", null, t("network.handover.lead")),
+    h("p", { class: "muted small" }, t("network.handover.how", { nic: nic.name })),
+    h("p", { class: "banner small" }, t("network.trial.promise", { n: state.network.trial })),
+    error,
+    h(
+      "footer",
+      null,
+      closeButton(() => dialog, t("common.cancel")),
+      button(t("network.handover.go"), {
+        class: "primary",
+        onclick: async (e) => {
+          e.currentTarget.disabled = true;
+          try {
+            const pending = await api("POST", `/api/network/${nic.name}/handover`, {});
+            dialog.close();
+            trialDialog(pending);
+          } catch (err) {
+            error.textContent = errorText(err);
+            e.target.closest("button").disabled = false;
+          }
+        },
+      }),
+    ),
+  );
+}
+
+function networkSection() {
+  const data = state.network;
+  if (!data) return [h("p", { class: "muted" }, "…")];
+  const error = h("p", { class: "error", role: "alert" });
+  const row = (label, value, mono = true) => h("div", { class: "kv" }, h("span", { class: "muted" }, label), h("span", { class: mono ? "mono" : "" }, value || "—"));
+  const card = (nic) =>
+    h(
+      "section",
+      { class: "card pad" },
+      h(
+        "div",
+        { class: "section-head" },
+        h("h2", null, h("span", { class: "with-icon" }, icon("network"), nic.name), " ", h("span", { class: "state " + (nic.up ? "running" : "stopped") }, t(nic.up ? "network.up" : "network.down"))),
+        nic.manager === "nm" && !data.pending && button(t("network.change"), { onclick: () => nicDialog(nic) }, "sliders"),
+        nic.manager === "networkd" && data.tool === "ok" && !data.pending && button(t("network.handover"), { onclick: () => handOverDialog(nic) }),
+      ),
+      row(t("network.address"), nic.addresses.join(", ") + (nic.addresses.length ? ` · ${t(nic.dynamic ? "network.byRouter" : "network.fixed")}` : "")),
+      row(t("network.gateway"), nic.gateway),
+      row(t("network.dns"), nic.dns.join(", ")),
+      nic.addresses6.length > 0 && row("IPv6", nic.addresses6.join(", ")),
+      row(t("network.mac"), nic.mac + (nic.speed ? ` · ${nic.speed >= 1000 ? nic.speed / 1000 + " Gbit/s" : nic.speed + " Mbit/s"}` : "")),
+      row(t("network.manager"), t("network.by." + (nic.manager || "none")), false),
+      nic.manager !== "nm" && h("p", { class: "muted small" }, t(nic.manager === "networkd" ? (data.tool === "ok" ? "network.handoverHint" : "network.needsTool") : "network.readOnly")),
+    );
+  const needs =
+    data.needs &&
+    h(
+      "div",
+      { class: "banner stack" },
+      h("strong", null, t("network.needs.what")),
+      h("p", { class: "muted small" }, t("network.needs.why")),
+      data.needs.install ? h("p", { class: "cmd" }, icon("terminal"), data.needs.install) : h("p", { class: "muted small" }, t("mounting.needs.byHand", { package: data.needs.package })),
+      error,
+      data.needs.install &&
+        button(t("mounting.needs.install", { package: data.needs.package }), {
+          class: "small",
+          onclick: async (e) => {
+            e.currentTarget.disabled = true;
+            try {
+              state.network = await api("POST", "/api/network/package", {});
+              renderSettings();
+            } catch (err) {
+              error.textContent = errorText(err);
+              e.target.closest("button").disabled = false;
+            }
+          },
+        }),
+    );
+  return [
+    h("section", { class: "card pad stack" }, h("h2", null, t("settings.network")), h("p", { class: "muted small" }, t("network.lead")), data.tool === "stopped" && h("p", { class: "banner small" }, t("network.stopped")), needs, data.pending && h("div", { class: "banner" }, t("network.trial.title", { nic: data.pending.nic }), " ", button(t("network.trial.show"), { class: "small", onclick: () => trialDialog(data.pending) }))),
+    ...data.nics.map(card),
+    !data.nics.length && h("p", { class: "card pad muted" }, t("network.none")),
   ];
 }
 

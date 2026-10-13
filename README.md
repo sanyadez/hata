@@ -58,8 +58,9 @@ It is not better, it does another job. Cockpit administers a Linux server: syste
 network interfaces, system accounts, packages, virtual machines. Hata is about apps and the people of a
 home: a store, one-click installs, a dashboard of tiles, backups of app data, family members who open
 their apps and nothing else. Cockpit has no app store and no idea of "an app with its data"; Hata does
-not manage services or network interfaces. The two do not get in each other's way and can run on one
-machine.
+not manage services, packages or virtual machines. Of the network it does what a home server needs: it
+shows the interfaces and changes an address, with the previous one coming back by itself if the server
+can no longer be reached. The two do not get in each other's way and can run on one machine.
 
 **Can it manage containers and compose files like Portainer?**
 Apps, yes. Every app is a compose project, and on its page you start, stop and restart it, update its
@@ -113,6 +114,10 @@ Early development. What works today:
 - store updates that keep your changes: when the store has a newer version of an app, Hata shows what
   changes in its compose file and merges it in — your ports, folders, variables and edits by hand stay, and
   where you and the store changed the same line, yours wins and the difference is shown;
+- network: the server's interfaces with address, gateway and DNS; an address is changed from the page —
+  fixed or from the router — through NetworkManager (installed on request, an interface the system set
+  up is handed over as it is), and every change is on trial: unless the page reaches the server again
+  within a minute and a half, the previous settings come back by themselves;
 - newer images: once a day the registries are asked whether the tags of your apps have moved on, and an
   app with a newer image is marked; on request the running apps are updated by themselves at a set time,
   each after a snapshot of its data;

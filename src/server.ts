@@ -24,6 +24,7 @@ import { addShare, changeShare, installSamba, listShares, refreshShares, removeS
 import { checkDisks, diskHealth, installTool, listDisks, startDisks, startSelfTest } from "./disks";
 import { fills, measureFills, startFills } from "./fills";
 import { checkImages, imagesStatus, startImages } from "./images";
+import { changeNic, confirmChange, handOver, networkReport, NetworkError, revertChange } from "./network";
 import { absent, connectVolume, disconnect, mergeFolders, mountingReport, prepareDisk, startMounting, type Outcome } from "./mounting";
 import { moveData } from "./movedata";
 import { installPackage } from "./packages";
@@ -743,6 +744,29 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
     }
   }
 
+  if (path === "/api/network" && method === "GET") return json(await networkReport());
+  if (path.startsWith("/api/network")) {
+    try {
+      if (path === "/api/network/package" && method === "POST") {
+        server.timeout(req, 0);
+        const message = await installPackage("network-manager");
+        if (message) return fail(500, "network.failed", { message });
+        return json(await networkReport());
+      }
+      if (path === "/api/network/confirm" && method === "POST") return (await confirmChange()) ? json(await networkReport()) : fail(409, "network.nothingPending");
+      if (path === "/api/network/revert" && method === "POST") {
+        await revertChange();
+        return json(await networkReport());
+      }
+      const nic = /^\/api\/network\/([A-Za-z0-9_.-]{1,15})(\/handover)?$/.exec(path);
+      if (nic && method === "POST" && nic[2]) return json(await handOver(nic[1]!, user.name));
+      if (nic && method === "PUT" && !nic[2]) return json(await changeNic(nic[1]!, await body(req), user.name));
+    } catch (e) {
+      if (e instanceof NetworkError) return fail(e.code === "network.noNic" ? 404 : 400, e.code, e.detail);
+      throw e;
+    }
+  }
+
   if (path === "/api/images" && method === "GET") return json(await imagesStatus());
   // the answer does not wait for the registries: the page asks again while it runs
   if (path === "/api/images/check" && method === "POST") {
@@ -1279,6 +1303,11 @@ async function handle(req: Request, server: Server): Promise<Response> {
   const host = classifyHost(requestHost(req));
   if (host.kind === "app") return serveApp(req, server, host.label);
   if (url.pathname === "/mcp") return mcp(req, server);
+  // a network change on trial is kept by opening this at the server's new address, where no session reaches
+  if (url.pathname === "/network/confirm" && req.method === "GET") {
+    await confirmChange(url.searchParams.get("token") ?? "");
+    return new Response(null, { status: 302, headers: { location: "/#/settings/network" } });
+  }
   if (!url.pathname.startsWith("/api/")) {
     if (req.method !== "GET" && req.method !== "HEAD") return fail(405, "request.notFound");
     return serveStatic(req, url.pathname) ?? new Response("Not found", { status: 404, headers: SECURITY_HEADERS });
