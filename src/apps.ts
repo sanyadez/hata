@@ -17,6 +17,7 @@ import { DATA_DIR, settings, timezone } from "./config";
 import { record } from "./activity";
 import { compose as runCompose, composeCmd, containerStats, listContainers, PROJECT_LABEL, SERVICE_LABEL, type ContainerStats, type ContainerSummary } from "./docker";
 import { writeTextAtomic } from "./fsutil";
+import { newerImages } from "./images";
 import { guessBase, merge3, same, type MergeChange } from "./merge";
 import { findStoreApp, storeApp } from "./store";
 
@@ -228,6 +229,8 @@ export interface InstalledApp extends Pick<AppMeta, "title" | "icon" | "port" | 
   store: string;
   /** The store has a newer version of the app */
   update: boolean;
+  /** Images of the app that their registry has a newer version of */
+  newer: string[];
   /** Behind Hata's sign-in */
   protected: boolean;
   /** Running operation, if any */
@@ -272,6 +275,7 @@ function describeApp(name: string, containers: ContainerSummary[] | null, lang: 
     status: containers === null ? "unknown" : running === 0 ? "stopped" : running === own.length ? "running" : "partial",
     store: recordedStore(name, compose),
     update: planStoreUpdate(name) !== null,
+    newer: newerImages(own),
     protected: settings.access[name]?.protect === true,
     job: job ? { id: job.id, kind: job.kind } : null,
     containers: own.map((c) => ({

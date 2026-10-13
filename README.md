@@ -71,11 +71,14 @@ images, volumes and networks to browse and clean up, no Swarm or Kubernetes, and
 machine. Portainer runs fine next to it — as an app from the store.
 
 **Does it check Docker registries for newer images?**
-Not yet. Hata notices when the app store has a newer version of an app and marks the app "Update
-available"; it does not ask a registry by itself whether the tag an app uses — `latest`, say — has a
-newer image behind it. "Update images" on an app's page pulls them whenever you press it, with a
-snapshot of the app's data taken first. Images come from any registry the compose file names; signing in
-to a private registry is not in the UI.
+Yes. Once a day Hata asks the registries whether the tags your apps use — `latest`, say — point at newer
+images than the ones running; nothing is downloaded for that. An app with a newer image gets a mark on
+its tile, and "Update images" lights up on its page. Updating stays your decision unless you switch on
+"Update the apps by itself" in Settings → Apps: then the running apps with newer images are updated
+every day at the time you set, with a snapshot of the app's data taken first, and any app can be left
+out. Hata also notices when the app store has a newer version of an app. Images come from any registry
+the compose file names; a sign-in saved with `docker login` is used, signing in to a private registry
+is not in the UI.
 
 ## Status
 
@@ -110,6 +113,9 @@ Early development. What works today:
 - store updates that keep your changes: when the store has a newer version of an app, Hata shows what
   changes in its compose file and merges it in — your ports, folders, variables and edits by hand stay, and
   where you and the store changed the same line, yours wins and the difference is shown;
+- newer images: once a day the registries are asked whether the tags of your apps have moved on, and an
+  app with a newer image is marked; on request the running apps are updated by themselves at a set time,
+  each after a snapshot of its data;
 - per app, on its own page: start, stop, restart, image update, CPU and memory per container, live logs,
   editing the compose file, removal with or without data;
 - app settings as a form, the one known from CasaOS: image, title and icon, the web UI's address, network,

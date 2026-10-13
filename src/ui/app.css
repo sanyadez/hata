@@ -72,6 +72,7 @@ button { cursor: pointer; }
 
 .muted { color: var(--muted); }
 .small { font-size: 12px; }
+.accent-text { color: var(--accent-text); }
 .grow { flex: 1; min-width: 0; }
 .clip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pad { padding: 20px; }

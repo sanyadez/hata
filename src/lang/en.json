@@ -1306,5 +1306,20 @@
   "error.agents.badLevel": "The level is “read”, “operate” or “full”.",
   "error.agents.nameTaken": "There is already a key with this name.",
   "error.agents.tooMany": "There are 20 keys already. Remove one that is not used.",
-  "error.agents.notFound": "There is no such key any more."
+  "error.agents.notFound": "There is no such key any more.",
+  "app.newer": "Newer images available",
+  "app.newerImage": "a newer one is in the registry",
+  "images.title": "Image updates",
+  "images.check": "Look for newer images",
+  "images.checkHint": "Once a day Hata asks the registries whether the tags your apps use point at newer images. Nothing is downloaded: an app with a newer image gets a mark, and “Update images” lights up on its page.",
+  "images.checkNow": "Check now",
+  "images.running": "Asking the registries…",
+  "images.never": "Not checked yet",
+  "images.status": "Checked {when} · images: {asked} · with a newer version: {newer}",
+  "images.failed": "No answer about {n}",
+  "images.auto": "Update the apps by itself",
+  "images.autoHint": "Every day at the set time the running apps with newer images are updated, as if “Update images” was pressed: a snapshot of the app's data first (when that is on in Backups), then the new images and a restart. A stopped app is left alone. An update that failed shows up in “Needs attention”.",
+  "images.time": "Time",
+  "images.apps": "Apps that are updated",
+  "error.settings.badImages": "The image update settings are not valid."
 }

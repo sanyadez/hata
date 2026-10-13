@@ -70,6 +70,8 @@ export interface ContainerSummary {
   Id: string;
   Names: string[];
   Image: string;
+  /** Id of the image the container was created from */
+  ImageID: string;
   State: string;
   Status: string;
   Labels: Record<string, string>;
@@ -121,6 +123,26 @@ export async function imageConfig(id: string): Promise<ContainerInspect["Config"
   } catch {
     return null;
   }
+}
+
+/** The digests an image is known by in the registries it came from, as `<repository>@<digest>` */
+export async function imageDigests(id: string): Promise<string[]> {
+  try {
+    return (await api<{ RepoDigests?: string[] | null }>(`/images/${id}/json`)).RepoDigests ?? [];
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * The digest a tag has in its registry right now. Docker asks the registry itself, as for a pull, and
+ * downloads nothing; `auth` is the `X-Registry-Auth` header of a private registry.
+ */
+export async function registryDigest(name: string, auth = ""): Promise<string> {
+  const path = name.split("/").map(encodeURIComponent).join("/");
+  const answer = await api<{ Descriptor?: { digest?: string } }>(`/distribution/${path}/json`, { headers: auth ? { "X-Registry-Auth": auth } : {}, signal: AbortSignal.timeout(30_000) });
+  if (!answer?.Descriptor?.digest) throw new DockerError("The registry gave no digest");
+  return answer.Descriptor.digest;
 }
 
 const post = (path: string) => api<null>(path, { method: "POST" });

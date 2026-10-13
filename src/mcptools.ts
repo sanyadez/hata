@@ -197,6 +197,7 @@ const brief = (app: InstalledApp) => ({
   status: app.status,
   ...(app.store ? { store: app.store } : {}),
   ...(app.update ? { newerVersionInStore: true } : {}),
+  ...(app.newer.length ? { newerImagesInRegistry: app.newer } : {}),
   ...(app.port ? { webPort: app.port } : {}),
   ...(app.job ? { runningOperation: app.job } : {}),
   containers: app.containers.map(({ name, service, image, state, status, ports }) => ({ name, service, image, state, status, ports })),

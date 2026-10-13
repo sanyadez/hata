@@ -85,6 +85,8 @@ export interface Settings {
    * for itself over multicast DNS; any other (`hata.lan`) the home's own DNS has to point here.
    */
   local: { enabled: boolean; name: string };
+  /** Newer images in the registries: looking for them, and updating the apps by itself */
+  images: ImageSettings;
   /** Disks: whether a USB disk that is plugged in is mounted by itself */
   storage: { automount: boolean };
   /** Folders put on the dashboard from the file manager, absolute paths */
@@ -123,6 +125,17 @@ export interface AppAccess {
   extra?: { port: number; upstream: number }[];
 }
 
+export interface ImageSettings {
+  /** Ask the registries once a day whether the apps' images have newer versions */
+  check: boolean;
+  /** Update the running apps that have newer images, once a day */
+  auto: boolean;
+  /** Local time of that update, HH:MM */
+  time: string;
+  /** Apps never updated by themselves */
+  exclude: string[];
+}
+
 export interface BackupSettings {
   /** Back up every included app once a day */
   enabled: boolean;
@@ -148,6 +161,7 @@ const DEFAULTS: Settings = {
   stores: [{ id: "casaos", url: "https://github.com/IceWhaleTech/CasaOS-AppStore" }],
   backup: { enabled: false, time: "03:00", keep: 7, dir: "", beforeUpdate: true, exclude: [] },
   access: {},
+  images: { check: true, auto: false, time: "04:30", exclude: [] },
   https: { mode: "off", domain: "", email: "" },
   local: { enabled: true, name: "hata.local" },
   storage: { automount: false },
@@ -175,6 +189,7 @@ export const settings: Settings = {
   ...saved,
   // a settings file written by an older version has no such section, or only part of it
   backup: { ...DEFAULTS.backup, ...(isPlainObject(saved.backup) ? saved.backup : {}) },
+  images: { ...DEFAULTS.images, ...(isPlainObject(saved.images) ? saved.images : {}) },
   access: isPlainObject(saved.access) ? (saved.access as Record<string, AppAccess>) : {},
   folders: Array.isArray(saved.folders) ? saved.folders.filter((path): path is string => typeof path === "string") : [],
   shares: cleanShares(saved.shares),
@@ -194,6 +209,8 @@ export function saveSettings(): void {
 export function timezone(): string {
   return settings.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
 }
+
+const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 /** Validates and applies a partial update; returns an error code or null */
 export function updateSettings(patch: Record<string, unknown>): string | null {
@@ -233,7 +250,7 @@ export function updateSettings(patch: Record<string, unknown>): string | null {
     if ("enabled" in b) backup.enabled = b.enabled === true;
     if ("beforeUpdate" in b) backup.beforeUpdate = b.beforeUpdate === true;
     if ("time" in b) {
-      if (typeof b.time !== "string" || !/^([01]\d|2[0-3]):[0-5]\d$/.test(b.time)) return "settings.badTime";
+      if (typeof b.time !== "string" || !TIME_RE.test(b.time)) return "settings.badTime";
       backup.time = b.time;
     }
     if ("keep" in b) {
@@ -249,6 +266,24 @@ export function updateSettings(patch: Record<string, unknown>): string | null {
       backup.exclude = [...new Set(b.exclude as string[])];
     }
     next.backup = backup;
+  }
+  if ("images" in patch) {
+    const i = patch.images;
+    if (!isPlainObject(i)) return "settings.badImages";
+    const images = { ...next.images };
+    if ("check" in i) images.check = i.check === true;
+    if ("auto" in i) images.auto = i.auto === true;
+    if ("time" in i) {
+      if (typeof i.time !== "string" || !TIME_RE.test(i.time)) return "settings.badTime";
+      images.time = i.time;
+    }
+    if ("exclude" in i) {
+      if (!Array.isArray(i.exclude) || i.exclude.some((n) => typeof n !== "string" || !/^[a-z0-9][a-z0-9_-]{0,62}$/.test(n))) return "settings.badImages";
+      images.exclude = [...new Set(i.exclude as string[])];
+    }
+    // nothing is updated on the word of a check that no longer runs
+    if (!images.check) images.auto = false;
+    next.images = images;
   }
   if ("https" in patch) {
     const h = patch.https;

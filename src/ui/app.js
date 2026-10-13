@@ -857,7 +857,7 @@ function tile(item) {
     href = url ?? `#/apps/${app.name}`;
     external = !!url;
     sub = [h("i", { class: "dot " + st }), st === "running" && appAddress(app) ? appAddress(app) : t("status." + st)];
-    badges = [app.protected && h("span", { class: "lock", title: t("access.protected") }, icon("lock")), app.update && isAdmin() && h("span", { class: "lock", title: t("app.storeUpdate") }, icon("up"))];
+    badges = [app.protected && h("span", { class: "lock", title: t("access.protected") }, icon("lock")), (app.update || app.newer?.length > 0) && isAdmin() && h("span", { class: "lock", title: t(app.update ? "app.storeUpdate" : "app.newer") }, icon("up"))];
     side = h("a", { class: "tile-open", href: `#/apps/${app.name}`, title: t("home.manage"), "aria-label": `${t("home.manage")}: ${title}` }, icon("sliders"));
   } else if (item.type === "link") {
     href = item.url;
@@ -1602,6 +1602,7 @@ function renderAppHead() {
         ...(!isAdmin() ? [] : [
         app.job && button(t("status.busy"), { onclick: () => jobDialog(app.job.id, app.job.kind, app.title) }, "terminal"),
         app.update && !app.job && button(t("app.storeUpdate"), { class: "accent", onclick: () => storeUpdateDialog(app) }, "up"),
+        !app.update && app.newer?.length > 0 && !app.job && button(t("app.update"), { class: "accent", title: `${t("app.newer")}: ${app.newer.join(", ")}`, onclick: () => startAction(app, "update") }, "up"),
         isUp(app) && button(t("app.restart"), { disabled: !!app.job, onclick: () => startAction(app, "restart") }, "refresh"),
         isUp(app) ? button(t("app.stop"), { disabled: !!app.job, onclick: () => startAction(app, "stop") }, "stop") : button(t("app.start"), { class: url ? "" : "primary", disabled: !!app.job, onclick: () => startAction(app, "start") }, "play"),
         url && h("a", { class: "btn primary", href: url, target: "_blank", rel: "noopener noreferrer" }, icon("external"), h("span", null, t("app.open"))),
@@ -1671,7 +1672,7 @@ function appOverviewTab(app, box) {
 
   const containerRow = (c) => {
     const s = app.stats?.[c.name];
-    return h("tr", null, h("td", null, h("div", { class: "mono" }, c.name), h("div", { class: "muted small mono clip" }, c.image)), h("td", null, h("span", { class: "state " + (c.state === "running" ? "running" : c.state === "restarting" ? "restarting" : "stopped") }, c.status)), h("td", { class: "num" }, s ? s.cpu.toFixed(1) + " %" : "—"), h("td", { class: "num" }, s ? bytes(s.memory) : "—"), h("td", { class: "mono small" }, c.ports.join(", ") || "—"));
+    return h("tr", null, h("td", null, h("div", { class: "mono" }, c.name), h("div", { class: "muted small mono clip" }, c.image), app.newer?.includes(c.image) && h("div", { class: "small accent-text" }, t("app.newerImage"))), h("td", null, h("span", { class: "state " + (c.state === "running" ? "running" : c.state === "restarting" ? "restarting" : "stopped") }, c.status)), h("td", { class: "num" }, s ? s.cpu.toFixed(1) + " %" : "—"), h("td", { class: "num" }, s ? bytes(s.memory) : "—"), h("td", { class: "mono small" }, c.ports.join(", ") || "—"));
   };
 
   box.replaceChildren(
@@ -3750,6 +3751,7 @@ async function loadSettings() {
     if (isAdmin()) state.settings = await api("GET", "/api/settings");
     if (isAdmin()) state.update = await api("GET", "/api/update").catch(() => null);
     if (isAdmin()) state.notify = await api("GET", "/api/notify").catch(() => null);
+    if (isAdmin() && state.route.section === "apps") state.images = await api("GET", "/api/images").catch(() => null);
     if (isAdmin() && state.route.section === "storage") state.disks = await api("GET", "/api/disks").catch(() => null);
     if (isAdmin() && state.route.section === "shares") state.shares = await api("GET", "/api/shares").catch(() => null);
     if (isAdmin() && state.route.section === "agents") state.agents = await api("GET", "/api/agents").catch(() => null);
@@ -3993,6 +3995,7 @@ function settingsSection(section) {
         error,
         h("footer", null, h("button", { class: "btn primary" }, t("settings.save"))),
       ),
+      imagesCard(),
       stateDirCard(),
     ];
   }
@@ -4024,6 +4027,62 @@ function settingsSection(section) {
       settingRow(t("settings.source"), "", h("a", { class: "link", href: "https://github.com/sanyadez/hata", target: "_blank", rel: "noopener noreferrer" }, "github.com/sanyadez/hata", icon("external"))),
     ),
   ];
+}
+
+let imagesTimer;
+/** Settings → Apps: newer images in the registries, and the apps updating by themselves */
+function imagesCard() {
+  const s = state.settings.images;
+  const st = state.images;
+  if (!st) return null;
+  const apps = state.overview?.apps ?? [];
+  const check = h("input", { type: "checkbox", checked: s.check });
+  const auto = h("input", { type: "checkbox", checked: s.auto, disabled: !s.check });
+  const time = h("input", { type: "time", value: s.time, class: "short mono", required: true });
+  const included = apps.map((app) => ({ name: app.name, box: h("input", { type: "checkbox", checked: !s.exclude.includes(app.name) }), title: app.title }));
+  const whenAuto = h("div", { class: "stack", hidden: !s.auto }, field(`${t("images.time")} · ${state.settings.systemTimezone}`, time), included.length > 0 && h("div", { class: "stack" }, h("strong", null, t("images.apps")), included.map((a) => h("label", { class: "check" }, a.box, h("span", null, a.title)))));
+  check.onchange = () => {
+    auto.disabled = !check.checked;
+    if (!check.checked) auto.checked = false;
+    whenAuto.hidden = !auto.checked;
+  };
+  auto.onchange = () => (whenAuto.hidden = !auto.checked);
+  const error = h("p", { class: "error", role: "alert" });
+  const again = async (path, method = "GET") => {
+    state.images = await api(method, path, method === "GET" ? undefined : {}).catch(() => state.images);
+    // the marks on the apps come with the list of apps
+    if (!state.images.running) await refresh();
+    if (state.route.view === "settings" && state.route.section === "apps") renderSettings();
+  };
+  clearTimeout(imagesTimer);
+  if (st.running) imagesTimer = setTimeout(() => state.route.view === "settings" && again("/api/images"), 3000);
+  const status = st.running ? t("images.running") : st.at ? t("images.status", { when: ago(st.at), asked: st.asked, newer: st.newer }) : t("images.never");
+  return h(
+    "form",
+    {
+      class: "card pad stack",
+      onsubmit: async (e) => {
+        e.preventDefault();
+        error.textContent = "";
+        try {
+          state.settings = await api("PUT", "/api/settings", { images: { check: check.checked, auto: auto.checked, time: time.value, exclude: included.filter((a) => !a.box.checked).map((a) => a.name) } });
+          toast(t("settings.saved"));
+          await refresh();
+          renderSettings();
+        } catch (err) {
+          error.textContent = errorText(err);
+        }
+      },
+    },
+    h("h2", null, t("images.title")),
+    h("label", { class: "check" }, check, h("span", null, h("strong", null, t("images.check")), h("span", { class: "muted small block" }, t("images.checkHint")))),
+    s.check && settingRow(status, "", button(t("images.checkNow"), { disabled: st.running, onclick: () => again("/api/images/check", "POST") }, "refresh")),
+    s.check && st.failed.length > 0 && !st.running && h("details", null, h("summary", { class: "muted small" }, t("images.failed", { n: st.failed.length })), st.failed.map((f) => h("p", { class: "small" }, h("span", { class: "mono" }, f.image), " — ", h("span", { class: "muted" }, f.message)))),
+    h("label", { class: "check" }, auto, h("span", null, h("strong", null, t("images.auto")), h("span", { class: "muted small block" }, t("images.autoHint")))),
+    whenAuto,
+    error,
+    h("footer", null, h("button", { class: "btn primary" }, t("settings.save"))),
+  );
 }
 
 const HTTPS_MODES = ["off", "proxy", "acme"];

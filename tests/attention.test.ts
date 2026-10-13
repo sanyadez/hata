@@ -29,6 +29,7 @@ const app = (name: string, status: InstalledApp["status"], states: string[] = ["
   status,
   store: "",
   update: false,
+  newer: [],
   protected: false,
   job: null,
   containers: states.map((state, i) => ({ id: String(i), name: `${name}-${i}`, service: "s", image: "i", state, status: state, ports: [] })),

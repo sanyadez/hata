@@ -13,7 +13,7 @@ import { homedir, networkInterfaces } from "node:os";
 import type { Server, ServerWebSocket } from "bun";
 import { recent, record } from "./activity";
 import { agentUser, createKey, keyOf, listKeys, removeKey } from "./agents";
-import { AppError, appAction, appEnv, appDetail, appLogs, appIcon, appSettings, appStats, applyCompose, ICON_MIME, MAX_ICON, removeAppIcon, setAppIcon, applySettings, installFromSettings, applyStoreUpdate, composeText, getJob, installCustom, installFromStore, listApps, listJobs, onAppRemoved, planStoreUpdate, readCompose, removeApp, storeAppDetail } from "./apps";
+import { AppError, appAction, installedNames, jobFinished, appEnv, appDetail, appLogs, appIcon, appSettings, appStats, applyCompose, ICON_MIME, MAX_ICON, removeAppIcon, setAppIcon, applySettings, installFromSettings, applyStoreUpdate, composeText, getJob, installCustom, installFromStore, listApps, listJobs, onAppRemoved, planStoreUpdate, readCompose, removeApp, storeAppDetail } from "./apps";
 import { certificateStates, challengeResponse, ensureCertificates, loadCertificates } from "./acme";
 import { attention } from "./attention";
 import { backupApp, backupOverview, deleteSnapshot, listSnapshots, mirror, restoreSnapshot, resumeRestore, runBackups, scheduleBackups, takeServerSnapshot } from "./backup";
@@ -23,6 +23,7 @@ import { trashSizeOn } from "./trash";
 import { addShare, changeShare, installSamba, listShares, refreshShares, removeShare, startShares } from "./shares";
 import { checkDisks, diskHealth, installTool, listDisks, startDisks, startSelfTest } from "./disks";
 import { fills, measureFills, startFills } from "./fills";
+import { checkImages, imagesStatus, startImages } from "./images";
 import { absent, connectVolume, disconnect, mergeFolders, mountingReport, prepareDisk, startMounting, type Outcome } from "./mounting";
 import { moveData } from "./movedata";
 import { installPackage } from "./packages";
@@ -742,6 +743,13 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
     }
   }
 
+  if (path === "/api/images" && method === "GET") return json(await imagesStatus());
+  // the answer does not wait for the registries: the page asks again while it runs
+  if (path === "/api/images/check" && method === "POST") {
+    void checkImages();
+    return json(await imagesStatus());
+  }
+
   if (path === "/api/notify") {
     if (method === "GET") return json(notifyStatus());
     if (method === "PUT") {
@@ -1344,6 +1352,12 @@ export async function serve(): Promise<void> {
   startSampler();
   startDisks();
   startFills();
+  startImages({
+    apps: installedNames,
+    update: async (app) => {
+      await jobFinished(appAction(app, "update", "schedule"));
+    },
+  });
   startMounting();
   startShares();
   startTrash();
