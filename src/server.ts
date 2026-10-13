@@ -24,7 +24,7 @@ import { addShare, changeShare, installSamba, listShares, refreshShares, removeS
 import { checkDisks, diskHealth, installTool, listDisks, startDisks, startSelfTest } from "./disks";
 import { fills, measureFills, startFills } from "./fills";
 import { checkImages, imagesStatus, startImages } from "./images";
-import { afterPackage, setRole, startHotspot, stopHotspot, wifiQrText, changeNic, confirmChange, handOver, NETWORK_PACKAGES, networkReport, NetworkError, revertChange, wifiConnect, wifiForget, wifiNetworks } from "./network";
+import { afterPackage, setCheck, setRole, startHotspot, stopHotspot, wifiQrText, changeNic, confirmChange, handOver, NETWORK_PACKAGES, networkReport, NetworkError, revertChange, wifiConnect, wifiForget, wifiNetworks } from "./network";
 import { absent, connectVolume, disconnect, mergeFolders, mountingReport, prepareDisk, startMounting, type Outcome } from "./mounting";
 import { moveData } from "./movedata";
 import { installPackage } from "./packages";
@@ -754,6 +754,11 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
         const message = await installPackage(name);
         if (message) return fail(500, "network.failed", { message });
         await afterPackage(name);
+        return json(await networkReport());
+      }
+      if (path === "/api/network/check" && method === "PUT") {
+        server.timeout(req, 0);
+        await setCheck((await body(req)).on, user.name);
         return json(await networkReport());
       }
       if (path === "/api/network/confirm" && method === "POST") return (await confirmChange()) ? json(await networkReport()) : fail(409, "network.nothingPending");

@@ -4364,7 +4364,7 @@ function networkSection() {
       h(
         "div",
         { class: "section-head" },
-        h("h2", null, h("span", { class: "with-icon" }, icon("network"), nic.kind === "modem" ? nic.product || t("network.modem") : nic.name), " ", nic.kind === "modem" && h("span", { class: "muted small mono" }, nic.name + " "), h("span", { class: "state " + (nic.up ? "running" : "stopped") }, t(nic.up ? "network.up" : "network.down"))),
+        h("h2", null, h("span", { class: "with-icon" }, icon("network"), nic.kind === "modem" ? nic.product || t("network.modem") : nic.name), " ", nic.kind === "modem" && h("span", { class: "muted small mono" }, nic.name + " "), h("span", { class: "state " + (nic.up ? "running" : "stopped") }, t(nic.up ? "network.up" : "network.down")), nic.online === false && h("span", { class: "state restarting" }, t("network.offline")), nic.online === true && h("span", { class: "state running" }, t("network.online"))),
         h(
           "div",
           { class: "actions" },
@@ -4419,6 +4419,20 @@ function networkSection() {
     );
     return select;
   };
+  const checkBox = h("input", {
+    type: "checkbox",
+    checked: data.check.on,
+    onchange: async () => {
+      error.textContent = "";
+      checkBox.disabled = true;
+      try {
+        state.network = await api("PUT", "/api/network/check", { on: checkBox.checked });
+      } catch (err) {
+        error.textContent = errorText(err);
+      }
+      renderSettings();
+    },
+  });
   const needsCard = (needs, key) =>
     h(
       "div",
@@ -4444,7 +4458,7 @@ function networkSection() {
     );
   const needs = data.needs && needsCard(data.needs, "network.needs");
   return [
-    h("section", { class: "card pad stack" }, h("h2", null, t("settings.network")), h("p", { class: "muted small" }, t("network.lead")), data.tool === "stopped" && h("p", { class: "banner small" }, t("network.stopped")), needs, error, data.pending && h("div", { class: "banner" }, t("network.trial.title", { nic: data.pending.nic }), " ", button(t("network.trial.show"), { class: "small", onclick: () => trialDialog(data.pending) }))),
+    h("section", { class: "card pad stack" }, h("h2", null, t("settings.network")), h("p", { class: "muted small" }, t("network.lead")), data.tool === "stopped" && h("p", { class: "banner small" }, t("network.stopped")), needs, data.tool === "ok" && h("label", { class: "check" }, checkBox, h("span", null, h("strong", null, t("network.check")), h("span", { class: "muted small block" }, t("network.checkHint", { url: data.check.url.replace(/^https?:\/\//, "").replace(/\/.*/, "") })))), error, data.pending && h("div", { class: "banner" }, t("network.trial.title", { nic: data.pending.nic }), " ", button(t("network.trial.show"), { class: "small", onclick: () => trialDialog(data.pending) }))),
     ...data.nics.map(card),
     !data.nics.length && h("p", { class: "card pad muted" }, t("network.none")),
   ];

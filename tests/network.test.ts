@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { cleanChange, hotspotProfile, parseLeases, wifiQrText, isModem, roleArgs, parseWifi, wifiPassword, wifiProfile, wifiProfileId, dhcpcdClientId, withoutIface, handBackScript, handedFile, parseLinks, profileArgs, terse, udevRule, waitOnline } from "../src/network";
+import { cleanChange, checkConf, parseConnectivity, hotspotProfile, parseLeases, wifiQrText, isModem, roleArgs, parseWifi, wifiPassword, wifiProfile, wifiProfileId, dhcpcdClientId, withoutIface, handBackScript, handedFile, parseLinks, profileArgs, terse, udevRule, waitOnline } from "../src/network";
 
 const ADDR = JSON.stringify([
   { ifname: "lo", link_type: "loopback", flags: ["LOOPBACK", "UP", "LOWER_UP"], addr_info: [{ family: "inet", local: "127.0.0.1", prefixlen: 8 }] },
@@ -156,4 +156,10 @@ test("wifiQrText: what a phone's camera reads, with the signs of the format esca
 test("giving the internet out on an interface: the server is the router there", () => {
   expect(cleanChange({ method: "shared", address: "1.2.3.4/24", dns: "1.1.1.1" })).toEqual({ method: "shared", address: "", gateway: "", dns: [] });
   expect(profileArgs({ method: "shared", address: "", gateway: "", dns: [] }).slice(0, 2)).toEqual(["ipv4.method", "shared"]);
+});
+
+test("the check of the internet: NetworkManager's setting, and what it says of each interface", () => {
+  expect(checkConf()).toContain("[connectivity]\nuri=http://nmcheck.gnome.org/check_network_status.txt\nresponse=NetworkManager is online\ninterval=60\n");
+  const out = ["GENERAL.DEVICE:enp3s0", "GENERAL.IP4-CONNECTIVITY:3 (limited)", "", "GENERAL.DEVICE:enx344b50000000", "GENERAL.IP4-CONNECTIVITY:4 (full)", "", "GENERAL.DEVICE:wlp2s0", "GENERAL.IP4-CONNECTIVITY:0 (unknown)", "", "GENERAL.DEVICE:lo", "GENERAL.IP4-CONNECTIVITY:1 (none)", ""].join("\n");
+  expect([...parseConnectivity(out)]).toEqual([["enp3s0", false], ["enx344b50000000", true], ["lo", false]]);
 });

@@ -122,6 +122,7 @@ Early development. What works today:
   recognised, and you choose which interface is the main way to the internet and which a spare one;
   the Wi-Fi adapter can be an access point of the server's own, joined by a QR code, with the
   internet shared through the server, and a spare cable port can give the internet out the same way;
+  on request every way is checked each minute, and a spare one takes over while the main has no internet;
 - newer images: once a day the registries are asked whether the tags of your apps have moved on, and an
   app with a newer image is marked; on request the running apps are updated by themselves at a set time,
   each after a snapshot of its data;

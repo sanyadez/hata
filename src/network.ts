@@ -48,6 +48,8 @@ export interface Nic {
   internet: "main" | "backup" | "none";
   /** The server gives the internet out here: who has taken an address; null — it does not */
   shares: Hotspot["clients"] | null;
+  /** With the check on: whether the internet is reached through this interface; null — not known */
+  online: boolean | null;
   mac: string;
   /** A cable is in, or the radio is connected */
   up: boolean;
@@ -438,7 +440,32 @@ export interface Pending {
 /** `applied` — the change has been made: before that, reaching the server proves nothing */
 let pending: (Pending & { undo: () => Promise<void>; keep: () => Promise<void>; timer: Timer; applied: boolean }) | null = null;
 
+const CHECK_FILE = "/etc/NetworkManager/conf.d/90-hata-connectivity.conf";
+/** The small page NetworkManager's own project keeps for this very question */
+export const CHECK_URL = "http://nmcheck.gnome.org/check_network_status.txt";
+
+/**
+ * NetworkManager's check of whether a way really reaches the internet: every minute it asks for a
+ * small page through each interface, and one that gets no answer is moved behind the ways that do —
+ * so a spare way takes over also when the router is on and its internet is not.
+ */
+export const checkConf = (): string => `# Written by Hata: Settings → Network, "Check that the internet works".\n[connectivity]\nuri=${CHECK_URL}\nresponse=NetworkManager is online\ninterval=60\n`;
+
+/** Device → whether the internet is reached through it, out of `nmcli -t -f GENERAL.DEVICE,GENERAL.IP4-CONNECTIVITY device show` */
+export function parseConnectivity(out: string): Map<string, boolean> {
+  const found = new Map<string, boolean>();
+  let device = "";
+  for (const line of out.split("\n")) {
+    const [key, value] = terse(line);
+    if (key === "GENERAL.DEVICE") device = value ?? "";
+    else if (key === "GENERAL.IP4-CONNECTIVITY" && device && !/unknown/.test(value ?? "")) found.set(device, /full/.test(value ?? ""));
+  }
+  return found;
+}
+
 export interface NetworkReport {
+  /** The check of whether each way reaches the internet: on or off, and the page it asks for */
+  check: { on: boolean; url: string };
   /** NetworkManager: ok, missing (`needs` says what to install), stopped */
   tool: "ok" | "missing" | "stopped";
   needs: { package: string; install: string } | null;
@@ -450,6 +477,8 @@ export interface NetworkReport {
 export async function networkReport(): Promise<NetworkReport> {
   const [addr, route, nm, networkd] = await Promise.all([run(["ip", "-j", "addr"]), run(["ip", "-j", "route", "show", "default"]), nmDevices(), networkdManaged()]);
   const ifupdown = ifupdownNames();
+  const checking = existsSync(CHECK_FILE);
+  const reached = checking && nm.size ? parseConnectivity((await nmcli(["-t", "-f", "GENERAL.DEVICE,GENERAL.IP4-CONNECTIVITY", "device", "show"])).out) : new Map<string, boolean>();
   const nics: Nic[] = [];
   for (const link of parseLinks(addr.out, route.out)) {
     const state = nm.get(link.name) ?? "";
@@ -492,6 +521,7 @@ export async function networkReport(): Promise<NetworkReport> {
       // a USB interface hangs under its device, where the names are
       product: usb ? [read(`${device}/../manufacturer`), read(`${device}/../product`)].filter(Boolean).join(" ") : "",
       dns: link.addresses.length ? await dnsOf(link.name, byNm) : [],
+      online: byNm && link.internet !== "none" ? (reached.get(link.name) ?? null) : null,
       // NetworkManager keeps this file for an interface only while it shares the internet there
       shares: byNm && !isWifi && existsSync(`/run/nm-dnsmasq-${link.name}.pid`) ? parseLeases(read(`/var/lib/NetworkManager/dnsmasq-${link.name}.leases`)) : null,
       speed: speed > 0 ? speed : null,
@@ -503,6 +533,7 @@ export async function networkReport(): Promise<NetworkReport> {
     tool: !hasNm() ? "missing" : running ? "ok" : "stopped",
     needs: hasNm() ? null : { package: PACKAGE, install: installCommand(PACKAGE) },
     nics,
+    check: { on: checking, url: CHECK_URL },
     pending: pending && { nic: pending.nic, kind: pending.kind, until: pending.until, token: pending.token, address: pending.address },
     trial: TRIAL_S,
   };
@@ -843,5 +874,19 @@ export async function stopHotspot(name: string, user: string): Promise<void> {
   await wifiNic(name);
   await must(nmcli(["connection", "delete", hotspotId(name)]));
   record("network.hotspot.off", { user, detail: name });
+  bus.publish("network");
+}
+
+/** Turns NetworkManager's check of the internet on or off */
+export async function setCheck(on: unknown, user: string): Promise<void> {
+  if (!(await nmRunning())) throw new NetworkError("network.noTool");
+  if (on === true) {
+    mkdirSync("/etc/NetworkManager/conf.d", { recursive: true });
+    writeFileSync(CHECK_FILE, checkConf());
+  } else rmSync(CHECK_FILE, { force: true });
+  await must(nmcli(["general", "reload", "conf"]));
+  // the first answers, so the page does not show "not known" for a minute
+  if (on === true) await nmcli(["networking", "connectivity", "check"], 30_000);
+  record(on === true ? "network.check.on" : "network.check.off", { user });
   bus.publish("network");
 }

@@ -1413,7 +1413,7 @@
   "network.role.main": "main way",
   "network.role.backup": "spare way",
   "network.role.off": "not used",
-  "network.modemHint": "A USB modem or a phone that shares its connection: it gives the server an address by itself. Its SIM, PIN and operator are set up on the modem's own page (http://{gateway}, from the server). A spare way takes over when the main one goes away — the cable pulled out, the router off — not when the router is on but its internet is down.",
+  "network.modemHint": "A USB modem or a phone that shares its connection: it gives the server an address by itself. Its SIM, PIN and operator are set up on the modem's own page (http://{gateway}, from the server). A spare way takes over when the main one goes away — the cable pulled out, the router off; with “Check that the internet works” on, also when the router is on and its internet is down.",
   "error.network.badRole": "Choose the main way, a spare one or none.",
   "activity.network.role.main": "Internet goes through {target} first",
   "activity.network.role.backup": "{target} is a spare way to the internet",
@@ -1451,5 +1451,11 @@
   "network.share": "Give out the internet here",
   "network.shareHint": "The server becomes the router on this port: whatever is plugged in — a computer, a switch with several — gets an address from it and goes to the internet through the server's main way. For a spare port, not the one the server itself is reached by.",
   "network.sharing": "given out here · joined: {n}",
-  "error.network.shareMain": "The internet comes in through this interface — it cannot be given out through it too."
+  "error.network.shareMain": "The internet comes in through this interface — it cannot be given out through it too.",
+  "network.check": "Check that the internet works",
+  "network.checkHint": "Every minute NetworkManager asks for a small page ({url}) through each way to the internet. A way that gets no answer is marked and moved behind the ones that work — so a spare way takes over also when the router is on and its internet is down, and gives the place back when it returns.",
+  "network.online": "internet works",
+  "network.offline": "no internet",
+  "activity.network.check.on": "The check of the internet turned on",
+  "activity.network.check.off": "The check of the internet turned off"
 }
