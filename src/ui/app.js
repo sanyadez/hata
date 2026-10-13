@@ -4817,7 +4817,8 @@ function toolsSection() {
   };
   const install = (tool) =>
     button(t("mounting.needs.install", { package: tool.name }), {
-      class: "small primary",
+      // one the system does without is still the person's to install
+      class: tool.state === "unneeded" ? "small" : "small primary",
       onclick: async (e) => {
         const el = e.currentTarget;
         el.disabled = true;
@@ -4843,9 +4844,10 @@ function toolsSection() {
         { class: "grow" },
         h("div", { class: "tool-head" }, h("strong", null, tool.name), h("span", { class: "state " + (tool.state === "installed" ? "running" : "stopped") }, t("tools.state." + tool.state)), tool.used && h("span", { class: "state running" }, t("tools.used")), tool.version && h("span", { class: "muted small mono" }, tool.version)),
         h("p", { class: "muted small" }, t(`tools.${tool.id}.what`), " ", h("a", { class: "link", href: tool.page }, t(`tools.${tool.id}.where`))),
-        tool.state === "missing" && (tool.install ? h("p", { class: "cmd" }, icon("terminal"), tool.install) : h("p", { class: "muted small" }, t("mounting.needs.byHand", { package: tool.package }))),
+        tool.state === "unneeded" && h("p", { class: "muted small" }, t(`tools.${tool.id}.unneeded`)),
+        tool.state !== "installed" && (tool.install ? h("p", { class: "cmd" }, icon("terminal"), tool.install) : h("p", { class: "muted small" }, t("mounting.needs.byHand", { package: tool.package }))),
       ),
-      tool.state === "missing" && tool.install && install(tool),
+      tool.state !== "installed" && tool.install && install(tool),
     );
   const here = tools.filter((tool) => tool.state === "installed");
   const absent = tools.filter((tool) => tool.state !== "installed");

@@ -1682,7 +1682,7 @@
   "tools.present": "Встановлено",
   "tools.state.installed": "встановлено",
   "tools.state.missing": "не встановлено",
-  "tools.state.unneeded": "тут не потрібна",
+  "tools.state.unneeded": "не встановлено · тут не потрібна",
   "tools.used": "використовується",
   "tools.installing": "Встановлюю…",
   "tools.installed": "{name} встановлено",
@@ -1710,5 +1710,6 @@
   "tools.dnsmasq-base.what": "Роздає адреси тим, хто під'єднується до точки доступу сервера чи порту, який роздає інтернет.",
   "tools.dnsmasq-base.where": "Мережа",
   "tools.openssh-client.what": "Надсилає другу копію на іншу машину (sftp) і створює для цього власний ключ Hata.",
-  "tools.openssh-client.where": "Копії"
+  "tools.openssh-client.where": "Копії",
+  "tools.ntfs-3g.unneeded": "Ядро цієї системи читає й пише NTFS саме (драйвер ntfs3), і Hata підключає диски NTFS через нього — тож вони працюють і без цього пакета. Встановити його все одно можна, для власних потреб; Hata й далі користуватиметься драйвером ядра."
 }
