@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseListing, unescape, indexOf } from "../src/snapshot";
-import { extraAllowed, expired, movedAppDir, nextRun, restorable, tarMove, withoutNested, type Snapshot } from "../src/backup";
+import { roomNeeded, extraAllowed, expired, movedAppDir, nextRun, restorable, tarMove, withoutNested, type Snapshot } from "../src/backup";
 import { listServerSnapshots, stateExcludes, strayMembers } from "../src/restore";
 
 const snap = (id: string, at: number, reason: Snapshot["reason"]): Snapshot => ({ id, app: "a", at, reason, size: 1, paths: [], images: [] });
@@ -117,4 +117,11 @@ test("parseListing: what tar says a snapshot holds", () => {
   expect(index.byPath.get("/DATA/AppData/memos")!.dir).toBe(true);
   expect(unescape("plain name")).toBe("plain name");
   expect(unescape("a\\\\b\\tc")).toBe("a\\b\tc");
+});
+
+test("roomNeeded: media counts whole, the app's own data a third", () => {
+  expect(roomNeeded(0, 0)).toBe(0);
+  expect(roomNeeded(1000, 0)).toBe(1000);
+  expect(roomNeeded(1000, 300)).toBe(1100);
+  expect(roomNeeded(0, 10)).toBe(4);
 });

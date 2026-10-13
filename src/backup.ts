@@ -205,6 +205,21 @@ export function expired(snapshots: Snapshot[], keep: number): Snapshot[] {
 
 // --- Taking and restoring ---------------------------------------------------------------------------
 
+/**
+ * The room a snapshot may take, bytes, from what its folders hold: media and documents (`extra`) do
+ * not compress, the app's own data — databases, settings — usually shrinks to a third or less.
+ */
+export const roomNeeded = (extra: number, rest: number): number => extra + Math.ceil(rest / 3);
+
+/** What the folders hold together, bytes; 0 when it cannot be counted */
+async function sizeOf(paths: string[]): Promise<number> {
+  if (!paths.length) return 0;
+  const du = await run(["du", "-skxc", "--", ...paths]);
+  return (Number(/^(\d+)\s+total$/m.exec(du.output)?.[1]) || 0) * 1024;
+}
+
+const mb = (n: number): string => (n >= 1024 ** 3 ? `${(n / 1024 ** 3).toFixed(1)} GB` : `${Math.ceil(n / 1024 ** 2)} MB`);
+
 const tarPath = (path: string) => path.replace(/^\/+/, "");
 
 /** Snapshots an app. Runs inside a job that already owns the app. */
@@ -219,6 +234,12 @@ export async function takeSnapshot(name: string, reason: SnapshotReason, log: Lo
   // the snapshots themselves may lie inside a folder that is copied; so may a trash
   const within = paths.some((p) => backupDir() === p || backupDir().startsWith(p + "/"));
   const excludes = [...(within ? ["--anchored", "--exclude=" + tarPath(backupDir()), "--no-anchored"] : []), "--exclude=.hata-trash"];
+
+  // before the app is stopped for nothing: a disk that fills up half-way takes the other snapshots' room too
+  const copied = paths.filter((p) => extra.includes(p));
+  const needed = roomNeeded(await sizeOf(copied), await sizeOf(paths.filter((p) => !copied.includes(p))));
+  const room = statfsSync(dir);
+  if (needed > room.bavail * room.bsize) throw new Error(`Not enough room in ${dir}: the snapshot needs about ${mb(needed)}, ${mb(room.bavail * room.bsize)} is free`);
 
   const containers = (await listContainers().catch(() => [])).filter((c) => c.Labels[PROJECT_LABEL] === name);
   const wasRunning = containers.some((c) => c.State === "running" || c.State === "restarting");
