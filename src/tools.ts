@@ -53,8 +53,9 @@ export interface Tool {
   id: string;
   name: string;
   package: string;
-  /** installed; missing; unneeded — this system does without it (the kernel reads NTFS by itself) */
-  state: "installed" | "missing" | "unneeded";
+  state: "installed" | "missing";
+  /** The system does the same by itself (the kernel reads NTFS): said as a fact, the choice is the person's */
+  builtIn: boolean;
   version: string;
   /** The command the button runs; "" — the package manager of this system is not one Hata knows */
   install: string;
@@ -112,7 +113,8 @@ export async function toolsReport(): Promise<Tool[]> {
         id: spec.id,
         name: spec.name,
         package: spec.package,
-        state: installed ? ("installed" as const) : spec.id === "ntfs-3g" && ntfs ? ("unneeded" as const) : ("missing" as const),
+        state: installed ? ("installed" as const) : ("missing" as const),
+        builtIn: spec.id === "ntfs-3g" && ntfs,
         version,
         install: spec.id === "docker" ? DOCKER_INSTALL_COMMAND : installCommand(spec.package),
         page: spec.page,

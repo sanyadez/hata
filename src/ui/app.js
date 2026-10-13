@@ -4843,7 +4843,7 @@ function toolsSection() {
         { class: "grow" },
         h("div", { class: "tool-head" }, h("strong", null, tool.name), h("span", { class: "state " + (tool.state === "installed" ? "running" : "stopped") }, t("tools.state." + tool.state)), tool.used && h("span", { class: "state running" }, t("tools.used")), tool.version && h("span", { class: "muted small mono" }, tool.version)),
         h("p", { class: "muted small" }, t(`tools.${tool.id}.what`), " ", h("a", { class: "link", href: tool.page }, t(`tools.${tool.id}.where`))),
-        tool.state === "unneeded" && h("p", { class: "muted small" }, t(`tools.${tool.id}.unneeded`)),
+        tool.builtIn && h("p", { class: "muted small" }, t(`tools.${tool.id}.builtIn`)),
         tool.state !== "installed" && (tool.install ? h("p", { class: "cmd" }, icon("terminal"), tool.install) : h("p", { class: "muted small" }, t("mounting.needs.byHand", { package: tool.package }))),
       ),
       tool.state !== "installed" && tool.install && install(tool),

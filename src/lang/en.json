@@ -1682,7 +1682,6 @@
   "tools.present": "Installed",
   "tools.state.installed": "installed",
   "tools.state.missing": "not installed",
-  "tools.state.unneeded": "not installed · not needed here",
   "tools.used": "in use",
   "tools.installing": "Installing…",
   "tools.installed": "{name} is installed",
@@ -1711,5 +1710,5 @@
   "tools.dnsmasq-base.where": "Network",
   "tools.openssh-client.what": "Sends the second copy of the backups to another machine (sftp) and makes Hata's own key for it.",
   "tools.openssh-client.where": "Backups",
-  "tools.ntfs-3g.unneeded": "The kernel of this system reads and writes NTFS by itself (the ntfs3 driver), and Hata connects NTFS disks through it — so they work without this package. It can be installed all the same, for your own use; Hata keeps to the kernel's driver."
+  "tools.ntfs-3g.builtIn": "The kernel of this system reads and writes NTFS by itself (the ntfs3 driver), and Hata connects NTFS disks through it."
 }
