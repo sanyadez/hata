@@ -6395,7 +6395,7 @@ function connectWhere(redirect) {
 function renderConnect() {
   const { id } = state.route;
   const box = h("section", { class: "card pad stack-s connect" }, h("p", { class: "muted" }, "…"));
-  shell(h("div", { class: "page-head" }, h("div", null, h("h1", null, t("connect.title")))), box);
+  shell(box);
   const say = (text) => put(box, h("p", null, text), h("p", null, h("a", { class: "btn", href: "#/settings/agents" }, t("settings.agents"))));
   if (!isAdmin()) return put(box, h("p", null, t("connect.adminOnly")));
   const leave = async (answer, error) => {
@@ -6435,7 +6435,7 @@ function renderConnect() {
           },
           h("h2", null, t("connect.asks", { name: q.name })),
           h("p", null, t("connect.lead")),
-          h("div", { class: "setting" }, h("div", { class: "grow" }, h("strong", null, t("connect.where")), h("p", { class: "muted small" }, t("connect.whereHint"))), h("code", { class: "mono" }, connectWhere(q.redirect))),
+          field(t("connect.where"), h("div", { class: "connect-where" }, connectWhere(q.redirect)), t("connect.whereHint")),
           h("p", { class: "muted small" }, t("connect.warn")),
           h("label", { class: "field" }, h("span", { class: "label" }, t("agents.new.level")), level, hint),
           asks,

@@ -1311,7 +1311,6 @@
   "agents.via": "signed in as “{client}”",
   "agents.how.signin": "A connector that has nowhere to paste a key — one on claude.ai, for example — is given this address alone. It sends you to this server to sign in and to say what it may do; what it gets is listed above with the keys and is removed the same way. A service on the internet reaches the server only at an HTTPS address open to the internet.",
   "activity.agents.connect": "The connector “{target}” was let in as an agent",
-  "connect.title": "Connecting an agent",
   "connect.asks": "“{name}” asks to look after this server",
   "connect.lead": "A program wants to connect to this server as an AI agent: to see the state of the server and its apps and, as far as you allow below, to manage them. It gets no password — only an access that you can take away in Settings → Agents.",
   "connect.where": "Where the access goes",
