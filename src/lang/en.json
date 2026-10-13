@@ -1440,11 +1440,16 @@
   "hotspot.state": "access point “{ssid}” · joined: {n}",
   "hotspot.needs.what": "The program that hands out addresses is not installed",
   "hotspot.needs.why": "Whoever joins the access point needs an address and a name service; NetworkManager starts dnsmasq for that, on this network only.",
-  "hotspot.needs.done": "Installed. Press “Turn on” again.",
+  "hotspot.needs.done": "Installed. Press the button again.",
   "error.network.noAp": "This adapter cannot be an access point.",
   "error.network.needsPackage": "A program is missing: {package}.",
   "error.network.hotspotOnlyWay": "This Wi-Fi network is the server's only connection: as an access point it would leave it, and Hata would be out of reach. Connect a cable first.",
   "error.network.hotspotFailed": "The access point did not start: {message}",
   "activity.network.hotspot.on": "The access point {target} turned on",
-  "activity.network.hotspot.off": "The access point turned off"
+  "activity.network.hotspot.off": "The access point turned off",
+  "wifi.endsHotspot": "The adapter does one thing at a time: joining a network turns the access point “{ssid}” off.",
+  "network.share": "Give out the internet here",
+  "network.shareHint": "The server becomes the router on this port: whatever is plugged in — a computer, a switch with several — gets an address from it and goes to the internet through the server's main way. For a spare port, not the one the server itself is reached by.",
+  "network.sharing": "given out here · joined: {n}",
+  "error.network.shareMain": "The internet comes in through this interface — it cannot be given out through it too."
 }

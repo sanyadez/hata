@@ -46,6 +46,8 @@ export interface Nic {
   product: string;
   /** Whether the server's way to the internet leads through it: the first choice, a spare one, or not at all */
   internet: "main" | "backup" | "none";
+  /** The server gives the internet out here: who has taken an address; null — it does not */
+  shares: Hotspot["clients"] | null;
   mac: string;
   /** A cable is in, or the radio is connected */
   up: boolean;
@@ -133,8 +135,11 @@ export function roleArgs(role: Role): string[] {
 }
 
 export interface Change {
-  /** auto — the address comes from the router (DHCP); manual — the one given here */
-  method: "auto" | "manual";
+  /**
+   * auto — the address comes from the router (DHCP); manual — the one given here; shared — the server
+   * is the router on this interface: it hands out addresses and shares its way to the internet
+   */
+  method: "auto" | "manual" | "shared";
   /** `192.168.1.5/24` */
   address: string;
   gateway: string;
@@ -154,6 +159,7 @@ export function cleanChange(input: Record<string, unknown>): Change | string {
   const dns = list(input.dns);
   if (dns.length > 3 || dns.some((d) => ipNumber(d) === null)) return "network.badDns";
   if (input.method === "auto") return { method: "auto", address: "", gateway: "", dns };
+  if (input.method === "shared") return { method: "shared", address: "", gateway: "", dns: [] };
   if (input.method !== "manual") return "network.badMethod";
   const m = /^([\d.]+)\/(\d{1,2})$/.exec(typeof input.address === "string" ? input.address.trim() : "");
   const ip = m ? ipNumber(m[1]!) : null;
@@ -173,6 +179,7 @@ export function cleanChange(input: Record<string, unknown>): Change | string {
 
 /** The settings of a NetworkManager profile for a change, as arguments of `nmcli connection modify|add` */
 export function profileArgs(change: Change): string[] {
+  if (change.method === "shared") return ["ipv4.method", "shared", "ipv4.addresses", "", "ipv4.gateway", "", "ipv4.dns", "", "ipv4.ignore-auto-dns", "no"];
   return change.method === "auto"
     ? ["ipv4.method", "auto", "ipv4.addresses", "", "ipv4.gateway", "", "ipv4.dns", change.dns.join(","), "ipv4.ignore-auto-dns", change.dns.length ? "yes" : "no"]
     : ["ipv4.method", "manual", "ipv4.addresses", change.address, "ipv4.gateway", change.gateway, "ipv4.dns", change.dns.join(","), "ipv4.ignore-auto-dns", "no"];
@@ -485,6 +492,8 @@ export async function networkReport(): Promise<NetworkReport> {
       // a USB interface hangs under its device, where the names are
       product: usb ? [read(`${device}/../manufacturer`), read(`${device}/../product`)].filter(Boolean).join(" ") : "",
       dns: link.addresses.length ? await dnsOf(link.name, byNm) : [],
+      // NetworkManager keeps this file for an interface only while it shares the internet there
+      shares: byNm && !isWifi && existsSync(`/run/nm-dnsmasq-${link.name}.pid`) ? parseLeases(read(`/var/lib/NetworkManager/dnsmasq-${link.name}.leases`)) : null,
       speed: speed > 0 ? speed : null,
       manager: byNm ? "nm" : networkd.has(link.name) ? "networkd" : ifupdown.has(link.name) ? "ifupdown" : "",
     });
@@ -577,6 +586,11 @@ export async function changeNic(name: string, input: Record<string, unknown>, us
   if (typeof change === "string") throw new NetworkError(change);
   const nic = await findNic(name);
   if (nic.manager !== "nm") throw new NetworkError("network.notOurs");
+  if (change.method === "shared") {
+    // the internet cannot be given out through the interface it comes in by
+    if (nic.internet === "main" || nic.wifi) throw new NetworkError("network.shareMain");
+    if (!Bun.which("dnsmasq", { PATH })) throw new NetworkError("network.needsPackage", { package: SHARE_PACKAGE, install: installCommand(SHARE_PACKAGE) });
+  }
   const show = await must(nmcli(["-t", "-f", "GENERAL.CON-UUID,GENERAL.DBUS-PATH", "device", "show", name]));
   const field = (key: string) => show.split("\n").map(terse).find((f) => f[0] === key)?.[1] ?? "";
   const uuid = field("GENERAL.CON-UUID");
@@ -704,7 +718,7 @@ export async function wifiNetworks(name: string): Promise<WifiNetwork[]> {
  * nothing is kept of the attempt: the interface goes back to the network it was on.
  */
 export async function wifiConnect(name: string, input: Record<string, unknown>, user: string): Promise<void> {
-  await wifiNic(name);
+  const nic = await wifiNic(name);
   const ssid = typeof input.ssid === "string" ? input.ssid : "";
   if (!ssid || new TextEncoder().encode(ssid).length > 32) throw new NetworkError("network.badSsid");
   const saved = (await savedWifi()).get(ssid);
@@ -721,13 +735,18 @@ export async function wifiConnect(name: string, input: Record<string, unknown>, 
     writeFileSync(file, wifiProfile(profile, name, net, net.secure ? (input.password as string) : ""), { mode: 0o600 });
     await must(nmcli(["connection", "load", file]));
   }
+  // an adapter does one thing at a time: joining a network ends its access point
+  const spot = nic.wifi!.hotspot ? hotspotId(name) : "";
   const up = await nmcli(["--wait", "40", "connection", "up", profile, "ifname", name], 60_000);
   if (up.code !== 0) {
     // an attempt that failed leaves no profile behind: it would be tried again on every start
     if (fresh) await nmcli(["connection", "delete", profile]);
+    if (spot) await nmcli(["--wait", "40", "connection", "up", spot, "ifname", name], 60_000);
     const text = up.err + up.out;
     throw new NetworkError(/secrets were required|802-1x|wrong|password/i.test(text) ? "network.wifiWrongPassword" : "network.wifiFailed", { message: text.trim().split("\n").slice(-1)[0] ?? "" });
   }
+  // or it would take the adapter back at the next start
+  if (spot) await nmcli(["connection", "delete", spot]);
   record("network.wifi.connected", { user, detail: ssid });
   bus.publish("network");
 }

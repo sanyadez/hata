@@ -152,3 +152,8 @@ test("wifiQrText: what a phone's camera reads, with the signs of the format esca
   expect(wifiQrText("Hata", "horse battery")).toBe("WIFI:T:WPA;S:Hata;P:horse battery;;");
   expect(wifiQrText("my;net", 'p:a"s\\s,1')).toBe('WIFI:T:WPA;S:my\\;net;P:p\\:a\\"s\\\\s\\,1;;');
 });
+
+test("giving the internet out on an interface: the server is the router there", () => {
+  expect(cleanChange({ method: "shared", address: "1.2.3.4/24", dns: "1.1.1.1" })).toEqual({ method: "shared", address: "", gateway: "", dns: [] });
+  expect(profileArgs({ method: "shared", address: "", gateway: "", dns: [] }).slice(0, 2)).toEqual(["ipv4.method", "shared"]);
+});
