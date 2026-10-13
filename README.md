@@ -33,8 +33,9 @@ It turns a Linux machine — an old PC, a mini PC, a Raspberry Pi, a VM — into
 browser instead of a terminal. You pick an app in the store (Jellyfin, Nextcloud, Home Assistant, Pi-hole
 and well over a hundred more), press "Install", and it runs in Docker. Around the apps Hata does the rest of what
 a home server needs: a dashboard with the state of the machine, a file manager, folders shared over the
-network, disks and their health, backups with restore, users and who may open what, HTTPS, notifications
-when something breaks. The full list is under [Status](#status).
+network, disks, their health and protection from a disk failure, backups with restore of a whole app or of
+single files, the server's own network — Wi-Fi, a spare way to the internet, an access point —, users and
+who may open what, HTTPS, notifications when something breaks. The full list is under [Status](#status).
 
 **What is it an alternative to?**
 To CasaOS first of all, and to the others of that kind: Umbrel, Runtipi, Cosmos. Unlike some of them it is
@@ -50,8 +51,9 @@ machine, Hata can take its apps over as they are — see [Moving in from CasaOS]
 An open-source home server dashboard by IceWhale, the makers of ZimaBoard: a web page with app tiles, a
 Docker app store and a file manager on top of an ordinary Linux. It made the "home server without a
 terminal" idea popular. Hata starts from what CasaOS does and adds what it lacks: backups and restore,
-users with roles and two-factor sign-in, sign-in in front of any app, HTTPS with certificates, disk health,
-store updates that keep your changes, notifications.
+users with roles and two-factor sign-in, sign-in in front of any app, HTTPS with certificates, disk health
+and protection from a disk failure, the server's network settings, store updates that keep your changes,
+notifications.
 
 **How is it better than Cockpit?**
 It is not better, it does another job. Cockpit administers a Linux server: systemd services, the journal,
@@ -59,8 +61,9 @@ network interfaces, system accounts, packages, virtual machines. Hata is about a
 home: a store, one-click installs, a dashboard of tiles, backups of app data, family members who open
 their apps and nothing else. Cockpit has no app store and no idea of "an app with its data"; Hata does
 not manage services, packages or virtual machines. Of the network it does what a home server needs: it
-shows the interfaces and changes an address, with the previous one coming back by itself if the server
-can no longer be reached. The two do not get in each other's way and can run on one machine.
+shows the interfaces and changes an address — IPv4 and IPv6 —, with the previous one coming back by itself
+if the server can no longer be reached; it joins Wi-Fi, keeps a USB modem as a spare way to the internet,
+and can turn the Wi-Fi adapter into an access point. The two do not get in each other's way and can run on one machine.
 
 **Can it manage containers and compose files like Portainer?**
 Apps, yes. Every app is a compose project, and on its page you start, stop and restart it, update its
@@ -232,7 +235,7 @@ Not there yet: wildcard certificates (DNS challenge), share links for files.
 | ![An app's logs](screenshots/app-logs.png) An app's logs | ![An app's compose file](screenshots/app-compose.png) An app's compose file |
 | ![An app's snapshots](screenshots/app-backups.png) An app's snapshots | ![A shell inside an app's container](screenshots/app-terminal.png) A shell inside an app's container |
 | ![The server's terminal](screenshots/terminal.png) The server's terminal | ![Bringing in containers that already run](screenshots/import.png) Bringing in containers that already run |
-| ![Users, who can open what, invitations](screenshots/users.png) Users, who can open what, invitations |  |
+| ![Users, who can open what, invitations](screenshots/users.png) Users, who can open what, invitations | ![Inside a snapshot: a file taken out, chosen files and folders put back](screenshots/snapshot-files.png) Inside a snapshot: a file taken out, chosen files and folders put back |
 
 ### Settings
 
@@ -243,7 +246,8 @@ Not there yet: wildcard certificates (DNS challenge), share links for files.
 | ![App stores](screenshots/settings-stores.png) App stores | ![Storage: disks, file systems, what fills the data folder](screenshots/settings-storage.png) Storage: disks, file systems, what fills the data folder |
 | ![Network folders (SMB)](screenshots/settings-shares.png) Network folders (SMB) | ![HTTPS and domain](screenshots/settings-https.png) HTTPS and domain |
 | ![Notifications](screenshots/settings-notifications.png) Notifications | ![Agents: access keys for the MCP server](screenshots/settings-agents.png) Agents: access keys for the MCP server |
-| ![About and updates](screenshots/settings-about.png) About and updates |  |
+| ![About and updates](screenshots/settings-about.png) About and updates | ![Network: interfaces, Wi-Fi, the ways to the internet](screenshots/settings-network.png) Network: interfaces, Wi-Fi, the ways to the internet |
+| ![Storage: protection from a disk failure](screenshots/settings-protection.png) Storage: protection from a disk failure |  |
 
 ### Looks
 
@@ -314,6 +318,8 @@ Not moved: CasaOS's own settings and users.
 hata                    run the server
 hata install            install as a systemd service and start it; --port <number>
 hata uninstall          stop and remove the service (apps and data stay)
+hata restore <folder>   bring the server back from a backup folder: Hata's state, then every app
+hata unseal <file.enc>  open one file of an encrypted copy of the backups
 hata migrate casaos     take over the apps of a CasaOS install; --dry-run, --yes, --keep-casaos, --undo
 hata setup-url          print the address for creating the first administrator
 hata version            print the version
