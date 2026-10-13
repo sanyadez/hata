@@ -364,7 +364,7 @@ export async function advance(chat: Chat, engine: Engine, signal?: AbortSignal):
       const calls = reply.stopped ? [] : reply.calls;
       // an answer with nothing in it cannot be sent back as it came: it is kept in words of ours
       const empty = !reply.text && !calls.length;
-      chat.turns.push({ role: "assistant", text: [reply.text, note].filter(Boolean).join("\n\n") || "(The model gave an empty answer.)", calls, at: Date.now(), ...(reply.stopped || empty ? {} : { raw: reply.raw, via: reply.via }) });
+      chat.turns.push({ role: "assistant", text: [reply.text, note].filter(Boolean).join("\n\n") || (empty ? "(The model gave an empty answer.)" : ""), calls, at: Date.now(), ...(reply.stopped || empty ? {} : { raw: reply.raw, via: reply.via }) });
       step();
     }
     chat.status = "idle";

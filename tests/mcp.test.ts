@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { allows, createKey, keyOf, listKeys, removeKey } from "../src/agents";
 import { parseCompose } from "../src/appform";
 import { describeTool, handleMessage, ToolError, toolsFor, type Caller, type Tool } from "../src/mcp";
-import { findings, HIDDEN, instructions, maskCompose, TOOLS, type ContainerState } from "../src/mcptools";
+import { findings, happened, HIDDEN, instructions, maskCompose, TOOLS, type ContainerState } from "../src/mcptools";
 
 const caller = (level: Caller["level"]): Caller => ({ name: "laptop", level, user: "agent:laptop" });
 const info = { version: "1.2.3", instructions: () => "hello" };
@@ -193,4 +193,11 @@ test("access keys: shown once, found by the Bearer token, gone when removed", ()
   expect(removeKey(made.info.id)?.name).toBe("My laptop");
   expect(keyOf(request(made.key))).toBeNull();
   expect(listKeys()).toEqual([]);
+});
+
+test("happened: an entry of the activity log in words", () => {
+  expect(happened({ code: "app.docker.done", app: "", user: "tester" })).toBe("Docker installed");
+  expect(happened({ code: "system.disk.format", detail: "USB DISK → exFAT" })).toBe("Disk formatted: USB DISK → exFAT");
+  expect(happened({ code: "app.install.done", app: "memos" })).toContain("memos");
+  expect(happened({ code: "no.such.code" })).toBe("no.such.code");
 });

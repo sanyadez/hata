@@ -13,6 +13,7 @@
  * the values that look like secrets hidden (`maskCompose`): what an agent reads leaves this machine.
  */
 import { recent } from "./activity";
+import { settings } from "./config";
 import { type Level } from "./agents";
 import { appDir, AppError, appAction, appDetail, appStats, applyCompose, composeText, getJob, installCustom, installFromStore, jobFinished, listApps, listJobs, removeApp, storeAppDetail, type InstalledApp, type Job } from "./apps";
 import { APP_NAME_RE, parseCompose, dumpCompose, type Compose } from "./appform";
@@ -251,9 +252,9 @@ const read: Omit<Tool, "level" | "effect">[] = [
   {
     name: "activity",
     title: "Activity log",
-    description: "What happened on the server and when, newest first: installs, updates, starts and stops, backups, sign-ins — each with who did it. Narrow it to one app with `app`.",
+    description: "What happened on the server and when, newest first: installs, updates, starts and stops, backups, sign-ins — each with who did it, in words (`what`). An older entry may be undone by a newer one: read them in order. Narrow it to one app with `app`.",
     input: { app: { type: "string", description: "Only this app" }, limit: { type: "number", description: "How many entries, 30 by default, 100 at most" } },
-    run: (args) => recent(count(args.limit, 30, 100), typeof args.app === "string" && args.app ? args.app : undefined).map(({ ts, ...entry }) => ({ at: when(ts), ...entry })),
+    run: (args) => recent(count(args.limit, 30, 100), typeof args.app === "string" && args.app ? args.app : undefined).map(({ ts, ...entry }) => ({ at: when(ts), what: happened(entry), ...entry })),
   },
   {
     name: "apps_list",
@@ -291,7 +292,7 @@ const read: Omit<Tool, "level" | "effect">[] = [
   {
     name: "app_diagnose",
     title: "Diagnose an app",
-    description: "Everything needed to say why an app is down or misbehaving, in one call: the state of each container (exit code, restarts, out-of-memory kills, health check), the tail of the log, the app's recent operations, and `findings` — the likely causes in plain words.",
+    description: "Everything needed to say why an app is down or misbehaving, in one call: the state of each container (exit code, restarts, out-of-memory kills, health check), whether its web page answers (`webPage`), the tail of the log, the app's recent operations, and `findings` — the likely causes in plain words.",
     input: APP,
     required: ["app"],
     run: (args) =>
@@ -308,6 +309,10 @@ const read: Omit<Tool, "level" | "effect">[] = [
         const log = docker.available ? await logTail(name, 40).catch((e) => (e instanceof Error ? e.message : String(e))) : "";
         const system = systemStatus();
         const operations = recent(8, name);
+        // a container that runs is not yet a page that answers: asked the way a browser on this server would
+        const guarded = settings.access[name];
+        const port = guarded?.protect && guarded.upstream ? guarded.upstream : app.port;
+        const page = port && !app.hostname && app.status !== "stopped" ? await answers(`${app.scheme}://127.0.0.1:${port}${app.index}`) : null;
         const disks = system.disks.map((d) => ({ path: d.path, percent: percent(d.used, d.total) }));
         return {
           app: name,
@@ -316,6 +321,7 @@ const read: Omit<Tool, "level" | "effect">[] = [
           findings: findings({ containers, log, disks, memoryPercent: percent(system.memory.used, system.memory.total), docker: docker.available, stoppedBy: operations[0]?.code === "app.stop.done" ? (operations[0].user ?? "") : undefined }),
           containers: containers.map((c, i) => ({ ...c, image: app.containers[i]!.image, since: app.containers[i]!.status, ports: app.containers[i]!.ports })),
           recentOperations: operations.map(({ ts, code, user, detail }) => ({ at: when(ts), code, ...(user ? { by: user } : {}), ...(detail ? { detail } : {}) })),
+          ...(page ? { webPage: page } : {}),
           logTail: clip(log),
         };
       }),
@@ -511,6 +517,24 @@ const full: (Omit<Tool, "level" | "effect"> & { effect?: Tool["effect"] })[] = [
     run: (args, caller) => wrap(() => settle(restoreSnapshot(appName(args), text(args, "snapshot"), caller.user))),
   },
 ];
+
+/** Asks an app's page once: what it answered, or why it did not */
+async function answers(url: string): Promise<{ url: string; answer: string }> {
+  try {
+    const res = await fetch(url, { redirect: "manual", signal: AbortSignal.timeout(4000), tls: { rejectUnauthorized: false } } as RequestInit);
+    await res.body?.cancel();
+    return { url, answer: `HTTP ${res.status}` };
+  } catch (e) {
+    return { url, answer: `no answer: ${e instanceof Error ? e.message : String(e)}` };
+  }
+}
+
+/** An entry of the activity log in words, as the page says it: a bare code leaves the reader guessing */
+export function happened(entry: { code: string; app?: string; user?: string; detail?: string }): string {
+  const text = (en as Record<string, string>)["activity." + entry.code];
+  if (!text) return entry.code;
+  return text.replace(/\{(\w+)\}/g, (_, name: string) => (name === "app" ? entry.app : name === "user" ? entry.user : name === "target" ? entry.detail : "") ?? "").trim();
+}
 
 export const TOOLS: Tool[] = [
   ...read.map((tool) => ({ ...tool, level: "read" as const, effect: "read" as const })),
