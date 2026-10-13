@@ -4435,7 +4435,7 @@ async function loadSettings() {
     if (isAdmin()) state.notify = await api("GET", "/api/notify").catch(() => null);
     if (isAdmin() && state.route.section === "apps") state.images = await api("GET", "/api/images").catch(() => null);
     if (isAdmin() && state.route.section === "network") state.network = await api("GET", "/api/network").catch(() => null);
-    if (isAdmin() && state.route.section === "remote") state.remote = await api("GET", "/api/tailscale").catch(() => null);
+    if (isAdmin() && state.route.section === "remote") [state.remote, state.wireguard] = await Promise.all([api("GET", "/api/tailscale").catch(() => null), api("GET", "/api/wireguard").catch(() => null)]);
     if (isAdmin() && state.route.section === "tools") state.tools = await api("GET", "/api/tools").catch(() => null);
     if (isAdmin() && state.route.section === "storage") state.disks = await api("GET", "/api/disks").catch(() => null);
     if (isAdmin() && state.route.section === "shares") state.shares = await api("GET", "/api/shares").catch(() => null);
@@ -5283,8 +5283,215 @@ async function loadRemote() {
   if (state.route.view === "settings" && state.route.section === "remote") renderSettings();
 }
 
-/** Settings → Remote access: the server in the person's own private network (Tailscale) */
-function remoteSection() {
+/** Settings → Remote access: Tailscale, then WireGuard in and out */
+const remoteSection = () => [...tailscaleCards(), ...wireguardCards()];
+
+/** A device that agreed on keys within the last three minutes is connected: WireGuard renews them every two */
+const wgConnected = (handshake) => handshake > 0 && Date.now() - handshake < 180_000;
+
+async function wgDeviceDialog(id) {
+  let file;
+  try {
+    file = await api("GET", `/api/wireguard/devices/${id}`);
+  } catch (e) {
+    return toast(errorText(e), "error");
+  }
+  const w = state.wireguard;
+  const web = `http://${w.server.address}${w.web === 80 ? "" : ":" + w.web}`;
+  const dialog = openDialog(
+    "wide",
+    h("header", null, h("h2", { class: "grow" }, t("wg.deviceTitle", { name: file.name })), closeX(() => dialog)),
+    h("p", { class: "muted" }, t("wg.deviceLead")),
+    h("div", { class: "qr-box" }, qrSvg(file.qr)),
+    h("p", { class: "muted small" }, t("wg.devicePhone")),
+    h("pre", { class: "cmd whole wg-conf" }, file.conf),
+    h("p", { class: "muted small" }, t("wg.deviceComputer")),
+    h("p", { class: "banner" }, t("wg.deviceSecret")),
+    h("p", { class: "muted small" }, t("wg.deviceThen", { address: web })),
+    h("footer", null, h("a", { class: "btn", href: `/api/wireguard/devices/${id}?download=1`, download: "" }, icon("download"), h("span", null, t("wg.deviceFile"))), closeButton(() => dialog)),
+  );
+}
+
+function wgAddDialog() {
+  const w = state.wireguard;
+  const name = h("input", { maxLength: 40, required: true, placeholder: t("wg.namePlaceholder") });
+  const lan = h("input", { type: "checkbox", disabled: !w.server.firewall || !w.server.networks.length });
+  const error = h("p", { class: "error", role: "alert" });
+  let dialog;
+  dialog = openDialog(
+    "",
+    h("h2", null, t("wg.add")),
+    field(t("wg.name"), name),
+    h("label", { class: "check" }, lan, h("span", null, h("strong", null, t("wg.lan")), h("span", { class: "muted small block" }, !w.server.firewall ? t("wg.lanNoFirewall") : w.server.networks.length ? t("wg.lanHint", { networks: w.server.networks.join(", ") }) : t("remote.networksNone")))),
+    error,
+    h(
+      "footer",
+      null,
+      closeButton(() => dialog, t("common.cancel")),
+      button(t("wg.addGo"), {
+        class: "primary",
+        onclick: async (e) => {
+          const el = e.currentTarget;
+          el.disabled = true;
+          try {
+            state.wireguard = await api("POST", "/api/wireguard/devices", { name: name.value, lan: lan.checked });
+            dialog.close();
+            renderSettings();
+            void wgDeviceDialog(state.wireguard.added);
+          } catch (err) {
+            error.textContent = errorText(err);
+            el.disabled = false;
+          }
+        },
+      }),
+    ),
+  );
+  name.focus();
+}
+
+function wireguardCards() {
+  const w = state.wireguard;
+  if (!w) return [];
+  const error = h("p", { class: "error", role: "alert" });
+  const send = async (method, path, data, el, said = error) => {
+    if (el) el.disabled = true;
+    said.textContent = "";
+    try {
+      state.wireguard = await api(method, `/api/wireguard/${path}`, data);
+      renderSettings();
+      return state.wireguard;
+    } catch (err) {
+      said.textContent = errorText(err);
+      if (el) el.disabled = false;
+      return null;
+    }
+  };
+
+  if (w.tool === "missing")
+    return [
+      h(
+        "section",
+        { class: "card pad stack" },
+        h("h2", null, "WireGuard"),
+        h("p", { class: "muted" }, t("wg.lead")),
+        h("p", null, t("wg.what")),
+        h("p", { class: "muted small" }, t("wg.why")),
+        w.install ? h("p", { class: "cmd" }, icon("terminal"), w.install) : h("p", { class: "muted small" }, t("mounting.needs.byHand", { package: w.package })),
+        error,
+        w.install &&
+          h(
+            "footer",
+            null,
+            button(t("mounting.needs.install", { package: "WireGuard" }), {
+              class: "primary",
+              onclick: async (e) => {
+                const el = e.currentTarget;
+                el.disabled = true;
+                el.lastChild.textContent = t("tools.installing");
+                try {
+                  await api("POST", "/api/tools/wireguard-tools/install", {});
+                  state.wireguard = await api("GET", "/api/wireguard");
+                  renderSettings();
+                } catch (err) {
+                  error.textContent = errorText(err);
+                  el.disabled = false;
+                }
+              },
+            }, "download"),
+          ),
+      ),
+    ];
+
+  const s = w.server;
+  const endpoint = h("input", { value: s.endpoint || s.suggested, placeholder: "home.example.com", spellcheck: false, autocapitalize: "off", class: "mono", required: true });
+  const port = h("input", { type: "number", min: 1, max: 65535, value: s.port, class: "short mono", required: true });
+  const typed = () => ({ endpoint: endpoint.value.trim(), port: Number(port.value) });
+  const up = s.enabled && s.running;
+  const deviceRow = (d) =>
+    h(
+      "tr",
+      null,
+      h("td", null, h("div", { class: "strong" }, d.name), h("div", { class: "muted small mono" }, d.address)),
+      h("td", null, h("label", { class: "check small" }, h("input", { type: "checkbox", checked: d.lan, disabled: !s.firewall, onchange: (e) => send("PUT", `devices/${d.id}`, { lan: e.target.checked }, e.target) }), h("span", null, t("wg.lanShort")))),
+      h("td", null, h("span", { class: "state " + (wgConnected(d.handshake) ? "running" : "stopped") }, wgConnected(d.handshake) ? t("wg.connected") : d.handshake ? t("remote.seen", { when: ago(d.handshake) }) : t("wg.never"))),
+      h(
+        "td",
+        null,
+        h(
+          "div",
+          { class: "row-actions" },
+          button(t("wg.show"), { class: "small", onclick: () => wgDeviceDialog(d.id) }),
+          h("button", {
+            type: "button",
+            class: "icon-btn",
+            title: t("wg.remove"),
+            "aria-label": t("wg.remove"),
+            onclick: () => {
+              const dialog = openDialog("confirm", h("h2", null, t("wg.removeTitle", { name: d.name })), h("p", { class: "muted" }, t("wg.removeLead")), h("footer", null, closeButton(() => dialog, t("common.cancel")), button(t("wg.remove"), { class: "danger", onclick: (e) => (dialog.close(), send("DELETE", `devices/${d.id}`, undefined, e.currentTarget)) })));
+            },
+          }, icon("trash")),
+        ),
+      ),
+    );
+  const inCard = h(
+    "section",
+    { class: "card pad stack" },
+    h("div", { class: "section-head" }, h("h2", null, t("wg.in.title"), h("span", { class: "state " + (up ? "running" : s.enabled ? "partial" : "stopped") }, t(up ? "wg.state.on" : s.enabled ? "remote.state.stopped" : "remote.state.off"))), h("span", { class: "muted small" }, "WireGuard")),
+    h("p", { class: "muted" }, t("wg.in.lead")),
+    settingRow(t("wg.endpoint"), t("wg.endpointHint"), endpoint),
+    settingRow(t("wg.port"), t("wg.portHint", { port: s.port }), port),
+    !s.firewall && h("p", { class: "banner" }, t("wg.noFirewall")),
+    error,
+    h("footer", null, h("div", { class: "row-actions" }, s.enabled && button(t("remote.turnOff"), { onclick: (e) => send("PUT", "server", { enabled: false }, e.currentTarget) }), button(t(s.enabled ? "settings.save" : "remote.turnOn"), { class: "primary", onclick: (e) => send("PUT", "server", { ...typed(), enabled: true }, e.currentTarget) }))),
+  );
+  const devices =
+    s.address &&
+    h(
+      "section",
+      { class: "card pad stack" },
+      h("div", { class: "section-head" }, h("h2", null, t("wg.devices"), h("span", { class: "muted small" }, s.devices.length)), button(t("wg.add"), { class: "small primary", disabled: !s.endpoint, onclick: wgAddDialog }, "plus")),
+      s.devices.length ? h("div", { class: "table-wrap" }, h("table", null, h("tbody", null, s.devices.map(deviceRow)))) : h("p", { class: "muted" }, t("wg.devicesNone")),
+      h("p", { class: "muted small" }, t("wg.devicesHint", { address: s.address })),
+    );
+
+  const c = w.client;
+  const outError = h("p", { class: "error", role: "alert" });
+  const conf = h("textarea", { rows: 8, spellcheck: false, class: "mono", placeholder: "[Interface]\nPrivateKey = …\nAddress = …\n\n[Peer]\nPublicKey = …\nEndpoint = …\nAllowedIPs = …" });
+  const pick = h("input", { type: "file", accept: ".conf,text/plain", class: "offscreen", onchange: async () => pick.files[0] && (conf.value = await pick.files[0].text()) });
+  const join = async (e) => {
+    const done = await send("PUT", "client", { conf: conf.value, enabled: true }, e.currentTarget, outError);
+    if (done?.dropped?.length) toast(t("wg.out.dropped", { lines: done.dropped.join(", ") }));
+  };
+  const outUp = c.enabled && c.running;
+  const outCard = h(
+    "section",
+    { class: "card pad stack" },
+    h("div", { class: "section-head" }, h("h2", null, t("wg.out.title"), c.set && h("span", { class: "state " + (outUp ? "running" : c.enabled ? "partial" : "stopped") }, t(outUp ? (wgConnected(c.handshake) ? "wg.connected" : "wg.out.waiting") : c.enabled ? "remote.state.stopped" : "remote.state.off"))), h("span", { class: "muted small" }, "WireGuard")),
+    h("p", { class: "muted" }, t("wg.out.lead")),
+    c.set
+      ? [
+          settingRow(t("wg.out.server"), c.handshake ? t("wg.out.spoke", { when: ago(c.handshake) }) : "", h("span", { class: "mono" }, c.endpoint)),
+          settingRow(t("wg.out.address"), "", h("span", { class: "mono" }, c.address)),
+          settingRow(t("wg.out.through"), t(c.everything ? "wg.out.everything" : "wg.out.some"), h("span", { class: "mono" }, c.allowed.join(", "))),
+        ]
+      : [field(t("wg.out.conf"), conf, t("wg.out.confHint")), pick],
+    outError,
+    h(
+      "footer",
+      null,
+      h(
+        "div",
+        { class: "row-actions" },
+        c.set
+          ? [button(t("wg.out.forget"), { class: "quiet", onclick: (e) => send("DELETE", "client", undefined, e.currentTarget, outError) }), c.enabled ? button(t("remote.turnOff"), { onclick: (e) => send("PUT", "client", { enabled: false }, e.currentTarget, outError) }) : button(t("remote.turnOn"), { class: "primary", onclick: (e) => send("PUT", "client", { enabled: true }, e.currentTarget, outError) })]
+          : [button(t("wg.out.file"), { onclick: () => pick.click() }), button(t("wg.out.join"), { class: "primary", onclick: join })],
+      ),
+    ),
+  );
+  return [inCard, devices, outCard].filter(Boolean);
+}
+
+function tailscaleCards() {
   const r = state.remote;
   if (!r) return [h("p", { class: "muted" }, "…")];
   const error = h("p", { class: "error", role: "alert" });
@@ -5302,13 +5509,14 @@ function remoteSection() {
     }
   };
   const lead = h("p", { class: "muted" }, t("remote.lead"));
+  const title = "Tailscale";
 
   if (r.state === "missing")
     return [
       h(
         "section",
         { class: "card pad stack" },
-        h("h2", null, t("remote.title")),
+        h("h2", null, title),
         lead,
         h("p", null, t("remote.what")),
         h("p", { class: "muted small" }, t("remote.why")),
@@ -5336,7 +5544,7 @@ function remoteSection() {
       ),
     ];
 
-  const head = (chip, cls) => h("div", { class: "section-head" }, h("h2", null, t("remote.title"), h("span", { class: "state " + cls }, chip)), h("span", { class: "muted small mono" }, `Tailscale ${r.version}`));
+  const head = (chip, cls) => h("div", { class: "section-head" }, h("h2", null, title, h("span", { class: "state " + cls }, chip)), h("span", { class: "muted small mono" }, r.version));
   if (r.state === "stopped") return [h("section", { class: "card pad stack" }, head(t("remote.state.stopped"), "stopped"), h("p", { class: "muted" }, t("remote.stopped")), error, h("footer", null, button(t("remote.start"), { class: "primary", onclick: act("start") }))) ];
 
   // waiting for the person to let the server in: the page looks again by itself until it is done

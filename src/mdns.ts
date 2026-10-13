@@ -208,8 +208,8 @@ export function addressFor(remote: string, links: Link[]): string | null {
 
 // --- The responder ----------------------------------------------------------------------------------
 
-/** Bridges and pairs Docker makes for containers: nobody on them looks for the server by name */
-const INSIDE = /^(docker|br-|veth|virbr|cni|flannel|lxcbr|podman)/;
+/** Bridges and pairs Docker makes for containers, and tunnels: nobody on them looks for the server by a .local name */
+const INSIDE = /^(docker|br-|veth|virbr|cni|flannel|lxcbr|podman|tailscale|hata-wg|wg\d)/;
 
 /** The addresses of this machine on the networks people are on */
 export function homeLinks(): Link[] {

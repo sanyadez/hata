@@ -62,9 +62,12 @@ test("QR code: structure, a pinned sample, sizes and the length limit", () => {
   expect(versionFor(14)).toBe(1);
   expect(versionFor(15)).toBe(2);
   expect(versionFor(213)).toBe(10);
-  expect(versionFor(214)).toBeNull();
+  expect(versionFor(214)).toBe(11);
+  expect(versionFor(666)).toBe(20);
+  expect(versionFor(667)).toBeNull();
   expect(qrMatrix("x".repeat(213)).length).toBe(57);
-  expect(() => qrMatrix("x".repeat(214))).toThrow();
+  expect(qrMatrix("x".repeat(666)).length).toBe(97);
+  expect(() => qrMatrix("x".repeat(667))).toThrow();
   // same input, same code
   expect(qrMatrix("hello")).toEqual(m);
 });

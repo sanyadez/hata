@@ -97,6 +97,7 @@ import { appHost, appLabel, classifyHost, clientIp, cookieDomain, domainOf, loca
 import { newChallenge, PASSKEY_ALGORITHMS, spendChallenge, verifyAssertion, verifyRegistration } from "./passkey";
 import { qrMatrix } from "./qr";
 import { connect as connectTailscale, disconnect as disconnectTailscale, install as installTailscale, offerNetworks, report as tailscaleReport, signOut as signOutTailscale, start as startTailscale } from "./tailscale";
+import { addDevice as addWireguardDevice, changeDevice as changeWireguardDevice, deviceFile as wireguardDeviceFile, forgetClient as forgetWireguardClient, removeDevice as removeWireguardDevice, report as wireguardReport, setClient as setWireguardClient, setServer as setWireguardServer } from "./wireguard";
 import { IMAGE_MIME, imageType, wallpaperSvg, WALLPAPERS } from "./wallpapers";
 import { containerCommand, shellCommand, TerminalError, TerminalManager, terminalEnv, type TerminalClient, type TerminalStart } from "./terminal";
 import { ARCH, catalogue, scheduleStoreSync, syncStore } from "./store";
@@ -1110,6 +1111,27 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
     else if (what === "networks") await offerNetworks(data.on === true, user.name);
     else return fail(404, "request.notFound");
     return json(await tailscaleReport(listenAddress().port));
+  }
+  // WireGuard: devices let in to this server, and this server joining somebody else's
+  if (path === "/api/wireguard" && method === "GET") return json(await wireguardReport(listenAddress().port));
+  if (path.startsWith("/api/wireguard/")) {
+    server.timeout(req, 0);
+    const what = path.slice("/api/wireguard/".length);
+    const one = /^devices\/([0-9a-f]{8})$/.exec(what);
+    let extra = {};
+    if (what === "server" && method === "PUT") await setWireguardServer(await body(req), user.name);
+    else if (what === "devices" && method === "POST") extra = { added: await addWireguardDevice(await body(req), user.name) };
+    else if (one && method === "GET") {
+      const file = wireguardDeviceFile(one[1]!);
+      // the file for a computer: saved under the device's name
+      if (url.searchParams.has("download")) return new Response(file.conf, { headers: { "x-content-type-options": "nosniff", "content-type": "application/octet-stream", "content-disposition": disposition("attachment", `${file.name.replace(/[^A-Za-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "") || "hata"}.conf`), "cache-control": "no-store" } });
+      return json({ ...file, qr: qrMatrix(file.conf).map((row) => row.map((dark) => (dark ? "1" : "0")).join("")) });
+    } else if (one && method === "PUT") await changeWireguardDevice(one[1]!, await body(req));
+    else if (one && method === "DELETE") await removeWireguardDevice(one[1]!, user.name);
+    else if (what === "client" && method === "PUT") extra = await setWireguardClient(await body(req), user.name);
+    else if (what === "client" && method === "DELETE") await forgetWireguardClient(user.name);
+    else return fail(404, "request.notFound");
+    return json({ ...(await wireguardReport(listenAddress().port)), ...extra });
   }
   // Docker itself, for a server that has none: the button on the home page
   if (path === "/api/docker" && method === "GET") return json({ ...(await dockerInfo()), install: DOCKER_INSTALL_COMMAND });

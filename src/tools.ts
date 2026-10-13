@@ -21,6 +21,7 @@ import { bus } from "./bus";
 import { afterPackage, networkReport, type Nic } from "./network";
 import { installCommand, installPackage, PATH, removeCommand, removePackages, run } from "./packages";
 import { installSamba } from "./shares";
+import { inUse as wireguardInUse } from "./wireguard";
 import { INSTALL_COMMAND as TAILSCALE_INSTALL_COMMAND, install as installTailscale, report as tailscaleReport } from "./tailscale";
 
 interface Spec {
@@ -55,6 +56,7 @@ const SPECS: Spec[] = [
   { id: "network-manager", name: "NetworkManager", package: "network-manager", bin: "nmcli", version: ["nmcli", "--version"], page: "#/settings/network" },
   { id: "wpasupplicant", name: "wpa_supplicant", package: "wpasupplicant", bin: "wpa_supplicant", version: ["wpa_supplicant", "-v"], page: "#/settings/network" },
   { id: "dnsmasq-base", name: "dnsmasq", package: "dnsmasq-base", bin: "dnsmasq", version: ["dnsmasq", "--version"], page: "#/settings/network" },
+  { id: "wireguard-tools", name: "WireGuard tools", package: "wireguard-tools", bin: "wg-quick", version: ["wg", "--version"], page: "#/settings/remote" },
   { id: "tailscale", name: "Tailscale", package: "tailscale", bin: "tailscale", version: ["tailscale", "version"], page: "#/settings/remote" },
   { id: "openssh-client", name: "OpenSSH client", package: "openssh-client", bin: "sftp", version: ["ssh", "-V"], page: "#/backups", base: true },
 ];
@@ -131,6 +133,7 @@ async function packagesOf(spec: Spec): Promise<string[]> {
 function holdsOf(id: string, nics: Nic[], remote: boolean): string {
   // whoever is on this page from afar came through it
   if (id === "tailscale" && remote) return "remote";
+  if (id === "wireguard-tools" && wireguardInUse()) return "wireguard";
   if (id === "samba" && settings.shares.length > 0) return "shares";
   if (id === "snapraid" && settings.snapraid.parity !== "") return "array";
   if (id === "mergerfs" && usedNow("mergerfs", false)) return "merged";

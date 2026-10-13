@@ -220,6 +220,10 @@ Early development. What works today:
   in to Hata and allowed to open that app — no domain or HTTPS needed, the app's address stays the same. The app's
   other published ports are listed next to it and can be put behind the same sign-in when they are web
   pages too;
+- remote access, three ways on one page, each one nothing until its button is pressed: WireGuard for
+  your own devices (Hata makes the keys and hands every phone a QR code and every computer a file; a
+  device sees the server alone, or the home network when you allow it), WireGuard out to a server of
+  yours elsewhere from the configuration it gave, and Tailscale for a home behind a provider's NAT;
 - HTTPS, your choice of three: none (address and ports, for a home network); behind your own proxy (nginx,
   Caddy, Traefik) with a check that the proxy is set up right; or by Hata itself with certificates from
   Let's Encrypt. With a domain, every app has its own address, `<app>.<domain>`;

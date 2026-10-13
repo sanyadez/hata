@@ -1,6 +1,6 @@
 /**
  * QR code encoder — just enough for the codes Hata shows (a 2FA setup link, later an address for the
- * phone): byte mode, error correction level M, versions 1–10 (up to 213 bytes).
+ * phone): byte mode, error correction level M, versions 1–20 (up to 666 bytes).
  *
  * Follows ISO/IEC 18004. Returns the matrix; drawing it is the UI's job.
  */
@@ -17,7 +17,19 @@ const BLOCKS: Record<number, { ec: number; data: number[] }> = {
   8: { ec: 22, data: [38, 38, 39, 39] },
   9: { ec: 22, data: [36, 36, 36, 37, 37] },
   10: { ec: 26, data: [43, 43, 43, 43, 44] },
+  11: { ec: 30, data: [50, 51, 51, 51, 51] },
+  12: { ec: 22, data: [36, 36, 36, 36, 36, 36, 37, 37] },
+  13: { ec: 22, data: [37, 37, 37, 37, 37, 37, 37, 37, 38] },
+  14: { ec: 24, data: [40, 40, 40, 40, 41, 41, 41, 41, 41] },
+  15: { ec: 24, data: [41, 41, 41, 41, 41, 42, 42, 42, 42, 42] },
+  16: { ec: 28, data: [45, 45, 45, 45, 45, 45, 45, 46, 46, 46] },
+  17: { ec: 28, data: [46, 46, 46, 46, 46, 46, 46, 46, 46, 46, 47] },
+  18: { ec: 26, data: [43, 43, 43, 43, 43, 43, 43, 43, 43, 44, 44, 44, 44] },
+  19: { ec: 26, data: [44, 44, 44, 45, 45, 45, 45, 45, 45, 45, 45, 45, 45, 45] },
+  20: { ec: 26, data: [41, 41, 41, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42, 42] },
 };
+
+const MAX_VERSION = 20;
 
 /** Centres of the alignment patterns, per version */
 const ALIGNMENT: Record<number, number[]> = {
@@ -31,6 +43,16 @@ const ALIGNMENT: Record<number, number[]> = {
   8: [6, 24, 42],
   9: [6, 26, 46],
   10: [6, 28, 50],
+  11: [6, 30, 54],
+  12: [6, 32, 58],
+  13: [6, 34, 62],
+  14: [6, 26, 46, 66],
+  15: [6, 26, 48, 70],
+  16: [6, 26, 50, 74],
+  17: [6, 30, 54, 78],
+  18: [6, 30, 56, 82],
+  19: [6, 30, 58, 86],
+  20: [6, 34, 62, 90],
 };
 
 // --- Reed–Solomon over GF(256), polynomial x^8 + x^4 + x^3 + x^2 + 1 -------------------------------
@@ -72,7 +94,7 @@ function errorCorrection(data: number[], count: number): number[] {
 
 /** The smallest version whose data fits, or null */
 export function versionFor(bytes: number): number | null {
-  for (let version = 1; version <= 10; version++) {
+  for (let version = 1; version <= MAX_VERSION; version++) {
     const capacity = BLOCKS[version]!.data.reduce((a, b) => a + b, 0);
     // 4 bits of mode + the length field (8 bits up to version 9, 16 from 10)
     const header = version <= 9 ? 12 : 20;

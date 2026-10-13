@@ -883,3 +883,6 @@ table.shares td { vertical-align: top; }
   .welcome-label { display: none; }
 }
 .stack-s.end { justify-items: end; text-align: right; }
+.wg-conf { white-space: pre; overflow-x: auto; font-size: 12px; }
+.check.small { font-size: 13px; }
+.cmd.wg-conf { display: block; white-space: pre; overflow-x: auto; }
