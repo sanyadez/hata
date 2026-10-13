@@ -209,7 +209,7 @@ Early development. What works today:
   Windows, in the sidebar of Finder and in the Files app of a phone, under its name on the home network;
 - files: the server's files in the browser, opened in the data folder and reaching everywhere — folders,
   upload by drag and drop (whole folders too, large files in parts), download of a file or of a folder as a
-  ZIP archive, rename, move, copy, delete — into a trash, from where a thing is put back within 30 days —, copying a path, putting a folder on the dashboard, pictures, video and sound opened in place, text
+  ZIP archive, rename, move, copy, delete — into a trash, from where a thing is put back within 30 days —, copying a path, putting a folder on the dashboard, a menu on the right click (of the file, of everything selected, of the folder), pictures, video and sound opened in place, text
   files edited in place. What is uploaded into an app's folder belongs to the same user the app runs as;
   the system's own folders cannot be deleted by a slip of the hand;
 - users: administrators, members (who see the apps and open them, nothing more) and shared guest accounts;
@@ -254,7 +254,8 @@ Early development. What works today:
   something of Hata's stands on it);
 - English and Ukrainian UI, light and dark, phone-friendly.
 
-Not there yet: wildcard certificates (DNS challenge), share links for files.
+Not there yet: wildcard certificates (DNS challenge), share links for files, a second copy of the backups
+in Google Drive or Box.
 
 ## Screenshots
 
