@@ -2776,6 +2776,16 @@ async function offsiteCheck(trust) {
 
 function offsiteCard(o) {
   const enabled = h("input", { type: "checkbox", checked: o.enabled });
+  // the kind looked at survives the page being drawn anew, until it is saved
+  const shown = offsiteCard.kind ?? o.kind;
+  const kind = h("select", { onchange: () => ((offsiteCard.kind = kind.value), renderBackupsBody()) }, ["sftp", "s3"].map((id) => h("option", { value: id, selected: id === shown }, t("offsite.kind." + id))));
+  const s3 = shown === "s3";
+  const endpoint = h("input", { value: o.s3.endpoint, placeholder: "https://s3.eu-central-003.backblazeb2.com", spellcheck: false, autocapitalize: "off", class: "mono" });
+  const region = h("input", { value: o.s3.region, placeholder: "us-east-1", spellcheck: false, autocapitalize: "off", class: "mono" });
+  const bucket = h("input", { value: o.s3.bucket, spellcheck: false, autocapitalize: "off", class: "mono", required: s3 });
+  const prefix = h("input", { value: o.s3.prefix, spellcheck: false, class: "mono" });
+  const accessKey = h("input", { value: o.s3.accessKey, spellcheck: false, autocapitalize: "off", autocomplete: "off", class: "mono", required: s3 });
+  const secret = h("input", { type: "password", autocomplete: "new-password", placeholder: o.s3.secretSet ? t("offsite.secretKept") : "", class: "mono", required: s3 && !o.s3.secretSet });
   const host = h("input", { value: o.host, placeholder: "nas.lan", spellcheck: false, autocapitalize: "off", class: "mono", required: true });
   const port = h("input", { type: "number", min: 1, max: 65535, value: o.port, class: "short mono", required: true });
   const user = h("input", { value: o.user, placeholder: "backup", spellcheck: false, autocapitalize: "off", class: "mono", required: true });
@@ -2784,31 +2794,34 @@ function offsiteCard(o) {
   const passphrase = h("input", { type: "password", autocomplete: "new-password", minlength: 8, placeholder: o.sealed ? t("offsite.passphraseKept") : "", class: "mono" });
   const error = h("p", { class: "error", role: "alert" });
   const last = o.last;
-  const status = !o.available
+  const status = !o.available && !s3
     ? h("p", { class: "error" }, t("offsite.noSftp"))
     : o.running
       ? h("p", { class: "muted small" }, t("offsite.running"))
-      : last && o.enabled && h("p", { class: last.error ? "error" : "muted small" }, last.error ? t("offsite.failed", { when: ago(last.at), message: last.error }) : t("offsite.inStep", { when: ago(last.at) }));
+      : last && o.enabled && shown === o.kind && h("p", { class: last.error ? "error" : "muted small" }, last.error ? t("offsite.failed", { when: ago(last.at), message: last.error }) : t("offsite.inStep", { when: ago(last.at) }));
   const save = async (e) => {
     e.preventDefault();
     error.textContent = "";
     if (seal.checked && !o.sealed && !passphrase.value) return void (error.textContent = t("error.offsite.badPassphrase"));
-    const data = { enabled: enabled.checked, host: host.value.trim(), port: Number(port.value), user: user.value.trim(), path: path.value.trim() };
+    const data = s3
+      ? { kind: "s3", enabled: enabled.checked, endpoint: endpoint.value.trim(), region: region.value.trim(), bucket: bucket.value.trim(), prefix: prefix.value.trim(), accessKey: accessKey.value.trim(), secret: secret.value }
+      : { kind: "sftp", enabled: enabled.checked, host: host.value.trim(), port: Number(port.value), user: user.value.trim(), path: path.value.trim() };
     if (!seal.checked) data.passphrase = "";
     else if (passphrase.value) data.passphrase = passphrase.value;
     try {
       state.backups = await api("PUT", "/api/backups/offsite", data);
+      offsiteCard.kind = undefined;
       document.activeElement?.blur();
       const result = await offsiteCheck();
       if (result.status === "ok") {
-        toast(t("offsite.connected"));
+        toast(t(s3 ? "offsite.connectedS3" : "offsite.connected"));
         if (enabled.checked) await api("POST", "/api/backups/offsite/sync", {});
       }
       await loadBackups();
       // after the page is drawn anew: the message belongs to the form that is there now
-      const shown = document.querySelector("#offsite-form .error[role=alert]");
-      if (shown && result.status === "denied") shown.textContent = t("offsite.denied");
-      if (shown && result.status === "failed") shown.textContent = result.message;
+      const said = document.querySelector("#offsite-form .error[role=alert]");
+      if (said && result.status === "denied") said.textContent = t("offsite.denied");
+      if (said && result.status === "failed") said.textContent = result.message;
     } catch (err) {
       error.textContent = errorText(err);
     }
@@ -2818,10 +2831,19 @@ function offsiteCard(o) {
     { class: "card pad stack", id: "offsite-form", onsubmit: save },
     h("h2", null, t("offsite.title")),
     h("label", { class: "check" }, enabled, h("span", null, h("strong", null, t("offsite.enable")), h("span", { class: "muted small block" }, t("offsite.enableHint")))),
-    h("div", { class: "field-row" }, field(t("offsite.host"), host), field(t("offsite.port"), port)),
-    field(t("offsite.user"), user),
-    field(t("offsite.path"), path, t("offsite.pathHint")),
-    o.publicKey &&
+    field(t("offsite.kind"), kind, t("offsite.kindHint." + shown)),
+    s3 && [
+      field(t("offsite.endpoint"), endpoint, t("offsite.endpointHint")),
+      h("div", { class: "field-row" }, field(t("offsite.bucket"), bucket), field(t("offsite.region"), region)),
+      field(t("offsite.prefix"), prefix, t("offsite.prefixHint")),
+      field(t("offsite.accessKey"), accessKey),
+      field(t("offsite.secret"), secret, t("offsite.secretHint")),
+    ],
+    !s3 && h("div", { class: "field-row" }, field(t("offsite.host"), host), field(t("offsite.port"), port)),
+    !s3 && field(t("offsite.user"), user),
+    !s3 && field(t("offsite.path"), path, t("offsite.pathHint")),
+    !s3 &&
+      o.publicKey &&
       h(
         "div",
         { class: "field" },
@@ -2831,10 +2853,10 @@ function offsiteCard(o) {
       ),
     h("label", { class: "check" }, seal, h("span", null, h("strong", null, t("offsite.seal")), h("span", { class: "muted small block" }, t("offsite.sealHint")))),
     field(t("offsite.passphrase"), passphrase, t("offsite.passphraseHint")),
-    o.fingerprint && h("p", { class: "muted small" }, t("offsite.hostKnown", { fingerprint: o.fingerprint })),
+    !s3 && o.fingerprint && h("p", { class: "muted small" }, t("offsite.hostKnown", { fingerprint: o.fingerprint })),
     status,
     error,
-    h("footer", null, h("button", { class: "btn primary", disabled: !o.available }, t("offsite.save"))),
+    h("footer", null, h("button", { class: "btn primary", disabled: !o.available && !s3 }, t("offsite.save"))),
   );
 }
 

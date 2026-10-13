@@ -2,8 +2,9 @@
  * Backups on another machine.
  *
  * The backup folder on this machine stays what it is — plain files, the place a restore reads from. What
- * is added here is a second copy of it somewhere else, reached over SFTP: a NAS, a rented storage box, a
- * friend's server. After every snapshot the remote folder is brought in step: what is missing there is
+ * is added here is a second copy of it somewhere else: over SFTP on a NAS, a rented storage box, a
+ * friend's server — or in a bucket of S3-compatible storage (`s3.ts`; a `Remote` is what the two have
+ * in common). After every snapshot the remote folder is brought in step: what is missing there is
  * uploaded (so a day the other machine was off is caught up the next time), and a snapshot Hata deletes
  * here is deleted there. Only that: what is merely absent on this machine — a new backup disk, a server
  * restored from its latest snapshots — is left alone on the other.
@@ -20,6 +21,7 @@ import { join } from "node:path";
 import { SECRETS_DIR } from "./config";
 import { run } from "./docker";
 import { isPlainObject, readJsonFile, writeJsonAtomic, writeTextAtomic } from "./fsutil";
+import { list as listBucket, putFile, putText, remove as removeObject, type S3Place } from "./s3";
 import { SEALED_EXT, sealFile } from "./seal";
 
 export interface OffsiteTarget {
@@ -30,7 +32,22 @@ export interface OffsiteTarget {
   path: string;
 }
 
+/** A bucket of S3-compatible storage; the secret half of the key is kept apart and never shown */
+export interface Bucket {
+  /** The service's address; "" — Amazon's own, found by the region */
+  endpoint: string;
+  region: string;
+  bucket: string;
+  /** Folder inside the bucket; "" — its top */
+  prefix: string;
+  accessKey: string;
+}
+
+export type OffsiteKind = "sftp" | "s3";
+
 interface Saved extends OffsiteTarget {
+  kind: OffsiteKind;
+  s3: Bucket & { secret: string };
   enabled: boolean;
   /** "" — files are uploaded as they are */
   passphrase: string;
@@ -47,6 +64,8 @@ export interface OffsiteRun {
 }
 
 export interface OffsiteStatus extends OffsiteTarget {
+  kind: OffsiteKind;
+  s3: Bucket & { secretSet: boolean };
   /** The system has `sftp` and `ssh-keygen` */
   available: boolean;
   enabled: boolean;
@@ -68,10 +87,13 @@ export interface LocalSet {
 const FILE = join(SECRETS_DIR, "backup-remote.json");
 const KEY_FILE = join(SECRETS_DIR, "backup-key");
 const HOSTS_FILE = join(SECRETS_DIR, "backup-known-hosts");
-const EMPTY: Saved = { enabled: false, host: "", port: 22, user: "", path: "hata-backups", passphrase: "", removed: [], last: null };
+const NO_BUCKET = { endpoint: "", region: "us-east-1", bucket: "", prefix: "hata-backups", accessKey: "", secret: "" };
+const EMPTY: Saved = { kind: "sftp", s3: NO_BUCKET, enabled: false, host: "", port: 22, user: "", path: "hata-backups", passphrase: "", removed: [], last: null };
 
 const saved: Saved = { ...EMPTY, ...readJsonFile<Partial<Saved>>(FILE, {}, isPlainObject) };
 if (!Array.isArray(saved.removed)) saved.removed = [];
+saved.s3 = { ...NO_BUCKET, ...(isPlainObject(saved.s3) ? saved.s3 : {}) };
+if (saved.kind !== "s3") saved.kind = "sftp";
 let running = false;
 let again: (() => { root: string; sets: LocalSet[] }) | null = null;
 
@@ -100,6 +122,54 @@ export function cleanTarget(input: Record<string, unknown>, current: OffsiteTarg
     next.path = path;
   }
   return next;
+}
+
+/** Checks the bucket typed in; a string is the error's code */
+export function cleanBucket(input: Record<string, unknown>, current: Bucket): Bucket | string {
+  const next: Bucket = { endpoint: current.endpoint, region: current.region, bucket: current.bucket, prefix: current.prefix, accessKey: current.accessKey };
+  const text = (key: keyof Bucket) => (typeof input[key] === "string" ? (input[key] as string).trim() : null);
+  if ("endpoint" in input) {
+    const endpoint = text("endpoint")?.replace(/\/+$/, "") ?? null;
+    if (endpoint === null || (endpoint !== "" && !/^https?:\/\/[A-Za-z0-9.-]+(:\d{1,5})?(\/[A-Za-z0-9._~\/-]*)?$/.test(endpoint))) return "offsite.badEndpoint";
+    next.endpoint = endpoint;
+  }
+  if ("region" in input) {
+    const region = text("region");
+    if (region === null || !/^[a-z0-9-]{0,40}$/.test(region)) return "offsite.badRegion";
+    next.region = region || NO_BUCKET.region;
+  }
+  if ("bucket" in input) {
+    const bucket = text("bucket");
+    if (bucket === null || !/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/.test(bucket)) return "offsite.badBucket";
+    next.bucket = bucket;
+  }
+  if ("prefix" in input) {
+    const prefix = text("prefix")?.replace(/^\/+|\/+$/g, "") ?? null;
+    if (prefix === null || prefix.length > 512 || /[\x00-\x1f\\]/.test(prefix) || prefix.split("/").some((part) => part === ".." || part === "." || (part === "" && prefix !== ""))) return "offsite.badPath";
+    next.prefix = prefix;
+  }
+  if ("accessKey" in input) {
+    const accessKey = text("accessKey");
+    if (accessKey === null || !/^[\x21-\x7e]{1,128}$/.test(accessKey)) return "offsite.badAccessKey";
+    next.accessKey = accessKey;
+  }
+  return next;
+}
+
+/** The name of a file in the bucket */
+export const objectKey = (prefix: string, dir: string, name: string): string => [prefix, dir, name].filter(Boolean).join("/");
+
+/** The keys listed under the prefix, as the names each folder holds; what lies deeper or beside is not Hata's */
+export function groupKeys(prefix: string, keys: string[]): Map<string, string[]> {
+  const out = new Map<string, string[]>();
+  const start = prefix ? prefix + "/" : "";
+  for (const key of keys) {
+    if (!key.startsWith(start)) continue;
+    const parts = key.slice(start.length).split("/");
+    if (parts.length !== 2 || !parts[0] || !parts[1]) continue;
+    out.set(parts[0], [...(out.get(parts[0]) ?? []), parts[1]]);
+  }
+  return out;
 }
 
 /** A path as sftp's batch mode takes it; `cleanTarget` has kept out what quoting cannot carry */
@@ -217,23 +287,36 @@ async function sftp(commands: string[]): Promise<{ ok: boolean; output: string }
 // --- Settings and the check -------------------------------------------------------------------------
 
 export async function offsiteStatus(): Promise<OffsiteStatus> {
-  const { host, port, user, path, enabled, last } = saved;
-  return { available: available(), host, port, user, path, enabled, sealed: saved.passphrase !== "", publicKey: await publicKey(), fingerprint: await fingerprint(preferredKey(knownHosts())), running, last };
+  const { host, port, user, path, enabled, last, kind } = saved;
+  const { secret, ...store } = saved.s3;
+  return { kind, s3: { ...store, secretSet: secret !== "" }, available: available(), host, port, user, path, enabled, sealed: saved.passphrase !== "", publicKey: await publicKey(), fingerprint: await fingerprint(preferredKey(knownHosts())), running, last };
 }
 
 /** Saves what was typed in; returns the error's code, or null. `passphrase` is only ever written: "" takes it away */
 export function saveOffsite(input: Record<string, unknown>): string | null {
-  const target = cleanTarget(input, saved);
+  const kind: OffsiteKind = "kind" in input ? (input.kind === "s3" ? "s3" : "sftp") : saved.kind;
+  // only what belongs to the chosen kind is looked at: the other one's fields may be empty
+  const target = kind === "sftp" ? cleanTarget(input, saved) : saved;
   if (typeof target === "string") return target;
+  const store = kind === "s3" ? cleanBucket(input, saved.s3) : saved.s3;
+  if (typeof store === "string") return store;
+  let secret = saved.s3.secret;
+  if (kind === "s3" && typeof input.secret === "string" && input.secret !== "") {
+    if (!/^[\x21-\x7e]{1,256}$/.test(input.secret)) return "offsite.badAccessKey";
+    secret = input.secret;
+  }
   if ("passphrase" in input) {
     if (typeof input.passphrase !== "string" || input.passphrase.length > 1024 || (input.passphrase !== "" && input.passphrase.length < 8)) return "offsite.badPassphrase";
     saved.passphrase = input.passphrase;
   }
   // another machine has another key: the remembered one must not vouch for it
   if (target.host !== saved.host || target.port !== saved.port) rmSync(HOSTS_FILE, { force: true });
-  Object.assign(saved, target);
+  // what was deleted here was to be deleted in the old place; the new one never had it
+  if (kind !== saved.kind || store.bucket !== saved.s3.bucket || store.endpoint !== saved.s3.endpoint) Object.assign(saved, { removed: [], last: null });
+  const { host, port, user, path } = target;
+  Object.assign(saved, { host, port, user, path, kind, s3: { ...store, secret } });
   if ("enabled" in input) saved.enabled = input.enabled === true;
-  if (!saved.host || !saved.user) saved.enabled = false;
+  if (!configured()) saved.enabled = false;
   persist();
   return null;
 }
@@ -248,6 +331,18 @@ export type OffsiteCheck =
 
 /** Connects, makes the folder and looks into it. `trust` is the fingerprint the user has confirmed */
 export async function checkOffsite(trust?: string): Promise<OffsiteCheck> {
+  if (saved.kind === "s3") {
+    if (!configured()) return { status: "failed", message: "The bucket, the key and its secret are all needed." };
+    // a file written and taken away again: a key that may only read would fail at the first snapshot
+    const probe = objectKey(saved.s3.prefix, "", ".hata-check");
+    try {
+      await putText(bucket(), probe, "Hata can write here.\n");
+      await removeObject(bucket(), probe);
+      return { status: "ok" };
+    } catch (e) {
+      return { status: "failed", message: s3Reason(e) };
+    }
+  }
   if (!available()) return { status: "failed", message: "sftp is not installed on this machine (the package is openssh-client)." };
   if (!saved.host || !saved.user) return { status: "failed", message: "No address is set." };
   await publicKey();
@@ -277,16 +372,71 @@ export function forgetHost(): void {
 
 const UPLOAD_EXT = ".upload";
 
-async function sendFile(root: string, dir: string, file: string): Promise<void> {
+/** Whether there is a place to send to */
+const configured = (): boolean => (saved.kind === "s3" ? saved.s3.bucket !== "" && saved.s3.accessKey !== "" && saved.s3.secret !== "" : saved.host !== "" && saved.user !== "");
+
+/** The other place, whatever it is: what its folders hold, a file put there, files taken away */
+interface Remote {
+  listing(dirs: string[]): Promise<Map<string, string[]>>;
+  send(local: string, dir: string, name: string): Promise<void>;
+  drop(files: { dir: string; name: string }[]): Promise<void>;
+}
+
+const overSftp = (): Remote => {
+  const folder = (dir: string) => `${saved.path}/${dir}`;
+  return {
+    async listing(dirs) {
+      const listed = await sftp([...mkdirs(saved.path), ...dirs.flatMap((dir) => [`-mkdir ${quoted(folder(dir))}`, `-ls -1 ${quoted(folder(dir))}`])]);
+      if (!listed.ok) throw new Error(reason(listed.output));
+      const found = parseListings(listed.output);
+      return new Map(dirs.map((dir) => [dir, found.get(folder(dir)) ?? []]));
+    },
+    async send(local, dir, name) {
+      const remote = `${folder(dir)}/${name}`;
+      // under another name until it is whole, as on this machine
+      const result = await sftp([`put ${quoted(local)} ${quoted(remote + ".partial")}`, `-rm ${quoted(remote)}`, `rename ${quoted(remote + ".partial")} ${quoted(remote)}`]);
+      if (!result.ok) throw new Error(reason(result.output));
+    },
+    async drop(files) {
+      if (!files.length) return;
+      const removed = await sftp(files.map(({ dir, name }) => `-rm ${quoted(`${folder(dir)}/${name}`)}`));
+      if (!removed.ok) throw new Error(reason(removed.output));
+    },
+  };
+};
+
+const bucket = (): S3Place => ({ endpoint: saved.s3.endpoint, region: saved.s3.region, bucket: saved.s3.bucket, accessKey: saved.s3.accessKey, secret: saved.s3.secret });
+
+/** What the storage said, in a line: its own code first — "AccessDenied", "NoSuchBucket" say more than the sentence after */
+export function s3Reason(e: unknown): string {
+  const error = e as { code?: unknown; message?: unknown };
+  const code = typeof error?.code === "string" ? error.code : "";
+  const message = typeof error?.message === "string" ? error.message : String(e);
+  return [code, message].filter((part, i) => part && (i === 0 || !code || part !== code)).join(": ").slice(0, 300);
+}
+
+const inBucket = (): Remote => {
+  const place = bucket();
+  const { prefix } = saved.s3;
+  return {
+    async listing(dirs) {
+      const found = groupKeys(prefix, await listBucket(place, prefix ? prefix + "/" : ""));
+      return new Map(dirs.map((dir) => [dir, found.get(dir) ?? []]));
+    },
+    send: (local, dir, name) => putFile(place, objectKey(prefix, dir, name), local),
+    async drop(files) {
+      for (const { dir, name } of files) await removeObject(place, objectKey(prefix, dir, name));
+    },
+  };
+};
+
+async function sendFile(remote: Remote, root: string, dir: string, file: string): Promise<void> {
   const local = join(root, dir, file);
   const name = saved.passphrase ? file + SEALED_EXT : file;
   const sealed = local + SEALED_EXT + UPLOAD_EXT;
   try {
     if (saved.passphrase) await sealFile(local, sealed, saved.passphrase);
-    const remote = `${saved.path}/${dir}/${name}`;
-    // under another name until it is whole, as on this machine
-    const result = await sftp([`put ${quoted(saved.passphrase ? sealed : local)} ${quoted(remote + ".partial")}`, `-rm ${quoted(remote)}`, `rename ${quoted(remote + ".partial")} ${quoted(remote)}`]);
-    if (!result.ok) throw new Error(reason(result.output));
+    await remote.send(saved.passphrase ? sealed : local, dir, name);
   } finally {
     rmSync(sealed, { force: true });
     rmSync(sealed + ".partial", { force: true });
@@ -300,26 +450,21 @@ async function sync(root: string, sets: LocalSet[]): Promise<number> {
       for (const name of readdirSync(join(root, dir))) if (name.includes(SEALED_EXT + UPLOAD_EXT)) rmSync(join(root, dir, name), { force: true });
     } catch {}
   }
-  const folder = (dir: string) => `${saved.path}/${dir}`;
-  const listed = await sftp([...mkdirs(saved.path), ...sets.flatMap(({ dir }) => [`-mkdir ${quoted(folder(dir))}`, `-ls -1 ${quoted(folder(dir))}`])]);
-  if (!listed.ok) throw new Error(reason(listed.output));
-  const remote = parseListings(listed.output);
+  const remote = saved.kind === "s3" ? inBucket() : overSftp();
+  const there = await remote.listing(sets.map(({ dir }) => dir));
   let uploaded = 0;
-  const gone: string[] = [];
+  const gone: { dir: string; name: string }[] = [];
   const asked = [...saved.removed];
   for (const { dir, ids } of sets) {
     const deleted = asked.filter((entry) => entry.startsWith(dir + "/")).map((entry) => entry.slice(dir.length + 1));
-    const { upload, remove } = plan(ids, remote.get(folder(dir)) ?? [], deleted);
+    const { upload, remove } = plan(ids, there.get(dir) ?? [], deleted);
     for (const file of upload) {
-      await sendFile(root, dir, file);
+      await sendFile(remote, root, dir, file);
       uploaded++;
     }
-    gone.push(...remove.map((name) => `-rm ${quoted(`${folder(dir)}/${name}`)}`));
+    gone.push(...remove.map((name) => ({ dir, name })));
   }
-  if (gone.length) {
-    const removed = await sftp(gone);
-    if (!removed.ok) throw new Error(reason(removed.output));
-  }
+  await remote.drop(gone);
   saved.removed = saved.removed.filter((entry) => !asked.includes(entry));
   return uploaded;
 }
@@ -330,7 +475,7 @@ async function sync(root: string, sets: LocalSet[]): Promise<number> {
  * `onDone` hears how each run ended.
  */
 export function syncOffsite(local: () => { root: string; sets: LocalSet[] }, onDone?: (run: OffsiteRun) => void): void {
-  if (!saved.enabled || !saved.host) return;
+  if (!saved.enabled || !configured()) return;
   if (running) {
     again = local;
     return;
@@ -346,7 +491,7 @@ export function syncOffsite(local: () => { root: string; sets: LocalSet[] }, onD
         const { root, sets } = current();
         result.uploaded = await sync(root, sets);
       } catch (e) {
-        result.error = e instanceof Error ? e.message : String(e);
+        result.error = saved.kind === "s3" ? s3Reason(e) : e instanceof Error ? e.message : String(e);
       }
       result.at = Date.now();
       saved.last = result;
@@ -360,7 +505,7 @@ export function syncOffsite(local: () => { root: string; sets: LocalSet[] }, onD
 
 /** A snapshot was deleted here: the next run deletes it there */
 export function forgetSnapshot(dir: string, id: string): void {
-  if (!saved.host) return;
+  if (!configured()) return;
   saved.removed = [...saved.removed.filter((entry) => entry !== `${dir}/${id}`), `${dir}/${id}`].slice(-5000);
   persist();
 }

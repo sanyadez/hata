@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { cleanTarget, fingerprint, mkdirs, parseListings, plan, preferredKey, reason } from "../src/offsite";
+import { cleanBucket, cleanTarget, fingerprint, groupKeys, objectKey, s3Reason, mkdirs, parseListings, plan, preferredKey, reason } from "../src/offsite";
 import { sealedToOpen } from "../src/restore";
 
 const current = { host: "", port: 22, user: "", path: "hata-backups" };
@@ -89,4 +89,37 @@ test("of a sealed copy, a restore opens the latest snapshot of each folder", () 
   // one that did not arrive whole is passed over
   expect(sealedToOpen([...sealed("20261008-031400"), "20261009-031400.tar.gz.enc"])).toEqual(["20261008-031400.json.enc", "20261008-031400.tar.gz.enc"]);
   expect(sealedToOpen(["notes.txt"])).toEqual([]);
+});
+
+const noBucket = { endpoint: "", region: "us-east-1", bucket: "", prefix: "hata-backups", accessKey: "" };
+
+test("a bucket: an address that is a web address, names the services accept, a folder without a way out", () => {
+  expect(cleanBucket({ endpoint: " https://s3.eu-central-003.backblazeb2.com/ ", region: "eu-central-003", bucket: "my-home.backups", prefix: "/hata/server/", accessKey: " 003abc " }, noBucket)).toEqual({ endpoint: "https://s3.eu-central-003.backblazeb2.com", region: "eu-central-003", bucket: "my-home.backups", prefix: "hata/server", accessKey: "003abc" });
+  expect(cleanBucket({ endpoint: "http://192.168.1.5:9000", prefix: "" }, noBucket)).toMatchObject({ endpoint: "http://192.168.1.5:9000", prefix: "" });
+  // no region typed: the one every service takes
+  expect(cleanBucket({ region: "" }, { ...noBucket, region: "auto" })).toMatchObject({ region: "us-east-1" });
+  for (const endpoint of ["s3.example.com", "ftp://x", "https://a b", "https://user:pass@host", "https://host/?x=1"]) expect(cleanBucket({ endpoint }, noBucket)).toBe("offsite.badEndpoint");
+  for (const bucket of ["", "ab", "My-Bucket", "-bucket", "bucket-", "a/b"]) expect(cleanBucket({ bucket }, noBucket)).toBe("offsite.badBucket");
+  for (const prefix of ["a/../b", "a//b", "./a", "a\\b", "a\nb"]) expect(cleanBucket({ prefix }, noBucket)).toBe("offsite.badPath");
+  expect(cleanBucket({ region: "EU West" }, noBucket)).toBe("offsite.badRegion");
+  expect(cleanBucket({ accessKey: "a b" }, noBucket)).toBe("offsite.badAccessKey");
+  expect(cleanBucket({ accessKey: 5 }, noBucket)).toBe("offsite.badAccessKey");
+  // the secret is not part of what comes back
+  expect(cleanBucket({}, { ...noBucket, secret: "s" } as typeof noBucket)).toEqual(noBucket);
+});
+
+test("the files of a bucket are read as the folders of the backup directory", () => {
+  expect(objectKey("hata/server", "memos", "20261013-030000.tar.gz")).toBe("hata/server/memos/20261013-030000.tar.gz");
+  expect(objectKey("", "memos", "a.json")).toBe("memos/a.json");
+  expect(objectKey("hata", "", ".hata-check")).toBe("hata/.hata-check");
+  const keys = ["hata/memos/1.tar.gz", "hata/memos/1.json", "hata/_server/2.tar.gz", "hata/.hata-check", "hata/memos/deeper/x", "hatara/memos/3.json", "other/4.json"];
+  expect(groupKeys("hata", keys)).toEqual(new Map([["memos", ["1.tar.gz", "1.json"]], ["_server", ["2.tar.gz"]]]));
+  expect(groupKeys("", ["memos/1.json", "top.txt"])).toEqual(new Map([["memos", ["1.json"]]]));
+});
+
+test("what the storage answered is said with its own code", () => {
+  expect(s3Reason({ code: "AccessDenied", message: "Access Denied." })).toBe("AccessDenied: Access Denied.");
+  expect(s3Reason({ code: "NoSuchBucket", message: "NoSuchBucket" })).toBe("NoSuchBucket");
+  expect(s3Reason(new Error("connection refused"))).toBe("connection refused");
+  expect(s3Reason("odd")).toBe("odd");
 });

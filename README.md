@@ -151,9 +151,11 @@ Early development. What works today:
 - a backup of the whole server: with every run Hata's own state (settings, users, the dashboard, the
   apps' compose files) is saved next to the apps' snapshots, and `sudo hata restore <backup folder>` on a
   new machine brings back Hata and then every app from its latest snapshot;
-- a second copy of the backups on another machine: every snapshot is sent over SFTP to a NAS, a rented
-  storage box or another server — with a key Hata makes for itself, never a password. With a passphrase
-  the files are encrypted before they leave, so the other machine cannot read them. A day the other
+- a second copy of the backups somewhere else: every snapshot is sent over SFTP to a NAS, a rented
+  storage box or another server — with a key Hata makes for itself, never a password — or into a bucket
+  of S3-compatible storage (Backblaze B2, Wasabi, Cloudflare R2, Amazon S3, MinIO), in parts, so a large
+  snapshot does not cost memory. With a passphrase the files are encrypted before they leave, so
+  whoever keeps them cannot read them. A day the other
   machine was off is caught up the next time, and a copy that falls behind shows up under "needs
   attention". `hata restore` opens such a copy when given the passphrase;
 - disks and their health (Settings → Storage): every disk with what it says about itself (SMART) in plain
