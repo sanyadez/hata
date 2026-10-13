@@ -1398,6 +1398,8 @@
   "connect.where.local": "a program on this computer",
   "connect.where.app": "the app that opens “{scheme}://” links on this device",
   "connect.warn": "Allow only what you have started yourself, just now, in that program. If this page opened by itself or from a link somebody sent you, decline.",
+  "connect.name": "What to call it",
+  "connect.nameHint": "The name it has in Settings → Agents and in the activity log. Say which computer or chat it is, so that you can tell it from the others later.",
   "connect.password": "Your password",
   "connect.passwordHint": "To confirm that it is you who lets the agent in.",
   "connect.allow": "Allow",

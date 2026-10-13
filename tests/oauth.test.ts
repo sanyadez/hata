@@ -121,6 +121,11 @@ test("from registering to calling: the code is good once, the tokens renew and t
   expect(twin.name).toBe("Connector (2)");
   removeKey(twin.id);
 
+  // the administrator's own name for it wins; the connector's stays as who signed in
+  const named = keyOf(bearer(grantKey(client, { ...grant, name: "Laptop in the hall" })!.access_token))!;
+  expect(listKeys().find((k) => k.id === named.id)).toMatchObject({ name: "Laptop in the hall", via: "Connector" });
+  removeKey(named.id);
+
   // removed like any key: its tokens are worth nothing
   const last = renewTokens(later.refresh_token, client.id)!;
   removeKey(key.id);

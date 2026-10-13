@@ -80,9 +80,15 @@ export const publicKey = ({ hash: _, oauth, ...key }: AgentKey) => ({ ...key, ..
 export const listKeys = () => keys.map(publicKey);
 
 /** Makes a key; the `key` of the answer is the only time it is seen. A string is an error code. */
-export function createKey(name: unknown, level: unknown, by: string, confirm = false): { key: string; info: ReturnType<typeof publicKey> } | string {
+/** A key's name as it is kept: one line, up to 40 characters; "" — not a name */
+export function cleanName(name: unknown): string {
   const label = typeof name === "string" ? name.trim().replace(/\s+/g, " ") : "";
-  if (!label || label.length > 40) return "agents.badName";
+  return label.length > 40 ? "" : label;
+}
+
+export function createKey(name: unknown, level: unknown, by: string, confirm = false): { key: string; info: ReturnType<typeof publicKey> } | string {
+  const label = cleanName(name);
+  if (!label) return "agents.badName";
   if (!LEVELS.includes(level as Level)) return "agents.badLevel";
   if (keys.some((k) => k.name.toLowerCase() === label.toLowerCase())) return "agents.nameTaken";
   if (keys.length >= MAX_KEYS) return "agents.tooMany";
@@ -107,6 +113,8 @@ export interface Grant {
   level: Level;
   confirm: boolean;
   by: string;
+  /** what the administrator called it; without it the key takes the connector's own name */
+  name?: string;
 }
 
 /** Whether a connector could be given a key of this level now; the error code when not */
@@ -115,7 +123,7 @@ export const cannotGrant = (level: unknown): string | null => (!LEVELS.includes(
 /** Makes the key of a connector an administrator allowed, and its first tokens; null — there is no room for it */
 export function grantKey(client: { id: string; name: string }, grant: Grant, now = Date.now()): Tokens | null {
   if (cannotGrant(grant.level)) return null;
-  const made: AgentKey = { id: crypto.randomUUID(), name: freeName(client.name.slice(0, 40) || "MCP client"), level: grant.level, confirm: grant.confirm, hash: "", hint: "", createdAt: now, createdBy: grant.by, lastUsed: 0, lastIp: "", oauth: { client: client.id, clientName: client.name, refresh: "", expires: 0 } };
+  const made: AgentKey = { id: crypto.randomUUID(), name: freeName(grant.name || client.name.slice(0, 40) || "MCP client"), level: grant.level, confirm: grant.confirm, hash: "", hint: "", createdAt: now, createdBy: grant.by, lastUsed: 0, lastIp: "", oauth: { client: client.id, clientName: client.name, refresh: "", expires: 0 } };
   keys.push(made);
   return newTokens(made, now);
 }

@@ -12,7 +12,7 @@ import { join } from "node:path";
 import { homedir, networkInterfaces } from "node:os";
 import type { Server, ServerWebSocket } from "bun";
 import { recent, record, history } from "./activity";
-import { agentUser, cannotGrant, createKey, grantKey, keyOf, listKeys, removeKey, renewTokens, setConfirm } from "./agents";
+import { agentUser, cannotGrant, cleanName, createKey, grantKey, keyOf, listKeys, removeKey, renewTokens, setConfirm } from "./agents";
 import type { Level } from "./agents";
 import { Desk } from "./approvals";
 import { answerCall, assistantConfig, configured as assistantReady, findChat, listChats, ModelError, modelsFor, removeChat, retry as retryAssistant, say as sayToAssistant, shownChat, shownConfig as shownAssistant, stopChat, updateAssistant } from "./assistant";
@@ -696,8 +696,12 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
       if (!(await checkOwnPassword(user, data.password))) return fail(400, "auth.wrongPassword");
       const refused = cannotGrant(data.level);
       if (refused) return fail(400, refused);
-      record("agents.connect", { user: user.name, detail: q.name });
-      return json({ redirect: oauthAllowed(q.id, { level: data.level as Level, confirm: data.confirm === true, by: user.name }) });
+      // the connector's own name says little ("MCP CLI Proxy"): the administrator may give the access another
+      const typed = typeof data.name === "string" && data.name.trim() !== "";
+      const name = typed ? cleanName(data.name) : "";
+      if (typed && !name) return fail(400, "agents.badName");
+      record("agents.connect", { user: user.name, detail: name && name !== q.name ? `${name} (${q.name})` : q.name });
+      return json({ redirect: oauthAllowed(q.id, { level: data.level as Level, confirm: data.confirm === true, by: user.name, ...(name ? { name } : {}) }) });
     }
   }
 

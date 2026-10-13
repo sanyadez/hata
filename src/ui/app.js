@@ -6721,6 +6721,7 @@ function renderConnect() {
       level.addEventListener("change", paint);
       paint();
       const password = h("input", { type: "password", autocomplete: "current-password", required: true });
+      const name = h("input", { type: "text", maxlength: 40, value: q.name.slice(0, 40), autocomplete: "off" });
       const error = h("p", { class: "error", role: "alert" });
       put(
         box,
@@ -6730,13 +6731,14 @@ function renderConnect() {
             class: "stack-s",
             onsubmit: (e) => {
               e.preventDefault();
-              void leave({ allow: true, level: level.value, confirm: level.value === "full" && confirm.checked, password: password.value }, error);
+              void leave({ allow: true, name: name.value, level: level.value, confirm: level.value === "full" && confirm.checked, password: password.value }, error);
             },
           },
           h("h2", null, t("connect.asks", { name: q.name })),
           h("p", null, t("connect.lead")),
           field(t("connect.where"), h("div", { class: "connect-where" }, connectWhere(q.redirect)), t("connect.whereHint")),
           h("p", { class: "muted small" }, t("connect.warn")),
+          field(t("connect.name"), name, t("connect.nameHint")),
           h("label", { class: "field" }, h("span", { class: "label" }, t("agents.new.level")), level, hint),
           asks,
           field(t("connect.password"), password, t("connect.passwordHint")),
