@@ -43,6 +43,30 @@ export const installCommand = (pkg: string): string => {
 };
 
 /** Installs a package with the system's package manager; returns what went wrong, or null */
+/** How each package manager takes a package away, leaving its settings and what depends on nothing else */
+const REMOVERS: Record<string, string[]> = {
+  "apt-get": ["remove", "-y"],
+  dnf: ["remove", "-y"],
+  yum: ["remove", "-y"],
+  zypper: ["--non-interactive", "remove"],
+  pacman: ["-R", "--noconfirm"],
+  apk: ["del"],
+};
+
+/** The command the "Remove" button runs; empty when this system's package manager is not one we know */
+export const removeCommand = (pkgs: string[]): string => {
+  const manager = packageManager();
+  return manager && pkgs.length ? [manager, ...REMOVERS[manager]!, ...pkgs].join(" ") : "";
+};
+
+/** Removes packages; null when it worked, otherwise what the package manager said */
+export async function removePackages(pkgs: string[]): Promise<string | null> {
+  const manager = packageManager();
+  if (!manager || !pkgs.length) return "No known package manager was found.";
+  const result = await run([Bun.which(manager, { PATH })!, ...REMOVERS[manager]!, ...pkgs], 5 * 60_000, { DEBIAN_FRONTEND: "noninteractive" });
+  return result.code === 0 ? null : (result.err.trim() || result.out.trim()).split("\n").slice(-3).join("\n") || `${manager} exited with ${result.code}`;
+}
+
 export async function installPackage(pkg: string): Promise<string | null> {
   const found = installer();
   if (!found) return `No known package manager was found. Install the ${pkg} package by hand.`;

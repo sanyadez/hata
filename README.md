@@ -227,7 +227,8 @@ Early development. What works today:
 - Docker itself is installed by a button where it is missing, and started where it is not running;
 - system programs (Settings): every program of the system Hata relies on in one list — Docker, Samba,
   NetworkManager, mergerfs, SnapRAID and the rest — with what it is for, whether it is installed and in
-  which version, and the button that installs a missing one;
+  which version, and the button that installs a missing one or removes one you do not want (not while
+  something of Hata's stands on it);
 - English and Ukrainian UI, light and dark, phone-friendly.
 
 Not there yet: wildcard certificates (DNS challenge), share links for files.

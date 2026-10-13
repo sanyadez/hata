@@ -4806,6 +4806,45 @@ function networkSection() {
   ];
 }
 
+/** Takes a system program away: what happens, the command, and for Docker the password */
+function toolRemoveDialog(tool) {
+  const error = h("p", { class: "error", role: "alert" });
+  const password = tool.id === "docker" ? h("input", { type: "password", autocomplete: "current-password", required: true }) : null;
+  const go = h("button", { class: "btn danger" }, t("tools.removeGo", { name: tool.name }));
+  const dialog = openDialog(
+    "",
+    h(
+      "form",
+      {
+        class: "stack",
+        onsubmit: async (e) => {
+          e.preventDefault();
+          error.textContent = "";
+          go.disabled = true;
+          go.textContent = t("tools.removing");
+          try {
+            state.tools = await api("POST", `/api/tools/${tool.id}/remove`, password ? { password: password.value } : {});
+            dialog.close();
+            toast(t("tools.removed", { name: tool.name }));
+            renderSettings();
+          } catch (err) {
+            error.textContent = errorText(err);
+            go.disabled = false;
+            go.textContent = t("tools.removeGo", { name: tool.name });
+          }
+        },
+      },
+      h("header", null, h("h2", { class: "grow" }, t("tools.removeTitle", { name: tool.name })), closeX(() => dialog)),
+      h("p", null, t("tools.removeLead")),
+      tool.id === "docker" && h("p", { class: "banner" }, t("tools.removeDocker")),
+      h("p", { class: "cmd whole" }, icon("terminal"), tool.remove),
+      password && field(t("auth.password"), password),
+      error,
+      h("footer", null, closeButton(() => dialog, t("common.cancel")), go),
+    ),
+  );
+}
+
 /** Settings → System programs: everything of the system Hata relies on, installed or not */
 function toolsSection() {
   const tools = state.tools;
@@ -4844,9 +4883,11 @@ function toolsSection() {
         h("div", { class: "tool-head" }, h("strong", null, tool.name), h("span", { class: "state " + (tool.state === "installed" ? "running" : "stopped") }, t("tools.state." + tool.state)), tool.used && h("span", { class: "state running" }, t("tools.used")), tool.version && h("span", { class: "muted small mono" }, tool.version)),
         h("p", { class: "muted small" }, t(`tools.${tool.id}.what`), " ", h("a", { class: "link", href: tool.page }, t(`tools.${tool.id}.where`))),
         tool.builtIn && h("p", { class: "muted small" }, t(`tools.${tool.id}.builtIn`)),
+        tool.state === "installed" && tool.holds && h("p", { class: "muted small" }, t("tools.holds." + tool.holds)),
         tool.state !== "installed" && (tool.install ? h("p", { class: "cmd" }, icon("terminal"), tool.install) : h("p", { class: "muted small" }, t("mounting.needs.byHand", { package: tool.package }))),
       ),
       tool.state !== "installed" && tool.install && install(tool),
+      tool.state === "installed" && !tool.holds && tool.remove && button(t("tools.remove"), { class: "small", onclick: () => toolRemoveDialog(tool) }, "trash"),
     );
   const here = tools.filter((tool) => tool.state === "installed");
   const absent = tools.filter((tool) => tool.state !== "installed");

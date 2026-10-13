@@ -27,7 +27,7 @@ import { fills, measureFills, startFills } from "./fills";
 import { checkImages, imagesStatus, startImages } from "./images";
 import { afterPackage, giveBack, internetTrouble, startNetwork, setCheck, setRole, startHotspot, stopHotspot, wifiQrText, changeNic, confirmChange, handOver, NETWORK_PACKAGES, networkReport, NetworkError, revertChange, wifiConnect, wifiForget, wifiNetworks } from "./network";
 import { DOCKER_INSTALL_COMMAND, installDocker, startDocker } from "./dockerinstall";
-import { installOne, toolsReport } from "./tools";
+import { installOne, removeOne, toolsReport } from "./tools";
 import { ArrayError, arrayReport, arrayTrouble, bringBack, rebuild as rebuildParity, repair as repairArray, scrub as scrubArray, setUp as setUpArray, startSnapraid, stop as stopArray, sync as syncArray, turnOff as turnOffArray } from "./snapraid";
 import { ignoreDisk, unusedDisks, absent, connectVolume, disconnect, mergeFolders, mountingReport, prepareDisk, startMounting, type Outcome } from "./mounting";
 import { moveData } from "./movedata";
@@ -937,6 +937,15 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
     const done = await installOne(tool[1]!, user.name);
     if ("job" in done) return json({ job: done.job.id }, 202);
     if (done.error) return fail(500, "tools.installFailed", { message: done.error });
+    return json(await toolsReport());
+  }
+  const toolGone = /^\/api\/tools\/([a-z0-9-]+)\/remove$/.exec(path);
+  if (toolGone && method === "POST") {
+    // without Docker every app is down: asked for the password, like everything that hurts to undo
+    if (toolGone[1] === "docker" && !(await checkOwnPassword(user, (await body(req)).password))) return fail(400, "auth.wrongPassword");
+    server.timeout(req, 0);
+    const failed = await removeOne(toolGone[1]!, user.name);
+    if (failed) return fail(failed.message ? 500 : 409, failed.code, { message: failed.message ?? "" });
     return json(await toolsReport());
   }
   // Docker itself, for a server that has none: the button on the home page
