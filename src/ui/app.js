@@ -2917,6 +2917,33 @@ function renderFiles() {
   renderFilesBody();
 }
 
+/** The places on the left of Files and of the trash; `path` — the folder on screen, null in the trash */
+function filesPlaces(path) {
+  const places = document.getElementById("files-places");
+  if (!places) return;
+  const trash = path === null;
+  const home = state.files?.home ?? "";
+  const inHome = !trash && home !== "" && within(path, home);
+  const inside = (folder) => !trash && within(path, folder);
+  const place = (label, to, iconName, active) => h("a", { class: "cat" + (active ? " active" : ""), href: filesHash(to) }, h("span", { class: "with-icon" }, icon(iconName), h("span", { class: "clip" }, label)));
+  const disk = state.files?.disk;
+  const used = disk ? Math.round(((disk.total - disk.free) / disk.total) * 100) : 0;
+  const fill = h("i", { class: level(used) });
+  fill.style.width = used + "%";
+  put(
+    places,
+    h("div", { class: "cat-title" }, t("files.places")),
+    home && place(t("files.home"), home, "home", path === home),
+    home && (state.files?.places ?? []).map((name) => place(name, joinPath(home, name), name === "AppData" ? "box" : "folder", inside(joinPath(home, name)))),
+    place(t("files.root"), "/", "disk", !trash && path !== "" && !inHome && !(state.files?.disks ?? []).some((d) => within(path, d))),
+    h("a", { class: "cat" + (trash ? " active" : ""), href: "#/trash" }, h("span", { class: "with-icon" }, icon("trash"), h("span", { class: "clip" }, t("trash.title")))),
+    (state.files?.disks ?? []).length > 0 && h("div", { class: "cat-title" }, t("files.disks")),
+    (state.files?.disks ?? []).map((d) => place(d.split("/").pop(), d, "disk", inside(d))),
+    disk && h("div", { class: "cat-title" }, t("files.disk")),
+    disk && h("div", { class: "files-disk" }, h("div", { class: "bar" }, fill), h("span", { class: "muted small" }, t("files.free", { free: bytes(disk.free), total: bytes(disk.total) }))),
+  );
+}
+
 function renderFilesBody() {
   const main = document.getElementById("files-main");
   if (!main) return;
@@ -2924,26 +2951,7 @@ function renderFilesBody() {
   const listing = state.files?.path === path ? state.files : null;
   const parts = path.split("/").filter(Boolean);
 
-  const home = state.files?.home ?? "";
-  const inHome = home !== "" && within(path, home);
-  const place = (label, to, iconName, active) => h("a", { class: "cat" + (active ? " active" : ""), href: filesHash(to) }, h("span", { class: "with-icon" }, icon(iconName), h("span", { class: "clip" }, label)));
-  const disk = state.files?.disk;
-  const used = disk ? Math.round(((disk.total - disk.free) / disk.total) * 100) : 0;
-  const fill = h("i", { class: level(used) });
-  fill.style.width = used + "%";
-  put(
-    document.getElementById("files-places"),
-    h("div", { class: "cat-title" }, t("files.places")),
-    home && place(t("files.home"), home, "home", path === home),
-    home && (state.files?.places ?? []).map((name) => place(name, joinPath(home, name), name === "AppData" ? "box" : "folder", within(path, joinPath(home, name)))),
-    place(t("files.root"), "/", "disk", path !== "" && !inHome && !(state.files?.disks ?? []).some((d) => within(path, d))),
-    h("a", { class: "cat", href: "#/trash" }, h("span", { class: "with-icon" }, icon("trash"), h("span", { class: "clip" }, t("trash.title")))),
-    (state.files?.disks ?? []).length > 0 && h("div", { class: "cat-title" }, t("files.disks")),
-    (state.files?.disks ?? []).map((d) => place(d.split("/").pop(), d, "disk", within(path, d))),
-    disk && h("div", { class: "cat-title" }, t("files.disk")),
-    disk && h("div", { class: "files-disk" }, h("div", { class: "bar" }, fill), h("span", { class: "muted small" }, t("files.free", { free: bytes(disk.free), total: bytes(disk.total) }))),
-  );
-
+  filesPlaces(path);
   const crumbs = h(
     "h1",
     { class: "path" },
@@ -3213,6 +3221,8 @@ async function loadTrash() {
   } catch (e) {
     return toast(errorText(e), "error");
   }
+  // opened straight from a link: the places on the left come with a listing of Files
+  if (!state.files) state.files = await api("GET", "/api/files?path=").catch(() => null);
   if (state.route.view === "trash") renderTrash();
 }
 
@@ -3252,7 +3262,7 @@ function renderTrash() {
       h("td", { class: "num" }, bytes(item.size), item.type === "dir" && h("div", { class: "muted small" }, t("trash.files", { n: item.files }))),
       h("td", null, h("div", { class: "row-actions" }, button(t("trash.restore"), { class: "small", onclick: back(item) }, "undo"), button("", { class: "small icon-btn", title: t("files.deleteForever"), "aria-label": t("files.deleteForever"), onclick: () => forever([item.id], t("trash.deleteTitle", { name: item.name }), t("trash.deleteLead")) }, "trash"))),
     );
-  shell(
+  shell(h("div", { class: "files" }, h("aside", { class: "cats", id: "files-places" }), h("section", { class: "stack" },
     h(
       "div",
       { class: "page-head" },
@@ -3269,7 +3279,8 @@ function renderTrash() {
           ? h("p", { class: "empty" }, t("trash.nothing"))
           : h("table", { class: "disks trash" }, h("thead", null, h("tr", null, h("th", null, t("files.col.name")), h("th", null, t("trash.col.from")), h("th", null, t("trash.col.deleted")), h("th", { class: "num" }, t("files.col.size")), h("th"))), h("tbody", null, items.map(row))),
     ),
-  );
+  )));
+  filesPlaces(null);
 }
 
 /** Picks the folder to move or copy into */
