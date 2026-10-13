@@ -480,6 +480,9 @@ export function disconnect(path: string, user: string): Promise<Outcome> {
     const index = temporary.findIndex((t) => t.path === path);
     if (!kept && index < 0) return { error: "disk.notOurs" };
     if (Object.values(pools(fstab())).some((branches) => branches.includes(path))) return { error: "disk.holds.pool" };
+    // a disk of the array taken away is a disk that failed, as far as the parity knows
+    // (one that is gone already is let go: its replacement takes the same folder)
+    if (mountedAt().has(path) && (settings.snapraid.parity === path || settings.snapraid.data.some((d) => d.path === path))) return { error: "disk.holds.array" };
     const used = holds(path, { dataRoot: settings.dataRoot, backupDir: settings.backup.dir, state: [DATA_DIR, SECRETS_DIR], shares: settings.shares.map((s) => s.path) });
     if (used) return { error: `disk.holds.${used}` };
     const device = mountedAt().get(path);

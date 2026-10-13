@@ -110,6 +110,16 @@ export async function installService(args: string[] = []): Promise<number> {
   return 0;
 }
 
+/** SnapRAID gets back the configuration it had before Hata; the parity and the lists on the disks stay */
+function unprotect(): void {
+  try {
+    const conf = "/etc/snapraid.conf";
+    if (!existsSync(conf) || !readFileSync(conf, "utf8").startsWith("# Written by Hata")) return;
+    if (existsSync(conf + ".before-hata")) renameSync(conf + ".before-hata", conf);
+    else rmSync(conf, { force: true });
+  } catch {}
+}
+
 /** Samba gets back the configuration it had before Hata; without one, it is left with nothing shared */
 function unshare(): void {
   try {
@@ -135,6 +145,7 @@ export async function uninstallService(): Promise<number> {
   systemctl("daemon-reload");
   rmSync(BIN, { force: true });
   unshare();
+  unprotect();
   console.log(`Hata is removed. Apps keep running; their compose files and the state stay in ${serviceStateDir()}, the users and keys in /etc/hata.`);
   return 0;
 }

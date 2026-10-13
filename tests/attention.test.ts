@@ -112,3 +112,8 @@ test("a way to the internet without internet: a warning while another carries it
   expect(items.map((i) => [i.id, i.code, i.severity, i.detail.nic, i.detail.other])).toEqual([["internet:enp3s0", "internet.main", "warn", "enp3s0", "Alcatel"], ["internet:enx22", "internet.spare", "warn", "ZTE", ""]]);
   expect(attention({ system: system(), docker, apps: [], activity: [], now: NOW, internet: [{ code: "none", nic: "enp3s0", label: "enp3s0", other: "" }] })[0]).toMatchObject({ id: "internet", code: "internet.none", severity: "danger" });
 });
+
+test("the protection from a disk failure: damage and a lost disk are dangers, a waiting sync a warning", () => {
+  const items = attention({ system: system(), docker, apps: [], activity: [], now: NOW, array: [{ code: "held", detail: { n: 80 } }, { code: "errors", detail: { n: 3 } }] });
+  expect(items.map((i) => [i.id, i.severity, i.detail.n])).toEqual([["array.errors", "danger", 3], ["array.held", "warn", 80]]);
+});

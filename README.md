@@ -174,6 +174,11 @@ Early development. What works today:
 - several disks as one folder (mergerfs, installed on request): a new file goes to the disk with the most
   free room, every file stays a plain file on one of the disks. A disk that is plugged in shows up on the
   page by itself, and the disks are in the sidebar of Files;
+- protection from a disk failure (SnapRAID, installed on request): one disk holds parity for the
+  others, the disks stay plain disks; a sync every night and a check every week; when a disk dies, a
+  new one in its place is filled back from the parity; files deleted by mistake since the last sync
+  come back the same way — and a sync after which too many files would be forgotten waits for your
+  word; damage a check finds is repaired from the parity;
 - what fills the data folder (same page): measured once a day — its folders, the data of each app, the
   trash — with how much each grew over the week and, when the disk is filling up, in how long it will
   be full at this pace;

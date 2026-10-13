@@ -30,7 +30,7 @@ const FAILURE_WINDOW_MS = 24 * 3600 * 1000;
 /** A trash smaller than this is not worth a word when its disk fills up, bytes */
 const TRASH_WORTH = 100 * 1024 * 1024;
 
-export function attention(input: { system: SystemStatus; docker: DockerInfo; apps: InstalledApp[]; activity: Activity[]; update?: string | null; offsite?: { error: string } | null; disks?: DiskReport[]; trash?: (path: string) => number; absent?: { path: string; holds: string | null }[]; internet?: Trouble[]; now?: number }): AttentionItem[] {
+export function attention(input: { system: SystemStatus; docker: DockerInfo; apps: InstalledApp[]; activity: Activity[]; update?: string | null; offsite?: { error: string } | null; disks?: DiskReport[]; trash?: (path: string) => number; absent?: { path: string; holds: string | null }[]; internet?: Trouble[]; array?: { code: string; detail: Record<string, string | number> }[]; now?: number }): AttentionItem[] {
   const { system, docker, apps, activity } = input;
   const now = input.now ?? Date.now();
   const items: AttentionItem[] = [];
@@ -90,6 +90,11 @@ export function attention(input: { system: SystemStatus; docker: DockerInfo; app
   // a way to the internet that does not reach it: the server cut off, living on its spare way, or without one
   for (const way of input.internet ?? []) {
     items.push({ id: way.code === "none" ? "internet" : `internet:${way.nic}`, severity: way.code === "none" ? "danger" : "warn", code: `internet.${way.code}`, detail: { nic: way.label, other: way.other } });
+  }
+
+  // the protection from a disk failure: damage found, a disk that came up empty, a sync that waits or failed
+  for (const item of input.array ?? []) {
+    items.push({ id: `array.${item.code}`, severity: item.code === "held" || item.code === "failed" ? "warn" : "danger", code: `array.${item.code}`, detail: item.detail });
   }
 
   const memory = system.memory.total ? Math.round((system.memory.used / system.memory.total) * 100) : 0;

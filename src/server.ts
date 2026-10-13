@@ -26,6 +26,7 @@ import { checkDisks, diskHealth, installTool, listDisks, startDisks, startSelfTe
 import { fills, measureFills, startFills } from "./fills";
 import { checkImages, imagesStatus, startImages } from "./images";
 import { afterPackage, giveBack, internetTrouble, startNetwork, setCheck, setRole, startHotspot, stopHotspot, wifiQrText, changeNic, confirmChange, handOver, NETWORK_PACKAGES, networkReport, NetworkError, revertChange, wifiConnect, wifiForget, wifiNetworks } from "./network";
+import { ArrayError, arrayReport, arrayTrouble, bringBack, rebuild as rebuildParity, repair as repairArray, scrub as scrubArray, setUp as setUpArray, startSnapraid, stop as stopArray, sync as syncArray, turnOff as turnOffArray } from "./snapraid";
 import { absent, connectVolume, disconnect, mergeFolders, mountingReport, prepareDisk, startMounting, type Outcome } from "./mounting";
 import { moveData } from "./movedata";
 import { installPackage } from "./packages";
@@ -659,7 +660,7 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
       arch: ARCH,
       // with a domain, apps are opened at <label>.<domain> when Hata itself is opened by that domain
       site: { domain: siteDomain(), mode: settings.https.mode, local: localDomain() },
-      attention: admin ? attention({ system, docker, apps, activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble() }) : [],
+      attention: admin ? attention({ system, docker, apps, activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), array: arrayTrouble() }) : [],
       // who signed in from where, and what was installed by whom, is the administrators' business
       activity: admin ? recent(8) : [],
       // containers and compose projects on this machine that are not apps here yet
@@ -877,7 +878,7 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
   // ---- disks and their health ----
   const storage = async () => {
     const listed = await listDisks();
-    return json({ ...listed, fills: fills(), mounting: mountingReport(listed.disks) });
+    return json({ ...listed, fills: fills(), mounting: mountingReport(listed.disks), array: arrayReport() });
   };
   const changed = (outcome: Outcome) => ("error" in outcome ? fail(400, outcome.error, { message: outcome.message ?? "", ...(outcome.needs ?? {}) }) : storage());
   if (path === "/api/disks" && method === "GET") return storage();
@@ -896,7 +897,7 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
   // what a disk action said it lacks, installed by the button next to the reason and the command
   if (path === "/api/disks/package" && method === "POST") {
     const name = (await body(req)).package;
-    if (typeof name !== "string" || !["ntfs-3g", "fdisk", "sfdisk", "util-linux", "e2fsprogs", "mergerfs"].includes(name)) return fail(400, "disk.packageFailed", { message: "not a package Hata installs" });
+    if (typeof name !== "string" || !["ntfs-3g", "fdisk", "sfdisk", "util-linux", "e2fsprogs", "mergerfs", "snapraid"].includes(name)) return fail(400, "disk.packageFailed", { message: "not a package Hata installs" });
     server.timeout(req, 0);
     const message = await installPackage(name);
     if (message) return fail(500, "disk.packageFailed", { message });
@@ -923,6 +924,29 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
   if (path === "/api/disks/disconnect" && method === "POST") {
     server.timeout(req, 0);
     return changed(await disconnect(String((await body(req)).path ?? ""), user.name));
+  }
+  // protection from a disk failure; the long runs answer at once and the page follows them
+  if (path.startsWith("/api/disks/array")) {
+    try {
+      const what = path.slice("/api/disks/array".length);
+      if (what === "" && method === "PUT") setUpArray(await body(req), user.name);
+      else if (what === "" && method === "DELETE") turnOffArray(url.searchParams.get("wipe") === "1", user.name);
+      else if (method !== "POST") return fail(404, "notFound");
+      else if (what === "/sync") {
+        const asked = await body(req);
+        syncArray(asked.force === true, user.name, asked.empty === true);
+      }
+      else if (what === "/scrub") scrubArray((await body(req)).whole === true, user.name);
+      else if (what === "/repair") repairArray(user.name);
+      else if (what === "/fix") bringBack((await body(req)).disk, user.name);
+      else if (what === "/rebuild") rebuildParity(user.name);
+      else if (what === "/stop") stopArray();
+      else return fail(404, "notFound");
+      return storage();
+    } catch (e) {
+      if (e instanceof ArrayError) return fail(400, e.code, e.detail);
+      throw e;
+    }
   }
   // the answer does not wait for the measuring: the page asks again while it runs
   if (path === "/api/disks/fills" && method === "POST") {
@@ -1461,6 +1485,7 @@ export async function serve(): Promise<void> {
   });
   startMounting();
   startNetwork();
+  startSnapraid();
   startShares();
   startTrash();
   scheduleStoreSync();
@@ -1470,7 +1495,7 @@ export async function serve(): Promise<void> {
   void refreshHttps();
   refreshLocalNames();
   startNotifications({
-    attention: async () => attention({ system: systemStatus(), docker: await dockerInfo(), apps: await listApps("en"), activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble() }),
+    attention: async () => attention({ system: systemStatus(), docker: await dockerInfo(), apps: await listApps("en"), activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), array: arrayTrouble() }),
     baseUrl: publicUrl,
     isAdmin: (id) => findUser(id)?.role === "admin",
   });

@@ -89,6 +89,8 @@ export interface Settings {
   images: ImageSettings;
   /** Disks: whether a USB disk that is plugged in is mounted by itself */
   storage: { automount: boolean };
+  /** Protection from a disk failure: which disk holds parity and which are protected (`snapraid.ts`) */
+  snapraid: { parity: string; data: { name: string; path: string }[]; appData: boolean; time: string; scrub: boolean; deleteLimit: number };
   /** Folders put on the dashboard from the file manager, absolute paths */
   folders: string[];
   /** Folders shared over the network (SMB) */
@@ -167,6 +169,7 @@ const DEFAULTS: Settings = {
   https: { mode: "off", domain: "", email: "" },
   local: { enabled: true, name: "hata.local" },
   storage: { automount: false },
+  snapraid: { parity: "", data: [], appData: false, time: "05:00", scrub: true, deleteLimit: 50 },
   folders: [],
   shares: [],
   dashboard: cleanLayout(null),
@@ -192,6 +195,7 @@ export const settings: Settings = {
   // a settings file written by an older version has no such section, or only part of it
   backup: { ...DEFAULTS.backup, ...(isPlainObject(saved.backup) ? saved.backup : {}) },
   images: { ...DEFAULTS.images, ...(isPlainObject(saved.images) ? saved.images : {}) },
+  snapraid: { ...DEFAULTS.snapraid, ...(isPlainObject(saved.snapraid) ? saved.snapraid : {}) },
   access: isPlainObject(saved.access) ? (saved.access as Record<string, AppAccess>) : {},
   folders: Array.isArray(saved.folders) ? saved.folders.filter((path): path is string => typeof path === "string") : [],
   shares: cleanShares(saved.shares),

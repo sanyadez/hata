@@ -1381,7 +1381,7 @@ function dragEnd(drop) {
   drag.kind.drop(drag, target);
 }
 
-const ATTENTION_ICONS = { update: "up", docker: "box", restarting: "refresh", partial: "alert", disk: "disk", smart: "disk", memory: "memory", temperature: "temp", internet: "network" };
+const ATTENTION_ICONS = { update: "up", docker: "box", restarting: "refresh", partial: "alert", disk: "disk", smart: "disk", memory: "memory", temperature: "temp", internet: "network", array: "disk" };
 
 function attentionItem(item) {
   const detail = { ...item.detail, free: item.detail.free == null ? "" : bytes(item.detail.free), trash: item.detail.trash == null ? "" : bytes(item.detail.trash) };
@@ -1395,6 +1395,7 @@ function attentionItem(item) {
     item.code === "disk.trash" && h("a", { class: "btn small", href: "#/trash" }, t("trash.title")),
     item.code.startsWith("smart.") && h("a", { class: "btn small", href: "#/settings/storage" }, t("common.open")),
     item.code.startsWith("internet.") && h("a", { class: "btn small", href: "#/settings/network" }, t("common.open")),
+    item.code.startsWith("array.") && h("a", { class: "btn small", href: "#/settings/storage" }, t("common.open")),
     item.app && h("a", { class: "btn small", href: `#/apps/${item.app}${item.code === "restarting" || item.code === "partial" ? "/logs" : ""}` }, t(item.code === "restarting" || item.code === "partial" ? "app.logs" : "common.open")),
   );
 }
@@ -5591,8 +5592,184 @@ function storageSection() {
         h("table", { class: "disks" }, h("thead", null, h("tr", null, h("th", null, t("disks.fs.col.path")), h("th", null, t("disks.fs.col.source")), h("th", null, t("disks.col.usage")), h("th"))), h("tbody", null, data.mounts.map(fsRow), absent.map(absentRow))),
       ),
     data.mounting?.possible && h("section", { class: "card pad" }, h("label", { class: "check" }, automount, h("span", null, h("strong", null, t("mounting.automount")), h("span", { class: "muted small block" }, t("mounting.automountHint"))))),
+    data.array && data.mounting?.possible && arrayCard(data.array),
     data.fills && fillsCard(data.fills, busy),
   ].filter(Boolean);
+}
+
+// --- Protection from a disk failure (SnapRAID) --------------------------------------------------
+
+let arrayTimer = 0;
+/** One call that changes the array; the answer is the whole storage page */
+async function arrayCall(method, path, data, done) {
+  try {
+    setDisks(await api(method, "/api/disks/array" + path, data));
+    done?.();
+  } catch (err) {
+    toast(errorText(err), "error");
+  }
+}
+
+function arrayCard(array) {
+  clearTimeout(arrayTimer);
+  // a run moves without telling: the page looks again while one goes
+  if (array.running) arrayTimer = setTimeout(async () => state.route.view === "settings" && state.route.section === "storage" && setDisks(await api("GET", "/api/disks").catch(() => state.disks)), 3000);
+  const row = (label, value) => h("div", { class: "kv" }, h("span", { class: "muted" }, label), h("span", null, value));
+  const head = (...actions) => h("div", { class: "section-head" }, h("h2", null, t("array.title")), h("div", { class: "row-actions" }, actions));
+  const lead = h("p", { class: "muted small" }, t("array.lead"));
+  if (array.tool === "missing") {
+    return h(
+      "section",
+      { class: "card pad stack" },
+      head(),
+      lead,
+      h(
+        "div",
+        { class: "banner stack" },
+        h("strong", null, t("array.needs.what")),
+        h("p", { class: "muted small" }, t("array.needs.why")),
+        array.needs.install ? h("p", { class: "cmd" }, icon("terminal"), array.needs.install) : h("p", { class: "muted small" }, t("mounting.needs.byHand", { package: array.needs.package })),
+        array.needs.install &&
+          button(t("mounting.needs.install", { package: array.needs.package }), {
+            class: "small",
+            onclick: async (e) => {
+              const el = e.currentTarget;
+              el.disabled = true;
+              try {
+                setDisks(await api("POST", "/api/disks/package", { package: array.needs.package }));
+              } catch (err) {
+                el.disabled = false;
+                toast(errorText(err), "error");
+              }
+            },
+          }),
+      ),
+    );
+  }
+  if (!array.on) return h("section", { class: "card pad stack" }, head(array.candidates.length > 1 && button(t("array.setUp"), { class: "small primary", onclick: () => arrayDialog(array) })), lead, array.candidates.length < 2 && h("p", { class: "muted small" }, t("array.needsDisks")));
+
+  const busy = !!array.running;
+  const d = array.diff;
+  const waiting = d ? d.added + d.updated : 0;
+  const act = (label, path, data, cls = "small") => button(label, { class: cls, disabled: busy, onclick: () => arrayCall("POST", path, data ?? {}) });
+  const banners = [
+    array.missing.length > 0 && h("div", { class: "banner danger stack" }, h("strong", null, t("array.missing", { disks: array.missing.join(", ") })), h("p", { class: "small" }, t("array.missingHint"))),
+    array.trouble?.code === "diskEmpty" &&
+      h("div", { class: "banner danger stack" }, h("strong", null, t("array.diskEmpty", { disk: array.settings.data.find((x) => x.name === array.trouble.disk)?.path ?? array.trouble.disk })), h("p", { class: "small" }, t("array.diskEmptyHint")), h("div", { class: "row-actions" }, button(t("array.recover"), { class: "small primary", disabled: busy, onclick: () => recoverDialog(array.settings.data.find((x) => x.name === array.trouble.disk)) }), act(t("array.emptyOnPurpose"), "/sync", { force: true, empty: true }))),
+    array.trouble?.code === "parityLost" && h("div", { class: "banner danger stack" }, h("strong", null, t("array.parityLost", { disk: array.settings.parity })), h("p", { class: "small" }, t("array.parityLostHint")), h("div", { class: "row-actions" }, act(t("array.rebuild"), "/rebuild", {}, "small primary"))),
+    array.errors > 0 && h("div", { class: "banner danger stack" }, h("strong", null, t("array.errors", { n: array.errors })), h("p", { class: "small" }, t("array.errorsHint")), h("div", { class: "row-actions" }, act(t("array.repair"), "/repair", {}, "small primary"))),
+    array.held && h("div", { class: "banner stack" }, h("strong", null, t("array.held", { n: array.held.removed })), h("p", { class: "small" }, t("array.heldHint")), h("div", { class: "row-actions" }, act(t("array.bringBack"), "/fix", {}, "small primary"), act(t("array.syncAnyway"), "/sync", { force: true }))),
+    !array.trouble && !array.held && array.lastSync && !array.lastSync.ok && h("p", { class: "banner small" }, t("array.failed", { message: array.lastSync.message })),
+  ];
+  const running =
+    array.running &&
+    h("div", { class: "banner stack" }, h("div", { class: "section-head" }, h("strong", null, t("array.running." + array.running.what), array.running.percent != null && ` · ${array.running.percent}%`), button(t("array.stop"), { class: "small", onclick: () => arrayCall("POST", "/stop", {}) })), h("p", { class: "muted small" }, t("array.runningHint")));
+  return h(
+    "section",
+    { class: "card pad stack" },
+    head(act(t("array.syncNow"), "/sync", {}), act(t("array.checkNow"), "/scrub", {}), button(t("array.settings"), { class: "small", disabled: busy, onclick: () => arrayDialog(array) }, "sliders")),
+    lead,
+    running,
+    banners,
+    h(
+      "div",
+      { class: "kv-list" },
+      row(t("array.parity"), h("span", null, h("span", { class: "mono" }, array.settings.parity), array.paritySize > 0 && h("span", { class: "muted small" }, ` · ${bytes(array.paritySize)}`))),
+      array.settings.data.map((disk, i) => row(i === 0 ? t("array.data") : "", h("span", { class: "with-actions" }, h("span", { class: "mono" }, disk.path), " ", button(t("array.recover"), { class: "small quiet", disabled: busy, onclick: () => recoverDialog(disk) })))),
+      row(t("array.lastSync"), array.lastSync?.ok ? ago(array.lastSync.at) : array.lastSync ? t("array.lastFailed", { when: ago(array.lastSync.at) }) : t("array.never")),
+      row(t("array.waiting"), !array.lastSync?.ok && !d ? "—" : waiting || d?.removed ? [waiting > 0 && t("array.waitingNew", { n: waiting }), d.removed > 0 && t("array.waitingGone", { n: d.removed })].filter(Boolean).join(" · ") : t("array.waitingNone")),
+      row(t("array.lastScrub"), array.lastScrub ? `${ago(array.lastScrub.at)} · ${t(array.lastScrub.ok ? "array.scrubOk" : "array.scrubBad")}` : t("array.never")),
+      row(t("array.schedule"), t(array.settings.scrub ? "array.scheduleScrub" : "array.scheduleSync", { time: array.settings.time })),
+      array.appDataRule !== null && row("AppData", t(array.settings.appData ? "array.appDataIn" : "array.appDataOut")),
+    ),
+    array.log.length > 0 && h("details", null, h("summary", { class: "muted small" }, t("array.log")), h("pre", { class: "console small-console" }, array.log.join("\n"))),
+  );
+}
+
+/** Which disk holds parity, which are protected, when it runs */
+function arrayDialog(array) {
+  const cfg = array.settings;
+  const error = h("p", { class: "error", role: "alert" });
+  const size = (c) => `${bytes(c.size)} · ${t("array.used", { size: bytes(c.used) })}`;
+  const parity = array.candidates.map((c) => ({ c, input: h("input", { type: "radio", name: "parity", value: c.path, checked: cfg.parity === c.path, disabled: c.merged || !!c.holds }) }));
+  const data = array.candidates.map((c) => ({ c, input: h("input", { type: "checkbox", value: c.path, checked: cfg.data.some((x) => x.path === c.path) }) }));
+  const appData = h("input", { type: "checkbox", checked: cfg.appData });
+  const time = h("input", { type: "time", value: cfg.time, required: true });
+  const scrub = h("input", { type: "checkbox", checked: cfg.scrub });
+  const limit = h("input", { type: "number", min: 0, max: 1000000, value: cfg.deleteLimit, required: true });
+  const anew = h("p", { class: "banner small", hidden: true }, t("array.anew"));
+  const go = h("button", { class: "btn primary" }, t(array.on ? "settings.save" : "array.turnOn"));
+  const check = () => {
+    const chosen = parity.find((p) => p.input.checked)?.c.path ?? "";
+    for (const x of data) {
+      x.input.disabled = x.c.path === chosen;
+      if (x.input.disabled) x.input.checked = false;
+    }
+    const paths = data.filter((x) => x.input.checked).map((x) => x.c.path);
+    go.disabled = !chosen || !paths.length;
+    anew.hidden = !array.on || (chosen === cfg.parity && cfg.data.every((x) => paths.includes(x.path)));
+  };
+  for (const x of [...parity, ...data]) x.input.addEventListener("change", check);
+  const dialog = openDialog(
+    "wide",
+    h(
+      "form",
+      {
+        class: "stack",
+        onsubmit: async (e) => {
+          e.preventDefault();
+          error.textContent = "";
+          go.disabled = true;
+          try {
+            setDisks(await api("PUT", "/api/disks/array", { parity: parity.find((p) => p.input.checked).c.path, data: data.filter((x) => x.input.checked).map((x) => x.c.path), appData: appData.checked, time: time.value, scrub: scrub.checked, deleteLimit: Number(limit.value) }));
+            dialog.close();
+            toast(t(array.on ? "settings.saved" : "array.turnedOn"));
+          } catch (err) {
+            error.textContent = errorText(err);
+            go.disabled = false;
+          }
+        },
+      },
+      h("header", null, h("h2", { class: "grow" }, t("array.title")), closeX(() => dialog)),
+      h("p", { class: "muted small" }, t("array.how")),
+      h("h3", null, t("array.parityDisk")),
+      h("p", { class: "muted small" }, t("array.parityDiskHint")),
+      parity.map(({ c, input }) => h("label", { class: "check" }, input, h("span", null, h("strong", { class: "mono" }, c.path), h("span", { class: "muted small block" }, c.merged ? t("array.cannot.merged") : c.holds ? t("array.cannot.holds") : size(c))))),
+      h("h3", null, t("array.dataDisks")),
+      data.map(({ c, input }) => h("label", { class: "check" }, input, h("span", null, h("strong", { class: "mono" }, c.path), h("span", { class: "muted small block" }, size(c))))),
+      h("label", { class: "check" }, appData, h("span", null, h("strong", null, t("array.appData")), h("span", { class: "muted small block" }, t("array.appDataHint")))),
+      h("div", { class: "field-row" }, field(t("array.time"), time), field(t("array.limit"), limit, t("array.limitHint"))),
+      h("label", { class: "check" }, scrub, h("span", null, h("strong", null, t("array.scrub")), h("span", { class: "muted small block" }, t("array.scrubHint")))),
+      anew,
+      error,
+      h("footer", null, array.on && button(t("array.turnOff"), { class: "danger", onclick: () => (dialog.close(), arrayOffDialog()) }), closeButton(() => dialog, t("common.cancel")), go),
+    ),
+  );
+  check();
+}
+
+function arrayOffDialog() {
+  const wipe = h("input", { type: "checkbox" });
+  const dialog = openDialog(
+    "confirm",
+    h("h2", null, t("array.offTitle")),
+    h("p", { class: "muted" }, t("array.offLead")),
+    h("label", { class: "check" }, wipe, h("span", null, h("strong", null, t("array.offWipe")), h("span", { class: "muted small block" }, t("array.offWipeHint")))),
+    h("footer", null, closeButton(() => dialog, t("common.cancel")), button(t("array.turnOff"), { class: "danger", onclick: () => arrayCall("DELETE", wipe.checked ? "?wipe=1" : "", undefined, () => dialog.close()) })),
+  );
+}
+
+/** A disk that was replaced, or files that are gone from one: what the parity knows comes back */
+function recoverDialog(disk) {
+  if (!disk) return;
+  const dialog = openDialog(
+    "confirm",
+    h("h2", null, t("array.recoverTitle", { disk: disk.path })),
+    h("p", { class: "muted" }, t("array.recoverLead")),
+    h("p", { class: "muted small" }, t("array.recoverHow", { disk: disk.path })),
+    h("p", { class: "banner small" }, t("array.recoverOwners")),
+    h("footer", null, closeButton(() => dialog, t("common.cancel")), button(t("array.recoverGo"), { class: "primary", onclick: () => arrayCall("POST", "/fix", { disk: disk.name }, () => dialog.close()) }, "undo")),
+  );
 }
 
 const FILLS_COLOURS = 6;
