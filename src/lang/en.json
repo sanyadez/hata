@@ -820,6 +820,7 @@
   "edit.icon": "Icon",
   "edit.webUi": "Web UI",
   "edit.webUiHint": "Where the tile of the app leads: the address, the port and the path. Leave the address empty for this server and the port empty for an app without a page.",
+  "edit.webUiDomain": "Under Hata's domain the tile opens the app by a name of its own, and Hata leads that name to this port:",
   "edit.webHost": "Address",
   "edit.webPath": "Path",
   "edit.port": "Port",

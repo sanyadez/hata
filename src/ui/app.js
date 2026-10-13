@@ -2100,7 +2100,7 @@ function iconField(model, app) {
   return field;
 }
 
-function appSettingsForm(model, memoryTotal, app) {
+function appSettingsForm(model, memoryTotal, app, installed) {
   const title = h("input", { value: model.title, maxLength: 80 });
   const iconField_ = iconField(model, app);
   const iconUrl = iconField_.url;
@@ -2108,6 +2108,8 @@ function appSettingsForm(model, memoryTotal, app) {
   const host = h("input", { value: model.web.host, spellcheck: false, autocapitalize: "none", class: "mono", placeholder: location.hostname, "aria-label": t("edit.webHost") });
   const port = h("input", { value: model.web.port, inputMode: "numeric", class: "short mono", placeholder: t("edit.port"), "aria-label": t("edit.port") });
   const path = h("input", { value: model.web.path, spellcheck: false, autocapitalize: "none", class: "mono", placeholder: "/", "aria-label": t("edit.webPath") });
+  // opened by Hata's domain, the app has a name of its own there and the fields say where that name leads
+  const named = installed && appDomain(installed) ? appUrl(installed) : null;
   // the services are tabs: one is added by name, the one shown can be taken out
   const services = model.services.map((service) => ({ name: service.name, form: serviceForm(service, memoryTotal) }));
   let shown = 0;
@@ -2160,7 +2162,7 @@ function appSettingsForm(model, memoryTotal, app) {
       h("datalist", { id: "capabilities" }, CAPABILITIES.map((cap) => h("option", { value: cap }))),
       formRow(t("edit.title"), title),
       iconField_.el,
-      formRow(t("edit.webUi"), h("span", { class: "web-address" }, scheme, host, h("span", { class: "muted" }, ":"), port, path), t("edit.webUiHint")),
+      formRow(t("edit.webUi"), h("span", { class: "web-address" }, scheme, host, h("span", { class: "muted" }, ":"), port, path), [t("edit.webUiHint"), named && [" ", t("edit.webUiDomain"), " ", h("a", { class: "link", href: named, target: "_blank", rel: "noopener" }, named.replace(/\/$/, ""))]]),
       h("div", { class: "form-row services-row" }, h("span", { class: "form-label" }, t("edit.services")), tabs),
       body,
     ),
@@ -2176,7 +2178,7 @@ async function appSettingsTab(app, box) {
   } catch (e) {
     return box.replaceChildren(h("p", { class: "error" }, e.code === "app.badCompose" ? t("edit.broken") : errorText(e)));
   }
-  const form = appSettingsForm(model, model.memoryTotal, app.name);
+  const form = appSettingsForm(model, model.memoryTotal, app.name, app);
   const error = h("p", { class: "error", role: "alert" });
   box.replaceChildren(
     h(
