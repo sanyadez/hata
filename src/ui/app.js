@@ -4817,8 +4817,7 @@ function toolsSection() {
   };
   const install = (tool) =>
     button(t("mounting.needs.install", { package: tool.name }), {
-      // one the system does without is still the person's to install
-      class: tool.state === "unneeded" ? "small" : "small primary",
+      class: "small primary",
       onclick: async (e) => {
         const el = e.currentTarget;
         el.disabled = true;
