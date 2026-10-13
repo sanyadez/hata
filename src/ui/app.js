@@ -4243,7 +4243,7 @@ function networkSection() {
       h(
         "div",
         { class: "section-head" },
-        h("h2", null, h("span", { class: "with-icon" }, icon("network"), nic.name), " ", h("span", { class: "state " + (nic.up ? "running" : "stopped") }, t(nic.up ? "network.up" : "network.down"))),
+        h("h2", null, h("span", { class: "with-icon" }, icon("network"), nic.kind === "modem" ? nic.product || t("network.modem") : nic.name), " ", nic.kind === "modem" && h("span", { class: "muted small mono" }, nic.name + " "), h("span", { class: "state " + (nic.up ? "running" : "stopped") }, t(nic.up ? "network.up" : "network.down"))),
         nic.wifi?.ready && button(t("wifi.networks"), { onclick: () => wifiDialog(nic) }, "search"),
         nic.wifi?.ssid &&
           button(t("wifi.forget"), {
@@ -4263,12 +4263,35 @@ function networkSection() {
       nic.wifi?.needs && data.tool === "ok" && needsCard(nic.wifi.needs, "wifi.needs"),
       row(t("network.address"), nic.addresses.join(", ") + (nic.addresses.length ? ` · ${t(nic.dynamic ? "network.byRouter" : "network.fixed")}` : "")),
       row(t("network.gateway"), nic.gateway),
+      (nic.internet !== "none" || (several && nic.addresses.length > 0)) && h("div", { class: "kv" }, h("span", { class: "muted" }, t("network.internet")), nic.manager === "nm" && several ? roleSelect(nic) : h("span", null, t("network.role." + (nic.internet === "none" ? "off" : nic.internet)))),
       row(t("network.dns"), nic.dns.join(", ")),
       nic.addresses6.length > 0 && row("IPv6", nic.addresses6.join(", ")),
       row(t("network.mac"), nic.mac + (nic.speed ? ` · ${nic.speed >= 1000 ? nic.speed / 1000 + " Gbit/s" : nic.speed + " Mbit/s"}` : "")),
       row(t("network.manager"), t("network.by." + (nic.manager || "none")), false),
+      nic.kind === "modem" && h("p", { class: "muted small" }, t("network.modemHint", { gateway: nic.gateway || "192.168.0.1" })),
       nic.manager !== "nm" && h("p", { class: "muted small" }, t(nic.manager === "networkd" || nic.manager === "ifupdown" ? (data.tool === "ok" ? "network.handoverHint" : "network.needsTool") : "network.readOnly")),
     );
+  const several = data.nics.filter((n) => n.internet !== "none").length > 1 || data.nics.some((n) => n.kind === "modem");
+  const roleSelect = (nic) => {
+    const select = h(
+      "select",
+      {
+        "aria-label": t("network.internet"),
+        onchange: async () => {
+          error.textContent = "";
+          select.disabled = true;
+          try {
+            state.network = await api("PUT", `/api/network/${nic.name}/role`, { role: select.value });
+          } catch (err) {
+            error.textContent = errorText(err);
+          }
+          renderSettings();
+        },
+      },
+      ["main", "backup", "off"].map((role) => h("option", { value: role, selected: (nic.internet === "none" ? "off" : nic.internet) === role }, t("network.role." + role))),
+    );
+    return select;
+  };
   const needsCard = (needs, key) =>
     h(
       "div",

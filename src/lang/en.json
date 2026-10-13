@@ -1407,5 +1407,15 @@
   "error.network.wifiWrongPassword": "The network did not let the server in — most likely the password is wrong.",
   "error.network.wifiFailed": "Could not connect: {message}",
   "activity.network.wifi.connected": "Connected to the Wi-Fi network {target}",
-  "activity.network.wifi.forgotten": "The Wi-Fi network {target} forgotten"
+  "activity.network.wifi.forgotten": "The Wi-Fi network {target} forgotten",
+  "network.modem": "USB modem",
+  "network.internet": "Internet",
+  "network.role.main": "main way",
+  "network.role.backup": "spare way",
+  "network.role.off": "not used",
+  "network.modemHint": "A USB modem or a phone that shares its connection: it gives the server an address by itself. Its SIM, PIN and operator are set up on the modem's own page (http://{gateway}, from the server). A spare way takes over when the main one goes away — the cable pulled out, the router off — not when the router is on but its internet is down.",
+  "error.network.badRole": "Choose the main way, a spare one or none.",
+  "activity.network.role.main": "Internet goes through {target} first",
+  "activity.network.role.backup": "{target} is a spare way to the internet",
+  "activity.network.role.off": "{target} is not used for the internet"
 }

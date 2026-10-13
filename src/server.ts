@@ -24,7 +24,7 @@ import { addShare, changeShare, installSamba, listShares, refreshShares, removeS
 import { checkDisks, diskHealth, installTool, listDisks, startDisks, startSelfTest } from "./disks";
 import { fills, measureFills, startFills } from "./fills";
 import { checkImages, imagesStatus, startImages } from "./images";
-import { afterPackage, changeNic, confirmChange, handOver, NETWORK_PACKAGES, networkReport, NetworkError, revertChange, wifiConnect, wifiForget, wifiNetworks } from "./network";
+import { afterPackage, setRole, changeNic, confirmChange, handOver, NETWORK_PACKAGES, networkReport, NetworkError, revertChange, wifiConnect, wifiForget, wifiNetworks } from "./network";
 import { absent, connectVolume, disconnect, mergeFolders, mountingReport, prepareDisk, startMounting, type Outcome } from "./mounting";
 import { moveData } from "./movedata";
 import { installPackage } from "./packages";
@@ -769,6 +769,11 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
         if (method === "POST") await wifiConnect(wifi[1]!, await body(req), user.name);
         else if (method === "DELETE") await wifiForget(wifi[1]!, user.name);
         else return fail(404, "network.noNic");
+        return json(await networkReport());
+      }
+      const role = /^\/api\/network\/([A-Za-z0-9_.-]{1,15})\/role$/.exec(path);
+      if (role && method === "PUT") {
+        await setRole(role[1]!, (await body(req)).role, user.name);
         return json(await networkReport());
       }
       const nic = /^\/api\/network\/([A-Za-z0-9_.-]{1,15})(\/handover)?$/.exec(path);

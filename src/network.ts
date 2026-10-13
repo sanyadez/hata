@@ -15,7 +15,7 @@
  * Pure and tested: reading `ip -j`, nmcli's terse output, the check of a change (`cleanChange`), the
  * commands of a change and of a hand-over.
  */
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { record } from "./activity";
 import { bus } from "./bus";
 import { installCommand, PATH, run } from "./packages";
@@ -37,7 +37,12 @@ const profileName = (name: string) => `hata-${name}`;
 
 export interface Nic {
   name: string;
-  kind: "ethernet" | "wifi" | "other";
+  /** modem — a USB modem or a phone sharing its connection: it shows up as a network card of its own */
+  kind: "ethernet" | "wifi" | "modem";
+  /** What the device calls itself, for a USB one */
+  product: string;
+  /** Whether the server's way to the internet leads through it: the first choice, a spare one, or not at all */
+  internet: "main" | "backup" | "none";
   mac: string;
   /** A cable is in, or the radio is connected */
   up: boolean;
@@ -66,17 +71,20 @@ interface IpLink {
 }
 
 /** The interfaces out of `ip -j addr` and `ip -j route show default`, without Docker's and tunnels */
-export function parseLinks(addrJson: string, routeJson: string): Pick<Nic, "name" | "mac" | "up" | "addresses" | "addresses6" | "dynamic" | "gateway">[] {
+export function parseLinks(addrJson: string, routeJson: string): Pick<Nic, "name" | "mac" | "up" | "addresses" | "addresses6" | "dynamic" | "gateway" | "internet">[] {
   let links: IpLink[] = [];
-  let routes: { dev?: string; gateway?: string }[] = [];
+  let routes: { dev?: string; gateway?: string; metric?: number }[] = [];
   try {
     links = JSON.parse(addrJson);
     routes = JSON.parse(routeJson || "[]");
   } catch {}
+  // of several ways out the kernel takes the one with the lowest metric
+  const ways = routes.filter((r) => r.dev && r.gateway).sort((a, b) => (a.metric ?? 0) - (b.metric ?? 0));
   return links
     .filter((l) => l.link_type === "ether" && !NOT_OURS.test(l.ifname))
     .map((l) => {
       const v4 = (l.addr_info ?? []).filter((a) => a.family === "inet");
+      const way = ways.findIndex((r) => r.dev === l.ifname);
       return {
         name: l.ifname,
         mac: l.address ?? "",
@@ -84,7 +92,8 @@ export function parseLinks(addrJson: string, routeJson: string): Pick<Nic, "name
         addresses: v4.map((a) => `${a.local}/${a.prefixlen}`),
         addresses6: (l.addr_info ?? []).filter((a) => a.family === "inet6" && a.scope === "global").map((a) => `${a.local}/${a.prefixlen}`),
         dynamic: v4.some((a) => a.dynamic === true),
-        gateway: routes.find((r) => r.dev === l.ifname && r.gateway)?.gateway ?? "",
+        gateway: way < 0 ? "" : ways[way]!.gateway!,
+        internet: way < 0 ? ("none" as const) : way === 0 ? ("main" as const) : ("backup" as const),
       };
     });
 }
@@ -102,6 +111,22 @@ export function terse(line: string): string[] {
   }
   fields.push(field);
   return fields;
+}
+
+/** Drivers of the USB devices that are a modem or a phone, not a network card on a cable */
+const MODEM_DRIVERS = /^(cdc_ether|cdc_ncm|cdc_mbim|rndis_host|ipheth|qmi_wwan|huawei_cdc_ncm|cdc_eem|sierra_net|hso)$/;
+export const isModem = (subsystem: string, driver: string): boolean => subsystem === "usb" && MODEM_DRIVERS.test(driver);
+
+export type Role = "main" | "backup" | "off";
+/** A route's metric is its place in the queue: NetworkManager gives a cable 100 and Wi-Fi 600 */
+const MAIN_METRIC = 50;
+const BACKUP_METRIC = 900;
+
+/** The settings of a profile for an interface's part in reaching the internet */
+export function roleArgs(role: Role): string[] {
+  const metric = role === "main" ? String(MAIN_METRIC) : role === "backup" ? String(BACKUP_METRIC) : "-1";
+  const never = role === "off" ? "yes" : "no";
+  return ["ipv4.route-metric", metric, "ipv6.route-metric", metric, "ipv4.never-default", never, "ipv6.never-default", never];
 }
 
 export interface Change {
@@ -369,6 +394,16 @@ export async function networkReport(): Promise<NetworkReport> {
     const byNm = state !== "" && state !== "unmanaged" && !state.includes("externally");
     const speed = Number(read(`/sys/class/net/${link.name}/speed`));
     const isWifi = existsSync(`/sys/class/net/${link.name}/wireless`);
+    const device = `/sys/class/net/${link.name}/device`;
+    const sysName = (path: string) => {
+      try {
+        return realpathSync(path).split("/").pop() ?? "";
+      } catch {
+        return "";
+      }
+    };
+    const usb = sysName(`${device}/subsystem`) === "usb";
+    const modem = !isWifi && isModem(usb ? "usb" : "", sysName(`${device}/driver`));
     let wifi: Nic["wifi"];
     if (isWifi) {
       const supplicant = !!Bun.which("wpa_supplicant", { PATH });
@@ -378,7 +413,9 @@ export async function networkReport(): Promise<NetworkReport> {
     nics.push({
       ...link,
       ...(wifi ? { wifi } : {}),
-      kind: isWifi ? "wifi" : "ethernet",
+      kind: isWifi ? "wifi" : modem ? "modem" : "ethernet",
+      // a USB interface hangs under its device, where the names are
+      product: usb ? [read(`${device}/../manufacturer`), read(`${device}/../product`)].filter(Boolean).join(" ") : "",
       dns: link.addresses.length ? await dnsOf(link.name, byNm) : [],
       speed: speed > 0 ? speed : null,
       manager: byNm ? "nm" : networkd.has(link.name) ? "networkd" : ifupdown.has(link.name) ? "ifupdown" : "",
@@ -643,4 +680,38 @@ export async function afterPackage(pkg: string): Promise<void> {
   await run(["systemctl", "restart", "NetworkManager"], 60_000);
   for (let i = 0; i < 20 && !(await nmRunning()); i++) await Bun.sleep(500);
   await Bun.sleep(2000);
+}
+
+// --- The way to the internet ------------------------------------------------------------------------
+
+/**
+ * Says which part an interface plays in reaching the internet: the first choice, a spare one for when
+ * the first is gone, or none. Only the default route changes — the interface keeps its address and the
+ * machines of its own network still reach the server through it, so there is nothing to put on trial.
+ */
+export async function setRole(name: string, role: unknown, user: string): Promise<void> {
+  if (role !== "main" && role !== "backup" && role !== "off") throw new NetworkError("network.badRole");
+  const nic = await findNic(name);
+  if (nic.manager !== "nm") throw new NetworkError("network.notOurs");
+  const uuidOf = async (device: string) => terse((await nmcli(["-t", "-f", "GENERAL.CON-UUID", "device", "show", device])).out.trim())[1] ?? "";
+  const uuid = await uuidOf(name);
+  if (!uuid) throw new NetworkError("network.failed", { message: "the interface has no connection" });
+  if (role === "main") {
+    // one first choice: whoever was it before goes back to its usual place
+    for (const other of (await networkReport()).nics) {
+      if (other.name === name || other.manager !== "nm") continue;
+      const id = await uuidOf(other.name);
+      if (id && (await nmcli(["-t", "-f", "ipv4.route-metric", "connection", "show", id])).out.trim().endsWith(`:${MAIN_METRIC}`)) {
+        await nmcli(["connection", "modify", id, "ipv4.route-metric", "-1", "ipv6.route-metric", "-1"]);
+        await nmcli(["device", "reapply", other.name]);
+      }
+    }
+  }
+  await must(nmcli(["connection", "modify", uuid, ...roleArgs(role)]));
+  const applied = await nmcli(["device", "reapply", name], 30_000);
+  if (applied.code !== 0) await must(nmcli(["connection", "up", uuid, "ifname", name], 60_000));
+  // the routes follow a moment later: whoever asks for the report next should see them
+  await Bun.sleep(1500);
+  record("network.role." + role, { user, detail: name });
+  bus.publish("network");
 }

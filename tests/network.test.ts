@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { cleanChange, parseWifi, wifiPassword, wifiProfile, wifiProfileId, dhcpcdClientId, withoutIface, handBackScript, handedFile, parseLinks, profileArgs, terse, udevRule, waitOnline } from "../src/network";
+import { cleanChange, isModem, roleArgs, parseWifi, wifiPassword, wifiProfile, wifiProfileId, dhcpcdClientId, withoutIface, handBackScript, handedFile, parseLinks, profileArgs, terse, udevRule, waitOnline } from "../src/network";
 
 const ADDR = JSON.stringify([
   { ifname: "lo", link_type: "loopback", flags: ["LOOPBACK", "UP", "LOWER_UP"], addr_info: [{ family: "inet", local: "127.0.0.1", prefixlen: 8 }] },
@@ -23,8 +23,8 @@ const ROUTE = JSON.stringify([{ dst: "default", gateway: "192.168.1.1", dev: "et
 
 test("parseLinks: the server's own interfaces, without Docker's and tunnels", () => {
   expect(parseLinks(ADDR, ROUTE)).toEqual([
-    { name: "eth0", mac: "bc:24:11:b6:3a:39", up: true, addresses: ["192.168.1.233/24"], addresses6: ["2001:db8::5/64"], dynamic: true, gateway: "192.168.1.1" },
-    { name: "enp2s0", mac: "aa:bb:cc:dd:ee:ff", up: false, addresses: [], addresses6: [], dynamic: false, gateway: "" },
+    { name: "eth0", mac: "bc:24:11:b6:3a:39", up: true, addresses: ["192.168.1.233/24"], addresses6: ["2001:db8::5/64"], dynamic: true, gateway: "192.168.1.1", internet: "main" },
+    { name: "enp2s0", mac: "aa:bb:cc:dd:ee:ff", up: false, addresses: [], addresses6: [], dynamic: false, gateway: "", internet: "none" },
   ]);
   expect(parseLinks("not json", "")).toEqual([]);
 });
@@ -112,4 +112,22 @@ test("wifiPassword and wifiProfileId", () => {
   expect(wifiProfileId("../../etc")).toMatch(/^hata-wifi-\.\.-\.\.-etc-[0-9a-f]{6}$/);
   expect(wifiProfileId("Дім")).toMatch(/^hata-wifi-network-[0-9a-f]{6}$/);
   expect(wifiProfileId("Дім")).not.toBe(wifiProfileId("Дача"));
+});
+
+test("the way to the internet: the lowest metric is the main one, the rest are spare", () => {
+  const addr = JSON.stringify([
+    { ifname: "enp3s0", link_type: "ether", flags: ["UP", "LOWER_UP"], addr_info: [{ family: "inet", local: "192.168.1.128", prefixlen: 24 }] },
+    { ifname: "enx22b3cb594442", link_type: "ether", flags: ["UP", "LOWER_UP"], addr_info: [{ family: "inet", local: "192.168.0.100", prefixlen: 24 }] },
+    { ifname: "wlp2s0", link_type: "ether", flags: ["UP"], addr_info: [] },
+  ]);
+  const route = JSON.stringify([
+    { dst: "default", gateway: "192.168.0.1", dev: "enx22b3cb594442", metric: 101 },
+    { dst: "default", gateway: "192.168.1.1", dev: "enp3s0", metric: 100 },
+  ]);
+  expect(parseLinks(addr, route).map((l) => [l.name, l.gateway, l.internet])).toEqual([["enp3s0", "192.168.1.1", "main"], ["enx22b3cb594442", "192.168.0.1", "backup"], ["wlp2s0", "", "none"]]);
+  expect(roleArgs("main")).toEqual(["ipv4.route-metric", "50", "ipv6.route-metric", "50", "ipv4.never-default", "no", "ipv6.never-default", "no"]);
+  expect(roleArgs("off").slice(4)).toEqual(["ipv4.never-default", "yes", "ipv6.never-default", "yes"]);
+  expect(isModem("usb", "cdc_ether")).toBe(true);
+  expect(isModem("usb", "r8152")).toBe(false);
+  expect(isModem("pci", "cdc_ether")).toBe(false);
 });

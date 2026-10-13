@@ -359,6 +359,7 @@ td .clip { max-width: 320px; }
 .kv { display: flex; justify-content: space-between; gap: 16px; padding: 7px 0; }
 .kv > :first-child { flex: none; }
 .kv > :last-child { text-align: right; overflow-wrap: anywhere; min-width: 0; }
+.kv > select { width: auto; flex: none; }
 .editor-head { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
 #app-tab { display: grid; gap: 16px; }
 

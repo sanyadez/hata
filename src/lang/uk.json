@@ -1407,5 +1407,15 @@
   "error.network.wifiWrongPassword": "Мережа не впустила сервер — найімовірніше, пароль неправильний.",
   "error.network.wifiFailed": "Не вдалося під'єднатись: {message}",
   "activity.network.wifi.connected": "Під'єднано до мережі Wi-Fi {target}",
-  "activity.network.wifi.forgotten": "Мережу Wi-Fi {target} забуто"
+  "activity.network.wifi.forgotten": "Мережу Wi-Fi {target} забуто",
+  "network.modem": "USB-модем",
+  "network.internet": "Інтернет",
+  "network.role.main": "основний шлях",
+  "network.role.backup": "запасний шлях",
+  "network.role.off": "не використовується",
+  "network.modemHint": "USB-модем або телефон, що роздає своє з'єднання: він сам дає серверу адресу. SIM-карта, PIN і оператор налаштовуються на сторінці самого модема (http://{gateway}, із сервера). Запасний шлях підхоплює, коли основний зникає — витягли кабель, вимкнули роутер, — а не коли роутер працює, але інтернету в ньому немає.",
+  "error.network.badRole": "Оберіть основний шлях, запасний або жоден.",
+  "activity.network.role.main": "Інтернет іде насамперед через {target}",
+  "activity.network.role.backup": "{target} — запасний шлях до інтернету",
+  "activity.network.role.off": "{target} не використовується для інтернету"
 }
