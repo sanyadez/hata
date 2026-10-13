@@ -21,6 +21,7 @@ import { bus } from "./bus";
 import { afterPackage, networkReport, type Nic } from "./network";
 import { installCommand, installPackage, PATH, removeCommand, removePackages, run } from "./packages";
 import { installSamba } from "./shares";
+import { INSTALL_COMMAND as TAILSCALE_INSTALL_COMMAND, install as installTailscale, report as tailscaleReport } from "./tailscale";
 
 interface Spec {
   id: string;
@@ -54,6 +55,7 @@ const SPECS: Spec[] = [
   { id: "network-manager", name: "NetworkManager", package: "network-manager", bin: "nmcli", version: ["nmcli", "--version"], page: "#/settings/network" },
   { id: "wpasupplicant", name: "wpa_supplicant", package: "wpasupplicant", bin: "wpa_supplicant", version: ["wpa_supplicant", "-v"], page: "#/settings/network" },
   { id: "dnsmasq-base", name: "dnsmasq", package: "dnsmasq-base", bin: "dnsmasq", version: ["dnsmasq", "--version"], page: "#/settings/network" },
+  { id: "tailscale", name: "Tailscale", package: "tailscale", bin: "tailscale", version: ["tailscale", "version"], page: "#/settings/remote" },
   { id: "openssh-client", name: "OpenSSH client", package: "openssh-client", bin: "sftp", version: ["ssh", "-V"], page: "#/backups", base: true },
 ];
 
@@ -126,7 +128,9 @@ async function packagesOf(spec: Spec): Promise<string[]> {
 }
 
 /** What of Hata's stands on a program right now, so that taking it away would break it */
-function holdsOf(id: string, nics: Nic[]): string {
+function holdsOf(id: string, nics: Nic[], remote: boolean): string {
+  // whoever is on this page from afar came through it
+  if (id === "tailscale" && remote) return "remote";
   if (id === "samba" && settings.shares.length > 0) return "shares";
   if (id === "snapraid" && settings.snapraid.parity !== "") return "array";
   if (id === "mergerfs" && usedNow("mergerfs", false)) return "merged";
@@ -150,6 +154,7 @@ export async function toolsReport(): Promise<Tool[]> {
   const docker = await dockerInfo();
   const ntfs = await kernelReadsNtfs();
   const nics = (await networkReport().catch(() => null))?.nics ?? [];
+  const remote = (await tailscaleReport(0).catch(() => null))?.state === "running";
   return Promise.all(
     SPECS.map(async (spec) => {
       const installed = has(spec.bin);
@@ -162,11 +167,11 @@ export async function toolsReport(): Promise<Tool[]> {
         state: installed ? ("installed" as const) : ("missing" as const),
         builtIn: spec.id === "ntfs-3g" && ntfs,
         version,
-        install: spec.id === "docker" ? DOCKER_INSTALL_COMMAND : installCommand(spec.package),
+        install: spec.id === "docker" ? DOCKER_INSTALL_COMMAND : spec.id === "tailscale" ? TAILSCALE_INSTALL_COMMAND : installCommand(spec.package),
         page: spec.page,
         used: installed ? usedNow(spec.id, docker.available) : null,
         remove: installed && !spec.base ? removeCommand(await packagesOf(spec)) : "",
-        holds: !installed ? "" : spec.base ? "base" : holdsOf(spec.id, nics),
+        holds: !installed ? "" : spec.base ? "base" : holdsOf(spec.id, nics, remote),
       };
     }),
   );
@@ -180,6 +185,7 @@ export async function installOne(id: string, user: string): Promise<{ job: Job }
   const spec = SPECS.find((s) => s.id === id);
   if (!spec) return { error: "not a program Hata installs" };
   if (spec.id === "docker") return { job: installDocker(user) };
+  if (spec.id === "tailscale") return { job: installTailscale(user) };
   if (spec.id === "smartmontools") return { error: await installTool() };
   if (spec.id === "samba") {
     try {

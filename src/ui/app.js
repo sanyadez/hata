@@ -394,6 +394,8 @@ function startEvents() {
       assistantEvent(event);
     } else if (event.type === "approvals") {
       void loadApprovals();
+    } else if (event.type === "tailscale") {
+      if (state.route.view === "settings" && state.route.section === "remote") void loadRemote();
     } else if (event.type === "network") {
       if (state.route.view === "settings" && state.route.section === "network") void loadNetwork();
     } else if (event.type === "store" && state.route.view === "store") {
@@ -4433,6 +4435,7 @@ async function loadSettings() {
     if (isAdmin()) state.notify = await api("GET", "/api/notify").catch(() => null);
     if (isAdmin() && state.route.section === "apps") state.images = await api("GET", "/api/images").catch(() => null);
     if (isAdmin() && state.route.section === "network") state.network = await api("GET", "/api/network").catch(() => null);
+    if (isAdmin() && state.route.section === "remote") state.remote = await api("GET", "/api/tailscale").catch(() => null);
     if (isAdmin() && state.route.section === "tools") state.tools = await api("GET", "/api/tools").catch(() => null);
     if (isAdmin() && state.route.section === "storage") state.disks = await api("GET", "/api/disks").catch(() => null);
     if (isAdmin() && state.route.section === "shares") state.shares = await api("GET", "/api/shares").catch(() => null);
@@ -4455,6 +4458,7 @@ const SECTIONS = [
   { id: "storage", icon: "disk", admin: true },
   { id: "shares", icon: "share", admin: true },
   { id: "network", icon: "network", admin: true },
+  { id: "remote", icon: "globe", admin: true },
   { id: "https", icon: "lock", admin: true },
   { id: "notifications", icon: "bell", admin: true },
   { id: "agents", icon: "key", admin: true },
@@ -4679,6 +4683,7 @@ function settingsSection(section) {
   if (section === "shares") return sharesSection();
   if (section === "network") return networkSection();
   if (section === "tools") return toolsSection();
+  if (section === "remote") return remoteSection();
   if (section === "agents") return agentsSection();
   if (section === "assistant") return assistantSection();
   if (section === "stores") {
@@ -5273,6 +5278,127 @@ function toolRemoveDialog(tool) {
   );
 }
 
+async function loadRemote() {
+  state.remote = await api("GET", "/api/tailscale").catch(() => state.remote);
+  if (state.route.view === "settings" && state.route.section === "remote") renderSettings();
+}
+
+/** Settings → Remote access: the server in the person's own private network (Tailscale) */
+function remoteSection() {
+  const r = state.remote;
+  if (!r) return [h("p", { class: "muted" }, "…")];
+  const error = h("p", { class: "error", role: "alert" });
+  const act = (what, data = {}, said) => async (e) => {
+    const el = e.currentTarget;
+    el.disabled = true;
+    error.textContent = "";
+    try {
+      state.remote = await api("POST", `/api/tailscale/${what}`, data);
+      if (said) toast(said);
+      renderSettings();
+    } catch (err) {
+      error.textContent = errorText(err);
+      el.disabled = false;
+    }
+  };
+  const lead = h("p", { class: "muted" }, t("remote.lead"));
+
+  if (r.state === "missing")
+    return [
+      h(
+        "section",
+        { class: "card pad stack" },
+        h("h2", null, t("remote.title")),
+        lead,
+        h("p", null, t("remote.what")),
+        h("p", { class: "muted small" }, t("remote.why")),
+        h("p", { class: "cmd" }, icon("terminal"), r.install),
+        h("p", { class: "muted small" }, t("remote.how")),
+        error,
+        h(
+          "footer",
+          null,
+          button(t("mounting.needs.install", { package: "Tailscale" }), {
+            class: "primary",
+            onclick: async (e) => {
+              const el = e.currentTarget;
+              el.disabled = true;
+              try {
+                const res = await api("POST", "/api/tailscale/install", {});
+                jobDialog(res.job, "tailscale", "", loadRemote);
+              } catch (err) {
+                error.textContent = errorText(err);
+                el.disabled = false;
+              }
+            },
+          }, "download"),
+        ),
+      ),
+    ];
+
+  const head = (chip, cls) => h("div", { class: "section-head" }, h("h2", null, t("remote.title"), h("span", { class: "state " + cls }, chip)), h("span", { class: "muted small mono" }, `Tailscale ${r.version}`));
+  if (r.state === "stopped") return [h("section", { class: "card pad stack" }, head(t("remote.state.stopped"), "stopped"), h("p", { class: "muted" }, t("remote.stopped")), error, h("footer", null, button(t("remote.start"), { class: "primary", onclick: act("start") }))) ];
+
+  // waiting for the person to let the server in: the page looks again by itself until it is done
+  if (r.state === "starting") {
+    const timer = setTimeout(loadRemote, 3000);
+    cleanups.push(() => clearTimeout(timer));
+  }
+  const port = r.port === 80 ? "" : ":" + r.port;
+  const address = (host) => h("a", { class: "link mono", href: `http://${host}${port}/` }, host + port);
+
+  if (r.state === "needsLogin" || r.state === "starting") {
+    const own = h("input", { value: r.server ?? "", placeholder: "https://headscale.example.com", spellcheck: false, autocapitalize: "off", class: "mono" });
+    return [
+      h(
+        "section",
+        { class: "card pad stack" },
+        head(t(r.authUrl ? "remote.state.waiting" : "remote.state.signedOut"), r.authUrl ? "partial" : "stopped"),
+        lead,
+        r.authUrl
+          ? [h("p", null, t("remote.openLink")), h("p", { class: "cmd" }, h("a", { class: "link grow clip", href: r.authUrl, target: "_blank", rel: "noopener noreferrer" }, r.authUrl), h("button", { type: "button", class: "icon-btn", title: t("twofa.copy"), "aria-label": t("twofa.copy"), onclick: () => copyText(r.authUrl) }, icon("copy"))), h("p", { class: "muted small" }, t("remote.openLinkHint"))]
+          : [h("p", { class: "muted small" }, t("remote.signInHint")), h("details", null, h("summary", { class: "muted small" }, t("remote.ownServer")), field(t("remote.ownServerAddress"), own, t("remote.ownServerHint")))],
+        error,
+        h("footer", null, r.authUrl ? button(t("common.cancel"), { onclick: act("disconnect") }) : button(t("remote.signIn"), { class: "primary", onclick: (e) => act("connect", { server: own.value.trim() })(e) }, "arrow")),
+      ),
+    ];
+  }
+
+  const on = r.state === "running";
+  const offered = r.offered.length > 0;
+  const waiting = r.offered.filter((net) => !r.approved.includes(net));
+  const share = h("input", { type: "checkbox", checked: offered, disabled: !on || (!offered && !r.networks.length), onchange: (e) => act("networks", { on: e.target.checked })(e) });
+  return [
+    h(
+      "section",
+      { class: "card pad stack" },
+      head(t(on ? "remote.state.on" : "remote.state.off"), on ? "running" : "stopped"),
+      lead,
+      settingRow(t("remote.name"), t("remote.nameHint"), h("span", { class: "stack-s end" }, r.name && address(r.name), r.addresses.filter((a) => !a.includes(":")).map(address))),
+      settingRow(t("remote.account"), r.server ? t("remote.accountOwn", { server: r.server }) : r.expires ? t("remote.expires", { date: shortDate(r.expires) }) : "", h("span", null, r.tailnet || "—")),
+      r.health.length > 0 && h("div", { class: "banner stack" }, r.health.map((line) => h("p", { class: "small" }, line))),
+      error,
+      h("footer", null, h("div", { class: "row-actions" }, button(t("remote.signOut"), { class: "quiet", onclick: act("signout") }), on ? button(t("remote.turnOff"), { onclick: act("disconnect") }) : button(t("remote.turnOn"), { class: "primary", onclick: act("connect") }))),
+    ),
+    h(
+      "section",
+      { class: "card pad stack" },
+      h("h2", null, t("remote.networks")),
+      h("label", { class: "check" }, share, h("span", null, h("strong", null, t("remote.networksOn")), h("span", { class: "muted small block" }, r.networks.length || offered ? t("remote.networksHint", { networks: (offered ? r.offered : r.networks).join(", ") }) : t("remote.networksNone")))),
+      waiting.length > 0 && h("p", { class: "banner" }, t(r.server ? "remote.networksApproveOwn" : "remote.networksApprove", { networks: waiting.join(", ") }), !r.server && [" ", h("a", { class: "link", href: r.admin, target: "_blank", rel: "noopener noreferrer" }, "login.tailscale.com")]),
+    ),
+    h(
+      "section",
+      { class: "card pad stack" },
+      h("div", { class: "section-head" }, h("h2", null, t("remote.devices"), h("span", { class: "muted small" }, r.devices.length))),
+      r.devices.length
+        ? h("div", { class: "table-wrap" }, h("table", null, h("tbody", null, r.devices.map((d) => h("tr", null, h("td", null, h("div", { class: "strong" }, d.name), h("div", { class: "muted small" }, d.os)), h("td", { class: "mono small" }, d.addresses.filter((a) => !a.includes(":")).join(", ")), h("td", { class: "num" }, h("span", { class: "state " + (d.online ? "running" : "stopped") }, d.online ? t("remote.online") : d.lastSeen ? t("remote.seen", { when: ago(d.lastSeen) }) : t("remote.offline"))))))))
+        : h("p", { class: "muted" }, t("remote.devicesNone")),
+      h("p", { class: "muted small" }, t("remote.devicesHint")),
+    ),
+  ];
+}
+
 /** Settings → System programs: everything of the system Hata relies on, installed or not */
 function toolsSection() {
   const tools = state.tools;
@@ -5292,7 +5418,7 @@ function toolsSection() {
         error.textContent = "";
         try {
           const res = await api("POST", `/api/tools/${tool.id}/install`, {});
-          if (res.job) return jobDialog(res.job, "docker", "", again);
+          if (res.job) return jobDialog(res.job, tool.id === "tailscale" ? "tailscale" : "docker", "", again);
           state.tools = res;
           toast(t("tools.installed", { name: tool.name }));
         } catch (err) {

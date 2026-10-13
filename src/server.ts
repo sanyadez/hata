@@ -96,6 +96,7 @@ import { addDevice, CHANNELS, listDevices, notifyStatus, pushKey, removeDevice, 
 import { appHost, appLabel, classifyHost, clientIp, cookieDomain, domainOf, localDomain, requestHost, requestPort, requestProto, siteDomain } from "./site";
 import { newChallenge, PASSKEY_ALGORITHMS, spendChallenge, verifyAssertion, verifyRegistration } from "./passkey";
 import { qrMatrix } from "./qr";
+import { connect as connectTailscale, disconnect as disconnectTailscale, install as installTailscale, offerNetworks, report as tailscaleReport, signOut as signOutTailscale, start as startTailscale } from "./tailscale";
 import { IMAGE_MIME, imageType, wallpaperSvg, WALLPAPERS } from "./wallpapers";
 import { containerCommand, shellCommand, TerminalError, TerminalManager, terminalEnv, type TerminalClient, type TerminalStart } from "./terminal";
 import { ARCH, catalogue, scheduleStoreSync, syncStore } from "./store";
@@ -1094,6 +1095,21 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
     const failed = await removeOne(toolGone[1]!, user.name);
     if (failed) return fail(failed.message ? 500 : 409, failed.code, { message: failed.message ?? "" });
     return json(await toolsReport());
+  }
+  // remote access: the server in the person's own private network
+  if (path === "/api/tailscale" && method === "GET") return json(await tailscaleReport(listenAddress().port));
+  if (path.startsWith("/api/tailscale/") && method === "POST") {
+    const what = path.slice("/api/tailscale/".length);
+    if (what === "install") return json({ job: installTailscale(user.name).id }, 202);
+    server.timeout(req, 0);
+    const data = await body(req);
+    if (what === "start") await startTailscale();
+    else if (what === "connect") await connectTailscale(data.server, user.name);
+    else if (what === "disconnect") await disconnectTailscale(user.name);
+    else if (what === "signout") await signOutTailscale(user.name);
+    else if (what === "networks") await offerNetworks(data.on === true, user.name);
+    else return fail(404, "request.notFound");
+    return json(await tailscaleReport(listenAddress().port));
   }
   // Docker itself, for a server that has none: the button on the home page
   if (path === "/api/docker" && method === "GET") return json({ ...(await dockerInfo()), install: DOCKER_INSTALL_COMMAND });

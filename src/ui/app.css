@@ -882,3 +882,4 @@ table.shares td { vertical-align: top; }
   .welcome-steps .grow { display: none; }
   .welcome-label { display: none; }
 }
+.stack-s.end { justify-items: end; text-align: right; }
