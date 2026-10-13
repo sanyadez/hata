@@ -4,6 +4,7 @@
  * and a large file goes up in parts read from the disk one at a time, so a snapshot of many gigabytes
  * costs the memory of one part. Signing, addresses and reading the answers are pure and tested.
  */
+import { renameSync, rmSync } from "node:fs";
 
 export interface S3Place {
   /** The service's address; "" — Amazon's own, found by the region */
@@ -124,6 +125,18 @@ export async function putText(place: S3Place, key: string, text: string): Promis
 
 export async function remove(place: S3Place, key: string): Promise<void> {
   await patiently(() => call(place, "DELETE", key));
+}
+
+/** Brings a file of the bucket to this machine, straight to the disk; it appears under its name only when whole */
+export async function getFile(place: S3Place, key: string, path: string): Promise<void> {
+  const response = await patiently(() => call(place, "GET", key));
+  const expected = Number(response.headers.get("content-length") ?? -1);
+  const written = await Bun.write(path + ".partial", response);
+  if (expected >= 0 && written !== expected) {
+    rmSync(path + ".partial", { force: true });
+    throw new S3Error("Incomplete", `Only ${written} of ${expected} bytes arrived.`);
+  }
+  renameSync(path + ".partial", path);
 }
 
 /** Puts a file of this machine into the bucket; it is there whole or not at all */

@@ -157,7 +157,8 @@ Early development. What works today:
   snapshot does not cost memory. With a passphrase the files are encrypted before they leave, so
   whoever keeps them cannot read them. A day the other
   machine was off is caught up the next time, and a copy that falls behind shows up under "needs
-  attention". `hata restore` opens such a copy when given the passphrase;
+  attention". `hata restore` opens such a copy when given the passphrase, and takes the copy's own
+  address — `s3://bucket/folder` or `sftp://user@host/folder` — fetching the latest snapshots by itself;
 - disks and their health (Settings → Storage): every disk with what it says about itself (SMART) in plain
   words — healthy, wearing out or failing, and why — its temperature, how full it is and where it is
   mounted; the file systems of the server, network folders included. Health is read every half an hour
@@ -345,6 +346,7 @@ hata                    run the server
 hata install            install as a systemd service and start it; --port <number>
 hata uninstall          stop and remove the service (apps and data stay)
 hata restore <folder>   bring the server back from a backup folder: Hata's state, then every app
+                        (or from s3://bucket/folder, sftp://user@host/folder — the second copy)
 hata unseal <file.enc>  open one file of an encrypted copy of the backups
 hata migrate casaos     take over the apps of a CasaOS install; --dry-run, --yes, --keep-casaos, --undo
 hata setup-url          print the address for creating the first administrator

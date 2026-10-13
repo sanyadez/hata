@@ -21,6 +21,7 @@ import { join } from "node:path";
 import { SECRETS_DIR } from "./config";
 import { run } from "./docker";
 import { isPlainObject, readJsonFile, writeJsonAtomic, writeTextAtomic } from "./fsutil";
+import { groupKeys, objectKey, parseListings, quoted } from "./remote";
 import { list as listBucket, putFile, putText, remove as removeObject, type S3Place } from "./s3";
 import { SEALED_EXT, sealFile } from "./seal";
 
@@ -156,48 +157,11 @@ export function cleanBucket(input: Record<string, unknown>, current: Bucket): Bu
   return next;
 }
 
-/** The name of a file in the bucket */
-export const objectKey = (prefix: string, dir: string, name: string): string => [prefix, dir, name].filter(Boolean).join("/");
-
-/** The keys listed under the prefix, as the names each folder holds; what lies deeper or beside is not Hata's */
-export function groupKeys(prefix: string, keys: string[]): Map<string, string[]> {
-  const out = new Map<string, string[]>();
-  const start = prefix ? prefix + "/" : "";
-  for (const key of keys) {
-    if (!key.startsWith(start)) continue;
-    const parts = key.slice(start.length).split("/");
-    if (parts.length !== 2 || !parts[0] || !parts[1]) continue;
-    out.set(parts[0], [...(out.get(parts[0]) ?? []), parts[1]]);
-  }
-  return out;
-}
-
-/** A path as sftp's batch mode takes it; `cleanTarget` has kept out what quoting cannot carry */
-export const quoted = (path: string): string => `"${path}"`;
-
 /** `mkdir` for every step of the way to `path`: sftp has no `mkdir -p`, and "it exists" is not an error here */
 export function mkdirs(path: string): string[] {
   const parts = path.split("/").filter(Boolean);
   const start = path.startsWith("/") ? "/" : "";
   return parts.map((_, i) => `-mkdir ${quoted(start + parts.slice(0, i + 1).join("/"))}`);
-}
-
-/**
- * What `ls -1 <dir>` printed for each folder asked. Batch mode repeats every command after `sftp> `,
- * which is what tells the answers apart; a folder that is not there has no names.
- */
-export function parseListings(output: string): Map<string, string[]> {
-  const out = new Map<string, string[]>();
-  let names: string[] | null = null;
-  for (const line of output.split("\n")) {
-    const command = /^sftp> -?ls -1 "(.*)"$/.exec(line);
-    if (command) {
-      names = [];
-      out.set(command[1]!, names);
-    } else if (line.startsWith("sftp> ")) names = null;
-    else if (names && line && !line.startsWith("Can't ls:")) names.push(line.slice(line.lastIndexOf("/") + 1).trim());
-  }
-  return out;
 }
 
 const SNAPSHOT_FILE_RE = /^(\d{8}-\d{6})\.(tar\.gz|json)(\.enc)?(\.partial)?$/;

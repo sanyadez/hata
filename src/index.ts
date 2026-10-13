@@ -20,6 +20,11 @@ Usage:
                     bring the server back from its backup: Hata's settings and users, then
                     every app from its latest snapshot (needs root); --yes does not ask.
                     A copy sealed with a passphrase is opened first
+  hata restore s3://<bucket>[/<folder>]  |  sftp://<user>@<host>[:<port>]/<folder>
+                    the same from the second copy kept elsewhere: the latest snapshots are
+                    fetched first (--to <folder>, by default /DATA/Backups). A bucket takes
+                    --endpoint <address> and --region <region>; its key is asked for, or read
+                    from HATA_S3_KEY and HATA_S3_SECRET
   hata unseal <file.enc> [<output file>]
                     open one file of a sealed backup by hand
   hata setup-url    print the address for creating the first administrator

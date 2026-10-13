@@ -10,8 +10,9 @@
  */
 import { MOVED_MARK, serviceStateDir } from "./statedir";
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync } from "node:fs";
-import { join, relative } from "node:path";
+import { join, relative, resolve } from "node:path";
 import { readJsonFile, writeJsonAtomic } from "./fsutil";
+import { fetchFromBucket, fetchOverSftp, parseSource, type Source } from "./remote";
 import { openFile, SEALED_EXT, SealError } from "./seal";
 import { COMPILED, VERSION } from "./version";
 
@@ -78,7 +79,31 @@ function confirm(question: string): boolean {
   return /^y(es)?$/i.test(answer?.trim() ?? "");
 }
 
-const USAGE = "Usage: hata restore <backup folder> [--yes]";
+const USAGE = `Usage: hata restore <backup folder> [--yes]
+       hata restore s3://<bucket>[/<folder>] [--endpoint <address>] [--region <region>] [--to <folder>] [--yes]
+       hata restore sftp://<user>@<host>[:<port>]/<folder> [--to <folder>] [--yes]`;
+
+/** Where a copy fetched from elsewhere is put when `--to` does not say: the backup folder of a fresh install */
+const FETCH_TO = "/DATA/Backups";
+
+/** Brings the latest snapshots of a copy kept elsewhere into `to`. False — it could not, and the reason is printed */
+async function fetchCopy(source: Source, options: Record<string, string>, to: string): Promise<boolean> {
+  console.log(`The latest snapshot of every folder is fetched into ${to}; the restore then reads from there.`);
+  mkdirSync(to, { recursive: true });
+  if (source.kind === "sftp") return fetchOverSftp(source, to);
+  const endpoint = (options.endpoint ?? "").replace(/\/+$/, "");
+  if (endpoint && !/^https?:\/\/[A-Za-z0-9.-]+(:\d{1,5})?(\/[A-Za-z0-9._~\/-]*)?$/.test(endpoint)) {
+    console.error("The address after --endpoint must look like https://s3.example.com.");
+    return false;
+  }
+  const accessKey = process.env.HATA_S3_KEY || process.env.AWS_ACCESS_KEY_ID || (process.stdin.isTTY ? (prompt("Access key ID:") ?? "").trim() : "");
+  const secret = process.env.HATA_S3_SECRET || process.env.AWS_SECRET_ACCESS_KEY || askSecret("Secret access key:").trim();
+  if (!accessKey || !secret) {
+    console.error("The key of the bucket is needed: type it when asked, or give it in HATA_S3_KEY and HATA_S3_SECRET.");
+    return false;
+  }
+  return fetchFromBucket({ endpoint, region: options.region || "us-east-1", bucket: source.bucket, accessKey, secret }, source.prefix, to);
+}
 
 /**
  * Of a folder that came back from another machine sealed: the files of its latest snapshot, if that one
@@ -167,12 +192,26 @@ export async function unseal(args: string[]): Promise<number> {
 
 /** `hata restore <backup folder>`: puts Hata's state back from the latest snapshot of the server found there */
 export async function restoreServer(args: string[]): Promise<number> {
-  const flags = args.filter((a) => a.startsWith("--"));
-  const [from, ...extra] = args.filter((a) => !a.startsWith("--"));
-  if (!from || extra.length || flags.some((f) => f !== "--yes")) {
+  const flags: string[] = [];
+  const options: Record<string, string> = {};
+  const words: string[] = [];
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i]!;
+    if (["--endpoint", "--region", "--to"].includes(arg) && args[i + 1] !== undefined) options[arg.slice(2)] = args[++i]!;
+    else (arg.startsWith("--") ? flags : words).push(arg);
+  }
+  const [where, ...extra] = words;
+  const source = where ? parseSource(where) : null;
+  // the options belong to a copy kept elsewhere; with a folder of this machine they are a slip
+  if (!where || extra.length || flags.some((f) => f !== "--yes") || (!source && Object.keys(options).length) || (typeof source === "object" && source?.kind === "sftp" && (options.endpoint || options.region))) {
     console.error(USAGE);
     return 2;
   }
+  if (typeof source === "string") {
+    console.error(source);
+    return 2;
+  }
+  const from = source ? resolve(options.to ?? FETCH_TO) : where;
   if (COMPILED && process.getuid?.() !== 0) {
     console.error("This needs root: run it with sudo.");
     return 1;
@@ -182,6 +221,7 @@ export async function restoreServer(args: string[]): Promise<number> {
   const { DATA_DIR, SECRETS_DIR, SECRET_NAMES } = await import("./config");
   const apart = SECRETS_DIR !== DATA_DIR;
 
+  if (source && !(await fetchCopy(source, options, from))) return 1;
   if (!(await openSealedCopy(from))) return 1;
   const snapshot = listServerSnapshots(from)[0];
   if (!snapshot) {

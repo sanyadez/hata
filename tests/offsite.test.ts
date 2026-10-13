@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
-import { cleanBucket, cleanTarget, fingerprint, groupKeys, objectKey, s3Reason, mkdirs, parseListings, plan, preferredKey, reason } from "../src/offsite";
+import { cleanBucket, cleanTarget, fingerprint, s3Reason, mkdirs, plan, preferredKey, reason } from "../src/offsite";
+import { groupKeys, latestFiles, objectKey, parseListings, parseSource, quoted } from "../src/remote";
 import { sealedToOpen } from "../src/restore";
 
 const current = { host: "", port: 22, user: "", path: "hata-backups" };
@@ -122,4 +123,25 @@ test("what the storage answered is said with its own code", () => {
   expect(s3Reason({ code: "NoSuchBucket", message: "NoSuchBucket" })).toBe("NoSuchBucket");
   expect(s3Reason(new Error("connection refused"))).toBe("connection refused");
   expect(s3Reason("odd")).toBe("odd");
+});
+
+test("where a copy to restore from lies: a bucket, another machine, or a folder here", () => {
+  expect(parseSource("/mnt/disk/Backups")).toBeNull();
+  expect(parseSource("backups")).toBeNull();
+  expect(parseSource("s3://my-home.backups/hata/server/")).toEqual({ kind: "s3", bucket: "my-home.backups", prefix: "hata/server" });
+  expect(parseSource("s3://my-home")).toEqual({ kind: "s3", bucket: "my-home", prefix: "" });
+  expect(typeof parseSource("s3://My_Bucket/x")).toBe("string");
+  expect(typeof parseSource("s3://bucket/a/../b")).toBe("string");
+  expect(parseSource("sftp://backup@nas.lan/volume1/hata/")).toEqual({ kind: "sftp", user: "backup", host: "nas.lan", port: 22, path: "/volume1/hata" });
+  expect(parseSource("sftp://u@[fd00::5]:2222/~/copies/my server")).toEqual({ kind: "sftp", user: "u", host: "fd00::5", port: 2222, path: "copies/my server" });
+  for (const bad of ["sftp://nas.lan/x", "sftp://u@nas.lan", "sftp://u@nas.lan/", "sftp://-oProxyCommand=x@h/p", "sftp://u@-h/p", 'sftp://u@h/a"b', "sftp://u@h/a/../b", "sftp://u@h/~/-x", "sftp://u@h:99999/p", "sftp://u@h/a*"]) expect([bad, typeof parseSource(bad)]).toEqual([bad, "string"]);
+});
+
+test("a restore fetches the two files of the latest whole snapshot of a folder", () => {
+  expect(latestFiles(["20261010-030000.tar.gz", "20261010-030000.json", "20261012-030000.tar.gz", "20261012-030000.json", "notes.txt"])).toEqual(["20261012-030000.json", "20261012-030000.tar.gz"]);
+  // the newest is half there: the one before it is whole
+  expect(latestFiles(["20261010-030000.tar.gz.enc", "20261010-030000.json.enc", "20261012-030000.tar.gz.enc"])).toEqual(["20261010-030000.json.enc", "20261010-030000.tar.gz.enc"]);
+  expect(latestFiles(["20261010-030000.tar.gz.partial", "20261010-030000.json"])).toEqual([]);
+  expect(latestFiles([])).toEqual([]);
+  expect(quoted("a b")).toBe('"a b"');
 });
