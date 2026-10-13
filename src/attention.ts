@@ -6,6 +6,7 @@ import type { Activity } from "./activity";
 import type { InstalledApp } from "./apps";
 import { diskLabel, type DiskReport } from "./disks";
 import type { DockerInfo } from "./docker";
+import type { Trouble } from "./network";
 import type { SystemStatus } from "./system";
 
 export interface AttentionItem {
@@ -29,7 +30,7 @@ const FAILURE_WINDOW_MS = 24 * 3600 * 1000;
 /** A trash smaller than this is not worth a word when its disk fills up, bytes */
 const TRASH_WORTH = 100 * 1024 * 1024;
 
-export function attention(input: { system: SystemStatus; docker: DockerInfo; apps: InstalledApp[]; activity: Activity[]; update?: string | null; offsite?: { error: string } | null; disks?: DiskReport[]; trash?: (path: string) => number; absent?: { path: string; holds: string | null }[]; now?: number }): AttentionItem[] {
+export function attention(input: { system: SystemStatus; docker: DockerInfo; apps: InstalledApp[]; activity: Activity[]; update?: string | null; offsite?: { error: string } | null; disks?: DiskReport[]; trash?: (path: string) => number; absent?: { path: string; holds: string | null }[]; internet?: Trouble[]; now?: number }): AttentionItem[] {
   const { system, docker, apps, activity } = input;
   const now = input.now ?? Date.now();
   const items: AttentionItem[] = [];
@@ -84,6 +85,11 @@ export function attention(input: { system: SystemStatus; docker: DockerInfo; app
   // a disk Hata connected for good is not there: with the data folder on it, apps cannot start
   for (const folder of input.absent ?? []) {
     items.push({ id: `absent:${folder.path}`, severity: folder.holds === "data" ? "danger" : "warn", code: folder.holds === "data" ? "absent.data" : "absent", detail: { path: folder.path } });
+  }
+
+  // a way to the internet that does not reach it: the server cut off, living on its spare way, or without one
+  for (const way of input.internet ?? []) {
+    items.push({ id: way.code === "none" ? "internet" : `internet:${way.nic}`, severity: way.code === "none" ? "danger" : "warn", code: `internet.${way.code}`, detail: { nic: way.label, other: way.other } });
   }
 
   const memory = system.memory.total ? Math.round((system.memory.used / system.memory.total) * 100) : 0;

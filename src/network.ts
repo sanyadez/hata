@@ -57,6 +57,10 @@ export interface Nic {
   addresses: string[];
   /** Global IPv6 addresses */
   addresses6: string[];
+  /** IPv6 as its NetworkManager profile has it; method "" — not known, or not something the form sets */
+  v6: { method: Change6["method"] | ""; address: string; gateway: string; dns: string[] };
+  /** Whose it was before Hata handed it over to NetworkManager — it can be given back; "" — not handed over */
+  handed: "networkd" | "ifupdown" | "";
   /** The address came by itself (DHCP) */
   dynamic: boolean;
   gateway: string;
@@ -120,6 +124,19 @@ export function terse(line: string): string[] {
   return fields;
 }
 
+/**
+ * The properties of one thing (`nmcli -t -f a,b connection show <name>`): a line each, `name:value` —
+ * and there, unlike in a table, the value is written as it is, colons and all.
+ */
+export function props(out: string): Map<string, string> {
+  const found = new Map<string, string>();
+  for (const line of out.split("\n")) {
+    const at = line.indexOf(":");
+    if (at > 0) found.set(line.slice(0, at), line.slice(at + 1));
+  }
+  return found;
+}
+
 /** Drivers of the USB devices that are a modem or a phone, not a network card on a cable */
 const MODEM_DRIVERS = /^(cdc_ether|cdc_ncm|cdc_mbim|rndis_host|ipheth|qmi_wwan|huawei_cdc_ncm|cdc_eem|sierra_net|hso)$/;
 export const isModem = (subsystem: string, driver: string): boolean => subsystem === "usb" && MODEM_DRIVERS.test(driver);
@@ -146,6 +163,17 @@ export interface Change {
   address: string;
   gateway: string;
   dns: string[];
+  /** IPv6, when the form sent it; without it IPv6 stays as it is */
+  v6?: Change6;
+}
+
+export interface Change6 {
+  /** auto — from the router (its announcements, DHCPv6); manual — the one given here; off — no IPv6 on this interface */
+  method: "auto" | "manual" | "off";
+  /** `2001:db8::5/64` */
+  address: string;
+  gateway: string;
+  dns: string[];
 }
 
 const ipNumber = (ip: string): number | null => {
@@ -155,36 +183,123 @@ const ipNumber = (ip: string): number | null => {
   return parts.some((p) => p > 255) ? null : ((parts[0]! << 24) | (parts[1]! << 16) | (parts[2]! << 8) | parts[3]!) >>> 0;
 };
 
-/** Checks what the form sent; an error code, or the change as it will be applied */
-export function cleanChange(input: Record<string, unknown>): Change | string {
-  const list = (v: unknown): string[] => (Array.isArray(v) ? v : typeof v === "string" ? v.split(/[\s,]+/) : []).map((s) => String(s).trim()).filter(Boolean);
-  const dns = list(input.dns);
-  if (dns.length > 3 || dns.some((d) => ipNumber(d) === null)) return "network.badDns";
-  if (input.method === "auto") return { method: "auto", address: "", gateway: "", dns };
-  if (input.method === "shared") return { method: "shared", address: "", gateway: "", dns: [] };
-  if (input.method !== "manual") return "network.badMethod";
-  const m = /^([\d.]+)\/(\d{1,2})$/.exec(typeof input.address === "string" ? input.address.trim() : "");
+const words = (v: unknown): string[] => (Array.isArray(v) ? v : typeof v === "string" ? v.split(/[\s,]+/) : []).map((s) => String(s).trim()).filter(Boolean);
+
+/** An address with the size of its network, `192.168.1.5/24`, as a machine can have it; null — it is not one */
+function hostAddress(value: unknown): { text: string; ip: number; mask: number; prefix: number } | null {
+  const m = /^([\d.]+)\/(\d{1,2})$/.exec(typeof value === "string" ? value.trim() : "");
   const ip = m ? ipNumber(m[1]!) : null;
   const prefix = m ? Number(m[2]) : 0;
-  if (ip === null || prefix < 8 || prefix > 30) return "network.badAddress";
+  if (ip === null || prefix < 8 || prefix > 30) return null;
   const mask = (0xffffffff << (32 - prefix)) >>> 0;
   const host = ip & ~mask;
   // the first and the last address of a network are not a machine's
-  if (host === 0 || host === (~mask >>> 0) || ip >>> 24 === 127 || ip >>> 24 >= 224 || ip >>> 24 === 0) return "network.badAddress";
+  if (host === 0 || host === (~mask >>> 0) || ip >>> 24 === 127 || ip >>> 24 >= 224 || ip >>> 24 === 0) return null;
+  return { text: `${m![1]}/${prefix}`, ip, mask, prefix };
+}
+
+/**
+ * The server's address on a network of its own — an access point, a port it gives the internet out on:
+ * "" — left to NetworkManager (10.42.x.1/24); null — not an address, or a network with no room for others.
+ */
+export function shareAddress(value: unknown): string | null {
+  if (value === undefined || value === null || (typeof value === "string" && !value.trim())) return "";
+  const address = hostAddress(value);
+  return address && address.prefix >= 16 && address.prefix <= 28 ? address.text : null;
+}
+
+/** Two networks, each written as an address in it with its size, have addresses in common */
+export function overlaps(a: string, b: string): boolean {
+  const x = hostAddress(a);
+  const y = hostAddress(b);
+  if (!x || !y) return false;
+  const mask = x.prefix < y.prefix ? x.mask : y.mask;
+  return (x.ip & mask) === (y.ip & mask);
+}
+
+/** Whoever took an address of the network the server has there now: a lease outlives a change of the network */
+const joined = (clients: Hotspot["clients"], own: string | undefined): Hotspot["clients"] => (own ? clients.filter((c) => overlaps(`${c.ip}/${own.split("/")[1]}`, own) || c.ip.includes(":")) : clients);
+
+/** An IPv6 address as its eight numbers; null — it is not one (an IPv4 tail is not read) */
+export function ip6Groups(text: string): number[] | null {
+  const halves = text.split("::");
+  if (!/^[0-9a-f:]+$/i.test(text) || halves.length > 2) return null;
+  const part = (half: string) => (half ? half.split(":") : []);
+  const head = part(halves[0]!);
+  const tail = part(halves[1] ?? "");
+  if ([...head, ...tail].some((group) => !/^[0-9a-f]{1,4}$/i.test(group))) return null;
+  if (halves.length === 1 ? head.length !== 8 : head.length + tail.length > 7) return null;
+  return [...head, ...Array<string>(8 - head.length - tail.length).fill("0"), ...tail].map((group) => parseInt(group, 16));
+}
+
+function cleanV6(input: unknown): Change6 | string {
+  const v = (typeof input === "object" && input ? input : {}) as Record<string, unknown>;
+  const dns = words(v.dns);
+  if (dns.length > 3 || dns.some((d) => ip6Groups(d) === null)) return "network.badDns6";
+  if (v.method === "off") return { method: "off", address: "", gateway: "", dns: [] };
+  if (v.method === "auto") return { method: "auto", address: "", gateway: "", dns };
+  if (v.method !== "manual") return "network.badMethod";
+  const m = /^([0-9a-f:]+)\/(\d{1,3})$/i.exec(typeof v.address === "string" ? v.address.trim() : "");
+  const groups = m ? ip6Groups(m[1]!) : null;
+  const prefix = m ? Number(m[2]) : 0;
+  // not the addresses every interface has by itself (fe80::), nor those of many machines at once (ff…)
+  if (!groups || prefix < 8 || prefix > 128 || groups[0]! >>> 8 === 0xff || (groups[0]! & 0xffc0) === 0xfe80 || groups.slice(0, 7).every((g) => g === 0)) return "network.badAddress6";
+  const gateway = typeof v.gateway === "string" ? v.gateway.trim() : "";
+  if (gateway) {
+    const g = ip6Groups(gateway);
+    if (!g || g[0]! >>> 8 === 0xff || g.every((n, i) => n === groups[i])) return "network.badGateway6";
+  }
+  return { method: "manual", address: `${m![1]!.toLowerCase()}/${prefix}`, gateway: gateway.toLowerCase(), dns };
+}
+
+/** Checks what the form sent; an error code, or the change as it will be applied */
+export function cleanChange(input: Record<string, unknown>): Change | string {
+  const dns = words(input.dns);
+  if (dns.length > 3 || dns.some((d) => ipNumber(d) === null)) return "network.badDns";
+  const v6 = input.v6 === undefined ? undefined : cleanV6(input.v6);
+  if (typeof v6 === "string") return v6;
+  const more = v6 ? { v6 } : {};
+  if (input.method === "auto") return { method: "auto", address: "", gateway: "", dns, ...more };
+  if (input.method === "shared") {
+    const own = shareAddress(input.address);
+    return own === null ? "network.badShareAddress" : { method: "shared", address: own, gateway: "", dns: [] };
+  }
+  if (input.method !== "manual") return "network.badMethod";
+  const address = hostAddress(input.address);
+  if (!address) return "network.badAddress";
   const gateway = typeof input.gateway === "string" ? input.gateway.trim() : "";
   if (gateway) {
     const g = ipNumber(gateway);
-    if (g === null || g === ip || (g & mask) !== (ip & mask)) return "network.badGateway";
+    if (g === null || g === address.ip || (g & address.mask) !== (address.ip & address.mask)) return "network.badGateway";
   }
-  return { method: "manual", address: `${m![1]}/${prefix}`, gateway, dns };
+  return { method: "manual", address: address.text, gateway, dns, ...more };
 }
 
 /** The settings of a NetworkManager profile for a change, as arguments of `nmcli connection modify|add` */
 export function profileArgs(change: Change): string[] {
-  if (change.method === "shared") return ["ipv4.method", "shared", "ipv4.addresses", "", "ipv4.gateway", "", "ipv4.dns", "", "ipv4.ignore-auto-dns", "no"];
-  return change.method === "auto"
-    ? ["ipv4.method", "auto", "ipv4.addresses", "", "ipv4.gateway", "", "ipv4.dns", change.dns.join(","), "ipv4.ignore-auto-dns", change.dns.length ? "yes" : "no"]
-    : ["ipv4.method", "manual", "ipv4.addresses", change.address, "ipv4.gateway", change.gateway, "ipv4.dns", change.dns.join(","), "ipv4.ignore-auto-dns", "no"];
+  if (change.method === "shared") return ["ipv4.method", "shared", "ipv4.addresses", change.address, "ipv4.gateway", "", "ipv4.dns", "", "ipv4.ignore-auto-dns", "no"];
+  const v4 =
+    change.method === "auto"
+      ? ["ipv4.method", "auto", "ipv4.addresses", "", "ipv4.gateway", "", "ipv4.dns", change.dns.join(","), "ipv4.ignore-auto-dns", change.dns.length ? "yes" : "no"]
+      : ["ipv4.method", "manual", "ipv4.addresses", change.address, "ipv4.gateway", change.gateway, "ipv4.dns", change.dns.join(","), "ipv4.ignore-auto-dns", "no"];
+  const v6 = change.v6;
+  if (!v6) return v4;
+  // the gateway goes before the method: NetworkManager takes no gateway for a method without addresses
+  if (v6.method === "manual") return [...v4, "ipv6.method", "manual", "ipv6.addresses", v6.address, "ipv6.gateway", v6.gateway, "ipv6.dns", v6.dns.join(","), "ipv6.ignore-auto-dns", "no"];
+  return [...v4, "ipv6.gateway", "", "ipv6.addresses", "", "ipv6.method", v6.method === "off" ? "disabled" : "auto", "ipv6.dns", v6.dns.join(","), "ipv6.ignore-auto-dns", v6.dns.length ? "yes" : "no"];
+}
+
+/** IPv6 of a profile, out of `nmcli -t -f ipv6.method,ipv6.addresses,ipv6.gateway,ipv6.dns connection show` */
+export function parseV6(out: string): Nic["v6"] {
+  const got = props(out);
+  const field = (key: string) => got.get(key) ?? "";
+  const method = field("ipv6.method");
+  return {
+    method: method === "auto" || method === "dhcp" ? "auto" : method === "manual" ? "manual" : method === "disabled" || method === "ignore" ? "off" : "",
+    address: words(field("ipv6.addresses"))[0] ?? "",
+    gateway: field("ipv6.gateway").replace(/^--$/, ""),
+    dns: words(field("ipv6.dns")),
+  };
 }
 
 /** The `.network` file that takes an interface away from systemd-networkd: the first file to match wins */
@@ -219,6 +334,61 @@ export const handBackScript = (name: string): string =>
     `udevadm trigger --action=change /sys/class/net/${name}`,
     "networkctl reload",
     `networkctl reconfigure ${name}`,
+    "",
+  ].join("\n");
+
+/**
+ * Gives an interface back to systemd-networkd: Hata's files go, the profile stays switched off until
+ * the change is kept. `waitFile` — what the boot's waiting is told from now on, "" — nothing of Hata's.
+ */
+export const giveBackScript = (name: string, waitFile: string): string =>
+  [
+    "#!/bin/sh",
+    "PATH=$PATH:/usr/sbin:/sbin",
+    `nmcli connection modify ${profileName(name)} connection.autoconnect no`,
+    `rm -f ${HANDED(name)} ${UDEV_RULE(name)}`,
+    waitFile ? `cat > ${WAIT_FILE} <<'HATA'\n${waitFile.trimEnd()}\nHATA` : `rm -f ${WAIT_FILE}`,
+    "systemctl daemon-reload",
+    "udevadm control --reload",
+    `nmcli device set ${name} managed no`,
+    `udevadm trigger --action=change /sys/class/net/${name}`,
+    "networkctl reload",
+    `networkctl reconfigure ${name}`,
+    "",
+  ].join("\n");
+
+/** What undoes giving back to systemd-networkd: the files as they were (`saved`, a folder), the profile up again */
+export const retakeScript = (name: string, saved: string): string =>
+  [
+    "#!/bin/sh",
+    "PATH=$PATH:/usr/sbin:/sbin",
+    `cp ${saved}/network ${HANDED(name)}`,
+    `cp ${saved}/rule ${UDEV_RULE(name)}`,
+    `mkdir -p ${WAIT_DIR}`,
+    `if [ -f ${saved}/wait ]; then cp ${saved}/wait ${WAIT_FILE}; else rm -f ${WAIT_FILE}; fi`,
+    "systemctl daemon-reload",
+    "udevadm control --reload",
+    `udevadm trigger --action=change /sys/class/net/${name}`,
+    "networkctl reload",
+    `nmcli device set ${name} managed yes`,
+    `nmcli connection modify ${profileName(name)} connection.autoconnect yes`,
+    `nmcli connection up ${profileName(name)} ifname ${name}`,
+    "",
+  ].join("\n");
+
+/** What undoes giving back to ifupdown: the file with the interface commented out again, the profile up again */
+export const ifupRetakeScript = (name: string, saved: string): string =>
+  [
+    "#!/bin/sh",
+    "PATH=$PATH:/usr/sbin:/sbin",
+    `ifdown --force ${name}`,
+    `cp ${saved} ${INTERFACES}`,
+    "systemctl restart NetworkManager",
+    "sleep 3",
+    `ip addr flush dev ${name}`,
+    `nmcli device set ${name} managed yes`,
+    `nmcli connection modify ${profileName(name)} connection.autoconnect yes`,
+    `nmcli connection up ${profileName(name)} ifname ${name}`,
     "",
   ].join("\n");
 
@@ -259,12 +429,22 @@ export interface Hotspot {
   ssid: string;
   password: string;
   band: "2.4" | "5";
+  /** 0 — the adapter picks one */
+  channel: number;
+  /** The server's address on that network, with its size: `10.42.0.1/24` */
+  address: string;
   /** Who has joined: what the address service remembers */
   clients: { mac: string; ip: string; name: string }[];
 }
 
-/** The profile of an access point of the server's own: its network, with addresses and a way out through the server */
-export function hotspotProfile(id: string, nic: string, spot: { ssid: string; password: string; band: "2.4" | "5" }): string {
+/** The channels an access point is offered: at 5 GHz those that need no waiting for radars */
+export const CHANNELS = { "2.4": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13], "5": [36, 40, 44, 48, 149, 153, 157, 161] };
+
+/**
+ * The profile of an access point of the server's own: its network, with addresses and a way out through
+ * the server. `address` — the server's own there, the addresses handed out follow it; "" — NetworkManager's choice.
+ */
+export function hotspotProfile(id: string, nic: string, spot: { ssid: string; password: string; band: "2.4" | "5"; channel?: number; address?: string }): string {
   const ssid = [...new TextEncoder().encode(spot.ssid)].join(";") + ";";
   return [
     "[connection]",
@@ -280,6 +460,7 @@ export function hotspotProfile(id: string, nic: string, spot: { ssid: string; pa
     "mode=ap",
     `ssid=${ssid}`,
     `band=${spot.band === "5" ? "a" : "bg"}`,
+    ...(spot.channel ? [`channel=${spot.channel}`] : []),
     "",
     "[wifi-security]",
     "key-mgmt=wpa-psk",
@@ -289,6 +470,7 @@ export function hotspotProfile(id: string, nic: string, spot: { ssid: string; pa
     "",
     "[ipv4]",
     "method=shared",
+    ...(spot.address ? [`address1=${spot.address}`] : []),
     "",
     "[ipv6]",
     "method=ignore",
@@ -315,10 +497,10 @@ export const wifiPassword = (value: unknown): value is string => typeof value ==
  * The NetworkManager profile of a Wi-Fi network as a file: written with mode 0600, so the password is
  * never an argument of a command, where every user of the machine could read it.
  */
-export function wifiProfile(id: string, nic: string, net: { ssid: string; secure: boolean; wpa3: boolean }, password: string): string {
+export function wifiProfile(id: string, nic: string, net: { ssid: string; secure: boolean; wpa3: boolean; /** The network does not say its name: it has to be called by it */ hidden?: boolean }, password: string): string {
   // the name as a list of bytes: any characters, nothing to escape
   const ssid = [...new TextEncoder().encode(net.ssid)].join(";") + ";";
-  const lines = ["[connection]", `id=${id}`, `uuid=${crypto.randomUUID()}`, "type=wifi", `interface-name=${nic}`, "", "[wifi]", "mode=infrastructure", `ssid=${ssid}`, ""];
+  const lines = ["[connection]", `id=${id}`, `uuid=${crypto.randomUUID()}`, "type=wifi", `interface-name=${nic}`, "", "[wifi]", "mode=infrastructure", `ssid=${ssid}`, ...(net.hidden ? ["hidden=true"] : []), ""];
   if (net.secure) lines.push("[wifi-security]", `key-mgmt=${net.wpa3 ? "sae" : "wpa-psk"}`, `psk=${password.replace(/\\/g, "\\\\").replace(/^ /, "\\s")}`, "");
   lines.push("[ipv4]", "method=auto", "", "[ipv6]", "method=auto", "");
   return lines.join("\n");
@@ -350,6 +532,32 @@ export function withoutIface(text: string, name: string): string | null {
       const others = words.slice(1).filter((word) => word !== name);
       out.push(MARK + line);
       if (others.length) out.push(`${words[0]} ${others.join(" ")}`);
+    } else out.push(line);
+  }
+  return found ? out.join("\n") : null;
+}
+
+/** The opposite of `withoutIface`: the lines commented out for an interface are the file's again; null — there are none */
+export function withIface(text: string, name: string): string | null {
+  const out: string[] = [];
+  const lines = text.split("\n");
+  let inside = false;
+  let found = false;
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i]!;
+    const marked = line.startsWith(MARK);
+    const body = marked ? line.slice(MARK.length) : line;
+    const words = body.trim().split(/\s+/);
+    const stanza = /^(iface|mapping|auto|allow-[\w-]+|source|source-directory|rename|no-auto-down|no-scripts)$/.test(words[0] ?? "");
+    if (stanza) inside = marked && words[0] === "iface" && words[1] === name;
+    if (marked && inside) {
+      found = true;
+      out.push(body);
+    } else if (marked && stanza && /^(auto|allow-)/.test(words[0]!) && words.slice(1).includes(name)) {
+      out.push(body);
+      // the line written in its place for the other interfaces it named
+      const others = words.slice(1).filter((word) => word !== name);
+      if (others.length && lines[i + 1] === `${words[0]} ${others.join(" ")}`) i++;
     } else out.push(line);
   }
   return found ? out.join("\n") : null;
@@ -429,7 +637,7 @@ async function dnsOf(name: string, byNm: boolean): Promise<string[]> {
 
 export interface Pending {
   nic: string;
-  kind: "change" | "handover";
+  kind: "change" | "handover" | "handback";
   until: number;
   /** Opens `/network/confirm?token=…` at the new address, where the page's own session does not reach */
   token: string;
@@ -463,6 +671,67 @@ export function parseConnectivity(out: string): Map<string, boolean> {
   return found;
 }
 
+export interface Trouble {
+  /** main — the first way has no internet and a spare one carries it; spare — a spare way has none; none — no way has */
+  code: "main" | "spare" | "none";
+  nic: string;
+  /** What a person calls the interface, and the one that works instead of it (for `main`) */
+  label: string;
+  other: string;
+}
+
+/** What NetworkManager adds to the metric of a way that does not reach the internet */
+const PENALTY = 20000;
+
+/**
+ * Which ways to the internet do not reach it, from the default routes (`ip -j route show default`) and
+ * what the check found. A way without an answer has its route moved behind the others, so its place in
+ * the queue is read without that.
+ */
+export function trouble(routeJson: string, reached: Map<string, boolean>): Trouble[] {
+  let routes: { dev?: string; gateway?: string; metric?: number }[] = [];
+  try {
+    routes = JSON.parse(routeJson || "[]");
+  } catch {}
+  const ways = new Map<string, { nic: string; place: number; online: boolean }>();
+  for (const r of routes) {
+    if (!r.dev || !r.gateway || !reached.has(r.dev) || ways.has(r.dev)) continue;
+    const metric = r.metric ?? 0;
+    ways.set(r.dev, { nic: r.dev, place: metric >= PENALTY ? metric - PENALTY : metric, online: reached.get(r.dev)! });
+  }
+  const all = [...ways.values()].sort((a, b) => a.place - b.place);
+  const works = all.find((w) => w.online);
+  if (!all.length || all.every((w) => w.online)) return [];
+  if (!works) return [{ code: "none", nic: all[0]!.nic, label: all[0]!.nic, other: "" }];
+  return all.filter((w) => !w.online).map((w) => (w.place < works.place ? { code: "main" as const, nic: w.nic, label: w.nic, other: works.nic } : { code: "spare" as const, nic: w.nic, label: w.nic, other: "" }));
+}
+
+let troubles: Trouble[] = [];
+/** What the last look at the ways to the internet found; empty with the check off */
+export const internetTrouble = (): Trouble[] => troubles;
+
+/** What a person calls an interface: a modem by what it says it is, the rest by name */
+function nicLabel(name: string): string {
+  const device = `/sys/class/net/${name}/device`;
+  return [read(`${device}/../manufacturer`), read(`${device}/../product`)].filter(Boolean).join(" ") || name;
+}
+
+async function lookAtWays(): Promise<void> {
+  const before = JSON.stringify(troubles);
+  if (!existsSync(CHECK_FILE) || !(await nmRunning())) troubles = [];
+  else {
+    const reached = parseConnectivity((await nmcli(["-t", "-f", "GENERAL.DEVICE,GENERAL.IP4-CONNECTIVITY", "device", "show"])).out);
+    troubles = trouble((await run(["ip", "-j", "route", "show", "default"])).out, reached).map((t) => ({ ...t, label: nicLabel(t.nic), other: t.other && nicLabel(t.other) }));
+  }
+  if (JSON.stringify(troubles) !== before) bus.publish("network");
+}
+
+/** Keeps an eye on the ways to the internet while the check is on, for the "needs attention" list */
+export function startNetwork(): void {
+  setTimeout(() => void lookAtWays().catch(() => {}), 20_000);
+  setInterval(() => void lookAtWays().catch(() => {}), 60_000);
+}
+
 export interface NetworkReport {
   /** The check of whether each way reaches the internet: on or off, and the page it asks for */
   check: { on: boolean; url: string };
@@ -472,12 +741,18 @@ export interface NetworkReport {
   nics: Nic[];
   pending: Pending | null;
   trial: number;
+  /** The channels offered for an access point, by band */
+  channels: typeof CHANNELS;
 }
 
 export async function networkReport(): Promise<NetworkReport> {
   const [addr, route, nm, networkd] = await Promise.all([run(["ip", "-j", "addr"]), run(["ip", "-j", "route", "show", "default"]), nmDevices(), networkdManaged()]);
   const ifupdown = ifupdownNames();
+  const interfaces = read(INTERFACES);
   const checking = existsSync(CHECK_FILE);
+  // device → the profile it is on
+  const profiles = new Map<string, string>();
+  if (nm.size) for (const line of (await nmcli(["-t", "-f", "DEVICE,UUID", "connection", "show", "--active"])).out.split("\n")) if (terse(line)[0]) profiles.set(terse(line)[0]!, terse(line)[1] ?? "");
   const reached = checking && nm.size ? parseConnectivity((await nmcli(["-t", "-f", "GENERAL.DEVICE,GENERAL.IP4-CONNECTIVITY", "device", "show"])).out) : new Map<string, boolean>();
   const nics: Nic[] = [];
   for (const link of parseLinks(addr.out, route.out)) {
@@ -507,23 +782,26 @@ export async function networkReport(): Promise<NetworkReport> {
         const show = (await nmcli(["-t", "-f", "GENERAL.CONNECTION,WIFI-PROPERTIES.AP", "device", "show", link.name])).out.split("\n").map(terse);
         ap = show.find((f) => f[0] === "WIFI-PROPERTIES.AP")?.[1] === "yes";
         if (show.find((f) => f[0] === "GENERAL.CONNECTION")?.[1] === hotspotId(link.name)) {
-          const got = (await nmcli(["-s", "-t", "-f", "802-11-wireless.ssid,802-11-wireless.band,802-11-wireless-security.psk", "connection", "show", hotspotId(link.name)])).out.split("\n").map(terse);
-          const field = (key: string) => got.find((f) => f[0] === key)?.[1] ?? "";
-          hotspot = { ssid: field("802-11-wireless.ssid"), password: field("802-11-wireless-security.psk"), band: field("802-11-wireless.band") === "a" ? "5" : "2.4", clients: parseLeases(read(`/var/lib/NetworkManager/dnsmasq-${link.name}.leases`)) };
+          const got = props((await nmcli(["-s", "-t", "-f", "802-11-wireless.ssid,802-11-wireless.band,802-11-wireless.channel,802-11-wireless-security.psk", "connection", "show", hotspotId(link.name)])).out);
+          const field = (key: string) => got.get(key) ?? "";
+          hotspot = { ssid: field("802-11-wireless.ssid"), password: field("802-11-wireless-security.psk"), band: field("802-11-wireless.band") === "a" ? "5" : "2.4", channel: Number(field("802-11-wireless.channel")) || 0, address: link.addresses[0] ?? "", clients: joined(parseLeases(read(`/var/lib/NetworkManager/dnsmasq-${link.name}.leases`)), link.addresses[0]) };
         }
       }
       wifi = { ready, needs: supplicant ? null : { package: WIFI_PACKAGE, install: installCommand(WIFI_PACKAGE) }, ssid: hotspot ? "" : (on?.ssid ?? ""), signal: on?.signal ?? 0, ap, hotspot };
     }
+    const profile = byNm ? profiles.get(link.name) : undefined;
     nics.push({
       ...link,
       ...(wifi ? { wifi } : {}),
+      v6: profile ? parseV6((await nmcli(["-t", "-f", "ipv6.method,ipv6.addresses,ipv6.gateway,ipv6.dns", "connection", "show", profile])).out) : { method: "", address: "", gateway: "", dns: [] },
+      handed: !byNm || isWifi ? "" : existsSync(HANDED(link.name)) ? "networkd" : withIface(interfaces, link.name) !== null ? "ifupdown" : "",
       kind: isWifi ? "wifi" : modem ? "modem" : "ethernet",
       // a USB interface hangs under its device, where the names are
       product: usb ? [read(`${device}/../manufacturer`), read(`${device}/../product`)].filter(Boolean).join(" ") : "",
       dns: link.addresses.length ? await dnsOf(link.name, byNm) : [],
       online: byNm && link.internet !== "none" ? (reached.get(link.name) ?? null) : null,
       // NetworkManager keeps this file for an interface only while it shares the internet there
-      shares: byNm && !isWifi && existsSync(`/run/nm-dnsmasq-${link.name}.pid`) ? parseLeases(read(`/var/lib/NetworkManager/dnsmasq-${link.name}.leases`)) : null,
+      shares: byNm && !isWifi && existsSync(`/run/nm-dnsmasq-${link.name}.pid`) ? joined(parseLeases(read(`/var/lib/NetworkManager/dnsmasq-${link.name}.leases`)), link.addresses[0]) : null,
       speed: speed > 0 ? speed : null,
       manager: byNm ? "nm" : networkd.has(link.name) ? "networkd" : ifupdown.has(link.name) ? "ifupdown" : "",
     });
@@ -536,6 +814,7 @@ export async function networkReport(): Promise<NetworkReport> {
     check: { on: checking, url: CHECK_URL },
     pending: pending && { nic: pending.nic, kind: pending.kind, until: pending.until, token: pending.token, address: pending.address },
     trial: TRIAL_S,
+    channels: CHANNELS,
   };
 }
 
@@ -586,7 +865,7 @@ export async function confirmChange(token?: string): Promise<boolean> {
   pending = null;
   clearTimeout(kept.timer);
   await kept.keep().catch(() => {});
-  record(kept.kind === "handover" ? "network.handedOver" : "network.changed", { detail: kept.nic });
+  record(kept.kind === "handover" ? "network.handedOver" : kept.kind === "handback" ? "network.givenBack" : "network.changed", { detail: kept.nic });
   bus.publish("network");
   return true;
 }
@@ -608,6 +887,15 @@ export async function revertChange(): Promise<void> {
   bus.publish("network");
 }
 
+/** A network of the server's own cannot have the addresses of one it is already on: nothing would know which is meant */
+async function mustBeFree(address: string, name: string): Promise<void> {
+  if (!address) return;
+  for (const other of (await networkReport()).nics) {
+    const taken = other.name !== name && other.addresses.find((a) => overlaps(a, address));
+    if (taken) throw new NetworkError("network.addressTaken", { address: taken, nic: other.name });
+  }
+}
+
 const addressOf = (change: Change, nic: Nic): string => (change.method === "manual" && !nic.addresses.includes(change.address) ? change.address.split("/")[0]! : "");
 
 /** Changes the IPv4 settings of an interface NetworkManager looks after; applied a moment after the answer */
@@ -621,6 +909,7 @@ export async function changeNic(name: string, input: Record<string, unknown>, us
     // the internet cannot be given out through the interface it comes in by
     if (nic.internet === "main" || nic.wifi) throw new NetworkError("network.shareMain");
     if (!Bun.which("dnsmasq", { PATH })) throw new NetworkError("network.needsPackage", { package: SHARE_PACKAGE, install: installCommand(SHARE_PACKAGE) });
+    await mustBeFree(change.address, name);
   }
   const show = await must(nmcli(["-t", "-f", "GENERAL.CON-UUID,GENERAL.DBUS-PATH", "device", "show", name]));
   const field = (key: string) => show.split("\n").map(terse).find((f) => f[0] === key)?.[1] ?? "";
@@ -652,7 +941,7 @@ export async function handOver(name: string, user: string): Promise<Pending> {
   const nic = await findNic(name);
   if (nic.manager !== "networkd" && nic.manager !== "ifupdown") throw new NetworkError("network.cannotHandOver");
   const ifupdown = nic.manager === "ifupdown";
-  const edited = ifupdown ? withoutIface(read(INTERFACES), name) : null;
+  const edited = ifupdown ? withoutIface(readFileSync(INTERFACES, "utf8"), name) : null;
   // set up in a file that one includes: not ours to edit
   if (ifupdown && edited === null) throw new NetworkError("network.cannotHandOver");
   const change: Change = nic.dynamic || !nic.addresses.length ? { method: "auto", address: "", gateway: "", dns: [] } : { method: "manual", address: nic.addresses[0]!, gateway: nic.gateway, dns: nic.dns };
@@ -715,6 +1004,69 @@ export async function handOver(name: string, user: string): Promise<Pending> {
   });
 }
 
+/**
+ * Gives an interface Hata handed over back to the service it was taken from: systemd-networkd or
+ * ifupdown sets it up again, by its own files — which may say another address than the interface has
+ * now. On trial like the hand-over: the profile is kept, switched off, until the change is.
+ */
+export async function giveBack(name: string, user: string): Promise<Pending> {
+  if (pending) throw new NetworkError("network.pending");
+  const nic = await findNic(name);
+  if (!nic.handed) throw new NetworkError("network.notHanded");
+  const dir = `/run/hata-network-back-${name}`;
+  const script = `${dir}/undo.sh`;
+  const unit = `hata-network-undo-${name}`;
+  rmSync(dir, { recursive: true, force: true });
+  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  let forward: () => Promise<void>;
+  if (nic.handed === "ifupdown") {
+    const now = readFileSync(INTERFACES, "utf8");
+    const restored = withIface(now, name)!;
+    writeFileSync(`${dir}/interfaces`, now);
+    writeFileSync(script, ifupRetakeScript(name, `${dir}/interfaces`), { mode: 0o700 });
+    forward = async () => {
+      await nmcli(["connection", "modify", profileName(name), "connection.autoconnect", "no"]);
+      writeFileSync(INTERFACES, restored);
+      // NetworkManager lets go of what that file names, and reads it only when it starts
+      await run(["systemctl", "restart", "NetworkManager"], 60_000);
+      for (let i = 0; i < 20 && !(await nmRunning()); i++) await Bun.sleep(500);
+      await nmcli(["device", "set", name, "managed", "no"]);
+      await run(["ip", "addr", "flush", "dev", name]);
+      await run(["ifup", "--force", name], 60_000);
+    };
+  } else {
+    for (const [from, to] of [[HANDED(name), "network"], [UDEV_RULE(name), "rule"], [WAIT_FILE, "wait"]] as const) if (existsSync(from)) writeFileSync(`${dir}/${to}`, readFileSync(from));
+    const handed = [...new Bun.Glob("00-hata-*.network").scanSync({ cwd: "/etc/systemd/network" })].map((file) => file.slice(8, -8)).filter((other) => other !== name);
+    writeFileSync(script, retakeScript(name, dir), { mode: 0o700 });
+    writeFileSync(`${dir}/forward.sh`, giveBackScript(name, handed.length ? waitOnline(handed, [...(await networkdManaged()), name]) : ""), { mode: 0o700 });
+    forward = async () => void (await run(["/bin/sh", `${dir}/forward.sh`], 60_000));
+  }
+  await run(["systemctl", "stop", `${unit}.timer`]);
+  await must(run(["systemd-run", "--unit", unit, "--collect", "--quiet", `--on-active=${TRIAL_S + 5}`, "/bin/sh", script]));
+  setTimeout(async () => {
+    await forward();
+    // the service takes its time to ask the router for an address
+    let up = false;
+    for (let i = 0; i < 30 && !up; i++) {
+      await Bun.sleep(1000);
+      up = (parseLinks((await run(["ip", "-j", "addr"])).out, "").find((l) => l.name === name)?.addresses.length ?? 0) > 0;
+    }
+    await applied(up);
+  }, 400);
+  return startTrial({ nic: name, kind: "handback", address: "" }, user, {
+    undo: async () => {
+      await run(["systemctl", "stop", `${unit}.timer`]);
+      await run(["/bin/sh", script], 60_000);
+      rmSync(dir, { recursive: true, force: true });
+    },
+    keep: async () => {
+      await run(["systemctl", "stop", `${unit}.timer`]);
+      await nmcli(["connection", "delete", profileName(name)]);
+      rmSync(dir, { recursive: true, force: true });
+    },
+  });
+}
+
 // --- Wi-Fi ------------------------------------------------------------------------------------------
 
 /** SSIDs whose profile is saved, with the profile's name */
@@ -723,7 +1075,7 @@ async function savedWifi(): Promise<Map<string, string>> {
   for (const line of (await nmcli(["-t", "-f", "NAME,TYPE", "connection"])).out.split("\n")) {
     const [name, type] = terse(line);
     if (!name || type !== "802-11-wireless") continue;
-    const ssid = terse((await nmcli(["-t", "-f", "802-11-wireless.ssid", "connection", "show", name])).out.trim())[1];
+    const ssid = props((await nmcli(["-t", "-f", "802-11-wireless.ssid", "connection", "show", name])).out).get("802-11-wireless.ssid");
     if (ssid) out.set(ssid, name);
   }
   return out;
@@ -746,14 +1098,16 @@ export async function wifiNetworks(name: string): Promise<WifiNetwork[]> {
 
 /**
  * Connects to a network. A wrong password or a network out of reach is told within half a minute, and
- * nothing is kept of the attempt: the interface goes back to the network it was on.
+ * nothing is kept of the attempt: the interface goes back to the network it was on. `hidden` — a
+ * network that does not say its name and so is in no list: it is called by the name typed in.
  */
 export async function wifiConnect(name: string, input: Record<string, unknown>, user: string): Promise<void> {
   const nic = await wifiNic(name);
   const ssid = typeof input.ssid === "string" ? input.ssid : "";
   if (!ssid || new TextEncoder().encode(ssid).length > 32) throw new NetworkError("network.badSsid");
   const saved = (await savedWifi()).get(ssid);
-  const net = (await wifiNetworks(name)).find((n) => n.ssid === ssid);
+  const seen = (await wifiNetworks(name)).find((n) => n.ssid === ssid);
+  const net = seen ?? (input.hidden === true ? { ssid, secure: typeof input.password === "string" && input.password !== "", wpa3: false, hidden: true } : undefined);
   if (!net) throw new NetworkError("network.wifiGone");
   const fresh = !saved || typeof input.password === "string";
   let profile = saved ?? wifiProfileId(ssid);
@@ -853,13 +1207,19 @@ export async function startHotspot(name: string, input: Record<string, unknown>,
   const ssid = typeof input.ssid === "string" ? input.ssid.trim() : "";
   if (!ssid || new TextEncoder().encode(ssid).length > 32 || /[\x00-\x1f]/.test(ssid)) throw new NetworkError("network.badSsid");
   if (!wifiPassword(input.password)) throw new NetworkError("network.badWifiPassword");
+  const band = input.band === "5" ? "5" : "2.4";
+  const channel = Number(input.channel) || 0;
+  if (channel && !CHANNELS[band].includes(channel)) throw new NetworkError("network.badChannel");
+  const address = shareAddress(input.address);
+  if (address === null) throw new NetworkError("network.badShareAddress");
+  await mustBeFree(address, name);
   const others = (await networkReport()).nics.filter((n) => n.name !== name && n.addresses.length > 0);
   if (nic.addresses.length && !nic.wifi!.hotspot && !others.length) throw new NetworkError("network.hotspotOnlyWay");
   const id = hotspotId(name);
   const file = `${PROFILES}/${id}.nmconnection`;
   await nmcli(["connection", "delete", id]);
   mkdirSync(PROFILES, { recursive: true });
-  writeFileSync(file, hotspotProfile(id, name, { ssid, password: input.password, band: input.band === "5" ? "5" : "2.4" }), { mode: 0o600 });
+  writeFileSync(file, hotspotProfile(id, name, { ssid, password: input.password, band, channel, address }), { mode: 0o600 });
   await must(nmcli(["connection", "load", file]));
   const up = await nmcli(["--wait", "40", "connection", "up", id, "ifname", name], 60_000);
   if (up.code !== 0) {
@@ -887,6 +1247,7 @@ export async function setCheck(on: unknown, user: string): Promise<void> {
   await must(nmcli(["general", "reload", "conf"]));
   // the first answers, so the page does not show "not known" for a minute
   if (on === true) await nmcli(["networking", "connectivity", "check"], 30_000);
+  await lookAtWays().catch(() => {});
   record(on === true ? "network.check.on" : "network.check.off", { user });
   bus.publish("network");
 }

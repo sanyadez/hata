@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { cleanChange, checkConf, parseConnectivity, hotspotProfile, parseLeases, wifiQrText, isModem, roleArgs, parseWifi, wifiPassword, wifiProfile, wifiProfileId, dhcpcdClientId, withoutIface, handBackScript, handedFile, parseLinks, profileArgs, terse, udevRule, waitOnline } from "../src/network";
+import { props, giveBackScript, retakeScript, ifupRetakeScript, ip6Groups, overlaps, parseV6, shareAddress, trouble, withIface, cleanChange, checkConf, parseConnectivity, hotspotProfile, parseLeases, wifiQrText, isModem, roleArgs, parseWifi, wifiPassword, wifiProfile, wifiProfileId, dhcpcdClientId, withoutIface, handBackScript, handedFile, parseLinks, profileArgs, terse, udevRule, waitOnline } from "../src/network";
 
 const ADDR = JSON.stringify([
   { ifname: "lo", link_type: "loopback", flags: ["LOOPBACK", "UP", "LOWER_UP"], addr_info: [{ family: "inet", local: "127.0.0.1", prefixlen: 8 }] },
@@ -154,12 +154,99 @@ test("wifiQrText: what a phone's camera reads, with the signs of the format esca
 });
 
 test("giving the internet out on an interface: the server is the router there", () => {
-  expect(cleanChange({ method: "shared", address: "1.2.3.4/24", dns: "1.1.1.1" })).toEqual({ method: "shared", address: "", gateway: "", dns: [] });
-  expect(profileArgs({ method: "shared", address: "", gateway: "", dns: [] }).slice(0, 2)).toEqual(["ipv4.method", "shared"]);
+  expect(cleanChange({ method: "shared", dns: "1.1.1.1" })).toEqual({ method: "shared", address: "", gateway: "", dns: [] });
+  expect(cleanChange({ method: "shared", address: " 192.168.50.1/24 " })).toEqual({ method: "shared", address: "192.168.50.1/24", gateway: "", dns: [] });
+  expect(cleanChange({ method: "shared", address: "192.168.50.0/24" })).toBe("network.badShareAddress");
+  expect(profileArgs({ method: "shared", address: "", gateway: "", dns: [] }).slice(0, 4)).toEqual(["ipv4.method", "shared", "ipv4.addresses", ""]);
+  expect(profileArgs({ method: "shared", address: "192.168.50.1/24", gateway: "", dns: [] }).slice(0, 4)).toEqual(["ipv4.method", "shared", "ipv4.addresses", "192.168.50.1/24"]);
 });
 
 test("the check of the internet: NetworkManager's setting, and what it says of each interface", () => {
   expect(checkConf()).toContain("[connectivity]\nuri=http://nmcheck.gnome.org/check_network_status.txt\nresponse=NetworkManager is online\ninterval=60\n");
   const out = ["GENERAL.DEVICE:enp3s0", "GENERAL.IP4-CONNECTIVITY:3 (limited)", "", "GENERAL.DEVICE:enx344b50000000", "GENERAL.IP4-CONNECTIVITY:4 (full)", "", "GENERAL.DEVICE:wlp2s0", "GENERAL.IP4-CONNECTIVITY:0 (unknown)", "", "GENERAL.DEVICE:lo", "GENERAL.IP4-CONNECTIVITY:1 (none)", ""].join("\n");
   expect([...parseConnectivity(out)]).toEqual([["enp3s0", false], ["enx344b50000000", true], ["lo", false]]);
+});
+
+test("a network of the server's own: its address, and that it is not one the server is on already", () => {
+  expect(shareAddress("")).toBe("");
+  expect(shareAddress(undefined)).toBe("");
+  expect(shareAddress("10.0.0.1/16")).toBe("10.0.0.1/16");
+  expect(shareAddress("10.0.0.1/8")).toBeNull();
+  expect(shareAddress("192.168.50.1/30")).toBeNull();
+  expect(shareAddress("192.168.50.1")).toBeNull();
+  expect(overlaps("192.168.1.128/24", "192.168.1.1/24")).toBe(true);
+  expect(overlaps("192.168.1.128/24", "192.168.0.1/16")).toBe(true);
+  expect(overlaps("192.168.1.128/24", "192.168.50.1/24")).toBe(false);
+  expect(overlaps("10.42.0.1/24", "10.42.1.1/24")).toBe(false);
+  const text = hotspotProfile("a", "wlan0", { ssid: "x", password: "12345678", band: "2.4", channel: 6, address: "192.168.50.1/24" });
+  expect(text).toContain("band=bg\nchannel=6\n");
+  expect(text).toContain("[ipv4]\nmethod=shared\naddress1=192.168.50.1/24\n");
+});
+
+test("a network that does not say its name is called by it", () => {
+  expect(wifiProfile("a", "wlan0", { ssid: "Quiet", secure: true, wpa3: false, hidden: true }, "12345678")).toContain("mode=infrastructure\nssid=81;117;105;101;116;\nhidden=true\n");
+  expect(wifiProfile("a", "wlan0", { ssid: "Loud", secure: true, wpa3: false }, "12345678")).not.toContain("hidden");
+});
+
+test("IPv6: addresses read, the form checked, the profile's settings", () => {
+  expect(ip6Groups("2001:db8::5")).toEqual([0x2001, 0xdb8, 0, 0, 0, 0, 0, 5]);
+  expect(ip6Groups("::1")).toEqual([0, 0, 0, 0, 0, 0, 0, 1]);
+  expect(ip6Groups("1:2:3:4:5:6:7:8")).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+  for (const bad of ["", "1:2:3:4:5:6:7", "1:2:3:4:5:6:7:8:9", "1::2::3", "12345::1", "g::1", "1:2:3:4:5:6:7::8", "192.168.1.1"]) expect(ip6Groups(bad)).toBeNull();
+  const v4 = { method: "auto", dns: "" };
+  expect(cleanChange({ ...v4, v6: { method: "manual", address: " 2001:DB8::10/64 ", gateway: "FE80::1", dns: "2606:4700:4700::1111" } })).toEqual({ method: "auto", address: "", gateway: "", dns: [], v6: { method: "manual", address: "2001:db8::10/64", gateway: "fe80::1", dns: ["2606:4700:4700::1111"] } });
+  expect(cleanChange({ ...v4, v6: { method: "off", address: "junk" } })).toEqual({ method: "auto", address: "", gateway: "", dns: [], v6: { method: "off", address: "", gateway: "", dns: [] } });
+  expect(cleanChange(v4)).not.toHaveProperty("v6");
+  for (const address of ["2001:db8::10", "fe80::5/64", "ff02::1/64", "::/64", "2001:db8::10/200", "192.168.1.5/24"]) expect(cleanChange({ ...v4, v6: { method: "manual", address } })).toBe("network.badAddress6");
+  expect(cleanChange({ ...v4, v6: { method: "manual", address: "2001:db8::10/64", gateway: "2001:db8::10" } })).toBe("network.badGateway6");
+  expect(cleanChange({ ...v4, v6: { method: "auto", dns: "1.1.1.1" } })).toBe("network.badDns6");
+  expect(cleanChange({ ...v4, v6: { method: "sometimes" } })).toBe("network.badMethod");
+  const base = { method: "auto" as const, address: "", gateway: "", dns: [] };
+  expect(profileArgs({ ...base, v6: { method: "manual", address: "2001:db8::10/64", gateway: "fe80::1", dns: [] } }).slice(10)).toEqual(["ipv6.method", "manual", "ipv6.addresses", "2001:db8::10/64", "ipv6.gateway", "fe80::1", "ipv6.dns", "", "ipv6.ignore-auto-dns", "no"]);
+  expect(profileArgs({ ...base, v6: { method: "off", address: "", gateway: "", dns: [] } }).slice(10)).toEqual(["ipv6.gateway", "", "ipv6.addresses", "", "ipv6.method", "disabled", "ipv6.dns", "", "ipv6.ignore-auto-dns", "no"]);
+  expect(profileArgs(base)).toHaveLength(10);
+  // the properties of one profile come as they are, colons not escaped
+  expect([...props("802-11-wireless.ssid:my:net\\1\n802-11-wireless.channel:0\n\n")]).toEqual([["802-11-wireless.ssid", "my:net\\1"], ["802-11-wireless.channel", "0"]]);
+  expect(parseV6("ipv6.method:manual\nipv6.addresses:2001:db8::10/64, 2001:db8::11/64\nipv6.gateway:fe80::1\nipv6.dns:2606:4700:4700::1111\n")).toEqual({ method: "manual", address: "2001:db8::10/64", gateway: "fe80::1", dns: ["2606:4700:4700::1111"] });
+  expect(parseV6("ipv6.method:disabled\nipv6.addresses:\nipv6.gateway:\nipv6.dns:\n")).toEqual({ method: "off", address: "", gateway: "", dns: [] });
+  expect(parseV6("ipv6.method:link-local\n").method).toBe("");
+});
+
+test("withIface: the lines of an interface are the file's again, exactly as they were", () => {
+  const file = "# the network\nsource /etc/network/interfaces.d/*\n\nauto lo enp3s0\niface lo inet loopback\n\nallow-hotplug enp3s0\niface enp3s0 inet static\n\taddress 192.168.1.5/24\n\n\tgateway 192.168.1.1\niface enp3s0 inet6 auto\n\nauto eth1\niface eth1 inet dhcp\n";
+  const without = withoutIface(file, "enp3s0")!;
+  expect(without).toContain("#hata# auto lo enp3s0\nauto lo\n");
+  expect(withIface(without, "enp3s0")).toBe(file);
+  expect(withIface(without, "eth1")).toBeNull();
+  expect(withIface(file, "enp3s0")).toBeNull();
+  // two interfaces handed over: each comes back by itself
+  const both = withoutIface(without, "eth1")!;
+  expect(withIface(both, "eth1")).toBe(without);
+  expect(withIface(withIface(both, "enp3s0")!, "eth1")).toBe(file);
+});
+
+test("giving an interface back, and taking it again when that is not confirmed", () => {
+  const back = giveBackScript("eth0", "");
+  expect(back).toContain("nmcli connection modify hata-eth0 connection.autoconnect no\nrm -f /etc/systemd/network/00-hata-eth0.network /etc/udev/rules.d/99-zz-hata-eth0.rules\nrm -f /etc/systemd/system/systemd-networkd-wait-online.service.d/zz-hata.conf\n");
+  expect(back).toContain("networkctl reconfigure eth0\n");
+  expect(back).not.toContain("connection delete");
+  expect(giveBackScript("eth0", waitOnline(["eth1"], ["eth0"]))).toContain("zz-hata.conf <<'HATA'\n# Written by Hata");
+  const retake = retakeScript("eth0", "/run/x");
+  expect(retake).toContain("cp /run/x/network /etc/systemd/network/00-hata-eth0.network\n");
+  expect(retake).toContain("nmcli connection modify hata-eth0 connection.autoconnect yes\nnmcli connection up hata-eth0 ifname eth0\n");
+  expect(ifupRetakeScript("enp3s0", "/run/x/interfaces")).toContain("ifdown --force enp3s0\ncp /run/x/interfaces /etc/network/interfaces\nsystemctl restart NetworkManager\n");
+});
+
+test("trouble: which way to the internet does not reach it", () => {
+  const routes = (cable: number, modem: number) => JSON.stringify([{ dst: "default", gateway: "192.168.0.1", dev: "modem", metric: modem }, { dst: "default", gateway: "192.168.1.1", dev: "cable", metric: cable }]);
+  const reached = (cable: boolean, modem: boolean) => new Map([["cable", cable], ["modem", modem], ["lo", false]]);
+  expect(trouble(routes(100, 101), reached(true, true))).toEqual([]);
+  // a way without an answer is 20000 further back than its place
+  expect(trouble(routes(20100, 101), reached(false, true))).toEqual([{ code: "main", nic: "cable", label: "cable", other: "modem" }]);
+  expect(trouble(routes(100, 20101), reached(true, false))).toEqual([{ code: "spare", nic: "modem", label: "modem", other: "" }]);
+  expect(trouble(routes(20100, 20101), reached(false, false))).toEqual([{ code: "none", nic: "cable", label: "cable", other: "" }]);
+  // a way the check knows nothing of is not judged
+  expect(trouble(routes(100, 101), new Map([["cable", true]]))).toEqual([]);
+  expect(trouble("", reached(false, false))).toEqual([]);
+  expect(trouble("junk", reached(false, false))).toEqual([]);
 });

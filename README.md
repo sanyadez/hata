@@ -121,8 +121,12 @@ Early development. What works today:
   reach, joining one with its password, forgetting it; a USB modem or a phone sharing its connection is
   recognised, and you choose which interface is the main way to the internet and which a spare one;
   the Wi-Fi adapter can be an access point of the server's own, joined by a QR code, with the
-  internet shared through the server, and a spare cable port can give the internet out the same way;
-  on request every way is checked each minute, and a spare one takes over while the main has no internet;
+  internet shared through the server — on a network, a channel and an address of your choosing — and a
+  spare cable port can give the internet out the same way; IPv6 is set next to IPv4 (from the router,
+  fixed, or off), a Wi-Fi network that hides its name is joined by typing it, an interface handed over
+  to NetworkManager can be given back;
+  on request every way is checked each minute, a spare one takes over while the main has no internet,
+  and a way that stops reaching the internet shows up in "needs attention";
 - newer images: once a day the registries are asked whether the tags of your apps have moved on, and an
   app with a newer image is marked; on request the running apps are updated by themselves at a set time,
   each after a snapshot of its data;

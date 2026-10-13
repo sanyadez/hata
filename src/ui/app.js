@@ -1381,7 +1381,7 @@ function dragEnd(drop) {
   drag.kind.drop(drag, target);
 }
 
-const ATTENTION_ICONS = { update: "up", docker: "box", restarting: "refresh", partial: "alert", disk: "disk", smart: "disk", memory: "memory", temperature: "temp" };
+const ATTENTION_ICONS = { update: "up", docker: "box", restarting: "refresh", partial: "alert", disk: "disk", smart: "disk", memory: "memory", temperature: "temp", internet: "network" };
 
 function attentionItem(item) {
   const detail = { ...item.detail, free: item.detail.free == null ? "" : bytes(item.detail.free), trash: item.detail.trash == null ? "" : bytes(item.detail.trash) };
@@ -1394,6 +1394,7 @@ function attentionItem(item) {
     item.code === "update" && h("a", { class: "btn small", href: "#/settings/about" }, t("common.open")),
     item.code === "disk.trash" && h("a", { class: "btn small", href: "#/trash" }, t("trash.title")),
     item.code.startsWith("smart.") && h("a", { class: "btn small", href: "#/settings/storage" }, t("common.open")),
+    item.code.startsWith("internet.") && h("a", { class: "btn small", href: "#/settings/network" }, t("common.open")),
     item.app && h("a", { class: "btn small", href: `#/apps/${item.app}${item.code === "restarting" || item.code === "partial" ? "/logs" : ""}` }, t(item.code === "restarting" || item.code === "partial" ? "app.logs" : "common.open")),
   );
 }
@@ -4107,9 +4108,29 @@ function nicDialog(nic) {
   const fixed = h("div", { class: "stack", hidden: !manual.checked }, field(t("network.address"), address, t("network.addressHint")), field(t("network.gateway"), gateway));
   const dnsField = field(t("network.dns"), dns, t("network.dnsHint"));
   dnsField.hidden = shared.checked;
+  const own = h("input", { class: "mono", value: nic.shares ? (nic.addresses[0] ?? "") : "", placeholder: "10.42.0.1/24", spellcheck: false });
+  const ownField = field(t("network.shareAddress"), own, t("network.shareAddressHint"));
+  ownField.hidden = !shared.checked;
+  // IPv6 is sent only when the profile has a setting this form knows, or the person chose one
+  let touched6 = nic.v6.method !== "";
+  const method6 = h("select", { onchange: () => ((touched6 = true), show6()) }, ["auto", "manual", "off"].map((m) => h("option", { value: m, selected: (nic.v6.method || "auto") === m }, t("network.v6." + m))));
+  const address6 = h("input", { class: "mono", value: nic.v6.address, placeholder: "2001:db8::10/64", spellcheck: false });
+  const gateway6 = h("input", { class: "mono", value: nic.v6.gateway, placeholder: "fe80::1", spellcheck: false });
+  const dns6 = h("input", { class: "mono", value: nic.v6.dns.join(", "), placeholder: "2606:4700:4700::1111", spellcheck: false });
+  const fixed6 = h("div", { class: "stack" }, field(t("network.address"), address6, t("network.address6Hint")), field(t("network.gateway"), gateway6));
+  const dns6Field = field(t("network.dns"), dns6, t("network.dns6Hint"));
+  const six = h("div", { class: "stack" }, field("IPv6", method6), fixed6, dns6Field);
+  const show6 = () => {
+    six.hidden = shared.checked;
+    fixed6.hidden = method6.value !== "manual";
+    dns6Field.hidden = method6.value === "off";
+  };
+  show6();
   auto.onchange = manual.onchange = shared.onchange = () => {
     fixed.hidden = !manual.checked;
     dnsField.hidden = shared.checked;
+    ownField.hidden = !shared.checked;
+    show6();
   };
   const error = h("p", { class: "error", role: "alert" });
   const dialog = openDialog(
@@ -4123,7 +4144,7 @@ function nicDialog(nic) {
           error.textContent = "";
           try {
             needs.replaceChildren();
-            const pending = await api("PUT", `/api/network/${nic.name}`, { method: shared.checked ? "shared" : auto.checked ? "auto" : "manual", address: address.value, gateway: gateway.value, dns: dns.value });
+            const pending = await api("PUT", `/api/network/${nic.name}`, { method: shared.checked ? "shared" : auto.checked ? "auto" : "manual", address: shared.checked ? own.value : address.value, gateway: gateway.value, dns: dns.value, ...(touched6 && !shared.checked ? { v6: { method: method6.value, address: address6.value, gateway: gateway6.value, dns: dns6.value } } : {}) });
             dialog.close();
             trialDialog(pending);
           } catch (err) {
@@ -4137,7 +4158,9 @@ function nicDialog(nic) {
       h("label", { class: "check" }, manual, h("span", null, h("strong", null, t("network.manual")), h("span", { class: "muted small block" }, t("network.manualHint")))),
       fixed,
       canShare && h("label", { class: "check" }, shared, h("span", null, h("strong", null, t("network.share")), h("span", { class: "muted small block" }, t("network.shareHint")))),
+      ownField,
       dnsField,
+      six,
       needs,
       h("p", { class: "banner small" }, t("network.trial.promise", { n: state.network.trial })),
       error,
@@ -4170,6 +4193,39 @@ function handOverDialog(nic) {
           } catch (err) {
             error.textContent = errorText(err);
             e.target.closest("button").disabled = false;
+          }
+        },
+      }),
+    ),
+  );
+}
+
+/** Gives an interface handed over to NetworkManager back to the service that had it */
+function handBackDialog(nic) {
+  const error = h("p", { class: "error", role: "alert" });
+  const dialog = openDialog(
+    "",
+    h("header", null, h("h2", { class: "grow" }, t("network.handback.title", { nic: nic.name })), closeX(() => dialog)),
+    h("p", null, t("network.handback.lead", { service: t("network.by." + nic.handed) })),
+    h("p", { class: "muted small" }, t(nic.handed === "ifupdown" ? "network.handback.howIfupdown" : "network.handback.how", { nic: nic.name })),
+    h("p", { class: "banner small" }, t("network.trial.promise", { n: state.network.trial })),
+    error,
+    h(
+      "footer",
+      null,
+      closeButton(() => dialog, t("common.cancel")),
+      button(t("network.handback.go"), {
+        class: "primary",
+        onclick: async (e) => {
+          const el = e.currentTarget;
+          el.disabled = true;
+          try {
+            const pending = await api("POST", `/api/network/${nic.name}/handback`, {});
+            dialog.close();
+            trialDialog(pending);
+          } catch (err) {
+            error.textContent = errorText(err);
+            el.disabled = false;
           }
         },
       }),
@@ -4230,6 +4286,40 @@ function wifiDialog(nic) {
         : [h("p", { class: "muted" }, t("wifi.none"))]),
     );
   };
+  const other = () => {
+    const name = h("input", { maxLength: 32, required: true, placeholder: t("hotspot.name"), spellcheck: false });
+    const password = h("input", { type: "password", autocomplete: "off", minLength: 8, maxLength: 63, placeholder: t("wifi.password") });
+    const go = button(t("wifi.connect"), { class: "primary small", type: "submit" });
+    list.replaceChildren(
+      h(
+        "form",
+        {
+          class: "stack",
+          onsubmit: async (e) => {
+            e.preventDefault();
+            error.textContent = "";
+            go.disabled = true;
+            go.lastChild.textContent = t("wifi.connecting");
+            try {
+              state.network = await api("POST", `/api/network/${nic.name}/wifi`, { ssid: name.value, hidden: true, ...(password.value ? { password: password.value } : {}) });
+              dialog.close();
+              toast(t("wifi.connected", { ssid: name.value }));
+              renderSettings();
+            } catch (err) {
+              error.textContent = errorText(err);
+              go.disabled = false;
+              go.lastChild.textContent = t("wifi.connect");
+            }
+          },
+        },
+        h("p", { class: "muted small" }, t("wifi.otherLead")),
+        field(t("hotspot.name"), name),
+        field(t("wifi.password"), password, t("wifi.otherPasswordHint")),
+        h("div", null, go),
+      ),
+    );
+    name.focus();
+  };
   const look = async () => {
     error.textContent = "";
     try {
@@ -4239,13 +4329,14 @@ function wifiDialog(nic) {
       error.textContent = errorText(err);
     }
   };
-  const dialog = openDialog("", h("header", null, h("h2", { class: "grow" }, t("wifi.title", { nic: nic.name })), closeX(() => dialog)), nic.wifi.hotspot && h("p", { class: "banner small" }, t("wifi.endsHotspot", { ssid: nic.wifi.hotspot.ssid })), list, error, h("footer", null, button(t("wifi.again"), { onclick: () => (list.replaceChildren(h("p", { class: "muted" }, t("wifi.looking"))), look()) }, "refresh"), closeButton(() => dialog)));
+  const dialog = openDialog("", h("header", null, h("h2", { class: "grow" }, t("wifi.title", { nic: nic.name })), closeX(() => dialog)), nic.wifi.hotspot && h("p", { class: "banner small" }, t("wifi.endsHotspot", { ssid: nic.wifi.hotspot.ssid })), list, error, h("footer", null, button(t("wifi.again"), { onclick: () => (list.replaceChildren(h("p", { class: "muted" }, t("wifi.looking"))), look()) }, "refresh"), button(t("wifi.other"), { onclick: other }), closeButton(() => dialog)));
   void look();
 }
 
 /** The server's own Wi-Fi network: its name and password, or — when it is on — how to join it and who has */
-function hotspotDialog(nic) {
-  const spot = nic.wifi.hotspot;
+function hotspotDialog(nic, settings = false) {
+  const on = nic.wifi.hotspot;
+  const spot = settings ? null : on;
   const error = h("p", { class: "error", role: "alert" });
   const done = (data, message) => {
     state.network = data;
@@ -4271,6 +4362,7 @@ function hotspotDialog(nic) {
       h(
         "footer",
         null,
+        button(t("hotspot.settings"), { onclick: () => (dialog.close(), hotspotDialog(nic, true)) }, "sliders"),
         button(t("hotspot.off"), {
           class: "danger",
           onclick: async (e) => {
@@ -4288,10 +4380,14 @@ function hotspotDialog(nic) {
     );
     return;
   }
-  const ssid = h("input", { value: "Hata", maxLength: 32, required: true });
-  const password = h("input", { class: "mono", minLength: 8, maxLength: 63, required: true, autocomplete: "off", spellcheck: false });
-  const band = h("select", null, h("option", { value: "2.4" }, t("hotspot.band24")), h("option", { value: "5" }, t("hotspot.band5")));
-  const go = h("button", { class: "btn primary" }, t("hotspot.on"));
+  const ssid = h("input", { value: on?.ssid ?? "Hata", maxLength: 32, required: true });
+  const password = h("input", { class: "mono", value: on?.password ?? "", minLength: 8, maxLength: 63, required: true, autocomplete: "off", spellcheck: false });
+  const band = h("select", { onchange: () => channels(0) }, h("option", { value: "2.4" }, t("hotspot.band24")), h("option", { value: "5", selected: on?.band === "5" }, t("hotspot.band5")));
+  const channel = h("select");
+  const channels = (chosen) => channel.replaceChildren(h("option", { value: "0" }, t("hotspot.channelAuto")), ...state.network.channels[band.value].map((n) => h("option", { value: String(n), selected: n === chosen }, String(n))));
+  channels(on?.channel ?? 0);
+  const address = h("input", { class: "mono", value: on?.address ?? "", placeholder: "10.42.0.1/24", spellcheck: false });
+  const go = h("button", { class: "btn primary" }, t(on ? "network.apply" : "hotspot.on"));
   const needs = h("div");
   dialog = openDialog(
     "",
@@ -4305,7 +4401,7 @@ function hotspotDialog(nic) {
           needs.replaceChildren();
           go.disabled = true;
           try {
-            done(await api("PUT", `/api/network/${nic.name}/hotspot`, { ssid: ssid.value, password: password.value, band: band.value }), t("hotspot.started", { ssid: ssid.value.trim() }));
+            done(await api("PUT", `/api/network/${nic.name}/hotspot`, { ssid: ssid.value, password: password.value, band: band.value, channel: Number(channel.value), address: address.value }), t("hotspot.started", { ssid: ssid.value.trim() }));
           } catch (err) {
             if (err.code === "network.needsPackage") needs.replaceChildren(hotspotNeeds(err.detail, error));
             else error.textContent = errorText(err);
@@ -4314,11 +4410,14 @@ function hotspotDialog(nic) {
         },
       },
       h("header", null, h("h2", { class: "grow" }, t("hotspot.title")), closeX(() => dialog)),
-      h("p", { class: "muted small" }, t("hotspot.lead")),
+      !on && h("p", { class: "muted small" }, t("hotspot.lead")),
+      on && h("p", { class: "banner small" }, t("hotspot.restarts")),
       nic.wifi.ssid && h("p", { class: "banner small" }, t("hotspot.leaves", { ssid: nic.wifi.ssid })),
       field(t("hotspot.name"), ssid),
       field(t("wifi.password"), password, t("hotspot.passwordHint")),
       field(t("hotspot.band"), band, t("hotspot.bandHint")),
+      field(t("hotspot.channel"), channel, t("hotspot.channelHint")),
+      field(t("hotspot.ownAddress"), address, t("hotspot.ownAddressHint")),
       needs,
       error,
       h("footer", null, closeButton(() => dialog, t("common.cancel")), go),
@@ -4383,6 +4482,7 @@ function networkSection() {
             }),
           nic.manager === "nm" && !data.pending && (!nic.wifi || nic.wifi.ssid) && !nic.wifi?.hotspot && button(t("network.change"), { onclick: () => nicDialog(nic) }, "sliders"),
           (nic.manager === "networkd" || nic.manager === "ifupdown") && data.tool === "ok" && !data.pending && button(t("network.handover"), { onclick: () => handOverDialog(nic) }),
+          nic.handed && !data.pending && button(t("network.handback"), { onclick: () => handBackDialog(nic) }, "undo"),
         ),
       ),
       nic.wifi && row("Wi-Fi", nic.wifi.hotspot ? t("hotspot.state", { ssid: nic.wifi.hotspot.ssid, n: nic.wifi.hotspot.clients.length }) : nic.wifi.ssid ? `${nic.wifi.ssid} · ${nic.wifi.signal}%` : t(nic.wifi.ready ? "wifi.notConnected" : "wifi.notReady"), false),
@@ -4392,7 +4492,7 @@ function networkSection() {
       nic.shares && row(t("network.internet"), t("network.sharing", { n: nic.shares.length }), false),
       !nic.shares && !nic.wifi?.hotspot && (nic.internet !== "none" || (several && nic.addresses.length > 0)) && h("div", { class: "kv" }, h("span", { class: "muted" }, t("network.internet")), nic.manager === "nm" && several ? roleSelect(nic) : h("span", null, t("network.role." + (nic.internet === "none" ? "off" : nic.internet)))),
       !nic.wifi?.hotspot && row(t("network.dns"), nic.dns.join(", ")),
-      nic.addresses6.length > 0 && row("IPv6", nic.addresses6.join(", ")),
+      !nic.wifi?.hotspot && (nic.addresses6.length > 0 || nic.v6.method === "off") && row("IPv6", nic.v6.method === "off" ? t("network.v6.off") : nic.addresses6.join(", ") + (nic.v6.method ? ` · ${t(nic.v6.method === "manual" ? "network.fixed" : "network.byRouter")}` : ""), nic.v6.method !== "off"),
       row(t("network.mac"), nic.mac + (nic.speed ? ` · ${nic.speed >= 1000 ? nic.speed / 1000 + " Gbit/s" : nic.speed + " Mbit/s"}` : "")),
       row(t("network.manager"), t("network.by." + (nic.manager || "none")), false),
       nic.kind === "modem" && h("p", { class: "muted small" }, t("network.modemHint", { gateway: nic.gateway || "192.168.0.1" })),

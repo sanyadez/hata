@@ -24,7 +24,7 @@ import { addShare, changeShare, installSamba, listShares, refreshShares, removeS
 import { checkDisks, diskHealth, installTool, listDisks, startDisks, startSelfTest } from "./disks";
 import { fills, measureFills, startFills } from "./fills";
 import { checkImages, imagesStatus, startImages } from "./images";
-import { afterPackage, setCheck, setRole, startHotspot, stopHotspot, wifiQrText, changeNic, confirmChange, handOver, NETWORK_PACKAGES, networkReport, NetworkError, revertChange, wifiConnect, wifiForget, wifiNetworks } from "./network";
+import { afterPackage, giveBack, internetTrouble, startNetwork, setCheck, setRole, startHotspot, stopHotspot, wifiQrText, changeNic, confirmChange, handOver, NETWORK_PACKAGES, networkReport, NetworkError, revertChange, wifiConnect, wifiForget, wifiNetworks } from "./network";
 import { absent, connectVolume, disconnect, mergeFolders, mountingReport, prepareDisk, startMounting, type Outcome } from "./mounting";
 import { moveData } from "./movedata";
 import { installPackage } from "./packages";
@@ -658,7 +658,7 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
       arch: ARCH,
       // with a domain, apps are opened at <label>.<domain> when Hata itself is opened by that domain
       site: { domain: siteDomain(), mode: settings.https.mode, local: localDomain() },
-      attention: admin ? attention({ system, docker, apps, activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent() }) : [],
+      attention: admin ? attention({ system, docker, apps, activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble() }) : [],
       // who signed in from where, and what was installed by whom, is the administrators' business
       activity: admin ? recent(8) : [],
       // containers and compose projects on this machine that are not apps here yet
@@ -794,8 +794,9 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
         await setRole(role[1]!, (await body(req)).role, user.name);
         return json(await networkReport());
       }
-      const nic = /^\/api\/network\/([A-Za-z0-9_.-]{1,15})(\/handover)?$/.exec(path);
-      if (nic && method === "POST" && nic[2]) return json(await handOver(nic[1]!, user.name));
+      const nic = /^\/api\/network\/([A-Za-z0-9_.-]{1,15})(\/handover|\/handback)?$/.exec(path);
+      if (nic && method === "POST" && nic[2] === "/handover") return json(await handOver(nic[1]!, user.name));
+      if (nic && method === "POST" && nic[2] === "/handback") return json(await giveBack(nic[1]!, user.name));
       if (nic && method === "PUT" && !nic[2]) return json(await changeNic(nic[1]!, await body(req), user.name));
     } catch (e) {
       if (e instanceof NetworkError) return fail(e.code === "network.noNic" ? 404 : 400, e.code, e.detail);
@@ -1424,6 +1425,7 @@ export async function serve(): Promise<void> {
     },
   });
   startMounting();
+  startNetwork();
   startShares();
   startTrash();
   scheduleStoreSync();
@@ -1433,7 +1435,7 @@ export async function serve(): Promise<void> {
   void refreshHttps();
   refreshLocalNames();
   startNotifications({
-    attention: async () => attention({ system: systemStatus(), docker: await dockerInfo(), apps: await listApps("en"), activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent() }),
+    attention: async () => attention({ system: systemStatus(), docker: await dockerInfo(), apps: await listApps("en"), activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble() }),
     baseUrl: publicUrl,
     isAdmin: (id) => findUser(id)?.role === "admin",
   });
