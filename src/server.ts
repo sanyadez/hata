@@ -16,7 +16,8 @@ import { agentUser, createKey, keyOf, listKeys, removeKey } from "./agents";
 import { AppError, appAction, installedNames, jobFinished, appEnv, appDetail, appLogs, appIcon, appSettings, appStats, applyCompose, ICON_MIME, MAX_ICON, removeAppIcon, setAppIcon, applySettings, installFromSettings, applyStoreUpdate, composeText, getJob, installCustom, installFromStore, listApps, listJobs, onAppRemoved, planStoreUpdate, readCompose, removeApp, storeAppDetail } from "./apps";
 import { certificateStates, challengeResponse, ensureCertificates, loadCertificates } from "./acme";
 import { attention } from "./attention";
-import { backupApp, backupOverview, deleteSnapshot, listSnapshots, mirror, restoreSnapshot, resumeRestore, runBackups, scheduleBackups, takeServerSnapshot } from "./backup";
+import { folderSize, restoreFromSnapshot, snapshotFile, snapshotFiles } from "./snapshot";
+import { appFolders, extraAllowed, backupApp, backupOverview, deleteSnapshot, listSnapshots, mirror, restoreSnapshot, resumeRestore, runBackups, scheduleBackups, takeServerSnapshot } from "./backup";
 import { checkOffsite, forgetHost, offsiteFailure, saveOffsite } from "./offsite";
 import { APP_NAME_RE, dumpCompose } from "./appform";
 import { trashSizeOn } from "./trash";
@@ -986,6 +987,40 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
   if (path === "/api/backups/offsite/sync" && method === "POST") {
     mirror();
     return json({ started: true }, 202);
+  }
+  // the folders of an app outside AppData: which of them go into its snapshots
+  const chosen = /^\/api\/backups\/([a-z0-9_-]+)\/folders$/.exec(path);
+  if (chosen && (method === "GET" || method === "PUT")) {
+    const name = chosen[1]!;
+    if (!installedNames().includes(name)) return fail(404, "app.notFound");
+    if (method === "PUT") {
+      const asked = (await body(req)).folders;
+      const { other } = appFolders(name);
+      if (!Array.isArray(asked) || asked.some((p) => typeof p !== "string" || !other.includes(p) || !extraAllowed(p))) return fail(400, "backup.badFolder");
+      const error = updateSettings({ backup: { folders: { [name]: asked } } });
+      if (error) return fail(400, error);
+      record("app.backup.folders", { app: name, user: user.name, detail: String(asked.length) });
+    }
+    const { included, other, extra } = appFolders(name);
+    // counting a large folder takes its time; one that takes too long simply has no number
+    server.timeout(req, 0);
+    return json({
+      always: included,
+      folders: await Promise.all(other.map(async (folder) => ({ path: folder, allowed: extraAllowed(folder), included: extra.includes(folder), size: extraAllowed(folder) ? await folderSize(folder) : null }))),
+    });
+  }
+  // looking inside a snapshot
+  const inside = /^\/api\/backups\/([a-z0-9_-]+)\/(\d{8}-\d{6})\/(files|file|restore-files)$/.exec(path);
+  if (inside) {
+    // the first look reads the whole archive
+    server.timeout(req, 0);
+    const at = url.searchParams.get("path") ?? "";
+    if (inside[3] === "files" && method === "GET") return json(await snapshotFiles(inside[1]!, inside[2]!, at));
+    if (inside[3] === "file" && method === "GET") {
+      const file = await snapshotFile(inside[1]!, inside[2]!, at);
+      return new Response(file.body, { headers: { "x-content-type-options": "nosniff", "content-type": "application/octet-stream", "content-length": String(file.size), "content-disposition": disposition("attachment", file.name), "cache-control": "no-store" } });
+    }
+    if (inside[3] === "restore-files" && method === "POST") return json({ job: restoreFromSnapshot(inside[1]!, inside[2]!, (await body(req)).paths, user.name).id }, 202);
   }
   const b = /^\/api\/backups\/([a-z0-9_-]+)\/(\d{8}-\d{6})(\/restore)?$/.exec(path);
   if (b && b[3] && method === "POST") return json({ job: restoreSnapshot(b[1]!, b[2]!, user.name).id }, 202);

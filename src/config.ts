@@ -149,6 +149,8 @@ export interface BackupSettings {
   beforeUpdate: boolean;
   /** Apps left out of the scheduled run */
   exclude: string[];
+  /** App → its folders outside AppData that go into its snapshots too (media, documents); none by default */
+  folders: Record<string, string[]>;
 }
 
 const DEFAULTS: Settings = {
@@ -159,7 +161,7 @@ const DEFAULTS: Settings = {
   timezone: "",
   language: "en",
   stores: [{ id: "casaos", url: "https://github.com/IceWhaleTech/CasaOS-AppStore" }],
-  backup: { enabled: false, time: "03:00", keep: 7, dir: "", beforeUpdate: true, exclude: [] },
+  backup: { enabled: false, time: "03:00", keep: 7, dir: "", beforeUpdate: true, exclude: [], folders: {} },
   access: {},
   images: { check: true, auto: false, time: "04:30", exclude: [] },
   https: { mode: "off", domain: "", email: "" },
@@ -264,6 +266,17 @@ export function updateSettings(patch: Record<string, unknown>): string | null {
     if ("exclude" in b) {
       if (!Array.isArray(b.exclude) || b.exclude.some((n) => typeof n !== "string" || !/^[a-z0-9][a-z0-9_-]{0,62}$/.test(n))) return "settings.badBackup";
       backup.exclude = [...new Set(b.exclude as string[])];
+    }
+    if ("folders" in b) {
+      // per app: the folders given replace the ones it had, an empty list takes the app out
+      if (!isPlainObject(b.folders)) return "settings.badBackup";
+      const folders = { ...backup.folders };
+      for (const [app, list] of Object.entries(b.folders)) {
+        if (!/^[a-z0-9][a-z0-9_-]{0,62}$/.test(app) || !Array.isArray(list) || list.some((p) => typeof p !== "string" || !/^\/[^\0]+$/.test(p) || p.split("/").includes(".."))) return "settings.badBackup";
+        if (list.length) folders[app] = [...new Set(list as string[])];
+        else delete folders[app];
+      }
+      backup.folders = folders;
     }
     next.backup = backup;
   }

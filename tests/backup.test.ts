@@ -3,7 +3,8 @@ import { appDir } from "../src/apps";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expired, movedAppDir, nextRun, restorable, tarMove, withoutNested, type Snapshot } from "../src/backup";
+import { parseListing, unescape, indexOf } from "../src/snapshot";
+import { extraAllowed, expired, movedAppDir, nextRun, restorable, tarMove, withoutNested, type Snapshot } from "../src/backup";
 import { listServerSnapshots, stateExcludes, strayMembers } from "../src/restore";
 
 const snap = (id: string, at: number, reason: Snapshot["reason"]): Snapshot => ({ id, app: "a", at, reason, size: 1, paths: [], images: [] });
@@ -84,4 +85,36 @@ test("a snapshot taken where the apps used to be kept is restored to where they 
   expect(movedAppDir(["/var/lib/hata/apps/other"], "memos", "/x/apps/memos")).toBeNull();
   expect(tarMove("/var/lib/hata/apps/memos", "/mnt/my disk/hata.d/apps/memos")).toBe("--transform=s|^var/lib/hata/apps/memos|mnt/my disk/hata.d/apps/memos|rh");
   expect(tarMove("/srv/a.b/apps/memos", "/srv/a&b|c/apps/memos")).toBe("--transform=s|^srv/a\\.b/apps/memos|srv/a\\&b\\|c/apps/memos|rh");
+});
+
+test("folders outside AppData: which may go into a snapshot", () => {
+  const ok = (path: string) => extraAllowed(path, "/DATA", ["/var/lib/hata", "/etc/hata"]);
+  for (const path of ["/DATA/Media", "/mnt/big/films", "/srv/photos", "/home/me/docs", "/storage", "/var/lib/app", "/opt/app/data"]) expect(ok(path)).toBe(true);
+  for (const path of ["/", "/DATA", "/mnt", "/home", "/var", "/etc/app", "/usr/share/x", "/var/lib/docker/volumes/x", "/var/run/docker.sock", "/var/lib/hata", "/var/lib/hata/apps/x", "/var/lib", "/DATA/../etc", "/DATA//Media", "/DATA/Media/", "relative", "/proc/1"]) expect(ok(path)).toBe(false);
+});
+
+test("parseListing: what tar says a snapshot holds", () => {
+  const out = [
+    "drwxr-xr-x 0/0               0 2026-10-09 03:14 DATA/AppData/memos/",
+    "-rw-r--r-- 1000/1000     52341 2026-10-08 21:05 DATA/AppData/memos/memos prod.db",
+    "lrwxrwxrwx 0/0               0 2026-10-01 10:00 DATA/AppData/memos/latest -> memos prod.db",
+    "hrw-r--r-- 0/0               0 2026-10-01 10:00 DATA/AppData/memos/twin link to DATA/AppData/memos/memos prod.db",
+    "-rw-r--r-- 0/0              12 2026-10-01 10:00 DATA/AppData/memos/\\320\\244\\320\\276\\321\\202\\320\\276/a\\nb.txt",
+    "crw-rw-rw- 0/0             1,3 2026-10-01 10:00 DATA/AppData/memos/null",
+    "-rw-r--r-- 0/0               1 2026-10-01 10:00 ../../etc/passwd",
+    "tar: Removing leading `/' from member names",
+    "",
+  ].join("\n");
+  const entries = parseListing(out);
+  expect(entries.map((e) => e.path)).toEqual(["/DATA/AppData/memos", "/DATA/AppData/memos/memos prod.db", "/DATA/AppData/memos/latest", "/DATA/AppData/memos/twin", "/DATA/AppData/memos/Фото/a\nb.txt", "/DATA/AppData/memos/null"]);
+  expect(entries[0]).toEqual({ path: "/DATA/AppData/memos", dir: true, size: 0, at: Date.UTC(2026, 9, 9, 3, 14), link: "" });
+  expect(entries[1]).toMatchObject({ dir: false, size: 52341 });
+  expect(entries[2]!.link).toBe("memos prod.db");
+  expect(entries[3]!.link).toBe("DATA/AppData/memos/memos prod.db");
+  expect(entries[5]!.size).toBe(0);
+  const index = indexOf(entries);
+  expect(index.children.get("/DATA/AppData/memos")!.map((e) => e.path.split("/").pop())).toEqual(["memos prod.db", "latest", "twin", "null"]);
+  expect(index.byPath.get("/DATA/AppData/memos")!.dir).toBe(true);
+  expect(unescape("plain name")).toBe("plain name");
+  expect(unescape("a\\\\b\\tc")).toBe("a\\b\tc");
 });

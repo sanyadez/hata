@@ -2247,6 +2247,7 @@ function snapshotList(app, snapshots, reload) {
         "div",
         { class: "snapshot" },
         h("div", { class: "grow" }, h("strong", null, dateTime(s.at)), h("div", { class: "muted small" }, [t("backup.reason." + s.reason), bytes(s.size), s.images[0]].filter(Boolean).join(" · "))),
+        button(t("backup.files"), { class: "small", onclick: () => snapshotFilesDialog(app, s) }, "folder"),
         button(t("backup.restore"), { class: "small", onclick: () => restoreDialog(app, s) }, "undo"),
         h(
           "button",
@@ -2271,6 +2272,134 @@ function snapshotList(app, snapshots, reload) {
   );
 }
 
+/** What a snapshot holds: its folders walked like a disk, a file taken out, chosen ones put back */
+function snapshotFilesDialog(app, snapshot) {
+  const base = `/api/backups/${app.name}/${snapshot.id}`;
+  const chosen = new Set();
+  const crumbs = h("div", { class: "crumbs wrap small" });
+  const list = h("div", { class: "snapshot-files" }, h("p", { class: "muted" }, t("backup.files.reading")));
+  const error = h("p", { class: "error", role: "alert" });
+  const restore = button(t("backup.files.restore", { n: 0 }), { class: "primary", disabled: true, onclick: () => confirmRestore() }, "undo");
+  const count = () => {
+    restore.disabled = chosen.size === 0;
+    restore.lastChild.textContent = t("backup.files.restore", { n: chosen.size });
+  };
+  const open = async (path) => {
+    error.textContent = "";
+    let data;
+    try {
+      data = await api("GET", `${base}/files?path=${encodeURIComponent(path)}`);
+    } catch (e) {
+      list.replaceChildren();
+      error.textContent = errorText(e);
+      return;
+    }
+    // inside a folder the way back is shown from the snapshot's own folder it lies in
+    const root = data.roots.find((r) => path === r || path.startsWith(r + "/"));
+    const steps = root ? path.slice(root.length).split("/").filter(Boolean) : [];
+    crumbs.replaceChildren(
+      h("button", { type: "button", class: "text-btn", onclick: () => open("") }, t("backup.files.top")),
+      root && icon("chevron"),
+      root && h("button", { type: "button", class: "text-btn mono", onclick: () => open(root) }, root),
+      ...steps.flatMap((step, i) => [icon("chevron"), h("button", { type: "button", class: "text-btn mono", onclick: () => open(root + "/" + steps.slice(0, i + 1).join("/")) }, step)]),
+    );
+    list.replaceChildren(
+      ...(data.entries.length
+        ? data.entries.map((entry) => {
+            const name = path ? entry.path.slice(entry.path.lastIndexOf("/") + 1) : entry.path;
+            const tick = h("input", { type: "checkbox", checked: chosen.has(entry.path), "aria-label": name, onchange: () => ((tick.checked ? chosen.add(entry.path) : chosen.delete(entry.path)), count()) });
+            return h(
+              "div",
+              { class: "snapshot-file" },
+              tick,
+              icon(entry.dir ? "folder" : "file"),
+              entry.dir ? h("button", { type: "button", class: "text-btn grow name" + (path ? "" : " mono"), onclick: () => open(entry.path) }, name) : h("span", { class: "grow name" }, name, entry.link && h("span", { class: "muted small" }, " → " + entry.link)),
+              h("span", { class: "muted small" }, entry.dir || entry.link ? "" : bytes(entry.size)),
+              h("span", { class: "muted small when" }, dateTime(entry.at)),
+              entry.dir || entry.link ? h("span", { class: "icon-btn ghost" }) : h("a", { class: "icon-btn", href: `${base}/file?path=${encodeURIComponent(entry.path)}`, download: name, title: t("files.download"), "aria-label": `${t("files.download")}: ${name}` }, icon("download")),
+            );
+          })
+        : [h("p", { class: "muted" }, t("backup.files.empty"))]),
+    );
+  };
+  const confirmRestore = () => {
+    const paths = [...chosen].sort();
+    const sure = openDialog(
+      "confirm",
+      h("h2", null, t("backup.files.sureTitle", { n: paths.length })),
+      h("p", { class: "muted" }, t("backup.files.sureLead", { time: dateTime(snapshot.at), title: app.title })),
+      h("ul", { class: "paths mono small" }, paths.slice(0, 12).map((path) => h("li", null, path)), paths.length > 12 && h("li", null, "…")),
+      h(
+        "footer",
+        null,
+        closeButton(() => sure, t("common.cancel")),
+        button(t("backup.restore"), {
+          class: "primary",
+          onclick: async () => {
+            sure.close();
+            dialog.close();
+            document.querySelector("dialog.snapshots")?.close();
+            try {
+              const res = await api("POST", `${base}/restore-files`, { paths });
+              jobDialog(res.job, "restore", app.title, () => void refresh());
+            } catch (e) {
+              toast(errorText(e), "error");
+            }
+          },
+        }, "undo"),
+      ),
+    );
+  };
+  const dialog = openDialog("wide", h("header", null, h("div", { class: "grow" }, h("h2", null, t("backup.files.title", { title: app.title })), h("p", { class: "muted small" }, `${dateTime(snapshot.at)} · ${bytes(snapshot.size)}`)), closeX(() => dialog)), crumbs, list, error, h("footer", null, closeButton(() => dialog), restore));
+  void open("");
+}
+
+/** Which folders of an app go into its snapshots: those in AppData always, the rest by choice */
+async function backupFoldersDialog(app, done) {
+  let data;
+  try {
+    data = await api("GET", `/api/backups/${app.name}/folders`);
+  } catch (e) {
+    return toast(errorText(e), "error");
+  }
+  const error = h("p", { class: "error", role: "alert" });
+  const ticks = data.folders.map((folder) => ({ folder, input: h("input", { type: "checkbox", checked: folder.included, disabled: !folder.allowed }) }));
+  const dialog = openDialog(
+    "",
+    h(
+      "form",
+      {
+        class: "stack",
+        onsubmit: async (e) => {
+          e.preventDefault();
+          error.textContent = "";
+          try {
+            await api("PUT", `/api/backups/${app.name}/folders`, { folders: ticks.filter((x) => x.input.checked).map((x) => x.folder.path) });
+            dialog.close();
+            toast(t("settings.saved"));
+            done?.();
+          } catch (err) {
+            error.textContent = errorText(err);
+          }
+        },
+      },
+      h("header", null, h("h2", { class: "grow" }, t("backup.folders.title", { title: app.title })), closeX(() => dialog)),
+      h("h3", null, t("backup.folders.always")),
+      h("p", { class: "muted small" }, t("backup.folders.alwaysHint")),
+      data.always.length > 0 && h("ul", { class: "paths mono small" }, data.always.map((path) => h("li", null, path))),
+      h("h3", null, t("backup.folders.other")),
+      ticks.length
+        ? [
+            h("p", { class: "muted small" }, t("backup.folders.otherHint")),
+            ...ticks.map(({ folder, input }) => h("label", { class: "check" }, input, h("span", null, h("strong", { class: "mono" }, folder.path), h("span", { class: "muted small block" }, folder.allowed ? (folder.size === null ? t("backup.folders.unknown") : bytes(folder.size)) : t("backup.folders.never"))))),
+          ]
+        : h("p", { class: "muted small" }, t("backup.folders.none")),
+      error,
+      h("footer", null, closeButton(() => dialog, t("common.cancel")), ticks.some((x) => x.folder.allowed) && h("button", { class: "btn primary" }, t("settings.save"))),
+    ),
+  );
+}
+
 function snapshotsDialog(app) {
   const body = h("div");
   let dialog;
@@ -2291,7 +2420,7 @@ async function appBackupsTab(app, box) {
     return box.replaceChildren(h("p", { class: "error" }, errorText(e)));
   }
   box.replaceChildren(
-    h("div", { class: "editor-head" }, h("div", { class: "grow" }, h("p", null, t("backup.appLead")), h("p", { class: "muted small" }, app.folders.join(" · "))), button(t("backup.now"), { class: "primary", disabled: !!app.job, onclick: () => backupNow(app) }, "archive")),
+    h("div", { class: "editor-head" }, h("div", { class: "grow" }, h("p", null, t("backup.appLead")), h("p", { class: "muted small" }, app.folders.join(" · "))), button(t("backup.folders.button"), { onclick: () => backupFoldersDialog(app) }, "folder"), button(t("backup.now"), { class: "primary", disabled: !!app.job, onclick: () => backupNow(app) }, "archive")),
     h("div", { class: "card pad" }, snapshotList(app, snapshots, () => renderAppTab())),
   );
 }
@@ -2355,7 +2484,7 @@ function renderBackupsBody() {
     return h(
       "tr",
       { class: app.installed ? "" : "removed" },
-      h("td", null, h("div", { class: "with-icon" }, appIcon(app, "sm"), h("div", null, app.installed ? h("a", { class: "strong", href: `#/apps/${app.name}/backups` }, app.title) : h("span", { class: "strong" }, app.title), !app.installed && h("div", { class: "muted small" }, t("backup.removedApp")), app.otherFolders.length > 0 && h("div", { class: "muted small", title: app.otherFolders.join("\n") }, t("backup.notIncluded", { n: app.otherFolders.length }))))),
+      h("td", null, h("div", { class: "with-icon" }, appIcon(app, "sm"), h("div", null, app.installed ? h("a", { class: "strong", href: `#/apps/${app.name}/backups` }, app.title) : h("span", { class: "strong" }, app.title), !app.installed && h("div", { class: "muted small" }, t("backup.removedApp")), app.otherFolders.length > 0 && h("button", { type: "button", class: "text-btn muted small", title: app.otherFolders.join("\n"), onclick: () => backupFoldersDialog(app, loadBackups) }, t("backup.folders.row", { n: app.otherFolders.length, m: app.extraFolders.length }))))),
       h("td", null, newest ? h("div", null, ago(newest.at), h("div", { class: "muted small" }, t("backup.reason." + newest.reason))) : h("span", { class: "muted" }, t("backup.noneShort"))),
       h("td", { class: "num" }, size ? bytes(size) : "—"),
       h("td", { class: "num" }, app.snapshots.length || "—"),

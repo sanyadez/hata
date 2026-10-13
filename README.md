@@ -141,6 +141,9 @@ Early development. What works today:
   to the compose file as `icon.*` and used instead of the store's;
 - backups: a snapshot of an app (compose file, its folders, its Docker volumes) as a plain `tar.gz`, daily
   on a schedule and before every update, restore to any snapshot — also of an app that was removed;
+  folders the app uses outside its own (media, documents) go into its snapshots when you choose them;
+  a snapshot can be looked into like a disk, a file taken out of it, and single files and folders put
+  back without restoring the whole app;
 - a backup of the whole server: with every run Hata's own state (settings, users, the dashboard, the
   apps' compose files) is saved next to the apps' snapshots, and `sudo hata restore <backup folder>` on a
   new machine brings back Hata and then every app from its latest snapshot;

@@ -40,6 +40,11 @@ export interface Snapshot {
   images: string[];
   /** The data folder of that moment; older snapshots do not say */
   dataRoot?: string;
+  /**
+   * Those of `paths` that are folders outside AppData the person chose to copy too. They may be shared
+   * with other apps and hold newer files, so a restore unpacks over them and deletes nothing there.
+   */
+  extra?: string[];
 }
 
 const KEEP_PRE_UPDATE = 3;
@@ -55,10 +60,26 @@ function snapshotId(at: Date): string {
 
 // --- What belongs to an app -------------------------------------------------------------------------
 
-/** The app's folders: those under `<dataRoot>/AppData/` are backed up, the rest are only reported */
-export function appFolders(name: string): { included: string[]; other: string[] } {
+const SYSTEM_TOP = /^\/(bin|boot|dev|etc|home|lib|lib32|lib64|libx32|media|mnt|opt|proc|root|run|sbin|srv|sys|tmp|usr|var)$/;
+const SYSTEM_TREE = /^\/(bin|boot|dev|etc|lib|lib32|lib64|libx32|proc|run|sbin|sys|usr|var\/run|var\/lib\/docker)(\/|$)/;
+
+/**
+ * May a folder outside AppData go into a snapshot, and be written by a restore? Not the system's own
+ * places, not the whole data folder, not where Hata keeps its state and secrets.
+ */
+export function extraAllowed(path: string, dataRoot = settings.dataRoot, own = [DATA_DIR, SECRETS_DIR]): boolean {
+  if (!path.startsWith("/") || path === "/" || path.includes("\0") || path.includes("//") || path.endsWith("/") || path.split("/").includes("..") || path.split("/").includes(".")) return false;
+  if (SYSTEM_TOP.test(path) || SYSTEM_TREE.test(path) || path === dataRoot) return false;
+  return !own.some((dir) => path === dir || path.startsWith(dir + "/") || dir.startsWith(path + "/"));
+}
+
+/**
+ * The app's folders: those under `<dataRoot>/AppData/` are backed up always; of the rest (`other`)
+ * only the ones the person chose (`extra`).
+ */
+export function appFolders(name: string): { included: string[]; other: string[]; extra: string[] } {
   const compose = readCompose(name);
-  if (!compose) return { included: [], other: [] };
+  if (!compose) return { included: [], other: [], extra: [] };
   const copy = structuredClone(compose);
   normalize(copy, settings.dataRoot, name);
   const root = (settings.dataRoot === "/" ? "" : settings.dataRoot) + "/AppData/";
@@ -68,7 +89,8 @@ export function appFolders(name: string): { included: string[]; other: string[] 
     if (/^\/(dev|proc|sys|run|var\/run|etc)(\/|$)/.test(folder)) continue;
     (folder.startsWith(root) ? included : other).push(folder);
   }
-  return { included, other };
+  const chosen = settings.backup.folders[name] ?? [];
+  return { included, other, extra: other.filter((folder) => chosen.includes(folder) && extraAllowed(folder)) };
 }
 
 /** Where Docker keeps the named volumes of the app's compose project */
@@ -191,9 +213,12 @@ export async function takeSnapshot(name: string, reason: SnapshotReason, log: Lo
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   const at = new Date();
   const id = snapshotId(at);
-  const { included, other } = appFolders(name);
-  const paths = withoutNested([appDir(name), ...included, ...(await volumePaths(name))]).filter((p) => existsSync(p));
-  for (const folder of other) log(`Not included (outside AppData): ${folder}`);
+  const { included, other, extra } = appFolders(name);
+  const paths = withoutNested([appDir(name), ...included, ...extra, ...(await volumePaths(name))]).filter((p) => existsSync(p));
+  for (const folder of other) if (!extra.includes(folder)) log(`Not included (outside AppData): ${folder}`);
+  // the snapshots themselves may lie inside a folder that is copied; so may a trash
+  const within = paths.some((p) => backupDir() === p || backupDir().startsWith(p + "/"));
+  const excludes = [...(within ? ["--anchored", "--exclude=" + tarPath(backupDir()), "--no-anchored"] : []), "--exclude=.hata-trash"];
 
   const containers = (await listContainers().catch(() => [])).filter((c) => c.Labels[PROJECT_LABEL] === name);
   const wasRunning = containers.some((c) => c.State === "running" || c.State === "restarting");
@@ -202,7 +227,7 @@ export async function takeSnapshot(name: string, reason: SnapshotReason, log: Lo
   if (wasRunning) await dc(name, ["stop"], log);
   try {
     log(`$ tar -czf ${archive} ${paths.join(" ")}`);
-    const tar = await run(["tar", "--numeric-owner", "-czf", partial, "-C", "/", ...paths.map(tarPath)]);
+    const tar = await run(["tar", "--numeric-owner", ...excludes, "-czf", partial, "-C", "/", ...paths.map(tarPath)]);
     // 1 is "a file changed while it was read": the archive is complete
     if (tar.code > 1) throw new Error(tar.output.split("\n").slice(-3).join("\n") || `tar exited with ${tar.code}`);
     renameSync(partial, archive);
@@ -213,7 +238,7 @@ export async function takeSnapshot(name: string, reason: SnapshotReason, log: Lo
     if (wasRunning) await dc(name, ["start"], log).catch((e) => log(`Could not start the app again: ${e instanceof Error ? e.message : e}`));
   }
 
-  const snapshot: Snapshot = { id, app: name, at: at.getTime(), reason, size: statSync(archive).size, paths, images: [...new Set(containers.map((c) => c.Image))], dataRoot: settings.dataRoot };
+  const snapshot: Snapshot = { id, app: name, at: at.getTime(), reason, size: statSync(archive).size, paths, images: [...new Set(containers.map((c) => c.Image))], dataRoot: settings.dataRoot, ...(extra.some((p) => paths.includes(p)) ? { extra: extra.filter((p) => paths.includes(p)) } : {}) };
   writeJsonAtomic(join(dir, id + ".json"), snapshot);
   log(`Snapshot ${id}: ${(snapshot.size / 1024 / 1024).toFixed(1)} MB`);
   for (const old of expired(listSnapshots(name), settings.backup.keep)) {
@@ -232,6 +257,29 @@ export function backupApp(name: string, user: string, reason: SnapshotReason = "
   });
 }
 
+/** Where the paths of a snapshot belong today, and which of them are folders outside AppData */
+export function placement(snapshot: Snapshot, name: string): { moved: string | null; formerRoot: string | null; place: (path: string) => string; extra: Set<string> } {
+  // the app's directory goes to where the apps are kept now, wherever they were when the snapshot was taken
+  const moved = movedAppDir(snapshot.paths, name);
+  // and its data to where the data folder is now
+  const formerRoot = movedDataRoot(snapshot, name);
+  const place = (p: string): string => (p === moved ? appDir(name) : ((formerRoot && rebasePath(p, formerRoot, settings.dataRoot)) ?? p));
+  return { moved, formerRoot, place, extra: new Set(snapshot.extra ?? []) };
+}
+
+/** Those of `roots` (paths of the snapshot) a restore must not write to */
+export function refusedPaths(snapshot: Snapshot, name: string, roots: string[]): string[] {
+  const { moved, place, extra } = placement(snapshot, name);
+  return roots.filter((p) => p !== moved && !(extra.has(p) ? extraAllowed(place(p)) : restorable(place(p), name)));
+}
+
+export const archiveOf = (name: string, id: string): string => join(appBackupDir(name), id + ".tar.gz");
+export const snapshotOf = (name: string, id: string): Snapshot => {
+  const snapshot = APP_NAME_RE.test(name) && SNAPSHOT_ID_RE.test(id) ? listSnapshots(name).find((s) => s.id === id) : undefined;
+  if (!snapshot) throw new AppError("backup.notFound", 404);
+  return snapshot;
+};
+
 /**
  * Puts an app back to a snapshot: its folders are replaced by the archive's content and the app is
  * started from the compose file of that moment. Works for a removed app too.
@@ -242,13 +290,9 @@ export function restoreSnapshot(name: string, id: string, user: string): Job {
   if (!snapshot) throw new AppError("backup.notFound", 404);
   const archive = join(appBackupDir(name), id + ".tar.gz");
   return startJob(name, "restore", user, async (log) => {
-    // the app's directory goes to where the apps are kept now, wherever they were when the snapshot was taken
-    const moved = movedAppDir(snapshot.paths, name);
-    // and its data to where the data folder is now
-    const formerRoot = movedDataRoot(snapshot, name);
-    const place = (p: string): string => (p === moved ? appDir(name) : ((formerRoot && rebasePath(p, formerRoot, settings.dataRoot)) ?? p));
+    const { moved, formerRoot, place, extra } = placement(snapshot, name);
     const elsewhere = snapshot.paths.filter((p) => place(p) !== p);
-    const refused = snapshot.paths.filter((p) => p !== moved && !restorable(place(p), name));
+    const refused = refusedPaths(snapshot, name, snapshot.paths);
     if (refused.length) throw new Error(`The snapshot holds paths a restore must not touch: ${refused.join(", ")}`);
     // the archive is ours, but it has been lying on a disk: check it holds what its description says
     const listing = await run(["tar", "-tzf", archive]);
@@ -258,9 +302,14 @@ export function restoreSnapshot(name: string, id: string, user: string): Job {
     if (stray.length) throw new Error(`The archive holds files outside the app: ${stray[0]}`);
 
     if (existsSync(join(appDir(name), "compose.yml"))) await dc(name, ["stop"], log);
-    for (const path of snapshot.paths.map(place)) {
-      log(`Replacing ${path}`);
-      await rm(path, { recursive: true, force: true });
+    for (const path of snapshot.paths) {
+      // a folder outside AppData is not the app's alone: what the snapshot has comes back, the rest stays
+      if (extra.has(path)) {
+        log(`Unpacking over ${place(path)}`);
+        continue;
+      }
+      log(`Replacing ${place(path)}`);
+      await rm(place(path), { recursive: true, force: true });
     }
     if (moved) mkdirSync(dirname(appDir(name)), { recursive: true });
     log(`$ tar -xzf ${archive} -C /${elsewhere.map((p) => `  (${p} → ${place(p)})`).join("")}`);
@@ -368,8 +417,10 @@ export interface BackupApp {
   /** Part of the scheduled run */
   included: boolean;
   snapshots: Snapshot[];
-  /** Folders of the app that are not backed up, because they are outside AppData */
+  /** Folders of the app outside AppData: copied only when chosen */
   otherFolders: string[];
+  /** Those of them that are chosen */
+  extraFolders: string[];
 }
 
 export interface BackupOverview {
@@ -422,6 +473,7 @@ export async function backupOverview(lang: string): Promise<BackupOverview> {
       included: !settings.backup.exclude.includes(name),
       snapshots: listSnapshots(name),
       otherFolders: installed.includes(name) ? appFolders(name).other : [],
+      extraFolders: installed.includes(name) ? appFolders(name).extra : [],
     };
   });
   let free: number | null = null;

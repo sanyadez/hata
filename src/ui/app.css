@@ -374,6 +374,17 @@ td .clip { max-width: 320px; }
 .snapshot { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-top: 1px solid var(--border); }
 .snapshot:first-child { border-top: 0; padding-top: 0; }
 .snapshot:last-child { padding-bottom: 0; }
+.text-btn { border: 0; background: none; padding: 0; font: inherit; color: inherit; text-align: left; cursor: pointer; }
+.text-btn:hover { text-decoration: underline; }
+.text-btn.small { font-size: 12px; text-decoration: underline; text-decoration-style: dotted; }
+.snapshot-files { display: grid; max-height: min(52vh, 480px); overflow-y: auto; margin: 0 -4px; }
+.snapshot-file { display: flex; align-items: center; gap: 10px; padding: 7px 4px; border-top: 1px solid var(--border); min-width: 0; }
+.snapshot-file:first-child { border-top: 0; }
+.snapshot-file > .ico { width: 16px; height: 16px; color: var(--muted); flex: none; }
+.snapshot-file .name { min-width: 0; overflow-wrap: anywhere; }
+.snapshot-file .when { width: 110px; text-align: right; flex: none; }
+.snapshot-file .icon-btn.ghost { visibility: hidden; }
+@media (max-width: 600px) { .snapshot-file .when { display: none; } }
 .paths { margin: 0; padding-left: 18px; color: var(--muted); display: grid; gap: 4px; overflow-wrap: anywhere; }
 .strong { font-weight: 600; }
 a.strong:hover { color: var(--accent-text); }
