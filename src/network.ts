@@ -710,8 +710,13 @@ export async function setRole(name: string, role: unknown, user: string): Promis
   await must(nmcli(["connection", "modify", uuid, ...roleArgs(role)]));
   const applied = await nmcli(["device", "reapply", name], 30_000);
   if (applied.code !== 0) await must(nmcli(["connection", "up", uuid, "ifname", name], 60_000));
-  // the routes follow a moment later: whoever asks for the report next should see them
-  await Bun.sleep(1500);
+  // the address may be asked for anew, and a modem takes its time to answer: whoever asks for the
+  // report next should see the routes as they will be
+  for (let i = 0; i < 25; i++) {
+    await Bun.sleep(1000);
+    const now = parseLinks((await run(["ip", "-j", "addr"])).out, (await run(["ip", "-j", "route", "show", "default"])).out).find((l) => l.name === name);
+    if (!now || !nic.addresses.length || (now.addresses.length && (role === "off" ? now.internet === "none" : now.internet !== "none"))) break;
+  }
   record("network.role." + role, { user, detail: name });
   bus.publish("network");
 }
