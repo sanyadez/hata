@@ -225,6 +225,9 @@ Early development. What works today:
   started; if it does not come up, the previous version is put back by itself. Apps keep running meanwhile;
 - the whole history of what happened on the server and who did it, by day, with a search;
 - Docker itself is installed by a button where it is missing, and started where it is not running;
+- system programs (Settings): every program of the system Hata relies on in one list — Docker, Samba,
+  NetworkManager, mergerfs, SnapRAID and the rest — with what it is for, whether it is installed and in
+  which version, and the button that installs a missing one;
 - English and Ukrainian UI, light and dark, phone-friendly.
 
 Not there yet: wildcard certificates (DNS challenge), share links for files.

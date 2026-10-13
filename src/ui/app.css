@@ -383,6 +383,10 @@ td .clip { max-width: 320px; }
 .check.inline { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
 .history-day h3 { margin: 0 0 8px; }
 .center-row { display: flex; justify-content: center; text-align: center; }
+.tool { display: flex; align-items: flex-start; gap: 16px; padding: 14px 0; border-top: 1px solid var(--border); }
+.tool:first-of-type { border-top: 0; }
+.tool-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 4px; }
+.tool .cmd { margin-top: 8px; }
 .text-btn { border: 0; background: none; padding: 0; font: inherit; color: inherit; text-align: left; cursor: pointer; }
 .text-btn:hover { text-decoration: underline; }
 .text-btn.small { font-size: 12px; text-decoration: underline; text-decoration-style: dotted; }

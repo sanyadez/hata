@@ -3996,6 +3996,7 @@ async function loadSettings() {
     if (isAdmin()) state.notify = await api("GET", "/api/notify").catch(() => null);
     if (isAdmin() && state.route.section === "apps") state.images = await api("GET", "/api/images").catch(() => null);
     if (isAdmin() && state.route.section === "network") state.network = await api("GET", "/api/network").catch(() => null);
+    if (isAdmin() && state.route.section === "tools") state.tools = await api("GET", "/api/tools").catch(() => null);
     if (isAdmin() && state.route.section === "storage") state.disks = await api("GET", "/api/disks").catch(() => null);
     if (isAdmin() && state.route.section === "shares") state.shares = await api("GET", "/api/shares").catch(() => null);
     if (isAdmin() && state.route.section === "agents") state.agents = await api("GET", "/api/agents").catch(() => null);
@@ -4019,6 +4020,7 @@ const SECTIONS = [
   { id: "https", icon: "lock", admin: true },
   { id: "notifications", icon: "bell", admin: true },
   { id: "agents", icon: "key", admin: true },
+  { id: "tools", icon: "terminal", admin: true },
   { id: "about", icon: "info" },
 ];
 const sections = () => SECTIONS.filter((item) => !item.admin || isAdmin());
@@ -4249,6 +4251,7 @@ function settingsSection(section) {
   if (section === "storage") return storageSection();
   if (section === "shares") return sharesSection();
   if (section === "network") return networkSection();
+  if (section === "tools") return toolsSection();
   if (section === "agents") return agentsSection();
   if (section === "stores") {
     const stores = state.store?.stores ?? [];
@@ -4800,6 +4803,56 @@ function networkSection() {
     h("section", { class: "card pad stack" }, h("h2", null, t("settings.network")), h("p", { class: "muted small" }, t("network.lead")), data.tool === "stopped" && h("p", { class: "banner small" }, t("network.stopped")), needs, data.tool === "ok" && h("label", { class: "check" }, checkBox, h("span", null, h("strong", null, t("network.check")), h("span", { class: "muted small block" }, t("network.checkHint", { url: data.check.url.replace(/^https?:\/\//, "").replace(/\/.*/, "") })))), error, data.pending && h("div", { class: "banner" }, t("network.trial.title", { nic: data.pending.nic }), " ", button(t("network.trial.show"), { class: "small", onclick: () => trialDialog(data.pending) }))),
     ...data.nics.map(card),
     !data.nics.length && h("p", { class: "card pad muted" }, t("network.none")),
+  ];
+}
+
+/** Settings → System programs: everything of the system Hata relies on, installed or not */
+function toolsSection() {
+  const tools = state.tools;
+  if (!tools) return [h("p", { class: "muted" }, "…")];
+  const error = h("p", { class: "error", role: "alert" });
+  const again = async () => {
+    state.tools = await api("GET", "/api/tools").catch(() => state.tools);
+    if (state.route.view === "settings" && state.route.section === "tools") renderSettings();
+  };
+  const install = (tool) =>
+    button(t("mounting.needs.install", { package: tool.name }), {
+      class: "small primary",
+      onclick: async (e) => {
+        const el = e.currentTarget;
+        el.disabled = true;
+        el.lastChild.textContent = t("tools.installing");
+        error.textContent = "";
+        try {
+          const res = await api("POST", `/api/tools/${tool.id}/install`, {});
+          if (res.job) return jobDialog(res.job, "docker", "", again);
+          state.tools = res;
+          toast(t("tools.installed", { name: tool.name }));
+        } catch (err) {
+          error.textContent = errorText(err);
+        }
+        renderSettings();
+      },
+    }, "download");
+  const row = (tool) =>
+    h(
+      "div",
+      { class: "tool" },
+      h(
+        "div",
+        { class: "grow" },
+        h("div", { class: "tool-head" }, h("strong", null, tool.name), h("span", { class: "state " + (tool.state === "installed" ? "running" : "stopped") }, t("tools.state." + tool.state)), tool.used && h("span", { class: "state running" }, t("tools.used")), tool.version && h("span", { class: "muted small mono" }, tool.version)),
+        h("p", { class: "muted small" }, t(`tools.${tool.id}.what`), " ", h("a", { class: "link", href: tool.page }, t(`tools.${tool.id}.where`))),
+        tool.state === "missing" && (tool.install ? h("p", { class: "cmd" }, icon("terminal"), tool.install) : h("p", { class: "muted small" }, t("mounting.needs.byHand", { package: tool.package }))),
+      ),
+      tool.state === "missing" && tool.install && install(tool),
+    );
+  const here = tools.filter((tool) => tool.state === "installed");
+  const absent = tools.filter((tool) => tool.state !== "installed");
+  return [
+    h("section", { class: "card pad stack" }, h("h2", null, t("settings.tools")), h("p", { class: "muted small" }, t("tools.lead")), error),
+    absent.length > 0 && h("section", { class: "card pad" }, h("h2", null, t("tools.absent"), h("span", { class: "muted" }, " " + absent.length)), absent.map(row)),
+    here.length > 0 && h("section", { class: "card pad" }, h("h2", null, t("tools.present"), h("span", { class: "muted" }, " " + here.length)), here.map(row)),
   ];
 }
 

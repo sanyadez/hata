@@ -27,6 +27,7 @@ import { fills, measureFills, startFills } from "./fills";
 import { checkImages, imagesStatus, startImages } from "./images";
 import { afterPackage, giveBack, internetTrouble, startNetwork, setCheck, setRole, startHotspot, stopHotspot, wifiQrText, changeNic, confirmChange, handOver, NETWORK_PACKAGES, networkReport, NetworkError, revertChange, wifiConnect, wifiForget, wifiNetworks } from "./network";
 import { DOCKER_INSTALL_COMMAND, installDocker, startDocker } from "./dockerinstall";
+import { installOne, toolsReport } from "./tools";
 import { ArrayError, arrayReport, arrayTrouble, bringBack, rebuild as rebuildParity, repair as repairArray, scrub as scrubArray, setUp as setUpArray, startSnapraid, stop as stopArray, sync as syncArray, turnOff as turnOffArray } from "./snapraid";
 import { ignoreDisk, unusedDisks, absent, connectVolume, disconnect, mergeFolders, mountingReport, prepareDisk, startMounting, type Outcome } from "./mounting";
 import { moveData } from "./movedata";
@@ -927,6 +928,16 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
   if (path === "/api/disks/disconnect" && method === "POST") {
     server.timeout(req, 0);
     return changed(await disconnect(String((await body(req)).path ?? ""), user.name));
+  }
+  // every program of the system Hata relies on, in one list
+  if (path === "/api/tools" && method === "GET") return json(await toolsReport());
+  const tool = /^\/api\/tools\/([a-z0-9-]+)\/install$/.exec(path);
+  if (tool && method === "POST") {
+    server.timeout(req, 0);
+    const done = await installOne(tool[1]!, user.name);
+    if ("job" in done) return json({ job: done.job.id }, 202);
+    if (done.error) return fail(500, "tools.installFailed", { message: done.error });
+    return json(await toolsReport());
   }
   // Docker itself, for a server that has none: the button on the home page
   if (path === "/api/docker" && method === "GET") return json({ ...(await dockerInfo()), install: DOCKER_INSTALL_COMMAND });
