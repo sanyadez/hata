@@ -570,6 +570,7 @@
   "files.selectAll": "Вибрати все",
   "files.clearSelection": "Зняти вибір",
   "files.actions": "Дії",
+  "files.openTab": "Відкрити в новій вкладці",
   "files.items": "{n} об'єктів",
   "files.download": "Скачати",
   "files.downloadZip": "Скачати як ZIP",

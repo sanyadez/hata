@@ -570,6 +570,7 @@
   "files.selectAll": "Select everything",
   "files.clearSelection": "Clear the selection",
   "files.actions": "Actions",
+  "files.openTab": "Open in a new tab",
   "files.items": "{n} items",
   "files.download": "Download",
   "files.downloadZip": "Download as ZIP",

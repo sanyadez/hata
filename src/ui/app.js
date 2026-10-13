@@ -2927,6 +2927,7 @@ async function loadFiles() {
 
 function renderFiles() {
   const box = h("div", { class: "files" }, h("aside", { class: "cats", id: "files-places" }), h("section", { class: "stack", id: "files-main" }));
+  box.addEventListener("contextmenu", filesContext);
   // files and folders dropped anywhere on the page go into the folder on screen
   let depth = 0;
   const dragging = (e) => [...(e.dataTransfer?.types ?? [])].includes("Files");
@@ -3136,15 +3137,80 @@ async function downloadEntries(entries) {
   save("/api/files/zip?" + entries.map((entry) => "path=" + encodeURIComponent(joinPath(dir, entry.name))).join("&"));
 }
 
-function entryMenu(entry) {
+/** Puts a menu where the pointer is, inside the window; a right click beside it moves it there */
+function placeAt(dialog, at) {
+  const page = document.documentElement;
+  dialog.style.right = "auto";
+  dialog.style.left = Math.max(8, Math.min(at.x, page.clientWidth - dialog.offsetWidth - 8)) + "px";
+  dialog.style.top = Math.max(8, Math.min(at.y, page.clientHeight - dialog.offsetHeight - 8)) + "px";
+  dialog.addEventListener("contextmenu", (e) => {
+    e.preventDefault();
+    if (e.target !== dialog) return;
+    dialog.close();
+    document.elementFromPoint(e.clientX, e.clientY)?.dispatchEvent(new MouseEvent("contextmenu", { bubbles: true, cancelable: true, clientX: e.clientX, clientY: e.clientY }));
+  });
+}
+
+/** The right click in Files: the menu of the file, of everything selected, or of the folder on screen */
+function filesContext(e) {
+  // Shift leaves the browser's own menu, and so does a field with text in it
+  if (e.shiftKey || e.target.closest?.("input, textarea, select") || !e.target.closest?.("#files-main")) return;
+  const listing = state.files?.path === state.route.path ? state.files : null;
+  if (!listing || listing.error) return;
+  e.preventDefault();
+  const at = { x: e.clientX, y: e.clientY };
+  const name = e.target.closest("[data-name]")?.dataset.name;
+  const entry = name !== undefined && listing.entries.find((one) => one.name === name);
+  if (!entry) return folderMenu(at);
+  const chosen = selectedEntries();
+  if (chosen.length > 1 && chosen.includes(entry)) return selectionMenu(chosen, at);
+  entryMenu(entry, at);
+}
+
+function selectionMenu(chosen, at) {
+  let dialog;
+  const item = (label, iconName, action, cls = "") => h("button", { type: "button", class: "menu-item " + cls, onclick: () => (dialog.close(), action()) }, icon(iconName), label);
+  dialog = openDialog(
+    "menu dropdown",
+    h("header", null, h("div", null, h("h2", null, t("files.selected", { n: chosen.length })), h("span", { class: "muted small" }, bytes(chosen.reduce((n, entry) => n + entry.size, 0))))),
+    item(t("files.downloadZip"), "download", () => downloadEntries(chosen)),
+    item(t("files.move"), "arrow", () => transferDialog(chosen, false)),
+    item(t("files.copy"), "copy", () => transferDialog(chosen, true)),
+    item(t("files.clearSelection"), "x", () => ((filesUi.selected = new Set()), renderFilesBody())),
+    item(t("files.delete"), "trash", () => deleteDialog(chosen), "danger"),
+  );
+  placeAt(dialog, at);
+}
+
+function folderMenu(at) {
+  let dialog;
+  const listing = state.files;
+  const path = listing.path;
+  const item = (label, iconName, action, off) => h("button", { type: "button", class: "menu-item", disabled: !!off, onclick: () => (dialog.close(), action()) }, icon(iconName), label);
+  dialog = openDialog(
+    "menu dropdown",
+    h("header", null, h("span", { class: "badge-icon plain" }, icon("folder")), h("div", null, h("h2", { class: "clip" }, path.split("/").pop() || "/"))),
+    item(t("files.newFolder"), "folder", () => newFolderDialog(path, loadFiles), listing.readOnly),
+    item(t("files.upload"), "upload", () => document.querySelector("#files-main .page-head input[type=file]")?.click(), listing.readOnly),
+    listing.entries.length > 0 && item(t("files.selectAll"), "check", () => ((filesUi.selected = new Set(listing.entries.map((entry) => entry.name))), renderFilesBody())),
+    listing.entries.length > 0 && item(t("files.downloadZip"), "download", () => downloadEntries(listing.entries.filter((entry) => entry.type !== "other"))),
+    item(t("files.copyPath"), "link", () => copyText(path)),
+    item(t(listing.pinned.includes(path) ? "files.unpin" : "files.pin"), "pin", () => pinFolder(path, !listing.pinned.includes(path))),
+    item(t(listing.shared.includes(path) ? "files.shareSettings" : "files.share"), "share", () => shareDialog(path)),
+  );
+  placeAt(dialog, at);
+}
+
+function entryMenu(entry, at) {
   let dialog;
   const kind = fileKind(entry);
   const path = joinPath(state.files.path, entry.name);
   const item = (label, iconName, action, cls = "") => h("button", { type: "button", class: "menu-item " + cls, onclick: () => (dialog.close(), action()) }, icon(iconName), label);
   dialog = openDialog(
-    "menu",
+    at ? "menu dropdown" : "menu",
     h("header", null, h("span", { class: "badge-icon plain" }, fileIcon(entry)), h("div", null, h("h2", { class: "clip" }, entry.name), h("span", { class: "muted small" }, entry.type === "file" ? `${bytes(entry.size)} · ${fileTime(entry.modified)}` : fileTime(entry.modified)))),
     entry.type === "dir" && item(t("common.open"), "folder", () => go(filesHash(path))),
+    entry.type === "dir" && at && item(t("files.openTab"), "external", () => window.open(filesHash(path), "_blank", "noopener")),
     ["image", "video", "audio", "pdf"].includes(kind) && item(t("common.open"), "external", () => openEntry(entry)),
     entry.type === "file" && entry.size <= TEXT_MAX && !["image", "video", "audio", "pdf"].includes(kind) && item(t("files.edit"), "edit", () => textDialog(path)),
     entry.type !== "other" && item(t(entry.type === "dir" ? "files.downloadZip" : "files.download"), "download", () => downloadEntries([entry])),
@@ -3156,6 +3222,7 @@ function entryMenu(entry) {
     item(t("files.copy"), "copy", () => transferDialog([entry], true)),
     item(t("files.delete"), "trash", () => deleteDialog([entry]), "danger"),
   );
+  if (at) placeAt(dialog, at);
 }
 
 /** Asks for one name: a new folder, a new name */

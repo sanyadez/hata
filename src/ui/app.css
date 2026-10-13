@@ -454,6 +454,9 @@ tr.removed .app-icon { opacity: 0.5; }
 .stack-s { display: grid; gap: 8px; min-width: 0; }
 a.cat .with-icon { min-width: 0; }
 .files-disk { display: grid; gap: 4px; padding: 0 10px; }
+/* the list reaches the bottom of the window, so the empty room under it is the folder's too (its menu, a drop) */
+.files { min-height: calc(100dvh - 173px); }
+#files-main { align-self: stretch; align-content: start; }
 .files.dropping #files-main { outline: 2px dashed var(--accent); outline-offset: 12px; border-radius: var(--radius-md); }
 
 .path { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; min-width: 0; }
@@ -650,6 +653,7 @@ dialog.dropdown header { padding: 4px 6px; margin-bottom: 8px; }
   .tile-main { flex-direction: column; align-items: flex-start; }
   .tile-open { position: absolute; top: 4px; right: 4px; width: 32px; height: 32px; border-radius: var(--radius-sm); }
   .store, .settings, .files { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  .files { min-height: 0; }
   .files-disk, .file-table .when, .sort { display: none; }
   .bottom-link { padding: 6px 10px; }
   .file-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
