@@ -128,3 +128,12 @@ test("a disk nothing uses yet: a new one to put to use, a USB stick with files t
   const items = attention({ system: system(), docker, apps: [], activity: [], now: NOW, unused: [{ id: "S1", title: "GOODRAM SSD", size: 120e9, carries: false }, { id: "S2", title: "USB DISK 3.0", size: 31e9, carries: true }] });
   expect(items.map((i) => [i.id, i.code, i.severity, i.detail.disk])).toEqual([["newdisk:S1", "disk.new", "warn", "GOODRAM SSD"], ["newdisk:S2", "disk.usb", "warn", "USB DISK 3.0"]]);
 });
+
+test("a disk on its way to full is said a month ahead, until it is full enough to be said as that", () => {
+  const base = { system: system(), docker: { available: true } as never, apps: [], activity: [] };
+  expect(attention({ ...base, filling: { path: "/DATA", days: 12, percent: 60 } })).toEqual([{ id: "filling:/DATA", severity: "warn", code: "disk.filling", detail: { path: "/DATA", days: 12, percent: 60 } }]);
+  expect(attention({ ...base, filling: { path: "/DATA", days: 0, percent: 60 } })[0]!.detail.days).toBe(1);
+  expect(attention({ ...base, filling: { path: "/DATA", days: 45, percent: 60 } })).toEqual([]);
+  expect(attention({ ...base, filling: { path: "/DATA", days: 5, percent: 90 } })).toEqual([]);
+  expect(attention({ ...base, filling: null })).toEqual([]);
+});

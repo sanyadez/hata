@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { pieces } from "../src/packages";
-import { passProgress, checkCommand, checkVerdict, cleanLabel, familyOf, FAT_MAX, isFs, labelCommand, mkfsCommand, partType, tableFor, tableScript } from "../src/format";
+import { passProgress, checkCommand, checkVerdict, cleanLabel, familyOf, FAT_MAX, isFs, labelCommand, mkfsCommand, partType, tableFor, tableScript, partLine, unallocated } from "../src/format";
 
 test("isFs, familyOf: the file systems Hata makes, and the ones it checks", () => {
   for (const fs of ["ext4", "exfat", "vfat", "ntfs"]) expect(isFs(fs)).toBe(true);
@@ -93,4 +93,16 @@ test("passProgress, pieces: how far a long run is, read out of what the programs
     { line: "Creating journal: done", progress: false },
   ]);
   expect(pieces("/dev/sdb1: |====    | 34.5%\r\n\n")).toEqual([{ line: "/dev/sdb1: |====    | 34.5%", progress: true }]);
+});
+
+test("a partition of a given size, and the room no partition takes", () => {
+  expect(tableScript("gpt", "ext4", 10 * 1024 ** 3)).toBe("label: gpt\n,10240MiB,0FC63DAF-8483-4772-8E79-3D69D8477DE4\n");
+  expect(partLine("dos", "exfat")).toBe(",,7\n");
+  expect(partLine("dos", "vfat", 512 * 1024 ** 2)).toBe(",512MiB,c\n");
+  const part = (size: number) => ({ kind: "part", size });
+  expect(unallocated({ size: 100e9, volumes: [part(40e9)] })).toBe(100e9 - 40e9 - 8 * 1024 ** 2);
+  expect(unallocated({ size: 100e9, volumes: [part(40e9), part(60e9 - 20e6)] })).toBe(0);
+  // no table: the whole disk is to be formatted, not added to
+  expect(unallocated({ size: 100e9, volumes: [] })).toBe(0);
+  expect(unallocated({ size: 100e9, volumes: [{ kind: "disk", size: 100e9 }] })).toBe(0);
 });

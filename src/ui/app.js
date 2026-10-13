@@ -1418,7 +1418,7 @@ function attentionItem(item) {
     h("div", { class: "grow" }, h("strong", null, t(base + ".title", detail)), h("p", { class: "muted small" }, t(base + ".text", detail).trim()), below.length > 0 && h("div", { class: "row-actions under" }, below)),
     item.code === "update" && h("a", { class: "btn small", href: "#/settings/about" }, t("common.open")),
     item.code === "disk.trash" && h("a", { class: "btn small", href: "#/trash" }, t("trash.title")),
-    item.code.startsWith("smart.") && h("a", { class: "btn small", href: "#/settings/storage" }, t("common.open")),
+    (item.code.startsWith("smart.") || item.code === "disk.filling") && h("a", { class: "btn small", href: "#/settings/storage" }, t("common.open")),
     item.code.startsWith("internet.") && h("a", { class: "btn small", href: "#/settings/network" }, t("common.open")),
     item.code.startsWith("array.") && h("a", { class: "btn small", href: "#/settings/storage" }, t("common.open")),
     item.app && h("a", { class: "btn small", href: `#/apps/${item.app}${item.code === "restarting" || item.code === "partial" ? "/logs" : ""}` }, t(item.code === "restarting" || item.code === "partial" ? "app.logs" : "common.open")),
@@ -5522,7 +5522,9 @@ function diskDialog(name) {
               ),
             ),
           ),
-          changeable(disk).whole ? h("footer", null, h("span", { class: "muted small" }, t("mounting.formatHint")), button(t("mounting.formatDisk"), { onclick: () => (dialog.close(), formatDialog(disk)) })) : h("p", { class: "muted small" }, t("mounting.blocked." + (state.disks.mounting.blockers[disk.name]?.[0] ?? "mounted"))),
+          (state.disks.mounting.free?.[disk.name] ?? 0) > 0 &&
+            h("div", { class: "kv" }, h("div", null, h("span", null, t("mounting.unallocated")), h("div", { class: "muted small" }, bytes(state.disks.mounting.free[disk.name]))), h("span", { class: "with-actions" }, button(t("mounting.newPart"), { class: "small", onclick: () => (dialog.close(), formatDialog(disk, null, state.disks.mounting.free[disk.name])) }))),
+          changeable(disk).whole ? h("footer", null, h("span", { class: "muted small" }, t("mounting.formatHint")), button(t("mounting.wipe"), { class: "quiet", onclick: () => (dialog.close(), wipeDialog(disk)) }), button(t("mounting.formatDisk"), { onclick: () => (dialog.close(), formatDialog(disk)) })) : h("p", { class: "muted small" }, t("mounting.blocked." + (state.disks.mounting.blockers[disk.name]?.[0] ?? "mounted"))),
         ),
     );
   };
@@ -5616,14 +5618,20 @@ function diskAction(dialogOf, slot, request, done) {
  * Erases a disk, or one partition of it, and makes a file system there: which one, under what label,
  * and whether it is connected afterwards.
  */
-function formatDialog(disk, part) {
+function formatDialog(disk, part, free = 0) {
   const removable = disk.removable || disk.transport === "usb";
-  const targets = part ? [part] : disk.volumes;
+  // `free` — the room no partition takes: a new partition is made there and nothing is erased
+  const targets = free ? [] : part ? [part] : disk.volumes;
+  const GB = 1e9;
+  const room = free || disk.size;
+  const size = h("input", { type: "text", inputMode: "decimal", class: "short", placeholder: (room / GB).toFixed(room < 10 * GB ? 1 : 0), "aria-label": t("mounting.size") });
+  const sizeHint = h("span", { class: "hint" });
+  const asked = () => Math.round(Number(size.value.trim().replace(",", ".")) * GB);
   const holds = targets.filter((v) => v.fstype);
   const leaving = targets.flatMap((v) => v.mounts);
-  const old = (part ?? disk.volumes.find((v) => v.label))?.label ?? "";
+  const old = free ? "" : ((part ?? disk.volumes.find((v) => v.label))?.label ?? "");
   const fs = h("select", null, Object.keys(FS_NAMES).map((id) => h("option", { value: id, selected: id === (removable ? "exfat" : "ext4") }, t("mounting.fs." + id))));
-  const label = h("input", { type: "text", value: old || (removable ? "" : disk.model), maxlength: 40, spellcheck: false });
+  const label = h("input", { type: "text", value: old || (removable || free ? "" : disk.model), maxlength: 40, spellcheck: false });
   const after = h("select", null, ["keep", "once", "no"].map((id) => h("option", { value: id, selected: id === (removable ? "once" : "keep") }, t("mounting.after." + id))));
   const name = h("input", { type: "text", maxlength: 32, spellcheck: false });
   const typed = h("input", { type: "text", autocomplete: "off", spellcheck: false, placeholder: (part ?? disk).name });
@@ -5638,7 +5646,7 @@ function formatDialog(disk, part) {
   const slot = h("div");
   let dialog;
   let named = false;
-  const go = button(t("mounting.formatGo"), { class: "danger", disabled: true });
+  const go = button(t(free ? "mounting.newPartGo" : "mounting.formatGo"), { class: free ? "primary" : "danger", disabled: true });
   const check = () => {
     const written = fsLabel(fs.value, label.value);
     if (!named) name.value = leaving[0]?.startsWith("/mnt/") ? leaving[0].slice(5) : mountName((removable ? "usb-" : "") + (written || disk.model || "disk"));
@@ -5650,20 +5658,24 @@ function formatDialog(disk, part) {
     folder.hidden = !connects;
     open.hidden = !connects || fs.value === "ext4";
     open.textContent = t("mounting.noOwners", { fs: FS_NAMES[fs.value] });
-    cmd.textContent = [!part && `sfdisk ${disk.path}`, `mkfs.${fs.value === "vfat" ? "fat" : fs.value} ${part ? part.path : disk.path + (/\d$/.test(disk.path) ? "p1" : "1")}`, after.value === "keep" && "/etc/fstab"].filter(Boolean).join("; ");
-    go.disabled = (connects && !MOUNT_NAME.test(name.value)) || typed.value.trim() !== (part ?? disk).name || !password.value;
+    const sized = size.value.trim() !== "";
+    const fits = !sized || (asked() >= 64 * 1024 * 1024 && asked() <= room);
+    sizeHint.textContent = !fits ? t("mounting.sizeBad", { max: bytes(room) }) : t(free ? "mounting.sizeHintFree" : sized ? "mounting.sizeHintRest" : "mounting.sizeHint", { rest: bytes(Math.max(0, room - asked())), max: bytes(room) });
+    cmd.textContent = [!part && `sfdisk ${free ? "--append " : ""}${disk.path}`, `mkfs.${fs.value === "vfat" ? "fat" : fs.value} ${part ? part.path : free ? "…" : disk.path + (/\d$/.test(disk.path) ? "p1" : "1")}`, after.value === "keep" && "/etc/fstab"].filter(Boolean).join("; ");
+    go.disabled = (connects && !MOUNT_NAME.test(name.value)) || !fits || (!free && (typed.value.trim() !== (part ?? disk).name || !password.value));
   };
   name.addEventListener("input", () => ((named = true), check()));
-  for (const input of [fs, label, after, typed, password]) input.addEventListener("input", check);
+  for (const input of [fs, label, after, typed, password, size]) input.addEventListener("input", check);
   go.onclick = diskAction(
     () => dialog,
     slot,
-    () => api("POST", `/api/disks/${disk.name}/format`, { serial: disk.serial, size: disk.size, part: part?.path ?? "", fs: fs.value, label: label.value, connect: after.value, name: name.value, password: password.value }),
+    () => api("POST", `/api/disks/${disk.name}/format`, { serial: disk.serial, size: disk.size, part: free ? "free" : (part?.path ?? ""), bytes: part || !size.value.trim() ? 0 : asked(), fs: fs.value, label: label.value, connect: after.value, name: name.value, password: password.value }),
     (data) => {
       dialog.close();
       const path = "/mnt/" + name.value;
       const [kind, into, how] = [fs.value, name.value, after.value];
       jobDialog(data.job, "format", part ? part.name : diskTitle(disk), async () => {
+        if (free) return toast(how === "no" ? t("mounting.formatted", { fs: FS_NAMES[kind] }) : t("mounting.formattedAt", { fs: FS_NAMES[kind], path }));
         setDisks(await api("GET", "/api/disks").catch(() => state.disks));
         if (how === "keep" && kind === "ext4") {
           document.querySelectorAll("dialog[open]").forEach((d) => d.close());
@@ -5674,9 +5686,10 @@ function formatDialog(disk, part) {
   );
   dialog = openDialog(
     "wide",
-    h("h2", null, t("mounting.formatTitle", { disk: part ? `${part.name} · ${diskTitle(disk)}` : diskTitle(disk) })),
+    h("h2", null, free ? t("mounting.newPartTitle", { disk: diskTitle(disk) }) : t("mounting.formatTitle", { disk: part ? `${part.name} · ${diskTitle(disk)}` : diskTitle(disk) })),
     h("p", { class: "muted small" }, part ? [part.name, bytes(part.size)].join(" · ") : diskMeta(disk)),
-    h(
+    free > 0 && h("p", { class: "muted" }, t("mounting.newPartLead", { free: bytes(free) })),
+    !free && h(
       "p",
       { class: "banner danger" },
       t(part ? "mounting.formatPartErases" : holds.length ? "mounting.formatErases" : "mounting.formatEmpty"),
@@ -5685,10 +5698,61 @@ function formatDialog(disk, part) {
     ),
     h("label", { class: "field" }, h("span", { class: "label" }, t("mounting.fs")), fs, fsHint),
     h("label", { class: "field" }, h("span", { class: "label" }, t("mounting.label")), label, labelHint),
+    !part && h("label", { class: "field" }, h("span", { class: "label" }, t("mounting.size")), size, sizeHint),
     h("label", { class: "field" }, h("span", { class: "label" }, t("mounting.after")), after, afterHint),
     folder,
     open,
-    field(t("mounting.typeName", { name: (part ?? disk).name }), typed),
+    !free && field(t("mounting.typeName", { name: (part ?? disk).name }), typed),
+    !free && field(t("account.password"), password, t("mounting.passwordHint")),
+    h("p", { class: "cmd" }, icon("terminal"), cmd),
+    slot,
+    h("footer", null, closeButton(() => dialog, t("common.cancel")), go),
+  );
+  check();
+}
+
+/** Erases a disk and leaves it empty: quickly, or with every block written over — for a disk that goes to somebody else */
+function wipeDialog(disk) {
+  const holds = disk.volumes.filter((v) => v.fstype);
+  const leaving = disk.volumes.flatMap((v) => v.mounts);
+  const thorough = h("input", { type: "checkbox" });
+  const typed = h("input", { type: "text", autocomplete: "off", spellcheck: false, placeholder: disk.name });
+  const password = h("input", { type: "password", autocomplete: "current-password" });
+  const cmd = h("span");
+  const slot = h("div");
+  let dialog;
+  const go = button(t("mounting.wipeGo"), { class: "danger", disabled: true });
+  const check = () => {
+    cmd.textContent = thorough.checked ? `dd if=/dev/zero of=${disk.path} bs=4M` : `wipefs -a ${disk.path}`;
+    go.disabled = typed.value.trim() !== disk.name || !password.value;
+  };
+  for (const input of [thorough, typed, password]) input.addEventListener("input", check);
+  go.onclick = diskAction(
+    () => dialog,
+    slot,
+    () => api("POST", `/api/disks/${disk.name}/wipe`, { serial: disk.serial, size: disk.size, thorough: thorough.checked, password: password.value }),
+    (data) => {
+      dialog.close();
+      jobDialog(data.job, "wipe", diskTitle(disk), async () => {
+        setDisks(await api("GET", "/api/disks").catch(() => state.disks));
+        toast(t("mounting.wiped"));
+      });
+    },
+  );
+  dialog = openDialog(
+    "wide",
+    h("h2", null, t("mounting.wipeTitle", { disk: diskTitle(disk) })),
+    h("p", { class: "muted small" }, diskMeta(disk)),
+    h(
+      "p",
+      { class: "banner danger" },
+      t(holds.length ? "mounting.formatErases" : "mounting.formatEmpty"),
+      holds.length > 0 && h("span", { class: "block mono small" }, holds.map((v) => [v.name, v.fstype, v.label, bytes(v.size)].filter(Boolean).join(" · ")).join("; ")),
+      leaving.length > 0 && h("span", { class: "block" }, t("mounting.formatLeaves", { paths: leaving.join(", ") })),
+    ),
+    h("p", { class: "muted" }, t("mounting.wipeLead")),
+    h("label", { class: "check" }, thorough, h("span", null, h("strong", null, t("mounting.wipeThorough")), h("span", { class: "muted small block" }, t(disk.rotational ? "mounting.wipeThoroughHint" : "mounting.wipeThoroughFlash")))),
+    field(t("mounting.typeName", { name: disk.name }), typed),
     field(t("account.password"), password, t("mounting.passwordHint")),
     h("p", { class: "cmd" }, icon("terminal"), cmd),
     slot,

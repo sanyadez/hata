@@ -33,7 +33,7 @@ import { afterPackage, giveBack, internetTrouble, startNetwork, setCheck, setRol
 import { DOCKER_INSTALL_COMMAND, installDocker, startDocker } from "./dockerinstall";
 import { installOne, removeOne, toolsReport } from "./tools";
 import { ArrayError, arrayReport, arrayTrouble, bringBack, rebuild as rebuildParity, repair as repairArray, scrub as scrubArray, setUp as setUpArray, startSnapraid, stop as stopArray, sync as syncArray, turnOff as turnOffArray } from "./snapraid";
-import { ignoreDisk, unusedDisks, absent, connectVolume, disconnect, checkVolume, formatDisk, mergeFolders, mountingReport, relabel, startMounting, type Outcome } from "./mounting";
+import { ignoreDisk, unusedDisks, absent, connectVolume, disconnect, checkVolume, wipeDisk, formatDisk, mergeFolders, mountingReport, relabel, startMounting, type Outcome } from "./mounting";
 import { moveData } from "./movedata";
 import { installPackage } from "./packages";
 import {
@@ -205,6 +205,12 @@ function json(data: unknown, status = 200, headers: Record<string, string> = {})
     status,
     headers: { ...SECURITY_HEADERS, "content-type": "application/json; charset=utf-8", "cache-control": "no-store", ...headers },
   });
+}
+
+/** When the disk with the data folder will be full, for the "needs attention" list; null — not known or not growing */
+function fillingUp(): { path: string; days: number; percent: number } | null {
+  const now = fills();
+  return now && now.fullIn !== null && now.total > 0 ? { path: now.root, days: now.fullIn, percent: Math.round((now.used / now.total) * 100) } : null;
 }
 
 /** `code` is translated by the UI; `detail` fills the placeholders of its message */
@@ -744,7 +750,7 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
       site: { domain: siteDomain(), mode: settings.https.mode, local: localDomain() },
       // whether the assistant can be asked: the pages offer it next to what is wrong
       assistant: admin && assistantReady(assistantConfig()),
-      attention: admin ? attention({ system, docker, apps, activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), array: arrayTrouble(), unused: unusedDisks() }) : [],
+      attention: admin ? attention({ system, docker, apps, activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), array: arrayTrouble(), unused: unusedDisks(), filling: fillingUp() }) : [],
       // who signed in from where, and what was installed by whom, is the administrators' business
       activity: admin ? recent(8) : [],
       // containers and compose projects on this machine that are not apps here yet
@@ -968,7 +974,7 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
   };
   const refused = (failure: Extract<Outcome, { error: string }>) => fail(400, failure.error, { message: failure.message ?? "", ...(failure.needs ?? {}) });
   // a long piece of work on a disk: answered at once with the job the page then follows
-  const diskJob = (kind: "format" | "fsck", by: string, work: (log: (line: string) => void) => Promise<void>, started: (job: Job) => void = () => {}) => {
+  const diskJob = (kind: "format" | "fsck" | "wipe", by: string, work: (log: (line: string) => void) => Promise<void>, started: (job: Job) => void = () => {}) => {
     try {
       const job = startJob("", kind, by, work, true);
       started(job);
@@ -978,7 +984,7 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
       throw e;
     }
   };
-  const failureWords = (failure: Extract<Outcome, { error: string }>) => `${({ "disk.busy": "Something is still using the folder.", "disk.mountFailed": "The disk could not be connected.", "disk.formatFailed": "The disk could not be formatted.", "disk.inUse": "The disk is in use." } as Record<string, string>)[failure.error] ?? failure.error} ${failure.message ?? ""}`.trim();
+  const failureWords = (failure: Extract<Outcome, { error: string }>) => `${({ "disk.busy": "Something is still using the folder.", "disk.mountFailed": "The disk could not be connected.", "disk.formatFailed": "The disk could not be formatted.", "disk.wipeFailed": "The disk could not be erased.", "disk.inUse": "The disk is in use." } as Record<string, string>)[failure.error] ?? failure.error} ${failure.message ?? ""}`.trim();
   const changed = (outcome: Outcome) => ("error" in outcome ? refused(outcome) : storage());
   if (path === "/api/disks" && method === "GET") return storage();
   if (path === "/api/disks/check" && method === "POST") {
@@ -1006,10 +1012,11 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
   const diskFormat = /^\/api\/disks\/([A-Za-z0-9_-]+)\/format$/.exec(path);
   if (diskFormat && method === "POST") {
     const data = await body(req);
-    if (!(await checkOwnPassword(user, data.password))) return fail(400, "auth.wrongPassword");
+    // a new partition in free room erases nothing
+    if (data.part !== "free" && !(await checkOwnPassword(user, data.password))) return fail(400, "auth.wrongPassword");
     // a large disk takes its time
     server.timeout(req, 0);
-    const ask = { part: String(data.part ?? ""), fs: String(data.fs ?? ""), label: String(data.label ?? ""), connect: data.connect === "keep" || data.connect === "once" ? data.connect : "no", name: String(data.name ?? "") };
+    const ask = { part: String(data.part ?? ""), size: Number(data.bytes) || 0, fs: String(data.fs ?? ""), label: String(data.label ?? ""), connect: data.connect === "keep" || data.connect === "once" ? data.connect : "no", name: String(data.name ?? "") };
     const seen = { serial: String(data.serial ?? ""), size: Number(data.size) };
     // what can be refused is refused at once, in the dialog; the work itself is a job with a log
     const may = await formatDisk(diskFormat[1]!, seen, ask, user.name, undefined, true);
@@ -1018,6 +1025,19 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
       const done = await formatDisk(diskFormat[1]!, seen, ask, user.name, log);
       if ("error" in done) throw new Error(failureWords(done));
       log(done.path ? `Done: connected as ${done.path}` : "Done");
+    });
+  }
+  const diskWipe = /^\/api\/disks\/([A-Za-z0-9_-]+)\/wipe$/.exec(path);
+  if (diskWipe && method === "POST") {
+    const data = await body(req);
+    if (!(await checkOwnPassword(user, data.password))) return fail(400, "auth.wrongPassword");
+    const seen = { serial: String(data.serial ?? ""), size: Number(data.size) };
+    const may = await wipeDisk(diskWipe[1]!, seen, data.thorough === true, user.name, undefined, true);
+    if ("error" in may) return refused(may);
+    return diskJob("wipe", user.name, async (log) => {
+      const done = await wipeDisk(diskWipe[1]!, seen, data.thorough === true, user.name, log);
+      if ("error" in done) throw new Error(failureWords(done));
+      log("Done: the disk is empty");
     });
   }
   // looking a file system over, and mending it: the answer carries what the program said
@@ -1725,7 +1745,7 @@ export async function serve(): Promise<void> {
   void refreshHttps();
   refreshLocalNames();
   startNotifications({
-    attention: async () => attention({ system: systemStatus(), docker: await dockerInfo(), apps: await listApps("en"), activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), array: arrayTrouble(), unused: unusedDisks() }),
+    attention: async () => attention({ system: systemStatus(), docker: await dockerInfo(), apps: await listApps("en"), activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), array: arrayTrouble(), unused: unusedDisks(), filling: fillingUp() }),
     baseUrl: publicUrl,
     isAdmin: (id) => findUser(id)?.role === "admin",
   });

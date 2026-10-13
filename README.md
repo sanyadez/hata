@@ -176,7 +176,10 @@ Early development. What works today:
   NTFS under the label you type, with the partition table and type each kind of device expects, and is
   then kept connected, connected until unplugged, or left ready to take away — a stick Hata connected
   is let go of for it. A file system can be checked and repaired (what an unplugging without ejecting
-  leaves behind, the NTFS mark that stops a disk from connecting included) and renamed;
+  leaves behind, the NTFS mark that stops a disk from connecting included) and renamed. A partition can
+  be smaller than the disk, with another made later in the room that is left; a disk that goes to
+  somebody else is erased, with every block written over if you ask. Long runs show what the programs
+  say and how far they are, and a data disk on its way to full is said a month ahead;
 - the data folder moves to a disk with one button (Settings → Apps, or right after formatting a disk):
   the apps are stopped, everything is copied, the apps' compose files — comments and all —, the backups,
   the shared folders and the folders on the dashboard are pointed at the new place, and the apps start

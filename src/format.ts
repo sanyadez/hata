@@ -65,8 +65,27 @@ export function partType(table: "gpt" | "dos", fs: Fs): string {
   return fs === "ext4" ? "83" : fs === "vfat" ? "c" : "7";
 }
 
-/** What sfdisk reads to make one partition over the whole disk */
-export const tableScript = (table: "gpt" | "dos", fs: Fs): string => `label: ${table}\n,,${partType(table, fs)}\n`;
+const MIB = 1024 * 1024;
+/** The smallest partition worth making, and the room a partition table takes for itself */
+export const PART_MIN = 64 * MIB;
+export const TABLE_ROOM = 8 * MIB;
+
+/** One partition as sfdisk reads it: `size` bytes, or 0 for all the room there is */
+export const partLine = (table: "gpt" | "dos", fs: Fs, size = 0): string => `,${size ? Math.floor(size / MIB) + "MiB" : ""},${partType(table, fs)}\n`;
+
+/** What sfdisk reads to make a new table with one partition: over the whole disk, or of `size` bytes */
+export const tableScript = (table: "gpt" | "dos", fs: Fs, size = 0): string => `label: ${table}\n${partLine(table, fs, size)}`;
+
+/**
+ * The room of a disk no partition takes, bytes — by the sizes alone, less what the table needs; 0 for
+ * a disk without a partition table. Good for saying "there is room for another partition".
+ */
+export function unallocated(disk: { size: number; volumes: { kind: string; size: number }[] }): number {
+  const parts = disk.volumes.filter((v) => v.kind === "part");
+  if (!parts.length || parts.length !== disk.volumes.length) return 0;
+  const left = disk.size - parts.reduce((sum, v) => sum + v.size, 0) - TABLE_ROOM;
+  return left >= PART_MIN ? left : 0;
+}
 
 /**
  * The command that makes the file system. `legacy` — mkfs.exfat is the one of exfat-utils, which names

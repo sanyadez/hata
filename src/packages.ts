@@ -36,7 +36,7 @@ export function pieces(text: string): { line: string; progress: boolean }[] {
 
 /**
  * Runs a system program to its end and hands over what it prints as it comes; a counter is passed on
- * every couple of seconds. `reword` may put a line in other words, or drop it (null).
+ * every couple of seconds, and every twenty once a minute has passed. `reword` may put a line in other words, or drop it (null).
  */
 export async function runLogged(cmd: string[], log: (line: string) => void, timeout = 30_000, env: Record<string, string> = {}, reword: (line: string) => string | null = (line) => line): Promise<Ran> {
   let proc;
@@ -46,6 +46,7 @@ export async function runLogged(cmd: string[], log: (line: string) => void, time
     return { code: -1, out: "", err: e instanceof Error ? e.message : String(e) };
   }
   let told = 0;
+  const started = Date.now();
   const read = async (stream: ReadableStream<Uint8Array>): Promise<string> => {
     const kept: string[] = [];
     const decoder = new TextDecoder();
@@ -55,8 +56,8 @@ export async function runLogged(cmd: string[], log: (line: string) => void, time
         const line = reword(piece.line);
         if (line === null) continue;
         if (piece.progress || line !== piece.line) {
-          // a counter: said now and then, never kept
-          if (Date.now() - told < 2000) continue;
+          // a counter: said now and then — rarer once the run turns out to be a long one — and never kept
+          if (Date.now() - told < (Date.now() - started < 60_000 ? 2000 : 20_000)) continue;
           told = Date.now();
           log("  " + line.trim());
         } else {

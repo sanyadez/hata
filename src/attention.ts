@@ -24,13 +24,15 @@ export interface AttentionItem {
 
 const DISK_WARN = 85;
 const DISK_DANGER = 95;
+/** A disk that fills up within this many days at the pace of the last month is worth a word */
+const FILLING_DAYS = 30;
 const MEMORY_WARN = 92;
 const TEMPERATURE_WARN = 85;
 const FAILURE_WINDOW_MS = 24 * 3600 * 1000;
 /** A trash smaller than this is not worth a word when its disk fills up, bytes */
 const TRASH_WORTH = 100 * 1024 * 1024;
 
-export function attention(input: { system: SystemStatus; docker: DockerInfo; apps: InstalledApp[]; activity: Activity[]; update?: string | null; offsite?: { error: string } | null; disks?: DiskReport[]; trash?: (path: string) => number; absent?: { path: string; holds: string | null }[]; internet?: Trouble[]; array?: { code: string; detail: Record<string, string | number> }[]; unused?: { id: string; title: string; size: number; carries: boolean }[]; now?: number }): AttentionItem[] {
+export function attention(input: { system: SystemStatus; docker: DockerInfo; apps: InstalledApp[]; activity: Activity[]; update?: string | null; offsite?: { error: string } | null; disks?: DiskReport[]; trash?: (path: string) => number; absent?: { path: string; holds: string | null }[]; internet?: Trouble[]; array?: { code: string; detail: Record<string, string | number> }[]; unused?: { id: string; title: string; size: number; carries: boolean }[]; filling?: { path: string; days: number; percent: number } | null; now?: number }): AttentionItem[] {
   const { system, docker, apps, activity } = input;
   const now = input.now ?? Date.now();
   const items: AttentionItem[] = [];
@@ -75,6 +77,10 @@ export function attention(input: { system: SystemStatus; docker: DockerInfo; app
       items.push({ id: `disk:${disk.path}`, severity: percent >= DISK_DANGER ? "danger" : "warn", code: trash >= TRASH_WORTH ? "disk.trash" : "disk", detail: { path: disk.path, percent, free: disk.total - disk.used, ...(trash >= TRASH_WORTH ? { trash } : {}) } });
     }
   }
+
+  // not full yet, but on the way: said a month ahead, until the disk is full enough to be said as that
+  const filling = input.filling;
+  if (filling && filling.days <= FILLING_DAYS && filling.percent < DISK_WARN) items.push({ id: `filling:${filling.path}`, severity: "warn", code: "disk.filling", detail: { path: filling.path, days: Math.max(1, filling.days), percent: filling.percent } });
 
   // a disk that says it is in trouble: one line per disk, about the worst thing it reports
   for (const disk of input.disks ?? []) {

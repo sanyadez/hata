@@ -23,7 +23,7 @@ import { record } from "./activity";
 import { bus } from "./bus";
 import { DATA_DIR, SECRETS_DIR, saveSettings, settings } from "./config";
 import { connected, diskLabel, type Disk, type Volume } from "./disks";
-import { CHECKERS, checkCommand, checkVerdict, cleanLabel, familyOf, FAT_MAX, FORMATS, FS_NAMES, isFs, labelCommand, LABELLERS, mkfsCommand, partType, passProgress, tableFor, tableScript, type Fs, type Verdict } from "./format";
+import { CHECKERS, checkCommand, checkVerdict, cleanLabel, familyOf, FAT_MAX, FORMATS, FS_NAMES, isFs, labelCommand, LABELLERS, mkfsCommand, partLine, PART_MIN, partType, passProgress, TABLE_ROOM, tableFor, tableScript, unallocated, type Fs, type Verdict } from "./format";
 import { isPlainObject, readJsonFile, writeJsonAtomic, writeTextAtomic } from "./fsutil";
 import { installCommand, packageManager, PATH, run, runLogged } from "./packages";
 
@@ -292,11 +292,17 @@ async function removeFolder(path: string, ours = true): Promise<void> {
 
 // one change of the disks at a time
 let queue: Promise<unknown> = Promise.resolve();
-const oneAtATime = <T>(work: () => Promise<T>): Promise<T> => {
+/** Long work (a format, a check, an erasing) is under way: what a person asks meanwhile is refused at once instead of waiting behind it */
+let long = 0;
+const oneAtATime = <T>(work: () => Promise<T>, kind: "asked" | "long" | "own" = "asked"): Promise<T> => {
+  if (kind !== "own" && long > 0) return Promise.resolve({ error: "disk.working" } as T);
+  if (kind === "long") long++;
   const next = queue.then(work, work);
   queue = next.catch(() => {});
-  return next;
+  return kind === "long" ? next.finally(() => long--) : next;
 };
+
+const ownTurn = <T>(work: () => Promise<T>): Promise<T> => oneAtATime(work, "own");
 
 /** Something holds the device open from above: LVM, RAID, an encrypted volume */
 const held = (name: string): boolean => {
@@ -378,8 +384,10 @@ const usb = (disk: Disk): boolean => disk.removable || disk.transport === "usb";
 const lacks = (error: string, pkg: string): Failure => ({ error, needs: { package: pkg, install: installCommand(pkg) } });
 
 export interface FormatAsk {
-  /** A partition to format alone; "" — the whole disk, under a new partition table */
+  /** A partition to format alone; "" — the whole disk, under a new partition table; "free" — a new partition in the room no partition takes */
   part: string;
+  /** How large the new partition is, bytes; 0 — all the room there is */
+  size: number;
   fs: string;
   label: string;
   /** Afterwards: keep — connected from now on; once — until it is unplugged; no — left as it is */
@@ -413,17 +421,23 @@ export function formatDisk(name: string, seen: { serial: string; size: number },
     const disk = (await connected()).find((d) => d.name === name);
     if (!disk || !existsSync(disk.path)) return { error: "disk.unknown" };
     if (disk.serial !== seen.serial || disk.size !== seen.size) return { error: "disk.changed" };
-    const part = ask.part ? disk.volumes.find((v) => v.path === ask.part && v.kind === "part") : undefined;
-    if (ask.part && !part) return { error: "disk.unknown" };
+    const fresh = ask.part === "free";
+    const part = ask.part && !fresh ? disk.volumes.find((v) => v.path === ask.part && v.kind === "part") : undefined;
+    if (ask.part && !fresh && !part) return { error: "disk.unknown" };
     const can = changeable(disk, Object.keys(oursNow()));
-    if (part ? !can.volumes.includes(part.path) : !can.whole) return { error: "disk.inUse" };
-    if (fs === "vfat" && (part?.size ?? disk.size) > FAT_MAX) return { error: "disk.tooBigForFat" };
+    // a new partition leaves the others as they are: they may be in anybody's use
+    if (fresh ? blockers(disk).some((b) => b !== "mounted") : part ? !can.volumes.includes(part.path) : !can.whole) return { error: "disk.inUse" };
+    const room = fresh ? unallocated(disk) : disk.size - TABLE_ROOM;
+    const size = part ? 0 : Number.isFinite(ask.size) && ask.size > 0 ? Math.floor(ask.size) : 0;
+    if (fresh && !room) return { error: "disk.noRoom" };
+    if (size && (size < PART_MIN || size > room)) return { error: "disk.badSize" };
+    if (fs === "vfat" && (part?.size ?? (size || room)) > FAT_MAX) return { error: "disk.tooBigForFat" };
     const pkg = partitionPackage();
     if (!part && !has("sfdisk")) return lacks("disk.noPartitionTool", pkg);
     if (!has(FORMATS[fs].tool)) return lacks("disk.noFormatTool", FORMATS[fs].package);
 
     // what Hata connected of it goes first — unless something of Hata's own lives there
-    const leaving = (part ? [part] : disk.volumes).flatMap((v) => v.mounts);
+    const leaving = (fresh ? [] : part ? [part] : disk.volumes).flatMap((v) => v.mounts);
     for (const folder of leaving) {
       const why = keeps(folder);
       if (why) return { error: why };
@@ -435,10 +449,26 @@ export function formatDisk(name: string, seen: { serial: string; size: number },
       const gone = await release(folder);
       if ("error" in gone) return gone;
     }
-    if (inUse(part ? { name: part.name, path: part.path, volumes: [] } : disk)) return { error: "disk.inUse" };
+    if (!fresh && inUse(part ? { name: part.name, path: part.path, volumes: [] } : disk)) return { error: "disk.inUse" };
 
     let target = part;
-    if (target) {
+    if (fresh) {
+      const table = (await run(["blkid", "-p", "-s", "PTTYPE", "-o", "value", disk.path], 15_000)).out.trim();
+      if (table !== "gpt" && table !== "dos") return { error: "disk.formatFailed", message: "The disk has no partition table Hata knows." };
+      const before = new Set(disk.volumes.map((v) => v.path));
+      log(`Adding a partition to ${disk.path}`);
+      // the kernel is told apart: with a partition of the disk in use it would not read the whole table again
+      const added = await run(["sfdisk", "--append", "--no-reread", disk.path], 60_000, {}, partLine(table, fs, size));
+      if (added.code !== 0) return { error: "disk.formatFailed", message: said(added) };
+      await run(["partx", "-u", disk.path], 30_000);
+      await settle();
+      for (let i = 0; i < 20 && !target; i++) {
+        target = (await connected()).find((d) => d.name === name)?.volumes.find((v) => v.kind === "part" && !before.has(v.path) && existsSync(v.path));
+        if (!target) await Bun.sleep(500);
+      }
+      if (!target) return { error: "disk.formatFailed", message: "The new partition did not show up." };
+      await run(["wipefs", "-a", target.path], 30_000);
+    } else if (target) {
       log(`Clearing ${target.path}`);
       await run(["wipefs", "-a", target.path], 30_000);
       await retype(disk, target, fs);
@@ -446,7 +476,7 @@ export function formatDisk(name: string, seen: { serial: string; size: number },
       // old signatures first: a file system found again on the new partition would be mounted as it was
       for (const device of [...disk.volumes.map((v) => v.path), disk.path]) await run(["wipefs", "-a", device], 30_000);
       log(`Writing a new partition table to ${disk.path} (${tableFor(fs, disk.size, usb(disk))})`);
-      const table = await run(["sfdisk", "--wipe", "always", "--wipe-partitions", "always", disk.path], 60_000, {}, tableScript(tableFor(fs, disk.size, usb(disk)), fs));
+      const table = await run(["sfdisk", "--wipe", "always", "--wipe-partitions", "always", disk.path], 60_000, {}, tableScript(tableFor(fs, disk.size, usb(disk)), fs, size));
       if (table.code !== 0) return { error: "disk.formatFailed", message: said(table) };
       await settle();
       for (let i = 0; i < 20 && !target; i++) {
@@ -464,7 +494,7 @@ export function formatDisk(name: string, seen: { serial: string; size: number },
     await run(["sync"], 120_000);
     await settle();
     const uuid = (await run(["blkid", "-s", "UUID", "-o", "value", target.path], 15_000)).out.trim();
-    const what = `${part ? part.name + ", " : ""}${diskLabel(disk)} → ${FS_NAMES[fs]}${label ? ` “${label}”` : ""}`;
+    const what = `${part || fresh ? target.name + ", " : ""}${diskLabel(disk)} → ${FS_NAMES[fs]}${label ? ` “${label}”` : ""}`;
     if (!path) {
       // left as it is: not to be connected by itself the moment it is ready
       ejected.add(uuid || target.path);
@@ -484,7 +514,52 @@ export function formatDisk(name: string, seen: { serial: string; size: number },
     }
     record("system.disk.format", { user, detail: `${what} → ${path}` });
     return { path };
-  });
+  }, dry ? "asked" : "long");
+}
+
+/**
+ * Erases a disk and leaves it empty, without a partition table. `thorough` — every block is written
+ * over with zeros first, so what was there cannot be read back with ordinary tools (hours for a large
+ * disk; a flash disk may keep spare blocks that are not reached).
+ */
+export function wipeDisk(name: string, seen: { serial: string; size: number }, thorough: boolean, user: string, log: (line: string) => void = () => {}, dry = false): Promise<Outcome> {
+  return oneAtATime(async () => {
+    const disk = (await connected()).find((d) => d.name === name);
+    if (!disk || !existsSync(disk.path)) return { error: "disk.unknown" };
+    if (disk.serial !== seen.serial || disk.size !== seen.size) return { error: "disk.changed" };
+    if (!changeable(disk, Object.keys(oursNow())).whole) return { error: "disk.inUse" };
+    const leaving = disk.volumes.flatMap((v) => v.mounts);
+    for (const folder of leaving) {
+      const why = keeps(folder);
+      if (why) return { error: why };
+    }
+    if (dry) return { path: "" };
+    for (const folder of leaving) {
+      log(`Disconnecting ${folder}`);
+      const gone = await release(folder);
+      if ("error" in gone) return gone;
+    }
+    if (inUse(disk)) return { error: "disk.inUse" };
+    for (const device of [...disk.volumes.map((v) => v.path), disk.path]) await run(["wipefs", "-a", device], 30_000);
+    if (thorough) {
+      log(`Writing zeros over ${disk.path}: ${Math.round(disk.size / 1e9)} GB`);
+      const started = Date.now();
+      let whole = false;
+      const zeros = await runLogged(["dd", "if=/dev/zero", `of=${disk.path}`, "bs=4M", "oflag=direct", "status=progress"], log, 7 * 24 * 60 * 60_000, {}, (line) => {
+        // dd stops at the end of the disk with "No space left": that is the whole of it written
+        if (/No space left/i.test(line)) whole = true;
+        if (/No space left|records (in|out)$/i.test(line)) return null;
+        const m = /^(\d+) bytes .* copied/.exec(line);
+        return m ? `${Math.min(100, Math.floor((Number(m[1]) / disk.size) * 100))}% · ${Math.round(Number(m[1]) / 1e9)} of ${Math.round(disk.size / 1e9)} GB · ${Math.round((Date.now() - started) / 60_000)} min` : line;
+      });
+      if (zeros.code !== 0 && !whole) return { error: "disk.wipeFailed", message: said(zeros) };
+      await run(["sync"], 120_000);
+    }
+    await run(["partx", "-d", disk.path], 30_000);
+    await settle();
+    record("system.disk.wipe", { user, detail: `${diskLabel(disk)}${thorough ? ", written over" : ""}` });
+    return { path: "" };
+  }, dry ? "asked" : "long");
 }
 
 /** A file system Hata may check or rename, with the disk it is on */
@@ -555,7 +630,7 @@ export function checkVolume(device: string, repair: boolean, user: string, log: 
     const output = `${ran.done.out}\n${ran.done.err}`.split("\n").map((line) => line.trimEnd()).filter(Boolean).slice(-14).join("\n").slice(-3000);
     if (repair) record("system.disk.repair", { user, detail: volume.label || volume.path });
     return { device, verdict, output, repaired: repair, back: ran.back };
-  });
+  }, dry ? "asked" : "long");
 }
 
 /** Gives a file system another label; the files are not touched */
@@ -712,7 +787,7 @@ export function absent(): { path: string; holds: ReturnType<typeof holds> }[] {
 
 /** Brings what older versions wrote up to date: the order of the start, the closed directories */
 function upgradeKept(): Promise<void> {
-  return oneAtATime(async () => {
+  return ownTurn(async () => {
     if (process.getuid?.() !== 0 || !existsSync(FSTAB)) return;
     const text = readText(FSTAB);
     const next = upgradeLines(text);
@@ -736,7 +811,7 @@ function usbFolder(volume: Volume, taken: Set<string>): string {
 
 /** Clears away what an unplugged disk left behind, and connects what was plugged in when that is on */
 function lookAround(): Promise<void> {
-  return oneAtATime(async () => {
+  return ownTurn(async () => {
     const disks = await connected();
     note(disks);
     const volumes = disks.flatMap((d) => d.volumes);
@@ -869,6 +944,8 @@ export interface MountingReport {
   mergeable: string[];
   /** The disks nothing uses that are said so on top of the page */
   unused: UnusedDisk[];
+  /** Per disk, the room no partition takes, bytes — where another partition can be made */
+  free: Record<string, number>;
   /** Per disk, what may be formatted, checked or renamed (`changeable`) */
   changeable: Record<string, { whole: boolean; volumes: string[] }>;
 }
@@ -894,6 +971,7 @@ export function mountingReport(disks: Disk[]): MountingReport {
     pools: pools(lines),
     mergeable: mergeable(lines, [...mountedAt().keys()]),
     unused,
+    free: Object.fromEntries(disks.map((d) => [d.name, blockers(d).some((b) => b !== "mounted") ? 0 : unallocated(d)])),
     changeable: Object.fromEntries(disks.map((d) => [d.name, changeable(d, Object.keys(ours))])),
   };
 }

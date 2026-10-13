@@ -26,7 +26,7 @@ test("strings chosen at run time exist for every value the server can send", () 
   const need = [
     ...["running", "partial", "restarting", "stopped", "unknown", "busy"].map((s) => `status.${s}`),
     ...["install", "update", "start", "stop", "restart", "remove", "apply", "backup", "restore", "import"].flatMap((k) => [`job.${k}`, `activity.app.${k}.done`, `activity.app.${k}.failed`]),
-    ...["update", "docker", "docker.missing", "docker.stopped", "disk.new", "disk.usb", "restarting", "partial", "disk", "memory", "temperature", "failed.install", "failed.update", "failed.apply", "failed.start", "failed.backup", "failed.restore", "internet.main", "internet.spare", "internet.none", "array.errors", "array.diskEmpty", "array.parityLost", "array.held", "array.failed"].flatMap((c) => [`attention.${c}.title`, `attention.${c}.text`]),
+    ...["update", "docker", "docker.missing", "docker.stopped", "disk.new", "disk.usb", "disk.filling", "restarting", "partial", "disk", "memory", "temperature", "failed.install", "failed.update", "failed.apply", "failed.start", "failed.backup", "failed.restore", "internet.main", "internet.spare", "internet.none", "array.errors", "array.diskEmpty", "array.parityLost", "array.held", "array.failed"].flatMap((c) => [`attention.${c}.title`, `attention.${c}.text`]),
     ...["home", "store", "files", "backups", "users", "settings"].map((v) => `nav.${v}`),
     ...["badPath", "virtual", "protected", "notFound", "notDir", "notFile", "exists", "badName", "samePlace", "intoItself", "noSpace", "denied", "failed", "badUpload", "uploadOrder", "tooLargeToEdit", "notText", "changed", "archiveTooLarge", "tooManyPinned"].map((v) => `error.files.${v}`),
     ...["list", "grid"].map((v) => `files.view.${v}`),
