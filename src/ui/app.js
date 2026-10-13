@@ -4140,7 +4140,7 @@ function handOverDialog(nic) {
     "",
     h("header", null, h("h2", { class: "grow" }, t("network.handover.title", { nic: nic.name })), closeX(() => dialog)),
     h("p", null, t("network.handover.lead")),
-    h("p", { class: "muted small" }, t("network.handover.how", { nic: nic.name })),
+    h("p", { class: "muted small" }, t(nic.manager === "ifupdown" ? "network.handover.howIfupdown" : "network.handover.how", { nic: nic.name })),
     h("p", { class: "banner small" }, t("network.trial.promise", { n: state.network.trial })),
     error,
     h(
@@ -4179,7 +4179,7 @@ function networkSection() {
         { class: "section-head" },
         h("h2", null, h("span", { class: "with-icon" }, icon("network"), nic.name), " ", h("span", { class: "state " + (nic.up ? "running" : "stopped") }, t(nic.up ? "network.up" : "network.down"))),
         nic.manager === "nm" && !data.pending && button(t("network.change"), { onclick: () => nicDialog(nic) }, "sliders"),
-        nic.manager === "networkd" && data.tool === "ok" && !data.pending && button(t("network.handover"), { onclick: () => handOverDialog(nic) }),
+        (nic.manager === "networkd" || nic.manager === "ifupdown") && data.tool === "ok" && !data.pending && button(t("network.handover"), { onclick: () => handOverDialog(nic) }),
       ),
       row(t("network.address"), nic.addresses.join(", ") + (nic.addresses.length ? ` · ${t(nic.dynamic ? "network.byRouter" : "network.fixed")}` : "")),
       row(t("network.gateway"), nic.gateway),
@@ -4187,7 +4187,7 @@ function networkSection() {
       nic.addresses6.length > 0 && row("IPv6", nic.addresses6.join(", ")),
       row(t("network.mac"), nic.mac + (nic.speed ? ` · ${nic.speed >= 1000 ? nic.speed / 1000 + " Gbit/s" : nic.speed + " Mbit/s"}` : "")),
       row(t("network.manager"), t("network.by." + (nic.manager || "none")), false),
-      nic.manager !== "nm" && h("p", { class: "muted small" }, t(nic.manager === "networkd" ? (data.tool === "ok" ? "network.handoverHint" : "network.needsTool") : "network.readOnly")),
+      nic.manager !== "nm" && h("p", { class: "muted small" }, t(nic.manager === "networkd" || nic.manager === "ifupdown" ? (data.tool === "ok" ? "network.handoverHint" : "network.needsTool") : "network.readOnly")),
     );
   const needs =
     data.needs &&

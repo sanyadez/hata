@@ -1382,5 +1382,6 @@
   "error.network.failed": "Не вийшло: {message}",
   "activity.network.changed": "Змінено мережеві налаштування {target}",
   "activity.network.handedOver": "{target} передано NetworkManager",
-  "activity.network.rolledBack": "Зміну мережі {target} не підтверджено, її повернуто"
+  "activity.network.rolledBack": "Зміну мережі {target} не підтверджено, її повернуто",
+  "network.handover.howIfupdown": "Hata створює профіль NetworkManager «hata-{nic}» і закоментовує {nic} у /etc/network/interfaces (файл, яким він був, лишається поруч як interfaces.before-hata). З'єднання зникне на кілька секунд; якщо адресу дає роутер, він може дати іншу."
 }

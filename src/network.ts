@@ -179,6 +179,49 @@ export const handBackScript = (name: string): string =>
     "",
   ].join("\n");
 
+const INTERFACES = "/etc/network/interfaces";
+const MARK = "#hata# ";
+
+/**
+ * `/etc/network/interfaces` without an interface: its `iface` stanzas and its name on the `auto` and
+ * `allow-…` lines are commented out with a mark, everything else stays as written. null — the file
+ * does not set the interface up (it may be in a file this one includes, which Hata does not edit).
+ */
+export function withoutIface(text: string, name: string): string | null {
+  const out: string[] = [];
+  let inside = false;
+  let found = false;
+  for (const line of text.split("\n")) {
+    const words = line.trim().split(/\s+/);
+    const stanza = /^(iface|mapping|auto|allow-[\w-]+|source|source-directory|rename|no-auto-down|no-scripts)$/.test(words[0] ?? "");
+    if (stanza) inside = words[0] === "iface" && words[1] === name;
+    if (inside) {
+      found = true;
+      out.push(line.trim() ? MARK + line : line);
+    } else if (stanza && /^(auto|allow-)/.test(words[0]!) && words.slice(1).includes(name)) {
+      const others = words.slice(1).filter((word) => word !== name);
+      out.push(MARK + line);
+      if (others.length) out.push(`${words[0]} ${others.join(" ")}`);
+    } else out.push(line);
+  }
+  return found ? out.join("\n") : null;
+}
+
+/**
+ * The name an interface gave the router when dhcpcd asked for its address: with the same one
+ * NetworkManager is given the same address, so a hand-over does not move the server. dhcpcd's is
+ * `ff`, the last four bytes of the hardware address, and its DUID (`/var/lib/dhcpcd/duid`).
+ */
+export function dhcpcdClientId(mac: string, duid: string): string {
+  const bytes = mac.toLowerCase().split(":");
+  const id = duid.trim().toLowerCase();
+  return bytes.length === 6 && /^[0-9a-f]{2}(:[0-9a-f]{2}){3,}$/.test(id) ? ["ff", ...bytes.slice(2), id].join(":") : "";
+}
+
+/** What undoes a hand-over from ifupdown: the file as it was, and the interface brought up by it again */
+export const ifupBackScript = (name: string, saved: string): string =>
+  ["#!/bin/sh", "PATH=$PATH:/usr/sbin:/sbin", `nmcli connection delete ${profileName(name)}`, `nmcli device set ${name} managed no`, `cp ${saved} ${INTERFACES}`, "systemctl restart NetworkManager", `ip addr flush dev ${name}`, `ifup --force ${name}`, ""].join("\n");
+
 // --- Reading ----------------------------------------------------------------------------------------
 
 const read = (path: string): string => {
@@ -246,7 +289,8 @@ export interface Pending {
   address: string;
 }
 
-let pending: (Pending & { undo: () => Promise<void>; keep: () => Promise<void>; timer: Timer }) | null = null;
+/** `applied` — the change has been made: before that, reaching the server proves nothing */
+let pending: (Pending & { undo: () => Promise<void>; keep: () => Promise<void>; timer: Timer; applied: boolean }) | null = null;
 
 export interface NetworkReport {
   /** NetworkManager: ok, missing (`needs` says what to install), stopped */
@@ -320,13 +364,13 @@ function startTrial(p: Omit<Pending, "until" | "token">, user: string, hooks: { 
       bus.publish("network");
     });
   }, TRIAL_S * 1000);
-  pending = { ...p, until, token, timer, ...hooks };
+  pending = { ...p, until, token, timer, applied: false, ...hooks };
   return { ...p, until, token };
 }
 
 /** Keeps the change on trial. `token` — from the link; without one the caller is a signed-in administrator */
 export async function confirmChange(token?: string): Promise<boolean> {
-  if (!pending || (token !== undefined && token !== pending.token)) return false;
+  if (!pending || !pending.applied || (token !== undefined && token !== pending.token)) return false;
   const kept = pending;
   pending = null;
   clearTimeout(kept.timer);
@@ -334,6 +378,13 @@ export async function confirmChange(token?: string): Promise<boolean> {
   record(kept.kind === "handover" ? "network.handedOver" : "network.changed", { detail: kept.nic });
   bus.publish("network");
   return true;
+}
+
+/** The change has been made — from here on it can be kept; one that could not be made is taken back at once */
+async function applied(worked: boolean): Promise<void> {
+  if (!pending) return;
+  if (worked) pending.applied = true;
+  else await revertChange();
 }
 
 /** Takes the change on trial back at once */
@@ -371,7 +422,7 @@ export async function changeNic(name: string, input: Record<string, unknown>, us
     throw e;
   }
   // the answer has to leave through the address that is about to go
-  setTimeout(() => void nmcli(["connection", "up", uuid, "ifname", name], 60_000), 400);
+  setTimeout(async () => applied((await nmcli(["connection", "up", uuid, "ifname", name], 60_000)).code === 0), 400);
   return startTrial({ nic: name, kind: "change", address: addressOf(change, nic) }, user, { undo: () => drop("CheckpointRollback"), keep: () => drop("CheckpointDestroy") });
 }
 
@@ -383,45 +434,67 @@ export async function handOver(name: string, user: string): Promise<Pending> {
   if (pending) throw new NetworkError("network.pending");
   if (!(await nmRunning())) throw new NetworkError("network.noTool");
   const nic = await findNic(name);
-  if (nic.manager !== "networkd") throw new NetworkError("network.cannotHandOver");
+  if (nic.manager !== "networkd" && nic.manager !== "ifupdown") throw new NetworkError("network.cannotHandOver");
+  const ifupdown = nic.manager === "ifupdown";
+  const edited = ifupdown ? withoutIface(read(INTERFACES), name) : null;
+  // set up in a file that one includes: not ours to edit
+  if (ifupdown && edited === null) throw new NetworkError("network.cannotHandOver");
   const change: Change = nic.dynamic || !nic.addresses.length ? { method: "auto", address: "", gateway: "", dns: [] } : { method: "manual", address: nic.addresses[0]!, gateway: nic.gateway, dns: nic.dns };
   const script = `/run/hata-network-undo-${name}.sh`;
+  const saved = `/run/hata-network-undo-${name}.interfaces`;
   const unit = `hata-network-undo-${name}`;
-  writeFileSync(script, handBackScript(name), { mode: 0o700 });
+  if (ifupdown) {
+    writeFileSync(saved, readFileSync(INTERFACES));
+    if (!existsSync(`${INTERFACES}.before-hata`)) writeFileSync(`${INTERFACES}.before-hata`, readFileSync(INTERFACES));
+  }
+  writeFileSync(script, ifupdown ? ifupBackScript(name, saved) : handBackScript(name), { mode: 0o700 });
   await run(["systemctl", "stop", `${unit}.timer`]);
   await must(run(["systemd-run", "--unit", unit, "--collect", "--quiet", `--on-active=${TRIAL_S + 5}`, "/bin/sh", script]));
   const undo = async () => {
     await run(["systemctl", "stop", `${unit}.timer`]);
     await run(["/bin/sh", script], 60_000);
     rmSync(script, { force: true });
+    rmSync(saved, { force: true });
   };
   try {
     await nmcli(["connection", "delete", profileName(name)]);
-    await must(nmcli(["connection", "add", "type", "ethernet", "ifname", name, "con-name", profileName(name), "autoconnect", "yes", "save", "yes", ...profileArgs(change)]));
+    // the router knows the interface by the name its DHCP client gave: keep it, and the address stays
+    const clientId = ifupdown && change.method === "auto" ? dhcpcdClientId(nic.mac, read("/var/lib/dhcpcd/duid")) : "";
+    await must(nmcli(["connection", "add", "type", "ethernet", "ifname", name, "con-name", profileName(name), "autoconnect", "yes", "save", "yes", ...profileArgs(change), ...(clientId ? ["ipv4.dhcp-client-id", clientId] : [])]));
   } catch (e) {
     await undo();
     throw e;
   }
   setTimeout(async () => {
-    const left = [...(await networkdManaged())].filter((other) => other !== name);
-    mkdirSync("/etc/systemd/network", { recursive: true });
-    writeFileSync(HANDED(name), handedFile(name));
-    writeFileSync(UDEV_RULE(name), udevRule(name));
-    mkdirSync(WAIT_DIR, { recursive: true });
-    const handed = [...new Bun.Glob("00-hata-*.network").scanSync({ cwd: "/etc/systemd/network" })].map((file) => file.slice(8, -8));
-    writeFileSync(WAIT_FILE, waitOnline(handed, left));
-    await run(["systemctl", "daemon-reload"]);
-    await run(["udevadm", "control", "--reload"]);
-    await run(["udevadm", "trigger", "--action=change", `/sys/class/net/${name}`]);
-    await run(["networkctl", "reload"]);
+    if (ifupdown) {
+      // ifdown needs the stanza it is taking down, so the file changes after it
+      await run(["ifdown", "--force", name], 30_000);
+      writeFileSync(INTERFACES, edited!);
+      // NetworkManager reads that file only when it starts; what it has connected stays connected
+      await run(["systemctl", "restart", "NetworkManager"], 60_000);
+      for (let i = 0; i < 20 && !(await nmRunning()); i++) await Bun.sleep(500);
+    } else {
+      const left = [...(await networkdManaged())].filter((other) => other !== name);
+      mkdirSync("/etc/systemd/network", { recursive: true });
+      writeFileSync(HANDED(name), handedFile(name));
+      writeFileSync(UDEV_RULE(name), udevRule(name));
+      mkdirSync(WAIT_DIR, { recursive: true });
+      const handed = [...new Bun.Glob("00-hata-*.network").scanSync({ cwd: "/etc/systemd/network" })].map((file) => file.slice(8, -8));
+      writeFileSync(WAIT_FILE, waitOnline(handed, left));
+      await run(["systemctl", "daemon-reload"]);
+      await run(["udevadm", "control", "--reload"]);
+      await run(["udevadm", "trigger", "--action=change", `/sys/class/net/${name}`]);
+      await run(["networkctl", "reload"]);
+    }
     await nmcli(["device", "set", name, "managed", "yes"]);
-    await nmcli(["connection", "up", profileName(name), "ifname", name], 60_000);
+    await applied((await nmcli(["connection", "up", profileName(name), "ifname", name], 60_000)).code === 0);
   }, 400);
   return startTrial({ nic: name, kind: "handover", address: "" }, user, {
     undo,
     keep: async () => {
       await run(["systemctl", "stop", `${unit}.timer`]);
       rmSync(script, { force: true });
+      rmSync(saved, { force: true });
     },
   });
 }

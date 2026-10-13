@@ -1382,5 +1382,6 @@
   "error.network.failed": "It did not work: {message}",
   "activity.network.changed": "Network settings of {target} changed",
   "activity.network.handedOver": "{target} handed over to NetworkManager",
-  "activity.network.rolledBack": "A network change of {target} was not confirmed and was taken back"
+  "activity.network.rolledBack": "A network change of {target} was not confirmed and was taken back",
+  "network.handover.howIfupdown": "Hata makes the NetworkManager profile “hata-{nic}” and comments {nic} out in /etc/network/interfaces (the file as it was is kept next to it as interfaces.before-hata). The connection drops for a few seconds; with an address from the router, the router may give another one."
 }

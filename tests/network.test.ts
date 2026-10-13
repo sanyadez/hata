@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { cleanChange, handBackScript, handedFile, parseLinks, profileArgs, terse, udevRule, waitOnline } from "../src/network";
+import { cleanChange, dhcpcdClientId, withoutIface, handBackScript, handedFile, parseLinks, profileArgs, terse, udevRule, waitOnline } from "../src/network";
 
 const ADDR = JSON.stringify([
   { ifname: "lo", link_type: "loopback", flags: ["LOOPBACK", "UP", "LOWER_UP"], addr_info: [{ family: "inet", local: "127.0.0.1", prefixlen: 8 }] },
@@ -66,4 +66,17 @@ test("a hand-over: networkd is told to leave the interface, udev to let NetworkM
   expect(undo).toContain("rm -f /etc/systemd/network/00-hata-eth0.network /etc/udev/rules.d/99-zz-hata-eth0.rules");
   expect(undo).toContain("nmcli connection delete hata-eth0");
   expect(undo.trimEnd().endsWith("networkctl reconfigure eth0")).toBe(true);
+});
+
+test("withoutIface: the interface is commented out of /etc/network/interfaces, the rest stays as written", () => {
+  const text = ["# The loopback network interface", "auto lo", "iface lo inet loopback", "", "# The primary network interface", "allow-hotplug enp3s0", "iface enp3s0 inet dhcp", "\tdns-nameservers 1.1.1.1", "", "auto eth1 enp3s0", "iface eth1 inet static", "\taddress 10.0.0.2/24", "iface enp3s0 inet6 auto", ""].join("\n");
+  expect(withoutIface(text, "enp3s0")).toBe(["# The loopback network interface", "auto lo", "iface lo inet loopback", "", "# The primary network interface", "#hata# allow-hotplug enp3s0", "#hata# iface enp3s0 inet dhcp", "#hata# \tdns-nameservers 1.1.1.1", "", "#hata# auto eth1 enp3s0", "auto eth1", "iface eth1 inet static", "\taddress 10.0.0.2/24", "#hata# iface enp3s0 inet6 auto", ""].join("\n"));
+  expect(withoutIface(text, "wlan0")).toBeNull();
+  expect(withoutIface("source /etc/network/interfaces.d/*\nauto enp3s0\n", "enp3s0")).toBeNull();
+});
+
+test("dhcpcdClientId: the name dhcpcd gave the router, for NetworkManager to give too", () => {
+  expect(dhcpcdClientId("40:8D:5C:33:B9:0F", "00:01:00:01:32:60:b9:d2:40:8d:5c:33:b9:0f\n")).toBe("ff:5c:33:b9:0f:00:01:00:01:32:60:b9:d2:40:8d:5c:33:b9:0f");
+  expect(dhcpcdClientId("40:8d:5c:33:b9:0f", "")).toBe("");
+  expect(dhcpcdClientId("", "00:01:00:01")).toBe("");
 });
