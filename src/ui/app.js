@@ -4109,7 +4109,7 @@ function updateRow() {
 }
 
 /** The configuration folder: where it is, and moving it — which restarts Hata in the new place */
-/** Moves the data folder with everything in it; `suggested` — a folder to offer (a disk just prepared) */
+/** Moves the data folder with everything in it; `suggested` — a folder to offer (a disk just formatted) */
 async function moveDataDialog(suggested = "") {
   const s = state.settings;
   const target = h("input", { type: "text", value: suggested, spellcheck: false, class: "mono", placeholder: "/mnt/disk/DATA" });
@@ -5459,10 +5459,17 @@ function diskDialog(name) {
               "div",
               { class: "kv" },
               h("div", null, h("span", { class: "mono" }, v.name), h("div", { class: "muted small" }, [bytes(v.size), v.fstype || t("mounting.noFs"), v.label].filter(Boolean).join(" · "))),
-              v.mounts.length ? h("span", { class: "mono" }, v.mounts[0]) : state.disks.mounting.mountable.includes(v.path) ? button(t("mounting.connect"), { class: "small", onclick: () => (dialog.close(), connectDialog(disk, v)) }) : h("span", { class: "muted" }, t(v.swap ? "mounting.swap" : "disks.notMounted")),
+              h(
+                "span",
+                { class: "with-actions" },
+                v.mounts.length ? h("span", { class: "mono" }, v.mounts[0]) : state.disks.mounting.mountable.includes(v.path) ? button(t("mounting.connect"), { class: "small", onclick: () => (dialog.close(), connectDialog(disk, v)) }) : h("span", { class: "muted" }, t(v.swap ? "mounting.swap" : "disks.notMounted")),
+                canTend(disk, v) && button(t("fsck.go"), { class: "small quiet", onclick: () => (dialog.close(), checkDialog(disk, v)) }),
+                canTend(disk, v) && button(t("mounting.rename"), { class: "small quiet", onclick: () => (dialog.close(), labelDialog(disk, v)) }),
+                v.kind === "part" && disk.volumes.length > 1 && changeable(disk).volumes.includes(v.path) && button(t("mounting.format"), { class: "small quiet", onclick: () => (dialog.close(), formatDialog(disk, v)) }),
+              ),
             ),
           ),
-          canPrepare(disk) ? h("footer", null, h("span", { class: "muted small" }, t("mounting.prepareHint")), button(t("mounting.prepare"), { onclick: () => (dialog.close(), prepareDialog(disk)) })) : h("p", { class: "muted small" }, t("mounting.blocked." + (state.disks.mounting.blockers[disk.name]?.[0] ?? "mounted"))),
+          changeable(disk).whole ? h("footer", null, h("span", { class: "muted small" }, t("mounting.formatHint")), button(t("mounting.formatDisk"), { onclick: () => (dialog.close(), formatDialog(disk)) })) : h("p", { class: "muted small" }, t("mounting.blocked." + (state.disks.mounting.blockers[disk.name]?.[0] ?? "mounted"))),
         ),
     );
   };
@@ -5476,6 +5483,30 @@ function diskDialog(name) {
 
 const canPrepare = (disk) => state.disks?.mounting?.possible && state.disks.mounting.blockers[disk.name]?.length === 0;
 const canConnect = (disk) => (state.disks?.mounting?.possible ? disk.volumes.filter((v) => state.disks.mounting.mountable.includes(v.path)) : []);
+/** What of a disk may be formatted, checked or renamed — the server's word */
+const changeable = (disk) => (state.disks?.mounting?.possible && state.disks.mounting.changeable?.[disk.name]) || { whole: false, volumes: [] };
+const fsFamily = (fstype) => (/^ext[234]$/.test(fstype) ? "ext4" : ["exfat", "vfat", "ntfs"].includes(fstype) ? fstype : null);
+/** A file system Hata can check and rename */
+const canTend = (disk, volume) => !!fsFamily(volume.fstype) && changeable(disk).volumes.includes(volume.path);
+const FS_NAMES = { ext4: "ext4", exfat: "exFAT", vfat: "FAT32", ntfs: "NTFS" };
+
+/** The label as the file system will carry it — the server makes it the same way */
+function fsLabel(fs, text) {
+  const fit = (value, max, width) => {
+    let out = "";
+    let used = 0;
+    for (const char of value) {
+      used += width(char);
+      if (used > max) break;
+      out += char;
+    }
+    return out.trim();
+  };
+  const plain = text.replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim();
+  if (fs === "vfat") return fit(plain.normalize("NFKD").replace(/[^\x20-\x7e]/g, "").replace(/[*?.,;:/\\|+=<>[\]"]/g, "").toUpperCase().trim(), 11, () => 1);
+  if (fs === "ext4") return fit(plain.replace(/\//g, "-"), 16, (char) => new TextEncoder().encode(char).length);
+  return fit(plain.replace(/["*/:<>?\\|]/g, ""), fs === "exfat" ? 11 : 32, (char) => char.length);
+}
 const MOUNT_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$/;
 const mountName = (text) => text.normalize("NFKD").replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^[^A-Za-z0-9]+|[-._]+$/g, "").slice(0, 24).replace(/[-._]+$/, "") || "disk";
 
@@ -5528,39 +5559,155 @@ function diskAction(dialogOf, slot, request, done) {
   return run;
 }
 
-function prepareDialog(disk) {
-  const name = h("input", { type: "text", value: mountName(disk.model || "disk"), maxlength: 32, spellcheck: false });
-  const typed = h("input", { type: "text", autocomplete: "off", spellcheck: false, placeholder: disk.name });
+/**
+ * Erases a disk, or one partition of it, and makes a file system there: which one, under what label,
+ * and whether it is connected afterwards.
+ */
+function formatDialog(disk, part) {
+  const removable = disk.removable || disk.transport === "usb";
+  const targets = part ? [part] : disk.volumes;
+  const holds = targets.filter((v) => v.fstype);
+  const leaving = targets.flatMap((v) => v.mounts);
+  const old = (part ?? disk.volumes.find((v) => v.label))?.label ?? "";
+  const fs = h("select", null, Object.keys(FS_NAMES).map((id) => h("option", { value: id, selected: id === (removable ? "exfat" : "ext4") }, t("mounting.fs." + id))));
+  const label = h("input", { type: "text", value: old || (removable ? "" : disk.model), maxlength: 40, spellcheck: false });
+  const after = h("select", null, ["keep", "once", "no"].map((id) => h("option", { value: id, selected: id === (removable ? "once" : "keep") }, t("mounting.after." + id))));
+  const name = h("input", { type: "text", maxlength: 32, spellcheck: false });
+  const typed = h("input", { type: "text", autocomplete: "off", spellcheck: false, placeholder: (part ?? disk).name });
   const password = h("input", { type: "password", autocomplete: "current-password" });
+  const fsHint = h("span", { class: "hint" });
+  const labelHint = h("span", { class: "hint" });
+  const afterHint = h("span", { class: "hint" });
   const where = h("span", { class: "hint mono" });
+  const folder = h("label", { class: "field" }, h("span", { class: "label" }, t("mounting.folder")), name, where, h("span", { class: "hint" }, t("mounting.nameHint")));
+  const open = h("p", { class: "banner" });
+  const cmd = h("span");
   const slot = h("div");
-  const holds = disk.volumes.filter((v) => v.fstype);
   let dialog;
-  const go = button(t("mounting.prepareGo"), { class: "danger", disabled: true });
+  let named = false;
+  const go = button(t("mounting.formatGo"), { class: "danger", disabled: true });
   const check = () => {
+    const written = fsLabel(fs.value, label.value);
+    if (!named) name.value = leaving[0]?.startsWith("/mnt/") ? leaving[0].slice(5) : mountName((removable ? "usb-" : "") + (written || disk.model || "disk"));
+    const connects = after.value !== "no";
+    fsHint.textContent = t("mounting.fsHint." + fs.value);
+    labelHint.textContent = t("mounting.labelHint." + fs.value) + (written && written !== label.value.trim() ? " " + t("mounting.labelBecomes", { label: written }) : "");
+    afterHint.textContent = t("mounting.afterHint." + after.value);
     where.textContent = "/mnt/" + name.value;
-    go.disabled = !MOUNT_NAME.test(name.value) || typed.value.trim() !== disk.name || !password.value;
+    folder.hidden = !connects;
+    open.hidden = !connects || fs.value === "ext4";
+    open.textContent = t("mounting.noOwners", { fs: FS_NAMES[fs.value] });
+    cmd.textContent = [!part && `sfdisk ${disk.path}`, `mkfs.${fs.value === "vfat" ? "fat" : fs.value} ${part ? part.path : disk.path + (/\d$/.test(disk.path) ? "p1" : "1")}`, after.value === "keep" && "/etc/fstab"].filter(Boolean).join("; ");
+    go.disabled = (connects && !MOUNT_NAME.test(name.value)) || typed.value.trim() !== (part ?? disk).name || !password.value;
   };
-  for (const input of [name, typed, password]) input.addEventListener("input", check);
+  name.addEventListener("input", () => ((named = true), check()));
+  for (const input of [fs, label, after, typed, password]) input.addEventListener("input", check);
   go.onclick = diskAction(
     () => dialog,
     slot,
-    () => api("POST", `/api/disks/${disk.name}/prepare`, { serial: disk.serial, size: disk.size, name: name.value, password: password.value }),
+    () => api("POST", `/api/disks/${disk.name}/format`, { serial: disk.serial, size: disk.size, part: part?.path ?? "", fs: fs.value, label: label.value, connect: after.value, name: name.value, password: password.value }),
     () => {
       dialog.close();
-      preparedDialog("/mnt/" + name.value);
+      const path = "/mnt/" + name.value;
+      if (after.value === "keep" && fs.value === "ext4") preparedDialog(path);
+      else toast(after.value === "no" ? t("mounting.formatted", { fs: FS_NAMES[fs.value] }) : t("mounting.formattedAt", { fs: FS_NAMES[fs.value], path }));
     },
   );
   dialog = openDialog(
     "wide",
-    h("h2", null, t("mounting.prepareTitle", { disk: diskTitle(disk) })),
-    h("p", { class: "muted small" }, diskMeta(disk)),
-    h("p", { class: "banner danger" }, t(holds.length ? "mounting.prepareErases" : "mounting.prepareEmpty"), holds.length > 0 && h("span", { class: "block mono small" }, holds.map((v) => [v.name, v.fstype, v.label, bytes(v.size)].filter(Boolean).join(" · ")).join("; "))),
-    h("p", { class: "muted" }, t("mounting.prepareLead")),
-    h("label", { class: "field" }, h("span", { class: "label" }, t("mounting.name")), name, where, h("span", { class: "hint" }, t("mounting.nameHint"))),
-    field(t("mounting.typeName", { name: disk.name }), typed),
+    h("h2", null, t("mounting.formatTitle", { disk: part ? `${part.name} · ${diskTitle(disk)}` : diskTitle(disk) })),
+    h("p", { class: "muted small" }, part ? [part.name, bytes(part.size)].join(" · ") : diskMeta(disk)),
+    h(
+      "p",
+      { class: "banner danger" },
+      t(part ? "mounting.formatPartErases" : holds.length ? "mounting.formatErases" : "mounting.formatEmpty"),
+      holds.length > 0 && h("span", { class: "block mono small" }, holds.map((v) => [v.name, v.fstype, v.label, bytes(v.size)].filter(Boolean).join(" · ")).join("; ")),
+      leaving.length > 0 && h("span", { class: "block" }, t("mounting.formatLeaves", { paths: leaving.join(", ") })),
+    ),
+    h("label", { class: "field" }, h("span", { class: "label" }, t("mounting.fs")), fs, fsHint),
+    h("label", { class: "field" }, h("span", { class: "label" }, t("mounting.label")), label, labelHint),
+    h("label", { class: "field" }, h("span", { class: "label" }, t("mounting.after")), after, afterHint),
+    folder,
+    open,
+    field(t("mounting.typeName", { name: (part ?? disk).name }), typed),
     field(t("account.password"), password, t("mounting.passwordHint")),
-    h("p", { class: "cmd" }, icon("terminal"), `sfdisk ${disk.path}; mkfs.ext4 ${disk.path}1; /etc/fstab`),
+    h("p", { class: "cmd" }, icon("terminal"), cmd),
+    slot,
+    h("footer", null, closeButton(() => dialog, t("common.cancel")), go),
+  );
+  check();
+}
+
+/** Looks a file system over without changing it; damage that is found can then be repaired */
+function checkDialog(disk, volume) {
+  const title = volume.label || volume.name;
+  const slot = h("div");
+  const result = h("div", { class: "stack" });
+  let dialog;
+  const go = button(t("fsck.go"), { class: "primary" });
+  const start = (repair) => (e) => {
+    put(result, h("p", { class: "with-icon muted" }, icon("refresh"), t(repair ? "fsck.repairing" : "fsck.running")));
+    // an error is shown in its own place: the line that says "checking" goes
+    return diskAction(
+      () => dialog,
+      slot,
+      () => api("POST", "/api/disks/fsck", { device: volume.path, repair }),
+      (data) => {
+        const { verdict, output, back } = data.checked;
+        go.disabled = false;
+        const mend = verdict === "errors" && !repair;
+        put(
+          result,
+          h("p", { class: "banner " + (verdict === "errors" || verdict === "failed" ? "danger" : "ok") }, t("fsck.verdict." + verdict)),
+          back && h("p", { class: "error", role: "alert" }, t("fsck.back", { message: back })),
+          output && h("details", { open: verdict !== "clean" }, h("summary", { class: "muted small" }, t("fsck.said")), h("pre", { class: "said" }, output)),
+          mend && h("div", { class: "row-actions" }, button(t("fsck.repair"), { class: "primary", onclick: start(true) })),
+        );
+      },
+    )(e).then(() => slot.firstChild && put(result));
+  };
+  go.onclick = start(false);
+  dialog = openDialog(
+    "wide",
+    h("header", null, h("div", { class: "grow" }, h("h2", null, t("fsck.title", { name: title })), h("p", { class: "muted small" }, [volume.name, volume.fstype, bytes(volume.size)].join(" · "))), closeX(() => dialog)),
+    h("p", { class: "muted" }, t("fsck.lead")),
+    volume.mounts.length > 0 && h("p", { class: "banner" }, t("fsck.leadMounted", { path: volume.mounts[0] })),
+    volume.fstype === "ntfs" && h("p", { class: "muted small" }, t("fsck.ntfs")),
+    result,
+    slot,
+    h("footer", null, closeButton(() => dialog, t("common.close")), go),
+  );
+}
+
+/** Gives a file system another label — the name other devices show the disk under */
+function labelDialog(disk, volume) {
+  const fs = fsFamily(volume.fstype);
+  const label = h("input", { type: "text", value: volume.label, maxlength: 40, spellcheck: false });
+  const hint = h("span", { class: "hint" });
+  const slot = h("div");
+  let dialog;
+  const go = button(t("mounting.rename"), { class: "primary" });
+  const check = () => {
+    const written = fsLabel(fs, label.value);
+    hint.textContent = t("mounting.labelHint." + fs) + (written && written !== label.value.trim() ? " " + t("mounting.labelBecomes", { label: written }) : "");
+    go.disabled = !written || written === volume.label;
+  };
+  label.addEventListener("input", check);
+  go.onclick = diskAction(
+    () => dialog,
+    slot,
+    () => api("POST", "/api/disks/label", { device: volume.path, label: label.value }),
+    () => {
+      dialog.close();
+      toast(t("relabel.done", { label: fsLabel(fs, label.value) }));
+    },
+  );
+  dialog = openDialog(
+    "confirm",
+    h("h2", null, t("relabel.title", { name: volume.label || volume.name })),
+    h("p", { class: "muted" }, t("relabel.lead")),
+    volume.mounts.length > 0 && fs !== "ext4" && h("p", { class: "banner" }, t("relabel.leadMounted", { path: volume.mounts[0] })),
+    h("label", { class: "field" }, h("span", { class: "label" }, t("mounting.label")), label, hint),
     slot,
     h("footer", null, closeButton(() => dialog, t("common.cancel")), go),
   );
@@ -5840,7 +5987,7 @@ function storageSection() {
       h("td", { class: "num" + (hot ? " bad" : "") }, disk.smart?.temperature != null ? disk.smart.temperature + " °C" : "—"),
       h("td", null, total ? usageBar(used, total) : h("span", { class: "muted" }, "—")),
       h("td", { class: "mono" }, mounts.length ? mounts.map((m) => h("div", { class: "clip" }, m)) : h("span", { class: "muted" }, t("disks.notMounted"))),
-      h("td", null, h("div", { class: "row-actions" }, canPrepare(disk) && !mounts.length && !canConnect(disk).length && button(t("mounting.prepare"), { class: "small primary", onclick: (e) => (e.stopPropagation(), prepareDialog(disk)) }), (disk.removable || disk.transport === "usb") && state.disks.mounting?.possible && disk.volumes.some((v) => v.fstype && v.mounts.length > 0) && button(t("copyin.button"), { class: "small", onclick: (e) => (e.stopPropagation(), copyInDialog(disk)) }, "download"), canConnect(disk).length > 0 && button(t("mounting.connect"), { class: "small primary", onclick: (e) => (e.stopPropagation(), connectDialog(disk, canConnect(disk)[0])) }), button(t("disks.details"), { class: "small", onclick: (e) => (e.stopPropagation(), diskDialog(disk.name)) }))),
+      h("td", null, h("div", { class: "row-actions" }, canPrepare(disk) && !mounts.length && !canConnect(disk).length && button(t("mounting.format"), { class: "small primary", onclick: (e) => (e.stopPropagation(), formatDialog(disk)) }), (disk.removable || disk.transport === "usb") && state.disks.mounting?.possible && disk.volumes.some((v) => v.fstype && v.mounts.length > 0) && button(t("copyin.button"), { class: "small", onclick: (e) => (e.stopPropagation(), copyInDialog(disk)) }, "download"), canConnect(disk).length > 0 && button(t("mounting.connect"), { class: "small primary", onclick: (e) => (e.stopPropagation(), connectDialog(disk, canConnect(disk)[0])) }), button(t("disks.details"), { class: "small", onclick: (e) => (e.stopPropagation(), diskDialog(disk.name)) }))),
     );
   };
   const checked = Math.max(0, ...data.disks.map((d) => d.checkedAt ?? 0));
@@ -5895,7 +6042,7 @@ function storageSection() {
         button(t("mounting.ignore"), { class: "small quiet", onclick: async () => setDisks(await api("POST", "/api/disks/ignore", { id: disk.serial || disk.name }).catch(() => state.disks)) }),
         connectable.length > 0 && (disk.removable || disk.transport === "usb") && button(t("copyin.button"), { class: "small primary", onclick: () => copyInDialog(disk) }, "download"),
         connectable.length > 0 && button(t("mounting.connect"), { class: "small", onclick: () => connectDialog(disk, connectable[0]) }),
-        button(t("mounting.prepare"), { class: "small" + (connectable.length ? "" : " primary"), onclick: () => prepareDialog(disk) }),
+        button(t("mounting.format"), { class: "small" + (connectable.length ? "" : " primary"), onclick: () => formatDialog(disk) }),
       ),
     );
   };

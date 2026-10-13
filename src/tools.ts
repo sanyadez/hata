@@ -46,6 +46,8 @@ const SPECS: Spec[] = [
   { id: "smartmontools", name: "smartmontools", package: "smartmontools", bin: "smartctl", version: ["smartctl", "--version"], page: "#/settings/storage" },
   { id: "fdisk", name: "fdisk", package: "fdisk", bin: "sfdisk", version: ["sfdisk", "--version"], page: "#/settings/storage", base: true },
   { id: "e2fsprogs", name: "e2fsprogs", package: "e2fsprogs", bin: "mkfs.ext4", version: ["mkfs.ext4", "-V"], page: "#/settings/storage", base: true },
+  { id: "dosfstools", name: "dosfstools", package: "dosfstools", bin: "mkfs.fat", version: ["mkfs.fat", "--help"], page: "#/settings/storage" },
+  { id: "exfatprogs", name: "exfatprogs", package: "exfatprogs", bin: "mkfs.exfat", version: ["mkfs.exfat", "-V"], page: "#/settings/storage" },
   { id: "ntfs-3g", name: "ntfs-3g", package: "ntfs-3g", bin: "ntfs-3g", version: ["ntfs-3g", "--version"], page: "#/settings/storage" },
   { id: "mergerfs", name: "mergerfs", package: "mergerfs", bin: "mergerfs", version: ["mergerfs", "--version"], page: "#/settings/storage" },
   { id: "snapraid", name: "SnapRAID", package: "snapraid", bin: "snapraid", version: ["snapraid", "--version"], page: "#/settings/storage" },

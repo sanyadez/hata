@@ -546,12 +546,14 @@ tr.clickable:hover td { background: var(--surface-2); }
 .usage-text { display: flex; justify-content: space-between; gap: 12px; font-size: 12.5px; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .bad { color: var(--warn); }
 .banner.danger { background: var(--danger-soft); border-color: var(--danger); }
+.banner.ok { background: var(--ok-soft); border-color: var(--ok); }
 .kv-list .kv { border-top: 1px solid var(--border); padding: 10px 0; align-items: center; }
 dialog.disk header .state { flex: none; }
 .disk-use { display: grid; gap: 4px; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border); }
 .disk-use h3 { font: 600 13px var(--font-heading); margin: 0 0 4px; }
 .banner .block { display: block; margin-top: 6px; }
 .banner.stack { display: grid; gap: 8px; justify-items: start; }
+pre.said { margin: 0; padding: 10px 12px; max-height: 240px; overflow: auto; border-radius: var(--radius-sm); background: var(--surface-2); border: 1px solid var(--border); font: 12px/1.5 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
 .new-disk { display: flex !important; align-items: center; gap: 14px; border-color: var(--accent); background: var(--accent-soft); }
 .new-disk .row-actions { flex: none; }
 .row-actions.wrap { flex-wrap: wrap; justify-content: flex-start; }

@@ -162,7 +162,7 @@ Early development. What works today:
   notification, and a disk can be told to test itself. The counters that matter are remembered: a disk's
   page says "was 0 until 14 Sep", and a counter that grows is sent as a notification again. It needs
   `smartmontools`, which Hata offers to install; nothing on a disk is changed;
-- putting a disk to use (same page): a new disk is prepared in one dialog — one partition, ext4, a folder
+- putting a disk to use (same page): a disk is formatted in one dialog — one partition, ext4, a folder
   under `/mnt`, a line in `/etc/fstab` that does not hold up the start when the disk is absent (Docker waits for the
   disk, and without it the apps that keep data there stay stopped instead of starting empty on the
   system's disk — the home page says which disk is missing); a disk that
@@ -170,9 +170,14 @@ Early development. What works today:
   a USB disk can be connected by itself when plugged in, and is ejected before it is pulled out. A disk
   nothing uses yet is said so on the home page too, and what a plugged-in stick holds can be copied
   onto the server — all of it or the folders and files you choose, into the folder you choose. Erasing
-  asks for the disk's name and your password, and is never offered for the system's disk, a disk in use
-  or a member of an array;
-- the data folder moves to a disk with one button (Settings → Apps, or right after preparing a disk):
+  asks for the disk's name and your password, and is never offered for the system's disk, a disk
+  something else uses or a member of an array;
+- formatting for other devices too: a disk, a stick or a single partition becomes ext4, exFAT, FAT32 or
+  NTFS under the label you type, with the partition table and type each kind of device expects, and is
+  then kept connected, connected until unplugged, or left ready to take away — a stick Hata connected
+  is let go of for it. A file system can be checked and repaired (what an unplugging without ejecting
+  leaves behind, the NTFS mark that stops a disk from connecting included) and renamed;
+- the data folder moves to a disk with one button (Settings → Apps, or right after formatting a disk):
   the apps are stopped, everything is copied, the apps' compose files — comments and all —, the backups,
   the shared folders and the folders on the dashboard are pointed at the new place, and the apps start
   again; the old folder is kept until you delete it, and a snapshot taken before the move still restores;

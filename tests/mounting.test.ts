@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { Disk, Volume } from "../src/disks";
-import { blockers, holds, mountable, NAME_RE, optionsFor, parseFstab, upgradeLines, suggestName, withMount, withoutMount, unusedOf } from "../src/mounting";
+import { blockers, changeable, holds, mountable, NAME_RE, optionsFor, parseFstab, upgradeLines, suggestName, withMount, withoutMount, unusedOf } from "../src/mounting";
 
 const volume = (patch: Partial<Volume> = {}): Volume => ({ name: "sdb1", path: "/dev/sdb1", kind: "part", size: 1e9, fstype: "ext4", label: "", uuid: "u-1", mounts: [], swap: false, total: null, used: null, ...patch });
 const disk = (volumes: Volume[] = [], patch: Partial<Disk> = {}): Disk => ({ name: "sdb", path: "/dev/sdb", model: "Disk", serial: "S1", size: 4e9, transport: "sata", rotational: true, removable: false, readOnly: false, volumes, ...patch });
@@ -20,6 +20,21 @@ test("blockers: the system's disk, a disk in use, swap, a member of something la
   expect(blockers(disk([volume({ fstype: "crypto_LUKS" }), volume({ kind: "crypt", name: "data", path: "/dev/mapper/data" })]))).toEqual(["member"]);
   expect(blockers(disk([volume({ kind: "lvm", mounts: ["/"] })]))).toEqual(["system", "member"]);
   expect(blockers(disk([], { readOnly: true }))).toEqual(["readonly"]);
+});
+
+test("changeable: a disk Hata may format, with the folders it connected itself", () => {
+  expect(changeable(disk(), [])).toEqual({ whole: true, volumes: [] });
+  expect(changeable(disk([volume()]), [])).toEqual({ whole: true, volumes: ["/dev/sdb1"] });
+  // a stick Hata connected is disconnected for the work; one somebody else mounted is left alone
+  expect(changeable(disk([volume({ mounts: ["/mnt/usb-stick"] })]), ["/mnt/usb-stick"])).toEqual({ whole: true, volumes: ["/dev/sdb1"] });
+  expect(changeable(disk([volume({ mounts: ["/media/stick"] })]), ["/mnt/usb-stick"])).toEqual({ whole: false, volumes: [] });
+  // one partition in somebody's use: the other may still be formatted alone
+  expect(changeable(disk([volume({ mounts: ["/srv"] }), volume({ name: "sdb2", path: "/dev/sdb2" })]), [])).toEqual({ whole: false, volumes: ["/dev/sdb2"] });
+  // nothing of the system's disk, of swap, of an array, of a read-only disk
+  expect(changeable(disk([volume({ mounts: ["/"] }), volume({ name: "sdb2", path: "/dev/sdb2" })]), [])).toEqual({ whole: false, volumes: [] });
+  expect(changeable(disk([volume({ fstype: "swap", swap: true }), volume({ name: "sdb2", path: "/dev/sdb2" })]), [])).toEqual({ whole: false, volumes: [] });
+  expect(changeable(disk([volume({ fstype: "LVM2_member" })]), [])).toEqual({ whole: false, volumes: [] });
+  expect(changeable(disk([volume()], { readOnly: true }), [])).toEqual({ whole: false, volumes: [] });
 });
 
 test("mountable: a known file system that is not in use and not a piece of something", () => {

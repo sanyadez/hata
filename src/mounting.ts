@@ -1,8 +1,11 @@
 /**
  * Putting a disk to use: preparing a new one, connecting one that already holds files, taking one out.
  *
- * - **Prepare** erases a whole disk: a GPT table with one partition, ext4, mounted under /mnt and
- *   written to /etc/fstab by UUID with `nofail`, so the server starts without the disk too.
+ * - **Format** erases a whole disk (a new partition table with one partition) or one partition of it
+ *   and makes a file system there: ext4 for a disk that stays — mounted under /mnt and written to
+ *   /etc/fstab by UUID with `nofail`, so the server starts without the disk too — or exFAT, FAT32,
+ *   NTFS for one that goes to other devices. A folder Hata connected is disconnected for it.
+ * - **Check** looks a file system over and mends it; **rename** gives it another label.
  * - **Connect** mounts a file system as it is, without changing it — kept in /etc/fstab, or until the
  *   disk is unplugged (a USB disk).
  * - **Disconnect** unmounts what Hata itself connected and takes its line out of /etc/fstab; a
@@ -20,6 +23,7 @@ import { record } from "./activity";
 import { bus } from "./bus";
 import { DATA_DIR, SECRETS_DIR, saveSettings, settings } from "./config";
 import { connected, diskLabel, type Disk, type Volume } from "./disks";
+import { CHECKERS, checkCommand, checkVerdict, cleanLabel, familyOf, FAT_MAX, FORMATS, FS_NAMES, isFs, labelCommand, LABELLERS, mkfsCommand, partType, tableFor, tableScript, type Fs, type Verdict } from "./format";
 import { isPlainObject, readJsonFile, writeJsonAtomic, writeTextAtomic } from "./fsutil";
 import { installCommand, packageManager, PATH, run } from "./packages";
 
@@ -52,9 +56,19 @@ const FOREIGN_FS = /^(vfat|exfat|ntfs)$/;
 /** A file system Hata can connect as it is: one it knows, not in use, not a piece of something larger */
 export const mountable = (volume: Volume): boolean => (volume.kind === "part" || volume.kind === "disk") && (POSIX_FS.test(volume.fstype) || FOREIGN_FS.test(volume.fstype)) && !volume.mounts.length && !volume.swap;
 
-/** The name of a mount under /mnt, and of the file system's label */
+/**
+ * What of a disk Hata may change: `whole` — format it whole; `volumes` — the file systems that may be
+ * formatted, checked or renamed one by one. A mounted one counts only when Hata itself connected it
+ * (`ours` — those folders): it is disconnected for the work.
+ */
+export function changeable(disk: Disk, ours: string[]): { whole: boolean; volumes: string[] } {
+  if (blockers(disk).some((b) => b !== "mounted")) return { whole: false, volumes: [] };
+  const free = (v: Volume) => v.mounts.every((m) => ours.includes(m));
+  return { whole: disk.volumes.every(free), volumes: disk.volumes.filter(free).map((v) => v.path) };
+}
+
+/** The name of a mount under /mnt */
 export const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$/;
-const LABEL_MAX = 16;
 
 /** A name for a disk nobody named: from its label, or its model */
 export function suggestName(text: string, fallback = "disk"): string {
@@ -294,7 +308,7 @@ const held = (name: string): boolean => {
 };
 
 /** The kernel's own word on whether anything of the disk is in use — asked right before erasing */
-function inUse(disk: Disk): boolean {
+function inUse(disk: { name: string; path: string; volumes: { name: string; path: string }[] }): boolean {
   const devices = [disk.path, ...disk.volumes.map((v) => v.path)];
   const busy = [...mountedAt().values(), ...readText("/proc/swaps").split("\n").slice(1).map((line) => line.split(/\s+/)[0] ?? "")];
   return busy.some((device) => devices.includes(device)) || [disk.name, ...disk.volumes.map((v) => v.name)].some(held);
@@ -355,53 +369,199 @@ async function attach(volume: { path: string; uuid: string; fstype: string }, pa
 
 const partitionPackage = (): string => ({ "apt-get": "fdisk", apk: "sfdisk" })[packageManager()] ?? "util-linux";
 
+const settle = async (): Promise<void> => {
+  if (has("udevadm")) await run(["udevadm", "settle", "--timeout=10"], 15_000);
+};
+// a label in any language reaches the programs as UTF-8
+const UTF8 = { LC_ALL: "C.UTF-8" };
+const usb = (disk: Disk): boolean => disk.removable || disk.transport === "usb";
+const lacks = (error: string, pkg: string): Failure => ({ error, needs: { package: pkg, install: installCommand(pkg) } });
+
+export interface FormatAsk {
+  /** A partition to format alone; "" — the whole disk, under a new partition table */
+  part: string;
+  fs: string;
+  label: string;
+  /** Afterwards: keep — connected from now on; once — until it is unplugged; no — left as it is */
+  connect: string;
+  /** The folder under /mnt, when it is connected */
+  name: string;
+}
+
+/** Tells the partition table what the partition holds now: Windows goes by that, not by the contents */
+async function retype(disk: Disk, part: Volume, fs: Fs): Promise<void> {
+  if (!has("sfdisk")) return;
+  const table = (await run(["blkid", "-p", "-s", "PTTYPE", "-o", "value", disk.path], 15_000)).out.trim();
+  const number = readText(`/sys/class/block/${part.name}/partition`).trim();
+  if ((table !== "gpt" && table !== "dos") || !number) return;
+  await run(["sfdisk", "--no-reread", "--part-type", disk.path, number, partType(table, fs)], 30_000);
+}
+
 /**
- * Erases a disk and makes it Hata's: one partition, ext4, mounted at /mnt/<name> from now on.
- * `seen` is the disk as the person saw it when confirming — a letter that moved to another disk in
- * between must not get that disk erased.
+ * Erases a disk — or one partition of it — and makes a file system there. `seen` is the disk as the
+ * person saw it when confirming — a letter that moved to another disk in between must not get that
+ * disk erased. What Hata had connected of it is disconnected first; what anything else uses is refused.
  */
-export function prepareDisk(name: string, seen: { serial: string; size: number }, label: string, user: string): Promise<Outcome> {
+export function formatDisk(name: string, seen: { serial: string; size: number }, ask: FormatAsk, user: string): Promise<Outcome> {
   return oneAtATime(async () => {
-    if (!NAME_RE.test(label)) return { error: "disk.badName" };
-    const path = join(MOUNT_ROOT, label);
+    if (!isFs(ask.fs)) return { error: "disk.badFs" };
+    const fs = ask.fs;
+    const path = ask.connect === "no" ? "" : join(MOUNT_ROOT, ask.name);
+    if (path && !NAME_RE.test(ask.name)) return { error: "disk.badName" };
+    const label = cleanLabel(fs, ask.label);
     const disk = (await connected()).find((d) => d.name === name);
     if (!disk || !existsSync(disk.path)) return { error: "disk.unknown" };
     if (disk.serial !== seen.serial || disk.size !== seen.size) return { error: "disk.changed" };
-    if (blockers(disk).length || inUse(disk)) return { error: "disk.inUse" };
-    if (!freeFolder(path) || fstab().some((e) => e.path === path)) return { error: "disk.folderTaken" };
+    const part = ask.part ? disk.volumes.find((v) => v.path === ask.part && v.kind === "part") : undefined;
+    if (ask.part && !part) return { error: "disk.unknown" };
+    const can = changeable(disk, Object.keys(oursNow()));
+    if (part ? !can.volumes.includes(part.path) : !can.whole) return { error: "disk.inUse" };
+    if (fs === "vfat" && (part?.size ?? disk.size) > FAT_MAX) return { error: "disk.tooBigForFat" };
     const pkg = partitionPackage();
-    if (!has("sfdisk")) return { error: "disk.noPartitionTool", needs: { package: pkg, install: installCommand(pkg) } };
-    if (!has("mkfs.ext4")) return { error: "disk.noFormatTool", needs: { package: "e2fsprogs", install: installCommand("e2fsprogs") } };
+    if (!part && !has("sfdisk")) return lacks("disk.noPartitionTool", pkg);
+    if (!has(FORMATS[fs].tool)) return lacks("disk.noFormatTool", FORMATS[fs].package);
 
-    const settle = async () => {
-      if (has("udevadm")) await run(["udevadm", "settle", "--timeout=10"], 15_000);
-    };
-    // old signatures first: a file system found again on the new partition would be mounted as it was
-    for (const device of [...disk.volumes.map((v) => v.path), disk.path]) await run(["wipefs", "-a", device], 30_000);
-    const table = await run(["sfdisk", "--wipe", "always", "--wipe-partitions", "always", disk.path], 60_000, {}, "label: gpt\n,,L\n");
-    if (table.code !== 0) return { error: "disk.prepareFailed", message: said(table) };
-    await settle();
-    let part: Volume | undefined;
-    for (let i = 0; i < 20 && !part; i++) {
-      part = (await connected()).find((d) => d.name === name)?.volumes.find((v) => v.kind === "part" && existsSync(v.path));
-      if (!part) await Bun.sleep(500);
+    // what Hata connected of it goes first — unless something of Hata's own lives there
+    const leaving = (part ? [part] : disk.volumes).flatMap((v) => v.mounts);
+    for (const folder of leaving) {
+      const why = keeps(folder);
+      if (why) return { error: why };
     }
-    if (!part) return { error: "disk.prepareFailed", message: "The new partition did not show up." };
-    // -m 0: no blocks kept back for root on a disk that holds data, not the system
-    const made = await run(["mkfs.ext4", "-F", "-q", "-m", "0", "-L", label.slice(0, LABEL_MAX), part.path], 60 * 60_000);
-    if (made.code !== 0) return { error: "disk.prepareFailed", message: said(made) };
+    if (path && !leaving.includes(path) && (!freeFolder(path) || fstab().some((e) => e.path === path))) return { error: "disk.folderTaken" };
+    for (const folder of leaving) {
+      const gone = await release(folder);
+      if ("error" in gone) return gone;
+    }
+    if (inUse(part ? { name: part.name, path: part.path, volumes: [] } : disk)) return { error: "disk.inUse" };
+
+    let target = part;
+    if (target) {
+      await run(["wipefs", "-a", target.path], 30_000);
+      await retype(disk, target, fs);
+    } else {
+      // old signatures first: a file system found again on the new partition would be mounted as it was
+      for (const device of [...disk.volumes.map((v) => v.path), disk.path]) await run(["wipefs", "-a", device], 30_000);
+      const table = await run(["sfdisk", "--wipe", "always", "--wipe-partitions", "always", disk.path], 60_000, {}, tableScript(tableFor(fs, disk.size, usb(disk)), fs));
+      if (table.code !== 0) return { error: "disk.formatFailed", message: said(table) };
+      await settle();
+      for (let i = 0; i < 20 && !target; i++) {
+        target = (await connected()).find((d) => d.name === name)?.volumes.find((v) => v.kind === "part" && existsSync(v.path));
+        if (!target) await Bun.sleep(500);
+      }
+      if (!target) return { error: "disk.formatFailed", message: "The new partition did not show up." };
+    }
+    const legacy = fs === "exfat" && !/exfatprogs/.test(Object.values(await run(["mkfs.exfat", "-V"], 10_000)).join(" "));
+    const made = await run(mkfsCommand(fs, label, target.path, { size: target.size, legacy }), 6 * 60 * 60_000, UTF8);
+    if (made.code !== 0) return { error: "disk.formatFailed", message: said(made) };
+    await run(["sync"], 120_000);
     await settle();
-    const uuid = (await run(["blkid", "-s", "UUID", "-o", "value", part.path], 15_000)).out.trim();
-    if (!uuid) return { error: "disk.prepareFailed", message: "The new file system has no UUID." };
-    const failed = await attach({ path: part.path, uuid, fstype: "ext4" }, path, true);
+    const uuid = (await run(["blkid", "-s", "UUID", "-o", "value", target.path], 15_000)).out.trim();
+    const what = `${part ? part.name + ", " : ""}${diskLabel(disk)} → ${FS_NAMES[fs]}${label ? ` “${label}”` : ""}`;
+    if (!path) {
+      // left as it is: not to be connected by itself the moment it is ready
+      ejected.add(uuid || target.path);
+      record("system.disk.format", { user, detail: what });
+      return { path: "" };
+    }
+    if (!uuid) return { error: "disk.formatFailed", message: "The new file system has no UUID." };
+    const failed = await attach({ path: target.path, uuid, fstype: fs }, path, ask.connect === "keep");
     if (failed) return failed;
     // the apps' own user owns the new disk, as it owns their data: an app can write to it at once
-    try {
-      chownSync(path, settings.puid, settings.pgid);
-      chmodSync(path, 0o775);
-    } catch {}
-    record("system.disk.prepare", { user, detail: `${diskLabel(disk)} → ${path}` });
+    if (fs === "ext4") {
+      try {
+        chownSync(path, settings.puid, settings.pgid);
+        chmodSync(path, 0o775);
+      } catch {}
+    }
+    record("system.disk.format", { user, detail: `${what} → ${path}` });
     return { path };
+  });
+}
+
+/** A file system Hata may check or rename, with the disk it is on */
+async function volumeAt(device: string): Promise<{ volume: Volume; fs: Fs } | Failure> {
+  const disk = (await connected()).find((d) => d.volumes.some((v) => v.path === device));
+  const volume = disk?.volumes.find((v) => v.path === device);
+  if (!disk || !volume || !existsSync(volume.path)) return { error: "disk.unknown" };
+  if (!changeable(disk, Object.keys(oursNow())).volumes.includes(volume.path) || held(volume.name)) return { error: "disk.inUse" };
+  const fs = familyOf(volume.fstype);
+  return fs ? { volume, fs } : { error: "disk.badFs" };
+}
+
+/**
+ * Does something to a file system that must not be mounted meanwhile: a folder Hata connected is taken
+ * down for it and put back as it was. `back` — why it could not be put back.
+ */
+async function paused<T>(volume: Volume, work: () => Promise<T>): Promise<{ done: T; back: string } | Failure> {
+  const folder = volume.mounts[0];
+  if (!folder) return { done: await work(), back: "" };
+  if (volume.mounts.length > 1) return { error: "disk.inUse" };
+  const why = keeps(folder);
+  if (why) return { error: why };
+  const kept = fstab().some((e) => e.ours && e.path === folder);
+  const down = await run(["umount", folder], 120_000);
+  if (down.code !== 0) return { error: "disk.busy", message: said(down) };
+  const done = await work();
+  const type = kept ? "" : await driver(volume.fstype);
+  if (typeof type !== "string") return { done, back: type.error };
+  const up = await run(kept ? ["mount", folder] : ["mount", "-t", type, "-o", optionsFor(volume.fstype, false), volume.path, folder], 60_000);
+  return { done, back: up.code === 0 ? "" : said(up) };
+}
+
+export interface Checked {
+  device: string;
+  verdict: Verdict;
+  /** The last lines of what the program said */
+  output: string;
+  repaired: boolean;
+  /** The folder was disconnected for the check and could not be connected again: why */
+  back: string;
+}
+
+/** Looks a file system over; `repair` — and mends what it finds */
+export function checkVolume(device: string, repair: boolean, user: string): Promise<Checked | Failure> {
+  return oneAtATime(async () => {
+    const found = await volumeAt(device);
+    if ("error" in found) return found;
+    const { volume, fs } = found;
+    if (!has(CHECKERS[fs])) return lacks("disk.noCheckTool", FORMATS[fs].package);
+    const look = async () => {
+      // a large disk takes hours
+      const said = await run(checkCommand(fs, repair, volume.path), 12 * 60 * 60_000);
+      if (fs !== "ntfs" || repair || said.code !== 0 || !has("ntfsinfo")) return said;
+      // ntfsfix does not tell that the volume was not closed properly; ntfsinfo refuses to open such a one
+      const opened = await run(["ntfsinfo", "-m", volume.path], 60_000);
+      return opened.code === 0 ? said : { code: 1, out: said.out, err: (opened.err.trim() || opened.out.trim()).split("\n")[0] ?? "" };
+    };
+    const ran = await paused(volume, look);
+    if ("error" in ran) return ran;
+    const verdict = checkVerdict(fs, repair, ran.done.code);
+    const output = `${ran.done.out}\n${ran.done.err}`.split("\n").map((line) => line.trimEnd()).filter(Boolean).slice(-14).join("\n").slice(-3000);
+    if (repair) record("system.disk.repair", { user, detail: volume.label || volume.path });
+    return { device, verdict, output, repaired: repair, back: ran.back };
+  });
+}
+
+/** Gives a file system another label; the files are not touched */
+export function relabel(device: string, text: string, user: string): Promise<Outcome> {
+  return oneAtATime(async () => {
+    const found = await volumeAt(device);
+    if ("error" in found) return found;
+    const { volume, fs } = found;
+    const label = cleanLabel(fs, text);
+    if (!label) return { error: "disk.badLabel" };
+    if (!has(LABELLERS[fs])) return lacks("disk.noLabelTool", FORMATS[fs].package);
+    const name = () => run(labelCommand(fs, volume.path, label), 60_000, UTF8);
+    // ext4 takes a new label while it is in use; the others have to be let go of
+    const ran = fs === "ext4" ? { done: await name(), back: "" } : await paused(volume, name);
+    if ("error" in ran) return ran;
+    if (ran.done.code !== 0) return { error: "disk.labelFailed", message: said(ran.done) };
+    // a file system in use is not looked at again by itself: lsblk would go on showing the old label
+    if (has("udevadm")) await run(["udevadm", "trigger", "--action=change", volume.path], 15_000);
+    await settle();
+    record("system.disk.label", { user, detail: `${volume.label || volume.name} → ${label}` });
+    if (ran.back) return { error: "disk.mountFailed", message: ran.back };
+    return { path: volume.mounts[0] ?? "" };
   });
 }
 
@@ -473,37 +633,50 @@ async function powerDown(device: string): Promise<void> {
   } catch {}
 }
 
-/** Unmounts a folder Hata connected and forgets it; other mounts of the system are not Hata's to end */
+/** Why a folder cannot be taken away now: what of Hata's stands on it, as an error code; null — nothing */
+function keeps(path: string): string | null {
+  if (Object.values(pools(fstab())).some((branches) => branches.includes(path))) return "disk.holds.pool";
+  // a disk of the array taken away is a disk that failed, as far as the parity knows
+  // (one that is gone already is let go: its replacement takes the same folder)
+  if (mountedAt().has(path) && (settings.snapraid.parity === path || settings.snapraid.data.some((d) => d.path === path))) return "disk.holds.array";
+  const used = holds(path, { dataRoot: settings.dataRoot, backupDir: settings.backup.dir, state: [DATA_DIR, SECRETS_DIR], shares: settings.shares.map((s) => s.path) });
+  return used ? `disk.holds.${used}` : null;
+}
+
+/** Unmounts a folder Hata connected and forgets it; `device` — what was mounted there, if anything was */
+async function release(path: string): Promise<{ device: string | undefined } | Failure> {
+  const kept = fstab().find((e) => e.ours && e.path === path);
+  const index = temporary.findIndex((t) => t.path === path);
+  if (!kept && index < 0) return { error: "disk.notOurs" };
+  const why = keeps(path);
+  if (why) return { error: why };
+  const device = mountedAt().get(path);
+  if (device) {
+    const result = await run(["umount", path], 120_000);
+    if (result.code !== 0) return { error: "disk.busy", message: said(result) };
+  }
+  if (kept) {
+    writeFstab(withoutMount(readText(FSTAB), path));
+    await reload();
+  }
+  if (index >= 0) {
+    temporary.splice(index, 1);
+    save();
+  }
+  await removeFolder(path);
+  return { device };
+}
+
+/** Disconnects a folder Hata connected; other mounts of the system are not Hata's to end */
 export function disconnect(path: string, user: string): Promise<Outcome> {
   return oneAtATime(async () => {
-    const kept = fstab().find((e) => e.ours && e.path === path);
-    const index = temporary.findIndex((t) => t.path === path);
-    if (!kept && index < 0) return { error: "disk.notOurs" };
-    if (Object.values(pools(fstab())).some((branches) => branches.includes(path))) return { error: "disk.holds.pool" };
-    // a disk of the array taken away is a disk that failed, as far as the parity knows
-    // (one that is gone already is let go: its replacement takes the same folder)
-    if (mountedAt().has(path) && (settings.snapraid.parity === path || settings.snapraid.data.some((d) => d.path === path))) return { error: "disk.holds.array" };
-    const used = holds(path, { dataRoot: settings.dataRoot, backupDir: settings.backup.dir, state: [DATA_DIR, SECRETS_DIR], shares: settings.shares.map((s) => s.path) });
-    if (used) return { error: `disk.holds.${used}` };
-    const device = mountedAt().get(path);
-    if (device) {
-      const result = await run(["umount", path], 120_000);
-      if (result.code !== 0) return { error: "disk.busy", message: said(result) };
-    }
-    if (kept) {
-      writeFstab(withoutMount(readText(FSTAB), path));
-      await reload();
-    }
-    if (index >= 0) {
-      temporary.splice(index, 1);
-      save();
-    }
-    await removeFolder(path);
-    if (device) {
+    const gone = await release(path);
+    if ("error" in gone) return gone;
+    if (gone.device) {
       // taken out by hand: not to be connected again by itself while it stays plugged in
-      const volume = (await connected()).flatMap((d) => d.volumes).find((v) => v.path === device);
-      ejected.add(volume?.uuid || device);
-      await powerDown(device);
+      const volume = (await connected()).flatMap((d) => d.volumes).find((v) => v.path === gone.device);
+      ejected.add(volume?.uuid || gone.device);
+      await powerDown(gone.device);
     }
     record("system.disk.disconnect", { user, detail: path });
     return { path };
@@ -680,14 +853,22 @@ export interface MountingReport {
   mergeable: string[];
   /** The disks nothing uses that are said so on top of the page */
   unused: UnusedDisk[];
+  /** Per disk, what may be formatted, checked or renamed (`changeable`) */
+  changeable: Record<string, { whole: boolean; volumes: string[] }>;
+}
+
+/** The folders Hata connected */
+function oursNow(): MountingReport["ours"] {
+  const ours: MountingReport["ours"] = {};
+  for (const entry of fstab()) if (entry.ours) ours[entry.path] = "kept";
+  for (const entry of temporary) ours[entry.path] = "temporary";
+  return ours;
 }
 
 export function mountingReport(disks: Disk[]): MountingReport {
   note(disks);
-  const ours: MountingReport["ours"] = {};
+  const ours = oursNow();
   const lines = fstab();
-  for (const entry of lines) if (entry.ours) ours[entry.path] = "kept";
-  for (const entry of temporary) ours[entry.path] = "temporary";
   return {
     possible: disks.some((d) => existsSync(d.path)),
     automount: settings.storage.automount,
@@ -697,5 +878,6 @@ export function mountingReport(disks: Disk[]): MountingReport {
     pools: pools(lines),
     mergeable: mergeable(lines, [...mountedAt().keys()]),
     unused,
+    changeable: Object.fromEntries(disks.map((d) => [d.name, changeable(d, Object.keys(ours))])),
   };
 }

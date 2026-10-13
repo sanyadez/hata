@@ -33,7 +33,7 @@ import { afterPackage, giveBack, internetTrouble, startNetwork, setCheck, setRol
 import { DOCKER_INSTALL_COMMAND, installDocker, startDocker } from "./dockerinstall";
 import { installOne, removeOne, toolsReport } from "./tools";
 import { ArrayError, arrayReport, arrayTrouble, bringBack, rebuild as rebuildParity, repair as repairArray, scrub as scrubArray, setUp as setUpArray, startSnapraid, stop as stopArray, sync as syncArray, turnOff as turnOffArray } from "./snapraid";
-import { ignoreDisk, unusedDisks, absent, connectVolume, disconnect, mergeFolders, mountingReport, prepareDisk, startMounting, type Outcome } from "./mounting";
+import { ignoreDisk, unusedDisks, absent, connectVolume, disconnect, checkVolume, formatDisk, mergeFolders, mountingReport, relabel, startMounting, type Outcome } from "./mounting";
 import { moveData } from "./movedata";
 import { installPackage } from "./packages";
 import {
@@ -962,11 +962,12 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
   }
 
   // ---- disks and their health ----
-  const storage = async () => {
+  const storage = async (more: Record<string, unknown> = {}) => {
     const listed = await listDisks();
-    return json({ ...listed, fills: fills(), mounting: mountingReport(listed.disks), array: arrayReport() });
+    return json({ ...listed, fills: fills(), mounting: mountingReport(listed.disks), array: arrayReport(), ...more });
   };
-  const changed = (outcome: Outcome) => ("error" in outcome ? fail(400, outcome.error, { message: outcome.message ?? "", ...(outcome.needs ?? {}) }) : storage());
+  const refused = (failure: Extract<Outcome, { error: string }>) => fail(400, failure.error, { message: failure.message ?? "", ...(failure.needs ?? {}) });
+  const changed = (outcome: Outcome) => ("error" in outcome ? refused(outcome) : storage());
   if (path === "/api/disks" && method === "GET") return storage();
   if (path === "/api/disks/check" && method === "POST") {
     // a disk that sleeps takes its time to spin up
@@ -983,20 +984,33 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
   // what a disk action said it lacks, installed by the button next to the reason and the command
   if (path === "/api/disks/package" && method === "POST") {
     const name = (await body(req)).package;
-    if (typeof name !== "string" || !["ntfs-3g", "fdisk", "sfdisk", "util-linux", "e2fsprogs", "mergerfs", "snapraid"].includes(name)) return fail(400, "disk.packageFailed", { message: "not a package Hata installs" });
+    if (typeof name !== "string" || !["ntfs-3g", "fdisk", "sfdisk", "util-linux", "e2fsprogs", "dosfstools", "exfatprogs", "mergerfs", "snapraid"].includes(name)) return fail(400, "disk.packageFailed", { message: "not a package Hata installs" });
     server.timeout(req, 0);
     const message = await installPackage(name);
     if (message) return fail(500, "disk.packageFailed", { message });
     return storage();
   }
   // erasing a disk asks for the password, like everything that cannot be undone by a second click
-  const diskPrepare = /^\/api\/disks\/([A-Za-z0-9_-]+)\/prepare$/.exec(path);
-  if (diskPrepare && method === "POST") {
+  const diskFormat = /^\/api\/disks\/([A-Za-z0-9_-]+)\/format$/.exec(path);
+  if (diskFormat && method === "POST") {
     const data = await body(req);
     if (!(await checkOwnPassword(user, data.password))) return fail(400, "auth.wrongPassword");
     // a large disk takes its time
     server.timeout(req, 0);
-    return changed(await prepareDisk(diskPrepare[1]!, { serial: String(data.serial ?? ""), size: Number(data.size) }, String(data.name ?? ""), user.name));
+    const ask = { part: String(data.part ?? ""), fs: String(data.fs ?? ""), label: String(data.label ?? ""), connect: data.connect === "keep" || data.connect === "once" ? data.connect : "no", name: String(data.name ?? "") };
+    return changed(await formatDisk(diskFormat[1]!, { serial: String(data.serial ?? ""), size: Number(data.size) }, ask, user.name));
+  }
+  // looking a file system over, and mending it: the answer carries what the program said
+  if (path === "/api/disks/fsck" && method === "POST") {
+    const data = await body(req);
+    server.timeout(req, 0);
+    const checked = await checkVolume(String(data.device ?? ""), data.repair === true, user.name);
+    return "error" in checked ? refused(checked) : storage({ checked });
+  }
+  if (path === "/api/disks/label" && method === "POST") {
+    const data = await body(req);
+    server.timeout(req, 0);
+    return changed(await relabel(String(data.device ?? ""), String(data.label ?? ""), user.name));
   }
   if (path === "/api/disks/connect" && method === "POST") {
     const data = await body(req);
