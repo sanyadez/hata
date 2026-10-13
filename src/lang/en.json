@@ -1324,7 +1324,6 @@
   "shares.tool.installing": "Installing…",
   "shares.tool.installed": "Samba is installed.",
   "shares.tool.note": "Sharing needs Samba, which is not installed on this server yet.",
-  "shares.tool.open": "Open Settings → Network folders",
   "files.share": "Share over the network…",
   "files.shareSettings": "Network sharing…",
   "files.sharedMark": "Shared over the network",

@@ -6499,7 +6499,19 @@ async function shareDialog(path) {
   const folder = path.split("/").pop() || "/";
   let dialog;
   if (data.tool === "missing") {
-    dialog = openDialog("confirm", h("h2", null, t("shares.dialog.new", { name: folder })), h("p", { class: "muted" }, t("shares.tool.note")), h("footer", null, closeButton(() => dialog, t("common.cancel")), h("a", { class: "btn primary", href: "#/settings/shares", onclick: () => dialog.close() }, t("shares.tool.open"))));
+    // what, why, the command and the button right here; once installed, the dialog of the folder itself
+    dialog = openDialog(
+      "confirm",
+      h("h2", null, t("shares.dialog.new", { name: folder })),
+      h("p", { class: "muted" }, t("shares.tool.note")),
+      sambaCard(
+        () => {
+          dialog.close();
+          void shareDialog(path);
+        },
+        closeButton(() => dialog, t("common.cancel")),
+      ),
+    );
     return;
   }
   const name = h("input", { value: share?.name ?? "", placeholder: folder, maxLength: 40, spellcheck: false, autocomplete: "off" });
@@ -6551,39 +6563,39 @@ async function shareDialog(path) {
   );
 }
 
+/** What Samba is, what for, the command and the button that installs it (next to a dialog's "Cancel") */
+function sambaCard(done, cancel) {
+  const data = state.shares;
+  const error = h("p", { class: "error", role: "alert" });
+  const install = async (e) => {
+    const el = e.currentTarget;
+    error.textContent = "";
+    el.disabled = true;
+    el.lastChild.textContent = t("shares.tool.installing");
+    try {
+      setShares(await api("POST", "/api/shares/tool", {}));
+      toast(t("shares.tool.installed"));
+      done?.();
+    } catch (err) {
+      el.disabled = false;
+      el.lastChild.textContent = t("shares.tool.install");
+      error.textContent = errorText(err);
+    }
+  };
+  return [
+    h("p", { class: "muted" }, t("shares.tool.what")),
+    h("p", { class: "muted" }, t("shares.tool.why")),
+    data.install ? [h("p", { class: "muted" }, t("shares.tool.how")), h("p", { class: "cmd whole" }, icon("terminal"), data.install)] : h("p", { class: "muted" }, t("shares.tool.byHand")),
+    error,
+    (cancel || data.install) && h("footer", null, cancel, data.install && button(t("shares.tool.install"), { class: "primary", onclick: install }, "download")),
+  ];
+}
+
 function sharesSection() {
   const data = state.shares;
   if (!data) return [h("p", { class: "muted" }, "…")];
   const error = h("p", { class: "error", role: "alert" });
-  if (data.tool === "missing") {
-    const install = async (e) => {
-      const el = e.currentTarget;
-      error.textContent = "";
-      el.disabled = true;
-      el.lastChild.textContent = t("shares.tool.installing");
-      try {
-        setShares(await api("POST", "/api/shares/tool", {}));
-        toast(t("shares.tool.installed"));
-      } catch (err) {
-        el.disabled = false;
-        el.lastChild.textContent = t("shares.tool.install");
-        error.textContent = errorText(err);
-      }
-    };
-    return [
-      h(
-        "section",
-        { class: "card pad" },
-        h("h2", null, t("shares.tool.missing")),
-        h("p", { class: "muted" }, t("shares.lead")),
-        h("p", { class: "muted" }, t("shares.tool.what")),
-        h("p", { class: "muted" }, t("shares.tool.why")),
-        data.install ? [h("p", { class: "muted" }, t("shares.tool.how")), h("p", { class: "cmd" }, icon("terminal"), data.install)] : h("p", { class: "muted" }, t("shares.tool.byHand")),
-        error,
-        data.install && h("footer", null, button(t("shares.tool.install"), { class: "primary", onclick: install }, "download")),
-      ),
-    ];
-  }
+  if (data.tool === "missing") return [h("section", { class: "card pad" }, h("h2", null, t("shares.tool.missing")), h("p", { class: "muted" }, t("shares.lead")), sambaCard())];
   const host = data.hosts[0] ?? location.hostname;
   const taken = data.shares.map((share) => share.path);
   const add = () => folderPicker({ title: t("shares.addTitle"), start: "", confirmLabel: t("shares.addHere"), allowed: (at) => !taken.includes(at), action: (at) => void setTimeout(() => shareDialog(at)) });

@@ -1324,7 +1324,6 @@
   "shares.tool.installing": "Встановлення…",
   "shares.tool.installed": "Samba встановлено.",
   "shares.tool.note": "Для спільних тек потрібна Samba, а на цьому сервері її ще не встановлено.",
-  "shares.tool.open": "Відкрити «Налаштування → Мережеві теки»",
   "files.share": "Відкрити в мережі…",
   "files.shareSettings": "Доступ у мережі…",
   "files.sharedMark": "Відкрито в мережі",
