@@ -47,8 +47,11 @@ export function domainOf(host: string): string {
 /** The label of an app's subdomain: app names may hold `_`, host names may not */
 export const appLabel = (name: string): string => name.replace(/_/g, "-");
 
+/** The label an app answers to: the one chosen for it, or the one its name gives */
+export const labelOf = (app: { name: string; subdomain?: string }): string => app.subdomain || appLabel(app.name);
+
 /** The address of an app under the domain */
-export const appHost = (name: string): string => `${appLabel(name)}.${siteDomain()}`;
+export const appHost = (app: { name: string; subdomain?: string }): string => `${labelOf(app)}.${siteDomain()}`;
 
 /**
  * What a host name means: Hata itself, the subdomain of an app (its label is returned — which app it is,

@@ -167,6 +167,17 @@ test("the fields of a service", () => {
   expect(edit((form) => (form.services[0]!.command = ["nginx -T"])).compose.services.web.command).toBe("nginx -T");
 });
 
+test("the name under the domain: one label, kept in x-casaos, left alone by a form that does not send it", () => {
+  const named = edit((form) => (form.web.domain = "DB"));
+  expect(named.error).toBeNull();
+  expect(named.compose["x-casaos"].subdomain).toBe("db");
+  expect(appMeta(named.compose, "en").subdomain).toBe("db");
+  expect(readEdit(named.compose, "en").web.domain).toBe("db");
+  for (const bad of ["a.b", "-x", "x-", "my app", "кіно", "x".repeat(64)]) expect(edit((form) => (form.web.domain = bad)).error).toBe("edit.badDomain");
+  expect(edit((form) => (form.web.domain = "")).compose["x-casaos"].subdomain).toBeUndefined();
+  expect(appMeta({ services: {}, "x-casaos": { subdomain: "a.b" } }, "en").subdomain).toBe("");
+});
+
 test("title, icon and the web UI go into x-casaos; a typed title wins in every language", () => {
   const { error, compose } = edit((form) => Object.assign(form, { title: "My site", icon: "", web: { scheme: "https", host: "nas.lan", port: "8443", path: "ui" } }));
   expect(error).toBeNull();

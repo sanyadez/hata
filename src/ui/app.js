@@ -727,7 +727,7 @@ function appIcon(app, size = "") {
 function appDomain(app) {
   const site = state.overview?.site;
   const domain = [site?.domain, site?.local].find((name) => name && location.hostname === name);
-  return domain && !app.hostname ? `${app.name.replace(/_/g, "-")}.${domain}` : null;
+  return domain && !app.hostname ? `${app.subdomain || app.name.replace(/_/g, "-")}.${domain}` : null;
 }
 
 function appUrl(app) {
@@ -2105,11 +2105,22 @@ function appSettingsForm(model, memoryTotal, app, installed) {
   const iconField_ = iconField(model, app);
   const iconUrl = iconField_.url;
   const scheme = choice(model.web.scheme, [["http", "http://"], ["https", "https://"]], t("edit.webUi"));
-  const host = h("input", { value: model.web.host, spellcheck: false, autocapitalize: "none", class: "mono", placeholder: location.hostname, "aria-label": t("edit.webHost") });
+  const host = h("input", { value: model.web.host, spellcheck: false, autocapitalize: "none", class: "mono", placeholder: t("edit.webHostHere"), "aria-label": t("edit.webHost") });
   const port = h("input", { value: model.web.port, inputMode: "numeric", class: "short mono", placeholder: t("edit.port"), "aria-label": t("edit.port") });
   const path = h("input", { value: model.web.path, spellcheck: false, autocapitalize: "none", class: "mono", placeholder: "/", "aria-label": t("edit.webPath") });
-  // opened by Hata's domain, the app has a name of its own there and the fields say where that name leads
-  const named = installed && appDomain(installed) ? appUrl(installed) : null;
+  // under Hata's domain and its name on the home network the app has a name of its own, which can be chosen
+  const domains = [state.overview?.site?.domain, state.overview?.site?.local].filter(Boolean);
+  const usual = (app ?? "").replace(/_/g, "-");
+  const domain = h("input", { value: model.web.domain ?? "", spellcheck: false, autocapitalize: "none", class: "mono", maxLength: 63, placeholder: usual || t("edit.webDomainUsual"), "aria-label": t("edit.webDomain") });
+  const domainHint = h("span", { class: "muted small" });
+  const sayDomain = () => {
+    const label = domain.value.trim().toLowerCase() || usual;
+    const names = domains.map((name) => `${label || "…"}.${name}`).join(", ");
+    domainHint.textContent = t(installed?.hostname || host.value.trim() ? "edit.webDomainElsewhere" : "edit.webDomainHint", { names });
+  };
+  domain.addEventListener("input", sayDomain);
+  host.addEventListener("input", sayDomain);
+  sayDomain();
   // the services are tabs: one is added by name, the one shown can be taken out
   const services = model.services.map((service) => ({ name: service.name, form: serviceForm(service, memoryTotal) }));
   let shown = 0;
@@ -2162,12 +2173,13 @@ function appSettingsForm(model, memoryTotal, app, installed) {
       h("datalist", { id: "capabilities" }, CAPABILITIES.map((cap) => h("option", { value: cap }))),
       formRow(t("edit.title"), title),
       iconField_.el,
-      formRow(t("edit.webUi"), h("span", { class: "web-address" }, scheme, host, h("span", { class: "muted" }, ":"), port, path), [t("edit.webUiHint"), named && [" ", t("edit.webUiDomain"), " ", h("a", { class: "link", href: named, target: "_blank", rel: "noopener" }, named.replace(/\/$/, ""))]]),
+      formRow(t("edit.webUi"), h("span", { class: "web-address" }, scheme, host, h("span", { class: "muted" }, ":"), port, path), t("edit.webUiHint")),
+      domains.length > 0 && h("label", { class: "form-row" }, h("span", { class: "form-label" }, t("edit.webDomain")), h("span", { class: "form-control" }, h("span", { class: "web-address" }, domain, h("span", { class: "muted mono" }, "." + domains[0])), domainHint)),
       h("div", { class: "form-row services-row" }, h("span", { class: "form-label" }, t("edit.services")), tabs),
       body,
     ),
     pickedIcon: () => iconField_.picked,
-    value: () => ({ title: title.value, icon: iconUrl.value, web: { scheme: scheme.value, host: host.value, port: port.value, path: path.value }, services: services.map((service) => ({ name: service.name, ...service.form.value() })) }),
+    value: () => ({ title: title.value, icon: iconUrl.value, web: { scheme: scheme.value, host: host.value, port: port.value, path: path.value, domain: domain.value.trim().toLowerCase() === usual ? "" : domain.value.trim() }, services: services.map((service) => ({ name: service.name, ...service.form.value() })) }),
   };
 }
 

@@ -222,7 +222,7 @@ export function installedNames(): string[] {
 
 export type AppStatus = "running" | "partial" | "stopped" | "unknown";
 
-export interface InstalledApp extends Pick<AppMeta, "title" | "icon" | "port" | "index" | "scheme" | "hostname"> {
+export interface InstalledApp extends Pick<AppMeta, "title" | "icon" | "port" | "index" | "scheme" | "hostname" | "subdomain"> {
   name: string;
   status: AppStatus;
   /** Store the app came from; "" — a custom app */
@@ -272,6 +272,7 @@ function describeApp(name: string, containers: ContainerSummary[] | null, lang: 
     index: meta.index,
     scheme: meta.scheme,
     hostname: meta.hostname,
+    subdomain: meta.subdomain,
     status: containers === null ? "unknown" : running === 0 ? "stopped" : running === own.length ? "running" : "partial",
     store: recordedStore(name, compose),
     update: planStoreUpdate(name) !== null,
@@ -656,19 +657,34 @@ function editedCompose(compose: Compose, input: unknown, lang: string): Compose 
   return compose;
 }
 
+/** A name under the domain belongs to one app: the one chosen here must not be another app's */
+function assertLabelFree(name: string, compose: Compose): void {
+  const label = appMeta(compose, "en").subdomain;
+  if (!label) return;
+  for (const other of installedNames()) {
+    if (other === name) continue;
+    const theirs = readCompose(other);
+    if (((theirs && appMeta(theirs, "en").subdomain) || other.replace(/_/g, "-")) === label) throw new AppError("edit.domainTaken", 409, { app: other });
+  }
+}
+
 /** Applies the settings form: the answers go into the compose file, which is then applied as if edited by hand */
 export function applySettings(name: string, input: unknown, user: string, lang: string): Job {
   assertInstalled(name);
   const compose = structuredClone(readCompose(name));
   if (!compose) throw new AppError("app.badCompose", 409, { message: "" });
-  return applyCompose(name, dumpCompose(editedCompose(compose, input, lang)), user);
+  const edited = editedCompose(compose, input, lang);
+  assertLabelFree(name, edited);
+  return applyCompose(name, dumpCompose(edited), user);
 }
 
 /** Installs an app described in the settings form instead of a compose file */
 export async function installFromSettings(name: unknown, input: unknown, user: string, lang: string): Promise<Job> {
   assertName(typeof name === "string" ? name : "");
   if (existsSync(appDir(name as string))) throw new AppError("app.exists", 409);
-  return installCustom(name, dumpCompose(editedCompose(blankCompose(name as string), input, lang)), user);
+  const edited = editedCompose(blankCompose(name as string), input, lang);
+  assertLabelFree(name as string, edited);
+  return installCustom(name, dumpCompose(edited), user);
 }
 
 /** Removes the app; `withData` also deletes its named volumes and `<dataRoot>/AppData/<name>` */

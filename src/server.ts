@@ -1506,7 +1506,8 @@ const INSTANCE = crypto.randomUUID();
 /** A request for `<app>.<domain>`: the app itself, behind sign-in if the app asks for it */
 async function serveApp(req: Request, server: Server, label: string): Promise<Response> {
   const apps = await listApps("en");
-  const app = apps.find((a) => appLabel(a.name) === label);
+  // a name chosen for an app wins over a name another app merely has
+  const app = apps.find((a) => a.subdomain === label) ?? apps.find((a) => !a.subdomain && appLabel(a.name) === label);
   if (!app) return page(404, "No such app", `Nothing is installed at ${requestHost(req)}.`);
   const access = accessOf(app.name);
   const upstream = access.protect && access.upstream ? access.upstream : Number(app.port);
@@ -1533,7 +1534,7 @@ async function httpsNames(): Promise<string[]> {
   const domain = siteDomain();
   if (settings.https.mode !== "acme" || !domain) return [];
   const apps = await listApps("en");
-  return [domain, ...apps.filter((app) => app.port).map((app) => appHost(app.name))];
+  return [domain, ...apps.filter((app) => app.port).map((app) => appHost(app))];
 }
 
 /** (Re)starts the HTTPS listener with the certificates there are; without any, there is nothing to serve */

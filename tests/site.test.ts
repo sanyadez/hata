@@ -25,7 +25,8 @@ test("with a domain, one label under it is an app", () => {
   expect(classifyHost("evilhome.example.com")).toEqual({ kind: "hata" });
   expect(classifyHost("192.168.1.20")).toEqual({ kind: "hata" });
   expect(appLabel("big_bear_app")).toBe("big-bear-app");
-  expect(appHost("big_bear_app")).toBe("big-bear-app.home.example.com");
+  expect(appHost({ name: "big_bear_app" })).toBe("big-bear-app.home.example.com");
+  expect(appHost({ name: "big_bear_app", subdomain: "bear" })).toBe("bear.home.example.com");
   expect(cookieDomain("home.example.com")).toBe("home.example.com");
   expect(cookieDomain("memos.home.example.com")).toBe("home.example.com");
   // reached by address: the cookie stays with that address

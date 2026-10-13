@@ -141,6 +141,8 @@ export interface AppMeta {
   scheme: string;
   /** Host of the web UI when it is not this machine */
   hostname: string;
+  /** The app's own name under Hata's domain (`<subdomain>.<domain>`); "" — the app's name */
+  subdomain: string;
   /** Text the store asks to show before installing (markdown) */
   tips: string;
   website: string;
@@ -148,6 +150,9 @@ export interface AppMeta {
 
 const str = (v: unknown): string => (typeof v === "string" ? v : typeof v === "number" ? String(v) : "");
 const httpUrl = (v: unknown): string => (typeof v === "string" && /^https?:\/\//i.test(v) ? v : "");
+
+/** One label of a host name */
+export const SUBDOMAIN_RE = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
 
 export function appMeta(compose: Compose, lang: string): AppMeta {
   const x: Compose = isObject(compose["x-casaos"]) ? compose["x-casaos"] : {};
@@ -167,6 +172,7 @@ export function appMeta(compose: Compose, lang: string): AppMeta {
     index: index.startsWith("/") ? index : "/" + index,
     scheme: str(x.scheme) === "https" ? "https" : "http",
     hostname: /^[a-z0-9.-]+$/i.test(str(x.hostname)) ? str(x.hostname) : "",
+    subdomain: SUBDOMAIN_RE.test(str(x.subdomain)) ? str(x.subdomain) : "",
     tips: localize(isObject(x.tips) ? x.tips.before_install : undefined, lang),
     website: httpUrl(x.website),
   };

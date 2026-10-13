@@ -8,7 +8,7 @@
  * row remembers which entry it came from (`from`); an entry the form cannot show (a port range, a
  * `tmpfs` mount) travels as `raw` text and can only be kept or taken out. Pure and tested.
  */
-import { localize, type Compose } from "./appform";
+import { localize, SUBDOMAIN_RE, type Compose } from "./appform";
 
 const isObject = (v: unknown): v is Record<string, any> => typeof v === "object" && v !== null && !Array.isArray(v);
 const str = (v: unknown): string => (typeof v === "string" ? v : typeof v === "number" || typeof v === "boolean" ? String(v) : "");
@@ -58,8 +58,11 @@ export interface ServiceEdit {
 export interface AppEdit {
   title: string;
   icon: string;
-  /** Where the tile of the app leads; `port` "" — the app has no page */
-  web: { scheme: string; host: string; port: string; path: string };
+  /**
+   * Where the tile of the app leads; `port` "" — the app has no page. `domain` is the app's own name
+   * under Hata's domain (`<domain>.<Hata's domain>`); "" — the app's name.
+   */
+  web: { scheme: string; host: string; port: string; path: string; domain: string };
   services: ServiceEdit[];
 }
 
@@ -151,7 +154,7 @@ export function readService(name: string, service: Compose): ServiceEdit {
 
 function readWeb(x: Compose): AppEdit["web"] {
   const path = str(x.index) || "/";
-  return { scheme: str(x.scheme) === "https" ? "https" : "http", host: str(x.hostname), port: str(x.port_map), path: path.startsWith("/") ? path : "/" + path };
+  return { scheme: str(x.scheme) === "https" ? "https" : "http", host: str(x.hostname), port: str(x.port_map), path: path.startsWith("/") ? path : "/" + path, domain: SUBDOMAIN_RE.test(str(x.subdomain)) ? str(x.subdomain) : "" };
 }
 
 export function readEdit(compose: Compose, lang: string): AppEdit {
@@ -353,7 +356,10 @@ export function applyEdit(compose: Compose, input: unknown, lang: string): strin
   const title = cleanText(input.title);
   const icon = cleanText(input.icon);
   if (title === null || icon === null || (icon !== "" && !/^https?:\/\/\S+$/i.test(icon))) return "edit.badIcon";
-  const web = { scheme: input.web.scheme === "https" ? "https" : "http", host: cleanText(input.web.host), port: cleanText(input.web.port), path: cleanText(input.web.path) };
+  // a form that does not know the field leaves the name as it is
+  const domain = input.web.domain === undefined ? before.web.domain : cleanText(input.web.domain)?.toLowerCase();
+  if (domain === null || domain === undefined || (domain !== "" && !SUBDOMAIN_RE.test(domain))) return "edit.badDomain";
+  const web = { scheme: input.web.scheme === "https" ? "https" : "http", host: cleanText(input.web.host), port: cleanText(input.web.port), path: cleanText(input.web.path), domain };
   if (web.host === null || web.port === null || web.path === null || !/^[a-z0-9.-]*$/i.test(web.host) || (web.port !== "" && !validPort(web.port)) || /\s/.test(web.path)) return "edit.badWeb";
   web.path = web.path.startsWith("/") ? web.path : "/" + web.path;
 
@@ -367,6 +373,7 @@ export function applyEdit(compose: Compose, input: unknown, lang: string): strin
     if (web.host !== before.web.host) setOrDelete(x, "hostname", web.host);
     if (web.port !== before.web.port) setOrDelete(x, "port_map", web.port);
     if (web.path !== before.web.path) x.index = web.path;
+    if (web.domain !== before.web.domain) setOrDelete(x, "subdomain", web.domain);
   }
 
   // the services of the form are the services of the app: one that is not listed is taken out, a new one is made
