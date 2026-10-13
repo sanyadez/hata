@@ -224,6 +224,10 @@ Early development. What works today:
   or replaces a compose file then waits until an administrator allows it — on Hata's page or from the
   notification. A connector with nowhere to paste a key signs in instead (OAuth): it is given the
   server's address, and an administrator says in Hata what it may do;
+- an assistant on Hata's own pages: ask in your own words why an app is down or what fills the disk, and
+  it looks with the same tools and acts — what only looks runs at once, every change is shown first
+  and waits for "Run". The model is yours to name: the API of a provider you have a key for, or a model
+  on your own machine;
 - updates of Hata itself from the web UI: a newer release is downloaded, checked against its checksums and
   started; if it does not come up, the previous version is put back by itself. Apps keep running meanwhile;
 - the whole history of what happened on the server and who did it, by day, with a search;

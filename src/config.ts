@@ -29,7 +29,7 @@ if (stateIsMissing(DATA_DIR)) {
 mkdirSync(DATA_DIR, { recursive: true, mode: 0o700 });
 
 /** What must not be read by anyone but Hata: password hashes, sessions, keys, tokens */
-export const SECRET_NAMES = ["users.json", "sessions.json", "setup-token", "invites.json", "notify.json", "certs", "backup-remote.json", "backup-key", "backup-key.pub", "backup-known-hosts", "agents.json", "oauth.json"];
+export const SECRET_NAMES = ["users.json", "sessions.json", "setup-token", "invites.json", "notify.json", "certs", "backup-remote.json", "backup-key", "backup-key.pub", "backup-known-hosts", "agents.json", "oauth.json", "assistant.json", "assistant-chats.json"];
 
 /**
  * Where the secrets lie. For the installed service that is `/etc/hata`, whatever the configuration

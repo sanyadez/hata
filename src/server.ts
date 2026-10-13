@@ -15,6 +15,7 @@ import { recent, record, history } from "./activity";
 import { agentUser, cannotGrant, createKey, grantKey, keyOf, listKeys, removeKey, renewTokens, setConfirm } from "./agents";
 import type { Level } from "./agents";
 import { Desk } from "./approvals";
+import { answerCall, assistantConfig, configured as assistantReady, findChat, listChats, ModelError, modelsFor, removeChat, retry as retryAssistant, say as sayToAssistant, shownChat, shownConfig as shownAssistant, stopChat, updateAssistant } from "./assistant";
 import { AppError, appAction, installedNames, jobFinished, appEnv, appDetail, appLogs, appIcon, appSettings, appStats, applyCompose, ICON_MIME, MAX_ICON, removeAppIcon, setAppIcon, applySettings, installFromSettings, applyStoreUpdate, composeText, getJob, installCustom, installFromStore, listApps, listJobs, onAppRemoved, planStoreUpdate, readCompose, removeApp, storeAppDetail } from "./apps";
 import { certificateStates, challengeResponse, ensureCertificates, loadCertificates } from "./acme";
 import { attention } from "./attention";
@@ -645,6 +646,43 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
     return json({ ok: true });
   }
 
+  // ---- the assistant: a chat with a model that works with the tools of the MCP server (`assistant.ts`) ----
+  if (path === "/api/assistant" && method === "GET") return json({ config: shownAssistant(), chats: listChats(user.id) });
+  if (path === "/api/assistant/config" && method === "PUT") {
+    const error = updateAssistant(await body(req));
+    if (error) return fail(400, error);
+    record("assistant.config", { user: user.name });
+    return json({ config: shownAssistant() });
+  }
+  if (path === "/api/assistant/models" && method === "POST") {
+    try {
+      return json({ models: await modelsFor(await body(req)) });
+    } catch (e) {
+      if (e instanceof ModelError) return fail(502, "assistant." + e.code, { message: e.message });
+      throw e;
+    }
+  }
+  const assistantHost = { tools: TOOLS, instructions: mcpInstructions };
+  if (path === "/api/assistant/chats" && method === "POST") {
+    const chat = sayToAssistant(user, null, (await body(req)).text, assistantHost);
+    return typeof chat === "string" ? fail(400, chat) : json(shownChat(chat), 201);
+  }
+  const talk = /^\/api\/assistant\/chats\/([0-9a-f-]{36})(?:\/(stop|calls\/([\w-]{1,120})))?$/.exec(path);
+  if (talk) {
+    const [, chatId, sub, callId] = talk;
+    if (!sub && method === "GET") {
+      const chat = findChat(user.id, chatId!);
+      return chat ? json(shownChat(chat)) : fail(404, "assistant.noChat");
+    }
+    if (!sub && method === "DELETE") return removeChat(user.id, chatId!) ? json({ ok: true }) : fail(404, "assistant.noChat");
+    if (method === "POST") {
+      if (sub === "stop") return stopChat(user.id, chatId!) ? json({ ok: true }) : fail(404, "assistant.noChat");
+      const data = await body(req);
+      const chat = callId ? answerCall(user.id, chatId!, callId, data.run === true, assistantHost) : data.retry === true ? retryAssistant(user.id, chatId!, assistantHost) : sayToAssistant(user, chatId!, data.text, assistantHost);
+      return typeof chat === "string" ? fail(chat === "assistant.noChat" ? 404 : 409, chat) : json(shownChat(chat));
+    }
+  }
+
   // ---- a connector that signs in: the question put to the administrator (`oauth.ts`) ----
   const connect = /^\/api\/oauth\/requests\/([0-9a-f-]{36})$/.exec(path);
   if (connect) {
@@ -700,6 +738,8 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
       arch: ARCH,
       // with a domain, apps are opened at <label>.<domain> when Hata itself is opened by that domain
       site: { domain: siteDomain(), mode: settings.https.mode, local: localDomain() },
+      // whether the assistant can be asked: the pages offer it next to what is wrong
+      assistant: admin && assistantReady(assistantConfig()),
       attention: admin ? attention({ system, docker, apps, activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), array: arrayTrouble(), unused: unusedDisks() }) : [],
       // who signed in from where, and what was installed by whom, is the administrators' business
       activity: admin ? recent(8) : [],

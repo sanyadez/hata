@@ -75,6 +75,7 @@ const ICONS = {
   share: "M18 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM6 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM18 22a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM8.6 13.5l6.8 4M15.4 6.5l-6.8 4",
   link: "M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1",
   key: "M8 16a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM12 12h9M18 12v3M21 12v2",
+  chat: "M4 5h16v11h-9l-5 4v-4H4zM8 9h8M8 12h5",
 };
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -267,6 +268,7 @@ const state = {
   invites: null,
   agents: null,
   approvals: null,
+  assistant: null,
   access: null,
   signIns: null,
   backups: null,
@@ -384,6 +386,8 @@ function startEvents() {
         if (state.route.view === "settings" && state.route.section === "storage") setDisks(await api("GET", "/api/disks").catch(() => state.disks));
         else if (state.route.view === "files") void loadFiles?.();
       }, 1200);
+    } else if (event.type === "assistant") {
+      assistantEvent(event);
     } else if (event.type === "approvals") {
       void loadApprovals();
     } else if (event.type === "network") {
@@ -604,6 +608,8 @@ function navLinks(className) {
 async function signOut() {
   await api("POST", "/api/logout", {}).catch(() => {});
   state.user = null;
+  closeAssistant();
+  assistantUi.chat = null;
   stopEvents();
   leaveView();
   render();
@@ -679,7 +685,7 @@ function shell(...content) {
       { class: "top" },
       h("a", { class: "brand", href: "#/" }, logo(), "hata"),
       h("nav", { class: "nav" }, navLinks("nav-link")),
-      h("div", { class: "top-right" }, globalSearch(), isAdmin() && h("a", { class: "icon-btn top-tool" + (state.route.view === "terminal" ? " active" : ""), href: "#/terminal", title: t("terminal.title"), "aria-label": t("terminal.title") }, icon("terminal")), h("button", { type: "button", class: "user", onclick: userMenu }, h("span", { class: "avatar" }, state.user.name.slice(0, 1).toUpperCase()), h("span", { class: "user-name" }, state.user.name))),
+      h("div", { class: "top-right" }, globalSearch(), isAdmin() && h("button", { type: "button", class: "icon-btn top-tool", title: t("assistant.title"), "aria-label": t("assistant.title"), onclick: () => (assistantUi.open ? closeAssistant() : openAssistant()) }, icon("chat")), isAdmin() && h("a", { class: "icon-btn top-tool" + (state.route.view === "terminal" ? " active" : ""), href: "#/terminal", title: t("terminal.title"), "aria-label": t("terminal.title") }, icon("terminal")), h("button", { type: "button", class: "user", onclick: userMenu }, h("span", { class: "avatar" }, state.user.name.slice(0, 1).toUpperCase()), h("span", { class: "user-name" }, state.user.name))),
     ),
     h("main", { id: "view" }, content),
     h("nav", { class: "bottom-bar" }, navLinks("bottom-link")),
@@ -1398,6 +1404,7 @@ function attentionItem(item) {
   const base = "attention." + item.code;
   // a button that does the thing sits under the words: beside them it leaves the words a narrow column
   const below = [
+    item.app && isAdmin() && assistantReady() && button(t("assistant.askWhy"), { class: "small", onclick: () => openAssistant({ ask: t("assistant.whyDown", { title: item.detail.title || item.app, app: item.app }) }) }, "chat"),
     item.code === "docker.missing" && isAdmin() && button(t("docker.install"), { class: "small primary", onclick: () => dockerDialog() }, "download"),
     item.code === "docker.stopped" && isAdmin() && dockerStartButton(),
     item.code === "disk.usb" && isAdmin() && button(t("copyin.button"), { class: "small primary", onclick: () => ((state.copyInFrom = item.detail.id), go("#/settings/storage")) }, "download"),
@@ -1477,7 +1484,7 @@ function activityItem(entry, when) {
   const failed = outcome === "failed";
   const key = "activity." + entry.code;
   const title = state.overview?.apps.find((a) => a.name === entry.app)?.title ?? entry.app ?? "";
-  const meta = [typeof when === "string" ? when : ago(entry.ts), entry.user && group !== "auth" ? (entry.user === "schedule" ? t("activity.bySchedule") : entry.user === "restore" ? t("activity.byRestore") : entry.user.startsWith("agent:") ? t("activity.byAgent", { name: entry.user.slice(6) }) : t("activity.by", { user: entry.user })) : null, group === "auth" ? entry.detail : null].filter(Boolean).join(" · ");
+  const meta = [typeof when === "string" ? when : ago(entry.ts), entry.user && group !== "auth" ? (entry.user === "schedule" ? t("activity.bySchedule") : entry.user === "restore" ? t("activity.byRestore") : entry.user.startsWith("agent:") ? t("activity.byAgent", { name: entry.user.slice(6) }) : entry.user.startsWith("assistant:") ? t("activity.byAssistant", { user: entry.user.slice(10) }) : t("activity.by", { user: entry.user })) : null, group === "auth" ? entry.detail : null].filter(Boolean).join(" · ");
   return h(
     "div",
     { class: "activity-item" },
@@ -1694,6 +1701,7 @@ function appMoreMenu(app) {
   dialog = openDialog(
     "menu",
     h("header", null, appIcon(app), h("div", null, h("h2", null, app.title), stateChip(app))),
+    assistantReady() && h("button", { type: "button", class: "menu-item", onclick: () => (dialog.close(), openAssistant({ draft: t("assistant.aboutApp", { title: app.title, app: app.name }) })) }, icon("chat"), t("assistant.ask")),
     item(t("app.update"), "up", () => startAction(app, "update")),
     item(t("app.remove"), "trash", () => removeDialog(app), "danger"),
   );
@@ -1725,6 +1733,7 @@ function renderAppHead() {
         app.job && button(t("status.busy"), { onclick: () => jobDialog(app.job.id, app.job.kind, app.title) }, "terminal"),
         app.update && !app.job && button(t("app.storeUpdate"), { class: "accent", onclick: () => storeUpdateDialog(app) }, "up"),
         !app.update && app.newer?.length > 0 && !app.job && button(t("app.update"), { class: "accent", title: `${t("app.newer")}: ${app.newer.join(", ")}`, onclick: () => startAction(app, "update") }, "up"),
+        (app.status === "partial" || app.status === "restarting") && assistantReady() && button(t("assistant.askWhy"), { onclick: () => openAssistant({ ask: t("assistant.whyDown", { title: app.title, app: app.name }) }) }, "chat"),
         isUp(app) && button(t("app.restart"), { disabled: !!app.job, onclick: () => startAction(app, "restart") }, "refresh"),
         isUp(app) ? button(t("app.stop"), { disabled: !!app.job, onclick: () => startAction(app, "stop") }, "stop") : button(t("app.start"), { class: url ? "" : "primary", disabled: !!app.job, onclick: () => startAction(app, "start") }, "play"),
         url && h("a", { class: "btn primary", href: url, target: "_blank", rel: "noopener noreferrer" }, icon("external"), h("span", null, t("app.open"))),
@@ -4008,6 +4017,7 @@ async function loadSettings() {
     if (isAdmin() && state.route.section === "storage") state.disks = await api("GET", "/api/disks").catch(() => null);
     if (isAdmin() && state.route.section === "shares") state.shares = await api("GET", "/api/shares").catch(() => null);
     if (isAdmin() && state.route.section === "agents") state.agents = await api("GET", "/api/agents").catch(() => null);
+    if (isAdmin() && state.route.section === "assistant") state.assistant = await api("GET", "/api/assistant").catch(() => null);
     if (!state.store && isAdmin()) state.store = await api("GET", `/api/store?lang=${state.lang}`).catch(() => null);
   } catch (e) {
     return toast(errorText(e), "error");
@@ -4028,6 +4038,7 @@ const SECTIONS = [
   { id: "https", icon: "lock", admin: true },
   { id: "notifications", icon: "bell", admin: true },
   { id: "agents", icon: "key", admin: true },
+  { id: "assistant", icon: "chat", admin: true },
   { id: "tools", icon: "terminal", admin: true },
   { id: "about", icon: "info" },
 ];
@@ -4261,6 +4272,7 @@ function settingsSection(section) {
   if (section === "network") return networkSection();
   if (section === "tools") return toolsSection();
   if (section === "agents") return agentsSection();
+  if (section === "assistant") return assistantSection();
   if (section === "stores") {
     const stores = state.store?.stores ?? [];
     return [
@@ -6377,6 +6389,294 @@ function agentKeyDialog(made) {
     field(t("agents.made.config"), copyBox(config, 11), t("agents.made.configHint")),
     h("footer", null, button(t("agents.made.done"), { class: "primary", onclick: () => dialog.close() })),
   );
+}
+
+// --- The assistant: a chat with a model that works with Hata's tools --------------------------------
+
+const assistantUi = { open: false, panel: null, config: null, chats: [], chat: null, timer: 0 };
+const assistantReady = () => !!state.overview?.assistant;
+
+/** A model's answer as elements: paragraphs, lists, code, bold — built from text, never as markup */
+function mdInline(text) {
+  const out = [];
+  const pattern = /`([^`\n]+)`|\*\*([^*\n]+)\*\*/g;
+  let at = 0;
+  for (let m; (m = pattern.exec(text)); at = pattern.lastIndex) {
+    if (m.index > at) out.push(text.slice(at, m.index));
+    out.push(m[1] !== undefined ? h("code", null, m[1]) : h("strong", null, m[2]));
+  }
+  if (at < text.length) out.push(text.slice(at));
+  return out;
+}
+
+function md(text) {
+  const out = [];
+  String(text).split(/```/).forEach((part, i) => {
+    // every second part lies between code fences; its first line names the language
+    if (i % 2) return out.push(h("pre", { class: "md-code" }, part.replace(/^[\w-]*\n/, "").replace(/\n$/, "")));
+    let list = null;
+    let para = [];
+    const flush = () => {
+      if (para.length) out.push(h("p", null, para.flatMap((line, n) => (n ? [h("br"), ...mdInline(line)] : mdInline(line)))));
+      para = [];
+    };
+    for (const line of part.split("\n")) {
+      const item = /^\s*(?:[-*•]|(\d+)[.)])\s+(.*)$/.exec(line);
+      const heading = /^#{1,6}\s+(.*)$/.exec(line);
+      if (item) {
+        flush();
+        const tag = item[1] ? "ol" : "ul";
+        if (!list || list.tagName.toLowerCase() !== tag) out.push((list = h(tag)));
+        list.append(h("li", null, mdInline(item[2])));
+        continue;
+      }
+      list = null;
+      if (heading) {
+        flush();
+        out.push(h("p", null, h("strong", null, mdInline(heading[1]))));
+      } else if (!line.trim()) flush();
+      else para.push(line);
+    }
+    flush();
+  });
+  return out;
+}
+
+/** What a call of the assistant does, in the page's words */
+function toolWords(call) {
+  const key = `assistant.tool.${call.name}${call.name === "app_remove" && call.args.deleteData === true ? ".data" : ""}`;
+  const a = call.args ?? {};
+  return has(key) ? t(key, { app: String(a.app ?? a.name ?? ""), query: String(a.query ?? ""), snapshot: String(a.snapshot ?? "") }) : call.name;
+}
+
+async function assistantCall(path, data = {}) {
+  try {
+    const chat = await api("POST", path, data);
+    if (chat?.turns) assistantUi.chat = chat;
+  } catch (e) {
+    toast(errorText(e), "error");
+  }
+  paintAssistant();
+}
+
+async function sendToAssistant(text, fresh = false) {
+  const words = text.trim();
+  if (!words) return;
+  const chat = fresh ? null : assistantUi.chat;
+  await assistantCall(chat ? `/api/assistant/chats/${chat.id}` : "/api/assistant/chats", { text: words });
+  void loadAssistant(true);
+}
+
+function assistantBody() {
+  const chat = assistantUi.chat;
+  if (!assistantUi.config) return [h("p", { class: "muted" }, "…")];
+  if (!assistantUi.config.ready) {
+    return [h("div", { class: "assistant-empty" }, h("p", null, t("assistant.notSet")), h("p", { class: "muted small" }, t("assistant.notSetHint")), h("a", { class: "btn primary", href: "#/settings/assistant", onclick: () => innerWidth < 900 && closeAssistant() }, t("assistant.setUp")))];
+  }
+  if (!chat) {
+    const ask = (key) => button(t(key), { class: "small", onclick: () => sendToAssistant(t(key), true) });
+    return [h("div", { class: "assistant-empty" }, h("p", null, t("assistant.hello")), h("p", { class: "muted small" }, t("assistant.helloHint")), h("div", { class: "assistant-starts" }, ask("assistant.start.health"), ask("assistant.start.updates"), ask("assistant.start.space")))];
+  }
+  const results = new Map(chat.turns.filter((turn) => turn.role === "tool").map((turn) => [turn.id, turn]));
+  const callRow = (call) => {
+    const result = results.get(call.id);
+    if (call.state === "asking") {
+      const detail = typeof call.args.compose === "string" ? call.args.compose : Object.keys(call.args).some((k) => !["app", "name", "deleteData", "snapshot"].includes(k)) ? JSON.stringify(call.args, null, 1) : "";
+      return h(
+        "div",
+        { class: "assistant-ask" },
+        h("strong", null, t("assistant.wants", { what: toolWords(call) })),
+        detail && h("pre", { class: "md-code" }, detail),
+        h("div", { class: "row-actions" }, button(t("approvals.decline"), { class: "small", onclick: () => assistantCall(`/api/assistant/chats/${chat.id}/calls/${call.id}`, { run: false }) }), button(t("assistant.run"), { class: "small primary", onclick: () => assistantCall(`/api/assistant/chats/${chat.id}/calls/${call.id}`, { run: true }) }, "play")),
+      );
+    }
+    const mark = !result ? icon("refresh", "spin") : icon(result.error ? "x" : "check", result.error ? "danger" : "");
+    // what the tool answered is there to look at: nothing the assistant saw is hidden from the person
+    return h("details", { class: "assistant-call" }, h("summary", null, mark, h("span", null, result?.declined || call.state === "declined" ? t("assistant.declined", { what: toolWords(call) }) : toolWords(call))), result && !result.declined && h("pre", { class: "md-code" }, result.text));
+  };
+  const rows = chat.turns.flatMap((turn) => {
+    if (turn.role === "user") return [h("div", { class: "msg user" }, turn.text)];
+    if (turn.role === "assistant") return [turn.text && h("div", { class: "msg bot" }, md(turn.text)), ...turn.calls.map(callRow)];
+    return [];
+  });
+  if (chat.status === "thinking") rows.push(h("div", { class: "assistant-status" }, icon("refresh", "spin"), h("span", { class: "grow muted" }, t("assistant.thinking")), button(t("assistant.stop"), { class: "small", onclick: () => assistantCall(`/api/assistant/chats/${chat.id}/stop`) })));
+  if (chat.status === "error") {
+    const key = "error.assistant." + chat.error?.code;
+    rows.push(h("div", { class: "banner danger stack" }, h("div", null, has(key) ? t(key) : "", h("span", { class: "block muted small" }, chat.error?.message ?? "")), button(t("assistant.retry"), { class: "small", onclick: () => assistantCall(`/api/assistant/chats/${chat.id}`, { retry: true }) }, "refresh")));
+  }
+  return rows;
+}
+
+function paintAssistant() {
+  const panel = assistantUi.panel;
+  if (!panel) return;
+  const { chat, chats } = assistantUi;
+  const pick = h(
+    "select",
+    { "aria-label": t("assistant.chats"), onchange: (e) => (e.target.value ? void loadAssistantChat(e.target.value) : ((assistantUi.chat = null), paintAssistant())) },
+    h("option", { value: "", selected: !chat }, t("assistant.newChat")),
+    chats.map((c) => h("option", { value: c.id, selected: c.id === chat?.id }, c.title)),
+  );
+  put(
+    panel.querySelector(".assistant-head"),
+    h("strong", { class: "grow" }, t("assistant.title")),
+    chats.length > 0 && pick,
+    chat && h("button", { type: "button", class: "icon-btn", title: t("assistant.forget"), "aria-label": t("assistant.forget"), onclick: forgetAssistantChat }, icon("trash")),
+    h("button", { type: "button", class: "icon-btn", "aria-label": t("common.close"), onclick: closeAssistant }, icon("x")),
+  );
+  const body = panel.querySelector(".assistant-body");
+  // new words are followed down the panel unless the person has scrolled up to read
+  const follow = body.scrollHeight - body.scrollTop - body.clientHeight < 80;
+  put(body, assistantBody());
+  if (follow) body.scrollTop = body.scrollHeight;
+  const busy = chat?.status === "thinking" || chat?.status === "asking";
+  panel.querySelector(".assistant-form").hidden = !assistantUi.config?.ready;
+  panel.querySelector(".assistant-form button").disabled = busy;
+}
+
+async function loadAssistantChat(id) {
+  assistantUi.chat = await api("GET", `/api/assistant/chats/${id}`).catch(() => null);
+  paintAssistant();
+}
+
+async function loadAssistant(keep = false) {
+  try {
+    const data = await api("GET", "/api/assistant");
+    assistantUi.config = data.config;
+    assistantUi.chats = data.chats;
+    if (state.overview) state.overview.assistant = data.config.ready;
+  } catch {}
+  if (!keep && assistantUi.chat) return loadAssistantChat(assistantUi.chat.id);
+  paintAssistant();
+}
+
+async function forgetAssistantChat() {
+  const { chat } = assistantUi;
+  if (!chat) return;
+  await api("DELETE", `/api/assistant/chats/${chat.id}`).catch((e) => toast(errorText(e), "error"));
+  assistantUi.chat = null;
+  void loadAssistant();
+}
+
+/** Opens the panel; `ask` is sent as the first words of a new chat, `draft` is put into the field */
+function openAssistant({ ask, draft } = {}) {
+  if (!assistantUi.panel) {
+    const input = h("textarea", { rows: 2, maxLength: 20000, placeholder: t("assistant.placeholder"), "aria-label": t("assistant.placeholder") });
+    const submit = () => {
+      const text = input.value;
+      if (!text.trim() || form.querySelector("button").disabled) return;
+      input.value = "";
+      void sendToAssistant(text);
+    };
+    input.addEventListener("keydown", (e) => {
+      if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
+        e.preventDefault();
+        submit();
+      }
+    });
+    const form = h("form", { class: "assistant-form", onsubmit: (e) => (e.preventDefault(), submit()) }, input, h("button", { class: "btn primary square", "aria-label": t("assistant.send"), title: t("assistant.send") }, icon("arrow")));
+    assistantUi.panel = h("aside", { class: "assistant", "aria-label": t("assistant.title") }, h("div", { class: "assistant-head" }), h("div", { class: "assistant-body" }), form);
+    document.body.append(assistantUi.panel);
+  }
+  assistantUi.open = true;
+  assistantUi.panel.hidden = false;
+  document.body.classList.add("with-assistant");
+  const input = assistantUi.panel.querySelector("textarea");
+  if (ask) assistantUi.chat = null;
+  if (draft) input.value = draft;
+  paintAssistant();
+  void loadAssistant().then(() => ask && assistantUi.config?.ready && sendToAssistant(ask, true));
+  input.focus();
+}
+
+function closeAssistant() {
+  assistantUi.open = false;
+  if (assistantUi.panel) assistantUi.panel.hidden = true;
+  document.body.classList.remove("with-assistant");
+}
+
+/** The server says a chat moved on: the one on the screen is read again */
+function assistantEvent(event) {
+  if (!assistantUi.open || event.owner !== state.user?.id) return;
+  clearTimeout(assistantUi.timer);
+  assistantUi.timer = setTimeout(() => {
+    if (assistantUi.chat?.id === event.chat) void loadAssistantChat(event.chat);
+    else if (!assistantUi.chat) void loadAssistant(true);
+  }, 120);
+}
+
+function assistantSection() {
+  const config = state.assistant?.config;
+  if (!config) return h("p", { class: "muted" }, "…");
+  const provider = h("select", null, ["anthropic", "openai"].map((id) => h("option", { value: id, selected: id === config.provider }, t("assistant.provider." + id))));
+  const url = h("input", { type: "url", class: "mono", value: config.url, spellcheck: false });
+  const urlHint = h("span", { class: "hint" });
+  const key = h("input", { type: "password", autocomplete: "off", class: "mono", placeholder: config.saved ? t("assistant.keySaved") : "" });
+  const models = h("datalist", { id: "assistant-models" });
+  const model = h("input", { class: "mono", value: config.model, spellcheck: false, required: true });
+  model.setAttribute("list", "assistant-models");
+  const level = h("select", null, AGENT_LEVELS.map((id) => h("option", { value: id, selected: id === config.level }, t("agents.level." + id))));
+  const levelHint = h("span", { class: "hint" });
+  const error = h("p", { class: "error", role: "alert" });
+  const paint = () => {
+    url.placeholder = config.defaults[provider.value];
+    urlHint.textContent = t(`assistant.url.${provider.value}`);
+    levelHint.textContent = `${t(`agents.level.${level.value}.hint`)} ${t(level.value === "full" ? "assistant.level.full" : "assistant.level.asks")}`;
+  };
+  provider.addEventListener("change", paint);
+  level.addEventListener("change", paint);
+  paint();
+  const draft = () => ({ provider: provider.value, url: url.value.trim(), key: key.value.trim(), model: model.value.trim(), level: level.value });
+  const find = button(t("assistant.findModels"), {
+    class: "small",
+    onclick: async () => {
+      error.textContent = "";
+      find.disabled = true;
+      try {
+        const { models: names } = await api("POST", "/api/assistant/models", draft());
+        put(models, names.map((name) => h("option", { value: name })));
+        toast(t("assistant.modelsFound", { n: names.length }));
+        model.focus();
+      } catch (e) {
+        error.textContent = [errorText(e), e.detail?.message].filter(Boolean).join(" — ");
+      }
+      find.disabled = false;
+    },
+  });
+  return [
+    h(
+      "section",
+      { class: "card pad" },
+      h(
+        "form",
+        {
+          class: "stack",
+          onsubmit: async (e) => {
+            e.preventDefault();
+            try {
+              state.assistant = { ...state.assistant, ...(await api("PUT", "/api/assistant/config", draft())) };
+              if (state.overview) state.overview.assistant = state.assistant.config.ready;
+              assistantUi.config = state.assistant.config;
+              toast(t("settings.saved"));
+              renderSettings();
+            } catch (err) {
+              error.textContent = errorText(err);
+            }
+          },
+        },
+        h("div", { class: "section-head" }, h("h2", null, t("assistant.title")), config.ready && button(t("assistant.open"), { class: "small", onclick: () => openAssistant() }, "chat")),
+        h("p", { class: "muted" }, t("assistant.lead")),
+        h("label", { class: "field" }, h("span", { class: "label" }, t("assistant.provider")), provider),
+        h("label", { class: "field" }, h("span", { class: "label" }, t("assistant.url")), url, urlHint),
+        field(t("assistant.key"), key, t("assistant.keyHint")),
+        h("label", { class: "field" }, h("span", { class: "label" }, t("assistant.model")), h("div", { class: "pair" }, model, find), models, h("span", { class: "hint" }, t("assistant.modelHint"))),
+        h("label", { class: "field" }, h("span", { class: "label" }, t("agents.new.level")), level, levelHint),
+        error,
+        h("p", { class: "muted small" }, t("assistant.privacy")),
+        h("div", { class: "row-actions" }, h("button", { class: "btn primary" }, t("settings.save"))),
+      ),
+    ),
+  ];
 }
 
 // --- A connector that signs in: the administrator's answer ------------------------------------------
