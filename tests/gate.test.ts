@@ -96,3 +96,9 @@ test("who may open an app", () => {
   expect([admin, member, guest].map((u) => mayOpen(u, "photos"))).toEqual([true, false, false]);
   delete settings.access.photos;
 });
+
+test("the override of an app of another machine names the Hata it opens through", () => {
+  const text = overrideText(compose, "/DATA", [{ port: 8443, upstream: 28443 }], {}, { host: "hata-pc", port: 8444 });
+  expect(text.split("\n")[0]).toContain("Hata at hata-pc, opened there on port 8444");
+  expect(text).toContain('"published":"28443","host_ip":"127.0.0.1"');
+});

@@ -112,7 +112,7 @@ export function guardsOf(access: AppAccess): Guard[] {
  * The override file: the whole port list of every service with a guarded port again (compose replaces
  * a list marked `!override`, it does not merge into it), the guarded ports moved to 127.0.0.1.
  */
-export function overrideText(compose: Compose, dataRoot: string, guards: Guard[], env: Env = {}): string {
+export function overrideText(compose: Compose, dataRoot: string, guards: Guard[], env: Env = {}, through?: { host: string; port: number }): string {
   const copy = resolved(compose, dataRoot, env);
   const upstreamOf = (p: unknown): number | undefined => {
     if (typeof p !== "object" || p === null || ((p as Compose).protocol ?? "tcp") !== "tcp" || isLocal((p as Compose).host_ip)) return undefined;
@@ -130,9 +130,12 @@ export function overrideText(compose: Compose, dataRoot: string, guards: Guard[]
     }
   }
   const list = guards.map((g) => g.port).join(", ");
+  // an app of another machine is opened through the Hata that looks after it
+  const head = through
+    ? [`${OVERRIDE_MARK}: this app is behind the sign-in of Hata at ${through.host}, opened there on port ${through.port};`, `# here it listens on 127.0.0.1 (${guards.map((g) => g.upstream).join(", ")}) only. Remove the protection in Hata, not by deleting this file.`]
+    : [`${OVERRIDE_MARK}: this app is behind Hata's sign-in. Hata listens on ${guards.length > 1 ? "ports" : "port"} ${list} and passes`, `# signed-in users on to 127.0.0.1 (${guards.map((g) => g.upstream).join(", ")}). Remove the protection in Hata, not by deleting this file.`];
   return [
-    `${OVERRIDE_MARK}: this app is behind Hata's sign-in. Hata listens on ${guards.length > 1 ? "ports" : "port"} ${list} and passes`,
-    `# signed-in users on to 127.0.0.1 (${guards.map((g) => g.upstream).join(", ")}). Remove the protection in Hata, not by deleting this file.`,
+    ...head,
     "services:",
     ...lines,
     "",
@@ -266,7 +269,15 @@ const listening = (name: string): Map<number, Server> => listeners.get(name) ?? 
 
 function startListener(name: string, { port, upstream }: Guard): void {
   listening(name).get(port)?.stop(true);
-  const server = Bun.serve<Tunnel, never>({
+  listening(name).set(port, guardedServer(name, port, upstream));
+}
+
+/**
+ * A listener on `port` of this server that lets signed-in people who may open `name` through to
+ * 127.0.0.1:`upstream` — the app itself, or (for an app of another machine) the end of a tunnel to it.
+ */
+export function guardedServer(name: string, port: number, upstream: number): Server {
+  return Bun.serve<Tunnel, never>({
     port,
     hostname: anyAddress(),
     // uploads to a photo library or a cloud drive are large; the app sets its own limits
@@ -281,7 +292,6 @@ function startListener(name: string, { port, upstream }: Guard): void {
     },
     websocket: tunnelHandlers,
   });
-  listening(name).set(port, server);
 }
 
 /** Stops the listeners of an app — all of them, or those on ports that are not in `keep` */

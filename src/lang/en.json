@@ -413,7 +413,7 @@
   "access.others": "Other ports stay open. Tick the ones that are web pages to ask for sign-in there too:",
   "access.cannot.noPort": "This app has no web port to guard.",
   "access.cannot.hostNetwork": "This app uses the host's network, so its port cannot be taken over.",
-  "access.how": "With sign-in in front, Hata takes over the app's port and lets through only people who are signed in to Hata and allowed to open the app; the address stays the same. Without it, a limit only hides the app in Hata. Administrators can always open everything. Sign-in stands in front of the app's web port; its other ports stay open unless ticked, and only a port that serves web pages can be guarded.",
+  "access.how": "With sign-in in front, Hata takes over the app's port and lets through only people who are signed in to Hata and allowed to open the app; the address stays the same. Without it, a limit only hides the app in Hata. Administrators can always open everything. Sign-in stands in front of the app's web port; its other ports stay open unless ticked, and only a port that serves web pages can be guarded. An app of another machine opens through this server then, on a port of this server, and no longer at the machine's own address.",
   "activity.users.joined": "{user} joined by invitation",
   "error.invite.invalid": "The invitation link does not work any more.",
   "error.gate.noPort": "This app has no web port to guard.",
@@ -2500,5 +2500,6 @@
   "attention.machine.restarting.title": "{title} on {machine} keeps restarting",
   "attention.machine.restarting.text": "Container {container} does not stay up — its logs on the machine's page say why.",
   "attention.machine.partial.title": "{title} on {machine} is only partly running",
-  "attention.machine.partial.text": "Container {container} is not running."
+  "attention.machine.partial.text": "Container {container} is not running.",
+  "access.through": "opens through this server on port {port}"
 }

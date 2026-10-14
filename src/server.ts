@@ -106,6 +106,7 @@ import { MuxError, type Channel } from "./mux";
 import { crossTransfer } from "./machinefiles";
 import { moveApp, moveCheck } from "./moveapp";
 import { backupMachineApp, restoreMachineApp } from "./machinebackup";
+import { machineAccessRows, setMachineAccess, startMachineGates } from "./machinegate";
 import { applyMachineCompose, installComposeOnMachine, machineTiles, installOnMachine, machineAppAction, machineAppLogs, machineApps, machineCompose, removeMachineApp, storeAppFor } from "./machineapps";
 import { addStore, ARCH, catalogue, removeStore, scheduleStoreSync, StoreError, syncStore } from "./store";
 import { startSampler, systemStatus } from "./system";
@@ -853,13 +854,15 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
       const others = compose ? otherPorts(compose, settings.dataRoot, env).map((p) => ({ port: p.port, guarded: guardsOf(access).some((g) => g.port === p.port) })) : [];
       return { name: app.name, title: app.title, icon: app.icon, allowed: access.allowed, protect: access.protect, cannotProtect: typeof gate === "string" ? gate : null, others };
     });
-    return json({ apps, users: listUsers().map(({ id, name, role }) => ({ id, name, role })) });
+    return json({ apps: [...apps, ...(await machineAccessRows(language(url)).catch(() => []))], users: listUsers().map(({ id, name, role }) => ({ id, name, role })) });
   }
 
   if (path === "/api/events" && method === "GET") return events(req, server, admin);
 
   if (path === "/api/overview" && method === "GET") {
-    const [docker, all, containers, onMachines] = await Promise.all([dockerInfo(), listApps(language(url)), admin ? listContainers().catch(() => []) : [], admin ? machineTiles(machineList(), language(url)) : []]);
+    const [docker, all, containers, everywhere] = await Promise.all([dockerInfo(), listApps(language(url)), admin ? listContainers().catch(() => []) : [], user.role === "guest" && !Object.keys(settings.access).some((k) => k.includes("@")) ? [] : machineTiles(machineList(), language(url))]);
+    // the apps of other machines a member or guest may open, as those of this server
+    const onMachines = everywhere.filter((app) => mayOpen(user, app.key));
     const apps = all.filter((app) => mayOpen(user, app.name));
     const system = systemStatus();
     return json({
@@ -1958,6 +1961,13 @@ async function machinesApi(req: Request, url: URL, server: Server, by: string): 
     const [, name, part] = app as unknown as [string, string, string | undefined];
     if (!part && method === "DELETE") return json({ job: (await removeMachineApp(id, name, url.searchParams.get("data") === "1", by)).id }, 202);
     if (part === "compose" && method === "GET") return json(await machineCompose(id, name));
+    if (part === "access" && method === "PUT") {
+      const data = await body(req);
+      const allowed = data.allowed === "all" ? "all" : Array.isArray(data.allowed) ? data.allowed.filter((u): u is string => typeof u === "string" && !!findUser(u)) : null;
+      if (!allowed) return fail(400, "request.notFound");
+      const job = await setMachineAccess(id, name, { allowed, protect: data.protect === true }, by);
+      return json(job ? { job: job.id } : { ok: true });
+    }
     if (part === "compose" && method === "PUT") return json({ job: (await applyMachineCompose(id, name, (await body(req)).compose, by)).id }, 202);
     if (part === "logs" && method === "GET") {
       server.timeout(req, 0);
@@ -2183,6 +2193,7 @@ export async function serve(): Promise<void> {
   scheduleUpdateChecks();
   startSampler(() => settings.dataRoot);
   startMachines();
+  startMachineGates();
   startDisks();
   startFills();
   startImages({

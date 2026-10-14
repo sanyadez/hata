@@ -377,6 +377,7 @@ function handlersFor(state: LinkState): Record<string, Handler> {
     "apps.ports": (args) => apps.ports(args),
     "apps.remove": (args) => apps.remove(args),
     "apps.snapshot": (args, channel) => apps.snapshot(args, channel),
+    tcp: (args, channel) => apps.tcp(args, channel),
     "apps.restore": (args, channel) => apps.restore(args, channel),
     "fs.list": (args) => files.list(args),
     "fs.summary": (args) => files.summary(args),

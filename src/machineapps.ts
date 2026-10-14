@@ -21,7 +21,12 @@ interface Files {
   compose: string;
   env: string;
   hata: string | null;
+  override: string | null;
 }
+
+/** Runs before `docker compose` reads a machine's app: the sign-in's override is brought in step (`machinegate.ts`) */
+let beforeUp: (id: string, name: string) => Promise<void> = async () => {};
+export const beforeMachineUp = (hook: typeof beforeUp): void => void (beforeUp = hook);
 
 const key = (id: string, name: string) => `${name}@${id}`;
 
@@ -35,6 +40,8 @@ export interface MachineApp {
   scheme: string;
   status: "running" | "partial" | "stopped" | "unknown";
   store: string;
+  /** Behind Hata's sign-in: the port of this server it opens on */
+  guarded: number | null;
   job: { id: string; kind: JobKind } | null;
   containers: { id: string; name: string; service: string; image: string; state: string; status: string; ports: string[] }[];
 }
@@ -80,6 +87,10 @@ function describe(id: string, files: Files, containers: MachineContainer[] | nul
     scheme: meta.scheme,
     status: containers === null ? "unknown" : running === 0 ? "stopped" : running === own.length ? "running" : "partial",
     store,
+    guarded: (() => {
+      const access = settings.access[key(id, files.name)];
+      return access?.protect && access.listen ? access.listen : null;
+    })(),
     job: jobOf(id, files.name),
     containers: own.map((c) => ({ id: c.id.slice(0, 12), name: c.name, service: c.service, image: c.image, state: c.state, status: c.status, ports: [...new Set(c.ports.filter((p) => p.public).map((p) => `${p.public}:${p.private}/${p.type}`))] })),
   };
@@ -115,6 +126,10 @@ export async function machineTiles(list: { id: string; name: string; ip: string;
   return each.flat();
 }
 
+export async function filesOfMachineApp(id: string, name: string): Promise<Files> {
+  return filesOfApp(id, name);
+}
+
 async function filesOfApp(id: string, name: string): Promise<Files> {
   assertName(name);
   const found = (await filesOf(id)).find((f) => f.name === name);
@@ -124,6 +139,7 @@ async function filesOfApp(id: string, name: string): Promise<Files> {
 
 /** Runs one compose command on the machine, its output into the job's log */
 async function dcOn(id: string, name: string, command: string, log: Log): Promise<void> {
+  if (command === "config" || command === "up") await beforeUp(id, name);
   const channel = open(id, "apps.compose", { name, command });
   const decoder = new TextDecoder();
   let rest = "";
@@ -142,6 +158,9 @@ async function dcOn(id: string, name: string, command: string, log: Log): Promis
     asApp(e);
   }
 }
+
+export const runOnMachine = (id: string, name: string, command: string, log: Log): Promise<void> => dcOn(id, name, command, log);
+export const jobOnMachine = (id: string, name: string, kind: JobKind, user: string, work: (log: Log) => Promise<void>): Job => jobOn(id, name, kind, user, work);
 
 function jobOn(id: string, name: string, kind: JobKind, user: string, work: (log: Log) => Promise<void>): Job {
   return startJob(key(id, name), kind, user, work, false, { app: name, machine: machine(id).name });
@@ -261,9 +280,15 @@ export async function applyMachineCompose(id: string, name: string, text: unknow
   });
 }
 
+/** Called when an app of a machine is gone (removed, moved away) */
+let goneHook: (id: string, name: string) => void = () => {};
+export const onMachineAppGone = (hook: typeof goneHook): void => void (goneHook = hook);
+export const machineAppGone = (id: string, name: string): void => goneHook(id, name);
+
 export async function removeMachineApp(id: string, name: string, withData: boolean, user: string): Promise<Job> {
   await filesOfApp(id, name);
   return jobOn(id, name, "remove", user, async (log) => {
+    goneHook(id, name);
     await dcOn(id, name, withData ? "downVolumes" : "down", log);
     const data = `${machineDataRoot(id).replace(/\/+$/, "")}/AppData/${name}`;
     if (withData) log(`Removing ${data}`);

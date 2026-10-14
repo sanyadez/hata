@@ -908,9 +908,9 @@ function tile(item) {
     const url = isUp(app) ? machineAppUrl(target.machine, app) : null;
     href = url ?? `#/machines/${target.machine.id}/apps`;
     external = !!url;
-    sub = [h("i", { class: "dot " + st }), target.machine.online ? (st === "running" && app.port ? `${target.machine.ip}:${app.port}` : t("status." + st)) : t("machines.offline")];
-    badges = h("span", { class: "lock", title: target.machine.name }, icon("server"));
-    side = h("a", { class: "tile-open", href: `#/machines/${target.machine.id}/apps`, title: target.machine.name, "aria-label": `${target.machine.name}: ${title}` }, icon("sliders"));
+    sub = [h("i", { class: "dot " + st }), target.machine.online ? (st === "running" && (app.guarded || app.port) ? (app.guarded ? `${location.hostname}:${app.guarded}` : `${target.machine.ip}:${app.port}`) : t("status." + st)) : t("machines.offline")];
+    badges = [app.guarded && h("span", { class: "lock", title: t("access.protected") }, icon("lock")), h("span", { class: "lock", title: target.machine.name }, icon("server"))];
+    side = admin && h("a", { class: "tile-open", href: `#/machines/${target.machine.id}/apps`, title: target.machine.name, "aria-label": `${target.machine.name}: ${title}` }, icon("sliders"));
   } else if (item.type === "app") {
     const app = target;
     const st = (cls = appState(app));
@@ -2422,6 +2422,8 @@ async function loadMachineApps() {
 
 /** Where a machine's app answers: the machine's address and the app's port */
 function machineAppUrl(m, app) {
+  // behind Hata's sign-in it opens through this server, on a port of its own
+  if (app.guarded) return `http://${location.hostname}:${app.guarded}${app.index || "/"}`;
   if (!app.port || !m.ip) return null;
   return `${app.scheme || "http"}://${m.ip.includes(":") ? `[${m.ip}]` : m.ip}:${app.port}${app.index || "/"}`;
 }
@@ -2462,7 +2464,7 @@ function paintMachineApps() {
       null,
       h("td", null, h("div", { class: "with-icon machine-app" }, appIcon(app), h("div", { class: "stack-s" }, h("strong", null, app.title), h("span", { class: "muted small mono" }, app.name + (app.store ? ` · ${app.store}` : ""))))),
       h("td", null, stateChip(app)),
-      h("td", { class: "mono small" }, url ? h("a", { class: "link", href: url, target: "_blank", rel: "noopener noreferrer" }, url.replace(/^https?:\/\//, "").replace(/\/$/, "")) : app.port ? `${m.ip}:${app.port}` : "—"),
+      h("td", { class: "mono small" }, app.guarded && h("span", { class: "lock-mark", title: t("access.protected") }, icon("lock")), url ? h("a", { class: "link", href: url, target: "_blank", rel: "noopener noreferrer" }, url.replace(/^https?:\/\//, "").replace(/\/$/, "")) : app.port ? `${m.ip}:${app.port}` : "—"),
       h(
         "td",
         null,
@@ -9934,7 +9936,7 @@ function accessMatrix() {
   const people = access.users.filter((u) => u.role !== "admin");
   const update = async (app, patch) => {
     try {
-      const res = await api("PUT", `/api/apps/${app.name}/access`, { protect: app.protect, allowed: app.allowed, ...patch });
+      const res = await api("PUT", app.machine ? `/api/machines/${app.machine.id}/apps/${app.app}/access` : `/api/apps/${app.name}/access`, { protect: app.protect, allowed: app.allowed, ...patch });
       if (res.job) jobDialog(res.job, "apply", app.title, () => void loadUsers());
       else void loadUsers();
     } catch (e) {
@@ -9968,7 +9970,7 @@ function accessMatrix() {
     return h(
       "tr",
       null,
-      h("td", null, h("div", { class: "with-icon" }, appIcon(app, "sm"), h("div", null, h("a", { class: "strong", href: `#/apps/${app.name}` }, app.title), !everyone && !app.protect && h("div", { class: "muted small" }, t("access.onlyHidden")), app.protect && app.others.length > 0 && otherPorts(app)))),
+      h("td", null, h("div", { class: "with-icon" }, appIcon(app, "sm"), h("div", { class: "stack-s backup-name" }, h("a", { class: "strong", href: app.machine ? `#/machines/${app.machine.id}/apps` : `#/apps/${app.name}` }, app.title), app.machine && h("div", { class: "muted small with-icon" }, icon("server"), app.machine.name, app.protect && app.listen ? ` · ${t("access.through", { port: app.listen })}` : ""), !everyone && !app.protect && h("div", { class: "muted small" }, t("access.onlyHidden")), app.protect && app.others.length > 0 && otherPorts(app)))),
       h("td", null, h("input", { type: "checkbox", checked: app.protect, disabled: !!app.cannotProtect, title: app.cannotProtect ? t("access.cannot." + app.cannotProtect) : "", "aria-label": t("access.protectApp", { title: app.title }), onchange: (e) => update(app, { protect: e.target.checked }) })),
       h("td", null, h("input", { type: "checkbox", checked: everyone, "aria-label": t("access.everyone"), onchange: (e) => update(app, { allowed: e.target.checked ? "all" : people.filter((u) => u.role === "member").map((u) => u.id) }) })),
       people.map((user) => h("td", null, h("input", { type: "checkbox", checked: everyone ? user.role === "member" : list.includes(user.id), "aria-label": `${user.name}: ${app.title}`, onchange: (e) => toggle(user, e.target.checked) }))),

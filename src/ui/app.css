@@ -957,3 +957,4 @@ body:has(> .assistant-fab) #view:not(.fill) { padding-bottom: 104px; }
 .store-target select { width: auto; }
 .backup-name { gap: 2px; justify-items: start; }
 .backup-name .with-icon .ico { width: 14px; height: 14px; }
+.lock-mark .ico { width: 13px; height: 13px; vertical-align: -2px; margin-right: 4px; color: var(--muted); }

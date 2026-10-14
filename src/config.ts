@@ -133,6 +133,11 @@ export interface AppAccess {
   upstream?: number;
   /** Other ports of the app guarded the same way */
   extra?: { port: number; upstream: number }[];
+  /**
+   * An app of another machine (`<name>@<machine>`): `port` and `upstream` are the machine's (its
+   * published port, moved to its 127.0.0.1:`upstream`), and this is the port of this server people open
+   */
+  listen?: number;
 }
 
 export interface ImageSettings {

@@ -19,7 +19,7 @@ import { record } from "./activity";
 import { bindSources, normalize, parseCompose, publishedPorts, type Compose } from "./appform";
 import { adoptApp, AppError, assertName, busyPorts, dc, envText, installedNames, letGo, localAppFiles, startJob, type Job, type Log } from "./apps";
 import { settings } from "./config";
-import { machineApps } from "./machineapps";
+import { machineAppGone, machineApps } from "./machineapps";
 import { call, machine, machineDataRoot, open } from "./machines";
 import { MuxError } from "./mux";
 import { rebaseCompose } from "./rebase";
@@ -161,7 +161,11 @@ function onMachine(id: string): Place {
         throw e;
       }
     },
-    letGo: async (app) => void (await call(id, "apps.remove", { name: app }).catch(asApp)),
+    letGo: async (app) => {
+      await call(id, "apps.remove", { name: app }).catch(asApp);
+      // its sign-in was this machine's: the app at its new place starts open
+      machineAppGone(id, app);
+    },
     dropData: async (path) => void (await call(id, "fs.dropData", { path, root: machineDataRoot(id) }).catch(asApp)),
   };
 }

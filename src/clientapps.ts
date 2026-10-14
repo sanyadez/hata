@@ -14,7 +14,7 @@ import { MuxError, type Channel } from "./mux";
 
 export const APPS_DIR = process.env.HATA_CLIENT_APPS || "/var/lib/hata-client/apps";
 const NAME_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
-const FILES = ["compose.yml", ".env", "hata.yml"];
+const FILES = ["compose.yml", ".env", "hata.yml", "compose.override.yml"];
 
 const fail = (code: string, detail: Record<string, string | number> = {}): never => {
   throw new MuxError(code, code, detail);
@@ -39,6 +39,8 @@ export interface MachineAppFiles {
   compose: string;
   env: string;
   hata: string | null;
+  /** Written by Hata when the app is behind its sign-in */
+  override: string | null;
 }
 
 /** Every app with its files, for Hata to read */
@@ -52,7 +54,7 @@ export function list(): MachineAppFiles[] {
   const out: MachineAppFiles[] = [];
   for (const name of names) {
     const compose = read(join(APPS_DIR, name, "compose.yml"));
-    if (compose !== null) out.push({ name, compose, env: read(join(APPS_DIR, name, ".env")) ?? "", hata: read(join(APPS_DIR, name, "hata.yml")) });
+    if (compose !== null) out.push({ name, compose, env: read(join(APPS_DIR, name, ".env")) ?? "", hata: read(join(APPS_DIR, name, "hata.yml")), override: read(join(APPS_DIR, name, "compose.override.yml")) });
   }
   return out;
 }
@@ -248,4 +250,57 @@ export async function restore(args: { name?: unknown; paths?: unknown }, channel
   } finally {
     rmSync(file, { force: true });
   }
+}
+
+// --- A connection to an app that listens on 127.0.0.1 here: an app behind Hata's sign-in -----------------
+
+/** Joins the channel to a TCP connection to `127.0.0.1:<port>`; bytes go both ways until either side ends */
+export async function tcp(args: { port?: unknown }, channel: Channel): Promise<void> {
+  const port = Number(args.port);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) fail("request.notFound");
+  let pending: Uint8Array[] = [];
+  let sending: Promise<void> = Promise.resolve();
+  let done!: () => void;
+  const finished = new Promise<void>((resolve) => (done = resolve));
+  const write = (socket: { write(data: Uint8Array): number }) => {
+    while (pending.length) {
+      const chunk = pending[0]!;
+      const n = socket.write(chunk);
+      if (n < chunk.length) {
+        pending[0] = chunk.subarray(n);
+        return;
+      }
+      pending.shift();
+    }
+  };
+  let socket: Awaited<ReturnType<typeof Bun.connect>>;
+  try {
+    socket = await Bun.connect({
+      hostname: "127.0.0.1",
+      port,
+      socket: {
+        // in order: the channel takes one piece after another
+        data: (_s, data) => void (sending = sending.then(() => channel.send(new Uint8Array(data))).catch(() => done())),
+        drain: (s) => write(s),
+        close: () => done(),
+        error: () => done(),
+      },
+    });
+  } catch {
+    fail("machine.appNotAnswering", { port });
+  }
+  channel.signal.addEventListener("abort", () => done());
+  void (async () => {
+    try {
+      for (let chunk = await channel.read(); chunk; chunk = await channel.read()) {
+        pending.push(chunk);
+        write(socket!);
+      }
+    } catch {}
+    socket!.end();
+  })();
+  await finished;
+  await sending.catch(() => {});
+  socket!.end();
+  pending = [];
 }
