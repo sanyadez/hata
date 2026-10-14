@@ -3147,7 +3147,8 @@ const dateTime = (ts) => new Date(ts).toLocaleString(state.lang, { day: "numeric
 
 async function backupNow(app) {
   try {
-    const res = await api("POST", `/api/apps/${app.name}/backup`, {});
+    // an app of another machine: its snapshot is taken there and kept here
+    const res = await api("POST", app.machine ? `/api/backups/${app.name}/take` : `/api/apps/${app.name}/backup`, {});
     jobDialog(res.job, "backup", app.title, () => (state.route.view === "backups" ? loadBackups() : loadApp(true)));
   } catch (e) {
     toast(errorText(e), "error");
@@ -3257,7 +3258,8 @@ function snapshotFilesDialog(app, snapshot) {
             return h(
               "div",
               { class: "snapshot-file" },
-              tick,
+              // single files are put back on this server only
+              !app.machine && tick,
               icon(entry.dir ? "folder" : "file"),
               entry.dir ? h("button", { type: "button", class: "text-btn grow name" + (path ? "" : " mono"), onclick: () => open(entry.path) }, name) : h("span", { class: "grow name" }, name, entry.link && h("span", { class: "muted small" }, " → " + entry.link)),
               h("span", { class: "muted small" }, entry.dir || entry.link ? "" : bytes(entry.size)),
@@ -3296,7 +3298,7 @@ function snapshotFilesDialog(app, snapshot) {
       ),
     );
   };
-  const dialog = openDialog("wide", h("header", null, h("div", { class: "grow" }, h("h2", null, t("backup.files.title", { title: app.title })), h("p", { class: "muted small" }, `${dateTime(snapshot.at)} · ${bytes(snapshot.size)}`)), closeX(() => dialog)), crumbs, list, error, h("footer", null, closeButton(() => dialog), restore));
+  const dialog = openDialog("wide", h("header", null, h("div", { class: "grow" }, h("h2", null, t("backup.files.title", { title: app.title })), h("p", { class: "muted small" }, `${dateTime(snapshot.at)} · ${bytes(snapshot.size)}`)), closeX(() => dialog)), crumbs, list, error, h("footer", null, closeButton(() => dialog), !app.machine && restore));
   void open("");
 }
 
@@ -3430,7 +3432,7 @@ function renderBackupsBody() {
     return h(
       "tr",
       { class: app.installed ? "" : "removed" },
-      h("td", null, h("div", { class: "with-icon" }, appIcon(app, "sm"), h("div", null, app.installed ? h("a", { class: "strong", href: `#/apps/${app.name}/backups` }, app.title) : h("span", { class: "strong" }, app.title), !app.installed && h("div", { class: "muted small" }, t("backup.removedApp")), app.otherFolders.length > 0 && h("button", { type: "button", class: "text-btn muted small", title: app.otherFolders.join("\n"), onclick: () => backupFoldersDialog(app, loadBackups) }, t("backup.folders.row", { n: app.otherFolders.length, m: app.extraFolders.length }))))),
+      h("td", null, h("div", { class: "with-icon" }, appIcon(app, "sm"), h("div", { class: "stack-s backup-name" }, app.installed ? h("a", { class: "strong", href: app.machine ? `#/machines/${app.machine.id}/apps` : `#/apps/${app.name}/backups` }, app.title) : h("span", { class: "strong" }, app.title), app.machine && h("div", { class: "muted small with-icon" }, icon("server"), app.machine.name), !app.installed && h("div", { class: "muted small" }, t("backup.removedApp")), app.otherFolders.length > 0 && h("button", { type: "button", class: "text-btn muted small", title: app.otherFolders.join("\n"), onclick: () => backupFoldersDialog(app, loadBackups) }, t("backup.folders.row", { n: app.otherFolders.length, m: app.extraFolders.length }))))),
       h("td", null, newest ? h("div", null, ago(newest.at), h("div", { class: "muted small" }, t("backup.reason." + newest.reason))) : h("span", { class: "muted" }, t("backup.noneShort"))),
       h("td", { class: "num" }, size ? bytes(size) : "—"),
       h("td", { class: "num" }, app.snapshots.length || "—"),

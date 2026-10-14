@@ -282,7 +282,8 @@ export function updateSettings(patch: Record<string, unknown>): string | null {
       backup.dir = b.dir.length > 1 ? b.dir.replace(/\/+$/, "") : b.dir;
     }
     if ("exclude" in b) {
-      if (!Array.isArray(b.exclude) || b.exclude.some((n) => typeof n !== "string" || !/^[a-z0-9][a-z0-9_-]{0,62}$/.test(n))) return "settings.badBackup";
+      // an app here, or `<name>@<machine>` — an app of another machine
+      if (!Array.isArray(b.exclude) || b.exclude.some((n) => typeof n !== "string" || !/^[a-z0-9][a-z0-9_-]{0,62}(@[a-f0-9]{8})?$/.test(n))) return "settings.badBackup";
       backup.exclude = [...new Set(b.exclude as string[])];
     }
     if ("folders" in b) {

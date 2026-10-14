@@ -105,6 +105,7 @@ import { containerCommand, MAX_BUFFERED_BYTES, shellCommand, TerminalError, Term
 import { MuxError, type Channel } from "./mux";
 import { crossTransfer } from "./machinefiles";
 import { moveApp, moveCheck } from "./moveapp";
+import { backupMachineApp, restoreMachineApp } from "./machinebackup";
 import { applyMachineCompose, installComposeOnMachine, machineTiles, installOnMachine, machineAppAction, machineAppLogs, machineApps, machineCompose, removeMachineApp, storeAppFor } from "./machineapps";
 import { addStore, ARCH, catalogue, removeStore, scheduleStoreSync, StoreError, syncStore } from "./store";
 import { startSampler, systemStatus } from "./system";
@@ -1416,8 +1417,9 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
     });
   }
   // looking inside a snapshot
-  const inside = /^\/api\/backups\/([a-z0-9_-]+)\/(\d{8}-\d{6})\/(files|file|restore-files)$/.exec(path);
-  if (inside) {
+  const inside = /^\/api\/backups\/([a-z0-9_-]+(?:@[a-f0-9]{8})?)\/(\d{8}-\d{6})\/(files|file|restore-files)$/.exec(path);
+  // a snapshot of another machine's app is looked into here; putting single files back there is not built
+  if (inside && !(inside[1]!.includes("@") && inside[3] === "restore-files")) {
     // the first look reads the whole archive
     server.timeout(req, 0);
     const at = url.searchParams.get("path") ?? "";
@@ -1428,11 +1430,15 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
     }
     if (inside[3] === "restore-files" && method === "POST") return json({ job: restoreFromSnapshot(inside[1]!, inside[2]!, (await body(req)).paths, user.name).id }, 202);
   }
-  const b = /^\/api\/backups\/([a-z0-9_-]+)\/(\d{8}-\d{6})(\/restore)?$/.exec(path);
-  if (b && b[3] && method === "POST") return json({ job: restoreSnapshot(b[1]!, b[2]!, user.name).id }, 202);
+  // an app of another machine: its snapshot is taken there and kept here
+  const take = /^\/api\/backups\/([a-z0-9_-]+@[a-f0-9]{8})\/take$/.exec(path);
+  if (take && method === "POST") return json({ job: backupMachineApp(take[1]!, user.name).id }, 202);
+  const b = /^\/api\/backups\/([a-z0-9_-]+(?:@[a-f0-9]{8})?)\/(\d{8}-\d{6})(\/restore)?$/.exec(path);
+  if (b && b[3] && method === "POST") return json({ job: (b[1]!.includes("@") ? restoreMachineApp(b[1]!, b[2]!, user.name) : restoreSnapshot(b[1]!, b[2]!, user.name)).id }, 202);
   if (b && !b[3] && method === "DELETE") {
     deleteSnapshot(b[1]!, b[2]!);
-    record("app.snapshot.remove", { app: b[1]!, user: user.name });
+    const [app, on] = b[1]!.split("@");
+    record("app.snapshot.remove", { app, user: user.name, ...(on ? { machine: machineList().find((m) => m.id === on)?.name ?? on } : {}) });
     return json({ ok: true });
   }
 

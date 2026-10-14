@@ -955,3 +955,5 @@ body:has(> .assistant-fab) #view:not(.fill) { padding-bottom: 104px; }
 .machine-apps th:last-child { width: 1%; }
 .store-target { padding: 0; }
 .store-target select { width: auto; }
+.backup-name { gap: 2px; justify-items: start; }
+.backup-name .with-icon .ico { width: 14px; height: 14px; }

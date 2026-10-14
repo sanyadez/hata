@@ -48,12 +48,14 @@ export interface Snapshot {
 }
 
 const KEEP_PRE_UPDATE = 3;
-const SNAPSHOT_ID_RE = /^\d{8}-\d{6}$/;
+export const SNAPSHOT_ID_RE = /^\d{8}-\d{6}$/;
+/** Whose snapshots a folder holds: an app here, or `<name>@<machine>` — an app of another machine */
+export const BACKUP_KEY_RE = /^[a-z0-9][a-z0-9_-]{0,63}(@[a-f0-9]{8})?$/;
 
 export const backupDir = (): string => settings.backup.dir || join(settings.dataRoot, "Backups");
-const appBackupDir = (name: string) => join(backupDir(), name);
+export const appBackupDir = (name: string) => join(backupDir(), name);
 
-function snapshotId(at: Date): string {
+export function snapshotId(at: Date): string {
   const p = (n: number, width = 2) => String(n).padStart(width, "0");
   return `${at.getFullYear()}${p(at.getMonth() + 1)}${p(at.getDate())}-${p(at.getHours())}${p(at.getMinutes())}${p(at.getSeconds())}`;
 }
@@ -145,7 +147,7 @@ export function tarMove(from: string, to: string): string {
 // --- Snapshots on disk ------------------------------------------------------------------------------
 
 export function listSnapshots(name: string): Snapshot[] {
-  if (!APP_NAME_RE.test(name)) return [];
+  if (!BACKUP_KEY_RE.test(name)) return [];
   let files: string[];
   try {
     files = readdirSync(appBackupDir(name));
@@ -162,14 +164,14 @@ export function listSnapshots(name: string): Snapshot[] {
   return out.sort((a, b) => b.at - a.at);
 }
 
-function deleteFiles(name: string, id: string): void {
+export function deleteFiles(name: string, id: string): void {
   rmSync(join(appBackupDir(name), id + ".tar.gz"), { force: true });
   rmSync(join(appBackupDir(name), id + ".json"), { force: true });
   forgetSnapshot(name, id);
 }
 
 export function deleteSnapshot(name: string, id: string): void {
-  if (!APP_NAME_RE.test(name) || !SNAPSHOT_ID_RE.test(id)) throw new AppError("backup.notFound", 404);
+  if (!BACKUP_KEY_RE.test(name) || !SNAPSHOT_ID_RE.test(id)) throw new AppError("backup.notFound", 404);
   if (!listSnapshots(name).some((s) => s.id === id)) throw new AppError("backup.notFound", 404);
   deleteFiles(name, id);
   mirror();
@@ -180,7 +182,7 @@ function localSets(): { root: string; sets: LocalSet[] } {
   const root = backupDir();
   let apps: string[] = [];
   try {
-    apps = readdirSync(root, { withFileTypes: true }).filter((e) => e.isDirectory() && APP_NAME_RE.test(e.name)).map((e) => e.name);
+    apps = readdirSync(root, { withFileTypes: true }).filter((e) => e.isDirectory() && BACKUP_KEY_RE.test(e.name)).map((e) => e.name);
   } catch {}
   const sets = apps.map((name) => ({ dir: name, ids: listSnapshots(name).map((s) => s.id) }));
   sets.push({ dir: SERVER_DIR, ids: listServerSnapshots(root).map((s) => s.id) });
@@ -297,7 +299,7 @@ export function refusedPaths(snapshot: Snapshot, name: string, roots: string[]):
 
 export const archiveOf = (name: string, id: string): string => join(appBackupDir(name), id + ".tar.gz");
 export const snapshotOf = (name: string, id: string): Snapshot => {
-  const snapshot = APP_NAME_RE.test(name) && SNAPSHOT_ID_RE.test(id) ? listSnapshots(name).find((s) => s.id === id) : undefined;
+  const snapshot = BACKUP_KEY_RE.test(name) && SNAPSHOT_ID_RE.test(id) ? listSnapshots(name).find((s) => s.id === id) : undefined;
   if (!snapshot) throw new AppError("backup.notFound", 404);
   return snapshot;
 };
@@ -432,7 +434,10 @@ onBeforeUpdate(async (name, log) => {
 // --- Overview ---------------------------------------------------------------------------------------
 
 export interface BackupApp {
+  /** An app here, or `<name>@<machine>` */
   name: string;
+  /** The machine it is on, when not this server */
+  machine?: { id: string; name: string };
   title: string;
   icon: string;
   installed: boolean;
@@ -478,6 +483,14 @@ export function nextRun(time: string, now: Date): Date {
   return next;
 }
 
+/** The apps of other machines on the Backups page, given by `machinebackup.ts` (it imports this module) */
+let machineEntries: (lang: string) => Promise<BackupApp[]> = async () => [];
+export function onMachineBackups(entries: (lang: string) => Promise<BackupApp[]>, run: (user: string, reason: SnapshotReason) => Promise<{ ok: number; failed: string[] }>): void {
+  machineEntries = entries;
+  machineRun = run;
+}
+let machineRun: (user: string, reason: SnapshotReason) => Promise<{ ok: number; failed: string[] }> = async () => ({ ok: 0, failed: [] });
+
 export async function backupOverview(lang: string): Promise<BackupOverview> {
   const dir = backupDir();
   const installed = installedNames();
@@ -485,7 +498,7 @@ export async function backupOverview(lang: string): Promise<BackupOverview> {
   try {
     stored = readdirSync(dir, { withFileTypes: true }).filter((e) => e.isDirectory() && APP_NAME_RE.test(e.name)).map((e) => e.name);
   } catch {}
-  const apps: BackupApp[] = [...new Set([...installed, ...stored])].sort().map((name) => {
+  const local: BackupApp[] = [...new Set([...installed, ...stored])].sort().map((name) => {
     const meta = appMeta(readCompose(name) ?? { name }, lang);
     return {
       name,
@@ -498,6 +511,7 @@ export async function backupOverview(lang: string): Promise<BackupOverview> {
       extraFolders: installed.includes(name) ? appFolders(name).extra : [],
     };
   });
+  const apps = [...local, ...(await machineEntries(lang).catch(() => []))];
   let free: number | null = null;
   try {
     const s = statfsSync(dir);
@@ -539,6 +553,10 @@ export async function runBackups(user: string, reason: SnapshotReason = "schedul
         failed.push(name);
       }
     }
+    // the apps of the other machines: their snapshots are kept here
+    const other = await machineRun(user, reason).catch(() => ({ ok: 0, failed: [] as string[] }));
+    ok += other.ok;
+    failed.push(...other.failed);
     // the server's own state last: it is small, and the run is whole only with it
     await takeServerSnapshot(reason === "manual" ? "manual" : "schedule").catch((e) => {
       console.error("Could not back up the server's state:", e instanceof Error ? e.message : e);

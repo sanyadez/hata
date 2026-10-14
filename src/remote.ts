@@ -71,7 +71,7 @@ export function parseSource(word: string): Source | string | null {
 }
 
 /** A folder of the backup directory: the server's own, or an app's */
-export const isCopyFolder = (name: string): boolean => name === "_server" || /^[a-z0-9][a-z0-9_-]{0,62}$/.test(name);
+export const isCopyFolder = (name: string): boolean => name === "_server" || /^[a-z0-9][a-z0-9_-]{0,62}(@[a-f0-9]{8})?$/.test(name);
 
 /** Of the files of one folder: the two of its latest whole snapshot, sealed or not — what a restore needs */
 export function latestFiles(names: string[]): string[] {

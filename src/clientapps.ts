@@ -171,3 +171,78 @@ export function remove(args: { name?: unknown; data?: unknown; root?: unknown })
     rmSync(data, { recursive: true, force: true });
   }
 }
+
+// --- Snapshots: the archive is kept by Hata ------------------------------------------------------------
+
+const tarPath = (path: string) => path.replace(/^\/+/, "");
+
+async function running(name: string): Promise<{ any: boolean; images: string[] }> {
+  const out = Bun.spawnSync(["docker", "ps", "-a", "--filter", `label=com.docker.compose.project=${name}`, "--format", "{{.State}} {{.Image}}"]);
+  const lines = out.stdout.toString().split("\n").filter(Boolean);
+  return { any: lines.some((l) => l.startsWith("running") || l.startsWith("restarting")), images: [...new Set(lines.map((l) => l.split(" ")[1] ?? ""))].filter(Boolean) };
+}
+
+const quietly = async (name: string, command: string) => {
+  const dir = join(APPS_DIR, name);
+  if (!existsSync(join(dir, "compose.yml"))) return;
+  const proc = Bun.spawn({ cmd: composeCmd(name, dir, command === "up" ? ["up", "-d", "--remove-orphans"] : [command]), cwd: dir, stdout: "ignore", stderr: "pipe" });
+  const said = await new Response(proc.stderr).text();
+  if ((await proc.exited) !== 0) fail("machine.composeFailed", { message: said.trim().split("\n").pop() || `docker compose ${command} failed` });
+};
+
+/**
+ * An app's snapshot as a tar.gz stream: its folder here, its own data folder and its named volumes,
+ * owners by number. The app is stopped while it is read and started again whatever happens.
+ */
+export async function snapshot(args: { name?: unknown; root?: unknown }, channel: Channel): Promise<{ paths: string[]; images: string[] }> {
+  const name = nameOf(args.name);
+  const dir = join(APPS_DIR, name);
+  if (!existsSync(join(dir, "compose.yml"))) fail("app.notFound");
+  const data = join(resolve(String(args.root ?? "/DATA")), "AppData", name);
+  const volumes = Bun.spawnSync(["docker", "volume", "ls", "--filter", `label=com.docker.compose.project=${name}`, "--format", "{{.Mountpoint}}"]).stdout.toString().split("\n").map((l) => l.trim()).filter((l) => l.startsWith("/"));
+  const paths = [dir, data, ...volumes].filter((p) => existsSync(p));
+  const state = await running(name);
+  if (state.any) await quietly(name, "stop");
+  try {
+    const proc = Bun.spawn(["tar", "--numeric-owner", "--exclude=.hata-trash", "-czf", "-", "-C", "/", ...paths.map(tarPath)], { stdout: "pipe", stderr: "pipe" });
+    channel.signal.addEventListener("abort", () => proc.kill());
+    const errors = new Response(proc.stderr).text();
+    for await (const chunk of proc.stdout) await channel.send(chunk);
+    const code = await proc.exited;
+    // 1 is "a file changed while it was read": the archive is complete
+    if (code > 1) fail("files.failed", { code: (await errors).trim().split("\n").pop() || `tar exited with ${code}` });
+  } finally {
+    if (state.any) await quietly(name, "up").catch(() => {});
+  }
+  return { paths, images: state.images };
+}
+
+/**
+ * Puts an app back from a snapshot Hata sends: the archive is kept aside first and checked to hold only
+ * the snapshot's own paths; then the app is stopped, those paths are replaced and the app is started.
+ */
+export async function restore(args: { name?: unknown; paths?: unknown }, channel: Channel): Promise<void> {
+  const name = nameOf(args.name);
+  const paths = Array.isArray(args.paths) ? args.paths.filter((p): p is string => typeof p === "string" && p.startsWith("/")).map((p) => resolve(p)) : [];
+  // what a snapshot of this app may hold: its folder, a data folder named after it, Docker's volumes of it
+  const allowed = (p: string) => p === join(APPS_DIR, name) || /\/AppData\/[^/]+$/.test(p) && p.endsWith("/" + name) || /^\/var\/lib\/docker\/volumes\/[^/]+\/_data$/.test(p) || /\/volumes\/[^/]+\/_data$/.test(p);
+  if (!paths.length || paths.some((p) => !allowed(p))) fail("backup.badArchive");
+  const file = join("/var/tmp", `hata-restore-${name}-${process.pid}.tar.gz`);
+  const out = Bun.file(file).writer();
+  try {
+    for (let chunk = await channel.read(); chunk; chunk = await channel.read()) out.write(chunk);
+    await out.end();
+    const listing = Bun.spawnSync(["tar", "-tzf", file]);
+    if (listing.exitCode !== 0) fail("backup.badArchive");
+    const roots = paths.map(tarPath);
+    const stray = listing.stdout.toString().split("\n").filter((m) => m && !roots.some((r) => m === r || m === r + "/" || m.startsWith(r + "/")));
+    if (stray.length) fail("backup.badArchive");
+    await quietly(name, "stop").catch(() => {});
+    for (const path of paths) rmSync(path, { recursive: true, force: true });
+    const tar = Bun.spawnSync(["tar", "--numeric-owner", "-xzpf", file, "-C", "/"]);
+    if (tar.exitCode !== 0) fail("files.failed", { code: tar.stderr.toString().trim().split("\n").pop() || "tar failed" });
+    await quietly(name, "up");
+  } finally {
+    rmSync(file, { force: true });
+  }
+}
