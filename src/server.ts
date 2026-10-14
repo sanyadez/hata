@@ -954,7 +954,7 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
   // the data folder moves as a job: the apps are stopped, the files copied, the apps pointed at them
   if (path === "/api/data-root/move" && method === "POST") {
     const job = moveData((await body(req)).path, user.name);
-    return json({ job: job.id, app: job.app }, 202);
+    return job ? json({ job: job.id, app: job.app }, 202) : json({ path: settings.dataRoot });
   }
 
   // the configuration folder moves as a whole, and the service restarts in the new place

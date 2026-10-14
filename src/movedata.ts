@@ -14,6 +14,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmdirSync
 import { rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { AppError, appDir, composeFile, dc, installedNames, listApps, listJobs, startJob, writeEnv, type Job, type Log } from "./apps";
+import { record } from "./activity";
 import { bus } from "./bus";
 import { DATA_DIR, saveSettings, SECRETS_DIR, settings } from "./config";
 import { folderMoved } from "./files";
@@ -89,8 +90,17 @@ function freeAt(path: string): number {
 const TRASH = ".hata-trash";
 const date = () => new Date().toISOString().slice(0, 10);
 
-/** Starts the move as a job: its log is what the dialog shows */
-export function moveData(target: unknown, user: string): Job {
+/** Whether the data folder holds nothing to carry over: no app installed, and nothing in it but the disk's own folders */
+function nothingToMove(from: string): boolean {
+  if (installedNames().length) return false;
+  return !existsSync(from) || readdirSync(from).every((name) => name === TRASH || name === "lost+found");
+}
+
+/**
+ * Starts the move as a job: its log is what the dialog shows. While there is nothing to move (a fresh
+ * server) the folder is simply chosen instead — it may be one that already holds files — and no job runs.
+ */
+export function moveData(target: unknown, user: string): Job | null {
   const from = settings.dataRoot;
   const checked = cannotMoveData(target, from, [DATA_DIR, SECRETS_DIR], mountPoints());
   if ("error" in checked) throw new AppError(checked.error, 400, checked.detail);
@@ -98,6 +108,15 @@ export function moveData(target: unknown, user: string): Job {
   const foreign = ownerless(to, mountTable());
   if (foreign) throw new AppError("data.ownerless", 400, { fstype: foreign });
   if (listJobs().some((job) => job.status === "running")) throw new AppError("data.busy", 409);
+  if (nothingToMove(from)) {
+    settings.dataRoot = to;
+    const backups = rebasePath(settings.backup.dir, from, to);
+    if (backups !== null) settings.backup.dir = backups;
+    saveSettings();
+    folderMoved(from, to);
+    record("system.data.chosen", { user, detail: to });
+    return null;
+  }
   if (existsSync(to) && readdirSync(to).some((name) => name !== "lost+found")) throw new AppError("data.notEmpty", 409);
 
   return startJob("", "move", user, async (log) => {

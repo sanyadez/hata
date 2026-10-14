@@ -3525,6 +3525,8 @@ function folderPicker({ title, start, confirmLabel, action, allowed = () => true
     try {
       listing = await api("GET", `/api/files?path=${encodeURIComponent(path)}`);
     } catch (e) {
+      // a starting folder that is not there yet opens at the nearest one that is
+      if (path === start && path.lastIndexOf("/") > 0) return show((start = path.slice(0, path.lastIndexOf("/"))));
       return void (error.textContent = errorText(e));
     }
     at = listing.path;
@@ -4495,7 +4497,7 @@ function paintWelcome() {
           h("p", { class: "muted small" }, place ? t("welcome.data.on", { device: place.device, path: place.path, free: bytes(Math.max(0, place.total - place.used)), total: bytes(place.total) }) : t("welcome.data.unknown")),
           place?.path === "/" && h("p", { class: "muted small" }, t("welcome.data.system")),
         ),
-        button(t("data.move"), { class: "small", onclick: () => moveDataDialog() }),
+        h("div", { class: "row-actions" }, button(t("data.choose"), { class: "small", onclick: () => pickDataRoot() }, "folder")),
       ),
       h("div", { class: "section-head" }, h("h2", null, t("welcome.data.disks")), h("a", { class: "link small", href: "#/settings/storage" }, t("welcome.data.all"))),
       !disks ? waiting : fresh.length ? fresh.map(diskRow) : h("p", { class: "muted" }, t("welcome.data.noDisks")),
@@ -4681,6 +4683,33 @@ function updateRow() {
 
 /** The configuration folder: where it is, and moving it — which restarts Hata in the new place */
 /** Moves the data folder with everything in it; `suggested` — a folder to offer (a disk just formatted) */
+/** What the server answered a move with: a job to follow, or the folder simply chosen (nothing was there to move) */
+function dataRootMoved(res, done) {
+  if (!res.job) {
+    toast(t("data.chosen", { path: res.path }));
+    return void done();
+  }
+  jobDialog(res.job, "move", "", done);
+}
+
+async function afterDataRoot() {
+  state.settings = await api("GET", "/api/settings");
+  if (state.route.view === "settings") renderSettings();
+  if (state.route.view === "welcome") void loadWelcome();
+}
+
+/** The data folder chosen with the folder picker; a folder that holds data already is moved there */
+function pickDataRoot() {
+  const current = state.settings.dataRoot;
+  folderPicker({
+    title: t("data.chooseTitle"),
+    start: current.split("/").slice(0, -1).join("/") || "/",
+    confirmLabel: t("data.chooseHere"),
+    allowed: (at) => at !== "/" && at !== current,
+    action: async (path) => dataRootMoved(await api("POST", "/api/data-root/move", { path }), afterDataRoot),
+  });
+}
+
 async function moveDataDialog(suggested = "") {
   const s = state.settings;
   const target = h("input", { type: "text", value: suggested, spellcheck: false, class: "mono", placeholder: "/mnt/disk/DATA" });
@@ -4698,11 +4727,7 @@ async function moveDataDialog(suggested = "") {
     try {
       const res = await api("POST", "/api/data-root/move", { path: target.value.trim() });
       dialog.close();
-      jobDialog(res.job, "move", "", async () => {
-        state.settings = await api("GET", "/api/settings");
-        if (state.route.view === "settings") renderSettings();
-        if (state.route.view === "welcome") void loadWelcome();
-      });
+      dataRootMoved(res, afterDataRoot);
     } catch (e) {
       error.textContent = errorText(e);
       go.disabled = false;
@@ -4712,7 +4737,7 @@ async function moveDataDialog(suggested = "") {
     "wide",
     h("h2", null, t("data.moveTitle")),
     h("p", { class: "muted" }, t("data.moveLead", { from: s.dataRoot })),
-    field(t("data.target"), target, t("data.targetHint")),
+    field(t("data.target"), h("span", { class: "pair" }, target, button(t("data.choose"), { onclick: () => folderPicker({ title: t("data.chooseTitle"), start: target.value.startsWith("/") ? target.value : "", confirmLabel: t("edit.pickHere"), action: (path) => void ((target.value = path), (go.disabled = false)) }) }, "folder")), t("data.targetHint")),
     places.length > 0 && h("div", { class: "row-actions wrap" }, places.map((path) => button(`${path}/DATA`, { class: "small mono", onclick: () => ((target.value = `${path}/DATA`), (go.disabled = false)) }))),
     h("p", { class: "banner" }, t("data.moveWarn")),
     error,
