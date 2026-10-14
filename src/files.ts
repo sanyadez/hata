@@ -23,6 +23,8 @@ import { AppError, startJob, type Job } from "./apps";
 import { DATA_DIR, saveSettings, SECRETS_DIR, settings } from "./config";
 import { movePath } from "./dashboard";
 import { parseMounts } from "./disks";
+import { roomOf } from "./netroom";
+import { readJsonFile } from "./fsutil";
 import { writablePath } from "./smbconf";
 import { findInTrash, inTrash, KEEP_DAYS, listTrash, purgeTrash, putInTrash, sweepTrash, takeFromTrash, TRASH_DIR, type TrashItem } from "./trash";
 import { openZip } from "./unzip";
@@ -264,9 +266,13 @@ function otherDisks(home: string): Volume[] {
     mounts = parseMounts(readFileSync("/proc/mounts", "utf8")).filter((mount) => mount.path !== "/" && mount.path !== home).slice(0, 20);
   } catch {}
   const labels = labelsByDevice();
+  // a network place is called by the name it was given (read here, not imported: no side effects)
+  const saved = readJsonFile<{ places?: unknown }>(join(SECRETS_DIR, "netplaces.json"), {}).places;
+  const named = new Map((Array.isArray(saved) ? saved : []).filter((p) => typeof p?.slug === "string" && typeof p?.name === "string").map((p) => [`/mnt/net/${p.slug}`, p.name as string] as const));
   return mounts.map((mount) => {
-    const room = diskOf(mount.path);
-    return { path: mount.path, label: labels.get(realOrSame(mount.device)) ?? "", total: room?.total ?? 0, free: room?.free ?? 0, network: mount.network, readOnly: mount.readOnly };
+    // a server that does not answer would stop this process in statfs
+    const room = mount.network ? roomOf(mount.path) : diskOf(mount.path);
+    return { path: mount.path, label: named.get(mount.path) ?? labels.get(realOrSame(mount.device)) ?? "", total: room?.total ?? 0, free: room?.free ?? 0, network: mount.network, readOnly: mount.readOnly };
   });
 }
 

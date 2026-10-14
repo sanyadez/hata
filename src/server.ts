@@ -25,6 +25,7 @@ import { allowed as oauthAllowed, declined as oauthDeclined, findClient, holdQue
 import { checkOffsite, forgetHost, offsiteFailure, saveOffsite } from "./offsite";
 import { APP_NAME_RE, dumpCompose } from "./appform";
 import { trashSizeOn } from "./trash";
+import { discover as discoverPlaces, installFor as installPlaceTools, listPlaces, placesDown, removePlace, retryPlace, savePlace, shares as placeShares, startNetPlaces } from "./netplaces";
 import { addShare, changeShare, installSamba, listShares, refreshShares, removeShare, shareTrouble, startShares } from "./shares";
 import { checkDisks, diskHealth, installTool, listDisks, startDisks, startSelfTest } from "./disks";
 import { fills, measureFills, startFills } from "./fills";
@@ -777,7 +778,7 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
       site: { domain: siteDomain(), mode: settings.https.mode, local: localDomain() },
       // whether the assistant can be asked: the pages offer it next to what is wrong
       assistant: admin && assistantReady(assistantConfig()),
-      attention: admin ? attention({ system, docker, apps, activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), exposed: exposedNics(), array: arrayTrouble(), shares: shareTrouble(), unused: unusedDisks(), filling: fillingUp() }) : [],
+      attention: admin ? attention({ system, docker, apps, activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), exposed: exposedNics(), array: arrayTrouble(), shares: shareTrouble(), places: placesDown(), unused: unusedDisks(), filling: fillingUp() }) : [],
       // who signed in from where, and what was installed by whom, is the administrators' business
       activity: admin ? recent(8) : [],
       // containers and compose projects on this machine that are not apps here yet
@@ -1029,6 +1030,32 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
   const failureWords = (failure: Extract<Outcome, { error: string }>) => `${({ "disk.busy": "Something is still using the folder.", "disk.mountFailed": "The disk could not be connected.", "disk.formatFailed": "The disk could not be formatted.", "disk.wipeFailed": "The disk could not be erased.", "disk.inUse": "The disk is in use." } as Record<string, string>)[failure.error] ?? failure.error} ${failure.message ?? ""}`.trim();
   const changed = (outcome: Outcome) => ("error" in outcome ? refused(outcome) : storage());
   if (path === "/api/disks" && method === "GET") return storage();
+
+  // ---- folders of other machines mounted here (never through MCP: passwords) ----
+  if (path === "/api/netplaces" && method === "GET") return json(await listPlaces());
+  if (path === "/api/netplaces/discover" && method === "GET") return json(await discoverPlaces());
+  if (path === "/api/netplaces/shares" && method === "POST") return json(await placeShares(await body(req)));
+  if (path === "/api/netplaces/package" && method === "POST") {
+    server.timeout(req, 0);
+    const failed = await installPlaceTools((await body(req)).kind);
+    return failed ? fail(500, "netplace.packageFailed", { message: failed }) : json(await listPlaces());
+  }
+  if (path === "/api/netplaces" && method === "POST") {
+    server.timeout(req, 0);
+    const res = await savePlace(await body(req), null, user.name);
+    return Array.isArray(res) ? json({ places: res }, 201) : json(res);
+  }
+  const place = /^\/api\/netplaces\/([a-z0-9-]{1,40})(\/retry)?$/.exec(path);
+  if (place && method === "POST" && place[2]) {
+    server.timeout(req, 0);
+    return json({ places: await retryPlace(place[1]!) });
+  }
+  if (place && !place[2] && method === "PUT") {
+    server.timeout(req, 0);
+    const res = await savePlace(await body(req), place[1]!, user.name);
+    return Array.isArray(res) ? json({ places: res }) : json(res);
+  }
+  if (place && !place[2] && method === "DELETE") return json({ places: await removePlace(place[1]!, user.name) });
   if (path === "/api/disks/check" && method === "POST") {
     // a disk that sleeps takes its time to spin up
     server.timeout(req, 0);
@@ -1863,6 +1890,7 @@ export async function serve(): Promise<void> {
   startNetwork();
   startSnapraid();
   startShares();
+  startNetPlaces();
   startTrash();
   scheduleStoreSync();
   scheduleBackups();
@@ -1871,7 +1899,7 @@ export async function serve(): Promise<void> {
   void refreshHttps();
   refreshLocalNames();
   startNotifications({
-    attention: async () => attention({ system: systemStatus(), docker: await dockerInfo(), apps: await listApps("en"), activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), exposed: exposedNics(), array: arrayTrouble(), shares: shareTrouble(), unused: unusedDisks(), filling: fillingUp() }),
+    attention: async () => attention({ system: systemStatus(), docker: await dockerInfo(), apps: await listApps("en"), activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), exposed: exposedNics(), array: arrayTrouble(), shares: shareTrouble(), places: placesDown(), unused: unusedDisks(), filling: fillingUp() }),
     baseUrl: publicUrl,
     isAdmin: (id) => findUser(id)?.role === "admin",
   });

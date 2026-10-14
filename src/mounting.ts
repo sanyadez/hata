@@ -276,6 +276,10 @@ async function seal(path: string): Promise<void> {
   }
 }
 
+/** For other kinds of mounts Hata makes (network places): the same closed directory */
+export const sealFolder = (path: string): Promise<void> => seal(path);
+export const openFolder = (path: string): Promise<void> => removeFolder(path);
+
 /** Opens such a directory again and, unless it was there before Hata, removes it when empty */
 async function removeFolder(path: string, ours = true): Promise<void> {
   const at = sealed.indexOf(path);

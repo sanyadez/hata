@@ -11,6 +11,7 @@
  * disk's own self-test.
  */
 import { existsSync, readFileSync, statfsSync } from "node:fs";
+import { roomOf } from "./netroom";
 import { join } from "node:path";
 import { DATA_DIR } from "./config";
 import { isPlainObject, readJsonFile, writeJsonAtomic } from "./fsutil";
@@ -469,7 +470,9 @@ export async function listDisks(): Promise<{ disks: DiskReport[]; mounts: MountR
   } catch {}
   const mounts: MountReport[] = [];
   for (const mount of parseMounts(mounted)) {
-    const size = usage(mount.path);
+    // a network file system is measured apart: a server that does not answer would block statfs
+    const room = mount.network ? roomOf(mount.path) : null;
+    const size = mount.network ? room && { total: room.total, used: room.total - room.free } : usage(mount.path);
     if (!size) continue;
     const disk = known.find((d) => d.path === mount.device || d.volumes.some((v) => v.path === mount.device || v.mounts.includes(mount.path)));
     mounts.push({ ...mount, ...size, disk: disk?.name ?? "" });

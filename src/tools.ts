@@ -16,6 +16,7 @@ import { installTool } from "./disks";
 import { dockerInfo } from "./docker";
 import { DOCKER_INSTALL_COMMAND, installDocker } from "./dockerinstall";
 import { parseFstab, pools } from "./mounting";
+import { packagesInUse } from "./netplaces";
 import { record } from "./activity";
 import { bus } from "./bus";
 import { afterPackage, networkReport, type Nic } from "./network";
@@ -53,6 +54,11 @@ const SPECS: Spec[] = [
   { id: "ntfs-3g", name: "ntfs-3g", package: "ntfs-3g", bin: "ntfs-3g", version: ["ntfs-3g", "--version"], page: "#/settings/storage" },
   { id: "mergerfs", name: "mergerfs", package: "mergerfs", bin: "mergerfs", version: ["mergerfs", "--version"], page: "#/settings/storage" },
   { id: "snapraid", name: "SnapRAID", package: "snapraid", bin: "snapraid", version: ["snapraid", "--version"], page: "#/settings/storage" },
+  { id: "cifs-utils", name: "cifs-utils", package: "cifs-utils", bin: "mount.cifs", version: ["mount.cifs", "-V"], page: "#/settings/storage" },
+  { id: "smbclient", name: "smbclient", package: "smbclient", bin: "smbclient", version: ["smbclient", "--version"], page: "#/settings/storage" },
+  { id: "nfs-common", name: "nfs-common", package: "nfs-common", bin: "mount.nfs", version: ["mount.nfs", "-V"], page: "#/settings/storage" },
+  { id: "rclone", name: "rclone", package: "rclone", bin: "rclone", version: ["rclone", "version"], page: "#/settings/storage" },
+  { id: "fuse3", name: "FUSE 3", package: "fuse3", bin: "fusermount3", version: ["fusermount3", "--version"], page: "#/settings/storage" },
   { id: "network-manager", name: "NetworkManager", package: "network-manager", bin: "nmcli", version: ["nmcli", "--version"], page: "#/settings/network" },
   { id: "wpasupplicant", name: "wpa_supplicant", package: "wpasupplicant", bin: "wpa_supplicant", version: ["wpa_supplicant", "-v"], page: "#/settings/network" },
   { id: "dnsmasq-base", name: "dnsmasq", package: "dnsmasq-base", bin: "dnsmasq", version: ["dnsmasq", "--version"], page: "#/settings/network" },
@@ -146,6 +152,7 @@ function holdsOf(id: string, nics: Nic[], remote: boolean): string {
   // Docker's packages depend on it: the package manager would take Docker away with it
   if (id === "iptables" && has("docker")) return "docker";
   if (id === "ntfs-3g" && /\sfuseblk\s/.test(readText("/proc/mounts"))) return "ntfs";
+  if (packagesInUse().includes(id)) return "places";
   return "";
 }
 

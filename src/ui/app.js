@@ -1424,7 +1424,7 @@ function dragEnd(drop) {
   drag.kind.drop(drag, target);
 }
 
-const ATTENTION_ICONS = { update: "up", docker: "box", restarting: "refresh", partial: "alert", disk: "disk", smart: "disk", memory: "memory", temperature: "temp", internet: "network", network: "network", array: "disk", share: "share" };
+const ATTENTION_ICONS = { update: "up", docker: "box", restarting: "refresh", partial: "alert", disk: "disk", smart: "disk", memory: "memory", temperature: "temp", internet: "network", network: "network", array: "disk", share: "share", netplace: "globe" };
 
 function attentionItem(item) {
   const detail = { ...item.detail, free: item.detail.free == null ? "" : bytes(item.detail.free), trash: item.detail.trash == null ? "" : bytes(item.detail.trash), size: item.detail.size == null ? "" : bytes(item.detail.size) };
@@ -1442,6 +1442,7 @@ function attentionItem(item) {
     (item.code.startsWith("smart.") || item.code === "disk.filling" || item.code.startsWith("array.")) && open("#/settings/storage"),
     (item.code.startsWith("internet.") || item.code === "network.exposed") && open("#/settings/network"),
     item.code.startsWith("share.") && open("#/settings/shares"),
+    item.code === "netplace.down" && open("#/settings/storage"),
     item.app && open(`#/apps/${item.app}${item.code === "restarting" || item.code === "partial" ? "/logs" : ""}`, t(item.code === "restarting" || item.code === "partial" ? "app.logs" : "common.open")),
     (item.code === "disk.new" || item.code === "disk.usb") && isAdmin() && button(t("mounting.ignore"), { class: "small quiet", onclick: () => void api("POST", "/api/disks/ignore", { id: item.detail.id }).then(refresh, (e) => toast(errorText(e), "error")) }),
   ].filter(Boolean);
@@ -3093,6 +3094,7 @@ function filesPlaces(path) {
     h("a", { class: "cat" + (trash ? " active" : ""), href: "#/trash" }, h("span", { class: "with-icon" }, icon("trash"), h("span", { class: "clip" }, t("trash.title")))),
     (state.files?.disks ?? []).length > 0 && h("div", { class: "cat-title" }, t("files.disks")),
     (state.files?.disks ?? []).map((d) => place(volumeName(d), d.path, d.network ? "globe" : "disk", inside(d.path))),
+    h("a", { class: "cat", href: "#/settings/storage", title: t("netplace.sidebarHint") }, h("span", { class: "with-icon" }, icon("plus"), h("span", { class: "clip muted" }, t("netplace.sidebar")))),
     disk && h("div", { class: "cat-title" }, t("files.disk")),
     disk && h("div", { class: "files-disk" }, h("div", { class: "bar" }, fill), h("span", { class: "muted small" }, t("files.free", { free: bytes(disk.free), total: bytes(disk.total) }))),
   );
@@ -4692,7 +4694,7 @@ async function loadSettings() {
     if (isAdmin() && state.route.section === "network") state.network = await api("GET", "/api/network").catch(() => null);
     if (isAdmin() && state.route.section === "remote") [state.remote, state.wireguard] = await Promise.all([api("GET", "/api/tailscale").catch(() => null), api("GET", "/api/wireguard").catch(() => null)]);
     if (isAdmin() && state.route.section === "tools") state.tools = await api("GET", "/api/tools").catch(() => null);
-    if (isAdmin() && state.route.section === "storage") state.disks = await api("GET", "/api/disks").catch(() => null);
+    if (isAdmin() && state.route.section === "storage") [state.disks, state.places] = await Promise.all([api("GET", "/api/disks").catch(() => null), api("GET", "/api/netplaces").catch(() => null)]);
     if (isAdmin() && state.route.section === "shares") state.shares = await api("GET", "/api/shares").catch(() => null);
     if (isAdmin() && state.route.section === "agents") state.agents = await api("GET", "/api/agents").catch(() => null);
     if (isAdmin() && state.route.section === "assistant") state.assistant = await api("GET", "/api/assistant").catch(() => null);
@@ -7353,9 +7355,228 @@ function storageSection() {
         h("table", { class: "disks" }, h("thead", null, h("tr", null, h("th", null, t("disks.fs.col.path")), h("th", null, t("disks.fs.col.source")), h("th", null, t("disks.col.usage")), h("th"))), h("tbody", null, data.mounts.map(fsRow), absent.map(absentRow))),
       ),
     data.mounting?.possible && h("section", { class: "card pad" }, h("label", { class: "check" }, automount, h("span", null, h("strong", null, t("mounting.automount")), h("span", { class: "muted small block" }, t("mounting.automountHint"))))),
+    state.places && placesCard(state.places),
     data.array && data.mounting?.possible && arrayCard(data.array),
     data.fills && fillsCard(data.fills, busy),
   ].filter(Boolean);
+}
+
+// --- Network places: folders of other machines mounted here -----------------------------------------
+
+const PLACE_KINDS = ["smb", "nfs", "sftp", "webdav", "ftp"];
+const placeAddress = (p) => (p.kind === "webdav" ? p.url : p.kind === "smb" ? `//${p.host}/${p.path}` : p.kind === "nfs" ? `${p.host}:${p.path}` : `${p.kind}://${p.user ? p.user + "@" : ""}${p.host}${p.port ? ":" + p.port : ""}${p.path.startsWith("/") ? p.path : "/~/" + p.path}`);
+
+async function reloadPlaces(list) {
+  state.places = list ? { ...state.places, places: list } : await api("GET", "/api/netplaces").catch(() => state.places);
+  if (state.route.view === "settings" && state.route.section === "storage") renderSettings();
+}
+
+function placesCard(data) {
+  const row = (p) => {
+    const chip = p.mounted && !p.away ? h("span", { class: "state running" }, t("netplace.on")) : p.state === "activating" ? h("span", { class: "state partial" }, t("netplace.connecting")) : h("span", { class: "state restarting" }, t("netplace.off"));
+    return h(
+      "tr",
+      null,
+      h("td", null, h("div", { class: "with-icon" }, h("span", { class: "badge-icon plain" }, icon("globe")), h("div", null, h("a", { class: "strong", href: filesHash(p.folder) }, p.name), h("div", { class: "muted small mono clip" }, placeAddress(p))))),
+      h("td", null, chip, p.readOnly && h("span", { class: "chip" }, t("netplace.readOnly"))),
+      h("td", null, p.mounted && p.total ? usageBar(p.total - p.free, p.total) : h("span", { class: "muted mono small" }, p.folder)),
+      h(
+        "td",
+        null,
+        h(
+          "div",
+          { class: "row-actions" },
+          (!p.mounted || p.away) && button(t("netplace.retry"), { class: "small", onclick: async (e) => {
+            e.currentTarget.disabled = true;
+            try {
+              await reloadPlaces((await api("POST", `/api/netplaces/${p.id}/retry`, {})).places);
+            } catch (err) {
+              toast(errorText(err), "error");
+              void reloadPlaces();
+            }
+          } }, "refresh"),
+          button(t("netplace.change"), { class: "small", onclick: () => placeDialog(p) }),
+          button(t("netplace.remove"), { class: "small quiet", onclick: () => removePlaceDialog(p) }),
+        ),
+      ),
+    );
+  };
+  return h(
+    "section",
+    { class: "card table-wrap" },
+    h(
+      "div",
+      { class: "pad card-head" },
+      h("div", { class: "section-head" }, h("h2", null, t("netplace.title")), h("div", { class: "row-actions" }, button(t("netplace.find"), { class: "small", onclick: () => findPlacesDialog() }, "search"), button(t("netplace.connect"), { class: "small primary", onclick: () => placeDialog() }, "plus"))),
+      h("p", { class: "muted small" }, t(data.places.length ? "netplace.lead" : "netplace.none")),
+    ),
+    data.places.length > 0 && h("table", { class: "disks" }, h("thead", null, h("tr", null, h("th", null, t("netplace.col.place")), h("th", null, t("netplace.col.state")), h("th", null, t("disks.col.usage")), h("th"))), h("tbody", null, data.places.map(row))),
+  );
+}
+
+/** Connects a network place, or changes one; `seed` — a server found on the network */
+function placeDialog(place = null, seed = {}) {
+  let kind = place?.kind ?? seed.kind ?? "smb";
+  let dialog;
+  const value = (key, fallback = "") => place?.[key] ?? seed[key] ?? fallback;
+  const name = h("input", { value: value("name"), maxLength: 40, required: true });
+  const host = h("input", { value: value("host"), spellcheck: false, class: "mono", placeholder: "nas.local" });
+  const port = h("input", { type: "number", min: 0, max: 65535, value: value("port", 0) || "", class: "mono port" });
+  const url = h("input", { type: "url", value: value("url"), spellcheck: false, class: "mono", placeholder: "https://cloud.example.org/remote.php/dav/files/me" });
+  const share = h("input", { value: value("path"), spellcheck: false, class: "mono" });
+  const user = h("input", { value: value("user"), spellcheck: false, autocomplete: "off", class: "mono" });
+  const password = h("input", { type: "password", autocomplete: "new-password", placeholder: place?.passwordSet ? t("notify.tokenSaved") : "" });
+  const domain = h("input", { value: value("domain"), spellcheck: false, class: "mono", placeholder: "WORKGROUP" });
+  const tls = h("input", { type: "checkbox", checked: !!value("tls", false) });
+  const readOnly = h("input", { type: "checkbox", checked: !!value("readOnly", false) });
+  const found = h("div", { class: "row-actions wrap" });
+  const error = h("p", { class: "error", role: "alert" });
+  const trust = h("div", { class: "banner stack", hidden: true });
+  const needs = h("div");
+  const modes = h("div", { class: "modes" });
+  const fields = h("div", { class: "stack" });
+  const submit = h("button", { class: "btn primary" }, t(place ? "settings.save" : "netplace.connectGo"));
+  let trusted = "";
+  // the server's own list, to pick from instead of typing
+  const list = button(t(kind === "nfs" ? "netplace.showExports" : "netplace.showShares"), { class: "small", onclick: async () => {
+    error.textContent = "";
+    try {
+      const names = await api("POST", "/api/netplaces/shares", { kind, host: host.value, user: user.value, password: password.value });
+      put(found, names.length ? names.map((n) => button(n, { class: "small mono", onclick: () => (share.value = n) })) : h("span", { class: "muted small" }, t("netplace.noShares")));
+    } catch (err) {
+      showError(err);
+    }
+  } }, "search");
+  const tools = () => state.places?.packages?.[kind] ?? { missing: [], install: "" };
+  const showError = (err) => {
+    error.textContent = errorText(err);
+    if (err instanceof ApiError && err.code === "netplace.needsPackage") paintNeeds({ missing: err.detail.package.split(" "), install: err.detail.install }, err.detail.package === "smbclient" ? "smbclient" : kind);
+  };
+  const paintNeeds = (tool, forKind = kind) =>
+    put(
+      needs,
+      tool.missing.length > 0 &&
+        h(
+          "div",
+          { class: "banner stack" },
+          h("strong", null, t(`netplace.needs.${forKind}`, { package: tool.missing.join(", ") })),
+          h("p", { class: "muted small" }, t(`netplace.needs.${forKind}Why`)),
+          tool.install ? h("p", { class: "cmd" }, icon("terminal"), tool.install) : h("p", { class: "muted small" }, t("mounting.needs.byHand", { package: tool.missing.join(" ") })),
+          tool.install && button(t("mounting.needs.install", { package: tool.missing.join(", ") }), { class: "small", onclick: async (e) => {
+            const b = e.currentTarget;
+            b.disabled = true;
+            error.textContent = "";
+            try {
+              state.places = await api("POST", "/api/netplaces/package", { kind: forKind });
+              paintNeeds(forKind === "smbclient" ? { missing: [] } : tools());
+            } catch (err) {
+              error.textContent = errorText(err);
+              b.disabled = false;
+            }
+          } }, "download"),
+        ),
+    );
+  const paint = () => {
+    put(modes, PLACE_KINDS.map((k) => h("button", { type: "button", class: "mode" + (k === kind ? " active" : ""), disabled: !!place && k !== kind, onclick: () => ((kind = k), (trusted = ""), (trust.hidden = true), put(found), paint()) }, t(`netplace.kind.${k}`))));
+    list.lastChild.textContent = t(kind === "nfs" ? "netplace.showExports" : "netplace.showShares");
+    port.placeholder = { smb: "445", nfs: "2049", sftp: "22", ftp: "21", webdav: "" }[kind];
+    share.placeholder = kind === "smb" ? "photos" : kind === "nfs" ? "/srv/media" : "/";
+    host.required = kind !== "webdav";
+    url.required = kind === "webdav";
+    put(
+      fields,
+      h("p", { class: "muted small" }, t(`netplace.kind.${kind}Lead`)),
+      field(t("netplace.name"), name, t("netplace.nameHint")),
+      kind === "webdav" ? field(t("netplace.url"), url) : field(t("netplace.host"), h("span", { class: "pair" }, host, port), t("netplace.hostHint")),
+      kind === "smb" || kind === "nfs" ? field(t(kind === "smb" ? "netplace.share" : "netplace.export"), h("span", { class: "pair" }, share, list), t(kind === "smb" ? "netplace.shareHint" : "netplace.exportHint")) : field(t("netplace.folder"), share, t("netplace.folderHint")),
+      found,
+      kind !== "nfs" && field(t("netplace.user"), user, t(kind === "smb" ? "netplace.userHintSmb" : "netplace.userHint")),
+      kind !== "nfs" && field(t("netplace.password"), password),
+      kind === "smb" && field(t("netplace.domain"), domain, t("netplace.domainHint")),
+      kind === "nfs" && h("p", { class: "muted small" }, t("netplace.nfsOwners", { puid: `${state.settings?.puid ?? 1000}:${state.settings?.pgid ?? 1000}` })),
+      kind === "ftp" && h("label", { class: "check" }, tls, h("span", null, h("strong", null, t("netplace.tls")), h("span", { class: "muted small block" }, t("netplace.tlsHint")))),
+      h("label", { class: "check" }, readOnly, h("span", null, h("strong", null, t("netplace.readOnly")), h("span", { class: "muted small block" }, t("netplace.readOnlyHint")))),
+    );
+    paintNeeds(tools());
+  };
+  const send = async (e) => {
+    e.preventDefault();
+    error.textContent = "";
+    submit.disabled = true;
+    const body = { kind, name: name.value, host: host.value, port: port.value, url: url.value, path: share.value, user: user.value, password: password.value, domain: domain.value, tls: tls.checked, readOnly: readOnly.checked, ...(trusted ? { trust: trusted } : {}) };
+    submit.textContent = t("netplace.connecting");
+    try {
+      const res = await api(place ? "PUT" : "POST", place ? `/api/netplaces/${place.id}` : "/api/netplaces", body);
+      if (res.unknownHost) {
+        trusted = res.unknownHost;
+        trust.hidden = false;
+        put(trust, h("strong", null, t("netplace.hostKey", { host: host.value })), h("p", { class: "mono small" }, res.unknownHost), h("p", { class: "muted small" }, t("netplace.hostKeyHint")));
+        submit.textContent = t("netplace.trustGo");
+        submit.disabled = false;
+        return;
+      }
+      dialog.close();
+      toast(t(place ? "settings.saved" : "netplace.connected", { name: name.value }));
+      await reloadPlaces(res.places);
+    } catch (err) {
+      showError(err);
+      submit.textContent = t(place ? "settings.save" : "netplace.connectGo");
+      submit.disabled = false;
+    }
+  };
+  dialog = openDialog(
+    "wide",
+    h(
+      "form",
+      { onsubmit: send },
+      h("header", null, h("div", { class: "grow" }, h("h2", null, t(place ? "netplace.changeTitle" : "netplace.connectTitle")), h("p", { class: "muted small" }, t("netplace.dialogLead"))), closeX(() => dialog)),
+      modes,
+      needs,
+      fields,
+      trust,
+      error,
+      h("footer", null, closeButton(() => dialog, t("common.cancel")), submit),
+    ),
+  );
+  paint();
+  (place ? submit : name).focus();
+}
+
+function removePlaceDialog(p) {
+  let dialog;
+  const error = h("p", { class: "error", role: "alert" });
+  const go = button(t("netplace.remove"), { class: "danger", onclick: async () => {
+    go.disabled = true;
+    try {
+      const res = await api("DELETE", `/api/netplaces/${p.id}`);
+      dialog.close();
+      await reloadPlaces(res.places);
+    } catch (err) {
+      error.textContent = errorText(err);
+      go.disabled = false;
+    }
+  } });
+  dialog = openDialog("confirm", h("h2", null, t("netplace.removeTitle", { name: p.name })), h("p", { class: "muted" }, t("netplace.removeLead", { path: p.folder })), error, h("footer", null, closeButton(() => dialog, t("common.cancel")), go));
+}
+
+/** Servers on the home network that announce a file service; each opens the dialog filled in */
+async function findPlacesDialog() {
+  let dialog;
+  const body = h("div", { class: "stack" }, h("p", { class: "muted" }, t("netplace.finding")));
+  dialog = openDialog("wide", h("header", null, h("div", { class: "grow" }, h("h2", null, t("netplace.findTitle")), h("p", { class: "muted small" }, t("netplace.findLead"))), closeX(() => dialog)), body);
+  let found = [];
+  try {
+    found = await api("GET", "/api/netplaces/discover");
+  } catch (err) {
+    return put(body, h("p", { class: "error" }, errorText(err)));
+  }
+  put(
+    body,
+    found.length
+      ? found.map((f) => h("div", { class: "snapshot" }, h("span", { class: "badge-icon plain" }, icon("globe")), h("div", { class: "grow" }, h("strong", null, f.name), h("div", { class: "muted small mono" }, `${t("netplace.kind." + f.kind)} · ${f.host}${f.address ? " · " + f.address : ""}${f.port ? ":" + f.port : ""}`)), button(t("netplace.connect"), { class: "small primary", onclick: () => (dialog.close(), placeDialog(null, { kind: f.kind, host: f.address || f.host, name: f.name, port: [445, 2049, 22, 21, 80, 443].includes(f.port) ? 0 : f.port, url: f.kind === "webdav" ? `${f.port === 443 ? "https" : "http"}://${f.address || f.host}${[80, 443].includes(f.port) ? "" : ":" + f.port}/` : "" })) }, "plus")))
+      : h("p", { class: "muted" }, t("netplace.foundNone")),
+    h("p", { class: "muted small" }, t("netplace.findHint")),
+  );
 }
 
 // --- Protection from a disk failure (SnapRAID) --------------------------------------------------

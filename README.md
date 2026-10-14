@@ -212,6 +212,12 @@ Early development. What works today:
   stopped, or a shared folder whose disk is gone, shows up under "needs attention". No address
   has to be typed: while something is shared, the server shows up by itself under "Network" in Explorer on
   Windows, in the sidebar of Finder and in the Files app of a phone, under its name on the home network;
+- network places: a folder of a NAS, another computer or a server elsewhere — over SMB, NFS, SFTP, WebDAV
+  or FTP — mounted here as an ordinary folder under `/mnt/net`, so it is in Files, in every folder picker,
+  and apps and backups can use it. It is tried before it is kept (a wrong password or a missing folder is
+  said in the server's own words), it comes back by itself after a restart or when the server is back, and
+  one that stops answering shows up under "needs attention". Servers that announce themselves on the home
+  network are listed, and so are a server's shares;
 - files: the server's files in the browser, opened in the data folder and reaching everywhere — folders,
   upload by drag and drop (whole folders too, large files in parts), download of a file or of a folder as a
   ZIP archive, rename, move, copy, delete — into a trash, from where a thing is put back within 30 days —, copying a path, putting a folder on the dashboard, a menu on the right click (of the file, of everything selected, of the folder), the other disks of the server at the top of the data folder and in every folder picker, pictures, video and sound opened in place, text
