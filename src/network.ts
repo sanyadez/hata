@@ -466,6 +466,8 @@ export function hotspotProfile(id: string, nic: string, spot: { ssid: string; pa
     "key-mgmt=wpa-psk",
     "proto=rsn;",
     "pairwise=ccmp;",
+    // plain WPA2: left to itself NetworkManager offers WPA3 next to it, and Windows then calls a right password wrong
+    "pmf=1",
     `psk=${spot.password.replace(/\\/g, "\\\\").replace(/^ /, "\\s")}`,
     "",
     "[ipv4]",

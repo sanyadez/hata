@@ -135,7 +135,7 @@ test("the way to the internet: the lowest metric is the main one, the rest are s
 test("hotspotProfile: an access point that shares the server's way out and comes back after a restart", () => {
   const text = hotspotProfile("hata-hotspot-wlp2s0", "wlp2s0", { ssid: "Hata", password: "horse battery", band: "2.4" });
   expect(text).toContain("[wifi]\nmode=ap\nssid=72;97;116;97;\nband=bg\n");
-  expect(text).toContain("key-mgmt=wpa-psk\nproto=rsn;\npairwise=ccmp;\npsk=horse battery\n");
+  expect(text).toContain("key-mgmt=wpa-psk\nproto=rsn;\npairwise=ccmp;\npmf=1\npsk=horse battery\n");
   expect(text).toContain("[ipv4]\nmethod=shared\n");
   expect(text).toContain("autoconnect=true\nautoconnect-priority=10\n");
   expect(hotspotProfile("a", "wlan0", { ssid: "x", password: "12345678", band: "5" })).toContain("band=a\n");
