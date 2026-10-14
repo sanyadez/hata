@@ -180,7 +180,10 @@ export async function migrateCasaos(args: string[]): Promise<number> {
   const { DATA_DIR } = await import("./config");
   const { APPS_DIR } = await import("./apps");
 
-  if (flags.has("--undo")) return undo(recordFile(DATA_DIR), APPS_DIR, flags.has("--yes"));
+  if (flags.has("--undo")) {
+    const { settings, saveSettings } = await import("./config");
+    return undo(recordFile(DATA_DIR), APPS_DIR, flags.has("--yes"), { access: settings.access, save: saveSettings });
+  }
 
   const casaosApps = casaosAppsPath();
   if (!existsSync(casaosApps) && !existsSync(CASAOS_CONF)) {
@@ -226,7 +229,10 @@ export async function migrateCasaos(args: string[]): Promise<number> {
   return 0;
 }
 
-function undo(recordFile: string, hataApps: string, yes: boolean): number {
+/** Hata's sign-in stands in front of the app: its web port is moved to 127.0.0.1 by a file of Hata's */
+export const guardedBy = (text: string): boolean => text.startsWith("# Written by Hata");
+
+function undo(recordFile: string, hataApps: string, yes: boolean, gate: { access: Record<string, unknown>; save: () => void }): number {
   const record = readJsonFile<MigrationRecord | null>(recordFile, null);
   if (!record) {
     console.error("There is no migration from CasaOS to undo.");
@@ -235,7 +241,12 @@ function undo(recordFile: string, hataApps: string, yes: boolean): number {
   console.log("What will happen:");
   console.log(`  1. ${record.apps.length} app(s) are removed from Hata's list: ${record.apps.join(", ") || "none"}.`);
   console.log("     Their containers and data are not touched; changes made to them in Hata since the move stay in the containers.");
+  // an app behind Hata's sign-in has its web port on 127.0.0.1, and Hata holds the port itself: CasaOS
+  // would get it back unreachable, so the sign-in goes first and the app is started on its own port again
+  const override = (name: string) => join(hataApps, name, "compose.override.yml");
+  const guarded = record.apps.filter((name) => APP_NAME_RE.test(name) && existsSync(override(name)) && guardedBy(readFileSync(override(name), "utf8")));
   console.log(`  2. CasaOS is enabled and started again: ${record.units.join(", ") || "nothing to start"}.`);
+  if (guarded.length) console.log(`  3. Hata's sign-in in front of ${guarded.join(", ")} is taken off, and the app is started on its own port again (Hata stops for a moment for that).`);
   console.log("");
   // CasaOS's gateway wants the port it had; with Hata on it, CasaOS would come back without its web UI
   const gatewayPort = Number(iniValue(existsSync("/etc/casaos/gateway.ini") ? readFileSync("/etc/casaos/gateway.ini", "utf8") : "", "port") ?? 80);
@@ -249,6 +260,18 @@ function undo(recordFile: string, hataApps: string, yes: boolean): number {
     console.log("Nothing was changed.");
     return 1;
   }
+  const hataRunning = guarded.length > 0 && sh("systemctl", "is-active", "--quiet", "hata.service").ok;
+  // Hata lets the ports go, and does not write its settings over ours while we change them
+  if (hataRunning) sh("systemctl", "stop", "hata.service");
+  for (const name of guarded) {
+    const dir = join(hataApps, name);
+    const file = ["compose.yml", "compose.yaml", "docker-compose.yml", "docker-compose.yaml"].map((f) => join(dir, f)).find(existsSync);
+    // the compose file alone, without Hata's override: the web port is published as the file says
+    const up = file ? sh("docker", "compose", "-p", name, "--project-directory", dir, "-f", file, "up", "-d", "--remove-orphans") : { ok: false, out: "" };
+    if (!up.ok) console.error(`Could not start ${name} on its own port; run it from CasaOS once it is back.`);
+    delete gate.access[name];
+  }
+  if (guarded.length) gate.save();
   for (const name of record.apps) {
     if (APP_NAME_RE.test(name)) rmSync(join(hataApps, name), { recursive: true, force: true });
   }
@@ -260,6 +283,7 @@ function undo(recordFile: string, hataApps: string, yes: boolean): number {
     }
   }
   rmSync(recordFile, { force: true });
+  if (hataRunning) sh("systemctl", "start", "hata.service");
   console.log("Done: the apps are back with CasaOS.");
   return 0;
 }
