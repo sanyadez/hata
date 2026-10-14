@@ -6501,6 +6501,42 @@ function telegramCard() {
   );
 }
 
+/** Mail through an SMTP server: the provider's one (with an app password) or a relay of your own */
+function emailCard() {
+  const config = state.notify.config.email;
+  const host = h("input", { value: config.host, spellcheck: false, class: "mono", placeholder: "smtp.gmail.com" });
+  const port = h("input", { type: "number", min: 1, max: 65535, value: config.port, class: "mono port" });
+  const security = h("select", null, ["starttls", "tls", "none"].map((value) => h("option", { value, selected: config.security === value }, t("notify.email.security." + value))));
+  // the usual port follows the choice, unless one of one's own was typed
+  security.addEventListener("change", () => {
+    if (["", "25", "465", "587"].includes(port.value)) port.value = security.value === "tls" ? "465" : security.value === "starttls" ? "587" : "25";
+  });
+  const user = h("input", { value: config.user, spellcheck: false, autocomplete: "off", class: "mono" });
+  const password = h("input", { type: "password", autocomplete: "new-password", spellcheck: false, class: "mono", placeholder: config.saved ? t("notify.tokenSaved") : "" });
+  const forget = config.saved && button(t("notify.tokenForget"), { class: "small", onclick: async () => {
+    try {
+      state.notify = await api("PUT", "/api/notify", { email: { password: "" } });
+      renderSettings();
+    } catch (err) {
+      toast(errorText(err), "error");
+    }
+  } });
+  const from = h("input", { type: "email", value: config.from, spellcheck: false, class: "mono", placeholder: "hata@example.org" });
+  const to = h("input", { value: config.to.join(", "), spellcheck: false, class: "mono", placeholder: "me@example.org" });
+  return channelCard(
+    "email",
+    [
+      settingRow(t("notify.email.host"), t("notify.email.hostHint"), h("span", { class: "pair" }, host, port)),
+      settingRow(t("notify.email.securityTitle"), t("notify.email.securityHint"), security),
+      settingRow(t("notify.email.user"), t("notify.email.userHint"), user),
+      settingRow(t("notify.email.password"), t("notify.email.passwordHint"), forget ? h("span", { class: "pair" }, password, forget) : password),
+      settingRow(t("notify.email.from"), t("notify.email.fromHint"), from),
+      settingRow(t("notify.email.to"), t("notify.email.toHint"), to),
+    ],
+    () => ({ host: host.value, port: Number(port.value), security: security.value, user: user.value, from: from.value, to: to.value, ...(password.value ? { password: password.value } : {}) }),
+  );
+}
+
 function notificationsSection() {
   const n = state.notify;
   if (!n) return [h("p", { class: "muted" }, "…")];
@@ -6535,6 +6571,7 @@ function notificationsSection() {
     devicesCard(),
     telegramCard(),
     channelCard("ntfy", [settingRow(t("notify.ntfy.url"), t("notify.ntfy.urlHint"), ntfyUrl), settingRow(t("notify.ntfy.token"), t("notify.ntfy.tokenHint"), forget ? h("span", { class: "pair" }, ntfyToken, forget) : ntfyToken)], () => ({ url: ntfyUrl.value, ...typedToken(ntfyToken) })),
+    emailCard(),
     channelCard("webhook", [settingRow(t("notify.webhook.url"), t("notify.webhook.urlHint"), hook)], () => ({ url: hook.value })),
   ];
 }

@@ -237,7 +237,8 @@ Early development. What works today:
   Let's Encrypt. With a domain, every app has its own address, `<app>.<domain>`;
 - notifications: what the home page lists as needing attention also reaches you where you are — on your
   phone or computer (a notification from the browser, when Hata is opened over HTTPS), in Telegram through
-  a bot of your own, in an ntfy topic, or as a webhook for your own automation. Each problem is told once,
+  a bot of your own, in an ntfy topic, by mail through your provider's SMTP server or a relay of your own,
+  or as a webhook for your own automation. Each problem is told once,
   after it has lasted a minute and a half, in the words of the home page;
 - an MCP server for AI agents: an agent that speaks MCP can say why an app is down (state of the
   containers, the tail of the log and the likely causes in one answer), update apps, install from the store,

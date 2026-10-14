@@ -924,3 +924,4 @@ body:has(> .assistant-fab) #view:not(.fill) { padding-bottom: 104px; }
 .page-head input.find { width: 200px; }
 @media (max-width: 760px) { .page-head input.find { width: 100%; } }
 .file-text .shared-mark { margin-left: 4px; vertical-align: -2px; }
+.pair input.port { width: 90px; flex: none; }

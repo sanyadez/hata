@@ -1,6 +1,6 @@
 /**
  * Notifications: what the "needs attention" list shows on the home page is also sent to where the
- * administrators are — their devices (Web Push), a Telegram chat, an ntfy topic, a webhook.
+ * administrators are — their devices (Web Push), a Telegram chat, an ntfy topic, a webhook, mail.
  *
  * The rules of when to send (`due`), the wording and the requests to the services are pure functions;
  * the rest keeps `notify.json` (the settings, the server's push key, the subscribed devices, what has been
@@ -13,12 +13,13 @@ import type { AttentionItem } from "./attention";
 import { SECRETS_DIR, settings } from "./config";
 import { isPlainObject, readJsonFile, writeJsonAtomic } from "./fsutil";
 import { cleanSubscription, generateVapid, sendPush, type PushTarget, type VapidKeys } from "./push";
+import { EMAIL_RE, sendMail, type Security } from "./smtp";
 import en from "./lang/en.json";
 import uk from "./lang/uk.json";
 
 const LANGUAGES: Record<string, Record<string, string>> = { en, uk };
 
-export const CHANNELS = ["push", "telegram", "ntfy", "webhook"] as const;
+export const CHANNELS = ["push", "telegram", "ntfy", "webhook", "email"] as const;
 export type Channel = (typeof CHANNELS)[number];
 
 export interface NotifyConfig {
@@ -28,6 +29,8 @@ export interface NotifyConfig {
   /** `url` is the address of the topic (`https://ntfy.sh/my-topic`); `token` — for a protected topic */
   ntfy: { enabled: boolean; url: string; token: string };
   webhook: { enabled: boolean; url: string };
+  /** Mail through an SMTP server: `to` is one address or several; `password` is write-only for the page */
+  email: { enabled: boolean; host: string; port: number; security: Security; user: string; password: string; from: string; to: string[] };
 }
 
 export const DEFAULT_CONFIG: NotifyConfig = {
@@ -35,7 +38,13 @@ export const DEFAULT_CONFIG: NotifyConfig = {
   telegram: { enabled: false, token: "", chat: "" },
   ntfy: { enabled: false, url: "", token: "" },
   webhook: { enabled: false, url: "" },
+  email: { enabled: false, host: "", port: 587, security: "starttls", user: "", password: "", from: "", to: [] },
 };
+
+const SECURITIES: Security[] = ["tls", "starttls", "none"];
+const HOST_RE = /^(?=.{1,253}$)[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)*$|^[0-9a-fA-F:.]+$/;
+/** The addresses of the "To" field: written with commas, spaces or semicolons */
+const addresses = (value: unknown, fallback: string[]): string[] => (Array.isArray(value) ? value.map(String) : typeof value === "string" ? value.split(/[\s,;]+/) : fallback).map((a) => a.trim()).filter(Boolean);
 
 const text = (value: unknown, fallback: string): string => (typeof value === "string" ? value.trim() : fallback);
 
@@ -68,7 +77,27 @@ export function changeConfig(current: NotifyConfig, patch: unknown): NotifyConfi
     const p = patch.webhook;
     next.webhook = { enabled: "enabled" in p ? p.enabled === true : next.webhook.enabled, url: text(p.url, next.webhook.url) };
   }
-  const { telegram, ntfy, webhook } = next;
+  if (isPlainObject(patch.email)) {
+    const p = patch.email;
+    const e = next.email;
+    next.email = {
+      enabled: "enabled" in p ? p.enabled === true : e.enabled,
+      host: text(p.host, e.host),
+      port: "port" in p ? Number(p.port) : e.port,
+      security: SECURITIES.includes(p.security as Security) ? (p.security as Security) : e.security,
+      user: text(p.user, e.user),
+      // a password is never trimmed: spaces may be part of it
+      password: typeof p.password === "string" ? p.password : e.password,
+      from: text(p.from, e.from),
+      to: addresses(p.to, e.to),
+    };
+  }
+  const { telegram, ntfy, webhook, email } = next;
+  if (email.host && !HOST_RE.test(email.host)) return "notify.badMailHost";
+  if (!Number.isInteger(email.port) || email.port < 1 || email.port > 65535) return "notify.badMailPort";
+  if ((email.from && !EMAIL_RE.test(email.from)) || email.to.some((a) => !EMAIL_RE.test(a)) || email.to.length > 10) return "notify.badMailAddress";
+  if (/[\r\n\0]/.test(email.user + email.password)) return "notify.badMailUser";
+  if (email.enabled && !(email.host && email.from && email.to.length)) return "notify.needMail";
   if (telegram.token && !/^\d+:[\w-]{20,}$/.test(telegram.token)) return "notify.badToken";
   if (telegram.chat && !/^(-?\d+|@\w{4,})$/.test(telegram.chat)) return "notify.badChat";
   if (telegram.enabled && !(telegram.token && telegram.chat)) return "notify.needTelegram";
@@ -178,7 +207,7 @@ export function wording(items: AttentionItem[], lang: string): Message[] {
       title: tr(lang, `attention.${item.code}.title`, detail),
       text: tr(lang, `attention.${item.code}.text`, detail).trim(),
       severity: item.severity,
-      route: item.app ? `#/apps/${item.app}${tab}` : item.code === "update" ? "#/settings/about" : item.code === "disk.trash" ? "#/trash" : item.code.startsWith("internet.") ? "#/settings/network" : item.code.startsWith("array.") || item.code.startsWith("smart.") || item.code === "disk.new" || item.code === "disk.usb" ? "#/settings/storage" : "#/",
+      route: item.app ? `#/apps/${item.app}${tab}` : item.code === "update" ? "#/settings/about" : item.code === "disk.trash" ? "#/trash" : item.code.startsWith("internet.") || item.code === "network.exposed" ? "#/settings/network" : item.code.startsWith("share.") ? "#/settings/shares" : item.code.startsWith("array.") || item.code.startsWith("smart.") || item.code === "disk.new" || item.code === "disk.usb" || item.code === "disk.filling" ? "#/settings/storage" : "#/",
       tag: keyOf(item),
       code: item.code,
       app: item.app,
@@ -255,6 +284,12 @@ export function ntfyRequest(config: NotifyConfig["ntfy"], message: Message, base
   };
 }
 
+/** A message as mail: its words, then the page it is about and which server it came from */
+export function mailOf(config: NotifyConfig["email"], message: Message, base: string) {
+  const mark = message.severity === "danger" ? "[!] " : "";
+  return { from: config.from, to: config.to, subject: mark + message.title, text: [message.text, "", base + message.route, "", `— Hata, ${hostname()}`].filter((line, i) => i > 0 || line).join("\n") };
+}
+
 export function webhookRequest(config: NotifyConfig["webhook"], message: Message, base: string, now = Date.now()): Outgoing {
   const { title, text, severity, code, app } = message;
   return {
@@ -280,7 +315,7 @@ async function post(request: Outgoing): Promise<void> {
 }
 
 /** A bot token never belongs in an error shown on a page or written to a log */
-const withoutSecrets = (message: string, config: NotifyConfig): string => (config.telegram.token ? message.replaceAll(config.telegram.token, "…") : message);
+const withoutSecrets = (message: string, config: NotifyConfig): string => [config.telegram.token, config.ntfy.token, config.email.password].filter((secret) => secret.length >= 4).reduce((said, secret) => said.replaceAll(secret, "…"), message);
 
 // --- State --------------------------------------------------------------------------------------
 
@@ -339,15 +374,15 @@ const devicesOfAdmins = (): Device[] => state.devices.filter((d) => host?.isAdmi
 
 /** The channels that would carry a message now */
 export function activeChannels(): Channel[] {
-  const { telegram, ntfy, webhook } = state.config;
-  return CHANNELS.filter((c) => (c === "push" ? devicesOfAdmins().length > 0 : c === "telegram" ? telegram.enabled : c === "ntfy" ? ntfy.enabled : webhook.enabled));
+  const { telegram, ntfy, webhook, email } = state.config;
+  return CHANNELS.filter((c) => (c === "push" ? devicesOfAdmins().length > 0 : c === "telegram" ? telegram.enabled : c === "ntfy" ? ntfy.enabled : c === "email" ? email.enabled : webhook.enabled));
 }
 
 export const notifyConfig = (): NotifyConfig => state.config;
 /** The settings as a page gets them: a token is write-only — `saved` says there is one, the value stays here */
 export function shownConfig(config: NotifyConfig) {
   const hide = <T extends { token: string }>(channel: T) => ({ ...channel, token: "", saved: channel.token !== "" });
-  return { ...config, telegram: hide(config.telegram), ntfy: hide(config.ntfy) };
+  return { ...config, telegram: hide(config.telegram), ntfy: hide(config.ntfy), email: { ...config.email, password: "", saved: config.email.password !== "" } };
 }
 
 export const notifyStatus = () => ({ config: shownConfig(state.config), last: state.last, active: activeChannels() });
@@ -439,6 +474,10 @@ async function deliver(channel: Channel, message: (lang: string) => Message[], d
     if (channel === "push") await toDevices(devices, message);
     else {
       for (const m of message(settings.language)) {
+        if (channel === "email") {
+          await sendMail(config.email, mailOf(config.email, m, base), hostname());
+          continue;
+        }
         await post(channel === "telegram" ? telegramRequest(config.telegram, m, base) : channel === "ntfy" ? ntfyRequest(config.ntfy, m, base) : webhookRequest(config.webhook, m, base));
       }
     }
