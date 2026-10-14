@@ -145,3 +145,10 @@ test("Hata's own tiles are always there for those who have them, wherever they w
   const moved = cleanLayout({ groups: [{ id: "main", title: "", items: [{ type: "builtin", id: "add" }, { type: "app", name: "memos" }] }] });
   expect(arrange(moved, ["memos", "new"], [], ["store", "add"]).groups[0]!.items).toEqual([{ type: "builtin", id: "add" }, { type: "app", name: "memos" }, { type: "app", name: "new" }, { type: "builtin", id: "store" }]);
 });
+
+test("an app of another machine is a tile of its own, `<name>@<machine>`", () => {
+  const layout = cleanLayout({ groups: [{ id: "g", title: "", items: [{ type: "app", name: "memos@1a2b3c4d" }, { type: "app", name: "memos" }, { type: "app", name: "memos@nothex!" }] }] });
+  expect(layout.groups[0]!.items).toEqual([{ type: "app", name: "memos@1a2b3c4d" }, { type: "app", name: "memos" }]);
+  const shown = arrange(layout, ["memos", "memos@1a2b3c4d", "kuma@1a2b3c4d"], []);
+  expect(shown.groups[0]!.items.map((item) => (item.type === "app" ? item.name : item.type))).toEqual(["memos@1a2b3c4d", "memos", "kuma@1a2b3c4d"]);
+});

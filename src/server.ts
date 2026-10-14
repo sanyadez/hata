@@ -104,6 +104,7 @@ import { IMAGE_MIME, imageType, wallpaperSvg, WALLPAPERS } from "./wallpapers";
 import { containerCommand, MAX_BUFFERED_BYTES, shellCommand, TerminalError, TerminalManager, terminalEnv, WS_SLOW_CLIENT, type TerminalClient, type TerminalStart } from "./terminal";
 import { MuxError, type Channel } from "./mux";
 import { crossTransfer } from "./machinefiles";
+import { applyMachineCompose, installComposeOnMachine, machineTiles, installOnMachine, machineAppAction, machineAppLogs, machineApps, machineCompose, removeMachineApp, storeAppFor } from "./machineapps";
 import { addStore, ARCH, catalogue, removeStore, scheduleStoreSync, StoreError, syncStore } from "./store";
 import { startSampler, systemStatus } from "./system";
 import { call as machineCall, clientBinary, containersOf, installScript, invite as machineInvite, INVITE_MS, linkData, linkHandlers, machine as machineView, MACHINE_ID_RE, machines as machineList, machinesAway, open as machineOpen, remove as removeMachine, rename as renameMachine, startMachines, updateClient, type LinkSocket } from "./machines";
@@ -856,7 +857,7 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
   if (path === "/api/events" && method === "GET") return events(req, server, admin);
 
   if (path === "/api/overview" && method === "GET") {
-    const [docker, all, containers] = await Promise.all([dockerInfo(), listApps(language(url)), admin ? listContainers().catch(() => []) : []]);
+    const [docker, all, containers, onMachines] = await Promise.all([dockerInfo(), listApps(language(url)), admin ? listContainers().catch(() => []) : [], admin ? machineTiles(machineList(), language(url)) : []]);
     const apps = all.filter((app) => mayOpen(user, app.name));
     const system = systemStatus();
     return json({
@@ -875,7 +876,9 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
       importable: admin ? importCount(containers) : 0,
       // folders an administrator put on the dashboard from the file manager
       folders: admin ? pinnedFolders() : [],
-      dashboard: arrange(settings.dashboard, apps.map((app) => app.name), admin ? settings.folders : [], admin ? ["store", "add"] : user.role === "guest" ? [] : ["store"]),
+      // apps of the other machines, for administrators: their tiles are `<name>@<machine>`
+      machineApps: onMachines,
+      dashboard: arrange(settings.dashboard, [...apps.map((app) => app.name), ...onMachines.map((app) => app.key)], admin ? settings.folders : [], admin ? ["store", "add"] : user.role === "guest" ? [] : ["store"]),
       jobs: admin ? listJobs().filter((j) => j.status === "running").map(({ log: _, ...job }) => job) : [],
     });
   }
@@ -911,7 +914,8 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
   // the layout as text: everything that is on the dashboard, for an editor instead of a mouse
   if (path === "/api/dashboard/text" && method === "GET") {
     const apps = await listApps("en");
-    return json({ text: layoutText(arrange(settings.dashboard, apps.map((app) => app.name), settings.folders, ["store", "add"])) });
+    const onMachines = await machineTiles(machineList(), "en");
+    return json({ text: layoutText(arrange(settings.dashboard, [...apps.map((app) => app.name), ...onMachines.map((app) => app.key)], settings.folders, ["store", "add"])) });
   }
   if (path === "/api/dashboard/text" && method === "PUT") {
     const data = await body(req);
@@ -1469,7 +1473,12 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
   if (m && method === "POST") return json(await syncStore(m[1]!));
 
   m = /^\/api\/store\/([a-z0-9-]+)\/apps\/([a-z0-9_-]+)$/.exec(path);
-  if (m && method === "GET") return json(await storeAppDetail(m[1]!, m[2]!, language(url)));
+  if (m && method === "GET") {
+    const on = url.searchParams.get("machine");
+    // the form for another machine: its data folder and its ports
+    if (on && user.role === "admin") return json(await storeAppFor(on, m[1]!, m[2]!, language(url)));
+    return json(await storeAppDetail(m[1]!, m[2]!, language(url)));
+  }
 
   // a `docker run` command read into the form of a custom app; nothing is installed here
   if (path === "/api/dockerrun" && method === "POST") {
@@ -1926,6 +1935,25 @@ async function machinesApi(req: Request, url: URL, server: Server, by: string): 
     return new Response(channel.readable(), { headers: { ...SECURITY_HEADERS, "content-type": "text/plain; charset=utf-8", "cache-control": "no-store", "x-accel-buffering": "no" } });
   }
   if (rest.startsWith("/files")) return machineFiles(req, url, server, id, rest.slice(6), by);
+  // apps of the machine
+  if (rest === "/apps" && method === "GET") return json(await machineApps(id, language(url)));
+  if (rest === "/apps" && method === "POST") {
+    const data = await body(req);
+    const job = typeof data.store === "string" ? await installOnMachine(id, data.store, String(data.name ?? ""), data.form, by) : await installComposeOnMachine(id, data.name, data.compose, by);
+    return json({ job: job.id }, 202);
+  }
+  const app = /^\/apps\/([a-z0-9][a-z0-9_-]{0,63})(?:\/([a-z]+))?$/.exec(rest);
+  if (app) {
+    const [, name, part] = app as unknown as [string, string, string | undefined];
+    if (!part && method === "DELETE") return json({ job: (await removeMachineApp(id, name, url.searchParams.get("data") === "1", by)).id }, 202);
+    if (part === "compose" && method === "GET") return json(await machineCompose(id, name));
+    if (part === "compose" && method === "PUT") return json({ job: (await applyMachineCompose(id, name, (await body(req)).compose, by)).id }, 202);
+    if (part === "logs" && method === "GET") {
+      server.timeout(req, 0);
+      return new Response(machineAppLogs(id, name, req.signal), { headers: { ...SECURITY_HEADERS, "content-type": "text/plain; charset=utf-8", "cache-control": "no-store", "x-accel-buffering": "no" } });
+    }
+    if (part && ["start", "stop", "restart", "update"].includes(part) && method === "POST") return json({ job: (await machineAppAction(id, name, part, by)).id }, 202);
+  }
   if (rest === "/update" && method === "POST") {
     server.timeout(req, 0);
     await updateClient(id, by);

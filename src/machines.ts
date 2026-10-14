@@ -51,6 +51,8 @@ export interface Machine {
   /** When it was last connected */
   seen: number;
   info?: MachineInfo;
+  /** Where the machine's apps keep their data; `/DATA` until said otherwise */
+  dataRoot?: string;
 }
 
 interface Invite {
@@ -135,12 +137,17 @@ export interface MachineView {
   status: SystemStatus | null;
   /** The client runs another version than Hata: it can be brought to Hata's */
   outdated: boolean;
+  /** Where its apps keep their data */
+  dataRoot: string;
 }
 
 const view = (m: Machine): MachineView => {
   const link = live.get(m.id);
-  return { id: m.id, name: m.name, added: m.added, seen: link ? Date.now() : m.seen, online: !!link, ip: link?.ip ?? "", info: m.info ?? null, status: link?.status ?? null, outdated: !!m.info && m.info.version !== VERSION };
+  return { id: m.id, name: m.name, added: m.added, seen: link ? Date.now() : m.seen, online: !!link, ip: link?.ip ?? "", info: m.info ?? null, status: link?.status ?? null, outdated: !!m.info && m.info.version !== VERSION, dataRoot: m.dataRoot ?? "/DATA" };
 };
+
+/** The data folder of a machine's apps */
+export const machineDataRoot = (id: string): string => state.machines.find((m) => m.id === id)?.dataRoot ?? "/DATA";
 
 export const machines = (): MachineView[] => state.machines.map(view);
 

@@ -2454,5 +2454,21 @@
   "activity.app.transfer.failed": "Sending files to another machine failed",
   "files.machineNoTrash": "A machine has no trash: what is deleted there is gone for good.",
   "machines.files": "Files",
-  "files.machineDeleteLead": "Files: {files}, folders: {dirs}, {size} in total."
+  "files.machineDeleteLead": "Files: {files}, folders: {dirs}, {size} in total.",
+  "store.where": "Install on",
+  "store.whereHere": "This server",
+  "activity.onMachine": "on {name}",
+  "machines.apps": "Apps",
+  "machines.tab.apps": "Apps",
+  "machines.customApp": "From a compose file",
+  "machines.fromStore": "Install from the store",
+  "machines.app": "App",
+  "machines.noApps": "No apps of Hata's on this machine yet. Containers started otherwise are on the Containers tab.",
+  "machines.customTitle": "A new app on {name}",
+  "machines.removeApp": "Remove {title} from {name}?",
+  "machines.removeAppLead": "Its containers are stopped and removed, with the app's compose file. Its data stays unless you tick the box.",
+  "machines.removeAppData": "Delete its data too: {path} and its Docker volumes",
+  "error.machine.noDocker": "{name} has no Docker: install it there first.",
+  "error.machine.composeFailed": "docker compose failed: {message}",
+  "store.portsOn": "on {name}"
 }

@@ -16,6 +16,8 @@ export interface Activity {
   code: string;
   app?: string;
   user?: string;
+  /** The machine it happened on, by name, when not on this server */
+  machine?: string;
   /** Extra text: an error message, an address */
   detail?: string;
 }

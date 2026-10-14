@@ -80,7 +80,8 @@ const MAX_TILES = 500;
 const MAX_TITLE = 60;
 const MAX_URL = 2000;
 const ID_RE = /^[a-z0-9-]{1,40}$/;
-const APP_RE = /^[a-z0-9_-]{1,64}$/;
+/** An app of this server, or `<name>@<machine>` — an app of another machine */
+const APP_RE = /^[a-z0-9_-]{1,64}(@[a-f0-9]{8})?$/;
 
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
 const text = (value: unknown, max: number) => (typeof value === "string" ? value.replace(/\s+/g, " ").trim().slice(0, max) : "");

@@ -347,6 +347,8 @@ function onRoute() {
   if (/^#(setup|invite)=/.test(location.hash)) return;
   leaveView();
   state.route = parseRoute();
+  // an install onto a machine is offered while the store is on screen
+  if (state.route.view !== "store") state.installTarget = "";
   render();
   if (!state.user) return;
   if (state.route.view === "store") void loadStore();
@@ -437,6 +439,7 @@ async function refresh() {
   if (state.route.view === "home") renderHomeBody();
   if (state.route.view === "store") renderStoreList();
   if (state.route.view === "app") void loadApp(true);
+  if (state.route.view === "machine" && state.route.tab === "apps") void loadMachineApps();
   if (state.route.view === "backups") void loadBackups();
   if (state.route.view === "import") void loadImport();
   if (state.route.view === "welcome" && ["existing", "apps"].includes(state.route.step)) paintWelcome();
@@ -866,7 +869,8 @@ const linkIcon = (link) => {
 /** What a tile of the layout stands for: the app, the pinned folder; null when it is not there */
 function tileTarget(item) {
   const o = state.overview;
-  if (item.type === "app") return o.apps.find((app) => app.name === item.name) ?? null;
+  // `<name>@<machine>` — an app of another machine
+  if (item.type === "app") return item.name.includes("@") ? ((o.machineApps ?? []).find((app) => app.key === item.name) ?? null) : (o.apps.find((app) => app.name === item.name) ?? null);
   if (item.type === "files") return (o.folders ?? []).find((folder) => folder.path === item.path) ?? null;
   return item;
 }
@@ -897,7 +901,17 @@ function tile(item) {
   let sub;
   let side = null;
   let badges = null;
-  if (item.type === "app") {
+  if (item.type === "app" && target.machine) {
+    // an app of another machine: opened at the machine's address, managed on the machine's page
+    const app = target;
+    const st = (cls = target.machine.online ? appState(app) : "stopped");
+    const url = isUp(app) ? machineAppUrl(target.machine, app) : null;
+    href = url ?? `#/machines/${target.machine.id}/apps`;
+    external = !!url;
+    sub = [h("i", { class: "dot " + st }), target.machine.online ? (st === "running" && app.port ? `${target.machine.ip}:${app.port}` : t("status." + st)) : t("machines.offline")];
+    badges = h("span", { class: "lock", title: target.machine.name }, icon("server"));
+    side = h("a", { class: "tile-open", href: `#/machines/${target.machine.id}/apps`, title: target.machine.name, "aria-label": `${target.machine.name}: ${title}` }, icon("sliders"));
+  } else if (item.type === "app") {
     const app = target;
     const st = (cls = appState(app));
     const url = isUp(app) ? appUrl(app) : null;
@@ -942,7 +956,7 @@ function tile(item) {
   return h("div", { class: `tile kind-${item.type} ${cls} movable`, "data-key": key, onpointerdown: (e) => dragStart(e, item), oncontextmenu: (e) => {
         if (homeUi.drag?.active) return e.preventDefault();
         // a right click on an app is the same menu as its button, where the pointer is
-        if (item.type === "app" && e.pointerType !== "touch") {
+        if (item.type === "app" && !target.machine && e.pointerType !== "touch") {
           e.preventDefault();
           appTileMenu(target, null, { x: e.clientX, y: e.clientY });
         }
@@ -1526,13 +1540,13 @@ function activityItem(entry, when) {
   const failed = outcome === "failed";
   const key = "activity." + entry.code;
   const title = state.overview?.apps.find((a) => a.name === entry.app)?.title ?? entry.app ?? "";
-  const meta = [typeof when === "string" ? when : ago(entry.ts), entry.user && group !== "auth" ? (entry.user === "schedule" ? t("activity.bySchedule") : entry.user === "restore" ? t("activity.byRestore") : entry.user === "console" ? t("activity.byConsole") : entry.user.startsWith("agent:") ? t("activity.byAgent", { name: entry.user.slice(6) }) : entry.user.startsWith("assistant:") ? t("activity.byAssistant", { user: entry.user.slice(10) }) : t("activity.by", { user: entry.user })) : null, group === "auth" ? entry.detail : null].filter(Boolean).join(" · ");
+  const meta = [typeof when === "string" ? when : ago(entry.ts), entry.machine && t("activity.onMachine", { name: entry.machine }), entry.user && group !== "auth" ? (entry.user === "schedule" ? t("activity.bySchedule") : entry.user === "restore" ? t("activity.byRestore") : entry.user === "console" ? t("activity.byConsole") : entry.user.startsWith("agent:") ? t("activity.byAgent", { name: entry.user.slice(6) }) : entry.user.startsWith("assistant:") ? t("activity.byAssistant", { user: entry.user.slice(10) }) : t("activity.by", { user: entry.user })) : null, group === "auth" ? entry.detail : null].filter(Boolean).join(" · ");
   return h(
     "div",
     { class: "activity-item" },
     icon(group === "auth" ? "signin" : group === "users" ? "user" : failed ? "x" : (ACTIVITY_ICONS[kind] ?? "check"), failed ? "danger" : ""),
     h("div", { class: "grow" }, h("div", null, has(key) ? t(key, { app: title, user: entry.user ?? "", target: entry.detail ?? "" }) : entry.code), h("div", { class: "muted small" }, meta), failed && entry.detail && h("div", { class: "muted small clip" }, entry.detail)),
-    entry.code === "app.update.done" && isAdmin() && Date.now() - entry.ts < UNDO_DAYS * 86400_000 && button(t("activity.undo"), { class: "small ghost", onclick: () => undoUpdate(entry) }, "undo"),
+    entry.code === "app.update.done" && !entry.machine && isAdmin() && Date.now() - entry.ts < UNDO_DAYS * 86400_000 && button(t("activity.undo"), { class: "small ghost", onclick: () => undoUpdate(entry) }, "undo"),
   );
 }
 
@@ -2016,7 +2030,7 @@ function appTerminalTab(app, box) {
 // Other machines with Hata's client: their state, their containers and a terminal. The client connects
 // to Hata, so whatever the page asks goes over that connection; `machine` events bring the state.
 
-const machinesUi = { list: null, current: null, containers: null };
+const machinesUi = { list: null, current: null, containers: null, apps: null };
 
 async function loadMachines() {
   try {
@@ -2028,7 +2042,9 @@ async function loadMachines() {
   if (state.route.view === "machine") {
     machinesUi.current = machinesUi.list.machines.find((m) => m.id === state.route.id) ?? null;
     renderMachineHead();
-    if (state.route.tab === "overview") paintMachineOverview();
+    // opened straight from an address, the tab is drawn once the machine is known
+    if (!document.getElementById("machine-tab")?.hasChildNodes()) renderMachineTab();
+    else if (state.route.tab === "overview") paintMachineOverview();
   }
 }
 
@@ -2142,7 +2158,7 @@ async function addMachineDialog() {
 
 // --- One machine ---
 
-const MACHINE_TABS = ["overview", "containers", "terminal"];
+const MACHINE_TABS = ["overview", "apps", "containers", "terminal"];
 
 function renderMachine() {
   if (machinesUi.current?.id !== state.route.id) {
@@ -2175,7 +2191,7 @@ function renderMachineHead() {
         h("button", { type: "button", class: "btn square", "aria-label": t("app.more"), onclick: () => machineMenu(m) }, icon("more")),
       ),
     ),
-    h("div", { class: "tabs" }, tab("overview", "grid"), tab("containers", "box"), tab("terminal", "terminal")),
+    h("div", { class: "tabs" }, tab("overview", "grid"), tab("apps", "store"), tab("containers", "box"), tab("terminal", "terminal")),
   );
 }
 
@@ -2268,6 +2284,10 @@ function renderMachineTab() {
     box.replaceChildren(h("div", { id: "machine-containers" }, h("p", { class: "muted" }, t("machines.loading"))));
     if (machinesUi.containers) paintMachineContainers();
     void loadMachineContainers();
+  } else if (state.route.tab === "apps") {
+    box.replaceChildren(h("div", { id: "machine-apps" }, h("p", { class: "muted" }, t("machines.loading"))));
+    if (machinesUi.apps?.machine === m.id) paintMachineApps();
+    void loadMachineApps();
   } else if (state.route.tab === "terminal") {
     box.replaceChildren(h("div", { class: "term-holder" }, terminalFrame({ machine: m.id })));
   } else machineOverview(m, box);
@@ -2337,6 +2357,173 @@ function paintMachineStats(m) {
   const temp = document.getElementById("stat-m-temp");
   if (temp) temp.hidden = s.temperature == null;
   if (s.temperature != null) setStat("m-temp", String(s.temperature), "°C", t("sys.cpu"), null, s.temperature >= 85 ? "warn" : "");
+}
+
+// --- A machine's apps ---
+
+async function loadMachineApps() {
+  const id = state.route.id;
+  try {
+    const list = await api("GET", `/api/machines/${id}/apps?lang=${state.lang}`);
+    if (state.route.view !== "machine" || state.route.id !== id) return;
+    machinesUi.apps = { machine: id, list };
+  } catch (e) {
+    const box = document.getElementById("machine-apps");
+    return box ? box.replaceChildren(h("p", { class: "card pad muted" }, errorText(e))) : toast(errorText(e), "error");
+  }
+  paintMachineApps();
+}
+
+/** Where a machine's app answers: the machine's address and the app's port */
+function machineAppUrl(m, app) {
+  if (!app.port || !m.ip) return null;
+  return `${app.scheme || "http"}://${m.ip.includes(":") ? `[${m.ip}]` : m.ip}:${app.port}${app.index || "/"}`;
+}
+
+function paintMachineApps() {
+  const box = document.getElementById("machine-apps");
+  const m = machinesUi.current;
+  const list = machinesUi.apps?.list;
+  if (!box || !m || !list) return;
+  const head = h(
+    "div",
+    { class: "section-head" },
+    h("h2", null, t("machines.apps"), h("span", { class: "muted" }, String(list.length))),
+    h(
+      "div",
+      { class: "row-actions" },
+      button(t("machines.customApp"), { class: "small", onclick: () => machineComposeDialog(m, null) }, "code"),
+      button(t("machines.fromStore"), { class: "small primary", onclick: () => ((state.installTarget = m.id), go("#/store")) }, "store"),
+    ),
+  );
+  if (!m.info?.docker?.available) return box.replaceChildren(h("div", { class: "card pad" }, h("h2", null, t("machines.noDocker")), h("p", { class: "muted" }, t("machines.noDockerLead"))));
+  const act = (app, action) => async (e) => {
+    e.currentTarget.disabled = true;
+    try {
+      const res = await api("POST", `/api/machines/${m.id}/apps/${app.name}/${action}`, {});
+      jobDialog(res.job, action, app.title, () => void loadMachineApps());
+    } catch (err) {
+      toast(errorText(err), "error");
+    }
+    void loadMachineApps();
+  };
+  const small = (label, iconName, onclick, off) => h("button", { type: "button", class: "icon-btn", title: label, "aria-label": label, disabled: off, onclick }, icon(iconName));
+  const row = (app) => {
+    const url = isUp(app) ? machineAppUrl(m, app) : null;
+    const busy = !!app.job;
+    return h(
+      "tr",
+      null,
+      h("td", null, h("div", { class: "with-icon machine-app" }, appIcon(app), h("div", { class: "stack-s" }, h("strong", null, app.title), h("span", { class: "muted small mono" }, app.name + (app.store ? ` · ${app.store}` : ""))))),
+      h("td", null, stateChip(app)),
+      h("td", { class: "mono small" }, url ? h("a", { class: "link", href: url, target: "_blank", rel: "noopener noreferrer" }, url.replace(/^https?:\/\//, "").replace(/\/$/, "")) : app.port ? `${m.ip}:${app.port}` : "—"),
+      h(
+        "td",
+        null,
+        h(
+          "div",
+          { class: "row-actions" },
+          busy && small(t("status.busy"), "terminal", () => jobDialog(app.job.id, app.job.kind, app.title, () => void loadMachineApps())),
+          isUp(app) ? small(t("app.stop"), "stop", act(app, "stop"), busy) : small(t("app.start"), "play", act(app, "start"), busy),
+          small(t("app.restart"), "refresh", act(app, "restart"), busy || !isUp(app)),
+          small(t("app.update"), "up", act(app, "update"), busy),
+          small(t("app.logs"), "logs", () => machineAppLogsDialog(m, app)),
+          small(t("app.tab.compose"), "code", () => machineComposeDialog(m, app), busy),
+          small(t("app.remove"), "trash", () => removeMachineAppDialog(m, app), busy),
+        ),
+      ),
+    );
+  };
+  box.replaceChildren(
+    h(
+      "div",
+      { class: "stack" },
+      head,
+      list.length
+        ? h("div", { class: "card table-wrap" }, h("table", { class: "machine-apps" }, h("thead", null, h("tr", null, h("th", null, t("machines.app")), h("th", null, t("app.col.state")), h("th", null, t("app.address")), h("th"))), h("tbody", null, list.map(row))))
+        : h("div", { class: "card empty" }, icon("store"), h("p", null, t("machines.noApps")), button(t("machines.fromStore"), { class: "primary", onclick: () => ((state.installTarget = m.id), go("#/store")) }, "store")),
+    ),
+  );
+}
+
+function machineAppLogsDialog(m, app) {
+  let dialog;
+  const log = h("pre", { class: "console page" });
+  const abort = new AbortController();
+  dialog = openDialog("xwide", h("header", null, h("h2", { class: "clip grow" }, `${m.name}: ${app.title}`), closeX(() => dialog)), h("p", { class: "cmd" }, icon("terminal"), `docker compose -p ${app.name} logs --follow --tail 200`), log);
+  dialog.addEventListener("close", () => abort.abort());
+  void followText(`/api/machines/${m.id}/apps/${app.name}/logs`, log, abort.signal);
+}
+
+/** The compose file of a machine's app, edited and applied; `app` null — a new app from a pasted file */
+async function machineComposeDialog(m, app) {
+  let current = { text: "", file: "" };
+  if (app) {
+    try {
+      current = await api("GET", `/api/machines/${m.id}/apps/${app.name}/compose`);
+    } catch (e) {
+      return toast(errorText(e), "error");
+    }
+  }
+  let dialog;
+  const name = !app && h("input", { required: true, pattern: "[a-z0-9][a-z0-9_\\-]*", autocapitalize: "none", spellcheck: false, class: "mono" });
+  const area = h("textarea", { class: "code", spellcheck: false, wrap: "off", required: true, value: current.text, placeholder: "services:\n  web:\n    image: nginx:alpine\n    ports:\n      - 8088:80\n" });
+  const error = h("p", { class: "error", role: "alert" });
+  dialog = openDialog(
+    "xwide",
+    h(
+      "form",
+      {
+        class: "stack",
+        onsubmit: async (e) => {
+          e.preventDefault();
+          error.textContent = "";
+          try {
+            const res = app ? await api("PUT", `/api/machines/${m.id}/apps/${app.name}/compose`, { compose: area.value }) : await api("POST", `/api/machines/${m.id}/apps`, { name: name.value.trim(), compose: area.value });
+            dialog.close();
+            jobDialog(res.job, app ? "apply" : "install", app ? app.title : name.value.trim(), () => void loadMachineApps());
+          } catch (err) {
+            error.textContent = errorText(err);
+          }
+        },
+      },
+      h("header", null, h("div", { class: "grow" }, h("h2", null, app ? `${m.name}: ${app.title}` : t("machines.customTitle", { name: m.name })), app && h("p", { class: "muted small mono" }, current.file)), closeX(() => dialog)),
+      name && field(t("store.customName"), name),
+      area,
+      error,
+      h("footer", null, h("p", { class: "cmd grow" }, icon("terminal"), `docker compose -p ${app ? app.name : "…"} up -d --remove-orphans`), closeButton(() => dialog, t("common.cancel")), h("button", { class: "btn primary" }, t(app ? "settings.save" : "store.install"))),
+    ),
+  );
+  (name || area).focus();
+}
+
+function removeMachineAppDialog(m, app) {
+  let dialog;
+  const data = h("input", { type: "checkbox" });
+  dialog = openDialog(
+    "confirm",
+    h("h2", { class: "wrap" }, t("machines.removeApp", { title: app.title, name: m.name })),
+    h("p", { class: "muted" }, t("machines.removeAppLead")),
+    h("label", { class: "check" }, data, h("span", null, t("machines.removeAppData", { path: `${(machinesUi.current?.dataRoot ?? "/DATA")}/AppData/${app.name}` }))),
+    h(
+      "footer",
+      null,
+      closeButton(() => dialog, t("common.cancel")),
+      button(t("app.remove"), {
+        class: "danger",
+        onclick: async (e) => {
+          e.currentTarget.disabled = true;
+          try {
+            const res = await api("DELETE", `/api/machines/${m.id}/apps/${app.name}${data.checked ? "?data=1" : ""}`);
+            dialog.close();
+            jobDialog(res.job, "remove", app.title, () => void loadMachineApps());
+          } catch (err) {
+            toast(errorText(err), "error");
+          }
+        },
+      }, "trash"),
+    ),
+  );
 }
 
 // --- A machine's containers ---
@@ -4582,14 +4769,20 @@ function formSection(title, hint, rows) {
   return rows.length > 0 && h("section", { class: "form-section" }, h("div", { class: "form-head" }, h("h3", null, title), hint && h("span", { class: "muted small" }, hint)), rows);
 }
 
-async function storeDialog(entry) {
+/** `target` — the machine to install on; "" — this server */
+async function storeDialog(entry, target = state.installTarget ?? "") {
+  // the machines an app can go to: connected, with Docker
+  if (isAdmin() && !machinesUi.list) machinesUi.list = await api("GET", "/api/machines").catch(() => null);
+  const targets = isAdmin() ? (machinesUi.list?.machines ?? []).filter((m) => m.online && m.info?.docker?.available) : [];
+  if (target && !targets.some((m) => m.id === target)) target = "";
   let app;
   try {
-    app = await api("GET", `/api/store/${entry.store}/apps/${entry.name}?lang=${state.lang}`);
+    app = await api("GET", `/api/store/${entry.store}/apps/${entry.name}?lang=${state.lang}${target ? "&machine=" + target : ""}`);
   } catch (e) {
     return toast(errorText(e), "error");
   }
-  const supported = app.architectures.length === 0 || app.architectures.includes(state.overview?.arch);
+  const arch = target ? (targets.find((m) => m.id === target)?.info.arch === "arm64" ? "arm64" : "amd64") : state.overview?.arch;
+  const supported = app.architectures.length === 0 || app.architectures.includes(arch);
   const inputs = { ports: [], volumes: [], envs: [] };
   const ports = app.form.ports.map((p) => {
     const input = h("input", { value: p.published, inputMode: "numeric", pattern: "[0-9]*", class: "short mono" });
@@ -4622,9 +4815,10 @@ async function storeDialog(entry) {
         envs: inputs.envs.map(({ input, ...e }) => ({ ...e, value: input.value })),
       };
       try {
-        const res = await api("POST", "/api/apps", { store: app.store, name: app.name, form });
+        const res = await api("POST", target ? `/api/machines/${target}/apps` : "/api/apps", { store: app.store, name: app.name, form });
         dialog.close();
-        jobDialog(res.job, "install", app.title, () => go(`#/apps/${app.name}`));
+        state.installTarget = "";
+        jobDialog(res.job, "install", app.title, () => go(target ? `#/machines/${target}/apps` : `#/apps/${app.name}`));
       } catch (e) {
         error.textContent = errorText(e);
         install.disabled = false;
@@ -4636,7 +4830,14 @@ async function storeDialog(entry) {
   dialog = openDialog(
     "xwide store-app",
     h("header", null, appIcon(app, "lg"), h("div", { class: "grow" }, h("h2", null, app.title), h("p", { class: "muted" }, app.tagline), h("p", { class: "muted small" }, [app.category, app.developer && t("store.by", { developer: app.developer })].filter(Boolean).join(" · "))), closeX(() => dialog)),
-    !supported && h("p", { class: "banner" }, t("store.unsupported", { arch: state.overview?.arch ?? "" })),
+    targets.length > 0 &&
+      h(
+        "div",
+        { class: "kv store-target" },
+        h("span", { class: "muted" }, t("store.where")),
+        h("select", { onchange: (e) => (dialog.close(), void storeDialog(entry, e.target.value)) }, h("option", { value: "", selected: !target }, t("store.whereHere")), targets.map((m) => h("option", { value: m.id, selected: m.id === target }, m.name))),
+      ),
+    !supported && h("p", { class: "banner" }, t("store.unsupported", { arch: arch ?? "" })),
     h(
       "div",
       { class: "store-app-body" },
@@ -4648,7 +4849,7 @@ async function storeDialog(entry) {
         app.tips && h("div", { class: "tips prose" }, h("strong", null, t("store.tips")), md(app.tips)),
         app.website && h("a", { class: "link", href: app.website, target: "_blank", rel: "noopener noreferrer" }, app.website.replace(/^https?:\/\//, "").replace(/\/$/, ""), icon("external")),
       ),
-      hasForm && h("div", { class: "stack install-form" }, formSection(t("store.ports"), t("store.portsHint"), ports), formSection(t("store.volumes"), state.settings ? t("store.volumesHint", { path: state.settings.dataRoot }) : "", volumes), formSection(t("store.envs"), t("store.envsHint"), envs)),
+      hasForm && h("div", { class: "stack install-form" }, formSection(t("store.ports"), target ? t("store.portsOn", { name: targets.find((m) => m.id === target)?.name ?? "" }) : t("store.portsHint"), ports), formSection(t("store.volumes"), target ? t("store.volumesHint", { path: app.form.volumes[0]?.source.split("/AppData/")[0] || "/DATA" }) : state.settings ? t("store.volumesHint", { path: state.settings.dataRoot }) : "", volumes), formSection(t("store.envs"), t("store.envsHint"), envs)),
     ),
     error,
     h("footer", null, h("p", { class: "cmd grow" }, icon("terminal"), `docker compose -p ${app.name} up -d`), closeButton(() => dialog, t("common.cancel")), install),

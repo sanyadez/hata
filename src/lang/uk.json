@@ -2454,5 +2454,21 @@
   "activity.app.transfer.failed": "Не вдалося переслати файли на іншу машину",
   "files.machineNoTrash": "На машині немає кошика: видалене там зникає назавжди.",
   "machines.files": "Файли",
-  "files.machineDeleteLead": "Файлів: {files}, тек: {dirs}, разом {size}."
+  "files.machineDeleteLead": "Файлів: {files}, тек: {dirs}, разом {size}.",
+  "store.where": "Встановити на",
+  "store.whereHere": "Цей сервер",
+  "activity.onMachine": "на {name}",
+  "machines.apps": "Застосунки",
+  "machines.tab.apps": "Застосунки",
+  "machines.customApp": "Із compose-файлу",
+  "machines.fromStore": "Встановити з магазину",
+  "machines.app": "Застосунок",
+  "machines.noApps": "На цій машині ще немає застосунків Hata. Контейнери, запущені інакше, — на вкладці «Контейнери».",
+  "machines.customTitle": "Новий застосунок на {name}",
+  "machines.removeApp": "Прибрати {title} з {name}?",
+  "machines.removeAppLead": "Його контейнери буде зупинено й видалено разом із compose-файлом. Дані лишаться, якщо не поставити позначку.",
+  "machines.removeAppData": "Видалити й дані: {path} і томи Docker",
+  "error.machine.noDocker": "На {name} немає Docker: спершу встановіть його там.",
+  "error.machine.composeFailed": "docker compose не спрацював: {message}",
+  "store.portsOn": "на {name}"
 }

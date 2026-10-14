@@ -38,7 +38,7 @@ export class AppError extends Error {
 export const appDir = (name: string) => join(APPS_DIR, name);
 export const composeFile = (name: string) => join(appDir(name), "compose.yml");
 
-function assertName(name: string): void {
+export function assertName(name: string): void {
   if (!APP_NAME_RE.test(name)) throw new AppError("app.badName");
 }
 
@@ -86,7 +86,11 @@ export const jobFinished = (job: Job): Promise<void> => finished.get(job) ?? Pro
  * Starts a long operation on an app; one app runs one operation at a time. `quiet` — the operation
  * writes its own line to the activity log when it works, so only a failure is recorded here.
  */
-export function startJob(app: string, kind: JobKind, user: string, work: (log: Log) => Promise<void>, quiet = false): Job {
+/**
+ * `label` — for an app of another machine: `app` is then only the key that keeps one operation at a
+ * time, the activity log gets the app's own name and the machine's.
+ */
+export function startJob(app: string, kind: JobKind, user: string, work: (log: Log) => Promise<void>, quiet = false, label?: { app: string; machine: string }): Job {
   if (busy.has(app)) throw new AppError("app.busy", 409);
   const job: Job = { id: crypto.randomUUID(), app, kind, status: "running", log: [], lineCount: 0, startedAt: Date.now() };
   jobs.set(job.id, job);
@@ -109,7 +113,7 @@ export function startJob(app: string, kind: JobKind, user: string, work: (log: L
     })
     .finally(() => {
       job.finishedAt = Date.now();
-      if (!quiet || job.status === "failed") record(`app.${kind}.${job.status}`, { app, user, detail: job.status === "failed" ? job.error?.trim().split("\n")[0]?.trim().slice(0, 300) : undefined });
+      if (!quiet || job.status === "failed") record(`app.${kind}.${job.status}`, { app: label?.app ?? app, machine: label?.machine, user, detail: job.status === "failed" ? job.error?.trim().split("\n")[0]?.trim().slice(0, 300) : undefined });
       busy.delete(app);
       const over = [...jobs.values()].filter((j) => j.status !== "running");
       for (const old of over.slice(0, Math.max(0, over.length - KEEP_FINISHED_JOBS))) jobs.delete(old.id);
@@ -348,12 +352,12 @@ export function composeText(name: string): string {
 
 // --- Store app → form -------------------------------------------------------------------------------
 
-/** A private, normalised copy of a store app's compose file */
-function storeCompose(store: string, name: string): Compose {
+/** A private, normalised copy of a store app's compose file, for this server's data folder or another's */
+export function storeCompose(store: string, name: string, dataRoot = settings.dataRoot): Compose {
   const app = storeApp(store, name);
   if (!app) throw new AppError("store.appNotFound", 404);
   const compose = structuredClone(app.compose);
-  normalize(compose, settings.dataRoot, name);
+  normalize(compose, dataRoot, name);
   return compose;
 }
 
@@ -374,13 +378,18 @@ export interface StoreAppDetail extends AppMeta {
   form: AppForm & { ports: (AppForm["ports"][number] & { busy: boolean })[] };
 }
 
-export async function storeAppDetail(store: string, name: string, lang: string): Promise<StoreAppDetail> {
-  const compose = storeCompose(store, name);
+/**
+ * A store app with its install form. `on` — the form for another machine: its data folder, its ports
+ * that are taken and whether the app is there already.
+ */
+export async function storeAppDetail(store: string, name: string, lang: string, on?: { dataRoot: string; busy: (ports: { port: number; protocol: string }[]) => Promise<number[]>; installed: boolean }): Promise<StoreAppDetail> {
+  const compose = storeCompose(store, name, on?.dataRoot);
   const form = buildForm(compose, lang);
+  const taken = on ? new Set(await on.busy(form.ports.filter((p) => p.published !== "").map((p) => ({ port: Number(p.published), protocol: p.protocol })))) : null;
   const ports = await Promise.all(
-    form.ports.map(async (p) => ({ ...p, busy: p.published !== "" && !(await portFree(Number(p.published), p.protocol)) })),
+    form.ports.map(async (p) => ({ ...p, busy: p.published !== "" && (taken ? taken.has(Number(p.published)) : !(await portFree(Number(p.published), p.protocol))) })),
   );
-  return { ...appMeta(compose, lang), store, name, installed: existsSync(composeFile(name)), form: { ...form, ports } };
+  return { ...appMeta(compose, lang), store, name, installed: on ? on.installed : existsSync(composeFile(name)), form: { ...form, ports } };
 }
 
 // --- Operations -------------------------------------------------------------------------------------
@@ -404,11 +413,19 @@ export function writeEnv(name: string, extra: Record<string, string> = {}): void
   writeTextAtomic(file, envText(name, previous, extra));
 }
 
-/** Creates the app's missing bind directories — only inside the data root; devices and sockets are not ours */
+/**
+ * Creates the app's missing bind directories — only inside the data root; devices and sockets are not
+ * ours. What is made belongs to PUID:PGID, the user the apps run as: an image that does not start as
+ * root could not write into a folder of root's.
+ */
 function createDataDirs(compose: Compose): void {
   const root = settings.dataRoot === "/" ? "/" : settings.dataRoot + "/";
   for (const source of bindSources(compose)) {
-    if (source.startsWith(root) && !existsSync(source)) mkdirSync(source, { recursive: true });
+    if (!source.startsWith(root) || existsSync(source)) continue;
+    // the data folder and AppData themselves stay root's
+    mkdirSync(source.startsWith(join(settings.dataRoot, "AppData") + "/") ? join(settings.dataRoot, "AppData") : settings.dataRoot, { recursive: true });
+    const first = mkdirSync(source, { recursive: true });
+    if (first && process.getuid?.() === 0) Bun.spawnSync(["chown", "-R", `${settings.puid}:${settings.pgid}`, "--", first]);
   }
 }
 
@@ -514,8 +531,11 @@ const hataFile = (name: string) => join(appDir(name), "hata.yml");
 const HATA_FILE_HEADER = "# Written by Hata: the store this app came from and the store's compose file it was installed from.\n# compose.yml next to this file is yours to edit; this one is not, and docker compose never reads it.\n";
 
 function writeHataFile(name: string, store: string, base: Compose): void {
-  writeTextAtomic(hataFile(name), HATA_FILE_HEADER + dumpCompose({ store, base }));
+  writeTextAtomic(hataFile(name), hataFileText(store, base));
 }
+
+/** The text of `hata.yml`: the store an app came from and the store's file it was installed from */
+export const hataFileText = (store: string, base: Compose): string => HATA_FILE_HEADER + dumpCompose({ store, base });
 
 interface HataFile {
   store: string;

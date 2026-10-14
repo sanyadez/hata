@@ -16,6 +16,7 @@ import { arch, hostname, release, totalmem } from "node:os";
 import { dirname } from "node:path";
 import { containerCommand, shellCommand, TerminalManager, terminalEnv, type TerminalClient } from "./terminal";
 import { dockerInfo, listContainers, PROJECT_LABEL, run, SERVICE_LABEL, startContainer, stopContainer, type ContainerSummary } from "./docker";
+import * as apps from "./clientapps";
 import * as files from "./clientfiles";
 import { keyPair, linkKeys, Opener, Sealer, splitCode, type KeyPair } from "./link";
 import { MuxError, Peer, type Channel, type Handler } from "./mux";
@@ -233,8 +234,8 @@ const archName = (): string => (arch() === "arm64" ? "arm64" : "x64");
 
 /** Hata removed this machine: the client takes itself away */
 function forget(): void {
-  console.log("Hata removed this machine; the client removes itself");
-  rmSync(STATE_DIR, { recursive: true, force: true });
+  console.log("Hata removed this machine; the client removes itself (its apps stay where they are)");
+  rmSync(LINK_FILE, { force: true });
   setTimeout(() => {
     if (existsSync(UNIT)) {
       Bun.spawnSync({ cmd: ["systemctl", "disable", "hata-client.service"] });
@@ -344,6 +345,13 @@ function handlersFor(state: LinkState): Record<string, Handler> {
     terminal: (args, channel) => terminal(args, channel),
     update: (args) => update(args, state),
     forget: () => forget(),
+    "apps.list": () => apps.list(),
+    "apps.write": (args) => apps.write(args),
+    "apps.compose": (args, channel) => apps.compose(args, channel),
+    "apps.logs": (args, channel) => apps.logs(args, channel),
+    "apps.folders": (args) => apps.folders(args),
+    "apps.ports": (args) => apps.ports(args),
+    "apps.remove": (args) => apps.remove(args),
     "fs.list": (args) => files.list(args),
     "fs.summary": (args) => files.summary(args),
     "fs.info": (args) => files.fileInfo(args),
@@ -473,9 +481,9 @@ function uninstall(): number {
   Bun.spawnSync({ cmd: ["systemctl", "disable", "--now", "hata-client.service"], stdout: "inherit", stderr: "inherit" });
   rmSync(UNIT, { force: true });
   Bun.spawnSync({ cmd: ["systemctl", "daemon-reload"] });
-  rmSync(STATE_DIR, { recursive: true, force: true });
+  rmSync(LINK_FILE, { force: true });
   rmSync(BIN, { force: true });
-  console.log("The Hata client is removed. Remove the machine on Hata's page too, if it is still listed.");
+  console.log(`The Hata client is removed. Apps it installed keep running; their compose files stay in ${apps.APPS_DIR}. Remove the machine on Hata's page too, if it is still listed.`);
   return 0;
 }
 
