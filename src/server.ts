@@ -101,9 +101,11 @@ import { qrMatrix } from "./qr";
 import { connect as connectTailscale, disconnect as disconnectTailscale, install as installTailscale, offerNetworks, report as tailscaleReport, signOut as signOutTailscale, start as startTailscale } from "./tailscale";
 import { addDevice as addWireguardDevice, changeDevice as changeWireguardDevice, deviceFile as wireguardDeviceFile, forgetClient as forgetWireguardClient, removeDevice as removeWireguardDevice, report as wireguardReport, setClient as setWireguardClient, setServer as setWireguardServer } from "./wireguard";
 import { IMAGE_MIME, imageType, wallpaperSvg, WALLPAPERS } from "./wallpapers";
-import { containerCommand, shellCommand, TerminalError, TerminalManager, terminalEnv, type TerminalClient, type TerminalStart } from "./terminal";
+import { containerCommand, MAX_BUFFERED_BYTES, shellCommand, TerminalError, TerminalManager, terminalEnv, WS_SLOW_CLIENT, type TerminalClient, type TerminalStart } from "./terminal";
+import { MuxError, type Channel } from "./mux";
 import { addStore, ARCH, catalogue, removeStore, scheduleStoreSync, StoreError, syncStore } from "./store";
 import { startSampler, systemStatus } from "./system";
+import { call as machineCall, clientBinary, containersOf, installScript, invite as machineInvite, INVITE_MS, linkData, linkHandlers, machine as machineView, MACHINE_ID_RE, machines as machineList, machinesAway, open as machineOpen, remove as removeMachine, rename as renameMachine, startMachines, updateClient, type LinkSocket } from "./machines";
 import { availableUpdate, checkForUpdate, confirmUpdate, scheduleUpdateChecks, startRollback, startUpdate, updateStatus } from "./update";
 import { VERSION } from "./version";
 import { zipStream } from "./zip";
@@ -355,6 +357,18 @@ async function openTerminal(req: Request, url: URL, server: Server, user: string
   const upgrade = req.headers.get("upgrade")?.toLowerCase() === "websocket";
   // a page of another site can open a WebSocket here with our cookie; it cannot fake where it comes from
   if (upgrade && (req.headers.get("origin") === null || !sameOrigin(req, url))) return fail(403, "request.crossSite");
+  const machineId = url.searchParams.get("machine");
+  if (machineId !== null) {
+    if (!MACHINE_ID_RE.test(machineId)) return fail(404, "machine.notFound");
+    const m = machineView(machineId);
+    if (!m.online) return fail(409, "machine.offline", { name: m.name });
+    const container = url.searchParams.get("container");
+    if (container !== null && !/^[a-f0-9]{12,64}$/.test(container)) return fail(404, "machine.noContainer");
+    if (!upgrade) return json({ ok: true });
+    const data: MachineTerminalSocket = { kind: "machineTerminal", machine: machineId, name: m.name, user, key: container ? `c:${container}` : "host", cols: url.searchParams.get("cols"), rows: url.searchParams.get("rows"), channel: null };
+    if (server.upgrade(req, { data })) return undefined as never;
+    return fail(400, "request.notFound");
+  }
   const app = url.searchParams.get("app");
   let key = "host";
   let start = (): TerminalStart => ({ cmd: shellCommand(), cwd: existsSync(homedir()) ? homedir() : "/", env: terminalEnv() });
@@ -382,12 +396,83 @@ async function openTerminal(req: Request, url: URL, server: Server, user: string
   return fail(400, "request.notFound");
 }
 
-type AnySocket = ServerWebSocket<TerminalSocket | Parameters<typeof tunnelHandlers.open>[0]["data"]>;
+/** A terminal of another machine: the browser's socket joined to a channel of the machine's client */
+interface MachineTerminalSocket {
+  kind: "machineTerminal";
+  machine: string;
+  name: string;
+  user: string;
+  /** `host`, or `c:<container id>` */
+  key: string;
+  cols: string | null;
+  rows: string | null;
+  channel: Channel | null;
+}
+
+function machineTerminalOpen(ws: ServerWebSocket<MachineTerminalSocket>): void {
+  const d = ws.data;
+  const failed = (e: unknown) => {
+    const code = e instanceof MuxError || e instanceof AppError ? e.code : "terminal.spawn";
+    ws.send(JSON.stringify({ type: "error", code: code.startsWith("terminal.") ? code : "error." + code, message: e instanceof Error ? e.message : String(e) }));
+    ws.close(1011, "failed");
+  };
+  try {
+    d.channel = machineOpen(d.machine, "terminal", { key: d.key, cols: d.cols, rows: d.rows });
+  } catch (e) {
+    return failed(e);
+  }
+  const channel = d.channel;
+  channel.onControl((m) => {
+    if (typeof m.json !== "string") return;
+    // a shell really started there: that is worth a line in the activity log
+    if (m.json.startsWith('{"type":"ready","created":true')) record("machine.terminal", { user: d.user, detail: d.key === "host" ? d.name : `${d.name}: ${d.key.slice(2, 14)}` });
+    ws.send(m.json);
+  });
+  void (async () => {
+    try {
+      for (let chunk = await channel.read(); chunk; chunk = await channel.read()) {
+        if (ws.getBufferedAmount() > MAX_BUFFERED_BYTES) {
+          // a slow window: the page connects again and gets the tail
+          channel.cancel();
+          return ws.close(WS_SLOW_CLIENT, "slow");
+        }
+        ws.send(chunk);
+      }
+    } catch {
+      // the channel failed: its result says why
+    }
+  })();
+  channel.result.then(
+    () => ws.close(1000, "ended"),
+    (e) => failed(e),
+  );
+}
+
+function machineTerminalMessage(ws: ServerWebSocket<MachineTerminalSocket>, message: string | Buffer): void {
+  const channel = ws.data.channel;
+  if (!channel) return;
+  if (typeof message !== "string") {
+    if (message.length <= MAX_TERMINAL_INPUT) channel.send(new Uint8Array(message)).catch(() => {});
+    return;
+  }
+  try {
+    const data = JSON.parse(message) as { type?: string; cols?: unknown; rows?: unknown };
+    if (data.type === "resize") channel.control({ type: "resize", cols: data.cols, rows: data.rows });
+  } catch {
+    // not ours to understand
+  }
+}
+
+type AnySocket = ServerWebSocket<TerminalSocket | MachineTerminalSocket | LinkSocket | Parameters<typeof tunnelHandlers.open>[0]["data"]>;
 const isTerminal = (ws: AnySocket): ws is ServerWebSocket<TerminalSocket> => (ws.data as { kind?: string }).kind === "terminal";
+const isLink = (ws: AnySocket): ws is ServerWebSocket<LinkSocket> => (ws.data as { kind?: string }).kind === "machine";
+const isMachineTerminal = (ws: AnySocket): ws is ServerWebSocket<MachineTerminalSocket> => (ws.data as { kind?: string }).kind === "machineTerminal";
 
 /** The sockets of Hata's own listeners: terminals, and connections passed on to apps */
 const sockets = {
   open(ws: AnySocket) {
+    if (isLink(ws)) return linkHandlers.open(ws);
+    if (isMachineTerminal(ws)) return machineTerminalOpen(ws);
     if (!isTerminal(ws)) return tunnelHandlers.open(ws as never);
     const client = ws as unknown as TerminalClient;
     try {
@@ -399,6 +484,8 @@ const sockets = {
     }
   },
   message(ws: AnySocket, message: string | Buffer) {
+    if (isLink(ws)) return linkHandlers.message(ws, message);
+    if (isMachineTerminal(ws)) return machineTerminalMessage(ws, message);
     if (!isTerminal(ws)) return tunnelHandlers.message(ws as never, message);
     const client = ws as unknown as TerminalClient;
     if (typeof message !== "string") {
@@ -413,6 +500,8 @@ const sockets = {
     }
   },
   close(ws: AnySocket, code: number, reason: string) {
+    if (isLink(ws)) return linkHandlers.close(ws);
+    if (isMachineTerminal(ws)) return ws.data.channel?.cancel();
     if (!isTerminal(ws)) return tunnelHandlers.close(ws as never, code, reason);
     terminals.detach(ws as unknown as TerminalClient);
   },
@@ -778,7 +867,7 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
       site: { domain: siteDomain(), mode: settings.https.mode, local: localDomain() },
       // whether the assistant can be asked: the pages offer it next to what is wrong
       assistant: admin && assistantReady(assistantConfig()),
-      attention: admin ? attention({ system, docker, apps, activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), exposed: exposedNics(), array: arrayTrouble(), shares: shareTrouble(), places: placesDown(), unused: unusedDisks(), filling: fillingUp() }) : [],
+      attention: admin ? attention({ system, docker, apps, activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), exposed: exposedNics(), array: arrayTrouble(), shares: shareTrouble(), places: placesDown(), machines: machinesAway(), unused: unusedDisks(), filling: fillingUp() }) : [],
       // who signed in from where, and what was installed by whom, is the administrators' business
       activity: admin ? recent(8) : [],
       // containers and compose projects on this machine that are not apps here yet
@@ -1341,6 +1430,12 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
     return json({ ok: true });
   }
 
+  // ---- other machines (administrators only) ----
+  if (path.startsWith("/api/machines")) {
+    const response = await machinesApi(req, url, server, user.name);
+    if (response) return response;
+  }
+
   // ---- files (administrators only: members were turned away above) ----
   if (path.startsWith("/api/files")) {
     const response = await files(req, url, server, user.name);
@@ -1683,6 +1778,78 @@ async function files(req: Request, url: URL, server: Server, by: string): Promis
   return null;
 }
 
+// --- Other machines ---------------------------------------------------------------------------------
+
+async function clientRoutes(req: Request, url: URL, server: Server): Promise<Response> {
+  if (url.pathname === "/client/link") {
+    if (req.headers.get("upgrade")?.toLowerCase() === "websocket" && server.upgrade(req, { data: linkData(clientIp(req, server)) })) return undefined as never;
+    return fail(400, "request.notFound");
+  }
+  if (req.method !== "GET") return fail(405, "request.notFound");
+  const bin = /^\/client\/bin\/(x64|arm64)$/.exec(url.pathname);
+  if (bin) {
+    server.timeout(req, 0);
+    const { path } = await clientBinary(bin[1]!);
+    return new Response(Bun.file(path), { headers: { ...SECURITY_HEADERS, "content-type": "application/octet-stream", "cache-control": "no-store" } });
+  }
+  const code = /^\/client\/([a-f0-9]{8}\.[A-Za-z0-9_-]{22,64})$/.exec(url.pathname);
+  if (code) {
+    // the address this machine reached Hata at is the one it will keep using
+    server.timeout(req, 0);
+    const origin = `${requestProto(req)}://${req.headers.get("host") ?? url.host}`;
+    return new Response(await installScript(code[1]!, origin), { headers: { ...SECURITY_HEADERS, "content-type": "text/plain; charset=utf-8", "cache-control": "no-store" } });
+  }
+  return fail(404, "request.notFound");
+}
+
+const CONTAINER_ID_RE = /^[a-f0-9]{12,64}$/;
+const PROJECT_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
+const CONTAINER_ACTIONS = ["start", "stop", "restart"];
+
+async function machinesApi(req: Request, url: URL, server: Server, by: string): Promise<Response | null> {
+  const path = url.pathname;
+  const method = req.method;
+  if (path === "/api/machines" && method === "GET") return json({ machines: machineList(), version: VERSION });
+  if (path === "/api/machines/invite" && method === "POST") return json({ ...(await machineInvite(by)), valid: INVITE_MS, lan: baseUrl() });
+  const m = /^\/api\/machines\/([a-f0-9]{8})(\/.*)?$/.exec(path);
+  if (!m) return null;
+  const id = m[1]!;
+  const rest = m[2] ?? "";
+  if (rest === "" && method === "GET") return json(machineView(id));
+  if (rest === "" && method === "PATCH") return json(renameMachine(id, (await body(req)).name, by));
+  if (rest === "" && method === "DELETE") {
+    await removeMachine(id, by);
+    return json({ ok: true });
+  }
+  if (rest === "/containers" && method === "GET") return json(await containersOf(id));
+  const one = /^\/(containers|projects)\/([^/]+)$/.exec(rest);
+  if (one && method === "POST") {
+    const action = String((await body(req)).action);
+    const target = decodeURIComponent(one[2]!);
+    if (!CONTAINER_ACTIONS.includes(action) || !(one[1] === "containers" ? CONTAINER_ID_RE : PROJECT_RE).test(target)) return fail(400, "request.notFound");
+    server.timeout(req, 0);
+    await machineCall(id, one[1] === "containers" ? "container" : "project", one[1] === "containers" ? { id: target, action } : { project: target, action });
+    const name = machineView(id).name;
+    record(`machine.container.${action}`, { user: by, detail: `${name}: ${one[1] === "containers" ? String((await containersOf(id).catch(() => null))?.containers.find((c) => c.id === target)?.name ?? target.slice(0, 12)) : target}` });
+    return json({ ok: true });
+  }
+  if (rest === "/logs" && method === "GET") {
+    const container = url.searchParams.get("container") ?? "";
+    if (!CONTAINER_ID_RE.test(container)) return fail(404, "machine.noContainer");
+    machineView(id);
+    server.timeout(req, 0);
+    const channel = machineOpen(id, "logs", { id: container, tail: 200 });
+    req.signal.addEventListener("abort", () => channel.cancel(), { once: true });
+    return new Response(channel.readable(), { headers: { ...SECURITY_HEADERS, "content-type": "text/plain; charset=utf-8", "cache-control": "no-store", "x-accel-buffering": "no" } });
+  }
+  if (rest === "/update" && method === "POST") {
+    server.timeout(req, 0);
+    await updateClient(id, by);
+    return json({ ok: true });
+  }
+  return null;
+}
+
 /**
  * Asks the domain for this very process, the way a browser would: does the name lead here, over HTTPS,
  * with the host name kept? Run for Hata's own name and for a made-up subdomain (the apps' addresses).
@@ -1807,6 +1974,15 @@ async function handle(req: Request, server: Server): Promise<Response> {
     await confirmChange(url.searchParams.get("token") ?? "");
     return new Response(null, { status: 302, headers: { location: "/#/settings/network" } });
   }
+  // the clients of other machines: their connection, their install script and binary — no session here
+  if (url.pathname.startsWith("/client/")) {
+    try {
+      return await clientRoutes(req, url, server);
+    } catch (e) {
+      if (e instanceof AppError) return fail(e.status, e.code, e.detail);
+      throw e;
+    }
+  }
   if (!url.pathname.startsWith("/api/")) {
     if (req.method !== "GET" && req.method !== "HEAD") return fail(405, "request.notFound");
     return serveStatic(req, url.pathname) ?? new Response("Not found", { status: 404, headers: SECURITY_HEADERS });
@@ -1877,7 +2053,8 @@ export async function serve(): Promise<void> {
   confirmUpdate();
   dropOldSecrets();
   scheduleUpdateChecks();
-  startSampler();
+  startSampler(() => settings.dataRoot);
+  startMachines();
   startDisks();
   startFills();
   startImages({
@@ -1899,7 +2076,7 @@ export async function serve(): Promise<void> {
   void refreshHttps();
   refreshLocalNames();
   startNotifications({
-    attention: async () => attention({ system: systemStatus(), docker: await dockerInfo(), apps: await listApps("en"), activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), exposed: exposedNics(), array: arrayTrouble(), shares: shareTrouble(), places: placesDown(), unused: unusedDisks(), filling: fillingUp() }),
+    attention: async () => attention({ system: systemStatus(), docker: await dockerInfo(), apps: await listApps("en"), activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), exposed: exposedNics(), array: arrayTrouble(), shares: shareTrouble(), places: placesDown(), machines: machinesAway(), unused: unusedDisks(), filling: fillingUp() }),
     baseUrl: publicUrl,
     isAdmin: (id) => findUser(id)?.role === "admin",
   });

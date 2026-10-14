@@ -926,3 +926,26 @@ body:has(> .assistant-fab) #view:not(.fill) { padding-bottom: 104px; }
 .file-text .shared-mark { margin-left: 4px; vertical-align: -2px; }
 .pair input.port { width: 90px; flex: none; }
 .pair input.port ~ input, .pair input:has(+ input.port) { flex: 1; min-width: 160px; width: auto; }
+
+/* Machines */
+.machine-card { display: grid; gap: 8px; color: inherit; text-decoration: none; transition: border-color 0.15s; }
+.machine-card:hover { border-color: var(--accent); }
+.machine-title { display: flex; align-items: center; gap: 10px; }
+.machine-title .ico { width: 20px; height: 20px; flex: none; color: var(--muted); }
+.machine-meter .kv { padding: 2px 0 4px; }
+.machine-meter .bar { margin-bottom: 0; }
+.machine-icon { display: grid; place-items: center; width: 56px; height: 56px; flex: none; border-radius: var(--radius-md); background: var(--surface-2); color: var(--muted); }
+.machine-icon .ico { width: 28px; height: 28px; }
+.menu .machine-icon { width: 40px; height: 40px; }
+.machine-line { overflow-wrap: anywhere; }
+.machine-wait { display: flex; align-items: center; gap: 10px; color: var(--muted); }
+.machine-wait.done { color: var(--ok); }
+.machine-wait .btn { margin-left: auto; }
+.machine-pulse { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); animation: machine-pulse 1.2s ease-in-out infinite; }
+@keyframes machine-pulse { 50% { opacity: 0.25; } }
+.machine-project .section-head { flex-wrap: wrap; }
+.machine-project .section-head .row-actions { margin-left: auto; }
+.machine-project { gap: 10px; }
+.machine-containers th:nth-child(1) { width: 38%; }
+.machine-containers th:nth-child(2) { width: 24%; }
+.machine-containers th:last-child { width: 1%; }

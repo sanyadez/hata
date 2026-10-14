@@ -79,6 +79,7 @@ const ICONS = {
   expand: "M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7",
   shrink: "M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7",
   down: "M6 9l6 6 6-6",
+  server: "M4 4h16v7H4zM4 13h16v7H4zM8 7.5h.01M8 16.5h.01M12 7.5h4M12 16.5h4",
 };
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -313,6 +314,7 @@ function parseRoute() {
   if (parts[0] === "users" && isAdmin()) return { view: "users" };
   if (parts[0] === "import" && isAdmin()) return { view: "import" };
   if (parts[0] === "terminal" && isAdmin()) return { view: "terminal" };
+  if (parts[0] === "machines" && isAdmin()) return parts[1] ? { view: "machine", id: parts[1], tab: MACHINE_TABS.includes(parts[2]) ? parts[2] : "overview" } : { view: "machines" };
   if (parts[0] === "apps" && parts[1]) return { view: "app", name: parts[1], tab: isAdmin() && ["settings", "logs", "compose", "backups", "terminal"].includes(parts[2]) ? parts[2] : "overview" };
   if (parts[0] === "settings") return { view: "settings", section: sections().some((item) => item.id === parts[1]) ? parts[1] : "account" };
   return { view: "home" };
@@ -354,6 +356,7 @@ function onRoute() {
   if (state.route.view === "import") void loadImport();
   if (state.route.view === "welcome") void loadWelcome();
   if (state.route.view === "app") void loadApp();
+  if (state.route.view === "machines" || state.route.view === "machine") void loadMachines();
   window.scrollTo(0, 0);
 }
 window.addEventListener("hashchange", onRoute);
@@ -395,6 +398,10 @@ function startEvents() {
       }, 1200);
     } else if (event.type === "assistant") {
       assistantEvent(event);
+    } else if (event.type === "machines") {
+      if (state.route.view === "machines" || state.route.view === "machine") void loadMachines();
+    } else if (event.type === "machine") {
+      machineEvent(event);
     } else if (event.type === "approvals") {
       void loadApprovals();
     } else if (event.type === "tailscale") {
@@ -602,6 +609,7 @@ const NAV = [
   { view: "home", hash: "#/", icon: "home" },
   { view: "store", hash: "#/store", icon: "grid", guest: false },
   { view: "files", hash: "#/files", icon: "folder", admin: true },
+  { view: "machines", hash: "#/machines", icon: "server", admin: true },
   { view: "backups", hash: "#/backups", icon: "archive", admin: true },
   { view: "users", hash: "#/users", icon: "user", admin: true },
   { view: "settings", hash: "#/settings", icon: "sliders" },
@@ -612,7 +620,7 @@ const NAV = [
 const isAdmin = () => state.user?.role === "admin" && !state.user.mustTwoFactor;
 
 function navLinks(className) {
-  const current = state.route.view === "app" ? "home" : state.route.view === "import" ? "store" : state.route.view === "trash" ? "files" : state.route.view;
+  const current = state.route.view === "machine" ? "machines" : state.route.view === "app" ? "home" : state.route.view === "import" ? "store" : state.route.view === "trash" ? "files" : state.route.view;
   return NAV.filter((item) => (!item.admin || isAdmin()) && (item.guest !== false || state.user.role !== "guest")).map((item) =>
     h("a", { class: className + (current === item.view ? " active" : ""), href: item.hash, "aria-current": current === item.view ? "page" : null }, icon(item.icon), h("span", null, t("nav." + item.view))),
   );
@@ -722,6 +730,8 @@ function render() {
   if (view === "users") return renderUsers();
   if (view === "import") return renderImport();
   if (view === "terminal") return renderTerminal();
+  if (view === "machines") return renderMachines();
+  if (view === "machine") return renderMachine();
   if (view === "app") return renderApp();
   renderHome();
 }
@@ -1424,7 +1434,7 @@ function dragEnd(drop) {
   drag.kind.drop(drag, target);
 }
 
-const ATTENTION_ICONS = { update: "up", docker: "box", restarting: "refresh", partial: "alert", disk: "disk", smart: "disk", memory: "memory", temperature: "temp", internet: "network", network: "network", array: "disk", share: "share", netplace: "globe" };
+const ATTENTION_ICONS = { update: "up", docker: "box", restarting: "refresh", partial: "alert", disk: "disk", smart: "disk", memory: "memory", temperature: "temp", internet: "network", network: "network", array: "disk", share: "share", netplace: "globe", machine: "server" };
 
 function attentionItem(item) {
   const detail = { ...item.detail, free: item.detail.free == null ? "" : bytes(item.detail.free), trash: item.detail.trash == null ? "" : bytes(item.detail.trash), size: item.detail.size == null ? "" : bytes(item.detail.size) };
@@ -1443,6 +1453,7 @@ function attentionItem(item) {
     (item.code.startsWith("internet.") || item.code === "network.exposed") && open("#/settings/network"),
     item.code.startsWith("share.") && open("#/settings/shares"),
     item.code === "netplace.down" && open("#/settings/storage"),
+    item.code === "machine.away" && open(`#/machines/${item.detail.id}`),
     item.app && open(`#/apps/${item.app}${item.code === "restarting" || item.code === "partial" ? "/logs" : ""}`, t(item.code === "restarting" || item.code === "partial" ? "app.logs" : "common.open")),
     (item.code === "disk.new" || item.code === "disk.usb") && isAdmin() && button(t("mounting.ignore"), { class: "small quiet", onclick: () => void api("POST", "/api/disks/ignore", { id: item.detail.id }).then(refresh, (e) => toast(errorText(e), "error")) }),
   ].filter(Boolean);
@@ -1942,10 +1953,13 @@ function appOverviewTab(app, box) {
   void poll();
 }
 
-function streamLogs(app, log, signal) {
+const streamLogs = (app, log, signal) => followText(`/api/apps/${app.name}/logs`, log, signal);
+
+/** A text stream into a <pre>, kept scrolled to the end while the reader is there */
+function followText(url, log, signal) {
   return (async () => {
     try {
-      const res = await fetch(`/api/apps/${app.name}/logs`, { signal });
+      const res = await fetch(url, { signal });
       if (!res.ok) throw new ApiError(res.status, (await res.json().catch(() => ({}))).error?.code ?? "request.failed");
       const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
       for (;;) {
@@ -1993,6 +2007,436 @@ function appTerminalTab(app, box) {
   box.replaceChildren(h("div", { class: "cmd-row" }, h("p", { class: "cmd grow" }, icon("terminal"), `docker exec -it ${running[0].name} sh`), pick), frame);
   if (pick) pick.addEventListener("change", () => (box.querySelector(".cmd").lastChild.textContent = `docker exec -it ${pick.value} sh`));
   open(running[0].name);
+}
+
+// --- Machines ---------------------------------------------------------------------------------------
+// Other machines with Hata's client: their state, their containers and a terminal. The client connects
+// to Hata, so whatever the page asks goes over that connection; `machine` events bring the state.
+
+const machinesUi = { list: null, current: null, containers: null };
+
+async function loadMachines() {
+  try {
+    machinesUi.list = await api("GET", "/api/machines");
+  } catch (e) {
+    return toast(errorText(e), "error");
+  }
+  if (state.route.view === "machines") renderMachinesBody();
+  if (state.route.view === "machine") {
+    machinesUi.current = machinesUi.list.machines.find((m) => m.id === state.route.id) ?? null;
+    renderMachineHead();
+    if (state.route.tab === "overview") paintMachineOverview();
+  }
+}
+
+/** A machine's news: its state every few seconds, or its containers changed */
+function machineEvent(event) {
+  const m = machinesUi.list?.machines.find((x) => x.id === event.id);
+  if (!m) return;
+  if (event.status) m.status = event.status;
+  if (state.route.view === "machines" && event.status) paintMachineCard(m);
+  if (state.route.view !== "machine" || state.route.id !== event.id) return;
+  if (event.status && state.route.tab === "overview") paintMachineStats(m);
+  if (event.containers && state.route.tab === "containers") void loadMachineContainers();
+}
+
+const machineChip = (m) => h("span", { class: "state " + (m.online ? "running" : "") }, m.online ? t("machines.online") : t("machines.offline"));
+const machineOs = (m) => [m.info?.os, m.info?.arch].filter(Boolean).join(" · ");
+
+function renderMachines() {
+  shell(
+    h("div", { class: "page-head" }, h("div", null, h("h1", null, t("nav.machines")), h("p", { class: "meta", id: "machines-meta" }, t("machines.lead"))), h("div", { class: "actions" }, button(t("machines.add"), { class: "primary", onclick: addMachineDialog }, "plus"))),
+    h("div", { id: "machines-body" }),
+  );
+  if (machinesUi.list) renderMachinesBody();
+}
+
+function renderMachinesBody() {
+  const box = document.getElementById("machines-body");
+  if (!box) return;
+  const list = machinesUi.list.machines;
+  document.getElementById("machines-meta").textContent = list.length ? t("machines.count", { n: list.length, online: list.filter((m) => m.online).length }) : t("machines.lead");
+  if (!list.length) {
+    return box.replaceChildren(h("div", { class: "card empty" }, icon("server"), h("h2", null, t("machines.none")), h("p", null, t("machines.noneLead")), button(t("machines.add"), { class: "primary", onclick: addMachineDialog }, "plus")));
+  }
+  box.replaceChildren(h("div", { class: "cards" }, list.map((m) => h("a", { class: "card pad machine-card", href: `#/machines/${m.id}`, id: "machine-" + m.id }))));
+  for (const m of list) paintMachineCard(m);
+}
+
+/** The card of a machine in the list: who it is, and its numbers while it is connected */
+function paintMachineCard(m) {
+  const card = document.getElementById("machine-" + m.id);
+  if (!card) return;
+  const s = m.status;
+  const mem = s?.memory.total ? Math.round((s.memory.used / s.memory.total) * 100) : null;
+  const disk = s?.disks[0];
+  const diskPercent = disk ? Math.round((disk.used / disk.total) * 100) : null;
+  const meter = (label, percent, hint) => {
+    const fill = h("i", { class: level(percent ?? 0) });
+    fill.style.width = (percent ?? 0) + "%";
+    return h("div", { class: "machine-meter" }, h("div", { class: "kv" }, h("span", { class: "muted small" }, label), h("span", { class: "small" }, percent == null ? "—" : `${percent}%`, hint && h("span", { class: "muted" }, " · " + hint))), h("div", { class: "bar" }, fill));
+  };
+  put(
+    card,
+    h("div", { class: "machine-title" }, icon("server"), h("strong", { class: "clip grow" }, m.name), machineChip(m)),
+    h("p", { class: "muted small clip" }, machineOs(m) || "—"),
+    m.online && s
+      ? [meter(t("sys.cpu"), s.cpu, t("sys.cores", { n: s.cores })), meter(t("sys.memory"), mem, bytes(s.memory.total)), disk && meter(t("sys.disk"), diskPercent, t("sys.free", { free: bytes(disk.total - disk.used), total: bytes(disk.total) }))]
+      : h("p", { class: "muted small" }, m.online ? t("machines.waiting") : t("machines.seen", { ago: ago(m.seen) })),
+    m.outdated && m.online && h("p", { class: "small accent-text" }, t("machines.outdated", { version: m.info.version })),
+  );
+}
+
+/** The install line for a new machine, and the wait for it to connect */
+async function addMachineDialog() {
+  let invite;
+  try {
+    invite = await api("POST", "/api/machines/invite", {});
+  } catch (e) {
+    return toast(errorText(e), "error");
+  }
+  const known = new Set((machinesUi.list?.machines ?? []).map((m) => m.id));
+  const addresses = [...new Set([location.origin, invite.lan?.replace(/\/$/, "")].filter(Boolean))];
+  let address = addresses[0];
+  const line = () => `curl -fsSL ${address}/client/${invite.code} | sudo sh`;
+  const cmd = h("span", { class: "grow mono machine-line" }, line());
+  const waiting = h("p", { class: "machine-wait" }, h("span", { class: "machine-pulse" }), t("machines.addWaiting"));
+  let dialog;
+  const pick =
+    addresses.length > 1 &&
+    h(
+      "div",
+      { class: "kv" },
+      h("span", { class: "muted" }, t("machines.addAddress")),
+      h("select", { onchange: (e) => ((address = e.target.value), (cmd.textContent = line())) }, addresses.map((a) => h("option", { value: a }, a))),
+    );
+  dialog = openDialog(
+    "wide",
+    h("header", null, h("h2", { class: "grow" }, t("machines.addTitle")), closeX(() => dialog)),
+    h("p", null, t("machines.addLead")),
+    pick,
+    h("p", { class: "cmd" }, cmd, h("button", { type: "button", class: "icon-btn", title: t("twofa.copy"), "aria-label": t("twofa.copy"), onclick: () => copyText(line()) }, icon("copy"))),
+    h("p", { class: "muted small" }, t("machines.addHint", { minutes: Math.round(invite.valid / 60000) })),
+    h("p", { class: "muted small" }, t("machines.addNeeds")),
+    waiting,
+    h("footer", null, closeButton(() => dialog)),
+  );
+  // the new machine shows itself in the list: the dialog says so and leads to it
+  const look = async () => {
+    const list = await api("GET", "/api/machines").catch(() => null);
+    const fresh = list?.machines.find((m) => !known.has(m.id));
+    if (!fresh) return;
+    machinesUi.list = list;
+    if (state.route.view === "machines") renderMachinesBody();
+    waiting.replaceChildren(icon("check"), h("span", null, t("machines.addDone", { name: fresh.name })), h("a", { class: "btn small primary", href: `#/machines/${fresh.id}`, onclick: () => dialog.close() }, t("common.open")));
+    waiting.classList.add("done");
+    stop();
+  };
+  const timer = setInterval(look, 3000);
+  const stop = () => clearInterval(timer);
+  dialog.addEventListener("close", stop);
+}
+
+// --- One machine ---
+
+const MACHINE_TABS = ["overview", "containers", "terminal"];
+
+function renderMachine() {
+  if (machinesUi.current?.id !== state.route.id) {
+    machinesUi.current = machinesUi.list?.machines.find((m) => m.id === state.route.id) ?? null;
+    machinesUi.containers = null;
+  }
+  shell(h("div", { id: "machine-head" }), h("div", { id: "machine-tab" }));
+  if (machinesUi.current) renderMachineHead();
+  renderMachineTab();
+}
+
+function renderMachineHead() {
+  const m = machinesUi.current;
+  const head = document.getElementById("machine-head");
+  if (!head) return;
+  if (!m) return head.replaceChildren(h("nav", { class: "crumbs" }, h("a", { href: "#/machines" }, t("nav.machines"))), machinesUi.list && h("p", { class: "card pad muted" }, t("error.machine.notFound")));
+  const tab = (id, iconName) => h("a", { class: "tab" + (state.route.tab === id ? " active" : ""), href: `#/machines/${m.id}${id === "overview" ? "" : "/" + id}` }, icon(iconName), t("machines.tab." + id));
+  head.replaceChildren(
+    h("nav", { class: "crumbs" }, h("a", { href: "#/machines" }, t("nav.machines")), icon("chevron"), h("span", null, m.name)),
+    h(
+      "div",
+      { class: "app-head" },
+      h("span", { class: "machine-icon" }, icon("server")),
+      h("div", { class: "grow" }, h("div", { class: "app-title" }, h("h1", null, m.name), machineChip(m)), h("p", { class: "meta" }, [machineOs(m), m.ip, m.online ? null : t("machines.seen", { ago: ago(m.seen) })].filter(Boolean).flatMap((part, i) => (i ? [h("span", { class: "dot-sep" }, "·"), part] : [part])))),
+      h(
+        "div",
+        { class: "actions" },
+        m.outdated && m.online && button(t("machines.update", { version: machinesUi.list.version }), { class: "accent", onclick: (e) => updateMachine(m, e.currentTarget) }, "up"),
+        h("button", { type: "button", class: "btn square", "aria-label": t("app.more"), onclick: () => machineMenu(m) }, icon("more")),
+      ),
+    ),
+    h("div", { class: "tabs" }, tab("overview", "grid"), tab("containers", "box"), tab("terminal", "terminal")),
+  );
+}
+
+function machineMenu(m) {
+  let dialog;
+  const item = (label, iconName, action, cls = "") => h("button", { type: "button", class: "menu-item " + cls, onclick: () => (dialog.close(), action()) }, icon(iconName), label);
+  dialog = openDialog(
+    "menu",
+    h("header", null, h("span", { class: "machine-icon" }, icon("server")), h("div", null, h("h2", null, m.name), machineChip(m))),
+    item(t("machines.rename"), "edit", () => renameMachineDialog(m)),
+    m.online && item(t("machines.updateAgain"), "up", () => updateMachine(m)),
+    item(t("machines.remove"), "trash", () => removeMachineDialog(m), "danger"),
+  );
+}
+
+async function updateMachine(m, el) {
+  if (el) el.disabled = true;
+  try {
+    await api("POST", `/api/machines/${m.id}/update`, {});
+    toast(t("machines.updated", { name: m.name }));
+  } catch (e) {
+    toast(errorText(e), "error");
+  }
+  if (el) el.disabled = false;
+  // the client restarts into the new version and connects again
+  setTimeout(loadMachines, 4000);
+}
+
+function renameMachineDialog(m) {
+  let dialog;
+  const field = h("input", { type: "text", value: m.name, maxlength: 40, required: true });
+  dialog = openDialog(
+    "",
+    h(
+      "form",
+      {
+        onsubmit: async (e) => {
+          e.preventDefault();
+          try {
+            await api("PATCH", `/api/machines/${m.id}`, { name: field.value });
+            dialog.close();
+            await loadMachines();
+          } catch (err) {
+            toast(errorText(err), "error");
+          }
+        },
+      },
+      h("header", null, h("h2", { class: "grow" }, t("machines.rename")), closeX(() => dialog)),
+      h("label", { class: "field" }, h("span", null, t("machines.name")), field),
+      h("footer", null, closeButton(() => dialog, t("common.cancel")), button(t("settings.save"), { type: "submit", class: "primary" })),
+    ),
+  );
+  field.select();
+}
+
+function removeMachineDialog(m) {
+  let dialog;
+  dialog = openDialog(
+    "confirm",
+    h("h2", { class: "wrap" }, t("machines.removeTitle", { name: m.name })),
+    h("p", { class: "muted" }, t(m.online ? "machines.removeLead" : "machines.removeOffline")),
+    !m.online && h("p", { class: "cmd" }, icon("terminal"), "sudo hata-client uninstall"),
+    h(
+      "footer",
+      null,
+      closeButton(() => dialog, t("common.cancel")),
+      button(t("machines.remove"), {
+        class: "danger",
+        onclick: async (e) => {
+          e.currentTarget.disabled = true;
+          try {
+            await api("DELETE", `/api/machines/${m.id}`);
+            dialog.close();
+            go("#/machines");
+          } catch (err) {
+            toast(errorText(err), "error");
+          }
+        },
+      }, "trash"),
+    ),
+  );
+}
+
+function renderMachineTab() {
+  const box = document.getElementById("machine-tab");
+  const m = machinesUi.current;
+  if (!box || !m) return;
+  if (!m.online && state.route.tab !== "overview") return box.replaceChildren(h("p", { class: "card pad muted" }, t("error.machine.offline", { name: m.name })));
+  if (state.route.tab === "containers") {
+    box.replaceChildren(h("div", { id: "machine-containers" }, h("p", { class: "muted" }, t("machines.loading"))));
+    if (machinesUi.containers) paintMachineContainers();
+    void loadMachineContainers();
+  } else if (state.route.tab === "terminal") {
+    box.replaceChildren(h("div", { class: "term-holder" }, terminalFrame({ machine: m.id })));
+  } else machineOverview(m, box);
+}
+
+function machineOverview(m, box) {
+  const row = (label, value, mono) => value && h("div", { class: "kv" }, h("span", { class: "muted" }, label), h("span", { class: mono ? "mono" : "" }, value));
+  const i = m.info ?? {};
+  box.replaceChildren(
+    h(
+      "div",
+      { class: "columns" },
+      h(
+        "div",
+        { class: "stack" },
+        h("div", { class: "section-head" }, h("h2", null, t("app.resources"))),
+        m.online
+          ? h("section", { class: "stats card" }, statCell("m-cpu", "cpu", t("sys.cpu")), statCell("m-memory", "memory", t("sys.memory")), statCell("m-disk", "disk", t("sys.disk")), statCell("m-network", "network", t("sys.network")), h("div", { class: "stat", id: "stat-m-temp", hidden: true }, h("div", { class: "stat-label" }, icon("temp"), t("sys.temperature")), h("div", { class: "stat-row" }, h("div", { class: "stat-value" }, h("strong", null, "—"), h("span", { class: "unit" })), h("div", { class: "stat-chart" })), h("div", { class: "stat-hint" }, " ")))
+          : h("p", { class: "card pad muted" }, t("machines.offlineLead", { ago: ago(m.seen) })),
+        h("div", { id: "m-disks" }),
+      ),
+      h(
+        "aside",
+        { class: "side" },
+        h(
+          "section",
+          { class: "card pad" },
+          h("div", { class: "section-head" }, h("h2", null, t("app.glance"))),
+          row(t("machines.hostname"), i.hostname, true),
+          row(t("machines.os"), i.os),
+          row(t("machines.kernel"), i.kernel, true),
+          row(t("sys.cpu"), i.cpu && `${i.cpu} · ${t("sys.cores", { n: i.cores })}`),
+          row(t("sys.memory"), i.memory && bytes(i.memory)),
+          row("Docker", i.docker ? (i.docker.available ? `${i.docker.version} · compose ${i.docker.compose}` : t("machines.noDocker")) : ""),
+          row(t("machines.address"), m.ip, true),
+          row(t("machines.client"), i.version),
+          row(t("machines.added"), new Date(m.added).toLocaleDateString(state.lang, { day: "numeric", month: "short", year: "numeric" })),
+        ),
+      ),
+    ),
+  );
+  paintMachineStats(m);
+}
+
+function paintMachineOverview() {
+  const box = document.getElementById("machine-tab");
+  if (box && machinesUi.current) machineOverview(machinesUi.current, box);
+}
+
+function paintMachineStats(m) {
+  const s = m.status;
+  if (!s) return;
+  setStat("m-cpu", s.cpu == null ? "—" : String(s.cpu), "%", t("sys.cores", { n: s.cores }) + " · " + t("sys.load", { load: s.load[0] }), sparkline(s.history.cpu, 100));
+  const mem = s.memory;
+  const memPercent = mem.total ? Math.round((mem.used / mem.total) * 100) : 0;
+  const used = bytesParts(mem.used);
+  setStat("m-memory", used.value, used.unit, t("sys.ofPercent", { total: bytes(mem.total), percent: memPercent }), sparkline(s.history.memory, 100), level(memPercent));
+  const disk = s.disks[0];
+  if (disk) {
+    const percent = Math.round((disk.used / disk.total) * 100);
+    const fill = h("i", { class: level(percent) });
+    fill.style.width = percent + "%";
+    setStat("m-disk", String(percent), "%", t("sys.free", { free: bytes(disk.total - disk.used), total: bytes(disk.total) }), h("div", { class: "bar" }, fill), level(percent));
+  }
+  const net = s.net ? bytesParts(s.net.rx + s.net.tx) : null;
+  setStat("m-network", net ? net.value : "—", net ? net.unit + "/s" : "", s.net ? `↓ ${bytes(s.net.rx)}/s · ↑ ${bytes(s.net.tx)}/s` : "", sparkline(s.history.net));
+  const temp = document.getElementById("stat-m-temp");
+  if (temp) temp.hidden = s.temperature == null;
+  if (s.temperature != null) setStat("m-temp", String(s.temperature), "°C", t("sys.cpu"), null, s.temperature >= 85 ? "warn" : "");
+}
+
+// --- A machine's containers ---
+
+async function loadMachineContainers() {
+  const id = state.route.id;
+  try {
+    const data = await api("GET", `/api/machines/${id}/containers`);
+    if (state.route.view !== "machine" || state.route.id !== id) return;
+    machinesUi.containers = data;
+  } catch (e) {
+    const box = document.getElementById("machine-containers");
+    return box ? box.replaceChildren(h("p", { class: "card pad muted" }, errorText(e))) : toast(errorText(e), "error");
+  }
+  paintMachineContainers();
+}
+
+function paintMachineContainers() {
+  const box = document.getElementById("machine-containers");
+  const m = machinesUi.current;
+  const data = machinesUi.containers;
+  if (!box || !m || !data) return;
+  if (!data.docker.available && !data.containers.length) return box.replaceChildren(h("div", { class: "card pad" }, h("h2", null, t("machines.noDocker")), h("p", { class: "muted" }, t("machines.noDockerLead"))));
+  if (!data.containers.length) return box.replaceChildren(h("p", { class: "card pad muted" }, t("machines.noContainers")));
+  // compose projects first, by name; containers started on their own after them
+  const groups = new Map();
+  for (const c of data.containers) {
+    if (!groups.has(c.project)) groups.set(c.project, []);
+    groups.get(c.project).push(c);
+  }
+  const names = [...groups.keys()].sort((a, b) => (a === "") - (b === "") || a.localeCompare(b));
+  const act = (path, action) => async (e) => {
+    const el = e.currentTarget;
+    el.disabled = true;
+    try {
+      await api("POST", `/api/machines/${m.id}/${path}`, { action });
+    } catch (err) {
+      toast(errorText(err), "error");
+    }
+    el.disabled = false;
+    await loadMachineContainers();
+  };
+  const ports = (c) => [...new Set(c.ports.filter((p) => p.public).map((p) => `${p.public}→${p.private}`))].join(", ");
+  const small = (label, iconName, onclick, off) => h("button", { type: "button", class: "icon-btn", title: label, "aria-label": label, disabled: off, onclick }, icon(iconName));
+  const row = (c) => {
+    const up = c.state === "running";
+    const link = c.ports.find((p) => p.public && p.type === "tcp");
+    return h(
+      "tr",
+      null,
+      h("td", null, h("div", { class: "mono" }, c.service || c.name), h("div", { class: "muted small mono clip" }, c.image)),
+      h("td", null, h("span", { class: "state " + (up ? "running" : c.state === "restarting" ? "restarting" : "") }, c.status)),
+      h("td", { class: "mono small" }, link && m.ip ? h("a", { class: "link", href: `http://${m.ip.includes(":") ? `[${m.ip}]` : m.ip}:${link.public}`, target: "_blank", rel: "noopener noreferrer" }, ports(c)) : ports(c) || "—"),
+      h(
+        "td",
+        null,
+        h(
+          "div",
+          { class: "row-actions" },
+          up ? small(t("app.stop"), "stop", act(`containers/${c.id}`, "stop")) : small(t("app.start"), "play", act(`containers/${c.id}`, "start")),
+          small(t("app.restart"), "refresh", act(`containers/${c.id}`, "restart"), !up),
+          small(t("app.logs"), "logs", () => machineLogsDialog(m, c)),
+          small(t("app.tab.terminal"), "terminal", () => machineTerminalDialog(m, c), !up),
+        ),
+      ),
+    );
+  };
+  box.replaceChildren(
+    h("div", { class: "stack" }, names.map((name) => {
+      const list = groups.get(name);
+      const running = list.filter((c) => c.state === "running").length;
+      return h(
+        "section",
+        { class: "stack machine-project" },
+        h(
+          "div",
+          { class: "section-head" },
+          h("h2", null, name || t("machines.loose"), h("span", { class: "muted" }, t("machines.running", { n: running, total: list.length }))),
+          name &&
+            h(
+              "div",
+              { class: "row-actions" },
+              running ? button(t("app.stop"), { class: "small", onclick: act(`projects/${encodeURIComponent(name)}`, "stop") }, "stop") : button(t("app.start"), { class: "small", onclick: act(`projects/${encodeURIComponent(name)}`, "start") }, "play"),
+              running > 0 && button(t("app.restart"), { class: "small", onclick: act(`projects/${encodeURIComponent(name)}`, "restart") }, "refresh"),
+            ),
+        ),
+        h("div", { class: "card table-wrap" }, h("table", { class: "machine-containers" }, h("thead", null, h("tr", null, h("th", null, t("app.col.container")), h("th", null, t("app.col.state")), h("th", null, t("app.col.ports")), h("th"))), h("tbody", null, list.map(row)))),
+      );
+    })),
+  );
+}
+
+function machineLogsDialog(m, c) {
+  let dialog;
+  const log = h("pre", { class: "console page" });
+  const abort = new AbortController();
+  dialog = openDialog("xwide", h("header", null, h("h2", { class: "clip grow" }, `${m.name}: ${c.name}`), closeX(() => dialog)), h("p", { class: "cmd" }, icon("terminal"), `docker logs --follow --tail 200 ${c.name}`), log);
+  dialog.addEventListener("close", () => abort.abort());
+  void followText(`/api/machines/${m.id}/logs?container=${c.id}`, log, abort.signal);
+}
+
+function machineTerminalDialog(m, c) {
+  let dialog;
+  dialog = openDialog("xwide", h("header", null, h("h2", { class: "clip grow" }, `${m.name}: ${c.name}`), closeX(() => dialog)), h("p", { class: "cmd" }, icon("terminal"), `docker exec -it ${c.name} sh`), h("div", { class: "term-holder" }, terminalFrame({ machine: m.id, container: c.id })));
 }
 
 // --- The settings form of an app ---------------------------------------------------------------

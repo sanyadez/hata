@@ -238,6 +238,11 @@ Early development. What works today:
   your own devices (Hata makes the keys and hands every phone a QR code and every computer a file; a
   device sees the server alone, or the home network when you allow it), WireGuard out to a server of
   yours elsewhere from the configuration it gave, and Tailscale for a home behind a provider's NAT;
+- other machines of the house — a PC, a virtual machine, a container with Linux — looked after from
+  Hata: one line run there installs a small client that connects to Hata by itself (no port to open on
+  the machine, the connection is encrypted end to end even over plain HTTP), and the machine shows its
+  state, its Docker containers grouped by compose project (start, stop, restart, logs, a shell inside)
+  and a terminal of its own. Hata keeps the clients at its own version;
 - HTTPS, your choice of three: none (address and ports, for a home network); behind your own proxy (nginx,
   Caddy, Traefik) with a check that the proxy is set up right; or by Hata itself with certificates from
   Let's Encrypt. With a domain, every app has its own address, `<app>.<domain>`;

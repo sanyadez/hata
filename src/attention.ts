@@ -32,7 +32,7 @@ const FAILURE_WINDOW_MS = 24 * 3600 * 1000;
 /** A trash smaller than this is not worth a word when its disk fills up, bytes */
 const TRASH_WORTH = 100 * 1024 * 1024;
 
-export function attention(input: { system: SystemStatus; docker: DockerInfo; apps: InstalledApp[]; activity: Activity[]; update?: string | null; offsite?: { error: string } | null; disks?: DiskReport[]; trash?: (path: string) => number; absent?: { path: string; holds: string | null }[]; internet?: Trouble[]; exposed?: { nic: string; address: string }[]; array?: { code: string; detail: Record<string, string | number> }[]; shares?: { code: string; detail: Record<string, string> }[]; places?: { id: string; name: string; path: string }[]; unused?: { id: string; title: string; size: number; carries: boolean }[]; filling?: { path: string; days: number; percent: number } | null; now?: number }): AttentionItem[] {
+export function attention(input: { system: SystemStatus; docker: DockerInfo; apps: InstalledApp[]; activity: Activity[]; update?: string | null; offsite?: { error: string } | null; disks?: DiskReport[]; trash?: (path: string) => number; absent?: { path: string; holds: string | null }[]; internet?: Trouble[]; exposed?: { nic: string; address: string }[]; array?: { code: string; detail: Record<string, string | number> }[]; shares?: { code: string; detail: Record<string, string> }[]; places?: { id: string; name: string; path: string }[]; machines?: { id: string; name: string; since: number }[]; unused?: { id: string; title: string; size: number; carries: boolean }[]; filling?: { path: string; days: number; percent: number } | null; now?: number }): AttentionItem[] {
   const { system, docker, apps, activity } = input;
   const now = input.now ?? Date.now();
   const items: AttentionItem[] = [];
@@ -114,6 +114,11 @@ export function attention(input: { system: SystemStatus; docker: DockerInfo; app
   // a folder of another machine that should be mounted and is not: the server is off or away
   for (const place of input.places ?? []) {
     items.push({ id: `netplace:${place.id}`, severity: "warn", code: "netplace.down", detail: { name: place.name, path: place.path } });
+  }
+
+  // a machine whose client has not been connected for a while: off, or the client stopped
+  for (const m of input.machines ?? []) {
+    items.push({ id: `machine:${m.id}`, severity: "warn", code: "machine.away", detail: { name: m.name, id: m.id } });
   }
 
   // a disk nothing uses yet: a new one to put to use, or a USB stick with files to copy from

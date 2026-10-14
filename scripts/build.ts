@@ -1,6 +1,7 @@
 /**
  * Builds the single-file binaries into dist/: `bun run build` — every target, `bun run build x64` — one.
  * The web UI and translations are imported by the server as text, so they end up inside the binary.
+ * Each target gets two: Hata itself and the client of the machines it looks after (`src/client.ts`).
  */
 import { mkdirSync } from "node:fs";
 
@@ -19,12 +20,13 @@ for (const name of names) {
     console.error(`Unknown target "${name}". Known: ${Object.keys(TARGETS).join(", ")}`);
     process.exit(2);
   }
-  const outfile = `dist/hata-linux-${name}`;
-  const proc = Bun.spawnSync({
-    cmd: ["bun", "build", "--compile", "--minify-syntax", `--target=${target}`, "src/index.ts", "--outfile", outfile],
-    stdout: "inherit",
-    stderr: "inherit",
-  });
-  if (proc.exitCode !== 0) process.exit(proc.exitCode ?? 1);
-  console.log(`${outfile}: ${(Bun.file(outfile).size / 1024 / 1024).toFixed(1)} MB`);
+  for (const [entry, outfile] of [["src/index.ts", `dist/hata-linux-${name}`], ["src/client.ts", `dist/hata-client-linux-${name}`]]) {
+    const proc = Bun.spawnSync({
+      cmd: ["bun", "build", "--compile", "--minify-syntax", `--target=${target}`, entry!, "--outfile", outfile!],
+      stdout: "inherit",
+      stderr: "inherit",
+    });
+    if (proc.exitCode !== 0) process.exit(proc.exitCode ?? 1);
+    console.log(`${outfile}: ${(Bun.file(outfile!).size / 1024 / 1024).toFixed(1)} MB`);
+  }
 }

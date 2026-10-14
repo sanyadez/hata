@@ -5,7 +5,6 @@
 import { readdirSync, readFileSync, statfsSync } from "node:fs";
 import { hostname, loadavg } from "node:os";
 import { bus } from "./bus";
-import { settings } from "./config";
 
 const read = (path: string): string => {
   try {
@@ -86,10 +85,13 @@ function disk(path: string): Disk | null {
   }
 }
 
+/** The folder shown next to the root filesystem: Hata's data folder; a machine's client has none */
+let dataRoot = (): string => "/";
+
 /** The root filesystem and, when it is a different filesystem, the data root */
 function disks(): Disk[] {
   const root = disk("/");
-  const data = settings.dataRoot === "/" ? null : disk(settings.dataRoot);
+  const data = dataRoot() === "/" ? null : disk(dataRoot());
   const out = root ? [root] : [];
   if (data && (!root || data.total !== root.total || data.used !== root.used)) out.push(data);
   return out;
@@ -176,10 +178,11 @@ export const systemStatus = (): SystemStatus => last ?? sample();
 const SAMPLE_EVERY_MS = 2000;
 
 /** Samples continuously (rates need a steady baseline) but publishes only while someone is watching */
-export function startSampler(): void {
+export function startSampler(dataRootOf: () => string, publish = true): void {
+  dataRoot = dataRootOf;
   sample();
   setInterval(() => {
     const status = sample();
-    if (bus.subscriberCount > 0) bus.publish("system", { system: status });
+    if (publish && bus.subscriberCount > 0) bus.publish("system", { system: status });
   }, SAMPLE_EVERY_MS);
 }
