@@ -620,11 +620,14 @@ dialog.dropdown header { padding: 4px 6px; margin-bottom: 8px; }
 
 .store-app-body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 28px; align-items: start; }
 .store-app-body > :only-child { grid-column: 1 / -1; }
-.description { white-space: pre-line; overflow-wrap: anywhere; color: var(--muted); max-height: 260px; overflow-y: auto; }
+.description { overflow-wrap: anywhere; color: var(--muted); max-height: 260px; overflow-y: auto; }
+.prose { display: grid; gap: 8px; }
+.prose p { margin: 0; }
+.prose ul, .prose ol { margin: 0; padding-left: 20px; display: grid; gap: 4px; }
 .shots { display: flex; gap: 8px; overflow-x: auto; }
 .shots img { height: 170px; border-radius: var(--radius-md); border: 1px solid var(--border); }
 .tips { background: var(--surface-2); border-radius: var(--radius-md); padding: 12px 16px; display: grid; gap: 6px; }
-.tips p { white-space: pre-line; overflow-wrap: anywhere; color: var(--muted); }
+.tips p, .tips li { overflow-wrap: anywhere; color: var(--muted); }
 .install-form { background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 18px; gap: 22px; }
 .form-section { display: grid; gap: 10px; }
 .form-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; }
@@ -916,3 +919,8 @@ body:has(> .assistant-fab) #view:not(.fill) { padding-bottom: 104px; }
 .wg-conf { white-space: pre; overflow-x: auto; font-size: 12px; }
 .check.small { font-size: 13px; }
 .cmd.wg-conf { display: block; white-space: pre; overflow-x: auto; }
+
+/* the search field of a folder in Files */
+.page-head input.find { width: 200px; }
+@media (max-width: 760px) { .page-head input.find { width: 100%; } }
+.file-text .shared-mark { margin-left: 4px; vertical-align: -2px; }

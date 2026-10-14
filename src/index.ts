@@ -25,6 +25,8 @@ Usage:
                     fetched first (--to <folder>, by default /DATA/Backups). A bucket takes
                     --endpoint <address> and --region <region>; its key is asked for, or read
                     from HATA_S3_KEY and HATA_S3_SECRET
+  hata update       install the newest release, as Settings → About does (needs root);
+                    --previous goes back to the version that ran before, --yes does not ask
   hata unseal <file.enc> [<output file>]
                     open one file of a sealed backup by hand
   hata setup-url    print the address for creating the first administrator
@@ -65,6 +67,11 @@ switch (command) {
   case "restore": {
     const { restoreServer } = await import("./restore");
     process.exit(await restoreServer(process.argv.slice(3)));
+    break;
+  }
+  case "update": {
+    const { updateFromConsole } = await import("./update");
+    process.exit(await updateFromConsole(process.argv.slice(3)));
     break;
   }
   case "update-watch": {

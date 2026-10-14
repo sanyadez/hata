@@ -208,18 +208,22 @@ Early development. What works today:
   with the name and password they sign in to Hata with; for every folder each user may look, change or
   nothing at all, and so may "anyone without a password". What lands there takes the owner of its
   folder, so apps still reach it. Samba does the serving: the installer puts it in and Hata sets it up
-  whole — the `smb.conf` that was there is kept next to it and put back when Hata is removed. No address
+  whole — the `smb.conf` that was there is kept next to it and put back when Hata is removed. A Samba that
+  stopped, or a shared folder whose disk is gone, shows up under "needs attention". No address
   has to be typed: while something is shared, the server shows up by itself under "Network" in Explorer on
   Windows, in the sidebar of Finder and in the Files app of a phone, under its name on the home network;
 - files: the server's files in the browser, opened in the data folder and reaching everywhere — folders,
   upload by drag and drop (whole folders too, large files in parts), download of a file or of a folder as a
   ZIP archive, rename, move, copy, delete — into a trash, from where a thing is put back within 30 days —, copying a path, putting a folder on the dashboard, a menu on the right click (of the file, of everything selected, of the folder), the other disks of the server at the top of the data folder and in every folder picker, pictures, video and sound opened in place, text
-  files edited in place. What is uploaded into an app's folder belongs to the same user the app runs as;
+  files made and edited in place, ZIP and tar archives extracted into a folder next to them, files found by
+  name under the folder you are in; what is renamed, moved, copied, deleted or extracted is in the
+  activity log. What is uploaded into an app's folder belongs to the same user the app runs as;
   the system's own folders cannot be deleted by a slip of the hand;
 - users: administrators, members (who see the apps and open them, nothing more) and shared guest accounts;
   invitations by link; two-factor sign-in with an authenticator app and recovery codes; passkeys (sign in with the
-  device's fingerprint, face or PIN) when Hata is reached by a domain over HTTPS; a list of one's
-  sessions with sign-out per device; a sign-in log;
+  device's fingerprint, face or PIN) when Hata is reached by a domain over HTTPS; a rule that every
+  administrator signs in with a second factor; a list of one's sessions with sign-out per device; a
+  sign-in log;
 - sign-in in front of any app: Hata takes over the app's port and lets through only people who are signed
   in to Hata and allowed to open that app — no domain or HTTPS needed, the app's address stays the same. The app's
   other published ports are listed next to it and can be put behind the same sign-in when they are web
@@ -249,7 +253,9 @@ Early development. What works today:
   and waits for "Run". The model is yours to name: the API of a provider you have a key for, or a model
   on your own machine;
 - updates of Hata itself from the web UI: a newer release is downloaded, checked against its checksums and
-  started; if it does not come up, the previous version is put back by itself. Apps keep running meanwhile;
+  started; if it does not come up, the previous version is put back by itself. Apps keep running meanwhile.
+  The version that ran before can be gone back to with a button, and `sudo hata update` does the same
+  from a shell; an app's update can be undone from the activity log, from the snapshot taken right before it;
 - the whole history of what happened on the server and who did it, by day, with a search;
 - Docker itself is installed by a button where it is missing, and started where it is not running;
 - system programs (Settings): every program of the system Hata relies on in one list — Docker, Samba,

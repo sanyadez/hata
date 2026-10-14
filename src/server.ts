@@ -25,7 +25,7 @@ import { allowed as oauthAllowed, declined as oauthDeclined, findClient, holdQue
 import { checkOffsite, forgetHost, offsiteFailure, saveOffsite } from "./offsite";
 import { APP_NAME_RE, dumpCompose } from "./appform";
 import { trashSizeOn } from "./trash";
-import { addShare, changeShare, installSamba, listShares, refreshShares, removeShare, startShares } from "./shares";
+import { addShare, changeShare, installSamba, listShares, refreshShares, removeShare, shareTrouble, startShares } from "./shares";
 import { checkDisks, diskHealth, installTool, listDisks, startDisks, startSelfTest } from "./disks";
 import { fills, measureFills, startFills } from "./fills";
 import { checkImages, imagesStatus, startImages } from "./images";
@@ -53,6 +53,7 @@ import {
   revokeInvite,
   revokeSessions,
   type Role,
+  type User,
   changePassword,
   checkPassword,
   checkSecondFactor,
@@ -83,7 +84,7 @@ import { bus } from "./bus";
 import { DATA_DIR, dropOldSecrets, listenAddress, saveSettings, settings, timezone, updateSettings } from "./config";
 import { arrange, cleanLayout, layoutText, parseLayoutText } from "./dashboard";
 import { dockerInfo, listContainers, watchEvents } from "./docker";
-import { abortUpload, copyIn, archivePlan, emptyTrash, list as listFiles, makeFolder, pinFolder, pinnedFolders, readable, readText, remove as removeFiles, rename as renameFile, restore as restoreFiles, startTrash, summary as filesSummary, transfer, trash, upload, writeText } from "./files";
+import { abortUpload, copyIn, archivePlan, emptyTrash, extract as extractArchive, find as findFiles, list as listFiles, makeFile, makeFolder, pinFolder, pinnedFolders, readable, readText, remove as removeFiles, rename as renameFile, restore as restoreFiles, startTrash, summary as filesSummary, transfer, trash, upload, writeText } from "./files";
 import { adoptProject, casaosState, containerDraft, importCount, importList, moveInCasaos, projectDraft, rebuildContainer } from "./import";
 import { accessOf, dropAccess, dropUser, gateTarget, guard, guardsOf, mayOpen, otherPorts, MAX_APP_BODY, page, passToApp, setAccess, startGates, tunnelHandlers } from "./gate";
 import { parseDockerRun } from "./dockerrun";
@@ -92,7 +93,7 @@ import { isPlainObject } from "./fsutil";
 import { mcpResponse } from "./mcp";
 import { instructions as mcpInstructions, TOOLS } from "./mcptools";
 import { localNamesStatus, refreshLocalNames } from "./mdns";
-import { addDevice, CHANNELS, listDevices, notifyStatus, pushKey, removeDevice, sendAsk, sendTest, startNotifications, telegramChats, updateNotify } from "./notify";
+import { addDevice, CHANNELS, listDevices, notifyStatus, pushKey, removeDevice, renewDevice, sendAsk, sendTest, startNotifications, telegramChats, updateNotify } from "./notify";
 import { appHost, appLabel, classifyHost, clientIp, cookieDomain, domainOf, localDomain, requestHost, requestPort, requestProto, siteDomain } from "./site";
 import { newChallenge, PASSKEY_ALGORITHMS, spendChallenge, verifyAssertion, verifyRegistration } from "./passkey";
 import { qrMatrix } from "./qr";
@@ -102,7 +103,7 @@ import { IMAGE_MIME, imageType, wallpaperSvg, WALLPAPERS } from "./wallpapers";
 import { containerCommand, shellCommand, TerminalError, TerminalManager, terminalEnv, type TerminalClient, type TerminalStart } from "./terminal";
 import { addStore, ARCH, catalogue, removeStore, scheduleStoreSync, StoreError, syncStore } from "./store";
 import { startSampler, systemStatus } from "./system";
-import { availableUpdate, checkForUpdate, confirmUpdate, scheduleUpdateChecks, startUpdate, updateStatus } from "./update";
+import { availableUpdate, checkForUpdate, confirmUpdate, scheduleUpdateChecks, startRollback, startUpdate, updateStatus } from "./update";
 import { VERSION } from "./version";
 import { zipStream } from "./zip";
 
@@ -122,6 +123,9 @@ import manropeCyrillic from "./ui/fonts/manrope-cyrillic.woff2" with { type: "fi
 import manropeLatinExt from "./ui/fonts/manrope-latin-ext.woff2" with { type: "file" };
 import manropeLatin from "./ui/fonts/manrope-latin.woff2" with { type: "file" };
 import swJs from "./ui/sw.js" with { type: "text" };
+import badgePng from "./ui/badge.png" with { type: "file" };
+import icon192 from "./ui/icon-192.png" with { type: "file" };
+import icon512 from "./ui/icon-512.png" with { type: "file" };
 import en from "./lang/en.json";
 import uk from "./lang/uk.json";
 
@@ -138,7 +142,11 @@ const MANIFEST = JSON.stringify({
   display: "standalone",
   background_color: "#131110",
   theme_color: "#131110",
-  icons: [{ src: "/logo.svg", sizes: "any", type: "image/svg+xml", purpose: "any" }],
+  icons: [
+    { src: "/logo.svg", sizes: "any", type: "image/svg+xml", purpose: "any" },
+    { src: "/icon-192.png", sizes: "192x192", type: "image/png", purpose: "any" },
+    { src: "/icon-512.png", sizes: "512x512", type: "image/png", purpose: "any" },
+  ],
 });
 
 const STATIC: Record<string, { body: string; type: string; headers?: Record<string, string> }> = {
@@ -167,6 +175,9 @@ const STATIC: Record<string, { body: string; type: string; headers?: Record<stri
   ...Object.fromEntries(Object.entries(LANGUAGES).map(([code, dict]) => [`/lang/${code}.json`, { body: JSON.stringify(dict), type: "application/json; charset=utf-8" }])),
 };
 
+/** Pictures of the app for systems that take no SVG: notifications, the home screen of a phone */
+const ICONS: Record<string, string> = { "/icon-192.png": icon192, "/icon-512.png": icon512, "/badge.png": badgePng };
+
 /** Binary files of the UI: embedded in the binary, read from it on request */
 const FONTS: Record<string, string> = {
   "/fonts/inter-latin.woff2": interLatin,
@@ -188,6 +199,9 @@ const SECURITY_HEADERS = {
 };
 
 function serveStatic(req: Request, path: string): Response | null {
+  if (Object.hasOwn(ICONS, path)) {
+    return new Response(Bun.file(ICONS[path]!), { headers: { ...SECURITY_HEADERS, "content-type": "image/png", "cache-control": "public, max-age=86400" } });
+  }
   if (Object.hasOwn(FONTS, path)) {
     return new Response(Bun.file(FONTS[path]!), { headers: { ...SECURITY_HEADERS, "content-type": "font/woff2", "cache-control": "public, max-age=604800" } });
   }
@@ -252,6 +266,11 @@ function passkeyDomain(req: Request): string {
   const domain = siteDomain();
   return domain && requestProto(req) === "https" && requestHost(req) === domain ? domain : "";
 }
+
+/** The rules ask this administrator for two-factor sign-in, and it is not on yet */
+const mustSetUpTwoFactor = (user: User): boolean => user.role === "admin" && settings.security.adminTwoFactor && !user.totp;
+/** The user the page is told it is signed in as */
+const signedIn = (user: User) => ({ ...publicUser(user), mustTwoFactor: mustSetUpTwoFactor(user) });
 
 const publicSettings = () => ({ ...settings, systemTimezone: timezone(), languages: Object.keys(LANGUAGES), stateDir: DATA_DIR, stateMovable: cannotMove() === null });
 
@@ -416,7 +435,7 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
     return json({
       version: VERSION,
       setup: needsSetup(),
-      user: user ? publicUser(user) : null,
+      user: user ? signedIn(user) : null,
       language: settings.language,
       languages: Object.keys(LANGUAGES),
       passkeys: passkeyDomain(req) !== "",
@@ -448,7 +467,7 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
     console.log(`Administrator "${result.name}" created from ${ip}`);
     record("auth.setup", { user: result.name, detail: ip });
     updateSettings({ welcome: true });
-    return json({ user: publicUser(result) }, 200, { "set-cookie": cookie(createSession(result, client)) });
+    return json({ user: signedIn(result) }, 200, { "set-cookie": cookie(createSession(result, client)) });
   }
 
   if (path === "/api/login" && method === "POST") {
@@ -476,7 +495,7 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
     registerLoginSuccess(ip);
     recordSignIn(user.name, ip, "ok");
     record("auth.signin", { user: user.name, detail: ip });
-    return json({ user: publicUser(user) }, 200, { "set-cookie": cookie(createSession(user, client)) });
+    return json({ user: signedIn(user) }, 200, { "set-cookie": cookie(createSession(user, client)) });
   }
 
   // signing in with a passkey: the browser signs our challenge with a key only that device holds
@@ -502,7 +521,7 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
     registerLoginSuccess(ip);
     recordSignIn(found.user.name, ip, "ok");
     record("auth.signin", { user: found.user.name, detail: ip });
-    return json({ user: publicUser(found.user) }, 200, { "set-cookie": cookie(createSession(found.user, client)) });
+    return json({ user: signedIn(found.user) }, 200, { "set-cookie": cookie(createSession(found.user, client)) });
   }
 
   // an invitation link: the page asks what it is for, then creates the account
@@ -520,14 +539,15 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
       return fail(result === "users.nameTaken" ? 409 : 400, result);
     }
     record("users.joined", { user: result.name, detail: ip });
-    return json({ user: publicUser(result) }, 200, { "set-cookie": cookie(createSession(result, client)) });
+    return json({ user: signedIn(result) }, 200, { "set-cookie": cookie(createSession(result, client)) });
   }
 
   // ---- everything below needs a session ----
   const user = sessionUser(req);
   if (!user) return fail(401, "auth.required");
-  const admin = user.role === "admin";
-  if (!admin && !memberMay(method, path, user.role)) return fail(403, "auth.forbidden");
+  // an administrator the rules ask for two-factor sign-in is a member until it is set up
+  const admin = user.role === "admin" && !mustSetUpTwoFactor(user);
+  if (!admin && !memberMay(method, path, user.role === "admin" ? "member" : user.role)) return fail(403, user.role === "admin" ? "auth.twoFactorRequired" : "auth.forbidden");
 
   // ---- the signed-in user's own account ----
   if (path === "/api/account" && method === "GET") {
@@ -558,6 +578,7 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
     return json({ recovery: result });
   }
   if (path === "/api/account/totp/disable" && method === "POST") {
+    if (user.role === "admin" && settings.security.adminTwoFactor) return fail(400, "totp.required");
     const error = await disableTotp(user, (await body(req)).password);
     if (error) return fail(400, error);
     record("auth.twoFactorOff", { user: user.name });
@@ -756,7 +777,7 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
       site: { domain: siteDomain(), mode: settings.https.mode, local: localDomain() },
       // whether the assistant can be asked: the pages offer it next to what is wrong
       assistant: admin && assistantReady(assistantConfig()),
-      attention: admin ? attention({ system, docker, apps, activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), exposed: exposedNics(), array: arrayTrouble(), unused: unusedDisks(), filling: fillingUp() }) : [],
+      attention: admin ? attention({ system, docker, apps, activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), exposed: exposedNics(), array: arrayTrouble(), shares: shareTrouble(), unused: unusedDisks(), filling: fillingUp() }) : [],
       // who signed in from where, and what was installed by whom, is the administrators' business
       activity: admin ? recent(8) : [],
       // containers and compose projects on this machine that are not apps here yet
@@ -831,6 +852,8 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
     if (method === "GET") return json(publicSettings());
     if (method === "PUT") {
       const patch = await body(req);
+      // whoever turns the rule on must not be the first one it locks out
+      if (isPlainObject(patch.security) && patch.security.adminTwoFactor === true && !user.totp) return fail(400, "security.ownFirst");
       const error = updateSettings(patch);
       if (error) return fail(400, error);
       // certificates take a while: the page asks for their state
@@ -936,6 +959,11 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
   if (path === "/api/notify/telegram/chats" && method === "POST") {
     const chats = await telegramChats((await body(req)).token);
     return typeof chats === "string" ? fail(400, chats) : json(chats);
+  }
+  // sent by the service worker when the browser has replaced the subscription by itself
+  if (path === "/api/notify/push/renew" && method === "POST") {
+    const data = await body(req);
+    return renewDevice(user.id, data.old, data.subscription) ? json({ ok: true }) : fail(404, "notify.noDevice");
   }
   if (path === "/api/notify/push") {
     if (method === "GET") return json({ key: await pushKey(), devices: listDevices(user.id) });
@@ -1210,6 +1238,10 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
   if (path === "/api/update/check" && method === "POST") return json(await checkForUpdate());
   if (path === "/api/update/install" && method === "POST") {
     const error = startUpdate(user.name);
+    return error ? fail(409, error) : json({ started: true }, 202);
+  }
+  if (path === "/api/update/rollback" && method === "POST") {
+    const error = startRollback(user.name);
     return error ? fail(409, error) : json({ started: true }, 202);
   }
 
@@ -1534,6 +1566,14 @@ function sendFile(req: Request, path: string | null, download: boolean): Respons
   return new Response(Bun.file(file.file), { headers });
 }
 
+/** The paths of a file action as the activity log keeps them: the full path of one, or the first names and a count */
+function filesNamed(paths: unknown): string {
+  const list = Array.isArray(paths) ? paths.filter((p): p is string => typeof p === "string") : [];
+  if (list.length === 1) return list[0]!.slice(0, 300);
+  const names = list.slice(0, 3).map((p) => p.split("/").pop()).join(", ");
+  return (list.length > 3 ? `${names} +${list.length - 3}` : names).slice(0, 300);
+}
+
 async function files(req: Request, url: URL, server: Server, by: string): Promise<Response | null> {
   const path = url.pathname;
   const method = req.method;
@@ -1555,6 +1595,12 @@ async function files(req: Request, url: URL, server: Server, by: string): Promis
     const data = await body(req);
     return json({ path: makeFolder(data.path, data.name) }, 201);
   }
+  if (path === "/api/files/file" && method === "POST") {
+    const data = await body(req);
+    return json({ path: makeFile(data.path, data.name) }, 201);
+  }
+  if (path === "/api/files/find" && method === "GET") return json(await findFiles(q.get("path") ?? "", q.get("q")));
+  if (path === "/api/files/extract" && method === "POST") return json({ job: extractArchive((await body(req)).path, by).id }, 202);
   if (path === "/api/files/pin" && method === "POST") {
     const data = await body(req);
     pinFolder(data.path, data.pinned === true);
@@ -1562,7 +1608,9 @@ async function files(req: Request, url: URL, server: Server, by: string): Promis
   }
   if (path === "/api/files/rename" && method === "POST") {
     const data = await body(req);
-    return json({ path: renameFile(data.path, data.name) });
+    const renamed = renameFile(data.path, data.name);
+    record("files.rename", { user: by, detail: `${data.path} → ${renamed.split("/").pop()}` });
+    return json({ path: renamed });
   }
   // what a plugged-in disk holds, copied onto the server as a job
   if (path === "/api/files/copy-in" && method === "POST") {
@@ -1574,19 +1622,27 @@ async function files(req: Request, url: URL, server: Server, by: string): Promis
     // a large folder takes its time, and more so across disks
     server.timeout(req, 0);
     await transfer(data.paths, data.to, path.endsWith("copy"));
+    record(path.endsWith("copy") ? "files.copy" : "files.move", { user: by, detail: `${filesNamed(data.paths)} → ${data.to}` });
     return json({ ok: true });
   }
   if (path === "/api/files/delete" && method === "POST") {
     server.timeout(req, 0);
     const data = await body(req);
     await removeFiles(data.paths, data.forever === true, by);
+    record(data.forever === true ? "files.deleteForever" : "files.delete", { user: by, detail: filesNamed(data.paths) });
     return json({ ok: true });
   }
   if (path === "/api/files/trash" && method === "GET") return json(trash());
-  if (path === "/api/files/trash/restore" && method === "POST") return json({ restored: restoreFiles((await body(req)).ids) });
+  if (path === "/api/files/trash/restore" && method === "POST") {
+    const restored = restoreFiles((await body(req)).ids);
+    if (restored.length) record("files.restore", { user: by, detail: filesNamed(restored.map((r) => r.path)) });
+    return json({ restored });
+  }
   if (path === "/api/files/trash/delete" && method === "POST") {
     server.timeout(req, 0);
-    return json({ removed: await emptyTrash((await body(req)).ids) });
+    const removed = await emptyTrash((await body(req)).ids);
+    if (removed) record("files.purge", { user: by, detail: String(removed) });
+    return json({ removed });
   }
   if (path === "/api/files/upload" && method === "PUT") {
     server.timeout(req, 0);
@@ -1815,7 +1871,7 @@ export async function serve(): Promise<void> {
   void refreshHttps();
   refreshLocalNames();
   startNotifications({
-    attention: async () => attention({ system: systemStatus(), docker: await dockerInfo(), apps: await listApps("en"), activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), exposed: exposedNics(), array: arrayTrouble(), unused: unusedDisks(), filling: fillingUp() }),
+    attention: async () => attention({ system: systemStatus(), docker: await dockerInfo(), apps: await listApps("en"), activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), exposed: exposedNics(), array: arrayTrouble(), shares: shareTrouble(), unused: unusedDisks(), filling: fillingUp() }),
     baseUrl: publicUrl,
     isAdmin: (id) => findUser(id)?.role === "admin",
   });

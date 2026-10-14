@@ -53,12 +53,19 @@ export interface DockerInfo {
 }
 
 let composeVersion: string | undefined;
+/** Where Docker keeps its data (`data-root` of daemon.json); learnt from the engine the first time it answers */
+export let dockerRoot = "/var/lib/docker";
+let rootLearnt = false;
 /** After Docker was installed or started: what was learnt about the compose plugin is asked anew */
 export const forgetCompose = (): void => void (composeVersion = undefined);
 
 export async function dockerInfo(): Promise<DockerInfo> {
   try {
     const v = await api<{ Version: string }>("/version");
+    if (!rootLearnt) {
+      const info = await api<{ DockerRootDir?: string }>("/info").catch(() => null);
+      if (info?.DockerRootDir?.startsWith("/")) [dockerRoot, rootLearnt] = [info.DockerRootDir.replace(/\/+$/, ""), true];
+    }
     if (composeVersion === undefined) {
       const r = await run(["docker", "compose", "version", "--short"]).catch(() => null);
       composeVersion = r && r.code === 0 ? r.output.trim() : "";

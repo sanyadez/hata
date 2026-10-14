@@ -142,9 +142,13 @@ const queued = (work: () => Promise<void>): Promise<void> => {
   return queue;
 };
 
+/** Whether smbd ran when it was last looked at — read without waiting by the "needs attention" list */
+let serving = true;
+
 /** The server shows up by itself where people look for network folders — while there is something to open */
 async function announce(): Promise<void> {
-  const on = installed() && settings.shares.length > 0 && (await isActive(await unit()));
+  serving = installed() && (await isActive(await unit()));
+  const on = installed() && settings.shares.length > 0 && serving;
   offer(on ? SERVICES : []);
   refreshWsd(on ? serverName() : null);
 }
@@ -317,9 +321,24 @@ export async function installSamba(): Promise<SharesReport> {
   return listShares();
 }
 
+/**
+ * What keeps the shared folders from being opened: Samba not running or not taking the settings, a
+ * shared folder that is not there (its disk is not mounted). Nothing while nothing is shared.
+ */
+export function shareTrouble(): { code: string; detail: Record<string, string> }[] {
+  if (!settings.shares.length || !installed()) return [];
+  const found: { code: string; detail: Record<string, string> }[] = [];
+  if (failure) found.push({ code: "failed", detail: { message: failure.split("\n").pop() ?? "" } });
+  else if (!serving) found.push({ code: "stopped", detail: {} });
+  for (const share of settings.shares) if (!isDir(share.path)) found.push({ code: "missing", detail: { name: share.name, path: share.path } });
+  return found;
+}
+
 /** On start: Samba, when it is there, is set up from the settings — after a restore of the server, too */
 export function startShares(): void {
   onSharesMoved(() => void apply());
   onPasswords(learn, () => void apply());
   if (installed()) void apply();
+  // a Samba that stopped by itself is noticed within a few minutes
+  setInterval(() => void (settings.shares.length && installed() && unit().then(isActive).then((on) => (serving = on))), 3 * 60_000);
 }

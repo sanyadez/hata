@@ -608,7 +608,8 @@ const NAV = [
 ];
 
 /** Members look at the apps; everything that changes the server is an administrator's */
-const isAdmin = () => state.user?.role === "admin";
+// an administrator the rules ask for two-factor sign-in is a member until it is on — the server says so too
+const isAdmin = () => state.user?.role === "admin" && !state.user.mustTwoFactor;
 
 function navLinks(className) {
   const current = state.route.view === "app" ? "home" : state.route.view === "import" ? "store" : state.route.view === "trash" ? "files" : state.route.view;
@@ -702,7 +703,7 @@ function shell(...content) {
       h("nav", { class: "nav" }, navLinks("nav-link")),
       h("div", { class: "top-right" }, globalSearch(), isAdmin() && h("a", { class: "icon-btn top-tool" + (state.route.view === "terminal" ? " active" : ""), href: "#/terminal", title: t("terminal.title"), "aria-label": t("terminal.title") }, icon("terminal")), h("button", { type: "button", class: "user", onclick: userMenu }, h("span", { class: "avatar" }, state.user.name.slice(0, 1).toUpperCase()), h("span", { class: "user-name" }, state.user.name))),
     ),
-    h("main", { id: "view" }, content),
+    h("main", { id: "view" }, state.user.mustTwoFactor && h("p", { class: "banner" }, t("twofa.mustLead"), " ", h("a", { class: "link", href: "#/settings/account" }, t("twofa.mustGo"))), content),
     h("nav", { class: "bottom-bar" }, navLinks("bottom-link")),
   );
 }
@@ -1423,7 +1424,7 @@ function dragEnd(drop) {
   drag.kind.drop(drag, target);
 }
 
-const ATTENTION_ICONS = { update: "up", docker: "box", restarting: "refresh", partial: "alert", disk: "disk", smart: "disk", memory: "memory", temperature: "temp", internet: "network", network: "network", array: "disk" };
+const ATTENTION_ICONS = { update: "up", docker: "box", restarting: "refresh", partial: "alert", disk: "disk", smart: "disk", memory: "memory", temperature: "temp", internet: "network", network: "network", array: "disk", share: "share" };
 
 function attentionItem(item) {
   const detail = { ...item.detail, free: item.detail.free == null ? "" : bytes(item.detail.free), trash: item.detail.trash == null ? "" : bytes(item.detail.trash), size: item.detail.size == null ? "" : bytes(item.detail.size) };
@@ -1440,6 +1441,7 @@ function attentionItem(item) {
     item.code === "disk.trash" && open("#/trash", t("trash.title")),
     (item.code.startsWith("smart.") || item.code === "disk.filling" || item.code.startsWith("array.")) && open("#/settings/storage"),
     (item.code.startsWith("internet.") || item.code === "network.exposed") && open("#/settings/network"),
+    item.code.startsWith("share.") && open("#/settings/shares"),
     item.app && open(`#/apps/${item.app}${item.code === "restarting" || item.code === "partial" ? "/logs" : ""}`, t(item.code === "restarting" || item.code === "partial" ? "app.logs" : "common.open")),
     (item.code === "disk.new" || item.code === "disk.usb") && isAdmin() && button(t("mounting.ignore"), { class: "small quiet", onclick: () => void api("POST", "/api/disks/ignore", { id: item.detail.id }).then(refresh, (e) => toast(errorText(e), "error")) }),
   ].filter(Boolean);
@@ -1503,20 +1505,39 @@ async function dockerDialog() {
   );
 }
 
-const ACTIVITY_ICONS = { terminal: "terminal", install: "download", update: "up", start: "play", stop: "stop", restart: "refresh", remove: "trash", apply: "code", backup: "archive", restore: "undo", snapshot: "trash", import: "download" };
+const ACTIVITY_ICONS = { rename: "edit", move: "arrow", copy: "copy", delete: "trash", deleteForever: "trash", purge: "trash", extract: "archive", terminal: "terminal", install: "download", update: "up", start: "play", stop: "stop", restart: "refresh", remove: "trash", apply: "code", backup: "archive", restore: "undo", snapshot: "trash", import: "download" };
 
 function activityItem(entry, when) {
   const [group, kind, outcome] = entry.code.split(".");
   const failed = outcome === "failed";
   const key = "activity." + entry.code;
   const title = state.overview?.apps.find((a) => a.name === entry.app)?.title ?? entry.app ?? "";
-  const meta = [typeof when === "string" ? when : ago(entry.ts), entry.user && group !== "auth" ? (entry.user === "schedule" ? t("activity.bySchedule") : entry.user === "restore" ? t("activity.byRestore") : entry.user.startsWith("agent:") ? t("activity.byAgent", { name: entry.user.slice(6) }) : entry.user.startsWith("assistant:") ? t("activity.byAssistant", { user: entry.user.slice(10) }) : t("activity.by", { user: entry.user })) : null, group === "auth" ? entry.detail : null].filter(Boolean).join(" · ");
+  const meta = [typeof when === "string" ? when : ago(entry.ts), entry.user && group !== "auth" ? (entry.user === "schedule" ? t("activity.bySchedule") : entry.user === "restore" ? t("activity.byRestore") : entry.user === "console" ? t("activity.byConsole") : entry.user.startsWith("agent:") ? t("activity.byAgent", { name: entry.user.slice(6) }) : entry.user.startsWith("assistant:") ? t("activity.byAssistant", { user: entry.user.slice(10) }) : t("activity.by", { user: entry.user })) : null, group === "auth" ? entry.detail : null].filter(Boolean).join(" · ");
   return h(
     "div",
     { class: "activity-item" },
     icon(group === "auth" ? "signin" : group === "users" ? "user" : failed ? "x" : (ACTIVITY_ICONS[kind] ?? "check"), failed ? "danger" : ""),
     h("div", { class: "grow" }, h("div", null, has(key) ? t(key, { app: title, user: entry.user ?? "", target: entry.detail ?? "" }) : entry.code), h("div", { class: "muted small" }, meta), failed && entry.detail && h("div", { class: "muted small clip" }, entry.detail)),
+    entry.code === "app.update.done" && isAdmin() && Date.now() - entry.ts < UNDO_DAYS * 86400_000 && button(t("activity.undo"), { class: "small ghost", onclick: () => undoUpdate(entry) }, "undo"),
   );
+}
+
+/** How long after an update its "Undo" is offered: pre-update snapshots are few and get replaced */
+const UNDO_DAYS = 7;
+
+/** An update undone: the snapshot taken right before it, restored the usual way */
+async function undoUpdate(entry) {
+  let overview;
+  try {
+    overview = await api("GET", `/api/backups?lang=${state.lang}`);
+  } catch (e) {
+    return toast(errorText(e), "error");
+  }
+  const app = overview.apps.find((a) => a.name === entry.app);
+  // the snapshot is taken inside the update job, so within the minutes before it was done
+  const before = (app?.snapshots ?? []).filter((s) => s.reason === "pre-update" && s.at <= entry.ts && entry.ts - s.at < 3 * 3600_000).sort((a, b) => b.at - a.at)[0];
+  if (!before) return toast(t("activity.undoNone"), "error");
+  restoreDialog(app, before);
 }
 
 // --- The whole history ----------------------------------------------------------------------------
@@ -2934,6 +2955,10 @@ const filesUi = {
   sort: ["name", "modified", "size"].find((key) => key === localStorage.getItem("hata.files.sort")) ?? "name",
   /** Names selected in the folder on screen */
   selected: new Set(),
+  /** A search under the folder on screen: what was asked, and what was found — null while it runs */
+  find: null,
+  /** A name to choose once the folder is listed */
+  pick: null,
 };
 
 const filesHash = (path) => "#/files" + (path.split("/").filter(Boolean).map((part) => "/" + encodeURIComponent(part)).join("") || "/");
@@ -3017,6 +3042,10 @@ async function loadFiles() {
   }
   const names = new Set(listing.entries.map((entry) => entry.name));
   filesUi.selected = new Set(state.files?.path === listing.path ? [...filesUi.selected].filter((name) => names.has(name)) : []);
+  if (filesUi.find && filesUi.find.under !== listing.path) filesUi.find = null;
+  // a file found by a search is shown chosen in its folder
+  if (filesUi.pick && names.has(filesUi.pick)) filesUi.selected = new Set([filesUi.pick]);
+  filesUi.pick = null;
   state.files = listing;
   renderFilesBody();
 }
@@ -3110,7 +3139,7 @@ function renderFilesBody() {
       crumbs,
       h("p", { class: "meta" }, path && h("button", { type: "button", class: "copy-path", title: t("files.copyPath"), "aria-label": t("files.copyPath"), onclick: () => copyText(path) }, h("span", null, path), icon("copy")), listing?.readOnly && h("span", { class: "chip warn" }, t("files.readOnly")), listing && !listing.error && h("span", { class: "dot-sep" }, "·"), listing && !listing.error && t("files.count", { dirs: dirs.length, files: rest.length }), rest.length > 0 && h("span", { class: "dot-sep" }, "·"), rest.length > 0 && bytes(rest.reduce((n, entry) => n + entry.size, 0))),
     ),
-    h("div", { class: "actions" }, listing && !listing.error && h("button", { type: "button", class: "btn square" + (isPinned ? " active" : ""), title: t(isPinned ? "files.unpin" : "files.pin"), "aria-label": t(isPinned ? "files.unpin" : "files.pin"), "aria-pressed": String(isPinned), onclick: () => pinFolder(path, !isPinned) }, icon("pin")), listing && !listing.error && h("button", { type: "button", class: "btn square" + (isShared ? " active" : ""), title: t(isShared ? "files.shareSettings" : "files.share"), "aria-label": t(isShared ? "files.shareSettings" : "files.share"), onclick: () => shareDialog(path) }, icon("share")), sort, h("div", { class: "seg" }, modeButton("list", "list"), modeButton("grid", "grid")), button(t("files.newFolder"), { disabled: !listing || !!listing.error || listing.readOnly, onclick: () => newFolderDialog(path, loadFiles) }, "folder"), button(t("files.upload"), { class: "primary", disabled: !listing || !!listing.error || listing.readOnly, onclick: () => picker.click() }, "upload"), picker),
+    h("div", { class: "actions" }, listing && !listing.error && h("button", { type: "button", class: "btn square" + (isPinned ? " active" : ""), title: t(isPinned ? "files.unpin" : "files.pin"), "aria-label": t(isPinned ? "files.unpin" : "files.pin"), "aria-pressed": String(isPinned), onclick: () => pinFolder(path, !isPinned) }, icon("pin")), listing && !listing.error && h("button", { type: "button", class: "btn square" + (isShared ? " active" : ""), title: t(isShared ? "files.shareSettings" : "files.share"), "aria-label": t(isShared ? "files.shareSettings" : "files.share"), onclick: () => shareDialog(path) }, icon("share")), listing && !listing.error && findBox(path), sort, h("div", { class: "seg" }, modeButton("list", "list"), modeButton("grid", "grid")), button(t("files.new"), { disabled: !listing || !!listing.error || listing.readOnly, onclick: (e) => newMenu(path, e.currentTarget) }, "plus"), button(t("files.upload"), { class: "primary", disabled: !listing || !!listing.error || listing.readOnly, onclick: () => picker.click() }, "upload"), picker),
   );
 
   const selection = h("div", { class: "card selection", id: "files-selection", hidden: true });
@@ -3119,6 +3148,7 @@ function renderFilesBody() {
   else if (listing.error) body = h("p", { class: "card pad error" }, listing.error);
   else if (!entries.length) body = h("div", { class: "card empty" }, icon("folder"), h("p", null, t("files.empty")), h("p", { class: "small" }, t("files.dropHint")));
   else body = filesUi.mode === "grid" ? filesGrid(dirs, rest) : filesTable(entries);
+  if (filesUi.find && filesUi.find.under === path) body = foundList(filesUi.find);
 
   put(main, head, selection, listing && path === listing.home && diskStrip(listing), body, listing?.truncated && h("p", { class: "muted small" }, t("files.truncated")), uploadBox);
   renderSelection();
@@ -3217,7 +3247,7 @@ function filesGrid(dirs, rest) {
     return h(
       "div",
       { class: "file-tile" + (entry.type === "dir" ? " dir" : "") + (filesUi.selected.has(entry.name) ? " selected" : ""), "data-name": entry.name },
-      entryOpener(entry, "file-open", entry.type !== "dir" && h("span", { class: "thumb" }, thumb), entry.type === "dir" && fileIcon(entry), h("span", { class: "file-text" }, h("span", { class: "clip strong" }, entry.name), h("span", { class: "muted small clip" }, entry.type === "file" ? `${bytes(entry.size)} · ${fileTime(entry.modified)}` : fileTime(entry.modified)))),
+      entryOpener(entry, "file-open", entry.type !== "dir" && h("span", { class: "thumb" }, thumb), entry.type === "dir" && fileIcon(entry), h("span", { class: "file-text" }, h("span", { class: "clip strong" }, entry.name, sharedMark(entry)), h("span", { class: "muted small clip" }, entry.type === "file" ? `${bytes(entry.size)} · ${fileTime(entry.modified)}` : fileTime(entry.modified)))),
       h("span", { class: "file-tick" }, entryCheckbox(entry)),
       h("span", { class: "file-more" }, entryMore(entry)),
     );
@@ -3310,6 +3340,7 @@ function folderMenu(at) {
     "menu dropdown",
     h("header", null, h("span", { class: "badge-icon plain" }, icon("folder")), h("div", null, h("h2", { class: "clip" }, path.split("/").pop() || "/"))),
     item(t("files.newFolder"), "folder", () => newFolderDialog(path, loadFiles), listing.readOnly),
+    item(t("files.newFile"), "file", () => newFileDialog(path), listing.readOnly),
     item(t("files.upload"), "upload", () => document.querySelector("#files-main .page-head input[type=file]")?.click(), listing.readOnly),
     listing.entries.length > 0 && item(t("files.selectAll"), "check", () => ((filesUi.selected = new Set(listing.entries.map((entry) => entry.name))), renderFilesBody())),
     listing.entries.length > 0 && item(t("files.downloadZip"), "download", () => downloadEntries(listing.entries.filter((entry) => entry.type !== "other"))),
@@ -3333,6 +3364,7 @@ function entryMenu(entry, at) {
     ["image", "video", "audio", "pdf"].includes(kind) && item(t("common.open"), "external", () => openEntry(entry)),
     entry.type === "file" && entry.size <= TEXT_MAX && !["image", "video", "audio", "pdf"].includes(kind) && item(t("files.edit"), "edit", () => textDialog(path)),
     entry.type !== "other" && item(t(entry.type === "dir" ? "files.downloadZip" : "files.download"), "download", () => downloadEntries([entry])),
+    entry.type === "file" && ARCHIVE_RE.test(entry.name) && !state.files.readOnly && item(t("files.extract"), "archive", () => extractArchive(path)),
     item(t("files.copyPath"), "link", () => copyText(path)),
     entry.type === "dir" && (state.files.pinned.includes(path) ? item(t("files.unpin"), "pin", () => pinFolder(path, false)) : item(t("files.pin"), "pin", () => pinFolder(path, true))),
     entry.type === "dir" && item(t(state.files.shared.includes(path) ? "files.shareSettings" : "files.share"), "share", () => shareDialog(path)),
@@ -3375,6 +3407,99 @@ function nameDialog(title, value, confirmLabel, action) {
   // the name without its extension is what gets retyped
   const dot = value.lastIndexOf(".");
   input.setSelectionRange(0, dot > 0 ? dot : value.length);
+}
+
+/** The names Hata unpacks: ZIP, and tar with or without compression — as `archiveKind` in files.ts */
+const ARCHIVE_RE = /\.(zip|tar|tar\.(gz|bz2|xz|zst)|tgz|tbz2?|txz)$/i;
+
+/** Unpacked into a new folder next to the archive, as a job */
+async function extractArchive(path) {
+  try {
+    const res = await api("POST", "/api/files/extract", { path });
+    jobDialog(res.job, "extract", path.split("/").pop(), () => void loadFiles());
+  } catch (e) {
+    toast(errorText(e), "error");
+  }
+}
+
+/** What can be made in a folder */
+function newMenu(path, anchor) {
+  let dialog;
+  const item = (label, iconName, action) => h("button", { type: "button", class: "menu-item", onclick: () => (dialog.close(), action()) }, icon(iconName), label);
+  dialog = openDialog("menu dropdown", item(t("files.newFolder"), "folder", () => newFolderDialog(path, loadFiles)), item(t("files.newFile"), "file", () => newFileDialog(path)));
+  const box = anchor.getBoundingClientRect();
+  placeAt(dialog, { x: box.right - dialog.offsetWidth, y: box.bottom + 4 });
+}
+
+/** A new empty text file, opened in the editor at once */
+const newFileDialog = (dir) =>
+  nameDialog(t("files.newFile"), "", t("files.create"), async (name) => {
+    const res = await api("POST", "/api/files/file", { path: dir, name });
+    await loadFiles();
+    void textDialog(res.path);
+  });
+
+/** The search field of the folder on screen: names under it, found by the server */
+function findBox(path) {
+  const input = h("input", { type: "search", class: "find", placeholder: t("files.find"), "aria-label": t("files.find"), value: filesUi.find?.under === path ? filesUi.find.query : "", spellcheck: false });
+  let timer;
+  const run = async () => {
+    const query = input.value.trim();
+    if (query.length < 2) {
+      if (filesUi.find) (filesUi.find = null), renderFilesBody(), document.querySelector("#files-main input.find")?.focus();
+      return;
+    }
+    filesUi.find = { under: path, query, found: null, more: false };
+    try {
+      const res = await api("GET", `/api/files/find?path=${encodeURIComponent(path)}&q=${encodeURIComponent(query)}`);
+      // another search, or another folder, may have started meanwhile
+      if (filesUi.find?.query !== query || filesUi.find.under !== path) return;
+      Object.assign(filesUi.find, res);
+    } catch (e) {
+      if (filesUi.find?.query === query) filesUi.find.error = errorText(e);
+    }
+    const caret = input.selectionStart;
+    renderFilesBody();
+    const again = document.querySelector("#files-main input.find");
+    if (again) (again.focus(), again.setSelectionRange(caret, caret));
+  };
+  input.addEventListener("input", () => (clearTimeout(timer), (timer = setTimeout(run, 400))));
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") (clearTimeout(timer), void run());
+    if (e.key === "Escape") ((input.value = ""), clearTimeout(timer), void run());
+  });
+  return input;
+}
+
+/** What a search found: each with the folder it lies in; a folder opens, a file opens its folder with it chosen */
+function foundList(find) {
+  if (find.error) return h("p", { class: "card pad error" }, find.error);
+  if (!find.found) return h("p", { class: "muted" }, t("files.finding"));
+  if (!find.found.length) return h("div", { class: "card empty" }, icon("search"), h("p", null, t("files.nothingFound", { query: find.query })));
+  const show = (item) => {
+    const parent = item.path.slice(0, item.path.lastIndexOf("/")) || "/";
+    if (item.type === "dir") return go(filesHash(item.path));
+    filesUi.find = null;
+    filesUi.pick = item.path.split("/").pop();
+    go(filesHash(parent));
+  };
+  const row = (item) => {
+    const name = item.path.split("/").pop();
+    const parent = item.path.slice(0, item.path.lastIndexOf("/")) || "/";
+    return h(
+      "tr",
+      null,
+      h("td", { class: "name" }, h("button", { type: "button", class: "file-name", onclick: () => show(item) }, fileIcon({ name, type: item.type }), h("span", { class: "clip" }, name)), h("div", { class: "muted small clip mono" }, parent)),
+      h("td", { class: "num muted" }, item.type === "file" ? bytes(item.size) : "—"),
+      h("td", { class: "muted when" }, item.modified ? fileTime(item.modified) : ""),
+    );
+  };
+  return h(
+    "div",
+    { class: "stack" },
+    h("p", { class: "muted small" }, t(find.more ? "files.foundMore" : "files.found", { n: find.found.length, query: find.query })),
+    h("div", { class: "card table-wrap" }, h("table", { class: "file-table" }, h("thead", null, h("tr", null, h("th", null, t("files.col.name")), h("th", { class: "num" }, t("files.col.size")), h("th", { class: "when" }, t("files.col.modified")))), h("tbody", null, find.found.map(row)))),
+  );
 }
 
 const newFolderDialog = (dir, done) =>
@@ -4007,8 +4132,8 @@ async function storeDialog(entry) {
         "div",
         { class: "stack" },
         app.screenshots.length > 0 && h("div", { class: "shots" }, app.screenshots.map((src) => h("img", { src, alt: "", loading: "lazy", referrerPolicy: "no-referrer" }))),
-        h("p", { class: "description" }, app.description),
-        app.tips && h("div", { class: "tips" }, h("strong", null, t("store.tips")), h("p", null, app.tips)),
+        h("div", { class: "description prose" }, md(app.description)),
+        app.tips && h("div", { class: "tips prose" }, h("strong", null, t("store.tips")), md(app.tips)),
         app.website && h("a", { class: "link", href: app.website, target: "_blank", rel: "noopener noreferrer" }, app.website.replace(/^https?:\/\//, "").replace(/\/$/, ""), icon("external")),
       ),
       hasForm && h("div", { class: "stack install-form" }, formSection(t("store.ports"), t("store.portsHint"), ports), formSection(t("store.volumes"), state.settings ? t("store.volumesHint", { path: state.settings.dataRoot }) : "", volumes), formSection(t("store.envs"), t("store.envsHint"), envs)),
@@ -4674,15 +4799,38 @@ function updateRow() {
       }
     },
   }, "up");
+  const back = u.previous && !u.unsupported && button(t("update.back", { version: u.previous }), { class: "small ghost", disabled: busy, onclick: () => rollbackDialog(u) });
   return settingRow(
     u.available ? t("update.available", { version: u.latest.version }) : t("update.title2"),
     hint,
-    h("div", { class: "row-actions" }, u.available && u.latest.url && h("a", { class: "link small", href: u.latest.url, target: "_blank", rel: "noopener noreferrer" }, t("update.notes"), icon("external")), check, install),
+    h("div", { class: "row-actions" }, u.available && u.latest.url && h("a", { class: "link small", href: u.latest.url, target: "_blank", rel: "noopener noreferrer" }, t("update.notes"), icon("external")), back, check, install),
   );
 }
 
+/** Going back to the version that ran before: the same watched restart as an update */
+function rollbackDialog(u) {
+  let dialog;
+  const error = h("p", { class: "error", role: "alert" });
+  const go = button(t("update.backGo", { version: u.previous }), {
+    class: "primary",
+    onclick: async () => {
+      go.disabled = true;
+      try {
+        await api("POST", "/api/update/rollback", {});
+        dialog.close();
+        state.update = { ...u, stage: "restart", error: "" };
+        renderSettings();
+        void followUpdate(u.previous);
+      } catch (e) {
+        error.textContent = errorText(e);
+        go.disabled = false;
+      }
+    },
+  });
+  dialog = openDialog("", h("h2", null, t("update.backTitle", { version: u.previous })), h("p", { class: "muted" }, t("update.backLead", { from: u.current, version: u.previous })), error, h("footer", null, closeButton(() => dialog, t("common.cancel")), go));
+}
+
 /** The configuration folder: where it is, and moving it — which restarts Hata in the new place */
-/** Moves the data folder with everything in it; `suggested` — a folder to offer (a disk just formatted) */
 /** What the server answered a move with: a job to follow, or the folder simply chosen (nothing was there to move) */
 function dataRootMoved(res, done) {
   if (!res.job) {
@@ -4710,6 +4858,7 @@ function pickDataRoot() {
   });
 }
 
+/** Moves the data folder with everything in it; `suggested` — a folder to offer (a disk just formatted) */
 async function moveDataDialog(suggested = "") {
   const s = state.settings;
   const target = h("input", { type: "text", value: suggested, spellcheck: false, class: "mono", placeholder: "/mnt/disk/DATA" });
@@ -6234,6 +6383,28 @@ async function pushSubscribe(key) {
   if (old) await old.unsubscribe();
   const subscription = await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: keyBytes(key) });
   await api("POST", `/api/notify/push?lang=${state.lang}`, { subscription: subscription.toJSON(), label: deviceName(navigator.userAgent) });
+  localStorage.setItem("hata.push", subscription.endpoint);
+}
+
+/**
+ * The browser replaced this device's subscription without telling the service worker which one it was:
+ * the new one is told to Hata when the page is opened, in place of the old. A device removed from the
+ * list on purpose keeps its old subscription here, so it is left alone.
+ */
+async function pushResync() {
+  const known = localStorage.getItem("hata.push");
+  if (!isAdmin() || !pushSupported() || Notification.permission !== "granted") return;
+  const local = await pushSubscription().catch(() => null);
+  if (!local || local.endpoint === known) return;
+  const info = await api("GET", "/api/notify/push").catch(() => null);
+  // subscribed before this was remembered: remembered now
+  if (!known) return void (info?.devices.some((d) => d.endpoint === local.endpoint) && localStorage.setItem("hata.push", local.endpoint));
+  if (!info || info.devices.some((d) => d.endpoint === local.endpoint)) return localStorage.setItem("hata.push", local.endpoint);
+  if (!info.devices.some((d) => d.endpoint === known)) return;
+  try {
+    await api("POST", "/api/notify/push/renew", { old: known, subscription: local.toJSON() });
+    localStorage.setItem("hata.push", local.endpoint);
+  } catch {}
 }
 
 function devicesCard() {
@@ -6266,7 +6437,7 @@ function devicesCard() {
             "span",
             { class: "row-actions" },
             button(t("notify.test"), { class: "small", onclick: () => attempt(async () => (await api("POST", "/api/notify/test", { channel: "push", device: device.id }), toast(t("notify.testSent")))) }),
-            button(t("app.remove"), { class: "small", onclick: () => attempt(async () => (own && (await sub.unsubscribe().catch(() => {})), await api("DELETE", `/api/notify/push?id=${device.id}`))) }),
+            button(t("app.remove"), { class: "small", onclick: () => attempt(async () => (own && (await sub.unsubscribe().catch(() => {}), localStorage.removeItem("hata.push")), await api("DELETE", `/api/notify/push?id=${device.id}`))) }),
           ),
         );
       }),
@@ -7644,11 +7815,12 @@ const assistantReady = () => !!state.overview?.assistant;
 /** A model's answer as elements: paragraphs, lists, code, bold — built from text, never as markup */
 function mdInline(text) {
   const out = [];
-  const pattern = /`([^`\n]+)`|\*\*([^*\n]+)\*\*/g;
+  // code, bold, and a link — only to a web address, opened apart
+  const pattern = /`([^`\n]+)`|\*\*([^*\n]+)\*\*|\[([^\]\n]+)\]\((https?:\/\/[^)\s]+)\)/g;
   let at = 0;
   for (let m; (m = pattern.exec(text)); at = pattern.lastIndex) {
     if (m.index > at) out.push(text.slice(at, m.index));
-    out.push(m[1] !== undefined ? h("code", null, m[1]) : h("strong", null, m[2]));
+    out.push(m[1] !== undefined ? h("code", null, m[1]) : m[2] !== undefined ? h("strong", null, m[2]) : h("a", { class: "link", href: m[4], target: "_blank", rel: "noopener noreferrer" }, m[3]));
   }
   if (at < text.length) out.push(text.slice(at));
   return out;
@@ -8307,6 +8479,8 @@ async function twoFactorSetup() {
             const res = await api("POST", "/api/account/totp/enable", { code: code.value.trim() });
             dialog.close();
             state.user.twoFactor = true;
+            // what the administrator could not do until now opens once the codes are put away
+            if (state.user.mustTwoFactor) return recoveryDialog(res.recovery, () => location.reload());
             recoveryDialog(res.recovery);
             void loadSettings();
           } catch (err) {
@@ -8325,13 +8499,13 @@ async function twoFactorSetup() {
   code.focus();
 }
 
-function recoveryDialog(codes) {
+function recoveryDialog(codes, done = () => {}) {
   const dialog = openDialog(
     "",
     h("h2", null, t("twofa.recoveryTitle")),
     h("p", { class: "muted" }, t("twofa.recoveryLead")),
     h("pre", { class: "codes" }, codes.join("\n")),
-    h("footer", null, button(t("twofa.copy"), { onclick: () => navigator.clipboard?.writeText(codes.join("\n")).then(() => toast(t("twofa.copied"))) }), button(t("twofa.saved"), { class: "primary", onclick: () => dialog.close() })),
+    h("footer", null, button(t("twofa.copy"), { onclick: () => navigator.clipboard?.writeText(codes.join("\n")).then(() => toast(t("twofa.copied"))) }), button(t("twofa.saved"), { class: "primary", onclick: () => (dialog.close(), done()) })),
   );
 }
 
@@ -8483,6 +8657,7 @@ async function loadUsers() {
   try {
     const [users, invites, access, signIns] = await Promise.all([api("GET", "/api/users"), api("GET", "/api/invites"), api("GET", `/api/access?lang=${state.lang}`), api("GET", "/api/signins")]);
     Object.assign(state, { users, invites, access, signIns });
+    if (!state.settings) state.settings = await api("GET", "/api/settings");
   } catch (e) {
     return toast(errorText(e), "error");
   }
@@ -8603,7 +8778,7 @@ function renderUsers() {
             h(
               "tr",
               null,
-              h("td", null, h("div", { class: "with-icon" }, h("span", { class: "avatar" }, u.name.slice(0, 1).toUpperCase()), h("span", { class: "strong" }, u.name), u.id === state.user.id && h("span", { class: "muted small" }, t("users.you")))),
+              h("td", null, h("div", { class: "with-icon" }, h("span", { class: "avatar" }, u.name.slice(0, 1).toUpperCase()), h("div", null, h("span", { class: "strong" }, u.name), u.id === state.user.id && h("span", { class: "muted small" }, " ", t("users.you")), userShares(u)))),
               h("td", null, h("span", { class: "chip" + (u.role === "admin" ? " accent" : "") }, t("user.role." + u.role))),
               h("td", null, u.twoFactor ? h("span", { class: "chip ok" }, icon("check"), t("twofa.onShort")) : h("span", { class: "muted" }, t("twofa.offShort"))),
               h("td", null, u.lastSignIn ? ago(u.lastSignIn) : h("span", { class: "muted" }, t("users.never"))),
@@ -8615,8 +8790,34 @@ function renderUsers() {
       ),
     ),
     h("p", { class: "muted small" }, t("users.rolesHint")),
+    requireTwoFactorRow(),
     h("div", { class: "columns" }, h("section", null, accessMatrix()), h("aside", { class: "side" }, invitesCard(), signInLog())),
   );
+}
+
+/** The network folders a user may open, and how — under the name in the list of users */
+function userShares(user) {
+  const shares = (state.settings?.shares ?? []).filter((share) => share.users?.[user.id]);
+  if (!shares.length) return null;
+  return h("div", { class: "muted small" }, t("users.shares"), " ", shares.map((share, i) => [i > 0 && ", ", h("a", { class: "link", href: "#/settings/shares" }, share.name), ` (${t("shares.access." + share.users[user.id])})`]));
+}
+
+/** The rule that every administrator signs in with a second factor */
+function requireTwoFactorRow() {
+  const on = !!state.settings?.security?.adminTwoFactor;
+  const box = h("input", {
+    type: "checkbox",
+    checked: on,
+    onchange: async () => {
+      try {
+        state.settings = await api("PUT", "/api/settings", { security: { adminTwoFactor: box.checked } });
+      } catch (e) {
+        box.checked = on;
+        toast(errorText(e), "error");
+      }
+    },
+  });
+  return h("section", { class: "card pad" }, h("label", { class: "check" }, box, h("span", null, h("strong", null, t("users.require2fa")), h("span", { class: "muted small block" }, t("users.require2faHint")))));
 }
 
 function inviteDialog() {
@@ -8751,6 +8952,7 @@ async function enter() {
   await refresh();
   startEvents();
   if (isAdmin() && state.route.view !== "welcome") api("GET", "/api/settings").then((s) => (state.settings = s), () => {});
+  void pushResync();
   onRoute();
 }
 

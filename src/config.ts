@@ -91,6 +91,8 @@ export interface Settings {
   /** Disks: whether a USB disk that is plugged in is mounted by itself */
   /** `ignored` — disks nothing uses that the person said not to mention again, by serial number */
   storage: { automount: boolean; ignored: string[] };
+  /** Sign-in rules: `adminTwoFactor` — an administrator without two-factor sign-in acts as a member until it is on */
+  security: { adminTwoFactor: boolean };
   /** `outside` — the interfaces the internet comes in on: nothing of the server answers there (`outside.ts`) */
   network: { outside: string[] };
   /** Protection from a disk failure: which disk holds parity and which are protected (`snapraid.ts`) */
@@ -175,6 +177,7 @@ const DEFAULTS: Settings = {
   https: { mode: "off", domain: "", email: "" },
   local: { enabled: true, name: "hata.local" },
   storage: { automount: false, ignored: [] },
+  security: { adminTwoFactor: false },
   network: { outside: [] },
   snapraid: { parity: "", data: [], appData: false, time: "05:00", scrub: true, deleteLimit: 50 },
   folders: [],
@@ -213,6 +216,7 @@ export const settings: Settings = {
   local: { ...DEFAULTS.local, ...(isPlainObject(saved.local) ? saved.local : {}) },
   welcome: saved.welcome === true,
   network: { outside: cleanOutside(isPlainObject(saved.network) ? saved.network.outside : []) },
+  security: { adminTwoFactor: isPlainObject(saved.security) && saved.security.adminTwoFactor === true },
   storage: { automount: isPlainObject(saved.storage) && saved.storage.automount === true, ignored: isPlainObject(saved.storage) && Array.isArray(saved.storage.ignored) ? saved.storage.ignored.filter((id): id is string => typeof id === "string") : [] },
 };
 settings.local.name = localName(settings.local.name) ?? DEFAULTS.local.name;
@@ -347,6 +351,10 @@ export function updateSettings(patch: Record<string, unknown>): string | null {
   if ("storage" in patch) {
     if (!isPlainObject(patch.storage)) return "settings.badStorage";
     next.storage = { ...next.storage, ...("automount" in patch.storage ? { automount: patch.storage.automount === true } : {}) };
+  }
+  if ("security" in patch) {
+    if (!isPlainObject(patch.security)) return "settings.badSecurity";
+    if ("adminTwoFactor" in patch.security) next.security = { ...next.security, adminTwoFactor: patch.security.adminTwoFactor === true };
   }
   if ("appearance" in patch) {
     const appearance = isPlainObject(patch.appearance) ? changeAppearance(next.appearance, patch.appearance) : null;

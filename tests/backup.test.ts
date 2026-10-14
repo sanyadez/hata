@@ -23,6 +23,10 @@ test("a restore may only replace the app's own places", () => {
   expect(restorable("/var/lib/docker/volumes/memos_data/_data", "memos")).toBe(true);
   expect(restorable("/var/lib/docker/volumes/../../etc/_data", "memos")).toBe(false);
   expect(restorable("/etc", "memos")).toBe(false);
+  // Docker with another data-root keeps the volumes there
+  expect(restorable("/srv/docker/volumes/memos_data/_data", "memos", "/DATA", "/srv/docker/volumes")).toBe(true);
+  expect(restorable("/var/lib/docker/volumes/memos_data/_data", "memos", "/DATA", "/srv/docker/volumes")).toBe(false);
+  expect(restorable("/srv/docker/volumes/memos_data/_data/x", "memos", "/DATA", "/srv/docker/volumes")).toBe(false);
   expect(restorable("/", "memos")).toBe(false);
 });
 

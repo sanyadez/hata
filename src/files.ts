@@ -18,12 +18,14 @@
 import { chmodSync, chownSync, existsSync, readdirSync, lchownSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, statfsSync, statSync, unlinkSync, writeFileSync, type Stats } from "node:fs";
 import { lstat, open, readdir, readFile, rm, stat } from "node:fs/promises";
 import { basename, dirname, extname, join, resolve, sep } from "node:path";
+import { record } from "./activity";
 import { AppError, startJob, type Job } from "./apps";
 import { DATA_DIR, saveSettings, SECRETS_DIR, settings } from "./config";
 import { movePath } from "./dashboard";
 import { parseMounts } from "./disks";
 import { writablePath } from "./smbconf";
 import { findInTrash, inTrash, KEEP_DAYS, listTrash, purgeTrash, putInTrash, sweepTrash, takeFromTrash, TRASH_DIR, type TrashItem } from "./trash";
+import { openZip } from "./unzip";
 import { ZIP_MAX_BYTES, ZIP_MAX_ENTRIES, type ZipSource } from "./zip";
 
 /** A folder's listing holds at most this many entries */
@@ -399,6 +401,22 @@ export function makeFolder(dir: unknown, name: unknown): string {
   if (lstatOrNull(target)) throw new AppError("files.exists", 409, { name: basename(target) });
   try {
     mkdirSync(target);
+  } catch (e) {
+    throw fsError(e);
+  }
+  inheritOwner(target);
+  return target;
+}
+
+/** A new empty file, for the editor to fill */
+export function makeFile(dir: unknown, name: unknown): string {
+  const parent = locate(dir);
+  mustBeDir(parent);
+  mustWrite(parent);
+  const target = join(parent, validName(name));
+  if (lstatOrNull(target)) throw new AppError("files.exists", 409, { name: basename(target) });
+  try {
+    writeFileSync(target, "", { flag: "wx", mode: 0o644 });
   } catch (e) {
     throw fsError(e);
   }
@@ -863,4 +881,133 @@ export async function archivePlan(paths: unknown): Promise<ArchivePlan> {
   }
   const one = all.length === 1 ? [...names][0]! : basename(dirname(all[0]!)) || "files";
   return { name: one + ".zip", sources };
+}
+
+// --- Unpacking an archive ---------------------------------------------------------------------------
+
+/** The kind of archive a name says, and the name it would unpack under; null — not one Hata unpacks */
+export function archiveKind(name: string): { kind: "zip" | "tar"; stem: string } | null {
+  const zip = /^(.+)\.zip$/i.exec(name);
+  if (zip) return { kind: "zip", stem: zip[1]! };
+  const tar = /^(.+?)(\.tar(\.(gz|bz2|xz|zst))?|\.tgz|\.tbz2?|\.txz)$/i.exec(name);
+  return tar ? { kind: "tar", stem: tar[1]! } : null;
+}
+
+/**
+ * Unpacks a ZIP or tar archive into a new folder next to it, named after it — never over what is there.
+ * What is unpacked takes the owner of the folder, like everything made here; a ZIP's links are left
+ * out. A failure takes the half-made folder away.
+ */
+export function extract(path: unknown, user: string): Job {
+  const file = locate(path);
+  const st = lstatOrNull(file);
+  if (!st?.isFile()) throw new AppError("files.notFound", 404);
+  const kind = archiveKind(basename(file));
+  if (!kind) throw new AppError("files.notArchive", 415);
+  const dir = dirname(file);
+  mustWrite(dir);
+  if (isVirtual(file)) throw new AppError("files.virtual", 403);
+  // what can be told before the job: a ZIP that cannot be read, or one with a password
+  let zip: ReturnType<typeof openZip> | null = null;
+  if (kind.kind === "zip") {
+    try {
+      zip = openZip(file);
+    } catch (e) {
+      throw new AppError("files.badArchive", 415, { message: e instanceof Error ? e.message : String(e) });
+    }
+    const odd = zip.entries.find((e) => e.encrypted || (!e.dir && e.method !== 0 && e.method !== 8));
+    if (odd) {
+      zip.close();
+      throw new AppError(odd.encrypted ? "files.archiveLocked" : "files.badArchive", 415, { message: `compression method ${odd.method}` });
+    }
+  }
+  const target = join(dir, freeName(dir, kind.stem));
+  return startJob("", "extract", user, async (log) => {
+    const owner = statSync(dir);
+    try {
+      mkdirSync(target);
+      if (zip) {
+        const total = zip.entries.reduce((sum, e) => sum + e.size, 0);
+        const room = statfsSync(dir);
+        if (total > room.bavail * room.bsize) throw new Error(`Not enough room: ${megabytes(total)} to unpack, ${megabytes(room.bavail * room.bsize)} free`);
+        log(`Unpacking ${zip.entries.length} entries (${megabytes(total)}) into ${target}`);
+        let skipped = 0;
+        for (const entry of zip.entries) {
+          const dest = join(target, entry.name);
+          if (!inside(dest, target)) continue;
+          if (entry.link) {
+            skipped++;
+            continue;
+          }
+          if (entry.dir) {
+            mkdirSync(dest, { recursive: true });
+            continue;
+          }
+          mkdirSync(dirname(dest), { recursive: true });
+          // a name met twice keeps the later one, as unzip does
+          await zip.extract(entry, dest);
+          if (entry.mode) chmodSync(dest, entry.mode | 0o600);
+        }
+        if (skipped) log(`${skipped} symbolic links left out`);
+      } else {
+        log(`$ tar -xf ${file} -C ${target}`);
+        // GNU tar refuses members that would land outside the folder
+        const tar = Bun.spawn(["tar", "-xf", file, "-C", target, "--no-same-owner", "--no-same-permissions"], { stdout: "ignore", stderr: "pipe" });
+        const [code, err] = await Promise.all([tar.exited, new Response(tar.stderr).text()]);
+        for (const line of err.trim().split("\n").filter(Boolean).slice(-5)) log(line);
+        if (code !== 0) throw new Error(/No space left/i.test(err) ? "The disk is full" : err.trim().split("\n").pop() || `tar exited with ${code}`);
+      }
+      if (process.getuid?.() === 0) await Bun.spawn(["chown", "-R", "-h", `${owner.uid}:${owner.gid}`, "--", target], { stdout: "ignore", stderr: "ignore" }).exited;
+      log(`Done: ${target}`);
+      record("files.extract", { user, detail: `${basename(file)} → ${target}` });
+    } catch (e) {
+      await rm(target, { recursive: true, force: true }).catch(() => {});
+      throw e;
+    } finally {
+      zip?.close();
+    }
+  }, true);
+}
+
+// --- Finding files ----------------------------------------------------------------------------------
+
+export interface Found {
+  path: string;
+  type: EntryType;
+  size: number;
+  modified: number;
+}
+
+const FIND_LIMIT = 200;
+const FIND_MS = 5000;
+
+/**
+ * Files and folders under `path` whose names hold `query` (any case), nearest first. The walk does not
+ * follow links, leaves the kernel's folders and the trashes out, and stops after `FIND_LIMIT` finds or
+ * `FIND_MS` — then `more` says the list is not whole.
+ */
+export async function find(path: unknown, query: unknown): Promise<{ found: Found[]; more: boolean }> {
+  const root = locate(path);
+  mustBeDir(root);
+  if (typeof query !== "string" || !query.trim() || query.length > 200) throw new AppError("files.badQuery");
+  const needle = query.trim().toLocaleLowerCase();
+  const found: Found[] = [];
+  const queue = [root];
+  const until = Date.now() + FIND_MS;
+  while (queue.length) {
+    if (found.length >= FIND_LIMIT || Date.now() > until) return { found, more: true };
+    const dir = queue.shift()!;
+    if (dir !== root && isVirtual(dir)) continue;
+    const entries = await readdir(dir, { withFileTypes: true }).catch(() => []);
+    for (const entry of entries) {
+      if (entry.name === TRASH_DIR || entry.name.startsWith(".hata-upload-")) continue;
+      const abs = join(dir, entry.name);
+      if (entry.isDirectory()) queue.push(abs);
+      if (!entry.name.toLocaleLowerCase().includes(needle)) continue;
+      const st = await stat(abs).catch(() => null);
+      found.push({ path: abs, type: entry.isDirectory() ? "dir" : st?.isFile() ? "file" : "other", size: st?.isFile() ? st.size : 0, modified: st ? Math.round(st.mtimeMs) : 0 });
+      if (found.length >= FIND_LIMIT) break;
+    }
+  }
+  return { found, more: false };
 }

@@ -386,6 +386,19 @@ export function addDevice(user: string, input: { subscription: unknown; label: u
   return null;
 }
 
+/**
+ * The browser replaced a device's subscription by itself (keys rotated, the push service moved it):
+ * the device keeps its name and language under the new one. False — the old one is not this user's.
+ */
+export function renewDevice(user: string, oldEndpoint: unknown, subscription: unknown): boolean {
+  const before = state.devices.find((d) => d.user === user && d.endpoint === oldEndpoint);
+  const target = cleanSubscription(subscription);
+  if (!before || !target) return false;
+  state.devices = [...state.devices.filter((d) => d !== before && d.endpoint !== target.endpoint), { ...before, ...target, id: deviceId(target.endpoint) }];
+  save();
+  return true;
+}
+
 /** By id among the user's own devices, or by the endpoint the browser itself names */
 export function removeDevice(user: string, idOrEndpoint: string): boolean {
   const before = state.devices.length;

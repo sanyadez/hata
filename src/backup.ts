@@ -17,7 +17,7 @@ import { APP_NAME_RE, appMeta, bindSources, normalize } from "./appform";
 import { AppError, appAction, appDir, dc, installedNames, jobFinished, onBeforeUpdate, readCompose, startJob, type Job, type Log } from "./apps";
 import { record } from "./activity";
 import { DATA_DIR, SECRET_NAMES, SECRETS_DIR, settings } from "./config";
-import { listContainers, PROJECT_LABEL, run } from "./docker";
+import { dockerRoot, listContainers, PROJECT_LABEL, run } from "./docker";
 import { readJsonFile, writeJsonAtomic, writeTextAtomic } from "./fsutil";
 import { forgetSnapshot, offsiteStatus, syncOffsite, type LocalSet, type OffsiteStatus } from "./offsite";
 import { rebaseCompose, rebaseEnv, rebasePath } from "./rebase";
@@ -107,12 +107,13 @@ export function withoutNested(paths: string[]): string[] {
 }
 
 /** May a restore delete and rewrite this path? Only the app's own directory, AppData and Docker volumes */
-export function restorable(path: string, name: string, dataRoot = settings.dataRoot): boolean {
+export function restorable(path: string, name: string, dataRoot = settings.dataRoot, volumes = dockerRoot + "/volumes"): boolean {
   if (path.includes("\0") || path.split("/").includes("..")) return false;
   if (path === appDir(name)) return true;
   const appData = (dataRoot === "/" ? "" : dataRoot) + "/AppData/";
   if (path.startsWith(appData) && path.length > appData.length) return true;
-  return /^\/var\/lib\/docker\/volumes\/[A-Za-z0-9][A-Za-z0-9_.-]*\/_data$/.test(path);
+  if (!path.startsWith(volumes + "/")) return false;
+  return /^[A-Za-z0-9][A-Za-z0-9_.-]*\/_data$/.test(path.slice(volumes.length + 1));
 }
 
 /**
@@ -129,7 +130,7 @@ export function movedAppDir(paths: string[], name: string, current = appDir(name
  * snapshot that does not say is read by its paths — `<data folder>/AppData/<app's folder>`.
  */
 export function movedDataRoot(snapshot: Pick<Snapshot, "paths" | "dataRoot">, name: string, current = settings.dataRoot): string | null {
-  const data = snapshot.paths.find((p) => p.includes("/AppData/") && !p.startsWith("/var/lib/docker/") && !p.endsWith(`/apps/${name}`));
+  const data = snapshot.paths.find((p) => p.includes("/AppData/") && !p.startsWith(dockerRoot + "/") && !p.endsWith(`/apps/${name}`));
   const then = snapshot.dataRoot ?? (data ? data.slice(0, data.indexOf("/AppData/")) : "");
   return then && then !== "/" && current !== "/" && then !== current ? then : null;
 }

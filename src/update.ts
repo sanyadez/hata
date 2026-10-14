@@ -9,7 +9,7 @@
  *
  * Nothing is installed without the administrator asking for it.
  */
-import { chmodSync, copyFileSync, existsSync, readFileSync, renameSync, rmSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, readFileSync, renameSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { record } from "./activity";
 import { DATA_DIR } from "./config";
@@ -111,11 +111,29 @@ export interface UpdateStatus {
   /** What an install started from here is doing right now */
   stage: string;
   last: UpdateRecord | null;
+  /** The version kept as `hata.previous` that can be put back, when there is one and it is another one */
+  previous: string | null;
+}
+
+let previousSeen = { mtime: 0, version: "" };
+/** What `hata.previous` says it is; asked again only when the file changed */
+function previousVersion(): string | null {
+  if (unsupported()) return null;
+  try {
+    const mtime = statSync(PREVIOUS_BIN).mtimeMs;
+    if (mtime !== previousSeen.mtime) {
+      const probe = Bun.spawnSync({ cmd: [PREVIOUS_BIN, "version"], stdout: "pipe", stderr: "pipe" });
+      previousSeen = { mtime, version: probe.exitCode === 0 ? probe.stdout.toString().trim() : "" };
+    }
+  } catch {
+    return null;
+  }
+  return previousSeen.version && previousSeen.version !== VERSION ? previousSeen.version : null;
 }
 
 export function updateStatus(): UpdateStatus {
   const release = latest && { version: latest.version, url: latest.url, notes: latest.notes, publishedAt: latest.publishedAt };
-  return { current: VERSION, latest: release, available: !!latest && compareVersions(latest.version, VERSION) > 0, unsupported: unsupported(), checkedAt, error: installError || checkError, stage, last: readRecord() };
+  return { current: VERSION, latest: release, available: !!latest && compareVersions(latest.version, VERSION) > 0, unsupported: unsupported(), checkedAt, error: installError || checkError, stage, last: readRecord(), previous: previousVersion() };
 }
 
 /** The newer version, when there is one — for the hint on the home page */
@@ -193,26 +211,61 @@ async function install(release: Found, user: string): Promise<void> {
     const probe = Bun.spawnSync({ cmd: [fresh, "version"], stdout: "pipe", stderr: "pipe" });
     if (probe.exitCode !== 0 || probe.stdout.toString().trim() !== release.version) throw new Error("The downloaded binary does not run on this machine");
 
-    stage = "restart";
-    copyFileSync(SERVICE_BIN, PREVIOUS_BIN + ".new");
-    chmodSync(PREVIOUS_BIN + ".new", 0o755);
-    renameSync(PREVIOUS_BIN + ".new", PREVIOUS_BIN);
-    writeJsonAtomic(STATE_FILE, { from: VERSION, to: release.version, at: Date.now(), status: "pending", user } satisfies UpdateRecord);
-    renameSync(fresh, SERVICE_BIN);
-    // the watcher runs outside our service, so restarting the service does not take it down
-    const watcher = Bun.spawnSync({
-      cmd: ["systemd-run", "--unit", `hata-update-${Date.now()}`, "--collect", "--quiet", `--setenv=HATA_DATA_DIR=${DATA_DIR}`, PREVIOUS_BIN, "update-watch"],
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-    if (watcher.exitCode !== 0) {
-      renameSync(PREVIOUS_BIN, SERVICE_BIN);
-      rmSync(STATE_FILE, { force: true });
-      throw new Error(`Could not start the restart: ${watcher.stderr.toString().trim()}`);
-    }
+    swapIn(fresh, release.version, user);
   } finally {
     rmSync(fresh, { force: true });
   }
+}
+
+/**
+ * Puts `fresh` (a checked binary of `version`) in place of the running one and restarts into it. The
+ * running binary becomes `hata.previous`: it is known to work here, so it watches the restart and comes
+ * back if the other one does not confirm.
+ */
+function swapIn(fresh: string, version: string, user: string): void {
+  stage = "restart";
+  copyFileSync(SERVICE_BIN, PREVIOUS_BIN + ".new");
+  chmodSync(PREVIOUS_BIN + ".new", 0o755);
+  renameSync(PREVIOUS_BIN + ".new", PREVIOUS_BIN);
+  writeJsonAtomic(STATE_FILE, { from: VERSION, to: version, at: Date.now(), status: "pending", user } satisfies UpdateRecord);
+  renameSync(fresh, SERVICE_BIN);
+  // the watcher runs outside our service, so restarting the service does not take it down
+  const watcher = Bun.spawnSync({
+    cmd: ["systemd-run", "--unit", `hata-update-${Date.now()}`, "--collect", "--quiet", `--setenv=HATA_DATA_DIR=${DATA_DIR}`, PREVIOUS_BIN, "update-watch"],
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  if (watcher.exitCode !== 0) {
+    renameSync(PREVIOUS_BIN, SERVICE_BIN);
+    rmSync(STATE_FILE, { force: true });
+    throw new Error(`Could not start the restart: ${watcher.stderr.toString().trim()}`);
+  }
+}
+
+/**
+ * Goes back to the version kept as `hata.previous` — the same restart, watched the same way, and the
+ * version left now becomes the previous one, so it can be come back to.
+ */
+export function startRollback(user: string): string | null {
+  if (unsupported()) return "update.unsupported";
+  if (stage) return "update.running";
+  const version = previousVersion();
+  if (!version) return "update.noPrevious";
+  const fresh = SERVICE_BIN + ".download";
+  installError = "";
+  try {
+    copyFileSync(PREVIOUS_BIN, fresh);
+    chmodSync(fresh, 0o755);
+    swapIn(fresh, version, user);
+  } catch (e) {
+    stage = "";
+    installError = e instanceof Error ? e.message : String(e);
+    record("system.update.failed", { user, detail: installError.slice(0, 300) });
+    return null;
+  } finally {
+    rmSync(fresh, { force: true });
+  }
+  return null;
 }
 
 /** Starts the install of the release found by the last check; progress is in `updateStatus().stage` */
@@ -256,4 +309,41 @@ export async function watchUpdate(): Promise<number> {
   writeJsonAtomic(STATE_FILE, { ...started, status: "rolledBack" } satisfies UpdateRecord);
   systemctl("restart", "hata.service");
   return 1;
+}
+
+// --- From the console (`hata update`) ---------------------------------------------------------------
+
+const WHY: Record<string, string> = {
+  source: "This Hata runs from source; update the working copy instead.",
+  notService: "Only the installed service updates itself: run it as root, as /usr/local/bin/hata.",
+};
+
+/** `hata update [--previous] [--yes]`: what the button in Settings → About does, from a shell */
+export async function updateFromConsole(args: string[]): Promise<number> {
+  const why = unsupported();
+  if (why) return console.error(WHY[why] ?? why), 1;
+  const yes = args.includes("--yes");
+  const ask = (question: string) => yes || /^y(es)?$/i.test((prompt(`${question} [y/N]`) ?? "").trim());
+  if (args.includes("--previous")) {
+    const version = previousVersion();
+    if (!version) return console.error("There is no previous version kept on this machine."), 1;
+    if (!ask(`Go back from ${VERSION} to ${version}?`)) return 1;
+    const error = startRollback("console");
+    if (error || installError) return console.error(installError || error), 1;
+    console.log(`Restarting into ${version}. ${VERSION} is kept as the previous version.`);
+    return 0;
+  }
+  const status = await checkForUpdate();
+  if (status.error) return console.error(`Could not check: ${status.error}`), 1;
+  if (!status.available || !latest) return console.log(`${VERSION} is the newest version.`), 0;
+  console.log(`Hata ${latest.version} is available (this is ${VERSION}).`);
+  if (latest.notes.trim()) console.log(`\n${latest.notes.trim()}\n`);
+  if (!ask(`Install ${latest.version}?`)) return 1;
+  try {
+    await install(latest, "console");
+  } catch (e) {
+    return console.error(e instanceof Error ? e.message : String(e)), 1;
+  }
+  console.log(`Restarting into ${latest.version}. If it does not start within a minute, ${VERSION} comes back by itself.`);
+  return 0;
 }
