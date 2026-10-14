@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, symlinkS
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { DATA_DIR, settings } from "../src/config";
-import { archivePlan, emptyTrash, freeName, list, mustBeSharable, onSharesMoved, pinFolder, pinnedFolders, locate, makeFolder, readable, readText, remove, rename, restore, summary, transfer, trash, upload, validName, writeText, type UploadPart } from "../src/files";
+import { archivePlan, emptyTrash, freeName, list, udevName, mustBeSharable, onSharesMoved, pinFolder, pinnedFolders, locate, makeFolder, readable, readText, remove, rename, restore, summary, transfer, trash, upload, validName, writeText, type UploadPart } from "../src/files";
 import { world } from "../src/trash";
 import { zipChunks } from "../src/zip";
 
@@ -293,4 +293,11 @@ test("deleting for good skips the trash; the trash is emptied by entry or whole"
   expect(trash().items).toEqual([]);
   expect(readdirSync(at("/.hata-trash"))).toEqual([]);
   expect(await rejects(emptyTrash(["../x"]).then(() => restore("nope")))).toBe("files.badPath");
+});
+
+test("udev's names of labels are read back, escaped bytes and UTF-8 alike", () => {
+  expect(udevName("My\\x20Disk")).toBe("My Disk");
+  expect(udevName("Фільми")).toBe("Фільми");
+  expect(udevName("\\xd0\\xa4\\xd1\\x96\\x20x")).toBe("Фі x");
+  expect(udevName("CAR\\x20USB")).toBe("CAR USB");
 });

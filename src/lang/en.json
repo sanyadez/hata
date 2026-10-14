@@ -2182,5 +2182,7 @@
   "tools.holds.docker": "Docker needs it: removing it would take Docker away too.",
   "assistant.wide": "Make the window bigger",
   "assistant.narrow": "Make the window smaller",
-  "assistant.hide": "Hide"
+  "assistant.hide": "Hide",
+  "edit.pickFolder": "Choose a folder of the server",
+  "edit.pickHere": "Use this folder"
 }

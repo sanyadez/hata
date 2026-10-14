@@ -454,6 +454,18 @@ tr.removed .app-icon { opacity: 0.5; }
 .stack-s { display: grid; gap: 8px; min-width: 0; }
 a.cat .with-icon { min-width: 0; }
 .files-disk { display: grid; gap: 4px; padding: 0 10px; }
+/* the other disks at the top of the data folder */
+.disk-strip { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; }
+.disk-tile { display: flex; gap: 12px; align-items: flex-start; padding: 14px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); color: var(--text); min-width: 0; }
+.disk-tile:hover { border-color: var(--border-strong); background: var(--surface-2); }
+.disk-text { display: grid; gap: 4px; min-width: 0; flex: 1; }
+.disk-text .bar { margin: 4px 0 0; }
+/* the data folder and the disks above the folders of a picker */
+.picker-quick { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip-btn { display: inline-flex; align-items: center; gap: 6px; max-width: 220px; height: 30px; padding: 0 12px; border: 1px solid var(--border); border-radius: 15px; background: var(--surface-2); color: var(--text); font-size: 13px; cursor: pointer; }
+.chip-btn .ico { width: 15px; height: 15px; flex: none; }
+.chip-btn:hover { border-color: var(--border-strong); }
+.chip-btn.active { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-text); }
 /* the list reaches the bottom of the window, so the empty room under it is the folder's too (its menu, a drop) */
 .files { min-height: calc(100dvh - 173px); }
 #files-main { align-self: stretch; align-content: start; }
@@ -769,7 +781,9 @@ input[type="range"] { accent-color: var(--accent); width: 100%; }
 .edit-rows { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
 .edit-rows:empty { display: none; }
 .edit-row { display: flex; align-items: center; gap: 8px; }
-.edit-row > input { flex: 1 1 0; min-width: 0; }
+.edit-row > input, .edit-row > .with-pick { flex: 1 1 0; min-width: 0; }
+.with-pick { display: flex; align-items: center; gap: 4px; }
+.with-pick input { flex: 1; min-width: 0; }
 .edit-row > select { flex: 0 1 auto; width: auto; min-width: 0; }
 .edit-row .raw { padding: 8px 12px; border: 1px dashed var(--border); border-radius: var(--radius-sm); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .web-address { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }

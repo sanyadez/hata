@@ -1997,7 +1997,24 @@ function rowList(title, hint, items, cells) {
       row.value = () => item;
     } else {
       const inputs = cells.map((c) => (c.options ? choice(item[c.key], c.options, c.label) : h("input", { value: item[c.key] ?? "", placeholder: c.label, "aria-label": c.label, class: "mono " + (c.class ?? ""), spellcheck: false, autocapitalize: "none", autocomplete: "off" })));
-      row.el = h("div", { class: "edit-row" }, inputs, remove);
+      // a folder of the server can be chosen instead of typed: the disks are offered there too
+      const cellsOf = inputs.map((input, i) =>
+        cells[i].pick
+          ? h(
+              "span",
+              { class: "with-pick" },
+              input,
+              h("button", {
+                type: "button",
+                class: "icon-btn",
+                title: t("edit.pickFolder"),
+                "aria-label": t("edit.pickFolder"),
+                onclick: () => folderPicker({ title: t("edit.pickFolder"), start: input.value.startsWith("/") ? input.value : "", confirmLabel: t("edit.pickHere"), action: (path) => void (input.value = path) }),
+              }, icon("folder")),
+            )
+          : input,
+      );
+      row.el = h("div", { class: "edit-row" }, cellsOf, remove);
       row.value = () => ({ ...(item.from === undefined ? {} : { from: item.from }), ...Object.fromEntries(cells.map((c, i) => [c.key, inputs[i].value])) });
       // a row added and left empty was not meant
       row.empty = () => item.from === undefined && inputs.every((input) => input.tagName === "SELECT" || input.value.trim() === "");
@@ -2029,7 +2046,7 @@ function serviceForm(service, memoryTotal) {
     { key: "host", label: t("edit.host") },
     { key: "container", label: t("edit.container") },
   ];
-  const volumes = rowList(t("edit.volumes"), t("edit.volumesHint"), service.volumes, pair);
+  const volumes = rowList(t("edit.volumes"), t("edit.volumesHint"), service.volumes, [{ ...pair[0], pick: true }, pair[1]]);
   const envs = rowList(t("edit.envs"), "", service.envs, [
     { key: "name", label: t("edit.key") },
     { key: "value", label: t("edit.value") },
@@ -3043,10 +3060,10 @@ function filesPlaces(path) {
     h("div", { class: "cat-title" }, t("files.places")),
     home && place(t("files.home"), home, "home", path === home),
     home && (state.files?.places ?? []).map((name) => place(name, joinPath(home, name), name === "AppData" ? "box" : "folder", inside(joinPath(home, name)))),
-    place(t("files.root"), "/", "disk", !trash && path !== "" && !inHome && !(state.files?.disks ?? []).some((d) => within(path, d))),
+    place(t("files.root"), "/", "disk", !trash && path !== "" && !inHome && !(state.files?.disks ?? []).some((d) => within(path, d.path))),
     h("a", { class: "cat" + (trash ? " active" : ""), href: "#/trash" }, h("span", { class: "with-icon" }, icon("trash"), h("span", { class: "clip" }, t("trash.title")))),
     (state.files?.disks ?? []).length > 0 && h("div", { class: "cat-title" }, t("files.disks")),
-    (state.files?.disks ?? []).map((d) => place(d.split("/").pop(), d, "disk", inside(d))),
+    (state.files?.disks ?? []).map((d) => place(volumeName(d), d.path, d.network ? "globe" : "disk", inside(d.path))),
     disk && h("div", { class: "cat-title" }, t("files.disk")),
     disk && h("div", { class: "files-disk" }, h("div", { class: "bar" }, fill), h("span", { class: "muted small" }, t("files.free", { free: bytes(disk.free), total: bytes(disk.total) }))),
   );
@@ -3103,8 +3120,31 @@ function renderFilesBody() {
   else if (!entries.length) body = h("div", { class: "card empty" }, icon("folder"), h("p", null, t("files.empty")), h("p", { class: "small" }, t("files.dropHint")));
   else body = filesUi.mode === "grid" ? filesGrid(dirs, rest) : filesTable(entries);
 
-  put(main, head, selection, body, listing?.truncated && h("p", { class: "muted small" }, t("files.truncated")), uploadBox);
+  put(main, head, selection, listing && path === listing.home && diskStrip(listing), body, listing?.truncated && h("p", { class: "muted small" }, t("files.truncated")), uploadBox);
   renderSelection();
+}
+
+/** What a disk is called: its label, or the folder it is mounted at */
+const volumeName = (volume) => volume.label || volume.path.split("/").pop() || volume.path;
+/** The disks that are not inside the data folder already, where people look for them */
+const outerVolumes = (listing) => (listing?.disks ?? []).filter((d) => !(d.path + "/").startsWith((listing.home || "\0") + "/"));
+
+/** The other disks of the server, at the top of the data folder: they are mounted elsewhere, not in it */
+function diskStrip(listing) {
+  const volumes = outerVolumes(listing);
+  if (!volumes.length) return null;
+  const card = (volume) => {
+    const used = volume.total ? Math.round(((volume.total - volume.free) / volume.total) * 100) : 0;
+    const fill = h("i", { class: level(used) });
+    fill.style.width = used + "%";
+    return h(
+      "a",
+      { class: "disk-tile", href: filesHash(volume.path), title: volume.path },
+      h("span", { class: "badge-icon plain" }, icon(volume.network ? "globe" : "disk")),
+      h("span", { class: "disk-text" }, h("span", { class: "clip strong" }, volumeName(volume)), h("span", { class: "muted small mono clip" }, volume.path), volume.total > 0 && h("span", { class: "bar" }, fill), volume.total > 0 && h("span", { class: "muted small" }, t("files.free", { free: bytes(volume.free), total: bytes(volume.total) }))),
+    );
+  };
+  return h("div", { class: "stack" }, h("div", { class: "cat-title" }, t("files.disks")), h("div", { class: "disk-strip" }, volumes.map(card)));
 }
 
 const selectedEntries = () => (state.files?.entries ?? []).filter((entry) => filesUi.selected.has(entry.name));
@@ -3463,6 +3503,7 @@ function folderPicker({ title, start, confirmLabel, action, allowed = () => true
   let at = start;
   let dialog;
   const crumbs = h("div", { class: "crumbs wrap" });
+  const quick = h("div", { class: "picker-quick" });
   const folders = h("div", { class: "picker" });
   const error = h("p", { class: "error", role: "alert" });
   const confirm = button(confirmLabel, {
@@ -3491,11 +3532,16 @@ function folderPicker({ title, start, confirmLabel, action, allowed = () => true
     const parts = at.split("/").filter(Boolean);
     const crumb = (label, to) => h("button", { type: "button", class: "crumb", onclick: () => show(to) }, label);
     put(crumbs, crumb("/", "/"), parts.map((part, i) => [i > 0 && icon("chevron"), crumb(part, "/" + parts.slice(0, i + 1).join("/"))]));
+    // the data folder and the disks, one press away wherever the picker is
+    const jump = (label, to, iconName) => h("button", { type: "button", class: "chip-btn" + (at === to || at.startsWith(to + "/") ? " active" : ""), onclick: () => show(to) }, icon(iconName), h("span", { class: "clip" }, label));
+    const volumes = outerVolumes(listing);
+    put(quick, listing.home && jump(t("files.home"), listing.home, "home"), volumes.map((d) => jump(volumeName(d), d.path, d.network ? "globe" : "disk")));
+    quick.hidden = !volumes.length;
     const inner = sortedEntries(listing.entries).filter((entry) => entry.type === "dir" && shown(joinPath(at, entry.name)));
     put(folders, inner.length ? inner.map((entry) => h("button", { type: "button", class: "menu-item", onclick: () => show(joinPath(at, entry.name)) }, icon("folder", "folder-ico"), h("span", { class: "clip grow" }, entry.name), icon("chevron", "faint"))) : h("p", { class: "muted small pad" }, t("files.noFolders")));
     confirm.disabled = !allowed(at);
   };
-  dialog = openDialog("wide", h("h2", { class: "wrap" }, title), crumbs, folders, error, h("footer", null, button(t("files.newFolder"), { onclick: () => newFolderDialog(at, () => show(at)) }, "folder"), closeButton(() => dialog, t("common.cancel")), confirm));
+  dialog = openDialog("wide", h("h2", { class: "wrap" }, title), quick, crumbs, folders, error, h("footer", null, button(t("files.newFolder"), { onclick: () => newFolderDialog(at, () => show(at)) }, "folder"), closeButton(() => dialog, t("common.cancel")), confirm));
   void show(at);
 }
 

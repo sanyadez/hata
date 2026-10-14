@@ -2182,5 +2182,7 @@
   "tools.holds.docker": "Він потрібен Docker: разом із ним піде й Docker.",
   "assistant.wide": "Збільшити вікно",
   "assistant.narrow": "Зменшити вікно",
-  "assistant.hide": "Сховати"
+  "assistant.hide": "Сховати",
+  "edit.pickFolder": "Вибрати теку сервера",
+  "edit.pickHere": "Узяти цю теку"
 }

@@ -15,7 +15,7 @@
  * the owner of the folder it is created in — otherwise an app could not touch a file uploaded into its
  * own folder.
  */
-import { chmodSync, chownSync, existsSync, lchownSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, statfsSync, statSync, unlinkSync, writeFileSync, type Stats } from "node:fs";
+import { chmodSync, chownSync, existsSync, readdirSync, lchownSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, statfsSync, statSync, unlinkSync, writeFileSync, type Stats } from "node:fs";
 import { lstat, open, readdir, readFile, rm, stat } from "node:fs/promises";
 import { basename, dirname, extname, join, resolve, sep } from "node:path";
 import { AppError, startJob, type Job } from "./apps";
@@ -65,8 +65,20 @@ export interface Listing {
   /** Folders at the top of the data root: the places of the sidebar */
   places: string[];
   /** The other file systems of the server — disks and network folders — by the folder they are mounted at */
-  disks: string[];
+  disks: Volume[];
   disk: { total: number; free: number } | null;
+}
+
+/** A file system mounted somewhere: what the file manager shows as a disk */
+export interface Volume {
+  path: string;
+  /** The label of the file system; "" — it has none, the folder's name is shown */
+  label: string;
+  /** Bytes; 0 — not known */
+  total: number;
+  free: number;
+  network: boolean;
+  readOnly: boolean;
 }
 
 export interface Summary {
@@ -244,12 +256,51 @@ export async function list(path: unknown): Promise<Listing> {
   };
 }
 
-function otherDisks(home: string): string[] {
+function otherDisks(home: string): Volume[] {
+  let mounts: ReturnType<typeof parseMounts> = [];
   try {
-    return parseMounts(readFileSync("/proc/mounts", "utf8")).map((mount) => mount.path).filter((path) => path !== "/" && path !== home).slice(0, 20);
+    mounts = parseMounts(readFileSync("/proc/mounts", "utf8")).filter((mount) => mount.path !== "/" && mount.path !== home).slice(0, 20);
+  } catch {}
+  const labels = labelsByDevice();
+  return mounts.map((mount) => {
+    const room = diskOf(mount.path);
+    return { path: mount.path, label: labels.get(realOrSame(mount.device)) ?? "", total: room?.total ?? 0, free: room?.free ?? 0, network: mount.network, readOnly: mount.readOnly };
+  });
+}
+
+const realOrSame = (path: string): string => {
+  try {
+    return realpathSync(path);
   } catch {
-    return [];
+    return path;
   }
+};
+
+/** A name as udev writes it into a link: unsafe bytes as `\\xNN`, the rest UTF-8 */
+export function udevName(name: string): string {
+  const bytes: number[] = [];
+  for (let i = 0; i < name.length; ) {
+    const escaped = /^\\x([0-9a-f]{2})/i.exec(name.slice(i, i + 4));
+    if (escaped) {
+      bytes.push(parseInt(escaped[1]!, 16));
+      i += 4;
+    } else {
+      const char = String.fromCodePoint(name.codePointAt(i)!);
+      bytes.push(...new TextEncoder().encode(char));
+      i += char.length;
+    }
+  }
+  return new TextDecoder().decode(new Uint8Array(bytes));
+}
+
+/** Device → the label of its file system, from udev's links (`/dev/disk/by-label/My\x20Disk`) */
+function labelsByDevice(): Map<string, string> {
+  const out = new Map<string, string>();
+  const dir = "/dev/disk/by-label";
+  try {
+    for (const name of readdirSync(dir)) out.set(realOrSame(join(dir, name)), udevName(name));
+  } catch {}
+  return out;
 }
 
 // --- Folders on the dashboard -----------------------------------------------------------------------
