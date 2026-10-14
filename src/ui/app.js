@@ -4145,35 +4145,6 @@ async function storeDialog(entry) {
   (install.disabled ? dialog : install).focus();
 }
 
-/** Asks for a `docker run` command and hands over what the server read out of it */
-function dockerRunDialog(then) {
-  const area = h("textarea", { class: "code", spellcheck: false, required: true, placeholder: "docker run -d --name whoami -p 8088:80 traefik/whoami" });
-  const error = h("p", { class: "error", role: "alert" });
-  const dialog = openDialog(
-    "wide",
-    h(
-      "form",
-      {
-        onsubmit: async (e) => {
-          e.preventDefault();
-          error.textContent = "";
-          try {
-            then(await api("POST", "/api/dockerrun", { command: area.value }));
-            dialog.close();
-          } catch (err) {
-            error.textContent = errorText(err);
-          }
-        },
-      },
-      h("header", null, h("div", { class: "grow" }, h("h2", null, t("run.title")), h("p", { class: "muted small" }, t("run.lead"))), closeX(() => dialog)),
-      area,
-      error,
-      h("footer", null, closeButton(() => dialog, t("common.cancel")), h("button", { class: "btn primary" }, t("run.read"))),
-    ),
-  );
-  area.focus();
-}
-
 function customDialog() {
   const name = h("input", { required: true, pattern: "[a-z0-9][a-z0-9_\\-]*", autocapitalize: "none", spellcheck: false, class: "mono" });
   const area = h("textarea", { class: "code", spellcheck: false, wrap: "off", required: true, placeholder: "services:\n  web:\n    image: nginx:alpine\n    ports:\n      - 8088:80\n" });
@@ -4186,27 +4157,31 @@ function customDialog() {
   const modes = h("div", { class: "modes" });
   const notice = h("div", { class: "banner stack", hidden: true });
   const file = field(t("store.customCompose"), area);
-  let asForm = true;
-  const fromRun = (run) => {
-    form = appSettingsForm({ ...run.edit, services: run.edit.services.map((service) => ({ ...service, name: "" })) }, memoryTotal);
+  // the third way in: a command from an app's instructions, read into the form
+  const command = h("textarea", { class: "code", spellcheck: false, placeholder: "docker run -d --name whoami -p 8088:80 traefik/whoami" });
+  const run = h("div", { class: "stack" }, field(t("run.command"), command));
+  const submit = h("button", { class: "btn primary" }, t("store.install"));
+  /** form | file | run */
+  let current = "form";
+  const fromRun = (read) => {
+    form = appSettingsForm({ ...read.edit, services: read.edit.services.map((service) => ({ ...service, name: "" })) }, memoryTotal);
     holder.replaceChildren(form.el);
-    if (!name.value.trim()) name.value = run.name;
-    notice.hidden = run.ignored.length === 0;
-    put(notice, h("p", { class: "small" }, t("run.ignored")), run.ignored.map((option) => h("p", { class: "mono small" }, option)));
+    if (!name.value.trim()) name.value = read.name;
+    put(notice, read.ignored.length > 0 && [h("p", { class: "small" }, t("run.ignored")), read.ignored.map((option) => h("p", { class: "mono small" }, option))]);
   };
-  const mode = (on) => {
-    asForm = on;
-    put(
-      modes,
-      [true, false].map((value) => h("button", { type: "button", class: "mode" + (value === on ? " active" : ""), onclick: () => mode(value) }, t(value ? "store.customForm" : "store.customFile"))),
-      on && button(t("run.import"), { class: "small ghost", onclick: () => dockerRunDialog(fromRun) }, "terminal"),
-    );
-    lead.textContent = t(on ? "store.customFormLead" : "store.customLead");
-    holder.hidden = !on;
-    notice.hidden = !on || !notice.hasChildNodes();
-    file.hidden = on;
+  const mode = (next) => {
+    current = next;
+    put(modes, ["form", "file", "run"].map((value) => h("button", { type: "button", class: "mode" + (value === next ? " active" : ""), onclick: () => mode(value) }, t(`store.custom.${value}`))));
+    lead.textContent = t(`store.custom.${next}Lead`);
+    holder.hidden = next !== "form";
+    notice.hidden = next !== "form" || !notice.hasChildNodes();
+    file.hidden = next !== "file";
+    run.hidden = next !== "run";
     // a hidden field must not hold the form back
-    area.required = !on;
+    area.required = next === "file";
+    command.required = next === "run";
+    name.required = next !== "run";
+    submit.textContent = t(next === "run" ? "run.read" : "store.install");
   };
   const dialog = openDialog(
     "wide",
@@ -4218,6 +4193,11 @@ function customDialog() {
           error.textContent = "";
           const app = name.value.trim();
           try {
+            if (current === "run") {
+              fromRun(await api("POST", "/api/dockerrun", { command: command.value }));
+              return mode("form");
+            }
+            const asForm = current === "form";
             const settings = form.value();
             for (const service of settings.services) service.name ||= app;
             const res = await api("POST", `/api/apps?lang=${state.lang}`, asForm ? { name: app, settings } : { name: app, compose: area.value });
@@ -4238,11 +4218,12 @@ function customDialog() {
       field(t("store.customName"), name, t("store.customNameHint")),
       holder,
       file,
+      run,
       error,
-      h("footer", null, closeButton(() => dialog, t("common.cancel")), h("button", { class: "btn primary" }, t("store.install"))),
+      h("footer", null, closeButton(() => dialog, t("common.cancel")), submit),
     ),
   );
-  mode(true);
+  mode("form");
   name.focus();
 }
 
