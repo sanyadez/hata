@@ -5748,7 +5748,9 @@ function tailscaleCards() {
 
   const on = r.state === "running";
   const offered = r.offered.length > 0;
-  const waiting = r.offered.filter((net) => !r.approved.includes(net));
+  // a network a router of the private network already carries is reached through it: nothing waits there
+  const carried = r.offered.filter((net) => !r.approved.includes(net) && r.carried?.[net]);
+  const waiting = r.offered.filter((net) => !r.approved.includes(net) && !r.carried?.[net]);
   const share = h("input", { type: "checkbox", checked: offered, disabled: !on || (!offered && !r.networks.length), onchange: (e) => act("networks", { on: e.target.checked })(e) });
   return [
     h(
@@ -5767,6 +5769,7 @@ function tailscaleCards() {
       { class: "card pad stack" },
       h("h2", null, t("remote.networks")),
       h("label", { class: "check" }, share, h("span", null, h("strong", null, t("remote.networksOn")), h("span", { class: "muted small block" }, r.networks.length || offered ? t("remote.networksHint", { networks: (offered ? r.offered : r.networks).join(", ") }) : t("remote.networksNone")))),
+      carried.length > 0 && h("p", { class: "muted small" }, carried.map((net) => t("remote.networksCarried", { network: net, device: r.carried[net] })).join(" ")),
       waiting.length > 0 && h("p", { class: "banner" }, t(r.server ? "remote.networksApproveOwn" : "remote.networksApprove", { networks: waiting.join(", ") }), !r.server && [" ", h("a", { class: "link", href: r.admin, target: "_blank", rel: "noopener noreferrer" }, "login.tailscale.com")]),
     ),
     h(

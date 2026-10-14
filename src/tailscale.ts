@@ -49,6 +49,8 @@ export interface Status {
   expires: number;
   /** The home networks the service lets the other devices reach through this server */
   approved: string[];
+  /** Networks another device of the private network already carries (a router with Tailscale): network → its name */
+  carried: Record<string, string>;
   /** What the daemon itself says is wrong */
   health: string[];
   devices: Device[];
@@ -81,6 +83,12 @@ const when = (value: unknown): number => {
 };
 const bare = (dnsName: unknown): string => text(dnsName).replace(/\.$/, "");
 
+/**
+ * What the daemon says that is no trouble: being switched off (the page says so itself), and not taking the routes other devices offer —
+ * on the home network itself that is right, the home is reached directly.
+ */
+const BENIGN = /advertising routes but --accept-routes is false|^Tailscale is stopped\.?$/;
+
 export function parseStatus(json: string): Status | null {
   let data: Record<string, unknown>;
   try {
@@ -94,13 +102,15 @@ export function parseStatus(json: string): Status | null {
   const tailnet = (data.CurrentTailnet && typeof data.CurrentTailnet === "object" ? data.CurrentTailnet : {}) as Record<string, unknown>;
   const authUrl = /^https?:\/\//.test(text(data.AuthURL)) ? text(data.AuthURL) : "";
   const state: Status["state"] = backend === "Running" ? "running" : backend === "Stopped" ? "off" : backend === "NeedsLogin" || backend === "NeedsMachineAuth" ? (authUrl || backend === "NeedsMachineAuth" ? "starting" : "needsLogin") : "starting";
-  const devices = Object.values(data.Peer && typeof data.Peer === "object" ? (data.Peer as Record<string, Record<string, unknown>>) : {})
-    .filter((peer) => peer && typeof peer === "object")
+  const peers = Object.values(data.Peer && typeof data.Peer === "object" ? (data.Peer as Record<string, Record<string, unknown>>) : {}).filter((peer) => peer && typeof peer === "object");
+  const carried: Record<string, string> = {};
+  for (const peer of peers) for (const route of list(peer.PrimaryRoutes)) carried[route] = bare(peer.DNSName).split(".")[0] || text(peer.HostName);
+  const devices = peers
     .map((peer) => ({ name: bare(peer.DNSName).split(".")[0] || text(peer.HostName), os: text(peer.OS), addresses: list(peer.TailscaleIPs), online: peer.Online === true, lastSeen: peer.Online === true ? 0 : when(peer.LastSeen) }))
     .sort((a, b) => Number(b.online) - Number(a.online) || a.name.localeCompare(b.name));
   // the routes of its own the service has accepted: its own addresses are there too, as /32 and /128
   const approved = list(self.PrimaryRoutes).length ? list(self.PrimaryRoutes) : list(self.AllowedIPs).filter((route) => !/\/(32|128)$/.test(route));
-  return { state, authUrl, name: state === "needsLogin" ? "" : bare(self.DNSName), addresses: list(self.TailscaleIPs ?? data.TailscaleIPs), tailnet: text(tailnet.Name), expires: when(self.KeyExpiry), approved, health: list(data.Health), devices };
+  return { state, authUrl, name: state === "needsLogin" ? "" : bare(self.DNSName), addresses: list(self.TailscaleIPs ?? data.TailscaleIPs), tailnet: text(tailnet.Name), expires: when(self.KeyExpiry), approved, carried, health: list(data.Health).filter((line) => !BENIGN.test(line)), devices };
 }
 
 /** What `tailscale debug prefs` holds of interest: the service signed in to and the routes offered */

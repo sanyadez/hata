@@ -2184,5 +2184,6 @@
   "assistant.narrow": "Make the window smaller",
   "assistant.hide": "Hide",
   "edit.pickFolder": "Choose a folder of the server",
-  "edit.pickHere": "Use this folder"
+  "edit.pickHere": "Use this folder",
+  "remote.networksCarried": "{network} is already reached through {device}, which offers it too: Tailscale takes one way to a network."
 }

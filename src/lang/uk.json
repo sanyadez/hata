@@ -2184,5 +2184,6 @@
   "assistant.narrow": "Зменшити вікно",
   "assistant.hide": "Сховати",
   "edit.pickFolder": "Вибрати теку сервера",
-  "edit.pickHere": "Узяти цю теку"
+  "edit.pickHere": "Узяти цю теку",
+  "remote.networksCarried": "{network} уже доступна через {device}, що теж її пропонує: до однієї мережі Tailscale веде одним шляхом."
 }
