@@ -296,6 +296,22 @@ in Google Drive or Box.
 | ![An app's snapshots](screenshots/app-backups.png) An app's snapshots | ![A shell inside an app's container](screenshots/app-terminal.png) A shell inside an app's container |
 | ![The server's terminal](screenshots/terminal.png) The server's terminal | ![Bringing in containers that already run](screenshots/import.png) Bringing in containers that already run |
 | ![Users, who can open what, invitations](screenshots/users.png) Users, who can open what, invitations | ![Inside a snapshot: a file taken out, chosen files and folders put back](screenshots/snapshot-files.png) Inside a snapshot: a file taken out, chosen files and folders put back |
+| ![The whole history: what happened on the server and who did it](screenshots/activity.png) The whole history: what happened on the server and who did it | ![An app from the store installed here or on another machine](screenshots/store-install-on.png) An app from the store installed here or on another machine |
+| ![The assistant looks first and asks before it changes anything](screenshots/assistant.png) The assistant looks first and asks before it changes anything | ![The assistant's answer once the change is made](screenshots/assistant-done.png) The assistant's answer once the change is made |
+
+### Other machines
+
+| | |
+|---|---|
+| ![Machines: the other computers of the house](screenshots/machines.png) Machines: the other computers of the house | ![A machine: its state at a glance](screenshots/machine.png) A machine: its state at a glance |
+| ![A machine's apps: installed, updated, backed up and moved from here](screenshots/machine-apps.png) A machine's apps: installed, updated, backed up and moved from here | ![A machine's Docker containers](screenshots/machine-containers.png) A machine's Docker containers |
+| ![A terminal on the machine](screenshots/machine-terminal.png) A terminal on the machine | ![A machine's files in Files](screenshots/machine-files.png) A machine's files in Files |
+
+### First run
+
+| | | |
+|---|---|---|
+| ![First run: the server's name and time zone](screenshots/welcome.png) The server's name and time zone | ![First run: where the data lives](screenshots/welcome-data.png) Where the data lives | ![First run: a few apps to start with](screenshots/welcome-apps.png) A few apps to start with |
 
 ### Settings
 
@@ -307,7 +323,8 @@ in Google Drive or Box.
 | ![Network folders (SMB)](screenshots/settings-shares.png) Network folders (SMB) | ![HTTPS and domain](screenshots/settings-https.png) HTTPS and domain |
 | ![Notifications](screenshots/settings-notifications.png) Notifications | ![Agents: access keys for the MCP server](screenshots/settings-agents.png) Agents: access keys for the MCP server |
 | ![About and updates](screenshots/settings-about.png) About and updates | ![Network: interfaces, Wi-Fi, the ways to the internet](screenshots/settings-network.png) Network: interfaces, Wi-Fi, the ways to the internet |
-| ![Storage: protection from a disk failure](screenshots/settings-protection.png) Storage: protection from a disk failure |  |
+| ![Storage: protection from a disk failure](screenshots/settings-protection.png) Storage: protection from a disk failure | ![Remote access: Tailscale and WireGuard](screenshots/settings-remote.png) Remote access: Tailscale and WireGuard |
+| ![The assistant: which model it talks to and what it may do](screenshots/settings-assistant.png) The assistant: which model it talks to and what it may do | ![System programs: what Hata relies on, installed or not](screenshots/settings-tools.png) System programs: what Hata relies on, installed or not |
 
 ### Looks
 
