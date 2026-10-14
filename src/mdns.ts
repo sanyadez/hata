@@ -211,9 +211,9 @@ export function addressFor(remote: string, links: Link[]): string | null {
 /** Bridges and pairs Docker makes for containers, and tunnels: nobody on them looks for the server by a .local name */
 const INSIDE = /^(docker|br-|veth|virbr|cni|flannel|lxcbr|podman|tailscale|hata-wg|wg\d)/;
 
-/** The addresses of this machine on the networks people are on */
+/** The addresses of this machine on the networks people are on: not the tunnels, not the internet side */
 export function homeLinks(): Link[] {
-  return Object.entries(networkInterfaces()).flatMap(([name, list]) => (INSIDE.test(name) ? [] : (list ?? []).filter((a) => a.family === "IPv4" && !a.internal).map((a) => ({ address: a.address, netmask: a.netmask }))));
+  return Object.entries(networkInterfaces()).flatMap(([name, list]) => (INSIDE.test(name) || settings.network.outside.includes(name) ? [] : (list ?? []).filter((a) => a.family === "IPv4" && !a.internal).map((a) => ({ address: a.address, netmask: a.netmask }))));
 }
 
 /** Multicast DNS is for names ending in `.local` only: any other name is the business of the home's DNS */

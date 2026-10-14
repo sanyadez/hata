@@ -238,6 +238,8 @@ const persist = () => writeJsonAtomic(FILE, saved, 0o600);
 export const toolInstalled = (): boolean => !!Bun.which("wg-quick", { PATH }) && !!Bun.which("wg", { PATH });
 const hasIptables = (): boolean => !!Bun.which("iptables", { PATH });
 /** Whether either tunnel is set to run: what stands on the program */
+/** The port devices from afar come in on, while the server is on */
+export const listeningPort = (): number | null => (saved.server.enabled ? saved.server.port : null);
 export const inUse = (): boolean => saved.server.enabled || saved.client.enabled;
 
 const networks = (): string[] => homeNetworks(homeLinks()).filter((net) => !saved.server.subnet || !net.startsWith(saved.server.subnet + "."));

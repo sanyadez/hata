@@ -29,7 +29,7 @@ import { addShare, changeShare, installSamba, listShares, refreshShares, removeS
 import { checkDisks, diskHealth, installTool, listDisks, startDisks, startSelfTest } from "./disks";
 import { fills, measureFills, startFills } from "./fills";
 import { checkImages, imagesStatus, startImages } from "./images";
-import { afterPackage, giveBack, internetTrouble, startNetwork, setCheck, setRole, startHotspot, stopHotspot, wifiQrText, changeNic, confirmChange, handOver, NETWORK_PACKAGES, networkReport, NetworkError, revertChange, wifiConnect, wifiForget, wifiNetworks } from "./network";
+import { afterPackage, exposedNics, giveBack, internetTrouble, setSide, startNetwork, setCheck, setRole, startHotspot, stopHotspot, wifiQrText, changeNic, confirmChange, handOver, NETWORK_PACKAGES, networkReport, NetworkError, revertChange, wifiConnect, wifiForget, wifiNetworks } from "./network";
 import { DOCKER_INSTALL_COMMAND, installDocker, startDocker } from "./dockerinstall";
 import { installOne, removeOne, toolsReport } from "./tools";
 import { ArrayError, arrayReport, arrayTrouble, bringBack, rebuild as rebuildParity, repair as repairArray, scrub as scrubArray, setUp as setUpArray, startSnapraid, stop as stopArray, sync as syncArray, turnOff as turnOffArray } from "./snapraid";
@@ -755,7 +755,7 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
       site: { domain: siteDomain(), mode: settings.https.mode, local: localDomain() },
       // whether the assistant can be asked: the pages offer it next to what is wrong
       assistant: admin && assistantReady(assistantConfig()),
-      attention: admin ? attention({ system, docker, apps, activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), array: arrayTrouble(), unused: unusedDisks(), filling: fillingUp() }) : [],
+      attention: admin ? attention({ system, docker, apps, activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), exposed: exposedNics(), array: arrayTrouble(), unused: unusedDisks(), filling: fillingUp() }) : [],
       // who signed in from where, and what was installed by whom, is the administrators' business
       activity: admin ? recent(8) : [],
       // containers and compose projects on this machine that are not apps here yet
@@ -887,6 +887,14 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
         const spot = (await networkReport()).nics.find((n) => n.name === hotspot[1])?.wifi?.hotspot;
         if (!spot) return fail(404, "network.noNic");
         return json({ qr: qrMatrix(wifiQrText(spot.ssid, spot.password)).map((row) => row.map((dark) => (dark ? "1" : "0")).join("")) });
+      }
+      const side = /^\/api\/network\/([A-Za-z0-9_.-]{1,15})\/side$/.exec(path);
+      if (side && method === "PUT") {
+        // the address the packets come from, a proxy's included: that is what the rules would stop
+        await setSide(side[1]!, (await body(req)).side, server.requestIP(req)?.address ?? "", user.name);
+        // the server stops announcing itself there, and the network folders follow
+        refreshShares();
+        return json(await networkReport());
       }
       const role = /^\/api\/network\/([A-Za-z0-9_.-]{1,15})\/role$/.exec(path);
       if (role && method === "PUT") {
@@ -1786,7 +1794,7 @@ export async function serve(): Promise<void> {
   void refreshHttps();
   refreshLocalNames();
   startNotifications({
-    attention: async () => attention({ system: systemStatus(), docker: await dockerInfo(), apps: await listApps("en"), activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), array: arrayTrouble(), unused: unusedDisks(), filling: fillingUp() }),
+    attention: async () => attention({ system: systemStatus(), docker: await dockerInfo(), apps: await listApps("en"), activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), exposed: exposedNics(), array: arrayTrouble(), unused: unusedDisks(), filling: fillingUp() }),
     baseUrl: publicUrl,
     isAdmin: (id) => findUser(id)?.role === "admin",
   });

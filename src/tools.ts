@@ -56,6 +56,7 @@ const SPECS: Spec[] = [
   { id: "network-manager", name: "NetworkManager", package: "network-manager", bin: "nmcli", version: ["nmcli", "--version"], page: "#/settings/network" },
   { id: "wpasupplicant", name: "wpa_supplicant", package: "wpasupplicant", bin: "wpa_supplicant", version: ["wpa_supplicant", "-v"], page: "#/settings/network" },
   { id: "dnsmasq-base", name: "dnsmasq", package: "dnsmasq-base", bin: "dnsmasq", version: ["dnsmasq", "--version"], page: "#/settings/network" },
+  { id: "iptables", name: "iptables", package: "iptables", bin: "iptables", version: ["iptables", "--version"], page: "#/settings/network" },
   { id: "wireguard-tools", name: "WireGuard tools", package: "wireguard-tools", bin: "wg-quick", version: ["wg", "--version"], page: "#/settings/remote" },
   { id: "tailscale", name: "Tailscale", package: "tailscale", bin: "tailscale", version: ["tailscale", "version"], page: "#/settings/remote" },
   { id: "openssh-client", name: "OpenSSH client", package: "openssh-client", bin: "sftp", version: ["ssh", "-V"], page: "#/backups", base: true },
@@ -141,6 +142,9 @@ function holdsOf(id: string, nics: Nic[], remote: boolean): string {
   if (id === "network-manager" && nics.some((nic) => nic.manager === "nm" && nic.addresses.length > 0)) return "network";
   if (id === "wpasupplicant" && nics.some((nic) => nic.wifi && (nic.wifi.ssid || nic.wifi.hotspot))) return "wifi";
   if (id === "dnsmasq-base" && nics.some((nic) => nic.shares !== null || nic.wifi?.hotspot)) return "hotspot";
+  if (id === "iptables" && settings.network.outside.length > 0) return "outside";
+  // Docker's packages depend on it: the package manager would take Docker away with it
+  if (id === "iptables" && has("docker")) return "docker";
   if (id === "ntfs-3g" && /\sfuseblk\s/.test(readText("/proc/mounts"))) return "ntfs";
   return "";
 }

@@ -1407,7 +1407,7 @@ function dragEnd(drop) {
   drag.kind.drop(drag, target);
 }
 
-const ATTENTION_ICONS = { update: "up", docker: "box", restarting: "refresh", partial: "alert", disk: "disk", smart: "disk", memory: "memory", temperature: "temp", internet: "network", array: "disk" };
+const ATTENTION_ICONS = { update: "up", docker: "box", restarting: "refresh", partial: "alert", disk: "disk", smart: "disk", memory: "memory", temperature: "temp", internet: "network", network: "network", array: "disk" };
 
 function attentionItem(item) {
   const detail = { ...item.detail, free: item.detail.free == null ? "" : bytes(item.detail.free), trash: item.detail.trash == null ? "" : bytes(item.detail.trash), size: item.detail.size == null ? "" : bytes(item.detail.size) };
@@ -1429,7 +1429,7 @@ function attentionItem(item) {
     item.code === "update" && h("a", { class: "btn small", href: "#/settings/about" }, t("common.open")),
     item.code === "disk.trash" && h("a", { class: "btn small", href: "#/trash" }, t("trash.title")),
     (item.code.startsWith("smart.") || item.code === "disk.filling") && h("a", { class: "btn small", href: "#/settings/storage" }, t("common.open")),
-    item.code.startsWith("internet.") && h("a", { class: "btn small", href: "#/settings/network" }, t("common.open")),
+    (item.code.startsWith("internet.") || item.code === "network.exposed") && h("a", { class: "btn small", href: "#/settings/network" }, t("common.open")),
     item.code.startsWith("array.") && h("a", { class: "btn small", href: "#/settings/storage" }, t("common.open")),
     item.app && h("a", { class: "btn small", href: `#/apps/${item.app}${item.code === "restarting" || item.code === "partial" ? "/logs" : ""}` }, t(item.code === "restarting" || item.code === "partial" ? "app.logs" : "common.open")),
   );
@@ -4875,6 +4875,61 @@ function handOverDialog(nic) {
   );
 }
 
+/** Marks an interface as the side the internet comes in on: what stops answering there, and the firewall it takes */
+function outsideDialog(nic) {
+  const error = h("p", { class: "error", role: "alert" });
+  const needs = state.network.firewall;
+  const go = button(t("outside.go"), {
+    class: "primary",
+    disabled: !!needs,
+    onclick: async (e) => {
+      e.currentTarget.disabled = true;
+      error.textContent = "";
+      try {
+        state.network = await api("PUT", `/api/network/${nic.name}/side`, { side: "outside" });
+        dialog.close();
+        renderSettings();
+      } catch (err) {
+        error.textContent = errorText(err);
+        e.target.closest("button").disabled = false;
+      }
+    },
+  });
+  const dialog = openDialog(
+    "",
+    h("header", null, h("h2", { class: "grow" }, t("outside.title", { nic: nic.name })), closeX(() => dialog)),
+    h("p", null, t("outside.lead")),
+    h("ul", { class: "muted small" }, ["pages", "folders", "announce", "remote"].map((key) => h("li", null, t("outside.what." + key)))),
+    h("p", { class: "muted small" }, t("outside.still")),
+    needs &&
+      h(
+        "div",
+        { class: "banner stack" },
+        h("strong", null, t("outside.needs.what")),
+        h("p", { class: "muted small" }, t("outside.needs.why")),
+        needs.install ? h("p", { class: "cmd" }, icon("terminal"), needs.install) : h("p", { class: "muted small" }, t("mounting.needs.byHand", { package: needs.package })),
+        needs.install &&
+          button(t("mounting.needs.install", { package: needs.package }), {
+            class: "small",
+            onclick: async (e) => {
+              e.currentTarget.disabled = true;
+              error.textContent = "";
+              try {
+                state.network = await api("POST", "/api/network/package", { package: needs.package });
+                dialog.close();
+                outsideDialog(nic);
+              } catch (err) {
+                error.textContent = errorText(err);
+                e.target.closest("button").disabled = false;
+              }
+            },
+          }),
+      ),
+    error,
+    h("footer", null, closeButton(() => dialog, t("common.cancel")), go),
+  );
+}
+
 /** Gives an interface handed over to NetworkManager back to the service that had it */
 function handBackDialog(nic) {
   const error = h("p", { class: "error", role: "alert" });
@@ -5138,7 +5193,7 @@ function networkSection() {
       h(
         "div",
         { class: "section-head" },
-        h("h2", null, h("span", { class: "with-icon" }, icon("network"), nic.kind === "modem" ? nic.product || t("network.modem") : nic.name), " ", nic.kind === "modem" && h("span", { class: "muted small mono" }, nic.name + " "), h("span", { class: "state " + (nic.up ? "running" : "stopped") }, t(nic.up ? "network.up" : "network.down")), nic.online === false && h("span", { class: "state restarting" }, t("network.offline")), nic.online === true && h("span", { class: "state running" }, t("network.online"))),
+        h("h2", null, h("span", { class: "with-icon" }, icon("network"), nic.kind === "modem" ? nic.product || t("network.modem") : nic.name), " ", nic.kind === "modem" && h("span", { class: "muted small mono" }, nic.name + " "), h("span", { class: "state " + (nic.up ? "running" : "stopped") }, t(nic.up ? "network.up" : "network.down")), nic.outside && h("span", { class: "state" }, t("outside.chip")), nic.online === false && h("span", { class: "state restarting" }, t("network.offline")), nic.online === true && h("span", { class: "state running" }, t("network.online"))),
         h(
           "div",
           { class: "actions" },
@@ -5170,6 +5225,8 @@ function networkSection() {
       !nic.wifi?.hotspot && (nic.addresses6.length > 0 || nic.v6.method === "off") && row("IPv6", nic.v6.method === "off" ? t("network.v6.off") : nic.addresses6.join(", ") + (nic.v6.method ? ` · ${t(nic.v6.method === "manual" ? "network.fixed" : "network.byRouter")}` : ""), nic.v6.method !== "off"),
       row(t("network.mac"), nic.mac + (nic.speed ? ` · ${nic.speed >= 1000 ? nic.speed / 1000 + " Gbit/s" : nic.speed + " Mbit/s"}` : "")),
       row(t("network.manager"), t("network.by." + (nic.manager || "none")), false),
+      h("div", { class: "kv" }, h("span", { class: "muted" }, t("outside.side")), sideSelect(nic)),
+      nic.public && !nic.outside && h("p", { class: "banner small" }, t("outside.exposed", { address: nic.public })),
       nic.kind === "modem" && h("p", { class: "muted small" }, t("network.modemHint", { gateway: nic.gateway || "192.168.0.1" })),
       nic.manager !== "nm" && h("p", { class: "muted small" }, t(nic.manager === "networkd" || nic.manager === "ifupdown" ? (data.tool === "ok" ? "network.handoverHint" : "network.needsTool") : "network.readOnly")),
     );
@@ -5191,6 +5248,30 @@ function networkSection() {
         },
       },
       ["main", "backup", "off"].map((role) => h("option", { value: role, selected: (nic.internet === "none" ? "off" : nic.internet) === role }, t("network.role." + role))),
+    );
+    return select;
+  };
+  const sideSelect = (nic) => {
+    const select = h(
+      "select",
+      {
+        "aria-label": t("outside.side"),
+        onchange: async () => {
+          error.textContent = "";
+          if (select.value === "outside") {
+            select.value = "home";
+            return outsideDialog(nic);
+          }
+          select.disabled = true;
+          try {
+            state.network = await api("PUT", `/api/network/${nic.name}/side`, { side: "home" });
+          } catch (err) {
+            error.textContent = errorText(err);
+          }
+          renderSettings();
+        },
+      },
+      ["home", "outside"].map((side) => h("option", { value: side, selected: (nic.outside ? "outside" : "home") === side }, t("outside.side." + side))),
     );
     return select;
   };

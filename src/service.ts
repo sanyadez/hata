@@ -3,6 +3,7 @@
  * one unit file — nothing else is put on the system.
  */
 import { chmodSync, copyFileSync, existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { OUTSIDE_CHAIN, outsideDown } from "./outside";
 import { isOurs, SMB_CONF, SMB_CONF_BEFORE, USER_MAP } from "./smbconf";
 import { serviceStateDir } from "./statedir";
 import { COMPILED } from "./version";
@@ -120,6 +121,18 @@ function unprotect(): void {
   } catch {}
 }
 
+/** The internet side stops being closed: the rules were Hata's, kept in the kernel only. Says whether there were any */
+function unclose(): boolean {
+  try {
+    const had = Bun.spawnSync({ cmd: ["iptables", "-w", "-S", OUTSIDE_CHAIN], stdout: "ignore", stderr: "ignore" }).exitCode === 0;
+    for (const line of outsideDown()) Bun.spawnSync({ cmd: ["sh", "-c", line], stdout: "ignore", stderr: "ignore" });
+    return had;
+  } catch {
+    // no iptables: nothing was closed
+    return false;
+  }
+}
+
 /** Samba gets back the configuration it had before Hata; without one, it is left with nothing shared */
 function unshare(): void {
   try {
@@ -146,6 +159,7 @@ export async function uninstallService(): Promise<number> {
   rmSync(BIN, { force: true });
   unshare();
   unprotect();
+  if (unclose()) console.log("The rules that closed the internet side are gone with Hata: the server answers there again.");
   console.log(`Hata is removed. Apps keep running; their compose files and the state stay in ${serviceStateDir()}, the users and keys in /etc/hata.`);
   return 0;
 }

@@ -18,7 +18,10 @@
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { record } from "./activity";
 import { bus } from "./bus";
+import { saveSettings, settings } from "./config";
+import { cleanOutside, inNetworkOf, isPublic, OUTSIDE_CHAIN, OUTSIDE_HOOKS, outsideDown, outsideRules } from "./outside";
 import { installCommand, PATH, run } from "./packages";
+import { listeningPort } from "./wireguard";
 
 const TRIAL_S = 90;
 /** Interfaces that are Docker's or a tunnel's, not the server's way to the network */
@@ -28,7 +31,9 @@ const PACKAGE = "network-manager";
 const WIFI_PACKAGE = "wpasupplicant";
 /** NetworkManager starts it to hand out addresses to whoever joins the access point */
 const SHARE_PACKAGE = "dnsmasq-base";
-export const NETWORK_PACKAGES = [PACKAGE, WIFI_PACKAGE, SHARE_PACKAGE];
+/** The rules that close the internet side are written with it */
+const FIREWALL_PACKAGE = "iptables";
+export const NETWORK_PACKAGES = [PACKAGE, WIFI_PACKAGE, SHARE_PACKAGE, FIREWALL_PACKAGE];
 const hotspotId = (name: string) => `hata-hotspot-${name}`;
 const PROFILES = "/etc/NetworkManager/system-connections";
 const NM = ["org.freedesktop.NetworkManager", "/org/freedesktop/NetworkManager", "org.freedesktop.NetworkManager"];
@@ -48,6 +53,10 @@ export interface Nic {
   internet: "main" | "backup" | "none";
   /** The server gives the internet out here: who has taken an address; null — it does not */
   shares: Hotspot["clients"] | null;
+  /** The person marked it as the side the internet comes in on: nothing of the server answers there */
+  outside: boolean;
+  /** An IPv4 address of it the whole internet can reach, without the prefix; "" — none */
+  public: string;
   /** With the check on: whether the internet is reached through this interface; null — not known */
   online: boolean | null;
   mac: string;
@@ -719,6 +728,7 @@ function nicLabel(name: string): string {
 }
 
 async function lookAtWays(): Promise<void> {
+  await lookAtSides();
   const before = JSON.stringify(troubles);
   if (!existsSync(CHECK_FILE) || !(await nmRunning())) troubles = [];
   else {
@@ -728,10 +738,94 @@ async function lookAtWays(): Promise<void> {
   if (JSON.stringify(troubles) !== before) bus.publish("network");
 }
 
-/** Keeps an eye on the ways to the internet while the check is on, for the "needs attention" list */
+/** Keeps an eye on the ways to the internet while the check is on, for the "needs attention" list, and keeps the internet side closed */
 export function startNetwork(): void {
+  void closeOutside().catch(() => {});
   setTimeout(() => void lookAtWays().catch(() => {}), 20_000);
-  setInterval(() => void lookAtWays().catch(() => {}), 60_000);
+  setInterval(() => {
+    void lookAtWays().catch(() => {});
+    // Docker makes its chain anew when it starts, and the WireGuard port may have changed
+    void closeOutside().catch(() => {});
+  }, 60_000);
+}
+
+// --- The internet side ------------------------------------------------------------------------------
+
+const hasFirewall = (): boolean => !!Bun.which("iptables", { PATH }) && !!Bun.which("ip6tables", { PATH });
+/** The rules last written, so that a look every minute only checks the jumps */
+let written = "";
+
+/**
+ * Writes Hata's chain for the interfaces marked as the internet side and jumps to it from where traffic
+ * comes in; with none marked, takes it all away. The rules live in the kernel only, so this runs at
+ * every start; a jump somebody else removed (Docker re-making `DOCKER-USER`) is put back.
+ */
+export async function closeOutside(): Promise<void> {
+  const names = settings.network.outside;
+  if (!hasFirewall()) return;
+  if (!names.length) {
+    if (written !== "none") for (const line of outsideDown()) await run(["sh", "-c", line], 10_000);
+    written = "none";
+    return;
+  }
+  const open = { wireguard: listeningPort() };
+  const wanted = JSON.stringify([names, open]);
+  for (const [tool, family] of [["iptables", "4"], ["ip6tables", "6"]] as const) {
+    if (wanted !== written) {
+      await run([tool, "-w", "-N", OUTSIDE_CHAIN]);
+      await run([tool, "-w", "-F", OUTSIDE_CHAIN]);
+      for (const rule of outsideRules(names, open, family)) {
+        const done = await run([tool, "-w", ...rule]);
+        if (done.code !== 0) throw new NetworkError("network.failed", { message: (done.err || done.out).trim() });
+      }
+    }
+    for (const hook of OUTSIDE_HOOKS) {
+      // DOCKER-USER is there only once Docker has run
+      if ((await run([tool, "-w", "-S", hook])).code !== 0) continue;
+      if ((await run([tool, "-w", "-C", hook, "-j", OUTSIDE_CHAIN])).code !== 0) await run([tool, "-w", "-I", hook, "1", "-j", OUTSIDE_CHAIN]);
+    }
+  }
+  written = wanted;
+}
+
+/**
+ * Marks an interface as the internet side, or as the home network again. Refused for the interface the
+ * person is on right now — the page would go dark with nobody to undo it; `peer` is the address the
+ * request came from (a proxy's, when there is one: that is the one the rules would stop).
+ */
+export async function setSide(name: string, side: unknown, peer: string, user: string): Promise<void> {
+  if (side !== "outside" && side !== "home") throw new NetworkError("network.badSide");
+  const nic = await findNic(name);
+  const outside = side === "outside";
+  if (outside) {
+    if (!hasFirewall()) throw new NetworkError("network.needsPackage", { package: FIREWALL_PACKAGE, install: installCommand(FIREWALL_PACKAGE) });
+    if (inNetworkOf(peer.replace(/^::ffff:/, ""), [...nic.addresses, ...nic.addresses6])) throw new NetworkError("network.outsideHere");
+  }
+  const before = settings.network.outside;
+  settings.network.outside = cleanOutside(outside ? [...before, name] : before.filter((n) => n !== name));
+  try {
+    await closeOutside();
+  } catch (e) {
+    settings.network.outside = before;
+    await closeOutside().catch(() => {});
+    throw e;
+  }
+  saveSettings();
+  record(outside ? "network.side.outside" : "network.side.home", { user, detail: name });
+  bus.publish("network");
+}
+
+let exposed: { nic: string; address: string }[] = [];
+/** Interfaces with an address the internet reaches that are not marked as the internet side */
+export const exposedNics = (): { nic: string; address: string }[] => exposed;
+
+async function lookAtSides(): Promise<void> {
+  const before = JSON.stringify(exposed);
+  exposed = parseLinks((await run(["ip", "-j", "addr"])).out, "[]").flatMap((link) => {
+    const address = link.addresses.find(isPublic);
+    return address && !settings.network.outside.includes(link.name) ? [{ nic: link.name, address: address.split("/")[0]! }] : [];
+  });
+  if (JSON.stringify(exposed) !== before) bus.publish("network");
 }
 
 export interface NetworkReport {
@@ -745,6 +839,8 @@ export interface NetworkReport {
   trial: number;
   /** The channels offered for an access point, by band */
   channels: typeof CHANNELS;
+  /** iptables, which closes the internet side, is missing: what to install */
+  firewall: { package: string; install: string } | null;
 }
 
 export async function networkReport(): Promise<NetworkReport> {
@@ -801,6 +897,8 @@ export async function networkReport(): Promise<NetworkReport> {
       // a USB interface hangs under its device, where the names are
       product: usb ? [read(`${device}/../manufacturer`), read(`${device}/../product`)].filter(Boolean).join(" ") : "",
       dns: link.addresses.length ? await dnsOf(link.name, byNm) : [],
+      outside: settings.network.outside.includes(link.name),
+      public: link.addresses.find(isPublic)?.split("/")[0] ?? "",
       online: byNm && link.internet !== "none" ? (reached.get(link.name) ?? null) : null,
       // NetworkManager keeps this file for an interface only while it shares the internet there
       shares: byNm && !isWifi && existsSync(`/run/nm-dnsmasq-${link.name}.pid`) ? joined(parseLeases(read(`/var/lib/NetworkManager/dnsmasq-${link.name}.leases`)), link.addresses[0]) : null,
@@ -817,6 +915,7 @@ export async function networkReport(): Promise<NetworkReport> {
     pending: pending && { nic: pending.nic, kind: pending.kind, until: pending.until, token: pending.token, address: pending.address },
     trial: TRIAL_S,
     channels: CHANNELS,
+    firewall: hasFirewall() ? null : { package: FIREWALL_PACKAGE, install: installCommand(FIREWALL_PACKAGE) },
   };
 }
 

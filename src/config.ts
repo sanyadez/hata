@@ -6,6 +6,7 @@ import { chmodSync, cpSync, existsSync, mkdirSync, readFileSync, rmSync } from "
 import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { cleanLayout, type Layout } from "./dashboard";
+import { cleanOutside } from "./outside";
 import { cleanShares, type Share } from "./smbconf";
 import { changeAppearance, cleanAppearance, DEFAULT_APPEARANCE, type Appearance } from "./wallpapers";
 import { isPlainObject, readJsonFile, writeJsonAtomic } from "./fsutil";
@@ -90,6 +91,8 @@ export interface Settings {
   /** Disks: whether a USB disk that is plugged in is mounted by itself */
   /** `ignored` — disks nothing uses that the person said not to mention again, by serial number */
   storage: { automount: boolean; ignored: string[] };
+  /** `outside` — the interfaces the internet comes in on: nothing of the server answers there (`outside.ts`) */
+  network: { outside: string[] };
   /** Protection from a disk failure: which disk holds parity and which are protected (`snapraid.ts`) */
   snapraid: { parity: string; data: { name: string; path: string }[]; appData: boolean; time: string; scrub: boolean; deleteLimit: number };
   /** Folders put on the dashboard from the file manager, absolute paths */
@@ -172,6 +175,7 @@ const DEFAULTS: Settings = {
   https: { mode: "off", domain: "", email: "" },
   local: { enabled: true, name: "hata.local" },
   storage: { automount: false, ignored: [] },
+  network: { outside: [] },
   snapraid: { parity: "", data: [], appData: false, time: "05:00", scrub: true, deleteLimit: 50 },
   folders: [],
   shares: [],
@@ -208,6 +212,7 @@ export const settings: Settings = {
   https: { ...DEFAULTS.https, ...(isPlainObject(saved.https) ? saved.https : {}) },
   local: { ...DEFAULTS.local, ...(isPlainObject(saved.local) ? saved.local : {}) },
   welcome: saved.welcome === true,
+  network: { outside: cleanOutside(isPlainObject(saved.network) ? saved.network.outside : []) },
   storage: { automount: isPlainObject(saved.storage) && saved.storage.automount === true, ignored: isPlainObject(saved.storage) && Array.isArray(saved.storage.ignored) ? saved.storage.ignored.filter((id): id is string => typeof id === "string") : [] },
 };
 settings.local.name = localName(settings.local.name) ?? DEFAULTS.local.name;
