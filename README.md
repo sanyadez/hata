@@ -40,7 +40,7 @@ who may open what, HTTPS, notifications when something breaks. The full list is 
 **What is it an alternative to?**
 To the home server programs of that kind: Umbrel, Runtipi, Cosmos, CasaOS. Unlike some of them it is
 not an operating system: it is one program installed on the Linux you already have, and removed from it
-just as easily.
+just as easily. What each of them has: [How Hata compares](COMPARISON.md).
 
 **Is it a web UI for CasaOS?**
 No. Hata is a separate program and does not need CasaOS. For now it reads app stores in the CasaOS
