@@ -243,8 +243,9 @@ Early development. What works today:
   the machine, the connection is encrypted end to end even over plain HTTP), and the machine shows its
   state, its Docker containers grouped by compose project (start, stop, restart, logs, a shell inside)
   and a terminal of its own. Its files are in Hata's Files next to the server's: look, edit, upload,
-  download, and copy or move folders between the server and the machines. Hata keeps the clients at
-  its own version;
+  download, and copy or move folders between the server and the machines. Apps from the store are
+  installed onto a machine as onto the server, their tiles are on the home page, and an app moves from
+  the server to a machine and back, with its data. Hata keeps the clients at its own version;
 - HTTPS, your choice of three: none (address and ports, for a home network); behind your own proxy (nginx,
   Caddy, Traefik) with a check that the proxy is set up right; or by Hata itself with certificates from
   Let's Encrypt. With a domain, every app has its own address, `<app>.<domain>`;

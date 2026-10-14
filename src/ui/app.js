@@ -1810,6 +1810,7 @@ function appMoreMenu(app) {
     h("header", null, appIcon(app), h("div", null, h("h2", null, app.title), stateChip(app))),
     assistantReady() && h("button", { type: "button", class: "menu-item", onclick: () => (dialog.close(), openAssistant({ draft: t("assistant.aboutApp", { title: app.title, app: app.name }) })) }, icon("chat"), t("assistant.ask")),
     item(t("app.update"), "up", () => startAction(app, "update")),
+    item(t("machines.move"), "server", () => moveAppDialog("", app)),
     item(t("app.remove"), "trash", () => removeDialog(app), "danger"),
   );
 }
@@ -2429,6 +2430,7 @@ function paintMachineApps() {
           small(t("app.update"), "up", act(app, "update"), busy),
           small(t("app.logs"), "logs", () => machineAppLogsDialog(m, app)),
           small(t("app.tab.compose"), "code", () => machineComposeDialog(m, app), busy),
+          small(t("machines.move"), "server", () => moveAppDialog(m.id, app), busy),
           small(t("app.remove"), "trash", () => removeMachineAppDialog(m, app), busy),
         ),
       ),
@@ -2523,6 +2525,50 @@ function removeMachineAppDialog(m, app) {
         },
       }, "trash"),
     ),
+  );
+}
+
+/** An app moved to another machine: `from` — the machine it is on, "" for this server */
+async function moveAppDialog(from, app) {
+  if (!machinesUi.list) machinesUi.list = await api("GET", "/api/machines").catch(() => null);
+  let check;
+  try {
+    check = await api("GET", `/api/moveapp/check?from=${from}&name=${app.name}`);
+  } catch (e) {
+    return toast(errorText(e), "error");
+  }
+  const places = [...(from ? [{ id: "", name: state.overview?.system.hostname ?? "Hata" }] : []), ...(machinesUi.list?.machines ?? []).filter((m) => m.id !== from && m.online && m.info?.docker?.available)];
+  const to = h("select", null, places.map((p) => h("option", { value: p.id }, p.name)));
+  const drop = h("input", { type: "checkbox" });
+  const error = h("p", { class: "error", role: "alert" });
+  let dialog;
+  const go_ = button(t("moveapp.go"), {
+    class: "primary",
+    disabled: !places.length,
+    onclick: async (e) => {
+      e.currentTarget.disabled = true;
+      error.textContent = "";
+      try {
+        const res = await api("POST", "/api/moveapp", { from, to: to.value, name: app.name, dropOld: drop.checked });
+        dialog.close();
+        const target = to.value;
+        jobDialog(res.job, "moveapp", app.title, () => go(target ? `#/machines/${target}/apps` : `#/apps/${app.name}`));
+      } catch (err) {
+        error.textContent = errorText(err);
+        e.currentTarget.disabled = false;
+      }
+    },
+  }, "server");
+  dialog = openDialog(
+    "",
+    h("header", null, h("h2", { class: "grow" }, t("moveapp.title", { title: app.title })), closeX(() => dialog)),
+    h("p", { class: "muted" }, t("moveapp.lead", { path: check.own })),
+    places.length ? h("div", { class: "kv" }, h("span", { class: "muted" }, t("moveapp.to")), to) : h("p", { class: "banner small" }, t("moveapp.none")),
+    check.outside.length > 0 && h("div", { class: "banner small stack-s" }, h("span", null, t("moveapp.outside")), check.outside.map((p) => h("span", { class: "mono" }, p))),
+    check.volumes.length > 0 && h("div", { class: "banner small stack-s" }, h("span", null, t("moveapp.volumes")), h("span", { class: "mono" }, check.volumes.join(", "))),
+    h("label", { class: "check" }, drop, h("span", null, t("moveapp.dropOld"))),
+    error,
+    h("footer", null, closeButton(() => dialog, t("common.cancel")), go_),
   );
 }
 

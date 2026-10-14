@@ -511,10 +511,10 @@ export function taken(args: { dir?: unknown; names?: unknown }): { taken: string
   return { taken: names.filter((name) => lstatOrNull(join(dir, name)) !== null) };
 }
 
-/** The tar stream of entries of one folder */
-export async function pack(args: { paths?: unknown }, channel: Channel): Promise<void> {
+/** The tar stream of entries of one folder; `owners` — with owners by number, for an app's data */
+export async function pack(args: { paths?: unknown; owners?: unknown }, channel: Channel): Promise<void> {
   const { dir, names } = packPlan(args.paths);
-  const proc = Bun.spawn(["tar", "-cf", "-", "-C", dir, "--", ...names], { stdout: "pipe", stderr: "pipe" });
+  const proc = Bun.spawn(["tar", "-cf", "-", ...(args.owners === true ? ["--numeric-owner"] : []), "-C", dir, "--", ...names], { stdout: "pipe", stderr: "pipe" });
   channel.signal.addEventListener("abort", () => proc.kill());
   const errors = new Response(proc.stderr).text();
   for await (const chunk of proc.stdout) await channel.send(chunk).catch(() => proc.kill());
@@ -526,11 +526,14 @@ export async function pack(args: { paths?: unknown }, channel: Channel): Promise
  * A tar stream unpacked into a folder: the files take the owner of that folder, as everything made in
  * the file manager does. `names` are what the stream holds at its top; none of them may be there yet.
  */
-export async function unpack(args: { to?: unknown; names?: unknown }, channel: Channel): Promise<void> {
+export async function unpack(args: { to?: unknown; names?: unknown; owners?: unknown }, channel: Channel): Promise<void> {
   const dir = locate(args.to);
+  const owners = args.owners === true;
   const names = Array.isArray(args.names) ? args.names.map(validName) : [];
+  // an app's data comes into its own folder, made for it here
+  if (owners) mkdirSync(dir, { recursive: true });
   if (taken({ dir, names }).taken.length) fail("files.exists", { name: taken({ dir, names }).taken[0]! });
-  const proc = Bun.spawn(["tar", "-xf", "-", "-C", dir, "--no-same-owner"], { stdin: "pipe", stdout: "ignore", stderr: "pipe" });
+  const proc = Bun.spawn(["tar", "-xf", "-", "-C", dir, ...(owners ? ["--same-owner", "--numeric-owner", "-p"] : ["--no-same-owner"])], { stdin: "pipe", stdout: "ignore", stderr: "pipe" });
   const errors = new Response(proc.stderr).text();
   try {
     for (let chunk = await channel.read(); chunk; chunk = await channel.read()) {
@@ -546,8 +549,16 @@ export async function unpack(args: { to?: unknown; names?: unknown }, channel: C
     if (/No space left/i.test(said)) fail("files.noSpace");
     fail("files.failed", { code: said.split("\n").pop() || `tar exited with ${code}` });
   }
-  if (process.getuid?.() === 0) {
+  if (process.getuid?.() === 0 && !owners) {
     const owner = statSync(dir);
     for (const name of names) Bun.spawnSync(["chown", "-R", "-h", `${owner.uid}:${owner.gid}`, "--", join(dir, name)]);
   }
+}
+
+/** Removes an app's data folder that was moved away: only a folder in `<root>/AppData` */
+export async function dropData(args: { path?: unknown; root?: unknown }): Promise<void> {
+  const path = locate(args.path);
+  const appData = join(resolve(String(args.root ?? "/DATA")), "AppData");
+  if (!path.startsWith(appData + "/") || path.slice(appData.length + 1).includes("/")) fail("files.protected");
+  await rm(path, { recursive: true, force: true });
 }

@@ -2470,5 +2470,17 @@
   "machines.removeAppData": "Delete its data too: {path} and its Docker volumes",
   "error.machine.noDocker": "{name} has no Docker: install it there first.",
   "error.machine.composeFailed": "docker compose failed: {message}",
-  "store.portsOn": "on {name}"
+  "store.portsOn": "on {name}",
+  "job.moveapp": "Moving to another machine",
+  "activity.app.moveapp.done": "{app} moved: {target}",
+  "activity.app.moveapp.failed": "Moving {app} to another machine failed",
+  "moveapp.title": "Move {title} to another machine",
+  "moveapp.lead": "The app is stopped, its data folder {path} is copied to the other machine with its owners, and the app is started there. If anything fails, it is started again here.",
+  "moveapp.to": "Move to",
+  "moveapp.dropOld": "Delete the data here once the app runs there",
+  "moveapp.outside": "Folders outside the app's own are not copied — the app will look for them at the same place on the other machine:",
+  "moveapp.volumes": "Docker volumes are not moved; the app starts there with them empty:",
+  "moveapp.go": "Move",
+  "moveapp.none": "There is no other machine with Docker connected now.",
+  "machines.move": "Move to another machine"
 }

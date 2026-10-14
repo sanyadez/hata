@@ -369,6 +369,7 @@ function handlersFor(state: LinkState): Record<string, Handler> {
     "fs.taken": (args) => files.taken(args),
     "fs.pack": (args, channel) => files.pack(args, channel),
     "fs.unpack": (args, channel) => files.unpack(args, channel),
+    "fs.dropData": (args) => files.dropData(args),
     ping: () => "pong",
   };
 }

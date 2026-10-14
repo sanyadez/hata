@@ -49,7 +49,7 @@ function assertInstalled(name: string): void {
 
 // --- Jobs -------------------------------------------------------------------------------------------
 
-export type JobKind = "install" | "update" | "start" | "stop" | "restart" | "remove" | "apply" | "backup" | "restore" | "import" | "move" | "docker" | "tailscale" | "copyin" | "transfer" | "extract" | "format" | "fsck" | "wipe";
+export type JobKind = "install" | "update" | "start" | "stop" | "restart" | "remove" | "apply" | "backup" | "restore" | "import" | "move" | "docker" | "tailscale" | "copyin" | "transfer" | "moveapp" | "extract" | "format" | "fsck" | "wipe";
 
 export interface Job {
   id: string;
@@ -452,6 +452,59 @@ async function install(name: string, text: string, compose: Compose, log: Log, o
     rmSync(dir, { recursive: true, force: true });
     throw e;
   }
+}
+
+// --- An app arriving from another machine, or leaving for one (`moveapp.ts`) --------------------------
+
+/** The files of an app as they are: what moves with it */
+export function localAppFiles(name: string): { compose: string; env: string; hata: string | null } {
+  assertInstalled(name);
+  const read = (file: string) => (existsSync(join(appDir(name), file)) ? readFileSync(join(appDir(name), file), "utf8") : null);
+  return { compose: read("compose.yml") ?? "", env: read(".env") ?? "", hata: read("hata.yml") };
+}
+
+/** Which of these ports something here listens on already */
+export async function busyPorts(ports: { port: number; protocol: string }[]): Promise<number[]> {
+  const busy: number[] = [];
+  for (const { port, protocol } of ports) if (!(await portFree(port, protocol))) busy.push(port);
+  return busy;
+}
+
+/**
+ * Puts an app that came from elsewhere in place and starts it: its files as they were (the compose
+ * file already pointing at this data folder), `.env` with this server's own variables. A failure takes
+ * the app's folder away again; its data, copied before, is the caller's.
+ */
+export async function adoptApp(name: string, files: { compose: string; env: string; hata: string | null }, log: Log): Promise<void> {
+  assertName(name);
+  if (existsSync(appDir(name))) throw new AppError("app.exists", 409);
+  const dir = appDir(name);
+  mkdirSync(dir, { recursive: true });
+  try {
+    writeTextAtomic(composeFile(name), files.compose);
+    if (files.hata) writeTextAtomic(hataFile(name), files.hata);
+    writeTextAtomic(join(dir, ".env"), envText(name, files.env));
+    await dc(name, ["config", "--quiet"], log);
+    const compose = parseCompose(files.compose);
+    normalize(compose, settings.dataRoot);
+    createDataDirs(compose);
+    await dc(name, ["pull"], log);
+    await dc(name, ["up", "-d", "--remove-orphans"], log);
+  } catch (e) {
+    await runCompose(name, dir, ["down", "--remove-orphans"]).catch(() => {});
+    rmSync(dir, { recursive: true, force: true });
+    parsed.delete(name);
+    throw e;
+  }
+}
+
+/** The app has left for another machine: its folder goes, and what other modules keep about it */
+export function letGo(name: string): void {
+  assertInstalled(name);
+  rmSync(appDir(name), { recursive: true, force: true });
+  parsed.delete(name);
+  plans.delete(name);
+  for (const hook of removedHooks) hook(name);
 }
 
 /** An install without Docker would only fail half-way with words nobody can act on */

@@ -104,6 +104,7 @@ import { IMAGE_MIME, imageType, wallpaperSvg, WALLPAPERS } from "./wallpapers";
 import { containerCommand, MAX_BUFFERED_BYTES, shellCommand, TerminalError, TerminalManager, terminalEnv, WS_SLOW_CLIENT, type TerminalClient, type TerminalStart } from "./terminal";
 import { MuxError, type Channel } from "./mux";
 import { crossTransfer } from "./machinefiles";
+import { moveApp, moveCheck } from "./moveapp";
 import { applyMachineCompose, installComposeOnMachine, machineTiles, installOnMachine, machineAppAction, machineAppLogs, machineApps, machineCompose, removeMachineApp, storeAppFor } from "./machineapps";
 import { addStore, ARCH, catalogue, removeStore, scheduleStoreSync, StoreError, syncStore } from "./store";
 import { startSampler, systemStatus } from "./system";
@@ -1446,6 +1447,10 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
     const response = await files(req, url, server, user.name);
     if (response) return response;
   }
+
+  // an app moved to another machine, or back here
+  if (path === "/api/moveapp/check" && method === "GET") return json(await moveCheck({ from: url.searchParams.get("from") ?? "", name: url.searchParams.get("name") }));
+  if (path === "/api/moveapp" && method === "POST") return json({ job: (await moveApp(await body(req), user.name)).id }, 202);
 
   if (path === "/api/store" && method === "GET") return json(catalogue(language(url)));
 

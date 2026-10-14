@@ -2470,5 +2470,17 @@
   "machines.removeAppData": "Видалити й дані: {path} і томи Docker",
   "error.machine.noDocker": "На {name} немає Docker: спершу встановіть його там.",
   "error.machine.composeFailed": "docker compose не спрацював: {message}",
-  "store.portsOn": "на {name}"
+  "store.portsOn": "на {name}",
+  "job.moveapp": "Перенесення на іншу машину",
+  "activity.app.moveapp.done": "{app} перенесено: {target}",
+  "activity.app.moveapp.failed": "Не вдалося перенести {app} на іншу машину",
+  "moveapp.title": "Перенести {title} на іншу машину",
+  "moveapp.lead": "Застосунок буде зупинено, його теку даних {path} скопійовано на іншу машину зі збереженням власників, і там його буде запущено. Якщо щось не вдасться, він знову запуститься тут.",
+  "moveapp.to": "Куди",
+  "moveapp.dropOld": "Видалити дані тут, коли застосунок запрацює там",
+  "moveapp.outside": "Теки поза власною текою застосунку не копіюються — там застосунок шукатиме їх у тому ж місці:",
+  "moveapp.volumes": "Томи Docker не переносяться; там застосунок почне з порожніми:",
+  "moveapp.go": "Перенести",
+  "moveapp.none": "Зараз немає іншої машини з Docker на зв'язку.",
+  "machines.move": "Перенести на іншу машину"
 }
