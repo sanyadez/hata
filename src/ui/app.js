@@ -887,7 +887,10 @@ function tile(item) {
     external = !!url;
     sub = [h("i", { class: "dot " + st }), st === "running" && appAddress(app) ? appAddress(app) : t("status." + st)];
     badges = [app.protected && h("span", { class: "lock", title: t("access.protected") }, icon("lock")), (app.update || app.newer?.length > 0) && isAdmin() && h("span", { class: "lock", title: t(app.update ? "app.storeUpdate" : "app.newer") }, icon("up"))];
-    side = h("a", { class: "tile-open", href: `#/apps/${app.name}`, title: t("home.manage"), "aria-label": `${t("home.manage")}: ${title}` }, icon("sliders"));
+    // an administrator gets what can be done to the app right there; a member, the app's page
+    side = admin
+      ? h("button", { type: "button", class: "tile-open", title: t("home.tileActions"), "aria-label": `${t("home.tileActions")}: ${title}`, onclick: (e) => appTileMenu(app, e.currentTarget) }, icon("more"))
+      : h("a", { class: "tile-open", href: `#/apps/${app.name}`, title: t("home.manage"), "aria-label": `${t("home.manage")}: ${title}` }, icon("sliders"));
   } else if (item.type === "link") {
     href = item.url;
     external = true;
@@ -917,7 +920,14 @@ function tile(item) {
       : h("a", { class: "tile-main", href, draggable: false, ...(external ? { target: "_blank", rel: "noopener noreferrer" } : {}) }, content);
   if (!admin) return h("div", { class: `tile kind-${item.type} ${cls}`, "data-key": key }, main, side);
   // an administrator moves tiles by dragging them; a long press of a finger is the start of that, not a menu
-  return h("div", { class: `tile kind-${item.type} ${cls} movable`, "data-key": key, onpointerdown: (e) => dragStart(e, item), oncontextmenu: (e) => homeUi.drag?.active && e.preventDefault(), ondragstart: (e) => e.preventDefault() }, main, side);
+  return h("div", { class: `tile kind-${item.type} ${cls} movable`, "data-key": key, onpointerdown: (e) => dragStart(e, item), oncontextmenu: (e) => {
+        if (homeUi.drag?.active) return e.preventDefault();
+        // a right click on an app is the same menu as its button, where the pointer is
+        if (item.type === "app" && e.pointerType !== "touch") {
+          e.preventDefault();
+          appTileMenu(target, null, { x: e.clientX, y: e.clientY });
+        }
+      }, ondragstart: (e) => e.preventDefault() }, main, side);
 }
 
 // --- Changing the layout: every change is made on a copy, shown at once and sent to the server ----
@@ -1703,6 +1713,37 @@ async function startAction(app, action) {
   } catch (e) {
     toast(errorText(e), "error");
   }
+}
+
+/** What can be done to an app from its tile: open it, start or stop it, go to its settings, logs and the rest */
+function appTileMenu(app, anchor, at) {
+  let dialog;
+  const url = isUp(app) ? appUrl(app) : null;
+  const busy = !!app.job;
+  const item = (label, iconName, action, cls = "", off = false) => h("button", { type: "button", class: "menu-item " + cls, disabled: off, onclick: () => (dialog.close(), action()) }, icon(iconName), label);
+  const page = (label, iconName, tab) => h("a", { class: "menu-item", href: `#/apps/${app.name}${tab ? "/" + tab : ""}`, onclick: () => dialog.close() }, icon(iconName), label);
+  dialog = openDialog(
+    "menu dropdown",
+    h("header", null, appIcon(app), h("div", null, h("h2", { class: "clip" }, app.title), stateChip(app))),
+    url && h("a", { class: "menu-item", href: url, target: "_blank", rel: "noopener noreferrer", onclick: () => dialog.close() }, icon("external"), t("app.open")),
+    busy && item(t("status.busy"), "terminal", () => jobDialog(app.job.id, app.job.kind, app.title)),
+    isUp(app) ? item(t("app.stop"), "stop", () => startAction(app, "stop"), "", busy) : item(t("app.start"), "play", () => startAction(app, "start"), "", busy),
+    isUp(app) && item(t("app.restart"), "refresh", () => startAction(app, "restart"), "", busy),
+    app.update && item(t("app.storeUpdate"), "up", () => storeUpdateDialog(app), "", busy),
+    !app.update && app.newer?.length > 0 && item(t("app.update"), "up", () => startAction(app, "update"), "", busy),
+    page(t("app.tab.settings"), "sliders", "settings"),
+    page(t("app.logs"), "logs", "logs"),
+    page(t("app.tab.terminal"), "terminal", "terminal"),
+    page(t("app.tab.backups"), "archive", "backups"),
+    assistantReady() && item(t("assistant.ask"), "chat", () => openAssistant({ draft: t("assistant.aboutApp", { title: app.title, app: app.name }) })),
+    page(t("home.manage"), "grid", ""),
+    item(t("app.remove"), "trash", () => removeDialog(app), "danger", busy),
+  );
+  if (at) return placeAt(dialog, at);
+  // it hangs under the button it was opened from, by the button's right edge — or above it, when there is no room below
+  const box = anchor.getBoundingClientRect();
+  const below = box.bottom + 6 + dialog.offsetHeight <= document.documentElement.clientHeight - 8;
+  placeAt(dialog, { x: box.right - dialog.offsetWidth, y: below || box.top - 6 - dialog.offsetHeight < 8 ? box.bottom + 6 : box.top - 6 - dialog.offsetHeight });
 }
 
 function appMoreMenu(app) {
