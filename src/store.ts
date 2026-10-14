@@ -8,8 +8,9 @@
 import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { APP_NAME_RE, appMeta, parseCompose, type AppMeta, type Compose } from "./appform";
+import { record } from "./activity";
 import { bus } from "./bus";
-import { DATA_DIR, settings, type StoreSource } from "./config";
+import { DATA_DIR, saveSettings, settings, type StoreSource } from "./config";
 import { isPlainObject, readJsonFile, writeJsonAtomic, writeTextAtomic } from "./fsutil";
 
 const STORES_DIR = join(DATA_DIR, "stores");
@@ -50,6 +51,68 @@ const validStoreId = (id: string) => /^[a-z0-9][a-z0-9-]{0,31}$/.test(id);
 export function githubRepo(url: string): { owner: string; repo: string } | null {
   const m = /^https:\/\/github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?\/?$/.exec(url);
   return m ? { owner: m[1]!, repo: m[2]! } : null;
+}
+
+/**
+ * A store's address as people paste it, made the repository's: CasaOS takes the ZIP of a branch
+ * (`…/archive/refs/heads/main.zip`), and a page of the repository (`…/tree/main`) is copied as often.
+ * null — not a repository on GitHub.
+ */
+export function storeUrl(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const m = /^https?:\/\/(?:www\.)?github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?(?:\/(?:archive|tree|blob|releases)\/[^\s]*)?\/?$/.exec(value.trim());
+  return m ? `https://github.com/${m[1]}/${m[2]}` : null;
+}
+
+/** A short id for a new store, from its repository's name, not taken by another */
+export function storeId(url: string, taken: string[]): string {
+  const repo = githubRepo(url)?.repo ?? "store";
+  const base = repo.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 28) || "store";
+  let id = base;
+  for (let n = 2; taken.includes(id); n++) id = `${base}-${n}`;
+  return id;
+}
+
+export class StoreError extends Error {
+  constructor(
+    readonly code: string,
+    readonly detail: Record<string, string> = {},
+  ) {
+    super(code);
+  }
+}
+
+/** Adds a store by its address; one that has no app Hata can read is not kept */
+export async function addStore(value: unknown, user: string): Promise<SyncResult & { id: string }> {
+  const url = storeUrl(value);
+  if (!url) throw new StoreError("store.badUrl");
+  const same = settings.stores.find((s) => s.url.toLowerCase() === url.toLowerCase());
+  if (same) throw new StoreError("store.exists", { id: same.id });
+  const id = storeId(url, settings.stores.map((s) => s.id));
+  settings.stores = [...settings.stores, { id, url }];
+  const result = await syncStore(id);
+  if (!result.ok || result.apps === 0) {
+    settings.stores = settings.stores.filter((s) => s.id !== id);
+    stores.delete(id);
+    rmSync(storeDir(id), { recursive: true, force: true });
+    throw new StoreError(result.ok ? "store.noApps" : "store.syncFailed", { message: result.error ?? "" });
+  }
+  saveSettings();
+  record("store.added", { user, detail: url });
+  bus.publish("store");
+  return { ...result, id };
+}
+
+/** Takes a store away: its apps leave the catalogue; installed ones keep running, without its updates */
+export function removeStore(id: string, user: string): void {
+  const source = settings.stores.find((s) => s.id === id);
+  if (!source) throw new StoreError("store.noStore");
+  settings.stores = settings.stores.filter((s) => s.id !== id);
+  stores.delete(id);
+  if (validStoreId(id)) rmSync(storeDir(id), { recursive: true, force: true });
+  saveSettings();
+  record("store.removed", { user, detail: source.url });
+  bus.publish("store");
 }
 
 function readList(file: string, pick: (item: unknown) => string | undefined): string[] {

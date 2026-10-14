@@ -3792,6 +3792,60 @@ async function loadStore() {
   if (state.route.view === "store") renderStoreList();
 }
 
+/** A store added by its address: the repository is read first, and one with no app Hata can read is refused */
+function addStoreForm() {
+  const input = h("input", { type: "url", class: "mono grow", placeholder: "https://github.com/…", "aria-label": t("store.address"), spellcheck: false, required: true });
+  const error = h("p", { class: "error", role: "alert" });
+  const go = h("button", { class: "btn" }, icon("plus"), h("span", null, t("store.add")));
+  return h(
+    "form",
+    {
+      class: "stack-s add-store",
+      onsubmit: async (e) => {
+        e.preventDefault();
+        error.textContent = "";
+        go.disabled = true;
+        go.lastChild.textContent = t("store.adding");
+        try {
+          const res = await api("POST", "/api/stores", { url: input.value });
+          toast(t("store.added", { apps: res.apps }));
+          await loadStore();
+          renderSettings();
+        } catch (err) {
+          error.textContent = errorText(err);
+          go.disabled = false;
+          go.lastChild.textContent = t("store.add");
+        }
+      },
+    },
+    h("span", { class: "form-label" }, t("store.address")),
+    h("div", { class: "row-actions" }, input, go),
+    error,
+  );
+}
+
+function removeStoreDialog(store) {
+  const dialog = openDialog(
+    "confirm",
+    h("h2", null, t("store.removeTitle", { id: store.id })),
+    h("p", { class: "muted" }, t("store.removeText")),
+    h(
+      "footer",
+      null,
+      closeButton(() => dialog, t("common.cancel")),
+      button(t("store.remove"), {
+        class: "danger",
+        onclick: async () => {
+          dialog.close();
+          await api("DELETE", `/api/stores/${store.id}`).catch((e) => toast(errorText(e), "error"));
+          await loadStore();
+          renderSettings();
+        },
+      }),
+    ),
+  );
+}
+
 async function syncStores() {
   toast(t("store.syncing"));
   for (const store of state.store?.stores ?? state.settings?.stores ?? []) {
@@ -4786,7 +4840,14 @@ function settingsSection(section) {
         "section",
         { class: "card pad" },
         h("div", { class: "section-head" }, h("h2", null, t("settings.stores")), button(t("store.sync"), { onclick: syncStores }, "refresh")),
-        stores.map((store) => settingRow(store.id, store.url, h("span", { class: "muted small" }, t("settings.storeApps", { n: store.apps }) + (store.syncedAt ? " · " + ago(store.syncedAt) : "")))),
+        stores.map((store) =>
+          settingRow(
+            store.id,
+            store.url,
+            h("span", { class: "store-meta" }, h("span", { class: "muted small" }, t("settings.storeApps", { n: store.apps }) + (store.syncedAt ? " · " + ago(store.syncedAt) : "")), h("button", { type: "button", class: "icon-btn", title: t("store.remove"), "aria-label": `${t("store.remove")}: ${store.id}`, onclick: () => removeStoreDialog(store) }, icon("trash"))),
+          ),
+        ),
+        addStoreForm(),
         h("p", { class: "muted small" }, t("settings.storesHint")),
       ),
     ];

@@ -461,6 +461,7 @@ a.cat .with-icon { min-width: 0; }
 .disk-text { display: grid; gap: 4px; min-width: 0; flex: 1; }
 .disk-text .bar { margin: 4px 0 0; }
 /* the data folder and the disks above the folders of a picker */
+.store-meta { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
 .picker-quick { display: flex; flex-wrap: wrap; gap: 6px; }
 .chip-btn { display: inline-flex; align-items: center; gap: 6px; max-width: 220px; height: 30px; padding: 0 12px; border: 1px solid var(--border); border-radius: 15px; background: var(--surface-2); color: var(--text); font-size: 13px; cursor: pointer; }
 .chip-btn .ico { width: 15px; height: 15px; flex: none; }

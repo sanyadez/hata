@@ -100,7 +100,7 @@ import { connect as connectTailscale, disconnect as disconnectTailscale, install
 import { addDevice as addWireguardDevice, changeDevice as changeWireguardDevice, deviceFile as wireguardDeviceFile, forgetClient as forgetWireguardClient, removeDevice as removeWireguardDevice, report as wireguardReport, setClient as setWireguardClient, setServer as setWireguardServer } from "./wireguard";
 import { IMAGE_MIME, imageType, wallpaperSvg, WALLPAPERS } from "./wallpapers";
 import { containerCommand, shellCommand, TerminalError, TerminalManager, terminalEnv, type TerminalClient, type TerminalStart } from "./terminal";
-import { ARCH, catalogue, scheduleStoreSync, syncStore } from "./store";
+import { addStore, ARCH, catalogue, removeStore, scheduleStoreSync, StoreError, syncStore } from "./store";
 import { startSampler, systemStatus } from "./system";
 import { availableUpdate, checkForUpdate, confirmUpdate, scheduleUpdateChecks, startUpdate, updateStatus } from "./update";
 import { VERSION } from "./version";
@@ -1290,6 +1290,26 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
 
   if (path === "/api/store" && method === "GET") return json(catalogue(language(url)));
 
+  if (path === "/api/stores" && method === "POST") {
+    try {
+      // the repository is read before it is kept: that takes a while
+      server.timeout(req, 0);
+      return json(await addStore((await body(req)).url, user.name), 201);
+    } catch (e) {
+      if (e instanceof StoreError) return fail(e.code === "store.exists" ? 409 : 400, e.code, e.detail);
+      throw e;
+    }
+  }
+  const storeGone = /^\/api\/stores\/([a-z0-9-]+)$/.exec(path);
+  if (storeGone && method === "DELETE") {
+    try {
+      removeStore(storeGone[1]!, user.name);
+      return json({ ok: true });
+    } catch (e) {
+      if (e instanceof StoreError) return fail(404, e.code);
+      throw e;
+    }
+  }
   let m = /^\/api\/store\/([a-z0-9-]+)\/sync$/.exec(path);
   if (m && method === "POST") return json(await syncStore(m[1]!));
 
