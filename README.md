@@ -109,8 +109,8 @@ Early development. What works today:
   closed and shows the latest output when you come back) and a shell inside a container of an app;
 - the look is yours as well: accent and background colours (a light background turns the page light), a
   background picture — one of the built-in ones or your own;
-- app store: reads the CasaOS store (`x-casaos`), search and categories, a form for ports, folders and
-  variables, install with live progress;
+- app store: reads the CasaOS store (`x-casaos`) and any other CasaOS-compatible store added by its
+  address, search and categories, a form for ports, folders and variables, install with live progress;
 - custom apps: fill in a form or paste any compose file;
 - import of what already runs: a compose project started elsewhere becomes an app without a restart; a
   container started with `docker run` is rebuilt into an app from a compose file written out of its settings
