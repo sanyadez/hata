@@ -1584,8 +1584,9 @@ function paintHistory() {
     if (!days.has(day)) days.set(day, []);
     days.get(day).push(row);
   }
-  box.replaceChildren(
-    ...(days.size ? [...days].map(([day, rows]) => h("section", { class: "card pad history-day" }, h("h3", null, day), rows)) : [h("p", { class: "card pad muted" }, t(words ? "activity.noMatch" : "activity.none"))]),
+  put(
+    box,
+    days.size ? [...days].map(([day, rows]) => h("section", { class: "card pad history-day" }, h("h3", null, day), rows)) : h("p", { class: "card pad muted" }, t(words ? "activity.noMatch" : "activity.none")),
     historyUi.more && h("div", { class: "center-row" }, button(t("activity.older"), { onclick: (e) => ((e.currentTarget.disabled = true), loadHistory(true)) })),
     !historyUi.more && days.size > 0 && h("p", { class: "muted small center-row" }, t("activity.start")),
   );
@@ -1803,7 +1804,7 @@ function renderAppHead() {
   if (!app || !head) return;
   const url = isUp(app) ? appUrl(app) : null;
   const tab = (id, iconName) => h("a", { class: "tab" + (state.route.tab === id ? " active" : ""), href: `#/apps/${app.name}${id === "overview" ? "" : "/" + id}` }, icon(iconName), t("app.tab." + id));
-  head.replaceChildren(
+  put(head,
     h("nav", { class: "crumbs" }, h("a", { href: "#/" }, t("home.apps")), icon("chevron"), h("span", null, app.title)),
     h(
       "div",
@@ -2155,7 +2156,7 @@ function renderMachineHead() {
   const m = machinesUi.current;
   const head = document.getElementById("machine-head");
   if (!head) return;
-  if (!m) return head.replaceChildren(h("nav", { class: "crumbs" }, h("a", { href: "#/machines" }, t("nav.machines"))), machinesUi.list && h("p", { class: "card pad muted" }, t("error.machine.notFound")));
+  if (!m) return put(head, h("nav", { class: "crumbs" }, h("a", { href: "#/machines" }, t("nav.machines"))), machinesUi.list && h("p", { class: "card pad muted" }, t("error.machine.notFound")));
   const tab = (id, iconName) => h("a", { class: "tab" + (state.route.tab === id ? " active" : ""), href: `#/machines/${m.id}${id === "overview" ? "" : "/" + id}` }, icon(iconName), t("machines.tab." + id));
   head.replaceChildren(
     h("nav", { class: "crumbs" }, h("a", { href: "#/machines" }, t("nav.machines")), icon("chevron"), h("span", null, m.name)),
@@ -3006,7 +3007,7 @@ function snapshotFilesDialog(app, snapshot) {
     // inside a folder the way back is shown from the snapshot's own folder it lies in
     const root = data.roots.find((r) => path === r || path.startsWith(r + "/"));
     const steps = root ? path.slice(root.length).split("/").filter(Boolean) : [];
-    crumbs.replaceChildren(
+    put(crumbs,
       h("button", { type: "button", class: "text-btn", onclick: () => open("") }, t("backup.files.top")),
       root && icon("chevron"),
       root && h("button", { type: "button", class: "text-btn mono", onclick: () => open(root) }, root),
@@ -6746,7 +6747,7 @@ function httpsSection(save, error) {
   const paintCerts = async () => {
     const status = await api("GET", "/api/https").catch(() => null);
     if (!alive || !status) return;
-    certs.replaceChildren(
+    put(certs,
       status.httpPort !== 80 && h("p", { class: "banner" }, t("https.needPort80", { port: status.httpPort })),
       status.error && h("p", { class: "error" }, status.error),
       ...status.certificates.map((c) =>
