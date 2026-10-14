@@ -2496,5 +2496,9 @@
   "error.machine.noMac": "Hata не знає мережевої карти {name}, щоб її розбудити.",
   "activity.machine.wake": "Надіслано сигнал пробудження: {target}",
   "activity.machine.reboot": "Машину перезавантажено: {target}",
-  "activity.machine.poweroff": "Машину вимкнено: {target}"
+  "activity.machine.poweroff": "Машину вимкнено: {target}",
+  "attention.machine.restarting.title": "{title} на {machine} постійно перезапускається",
+  "attention.machine.restarting.text": "Контейнер {container} не тримається запущеним — причина в журналі на сторінці машини.",
+  "attention.machine.partial.title": "{title} на {machine} працює лише частково",
+  "attention.machine.partial.text": "Контейнер {container} не запущено."
 }

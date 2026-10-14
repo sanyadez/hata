@@ -2496,5 +2496,9 @@
   "error.machine.noMac": "Hata does not know a network card of {name} to wake.",
   "activity.machine.wake": "Wake-up signal sent: {target}",
   "activity.machine.reboot": "Machine restarted: {target}",
-  "activity.machine.poweroff": "Machine shut down: {target}"
+  "activity.machine.poweroff": "Machine shut down: {target}",
+  "attention.machine.restarting.title": "{title} on {machine} keeps restarting",
+  "attention.machine.restarting.text": "Container {container} does not stay up — its logs on the machine's page say why.",
+  "attention.machine.partial.title": "{title} on {machine} is only partly running",
+  "attention.machine.partial.text": "Container {container} is not running."
 }

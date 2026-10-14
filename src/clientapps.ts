@@ -112,12 +112,15 @@ export async function compose(args: { name?: unknown; command?: unknown }, chann
 }
 
 /** The output of an app's containers: the tail, then what they write, until cancelled */
-export async function logs(args: { name?: unknown; tail?: unknown }, channel: Channel): Promise<void> {
+export async function logs(args: { name?: unknown; tail?: unknown; follow?: unknown; service?: unknown }, channel: Channel): Promise<void> {
   const name = nameOf(args.name);
   const dir = join(APPS_DIR, name);
   if (!existsSync(join(dir, "compose.yml"))) fail("app.notFound");
   const tail = Math.min(5000, Math.max(0, Number(args.tail) || 200));
-  const proc = Bun.spawn({ cmd: composeCmd(name, dir, ["logs", "--no-color", "--follow", "--tail", String(tail)]), cwd: dir, stdout: "pipe", stderr: "ignore" });
+  // without `follow` — the tail with timestamps, and the stream ends: what an agent reads
+  const follow = args.follow !== false;
+  const service = typeof args.service === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(args.service) ? [args.service] : [];
+  const proc = Bun.spawn({ cmd: composeCmd(name, dir, ["logs", "--no-color", ...(follow ? ["--follow"] : ["--timestamps"]), "--tail", String(tail), ...service]), cwd: dir, stdout: "pipe", stderr: "ignore" });
   channel.signal.addEventListener("abort", () => proc.kill());
   for await (const chunk of proc.stdout) await channel.send(chunk).catch(() => proc.kill());
   await proc.exited;

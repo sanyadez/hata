@@ -32,7 +32,7 @@ const FAILURE_WINDOW_MS = 24 * 3600 * 1000;
 /** A trash smaller than this is not worth a word when its disk fills up, bytes */
 const TRASH_WORTH = 100 * 1024 * 1024;
 
-export function attention(input: { system: SystemStatus; docker: DockerInfo; apps: InstalledApp[]; activity: Activity[]; update?: string | null; offsite?: { error: string } | null; disks?: DiskReport[]; trash?: (path: string) => number; absent?: { path: string; holds: string | null }[]; internet?: Trouble[]; exposed?: { nic: string; address: string }[]; array?: { code: string; detail: Record<string, string | number> }[]; shares?: { code: string; detail: Record<string, string> }[]; places?: { id: string; name: string; path: string }[]; machines?: { id: string; name: string; since: number }[]; unused?: { id: string; title: string; size: number; carries: boolean }[]; filling?: { path: string; days: number; percent: number } | null; now?: number }): AttentionItem[] {
+export function attention(input: { system: SystemStatus; docker: DockerInfo; apps: InstalledApp[]; activity: Activity[]; update?: string | null; offsite?: { error: string } | null; disks?: DiskReport[]; trash?: (path: string) => number; absent?: { path: string; holds: string | null }[]; internet?: Trouble[]; exposed?: { nic: string; address: string }[]; array?: { code: string; detail: Record<string, string | number> }[]; shares?: { code: string; detail: Record<string, string> }[]; places?: { id: string; name: string; path: string }[]; machines?: { id: string; name: string; since: number }[]; machineApps?: { key: string; title: string; status: string; containers: { name: string; state: string }[]; machine: { id: string; name: string; online: boolean } }[]; unused?: { id: string; title: string; size: number; carries: boolean }[]; filling?: { path: string; days: number; percent: number } | null; now?: number }): AttentionItem[] {
   const { system, docker, apps, activity } = input;
   const now = input.now ?? Date.now();
   const items: AttentionItem[] = [];
@@ -50,18 +50,32 @@ export function attention(input: { system: SystemStatus; docker: DockerInfo; app
     }
   }
 
+  // the apps of the other machines, while their machine is there to say how they are
+  for (const app of input.machineApps ?? []) {
+    if (!app.machine.online) continue;
+    const restarting = app.containers.filter((c) => c.state === "restarting");
+    const detail = { title: app.title, machine: app.machine.name, id: app.machine.id };
+    if (restarting.length) items.push({ id: `restarting:${app.key}`, severity: "danger", code: "machine.restarting", detail: { ...detail, container: restarting[0]!.name } });
+    else if (app.status === "partial") items.push({ id: `partial:${app.key}`, severity: "warn", code: "machine.partial", detail: { ...detail, container: app.containers.find((c) => c.state !== "running")?.name ?? "" } });
+  }
+
   // The latest outcome decides: a failure followed by a success is history, not a problem. Running the
   // app and backing it up are judged apart — a good start says nothing about a failed backup.
   const latest = new Map<string, Activity>();
   for (const entry of activity) {
     const m = /^app\.(install|update|apply|start|backup|restore)\.(done|failed)$/.exec(entry.code);
     if (!entry.app || !m) continue;
-    const key = `${m[1] === "backup" ? "backup" : "run"}:${entry.app}`;
+    // an app of another machine is not the app of the same name here
+    const key = `${m[1] === "backup" ? "backup" : "run"}:${entry.app}${entry.machine ? "@" + entry.machine : ""}`;
     if (!latest.has(key)) latest.set(key, entry);
   }
   for (const [key, entry] of latest) {
     if (!entry.code.endsWith(".failed") || now - entry.ts > FAILURE_WINDOW_MS) continue;
     const name = entry.app!;
+    if (entry.machine) {
+      items.push({ id: `failed:${key}`, severity: "warn", code: `failed.${entry.code.split(".")[1]}`, detail: { title: `${name} (${entry.machine})`, message: entry.detail ?? "" }, at: entry.ts });
+      continue;
+    }
     const app = apps.find((a) => a.name === name);
     const kind = entry.code.split(".")[1]!;
     // a failed install leaves no app behind, so there is nothing to link to

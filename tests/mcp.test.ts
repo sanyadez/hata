@@ -84,10 +84,10 @@ test("the real tools: unique names, every level present, nothing that reaches us
   expect(names.filter((n) => /user|password|file|terminal|shell|exec|key|setting|session/.test(n))).toEqual([]);
   // looking never needs more than the lowest level, and nothing that only looks is marked as changing
   for (const tool of TOOLS) expect(tool.effect === "read").toBe(tool.level === "read");
-  expect(toolsFor(TOOLS, "read").map((t) => t.name)).toEqual(["overview", "activity", "apps_list", "app_get", "app_logs", "app_diagnose", "app_compose", "store_search", "store_app", "backups", "disks", "job_get"]);
-  expect(toolsFor(TOOLS, "operate").filter((t) => t.level === "operate").map((t) => t.name)).toEqual(["app_start", "app_stop", "app_restart", "app_update", "app_install", "backup_take"]);
-  expect(TOOLS.filter((t) => t.level === "full").map((t) => t.name)).toEqual(["app_compose_set", "app_install_compose", "app_remove", "backup_restore"]);
-  expect(TOOLS.filter((t) => t.effect === "destroy").map((t) => t.name)).toEqual(["app_compose_set", "app_remove", "backup_restore"]);
+  expect(toolsFor(TOOLS, "read").map((t) => t.name)).toEqual(["overview", "activity", "apps_list", "app_get", "app_logs", "app_diagnose", "app_compose", "store_search", "store_app", "backups", "disks", "job_get", "machines", "machine_apps", "machine_containers", "machine_app_logs", "machine_app_compose"]);
+  expect(toolsFor(TOOLS, "operate").filter((t) => t.level === "operate").map((t) => t.name)).toEqual(["app_start", "app_stop", "app_restart", "app_update", "app_install", "backup_take", "machine_app_start", "machine_app_stop", "machine_app_restart", "machine_app_update", "machine_app_install", "machine_backup_take", "machine_wake"]);
+  expect(TOOLS.filter((t) => t.level === "full").map((t) => t.name)).toEqual(["app_compose_set", "app_install_compose", "app_remove", "backup_restore", "machine_app_compose_set", "machine_app_remove", "machine_backup_restore", "app_move", "machine_power"]);
+  expect(TOOLS.filter((t) => t.effect === "destroy").map((t) => t.name)).toEqual(["app_compose_set", "app_remove", "backup_restore", "machine_app_compose_set", "machine_app_remove", "machine_backup_restore", "app_move", "machine_power"]);
   expect(instructions(caller("read"))).toContain('level "read"');
 });
 

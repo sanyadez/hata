@@ -137,3 +137,29 @@ test("a disk on its way to full is said a month ahead, until it is full enough t
   expect(attention({ ...base, filling: { path: "/DATA", days: 5, percent: 90 } })).toEqual([]);
   expect(attention({ ...base, filling: null })).toEqual([]);
 });
+
+test("an app of another machine that does not stay up is said with the machine's name; an away machine's apps are not judged", () => {
+  const on = { id: "1a2b3c4d", name: "pc", online: true };
+  const items = attention({
+    system: system(),
+    docker,
+    apps: [app("memos", "running")],
+    activity: [
+      { ts: Date.now(), code: "app.start.failed", app: "memos", machine: "pc", detail: "no image" },
+      { ts: Date.now() - 1000, code: "app.start.done", app: "memos" },
+    ],
+    machineApps: [
+      { key: "kuma@1a2b3c4d", title: "Kuma", status: "running", containers: [{ name: "kuma", state: "restarting" }], machine: on },
+      { key: "db@1a2b3c4d", title: "DB", status: "partial", containers: [{ name: "a", state: "running" }, { name: "b", state: "exited" }], machine: on },
+      { key: "x@1a2b3c4d", title: "X", status: "unknown", containers: [{ name: "x", state: "restarting" }], machine: { ...on, online: false } },
+    ],
+  });
+  expect(items.find((i) => i.id === "restarting:kuma@1a2b3c4d")).toMatchObject({ code: "machine.restarting", severity: "danger", detail: { title: "Kuma", machine: "pc", id: "1a2b3c4d" } });
+  expect(items.find((i) => i.id === "partial:db@1a2b3c4d")?.detail.container).toBe("b");
+  expect(items.some((i) => i.id.includes("x@"))).toBe(false);
+  // the machine's failure is its own: the app of the same name here started fine
+  const failed = items.filter((i) => i.code === "failed.start");
+  expect(failed).toHaveLength(1);
+  expect(failed[0]!.detail.title).toBe("memos (pc)");
+  expect(failed[0]!.app).toBeUndefined();
+});

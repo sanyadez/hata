@@ -1470,6 +1470,7 @@ function attentionItem(item) {
     item.code.startsWith("share.") && open("#/settings/shares"),
     item.code === "netplace.down" && open("#/settings/storage"),
     item.code === "machine.away" && open(`#/machines/${item.detail.id}`),
+    (item.code === "machine.restarting" || item.code === "machine.partial") && open(`#/machines/${item.detail.id}/apps`),
     item.app && open(`#/apps/${item.app}${item.code === "restarting" || item.code === "partial" ? "/logs" : ""}`, t(item.code === "restarting" || item.code === "partial" ? "app.logs" : "common.open")),
     (item.code === "disk.new" || item.code === "disk.usb") && isAdmin() && button(t("mounting.ignore"), { class: "small quiet", onclick: () => void api("POST", "/api/disks/ignore", { id: item.detail.id }).then(refresh, (e) => toast(errorText(e), "error")) }),
   ].filter(Boolean);

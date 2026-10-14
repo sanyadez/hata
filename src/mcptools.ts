@@ -30,6 +30,11 @@ import { catalogue } from "./store";
 import { systemStatus } from "./system";
 import { trashSizeOn } from "./trash";
 import { availableUpdate } from "./update";
+import { applyMachineCompose, installOnMachine, machineTiles, machineAppAction, machineApps, machineCompose, removeMachineApp } from "./machineapps";
+import { backupMachineApp, restoreMachineApp } from "./machinebackup";
+import { containersOf, machinesAway, machines as machineList, open as openOnMachine, power as powerMachine, wake as wakeMachine, type MachineView } from "./machines";
+import { moveApp } from "./moveapp";
+import { MuxError } from "./mux";
 import { VERSION } from "./version";
 import en from "./lang/en.json";
 
@@ -210,7 +215,7 @@ const brief = (app: InstalledApp, caller?: Caller) => ({
 });
 
 async function attentionNow(apps: InstalledApp[]) {
-  const items = attention({ system: systemStatus(), docker: await dockerInfo(), apps, activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn });
+  const items = attention({ system: systemStatus(), docker: await dockerInfo(), apps, activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, machines: machinesAway(), machineApps: await machineTiles(machineList(), "en").catch(() => []) });
   // worded one by one: `wording` folds a long list into a single message, which is right for a phone and wrong here
   return items.map((item) => {
     const [message] = wording([item], "en");
@@ -250,6 +255,7 @@ const read: Omit<Tool, "level" | "effect">[] = [
         newerHataVersion: availableUpdate() ?? null,
         needsAttention: await attentionNow(apps),
         apps: apps.map(({ name, title, status, update }) => ({ name, title, status, ...(update ? { newerVersionInStore: true } : {}) })),
+        machines: machineList().map((m) => ({ name: m.name, online: m.online })),
         runningOperations: listJobs().filter((j) => j.status === "running").map((j) => ({ job: j.id, app: j.app, operation: j.kind })),
       };
     },
@@ -535,6 +541,184 @@ const full: (Omit<Tool, "level" | "effect"> & { effect?: Tool["effect"] })[] = [
   },
 ];
 
+// --- Other machines -----------------------------------------------------------------------------------
+// The machines this server looks after through their client: their state, their apps and those apps'
+// snapshots. Their terminal and files stay out of reach here, as this server's do.
+
+/** A machine by its name or id, as `machines` gives them */
+function machineOf(args: Record<string, unknown>, online = true): MachineView {
+  const asked = text(args, "machine").toLowerCase();
+  const m = machineList().find((x) => x.id === asked || x.name.toLowerCase() === asked);
+  if (!m) throw new ToolError(`There is no machine "${asked}". The machines are: ${machineList().map((x) => x.name).join(", ") || "none"}.`);
+  if (online && !m.online) throw new ToolError(say("machine.offline", { name: m.name }) + " It may be off: machine_wake can wake it if its network card allows.");
+  return m;
+}
+
+const MACHINE = { machine: { type: "string", description: "The machine's name or id, as `machines` gives it" } };
+const MACHINE_APP = { ...MACHINE, app: { type: "string", description: "The app's name on that machine, as machine_apps gives it" } };
+
+const machineBrief = (m: MachineView) => ({
+  id: m.id,
+  name: m.name,
+  online: m.online,
+  ...(m.online ? {} : { lastSeen: when(m.seen) }),
+  ...(m.ip ? { address: m.ip } : {}),
+  system: m.info ? `${m.info.os} · ${m.info.arch}` : null,
+  docker: m.info?.docker.available ? m.info.docker.version : "not installed",
+  ...(m.status ? { cpuPercent: m.status.cpu, memoryUsedPercent: percent(m.status.memory.used, m.status.memory.total), disks: m.status.disks.map((d) => ({ path: d.path, usedPercent: percent(d.used, d.total), freeBytes: d.total - d.used })) } : {}),
+  canBeWoken: !!m.info?.macs?.length,
+});
+
+const machineRead: Omit<Tool, "level" | "effect">[] = [
+  {
+    name: "machines",
+    title: "Other machines",
+    description: "The other machines this server looks after (PCs, virtual machines, containers with Hata's client): whether each is connected, its system, load, memory and disks. Their apps are listed by machine_apps.",
+    run: () => machineList().map(machineBrief),
+  },
+  {
+    name: "machine_apps",
+    title: "Apps of a machine",
+    description: "The apps Hata installed on another machine, with their status, containers and the address each answers at. Containers started there by other means are listed by machine_containers.",
+    input: MACHINE,
+    required: ["machine"],
+    run: (args) =>
+      wrap(async () => {
+        const m = machineOf(args);
+        return (await machineApps(m.id, "en")).map((app) => ({ name: app.name, title: app.title, status: app.status, ...(app.store ? { store: app.store } : {}), ...(app.port && m.ip ? { address: `${app.scheme || "http"}://${m.ip}:${app.port}${app.index || "/"}` } : {}), ...(app.job ? { runningOperation: app.job } : {}), containers: app.containers }));
+      }),
+  },
+  {
+    name: "machine_containers",
+    title: "Containers of a machine",
+    description: "Every container on another machine — Hata's apps and anything else running there — with its compose project, image, state and published ports.",
+    input: MACHINE,
+    required: ["machine"],
+    run: (args) => wrap(async () => containersOf(machineOf(args).id)),
+  },
+  {
+    name: "machine_app_logs",
+    title: "Log of a machine's app",
+    description: "The last lines of the container logs of an app on another machine, with timestamps.",
+    input: { ...MACHINE_APP, service: { type: "string", description: "Only this service of the app" }, lines: { type: "number", description: "How many lines per container, 100 by default, 500 at most" } },
+    required: ["machine", "app"],
+    run: (args) =>
+      wrap(async () => {
+        const m = machineOf(args);
+        const channel = openOnMachine(m.id, "apps.logs", { name: appName(args), tail: count(args.lines, 100, 500), follow: false, service: args.service });
+        const out = await new Response(channel.readable()).text();
+        await channel.result.catch((e) => {
+          throw e instanceof MuxError ? new AppError(e.code, 400, e.detail) : e;
+        });
+        return clip(out) || "(the log is empty)";
+      }),
+  },
+  {
+    name: "machine_app_compose",
+    title: "Compose file of a machine's app",
+    description: "The compose file of an app on another machine. A key of the level \"full\" gets it as it is, to be changed and sent back with machine_app_compose_set; other keys get a copy with values that look like secrets hidden.",
+    input: MACHINE_APP,
+    required: ["machine", "app"],
+    run: (args, caller) =>
+      wrap(async () => {
+        const file = (await machineCompose(machineOf(args).id, appName(args))).text;
+        if (caller.level === "full") return file;
+        try {
+          return dumpCompose(maskCompose(parseCompose(file)));
+        } catch {
+          throw new ToolError("The compose file is not valid YAML, so it cannot be shown with its secrets hidden. A key of the level \"full\" can read it as it is.");
+        }
+      }),
+  },
+];
+
+const machineOperate: Omit<Tool, "level" | "effect">[] = [
+  ...ACTIONS.map(([action, title, description]) => ({
+    name: `machine_app_${action}`,
+    title: `${title} on another machine`,
+    description: `${description.replace(/ A snapshot.*$/, "")} The app is on another machine. Waits up to half a minute; longer comes back as a running job — ask job_get.`,
+    input: MACHINE_APP,
+    required: ["machine", "app"],
+    run: (args: Record<string, unknown>, caller: Caller) => wrap(async () => settle(await machineAppAction(machineOf(args).id, appName(args), action, caller.user))),
+  })),
+  {
+    name: "machine_app_install",
+    title: "Install an app from the store on another machine",
+    description: "Installs an app from the store on another machine — as app_install does here; look at store_app for the form. Ports taken on that machine must be changed. Expect a running job and ask job_get.",
+    input: { ...MACHINE, store: { type: "string", description: "The store's id" }, app: { type: "string", description: "The app's name in the store" }, form: { type: "object", description: "Changes to the defaults, as for app_install" } },
+    required: ["machine", "store", "app"],
+    run: (args, caller) => wrap(async () => settle(await installOnMachine(machineOf(args).id, text(args, "store"), appName(args), isPlainObject(args.form) ? args.form : {}, caller.user))),
+  },
+  {
+    name: "machine_backup_take",
+    title: "Take a snapshot of a machine's app",
+    description: "Takes a snapshot of an app of another machine now; it is kept on this server with the others (the backups tool lists it as `<app>@<machine id>`).",
+    input: MACHINE_APP,
+    required: ["machine", "app"],
+    run: (args, caller) => wrap(() => settle(backupMachineApp(`${appName(args)}@${machineOf(args).id}`, caller.user))),
+  },
+  {
+    name: "machine_wake",
+    title: "Wake a machine up",
+    description: "Sends the Wake-on-LAN signal to a machine that is off or asleep. It comes back in a minute or two if its network card has Wake-on-LAN on; `machines` shows when it is connected again.",
+    input: MACHINE,
+    required: ["machine"],
+    run: (args, caller) => wrap(async () => ({ ...(await wakeMachine(machineOf(args, false).id, caller.user)), note: "Sent. Ask `machines` in a minute or two." })),
+  },
+];
+
+const machineFull: (Omit<Tool, "level" | "effect"> & { effect?: Tool["effect"] })[] = [
+  {
+    name: "machine_app_compose_set",
+    title: "Replace the compose file of a machine's app",
+    description: "Replaces the compose file of an app on another machine and applies it. Send the whole file (read it with machine_app_compose). A file Docker rejects there is not kept.",
+    input: { ...MACHINE_APP, compose: { type: "string", description: "The whole compose file, YAML" } },
+    required: ["machine", "app", "compose"],
+    run: (args, caller) => wrap(async () => settle(await applyMachineCompose(machineOf(args).id, appName(args), args.compose, caller.user))),
+  },
+  {
+    name: "machine_app_remove",
+    title: "Remove an app from another machine",
+    description: "Removes an app from another machine. With `deleteData` its data there goes too — take a snapshot first (machine_backup_take) unless the person said it is not needed.",
+    input: { ...MACHINE_APP, deleteData: { type: "boolean", description: "Also delete the app's data there. false by default." } },
+    required: ["machine", "app"],
+    run: (args, caller) => wrap(async () => settle(await removeMachineApp(machineOf(args).id, appName(args), args.deleteData === true, caller.user))),
+  },
+  {
+    name: "machine_backup_restore",
+    title: "Restore a machine's app from a snapshot",
+    description: "Puts an app of another machine back to a snapshot kept on this server: its data there is REPLACED. Snapshots are listed by backups as `<app>@<machine id>`.",
+    input: { ...MACHINE_APP, snapshot: { type: "string", description: "The snapshot's id" } },
+    required: ["machine", "app", "snapshot"],
+    run: (args, caller) => wrap(() => settle(restoreMachineApp(`${appName(args)}@${machineOf(args).id}`, text(args, "snapshot"), caller.user))),
+  },
+  {
+    name: "app_move",
+    title: "Move an app to another machine",
+    description: "Moves an app with its data from one place to another: this server (\"server\") or a machine. The app is stopped, its own data folder copied, and it is started at the new place; if anything fails it is started again where it was. Folders outside its own data folder and Docker volumes are not moved. Its old data stays unless `deleteOld`.",
+    input: { app: { type: "string", description: "The app's name" }, from: { type: "string", description: "\"server\" or a machine's name or id" }, to: { type: "string", description: "\"server\" or a machine's name or id" }, deleteOld: { type: "boolean", description: "Delete the data at the old place once the app runs at the new one. false by default." } },
+    required: ["app", "from", "to"],
+    run: (args, caller) =>
+      wrap(async () => {
+        const place = (key: string) => (String(args[key]).trim().toLowerCase() === "server" ? "" : machineOf({ machine: args[key] }).id);
+        return settle(await moveApp({ from: place("from"), to: place("to"), name: appName(args), dropOld: args.deleteOld === true }, caller.user), 60_000);
+      }),
+  },
+  {
+    name: "machine_power",
+    title: "Restart or shut down a machine",
+    description: "Restarts (`reboot`) or shuts down (`poweroff`) another machine. Everything running there stops; after a shut down only Wake-on-LAN or its power button brings it back.",
+    input: { ...MACHINE, action: { type: "string", enum: ["reboot", "poweroff"], description: "reboot or poweroff" } },
+    required: ["machine", "action"],
+    run: (args, caller) =>
+      wrap(async () => {
+        const m = machineOf(args);
+        await powerMachine(m.id, args.action, caller.user);
+        return { ok: true, machine: m.name, action: args.action };
+      }),
+  },
+];
+
 /** Asks an app's page once: what it answered, or why it did not */
 async function answers(url: string): Promise<{ url: string; answer: string }> {
   try {
@@ -554,15 +738,15 @@ export function happened(entry: { code: string; app?: string; user?: string; det
 }
 
 export const TOOLS: Tool[] = [
-  ...read.map((tool) => ({ ...tool, level: "read" as const, effect: "read" as const })),
-  ...operate.map((tool) => ({ ...tool, level: "operate" as const, effect: "change" as const })),
-  ...full.map((tool) => ({ ...tool, level: "full" as const, effect: tool.effect ?? ("destroy" as const) })),
+  ...[...read, ...machineRead].map((tool) => ({ ...tool, level: "read" as const, effect: "read" as const })),
+  ...[...operate, ...machineOperate].map((tool) => ({ ...tool, level: "operate" as const, effect: "change" as const })),
+  ...[...full, ...machineFull].map((tool) => ({ ...tool, level: "full" as const, effect: tool.effect ?? ("destroy" as const) })),
 ];
 
 const LEVEL_WORDS: Record<Level, string> = {
   read: "It can look at everything listed in the tools and change nothing.",
-  operate: "It can look, start, stop, restart and update apps, install apps from the store and take snapshots. It cannot change compose files, remove apps or restore snapshots.",
-  full: "It can also change compose files, install apps from a compose file, remove apps and restore snapshots.",
+  operate: "It can look, start, stop, restart and update apps — here and on the other machines — install apps from the store, take snapshots and wake a machine up. It cannot change compose files, remove apps, restore snapshots, move apps or restart machines.",
+  full: "It can also change compose files, install apps from a compose file, remove apps, restore snapshots, move apps between machines and restart or shut down machines.",
 };
 
 /** What the model is told when it connects */
@@ -571,6 +755,7 @@ export function instructions(caller: Caller): string {
     "Hata is a home server: apps run in Docker, each app is a plain compose project. This server lets you see its state and manage the apps.",
     `You are connected with the access key "${caller.name}" of the level "${caller.level}". ${LEVEL_WORDS[caller.level]} Users, passwords, files, a shell and Hata's own settings are not reachable from here at any level — for those the person uses Hata's web UI.`,
     "An app's page is `address` in apps_list, app_get and what starting it returns: give that address as it is — never build one from the machine's host name, which is often not reachable.",
+    "Besides this server there may be other machines it looks after (`machines`): their apps have tools of their own (`machine_apps`, `machine_app_*`), and an app can be moved between them (`app_move`).",
     "Start with `overview`. When an app does not work, `app_diagnose` gives its state, the tail of its log and the likely causes in one call.",
     "Operations that take long (install, update, backup) wait up to half a minute and then return a job that is still running: ask `job_get` until it is done or failed.",
     ...(caller.confirm ? ["Removing an app, restoring a snapshot and replacing a compose file need the word of an administrator in Hata each time, for this access key. Such a call waits for it for half a minute; when it answers that nobody has allowed it yet, ask the person to open Hata and allow it, then repeat the call with the same arguments."] : []),

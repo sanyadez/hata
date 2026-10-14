@@ -207,7 +207,7 @@ export function wording(items: AttentionItem[], lang: string): Message[] {
       title: tr(lang, `attention.${item.code}.title`, detail),
       text: tr(lang, `attention.${item.code}.text`, detail).trim(),
       severity: item.severity,
-      route: item.app ? `#/apps/${item.app}${tab}` : item.code === "update" ? "#/settings/about" : item.code === "disk.trash" ? "#/trash" : item.code.startsWith("internet.") || item.code === "network.exposed" ? "#/settings/network" : item.code.startsWith("share.") ? "#/settings/shares" : item.code === "netplace.down" ? "#/settings/storage" : item.code === "machine.away" ? `#/machines/${item.detail.id}` : item.code.startsWith("array.") || item.code.startsWith("smart.") || item.code === "disk.new" || item.code === "disk.usb" || item.code === "disk.filling" ? "#/settings/storage" : "#/",
+      route: item.app ? `#/apps/${item.app}${tab}` : item.code === "update" ? "#/settings/about" : item.code === "disk.trash" ? "#/trash" : item.code.startsWith("internet.") || item.code === "network.exposed" ? "#/settings/network" : item.code.startsWith("share.") ? "#/settings/shares" : item.code === "netplace.down" ? "#/settings/storage" : item.code === "machine.away" ? `#/machines/${item.detail.id}` : item.code.startsWith("machine.") ? `#/machines/${item.detail.id}/apps` : item.code.startsWith("array.") || item.code.startsWith("smart.") || item.code === "disk.new" || item.code === "disk.usb" || item.code === "disk.filling" ? "#/settings/storage" : "#/",
       tag: keyOf(item),
       code: item.code,
       app: item.app,
