@@ -1428,13 +1428,19 @@ const ATTENTION_ICONS = { update: "up", docker: "box", restarting: "refresh", pa
 function attentionItem(item) {
   const detail = { ...item.detail, free: item.detail.free == null ? "" : bytes(item.detail.free), trash: item.detail.trash == null ? "" : bytes(item.detail.trash), size: item.detail.size == null ? "" : bytes(item.detail.size) };
   const base = "attention." + item.code;
-  // a button that does the thing sits under the words: beside them it leaves the words a narrow column
+  const open = (href, label = t("common.open")) => h("a", { class: "btn small", href }, label);
+  // every button sits under the words, the one that does the thing first: beside them it leaves the words a narrow column
   const below = [
     item.app && isAdmin() && assistantReady() && button(t("assistant.askWhy"), { class: "small", onclick: () => openAssistant({ ask: t("assistant.whyDown", { title: item.detail.title || item.app, app: item.app }) }) }, "chat"),
     item.code === "docker.missing" && isAdmin() && button(t("docker.install"), { class: "small primary", onclick: () => dockerDialog() }, "download"),
     item.code === "docker.stopped" && isAdmin() && dockerStartButton(),
     item.code === "disk.usb" && isAdmin() && button(t("copyin.button"), { class: "small primary", onclick: () => ((state.copyInFrom = item.detail.id), go("#/settings/storage")) }, "download"),
-    item.code === "disk.new" && isAdmin() && h("a", { class: "btn small", href: "#/settings/storage" }, t("attention.disk.open")),
+    item.code === "disk.new" && isAdmin() && open("#/settings/storage", t("attention.disk.open")),
+    item.code === "update" && open("#/settings/about"),
+    item.code === "disk.trash" && open("#/trash", t("trash.title")),
+    (item.code.startsWith("smart.") || item.code === "disk.filling" || item.code.startsWith("array.")) && open("#/settings/storage"),
+    (item.code.startsWith("internet.") || item.code === "network.exposed") && open("#/settings/network"),
+    item.app && open(`#/apps/${item.app}${item.code === "restarting" || item.code === "partial" ? "/logs" : ""}`, t(item.code === "restarting" || item.code === "partial" ? "app.logs" : "common.open")),
     (item.code === "disk.new" || item.code === "disk.usb") && isAdmin() && button(t("mounting.ignore"), { class: "small quiet", onclick: () => void api("POST", "/api/disks/ignore", { id: item.detail.id }).then(refresh, (e) => toast(errorText(e), "error")) }),
   ].filter(Boolean);
   return h(
@@ -1442,12 +1448,6 @@ function attentionItem(item) {
     { class: "attention-item" },
     h("span", { class: "badge-icon " + item.severity }, icon(ATTENTION_ICONS[item.code.split(".")[0]] ?? "alert")),
     h("div", { class: "grow" }, h("strong", null, t(base + ".title", detail)), h("p", { class: "muted small" }, t(base + ".text", detail).trim()), below.length > 0 && h("div", { class: "row-actions under" }, below)),
-    item.code === "update" && h("a", { class: "btn small", href: "#/settings/about" }, t("common.open")),
-    item.code === "disk.trash" && h("a", { class: "btn small", href: "#/trash" }, t("trash.title")),
-    (item.code.startsWith("smart.") || item.code === "disk.filling") && h("a", { class: "btn small", href: "#/settings/storage" }, t("common.open")),
-    (item.code.startsWith("internet.") || item.code === "network.exposed") && h("a", { class: "btn small", href: "#/settings/network" }, t("common.open")),
-    item.code.startsWith("array.") && h("a", { class: "btn small", href: "#/settings/storage" }, t("common.open")),
-    item.app && h("a", { class: "btn small", href: `#/apps/${item.app}${item.code === "restarting" || item.code === "partial" ? "/logs" : ""}` }, t(item.code === "restarting" || item.code === "partial" ? "app.logs" : "common.open")),
   );
 }
 
