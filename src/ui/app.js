@@ -76,6 +76,9 @@ const ICONS = {
   link: "M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1",
   key: "M8 16a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM12 12h9M18 12v3M21 12v2",
   chat: "M4 5h16v11h-9l-5 4v-4H4zM8 9h8M8 12h5",
+  expand: "M14 4h6v6M10 20H4v-6M20 4l-7 7M4 20l7-7",
+  shrink: "M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7",
+  down: "M6 9l6 6 6-6",
 };
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -618,6 +621,8 @@ async function signOut() {
   await api("POST", "/api/logout", {}).catch(() => {});
   state.user = null;
   closeAssistant();
+  assistantUi.fab?.remove();
+  assistantUi.fab = null;
   assistantUi.chat = null;
   stopEvents();
   leaveView();
@@ -688,13 +693,14 @@ document.addEventListener("keydown", (e) => {
 });
 
 function shell(...content) {
+  assistantFab();
   $app.replaceChildren(
     h(
       "header",
       { class: "top" },
       h("a", { class: "brand", href: "#/" }, logo(), "hata"),
       h("nav", { class: "nav" }, navLinks("nav-link")),
-      h("div", { class: "top-right" }, globalSearch(), isAdmin() && h("button", { type: "button", class: "icon-btn top-tool", title: t("assistant.title"), "aria-label": t("assistant.title"), onclick: () => (assistantUi.open ? closeAssistant() : openAssistant()) }, icon("chat")), isAdmin() && h("a", { class: "icon-btn top-tool" + (state.route.view === "terminal" ? " active" : ""), href: "#/terminal", title: t("terminal.title"), "aria-label": t("terminal.title") }, icon("terminal")), h("button", { type: "button", class: "user", onclick: userMenu }, h("span", { class: "avatar" }, state.user.name.slice(0, 1).toUpperCase()), h("span", { class: "user-name" }, state.user.name))),
+      h("div", { class: "top-right" }, globalSearch(), isAdmin() && h("a", { class: "icon-btn top-tool" + (state.route.view === "terminal" ? " active" : ""), href: "#/terminal", title: t("terminal.title"), "aria-label": t("terminal.title") }, icon("terminal")), h("button", { type: "button", class: "user", onclick: userMenu }, h("span", { class: "avatar" }, state.user.name.slice(0, 1).toUpperCase()), h("span", { class: "user-name" }, state.user.name))),
     ),
     h("main", { id: "view" }, content),
     h("nav", { class: "bottom-bar" }, navLinks("bottom-link")),
@@ -7495,7 +7501,9 @@ function agentKeyDialog(made) {
 
 // --- The assistant: a chat with a model that works with Hata's tools --------------------------------
 
-const assistantUi = { open: false, panel: null, config: null, chats: [], chat: null, timer: 0 };
+const assistantUi = { open: false, panel: null, fab: null, config: null, chats: [], chat: null, timer: 0 };
+/** Whether the window was open and how big, kept across pages and reloads */
+const ASSISTANT_KEY = "hata.assistant";
 const assistantReady = () => !!state.overview?.assistant;
 
 /** A model's answer as elements: paragraphs, lists, code, bold — built from text, never as markup */
@@ -7619,12 +7627,19 @@ function paintAssistant() {
     h("option", { value: "", selected: !chat }, t("assistant.newChat")),
     chats.map((c) => h("option", { value: c.id, selected: c.id === chat?.id }, c.title)),
   );
+  // the chat on the screen comes back after a reload
+  if (chat) localStorage.setItem(ASSISTANT_KEY + ".chat", chat.id);
+  else localStorage.removeItem(ASSISTANT_KEY + ".chat");
+  const wide = panel.classList.contains("wide");
+  const tool = (label, name, onclick, cls = "") => h("button", { type: "button", class: "icon-btn " + cls, title: label, "aria-label": label, onclick }, icon(name));
   put(
     panel.querySelector(".assistant-head"),
-    h("strong", { class: "grow" }, t("assistant.title")),
+    h("strong", { class: "grow clip", title: chat?.title ?? "" }, chat?.title || t("assistant.title")),
     chats.length > 0 && pick,
-    chat && h("button", { type: "button", class: "icon-btn", title: t("assistant.forget"), "aria-label": t("assistant.forget"), onclick: forgetAssistantChat }, icon("trash")),
-    h("button", { type: "button", class: "icon-btn", "aria-label": t("common.close"), onclick: closeAssistant }, icon("x")),
+    chat && tool(t("assistant.newChat"), "plus", () => ((assistantUi.chat = null), paintAssistant(), panel.querySelector("textarea").focus())),
+    chat && tool(t("assistant.forget"), "trash", forgetAssistantChat),
+    tool(t(wide ? "assistant.narrow" : "assistant.wide"), wide ? "shrink" : "expand", () => (panel.classList.toggle("wide"), rememberAssistant(), paintAssistant()), "wide-only"),
+    tool(t("assistant.hide"), "down", closeAssistant),
   );
   const body = panel.querySelector(".assistant-body");
   // new words are followed down the panel unless the person has scrolled up to read
@@ -7648,6 +7663,7 @@ async function loadAssistant(keep = false) {
     assistantUi.chats = data.chats;
     if (state.overview) state.overview.assistant = data.config.ready;
   } catch {}
+  markAssistantFab();
   if (!keep && assistantUi.chat) return loadAssistantChat(assistantUi.chat.id);
   paintAssistant();
 }
@@ -7660,8 +7676,34 @@ async function forgetAssistantChat() {
   void loadAssistant();
 }
 
-/** Opens the panel; `ask` is sent as the first words of a new chat, `draft` is put into the field */
-function openAssistant({ ask, draft } = {}) {
+/** The round button in the corner of every page: opens the window, and shows when a change waits for a word */
+function assistantFab() {
+  if (!isAdmin()) return;
+  if (!assistantUi.fab) {
+    assistantUi.fab = h("button", { type: "button", class: "assistant-fab", title: t("assistant.title"), "aria-label": t("assistant.title"), onclick: () => (assistantUi.open ? closeAssistant() : openAssistant()) }, icon("chat"), h("span", { class: "fab-dot", hidden: true }));
+    document.body.append(assistantUi.fab);
+    // a window left open stays open after a reload; otherwise only the list of chats is asked for, for the dot
+    if (localStorage.getItem(ASSISTANT_KEY)) {
+      const last = localStorage.getItem(ASSISTANT_KEY + ".chat");
+      if (last) assistantUi.chat = { id: last };
+      openAssistant({ restore: true });
+    }
+    else void loadAssistant(true);
+  }
+}
+
+/** The dot on the button: some chat of this person waits for a yes or no */
+function markAssistantFab() {
+  const dot = assistantUi.fab?.querySelector(".fab-dot");
+  if (!dot) return;
+  dot.hidden = !assistantUi.chats.some((c) => c.status === "asking");
+  assistantUi.fab.classList.toggle("open", assistantUi.open);
+}
+
+const rememberAssistant = () => (assistantUi.open ? localStorage.setItem(ASSISTANT_KEY, assistantUi.panel?.classList.contains("wide") ? "wide" : "open") : localStorage.removeItem(ASSISTANT_KEY));
+
+/** Opens the window; `ask` is sent as the first words of a new chat, `draft` is put into the field */
+function openAssistant({ ask, draft, restore } = {}) {
   if (!assistantUi.panel) {
     const input = h("textarea", { rows: 2, maxLength: 20000, placeholder: t("assistant.placeholder"), "aria-label": t("assistant.placeholder") });
     const submit = () => {
@@ -7677,29 +7719,38 @@ function openAssistant({ ask, draft } = {}) {
       }
     });
     const form = h("form", { class: "assistant-form", onsubmit: (e) => (e.preventDefault(), submit()) }, input, h("button", { class: "btn primary square", "aria-label": t("assistant.send"), title: t("assistant.send") }, icon("arrow")));
-    assistantUi.panel = h("aside", { class: "assistant", "aria-label": t("assistant.title") }, h("div", { class: "assistant-head" }), h("div", { class: "assistant-body" }), form);
+    assistantUi.panel = h("aside", { class: "assistant" + (localStorage.getItem(ASSISTANT_KEY) === "wide" ? " wide" : ""), "aria-label": t("assistant.title") }, h("div", { class: "assistant-head" }), h("div", { class: "assistant-body" }), form);
     document.body.append(assistantUi.panel);
   }
   assistantUi.open = true;
   assistantUi.panel.hidden = false;
-  document.body.classList.add("with-assistant");
+  rememberAssistant();
+  markAssistantFab();
   const input = assistantUi.panel.querySelector("textarea");
   if (ask) assistantUi.chat = null;
   if (draft) input.value = draft;
   paintAssistant();
   void loadAssistant().then(() => ask && assistantUi.config?.ready && sendToAssistant(ask, true));
-  input.focus();
+  // a window put back after a reload does not take the keyboard from the page
+  if (!restore) input.focus();
 }
 
 function closeAssistant() {
   assistantUi.open = false;
   if (assistantUi.panel) assistantUi.panel.hidden = true;
-  document.body.classList.remove("with-assistant");
+  rememberAssistant();
+  markAssistantFab();
 }
 
 /** The server says a chat moved on: the one on the screen is read again */
 function assistantEvent(event) {
-  if (!assistantUi.open || event.owner !== state.user?.id) return;
+  if (event.owner !== state.user?.id) return;
+  // with the window hidden, only the dot on the button follows
+  if (!assistantUi.open) {
+    clearTimeout(assistantUi.timer);
+    assistantUi.timer = setTimeout(() => void loadAssistant(true), 300);
+    return;
+  }
   clearTimeout(assistantUi.timer);
   assistantUi.timer = setTimeout(() => {
     if (assistantUi.chat?.id === event.chat) void loadAssistantChat(event.chat);

@@ -2179,5 +2179,8 @@
   "tools.iptables.what": "The firewall rules of Linux.",
   "tools.iptables.where": "Network",
   "tools.holds.outside": "It keeps the interface marked as the internet side closed. Mark it as the home network first.",
-  "tools.holds.docker": "Docker needs it: removing it would take Docker away too."
+  "tools.holds.docker": "Docker needs it: removing it would take Docker away too.",
+  "assistant.wide": "Make the window bigger",
+  "assistant.narrow": "Make the window smaller",
+  "assistant.hide": "Hide"
 }

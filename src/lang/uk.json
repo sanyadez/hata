@@ -2179,5 +2179,8 @@
   "tools.iptables.what": "Правила мережевого екрана Linux.",
   "tools.iptables.where": "Мережа",
   "tools.holds.outside": "Він тримає закритим інтерфейс, позначений як бік інтернету. Спершу позначте його домашньою мережею.",
-  "tools.holds.docker": "Він потрібен Docker: разом із ним піде й Docker."
+  "tools.holds.docker": "Він потрібен Docker: разом із ним піде й Docker.",
+  "assistant.wide": "Збільшити вікно",
+  "assistant.narrow": "Зменшити вікно",
+  "assistant.hide": "Сховати"
 }
