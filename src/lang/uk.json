@@ -2482,5 +2482,19 @@
   "moveapp.volumes": "Томи Docker не переносяться; там застосунок почне з порожніми:",
   "moveapp.go": "Перенести",
   "moveapp.none": "Зараз немає іншої машини з Docker на зв'язку.",
-  "machines.move": "Перенести на іншу машину"
+  "machines.move": "Перенести на іншу машину",
+  "machines.wake": "Розбудити",
+  "machines.wakeSent": "Сигнал пробудження надіслано на {name}. Машина з'явиться за хвилину-дві, якщо в BIOS її мережевої карти увімкнено Wake-on-LAN.",
+  "machines.reboot": "Перезавантажити",
+  "machines.poweroff": "Вимкнути",
+  "machines.rebootTitle": "Перезавантажити {name}?",
+  "machines.poweroffTitle": "Вимкнути {name}?",
+  "machines.rebootLead": "Усе, що там працює, зупиниться на хвилину-дві; клієнт підключиться знову сам, щойно машина запуститься.",
+  "machines.poweroffLead": "Машина вимкнеться. Розбудити її звідси можна, якщо в її мережевої карти увімкнено Wake-on-LAN; інакше — кнопкою живлення.",
+  "machines.rebootDone": "{name} перезавантажується.",
+  "machines.poweroffDone": "{name} вимикається.",
+  "error.machine.noMac": "Hata не знає мережевої карти {name}, щоб її розбудити.",
+  "activity.machine.wake": "Надіслано сигнал пробудження: {target}",
+  "activity.machine.reboot": "Машину перезавантажено: {target}",
+  "activity.machine.poweroff": "Машину вимкнено: {target}"
 }

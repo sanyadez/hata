@@ -2104,6 +2104,7 @@ function paintMachineCard(m) {
       ? [meter(t("sys.cpu"), s.cpu, t("sys.cores", { n: s.cores })), meter(t("sys.memory"), mem, bytes(s.memory.total)), disk && meter(t("sys.disk"), diskPercent, t("sys.free", { free: bytes(disk.total - disk.used), total: bytes(disk.total) }))]
       : h("p", { class: "muted small" }, m.online ? t("machines.waiting") : t("machines.seen", { ago: ago(m.seen) })),
     m.outdated && m.online && h("p", { class: "small accent-text" }, t("machines.outdated", { version: m.info.version })),
+    !m.online && m.info?.macs?.length > 0 && h("div", { class: "row-actions" }, button(t("machines.wake"), { class: "small", onclick: (e) => (e.preventDefault(), e.stopPropagation(), wakeMachine(m, e.currentTarget)) }, "play")),
   );
 }
 
@@ -2189,6 +2190,7 @@ function renderMachineHead() {
         { class: "actions" },
         m.outdated && m.online && button(t("machines.update", { version: machinesUi.list.version }), { class: "accent", onclick: (e) => updateMachine(m, e.currentTarget) }, "up"),
         m.online && h("a", { class: "btn", href: filesHash("/", m.id) }, icon("folder"), h("span", null, t("machines.files"))),
+        !m.online && m.info?.macs?.length > 0 && button(t("machines.wake"), { class: "primary", onclick: (e) => wakeMachine(m, e.currentTarget) }, "play"),
         h("button", { type: "button", class: "btn square", "aria-label": t("app.more"), onclick: () => machineMenu(m) }, icon("more")),
       ),
     ),
@@ -2203,8 +2205,50 @@ function machineMenu(m) {
     "menu",
     h("header", null, h("span", { class: "machine-icon" }, icon("server")), h("div", null, h("h2", null, m.name), machineChip(m))),
     item(t("machines.rename"), "edit", () => renameMachineDialog(m)),
+    !m.online && m.info?.macs?.length > 0 && item(t("machines.wake"), "play", () => wakeMachine(m)),
+    m.online && item(t("machines.reboot"), "refresh", () => powerDialog(m, "reboot")),
+    m.online && item(t("machines.poweroff"), "stop", () => powerDialog(m, "poweroff")),
     m.online && item(t("machines.updateAgain"), "up", () => updateMachine(m)),
     item(t("machines.remove"), "trash", () => removeMachineDialog(m), "danger"),
+  );
+}
+
+/** The magic packet to the machine's cards: it wakes when its BIOS and card allow it */
+async function wakeMachine(m, el) {
+  if (el) el.disabled = true;
+  try {
+    await api("POST", `/api/machines/${m.id}/wake`, {});
+    toast(t("machines.wakeSent", { name: m.name }));
+  } catch (e) {
+    toast(errorText(e), "error");
+  }
+  if (el) setTimeout(() => (el.disabled = false), 5000);
+}
+
+function powerDialog(m, action) {
+  let dialog;
+  dialog = openDialog(
+    "confirm",
+    h("h2", { class: "wrap" }, t(`machines.${action}Title`, { name: m.name })),
+    h("p", { class: "muted" }, t(`machines.${action}Lead`)),
+    h(
+      "footer",
+      null,
+      closeButton(() => dialog, t("common.cancel")),
+      button(t(`machines.${action}`), {
+        class: "danger",
+        onclick: async (e) => {
+          e.currentTarget.disabled = true;
+          try {
+            await api("POST", `/api/machines/${m.id}/power`, { action });
+            dialog.close();
+            toast(t(`machines.${action}Done`, { name: m.name }));
+          } catch (err) {
+            toast(errorText(err), "error");
+          }
+        },
+      }, action === "reboot" ? "refresh" : "stop"),
+    ),
   );
 }
 

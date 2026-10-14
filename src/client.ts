@@ -11,7 +11,7 @@
  *   hata-client                                            run (what the service does)
  *   hata-client uninstall                                  stop and remove the service
  */
-import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { arch, hostname, release, totalmem } from "node:os";
 import { dirname } from "node:path";
 import { containerCommand, shellCommand, TerminalManager, terminalEnv, type TerminalClient } from "./terminal";
@@ -72,13 +72,30 @@ export interface MachineInfo {
   memory: number;
   version: string;
   docker: { available: boolean; version?: string; compose?: string; state?: string };
+  /** The machine's own network cards, for waking it from Hata (Wake-on-LAN) */
+  macs: { iface: string; mac: string }[];
+}
+
+/** Network cards of the hardware (a `device` in sysfs), not bridges, tunnels or Docker's */
+function macs(): { iface: string; mac: string }[] {
+  const out: { iface: string; mac: string }[] = [];
+  let names: string[] = [];
+  try {
+    names = readdirSync("/sys/class/net");
+  } catch {}
+  for (const iface of names) {
+    if (!existsSync(`/sys/class/net/${iface}/device`)) continue;
+    const mac = read(`/sys/class/net/${iface}/address`).trim().toLowerCase();
+    if (/^([0-9a-f]{2}:){5}[0-9a-f]{2}$/.test(mac) && mac !== "00:00:00:00:00:00") out.push({ iface, mac });
+  }
+  return out;
 }
 
 async function info(): Promise<MachineInfo> {
   const os = /^PRETTY_NAME="?([^"\n]*)"?/m.exec(read("/etc/os-release"))?.[1] ?? "Linux";
   const cpu = /^model name\s*:\s*(.+)$/m.exec(read("/proc/cpuinfo"))?.[1]?.trim() ?? "";
   const docker = await dockerInfo();
-  return { hostname: hostname(), os, kernel: release(), arch: arch(), cpu, cores: navigator.hardwareConcurrency, memory: totalmem(), version: VERSION, docker: { available: docker.available, version: docker.version, compose: docker.compose, state: docker.state } };
+  return { hostname: hostname(), os, kernel: release(), arch: arch(), cpu, cores: navigator.hardwareConcurrency, memory: totalmem(), version: VERSION, docker: { available: docker.available, version: docker.version, compose: docker.compose, state: docker.state }, macs: macs() };
 }
 
 // --- Containers -------------------------------------------------------------------------------------
@@ -345,6 +362,13 @@ function handlersFor(state: LinkState): Record<string, Handler> {
     terminal: (args, channel) => terminal(args, channel),
     update: (args) => update(args, state),
     forget: () => forget(),
+    // the answer goes out first, then the machine goes down
+    power: (args) => {
+      const action = args?.action === "reboot" ? "reboot" : args?.action === "poweroff" ? "poweroff" : "";
+      if (!action) throw new MuxError("request.notFound");
+      setTimeout(() => Bun.spawn(["systemctl", action]), 500);
+      return { ok: true };
+    },
     "apps.list": () => apps.list(),
     "apps.write": (args) => apps.write(args),
     "apps.compose": (args, channel) => apps.compose(args, channel),

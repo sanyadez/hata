@@ -17,7 +17,9 @@
  * `hata-client-linux-<arch>` and SHA256SUMS — takes it from elsewhere).
  */
 import type { ServerWebSocket } from "bun";
+import { createSocket } from "node:dgram";
 import { existsSync, mkdirSync, readFileSync, renameSync } from "node:fs";
+import { networkInterfaces } from "node:os";
 import { join } from "node:path";
 import { record } from "./activity";
 import { AppError } from "./apps";
@@ -201,6 +203,61 @@ export async function remove(id: string, by: string): Promise<void> {
   save();
   record("machine.removed", { user: by, detail: m.name });
   bus.publish("machines");
+}
+
+// --- Power ------------------------------------------------------------------------------------------
+
+/** The Wake-on-LAN magic packet for a card: six bytes of 0xFF, then its address sixteen times */
+export function magicPacket(mac: string): Uint8Array {
+  const bytes = mac.split(/[:-]/).map((x) => parseInt(x, 16));
+  if (bytes.length !== 6 || bytes.some((b) => !Number.isInteger(b) || b < 0 || b > 255)) throw new AppError("machine.noMac", 400);
+  const out = new Uint8Array(102).fill(0xff);
+  for (let i = 0; i < 16; i++) out.set(bytes, 6 + i * 6);
+  return out;
+}
+
+/** The broadcast address of a network: `192.168.1.0/24` from an address and its mask */
+export function broadcastOf(address: string, netmask: string): string {
+  const a = address.split(".").map(Number);
+  const m = netmask.split(".").map(Number);
+  return a.map((x, i) => (x | (~m[i]! & 255)) & 255).join(".");
+}
+
+/**
+ * Wakes a machine that is off or asleep: the magic packet for each of its cards, to every home network
+ * of this server and to the general broadcast, on the usual ports 9 and 7. The machine's card must have
+ * Wake-on-LAN on — that is its BIOS and driver, not Hata.
+ */
+export async function wake(id: string, by: string): Promise<{ sent: number }> {
+  const m = state.machines.find((x) => x.id === id);
+  if (!m) throw new AppError("machine.notFound", 404);
+  const cards = m.info?.macs ?? [];
+  if (!cards.length) throw new AppError("machine.noMac", 409, { name: m.name });
+  const targets = new Set(["255.255.255.255"]);
+  for (const list of Object.values(networkInterfaces())) for (const a of list ?? []) if (a.family === "IPv4" && !a.internal && a.netmask) targets.add(broadcastOf(a.address, a.netmask));
+  const socket = createSocket("udp4");
+  await new Promise<void>((resolve) => socket.bind(0, () => resolve()));
+  socket.setBroadcast(true);
+  let sent = 0;
+  for (const { mac } of cards) {
+    const packet = magicPacket(mac);
+    for (const host of targets) {
+      for (const port of [9, 7]) {
+        await new Promise<void>((resolve) => socket.send(packet, port, host, () => resolve()));
+        sent++;
+      }
+    }
+  }
+  socket.close();
+  record("machine.wake", { user: by, detail: m.name });
+  return { sent };
+}
+
+export async function power(id: string, action: unknown, by: string): Promise<void> {
+  if (action !== "reboot" && action !== "poweroff") throw new AppError("request.notFound", 404);
+  const m = linkOf(id);
+  await (m.peer.call("power", { action }) as Promise<unknown>).catch(asApp);
+  record(`machine.${action}`, { user: by, detail: state.machines.find((x) => x.id === id)?.name ?? id });
 }
 
 // --- The client's binary ----------------------------------------------------------------------------

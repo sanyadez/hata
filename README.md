@@ -246,7 +246,8 @@ Early development. What works today:
   download, and copy or move folders between the server and the machines. Apps from the store are
   installed onto a machine as onto the server, their tiles are on the home page, and an app moves from
   the server to a machine and back, with its data. Their snapshots are kept on the server with the
-  others, in the daily run, and put back from there. Hata keeps the clients at its own version;
+  others, in the daily run, and put back from there. A machine is restarted or shut down from Hata,
+  and woken up again (Wake-on-LAN). Hata keeps the clients at its own version;
 - HTTPS, your choice of three: none (address and ports, for a home network); behind your own proxy (nginx,
   Caddy, Traefik) with a check that the proxy is set up right; or by Hata itself with certificates from
   Let's Encrypt. With a domain, every app has its own address, `<app>.<domain>`;

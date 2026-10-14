@@ -2482,5 +2482,19 @@
   "moveapp.volumes": "Docker volumes are not moved; the app starts there with them empty:",
   "moveapp.go": "Move",
   "moveapp.none": "There is no other machine with Docker connected now.",
-  "machines.move": "Move to another machine"
+  "machines.move": "Move to another machine",
+  "machines.wake": "Wake up",
+  "machines.wakeSent": "The wake-up signal went to {name}. It comes in a minute or two if its network card has Wake-on-LAN on in the BIOS.",
+  "machines.reboot": "Restart",
+  "machines.poweroff": "Shut down",
+  "machines.rebootTitle": "Restart {name}?",
+  "machines.poweroffTitle": "Shut {name} down?",
+  "machines.rebootLead": "Everything running there stops for a minute or two; the client connects again by itself when the machine is up.",
+  "machines.poweroffLead": "The machine turns off. It can be woken from here later if its network card has Wake-on-LAN on; otherwise it needs its power button.",
+  "machines.rebootDone": "{name} is restarting.",
+  "machines.poweroffDone": "{name} is shutting down.",
+  "error.machine.noMac": "Hata does not know a network card of {name} to wake.",
+  "activity.machine.wake": "Wake-up signal sent: {target}",
+  "activity.machine.reboot": "Machine restarted: {target}",
+  "activity.machine.poweroff": "Machine shut down: {target}"
 }

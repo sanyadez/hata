@@ -109,7 +109,7 @@ import { backupMachineApp, restoreMachineApp } from "./machinebackup";
 import { applyMachineCompose, installComposeOnMachine, machineTiles, installOnMachine, machineAppAction, machineAppLogs, machineApps, machineCompose, removeMachineApp, storeAppFor } from "./machineapps";
 import { addStore, ARCH, catalogue, removeStore, scheduleStoreSync, StoreError, syncStore } from "./store";
 import { startSampler, systemStatus } from "./system";
-import { call as machineCall, clientBinary, containersOf, installScript, invite as machineInvite, INVITE_MS, linkData, linkHandlers, machine as machineView, MACHINE_ID_RE, machines as machineList, machinesAway, open as machineOpen, remove as removeMachine, rename as renameMachine, startMachines, updateClient, type LinkSocket } from "./machines";
+import { call as machineCall, clientBinary, containersOf, installScript, invite as machineInvite, INVITE_MS, linkData, linkHandlers, machine as machineView, MACHINE_ID_RE, machines as machineList, machinesAway, open as machineOpen, remove as removeMachine, rename as renameMachine, startMachines, updateClient, wake as wakeMachine, power as powerMachine, type LinkSocket } from "./machines";
 import { availableUpdate, checkForUpdate, confirmUpdate, scheduleUpdateChecks, startRollback, startUpdate, updateStatus } from "./update";
 import { VERSION } from "./version";
 import { zipStream } from "./zip";
@@ -1964,6 +1964,11 @@ async function machinesApi(req: Request, url: URL, server: Server, by: string): 
       return new Response(machineAppLogs(id, name, req.signal), { headers: { ...SECURITY_HEADERS, "content-type": "text/plain; charset=utf-8", "cache-control": "no-store", "x-accel-buffering": "no" } });
     }
     if (part && ["start", "stop", "restart", "update"].includes(part) && method === "POST") return json({ job: (await machineAppAction(id, name, part, by)).id }, 202);
+  }
+  if (rest === "/wake" && method === "POST") return json(await wakeMachine(id, by));
+  if (rest === "/power" && method === "POST") {
+    await powerMachine(id, (await body(req)).action, by);
+    return json({ ok: true });
   }
   if (rest === "/update" && method === "POST") {
     server.timeout(req, 0);
