@@ -4,7 +4,8 @@
  *
  * It has no web page, no users and no settings of its own: it connects to one Hata (the connection is
  * the client's, so the machine needs no open port), and runs what Hata asks — the machine's state, its
- * containers, a terminal, and its own update. Everything is decided on Hata's side; here are the hands.
+ * containers, a terminal, its files (`clientfiles.ts`), and its own update. Everything is decided on
+ * Hata's side; here are the hands.
  *
  *   hata-client join <Hata address> <Hata's key> <code>   pair with Hata and install the service
  *   hata-client                                            run (what the service does)
@@ -15,6 +16,7 @@ import { arch, hostname, release, totalmem } from "node:os";
 import { dirname } from "node:path";
 import { containerCommand, shellCommand, TerminalManager, terminalEnv, type TerminalClient } from "./terminal";
 import { dockerInfo, listContainers, PROJECT_LABEL, run, SERVICE_LABEL, startContainer, stopContainer, type ContainerSummary } from "./docker";
+import * as files from "./clientfiles";
 import { keyPair, linkKeys, Opener, Sealer, splitCode, type KeyPair } from "./link";
 import { MuxError, Peer, type Channel, type Handler } from "./mux";
 import { startSampler, systemStatus } from "./system";
@@ -342,6 +344,23 @@ function handlersFor(state: LinkState): Record<string, Handler> {
     terminal: (args, channel) => terminal(args, channel),
     update: (args) => update(args, state),
     forget: () => forget(),
+    "fs.list": (args) => files.list(args),
+    "fs.summary": (args) => files.summary(args),
+    "fs.info": (args) => files.fileInfo(args),
+    "fs.read": (args, channel) => files.read(args, channel),
+    "fs.text": (args) => files.readText(args),
+    "fs.textPut": (args) => files.writeText(args),
+    "fs.zip": (args, channel) => files.zip(args, channel),
+    "fs.folder": (args) => files.makeFolder(args),
+    "fs.file": (args) => files.makeFile(args),
+    "fs.rename": (args) => files.rename(args),
+    "fs.delete": (args) => files.remove(args),
+    "fs.transfer": (args) => files.transfer(args),
+    "fs.upload": (args, channel) => files.upload(args, channel),
+    "fs.uploadAbort": (args) => files.abortUpload(args),
+    "fs.taken": (args) => files.taken(args),
+    "fs.pack": (args, channel) => files.pack(args, channel),
+    "fs.unpack": (args, channel) => files.unpack(args, channel),
     ping: () => "pong",
   };
 }

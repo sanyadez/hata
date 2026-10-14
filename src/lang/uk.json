@@ -2448,5 +2448,11 @@
   "activity.machine.container.stop": "Зупинено: {target}",
   "activity.machine.container.restart": "Перезапущено: {target}",
   "attention.machine.away.title": "{name} не на зв'язку",
-  "attention.machine.away.text": "Клієнт машини мовчить понад п'ять хвилин: машина вимкнена, поза мережею або клієнт зупинено."
+  "attention.machine.away.text": "Клієнт машини мовчить понад п'ять хвилин: машина вимкнена, поза мережею або клієнт зупинено.",
+  "job.transfer": "Пересилання файлів",
+  "activity.app.transfer.done": "Файли переслано на іншу машину",
+  "activity.app.transfer.failed": "Не вдалося переслати файли на іншу машину",
+  "files.machineNoTrash": "На машині немає кошика: видалене там зникає назавжди.",
+  "machines.files": "Файли",
+  "files.machineDeleteLead": "Файлів: {files}, тек: {dirs}, разом {size}."
 }

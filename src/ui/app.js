@@ -307,7 +307,9 @@ function parseRoute() {
   if (parts[0] === "welcome" && isAdmin()) return { view: "welcome", step: WELCOME_STEPS.includes(parts[1]) && parts[1] !== "admin" ? parts[1] : "server" };
   if (parts[0] === "store" && state.user?.role !== "guest") return { view: "store" };
   // "#/files" is the data root, wherever it is; "#/files/" is the root of the server
-  if (parts[0] === "files" && isAdmin()) return { view: "files", path: /^#\/?files$/.test(location.hash) ? "" : "/" + parts.slice(1).join("/") };
+  // "#/files/@<machine>/<folders>" is a folder of another machine
+  if (parts[0] === "files" && isAdmin() && parts[1]?.startsWith("@")) return { view: "files", machine: parts[1].slice(1), path: "/" + parts.slice(2).join("/") };
+  if (parts[0] === "files" && isAdmin()) return { view: "files", machine: "", path: /^#\/?files$/.test(location.hash) ? "" : "/" + parts.slice(1).join("/") };
   if (parts[0] === "trash" && isAdmin()) return { view: "trash" };
   if (parts[0] === "activity" && isAdmin()) return { view: "activity" };
   if (parts[0] === "backups" && isAdmin()) return { view: "backups" };
@@ -2169,6 +2171,7 @@ function renderMachineHead() {
         "div",
         { class: "actions" },
         m.outdated && m.online && button(t("machines.update", { version: machinesUi.list.version }), { class: "accent", onclick: (e) => updateMachine(m, e.currentTarget) }, "up"),
+        m.online && h("a", { class: "btn", href: filesHash("/", m.id) }, icon("folder"), h("span", null, t("machines.files"))),
         h("button", { type: "button", class: "btn square", "aria-label": t("app.more"), onclick: () => machineMenu(m) }, icon("more")),
       ),
     ),
@@ -3407,7 +3410,12 @@ const filesUi = {
   pick: null,
 };
 
-const filesHash = (path) => "#/files" + (path.split("/").filter(Boolean).map((part) => "/" + encodeURIComponent(part)).join("") || "/");
+/** The address of a folder; `machine` — of another machine, by default the one on screen */
+const filesHash = (path, machine = filesMachine()) => "#/files" + (machine ? "/@" + machine : "") + (path.split("/").filter(Boolean).map((part) => "/" + encodeURIComponent(part)).join("") || "/");
+/** The machine whose files are on screen; "" — this server */
+const filesMachine = () => (state.route.view === "files" ? state.route.machine || "" : "");
+/** Where the file manager's calls go: this server's files or a machine's */
+const filesApi = (sub = "", machine = filesMachine()) => (machine ? `/api/machines/${machine}/files` : "/api/files") + sub;
 const within = (path, dir) => path === dir || path.startsWith(dir === "/" ? "/" : dir + "/");
 
 /** Puts text on the clipboard; on plain HTTP browsers offer no clipboard API, so the old way steps in */
@@ -3424,7 +3432,7 @@ function copyText(text) {
   toast(t("files.pathCopied", { path: text }));
 }
 const joinPath = (dir, name) => (dir === "/" ? "" : dir) + "/" + name;
-const rawUrl = (path, download = false) => `/api/files/raw?path=${encodeURIComponent(path)}${download ? "&download=1" : ""}`;
+const rawUrl = (path, download = false) => `${filesApi("/raw")}?path=${encodeURIComponent(path)}${download ? "&download=1" : ""}`;
 
 // What the browser can show itself; the rest is downloaded.
 const FILE_KINDS = {
@@ -3471,16 +3479,22 @@ async function pinFolder(path, pinned, quiet = true) {
 }
 
 const onFiles = (path) => state.route.view === "files" && state.route.path === path;
+/** The listing on screen, when it is of the folder and machine the address names */
+const filesListing = () => (state.files?.path === state.route.path && (state.files.machine ?? "") === filesMachine() ? state.files : null);
 
 async function loadFiles() {
   const path = state.route.path;
+  const machine = filesMachine();
+  // the other machines are places of the sidebar
+  if (!machinesUi.list) machinesUi.list = await api("GET", "/api/machines").catch(() => null);
   let listing;
   try {
-    listing = await api("GET", `/api/files?path=${encodeURIComponent(path)}`);
+    listing = await api("GET", `${filesApi()}?path=${encodeURIComponent(path)}`);
   } catch (e) {
-    listing = { path, home: state.files?.home ?? "", entries: [], places: state.files?.places ?? [], disk: state.files?.disk ?? null, error: errorText(e) };
+    listing = { path, home: machine ? "/" : (state.files?.home ?? ""), entries: [], places: machine ? [] : (state.files?.places ?? []), pinned: [], shared: [], disk: machine ? null : (state.files?.disk ?? null), error: errorText(e) };
   }
-  if (!onFiles(path)) return;
+  listing.machine = machine;
+  if (!onFiles(path) || filesMachine() !== machine) return;
   if (path !== listing.path) {
     // the page was opened without a folder: the address becomes the data root's
     state.route.path = listing.path;
@@ -3522,14 +3536,32 @@ function filesPlaces(path) {
   const places = document.getElementById("files-places");
   if (!places) return;
   const trash = path === null;
-  const home = state.files?.home ?? "";
+  const machine = trash ? "" : filesMachine();
+  const listing = trash ? null : state.files;
+  const home = machine ? "" : (state.files?.home ?? "");
   const inHome = !trash && home !== "" && within(path, home);
   const inside = (folder) => !trash && within(path, folder);
-  const place = (label, to, iconName, active) => h("a", { class: "cat" + (active ? " active" : ""), href: filesHash(to) }, h("span", { class: "with-icon" }, icon(iconName), h("span", { class: "clip" }, label)));
+  const place = (label, to, iconName, active, on = machine) => h("a", { class: "cat" + (active ? " active" : ""), href: filesHash(to, on) }, h("span", { class: "with-icon" }, icon(iconName), h("span", { class: "clip" }, label)));
   const disk = state.files?.disk;
   const used = disk ? Math.round(((disk.total - disk.free) / disk.total) * 100) : 0;
   const fill = h("i", { class: level(used) });
   fill.style.width = used + "%";
+  const others = machinesUi.list?.machines ?? [];
+  const machinesList = others.length > 0 && [h("div", { class: "cat-title" }, t("nav.machines")), others.map((m) => h("a", { class: "cat" + (machine === m.id ? " active" : "") + (m.online ? "" : " muted"), href: filesHash("/", m.id), title: m.online ? "" : t("machines.offline") }, h("span", { class: "with-icon" }, icon("server"), h("span", { class: "clip" }, m.name))))];
+  if (machine) {
+    const m = others.find((x) => x.id === machine);
+    const volumes = listing?.disks ?? [];
+    return put(
+      places,
+      h("div", { class: "cat-title" }, t("files.places")),
+      h("a", { class: "cat", href: "#/files" }, h("span", { class: "with-icon" }, icon("home"), h("span", { class: "clip" }, t("files.home")))),
+      machinesList,
+      volumes.length > 0 && h("div", { class: "cat-title" }, m?.name ?? t("files.disks")),
+      volumes.length > 0 && [place(t("files.root"), "/", "disk", !volumes.some((d) => within(path, d.path))), volumes.map((d) => place(volumeName(d), d.path, d.network ? "globe" : "disk", inside(d.path)))],
+      disk && h("div", { class: "cat-title" }, t("files.disk")),
+      disk && h("div", { class: "files-disk" }, h("div", { class: "bar" }, fill), h("span", { class: "muted small" }, t("files.free", { free: bytes(disk.free), total: bytes(disk.total) }))),
+    );
+  }
   put(
     places,
     h("div", { class: "cat-title" }, t("files.places")),
@@ -3540,6 +3572,7 @@ function filesPlaces(path) {
     (state.files?.disks ?? []).length > 0 && h("div", { class: "cat-title" }, t("files.disks")),
     (state.files?.disks ?? []).map((d) => place(volumeName(d), d.path, d.network ? "globe" : "disk", inside(d.path))),
     h("a", { class: "cat", href: "#/settings/storage", title: t("netplace.sidebarHint") }, h("span", { class: "with-icon" }, icon("plus"), h("span", { class: "clip muted" }, t("netplace.sidebar")))),
+    machinesList,
     disk && h("div", { class: "cat-title" }, t("files.disk")),
     disk && h("div", { class: "files-disk" }, h("div", { class: "bar" }, fill), h("span", { class: "muted small" }, t("files.free", { free: bytes(disk.free), total: bytes(disk.total) }))),
   );
@@ -3549,14 +3582,17 @@ function renderFilesBody() {
   const main = document.getElementById("files-main");
   if (!main) return;
   const path = state.route.path;
-  const listing = state.files?.path === path ? state.files : null;
+  const listing = filesListing();
   const parts = path.split("/").filter(Boolean);
+  const machine = filesMachine();
+  const machineName = machine && (machinesUi.list?.machines.find((m) => m.id === machine)?.name ?? machine);
 
   filesPlaces(path);
   const crumbs = h(
     "h1",
     { class: "path" },
-    parts.length ? h("a", { href: filesHash("/"), title: t("files.root"), "aria-label": t("files.root") }, "/") : h("span", null, path ? t("files.root") : " "),
+    machine && h("a", { class: "machine-crumb", href: filesHash("/"), title: t("files.root") }, icon("server"), machineName),
+    parts.length ? h("a", { href: filesHash("/"), title: t("files.root"), "aria-label": t("files.root") }, "/") : !machine && h("span", null, path ? t("files.root") : " "),
     parts.map((part, i) => [i > 0 && icon("chevron"), i === parts.length - 1 ? h("span", null, part) : h("a", { href: filesHash("/" + parts.slice(0, i + 1).join("/")) }, part)]),
   );
   const entries = listing ? sortedEntries(listing.entries) : [];
@@ -3586,7 +3622,7 @@ function renderFilesBody() {
       crumbs,
       h("p", { class: "meta" }, path && h("button", { type: "button", class: "copy-path", title: t("files.copyPath"), "aria-label": t("files.copyPath"), onclick: () => copyText(path) }, h("span", null, path), icon("copy")), listing?.readOnly && h("span", { class: "chip warn" }, t("files.readOnly")), listing && !listing.error && h("span", { class: "dot-sep" }, "·"), listing && !listing.error && t("files.count", { dirs: dirs.length, files: rest.length }), rest.length > 0 && h("span", { class: "dot-sep" }, "·"), rest.length > 0 && bytes(rest.reduce((n, entry) => n + entry.size, 0))),
     ),
-    h("div", { class: "actions" }, listing && !listing.error && h("button", { type: "button", class: "btn square" + (isPinned ? " active" : ""), title: t(isPinned ? "files.unpin" : "files.pin"), "aria-label": t(isPinned ? "files.unpin" : "files.pin"), "aria-pressed": String(isPinned), onclick: () => pinFolder(path, !isPinned) }, icon("pin")), listing && !listing.error && h("button", { type: "button", class: "btn square" + (isShared ? " active" : ""), title: t(isShared ? "files.shareSettings" : "files.share"), "aria-label": t(isShared ? "files.shareSettings" : "files.share"), onclick: () => shareDialog(path) }, icon("share")), listing && !listing.error && findBox(path), sort, h("div", { class: "seg" }, modeButton("list", "list"), modeButton("grid", "grid")), button(t("files.new"), { disabled: !listing || !!listing.error || listing.readOnly, onclick: (e) => newMenu(path, e.currentTarget) }, "plus"), button(t("files.upload"), { class: "primary", disabled: !listing || !!listing.error || listing.readOnly, onclick: () => picker.click() }, "upload"), picker),
+    h("div", { class: "actions" }, listing && !listing.error && !machine && h("button", { type: "button", class: "btn square" + (isPinned ? " active" : ""), title: t(isPinned ? "files.unpin" : "files.pin"), "aria-label": t(isPinned ? "files.unpin" : "files.pin"), "aria-pressed": String(isPinned), onclick: () => pinFolder(path, !isPinned) }, icon("pin")), listing && !listing.error && !machine && h("button", { type: "button", class: "btn square" + (isShared ? " active" : ""), title: t(isShared ? "files.shareSettings" : "files.share"), "aria-label": t(isShared ? "files.shareSettings" : "files.share"), onclick: () => shareDialog(path) }, icon("share")), listing && !listing.error && !machine && findBox(path), sort, h("div", { class: "seg" }, modeButton("list", "list"), modeButton("grid", "grid")), button(t("files.new"), { disabled: !listing || !!listing.error || listing.readOnly, onclick: (e) => newMenu(path, e.currentTarget) }, "plus"), button(t("files.upload"), { class: "primary", disabled: !listing || !!listing.error || listing.readOnly, onclick: () => picker.click() }, "upload"), picker),
   );
 
   const selection = h("div", { class: "card selection", id: "files-selection", hidden: true });
@@ -3725,12 +3761,12 @@ async function downloadEntries(entries) {
   if (entries.length === 1 && entries[0].type === "file") return save(rawUrl(joinPath(dir, entries[0].name), true));
   try {
     // the archive is streamed, so its limits are checked before it starts
-    const sum = await api("POST", "/api/files/summary", { paths: entries.map((entry) => joinPath(dir, entry.name)) });
+    const sum = await api("POST", filesApi("/summary"), { paths: entries.map((entry) => joinPath(dir, entry.name)) });
     if (sum.truncated || sum.size > 3.8 * 1024 ** 3 || sum.files + sum.dirs > 60000) return toast(t("error.files.archiveTooLarge"), "error");
   } catch (e) {
     return toast(errorText(e), "error");
   }
-  save("/api/files/zip?" + entries.map((entry) => "path=" + encodeURIComponent(joinPath(dir, entry.name))).join("&"));
+  save(filesApi("/zip") + "?" + entries.map((entry) => "path=" + encodeURIComponent(joinPath(dir, entry.name))).join("&"));
 }
 
 /** Puts a menu where the pointer is, inside the window; a right click beside it moves it there */
@@ -3751,7 +3787,7 @@ function placeAt(dialog, at) {
 function filesContext(e) {
   // Shift leaves the browser's own menu, and so does a field with text in it
   if (e.shiftKey || e.target.closest?.("input, textarea, select") || !e.target.closest?.("#files-main")) return;
-  const listing = state.files?.path === state.route.path ? state.files : null;
+  const listing = filesListing();
   if (!listing || listing.error) return;
   e.preventDefault();
   const at = { x: e.clientX, y: e.clientY };
@@ -3792,8 +3828,8 @@ function folderMenu(at) {
     listing.entries.length > 0 && item(t("files.selectAll"), "check", () => ((filesUi.selected = new Set(listing.entries.map((entry) => entry.name))), renderFilesBody())),
     listing.entries.length > 0 && item(t("files.downloadZip"), "download", () => downloadEntries(listing.entries.filter((entry) => entry.type !== "other"))),
     item(t("files.copyPath"), "link", () => copyText(path)),
-    item(t(listing.pinned.includes(path) ? "files.unpin" : "files.pin"), "pin", () => pinFolder(path, !listing.pinned.includes(path))),
-    item(t(listing.shared.includes(path) ? "files.shareSettings" : "files.share"), "share", () => shareDialog(path)),
+    !listing.machine && item(t(listing.pinned.includes(path) ? "files.unpin" : "files.pin"), "pin", () => pinFolder(path, !listing.pinned.includes(path))),
+    !listing.machine && item(t(listing.shared.includes(path) ? "files.shareSettings" : "files.share"), "share", () => shareDialog(path)),
   );
   placeAt(dialog, at);
 }
@@ -3811,10 +3847,10 @@ function entryMenu(entry, at) {
     ["image", "video", "audio", "pdf"].includes(kind) && item(t("common.open"), "external", () => openEntry(entry)),
     entry.type === "file" && entry.size <= TEXT_MAX && !["image", "video", "audio", "pdf"].includes(kind) && item(t("files.edit"), "edit", () => textDialog(path)),
     entry.type !== "other" && item(t(entry.type === "dir" ? "files.downloadZip" : "files.download"), "download", () => downloadEntries([entry])),
-    entry.type === "file" && ARCHIVE_RE.test(entry.name) && !state.files.readOnly && item(t("files.extract"), "archive", () => extractArchive(path)),
+    entry.type === "file" && ARCHIVE_RE.test(entry.name) && !state.files.readOnly && !filesMachine() && item(t("files.extract"), "archive", () => extractArchive(path)),
     item(t("files.copyPath"), "link", () => copyText(path)),
-    entry.type === "dir" && (state.files.pinned.includes(path) ? item(t("files.unpin"), "pin", () => pinFolder(path, false)) : item(t("files.pin"), "pin", () => pinFolder(path, true))),
-    entry.type === "dir" && item(t(state.files.shared.includes(path) ? "files.shareSettings" : "files.share"), "share", () => shareDialog(path)),
+    entry.type === "dir" && !filesMachine() && (state.files.pinned.includes(path) ? item(t("files.unpin"), "pin", () => pinFolder(path, false)) : item(t("files.pin"), "pin", () => pinFolder(path, true))),
+    entry.type === "dir" && !filesMachine() && item(t(state.files.shared.includes(path) ? "files.shareSettings" : "files.share"), "share", () => shareDialog(path)),
     item(t("files.rename"), "edit", () => renameDialog(entry)),
     item(t("files.move"), "arrow", () => transferDialog([entry], false)),
     item(t("files.copy"), "copy", () => transferDialog([entry], true)),
@@ -3881,7 +3917,7 @@ function newMenu(path, anchor) {
 /** A new empty text file, opened in the editor at once */
 const newFileDialog = (dir) =>
   nameDialog(t("files.newFile"), "", t("files.create"), async (name) => {
-    const res = await api("POST", "/api/files/file", { path: dir, name });
+    const res = await api("POST", filesApi("/file"), { path: dir, name });
     await loadFiles();
     void textDialog(res.path);
   });
@@ -3949,33 +3985,35 @@ function foundList(find) {
   );
 }
 
-const newFolderDialog = (dir, done) =>
+const newFolderDialog = (dir, done, machine = filesMachine()) =>
   nameDialog(t("files.newFolder"), "", t("files.create"), async (name) => {
-    await api("POST", "/api/files/folder", { path: dir, name });
+    await api("POST", filesApi("/folder", machine), { path: dir, name });
     await done();
   });
 
 const renameDialog = (entry) =>
   nameDialog(t("files.renameTitle", { name: entry.name }), entry.name, t("files.rename"), async (name) => {
-    await api("POST", "/api/files/rename", { path: joinPath(state.files.path, entry.name), name });
+    await api("POST", filesApi("/rename"), { path: joinPath(state.files.path, entry.name), name });
     await loadFiles();
   });
 
 async function deleteDialog(entries) {
   const dir = state.files.path;
   const paths = entries.map((entry) => joinPath(dir, entry.name));
+  // a machine keeps no trash: what is deleted there is gone
+  const machine = filesMachine();
   let sum;
   try {
-    sum = await api("POST", "/api/files/summary", { paths });
+    sum = await api("POST", filesApi("/summary"), { paths });
   } catch (e) {
     return toast(errorText(e), "error");
   }
-  const note = h("p", { class: "muted" }, t("files.deleteLead", { files: sum.truncated ? sum.files + "+" : sum.files, dirs: sum.dirs, size: bytes(sum.size) }));
+  const note = h("p", { class: "muted" }, t(machine ? "files.machineDeleteLead" : "files.deleteLead", { files: sum.truncated ? sum.files + "+" : sum.files, dirs: sum.dirs, size: bytes(sum.size) }));
   const run = async (e, forever) => {
     const pressed = e.currentTarget;
     pressed.disabled = true;
     try {
-      await api("POST", "/api/files/delete", { paths, forever });
+      await api("POST", filesApi("/delete"), { paths, forever });
       toast(t(forever ? "files.deletedForever" : "files.trashed", { n: paths.length }));
     } catch (err) {
       // a disk that keeps no trash: what is left is to delete for good, and the dialog says so
@@ -3994,8 +4032,11 @@ async function deleteDialog(entries) {
     "confirm",
     h("h2", { class: "wrap" }, entries.length === 1 ? t("files.deleteTitle", { name: entries[0].name }) : t("files.deleteMany", { n: entries.length })),
     note,
-    within(dir, joinPath(state.files.home, "AppData")) ? h("p", { class: "banner small" }, t("files.deleteAppData")) : null,
-    h("footer", null, button(t("files.deleteForever"), { class: "ghost danger-text small", onclick: (e) => run(e, true) }), closeButton(() => dialog, t("common.cancel")), button(t("files.toTrash"), { class: "primary", autofocus: true, onclick: (e) => run(e, false) }, "trash")),
+    !machine && within(dir, joinPath(state.files.home, "AppData")) ? h("p", { class: "banner small" }, t("files.deleteAppData")) : null,
+    machine && h("p", { class: "banner small" }, t("files.machineNoTrash")),
+    machine
+      ? h("footer", null, closeButton(() => dialog, t("common.cancel")), button(t("files.deleteForever"), { class: "danger", onclick: (e) => run(e, true) }, "trash"))
+      : h("footer", null, button(t("files.deleteForever"), { class: "ghost danger-text small", onclick: (e) => run(e, true) }), closeButton(() => dialog, t("common.cancel")), button(t("files.toTrash"), { class: "primary", autofocus: true, onclick: (e) => run(e, false) }, "trash")),
   );
 }
 
@@ -4070,9 +4111,15 @@ function renderTrash() {
 }
 
 /** Picks the folder to move or copy into */
-/** Walks the folders of the server to choose one: `allowed(at)` says whether the current one will do */
-function folderPicker({ title, start, confirmLabel, action, allowed = () => true, shown = () => true }) {
+/**
+ * Walks the folders of the server to choose one: `allowed(at, machine)` says whether the current one
+ * will do. With `machines` the other machines are a press away too, and `action` gets the machine
+ * ("" — this server) after the folder.
+ */
+function folderPicker({ title, start, confirmLabel, action, allowed = () => true, shown = () => true, machine = "", machines = false }) {
   let at = start;
+  let on = machine;
+  let home = "";
   let dialog;
   const crumbs = h("div", { class: "crumbs wrap" });
   const quick = h("div", { class: "picker-quick" });
@@ -4084,7 +4131,7 @@ function folderPicker({ title, start, confirmLabel, action, allowed = () => true
       confirm.disabled = true;
       error.textContent = "";
       try {
-        await action(at);
+        await action(at, on);
         dialog.close();
       } catch (e) {
         error.textContent = errorText(e);
@@ -4092,45 +4139,60 @@ function folderPicker({ title, start, confirmLabel, action, allowed = () => true
       }
     },
   });
-  const show = async (path) => {
+  const show = async (path, where = on) => {
     let listing;
     try {
-      listing = await api("GET", `/api/files?path=${encodeURIComponent(path)}`);
+      listing = await api("GET", `${filesApi("", where)}?path=${encodeURIComponent(path)}`);
     } catch (e) {
       // a starting folder that is not there yet opens at the nearest one that is
-      if (path === start && path.lastIndexOf("/") > 0) return show((start = path.slice(0, path.lastIndexOf("/"))));
+      if (path === start && where === machine && path.lastIndexOf("/") > 0) return show((start = path.slice(0, path.lastIndexOf("/"))), where);
       return void (error.textContent = errorText(e));
     }
+    on = where;
+    if (!on) home = listing.home;
+    // opened on a machine: this server's data folder is a press away as well
+    else if (machines && !home) home = (await api("GET", "/api/files?path=").catch(() => null))?.home ?? "";
     at = listing.path;
     error.textContent = "";
     const parts = at.split("/").filter(Boolean);
     const crumb = (label, to) => h("button", { type: "button", class: "crumb", onclick: () => show(to) }, label);
-    put(crumbs, crumb("/", "/"), parts.map((part, i) => [i > 0 && icon("chevron"), crumb(part, "/" + parts.slice(0, i + 1).join("/"))]));
-    // the data folder and the disks, one press away wherever the picker is
-    const jump = (label, to, iconName) => h("button", { type: "button", class: "chip-btn" + (at === to || at.startsWith(to + "/") ? " active" : ""), onclick: () => show(to) }, icon(iconName), h("span", { class: "clip" }, label));
-    const volumes = outerVolumes(listing);
-    put(quick, listing.home && jump(t("files.home"), listing.home, "home"), volumes.map((d) => jump(volumeName(d), d.path, d.network ? "globe" : "disk")));
-    quick.hidden = !volumes.length;
-    const inner = sortedEntries(listing.entries).filter((entry) => entry.type === "dir" && shown(joinPath(at, entry.name)));
+    const other = on && machinesUi.list?.machines.find((m) => m.id === on);
+    put(crumbs, other && h("span", { class: "with-icon strong" }, icon("server"), other.name), crumb("/", "/"), parts.map((part, i) => [i > 0 && icon("chevron"), crumb(part, "/" + parts.slice(0, i + 1).join("/"))]));
+    // the data folder and the disks, one press away wherever the picker is; with `machines` the other machines too
+    const jump = (label, to, iconName, target = on) => h("button", { type: "button", class: "chip-btn" + (target === on && (at === to || at.startsWith(to + "/")) ? " active" : ""), onclick: () => show(to, target) }, icon(iconName), h("span", { class: "clip" }, label));
+    const volumes = on ? [] : outerVolumes(listing);
+    const others = machines ? (machinesUi.list?.machines ?? []).filter((m) => m.online) : [];
+    put(quick, (on ? home : listing.home) && jump(t("files.home"), on ? home : listing.home, "home", ""), volumes.map((d) => jump(volumeName(d), d.path, d.network ? "globe" : "disk")), others.map((m) => h("button", { type: "button", class: "chip-btn" + (on === m.id ? " active" : ""), onclick: () => show("/", m.id) }, icon("server"), h("span", { class: "clip" }, m.name))));
+    quick.hidden = !volumes.length && !others.length && !on;
+    const inner = sortedEntries(listing.entries).filter((entry) => entry.type === "dir" && shown(joinPath(at, entry.name), on));
     put(folders, inner.length ? inner.map((entry) => h("button", { type: "button", class: "menu-item", onclick: () => show(joinPath(at, entry.name)) }, icon("folder", "folder-ico"), h("span", { class: "clip grow" }, entry.name), icon("chevron", "faint"))) : h("p", { class: "muted small pad" }, t("files.noFolders")));
-    confirm.disabled = !allowed(at);
+    confirm.disabled = !allowed(at, on);
   };
-  dialog = openDialog("wide", h("h2", { class: "wrap" }, title), quick, crumbs, folders, error, h("footer", null, button(t("files.newFolder"), { onclick: () => newFolderDialog(at, () => show(at)) }, "folder"), closeButton(() => dialog, t("common.cancel")), confirm));
+  dialog = openDialog("wide", h("h2", { class: "wrap" }, title), quick, crumbs, folders, error, h("footer", null, button(t("files.newFolder"), { onclick: () => newFolderDialog(at, () => show(at), on) }, "folder"), closeButton(() => dialog, t("common.cancel")), confirm));
   void show(at);
 }
 
 function transferDialog(entries, copy) {
   const from = state.files.path;
+  const source = filesMachine();
   const paths = entries.map((entry) => joinPath(from, entry.name));
+  const what = entries.length === 1 ? entries[0].name : t("files.items", { n: entries.length });
   folderPicker({
-    title: t(copy ? "files.copyTitle" : "files.moveTitle", { what: entries.length === 1 ? entries[0].name : t("files.items", { n: entries.length }) }),
+    title: t(copy ? "files.copyTitle" : "files.moveTitle", { what }),
     start: from,
+    machine: source,
+    machines: true,
     confirmLabel: t(copy ? "files.copyHere" : "files.moveHere"),
-    allowed: (at) => copy || at !== from,
+    allowed: (at, on) => copy || on !== source || at !== from,
     // a folder cannot go into itself
-    shown: (path) => copy || !paths.includes(path),
-    action: async (to) => {
-      await api("POST", copy ? "/api/files/copy" : "/api/files/move", { paths, to });
+    shown: (path, on) => copy || on !== source || !paths.includes(path),
+    action: async (to, on) => {
+      if (on !== source) {
+        // to another machine: a job that sends the files over
+        const res = await api("POST", "/api/files/transfer", { from: { machine: source, paths }, to: { machine: on, dir: to }, copy });
+        return jobDialog(res.job, "transfer", what, () => void loadFiles());
+      }
+      await api("POST", filesApi(copy ? "/copy" : "/move", source), { paths, to });
       toast(t(copy ? "files.copied" : "files.moved", { n: entries.length, to: to === "/" ? "/" : to.split("/").pop() }));
       await loadFiles();
     },
@@ -4181,9 +4243,10 @@ function mediaDialog(entry) {
 }
 
 async function textDialog(path) {
+  const machine = filesMachine();
   let file;
   try {
-    file = await api("GET", `/api/files/text?path=${encodeURIComponent(path)}`);
+    file = await api("GET", `${filesApi("/text", machine)}?path=${encodeURIComponent(path)}`);
   } catch (e) {
     return toast(errorText(e), "error");
   }
@@ -4196,7 +4259,7 @@ async function textDialog(path) {
     onclick: async () => {
       error.textContent = "";
       try {
-        file = await api("PUT", "/api/files/text", { path, content: area.value, modified: file.modified });
+        file = await api("PUT", filesApi("/text", machine), { path, content: area.value, modified: file.modified });
         save.disabled = true;
         toast(t("settings.saved"));
         if (onFiles(state.files?.path)) void loadFiles();
@@ -4263,7 +4326,7 @@ function sendPart(url, blob, onProgress) {
   });
 }
 
-async function uploadOne({ dir, file, sub, overwrite }) {
+async function uploadOne({ dir, file, sub, overwrite, machine }) {
   const id = crypto.getRandomValues(new Uint32Array(3)).reduce((text, n) => text + n.toString(36), "").padEnd(8, "0").slice(0, 24);
   const base = uploads.sent;
   let offset = 0;
@@ -4272,9 +4335,9 @@ async function uploadOne({ dir, file, sub, overwrite }) {
     const last = offset + blob.size >= file.size;
     const query = new URLSearchParams({ dir, name: file.name, sub, id, offset, last: last ? "1" : "0", overwrite: overwrite ? "1" : "0" });
     try {
-      await sendPart("/api/files/upload?" + query, blob, (loaded) => ((uploads.sent = base + offset + loaded), paintUpload()));
+      await sendPart(filesApi("/upload", machine) + "?" + query, blob, (loaded) => ((uploads.sent = base + offset + loaded), paintUpload()));
     } catch (e) {
-      if (offset > 0 || uploads.cancelled) void fetch(`/api/files/upload?${new URLSearchParams({ dir, sub, id })}`, { method: "DELETE" }).catch(() => {});
+      if (offset > 0 || uploads.cancelled) void fetch(`${filesApi("/upload", machine)}?${new URLSearchParams({ dir, sub, id })}`, { method: "DELETE" }).catch(() => {});
       uploads.sent = base + file.size;
       throw e;
     }
@@ -4297,11 +4360,13 @@ function paintUpload() {
   );
 }
 
-function queueUpload(dir, items, overwrite = false) {
+const queueUpload = (dir, items, overwrite = false) => queueUploadOn(filesMachine(), dir, items, overwrite);
+
+function queueUploadOn(machine, dir, items, overwrite = false) {
   if (!items.length) return;
   if (!uploads.running) Object.assign(uploads, { count: 0, done: 0, bytes: 0, sent: 0, started: Date.now(), failed: [], conflicts: [], cancelled: false });
   for (const item of items) {
-    uploads.queue.push({ dir, overwrite, ...item });
+    uploads.queue.push({ dir, overwrite, machine, ...item });
     uploads.count++;
     uploads.bytes += item.file.size;
   }
@@ -4320,7 +4385,7 @@ async function runUploads() {
     paintUpload();
     try {
       // a name that is plainly taken is not sent just to be refused
-      if (!item.overwrite && !item.sub && state.files?.path === item.dir && state.files.entries.some((entry) => entry.name === item.file.name)) {
+      if (!item.overwrite && !item.sub && state.files?.path === item.dir && (state.files.machine ?? "") === item.machine && state.files.entries.some((entry) => entry.name === item.file.name)) {
         uploads.sent += item.file.size;
         throw new ApiError(409, "files.exists");
       }
@@ -4351,7 +4416,7 @@ function replaceDialog(conflicts) {
     "confirm",
     h("h2", null, t("files.replaceTitle", { n: conflicts.length })),
     h("ul", { class: "paths small" }, conflicts.slice(0, 8).map((item) => h("li", null, item.sub ? `${item.sub}/${item.file.name}` : item.file.name)), conflicts.length > 8 && h("li", null, "…")),
-    h("footer", null, closeButton(() => dialog, t("files.skip")), button(t("files.replace"), { class: "danger", onclick: () => (dialog.close(), queueUpload(conflicts[0].dir, conflicts.map(({ file, sub }) => ({ file, sub })), true)) })),
+    h("footer", null, closeButton(() => dialog, t("files.skip")), button(t("files.replace"), { class: "danger", onclick: () => (dialog.close(), queueUploadOn(conflicts[0].machine, conflicts[0].dir, conflicts.map(({ file, sub }) => ({ file, sub })), true)) })),
   );
 }
 

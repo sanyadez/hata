@@ -949,3 +949,5 @@ body:has(> .assistant-fab) #view:not(.fill) { padding-bottom: 104px; }
 .machine-containers th:nth-child(1) { width: 38%; }
 .machine-containers th:nth-child(2) { width: 24%; }
 .machine-containers th:last-child { width: 1%; }
+.path .machine-crumb { display: inline-flex; align-items: center; gap: 8px; margin-right: 6px; }
+.path .machine-crumb .ico { width: 0.9em; height: 0.9em; }

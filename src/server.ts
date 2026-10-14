@@ -103,6 +103,7 @@ import { addDevice as addWireguardDevice, changeDevice as changeWireguardDevice,
 import { IMAGE_MIME, imageType, wallpaperSvg, WALLPAPERS } from "./wallpapers";
 import { containerCommand, MAX_BUFFERED_BYTES, shellCommand, TerminalError, TerminalManager, terminalEnv, WS_SLOW_CLIENT, type TerminalClient, type TerminalStart } from "./terminal";
 import { MuxError, type Channel } from "./mux";
+import { crossTransfer } from "./machinefiles";
 import { addStore, ARCH, catalogue, removeStore, scheduleStoreSync, StoreError, syncStore } from "./store";
 import { startSampler, systemStatus } from "./system";
 import { call as machineCall, clientBinary, containersOf, installScript, invite as machineInvite, INVITE_MS, linkData, linkHandlers, machine as machineView, MACHINE_ID_RE, machines as machineList, machinesAway, open as machineOpen, remove as removeMachine, rename as renameMachine, startMachines, updateClient, type LinkSocket } from "./machines";
@@ -516,7 +517,7 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
   if (write && !sameOrigin(req, url)) return fail(403, "request.crossSite");
   const ip = clientIp(req, server);
   // the API takes small JSON bodies; the server's own limit is the apps' (they upload files through it)
-  if (write && path !== "/api/files/upload" && path !== "/api/appearance/wallpaper" && Number(req.headers.get("content-length") ?? 0) > MAX_API_BODY) return fail(413, "request.tooLarge");
+  if (write && path !== "/api/files/upload" && !/^\/api\/machines\/[a-f0-9]{8}\/files\/upload$/.test(path) && path !== "/api/appearance/wallpaper" && Number(req.headers.get("content-length") ?? 0) > MAX_API_BODY) return fail(413, "request.tooLarge");
   const cookie = (token: string) => sessionCookie(token, requestProto(req) === "https", cookieDomain(requestHost(req)));
   const client = { ip, userAgent: req.headers.get("user-agent") ?? "" };
 
@@ -1663,6 +1664,11 @@ function disposition(kind: "inline" | "attachment", name: string): string {
  */
 function sendFile(req: Request, path: string | null, download: boolean): Response {
   const file = readable(path);
+  return sendBytes(req, file, download, (start, end) => Bun.file(file.file).slice(start, end + 1));
+}
+
+/** A file to the browser, with ranges for players: `bytes` gives the part from `start` to `end`, inclusive */
+function sendBytes(req: Request, file: { name: string; size: number; modified: number; inline: string }, download: boolean, bytes: (start: number, end: number) => BodyInit): Response {
   const inline = !download && file.inline !== "";
   const etag = `"${file.size.toString(36)}-${file.modified.toString(36)}"`;
   const headers: Record<string, string> = {
@@ -1683,9 +1689,9 @@ function sendFile(req: Request, path: string | null, download: boolean): Respons
     const start = range[1] ? Number(range[1]) : Math.max(0, file.size - Number(range[2]));
     const end = range[1] && range[2] ? Math.min(Number(range[2]), file.size - 1) : file.size - 1;
     if (start > end || start >= file.size) return new Response(null, { status: 416, headers: { ...headers, "content-range": `bytes */${file.size}` } });
-    return new Response(Bun.file(file.file).slice(start, end + 1), { status: 206, headers: { ...headers, "content-range": `bytes ${start}-${end}/${file.size}`, "content-length": String(end - start + 1) } });
+    return new Response(bytes(start, end), { status: 206, headers: { ...headers, "content-range": `bytes ${start}-${end}/${file.size}`, "content-length": String(end - start + 1) } });
   }
-  return new Response(Bun.file(file.file), { headers });
+  return new Response(file.size ? bytes(0, file.size - 1) : "", { headers: { ...headers, "content-length": String(file.size) } });
 }
 
 /** The paths of a file action as the activity log keeps them: the full path of one, or the first names and a count */
@@ -1747,6 +1753,8 @@ async function files(req: Request, url: URL, server: Server, by: string): Promis
     record(path.endsWith("copy") ? "files.copy" : "files.move", { user: by, detail: `${filesNamed(data.paths)} → ${data.to}` });
     return json({ ok: true });
   }
+  // between Hata and a machine, or two machines: a job
+  if (path === "/api/files/transfer" && method === "POST") return json({ job: (await crossTransfer(await body(req), by)).id }, 202);
   if (path === "/api/files/delete" && method === "POST") {
     server.timeout(req, 0);
     const data = await body(req);
@@ -1806,6 +1814,81 @@ const CONTAINER_ID_RE = /^[a-f0-9]{12,64}$/;
 const PROJECT_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 const CONTAINER_ACTIONS = ["start", "stop", "restart"];
 
+/**
+ * The file manager's calls for a machine's files: the same shapes as `/api/files`, answered by the
+ * machine's client. No trash there (a delete is for good), no pins, shares, search or unpacking.
+ */
+async function machineFiles(req: Request, url: URL, server: Server, id: string, sub: string, by: string): Promise<Response> {
+  const method = req.method;
+  const q = url.searchParams;
+  const name = machineView(id).name;
+  const ask = <T>(op: string, args: unknown) => machineCall<T>(id, op, args);
+  const said = (code: string, detail: string) => record(code, { user: by, detail: `${name}:${detail}`.slice(0, 300) });
+  server.timeout(req, 0);
+  if (sub === "" && method === "GET") return json(await ask("fs.list", { path: q.get("path") ?? "" }));
+  if (sub === "/raw" && method === "GET") {
+    const path = q.get("path");
+    const file = await ask<{ name: string; size: number; modified: number; inline: string }>("fs.info", { path });
+    return sendBytes(req, file, q.get("download") === "1", (start, end) => {
+      const channel = machineOpen(id, "fs.read", { path, start, end });
+      req.signal.addEventListener("abort", () => channel.cancel(), { once: true });
+      return channel.readable();
+    });
+  }
+  if (sub === "/zip" && method === "GET") {
+    const paths = q.getAll("path");
+    const channel = machineOpen(id, "fs.zip", { paths });
+    req.signal.addEventListener("abort", () => channel.cancel(), { once: true });
+    const stem = paths.length === 1 ? paths[0]!.split("/").pop() : paths[0]?.split("/").slice(-2, -1)[0];
+    return new Response(channel.readable(), { headers: { "x-content-type-options": "nosniff", "content-type": "application/zip", "content-disposition": disposition("attachment", `${stem || "files"}.zip`), "cache-control": "no-store" } });
+  }
+  if (sub === "/summary" && method === "POST") return json(await ask("fs.summary", { paths: (await body(req)).paths }));
+  if (sub === "/text" && method === "GET") return json(await ask("fs.text", { path: q.get("path") }));
+  if (sub === "/text" && method === "PUT") {
+    const data = await body(req);
+    return json(await ask("fs.textPut", { path: data.path, content: data.content, modified: data.modified }));
+  }
+  if ((sub === "/folder" || sub === "/file") && method === "POST") {
+    const data = await body(req);
+    return json(await ask(sub === "/folder" ? "fs.folder" : "fs.file", { path: data.path, name: data.name }), 201);
+  }
+  if (sub === "/rename" && method === "POST") {
+    const data = await body(req);
+    const renamed = await ask<{ path: string }>("fs.rename", { path: data.path, name: data.name });
+    said("files.rename", `${data.path} → ${renamed.path.split("/").pop()}`);
+    return json(renamed);
+  }
+  if ((sub === "/move" || sub === "/copy") && method === "POST") {
+    const data = await body(req);
+    await ask("fs.transfer", { paths: data.paths, to: data.to, copy: sub === "/copy" });
+    said(sub === "/copy" ? "files.copy" : "files.move", `${filesNamed(data.paths)} → ${data.to}`);
+    return json({ ok: true });
+  }
+  if (sub === "/delete" && method === "POST") {
+    const data = await body(req);
+    await ask("fs.delete", { paths: data.paths });
+    said("files.deleteForever", filesNamed(data.paths));
+    return json({ ok: true });
+  }
+  if (sub === "/upload" && method === "PUT") {
+    const channel = machineOpen(id, "fs.upload", { dir: q.get("dir"), name: q.get("name"), sub: q.get("sub") ?? "", id: q.get("id") ?? "", offset: Number(q.get("offset") ?? 0), last: q.get("last") === "1", overwrite: q.get("overwrite") === "1" });
+    try {
+      if (req.body) for await (const chunk of req.body) await channel.send(chunk);
+      channel.end();
+    } catch {
+      channel.cancel();
+    }
+    return json(await (channel.result as Promise<unknown>).catch((e) => {
+      throw e instanceof MuxError ? new AppError(e.code, 400, e.detail) : e;
+    }));
+  }
+  if (sub === "/upload" && method === "DELETE") {
+    await ask("fs.uploadAbort", { dir: q.get("dir"), sub: q.get("sub") ?? "", id: q.get("id") ?? "" });
+    return json({ ok: true });
+  }
+  return fail(404, "request.notFound");
+}
+
 async function machinesApi(req: Request, url: URL, server: Server, by: string): Promise<Response | null> {
   const path = url.pathname;
   const method = req.method;
@@ -1842,6 +1925,7 @@ async function machinesApi(req: Request, url: URL, server: Server, by: string): 
     req.signal.addEventListener("abort", () => channel.cancel(), { once: true });
     return new Response(channel.readable(), { headers: { ...SECURITY_HEADERS, "content-type": "text/plain; charset=utf-8", "cache-control": "no-store", "x-accel-buffering": "no" } });
   }
+  if (rest.startsWith("/files")) return machineFiles(req, url, server, id, rest.slice(6), by);
   if (rest === "/update" && method === "POST") {
     server.timeout(req, 0);
     await updateClient(id, by);

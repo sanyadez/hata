@@ -2448,5 +2448,11 @@
   "activity.machine.container.stop": "Stopped: {target}",
   "activity.machine.container.restart": "Restarted: {target}",
   "attention.machine.away.title": "{name} is not connected",
-  "attention.machine.away.text": "The machine's client has been silent for more than five minutes: the machine is off, away from the network, or the client is stopped."
+  "attention.machine.away.text": "The machine's client has been silent for more than five minutes: the machine is off, away from the network, or the client is stopped.",
+  "job.transfer": "Sending files",
+  "activity.app.transfer.done": "Files sent to another machine",
+  "activity.app.transfer.failed": "Sending files to another machine failed",
+  "files.machineNoTrash": "A machine has no trash: what is deleted there is gone for good.",
+  "machines.files": "Files",
+  "files.machineDeleteLead": "Files: {files}, folders: {dirs}, {size} in total."
 }

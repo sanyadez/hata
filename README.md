@@ -242,7 +242,9 @@ Early development. What works today:
   Hata: one line run there installs a small client that connects to Hata by itself (no port to open on
   the machine, the connection is encrypted end to end even over plain HTTP), and the machine shows its
   state, its Docker containers grouped by compose project (start, stop, restart, logs, a shell inside)
-  and a terminal of its own. Hata keeps the clients at its own version;
+  and a terminal of its own. Its files are in Hata's Files next to the server's: look, edit, upload,
+  download, and copy or move folders between the server and the machines. Hata keeps the clients at
+  its own version;
 - HTTPS, your choice of three: none (address and ports, for a home network); behind your own proxy (nginx,
   Caddy, Traefik) with a check that the proxy is set up right; or by Hata itself with certificates from
   Let's Encrypt. With a domain, every app has its own address, `<app>.<domain>`;

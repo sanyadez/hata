@@ -501,6 +501,26 @@ export async function transfer(paths: unknown, to: unknown, copy: boolean): Prom
   }
 }
 
+/** Entries that are to be sent to another machine: they lie in one folder, which tar is run in */
+export function packable(paths: unknown): { dir: string; names: string[] } {
+  const all = pathList(paths).map(locate);
+  const dir = dirname(all[0]!);
+  for (const abs of all) {
+    if (dirname(abs) !== dir || abs === "/") throw new AppError("files.badPath");
+    if (isVirtual(abs)) throw new AppError("files.virtual", 403);
+    if (!lstatOrNull(abs)) throw new AppError("files.notFound", 404);
+  }
+  return { dir, names: all.map((abs) => basename(abs)) };
+}
+
+/** A folder that is to receive entries from another machine, and which of their names it has already */
+export function receiving(to: unknown, names: string[]): { dir: string; taken: string[] } {
+  const dir = locate(to);
+  mustBeDir(dir);
+  mustWrite(dir);
+  return { dir, taken: names.map(validName).filter((name) => lstatOrNull(join(dir, name)) !== null) };
+}
+
 /** File systems that keep no owners and no permissions: what comes from them is everybody's and "executable" */
 const OWNERLESS = /^(vfat|msdos|exfat|ntfs|ntfs3|fuseblk|iso9660|udf|hfsplus)$/;
 
