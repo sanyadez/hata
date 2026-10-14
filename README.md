@@ -99,8 +99,9 @@ Early development. What works today:
 - the dashboard is yours to arrange: plain links next to the apps, named groups, folders of tiles that
   open in place like on a phone — all by dragging, mouse or finger, with no editing mode to enter; groups
   and the blocks of the page (system numbers, what needs attention, activity) are dragged too, and can be
-  taken off and added back; the whole layout can also be edited as text (YAML); a tile opens the app, the
-  small button next to it leads to its page in Hata;
+  taken off and added back; the whole layout can also be edited as text (YAML); a tile opens the app, its
+  menu (the button next to it, or a right click) starts, stops and restarts it and leads to its
+  settings, logs, terminal and backups;
 - a name on the home network: Hata answers to `hata.local` and every app to `<app>.hata.local` over
   multicast DNS — nothing to set up on phones, computers or the router; the name is yours to change, and
   one with another ending (`hata.lan`) works too once your router's DNS knows it;
@@ -130,7 +131,10 @@ Early development. What works today:
   fixed, or off), a Wi-Fi network that hides its name is joined by typing it, an interface handed over
   to NetworkManager can be given back;
   on request every way is checked each minute, a spare one takes over while the main has no internet,
-  and a way that stops reaching the internet shows up in "needs attention";
+  and a way that stops reaching the internet shows up in "needs attention"; an interface the internet
+  comes in on (a provider's cable straight in the server) is marked as the internet side, and nothing of
+  the server answers there — the pages, the apps with Docker's ports, the network folders — while an
+  interface with a public address that is not marked is pointed out;
 - newer images: once a day the registries are asked whether the tags of your apps have moved on, and an
   app with a newer image is marked; on request the running apps are updated by themselves at a set time,
   each after a snapshot of its data;
@@ -209,7 +213,7 @@ Early development. What works today:
   Windows, in the sidebar of Finder and in the Files app of a phone, under its name on the home network;
 - files: the server's files in the browser, opened in the data folder and reaching everywhere — folders,
   upload by drag and drop (whole folders too, large files in parts), download of a file or of a folder as a
-  ZIP archive, rename, move, copy, delete — into a trash, from where a thing is put back within 30 days —, copying a path, putting a folder on the dashboard, a menu on the right click (of the file, of everything selected, of the folder), pictures, video and sound opened in place, text
+  ZIP archive, rename, move, copy, delete — into a trash, from where a thing is put back within 30 days —, copying a path, putting a folder on the dashboard, a menu on the right click (of the file, of everything selected, of the folder), the other disks of the server at the top of the data folder and in every folder picker, pictures, video and sound opened in place, text
   files edited in place. What is uploaded into an app's folder belongs to the same user the app runs as;
   the system's own folders cannot be deleted by a slip of the hand;
 - users: administrators, members (who see the apps and open them, nothing more) and shared guest accounts;
@@ -240,7 +244,7 @@ Early development. What works today:
   or replaces a compose file then waits until an administrator allows it — on Hata's page or from the
   notification. A connector with nowhere to paste a key signs in instead (OAuth): it is given the
   server's address, and an administrator says in Hata what it may do;
-- an assistant on Hata's own pages: ask in your own words why an app is down or what fills the disk, and
+- an assistant on every page of Hata, in a window opened from the button in the corner: ask in your own words why an app is down or what fills the disk, and
   it looks with the same tools and acts — what only looks runs at once, every change is shown first
   and waits for "Run". The model is yours to name: the API of a provider you have a key for, or a model
   on your own machine;
