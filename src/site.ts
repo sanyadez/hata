@@ -51,6 +51,24 @@ export const appLabel = (name: string): string => name.replace(/_/g, "-");
 export const labelOf = (app: { name: string; subdomain?: string }): string => app.subdomain || appLabel(app.name);
 
 /** The address of an app under the domain */
+/**
+ * The address of an app's page as the person would open it, the way the tile does: with Hata opened by
+ * its domain (or its local name), `<label>.<domain>`; otherwise the host Hata was opened at and the
+ * app's port. `origin` is where Hata was opened, `http://192.168.1.10`; null — the app has no page.
+ */
+export function webAddress(app: { name: string; subdomain?: string; port?: number; scheme?: string; index?: string; hostname?: string }, origin: string, domains: string[]): string | null {
+  if (!app.port) return null;
+  let at: URL;
+  try {
+    at = new URL(origin);
+  } catch {
+    return null;
+  }
+  const index = app.index || "/";
+  if (!app.hostname && domains.includes(at.hostname)) return `${at.protocol}//${labelOf(app)}.${at.hostname}${at.port ? ":" + at.port : ""}${index}`;
+  return `${app.scheme || "http"}://${app.hostname || at.hostname}:${app.port}${index}`;
+}
+
 export const appHost = (app: { name: string; subdomain?: string }): string => `${labelOf(app)}.${siteDomain()}`;
 
 /**

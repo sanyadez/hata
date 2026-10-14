@@ -1,6 +1,6 @@
 import { afterAll, expect, test } from "bun:test";
 import { localName, settings } from "../src/config";
-import { appHost, appLabel, classifyHost, cookieDomain, domainOf, localDomain, requestPort, requestProto, siteDomain } from "../src/site";
+import { appHost, appLabel, classifyHost, cookieDomain, domainOf, localDomain, requestPort, requestProto, siteDomain, webAddress } from "../src/site";
 
 const req = (headers: Record<string, string> = {}) => new Request("http://10.0.0.5/", { headers });
 afterAll(() => {
@@ -62,4 +62,18 @@ test("the name on the home network is a domain too, next to the one that is set"
 test("a single word is a name ending in .local; a whole name is kept as it is", () => {
   expect(["hata", " Attic ", "hata.local", "hata.lan", "nas.home.arpa.", "my-server.internal"].map(localName)).toEqual(["hata.local", "attic.local", "hata.local", "hata.lan", "nas.home.arpa", "my-server.internal"]);
   expect(["", "bad name", "-hata", "hata..lan", "hata.1", "a_b.lan", 5, null].map(localName)).toEqual([null, null, null, null, null, null, null, null]);
+});
+
+test("an app's page as the person would open it", () => {
+  const app = { name: "adminer", port: 8080, scheme: "http", index: "/" };
+  const domains = ["hata-pc.example.com", "test.local"];
+  // opened by its address: that host and the app's port, not the machine's name
+  expect(webAddress(app, "http://192.168.1.128", domains)).toBe("http://192.168.1.128:8080/");
+  // opened by its domain or its local name: the app's own name there
+  expect(webAddress(app, "https://hata-pc.example.com", domains)).toBe("https://adminer.hata-pc.example.com/");
+  expect(webAddress({ ...app, subdomain: "db" }, "http://test.local:8081", domains)).toBe("http://db.test.local:8081/");
+  // an app that names a host of its own keeps it; one without a page has no address
+  expect(webAddress({ ...app, hostname: "nas.lan", index: "/ui" }, "http://192.168.1.128", domains)).toBe("http://nas.lan:8080/ui");
+  expect(webAddress({ name: "worker" }, "http://192.168.1.128", domains)).toBeNull();
+  expect(webAddress(app, "not a url", domains)).toBeNull();
 });

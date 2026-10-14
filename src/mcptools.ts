@@ -12,6 +12,7 @@
  * A compose file is shown whole only to a key of the level that may change it; the others get it with
  * the values that look like secrets hidden (`maskCompose`): what an agent reads leaves this machine.
  */
+import { localDomain, siteDomain, webAddress } from "./site";
 import { recent } from "./activity";
 import { settings } from "./config";
 import { type Level } from "./agents";
@@ -192,10 +193,14 @@ async function settle(job: Job, wait = WAIT_MS) {
   return jobView(job);
 }
 
-const brief = (app: InstalledApp) => ({
+/** An app's page as the caller would open it; the host name of the machine is often no address at all */
+const addressOf = (app: InstalledApp, caller?: Caller): string | null => (caller?.origin ? webAddress(app, caller.origin, [siteDomain(), localDomain()].filter(Boolean)) : null);
+
+const brief = (app: InstalledApp, caller?: Caller) => ({
   name: app.name,
   title: app.title,
   status: app.status,
+  ...(addressOf(app, caller) ? { address: addressOf(app, caller) } : {}),
   ...(app.store ? { store: app.store } : {}),
   ...(app.update ? { newerVersionInStore: true } : {}),
   ...(app.newer.length ? { newerImagesInRegistry: app.newer } : {}),
@@ -260,7 +265,7 @@ const read: Omit<Tool, "level" | "effect">[] = [
     name: "apps_list",
     title: "Installed apps",
     description: "Every installed app with its status (running, partial, stopped), containers, images and published ports.",
-    run: async () => (await listApps("en")).map(brief),
+    run: async (_args: Record<string, unknown>, caller: Caller) => (await listApps("en")).map((app) => brief(app, caller)),
   },
   {
     name: "app_get",
@@ -268,11 +273,11 @@ const read: Omit<Tool, "level" | "effect">[] = [
     description: "One app in detail: containers and their state, CPU and memory use right now, the folders it keeps data in, where its compose file lies, when it was installed.",
     input: APP,
     required: ["app"],
-    run: (args) =>
+    run: (args, caller) =>
       wrap(async () => {
         const name = appName(args);
         const [app, stats] = await Promise.all([appDetail(name, "en"), appStats(name).catch(() => ({}))]);
-        return { ...brief(app), installedAt: when(app.installedAt), composeFile: app.composeFile, dataFolders: app.folders, usage: stats };
+        return { ...brief(app, caller), installedAt: when(app.installedAt), composeFile: app.composeFile, dataFolders: app.folders, usage: stats };
       }),
   },
   {
@@ -292,10 +297,10 @@ const read: Omit<Tool, "level" | "effect">[] = [
   {
     name: "app_diagnose",
     title: "Diagnose an app",
-    description: "Everything needed to say why an app is down or misbehaving, in one call: the state of each container (exit code, restarts, out-of-memory kills, health check), whether its web page answers (`webPage`), the tail of the log, the app's recent operations, and `findings` — the likely causes in plain words.",
+    description: "Everything needed to say why an app is down or misbehaving, in one call: the state of each container (exit code, restarts, out-of-memory kills, health check), whether its web page answers on the server itself (`webPage`) and at the address the person opens it by (`atAddress`), the tail of the log, the app's recent operations, and `findings` — the likely causes in plain words.",
     input: APP,
     required: ["app"],
-    run: (args) =>
+    run: (args, caller) =>
       wrap(async () => {
         const name = appName(args);
         const [app, docker] = await Promise.all([appDetail(name, "en"), dockerInfo()]);
@@ -313,6 +318,9 @@ const read: Omit<Tool, "level" | "effect">[] = [
         const guarded = settings.access[name];
         const port = guarded?.protect && guarded.upstream ? guarded.upstream : app.port;
         const page = port && !app.hostname && app.status !== "stopped" ? await answers(`${app.scheme}://127.0.0.1:${port}${app.index}`) : null;
+        // and at the address the person opens it by: a domain, a proxy or the gate may stand in between
+        const address = addressOf(app, caller);
+        const outside = address && app.status !== "stopped" ? await answers(address) : null;
         const disks = system.disks.map((d) => ({ path: d.path, percent: percent(d.used, d.total) }));
         return {
           app: name,
@@ -322,6 +330,7 @@ const read: Omit<Tool, "level" | "effect">[] = [
           containers: containers.map((c, i) => ({ ...c, image: app.containers[i]!.image, since: app.containers[i]!.status, ports: app.containers[i]!.ports })),
           recentOperations: operations.map(({ ts, code, user, detail }) => ({ at: when(ts), code, ...(user ? { by: user } : {}), ...(detail ? { detail } : {}) })),
           ...(page ? { webPage: page } : {}),
+          ...(outside ? { atAddress: outside } : {}),
           logTail: clip(log),
         };
       }),
@@ -458,7 +467,15 @@ const operate: Omit<Tool, "level" | "effect">[] = [
     description: `${description} Waits up to half a minute; an operation that takes longer comes back as a running job — ask job_get.`,
     input: APP,
     required: ["app"],
-    run: (args: Record<string, unknown>, caller: Caller) => wrap(() => settle(appAction(appName(args), action, caller.user))),
+    run: (args: Record<string, unknown>, caller: Caller) =>
+      wrap(async () => {
+        const name = appName(args);
+        const outcome = await settle(appAction(name, action, caller.user));
+        // where to open it now, so that nobody makes an address up
+        const app = action === "stop" ? null : await appDetail(name, "en").catch(() => null);
+        const address = app && addressOf(app, caller);
+        return address ? { ...outcome, address } : outcome;
+      }),
   })),
   {
     name: "app_install",
@@ -553,6 +570,7 @@ export function instructions(caller: Caller): string {
   return [
     "Hata is a home server: apps run in Docker, each app is a plain compose project. This server lets you see its state and manage the apps.",
     `You are connected with the access key "${caller.name}" of the level "${caller.level}". ${LEVEL_WORDS[caller.level]} Users, passwords, files, a shell and Hata's own settings are not reachable from here at any level — for those the person uses Hata's web UI.`,
+    "An app's page is `address` in apps_list, app_get and what starting it returns: give that address as it is — never build one from the machine's host name, which is often not reachable.",
     "Start with `overview`. When an app does not work, `app_diagnose` gives its state, the tail of its log and the likely causes in one call.",
     "Operations that take long (install, update, backup) wait up to half a minute and then return a job that is still running: ask `job_get` until it is done or failed.",
     ...(caller.confirm ? ["Removing an app, restoring a snapshot and replacing a compose file need the word of an administrator in Hata each time, for this access key. Such a call waits for it for half a minute; when it answers that nobody has allowed it yet, ask the person to open Hata and allow it, then repeat the call with the same arguments."] : []),

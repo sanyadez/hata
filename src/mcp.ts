@@ -19,6 +19,8 @@ export interface Caller {
   user: string;
   /** A call that may destroy something waits for an administrator's word */
   confirm?: boolean;
+  /** Where the caller reaches Hata, `http://192.168.1.10`: apps' addresses are given with that host */
+  origin?: string;
 }
 
 /** An error the model sees as the result of its call (and can correct), not a failure of the protocol */

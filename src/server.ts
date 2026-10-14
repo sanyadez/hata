@@ -1475,7 +1475,7 @@ async function mcp(req: Request, server: Server): Promise<Response> {
   if (Number(req.headers.get("content-length") ?? 0) > MAX_API_BODY) return new Response(null, { status: 413 });
   // a tool waits for an operation for half a minute; the default idle timeout would cut the answer
   server.timeout(req, 120);
-  return mcpResponse(req, TOOLS, { name: key.name, level: key.level, user: agentUser(key), confirm: key.confirm }, { version: VERSION, instructions: mcpInstructions, approve: (tool, args, caller) => desk.ask(caller.name, tool, args) });
+  return mcpResponse(req, TOOLS, { name: key.name, level: key.level, user: agentUser(key), confirm: key.confirm, origin: `${requestProto(req)}://${req.headers.get("host") ?? new URL(req.url).host}` }, { version: VERSION, instructions: mcpInstructions, approve: (tool, args, caller) => desk.ask(caller.name, tool, args) });
 }
 
 /** A file name for the Content-Disposition header, whatever letters it has */

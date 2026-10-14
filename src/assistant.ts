@@ -456,7 +456,7 @@ export interface Host {
 }
 
 function go(chat: Chat, host: Host): void {
-  const caller: Caller = { name: "assistant", level: config.level, user: `${ASSISTANT_PREFIX}${chat.ownerName}` };
+  const caller: Caller = { name: "assistant", level: config.level, user: `${ASSISTANT_PREFIX}${chat.ownerName}`, ...(host.origin ? { origin: host.origin } : {}) };
   const tools = toolsFor(host.tools, config.level);
   const system = systemPrompt(host.instructions(caller), chat.ownerName, host.origin);
   const settings = config;
