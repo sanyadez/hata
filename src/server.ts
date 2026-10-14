@@ -673,7 +673,8 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
       throw e;
     }
   }
-  const assistantHost = { tools: TOOLS, instructions: mcpInstructions };
+  // where the person has Hata open: the assistant gives the addresses of apps with that host
+  const assistantHost = { tools: TOOLS, instructions: mcpInstructions, origin: `${requestProto(req)}://${req.headers.get("host") ?? new URL(req.url).host}` };
   if (path === "/api/assistant/chats" && method === "POST") {
     const chat = sayToAssistant(user, null, (await body(req)).text, assistantHost);
     return typeof chat === "string" ? fail(400, chat) : json(shownChat(chat), 201);

@@ -853,6 +853,8 @@ body:has(> .assistant-fab) #view:not(.fill) { padding-bottom: 104px; }
 .assistant-head { display: flex; align-items: center; gap: 8px; padding: 12px 12px 12px 18px; border-bottom: 1px solid var(--border); }
 .assistant-head strong { font-family: var(--font-heading); font-size: 16px; }
 .assistant-head select { max-width: 170px; }
+.assistant-head .pick { min-width: 0; display: flex; }
+.assistant-head .pick select { max-width: 100%; width: 100%; }
 .assistant-body { overflow-y: auto; padding: 16px 18px; display: flex; flex-direction: column; gap: 10px; min-height: 0; overscroll-behavior: contain; }
 .assistant-empty { margin: auto 0; display: grid; gap: 10px; justify-items: start; }
 .assistant-starts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }

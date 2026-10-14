@@ -385,11 +385,12 @@ export const shownChat = ({ turns, owner: _, ...chat }: Chat) => ({ ...chat, tur
 export const titleOf = (text: string): string => text.replace(/\s+/g, " ").trim().slice(0, 60) || "…";
 
 /** What the model is told about where it is and how to behave */
-export function systemPrompt(base: string, user: string): string {
+export function systemPrompt(base: string, user: string, origin = ""): string {
   return [
     base,
     `You are the assistant built into Hata's web UI, talking with ${user}, an administrator of this server. Answer in the language the person writes in, briefly and in plain words: say what you found and what you suggest, not how you looked.`,
     "Tools that only look run at once. A tool that changes something is shown to the person with “Run” and “Decline” buttons before it runs — so do not ask for permission in words first: say in a sentence what you are about to do and why, and call the tool. If it comes back declined, do not repeat it.",
+    ...(origin ? [`The person has Hata open at ${origin}. An app's page is on the same host at the app's own port (or at the address the app's tile has): give whole addresses with that host, never a placeholder for it.`] : []),
     "When you do not know, look with a tool instead of guessing. What you cannot do with the tools (users, files, a shell, Hata's own settings), the person does in the web UI — name the page.",
   ].join("\n");
 }
@@ -450,12 +451,14 @@ export const findChat = (owner: string, id: string): Chat | undefined => chats.f
 export interface Host {
   tools: Tool[];
   instructions: (caller: Caller) => string;
+  /** Where the person has Hata open, `http://192.168.1.10` */
+  origin?: string;
 }
 
 function go(chat: Chat, host: Host): void {
   const caller: Caller = { name: "assistant", level: config.level, user: `${ASSISTANT_PREFIX}${chat.ownerName}` };
   const tools = toolsFor(host.tools, config.level);
-  const system = systemPrompt(host.instructions(caller), chat.ownerName);
+  const system = systemPrompt(host.instructions(caller), chat.ownerName, host.origin);
   const settings = config;
   const abort = new AbortController();
   running.set(chat.id, abort);

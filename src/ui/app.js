@@ -7683,8 +7683,8 @@ function paintAssistant() {
   const tool = (label, name, onclick, cls = "") => h("button", { type: "button", class: "icon-btn " + cls, title: label, "aria-label": label, onclick }, icon(name));
   put(
     panel.querySelector(".assistant-head"),
-    h("strong", { class: "grow clip", title: chat?.title ?? "" }, chat?.title || t("assistant.title")),
-    chats.length > 0 && pick,
+    // with chats to choose from the list names the one on the screen; otherwise the window says what it is
+    chats.length > 0 ? h("span", { class: "grow pick" }, pick) : h("strong", { class: "grow" }, t("assistant.title")),
     chat && tool(t("assistant.newChat"), "plus", () => ((assistantUi.chat = null), paintAssistant(), panel.querySelector("textarea").focus())),
     chat && tool(t("assistant.forget"), "trash", forgetAssistantChat),
     tool(t(wide ? "assistant.narrow" : "assistant.wide"), wide ? "shrink" : "expand", () => (panel.classList.toggle("wide"), rememberAssistant(), paintAssistant()), "wide-only"),
@@ -7702,6 +7702,10 @@ function paintAssistant() {
 
 async function loadAssistantChat(id) {
   assistantUi.chat = await api("GET", `/api/assistant/chats/${id}`).catch(() => null);
+  // the list keeps up with the chat on the screen, for the dot on the button
+  const listed = assistantUi.chats.find((c) => c.id === id);
+  if (listed && assistantUi.chat) listed.status = assistantUi.chat.status;
+  markAssistantFab();
   paintAssistant();
 }
 
