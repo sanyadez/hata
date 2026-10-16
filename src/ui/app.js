@@ -1304,12 +1304,13 @@ function renderFolder() {
 
 // --- Dragging a tile (mouse, pen and finger alike) -------------------------------------------------
 
-const DROP_CLASSES = ["drop-before", "drop-after", "drop-into", "drop-end", "drop-above", "drop-below"];
+const DROP_CLASSES = ["drop-into"];
 
 /**
  * A press on something that can be moved — a tile, a group (by its heading), a block of the dashboard:
  * a mouse drags once it moves, a finger after holding still — moving first is scrolling. `kind` says
- * where it may land (`find`) and what a drop does (`drop`).
+ * where it may land (`find`) and what a drop does (`drop`). What is dragged stays in the page as its own
+ * outline and moves there as the pointer goes, the others making room: the page shows how it will be.
  */
 function dragStart(e, item, kind = TILE_DRAG, el = e.currentTarget) {
   if (homeUi.drag || e.button > 0 || e.target.closest(kind.ignore)) return;
@@ -1324,6 +1325,7 @@ function dragStart(e, item, kind = TILE_DRAG, el = e.currentTarget) {
     drag.ghost.classList.add("drag-ghost");
     drag.ghost.style.width = rect.width + "px";
     drag.ghost.removeAttribute("id");
+    drag.home = { parent: el.parentNode, next: el.nextSibling };
     for (const marked of drag.ghost.querySelectorAll("[id]")) marked.removeAttribute("id");
     // a modal dialog is drawn above everything else on the page
     (homeUi.folder?.dialog ?? document.body).append(drag.ghost);
@@ -1360,6 +1362,8 @@ function dragStart(e, item, kind = TILE_DRAG, el = e.currentTarget) {
     dragMove(drag);
   };
   const up = (ev) => ev.pointerId === drag.id && dragEnd(ev.type === "pointerup");
+  // Escape puts it back where it was
+  const key = (ev) => ev.key === "Escape" && drag.active && (ev.preventDefault(), dragEnd(false));
   // while a tile is in the air the page under the finger stays put
   const still = (ev) => drag.active && ev.cancelable && ev.preventDefault();
   drag.stop = () => {
@@ -1367,11 +1371,13 @@ function dragStart(e, item, kind = TILE_DRAG, el = e.currentTarget) {
     removeEventListener("pointerup", up);
     removeEventListener("pointercancel", up);
     removeEventListener("touchmove", still);
+    removeEventListener("keydown", key, true);
   };
   addEventListener("pointermove", move);
   addEventListener("pointerup", up);
   addEventListener("pointercancel", up);
   addEventListener("touchmove", still, { passive: false });
+  addEventListener("keydown", key, true);
 }
 
 /** Above or below the block under the pointer, by which half of it the pointer is in */
@@ -1386,6 +1392,8 @@ function besideBlock(drag, selector, name) {
 /** A group is moved among the groups */
 const GROUP_DRAG = {
   name: "group",
+  sibling: ".group[data-group-id]",
+  key: "groupId",
   ignore: "button, a, input",
   find: (drag) => besideBlock(drag, ".group[data-group-id]", "groupId"),
   drop: (drag, target) =>
@@ -1400,14 +1408,19 @@ const GROUP_DRAG = {
 /** A block — the system's numbers, what needs attention, the activity — is moved among the blocks and the places for them */
 const WIDGET_DRAG = {
   name: "widget",
+  sibling: ".widget[data-widget]",
+  key: "widget",
+  end: (zone) => ({ zone: zone.dataset.zone }),
   ignore: "button, a, input",
   find: (drag) => {
     const beside = besideBlock(drag, ".widget[data-widget]", "widget");
     if (beside) return beside;
-    // not over a block: the free room of a place takes the block at its end
+    // not over a block: the free room of a place below its blocks takes the block at its end
     const under = document.elementFromPoint(drag.x, drag.y);
     const zone = under?.closest("[data-zone]");
-    return zone && !under.closest(".widget") ? { el: zone, cls: "drop-end", zone: zone.dataset.zone } : null;
+    if (!zone || under.closest(".widget")) return null;
+    const last = [...zone.querySelectorAll(":scope > .widget")].filter((w) => w !== drag.el).at(-1);
+    return !last || drag.y > last.getBoundingClientRect().bottom ? { el: zone, cls: "drop-end", zone: zone.dataset.zone } : null;
   },
   drop: (drag, target) =>
     changeLayout((layout) => {
@@ -1423,6 +1436,9 @@ const WIDGET_DRAG = {
 /** A tile is moved among the tiles, into a folder, onto another tile (which makes a folder), out of an open folder */
 const TILE_DRAG = {
   name: "tile",
+  sibling: ".tile[data-key]",
+  key: "key",
+  end: (list) => ({ group: list.dataset.group }),
   ignore: ".tile-open",
   find: dropTarget,
   drop: (drag, target) => {
@@ -1456,19 +1472,54 @@ function dropTarget(drag) {
     if (mayJoin && part > 0.28 && part < 0.72) return key.startsWith("folder:") ? { el: over, cls: "drop-into", folder: key.slice(7) } : { el: over, cls: "drop-into", onto: key };
     return part < 0.5 ? { el: over, cls: "drop-before", before: key } : { el: over, cls: "drop-after", after: key };
   }
+  // the room after the last tile of a group; a gap between two tiles is not the end
   const list = under.closest(".tiles[data-group]");
-  if (list && !over) return { el: list, cls: "drop-end", group: list.dataset.group };
-  return null;
+  if (!list || over) return null;
+  const last = [...list.querySelectorAll(":scope > .tile[data-key]")].filter((tile) => tile !== drag.el).at(-1)?.getBoundingClientRect();
+  return !last || drag.y > last.bottom || (drag.y >= last.top && drag.x > last.right) ? { el: list, cls: "drop-end", group: list.dataset.group } : null;
 }
 
 function dragMove(drag) {
   drag.ghost.style.transform = `translate(${drag.x - drag.dx}px, ${drag.y - drag.dy}px)`;
-  const target = drag.kind.find(drag);
+  let target = drag.kind.find(drag);
+  // over its own outline, or between two things: it stays where it is shown
+  if (!target && drag.target && !drag.target.out && drag.target.cls !== "drop-into") target = drag.target;
   drag.marked?.classList.remove(...DROP_CLASSES);
   homeUi.folder?.dialog.classList.toggle("drop-out", !!target?.out);
-  drag.marked = target?.el ?? null;
-  if (target?.el) target.el.classList.add(target.cls);
+  drag.marked = null;
+  if (target?.cls === "drop-into") (drag.marked = target.el).classList.add("drop-into");
+  else if (target?.el && target !== drag.target) makeRoom(drag, target);
   drag.target = target;
+}
+
+/** The outline of what is dragged goes where it would land, and the others move aside */
+function makeRoom(drag, target) {
+  const { el } = drag;
+  const before = target.cls === "drop-before" || target.cls === "drop-above";
+  const after = target.cls === "drop-after" || target.cls === "drop-below";
+  if (before && target.el.previousElementSibling !== el) target.el.before(el);
+  else if (after && target.el.nextElementSibling !== el) target.el.after(el);
+  else if (target.cls === "drop-end" && target.el.lastElementChild !== el) target.el.append(el);
+  else return;
+  drag.shifted = true;
+  if (drag.kind === WIDGET_DRAG) markEmptyZones();
+}
+
+const markEmptyZones = () => document.querySelectorAll(".zone[data-zone]").forEach((zone) => zone.classList.toggle("empty", !zone.querySelector(":scope > .widget")));
+
+/** Where the outline stands, said as the drop of the kind takes it: after the one before it, before the one after it, or at the end */
+function landing(drag) {
+  const { el, kind } = drag;
+  const near = (step) => {
+    let at = el[step];
+    while (at && !(at.matches(kind.sibling) && !at.classList.contains("drag-ghost"))) at = at[step];
+    return at;
+  };
+  const prev = near("previousElementSibling");
+  if (prev) return { after: prev.dataset[kind.key] };
+  const next = near("nextElementSibling");
+  if (next) return { before: next.dataset[kind.key] };
+  return kind.end?.(el.parentElement) ?? null;
 }
 
 function dragEnd(drop) {
@@ -1489,8 +1540,12 @@ function dragEnd(drop) {
     setTimeout(() => removeEventListener("click", swallow, { capture: true }));
   }
   setTimeout(() => homeUi.drag === drag && (homeUi.drag = null));
-  const target = drop && drag.active ? drag.target : null;
+  const last = drop && drag.active ? drag.target : null;
+  const target = last?.out || last?.cls === "drop-into" ? last : drop && drag.shifted ? landing(drag) : null;
   if (!target) {
+    // let go somewhere else: it goes back where it was
+    if (drag.shifted && drag.home.parent.isConnected) drag.home.parent.insertBefore(drag.el, drag.home.next?.parentNode === drag.home.parent ? drag.home.next : null);
+    if (drag.kind === WIDGET_DRAG) markEmptyZones();
     if (homeUi.stale) setTimeout(renderHomeBody);
     return;
   }
