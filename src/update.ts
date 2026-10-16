@@ -7,7 +7,8 @@
  * service and waits for the new version to say it is up. If it does not — the binary does not run on this
  * machine, or crashes at start — the previous binary is put back and started again.
  *
- * Nothing is installed without the administrator asking for it.
+ * Nothing is installed without the administrator asking for it: by the button, or by turning on the daily
+ * install (`settings.update.auto`, off by default).
  */
 import { chmodSync, copyFileSync, existsSync, readFileSync, renameSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
@@ -196,6 +197,29 @@ export async function checkForUpdate(): Promise<UpdateStatus> {
 export function scheduleUpdateChecks(): void {
   setTimeout(() => void checkForUpdate(), 30_000);
   setInterval(() => void checkForUpdate(), CHECK_EVERY_MS);
+  let lastDay = "";
+  setInterval(() => {
+    if (!settings.update.auto || unsupported() || stage) return;
+    const now = new Date();
+    const time = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+    const day = now.toDateString();
+    if (time !== settings.update.time || lastDay === day) return;
+    lastDay = day;
+    void installByItself();
+  }, 20_000);
+}
+
+/** The daily install: a fresh check, then the version offered — unless that one already failed here */
+async function installByItself(): Promise<void> {
+  await checkForUpdate();
+  const version = availableUpdate();
+  if (!version) return;
+  // the version that did not start was put back within this minute: it is not tried again by itself
+  const last = readRecord();
+  if (last?.status === "rolledBack" && last.to === version) return;
+  // nor is the one the administrator went back from by "Back to …"
+  if (last && compareVersions(last.to, last.from) < 0 && compareVersions(version, last.from) <= 0) return;
+  startUpdate("schedule");
 }
 
 /**

@@ -6691,6 +6691,23 @@ function channelRow() {
   return settingRow(t("update.channel"), t(channel === "beta" ? "update.channelBetaHint" : "update.channelHint"), pick);
 }
 
+/** The daily install of the version offered; off unless turned on, and only where Hata can replace itself */
+function autoUpdateRow() {
+  if (!state.update || !state.settings || state.update.unsupported) return null;
+  const u = state.settings.update;
+  const save = async (patch) => {
+    try {
+      state.settings = await api("PUT", "/api/settings", { update: patch });
+    } catch (e) {
+      toast(errorText(e), "error");
+    }
+    renderSettings();
+  };
+  const auto = h("input", { type: "checkbox", checked: u.auto, "aria-label": t("update.auto"), onchange: () => save({ auto: auto.checked }) });
+  const time = h("input", { type: "time", value: u.time, class: "short mono", required: true, "aria-label": t("update.autoTime"), hidden: !u.auto, onchange: () => time.value && save({ time: time.value }) });
+  return settingRow(t("update.auto"), t(u.auto ? "update.autoOnHint" : "update.autoHint", { zone: state.settings.systemTimezone }), h("div", { class: "row-actions" }, time, auto));
+}
+
 /** Going back to the version that ran before: the same watched restart as an update */
 function rollbackDialog(u) {
   let dialog;
@@ -6918,6 +6935,7 @@ function settingsSection(section) {
       settingRow("Hata", t("settings.aboutHint"), h("span", { class: "mono" }, state.version)),
       updateRow(),
       channelRow(),
+      autoUpdateRow(),
       settingRow("Docker", d?.available ? "" : (d?.error ?? ""), h("span", { class: "mono" }, d?.available ? `${d.version} · compose ${d.compose}` : "—")),
       settingRow(t("settings.source"), "", h("a", { class: "link", href: "https://github.com/sanyadez/hata", target: "_blank", rel: "noopener noreferrer" }, "github.com/sanyadez/hata", icon("external"))),
     ),

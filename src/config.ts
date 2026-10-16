@@ -111,8 +111,11 @@ export interface Settings {
   appearance: Appearance;
   /** The walk through a new server is still ahead: set when the first administrator is created */
   welcome: boolean;
-  /** Which releases of Hata itself are offered: `stable` only, or `beta` — pre-releases too */
-  update: { channel: "stable" | "beta" };
+  /**
+   * Which releases of Hata itself are offered: `stable` only, or `beta` — pre-releases too; `auto` installs
+   * the one offered by itself every day at `time` (local, HH:MM), off unless the administrator turns it on
+   */
+  update: { channel: "stable" | "beta"; auto: boolean; time: string };
 }
 
 export interface HttpsSettings {
@@ -199,7 +202,7 @@ const DEFAULTS: Settings = {
   dashboard: cleanLayout(null),
   appearance: DEFAULT_APPEARANCE,
   welcome: false,
-  update: { channel: "stable" },
+  update: { channel: "stable", auto: false, time: "05:00" },
 };
 
 /** A host name with at least two labels: letters, digits and hyphens */
@@ -219,6 +222,8 @@ export interface Favorite {
   dir: boolean;
 }
 
+const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+
 const saved = readJsonFile<Partial<Settings>>(SETTINGS_FILE, {}, isPlainObject);
 
 export const settings: Settings = {
@@ -237,7 +242,11 @@ export const settings: Settings = {
   https: { ...DEFAULTS.https, ...(isPlainObject(saved.https) ? saved.https : {}) },
   local: { ...DEFAULTS.local, ...(isPlainObject(saved.local) ? saved.local : {}) },
   welcome: saved.welcome === true,
-  update: { channel: isPlainObject(saved.update) && saved.update.channel === "beta" ? "beta" : "stable" },
+  update: {
+    channel: isPlainObject(saved.update) && saved.update.channel === "beta" ? "beta" : "stable",
+    auto: isPlainObject(saved.update) && saved.update.auto === true,
+    time: isPlainObject(saved.update) && typeof saved.update.time === "string" && TIME_RE.test(saved.update.time) ? saved.update.time : DEFAULTS.update.time,
+  },
   network: { outside: cleanOutside(isPlainObject(saved.network) ? saved.network.outside : []) },
   security: { adminTwoFactor: isPlainObject(saved.security) && saved.security.adminTwoFactor === true },
   storage: { automount: isPlainObject(saved.storage) && saved.storage.automount === true, ignored: isPlainObject(saved.storage) && Array.isArray(saved.storage.ignored) ? saved.storage.ignored.filter((id): id is string => typeof id === "string") : [] },
@@ -264,7 +273,6 @@ export function timezone(): string {
   return settings.timezone || Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
 }
 
-const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 /** Validates and applies a partial update; returns an error code or null */
 export function updateSettings(patch: Record<string, unknown>): string | null {
@@ -353,8 +361,18 @@ export function updateSettings(patch: Record<string, unknown>): string | null {
   }
   if ("update" in patch) {
     const u = patch.update;
-    if (!isPlainObject(u) || (u.channel !== "stable" && u.channel !== "beta")) return "settings.badChannel";
-    next.update = { channel: u.channel };
+    if (!isPlainObject(u)) return "settings.badChannel";
+    const update = { ...next.update };
+    if ("channel" in u) {
+      if (u.channel !== "stable" && u.channel !== "beta") return "settings.badChannel";
+      update.channel = u.channel;
+    }
+    if ("auto" in u) update.auto = u.auto === true;
+    if ("time" in u) {
+      if (typeof u.time !== "string" || !TIME_RE.test(u.time)) return "settings.badTime";
+      update.time = u.time;
+    }
+    next.update = update;
   }
   if ("https" in patch) {
     const h = patch.https;
