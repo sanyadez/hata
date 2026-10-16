@@ -2352,8 +2352,16 @@ async function addMachineDialog() {
     return toast(errorText(e), "error");
   }
   const known = new Set((machinesUi.list?.machines ?? []).map((m) => m.id));
-  const addresses = [...new Set([location.origin, invite.lan?.replace(/\/$/, "")].filter(Boolean))];
+  const addresses = [...new Set([location.origin, invite.lan, invite.local].filter(Boolean).map((a) => a.replace(/\/$/, "")))];
   let address = addresses[0];
+  // what kind of address it is: by the domain, the server's number on the home network, or its .local name
+  const kindOf = (url) => {
+    const host = new URL(url).hostname;
+    if (invite.local && host === new URL(invite.local).hostname) return "local";
+    return /^[\d.]+$|^\[/.test(host) ? "lan" : "domain";
+  };
+  const about = h("p", { class: "muted small" });
+  const explain = () => (about.textContent = t("machines.addVia." + kindOf(address) + "Hint"));
   const line = () => `curl -fsSL ${address}/client/${invite.code} | sudo sh`;
   const cmd = h("span", { class: "grow mono machine-line" }, line());
   const waiting = h("p", { class: "machine-wait" }, h("span", { class: "machine-pulse" }), t("machines.addWaiting"));
@@ -2362,10 +2370,12 @@ async function addMachineDialog() {
     addresses.length > 1 &&
     h(
       "div",
-      { class: "kv" },
-      h("span", { class: "muted" }, t("machines.addAddress")),
-      h("select", { onchange: (e) => ((address = e.target.value), (cmd.textContent = line())) }, addresses.map((a) => h("option", { value: a }, a))),
+      { class: "stack-s" },
+      h("label", { for: "machine-address", class: "strong" }, t("machines.addAddress")),
+      h("select", { id: "machine-address", onchange: (e) => ((address = e.target.value), (cmd.textContent = line()), explain()) }, addresses.map((a) => h("option", { value: a }, t("machines.addVia." + kindOf(a), { address: a })))),
+      about,
     );
+  explain();
   dialog = openDialog(
     "wide",
     h("header", null, h("h2", { class: "grow" }, t("machines.addTitle")), closeX(() => dialog)),
