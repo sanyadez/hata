@@ -1,13 +1,19 @@
 /**
- * App stores: CasaOS-compatible GitHub repositories (`Apps/<Name>/docker-compose.yml` with `x-casaos`).
+ * App stores, of two kinds.
  *
- * A store repository is hundreds of megabytes of screenshots, while all we need are the compose files:
- * icons and screenshots are referenced from them by URL. So a sync asks GitHub for the file tree (one
- * request) and downloads only the compose files whose blob hash changed since the last sync.
+ * Hata's own format (`hataapp.ts`): the store publishes one `index.json` with every app — on GitHub in
+ * the branch `index` of the repository, elsewhere at any https address ending in `/index.json`. A sync
+ * downloads that file.
+ *
+ * CasaOS-compatible GitHub repositories (`Apps/<Name>/docker-compose.yml` with `x-casaos`): a store
+ * repository is hundreds of megabytes of screenshots, while all we need are the compose files — icons and
+ * screenshots are referenced from them by URL. So a sync asks GitHub for the file tree (one request) and
+ * downloads only the compose files whose blob hash changed since the last sync.
  */
 import { existsSync, mkdirSync, readFileSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
-import { APP_NAME_RE, appMeta, parseCompose, type AppMeta, type Compose } from "./appform";
+import { APP_NAME_RE, appMeta, localize, parseCompose, type AppMeta, type Compose } from "./appform";
+import { readIndexApp, startingEnv, viewCompose, type IndexApp, type Text } from "./hataapp";
 import { record } from "./activity";
 import { bus } from "./bus";
 import { DATA_DIR, saveSettings, settings, type StoreSource } from "./config";
@@ -18,11 +24,16 @@ const COMPOSE_PATH_RE = /^Apps\/([A-Za-z0-9][A-Za-z0-9._-]*)\/docker-compose\.ya
 const EXTRA_FILES = ["category-list.json", "recommend-list.json"];
 const DOWNLOADS_AT_ONCE = 12;
 const MAX_COMPOSE_BYTES = 1024 * 1024;
+const MAX_INDEX_BYTES = 32 * 1024 * 1024;
+/** The file a store of Hata's format keeps on disk: its `index.json` as downloaded */
+const HATA_INDEX = "hata-index.json";
 
 interface StoreIndex {
   syncedAt: number;
   /** path in the repository → git blob hash of the copy on disk */
   files: Record<string, string>;
+  /** "hata" — the store is in Hata's format, its apps are in `HATA_INDEX` */
+  kind?: "hata";
 }
 
 export interface StoreApp {
@@ -31,15 +42,21 @@ export interface StoreApp {
   name: string;
   /** Path of the compose file inside the store */
   path: string;
+  /** The compose file as Hata reads its tile: for an app of Hata's format, with the `x-casaos` made from `hata.yml` */
   compose: Compose;
+  /** An app of Hata's format: `hata.yml`, the compose file as written, the other files */
+  hata?: IndexApp;
 }
 
 interface LoadedStore {
   source: StoreSource;
   index: StoreIndex;
   apps: Map<string, StoreApp>;
-  categories: string[];
+  /** Names, or texts in several languages */
+  categories: Text[];
   recommended: string[];
+  /** The store's own name, for one of Hata's format */
+  name: Text;
 }
 
 const stores = new Map<string, LoadedStore>();
@@ -60,13 +77,30 @@ export function githubRepo(url: string): { owner: string; repo: string } | null 
  */
 export function storeUrl(value: unknown): string | null {
   if (typeof value !== "string") return null;
+  const index = indexUrl(value.trim());
+  if (index) return index;
   const m = /^https?:\/\/(?:www\.)?github\.com\/([A-Za-z0-9_.-]+)\/([A-Za-z0-9_.-]+?)(?:\.git)?(?:\/(?:archive|tree|blob|releases)\/[^\s]*)?\/?$/.exec(value.trim());
   return m ? `https://github.com/${m[1]}/${m[2]}` : null;
 }
 
+/**
+ * The address of a store's `index.json` given as such: https, or http when `HATA_STORE_INSECURE=1` (for
+ * trying a store out on the home network). null — not one.
+ */
+export function indexUrl(value: string): string | null {
+  const insecure = process.env.HATA_STORE_INSECURE === "1";
+  if (!/^https?:\/\/[^\s?#]+\/index\.json$/.test(value) || (!insecure && !value.startsWith("https://"))) return null;
+  try {
+    return new URL(value).href;
+  } catch {
+    return null;
+  }
+}
+
 /** A short id for a new store, from its repository's name, not taken by another */
 export function storeId(url: string, taken: string[]): string {
-  const repo = githubRepo(url)?.repo ?? "store";
+  // for an index of its own the folder it lies in names it
+  const repo = githubRepo(url)?.repo ?? (indexUrl(url) ? new URL(url).pathname.split("/").slice(-2, -1)[0] || new URL(url).hostname : "store");
   const base = repo.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 28) || "store";
   let id = base;
   for (let n = 2; taken.includes(id); n++) id = `${base}-${n}`;
@@ -120,9 +154,44 @@ function readList(file: string, pick: (item: unknown) => string | undefined): st
   return list.map(pick).filter((v): v is string => typeof v === "string" && v !== "");
 }
 
+/** What a downloaded `index.json` holds, read leniently: a broken app must not hide the rest */
+function readHataIndex(source: StoreSource, index: StoreIndex, doc: unknown): LoadedStore {
+  const apps = new Map<string, StoreApp>();
+  const top = isPlainObject(doc) ? doc : {};
+  const store = isPlainObject(top.store) ? top.store : {};
+  const categories: Record<string, Text> = isPlainObject(store.categories) ? (store.categories as Record<string, Text>) : {};
+  const repo = githubRepo(source.url);
+  const commit = typeof top.commit === "string" && /^[0-9a-f]{7,40}$/.test(top.commit) ? top.commit : "";
+  // screenshots lie in the repository, at the commit the index was made of
+  const base = repo && commit ? `https://raw.githubusercontent.com/${repo.owner}/${repo.repo}/${commit}/` : source.url.replace(/[^/]*$/, "");
+  for (const entry of Array.isArray(top.apps) ? top.apps : []) {
+    const app = readIndexApp(entry, base, categories);
+    if (!app || apps.has(app.name)) continue;
+    try {
+      const compose = parseCompose(app.compose);
+      // the tile is read with every setting at its default
+      const view = viewCompose(compose, app.meta, startingEnv(app.meta, {}, () => ""));
+      apps.set(app.name, { store: source.id, name: app.name, path: `apps/${app.name}/compose.yml`, compose: view, hata: app });
+    } catch {
+      // one broken file must not hide the rest of the store
+    }
+  }
+  const loaded: LoadedStore = {
+    source,
+    index,
+    apps,
+    categories: Object.values(categories),
+    recommended: Array.isArray(store.recommended) ? store.recommended.filter((n: unknown): n is string => typeof n === "string") : [],
+    name: typeof store.name === "string" || isPlainObject(store.name) ? (store.name as Text) : "",
+  };
+  stores.set(source.id, loaded);
+  return loaded;
+}
+
 function load(source: StoreSource): LoadedStore {
   const dir = storeDir(source.id);
   const index = readJsonFile<StoreIndex>(join(dir, "index.json"), { syncedAt: 0, files: {} }, (v) => isPlainObject(v) && isPlainObject(v.files));
+  if (index.kind === "hata") return readHataIndex(source, index, readJsonFile<unknown>(join(dir, HATA_INDEX), {}, isPlainObject));
   const apps = new Map<string, StoreApp>();
   for (const path of Object.keys(index.files)) {
     if (!COMPOSE_PATH_RE.test(path)) continue;
@@ -142,6 +211,7 @@ function load(source: StoreSource): LoadedStore {
     apps,
     categories: readList(join(dir, "category-list.json"), (c) => (isPlainObject(c) ? (c.name as string) : undefined)),
     recommended: readList(join(dir, "recommend-list.json"), (c) => (isPlainObject(c) ? (c.appid as string) : undefined)),
+    name: "",
   };
   stores.set(source.id, loaded);
   return loaded;
@@ -166,9 +236,44 @@ async function download(url: string): Promise<string> {
   return text;
 }
 
+/**
+ * The `index.json` of a store in Hata's format: at the address given, or in the branch `index` of a
+ * GitHub repository. null — the store has none (a CasaOS one); a failure to download it throws.
+ */
+async function fetchHataIndex(source: StoreSource): Promise<unknown | null> {
+  const repo = githubRepo(source.url);
+  const url = repo ? `https://raw.githubusercontent.com/${repo.owner}/${repo.repo}/index/index.json` : source.url;
+  const res = await fetch(url, { signal: AbortSignal.timeout(60_000), headers: { "user-agent": "hata" } });
+  if (res.status === 404 && repo) return null;
+  if (!res.ok) throw new Error(`${url}: ${res.status}`);
+  const text = await res.text();
+  if (text.length > MAX_INDEX_BYTES) throw new Error(`${url}: too large`);
+  const doc = JSON.parse(text) as unknown;
+  if (!isPlainObject(doc) || doc.format !== 1 || !Array.isArray(doc.apps)) throw new Error(`${url}: not an index of a store`);
+  return doc;
+}
+
+async function syncHata(source: StoreSource, doc: unknown): Promise<SyncResult> {
+  const dir = storeDir(source.id);
+  const before = stores.get(source.id) ?? load(source);
+  const old = new Map([...before.apps].map(([name, app]) => [name, JSON.stringify(app.hata ?? null)]));
+  mkdirSync(dir, { recursive: true });
+  writeJsonAtomic(join(dir, HATA_INDEX), doc);
+  // the files of a CasaOS copy that may lie here from before are not this store's any more
+  for (const path of Object.keys(before.index.files)) rmSync(join(dir, path), { force: true });
+  writeJsonAtomic(join(dir, "index.json"), { syncedAt: Date.now(), files: {}, kind: "hata" } satisfies StoreIndex);
+  const fresh = load(source);
+  bus.publish("store");
+  const changed = [...fresh.apps].filter(([name, app]) => old.get(name) !== JSON.stringify(app.hata ?? null)).length;
+  return { ok: true, apps: fresh.apps.size, changed };
+}
+
 async function doSync(source: StoreSource): Promise<SyncResult> {
   const repo = githubRepo(source.url);
-  if (!repo) return { ok: false, apps: 0, changed: 0, error: "Only GitHub repository URLs are supported for now" };
+  if (!repo && !indexUrl(source.url)) return { ok: false, apps: 0, changed: 0, error: "Only GitHub repositories and addresses of an index.json are supported" };
+  const index = await fetchHataIndex(source);
+  if (index) return syncHata(source, index);
+  if (!repo) return { ok: false, apps: 0, changed: 0, error: "No index.json there" };
   const current = stores.get(source.id) ?? load(source);
   const dir = storeDir(source.id);
 
@@ -215,6 +320,7 @@ async function doSync(source: StoreSource): Promise<SyncResult> {
   }
   mkdirSync(dir, { recursive: true });
   writeJsonAtomic(join(dir, "index.json"), { syncedAt: Date.now(), files } satisfies StoreIndex);
+  rmSync(join(dir, HATA_INDEX), { force: true });
   const fresh = load(source);
   bus.publish("store");
   return { ok: failed === 0, apps: fresh.apps.size, changed: todo.length - failed, error: failed ? `${failed} files could not be downloaded` : undefined };
@@ -258,6 +364,8 @@ export const ARCH = process.arch === "x64" ? "amd64" : process.arch === "arm64" 
 
 export interface CatalogueApp extends Pick<AppMeta, "title" | "tagline" | "icon" | "category" | "developer"> {
   store: string;
+  /** The store's name, for telling apart the same app of two stores */
+  storeName: string;
   name: string;
   /** false — the app has no image for this machine's architecture */
   supported: boolean;
@@ -265,7 +373,7 @@ export interface CatalogueApp extends Pick<AppMeta, "title" | "tagline" | "icon"
 }
 
 export interface Catalogue {
-  stores: { id: string; url: string; syncedAt: number; syncing: boolean; apps: number }[];
+  stores: { id: string; url: string; name: string; kind: "hata" | "casaos"; syncedAt: number; syncing: boolean; apps: number }[];
   categories: string[];
   apps: CatalogueApp[];
 }
@@ -275,12 +383,14 @@ export function catalogue(lang: string): Catalogue {
   const apps: CatalogueApp[] = [];
   const categories = new Set<string>();
   for (const s of all) {
-    for (const c of s.categories) categories.add(c);
+    for (const c of s.categories) categories.add(localize(c, lang));
+    const storeName = localize(s.name, lang) || s.source.id;
     for (const app of s.apps.values()) {
       const meta = appMeta(app.compose, lang);
       if (meta.category) categories.add(meta.category);
       apps.push({
         store: app.store,
+        storeName,
         name: app.name,
         title: meta.title,
         tagline: meta.tagline,
@@ -294,7 +404,7 @@ export function catalogue(lang: string): Catalogue {
   }
   apps.sort((a, b) => a.title.localeCompare(b.title));
   return {
-    stores: all.map((s) => ({ id: s.source.id, url: s.source.url, syncedAt: s.index.syncedAt, syncing: syncing.has(s.source.id), apps: s.apps.size })),
+    stores: all.map((s) => ({ id: s.source.id, url: s.source.url, name: localize(s.name, lang) || s.source.id, kind: s.index.kind === "hata" ? ("hata" as const) : ("casaos" as const), syncedAt: s.index.syncedAt, syncing: syncing.has(s.source.id), apps: s.apps.size })),
     categories: [...categories],
     apps,
   };

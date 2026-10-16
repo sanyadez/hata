@@ -17,7 +17,7 @@ import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import type { Server, ServerWebSocket } from "bun";
 import { appMeta, normalize, resolvePorts, type Compose } from "./appform";
-import { AppError, appDir, appEnv, dc, onCompose, readCompose, startJob, type Job } from "./apps";
+import { AppError, appDir, appEnv, dc, onCompose, readCompose, startJob, viewOf, type Job } from "./apps";
 import { COOKIE_NAME, sessionUser, type User } from "./auth";
 import { anyAddress, listenAddress, saveSettings, settings, type AppAccess } from "./config";
 import { plainIp } from "./site";
@@ -337,7 +337,7 @@ function save(name: string, access: AppAccess): void {
  */
 function syncOverride(name: string): void {
   const access = accessOf(name);
-  const compose = access.protect ? readCompose(name) : null;
+  const compose = access.protect ? viewOf(name) : null;
   const env = appEnv(name);
   const web = compose ? gateTarget(compose, settings.dataRoot, env) : "noPort";
   if (!compose || typeof web === "string" || !access.upstream) {
@@ -372,7 +372,7 @@ export interface AccessRequest {
  * app on other ports, so it runs as a job; a change of the list of people alone takes effect at once.
  */
 export function setAccess(name: string, request: AccessRequest, user: string): Job | null {
-  const compose = readCompose(name);
+  const compose = viewOf(name);
   if (!compose) throw new AppError("app.notFound", 404);
   const current = accessOf(name);
   const env = appEnv(name);

@@ -202,6 +202,8 @@ export async function installOnMachine(id: string, store: string, name: string, 
   if (!m.online) throw new AppError("machine.offline", 409, { name: m.name });
   if (!m.info?.docker.available) throw new AppError("machine.noDocker", 409, { name: m.name });
   if ((await filesOf(id)).some((f) => f.name === name)) throw new AppError("app.exists", 409);
+  // an app of Hata's format needs its .env and its other files made on the machine: not done there yet
+  if (storeApp(store, name)?.hata) throw new AppError("store.notOnMachine", 409);
   const compose = storeCompose(store, name, machineDataRoot(id));
   const error = applyForm(compose, form ?? {});
   if (error) throw new AppError(error);

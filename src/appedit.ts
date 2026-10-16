@@ -355,7 +355,8 @@ export function applyEdit(compose: Compose, input: unknown, lang: string): strin
 
   const title = cleanText(input.title);
   const icon = cleanText(input.icon);
-  if (title === null || icon === null || (icon !== "" && !/^https?:\/\/\S+$/i.test(icon))) return "edit.badIcon";
+  // the picture the store gave (a data: URI) may stay; a new one is an address
+  if (title === null || icon === null || (icon !== "" && icon !== before.icon && !/^https?:\/\/\S+$/i.test(icon))) return "edit.badIcon";
   // a form that does not know the field leaves the name as it is
   const domain = input.web.domain === undefined ? before.web.domain : cleanText(input.web.domain)?.toLowerCase();
   if (domain === null || domain === undefined || (domain !== "" && !SUBDOMAIN_RE.test(domain))) return "edit.badDomain";

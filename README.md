@@ -43,9 +43,10 @@ not an operating system: it is one program installed on the Linux you already ha
 just as easily. What each of them has: [How Hata compares](COMPARISON.md).
 
 **Is it a web UI for CasaOS?**
-No. Hata is a separate program and does not need CasaOS. For now it reads app stores in the CasaOS
-format, so the apps of the CasaOS store install here too. If CasaOS is already on the machine, Hata can
-take its apps over as they are — see [Moving in from CasaOS](#moving-in-from-casaos).
+No. Hata is a separate program and does not need CasaOS. It has a store of its own,
+[Hata Store](https://github.com/sanyadez/hata-store), and it also reads app stores in the CasaOS format, so
+the apps of the CasaOS store install here too. If CasaOS is already on the machine, Hata can take its apps
+over as they are — see [Moving in from CasaOS](#moving-in-from-casaos).
 
 **And what is CasaOS?**
 An open-source home server dashboard by IceWhale, the makers of ZimaBoard: a web page with app tiles, a
@@ -110,8 +111,11 @@ Early development. What works today:
   closed and shows the latest output when you come back) and a shell inside a container of an app;
 - the look is yours as well: accent and background colours (a light background turns the page light), a
   background picture — one of the built-in ones or your own;
-- app store: reads stores in the CasaOS format (`x-casaos`): the CasaOS store and any other one added by
-  its address; search and categories, a form for ports, folders and variables, install with live progress;
+- app store: [Hata Store](https://github.com/sanyadez/hata-store) — every app a plain compose file that
+  runs without Hata too, with its texts, its settings and what it asks of the server said before installing;
+  the settings go into the app's `.env`, a taken port is moved to a free one, passwords are made; it also
+  reads stores in the CasaOS format (`x-casaos`): the CasaOS store and any other one added by its address;
+  search and categories, install with live progress;
 - custom apps: fill in a form or paste any compose file;
 - import of what already runs: a compose project started elsewhere becomes an app without a restart; a
   container started with `docker run` is rebuilt into an app from a compose file written out of its settings

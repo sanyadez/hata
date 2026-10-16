@@ -5,11 +5,16 @@
  * reports for the compose project of the same name. What Hata itself knows about a store app — which
  * store, and the store's file it was installed from — lies next to it in `hata.yml`, which compose never
  * reads; a newer store version is merged into the app from there (`merge.ts`).
+ *
+ * An app of a store in Hata's own format (`hataapp.ts`) keeps its compose file exactly as the store has
+ * it: the answers of its settings go into `.env`, and its tile comes from the `meta` its `hata.yml`
+ * holds. `viewOf` is the file the way the rest of Hata reads such an app.
  */
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { rm } from "node:fs/promises";
-import { join } from "node:path";
-import { APP_NAME_RE, appMeta, applyForm, bindSources, buildForm, dumpCompose, normalize, parseCompose, parseEnv, publishedPorts, resolvePorts, type AppForm, type AppMeta, type Compose } from "./appform";
+import { networkInterfaces } from "node:os";
+import { dirname, join } from "node:path";
+import { APP_NAME_RE, appMeta, applyForm, localize, bindSources, buildForm, dumpCompose, normalize, parseCompose, parseEnv, publishedPorts, resolvePorts, type AppForm, type AppMeta, type Compose } from "./appform";
 import { applyEdit, blankCompose, readEdit, type AppEdit } from "./appedit";
 import { bus } from "./bus";
 import { IMAGE_MIME, imageType } from "./wallpapers";
@@ -19,7 +24,9 @@ import { compose as runCompose, composeCmd, containerStats, listContainers, PROJ
 import { writeTextAtomic } from "./fsutil";
 import { newerImages } from "./images";
 import { guessBase, merge3, same, type MergeChange } from "./merge";
-import { findStoreApp, storeApp } from "./store";
+import { answer, casaosOf, envLine, filled, ownCasaos, settingFolders, settingPorts, settingsForm, startingEnv, viewCompose, webPortOf, type FormSetting, type HataMeta, type IndexApp } from "./hataapp";
+import { labelOf, siteDomain } from "./site";
+import { findStoreApp, storeApp, type StoreApp } from "./store";
 
 export const APPS_DIR = join(DATA_DIR, "apps");
 mkdirSync(APPS_DIR, { recursive: true });
@@ -34,6 +41,8 @@ export class AppError extends Error {
     super(code);
   }
 }
+
+const isObject = (v: unknown): v is Record<string, any> => typeof v === "object" && v !== null && !Array.isArray(v);
 
 export const appDir = (name: string) => join(APPS_DIR, name);
 export const composeFile = (name: string) => join(appDir(name), "compose.yml");
@@ -266,7 +275,7 @@ function firstPublishedPort(name: string, compose: Compose | null): string {
 }
 
 function describeApp(name: string, containers: ContainerSummary[] | null, lang: string): InstalledApp {
-  const compose = readCompose(name);
+  const compose = viewOf(name);
   const meta = appMeta(compose ?? { name }, lang);
   const own = (containers ?? []).filter((c) => c.Labels[PROJECT_LABEL] === name);
   const running = own.filter((c) => c.State === "running").length;
@@ -316,7 +325,7 @@ export interface AppDetail extends InstalledApp {
 export async function appDetail(name: string, lang: string): Promise<AppDetail> {
   assertInstalled(name);
   const containers = await listContainers().catch(() => null);
-  const compose = readCompose(name);
+  const compose = viewOf(name);
   let folders: string[] = [];
   if (compose) {
     const copy = structuredClone(compose);
@@ -350,6 +359,19 @@ export function composeText(name: string): string {
   return readFileSync(composeFile(name), "utf8");
 }
 
+/**
+ * The compose file the way Hata reads the app — its tile, ports, folders: for an app of Hata's format,
+ * filled from its `.env`, with the tile made from its `hata.yml`; any other app's file as it is.
+ */
+export function viewOf(name: string): Compose | null {
+  const compose = readCompose(name);
+  const meta = hataMetaOf(name);
+  return compose && meta ? viewCompose(compose, meta, appEnv(name)) : compose;
+}
+
+/** What `hata.yml` says of an app of Hata's format; null — the app is not one */
+export const hataMetaOf = (name: string): HataMeta | null => readHataFile(name)?.meta ?? null;
+
 // --- Store app → form -------------------------------------------------------------------------------
 
 /** A private, normalised copy of a store app's compose file, for this server's data folder or another's */
@@ -375,42 +397,153 @@ export interface StoreAppDetail extends AppMeta {
   store: string;
   name: string;
   installed: boolean;
-  form: AppForm & { ports: (AppForm["ports"][number] & { busy: boolean })[] };
+  /** "hata" — the app of a store in Hata's format: its form is `settings` */
+  kind: "hata" | "casaos";
+  /** What the app asks of the server beyond its folders and ports, and why */
+  permissions: { id: string; why: string }[];
+  version: string;
+  form: AppForm & {
+    ports: (AppForm["ports"][number] & { busy: boolean })[];
+    /** The settings of an app of Hata's format, with a port that is taken moved to a free one (`busy` — the default was) */
+    settings?: (FormSetting & { busy?: number })[];
+  };
 }
+
+/** The values Hata gives every app of its format, for this server's data folder or another's */
+function ownVars(name: string, dataRoot: string): Record<string, string> {
+  return { APP_DATA: join(dataRoot, "AppData", name), PUID: String(settings.puid), PGID: String(settings.pgid), TZ: timezone() };
+}
+
+/** A made-up secret: letters and digits, which every program takes */
+function newSecret(length: number): string {
+  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+  return Array.from(crypto.getRandomValues(new Uint8Array(length)), (b) => chars[b % chars.length]).join("");
+}
+
+/** The store app's compose file as the store wrote it (for one of Hata's format, without the tile Hata adds) */
+const storeFile = (app: StoreApp): Compose => (app.hata ? parseCompose(app.hata.compose) : app.compose);
 
 /**
  * A store app with its install form. `on` — the form for another machine: its data folder, its ports
  * that are taken and whether the app is there already.
  */
 export async function storeAppDetail(store: string, name: string, lang: string, on?: { dataRoot: string; busy: (ports: { port: number; protocol: string }[]) => Promise<number[]>; installed: boolean }): Promise<StoreAppDetail> {
+  const app = storeApp(store, name);
+  if (!app) throw new AppError("store.appNotFound", 404);
+  const installed = on ? on.installed : existsSync(composeFile(name));
+  if (app.hata) {
+    const { meta } = app.hata;
+    const known = { ...ownVars(name, on?.dataRoot ?? settings.dataRoot), DATA_ROOT: on?.dataRoot ?? settings.dataRoot };
+    const env = startingEnv(meta, known, () => "");
+    const busy = async (port: number) => (on ? (await on.busy([{ port, protocol: "tcp" }])).includes(port) : !(await portFree(port, "tcp")));
+    const rows = await Promise.all(
+      settingsForm(meta, env, lang).map(async (row) => {
+        if (row.type !== "port" || !/^\d+$/.test(row.value) || !(await busy(Number(row.value)))) return row;
+        // the store's port is taken here: the next free one is offered instead
+        for (let port = Number(row.value) + 1; port < Math.min(65536, Number(row.value) + 100); port++) {
+          if (!(await busy(port))) return { ...row, value: String(port), busy: Number(row.value) };
+        }
+        return { ...row, busy: Number(row.value) };
+      }),
+    );
+    const view = viewCompose(storeFile(app), meta, env);
+    return {
+      ...appMeta(view, lang),
+      store,
+      name,
+      installed,
+      kind: "hata",
+      permissions: Object.entries(meta.permissions).map(([id, why]) => ({ id, why: localize(why, lang) })),
+      version: meta.version,
+      form: { ports: [], volumes: [], envs: [], settings: rows },
+    };
+  }
   const compose = storeCompose(store, name, on?.dataRoot);
   const form = buildForm(compose, lang);
   const taken = on ? new Set(await on.busy(form.ports.filter((p) => p.published !== "").map((p) => ({ port: Number(p.published), protocol: p.protocol })))) : null;
   const ports = await Promise.all(
     form.ports.map(async (p) => ({ ...p, busy: p.published !== "" && (taken ? taken.has(Number(p.published)) : !(await portFree(Number(p.published), p.protocol))) })),
   );
-  return { ...appMeta(compose, lang), store, name, installed: on ? on.installed : existsSync(composeFile(name)), form: { ...form, ports } };
+  return { ...appMeta(compose, lang), store, name, installed, kind: "casaos", permissions: [], version: "", form: { ...form, ports } };
 }
 
 // --- Operations -------------------------------------------------------------------------------------
 
 const ENV_HEADER = "# Variables for compose.yml. Hata keeps AppID, PUID, PGID and TZ up to date; other lines are yours.";
+const HATA_ENV_HEADER = "# Variables for compose.yml. Hata keeps AppID, APP_DATA, APP_URL, APP_HOST, PUID, PGID and TZ up to date; the settings of the app follow.";
 const OWN_ENV_KEYS = new Set(["AppID", "PUID", "PGID", "TZ"]);
 
-/** The text of an app's `.env`: our variables, then whatever else the file already held */
-export function envText(name: string, previous: string, extra: Record<string, string> = {}): string {
+/**
+ * The text of an app's `.env`: our variables, then whatever else the file already held, then `extra`.
+ * `own` — more variables of ours, for an app of Hata's format.
+ */
+export function envText(name: string, previous: string, extra: Record<string, string> = {}, own: Record<string, string> | null = null): string {
+  const ours = new Set([...OWN_ENV_KEYS, ...Object.keys(own ?? {})]);
   const kept = previous.split("\n").filter((line) => {
     const key = /^\s*([A-Za-z_][A-Za-z0-9_]*)\s*=/.exec(line)?.[1];
-    return key ? !OWN_ENV_KEYS.has(key) && !(key in extra) : line.trim() !== "" && line !== ENV_HEADER && !line.startsWith("# Variables for compose.yml.");
+    return key ? !ours.has(key) && !(key in extra) : line.trim() !== "" && line !== ENV_HEADER && !line.startsWith("# Variables for compose.yml.");
   });
-  const added = Object.entries(extra).filter(([key]) => !OWN_ENV_KEYS.has(key)).map(([key, value]) => `${key}=${value}`);
-  return [ENV_HEADER, `AppID=${name}`, `PUID=${settings.puid}`, `PGID=${settings.pgid}`, `TZ=${timezone()}`, ...kept, ...added, ""].join("\n");
+  const added = Object.entries(extra).filter(([key]) => !ours.has(key)).map(([key, value]) => (own ? envLine(key, value) : `${key}=${value}`));
+  const head = own ? [HATA_ENV_HEADER, `AppID=${name}`, ...Object.entries(own).map(([key, value]) => envLine(key, value))] : [ENV_HEADER, `AppID=${name}`];
+  return [...head, `PUID=${settings.puid}`, `PGID=${settings.pgid}`, `TZ=${timezone()}`, ...kept, ...added, ""].join("\n");
+}
+
+/** The server's address on the home network: the first IPv4 of a card that is not Docker's or a tunnel's */
+function homeAddress(): string {
+  for (const [card, list] of Object.entries(networkInterfaces())) {
+    if (/^(docker|br-|veth|virbr|lo|tailscale|hata-wg|wg\d)/.test(card) || settings.network.outside.includes(card)) continue;
+    const a = (list ?? []).find((x) => x.family === "IPv4" && !x.internal);
+    if (a) return a.address;
+  }
+  return "localhost";
+}
+
+/**
+ * The address an app of Hata's format is opened at, as its `.env` gives it: under Hata's domain with
+ * HTTPS when there is one, else the server's address on the home network and the app's port.
+ */
+export function appUrlOf(name: string, meta: HataMeta, compose: Compose, env: Record<string, string>): string {
+  const view = filled(compose, env);
+  const own = typeof compose["x-casaos"] === "object" && compose["x-casaos"] ? compose["x-casaos"] : {};
+  if (!meta.web) return "";
+  if (siteDomain()) return `https://${labelOf({ name, subdomain: typeof own.subdomain === "string" ? own.subdomain : "" })}.${siteDomain()}`;
+  const port = webPortOf(meta, view);
+  return port ? `${meta.web.scheme}://${homeAddress()}:${port}` : "";
+}
+
+/** Hata's own variables of an app of its format, with `env` the values its `.env` will hold */
+function hataOwn(name: string, meta: HataMeta, env: Record<string, string>): Record<string, string> {
+  const compose = readCompose(name);
+  const vars = ownVars(name, settings.dataRoot);
+  const url = compose ? appUrlOf(name, meta, compose, { ...env, ...vars }) : "";
+  return { APP_DATA: vars.APP_DATA!, APP_URL: url, APP_HOST: url ? new URL(url).hostname : "" };
+}
+
+/**
+ * After the domain changed: every app of Hata's format whose address is not the one its `.env` holds
+ * gets the new one and is recreated, if it runs, so that it reads it. Returns the jobs started.
+ */
+export async function refreshAppUrls(user: string): Promise<Job[]> {
+  const containers = await listContainers().catch(() => []);
+  const jobs: Job[] = [];
+  for (const name of installedNames()) {
+    const meta = hataMetaOf(name);
+    if (!meta || busy.has(name)) continue;
+    const env = appEnv(name);
+    const own = hataOwn(name, meta, env);
+    if (own.APP_URL === (env.APP_URL ?? "") && own.APP_HOST === (env.APP_HOST ?? "")) continue;
+    writeEnv(name);
+    if (containers.some((c) => c.Labels[PROJECT_LABEL] === name && c.State === "running")) jobs.push(startJob(name, "apply", user, (log) => dc(name, ["up", "-d", "--remove-orphans"], log)));
+  }
+  return jobs;
 }
 
 export function writeEnv(name: string, extra: Record<string, string> = {}): void {
   const file = join(appDir(name), ".env");
   const previous = existsSync(file) ? readFileSync(file, "utf8") : "";
-  writeTextAtomic(file, envText(name, previous, extra));
+  const meta = hataMetaOf(name);
+  const own = meta ? hataOwn(name, meta, { ...parseEnv(previous), ...extra }) : null;
+  writeTextAtomic(file, envText(name, previous, extra, own));
 }
 
 /**
@@ -418,9 +551,9 @@ export function writeEnv(name: string, extra: Record<string, string> = {}): void
  * ours. What is made belongs to PUID:PGID, the user the apps run as: an image that does not start as
  * root could not write into a folder of root's.
  */
-function createDataDirs(compose: Compose): void {
+function createDataDirs(compose: Compose, more: string[] = []): void {
   const root = settings.dataRoot === "/" ? "/" : settings.dataRoot + "/";
-  for (const source of bindSources(compose)) {
+  for (const source of [...bindSources(compose), ...more]) {
     if (!source.startsWith(root) || existsSync(source)) continue;
     // the data folder and AppData themselves stay root's
     mkdirSync(source.startsWith(join(settings.dataRoot, "AppData") + "/") ? join(settings.dataRoot, "AppData") : settings.dataRoot, { recursive: true });
@@ -435,15 +568,21 @@ async function assertPortsFree(compose: Compose): Promise<void> {
   }
 }
 
-async function install(name: string, text: string, compose: Compose, log: Log, origin?: { store: string; base: Compose }): Promise<void> {
+async function install(name: string, text: string, compose: Compose, log: Log, origin?: { store: string; base: Compose; hata?: IndexApp; env?: Record<string, string> }): Promise<void> {
   const dir = appDir(name);
   mkdirSync(dir, { recursive: true });
   try {
     writeTextAtomic(composeFile(name), text);
-    if (origin) writeHataFile(name, origin.store, origin.base);
-    writeEnv(name);
+    if (origin) writeHataFile(name, origin.store, origin.base, origin.hata);
+    if (origin?.hata) writeFiles(name, origin.hata.files, {}, log);
+    writeEnv(name, origin?.env);
     await dc(name, ["config", "--quiet"], log);
-    createDataDirs(compose);
+    if (origin?.hata) {
+      // the folders are made from the file as compose will read it, with the settings' folders too
+      const view = viewOf(name)!;
+      normalize(view, settings.dataRoot, name);
+      createDataDirs(view, settingFolders(origin.hata.meta, appEnv(name)));
+    } else createDataDirs(compose);
     await dc(name, ["pull"], log);
     await dc(name, ["up", "-d", "--remove-orphans"], log);
   } catch (e) {
@@ -483,7 +622,9 @@ export async function adoptApp(name: string, files: { compose: string; env: stri
   try {
     writeTextAtomic(composeFile(name), files.compose);
     if (files.hata) writeTextAtomic(hataFile(name), files.hata);
-    writeTextAtomic(join(dir, ".env"), envText(name, files.env));
+    // the variables of this server go in again: an app of Hata's format has its folder in APP_DATA
+    writeTextAtomic(join(dir, ".env"), files.env);
+    writeEnv(name);
     await dc(name, ["config", "--quiet"], log);
     const compose = parseCompose(files.compose);
     normalize(compose, settings.dataRoot);
@@ -512,9 +653,51 @@ function needDocker(): void {
   if (!Bun.which("docker", { PATH: `${process.env.PATH ?? ""}:/usr/bin:/usr/local/bin` })) throw new AppError("docker.missing", 409);
 }
 
+/**
+ * The other files of an app of Hata's format put next to its compose file: those `previous` names (the
+ * store's files of the version installed) are replaced only while the person has not changed them.
+ */
+function writeFiles(name: string, files: Record<string, string>, previous: Record<string, string> | null, log: Log): void {
+  const dir = appDir(name);
+  for (const [path, text] of Object.entries(files)) {
+    const file = join(dir, path);
+    const now = existsSync(file) ? readFileSync(file, "utf8") : null;
+    if (now === text) continue;
+    if (previous && now !== null && now !== previous[path]) {
+      log(`${path} was changed here: kept as it is, the store's new version not taken`);
+      continue;
+    }
+    mkdirSync(dirname(file), { recursive: true });
+    writeTextAtomic(file, text);
+  }
+  // a file the store no longer has goes, unless it was changed here
+  for (const [path, text] of Object.entries(previous ?? {})) {
+    const file = join(dir, path);
+    if (path in files || !existsSync(file)) continue;
+    if (readFileSync(file, "utf8") === text) rmSync(file, { force: true });
+  }
+}
+
+async function installHata(app: StoreApp & { hata: IndexApp }, form: unknown, user: string): Promise<Job> {
+  const { name, hata } = app;
+  const known = { ...ownVars(name, settings.dataRoot), DATA_ROOT: settings.dataRoot };
+  const result = answer(hata.meta, isObject(form) ? form.settings : undefined, startingEnv(hata.meta, known, newSecret));
+  if ("error" in result) throw new AppError(result.error, 400, { name: result.name });
+  const compose = parseCompose(hata.compose);
+  const view = viewCompose(compose, hata.meta, { ...result.values, ...known });
+  normalize(view, settings.dataRoot, name);
+  await assertPortsFree(view);
+  const origin = { store: app.store, base: compose, hata, env: result.values };
+  return startJob(name, "install", user, (log) => install(name, hata.compose, view, log, origin));
+}
+
 export async function installFromStore(store: string, name: string, form: unknown, user: string): Promise<Job> {
   needDocker();
   assertName(name);
+  const app = storeApp(store, name);
+  if (!app) throw new AppError("store.appNotFound", 404);
+  if (existsSync(appDir(name))) throw new AppError("app.exists", 409);
+  if (app.hata) return installHata(app as StoreApp & { hata: IndexApp }, form, user);
   const compose = storeCompose(store, name);
   if (existsSync(appDir(name))) throw new AppError("app.exists", 409);
   const error = applyForm(compose, form ?? {});
@@ -583,17 +766,25 @@ export function appAction(name: string, action: string, user: string): Job {
 const hataFile = (name: string) => join(appDir(name), "hata.yml");
 const HATA_FILE_HEADER = "# Written by Hata: the store this app came from and the store's compose file it was installed from.\n# compose.yml next to this file is yours to edit; this one is not, and docker compose never reads it.\n";
 
-function writeHataFile(name: string, store: string, base: Compose): void {
-  writeTextAtomic(hataFile(name), hataFileText(store, base));
+function writeHataFile(name: string, store: string, base: Compose, hata?: IndexApp): void {
+  writeTextAtomic(hataFile(name), hataFileText(store, base, hata));
 }
 
-/** The text of `hata.yml`: the store an app came from and the store's file it was installed from */
-export const hataFileText = (store: string, base: Compose): string => HATA_FILE_HEADER + dumpCompose({ store, base });
+/**
+ * The text of `hata.yml`: the store an app came from and the store's file it was installed from; for an
+ * app of Hata's format also what the store said of it (`meta`) and its other files as installed.
+ */
+export const hataFileText = (store: string, base: Compose, hata?: IndexApp): string =>
+  HATA_FILE_HEADER + dumpCompose(hata ? { store, base, meta: hata.meta, files: hata.files } : { store, base });
 
 interface HataFile {
   store: string;
   /** The store's compose file as the store had it; null when it was not kept */
   base: Compose | null;
+  /** An app of Hata's format: what its store said of it */
+  meta?: HataMeta;
+  /** …and its other files as the store had them */
+  files?: Record<string, string>;
 }
 
 const hataFiles = new Map<string, { mtime: number; value: HataFile | null }>();
@@ -611,7 +802,11 @@ function readHataFile(name: string): HataFile | null {
   let value: HataFile | null = null;
   try {
     const doc = Bun.YAML.parse(readFileSync(hataFile(name), "utf8")) as Compose | null;
-    if (typeof doc?.store === "string") value = { store: doc.store, base: typeof doc.base?.services === "object" && doc.base.services ? doc.base : null };
+    if (typeof doc?.store === "string") {
+      value = { store: doc.store, base: typeof doc.base?.services === "object" && doc.base.services ? doc.base : null };
+      if (isObject(doc.meta) && Array.isArray(doc.meta.settings)) value.meta = doc.meta as HataMeta;
+      if (isObject(doc.files)) value.files = doc.files as Record<string, string>;
+    }
   } catch {
     // a damaged file only means the app is treated as one that does not say where it came from
   }
@@ -626,6 +821,8 @@ function recordedStore(name: string, compose: Compose | null): string {
 
 export interface StoreUpdate {
   store: string;
+  /** An app of Hata's format: the store's version of it as a whole */
+  hata?: IndexApp;
   /** False when the store was found by the app's name only (an app moved in from CasaOS) */
   recorded: boolean;
   /** False when the store file the app was installed from is not known: only the form's answers are surely kept */
@@ -649,6 +846,11 @@ export function planStoreUpdate(name: string): StoreUpdate | null {
   // parsed files are cached objects: the same three mean the same answer
   const hit = plans.get(name);
   if (hit && hit.compose === compose && hit.origin === origin && hit.theirs === app.compose) return hit.plan;
+  if (app.hata) {
+    const plan = hataPlan(app, compose, origin, store !== "");
+    plans.set(name, { compose, origin, theirs: app.compose, plan });
+    return plan;
+  }
 
   const prepared = (source: Compose) => {
     const copy = structuredClone(source);
@@ -671,6 +873,25 @@ export function planStoreUpdate(name: string): StoreUpdate | null {
   return plan;
 }
 
+/**
+ * The newer version of an app of Hata's format: its compose file merged like any other (the settings
+ * live in `.env`, so the file is the store's unless edited by hand), and its other files.
+ */
+function hataPlan(app: StoreApp, compose: Compose, origin: HataFile | null, recorded: boolean): StoreUpdate | null {
+  const hata = app.hata!;
+  const theirs = parseCompose(hata.compose);
+  const prepared = (source: Compose) => {
+    const copy = structuredClone(source);
+    normalize(copy, settings.dataRoot);
+    return copy;
+  };
+  const ours = prepared(compose);
+  const { merged, changes } = merge3(origin?.base ? prepared(origin.base) : guessBase(ours, prepared(theirs)), ours, prepared(theirs));
+  const filesChanged = !same(origin?.files ?? {}, hata.files);
+  if (!changes.length && !filesChanged) return null;
+  return { store: app.store, hata, recorded, exact: !!origin?.base, changes, merged, base: theirs };
+}
+
 /** Moves the app to the store's newer version, keeping what the user changed */
 export function applyStoreUpdate(name: string, user: string): Job {
   assertInstalled(name);
@@ -678,17 +899,29 @@ export function applyStoreUpdate(name: string, user: string): Job {
   if (!plan) throw new AppError("app.noUpdate", 409);
   return startJob(name, "update", user, async (log) => {
     await beforeUpdate?.(name, log);
-    const previous = [composeFile(name), hataFile(name)].map((file) => ({ file, text: existsSync(file) ? readFileSync(file, "utf8") : null }));
-    writeTextAtomic(composeFile(name), dumpCompose(plan.merged));
-    writeHataFile(name, plan.store, plan.base);
-    writeEnv(name);
+    const previous = [composeFile(name), hataFile(name), join(appDir(name), ".env")].map((file) => ({ file, text: existsSync(file) ? readFileSync(file, "utf8") : null }));
+    const before = readHataFile(name);
+    // a file nobody edited is written as the store has it, comments and all
+    writeTextAtomic(composeFile(name), plan.hata && same(readCompose(name), before?.base) ? plan.hata.compose : dumpCompose(plan.merged));
+    writeHataFile(name, plan.store, plan.base, plan.hata);
+    if (plan.hata) {
+      writeFiles(name, plan.hata.files, before?.files ?? {}, log);
+      // a setting the new version brings starts at its default, a new secret is made
+      const env = appEnv(name);
+      const fresh = startingEnv(plan.hata.meta, { ...ownVars(name, settings.dataRoot), DATA_ROOT: settings.dataRoot }, newSecret);
+      writeEnv(name, Object.fromEntries(Object.entries(fresh).filter(([key]) => !(key in env))));
+    } else writeEnv(name);
     try {
       await dc(name, ["config", "--quiet"], log);
     } catch (e) {
       for (const { file, text } of previous) text === null ? rmSync(file, { force: true }) : writeTextAtomic(file, text);
       throw e;
     }
-    createDataDirs(plan.merged);
+    if (plan.hata) {
+      const view = viewOf(name)!;
+      normalize(view, settings.dataRoot, name);
+      createDataDirs(view, settingFolders(plan.hata.meta, appEnv(name)));
+    } else createDataDirs(plan.merged);
     await dc(name, ["pull"], log);
     await dc(name, ["up", "-d", "--remove-orphans"], log);
   });
@@ -717,11 +950,29 @@ export function applyCompose(name: string, text: unknown, user: string): Job {
   });
 }
 
-/** The app's compose file as the settings form shows it */
-export function appSettings(name: string, lang: string): AppEdit & { ownIcon: string } {
+/**
+ * The compose file of an app of Hata's format with the tile in it as the form shows it: the one made
+ * from `hata.yml` under what the file itself says. `made` — the block made, to tell the person's changes.
+ */
+function withTile(name: string, compose: Compose, meta: HataMeta): { compose: Compose; made: Compose } {
+  const made = casaosOf(meta, filled(compose, appEnv(name)));
+  const copy = structuredClone(compose);
+  copy["x-casaos"] = { ...made, ...(isObject(compose["x-casaos"]) ? compose["x-casaos"] : {}) };
+  return { compose: copy, made };
+}
+
+/** The app's compose file as the settings form shows it; for an app of Hata's format also its settings */
+export function appSettings(name: string, lang: string): AppEdit & { ownIcon: string; storeIcon?: string; settings?: FormSetting[] } {
   assertInstalled(name);
   const compose = readCompose(name);
   if (!compose) throw new AppError("app.badCompose", 409, { message: "" });
+  const meta = hataMetaOf(name);
+  if (meta) {
+    const { compose: shown, made } = withTile(name, compose, meta);
+    const edit = readEdit(shown, lang);
+    // the store's picture is shown, not put in the address field: there it would be a page of base64
+    return { ...edit, icon: edit.icon === made.icon ? "" : edit.icon, storeIcon: String(made.icon ?? ""), ownIcon: ownIconUrl(name), settings: settingsForm(meta, appEnv(name), lang) };
+  }
   return { ...readEdit(compose, lang), ownIcon: ownIconUrl(name) };
 }
 
@@ -741,7 +992,7 @@ function assertLabelFree(name: string, compose: Compose): void {
   if (!label) return;
   for (const other of installedNames()) {
     if (other === name) continue;
-    const theirs = readCompose(other);
+    const theirs = viewOf(other);
     if (((theirs && appMeta(theirs, "en").subdomain) || other.replace(/_/g, "-")) === label) throw new AppError("edit.domainTaken", 409, { app: other });
   }
 }
@@ -751,9 +1002,48 @@ export function applySettings(name: string, input: unknown, user: string, lang: 
   assertInstalled(name);
   const compose = structuredClone(readCompose(name));
   if (!compose) throw new AppError("app.badCompose", 409, { message: "" });
+  const meta = hataMetaOf(name);
+  if (meta) return applyHataSettings(name, compose, meta, input, user, lang);
   const edited = editedCompose(compose, input, lang);
   assertLabelFree(name, edited);
   return applyCompose(name, dumpCompose(edited), user);
+}
+
+/**
+ * The settings form of an app of Hata's format: the settings go into `.env`, what was changed of the tile
+ * and the services into the compose file — which is rewritten only when something there changed.
+ */
+function applyHataSettings(name: string, compose: Compose, meta: HataMeta, input: unknown, user: string, lang: string): Job {
+  const env = appEnv(name);
+  const result = answer(meta, isObject(input) ? input.env : undefined, env);
+  if ("error" in result) throw new AppError(result.error, 400, { name: result.name });
+  const { compose: shown, made } = withTile(name, compose, meta);
+  const before = JSON.stringify(shown);
+  // the form leaves the store's picture out of the address field (see appSettings): empty means it
+  const edit = isObject(input) && input.icon === "" && made.icon ? { ...input, icon: made.icon } : input;
+  const error = applyEdit(shown, edit, lang);
+  if (error) throw new AppError(error);
+  const fileChanged = JSON.stringify(shown) !== before;
+  const own = ownCasaos(shown["x-casaos"] ?? {}, made);
+  if (own) shown["x-casaos"] = own;
+  else delete shown["x-casaos"];
+  assertLabelFree(name, viewCompose(shown, meta, { ...env, ...result.values }));
+  return startJob(name, "apply", user, async (log) => {
+    const files = [composeFile(name), join(appDir(name), ".env")];
+    const previous = files.map((file) => readFileSync(file, "utf8"));
+    if (fileChanged) writeTextAtomic(composeFile(name), dumpCompose(shown));
+    writeEnv(name, result.values);
+    try {
+      await dc(name, ["config", "--quiet"], log);
+    } catch (e) {
+      files.forEach((file, i) => writeTextAtomic(file, previous[i]!));
+      throw e;
+    }
+    const view = viewOf(name)!;
+    normalize(view, settings.dataRoot, name);
+    createDataDirs(view, settingFolders(meta, appEnv(name)));
+    await dc(name, ["up", "-d", "--remove-orphans"], log);
+  });
 }
 
 /** Installs an app described in the settings form instead of a compose file */

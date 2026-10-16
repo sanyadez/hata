@@ -385,14 +385,16 @@ const read: Omit<Tool, "level" | "effect">[] = [
   {
     name: "store_app",
     title: "Store app details",
-    description: "One app of the store before installing it: what it is, what the store says to know beforehand (`tips`), and `form` — the ports, folders and variables that can be set at install, with their defaults and whether a port is already taken on this machine.",
+    description: "One app of the store before installing it: what it is, what the store says to know beforehand (`tips`), what it asks of the server (`permissions`), and `form` — the ports, folders and variables that can be set at install, with their defaults and whether a port is already taken on this machine; for a store of Hata's format `form.settings` instead (a secret is made by Hata, a taken port is already moved to a free one, `busy` names the store's).",
     input: { store: { type: "string", description: "The store's id, as store_search gives it" }, app: { type: "string", description: "The app's name in the store" } },
     required: ["store", "app"],
     run: (args) =>
       wrap(async () => {
         const detail = await storeAppDetail(text(args, "store"), appName(args), "en");
-        const { title, tagline, description, category, developer, website, tips, port, architectures, installed, store, name, form } = detail;
-        return { store, name, title, tagline, description: description.slice(0, 4000), category, developer, website, tips: tips.slice(0, 4000), webPort: port, architectures, installed, form };
+        const { title, tagline, description, category, developer, website, tips, port, architectures, installed, store, name, form, permissions, version } = detail;
+        // an app of Hata's format is set up by its settings alone; the empty lists would only mislead
+        const shown = form.settings ? { settings: form.settings } : form;
+        return { store, name, title, tagline, description: description.slice(0, 4000), category, developer, website, tips: tips.slice(0, 4000), webPort: port, architectures, installed, ...(version ? { version } : {}), ...(permissions.length ? { permissions } : {}), form: shown };
       }),
   },
   {
@@ -486,11 +488,11 @@ const operate: Omit<Tool, "level" | "effect">[] = [
   {
     name: "app_install",
     title: "Install an app from the store",
-    description: "Installs an app from the store. Look at store_app first: `form` there lists what can be set. Pass the entries you want to change in the same shape — `ports` (service, target, protocol, published), `volumes` (service, target, source), `envs` (service, name, value); what is not passed keeps the store's default. A port that is taken on this machine must be changed, or the install is refused. Downloading images takes minutes: expect a running job and ask job_get.",
+    description: "Installs an app from the store. Look at store_app first: `form` there lists what can be set. Pass the entries you want to change in the same shape — `ports` (service, target, protocol, published), `volumes` (service, target, source), `envs` (service, name, value); for an app whose `form` has `settings` instead (a store of Hata's format), pass `settings` as { NAME: value }. What is not passed keeps the store's default. A port that is taken on this machine must be changed, or the install is refused. Downloading images takes minutes: expect a running job and ask job_get.",
     input: {
       store: { type: "string", description: "The store's id, as store_search gives it" },
       app: { type: "string", description: "The app's name in the store" },
-      form: { type: "object", description: "Changes to the defaults: { ports?: [...], volumes?: [...], envs?: [...] }, entries as in store_app's `form`" },
+      form: { type: "object", description: "Changes to the defaults: { ports?: [...], volumes?: [...], envs?: [...] }, entries as in store_app's `form`; or { settings: { NAME: value } } when store_app's form has `settings`" },
     },
     required: ["store", "app"],
     run: (args, caller) => wrap(async () => settle(await installFromStore(text(args, "store"), appName(args), isPlainObject(args.form) ? args.form : {}, caller.user))),

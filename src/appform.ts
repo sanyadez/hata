@@ -45,7 +45,10 @@ export function localize(value: unknown, lang: string): string {
   if (typeof value.custom === "string" && value.custom) return value.custom;
   const entries = Object.entries(value).filter((e): e is [string, string] => typeof e[1] === "string");
   const find = (prefix: string) => entries.find(([k]) => k.toLowerCase().startsWith(prefix))?.[1];
-  return find(lang.toLowerCase() + "_") ?? find("en_us") ?? find("en_") ?? entries[0]?.[1] ?? "";
+  // CasaOS writes `en_US`; Hata's own store writes `en`
+  const exact = (key: string) => entries.find(([k]) => k.toLowerCase() === key)?.[1];
+  const l = lang.toLowerCase();
+  return find(l + "_") ?? exact(l) ?? find("en_us") ?? find("en_") ?? exact("en") ?? entries[0]?.[1] ?? "";
 }
 
 // --- Normalisation ----------------------------------------------------------------------------------
@@ -150,6 +153,8 @@ export interface AppMeta {
 
 const str = (v: unknown): string => (typeof v === "string" ? v : typeof v === "number" ? String(v) : "");
 const httpUrl = (v: unknown): string => (typeof v === "string" && /^https?:\/\//i.test(v) ? v : "");
+/** An icon: an address, or the picture itself (a store of Hata's format gives it so) */
+export const iconUrl = (v: unknown): string => httpUrl(v) || (typeof v === "string" && /^data:image\/(svg\+xml|png|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(v) ? v : "");
 
 /** One label of a host name */
 export const SUBDOMAIN_RE = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
@@ -161,10 +166,11 @@ export function appMeta(compose: Compose, lang: string): AppMeta {
     title: localize(x.title, lang) || str(compose.name),
     tagline: localize(x.tagline, lang),
     description: localize(x.description, lang),
-    icon: httpUrl(x.icon),
+    icon: iconUrl(x.icon),
     thumbnail: httpUrl(x.thumbnail),
     screenshots: Array.isArray(x.screenshot_link) ? x.screenshot_link.map(httpUrl).filter(Boolean) : [],
-    category: str(x.category),
+    // a name, or one in several languages (a store of Hata's format)
+    category: localize(x.category, lang),
     developer: str(x.developer),
     author: str(x.author),
     architectures: Array.isArray(x.architectures) ? x.architectures.map(str).filter(Boolean) : [],

@@ -14,7 +14,7 @@ import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync
 import { rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { APP_NAME_RE, appMeta, bindSources, normalize } from "./appform";
-import { AppError, appAction, appDir, dc, installedNames, jobFinished, onBeforeUpdate, readCompose, startJob, type Job, type Log } from "./apps";
+import { AppError, appAction, appDir, dc, installedNames, jobFinished, onBeforeUpdate, readCompose, startJob, viewOf, type Job, type Log } from "./apps";
 import { record } from "./activity";
 import { DATA_DIR, SECRET_NAMES, SECRETS_DIR, settings } from "./config";
 import { dockerRoot, listContainers, PROJECT_LABEL, run } from "./docker";
@@ -80,7 +80,8 @@ export function extraAllowed(path: string, dataRoot = settings.dataRoot, own = [
  * only the ones the person chose (`extra`).
  */
 export function appFolders(name: string): { included: string[]; other: string[]; extra: string[] } {
-  const compose = readCompose(name);
+  // an app of Hata's format names its folders through its .env
+  const compose = viewOf(name);
   if (!compose) return { included: [], other: [], extra: [] };
   const copy = structuredClone(compose);
   normalize(copy, settings.dataRoot, name);
@@ -499,7 +500,7 @@ export async function backupOverview(lang: string): Promise<BackupOverview> {
     stored = readdirSync(dir, { withFileTypes: true }).filter((e) => e.isDirectory() && APP_NAME_RE.test(e.name)).map((e) => e.name);
   } catch {}
   const local: BackupApp[] = [...new Set([...installed, ...stored])].sort().map((name) => {
-    const meta = appMeta(readCompose(name) ?? { name }, lang);
+    const meta = appMeta(viewOf(name) ?? { name }, lang);
     return {
       name,
       title: meta.title || name,

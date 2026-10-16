@@ -77,6 +77,8 @@ export interface Settings {
   /** UI language when the browser's language is not available */
   language: string;
   stores: StoreSource[];
+  /** Stores Hata has offered by itself: one taken away by the person is not offered again */
+  storesOffered: string[];
   backup: BackupSettings;
   /** Who may open which app, and which apps are behind Hata's sign-in; an app not listed is open to members */
   access: Record<string, AppAccess>;
@@ -177,7 +179,11 @@ const DEFAULTS: Settings = {
   pgid: 1000,
   timezone: "",
   language: "en",
-  stores: [{ id: "casaos", url: "https://github.com/IceWhaleTech/CasaOS-AppStore" }],
+  stores: [
+    { id: "hata", url: "https://github.com/sanyadez/hata-store" },
+    { id: "casaos", url: "https://github.com/IceWhaleTech/CasaOS-AppStore" },
+  ],
+  storesOffered: ["hata", "casaos"],
   backup: { enabled: false, time: "03:00", keep: 7, dir: "", beforeUpdate: true, exclude: [], folders: {} },
   access: {},
   images: { check: true, auto: false, time: "04:30", exclude: [] },
@@ -235,6 +241,16 @@ export const settings: Settings = {
   storage: { automount: isPlainObject(saved.storage) && saved.storage.automount === true, ignored: isPlainObject(saved.storage) && Array.isArray(saved.storage.ignored) ? saved.storage.ignored.filter((id): id is string => typeof id === "string") : [] },
 };
 settings.local.name = localName(settings.local.name) ?? DEFAULTS.local.name;
+
+// a store Hata has come to offer since this server was set up is added once
+if (saved.stores !== undefined) {
+  settings.storesOffered = Array.isArray(saved.storesOffered) ? saved.storesOffered.filter((id): id is string => typeof id === "string") : ["casaos"];
+  for (const store of DEFAULTS.stores) {
+    if (settings.storesOffered.includes(store.id)) continue;
+    if (!settings.stores.some((s) => s.url.toLowerCase() === store.url.toLowerCase() || s.id === store.id)) settings.stores = [store, ...settings.stores];
+    settings.storesOffered = [...settings.storesOffered, store.id];
+  }
+}
 
 /** Writes the settings after a change made in place (the access rules are edited that way) */
 export function saveSettings(): void {

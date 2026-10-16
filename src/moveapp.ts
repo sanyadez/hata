@@ -196,6 +196,8 @@ export async function moveApp(input: { from?: unknown; to?: unknown; name?: unkn
   if (!(await from.has(app))) throw new AppError("app.notFound", 404);
   if (await to.has(app)) throw new AppError("app.exists", 409);
   const files = await from.files(app);
+  // its .env and other files would have to be made at the other place: not done for machines yet
+  if (files.hata && /^meta:/m.test(files.hata)) throw new AppError("moveapp.hataFormat", 409);
   const rebased = rebaseCompose(files.compose, from.dataRoot.replace(/\/+$/, ""), to.dataRoot.replace(/\/+$/, ""));
   const compose = parseCompose(rebased);
   normalize(compose, to.dataRoot);

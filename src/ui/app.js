@@ -3000,7 +3000,7 @@ function iconField(model, app) {
   const field = { el: null, url, picked: null };
   let own = model.ownIcon ?? "";
   const paint = () => {
-    const src = own || url.value.trim();
+    const src = own || url.value.trim() || model.storeIcon || "";
     put(preview, src ? h("img", { src, alt: "", referrerPolicy: "no-referrer", onerror: (e) => e.target.remove() }) : icon("image"));
     put(actions, button(t(own ? "edit.iconReplace" : "edit.iconUpload"), { class: "small", onclick: () => file.click() }, "upload"), own && button(t("edit.iconRemove"), { class: "small ghost", onclick: remove }, "trash"));
     note.textContent = t(own ? "edit.iconOwn" : "edit.iconHint");
@@ -3141,6 +3141,8 @@ async function appSettingsTab(app, box) {
     return box.replaceChildren(h("p", { class: "error" }, e.code === "app.badCompose" ? t("edit.broken") : errorText(e)));
   }
   const form = appSettingsForm(model, model.memoryTotal, app.name, app);
+  // an app of Hata's format: its own settings, kept in .env, come first
+  const env = model.settings ? settingFields(model.settings, false) : null;
   const error = h("p", { class: "error", role: "alert" });
   box.replaceChildren(
     h(
@@ -3151,7 +3153,7 @@ async function appSettingsTab(app, box) {
           e.preventDefault();
           error.textContent = "";
           try {
-            const res = await api("PUT", `/api/apps/${app.name}/settings?lang=${state.lang}`, form.value());
+            const res = await api("PUT", `/api/apps/${app.name}/settings?lang=${state.lang}`, env ? { ...form.value(), env: env.value() } : form.value());
             jobDialog(res.job, "apply", app.title, () => (loadApp(true), state.route.tab === "settings" && appSettingsTab(app, box)));
           } catch (err) {
             error.textContent = errorText(err);
@@ -3159,6 +3161,8 @@ async function appSettingsTab(app, box) {
         },
       },
       h("p", { class: "muted small" }, t("edit.lead")),
+      env && env.rows.length > 0 && h("div", { class: "stack edit-form" }, formSection(t("store.settings"), t("edit.envHint"), env.rows), env.more),
+      env && env.rows.length === 0 && env.more,
       form.el,
       error,
       h("footer", { class: "pair" }, h("p", { class: "cmd grow" }, icon("terminal"), `docker compose -p ${app.name} up -d --remove-orphans`), h("button", { class: "btn primary" }, t("app.saveApply"))),
@@ -5593,6 +5597,8 @@ function renderStoreList() {
     cat("+", t("store.installed"), all.filter((a) => installed.has(a.name)).length),
   );
 
+  // the same app in two stores: each card says whose it is
+  const twice = new Set(all.filter((a, i) => all.findIndex((b) => b.name === a.name) !== i).map((a) => a.name));
   const q = query.trim().toLowerCase();
   const inCategory = (a) => category === "" || (category === "*" ? a.recommended : category === "+" ? installed.has(a.name) : a.category === category);
   const apps = all.filter((a) => (!q || `${a.title} ${a.name} ${a.tagline}`.toLowerCase().includes(q)) && inCategory(a));
@@ -5610,7 +5616,7 @@ function renderStoreList() {
         h(
           "button",
           { type: "button", class: "store-card" + (a.supported ? "" : " unsupported"), onclick: () => (installed.has(a.name) ? go(`#/apps/${a.name}`) : storeDialog(a)), menu: (at) => storeCardMenu(a, installed.has(a.name), at) },
-          h("span", { class: "store-card-head" }, appIcon(a), h("span", { class: "grow" }, h("span", { class: "tile-name" }, a.title), h("span", { class: "muted small" }, a.category)), installed.has(a.name) ? h("span", { class: "chip ok" }, icon("check"), t("store.installed")) : h("span", { class: "chip" }, t("store.install"))),
+          h("span", { class: "store-card-head" }, appIcon(a), h("span", { class: "grow" }, h("span", { class: "tile-name" }, a.title), h("span", { class: "muted small" }, twice.has(a.name) ? `${a.category} · ${a.storeName}` : a.category)), installed.has(a.name) ? h("span", { class: "chip ok" }, icon("check"), t("store.installed")) : h("span", { class: "chip" }, t("store.install"))),
           h("span", { class: "tagline" }, a.tagline),
         ),
       ),
@@ -5620,6 +5626,50 @@ function renderStoreList() {
 
 function formSection(title, hint, rows) {
   return rows.length > 0 && h("section", { class: "form-section" }, h("div", { class: "form-head" }, h("h3", null, title), hint && h("span", { class: "muted small" }, hint)), rows);
+}
+
+/**
+ * The settings of an app of Hata's format: each one a variable of the app's `.env`. On install a secret
+ * is made by Hata and not shown; afterwards a secret or a password is left as it is unless typed anew.
+ * Returns the rows, the advanced ones under "More", and the answers by name.
+ */
+function settingFields(settings, installing) {
+  const inputs = [];
+  const rowOf = (s) => {
+    if (s.type === "secret" && installing) return null;
+    let input;
+    if (s.type === "switch") input = h("input", { type: "checkbox", checked: s.value === "true" });
+    else if (s.type === "choice") input = choice(s.value, s.options.map((o) => [o.value, o.label]), s.label);
+    else {
+      const hidden = s.type === "secret" || s.type === "password";
+      input = h("input", {
+        value: s.value,
+        type: hidden ? "password" : s.type === "url" ? "url" : "text",
+        inputMode: s.type === "port" || s.type === "number" ? "numeric" : undefined,
+        class: "mono" + (s.type === "port" ? " short" : ""),
+        spellcheck: false,
+        autocapitalize: "none",
+        autocomplete: hidden ? "new-password" : "off",
+        required: s.required && !s.set,
+        placeholder: hidden && s.set ? t("store.settingKept") : "",
+      });
+    }
+    inputs.push({ name: s.name, type: s.type, input });
+    const control =
+      s.type === "folder"
+        ? h("span", { class: "with-pick" }, input, h("button", { type: "button", class: "icon-btn", title: t("edit.pickFolder"), "aria-label": t("edit.pickFolder"), onclick: () => folderPicker({ title: t("edit.pickFolder"), start: input.value.startsWith("/") ? input.value : "", confirmLabel: t("edit.pickHere"), action: (path) => void (input.value = path) }) }, icon("folder")))
+        : s.type === "port"
+          ? h("span", { class: "pair" }, input, s.busy && h("span", { class: "chip warn" }, t("store.portMoved", { port: s.busy })))
+          : input;
+    return formRow(s.label, control, s.hint);
+  };
+  const rows = settings.filter((s) => !s.advanced).map(rowOf).filter(Boolean);
+  const more = settings.filter((s) => s.advanced).map(rowOf).filter(Boolean);
+  return {
+    rows,
+    more: more.length > 0 && h("details", { class: "form-more" }, h("summary", null, t("store.more")), more),
+    value: () => Object.fromEntries(inputs.map(({ name, type, input }) => [name, type === "switch" ? input.checked : input.value])),
+  };
 }
 
 /** `target` — the machine to install on; "" — this server */
@@ -5634,8 +5684,11 @@ async function storeDialog(entry, target = state.installTarget ?? "") {
   } catch (e) {
     return toast(errorText(e), "error");
   }
+  // an app of Hata's format goes to this server only, for now
+  if (app.kind === "hata") targets.length = 0;
   const arch = target ? (targets.find((m) => m.id === target)?.info.arch === "arm64" ? "arm64" : "amd64") : state.overview?.arch;
   const supported = app.architectures.length === 0 || app.architectures.includes(arch);
+  const settingsForm = app.form.settings ? settingFields(app.form.settings, true) : null;
   const inputs = { ports: [], volumes: [], envs: [] };
   const ports = app.form.ports.map((p) => {
     const input = h("input", { value: p.published, inputMode: "numeric", pattern: "[0-9]*", class: "short mono" });
@@ -5662,11 +5715,13 @@ async function storeDialog(entry, target = state.installTarget ?? "") {
     onclick: async () => {
       install.disabled = true;
       error.textContent = "";
-      const form = {
-        ports: inputs.ports.map(({ input, ...p }) => ({ ...p, published: input.value })),
-        volumes: inputs.volumes.map(({ input, ...v }) => ({ ...v, source: input.value })),
-        envs: inputs.envs.map(({ input, ...e }) => ({ ...e, value: input.value })),
-      };
+      const form = settingsForm
+        ? { settings: settingsForm.value() }
+        : {
+            ports: inputs.ports.map(({ input, ...p }) => ({ ...p, published: input.value })),
+            volumes: inputs.volumes.map(({ input, ...v }) => ({ ...v, source: input.value })),
+            envs: inputs.envs.map(({ input, ...e }) => ({ ...e, value: input.value })),
+          };
       try {
         const res = await api("POST", target ? `/api/machines/${target}/apps` : "/api/apps", { store: app.store, name: app.name, form });
         dialog.close();
@@ -5679,10 +5734,12 @@ async function storeDialog(entry, target = state.installTarget ?? "") {
     },
   });
 
-  const hasForm = isAdmin() && ports.length + volumes.length + envs.length > 0;
+  const hasForm = isAdmin() && (settingsForm ? settingsForm.rows.length > 0 || settingsForm.more : ports.length + volumes.length + envs.length > 0);
+  // what the app asks of the server beyond its folders and ports, said before it is installed
+  const permissions = app.permissions.length > 0 && h("div", { class: "tips prose" }, h("strong", null, t("store.permissions")), h("ul", null, app.permissions.map((p) => h("li", null, h("strong", null, t(`store.permission.${p.id}`)), " — ", p.why))));
   dialog = openDialog(
     "xwide store-app",
-    h("header", null, appIcon(app, "lg"), h("div", { class: "grow" }, h("h2", null, app.title), h("p", { class: "muted" }, app.tagline), h("p", { class: "muted small" }, [app.category, app.developer && t("store.by", { developer: app.developer })].filter(Boolean).join(" · "))), closeX(() => dialog)),
+    h("header", null, appIcon(app, "lg"), h("div", { class: "grow" }, h("h2", null, app.title), h("p", { class: "muted" }, app.tagline), h("p", { class: "muted small" }, [app.category, app.developer && t("store.by", { developer: app.developer }), app.version && t("store.version", { version: app.version })].filter(Boolean).join(" · "))), closeX(() => dialog)),
     targets.length > 0 &&
       h(
         "div",
@@ -5700,9 +5757,11 @@ async function storeDialog(entry, target = state.installTarget ?? "") {
         app.screenshots.length > 0 && h("div", { class: "shots" }, app.screenshots.map((src) => h("img", { src, alt: "", loading: "lazy", referrerPolicy: "no-referrer" }))),
         h("div", { class: "description prose" }, md(app.description)),
         app.tips && h("div", { class: "tips prose" }, h("strong", null, t("store.tips")), md(app.tips)),
+        permissions,
         app.website && h("a", { class: "link", href: app.website, target: "_blank", rel: "noopener noreferrer" }, app.website.replace(/^https?:\/\//, "").replace(/\/$/, ""), icon("external")),
       ),
-      hasForm && h("div", { class: "stack install-form" }, formSection(t("store.ports"), target ? t("store.portsOn", { name: targets.find((m) => m.id === target)?.name ?? "" }) : t("store.portsHint"), ports), formSection(t("store.volumes"), target ? t("store.volumesHint", { path: app.form.volumes[0]?.source.split("/AppData/")[0] || "/DATA" }) : state.settings ? t("store.volumesHint", { path: state.settings.dataRoot }) : "", volumes), formSection(t("store.envs"), t("store.envsHint"), envs)),
+      hasForm && settingsForm && h("div", { class: "stack install-form" }, formSection(t("store.settings"), t("store.settingsHint"), settingsForm.rows), settingsForm.more),
+      hasForm && !settingsForm && h("div", { class: "stack install-form" }, formSection(t("store.ports"), target ? t("store.portsOn", { name: targets.find((m) => m.id === target)?.name ?? "" }) : t("store.portsHint"), ports), formSection(t("store.volumes"), target ? t("store.volumesHint", { path: app.form.volumes[0]?.source.split("/AppData/")[0] || "/DATA" }) : state.settings ? t("store.volumesHint", { path: state.settings.dataRoot }) : "", volumes), formSection(t("store.envs"), t("store.envsHint"), envs)),
     ),
     error,
     h("footer", null, h("p", { class: "cmd grow" }, icon("terminal"), `docker compose -p ${app.name} up -d`), closeButton(() => dialog, t("common.cancel")), install),
@@ -6235,7 +6294,7 @@ function paintWelcome() {
               h(
                 "button",
                 { type: "button", class: "store-card", onclick: () => (installed.has(a.name) ? go(`#/apps/${a.name}`) : storeDialog(a)), menu: (at) => storeCardMenu(a, installed.has(a.name), at) },
-                h("span", { class: "store-card-head" }, appIcon(a), h("span", { class: "grow" }, h("span", { class: "tile-name" }, a.title), h("span", { class: "muted small" }, a.category)), installed.has(a.name) ? h("span", { class: "chip ok" }, icon("check"), t("store.installed")) : h("span", { class: "chip" }, t("store.install"))),
+                h("span", { class: "store-card-head" }, appIcon(a), h("span", { class: "grow" }, h("span", { class: "tile-name" }, a.title), h("span", { class: "muted small" }, twice.has(a.name) ? `${a.category} · ${a.storeName}` : a.category)), installed.has(a.name) ? h("span", { class: "chip ok" }, icon("check"), t("store.installed")) : h("span", { class: "chip" }, t("store.install"))),
                 h("span", { class: "tagline" }, a.tagline),
               ),
             ),

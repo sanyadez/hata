@@ -16,7 +16,7 @@ import { agentUser, cannotGrant, cleanName, createKey, grantKey, keyOf, listKeys
 import type { Level } from "./agents";
 import { Desk } from "./approvals";
 import { answerCall, assistantConfig, configured as assistantReady, findChat, listChats, ModelError, modelsFor, removeChat, retry as retryAssistant, say as sayToAssistant, shownChat, shownConfig as shownAssistant, stopChat, updateAssistant } from "./assistant";
-import { AppError, appAction, startJob, type Job, installedNames, jobFinished, appEnv, appDetail, appLogs, appIcon, appSettings, appStats, applyCompose, ICON_MIME, MAX_ICON, removeAppIcon, setAppIcon, applySettings, installFromSettings, applyStoreUpdate, composeText, getJob, installCustom, installFromStore, listApps, listJobs, onAppRemoved, planStoreUpdate, readCompose, removeApp, storeAppDetail } from "./apps";
+import { AppError, appAction, startJob, type Job, installedNames, jobFinished, appEnv, appDetail, appLogs, appIcon, appSettings, appStats, applyCompose, ICON_MIME, MAX_ICON, removeAppIcon, setAppIcon, applySettings, installFromSettings, applyStoreUpdate, composeText, getJob, installCustom, installFromStore, listApps, listJobs, onAppRemoved, planStoreUpdate, readCompose, refreshAppUrls, removeApp, storeAppDetail, viewOf } from "./apps";
 import { certificateStates, challengeResponse, ensureCertificates, loadCertificates } from "./acme";
 import { attention } from "./attention";
 import { folderSize, restoreFromSnapshot, snapshotFile, snapshotFiles } from "./snapshot";
@@ -848,7 +848,7 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
   // ---- who may open what ----
   if (path === "/api/access" && method === "GET") {
     const apps = (await listApps(language(url))).map((app) => {
-      const compose = readCompose(app.name);
+      const compose = viewOf(app.name);
       const env = appEnv(app.name);
       const gate = compose ? gateTarget(compose, settings.dataRoot, env) : "noPort";
       const access = accessOf(app.name);
@@ -959,7 +959,11 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
       const error = updateSettings(patch);
       if (error) return fail(400, error);
       // certificates take a while: the page asks for their state
-      if ("https" in patch) void refreshHttps(true);
+      if ("https" in patch) {
+        void refreshHttps(true);
+        // apps of Hata's format are told their new address
+        void refreshAppUrls(user.name).catch(() => {});
+      }
       if ("local" in patch) {
         refreshLocalNames();
         // the shared folders are announced under the same name
