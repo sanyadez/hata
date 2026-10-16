@@ -35,7 +35,7 @@ or a plugin is named as such. These products change fast: if a cell is wrong or 
 |---|---|---|---|---|---|---|---|
 | App format | plain compose file on disk | compose from the store | compose | compose with `x-casaos` | compose with `x-runtipi` | cosmos-compose; compose imported | Docker templates; compose by plugin |
 | Changing an app | settings form, or the compose file itself; your changes stay through store updates | folders and variables | settings, or the YAML | settings form | overrides kept apart, they stay through updates | in the page | template form |
-| Stores | stores in the CasaOS format, added by address | 300+ apps; community stores | hundreds of apps; community stores | ~180 apps; other stores | ~270 apps; other stores by Git address | 250+ apps; other sources | Community Applications (plugin), ~4,500 |
+| Stores | Hata Store, 200+ apps; other stores by address | 300+ apps; community stores | hundreds of apps; community stores | ~180 apps; other stores | ~270 apps; other stores by Git address | 250+ apps; other sources | Community Applications (plugin), ~4,500 |
 
 ## Data
 
@@ -76,7 +76,6 @@ or a plugin is named as such. These products change fast: if a cell is wrong or 
 - RAID and ZFS: protection from a disk failure is SnapRAID parity over plain disks.
 - An OpenID Connect provider for apps: Hata's sign-in stands in front of an app, the app itself does not
   learn who came in.
-- A store of its own: it reads stores in the CasaOS format for now.
 - Years of use: it is young, and verified on a handful of machines.
 
 ## Sources

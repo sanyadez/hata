@@ -2850,7 +2850,7 @@ function machineTerminalDialog(m, c) {
 }
 
 // --- The settings form of an app ---------------------------------------------------------------
-// The compose file as the fields people know from CasaOS. The server reads the file into rows and puts
+// The compose file as fields. The server reads the file into rows and puts
 // the answers back; a row carries `from` — the entry of the file it shows — so what is not touched stays.
 
 const formRow = (label, control, note) => h("label", { class: "form-row" }, h("span", { class: "form-label" }, label), h("span", { class: "form-control" }, control, note && h("span", { class: "muted small" }, note)));

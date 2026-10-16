@@ -3,8 +3,7 @@
 **English** · [Українська](README.uk.md)
 
 A home server in a single file: a web dashboard, a Docker app store, files, HTTPS and backups.
-It began when CasaOS stopped moving and is a program of its own; it takes a CasaOS install over in one
-line, with an undo. ("Hata" — «хата» — is Ukrainian for "home", the same thing "casa" means.)
+("Hata" — «хата» — is Ukrainian for "home".)
 
 One process, one binary, no microservices, no database server next to it and no npm packages — built
 on Bun with zero dependencies. An app is a plain compose file on disk: Hata does not hide Docker.
@@ -13,8 +12,7 @@ on Bun with zero dependencies. An app is a plain compose file on disk: Hata does
 curl -fsSL https://raw.githubusercontent.com/sanyadez/hata/main/install.sh | sudo sh
 ```
 
-On a Linux machine with systemd, x86_64 or arm64 — see [Install](#install); coming from CasaOS, see
-[Moving in from CasaOS](#moving-in-from-casaos).
+On a Linux machine with systemd, x86_64 or arm64 — see [Install](#install).
 
 ![The dashboard: system numbers, app tiles in groups, what needs attention and recent activity](screenshots/dashboard.png)
 
@@ -38,24 +36,9 @@ single files, the server's own network — Wi-Fi, a spare way to the internet, a
 who may open what, HTTPS, notifications when something breaks. The full list is under [Status](#status).
 
 **What is it an alternative to?**
-To the home server programs of that kind: Umbrel, Runtipi, Cosmos, CasaOS. Unlike some of them it is
+To the home server programs of that kind: Umbrel, Runtipi, Cosmos. Unlike some of them it is
 not an operating system: it is one program installed on the Linux you already have, and removed from it
 just as easily. What each of them has: [How Hata compares](COMPARISON.md).
-
-**Is it a web UI for CasaOS?**
-No. Hata is a separate program and does not need CasaOS. It has a store of its own,
-[Hata Store](https://github.com/sanyadez/hata-store); stores in the CasaOS format are supported too — add
-one by its address in Settings → Apps, and its apps install here. If CasaOS is already on the machine, Hata can take its apps
-over as they are — see [Moving in from CasaOS](#moving-in-from-casaos).
-
-**And what is CasaOS?**
-An open-source home server dashboard by IceWhale, the makers of ZimaBoard: a web page with app tiles, a
-Docker app store and a file manager on top of an ordinary Linux. It made the "home server without a
-terminal" idea popular. Its core has had no release since December 2024, and that is how Hata began: as
-a home for its users. It went its own way from there, with what CasaOS never had: backups and restore,
-users with roles and two-factor sign-in, sign-in in front of any app, HTTPS with certificates, disk health
-and protection from a disk failure, the server's network settings, store updates that keep your changes,
-other machines run from the same page, notifications.
 
 **How is it better than Cockpit?**
 It is not better, it does another job. Cockpit administers a Linux server: systemd services, the journal,
@@ -113,8 +96,8 @@ Early development. What works today:
   background picture — one of the built-in ones or your own;
 - app store: [Hata Store](https://github.com/sanyadez/hata-store) — every app a plain compose file that
   runs without Hata too, with its texts, its settings and what it asks of the server said before installing;
-  the settings go into the app's `.env`, a taken port is moved to a free one, passwords are made; stores in
-  the CasaOS format (`x-casaos`) are supported too, added by their address;
+  the settings go into the app's `.env`, a taken port is moved to a free one, passwords are made; other
+  stores are added by their address;
   search and categories, install with live progress;
 - custom apps: fill in a form or paste any compose file;
 - import of what already runs: a compose project started elsewhere becomes an app without a restart; a
@@ -145,7 +128,7 @@ Early development. What works today:
   each after a snapshot of its data;
 - per app, on its own page: start, stop, restart, image update, CPU and memory per container, live logs,
   editing the compose file, removal with or without data;
-- app settings as a form, the one known from CasaOS: image, title and icon, the web UI's address, network,
+- app settings as a form: image, title and icon, the web UI's address, network,
   ports, volumes, environment variables, devices, command, privileges, memory limit, CPU shares, restart
   policy, capabilities, host name — for every service of the app, and services are added and removed as
   tabs. It edits the same compose file: what the form does not show stays as written. A custom app can be
