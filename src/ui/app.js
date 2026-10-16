@@ -3858,7 +3858,21 @@ function filesPlaces(path) {
   const home = machine ? "" : (state.files?.home ?? "");
   const inHome = !trash && home !== "" && within(path, home);
   const inside = (folder) => !trash && within(path, folder);
-  const place = (label, to, iconName, active, on = machine, volume = null) => h("a", { class: "cat" + (active ? " active" : ""), href: filesHash(to, on), menu: (at) => sidebarMenu(at, { label, path: to, machine: on, volume, iconName }) }, h("span", { class: "with-icon" }, icon(iconName), h("span", { class: "clip" }, label)));
+  // a disk says how full it is, as its tile does: a thin bar under the name, the numbers on hover
+  const room = (volume) => {
+    if (!volume?.total) return null;
+    const used = Math.round(((volume.total - volume.free) / volume.total) * 100);
+    const fill = h("i", { class: level(used) });
+    fill.style.width = used + "%";
+    return h("span", { class: "bar" }, fill);
+  };
+  const place = (label, to, iconName, active, on = machine, volume = null) =>
+    h(
+      "a",
+      { class: "cat" + (active ? " active" : "") + (volume?.total ? " vol" : ""), href: filesHash(to, on), title: volume?.total ? t("files.free", { free: bytes(volume.free), total: bytes(volume.total) }) : "", menu: (at) => sidebarMenu(at, { label, path: to, machine: on, volume, iconName }) },
+      h("span", { class: "with-icon" }, icon(iconName), h("span", { class: "clip" }, label)),
+      room(volume),
+    );
   const disk = state.files?.disk;
   const used = disk ? Math.round(((disk.total - disk.free) / disk.total) * 100) : 0;
   const fill = h("i", { class: level(used) });
