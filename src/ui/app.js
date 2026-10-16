@@ -5755,7 +5755,7 @@ async function storeDialog(entry, target = state.installTarget ?? "") {
       h(
         "div",
         { class: "stack" },
-        app.screenshots.length > 0 && h("div", { class: "shots" }, app.screenshots.map((src) => h("img", { src, alt: "", loading: "lazy", referrerPolicy: "no-referrer" }))),
+        app.screenshots.length > 0 && h("div", { class: "shots" }, app.screenshots.map((src) => h("img", { src, alt: "", loading: "lazy", referrerPolicy: "no-referrer", onerror: (e) => e.target.remove() }))),
         h("div", { class: "description prose" }, md(app.description)),
         app.tips && h("div", { class: "tips prose" }, h("strong", null, t("store.tips")), md(app.tips)),
         permissions,
