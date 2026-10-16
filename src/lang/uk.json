@@ -2342,6 +2342,7 @@
   "edit.pickHere": "Узяти цю теку",
   "remote.networksCarried": "{network} уже доступна через {device}, що теж її пропонує: до однієї мережі Tailscale веде одним шляхом.",
   "store.address": "Додати магазин за адресою",
+  "store.addHint": "Магазин формату Hata або магазин у форматі CasaOS — репозиторій на GitHub з Apps/<назва>/docker-compose.yml, наприклад https://github.com/IceWhaleTech/CasaOS-AppStore.",
   "store.add": "Додати",
   "store.adding": "Читаю магазин…",
   "store.added": "Магазин додано: застосунків — {apps}",

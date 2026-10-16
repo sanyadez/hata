@@ -179,11 +179,9 @@ const DEFAULTS: Settings = {
   pgid: 1000,
   timezone: "",
   language: "en",
-  stores: [
-    { id: "hata", url: "https://github.com/sanyadez/hata-store" },
-    { id: "casaos", url: "https://github.com/IceWhaleTech/CasaOS-AppStore" },
-  ],
-  storesOffered: ["hata", "casaos"],
+  // stores in the CasaOS format are added by the person (the hint under "Add a store" says how)
+  stores: [{ id: "hata", url: "https://github.com/sanyadez/hata-store" }],
+  storesOffered: ["hata"],
   backup: { enabled: false, time: "03:00", keep: 7, dir: "", beforeUpdate: true, exclude: [], folders: {} },
   access: {},
   images: { check: true, auto: false, time: "04:30", exclude: [] },
@@ -244,6 +242,7 @@ settings.local.name = localName(settings.local.name) ?? DEFAULTS.local.name;
 
 // a store Hata has come to offer since this server was set up is added once
 if (saved.stores !== undefined) {
+  // the CasaOS store was offered by itself up to 0.19
   settings.storesOffered = Array.isArray(saved.storesOffered) ? saved.storesOffered.filter((id): id is string => typeof id === "string") : ["casaos"];
   for (const store of DEFAULTS.stores) {
     if (settings.storesOffered.includes(store.id)) continue;

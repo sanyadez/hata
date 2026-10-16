@@ -44,8 +44,8 @@ just as easily. What each of them has: [How Hata compares](COMPARISON.md).
 
 **Is it a web UI for CasaOS?**
 No. Hata is a separate program and does not need CasaOS. It has a store of its own,
-[Hata Store](https://github.com/sanyadez/hata-store), and it also reads app stores in the CasaOS format, so
-the apps of the CasaOS store install here too. If CasaOS is already on the machine, Hata can take its apps
+[Hata Store](https://github.com/sanyadez/hata-store); stores in the CasaOS format are supported too — add
+one by its address in Settings → Apps, and its apps install here. If CasaOS is already on the machine, Hata can take its apps
 over as they are — see [Moving in from CasaOS](#moving-in-from-casaos).
 
 **And what is CasaOS?**
@@ -113,8 +113,8 @@ Early development. What works today:
   background picture — one of the built-in ones or your own;
 - app store: [Hata Store](https://github.com/sanyadez/hata-store) — every app a plain compose file that
   runs without Hata too, with its texts, its settings and what it asks of the server said before installing;
-  the settings go into the app's `.env`, a taken port is moved to a free one, passwords are made; it also
-  reads stores in the CasaOS format (`x-casaos`): the CasaOS store and any other one added by its address;
+  the settings go into the app's `.env`, a taken port is moved to a free one, passwords are made; stores in
+  the CasaOS format (`x-casaos`) are supported too, added by their address;
   search and categories, install with live progress;
 - custom apps: fill in a form or paste any compose file;
 - import of what already runs: a compose project started elsewhere becomes an app without a restart; a

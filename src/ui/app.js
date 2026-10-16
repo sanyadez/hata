@@ -5503,6 +5503,7 @@ function addStoreForm() {
     },
     h("span", { class: "form-label" }, t("store.address")),
     h("div", { class: "row-actions" }, input, go),
+    h("span", { class: "muted small" }, t("store.addHint")),
     error,
   );
 }

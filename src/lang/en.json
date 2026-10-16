@@ -2342,6 +2342,7 @@
   "edit.pickHere": "Use this folder",
   "remote.networksCarried": "{network} is already reached through {device}, which offers it too: Tailscale takes one way to a network.",
   "store.address": "Add a store by its address",
+  "store.addHint": "A store of Hata's format, or one in the CasaOS format — a GitHub repository with Apps/<name>/docker-compose.yml, such as https://github.com/IceWhaleTech/CasaOS-AppStore.",
   "store.add": "Add",
   "store.adding": "Reading the store…",
   "store.added": "Store added: {apps} apps",
