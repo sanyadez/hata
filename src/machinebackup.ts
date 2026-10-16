@@ -9,8 +9,8 @@
  */
 import { createReadStream, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
-import { appMeta, parseCompose } from "./appform";
-import { AppError, jobFinished, startJob, type Job, type Log } from "./apps";
+import { appMeta } from "./appform";
+import { AppError, jobFinished, startJob, viewOfFiles, type Job, type Log } from "./apps";
 import { appBackupDir, backupDir, BACKUP_KEY_RE, deleteFiles, expired, listSnapshots, mirror, onMachineBackups, SNAPSHOT_ID_RE, snapshotId, type BackupApp, type Snapshot, type SnapshotReason } from "./backup";
 import { settings } from "./config";
 import { writeJsonAtomic } from "./fsutil";
@@ -111,15 +111,12 @@ async function entries(lang: string): Promise<BackupApp[]> {
   const list = machines();
   const out = new Map<string, BackupApp>();
   for (const m of list.filter((x) => x.online)) {
-    const files = await call<{ name: string; compose: string }[]>(m.id, "apps.list").catch(() => []);
+    const files = await call<{ name: string; compose: string; env: string; hata: string | null }[]>(m.id, "apps.list").catch(() => []);
     for (const f of files) {
-      let title = f.name;
-      let icon = "";
-      try {
-        const meta = appMeta(parseCompose(f.compose), lang);
-        title = meta.title || f.name;
-        icon = meta.icon;
-      } catch {}
+      const view = viewOfFiles(f);
+      const meta = view ? appMeta(view, lang) : null;
+      const title = meta?.title || f.name;
+      const icon = meta?.icon ?? "";
       const key = keyOf(m.id, f.name);
       out.set(key, { name: key, machine: { id: m.id, name: m.name }, title, icon, installed: true, included: !settings.backup.exclude.includes(key), snapshots: listSnapshots(key), otherFolders: [], extraFolders: [] });
     }

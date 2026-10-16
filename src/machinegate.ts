@@ -11,8 +11,8 @@
  */
 import type { Server, TCPSocketListener } from "bun";
 import { hostname } from "node:os";
-import { appMeta, parseCompose, parseEnv, type Compose } from "./appform";
-import { AppError, busyPorts, type Job } from "./apps";
+import { appMeta, parseEnv, type Compose } from "./appform";
+import { AppError, busyPorts, viewOfFiles, type Job } from "./apps";
 import { listenAddress, saveSettings, settings, type AppAccess } from "./config";
 import { accessOf, gateTarget, guardedServer, guardsOf, overrideText } from "./gate";
 import { beforeMachineUp, filesOfMachineApp, jobOnMachine, onMachineAppGone, runOnMachine } from "./machineapps";
@@ -113,11 +113,12 @@ function save(key: string, access: AppAccess | null): void {
 }
 
 /** The override of a machine's app as it must be now; null — none (or the person's own, left alone) */
-function overrideOf(id: string, name: string, files: { compose: string; env: string }): string | null {
+function overrideOf(id: string, name: string, files: { compose: string; env: string; hata: string | null }): string | null {
   const access = accessOf(keyOf(id, name));
-  if (!access.protect) return null;
+  const view = viewOfFiles(files);
+  if (!access.protect || !view) return null;
   try {
-    return overrideText(parseCompose(files.compose), machineDataRoot(id), guardsOf(access), parseEnv(files.env), { host: hostname(), port: access.listen ?? 0 });
+    return overrideText(view, machineDataRoot(id), guardsOf(access), parseEnv(files.env), { host: hostname(), port: access.listen ?? 0 });
   } catch {
     return null;
   }
@@ -160,7 +161,8 @@ export async function setMachineAccess(id: string, name: string, request: { allo
   const current = accessOf(key);
   let next: AppAccess = { allowed: request.allowed, protect: false };
   if (request.protect) {
-    const gate = gateTarget(parseCompose(files.compose), machineDataRoot(id), parseEnv(files.env));
+    const view = viewOfFiles(files);
+    const gate = view ? gateTarget(view, machineDataRoot(id), parseEnv(files.env)) : "noPort";
     if (typeof gate === "string") throw new AppError("gate." + gate);
     const upstream = current.protect && current.port === gate.port && current.upstream ? current.upstream : await freeOnMachine(id, 20000 + (gate.port % 10000));
     const listen = current.protect && current.listen ? current.listen : await freeHere(gate.port, key);
@@ -203,12 +205,9 @@ onMachineAppGone(dropMachineAccess);
 export async function machineAccessRows(lang: string) {
   const rows = [];
   for (const m of machines().filter((x) => x.online)) {
-    const files = await call<{ name: string; compose: string; env: string }[]>(m.id, "apps.list").catch(() => []);
+    const files = await call<{ name: string; compose: string; env: string; hata: string | null }[]>(m.id, "apps.list").catch(() => []);
     for (const f of files) {
-      let compose: Compose | null = null;
-      try {
-        compose = parseCompose(f.compose);
-      } catch {}
+      const compose: Compose | null = viewOfFiles(f);
       const key = keyOf(m.id, f.name);
       const access = accessOf(key);
       const gate = compose ? gateTarget(compose, machineDataRoot(m.id), parseEnv(f.env)) : "noPort";

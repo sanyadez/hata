@@ -8,8 +8,9 @@
  * An operation is a job like any app's, kept one at a time per app and machine (`<name>@<machine>`);
  * the activity log names the app and the machine.
  */
-import { appMeta, applyForm, bindSources, dumpCompose, normalize, parseCompose, parseEnv, publishedPorts, resolvePorts, type Compose } from "./appform";
-import { AppError, assertName, envText, hataFileText, listJobs, startJob, storeAppDetail, storeCompose, type Job, type JobKind, type Log } from "./apps";
+import { appMeta, applyForm, dumpCompose, normalize, parseCompose, parseEnv, publishedPorts, resolvePorts, type Compose } from "./appform";
+import { AppError, assertName, envText, foldersOfFiles, hataAnswers, hataFileText, hataMetaIn, homeAddress, listJobs, ownVars, startJob, storeAppDetail, storeCompose, viewOfFiles, type AppFiles, type Job, type JobKind, type Log } from "./apps";
+import { filled, webPortOf, type HataMeta, type IndexApp } from "./hataapp";
 import type { MachineContainer } from "./client";
 import { call, containersOf, machine, machineDataRoot, open } from "./machines";
 import { MuxError } from "./mux";
@@ -22,6 +23,8 @@ interface Files {
   env: string;
   hata: string | null;
   override: string | null;
+  /** The other files of an app of Hata's format; a client older than 0.22 does not send them */
+  others?: Record<string, string>;
 }
 
 /** Runs before `docker compose` reads a machine's app: the sign-in's override is brought in step (`machinegate.ts`) */
@@ -58,12 +61,8 @@ function jobOf(id: string, name: string): MachineApp["job"] {
 }
 
 function describe(id: string, files: Files, containers: MachineContainer[] | null, lang: string): MachineApp {
-  let compose: Compose | null = null;
-  try {
-    compose = parseCompose(files.compose);
-  } catch {
-    // a file broken by hand still shows, so that it can be fixed or removed
-  }
+  // a file broken by hand still shows, so that it can be fixed or removed
+  const compose = viewOfFiles(files);
   const meta = appMeta(compose ?? { name: files.name }, lang);
   let port = meta.port;
   if (!port && compose) {
@@ -130,6 +129,56 @@ export async function filesOfMachineApp(id: string, name: string): Promise<Files
   return filesOfApp(id, name);
 }
 
+/**
+ * Hata's own variables of a machine's app of its format: its folder under the machine's data folder and
+ * the address it is opened at — Hata's, when the app is behind Hata's sign-in, else the machine's.
+ */
+function machineOwn(id: string, name: string, meta: HataMeta, compose: Compose, env: Record<string, string>): Record<string, string> {
+  const vars = ownVars(name, machineDataRoot(id));
+  let url = "";
+  if (meta.web) {
+    const access = settings.access[key(id, name)];
+    const port = webPortOf(meta, filled(compose, { ...env, ...vars }));
+    const ip = machine(id).ip;
+    if (access?.protect && access.listen) url = `http://${homeAddress()}:${access.listen}`;
+    else if (port && ip) url = `${meta.web.scheme}://${ip.includes(":") ? `[${ip}]` : ip}:${port}`;
+    // a machine that is away keeps the address it had
+    else url = env.APP_URL ?? "";
+  }
+  let host = "";
+  try {
+    host = url ? new URL(url).hostname : "";
+  } catch {}
+  return { APP_DATA: vars.APP_DATA!, APP_URL: url, APP_HOST: host };
+}
+
+/** The `.env` of a machine's app: Hata's variables as they must be there, the rest kept, `extra` added */
+export function machineEnvText(id: string, name: string, files: AppFiles, extra: Record<string, string> = {}): string {
+  const hata = hataMetaIn(files.hata);
+  if (!hata) return envText(name, files.env, extra);
+  let compose: Compose;
+  try {
+    compose = parseCompose(files.compose);
+  } catch {
+    return envText(name, files.env, extra);
+  }
+  return envText(name, files.env, extra, machineOwn(id, name, hata.meta, compose, { ...parseEnv(files.env), ...extra }));
+}
+
+/** An app of Hata's format needs a client that keeps its other files: one of Hata's own version */
+function assertClientFor(id: string, hata: string | null): void {
+  const m = machine(id);
+  if (hataMetaIn(hata) && m.outdated) throw new AppError("machine.clientOutdated", 409, { name: m.name });
+}
+
+/** Before `up`: the `.env` of an app of Hata's format with its address and folder as they are now */
+async function refreshEnv(id: string, name: string): Promise<void> {
+  const files = await filesOfApp(id, name);
+  if (!hataMetaIn(files.hata)) return;
+  const want = machineEnvText(id, name, files);
+  if (want !== files.env) await call(id, "apps.write", { name, files: { ".env": want } }).catch(asApp);
+}
+
 async function filesOfApp(id: string, name: string): Promise<Files> {
   assertName(name);
   const found = (await filesOf(id)).find((f) => f.name === name);
@@ -139,6 +188,7 @@ async function filesOfApp(id: string, name: string): Promise<Files> {
 
 /** Runs one compose command on the machine, its output into the job's log */
 async function dcOn(id: string, name: string, command: string, log: Log): Promise<void> {
+  if (command === "up") await refreshEnv(id, name);
   if (command === "config" || command === "up") await beforeUp(id, name);
   const channel = open(id, "apps.compose", { name, command });
   const decoder = new TextDecoder();
@@ -174,11 +224,19 @@ export async function storeAppFor(id: string, store: string, name: string, lang:
   return storeAppDetail(store, name, lang, { dataRoot: machineDataRoot(id), installed, busy: async (ports) => (await call<{ busy: number[] }>(id, "apps.ports", { ports })).busy });
 }
 
-async function install(id: string, name: string, compose: Compose, text: string, hata: string | null, log: Log): Promise<void> {
+/** The files of an app written on the machine, as one request: `fresh` refuses an app that is there */
+export const writeOnMachine = (id: string, name: string, files: AppFiles, fresh: boolean): Promise<unknown> =>
+  call(id, "apps.write", { name, fresh, files: { ...files.others, "compose.yml": files.compose, ".env": files.env, ...(files.hata ? { "hata.yml": files.hata } : {}) } }).catch(asApp);
+
+/** Makes the app's folders on the machine: its binds and the folders of its settings, under the machine's data folder */
+export const foldersOnMachine = (id: string, name: string, files: AppFiles): Promise<unknown> =>
+  call(id, "apps.folders", { paths: foldersOfFiles(files, machineDataRoot(id), name), root: machineDataRoot(id), owner: `${settings.puid}:${settings.pgid}` }).catch(asApp);
+
+async function install(id: string, name: string, files: AppFiles, log: Log): Promise<void> {
   try {
-    await call(id, "apps.write", { name, fresh: true, files: { "compose.yml": text, ".env": envText(name, ""), ...(hata ? { "hata.yml": hata } : {}) } }).catch(asApp);
+    await writeOnMachine(id, name, files, true);
     await dcOn(id, name, "config", log);
-    await call(id, "apps.folders", { paths: bindSources(compose), root: machineDataRoot(id), owner: `${settings.puid}:${settings.pgid}` }).catch(asApp);
+    await foldersOnMachine(id, name, files);
     await dcOn(id, name, "pull", log);
     await dcOn(id, name, "up", log);
   } catch (e) {
@@ -202,14 +260,28 @@ export async function installOnMachine(id: string, store: string, name: string, 
   if (!m.online) throw new AppError("machine.offline", 409, { name: m.name });
   if (!m.info?.docker.available) throw new AppError("machine.noDocker", 409, { name: m.name });
   if ((await filesOf(id)).some((f) => f.name === name)) throw new AppError("app.exists", 409);
-  // an app of Hata's format needs its .env and its other files made on the machine: not done there yet
-  if (storeApp(store, name)?.hata) throw new AppError("store.notOnMachine", 409);
+  const app = storeApp(store, name);
+  if (app?.hata) return installHataOnMachine(id, { ...app, hata: app.hata }, form, user);
   const compose = storeCompose(store, name, machineDataRoot(id));
   const error = applyForm(compose, form ?? {});
   if (error) throw new AppError(error);
   await assertFree(id, compose);
-  const base = structuredClone(storeApp(store, name)!.compose);
-  return jobOn(id, name, "install", user, (log) => install(id, name, compose, dumpCompose(compose), hataFileText(store, base), log));
+  const base = structuredClone(app!.compose);
+  const files: AppFiles = { compose: dumpCompose(compose), env: envText(name, ""), hata: hataFileText(store, base) };
+  return jobOn(id, name, "install", user, (log) => install(id, name, files, log));
+}
+
+/**
+ * An app of Hata's format: the compose file as the store has it, its settings' answers and Hata's
+ * variables of the machine in `.env`, `hata.yml` with what the store said and the store's other files.
+ */
+async function installHataOnMachine(id: string, app: NonNullable<ReturnType<typeof storeApp>> & { hata: IndexApp }, form: unknown, user: string): Promise<Job> {
+  const files: AppFiles = { compose: app.hata.compose, env: "", hata: hataFileText(app.store, parseCompose(app.hata.compose), app.hata), others: app.hata.files };
+  assertClientFor(id, files.hata);
+  const { values, view } = hataAnswers(app, form, machineDataRoot(id));
+  await assertFree(id, view);
+  files.env = machineEnvText(id, app.name, files, values);
+  return jobOn(id, app.name, "install", user, (log) => install(id, app.name, files, log));
 }
 
 /** A compose file pasted by hand, kept exactly as given */
@@ -226,12 +298,12 @@ export async function installComposeOnMachine(id: string, name: unknown, text: u
   if ((await filesOf(id)).some((f) => f.name === appName)) throw new AppError("app.exists", 409);
   normalize(compose, machineDataRoot(id));
   await assertFree(id, compose);
-  return jobOn(id, appName, "install", user, (log) => install(id, appName, compose, text, null, log));
+  return jobOn(id, appName, "install", user, (log) => install(id, appName, { compose: text, env: envText(appName, ""), hata: null }, log));
 }
 
 export async function machineAppAction(id: string, name: string, action: string, user: string): Promise<Job> {
   const files = await filesOfApp(id, name);
-  const env = () => call(id, "apps.write", { name, files: { ".env": envText(name, files.env) } }).catch(asApp);
+  const env = () => call(id, "apps.write", { name, files: { ".env": machineEnvText(id, name, files) } }).catch(asApp);
   switch (action) {
     case "start":
       return jobOn(id, name, "start", user, async (log) => {
@@ -276,8 +348,7 @@ export async function applyMachineCompose(id: string, name: string, text: unknow
       await call(id, "apps.write", { name, files: { "compose.yml": files.compose } }).catch(() => {});
       throw e;
     }
-    normalize(compose, machineDataRoot(id));
-    await call(id, "apps.folders", { paths: bindSources(compose), root: machineDataRoot(id), owner: `${settings.puid}:${settings.pgid}` }).catch(asApp);
+    await foldersOnMachine(id, name, { ...files, compose: text });
     await dcOn(id, name, "up", log);
   });
 }

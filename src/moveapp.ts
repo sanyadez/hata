@@ -16,24 +16,20 @@ import { existsSync } from "node:fs";
 import { hostname } from "node:os";
 import { join } from "node:path";
 import { record } from "./activity";
-import { bindSources, normalize, parseCompose, publishedPorts, type Compose } from "./appform";
-import { adoptApp, AppError, assertName, busyPorts, dc, envText, installedNames, letGo, localAppFiles, startJob, type Job, type Log } from "./apps";
+import { bindSources, normalize, publishedPorts } from "./appform";
+import { adoptApp, AppError, assertName, busyPorts, dc, hataMetaIn, installedNames, letGo, localAppFiles, startJob, viewOfFiles, type AppFiles, type Job, type Log } from "./apps";
 import { settings } from "./config";
-import { machineAppGone, machineApps } from "./machineapps";
+import { foldersOnMachine, machineAppGone, machineApps, machineEnvText, writeOnMachine } from "./machineapps";
 import { call, machine, machineDataRoot, open } from "./machines";
 import { MuxError } from "./mux";
-import { rebaseCompose } from "./rebase";
-
-interface AppFiles {
-  compose: string;
-  env: string;
-  hata: string | null;
-}
+import { rebaseCompose, rebaseEnv } from "./rebase";
 
 interface Place {
   id: string;
   name: string;
   dataRoot: string;
+  /** A machine whose client is older than Hata: it does not keep the other files of an app of Hata's format */
+  outdated: boolean;
   has(app: string): Promise<boolean>;
   files(app: string): Promise<AppFiles>;
   compose(app: string, command: "stop" | "up" | "down", log: Log): Promise<void>;
@@ -61,6 +57,7 @@ const tarError = async (code: number, errors: Promise<string>): Promise<never> =
 const here: Place = {
   id: "",
   name: hostname(),
+  outdated: false,
   get dataRoot() {
     return settings.dataRoot;
   },
@@ -106,7 +103,7 @@ function onMachine(id: string): Place {
   const filesOf = async (app: string) => {
     const found = (await call<(AppFiles & { name: string })[]>(id, "apps.list").catch(asApp)).find((f) => f.name === app);
     if (!found) throw new AppError("app.notFound", 404);
-    return { compose: found.compose, env: found.env, hata: found.hata };
+    return { compose: found.compose, env: found.env, hata: found.hata, others: found.others ?? {} };
   };
   const composeOn = async (app: string, command: string, log: Log) => {
     const channel = open(id, "apps.compose", { name: app, command });
@@ -123,6 +120,7 @@ function onMachine(id: string): Place {
     id,
     name: m.name,
     dataRoot: machineDataRoot(id),
+    outdated: m.outdated,
     has: async (app) => (await call<{ name: string }[]>(id, "apps.list").catch(asApp)).some((f) => f.name === app),
     files: filesOf,
     compose: composeOn,
@@ -147,12 +145,12 @@ function onMachine(id: string): Place {
       };
     },
     async adopt(app, files, log) {
-      await call(id, "apps.write", { name: app, fresh: true, files: { "compose.yml": files.compose, ".env": envText(app, files.env), ...(files.hata ? { "hata.yml": files.hata } : {}) } }).catch(asApp);
+      // the variables of the machine go in: an app of Hata's format has its folder in APP_DATA
+      const placed = { ...files, env: machineEnvText(id, app, files) };
+      await writeOnMachine(id, app, placed, true);
       try {
         await composeOn(app, "config", log);
-        const compose = parseCompose(files.compose);
-        normalize(compose, machineDataRoot(id));
-        await call(id, "apps.folders", { paths: bindSources(compose), root: machineDataRoot(id), owner: `${settings.puid}:${settings.pgid}` }).catch(asApp);
+        await foldersOnMachine(id, app, placed);
         await composeOn(app, "pull", log);
         await composeOn(app, "up", log);
       } catch (e) {
@@ -179,8 +177,9 @@ export async function moveCheck(input: { from?: unknown; name?: unknown }): Prom
   const from = placeOf(input.from);
   const app = String(input.name ?? "");
   assertName(app);
-  const compose: Compose = parseCompose((await from.files(app)).compose);
-  normalize(compose, from.dataRoot);
+  const compose = viewOfFiles(await from.files(app));
+  if (!compose) throw new AppError("app.badCompose");
+  normalize(compose, from.dataRoot, app);
   const own = appDataOf(from.dataRoot, app);
   const outside = bindSources(compose).filter((path) => path !== own && !path.startsWith(own + "/"));
   const volumes = Object.keys(typeof compose.volumes === "object" && compose.volumes ? compose.volumes : {});
@@ -196,11 +195,14 @@ export async function moveApp(input: { from?: unknown; to?: unknown; name?: unkn
   if (!(await from.has(app))) throw new AppError("app.notFound", 404);
   if (await to.has(app)) throw new AppError("app.exists", 409);
   const files = await from.files(app);
-  // its .env and other files would have to be made at the other place: not done for machines yet
-  if (files.hata && /^meta:/m.test(files.hata)) throw new AppError("moveapp.hataFormat", 409);
-  const rebased = rebaseCompose(files.compose, from.dataRoot.replace(/\/+$/, ""), to.dataRoot.replace(/\/+$/, ""));
-  const compose = parseCompose(rebased);
-  normalize(compose, to.dataRoot);
+  // an older client neither gives nor keeps the other files of an app of Hata's format
+  const old = hataMetaIn(files.hata) ? [from, to].find((p) => p.outdated) : undefined;
+  if (old) throw new AppError("machine.clientOutdated", 409, { name: old.name });
+  const [fromRoot, toRoot] = [from.dataRoot.replace(/\/+$/, ""), to.dataRoot.replace(/\/+$/, "")];
+  const moved: AppFiles = { ...files, compose: rebaseCompose(files.compose, fromRoot, toRoot), env: rebaseEnv(files.env, fromRoot, toRoot) };
+  const compose = viewOfFiles(moved);
+  if (!compose) throw new AppError("app.badCompose");
+  normalize(compose, to.dataRoot, app);
   const ports = publishedPorts(compose);
   const taken = ports.length ? await to.busy(ports) : [];
   if (taken.length) throw new AppError("app.portBusy", 409, { port: taken[0]! });
@@ -240,7 +242,7 @@ export async function moveApp(input: { from?: unknown; to?: unknown; name?: unkn
           copied = true;
           log(`  ${Math.ceil(sent / 1024 / 1024)} MB copied`);
         }
-        await to.adopt(app, { ...files, compose: rebased }, log);
+        await to.adopt(app, moved, log);
       } catch (e) {
         log(`The move failed: ${e instanceof Error ? e.message : e}. ${app} is started again on ${from.name}`);
         if (copied) await to.dropData(newData).catch(() => {});

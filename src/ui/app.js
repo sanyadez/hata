@@ -5685,8 +5685,6 @@ async function storeDialog(entry, target = state.installTarget ?? "") {
   } catch (e) {
     return toast(errorText(e), "error");
   }
-  // an app of Hata's format goes to this server only, for now
-  if (app.kind === "hata") targets.length = 0;
   const arch = target ? (targets.find((m) => m.id === target)?.info.arch === "arm64" ? "arm64" : "amd64") : state.overview?.arch;
   const supported = app.architectures.length === 0 || app.architectures.includes(arch);
   const settingsForm = app.form.settings ? settingFields(app.form.settings, true) : null;
