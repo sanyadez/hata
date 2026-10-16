@@ -632,11 +632,42 @@ const NAV = [
 // an administrator the rules ask for two-factor sign-in is a member until it is on — the server says so too
 const isAdmin = () => state.user?.role === "admin" && !state.user.mustTwoFactor;
 
-function navLinks(className) {
-  const current = state.route.view === "machine" ? "machines" : state.route.view === "app" ? "home" : state.route.view === "import" ? "store" : state.route.view === "trash" ? "files" : state.route.view;
-  return NAV.filter((item) => (!item.admin || isAdmin()) && (item.guest !== false || state.user.role !== "guest")).map((item) =>
+const navCurrent = () => (state.route.view === "machine" ? "machines" : state.route.view === "app" ? "home" : state.route.view === "import" ? "store" : state.route.view === "trash" ? "files" : state.route.view);
+const navItems = () => NAV.filter((item) => (!item.admin || isAdmin()) && (item.guest !== false || state.user.role !== "guest"));
+
+function navLinks(className, items = navItems()) {
+  const current = navCurrent();
+  return items.map((item) =>
     h("a", { class: className + (current === item.view ? " active" : ""), href: item.hash, "aria-current": current === item.view ? "page" : null }, icon(item.icon), h("span", null, t("nav." + item.view))),
   );
+}
+
+/** The bar at the bottom of a phone holds five: past that, the first four and "More" with the rest */
+const BOTTOM_SLOTS = 5;
+
+function bottomLinks() {
+  const items = navItems();
+  if (items.length <= BOTTOM_SLOTS) return navLinks("bottom-link", items);
+  const rest = items.slice(BOTTOM_SLOTS - 1);
+  const here = rest.some((item) => item.view === navCurrent());
+  const more = h("button", { type: "button", class: "bottom-link" + (here ? " active" : ""), "aria-haspopup": "menu", onclick: (e) => moreMenu(e.currentTarget, rest) }, icon("more"), h("span", null, t("nav.more")));
+  return [...navLinks("bottom-link", items.slice(0, BOTTOM_SLOTS - 1)), more];
+}
+
+function moreMenu(anchor, items) {
+  let dialog;
+  const current = navCurrent();
+  dialog = openDialog(
+    "menu dropdown nav-more",
+    items.map((item) => h("a", { class: "menu-item" + (current === item.view ? " active" : ""), href: item.hash, onclick: () => dialog.close() }, icon(item.icon), t("nav." + item.view))),
+  );
+  // it stands over the bar, by the button's right edge
+  const at = anchor.getBoundingClientRect();
+  dialog.style.top = "auto";
+  dialog.style.bottom = document.documentElement.clientHeight - at.top + 8 + "px";
+  dialog.style.right = Math.max(8, document.documentElement.clientWidth - at.right) + "px";
+  // a finger opened it: no item is chosen yet
+  dialog.focus();
 }
 
 async function signOut() {
@@ -726,7 +757,7 @@ function shell(...content) {
       h("div", { class: "top-right" }, globalSearch(), isAdmin() && h("a", { class: "icon-btn top-tool" + (state.route.view === "terminal" ? " active" : ""), href: "#/terminal", title: t("terminal.title"), "aria-label": t("terminal.title") }, icon("terminal")), h("button", { type: "button", class: "user", onclick: userMenu }, h("span", { class: "avatar" }, state.user.name.slice(0, 1).toUpperCase()), h("span", { class: "user-name" }, state.user.name))),
     ),
     h("main", { id: "view" }, state.user.mustTwoFactor && h("p", { class: "banner" }, t("twofa.mustLead"), " ", h("a", { class: "link", href: "#/settings/account" }, t("twofa.mustGo"))), content),
-    h("nav", { class: "bottom-bar" }, navLinks("bottom-link")),
+    h("nav", { class: "bottom-bar" }, bottomLinks()),
   );
 }
 

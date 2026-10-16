@@ -220,6 +220,7 @@ textarea.code.page { min-height: 60dvh; background: var(--surface); padding: 16p
 
 #view { max-width: 1440px; margin: 0 auto; padding: 36px 32px 72px; display: grid; gap: 24px; }
 .bottom-bar { display: none; }
+.nav-more .menu-item.active { color: var(--accent-text); }
 
 .page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
 .page-head > div:first-child { display: grid; gap: 8px; min-width: 0; }
@@ -704,8 +705,9 @@ dialog.dropdown header { padding: 4px 6px; margin-bottom: 8px; }
   #view { padding: 20px 16px 96px; gap: 20px; }
   .upload { bottom: 88px; }
   .selection { top: 64px; }
-  .bottom-bar { position: fixed; left: 12px; right: 12px; bottom: max(12px, env(safe-area-inset-bottom)); z-index: 6; display: flex; justify-content: space-around; padding: 6px; background: color-mix(in srgb, var(--surface) 92%, transparent); backdrop-filter: blur(12px); border: 1px solid var(--border-strong); border-radius: 26px; }
-  .bottom-link { display: grid; justify-items: center; gap: 2px; padding: 6px 18px; border-radius: 20px; color: var(--muted); font-size: 11px; }
+  .bottom-bar { position: fixed; left: 12px; right: 12px; bottom: max(12px, env(safe-area-inset-bottom)); z-index: 6; display: flex; justify-content: space-around; padding: 4px; background: color-mix(in srgb, var(--surface) 92%, transparent); backdrop-filter: blur(12px); border: 1px solid var(--border-strong); border-radius: 26px; }
+  .bottom-link { flex: 1 1 0; min-width: 0; display: grid; justify-items: center; gap: 2px; padding: 6px 2px; border-radius: 20px; color: var(--muted); font-size: 11px; letter-spacing: -0.01em; background: none; border: 0; font-family: inherit; cursor: pointer; }
+  .bottom-link span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .bottom-link .ico { width: 20px; height: 20px; }
   .bottom-link.active { background: var(--accent-soft); color: var(--accent-text); }
   .stats, .stats.three { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -718,7 +720,6 @@ dialog.dropdown header { padding: 4px 6px; margin-bottom: 8px; }
   .store, .settings, .files { grid-template-columns: minmax(0, 1fr); gap: 16px; }
   .files, body:has(> .assistant-fab) .files { min-height: 0; }
   .file-table .when, .sort { display: none; }
-  .bottom-link { padding: 6px 10px; }
   .file-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .cats { position: static; display: flex; overflow-x: auto; gap: 6px; padding-bottom: 4px; }
   .cat-title { display: none; }
