@@ -2469,6 +2469,7 @@
   "tools.holds.places": "Network places are mounted through it. To remove it, remove them first (Settings → Storage).",
   "netplace.sidebarHint": "Connect a folder of another machine: Settings → Storage",
   "nav.machines": "Machines",
+  "nav.more": "More",
   "machines.lead": "Other computers of the house: their state, containers and a terminal, from here.",
   "machines.count": "{n} machines · {online} connected",
   "machines.add": "Add a machine",
