@@ -81,6 +81,14 @@ test("every block of the dashboard stands in exactly one place, or is put away",
   expect(movePath(layout, "/a", "/b").widgets).toEqual(layout.widgets);
 });
 
+test("the numbers of other machines are blocks put on the page by hand", () => {
+  expect(cleanWidgets({ top: ["stats", "machine:22d2efed", "machine:XYZ", "machine:22d2efed"], side: ["machine:304015a8", "attention", "activity"], hidden: ["machine:aaaaaaaa"] })).toEqual({ top: ["stats", "machine:22d2efed"], side: ["machine:304015a8", "attention", "activity"], bottom: [], hidden: [] });
+  // and survive arranging and the text of the layout
+  const layout = cleanLayout({ groups: [], widgets: { top: ["machine:22d2efed", "stats"] } });
+  expect(arrange(layout, [], []).widgets.top).toEqual(["machine:22d2efed", "stats"]);
+  expect(parseLayoutText(layoutText(layout)).widgets.top).toEqual(["machine:22d2efed", "stats"]);
+});
+
 test("a layout saved while the numbers were blocks of their own and there was a left column", () => {
   expect(cleanWidgets({ top: ["cpu", "memory"], left: ["activity", "disk"], main: ["group:a"], side: ["attention"], bottom: ["temp"], hidden: ["network"] })).toEqual({ top: ["stats"], side: ["activity", "attention"], bottom: [], hidden: [] });
   expect(cleanWidgets({ top: [], side: ["attention"], hidden: ["cpu", "memory", "activity"] }).hidden).toEqual(["stats", "activity"]);

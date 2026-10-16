@@ -221,6 +221,11 @@ textarea.code.page { min-height: 60dvh; background: var(--surface); padding: 16p
 #view { max-width: 1440px; margin: 0 auto; padding: 36px 32px 72px; display: grid; gap: 24px; }
 .bottom-bar { display: none; }
 .nav-more .menu-item.active { color: var(--accent-text); }
+.machine-block { display: grid; gap: 10px; position: relative; }
+.machine-block .section-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.machine-block h2 a { display: inline-flex; align-items: center; gap: 8px; }
+.machine-block h2 a:hover { color: var(--accent-text); }
+.machine-block h2 .ico { width: 16px; height: 16px; color: var(--muted); }
 
 .page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
 .page-head > div:first-child { display: grid; gap: 8px; min-width: 0; }

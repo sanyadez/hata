@@ -885,6 +885,8 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
       folders: admin ? pinnedFolders() : [],
       // apps of the other machines, for administrators: their tiles are `<name>@<machine>`
       machineApps: onMachines,
+      // the other machines and their numbers, for their blocks on the dashboard
+      machines: admin ? machineList().map((m) => ({ id: m.id, name: m.name, online: m.online, seen: m.seen, os: [m.info?.os, m.info?.arch].filter(Boolean).join(" · "), status: m.status })) : [],
       dashboard: arrange(settings.dashboard, [...apps.map((app) => app.name), ...onMachines.map((app) => app.key)], admin ? settings.folders : [], admin ? ["store", "add"] : user.role === "guest" ? [] : ["store"]),
       jobs: admin ? listJobs().filter((j) => j.status === "running").map(({ log: _, ...job }) => job) : [],
     });
@@ -1940,6 +1942,13 @@ async function machinesApi(req: Request, url: URL, server: Server, by: string): 
   if (rest === "" && method === "PATCH") return json(renameMachine(id, (await body(req)).name, by));
   if (rest === "" && method === "DELETE") {
     await removeMachine(id, by);
+    // its numbers on the dashboard go with it
+    const block = `machine:${id}`;
+    const zones = settings.dashboard.widgets;
+    if ([zones.top, zones.side, zones.bottom].some((list) => list.includes(block))) {
+      for (const zone of ["top", "side", "bottom"] as const) zones[zone] = zones[zone].filter((x) => x !== block);
+      saveSettings();
+    }
     return json({ ok: true });
   }
   if (rest === "/containers" && method === "GET") return json(await containersOf(id));

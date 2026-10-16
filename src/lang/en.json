@@ -859,6 +859,8 @@
   "error.dashboard.badText": "This text is not a layout: {message}",
   "home.dropBlock": "Drop a block here",
   "home.statsBlock": "System numbers",
+  "home.machineBlock": "Numbers of “{name}”",
+  "home.machineBlockHint": "Processor, memory, disk and network of that machine",
   "local.title": "Name on the home network",
   "local.lead": "Hata answers to a name on your home network, so nobody has to remember the address. Each app with a web page gets a name of its own under it.",
   "local.enabled": "Use a local name",

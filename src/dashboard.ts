@@ -39,7 +39,11 @@ export interface Layout {
   widgets: Widgets;
 }
 
-export const usualZone = (id: string): Zone => (id === "stats" ? "top" : "side");
+/** The numbers of another machine Hata looks after, by the machine's id: put on the page by hand, any number of them */
+export const MACHINE_BLOCK_RE = /^machine:[a-f0-9]{8}$/;
+const knownBlock = (id: string) => (WIDGETS as readonly string[]).includes(id) || MACHINE_BLOCK_RE.test(id);
+
+export const usualZone = (id: string): Zone => (id === "stats" || MACHINE_BLOCK_RE.test(id) ? "top" : "side");
 
 /** The numbers of the system were blocks of their own for a while: any of them stands for `stats` */
 const NUMBERS = ["cpu", "memory", "disk", "network", "temp"];
@@ -51,7 +55,7 @@ export function cleanWidgets(input: unknown): Widgets {
   const out: Widgets = { top: [], side: [], bottom: [], hidden: [] };
   const seen = new Set<string>();
   const take = (list: unknown, into: string[]) => {
-    for (const id of blockIds(list)) if ((WIDGETS as readonly string[]).includes(id) && !seen.has(id) && seen.add(id)) into.push(id);
+    for (const id of blockIds(list)) if (knownBlock(id) && !seen.has(id) && seen.add(id)) into.push(id);
   };
   take(raw.top, out.top);
   // there was a left column once: what stood in it stands in the one that is left
@@ -59,6 +63,8 @@ export function cleanWidgets(input: unknown): Widgets {
   take(raw.side, out.side);
   take(raw.bottom, out.bottom);
   take(raw.hidden, out.hidden);
+  // a machine's block taken off is simply gone: the "Add" menu offers every machine anyway
+  out.hidden = out.hidden.filter((id) => !MACHINE_BLOCK_RE.test(id));
   for (const id of WIDGETS) if (!seen.has(id)) out[usualZone(id)].push(id);
   return out;
 }
