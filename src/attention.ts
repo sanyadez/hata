@@ -32,7 +32,7 @@ const FAILURE_WINDOW_MS = 24 * 3600 * 1000;
 /** A trash smaller than this is not worth a word when its disk fills up, bytes */
 const TRASH_WORTH = 100 * 1024 * 1024;
 
-export function attention(input: { system: SystemStatus; docker: DockerInfo; apps: InstalledApp[]; activity: Activity[]; update?: string | null; offsite?: { error: string } | null; disks?: DiskReport[]; trash?: (path: string) => number; absent?: { path: string; holds: string | null }[]; internet?: Trouble[]; exposed?: { nic: string; address: string }[]; array?: { code: string; detail: Record<string, string | number> }[]; shares?: { code: string; detail: Record<string, string> }[]; places?: { id: string; name: string; path: string }[]; machines?: { id: string; name: string; since: number }[]; machineApps?: { key: string; title: string; status: string; containers: { name: string; state: string }[]; machine: { id: string; name: string; online: boolean } }[]; unused?: { id: string; title: string; size: number; carries: boolean }[]; filling?: { path: string; days: number; percent: number } | null; now?: number }): AttentionItem[] {
+export function attention(input: { system: SystemStatus; docker: DockerInfo; apps: InstalledApp[]; activity: Activity[]; update?: string | null; offsite?: { error: string } | null; disks?: DiskReport[]; trash?: (path: string) => number; absent?: { path: string; holds: string | null }[]; internet?: Trouble[]; exposed?: { nic: string; address: string }[]; array?: { code: string; detail: Record<string, string | number> }[]; shares?: { code: string; detail: Record<string, string> }[]; places?: { id: string; name: string; path: string }[]; machines?: { id: string; name: string; since: number }[]; machineApps?: { key: string; title: string; status: string; containers: { name: string; state: string; done?: boolean }[]; machine: { id: string; name: string; online: boolean } }[]; unused?: { id: string; title: string; size: number; carries: boolean }[]; filling?: { path: string; days: number; percent: number } | null; now?: number }): AttentionItem[] {
   const { system, docker, apps, activity } = input;
   const now = input.now ?? Date.now();
   const items: AttentionItem[] = [];
@@ -45,7 +45,7 @@ export function attention(input: { system: SystemStatus; docker: DockerInfo; app
     if (restarting.length) {
       items.push({ id: `restarting:${app.name}`, severity: "danger", code: "restarting", detail: { title: app.title, container: restarting[0]!.name }, app: app.name });
     } else if (app.status === "partial") {
-      const down = app.containers.filter((c) => c.state !== "running");
+      const down = app.containers.filter((c) => c.state !== "running" && !c.done);
       items.push({ id: `partial:${app.name}`, severity: "warn", code: "partial", detail: { title: app.title, container: down[0]?.name ?? "" }, app: app.name });
     }
   }
@@ -56,7 +56,7 @@ export function attention(input: { system: SystemStatus; docker: DockerInfo; app
     const restarting = app.containers.filter((c) => c.state === "restarting");
     const detail = { title: app.title, machine: app.machine.name, id: app.machine.id };
     if (restarting.length) items.push({ id: `restarting:${app.key}`, severity: "danger", code: "machine.restarting", detail: { ...detail, container: restarting[0]!.name } });
-    else if (app.status === "partial") items.push({ id: `partial:${app.key}`, severity: "warn", code: "machine.partial", detail: { ...detail, container: app.containers.find((c) => c.state !== "running")?.name ?? "" } });
+    else if (app.status === "partial") items.push({ id: `partial:${app.key}`, severity: "warn", code: "machine.partial", detail: { ...detail, container: app.containers.find((c) => c.state !== "running" && !c.done)?.name ?? "" } });
   }
 
   // The latest outcome decides: a failure followed by a success is history, not a problem. Running the

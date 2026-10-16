@@ -14,7 +14,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, wri
 import { rm } from "node:fs/promises";
 import { networkInterfaces } from "node:os";
 import { dirname, join } from "node:path";
-import { APP_NAME_RE, appMeta, applyForm, localize, bindSources, buildForm, dumpCompose, normalize, parseCompose, parseEnv, publishedPorts, resolvePorts, type AppForm, type AppMeta, type Compose } from "./appform";
+import { APP_NAME_RE, appMeta, applyForm, appStatus, finished, localize, bindSources, buildForm, dumpCompose, normalize, parseCompose, parseEnv, publishedPorts, resolvePorts, type AppForm, type AppMeta, type Compose } from "./appform";
 import { applyEdit, blankCompose, readEdit, type AppEdit } from "./appedit";
 import { bus } from "./bus";
 import { IMAGE_MIME, imageType } from "./wallpapers";
@@ -253,7 +253,8 @@ export interface InstalledApp extends Pick<AppMeta, "title" | "icon" | "port" | 
   protected: boolean;
   /** Running operation, if any */
   job: { id: string; kind: JobKind } | null;
-  containers: { id: string; name: string; service: string; image: string; state: string; status: string; ports: string[] }[];
+  /** `done` — a step that ran once and ended as it should (`finished`) */
+  containers: { id: string; name: string; service: string; image: string; state: string; status: string; ports: string[]; done: boolean }[];
 }
 
 /** The variables `docker compose` fills an app's file with: its `.env` */
@@ -278,7 +279,6 @@ function describeApp(name: string, containers: ContainerSummary[] | null, lang: 
   const compose = viewOf(name);
   const meta = appMeta(compose ?? { name }, lang);
   const own = (containers ?? []).filter((c) => c.Labels[PROJECT_LABEL] === name);
-  const running = own.filter((c) => c.State === "running").length;
   const jobId = busy.get(name);
   const job = jobId ? jobs.get(jobId) : undefined;
   return {
@@ -291,7 +291,7 @@ function describeApp(name: string, containers: ContainerSummary[] | null, lang: 
     scheme: meta.scheme,
     hostname: meta.hostname,
     subdomain: meta.subdomain,
-    status: containers === null ? "unknown" : running === 0 ? "stopped" : running === own.length ? "running" : "partial",
+    status: containers === null ? "unknown" : appStatus(own.map((c) => ({ service: c.Labels[SERVICE_LABEL] ?? "", state: c.State, status: c.Status })), compose),
     store: recordedStore(name, compose),
     update: planStoreUpdate(name) !== null,
     newer: newerImages(own),
@@ -305,6 +305,7 @@ function describeApp(name: string, containers: ContainerSummary[] | null, lang: 
       image: c.Image,
       state: c.State,
       status: c.Status,
+      done: finished(compose, c.Labels[SERVICE_LABEL] ?? "", c.State, c.Status),
     })),
   };
 }
