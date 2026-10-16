@@ -4475,7 +4475,17 @@ const entryOpener = (entry, className, ...content) =>
     ? h("a", { class: className, href: filesHash(joinPath(state.files.path, entry.name)) }, content)
     : h("button", { type: "button", class: className, onclick: () => openEntry(entry) }, content);
 
-const sharedMark = (entry) => entry.type === "dir" && state.files.shared.includes(joinPath(state.files.path, entry.name)) && h("span", { class: "shared-mark", title: t("files.sharedMark") }, icon("share"));
+/** Small signs after a name: a favourite, a folder on the dashboard, a folder shared over the network */
+const entryMarks = (entry) => {
+  const path = joinPath(state.files.path, entry.name);
+  const mark = (iconName, title) => h("span", { class: "shared-mark", title }, icon(iconName));
+  const here = !filesMachine();
+  return [
+    here && entry.type !== "other" && isFavorite(path) && mark("star", t("files.favoriteMark")),
+    here && entry.type === "dir" && (state.files.pinned ?? []).includes(path) && mark("pin", t("files.pinnedMark")),
+    entry.type === "dir" && (state.files.shared ?? []).includes(path) && mark("share", t("files.sharedMark")),
+  ];
+};
 
 function filesTable(entries) {
   const all = h("input", {
@@ -4489,7 +4499,7 @@ function filesTable(entries) {
       "tr",
       { class: (filesUi.selected.has(entry.name) ? "selected" : "") + (filesUi.cursor === entry.name ? " cursor" : ""), "data-name": entry.name },
       h("td", { class: "tick" }, entryCheckbox(entry)),
-      h("td", { class: "name" }, entryOpener(entry, "file-name", fileIcon(entry), h("span", { class: "clip" }, entry.name), entry.link && icon("link", "faint"), sharedMark(entry))),
+      h("td", { class: "name" }, entryOpener(entry, "file-name", fileIcon(entry), h("span", { class: "clip" }, entry.name), entry.link && icon("link", "faint"), entryMarks(entry))),
       h("td", { class: "num muted" }, entry.type === "file" ? bytes(entry.size) : "—"),
       h("td", { class: "muted when" }, fileTime(entry.modified)),
       h("td", { class: "tick" }, entryMore(entry)),
@@ -4503,7 +4513,7 @@ function filesGrid(dirs, rest) {
     return h(
       "div",
       { class: "file-tile" + (entry.type === "dir" ? " dir" : "") + (filesUi.selected.has(entry.name) ? " selected" : "") + (filesUi.cursor === entry.name ? " cursor" : ""), "data-name": entry.name },
-      entryOpener(entry, "file-open", entry.type !== "dir" && h("span", { class: "thumb" }, thumb), entry.type === "dir" && fileIcon(entry), h("span", { class: "file-text" }, h("span", { class: "clip strong" }, entry.name, sharedMark(entry)), h("span", { class: "muted small clip" }, entry.type === "file" ? `${bytes(entry.size)} · ${fileTime(entry.modified)}` : fileTime(entry.modified)))),
+      entryOpener(entry, "file-open", entry.type !== "dir" && h("span", { class: "thumb" }, thumb), entry.type === "dir" && fileIcon(entry), h("span", { class: "file-text" }, h("span", { class: "clip strong" }, entry.name, entryMarks(entry)), h("span", { class: "muted small clip" }, entry.type === "file" ? `${bytes(entry.size)} · ${fileTime(entry.modified)}` : fileTime(entry.modified)))),
       h("span", { class: "file-tick" }, entryCheckbox(entry)),
       h("span", { class: "file-more" }, entryMore(entry)),
     );

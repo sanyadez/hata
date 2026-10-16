@@ -1436,6 +1436,8 @@
   "shares.tool.note": "Для спільних тек потрібна Samba, а на цьому сервері її ще не встановлено.",
   "files.share": "Відкрити в мережі…",
   "files.shareSettings": "Доступ у мережі…",
+  "files.favoriteMark": "В обраному",
+  "files.pinnedMark": "На дашборді",
   "files.sharedMark": "Відкрито в мережі",
   "error.shares.protected": "Цю теку не можна відкрити в мережі: вона системна або містить конфігурацію Hata.",
   "error.shares.notFound": "Такої спільної теки немає.",

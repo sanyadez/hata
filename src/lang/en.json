@@ -1436,6 +1436,8 @@
   "shares.tool.note": "Sharing needs Samba, which is not installed on this server yet.",
   "files.share": "Share over the network…",
   "files.shareSettings": "Network sharing…",
+  "files.favoriteMark": "In favourites",
+  "files.pinnedMark": "On the dashboard",
   "files.sharedMark": "Shared over the network",
   "error.shares.protected": "This folder cannot be shared: it is the system's own or holds Hata's configuration.",
   "error.shares.notFound": "There is no such shared folder.",
