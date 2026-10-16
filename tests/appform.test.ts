@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { appMeta, applyForm, appStatus, finished, bindSources, buildForm, dumpCompose, interpolate, localize, normalize, parseCompose, parseEnv, publishedPorts, resolvePorts } from "../src/appform";
+import { appMeta, applyForm, appStatus, stepDone, bindSources, buildForm, dumpCompose, interpolate, localize, normalize, parseCompose, parseEnv, publishedPorts, resolvePorts } from "../src/appform";
 
 const STORE_APP = `
 name: demo
@@ -242,17 +242,17 @@ describe("a step that ran once", () => {
   const c = (service: string, state: string, status: string) => ({ service, state, status });
 
   test("exited with 0 from a service that is not restarted is done", () => {
-    expect(finished(compose, "config", "exited", "Exited (0) 5 minutes ago")).toBe(true);
-    expect(finished(compose, "seed", "exited", "Exited (0) 1 second ago")).toBe(true);
-    expect(finished(compose, "retry", "exited", "Exited (0) 1 hour ago")).toBe(true);
+    expect(stepDone(compose, "config", "exited", "Exited (0) 5 minutes ago")).toBe(true);
+    expect(stepDone(compose, "seed", "exited", "Exited (0) 1 second ago")).toBe(true);
+    expect(stepDone(compose, "retry", "exited", "Exited (0) 1 hour ago")).toBe(true);
   });
 
   test("a failure, a restarted service or an unknown one is not", () => {
-    expect(finished(compose, "config", "exited", "Exited (1) 5 minutes ago")).toBe(false);
-    expect(finished(compose, "web", "exited", "Exited (0) 5 minutes ago")).toBe(false);
-    expect(finished(compose, "other", "exited", "Exited (0) 5 minutes ago")).toBe(false);
-    expect(finished(null, "config", "exited", "Exited (0) 5 minutes ago")).toBe(false);
-    expect(finished(compose, "config", "created", "Created")).toBe(false);
+    expect(stepDone(compose, "config", "exited", "Exited (1) 5 minutes ago")).toBe(false);
+    expect(stepDone(compose, "web", "exited", "Exited (0) 5 minutes ago")).toBe(false);
+    expect(stepDone(compose, "other", "exited", "Exited (0) 5 minutes ago")).toBe(false);
+    expect(stepDone(null, "config", "exited", "Exited (0) 5 minutes ago")).toBe(false);
+    expect(stepDone(compose, "config", "created", "Created")).toBe(false);
   });
 
   test("the app runs when the rest runs; nothing running is stopped", () => {
