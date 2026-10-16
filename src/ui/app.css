@@ -355,7 +355,31 @@ dialog.tile-folder.drop-out .tiles { opacity: 0.5; }
 .tab.active { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
 .tab.active .ico { color: var(--accent-text); }
 
-.table-wrap { overflow-x: auto; }
+.table-wrap { overflow-x: auto; container: tablebox / inline-size; }
+td .row-actions { flex-wrap: wrap; }
+/* no sideways scrolling anywhere: long lines of code and logs wrap */
+textarea.code, pre { white-space: pre-wrap; overflow-wrap: anywhere; overflow-x: hidden; }
+
+/* a table with no room for its columns is a list of cards, a "column: value" line under another */
+@container tablebox (max-width: 640px) {
+  table:not(.file-table), table:not(.file-table) > tbody, table:not(.file-table) > tbody > tr, table:not(.file-table) > tbody > tr > td { display: block; width: auto; }
+  table:not(.file-table) > thead { display: none; }
+  table:not(.file-table) > tbody > tr { padding: 12px 14px; border-top: 1px solid var(--border); }
+  table:not(.file-table) > tbody > tr:first-child { border-top: 0; }
+  table:not(.file-table) > tbody > tr > td { border: 0; padding: 3px 0; text-align: left; }
+  table:not(.file-table) > tbody > tr > td:empty { display: none; }
+  table:not(.file-table) > tbody > tr > td:not([data-label=""])[data-label]::before { content: attr(data-label); display: block; margin-top: 4px; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--faint); }
+  table:not(.file-table) td .clip { max-width: 100%; }
+  table:not(.file-table) .row-actions { justify-content: flex-start; margin-top: 6px; }
+}
+
+/* between a phone and a wide screen the sections are icons, their names in the tooltip */
+@media (min-width: 761px) and (max-width: 1180px) {
+  .nav-link { padding: 0 10px; }
+  .nav-link .ico { display: block; width: 18px; height: 18px; }
+  .nav-link span, .user-name { display: none; }
+  .top-right { gap: 10px; }
+}
 .table-wrap .cmd { padding: 12px 20px; border-top: 1px solid var(--border); }
 table { width: 100%; border-collapse: collapse; }
 th { text-align: left; font-size: 11px; font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; color: var(--faint); padding: 16px 20px 10px; white-space: nowrap; }
@@ -726,12 +750,26 @@ dialog.dropdown header { padding: 4px 6px; margin-bottom: 8px; }
   .files, body:has(> .assistant-fab) .files { min-height: 0; }
   .file-table .when, .sort { display: none; }
   .file-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .cats { position: static; display: flex; overflow-x: auto; gap: 6px; padding-bottom: 4px; }
+  .cats { position: static; display: grid; gap: 4px; }
   .cat-title { display: none; }
-  .files-side { position: static; gap: 8px; }
-  .side-disks { display: flex; overflow-x: auto; gap: 6px; padding-bottom: 4px; }
-  .side-disks .cat.vol { flex: 0 0 200px; }
-  .cat { width: auto; white-space: nowrap; border: 1px solid var(--border); gap: 8px; }
+  .files-side { position: static; gap: 4px; }
+  .side-disks { gap: 4px; }
+  .cat { border: 1px solid var(--border); gap: 8px; position: relative; }
+  /* a list of sections shows the open one; tapped, it shows them all to choose from */
+  .fold:not(.open):has(.cat.active) :is(.cat:not(.active), .cat-title) { display: none; }
+  .fold:not(.open):has(.cat.active) .side-disks:not(:has(.cat.active)) { display: none; }
+  .fold:not(.open):has(.cat.active) .cats:not(:has(.cat.active)) { display: none; }
+  .fold .cat.active { padding-right: 36px; }
+  .fold .cat.active::after { content: ""; position: absolute; right: 16px; top: calc(50% - 6px); width: 7px; height: 7px; border: solid currentColor; border-width: 0 2px 2px 0; transform: rotate(45deg); }
+  .fold .cat.vol.active::after { top: 16px; }
+  .fold.open .cat.active::after { top: calc(50% - 2px); transform: rotate(225deg); }
+  .fold.open .cat.vol.active::after { top: 20px; }
+  .fold.open .cat-title { display: block; padding: 10px 4px 2px; }
+  .disk-strip { display: none; }
+  /* no sideways scrolling: tabs go on a second line, a table row is a card, code wraps */
+  .tabs { flex-wrap: wrap; overflow: visible; gap: 0 20px; }
+  .section-head, .snapshot, .section-head .row-actions { flex-wrap: wrap; }
+  .card-head { grid-template-columns: minmax(0, 1fr); }
   .cards { grid-template-columns: minmax(0, 1fr); }
   .form-row { grid-template-columns: minmax(0, 1fr); gap: 4px; }
   .form-label { padding-top: 0; }

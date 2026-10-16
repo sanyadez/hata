@@ -620,6 +620,48 @@ function authScreen() {
 
 // --- Shell --------------------------------------------------------------------------------------
 
+/** A phone: lists of sections fold to the open one, tables become cards */
+const phone = matchMedia("(max-width: 760px)");
+
+// a folded list opens when its open section is tapped; choosing one, or tapping elsewhere, folds it again
+document.addEventListener(
+  "click",
+  (e) => {
+    const fold = e.target.closest?.(".fold");
+    for (const open of document.querySelectorAll(".fold.open")) if (open !== fold) open.classList.remove("open");
+    if (!fold || !phone.matches) return;
+    const item = e.target.closest(".cat");
+    if (fold.classList.contains("open")) {
+      if (item) fold.classList.remove("open");
+    } else if (item?.classList.contains("active")) {
+      e.preventDefault();
+      e.stopPropagation();
+      fold.classList.add("open");
+    }
+  },
+  true,
+);
+
+/** Every cell of a table knows its column's name: a phone shows a row as a card of "name: value" lines */
+function labelTables() {
+  for (const table of document.querySelectorAll("table")) {
+    const names = [...(table.tHead?.rows[0]?.cells ?? [])].map((cell) => cell.textContent.trim());
+    if (!names.length) continue;
+    for (const row of table.tBodies[0]?.rows ?? []) {
+      let column = 0;
+      for (const cell of row.cells) {
+        const name = column > 0 ? names[column] ?? "" : "";
+        if (cell.dataset.label !== name) cell.dataset.label = name;
+        column += cell.colSpan || 1;
+      }
+    }
+  }
+}
+let labelling = 0;
+new MutationObserver(() => {
+  if (!labelling) labelling = requestAnimationFrame(() => ((labelling = 0), labelTables()));
+}).observe(document.documentElement, { childList: true, subtree: true });
+
 const NAV = [
   { view: "home", hash: "#/", icon: "home" },
   { view: "store", hash: "#/store", icon: "grid", guest: false },
@@ -640,7 +682,7 @@ const navItems = () => NAV.filter((item) => (!item.admin || isAdmin()) && (item.
 function navLinks(className, items = navItems()) {
   const current = navCurrent();
   return items.map((item) =>
-    h("a", { class: className + (current === item.view ? " active" : ""), href: item.hash, "aria-current": current === item.view ? "page" : null }, icon(item.icon), h("span", null, t("nav." + item.view))),
+    h("a", { class: className + (current === item.view ? " active" : ""), href: item.hash, title: t("nav." + item.view), "aria-current": current === item.view ? "page" : null }, icon(item.icon), h("span", null, t("nav." + item.view))),
   );
 }
 
@@ -4062,7 +4104,7 @@ async function loadFiles() {
 }
 
 function renderFiles() {
-  const box = h("div", { class: "files" }, h("aside", { class: "files-side", id: "files-places" }), h("section", { class: "stack", id: "files-main" }));
+  const box = h("div", { class: "files" }, h("aside", { class: "files-side fold", id: "files-places" }), h("section", { class: "stack", id: "files-main" }));
   box.addEventListener("contextmenu", filesContext);
   // files and folders dropped anywhere on the page go into the folder on screen
   let depth = 0;
@@ -5212,7 +5254,7 @@ function renderTrash() {
       h("td", { class: "num" }, bytes(item.size), item.type === "dir" && h("div", { class: "muted small" }, t("trash.files", { n: item.files }))),
       h("td", null, h("div", { class: "row-actions" }, button(t("trash.restore"), { class: "small", onclick: back(item) }, "undo"), button("", { class: "small icon-btn", title: t("files.deleteForever"), "aria-label": t("files.deleteForever"), onclick: () => forever([item.id], t("trash.deleteTitle", { name: item.name }), t("trash.deleteLead")) }, "trash"))),
     );
-  shell(h("div", { class: "files" }, h("aside", { class: "files-side", id: "files-places" }), h("section", { class: "stack" },
+  shell(h("div", { class: "files" }, h("aside", { class: "files-side fold", id: "files-places" }), h("section", { class: "stack" },
     h(
       "div",
       { class: "page-head" },
@@ -5637,7 +5679,7 @@ function renderStore() {
   shell(
     h("div", { class: "page-head" }, h("div", null, h("h1", null, t("nav.store")), h("p", { class: "meta", id: "store-meta" }, " ")), isAdmin() && h("div", { class: "actions" }, button(t("store.sync"), { class: "ghost", onclick: syncStores }, "refresh"), h("a", { class: "btn", href: "#/import" }, icon("download"), h("span", null, t("import.open"))), button(t("store.custom"), { onclick: customDialog }, "plus"))),
     h("div", { class: "search wide" }, icon("search"), search),
-    h("div", { class: "store" }, h("nav", { class: "cats", id: "cats", "aria-label": t("store.categories") }), h("div", { id: "store-list" })),
+    h("div", { class: "store" }, h("nav", { class: "cats fold", id: "cats", "aria-label": t("store.categories") }), h("div", { id: "store-list" })),
   );
   renderStoreList();
 }
@@ -10430,7 +10472,7 @@ function renderSettings() {
     h(
       "div",
       { class: "settings" },
-      h("nav", { class: "cats" }, sections().map((item) => h("a", { class: "cat" + (section === item.id ? " active" : ""), href: `#/settings/${item.id}` }, h("span", { class: "with-icon" }, icon(item.icon), t("settings." + item.id))))),
+      h("nav", { class: "cats fold" }, sections().map((item) => h("a", { class: "cat" + (section === item.id ? " active" : ""), href: `#/settings/${item.id}` }, h("span", { class: "with-icon" }, icon(item.icon), t("settings." + item.id))))),
       h("div", { class: "stack" }, state.account && (state.settings || !isAdmin()) ? settingsSection(section) : h("p", { class: "muted" }, "…")),
     ),
   );
