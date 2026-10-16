@@ -20,7 +20,7 @@ import { bus } from "./bus";
 import { IMAGE_MIME, imageType } from "./wallpapers";
 import { DATA_DIR, settings, timezone } from "./config";
 import { record } from "./activity";
-import { compose as runCompose, composeCmd, containerStats, listContainers, PROJECT_LABEL, SERVICE_LABEL, type ContainerStats, type ContainerSummary } from "./docker";
+import { compose as runCompose, composeCmd, containerStats, imageUser, listContainers, PROJECT_LABEL, SERVICE_LABEL, type ContainerStats, type ContainerSummary } from "./docker";
 import { writeTextAtomic } from "./fsutil";
 import { newerImages } from "./images";
 import { guessBase, merge3, same, type MergeChange } from "./merge";
@@ -551,14 +551,37 @@ export function writeEnv(name: string, extra: Record<string, string> = {}): void
  * ours. What is made belongs to PUID:PGID, the user the apps run as: an image that does not start as
  * root could not write into a folder of root's.
  */
-function createDataDirs(compose: Compose, more: string[] = []): void {
+function createDataDirs(compose: Compose, more: string[] = []): string[] {
   const root = settings.dataRoot === "/" ? "/" : settings.dataRoot + "/";
+  const made: string[] = [];
   for (const source of [...bindSources(compose), ...more]) {
     if (!source.startsWith(root) || existsSync(source)) continue;
     // the data folder and AppData themselves stay root's
     mkdirSync(source.startsWith(join(settings.dataRoot, "AppData") + "/") ? join(settings.dataRoot, "AppData") : settings.dataRoot, { recursive: true });
     const first = mkdirSync(source, { recursive: true });
     if (first && process.getuid?.() === 0) Bun.spawnSync(["chown", "-R", `${settings.puid}:${settings.pgid}`, "--", first]);
+    made.push(source);
+  }
+  return made;
+}
+
+/**
+ * The folders just made for an app, given to the user each service runs as when that is not the one apps
+ * run as: an image that runs as its own user (Grafana as 472) cannot write into a folder of 1000's.
+ * Only folders made by this install, still empty, are touched. Runs after the images are pulled.
+ */
+async function giveToImageUsers(compose: Compose, made: string[], log: Log): Promise<void> {
+  if (!made.length || process.getuid?.() !== 0) return;
+  for (const [service, def] of Object.entries(compose.services) as [string, Compose][]) {
+    if (typeof def.image !== "string") continue;
+    const mine = bindSources({ services: { [service]: def } }).filter((source) => made.includes(source));
+    if (!mine.length) continue;
+    const who = await imageUser(def.image, def.user == null ? "" : String(def.user)).catch(() => null);
+    if (!who || (who.uid === settings.puid && who.gid === settings.pgid)) continue;
+    for (const source of mine) {
+      Bun.spawnSync(["chown", "-R", `${who.uid}:${who.gid}`, "--", source]);
+      log(`${source} given to ${who.uid}:${who.gid}, the user ${service} runs as`);
+    }
   }
 }
 
@@ -577,13 +600,12 @@ async function install(name: string, text: string, compose: Compose, log: Log, o
     if (origin?.hata) writeFiles(name, origin.hata.files, {}, log);
     writeEnv(name, origin?.env);
     await dc(name, ["config", "--quiet"], log);
-    if (origin?.hata) {
-      // the folders are made from the file as compose will read it, with the settings' folders too
-      const view = viewOf(name)!;
-      normalize(view, settings.dataRoot, name);
-      createDataDirs(view, settingFolders(origin.hata.meta, appEnv(name)));
-    } else createDataDirs(compose);
+    // the folders are made from the file as compose will read it, with the settings' folders too
+    const view = origin?.hata ? viewOf(name)! : compose;
+    if (origin?.hata) normalize(view, settings.dataRoot, name);
+    const made = createDataDirs(view, origin?.hata ? settingFolders(origin.hata.meta, appEnv(name)) : []);
     await dc(name, ["pull"], log);
+    await giveToImageUsers(view, made, log);
     await dc(name, ["up", "-d", "--remove-orphans"], log);
   } catch (e) {
     // a failed install leaves nothing behind, so it can simply be tried again
@@ -917,12 +939,11 @@ export function applyStoreUpdate(name: string, user: string): Job {
       for (const { file, text } of previous) text === null ? rmSync(file, { force: true }) : writeTextAtomic(file, text);
       throw e;
     }
-    if (plan.hata) {
-      const view = viewOf(name)!;
-      normalize(view, settings.dataRoot, name);
-      createDataDirs(view, settingFolders(plan.hata.meta, appEnv(name)));
-    } else createDataDirs(plan.merged);
+    const view = plan.hata ? viewOf(name)! : plan.merged;
+    if (plan.hata) normalize(view, settings.dataRoot, name);
+    const made = createDataDirs(view, plan.hata ? settingFolders(plan.hata.meta, appEnv(name)) : []);
     await dc(name, ["pull"], log);
+    await giveToImageUsers(view, made, log);
     await dc(name, ["up", "-d", "--remove-orphans"], log);
   });
 }

@@ -140,6 +140,53 @@ export async function imageConfig(id: string): Promise<ContainerInspect["Config"
   }
 }
 
+/** A field of a line of `/etc/passwd` or `/etc/group` whose first field is `name` */
+export function accountId(text: string, name: string, field = 2): number | null {
+  for (const line of text.split("\n")) {
+    const parts = line.split(":");
+    if (parts[0] === name && /^\d+$/.test(parts[field] ?? "")) return Number(parts[field]);
+  }
+  return null;
+}
+
+/** The first file of a tar stream (an archive Docker gives of one path) as text */
+export function firstTarFile(bytes: Uint8Array): string {
+  if (bytes.length < 512) return "";
+  const size = parseInt(new TextDecoder().decode(bytes.subarray(124, 136)).replace(/\0.*$/, "").trim() || "0", 8);
+  return new TextDecoder().decode(bytes.subarray(512, 512 + size));
+}
+
+/** A file of an image, read from a container made of it and never started; "" — not there */
+async function imageFile(image: string, path: string): Promise<string> {
+  let id = "";
+  try {
+    id = (await api<{ Id: string }>("/containers/create", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ Image: image, Entrypoint: ["/nonexistent"], Cmd: [], NetworkDisabled: true }) })).Id;
+    const res = await fetch(`http://docker/containers/${id}/archive?path=${encodeURIComponent(path)}`, { unix: DOCKER_SOCK } as RequestInit);
+    return res.ok ? firstTarFile(new Uint8Array(await res.arrayBuffer())) : "";
+  } catch {
+    return "";
+  } finally {
+    if (id) await api(`/containers/${id}?force=true`, { method: "DELETE" }).catch(() => {});
+  }
+}
+
+/**
+ * The user a service of an image runs as, by number: `user` of the compose file if given, else the
+ * image's own. null — root, or a name the image does not know.
+ */
+export async function imageUser(image: string, user = ""): Promise<{ uid: number; gid: number } | null> {
+  const given = user || (await imageConfig(image))?.User || "";
+  if (!given) return null;
+  const [u = "", g = ""] = given.split(":");
+  let passwd: string | null = null;
+  const lookup = async (file: string) => (file === "/etc/passwd" ? (passwd ??= await imageFile(image, file)) : imageFile(image, file));
+  const uid = /^\d+$/.test(u) ? Number(u) : accountId(await lookup("/etc/passwd"), u);
+  if (uid === null || uid === 0) return null;
+  let gid = /^\d+$/.test(g) ? Number(g) : g ? accountId(await imageFile(image, "/etc/group"), g) : null;
+  if (gid === null && !/^\d+$/.test(u)) gid = accountId(await lookup("/etc/passwd"), u, 3);
+  return { uid, gid: gid ?? uid };
+}
+
 /** The digests an image is known by in the registries it came from, as `<repository>@<digest>` */
 export async function imageDigests(id: string): Promise<string[]> {
   try {

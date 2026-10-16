@@ -109,10 +109,31 @@ export function guardsOf(access: AppAccess): Guard[] {
 }
 
 /**
- * The override file: the whole port list of every service with a guarded port again (compose replaces
- * a list marked `!override`, it does not merge into it), the guarded ports moved to 127.0.0.1.
+ * The devices of each service that this server has, for the services that name one it has not: Docker
+ * refuses to start a container whose device is missing (a TV tuner, a Raspberry Pi's video), and a
+ * store writes them for the machines that have them. Pure: `has` says whether a path exists.
  */
-export function overrideText(compose: Compose, dataRoot: string, guards: Guard[], env: Env = {}, through?: { host: string; port: number }): string {
+export function presentDevices(compose: Compose, has: (path: string) => boolean): { devices: Record<string, unknown[]>; missing: string[] } {
+  const devices: Record<string, unknown[]> = {};
+  const missing: string[] = [];
+  for (const [service, def] of Object.entries((compose.services ?? {}) as Record<string, Compose>)) {
+    if (!Array.isArray(def.devices)) continue;
+    const host = (d: unknown) => (typeof d === "string" ? d.split(":")[0]! : typeof d === "object" && d !== null ? String((d as Compose).source ?? "") : "");
+    // a device given by a variable or a CDI name (vendor.com/gpu=all) is not a path to look for
+    const gone = def.devices.filter((d: unknown) => host(d).startsWith("/") && !has(host(d)));
+    if (!gone.length) continue;
+    devices[service] = def.devices.filter((d: unknown) => !gone.includes(d));
+    for (const d of gone) if (!missing.includes(host(d))) missing.push(host(d));
+  }
+  return { devices, missing };
+}
+
+/**
+ * The override file: the whole port list of every service with a guarded port again (compose replaces
+ * a list marked `!override`, it does not merge into it), the guarded ports moved to 127.0.0.1; and the
+ * device lists without the devices this server has not.
+ */
+export function overrideText(compose: Compose, dataRoot: string, guards: Guard[], env: Env = {}, through?: { host: string; port: number }, devices?: { devices: Record<string, unknown[]>; missing: string[] }): string {
   const copy = resolved(compose, dataRoot, env);
   const upstreamOf = (p: unknown): number | undefined => {
     if (typeof p !== "object" || p === null || ((p as Compose).protocol ?? "tcp") !== "tcp" || isLocal((p as Compose).host_ip)) return undefined;
@@ -121,25 +142,42 @@ export function overrideText(compose: Compose, dataRoot: string, guards: Guard[]
   const lines: string[] = [];
   for (const [service, def] of Object.entries(copy.services) as [string, Compose][]) {
     const ports: unknown[] = Array.isArray(def.ports) ? def.ports : [];
-    if (!ports.some((p) => upstreamOf(p) !== undefined)) continue;
-    lines.push(`  ${JSON.stringify(service)}:`, "    ports: !override");
-    for (const p of ports) {
-      const upstream = upstreamOf(p);
-      // JSON is YAML: flow style keeps this free of quoting questions
-      lines.push(`      - ${JSON.stringify(upstream === undefined ? p : { ...(p as Compose), published: String(upstream), host_ip: "127.0.0.1" })}`);
+    const guarded = ports.some((p) => upstreamOf(p) !== undefined);
+    const kept = devices?.devices[service];
+    if (!guarded && !kept) continue;
+    lines.push(`  ${JSON.stringify(service)}:`);
+    if (guarded) {
+      lines.push("    ports: !override");
+      for (const p of ports) {
+        const upstream = upstreamOf(p);
+        // JSON is YAML: flow style keeps this free of quoting questions
+        lines.push(`      - ${JSON.stringify(upstream === undefined ? p : { ...(p as Compose), published: String(upstream), host_ip: "127.0.0.1" })}`);
+      }
     }
+    if (kept) lines.push(`    devices: !override ${JSON.stringify(kept)}`);
   }
   const list = guards.map((g) => g.port).join(", ");
+  const left = devices?.missing.length ? [`# Devices this server does not have are left out: ${devices.missing.join(", ")}.`] : [];
   // an app of another machine is opened through the Hata that looks after it
-  const head = through
+  const head = !guards.length
+    ? [`${OVERRIDE_MARK}: what this server cannot give the app.`]
+    : through
     ? [`${OVERRIDE_MARK}: this app is behind the sign-in of Hata at ${through.host}, opened there on port ${through.port};`, `# here it listens on 127.0.0.1 (${guards.map((g) => g.upstream).join(", ")}) only. Remove the protection in Hata, not by deleting this file.`]
     : [`${OVERRIDE_MARK}: this app is behind Hata's sign-in. Hata listens on ${guards.length > 1 ? "ports" : "port"} ${list} and passes`, `# signed-in users on to 127.0.0.1 (${guards.map((g) => g.upstream).join(", ")}). Remove the protection in Hata, not by deleting this file.`];
   return [
     ...head,
+    ...left,
     "services:",
     ...lines,
     "",
   ].join("\n");
+}
+
+/** Writes the override when it says something new; a file of that name written by the person is theirs */
+function writeOverride(name: string, text: string): void {
+  const path = overridePath(name);
+  if (existsSync(path) && !readFileSync(path, "utf8").startsWith(OVERRIDE_MARK)) return;
+  if (!existsSync(path) || readFileSync(path, "utf8") !== text) writeTextAtomic(path, text);
 }
 
 /** Removes the override — ours only: a file of that name written by the person is theirs */
@@ -337,11 +375,16 @@ function save(name: string, access: AppAccess): void {
  */
 function syncOverride(name: string): void {
   const access = accessOf(name);
-  const compose = access.protect ? viewOf(name) : null;
+  const view = viewOf(name);
+  const compose = access.protect ? view : null;
   const env = appEnv(name);
+  // a device this server has not would keep the app from starting at all
+  const devices = view ? presentDevices(view, existsSync) : { devices: {}, missing: [] };
+  const fixDevices = devices.missing.length > 0;
   const web = compose ? gateTarget(compose, settings.dataRoot, env) : "noPort";
   if (!compose || typeof web === "string" || !access.upstream) {
-    removeOverride(name);
+    if (fixDevices && view) writeOverride(name, overrideText(view, settings.dataRoot, [], env, undefined, devices));
+    else removeOverride(name);
     stopListeners(name);
     if (access.protect) save(name, { allowed: access.allowed, protect: false });
     return;
@@ -350,8 +393,7 @@ function syncOverride(name: string): void {
   const extra = (access.extra ?? []).filter((g) => others.some((o) => o.port === g.port));
   const next: AppAccess = { allowed: access.allowed, protect: true, port: web.port, upstream: access.upstream, ...(extra.length ? { extra } : {}) };
   if (JSON.stringify(next) !== JSON.stringify(access)) save(name, next);
-  const text = overrideText(compose, settings.dataRoot, guardsOf(next), env);
-  if (!existsSync(overridePath(name)) || readFileSync(overridePath(name), "utf8") !== text) writeTextAtomic(overridePath(name), text);
+  writeOverride(name, overrideText(compose, settings.dataRoot, guardsOf(next), env, undefined, fixDevices ? devices : undefined));
   // a port that is not guarded any more goes back to the app: let go of it before the app asks for it
   stopListeners(name, guardsOf(next));
 }

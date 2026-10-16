@@ -132,3 +132,19 @@ describe("settings", () => {
     expect(envLine("A", "two words # not a comment")).toBe("A='two words # not a comment'");
   });
 });
+
+test("the user an image runs as, read from its own files", async () => {
+  const { accountId, firstTarFile } = await import("../src/docker");
+  const passwd = "root:x:0:0:root:/root:/bin/sh\netherpad:x:5001:0::/home/etherpad:/bin/sh\n";
+  expect(accountId(passwd, "etherpad")).toBe(5001);
+  expect(accountId(passwd, "etherpad", 3)).toBe(0);
+  expect(accountId(passwd, "nobody")).toBeNull();
+  // a tar of one file: a 512-byte header with the size in octal at 124, then the file
+  const header = new Uint8Array(512);
+  header.set(new TextEncoder().encode("passwd"), 0);
+  header.set(new TextEncoder().encode(passwd.length.toString(8).padStart(11, "0") + "\0"), 124);
+  const tar = new Uint8Array(1024 + 512);
+  tar.set(header, 0);
+  tar.set(new TextEncoder().encode(passwd), 512);
+  expect(firstTarFile(tar)).toBe(passwd);
+});

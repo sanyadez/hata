@@ -103,3 +103,15 @@ test("the override of an app of another machine names the Hata it opens through"
   const moved = text.split("\n").find((line) => line.includes('"published":"28443"'));
   expect(moved).toContain('"host_ip":"127.0.0.1"');
 });
+
+test("devices this server has not are left out of the app, the rest kept", async () => {
+  const { presentDevices, overrideText } = await import("../src/gate");
+  const compose = { services: { plex: { image: "plex", devices: ["/dev/dri:/dev/dri", "/dev/dvb:/dev/dvb", "nvidia.com/gpu=all"] }, web: { image: "nginx", devices: ["/dev/dri:/dev/dri"] } } };
+  const found = presentDevices(compose, (p) => p === "/dev/dri");
+  expect(found).toEqual({ devices: { plex: ["/dev/dri:/dev/dri", "nvidia.com/gpu=all"] }, missing: ["/dev/dvb"] });
+  const text = overrideText(compose, "/DATA", [], {}, undefined, found);
+  expect(text).toContain("left out: /dev/dvb");
+  expect(text).toContain('  "plex":\n    devices: !override ["/dev/dri:/dev/dri","nvidia.com/gpu=all"]');
+  expect(text).not.toContain('"web"');
+  expect(Bun.YAML.parse(text.replace(/!override /g, ""))).toEqual({ services: { plex: { devices: ["/dev/dri:/dev/dri", "nvidia.com/gpu=all"] } } });
+});
