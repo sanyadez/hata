@@ -3596,7 +3596,15 @@ function offsiteCard(o) {
   const enabled = h("input", { type: "checkbox", checked: o.enabled });
   // the kind looked at survives the page being drawn anew, until it is saved
   const shown = offsiteCard.kind ?? o.kind;
-  const kind = h("select", { onchange: () => ((offsiteCard.kind = kind.value), renderBackupsBody()) }, ["sftp", "s3", "place"].map((id) => h("option", { value: id, selected: id === shown }, t("offsite.kind." + id))));
+  // only this card is drawn anew: the column it stands in is left alone while something in it has focus
+  const switchKind = () => {
+    if (kind.value === shown) return;
+    offsiteCard.kind = kind.value;
+    const next = offsiteCard(o);
+    document.getElementById("offsite-form")?.replaceWith(next);
+    next.querySelector("select")?.focus();
+  };
+  const kind = h("select", { onchange: switchKind }, ["sftp", "s3", "place"].map((id) => h("option", { value: id, selected: id === shown }, t("offsite.kind." + id))));
   const s3 = shown === "s3";
   const inPlace = shown === "place";
   const sftp = !s3 && !inPlace;
