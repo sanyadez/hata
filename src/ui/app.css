@@ -468,7 +468,9 @@ a.cat .with-icon { min-width: 0; }
 .chip-btn:hover { border-color: var(--border-strong); }
 .chip-btn.active { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-text); }
 /* the list reaches the bottom of the window, so the empty room under it is the folder's too (its menu, a drop) */
-.files { min-height: calc(100dvh - 173px); }
+/* the drop zone fills the window: less the top bar (64), the view's padding above (36) and below (72, or 104 under the assistant's button) */
+.files { min-height: calc(100dvh - 172px); }
+body:has(> .assistant-fab) .files { min-height: calc(100dvh - 204px); }
 #files-main { align-self: stretch; align-content: start; }
 .files.dropping #files-main { outline: 2px dashed var(--accent); outline-offset: 12px; border-radius: var(--radius-md); }
 
@@ -669,7 +671,7 @@ dialog.dropdown header { padding: 4px 6px; margin-bottom: 8px; }
   .tile-main { flex-direction: column; align-items: flex-start; }
   .tile-open { position: absolute; top: 4px; right: 4px; width: 32px; height: 32px; border-radius: var(--radius-sm); }
   .store, .settings, .files { grid-template-columns: minmax(0, 1fr); gap: 16px; }
-  .files { min-height: 0; }
+  .files, body:has(> .assistant-fab) .files { min-height: 0; }
   .files-disk, .file-table .when, .sort { display: none; }
   .bottom-link { padding: 6px 10px; }
   .file-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
