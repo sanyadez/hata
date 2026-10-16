@@ -412,6 +412,8 @@ function startEvents() {
       assistantEvent(event);
     } else if (event.type === "machines") {
       if (state.route.view === "machines" || state.route.view === "machine") void loadMachines();
+      // a machine came or went: its block on the home page says so
+      else if (state.route.view === "home") void refresh();
     } else if (event.type === "machine") {
       machineEvent(event);
     } else if (event.type === "approvals") {
@@ -1234,6 +1236,9 @@ function addDialog(at = null) {
         }),
       ),
     ),
+    (state.overview.machines ?? []).filter((m) => !ZONES.some((name) => state.overview.dashboard.widgets[name].includes("machine:" + m.id))).map((m) =>
+      entry(t("home.machineBlock", { name: m.name }), t("home.machineBlockHint"), "server", () => changeLayout((layout) => layout.widgets.top.push("machine:" + m.id))),
+    ),
     entry(t("home.addDisk"), t("home.addDiskHint"), "disk", () => diskPickDialog(pinned())),
     entry(t("home.addFolder"), t("home.addFolderHint"), "folder", () => folderPicker({ title: t("home.addFolderTitle"), start: "", confirmLabel: t("home.addFolderHere"), allowed: (at) => !pinned().includes(at), action: (at) => pinFolder(at, true, false) })),
   );
@@ -1765,16 +1770,39 @@ function renderActivity() {
   void loadHistory();
 }
 
+function widget(id, el) {
+  el.classList.add("widget");
+  el.dataset.widget = id;
+  // the numbers are dragged by any part of them, save a link; a list with text to read and select, by its heading
+  el.addEventListener("pointerdown", (e) => isAdmin() && ((isNumbers(id) && !e.target.closest("a")) || e.target.closest(".section-head")) && dragStart(e, id, WIDGET_DRAG));
+  return el;
+}
+
+const isNumbers = (id) => id === "stats" || id.startsWith("machine:");
+const machineOfBlock = (id) => (state.overview?.machines ?? []).find((m) => "machine:" + m.id === id);
+
+/** The block of another machine's numbers: made when it is first on the page, refilled as its numbers come */
+function machineBlock(id) {
+  const m = machineOfBlock(id);
+  if (!m) return null;
+  const prefix = "mb-" + m.id;
+  let el = homeUi.widgets[id];
+  if (!el) {
+    el = widget(id, h("section", { class: "machine-block" }, h("div", { class: "section-head" }), h("div", { class: "stats card" }, statCells(prefix)), h("p", { class: "card pad muted", hidden: true }), blockRemover(id)));
+    homeUi.widgets[id] = el;
+  }
+  const [head, cells, away] = el.children;
+  put(head, h("h2", null, h("a", { href: `#/machines/${m.id}` }, icon("server"), m.name)), machineChip(m), h("span", { class: "muted small grow" }, m.os));
+  cells.hidden = !m.online || !m.status;
+  away.hidden = !cells.hidden;
+  away.textContent = m.online ? "…" : t("machines.offlineLead", { ago: ago(m.seen) });
+  if (!cells.hidden) paintStats(prefix, m.status);
+  return el;
+}
+
 function renderHome() {
   const hour = new Date().getHours();
   const greeting = t(hour < 5 ? "home.night" : hour < 12 ? "home.morning" : hour < 18 ? "home.afternoon" : "home.evening", { name: state.user.name });
-  const widget = (id, el) => {
-    el.classList.add("widget");
-    el.dataset.widget = id;
-    // the numbers are dragged by any part of them; a list with text to read and select, by its heading
-    el.addEventListener("pointerdown", (e) => isAdmin() && (id === "stats" || e.target.closest(".section-head")) && dragStart(e, id, WIDGET_DRAG));
-    return el;
-  };
   // the blocks are made once and then only moved and refilled: the numbers of the system live in one of them
   homeUi.widgets = {
     stats: widget("stats", h("section", { class: "stats card" }, statCell("cpu", "cpu", t("sys.cpu")), statCell("memory", "memory", t("sys.memory")), statCell("disk", "disk", t("sys.disk")), statCell("network", "network", t("sys.network")), h("div", { class: "stat", id: "stat-temp", hidden: true }, h("div", { class: "stat-label" }, icon("temp"), t("sys.temperature")), h("div", { class: "stat-row" }, h("div", { class: "stat-value" }, h("strong", null, "—"), h("span", { class: "unit" })), h("div", { class: "stat-chart" })), h("div", { class: "stat-hint" }, " ")), blockRemover("stats"))),
@@ -1810,6 +1838,7 @@ function renderHomeBody() {
 
   put(homeUi.widgets.attention, blockRemover("attention"), h("div", { class: "section-head" }, h("h2", null, t("attention.title"), o.attention.length > 0 && h("span", { class: "pill" }, o.attention.length))), o.attention.length ? o.attention.map(attentionItem) : h("p", { class: "all-good" }, icon("check", "ok"), t("attention.none")));
   put(homeUi.widgets.activity, blockRemover("activity"), h("div", { class: "section-head" }, h("h2", null, t("activity.title"))), o.activity.length ? o.activity.map(activityItem) : h("p", { class: "muted small" }, t("activity.none")), isAdmin() && o.activity.length > 0 && h("a", { class: "link small all-activity", href: "#/activity" }, t("activity.all"), icon("chevron")));
+  for (const name of ZONES) for (const id of o.dashboard.widgets[name]) if (id.startsWith("machine:")) machineBlock(id);
   if (!homeUi.drag?.active) placeWidgets();
   renderSystem();
 }
@@ -1817,7 +1846,7 @@ function renderHomeBody() {
 const ZONES = ["top", "side", "bottom"];
 /** Hata's own blocks: the picture of one in the "Add" menu and where it goes when it is put back */
 const BLOCKS = { stats: { icon: "cpu", zone: "top" }, attention: { icon: "alert", zone: "side" }, activity: { icon: "list", zone: "side" } };
-const blockTitle = (id) => t(id === "stats" ? "home.statsBlock" : id + ".title");
+const blockTitle = (id) => (id.startsWith("machine:") ? t("home.machineBlock", { name: machineOfBlock(id)?.name ?? id.slice(8) }) : t(id === "stats" ? "home.statsBlock" : id + ".title"));
 
 /** The small button that takes one of Hata's own blocks off the dashboard; the "Add" menu brings it back */
 function blockRemover(id) {
@@ -1830,7 +1859,8 @@ function blockRemover(id) {
     onclick: () =>
       changeLayout((layout) => {
         for (const name of ZONES) layout.widgets[name] = layout.widgets[name].filter((block) => block !== id);
-        layout.widgets.hidden.push(id);
+        // a machine's block is offered again by the machine itself
+        if (!id.startsWith("machine:")) layout.widgets.hidden.push(id);
       }),
   }, icon("x"));
 }
@@ -2208,6 +2238,12 @@ async function loadMachines() {
 
 /** A machine's news: its state every few seconds, or its containers changed */
 function machineEvent(event) {
+  // its block on the home page
+  const shown = event.status && state.route.view === "home" && machineOfBlock("machine:" + event.id);
+  if (shown) {
+    shown.status = event.status;
+    if (homeUi.widgets?.["machine:" + event.id]) machineBlock("machine:" + event.id);
+  }
   const m = machinesUi.list?.machines.find((x) => x.id === event.id);
   if (!m) return;
   if (event.status) m.status = event.status;
@@ -2508,7 +2544,7 @@ function machineOverview(m, box) {
         { class: "stack" },
         h("div", { class: "section-head" }, h("h2", null, t("app.resources"))),
         m.online
-          ? h("section", { class: "stats card" }, statCell("m-cpu", "cpu", t("sys.cpu")), statCell("m-memory", "memory", t("sys.memory")), statCell("m-disk", "disk", t("sys.disk")), statCell("m-network", "network", t("sys.network")), h("div", { class: "stat", id: "stat-m-temp", hidden: true }, h("div", { class: "stat-label" }, icon("temp"), t("sys.temperature")), h("div", { class: "stat-row" }, h("div", { class: "stat-value" }, h("strong", null, "—"), h("span", { class: "unit" })), h("div", { class: "stat-chart" })), h("div", { class: "stat-hint" }, " ")))
+          ? h("section", { class: "stats card" }, statCells("m"))
           : h("p", { class: "card pad muted" }, t("machines.offlineLead", { ago: ago(m.seen) })),
         h("div", { id: "m-disks" }),
       ),
@@ -2541,25 +2577,37 @@ function paintMachineOverview() {
 }
 
 function paintMachineStats(m) {
-  const s = m.status;
-  if (!s) return;
-  setStat("m-cpu", s.cpu == null ? "—" : String(s.cpu), "%", t("sys.cores", { n: s.cores }) + " · " + t("sys.load", { load: s.load[0] }), sparkline(s.history.cpu, 100));
+  if (m.status) paintStats("m", m.status);
+}
+
+/** The cells of a machine's numbers, their ids starting with `prefix` */
+const statCells = (prefix) => [
+  statCell(prefix + "-cpu", "cpu", t("sys.cpu")),
+  statCell(prefix + "-memory", "memory", t("sys.memory")),
+  statCell(prefix + "-disk", "disk", t("sys.disk")),
+  statCell(prefix + "-network", "network", t("sys.network")),
+  h("div", { class: "stat", id: `stat-${prefix}-temp`, hidden: true }, h("div", { class: "stat-label" }, icon("temp"), t("sys.temperature")), h("div", { class: "stat-row" }, h("div", { class: "stat-value" }, h("strong", null, "—"), h("span", { class: "unit" })), h("div", { class: "stat-chart" })), h("div", { class: "stat-hint" }, " ")),
+];
+
+/** A machine's numbers into the cells of `statCells(prefix)` */
+function paintStats(prefix, s) {
+  setStat(prefix + "-cpu", s.cpu == null ? "—" : String(s.cpu), "%", t("sys.cores", { n: s.cores }) + " · " + t("sys.load", { load: s.load[0] }), sparkline(s.history.cpu, 100));
   const mem = s.memory;
   const memPercent = mem.total ? Math.round((mem.used / mem.total) * 100) : 0;
   const used = bytesParts(mem.used);
-  setStat("m-memory", used.value, used.unit, t("sys.ofPercent", { total: bytes(mem.total), percent: memPercent }), sparkline(s.history.memory, 100), level(memPercent));
+  setStat(prefix + "-memory", used.value, used.unit, t("sys.ofPercent", { total: bytes(mem.total), percent: memPercent }), sparkline(s.history.memory, 100), level(memPercent));
   const disk = s.disks[0];
   if (disk) {
     const percent = Math.round((disk.used / disk.total) * 100);
     const fill = h("i", { class: level(percent) });
     fill.style.width = percent + "%";
-    setStat("m-disk", String(percent), "%", t("sys.free", { free: bytes(disk.total - disk.used), total: bytes(disk.total) }), h("div", { class: "bar" }, fill), level(percent));
+    setStat(prefix + "-disk", String(percent), "%", t("sys.free", { free: bytes(disk.total - disk.used), total: bytes(disk.total) }), h("div", { class: "bar" }, fill), level(percent));
   }
   const net = s.net ? bytesParts(s.net.rx + s.net.tx) : null;
-  setStat("m-network", net ? net.value : "—", net ? net.unit + "/s" : "", s.net ? `↓ ${bytes(s.net.rx)}/s · ↑ ${bytes(s.net.tx)}/s` : "", sparkline(s.history.net));
-  const temp = document.getElementById("stat-m-temp");
+  setStat(prefix + "-network", net ? net.value : "—", net ? net.unit + "/s" : "", s.net ? `↓ ${bytes(s.net.rx)}/s · ↑ ${bytes(s.net.tx)}/s` : "", sparkline(s.history.net));
+  const temp = document.getElementById(`stat-${prefix}-temp`);
   if (temp) temp.hidden = s.temperature == null;
-  if (s.temperature != null) setStat("m-temp", String(s.temperature), "°C", t("sys.cpu"), null, s.temperature >= 85 ? "warn" : "");
+  if (s.temperature != null) setStat(prefix + "-temp", String(s.temperature), "°C", t("sys.cpu"), null, s.temperature >= 85 ? "warn" : "");
 }
 
 // --- A machine's apps ---
