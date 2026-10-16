@@ -796,14 +796,14 @@ input[type="range"] { accent-color: var(--accent); width: 100%; }
 /* Text that lies on the picture itself: what stands alone gets a pane of its own, the rest a halo of the
    background colour — the picture may be of any brightness */
 :root.has-wallpaper #view { text-shadow: 0 0 2px var(--bg), 0 0 6px var(--bg), 0 0 16px var(--bg); }
-:root.has-wallpaper #view :is(.card, .tile, .btn, .page-head, :is(.side > .pad-x, .loose), .section-head, #app-head, input, select, textarea, table, pre, .cats, .tabs) { text-shadow: none; }
-:root.has-wallpaper :is(.page-head, :is(.side > .pad-x, .loose), .cats, #app-head, #view .section-head:not(:is(.card, :is(.side > .pad-x, .loose), #app-head) *)) { background: color-mix(in srgb, var(--surface) 88%, transparent); backdrop-filter: blur(16px); border: 1px solid var(--border); border-radius: var(--radius-lg); }
+:root.has-wallpaper #view :is(.card, .tile, .btn, .page-head, :is(.side > .pad-x, .loose), .section-head, :is(#app-head, #machine-head), input, select, textarea, table, pre, .cats, .tabs) { text-shadow: none; }
+:root.has-wallpaper :is(.page-head, :is(.side > .pad-x, .loose), .cats, :is(#app-head, #machine-head), #view .section-head:not(:is(.card, :is(.side > .pad-x, .loose), :is(#app-head, #machine-head)) *)) { background: color-mix(in srgb, var(--surface) 88%, transparent); backdrop-filter: blur(16px); border: 1px solid var(--border); border-radius: var(--radius-lg); }
 :root.has-wallpaper :is(.page-head, :is(.side > .pad-x, .loose)) { padding: 18px 20px; }
-:root.has-wallpaper #app-head { padding: 18px 20px 0; }
-:root.has-wallpaper #app-head .tabs { box-shadow: none; }
-:root.has-wallpaper #view .section-head:not(:is(.card, :is(.side > .pad-x, .loose), #app-head) *) { padding: 8px 14px; border-radius: var(--radius-md); }
+:root.has-wallpaper :is(#app-head, #machine-head) { padding: 18px 20px 0; }
+:root.has-wallpaper :is(#app-head, #machine-head) .tabs { box-shadow: none; }
+:root.has-wallpaper #view .section-head:not(:is(.card, :is(.side > .pad-x, .loose), :is(#app-head, #machine-head)) *) { padding: 8px 14px; border-radius: var(--radius-md); }
 :root.has-wallpaper #view .ico { filter: drop-shadow(0 0 3px var(--bg)); }
-:root.has-wallpaper #view :is(.card, .tile, .btn, .page-head, :is(.side > .pad-x, .loose), .section-head, .cats, #app-head) .ico { filter: none; }
+:root.has-wallpaper #view :is(.card, .tile, .btn, .page-head, :is(.side > .pad-x, .loose), .section-head, .cats, :is(#app-head, #machine-head)) .ico { filter: none; }
 :root.has-wallpaper .cats.cats { padding: 8px; }
 :root.has-wallpaper .side-disks .cat.vol:not(.add, .active) { background: color-mix(in srgb, var(--surface) 88%, transparent); backdrop-filter: blur(16px); }
 :root.has-wallpaper .side-disks .cat.vol.add { background: color-mix(in srgb, var(--surface) 60%, transparent); backdrop-filter: blur(16px); }
@@ -1045,8 +1045,10 @@ body:has(> .assistant-fab) #view:not(.fill) { padding-bottom: 104px; }
 .path .machine-crumb .ico { width: 0.9em; height: 0.9em; }
 .machine-app { gap: 12px; }
 .machine-apps th:last-child { width: 1%; }
-.store-target { padding: 0; }
-.store-target select { width: auto; }
+.store-target { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius-md); }
+.store-target label { font-weight: 600; }
+.store-target select { width: auto; min-width: 220px; }
+.store-target p { flex-basis: 100%; margin: 0; }
 .backup-name { gap: 2px; justify-items: start; }
 .backup-name .with-icon .ico { width: 14px; height: 14px; }
 .lock-mark .ico { width: 13px; height: 13px; vertical-align: -2px; margin-right: 4px; color: var(--muted); }

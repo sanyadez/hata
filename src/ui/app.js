@@ -5742,9 +5742,15 @@ async function storeDialog(entry, target = state.installTarget ?? "") {
     targets.length > 0 &&
       h(
         "div",
-        { class: "kv store-target" },
-        h("span", { class: "muted" }, t("store.where")),
-        h("select", { onchange: (e) => (dialog.close(), void storeDialog(entry, e.target.value)) }, h("option", { value: "", selected: !target }, t("store.whereHere")), targets.map((m) => h("option", { value: m.id, selected: m.id === target }, m.name))),
+        { class: "store-target" },
+        h("label", { for: "store-target" }, t("store.where")),
+        h(
+          "select",
+          { id: "store-target", onchange: (e) => (dialog.close(), void storeDialog(entry, e.target.value)) },
+          h("option", { value: "", selected: !target }, t("store.whereHere", { name: state.overview?.system.hostname ?? "Hata" })),
+          targets.map((m) => h("option", { value: m.id, selected: m.id === target }, t("store.whereMachine", { name: m.name }))),
+        ),
+        h("p", { class: "muted small" }, t("store.whereHint")),
       ),
     !supported && h("p", { class: "banner" }, t("store.unsupported", { arch: arch ?? "" })),
     h(
