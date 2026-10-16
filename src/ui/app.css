@@ -442,7 +442,13 @@ tr.removed .app-icon { opacity: 0.5; }
 .tile-room .bar { height: 4px; margin: 0; }
 .disk-pick .tile-text { display: grid; gap: 4px; min-width: 0; flex: 1; }
 .cat.vol { flex-wrap: wrap; row-gap: 6px; padding: 9px 10px; border: 1px solid var(--border); background: color-mix(in srgb, var(--bg) 60%, transparent); }
-.cat.vol + .cat.vol { margin-top: 6px; }
+.files-side { display: grid; gap: 12px; position: sticky; top: 88px; min-width: 0; }
+.files-side .cats { position: static; }
+.side-disks { display: grid; gap: 8px; }
+.side-disks .cat.vol { padding: 12px; border-radius: var(--radius-md); background: var(--surface); color: var(--text); }
+.side-disks .cat.vol.active { background: var(--surface-2); }
+.side-disks .cat.vol.add { border-style: dashed; background: transparent; color: var(--muted); }
+.side-disks .cat.vol.add:hover { color: var(--text); }
 .cat.vol:hover { border-color: var(--border-strong); }
 .cat.vol.active { border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); background: var(--surface-2); }
 .cat.vol .vol-room { flex-basis: calc(100% - 26px); margin-left: 26px; display: grid; gap: 4px; }
@@ -688,6 +694,9 @@ dialog.dropdown header { padding: 4px 6px; margin-bottom: 8px; }
   .file-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .cats { position: static; display: flex; overflow-x: auto; gap: 6px; padding-bottom: 4px; }
   .cat-title { display: none; }
+  .files-side { position: static; gap: 8px; }
+  .side-disks { display: flex; overflow-x: auto; gap: 6px; padding-bottom: 4px; }
+  .side-disks .cat.vol { flex: 0 0 200px; }
   .cat { width: auto; white-space: nowrap; border: 1px solid var(--border); gap: 8px; }
   .cards { grid-template-columns: minmax(0, 1fr); }
   .form-row { grid-template-columns: minmax(0, 1fr); gap: 4px; }
@@ -768,6 +777,8 @@ input[type="range"] { accent-color: var(--accent); width: 100%; }
 :root.has-wallpaper #view .ico { filter: drop-shadow(0 0 3px var(--bg)); }
 :root.has-wallpaper #view :is(.card, .tile, .btn, .page-head, :is(.side > .pad-x, .loose), .section-head, .cats, #app-head) .ico { filter: none; }
 :root.has-wallpaper .cats.cats { padding: 8px; }
+:root.has-wallpaper .side-disks .cat.vol:not(.add, .active) { background: color-mix(in srgb, var(--surface) 88%, transparent); backdrop-filter: blur(16px); }
+:root.has-wallpaper .side-disks .cat.vol.add { background: color-mix(in srgb, var(--surface) 60%, transparent); backdrop-filter: blur(16px); }
 
 /* --- Moving groups and blocks of the dashboard -------------------------------------------------- */
 

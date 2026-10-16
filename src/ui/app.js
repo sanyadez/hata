@@ -3897,7 +3897,7 @@ async function loadFiles() {
 }
 
 function renderFiles() {
-  const box = h("div", { class: "files" }, h("aside", { class: "cats", id: "files-places" }), h("section", { class: "stack", id: "files-main" }));
+  const box = h("div", { class: "files" }, h("aside", { class: "files-side", id: "files-places" }), h("section", { class: "stack", id: "files-main" }));
   box.addEventListener("contextmenu", filesContext);
   // files and folders dropped anywhere on the page go into the folder on screen
   let depth = 0;
@@ -3949,24 +3949,37 @@ function filesPlaces(path) {
     const volumes = listing?.disks ?? [];
     return put(
       places,
-      h("div", { class: "cat-title" }, t("files.places")),
-      h("a", { class: "cat", href: "#/files" }, h("span", { class: "with-icon" }, icon("home"), h("span", { class: "clip" }, t("files.home")))),
-      machinesList,
-      volumes.length > 0 && h("div", { class: "cat-title" }, m?.name ?? t("files.disks")),
-      volumes.length > 0 && [place(t("files.root"), "/", "disk", !volumes.some((d) => within(path, d.path))), volumes.map((d) => place(volumeName(d), d.path, d.network ? "globe" : "disk", inside(d.path), machine, d))],
+      h(
+        "nav",
+        { class: "cats" },
+        h("div", { class: "cat-title" }, t("files.places")),
+        h("a", { class: "cat", href: "#/files" }, h("span", { class: "with-icon" }, icon("home"), h("span", { class: "clip" }, t("files.home")))),
+        machinesList,
+        volumes.length > 0 && h("div", { class: "cat-title" }, m?.name ?? t("files.disks")),
+        volumes.length > 0 && place(t("files.root"), "/", "disk", !volumes.some((d) => within(path, d.path))),
+      ),
+      volumes.length > 0 && h("div", { class: "side-disks" }, volumes.map((d) => place(volumeName(d), d.path, d.network ? "globe" : "disk", inside(d.path), machine, d))),
     );
   }
+  // the disks are tiles of their own under the places, as on the top of the data folder
   put(
     places,
-    h("div", { class: "cat-title" }, t("files.places")),
-    home && place(t("files.home"), home, "home", path === home),
-    home && (state.files?.places ?? []).map((name) => place(name, joinPath(home, name), name === "AppData" ? "box" : "folder", inside(joinPath(home, name)))),
-    place(t("files.root"), "/", "disk", !trash && path !== "" && !inHome && !(state.files?.disks ?? []).some((d) => within(path, d.path))),
-    h("a", { class: "cat" + (trash ? " active" : ""), href: "#/trash" }, h("span", { class: "with-icon" }, icon("trash"), h("span", { class: "clip" }, t("trash.title")))),
-    (state.files?.disks ?? []).length > 0 && h("div", { class: "cat-title" }, t("files.disks")),
-    (state.files?.disks ?? []).map((d) => place(volumeName(d), d.path, d.network ? "globe" : "disk", inside(d.path), machine, d)),
-    h("a", { class: "cat", href: "#/settings/storage", title: t("netplace.sidebarHint"), onclick: addPlaceHere }, h("span", { class: "with-icon" }, icon("plus"), h("span", { class: "clip muted" }, t("netplace.sidebar")))),
-    machinesList,
+    h(
+      "nav",
+      { class: "cats" },
+      h("div", { class: "cat-title" }, t("files.places")),
+      home && place(t("files.home"), home, "home", path === home),
+      home && (state.files?.places ?? []).map((name) => place(name, joinPath(home, name), name === "AppData" ? "box" : "folder", inside(joinPath(home, name)))),
+      place(t("files.root"), "/", "disk", !trash && path !== "" && !inHome && !(state.files?.disks ?? []).some((d) => within(path, d.path))),
+      h("a", { class: "cat" + (trash ? " active" : ""), href: "#/trash" }, h("span", { class: "with-icon" }, icon("trash"), h("span", { class: "clip" }, t("trash.title")))),
+      machinesList,
+    ),
+    h(
+      "div",
+      { class: "side-disks" },
+      (state.files?.disks ?? []).map((d) => place(volumeName(d), d.path, d.network ? "globe" : "disk", inside(d.path), machine, d)),
+      h("a", { class: "cat vol add", href: "#/settings/storage", title: t("netplace.sidebarHint"), onclick: addPlaceHere }, h("span", { class: "with-icon" }, icon("plus"), h("span", { class: "clip" }, t("netplace.sidebar")))),
+    ),
   );
 }
 
@@ -4948,7 +4961,7 @@ function renderTrash() {
       h("td", { class: "num" }, bytes(item.size), item.type === "dir" && h("div", { class: "muted small" }, t("trash.files", { n: item.files }))),
       h("td", null, h("div", { class: "row-actions" }, button(t("trash.restore"), { class: "small", onclick: back(item) }, "undo"), button("", { class: "small icon-btn", title: t("files.deleteForever"), "aria-label": t("files.deleteForever"), onclick: () => forever([item.id], t("trash.deleteTitle", { name: item.name }), t("trash.deleteLead")) }, "trash"))),
     );
-  shell(h("div", { class: "files" }, h("aside", { class: "cats", id: "files-places" }), h("section", { class: "stack" },
+  shell(h("div", { class: "files" }, h("aside", { class: "files-side", id: "files-places" }), h("section", { class: "stack" },
     h(
       "div",
       { class: "page-head" },
