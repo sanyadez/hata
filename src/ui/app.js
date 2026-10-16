@@ -349,6 +349,8 @@ function onRoute() {
   if (/^#(setup|invite)=/.test(location.hash)) return;
   leaveView();
   state.route = parseRoute();
+  if (state.route.view === "files") stepTrail();
+  else filesUi.trail = null;
   // an install onto a machine is offered while the store is on screen
   if (state.route.view !== "store") state.installTarget = "";
   render();
@@ -696,11 +698,12 @@ function globalSearch() {
     if (e.key === "Enter" && hits[0]) openHit(hits[0]);
     if (e.key === "Escape") input.blur();
   });
-  return h("div", { class: "search" }, icon("search"), input, h("kbd", null, "/"), results);
+  // in Files "/" starts a path
+  return h("div", { class: "search" }, icon("search"), input, state.route.view !== "files" && h("kbd", null, "/"), results);
 }
 
 document.addEventListener("keydown", (e) => {
-  if (e.key !== "/" || e.ctrlKey || e.metaKey || e.altKey) return;
+  if (e.key !== "/" || e.ctrlKey || e.metaKey || e.altKey || state.route.view === "files") return;
   if (/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName ?? "") || document.querySelector("dialog[open]")) return;
   const input = document.querySelector(".top .search input");
   if (input) {
@@ -3725,6 +3728,14 @@ const filesUi = {
   find: null,
   /** A name to choose once the folder is listed */
   pick: null,
+  /** The entry the keys act on: a name in the folder on screen */
+  cursor: null,
+  /** The name the cursor goes to once the folder is listed (the folder one came up from) */
+  cursorNext: null,
+  /** The address being typed: `{ value, caret, select }`, null while the crumbs are shown */
+  edit: null,
+  /** Where back and forward lead: the browser's own entries, numbered as Files opens them (`filesStep`) */
+  trail: null,
 };
 
 /** The address of a folder; `machine` — of another machine, by default the one on screen */
@@ -3815,7 +3826,11 @@ async function loadFiles() {
   if (path !== listing.path) {
     // the page was opened without a folder: the address becomes the data root's
     state.route.path = listing.path;
-    history.replaceState(null, "", filesHash(listing.path));
+    history.replaceState(history.state, "", filesHash(listing.path));
+  }
+  if (state.files?.path !== listing.path || (state.files?.machine ?? "") !== machine) {
+    filesUi.cursor = filesUi.cursorNext;
+    filesUi.cursorNext = null;
   }
   const names = new Set(listing.entries.map((entry) => entry.name));
   filesUi.selected = new Set(state.files?.path === listing.path ? [...filesUi.selected].filter((name) => names.has(name)) : []);
@@ -3873,10 +3888,6 @@ function filesPlaces(path) {
       h("span", { class: "with-icon" }, icon(iconName), h("span", { class: "clip" }, label)),
       room(volume),
     );
-  const disk = state.files?.disk;
-  const used = disk ? Math.round(((disk.total - disk.free) / disk.total) * 100) : 0;
-  const fill = h("i", { class: level(used) });
-  fill.style.width = used + "%";
   const others = machinesUi.list?.machines ?? [];
   const machinesList = others.length > 0 && [h("div", { class: "cat-title" }, t("nav.machines")), others.map((m) => h("a", { class: "cat" + (machine === m.id ? " active" : "") + (m.online ? "" : " muted"), href: filesHash("/", m.id), title: m.online ? "" : t("machines.offline"), menu: (at) => menuAt(at, menuHeader(m.name, machineOs(m), "server"), [{ label: t("machines.files"), icon: "folder", href: filesHash("/", m.id) }, { label: t("menu.machinePage"), icon: "server", href: `#/machines/${m.id}` }, isAdmin() && { label: t("app.more"), icon: "more", run: () => machineMenu(m, at) }]) }, h("span", { class: "with-icon" }, icon("server"), h("span", { class: "clip" }, m.name))))];
   if (machine) {
@@ -3889,8 +3900,6 @@ function filesPlaces(path) {
       machinesList,
       volumes.length > 0 && h("div", { class: "cat-title" }, m?.name ?? t("files.disks")),
       volumes.length > 0 && [place(t("files.root"), "/", "disk", !volumes.some((d) => within(path, d.path))), volumes.map((d) => place(volumeName(d), d.path, d.network ? "globe" : "disk", inside(d.path), machine, d))],
-      disk && h("div", { class: "cat-title" }, t("files.disk")),
-      disk && h("div", { class: "files-disk" }, h("div", { class: "bar" }, fill), h("span", { class: "muted small" }, t("files.free", { free: bytes(disk.free), total: bytes(disk.total) }))),
     );
   }
   put(
@@ -3904,8 +3913,6 @@ function filesPlaces(path) {
     (state.files?.disks ?? []).map((d) => place(volumeName(d), d.path, d.network ? "globe" : "disk", inside(d.path), machine, d)),
     h("a", { class: "cat", href: "#/settings/storage", title: t("netplace.sidebarHint"), onclick: addPlaceHere }, h("span", { class: "with-icon" }, icon("plus"), h("span", { class: "clip muted" }, t("netplace.sidebar")))),
     machinesList,
-    disk && h("div", { class: "cat-title" }, t("files.disk")),
-    disk && h("div", { class: "files-disk" }, h("div", { class: "bar" }, fill), h("span", { class: "muted small" }, t("files.free", { free: bytes(disk.free), total: bytes(disk.total) }))),
   );
 }
 
@@ -3919,13 +3926,6 @@ function renderFilesBody() {
   const machineName = machine && (machinesUi.list?.machines.find((m) => m.id === machine)?.name ?? machine);
 
   filesPlaces(path);
-  const crumbs = h(
-    "h1",
-    { class: "path" },
-    machine && h("a", { class: "machine-crumb", href: filesHash("/"), title: t("files.root") }, icon("server"), machineName),
-    parts.length ? h("a", { href: filesHash("/"), title: t("files.root"), "aria-label": t("files.root") }, "/") : !machine && h("span", null, path ? t("files.root") : " "),
-    parts.map((part, i) => [i > 0 && icon("chevron"), i === parts.length - 1 ? h("span", null, part) : h("a", { href: filesHash("/" + parts.slice(0, i + 1).join("/")) }, part)]),
-  );
   const entries = listing ? sortedEntries(listing.entries) : [];
   const dirs = entries.filter((entry) => entry.type === "dir");
   const rest = entries.filter((entry) => entry.type !== "dir");
@@ -3944,17 +3944,47 @@ function renderFilesBody() {
 
   const isPinned = (listing?.pinned ?? []).includes(path);
   const isShared = (listing?.shared ?? []).includes(listing?.path);
+  const trail = filesUi.trail;
+  const navButton = (label, iconName, off, run, cls = "") => h("button", { type: "button", class: "btn square", title: label, "aria-label": label, disabled: off, onclick: run }, icon(iconName, cls));
   const head = h(
     "div",
-    { class: "page-head" },
+    { class: "page-head files-head" },
     h(
       "div",
-      null,
-      crumbs,
-      h("p", { class: "meta" }, path && h("button", { type: "button", class: "copy-path", title: t("files.copyPath"), "aria-label": t("files.copyPath"), onclick: () => copyText(path) }, h("span", null, path), icon("copy")), listing?.readOnly && h("span", { class: "chip warn" }, t("files.readOnly")), listing && !listing.error && h("span", { class: "dot-sep" }, "·"), listing && !listing.error && t("files.count", { dirs: dirs.length, files: rest.length }), rest.length > 0 && h("span", { class: "dot-sep" }, "·"), rest.length > 0 && bytes(rest.reduce((n, entry) => n + entry.size, 0))),
+      { class: "files-bar" },
+      h(
+        "div",
+        { class: "files-nav" },
+        navButton(t("files.back"), "arrow", !(trail && trail.at > trail.first), () => history.back(), "flip"),
+        navButton(t("files.forward"), "arrow", !(trail && trail.at < trail.last), () => history.forward()),
+        navButton(t("files.up"), "up", !path || path === "/", goUp),
+      ),
+      filesUi.edit ? addressEditor() : filesAddress(path),
     ),
-    h("div", { class: "actions" }, listing && !listing.error && !machine && h("button", { type: "button", class: "btn square" + (isPinned ? " active" : ""), title: t(isPinned ? "files.unpin" : "files.pin"), "aria-label": t(isPinned ? "files.unpin" : "files.pin"), "aria-pressed": String(isPinned), onclick: () => pinFolder(path, !isPinned) }, icon("pin")), listing && !listing.error && !machine && h("button", { type: "button", class: "btn square" + (isShared ? " active" : ""), title: t(isShared ? "files.shareSettings" : "files.share"), "aria-label": t(isShared ? "files.shareSettings" : "files.share"), onclick: () => shareDialog(path) }, icon("share")), listing && !listing.error && !machine && findBox(path), sort, h("div", { class: "seg" }, modeButton("list", "list"), modeButton("grid", "grid")), button(t("files.new"), { disabled: !listing || !!listing.error || listing.readOnly, onclick: (e) => newMenu(path, e.currentTarget) }, "plus"), button(t("files.upload"), { class: "primary", disabled: !listing || !!listing.error || listing.readOnly, onclick: () => picker.click() }, "upload"), picker),
+    h(
+      "div",
+      { class: "files-tools" },
+      listing && !listing.error && !machine && findBox(path),
+      h("span", { class: "grow" }),
+      listing && !listing.error && !machine && h("button", { type: "button", class: "btn square" + (isPinned ? " active" : ""), title: t(isPinned ? "files.unpin" : "files.pin"), "aria-label": t(isPinned ? "files.unpin" : "files.pin"), "aria-pressed": String(isPinned), onclick: () => pinFolder(path, !isPinned) }, icon("pin")),
+      listing && !listing.error && !machine && h("button", { type: "button", class: "btn square" + (isShared ? " active" : ""), title: t(isShared ? "files.shareSettings" : "files.share"), "aria-label": t(isShared ? "files.shareSettings" : "files.share"), onclick: () => shareDialog(path) }, icon("share")),
+      sort,
+      h("div", { class: "seg" }, modeButton("list", "list"), modeButton("grid", "grid")),
+      button(t("files.new"), { disabled: !listing || !!listing.error || listing.readOnly, onclick: (e) => newMenu(path, e.currentTarget) }, "plus"),
+      button(t("files.upload"), { class: "primary", disabled: !listing || !!listing.error || listing.readOnly, onclick: () => picker.click() }, "upload"),
+      picker,
+    ),
   );
+  // what the folder holds, and the room of its disk: under the list, where the files end
+  const status =
+    listing &&
+    !listing.error &&
+    h(
+      "div",
+      { class: "files-status" },
+      h("span", null, listing.readOnly && h("span", { class: "chip warn" }, t("files.readOnly")), t("files.count", { dirs: dirs.length, files: rest.length }), rest.length > 0 && h("span", { class: "dot-sep" }, "·"), rest.length > 0 && bytes(rest.reduce((n, entry) => n + entry.size, 0))),
+      listing.disk && h("span", null, t("files.free", { free: bytes(listing.disk.free), total: bytes(listing.disk.total) })),
+    );
 
   const selection = h("div", { class: "card selection", id: "files-selection", hidden: true });
   let body;
@@ -3962,10 +3992,310 @@ function renderFilesBody() {
   else if (listing.error) body = h("p", { class: "card pad error" }, listing.error);
   else if (!entries.length) body = h("div", { class: "card empty" }, icon("folder"), h("p", null, t("files.empty")), h("p", { class: "small" }, t("files.dropHint")));
   else body = filesUi.mode === "grid" ? filesGrid(dirs, rest) : filesTable(entries);
-  if (filesUi.find && filesUi.find.under === path) body = foundList(filesUi.find);
+  const finding = filesUi.find && filesUi.find.under === path;
+  if (finding) body = foundList(filesUi.find);
+  // in a list the line closes its card; under tiles or an empty folder it is a card of its own
+  const inCard = !finding && status && body.classList.contains("table-wrap");
+  if (inCard) body.append(status);
 
-  put(main, head, selection, listing && path === listing.home && diskStrip(listing), body, listing?.truncated && h("p", { class: "muted small" }, t("files.truncated")), uploadBox);
+  put(main, head, selection, listing && path === listing.home && diskStrip(listing), body, listing?.truncated && h("p", { class: "muted small" }, t("files.truncated")), !finding && !inCard && status && h("div", { class: "card" }, status), uploadBox);
   renderSelection();
+  if (filesUi.edit) {
+    const input = main.querySelector(".address-input");
+    input.focus();
+    if (filesUi.edit.select) input.select();
+    else input.setSelectionRange(filesUi.edit.caret ?? input.value.length, filesUi.edit.caret ?? input.value.length);
+    filesUi.edit.select = false;
+  } else fitCrumbs();
+}
+
+// --- The address: back, forward, up, the path as crumbs, or typed ------------------------------------
+
+/** Numbers the browser's entry Files is on, so that back and forward know whether there is somewhere to go */
+function stepTrail() {
+  const step = history.state?.filesStep;
+  const trail = filesUi.trail;
+  if (typeof step !== "number") {
+    // a folder opened anew: what lay ahead of the current one is gone, as in the browser
+    const next = trail ? trail.at + 1 : 1;
+    history.replaceState({ ...(history.state ?? {}), filesStep: next }, "");
+    filesUi.trail = { first: trail?.first ?? next, at: next, last: next };
+  } else if (!trail) filesUi.trail = { first: step, at: step, last: step };
+  else Object.assign(trail, { at: step, first: Math.min(trail.first, step), last: Math.max(trail.last, step) });
+}
+
+/** One level up; the folder left is the one the keys stand on there */
+function goUp() {
+  const path = state.route.path;
+  if (!path || path === "/") return;
+  filesUi.cursorNext = path.split("/").pop();
+  go(filesHash(path.slice(0, path.lastIndexOf("/")) || "/"));
+}
+
+/** Where a path lies, for its first crumb: the data folder, a disk or a network place by name, else the root */
+function pathAnchor(path) {
+  const machine = filesMachine();
+  const files = state.files;
+  const named = [
+    !machine && files?.home && { path: files.home, label: t("files.home"), icon: "home" },
+    ...((files?.machine ?? "") === machine ? (files?.disks ?? []) : []).map((d) => ({ path: d.path, label: volumeName(d), icon: d.network ? "globe" : "disk" })),
+  ].filter((place) => place && within(path, place.path));
+  const root = machine ? { path: "/", label: machinesUi.list?.machines.find((m) => m.id === machine)?.name ?? machine, icon: "server" } : { path: "/", label: t("files.root"), icon: "disk" };
+  return named.sort((a, b) => b.path.length - a.path.length)[0] ?? root;
+}
+
+/** The path as crumbs: each opens its folder, the arrow after it the folders inside; a click beside them types a path */
+function filesAddress(path) {
+  const anchor = pathAnchor(path);
+  const parts = path.slice(anchor.path === "/" ? 1 : anchor.path.length + 1).split("/").filter(Boolean);
+  const steps = [anchor, ...parts.map((name, i) => ({ label: name, path: (anchor.path === "/" ? "" : anchor.path) + "/" + parts.slice(0, i + 1).join("/") }))];
+  const crumbs = h(
+    "h1",
+    { class: "crumbs" },
+    steps.map((step, i) => [
+      h("a", { class: "crumb" + (i === steps.length - 1 ? " here" : ""), href: filesHash(step.path), "data-step": String(i) }, step.icon && icon(step.icon), h("span", { class: "clip" }, step.label)),
+      h("button", { type: "button", class: "sep", "data-step": String(i), title: t("files.inside", { name: step.label }), "aria-label": t("files.inside", { name: step.label }), onclick: (e) => folderList(e.currentTarget, step.path, steps[i + 1]?.label) }, icon("chevron")),
+    ]),
+  );
+  crumbs.steps = steps;
+  const address = h(
+    "div",
+    { class: "address", onclick: (e) => (e.target === address || e.target === crumbs) && editAddress() },
+    crumbs,
+    h(
+      "span",
+      { class: "address-tail" },
+      h("button", { type: "button", class: "icon-btn", title: t("files.copyPath"), "aria-label": t("files.copyPath"), onclick: () => copyText(path) }, icon("copy")),
+      h("button", { type: "button", class: "icon-btn", title: t("files.typePath"), "aria-label": t("files.typePath"), onclick: () => editAddress() }, icon("edit")),
+    ),
+  );
+  return address;
+}
+
+/** A long path keeps its last crumbs; the ones before fold into "…", which lists them */
+function fitCrumbs() {
+  const crumbs = document.querySelector("#files-main .crumbs");
+  if (!crumbs?.steps) return;
+  const steps = crumbs.steps;
+  const hidden = [];
+  for (let i = 0; i < steps.length - 1 && crumbs.scrollWidth > crumbs.clientWidth; i++) {
+    for (const el of crumbs.querySelectorAll(`[data-step="${i}"]`)) el.hidden = true;
+    hidden.push(steps[i]);
+  }
+  if (!hidden.length) return;
+  const more = h("button", { type: "button", class: "crumb", title: t("files.earlier"), "aria-label": t("files.earlier"), onclick: (e) => {
+    const box = e.currentTarget.getBoundingClientRect();
+    menuAt({ x: box.left, y: box.bottom + 6 }, null, hidden.map((step) => ({ label: step.label, icon: step.icon ?? "folder", href: filesHash(step.path) })));
+  } }, "…");
+  crumbs.prepend(more, h("span", { class: "sep still" }, icon("chevron")));
+}
+
+/** The folders inside one of the path: the arrow after a crumb */
+async function folderList(anchor, path, here) {
+  const box = anchor.getBoundingClientRect();
+  let listing = state.files?.path === path && (state.files.machine ?? "") === filesMachine() ? state.files : null;
+  try {
+    listing ??= await api("GET", `${filesApi()}?path=${encodeURIComponent(path)}`);
+  } catch (e) {
+    return toast(errorText(e), "error");
+  }
+  const collator = new Intl.Collator(state.lang, { numeric: true, sensitivity: "base" });
+  const dirs = listing.entries.filter((entry) => entry.type === "dir").map((entry) => entry.name).sort(collator.compare);
+  menuAt(
+    { x: box.left - 8, y: box.bottom + 6 },
+    null,
+    dirs.length ? dirs.map((name) => ({ label: name, icon: "folder", href: filesHash(joinPath(path, name)), on: name === here })) : [{ label: t("files.noFolders"), icon: "folder", off: true, run: () => {} }],
+  );
+}
+
+/** Turns the crumbs into a field with the path; `text` — what to start with instead of the folder's path */
+function editAddress(text) {
+  filesUi.edit = text === undefined ? { value: state.route.path, select: true } : { value: text, caret: text.length };
+  renderFilesBody();
+}
+
+/** "a/../b/./c" as the folder it means; relative to the folder on screen, "~" — the data folder */
+function resolvePath(raw) {
+  let text = raw.trim();
+  if (text === "~" || text.startsWith("~/")) text = (filesMachine() ? "/" : state.files?.home || "/") + text.slice(1);
+  if (!text.startsWith("/")) text = joinPath(state.route.path || "/", text);
+  const out = [];
+  for (const part of text.split("/")) {
+    if (!part || part === ".") continue;
+    if (part === "..") out.pop();
+    else out.push(part);
+  }
+  return "/" + out.join("/");
+}
+
+/** The path typed: folders offered as in a terminal, Enter goes there, Esc leaves it */
+function addressEditor() {
+  const edit = filesUi.edit;
+  const input = h("input", { class: "address-input mono", value: edit.value, spellcheck: false, autocomplete: "off", autocapitalize: "off", "aria-label": t("files.typePath") });
+  const pop = h("div", { class: "address-pop", hidden: true });
+  const listings = new Map();
+  const listOf = (dir) => {
+    if (!listings.has(dir)) listings.set(dir, api("GET", `${filesApi()}?path=${encodeURIComponent(dir)}`).catch((e) => ({ error: errorText(e), entries: [] })));
+    return listings.get(dir);
+  };
+  const collator = new Intl.Collator(state.lang, { numeric: true, sensitivity: "base" });
+  const kbd = (key, what) => [h("kbd", null, key), " ", what];
+  let hits = [];
+  let at = -1;
+  let asked = 0;
+  let leaving = false;
+  const paint = (message = "") => {
+    put(
+      pop,
+      message && h("p", { class: "address-error" }, message),
+      hits.map((path, i) => h("button", { type: "button", class: "address-hit" + (i === at ? " on" : ""), onpointerdown: (e) => e.preventDefault(), onclick: () => travel(path) }, icon("folder"), h("span", { class: "clip" }, path))),
+      h("p", { class: "address-keys" }, kbd("↑↓", t("files.keys.choose")), " · ", kbd("Tab", t("files.keys.complete")), " · ", kbd("Enter", t("files.keys.go")), " · ", kbd("Esc", t("files.keys.cancel"))),
+    );
+    pop.hidden = false;
+  };
+  const suggest = async () => {
+    edit.value = input.value;
+    edit.caret = input.selectionStart;
+    const cut = input.value.lastIndexOf("/");
+    if (cut < 0) return void ((hits = []), (at = -1), paint());
+    const dir = resolvePath(input.value.slice(0, cut + 1) || "/");
+    const typed = input.value.slice(cut + 1).toLowerCase();
+    const mine = ++asked;
+    const listing = await listOf(dir);
+    if (mine !== asked) return;
+    const names = listing.entries.filter((entry) => entry.type === "dir").map((entry) => entry.name).sort(collator.compare);
+    const starting = names.filter((name) => name.toLowerCase().startsWith(typed));
+    hits = [...starting, ...names.filter((name) => !starting.includes(name) && name.toLowerCase().includes(typed))].slice(0, 12).map((name) => joinPath(dir, name));
+    at = typed && hits.length ? 0 : -1;
+    paint(listing.error);
+  };
+  const close = () => {
+    filesUi.edit = null;
+    renderFilesBody();
+  };
+  const travel = async (raw) => {
+    const path = resolvePath(raw);
+    leaving = true;
+    try {
+      await api("GET", `${filesApi()}?path=${encodeURIComponent(path)}`);
+      filesUi.edit = null;
+      return go(filesHash(path));
+    } catch (e) {
+      // a file: its folder opens with it chosen
+      const parent = path.slice(0, path.lastIndexOf("/")) || "/";
+      const name = path.split("/").pop();
+      const there = await listOf(parent);
+      if (!there.error && there.entries.some((entry) => entry.name === name && entry.type !== "dir")) {
+        filesUi.edit = null;
+        filesUi.pick = name;
+        filesUi.cursorNext = name;
+        return go(filesHash(parent));
+      }
+      leaving = false;
+      hits = [];
+      at = -1;
+      paint(e instanceof ApiError && e.code === "files.notFound" ? t("files.noSuchFolder", { path }) : errorText(e));
+      input.focus();
+    }
+  };
+  input.addEventListener("input", () => void suggest());
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+      e.preventDefault();
+      if (!hits.length) return;
+      at = (at + (e.key === "ArrowDown" ? 1 : -1) + hits.length) % hits.length;
+      return paint();
+    }
+    if (e.key === "Tab") {
+      e.preventDefault();
+      if (!hits.length) return;
+      input.value = hits[Math.max(at, 0)] + "/";
+      return void suggest();
+    }
+    // the field's keys are its own: the list under it must not hear them too
+    if (e.key === "Enter") return (e.preventDefault(), e.stopPropagation(), void travel(at >= 0 ? hits[at] : input.value));
+    if (e.key === "Escape") return (e.preventDefault(), e.stopPropagation(), close());
+  });
+  // a click elsewhere puts the crumbs back
+  input.addEventListener("blur", () => setTimeout(() => !leaving && filesUi.edit === edit && document.activeElement !== input && close(), 0));
+  input.addEventListener("focus", () => pop.hidden && paint());
+  return h("div", { class: "address editing" }, input, pop);
+}
+
+/** The keys of Files: the cursor moves with the arrows, Enter opens, Space chooses; the path by Ctrl+L or "/" */
+const typedName = { text: "", at: 0 };
+function filesKeys(e) {
+  if (state.route.view !== "files" || document.querySelector("dialog[open]")) return;
+  const active = document.activeElement;
+  const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(active?.tagName ?? "") || active?.isContentEditable;
+  const mod = e.ctrlKey || e.metaKey;
+  if (mod && !e.altKey && e.key.toLowerCase() === "l") return (e.preventDefault(), editAddress());
+  if (typing) return;
+  if (e.key === "/" && !mod && !e.altKey) return (e.preventDefault(), editAddress("/"));
+  if ((e.altKey && e.key === "ArrowUp") || (e.key === "Backspace" && !mod && !e.altKey)) return (e.preventDefault(), goUp());
+  if (e.altKey || filesUi.find || !filesListing() || filesListing().error) return;
+  const els = [...document.querySelectorAll("#files-main [data-name]")];
+  const entryOf = (name) => state.files.entries.find((entry) => entry.name === name);
+  const current = els.findIndex((el) => el.dataset.name === filesUi.cursor);
+  const cursorEntry = current >= 0 ? entryOf(filesUi.cursor) : null;
+  if (mod && e.key.toLowerCase() === "a") {
+    e.preventDefault();
+    filesUi.selected = new Set(state.files.entries.map((entry) => entry.name));
+    return renderFilesBody();
+  }
+  if (mod) return;
+  const moves = { ArrowDown: 1, ArrowUp: -1, ArrowRight: 1, ArrowLeft: -1, Home: -Infinity, End: Infinity };
+  if (e.key in moves && els.length) {
+    e.preventDefault();
+    let next;
+    if (current < 0) next = e.key === "End" ? els.length - 1 : 0;
+    else if (e.key === "Home" || e.key === "End") next = e.key === "Home" ? 0 : els.length - 1;
+    else if (filesUi.mode === "grid" && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
+      // in tiles up and down go to the nearest tile of the row above or below
+      const from = els[current].getBoundingClientRect();
+      const down = e.key === "ArrowDown";
+      const rows = els.map((el, i) => ({ i, box: el.getBoundingClientRect() })).filter(({ box }) => (down ? box.top > from.top + 4 : box.top < from.top - 4));
+      if (!rows.length) return;
+      const rowTop = down ? Math.min(...rows.map(({ box }) => box.top)) : Math.max(...rows.map(({ box }) => box.top));
+      next = rows.filter(({ box }) => Math.abs(box.top - rowTop) < 4).sort((a, b) => Math.abs(a.box.left - from.left) - Math.abs(b.box.left - from.left))[0].i;
+    } else if (filesUi.mode !== "grid" && (e.key === "ArrowLeft" || e.key === "ArrowRight")) return;
+    else next = Math.min(els.length - 1, Math.max(0, current + moves[e.key]));
+    return setCursor(els[next].dataset.name);
+  }
+  if (e.key === "Enter" && cursorEntry) {
+    e.preventDefault();
+    return cursorEntry.type === "dir" ? go(filesHash(joinPath(state.files.path, cursorEntry.name))) : openEntry(cursorEntry);
+  }
+  if (e.key === " " && cursorEntry) return (e.preventDefault(), toggleSelected(cursorEntry, !filesUi.selected.has(cursorEntry.name)));
+  if (e.key === "Delete") {
+    const chosen = selectedEntries();
+    if (chosen.length || cursorEntry) (e.preventDefault(), deleteDialog(chosen.length ? chosen : [cursorEntry]));
+    return;
+  }
+  if (e.key === "F2" && cursorEntry) return (e.preventDefault(), renameDialog(cursorEntry));
+  if (e.key === "Escape") {
+    filesUi.selected = new Set();
+    filesUi.cursor = null;
+    return renderFilesBody();
+  }
+  // letters typed one after another find the name that starts with them
+  if (e.key.length === 1 && e.key !== " ") {
+    const now = Date.now();
+    typedName.text = (now - typedName.at < 900 ? typedName.text : "") + e.key.toLowerCase();
+    typedName.at = now;
+    const found = els.find((el) => el.dataset.name.toLowerCase().startsWith(typedName.text));
+    if (found) setCursor(found.dataset.name);
+  }
+}
+document.addEventListener("keydown", filesKeys);
+
+function setCursor(name) {
+  filesUi.cursor = name;
+  for (const el of document.querySelectorAll("#files-main [data-name]")) {
+    const on = el.dataset.name === name;
+    el.classList.toggle("cursor", on);
+    if (on) el.scrollIntoView({ block: "nearest" });
+  }
 }
 
 /** What a disk is called: its label, or the folder it is mounted at */
@@ -4045,7 +4375,7 @@ function filesTable(entries) {
   const row = (entry) =>
     h(
       "tr",
-      { class: filesUi.selected.has(entry.name) ? "selected" : "", "data-name": entry.name },
+      { class: (filesUi.selected.has(entry.name) ? "selected" : "") + (filesUi.cursor === entry.name ? " cursor" : ""), "data-name": entry.name },
       h("td", { class: "tick" }, entryCheckbox(entry)),
       h("td", { class: "name" }, entryOpener(entry, "file-name", fileIcon(entry), h("span", { class: "clip" }, entry.name), entry.link && icon("link", "faint"), sharedMark(entry))),
       h("td", { class: "num muted" }, entry.type === "file" ? bytes(entry.size) : "—"),
@@ -4060,7 +4390,7 @@ function filesGrid(dirs, rest) {
     const thumb = fileKind(entry) === "image" && entry.size <= THUMB_MAX ? h("img", { src: rawUrl(joinPath(state.files.path, entry.name)), alt: "", loading: "lazy", decoding: "async" }) : fileIcon(entry);
     return h(
       "div",
-      { class: "file-tile" + (entry.type === "dir" ? " dir" : "") + (filesUi.selected.has(entry.name) ? " selected" : ""), "data-name": entry.name },
+      { class: "file-tile" + (entry.type === "dir" ? " dir" : "") + (filesUi.selected.has(entry.name) ? " selected" : "") + (filesUi.cursor === entry.name ? " cursor" : ""), "data-name": entry.name },
       entryOpener(entry, "file-open", entry.type !== "dir" && h("span", { class: "thumb" }, thumb), entry.type === "dir" && fileIcon(entry), h("span", { class: "file-text" }, h("span", { class: "clip strong" }, entry.name, sharedMark(entry)), h("span", { class: "muted small clip" }, entry.type === "file" ? `${bytes(entry.size)} · ${fileTime(entry.modified)}` : fileTime(entry.modified)))),
       h("span", { class: "file-tick" }, entryCheckbox(entry)),
       h("span", { class: "file-more" }, entryMore(entry)),
@@ -4124,7 +4454,8 @@ function menuAt(at, header, entries) {
     e.href
       ? h("a", { class: "menu-item", href: e.href, ...(e.newTab ? { target: "_blank", rel: "noopener noreferrer" } : {}), onclick: () => dialog.close() }, e.iconEl ?? icon(e.icon), e.label)
       : h("button", { type: "button", class: "menu-item" + (e.danger ? " danger" : ""), disabled: !!e.off, onclick: () => (dialog.close(), e.run()) }, e.iconEl ?? icon(e.icon), e.label);
-  dialog = openDialog("menu dropdown", header, entries.filter(Boolean).map(one));
+  const marked = (e, el) => (e.on && el.append(icon("check", "on-mark")), el);
+  dialog = openDialog("menu dropdown", header, entries.filter(Boolean).map((e) => marked(e, one(e))));
   placeAt(dialog, at);
   return dialog;
 }
@@ -4372,7 +4703,8 @@ function findBox(path) {
     if (e.key === "Enter") (clearTimeout(timer), void run());
     if (e.key === "Escape") ((input.value = ""), clearTimeout(timer), void run());
   });
-  return input;
+  // it searches by itself as one types; the button is for whoever does not know that
+  return h("div", { class: "find-box" }, input, h("button", { type: "button", class: "find-go", title: t("files.findGo"), "aria-label": t("files.findGo"), onclick: () => (clearTimeout(timer), void run(), input.focus()) }, icon("search")));
 }
 
 /** What a search found: each with the folder it lies in; a folder opens, a file opens its folder with it chosen */

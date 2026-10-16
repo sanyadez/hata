@@ -457,7 +457,6 @@ tr.removed .app-icon { opacity: 0.5; }
 .wrap { overflow-wrap: anywhere; }
 .stack-s { display: grid; gap: 8px; min-width: 0; }
 a.cat .with-icon { min-width: 0; }
-.files-disk { display: grid; gap: 4px; padding: 0 10px; }
 /* the other disks at the top of the data folder */
 .disk-strip { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; }
 .disk-tile { display: flex; gap: 12px; align-items: flex-start; padding: 14px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); color: var(--text); min-width: 0; }
@@ -676,7 +675,7 @@ dialog.dropdown header { padding: 4px 6px; margin-bottom: 8px; }
   .tile-open { position: absolute; top: 4px; right: 4px; width: 32px; height: 32px; border-radius: var(--radius-sm); }
   .store, .settings, .files { grid-template-columns: minmax(0, 1fr); gap: 16px; }
   .files, body:has(> .assistant-fab) .files { min-height: 0; }
-  .files-disk, .file-table .when, .sort { display: none; }
+  .file-table .when, .sort { display: none; }
   .bottom-link { padding: 6px 10px; }
   .file-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .cats { position: static; display: flex; overflow-x: auto; gap: 6px; padding-bottom: 4px; }
@@ -927,8 +926,50 @@ body:has(> .assistant-fab) #view:not(.fill) { padding-bottom: 104px; }
 .cmd.wg-conf { display: block; white-space: pre; overflow-x: auto; }
 
 /* the search field of a folder in Files */
-.page-head input.find { width: 200px; }
-@media (max-width: 760px) { .page-head input.find { width: 100%; } }
+/* The head of Files: back, forward, up and the address; under it the search and what can be done */
+.page-head.files-head { display: grid; grid-template-columns: minmax(0, 1fr); gap: 10px; align-items: stretch; position: relative; z-index: 3; }
+.page-head.files-head > .files-bar { display: flex; gap: 8px; align-items: center; min-width: 0; }
+.files-nav { display: flex; gap: 4px; flex: none; }
+.address { position: relative; flex: 1; display: flex; align-items: center; min-width: 0; height: 36px; padding: 0 2px 0 4px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm); cursor: text; }
+.address.editing { padding: 0; border-color: var(--accent); }
+.address .crumbs { display: flex; align-items: center; flex: 1; min-width: 0; overflow: hidden; margin: 0; font: inherit; }
+.address .crumb { display: inline-flex; align-items: center; gap: 7px; min-width: 0; flex: none; max-width: 260px; height: 28px; padding: 0 8px; border: 0; border-radius: 6px; background: transparent; color: var(--muted); font-size: 14px; font-weight: 500; white-space: nowrap; }
+.address .crumb:hover { background: var(--surface-2); color: var(--text); }
+.address .crumb.here { color: var(--text); font-weight: 600; }
+.address .crumb .ico { width: 15px; height: 15px; }
+.address .sep { display: grid; place-items: center; flex: none; width: 20px; height: 28px; border: 0; border-radius: 6px; background: transparent; color: var(--faint); }
+.address .sep .ico { width: 13px; height: 13px; }
+.address button.sep:hover { background: var(--surface-2); color: var(--text); }
+.address [hidden] { display: none; }
+.address-tail { display: flex; flex: none; }
+.address-tail .icon-btn { width: 30px; height: 30px; }
+.address-tail .ico { width: 15px; height: 15px; }
+.address-input { border: 0; background: transparent; height: 34px; min-height: 0; padding: 0 12px; font-size: 14px; }
+.address-input:focus { border: 0; }
+.address-pop { position: absolute; left: -1px; right: -1px; top: calc(100% + 6px); display: grid; gap: 1px; padding: 6px; background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius-md); box-shadow: 0 16px 40px rgb(0 0 0 / 35%); text-shadow: none; }
+.address-hit { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 7px 10px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text); font: 500 13px var(--font-mono); text-align: left; }
+.address-hit .ico { color: var(--muted); }
+.address-hit:hover, .address-hit.on { background: var(--surface-2); }
+.address-error { margin: 0; padding: 7px 10px; color: var(--danger); font-size: 13px; }
+.address-keys { margin: 4px 0 0; padding: 8px 10px 2px; border-top: 1px solid var(--border); color: var(--faint); font-size: 12px; }
+.address-keys:first-child { margin-top: 0; padding-top: 2px; border-top: 0; }
+.address-keys kbd { font: 600 11px var(--font-mono); border: 1px solid var(--border-strong); border-bottom-width: 2px; border-radius: 4px; padding: 0 5px; color: var(--muted); }
+.files-tools { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.files-tools > .grow { flex: 1; }
+.find-box { display: flex; width: 300px; }
+.find-box input.find { border-radius: var(--radius-sm) 0 0 var(--radius-sm); }
+.find-go { display: grid; place-items: center; flex: none; width: 36px; border: 1px solid var(--border); border-left: 0; border-radius: 0 var(--radius-sm) var(--radius-sm) 0; background: var(--bg); color: var(--muted); }
+.find-go:hover { color: var(--text); background: var(--surface-2); }
+.files-status { display: flex; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding: 10px 18px; color: var(--faint); font: 500 12px var(--font-mono); }
+.files-status > span { display: inline-flex; align-items: center; gap: 6px; }
+.table-wrap > .files-status { border-top: 1px solid var(--border); }
+.menu-item .on-mark { margin-left: auto; color: var(--accent); }
+.file-table tr.cursor { outline: 2px solid var(--accent); outline-offset: -2px; }
+.file-tile.cursor { outline: 2px solid var(--accent); outline-offset: 2px; }
+@media (max-width: 760px) {
+  .find-box { width: 100%; }
+  .address .crumb { max-width: 160px; }
+}
 .file-text .shared-mark { margin-left: 4px; vertical-align: -2px; }
 .pair input.port { width: 90px; flex: none; }
 .pair input.port ~ input, .pair input:has(+ input.port) { flex: 1; min-width: 160px; width: auto; }
