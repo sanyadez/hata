@@ -375,7 +375,7 @@ export function publishedPorts(compose: Compose): { port: number; protocol: stri
  * that prepares the app once (a config put in place, a user written) and ends, as it should. Such a
  * container does not make the app "partly running".
  */
-export function finished(compose: Compose | null, service: string, state: string, status: string): boolean {
+export function stepDone(compose: Compose | null, service: string, state: string, status: string): boolean {
   if (state !== "exited" || !/^Exited \(0\)/.test(status)) return false;
   const def = compose && typeof compose.services === "object" ? compose.services[service] : undefined;
   if (!def || typeof def !== "object") return false;
@@ -387,6 +387,6 @@ export function finished(compose: Compose | null, service: string, state: string
 export function appStatus(containers: { service: string; state: string; status: string }[], compose: Compose | null): "running" | "partial" | "stopped" {
   const running = containers.filter((c) => c.state === "running").length;
   if (running === 0) return "stopped";
-  const done = containers.filter((c) => finished(compose, c.service, c.state, c.status)).length;
+  const done = containers.filter((c) => stepDone(compose, c.service, c.state, c.status)).length;
   return running + done === containers.length ? "running" : "partial";
 }

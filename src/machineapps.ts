@@ -8,7 +8,7 @@
  * An operation is a job like any app's, kept one at a time per app and machine (`<name>@<machine>`);
  * the activity log names the app and the machine.
  */
-import { appMeta, applyForm, appStatus, dumpCompose, finished, normalize, parseCompose, parseEnv, publishedPorts, resolvePorts, type Compose } from "./appform";
+import { appMeta, applyForm, appStatus, dumpCompose, stepDone, normalize, parseCompose, parseEnv, publishedPorts, resolvePorts, type Compose } from "./appform";
 import { AppError, assertName, envText, foldersOfFiles, hataAnswers, hataFileText, hataMetaIn, homeAddress, listJobs, ownVars, startJob, storeAppDetail, storeCompose, viewOfFiles, type AppFiles, type Job, type JobKind, type Log } from "./apps";
 import { filled, webPortOf, type HataMeta, type IndexApp } from "./hataapp";
 import type { MachineContainer } from "./client";
@@ -90,7 +90,7 @@ function describe(id: string, files: Files, containers: MachineContainer[] | nul
       return access?.protect && access.listen ? access.listen : null;
     })(),
     job: jobOf(id, files.name),
-    containers: own.map((c) => ({ id: c.id.slice(0, 12), name: c.name, service: c.service, image: c.image, state: c.state, status: c.status, done: finished(compose, c.service, c.state, c.status), ports: [...new Set(c.ports.filter((p) => p.public).map((p) => `${p.public}:${p.private}/${p.type}`))] })),
+    containers: own.map((c) => ({ id: c.id.slice(0, 12), name: c.name, service: c.service, image: c.image, state: c.state, status: c.status, done: stepDone(compose, c.service, c.state, c.status), ports: [...new Set(c.ports.filter((p) => p.public).map((p) => `${p.public}:${p.private}/${p.type}`))] })),
   };
 }
 

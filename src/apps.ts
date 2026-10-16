@@ -14,7 +14,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, wri
 import { rm } from "node:fs/promises";
 import { networkInterfaces } from "node:os";
 import { dirname, join } from "node:path";
-import { APP_NAME_RE, appMeta, applyForm, appStatus, finished, localize, bindSources, buildForm, dumpCompose, normalize, parseCompose, parseEnv, publishedPorts, resolvePorts, type AppForm, type AppMeta, type Compose } from "./appform";
+import { APP_NAME_RE, appMeta, applyForm, appStatus, stepDone, localize, bindSources, buildForm, dumpCompose, normalize, parseCompose, parseEnv, publishedPorts, resolvePorts, type AppForm, type AppMeta, type Compose } from "./appform";
 import { applyEdit, blankCompose, readEdit, type AppEdit } from "./appedit";
 import { bus } from "./bus";
 import { IMAGE_MIME, imageType } from "./wallpapers";
@@ -253,7 +253,7 @@ export interface InstalledApp extends Pick<AppMeta, "title" | "icon" | "port" | 
   protected: boolean;
   /** Running operation, if any */
   job: { id: string; kind: JobKind } | null;
-  /** `done` — a step that ran once and ended as it should (`finished`) */
+  /** `done` — a step that ran once and ended as it should (`stepDone`) */
   containers: { id: string; name: string; service: string; image: string; state: string; status: string; ports: string[]; done: boolean }[];
 }
 
@@ -305,7 +305,7 @@ function describeApp(name: string, containers: ContainerSummary[] | null, lang: 
       image: c.Image,
       state: c.State,
       status: c.Status,
-      done: finished(compose, c.Labels[SERVICE_LABEL] ?? "", c.State, c.Status),
+      done: stepDone(compose, c.Labels[SERVICE_LABEL] ?? "", c.State, c.Status),
     })),
   };
 }
