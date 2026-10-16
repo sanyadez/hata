@@ -414,9 +414,9 @@ function ownVars(name: string, dataRoot: string): Record<string, string> {
   return { APP_DATA: join(dataRoot, "AppData", name), PUID: String(settings.puid), PGID: String(settings.pgid), TZ: timezone() };
 }
 
-/** A made-up secret: letters and digits, which every program takes */
-function newSecret(length: number): string {
-  const chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+/** A made-up secret: letters and digits, which every program takes, or hexadecimal digits when asked */
+function newSecret(length: number, kind?: "hex"): string {
+  const chars = kind === "hex" ? "0123456789abcdef" : "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
   return Array.from(crypto.getRandomValues(new Uint8Array(length)), (b) => chars[b % chars.length]).join("");
 }
 

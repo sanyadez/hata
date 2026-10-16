@@ -28,6 +28,8 @@ export interface Setting {
   advanced?: boolean;
   options?: { value: string; label: Text }[];
   length?: number;
+  /** A secret made of hexadecimal digits instead of letters and digits */
+  chars?: "hex";
 }
 
 export interface HataMeta {
@@ -94,6 +96,7 @@ function cleanSetting(v: unknown): Setting | null {
     if (!s.options.length) return null;
   }
   if (s.type === "secret" && Number.isInteger(v.length) && v.length >= 12 && v.length <= 128) s.length = v.length;
+  if (s.type === "secret" && v.chars === "hex") s.chars = "hex";
   return s;
 }
 
@@ -287,10 +290,10 @@ export function settingsForm(meta: HataMeta, env: Record<string, string>, lang: 
 }
 
 /** The values a new install starts from: defaults with Hata's variables filled, secrets made */
-export function startingEnv(meta: HataMeta, known: Record<string, string>, secret: (length: number) => string): Record<string, string> {
+export function startingEnv(meta: HataMeta, known: Record<string, string>, secret: (length: number, chars?: "hex") => string): Record<string, string> {
   const out: Record<string, string> = {};
   for (const s of meta.settings) {
-    if (s.type === "secret") out[s.name] = secret(s.length ?? 32);
+    if (s.type === "secret") out[s.name] = secret(s.length ?? 32, s.chars);
     else if (s.default !== undefined) out[s.name] = fill(s.default, known);
   }
   return out;

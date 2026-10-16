@@ -148,3 +148,9 @@ test("the user an image runs as, read from its own files", async () => {
   tar.set(new TextEncoder().encode(passwd), 512);
   expect(firstTarFile(tar)).toBe(passwd);
 });
+
+test("a secret of hexadecimal digits is made so", () => {
+  const app = readIndexApp(entry({ settings: [{ name: "CREDS_KEY", type: "secret", length: 64, chars: "hex", label: "Key" }] }), "", {})!;
+  expect(app.meta.settings[0]).toMatchObject({ length: 64, chars: "hex" });
+  expect(startingEnv(app.meta, {}, (n, chars) => (chars === "hex" ? "f" : "x").repeat(n))).toEqual({ CREDS_KEY: "f".repeat(64) });
+});
