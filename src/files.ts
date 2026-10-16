@@ -246,6 +246,9 @@ export async function list(path: unknown): Promise<Listing> {
   const entries = (await Promise.all(shown.slice(0, LIST_LIMIT).map((name) => entryOf(dir, name)))).filter((e): e is Entry => e !== null);
   const home = resolve(root());
   const top = dir === home ? entries : (await Promise.all((await readdir(home).catch(() => [])).slice(0, LIST_LIMIT).map((name) => entryOf(home, name)))).filter((e): e is Entry => e !== null);
+  const disks = otherDisks(home);
+  // inside a network place the room is what `df` told, never statfs here: a made-up petabyte, or a wait for a silent server
+  const on = disks.filter((d) => dir === d.path || dir.startsWith(d.path + "/")).sort((a, b) => b.path.length - a.path.length)[0];
   return {
     path: dir,
     readOnly: !isWritable(dir),
@@ -255,8 +258,8 @@ export async function list(path: unknown): Promise<Listing> {
     entries,
     truncated: shown.length > LIST_LIMIT,
     places: top.filter((e) => e.type === "dir" && !e.name.startsWith(".")).map((e) => e.name).sort((a, b) => a.localeCompare(b, undefined, { numeric: true })).slice(0, 40),
-    disks: otherDisks(home),
-    disk: diskOf(dir),
+    disks,
+    disk: on?.network ? (on.total ? { total: on.total, free: on.free } : null) : diskOf(dir),
   };
 }
 

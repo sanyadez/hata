@@ -3875,7 +3875,7 @@ function filesPlaces(path) {
     h("a", { class: "cat" + (trash ? " active" : ""), href: "#/trash" }, h("span", { class: "with-icon" }, icon("trash"), h("span", { class: "clip" }, t("trash.title")))),
     (state.files?.disks ?? []).length > 0 && h("div", { class: "cat-title" }, t("files.disks")),
     (state.files?.disks ?? []).map((d) => place(volumeName(d), d.path, d.network ? "globe" : "disk", inside(d.path))),
-    h("a", { class: "cat", href: "#/settings/storage", title: t("netplace.sidebarHint") }, h("span", { class: "with-icon" }, icon("plus"), h("span", { class: "clip muted" }, t("netplace.sidebar")))),
+    h("a", { class: "cat", href: "#/settings/storage", title: t("netplace.sidebarHint"), onclick: addPlaceHere }, h("span", { class: "with-icon" }, icon("plus"), h("span", { class: "clip muted" }, t("netplace.sidebar")))),
     machinesList,
     disk && h("div", { class: "cat-title" }, t("files.disk")),
     disk && h("div", { class: "files-disk" }, h("div", { class: "bar" }, fill), h("span", { class: "muted small" }, t("files.free", { free: bytes(disk.free), total: bytes(disk.total) }))),
@@ -8243,7 +8243,19 @@ function placesCard(data) {
 }
 
 /** Connects a network place, or changes one; `seed` — a server found on the network */
-function placeDialog(place = null, seed = {}) {
+/** "+ Network place" in Files: the dialog of Settings → Storage right there, and the new place opened once it is connected */
+async function addPlaceHere(e) {
+  e.preventDefault();
+  if (!state.places) state.places = await api("GET", "/api/netplaces").catch(() => null);
+  if (!state.places) return go("#/settings/storage");
+  const before = new Set(state.places.places.map((p) => p.id));
+  placeDialog(null, {}, (list) => {
+    const made = list.find((p) => !before.has(p.id));
+    if (made) go(filesHash(made.folder, ""));
+  });
+}
+
+function placeDialog(place = null, seed = {}, after = null) {
   let kind = place?.kind ?? seed.kind ?? "smb";
   let dialog;
   const value = (key, fallback = "") => place?.[key] ?? seed[key] ?? fallback;
@@ -8346,6 +8358,7 @@ function placeDialog(place = null, seed = {}) {
       dialog.close();
       toast(t(place ? "settings.saved" : "netplace.connected", { name: name.value }));
       await reloadPlaces(res.places);
+      after?.(state.places.places);
     } catch (err) {
       showError(err);
       submit.textContent = t(place ? "settings.save" : "netplace.connectGo");
