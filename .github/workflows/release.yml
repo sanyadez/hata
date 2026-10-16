@@ -1,5 +1,7 @@
 # Publishes a release when a version tag is pushed: the binaries, their checksums and the installer.
 # `install.sh` downloads from "releases/latest", so a published release is what users get.
+# A tag with a suffix (`v0.22.0-beta.1`) is a pre-release: `src/version.ts` says 0.22.0, the build adds the
+# suffix, GitHub marks it so — "releases/latest" skips it, and only servers on the beta channel are offered it.
 name: Release
 
 on:
@@ -20,12 +22,25 @@ jobs:
           bun-version: latest
 
       - name: The tag must match the version in the code
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           code="v$(bun src/index.ts version)"
-          if [ "$code" != "$GITHUB_REF_NAME" ]; then
-            echo "Tag $GITHUB_REF_NAME does not match src/version.ts ($code)" >&2
-            exit 1
-          fi
+          case "$GITHUB_REF_NAME" in
+            "$code") ;;
+            "$code"-*)
+              if gh release view "$code" >/dev/null 2>&1; then
+                echo "$code is out already: a pre-release of it would be older than it" >&2
+                exit 1
+              fi
+              echo "HATA_BUILD_VERSION=${GITHUB_REF_NAME#v}" >> "$GITHUB_ENV"
+              echo "PRERELEASE=--prerelease" >> "$GITHUB_ENV"
+              ;;
+            *)
+              echo "Tag $GITHUB_REF_NAME does not match src/version.ts ($code, or $code-<suffix> for a pre-release)" >&2
+              exit 1
+              ;;
+          esac
 
       # The notes of a release are the message of its tag below the first line: what was done, in short.
       # The checkout leaves the tag pointing at the commit, so the tag itself is fetched again.
@@ -53,4 +68,4 @@ jobs:
         run: |
           gh release create "$GITHUB_REF_NAME" \
             dist/hata-linux-x64 dist/hata-linux-arm64 dist/hata-client-linux-x64 dist/hata-client-linux-arm64 dist/SHA256SUMS install.sh \
-            --title "Hata ${GITHUB_REF_NAME#v}" --notes-file notes.md
+            --title "Hata ${GITHUB_REF_NAME#v}" --notes-file notes.md $PRERELEASE

@@ -111,6 +111,8 @@ export interface Settings {
   appearance: Appearance;
   /** The walk through a new server is still ahead: set when the first administrator is created */
   welcome: boolean;
+  /** Which releases of Hata itself are offered: `stable` only, or `beta` — pre-releases too */
+  update: { channel: "stable" | "beta" };
 }
 
 export interface HttpsSettings {
@@ -197,6 +199,7 @@ const DEFAULTS: Settings = {
   dashboard: cleanLayout(null),
   appearance: DEFAULT_APPEARANCE,
   welcome: false,
+  update: { channel: "stable" },
 };
 
 /** A host name with at least two labels: letters, digits and hyphens */
@@ -234,6 +237,7 @@ export const settings: Settings = {
   https: { ...DEFAULTS.https, ...(isPlainObject(saved.https) ? saved.https : {}) },
   local: { ...DEFAULTS.local, ...(isPlainObject(saved.local) ? saved.local : {}) },
   welcome: saved.welcome === true,
+  update: { channel: isPlainObject(saved.update) && saved.update.channel === "beta" ? "beta" : "stable" },
   network: { outside: cleanOutside(isPlainObject(saved.network) ? saved.network.outside : []) },
   security: { adminTwoFactor: isPlainObject(saved.security) && saved.security.adminTwoFactor === true },
   storage: { automount: isPlainObject(saved.storage) && saved.storage.automount === true, ignored: isPlainObject(saved.storage) && Array.isArray(saved.storage.ignored) ? saved.storage.ignored.filter((id): id is string => typeof id === "string") : [] },
@@ -346,6 +350,11 @@ export function updateSettings(patch: Record<string, unknown>): string | null {
     // nothing is updated on the word of a check that no longer runs
     if (!images.check) images.auto = false;
     next.images = images;
+  }
+  if ("update" in patch) {
+    const u = patch.update;
+    if (!isPlainObject(u) || (u.channel !== "stable" && u.channel !== "beta")) return "settings.badChannel";
+    next.update = { channel: u.channel };
   }
   if ("https" in patch) {
     const h = patch.https;
