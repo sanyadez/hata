@@ -1327,7 +1327,8 @@ function dragStart(e, item, kind = TILE_DRAG, el = e.currentTarget) {
     drag.home = { parent: el.parentNode, next: el.nextSibling };
     for (const marked of drag.ghost.querySelectorAll("[id]")) marked.removeAttribute("id");
     // a modal dialog is drawn above everything else on the page
-    (homeUi.folder?.dialog ?? document.body).append(drag.ghost);
+    // inside the page, so it keeps the looks the page gives it
+    (homeUi.folder?.dialog ?? document.getElementById("view") ?? document.body).append(drag.ghost);
     el.classList.add("dragging");
     document.documentElement.classList.add("tile-dragging", "dragging-" + kind.name);
     dragMove(drag);
