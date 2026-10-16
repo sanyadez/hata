@@ -76,7 +76,6 @@ const ICONS = {
   list: "M9 6h11M9 12h11M9 18h11M4 6h.01M4 12h.01M4 18h.01",
   edit: "M4 20h4L19 9l-4-4L4 16zM13 7l4 4",
   copy: "M9 9h11v11H9zM5 15H4V4h11v1",
-  pin: "M12 17v5M8 3h8l-1 6 3 4H6l3-4z",
   star: "M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.9l-5.2 2.7 1-5.8-4.3-4.1 5.9-.9z",
   share: "M18 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM6 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM18 22a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM8.6 13.5l6.8 4M15.4 6.5l-6.8 4",
   link: "M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1",
@@ -1162,7 +1161,7 @@ function tileMenu(item, point = null) {
     entry(t("home.toNewGroup"), "plus", () => newGroupDialog((id) => moveTile(key, { group: id }))),
     item.type === "folder" && entry(t("home.ungroup"), "x", () => changeLayout((next) => void locate(next, key).list.splice(at.index, 1, ...item.items))),
     item.type === "link" && entry(t("home.removeLink"), "trash", () => changeLayout((next) => void takeTile(next, key)), "danger"),
-    item.type === "files" && entry(t("files.unpin"), "pin", () => pinFolder(item.path, false)),
+    item.type === "files" && entry(t("files.unpin"), "home", () => pinFolder(item.path, false)),
   );
   if (point) placeAt(dialog, point);
 }
@@ -4124,7 +4123,7 @@ function renderFilesBody() {
       listing && !listing.error && !machine && findBox(path),
       h("span", { class: "grow" }),
       listing && !listing.error && !machine && h("button", { type: "button", class: "btn square" + (isFavorite(path) ? " active" : ""), title: t(isFavorite(path) ? "files.unfavorite" : "files.favorite"), "aria-label": t(isFavorite(path) ? "files.unfavorite" : "files.favorite"), "aria-pressed": String(isFavorite(path)), onclick: () => favorite(path, !isFavorite(path)) }, icon("star")),
-      listing && !listing.error && !machine && h("button", { type: "button", class: "btn square" + (isPinned ? " active" : ""), title: t(isPinned ? "files.unpin" : "files.pin"), "aria-label": t(isPinned ? "files.unpin" : "files.pin"), "aria-pressed": String(isPinned), onclick: () => pinFolder(path, !isPinned) }, icon("pin")),
+      listing && !listing.error && !machine && h("button", { type: "button", class: "btn square" + (isPinned ? " active" : ""), title: t(isPinned ? "files.unpin" : "files.pin"), "aria-label": t(isPinned ? "files.unpin" : "files.pin"), "aria-pressed": String(isPinned), onclick: () => pinFolder(path, !isPinned) }, icon("home")),
       listing && !listing.error && !machine && h("button", { type: "button", class: "btn square" + (isShared ? " active" : ""), title: t(isShared ? "files.shareSettings" : "files.share"), "aria-label": t(isShared ? "files.shareSettings" : "files.share"), onclick: () => shareDialog(path) }, icon("share")),
       sort,
       h("div", { class: "seg" }, modeButton("list", "list"), modeButton("grid", "grid")),
@@ -4537,7 +4536,7 @@ const entryMarks = (entry) => {
   const here = !filesMachine();
   return [
     here && entry.type !== "other" && isFavorite(path) && mark("star", t("files.favoriteMark")),
-    here && entry.type === "dir" && (state.files.pinned ?? []).includes(path) && mark("pin", t("files.pinnedMark")),
+    here && entry.type === "dir" && (state.files.pinned ?? []).includes(path) && mark("home", t("files.pinnedMark")),
     entry.type === "dir" && (state.files.shared ?? []).includes(path) && mark("share", t("files.sharedMark")),
   ];
 };
@@ -4801,7 +4800,7 @@ function folderMenu(at) {
     listing.entries.length > 0 && item(t("files.downloadZip"), "download", () => downloadEntries(listing.entries.filter((entry) => entry.type !== "other"))),
     item(t("files.copyPath"), "link", () => copyText(path)),
     !listing.machine && item(t(isFavorite(path) ? "files.unfavorite" : "files.favorite"), "star", () => favorite(path, !isFavorite(path))),
-    !listing.machine && item(t(listing.pinned.includes(path) ? "files.unpin" : "files.pin"), "pin", () => pinFolder(path, !listing.pinned.includes(path))),
+    !listing.machine && item(t(listing.pinned.includes(path) ? "files.unpin" : "files.pin"), "home", () => pinFolder(path, !listing.pinned.includes(path))),
     !listing.machine && item(t(listing.shared.includes(path) ? "files.shareSettings" : "files.share"), "share", () => shareDialog(path)),
   );
   placeAt(dialog, at);
@@ -4823,7 +4822,7 @@ function entryMenu(entry, at) {
     entry.type === "file" && ARCHIVE_RE.test(entry.name) && !state.files.readOnly && !filesMachine() && item(t("files.extract"), "archive", () => extractArchive(path)),
     item(t("files.copyPath"), "link", () => copyText(path)),
     entry.type !== "other" && !filesMachine() && item(t(isFavorite(path) ? "files.unfavorite" : "files.favorite"), "star", () => favorite(path, !isFavorite(path), entry.name)),
-    entry.type === "dir" && !filesMachine() && (state.files.pinned.includes(path) ? item(t("files.unpin"), "pin", () => pinFolder(path, false)) : item(t("files.pin"), "pin", () => pinFolder(path, true))),
+    entry.type === "dir" && !filesMachine() && (state.files.pinned.includes(path) ? item(t("files.unpin"), "home", () => pinFolder(path, false)) : item(t("files.pin"), "home", () => pinFolder(path, true))),
     entry.type === "dir" && !filesMachine() && item(t(state.files.shared.includes(path) ? "files.shareSettings" : "files.share"), "share", () => shareDialog(path)),
     item(t("files.rename"), "edit", () => renameDialog(entry)),
     item(t("files.move"), "arrow", () => transferDialog([entry], false)),
@@ -8924,7 +8923,7 @@ async function sidebarMenu(at, { label, path, machine = "", volume = null, iconN
   ];
   if (!machine && isAdmin()) {
     const pinned = (state.files?.pinned ?? state.overview?.folders?.map((folder) => folder.path) ?? []).includes(path);
-    entries.push({ label: t(pinned ? "files.unpin" : "files.pin"), icon: "pin", run: () => pinFolder(path, !pinned, true, label) });
+    entries.push({ label: t(pinned ? "files.unpin" : "files.pin"), icon: "home", run: () => pinFolder(path, !pinned, true, label) });
   }
   if (!machine && state.favorites) entries.push({ label: t(isFavorite(path) ? "files.unfavorite" : "files.favorite"), icon: "star", run: () => favorite(path, !isFavorite(path), label) });
   if (volume && !machine && isAdmin()) {
