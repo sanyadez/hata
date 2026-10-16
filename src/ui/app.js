@@ -6564,6 +6564,30 @@ function updateRow() {
   );
 }
 
+/** Which releases are offered: stable ones, or pre-releases too; the check runs again at once */
+function channelRow() {
+  if (!state.update || !state.settings) return null;
+  const channel = state.settings.update?.channel ?? "stable";
+  const pick = h(
+    "select",
+    {
+      "aria-label": t("update.channel"),
+      onchange: async () => {
+        pick.disabled = true;
+        try {
+          state.settings = await api("PUT", "/api/settings", { update: { channel: pick.value } });
+          state.update = await api("POST", "/api/update/check", {}).catch(() => state.update);
+        } catch (e) {
+          toast(errorText(e), "error");
+        }
+        renderSettings();
+      },
+    },
+    ["stable", "beta"].map((value) => h("option", { value, selected: value === channel }, t("update.channel." + value))),
+  );
+  return settingRow(t("update.channel"), t(channel === "beta" ? "update.channelBetaHint" : "update.channelHint"), pick);
+}
+
 /** Going back to the version that ran before: the same watched restart as an update */
 function rollbackDialog(u) {
   let dialog;
@@ -6790,6 +6814,7 @@ function settingsSection(section) {
       h("h2", null, t("settings.about")),
       settingRow("Hata", t("settings.aboutHint"), h("span", { class: "mono" }, state.version)),
       updateRow(),
+      channelRow(),
       settingRow("Docker", d?.available ? "" : (d?.error ?? ""), h("span", { class: "mono" }, d?.available ? `${d.version} · compose ${d.compose}` : "—")),
       settingRow(t("settings.source"), "", h("a", { class: "link", href: "https://github.com/sanyadez/hata", target: "_blank", rel: "noopener noreferrer" }, "github.com/sanyadez/hata", icon("external"))),
     ),

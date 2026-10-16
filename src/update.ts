@@ -12,11 +12,12 @@
 import { chmodSync, copyFileSync, existsSync, readFileSync, renameSync, rmSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { record } from "./activity";
-import { DATA_DIR } from "./config";
+import { DATA_DIR, settings } from "./config";
 import { readJsonFile, writeJsonAtomic } from "./fsutil";
 import { COMPILED, VERSION } from "./version";
 
-const RELEASE_API = process.env.HATA_RELEASE_API ?? "https://api.github.com/repos/sanyadez/hata/releases/latest";
+/** The releases, newest first; tests serve the same shape (or one release) from elsewhere */
+const RELEASE_API = process.env.HATA_RELEASE_API ?? "https://api.github.com/repos/sanyadez/hata/releases?per_page=30";
 const SERVICE_BIN = "/usr/local/bin/hata";
 const PREVIOUS_BIN = SERVICE_BIN + ".previous";
 const CHECK_EVERY_MS = 12 * 3600 * 1000;
@@ -55,6 +56,32 @@ export function checksumFor(sums: string, file: string): string {
     if (m && m[2] === file) return m[1]!;
   }
   return "";
+}
+
+/** A release as GitHub's API gives it, the fields Hata reads */
+export interface GithubRelease {
+  tag_name?: unknown;
+  html_url?: unknown;
+  body?: unknown;
+  published_at?: unknown;
+  draft?: unknown;
+  prerelease?: unknown;
+  assets?: unknown;
+}
+
+/**
+ * The release a channel offers: the highest version that is published, and not a pre-release unless the
+ * channel is `beta`. A pre-release is a version with a suffix (`0.22.0-beta.1`) or one GitHub marks so.
+ */
+export function pickRelease(list: GithubRelease[], channel: "stable" | "beta"): GithubRelease | null {
+  let best: GithubRelease | null = null;
+  for (const one of list) {
+    if (typeof one?.tag_name !== "string" || one.draft === true) continue;
+    const pre = one.prerelease === true || one.tag_name.includes("-");
+    if (pre && channel !== "beta") continue;
+    if (!best || compareVersions(one.tag_name, best.tag_name as string) > 0) best = one;
+  }
+  return best;
 }
 
 // --- State ------------------------------------------------------------------------------------------
@@ -146,14 +173,16 @@ export async function checkForUpdate(): Promise<UpdateStatus> {
     if (res.status === 404) latest = null;
     else if (!res.ok) throw new Error(`GitHub answered ${res.status}`);
     else {
-      const data = (await res.json()) as { tag_name?: string; html_url?: string; body?: string; published_at?: string; assets?: { name: string; browser_download_url: string }[] };
-      if (typeof data.tag_name !== "string") throw new Error("unexpected answer");
-      latest = {
-        version: data.tag_name.replace(/^v/, ""),
-        url: /^https:\/\//.test(data.html_url ?? "") ? data.html_url! : "",
-        notes: (data.body ?? "").slice(0, 4000),
-        publishedAt: data.published_at ?? "",
-        assets: Object.fromEntries((data.assets ?? []).map((a) => [a.name, a.browser_download_url])),
+      const data = (await res.json()) as unknown;
+      if (!data || typeof data !== "object") throw new Error("unexpected answer");
+      const found = pickRelease(Array.isArray(data) ? data : [data as GithubRelease], settings.update.channel);
+      const text = (v: unknown) => (typeof v === "string" ? v : "");
+      latest = found && {
+        version: text(found.tag_name).replace(/^v/, ""),
+        url: /^https:\/\//.test(text(found.html_url)) ? text(found.html_url) : "",
+        notes: text(found.body).slice(0, 4000),
+        publishedAt: text(found.published_at),
+        assets: Object.fromEntries((Array.isArray(found.assets) ? found.assets : []).filter((a) => typeof a?.name === "string" && typeof a.browser_download_url === "string").map((a) => [a.name, a.browser_download_url])),
       };
     }
     checkError = "";
