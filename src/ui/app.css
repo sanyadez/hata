@@ -438,7 +438,9 @@ tr.removed .app-icon { opacity: 0.5; }
 .cat:hover { color: var(--text); }
 .cat.active { background: var(--surface-2); color: var(--text); font-weight: 600; }
 .cat.vol { flex-wrap: wrap; row-gap: 6px; }
-.cat.vol .bar { flex-basis: calc(100% - 26px); height: 3px; margin: 0 0 0 26px; background: color-mix(in srgb, var(--text) 12%, transparent); }
+.cat.vol .vol-room { flex-basis: calc(100% - 26px); margin-left: 26px; display: grid; gap: 4px; }
+.cat.vol .vol-room .small { font-size: 11px; font-weight: 400; }
+.cat.vol .bar { height: 3px; margin: 0; background: color-mix(in srgb, var(--text) 12%, transparent); }
 .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
 .store-card { display: grid; gap: 14px; align-content: start; padding: 16px; text-align: left; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); }
 .store-card:hover { border-color: var(--border-strong); }
