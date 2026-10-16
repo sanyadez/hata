@@ -11,6 +11,8 @@ function h(tag, attrs, ...children) {
   for (const [key, value] of Object.entries(attrs ?? {})) {
     if (value === false || value == null) continue;
     if (key.startsWith("on")) el.addEventListener(key.slice(2), value);
+    // what a right click on it shows: a function of the point, or true for its own buttons (see `contextMenus`)
+    else if (key === "menu") el.hataMenu = value;
     else if (key === "class") el.className = value;
     else if (key in el && key !== "list" && key !== "form") el[key] = value;
     else el.setAttribute(key, value === true ? "" : value);
@@ -364,6 +366,7 @@ function onRoute() {
   window.scrollTo(0, 0);
 }
 window.addEventListener("hashchange", onRoute);
+contextMenus();
 
 /** Things a view started that must not outlive it: log streams, stats polling */
 let cleanups = [];
@@ -956,10 +959,10 @@ function tile(item) {
   return h("div", { class: `tile kind-${item.type} ${cls} movable`, "data-key": key, onpointerdown: (e) => dragStart(e, item), oncontextmenu: (e) => {
         if (homeUi.drag?.active) return e.preventDefault();
         // a right click on an app is the same menu as its button, where the pointer is
-        if (item.type === "app" && !target.machine && e.pointerType !== "touch") {
-          e.preventDefault();
-          appTileMenu(target, null, { x: e.clientX, y: e.clientY });
-        }
+        if (e.pointerType === "touch" || isAddTile(item)) return;
+        e.preventDefault();
+        if (item.type === "app" && !target.machine) appTileMenu(target, null, { x: e.clientX, y: e.clientY });
+        else tileMenu(item, { x: e.clientX, y: e.clientY });
       }, ondragstart: (e) => e.preventDefault() }, main, side);
 }
 
@@ -1125,7 +1128,7 @@ const renameFolderDialog = (folder) =>
   );
 
 /** Everything that can be done to a tile without dragging it */
-function tileMenu(item) {
+function tileMenu(item, point = null) {
   const key = tileKey(item);
   const layout = state.overview.dashboard;
   const at = locate(layout, key);
@@ -1135,7 +1138,7 @@ function tileMenu(item) {
   const groupName = (group) => group.title || t("home.apps");
   const neighbour = (step) => at.list[at.index + step];
   dialog = openDialog(
-    "menu",
+    point ? "menu dropdown" : "menu",
     h("header", null, tileIcon(item), h("div", null, h("h2", { class: "clip" }, tileTitle(item)), h("span", { class: "muted small" }, at.folder ? at.folder.title || t("home.folder") : groupName(at.group)))),
     item.type === "link" && entry(t("home.editLink"), "edit", () => linkDialog(item)),
     item.type === "folder" && entry(t("common.open"), "folder", () => openFolder(item.id)),
@@ -1151,6 +1154,7 @@ function tileMenu(item) {
     item.type === "link" && entry(t("home.removeLink"), "trash", () => changeLayout((next) => void takeTile(next, key)), "danger"),
     item.type === "files" && entry(t("files.unpin"), "pin", () => pinFolder(item.path, false)),
   );
+  if (point) placeAt(dialog, point);
 }
 
 function groupHead(group, index, count) {
@@ -1803,17 +1807,18 @@ function appTileMenu(app, anchor, at) {
   placeAt(dialog, { x: box.right - dialog.offsetWidth, y: below || box.top - 6 - dialog.offsetHeight < 8 ? box.bottom + 6 : box.top - 6 - dialog.offsetHeight });
 }
 
-function appMoreMenu(app) {
+function appMoreMenu(app, at = null) {
   let dialog;
   const item = (label, iconName, action, cls = "") => h("button", { type: "button", class: "menu-item " + cls, disabled: !!app.job, onclick: () => (dialog.close(), action()) }, icon(iconName), label);
   dialog = openDialog(
-    "menu",
+    at ? "menu dropdown" : "menu",
     h("header", null, appIcon(app), h("div", null, h("h2", null, app.title), stateChip(app))),
     assistantReady() && h("button", { type: "button", class: "menu-item", onclick: () => (dialog.close(), openAssistant({ draft: t("assistant.aboutApp", { title: app.title, app: app.name }) })) }, icon("chat"), t("assistant.ask")),
     item(t("app.update"), "up", () => startAction(app, "update")),
     item(t("machines.move"), "server", () => moveAppDialog("", app)),
     item(t("app.remove"), "trash", () => removeDialog(app), "danger"),
   );
+  if (at) placeAt(dialog, at);
 }
 
 function renderAppHead() {
@@ -1826,7 +1831,7 @@ function renderAppHead() {
     h("nav", { class: "crumbs" }, h("a", { href: "#/" }, t("home.apps")), icon("chevron"), h("span", null, app.title)),
     h(
       "div",
-      { class: "app-head" },
+      { class: "app-head", menu: isAdmin() && ((at) => appTileMenu(app, null, at)) },
       appIcon(app, "lg"),
       h(
         "div",
@@ -1912,7 +1917,14 @@ function appOverviewTab(app, box) {
 
   const containerRow = (c) => {
     const s = app.stats?.[c.name];
-    return h("tr", null, h("td", null, h("div", { class: "mono" }, c.name), h("div", { class: "muted small mono clip" }, c.image), app.newer?.includes(c.image) && h("div", { class: "small accent-text" }, t("app.newerImage"))), h("td", null, h("span", { class: "state " + (c.state === "running" ? "running" : c.state === "restarting" ? "restarting" : "stopped") }, c.status)), h("td", { class: "num" }, s ? s.cpu.toFixed(1) + " %" : "—"), h("td", { class: "num" }, s ? bytes(s.memory) : "—"), h("td", { class: "mono small" }, c.ports.join(", ") || "—"));
+    const menu = (at) =>
+      menuAt(at, menuHeader(c.name, c.image, "box"), [
+        { label: t("app.logs"), icon: "logs", href: `#/apps/${app.name}/logs` },
+        isAdmin() && { label: t("app.tab.terminal"), icon: "terminal", href: `#/apps/${app.name}/terminal` },
+        { label: t("menu.copyName"), icon: "copy", run: () => copyText(c.name) },
+        { label: t("menu.copyImage"), icon: "copy", run: () => copyText(c.image) },
+      ]);
+    return h("tr", { menu }, h("td", null, h("div", { class: "mono" }, c.name), h("div", { class: "muted small mono clip" }, c.image), app.newer?.includes(c.image) && h("div", { class: "small accent-text" }, t("app.newerImage"))), h("td", null, h("span", { class: "state " + (c.state === "running" ? "running" : c.state === "restarting" ? "restarting" : "stopped") }, c.status)), h("td", { class: "num" }, s ? s.cpu.toFixed(1) + " %" : "—"), h("td", { class: "num" }, s ? bytes(s.memory) : "—"), h("td", { class: "mono small" }, c.ports.join(", ") || "—"));
   };
 
   box.replaceChildren(
@@ -2080,7 +2092,7 @@ function renderMachinesBody() {
   if (!list.length) {
     return box.replaceChildren(h("div", { class: "card empty" }, icon("server"), h("h2", null, t("machines.none")), h("p", null, t("machines.noneLead")), button(t("machines.add"), { class: "primary", onclick: addMachineDialog }, "plus")));
   }
-  box.replaceChildren(h("div", { class: "cards" }, list.map((m) => h("a", { class: "card pad machine-card", href: `#/machines/${m.id}`, id: "machine-" + m.id }))));
+  box.replaceChildren(h("div", { class: "cards" }, list.map((m) => h("a", { class: "card pad machine-card", href: `#/machines/${m.id}`, id: "machine-" + m.id, menu: (at) => machineMenu(m, at) }))));
   for (const m of list) paintMachineCard(m);
 }
 
@@ -2183,7 +2195,7 @@ function renderMachineHead() {
     h("nav", { class: "crumbs" }, h("a", { href: "#/machines" }, t("nav.machines")), icon("chevron"), h("span", null, m.name)),
     h(
       "div",
-      { class: "app-head" },
+      { class: "app-head", menu: (at) => machineMenu(m, at) },
       h("span", { class: "machine-icon" }, icon("server")),
       h("div", { class: "grow" }, h("div", { class: "app-title" }, h("h1", null, m.name), machineChip(m)), h("p", { class: "meta" }, [machineOs(m), m.ip, m.online ? null : t("machines.seen", { ago: ago(m.seen) })].filter(Boolean).flatMap((part, i) => (i ? [h("span", { class: "dot-sep" }, "·"), part] : [part])))),
       h(
@@ -2199,11 +2211,11 @@ function renderMachineHead() {
   );
 }
 
-function machineMenu(m) {
+function machineMenu(m, at = null) {
   let dialog;
   const item = (label, iconName, action, cls = "") => h("button", { type: "button", class: "menu-item " + cls, onclick: () => (dialog.close(), action()) }, icon(iconName), label);
   dialog = openDialog(
-    "menu",
+    at ? "menu dropdown" : "menu",
     h("header", null, h("span", { class: "machine-icon" }, icon("server")), h("div", null, h("h2", null, m.name), machineChip(m))),
     item(t("machines.rename"), "edit", () => renameMachineDialog(m)),
     !m.online && m.info?.macs?.length > 0 && item(t("machines.wake"), "play", () => wakeMachine(m)),
@@ -2212,6 +2224,7 @@ function machineMenu(m) {
     m.online && item(t("machines.updateAgain"), "up", () => updateMachine(m)),
     item(t("machines.remove"), "trash", () => removeMachineDialog(m), "danger"),
   );
+  if (at) placeAt(dialog, at);
 }
 
 /** The magic packet to the machine's cards: it wakes when its BIOS and card allow it */
@@ -3845,13 +3858,13 @@ function filesPlaces(path) {
   const home = machine ? "" : (state.files?.home ?? "");
   const inHome = !trash && home !== "" && within(path, home);
   const inside = (folder) => !trash && within(path, folder);
-  const place = (label, to, iconName, active, on = machine) => h("a", { class: "cat" + (active ? " active" : ""), href: filesHash(to, on) }, h("span", { class: "with-icon" }, icon(iconName), h("span", { class: "clip" }, label)));
+  const place = (label, to, iconName, active, on = machine, volume = null) => h("a", { class: "cat" + (active ? " active" : ""), href: filesHash(to, on), menu: (at) => sidebarMenu(at, { label, path: to, machine: on, volume, iconName }) }, h("span", { class: "with-icon" }, icon(iconName), h("span", { class: "clip" }, label)));
   const disk = state.files?.disk;
   const used = disk ? Math.round(((disk.total - disk.free) / disk.total) * 100) : 0;
   const fill = h("i", { class: level(used) });
   fill.style.width = used + "%";
   const others = machinesUi.list?.machines ?? [];
-  const machinesList = others.length > 0 && [h("div", { class: "cat-title" }, t("nav.machines")), others.map((m) => h("a", { class: "cat" + (machine === m.id ? " active" : "") + (m.online ? "" : " muted"), href: filesHash("/", m.id), title: m.online ? "" : t("machines.offline") }, h("span", { class: "with-icon" }, icon("server"), h("span", { class: "clip" }, m.name))))];
+  const machinesList = others.length > 0 && [h("div", { class: "cat-title" }, t("nav.machines")), others.map((m) => h("a", { class: "cat" + (machine === m.id ? " active" : "") + (m.online ? "" : " muted"), href: filesHash("/", m.id), title: m.online ? "" : t("machines.offline"), menu: (at) => menuAt(at, menuHeader(m.name, machineOs(m), "server"), [{ label: t("machines.files"), icon: "folder", href: filesHash("/", m.id) }, { label: t("menu.machinePage"), icon: "server", href: `#/machines/${m.id}` }, isAdmin() && { label: t("app.more"), icon: "more", run: () => machineMenu(m, at) }]) }, h("span", { class: "with-icon" }, icon("server"), h("span", { class: "clip" }, m.name))))];
   if (machine) {
     const m = others.find((x) => x.id === machine);
     const volumes = listing?.disks ?? [];
@@ -3861,7 +3874,7 @@ function filesPlaces(path) {
       h("a", { class: "cat", href: "#/files" }, h("span", { class: "with-icon" }, icon("home"), h("span", { class: "clip" }, t("files.home")))),
       machinesList,
       volumes.length > 0 && h("div", { class: "cat-title" }, m?.name ?? t("files.disks")),
-      volumes.length > 0 && [place(t("files.root"), "/", "disk", !volumes.some((d) => within(path, d.path))), volumes.map((d) => place(volumeName(d), d.path, d.network ? "globe" : "disk", inside(d.path)))],
+      volumes.length > 0 && [place(t("files.root"), "/", "disk", !volumes.some((d) => within(path, d.path))), volumes.map((d) => place(volumeName(d), d.path, d.network ? "globe" : "disk", inside(d.path), machine, d))],
       disk && h("div", { class: "cat-title" }, t("files.disk")),
       disk && h("div", { class: "files-disk" }, h("div", { class: "bar" }, fill), h("span", { class: "muted small" }, t("files.free", { free: bytes(disk.free), total: bytes(disk.total) }))),
     );
@@ -3874,7 +3887,7 @@ function filesPlaces(path) {
     place(t("files.root"), "/", "disk", !trash && path !== "" && !inHome && !(state.files?.disks ?? []).some((d) => within(path, d.path))),
     h("a", { class: "cat" + (trash ? " active" : ""), href: "#/trash" }, h("span", { class: "with-icon" }, icon("trash"), h("span", { class: "clip" }, t("trash.title")))),
     (state.files?.disks ?? []).length > 0 && h("div", { class: "cat-title" }, t("files.disks")),
-    (state.files?.disks ?? []).map((d) => place(volumeName(d), d.path, d.network ? "globe" : "disk", inside(d.path))),
+    (state.files?.disks ?? []).map((d) => place(volumeName(d), d.path, d.network ? "globe" : "disk", inside(d.path), machine, d)),
     h("a", { class: "cat", href: "#/settings/storage", title: t("netplace.sidebarHint"), onclick: addPlaceHere }, h("span", { class: "with-icon" }, icon("plus"), h("span", { class: "clip muted" }, t("netplace.sidebar")))),
     machinesList,
     disk && h("div", { class: "cat-title" }, t("files.disk")),
@@ -3956,7 +3969,7 @@ function diskStrip(listing) {
     fill.style.width = used + "%";
     return h(
       "a",
-      { class: "disk-tile", href: filesHash(volume.path), title: volume.path },
+      { class: "disk-tile", href: filesHash(volume.path), title: volume.path, menu: (at) => sidebarMenu(at, { label: volumeName(volume), path: volume.path, volume, iconName: volume.network ? "globe" : "disk" }) },
       h("span", { class: "badge-icon plain" }, icon(volume.network ? "globe" : "disk")),
       h("span", { class: "disk-text" }, h("span", { class: "clip strong" }, volumeName(volume)), h("span", { class: "muted small mono clip" }, volume.path), volume.total > 0 && h("span", { class: "bar" }, fill), volume.total > 0 && h("span", { class: "muted small" }, t("files.free", { free: bytes(volume.free), total: bytes(volume.total) }))),
     );
@@ -4087,10 +4100,100 @@ function placeAt(dialog, at) {
   });
 }
 
+/**
+ * A menu at the pointer. Entries are `{ label, icon, run }` or `{ label, icon, href, newTab }`, with
+ * `danger` and `off`; false ones are skipped. `header` is what the menu is about.
+ */
+function menuAt(at, header, entries) {
+  let dialog;
+  const one = (e) =>
+    e.href
+      ? h("a", { class: "menu-item", href: e.href, ...(e.newTab ? { target: "_blank", rel: "noopener noreferrer" } : {}), onclick: () => dialog.close() }, e.iconEl ?? icon(e.icon), e.label)
+      : h("button", { type: "button", class: "menu-item" + (e.danger ? " danger" : ""), disabled: !!e.off, onclick: () => (dialog.close(), e.run()) }, e.iconEl ?? icon(e.icon), e.label);
+  dialog = openDialog("menu dropdown", header, entries.filter(Boolean).map(one));
+  placeAt(dialog, at);
+  return dialog;
+}
+
+const menuHeader = (title, sub, iconName) => h("header", null, iconName && h("span", { class: "badge-icon plain" }, icon(iconName)), h("div", null, h("h2", { class: "clip" }, title), sub && h("span", { class: "muted small clip" }, sub)));
+
+/** A card of the store: install it, or go to it once it is installed */
+const storeCardMenu = (a, isIn, at) =>
+  menuAt(at, menuHeader(a.title ?? a.name, a.category ?? ""), [
+    isIn ? { label: t("common.open"), icon: "grid", href: `#/apps/${a.name}` } : { label: t("store.install") + "…", icon: "download", run: () => storeDialog(a) },
+    isIn && { label: t("menu.newTab"), icon: "external", href: location.pathname + `#/apps/${a.name}`, newTab: true },
+  ]);
+
+/** Whether the element or one around it has a menu of its own */
+const hasOwnMenu = (el) => {
+  for (; el && el !== document.body; el = el.parentElement) if (el.hataMenu) return true;
+  return false;
+};
+
+/** The rows a right click finds the actions of by themselves: what their buttons and their link do */
+const MENU_ROWS = "tr, .snapshot, .machine-card, .attention-item, .tool";
+
+/** The menu of a row made of its own buttons — the same actions, where the pointer is; false — it has none */
+function rowMenu(row, at) {
+  const shown = (el) => el.getClientRects().length > 0 && !el.closest("dialog:not([open])");
+  const buttons = [...row.querySelectorAll("button, a.btn")].filter((b) => shown(b) && !b.closest(".menu-item") && b.type !== "submit");
+  // the name, without the chips that sit inside it ("test" of "test · Everything")
+  const named = row.querySelector("h2 .with-icon") ?? row.querySelector("strong, h2, h3, .strong, .name");
+  const title = (named && ([...named.childNodes].filter((n) => n.nodeType === Node.TEXT_NODE).map((n) => n.textContent).join("").trim() || named.textContent.trim())) || "";
+  // "Back up now: Adminer" says the name for a screen reader; under a header with that name it is said once
+  const labelOf = (b) => {
+    const text = (b.textContent.trim() || b.getAttribute("aria-label") || b.title || "").replace(/\s+/g, " ");
+    return title && text.endsWith(": " + title) ? text.slice(0, -title.length - 2) : text;
+  };
+  const actions = buttons.filter((b) => labelOf(b));
+  // the row's own link, not one in the words under it (`.link`)
+  const link = [...row.querySelectorAll("a[href]:not(.btn):not(.link)")].find((a) => shown(a) && a.getAttribute("href") !== "#");
+  if (!actions.length && !link) return false;
+  // a row with a "⋯" button: that menu is the row's (only that one is clicked for the person — never a delete)
+  const more = actions.find((b) => b.querySelector("path")?.getAttribute("d") === ICONS.more);
+  if (more) {
+    more.click();
+    return true;
+  }
+  const svgOf = (b) => b.querySelector("svg")?.cloneNode(true) ?? icon("chevron");
+  // the same thing twice (a copy button by each of two lines) is said once
+  const seen = new Set();
+  const once = actions.filter((b) => !seen.has(labelOf(b)) && seen.add(labelOf(b)));
+  menuAt(at, title && menuHeader(title), [
+    link && { label: t("common.open"), icon: "folder", href: link.getAttribute("href"), ...(link.target === "_blank" ? { newTab: true } : {}) },
+    link && link.target !== "_blank" && { label: t("menu.newTab"), icon: "external", href: link.href, newTab: true },
+    ...once.map((b) => ({ label: labelOf(b), iconEl: svgOf(b), off: b.disabled, danger: b.classList.contains("danger"), run: () => b.click() })),
+  ]);
+  return true;
+}
+
+/**
+ * The right click, everywhere: the menu of the thing under the pointer — one given to it (`menu` in h()),
+ * or one made of a row's buttons. Text being selected, fields, frames and Shift keep the browser's own.
+ */
+function contextMenus() {
+  document.addEventListener("contextmenu", (e) => {
+    if (e.defaultPrevented || e.shiftKey || !(e.target instanceof Element)) return;
+    if (e.target.closest("input, textarea, select, [contenteditable], iframe, dialog.menu")) return;
+    const picked = getSelection();
+    if (picked && !picked.isCollapsed && picked.containsNode(e.target, true)) return;
+    const at = { x: e.clientX, y: e.clientY };
+    for (let el = e.target; el && el !== document.body; el = el.parentElement) {
+      // `menu: true` — the element's own buttons are its menu, as in a row
+      if (el.hataMenu === true && rowMenu(el, at)) return void e.preventDefault();
+      if (typeof el.hataMenu === "function") {
+        e.preventDefault();
+        return void el.hataMenu(at);
+      }
+      if (el.matches(MENU_ROWS) && !el.closest("thead") && rowMenu(el, at)) return void e.preventDefault();
+    }
+  });
+}
+
 /** The right click in Files: the menu of the file, of everything selected, or of the folder on screen */
 function filesContext(e) {
   // Shift leaves the browser's own menu, and so does a field with text in it
-  if (e.shiftKey || e.target.closest?.("input, textarea, select") || !e.target.closest?.("#files-main")) return;
+  if (e.shiftKey || e.target.closest?.("input, textarea, select") || !e.target.closest?.("#files-main") || hasOwnMenu(e.target)) return;
   const listing = filesListing();
   if (!listing || listing.error) return;
   e.preventDefault();
@@ -4873,7 +4976,7 @@ function renderStoreList() {
       apps.map((a) =>
         h(
           "button",
-          { type: "button", class: "store-card" + (a.supported ? "" : " unsupported"), onclick: () => (installed.has(a.name) ? go(`#/apps/${a.name}`) : storeDialog(a)) },
+          { type: "button", class: "store-card" + (a.supported ? "" : " unsupported"), onclick: () => (installed.has(a.name) ? go(`#/apps/${a.name}`) : storeDialog(a)), menu: (at) => storeCardMenu(a, installed.has(a.name), at) },
           h("span", { class: "store-card-head" }, appIcon(a), h("span", { class: "grow" }, h("span", { class: "tile-name" }, a.title), h("span", { class: "muted small" }, a.category)), installed.has(a.name) ? h("span", { class: "chip ok" }, icon("check"), t("store.installed")) : h("span", { class: "chip" }, t("store.install"))),
           h("span", { class: "tagline" }, a.tagline),
         ),
@@ -5498,7 +5601,7 @@ function paintWelcome() {
             offered.map((a) =>
               h(
                 "button",
-                { type: "button", class: "store-card", onclick: () => (installed.has(a.name) ? go(`#/apps/${a.name}`) : storeDialog(a)) },
+                { type: "button", class: "store-card", onclick: () => (installed.has(a.name) ? go(`#/apps/${a.name}`) : storeDialog(a)), menu: (at) => storeCardMenu(a, installed.has(a.name), at) },
                 h("span", { class: "store-card-head" }, appIcon(a), h("span", { class: "grow" }, h("span", { class: "tile-name" }, a.title), h("span", { class: "muted small" }, a.category)), installed.has(a.name) ? h("span", { class: "chip ok" }, icon("check"), t("store.installed")) : h("span", { class: "chip" }, t("store.install"))),
                 h("span", { class: "tagline" }, a.tagline),
               ),
@@ -6328,7 +6431,7 @@ function networkSection() {
   const card = (nic) =>
     h(
       "section",
-      { class: "card pad" },
+      { class: "card pad", menu: true },
       h(
         "div",
         { class: "section-head" },
@@ -8242,7 +8345,40 @@ function placesCard(data) {
   );
 }
 
-/** Connects a network place, or changes one; `seed` — a server found on the network */
+/** The menu of a place in the sidebar of Files: open it, and what can be done to the disk or the network place it is */
+async function sidebarMenu(at, { label, path, machine = "", volume = null, iconName = "folder" }) {
+  const href = filesHash(path, machine);
+  const entries = [
+    { label: t("common.open"), icon: "folder", href },
+    { label: t("menu.newTab"), icon: "external", href: location.pathname + location.search + href, newTab: true },
+    { label: t("files.copyPath"), icon: "copy", run: () => copyText(path) },
+  ];
+  if (volume && !machine && isAdmin()) {
+    if (volume.network) {
+      if (!state.places) state.places = await api("GET", "/api/netplaces").catch(() => null);
+      const p = state.places?.places.find((one) => one.folder === volume.path);
+      if (p) {
+        entries.push(
+          { label: t("netplace.change"), icon: "edit", run: () => placeDialog(p) },
+          (!p.mounted || p.away) && { label: t("netplace.retry"), icon: "refresh", run: () => api("POST", `/api/netplaces/${p.id}/retry`, {}).then((res) => reloadPlaces(res.places), (err) => toast(errorText(err), "error")) },
+          { label: t("netplace.remove"), icon: "trash", danger: true, run: () => removePlaceDialog(p) },
+        );
+      }
+    } else {
+      if (!state.disks) state.disks = await api("GET", "/api/disks").catch(() => null);
+      const data = state.disks;
+      const mount = data?.mounts.find((m) => m.path === volume.path);
+      const disk = mount && data.disks.find((d) => d.name === mount.disk);
+      const removable = !!disk && (disk.removable || disk.transport === "usb");
+      const pooled = Object.values(data?.mounting?.pools ?? {}).some((folders) => folders.includes(volume.path));
+      if (removable && data.mounting?.possible) entries.push({ label: t("copyin.button"), icon: "download", run: () => copyInDialog(disk) });
+      if (mount && data.mounting?.ours[mount.path] && !pooled) entries.push({ label: t(removable ? "mounting.eject" : "mounting.disconnect"), icon: "signout", run: () => disconnectDialog(mount) });
+    }
+    entries.push({ label: t("menu.inStorage"), icon: "disk", href: "#/settings/storage" });
+  }
+  menuAt(at, menuHeader(label, path, iconName), entries);
+}
+
 /** "+ Network place" in Files: the dialog of Settings → Storage right there, and the new place opened once it is connected */
 async function addPlaceHere(e) {
   e.preventDefault();
@@ -8255,6 +8391,7 @@ async function addPlaceHere(e) {
   });
 }
 
+/** Connects a network place, or changes one; `seed` — a server found on the network, `after` hears the places once it is done */
 function placeDialog(place = null, seed = {}, after = null) {
   let kind = place?.kind ?? seed.kind ?? "smb";
   let dialog;
@@ -9777,7 +9914,7 @@ function userDialog() {
   name.focus();
 }
 
-function userMenuFor(user) {
+function userMenuFor(user, at = null) {
   let dialog;
   const self = user.id === state.user.id;
   const change = async (patch, done) => {
@@ -9791,7 +9928,7 @@ function userMenuFor(user) {
   };
   const item = (label, iconName, action, cls = "") => h("button", { type: "button", class: "menu-item " + cls, onclick: () => (dialog.close(), action()) }, icon(iconName), label);
   dialog = openDialog(
-    "menu",
+    at ? "menu dropdown" : "menu",
     h("header", null, h("span", { class: "avatar" }, user.name.slice(0, 1).toUpperCase()), h("div", null, h("h2", null, user.name), h("span", { class: "muted small" }, t("user.role." + user.role)))),
     user.role !== "member" && item(t("users.makeMember"), "user", () => change({ role: "member" })),
     user.role !== "guest" && item(t("users.makeGuest"), "user", () => change({ role: "guest" })),
@@ -9836,6 +9973,7 @@ function userMenuFor(user) {
         }
       }, "danger"),
   );
+  if (at) placeAt(dialog, at);
 }
 
 function renderUsers() {
@@ -9857,7 +9995,7 @@ function renderUsers() {
           users.map((u) =>
             h(
               "tr",
-              null,
+              { menu: (at) => userMenuFor(u, at) },
               h("td", null, h("div", { class: "with-icon" }, h("span", { class: "avatar" }, u.name.slice(0, 1).toUpperCase()), h("div", null, h("span", { class: "strong" }, u.name), u.id === state.user.id && h("span", { class: "muted small" }, " ", t("users.you")), userShares(u)))),
               h("td", null, h("span", { class: "chip" + (u.role === "admin" ? " accent" : "") }, t("user.role." + u.role))),
               h("td", null, u.twoFactor ? h("span", { class: "chip ok" }, icon("check"), t("twofa.onShort")) : h("span", { class: "muted" }, t("twofa.offShort"))),
