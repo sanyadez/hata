@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { cleanBucket, cleanTarget, fingerprint, s3Reason, mkdirs, plan, preferredKey, reason } from "../src/offsite";
+import { cleanBucket, cleanPlaceTarget, cleanTarget, fingerprint, s3Reason, mkdirs, plan, preferredKey, reason } from "../src/offsite";
 import { groupKeys, latestFiles, objectKey, parseListings, parseSource, quoted } from "../src/remote";
 import { sealedToOpen } from "../src/restore";
 
@@ -144,4 +144,13 @@ test("a restore fetches the two files of the latest whole snapshot of a folder",
   expect(latestFiles(["20261010-030000.tar.gz.partial", "20261010-030000.json"])).toEqual([]);
   expect(latestFiles([])).toEqual([]);
   expect(quoted("a b")).toBe('"a b"');
+});
+
+test("a network place is one of those there are, with a folder inside it", () => {
+  const none = { id: "", path: "hata-backups" };
+  expect(cleanPlaceTarget({ place: "p1", path: " /backups/home/ " }, none, ["p1", "p2"])).toEqual({ id: "p1", path: "backups/home" });
+  expect(cleanPlaceTarget({ path: "other" }, { id: "p2", path: "x" }, ["p1", "p2"])).toEqual({ id: "p2", path: "other" });
+  expect(cleanPlaceTarget({ place: "gone" }, none, ["p1"])).toBe("offsite.noPlace");
+  expect(cleanPlaceTarget({ path: "x" }, none, ["p1"])).toBe("offsite.noPlace");
+  for (const path of ["", "/", "a/../b", "a//b", "./a", "a\\b", "a\nb"]) expect(cleanPlaceTarget({ place: "p1", path }, none, ["p1"])).toBe("offsite.badPath");
 });

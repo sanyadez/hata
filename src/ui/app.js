@@ -3596,8 +3596,16 @@ function offsiteCard(o) {
   const enabled = h("input", { type: "checkbox", checked: o.enabled });
   // the kind looked at survives the page being drawn anew, until it is saved
   const shown = offsiteCard.kind ?? o.kind;
-  const kind = h("select", { onchange: () => ((offsiteCard.kind = kind.value), renderBackupsBody()) }, ["sftp", "s3"].map((id) => h("option", { value: id, selected: id === shown }, t("offsite.kind." + id))));
+  const kind = h("select", { onchange: () => ((offsiteCard.kind = kind.value), renderBackupsBody()) }, ["sftp", "s3", "place"].map((id) => h("option", { value: id, selected: id === shown }, t("offsite.kind." + id))));
   const s3 = shown === "s3";
+  const inPlace = shown === "place";
+  const sftp = !s3 && !inPlace;
+  const placeChoice = h(
+    "select",
+    { required: inPlace },
+    o.places.map((p) => h("option", { value: p.id, selected: p.id === o.place.id, disabled: p.readOnly }, `${p.name} · ${t("netplace.kind." + p.kind)}${p.readOnly ? ` · ${t("offsite.placeReadOnly")}` : p.ready ? "" : ` · ${t("offsite.placeAway")}`}`)),
+  );
+  const placePath = h("input", { value: o.place.path, spellcheck: false, class: "mono", required: inPlace });
   const endpoint = h("input", { value: o.s3.endpoint, placeholder: "https://s3.eu-central-003.backblazeb2.com", spellcheck: false, autocapitalize: "off", class: "mono" });
   const region = h("input", { value: o.s3.region, placeholder: "us-east-1", spellcheck: false, autocapitalize: "off", class: "mono" });
   const bucket = h("input", { value: o.s3.bucket, spellcheck: false, autocapitalize: "off", class: "mono", required: s3 });
@@ -3612,7 +3620,7 @@ function offsiteCard(o) {
   const passphrase = h("input", { type: "password", autocomplete: "new-password", minlength: 8, placeholder: o.sealed ? t("offsite.passphraseKept") : "", class: "mono" });
   const error = h("p", { class: "error", role: "alert" });
   const last = o.last;
-  const status = !o.available && !s3
+  const status = !o.available && sftp
     ? h("p", { class: "error" }, t("offsite.noSftp"))
     : o.running
       ? h("p", { class: "muted small" }, t("offsite.running"))
@@ -3623,7 +3631,9 @@ function offsiteCard(o) {
     if (seal.checked && !o.sealed && !passphrase.value) return void (error.textContent = t("error.offsite.badPassphrase"));
     const data = s3
       ? { kind: "s3", enabled: enabled.checked, endpoint: endpoint.value.trim(), region: region.value.trim(), bucket: bucket.value.trim(), prefix: prefix.value.trim(), accessKey: accessKey.value.trim(), secret: secret.value }
-      : { kind: "sftp", enabled: enabled.checked, host: host.value.trim(), port: Number(port.value), user: user.value.trim(), path: path.value.trim() };
+      : inPlace
+        ? { kind: "place", enabled: enabled.checked, place: placeChoice.value, path: placePath.value.trim() }
+        : { kind: "sftp", enabled: enabled.checked, host: host.value.trim(), port: Number(port.value), user: user.value.trim(), path: path.value.trim() };
     if (!seal.checked) data.passphrase = "";
     else if (passphrase.value) data.passphrase = passphrase.value;
     try {
@@ -3632,7 +3642,7 @@ function offsiteCard(o) {
       document.activeElement?.blur();
       const result = await offsiteCheck();
       if (result.status === "ok") {
-        toast(t(s3 ? "offsite.connectedS3" : "offsite.connected"));
+        toast(t(s3 ? "offsite.connectedS3" : inPlace ? "offsite.connectedPlace" : "offsite.connected"));
         if (enabled.checked) await api("POST", "/api/backups/offsite/sync", {});
       }
       await loadBackups();
@@ -3657,10 +3667,14 @@ function offsiteCard(o) {
       field(t("offsite.accessKey"), accessKey),
       field(t("offsite.secret"), secret, t("offsite.secretHint")),
     ],
-    !s3 && h("div", { class: "field-row" }, field(t("offsite.host"), host), field(t("offsite.port"), port)),
-    !s3 && field(t("offsite.user"), user),
-    !s3 && field(t("offsite.path"), path, t("offsite.pathHint")),
-    !s3 &&
+    inPlace &&
+      (o.places.length
+        ? [field(t("offsite.place"), placeChoice), field(t("offsite.placePath"), placePath, t("offsite.placePathHint"))]
+        : h("p", { class: "muted" }, t("offsite.noPlaces"), " ", h("a", { href: "#/settings/storage" }, t("offsite.addPlace")))),
+    sftp && h("div", { class: "field-row" }, field(t("offsite.host"), host), field(t("offsite.port"), port)),
+    sftp && field(t("offsite.user"), user),
+    sftp && field(t("offsite.path"), path, t("offsite.pathHint")),
+    sftp &&
       o.publicKey &&
       h(
         "div",
@@ -3671,10 +3685,10 @@ function offsiteCard(o) {
       ),
     h("label", { class: "check" }, seal, h("span", null, h("strong", null, t("offsite.seal")), h("span", { class: "muted small block" }, t("offsite.sealHint")))),
     field(t("offsite.passphrase"), passphrase, t("offsite.passphraseHint")),
-    !s3 && o.fingerprint && h("p", { class: "muted small" }, t("offsite.hostKnown", { fingerprint: o.fingerprint })),
+    sftp && o.fingerprint && h("p", { class: "muted small" }, t("offsite.hostKnown", { fingerprint: o.fingerprint })),
     status,
     error,
-    h("footer", null, h("button", { class: "btn primary", disabled: !o.available && !s3 }, t("offsite.save"))),
+    h("footer", null, h("button", { class: "btn primary", disabled: (!o.available && sftp) || (inPlace && !o.places.length) }, t("offsite.save"))),
   );
 }
 

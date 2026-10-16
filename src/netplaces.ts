@@ -20,7 +20,7 @@ import { DATA_DIR, SECRETS_DIR, settings } from "./config";
 import { isPlainObject, readJsonFile, writeJsonAtomic, writeTextAtomic } from "./fsutil";
 import { openFolder, sealFolder } from "./mounting";
 import { BINARY, browseQuery, byRclone, cleanPlace, credentials, foundServers, mountUnit, PACKAGES, parseAnswer, parseExports, parseSmbShares, rcloneSection, rcloneUnit, SERVICE_KINDS, shown, unitOf, where, type Found, type Input, type Kind, type Place } from "./netplace";
-import { fingerprint, preferredKey } from "./offsite";
+import { checkPlacesWith, fingerprint, knowPlaces, offsitePlace, preferredKey } from "./offsite";
 import { roomOf } from "./netroom";
 import { installCommand, installPackage, PATH, run } from "./packages";
 
@@ -217,6 +217,7 @@ function holds(place: Place): { code: string; detail?: Record<string, string> } 
   if ([DATA_DIR, SECRETS_DIR].some(inside)) return { code: "netplace.holds.state" };
   if (inside(settings.dataRoot)) return { code: "netplace.holds.data" };
   if (settings.backup.dir && inside(settings.backup.dir)) return { code: "netplace.holds.backups" };
+  if (offsitePlace() === place.id) return { code: "netplace.holds.offsite" };
   const share = settings.shares.find((s) => inside(s.path));
   if (share) return { code: "netplace.holds.share", detail: { name: share.name } };
   for (const app of installedNames()) {
@@ -431,6 +432,13 @@ async function look(): Promise<void> {
   }
   away = next;
 }
+
+// the second copy of the backups may go to a place: what there is, and whether one may be written to now
+knowPlaces(() => {
+  const now = mountedAt();
+  return places.map((p) => ({ id: p.id, name: p.name, kind: p.kind, folder: where(p), ready: now.has(where(p)) && !away.has(p.id), readOnly: p.readOnly }));
+});
+checkPlacesWith(async (p) => mountedAt().has(p.folder) && (await run(["timeout", "15", "ls", "-A", p.folder], 20_000)).code === 0);
 
 /** On start: the files written anew from the list, the places started, a look every minute */
 export function startNetPlaces(): void {

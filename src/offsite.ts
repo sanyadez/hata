@@ -15,8 +15,14 @@
  * The work is done by the system's `sftp`, with a key Hata makes for itself (the other machine is told
  * its public half) and the host's key remembered at the first connection. Building the commands and
  * deciding what to upload are pure and tested.
+ *
+ * The third kind is a network place (`netplaces.ts`): a folder of another machine already mounted here —
+ * SMB, NFS, WebDAV, FTP, SFTP with a password. It is copied into as into any folder; it is never written
+ * to while it is not mounted, or the copy would land on this machine's own disk. Unlike the two above,
+ * such a copy is a folder of this server — whatever runs here can reach it.
  */
 import { chmodSync, existsSync, readFileSync, readdirSync, rmSync } from "node:fs";
+import { copyFile, mkdir, readdir, rename, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { SECRETS_DIR } from "./config";
 import { run } from "./docker";
@@ -44,11 +50,44 @@ export interface Bucket {
   accessKey: string;
 }
 
-export type OffsiteKind = "sftp" | "s3";
+export type OffsiteKind = "sftp" | "s3" | "place";
+
+/** A folder inside a network place */
+export interface PlaceTarget {
+  /** The place's id; "" — none chosen */
+  id: string;
+  /** Folder inside it, relative */
+  path: string;
+}
+
+/** A network place as the copy sees it */
+export interface PlaceFolder {
+  id: string;
+  name: string;
+  kind: string;
+  /** Where it is mounted here */
+  folder: string;
+  /** Mounted, and its server answers */
+  ready: boolean;
+  readOnly: boolean;
+}
+
+/** Given by `netplaces.ts`, which imports this module: what places there are now */
+let placesNow: () => PlaceFolder[] = () => [];
+export function knowPlaces(lookup: () => PlaceFolder[]): void {
+  placesNow = lookup;
+}
+
+/** Whether a place's folder may be written to: mounted and answering, said by a read with a time limit */
+let placeReady: (place: PlaceFolder) => Promise<boolean> = async () => false;
+export function checkPlacesWith(check: (place: PlaceFolder) => Promise<boolean>): void {
+  placeReady = check;
+}
 
 interface Saved extends OffsiteTarget {
   kind: OffsiteKind;
   s3: Bucket & { secret: string };
+  place: PlaceTarget;
   enabled: boolean;
   /** "" — files are uploaded as they are */
   passphrase: string;
@@ -67,6 +106,9 @@ export interface OffsiteRun {
 export interface OffsiteStatus extends OffsiteTarget {
   kind: OffsiteKind;
   s3: Bucket & { secretSet: boolean };
+  place: PlaceTarget;
+  /** The network places there are, to choose from */
+  places: PlaceFolder[];
   /** The system has `sftp` and `ssh-keygen` */
   available: boolean;
   enabled: boolean;
@@ -89,12 +131,14 @@ const FILE = join(SECRETS_DIR, "backup-remote.json");
 const KEY_FILE = join(SECRETS_DIR, "backup-key");
 const HOSTS_FILE = join(SECRETS_DIR, "backup-known-hosts");
 const NO_BUCKET = { endpoint: "", region: "us-east-1", bucket: "", prefix: "hata-backups", accessKey: "", secret: "" };
-const EMPTY: Saved = { kind: "sftp", s3: NO_BUCKET, enabled: false, host: "", port: 22, user: "", path: "hata-backups", passphrase: "", removed: [], last: null };
+const NO_PLACE: PlaceTarget = { id: "", path: "hata-backups" };
+const EMPTY: Saved = { kind: "sftp", s3: NO_BUCKET, place: NO_PLACE, enabled: false, host: "", port: 22, user: "", path: "hata-backups", passphrase: "", removed: [], last: null };
 
 const saved: Saved = { ...EMPTY, ...readJsonFile<Partial<Saved>>(FILE, {}, isPlainObject) };
 if (!Array.isArray(saved.removed)) saved.removed = [];
 saved.s3 = { ...NO_BUCKET, ...(isPlainObject(saved.s3) ? saved.s3 : {}) };
-if (saved.kind !== "s3") saved.kind = "sftp";
+saved.place = { ...NO_PLACE, ...(isPlainObject(saved.place) ? saved.place : {}) };
+if (saved.kind !== "s3" && saved.kind !== "place") saved.kind = "sftp";
 let running = false;
 let again: (() => { root: string; sets: LocalSet[] }) | null = null;
 
@@ -154,6 +198,22 @@ export function cleanBucket(input: Record<string, unknown>, current: Bucket): Bu
     if (accessKey === null || !/^[\x21-\x7e]{1,128}$/.test(accessKey)) return "offsite.badAccessKey";
     next.accessKey = accessKey;
   }
+  return next;
+}
+
+/** Checks the place chosen and the folder in it; a string is the error's code */
+export function cleanPlaceTarget(input: Record<string, unknown>, current: PlaceTarget, ids: string[]): PlaceTarget | string {
+  const next: PlaceTarget = { ...current };
+  if ("place" in input) {
+    if (typeof input.place !== "string" || !ids.includes(input.place)) return "offsite.noPlace";
+    next.id = input.place;
+  }
+  if ("path" in input) {
+    const path = typeof input.path === "string" ? input.path.trim().replace(/^\/+|\/+$/g, "") : "";
+    if (!path || path.length > 1024 || /[\x00-\x1f\\]/.test(path) || path.split("/").some((part) => part === ".." || part === "." || part === "")) return "offsite.badPath";
+    next.path = path;
+  }
+  if (!next.id) return "offsite.noPlace";
   return next;
 }
 
@@ -253,17 +313,19 @@ async function sftp(commands: string[]): Promise<{ ok: boolean; output: string }
 export async function offsiteStatus(): Promise<OffsiteStatus> {
   const { host, port, user, path, enabled, last, kind } = saved;
   const { secret, ...store } = saved.s3;
-  return { kind, s3: { ...store, secretSet: secret !== "" }, available: available(), host, port, user, path, enabled, sealed: saved.passphrase !== "", publicKey: await publicKey(), fingerprint: await fingerprint(preferredKey(knownHosts())), running, last };
+  return { kind, s3: { ...store, secretSet: secret !== "" }, place: saved.place, places: placesNow(), available: available(), host, port, user, path, enabled, sealed: saved.passphrase !== "", publicKey: await publicKey(), fingerprint: await fingerprint(preferredKey(knownHosts())), running, last };
 }
 
 /** Saves what was typed in; returns the error's code, or null. `passphrase` is only ever written: "" takes it away */
 export function saveOffsite(input: Record<string, unknown>): string | null {
-  const kind: OffsiteKind = "kind" in input ? (input.kind === "s3" ? "s3" : "sftp") : saved.kind;
-  // only what belongs to the chosen kind is looked at: the other one's fields may be empty
+  const kind: OffsiteKind = "kind" in input ? (input.kind === "s3" || input.kind === "place" ? input.kind : "sftp") : saved.kind;
+  // only what belongs to the chosen kind is looked at: the other ones' fields may be empty
   const target = kind === "sftp" ? cleanTarget(input, saved) : saved;
   if (typeof target === "string") return target;
   const store = kind === "s3" ? cleanBucket(input, saved.s3) : saved.s3;
   if (typeof store === "string") return store;
+  const place = kind === "place" ? cleanPlaceTarget(input, saved.place, placesNow().map((p) => p.id)) : saved.place;
+  if (typeof place === "string") return place;
   let secret = saved.s3.secret;
   if (kind === "s3" && typeof input.secret === "string" && input.secret !== "") {
     if (!/^[\x21-\x7e]{1,256}$/.test(input.secret)) return "offsite.badAccessKey";
@@ -276,9 +338,9 @@ export function saveOffsite(input: Record<string, unknown>): string | null {
   // another machine has another key: the remembered one must not vouch for it
   if (target.host !== saved.host || target.port !== saved.port) rmSync(HOSTS_FILE, { force: true });
   // what was deleted here was to be deleted in the old place; the new one never had it
-  if (kind !== saved.kind || store.bucket !== saved.s3.bucket || store.endpoint !== saved.s3.endpoint) Object.assign(saved, { removed: [], last: null });
+  if (kind !== saved.kind || store.bucket !== saved.s3.bucket || store.endpoint !== saved.s3.endpoint || place.id !== saved.place.id) Object.assign(saved, { removed: [], last: null });
   const { host, port, user, path } = target;
-  Object.assign(saved, { host, port, user, path, kind, s3: { ...store, secret } });
+  Object.assign(saved, { host, port, user, path, kind, s3: { ...store, secret }, place });
   if ("enabled" in input) saved.enabled = input.enabled === true;
   if (!configured()) saved.enabled = false;
   persist();
@@ -295,6 +357,22 @@ export type OffsiteCheck =
 
 /** Connects, makes the folder and looks into it. `trust` is the fingerprint the user has confirmed */
 export async function checkOffsite(trust?: string): Promise<OffsiteCheck> {
+  if (saved.kind === "place") {
+    const place = chosenPlace();
+    if (!place) return { status: "failed", message: "The network place is not there any more." };
+    if (place.readOnly) return { status: "failed", message: `${place.name} is connected read-only.` };
+    if (!(await placeReady(place))) return { status: "failed", message: `${place.name} is not connected or its server does not answer.` };
+    // a file written and taken away again, as with a bucket
+    try {
+      const folder = join(place.folder, saved.place.path);
+      await mkdir(folder, { recursive: true });
+      await Bun.write(join(folder, ".hata-check"), "Hata can write here.\n");
+      await rm(join(folder, ".hata-check"), { force: true });
+      return { status: "ok" };
+    } catch (e) {
+      return { status: "failed", message: e instanceof Error ? e.message : String(e) };
+    }
+  }
   if (saved.kind === "s3") {
     if (!configured()) return { status: "failed", message: "The bucket, the key and its secret are all needed." };
     // a file written and taken away again: a key that may only read would fail at the first snapshot
@@ -337,7 +415,10 @@ export function forgetHost(): void {
 const UPLOAD_EXT = ".upload";
 
 /** Whether there is a place to send to */
-const configured = (): boolean => (saved.kind === "s3" ? saved.s3.bucket !== "" && saved.s3.accessKey !== "" && saved.s3.secret !== "" : saved.host !== "" && saved.user !== "");
+const configured = (): boolean =>
+  saved.kind === "s3" ? saved.s3.bucket !== "" && saved.s3.accessKey !== "" && saved.s3.secret !== "" : saved.kind === "place" ? saved.place.id !== "" : saved.host !== "" && saved.user !== "";
+
+const chosenPlace = (): PlaceFolder | undefined => placesNow().find((p) => p.id === saved.place.id);
 
 /** The other place, whatever it is: what its folders hold, a file put there, files taken away */
 interface Remote {
@@ -394,6 +475,46 @@ const inBucket = (): Remote => {
   };
 };
 
+/** A folder of a network place, mounted here: written to like any folder, and only while it is mounted */
+const inPlace = async (): Promise<Remote> => {
+  const place = chosenPlace();
+  if (!place) throw new Error("The network place is not there any more.");
+  // not mounted, the folder under it is this machine's own disk: never write there
+  if (!(await placeReady(place))) throw new Error(`${place.name} is not connected or its server does not answer.`);
+  const root = join(place.folder, saved.place.path);
+  // what the file system says ("EIO: i/o error, mkdir '/mnt/net/…'") names no place: the person's name for it goes first
+  const said = async <T>(work: () => Promise<T>): Promise<T> => {
+    try {
+      return await work();
+    } catch (e) {
+      const error = e as { code?: unknown; message?: unknown };
+      throw new Error(`${place.name}: ${typeof error?.code === "string" && error.code === "EIO" ? "its server does not answer" : String(error?.message ?? e)}`);
+    }
+  };
+  return {
+    listing: (dirs) =>
+      said(async () => {
+        const found = new Map<string, string[]>();
+        for (const dir of dirs) {
+          await mkdir(join(root, dir), { recursive: true });
+          found.set(dir, await readdir(join(root, dir)));
+        }
+        return found;
+      }),
+    send: (local, dir, name) =>
+      said(async () => {
+        // under another name until it is whole, as on this machine; async, so a slow server holds up no one else
+        const target = join(root, dir, name);
+        await copyFile(local, target + ".partial");
+        await rename(target + ".partial", target);
+      }),
+    drop: (files) =>
+      said(async () => {
+        for (const { dir, name } of files) await rm(join(root, dir, name), { force: true });
+      }),
+  };
+};
+
 async function sendFile(remote: Remote, root: string, dir: string, file: string): Promise<void> {
   const local = join(root, dir, file);
   const name = saved.passphrase ? file + SEALED_EXT : file;
@@ -414,7 +535,7 @@ async function sync(root: string, sets: LocalSet[]): Promise<number> {
       for (const name of readdirSync(join(root, dir))) if (name.includes(SEALED_EXT + UPLOAD_EXT)) rmSync(join(root, dir, name), { force: true });
     } catch {}
   }
-  const remote = saved.kind === "s3" ? inBucket() : overSftp();
+  const remote = saved.kind === "s3" ? inBucket() : saved.kind === "place" ? await inPlace() : overSftp();
   const there = await remote.listing(sets.map(({ dir }) => dir));
   let uploaded = 0;
   const gone: { dir: string; name: string }[] = [];
@@ -476,3 +597,6 @@ export function forgetSnapshot(dir: string, id: string): void {
 
 /** The last run, if it failed: one of the things that need attention */
 export const offsiteFailure = (): OffsiteRun | null => (saved.enabled && saved.last?.error ? saved.last : null);
+
+/** The network place the copy goes to, when it goes to one: it must not be taken away from under it */
+export const offsitePlace = (): string | null => (saved.kind === "place" && saved.place.id ? saved.place.id : null);
