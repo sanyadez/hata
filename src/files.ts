@@ -20,7 +20,7 @@ import { lstat, open, readdir, readFile, rm, stat } from "node:fs/promises";
 import { basename, dirname, extname, join, resolve, sep } from "node:path";
 import { record } from "./activity";
 import { AppError, startJob, type Job } from "./apps";
-import { DATA_DIR, saveSettings, SECRETS_DIR, settings } from "./config";
+import { DATA_DIR, saveSettings, SECRETS_DIR, settings, type Favorite } from "./config";
 import { movePath } from "./dashboard";
 import { parseMounts } from "./disks";
 import { roomOf } from "./netroom";
@@ -342,11 +342,46 @@ export function pinnedFolders(): { path: string; name: string; missing: boolean;
   });
 }
 
+// --- Favourites ---------------------------------------------------------------------------------------
+
+const MAX_FAVORITES = 40;
+
+/** Marks a folder or a file as a favourite of one user, or takes the mark off */
+export function setFavorite(userId: string, path: unknown, on: boolean): Favorite[] {
+  const abs = locate(path);
+  const mine = settings.favorites[userId] ?? [];
+  if (on) {
+    const stat = lstatOrNull(abs);
+    if (!stat) throw new AppError("files.notFound", 404);
+    if (mine.some((one) => one.path === abs)) return mine;
+    if (mine.length >= MAX_FAVORITES) throw new AppError("files.tooManyFavorites", 409, { max: MAX_FAVORITES });
+    settings.favorites = { ...settings.favorites, [userId]: [...mine, { path: abs, dir: stat.isDirectory() }] };
+  } else settings.favorites = { ...settings.favorites, [userId]: mine.filter((one) => one.path !== abs) };
+  if (!settings.favorites[userId]!.length) delete settings.favorites[userId];
+  saveSettings();
+  return favoritesOf(userId);
+}
+
+export function favoritesOf(userId: string): Favorite[] {
+  return settings.favorites[userId] ?? [];
+}
+
+/** A user who is removed takes the favourites along */
+export function dropFavorites(userId: string): void {
+  if (!settings.favorites[userId]) return;
+  delete settings.favorites[userId];
+  saveSettings();
+}
+
 /** A pinned folder that was moved or renamed (or one inside what was) stays pinned; a removed one is dropped */
 function repin(from: string, to: string | null): void {
-  const next = settings.folders.flatMap((path) => (!inside(path, from) ? [path] : to === null ? [] : [to + path.slice(from.length)]));
-  if (next.join("\n") === settings.folders.join("\n")) return;
-  settings.folders = [...new Set(next)];
+  const moved = (path: string) => (!inside(path, from) ? [path] : to === null ? [] : [to + path.slice(from.length)]);
+  const follow = (paths: string[]) => [...new Set(paths.flatMap(moved))];
+  const favorites = Object.fromEntries(Object.entries(settings.favorites).map(([id, list]) => [id, list.flatMap((one) => moved(one.path).map((path) => ({ ...one, path })))]));
+  const next = follow(settings.folders);
+  if (next.join("\n") === settings.folders.join("\n") && JSON.stringify(favorites) === JSON.stringify(settings.favorites)) return;
+  settings.favorites = favorites;
+  settings.folders = next;
   settings.dashboard = movePath(settings.dashboard, from, to);
   saveSettings();
 }

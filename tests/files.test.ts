@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, symlinkS
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { DATA_DIR, settings } from "../src/config";
-import { archivePlan, emptyTrash, freeName, list, udevName, mustBeSharable, onSharesMoved, pinFolder, pinnedFolders, locate, makeFolder, readable, readText, remove, rename, restore, summary, transfer, trash, upload, validName, writeText, type UploadPart } from "../src/files";
+import { archivePlan, dropFavorites, emptyTrash, favoritesOf, setFavorite, freeName, list, udevName, mustBeSharable, onSharesMoved, pinFolder, pinnedFolders, locate, makeFolder, readable, readText, remove, rename, restore, summary, transfer, trash, upload, validName, writeText, type UploadPart } from "../src/files";
 import { world } from "../src/trash";
 import { zipChunks } from "../src/zip";
 
@@ -146,6 +146,26 @@ test("a folder on the dashboard follows a rename and a move, and goes with a rem
   expect(settings.folders).toEqual([at("/Films")]);
   pinFolder(at("/Films"), false);
   expect(settings.folders).toEqual([]);
+});
+
+test("favourites are each person's own, follow a rename and go with a removal", async () => {
+  mkdirSync(at("/Fav/Docs"), { recursive: true });
+  writeFileSync(at("/Fav/Docs/note.txt"), "x");
+  setFavorite("u1", at("/Fav/Docs"), true);
+  setFavorite("u1", at("/Fav/Docs/note.txt"), true);
+  setFavorite("u1", at("/Fav/Docs"), true);
+  expect(code(() => setFavorite("u1", at("/Fav/nothing"), true))).toBe("files.notFound");
+  expect(favoritesOf("u1")).toEqual([{ path: at("/Fav/Docs"), dir: true }, { path: at("/Fav/Docs/note.txt"), dir: false }]);
+  expect(favoritesOf("u2")).toEqual([]);
+  rename(at("/Fav/Docs"), "Papers");
+  expect(favoritesOf("u1").map((one) => one.path)).toEqual([at("/Fav/Papers"), at("/Fav/Papers/note.txt")]);
+  await remove([at("/Fav/Papers/note.txt")]);
+  expect(favoritesOf("u1").map((one) => one.path)).toEqual([at("/Fav/Papers")]);
+  setFavorite("u1", at("/Fav/Papers"), false);
+  expect(settings.favorites).toEqual({});
+  setFavorite("u2", at("/Fav"), true);
+  dropFavorites("u2");
+  expect(settings.favorites).toEqual({});
 });
 
 test("a shared folder follows a rename and a move, and is not shared once removed", async () => {

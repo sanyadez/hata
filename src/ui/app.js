@@ -77,6 +77,7 @@ const ICONS = {
   edit: "M4 20h4L19 9l-4-4L4 16zM13 7l4 4",
   copy: "M9 9h11v11H9zM5 15H4V4h11v1",
   pin: "M12 17v5M8 3h8l-1 6 3 4H6l3-4z",
+  star: "M12 3.5l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.9l-5.2 2.7 1-5.8-4.3-4.1 5.9-.9z",
   share: "M18 8a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM6 15a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM18 22a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM8.6 13.5l6.8 4M15.4 6.5l-6.8 4",
   link: "M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1",
   key: "M8 16a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM12 12h9M18 12v3M21 12v2",
@@ -3845,6 +3846,20 @@ function sortedEntries(entries) {
   return [...entries].sort((a, b) => ((a.type === "dir") === (b.type === "dir") ? by(a, b) || collator.compare(a.name, b.name) : a.type === "dir" ? -1 : 1));
 }
 
+const isFavorite = (path) => (state.favorites ?? []).some((one) => one.path === path);
+
+/** Marks a folder or a file as a favourite of the person, or takes the mark off */
+async function favorite(path, on, name = path.split("/").pop() || "/") {
+  try {
+    state.favorites = (await api("POST", "/api/files/favorite", { path, on })).favorites;
+    toast(t(on ? "files.favoriteDone" : "files.unfavoriteDone", { name }));
+  } catch (e) {
+    return toast(errorText(e), "error");
+  }
+  if (state.route.view === "files") renderFilesBody();
+  else if (state.route.view === "trash") filesPlaces(null);
+}
+
 /** Puts a folder on the dashboard or takes it off */
 async function pinFolder(path, pinned, quiet = true, name = path.split("/").pop() || "/") {
   try {
@@ -3893,6 +3908,7 @@ async function loadFiles() {
   if (filesUi.pick && names.has(filesUi.pick)) filesUi.selected = new Set([filesUi.pick]);
   filesUi.pick = null;
   state.files = listing;
+  if (listing.favorites) state.favorites = listing.favorites;
   renderFilesBody();
 }
 
@@ -3942,6 +3958,24 @@ function filesPlaces(path) {
       h("span", { class: "with-icon" }, icon(iconName), h("span", { class: "clip" }, label)),
       room(volume),
     );
+  // a favourite file opens its folder with the file chosen
+  const favorites = state.favorites ?? [];
+  const favoriteRow = (one) => {
+    const name = one.path.split("/").pop() || "/";
+    if (one.dir) return place(name, one.path, "star", !trash && path === one.path, "");
+    const parent = one.path.slice(0, one.path.lastIndexOf("/")) || "/";
+    const show = (e) => {
+      e.preventDefault();
+      filesUi.pick = name;
+      if (path === parent && !filesMachine()) loadFiles();
+      else go(filesHash(parent));
+    };
+    return h(
+      "a",
+      { class: "cat", href: filesHash(parent), title: one.path, onclick: show, menu: (at) => menuAt(at, menuHeader(name, one.path, "file"), [{ label: t("common.open"), icon: "folder", run: () => show(new Event("click")) }, { label: t("files.copyPath"), icon: "copy", run: () => copyText(one.path) }, { label: t("files.unfavorite"), icon: "star", run: () => favorite(one.path, false, name) }]) },
+      h("span", { class: "with-icon" }, icon("star"), h("span", { class: "clip" }, name)),
+    );
+  };
   const others = machinesUi.list?.machines ?? [];
   const machinesList = others.length > 0 && [h("div", { class: "cat-title" }, t("nav.machines")), others.map((m) => h("a", { class: "cat" + (machine === m.id ? " active" : "") + (m.online ? "" : " muted"), href: filesHash("/", m.id), title: m.online ? "" : t("machines.offline"), menu: (at) => menuAt(at, menuHeader(m.name, machineOs(m), "server"), [{ label: t("machines.files"), icon: "folder", href: filesHash("/", m.id) }, { label: t("menu.machinePage"), icon: "server", href: `#/machines/${m.id}` }, isAdmin() && { label: t("app.more"), icon: "more", run: () => machineMenu(m, at) }]) }, h("span", { class: "with-icon" }, icon("server"), h("span", { class: "clip" }, m.name))))];
   if (machine) {
@@ -3972,6 +4006,7 @@ function filesPlaces(path) {
       home && (state.files?.places ?? []).map((name) => place(name, joinPath(home, name), name === "AppData" ? "box" : "folder", inside(joinPath(home, name)))),
       place(t("files.root"), "/", "disk", !trash && path !== "" && !inHome && !(state.files?.disks ?? []).some((d) => within(path, d.path))),
       h("a", { class: "cat" + (trash ? " active" : ""), href: "#/trash" }, h("span", { class: "with-icon" }, icon("trash"), h("span", { class: "clip" }, t("trash.title")))),
+      favorites.length > 0 && [h("div", { class: "cat-title" }, t("files.favorites")), favorites.map(favoriteRow)],
       machinesList,
     ),
     h(
@@ -4033,6 +4068,7 @@ function renderFilesBody() {
       { class: "files-tools" },
       listing && !listing.error && !machine && findBox(path),
       h("span", { class: "grow" }),
+      listing && !listing.error && !machine && h("button", { type: "button", class: "btn square" + (isFavorite(path) ? " active" : ""), title: t(isFavorite(path) ? "files.unfavorite" : "files.favorite"), "aria-label": t(isFavorite(path) ? "files.unfavorite" : "files.favorite"), "aria-pressed": String(isFavorite(path)), onclick: () => favorite(path, !isFavorite(path)) }, icon("star")),
       listing && !listing.error && !machine && h("button", { type: "button", class: "btn square" + (isPinned ? " active" : ""), title: t(isPinned ? "files.unpin" : "files.pin"), "aria-label": t(isPinned ? "files.unpin" : "files.pin"), "aria-pressed": String(isPinned), onclick: () => pinFolder(path, !isPinned) }, icon("pin")),
       listing && !listing.error && !machine && h("button", { type: "button", class: "btn square" + (isShared ? " active" : ""), title: t(isShared ? "files.shareSettings" : "files.share"), "aria-label": t(isShared ? "files.shareSettings" : "files.share"), onclick: () => shareDialog(path) }, icon("share")),
       sort,
@@ -4699,6 +4735,7 @@ function folderMenu(at) {
     listing.entries.length > 0 && item(t("files.selectAll"), "check", () => ((filesUi.selected = new Set(listing.entries.map((entry) => entry.name))), renderFilesBody())),
     listing.entries.length > 0 && item(t("files.downloadZip"), "download", () => downloadEntries(listing.entries.filter((entry) => entry.type !== "other"))),
     item(t("files.copyPath"), "link", () => copyText(path)),
+    !listing.machine && item(t(isFavorite(path) ? "files.unfavorite" : "files.favorite"), "star", () => favorite(path, !isFavorite(path))),
     !listing.machine && item(t(listing.pinned.includes(path) ? "files.unpin" : "files.pin"), "pin", () => pinFolder(path, !listing.pinned.includes(path))),
     !listing.machine && item(t(listing.shared.includes(path) ? "files.shareSettings" : "files.share"), "share", () => shareDialog(path)),
   );
@@ -4720,6 +4757,7 @@ function entryMenu(entry, at) {
     entry.type !== "other" && item(t(entry.type === "dir" ? "files.downloadZip" : "files.download"), "download", () => downloadEntries([entry])),
     entry.type === "file" && ARCHIVE_RE.test(entry.name) && !state.files.readOnly && !filesMachine() && item(t("files.extract"), "archive", () => extractArchive(path)),
     item(t("files.copyPath"), "link", () => copyText(path)),
+    entry.type !== "other" && !filesMachine() && item(t(isFavorite(path) ? "files.unfavorite" : "files.favorite"), "star", () => favorite(path, !isFavorite(path), entry.name)),
     entry.type === "dir" && !filesMachine() && (state.files.pinned.includes(path) ? item(t("files.unpin"), "pin", () => pinFolder(path, false)) : item(t("files.pin"), "pin", () => pinFolder(path, true))),
     entry.type === "dir" && !filesMachine() && item(t(state.files.shared.includes(path) ? "files.shareSettings" : "files.share"), "share", () => shareDialog(path)),
     item(t("files.rename"), "edit", () => renameDialog(entry)),
@@ -4922,6 +4960,7 @@ async function loadTrash() {
   }
   // opened straight from a link: the places on the left come with a listing of Files
   if (!state.files) state.files = await api("GET", "/api/files?path=").catch(() => null);
+  if (state.files?.favorites) state.favorites = state.files.favorites;
   if (state.route.view === "trash") renderTrash();
 }
 
@@ -8822,6 +8861,7 @@ async function sidebarMenu(at, { label, path, machine = "", volume = null, iconN
     const pinned = (state.files?.pinned ?? state.overview?.folders?.map((folder) => folder.path) ?? []).includes(path);
     entries.push({ label: t(pinned ? "files.unpin" : "files.pin"), icon: "pin", run: () => pinFolder(path, !pinned, true, label) });
   }
+  if (!machine && state.favorites) entries.push({ label: t(isFavorite(path) ? "files.unfavorite" : "files.favorite"), icon: "star", run: () => favorite(path, !isFavorite(path), label) });
   if (volume && !machine && isAdmin()) {
     if (volume.network) {
       if (!state.places) state.places = await api("GET", "/api/netplaces").catch(() => null);

@@ -99,6 +99,8 @@ export interface Settings {
   snapraid: { parity: string; data: { name: string; path: string }[]; appData: boolean; time: string; scrub: boolean; deleteLimit: number };
   /** Folders put on the dashboard from the file manager, absolute paths */
   folders: string[];
+  /** User id → the folders and files that user marked as favourites in the file manager, absolute paths */
+  favorites: Record<string, Favorite[]>;
   /** Folders shared over the network (SMB) */
   shares: Share[];
   /** How the dashboard is arranged: groups, links, folders of tiles */
@@ -186,6 +188,7 @@ const DEFAULTS: Settings = {
   network: { outside: [] },
   snapraid: { parity: "", data: [], appData: false, time: "05:00", scrub: true, deleteLimit: 50 },
   folders: [],
+  favorites: {},
   shares: [],
   dashboard: cleanLayout(null),
   appearance: DEFAULT_APPEARANCE,
@@ -203,6 +206,12 @@ export function localName(value: unknown): string | null {
   return DOMAIN_RE.test(whole) ? whole : null;
 }
 
+/** A folder or a file marked in the file manager; whether it is a folder is noted when it is marked, so the list never touches a disk (a network place may not answer) */
+export interface Favorite {
+  path: string;
+  dir: boolean;
+}
+
 const saved = readJsonFile<Partial<Settings>>(SETTINGS_FILE, {}, isPlainObject);
 
 export const settings: Settings = {
@@ -214,6 +223,7 @@ export const settings: Settings = {
   snapraid: { ...DEFAULTS.snapraid, ...(isPlainObject(saved.snapraid) ? saved.snapraid : {}) },
   access: isPlainObject(saved.access) ? (saved.access as Record<string, AppAccess>) : {},
   folders: Array.isArray(saved.folders) ? saved.folders.filter((path): path is string => typeof path === "string") : [],
+  favorites: isPlainObject(saved.favorites) ? Object.fromEntries(Object.entries(saved.favorites).map(([id, list]) => [id, Array.isArray(list) ? list.filter((one): one is Favorite => isPlainObject(one) && typeof one.path === "string").map((one) => ({ path: one.path, dir: one.dir !== false })) : []])) : {},
   shares: cleanShares(saved.shares),
   dashboard: cleanLayout(saved.dashboard),
   appearance: cleanAppearance(saved.appearance),

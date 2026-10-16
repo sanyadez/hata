@@ -86,7 +86,7 @@ import { bus } from "./bus";
 import { DATA_DIR, dropOldSecrets, listenAddress, saveSettings, settings, timezone, updateSettings } from "./config";
 import { arrange, cleanLayout, layoutText, parseLayoutText } from "./dashboard";
 import { dockerInfo, listContainers, watchEvents } from "./docker";
-import { abortUpload, copyIn, archivePlan, emptyTrash, extract as extractArchive, find as findFiles, list as listFiles, makeFile, makeFolder, pinFolder, pinnedFolders, readable, readText, remove as removeFiles, rename as renameFile, restore as restoreFiles, startTrash, summary as filesSummary, transfer, trash, upload, writeText } from "./files";
+import { abortUpload, copyIn, archivePlan, dropFavorites, emptyTrash, favoritesOf, setFavorite, extract as extractArchive, find as findFiles, list as listFiles, makeFile, makeFolder, pinFolder, pinnedFolders, readable, readText, remove as removeFiles, rename as renameFile, restore as restoreFiles, startTrash, summary as filesSummary, transfer, trash, upload, writeText } from "./files";
 import { adoptProject, casaosState, containerDraft, importCount, importList, moveInCasaos, projectDraft, rebuildContainer } from "./import";
 import { accessOf, dropAccess, dropUser, gateTarget, guard, guardsOf, mayOpen, otherPorts, MAX_APP_BODY, page, passToApp, setAccess, startGates, tunnelHandlers } from "./gate";
 import { parseDockerRun } from "./dockerrun";
@@ -727,6 +727,7 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
     const error = deleteUser(target[1]!, user);
     if (error) return fail(error === "users.notFound" ? 404 : 400, error);
     dropUser(target[1]!);
+    dropFavorites(target[1]!);
     record("users.remove", { user: user.name, detail: name });
     return json({ ok: true });
   }
@@ -1459,7 +1460,7 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
 
   // ---- files (administrators only: members were turned away above) ----
   if (path.startsWith("/api/files")) {
-    const response = await files(req, url, server, user.name);
+    const response = await files(req, url, server, user.name, user.id);
     if (response) return response;
   }
 
@@ -1731,11 +1732,15 @@ function filesNamed(paths: unknown): string {
   return (list.length > 3 ? `${names} +${list.length - 3}` : names).slice(0, 300);
 }
 
-async function files(req: Request, url: URL, server: Server, by: string): Promise<Response | null> {
+async function files(req: Request, url: URL, server: Server, by: string, userId: string): Promise<Response | null> {
   const path = url.pathname;
   const method = req.method;
   const q = url.searchParams;
-  if (path === "/api/files" && method === "GET") return json(await listFiles(q.get("path") ?? ""));
+  if (path === "/api/files" && method === "GET") return json({ ...(await listFiles(q.get("path") ?? "")), favorites: favoritesOf(userId) });
+  if (path === "/api/files/favorite" && method === "POST") {
+    const data = await body(req);
+    return json({ favorites: setFavorite(userId, data.path, data.on === true) });
+  }
   if (path === "/api/files/raw" && method === "GET") return sendFile(req, q.get("path"), q.get("download") === "1");
   if (path === "/api/files/summary" && method === "POST") return json(await filesSummary((await body(req)).paths));
   if (path === "/api/files/zip" && method === "GET") {
