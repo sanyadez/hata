@@ -60,6 +60,7 @@ const ICONS = {
   info: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 11v5M12 8h.01",
   sun: "M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zM12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4",
   moon: "M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z",
+  clock: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 7v5l3 2",
   globe: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM3 12h18M12 3c3 3.5 3 14.5 0 18M12 3c-3 3.5-3 14.5 0 18",
   terminal: "M5 8l4 4-4 4M12 16h7",
   store: "M5 8h14l-1 12H6zM9 8V6a3 3 0 0 1 6 0v2",
@@ -1513,6 +1514,7 @@ function attentionItem(item) {
     (item.code === "machine.restarting" || item.code === "machine.partial") && open(`#/machines/${item.detail.id}/apps`),
     item.app && open(`#/apps/${item.app}${item.code === "restarting" || item.code === "partial" ? "/logs" : ""}`, t(item.code === "restarting" || item.code === "partial" ? "app.logs" : "common.open")),
     (item.code === "disk.new" || item.code === "disk.usb") && isAdmin() && button(t("mounting.ignore"), { class: "small quiet", onclick: () => void api("POST", "/api/disks/ignore", { id: item.detail.id }).then(refresh, (e) => toast(errorText(e), "error")) }),
+    isAdmin() && button(t("attention.later", { n: SNOOZE_DAYS }), { class: "small quiet", title: t("attention.laterHint"), onclick: () => snoozeItem(item) }, "clock"),
   ].filter(Boolean);
   return h(
     "div",
@@ -1520,6 +1522,19 @@ function attentionItem(item) {
     h("span", { class: "badge-icon " + item.severity }, icon(ATTENTION_ICONS[item.code.split(".")[0]] ?? "alert")),
     h("div", { class: "grow" }, h("strong", null, t(base + ".title", detail)), h("p", { class: "muted small" }, t(base + ".text", detail).trim()), below.length > 0 && h("div", { class: "row-actions under" }, below)),
   );
+}
+
+/** How long "remind me later" puts an item off; it comes back sooner if it gets worse */
+const SNOOZE_DAYS = 3;
+
+async function snoozeItem(item) {
+  try {
+    await api("POST", "/api/attention/snooze", { id: item.id, severity: item.severity, ...(item.at ? { at: item.at } : {}), days: SNOOZE_DAYS });
+    toast(t("attention.snoozed", { date: shortDate(Date.now() + SNOOZE_DAYS * 86_400_000) }));
+    await refresh();
+  } catch (e) {
+    toast(errorText(e), "error");
+  }
 }
 
 function dockerStartButton() {

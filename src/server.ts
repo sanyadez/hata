@@ -23,6 +23,7 @@ import { folderSize, restoreFromSnapshot, snapshotFile, snapshotFiles } from "./
 import { appFolders, extraAllowed, backupApp, backupOverview, deleteSnapshot, listSnapshots, mirror, restoreSnapshot, resumeRestore, runBackups, scheduleBackups, takeServerSnapshot } from "./backup";
 import { allowed as oauthAllowed, declined as oauthDeclined, findClient, holdQuestion, question as oauthQuestion, readAuthorize, register as oauthRegister, resourceMetadata, serverMetadata, spendCode } from "./oauth";
 import { checkOffsite, forgetHost, offsiteFailure, saveOffsite } from "./offsite";
+import { notSnoozed, snooze } from "./snooze";
 import { APP_NAME_RE, dumpCompose } from "./appform";
 import { trashSizeOn } from "./trash";
 import { discover as discoverPlaces, installFor as installPlaceTools, listPlaces, placesDown, removePlace, retryPlace, savePlace, shares as placeShares, startNetPlaces } from "./netplaces";
@@ -874,7 +875,7 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
       site: { domain: siteDomain(), mode: settings.https.mode, local: localDomain() },
       // whether the assistant can be asked: the pages offer it next to what is wrong
       assistant: admin && assistantReady(assistantConfig()),
-      attention: admin ? attention({ system, docker, apps, activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), exposed: exposedNics(), array: arrayTrouble(), shares: shareTrouble(), places: placesDown(), machines: machinesAway(), machineApps: onMachines, unused: unusedDisks(), filling: fillingUp() }) : [],
+      attention: admin ? notSnoozed(attention({ system, docker, apps, activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), exposed: exposedNics(), array: arrayTrouble(), shares: shareTrouble(), places: placesDown(), machines: machinesAway(), machineApps: onMachines, unused: unusedDisks(), filling: fillingUp() })) : [],
       // who signed in from where, and what was installed by whom, is the administrators' business
       activity: admin ? recent(8) : [],
       // containers and compose projects on this machine that are not apps here yet
@@ -1381,6 +1382,11 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
     await takeServerSnapshot("manual");
     record("system.backup.done", { user: user.name });
     return json(await backupOverview(language(url)), 201);
+  }
+  // "remind me later" for an item of the "needs attention" list
+  if (path === "/api/attention/snooze" && method === "POST") {
+    const error = snooze(await body(req));
+    return error ? fail(400, error) : json({ ok: true });
   }
   if (path === "/api/backups/offsite" && method === "PUT") {
     const error = saveOffsite(await body(req));
@@ -2215,7 +2221,7 @@ export async function serve(): Promise<void> {
   void refreshHttps();
   refreshLocalNames();
   startNotifications({
-    attention: async () => attention({ system: systemStatus(), docker: await dockerInfo(), apps: await listApps("en"), activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), exposed: exposedNics(), array: arrayTrouble(), shares: shareTrouble(), places: placesDown(), machines: machinesAway(), machineApps: await machineTiles(machineList(), "en").catch(() => []), unused: unusedDisks(), filling: fillingUp() }),
+    attention: async () => notSnoozed(attention({ system: systemStatus(), docker: await dockerInfo(), apps: await listApps("en"), activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), exposed: exposedNics(), array: arrayTrouble(), shares: shareTrouble(), places: placesDown(), machines: machinesAway(), machineApps: await machineTiles(machineList(), "en").catch(() => []), unused: unusedDisks(), filling: fillingUp() })),
     baseUrl: publicUrl,
     isAdmin: (id) => findUser(id)?.role === "admin",
   });
