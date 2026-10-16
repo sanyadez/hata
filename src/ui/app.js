@@ -3974,7 +3974,8 @@ function diskStrip(listing) {
       h("span", { class: "disk-text" }, h("span", { class: "clip strong" }, volumeName(volume)), h("span", { class: "muted small mono clip" }, volume.path), volume.total > 0 && h("span", { class: "bar" }, fill), volume.total > 0 && h("span", { class: "muted small" }, t("files.free", { free: bytes(volume.free), total: bytes(volume.total) }))),
     );
   };
-  return h("div", { class: "stack" }, h("div", { class: "cat-title" }, t("files.disks")), h("div", { class: "disk-strip" }, volumes.map(card)));
+  // a heading of the page, not of the sidebar: over a wallpaper it gets its pane like the others
+  return h("div", { class: "stack" }, h("div", { class: "section-head" }, h("h2", null, t("files.disks"))), h("div", { class: "disk-strip" }, volumes.map(card)));
 }
 
 const selectedEntries = () => (state.files?.entries ?? []).filter((entry) => filesUi.selected.has(entry.name));
