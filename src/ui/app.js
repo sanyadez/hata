@@ -3884,7 +3884,7 @@ function filesPlaces(path) {
   const place = (label, to, iconName, active, on = machine, volume = null) =>
     h(
       "a",
-      { class: "cat" + (active ? " active" : "") + (volume?.total ? " vol" : ""), href: filesHash(to, on), menu: (at) => sidebarMenu(at, { label, path: to, machine: on, volume, iconName }) },
+      { class: "cat" + (active ? " active" : "") + (volume ? " vol" : ""), href: filesHash(to, on), menu: (at) => sidebarMenu(at, { label, path: to, machine: on, volume, iconName }) },
       h("span", { class: "with-icon" }, icon(iconName), h("span", { class: "clip" }, label)),
       room(volume),
     );
