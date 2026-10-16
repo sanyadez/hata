@@ -8,13 +8,16 @@
  * data folder (`/DATA` unless Hata says otherwise); only folders inside it are made or removed.
  */
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { join, resolve, sep } from "node:path";
+import { dirname, join, resolve, sep } from "node:path";
 import { composeCmd } from "./docker";
 import { MuxError, type Channel } from "./mux";
 
 export const APPS_DIR = process.env.HATA_CLIENT_APPS || "/var/lib/hata-client/apps";
 const NAME_RE = /^[a-z0-9][a-z0-9_-]{0,63}$/;
 const FILES = ["compose.yml", ".env", "hata.yml", "compose.override.yml"];
+/** The other files of an app of Hata's format (`.env.example`, configs): a path inside the app's folder */
+const OTHER_RE = /^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)*$/;
+const isOther = (path: string) => OTHER_RE.test(path) && !path.split("/").some((p) => p === "." || p === "..") && !FILES.includes(path) && !path.endsWith(".tmp");
 
 const fail = (code: string, detail: Record<string, string | number> = {}): never => {
   throw new MuxError(code, code, detail);
@@ -41,6 +44,27 @@ export interface MachineAppFiles {
   hata: string | null;
   /** Written by Hata when the app is behind its sign-in */
   override: string | null;
+  /** The other files `hata.yml` names, as they are here: they move with the app */
+  others: Record<string, string>;
+}
+
+/** The files `hata.yml` says the store gave the app, read from its folder */
+function othersOf(dir: string, hata: string | null): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (!hata) return out;
+  let named: unknown;
+  try {
+    named = (Bun.YAML.parse(hata) as { files?: unknown } | null)?.files;
+  } catch {
+    return out;
+  }
+  if (typeof named !== "object" || named === null) return out;
+  for (const path of Object.keys(named)) {
+    if (!isOther(path)) continue;
+    const text = read(join(dir, path));
+    if (text !== null) out[path] = text;
+  }
+  return out;
 }
 
 /** Every app with its files, for Hata to read */
@@ -54,7 +78,9 @@ export function list(): MachineAppFiles[] {
   const out: MachineAppFiles[] = [];
   for (const name of names) {
     const compose = read(join(APPS_DIR, name, "compose.yml"));
-    if (compose !== null) out.push({ name, compose, env: read(join(APPS_DIR, name, ".env")) ?? "", hata: read(join(APPS_DIR, name, "hata.yml")), override: read(join(APPS_DIR, name, "compose.override.yml")) });
+    if (compose === null) continue;
+    const hata = read(join(APPS_DIR, name, "hata.yml"));
+    out.push({ name, compose, env: read(join(APPS_DIR, name, ".env")) ?? "", hata, override: read(join(APPS_DIR, name, "compose.override.yml")), others: othersOf(join(APPS_DIR, name), hata) });
   }
   return out;
 }
@@ -67,12 +93,13 @@ export function write(args: { name?: unknown; files?: unknown; fresh?: unknown }
   const files = (args.files ?? {}) as Record<string, unknown>;
   mkdirSync(dir, { recursive: true, mode: 0o755 });
   for (const [file, text] of Object.entries(files)) {
-    if (!FILES.includes(file)) fail("request.notFound");
+    if (!FILES.includes(file) && !isOther(file)) fail("request.notFound");
     if (text === null) {
       rmSync(join(dir, file), { force: true });
       continue;
     }
     if (typeof text !== "string" || text.length > 512 * 1024) fail("app.badCompose");
+    if (file.includes("/")) mkdirSync(dirname(join(dir, file)), { recursive: true, mode: 0o755 });
     writeFileSync(join(dir, file + ".tmp"), text as string, { mode: file === ".env" ? 0o600 : 0o644 });
     renameSync(join(dir, file + ".tmp"), join(dir, file));
   }

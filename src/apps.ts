@@ -410,7 +410,7 @@ export interface StoreAppDetail extends AppMeta {
 }
 
 /** The values Hata gives every app of its format, for this server's data folder or another's */
-function ownVars(name: string, dataRoot: string): Record<string, string> {
+export function ownVars(name: string, dataRoot: string): Record<string, string> {
   return { APP_DATA: join(dataRoot, "AppData", name), PUID: String(settings.puid), PGID: String(settings.pgid), TZ: timezone() };
 }
 
@@ -489,7 +489,7 @@ export function envText(name: string, previous: string, extra: Record<string, st
 }
 
 /** The server's address on the home network: the first IPv4 of a card that is not Docker's or a tunnel's */
-function homeAddress(): string {
+export function homeAddress(): string {
   for (const [card, list] of Object.entries(networkInterfaces())) {
     if (/^(docker|br-|veth|virbr|lo|tailscale|hata-wg|wg\d)/.test(card) || settings.network.outside.includes(card)) continue;
     const a = (list ?? []).find((x) => x.family === "IPv4" && !x.internal);
@@ -617,11 +617,57 @@ async function install(name: string, text: string, compose: Compose, log: Log, o
 
 // --- An app arriving from another machine, or leaving for one (`moveapp.ts`) --------------------------
 
-/** The files of an app as they are: what moves with it */
-export function localAppFiles(name: string): { compose: string; env: string; hata: string | null } {
+/** The files of an app as they are: what moves with it — for an app of Hata's format also the other files its store gave */
+export function localAppFiles(name: string): AppFiles {
   assertInstalled(name);
   const read = (file: string) => (existsSync(join(appDir(name), file)) ? readFileSync(join(appDir(name), file), "utf8") : null);
-  return { compose: read("compose.yml") ?? "", env: read(".env") ?? "", hata: read("hata.yml") };
+  const others: Record<string, string> = {};
+  for (const path of Object.keys(readHataFile(name)?.files ?? {})) {
+    const text = read(path);
+    if (text !== null) others[path] = text;
+  }
+  return { compose: read("compose.yml") ?? "", env: read(".env") ?? "", hata: read("hata.yml"), others };
+}
+
+/** An app's files, here or on a machine: what an app is wherever it runs */
+export interface AppFiles {
+  compose: string;
+  env: string;
+  hata: string | null;
+  /** The other files `hata.yml` names, by their path in the app's folder */
+  others?: Record<string, string>;
+}
+
+/** What `hata.yml` says of an app of Hata's format, from its text; null — the app is not one */
+export function hataMetaIn(text: string | null): { meta: HataMeta; files: Record<string, string> } | null {
+  if (!text) return null;
+  try {
+    const parsed = Bun.YAML.parse(text) as HataFile | null;
+    return isObject(parsed) && isObject(parsed.meta) ? { meta: parsed.meta as HataMeta, files: isObject(parsed.files) ? (parsed.files as Record<string, string>) : {} } : null;
+  } catch {
+    return null;
+  }
+}
+
+/** The compose file of an app's files the way Hata reads it (`viewOf` for files that are not here); null — broken */
+export function viewOfFiles(files: AppFiles): Compose | null {
+  let compose: Compose;
+  try {
+    compose = parseCompose(files.compose);
+  } catch {
+    return null;
+  }
+  const hata = hataMetaIn(files.hata);
+  return hata ? viewCompose(compose, hata.meta, parseEnv(files.env)) : compose;
+}
+
+/** The folders an app's files need made before it starts, under `dataRoot`: its binds and the folders of its settings */
+export function foldersOfFiles(files: AppFiles, dataRoot: string, name: string): string[] {
+  const view = viewOfFiles(files);
+  if (!view) return [];
+  normalize(view, dataRoot, name);
+  const hata = hataMetaIn(files.hata);
+  return [...bindSources(view), ...(hata ? settingFolders(hata.meta, parseEnv(files.env)) : [])];
 }
 
 /** Which of these ports something here listens on already */
@@ -636,7 +682,7 @@ export async function busyPorts(ports: { port: number; protocol: string }[]): Pr
  * file already pointing at this data folder), `.env` with this server's own variables. A failure takes
  * the app's folder away again; its data, copied before, is the caller's.
  */
-export async function adoptApp(name: string, files: { compose: string; env: string; hata: string | null }, log: Log): Promise<void> {
+export async function adoptApp(name: string, files: AppFiles, log: Log): Promise<void> {
   assertName(name);
   if (existsSync(appDir(name))) throw new AppError("app.exists", 409);
   const dir = appDir(name);
@@ -644,13 +690,14 @@ export async function adoptApp(name: string, files: { compose: string; env: stri
   try {
     writeTextAtomic(composeFile(name), files.compose);
     if (files.hata) writeTextAtomic(hataFile(name), files.hata);
+    // only paths inside the app's folder: the files may come from another machine
+    const others = Object.entries(files.others ?? {}).filter(([path]) => /^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)*$/.test(path) && !path.split("/").some((p) => p === "." || p === "..") && !["compose.yml", "hata.yml", ".env"].includes(path) && !path.startsWith("compose.override."));
+    writeFiles(name, Object.fromEntries(others), null, log);
     // the variables of this server go in again: an app of Hata's format has its folder in APP_DATA
     writeTextAtomic(join(dir, ".env"), files.env);
     writeEnv(name);
     await dc(name, ["config", "--quiet"], log);
-    const compose = parseCompose(files.compose);
-    normalize(compose, settings.dataRoot);
-    createDataDirs(compose);
+    createDataDirs({ services: {} }, foldersOfFiles(localAppFiles(name), settings.dataRoot, name));
     await dc(name, ["pull"], log);
     await dc(name, ["up", "-d", "--remove-orphans"], log);
   } catch (e) {
@@ -700,16 +747,26 @@ function writeFiles(name: string, files: Record<string, string>, previous: Recor
   }
 }
 
-async function installHata(app: StoreApp & { hata: IndexApp }, form: unknown, user: string): Promise<Job> {
+/**
+ * The answers of the install form of an app of Hata's format, for this server's data folder or another's:
+ * the `.env` values of its settings and the file as compose will read it (with Hata's variables).
+ */
+export function hataAnswers(app: StoreApp & { hata: IndexApp }, form: unknown, dataRoot = settings.dataRoot): { values: Record<string, string>; compose: Compose; view: Compose } {
   const { name, hata } = app;
-  const known = { ...ownVars(name, settings.dataRoot), DATA_ROOT: settings.dataRoot };
+  const known = { ...ownVars(name, dataRoot), DATA_ROOT: dataRoot };
   const result = answer(hata.meta, isObject(form) ? form.settings : undefined, startingEnv(hata.meta, known, newSecret));
   if ("error" in result) throw new AppError(result.error, 400, { name: result.name });
   const compose = parseCompose(hata.compose);
   const view = viewCompose(compose, hata.meta, { ...result.values, ...known });
-  normalize(view, settings.dataRoot, name);
+  normalize(view, dataRoot, name);
+  return { values: result.values, compose, view };
+}
+
+async function installHata(app: StoreApp & { hata: IndexApp }, form: unknown, user: string): Promise<Job> {
+  const { name, hata } = app;
+  const { values, compose, view } = hataAnswers(app, form);
   await assertPortsFree(view);
-  const origin = { store: app.store, base: compose, hata, env: result.values };
+  const origin = { store: app.store, base: compose, hata, env: values };
   return startJob(name, "install", user, (log) => install(name, hata.compose, view, log, origin));
 }
 
