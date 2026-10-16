@@ -438,6 +438,9 @@ tr.removed .app-icon { opacity: 0.5; }
 .cat:hover { color: var(--text); }
 .cat.active { background: var(--surface-2); color: var(--text); font-weight: 600; }
 /* a disk is a tile of its own: next to each other the bars and numbers ran together */
+.tile-room { display: grid; gap: 5px; min-width: 0; }
+.tile-room .bar { height: 4px; margin: 0; }
+.disk-pick .tile-text { display: grid; gap: 4px; min-width: 0; flex: 1; }
 .cat.vol { flex-wrap: wrap; row-gap: 6px; padding: 9px 10px; border: 1px solid var(--border); background: color-mix(in srgb, var(--bg) 60%, transparent); }
 .cat.vol + .cat.vol { margin-top: 6px; }
 .cat.vol:hover { border-color: var(--border-strong); }

@@ -891,7 +891,7 @@ function tileIcon(item, size = "") {
   const target = tileTarget(item);
   if (item.type === "app") return appIcon(target ?? { name: item.name }, size);
   if (item.type === "link") return appIcon({ name: item.id, title: tileTitle(item), icon: linkIcon(item) }, size);
-  if (item.type === "files") return h("span", { class: `app-icon plus ${size}` }, icon("folder"));
+  if (item.type === "files") return h("span", { class: `app-icon plus ${size}` }, icon(tileTarget(item)?.disk ? (tileTarget(item).disk.network ? "globe" : "disk") : "folder"));
   if (item.type === "builtin") return h("span", { class: `app-icon plus ${size}` }, icon(item.id === "store" ? "store" : "plus"));
   return h("span", { class: "app-icon stack" }, item.items.filter(tileTarget).slice(0, 4).map((inner) => tileIcon(inner, "mini")));
 }
@@ -944,6 +944,7 @@ function tile(item) {
     cls = target.missing ? "stopped" : "";
     href = filesHash(item.path);
     sub = h("span", { class: "mono clip", title: item.path }, target.missing ? t("home.folderMissing") : item.path);
+    if (target.disk?.total && !target.missing) sub = diskRoom(target.disk, true);
   } else {
     const shown = item.items.filter(tileTarget).length;
     if (!shown) return null;
@@ -1198,7 +1199,37 @@ function addDialog() {
       ),
     ),
     entry(t("home.layoutText"), t("home.layoutTextHint"), "code", layoutTextDialog),
+    entry(t("home.addDisk"), t("home.addDiskHint"), "disk", () => diskPickDialog(pinned())),
     entry(t("home.addFolder"), t("home.addFolderHint"), "folder", () => folderPicker({ title: t("home.addFolderTitle"), start: "", confirmLabel: t("home.addFolderHere"), allowed: (at) => !pinned().includes(at), action: (at) => pinFolder(at, true, false) })),
+  );
+}
+
+/** The disks and network places of the server, to put one on the dashboard: its tile says how full it is */
+async function diskPickDialog(pinned) {
+  let disks;
+  try {
+    disks = (await api("GET", "/api/files?path=")).disks ?? [];
+  } catch (e) {
+    return toast(errorText(e), "error");
+  }
+  let dialog;
+  const row = (d) => {
+    const on = pinned.includes(d.path);
+    return h(
+      "button",
+      { type: "button", class: "menu-item disk-pick", disabled: on, onclick: async () => {
+        dialog.close();
+        await pinFolder(d.path, true, true, volumeName(d));
+      } },
+      h("span", { class: "app-icon plus" }, icon(d.network ? "globe" : "disk")),
+      h("span", { class: "tile-text" }, h("span", { class: "tile-name" }, volumeName(d)), on ? h("span", { class: "muted small" }, t("home.diskThere")) : d.total ? diskRoom(d) : h("span", { class: "muted small mono" }, d.path)),
+    );
+  };
+  dialog = openDialog(
+    "menu",
+    h("header", null, h("h2", null, t("home.addDiskTitle"))),
+    disks.length ? disks.map(row) : h("p", { class: "muted" }, t("home.noDisks")),
+    h("footer", null, closeButton(() => dialog)),
   );
 }
 
@@ -3792,11 +3823,11 @@ function sortedEntries(entries) {
 }
 
 /** Puts a folder on the dashboard or takes it off */
-async function pinFolder(path, pinned, quiet = true) {
+async function pinFolder(path, pinned, quiet = true, name = path.split("/").pop() || "/") {
   try {
     const res = await api("POST", "/api/files/pin", { path, pinned });
     if (state.files) state.files.pinned = res.pinned;
-    toast(t(pinned ? "files.pinnedDone" : "files.unpinnedDone", { name: path.split("/").pop() || "/" }));
+    toast(t(pinned ? "files.pinnedDone" : "files.unpinnedDone", { name }));
   } catch (e) {
     // a dialog shows the reason itself
     if (!quiet) throw e;
@@ -4296,6 +4327,15 @@ function setCursor(name) {
     el.classList.toggle("cursor", on);
     if (on) el.scrollIntoView({ block: "nearest" });
   }
+}
+
+/** How full a disk is: a thin bar and "free X of Y" — on a narrow tile only "X free", the rest on hover */
+function diskRoom(volume, short = false) {
+  const used = Math.round(((volume.total - volume.free) / volume.total) * 100);
+  const fill = h("i", { class: level(used) });
+  fill.style.width = used + "%";
+  const whole = t("files.free", { free: bytes(volume.free), total: bytes(volume.total) });
+  return h("span", { class: "tile-room", title: short ? whole : "" }, h("span", { class: "bar" }, fill), h("span", { class: "muted small clip" }, short ? t("home.diskFree", { free: bytes(volume.free) }) : whole));
 }
 
 /** What a disk is called: its label, or the folder it is mounted at */
@@ -8699,6 +8739,10 @@ async function sidebarMenu(at, { label, path, machine = "", volume = null, iconN
     { label: t("menu.newTab"), icon: "external", href: location.pathname + location.search + href, newTab: true },
     { label: t("files.copyPath"), icon: "copy", run: () => copyText(path) },
   ];
+  if (!machine && isAdmin()) {
+    const pinned = (state.files?.pinned ?? state.overview?.folders?.map((folder) => folder.path) ?? []).includes(path);
+    entries.push({ label: t(pinned ? "files.unpin" : "files.pin"), icon: "pin", run: () => pinFolder(path, !pinned, true, label) });
+  }
   if (volume && !machine && isAdmin()) {
     if (volume.network) {
       if (!state.places) state.places = await api("GET", "/api/netplaces").catch(() => null);

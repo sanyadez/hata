@@ -330,9 +330,16 @@ export function pinFolder(path: unknown, on: boolean): void {
   saveSettings();
 }
 
-/** The folders of the dashboard; one that is gone (a disk not mounted) is still shown, marked */
-export function pinnedFolders(): { path: string; name: string; missing: boolean }[] {
-  return settings.folders.map((path) => ({ path, name: basename(path) || "/", missing: !existsSync(path) }));
+/**
+ * The folders of the dashboard; one that is gone (a disk not mounted) is still shown, marked. A folder
+ * that is a disk or a network place is called by its name and says how full it is.
+ */
+export function pinnedFolders(): { path: string; name: string; missing: boolean; disk?: Volume }[] {
+  const disks = settings.folders.length ? otherDisks(resolve(root())) : [];
+  return settings.folders.map((path) => {
+    const disk = disks.find((volume) => volume.path === path);
+    return { path, name: disk?.label || basename(path) || "/", missing: !existsSync(path), ...(disk ? { disk } : {}) };
+  });
 }
 
 /** A pinned folder that was moved or renamed (or one inside what was) stays pinned; a removed one is dropped */
