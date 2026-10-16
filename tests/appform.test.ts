@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { appMeta, applyForm, bindSources, buildForm, dumpCompose, interpolate, localize, normalize, parseCompose, parseEnv, publishedPorts, resolvePorts } from "../src/appform";
+import { appMeta, applyForm, appStatus, finished, bindSources, buildForm, dumpCompose, interpolate, localize, normalize, parseCompose, parseEnv, publishedPorts, resolvePorts } from "../src/appform";
 
 const STORE_APP = `
 name: demo
@@ -223,4 +223,42 @@ test("variables in ports are filled the way docker compose fills them", () => {
   const compose = { services: { a: { ports: ["${WEB_PORT}:80", "53:53/udp", { target: 443, published: "${TLS:-8443}" }] } } };
   resolvePorts(compose, env);
   expect(compose.services.a.ports).toEqual(["8181:80", "53:53/udp", { target: 443, published: "8443" }]);
+});
+
+describe("a step that ran once", () => {
+  const compose = parseCompose(`services:
+  config:
+    image: busybox
+    restart: "no"
+  seed:
+    image: busybox
+  retry:
+    image: busybox
+    restart: on-failure:3
+  web:
+    image: nginx
+    restart: unless-stopped
+`);
+  const c = (service: string, state: string, status: string) => ({ service, state, status });
+
+  test("exited with 0 from a service that is not restarted is done", () => {
+    expect(finished(compose, "config", "exited", "Exited (0) 5 minutes ago")).toBe(true);
+    expect(finished(compose, "seed", "exited", "Exited (0) 1 second ago")).toBe(true);
+    expect(finished(compose, "retry", "exited", "Exited (0) 1 hour ago")).toBe(true);
+  });
+
+  test("a failure, a restarted service or an unknown one is not", () => {
+    expect(finished(compose, "config", "exited", "Exited (1) 5 minutes ago")).toBe(false);
+    expect(finished(compose, "web", "exited", "Exited (0) 5 minutes ago")).toBe(false);
+    expect(finished(compose, "other", "exited", "Exited (0) 5 minutes ago")).toBe(false);
+    expect(finished(null, "config", "exited", "Exited (0) 5 minutes ago")).toBe(false);
+    expect(finished(compose, "config", "created", "Created")).toBe(false);
+  });
+
+  test("the app runs when the rest runs; nothing running is stopped", () => {
+    expect(appStatus([c("web", "running", "Up 1 hour"), c("config", "exited", "Exited (0) 1 hour ago")], compose)).toBe("running");
+    expect(appStatus([c("web", "running", "Up 1 hour"), c("config", "exited", "Exited (2) 1 hour ago")], compose)).toBe("partial");
+    expect(appStatus([c("web", "running", "Up 1 hour"), c("seed", "restarting", "Restarting (1)")], compose)).toBe("partial");
+    expect(appStatus([c("web", "exited", "Exited (0) 1 hour ago"), c("config", "exited", "Exited (0) 1 hour ago")], compose)).toBe("stopped");
+  });
 });

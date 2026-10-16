@@ -369,3 +369,24 @@ export function publishedPorts(compose: Compose): { port: number; protocol: stri
   }
   return out;
 }
+
+/**
+ * A container that has done its work: it exited with 0 from a service that is not restarted — a step
+ * that prepares the app once (a config put in place, a user written) and ends, as it should. Such a
+ * container does not make the app "partly running".
+ */
+export function finished(compose: Compose | null, service: string, state: string, status: string): boolean {
+  if (state !== "exited" || !/^Exited \(0\)/.test(status)) return false;
+  const def = compose && typeof compose.services === "object" ? compose.services[service] : undefined;
+  if (!def || typeof def !== "object") return false;
+  const restart = def.restart === undefined ? "no" : String(def.restart);
+  return restart === "no" || restart.startsWith("on-failure");
+}
+
+/** How an app runs, by its containers: a finished step counts as done, not as down */
+export function appStatus(containers: { service: string; state: string; status: string }[], compose: Compose | null): "running" | "partial" | "stopped" {
+  const running = containers.filter((c) => c.state === "running").length;
+  if (running === 0) return "stopped";
+  const done = containers.filter((c) => finished(compose, c.service, c.state, c.status)).length;
+  return running + done === containers.length ? "running" : "partial";
+}
