@@ -58,6 +58,8 @@ const ICONS = {
   signout: "M10 4H5v16h5M20 12H9M16 8l4 4-4 4",
   chevron: "M9 6l6 6-6 6",
   info: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 11v5M12 8h.01",
+  sun: "M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zM12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4",
+  moon: "M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z",
   globe: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM3 12h18M12 3c3 3.5 3 14.5 0 18M12 3c-3 3.5-3 14.5 0 18",
   terminal: "M5 8l4 4-4 4M12 16h7",
   store: "M5 8h14l-1 12H6zM9 8V6a3 3 0 0 1 6 0v2",
@@ -4497,6 +4499,9 @@ function menuAt(at, header, entries) {
   const marked = (e, el) => (e.on && el.append(icon("check", "on-mark")), el);
   dialog = openDialog("menu dropdown", header, entries.filter(Boolean).map((e) => marked(e, one(e))));
   placeAt(dialog, at);
+  // opened by the pointer: the first entry is not chosen by itself (the dialog takes the focus instead)
+  dialog.tabIndex = -1;
+  dialog.focus();
   return dialog;
 }
 
@@ -4572,7 +4577,46 @@ function contextMenus() {
       }
       if (el.matches(MENU_ROWS) && !el.closest("thead") && rowMenu(el, at)) return void e.preventDefault();
     }
+    // nothing of its own under the pointer: the page's menu — but a link, a picture or a dialog keep the browser's
+    if (e.target.closest("a[href], img, video, audio, canvas, dialog")) return;
+    e.preventDefault();
+    pageMenu(at);
   });
+}
+
+/** Changes the look from anywhere (a right click on the page): shown at once, saved, taken back when refused */
+async function changeLook(patch) {
+  const before = state.appearance;
+  applyAppearance((state.appearance = { ...before, ...patch }));
+  try {
+    const saved = await api("PUT", "/api/settings", { appearance: patch });
+    state.appearance = saved.appearance;
+    if (state.settings) state.settings = saved;
+  } catch (e) {
+    applyAppearance((state.appearance = before));
+    toast(errorText(e), "error");
+  }
+}
+
+/** The menu of the page itself: the look, Hata's own places, and what the page on screen can add */
+function pageMenu(at) {
+  const admin = isAdmin();
+  const look = state.appearance ?? {};
+  const theme = !look.background ? "system" : lightness(look.background) > 0.35 ? "light" : "dark";
+  // the built-in pictures and one's own, in turn; after the last — none
+  const walls = ["", ...(state.wallpapers ?? []), ...(look.custom ? ["custom"] : [])];
+  const nextWall = walls[(walls.indexOf(look.wallpaper ?? "") + 1) % walls.length];
+  menuAt(at, menuHeader("Hata", state.version, "home"), [
+    admin && state.route.view === "home" && state.overview && { label: t("menu.addHere"), icon: "plus", run: () => addDialog() },
+    admin && { label: t("menu.themeLight"), icon: "sun", on: theme === "light", run: () => changeLook({ background: BACKGROUNDS[6] }) },
+    admin && { label: t("menu.themeDark"), icon: "moon", on: theme === "dark", run: () => changeLook({ background: BACKGROUNDS[0] }) },
+    admin && { label: t("menu.themeSystem"), icon: "sliders", on: theme === "system", run: () => changeLook({ background: "" }) },
+    admin && walls.length > 1 && { label: t("menu.nextWallpaper"), icon: "image", run: () => changeLook({ wallpaper: nextWall }) },
+    admin && { label: t("menu.appearance"), icon: "image", href: "#/settings/appearance" },
+    { label: t("menu.reload"), icon: "refresh", run: () => location.reload() },
+    { label: t("nav.settings"), icon: "sliders", href: "#/settings" },
+    { label: t("menu.about"), icon: "info", href: "#/settings/about" },
+  ]);
 }
 
 /** The right click in Files: the menu of the file, of everything selected, or of the folder on screen */

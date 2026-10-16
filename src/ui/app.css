@@ -620,6 +620,7 @@ dialog h2 { font-size: 18px; }
 
 .menu[open] { gap: 2px; }
 .menu header { margin-bottom: 12px; }
+dialog.menu:focus { outline: none; }
 dialog.dropdown { position: fixed; margin: 0; left: auto; bottom: auto; width: min(calc(100vw - 16px), 260px); box-shadow: 0 12px 40px rgb(0 0 0 / 40%); }
 dialog.dropdown[open] { padding: 12px; }
 dialog.dropdown::backdrop { background: transparent; }
