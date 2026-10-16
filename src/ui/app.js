@@ -5752,6 +5752,21 @@ async function storeDialog(entry, target = state.installTarget ?? "") {
         ),
         h("p", { class: "muted small" }, t("store.whereHint")),
       ),
+    // nowhere else to install yet: what the machines are and how one is connected
+    isAdmin() && targets.length === 0 &&
+      h(
+        "div",
+        { class: "store-target" },
+        h("span", { class: "label" }, t("store.where")),
+        h("span", null, t("store.whereHere", { name: state.overview?.system.hostname ?? "Hata" })),
+        h(
+          "p",
+          { class: "muted small" },
+          t(machinesUi.list?.machines?.length ? "store.whereNoneReady" : "store.whereNone"),
+          " ",
+          h("a", { class: "link", href: "#/machines", onclick: () => dialog.close() }, t("store.whereMachines")),
+        ),
+      ),
     !supported && h("p", { class: "banner" }, t("store.unsupported", { arch: arch ?? "" })),
     h(
       "div",

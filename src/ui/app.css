@@ -1046,7 +1046,7 @@ body:has(> .assistant-fab) #view:not(.fill) { padding-bottom: 104px; }
 .machine-app { gap: 12px; }
 .machine-apps th:last-child { width: 1%; }
 .store-target { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius-md); }
-.store-target label { font-weight: 600; }
+.store-target :is(label, .label) { font-weight: 600; }
 .store-target select { width: auto; min-width: 220px; }
 .store-target p { flex-basis: 100%; margin: 0; }
 .backup-name { gap: 2px; justify-items: start; }
