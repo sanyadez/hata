@@ -662,6 +662,109 @@ new MutationObserver(() => {
   if (!labelling) labelling = requestAnimationFrame(() => ((labelling = 0), labelTables()));
 }).observe(document.documentElement, { childList: true, subtree: true });
 
+// --- Choices: a <select> that looks the same on every system ----------------------------------------
+
+/*
+ * Every <select> is dressed as it enters the page: the native one stays, hidden, and keeps what the code
+ * uses — `value`, the options, `change` events; before it a button says the chosen option and opens a
+ * list of Hata's own, so a desktop, a Mac and a phone show one and the same thing.
+ */
+const NATIVE_VALUE = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value");
+const NATIVE_INDEX = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "selectedIndex");
+
+function dressSelect(select) {
+  const label = h("span", { class: "select-label" });
+  const keys = (e) => {
+    if (e.key === "ArrowDown" || e.key === "ArrowUp") e.preventDefault(), openPick(select);
+  };
+  const pick = h("button", { type: "button", "aria-haspopup": "listbox", onclick: () => openPick(select), onkeydown: keys }, label, icon("down", "select-arrow"));
+  select.hataPick = pick;
+  // a label that names the select by its id names the button: the id goes over
+  if (select.id) (pick.id = select.id), select.removeAttribute("id");
+  const show = () => {
+    const index = NATIVE_INDEX.get.call(select);
+    // every option lies in the same cell and only the chosen one is seen: the button is as wide as the widest, like a native select
+    label.replaceChildren(...[...select.options].map((o, i) => h("span", { class: i === index ? "" : "unseen" }, o.textContent)));
+    pick.className = ["select-btn", ...select.classList].filter((c) => c !== "dressed").join(" ");
+    pick.disabled = select.disabled;
+    const name = select.getAttribute("aria-label");
+    const text = select.options[index]?.textContent ?? "";
+    if (name) pick.setAttribute("aria-label", text ? `${name}: ${text}` : name);
+    if (select.title) pick.title = select.title;
+  };
+  select.hataShow = show;
+  // the code sets the value too, which no event tells of
+  for (const [key, native] of [["value", NATIVE_VALUE], ["selectedIndex", NATIVE_INDEX]])
+    Object.defineProperty(select, key, { configurable: true, get: () => native.get.call(select), set: (v) => (native.set.call(select, v), show()) });
+  select.focus = (options) => pick.focus(options);
+  new MutationObserver(show).observe(select, { childList: true, subtree: true, attributes: true, characterData: true });
+  select.classList.add("dressed");
+  show();
+  select.before(pick);
+}
+
+/** The list of a dressed select, under its button (over it when there is no room below) */
+function openPick(select) {
+  const pick = select.hataPick;
+  if (!pick || pick.disabled) return;
+  let dialog;
+  const current = NATIVE_INDEX.get.call(select);
+  const choose = (i) => {
+    dialog.close();
+    if (i === NATIVE_INDEX.get.call(select)) return;
+    NATIVE_INDEX.set.call(select, i);
+    select.hataShow();
+    select.dispatchEvent(new Event("input", { bubbles: true }));
+    select.dispatchEvent(new Event("change", { bubbles: true }));
+  };
+  const items = [...select.options].map((o, i) =>
+    h("button", { type: "button", class: "menu-item", role: "option", "aria-selected": String(i === current), disabled: o.disabled, onclick: () => choose(i) }, h("span", { class: "grow" }, o.textContent), i === current && icon("check", "on-mark")),
+  );
+  dialog = openDialog("menu dropdown select-list", h("div", { role: "listbox", "aria-label": select.getAttribute("aria-label") ?? "" }, items));
+  pick.setAttribute("aria-expanded", "true");
+  dialog.addEventListener("close", () => (pick.removeAttribute("aria-expanded"), pick.isConnected && pick.focus()));
+  const box = pick.getBoundingClientRect();
+  dialog.style.minWidth = Math.round(box.width) + "px";
+  const below = box.bottom + 4 + dialog.offsetHeight <= document.documentElement.clientHeight - 8;
+  placeAt(dialog, { x: box.left, y: below ? box.bottom + 4 : box.top - 4 - dialog.offsetHeight });
+  const open = items.filter((b) => !b.disabled);
+  const at = items[current] && !items[current].disabled ? items[current] : open[0];
+  at?.focus();
+  at?.scrollIntoView({ block: "nearest" });
+  let typed = "";
+  let typedAt = 0;
+  dialog.addEventListener("keydown", (e) => {
+    const now = open.indexOf(document.activeElement);
+    const go = (i) => (e.preventDefault(), open[Math.max(0, Math.min(open.length - 1, i))]?.focus());
+    if (e.key === "ArrowDown") go(now + 1);
+    else if (e.key === "ArrowUp") go(now - 1);
+    else if (e.key === "Home" || e.key === "PageUp") go(0);
+    else if (e.key === "End" || e.key === "PageDown") go(open.length - 1);
+    else if (e.key === "Tab") e.preventDefault(), dialog.close();
+    else if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey && e.key !== " ") {
+      // letters typed jump to the option they begin
+      typed = (Date.now() - typedAt < 800 ? typed : "") + e.key.toLowerCase();
+      typedAt = Date.now();
+      const found = open.find((b) => b.textContent.trim().toLowerCase().startsWith(typed));
+      if (found) e.preventDefault(), found.focus();
+    }
+  });
+}
+
+new MutationObserver((records) => {
+  for (const record of records) {
+    for (const node of record.addedNodes) {
+      if (node.nodeType !== Node.ELEMENT_NODE) continue;
+      for (const select of node.matches("select") ? [node] : node.querySelectorAll("select")) {
+        if (!select.hataPick) dressSelect(select);
+        // a select moved elsewhere takes its button along
+        else if (select.previousElementSibling !== select.hataPick) select.before(select.hataPick);
+      }
+    }
+    for (const node of record.removedNodes) if (node.hataPick && !node.isConnected) node.hataPick.remove();
+  }
+}).observe(document.documentElement, { childList: true, subtree: true });
+
 const NAV = [
   { view: "home", hash: "#/", icon: "home" },
   { view: "store", hash: "#/store", icon: "grid", guest: false },
@@ -4860,7 +4963,7 @@ const MENU_ROWS = "tr, .snapshot, .machine-card, .attention-item, .tool";
 /** The menu of a row made of its own buttons — the same actions, where the pointer is; false — it has none */
 function rowMenu(row, at) {
   const shown = (el) => el.getClientRects().length > 0 && !el.closest("dialog:not([open])");
-  const buttons = [...row.querySelectorAll("button, a.btn")].filter((b) => shown(b) && !b.closest(".menu-item") && b.type !== "submit");
+  const buttons = [...row.querySelectorAll("button, a.btn")].filter((b) => shown(b) && !b.closest(".menu-item") && !b.classList.contains("select-btn") && b.type !== "submit");
   // the name, without the chips that sit inside it ("test" of "test · Everything")
   const named = row.querySelector("h2 .with-icon") ?? row.querySelector("strong, h2, h3, .strong, .name");
   const title = (named && ([...named.childNodes].filter((n) => n.nodeType === Node.TEXT_NODE).map((n) => n.textContent).join("").trim() || named.textContent.trim())) || "";
@@ -4898,7 +5001,7 @@ function rowMenu(row, at) {
 function contextMenus() {
   document.addEventListener("contextmenu", (e) => {
     if (e.defaultPrevented || e.shiftKey || !(e.target instanceof Element)) return;
-    if (e.target.closest("input, textarea, select, [contenteditable], iframe, dialog.menu")) return;
+    if (e.target.closest("input, textarea, select, .select-btn, [contenteditable], iframe, dialog.menu")) return;
     const picked = getSelection();
     if (picked && !picked.isCollapsed && picked.containsNode(e.target, true)) return;
     const at = { x: e.clientX, y: e.clientY };

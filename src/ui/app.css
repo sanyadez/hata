@@ -131,6 +131,20 @@ input, select, textarea {
   padding: 7px 10px;
 }
 input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent); }
+/* a select is a button of Hata's and a list of its own (`dressSelect` in app.js): one look on every system */
+select.dressed { display: none !important; }
+.select-btn { display: inline-flex; align-items: center; gap: 8px; width: 100%; min-height: 36px; background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-sm); padding: 7px 10px; text-align: start; cursor: pointer; }
+.select-btn:hover:not(:disabled) { border-color: var(--border-strong); }
+.select-btn:focus-visible, .select-btn[aria-expanded] { outline: none; border-color: var(--accent); }
+.select-btn:disabled { opacity: 0.55; cursor: default; }
+.select-label { flex: 1; display: grid; min-width: 0; }
+.select-label > span { grid-area: 1 / 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.select-label > .unseen { visibility: hidden; height: 0; }
+.select-arrow { flex: none; width: 16px; height: 16px; color: var(--muted); }
+dialog.dropdown.select-list { width: auto; max-width: min(calc(100vw - 16px), 420px); max-height: min(60dvh, 420px); overflow-y: auto; }
+dialog.dropdown.select-list[open] { padding: 6px; }
+dialog.dropdown.select-list .menu-item:focus { outline: none; background: var(--surface-2); }
+dialog.dropdown.select-list .menu-item[aria-selected="true"] { color: var(--accent-text); }
 input.short { width: 110px; }
 input:is([type="checkbox"], [type="radio"]) { width: 16px; min-height: 16px; height: 16px; accent-color: var(--accent); flex: none; margin: 2px 0 0; }
 textarea.code { font-family: var(--font-mono); font-size: 12.5px; min-height: 320px; resize: vertical; white-space: pre; tab-size: 2; line-height: 1.6; }
@@ -389,7 +403,7 @@ td .clip { max-width: 320px; }
 .kv { display: flex; justify-content: space-between; gap: 16px; padding: 7px 0; }
 .kv > :first-child { flex: none; }
 .kv > :last-child { text-align: right; overflow-wrap: anywhere; min-width: 0; }
-.kv > select { width: auto; flex: none; }
+.kv > :is(select, .select-btn) { width: auto; flex: none; }
 .editor-head { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
 #app-tab { display: grid; gap: 16px; }
 
@@ -530,7 +544,7 @@ body:has(> .assistant-fab) .files { min-height: calc(100dvh - 204px); }
 .meta .chip { font-family: var(--font-body); margin-left: 6px; }
 .offscreen { position: fixed; left: -999px; top: 0; width: 1px; height: 1px; min-height: 0; opacity: 0; }
 .path .ico { width: 14px; height: 14px; color: var(--faint); }
-select.sort { width: auto; }
+:is(select, .select-btn).sort { width: auto; }
 .seg { display: flex; }
 .seg .btn { border-radius: 0; color: var(--muted); }
 .seg .btn:first-child { border-radius: var(--radius-sm) 0 0 var(--radius-sm); }
@@ -840,7 +854,7 @@ input[type="range"] { accent-color: var(--accent); width: 100%; }
 /* Text that lies on the picture itself: what stands alone gets a pane of its own, the rest a halo of the
    background colour — the picture may be of any brightness */
 :root.has-wallpaper #view { text-shadow: 0 0 2px var(--bg), 0 0 6px var(--bg), 0 0 16px var(--bg); }
-:root.has-wallpaper #view :is(.card, .tile, .btn, .page-head, :is(.side > .pad-x, .loose), .section-head, :is(#app-head, #machine-head), input, select, textarea, table, pre, .cats, .tabs) { text-shadow: none; }
+:root.has-wallpaper #view :is(.card, .tile, .btn, .page-head, :is(.side > .pad-x, .loose), .section-head, :is(#app-head, #machine-head), input, select, .select-btn, textarea, table, pre, .cats, .tabs) { text-shadow: none; }
 :root.has-wallpaper :is(.page-head, :is(.side > .pad-x, .loose), .cats, :is(#app-head, #machine-head), #view .section-head:not(:is(.card, :is(.side > .pad-x, .loose), :is(#app-head, #machine-head)) *)) { background: color-mix(in srgb, var(--surface) 88%, transparent); backdrop-filter: blur(16px); border: 1px solid var(--border); border-radius: var(--radius-lg); }
 :root.has-wallpaper :is(.page-head, :is(.side > .pad-x, .loose)) { padding: 18px 20px; }
 :root.has-wallpaper :is(#app-head, #machine-head) { padding: 18px 20px 0; }
@@ -881,10 +895,10 @@ input[type="range"] { accent-color: var(--accent); width: 100%; }
 .edit-row > input, .edit-row > .with-pick { flex: 1 1 0; min-width: 0; }
 .with-pick { display: flex; align-items: center; gap: 4px; }
 .with-pick input { flex: 1; min-width: 0; }
-.edit-row > select { flex: 0 1 auto; width: auto; min-width: 0; }
+.edit-row > :is(select, .select-btn) { flex: 0 1 auto; width: auto; min-width: 0; }
 .edit-row .raw { padding: 8px 12px; border: 1px dashed var(--border); border-radius: var(--radius-sm); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .web-address { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-.web-address select { width: auto; flex: none; }
+.web-address :is(select, .select-btn) { width: auto; flex: none; }
 .web-address input:not(.short) { flex: 1; min-width: 120px; }
 .edit-form input[type="range"] { flex: 1; min-width: 140px; padding: 0; accent-color: var(--accent); }
 .services-row { padding: 14px 0; border-block: 1px solid var(--border); align-items: center; }
@@ -920,7 +934,7 @@ table.shares td { vertical-align: top; }
 .share-access { display: grid; border: 1px solid var(--border); border-radius: var(--radius-md); }
 .share-access label { display: flex; align-items: center; gap: 12px; padding: 10px 12px; }
 .share-access label + label { border-top: 1px solid var(--border); }
-.share-access select { width: auto; flex: none; }
+.share-access :is(select, .select-btn) { width: auto; flex: none; }
 .copy-box { display: flex; align-items: flex-start; gap: 6px; min-width: 0; }
 .copy-box :is(input, textarea) { flex: 1; min-width: 0; font-size: 12px; }
 .copy-box textarea { resize: none; white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.5; }
@@ -949,9 +963,9 @@ body:has(> .assistant-fab) #view:not(.fill) { padding-bottom: 104px; }
 .assistant.wide { width: min(720px, calc(100vw - 48px)); height: calc(100dvh - 172px); }
 .assistant-head { display: flex; align-items: center; gap: 8px; padding: 12px 12px 12px 18px; border-bottom: 1px solid var(--border); }
 .assistant-head strong { font-family: var(--font-heading); font-size: 16px; }
-.assistant-head select { max-width: 170px; }
+.assistant-head :is(select, .select-btn) { max-width: 170px; }
 .assistant-head .pick { min-width: 0; display: flex; }
-.assistant-head .pick select { max-width: 100%; width: 100%; }
+.assistant-head .pick :is(select, .select-btn) { max-width: 100%; width: 100%; }
 .assistant-body { overflow-y: auto; padding: 16px 18px; display: flex; flex-direction: column; gap: 10px; min-height: 0; overscroll-behavior: contain; }
 .assistant-empty { margin: auto 0; display: grid; gap: 10px; justify-items: start; }
 .assistant-starts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
@@ -1091,7 +1105,7 @@ body:has(> .assistant-fab) #view:not(.fill) { padding-bottom: 104px; }
 .machine-apps th:last-child { width: 1%; }
 .store-target { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius-md); }
 .store-target :is(label, .label) { font-weight: 600; }
-.store-target select { width: auto; min-width: 220px; }
+.store-target :is(select, .select-btn) { width: auto; min-width: 220px; }
 .store-target p { flex-basis: 100%; margin: 0; }
 .backup-name { gap: 2px; justify-items: start; }
 .backup-name .with-icon .ico { width: 14px; height: 14px; }
