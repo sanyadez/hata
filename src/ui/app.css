@@ -533,6 +533,34 @@ button.tile-open { border: 0; background: transparent; }
 .thumb { display: grid; place-items: center; aspect-ratio: 4 / 3; background: var(--bg); border-radius: var(--radius-sm); overflow: hidden; color: var(--faint); }
 .thumb img { width: 100%; height: 100%; object-fit: cover; }
 .thumb .ico { width: 32px; height: 32px; stroke-width: 1.4; }
+/* a file without a picture: its extension and its kind, on the colour of the kind */
+.ext { display: grid; place-items: center; align-content: center; gap: 8px; width: 100%; height: 100%; color: var(--muted); }
+.ext b { font: 700 22px/1 var(--font-mono); letter-spacing: 0.06em; }
+.ext small { font-size: 11px; opacity: 0.8; }
+.tint-text { color: light-dark(#2563eb, #7fb4ff); background: color-mix(in srgb, #3b82f6 12%, var(--bg)); }
+.tint-archive { color: light-dark(#b45309, #f5b94a); background: color-mix(in srgb, #f59e0b 12%, var(--bg)); }
+.tint-doc { color: light-dark(#dc2626, #ff8a80); background: color-mix(in srgb, #ef4444 12%, var(--bg)); }
+.tint-video { color: light-dark(#7c3aed, #c4a5ff); background: color-mix(in srgb, #8b5cf6 13%, var(--bg)); }
+.tint-audio { color: light-dark(#047857, #6ee7a8); background: color-mix(in srgb, #10b981 12%, var(--bg)); }
+.tint-image { color: light-dark(#be185d, #f9a8d4); background: color-mix(in srgb, #ec4899 11%, var(--bg)); }
+/* the first lines of a text file */
+.peek { align-self: start; width: 100%; height: 100%; margin: 0; padding: 10px 12px; overflow: hidden; background: var(--bg); color: var(--muted); font: 10.5px/1.45 var(--font-mono); white-space: pre; text-align: left; mask-image: linear-gradient(#000 70%, transparent); }
+/* the box to tick shows on the tile under the pointer, on a chosen one, and on all once something is chosen */
+@media (hover: hover) {
+  .files-tiles:not(.choosing) .file-tile:not(:hover, .selected, :focus-within) .file-tick { opacity: 0; }
+  .files-tiles:not(.choosing) .file-tile.dir:hover .folder-ico, .files-tiles.choosing .file-tile.dir .folder-ico, .file-tile.dir.selected .folder-ico, .file-tile.dir:focus-within .folder-ico { visibility: hidden; }
+  .files-tiles .file-tile.dir .file-open { padding-left: 14px; }
+}
+/* on a touch screen the box to tick is always there: the text starts under it */
+@media (hover: none) { .peek { padding-top: 36px; } }
+/* an empty folder: a strip that takes files dropped on it, with the two things to do */
+.empty-folder { display: flex; align-items: center; gap: 16px; padding: 18px 20px; border: 2px dashed color-mix(in srgb, var(--accent) 45%, var(--border)); background: color-mix(in srgb, var(--accent) 4%, var(--surface)); }
+.empty-folder > .ico { flex: none; width: 32px; height: 32px; color: var(--accent-text); stroke-width: 1.4; }
+.empty-folder p { margin: 0; }
+.empty-folder .strong { font-size: 16px; font-weight: 600; }
+.empty-folder.read-only { border-style: solid; border-color: var(--border); background: var(--surface); }
+.empty-folder.read-only > .ico { color: var(--faint); }
+@media (max-width: 760px) { .empty-folder { flex-wrap: wrap; } .empty-folder .row-actions { width: 100%; } }
 .file-tick { position: absolute; top: 14px; left: 14px; display: grid; }
 .file-more { position: absolute; top: 10px; right: 8px; }
 .file-tile.dir .file-tick { top: 50%; left: 14px; transform: translateY(-50%); }

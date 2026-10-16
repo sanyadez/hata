@@ -3881,6 +3881,17 @@ const FILE_KINDS = {
 };
 const KIND_BY_EXT = Object.fromEntries(Object.entries(FILE_KINDS).flatMap(([kind, list]) => list.split(" ").map((ext) => [ext, kind])));
 const KIND_ICONS = { dir: "folder", image: "image", video: "film", audio: "music" };
+/** The colour of a tile with no picture, by what the file is */
+const TINT_BY_EXT = Object.fromEntries(
+  Object.entries({
+    archive: "zip tar gz tgz xz bz2 zst 7z rar iso deb rpm",
+    doc: "pdf doc docx odt rtf xls xlsx ods csv ppt pptx odp epub",
+    video: FILE_KINDS.video + " avi wmv flv ts",
+    audio: FILE_KINDS.audio + " wma",
+    image: FILE_KINDS.image + " heic tif tiff raw cr2 nef psd",
+    text: FILE_KINDS.text,
+  }).flatMap(([tint, list]) => list.split(" ").map((ext) => [ext, tint])),
+);
 /** Images up to this size are shown as their own thumbnails: there is no smaller copy of them */
 const THUMB_MAX = 6 * 1024 * 1024;
 const TEXT_MAX = 1024 * 1024;
@@ -4147,7 +4158,14 @@ function renderFilesBody() {
   let body;
   if (!listing) body = h("p", { class: "muted" }, " ");
   else if (listing.error) body = h("p", { class: "card pad error" }, listing.error);
-  else if (!entries.length) body = h("div", { class: "card empty" }, icon("folder"), h("p", null, t("files.empty")), h("p", { class: "small" }, t("files.dropHint")));
+  else if (!entries.length)
+    body = h(
+      "div",
+      { class: "card empty-folder" + (listing.readOnly ? " read-only" : "") },
+      icon("folder"),
+      h("div", { class: "grow" }, h("p", { class: "strong" }, t("files.empty")), !listing.readOnly && h("p", { class: "muted small" }, t("files.dropHint"))),
+      !listing.readOnly && h("div", { class: "row-actions" }, button(t("files.uploadFiles"), { class: "primary", onclick: () => picker.click() }, "upload"), button(t("files.newFolder"), { onclick: () => newFolderDialog(path, loadFiles) }, "plus")),
+    );
   else body = filesUi.mode === "grid" ? filesGrid(dirs, rest) : filesTable(entries);
   const finding = filesUi.find && filesUi.find.under === path;
   if (finding) body = foundList(filesUi.find);
@@ -4561,23 +4579,69 @@ function filesTable(entries) {
   return h("div", { class: "card table-wrap" }, h("table", { class: "file-table" }, h("thead", null, h("tr", null, h("th", { class: "tick" }, all), h("th", null, t("files.col.name")), h("th", { class: "num" }, t("files.col.size")), h("th", { class: "when" }, t("files.col.modified")), h("th"))), h("tbody", null, entries.map(row))));
 }
 
+/** A file without a picture: its extension and what it is, on the colour of its kind */
+function extBadge(entry) {
+  const dot = entry.name.lastIndexOf(".");
+  const ext = dot > 0 ? entry.name.slice(dot + 1) : "";
+  const tint = TINT_BY_EXT[ext.toLowerCase()] ?? "other";
+  return h("span", { class: "ext tint-" + tint }, ext && ext.length <= 5 ? h("b", null, ext.toUpperCase()) : fileIcon(entry), h("small", null, t("files.kind." + tint)));
+}
+
+/** The first lines of text files, by path and time, so a new drawing of the folder does not ask again */
+const peeks = new Map();
+const PEEK_BYTES = 2048;
+
+/** The thumbnail of a text file: its first lines, read when the tile comes into view */
+function textPeek(entry, path, badge) {
+  const key = `${filesMachine()}:${path}:${entry.modified}`;
+  const box = h("span", { class: "thumb" }, peeks.get(key) ?? badge);
+  if (peeks.has(key)) return box;
+  const seen = new IntersectionObserver(async ([view]) => {
+    if (!view.isIntersecting) return;
+    seen.disconnect();
+    try {
+      const res = await fetch(rawUrl(path), { headers: { range: `bytes=0-${PEEK_BYTES - 1}` } });
+      if (!res.ok) return;
+      const bytes = new Uint8Array(await res.arrayBuffer());
+      // a NUL means it is not text after all
+      if (bytes.includes(0)) return;
+      const lines = new TextDecoder().decode(bytes).split(/\r?\n/);
+      if (bytes.length >= PEEK_BYTES) lines.pop();
+      const text = lines.slice(0, 16).join("\n");
+      if (!text.trim()) return;
+      if (peeks.size > 300) peeks.delete(peeks.keys().next().value);
+      peeks.set(key, h("pre", { class: "peek" }, text));
+      box.replaceChildren(peeks.get(key));
+    } catch {}
+  });
+  seen.observe(box);
+  return box;
+}
+
 function filesGrid(dirs, rest) {
   const tile = (entry) => {
-    const thumb = fileKind(entry) === "image" && entry.size <= THUMB_MAX ? h("img", { src: rawUrl(joinPath(state.files.path, entry.name)), alt: "", loading: "lazy", decoding: "async" }) : fileIcon(entry);
+    const path = joinPath(state.files.path, entry.name);
+    const kind = fileKind(entry);
+    let thumb = null;
+    if (entry.type !== "dir") {
+      const badge = extBadge(entry);
+      if (kind === "image" && entry.size <= THUMB_MAX) thumb = h("span", { class: "thumb" }, h("img", { src: rawUrl(path), alt: "", loading: "lazy", decoding: "async", onerror: (e) => e.currentTarget.replaceWith(badge) }));
+      else if (kind === "text" && entry.size > 0 && entry.size <= TEXT_MAX) thumb = textPeek(entry, path, badge);
+      else thumb = h("span", { class: "thumb" }, badge);
+    }
     return h(
       "div",
       { class: "file-tile" + (entry.type === "dir" ? " dir" : "") + (filesUi.selected.has(entry.name) ? " selected" : "") + (filesUi.cursor === entry.name ? " cursor" : ""), "data-name": entry.name },
-      entryOpener(entry, "file-open", entry.type !== "dir" && h("span", { class: "thumb" }, thumb), entry.type === "dir" && fileIcon(entry), h("span", { class: "file-text" }, h("span", { class: "clip strong" }, entry.name, entryMarks(entry)), h("span", { class: "muted small clip" }, entry.type === "file" ? `${bytes(entry.size)} · ${fileTime(entry.modified)}` : fileTime(entry.modified)))),
+      entryOpener(entry, "file-open", thumb, entry.type === "dir" && fileIcon(entry), h("span", { class: "file-text" }, h("span", { class: "clip strong" }, entry.name, entryMarks(entry)), h("span", { class: "muted small clip" }, entry.type === "file" ? `${bytes(entry.size)} · ${fileTime(entry.modified)}` : fileTime(entry.modified)))),
       h("span", { class: "file-tick" }, entryCheckbox(entry)),
       h("span", { class: "file-more" }, entryMore(entry)),
     );
   };
+  // the boxes to tick show on the tile under the pointer, and on all of them once something is chosen
   return h(
     "div",
-    { class: "stack" },
-    dirs.length > 0 && h("div", { class: "cat-title" }, t("files.folders")),
+    { class: "stack files-tiles" + (filesUi.selected.size ? " choosing" : "") },
     dirs.length > 0 && h("div", { class: "file-grid dirs" }, dirs.map(tile)),
-    rest.length > 0 && h("div", { class: "cat-title" }, t("files.files")),
     rest.length > 0 && h("div", { class: "file-grid" }, rest.map(tile)),
   );
 }
