@@ -59,7 +59,7 @@ test("many problems at once arrive as one message", () => {
 });
 
 test("settings: a channel switched on has to be filled in, and filled in right", () => {
-  const token = "123456789:AAHdqTcvCH1vGWJxfSeofSAs0K5PALDsaw";
+  const token = "123456789:not-a-real-token-for-tests";
   expect(changeConfig(DEFAULT_CONFIG, { telegram: { enabled: true } })).toBe("notify.needTelegram");
   expect(changeConfig(DEFAULT_CONFIG, { telegram: { token: "nonsense" } })).toBe("notify.badToken");
   expect(changeConfig(DEFAULT_CONFIG, { telegram: { token, chat: "my chat" } })).toBe("notify.badChat");
