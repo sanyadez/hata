@@ -1933,7 +1933,12 @@ async function machinesApi(req: Request, url: URL, server: Server, by: string): 
   const path = url.pathname;
   const method = req.method;
   if (path === "/api/machines" && method === "GET") return json({ machines: machineList(), version: VERSION });
-  if (path === "/api/machines/invite" && method === "POST") return json({ ...(await machineInvite(by)), valid: INVITE_MS, lan: baseUrl() });
+  if (path === "/api/machines/invite" && method === "POST") {
+    // the name on the home network too: a machine that understands .local names finds Hata by it whatever address the router gives
+    const { port } = listenAddress();
+    const local = localDomain() ? `http://${localDomain()}${port === 80 ? "" : ":" + port}/` : "";
+    return json({ ...(await machineInvite(by)), valid: INVITE_MS, lan: baseUrl(), local });
+  }
   const m = /^\/api\/machines\/([a-f0-9]{8})(\/.*)?$/.exec(path);
   if (!m) return null;
   const id = m[1]!;
