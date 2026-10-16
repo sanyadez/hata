@@ -966,9 +966,11 @@ function tile(item) {
   return h("div", { class: `tile kind-${item.type} ${cls} movable`, "data-key": key, onpointerdown: (e) => dragStart(e, item), oncontextmenu: (e) => {
         if (homeUi.drag?.active) return e.preventDefault();
         // a right click on an app is the same menu as its button, where the pointer is
-        if (e.pointerType === "touch" || isAddTile(item)) return;
+        if (e.pointerType === "touch") return;
         e.preventDefault();
-        if (item.type === "app" && !target.machine) appTileMenu(target, null, { x: e.clientX, y: e.clientY });
+        // "Add" offers what it adds, where the pointer is
+        if (isAddTile(item)) addDialog({ x: e.clientX, y: e.clientY });
+        else if (item.type === "app" && !target.machine) appTileMenu(target, null, { x: e.clientX, y: e.clientY });
         else tileMenu(item, { x: e.clientX, y: e.clientY });
       }, ondragstart: (e) => e.preventDefault() }, main, side);
 }
@@ -1182,12 +1184,12 @@ function groupHead(group, index, count) {
 }
 
 /** What can be put on the dashboard, to choose from */
-function addDialog() {
+function addDialog(at = null) {
   let dialog;
   const entry = (label, hint, iconName, action) => h("button", { type: "button", class: "menu-item", onclick: () => (dialog.close(), action()) }, h("span", { class: "app-icon plus" }, icon(iconName)), h("span", { class: "tile-text" }, h("span", { class: "tile-name" }, label), h("span", { class: "muted small" }, hint)));
   const pinned = () => (state.overview.folders ?? []).map((folder) => folder.path);
   dialog = openDialog(
-    "menu",
+    at ? "menu dropdown" : "menu",
     h("header", null, h("h2", null, t("home.addTitle"))),
     entry(t("home.addApp"), t("home.addAppHint"), "store", () => go("#/store")),
     state.overview.importable > 0 && entry(t("home.import"), t("home.importHint", { n: state.overview.importable }), "download", () => go("#/import")),
@@ -1201,10 +1203,14 @@ function addDialog() {
         }),
       ),
     ),
-    entry(t("home.layoutText"), t("home.layoutTextHint"), "code", layoutTextDialog),
     entry(t("home.addDisk"), t("home.addDiskHint"), "disk", () => diskPickDialog(pinned())),
     entry(t("home.addFolder"), t("home.addFolderHint"), "folder", () => folderPicker({ title: t("home.addFolderTitle"), start: "", confirmLabel: t("home.addFolderHere"), allowed: (at) => !pinned().includes(at), action: (at) => pinFolder(at, true, false) })),
   );
+  if (at) {
+    placeAt(dialog, at);
+    dialog.tabIndex = -1;
+    dialog.focus();
+  }
 }
 
 /** The disks and network places of the server, to put one on the dashboard: its tile says how full it is */
@@ -4623,6 +4629,7 @@ function pageMenu(at) {
   const nextWall = walls[(walls.indexOf(look.wallpaper ?? "") + 1) % walls.length];
   menuAt(at, menuHeader("Hata", state.version, "home"), [
     admin && state.route.view === "home" && state.overview && { label: t("menu.addHere"), icon: "plus", run: () => addDialog() },
+    admin && state.route.view === "home" && state.overview && { label: t("menu.dashboardConfig"), icon: "code", run: layoutTextDialog },
     admin && { label: t("menu.themeLight"), icon: "sun", on: theme === "light", run: () => changeLook({ background: BACKGROUNDS[6] }) },
     admin && { label: t("menu.themeDark"), icon: "moon", on: theme === "dark", run: () => changeLook({ background: BACKGROUNDS[0] }) },
     admin && { label: t("menu.themeSystem"), icon: "sliders", on: theme === "system", run: () => changeLook({ background: "" }) },
