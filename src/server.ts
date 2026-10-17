@@ -12,7 +12,7 @@ import { join } from "node:path";
 import { homedir, networkInterfaces } from "node:os";
 import type { Server, ServerWebSocket } from "bun";
 import { recent, record, history } from "./activity";
-import { agentUser, cannotGrant, cleanName, createKey, grantKey, keyOf, listKeys, removeKey, renewTokens, setConfirm } from "./agents";
+import { agentUser, cannotGrant, cleanName, createKey, grantKey, keyOf, listKeys, removeKey, renameKey, renewTokens, setConfirm } from "./agents";
 import type { Level } from "./agents";
 import { Desk } from "./approvals";
 import { answerCall, assistantConfig, configured as assistantReady, findChat, listChats, ModelError, modelsFor, removeChat, retry as retryAssistant, say as sayToAssistant, shownChat, shownConfig as shownAssistant, stopChat, updateAssistant } from "./assistant";
@@ -87,7 +87,7 @@ import { bus } from "./bus";
 import { DATA_DIR, dropOldSecrets, listenAddress, saveSettings, settings, timezone, updateSettings } from "./config";
 import { arrange, cleanLayout, layoutText, parseLayoutText } from "./dashboard";
 import { dockerInfo, listContainers, watchEvents } from "./docker";
-import { abortUpload, copyIn, archivePlan, dropFavorites, emptyTrash, favoritesOf, setFavorite, extract as extractArchive, find as findFiles, list as listFiles, makeFile, makeFolder, pinFolder, pinnedFolders, readable, readText, remove as removeFiles, rename as renameFile, restore as restoreFiles, startTrash, summary as filesSummary, transfer, trash, upload, writeText } from "./files";
+import { abortUpload, copyIn, archivePlan, dropFavorites, emptyTrash, favoritesOf, setFavorite, extract as extractArchive, find as findFiles, list as listFiles, makeFile, makeFolder, pinFolder, pinnedFolders, readable, readText, remove as removeFiles, rename as renameFile, restore as restoreFiles, setTrashDays, startTrash, summary as filesSummary, transfer, trash, upload, writeText } from "./files";
 import { adoptProject, casaosState, containerDraft, importCount, importList, moveInCasaos, projectDraft, rebuildContainer } from "./import";
 import { accessOf, dropAccess, dropUser, gateTarget, guard, guardsOf, mayOpen, otherPorts, MAX_APP_BODY, page, passToApp, setAccess, startGates, tunnelHandlers } from "./gate";
 import { parseDockerRun } from "./dockerrun";
@@ -770,9 +770,21 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
     return json({ ok: true });
   }
   if (agent && method === "PATCH") {
-    const key = setConfirm(agent[1]!, (await body(req)).confirm === true);
-    if (!key) return fail(404, "agents.notFound");
-    record(key.confirm ? "agents.asks" : "agents.asksNot", { user: user.name, detail: key.name });
+    const data = await body(req);
+    if ("name" in data) {
+      const renamed = renameKey(agent[1]!, data.name);
+      if (typeof renamed === "string") return fail(renamed === "agents.notFound" ? 404 : renamed === "agents.nameTaken" ? 409 : 400, renamed);
+      if (renamed.was !== renamed.key.name) {
+        // a word asked under the old name would not match the calls made under the new one
+        desk.forget(renamed.was);
+        record("agents.rename", { user: user.name, detail: `${renamed.was} → ${renamed.key.name}` });
+      }
+    }
+    if ("confirm" in data) {
+      const key = setConfirm(agent[1]!, data.confirm === true);
+      if (!key) return fail(404, "agents.notFound");
+      record(key.confirm ? "agents.asks" : "agents.asksNot", { user: user.name, detail: key.name });
+    }
     return json({ ok: true });
   }
 
@@ -1850,6 +1862,11 @@ async function files(req: Request, url: URL, server: Server, by: string, userId:
     const restored = restoreFiles((await body(req)).ids);
     if (restored.length) record("files.restore", { user: by, detail: filesNamed(restored.map((r) => r.path)) });
     return json({ restored });
+  }
+  if (path === "/api/files/trash/days" && method === "PUT") {
+    const removed = await setTrashDays((await body(req)).days);
+    record("files.trashDays", { user: by, detail: String(settings.trash.days) });
+    return json({ removed, ...trash() });
   }
   if (path === "/api/files/trash/delete" && method === "POST") {
     server.timeout(req, 0);

@@ -157,6 +157,19 @@ export function setConfirm(id: string, confirm: boolean): AgentKey | null {
   return key;
 }
 
+/** Gives a key another name; a string is an error code. What it did before stays in the log under the old one. */
+export function renameKey(id: string, name: unknown): { key: AgentKey; was: string } | string {
+  const key = keys.find((k) => k.id === id);
+  if (!key) return "agents.notFound";
+  const label = cleanName(name);
+  if (!label) return "agents.badName";
+  if (keys.some((k) => k !== key && k.name.toLowerCase() === label.toLowerCase())) return "agents.nameTaken";
+  const was = key.name;
+  key.name = label;
+  save();
+  return { key, was };
+}
+
 export function removeKey(id: string): AgentKey | null {
   const i = keys.findIndex((k) => k.id === id);
   if (i < 0) return null;

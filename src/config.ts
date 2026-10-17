@@ -92,7 +92,7 @@ export interface Settings {
   images: ImageSettings;
   /** Disks: whether a USB disk that is plugged in is mounted by itself */
   /** `ignored` — disks nothing uses that the person said not to mention again, by serial number */
-  storage: { automount: boolean; ignored: string[] };
+  storage: { automount: boolean; ignored: string[]; smart: SmartLimits };
   /** Sign-in rules: `adminTwoFactor` — an administrator without two-factor sign-in acts as a member until it is on */
   security: { adminTwoFactor: boolean };
   /** `outside` — the interfaces the internet comes in on: nothing of the server answers there (`outside.ts`) */
@@ -116,6 +116,8 @@ export interface Settings {
    * the one offered by itself every day at `time` (local, HH:MM), off unless the administrator turns it on
    */
   update: { channel: "stable" | "beta"; auto: boolean; time: string };
+  /** How many days what is deleted in the file manager stays in the trash */
+  trash: { days: number };
 }
 
 export interface HttpsSettings {
@@ -177,6 +179,29 @@ export interface BackupSettings {
   folders: Record<string, string[]>;
 }
 
+/** When a disk's SMART reading is worth a word: hotter than `hotHdd` / `hotFlash` °C, worn `wear` percent */
+export interface SmartLimits {
+  hotHdd: number;
+  hotFlash: number;
+  wear: number;
+}
+// a spinning disk ages fast above 55 °C; flash is rated for more
+export const DEFAULT_SMART: SmartLimits = { hotHdd: 55, hotFlash: 70, wear: 90 };
+const SMART_RANGE: Record<keyof SmartLimits, [number, number]> = { hotHdd: [30, 90], hotFlash: [30, 110], wear: [10, 100] };
+
+/** The limits of a change, the ones given only, checked; null — one of them is not a whole number in its range */
+export function smartLimits(value: unknown): Partial<SmartLimits> | null {
+  if (!isPlainObject(value)) return null;
+  const out: Partial<SmartLimits> = {};
+  for (const [key, [low, high]] of Object.entries(SMART_RANGE) as [keyof SmartLimits, [number, number]][]) {
+    if (!(key in value)) continue;
+    const n = value[key];
+    if (!Number.isInteger(n) || (n as number) < low || (n as number) > high) return null;
+    out[key] = n as number;
+  }
+  return out;
+}
+
 const DEFAULTS: Settings = {
   port: 0,
   dataRoot: "/DATA",
@@ -192,7 +217,7 @@ const DEFAULTS: Settings = {
   images: { check: true, auto: false, time: "04:30", exclude: [] },
   https: { mode: "off", domain: "", email: "" },
   local: { enabled: true, name: "hata.local" },
-  storage: { automount: false, ignored: [] },
+  storage: { automount: false, ignored: [], smart: DEFAULT_SMART },
   security: { adminTwoFactor: false },
   network: { outside: [] },
   snapraid: { parity: "", data: [], appData: false, time: "05:00", scrub: true, deleteLimit: 50 },
@@ -203,6 +228,7 @@ const DEFAULTS: Settings = {
   appearance: DEFAULT_APPEARANCE,
   welcome: false,
   update: { channel: "stable", auto: false, time: "05:00" },
+  trash: { days: 30 },
 };
 
 /** A host name with at least two labels: letters, digits and hyphens */
@@ -223,6 +249,10 @@ export interface Favorite {
 }
 
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
+
+
+/** Days the trash keeps things, as it is kept: a whole number from 1 to 365; null — not that */
+export const trashDays = (value: unknown): number | null => (Number.isInteger(value) && (value as number) >= 1 && (value as number) <= 365 ? (value as number) : null);
 
 const saved = readJsonFile<Partial<Settings>>(SETTINGS_FILE, {}, isPlainObject);
 
@@ -247,9 +277,10 @@ export const settings: Settings = {
     auto: isPlainObject(saved.update) && saved.update.auto === true,
     time: isPlainObject(saved.update) && typeof saved.update.time === "string" && TIME_RE.test(saved.update.time) ? saved.update.time : DEFAULTS.update.time,
   },
+  trash: { days: trashDays(isPlainObject(saved.trash) ? saved.trash.days : undefined) ?? DEFAULTS.trash.days },
   network: { outside: cleanOutside(isPlainObject(saved.network) ? saved.network.outside : []) },
   security: { adminTwoFactor: isPlainObject(saved.security) && saved.security.adminTwoFactor === true },
-  storage: { automount: isPlainObject(saved.storage) && saved.storage.automount === true, ignored: isPlainObject(saved.storage) && Array.isArray(saved.storage.ignored) ? saved.storage.ignored.filter((id): id is string => typeof id === "string") : [] },
+  storage: { automount: isPlainObject(saved.storage) && saved.storage.automount === true, ignored: isPlainObject(saved.storage) && Array.isArray(saved.storage.ignored) ? saved.storage.ignored.filter((id): id is string => typeof id === "string") : [], smart: { ...DEFAULT_SMART, ...(isPlainObject(saved.storage) ? (smartLimits(saved.storage.smart) ?? {}) : {}) } },
 };
 settings.local.name = localName(settings.local.name) ?? DEFAULTS.local.name;
 
@@ -408,7 +439,9 @@ export function updateSettings(patch: Record<string, unknown>): string | null {
   }
   if ("storage" in patch) {
     if (!isPlainObject(patch.storage)) return "settings.badStorage";
-    next.storage = { ...next.storage, ...("automount" in patch.storage ? { automount: patch.storage.automount === true } : {}) };
+    const smart = "smart" in patch.storage ? smartLimits(patch.storage.smart) : {};
+    if (!smart) return "settings.badSmart";
+    next.storage = { ...next.storage, ...("automount" in patch.storage ? { automount: patch.storage.automount === true } : {}), smart: { ...next.storage.smart, ...smart } };
   }
   if ("security" in patch) {
     if (!isPlainObject(patch.security)) return "settings.badSecurity";

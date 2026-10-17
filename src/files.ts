@@ -20,13 +20,13 @@ import { lstat, open, readdir, readFile, rm, stat } from "node:fs/promises";
 import { basename, dirname, extname, join, resolve, sep } from "node:path";
 import { record } from "./activity";
 import { AppError, startJob, type Job } from "./apps";
-import { DATA_DIR, saveSettings, SECRETS_DIR, settings, type Favorite } from "./config";
+import { DATA_DIR, saveSettings, SECRETS_DIR, settings, trashDays, type Favorite } from "./config";
 import { movePath } from "./dashboard";
 import { parseMounts } from "./disks";
 import { roomOf } from "./netroom";
 import { readJsonFile } from "./fsutil";
 import { writablePath } from "./smbconf";
-import { findInTrash, inTrash, KEEP_DAYS, listTrash, purgeTrash, putInTrash, sweepTrash, takeFromTrash, TRASH_DIR, type TrashItem } from "./trash";
+import { findInTrash, inTrash, keepDays, listTrash, purgeTrash, putInTrash, sweepTrash, takeFromTrash, TRASH_DIR, type TrashItem } from "./trash";
 import { openZip } from "./unzip";
 import { ZIP_MAX_BYTES, ZIP_MAX_ENTRIES, type ZipSource } from "./zip";
 
@@ -692,7 +692,7 @@ export interface Trash {
 
 export function trash(): Trash {
   const items = listTrash();
-  return { items, size: items.reduce((sum, item) => sum + item.size, 0), keepDays: KEEP_DAYS };
+  return { items, size: items.reduce((sum, item) => sum + item.size, 0), keepDays: keepDays() };
 }
 
 const idList = (ids: unknown): string[] => {
@@ -733,6 +733,17 @@ export function restore(ids: unknown): { id: string; path: string }[] {
 
 /** Removes from the trash for good: the entries named, or everything */
 export const emptyTrash = (ids: unknown): Promise<number> => purgeTrash(ids === undefined || ids === null ? null : idList(ids));
+
+/** How long the trash keeps things from now on; what has lain there longer goes at once. Says how many went. */
+export async function setTrashDays(days: unknown): Promise<number> {
+  const kept = trashDays(days);
+  if (kept === null) throw new AppError("trash.badDays");
+  const before = listTrash().length;
+  settings.trash = { days: kept };
+  saveSettings();
+  await sweepTrash();
+  return before - listTrash().length;
+}
 
 /** On start and a few times a day: what was deleted long enough ago goes for good */
 export function startTrash(): void {

@@ -5358,9 +5358,40 @@ async function loadTrash() {
   if (state.route.view === "trash") renderTrash();
 }
 
+/** The entries of the trash chosen with their boxes, by id; what is no longer there drops out on every drawing */
+const trashChosen = new Set();
+const TRASH_DAYS = [1, 3, 7, 14, 30, 60, 90, 180, 365];
+const trashDaysText = (n) => (n === 1 ? t("trash.day") : t("trash.days", { n }));
+
+/** A shorter time for the trash: what has lain there longer goes at once, so that is asked first */
+function trashDaysChange(days, select) {
+  const items = state.trash?.items ?? [];
+  const going = items.filter((item) => Date.now() - item.at > days * 86_400_000);
+  const save = async () => {
+    try {
+      const answer = await api("PUT", "/api/files/trash/days", { days });
+      if (answer.removed) toast(t("trash.daysRemoved", { n: answer.removed }));
+    } catch (e) {
+      toast(errorText(e), "error");
+    }
+    await loadTrash();
+  };
+  if (!going.length) return void save();
+  const dialog = openDialog(
+    "confirm",
+    h("h2", null, t("trash.daysTitle", { days: trashDaysText(days) })),
+    h("p", { class: "muted" }, t("trash.daysLead", { n: going.length, size: bytes(going.reduce((sum, item) => sum + item.size, 0)) })),
+    h("footer", null, closeButton(() => dialog, t("common.cancel")), button(t("files.deleteForever"), { class: "danger", onclick: () => (dialog.close(), save()) }, "trash")),
+  );
+  // cancelled: the list shows the time that is still kept
+  dialog.addEventListener("close", () => (select.value = String(state.trash.keepDays)));
+}
+
 function renderTrash() {
   const data = state.trash;
   const items = data?.items ?? [];
+  for (const id of [...trashChosen]) if (!items.some((item) => item.id === id)) trashChosen.delete(id);
+  const chosen = items.filter((item) => trashChosen.has(item.id));
   const act = async (el, work) => {
     el.disabled = true;
     try {
@@ -5370,10 +5401,11 @@ function renderTrash() {
     }
     await loadTrash();
   };
-  const back = (item) => (e) =>
+  const back = (list) => (e) =>
     act(e.currentTarget, async () => {
-      const { restored } = await api("POST", "/api/files/trash/restore", { ids: [item.id] });
-      toast(t("trash.restored", { path: restored[0].path }));
+      const { restored } = await api("POST", "/api/files/trash/restore", { ids: list.map((item) => item.id) });
+      list.forEach((item) => trashChosen.delete(item.id));
+      toast(restored.length === 1 ? t("trash.restored", { path: restored[0].path }) : t("trash.restoredMany", { n: restored.length }));
     });
   const forever = (ids, title, lead) => {
     const dialog = openDialog(
@@ -5384,32 +5416,60 @@ function renderTrash() {
     );
   };
   const folderOf = (path) => path.slice(0, path.lastIndexOf("/")) || "/";
+  const tick = (item) =>
+    h("input", {
+      type: "checkbox",
+      checked: trashChosen.has(item.id),
+      "aria-label": item.name,
+      onchange: (e) => (e.target.checked ? trashChosen.add(item.id) : trashChosen.delete(item.id), renderTrash()),
+    });
+  const all = h("input", {
+    type: "checkbox",
+    checked: items.length > 0 && chosen.length === items.length,
+    "aria-label": t("trash.chooseAll"),
+    onchange: (e) => (items.forEach((item) => (e.target.checked ? trashChosen.add(item.id) : trashChosen.delete(item.id))), renderTrash()),
+  });
+  all.indeterminate = chosen.length > 0 && chosen.length < items.length;
   const row = (item) =>
     h(
       "tr",
-      null,
+      { class: trashChosen.has(item.id) ? "chosen" : "" },
+      h("td", { class: "tick" }, tick(item)),
       h("td", null, h("div", { class: "with-icon strong" }, icon(item.type === "dir" ? "folder" : "file"), h("span", { class: "clip" }, item.name))),
       h("td", null, h("a", { class: "muted small mono clip block", href: filesHash(folderOf(item.from)) }, folderOf(item.from))),
       h("td", null, h("div", null, ago(item.at)), item.by && h("div", { class: "muted small" }, item.by)),
       h("td", { class: "num" }, bytes(item.size), item.type === "dir" && h("div", { class: "muted small" }, t("trash.files", { n: item.files }))),
-      h("td", null, h("div", { class: "row-actions" }, button(t("trash.restore"), { class: "small", onclick: back(item) }, "undo"), button("", { class: "small icon-btn", title: t("files.deleteForever"), "aria-label": t("files.deleteForever"), onclick: () => forever([item.id], t("trash.deleteTitle", { name: item.name }), t("trash.deleteLead")) }, "trash"))),
+      h("td", null, h("div", { class: "row-actions" }, button(t("trash.restore"), { class: "small", onclick: back([item]) }, "undo"), button("", { class: "small icon-btn", title: t("files.deleteForever"), "aria-label": t("files.deleteForever"), onclick: () => forever([item.id], t("trash.deleteTitle", { name: item.name }), t("trash.deleteLead")) }, "trash"))),
     );
+  const keep = data?.keepDays ?? 30;
+  const days = h(
+    "select",
+    { class: "short", "aria-label": t("trash.keep"), onchange: (e) => trashDaysChange(Number(e.target.value), e.target) },
+    [...new Set([...TRASH_DAYS, keep])].sort((a, b) => a - b).map((n) => h("option", { value: String(n), selected: n === keep }, trashDaysText(n))),
+  );
+  const chosenSize = chosen.reduce((sum, item) => sum + item.size, 0);
   shell(h("div", { class: "files" }, h("aside", { class: "files-side fold", id: "files-places" }), h("section", { class: "stack" },
     h(
       "div",
       { class: "page-head" },
       h("div", null, h("h1", null, t("trash.title")), h("p", { class: "meta" }, h("a", { href: "#/files" }, t("nav.files")), h("span", { class: "dot-sep" }, "·"), t("trash.meta", { n: items.length, size: bytes(data?.size ?? 0) }))),
-      h("div", { class: "actions" }, items.length > 0 && button(t("trash.empty"), { class: "danger", onclick: () => forever(null, t("trash.emptyTitle"), t("trash.emptyLead", { n: items.length, size: bytes(data.size) })) }, "trash")),
+      h(
+        "div",
+        { class: "actions" },
+        chosen.length > 0 && button(t("trash.restoreChosen", { n: chosen.length }), { onclick: back(chosen) }, "undo"),
+        chosen.length > 0 && button(t("trash.deleteChosen", { n: chosen.length }), { class: "danger", onclick: () => forever(chosen.map((item) => item.id), t("trash.deleteChosenTitle", { n: chosen.length }), t("trash.emptyLead", { n: chosen.length, size: bytes(chosenSize) })) }, "trash"),
+        chosen.length === 0 && items.length > 0 && button(t("trash.empty"), { class: "danger", onclick: () => forever(null, t("trash.emptyTitle"), t("trash.emptyLead", { n: items.length, size: bytes(data.size) })) }, "trash"),
+      ),
     ),
     h(
       "div",
       { class: "card table-wrap" },
-      h("p", { class: "pad muted small" }, t("trash.lead", { days: data?.keepDays ?? 30 })),
+      h("div", { class: "pad trash-keep" }, h("p", { class: "muted small grow" }, t("trash.lead", { days: trashDaysText(keep) })), data && h("label", { class: "with-icon small" }, h("span", null, t("trash.keep")), days)),
       !data
         ? null
         : items.length === 0
           ? h("p", { class: "empty" }, t("trash.nothing"))
-          : h("table", { class: "disks trash" }, h("thead", null, h("tr", null, h("th", null, t("files.col.name")), h("th", null, t("trash.col.from")), h("th", null, t("trash.col.deleted")), h("th", { class: "num" }, t("files.col.size")), h("th"))), h("tbody", null, items.map(row))),
+          : h("table", { class: "disks trash" }, h("thead", null, h("tr", null, h("th", { class: "tick" }, all), h("th", null, t("files.col.name")), h("th", null, t("trash.col.from")), h("th", null, t("trash.col.deleted")), h("th", { class: "num" }, t("files.col.size")), h("th"))), h("tbody", null, items.map(row))),
     ),
   )));
   filesPlaces(null);
@@ -9381,6 +9441,40 @@ function diskWorkStrip(work) {
   );
 }
 
+/** When a disk's reading is worth a word: its temperature by kind, and how worn a flash disk may be */
+function smartLimitsDialog(limits) {
+  const number = (key, min, max) => h("input", { type: "number", min, max, step: 1, value: limits[key], class: "short mono", required: true });
+  const hotHdd = number("hotHdd", 30, 90);
+  const hotFlash = number("hotFlash", 30, 110);
+  const wear = number("wear", 10, 100);
+  const error = h("p", { class: "error", role: "alert" });
+  const dialog = openDialog(
+    "",
+    h(
+      "form",
+      {
+        onsubmit: async (e) => {
+          e.preventDefault();
+          error.textContent = "";
+          try {
+            state.settings = await api("PUT", "/api/settings", { storage: { smart: { hotHdd: Number(hotHdd.value), hotFlash: Number(hotFlash.value), wear: Number(wear.value) } } });
+            dialog.close();
+            setDisks(await api("GET", "/api/disks"));
+          } catch (err) {
+            error.textContent = errorText(err);
+          }
+        },
+      },
+      h("header", null, h("div", { class: "grow" }, h("h2", null, t("disks.limits.title")), h("p", { class: "muted small" }, t("disks.limits.lead"))), closeX(() => dialog)),
+      field(t("disks.limits.hotHdd"), h("div", { class: "with-icon" }, hotHdd, h("span", { class: "muted" }, "°C")), t("disks.limits.hotHddHint")),
+      field(t("disks.limits.hotFlash"), h("div", { class: "with-icon" }, hotFlash, h("span", { class: "muted" }, "°C")), t("disks.limits.hotFlashHint")),
+      field(t("disks.limits.wear"), h("div", { class: "with-icon" }, wear, h("span", { class: "muted" }, "%")), t("disks.limits.wearHint")),
+      error,
+      h("footer", null, button(t("disks.limits.defaults"), { class: "quiet", onclick: () => ((hotHdd.value = "55"), (hotFlash.value = "70"), (wear.value = "90")) }), h("span", { class: "grow" }), closeButton(() => dialog, t("common.cancel")), h("button", { class: "btn primary" }, t("settings.save"))),
+    ),
+  );
+}
+
 function storageSection() {
   const data = state.disks;
   if (!data) return [h("p", { class: "muted" }, "…")];
@@ -9505,7 +9599,7 @@ function storageSection() {
       h(
         "div",
         { class: "pad card-head" },
-        h("div", { class: "section-head" }, h("h2", null, t("disks.title"), h("span", { class: "muted" }, t("disks.connected", { n: data.disks.length }))), h("div", { class: "row-actions" }, (data.mounting?.mergeable.length ?? 0) > 1 && button(t("mounting.merge"), { class: "small", onclick: () => mergeDialog() }), data.tool === "ok" && data.disks.length > 0 && checked > 0 && h("span", { class: "muted small" }, t("disks.checked", { when: ago(checked) })), data.tool === "ok" && data.disks.length > 0 && button(t("disks.checkNow"), { class: "small", onclick: busy("…", { path: "/api/disks/check" }) }, "refresh"))),
+        h("div", { class: "section-head" }, h("h2", null, t("disks.title"), h("span", { class: "muted" }, t("disks.connected", { n: data.disks.length }))), h("div", { class: "row-actions" }, (data.mounting?.mergeable.length ?? 0) > 1 && button(t("mounting.merge"), { class: "small", onclick: () => mergeDialog() }), data.tool === "ok" && data.disks.length > 0 && checked > 0 && h("span", { class: "muted small" }, t("disks.checked", { when: ago(checked) })), data.tool === "ok" && data.disks.length > 0 && data.limits && button(t("disks.limits"), { class: "small", onclick: () => smartLimitsDialog(data.limits) }), data.tool === "ok" && data.disks.length > 0 && button(t("disks.checkNow"), { class: "small", onclick: busy("…", { path: "/api/disks/check" }) }, "refresh"))),
         h("p", { class: "muted small" }, t(data.disks.length ? "disks.lead" : "disks.none")),
         error,
       ),
@@ -10259,11 +10353,16 @@ function agentKeyDialog(made) {
   const url = mcpAddress();
   const command = `claude mcp add --transport http hata ${url} --header "Authorization: Bearer ${made.key}"`;
   const config = JSON.stringify({ mcpServers: { hata: { type: "http", url, headers: { Authorization: `Bearer ${made.key}` } } } }, null, 2);
+  // Claude Desktop runs only programs from its file: the bridge mcp-remote speaks HTTP for it. The header
+  // comes from a variable, because a space inside an argument is split on Windows
+  const bridge = ["-y", "mcp-remote", url, "--header", "Authorization:${HATA_AUTH}", ...(location.protocol === "http:" ? ["--allow-http"] : [])];
+  const desktop = JSON.stringify({ mcpServers: { hata: { command: "npx", args: bridge, env: { HATA_AUTH: `Bearer ${made.key}` } } } }, null, 2);
   const dialog = openDialog(
     "wide",
     h("header", null, h("div", { class: "grow" }, h("h2", null, t("agents.made.title", { name: made.info.name })), h("p", { class: "muted small" }, t("agents.made.lead"))), closeX(() => dialog)),
     field(t("agents.made.key"), copyBox(made.key)),
     field(t("agents.made.claude"), copyBox(command, 3), t("agents.made.claudeHint")),
+    field(t("agents.made.desktop"), copyBox(desktop, 8), t("agents.made.desktopHint")),
     field(t("agents.made.config"), copyBox(config, 11), t("agents.made.configHint")),
     h("footer", null, button(t("agents.made.done"), { class: "primary", onclick: () => dialog.close() })),
   );
@@ -10775,6 +10874,37 @@ function agentDialog() {
   name.focus();
 }
 
+function renameAgentKey(key) {
+  const input = h("input", { value: key.name, required: true, maxLength: 40, spellcheck: false, autocomplete: "off" });
+  const error = h("p", { class: "error", role: "alert" });
+  const dialog = openDialog(
+    "confirm",
+    h(
+      "form",
+      {
+        onsubmit: async (e) => {
+          e.preventDefault();
+          error.textContent = "";
+          try {
+            await api("PATCH", `/api/agents/${key.id}`, { name: input.value.trim() });
+            dialog.close();
+            void loadSettings();
+          } catch (err) {
+            error.textContent = errorText(err);
+          }
+        },
+      },
+      h("h2", null, t("agents.rename.title", { name: key.name })),
+      h("p", { class: "muted" }, t("agents.rename.lead")),
+      input,
+      error,
+      h("footer", null, closeButton(() => dialog, t("common.cancel")), h("button", { class: "btn primary" }, t("agents.rename"))),
+    ),
+  );
+  input.focus();
+  input.select();
+}
+
 function removeAgentKey(key) {
   const dialog = openDialog(
     "confirm",
@@ -10823,6 +10953,7 @@ function agentsSection() {
           }),
           h("span", null, t("agents.confirm.short")),
         ),
+      h("button", { type: "button", class: "icon-btn", "aria-label": t("agents.rename"), title: t("agents.rename"), onclick: () => renameAgentKey(key) }, icon("edit")),
       h("button", { type: "button", class: "icon-btn", "aria-label": t("agents.remove"), title: t("agents.remove"), onclick: () => removeAgentKey(key) }, icon("trash")),
     );
   const waiting = state.approvals ?? [];

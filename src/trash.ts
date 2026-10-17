@@ -6,7 +6,8 @@
  * a top as well: what is deleted in it stays in it, not at the root of the system. An entry is a folder
  * `<trash>/<id>/` with `meta.json` (where it lay, when it was deleted, by whom) and `item`, the deleted
  * thing itself. There is no list kept apart: the trash is what lies in those folders. An entry is
- * removed for good `KEEP_DAYS` after it was deleted.
+ * removed for good `settings.trash.days` (`KEEP_DAYS` unless the administrator chose otherwise) after it
+ * was deleted.
  *
  * Nothing here knows the rules of the file manager (what may be deleted, where one may write): that is
  * `files.ts`, which calls this.
@@ -18,8 +19,9 @@ import { DATA_DIR, settings } from "./config";
 import { readJsonFile, writeJsonAtomic } from "./fsutil";
 
 export const TRASH_DIR = ".hata-trash";
-/** How long a deleted thing is kept */
+/** How long a deleted thing is kept unless the administrator chose otherwise */
 export const KEEP_DAYS = 30;
+export const keepDays = (): number => settings.trash?.days ?? KEEP_DAYS;
 
 const ITEM = "item";
 const META = "meta.json";
@@ -73,7 +75,7 @@ export function readMeta(text: string, id: string): TrashItem | null {
   }
 }
 
-export const expired = (item: TrashItem, now: number): boolean => now - item.at > KEEP_DAYS * 86_400_000;
+export const expired = (item: TrashItem, now: number, days = keepDays()): boolean => now - item.at > days * 86_400_000;
 
 const newId = (now: number): string => now.toString(36).padStart(9, "0") + crypto.randomUUID().replace(/-/g, "").slice(0, 8);
 
