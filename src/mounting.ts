@@ -607,6 +607,7 @@ async function paused<T>(volume: Volume, work: () => Promise<T>): Promise<{ done
   const kept = fstab().some((e) => e.ours && e.path === folder);
   const down = await run(["umount", folder], 120_000);
   if (down.code !== 0) return { error: "disk.busy", message: said(down) };
+  endStale(folder);
   const done = await work();
   const type = kept ? "" : await driver(volume.fstype);
   if (typeof type !== "string") return { done, back: type.error };
@@ -789,6 +790,7 @@ async function release(path: string): Promise<{ device: string | undefined } | F
   if (device) {
     const result = await run(["umount", path], 120_000);
     if (result.code !== 0) return { error: "disk.busy", message: said(result) };
+    endStale(path);
   }
   if (kept) {
     writeFstab(withoutMount(readText(FSTAB), path));
@@ -842,6 +844,28 @@ function upgradeKept(): Promise<void> {
     for (const entry of fstab()) if (entry.ours && existsSync(entry.path)) await seal(entry.path);
     await mountLeftOut();
   });
+}
+
+const FUSE_DAEMONS = new Set(["mergerfs", "ntfs-3g", "mount.exfat-fuse", "exfat-fuse"]);
+
+/**
+ * Ends the FUSE program of a folder just unmounted: mergerfs mounted at boot was seen to stay asleep
+ * after its folder went, and a second one would then serve the same folder next to it.
+ */
+function endStale(path: string): void {
+  if (mountedAt().has(path)) return;
+  let pids: string[] = [];
+  try {
+    pids = readdirSync("/proc").filter((name) => /^\d+$/.test(name));
+  } catch {
+    return;
+  }
+  for (const pid of pids) {
+    try {
+      const args = readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0");
+      if (FUSE_DAEMONS.has(basename(args[0] ?? "")) && args.includes(path)) process.kill(Number(pid), "SIGTERM");
+    } catch {}
+  }
 }
 
 /**

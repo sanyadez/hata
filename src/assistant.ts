@@ -415,7 +415,13 @@ let config: AssistantConfig = (() => {
 // what was under way when the server stopped is not picked up again: the person asks anew
 let chats: Chat[] = readJsonFile<Chat[]>(CHATS_FILE, [], Array.isArray)
   .filter((chat) => isPlainObject(chat) && Array.isArray(chat.turns))
-  .map((chat) => ({ ...chat, status: chat.status === "thinking" ? "idle" : chat.status }));
+  .map((chat) => ({ ...chat, title: retitled(chat), status: chat.status === "thinking" ? "idle" : chat.status }));
+
+/** Older versions cut a long name at 60 characters, in the middle of a word and without saying so */
+function retitled(chat: Chat): string {
+  const first = chat.turns.find((turn) => turn.role === "user" && typeof turn.text === "string");
+  return chat.title?.length === 60 && first?.text ? titleOf(first.text) : chat.title;
+}
 const running = new Map<string, AbortController>();
 
 let saving: Timer | null = null;
