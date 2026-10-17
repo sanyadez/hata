@@ -1129,3 +1129,14 @@ body:has(> .assistant-fab) #view:not(.fill) { padding-bottom: 104px; }
 .backup-name { gap: 2px; justify-items: start; }
 .backup-name .with-icon .ico { width: 14px; height: 14px; }
 .lock-mark .ico { width: 13px; height: 13px; vertical-align: -2px; margin-right: 4px; color: var(--muted); }
+.pool-steps { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px 18px; color: var(--muted); }
+.pool-steps li { display: flex; align-items: center; gap: 8px; }
+.pool-steps li.current { color: var(--text); font-weight: 600; }
+.pool-steps li.current .welcome-num { background: var(--accent); border-color: var(--accent); color: #1a1408; }
+.pool-steps li.done .welcome-num { background: var(--ok-soft); border-color: transparent; color: var(--ok); }
+.pool-goal { padding: 10px 0; }
+.pool-disk { cursor: pointer; }
+.pool-disk.muted { cursor: default; }
+.pool-erase { color: var(--danger); }
+.pool-name { display: inline-flex; align-items: center; gap: 4px; }
+.pool-name input { width: 160px; }

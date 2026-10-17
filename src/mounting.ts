@@ -674,7 +674,7 @@ export function relabel(device: string, text: string, user: string): Promise<Out
 }
 
 /** Connects a file system as it is; `keep` — from now on, also after a restart */
-export function connectVolume(device: string, label: string, keep: boolean, user: string): Promise<Outcome> {
+export function connectVolume(device: string, label: string, keep: boolean, user: string, dry = false): Promise<Outcome> {
   return oneAtATime(async () => {
     if (!NAME_RE.test(label)) return { error: "disk.badName" };
     const disk = (await connected()).find((d) => d.volumes.some((v) => v.path === device));
@@ -683,10 +683,28 @@ export function connectVolume(device: string, label: string, keep: boolean, user
     if (!mountable(volume) || held(volume.name)) return { error: "disk.inUse" };
     const path = join(MOUNT_ROOT, label);
     if (fstab().some((e) => e.path === path)) return { error: "disk.folderTaken" };
+    if (dry) return freeFolder(path) ? { path } : { error: "disk.folderTaken" };
     const failed = await attach(volume, path, keep);
     if (failed) return failed;
     ejected.delete(volume.uuid || volume.path);
     record("system.disk.connect", { user, detail: `${volume.label || diskLabel(disk)} → ${path}` });
+    return { path };
+  });
+}
+
+/** A folder connected until its disk is unplugged, connected for good instead: in /etc/fstab from now on */
+export function keepConnected(path: string, user: string, dry = false): Promise<Outcome> {
+  return oneAtATime(async () => {
+    const was = temporary.find((t) => t.path === path);
+    if (!was) return { error: "disk.notOurs" };
+    const volume = (await connected()).flatMap((d) => d.volumes).find((v) => v.path === was.device);
+    if (!volume || !volume.uuid) return { error: "disk.unknown" };
+    if (dry) return { path };
+    const gone = await release(path);
+    if ("error" in gone) return gone;
+    const failed = await attach(volume, path, true);
+    if (failed) return failed;
+    record("system.disk.connect", { user, detail: `${volume.label || volume.name} → ${path}` });
     return { path };
   });
 }
@@ -980,6 +998,9 @@ export interface MountingReport {
   /** Per disk, what may be formatted, checked or renamed (`changeable`) */
   changeable: Record<string, { whole: boolean; volumes: string[] }>;
 }
+
+/** The connected folders that can be merged into one now */
+export const mergeableNow = (): string[] => mergeable(fstab(), [...mountedAt().keys()]);
 
 /** The folders Hata connected */
 function oursNow(): MountingReport["ours"] {

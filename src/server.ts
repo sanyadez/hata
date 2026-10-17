@@ -35,6 +35,7 @@ import { afterPackage, exposedNics, giveBack, internetTrouble, setSide, startNet
 import { DOCKER_INSTALL_COMMAND, installDocker, startDocker } from "./dockerinstall";
 import { installOne, removeOne, toolsReport } from "./tools";
 import { checkUpdates, packageUpdates, startSysUpdates, upgrade as upgradeSystem } from "./sysupdates";
+import { checkPlan, readPlan, runPlan } from "./diskplan";
 import { ArrayError, arrayReport, arrayTrouble, bringBack, rebuild as rebuildParity, repair as repairArray, scrub as scrubArray, setUp as setUpArray, startSnapraid, stop as stopArray, sync as syncArray, turnOff as turnOffArray } from "./snapraid";
 import { dockerSpace, dropImage, dropVolume, prune as pruneDocker } from "./dockerspace";
 import { ignoreDisk, unusedDisks, absent, onDiskBack, connectVolume, disconnect, checkVolume, wipeDisk, formatDisk, mergeFolders, mountingReport, relabel, startMounting, type Outcome } from "./mounting";
@@ -1135,14 +1136,14 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
   const storage = async (more: Record<string, unknown> = {}) => {
     const listed = await listDisks();
     // long work on a disk, so a page opened meanwhile can follow it and stop it
-    const work = listJobs().find((j) => j.app === "" && j.status === "running" && ["format", "fsck", "wipe"].includes(j.kind));
+    const work = listJobs().find((j) => j.app === "" && j.status === "running" && ["format", "fsck", "wipe", "pool"].includes(j.kind));
     const working = work ? { id: work.id, kind: work.kind, target: work.target ?? "", stoppable: !!work.stoppable, line: work.log.at(-1) ?? "" } : null;
     return json({ ...listed, fills: fills(), mounting: mountingReport(listed.disks), array: arrayReport(), working, ...more });
   };
   const refused = (failure: Extract<Outcome, { error: string }>) => fail(400, failure.error, { message: failure.message ?? "", ...(failure.needs ?? {}) });
   // a long piece of work on a disk: answered at once with the job the page then follows
   // `canStop` — the page offers "Stop"; `work` gets the signal
-  const diskJob = (kind: "format" | "fsck" | "wipe", target: string, by: string, work: (log: (line: string) => void, stop?: AbortSignal) => Promise<void>, started: (job: Job) => void = () => {}, canStop = false) => {
+  const diskJob = (kind: "format" | "fsck" | "wipe" | "pool", target: string, by: string, work: (log: (line: string) => void, stop?: AbortSignal) => Promise<void>, started: (job: Job) => void = () => {}, canStop = false) => {
     try {
       const stopper = new AbortController();
       const job = startJob("", kind, by, (log) => work(log, canStop ? stopper.signal : undefined), true);
@@ -1265,6 +1266,17 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
   if (path === "/api/disks/merge" && method === "POST") {
     const data = await body(req);
     return changed(await mergeFolders(data.folders, String(data.name ?? ""), user.name));
+  }
+  // several disks at once: formatted, connected, merged, protected — refused as a whole before anything is done
+  if (path === "/api/disks/plan" && method === "POST") {
+    const data = await body(req);
+    const plan = readPlan(data);
+    if (typeof plan === "string") return fail(400, plan);
+    if (plan.disks.some((d) => d.step === "format") && !(await checkOwnPassword(user, data.password))) return fail(400, "auth.wrongPassword");
+    server.timeout(req, 0);
+    const may = await checkPlan(plan, user.name);
+    if (may) return refused(may);
+    return diskJob("pool", plan.goal, user.name, (log) => runPlan(plan, user.name, log, failureWords));
   }
   if (path === "/api/disks/disconnect" && method === "POST") {
     server.timeout(req, 0);

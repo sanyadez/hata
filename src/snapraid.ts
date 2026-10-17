@@ -176,7 +176,7 @@ const save = () => {
 let current: { what: What; since: number; percent: number | null; log: string[]; proc: ReturnType<typeof Bun.spawn> | null; stopped: boolean } | null = null;
 let lastLog: string[] = [];
 
-const installed = (): boolean => !!Bun.which("snapraid", { PATH });
+export const installed = (): boolean => !!Bun.which("snapraid", { PATH });
 const isOn = (): boolean => settings.snapraid.parity !== "" && settings.snapraid.data.length > 0;
 
 const readText = (path: string): string => {
@@ -321,7 +321,7 @@ function fstab() {
   return parseFstab(readText("/etc/fstab"));
 }
 
-function candidates(): ArrayDisk[] {
+export function candidates(): ArrayDisk[] {
   const lines = fstab();
   const now = mounted();
   const branches = Object.values(pools(lines)).flat();
