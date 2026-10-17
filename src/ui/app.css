@@ -667,6 +667,11 @@ tr.clickable:hover td { background: var(--surface-2); }
 .banner.danger { background: var(--danger-soft); border-color: var(--danger); }
 .banner.ok { background: var(--ok-soft); border-color: var(--ok); }
 .kv-list .kv { border-top: 1px solid var(--border); padding: 10px 0; align-items: center; }
+.kv > .fit { flex: 1 1 auto; min-width: 0; }
+.kv > .fit + .row-actions { flex: none; }
+.fit-why { display: flex; gap: 6px; align-items: flex-start; margin-top: 4px; color: var(--muted); }
+.fit-why .ico { width: 14px; height: 14px; flex: none; margin-top: 2px; }
+.fit-why.ok { color: var(--ok); }
 dialog.disk header .state { flex: none; }
 .disk-use { display: grid; gap: 4px; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border); }
 .disk-use h3 { font: 600 13px var(--font-heading); margin: 0 0 4px; }

@@ -9894,7 +9894,7 @@ function storageSection() {
       ),
     data.mounting?.possible && h("section", { class: "card pad" }, h("label", { class: "check" }, automount, h("span", null, h("strong", null, t("mounting.automount")), h("span", { class: "muted small block" }, t("mounting.automountHint"))))),
     state.places && placesCard(state.places),
-    data.array && data.mounting?.possible && arrayCard(data.array),
+    data.array && data.mounting?.possible && arrayCard(data, data.array),
     data.fills && fillsCard(data.fills, busy),
   ].filter(Boolean);
 }
@@ -10182,7 +10182,7 @@ async function arrayCall(method, path, data, done) {
   }
 }
 
-function arrayCard(array) {
+function arrayCard(data, array) {
   clearTimeout(arrayTimer);
   // a run moves without telling: the page looks again while one goes
   if (array.running) arrayTimer = setTimeout(async () => state.route.view === "settings" && state.route.section === "storage" && setDisks(await api("GET", "/api/disks").catch(() => state.disks)), 3000);
@@ -10218,7 +10218,7 @@ function arrayCard(array) {
       ),
     );
   }
-  if (!array.on) return h("section", { class: "card pad stack" }, head(array.candidates.length > 1 && button(t("array.setUp"), { class: "small primary", onclick: () => arrayDialog(array) })), lead, array.candidates.length < 2 && h("p", { class: "muted small" }, t("array.needsDisks")));
+  if (!array.on) return h("section", { class: "card pad stack" }, head(array.candidates.length > 1 && button(t("array.setUp"), { class: "small primary", onclick: () => arrayDialog(array) })), lead, array.candidates.length < 2 && h("p", { class: "muted small" }, t("array.needsDisks")), arrayFit(data, array));
 
   const busy = !!array.running;
   const d = array.diff;
@@ -10255,6 +10255,59 @@ function arrayCard(array) {
       array.appDataRule !== null && row("AppData", t(array.settings.appData ? "array.appDataIn" : "array.appDataOut")),
     ),
     array.log.length > 0 && h("details", null, h("summary", { class: "muted small" }, t("array.log")), h("pre", { class: "console small-console" }, array.log.join("\n"))),
+  );
+}
+
+/** Every file system of the disks here: whether it can take part in the array, and if not, why and what to do */
+function arrayFit(data, array) {
+  const ours = data.mounting.ours;
+  const rows = [];
+  const add = (title, sub, fits, why, action) => rows.push({ title, sub, fits, why, action });
+  for (const disk of data.disks) {
+    const blocked = data.mounting.blockers[disk.name] ?? [];
+    const whole = [diskTitle(disk), disk.name, bytes(disk.size)].join(" · ");
+    const stop = ["system", "member", "readonly"].find((b) => blocked.includes(b));
+    if (stop) {
+      add(diskTitle(disk), whole, false, t("array.fit." + stop));
+      continue;
+    }
+    const volumes = disk.volumes.filter((v) => !v.swap);
+    if (!volumes.some((v) => v.fstype)) {
+      add(diskTitle(disk), whole, false, t("array.fit.blank"), canPrepare(disk) && button(t("mounting.format"), { class: "small", onclick: () => formatDialog(disk) }));
+      continue;
+    }
+    for (const v of volumes) {
+      const at = v.mounts[0];
+      const title = at ?? (v.label || diskTitle(disk));
+      const sub = [diskTitle(disk), v.name, v.fstype || "—", bytes(v.size)].join(" · ");
+      const format = changeable(disk).volumes.includes(v.path) && button(t("mounting.format"), { class: "small", onclick: () => formatDialog(disk, disk.volumes.length > 1 ? v : undefined) });
+      const candidate = at && array.candidates.find((c) => c.path === at);
+      if (candidate) add(title, sub, true, t(candidate.merged || candidate.holds ? "array.fit.dataOnly" : "array.fit.yes"));
+      else if (!v.fstype) add(title, sub, false, t("array.fit.blank"), format);
+      else if (!/^(ext[234]|xfs|btrfs|f2fs)$/.test(v.fstype)) add(title, sub, false, t("array.fit.foreign", { fs: v.fstype }), format);
+      else if (!at) add(title, sub, false, t("array.fit.notConnected"), data.mounting.mountable.includes(v.path) && button(t("mounting.connect"), { class: "small", onclick: () => connectDialog(disk, v) }));
+      else if (ours[at] === "temporary") add(title, sub, false, t("array.fit.temporary"), button(t("mounting.disconnect"), { class: "small", onclick: () => disconnectDialog({ path: at, disk: disk.name }) }));
+      else if (ours[at] === "kept") add(title, sub, false, t("array.fit.pool"));
+      else add(title, sub, false, t("array.fit.byHand", { path: at }));
+    }
+  }
+  if (!rows.length) return null;
+  return h(
+    "div",
+    { class: "stack" },
+    h("strong", { class: "small" }, t("array.fit.title")),
+    h(
+      "div",
+      { class: "kv-list" },
+      rows.map((r) =>
+        h(
+          "div",
+          { class: "kv" },
+          h("div", { class: "fit" }, h("span", { class: r.title.startsWith("/") ? "strong mono" : "strong" }, r.title), h("div", { class: "muted small" }, r.sub), h("div", { class: "small fit-why" + (r.fits ? " ok" : "") }, icon(r.fits ? "check" : "x"), r.why)),
+          r.action ? h("div", { class: "row-actions" }, r.action) : h("span"),
+        ),
+      ),
+    ),
   );
 }
 
