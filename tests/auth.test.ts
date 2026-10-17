@@ -176,6 +176,10 @@ test("a member may look, not touch", async () => {
   expect(memberMay("POST", "/api/account/password", "guest")).toBe(false);
   expect(memberMay("POST", "/api/account/totp/begin", "guest")).toBe(false);
   expect(memberMay("GET", "/api/store", "guest")).toBe(false);
+  // Files are let through: what they may do there is judged by the shared folders (memberfiles)
+  expect(memberMay("POST", "/api/files/delete")).toBe(true);
+  expect(memberMay("GET", "/api/files", "guest")).toBe(true);
+  expect(memberMay("GET", "/api/filesystem")).toBe(false);
 });
 
 test("invitations are single-use links for members and guests", async () => {

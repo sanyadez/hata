@@ -25,7 +25,7 @@ import { allowed as oauthAllowed, declined as oauthDeclined, findClient, holdQue
 import { checkOffsite, forgetHost, offsiteFailure, saveOffsite } from "./offsite";
 import { notSnoozed, snooze } from "./snooze";
 import { APP_NAME_RE, dumpCompose } from "./appform";
-import { trashSizeOn } from "./trash";
+import { findInTrash, trashSizeOn } from "./trash";
 import { discover as discoverPlaces, installFor as installPlaceTools, listPlaces, placesDown, removePlace, retryPlace, savePlace, shares as placeShares, startNetPlaces } from "./netplaces";
 import { addShare, changeShare, installSamba, listShares, refreshShares, removeShare, shareTrouble, startShares } from "./shares";
 import { checkDisks, diskHealth, installTool, listDisks, startDisks, startSelfTest } from "./disks";
@@ -89,7 +89,7 @@ import { bus } from "./bus";
 import { DATA_DIR, dropOldSecrets, listenAddress, saveSettings, settings, timezone, updateSettings } from "./config";
 import { arrange, cleanLayout, layoutText, parseLayoutText } from "./dashboard";
 import { dockerInfo, listContainers, watchEvents } from "./docker";
-import { abortUpload, copyIn, archivePlan, dropFavorites, emptyTrash, favoritesOf, setFavorite, extract as extractArchive, find as findFiles, list as listFiles, makeFile, makeFolder, pinFolder, pinnedFolders, readable, readText, remove as removeFiles, rename as renameFile, restore as restoreFiles, setTrashDays, startTrash, summary as filesSummary, transfer, trash, upload, writeText } from "./files";
+import { abortUpload, copyIn, locate, validName, archivePlan, dropFavorites, emptyTrash, favoritesOf, setFavorite, extract as extractArchive, find as findFiles, list as listFiles, makeFile, makeFolder, pinFolder, pinnedFolders, readable, readText, remove as removeFiles, rename as renameFile, restore as restoreFiles, setTrashDays, startTrash, summary as filesSummary, transfer, trash, upload, writeText } from "./files";
 import { adoptProject, casaosState, containerDraft, importCount, importList, moveInCasaos, projectDraft, rebuildContainer } from "./import";
 import { accessOf, dropAccess, dropUser, gateTarget, guard, guardsOf, mayOpen, otherPorts, MAX_APP_BODY, page, passToApp, setAccess, startGates, tunnelHandlers } from "./gate";
 import { parseDockerRun } from "./dockerrun";
@@ -108,6 +108,7 @@ import { IMAGE_MIME, imageType, wallpaperSvg, WALLPAPERS } from "./wallpapers";
 import { containerCommand, MAX_BUFFERED_BYTES, shellCommand, TerminalError, TerminalManager, terminalEnv, WS_SLOW_CLIENT, type TerminalClient, type TerminalStart } from "./terminal";
 import { MuxError, type Channel } from "./mux";
 import { crossTransfer } from "./machinefiles";
+import { rightsOf } from "./memberfiles";
 import { moveApp, moveCheck } from "./moveapp";
 import { backupMachineApp, restoreMachineApp } from "./machinebackup";
 import { machineAccessRows, setMachineAccess, startMachineGates } from "./machinegate";
@@ -282,7 +283,8 @@ function passkeyDomain(req: Request): string {
 /** The rules ask this administrator for two-factor sign-in, and it is not on yet */
 const mustSetUpTwoFactor = (user: User): boolean => user.role === "admin" && settings.security.adminTwoFactor && !user.totp;
 /** The user the page is told it is signed in as */
-const signedIn = (user: User) => ({ ...publicUser(user), mustTwoFactor: mustSetUpTwoFactor(user) });
+// `files` — folders are shared with one who is not an administrator, so Files is there for them
+const signedIn = (user: User) => ({ ...publicUser(user), mustTwoFactor: mustSetUpTwoFactor(user), files: user.role !== "admin" || mustSetUpTwoFactor(user) ? rightsOf(user).shares.length > 0 : true });
 
 const publicSettings = () => ({ ...settings, systemTimezone: timezone(), languages: Object.keys(LANGUAGES), stateDir: DATA_DIR, stateMovable: cannotMove() === null });
 
@@ -293,6 +295,8 @@ export function memberMay(method: string, path: string, role: Role = "member"): 
   if (path === "/api/logout" || path === "/api/account") return true;
   // a guest is a shared account: whoever holds it must not be able to lock the others out of it
   if (path.startsWith("/api/account/")) return role !== "guest";
+  // the folders shared with them; what they may do inside is `memberFiles`'s to say
+  if (path === "/api/files" || path.startsWith("/api/files/")) return true;
   if (method !== "GET") return false;
   if (["/api/events", "/api/overview", "/api/apps"].includes(path) || /^\/api\/apps\/[a-z0-9_-]+(\/(stats|icon))?$/.test(path)) return true;
   return role === "member" && (path === "/api/store" || /^\/api\/store\/[a-z0-9-]+\/apps\/[a-z0-9_-]+$/.test(path));
@@ -647,6 +651,8 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
   // an administrator the rules ask for two-factor sign-in is a member until it is set up
   const admin = user.role === "admin" && !mustSetUpTwoFactor(user);
   if (!admin && !memberMay(method, path, user.role === "admin" ? "member" : user.role)) return fail(403, user.role === "admin" ? "auth.twoFactorRequired" : "auth.forbidden");
+  // a member's Files: the shared folders, with the rights given there
+  if (!admin && path.startsWith("/api/files")) return memberFiles(req, url, server, user);
 
   // ---- the signed-in user's own account ----
   if (path === "/api/account" && method === "GET") {
@@ -1913,6 +1919,64 @@ async function files(req: Request, url: URL, server: Server, by: string, userId:
     return json({ ok: true });
   }
   return null;
+}
+
+/** Files for one who is not an administrator: every path is checked against the shared folders first */
+async function memberFiles(req: Request, url: URL, server: Server, user: User): Promise<Response> {
+  const path = url.pathname;
+  const method = req.method;
+  const q = url.searchParams;
+  const rights = rightsOf(user);
+  const read = (p: unknown) => rights.need(p, "read");
+  const write = (p: unknown) => rights.need(p, "write");
+  // the body is read here for the checks, and again by the route itself
+  const data = method === "POST" || (method === "PUT" && path === "/api/files/text") ? await body(req.clone()) : {};
+  const paths = (value: unknown): unknown[] => (Array.isArray(value) ? value : [value]);
+  const favorites = () => favoritesOf(user.id).filter((one) => rights.may(one.path, "read"));
+  if (path === "/api/files/shares" && method === "GET") return json({ shares: rights.shares, favorites: favorites() });
+  if (path === "/api/files" && method === "GET") {
+    const at = q.get("path") ?? "";
+    read(at);
+    const listing = await listFiles(at);
+    // the server's places are not theirs to see
+    return json({ ...listing, readOnly: listing.readOnly || !rights.may(listing.path, "write"), home: "", pinned: [], places: [], disks: [], shared: [], shares: rights.shares, favorites: favorites() });
+  }
+  if (path === "/api/files/trash" && method === "GET") {
+    const items = trash().items.filter((item) => rights.may(item.from, "write", true));
+    return json({ items, size: items.reduce((sum, item) => sum + item.size, 0), keepDays: trash().keepDays });
+  }
+  const checked = ((): boolean => {
+    if (path === "/api/files/favorite" && method === "POST") return !!read(data.path);
+    if (path === "/api/files/raw" && method === "GET") return !!read(q.get("path"));
+    if (path === "/api/files/text" && method === "GET") return !!read(q.get("path"));
+    if (path === "/api/files/text" && method === "PUT") return !!write(data.path);
+    if (path === "/api/files/summary" && method === "POST") return paths(data.paths).every((p) => rights.need(p, "read", { entry: true }));
+    if (path === "/api/files/zip" && method === "GET") return q.getAll("path").every(read);
+    if (path === "/api/files/find" && method === "GET") return !!read(q.get("path"));
+    if ((path === "/api/files/folder" || path === "/api/files/file") && method === "POST") return !!write(data.path);
+    if (path === "/api/files/rename" && method === "POST") return !!rights.need(data.path, "write", { entry: true, inner: true });
+    if ((path === "/api/files/move" || path === "/api/files/copy") && method === "POST") {
+      const copy = path.endsWith("copy");
+      return paths(data.paths).every((p) => rights.need(p, copy ? "read" : "write", { entry: true, inner: !copy })) && !!write(data.to);
+    }
+    if (path === "/api/files/delete" && method === "POST") return paths(data.paths).every((p) => rights.need(p, "write", { entry: true, inner: true }));
+    if (path === "/api/files/trash/restore" && method === "POST") {
+      const ids = Array.isArray(data.ids) ? data.ids : [];
+      return ids.every((id) => {
+        const item = typeof id === "string" ? findInTrash(id) : null;
+        if (!item || !rights.may(item.from, "write", true)) throw new AppError("files.notShared", 403);
+        return true;
+      });
+    }
+    if (path === "/api/files/upload" && (method === "PUT" || method === "DELETE")) {
+      const sub = (q.get("sub") ?? "").split("/").filter(Boolean);
+      // where the part lands, folders of the upload included — one of them may be a link already there
+      return !!write(join(locate(q.get("dir")), ...sub.map(validName)));
+    }
+    return false;
+  })();
+  if (!checked) return fail(403, "auth.forbidden");
+  return (await files(req, url, server, user.name, user.id)) ?? fail(404, "request.notFound");
 }
 
 // --- Other machines ---------------------------------------------------------------------------------
