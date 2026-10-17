@@ -1108,9 +1108,16 @@ body:has(> .assistant-fab) #view:not(.fill) { padding-bottom: 104px; }
 .machine-wait .btn { margin-left: auto; }
 .machine-pulse { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); animation: machine-pulse 1.2s ease-in-out infinite; }
 @keyframes machine-pulse { 50% { opacity: 0.25; } }
-.machine-project .section-head { flex-wrap: wrap; }
-.machine-project .section-head .row-actions { margin-left: auto; }
-.machine-project { gap: 10px; }
+/* a compose project of a machine: its name and buttons, then its containers, in one card */
+.machine-project { overflow: hidden; }
+.project-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 14px 20px; border-bottom: 1px solid var(--border); }
+.project-head h2 { flex: 1; display: flex; align-items: baseline; gap: 10px; margin: 0; }
+.project-head h2 .muted { font-size: 13px; font-weight: 400; }
+.project-head .row-actions { margin-left: auto; }
+@container tablebox (min-width: 641px) {
+  .machine-containers td:last-child { width: 1%; white-space: nowrap; }
+  .machine-containers td:last-child .row-actions { flex-wrap: nowrap; gap: 2px; }
+}
 .machine-containers th:nth-child(1) { width: 38%; }
 .machine-containers th:nth-child(2) { width: 24%; }
 .machine-containers th:last-child { width: 1%; }

@@ -3113,10 +3113,10 @@ function paintMachineContainers() {
       const running = list.filter((c) => c.state === "running").length;
       return h(
         "section",
-        { class: "stack machine-project" },
+        { class: "card machine-project" },
         h(
           "div",
-          { class: "section-head" },
+          { class: "project-head" },
           h("h2", null, name || t("machines.loose"), h("span", { class: "muted" }, t("machines.running", { n: running, total: list.length }))),
           name &&
             h(
@@ -3126,7 +3126,7 @@ function paintMachineContainers() {
               running > 0 && button(t("app.restart"), { class: "small", onclick: act(`projects/${encodeURIComponent(name)}`, "restart") }, "refresh"),
             ),
         ),
-        h("div", { class: "card table-wrap" }, h("table", { class: "machine-containers" }, h("thead", null, h("tr", null, h("th", null, t("app.col.container")), h("th", null, t("app.col.state")), h("th", null, t("app.col.ports")), h("th"))), h("tbody", null, list.map(row)))),
+        h("div", { class: "table-wrap" }, h("table", { class: "machine-containers" }, h("thead", null, h("tr", null, h("th", null, t("app.col.container")), h("th", null, t("app.col.state")), h("th", null, t("app.col.ports")), h("th"))), h("tbody", null, list.map(row)))),
       );
     })),
   );
