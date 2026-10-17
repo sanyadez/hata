@@ -318,8 +318,9 @@ function parseRoute() {
   if (parts[0] === "trash" && mayFiles()) return { view: "trash" };
   if (parts[0] === "hata" && mayFiles()) return { view: "myhata" };
   if (parts[0] === "activity" && isAdmin()) return { view: "activity" };
-  if (parts[0] === "backups" && isAdmin()) return { view: "backups" };
-  if (parts[0] === "users" && isAdmin()) return { view: "users" };
+  // both live in Settings; their own old addresses still lead there
+  if ((parts[0] === "backups" || (parts[0] === "settings" && parts[1] === "backups")) && isAdmin()) return { view: "backups" };
+  if ((parts[0] === "users" || (parts[0] === "settings" && parts[1] === "users")) && isAdmin()) return { view: "users" };
   if (parts[0] === "import" && isAdmin()) return { view: "import" };
   if (parts[0] === "terminal" && isAdmin()) return { view: "terminal" };
   if (parts[0] === "assistant" && isAdmin()) return { view: "assistant" };
@@ -778,8 +779,6 @@ const NAV = [
   { view: "store", hash: "#/store", icon: "grid", guest: false },
   { view: "files", hash: "#/files", icon: "folder", files: true },
   { view: "machines", hash: "#/machines", icon: "server", admin: true },
-  { view: "backups", hash: "#/backups", icon: "archive", admin: true },
-  { view: "users", hash: "#/users", icon: "user", admin: true },
   { view: "assistant", hash: "#/assistant", icon: "chat", admin: true, assistant: true },
   { view: "settings", hash: "#/settings", icon: "sliders" },
 ];
@@ -805,7 +804,7 @@ async function loadMine() {
   state.favorites = mine.favorites;
 }
 
-const navCurrent = () => (state.route.view === "machine" ? "machines" : state.route.view === "app" ? "home" : state.route.view === "import" ? "store" : state.route.view === "trash" || state.route.view === "myhata" ? "files" : state.route.view);
+const navCurrent = () => (state.route.view === "machine" ? "machines" : state.route.view === "backups" || state.route.view === "users" ? "settings" : state.route.view === "app" ? "home" : state.route.view === "import" ? "store" : state.route.view === "trash" || state.route.view === "myhata" ? "files" : state.route.view);
 const navItems = () => NAV.filter((item) => (!item.admin || isAdmin()) && (!item.files || mayFiles()) && (!item.assistant || !!(assistantUi.config?.ready ?? state.overview?.assistant)) && (item.guest !== false || state.user.role !== "guest"));
 
 function navLinks(className, items = navItems()) {
@@ -4082,9 +4081,12 @@ async function appBackupsTab(app, box) {
 
 function renderBackups() {
   shell(
-    h("div", { class: "page-head" }, h("div", null, h("h1", null, t("nav.backups")), h("p", { class: "meta", id: "backup-meta" }, " ")), h("div", { class: "actions", id: "backup-actions" })),
-    h("section", { class: "stats card", id: "backup-stats" }),
-    h("div", { class: "columns" }, h("section", { id: "backup-apps" }), h("aside", { class: "side", id: "backup-side" })),
+    ...settingsFrame(
+      "backups",
+      h("div", { class: "page-head section-page" }, h("div", null, h("h2", null, t("nav.backups")), h("p", { class: "meta", id: "backup-meta" }, " ")), h("div", { class: "actions", id: "backup-actions" })),
+      h("section", { class: "stats card", id: "backup-stats" }),
+      h("div", { class: "columns" }, h("section", { id: "backup-apps" }), h("aside", { class: "side", id: "backup-side" })),
+    ),
   );
   renderBackupsBody();
 }
@@ -7046,7 +7048,7 @@ function paintWelcome() {
         places.length > 0 && h("div", { class: "row-actions wrap" }, places.map((path) => button(`${path}/Backups`, { class: "small mono", onclick: () => ((dir.value = `${path}/Backups`), check()) }))),
         same,
       ),
-      h("p", { class: "muted small" }, t("welcome.backups.more"), " ", h("a", { class: "link", href: "#/backups" }, t("nav.backups"))),
+      h("p", { class: "muted small" }, t("welcome.backups.more"), " ", h("a", { class: "link", href: "#/settings/backups" }, t("nav.backups"))),
       ...welcomeFoot(step, async () => {
         state.settings = await api("PUT", "/api/settings", { backup: { enabled: enabled.checked, time: time.value, keep: Number(keep.value), dir: dir.value.trim() } });
       }),
@@ -7114,6 +7116,8 @@ const LANGUAGE_NAMES = { en: "English", uk: "Українська" };
 const SECTIONS = [
   { id: "account", icon: "user" },
   { id: "general", icon: "sliders" },
+  { id: "users", icon: "user", admin: true, label: "nav.users" },
+  { id: "backups", icon: "archive", admin: true, label: "nav.backups" },
   { id: "appearance", icon: "image", admin: true },
   { id: "apps", icon: "grid", admin: true },
   { id: "docker", icon: "box", admin: true },
@@ -11957,15 +11961,20 @@ function agentsSection() {
 
 function renderSettings() {
   const section = state.route.section;
-  shell(
+  shell(...settingsFrame(section, state.account && (state.settings || !isAdmin()) ? settingsSection(section) : h("p", { class: "muted" }, "…")));
+}
+
+/** The head and the list of sections of Settings around what one section shows */
+function settingsFrame(section, ...content) {
+  return [
     h("div", { class: "page-head" }, h("div", null, h("h1", null, t("nav.settings")), h("p", { class: "meta" }, `Hata ${state.version}`))),
     h(
       "div",
       { class: "settings" },
-      h("nav", { class: "cats fold" }, sections().map((item) => h("a", { class: "cat" + (section === item.id ? " active" : ""), href: `#/settings/${item.id}` }, h("span", { class: "with-icon" }, icon(item.icon), t("settings." + item.id))))),
-      h("div", { class: "stack" }, state.account && (state.settings || !isAdmin()) ? settingsSection(section) : h("p", { class: "muted" }, "…")),
+      h("nav", { class: "cats fold" }, sections().map((item) => h("a", { class: "cat" + (section === item.id ? " active" : ""), href: `#/settings/${item.id}` }, h("span", { class: "with-icon" }, icon(item.icon), t(item.label ?? "settings." + item.id))))),
+      h("div", { class: "stack" }, content),
     ),
-  );
+  ];
 }
 
 // --- Account and users --------------------------------------------------------------------------
@@ -12310,7 +12319,9 @@ function renderUsers() {
   const admins = users.filter((u) => u.role === "admin").length;
   const without = users.filter((u) => !u.twoFactor).length;
   shell(
-    h("div", { class: "page-head" }, h("div", null, h("h1", null, t("nav.users")), h("p", { class: "meta" }, t("users.meta", { users: users.length, admins }), without > 0 && h("span", { class: "dot-sep" }, "·"), without > 0 && t("users.without2fa", { n: without }))), h("div", { class: "actions" }, button(t("users.add"), { class: "primary", onclick: userDialog }, "plus"))),
+    ...settingsFrame(
+    "users",
+    h("div", { class: "page-head section-page" }, h("div", null, h("h2", null, t("nav.users")), h("p", { class: "meta" }, t("users.meta", { users: users.length, admins }), without > 0 && h("span", { class: "dot-sep" }, "·"), without > 0 && t("users.without2fa", { n: without }))), h("div", { class: "actions" }, button(t("users.add"), { class: "primary", onclick: userDialog }, "plus"))),
     h(
       "div",
       { class: "card table-wrap" },
@@ -12339,6 +12350,7 @@ function renderUsers() {
     h("p", { class: "muted small" }, t("users.rolesHint")),
     requireTwoFactorRow(),
     h("div", { class: "columns" }, h("section", null, accessMatrix()), h("aside", { class: "side" }, invitesCard(), signInLog())),
+    ),
   );
 }
 

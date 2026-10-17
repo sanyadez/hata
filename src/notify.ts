@@ -269,8 +269,8 @@ export function backupMessage(run: BackupRun, lang: string): Message {
   const minutes = String(Math.max(1, Math.round(run.took / 60_000)));
   const names = run.failed.map((name) => (name.includes("@") ? tr(lang, "notify.backups.onMachine", { app: name.split("@")[0]!, machine: name.split("@")[1]! }) : name)).join(", ");
   return run.failed.length
-    ? { title: tr(lang, "notify.backups.failedTitle", { ok: run.ok, failed: run.failed.length }), text: tr(lang, "notify.backups.failedText", { names, minutes }), severity: "warn", route: "#/backups", tag: "backups", code: "backups" }
-    : { title: tr(lang, "notify.backups.title", { ok: run.ok }), text: tr(lang, "notify.backups.text", { minutes }), severity: "ok", route: "#/backups", tag: "backups", code: "backups" };
+    ? { title: tr(lang, "notify.backups.failedTitle", { ok: run.ok, failed: run.failed.length }), text: tr(lang, "notify.backups.failedText", { names, minutes }), severity: "warn", route: "#/settings/backups", tag: "backups", code: "backups" }
+    : { title: tr(lang, "notify.backups.title", { ok: run.ok }), text: tr(lang, "notify.backups.text", { minutes }), severity: "ok", route: "#/settings/backups", tag: "backups", code: "backups" };
 }
 
 /** What an agent asks to do, as the rest of the sentence "It wants to …" */
