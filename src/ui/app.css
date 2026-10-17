@@ -733,8 +733,14 @@ dialog.dropdown header { padding: 4px 6px; margin-bottom: 8px; }
 .prose { display: grid; gap: 8px; }
 .prose p { margin: 0; }
 .prose ul, .prose ol { margin: 0; padding-left: 20px; display: grid; gap: 4px; }
-.shots { display: flex; gap: 8px; overflow-x: auto; }
-.shots img { height: 170px; border-radius: var(--radius-md); border: 1px solid var(--border); }
+.shot-view { position: relative; }
+.shot-stage { display: grid; place-items: center; height: clamp(180px, min(40vh, 58vw), 400px); background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-md); overflow: hidden; touch-action: pan-y; user-select: none; }
+.shot-stage a { display: block; width: 100%; height: 100%; }
+.shot-stage img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.shot-view .icon-btn { position: absolute; top: 50%; transform: translateY(-50%); background: var(--surface); border: 1px solid var(--border); border-radius: 50%; width: 36px; height: 36px; }
+.shot-prev { left: 10px; }
+.shot-next { right: 10px; }
+.shot-count { position: absolute; right: 12px; bottom: 10px; background: var(--surface); color: var(--muted); font-size: 12px; padding: 2px 8px; border-radius: 999px; }
 .tips { background: var(--surface-2); border-radius: var(--radius-md); padding: 12px 16px; display: grid; gap: 6px; }
 .tips p, .tips li { overflow-wrap: anywhere; color: var(--muted); }
 .install-form { background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 18px; gap: 22px; }
@@ -1122,10 +1128,10 @@ body:has(> .assistant-fab) #view:not(.fill) { padding-bottom: 104px; }
 .path .machine-crumb .ico { width: 0.9em; height: 0.9em; }
 .machine-app { gap: 12px; }
 .machine-apps th:last-child { width: 1%; }
-.store-target { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; padding: 12px 14px; border: 1px solid var(--border); border-radius: var(--radius-md); }
-.store-target :is(label, .label) { font-weight: 600; }
-.store-target :is(select, .select-btn) { width: auto; min-width: 220px; }
-.store-target p { flex-basis: 100%; margin: 0; }
+.store-where { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 12px; min-width: 0; }
+.store-where label { font-weight: 600; }
+@media (max-width: 760px) { .store-where { flex-basis: 100%; } }
+.store-where :is(select, .select-btn) { width: auto; min-width: 200px; max-width: 100%; }
 .backup-name { gap: 2px; justify-items: start; }
 .backup-name .with-icon .ico { width: 14px; height: 14px; }
 .lock-mark .ico { width: 13px; height: 13px; vertical-align: -2px; margin-right: 4px; color: var(--muted); }

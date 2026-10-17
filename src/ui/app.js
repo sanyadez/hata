@@ -6200,61 +6200,81 @@ async function storeDialog(entry, target = state.installTarget ?? "") {
     },
   });
 
+  // where it goes, next to the button that puts it there; with no machine ready, the way to connect one
+  const here = t("store.whereHere", { name: state.overview?.system.hostname ?? "Hata" });
+  const where =
+    isAdmin() &&
+    h(
+      "div",
+      { class: "store-where grow" },
+      h("label", { for: "store-target" }, t("store.where")),
+      targets.length > 0
+        ? h("select", { id: "store-target", onchange: (e) => (dialog.close(), void storeDialog(entry, e.target.value)) }, h("option", { value: "", selected: !target }, here), targets.map((m) => h("option", { value: m.id, selected: m.id === target }, t("store.whereMachine", { name: m.name }))))
+        : h("span", null, here),
+      targets.length === 0 && h("a", { class: "link small", href: "#/machines", title: t(machinesUi.list?.machines?.length ? "store.whereNoneReady" : "store.whereNone"), onclick: () => dialog.close() }, t("store.whereOther")),
+    );
   const hasForm = isAdmin() && (settingsForm ? settingsForm.rows.length > 0 || settingsForm.more : ports.length + volumes.length + envs.length > 0);
   // what the app asks of the server beyond its folders and ports, said before it is installed
   const permissions = app.permissions.length > 0 && h("div", { class: "tips prose" }, h("strong", null, t("store.permissions")), h("ul", null, app.permissions.map((p) => h("li", null, h("strong", null, t(`store.permission.${p.id}`)), " — ", p.why))));
   dialog = openDialog(
     "xwide store-app",
     h("header", null, appIcon(app, "lg"), h("div", { class: "grow" }, h("h2", null, app.title), h("p", { class: "muted" }, app.tagline), h("p", { class: "muted small" }, [app.category, app.developer && t("store.by", { developer: app.developer }), app.version && t("store.version", { version: app.version })].filter(Boolean).join(" · "))), closeX(() => dialog)),
-    targets.length > 0 &&
-      h(
-        "div",
-        { class: "store-target" },
-        h("label", { for: "store-target" }, t("store.where")),
-        h(
-          "select",
-          { id: "store-target", onchange: (e) => (dialog.close(), void storeDialog(entry, e.target.value)) },
-          h("option", { value: "", selected: !target }, t("store.whereHere", { name: state.overview?.system.hostname ?? "Hata" })),
-          targets.map((m) => h("option", { value: m.id, selected: m.id === target }, t("store.whereMachine", { name: m.name }))),
-        ),
-        h("p", { class: "muted small" }, t("store.whereHint")),
-      ),
-    // nowhere else to install yet: what the machines are and how one is connected
-    isAdmin() && targets.length === 0 &&
-      h(
-        "div",
-        { class: "store-target" },
-        h("span", { class: "label" }, t("store.where")),
-        h("span", null, t("store.whereHere", { name: state.overview?.system.hostname ?? "Hata" })),
-        h(
-          "p",
-          { class: "muted small" },
-          t(machinesUi.list?.machines?.length ? "store.whereNoneReady" : "store.whereNone"),
-          " ",
-          h("a", { class: "link", href: "#/machines", onclick: () => dialog.close() }, t("store.whereMachines")),
-        ),
-      ),
     !supported && h("p", { class: "banner" }, t("store.unsupported", { arch: arch ?? "" })),
+    app.screenshots.length > 0 && shotsView(app.screenshots),
     h(
       "div",
       { class: "store-app-body" },
       h(
         "div",
         { class: "stack" },
-        app.screenshots.length > 0 && h("div", { class: "shots" }, app.screenshots.map((src) => h("img", { src, alt: "", loading: "lazy", referrerPolicy: "no-referrer", onerror: (e) => e.target.remove() }))),
         h("div", { class: "description prose" }, md(app.description)),
         app.tips && h("div", { class: "tips prose" }, h("strong", null, t("store.tips")), md(app.tips)),
         permissions,
         app.website && h("a", { class: "link", href: app.website, target: "_blank", rel: "noopener noreferrer" }, app.website.replace(/^https?:\/\//, "").replace(/\/$/, ""), icon("external")),
+        h("p", { class: "cmd small" }, icon("terminal"), `docker compose -p ${app.name} up -d`),
       ),
       hasForm && settingsForm && h("div", { class: "stack install-form" }, formSection(t("store.settings"), t("store.settingsHint"), settingsForm.rows), settingsForm.more),
       hasForm && !settingsForm && h("div", { class: "stack install-form" }, formSection(t("store.ports"), target ? t("store.portsOn", { name: targets.find((m) => m.id === target)?.name ?? "" }) : t("store.portsHint"), ports), formSection(t("store.volumes"), target ? t("store.volumesHint", { path: app.form.volumes[0]?.source.split("/AppData/")[0] || "/DATA" }) : state.settings ? t("store.volumesHint", { path: state.settings.dataRoot }) : "", volumes), formSection(t("store.envs"), t("store.envsHint"), envs)),
     ),
     error,
-    h("footer", null, h("p", { class: "cmd grow" }, icon("terminal"), `docker compose -p ${app.name} up -d`), closeButton(() => dialog, t("common.cancel")), install),
+    h("footer", null, where, closeButton(() => dialog, t("common.cancel")), install),
   );
   // the dialog would otherwise put the focus ring on its close button
   (install.disabled ? dialog : install).focus();
+}
+
+/** An app's screenshots one at a time across the whole width: arrows, a swipe, the arrow keys */
+function shotsView(list) {
+  let shots = list.map((src) => h("a", { href: src, target: "_blank", rel: "noopener noreferrer", draggable: "false" }, h("img", { src, alt: "", referrerPolicy: "no-referrer", draggable: "false" })));
+  let at = 0;
+  const stage = h("div", { class: "shot-stage", tabindex: "0", "aria-roledescription": "carousel" });
+  const count = h("span", { class: "shot-count" });
+  const step = (by) => show(at + by);
+  const prev = h("button", { type: "button", class: "icon-btn shot-prev", "aria-label": t("store.shotPrev"), onclick: () => step(-1) }, icon("chevron", "flip"));
+  const next = h("button", { type: "button", class: "icon-btn shot-next", "aria-label": t("store.shotNext"), onclick: () => step(1) }, icon("chevron"));
+  const view = h("div", { class: "shot-view" }, stage, prev, next, count);
+  const show = (i) => {
+    if (!shots.length) return view.remove();
+    at = (i + shots.length) % shots.length;
+    stage.replaceChildren(shots[at]);
+    count.textContent = `${at + 1} / ${shots.length}`;
+    prev.hidden = next.hidden = count.hidden = shots.length < 2;
+  };
+  // a picture that does not load leaves the row
+  for (const a of shots) a.firstChild.addEventListener("error", () => ((shots = shots.filter((x) => x !== a)), show(Math.min(at, shots.length - 1))));
+  stage.addEventListener("keydown", (e) => (e.key === "ArrowLeft" || e.key === "ArrowRight") && (e.preventDefault(), step(e.key === "ArrowLeft" ? -1 : 1)));
+  let from = null;
+  let swiped = false;
+  stage.addEventListener("pointerdown", (e) => ((from = e.clientX), (swiped = false)));
+  stage.addEventListener("pointerup", (e) => {
+    const moved = from === null ? 0 : e.clientX - from;
+    from = null;
+    if (Math.abs(moved) > 40 && shots.length > 1) ((swiped = true), step(moved < 0 ? 1 : -1));
+  });
+  // a swipe is not a click on the picture, which opens it whole
+  stage.addEventListener("click", (e) => swiped && e.preventDefault(), true);
+  show(0);
+  return view;
 }
 
 function customDialog() {
