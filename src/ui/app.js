@@ -9695,7 +9695,7 @@ let diskWorkListener = null;
 function diskWorkStrip(work) {
   // a disk by its model, a file system by its device
   const disk = state.disks?.disks.find((d) => d.name === work.target);
-  const title = disk ? diskTitle(disk) : work.target;
+  const title = work.kind === "pool" ? t("pool.goal." + work.target) : disk ? diskTitle(disk) : work.target;
   const line = h("span", { class: "muted small mono clip" }, work.line);
   const stop = work.stoppable && stopButton(work.id);
   jobListeners.delete(diskWorkListener);
@@ -9879,7 +9879,7 @@ function storageSection() {
       h(
         "div",
         { class: "pad card-head" },
-        h("div", { class: "section-head" }, h("h2", null, t("disks.title"), h("span", { class: "muted" }, t("disks.connected", { n: data.disks.length }))), h("div", { class: "row-actions" }, (data.mounting?.mergeable.length ?? 0) > 1 && button(t("mounting.merge"), { class: "small", onclick: () => mergeDialog() }), data.tool === "ok" && data.disks.length > 0 && checked > 0 && h("span", { class: "muted small" }, t("disks.checked", { when: ago(checked) })), data.tool === "ok" && data.disks.length > 0 && data.limits && button(t("disks.limits"), { class: "small", onclick: () => smartLimitsDialog(data.limits) }), data.tool === "ok" && data.disks.length > 0 && button(t("disks.checkNow"), { class: "small", onclick: busy("…", { path: "/api/disks/check" }) }, "refresh"))),
+        h("div", { class: "section-head" }, h("h2", null, t("disks.title"), h("span", { class: "muted" }, t("disks.connected", { n: data.disks.length }))), h("div", { class: "row-actions" }, data.mounting?.possible && data.array && data.disks.length > 1 && button(t("pool.open"), { class: "small", onclick: () => poolDialog() }), (data.mounting?.mergeable.length ?? 0) > 1 && button(t("mounting.merge"), { class: "small", onclick: () => mergeDialog() }), data.tool === "ok" && data.disks.length > 0 && checked > 0 && h("span", { class: "muted small" }, t("disks.checked", { when: ago(checked) })), data.tool === "ok" && data.disks.length > 0 && data.limits && button(t("disks.limits"), { class: "small", onclick: () => smartLimitsDialog(data.limits) }), data.tool === "ok" && data.disks.length > 0 && button(t("disks.checkNow"), { class: "small", onclick: busy("…", { path: "/api/disks/check" }) }, "refresh"))),
         h("p", { class: "muted small" }, t(data.disks.length ? "disks.lead" : "disks.none")),
         error,
       ),
@@ -9894,7 +9894,7 @@ function storageSection() {
       ),
     data.mounting?.possible && h("section", { class: "card pad" }, h("label", { class: "check" }, automount, h("span", null, h("strong", null, t("mounting.automount")), h("span", { class: "muted small block" }, t("mounting.automountHint"))))),
     state.places && placesCard(state.places),
-    data.array && data.mounting?.possible && arrayCard(data.array),
+    data.array && data.mounting?.possible && arrayCard(data, data.array),
     data.fills && fillsCard(data.fills, busy),
   ].filter(Boolean);
 }
@@ -10182,7 +10182,7 @@ async function arrayCall(method, path, data, done) {
   }
 }
 
-function arrayCard(array) {
+function arrayCard(data, array) {
   clearTimeout(arrayTimer);
   // a run moves without telling: the page looks again while one goes
   if (array.running) arrayTimer = setTimeout(async () => state.route.view === "settings" && state.route.section === "storage" && setDisks(await api("GET", "/api/disks").catch(() => state.disks)), 3000);
@@ -10218,7 +10218,7 @@ function arrayCard(array) {
       ),
     );
   }
-  if (!array.on) return h("section", { class: "card pad stack" }, head(array.candidates.length > 1 && button(t("array.setUp"), { class: "small primary", onclick: () => arrayDialog(array) })), lead, array.candidates.length < 2 && h("p", { class: "muted small" }, t("array.needsDisks")));
+  if (!array.on) return h("section", { class: "card pad stack" }, head(button(t("pool.open"), { class: "small" + (array.candidates.length > 1 ? "" : " primary"), onclick: () => poolDialog() }), array.candidates.length > 1 && button(t("array.setUp"), { class: "small primary", onclick: () => arrayDialog(array) })), lead, array.candidates.length < 2 && h("p", { class: "muted small" }, t("array.needsDisks")), arrayFit(data));
 
   const busy = !!array.running;
   const d = array.diff;
@@ -10256,6 +10256,314 @@ function arrayCard(array) {
     ),
     array.log.length > 0 && h("details", null, h("summary", { class: "muted small" }, t("array.log")), h("pre", { class: "console small-console" }, array.log.join("\n"))),
   );
+}
+
+/**
+ * Every disk and file system here, as the array and the merged folders see them: `step` — what it needs
+ * before it can take part (format, connect, keep — connect for good, ready), null — it cannot; `why` —
+ * said to the person either way.
+ */
+function storageRows(data) {
+  const ours = data.mounting.ours;
+  const pooled = Object.values(data.mounting.pools ?? {}).flat();
+  const rows = [];
+  const add = (row) => rows.push({ step: null, size: 0, path: "", device: "", ...row });
+  for (const disk of data.disks) {
+    const blocked = data.mounting.blockers[disk.name] ?? [];
+    const base = { disk, title: diskTitle(disk), sub: [diskTitle(disk), disk.name, bytes(disk.size)].join(" · "), key: disk.name, size: disk.size };
+    const stop = ["system", "member", "readonly"].find((b) => blocked.includes(b));
+    if (stop) {
+      add({ ...base, why: "array.fit." + stop });
+      continue;
+    }
+    const volumes = disk.volumes.filter((v) => !v.swap);
+    if (!volumes.some((v) => v.fstype)) {
+      add({ ...base, why: "array.fit.blank", step: changeable(disk).whole ? "format" : null });
+      continue;
+    }
+    for (const v of volumes) {
+      const at = v.mounts[0];
+      const row = { disk, volume: v, key: v.path, device: v.path, title: at ?? (v.label || diskTitle(disk)), sub: [diskTitle(disk), v.name, v.fstype || "—", bytes(v.size)].join(" · "), size: v.size };
+      // a partition alone, or the whole disk when it is the only one
+      const format = changeable(disk).volumes.includes(v.path) ? "format" : null;
+      const whole = disk.volumes.length === 1;
+      const ready = at && data.array.candidates.find((c) => c.path === at);
+      if (ready) add({ ...row, step: "ready", path: at, size: ready.size, why: ready.merged || ready.holds ? "array.fit.dataOnly" : "array.fit.yes", pooled: pooled.includes(at), holds: !!ready.holds, parity: data.array.settings.parity === at });
+      else if (!v.fstype) add({ ...row, why: "array.fit.blank", step: format, device: whole ? "" : v.path });
+      else if (!/^(ext[234]|xfs|btrfs|f2fs)$/.test(v.fstype)) add({ ...row, why: "array.fit.foreign", fs: v.fstype, step: format, device: whole ? "" : v.path });
+      else if (!at) add({ ...row, why: "array.fit.notConnected", step: data.mounting.mountable.includes(v.path) ? "connect" : null });
+      else if (ours[at] === "temporary") add({ ...row, why: "array.fit.temporary", step: "keep", path: at });
+      else if (ours[at] === "kept") add({ ...row, why: "array.fit.pool" });
+      else add({ ...row, why: "array.fit.byHand", path: at });
+    }
+  }
+  return rows;
+}
+
+const fitWhy = (r) => t(r.why, { fs: r.fs ?? "", path: r.path });
+
+/** The disks here on the protection card: whether each can take part, and if not, why and what to do */
+function arrayFit(data) {
+  const rows = storageRows(data);
+  if (!rows.length) return null;
+  const action = (r) => {
+    if (r.step === "format") return button(t("mounting.format"), { class: "small", onclick: () => formatDialog(r.disk, r.device ? r.volume : undefined) });
+    if (r.step === "connect") return button(t("mounting.connect"), { class: "small", onclick: () => connectDialog(r.disk, r.volume) });
+    if (r.step === "keep") return button(t("mounting.disconnect"), { class: "small", onclick: () => disconnectDialog({ path: r.path, disk: r.disk.name }) });
+    return null;
+  };
+  return h("div", { class: "stack" }, h("strong", { class: "small" }, t("array.fit.title")), h("div", { class: "kv-list" }, rows.map((r) => fitRow(r, r.step === "ready", action(r)))));
+}
+
+const fitRow = (r, fits, ...after) =>
+  h(
+    "div",
+    { class: "kv" },
+    h("div", { class: "fit" }, h("span", { class: r.title.startsWith("/") ? "strong mono" : "strong" }, r.title), h("div", { class: "muted small" }, r.sub), h("div", { class: "small fit-why" + (fits ? " ok" : "") }, icon(fits ? "check" : "x"), fitWhy(r))),
+    after.some(Boolean) ? h("div", { class: "row-actions" }, after) : h("span"),
+  );
+
+/**
+ * Several disks together, step by step: what for (one large folder, protection from a disk failure,
+ * both), which disks, their folders and the schedule, then one confirmation and one job that does it all.
+ */
+function poolDialog() {
+  const data = state.disks;
+  const rows = storageRows(data);
+  const arrayOn = data.array?.on;
+  const plan = { goal: arrayOn ? "merge" : "both", chosen: new Set(), parity: "", names: {}, name: "storage", time: data.array?.settings.time ?? "05:00", scrub: true };
+  let step = 1;
+  let tools = null;
+  let dialog;
+  const body = h("div", { class: "stack" });
+  const steps = h("ol", { class: "pool-steps" });
+  const merge = () => plan.goal !== "protect";
+  const protect = () => plan.goal !== "merge";
+  // a branch of a merged folder can hold data of the array, but not go into another merged folder
+  const usable = (r) => !!r.step && !r.parity && !(r.pooled && merge());
+  const chosen = () => rows.filter((r) => plan.chosen.has(r.key));
+  const parityRow = () => (protect() ? chosen().find((r) => r.key === plan.parity) : undefined);
+  const dataRows = () => chosen().filter((r) => r !== parityRow());
+  const folder = (r) => (r.step === "format" || r.step === "connect" ? "/mnt/" + (plan.names[r.key] ?? "") : r.path);
+  const named = () => {
+    let n = 0;
+    for (const r of chosen()) if ((r.step === "format" || r.step === "connect") && !plan.names[r.key]) plan.names[r.key] = r === parityRow() ? "parity1" : "disk" + ++n;
+  };
+  // what is wrong with the choice of disks, in words; "" — nothing
+  const disksTrouble = () => {
+    const need = plan.goal === "both" ? 3 : 2;
+    if (chosen().length < need) return t("pool.needDisks", { n: need });
+    if (!protect()) return "";
+    const p = parityRow();
+    if (!p) return t("pool.needParity");
+    if (p.pooled || p.holds) return t(p.pooled ? "array.cannot.merged" : "array.cannot.holds");
+    if (p.size < Math.max(...dataRows().map((r) => r.size)) * 0.97) return t("error.array.parityTooSmall");
+    return "";
+  };
+  const namesTrouble = () => {
+    const folders = chosen().map(folder);
+    if (chosen().some((r) => (r.step === "format" || r.step === "connect") && !MOUNT_NAME.test(plan.names[r.key] ?? ""))) return t("error.disk.badName");
+    if (merge() && !MOUNT_NAME.test(plan.name)) return t("error.disk.badName");
+    if (new Set([...folders, ...(merge() ? ["/mnt/" + plan.name] : [])]).size !== folders.length + (merge() ? 1 : 0)) return t("error.plan.sameFolder");
+    return "";
+  };
+  const doing = (r) => (r.step === "format" ? t("pool.do.format") : r.step === "connect" ? t("pool.do.connect") : r.step === "keep" ? t("pool.do.keep") : t("pool.do.ready"));
+  const paint = () => {
+    put(steps, ["goal", "disks", "setup", "go"].map((id, i) => h("li", { class: i + 1 === step ? "current" : i + 1 < step ? "done" : "" }, h("span", { class: "welcome-num" }, i + 1 < step ? icon("check") : String(i + 1)), t("pool.step." + id))));
+    put(body, [null, goalStep, disksStep, setupStep, goStep][step]());
+  };
+  const nav = (ok, next = () => ((step += 1), paint())) =>
+    h("footer", null, step > 1 ? button(t("pool.back"), { onclick: () => ((step -= 1), paint()) }) : closeButton(() => dialog, t("common.cancel")), button(t("pool.next"), { class: "primary", disabled: !ok, onclick: next }));
+
+  const goalStep = () => {
+    const option = (id) => {
+      const off = arrayOn && id !== "merge";
+      const input = h("input", { type: "radio", name: "pool-goal", value: id, checked: plan.goal === id, disabled: off });
+      input.addEventListener("change", () => ((plan.goal = id), (plan.parity = "")));
+      return h("label", { class: "check pool-goal" + (off ? " muted" : "") }, input, h("span", null, h("strong", null, t("pool.goal." + id)), h("span", { class: "muted small block" }, t("pool.goal." + id + ".what")), off && h("span", { class: "small block" }, t("pool.arrayOn"))));
+    };
+    return [h("p", { class: "muted" }, t("pool.lead")), option("both"), option("merge"), option("protect"), nav(true)];
+  };
+
+  const disksStep = () => {
+    const trouble = h("p", { class: "muted small" });
+    const next = button(t("pool.next"), { class: "primary" });
+    const paritySlot = h("div");
+    const check = () => {
+      const why = disksTrouble();
+      trouble.textContent = why;
+      // too few disks yet is where everybody starts, not a mistake
+      trouble.className = why && chosen().length >= (plan.goal === "both" ? 3 : 2) ? "error small" : "muted small";
+      next.disabled = !!why;
+    };
+    const parityPick = () => {
+      if (!protect()) return put(paritySlot);
+      const list = chosen();
+      if (!plan.parityChosen || !list.some((r) => r.key === plan.parity)) {
+        // the largest disk that may hold it
+        const fit = list.filter((r) => !r.pooled && !r.holds).sort((a, b) => b.size - a.size)[0];
+        plan.parity = fit?.key ?? "";
+      }
+      const select = h("select", null, h("option", { value: "" }, "—"), list.map((r) => h("option", { value: r.key, selected: r.key === plan.parity, disabled: r.pooled || r.holds }, `${r.title} · ${bytes(r.size)}`)));
+      select.addEventListener("change", () => ((plan.parity = select.value), (plan.parityChosen = true), check()));
+      put(paritySlot, field(t("array.parityDisk"), select, t("pool.parityHint")));
+    };
+    const list = rows.map((r) => {
+      const box = h("input", { type: "checkbox", checked: plan.chosen.has(r.key), disabled: !usable(r), "aria-label": r.title });
+      const tag = h("span", { class: "small" });
+      const mark = () => {
+        tag.textContent = box.checked && r.step !== "ready" ? doing(r) : "";
+        tag.className = "small " + (r.step === "format" ? "pool-erase" : "muted");
+      };
+      box.addEventListener("change", () => {
+        if (box.checked) plan.chosen.add(r.key);
+        else plan.chosen.delete(r.key);
+        mark();
+        parityPick();
+        check();
+      });
+      mark();
+      // what the wizard does about it is said beside, so the fact alone here
+      const why = r.parity ? { ...r, why: "pool.isParity" } : r.pooled && merge() ? { ...r, why: "pool.inPool" } : r.step && r.step !== "ready" ? { ...r, why: "pool.fact." + r.why.split(".").pop() } : r;
+      return h("label", { class: "kv pool-disk" + (usable(r) ? "" : " muted") }, h("div", { class: "fit" }, h("span", { class: "with-icon" }, box, h("span", { class: r.title.startsWith("/") ? "strong mono" : "strong" }, r.title)), h("div", { class: "muted small" }, r.sub), h("div", { class: "small fit-why" + (r.step === "ready" && usable(r) ? " ok" : "") }, icon(r.step === "ready" && usable(r) ? "check" : "x"), fitWhy(why))), tag);
+    });
+    next.onclick = () => ((step += 1), named(), paint());
+    parityPick();
+    check();
+    return [h("p", { class: "muted" }, t("pool.disksLead." + plan.goal)), h("div", { class: "kv-list" }, list), paritySlot, trouble, h("footer", null, button(t("pool.back"), { onclick: () => ((step -= 1), paint()) }), next)];
+  };
+
+  const setupStep = () => {
+    const trouble = h("p", { class: "error small" });
+    const next = button(t("pool.next"), { class: "primary" });
+    const check = () => {
+      trouble.textContent = namesTrouble();
+      next.disabled = !!trouble.textContent || missing().length > 0;
+    };
+    const missing = () => (tools ? [merge() && "mergerfs", protect() && "snapraid"].filter((id) => id && tools.find((x) => x.id === id)?.state === "missing") : []);
+    const nameInput = (get, set) => {
+      const input = h("input", { type: "text", value: get(), maxlength: 32, spellcheck: false });
+      input.addEventListener("input", () => (set(input.value), check()));
+      return input;
+    };
+    const disks = chosen().map((r) =>
+      h(
+        "div",
+        { class: "kv" },
+        h("div", { class: "fit" }, h("span", { class: "strong" }, r.title), h("div", { class: "muted small" }, r.sub), h("div", { class: "small " + (r.step === "format" ? "pool-erase" : "muted") }, r === parityRow() ? t("pool.forParity") : t("pool.forData"), " · ", doing(r))),
+        r.step === "format" || r.step === "connect" ? h("label", { class: "pool-name" }, h("span", { class: "muted mono" }, "/mnt/"), nameInput(() => plan.names[r.key], (v) => (plan.names[r.key] = v))) : h("span", { class: "mono" }, r.path),
+      ),
+    );
+    const time = h("input", { type: "time", value: plan.time, required: true });
+    time.addEventListener("input", () => (plan.time = time.value || plan.time));
+    const scrub = h("input", { type: "checkbox", checked: plan.scrub });
+    scrub.addEventListener("change", () => (plan.scrub = scrub.checked));
+    const cards = h("div", { class: "stack" });
+    const loadTools = async () => {
+      tools = (await api("GET", "/api/tools").catch(() => null)) ?? tools;
+      put(cards, missing().map((id) => packageCard({ package: id, install: tools.find((x) => x.id === id)?.install ?? "" }, () => void loadTools())));
+      check();
+    };
+    void loadTools();
+    next.onclick = () => ((step += 1), paint());
+    check();
+    return [
+      cards,
+      h("strong", { class: "small" }, t("pool.disksTitle")),
+      h("div", { class: "kv-list" }, disks),
+      merge() && field(t("pool.merged"), h("span", { class: "pool-name" }, h("span", { class: "muted mono" }, "/mnt/"), nameInput(() => plan.name, (v) => (plan.name = v))), t("pool.mergedHint")),
+      protect() && field(t("array.time"), time),
+      protect() && h("label", { class: "check" }, scrub, h("span", null, h("strong", null, t("array.scrub")), h("span", { class: "muted small block" }, t("array.scrubHint")))),
+      trouble,
+      h("footer", null, button(t("pool.back"), { onclick: () => ((step -= 1), paint()) }), next),
+    ];
+  };
+
+  const goStep = () => {
+    const erased = chosen().filter((r) => r.step === "format");
+    const typed = erased.map((r) => ({ r, input: h("input", { type: "text", autocomplete: "off", spellcheck: false, placeholder: r.device ? r.volume.name : r.disk.name }) }));
+    const password = h("input", { type: "password", autocomplete: "current-password" });
+    const slot = h("div");
+    const go = button(t("pool.go"), { class: erased.length ? "danger" : "primary" });
+    const check = () => (go.disabled = typed.some((x) => x.input.value.trim() !== (x.r.device ? x.r.volume.name : x.r.disk.name)) || (erased.length > 0 && !password.value));
+    for (const input of [...typed.map((x) => x.input), password]) input.addEventListener("input", check);
+    const todo = [
+      ...chosen().filter((r) => r.step !== "ready").map((r) => t("pool.todo." + r.step, { what: r.device || r.disk.path, title: r.title, path: folder(r) })),
+      merge() && t("pool.todo.merge", { disks: dataRows().map(folder).join(" + "), path: "/mnt/" + plan.name }),
+      protect() && t("pool.todo.protect", { parity: folder(parityRow()), disks: dataRows().map(folder).join(", "), time: plan.time }),
+    ].filter(Boolean);
+    go.onclick = diskAction(
+      () => dialog,
+      slot,
+      () =>
+        api("POST", "/api/disks/plan", {
+          goal: plan.goal,
+          disks: chosen().map((r) => ({ disk: r.disk.name, serial: r.disk.serial, size: r.disk.size, device: r.device, step: r.step, name: plan.names[r.key] ?? "", path: r.path })),
+          parity: protect() ? chosen().indexOf(parityRow()) : -1,
+          name: plan.name,
+          time: plan.time,
+          scrub: plan.scrub,
+          password: password.value,
+        }),
+      (started) => run(started.job),
+    );
+    check();
+    return [
+      h("p", { class: "muted" }, t("pool.goLead")),
+      h("ol", { class: "steps" }, todo.map((line) => h("li", null, line))),
+      erased.length > 0 && h("p", { class: "banner danger" }, t("pool.erases", { disks: erased.map((r) => r.title).join(", ") })),
+      typed.map((x) => field(t("mounting.typeName", { name: x.r.device ? x.r.volume.name : x.r.disk.name }), x.input)),
+      erased.length > 0 && field(t("account.password"), password, t("mounting.passwordHint")),
+      slot,
+      h("footer", null, button(t("pool.back"), { onclick: () => ((step -= 1), paint()) }), go),
+    ];
+  };
+
+  // the work itself: its log here, then what to do next
+  const run = async (id) => {
+    const log = h("pre", { class: "console" });
+    const status = h("p", { class: "job-status running" }, t("job.running"));
+    put(body, status, log, h("footer", null, button(t("job.hide"), { onclick: () => dialog.close() })));
+    const job = await followJob(id, (line) => {
+      log.append(line + "\n");
+      log.scrollTop = log.scrollHeight;
+    });
+    setDisks(await api("GET", "/api/disks").catch(() => state.disks));
+    if (job.status !== "done") {
+      put(body, h("p", { class: "banner danger" }, t("pool.failed")), h("pre", { class: "said" }, job.error || ""), log, h("footer", null, closeButton(() => dialog, t("common.close"))));
+      return;
+    }
+    step = 5;
+    put(steps, ["goal", "disks", "setup", "go"].map((id) => h("li", { class: "done" }, h("span", { class: "welcome-num" }, icon("check")), t("pool.step." + id))));
+    const where = merge() ? "/mnt/" + plan.name : folder(dataRows()[0]);
+    put(
+      body,
+      h("p", { class: "banner ok" }, t("pool.done." + plan.goal, { path: where })),
+      protect() && h("p", { class: "muted" }, t("pool.syncHint")),
+      h("details", null, h("summary", { class: "muted small" }, t("array.log")), log),
+      h(
+        "footer",
+        null,
+        closeButton(() => dialog, t("common.close")),
+        h("a", { class: "btn", href: filesHash(where), onclick: () => dialog.close() }, t("disks.fs.browse")),
+        protect() &&
+          button(t("array.syncNow"), {
+            class: "primary",
+            onclick: async () => {
+              try {
+                setDisks(await api("POST", "/api/disks/array/sync", {}));
+                dialog.close();
+              } catch (e) {
+                toast(errorText(e), "error");
+              }
+            },
+          }),
+      ),
+    );
+  };
+
+  dialog = openDialog("wide", h("header", null, h("div", { class: "grow" }, h("h2", null, t("pool.title"))), closeX(() => dialog)), steps, body);
+  paint();
 }
 
 /** Which disk holds parity, which are protected, when it runs */
