@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { rolesFor } from "../src/proxmox";
+import { clientLine } from "../src/pve";
 import { cleanFingerprint, cleanUrl, failed, hostKeysIn, familyOf, nextId, readNewGuest, setupScript, guestOfMachine, guestRights, mayPath, readConfig, readResources, readTask, snapshotName, trouble, type Watched } from "../src/pve";
 
 test("an address as typed becomes the API's origin", () => {
@@ -59,8 +60,8 @@ test("a guest's configuration gives its cards and addresses", () => {
 test("rights: the most specific path that gives something", () => {
   const perms = { "/": { "VM.Audit": 1 }, "/pool/hata": { "VM.PowerMgmt": 1, "VM.Snapshot": 1 }, "/storage/local-lvm": { "Datastore.AllocateSpace": 1 } };
   const g = readResources(resources).guests;
-  expect(guestRights(perms, g[0]!)).toEqual({ power: false, snapshot: false, rollback: false, backup: false, remove: false });
-  expect(guestRights(perms, g[1]!)).toEqual({ power: true, snapshot: true, rollback: false, backup: false, remove: false });
+  expect(guestRights(perms, g[0]!)).toEqual({ power: false, snapshot: false, rollback: false, backup: false, remove: false, console: false, configure: false });
+  expect(guestRights(perms, g[1]!)).toEqual({ power: true, snapshot: true, rollback: false, backup: false, remove: false, console: false, configure: false });
   expect(guestRights({ "/": { "VM.PowerMgmt": 1 } }, g[0]!).power).toBe(true);
   expect(mayPath(perms, "/storage/local-lvm", "Datastore.AllocateSpace")).toBe(true);
   expect(mayPath(perms, "/storage/local", "Datastore.AllocateSpace")).toBe(false);
@@ -208,4 +209,11 @@ test("the rights Hata gives its own token, by level", () => {
   expect(rolesFor("read")).toEqual([["/", "PVEAuditor"]]);
   expect(rolesFor("pool")).toEqual([["/", "PVEAuditor"], ["/pool/hata", "PVEVMAdmin"], ["/storage", "PVEDatastoreUser"], ["/sdn/zones", "PVESDNUser"]]);
   expect(rolesFor("manage")[1]).toEqual(["/vms", "PVEVMAdmin"]);
+});
+
+test("the client's line per system", () => {
+  expect(clientLine("debian", "http://h/", "c")).toBe("export DEBIAN_FRONTEND=noninteractive; apt-get update -q && apt-get install -y -q curl ca-certificates && curl -fsSL http://h/client/c | sh");
+  expect(clientLine("alpine", "http://h", "c")).toBeNull();
+  expect(clientLine("l26", "http://h", "c")).toBe("curl -fsSL http://h/client/c | sh");
+  expect(doneIn("x; echo HATA-1-$?\r\nok\r\nHATA-1-0\r\n", "HATA-1")).toBe(0);
 });

@@ -3257,5 +3257,22 @@
   "pve.client.step3stopped": "Гість зупинений: спершу запустіть його. Hata чекатиме тут і скаже, коли машина під'єднається.",
   "pve.client.waiting": "Чекаю, поки машина під'єднається…",
   "pve.client.unsupported": "Клієнту Hata потрібен Linux із systemd; у цій системі ({os}) systemd немає, тож клієнт там працювати не зможе.",
-  "pve.client.openConsole": "відкрити консоль ↗"
+  "pve.client.openConsole": "відкрити консоль ↗",
+  "pve.console": "Консоль",
+  "pve.consoleHint": "Консоль контейнера, як її дає Proxmox: входьте власним користувачем контейнера. Закриття вікна її завершує.",
+  "pve.client.auto": "Нехай Hata зробить сама",
+  "pve.client.autoLead": "Hata увійде в консоль контейнера як root із паролем, який ви дасте тут (він вводиться лише там і ніде не зберігається), вставить рядок і простежить до кінця.",
+  "pve.client.autoButton": "Встановити",
+  "pve.client.howHand": "Або вручну",
+  "pve.client.done": "Клієнт Hata стоїть на {name}; він серед машин",
+  "job.client": "Клієнт Hata на {app}",
+  "error.pve.noConsole": "У Hata відкривається лише консоль контейнера; консоль віртуальної машини — на сторінці самого Proxmox.",
+  "error.pve.notRunning": "{name} не працює: спершу запустіть його.",
+  "error.pve.noClientHere": "Клієнту Hata потрібен Linux із systemd; у цій системі ({os}) його немає.",
+  "activity.pve.console": "Відкрито консоль контейнера: {target}",
+  "activity.pve.client.installed": "Клієнт Hata встановлено на гостя Proxmox: {target}",
+  "activity.app.client.failed": "Встановити клієнт Hata на гостя не вдалось",
+  "pve.client.rootPassword": "пароль root у контейнері",
+  "error.pve.badRootPassword": "Консоль {name} не прийняла пароль root.",
+  "error.pve.consoleSilent": "Консоль {name} відповідає не так, як очікувалось; спробуйте вручну."
 }

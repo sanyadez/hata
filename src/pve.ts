@@ -220,6 +220,8 @@ export const guestRights = (perms: Permissions, g: Guest) => ({
   rollback: mayGuest(perms, g.vmid, g.pool, "VM.Snapshot.Rollback"),
   backup: mayGuest(perms, g.vmid, g.pool, "VM.Backup"),
   remove: mayGuest(perms, g.vmid, g.pool, "VM.Allocate"),
+  console: mayGuest(perms, g.vmid, g.pool, "VM.Console"),
+  configure: mayGuest(perms, g.vmid, g.pool, "VM.Config.Options"),
 });
 
 /** A task of Proxmox, from `/cluster/tasks` or a task's `/status` */
@@ -494,4 +496,13 @@ export function setupScript(g: Pick<NewGuest, "family" | "docker" | "client">, i
 /** The fingerprints of a new container's SSH keys, as Proxmox's task wrote them while making them */
 export function hostKeysIn(lines: string[]): string[] {
   return lines.flatMap((l) => /^done: (SHA256:[A-Za-z0-9+/]{43})\b/.exec(l.trim())?.[1] ?? []);
+}
+
+/** The line that puts Hata's client on a system, run as root; null — the system has no systemd for it */
+export function clientLine(os: string, hata: string, code: string): string | null {
+  const line = `curl -fsSL ${hata.replace(/\/$/, "")}/client/${code} | sh`;
+  if (/^(debian|ubuntu)$/.test(os)) return `export DEBIAN_FRONTEND=noninteractive; apt-get update -q && apt-get install -y -q curl ca-certificates && ${line}`;
+  if (/^(fedora|centos|rocky|alma)/.test(os)) return `dnf install -y -q curl && ${line}`;
+  if (!os || os === "l26") return line;
+  return null;
 }

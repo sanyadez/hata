@@ -24,7 +24,8 @@ import { bus } from "./bus";
 import { SECRETS_DIR } from "./config";
 import { readJsonFile, writeJsonAtomic } from "./fsutil";
 import { invite, machines } from "./machines";
-import { cleanFingerprint, cleanUrl, failed, GUEST_RE, guestOfMachine as findGuest, guestRights, mayPath, POWER, readConfig, readResources, readTask, SECRET_RE, SNAPSHOT_RE, snapshotName, TOKEN_RE, trouble, hostKeysIn, nextId, readNewGuest, setupScript, type NewOptions, type Guest, type GuestConfig, type Permissions, type PveItem, type Resource, type Task, type Watched } from "./pve";
+import { acceptFor, BINARY, CLOSE, encodeFrame, FrameReader, PING, PONG, PVE_PING, sized, TEXT, typed } from "./wsframe";
+import { cleanFingerprint, cleanUrl, failed, GUEST_RE, guestOfMachine as findGuest, guestRights, mayPath, POWER, readConfig, readResources, readTask, SECRET_RE, SNAPSHOT_RE, snapshotName, TOKEN_RE, trouble, clientLine, hostKeysIn, nextId, readNewGuest, setupScript, type NewOptions, type Guest, type GuestConfig, type Permissions, type PveItem, type Resource, type Task, type Watched } from "./pve";
 
 const FILE = join(SECRETS_DIR, "proxmox.json");
 const ID_RE = /^[a-f0-9]{8}$/;
@@ -800,4 +801,213 @@ export async function addBySignIn(input: Input & { user?: unknown; password?: un
   record("pve.added", { user: by, detail: `${h.name} (${h.url}, ${made["full-tokenid"]})` });
   await look(h, true);
   return summary(h);
+}
+
+// --- A container's console ----------------------------------------------------------------------------
+
+/** A console of a guest as Proxmox serves it: what it prints comes to `onData`, what is typed goes in */
+export interface Console {
+  send(bytes: Uint8Array): void;
+  resize(cols: number, rows: number): void;
+  close(): void;
+  onData: (bytes: Uint8Array) => void;
+  onClose: (why: string) => void;
+}
+
+/**
+ * Opens a container's console: `termproxy` starts one, its WebSocket is reached over a connection whose
+ * certificate was checked like every other request, and the first line hands the console's ticket in.
+ * Proxmox's own page talks the same way: `0:<bytes>:<data>` typed, `1:<cols>:<rows>:` a size, `2` alive.
+ */
+export async function openConsole(id: string, guest: string, cols: number, rows: number): Promise<Console> {
+  const h = hostOf(id);
+  const g = guestOf(h, guest);
+  if (g.type !== "lxc") throw new AppError("pve.noConsole", 409);
+  if (g.status !== "running") throw new AppError("pve.notRunning", 409, { name: g.name });
+  const proxy = await pve<{ port: number | string; ticket: string; user: string }>(h, "POST", `/nodes/${g.node}/lxc/${g.vmid}/termproxy`);
+  const { socket, shown } = await reach(h.url);
+  if (h.fingerprint ? shown.fingerprint !== h.fingerprint : !shown.trusted) {
+    socket.destroy();
+    throw new AppError("pve.certChanged", 409, { name: h.name, fingerprint: shown.fingerprint });
+  }
+  const u = new URL(h.url);
+  const key = Buffer.from(crypto.getRandomValues(new Uint8Array(16))).toString("base64");
+  const path = `/api2/json/nodes/${g.node}/lxc/${g.vmid}/vncwebsocket?port=${encodeURIComponent(String(proxy.port))}&vncticket=${encodeURIComponent(proxy.ticket)}`;
+  socket.write([`GET ${path} HTTP/1.1`, `Host: ${u.host}`, "Upgrade: websocket", "Connection: Upgrade", `Sec-WebSocket-Key: ${key}`, "Sec-WebSocket-Version: 13", "Sec-WebSocket-Protocol: binary", `Authorization: PVEAPIToken=${h.token}=${h.secret}`, "", ""].join("\r\n"));
+  const reader = new FrameReader();
+  const accept = await acceptFor(key);
+  let head = Buffer.alloc(0);
+  let open = false;
+  let closed = false;
+  const con: Console = {
+    send: (bytes) => !closed && socket.write(encodeFrame(BINARY, typed(bytes))),
+    resize: (c, r) => !closed && socket.write(encodeFrame(BINARY, new TextEncoder().encode(sized(c, r)))),
+    close: () => {
+      if (closed) return;
+      closed = true;
+      clearInterval(alive);
+      socket.end(encodeFrame(CLOSE, new Uint8Array(0)));
+      socket.destroy();
+    },
+    onData: () => {},
+    onClose: () => {},
+  };
+  const alive = setInterval(() => !closed && socket.write(encodeFrame(BINARY, new TextEncoder().encode(PVE_PING))), 30_000);
+  const end = (why: string) => {
+    if (closed) return;
+    closed = true;
+    clearInterval(alive);
+    socket.destroy();
+    con.onClose(why);
+  };
+  await new Promise<void>((resolve, reject) => {
+    let said = false;
+    socket.on("data", (chunk: Buffer) => {
+      if (!open) {
+        head = Buffer.concat([head, chunk]);
+        const at = head.indexOf("\r\n\r\n");
+        if (at < 0) return;
+        const lines = head.subarray(0, at).toString("latin1").split("\r\n");
+        const status = Number(lines[0]?.split(" ")[1]);
+        const ok = status === 101 && lines.some((l) => /^sec-websocket-accept:\s*/i.test(l) && l.split(":")[1]!.trim() === accept);
+        if (!ok) return reject(new AppError(status === 401 ? "pve.badToken" : "pve.failed", 409, { name: h.name, message: lines[0] ?? "" }));
+        open = true;
+        // the console's own sign-in: its user and the ticket termproxy gave
+        socket.write(encodeFrame(BINARY, new TextEncoder().encode(`${proxy.user}:${proxy.ticket}\n`)));
+        chunk = head.subarray(at + 4);
+        if (!chunk.length) return;
+      }
+      for (const f of reader.push(new Uint8Array(chunk))) {
+        if (f.opcode === CLOSE) return end("closed");
+        if (f.opcode === PING) socket.write(encodeFrame(PONG, f.data));
+        else if (f.opcode === TEXT || f.opcode === BINARY) {
+          // the first word is "OK" when the ticket was taken
+          if (!said) {
+            said = true;
+            const text = new TextDecoder().decode(f.data);
+            if (text.startsWith("OK")) {
+              con.resize(cols, rows);
+              resolve();
+              if (f.data.length > 2) con.onData(f.data.subarray(2));
+              continue;
+            }
+            return reject(new AppError("pve.failed", 409, { name: h.name, message: text.slice(0, 200) }));
+          }
+          con.onData(f.data);
+        }
+      }
+    });
+    socket.on("close", () => (open ? end("closed") : reject(new AppError("pve.unreachable", 502, { name: h.name, message: "closed" }))));
+    socket.on("error", (e: Error) => (open ? end(e.message) : reject(new AppError("pve.unreachable", 502, { name: h.name, message: e.message }))));
+    setTimeout(() => reject(new AppError("pve.unreachable", 502, { name: h.name, message: "timeout" })), TIMEOUT_MS);
+  });
+  return con;
+}
+
+/** What a console printed, as lines for a job's log: colours and cursor moves taken out */
+const plain = (text: string) => text.replace(/\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07]*\x07|\x1b[()][A-Z0-9]/g, "").replace(/\r/g, "");
+
+/**
+ * Hata's client put on a running container through its console: Hata signs in there as root with the
+ * password the person gives (typed into the console, kept nowhere), types the line and follows it to
+ * its end. Proxmox's "shell" console mode would need no password, but on a running container a change
+ * of it waits for a restart.
+ */
+export async function installByConsole(id: string, guest: string, input: { password?: unknown }, by: string, hata: string) {
+  const h = hostOf(id);
+  const g = guestOf(h, guest);
+  const l = liveOf(h);
+  const may = guestRights(l.perms, g);
+  if (g.type !== "lxc") throw new AppError("pve.noConsole", 409);
+  if (g.status !== "running") throw new AppError("pve.notRunning", 409, { name: g.name });
+  if (!may.console) throw new AppError("pve.denied", 403, { name: h.name, message: "VM.Console" });
+  const password = typeof input.password === "string" ? input.password : "";
+  if (!password || /[\r\n]/.test(password)) throw new AppError("pve.badRootPassword", 400, { name: g.name });
+  const config = await pve<Record<string, unknown>>(h, "GET", `/nodes/${g.node}/lxc/${g.vmid}/config`);
+  const os = typeof config.ostype === "string" ? config.ostype : "";
+  const { code } = await invite(by);
+  const line = clientLine(os, hata, code);
+  if (!line) throw new AppError("pve.noClientHere", 409, { os });
+  const before = new Set(machines().map((m) => m.id));
+  const job = startJob(`pve:${h.id}:${g.vmid}`, "client", by, async (log) => {
+    const con = await openConsole(id, guest, 160, 40);
+    const type = (text: string) => con.send(new TextEncoder().encode(text));
+    let screen = "";
+    const shown = () => screen.replace(password, "***");
+    try {
+      let pending = "";
+      let quiet = true;
+      let wake: () => void = () => {};
+      con.onData = (bytes) => {
+        const text = plain(new TextDecoder().decode(bytes));
+        screen += text;
+        if (!quiet) {
+          const parts = (pending + text).split("\n");
+          pending = parts.pop() ?? "";
+          for (const p of parts) if (p.trim() && !/HATA-[0-9a-f]{6}/.test(p)) log(p);
+        }
+        wake();
+      };
+      let gone = false;
+      con.onClose = () => ((gone = true), wake());
+      /** Waits for what the console shows to match, up to `ms`; the screen is read from `from` on */
+      const until = async (re: RegExp, ms: number, from = 0): Promise<RegExpExecArray | null> => {
+        const end = Date.now() + ms;
+        for (;;) {
+          const m = re.exec(screen.slice(from));
+          if (m || gone || Date.now() > end) return m;
+          await Promise.race([new Promise<void>((r) => (wake = r)), Bun.sleep(500)]);
+        }
+      };
+      // the console shows its last screen or nothing: Enter brings the sign-in back
+      let mark0 = screen.length;
+      type("\r");
+      let first = await until(/login:\s*$|Password:\s*$|[#$]\s*$/m, 15_000, mark0);
+      // a sign-in left half-way (by somebody, or by that Enter): an empty password ends it
+      if (first && first[0].startsWith("Password")) {
+        mark0 = screen.length;
+        type("\r");
+        first = await until(/login:\s*$/m, 15_000, mark0);
+      }
+      if (!first) throw new AppError("pve.consoleSilent", 409, { name: g.name });
+      if (!/[#]\s*$/.test(first[0])) {
+        let mark = screen.length;
+        type("root\r");
+        if (!(await until(/Password:\s*$/m, 10_000, mark))) throw new AppError("pve.consoleSilent", 409, { name: g.name });
+        mark = screen.length;
+        type(password + "\r");
+        const after = await until(/Login incorrect|#\s*$/m, 15_000, mark);
+        if (!after || after[0].startsWith("Login")) throw new AppError("pve.badRootPassword", 400, { name: g.name });
+      }
+      log(`Signed in to ${g.name}`);
+      quiet = false;
+      const marker = `HATA-${Buffer.from(crypto.getRandomValues(new Uint8Array(3))).toString("hex")}`;
+      const mark = screen.length;
+      type(`${line}; echo ${marker}-$?\r`);
+      const end = await until(new RegExp(`${marker}-(\\d+)`), 15 * 60_000, mark);
+      if (!end || Number(end[1]) !== 0) throw new AppError("pve.setupFailed", 409, { address: g.name });
+      // the sign-in ends with the work
+      type("exit\r");
+      await Bun.sleep(500);
+    } catch (e) {
+      // what the console showed last says why better than any word of Hata's
+      for (const line of plain(shown()).split("\n").map((x) => x.trim()).filter(Boolean).slice(-6)) log("> " + line);
+      throw e;
+    } finally {
+      con.close();
+    }
+    log("Waiting for the machine to connect");
+    for (let i = 0; i < 45; i++) {
+      const fresh = machines().find((m) => !before.has(m.id));
+      if (fresh) {
+        log(`Connected: ${fresh.name}`);
+        job.result = { machine: fresh.id };
+        record("pve.client.installed", { user: by, detail: `${g.name} (${g.vmid}, ${h.name})` });
+        return;
+      }
+      await Bun.sleep(2000);
+    }
+    throw new AppError("pve.notConnected", 409, { address: g.name });
+  }, true, { app: g.name, machine: h.name });
+  return { job: job.id };
 }

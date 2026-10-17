@@ -3108,6 +3108,7 @@ function pveGuests(x) {
           g.may.power && !up && small(t("pve.start"), "play", (el) => pvePower(x, g, g.status === "paused" ? "resume" : "start", el)),
           g.may.power && up && small(t("pve.shutdown"), "stop", () => pvePowerDialog(x, g, "shutdown")),
           g.may.power && up && small(t("pve.reboot"), "refresh", () => pvePowerDialog(x, g, "reboot")),
+          up && g.type === "lxc" && g.may.console && small(t("pve.console"), "terminal", () => pveConsoleDialog(x, g)),
           !m && g.id !== x.self && small(t("pve.client.button"), "download", () => pveClientDialog(x, g)),
           small(t("app.more"), "more", () => pveGuestDialog(x, g)),
         ),
@@ -3171,6 +3172,12 @@ function clientLineFor(os, address, code) {
   return null;
 }
 
+/** A container's console from Proxmox, in Hata's own terminal */
+function pveConsoleDialog(x, g) {
+  let dialog;
+  dialog = openDialog("xwide", h("header", null, h("h2", { class: "clip grow" }, `${g.name} · ${guestKind(g)}`), closeX(() => dialog)), h("p", { class: "muted small" }, t("pve.consoleHint")), h("div", { class: "term-holder" }, terminalFrame({ pve: x.id, guest: g.id })));
+}
+
 /**
  * Hata's client put on a guest that is there already: Proxmox runs no command inside one for a token,
  * so the person pastes a line into its console — opened in Proxmox's own page — and Hata waits for it.
@@ -3183,6 +3190,9 @@ async function pveClientDialog(x, g) {
     return toast(errorText(e), "error");
   }
   const os = g.config?.os ?? "";
+  // a running container whose console and options the token may use: Hata types the line itself
+  const auto = g.type === "lxc" && g.status === "running" && g.may.console;
+  const rootPassword = h("input", { type: "password", autocomplete: "new-password", name: "pve-root-password", placeholder: t("pve.client.rootPassword") });
   const known = new Set((machinesUi.list?.machines ?? []).map((m) => m.id));
   // the guest is on the home network: the server's own number reaches it first
   const addresses = [...new Set([invite.lan, location.origin, invite.local].filter(Boolean).map((a) => a.replace(/\/$/, "")))];
@@ -3200,7 +3210,32 @@ async function pveClientDialog(x, g) {
     line() === null
       ? h("p", { class: "card pad warn-box" }, t("pve.client.unsupported", { os }))
       : [
-          h("p", { class: "strong" }, t("pve.client.how")),
+          auto &&
+            h(
+              "div",
+              { class: "card pad pve-offer" },
+              h("div", { class: "grow stack-s" }, h("strong", null, t("pve.client.auto")), h("p", { class: "muted small" }, t("pve.client.autoLead")), rootPassword),
+              button(t("pve.client.autoButton"), {
+                class: "primary",
+                onclick: async (e) => {
+                  if (!rootPassword.value) return rootPassword.focus();
+                  e.currentTarget.disabled = true;
+                  try {
+                    const r = await api("POST", `/api/proxmox/${x.id}/guests/${g.id}/client`, { password: rootPassword.value });
+                    dialog.close();
+                    void jobDialog(r.job, "client", g.name, () => {
+                      toast(t("pve.client.done", { name: g.name }));
+                      void loadPve();
+                      void loadMachines();
+                    });
+                  } catch (err) {
+                    toast(errorText(err), "error");
+                    e.currentTarget.disabled = false;
+                  }
+                },
+              }, "download"),
+            ),
+          h("p", { class: "strong" }, t(auto ? "pve.client.howHand" : "pve.client.how")),
           h("ol", { class: "stack-s small" }, h("li", null, t("pve.client.step1"), " ", h("a", { class: "link", href: consoleUrl, target: "_blank", rel: "noopener noreferrer" }, t("pve.client.openConsole"))), h("li", null, t("pve.client.step2")), h("li", null, t(g.status === "running" ? "pve.client.step3" : "pve.client.step3stopped"))),
           addresses.length > 1 && h("select", { onchange: (e) => ((address = e.target.value), (cmd.textContent = line())) }, addresses.map((a) => h("option", { value: a }, a))),
           h("p", { class: "cmd whole" }, cmd, h("button", { type: "button", class: "icon-btn", title: t("twofa.copy"), "aria-label": t("twofa.copy"), onclick: () => copyText(line()) }, icon("copy"))),
@@ -3245,6 +3280,7 @@ function pveGuestDialog(x, g) {
       up && act(t("pve.reboot"), "refresh", "reboot"),
       up && g.type === "qemu" && act(t("pve.suspend"), "clock", "suspend"),
       up && act(t("pve.stop"), "x", "stop", "danger"),
+      up && g.type === "lxc" && g.may.console && button(t("pve.console"), { class: "small", onclick: () => (dialog.close(), pveConsoleDialog(x, g)) }, "terminal"),
       !g.may.power && h("span", { class: "muted small" }, t("pve.noPower")),
       g.id === x.self && h("span", { class: "chip accent" }, t("pve.selfChip")),
       g.may.remove && g.status === "stopped" && g.id !== x.self && button(t("pve.guestRemove"), { class: "small danger", onclick: () => (dialog.close(), pveRemoveDialog(x, g)) }, "trash"),

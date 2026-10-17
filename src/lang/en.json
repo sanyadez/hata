@@ -3257,5 +3257,22 @@
   "pve.client.step3stopped": "The guest is stopped: start it first. Hata waits here and says when the machine has connected.",
   "pve.client.waiting": "Waiting for the machine to connect…",
   "pve.client.unsupported": "Hata's client needs Linux with systemd; this system ({os}) has no systemd, so the client cannot run there.",
-  "pve.client.openConsole": "open the console ↗"
+  "pve.client.openConsole": "open the console ↗",
+  "pve.console": "Console",
+  "pve.consoleHint": "The container's console as Proxmox gives it: sign in with the container's own user. Closing the window ends it.",
+  "pve.client.auto": "Let Hata do it",
+  "pve.client.autoLead": "Hata signs in on the container's console as root with the password you give here — it is typed there and kept nowhere — pastes the line and follows it to the end.",
+  "pve.client.autoButton": "Install",
+  "pve.client.howHand": "Or by hand",
+  "pve.client.done": "Hata's client is on {name}; it is among the machines",
+  "job.client": "Hata's client on {app}",
+  "error.pve.noConsole": "Only a container's console opens in Hata; a virtual machine's needs Proxmox's own page.",
+  "error.pve.notRunning": "{name} is not running: start it first.",
+  "error.pve.noClientHere": "Hata's client needs Linux with systemd; this system ({os}) has none.",
+  "activity.pve.console": "Console of a container opened: {target}",
+  "activity.pve.client.installed": "Hata's client put on a Proxmox guest: {target}",
+  "activity.app.client.failed": "Putting Hata's client on a guest failed",
+  "pve.client.rootPassword": "root's password in the container",
+  "error.pve.badRootPassword": "The console of {name} did not take root's password.",
+  "error.pve.consoleSilent": "The console of {name} does not answer as expected; try it by hand."
 }
