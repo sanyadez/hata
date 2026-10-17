@@ -91,6 +91,7 @@ export interface ContainerSummary {
   Status: string;
   Labels: Record<string, string>;
   Ports: { IP?: string; PrivatePort: number; PublicPort?: number; Type: string }[];
+  Mounts?: { Type: string; Name?: string; Source?: string; Destination: string }[];
 }
 
 export const PROJECT_LABEL = "com.docker.compose.project";
@@ -208,6 +209,23 @@ export async function registryDigest(name: string, auth = ""): Promise<string> {
 }
 
 const post = (path: string) => api<null>(path, { method: "POST" });
+
+/** What `docker system df` tells: images and volumes with their sizes and how many containers use them */
+export interface DiskUsage {
+  Images: { Id: string; RepoTags: string[] | null; RepoDigests: string[] | null; Created: number; Size: number; Containers: number; Labels: Record<string, string> | null }[] | null;
+  Volumes: { Name: string; Driver: string; Mountpoint: string; CreatedAt?: string; Labels: Record<string, string> | null; UsageData?: { Size: number; RefCount: number } | null }[] | null;
+  BuildCache: { Size: number; InUse: boolean }[] | null;
+}
+
+/** Sizes of volumes are counted by walking them: on a large server this takes a while */
+export const diskUsage = () => api<DiskUsage>("/system/df");
+export const removeImage = (id: string) => api<unknown>(`/images/${encodeURIComponent(id)}?force=1`, { method: "DELETE" });
+export const removeVolume = (name: string) => api<null>(`/volumes/${encodeURIComponent(name)}`, { method: "DELETE" });
+/** Every image no container was made from, named or not */
+export const pruneImages = () => api<{ ImagesDeleted: unknown[] | null; SpaceReclaimed: number }>(`/images/prune?filters=${encodeURIComponent(JSON.stringify({ dangling: ["false"] }))}`, { method: "POST" });
+/** Every volume no container uses — named ones too (without `all` Docker takes only the anonymous) */
+export const pruneVolumes = () => api<{ VolumesDeleted: string[] | null; SpaceReclaimed: number }>(`/volumes/prune?filters=${encodeURIComponent(JSON.stringify({ all: ["true"] }))}`, { method: "POST" });
+export const pruneBuildCache = () => api<{ SpaceReclaimed: number }>("/build/prune?all=1", { method: "POST" });
 /** Waits for the container to stop: Docker gives it its stop timeout, then kills it */
 export const stopContainer = (id: string) => post(`/containers/${id}/stop`);
 export const startContainer = (id: string) => post(`/containers/${id}/start`);

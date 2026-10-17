@@ -6594,6 +6594,8 @@ async function loadSettings() {
     if (isAdmin() && state.route.section === "network") state.network = await api("GET", "/api/network").catch(() => null);
     if (isAdmin() && state.route.section === "remote") [state.remote, state.wireguard] = await Promise.all([api("GET", "/api/tailscale").catch(() => null), api("GET", "/api/wireguard").catch(() => null)]);
     if (isAdmin() && state.route.section === "tools") state.tools = await api("GET", "/api/tools").catch(() => null);
+    // counting the volumes takes a while: the page is shown first
+    if (isAdmin() && state.route.section === "docker") void loadSpace();
     if (isAdmin() && state.route.section === "storage") [state.disks, state.places] = await Promise.all([api("GET", "/api/disks").catch(() => null), api("GET", "/api/netplaces").catch(() => null)]);
     if (isAdmin() && state.route.section === "shares") state.shares = await api("GET", "/api/shares").catch(() => null);
     if (isAdmin() && state.route.section === "agents") state.agents = await api("GET", "/api/agents").catch(() => null);
@@ -6611,6 +6613,7 @@ const SECTIONS = [
   { id: "general", icon: "sliders" },
   { id: "appearance", icon: "image", admin: true },
   { id: "apps", icon: "grid", admin: true },
+  { id: "docker", icon: "box", admin: true },
   { id: "stores", icon: "store", admin: true },
   { id: "storage", icon: "disk", admin: true },
   { id: "shares", icon: "share", admin: true },
@@ -6928,6 +6931,7 @@ function settingsSection(section) {
   if (section === "shares") return sharesSection();
   if (section === "network") return networkSection();
   if (section === "tools") return toolsSection();
+  if (section === "docker") return dockerSection();
   if (section === "remote") return remoteSection();
   if (section === "agents") return agentsSection();
   if (section === "assistant") return assistantSection();
@@ -7995,6 +7999,164 @@ function toolsSection() {
     h("section", { class: "card pad stack" }, h("h2", null, t("settings.tools")), h("p", { class: "muted small" }, t("tools.lead")), error),
     absent.length > 0 && h("section", { class: "card pad" }, h("h2", null, t("tools.absent"), h("span", { class: "muted" }, " " + absent.length)), absent.map(row)),
     here.length > 0 && h("section", { class: "card pad" }, h("h2", null, t("tools.present"), h("span", { class: "muted" }, " " + here.length)), here.map(row)),
+  ];
+}
+
+async function loadSpace() {
+  try {
+    state.space = await api("GET", "/api/docker/space");
+  } catch (e) {
+    state.space = { error: errorText(e) };
+  }
+  if (state.route.view === "settings" && state.route.section === "docker") renderSettings();
+}
+
+/** Asks before something of Docker's is taken away; `password` — for what takes data with it in bulk */
+function dockerDropDialog({ title, lead, warn, command, password: ask, go: label, run }) {
+  const error = h("p", { class: "error", role: "alert" });
+  const password = ask ? h("input", { type: "password", autocomplete: "current-password", required: true }) : null;
+  const go = h("button", { class: "btn danger" }, label);
+  const dialog = openDialog(
+    "confirm",
+    h(
+      "form",
+      {
+        class: "stack",
+        onsubmit: async (e) => {
+          e.preventDefault();
+          error.textContent = "";
+          go.disabled = true;
+          try {
+            const done = await run(password?.value);
+            dialog.close();
+            toast(done);
+            await loadSpace();
+          } catch (err) {
+            error.textContent = errorText(err);
+            go.disabled = false;
+          }
+        },
+      },
+      h("header", null, h("h2", { class: "grow" }, title), closeX(() => dialog)),
+      h("p", null, lead),
+      warn && h("p", { class: "banner danger" }, warn),
+      h("p", { class: "cmd whole" }, icon("terminal"), command),
+      password && field(t("account.password"), password, t("docker.passwordHint")),
+      error,
+      h("footer", null, closeButton(() => dialog, t("common.cancel")), go),
+    ),
+  );
+}
+
+/** Settings → Docker: images and volumes, who uses them, and taking away what nothing uses */
+function dockerSection() {
+  const space = state.space;
+  if (!space) return [h("section", { class: "card pad" }, h("p", { class: "with-icon muted" }, icon("refresh"), t("docker.counting")))];
+  if (space.error) return [h("section", { class: "card pad" }, h("p", { class: "error" }, space.error))];
+  const sum = (list) => list.reduce((n, one) => n + Math.max(0, one.size), 0);
+  const appLink = (name) => (state.overview?.apps ?? []).some((a) => a.name === name) ? h("a", { class: "link", href: `#/apps/${name}` }, name) : h("span", null, name);
+  // who uses it: the app when it is one, else the container
+  const users = (one) =>
+    one.used.length
+      ? one.used.map((u) => h("div", { class: "small" }, u.app ? appLink(u.app) : h("span", { class: "mono" }, u.container), !u.running && h("span", { class: "muted" }, " · " + t("docker.stopped"))))
+      : h("span", { class: "state stopped" }, t("docker.unused"));
+
+  const images = space.images;
+  const idle = images.filter((i) => !i.used.length);
+  const wanted = idle.filter((i) => i.wanted.length);
+  const imageName = (i) => (i.name ? h("div", { class: "strong mono clip" }, i.name) : h("div", null, h("span", { class: "strong" }, t("docker.noName")), h("span", { class: "muted small mono" }, " " + i.id.slice(7, 19))));
+  const dropImage = (i) =>
+    dockerDropDialog({
+      title: t("docker.image.dropTitle"),
+      lead: i.name || i.id.slice(7, 19),
+      warn: i.wanted.length ? t("docker.image.wanted", { apps: i.wanted.join(", ") }) : "",
+      command: `docker image rm ${i.name || i.id.slice(7, 19)}`,
+      go: t("docker.drop"),
+      run: async () => (await api("DELETE", `/api/docker/images/${i.id}`), t("docker.image.dropped")),
+    });
+  const imageRow = (i) =>
+    h(
+      "tr",
+      null,
+      h("td", null, imageName(i), i.more.length > 0 && h("div", { class: "muted small mono clip" }, i.more.join(", "))),
+      h("td", { class: "num" }, bytes(i.size)),
+      h("td", { class: "muted" }, shortDate(i.created * 1000)),
+      h("td", null, users(i), i.wanted.length > 0 && h("div", { class: "muted small" }, t("docker.image.wantedShort", { apps: i.wanted.join(", ") }))),
+      h("td", null, !i.used.length && h("div", { class: "row-actions" }, button(t("docker.drop"), { class: "small", onclick: () => dropImage(i) }, "trash"))),
+    );
+  const pruneImages = () =>
+    dockerDropDialog({
+      title: t("docker.image.pruneTitle"),
+      lead: t("docker.image.pruneLead", { n: idle.length, size: bytes(sum(idle)) }),
+      warn: wanted.length ? t("docker.image.wanted", { apps: [...new Set(wanted.flatMap((i) => i.wanted))].join(", ") }) : "",
+      command: "docker image prune -a",
+      go: t("docker.pruneGo"),
+      run: async () => t("docker.freed", { size: bytes((await api("POST", "/api/docker/images/prune", {})).freed) }),
+    });
+
+  const volumes = space.volumes;
+  const spare = volumes.filter((v) => !v.used.length);
+  const volumeName = (v) => h("div", null, h("div", { class: "strong mono clip" }, v.anonymous ? v.name.slice(0, 12) + "…" : v.name), h("div", { class: "muted small" }, v.anonymous ? t("docker.volume.anonymous") : v.project ? t("docker.volume.of", { app: v.project }) : t("docker.volume.byHand")));
+  const dropVolume = (v) =>
+    dockerDropDialog({
+      title: t("docker.volume.dropTitle"),
+      lead: v.name,
+      warn: t("docker.volume.dataGoes"),
+      command: `docker volume rm ${v.name}`,
+      go: t("docker.drop"),
+      run: async () => (await api("DELETE", `/api/docker/volumes/${encodeURIComponent(v.name)}`), t("docker.volume.dropped")),
+    });
+  const volumeRow = (v) =>
+    h(
+      "tr",
+      null,
+      h("td", null, volumeName(v)),
+      h("td", { class: "num" }, v.size >= 0 ? bytes(v.size) : "—"),
+      h("td", { class: "muted" }, v.created ? shortDate(Date.parse(v.created)) : "—"),
+      h("td", null, users(v)),
+      h("td", null, !v.used.length && h("div", { class: "row-actions" }, button(t("docker.drop"), { class: "small", onclick: () => dropVolume(v) }, "trash"))),
+    );
+  const pruneVolumes = () =>
+    dockerDropDialog({
+      title: t("docker.volume.pruneTitle"),
+      lead: t("docker.volume.pruneLead", { n: spare.length, size: bytes(sum(spare)), names: spare.map((v) => (v.anonymous ? v.name.slice(0, 12) + "…" : v.name)).join(", ") }),
+      warn: t("docker.volume.dataGoesAll"),
+      command: "docker volume prune -a",
+      password: true,
+      go: t("docker.pruneGo"),
+      run: async (password) => {
+        const done = await api("POST", "/api/docker/volumes/prune", { password });
+        return t("docker.volume.pruned", { n: done.count, size: bytes(done.freed) });
+      },
+    });
+  const pruneCache = () =>
+    dockerDropDialog({
+      title: t("docker.cache.title"),
+      lead: t("docker.cache.lead", { size: bytes(space.cache) }),
+      command: "docker builder prune -a",
+      go: t("docker.pruneGo"),
+      run: async () => t("docker.freed", { size: bytes((await api("POST", "/api/docker/cache/prune", {})).freed) }),
+    });
+
+  const head = (title, list, unused, prune) =>
+    h(
+      "div",
+      { class: "section-head pad" },
+      h("div", { class: "grow" }, h("h2", null, title, h("span", { class: "muted" }, " " + list.length)), h("p", { class: "muted small" }, unused.length ? t("docker.unusedSum", { n: unused.length, size: bytes(sum(unused)) }) : t("docker.allUsed"))),
+      unused.length > 0 && button(t("docker.prune"), { class: "small", onclick: prune }, "trash"),
+    );
+  const table = (columns, rows) => h("div", { class: "table-wrap" }, h("table", null, h("thead", null, h("tr", null, columns.map((c) => h("th", null, c)))), h("tbody", null, rows)));
+  const columns = (first) => [first, t("docker.size"), t("docker.created"), t("docker.usedBy"), ""];
+  return [
+    h(
+      "section",
+      { class: "card pad stack" },
+      h("div", { class: "section-head" }, h("h2", { class: "grow" }, t("settings.docker")), button(t("docker.recount"), { class: "small", onclick: () => ((state.space = null), renderSettings(), loadSpace()) }, "refresh")),
+      h("p", { class: "muted small" }, t("docker.lead")),
+      space.cache > 0 && h("div", { class: "section-head" }, h("p", { class: "muted small grow" }, t("docker.cache.line", { size: bytes(space.cache) })), button(t("docker.cache.clear"), { class: "small", onclick: pruneCache })),
+    ),
+    h("section", { class: "card" }, head(t("docker.images"), images, idle, pruneImages), images.length ? table(columns(t("docker.image")), images.map(imageRow)) : h("p", { class: "muted pad" }, t("docker.none"))),
+    h("section", { class: "card" }, head(t("docker.volumes"), volumes, spare, pruneVolumes), volumes.length ? table(columns(t("docker.volume")), volumes.map(volumeRow)) : h("p", { class: "muted pad" }, t("docker.noVolumes"))),
   ];
 }
 

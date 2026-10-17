@@ -35,6 +35,7 @@ import { afterPackage, exposedNics, giveBack, internetTrouble, setSide, startNet
 import { DOCKER_INSTALL_COMMAND, installDocker, startDocker } from "./dockerinstall";
 import { installOne, removeOne, toolsReport } from "./tools";
 import { ArrayError, arrayReport, arrayTrouble, bringBack, rebuild as rebuildParity, repair as repairArray, scrub as scrubArray, setUp as setUpArray, startSnapraid, stop as stopArray, sync as syncArray, turnOff as turnOffArray } from "./snapraid";
+import { dockerSpace, dropImage, dropVolume, prune as pruneDocker } from "./dockerspace";
 import { ignoreDisk, unusedDisks, absent, connectVolume, disconnect, checkVolume, wipeDisk, formatDisk, mergeFolders, mountingReport, relabel, startMounting, type Outcome } from "./mounting";
 import { moveData } from "./movedata";
 import { installPackage } from "./packages";
@@ -1314,6 +1315,29 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
   // Docker itself, for a server that has none: the button on the home page
   if (path === "/api/docker" && method === "GET") return json({ ...(await dockerInfo()), install: DOCKER_INSTALL_COMMAND });
   if (path === "/api/docker/install" && method === "POST") return json({ job: installDocker(user.name).id }, 202);
+  // images and volumes: what uses them, and taking away what nothing uses (never through MCP)
+  if (path === "/api/docker/space" && method === "GET") {
+    // the sizes of volumes are counted by walking them
+    server.timeout(req, 0);
+    return json(await dockerSpace());
+  }
+  const dockerImage = /^\/api\/docker\/images\/(sha256:[0-9a-f]{64})$/.exec(path);
+  if (dockerImage && method === "DELETE") {
+    await dropImage(dockerImage[1]!, user.name);
+    return json({ ok: true });
+  }
+  const dockerVolume = /^\/api\/docker\/volumes\/([A-Za-z0-9][A-Za-z0-9_.-]{0,254})$/.exec(path);
+  if (dockerVolume && method === "DELETE") {
+    await dropVolume(dockerVolume[1]!, user.name);
+    return json({ ok: true });
+  }
+  const dockerPrune = /^\/api\/docker\/(images|volumes|cache)\/prune$/.exec(path);
+  if (dockerPrune && method === "POST") {
+    // every volume nothing uses goes with its data: asked like erasing a disk
+    if (dockerPrune[1] === "volumes" && !(await checkOwnPassword(user, (await body(req)).password))) return fail(400, "auth.wrongPassword");
+    server.timeout(req, 0);
+    return json(await pruneDocker(dockerPrune[1] as "images" | "volumes" | "cache", user.name));
+  }
   if (path === "/api/docker/start" && method === "POST") {
     await startDocker();
     return json(await dockerInfo());
