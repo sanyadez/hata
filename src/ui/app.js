@@ -627,6 +627,8 @@ function authScreen() {
 
 /** A phone: lists of sections fold to the open one, tables become cards */
 const phone = matchMedia("(max-width: 760px)");
+// the assistant shows its chats as a column only on a wide screen
+phone.addEventListener("change", () => paintAssistant());
 
 // a folded list opens when its open section is tapped; choosing one, or tapping elsewhere, folds it again
 document.addEventListener(
@@ -11384,11 +11386,34 @@ function paintAssistant() {
   else localStorage.removeItem(ASSISTANT_KEY + ".chat");
   const wide = panel.classList.contains("wide");
   const tool = (label, name, onclick, cls = "") => h("button", { type: "button", class: "icon-btn " + cls, title: label, "aria-label": label, onclick }, icon(name));
+  const fresh = () => ((assistantUi.chat = null), paintAssistant(), panel.querySelector("textarea").focus());
+  // wide, the chats are a column on the left; narrow, a list in the head
+  const listed = wide && !phone.matches && chats.length > 0;
+  panel.classList.toggle("listed", listed);
+  put(
+    panel.querySelector(".assistant-list"),
+    listed && [
+      button(t("assistant.newChat"), { class: "small" + (chat ? "" : " primary"), onclick: fresh }, "plus"),
+      h(
+        "div",
+        { class: "assistant-chats" },
+        chats.map((c) =>
+          h(
+            "button",
+            { type: "button", class: "assistant-chat" + (c.id === chat?.id ? " active" : ""), "aria-current": c.id === chat?.id ? "true" : null, onclick: () => void loadAssistantChat(c.id) },
+            h("span", { class: "title" }, c.title),
+            h("span", { class: "muted small" }, c.status === "asking" ? h("span", { class: "dot partial" }) : null, ago(c.updatedAt)),
+          ),
+        ),
+      ),
+    ],
+  );
+  const title = chats.find((c) => c.id === chat?.id)?.title ?? (chat ? "" : t("assistant.newChat"));
   put(
     panel.querySelector(".assistant-head"),
     // with chats to choose from the list names the one on the screen; otherwise the window says what it is
-    chats.length > 0 ? h("span", { class: "grow pick" }, pick) : h("strong", { class: "grow" }, t("assistant.title")),
-    chat && tool(t("assistant.newChat"), "plus", () => ((assistantUi.chat = null), paintAssistant(), panel.querySelector("textarea").focus())),
+    listed ? h("strong", { class: "grow ellipsis" }, title) : chats.length > 0 ? h("span", { class: "grow pick" }, pick) : h("strong", { class: "grow" }, t("assistant.title")),
+    chat && !listed && tool(t("assistant.newChat"), "plus", fresh),
     chat && tool(t("assistant.forget"), "trash", forgetAssistantChat),
     tool(t(wide ? "assistant.narrow" : "assistant.wide"), wide ? "shrink" : "expand", () => (panel.classList.toggle("wide"), rememberAssistant(), paintAssistant()), "wide-only"),
     tool(t("assistant.hide"), "down", closeAssistant),
@@ -11475,7 +11500,7 @@ function openAssistant({ ask, draft, restore } = {}) {
       }
     });
     const form = h("form", { class: "assistant-form", onsubmit: (e) => (e.preventDefault(), submit()) }, input, h("button", { class: "btn primary square", "aria-label": t("assistant.send"), title: t("assistant.send") }, icon("arrow")));
-    assistantUi.panel = h("aside", { class: "assistant" + (localStorage.getItem(ASSISTANT_KEY) === "wide" ? " wide" : ""), "aria-label": t("assistant.title") }, h("div", { class: "assistant-head" }), h("div", { class: "assistant-body" }), form);
+    assistantUi.panel = h("aside", { class: "assistant" + (localStorage.getItem(ASSISTANT_KEY) === "wide" ? " wide" : ""), "aria-label": t("assistant.title") }, h("nav", { class: "assistant-list", "aria-label": t("assistant.chats") }), h("div", { class: "assistant-head" }), h("div", { class: "assistant-body" }), form);
     document.body.append(assistantUi.panel);
   }
   assistantUi.open = true;
