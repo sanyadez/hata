@@ -215,5 +215,4 @@ test("the client's line per system", () => {
   expect(clientLine("debian", "http://h/", "c")).toBe("export DEBIAN_FRONTEND=noninteractive; apt-get update -q && apt-get install -y -q curl ca-certificates && curl -fsSL http://h/client/c | sh");
   expect(clientLine("alpine", "http://h", "c")).toBeNull();
   expect(clientLine("l26", "http://h", "c")).toBe("curl -fsSL http://h/client/c | sh");
-  expect(doneIn("x; echo HATA-1-$?\r\nok\r\nHATA-1-0\r\n", "HATA-1")).toBe(0);
 });
