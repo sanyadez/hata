@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { rolesFor } from "../src/proxmox";
 import { cleanFingerprint, cleanUrl, failed, hostKeysIn, familyOf, nextId, readNewGuest, setupScript, guestOfMachine, guestRights, mayPath, readConfig, readResources, readTask, snapshotName, trouble, type Watched } from "../src/pve";
 
 test("an address as typed becomes the API's origin", () => {
@@ -201,4 +202,10 @@ test("the setup script takes Hata's key out whatever happens", () => {
 
 test("a new container's key fingerprints from the task's lines", () => {
   expect(hostKeysIn(["Creating SSH host key 'ssh_host_ed25519_key' - this may take some time ...", "done: SHA256:Q/PWaZvdCe2vZ/p5Dp+7eTp8sqhZyaFeISPWoC6igWs root@hata-ct1", "done: nothing"])).toEqual(["SHA256:Q/PWaZvdCe2vZ/p5Dp+7eTp8sqhZyaFeISPWoC6igWs"]);
+});
+
+test("the rights Hata gives its own token, by level", () => {
+  expect(rolesFor("read")).toEqual([["/", "PVEAuditor"]]);
+  expect(rolesFor("pool")).toEqual([["/", "PVEAuditor"], ["/pool/hata", "PVEVMAdmin"], ["/storage", "PVEDatastoreUser"], ["/sdn/zones", "PVESDNUser"]]);
+  expect(rolesFor("manage")[1]).toEqual(["/vms", "PVEVMAdmin"]);
 });

@@ -86,11 +86,20 @@ function reach(url: string): Promise<{ socket: TLSSocket; shown: Shown }> {
   });
 }
 
+function auth(h: Caller, method: string): Record<string, string> {
+  if (h.ticket) return { Cookie: `PVEAuthCookie=${encodeURIComponent(h.ticket)}`, ...(method !== "GET" && h.csrf ? { CSRFPreventionToken: h.csrf } : {}) };
+  if (h.token) return { Authorization: `PVEAPIToken=${h.token}=${h.secret}` };
+  return {};
+}
+
 /**
  * One request to the API. The connection is made first and its certificate judged; only then the
  * token goes out. Proxmox says what went wrong in the status line; its parameter errors come in the body.
  */
-async function pve<T>(h: Pick<Host, "url" | "token" | "secret" | "fingerprint" | "name">, method: string, path: string, params?: Record<string, string | number | boolean>): Promise<T> {
+/** Who asks: Hata's token, or — only while setting itself up — a person's sign-in, or nobody (the sign-in itself) */
+type Caller = Pick<Host, "url" | "fingerprint" | "name"> & { token?: string; secret?: string; ticket?: string; csrf?: string };
+
+async function pve<T>(h: Caller, method: string, path: string, params?: Record<string, string | number | boolean>): Promise<T> {
   const { socket, shown } = await reach(h.url);
   const ok = h.fingerprint ? shown.fingerprint === h.fingerprint : shown.trusted;
   if (!ok) {
@@ -109,7 +118,7 @@ async function pve<T>(h: Pick<Host, "url" | "token" | "secret" | "fingerprint" |
         method,
         path: "/api2/json" + path + query,
         createConnection: () => socket,
-        headers: { Authorization: `PVEAPIToken=${h.token}=${h.secret}`, Accept: "application/json", Connection: "close", ...(payload ? { "Content-Type": "application/x-www-form-urlencoded", "Content-Length": Buffer.byteLength(payload) } : {}) },
+        headers: { ...auth(h, method), Accept: "application/json", Connection: "close", ...(payload ? { "Content-Type": "application/x-www-form-urlencoded", "Content-Length": Buffer.byteLength(payload) } : {}) },
         timeout: TIMEOUT_MS,
       } as Parameters<typeof request>[0],
       (res) => {
@@ -123,7 +132,7 @@ async function pve<T>(h: Pick<Host, "url" | "token" | "secret" | "fingerprint" |
           } catch {}
           const status = res.statusCode ?? 0;
           const message = [res.statusMessage ?? "", ...Object.entries(body.errors ?? {}).map(([k, v]) => `${k}: ${String(v).trim()}`)].filter(Boolean).join("; ").slice(0, 400);
-          if (status === 401) return reject(new AppError("pve.badToken", 401, { name: h.name }));
+          if (status === 401) return reject(new AppError(h.token ? "pve.badToken" : "pve.badLogin", 401, { name: h.name }));
           if (status === 403) return reject(new AppError("pve.denied", 403, { name: h.name, message }));
           if (status >= 400 || status === 0) return reject(new AppError("pve.failed", status >= 500 ? 502 : 400, { name: h.name, message: message || String(status) }));
           resolve(body.data as T);
@@ -720,4 +729,75 @@ export async function removeGuest(id: string, guest: string, typed: unknown, by:
   record("pve.guest.removed", { user: by, detail: label(h, g) });
   void look(h, true);
   return result;
+}
+
+// --- Set up by a person's sign-in -------------------------------------------------------------------
+
+/** What the token Hata makes for itself may do */
+export const LEVELS = ["read", "manage", "pool"] as const;
+const POOL = "hata";
+const USER = "hata@pve";
+
+/** The roles given to Hata's user, path → role; Proxmox's own roles, so the person recognises them there */
+export function rolesFor(level: (typeof LEVELS)[number]): [string, string][] {
+  const see: [string, string][] = [["/", "PVEAuditor"]];
+  // making a container takes room on a storage and a bridge to plug it into
+  const room: [string, string][] = [["/storage", "PVEDatastoreUser"], ["/sdn/zones", "PVESDNUser"]];
+  if (level === "read") return see;
+  if (level === "pool") return [...see, [`/pool/${POOL}`, "PVEVMAdmin"], ...room];
+  return [...see, ["/vms", "PVEVMAdmin"], ...room];
+}
+
+/**
+ * Adds a server from a person's sign-in: Hata signs in once (a code too when the account has two
+ * factors), makes the user `hata@pve` when it is not there, a token of its own for it — named after
+ * this Hata, so several can share a server — and its rights, then keeps the token and forgets the
+ * password. The token is privilege-separated and given the rights of the level itself, so it may no
+ * more than was chosen even when the user already holds more (another Hata, an earlier level).
+ */
+export async function addBySignIn(input: Input & { user?: unknown; password?: unknown; otp?: unknown; level?: unknown }, by: string) {
+  const url = cleanUrl(input.url);
+  if (!url) throw new AppError("pve.badUrl");
+  if (state.hosts.some((h) => h.url === url)) throw new AppError("pve.taken", 409, { name: state.hosts.find((h) => h.url === url)!.name });
+  const level = LEVELS.find((l) => l === input.level) ?? "manage";
+  let user = typeof input.user === "string" && input.user.trim() ? input.user.trim() : "root";
+  if (!user.includes("@")) user += "@pam";
+  if (!/^[A-Za-z0-9._-]+@[A-Za-z0-9._-]+$/.test(user)) throw new AppError("pve.badUser");
+  const password = typeof input.password === "string" ? input.password : "";
+  if (!password) throw new AppError("pve.badLogin", 400, { name: url });
+  const { socket, shown } = await reach(url);
+  socket.destroy();
+  let fingerprint: string | null = null;
+  if (!shown.trusted) {
+    fingerprint = cleanFingerprint(input.fingerprint);
+    if (fingerprint !== shown.fingerprint) throw new AppError("pve.confirmCert", 409, { fingerprint: shown.fingerprint, subject: shown.subject, issuer: shown.issuer });
+  }
+  const bare: Caller = { url, fingerprint, name: new URL(url).hostname };
+  let signed = await pve<{ ticket: string; CSRFPreventionToken?: string; NeedTFA?: number }>(bare, "POST", "/access/ticket", { username: user, password });
+  if (signed.NeedTFA) {
+    const otp = typeof input.otp === "string" ? input.otp.replace(/\s/g, "") : "";
+    if (!/^\d{6,8}$/.test(otp)) throw new AppError("pve.needOtp", 409);
+    signed = await pve(bare, "POST", "/access/ticket", { username: user, "tfa-challenge": signed.ticket, password: `totp:${otp}` }).catch((e) => {
+      throw e instanceof AppError && e.code === "pve.badLogin" ? new AppError("pve.badOtp", 401) : e;
+    });
+  }
+  const as: Caller = { ...bare, ticket: signed.ticket, csrf: signed.CSRFPreventionToken };
+  const users = await pve<{ userid: string }[]>(as, "GET", "/access/users");
+  if (!users.some((u) => u.userid === USER)) await pve(as, "POST", "/access/users", { userid: USER, comment: "Hata" });
+  if (level === "pool") {
+    const pools = await pve<{ poolid: string }[]>(as, "GET", "/pools");
+    if (!pools.some((p) => p.poolid === POOL)) await pve(as, "POST", "/pools", { poolid: POOL, comment: "Guests Hata looks after" });
+  }
+  const tokenId = `hata-${Buffer.from(crypto.getRandomValues(new Uint8Array(3))).toString("hex")}`;
+  const made = await pve<{ value: string; "full-tokenid": string }>(as, "POST", `/access/users/${encodeURIComponent(USER)}/token/${tokenId}`, { privsep: 1, comment: `Hata (${level})` });
+  // a separated token may what both it and its user are given
+  for (const [path, role] of rolesFor(level)) await pve(as, "PUT", "/access/acl", { path, roles: role, users: USER, tokens: made["full-tokenid"], propagate: 1 });
+  const tried = await tryHost({ url, token: made["full-tokenid"], secret: made.value, fingerprint: fingerprint ?? undefined, name: input.name });
+  const ids = cleanIds(input.ids);
+  const h: Host = { id: Buffer.from(crypto.getRandomValues(new Uint8Array(4))).toString("hex"), ...tried, ...(ids ? { ids } : {}), added: Date.now(), by };
+  state.hosts.push(h);
+  save();
+  record("pve.added", { user: by, detail: `${h.name} (${h.url}, ${made["full-tokenid"]})` });
+  await look(h, true);
+  return summary(h);
 }

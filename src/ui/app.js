@@ -2705,18 +2705,52 @@ function pveDialog(old = null) {
   // not the browser's saved sign-in to Hata: these are Proxmox's, and a password field invites it
   const token = h("input", { value: old?.token ?? "", placeholder: "hata@pve!panel", required: true, autocapitalize: "none", spellcheck: false, autocomplete: "off", name: "pve-token-id", class: "mono" });
   const secret = h("input", { type: "password", placeholder: old ? t("pve.secretKeep") : "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx", autocomplete: "new-password", name: "pve-token-secret", class: "mono", required: !old });
+  // a new server: by a person's sign-in (Hata makes its own token there) or by a token made by hand
+  let mode = old ? "token" : "login";
+  const user = h("input", { value: "root@pam", required: true, autocapitalize: "none", spellcheck: false, autocomplete: "off", name: "pve-user", class: "mono" });
+  const password = h("input", { type: "password", autocomplete: "new-password", name: "pve-password", required: true });
+  const otp = h("input", { inputmode: "numeric", autocomplete: "one-time-code", maxLength: 8, class: "mono" });
+  const otpRow = field(t("pve.otp"), otp, t("pve.otpHint"));
+  otpRow.hidden = true;
+  const level = h("select", null, ["manage", "pool", "read"].map((l) => h("option", { value: l }, t("pve.level." + l))));
+  const levelHint = h("span", { class: "hint" }, t("pve.levelHint.manage"));
+  level.addEventListener("change", () => (levelHint.textContent = t("pve.levelHint." + level.value)));
+  const loginPart = h("div", { class: "stack" }, h("div", { class: "form-pair" }, field(t("pve.user"), user), field(t("pve.password"), password)), otpRow, h("label", { class: "field" }, h("span", { class: "label" }, t("pve.level")), level, levelHint), h("p", { class: "muted small" }, t("pve.loginLead")));
   const idsFrom = h("input", { type: "number", min: 100, value: old?.ids?.from ?? "", placeholder: "100" });
   const idsTo = h("input", { type: "number", min: 100, value: old?.ids?.to ?? "", placeholder: "999" });
   const cert = h("div");
   const error = h("p", { class: "error", role: "alert" });
-  let fingerprint = null;
   let dialog;
+  const tokenPart = h(
+    "div",
+    { class: "stack" },
+    field(t("pve.token"), token, t("pve.tokenHint")),
+    field(t("pve.secret"), secret, old ? t("pve.secretKeepHint") : null),
+    !old && h("details", { class: "small" }, h("summary", null, t("pve.howTitle")), h("ol", { class: "stack-s" }, ["1", "2", "3", "4"].map((n) => h("li", null, t("pve.how." + n)))), h("p", { class: "muted" }, t("pve.howRights"))),
+  );
+  const modeTab = (m) => h("button", { type: "button", class: "btn" + (mode === m ? " active" : ""), "data-mode": m, onclick: () => setMode(m) }, t("pve.mode." + m));
+  const setMode = (m) => {
+    mode = m;
+    loginPart.hidden = m !== "login";
+    tokenPart.hidden = m !== "token";
+    user.required = password.required = m === "login";
+    token.required = m === "token";
+    secret.required = m === "token" && !old;
+    dialog?.querySelectorAll("[data-mode]").forEach((b) => b.classList.toggle("active", b.dataset.mode === m));
+    error.textContent = "";
+  };
+  setMode(mode);
+  let fingerprint = null;
   const send = async (e) => {
     e.preventDefault();
     error.textContent = "";
     const submit = dialog.querySelector("button[type=submit]");
     submit.disabled = true;
-    const data = { ids: idsFrom.value && idsTo.value ? { from: Number(idsFrom.value), to: Number(idsTo.value) } : null, name: name.value, url: url.value, token: token.value, ...(secret.value ? { secret: secret.value } : {}), ...(fingerprint ? { fingerprint } : {}) };
+    const ids = idsFrom.value && idsTo.value ? { from: Number(idsFrom.value), to: Number(idsTo.value) } : null;
+    const data =
+      mode === "login"
+        ? { ids, name: name.value, url: url.value, user: user.value, password: password.value, level: level.value, ...(otp.value ? { otp: otp.value } : {}), ...(fingerprint ? { fingerprint } : {}) }
+        : { ids, name: name.value, url: url.value, token: token.value, ...(secret.value ? { secret: secret.value } : {}), ...(fingerprint ? { fingerprint } : {}) };
     try {
       const saved = old ? await api("PATCH", `/api/proxmox/${old.id}`, data) : await api("POST", "/api/proxmox", data);
       dialog.close();
@@ -2739,6 +2773,9 @@ function pveDialog(old = null) {
         );
         fingerprint = err.detail.fingerprint;
         submit.querySelector("span").textContent = t("pve.certTrust");
+      } else if (err.code === "pve.needOtp") {
+        otpRow.hidden = false;
+        otp.focus();
       } else error.textContent = errorText(err);
     }
     submit.disabled = false;
@@ -2750,19 +2787,12 @@ function pveDialog(old = null) {
       { class: "stack", onsubmit: send },
       h("header", null, h("h2", { class: "grow" }, old ? t("pve.changeTitle", { name: old.name }) : t("pve.addTitle")), closeX(() => dialog)),
       !old && h("p", null, t("pve.addLead")),
+      !old && h("div", { class: "seg" }, modeTab("login"), modeTab("token")),
       field(t("pve.url"), url, t("pve.urlHint")),
-      field(t("pve.token"), token, t("pve.tokenHint")),
-      field(t("pve.secret"), secret, old ? t("pve.secretKeepHint") : null),
+      loginPart,
+      tokenPart,
       field(t("pve.name"), name, t("pve.nameHint")),
       h("div", { class: "field" }, h("span", { class: "label" }, t("pve.ids")), h("div", { class: "form-pair" }, idsFrom, idsTo), h("span", { class: "hint" }, t("pve.idsHint"))),
-      !old &&
-        h(
-          "details",
-          { class: "small" },
-          h("summary", null, t("pve.howTitle")),
-          h("ol", { class: "stack-s" }, ["1", "2", "3", "4"].map((n) => h("li", null, t("pve.how." + n)))),
-          h("p", { class: "muted" }, t("pve.howRights")),
-        ),
       cert,
       error,
       h("footer", null, closeButton(() => dialog, t("common.cancel")), h("button", { type: "submit", class: "btn primary" }, h("span", null, old ? t("pve.save") : t("pve.add")))),
