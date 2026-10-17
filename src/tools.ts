@@ -22,6 +22,7 @@ import { bus } from "./bus";
 import { afterPackage, networkReport, type Nic } from "./network";
 import { installCommand, installPackage, PATH, removeCommand, removePackages, run } from "./packages";
 import { installSamba } from "./shares";
+import { packageUpdates } from "./sysupdates";
 import { inUse as wireguardInUse } from "./wireguard";
 import { INSTALL_COMMAND as TAILSCALE_INSTALL_COMMAND, install as installTailscale, report as tailscaleReport } from "./tailscale";
 
@@ -88,6 +89,10 @@ export interface Tool {
    * off first (shares, merged, array, network, wifi, hotspot, ntfs); "" — it can.
    */
   holds: string;
+  /** The newer version the package manager offers; "" — none known */
+  newer: string;
+  /** Its packages that have one, for the "Update" button */
+  upgrade: string[];
 }
 
 /** The version in what a program prints about itself: the first thing that looks like one; "" — none */
@@ -169,10 +174,12 @@ export async function toolsReport(): Promise<Tool[]> {
   const ntfs = await kernelReadsNtfs();
   const nics = (await networkReport().catch(() => null))?.nics ?? [];
   const remote = (await tailscaleReport(0).catch(() => null))?.state === "running";
+  const offered = packageUpdates().list ?? [];
   return Promise.all(
     SPECS.map(async (spec) => {
       const installed = has(spec.bin);
       let version = installed ? await versionFor(spec) : "";
+      const own = installed ? offered.filter((item) => item.from && (spec.family ?? [spec.package]).includes(item.name)) : [];
       if (spec.id === "docker" && docker.compose) version = `${docker.version ?? version} · compose ${docker.compose}`;
       return {
         id: spec.id,
@@ -186,6 +193,8 @@ export async function toolsReport(): Promise<Tool[]> {
         used: installed ? usedNow(spec.id, docker.available) : null,
         remove: installed && !spec.base ? removeCommand(await packagesOf(spec)) : "",
         holds: !installed ? "" : spec.base ? "base" : holdsOf(spec.id, nics, remote),
+        newer: (own.find((item) => item.name === spec.package) ?? own[0])?.to.replace(/^\d+:/, "").replace(/~(debian|ubuntu)[^-]*$/, "") ?? "",
+        upgrade: own.map((item) => item.name),
       };
     }),
   );

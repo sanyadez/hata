@@ -420,6 +420,8 @@ function startEvents() {
       void loadApprovals();
     } else if (event.type === "tailscale") {
       if (state.route.view === "settings" && state.route.section === "remote") void loadRemote();
+    } else if (event.type === "sysupdates") {
+      sysUpdatesEvent(event.at ?? "");
     } else if (event.type === "network") {
       if (state.route.view === "settings" && state.route.section === "network") void loadNetwork();
     } else if (event.type === "store" && state.route.view === "store") {
@@ -1887,7 +1889,7 @@ async function dockerDialog() {
   );
 }
 
-const ACTIVITY_ICONS = { rename: "edit", move: "arrow", copy: "copy", delete: "trash", deleteForever: "trash", purge: "trash", extract: "archive", terminal: "terminal", install: "download", update: "up", start: "play", stop: "stop", restart: "refresh", remove: "trash", apply: "code", backup: "archive", restore: "undo", snapshot: "trash", import: "download" };
+const ACTIVITY_ICONS = { rename: "edit", move: "arrow", copy: "copy", delete: "trash", deleteForever: "trash", purge: "trash", extract: "archive", terminal: "terminal", install: "download", update: "up", start: "play", stop: "stop", restart: "refresh", remove: "trash", apply: "code", backup: "archive", restore: "undo", snapshot: "trash", import: "download", packages: "up" };
 
 function activityItem(entry, when) {
   const [group, kind, outcome] = entry.code.split(".");
@@ -2761,6 +2763,7 @@ function machineOverview(m, box) {
           ? h("section", { class: "stats card" }, statCells("m"))
           : h("p", { class: "card pad muted" }, t("machines.offlineLead", { ago: ago(m.seen) })),
         h("div", { id: "m-disks" }),
+        m.online && h("div", { id: "machine-sysupdates" }, sysUpdatesCard(m.id)),
       ),
       h(
         "aside",
@@ -2783,6 +2786,7 @@ function machineOverview(m, box) {
     ),
   );
   paintMachineStats(m);
+  if (m.online && !sysUpdates[m.id]) void loadSysUpdates(m.id);
 }
 
 function paintMachineOverview() {
@@ -6739,7 +6743,7 @@ async function loadSettings() {
     if (isAdmin() && state.route.section === "apps") state.images = await api("GET", "/api/images").catch(() => null);
     if (isAdmin() && state.route.section === "network") state.network = await api("GET", "/api/network").catch(() => null);
     if (isAdmin() && state.route.section === "remote") [state.remote, state.wireguard] = await Promise.all([api("GET", "/api/tailscale").catch(() => null), api("GET", "/api/wireguard").catch(() => null)]);
-    if (isAdmin() && state.route.section === "tools") state.tools = await api("GET", "/api/tools").catch(() => null);
+    if (isAdmin() && state.route.section === "tools") [state.tools, sysUpdates[""]] = await Promise.all([api("GET", "/api/tools").catch(() => null), api("GET", "/api/system/updates").catch((e) => ({ error: errorText(e) }))]);
     // counting the volumes takes a while: the page is shown first
     if (isAdmin() && state.route.section === "docker") void loadSpace();
     if (isAdmin() && state.route.section === "storage") [state.disks, state.places] = await Promise.all([api("GET", "/api/disks").catch(() => null), api("GET", "/api/netplaces").catch(() => null)]);
@@ -8130,22 +8134,152 @@ function toolsSection() {
       h(
         "div",
         { class: "grow" },
-        h("div", { class: "tool-head" }, h("strong", null, tool.name), h("span", { class: "state " + (tool.state === "installed" ? "running" : "stopped") }, t("tools.state." + tool.state)), tool.used && h("span", { class: "state running" }, t("tools.used")), tool.version && h("span", { class: "muted small mono" }, tool.version)),
+        h("div", { class: "tool-head" }, h("strong", null, tool.name), h("span", { class: "state " + (tool.state === "installed" ? "running" : "stopped") }, t("tools.state." + tool.state)), tool.used && h("span", { class: "state running" }, t("tools.used")), tool.version && h("span", { class: "muted small mono" }, tool.version), tool.newer && h("span", { class: "state partial" }, t("tools.newer", { version: tool.newer }))),
         h("p", { class: "muted small" }, t(`tools.${tool.id}.what`), " ", h("a", { class: "link", href: tool.page }, t(`tools.${tool.id}.where`))),
         tool.builtIn && h("p", { class: "muted small" }, t(`tools.${tool.id}.builtIn`)),
         tool.state === "installed" && tool.holds && h("p", { class: "muted small" }, t("tools.holds." + tool.holds)),
         tool.state !== "installed" && (tool.install ? h("p", { class: "cmd" }, icon("terminal"), tool.install) : h("p", { class: "muted small" }, t("mounting.needs.byHand", { package: tool.package }))),
       ),
       tool.state !== "installed" && tool.install && install(tool),
+      tool.state === "installed" && tool.upgrade?.length > 0 && button(t("tools.update"), { class: "small accent", onclick: () => sysUpgradeDialog("", tool.upgrade, tool.name) }, "up"),
       tool.state === "installed" && !tool.holds && tool.remove && button(t("tools.remove"), { class: "small", onclick: () => toolRemoveDialog(tool) }, "trash"),
     );
   const here = tools.filter((tool) => tool.state === "installed");
   const absent = tools.filter((tool) => tool.state !== "installed");
   return [
     h("section", { class: "card pad stack" }, h("h2", null, t("settings.tools")), h("p", { class: "muted small" }, t("tools.lead")), error),
+    h("div", { id: "sysupdates" }, sysUpdatesCard("")),
     absent.length > 0 && h("section", { class: "card pad" }, h("h2", null, t("tools.absent"), h("span", { class: "muted" }, " " + absent.length)), absent.map(row)),
     here.length > 0 && h("section", { class: "card pad" }, h("h2", null, t("tools.present"), h("span", { class: "muted" }, " " + here.length)), here.map(row)),
   ];
+}
+
+/** Newer versions of the system's packages as last checked: "" — this server, else a machine's id */
+const sysUpdates = {};
+const sysUpdatesApi = (at) => (at ? `/api/machines/${at}/system/updates` : "/api/system/updates");
+/** The packages ticked in the list, per place */
+const sysChosen = {};
+
+async function loadSysUpdates(at = "") {
+  try {
+    sysUpdates[at] = await api("GET", sysUpdatesApi(at));
+  } catch (e) {
+    sysUpdates[at] = { error: errorText(e) };
+  }
+  paintSysUpdates(at);
+}
+
+function paintSysUpdates(at) {
+  const box = document.getElementById(at ? "machine-sysupdates" : "sysupdates");
+  if (box && (at ? state.route.view === "machine" && state.route.id === at : state.route.view === "settings")) box.replaceChildren(sysUpdatesCard(at));
+}
+
+/** A check began or ended somewhere: the page that shows that place looks again */
+async function sysUpdatesEvent(at) {
+  if (!at && state.route.view === "settings" && state.route.section === "tools") {
+    // the rows of the programs carry their newer versions too
+    state.tools = await api("GET", "/api/tools").catch(() => state.tools);
+    sysUpdates[""] = await api("GET", "/api/system/updates").catch(() => sysUpdates[""]);
+    renderSettings();
+  } else if (at && state.route.view === "machine" && state.route.id === at) void loadSysUpdates(at);
+}
+
+/** Newer versions of the system's packages: how many, which, and the buttons that install them */
+function sysUpdatesCard(at) {
+  const info = sysUpdates[at];
+  const list = info?.list ?? [];
+  const chosen = (sysChosen[at] ??= new Set());
+  for (const name of [...chosen]) if (!list.some((p) => p.name === name)) chosen.delete(name);
+  const check = button(info?.checking ? t("sysupdates.checking") : t("sysupdates.check"), {
+    class: "small",
+    disabled: !!info?.checking,
+    onclick: async (e) => {
+      const el = e.currentTarget;
+      el.disabled = true;
+      el.lastChild.textContent = t("sysupdates.checking");
+      try {
+        sysUpdates[at] = await api("POST", `${sysUpdatesApi(at)}/check`, {});
+      } catch (err) {
+        toast(errorText(err), "error");
+      }
+      paintSysUpdates(at);
+      if (!at) void sysUpdatesEvent("");
+    },
+  }, "refresh");
+  const head = h("div", { class: "section-head" }, h("h2", null, t("sysupdates.title")), check);
+  if (!info) return h("section", { class: "card pad stack" }, head, h("p", { class: "muted" }, "…"));
+  if (info.error && !info.at) return h("section", { class: "card pad stack" }, head, h("p", { class: "error" }, info.error));
+  if (info.at && !info.manager) return h("section", { class: "card pad stack" }, head, h("p", { class: "muted small" }, t("sysupdates.noManager")));
+  const security = list.filter((p) => p.security).length;
+  const when = info.at ? t("sysupdates.checked", { ago: ago(info.at) }) : "";
+  const status = !info.at
+    ? h("p", { class: "muted" }, t("sysupdates.never"))
+    : list.length
+      ? h("p", { class: "sys-status" }, h("span", { class: "state partial" }, t("sysupdates.count", { n: list.length })), security > 0 && h("span", { class: "state restarting" }, t("sysupdates.security", { n: security })), h("span", { class: "muted small" }, when))
+      : h("p", { class: "with-icon" }, icon("check"), t("sysupdates.none"), h("span", { class: "muted small" }, " · " + when));
+  const chooseButton = button(t("sysupdates.updateChosen", { n: chosen.size }), { class: "small", onclick: () => sysUpgradeDialog(at, [...chosen]) }, "up");
+  chooseButton.hidden = !chosen.size;
+  const row = (p) => {
+    const box = h("input", { type: "checkbox", checked: chosen.has(p.name) });
+    box.addEventListener("change", () => {
+      if (box.checked) chosen.add(p.name);
+      else chosen.delete(p.name);
+      chooseButton.hidden = !chosen.size;
+      chooseButton.lastChild.textContent = t("sysupdates.updateChosen", { n: chosen.size });
+    });
+    return h("label", { class: "check sys-package" }, box, h("span", { class: "mono grow clip" }, p.name), h("span", { class: "muted small mono" }, p.from ? `${p.from} → ${p.to}` : t("sysupdates.new", { version: p.to })), p.security && h("span", { class: "state restarting" }, t("sysupdates.securityOne")));
+  };
+  // security updates first, then by name
+  const sorted = [...list].sort((a, b) => Number(b.security) - Number(a.security) || a.name.localeCompare(b.name));
+  return h(
+    "section",
+    { class: "card pad stack" },
+    head,
+    h("p", { class: "muted small" }, t("sysupdates.lead")),
+    status,
+    info.error && h("p", { class: "error small" }, t("sysupdates.lastError", { message: info.error })),
+    info.reboot && h("p", { class: "banner" }, t(at ? "sysupdates.rebootMachine" : "sysupdates.reboot")),
+    list.length > 0 && h("p", { class: "cmd" }, icon("terminal"), info.command),
+    list.length > 0 && h("div", { class: "actions" }, button(t("sysupdates.updateAll"), { class: "accent", onclick: () => sysUpgradeDialog(at, []) }, "up"), chooseButton),
+    list.length > 0 && h("details", { open: chosen.size > 0 }, h("summary", null, t("sysupdates.show", { n: list.length })), h("div", { class: "sys-packages" }, sorted.map(row))),
+  );
+}
+
+/** Asks before newer versions are installed: of every package (`packages` empty) or the ones named */
+function sysUpgradeDialog(at, packages, name = "") {
+  const list = sysUpdates[at]?.list ?? [];
+  const count = packages.length || list.length;
+  const docker = (packages.length ? packages : list.map((p) => p.name)).some((p) => /^(docker|containerd)/.test(p));
+  const manager = sysUpdates[at]?.manager;
+  const command = packages.length ? (manager === "dnf" ? `dnf upgrade ${packages.join(" ")}` : `apt-get install --only-upgrade ${packages.join(" ")}`) : sysUpdates[at]?.command;
+  let dialog;
+  dialog = openDialog(
+    "confirm",
+    h("header", null, h("h2", { class: "grow" }, name ? t("sysupdates.updateTitle", { name }) : t("sysupdates.updateMany", { n: count })), closeX(() => dialog)),
+    h("p", null, t(at ? "sysupdates.updateLeadMachine" : "sysupdates.updateLead")),
+    docker && h("p", { class: "banner" }, t("sysupdates.docker")),
+    command && h("p", { class: "cmd whole" }, icon("terminal"), command),
+    h(
+      "footer",
+      null,
+      closeButton(() => dialog, t("common.cancel")),
+      button(t("sysupdates.go"), {
+        class: "primary",
+        onclick: async (e) => {
+          e.currentTarget.disabled = true;
+          try {
+            const res = await api("POST", `${sysUpdatesApi(at)}/upgrade`, { packages });
+            dialog.close();
+            sysChosen[at]?.clear();
+            jobDialog(res.job, "sysupdate", "", () => sysUpdatesEvent(at));
+          } catch (err) {
+            dialog.close();
+            toast(errorText(err), "error");
+          }
+        },
+      }, "up"),
+    ),
+  );
 }
 
 /** Images and volumes as last counted: "" — this server, else a machine's id */
