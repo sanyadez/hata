@@ -159,3 +159,15 @@ test("what is not an app yet: projects started elsewhere and containers on their
   ]);
   expect(found.single.map((x) => x.Id)).toEqual(["lonely"]);
 });
+
+test("the apps a machine's client runs on this same Docker are not offered to take over", () => {
+  const c = (name: string, labels: Record<string, string>): ContainerSummary => ({ Id: name, Names: ["/" + name], Image: "i", State: "running", Status: "Up", Labels: labels, Ports: [] });
+  const found = foreign(
+    [
+      c("radicale-1", { "com.docker.compose.project": "radicale", "com.docker.compose.project.working_dir": "/var/lib/hata-client/apps/radicale", "com.docker.compose.project.config_files": "/var/lib/hata-client/apps/radicale/compose.yml" }),
+      c("blog-1", { "com.docker.compose.project": "blog", "com.docker.compose.project.working_dir": "/srv/blog" }),
+    ],
+    [],
+  );
+  expect(found.projects.map((p) => p.name)).toEqual(["blog"]);
+});
