@@ -15,7 +15,7 @@ import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync
 import { arch, hostname, release, totalmem } from "node:os";
 import { dirname } from "node:path";
 import { containerCommand, shellCommand, TerminalManager, terminalEnv, type TerminalClient } from "./terminal";
-import { dockerInfo, listContainers, PROJECT_LABEL, run, SERVICE_LABEL, startContainer, stopContainer, type ContainerSummary } from "./docker";
+import { diskUsage, dockerInfo, listContainers, PROJECT_LABEL, pruneBuildCache, pruneImages, pruneVolumes, removeImage, removeVolume, run, SERVICE_LABEL, startContainer, stopContainer, type ContainerSummary } from "./docker";
 import * as apps from "./clientapps";
 import * as files from "./clientfiles";
 import { keyPair, linkKeys, Opener, Sealer, splitCode, type KeyPair } from "./link";
@@ -379,6 +379,23 @@ function handlersFor(state: LinkState): Record<string, Handler> {
     "apps.snapshot": (args, channel) => apps.snapshot(args, channel),
     tcp: (args, channel) => apps.tcp(args, channel),
     "apps.restore": (args, channel) => apps.restore(args, channel),
+    // images and volumes as Docker tells them; what they mean and whether one may go is Hata's to say
+    "docker.space": async () => ({ df: await diskUsage(), containers: await listContainers() }),
+    "docker.image.remove": async (args) => {
+      const id = String(args?.id ?? "");
+      if (!/^sha256:[0-9a-f]{64}$/.test(id)) throw new MuxError("request.notFound");
+      if ((await listContainers()).some((c) => c.ImageID === id)) throw new MuxError("docker.imageInUse");
+      await removeImage(id);
+      return { ok: true };
+    },
+    "docker.volume.remove": async (args) => {
+      const name = String(args?.name ?? "");
+      if (!/^[A-Za-z0-9][A-Za-z0-9_.-]{0,254}$/.test(name)) throw new MuxError("request.notFound");
+      if ((await listContainers()).some((c) => c.Mounts?.some((m) => m.Type === "volume" && m.Name === name))) throw new MuxError("docker.volumeInUse");
+      await removeVolume(name);
+      return { ok: true };
+    },
+    "docker.prune": (args) => (args?.kind === "images" ? pruneImages() : args?.kind === "volumes" ? pruneVolumes() : args?.kind === "cache" ? pruneBuildCache() : Promise.reject(new MuxError("request.notFound"))),
     "fs.list": (args) => files.list(args),
     "fs.summary": (args) => files.summary(args),
     "fs.info": (args) => files.fileInfo(args),
