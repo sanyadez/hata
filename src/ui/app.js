@@ -2685,6 +2685,7 @@ function paintPveList() {
           { class: "card pad machine-card", href: `#/proxmox/${x.id}`, menu: (at) => pveMenu(x, at) },
           h("div", { class: "machine-title" }, icon("server"), h("strong", { class: "clip grow" }, x.name), pveChip(x)),
           h("p", { class: "muted small clip" }, ["Proxmox VE " + (x.version || ""), x.nodes.length > 1 ? t("pve.nodes", { n: x.nodes.length }) : node?.name].filter(Boolean).join(" · ")),
+          x.self && h("p", { class: "small" }, icon("home"), " ", t("pve.selfShort", { guest: x.self.replace("lxc/", "CT ").replace("qemu/", "VM ") })),
           x.online
             ? [
                 h("p", { class: "small" }, t("pve.guestsRunning", { n: x.counts.running, total: x.counts.guests })),
@@ -2960,64 +2961,70 @@ function renderPveBody() {
   );
 }
 
+/** A part of the server's page: its title and what it shows in one card */
+const pveSection = (title, ...body) => h("section", { class: "card pve-section" }, h("header", { class: "pve-section-head" }, h("h2", null, title)), ...body);
+
 function pveOverview(x) {
   const storages = x.storages;
+  const self = x.guests.find((g) => g.id === x.self);
   return h(
     "div",
     { class: "stack" },
+    self && h("p", { class: "card pve-self" }, icon("home"), h("span", null, t("pve.selfHere", { guest: `${guestKind(self)} ${self.name}`, node: self.node }))),
     x.trouble.length > 0 && h("section", { class: "card pve-trouble" }, x.trouble.map(attentionItem)),
-    h("div", { class: "section-head" }, h("h2", null, t("pve.nodesTitle"))),
-    h(
-      "div",
-      { class: "cards" },
-      x.nodes.map((n) =>
-        h(
-          "section",
-          { class: "card pad machine-card" },
-          h("div", { class: "machine-title" }, icon("server"), h("strong", { class: "clip grow" }, n.name), pveChip(n)),
-          h("p", { class: "muted small" }, n.online ? t("pve.up", { time: duration(n.uptime) }) : "—"),
-          meterRow(t("sys.cpu"), n.online ? Math.round(n.cpu * 100) : null, t("sys.cores", { n: n.cores })),
-          meterRow(t("sys.memory"), n.online ? pct(n.memory.used, n.memory.total) : null, bytes(n.memory.total)),
-          meterRow(t("pve.rootDisk"), n.online ? pct(n.disk.used, n.disk.total) : null, t("sys.free", { free: bytes(n.disk.total - n.disk.used), total: bytes(n.disk.total) })),
-        ),
-      ),
-    ),
-    h("div", { class: "section-head" }, h("h2", null, t("pve.storagesTitle"))),
-    h(
-      "div",
-      { class: "table-wrap card" },
-      h(
-        "table",
-        null,
-        h("thead", null, h("tr", null, h("th", null, t("pve.col.storage")), h("th", null, t("pve.col.type")), h("th", null, t("pve.col.content")), h("th", null, t("pve.col.use")))),
-        h(
-          "tbody",
-          null,
-          storages.map((s) => {
-            const p = pct(s.used, s.total);
-            const fill = h("i", { class: level(p ?? 0) });
-            fill.style.width = (p ?? 0) + "%";
-            return h(
-              "tr",
-              null,
-              h("td", null, h("div", { class: "strong" }, s.name), x.nodes.length > 1 && h("div", { class: "muted small" }, s.node)),
-              h("td", { class: "small" }, s.type, s.shared && h("span", { class: "muted" }, " · " + t("pve.shared"))),
-              h("td", { class: "small muted" }, s.content.map((c) => t("pve.content." + c)).join(", ")),
-              h("td", null, s.active ? [h("div", { class: "small" }, `${p ?? 0}% · ${t("sys.free", { free: bytes(s.total - s.used), total: bytes(s.total) })}`), h("div", { class: "bar" }, fill)] : h("span", { class: "chip warn" }, t("pve.inactive"))),
-            );
-          }),
-        ),
-      ),
-    ),
-    x.disks.length > 0 && h("div", { class: "section-head" }, h("h2", null, t("pve.disksTitle"))),
-    x.disks.length > 0 &&
+    pveSection(
+      t("pve.nodesTitle"),
       h(
         "div",
-        { class: "table-wrap card" },
-        h("table", null, h("thead", null, h("tr", null, h("th", null, t("pve.col.disk")), h("th", null, t("pve.col.node")), h("th", null, t("pve.col.health")))), h("tbody", null, x.disks.map((d) => h("tr", null, h("td", null, h("div", null, d.model || d.device), h("div", { class: "muted small mono" }, d.device)), h("td", { class: "small" }, d.node), h("td", null, h("span", { class: "chip " + (/^(PASSED|OK)$/i.test(d.health) ? "ok" : /^UNKNOWN$/i.test(d.health) || !d.health ? "" : "danger") }, d.health || "—")))))),
+        { class: "pve-nodes" },
+        x.nodes.map((n) =>
+          h(
+            "div",
+            { class: "pve-node" },
+            h("div", { class: "machine-title" }, icon("server"), h("strong", { class: "clip grow" }, n.name), pveChip(n)),
+            h("p", { class: "muted small" }, n.online ? t("pve.up", { time: duration(n.uptime) }) : "—"),
+            meterRow(t("sys.cpu"), n.online ? Math.round(n.cpu * 100) : null, t("sys.cores", { n: n.cores })),
+            meterRow(t("sys.memory"), n.online ? pct(n.memory.used, n.memory.total) : null, bytes(n.memory.total)),
+            meterRow(t("pve.rootDisk"), n.online ? pct(n.disk.used, n.disk.total) : null, t("sys.free", { free: bytes(n.disk.total - n.disk.used), total: bytes(n.disk.total) })),
+          ),
+        ),
       ),
-    h("div", { class: "section-head" }, h("h2", null, t("pve.jobsTitle"))),
-    h("div", { id: "pve-jobs" }, h("p", { class: "muted" }, t("machines.loading"))),
+    ),
+    pveSection(
+      t("pve.storagesTitle"),
+      h(
+        "div",
+        { class: "table-wrap" },
+        h(
+          "table",
+          null,
+          h("thead", null, h("tr", null, h("th", null, t("pve.col.storage")), h("th", null, t("pve.col.type")), h("th", null, t("pve.col.content")), h("th", null, t("pve.col.use")))),
+          h(
+            "tbody",
+            null,
+            storages.map((s) => {
+              const p = pct(s.used, s.total);
+              const fill = h("i", { class: level(p ?? 0) });
+              fill.style.width = (p ?? 0) + "%";
+              return h(
+                "tr",
+                null,
+                h("td", null, h("div", { class: "strong" }, s.name), x.nodes.length > 1 && h("div", { class: "muted small" }, s.node)),
+                h("td", { class: "small" }, s.type, s.shared && h("span", { class: "muted" }, " · " + t("pve.shared"))),
+                h("td", { class: "small muted" }, s.content.map((c) => t("pve.content." + c)).join(", ")),
+                h("td", null, s.active ? [h("div", { class: "small" }, `${p ?? 0}% · ${t("sys.free", { free: bytes(s.total - s.used), total: bytes(s.total) })}`), h("div", { class: "bar" }, fill)] : h("span", { class: "chip warn" }, t("pve.inactive"))),
+              );
+            }),
+          ),
+        ),
+      ),
+    ),
+    x.disks.length > 0 &&
+      pveSection(
+        t("pve.disksTitle"),
+        h("div", { class: "table-wrap" }, h("table", null, h("thead", null, h("tr", null, h("th", null, t("pve.col.disk")), h("th", null, t("pve.col.node")), h("th", null, t("pve.col.health")))), h("tbody", null, x.disks.map((d) => h("tr", null, h("td", null, h("div", null, d.model || d.device), h("div", { class: "muted small mono" }, d.device)), h("td", { class: "small" }, d.node), h("td", null, h("span", { class: "chip " + (/^(PASSED|OK)$/i.test(d.health) ? "ok" : /^UNKNOWN$/i.test(d.health) || !d.health ? "" : "danger") }, d.health || "—"))))))),
+      ),
+    pveSection(t("pve.jobsTitle"), h("div", { id: "pve-jobs" }, h("p", { class: "muted pve-note first" }, t("machines.loading")))),
     loadPveJobs(x),
   );
 }
@@ -3034,11 +3041,11 @@ function loadPveJobs(x) {
       const who = (j) => (j.guests === "all" ? t("pve.jobAll") : j.guests.startsWith("pool:") ? t("pve.jobPool", { pool: j.guests.slice(5) }) : j.guests.split(",").map((id) => x.guests.find((g) => String(g.vmid) === id)?.name ?? id).join(", "));
       box.replaceChildren(
         jobs.length
-          ? h("section", { class: "card" }, h("div", { class: "table-wrap" }, h("table", null, h("thead", null, h("tr", null, h("th", null, t("pve.col.schedule")), h("th", null, t("pve.col.guests")), h("th", null, t("pve.col.storage")), h("th", null, t("pve.col.next")))), h("tbody", null, jobs.map((j) => h("tr", null, h("td", null, h("div", { class: "mono" }, j.schedule), !j.enabled && h("span", { class: "chip" }, t("pve.jobOff")), j.comment && h("div", { class: "muted small" }, j.comment)), h("td", { class: "small" }, who(j), j.exclude && h("div", { class: "muted small" }, t("pve.jobExclude", { list: j.exclude }))), h("td", { class: "small" }, j.storage), h("td", { class: "small" }, j.enabled && j.next ? dateTime(j.next) : "—")))))), left)
-          : h("section", { class: "card" }, h("p", { class: "muted pve-note first" }, t("pve.noJobs")), left),
+          ? h("div", null, h("div", { class: "table-wrap" }, h("table", null, h("thead", null, h("tr", null, h("th", null, t("pve.col.schedule")), h("th", null, t("pve.col.guests")), h("th", null, t("pve.col.storage")), h("th", null, t("pve.col.next")))), h("tbody", null, jobs.map((j) => h("tr", null, h("td", null, h("div", { class: "mono" }, j.schedule), !j.enabled && h("span", { class: "chip" }, t("pve.jobOff")), j.comment && h("div", { class: "muted small" }, j.comment)), h("td", { class: "small" }, who(j), j.exclude && h("div", { class: "muted small" }, t("pve.jobExclude", { list: j.exclude }))), h("td", { class: "small" }, j.storage), h("td", { class: "small" }, j.enabled && j.next ? dateTime(j.next) : "—")))))), left)
+          : h("div", null, h("p", { class: "muted pve-note first" }, t("pve.noJobs")), left),
       );
     } catch (e) {
-      box.replaceChildren(h("p", { class: "card pad muted" }, errorText(e)));
+      box.replaceChildren(h("p", { class: "muted pve-note first" }, errorText(e)));
     }
   });
   return null;
@@ -3057,7 +3064,7 @@ function pveGuests(x) {
       "tr",
       { class: "clickable", onclick: () => pveGuestDialog(x, g) },
       h("td", { class: "mono" }, g.vmid),
-      h("td", null, h("div", { class: "strong" }, g.name), h("div", { class: "muted small" }, [g.type === "lxc" ? t("pve.container") : t("pve.vm"), x.nodes.length > 1 ? g.node : null, g.config?.addresses[0], g.lock ? t("pve.locked", { lock: g.lock }) : null].filter(Boolean).join(" · ")), m && h("a", { class: "link small", href: `#/machines/${m.id}`, onclick: (e) => e.stopPropagation() }, icon("server"), " ", t("pve.isMachine", { name: m.name }))),
+      h("td", null, h("div", { class: "strong" }, g.name, g.id === x.self && h("span", { class: "chip accent pve-here" }, t("pve.selfChip"))), h("div", { class: "muted small" }, [g.type === "lxc" ? t("pve.container") : t("pve.vm"), x.nodes.length > 1 ? g.node : null, g.config?.addresses[0], g.lock ? t("pve.locked", { lock: g.lock }) : null].filter(Boolean).join(" · ")), m && h("a", { class: "link small", href: `#/machines/${m.id}`, onclick: (e) => e.stopPropagation() }, icon("server"), " ", t("pve.isMachine", { name: m.name }))),
       h("td", null, guestChip(g)),
       h("td", { class: "small" }, up ? `${Math.round(g.cpu * 100)}% · ${bytes(g.memory.used)} / ${bytes(g.memory.total)}` : `${t("sys.cores", { n: g.cores })} · ${bytes(g.memory.total)}`),
       h("td", { class: "small muted" }, up ? duration(g.uptime) : "—"),
@@ -3103,6 +3110,8 @@ function pvePowerDialog(x, g, action, then) {
     "confirm",
     h("h2", { class: "wrap" }, t(`pve.${action}Title`, { name: g.name })),
     h("p", { class: "muted" }, t(`pve.${action}Lead`)),
+    // the guest Hata itself runs in: the page goes with it
+    g.id === x.self && h("p", { class: "card pad warn-box" }, t(action === "reboot" ? "pve.selfReboot" : "pve.selfDown")),
     h(
       "footer",
       null,
@@ -3143,7 +3152,8 @@ function pveGuestDialog(x, g) {
       up && g.type === "qemu" && act(t("pve.suspend"), "clock", "suspend"),
       up && act(t("pve.stop"), "x", "stop", "danger"),
       !g.may.power && h("span", { class: "muted small" }, t("pve.noPower")),
-      g.may.remove && g.status === "stopped" && button(t("pve.guestRemove"), { class: "small danger", onclick: () => (dialog.close(), pveRemoveDialog(x, g)) }, "trash"),
+      g.id === x.self && h("span", { class: "chip accent" }, t("pve.selfChip")),
+      g.may.remove && g.status === "stopped" && g.id !== x.self && button(t("pve.guestRemove"), { class: "small danger", onclick: () => (dialog.close(), pveRemoveDialog(x, g)) }, "trash"),
     ),
     h(
       "section",

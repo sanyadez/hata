@@ -15,7 +15,7 @@
  */
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { request } from "node:https";
-import { tmpdir } from "node:os";
+import { networkInterfaces, tmpdir } from "node:os";
 import { connect, type TLSSocket } from "node:tls";
 import { join } from "node:path";
 import { record } from "./activity";
@@ -268,6 +268,15 @@ export function guestOfMachine(machine: string, macs: string[], ip: string): { h
 
 // --- For the page -----------------------------------------------------------------------------------
 
+/**
+ * The guest this Hata runs in, when it is one of the server's: a container's or a virtual machine's
+ * card shows inside it with the address its configuration gives.
+ */
+function selfOf(l: Live): string | null {
+  const own = new Set(Object.values(networkInterfaces()).flatMap((list) => (list ?? []).filter((a) => !a.internal && a.mac && a.mac !== "00:00:00:00:00:00").map((a) => a.mac.toLowerCase())));
+  return l.guests.find((g) => l.configs[g.id]?.macs.some((m) => own.has(m)))?.id ?? null;
+}
+
 function hostOf(id: string): Host {
   const h = ID_RE.test(id) ? state.hosts.find((x) => x.id === id) : undefined;
   if (!h) throw new AppError("pve.notFound", 404);
@@ -292,6 +301,7 @@ const summary = (h: Host) => {
     fingerprint: h.fingerprint,
     online: !l.error && l.at > 0,
     error: l.error,
+    self: selfOf(l),
     at: l.at,
     version: l.version,
     nodes: l.nodes,
@@ -692,6 +702,8 @@ export async function removeGuest(id: string, guest: string, typed: unknown, by:
   const h = hostOf(id);
   const g = guestOf(h, guest);
   if (typed !== g.name) throw new AppError("pve.typeName", 400, { name: g.name });
+  // Hata would delete itself half-way
+  if (selfOf(liveOf(h)) === g.id) throw new AppError("pve.isSelf", 409, { name: g.name });
   // what was said a few seconds ago may be before a shutdown: Proxmox is asked now
   const now = await pve<{ status?: string }>(h, "GET", `/nodes/${g.node}/${g.type}/${g.vmid}/status/current`);
   if (now.status !== "stopped") throw new AppError("pve.stopFirst", 409, { name: g.name });

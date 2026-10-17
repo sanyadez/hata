@@ -3215,5 +3215,11 @@
   "error.pve.hostKey": "The container at {address} shows SSH keys other than the ones Proxmox made for it: Hata did not go in.",
   "error.pve.typeName": "Type the guest's name exactly: {name}",
   "error.pve.stopFirst": "{name} is running: stop it first.",
-  "activity.pve.guest.removed": "Deleted in Proxmox: {target}"
+  "activity.pve.guest.removed": "Deleted in Proxmox: {target}",
+  "pve.selfHere": "This Hata runs here: {guest} on {node}.",
+  "pve.selfShort": "This Hata runs in {guest}",
+  "pve.selfChip": "This Hata",
+  "pve.selfDown": "This Hata runs in this guest: it stops too, and this page with it. Start it again in Proxmox's own page.",
+  "pve.selfReboot": "This Hata runs in this guest: the page loses it for a minute or two while it restarts.",
+  "error.pve.isSelf": "{name} is where this Hata runs: it cannot delete itself."
 }

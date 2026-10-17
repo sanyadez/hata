@@ -3215,5 +3215,11 @@
   "error.pve.hostKey": "Контейнер за адресою {address} показує інші SSH-ключі, ніж зробив для нього Proxmox: Hata туди не заходила.",
   "error.pve.typeName": "Введіть назву гостя точно: {name}",
   "error.pve.stopFirst": "{name} працює: спершу зупиніть його.",
-  "activity.pve.guest.removed": "Видалено в Proxmox: {target}"
+  "activity.pve.guest.removed": "Видалено в Proxmox: {target}",
+  "pve.selfHere": "Ця Hata працює тут: {guest} на {node}.",
+  "pve.selfShort": "Ця Hata працює в {guest}",
+  "pve.selfChip": "Ця Hata",
+  "pve.selfDown": "Ця Hata працює в цьому гості: вона теж зупиниться, а з нею й ця сторінка. Запустити його знову можна буде лише у веб-інтерфейсі Proxmox.",
+  "pve.selfReboot": "Ця Hata працює в цьому гості: на хвилину-дві сторінка її втратить, поки він перезапускається.",
+  "error.pve.isSelf": "У {name} працює ця Hata: видалити саму себе вона не може."
 }
