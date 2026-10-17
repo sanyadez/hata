@@ -129,3 +129,13 @@ test("Time Machine: the share is a backup destination for Macs, with its limit, 
   expect(adiskTxt(shares)).toEqual(["sys=waMa=0,adVF=0x100", "dk0=adVN=Backups,adVF=0x82", "dk1=adVN=Old Mac,adVF=0x82"]);
   expect(adiskTxt([shares[1]!])).toBeNull();
 });
+
+test("users kept out of the network folders are turned away by name, guests' folders too", () => {
+  const share = { name: "Media", path: "/DATA/Media", guest: "read" as const, users: { a1b2c3d4: "write" as const, e5f6a7b8: "read" as const } };
+  // the one kept out is not among the accounts, so not on the lists of the folder
+  const conf = smbConf([share], [{ id: "a1b2c3d4", name: "olena" }], { name: "hata", announced: true, denied: ["hata-e5f6a7b8"] });
+  expect(conf).toContain("   invalid users = hata-e5f6a7b8\n");
+  expect(conf).toContain("   write list = hata-a1b2c3d4\n");
+  expect(conf.split("e5f6a7b8").length).toBe(2);
+  expect(smbConf([share], [], { name: "hata", announced: true, denied: [] })).not.toContain("invalid users");
+});

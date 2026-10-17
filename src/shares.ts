@@ -88,6 +88,12 @@ async function syncAccounts(): Promise<void> {
     await run(["smbpasswd", "-x", name], 10_000);
     await run(["userdel", name], 20_000);
   }
+  // kept out of the network folders: Samba forgets the password, and learns it again only when let back in
+  for (const user of users.filter((one) => !one.shares)) {
+    const name = unixName(user.id);
+    if ((await inSamba()).includes(name)) await run(["smbpasswd", "-x", name], 10_000);
+    delete known[user.id];
+  }
   for (const id of Object.keys(known)) if (!users.some((user) => user.id === id)) delete known[id];
 }
 
@@ -118,8 +124,9 @@ async function sync(): Promise<void> {
   if (pruned) saveSettings();
   writeJsonAtomic(KNOWN_FILE, known);
 
-  const accounts = listUsers().map((user) => ({ id: user.id, name: user.name }));
-  const conf = smbConf(settings.shares, accounts, { name: serverName(), announced: answersItself(localDomain()), bare: await bareShares() });
+  const accounts = listUsers().filter((user) => user.shares).map((user) => ({ id: user.id, name: user.name }));
+  const denied = listUsers().filter((user) => !user.shares).map((user) => unixName(user.id));
+  const conf = smbConf(settings.shares, accounts, { name: serverName(), announced: answersItself(localDomain()), bare: await bareShares(), denied });
   const map = userMap(accounts);
   const before = read(SMB_CONF);
   const mapBefore = read(USER_MAP);
@@ -181,7 +188,7 @@ export const refreshShares = (): void => void apply();
 function learn(user: User, password: string): void {
   if (!installed()) return;
   // what Samba's tool reads line by line cannot hold a line break
-  if (/[\r\n\0]/.test(password)) return;
+  if (/[\r\n\0]/.test(password) || user.noShares) return;
   void queued(async () => {
     const name = unixName(user.id);
     if (known[user.id] === digest(user) && (await inSamba()).includes(name)) return;
@@ -208,8 +215,8 @@ export interface SharesReport {
   running: boolean;
   /** Why the shares are not served as set; "" when they are */
   error: string;
-  /** Hata's users; `ready` — Samba has their password, so they can connect */
-  users: { id: string; name: string; role: Role; ready: boolean }[];
+  /** Hata's users; `ready` — Samba has their password, so they can connect; `allowed` — not kept out by an administrator */
+  users: { id: string; name: string; role: Role; ready: boolean; allowed: boolean }[];
   /** How this server is called from another machine: the name on the home network first, then its addresses */
   hosts: string[];
   /**
@@ -242,7 +249,7 @@ export async function listShares(): Promise<SharesReport> {
     install: tool === "missing" ? installCommand(PACKAGE) : "",
     running: tool === "ok" && (await isActive(await unit())),
     error: failure,
-    users: listUsers().map((user) => ({ id: user.id, name: user.name, role: user.role, ready: ready(user.id) })),
+    users: listUsers().map((user) => ({ id: user.id, name: user.name, role: user.role, ready: user.shares && ready(user.id), allowed: user.shares })),
     hosts,
     announced: { name: serverName(), browse: offering(), windows: wsdStatus().on, error: wsdStatus().error },
     shares: settings.shares.map((share) => ({ ...share, missing: !isDir(share.path) })),

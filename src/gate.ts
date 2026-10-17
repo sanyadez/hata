@@ -214,9 +214,26 @@ const listeners = new Map<string, Map<number, Server>>();
 
 const HOP_HEADERS = ["connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailer", "transfer-encoding", "upgrade", "content-length"];
 
-/** The request headers for the app: without our own cookie, with the usual proxy headers */
-function forwardHeaders(req: Request, ip: string, proto: string): Headers {
+/**
+ * Who is signed in, as the app is told: the names single sign-on of other proxies uses (Authelia's,
+ * Grafana's). Taken off every request first — only Hata says who it is, never the browser.
+ */
+const WHO_HEADERS = ["remote-user", "remote-name", "remote-email", "remote-groups", "x-forwarded-user", "x-forwarded-preferred-username", "x-forwarded-email", "x-forwarded-groups", "x-webauth-user", "x-remote-user"];
+
+export function whoHeaders(headers: Headers, user: Pick<User, "name" | "role"> | null): void {
+  for (const name of WHO_HEADERS) headers.delete(name);
+  if (!user) return;
+  headers.set("remote-user", user.name);
+  headers.set("remote-name", user.name);
+  headers.set("remote-groups", user.role === "admin" ? "admins" : user.role === "member" ? "users" : "guests");
+  headers.set("x-forwarded-user", user.name);
+  headers.set("x-webauth-user", user.name);
+}
+
+/** The request headers for the app: without our own cookie, with the usual proxy headers and who is signed in */
+function forwardHeaders(req: Request, ip: string, proto: string, user: Pick<User, "name" | "role"> | null): Headers {
   const headers = new Headers(req.headers);
+  whoHeaders(headers, user);
   const cookies = (headers.get("cookie") ?? "").split(/;\s*/).filter((c) => c && !c.startsWith(COOKIE_NAME + "="));
   if (cookies.length) headers.set("cookie", cookies.join("; "));
   else headers.delete("cookie");
@@ -258,22 +275,22 @@ export const tunnelHandlers = {
 };
 
 /**
- * Decides whether a request may reach an app that asks for sign-in. Returns null to let it through, or
- * the answer to give instead: a redirect to `signIn` for a page, a refusal for anything else.
+ * Decides whether a request may reach an app that asks for sign-in. Returns the person to let through,
+ * or the answer to give instead: a redirect to `signIn` for a page, a refusal for anything else.
  */
-export function guard(req: Request, name: string, signIn: string): Response | null {
+export function guard(req: Request, name: string, signIn: string): Response | User {
   const user = sessionUser(req);
   if (!user) {
     // a page can be sent to sign in; a script's request can only be told why it failed
     return req.method === "GET" && (req.headers.get("accept") ?? "").includes("text/html") ? Response.redirect(signIn, 302) : new Response("Sign in to Hata first", { status: 401 });
   }
-  return mayOpen(user, name) ? null : page(403, "No access", `${user.name} may not open this app. Ask an administrator of this server.`);
+  return mayOpen(user, name) ? user : page(403, "No access", `${user.name} may not open this app. Ask an administrator of this server.`);
 }
 
 /** Passes a request (or a WebSocket upgrade) on to an app listening on a local port */
-export async function passToApp(req: Request, server: Server, upstream: number, proto: "http" | "https", ip: string): Promise<Response> {
+export async function passToApp(req: Request, server: Server, upstream: number, proto: "http" | "https", ip: string, user: User | null = null): Promise<Response> {
   const url = new URL(req.url);
-  const headers = forwardHeaders(req, ip, proto);
+  const headers = forwardHeaders(req, ip, proto, user);
   if (req.headers.get("upgrade")?.toLowerCase() === "websocket") {
     const protocols = req.headers.get("sec-websocket-protocol")?.split(",").map((p) => p.trim()).filter(Boolean);
     for (const h of ["upgrade", "connection", "sec-websocket-key", "sec-websocket-version", "sec-websocket-extensions", "sec-websocket-protocol"]) headers.delete(h);
@@ -327,7 +344,8 @@ export function guardedServer(name: string, port: number, upstream: number): Ser
       const host = (req.headers.get("host") ?? url.host).replace(/:\d+$/, "");
       const hata = listenAddress().port;
       const signIn = `http://${host}${hata === 80 ? "" : ":" + hata}/?next=${encodeURIComponent(`http://${req.headers.get("host") ?? url.host}${url.pathname}${url.search}`)}`;
-      return guard(req, name, signIn) ?? passToApp(req, self, upstream, "http", plainIp(self.requestIP(req)?.address ?? ""));
+      const passed = guard(req, name, signIn);
+      return passed instanceof Response ? passed : passToApp(req, self, upstream, "http", plainIp(self.requestIP(req)?.address ?? ""), passed);
     },
     websocket: tunnelHandlers,
   });

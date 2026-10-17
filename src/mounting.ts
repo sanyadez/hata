@@ -869,6 +869,19 @@ function lookAround(): Promise<void> {
   });
 }
 
+/** Told the folders of kept disks that were away and are connected again */
+let backHooks: ((paths: string[]) => void)[] = [];
+export const onDiskBack = (hook: (paths: string[]) => void): void => void backHooks.push(hook);
+
+/** The kept folders whose disk is away; the ones that left the list since the last look are told on */
+let away: Set<string> | null = null;
+function lookForReturns(): void {
+  const now = new Set(absent().map((a) => a.path));
+  const back = away ? [...away].filter((path) => !now.has(path)) : [];
+  away = now;
+  if (back.length) for (const hook of backHooks) hook(back);
+}
+
 const LOOK_EVERY_MS = 3000;
 // a disk just plugged in is listed before its file system is recognised
 const LOOK_AGAIN = 4;
@@ -889,6 +902,7 @@ export function startMounting(): void {
     // the page shows the disks and where they are mounted: it is told when either changed
     const mounted = readText("/proc/mounts");
     if ((last && now !== last) || (mounts && mounted !== mounts)) bus.publish("disks");
+    if (mounted !== mounts) lookForReturns();
     mounts = mounted;
     last = now;
     automount = settings.storage.automount;

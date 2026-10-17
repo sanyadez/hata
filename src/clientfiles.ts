@@ -447,7 +447,7 @@ export async function upload(args: { dir?: unknown; name?: unknown; sub?: unknow
   if (existing && (args.overwrite !== true || !existing.isFile())) fail("files.exists", { name: basename(target) });
   const tmp = join(into, `.hata-upload-${id}`);
   const have = offset === 0 ? 0 : (lstatOrNull(tmp)?.size ?? -1);
-  if (have !== offset) fail("files.uploadOrder");
+  if (have !== offset) fail("files.uploadOrder", { have });
   let received = offset;
   let file: Awaited<ReturnType<typeof open>> | null = null;
   try {

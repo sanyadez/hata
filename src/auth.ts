@@ -48,6 +48,8 @@ export interface User {
   totpPending?: string;
   /** Passkeys that sign this user in without a password */
   passkeys?: StoredPasskey[];
+  /** Kept out of the network folders: two-factor sign-in does not reach SMB, so an administrator may say no */
+  noShares?: true;
 }
 
 interface Session {
@@ -264,6 +266,8 @@ export interface UserInfo {
   createdAt: number;
   lastSignIn: number | null;
   sessions: number;
+  /** May open the network folders (SMB) */
+  shares: boolean;
 }
 
 export function listUsers(): UserInfo[] {
@@ -276,6 +280,7 @@ export function listUsers(): UserInfo[] {
     createdAt: u.createdAt,
     lastSignIn: u.lastSignIn ?? null,
     sessions: sessions.filter((s) => s.userId === u.id && s.exp > now).length,
+    shares: !u.noShares,
   }));
 }
 
@@ -304,6 +309,7 @@ export async function updateUser(id: string, patch: Record<string, unknown>): Pr
     if (user.role === "admin" && patch.role !== "admin" && admins().length === 1) return "users.lastAdmin";
   }
   if ("password" in patch && !validPassword(patch.password)) return "auth.weakPassword";
+  if ("shares" in patch && typeof patch.shares !== "boolean") return "users.badShares";
   if ("role" in patch) user.role = patch.role as Role;
   if ("password" in patch) {
     user.passwordHash = await Bun.password.hash(patch.password as string);
@@ -315,7 +321,10 @@ export async function updateUser(id: string, patch: Record<string, unknown>): Pr
     delete user.totp;
     delete user.totpPending;
   }
+  if (patch.shares === false) user.noShares = true;
+  if (patch.shares === true) delete user.noShares;
   saveUsers();
+  if ("shares" in patch) usersChanged();
   return null;
 }
 

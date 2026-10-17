@@ -842,41 +842,96 @@ function userMenu(e) {
   dialog.style.right = Math.max(8, document.documentElement.clientWidth - anchor.right) + "px";
 }
 
-/** The search field of the header: installed apps first, then the store */
+/** The search field of the header: installed apps first, then the store; for an administrator the data folder's files too */
 function globalSearch() {
   const results = h("div", { class: "search-results", hidden: true });
-  const input = h("input", { type: "search", placeholder: t("search.placeholder"), "aria-label": t("search.placeholder"), autocomplete: "off", spellcheck: false });
+  const withFiles = isAdmin();
+  const input = h("input", { type: "search", placeholder: t(withFiles ? "search.placeholderFiles" : "search.placeholder"), "aria-label": t(withFiles ? "search.placeholderFiles" : "search.placeholder"), autocomplete: "off", spellcheck: false });
   let hits = [];
-  const openHit = (hit) => {
+  // what the data folder gave for the query typed: { query, under, found, more } — found null while asked
+  let files = null;
+  let timer = 0;
+  const done = () => {
     input.value = "";
     results.hidden = true;
     input.blur();
+  };
+  const openHit = (hit) => {
+    done();
+    if (hit.file) {
+      const parent = hit.path.slice(0, hit.path.lastIndexOf("/")) || "/";
+      filesUi.find = null;
+      if (hit.type === "dir") return go(filesHash(hit.path));
+      filesUi.pick = hit.path.split("/").pop();
+      return go(filesHash(parent));
+    }
     if (hit.installed) go(`#/apps/${hit.name}`);
     else {
       go("#/store");
       void storeDialog(hit);
     }
   };
+  // everything found, in Files: the search of the data folder with these results
+  const allFiles = () => {
+    const { query, under, found, more } = files;
+    done();
+    filesUi.find = { under, query, found, more };
+    go(filesHash(under));
+  };
+  const paint = () => {
+    const q = input.value.trim();
+    const shown = files?.query === q ? files : null;
+    const fileHits = (shown?.found ?? []).slice(0, 6).map((item) => ({ ...item, file: true }));
+    const all = [...hits, ...fileHits];
+    const fileRow = (hit) => {
+      const name = hit.path.split("/").pop();
+      return h("button", { type: "button", class: "search-hit", onmousedown: (e) => (e.preventDefault(), openHit(hit)) }, fileIcon({ name, type: hit.type }), h("span", { class: "grow clip" }, name, h("span", { class: "muted small block clip mono" }, hit.path.slice(0, hit.path.lastIndexOf("/")) || "/")));
+    };
+    put(
+      results,
+      ...(hits.length ? hits.map((hit) => h("button", { type: "button", class: "search-hit", onmousedown: (e) => (e.preventDefault(), openHit(hit)) }, appIcon(hit, "sm"), h("span", { class: "grow" }, hit.title), h("span", { class: "muted small" }, t(hit.installed ? "search.installed" : "search.store")))) : []),
+      ...(withFiles && q.length >= 2
+        ? [
+            h("div", { class: "search-head muted small" }, t("search.files")),
+            ...(!shown || !shown.found ? [h("p", { class: "muted small pad-s" }, t("files.finding"))] : fileHits.length ? fileHits.map(fileRow) : [h("p", { class: "muted small pad-s" }, t("search.noFiles"))]),
+            shown?.found && shown.found.length > fileHits.length && h("button", { type: "button", class: "search-hit more", onmousedown: (e) => (e.preventDefault(), allFiles()) }, icon("search"), h("span", { class: "grow" }, t("search.allFiles", { n: shown.found.length + (shown.more ? "+" : "") }))),
+          ]
+        : []),
+      ...(!all.length && !(withFiles && q.length >= 2) ? [h("p", { class: "muted small pad" }, t("store.nothing"))] : []),
+    );
+    results.hidden = false;
+  };
+  const askFiles = async (q) => {
+    files = { query: q, under: "", found: null, more: false };
+    paint();
+    try {
+      const res = await api("GET", `/api/files/find?path=&q=${encodeURIComponent(q)}`);
+      // typed on meanwhile: this answer is for an older question
+      if (files?.query === q) files = { query: q, ...res };
+    } catch {
+      if (files?.query === q) files = { query: q, under: "", found: [], more: false };
+    }
+    if (input.value.trim() === q && document.activeElement === input) paint();
+  };
   const update = async () => {
     const q = input.value.trim().toLowerCase();
+    clearTimeout(timer);
     if (!q) return void (results.hidden = true);
     if (!state.store && state.user.role !== "guest") state.store = await api("GET", `/api/store?lang=${state.lang}`).catch(() => null);
     const match = (a) => `${a.title} ${a.name}`.toLowerCase().includes(q);
     const installed = (state.overview?.apps ?? []).filter(match).map((a) => ({ ...a, installed: true }));
     const names = new Set(installed.map((a) => a.name));
-    hits = [...installed, ...(state.store?.apps ?? []).filter((a) => match(a) && !names.has(a.name))].slice(0, 7);
-    results.replaceChildren(
-      ...(hits.length
-        ? hits.map((hit) => h("button", { type: "button", class: "search-hit", onmousedown: (e) => (e.preventDefault(), openHit(hit)) }, appIcon(hit, "sm"), h("span", { class: "grow" }, hit.title), h("span", { class: "muted small" }, t(hit.installed ? "search.installed" : "search.store"))))
-        : [h("p", { class: "muted small pad" }, t("store.nothing"))]),
-    );
-    results.hidden = false;
+    hits = [...installed, ...(state.store?.apps ?? []).filter((a) => match(a) && !names.has(a.name))].slice(0, withFiles ? 5 : 7);
+    paint();
+    const typed = input.value.trim();
+    if (withFiles && typed.length >= 2 && files?.query !== typed) timer = setTimeout(() => void askFiles(typed), 400);
   };
   input.addEventListener("input", update);
   input.addEventListener("focus", update);
   input.addEventListener("blur", () => (results.hidden = true));
   input.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" && hits[0]) openHit(hits[0]);
+    const first = hits[0] ?? (files?.query === input.value.trim() && files.found?.[0] ? { ...files.found[0], file: true } : null);
+    if (e.key === "Enter" && first) openHit(first);
     if (e.key === "Escape") input.blur();
   });
   // in Files "/" starts a path
@@ -1839,7 +1894,7 @@ function activityItem(entry, when) {
   const failed = outcome === "failed";
   const key = "activity." + entry.code;
   const title = state.overview?.apps.find((a) => a.name === entry.app)?.title ?? entry.app ?? "";
-  const meta = [typeof when === "string" ? when : ago(entry.ts), entry.machine && t("activity.onMachine", { name: entry.machine }), entry.user && group !== "auth" ? (entry.user === "schedule" ? t("activity.bySchedule") : entry.user === "restore" ? t("activity.byRestore") : entry.user === "console" ? t("activity.byConsole") : entry.user.startsWith("agent:") ? t("activity.byAgent", { name: entry.user.slice(6) }) : entry.user.startsWith("assistant:") ? t("activity.byAssistant", { user: entry.user.slice(10) }) : t("activity.by", { user: entry.user })) : null, group === "auth" ? entry.detail : null].filter(Boolean).join(" · ");
+  const meta = [typeof when === "string" ? when : ago(entry.ts), entry.machine && t("activity.onMachine", { name: entry.machine }), entry.user && group !== "auth" ? (entry.user === "schedule" ? t("activity.bySchedule") : entry.user === "restore" ? t("activity.byRestore") : entry.user === "console" ? t("activity.byConsole") : entry.user === "disk" ? t("activity.byDisk") : entry.user.startsWith("agent:") ? t("activity.byAgent", { name: entry.user.slice(6) }) : entry.user.startsWith("assistant:") ? t("activity.byAssistant", { user: entry.user.slice(10) }) : t("activity.by", { user: entry.user })) : null, group === "auth" ? entry.detail : null].filter(Boolean).join(" · ");
   return h(
     "div",
     { class: "activity-item" },
@@ -5691,6 +5746,33 @@ function sendPart(url, blob, onProgress) {
   });
 }
 
+/** Waits between the tries of a part cut off on the way: the network may be back in a few seconds */
+const UPLOAD_RETRIES = [1000, 3000, 8000, 15000, 30000];
+
+/**
+ * One part, tried again when the connection broke. The server keeps nothing of a part it did not get
+ * whole; when the answer was what got lost, its "not in order" says how much it has — a part that
+ * arrived counts as sent, and a last part whose file is already in place means the file is done.
+ */
+async function sendPartAgain(url, blob, offset, last, onProgress) {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return await sendPart(url, blob, onProgress);
+    } catch (e) {
+      const cut = e instanceof ApiError && e.status === 0;
+      if (attempt > 0 && e instanceof ApiError && e.code === "files.uploadOrder" && e.detail?.have === offset + blob.size) return {};
+      if (attempt > 0 && last && e instanceof ApiError && (e.code === "files.exists" || (e.code === "files.uploadOrder" && e.detail?.have === -1))) return {};
+      if (!cut || uploads.cancelled || attempt >= UPLOAD_RETRIES.length) throw e;
+      uploads.retrying = true;
+      paintUpload();
+      // a press of "Cancel" during the wait is heard at once
+      for (let waited = 0; waited < UPLOAD_RETRIES[attempt] && !uploads.cancelled; waited += 250) await new Promise((ok) => setTimeout(ok, 250));
+      uploads.retrying = false;
+      if (uploads.cancelled) throw e;
+    }
+  }
+}
+
 async function uploadOne({ dir, file, sub, overwrite, machine }) {
   const id = crypto.getRandomValues(new Uint32Array(3)).reduce((text, n) => text + n.toString(36), "").padEnd(8, "0").slice(0, 24);
   const base = uploads.sent;
@@ -5700,7 +5782,7 @@ async function uploadOne({ dir, file, sub, overwrite, machine }) {
     const last = offset + blob.size >= file.size;
     const query = new URLSearchParams({ dir, name: file.name, sub, id, offset, last: last ? "1" : "0", overwrite: overwrite ? "1" : "0" });
     try {
-      await sendPart(filesApi("/upload", machine) + "?" + query, blob, (loaded) => ((uploads.sent = base + offset + loaded), paintUpload()));
+      await sendPartAgain(filesApi("/upload", machine) + "?" + query, blob, offset, last, (loaded) => ((uploads.sent = base + offset + loaded), paintUpload()));
     } catch (e) {
       if (offset > 0 || uploads.cancelled) void fetch(`${filesApi("/upload", machine)}?${new URLSearchParams({ dir, sub, id })}`, { method: "DELETE" }).catch(() => {});
       uploads.sent = base + file.size;
@@ -5720,7 +5802,7 @@ function paintUpload() {
   fill.style.width = percent + "%";
   put(uploadBox,
     icon("upload"),
-    h("div", { class: "grow stack-s" }, h("div", { class: "upload-line" }, h("strong", { class: "grow clip" }, t("files.uploading", { done: Math.min(done + 1, count), n: count })), h("span", { class: "muted small mono" }, [percent + "%", speed && `${bytes(speed)}/s`, speed && sent < total && duration(Math.max(60, (total - sent) / speed))].filter(Boolean).join(" · "))), h("div", { class: "bar" }, fill)),
+    h("div", { class: "grow stack-s" }, h("div", { class: "upload-line" }, h("strong", { class: "grow clip" }, t("files.uploading", { done: Math.min(done + 1, count), n: count })), h("span", { class: "muted small mono" }, uploads.retrying ? t("files.uploadRetrying") : [percent + "%", speed && `${bytes(speed)}/s`, speed && sent < total && duration(Math.max(60, (total - sent) / speed))].filter(Boolean).join(" · "))), h("div", { class: "bar" }, fill)),
     h("button", { type: "button", class: "icon-btn", "aria-label": t("common.cancel"), title: t("common.cancel"), onclick: () => ((uploads.cancelled = true), (uploads.queue = []), uploads.xhr?.abort()) }, icon("x")),
   );
 }
@@ -8714,19 +8796,23 @@ function notificationsSection() {
   const n = state.notify;
   if (!n) return [h("p", { class: "muted" }, "…")];
   const error = h("p", { class: "error", role: "alert" });
-  const problems = h("input", {
-    type: "checkbox",
-    checked: n.config.problems,
-    onchange: async () => {
-      error.textContent = "";
-      try {
-        state.notify = await api("PUT", "/api/notify", { problems: problems.checked });
-        toast(t("settings.saved"));
-      } catch (err) {
-        error.textContent = errorText(err);
-      }
-    },
-  });
+  const toggle = (key) => {
+    const box = h("input", {
+      type: "checkbox",
+      checked: n.config[key],
+      onchange: async () => {
+        error.textContent = "";
+        try {
+          state.notify = await api("PUT", "/api/notify", { [key]: box.checked });
+          toast(t("settings.saved"));
+        } catch (err) {
+          box.checked = !box.checked;
+          error.textContent = errorText(err);
+        }
+      },
+    });
+    return box;
+  };
   const ntfyUrl = h("input", { type: "url", value: n.config.ntfy.url, spellcheck: false, class: "mono", placeholder: "https://ntfy.sh/my-topic" });
   const ntfyToken = h("input", { type: "password", autocomplete: "off", spellcheck: false, class: "mono", placeholder: n.config.ntfy.saved ? t("notify.tokenSaved") : "" });
   const forget = n.config.ntfy.saved && button(t("notify.tokenForget"), { class: "small", onclick: () => attemptForget() });
@@ -8740,7 +8826,7 @@ function notificationsSection() {
   };
   const hook = h("input", { type: "url", value: n.config.webhook.url, spellcheck: false, class: "mono", placeholder: "https://…" });
   return [
-    h("section", { class: "card pad" }, h("h2", null, t("settings.notifications")), h("p", { class: "muted small" }, t("notify.lead")), settingRow(t("notify.problems"), t("notify.problemsHint"), problems), error),
+    h("section", { class: "card pad" }, h("h2", null, t("settings.notifications")), h("p", { class: "muted small" }, t("notify.lead")), settingRow(t("notify.problems"), t("notify.problemsHint"), toggle("problems")), settingRow(t("notify.resolved"), t("notify.resolvedHint"), toggle("resolved")), settingRow(t("notify.backups"), t("notify.backupsHint"), toggle("backups")), error),
     devicesCard(),
     telegramCard(),
     channelCard("ntfy", [settingRow(t("notify.ntfy.url"), t("notify.ntfy.urlHint"), ntfyUrl), settingRow(t("notify.ntfy.token"), t("notify.ntfy.tokenHint"), forget ? h("span", { class: "pair" }, ntfyToken, forget) : ntfyToken)], () => ({ url: ntfyUrl.value, ...typedToken(ntfyToken) })),
@@ -10190,7 +10276,12 @@ async function shareDialog(path) {
   const name = h("input", { value: share?.name ?? "", placeholder: folder, maxLength: 40, spellcheck: false, autocomplete: "off" });
   const choice = (value) => h("select", null, ["none", "read", "write"].map((access) => h("option", { value: access, selected: access === value }, t("shares.access." + access))));
   // a folder shared for the first time is open to whoever shares it
-  const users = data.users.map((user) => ({ user, select: choice(share ? (share.users[user.id] ?? "none") : user.id === state.user.id ? "write" : "none") }));
+  const users = data.users.map((user) => {
+    const select = choice(share ? (share.users[user.id] ?? "none") : user.id === state.user.id && user.allowed !== false ? "write" : "none");
+    // kept out by an administrator: what was chosen stays, and counts again once let back in
+    select.disabled = user.allowed === false;
+    return { user, select };
+  });
   const guest = choice(share?.guest ?? "none");
   // Macs back up here with Time Machine; the limit keeps them from filling the disk
   const tm = h("input", { type: "checkbox", checked: !!share?.timeMachine });
@@ -10233,7 +10324,7 @@ async function shareDialog(path) {
         h(
           "div",
           { class: "share-access" },
-          users.map(({ user, select }) => h("label", null, h("span", { class: "grow" }, h("strong", null, user.name), !user.ready && h("span", { class: "muted small block" }, t("shares.notReadyHint"))), select)),
+          users.map(({ user, select }) => h("label", null, h("span", { class: "grow" }, h("strong", null, user.name), user.allowed === false ? h("span", { class: "muted small block" }, t("shares.deniedHint")) : !user.ready && h("span", { class: "muted small block" }, t("shares.notReadyHint"))), select)),
           h("label", null, h("span", { class: "grow" }, h("strong", null, t("shares.guest")), h("span", { class: "muted small block" }, t("shares.guestHint"))), guest),
         ),
       ),
@@ -10320,7 +10411,7 @@ function sharesSection() {
       h("h2", null, t("shares.users.title")),
       h("p", { class: "muted" }, t("shares.users.lead")),
       h("p", { class: "muted small" }, t("shares.users.note")),
-      data.users.map((user) => settingRow(user.name, t("shares.users.folders", { n: data.shares.filter((share) => share.users[user.id]).length }), h("span", { class: user.ready ? "state running" : "state" }, t(user.ready ? "shares.users.ready" : "shares.users.notReady")))),
+      data.users.map((user) => settingRow(user.name, t("shares.users.folders", { n: data.shares.filter((share) => share.users[user.id]).length }), user.allowed === false ? h("span", { class: "state" }, t("shares.users.denied")) : h("span", { class: user.ready ? "state running" : "state" }, t(user.ready ? "shares.users.ready" : "shares.users.notReady")))),
     ),
     h("section", { class: "card pad stack-s" }, h("h2", null, t("shares.how.title")), found && h("p", null, t("shares.found." + found, { name: data.announced.name })), data.announced.error && data.shares.length > 0 && h("p", { class: "muted small" }, t("shares.found.error", { message: data.announced.error })), h("p", { class: "muted" }, t("shares.how.windows", { address: all.windows })), h("p", { class: "muted" }, t("shares.how.mac", { address: all.url })), h("p", { class: "muted" }, t("shares.how.phone"))),
   ];
@@ -11311,6 +11402,7 @@ function userMenuFor(user, at = null) {
     user.role !== "member" && item(t("users.makeMember"), "user", () => change({ role: "member" })),
     user.role !== "guest" && item(t("users.makeGuest"), "user", () => change({ role: "guest" })),
     user.role !== "admin" && item(t("users.makeAdmin"), "sliders", () => change({ role: "admin" })),
+    item(t(user.shares === false ? "users.sharesAllow" : "users.sharesDeny"), "share", () => change({ shares: user.shares === false }, t(user.shares === false ? "users.sharesAllowed" : "users.sharesDenied"))),
     item(t("users.setPassword"), "refresh", () => {
       const password = passwordInput("new-password");
       const error = h("p", { class: "error", role: "alert" });
@@ -11393,6 +11485,7 @@ function renderUsers() {
 
 /** The network folders a user may open, and how — under the name in the list of users */
 function userShares(user) {
+  if (user.shares === false) return h("div", { class: "muted small" }, t("users.sharesDenied"));
   const shares = (state.settings?.shares ?? []).filter((share) => share.users?.[user.id]);
   if (!shares.length) return null;
   return h("div", { class: "muted small" }, t("users.shares"), " ", shares.map((share, i) => [i > 0 && ", ", h("a", { class: "link", href: "#/settings/shares" }, share.name), ` (${t("shares.access." + share.users[user.id])})`]));

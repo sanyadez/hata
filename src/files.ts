@@ -804,7 +804,8 @@ export async function upload(part: UploadPart, body: ReadableStream<Uint8Array> 
 
   const tmp = join(into, `.hata-upload-${part.id}`);
   const have = part.offset === 0 ? 0 : (lstatOrNull(tmp)?.size ?? -1);
-  if (have !== part.offset) throw new AppError("files.uploadOrder", 409);
+  // `have` lets a page whose part was cut off on the way see whether it arrived after all
+  if (have !== part.offset) throw new AppError("files.uploadOrder", 409, { have });
   let received = part.offset;
   let file: Awaited<ReturnType<typeof open>> | null = null;
   try {

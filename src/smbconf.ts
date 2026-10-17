@@ -109,6 +109,8 @@ export interface Server {
   announced: boolean;
   /** Shared folders on file systems that keep no extended attributes (FAT, exFAT, another machine's folders) */
   bare?: string[];
+  /** System accounts of the users an administrator kept out of the network folders */
+  denied?: string[];
 }
 
 /** A computer's name in the old Windows way: fifteen characters at most */
@@ -151,6 +153,8 @@ export function smbConf(shares: Share[], accounts: Account[], server: Server = {
   if (apple) lines.push("   vfs objects = catia fruit streams_xattr", "   fruit:metadata = stream");
   if (netbiosName(server.name)) lines.push(`   netbios name = ${netbiosName(server.name)}`);
   if (server.announced) lines.push("   multicast dns register = no");
+  // turned away even where a guest would be let in: they are not to come in by name
+  if (server.denied?.length) lines.push(`   invalid users = ${server.denied.join(" ")}`);
   const known = new Map(accounts.map((account) => [account.id, unixName(account.id)]));
   for (const share of shares) {
     const granted = Object.entries(share.users).filter(([id]) => known.has(id));
