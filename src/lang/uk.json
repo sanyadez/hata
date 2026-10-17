@@ -2768,5 +2768,6 @@
   "activity.app.sysupdate.failed": "Оновити пакети системи не вдалося",
   "activity.app.sysupdate.done": "Пакети системи оновлено",
   "activity.system.packages.all": "Пакети системи оновлено",
-  "activity.system.packages.updated": "Оновлено пакети системи: {target}"
+  "activity.system.packages.updated": "Оновлено пакети системи: {target}",
+  "home.thisServer": "цей сервер"
 }

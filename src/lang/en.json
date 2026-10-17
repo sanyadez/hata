@@ -2768,5 +2768,6 @@
   "activity.app.sysupdate.failed": "Updating the system's packages failed",
   "activity.app.sysupdate.done": "The system's packages were updated",
   "activity.system.packages.all": "The system's packages were updated",
-  "activity.system.packages.updated": "System packages updated: {target}"
+  "activity.system.packages.updated": "System packages updated: {target}",
+  "home.thisServer": "this server"
 }

@@ -1061,6 +1061,8 @@ function renderSystem() {
   const s = state.overview?.system;
   if (!s || state.route.view !== "home") return;
   const meta = document.getElementById("host");
+  const own = document.getElementById("own-name");
+  if (own) own.textContent = s.hostname;
   if (meta) meta.replaceChildren(...[s.hostname, location.host, t("sys.uptime", { time: duration(s.uptime) }), "Hata " + state.version].flatMap((part, i) => (i ? [h("span", { class: "dot-sep" }, "·"), part] : [part])));
 
   setStat("cpu", s.cpu == null ? "—" : String(s.cpu), "%", t("sys.cores", { n: s.cores }) + " · " + t("sys.load", { load: s.load[0] }), sparkline(s.history.cpu, 100));
@@ -1990,7 +1992,7 @@ function machineBlock(id) {
   const prefix = "mb-" + m.id;
   let el = homeUi.widgets[id];
   if (!el) {
-    el = widget(id, h("section", { class: "machine-block" }, h("div", { class: "section-head" }), h("div", { class: "stats card" }, statCells(prefix)), h("p", { class: "card pad muted", hidden: true }), blockRemover(id)));
+    el = widget(id, h("section", { class: "card machine-block" }, h("div", { class: "block-head" }), h("div", { class: "stats" }, statCells(prefix)), h("p", { class: "pad muted", hidden: true }), blockRemover(id)));
     homeUi.widgets[id] = el;
   }
   const [head, cells, away] = el.children;
@@ -2007,7 +2009,7 @@ function renderHome() {
   const greeting = t(hour < 5 ? "home.night" : hour < 12 ? "home.morning" : hour < 18 ? "home.afternoon" : "home.evening", { name: state.user.name });
   // the blocks are made once and then only moved and refilled: the numbers of the system live in one of them
   homeUi.widgets = {
-    stats: widget("stats", h("section", { class: "stats card" }, statCell("cpu", "cpu", t("sys.cpu")), statCell("memory", "memory", t("sys.memory")), statCell("disk", "disk", t("sys.disk")), statCell("network", "network", t("sys.network")), h("div", { class: "stat", id: "stat-temp", hidden: true }, h("div", { class: "stat-label" }, icon("temp"), t("sys.temperature")), h("div", { class: "stat-row" }, h("div", { class: "stat-value" }, h("strong", null, "—"), h("span", { class: "unit" })), h("div", { class: "stat-chart" })), h("div", { class: "stat-hint" }, " ")), blockRemover("stats"))),
+    stats: widget("stats", h("section", { class: "card machine-block" }, h("div", { class: "block-head" }, h("h2", null, icon("server"), h("span", { id: "own-name" }, state.overview?.system?.hostname ?? "…")), h("span", { class: "muted small grow" }, t("home.thisServer"))), h("div", { class: "stats" }, statCell("cpu", "cpu", t("sys.cpu")), statCell("memory", "memory", t("sys.memory")), statCell("disk", "disk", t("sys.disk")), statCell("network", "network", t("sys.network")), h("div", { class: "stat", id: "stat-temp", hidden: true }, h("div", { class: "stat-label" }, icon("temp"), t("sys.temperature")), h("div", { class: "stat-row" }, h("div", { class: "stat-value" }, h("strong", null, "—"), h("span", { class: "unit" })), h("div", { class: "stat-chart" })), h("div", { class: "stat-hint" }, " "))), blockRemover("stats"))),
     attention: widget("attention", h("section", { class: "card pad" })),
     activity: widget("activity", h("section", { class: "pad-x loose" })),
   };
