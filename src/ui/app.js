@@ -2702,8 +2702,9 @@ function paintPveList() {
 function pveDialog(old = null) {
   const name = h("input", { value: old?.name ?? "", placeholder: t("pve.namePlaceholder"), maxLength: 40 });
   const url = h("input", { value: old?.url ?? "", placeholder: "192.168.1.10", required: true, autocapitalize: "none", spellcheck: false, class: "mono" });
-  const token = h("input", { value: old?.token ?? "", placeholder: "hata@pve!panel", required: true, autocapitalize: "none", spellcheck: false, class: "mono" });
-  const secret = h("input", { type: "password", placeholder: old ? t("pve.secretKeep") : "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx", autocomplete: "off", class: "mono", required: !old });
+  // not the browser's saved sign-in to Hata: these are Proxmox's, and a password field invites it
+  const token = h("input", { value: old?.token ?? "", placeholder: "hata@pve!panel", required: true, autocapitalize: "none", spellcheck: false, autocomplete: "off", name: "pve-token-id", class: "mono" });
+  const secret = h("input", { type: "password", placeholder: old ? t("pve.secretKeep") : "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx", autocomplete: "new-password", name: "pve-token-secret", class: "mono", required: !old });
   const idsFrom = h("input", { type: "number", min: 100, value: old?.ids?.from ?? "", placeholder: "100" });
   const idsTo = h("input", { type: "number", min: 100, value: old?.ids?.to ?? "", placeholder: "999" });
   const cert = h("div");
