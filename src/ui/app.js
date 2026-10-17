@@ -1814,7 +1814,7 @@ function dragEnd(drop) {
   drag.kind.drop(drag, target);
 }
 
-const ATTENTION_ICONS = { update: "up", docker: "box", restarting: "refresh", partial: "alert", disk: "disk", smart: "disk", memory: "memory", temperature: "temp", internet: "network", network: "network", array: "disk", share: "share", netplace: "globe", machine: "server" };
+const ATTENTION_ICONS = { update: "up", docker: "box", restarting: "refresh", partial: "alert", disk: "disk", smart: "disk", memory: "memory", temperature: "temp", internet: "network", network: "network", array: "disk", share: "share", netplace: "globe", machine: "server", absent: "disk" };
 
 function attentionItem(item) {
   const detail = { ...item.detail, free: item.detail.free == null ? "" : bytes(item.detail.free), trash: item.detail.trash == null ? "" : bytes(item.detail.trash), size: item.detail.size == null ? "" : bytes(item.detail.size) };
@@ -1826,7 +1826,7 @@ function attentionItem(item) {
     item.code === "docker.missing" && isAdmin() && button(t("docker.install"), { class: "small primary", onclick: () => dockerDialog() }, "download"),
     item.code === "docker.stopped" && isAdmin() && dockerStartButton(),
     item.code === "disk.usb" && isAdmin() && button(t("copyin.button"), { class: "small primary", onclick: () => ((state.copyInFrom = item.detail.id), go("#/settings/storage")) }, "download"),
-    item.code === "disk.new" && isAdmin() && open("#/settings/storage", t("attention.disk.open")),
+    (item.code === "disk.new" || item.code.startsWith("absent")) && isAdmin() && open("#/settings/storage", t("attention.disk.open")),
     item.code === "update" && open("#/settings/about"),
     item.code === "disk.trash" && open("#/trash", t("trash.title")),
     (item.code.startsWith("smart.") || item.code === "disk.filling" || item.code.startsWith("array.")) && open("#/settings/storage"),
