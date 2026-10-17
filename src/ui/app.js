@@ -2858,7 +2858,7 @@ function paintMachineApps() {
   if (!box || !m || !list) return;
   const head = h(
     "div",
-    { class: "section-head" },
+    { class: list.length ? "project-head" : "section-head" },
     h("h2", null, t("machines.apps"), h("span", { class: "muted" }, String(list.length))),
     h(
       "div",
@@ -2910,10 +2910,11 @@ function paintMachineApps() {
     h(
       "div",
       { class: "stack" },
-      head,
       list.length
-        ? h("div", { class: "card table-wrap" }, h("table", { class: "machine-apps" }, h("thead", null, h("tr", null, h("th", null, t("machines.app")), h("th", null, t("app.col.state")), h("th", null, t("app.address")), h("th"))), h("tbody", null, list.map(row))))
-        : h("div", { class: "card empty" }, icon("store"), h("p", null, t("machines.noApps")), button(t("machines.fromStore"), { class: "primary", onclick: () => ((state.installTarget = m.id), go("#/store")) }, "store")),
+        ? h("section", { class: "card machine-project" }, head, h("div", { class: "table-wrap" }, h("table", { class: "machine-apps" }, h("thead", null, h("tr", null, h("th", null, t("machines.app")), h("th", null, t("app.col.state")), h("th", null, t("app.address")), h("th"))), h("tbody", null, list.map(row)))))
+        : head,
+      !list.length &&
+        h("div", { class: "card empty" }, icon("store"), h("p", null, t("machines.noApps")), button(t("machines.fromStore"), { class: "primary", onclick: () => ((state.installTarget = m.id), go("#/store")) }, "store")),
     ),
   );
 }

@@ -1114,9 +1114,10 @@ body:has(> .assistant-fab) #view:not(.fill) { padding-bottom: 104px; }
 .project-head h2 { flex: 1; display: flex; align-items: baseline; gap: 10px; margin: 0; }
 .project-head h2 .muted { font-size: 13px; font-weight: 400; }
 .project-head .row-actions { margin-left: auto; }
+/* a last column of icon buttons stands in one row: as narrow as it can be, it would stack them */
 @container tablebox (min-width: 641px) {
-  .machine-containers td:last-child { width: 1%; white-space: nowrap; }
-  .machine-containers td:last-child .row-actions { flex-wrap: nowrap; gap: 2px; }
+  td:last-child:has(> .row-actions:not(:has(.btn))) { width: 1%; white-space: nowrap; }
+  td:last-child > .row-actions:not(:has(.btn)) { flex-wrap: nowrap; gap: 2px; }
 }
 .machine-containers th:nth-child(1) { width: 38%; }
 .machine-containers th:nth-child(2) { width: 24%; }
