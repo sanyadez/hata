@@ -318,10 +318,12 @@ function parseRoute() {
   if (parts[0] === "trash" && mayFiles()) return { view: "trash" };
   if (parts[0] === "hata" && mayFiles()) return { view: "myhata" };
   if (parts[0] === "activity" && isAdmin()) return { view: "activity" };
-  if (parts[0] === "backups" && isAdmin()) return { view: "backups" };
-  if (parts[0] === "users" && isAdmin()) return { view: "users" };
+  // both live in Settings; their own old addresses still lead there
+  if ((parts[0] === "backups" || (parts[0] === "settings" && parts[1] === "backups")) && isAdmin()) return { view: "backups" };
+  if ((parts[0] === "users" || (parts[0] === "settings" && parts[1] === "users")) && isAdmin()) return { view: "users" };
   if (parts[0] === "import" && isAdmin()) return { view: "import" };
   if (parts[0] === "terminal" && isAdmin()) return { view: "terminal" };
+  if (parts[0] === "assistant" && isAdmin()) return { view: "assistant" };
   if (parts[0] === "machines" && isAdmin()) return parts[1] ? { view: "machine", id: parts[1], tab: MACHINE_TABS.includes(parts[2]) ? parts[2] : "overview" } : { view: "machines" };
   if (parts[0] === "apps" && parts[1]) return { view: "app", name: parts[1], tab: isAdmin() && ["settings", "logs", "compose", "backups", "terminal"].includes(parts[2]) ? parts[2] : "overview" };
   if (parts[0] === "settings") return { view: "settings", section: sections().some((item) => item.id === parts[1]) ? parts[1] : "account" };
@@ -627,6 +629,8 @@ function authScreen() {
 
 /** A phone: lists of sections fold to the open one, tables become cards */
 const phone = matchMedia("(max-width: 760px)");
+// the assistant shows its chats as a column only on a wide screen
+phone.addEventListener("change", () => paintAssistant());
 
 // a folded list opens when its open section is tapped; choosing one, or tapping elsewhere, folds it again
 document.addEventListener(
@@ -775,8 +779,7 @@ const NAV = [
   { view: "store", hash: "#/store", icon: "grid", guest: false },
   { view: "files", hash: "#/files", icon: "folder", files: true },
   { view: "machines", hash: "#/machines", icon: "server", admin: true },
-  { view: "backups", hash: "#/backups", icon: "archive", admin: true },
-  { view: "users", hash: "#/users", icon: "user", admin: true },
+  { view: "assistant", hash: "#/assistant", icon: "chat", admin: true, assistant: true },
   { view: "settings", hash: "#/settings", icon: "sliders" },
 ];
 
@@ -801,8 +804,8 @@ async function loadMine() {
   state.favorites = mine.favorites;
 }
 
-const navCurrent = () => (state.route.view === "machine" ? "machines" : state.route.view === "app" ? "home" : state.route.view === "import" ? "store" : state.route.view === "trash" || state.route.view === "myhata" ? "files" : state.route.view);
-const navItems = () => NAV.filter((item) => (!item.admin || isAdmin()) && (!item.files || mayFiles()) && (item.guest !== false || state.user.role !== "guest"));
+const navCurrent = () => (state.route.view === "machine" ? "machines" : state.route.view === "backups" || state.route.view === "users" ? "settings" : state.route.view === "app" ? "home" : state.route.view === "import" ? "store" : state.route.view === "trash" || state.route.view === "myhata" ? "files" : state.route.view);
+const navItems = () => NAV.filter((item) => (!item.admin || isAdmin()) && (!item.files || mayFiles()) && (!item.assistant || !!(assistantUi.config?.ready ?? state.overview?.assistant)) && (item.guest !== false || state.user.role !== "guest"));
 
 function navLinks(className, items = navItems()) {
   const current = navCurrent();
@@ -858,6 +861,8 @@ function userMenu(e) {
     "menu dropdown",
     h("header", null, h("span", { class: "avatar" }, state.user.name.slice(0, 1).toUpperCase()), h("div", null, h("h2", null, state.user.name), h("span", { class: "muted small" }, t("user.role." + state.user.role)))),
     h("a", { class: "menu-item", href: "#/settings/account", onclick: () => dialog.close() }, icon("user"), t("settings.account")),
+    isAdmin() && h("button", { type: "button", class: "menu-item", onclick: () => (dialog.close(), serverPowerDialog("reboot")) }, icon("refresh"), t("power.reboot")),
+    isAdmin() && h("button", { type: "button", class: "menu-item", onclick: () => (dialog.close(), serverPowerDialog("poweroff")) }, icon("stop"), t("power.poweroff")),
     h("button", { type: "button", class: "menu-item", onclick: () => (dialog.close(), signOut()) }, icon("signout"), t("nav.signOut")),
   );  // it hangs under the button it was opened from, by its right edge
   dialog.style.top = anchor.bottom + 8 + "px";
@@ -1000,6 +1005,7 @@ function render() {
   if (view === "users") return renderUsers();
   if (view === "import") return renderImport();
   if (view === "terminal") return renderTerminal();
+  if (view === "assistant") return renderAssistant();
   if (view === "machines") return renderMachines();
   if (view === "machine") return renderMachine();
   if (view === "app") return renderApp();
@@ -1814,7 +1820,7 @@ function dragEnd(drop) {
   drag.kind.drop(drag, target);
 }
 
-const ATTENTION_ICONS = { update: "up", docker: "box", restarting: "refresh", partial: "alert", disk: "disk", smart: "disk", memory: "memory", temperature: "temp", internet: "network", network: "network", array: "disk", share: "share", netplace: "globe", machine: "server" };
+const ATTENTION_ICONS = { update: "up", docker: "box", restarting: "refresh", partial: "alert", disk: "disk", smart: "disk", memory: "memory", temperature: "temp", internet: "network", network: "network", array: "disk", share: "share", netplace: "globe", machine: "server", absent: "disk" };
 
 function attentionItem(item) {
   const detail = { ...item.detail, free: item.detail.free == null ? "" : bytes(item.detail.free), trash: item.detail.trash == null ? "" : bytes(item.detail.trash), size: item.detail.size == null ? "" : bytes(item.detail.size) };
@@ -1826,7 +1832,7 @@ function attentionItem(item) {
     item.code === "docker.missing" && isAdmin() && button(t("docker.install"), { class: "small primary", onclick: () => dockerDialog() }, "download"),
     item.code === "docker.stopped" && isAdmin() && dockerStartButton(),
     item.code === "disk.usb" && isAdmin() && button(t("copyin.button"), { class: "small primary", onclick: () => ((state.copyInFrom = item.detail.id), go("#/settings/storage")) }, "download"),
-    item.code === "disk.new" && isAdmin() && open("#/settings/storage", t("attention.disk.open")),
+    (item.code === "disk.new" || item.code.startsWith("absent")) && isAdmin() && open("#/settings/storage", t("attention.disk.open")),
     item.code === "update" && open("#/settings/about"),
     item.code === "disk.trash" && open("#/trash", t("trash.title")),
     (item.code.startsWith("smart.") || item.code === "disk.filling" || item.code.startsWith("array.")) && open("#/settings/storage"),
@@ -2695,6 +2701,48 @@ function powerDialog(m, action) {
       }, action === "reboot" ? "refresh" : "stop"),
     ),
   );
+}
+
+/** Restarts or shuts down the server Hata runs on; after a restart the page waits for it and reloads */
+function serverPowerDialog(action) {
+  let dialog;
+  dialog = openDialog(
+    "confirm",
+    h("h2", { class: "wrap" }, t(`power.${action}Title`)),
+    h("p", { class: "muted" }, t(`power.${action}Lead`)),
+    h(
+      "footer",
+      null,
+      closeButton(() => dialog, t("common.cancel")),
+      button(t(`power.${action}`), {
+        class: "danger",
+        onclick: async (e) => {
+          e.currentTarget.disabled = true;
+          try {
+            await api("POST", "/api/system/power", { action });
+            dialog.close();
+            toast(t(`power.${action}Done`));
+            if (action === "reboot") void waitForReturn();
+          } catch (err) {
+            toast(errorText(err), "error");
+          }
+        },
+      }, action === "reboot" ? "refresh" : "stop"),
+    ),
+  );
+}
+
+/** Waits for the server to go away and to answer again, then reloads the page */
+async function waitForReturn() {
+  const answers = () => fetch("/api/state", { cache: "no-store" }).then((r) => r.ok, () => false);
+  const started = Date.now();
+  let gone = false;
+  while (Date.now() - started < 15 * 60_000) {
+    await new Promise((r) => setTimeout(r, 3000));
+    const up = await answers();
+    if (!up) gone = true;
+    else if (gone) return location.reload();
+  }
 }
 
 async function updateMachine(m, el) {
@@ -4033,9 +4081,12 @@ async function appBackupsTab(app, box) {
 
 function renderBackups() {
   shell(
-    h("div", { class: "page-head" }, h("div", null, h("h1", null, t("nav.backups")), h("p", { class: "meta", id: "backup-meta" }, " ")), h("div", { class: "actions", id: "backup-actions" })),
-    h("section", { class: "stats card", id: "backup-stats" }),
-    h("div", { class: "columns" }, h("section", { id: "backup-apps" }), h("aside", { class: "side", id: "backup-side" })),
+    ...settingsFrame(
+      "backups",
+      h("div", { class: "page-head section-page" }, h("div", null, h("h2", null, t("nav.backups")), h("p", { class: "meta", id: "backup-meta" }, " ")), h("div", { class: "actions", id: "backup-actions" })),
+      h("section", { class: "stats card", id: "backup-stats" }),
+      h("div", { class: "columns" }, h("section", { id: "backup-apps" }), h("aside", { class: "side", id: "backup-side" })),
+    ),
   );
   renderBackupsBody();
 }
@@ -6997,7 +7048,7 @@ function paintWelcome() {
         places.length > 0 && h("div", { class: "row-actions wrap" }, places.map((path) => button(`${path}/Backups`, { class: "small mono", onclick: () => ((dir.value = `${path}/Backups`), check()) }))),
         same,
       ),
-      h("p", { class: "muted small" }, t("welcome.backups.more"), " ", h("a", { class: "link", href: "#/backups" }, t("nav.backups"))),
+      h("p", { class: "muted small" }, t("welcome.backups.more"), " ", h("a", { class: "link", href: "#/settings/backups" }, t("nav.backups"))),
       ...welcomeFoot(step, async () => {
         state.settings = await api("PUT", "/api/settings", { backup: { enabled: enabled.checked, time: time.value, keep: Number(keep.value), dir: dir.value.trim() } });
       }),
@@ -7065,6 +7116,8 @@ const LANGUAGE_NAMES = { en: "English", uk: "Українська" };
 const SECTIONS = [
   { id: "account", icon: "user" },
   { id: "general", icon: "sliders" },
+  { id: "users", icon: "user", admin: true, label: "nav.users" },
+  { id: "backups", icon: "archive", admin: true, label: "nav.backups" },
   { id: "appearance", icon: "image", admin: true },
   { id: "apps", icon: "grid", admin: true },
   { id: "docker", icon: "box", admin: true },
@@ -7351,6 +7404,7 @@ function settingsSection(section) {
     const port = h("input", { type: "number", min: 1, max: 65535, class: "short mono", value: s?.port || "", placeholder: String(location.port || 80) });
     return [
       h("section", { class: "card pad" }, h("h2", null, t("settings.general")), settingRow(t("settings.language"), t("settings.languageHint"), language), isAdmin() && settingRow(t("settings.port"), t("settings.portHint"), h("span", { class: "pair" }, port, button(t("settings.save"), { onclick: () => save({ port: Number(port.value) || 0 }) }))), isAdmin() && settingRow(t("welcome.again"), t("welcome.againHint"), h("a", { class: "btn", href: "#/welcome" }, t("common.open"))), error),
+      isAdmin() && h("section", { class: "card pad" }, h("h2", null, t("power.title")), settingRow(t("power.reboot"), t("power.rebootHint"), button(t("power.reboot"), { onclick: () => serverPowerDialog("reboot") }, "refresh")), settingRow(t("power.poweroff"), t("power.poweroffHint"), button(t("power.poweroff"), { onclick: () => serverPowerDialog("poweroff") }, "stop"))),
     ];
   }
   if (section === "apps") {
@@ -11339,14 +11393,39 @@ function paintAssistant() {
   else localStorage.removeItem(ASSISTANT_KEY + ".chat");
   const wide = panel.classList.contains("wide");
   const tool = (label, name, onclick, cls = "") => h("button", { type: "button", class: "icon-btn " + cls, title: label, "aria-label": label, onclick }, icon(name));
+  const fresh = () => ((assistantUi.chat = null), paintAssistant(), panel.querySelector("textarea").focus());
+  // wide, the chats are a column on the left; narrow, a list in the head
+  const paged = panel.classList.contains("paged");
+  const listed = !phone.matches && (paged || chats.length > 0);
+  panel.classList.toggle("listed", listed);
+  put(
+    panel.querySelector(".assistant-list"),
+    listed && [
+      button(t("assistant.newChat"), { class: "small" + (chat ? "" : " primary"), onclick: fresh }, "plus"),
+      h(
+        "div",
+        { class: "assistant-chats" },
+        chats.map((c) =>
+          h(
+            "button",
+            { type: "button", class: "assistant-chat" + (c.id === chat?.id ? " active" : ""), "aria-current": c.id === chat?.id ? "true" : null, onclick: () => void loadAssistantChat(c.id) },
+            h("span", { class: "title" }, c.title),
+            h("span", { class: "muted small" }, c.status === "asking" ? h("span", { class: "dot partial" }) : null, ago(c.updatedAt)),
+          ),
+        ),
+      ),
+    ],
+  );
+  const title = chats.find((c) => c.id === chat?.id)?.title ?? (chat ? "" : t("assistant.newChat"));
   put(
     panel.querySelector(".assistant-head"),
     // with chats to choose from the list names the one on the screen; otherwise the window says what it is
-    chats.length > 0 ? h("span", { class: "grow pick" }, pick) : h("strong", { class: "grow" }, t("assistant.title")),
-    chat && tool(t("assistant.newChat"), "plus", () => ((assistantUi.chat = null), paintAssistant(), panel.querySelector("textarea").focus())),
+    listed ? h("strong", { class: "grow ellipsis" }, title) : chats.length > 0 ? h("span", { class: "grow pick" }, pick) : h("strong", { class: "grow" }, t("assistant.title")),
+    chat && !listed && tool(t("assistant.newChat"), "plus", fresh),
     chat && tool(t("assistant.forget"), "trash", forgetAssistantChat),
-    tool(t(wide ? "assistant.narrow" : "assistant.wide"), wide ? "shrink" : "expand", () => (panel.classList.toggle("wide"), rememberAssistant(), paintAssistant()), "wide-only"),
-    tool(t("assistant.hide"), "down", closeAssistant),
+    !paged && tool(t("assistant.asPage"), "external", () => go("#/assistant"), "wide-only"),
+    !paged && tool(t(wide ? "assistant.narrow" : "assistant.wide"), wide ? "shrink" : "expand", () => (panel.classList.toggle("wide"), rememberAssistant(), paintAssistant()), "wide-only"),
+    !paged && tool(t("assistant.hide"), "down", closeAssistant),
   );
   const body = panel.querySelector(".assistant-body");
   // new words are followed down the panel unless the person has scrolled up to read
@@ -11390,11 +11469,12 @@ async function forgetAssistantChat() {
 /** The round button in the corner of every page: opens the window, and shows when a change waits for a word */
 function assistantFab() {
   if (!isAdmin()) return;
+  leaveAssistantPage();
   if (!assistantUi.fab) {
     assistantUi.fab = h("button", { type: "button", class: "assistant-fab", title: t("assistant.title"), "aria-label": t("assistant.title"), onclick: () => (assistantUi.open ? closeAssistant() : openAssistant()) }, icon("chat"), h("span", { class: "fab-dot", hidden: true }));
     document.body.append(assistantUi.fab);
     // a window left open stays open after a reload; otherwise only the list of chats is asked for, for the dot
-    if (localStorage.getItem(ASSISTANT_KEY)) {
+    if (localStorage.getItem(ASSISTANT_KEY) && state.route.view !== "assistant") {
       const last = localStorage.getItem(ASSISTANT_KEY + ".chat");
       if (last) assistantUi.chat = { id: last };
       openAssistant({ restore: true });
@@ -11411,10 +11491,10 @@ function markAssistantFab() {
   assistantUi.fab.classList.toggle("open", assistantUi.open);
 }
 
-const rememberAssistant = () => (assistantUi.open ? localStorage.setItem(ASSISTANT_KEY, assistantUi.panel?.classList.contains("wide") ? "wide" : "open") : localStorage.removeItem(ASSISTANT_KEY));
+const rememberAssistant = () => assistantUi.panel?.classList.contains("paged") || (assistantUi.open ? localStorage.setItem(ASSISTANT_KEY, assistantUi.panel?.classList.contains("wide") ? "wide" : "open") : localStorage.removeItem(ASSISTANT_KEY));
 
-/** Opens the window; `ask` is sent as the first words of a new chat, `draft` is put into the field */
-function openAssistant({ ask, draft, restore } = {}) {
+/** The window of the assistant, made once: floating over the pages, or the whole page #/assistant */
+function assistantPanel() {
   if (!assistantUi.panel) {
     const input = h("textarea", { rows: 2, maxLength: 20000, placeholder: t("assistant.placeholder"), "aria-label": t("assistant.placeholder") });
     const submit = () => {
@@ -11430,8 +11510,18 @@ function openAssistant({ ask, draft, restore } = {}) {
       }
     });
     const form = h("form", { class: "assistant-form", onsubmit: (e) => (e.preventDefault(), submit()) }, input, h("button", { class: "btn primary square", "aria-label": t("assistant.send"), title: t("assistant.send") }, icon("arrow")));
-    assistantUi.panel = h("aside", { class: "assistant" + (localStorage.getItem(ASSISTANT_KEY) === "wide" ? " wide" : ""), "aria-label": t("assistant.title") }, h("div", { class: "assistant-head" }), h("div", { class: "assistant-body" }), form);
-    document.body.append(assistantUi.panel);
+    assistantUi.panel = h("aside", { class: "assistant" + (localStorage.getItem(ASSISTANT_KEY) === "wide" ? " wide" : ""), "aria-label": t("assistant.title") }, h("nav", { class: "assistant-list", "aria-label": t("assistant.chats") }), h("div", { class: "assistant-head" }), h("div", { class: "assistant-body" }), form);
+  }
+  return assistantUi.panel;
+}
+
+/** Opens the window; `ask` is sent as the first words of a new chat, `draft` is put into the field */
+function openAssistant({ ask, draft, restore } = {}) {
+  const panel = assistantPanel();
+  // on its own page the window is the page; elsewhere it floats
+  if (state.route.view !== "assistant" && (panel.classList.contains("paged") || panel.parentElement !== document.body)) {
+    panel.classList.remove("paged");
+    document.body.append(panel);
   }
   assistantUi.open = true;
   assistantUi.panel.hidden = false;
@@ -11444,6 +11534,33 @@ function openAssistant({ ask, draft, restore } = {}) {
   void loadAssistant().then(() => ask && assistantUi.config?.ready && sendToAssistant(ask, true));
   // a window put back after a reload does not take the keyboard from the page
   if (!restore) input.focus();
+}
+
+/** The assistant as a page of its own: the same window, with the chats on the left */
+function renderAssistant() {
+  const holder = h("div", { class: "assistant-page" });
+  shell(holder);
+  document.getElementById("view").classList.add("fill");
+  const panel = assistantPanel();
+  panel.classList.add("paged");
+  holder.append(panel);
+  panel.hidden = false;
+  assistantUi.open = true;
+  markAssistantFab();
+  paintAssistant();
+  void loadAssistant();
+}
+
+/** Leaving the page of the assistant: its window goes back to floating, closed */
+function leaveAssistantPage() {
+  const panel = assistantUi.panel;
+  if (!panel?.classList.contains("paged") || state.route.view === "assistant") return;
+  panel.classList.remove("paged");
+  panel.hidden = true;
+  document.body.append(panel);
+  assistantUi.open = false;
+  rememberAssistant();
+  markAssistantFab();
 }
 
 function closeAssistant() {
@@ -11844,15 +11961,20 @@ function agentsSection() {
 
 function renderSettings() {
   const section = state.route.section;
-  shell(
+  shell(...settingsFrame(section, state.account && (state.settings || !isAdmin()) ? settingsSection(section) : h("p", { class: "muted" }, "…")));
+}
+
+/** The head and the list of sections of Settings around what one section shows */
+function settingsFrame(section, ...content) {
+  return [
     h("div", { class: "page-head" }, h("div", null, h("h1", null, t("nav.settings")), h("p", { class: "meta" }, `Hata ${state.version}`))),
     h(
       "div",
       { class: "settings" },
-      h("nav", { class: "cats fold" }, sections().map((item) => h("a", { class: "cat" + (section === item.id ? " active" : ""), href: `#/settings/${item.id}` }, h("span", { class: "with-icon" }, icon(item.icon), t("settings." + item.id))))),
-      h("div", { class: "stack" }, state.account && (state.settings || !isAdmin()) ? settingsSection(section) : h("p", { class: "muted" }, "…")),
+      h("nav", { class: "cats fold" }, sections().map((item) => h("a", { class: "cat" + (section === item.id ? " active" : ""), href: `#/settings/${item.id}` }, h("span", { class: "with-icon" }, icon(item.icon), t(item.label ?? "settings." + item.id))))),
+      h("div", { class: "stack" }, content),
     ),
-  );
+  ];
 }
 
 // --- Account and users --------------------------------------------------------------------------
@@ -12197,7 +12319,9 @@ function renderUsers() {
   const admins = users.filter((u) => u.role === "admin").length;
   const without = users.filter((u) => !u.twoFactor).length;
   shell(
-    h("div", { class: "page-head" }, h("div", null, h("h1", null, t("nav.users")), h("p", { class: "meta" }, t("users.meta", { users: users.length, admins }), without > 0 && h("span", { class: "dot-sep" }, "·"), without > 0 && t("users.without2fa", { n: without }))), h("div", { class: "actions" }, button(t("users.add"), { class: "primary", onclick: userDialog }, "plus"))),
+    ...settingsFrame(
+    "users",
+    h("div", { class: "page-head section-page" }, h("div", null, h("h2", null, t("nav.users")), h("p", { class: "meta" }, t("users.meta", { users: users.length, admins }), without > 0 && h("span", { class: "dot-sep" }, "·"), without > 0 && t("users.without2fa", { n: without }))), h("div", { class: "actions" }, button(t("users.add"), { class: "primary", onclick: userDialog }, "plus"))),
     h(
       "div",
       { class: "card table-wrap" },
@@ -12226,6 +12350,7 @@ function renderUsers() {
     h("p", { class: "muted small" }, t("users.rolesHint")),
     requireTwoFactorRow(),
     h("div", { class: "columns" }, h("section", null, accessMatrix()), h("aside", { class: "side" }, invitesCard(), signInLog())),
+    ),
   );
 }
 

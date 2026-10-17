@@ -1395,6 +1395,15 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
     await startDocker();
     return json(await dockerInfo());
   }
+  // the answer goes out first, then the server goes down
+  if (path === "/api/system/power" && method === "POST") {
+    const { action } = await body(req);
+    if (action !== "reboot" && action !== "poweroff") return fail(404, "request.notFound");
+    if (process.getuid?.() !== 0) return fail(403, "system.powerDenied");
+    record(`system.power.${action}`, { user: user.name });
+    setTimeout(() => Bun.spawn(["systemctl", action], { stdout: "ignore", stderr: "ignore" }), 500);
+    return json({ ok: true });
+  }
   // protection from a disk failure; the long runs answer at once and the page follows them
   if (path.startsWith("/api/disks/array")) {
     try {

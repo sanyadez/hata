@@ -182,10 +182,13 @@ export function poolOptions(name: string, branches: string[]): string {
   return ["cache.files=off", "category.create=mfs", "moveonenospc=true", "minfreespace=1G", "allow_other", `fsname=${name}`, "nofail", BEFORE_DOCKER, ...branches.map((b) => `x-systemd.requires-mounts-for=${b}`)].join(",");
 }
 
-/** The connected folders that can be merged: Hata's own, kept, of a file system with owners, in no merged folder yet */
-export function mergeable(entries: FstabEntry[], mounted: string[]): string[] {
+/**
+ * The connected folders that can be merged: Hata's own, kept, of a file system with owners, in no merged
+ * folder yet, and not the parity of the protection — new files would land in the room the parity needs
+ */
+export function mergeable(entries: FstabEntry[], mounted: string[], parity = ""): string[] {
   const taken = new Set(Object.values(pools(entries)).flat());
-  return entries.filter((e) => e.ours && POSIX_FS.test(e.fstype) && mounted.includes(e.path) && !taken.has(e.path)).map((e) => e.path);
+  return entries.filter((e) => e.ours && POSIX_FS.test(e.fstype) && mounted.includes(e.path) && !taken.has(e.path) && e.path !== parity).map((e) => e.path);
 }
 
 // ---- the running part ----
@@ -233,6 +236,12 @@ const readText = (path: string): string => {
 const fstab = (): FstabEntry[] => parseFstab(readText(FSTAB));
 const mountedAt = (): Map<string, string> => new Map(readText("/proc/mounts").split("\n").map((line) => line.split(" ")).filter((f) => f.length > 2).map((f) => [unescapeField(f[1]!), unescapeField(f[0]!)]));
 const has = (program: string): string | null => Bun.which(program, { PATH });
+
+/**
+ * A mount command run in a scope of its own: a FUSE file system (mergerfs, ntfs-3g, exfat-fuse) is a
+ * process that would otherwise stay in Hata's service and be killed with it at every restart or update.
+ */
+const outside = (command: string[]): string[] => (process.getuid?.() === 0 && has("systemd-run") ? ["systemd-run", "--scope", "--collect", "--quiet", "--", ...command] : command);
 const said = (result: { out: string; err: string; code: number }): string => (result.err.trim() || result.out.trim()).split("\n").slice(-2).join(" ") || `exit code ${result.code}`;
 
 function writeFstab(text: string): void {
@@ -358,9 +367,9 @@ async function attach(volume: { path: string; uuid: string; fstype: string }, pa
     await seal(path);
     writeFstab(withMount(before, { spec: volume.uuid ? `UUID=${volume.uuid}` : volume.path, path, fstype: type, options }));
     await reload();
-    result = await run(["mount", path], 60_000);
+    result = await run(outside(["mount", path]), 60_000);
   } else {
-    result = await run(["mount", "-t", type, "-o", options, volume.path, path], 60_000);
+    result = await run(outside(["mount", "-t", type, "-o", options, volume.path, path]), 60_000);
   }
   if (result.code !== 0) {
     if (keep) {
@@ -598,10 +607,11 @@ async function paused<T>(volume: Volume, work: () => Promise<T>): Promise<{ done
   const kept = fstab().some((e) => e.ours && e.path === folder);
   const down = await run(["umount", folder], 120_000);
   if (down.code !== 0) return { error: "disk.busy", message: said(down) };
+  endStale(folder);
   const done = await work();
   const type = kept ? "" : await driver(volume.fstype);
   if (typeof type !== "string") return { done, back: type.error };
-  const up = await run(kept ? ["mount", folder] : ["mount", "-t", type, "-o", optionsFor(volume.fstype, false), volume.path, folder], 60_000);
+  const up = await run(outside(kept ? ["mount", folder] : ["mount", "-t", type, "-o", optionsFor(volume.fstype, false), volume.path, folder]), 60_000);
   return { done, back: up.code === 0 ? "" : said(up) };
 }
 
@@ -714,7 +724,7 @@ export function mergeFolders(branches: unknown, label: string, user: string): Pr
   return oneAtATime(async () => {
     if (!NAME_RE.test(label)) return { error: "disk.badName" };
     const lines = fstab();
-    const can = mergeable(lines, [...mountedAt().keys()]);
+    const can = mergeable(lines, [...mountedAt().keys()], settings.snapraid.parity);
     const chosen = Array.isArray(branches) ? [...new Set(branches.filter((b): b is string => typeof b === "string"))] : [];
     if (chosen.length < 2 || chosen.some((b) => !can.includes(b))) return { error: "disk.badMerge" };
     if (!has("mergerfs")) return { error: "disk.noMergeTool", needs: { package: "mergerfs", install: installCommand("mergerfs") } };
@@ -726,7 +736,7 @@ export function mergeFolders(branches: unknown, label: string, user: string): Pr
     await seal(path);
     writeFstab(withMount(before, { spec: chosen.join(":"), path, fstype: POOL_FS, options: poolOptions(label, chosen) }));
     await reload();
-    const result = await run(["mount", path], 60_000);
+    const result = await run(outside(["mount", path]), 60_000);
     if (result.code !== 0) {
       writeFstab(before);
       await reload();
@@ -780,6 +790,7 @@ async function release(path: string): Promise<{ device: string | undefined } | F
   if (device) {
     const result = await run(["umount", path], 120_000);
     if (result.code !== 0) return { error: "disk.busy", message: said(result) };
+    endStale(path);
   }
   if (kept) {
     writeFstab(withoutMount(readText(FSTAB), path));
@@ -831,7 +842,46 @@ function upgradeKept(): Promise<void> {
       await reload();
     }
     for (const entry of fstab()) if (entry.ours && existsSync(entry.path)) await seal(entry.path);
+    await mountLeftOut();
   });
+}
+
+const FUSE_DAEMONS = new Set(["mergerfs", "ntfs-3g", "mount.exfat-fuse", "exfat-fuse"]);
+
+/**
+ * Ends the FUSE program of a folder just unmounted: mergerfs mounted at boot was seen to stay asleep
+ * after its folder went, and a second one would then serve the same folder next to it.
+ */
+function endStale(path: string): void {
+  if (mountedAt().has(path)) return;
+  let pids: string[] = [];
+  try {
+    pids = readdirSync("/proc").filter((name) => /^\d+$/.test(name));
+  } catch {
+    return;
+  }
+  for (const pid of pids) {
+    try {
+      const args = readFileSync(`/proc/${pid}/cmdline`, "utf8").split("\0");
+      if (FUSE_DAEMONS.has(basename(args[0] ?? "")) && args.includes(path)) process.kill(Number(pid), "SIGTERM");
+    } catch {}
+  }
+}
+
+/**
+ * Kept folders whose disk is here but which are not mounted — a FUSE file system an older version
+ * mounted died with it — are mounted again; told as a return, so the apps that failed on them start.
+ */
+async function mountLeftOut(): Promise<void> {
+  lookForReturns();
+  for (const entry of fstab()) {
+    if (!entry.ours || mountedAt().has(entry.path)) continue;
+    const mounted = mountedAt();
+    const here = entry.fstype === POOL_FS ? entry.spec.split(":").every((branch) => mounted.has(branch)) : existsSync(entry.spec.startsWith("UUID=") ? `/dev/disk/by-uuid/${entry.spec.slice(5)}` : entry.spec);
+    if (!here) continue;
+    const result = await run(outside(["mount", entry.path]), 60_000);
+    if (result.code !== 0) console.error(`Could not mount ${entry.path} again:`, said(result));
+  }
 }
 
 // ---- USB disks that connect by themselves ----
@@ -1000,7 +1050,7 @@ export interface MountingReport {
 }
 
 /** The connected folders that can be merged into one now */
-export const mergeableNow = (): string[] => mergeable(fstab(), [...mountedAt().keys()]);
+export const mergeableNow = (): string[] => mergeable(fstab(), [...mountedAt().keys()], settings.snapraid.parity);
 
 /** The folders Hata connected */
 function oursNow(): MountingReport["ours"] {
@@ -1021,7 +1071,7 @@ export function mountingReport(disks: Disk[]): MountingReport {
     mountable: disks.flatMap((d) => d.volumes.filter(mountable).map((v) => v.path)),
     ours,
     pools: pools(lines),
-    mergeable: mergeable(lines, [...mountedAt().keys()]),
+    mergeable: mergeable(lines, [...mountedAt().keys()], settings.snapraid.parity),
     unused,
     free: Object.fromEntries(disks.map((d) => [d.name, blockers(d).some((b) => b !== "mounted") ? 0 : unallocated(d)])),
     changeable: Object.fromEntries(disks.map((d) => [d.name, changeable(d, Object.keys(ours))])),

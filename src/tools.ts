@@ -66,7 +66,7 @@ const SPECS: Spec[] = [
   { id: "iptables", name: "iptables", package: "iptables", bin: "iptables", version: ["iptables", "--version"], page: "#/settings/network" },
   { id: "wireguard-tools", name: "WireGuard tools", package: "wireguard-tools", bin: "wg-quick", version: ["wg", "--version"], page: "#/settings/remote" },
   { id: "tailscale", name: "Tailscale", package: "tailscale", bin: "tailscale", version: ["tailscale", "version"], page: "#/settings/remote" },
-  { id: "openssh-client", name: "OpenSSH client", package: "openssh-client", bin: "sftp", version: ["ssh", "-V"], page: "#/backups", base: true },
+  { id: "openssh-client", name: "OpenSSH client", package: "openssh-client", bin: "sftp", version: ["ssh", "-V"], page: "#/settings/backups", base: true },
 ];
 
 export interface Tool {

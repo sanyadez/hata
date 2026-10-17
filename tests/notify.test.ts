@@ -145,6 +145,6 @@ test("the words of a problem that is over, and of the night's backups", () => {
   expect(resolvedWording([disk()], "en")).toEqual([{ title: "Over: Disk / is 91% full", text: "It no longer needs attention.", severity: "ok", route: "#/", tag: "disk:/", code: "resolved.disk", app: undefined }]);
   const many = ["a", "b", "c", "d"].map((name): AttentionItem => ({ id: `partial:${name}`, severity: "warn", code: "partial", detail: { title: name.toUpperCase(), container: name }, app: name }));
   expect(resolvedWording(many, "en")).toMatchObject([{ title: "4 problems are over", severity: "ok" }]);
-  expect(backupMessage({ ok: 9, failed: [], took: 200_000 }, "en")).toMatchObject({ title: "Night backups: all 9 done", text: "It took 3 min.", severity: "ok", route: "#/backups" });
+  expect(backupMessage({ ok: 9, failed: [], took: 200_000 }, "en")).toMatchObject({ title: "Night backups: all 9 done", text: "It took 3 min.", severity: "ok", route: "#/settings/backups" });
   expect(backupMessage({ ok: 7, failed: ["memos", "kuma@nas"], took: 10_000 }, "uk")).toMatchObject({ title: "Нічні копії: не вдалося 2, зроблено 7", text: "Не скопійовано: memos, kuma на nas. Увесь запуск тривав 1 хв.", severity: "warn" });
 });

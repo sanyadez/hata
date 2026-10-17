@@ -382,7 +382,13 @@ export async function advance(chat: Chat, engine: Engine, signal?: AbortSignal):
 export const shownChat = ({ turns, owner: _, ...chat }: Chat) => ({ ...chat, turns: turns.map((turn) => (turn.role === "assistant" ? { role: turn.role, text: turn.text, calls: turn.calls, at: turn.at } : turn.role === "tool" ? { ...turn, text: turn.text.slice(0, 4000) } : turn)) });
 
 /** The first words of a chat, for the list */
-export const titleOf = (text: string): string => text.replace(/\s+/g, " ").trim().slice(0, 60) || "…";
+/** The first words of a chat, as its name; a long one is cut at a word and says so */
+export function titleOf(text: string): string {
+  const words = text.replace(/\s+/g, " ").trim();
+  if (words.length <= 60) return words || "…";
+  const cut = words.slice(0, 60);
+  return (cut.lastIndexOf(" ") > 30 ? cut.slice(0, cut.lastIndexOf(" ")) : cut).replace(/[\s,.;:!?–—-]+$/, "") + "…";
+}
 
 /** What the model is told about where it is and how to behave */
 export function systemPrompt(base: string, user: string, origin = ""): string {
@@ -409,7 +415,13 @@ let config: AssistantConfig = (() => {
 // what was under way when the server stopped is not picked up again: the person asks anew
 let chats: Chat[] = readJsonFile<Chat[]>(CHATS_FILE, [], Array.isArray)
   .filter((chat) => isPlainObject(chat) && Array.isArray(chat.turns))
-  .map((chat) => ({ ...chat, status: chat.status === "thinking" ? "idle" : chat.status }));
+  .map((chat) => ({ ...chat, title: retitled(chat), status: chat.status === "thinking" ? "idle" : chat.status }));
+
+/** Older versions cut a long name at 60 characters, in the middle of a word and without saying so */
+function retitled(chat: Chat): string {
+  const first = chat.turns.find((turn) => turn.role === "user" && typeof turn.text === "string");
+  return chat.title?.length === 60 && first?.text ? titleOf(first.text) : chat.title;
+}
 const running = new Map<string, AbortController>();
 
 let saving: Timer | null = null;

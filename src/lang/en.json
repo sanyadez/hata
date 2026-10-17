@@ -2899,5 +2899,21 @@
   "pool.isParity": "holds the parity of the protection",
   "store.whereOther": "Other computers…",
   "store.shotPrev": "Previous screenshot",
-  "store.shotNext": "Next screenshot"
+  "store.shotNext": "Next screenshot",
+  "power.title": "Server",
+  "power.reboot": "Restart the server",
+  "power.poweroff": "Shut the server down",
+  "power.rebootHint": "The whole computer restarts; apps are stopped and come back with it.",
+  "power.poweroffHint": "The computer turns off; it starts again only by its power button or Wake-on-LAN.",
+  "power.rebootTitle": "Restart the server?",
+  "power.poweroffTitle": "Shut the server down?",
+  "power.rebootLead": "Every app and Hata itself stop for a minute or two. This page reloads by itself once the server is back.",
+  "power.poweroffLead": "The computer turns off and Hata stops answering. To start it again, press its power button (or wake it over the network, if its network card allows that).",
+  "power.rebootDone": "The server is restarting…",
+  "power.poweroffDone": "The server is shutting down.",
+  "error.system.powerDenied": "Hata does not run as the system's administrator here, so it cannot restart or shut down the computer.",
+  "activity.system.power.reboot": "The server was restarted",
+  "activity.system.power.poweroff": "The server was shut down",
+  "nav.assistant": "Assistant",
+  "assistant.asPage": "Open as a page"
 }

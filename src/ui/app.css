@@ -978,6 +978,24 @@ body:has(> .assistant-fab) #view:not(.fill) { padding-bottom: 104px; }
 .fab-dot { position: absolute; top: 4px; right: 4px; width: 14px; height: 14px; border-radius: 50%; background: var(--danger); border: 2px solid var(--bg); }
 .assistant { position: fixed; right: 24px; bottom: 92px; width: min(400px, calc(100vw - 32px)); height: min(620px, calc(100dvh - 172px)); z-index: 20; display: grid; grid-template-rows: auto 1fr auto; background: var(--surface); border: 1px solid var(--border-strong); border-radius: var(--radius-lg); overflow: hidden; box-shadow: 0 18px 60px rgb(0 0 0 / 40%); }
 .assistant.wide { width: min(720px, calc(100vw - 48px)); height: calc(100dvh - 172px); }
+.assistant-list { display: none; }
+.assistant.listed { width: min(620px, calc(100vw - 48px)); grid-template-columns: 220px minmax(0, 1fr); }
+.assistant.listed.wide { width: min(940px, calc(100vw - 48px)); }
+.assistant-page { flex: 1; min-height: 0; display: flex; }
+.assistant.paged, .assistant.paged.listed { position: static; flex: 1; width: auto; height: auto; min-height: 0; z-index: auto; box-shadow: none; border-color: var(--border); }
+.assistant.paged.listed { grid-template-columns: 260px minmax(0, 1fr); }
+.assistant.paged :is(.assistant-body, .assistant-form) { padding-inline: max(18px, calc((100% - 820px) / 2)); }
+body:has(.assistant.paged) > .assistant-fab { display: none; }
+.assistant.listed > :not(.assistant-list) { grid-column: 2; }
+.assistant.listed .assistant-list { display: flex; flex-direction: column; gap: 10px; grid-row: 1 / -1; grid-column: 1; min-height: 0; padding: 12px 8px 12px 12px; border-right: 1px solid var(--border); }
+.assistant-list > .btn { justify-content: flex-start; }
+.assistant-chats { display: grid; align-content: start; gap: 2px; overflow-y: auto; min-height: 0; overscroll-behavior: contain; scrollbar-width: thin; }
+.assistant-chat { display: grid; gap: 2px; text-align: left; padding: 8px 10px; border: 0; border-radius: var(--radius-sm); background: none; color: var(--text); font: inherit; cursor: pointer; }
+.assistant-chat:hover { background: var(--surface-2); }
+.assistant-chat.active { background: var(--accent-soft); }
+.assistant-chat .title { font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.assistant-chat .muted { display: flex; align-items: center; gap: 6px; }
+.assistant-head .ellipsis { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .assistant-head { display: flex; align-items: center; gap: 8px; padding: 12px 12px 12px 18px; border-bottom: 1px solid var(--border); }
 .assistant-head strong { font-family: var(--font-heading); font-size: 16px; }
 .assistant-head :is(select, .select-btn) { max-width: 170px; }

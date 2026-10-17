@@ -119,6 +119,7 @@ test("pools: merged folders are read back from Hata's lines; what can be merged"
   const mounted = ["/", "/mnt/a", "/mnt/b", "/mnt/win"];
   // not the one that is not there now, not the one without owners, not what Hata did not connect
   expect(mergeable(parseFstab(text), mounted)).toEqual(["/mnt/a", "/mnt/b"]);
+  expect(mergeable(parseFstab(text), mounted, "/mnt/a")).toEqual(["/mnt/b"]);
   const merged = withMount(text, { spec: "/mnt/a:/mnt/b", path: "/mnt/storage", fstype: POOL_FS, options: poolOptions("storage", ["/mnt/a", "/mnt/b"]) });
   expect(pools(parseFstab(merged))).toEqual({ "/mnt/storage": ["/mnt/a", "/mnt/b"] });
   expect(merged.trimEnd().split("\n").at(-1)).toBe("/mnt/a:/mnt/b /mnt/storage fuse.mergerfs cache.files=off,category.create=mfs,moveonenospc=true,minfreespace=1G,allow_other,fsname=storage,nofail,x-systemd.before=docker.service,x-systemd.requires-mounts-for=/mnt/a,x-systemd.requires-mounts-for=/mnt/b 0 0");

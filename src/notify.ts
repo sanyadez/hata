@@ -231,7 +231,7 @@ export function wording(items: AttentionItem[], lang: string): Message[] {
       title: tr(lang, `attention.${item.code}.title`, detail),
       text: tr(lang, `attention.${item.code}.text`, detail).trim(),
       severity: item.severity,
-      route: item.app ? `#/apps/${item.app}${tab}` : item.code === "update" ? "#/settings/about" : item.code === "disk.trash" ? "#/trash" : item.code.startsWith("internet.") || item.code === "network.exposed" ? "#/settings/network" : item.code.startsWith("share.") ? "#/settings/shares" : item.code === "netplace.down" ? "#/settings/storage" : item.code === "machine.away" ? `#/machines/${item.detail.id}` : item.code.startsWith("machine.") ? `#/machines/${item.detail.id}/apps` : item.code.startsWith("array.") || item.code.startsWith("smart.") || item.code === "disk.new" || item.code === "disk.usb" || item.code === "disk.filling" ? "#/settings/storage" : "#/",
+      route: item.app ? `#/apps/${item.app}${tab}` : item.code === "update" ? "#/settings/about" : item.code === "disk.trash" ? "#/trash" : item.code.startsWith("internet.") || item.code === "network.exposed" ? "#/settings/network" : item.code.startsWith("share.") ? "#/settings/shares" : item.code === "netplace.down" ? "#/settings/storage" : item.code === "machine.away" ? `#/machines/${item.detail.id}` : item.code.startsWith("machine.") ? `#/machines/${item.detail.id}/apps` : item.code.startsWith("array.") || item.code.startsWith("smart.") || item.code === "disk.new" || item.code === "disk.usb" || item.code === "disk.filling" || item.code.startsWith("absent") ? "#/settings/storage" : "#/",
       tag: keyOf(item),
       code: item.code,
       app: item.app,
@@ -269,8 +269,8 @@ export function backupMessage(run: BackupRun, lang: string): Message {
   const minutes = String(Math.max(1, Math.round(run.took / 60_000)));
   const names = run.failed.map((name) => (name.includes("@") ? tr(lang, "notify.backups.onMachine", { app: name.split("@")[0]!, machine: name.split("@")[1]! }) : name)).join(", ");
   return run.failed.length
-    ? { title: tr(lang, "notify.backups.failedTitle", { ok: run.ok, failed: run.failed.length }), text: tr(lang, "notify.backups.failedText", { names, minutes }), severity: "warn", route: "#/backups", tag: "backups", code: "backups" }
-    : { title: tr(lang, "notify.backups.title", { ok: run.ok }), text: tr(lang, "notify.backups.text", { minutes }), severity: "ok", route: "#/backups", tag: "backups", code: "backups" };
+    ? { title: tr(lang, "notify.backups.failedTitle", { ok: run.ok, failed: run.failed.length }), text: tr(lang, "notify.backups.failedText", { names, minutes }), severity: "warn", route: "#/settings/backups", tag: "backups", code: "backups" }
+    : { title: tr(lang, "notify.backups.title", { ok: run.ok }), text: tr(lang, "notify.backups.text", { minutes }), severity: "ok", route: "#/settings/backups", tag: "backups", code: "backups" };
 }
 
 /** What an agent asks to do, as the rest of the sentence "It wants to …" */
