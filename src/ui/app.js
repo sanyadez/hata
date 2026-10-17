@@ -324,6 +324,7 @@ function parseRoute() {
   if (parts[0] === "import" && isAdmin()) return { view: "import" };
   if (parts[0] === "terminal" && isAdmin()) return { view: "terminal" };
   if (parts[0] === "assistant" && isAdmin()) return { view: "assistant" };
+  if (parts[0] === "proxmox" && parts[1] && isAdmin()) return { view: "proxmox", id: parts[1], tab: PVE_TABS.includes(parts[2]) ? parts[2] : "overview" };
   if (parts[0] === "machines" && isAdmin()) return parts[1] ? { view: "machine", id: parts[1], tab: MACHINE_TABS.includes(parts[2]) ? parts[2] : "overview" } : { view: "machines" };
   if (parts[0] === "apps" && parts[1]) return { view: "app", name: parts[1], tab: isAdmin() && ["settings", "logs", "compose", "backups", "terminal"].includes(parts[2]) ? parts[2] : "overview" };
   if (parts[0] === "settings") return { view: "settings", section: sections().some((item) => item.id === parts[1]) ? parts[1] : "account" };
@@ -371,7 +372,8 @@ function onRoute() {
   if (state.route.view === "import") void loadImport();
   if (state.route.view === "welcome") void loadWelcome();
   if (state.route.view === "app") void loadApp();
-  if (state.route.view === "machines" || state.route.view === "machine") void loadMachines();
+  if (state.route.view === "machines" || state.route.view === "machine" || state.route.view === "proxmox") void loadMachines();
+  if (state.route.view === "machines") void loadPve();
   window.scrollTo(0, 0);
 }
 window.addEventListener("hashchange", onRoute);
@@ -421,6 +423,8 @@ function startEvents() {
       else if (state.route.view === "home") void refresh();
     } else if (event.type === "machine") {
       machineEvent(event);
+    } else if (event.type === "proxmox") {
+      pveEvent(event);
     } else if (event.type === "approvals") {
       void loadApprovals();
     } else if (event.type === "tailscale") {
@@ -804,7 +808,7 @@ async function loadMine() {
   state.favorites = mine.favorites;
 }
 
-const navCurrent = () => (state.route.view === "machine" ? "machines" : state.route.view === "backups" || state.route.view === "users" ? "settings" : state.route.view === "app" ? "home" : state.route.view === "import" ? "store" : state.route.view === "trash" || state.route.view === "myhata" ? "files" : state.route.view);
+const navCurrent = () => (state.route.view === "machine" || state.route.view === "proxmox" ? "machines" : state.route.view === "backups" || state.route.view === "users" ? "settings" : state.route.view === "app" ? "home" : state.route.view === "import" ? "store" : state.route.view === "trash" || state.route.view === "myhata" ? "files" : state.route.view);
 const navItems = () => NAV.filter((item) => (!item.admin || isAdmin()) && (!item.files || mayFiles()) && (!item.assistant || !!(assistantUi.config?.ready ?? state.overview?.assistant)) && (item.guest !== false || state.user.role !== "guest"));
 
 function navLinks(className, items = navItems()) {
@@ -1008,6 +1012,7 @@ function render() {
   if (view === "assistant") return renderAssistant();
   if (view === "machines") return renderMachines();
   if (view === "machine") return renderMachine();
+  if (view === "proxmox") return renderPve();
   if (view === "app") return renderApp();
   renderHome();
 }
@@ -1820,7 +1825,7 @@ function dragEnd(drop) {
   drag.kind.drop(drag, target);
 }
 
-const ATTENTION_ICONS = { update: "up", docker: "box", restarting: "refresh", partial: "alert", disk: "disk", smart: "disk", memory: "memory", temperature: "temp", internet: "network", network: "network", array: "disk", share: "share", netplace: "globe", machine: "server", absent: "disk" };
+const ATTENTION_ICONS = { update: "up", docker: "box", restarting: "refresh", partial: "alert", disk: "disk", smart: "disk", memory: "memory", temperature: "temp", internet: "network", network: "network", array: "disk", share: "share", netplace: "globe", machine: "server", pve: "server", absent: "disk" };
 
 function attentionItem(item) {
   const detail = { ...item.detail, free: item.detail.free == null ? "" : bytes(item.detail.free), trash: item.detail.trash == null ? "" : bytes(item.detail.trash), size: item.detail.size == null ? "" : bytes(item.detail.size) };
@@ -1840,6 +1845,7 @@ function attentionItem(item) {
     item.code.startsWith("share.") && open("#/settings/shares"),
     item.code === "netplace.down" && open("#/settings/storage"),
     item.code === "machine.away" && open(`#/machines/${item.detail.id}`),
+    item.code.startsWith("pve.") && state.route.view !== "proxmox" && open(`#/proxmox/${item.detail.host}${item.code === "pve.guestDown" ? "/guests" : item.code === "pve.backupFailed" ? "/tasks" : ""}`),
     (item.code === "machine.restarting" || item.code === "machine.partial") && open(`#/machines/${item.detail.id}/apps`),
     item.app && open(`#/apps/${item.app}${item.code === "restarting" || item.code === "partial" ? "/logs" : ""}`, t(item.code === "restarting" || item.code === "partial" ? "app.logs" : "common.open")),
     (item.code === "disk.new" || item.code === "disk.usb") && isAdmin() && button(t("mounting.ignore"), { class: "small quiet", onclick: () => void api("POST", "/api/disks/ignore", { id: item.detail.id }).then(refresh, (e) => toast(errorText(e), "error")) }),
@@ -2489,10 +2495,12 @@ const machineOs = (m) => [m.info?.os, m.info?.arch].filter(Boolean).join(" · ")
 
 function renderMachines() {
   shell(
-    h("div", { class: "page-head" }, h("div", null, h("h1", null, t("nav.machines")), h("p", { class: "meta", id: "machines-meta" }, t("machines.lead"))), h("div", { class: "actions" }, button(t("machines.add"), { class: "primary", onclick: addMachineDialog }, "plus"))),
+    h("div", { class: "page-head" }, h("div", null, h("h1", null, t("nav.machines")), h("p", { class: "meta", id: "machines-meta" }, t("machines.lead"))), h("div", { class: "actions" }, button(t("pve.add"), { onclick: () => pveDialog() }, "plus"), button(t("machines.add"), { class: "primary", onclick: addMachineDialog }, "plus"))),
     h("div", { id: "machines-body" }),
+    h("div", { id: "pve-list", class: "stack" }),
   );
   if (machinesUi.list) renderMachinesBody();
+  if (pveUi.list) paintPveList();
 }
 
 function renderMachinesBody() {
@@ -2524,11 +2532,13 @@ function paintMachineCard(m) {
     card,
     h("div", { class: "machine-title" }, icon("server"), h("strong", { class: "clip grow" }, m.name), machineChip(m)),
     h("p", { class: "muted small clip" }, machineOs(m) || "—"),
+    m.pve && h("p", { class: "muted small clip" }, t("pve.guestOn", { guest: guestKind(m.pve), host: m.pve.hostName })),
     m.online && s
       ? [meter(t("sys.cpu"), s.cpu, t("sys.cores", { n: s.cores })), meter(t("sys.memory"), mem, bytes(s.memory.total)), disk && meter(t("sys.disk"), diskPercent, t("sys.free", { free: bytes(disk.total - disk.used), total: bytes(disk.total) }))]
       : h("p", { class: "muted small" }, m.online ? t("machines.waiting") : t("machines.seen", { ago: ago(m.seen) })),
     m.outdated && m.online && h("p", { class: "small accent-text" }, t("machines.outdated", { version: m.info.version })),
-    !m.online && m.info?.macs?.length > 0 && h("div", { class: "row-actions" }, button(t("machines.wake"), { class: "small", onclick: (e) => (e.preventDefault(), e.stopPropagation(), wakeMachine(m, e.currentTarget)) }, "play")),
+    !m.online && m.pve?.power && m.pve.status !== "running" && h("div", { class: "row-actions" }, button(t("pve.startHere", { host: m.pve.hostName }), { class: "small", onclick: (e) => (e.preventDefault(), e.stopPropagation(), startGuestOf(m, e.currentTarget)) }, "play")),
+    !m.online && !m.pve && m.info?.macs?.length > 0 && h("div", { class: "row-actions" }, button(t("machines.wake"), { class: "small", onclick: (e) => (e.preventDefault(), e.stopPropagation(), wakeMachine(m, e.currentTarget)) }, "play")),
   );
 }
 
@@ -2608,6 +2618,591 @@ async function addMachineDialog() {
   dialog.addEventListener("close", stop);
 }
 
+// --- Proxmox servers ---
+// Looked after through their API with a token: the list on the Machines page, a page of each
+
+const PVE_TABS = ["overview", "guests", "tasks"];
+const pveUi = { list: null, host: null, timer: null };
+
+async function loadPve() {
+  try {
+    if (state.route.view === "proxmox") {
+      pveUi.host = await api("GET", `/api/proxmox/${state.route.id}`);
+      return renderPveBody();
+    }
+    pveUi.list = await api("GET", "/api/proxmox");
+  } catch (e) {
+    if (state.route.view === "proxmox") {
+      pveUi.host = null;
+      const box = document.getElementById("pve-body");
+      if (box) put(box, h("nav", { class: "crumbs" }, h("a", { href: "#/machines" }, t("nav.machines"))), h("p", { class: "card pad muted" }, errorText(e)));
+      return;
+    }
+    return toast(errorText(e), "error");
+  }
+  if (state.route.view === "machines") paintPveList();
+}
+
+/** A Proxmox server said something new: the page that shows it asks again, at most every few seconds */
+function pveEvent(event) {
+  if (state.route.view === "proxmox" && state.route.id !== event.id) return;
+  if (state.route.view !== "proxmox" && state.route.view !== "machines") return;
+  clearTimeout(pveUi.timer);
+  pveUi.timer = setTimeout(() => {
+    void loadPve();
+    if (state.route.view === "machines") void loadMachines();
+  }, 800);
+}
+
+const pveChip = (x) => h("span", { class: "state " + (x.online ? "running" : "") }, x.online ? t("pve.online") : t("pve.offline"));
+const guestChip = (g) => h("span", { class: "state " + (g.status === "running" ? "running" : g.status === "paused" ? "restarting" : "") }, t("pve.status." + (["running", "stopped", "paused"].includes(g.status) ? g.status : "unknown")));
+const guestKind = (g) => (g.type === "lxc" ? "CT" : "VM") + " " + g.vmid;
+/** Why a server does not answer, in the words of its error */
+const pveError = (x) => (has("error." + x.error.code) ? t("error." + x.error.code, { name: x.name, message: "" }).replace(/[:\s]+$/, "") : x.error.code);
+const pct = (used, total) => (total ? Math.round((used / total) * 100) : null);
+
+function meterRow(label, percent, hint) {
+  const fill = h("i", { class: level(percent ?? 0) });
+  fill.style.width = (percent ?? 0) + "%";
+  return h("div", { class: "machine-meter" }, h("div", { class: "kv" }, h("span", { class: "muted small" }, label), h("span", { class: "small" }, percent == null ? "—" : `${percent}%`, hint && h("span", { class: "muted" }, " · " + hint))), h("div", { class: "bar" }, fill));
+}
+
+/** The Proxmox servers under the machines */
+function paintPveList() {
+  const box = document.getElementById("pve-list");
+  if (!box) return;
+  const list = pveUi.list?.hosts ?? [];
+  if (!list.length) return box.replaceChildren();
+  box.replaceChildren(
+    h("div", { class: "section-head" }, h("h2", null, t("pve.title"))),
+    h(
+      "div",
+      { class: "cards" },
+      list.map((x) => {
+        const node = x.nodes[0];
+        return h(
+          "a",
+          { class: "card pad machine-card", href: `#/proxmox/${x.id}`, menu: (at) => pveMenu(x, at) },
+          h("div", { class: "machine-title" }, icon("server"), h("strong", { class: "clip grow" }, x.name), pveChip(x)),
+          h("p", { class: "muted small clip" }, ["Proxmox VE " + (x.version || ""), x.nodes.length > 1 ? t("pve.nodes", { n: x.nodes.length }) : node?.name].filter(Boolean).join(" · ")),
+          x.online
+            ? [
+                h("p", { class: "small" }, t("pve.guestsRunning", { n: x.counts.running, total: x.counts.guests })),
+                ...x.nodes.slice(0, 3).flatMap((n) => [meterRow(x.nodes.length > 1 ? `${n.name} · ${t("sys.cpu")}` : t("sys.cpu"), n.online ? Math.round(n.cpu * 100) : null, t("sys.cores", { n: n.cores })), meterRow(t("sys.memory"), n.online ? pct(n.memory.used, n.memory.total) : null, bytes(n.memory.total))]),
+              ]
+            : h("p", { class: "muted small" }, x.error ? pveError(x) : t("pve.asking")),
+        );
+      }),
+    ),
+  );
+}
+
+/** Adding a server, or changing its token: the certificate is shown to be confirmed the first time */
+function pveDialog(old = null) {
+  const name = h("input", { value: old?.name ?? "", placeholder: t("pve.namePlaceholder"), maxLength: 40 });
+  const url = h("input", { value: old?.url ?? "", placeholder: "192.168.1.10", required: true, autocapitalize: "none", spellcheck: false, class: "mono" });
+  const token = h("input", { value: old?.token ?? "", placeholder: "hata@pve!panel", required: true, autocapitalize: "none", spellcheck: false, class: "mono" });
+  const secret = h("input", { type: "password", placeholder: old ? t("pve.secretKeep") : "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx", autocomplete: "off", class: "mono", required: !old });
+  const cert = h("div");
+  const error = h("p", { class: "error", role: "alert" });
+  let fingerprint = null;
+  let dialog;
+  const send = async (e) => {
+    e.preventDefault();
+    error.textContent = "";
+    const submit = dialog.querySelector("button[type=submit]");
+    submit.disabled = true;
+    const data = { name: name.value, url: url.value, token: token.value, ...(secret.value ? { secret: secret.value } : {}), ...(fingerprint ? { fingerprint } : {}) };
+    try {
+      const saved = old ? await api("PATCH", `/api/proxmox/${old.id}`, data) : await api("POST", "/api/proxmox", data);
+      dialog.close();
+      toast(t(old ? "pve.changed" : "pve.added", { name: saved.name }));
+      if (old) void loadPve();
+      else go(`#/proxmox/${saved.id}`);
+    } catch (err) {
+      if (err.code === "pve.confirmCert") {
+        // the server's own certificate: the person compares it with what Proxmox shows, then it is kept
+        put(
+          cert,
+          h(
+            "div",
+            { class: "card pad stack-s warn-box" },
+            h("strong", null, t("pve.certTitle")),
+            h("p", { class: "small" }, t("pve.certLead", { subject: err.detail.subject || "—", issuer: err.detail.issuer || "—" })),
+            h("p", { class: "mono small wrap" }, err.detail.fingerprint),
+            h("p", { class: "muted small" }, t("pve.certWhere")),
+          ),
+        );
+        fingerprint = err.detail.fingerprint;
+        submit.querySelector("span").textContent = t("pve.certTrust");
+      } else error.textContent = errorText(err);
+    }
+    submit.disabled = false;
+  };
+  dialog = openDialog(
+    "wide",
+    h(
+      "form",
+      { class: "stack", onsubmit: send },
+      h("header", null, h("h2", { class: "grow" }, old ? t("pve.changeTitle", { name: old.name }) : t("pve.addTitle")), closeX(() => dialog)),
+      !old && h("p", null, t("pve.addLead")),
+      field(t("pve.url"), url, t("pve.urlHint")),
+      field(t("pve.token"), token, t("pve.tokenHint")),
+      field(t("pve.secret"), secret, old ? t("pve.secretKeepHint") : null),
+      field(t("pve.name"), name, t("pve.nameHint")),
+      !old &&
+        h(
+          "details",
+          { class: "small" },
+          h("summary", null, t("pve.howTitle")),
+          h("ol", { class: "stack-s" }, ["1", "2", "3", "4"].map((n) => h("li", null, t("pve.how." + n)))),
+          h("p", { class: "muted" }, t("pve.howRights")),
+        ),
+      cert,
+      error,
+      h("footer", null, closeButton(() => dialog, t("common.cancel")), h("button", { type: "submit", class: "btn primary" }, h("span", null, old ? t("pve.save") : t("pve.add")))),
+    ),
+  );
+}
+
+function pveMenu(x, at = null) {
+  let dialog;
+  const item = (label, iconName, action, cls = "") => h("button", { type: "button", class: "menu-item " + cls, onclick: () => (dialog.close(), action()) }, icon(iconName), label);
+  dialog = openDialog(
+    at ? "menu dropdown" : "menu",
+    h("header", null, h("span", { class: "machine-icon" }, icon("server")), h("div", null, h("h2", null, x.name), pveChip(x))),
+    item(t("pve.refresh"), "refresh", () => refreshPve(x)),
+    item(t("pve.openWeb"), "external", () => window.open(x.url, "_blank", "noopener")),
+    item(t("pve.change"), "edit", () => pveDialog(x)),
+    item(t("pve.remove"), "trash", () => removePveDialog(x), "danger"),
+  );
+  if (at) placeAt(dialog, at);
+}
+
+async function refreshPve(x, el) {
+  if (el) el.disabled = true;
+  try {
+    const fresh = await api("POST", `/api/proxmox/${x.id}/refresh`, {});
+    if (state.route.view === "proxmox") (pveUi.host = fresh), renderPveBody();
+    else void loadPve();
+  } catch (e) {
+    toast(errorText(e), "error");
+  }
+  if (el) el.disabled = false;
+}
+
+function removePveDialog(x) {
+  let dialog;
+  dialog = openDialog(
+    "confirm",
+    h("h2", { class: "wrap" }, t("pve.removeTitle", { name: x.name })),
+    h("p", { class: "muted" }, t("pve.removeLead")),
+    h(
+      "footer",
+      null,
+      closeButton(() => dialog, t("common.cancel")),
+      button(t("pve.remove"), {
+        class: "danger",
+        onclick: async () => {
+          try {
+            await api("DELETE", `/api/proxmox/${x.id}`);
+            dialog.close();
+            go("#/machines");
+          } catch (e) {
+            toast(errorText(e), "error");
+          }
+        },
+      }, "trash"),
+    ),
+  );
+}
+
+// --- One Proxmox server ---
+
+function renderPve() {
+  if (pveUi.host?.id !== state.route.id) pveUi.host = null;
+  shell(h("div", { id: "pve-body" }));
+  if (pveUi.host) renderPveBody();
+  void loadPve();
+}
+
+function renderPveBody() {
+  const box = document.getElementById("pve-body");
+  const x = pveUi.host;
+  if (!box || !x) return;
+  const tab = (id, iconName) => h("a", { class: "tab" + (state.route.tab === id ? " active" : ""), href: `#/proxmox/${x.id}${id === "overview" ? "" : "/" + id}` }, icon(iconName), t("pve.tab." + id));
+  const body = state.route.tab === "guests" ? pveGuests(x) : state.route.tab === "tasks" ? pveTasks(x) : pveOverview(x);
+  put(
+    box,
+    h("nav", { class: "crumbs" }, h("a", { href: "#/machines" }, t("nav.machines")), icon("chevron"), h("span", null, x.name)),
+    h(
+      "div",
+      { class: "app-head", menu: (at) => pveMenu(x, at) },
+      h("span", { class: "machine-icon" }, icon("server")),
+      h("div", { class: "grow" }, h("div", { class: "app-title" }, h("h1", null, x.name), pveChip(x)), h("p", { class: "meta" }, ["Proxmox VE " + (x.version || ""), x.url, x.at ? t("pve.askedAgo", { ago: ago(x.at) }) : null].filter(Boolean).flatMap((part, i) => (i ? [h("span", { class: "dot-sep" }, "·"), part] : [part])))),
+      h("div", { class: "actions" }, button(t("pve.refresh"), { onclick: (e) => refreshPve(x, e.currentTarget) }, "refresh"), h("button", { type: "button", class: "btn square", "aria-label": t("app.more"), onclick: () => pveMenu(x) }, icon("more"))),
+    ),
+    h("div", { class: "tabs" }, tab("overview", "grid"), tab("guests", "box"), tab("tasks", "logs")),
+    x.error && h("p", { class: "card pad warn-box" }, pveError(x), " ", t("pve.since", { ago: ago(x.error.since) })),
+    body,
+  );
+}
+
+function pveOverview(x) {
+  const storages = x.storages;
+  return h(
+    "div",
+    { class: "stack" },
+    x.trouble.length > 0 && h("section", { class: "card pad" }, x.trouble.map(attentionItem)),
+    h("div", { class: "section-head" }, h("h2", null, t("pve.nodesTitle"))),
+    h(
+      "div",
+      { class: "cards" },
+      x.nodes.map((n) =>
+        h(
+          "section",
+          { class: "card pad machine-card" },
+          h("div", { class: "machine-title" }, icon("server"), h("strong", { class: "clip grow" }, n.name), pveChip(n)),
+          h("p", { class: "muted small" }, n.online ? t("pve.up", { time: duration(n.uptime) }) : "—"),
+          meterRow(t("sys.cpu"), n.online ? Math.round(n.cpu * 100) : null, t("sys.cores", { n: n.cores })),
+          meterRow(t("sys.memory"), n.online ? pct(n.memory.used, n.memory.total) : null, bytes(n.memory.total)),
+          meterRow(t("pve.rootDisk"), n.online ? pct(n.disk.used, n.disk.total) : null, t("sys.free", { free: bytes(n.disk.total - n.disk.used), total: bytes(n.disk.total) })),
+        ),
+      ),
+    ),
+    h("div", { class: "section-head" }, h("h2", null, t("pve.storagesTitle"))),
+    h(
+      "div",
+      { class: "table-wrap card" },
+      h(
+        "table",
+        null,
+        h("thead", null, h("tr", null, h("th", null, t("pve.col.storage")), h("th", null, t("pve.col.type")), h("th", null, t("pve.col.content")), h("th", null, t("pve.col.use")))),
+        h(
+          "tbody",
+          null,
+          storages.map((s) => {
+            const p = pct(s.used, s.total);
+            const fill = h("i", { class: level(p ?? 0) });
+            fill.style.width = (p ?? 0) + "%";
+            return h(
+              "tr",
+              null,
+              h("td", null, h("div", { class: "strong" }, s.name), x.nodes.length > 1 && h("div", { class: "muted small" }, s.node)),
+              h("td", { class: "small" }, s.type, s.shared && h("span", { class: "muted" }, " · " + t("pve.shared"))),
+              h("td", { class: "small muted" }, s.content.map((c) => t("pve.content." + c)).join(", ")),
+              h("td", null, s.active ? [h("div", { class: "small" }, `${p ?? 0}% · ${t("sys.free", { free: bytes(s.total - s.used), total: bytes(s.total) })}`), h("div", { class: "bar" }, fill)] : h("span", { class: "chip warn" }, t("pve.inactive"))),
+            );
+          }),
+        ),
+      ),
+    ),
+    x.disks.length > 0 && h("div", { class: "section-head" }, h("h2", null, t("pve.disksTitle"))),
+    x.disks.length > 0 &&
+      h(
+        "div",
+        { class: "table-wrap card" },
+        h("table", null, h("thead", null, h("tr", null, h("th", null, t("pve.col.disk")), h("th", null, t("pve.col.node")), h("th", null, t("pve.col.health")))), h("tbody", null, x.disks.map((d) => h("tr", null, h("td", null, h("div", null, d.model || d.device), h("div", { class: "muted small mono" }, d.device)), h("td", { class: "small" }, d.node), h("td", null, h("span", { class: "chip " + (/^(PASSED|OK)$/i.test(d.health) ? "ok" : /^UNKNOWN$/i.test(d.health) || !d.health ? "" : "danger") }, d.health || "—")))))),
+      ),
+    h("div", { class: "section-head" }, h("h2", null, t("pve.jobsTitle"))),
+    h("div", { id: "pve-jobs" }, h("p", { class: "muted" }, t("machines.loading"))),
+    x.unprotected?.length > 0 && h("p", { class: "muted small" }, t("pve.unprotected", { guests: x.unprotected.map((g) => `${g.name || g.vmid} (${g.vmid})`).join(", ") })),
+    loadPveJobs(x),
+  );
+}
+
+/** The backup jobs come with a request of their own, after the page is drawn */
+function loadPveJobs(x) {
+  queueMicrotask(async () => {
+    const box = document.getElementById("pve-jobs");
+    if (!box) return;
+    try {
+      const { jobs } = await api("GET", `/api/proxmox/${x.id}/jobs`);
+      const who = (j) => (j.guests === "all" ? t("pve.jobAll") : j.guests.startsWith("pool:") ? t("pve.jobPool", { pool: j.guests.slice(5) }) : j.guests.split(",").map((id) => x.guests.find((g) => String(g.vmid) === id)?.name ?? id).join(", "));
+      box.replaceChildren(
+        jobs.length
+          ? h("div", { class: "table-wrap card" }, h("table", null, h("thead", null, h("tr", null, h("th", null, t("pve.col.schedule")), h("th", null, t("pve.col.guests")), h("th", null, t("pve.col.storage")), h("th", null, t("pve.col.next")))), h("tbody", null, jobs.map((j) => h("tr", null, h("td", null, h("div", { class: "mono" }, j.schedule), !j.enabled && h("span", { class: "chip" }, t("pve.jobOff")), j.comment && h("div", { class: "muted small" }, j.comment)), h("td", { class: "small" }, who(j), j.exclude && h("div", { class: "muted small" }, t("pve.jobExclude", { list: j.exclude }))), h("td", { class: "small" }, j.storage), h("td", { class: "small" }, j.enabled && j.next ? dateTime(j.next) : "—"))))))
+          : h("p", { class: "card pad muted" }, t("pve.noJobs")),
+      );
+    } catch (e) {
+      box.replaceChildren(h("p", { class: "card pad muted" }, errorText(e)));
+    }
+  });
+  return null;
+}
+
+function pveGuests(x) {
+  const guests = x.guests.filter((g) => !g.template);
+  const templates = x.guests.filter((g) => g.template);
+  const small = (label, iconName, onclick, off) => h("button", { type: "button", class: "icon-btn", title: label, "aria-label": label, disabled: off, onclick: (e) => (e.stopPropagation(), onclick(e.currentTarget)) }, icon(iconName));
+  const machineOf = (g) => machinesUi.list?.machines.find((m) => m.pve?.host === x.id && m.pve?.id === g.id);
+  const row = (g) => {
+    const up = g.status === "running";
+    const m = machineOf(g);
+    return h(
+      "tr",
+      { class: "clickable", onclick: () => pveGuestDialog(x, g) },
+      h("td", { class: "mono" }, g.vmid),
+      h("td", null, h("div", { class: "strong" }, g.name), h("div", { class: "muted small" }, [g.type === "lxc" ? t("pve.container") : t("pve.vm"), x.nodes.length > 1 ? g.node : null, g.config?.addresses[0], g.lock ? t("pve.locked", { lock: g.lock }) : null].filter(Boolean).join(" · ")), m && h("a", { class: "link small", href: `#/machines/${m.id}`, onclick: (e) => e.stopPropagation() }, icon("server"), " ", t("pve.isMachine", { name: m.name }))),
+      h("td", null, guestChip(g)),
+      h("td", { class: "small" }, up ? `${Math.round(g.cpu * 100)}% · ${bytes(g.memory.used)} / ${bytes(g.memory.total)}` : `${t("sys.cores", { n: g.cores })} · ${bytes(g.memory.total)}`),
+      h("td", { class: "small muted" }, up ? duration(g.uptime) : "—"),
+      h(
+        "td",
+        null,
+        h(
+          "div",
+          { class: "row-actions" },
+          g.may.power && !up && small(t("pve.start"), "play", (el) => pvePower(x, g, g.status === "paused" ? "resume" : "start", el)),
+          g.may.power && up && small(t("pve.shutdown"), "stop", () => pvePowerDialog(x, g, "shutdown")),
+          g.may.power && up && small(t("pve.reboot"), "refresh", () => pvePowerDialog(x, g, "reboot")),
+          small(t("app.more"), "more", () => pveGuestDialog(x, g)),
+        ),
+      ),
+    );
+  };
+  return h(
+    "div",
+    { class: "stack" },
+    guests.length
+      ? h("div", { class: "table-wrap card" }, h("table", { class: "pve-guests" }, h("thead", null, h("tr", null, h("th", null, "ID"), h("th", null, t("pve.col.name")), h("th", null, t("app.col.state")), h("th", null, t("pve.col.load")), h("th", null, t("pve.col.uptime")), h("th"))), h("tbody", null, guests.map(row))))
+      : h("p", { class: "card pad muted" }, t("pve.noGuests")),
+    templates.length > 0 && h("p", { class: "muted small" }, t("pve.templates", { list: templates.map((g) => `${g.name} (${g.vmid})`).join(", ") })),
+  );
+}
+
+async function pvePower(x, g, action, el) {
+  if (el) el.disabled = true;
+  try {
+    const r = await api("POST", `/api/proxmox/${x.id}/guests/${g.id}/power`, { action });
+    toast(t(r.done ? "pve.done." + action : "pve.going", { name: g.name }));
+  } catch (e) {
+    toast(errorText(e), "error");
+  }
+  if (el) el.disabled = false;
+  void loadPve();
+}
+
+/** Shutting down, restarting or pulling the plug: asked first, the hard stop said for what it is */
+function pvePowerDialog(x, g, action, then) {
+  let dialog;
+  dialog = openDialog(
+    "confirm",
+    h("h2", { class: "wrap" }, t(`pve.${action}Title`, { name: g.name })),
+    h("p", { class: "muted" }, t(`pve.${action}Lead`)),
+    h(
+      "footer",
+      null,
+      closeButton(() => dialog, t("common.cancel")),
+      button(t("pve." + action), {
+        class: action === "stop" ? "danger" : "primary",
+        onclick: async (e) => {
+          e.currentTarget.disabled = true;
+          dialog.close();
+          await pvePower(x, g, action);
+          then?.();
+        },
+      }, action === "reboot" ? "refresh" : "stop"),
+    ),
+  );
+}
+
+/** One guest: what it is, its power, its snapshots and backups */
+function pveGuestDialog(x, g) {
+  const up = g.status === "running";
+  const c = g.config;
+  const row = (label, value, mono) => value && h("div", { class: "kv" }, h("span", { class: "muted" }, label), h("span", { class: mono ? "mono" : "" }, value));
+  const m = machinesUi.list?.machines.find((mm) => mm.pve?.host === x.id && mm.pve?.id === g.id);
+  const snaps = h("div", { class: "stack-s" }, h("p", { class: "muted small" }, t("machines.loading")));
+  const backs = h("div", { class: "stack-s" }, h("p", { class: "muted small" }, t("machines.loading")));
+  let dialog;
+  const again = () => (dialog.close(), pveGuestDialog(x, pveUi.host?.guests.find((y) => y.id === g.id) ?? g));
+  const act = (label, iconName, action, cls = "") => g.may.power && button(label, { class: "small " + cls, onclick: async (e) => (action === "start" || action === "resume" ? (await pvePower(x, g, action, e.currentTarget), again()) : (dialog.close(), pvePowerDialog(x, g, action))) }, iconName);
+  dialog = openDialog(
+    "wide",
+    h("header", null, h("span", { class: "machine-icon" }, icon(g.type === "lxc" ? "box" : "server")), h("div", { class: "grow" }, h("h2", null, g.name), h("p", { class: "muted small" }, guestKind(g), " · ", guestChip(g))), closeX(() => dialog)),
+    h(
+      "div",
+      { class: "row-actions" },
+      !up && act(t("pve.start"), "play", g.status === "paused" ? "resume" : "start", "primary"),
+      up && act(t("pve.shutdown"), "stop", "shutdown"),
+      up && act(t("pve.reboot"), "refresh", "reboot"),
+      up && g.type === "qemu" && act(t("pve.suspend"), "clock", "suspend"),
+      up && act(t("pve.stop"), "x", "stop", "danger"),
+      !g.may.power && h("span", { class: "muted small" }, t("pve.noPower")),
+    ),
+    h(
+      "section",
+      { class: "stack-s" },
+      row(t("pve.kind"), g.type === "lxc" ? t("pve.container") + (c?.unprivileged ? " · " + t("pve.unprivileged") : "") : t("pve.vm")),
+      row(t("pve.col.node"), g.node),
+      row(t("machines.os"), c?.os),
+      row(t("machines.address"), c?.addresses.join(", "), true),
+      row(t("pve.onboot"), c ? t(c.onboot ? "pve.yes" : "pve.no") : ""),
+      row(t("pve.resources"), `${t("sys.cores", { n: g.cores })} · ${bytes(g.memory.total)}${g.disk.total ? " · " + bytes(g.disk.total) : ""}`),
+      row(t("pve.pool"), g.pool),
+      row(t("pve.tags"), g.tags.join(", ")),
+      m && h("div", { class: "kv" }, h("span", { class: "muted" }, t("nav.machines")), h("a", { class: "link", href: `#/machines/${m.id}`, onclick: () => dialog.close() }, m.name)),
+      c?.description && h("p", { class: "muted small wrap" }, c.description),
+    ),
+    h("div", { class: "section-head" }, h("h3", null, t("pve.snapshots")), g.may.snapshot && button(t("pve.snapshotTake"), { class: "small", onclick: () => (dialog.close(), pveSnapshotDialog(x, g)) }, "plus")),
+    snaps,
+    h("div", { class: "section-head" }, h("h3", null, t("pve.backups")), g.may.backup && x.storages.some((st) => st.node === g.node && st.active && st.backup) && button(t("pve.backupTake"), { class: "small", onclick: (e) => pveBackupNow(x, g, e.currentTarget) }, "plus")),
+    backs,
+    h("footer", null, closeButton(() => dialog)),
+  );
+  void (async () => {
+    try {
+      const { snapshots } = await api("GET", `/api/proxmox/${x.id}/guests/${g.id}/snapshots`);
+      put(
+        snaps,
+        snapshots.length
+          ? snapshots.map((s) =>
+              h(
+                "div",
+                { class: "pve-row" },
+                h("div", { class: "grow" }, h("div", null, h("span", { class: "mono strong" }, s.name), s.memory && h("span", { class: "chip" }, t("pve.withMemory"))), h("div", { class: "muted small" }, [s.at ? dateTime(s.at) : "", s.description].filter(Boolean).join(" · "))),
+                h("div", { class: "row-actions" }, g.may.rollback && button(t("pve.rollback"), { class: "small", onclick: () => (dialog.close(), pveSnapshotAct(x, g, s, "rollback")) }, "undo"), g.may.snapshot && button("", { class: "small ghost", title: t("pve.snapshotRemove"), "aria-label": t("pve.snapshotRemove"), onclick: () => (dialog.close(), pveSnapshotAct(x, g, s, "delete")) }, "trash")),
+              ),
+            )
+          : h("p", { class: "muted small" }, t("pve.noSnapshots")),
+      );
+    } catch (e) {
+      snaps.replaceChildren(h("p", { class: "muted small" }, errorText(e)));
+    }
+    try {
+      const r = await api("GET", `/api/proxmox/${x.id}/guests/${g.id}/backups`);
+      put(
+        backs,
+        r.backups.length ? r.backups.slice(0, 10).map((b) => h("div", { class: "pve-row" }, h("div", { class: "grow" }, h("div", null, dateTime(b.at), b.protected && h("span", { class: "chip" }, t("pve.protected"))), b.notes && h("div", { class: "muted small" }, b.notes)), h("span", { class: "muted small" }, `${b.storage} · ${bytes(b.size)}`))) : h("p", { class: "muted small" }, r.storages.length ? t("pve.noBackups") : t("pve.noBackupStorages")),
+        r.backups.length > 10 && h("p", { class: "muted small" }, t("pve.moreBackups", { n: r.backups.length - 10 })),
+        r.unreachable.length > 0 && h("p", { class: "muted small" }, t("pve.storagesUnreachable", { list: r.unreachable.join(", ") })),
+      );
+    } catch (e) {
+      backs.replaceChildren(h("p", { class: "muted small" }, errorText(e)));
+    }
+  })();
+}
+
+function pveSnapshotDialog(x, g) {
+  const name = h("input", { placeholder: t("pve.snapshotNameAuto"), pattern: "[A-Za-z][A-Za-z0-9_\\-]{1,39}", maxLength: 40, class: "mono" });
+  const about = h("input", { maxLength: 500 });
+  let dialog;
+  dialog = openDialog(
+    "",
+    h(
+      "form",
+      {
+        class: "stack",
+        onsubmit: async (e) => {
+          e.preventDefault();
+          const submit = dialog.querySelector("button[type=submit]");
+          submit.disabled = true;
+          try {
+            const r = await api("POST", `/api/proxmox/${x.id}/guests/${g.id}/snapshots`, { name: name.value, description: about.value });
+            dialog.close();
+            toast(t(r.done ? "pve.snapshotDone" : "pve.going", { name: g.name }));
+            pveGuestDialog(x, g);
+          } catch (err) {
+            toast(errorText(err), "error");
+            submit.disabled = false;
+          }
+        },
+      },
+      h("header", null, h("h2", { class: "grow" }, t("pve.snapshotTitle", { name: g.name })), closeX(() => dialog)),
+      h("p", { class: "muted small" }, t("pve.snapshotLead")),
+      field(t("pve.snapshotName"), name, t("pve.snapshotNameHint")),
+      field(t("pve.snapshotAbout"), about),
+      h("footer", null, closeButton(() => dialog, t("common.cancel")), h("button", { type: "submit", class: "btn primary" }, icon("plus"), h("span", null, t("pve.snapshotTake")))),
+    ),
+  );
+}
+
+function pveSnapshotAct(x, g, s, action) {
+  let dialog;
+  dialog = openDialog(
+    "confirm",
+    h("h2", { class: "wrap" }, t(action === "rollback" ? "pve.rollbackTitle" : "pve.snapshotRemoveTitle", { name: g.name, snapshot: s.name })),
+    h("p", { class: "muted" }, t(action === "rollback" ? "pve.rollbackLead" : "pve.snapshotRemoveLead", { snapshot: s.name })),
+    h(
+      "footer",
+      null,
+      closeButton(() => (dialog.close(), pveGuestDialog(x, g), dialog), t("common.cancel")),
+      button(t(action === "rollback" ? "pve.rollback" : "pve.snapshotRemove"), {
+        class: "danger",
+        onclick: async (e) => {
+          e.currentTarget.disabled = true;
+          try {
+            const r = await api(action === "rollback" ? "POST" : "DELETE", `/api/proxmox/${x.id}/guests/${g.id}/snapshots/${encodeURIComponent(s.name)}`, action === "rollback" ? {} : undefined);
+            toast(t(r.done ? (action === "rollback" ? "pve.rollbackDone" : "pve.snapshotRemoved") : "pve.going", { name: g.name, snapshot: s.name }));
+          } catch (err) {
+            toast(errorText(err), "error");
+          }
+          dialog.close();
+          pveGuestDialog(x, g);
+        },
+      }, action === "rollback" ? "undo" : "trash"),
+    ),
+  );
+}
+
+async function pveBackupNow(x, g, el) {
+  el.disabled = true;
+  try {
+    await api("POST", `/api/proxmox/${x.id}/guests/${g.id}/backups`, {});
+    toast(t("pve.backupStarted", { name: g.name }));
+  } catch (e) {
+    toast(errorText(e), "error");
+    el.disabled = false;
+  }
+}
+
+function pveTasks(x) {
+  const name = (task) => {
+    const g = x.guests.find((y) => String(y.vmid) === task.id);
+    // a task of the node itself (its shell, its updates) is about no guest
+    return g ? `${g.name} (${g.vmid})` : task.id || task.node;
+  };
+  return x.tasks.length
+    ? h(
+        "div",
+        { class: "table-wrap card" },
+        h(
+          "table",
+          null,
+          h("thead", null, h("tr", null, h("th", null, t("pve.col.when")), h("th", null, t("pve.col.task")), h("th", null, t("pve.col.target")), h("th", null, t("pve.col.user")), h("th", null, t("app.col.state")))),
+          h(
+            "tbody",
+            null,
+            x.tasks.map((task) =>
+              h(
+                "tr",
+                { class: "clickable", onclick: () => pveTaskDialog(x, task, name(task)) },
+                h("td", { class: "small" }, dateTime(task.start * 1000)),
+                h("td", null, has("pve.task." + task.type) ? t("pve.task." + task.type) : h("span", { class: "mono" }, task.type)),
+                h("td", { class: "small" }, name(task), x.nodes.length > 1 && h("span", { class: "muted" }, " · " + task.node)),
+                h("td", { class: "small muted mono" }, task.user),
+                h("td", null, task.end === null ? h("span", { class: "state restarting" }, t("pve.taskRunning")) : task.failed ? h("span", { class: "chip danger clip" }, task.status) : h("span", { class: "chip ok" }, task.status === "OK" ? "OK" : task.status)),
+              ),
+            ),
+          ),
+        ),
+      )
+    : h("p", { class: "card pad muted" }, t("pve.noTasks"));
+}
+
+async function pveTaskDialog(x, task, target) {
+  const log = h("pre", { class: "log" }, t("machines.loading"));
+  let dialog;
+  dialog = openDialog("wide", h("header", null, h("h2", { class: "grow" }, (has("pve.task." + task.type) ? t("pve.task." + task.type) : task.type) + (target ? " · " + target : "")), closeX(() => dialog)), h("p", { class: "muted small" }, dateTime(task.start * 1000), " · ", task.user, " · ", task.end === null ? t("pve.taskRunning") : task.status), log, h("footer", null, closeButton(() => dialog)));
+  try {
+    const { lines } = await api("GET", `/api/proxmox/${x.id}/tasks/log?upid=${encodeURIComponent(task.upid)}`);
+    log.textContent = lines.join("\n") || "—";
+  } catch (e) {
+    log.textContent = errorText(e);
+  }
+}
+
 // --- One machine ---
 
 const MACHINE_TABS = ["overview", "apps", "containers", "docker", "terminal"];
@@ -2640,7 +3235,9 @@ function renderMachineHead() {
         { class: "actions" },
         m.outdated && m.online && button(t("machines.update", { version: machinesUi.list.version }), { class: "accent", onclick: (e) => updateMachine(m, e.currentTarget) }, "up"),
         m.online && h("a", { class: "btn", href: filesHash("/", m.id) }, icon("folder"), h("span", null, t("machines.files"))),
-        !m.online && m.info?.macs?.length > 0 && button(t("machines.wake"), { class: "primary", onclick: (e) => wakeMachine(m, e.currentTarget) }, "play"),
+        !m.online && m.pve?.power && m.pve.status !== "running" && button(t("pve.startHere", { host: m.pve.hostName }), { class: "primary", onclick: (e) => startGuestOf(m, e.currentTarget) }, "play"),
+        !m.online && !(m.pve?.power && m.pve.status !== "running") && m.info?.macs?.length > 0 && button(t("machines.wake"), { class: "primary", onclick: (e) => wakeMachine(m, e.currentTarget) }, "play"),
+        m.pve && h("a", { class: "btn", href: `#/proxmox/${m.pve.host}/guests` }, icon("server"), h("span", null, guestKind(m.pve) + " · " + m.pve.hostName)),
         h("button", { type: "button", class: "btn square", "aria-label": t("app.more"), onclick: () => machineMenu(m) }, icon("more")),
       ),
     ),
@@ -2662,6 +3259,18 @@ function machineMenu(m, at = null) {
     item(t("machines.remove"), "trash", () => removeMachineDialog(m), "danger"),
   );
   if (at) placeAt(dialog, at);
+}
+
+/** A machine that is a guest of Proxmox is started there, not woken */
+async function startGuestOf(m, el) {
+  if (el) el.disabled = true;
+  try {
+    const r = await api("POST", `/api/proxmox/${m.pve.host}/guests/${m.pve.id}/power`, { action: m.pve.status === "paused" ? "resume" : "start" });
+    toast(t(r.done ? "pve.done.start" : "pve.going", { name: m.name }));
+  } catch (e) {
+    toast(errorText(e), "error");
+  }
+  if (el) setTimeout(() => (el.disabled = false), 5000);
 }
 
 /** The magic packet to the machine's cards: it wakes when its BIOS and card allow it */

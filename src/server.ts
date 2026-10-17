@@ -116,6 +116,7 @@ import { machineAccessRows, setMachineAccess, startMachineGates } from "./machin
 import { applyMachineCompose, installComposeOnMachine, machineTiles, installOnMachine, machineAppAction, machineAppLogs, machineApps, machineCompose, removeMachineApp, storeAppFor } from "./machineapps";
 import { addStore, ARCH, catalogue, removeStore, scheduleStoreSync, StoreError, syncStore } from "./store";
 import { startSampler, systemStatus } from "./system";
+import { addHost as addPve, backupJobs as pveBackupJobs, backups as pveBackups, changeHost as changePve, guestOfMachine, host as pveHost, hosts as pveHosts, power as pvePower, proxmoxTrouble, refresh as refreshPve, removeHost as removePve, snapshotAction as pveSnapshotAction, snapshots as pveSnapshots, startProxmox, takeBackup as pveTakeBackup, takeSnapshot as pveTakeSnapshot, taskLog as pveTaskLog } from "./proxmox";
 import { call as machineCall, clientBinary, containersOf, installScript, invite as machineInvite, INVITE_MS, linkData, linkHandlers, machine as machineView, MACHINE_ID_RE, machines as machineList, machinesAway, open as machineOpen, remove as removeMachine, rename as renameMachine, startMachines, updateClient, wake as wakeMachine, power as powerMachine, type LinkSocket } from "./machines";
 import { availableUpdate, checkForUpdate, confirmUpdate, scheduleUpdateChecks, startRollback, startUpdate, updateStatus } from "./update";
 import { VERSION } from "./version";
@@ -900,7 +901,7 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
       site: { domain: siteDomain(), mode: settings.https.mode, local: localDomain() },
       // whether the assistant can be asked: the pages offer it next to what is wrong
       assistant: admin && assistantReady(assistantConfig()),
-      attention: admin ? notSnoozed(attention({ system, docker, apps, activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), exposed: exposedNics(), array: arrayTrouble(), shares: shareTrouble(), places: placesDown(), machines: machinesAway(), machineApps: onMachines, unused: unusedDisks(), filling: fillingUp() })) : [],
+      attention: admin ? notSnoozed(attention({ system, docker, apps, activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), exposed: exposedNics(), array: arrayTrouble(), shares: shareTrouble(), places: placesDown(), machines: machinesAway(), machineApps: onMachines, unused: unusedDisks(), filling: fillingUp(), pve: proxmoxTrouble() })) : [],
       // who signed in from where, and what was installed by whom, is the administrators' business
       activity: admin ? recent(8) : [],
       // containers and compose projects on this machine that are not apps here yet
@@ -1551,6 +1552,12 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
     return json({ ok: true });
   }
 
+  // ---- Proxmox servers (administrators only) ----
+  if (path.startsWith("/api/proxmox")) {
+    const response = await proxmoxApi(req, url, server, user.name);
+    if (response) return response;
+  }
+
   // ---- other machines (administrators only) ----
   if (path.startsWith("/api/machines")) {
     const response = await machinesApi(req, url, server, user.name);
@@ -2127,10 +2134,55 @@ async function machineFiles(req: Request, url: URL, server: Server, id: string, 
   return fail(404, "request.notFound");
 }
 
+async function proxmoxApi(req: Request, url: URL, server: Server, by: string): Promise<Response | null> {
+  const path = url.pathname;
+  const method = req.method;
+  if (path === "/api/proxmox" && method === "GET") return json({ hosts: pveHosts() });
+  if (path === "/api/proxmox" && method === "POST") {
+    server.timeout(req, 60);
+    return json(await addPve(await body(req), by), 201);
+  }
+  const m = /^\/api\/proxmox\/([a-f0-9]{8})(\/.*)?$/.exec(path);
+  if (!m) return null;
+  const id = m[1]!;
+  const rest = m[2] ?? "";
+  if (rest === "" && method === "GET") return json(pveHost(id));
+  if (rest === "" && method === "PATCH") {
+    server.timeout(req, 60);
+    return json(await changePve(id, await body(req), by));
+  }
+  if (rest === "" && method === "DELETE") {
+    removePve(id, by);
+    return json({ ok: true });
+  }
+  if (rest === "/refresh" && method === "POST") {
+    server.timeout(req, 120);
+    await refreshPve(id);
+    return json(pveHost(id));
+  }
+  if (rest === "/jobs" && method === "GET") return json({ jobs: await pveBackupJobs(id) });
+  if (rest === "/tasks/log" && method === "GET") return json({ lines: await pveTaskLog(id, url.searchParams.get("upid") ?? "") });
+  const g = /^\/guests\/(lxc|qemu)\/(\d+)(\/[a-z]+)?(?:\/([A-Za-z0-9_-]+))?$/.exec(rest);
+  if (!g) return null;
+  const guest = `${g[1]}/${g[2]}`;
+  const part = g[3] ?? "";
+  const name = g[4];
+  server.timeout(req, 0);
+  if (part === "/power" && method === "POST" && !name) return json(await pvePower(id, guest, (await body(req)).action, by));
+  if (part === "/snapshots" && !name && method === "GET") return json({ snapshots: await pveSnapshots(id, guest) });
+  if (part === "/snapshots" && !name && method === "POST") return json(await pveTakeSnapshot(id, guest, await body(req), by));
+  if (part === "/snapshots" && name && method === "POST") return json(await pveSnapshotAction(id, guest, name, "rollback", by));
+  if (part === "/snapshots" && name && method === "DELETE") return json(await pveSnapshotAction(id, guest, name, "delete", by));
+  if (part === "/backups" && !name && method === "GET") return json(await pveBackups(id, guest));
+  if (part === "/backups" && !name && method === "POST") return json(await pveTakeBackup(id, guest, await body(req), by));
+  return null;
+}
+
 async function machinesApi(req: Request, url: URL, server: Server, by: string): Promise<Response | null> {
   const path = url.pathname;
   const method = req.method;
-  if (path === "/api/machines" && method === "GET") return json({ machines: machineList(), version: VERSION });
+  // a machine that is a guest of a Proxmox server is said to be one: it can be started from there
+  if (path === "/api/machines" && method === "GET") return json({ machines: machineList().map((m) => ({ ...m, pve: guestOfMachine((m.info?.macs ?? []).map((c) => c.mac)) })), version: VERSION });
   if (path === "/api/machines/invite" && method === "POST") {
     // the name on the home network too: a machine that understands .local names finds Hata by it whatever address the router gives
     const { port } = listenAddress();
@@ -2430,6 +2482,7 @@ export async function serve(): Promise<void> {
   scheduleUpdateChecks();
   startSampler(() => settings.dataRoot);
   startMachines();
+  startProxmox();
   startMachineUsers();
   startMachineGates();
   startDisks();
@@ -2457,7 +2510,7 @@ export async function serve(): Promise<void> {
   void refreshHttps();
   refreshLocalNames();
   startNotifications({
-    attention: async () => notSnoozed(attention({ system: systemStatus(), docker: await dockerInfo(), apps: await listApps("en"), activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), exposed: exposedNics(), array: arrayTrouble(), shares: shareTrouble(), places: placesDown(), machines: machinesAway(), machineApps: await machineTiles(machineList(), "en").catch(() => []), unused: unusedDisks(), filling: fillingUp() })),
+    attention: async () => notSnoozed(attention({ system: systemStatus(), docker: await dockerInfo(), apps: await listApps("en"), activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), exposed: exposedNics(), array: arrayTrouble(), shares: shareTrouble(), places: placesDown(), machines: machinesAway(), machineApps: await machineTiles(machineList(), "en").catch(() => []), unused: unusedDisks(), filling: fillingUp(), pve: proxmoxTrouble() })),
     baseUrl: publicUrl,
     isAdmin: (id) => findUser(id)?.role === "admin",
   });
