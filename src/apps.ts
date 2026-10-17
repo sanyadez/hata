@@ -58,7 +58,7 @@ function assertInstalled(name: string): void {
 
 // --- Jobs -------------------------------------------------------------------------------------------
 
-export type JobKind = "install" | "update" | "start" | "stop" | "restart" | "remove" | "apply" | "backup" | "restore" | "import" | "move" | "docker" | "tailscale" | "copyin" | "transfer" | "moveapp" | "extract" | "format" | "fsck" | "wipe";
+export type JobKind = "install" | "update" | "start" | "stop" | "restart" | "remove" | "apply" | "backup" | "restore" | "import" | "move" | "docker" | "tailscale" | "copyin" | "transfer" | "moveapp" | "extract" | "format" | "fsck" | "wipe" | "sysupdate";
 
 export interface Job {
   id: string;

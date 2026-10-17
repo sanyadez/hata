@@ -20,6 +20,7 @@ import * as apps from "./clientapps";
 import * as files from "./clientfiles";
 import { keyPair, linkKeys, Opener, Sealer, splitCode, type KeyPair } from "./link";
 import { MuxError, Peer, type Channel, type Handler } from "./mux";
+import { checkPackages, upgradePackages } from "./pkgupdates";
 import { startSampler, systemStatus } from "./system";
 import { VERSION } from "./version";
 
@@ -396,6 +397,13 @@ function handlersFor(state: LinkState): Record<string, Handler> {
       return { ok: true };
     },
     "docker.prune": (args) => (args?.kind === "images" ? pruneImages() : args?.kind === "volumes" ? pruneVolumes() : args?.kind === "cache" ? pruneBuildCache() : Promise.reject(new MuxError("request.notFound"))),
+    // newer versions of the system's packages: Hata asks, the person decides
+    "system.updates.check": () => checkPackages(),
+    "system.updates.upgrade": (args, channel) => {
+      const encoder = new TextEncoder();
+      const packages = Array.isArray(args?.packages) ? args.packages.map(String) : [];
+      return upgradePackages(packages, (line) => void channel.send(encoder.encode(line + "\n")).catch(() => {}));
+    },
     "fs.list": (args) => files.list(args),
     "fs.summary": (args) => files.summary(args),
     "fs.info": (args) => files.fileInfo(args),

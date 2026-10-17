@@ -34,6 +34,7 @@ import { checkImages, imagesStatus, startImages } from "./images";
 import { afterPackage, exposedNics, giveBack, internetTrouble, setSide, startNetwork, setCheck, setRole, startHotspot, stopHotspot, wifiQrText, changeNic, confirmChange, handOver, NETWORK_PACKAGES, networkReport, NetworkError, revertChange, wifiConnect, wifiForget, wifiNetworks } from "./network";
 import { DOCKER_INSTALL_COMMAND, installDocker, startDocker } from "./dockerinstall";
 import { installOne, removeOne, toolsReport } from "./tools";
+import { checkUpdates, packageUpdates, startSysUpdates, upgrade as upgradeSystem } from "./sysupdates";
 import { ArrayError, arrayReport, arrayTrouble, bringBack, rebuild as rebuildParity, repair as repairArray, scrub as scrubArray, setUp as setUpArray, startSnapraid, stop as stopArray, sync as syncArray, turnOff as turnOffArray } from "./snapraid";
 import { dockerSpace, dropImage, dropVolume, prune as pruneDocker } from "./dockerspace";
 import { ignoreDisk, unusedDisks, absent, onDiskBack, connectVolume, disconnect, checkVolume, wipeDisk, formatDisk, mergeFolders, mountingReport, relabel, startMounting, type Outcome } from "./mounting";
@@ -1288,6 +1289,18 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
     if (failed) return fail(failed.message ? 500 : 409, failed.code, { message: failed.message ?? "" });
     return json(await toolsReport());
   }
+  // newer versions of the system's packages — of this server, or of a machine (never through MCP)
+  const sysUp = /^\/api\/(?:machines\/([a-f0-9]{8})\/)?system\/updates(?:\/(check|upgrade))?$/.exec(path);
+  if (sysUp) {
+    const at = sysUp[1] ?? "";
+    if (!sysUp[2] && method === "GET") return json(packageUpdates(at));
+    if (sysUp[2] === "check" && method === "POST") {
+      server.timeout(req, 0);
+      return json(await checkUpdates(at));
+    }
+    if (sysUp[2] === "upgrade" && method === "POST") return json({ job: upgradeSystem((await body(req)).packages, user.name, at).id }, 202);
+    return fail(404, "request.notFound");
+  }
   // remote access: the server in the person's own private network
   if (path === "/api/tailscale" && method === "GET") return json(await tailscaleReport(listenAddress().port));
   if (path.startsWith("/api/tailscale/") && method === "POST") {
@@ -2297,6 +2310,7 @@ export async function serve(): Promise<void> {
       await jobFinished(appAction(app, "update", "schedule"));
     },
   });
+  startSysUpdates();
   // apps Docker could not start while their disk was away are started once it is back
   onScheduledRun((run) => void sendBackupRun(run).catch(() => {}));
   onDiskBack((paths) => void startAfterDisk(paths).catch((e) => console.error("Could not start the apps of a disk that came back:", e instanceof Error ? e.message : e)));
