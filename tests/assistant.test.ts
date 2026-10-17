@@ -200,3 +200,9 @@ test("the page gets a chat without what only the provider needs", () => {
   expect("owner" in shown).toBe(false);
   expect((shown.turns[2] as { text: string }).text.length).toBe(4000);
 });
+
+test("a long first message names the chat up to a word", () => {
+  expect(titleOf("  Is   everything fine?  ")).toBe("Is everything fine?");
+  expect(titleOf("Check whether the adminer page answers, and give me a link to it please")).toBe("Check whether the adminer page answers, and give me a link…");
+  expect(titleOf("x".repeat(80))).toBe("x".repeat(60) + "…");
+});

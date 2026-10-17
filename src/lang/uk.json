@@ -2913,5 +2913,7 @@
   "power.poweroffDone": "Сервер вимикається.",
   "error.system.powerDenied": "Тут Hata працює не від імені адміністратора системи, тож не може перезавантажити чи вимкнути комп'ютер.",
   "activity.system.power.reboot": "Сервер перезавантажено",
-  "activity.system.power.poweroff": "Сервер вимкнено"
+  "activity.system.power.poweroff": "Сервер вимкнено",
+  "nav.assistant": "Помічник",
+  "assistant.asPage": "Відкрити як сторінку"
 }

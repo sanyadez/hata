@@ -2913,5 +2913,7 @@
   "power.poweroffDone": "The server is shutting down.",
   "error.system.powerDenied": "Hata does not run as the system's administrator here, so it cannot restart or shut down the computer.",
   "activity.system.power.reboot": "The server was restarted",
-  "activity.system.power.poweroff": "The server was shut down"
+  "activity.system.power.poweroff": "The server was shut down",
+  "nav.assistant": "Assistant",
+  "assistant.asPage": "Open as a page"
 }

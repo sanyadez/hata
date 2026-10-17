@@ -322,6 +322,7 @@ function parseRoute() {
   if (parts[0] === "users" && isAdmin()) return { view: "users" };
   if (parts[0] === "import" && isAdmin()) return { view: "import" };
   if (parts[0] === "terminal" && isAdmin()) return { view: "terminal" };
+  if (parts[0] === "assistant" && isAdmin()) return { view: "assistant" };
   if (parts[0] === "machines" && isAdmin()) return parts[1] ? { view: "machine", id: parts[1], tab: MACHINE_TABS.includes(parts[2]) ? parts[2] : "overview" } : { view: "machines" };
   if (parts[0] === "apps" && parts[1]) return { view: "app", name: parts[1], tab: isAdmin() && ["settings", "logs", "compose", "backups", "terminal"].includes(parts[2]) ? parts[2] : "overview" };
   if (parts[0] === "settings") return { view: "settings", section: sections().some((item) => item.id === parts[1]) ? parts[1] : "account" };
@@ -779,6 +780,7 @@ const NAV = [
   { view: "machines", hash: "#/machines", icon: "server", admin: true },
   { view: "backups", hash: "#/backups", icon: "archive", admin: true },
   { view: "users", hash: "#/users", icon: "user", admin: true },
+  { view: "assistant", hash: "#/assistant", icon: "chat", admin: true, assistant: true },
   { view: "settings", hash: "#/settings", icon: "sliders" },
 ];
 
@@ -804,7 +806,7 @@ async function loadMine() {
 }
 
 const navCurrent = () => (state.route.view === "machine" ? "machines" : state.route.view === "app" ? "home" : state.route.view === "import" ? "store" : state.route.view === "trash" || state.route.view === "myhata" ? "files" : state.route.view);
-const navItems = () => NAV.filter((item) => (!item.admin || isAdmin()) && (!item.files || mayFiles()) && (item.guest !== false || state.user.role !== "guest"));
+const navItems = () => NAV.filter((item) => (!item.admin || isAdmin()) && (!item.files || mayFiles()) && (!item.assistant || !!(assistantUi.config?.ready ?? state.overview?.assistant)) && (item.guest !== false || state.user.role !== "guest"));
 
 function navLinks(className, items = navItems()) {
   const current = navCurrent();
@@ -1004,6 +1006,7 @@ function render() {
   if (view === "users") return renderUsers();
   if (view === "import") return renderImport();
   if (view === "terminal") return renderTerminal();
+  if (view === "assistant") return renderAssistant();
   if (view === "machines") return renderMachines();
   if (view === "machine") return renderMachine();
   if (view === "app") return renderApp();
@@ -11388,7 +11391,8 @@ function paintAssistant() {
   const tool = (label, name, onclick, cls = "") => h("button", { type: "button", class: "icon-btn " + cls, title: label, "aria-label": label, onclick }, icon(name));
   const fresh = () => ((assistantUi.chat = null), paintAssistant(), panel.querySelector("textarea").focus());
   // wide, the chats are a column on the left; narrow, a list in the head
-  const listed = wide && !phone.matches && chats.length > 0;
+  const paged = panel.classList.contains("paged");
+  const listed = !phone.matches && (paged || chats.length > 0);
   panel.classList.toggle("listed", listed);
   put(
     panel.querySelector(".assistant-list"),
@@ -11415,8 +11419,9 @@ function paintAssistant() {
     listed ? h("strong", { class: "grow ellipsis" }, title) : chats.length > 0 ? h("span", { class: "grow pick" }, pick) : h("strong", { class: "grow" }, t("assistant.title")),
     chat && !listed && tool(t("assistant.newChat"), "plus", fresh),
     chat && tool(t("assistant.forget"), "trash", forgetAssistantChat),
-    tool(t(wide ? "assistant.narrow" : "assistant.wide"), wide ? "shrink" : "expand", () => (panel.classList.toggle("wide"), rememberAssistant(), paintAssistant()), "wide-only"),
-    tool(t("assistant.hide"), "down", closeAssistant),
+    !paged && tool(t("assistant.asPage"), "external", () => go("#/assistant"), "wide-only"),
+    !paged && tool(t(wide ? "assistant.narrow" : "assistant.wide"), wide ? "shrink" : "expand", () => (panel.classList.toggle("wide"), rememberAssistant(), paintAssistant()), "wide-only"),
+    !paged && tool(t("assistant.hide"), "down", closeAssistant),
   );
   const body = panel.querySelector(".assistant-body");
   // new words are followed down the panel unless the person has scrolled up to read
@@ -11460,11 +11465,12 @@ async function forgetAssistantChat() {
 /** The round button in the corner of every page: opens the window, and shows when a change waits for a word */
 function assistantFab() {
   if (!isAdmin()) return;
+  leaveAssistantPage();
   if (!assistantUi.fab) {
     assistantUi.fab = h("button", { type: "button", class: "assistant-fab", title: t("assistant.title"), "aria-label": t("assistant.title"), onclick: () => (assistantUi.open ? closeAssistant() : openAssistant()) }, icon("chat"), h("span", { class: "fab-dot", hidden: true }));
     document.body.append(assistantUi.fab);
     // a window left open stays open after a reload; otherwise only the list of chats is asked for, for the dot
-    if (localStorage.getItem(ASSISTANT_KEY)) {
+    if (localStorage.getItem(ASSISTANT_KEY) && state.route.view !== "assistant") {
       const last = localStorage.getItem(ASSISTANT_KEY + ".chat");
       if (last) assistantUi.chat = { id: last };
       openAssistant({ restore: true });
@@ -11481,10 +11487,10 @@ function markAssistantFab() {
   assistantUi.fab.classList.toggle("open", assistantUi.open);
 }
 
-const rememberAssistant = () => (assistantUi.open ? localStorage.setItem(ASSISTANT_KEY, assistantUi.panel?.classList.contains("wide") ? "wide" : "open") : localStorage.removeItem(ASSISTANT_KEY));
+const rememberAssistant = () => assistantUi.panel?.classList.contains("paged") || (assistantUi.open ? localStorage.setItem(ASSISTANT_KEY, assistantUi.panel?.classList.contains("wide") ? "wide" : "open") : localStorage.removeItem(ASSISTANT_KEY));
 
-/** Opens the window; `ask` is sent as the first words of a new chat, `draft` is put into the field */
-function openAssistant({ ask, draft, restore } = {}) {
+/** The window of the assistant, made once: floating over the pages, or the whole page #/assistant */
+function assistantPanel() {
   if (!assistantUi.panel) {
     const input = h("textarea", { rows: 2, maxLength: 20000, placeholder: t("assistant.placeholder"), "aria-label": t("assistant.placeholder") });
     const submit = () => {
@@ -11501,7 +11507,17 @@ function openAssistant({ ask, draft, restore } = {}) {
     });
     const form = h("form", { class: "assistant-form", onsubmit: (e) => (e.preventDefault(), submit()) }, input, h("button", { class: "btn primary square", "aria-label": t("assistant.send"), title: t("assistant.send") }, icon("arrow")));
     assistantUi.panel = h("aside", { class: "assistant" + (localStorage.getItem(ASSISTANT_KEY) === "wide" ? " wide" : ""), "aria-label": t("assistant.title") }, h("nav", { class: "assistant-list", "aria-label": t("assistant.chats") }), h("div", { class: "assistant-head" }), h("div", { class: "assistant-body" }), form);
-    document.body.append(assistantUi.panel);
+  }
+  return assistantUi.panel;
+}
+
+/** Opens the window; `ask` is sent as the first words of a new chat, `draft` is put into the field */
+function openAssistant({ ask, draft, restore } = {}) {
+  const panel = assistantPanel();
+  // on its own page the window is the page; elsewhere it floats
+  if (state.route.view !== "assistant" && (panel.classList.contains("paged") || panel.parentElement !== document.body)) {
+    panel.classList.remove("paged");
+    document.body.append(panel);
   }
   assistantUi.open = true;
   assistantUi.panel.hidden = false;
@@ -11514,6 +11530,33 @@ function openAssistant({ ask, draft, restore } = {}) {
   void loadAssistant().then(() => ask && assistantUi.config?.ready && sendToAssistant(ask, true));
   // a window put back after a reload does not take the keyboard from the page
   if (!restore) input.focus();
+}
+
+/** The assistant as a page of its own: the same window, with the chats on the left */
+function renderAssistant() {
+  const holder = h("div", { class: "assistant-page" });
+  shell(holder);
+  document.getElementById("view").classList.add("fill");
+  const panel = assistantPanel();
+  panel.classList.add("paged");
+  holder.append(panel);
+  panel.hidden = false;
+  assistantUi.open = true;
+  markAssistantFab();
+  paintAssistant();
+  void loadAssistant();
+}
+
+/** Leaving the page of the assistant: its window goes back to floating, closed */
+function leaveAssistantPage() {
+  const panel = assistantUi.panel;
+  if (!panel?.classList.contains("paged") || state.route.view === "assistant") return;
+  panel.classList.remove("paged");
+  panel.hidden = true;
+  document.body.append(panel);
+  assistantUi.open = false;
+  rememberAssistant();
+  markAssistantFab();
 }
 
 function closeAssistant() {
