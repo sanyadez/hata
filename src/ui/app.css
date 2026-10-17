@@ -1175,3 +1175,5 @@ body:has(.assistant.paged) > .assistant-fab { display: none; }
 @media (max-width: 640px) { .form-pair { grid-template-columns: 1fr; } }
 .pve-trouble { padding: 2px 20px; }
 .pve-trouble .attention-item:first-child { border-top: 0; }
+.pve-note { margin: 0; padding: 12px 20px; border-top: 1px solid var(--border); }
+.pve-note.first { border-top: 0; }

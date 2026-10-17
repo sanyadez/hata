@@ -3018,7 +3018,6 @@ function pveOverview(x) {
       ),
     h("div", { class: "section-head" }, h("h2", null, t("pve.jobsTitle"))),
     h("div", { id: "pve-jobs" }, h("p", { class: "muted" }, t("machines.loading"))),
-    x.unprotected?.length > 0 && h("p", { class: "muted small" }, t("pve.unprotected", { guests: x.unprotected.map((g) => `${g.name || g.vmid} (${g.vmid})`).join(", ") })),
     loadPveJobs(x),
   );
 }
@@ -3030,11 +3029,13 @@ function loadPveJobs(x) {
     if (!box) return;
     try {
       const { jobs } = await api("GET", `/api/proxmox/${x.id}/jobs`);
+      // the guests no job covers close the same card: a line of their own would stand on the wallpaper
+      const left = x.unprotected?.length > 0 && h("p", { class: "muted small pve-note" }, t("pve.unprotected", { guests: x.unprotected.map((g) => `${g.name || g.vmid} (${g.vmid})`).join(", ") }));
       const who = (j) => (j.guests === "all" ? t("pve.jobAll") : j.guests.startsWith("pool:") ? t("pve.jobPool", { pool: j.guests.slice(5) }) : j.guests.split(",").map((id) => x.guests.find((g) => String(g.vmid) === id)?.name ?? id).join(", "));
       box.replaceChildren(
         jobs.length
-          ? h("div", { class: "table-wrap card" }, h("table", null, h("thead", null, h("tr", null, h("th", null, t("pve.col.schedule")), h("th", null, t("pve.col.guests")), h("th", null, t("pve.col.storage")), h("th", null, t("pve.col.next")))), h("tbody", null, jobs.map((j) => h("tr", null, h("td", null, h("div", { class: "mono" }, j.schedule), !j.enabled && h("span", { class: "chip" }, t("pve.jobOff")), j.comment && h("div", { class: "muted small" }, j.comment)), h("td", { class: "small" }, who(j), j.exclude && h("div", { class: "muted small" }, t("pve.jobExclude", { list: j.exclude }))), h("td", { class: "small" }, j.storage), h("td", { class: "small" }, j.enabled && j.next ? dateTime(j.next) : "—"))))))
-          : h("p", { class: "card pad muted" }, t("pve.noJobs")),
+          ? h("section", { class: "card" }, h("div", { class: "table-wrap" }, h("table", null, h("thead", null, h("tr", null, h("th", null, t("pve.col.schedule")), h("th", null, t("pve.col.guests")), h("th", null, t("pve.col.storage")), h("th", null, t("pve.col.next")))), h("tbody", null, jobs.map((j) => h("tr", null, h("td", null, h("div", { class: "mono" }, j.schedule), !j.enabled && h("span", { class: "chip" }, t("pve.jobOff")), j.comment && h("div", { class: "muted small" }, j.comment)), h("td", { class: "small" }, who(j), j.exclude && h("div", { class: "muted small" }, t("pve.jobExclude", { list: j.exclude }))), h("td", { class: "small" }, j.storage), h("td", { class: "small" }, j.enabled && j.next ? dateTime(j.next) : "—")))))), left)
+          : h("section", { class: "card" }, h("p", { class: "muted pve-note first" }, t("pve.noJobs")), left),
       );
     } catch (e) {
       box.replaceChildren(h("p", { class: "card pad muted" }, errorText(e)));
@@ -3046,6 +3047,7 @@ function loadPveJobs(x) {
 function pveGuests(x) {
   const guests = x.guests.filter((g) => !g.template);
   const templates = x.guests.filter((g) => g.template);
+  const note = templates.length > 0 && h("p", { class: "muted small pve-note" }, t("pve.templates", { list: templates.map((g) => `${g.name} (${g.vmid})`).join(", ") }));
   const small = (label, iconName, onclick, off) => h("button", { type: "button", class: "icon-btn", title: label, "aria-label": label, disabled: off, onclick: (e) => (e.stopPropagation(), onclick(e.currentTarget)) }, icon(iconName));
   const machineOf = (g) => machinesUi.list?.machines.find((m) => m.pve?.host === x.id && m.pve?.id === g.id);
   const row = (g) => {
@@ -3077,9 +3079,8 @@ function pveGuests(x) {
     "div",
     { class: "stack" },
     guests.length
-      ? h("div", { class: "table-wrap card" }, h("table", { class: "pve-guests" }, h("thead", null, h("tr", null, h("th", null, "ID"), h("th", null, t("pve.col.name")), h("th", null, t("app.col.state")), h("th", null, t("pve.col.load")), h("th", null, t("pve.col.uptime")), h("th"))), h("tbody", null, guests.map(row))))
-      : h("p", { class: "card pad muted" }, t("pve.noGuests")),
-    templates.length > 0 && h("p", { class: "muted small" }, t("pve.templates", { list: templates.map((g) => `${g.name} (${g.vmid})`).join(", ") })),
+      ? h("section", { class: "card" }, h("div", { class: "table-wrap" }, h("table", { class: "pve-guests" }, h("thead", null, h("tr", null, h("th", null, "ID"), h("th", null, t("pve.col.name")), h("th", null, t("app.col.state")), h("th", null, t("pve.col.load")), h("th", null, t("pve.col.uptime")), h("th"))), h("tbody", null, guests.map(row)))), note)
+      : h("section", { class: "card" }, h("p", { class: "muted pve-note first" }, t("pve.noGuests")), note),
   );
 }
 
