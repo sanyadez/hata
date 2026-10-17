@@ -524,9 +524,10 @@ export function formatDisk(name: string, seen: { serial: string; size: number },
 /**
  * Erases a disk and leaves it empty, without a partition table. `thorough` — every block is written
  * over with zeros first, so what was there cannot be read back with ordinary tools (hours for a large
- * disk; a flash disk may keep spare blocks that are not reached).
+ * disk; a flash disk may keep spare blocks that are not reached). `stop` ends the writing over where it
+ * is: the disk is erased by then, only not all of it written over.
  */
-export function wipeDisk(name: string, seen: { serial: string; size: number }, thorough: boolean, user: string, log: (line: string) => void = () => {}, dry = false): Promise<Outcome> {
+export function wipeDisk(name: string, seen: { serial: string; size: number }, thorough: boolean, user: string, log: (line: string) => void = () => {}, dry = false, stop?: AbortSignal): Promise<Outcome> {
   return oneAtATime(async () => {
     const disk = (await connected()).find((d) => d.name === name);
     if (!disk || !existsSync(disk.path)) return { error: "disk.unknown" };
@@ -549,15 +550,23 @@ export function wipeDisk(name: string, seen: { serial: string; size: number }, t
       log(`Writing zeros over ${disk.path}: ${Math.round(disk.size / 1e9)} GB`);
       const started = Date.now();
       let whole = false;
+      let written = 0;
       const zeros = await runLogged(["dd", "if=/dev/zero", `of=${disk.path}`, "bs=4M", "oflag=direct", "status=progress"], log, 7 * 24 * 60 * 60_000, {}, (line) => {
         // dd stops at the end of the disk with "No space left": that is the whole of it written
         if (/No space left/i.test(line)) whole = true;
         if (/No space left|records (in|out)$/i.test(line)) return null;
         const m = /^(\d+) bytes .* copied/.exec(line);
+        if (m) written = Math.max(written, Number(m[1]));
         return m ? `${Math.min(100, Math.floor((Number(m[1]) / disk.size) * 100))}% · ${Math.round(Number(m[1]) / 1e9)} of ${Math.round(disk.size / 1e9)} GB · ${Math.round((Date.now() - started) / 60_000)} min` : line;
-      });
-      if (zeros.code !== 0 && !whole) return { error: "disk.wipeFailed", message: said(zeros) };
+      }, stop);
       await run(["sync"], 120_000);
+      if (stop?.aborted && !whole) {
+        await run(["partx", "-d", disk.path], 30_000);
+        await settle();
+        const part = `${Math.min(99, Math.floor((written / disk.size) * 100))}%, ${Math.round(written / 1e9)} of ${Math.round(disk.size / 1e9)} GB`;
+        return { error: "disk.stopped", message: `${diskLabel(disk)} written over up to ${part}. The disk is erased all the same: no partitions are left, but what was not written over can still be read with special tools.` };
+      }
+      if (zeros.code !== 0 && !whole) return { error: "disk.wipeFailed", message: said(zeros) };
     }
     await run(["partx", "-d", disk.path], 30_000);
     await settle();
@@ -606,8 +615,11 @@ export interface Checked {
   back: string;
 }
 
-/** Looks a file system over; `repair` — and mends what it finds. `dry` — only says whether it may be done */
-export function checkVolume(device: string, repair: boolean, user: string, log: (line: string) => void = () => {}, dry = false): Promise<Checked | Failure> {
+/**
+ * Looks a file system over; `repair` — and mends what it finds. `dry` — only says whether it may be done.
+ * `stop` ends a look (never a repair: one cut half-way may leave more to mend than it found).
+ */
+export function checkVolume(device: string, repair: boolean, user: string, log: (line: string) => void = () => {}, dry = false, stop?: AbortSignal): Promise<Checked | Failure> {
   return oneAtATime(async () => {
     const found = await volumeAt(device);
     if ("error" in found) return found;
@@ -620,7 +632,7 @@ export function checkVolume(device: string, repair: boolean, user: string, log: 
       const command = checkCommand(fs, repair, volume.path);
       log(command.join(" "));
       // a large disk takes hours
-      const said = await runLogged(command, log, 12 * 60 * 60_000, {}, (line) => passProgress(line) ?? line);
+      const said = await runLogged(command, log, 12 * 60 * 60_000, {}, (line) => passProgress(line) ?? line, repair ? undefined : stop);
       if (fs !== "ntfs" || repair || said.code !== 0 || !has("ntfsinfo")) return said;
       // ntfsfix does not tell that the volume was not closed properly; ntfsinfo refuses to open such a one
       const opened = await run(["ntfsinfo", "-m", volume.path], 60_000);
@@ -630,6 +642,7 @@ export function checkVolume(device: string, repair: boolean, user: string, log: 
     const ran = await paused(volume, look);
     if ("error" in ran) return ran;
     if (folder) log(ran.back ? `Could not connect ${folder} again: ${ran.back}` : `${folder} is connected again`);
+    if (stop?.aborted && !repair) return { error: "disk.stopped", message: ran.back ? `Could not connect ${folder} again: ${ran.back}` : "" };
     const verdict = checkVerdict(fs, repair, ran.done.code);
     const output = `${ran.done.out}\n${ran.done.err}`.split("\n").map((line) => line.trimEnd()).filter(Boolean).slice(-14).join("\n").slice(-3000);
     if (repair) record("system.disk.repair", { user, detail: volume.label || volume.path });

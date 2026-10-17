@@ -16,7 +16,7 @@ import { agentUser, cannotGrant, cleanName, createKey, grantKey, keyOf, listKeys
 import type { Level } from "./agents";
 import { Desk } from "./approvals";
 import { answerCall, assistantConfig, configured as assistantReady, findChat, listChats, ModelError, modelsFor, removeChat, retry as retryAssistant, say as sayToAssistant, shownChat, shownConfig as shownAssistant, stopChat, updateAssistant } from "./assistant";
-import { AppError, appAction, startJob, type Job, installedNames, jobFinished, appEnv, appDetail, appLogs, appIcon, appSettings, appStats, applyCompose, ICON_MIME, MAX_ICON, removeAppIcon, setAppIcon, applySettings, installFromSettings, applyStoreUpdate, composeText, getJob, installCustom, installFromStore, listApps, listJobs, onAppRemoved, planStoreUpdate, readCompose, refreshAppUrls, removeApp, storeAppDetail, viewOf } from "./apps";
+import { AppError, appAction, startJob, stoppable, stopJob, type Job, installedNames, jobFinished, appEnv, appDetail, appLogs, appIcon, appSettings, appStats, applyCompose, ICON_MIME, MAX_ICON, removeAppIcon, setAppIcon, applySettings, installFromSettings, applyStoreUpdate, composeText, getJob, installCustom, installFromStore, listApps, listJobs, onAppRemoved, planStoreUpdate, readCompose, refreshAppUrls, removeApp, storeAppDetail, viewOf } from "./apps";
 import { certificateStates, challengeResponse, ensureCertificates, loadCertificates } from "./acme";
 import { attention } from "./attention";
 import { folderSize, restoreFromSnapshot, snapshotFile, snapshotFiles } from "./snapshot";
@@ -1120,13 +1120,20 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
   // ---- disks and their health ----
   const storage = async (more: Record<string, unknown> = {}) => {
     const listed = await listDisks();
-    return json({ ...listed, fills: fills(), mounting: mountingReport(listed.disks), array: arrayReport(), ...more });
+    // long work on a disk, so a page opened meanwhile can follow it and stop it
+    const work = listJobs().find((j) => j.app === "" && j.status === "running" && ["format", "fsck", "wipe"].includes(j.kind));
+    const working = work ? { id: work.id, kind: work.kind, target: work.target ?? "", stoppable: !!work.stoppable, line: work.log.at(-1) ?? "" } : null;
+    return json({ ...listed, fills: fills(), mounting: mountingReport(listed.disks), array: arrayReport(), working, ...more });
   };
   const refused = (failure: Extract<Outcome, { error: string }>) => fail(400, failure.error, { message: failure.message ?? "", ...(failure.needs ?? {}) });
   // a long piece of work on a disk: answered at once with the job the page then follows
-  const diskJob = (kind: "format" | "fsck" | "wipe", by: string, work: (log: (line: string) => void) => Promise<void>, started: (job: Job) => void = () => {}) => {
+  // `canStop` — the page offers "Stop"; `work` gets the signal
+  const diskJob = (kind: "format" | "fsck" | "wipe", target: string, by: string, work: (log: (line: string) => void, stop?: AbortSignal) => Promise<void>, started: (job: Job) => void = () => {}, canStop = false) => {
     try {
-      const job = startJob("", kind, by, work, true);
+      const stopper = new AbortController();
+      const job = startJob("", kind, by, (log) => work(log, canStop ? stopper.signal : undefined), true);
+      job.target = target;
+      if (canStop) stoppable(job, stopper);
       started(job);
       return json({ job: job.id }, 202);
     } catch (e) {
@@ -1134,7 +1141,7 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
       throw e;
     }
   };
-  const failureWords = (failure: Extract<Outcome, { error: string }>) => `${({ "disk.busy": "Something is still using the folder.", "disk.mountFailed": "The disk could not be connected.", "disk.formatFailed": "The disk could not be formatted.", "disk.wipeFailed": "The disk could not be erased.", "disk.inUse": "The disk is in use." } as Record<string, string>)[failure.error] ?? failure.error} ${failure.message ?? ""}`.trim();
+  const failureWords = (failure: Extract<Outcome, { error: string }>) => `${({ "disk.busy": "Something is still using the folder.", "disk.mountFailed": "The disk could not be connected.", "disk.formatFailed": "The disk could not be formatted.", "disk.wipeFailed": "The disk could not be erased.", "disk.inUse": "The disk is in use.", "disk.stopped": "Stopped." } as Record<string, string>)[failure.error] ?? failure.error} ${failure.message ?? ""}`.trim();
   const changed = (outcome: Outcome) => ("error" in outcome ? refused(outcome) : storage());
   if (path === "/api/disks" && method === "GET") return storage();
 
@@ -1197,7 +1204,7 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
     // what can be refused is refused at once, in the dialog; the work itself is a job with a log
     const may = await formatDisk(diskFormat[1]!, seen, ask, user.name, undefined, true);
     if ("error" in may) return refused(may);
-    return diskJob("format", user.name, async (log) => {
+    return diskJob("format", diskFormat[1]!, user.name, async (log) => {
       const done = await formatDisk(diskFormat[1]!, seen, ask, user.name, log);
       if ("error" in done) throw new Error(failureWords(done));
       log(done.path ? `Done: connected as ${done.path}` : "Done");
@@ -1210,11 +1217,11 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
     const seen = { serial: String(data.serial ?? ""), size: Number(data.size) };
     const may = await wipeDisk(diskWipe[1]!, seen, data.thorough === true, user.name, undefined, true);
     if ("error" in may) return refused(may);
-    return diskJob("wipe", user.name, async (log) => {
-      const done = await wipeDisk(diskWipe[1]!, seen, data.thorough === true, user.name, log);
+    return diskJob("wipe", diskWipe[1]!, user.name, async (log, stop) => {
+      const done = await wipeDisk(diskWipe[1]!, seen, data.thorough === true, user.name, log, false, stop);
       if ("error" in done) throw new Error(failureWords(done));
       log("Done: the disk is empty");
-    });
+    }, undefined, data.thorough === true);
   }
   // looking a file system over, and mending it: the answer carries what the program said
   if (path === "/api/disks/fsck" && method === "POST") {
@@ -1224,11 +1231,11 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
     const may = await checkVolume(device, data.repair === true, user.name, undefined, true);
     if ("error" in may) return refused(may);
     let job: Job | undefined;
-    const answer = diskJob("fsck", user.name, async (log) => {
-      const checked = await checkVolume(device, data.repair === true, user.name, log);
+    const answer = diskJob("fsck", device, user.name, async (log, stop) => {
+      const checked = await checkVolume(device, data.repair === true, user.name, log, false, stop);
       if ("error" in checked) throw new Error(failureWords(checked));
       if (job) job.result = checked;
-    }, (started) => (job = started));
+    }, (started) => (job = started), data.repair !== true);
     return answer;
   }
   if (path === "/api/disks/label" && method === "POST") {
@@ -1550,6 +1557,11 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
   if (m && method === "GET") {
     const job = getJob(m[1]!);
     return job ? json(job) : fail(404, "job.notFound");
+  }
+  m = /^\/api\/jobs\/([0-9a-f-]{36})\/stop$/.exec(path);
+  if (m && method === "POST") {
+    if (!getJob(m[1]!)) return fail(404, "job.notFound");
+    return stopJob(m[1]!, user.name) ? json(getJob(m[1]!)) : fail(409, "job.notStoppable");
   }
 
   m = /^\/api\/apps\/([^/]+)(?:\/([a-z]+))?$/.exec(path);

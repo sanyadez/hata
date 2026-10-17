@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { cleanShares, isOurs, nameFor, nameLine, netbiosName, parseUsers, shareName, smbConf, UNIX_NAME_RE, unixName, userMap, writablePath, type Share } from "../src/smbconf";
+import { adiskTxt, cleanShares, isOurs, nameFor, nameLine, netbiosName, parseUsers, shareName, smbConf, UNIX_NAME_RE, unixName, userMap, writablePath, type Share } from "../src/smbconf";
 
 test("shareName: letters of any alphabet, digits, spaces; nothing Samba reads as its own", () => {
   expect(shareName("  Media  ")).toBe("Media");
@@ -104,4 +104,28 @@ test("the computer's name and who announces the folders are told to Samba", () =
   // fifteen characters, and nothing a name of that kind cannot hold
   expect(netbiosName("my-home-server-in-the-attic")).toBe("MY-HOME-SERVER-");
   expect(netbiosName("дім")).toBe("");
+});
+
+test("Time Machine: the share is a backup destination for Macs, with its limit, and Macs are told of it", () => {
+  const shares = cleanShares([
+    { name: "Backups", path: "/DATA/Backups/Mac", guest: "none", users: { a1b2c3d4: "write" }, timeMachine: { limit: 500 } },
+    { name: "Media", path: "/DATA/Media", guest: "read", users: {}, timeMachine: { limit: -1 } },
+    { name: "Old Mac", path: "/mnt/tm", guest: "none", users: { a1b2c3d4: "write" }, timeMachine: {} },
+  ]);
+  expect(shares.map((share) => share.timeMachine)).toEqual([{ limit: 500 }, undefined, { limit: 0 }]);
+  const section = (conf: string, name: string) => conf.split(`[${name}]`)[1]!.split("\n[")[0]!;
+  const conf = smbConf([...shares, { name: "Stick", path: "/mnt/stick", guest: "none", users: { a1b2c3d4: "write" } }], [{ id: "a1b2c3d4", name: "olena" }], { name: "hata", announced: true, bare: ["/mnt/stick"] });
+  // Apple's extensions for every folder of the server, or a Mac goes wrong
+  expect(section(conf, "global")).toContain("   vfs objects = catia fruit streams_xattr");
+  expect(section(conf, "Backups")).toContain("   fruit:time machine = yes");
+  expect(section(conf, "Backups")).toContain("   fruit:time machine max size = 500G");
+  expect(section(conf, "Old Mac")).not.toContain("max size");
+  expect(section(conf, "Media")).not.toContain("time machine");
+  // a FAT or exFAT disk keeps no streams: it gets the extensions without them
+  expect(section(conf, "Stick")).toContain("   vfs objects = catia fruit\n");
+  expect(section(conf, "Backups")).not.toContain("vfs objects");
+  // without Time Machine nothing of it is there
+  expect(smbConf([shares[1]!], [], { name: "hata", announced: true, bare: ["/DATA/Media"] })).not.toContain("fruit");
+  expect(adiskTxt(shares)).toEqual(["sys=waMa=0,adVF=0x100", "dk0=adVN=Backups,adVF=0x82", "dk1=adVN=Old Mac,adVF=0x82"]);
+  expect(adiskTxt([shares[1]!])).toBeNull();
 });

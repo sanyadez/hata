@@ -72,6 +72,12 @@ export interface Job {
   error?: string;
   /** What the operation found, for the page that started it */
   result?: unknown;
+  /** What the operation works on when that is not an app: a disk, a file system */
+  target?: string;
+  /** The operation can be ended before its time (`stopJob`) */
+  stoppable?: boolean;
+  /** It was ended so */
+  stopped?: boolean;
   startedAt: number;
   finishedAt?: number;
 }
@@ -104,7 +110,7 @@ export function startJob(app: string, kind: JobKind, user: string, work: (log: L
   const job: Job = { id: crypto.randomUUID(), app, kind, status: "running", log: [], lineCount: 0, startedAt: Date.now() };
   jobs.set(job.id, job);
   busy.set(app, job.id);
-  const summary = () => ({ id: job.id, app, kind, status: job.status, error: job.error });
+  const summary = () => ({ id: job.id, app, kind, status: job.status, error: job.error, stoppable: job.stoppable, stopped: job.stopped });
   const log: Log = (line) => {
     job.log.push(line);
     if (job.log.length > MAX_LOG_LINES) job.log.shift();
@@ -122,7 +128,7 @@ export function startJob(app: string, kind: JobKind, user: string, work: (log: L
     })
     .finally(() => {
       job.finishedAt = Date.now();
-      if (!quiet || job.status === "failed") record(`app.${kind}.${job.status}`, { app: label?.app ?? app, machine: label?.machine, user, detail: job.status === "failed" ? job.error?.trim().split("\n")[0]?.trim().slice(0, 300) : undefined });
+      if (!quiet || job.status === "failed") record(`app.${kind}.${job.stopped ? "stopped" : job.status}`, { app: label?.app ?? app, machine: label?.machine, user, detail: job.status === "failed" ? job.error?.trim().split("\n")[0]?.trim().slice(0, 300) : undefined });
       busy.delete(app);
       const over = [...jobs.values()].filter((j) => j.status !== "running");
       for (const old of over.slice(0, Math.max(0, over.length - KEEP_FINISHED_JOBS))) jobs.delete(old.id);
@@ -131,6 +137,32 @@ export function startJob(app: string, kind: JobKind, user: string, work: (log: L
     });
   finished.set(job, run);
   return job;
+}
+
+const stoppers = new Map<string, AbortController>();
+
+/**
+ * Makes a running job one that can be stopped by `stopper` — made before the job started, since its
+ * work begins at once and has to hold the signal from the first program it runs.
+ */
+export function stoppable(job: Job, stopper: AbortController): void {
+  stoppers.set(job.id, stopper);
+  job.stoppable = true;
+  void jobFinished(job).then(() => stoppers.delete(job.id));
+  bus.publish("job", { job: { id: job.id, app: job.app, kind: job.kind, status: job.status, stoppable: true } });
+}
+
+/** Asks a running job to stop; false when it cannot be */
+export function stopJob(id: string, user: string): boolean {
+  const job = jobs.get(id);
+  const stopper = stoppers.get(id);
+  if (!job || !stopper || job.status !== "running") return false;
+  job.stopped = true;
+  job.log.push(`Stopped by ${user}`);
+  if (job.log.length > MAX_LOG_LINES) job.log.shift();
+  bus.publish("job", { job: { id: job.id, app: job.app, kind: job.kind, status: job.status, stoppable: true, stopped: true }, line: `Stopped by ${user}`, n: job.lineCount++ });
+  stopper.abort();
+  return true;
 }
 
 /** Runs `docker compose …` for an app, failing the job on a non-zero exit */

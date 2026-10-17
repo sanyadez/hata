@@ -37,11 +37,12 @@ export function pieces(text: string): { line: string; progress: boolean }[] {
 /**
  * Runs a system program to its end and hands over what it prints as it comes; a counter is passed on
  * every couple of seconds, and every twenty once a minute has passed. `reword` may put a line in other words, or drop it (null).
+ * `stop` ends the program before its time (SIGTERM).
  */
-export async function runLogged(cmd: string[], log: (line: string) => void, timeout = 30_000, env: Record<string, string> = {}, reword: (line: string) => string | null = (line) => line): Promise<Ran> {
+export async function runLogged(cmd: string[], log: (line: string) => void, timeout = 30_000, env: Record<string, string> = {}, reword: (line: string) => string | null = (line) => line, stop?: AbortSignal): Promise<Ran> {
   let proc;
   try {
-    proc = Bun.spawn({ cmd, stdout: "pipe", stderr: "pipe", stdin: "ignore", timeout, env: { ...process.env, PATH, LC_ALL: "C", ...env } });
+    proc = Bun.spawn({ cmd, stdout: "pipe", stderr: "pipe", stdin: "ignore", timeout, signal: stop, env: { ...process.env, PATH, LC_ALL: "C", ...env } });
   } catch (e) {
     return { code: -1, out: "", err: e instanceof Error ? e.message : String(e) };
   }

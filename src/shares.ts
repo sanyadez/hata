@@ -19,7 +19,7 @@ import { readJsonFile, writeJsonAtomic, writeTextAtomic } from "./fsutil";
 import { answersItself, homeLinks, offer, offering, type Service } from "./mdns";
 import { installCommand, installPackage, PATH, run } from "./packages";
 import { localDomain } from "./site";
-import { isOurs, nameFor, nameLine, parseUsers, shareName, SMB_CONF, SMB_CONF_BEFORE, smbConf, UNIX_NAME_RE, unixName, USER_MAP, userMap, writablePath, type Access, type Share } from "./smbconf";
+import { adiskTxt, isOurs, nameFor, nameLine, parseUsers, shareName, SMB_CONF, SMB_CONF_BEFORE, smbConf, UNIX_NAME_RE, unixName, USER_MAP, userMap, writablePath, timeMachineOf, type Access, type Share } from "./smbconf";
 import { refreshWsd, wsdStatus } from "./wsd";
 
 const PACKAGE = "samba";
@@ -91,6 +91,22 @@ async function syncAccounts(): Promise<void> {
   for (const id of Object.keys(known)) if (!users.some((user) => user.id === id)) delete known[id];
 }
 
+/**
+ * File systems known to keep extended attributes — where what a Mac writes besides the data can go.
+ * Others (FAT, exFAT, the folders of other machines: CIFS answered a stream with an error) cannot.
+ */
+const XATTR = new Set(["ext2", "ext3", "ext4", "btrfs", "xfs", "f2fs", "zfs", "ntfs3", "fuse.mergerfs"]);
+
+const fsOf = async (path: string): Promise<string> => (await run(["findmnt", "-n", "-o", "FSTYPE", "-T", path], 10_000)).out.trim();
+
+/** Shared folders on file systems not known to keep extended attributes; asked only while Apple's extensions are on */
+async function bareShares(): Promise<string[]> {
+  if (!settings.shares.some((share) => share.timeMachine)) return [];
+  const bare: string[] = [];
+  for (const share of settings.shares) if (!XATTR.has(await fsOf(share.path))) bare.push(share.path);
+  return bare;
+}
+
 async function sync(): Promise<void> {
   failure = "";
   if (!installed()) return;
@@ -103,7 +119,7 @@ async function sync(): Promise<void> {
   writeJsonAtomic(KNOWN_FILE, known);
 
   const accounts = listUsers().map((user) => ({ id: user.id, name: user.name }));
-  const conf = smbConf(settings.shares, accounts, { name: serverName(), announced: answersItself(localDomain()) });
+  const conf = smbConf(settings.shares, accounts, { name: serverName(), announced: answersItself(localDomain()), bare: await bareShares() });
   const map = userMap(accounts);
   const before = read(SMB_CONF);
   const mapBefore = read(USER_MAP);
@@ -149,7 +165,9 @@ let serving = true;
 async function announce(): Promise<void> {
   serving = installed() && (await isActive(await unit()));
   const on = installed() && settings.shares.length > 0 && serving;
-  offer(on ? SERVICES : []);
+  const adisk = adiskTxt(settings.shares);
+  // the port of `_adisk._tcp` means nothing; Macs look at its TXT only
+  offer(on ? [...SERVICES, ...(adisk ? [{ type: "_adisk._tcp", port: 9, txt: adisk }] : [])] : []);
   refreshWsd(on ? serverName() : null);
 }
 
@@ -255,6 +273,8 @@ export interface ShareInput {
   name?: unknown;
   guest?: unknown;
   users?: unknown;
+  /** `{ limit }` (GB, 0 — no limit) turns Time Machine on, null turns it off */
+  timeMachine?: unknown;
 }
 
 const isAccess = (v: unknown): v is Access => v === "read" || v === "write";
@@ -276,6 +296,24 @@ function usersOf(value: unknown): Record<string, Access> {
   return out;
 }
 
+
+/** A Time Machine setting as sent, checked against the folder and who may write there */
+async function timeMachineFor(value: unknown, share: Share): Promise<Share["timeMachine"]> {
+  if (value === null || value === false) return undefined;
+  const on = timeMachineOf(value);
+  if (!on) throw new AppError("shares.badTimeMachine");
+  // a Mac signs in to back up: somebody must be able to write there under their own name
+  if (!Object.values(share.users).includes("write")) throw new AppError("shares.timeMachineNobody");
+  const fs = await fsOf(share.path);
+  if (!XATTR.has(fs)) throw new AppError("shares.timeMachineFs", 400, { fs: fs || "?" });
+  return on;
+}
+
+const withTimeMachine = (share: Share, on: Share["timeMachine"]): Share => {
+  const { timeMachine: _, ...rest } = share;
+  return on ? { ...rest, timeMachine: on } : rest;
+};
+
 /** Shares a folder; without a name it is called as the folder is. Whoever shares it may change it unless told otherwise */
 export async function addShare(input: ShareInput, by: User): Promise<SharesReport> {
   if (!installed()) throw new AppError("shares.noTool", 409);
@@ -285,7 +323,8 @@ export async function addShare(input: ShareInput, by: User): Promise<SharesRepor
   if (settings.shares.some((share) => share.path === path)) throw new AppError("shares.already", 409);
   if (settings.shares.length >= MAX_SHARES) throw new AppError("shares.tooMany", 409, { max: MAX_SHARES });
   const name = input.name === undefined || input.name === "" ? nameFor(path, settings.shares.map((share) => share.name)) : named(input.name);
-  const share: Share = { name, path, guest: input.guest === undefined ? "none" : guestOf(input.guest), users: input.users === undefined ? { [by.id]: "write" } : usersOf(input.users) };
+  let share: Share = { name, path, guest: input.guest === undefined ? "none" : guestOf(input.guest), users: input.users === undefined ? { [by.id]: "write" } : usersOf(input.users) };
+  if (input.timeMachine !== undefined) share = withTimeMachine(share, await timeMachineFor(input.timeMachine, share));
   settings.shares = [...settings.shares, share];
   record("system.share.on", { user: by.name, detail: name });
   return applied();
@@ -293,10 +332,13 @@ export async function addShare(input: ShareInput, by: User): Promise<SharesRepor
 
 export async function changeShare(current: string, input: ShareInput): Promise<SharesReport> {
   const share = find(current);
-  const next = { ...share };
+  let next = { ...share };
   if (input.name !== undefined) next.name = named(input.name, share);
   if (input.guest !== undefined) next.guest = guestOf(input.guest);
   if (input.users !== undefined) next.users = usersOf(input.users);
+  if (input.timeMachine !== undefined) next = withTimeMachine(next, await timeMachineFor(input.timeMachine, next));
+  // taking the last writer away leaves no Mac able to sign in to back up
+  else if (next.timeMachine && !Object.values(next.users).includes("write")) throw new AppError("shares.timeMachineNobody");
   settings.shares = settings.shares.map((one) => (one === share ? next : one));
   return applied();
 }
