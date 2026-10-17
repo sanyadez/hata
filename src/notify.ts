@@ -25,6 +25,10 @@ export type Channel = (typeof CHANNELS)[number];
 export interface NotifyConfig {
   /** Send what needs attention; off — nothing is sent, the channels stay set up */
   problems: boolean;
+  /** Say also when a problem that was sent is over */
+  resolved: boolean;
+  /** A word after every night's backups: how many apps, and which failed */
+  backups: boolean;
   telegram: { enabled: boolean; token: string; chat: string };
   /** `url` is the address of the topic (`https://ntfy.sh/my-topic`); `token` — for a protected topic */
   ntfy: { enabled: boolean; url: string; token: string };
@@ -35,6 +39,8 @@ export interface NotifyConfig {
 
 export const DEFAULT_CONFIG: NotifyConfig = {
   problems: true,
+  resolved: true,
+  backups: false,
   telegram: { enabled: false, token: "", chat: "" },
   ntfy: { enabled: false, url: "", token: "" },
   webhook: { enabled: false, url: "" },
@@ -65,6 +71,8 @@ export function changeConfig(current: NotifyConfig, patch: unknown): NotifyConfi
   if (!isPlainObject(patch)) return "notify.bad";
   const next: NotifyConfig = structuredClone(current);
   if ("problems" in patch) next.problems = patch.problems === true;
+  if ("resolved" in patch) next.resolved = patch.resolved === true;
+  if ("backups" in patch) next.backups = patch.backups === true;
   if (isPlainObject(patch.telegram)) {
     const p = patch.telegram;
     next.telegram = { enabled: "enabled" in p ? p.enabled === true : next.telegram.enabled, token: text(p.token, next.telegram.token), chat: text(p.chat, next.telegram.chat) };
@@ -123,6 +131,10 @@ export interface SeenItem {
   severity?: AttentionItem["severity"];
   /** When it went away — kept for a while, so one that comes and goes is not sent each time */
   gone?: number;
+  /** The item as it was last seen, kept once it was sent — to say it is over in its own words */
+  item?: AttentionItem;
+  /** When it was said to be over */
+  resolved?: number;
 }
 export type Seen = Record<string, SeenItem>;
 
@@ -134,18 +146,23 @@ export const QUIET_MS = 6 * 3600_000;
 /** A failure is an event — the next one is news again; so is the next version */
 export const keyOf = (item: AttentionItem): string => (item.at ? `${item.id}@${item.at}` : item.code === "update" ? `${item.id}@${item.detail.version}` : item.id);
 
+/** A state that can be over — not an event (a failure, a new version), which simply happened */
+const lasting = (item: AttentionItem): boolean => !item.at && item.code !== "update";
+
 /**
  * Which items of the list to send now, given what was seen before: each problem once — after it has
- * lasted `SETTLE_MS`, and again when it turns from a warning into a danger.
+ * lasted `SETTLE_MS`, and again when it turns from a warning into a danger. `resolved` are the problems
+ * sent before that have been gone for `SETTLE_MS` — said once; one that comes back after that is new.
  */
-export function due(items: AttentionItem[], seen: Seen, now: number): { send: AttentionItem[]; seen: Seen } {
+export function due(items: AttentionItem[], seen: Seen, now: number): { send: AttentionItem[]; resolved: AttentionItem[]; seen: Seen } {
   const next: Seen = {};
   const send: AttentionItem[] = [];
+  const resolved: AttentionItem[] = [];
   for (const item of items) {
     const key = keyOf(item);
     const old = seen[key];
-    // back after too long a pause to be the same occurrence
-    const was = old && (old.gone === undefined || now - old.gone < (old.sent === undefined ? SETTLE_MS : QUIET_MS)) ? old : undefined;
+    // back after too long a pause to be the same occurrence, or after it was said to be over
+    const was = old && old.resolved === undefined && (old.gone === undefined || now - old.gone < (old.sent === undefined ? SETTLE_MS : QUIET_MS)) ? old : undefined;
     const record: SeenItem = was ? { since: was.since, sent: was.sent, severity: was.severity } : { since: now };
     const worse = record.sent !== undefined && record.severity === "warn" && item.severity === "danger";
     if ((record.sent === undefined || worse) && now - record.since >= SETTLE_MS) {
@@ -153,15 +170,22 @@ export function due(items: AttentionItem[], seen: Seen, now: number): { send: At
       record.sent = now;
       record.severity = item.severity;
     }
+    if (record.sent !== undefined && lasting(item)) record.item = item;
     next[key] = record;
   }
   for (const [key, record] of Object.entries(seen)) {
     if (key in next) continue;
     const gone = record.gone ?? now;
+    const kept: SeenItem = { ...record, gone };
+    // over for long enough not to be a flicker: said once
+    if (kept.item && kept.resolved === undefined && now - gone >= SETTLE_MS) {
+      resolved.push(kept.item);
+      kept.resolved = now;
+    }
     // one not sent yet is remembered briefly: a container that keeps restarting is "running" in between
-    if (now - gone < (record.sent === undefined ? SETTLE_MS : QUIET_MS)) next[key] = { ...record, gone };
+    if (now - gone < (record.sent === undefined ? SETTLE_MS : QUIET_MS)) next[key] = kept;
   }
-  return { send, seen: next };
+  return { send, resolved, seen: next };
 }
 
 // --- Wording ------------------------------------------------------------------------------------
@@ -169,7 +193,7 @@ export function due(items: AttentionItem[], seen: Seen, now: number): { send: At
 export interface Message {
   title: string;
   text: string;
-  severity: AttentionItem["severity"] | "info";
+  severity: AttentionItem["severity"] | "info" | "ok";
   /** The page of Hata it is about, as a hash route: `#/apps/memos` */
   route: string;
   /** Notifications with the same tag replace one another on a device */
@@ -227,6 +251,28 @@ export function wording(items: AttentionItem[], lang: string): Message[] {
   ];
 }
 
+/** The problems that are over, in the words they were sent with; the tag replaces their notification on a device */
+export function resolvedWording(items: AttentionItem[], lang: string): Message[] {
+  const sent = items.map((item) => wording([item], lang)[0]!);
+  if (sent.length > SEPARATE) return [{ title: tr(lang, "notify.resolved.several", { n: sent.length }), text: sent.map((m) => "• " + m.title).join("\n"), severity: "ok", route: "#/", tag: "resolved", code: "resolved" }];
+  return sent.map((m) => ({ ...m, title: tr(lang, "notify.resolved.title", { title: m.title }), text: tr(lang, "notify.resolved.text"), severity: "ok", code: "resolved." + m.code }));
+}
+
+/** What the night's backups came to */
+export interface BackupRun {
+  ok: number;
+  failed: string[];
+  took: number;
+}
+
+export function backupMessage(run: BackupRun, lang: string): Message {
+  const minutes = String(Math.max(1, Math.round(run.took / 60_000)));
+  const names = run.failed.map((name) => (name.includes("@") ? tr(lang, "notify.backups.onMachine", { app: name.split("@")[0]!, machine: name.split("@")[1]! }) : name)).join(", ");
+  return run.failed.length
+    ? { title: tr(lang, "notify.backups.failedTitle", { ok: run.ok, failed: run.failed.length }), text: tr(lang, "notify.backups.failedText", { names, minutes }), severity: "warn", route: "#/backups", tag: "backups", code: "backups" }
+    : { title: tr(lang, "notify.backups.title", { ok: run.ok }), text: tr(lang, "notify.backups.text", { minutes }), severity: "ok", route: "#/backups", tag: "backups", code: "backups" };
+}
+
 /** What an agent asks to do, as the rest of the sentence "It wants to …" */
 export function askedWhat(ask: Pick<Ask, "tool" | "title" | "args">, lang: string): string {
   const key = `approvals.what.${ask.tool}${ask.tool === "app_remove" && ask.args.deleteData === true ? ".data" : ""}`;
@@ -257,7 +303,7 @@ export interface Outgoing {
 }
 
 const escapeHtml = (value: string): string => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-const MARKS = { danger: "🔴", warn: "🟠", info: "🏠" } as const;
+const MARKS = { danger: "🔴", warn: "🟠", info: "🏠", ok: "✅" } as const;
 
 export function telegramRequest(config: NotifyConfig["telegram"], message: Message, base: string): Outgoing {
   const lines = [`${MARKS[message.severity]} <b>${escapeHtml(message.title)}</b>`, escapeHtml(message.text), `<a href="${escapeHtml(base + message.route)}">${escapeHtml(hostname())}</a>`];
@@ -278,7 +324,7 @@ export function ntfyRequest(config: NotifyConfig["ntfy"], message: Message, base
       title: message.title,
       message: message.text || message.title,
       priority: message.severity === "danger" ? 5 : message.severity === "warn" ? 4 : 3,
-      tags: [message.severity === "danger" ? "rotating_light" : message.severity === "warn" ? "warning" : "house"],
+      tags: [message.severity === "danger" ? "rotating_light" : message.severity === "warn" ? "warning" : message.severity === "ok" ? "white_check_mark" : "house"],
       click: base + message.route,
     }),
   };
@@ -506,6 +552,14 @@ export async function sendAsk(ask: Ask): Promise<void> {
   errors.forEach((error, i) => error && console.error(`Notification over ${channels[i]} failed: ${error}`));
 }
 
+/** After the night's backups, when that is asked for */
+export async function sendBackupRun(run: BackupRun): Promise<void> {
+  if (!state.config.backups) return;
+  const channels = activeChannels();
+  const errors = await Promise.all(channels.map((channel) => deliver(channel, (lang) => [backupMessage(run, lang)])));
+  errors.forEach((error, i) => error && console.error(`Notification over ${channels[i]} failed: ${error}`));
+}
+
 /** Chats that have written to the bot lately — to pick the chat instead of looking its number up */
 export async function telegramChats(token: unknown): Promise<{ id: string; title: string }[] | string> {
   // the page does not have the saved token: an empty field means that one
@@ -537,8 +591,9 @@ async function check(): Promise<void> {
     const changed = JSON.stringify(result.seen) !== JSON.stringify(state.seen);
     state.seen = result.seen;
     if (changed) save();
-    if (result.send.length === 0) return;
-    const errors = await Promise.all(channels.map((channel) => deliver(channel, (lang) => wording(result.send, lang))));
+    const over = state.config.resolved ? result.resolved : [];
+    if (result.send.length === 0 && over.length === 0) return;
+    const errors = await Promise.all(channels.map((channel) => deliver(channel, (lang) => [...wording(result.send, lang), ...resolvedWording(over, lang)])));
     errors.forEach((error, i) => error && console.error(`Notification over ${channels[i]} failed: ${error}`));
   } catch (e) {
     console.error("Could not check what needs attention:", e instanceof Error ? e.message : e);

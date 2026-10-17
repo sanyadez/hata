@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { parseCompose } from "../src/appform";
 import { settings } from "../src/config";
-import { gateTarget, guardsOf, mayOpen, otherPorts, overrideText } from "../src/gate";
+import { gateTarget, guardsOf, mayOpen, otherPorts, overrideText, whoHeaders } from "../src/gate";
 
 const compose = parseCompose(`
 name: demo
@@ -116,4 +116,15 @@ test("devices this server has not are left out of the app, the rest kept", async
   expect(text).toContain('  "plex":\n    devices: !override ["/dev/dri:/dev/dri","nvidia.com/gpu=all"]');
   expect(text).not.toContain('"web"');
   expect(Bun.YAML.parse(text.replace(/!override /g, ""))).toEqual({ services: { plex: { devices: ["/dev/dri:/dev/dri", "nvidia.com/gpu=all"] } } });
+});
+
+test("the app hears who is signed in from Hata only", () => {
+  const headers = new Headers({ "remote-user": "mallory", "X-WebAuth-User": "admin", "x-forwarded-groups": "admins", accept: "text/html" });
+  whoHeaders(headers, null);
+  expect([...headers.keys()]).toEqual(["accept"]);
+  whoHeaders(headers, { name: "olena", role: "member" });
+  expect(Object.fromEntries(headers)).toEqual({ accept: "text/html", "remote-user": "olena", "remote-name": "olena", "remote-groups": "users", "x-forwarded-user": "olena", "x-webauth-user": "olena" });
+  whoHeaders(headers, { name: "root", role: "admin" });
+  expect(headers.get("remote-groups")).toBe("admins");
+  expect(headers.get("remote-user")).toBe("root");
 });

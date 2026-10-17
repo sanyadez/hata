@@ -20,7 +20,7 @@ import { bus } from "./bus";
 import { IMAGE_MIME, imageType } from "./wallpapers";
 import { DATA_DIR, settings, timezone } from "./config";
 import { record } from "./activity";
-import { compose as runCompose, composeCmd, containerStats, imageUser, listContainers, PROJECT_LABEL, SERVICE_LABEL, type ContainerStats, type ContainerSummary } from "./docker";
+import { compose as runCompose, composeCmd, containerStats, imageUser, inspectContainer, listContainers, PROJECT_LABEL, SERVICE_LABEL, type ContainerInspect, type ContainerStats, type ContainerSummary } from "./docker";
 import { writeTextAtomic } from "./fsutil";
 import { newerImages } from "./images";
 import { guessBase, merge3, same, type MergeChange } from "./merge";
@@ -852,6 +852,36 @@ export function onAppRemoved(hook: (name: string) => void): void {
 let beforeUpdate: ((name: string, log: Log) => Promise<void>) | null = null;
 export function onBeforeUpdate(hook: (name: string, log: Log) => Promise<void>): void {
   beforeUpdate = hook;
+}
+
+/**
+ * Whether a stopped container is one Docker could not start because its disk was away: it has a restart
+ * policy that would have run it, Docker kept the error of the start, and a folder it mounts lies on one
+ * of the disks that came back. A container somebody stopped carries no error, so it stays stopped.
+ */
+export function failedOnDisk(c: Pick<ContainerInspect, "State" | "HostConfig" | "Mounts">, paths: string[]): boolean {
+  if (c.State.Running || !c.State.Error) return false;
+  if (!["always", "unless-stopped", "on-failure"].includes(c.HostConfig?.RestartPolicy?.Name ?? "")) return false;
+  return (c.Mounts ?? []).some((m) => m.Type === "bind" && paths.some((path) => m.Source === path || m.Source.startsWith(path + "/")));
+}
+
+/** A disk that was away is back: the apps that could not start without it are started */
+export async function startAfterDisk(paths: string[]): Promise<string[]> {
+  const names = new Set(installedNames());
+  const started: string[] = [];
+  const waiting = new Map<string, string[]>();
+  for (const c of await listContainers().catch(() => [])) {
+    const name = c.Labels[PROJECT_LABEL] ?? "";
+    if (c.State !== "running" && names.has(name)) waiting.set(name, [...(waiting.get(name) ?? []), c.Id]);
+  }
+  for (const [name, ids] of waiting) {
+    if (busy.has(name)) continue;
+    const seen = await Promise.all(ids.map((id) => inspectContainer(id).catch(() => null)));
+    if (!seen.some((c) => c && failedOnDisk(c, paths))) continue;
+    appAction(name, "start", "disk");
+    started.push(name);
+  }
+  return started;
 }
 
 export function appAction(name: string, action: string, user: string): Job {

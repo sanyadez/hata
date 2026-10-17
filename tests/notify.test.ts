@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { AttentionItem } from "../src/attention";
-import { shownConfig, changeConfig, cleanConfig, DEFAULT_CONFIG, due, keyOf, ntfyRequest, QUIET_MS, SETTLE_MS, telegramRequest, webhookRequest, wording, type Seen } from "../src/notify";
+import { backupMessage, resolvedWording, shownConfig, changeConfig, cleanConfig, DEFAULT_CONFIG, due, keyOf, ntfyRequest, QUIET_MS, SETTLE_MS, telegramRequest, webhookRequest, wording, type Seen } from "../src/notify";
 
 const disk = (severity: AttentionItem["severity"] = "warn"): AttentionItem => ({ id: "disk:/", severity, code: "disk", detail: { path: "/", percent: 91, free: 9 * 1024 ** 3 } });
 const restarting: AttentionItem = { id: "restarting:memos", severity: "danger", code: "restarting", detail: { title: "Memos", container: "memos" }, app: "memos" };
@@ -107,4 +107,44 @@ test("a saved token is not shown again, only that there is one", () => {
   // what the page sends back without a token keeps the saved one
   const again = changeConfig(config, { telegram: { enabled: true, chat: "2" } });
   expect(typeof again === "string" ? again : again.telegram.token).toBe(config.telegram.token);
+});
+
+test("a problem that was sent and is gone is said to be over, once; one that comes back after that is new", () => {
+  let seen: Seen = {};
+  const step = (now: number, items: AttentionItem[]) => {
+    const result = due(items, seen, now);
+    seen = result.seen;
+    return [result.send.map(keyOf), result.resolved.map(keyOf)];
+  };
+  expect(step(0, [disk()])).toEqual([[], []]);
+  expect(step(SETTLE_MS, [disk()])).toEqual([["disk:/"], []]);
+  // gone for a moment: a flicker
+  expect(step(SETTLE_MS + 30_000, [])).toEqual([[], []]);
+  expect(step(SETTLE_MS + 60_000, [disk()])).toEqual([[], []]);
+  expect(step(SETTLE_MS + 90_000, [])).toEqual([[], []]);
+  expect(step(2 * SETTLE_MS + 90_000, [])).toEqual([[], ["disk:/"]]);
+  expect(step(3 * SETTLE_MS + 90_000, [])).toEqual([[], []]);
+  // back: a new problem, sent again once it has lasted
+  expect(step(4 * SETTLE_MS, [disk()])).toEqual([[], []]);
+  expect(step(5 * SETTLE_MS, [disk()])).toEqual([["disk:/"], []]);
+});
+
+test("one never sent, a failure and a new version are never said to be over", () => {
+  const update: AttentionItem = { id: "update", severity: "warn", code: "update", detail: { version: "0.5.0" } };
+  let seen: Seen = {};
+  const over: string[] = [];
+  for (const [now, items] of [[0, [failed(1), update, restarting]], [SETTLE_MS, [failed(1), update]], [SETTLE_MS + 30_000, []], [3 * SETTLE_MS, []]] as [number, AttentionItem[]][]) {
+    const result = due(items, seen, now);
+    seen = result.seen;
+    over.push(...result.resolved.map(keyOf));
+  }
+  expect(over).toEqual([]);
+});
+
+test("the words of a problem that is over, and of the night's backups", () => {
+  expect(resolvedWording([disk()], "en")).toEqual([{ title: "Over: Disk / is 91% full", text: "It no longer needs attention.", severity: "ok", route: "#/", tag: "disk:/", code: "resolved.disk", app: undefined }]);
+  const many = ["a", "b", "c", "d"].map((name): AttentionItem => ({ id: `partial:${name}`, severity: "warn", code: "partial", detail: { title: name.toUpperCase(), container: name }, app: name }));
+  expect(resolvedWording(many, "en")).toMatchObject([{ title: "4 problems are over", severity: "ok" }]);
+  expect(backupMessage({ ok: 9, failed: [], took: 200_000 }, "en")).toMatchObject({ title: "Night backups: all 9 done", text: "It took 3 min.", severity: "ok", route: "#/backups" });
+  expect(backupMessage({ ok: 7, failed: ["memos", "kuma@nas"], took: 10_000 }, "uk")).toMatchObject({ title: "Нічні копії: не вдалося 2, зроблено 7", text: "Не скопійовано: memos, kuma на nas. Увесь запуск тривав 1 хв.", severity: "warn" });
 });

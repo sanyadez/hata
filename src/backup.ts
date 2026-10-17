@@ -535,12 +535,17 @@ export async function backupOverview(lang: string): Promise<BackupOverview> {
 
 // --- The daily run ----------------------------------------------------------------------------------
 
+/** Told after every run by the schedule: how many apps were backed up, which were not, how long it took */
+let runDone: ((run: { ok: number; failed: string[]; took: number }) => void) | null = null;
+export const onScheduledRun = (hook: typeof runDone): void => void (runDone = hook);
+
 /** Backs up every included app, one after another. Returns false if a run is already going. */
 export async function runBackups(user: string, reason: SnapshotReason = "schedule"): Promise<boolean> {
   if (running) return false;
   running = true;
   const failed: string[] = [];
   let ok = 0;
+  const started = Date.now();
   try {
     for (const name of installedNames()) {
       if (settings.backup.exclude.includes(name)) continue;
@@ -569,6 +574,7 @@ export async function runBackups(user: string, reason: SnapshotReason = "schedul
     writeJsonAtomic(STATE_FILE, state);
     mirror();
   }
+  if (user === "schedule") runDone?.({ ok, failed, took: Date.now() - started });
   return true;
 }
 

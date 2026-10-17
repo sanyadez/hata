@@ -16,11 +16,11 @@ import { agentUser, cannotGrant, cleanName, createKey, grantKey, keyOf, listKeys
 import type { Level } from "./agents";
 import { Desk } from "./approvals";
 import { answerCall, assistantConfig, configured as assistantReady, findChat, listChats, ModelError, modelsFor, removeChat, retry as retryAssistant, say as sayToAssistant, shownChat, shownConfig as shownAssistant, stopChat, updateAssistant } from "./assistant";
-import { AppError, appAction, startJob, stoppable, stopJob, type Job, installedNames, jobFinished, appEnv, appDetail, appLogs, appIcon, appSettings, appStats, applyCompose, ICON_MIME, MAX_ICON, removeAppIcon, setAppIcon, applySettings, installFromSettings, applyStoreUpdate, composeText, getJob, installCustom, installFromStore, listApps, listJobs, onAppRemoved, planStoreUpdate, readCompose, refreshAppUrls, removeApp, storeAppDetail, viewOf } from "./apps";
+import { AppError, appAction, startAfterDisk, startJob, stoppable, stopJob, type Job, installedNames, jobFinished, appEnv, appDetail, appLogs, appIcon, appSettings, appStats, applyCompose, ICON_MIME, MAX_ICON, removeAppIcon, setAppIcon, applySettings, installFromSettings, applyStoreUpdate, composeText, getJob, installCustom, installFromStore, listApps, listJobs, onAppRemoved, planStoreUpdate, readCompose, refreshAppUrls, removeApp, storeAppDetail, viewOf } from "./apps";
 import { certificateStates, challengeResponse, ensureCertificates, loadCertificates } from "./acme";
 import { attention } from "./attention";
 import { folderSize, restoreFromSnapshot, snapshotFile, snapshotFiles } from "./snapshot";
-import { appFolders, extraAllowed, backupApp, backupOverview, deleteSnapshot, listSnapshots, mirror, restoreSnapshot, resumeRestore, runBackups, scheduleBackups, takeServerSnapshot } from "./backup";
+import { appFolders, onScheduledRun, extraAllowed, backupApp, backupOverview, deleteSnapshot, listSnapshots, mirror, restoreSnapshot, resumeRestore, runBackups, scheduleBackups, takeServerSnapshot } from "./backup";
 import { allowed as oauthAllowed, declined as oauthDeclined, findClient, holdQuestion, question as oauthQuestion, readAuthorize, register as oauthRegister, resourceMetadata, serverMetadata, spendCode } from "./oauth";
 import { checkOffsite, forgetHost, offsiteFailure, saveOffsite } from "./offsite";
 import { notSnoozed, snooze } from "./snooze";
@@ -36,7 +36,7 @@ import { DOCKER_INSTALL_COMMAND, installDocker, startDocker } from "./dockerinst
 import { installOne, removeOne, toolsReport } from "./tools";
 import { ArrayError, arrayReport, arrayTrouble, bringBack, rebuild as rebuildParity, repair as repairArray, scrub as scrubArray, setUp as setUpArray, startSnapraid, stop as stopArray, sync as syncArray, turnOff as turnOffArray } from "./snapraid";
 import { dockerSpace, dropImage, dropVolume, prune as pruneDocker } from "./dockerspace";
-import { ignoreDisk, unusedDisks, absent, connectVolume, disconnect, checkVolume, wipeDisk, formatDisk, mergeFolders, mountingReport, relabel, startMounting, type Outcome } from "./mounting";
+import { ignoreDisk, unusedDisks, absent, onDiskBack, connectVolume, disconnect, checkVolume, wipeDisk, formatDisk, mergeFolders, mountingReport, relabel, startMounting, type Outcome } from "./mounting";
 import { moveData } from "./movedata";
 import { installPackage } from "./packages";
 import {
@@ -96,7 +96,7 @@ import { isPlainObject } from "./fsutil";
 import { mcpResponse } from "./mcp";
 import { instructions as mcpInstructions, TOOLS } from "./mcptools";
 import { localNamesStatus, refreshLocalNames } from "./mdns";
-import { addDevice, CHANNELS, listDevices, notifyStatus, pushKey, removeDevice, renewDevice, sendAsk, sendTest, startNotifications, telegramChats, updateNotify } from "./notify";
+import { addDevice, CHANNELS, listDevices, notifyStatus, pushKey, removeDevice, renewDevice, sendAsk, sendBackupRun, sendTest, startNotifications, telegramChats, updateNotify } from "./notify";
 import { appHost, appLabel, classifyHost, clientIp, cookieDomain, domainOf, localDomain, requestHost, requestPort, requestProto, siteDomain } from "./site";
 import { newChallenge, PASSKEY_ALGORITHMS, spendChallenge, verifyAssertion, verifyRegistration } from "./passkey";
 import { qrMatrix } from "./qr";
@@ -1822,7 +1822,11 @@ async function files(req: Request, url: URL, server: Server, by: string, userId:
     const data = await body(req);
     return json({ path: makeFile(data.path, data.name) }, 201);
   }
-  if (path === "/api/files/find" && method === "GET") return json(await findFiles(q.get("path") ?? "", q.get("q")));
+  if (path === "/api/files/find" && method === "GET") {
+    // no folder: the data folder, as the search of the header asks
+    const under = q.get("path") || settings.dataRoot;
+    return json({ ...(await findFiles(under, q.get("q"))), under });
+  }
   if (path === "/api/files/extract" && method === "POST") return json({ job: extractArchive((await body(req)).path, by).id }, 202);
   if (path === "/api/files/pin" && method === "POST") {
     const data = await body(req);
@@ -2109,13 +2113,15 @@ async function serveApp(req: Request, server: Server, label: string): Promise<Re
   if (!upstream) return page(404, "No web page", `${app.title} has no web port to open.`);
   const proto = requestProto(req);
   const url = new URL(req.url);
+  let user: User | null = null;
   if (access.protect || access.allowed !== "all") {
     const here = `${proto}://${req.headers.get("host") ?? url.host}${url.pathname}${url.search}`;
     // sign-in is on Hata's own name of the same domain: the cookie it sets reaches this address too
-    const refusal = guard(req, app.name, `${proto}://${domainOf(requestHost(req))}${requestPort(req)}/?next=${encodeURIComponent(here)}`);
-    if (refusal) return refusal;
+    const passed = guard(req, app.name, `${proto}://${domainOf(requestHost(req))}${requestPort(req)}/?next=${encodeURIComponent(here)}`);
+    if (passed instanceof Response) return passed;
+    user = passed;
   }
-  return passToApp(req, server, upstream, proto, clientIp(req, server));
+  return passToApp(req, server, upstream, proto, clientIp(req, server), user);
 }
 
 // --- HTTPS served by Hata itself --------------------------------------------------------------------
@@ -2291,6 +2297,9 @@ export async function serve(): Promise<void> {
       await jobFinished(appAction(app, "update", "schedule"));
     },
   });
+  // apps Docker could not start while their disk was away are started once it is back
+  onScheduledRun((run) => void sendBackupRun(run).catch(() => {}));
+  onDiskBack((paths) => void startAfterDisk(paths).catch((e) => console.error("Could not start the apps of a disk that came back:", e instanceof Error ? e.message : e)));
   startMounting();
   startNetwork();
   startSnapraid();
