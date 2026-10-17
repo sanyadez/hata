@@ -23,6 +23,18 @@ export interface Share {
   guest: Access | "none";
   /** What each user of Hata may do, by id; one not listed may not open the folder */
   users: Record<string, Access>;
+  /** Macs may keep their Time Machine backups here; `limit` — how much of the disk they may take, GB (0 — no limit) */
+  timeMachine?: { limit: number };
+}
+
+/** The most a Time Machine limit may say, GB */
+export const MAX_TM_LIMIT = 1_000_000;
+
+/** A Time Machine setting as kept: on with a whole number of GB, or off (undefined) */
+export function timeMachineOf(value: unknown): Share["timeMachine"] {
+  if (typeof value !== "object" || value === null) return undefined;
+  const limit = (value as { limit?: unknown }).limit ?? 0;
+  return typeof limit === "number" && Number.isInteger(limit) && limit >= 0 && limit <= MAX_TM_LIMIT ? { limit } : undefined;
 }
 
 /** A user of Hata as Samba knows them */
@@ -78,7 +90,8 @@ export function cleanShares(value: unknown): Share[] {
     if (out.some((share) => share.name.toLowerCase() === name.toLowerCase() || share.path === item.path)) continue;
     const users: Record<string, Access> = {};
     if (typeof item.users === "object" && item.users !== null && !Array.isArray(item.users)) for (const [id, access] of Object.entries(item.users)) if (isAccess(access)) users[id] = access;
-    out.push({ name, path: item.path, guest: isAccess(item.guest) ? item.guest : "none", users });
+    const timeMachine = timeMachineOf(item.timeMachine);
+    out.push({ name, path: item.path, guest: isAccess(item.guest) ? item.guest : "none", users, ...(timeMachine ? { timeMachine } : {}) });
   }
   return out;
 }
@@ -94,6 +107,8 @@ export interface Server {
   name: string;
   /** Hata tells those who browse the network of the folders itself, so Samba must not (through Avahi) */
   announced: boolean;
+  /** Shared folders on file systems that keep no extended attributes (FAT, exFAT, another machine's folders) */
+  bare?: string[];
 }
 
 /** A computer's name in the old Windows way: fifteen characters at most */
@@ -129,6 +144,11 @@ export function smbConf(shares: Share[], accounts: Account[], server: Server = {
     // the trash of Hata's file manager, at the top of a disk: not to be seen or reached over the network
     "   veto files = /.hata-trash/",
   ];
+  // Time Machine wants Apple's extensions, and a Mac goes wrong when some folders of a server have them
+  // and others do not: so all have them. What a Mac or Windows keeps besides the data (resource forks,
+  // Finder's marks, "downloaded from the internet") goes into extended attributes.
+  const apple = shares.some((share) => share.timeMachine);
+  if (apple) lines.push("   vfs objects = catia fruit streams_xattr", "   fruit:metadata = stream");
   if (netbiosName(server.name)) lines.push(`   netbios name = ${netbiosName(server.name)}`);
   if (server.announced) lines.push("   multicast dns register = no");
   const known = new Map(accounts.map((account) => [account.id, unixName(account.id)]));
@@ -144,8 +164,25 @@ export function smbConf(shares: Share[], accounts: Account[], server: Server = {
     if (share.guest !== "write" && names("write")) lines.push(`   write list = ${names("write")}`);
     // Windows' "archive" mark would otherwise be kept as the right to run the file
     lines.push("   force user = root", "   inherit owner = yes", "   inherit permissions = yes", "   map archive = no");
+    // a file system with no room for extended attributes: no streams, as if there were no extensions —
+    // a stream written there would fail instead of being left out
+    if (apple && server.bare?.includes(share.path)) lines.push("   vfs objects = catia fruit", "   fruit:resource = file", "   fruit:metadata = netatalk");
+    if (share.timeMachine) {
+      lines.push("   fruit:time machine = yes", "   durable handles = yes", "   kernel oplocks = no", "   kernel share modes = no", "   posix locking = no");
+      if (share.timeMachine.limit) lines.push(`   fruit:time machine max size = ${share.timeMachine.limit}G`);
+    }
   }
   return lines.join("\n") + "\n";
+}
+
+/**
+ * How a Mac learns which folders take its Time Machine backups: the TXT of `_adisk._tcp` — one `dk<n>`
+ * per folder (`adVF=0x82`: a Time Machine destination). Null while no folder takes them.
+ */
+export function adiskTxt(shares: Share[]): string[] | null {
+  const ours = shares.filter((share) => share.timeMachine);
+  if (!ours.length) return null;
+  return ["sys=waMa=0,adVF=0x100", ...ours.map((share, n) => `dk${n}=adVN=${share.name},adVF=0x82`)];
 }
 
 /** The file that tells Samba which system account a typed name stands for */

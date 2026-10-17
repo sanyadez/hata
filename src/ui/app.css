@@ -413,6 +413,7 @@ td .clip { max-width: 320px; }
 .job-status.done { color: var(--ok); }
 .job-status.failed { color: var(--danger); }
 .job-status.running { color: var(--muted); }
+.job-status.stopped { color: var(--warn); }
 
 .snapshot-list { display: grid; }
 .snapshot { display: flex; align-items: center; gap: 12px; padding: 12px 0; border-top: 1px solid var(--border); }

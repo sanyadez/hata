@@ -3432,6 +3432,22 @@ async function appComposeTab(app, box) {
   box.replaceChildren(h("div", { class: "editor-head" }, h("div", { class: "grow" }, h("p", { class: "mono small" }, app.composeFile), h("p", { class: "muted small" }, t("app.composeLead"))), save), area, error, h("p", { class: "cmd" }, icon("terminal"), `docker compose -p ${app.name} up -d --remove-orphans`));
 }
 
+/** Ends a running operation that can be ended before its time */
+function stopButton(id) {
+  return button(t("job.stopIt"), {
+    onclick: async (e) => {
+      const el = e.currentTarget;
+      el.disabled = true;
+      try {
+        await api("POST", `/api/jobs/${id}/stop`);
+      } catch (err) {
+        el.disabled = false;
+        toast(errorText(err), "error");
+      }
+    },
+  }, "x");
+}
+
 /** Follows a running operation without a dialog of its own: every line as it comes, then the job as it ended */
 function followJob(id, onLine) {
   return new Promise((resolve) => {
@@ -3466,6 +3482,8 @@ async function jobDialog(id, kind, title, onDone) {
   const status = h("p", { class: "job-status running" }, t("job.running"));
   let dialog;
   const close = button(t("job.hide"), { onclick: () => dialog.close() });
+  const stop = stopButton(id);
+  stop.hidden = true;
 
   const append = (line) => {
     const stick = log.scrollTop + log.clientHeight >= log.scrollHeight - 8;
@@ -3473,9 +3491,10 @@ async function jobDialog(id, kind, title, onDone) {
     if (stick) log.scrollTop = log.scrollHeight;
   };
   const finish = (job) => {
-    status.className = "job-status " + job.status;
-    status.textContent = job.status === "done" ? t("job.done") : t("job.failed");
+    status.className = "job-status " + (job.stopped ? "stopped" : job.status);
+    status.textContent = job.status === "done" ? t("job.done") : job.stopped ? t("job.stopped") : t("job.failed");
     close.lastChild.textContent = t("common.close");
+    stop.hidden = true;
     jobListeners.delete(listener);
     if (job.status === "done") onDone?.();
   };
@@ -3490,6 +3509,7 @@ async function jobDialog(id, kind, title, onDone) {
         next = event.n + 1;
       }
     } else if (event.job.status !== "running") finish(event.job);
+    else if (event.job.stoppable && !event.job.stopped) stop.hidden = false;
   };
   const listener = (event) => {
     if (event.job.id !== id) return;
@@ -3498,7 +3518,7 @@ async function jobDialog(id, kind, title, onDone) {
   };
   jobListeners.add(listener);
 
-  dialog = openDialog("wide", h("h2", null, t("job." + kind, { app: title })), log, h("footer", null, status, close));
+  dialog = openDialog("wide", h("h2", null, t("job." + kind, { app: title })), log, h("footer", null, status, stop, close));
   dialog.addEventListener("close", () => jobListeners.delete(listener));
 
   try {
@@ -3506,7 +3526,10 @@ async function jobDialog(id, kind, title, onDone) {
     for (const line of job.log) append(line);
     next = job.lineCount;
     if (job.status !== "running") finish(job);
-    else pending.forEach(consume);
+    else {
+      stop.hidden = !job.stoppable || !!job.stopped;
+      pending.forEach(consume);
+    }
   } catch (e) {
     next = 0;
     append(errorText(e));
@@ -8841,13 +8864,15 @@ function checkDialog(disk, volume) {
       () => api("POST", "/api/disks/fsck", { device: volume.path, repair }),
       async (started) => {
         const lines = h("pre", { class: "said" });
-        put(result, h("p", { class: "with-icon muted" }, icon("refresh"), t(repair ? "fsck.repairing" : "fsck.running")), lines);
+        // a look can be ended; a repair goes to its end
+        put(result, h("div", { class: "section-head" }, h("p", { class: "with-icon muted" }, icon("refresh"), t(repair ? "fsck.repairing" : "fsck.running")), !repair && stopButton(started.job)), lines);
         const job = await followJob(started.job, (line) => {
           lines.append(line + "\n");
           lines.scrollTop = lines.scrollHeight;
         });
         go.disabled = false;
         setDisks(await api("GET", "/api/disks").catch(() => state.disks));
+        if (job.stopped) return put(result, h("p", { class: "banner" }, t("fsck.stopped")), job.error && job.error !== "Stopped." && h("p", { class: "error" }, job.error));
         if (job.status !== "done" || !job.result) return put(result, h("p", { class: "banner danger" }, t("fsck.verdict.failed")), h("pre", { class: "said" }, job.error || lines.textContent));
         const { verdict, output, back } = job.result;
         const mend = verdict === "errors" && !repair;
@@ -9138,6 +9163,37 @@ function disconnectDialog(mount) {
 
 let disksTimer = 0;
 
+/** Long work on a disk that runs while the page is open: what it says last, and the way back to it */
+let diskWorkListener = null;
+function diskWorkStrip(work) {
+  // a disk by its model, a file system by its device
+  const disk = state.disks?.disks.find((d) => d.name === work.target);
+  const title = disk ? diskTitle(disk) : work.target;
+  const line = h("span", { class: "muted small mono clip" }, work.line);
+  const stop = work.stoppable && stopButton(work.id);
+  jobListeners.delete(diskWorkListener);
+  diskWorkListener = (event) => {
+    if (event.job.id !== work.id) return;
+    if (event.line !== undefined) line.textContent = event.line;
+    if (event.job.stopped && stop) stop.disabled = true;
+    if (event.job.status !== "running") {
+      jobListeners.delete(diskWorkListener);
+      void api("GET", "/api/disks").then(setDisks, () => {});
+    }
+  };
+  jobListeners.add(diskWorkListener);
+  return h(
+    "section",
+    { class: "card pad" },
+    h(
+      "div",
+      { class: "section-head" },
+      h("div", { class: "with-icon grow" }, icon("refresh"), h("div", { class: "grow" }, h("div", { class: "strong" }, t("mounting.working." + work.kind), title && h("span", { class: "muted" }, " · " + title)), line)),
+      h("div", { class: "row-actions" }, button(t("mounting.working.show"), { class: "small", onclick: () => jobDialog(work.id, work.kind, title, () => void api("GET", "/api/disks").then(setDisks, () => {})) }), stop && (stop.classList.add("small"), stop)),
+    ),
+  );
+}
+
 function storageSection() {
   const data = state.disks;
   if (!data) return [h("p", { class: "muted" }, "…")];
@@ -9242,6 +9298,7 @@ function storageSection() {
     );
   };
   return [
+    data.working && diskWorkStrip(data.working),
     fresh.map(freshCard),
     data.tool === "missing" &&
       data.disks.length > 0 &&
@@ -9854,6 +9911,13 @@ async function shareDialog(path) {
   // a folder shared for the first time is open to whoever shares it
   const users = data.users.map((user) => ({ user, select: choice(share ? (share.users[user.id] ?? "none") : user.id === state.user.id ? "write" : "none") }));
   const guest = choice(share?.guest ?? "none");
+  // Macs back up here with Time Machine; the limit keeps them from filling the disk
+  const tm = h("input", { type: "checkbox", checked: !!share?.timeMachine });
+  const limit = h("input", { type: "number", min: 0, step: 1, inputmode: "numeric", value: share?.timeMachine?.limit || "", placeholder: t("shares.tm.noLimit") });
+  const limitField = field(t("shares.tm.limit"), limit, t("shares.tm.limitHint"));
+  const showLimit = () => (limitField.hidden = !tm.checked);
+  tm.addEventListener("change", showLimit);
+  showLimit();
   const error = h("p", { class: "error", role: "alert" });
   const send = async (method, url, body, done) => {
     error.textContent = "";
@@ -9865,7 +9929,7 @@ async function shareDialog(path) {
       error.textContent = errorText(e);
     }
   };
-  const settings = () => ({ name: name.value.trim(), guest: guest.value, users: Object.fromEntries(users.map(({ user, select }) => [user.id, select.value])) });
+  const settings = () => ({ name: name.value.trim(), guest: guest.value, users: Object.fromEntries(users.map(({ user, select }) => [user.id, select.value])), timeMachine: tm.checked ? { limit: Math.max(0, Math.floor(Number(limit.value) || 0)) } : null });
   const address = share && data.hosts[0] && shareAddresses(data.hosts[0], share.name);
   dialog = openDialog(
     "confirm",
@@ -9892,6 +9956,8 @@ async function shareDialog(path) {
           h("label", null, h("span", { class: "grow" }, h("strong", null, t("shares.guest")), h("span", { class: "muted small block" }, t("shares.guestHint"))), guest),
         ),
       ),
+      h("label", { class: "check" }, tm, h("span", null, h("strong", null, t("shares.tm.title")), h("span", { class: "muted small block" }, t("shares.tm.hint")))),
+      limitField,
       error,
       h("footer", null, share ? button(t("shares.stop"), { class: "danger", onclick: () => send("DELETE", `/api/shares/${encodeURIComponent(share.name)}`, undefined, t("shares.stoppedDone", { name: share.name })) }) : h("span"), closeButton(() => dialog, t("common.cancel")), h("button", { class: "btn primary" }, t(share ? "shares.save" : "shares.share"))),
     ),
@@ -9945,7 +10011,7 @@ function sharesSection() {
     return h(
       "tr",
       null,
-      h("td", null, h("div", { class: "strong" }, share.name), share.missing ? h("div", { class: "small danger-text" }, t("shares.missing")) : h("a", { class: "muted small mono clip block", href: filesHash(share.path) }, share.path)),
+      h("td", null, h("div", { class: "strong" }, share.name), share.timeMachine && h("div", { class: "muted small" }, share.timeMachine.limit ? t("shares.tm.tagLimit", { limit: share.timeMachine.limit }) : t("shares.tm.tag")), share.missing ? h("div", { class: "small danger-text" }, t("shares.missing")) : h("a", { class: "muted small mono clip block", href: filesHash(share.path) }, share.path)),
       h("td", null, who(share)),
       h("td", null, copyLine(address.windows), copyLine(address.url)),
       h("td", null, h("div", { class: "row-actions" }, button(t("shares.settings"), { class: "small", onclick: () => shareDialog(share.path) }))),
