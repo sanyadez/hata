@@ -313,10 +313,10 @@ function parseRoute() {
   if (parts[0] === "store" && state.user?.role !== "guest") return { view: "store" };
   // "#/files" is the data root, wherever it is; "#/files/" is the root of the server
   // "#/files/@<machine>/<folders>" is a folder of another machine
-  if (parts[0] === "files" && isAdmin() && parts[1]?.startsWith("@")) return { view: "files", machine: parts[1].slice(1), path: "/" + parts.slice(2).join("/") };
-  if (parts[0] === "files" && isAdmin()) return { view: "files", machine: "", path: /^#\/?files$/.test(location.hash) ? "" : "/" + parts.slice(1).join("/") };
-  if (parts[0] === "trash" && isAdmin()) return { view: "trash" };
-  if (parts[0] === "hata" && isAdmin()) return { view: "myhata" };
+  if (parts[0] === "files" && mayFiles() && parts[1]?.startsWith("@")) return { view: "files", machine: parts[1].slice(1), path: "/" + parts.slice(2).join("/") };
+  if (parts[0] === "files" && mayFiles()) return { view: "files", machine: "", path: /^#\/?files$/.test(location.hash) ? "" : "/" + parts.slice(1).join("/") };
+  if (parts[0] === "trash" && mayFiles()) return { view: "trash" };
+  if (parts[0] === "hata" && mayFiles()) return { view: "myhata" };
   if (parts[0] === "activity" && isAdmin()) return { view: "activity" };
   if (parts[0] === "backups" && isAdmin()) return { view: "backups" };
   if (parts[0] === "users" && isAdmin()) return { view: "users" };
@@ -773,7 +773,7 @@ new MutationObserver((records) => {
 const NAV = [
   { view: "home", hash: "#/", icon: "home" },
   { view: "store", hash: "#/store", icon: "grid", guest: false },
-  { view: "files", hash: "#/files", icon: "folder", admin: true },
+  { view: "files", hash: "#/files", icon: "folder", files: true },
   { view: "machines", hash: "#/machines", icon: "server", admin: true },
   { view: "backups", hash: "#/backups", icon: "archive", admin: true },
   { view: "users", hash: "#/users", icon: "user", admin: true },
@@ -783,9 +783,26 @@ const NAV = [
 /** Members look at the apps; everything that changes the server is an administrator's */
 // an administrator the rules ask for two-factor sign-in is a member until it is on — the server says so too
 const isAdmin = () => state.user?.role === "admin" && !state.user.mustTwoFactor;
+/** Files are an administrator's, and theirs with whom a folder is shared — only those folders then */
+const mayFiles = () => isAdmin() || !!state.user?.files;
+/** The folders shared with one who is not an administrator, of this server or of a machine; null for an administrator */
+function myShares(machine = state.route.view === "files" ? filesMachine() : "") {
+  if (isAdmin()) return null;
+  if ((state.files?.machine ?? "") === machine && state.files?.shares) return state.files.shares;
+  return machine ? (state.myMachines?.find((m) => m.id === machine)?.shares ?? []) : (state.myShares ?? []);
+}
+
+/** The folders shared with them, here and on the machines, asked once for the sidebar and My Hata */
+async function loadMine() {
+  const mine = await api("GET", "/api/files/shares").catch(() => null);
+  if (!mine) return;
+  state.myShares = mine.shares;
+  state.myMachines = mine.machines;
+  state.favorites = mine.favorites;
+}
 
 const navCurrent = () => (state.route.view === "machine" ? "machines" : state.route.view === "app" ? "home" : state.route.view === "import" ? "store" : state.route.view === "trash" || state.route.view === "myhata" ? "files" : state.route.view);
-const navItems = () => NAV.filter((item) => (!item.admin || isAdmin()) && (item.guest !== false || state.user.role !== "guest"));
+const navItems = () => NAV.filter((item) => (!item.admin || isAdmin()) && (!item.files || mayFiles()) && (item.guest !== false || state.user.role !== "guest"));
 
 function navLinks(className, items = navItems()) {
   const current = navCurrent();
@@ -2517,6 +2534,21 @@ async function addMachineDialog() {
   } catch (e) {
     return toast(errorText(e), "error");
   }
+  // whether the machine is let to the other users: a line of its own, so another code is asked for
+  const people = h("input", {
+    type: "checkbox",
+    onchange: async () => {
+      people.disabled = true;
+      try {
+        invite = { ...invite, ...(await api("POST", "/api/machines/invite", { people: people.checked })) };
+        cmd.textContent = line();
+      } catch (e) {
+        people.checked = !people.checked;
+        toast(errorText(e), "error");
+      }
+      people.disabled = false;
+    },
+  });
   const known = new Set((machinesUi.list?.machines ?? []).map((m) => m.id));
   const addresses = [...new Set([location.origin, invite.lan, invite.local].filter(Boolean).map((a) => a.replace(/\/$/, "")))];
   let address = addresses[0];
@@ -2550,6 +2582,7 @@ async function addMachineDialog() {
     h("p", { class: "cmd" }, cmd, h("button", { type: "button", class: "icon-btn", title: t("twofa.copy"), "aria-label": t("twofa.copy"), onclick: () => copyText(line()) }, icon("copy"))),
     h("p", { class: "muted small" }, t("machines.addHint", { minutes: Math.round(invite.valid / 60000) })),
     h("p", { class: "muted small" }, t("machines.addNeeds")),
+    h("label", { class: "check" }, people, h("span", null, h("strong", null, t("machines.people.tick")), h("span", { class: "muted small block" }, t("machines.people.tickHint")))),
     waiting,
     h("footer", null, closeButton(() => dialog)),
   );
@@ -2770,6 +2803,7 @@ function machineOverview(m, box) {
           : h("p", { class: "card pad muted" }, t("machines.offlineLead", { ago: ago(m.seen) })),
         h("div", { id: "m-disks" }),
         m.online && h("div", { id: "machine-sysupdates" }, sysUpdatesCard(m.id)),
+        h("div", { id: "machine-people" }, machinePeopleCard(m)),
       ),
       h(
         "aside",
@@ -2793,6 +2827,126 @@ function machineOverview(m, box) {
   );
   paintMachineStats(m);
   if (m.online && !sysUpdates[m.id]) void loadSysUpdates(m.id);
+}
+
+/** Who else may use the machine: its accounts for the users of Hata, and its folders shared with them */
+const machinePeople = {};
+
+async function loadMachinePeople(id) {
+  try {
+    const [shares, users] = await Promise.all([api("GET", `/api/machines/${id}/shares`), api("GET", "/api/users")]);
+    machinePeople[id] = { shares: shares.shares, users };
+  } catch (e) {
+    return toast(errorText(e), "error");
+  }
+  const box = document.getElementById("machine-people");
+  if (box && machinesUi.current?.id === id) box.replaceChildren(machinePeopleCard(machinesUi.current));
+}
+
+function machinePeopleCard(m) {
+  const data = machinePeople[m.id];
+  if (m.people && !data) void loadMachinePeople(m.id);
+  const others = (data?.users ?? []).filter((user) => user.role !== "admin");
+  const who = (share) =>
+    Object.entries(share.users)
+      .map(([id, access]) => `${(data?.users ?? []).find((user) => user.id === id)?.name ?? "?"} — ${t("shares.access." + access).toLowerCase()}`)
+      .join(", ");
+  const row = (share) =>
+    h(
+      "tr",
+      null,
+      h("td", null, h("div", { class: "with-icon strong" }, icon("share"), h("span", { class: "clip" }, share.name)), h("div", { class: "muted small mono clip" }, share.path)),
+      h("td", { class: "muted small" }, who(share)),
+      h("td", null, h("div", { class: "row-actions" }, button(t("machines.people.change"), { class: "small", onclick: () => machineShareDialog(m, share.path) }), h("a", { class: "btn small", href: filesHash(share.path, m.id) }, icon("folder"), h("span", null, t("common.open"))))),
+    );
+  return h(
+    "section",
+    { class: "card table-wrap" },
+    h(
+      "div",
+      { class: "pad card-head stack-s" },
+      h("div", { class: "section-head" }, h("h2", null, t("machines.people.title")), m.people ? h("div", { class: "row-actions" }, button(t("machines.people.share"), { class: "small primary", disabled: !m.online, onclick: () => folderPicker({ title: t("machines.people.pick", { name: m.name }), start: "/", machine: m.id, confirmLabel: t("machines.people.pickHere"), allowed: (at) => at !== "/", action: async (at) => machineShareDialog(m, at) }) }, "share"), button(t("machines.people.off"), { class: "small", onclick: () => letMachineDialog(m, false) })) : button(t("machines.people.on"), { class: "small primary", onclick: () => letMachineDialog(m, true) })),
+      h("p", { class: "muted small" }, t(m.people ? "machines.people.onLead" : "machines.people.offLead")),
+      m.people && data && !others.length && h("p", { class: "muted small" }, t("machines.people.nobody")),
+    ),
+    m.people && data?.shares.length > 0 && h("table", null, h("thead", null, h("tr", null, h("th", null, t("machines.people.col.folder")), h("th", null, t("shares.who")), h("th"))), h("tbody", null, data.shares.map(row))),
+  );
+}
+
+/** Lets the machine to the other users of Hata, or takes it back — what that does is said first */
+function letMachineDialog(m, on) {
+  let dialog;
+  dialog = openDialog(
+    "confirm",
+    h("h2", { class: "wrap" }, t(on ? "machines.people.onTitle" : "machines.people.offTitle", { name: m.name })),
+    h("p", { class: "muted" }, t(on ? "machines.people.onWhat" : "machines.people.offWhat")),
+    h(
+      "footer",
+      null,
+      closeButton(() => dialog, t("common.cancel")),
+      button(t(on ? "machines.people.on" : "machines.people.off"), {
+        class: on ? "primary" : "danger",
+        onclick: async (e) => {
+          const pressed = e.currentTarget;
+          pressed.disabled = true;
+          try {
+            const answer = await api("PUT", `/api/machines/${m.id}/people`, { on });
+            machinesUi.current = { ...machinesUi.current, people: answer.people };
+            delete machinePeople[m.id];
+            dialog.close();
+            paintMachineOverview();
+          } catch (err) {
+            toast(errorText(err), "error");
+            pressed.disabled = false;
+          }
+        },
+      }),
+    ),
+  );
+}
+
+/** The machine, when an administrator is in its files and it is let to the other users of Hata */
+const machineLet = (id) => (id && isAdmin() && machinesUi.list?.machines.find((m) => m.id === id && m.people)) || null;
+
+/** A folder of the machine shared with users of Hata: its name and who may do what; nobody — not shared */
+async function machineShareDialog(m, path) {
+  if (!machinePeople[m.id]) await loadMachinePeople(m.id);
+  const data = machinePeople[m.id];
+  if (!data) return;
+  const share = data.shares.find((one) => one.path === path);
+  const folder = path.split("/").pop() || "/";
+  const name = h("input", { value: share?.name ?? "", placeholder: folder, maxLength: 40, spellcheck: false, autocomplete: "off" });
+  const users = data.users
+    .filter((user) => user.role !== "admin")
+    .map((user) => ({ user, select: h("select", null, ["none", "read", "write"].map((access) => h("option", { value: access, selected: access === (share?.users[user.id] ?? "none") }, t("shares.access." + access)))) }));
+  const error = h("p", { class: "error", role: "alert" });
+  let dialog;
+  const save = async (all) => {
+    error.textContent = "";
+    try {
+      const answer = await api("PUT", `/api/machines/${m.id}/shares`, { path, name: name.value.trim(), users: all ? Object.fromEntries(users.filter(({ select }) => select.value !== "none").map(({ user, select }) => [user.id, select.value])) : {} });
+      data.shares = answer.shares;
+      dialog.close();
+      toast(t(answer.shares.some((one) => one.path === path) ? "shares.saved" : "machines.people.unshared", { name: folder }));
+      const box = document.getElementById("machine-people");
+      if (box && machinesUi.current?.id === m.id) box.replaceChildren(machinePeopleCard(machinesUi.current));
+    } catch (e) {
+      error.textContent = errorText(e);
+    }
+  };
+  dialog = openDialog(
+    "confirm",
+    h(
+      "form",
+      { onsubmit: (e) => (e.preventDefault(), save(true)) },
+      h("header", null, h("span", { class: "badge-icon plain" }, icon("share")), h("div", null, h("h2", null, t(share ? "machines.people.dialogEdit" : "machines.people.dialogNew", { name: folder })), h("span", { class: "muted small mono clip" }, `${m.name}:${path}`))),
+      h("p", { class: "muted small" }, t("machines.people.shareLead")),
+      field(t("machines.people.name"), name, t("machines.people.nameHint")),
+      h("div", { class: "field" }, h("span", { class: "label" }, t("shares.who")), users.length ? h("div", { class: "share-access" }, users.map(({ user, select }) => h("label", null, h("span", { class: "grow" }, h("strong", null, user.name), user.role === "guest" && h("span", { class: "muted small block" }, t("user.role.guest"))), select))) : h("p", { class: "muted small" }, t("machines.people.nobody"))),
+      error,
+      h("footer", null, share && button(t("machines.people.unshare"), { class: "danger", onclick: () => save(false) }), closeButton(() => dialog, t("common.cancel")), button(t("settings.save"), { type: "submit", class: "primary" })),
+    ),
+  );
 }
 
 function paintMachineOverview() {
@@ -4280,8 +4434,11 @@ const filesListing = () => (state.files?.path === state.route.path && (state.fil
 async function loadFiles() {
   const path = state.route.path;
   const machine = filesMachine();
+  // theirs with whom folders are shared start from those folders
+  if (!isAdmin() && !path) return go("#/hata");
+  if (!isAdmin() && !state.myMachines) await loadMine();
   // the other machines are places of the sidebar
-  if (!machinesUi.list) machinesUi.list = await api("GET", "/api/machines").catch(() => null);
+  if (!machinesUi.list && isAdmin()) machinesUi.list = await api("GET", "/api/machines").catch(() => null);
   let listing;
   try {
     listing = await api("GET", `${filesApi()}?path=${encodeURIComponent(path)}`);
@@ -4367,6 +4524,22 @@ function filesPlaces(path) {
   };
   const others = machinesUi.list?.machines ?? [];
   const machinesList = others.length > 0 && [h("div", { class: "cat-title" }, t("nav.machines")), others.map((m) => h("a", { class: "cat" + (machine === m.id ? " active" : "") + (m.online ? "" : " muted"), href: filesHash("/", m.id), title: m.online ? "" : t("machines.offline"), menu: (at) => menuAt(at, menuHeader(m.name, machineOs(m), "server"), [{ label: t("machines.files"), icon: "folder", href: filesHash("/", m.id) }, { label: t("menu.machinePage"), icon: "server", href: `#/machines/${m.id}` }, isAdmin() && { label: t("app.more"), icon: "more", run: () => machineMenu(m, at) }]) }, h("span", { class: "with-icon" }, icon("server"), h("span", { class: "clip" }, m.name))))];
+  const shares = myShares();
+  if (shares) {
+    return put(
+      places,
+      h(
+        "nav",
+        { class: "cats" },
+        h("div", { class: "cat-title" }, t("files.places")),
+        h("a", { class: "cat" + (path === "#hata" ? " active" : ""), href: "#/hata" }, h("span", { class: "with-icon" }, icon("home"), h("span", { class: "clip" }, t("myhata.title")))),
+        h("a", { class: "cat" + (trash ? " active" : ""), href: "#/trash" }, h("span", { class: "with-icon" }, icon("trash"), h("span", { class: "clip" }, t("trash.title")))),
+        (state.myShares ?? []).length > 0 && [h("div", { class: "cat-title" }, t("myhata.shared")), state.myShares.map((share) => place(share.name, share.path, "share", !machine && inside(share.path), ""))],
+        (state.myMachines ?? []).map((m) => [h("div", { class: "cat-title" }, m.name), m.shares.map((share) => place(share.name, share.path, "share", machine === m.id && inside(share.path), m.id))]),
+        favorites.length > 0 && [h("div", { class: "cat-title" }, t("files.favorites")), favorites.map(favoriteRow)],
+      ),
+    );
+  }
   if (machine) {
     const m = others.find((x) => x.id === machine);
     const volumes = listing?.disks ?? [];
@@ -4453,8 +4626,8 @@ function renderFilesBody() {
       listing && !listing.error && !machine && findBox(path),
       h("span", { class: "grow" }),
       listing && !listing.error && !machine && h("button", { type: "button", class: "btn square" + (isFavorite(path) ? " active" : ""), title: t(isFavorite(path) ? "files.unfavorite" : "files.favorite"), "aria-label": t(isFavorite(path) ? "files.unfavorite" : "files.favorite"), "aria-pressed": String(isFavorite(path)), onclick: () => favorite(path, !isFavorite(path)) }, icon("star")),
-      listing && !listing.error && !machine && h("button", { type: "button", class: "btn square" + (isPinned ? " active" : ""), title: t(isPinned ? "files.unpin" : "files.pin"), "aria-label": t(isPinned ? "files.unpin" : "files.pin"), "aria-pressed": String(isPinned), onclick: () => pinFolder(path, !isPinned) }, icon("home")),
-      listing && !listing.error && !machine && h("button", { type: "button", class: "btn square" + (isShared ? " active" : ""), title: t(isShared ? "files.shareSettings" : "files.share"), "aria-label": t(isShared ? "files.shareSettings" : "files.share"), onclick: () => shareDialog(path) }, icon("share")),
+      listing && !listing.error && !machine && isAdmin() && h("button", { type: "button", class: "btn square" + (isPinned ? " active" : ""), title: t(isPinned ? "files.unpin" : "files.pin"), "aria-label": t(isPinned ? "files.unpin" : "files.pin"), "aria-pressed": String(isPinned), onclick: () => pinFolder(path, !isPinned) }, icon("home")),
+      listing && !listing.error && !machine && isAdmin() && h("button", { type: "button", class: "btn square" + (isShared ? " active" : ""), title: t(isShared ? "files.shareSettings" : "files.share"), "aria-label": t(isShared ? "files.shareSettings" : "files.share"), onclick: () => shareDialog(path) }, icon("share")),
       sort,
       h("div", { class: "seg" }, modeButton("list", "list"), modeButton("grid", "grid")),
       button(t("files.new"), { disabled: !listing || !!listing.error || listing.readOnly, onclick: (e) => newMenu(path, e.currentTarget) }, "plus"),
@@ -4522,7 +4695,7 @@ function stepTrail() {
 function goUp() {
   const path = state.route.path;
   // above the data folder and the whole server is My Hata, where every place is
-  if (!filesMachine() && (!path || path === "/" || path === state.files?.home)) return go("#/hata");
+  if ((!filesMachine() && (!path || path === "/" || path === state.files?.home)) || myShares()?.some((share) => share.path === path)) return go("#/hata");
   if (!path || path === "/") return;
   filesUi.cursorNext = path.split("/").pop();
   go(filesHash(path.slice(0, path.lastIndexOf("/")) || "/"));
@@ -4533,6 +4706,7 @@ function pathAnchor(path) {
   const machine = filesMachine();
   const files = state.files;
   const named = [
+    ...(myShares() ?? []).map((share) => ({ path: share.path, label: share.name, icon: "share" })),
     !machine && files?.home && { path: files.home, label: t("files.home"), icon: "folder" },
     ...((files?.machine ?? "") === machine ? (files?.disks ?? []) : []).map((d) => ({ path: d.path, label: volumeName(d), icon: d.network ? "globe" : "disk" })),
   ].filter((place) => place && within(path, place.path));
@@ -4813,6 +4987,11 @@ const outerVolumes = (listing) => (listing?.disks ?? []).filter((d) => !(d.path 
  * places, the favourites and the machines — like "This PC" of a desktop
  */
 async function loadMyHata() {
+  if (!isAdmin()) {
+    await loadMine();
+    if (state.route.view === "myhata") renderMyHata();
+    return;
+  }
   const [data, root] = await Promise.all([api("GET", "/api/files?path=").catch(() => null), api("GET", "/api/files?path=" + encodeURIComponent("/")).catch(() => null)]);
   if (data) {
     state.files = data;
@@ -4826,7 +5005,7 @@ async function loadMyHata() {
 const myHataUi = { root: null };
 
 /** A tile of My Hata: what it is, where, and how full when it is a file system */
-function hataTile({ href, onclick, iconName, title, sub, room, menu, cls = "" }) {
+function hataTile({ href, onclick, iconName, title, sub, room, menu, cls = "", words = false }) {
   let bar = null;
   if (room?.total) {
     const used = Math.round(((room.total - room.free) / room.total) * 100);
@@ -4838,11 +5017,12 @@ function hataTile({ href, onclick, iconName, title, sub, room, menu, cls = "" })
     "a",
     { class: "disk-tile " + cls, href: href ?? "#", onclick, menu },
     h("span", { class: "badge-icon plain" }, icon(iconName)),
-    h("span", { class: "disk-text" }, h("span", { class: "clip strong" }, title), sub && h("span", { class: "muted small mono clip" }, sub), bar),
+    h("span", { class: "disk-text" }, h("span", { class: "clip strong" }, title), sub && h("span", { class: "muted small clip" + (words ? "" : " mono") }, sub), bar),
   );
 }
 
 function renderMyHata() {
+  if (!isAdmin()) return renderMySharedFolders();
   const listing = state.files;
   const home = listing?.home ?? "";
   const disks = listing?.disks ?? [];
@@ -4890,6 +5070,40 @@ function renderMyHata() {
   filesPlaces("#hata");
 }
 
+/** My Hata of one who is not an administrator: the folders shared with them, and their favourites */
+function renderMySharedFolders() {
+  const shares = state.myShares;
+  const favorites = state.favorites ?? [];
+  const section = (title, tiles) => h("section", { class: "card pad stack my-hata" }, h("div", { class: "section-head" }, h("h2", null, title)), h("div", { class: "disk-strip hata-grid" }, tiles));
+  // a machine that is away keeps its tiles, greyed: its folders open once it is back
+  const shareTile = (share, m) => hataTile({ href: filesHash(share.path, m ? m.id : ""), iconName: "share", title: share.name, sub: m && !m.online ? t("machines.offline") : t(share.access === "write" ? "myhata.mayWrite" : "myhata.mayRead"), words: true, cls: m && !m.online ? "away" : "", menu: (at) => sidebarMenu(at, { label: share.name, path: share.path, machine: m ? m.id : "", iconName: "share" }) });
+  const favoriteTile = (one) => {
+    const name = one.path.split("/").pop() || "/";
+    const parent = one.path.slice(0, one.path.lastIndexOf("/")) || "/";
+    return hataTile({ href: filesHash(one.dir ? one.path : parent, ""), onclick: one.dir ? null : () => (filesUi.pick = name), iconName: one.dir ? "folder" : "file", title: name, sub: one.path, menu: (at) => menuAt(at, menuHeader(name, one.path, one.dir ? "folder" : "file"), [{ label: t("files.unfavorite"), icon: "star", run: () => favorite(one.path, false, name) }]) });
+  };
+  shell(
+    h(
+      "div",
+      { class: "files" },
+      h("aside", { class: "files-side fold", id: "files-places" }),
+      h(
+        "section",
+        { class: "stack", id: "files-main" },
+        h("div", { class: "page-head card pad" }, h("div", null, h("h1", null, t("myhata.title")), h("p", { class: "muted" }, t("myhata.sharedLead")))),
+        !shares
+          ? h("p", { class: "card pad muted" }, "…")
+          : [
+              (shares.length > 0 || !(state.myMachines ?? []).length) && section(t("myhata.shared"), shares.length ? shares.map((share) => shareTile(share, "")) : h("p", { class: "muted small" }, t("myhata.nothingShared"))),
+              (state.myMachines ?? []).map((m) => section(t("myhata.onMachine", { name: m.name }), m.shares.map((share) => shareTile(share, m)))),
+              favorites.length > 0 && section(t("files.favorites"), favorites.map(favoriteTile)),
+            ],
+      ),
+    ),
+  );
+  filesPlaces("#hata");
+}
+
 const selectedEntries = () => (state.files?.entries ?? []).filter((entry) => filesUi.selected.has(entry.name));
 
 function toggleSelected(entry, on) {
@@ -4917,9 +5131,9 @@ function renderSelection() {
   put(box,
     h("strong", { class: "grow" }, t("files.selected", { n: chosen.length }), h("span", { class: "muted small" }, " · " + bytes(chosen.reduce((n, entry) => n + entry.size, 0)))),
     button(t("files.download"), { class: "small", onclick: () => downloadEntries(chosen) }, "download"),
-    button(t("files.move"), { class: "small", onclick: () => transferDialog(chosen, false) }, "arrow"),
+    !state.files.readOnly && button(t("files.move"), { class: "small", onclick: () => transferDialog(chosen, false) }, "arrow"),
     button(t("files.copy"), { class: "small", onclick: () => transferDialog(chosen, true) }, "copy"),
-    button(t("files.delete"), { class: "small", onclick: () => deleteDialog(chosen) }, "trash"),
+    !state.files.readOnly && button(t("files.delete"), { class: "small", onclick: () => deleteDialog(chosen) }, "trash"),
     h("button", { type: "button", class: "icon-btn", "aria-label": t("files.clearSelection"), title: t("files.clearSelection"), onclick: () => ((filesUi.selected = new Set()), renderFilesBody()) }, icon("x")),
   );
 }
@@ -5226,10 +5440,10 @@ function selectionMenu(chosen, at) {
     "menu dropdown",
     h("header", null, h("div", null, h("h2", null, t("files.selected", { n: chosen.length })), h("span", { class: "muted small" }, bytes(chosen.reduce((n, entry) => n + entry.size, 0))))),
     item(t("files.downloadZip"), "download", () => downloadEntries(chosen)),
-    item(t("files.move"), "arrow", () => transferDialog(chosen, false)),
+    !state.files.readOnly && item(t("files.move"), "arrow", () => transferDialog(chosen, false)),
     item(t("files.copy"), "copy", () => transferDialog(chosen, true)),
     item(t("files.clearSelection"), "x", () => ((filesUi.selected = new Set()), renderFilesBody())),
-    item(t("files.delete"), "trash", () => deleteDialog(chosen), "danger"),
+    !state.files.readOnly && item(t("files.delete"), "trash", () => deleteDialog(chosen), "danger"),
   );
   placeAt(dialog, at);
 }
@@ -5249,8 +5463,9 @@ function folderMenu(at) {
     listing.entries.length > 0 && item(t("files.downloadZip"), "download", () => downloadEntries(listing.entries.filter((entry) => entry.type !== "other"))),
     item(t("files.copyPath"), "link", () => copyText(path)),
     !listing.machine && item(t(isFavorite(path) ? "files.unfavorite" : "files.favorite"), "star", () => favorite(path, !isFavorite(path))),
-    !listing.machine && item(t(listing.pinned.includes(path) ? "files.unpin" : "files.pin"), "home", () => pinFolder(path, !listing.pinned.includes(path))),
-    !listing.machine && item(t(listing.shared.includes(path) ? "files.shareSettings" : "files.share"), "share", () => shareDialog(path)),
+    !listing.machine && isAdmin() && item(t(listing.pinned.includes(path) ? "files.unpin" : "files.pin"), "home", () => pinFolder(path, !listing.pinned.includes(path))),
+    !listing.machine && isAdmin() && item(t(listing.shared.includes(path) ? "files.shareSettings" : "files.share"), "share", () => shareDialog(path)),
+    machineLet(listing.machine) && path !== "/" && item(t("machines.people.shareHere"), "share", () => machineShareDialog(machineLet(listing.machine), path)),
   );
   placeAt(dialog, at);
 }
@@ -5268,15 +5483,16 @@ function entryMenu(entry, at) {
     ["image", "video", "audio", "pdf"].includes(kind) && item(t("common.open"), "external", () => openEntry(entry)),
     entry.type === "file" && entry.size <= TEXT_MAX && !["image", "video", "audio", "pdf"].includes(kind) && item(t("files.edit"), "edit", () => textDialog(path)),
     entry.type !== "other" && item(t(entry.type === "dir" ? "files.downloadZip" : "files.download"), "download", () => downloadEntries([entry])),
-    entry.type === "file" && ARCHIVE_RE.test(entry.name) && !state.files.readOnly && !filesMachine() && item(t("files.extract"), "archive", () => extractArchive(path)),
+    entry.type === "file" && ARCHIVE_RE.test(entry.name) && !state.files.readOnly && !filesMachine() && isAdmin() && item(t("files.extract"), "archive", () => extractArchive(path)),
     item(t("files.copyPath"), "link", () => copyText(path)),
     entry.type !== "other" && !filesMachine() && item(t(isFavorite(path) ? "files.unfavorite" : "files.favorite"), "star", () => favorite(path, !isFavorite(path), entry.name)),
-    entry.type === "dir" && !filesMachine() && (state.files.pinned.includes(path) ? item(t("files.unpin"), "home", () => pinFolder(path, false)) : item(t("files.pin"), "home", () => pinFolder(path, true))),
-    entry.type === "dir" && !filesMachine() && item(t(state.files.shared.includes(path) ? "files.shareSettings" : "files.share"), "share", () => shareDialog(path)),
-    item(t("files.rename"), "edit", () => renameDialog(entry)),
-    item(t("files.move"), "arrow", () => transferDialog([entry], false)),
+    entry.type === "dir" && !filesMachine() && isAdmin() && (state.files.pinned.includes(path) ? item(t("files.unpin"), "home", () => pinFolder(path, false)) : item(t("files.pin"), "home", () => pinFolder(path, true))),
+    entry.type === "dir" && !filesMachine() && isAdmin() && item(t(state.files.shared.includes(path) ? "files.shareSettings" : "files.share"), "share", () => shareDialog(path)),
+    entry.type === "dir" && machineLet(filesMachine()) && item(t("machines.people.shareHere"), "share", () => machineShareDialog(machineLet(filesMachine()), path)),
+    !state.files.readOnly && item(t("files.rename"), "edit", () => renameDialog(entry)),
+    !state.files.readOnly && item(t("files.move"), "arrow", () => transferDialog([entry], false)),
     item(t("files.copy"), "copy", () => transferDialog([entry], true)),
-    item(t("files.delete"), "trash", () => deleteDialog([entry]), "danger"),
+    !state.files.readOnly && item(t("files.delete"), "trash", () => deleteDialog([entry]), "danger"),
   );
   if (at) placeAt(dialog, at);
 }
@@ -5472,7 +5688,8 @@ async function loadTrash() {
     return toast(errorText(e), "error");
   }
   // opened straight from a link: the places on the left come with a listing of Files
-  if (!state.files) state.files = await api("GET", "/api/files?path=").catch(() => null);
+  if (!state.files && isAdmin()) state.files = await api("GET", "/api/files?path=").catch(() => null);
+  if (!isAdmin() && !state.myShares) await loadMine();
   if (state.files?.favorites) state.favorites = state.files.favorites;
   if (state.route.view === "trash") renderTrash();
 }
@@ -5558,7 +5775,7 @@ function renderTrash() {
       h("td", null, h("a", { class: "muted small mono clip block", href: filesHash(folderOf(item.from)) }, folderOf(item.from))),
       h("td", null, h("div", null, ago(item.at)), item.by && h("div", { class: "muted small" }, item.by)),
       h("td", { class: "num" }, bytes(item.size), item.type === "dir" && h("div", { class: "muted small" }, t("trash.files", { n: item.files }))),
-      h("td", null, h("div", { class: "row-actions" }, button(t("trash.restore"), { class: "small", onclick: back([item]) }, "undo"), button("", { class: "small icon-btn", title: t("files.deleteForever"), "aria-label": t("files.deleteForever"), onclick: () => forever([item.id], t("trash.deleteTitle", { name: item.name }), t("trash.deleteLead")) }, "trash"))),
+      h("td", null, h("div", { class: "row-actions" }, button(t("trash.restore"), { class: "small", onclick: back([item]) }, "undo"), isAdmin() && button("", { class: "small icon-btn", title: t("files.deleteForever"), "aria-label": t("files.deleteForever"), onclick: () => forever([item.id], t("trash.deleteTitle", { name: item.name }), t("trash.deleteLead")) }, "trash"))),
     );
   const keep = data?.keepDays ?? 30;
   const days = h(
@@ -5576,14 +5793,14 @@ function renderTrash() {
         "div",
         { class: "actions" },
         chosen.length > 0 && button(t("trash.restoreChosen", { n: chosen.length }), { onclick: back(chosen) }, "undo"),
-        chosen.length > 0 && button(t("trash.deleteChosen", { n: chosen.length }), { class: "danger", onclick: () => forever(chosen.map((item) => item.id), t("trash.deleteChosenTitle", { n: chosen.length }), t("trash.emptyLead", { n: chosen.length, size: bytes(chosenSize) })) }, "trash"),
-        chosen.length === 0 && items.length > 0 && button(t("trash.empty"), { class: "danger", onclick: () => forever(null, t("trash.emptyTitle"), t("trash.emptyLead", { n: items.length, size: bytes(data.size) })) }, "trash"),
+        chosen.length > 0 && isAdmin() && button(t("trash.deleteChosen", { n: chosen.length }), { class: "danger", onclick: () => forever(chosen.map((item) => item.id), t("trash.deleteChosenTitle", { n: chosen.length }), t("trash.emptyLead", { n: chosen.length, size: bytes(chosenSize) })) }, "trash"),
+        chosen.length === 0 && items.length > 0 && isAdmin() && button(t("trash.empty"), { class: "danger", onclick: () => forever(null, t("trash.emptyTitle"), t("trash.emptyLead", { n: items.length, size: bytes(data.size) })) }, "trash"),
       ),
     ),
     h(
       "div",
       { class: "card table-wrap" },
-      h("div", { class: "pad trash-keep" }, h("p", { class: "muted small grow" }, t("trash.lead", { days: trashDaysText(keep) })), data && h("label", { class: "with-icon small" }, h("span", null, t("trash.keep")), days)),
+      h("div", { class: "pad trash-keep" }, h("p", { class: "muted small grow" }, t("trash.lead", { days: trashDaysText(keep) })), data && isAdmin() && h("label", { class: "with-icon small" }, h("span", null, t("trash.keep")), days)),
       !data
         ? null
         : items.length === 0
@@ -5638,21 +5855,28 @@ function folderPicker({ title, start, confirmLabel, action, allowed = () => true
     else if (machines && !home) home = (await api("GET", "/api/files?path=").catch(() => null))?.home ?? "";
     at = listing.path;
     error.textContent = "";
-    const parts = at.split("/").filter(Boolean);
+    // one who is not an administrator walks the folders shared with them, from the folder down
+    const mine = isAdmin() ? null : (listing.shares ?? []);
+    const share = mine?.filter((one) => within(at, one.path)).sort((a, b) => b.path.length - a.path.length)[0];
+    const base = share ? share.path : "/";
+    const parts = at.slice(base.length).split("/").filter(Boolean);
     const crumb = (label, to) => h("button", { type: "button", class: "crumb", onclick: () => show(to) }, label);
     const other = on && machinesUi.list?.machines.find((m) => m.id === on);
-    put(crumbs, other && h("span", { class: "with-icon strong" }, icon("server"), other.name), crumb("/", "/"), parts.map((part, i) => [i > 0 && icon("chevron"), crumb(part, "/" + parts.slice(0, i + 1).join("/"))]));
+    put(crumbs, other && h("span", { class: "with-icon strong" }, icon("server"), other.name), crumb(share ? share.name : "/", base), parts.map((part, i) => [(i > 0 || share) && icon("chevron"), crumb(part, (base === "/" ? "" : base) + "/" + parts.slice(0, i + 1).join("/"))]));
     // the data folder and the disks, one press away wherever the picker is; with `machines` the other machines too
     const jump = (label, to, iconName, target = on) => h("button", { type: "button", class: "chip-btn" + (target === on && (at === to || at.startsWith(to + "/")) ? " active" : ""), onclick: () => show(to, target) }, icon(iconName), h("span", { class: "clip" }, label));
     const volumes = on ? [] : outerVolumes(listing);
     const others = machines ? (machinesUi.list?.machines ?? []).filter((m) => m.online) : [];
-    put(quick, (on ? home : listing.home) && jump(t("files.home"), on ? home : listing.home, "home", ""), volumes.map((d) => jump(volumeName(d), d.path, d.network ? "globe" : "disk")), others.map((m) => h("button", { type: "button", class: "chip-btn" + (on === m.id ? " active" : ""), onclick: () => show("/", m.id) }, icon("server"), h("span", { class: "clip" }, m.name))));
-    quick.hidden = !volumes.length && !others.length && !on;
+    if (mine) put(quick, mine.map((one) => jump(one.name, one.path, "share")));
+    else put(quick, (on ? home : listing.home) && jump(t("files.home"), on ? home : listing.home, "home", ""), volumes.map((d) => jump(volumeName(d), d.path, d.network ? "globe" : "disk")), others.map((m) => h("button", { type: "button", class: "chip-btn" + (on === m.id ? " active" : ""), onclick: () => show("/", m.id) }, icon("server"), h("span", { class: "clip" }, m.name))));
+    quick.hidden = mine ? mine.length < 2 : !volumes.length && !others.length && !on;
     const inner = sortedEntries(listing.entries).filter((entry) => entry.type === "dir" && shown(joinPath(at, entry.name), on));
     put(folders, inner.length ? inner.map((entry) => h("button", { type: "button", class: "menu-item", onclick: () => show(joinPath(at, entry.name)) }, icon("folder", "folder-ico"), h("span", { class: "clip grow" }, entry.name), icon("chevron", "faint"))) : h("p", { class: "muted small pad" }, t("files.noFolders")));
-    confirm.disabled = !allowed(at, on);
+    confirm.disabled = !allowed(at, on) || (!!mine && listing.readOnly);
+    newFolder.disabled = !!mine && listing.readOnly;
   };
-  dialog = openDialog("wide", h("h2", { class: "wrap" }, title), quick, crumbs, folders, error, h("footer", null, button(t("files.newFolder"), { onclick: () => newFolderDialog(at, () => show(at), on) }, "folder"), closeButton(() => dialog, t("common.cancel")), confirm));
+  const newFolder = button(t("files.newFolder"), { onclick: () => newFolderDialog(at, () => show(at), on) }, "folder");
+  dialog = openDialog("wide", h("h2", { class: "wrap" }, title), quick, crumbs, folders, error, h("footer", null, newFolder, closeButton(() => dialog, t("common.cancel")), confirm));
   void show(at);
 }
 
@@ -6200,61 +6424,81 @@ async function storeDialog(entry, target = state.installTarget ?? "") {
     },
   });
 
+  // where it goes, next to the button that puts it there; with no machine ready, the way to connect one
+  const here = t("store.whereHere", { name: state.overview?.system.hostname ?? "Hata" });
+  const where =
+    isAdmin() &&
+    h(
+      "div",
+      { class: "store-where grow" },
+      h("label", { for: "store-target" }, t("store.where")),
+      targets.length > 0
+        ? h("select", { id: "store-target", onchange: (e) => (dialog.close(), void storeDialog(entry, e.target.value)) }, h("option", { value: "", selected: !target }, here), targets.map((m) => h("option", { value: m.id, selected: m.id === target }, t("store.whereMachine", { name: m.name }))))
+        : h("span", null, here),
+      targets.length === 0 && h("a", { class: "link small", href: "#/machines", title: t(machinesUi.list?.machines?.length ? "store.whereNoneReady" : "store.whereNone"), onclick: () => dialog.close() }, t("store.whereOther")),
+    );
   const hasForm = isAdmin() && (settingsForm ? settingsForm.rows.length > 0 || settingsForm.more : ports.length + volumes.length + envs.length > 0);
   // what the app asks of the server beyond its folders and ports, said before it is installed
   const permissions = app.permissions.length > 0 && h("div", { class: "tips prose" }, h("strong", null, t("store.permissions")), h("ul", null, app.permissions.map((p) => h("li", null, h("strong", null, t(`store.permission.${p.id}`)), " — ", p.why))));
   dialog = openDialog(
     "xwide store-app",
     h("header", null, appIcon(app, "lg"), h("div", { class: "grow" }, h("h2", null, app.title), h("p", { class: "muted" }, app.tagline), h("p", { class: "muted small" }, [app.category, app.developer && t("store.by", { developer: app.developer }), app.version && t("store.version", { version: app.version })].filter(Boolean).join(" · "))), closeX(() => dialog)),
-    targets.length > 0 &&
-      h(
-        "div",
-        { class: "store-target" },
-        h("label", { for: "store-target" }, t("store.where")),
-        h(
-          "select",
-          { id: "store-target", onchange: (e) => (dialog.close(), void storeDialog(entry, e.target.value)) },
-          h("option", { value: "", selected: !target }, t("store.whereHere", { name: state.overview?.system.hostname ?? "Hata" })),
-          targets.map((m) => h("option", { value: m.id, selected: m.id === target }, t("store.whereMachine", { name: m.name }))),
-        ),
-        h("p", { class: "muted small" }, t("store.whereHint")),
-      ),
-    // nowhere else to install yet: what the machines are and how one is connected
-    isAdmin() && targets.length === 0 &&
-      h(
-        "div",
-        { class: "store-target" },
-        h("span", { class: "label" }, t("store.where")),
-        h("span", null, t("store.whereHere", { name: state.overview?.system.hostname ?? "Hata" })),
-        h(
-          "p",
-          { class: "muted small" },
-          t(machinesUi.list?.machines?.length ? "store.whereNoneReady" : "store.whereNone"),
-          " ",
-          h("a", { class: "link", href: "#/machines", onclick: () => dialog.close() }, t("store.whereMachines")),
-        ),
-      ),
     !supported && h("p", { class: "banner" }, t("store.unsupported", { arch: arch ?? "" })),
+    app.screenshots.length > 0 && shotsView(app.screenshots),
     h(
       "div",
       { class: "store-app-body" },
       h(
         "div",
         { class: "stack" },
-        app.screenshots.length > 0 && h("div", { class: "shots" }, app.screenshots.map((src) => h("img", { src, alt: "", loading: "lazy", referrerPolicy: "no-referrer", onerror: (e) => e.target.remove() }))),
         h("div", { class: "description prose" }, md(app.description)),
         app.tips && h("div", { class: "tips prose" }, h("strong", null, t("store.tips")), md(app.tips)),
         permissions,
         app.website && h("a", { class: "link", href: app.website, target: "_blank", rel: "noopener noreferrer" }, app.website.replace(/^https?:\/\//, "").replace(/\/$/, ""), icon("external")),
+        h("p", { class: "cmd small" }, icon("terminal"), `docker compose -p ${app.name} up -d`),
       ),
       hasForm && settingsForm && h("div", { class: "stack install-form" }, formSection(t("store.settings"), t("store.settingsHint"), settingsForm.rows), settingsForm.more),
       hasForm && !settingsForm && h("div", { class: "stack install-form" }, formSection(t("store.ports"), target ? t("store.portsOn", { name: targets.find((m) => m.id === target)?.name ?? "" }) : t("store.portsHint"), ports), formSection(t("store.volumes"), target ? t("store.volumesHint", { path: app.form.volumes[0]?.source.split("/AppData/")[0] || "/DATA" }) : state.settings ? t("store.volumesHint", { path: state.settings.dataRoot }) : "", volumes), formSection(t("store.envs"), t("store.envsHint"), envs)),
     ),
     error,
-    h("footer", null, h("p", { class: "cmd grow" }, icon("terminal"), `docker compose -p ${app.name} up -d`), closeButton(() => dialog, t("common.cancel")), install),
+    h("footer", null, where, closeButton(() => dialog, t("common.cancel")), install),
   );
   // the dialog would otherwise put the focus ring on its close button
   (install.disabled ? dialog : install).focus();
+}
+
+/** An app's screenshots one at a time across the whole width: arrows, a swipe, the arrow keys */
+function shotsView(list) {
+  let shots = list.map((src) => h("a", { href: src, target: "_blank", rel: "noopener noreferrer", draggable: "false" }, h("img", { src, alt: "", referrerPolicy: "no-referrer", draggable: "false" })));
+  let at = 0;
+  const stage = h("div", { class: "shot-stage", tabindex: "0", "aria-roledescription": "carousel" });
+  const count = h("span", { class: "shot-count" });
+  const step = (by) => show(at + by);
+  const prev = h("button", { type: "button", class: "icon-btn shot-prev", "aria-label": t("store.shotPrev"), onclick: () => step(-1) }, icon("chevron", "flip"));
+  const next = h("button", { type: "button", class: "icon-btn shot-next", "aria-label": t("store.shotNext"), onclick: () => step(1) }, icon("chevron"));
+  const view = h("div", { class: "shot-view" }, stage, prev, next, count);
+  const show = (i) => {
+    if (!shots.length) return view.remove();
+    at = (i + shots.length) % shots.length;
+    stage.replaceChildren(shots[at]);
+    count.textContent = `${at + 1} / ${shots.length}`;
+    prev.hidden = next.hidden = count.hidden = shots.length < 2;
+  };
+  // a picture that does not load leaves the row
+  for (const a of shots) a.firstChild.addEventListener("error", () => ((shots = shots.filter((x) => x !== a)), show(Math.min(at, shots.length - 1))));
+  stage.addEventListener("keydown", (e) => (e.key === "ArrowLeft" || e.key === "ArrowRight") && (e.preventDefault(), step(e.key === "ArrowLeft" ? -1 : 1)));
+  let from = null;
+  let swiped = false;
+  stage.addEventListener("pointerdown", (e) => ((from = e.clientX), (swiped = false)));
+  stage.addEventListener("pointerup", (e) => {
+    const moved = from === null ? 0 : e.clientX - from;
+    from = null;
+    if (Math.abs(moved) > 40 && shots.length > 1) ((swiped = true), step(moved < 0 ? 1 : -1));
+  });
+  // a swipe is not a click on the picture, which opens it whole
+  stage.addEventListener("click", (e) => swiped && e.preventDefault(), true);
+  show(0);
+  return view;
 }
 
 function customDialog() {
@@ -12116,7 +12360,7 @@ function accessMatrix() {
     return h(
       "tr",
       null,
-      h("td", null, h("div", { class: "with-icon" }, appIcon(app, "sm"), h("div", { class: "stack-s backup-name" }, h("a", { class: "strong", href: app.machine ? `#/machines/${app.machine.id}/apps` : `#/apps/${app.name}` }, app.title), app.machine && h("div", { class: "muted small with-icon" }, icon("server"), app.machine.name, app.protect && app.listen ? ` · ${t("access.through", { port: app.listen })}` : ""), !everyone && !app.protect && h("div", { class: "muted small" }, t("access.onlyHidden")), app.protect && app.others.length > 0 && otherPorts(app)))),
+      h("td", null, h("div", { class: "with-icon" }, appIcon(app, "sm"), h("div", { class: "stack-s backup-name" }, h("a", { class: "strong", href: app.machine ? `#/machines/${app.machine.id}/apps` : `#/apps/${app.name}` }, app.title), app.machine && h("div", { class: "muted small with-icon" }, icon("server"), app.machine.name, app.protect && app.listen ? ` · ${t("access.through", { port: app.listen })}` : ""), app.cannotProtect === "hostNetwork" && h("div", { class: "muted small" }, t("access.hostOpen")), !everyone && !app.protect && h("div", { class: "muted small" }, t("access.onlyHidden")), app.protect && app.others.length > 0 && otherPorts(app)))),
       h("td", null, h("input", { type: "checkbox", checked: app.protect, disabled: !!app.cannotProtect, title: app.cannotProtect ? t("access.cannot." + app.cannotProtect) : "", "aria-label": t("access.protectApp", { title: app.title }), onchange: (e) => update(app, { protect: e.target.checked }) })),
       h("td", null, h("input", { type: "checkbox", checked: everyone, "aria-label": t("access.everyone"), onchange: (e) => update(app, { allowed: e.target.checked ? "all" : people.filter((u) => u.role === "member").map((u) => u.id) }) })),
       people.map((user) => h("td", null, h("input", { type: "checkbox", checked: everyone ? user.role === "member" : list.includes(user.id), "aria-label": `${user.name}: ${app.title}`, onchange: (e) => toggle(user, e.target.checked) }))),

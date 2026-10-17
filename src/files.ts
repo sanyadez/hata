@@ -115,6 +115,8 @@ function realish(path: string): string {
   }
 }
 
+export { realish as realPath, inside as within };
+
 /** A path of the API → the absolute path on disk, tidied ("/a/../b" is "/b") */
 export function locate(path: unknown): string {
   if (typeof path !== "string" || !path.startsWith("/") || path.includes("\0")) throw new AppError("files.badPath");

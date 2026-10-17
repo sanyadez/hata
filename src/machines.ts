@@ -55,6 +55,8 @@ export interface Machine {
   info?: MachineInfo;
   /** Where the machine's apps keep their data; `/DATA` until said otherwise */
   dataRoot?: string;
+  /** The other users of Hata may use it: they have accounts there, and its folders can be shared with them */
+  people?: true;
 }
 
 interface Invite {
@@ -62,6 +64,8 @@ interface Invite {
   secret: string;
   expires: number;
   by: string;
+  /** The machine it adds is let to the other users of Hata from the start */
+  people?: true;
 }
 
 interface State {
@@ -141,11 +145,13 @@ export interface MachineView {
   outdated: boolean;
   /** Where its apps keep their data */
   dataRoot: string;
+  /** Let to the other users of Hata */
+  people: boolean;
 }
 
 const view = (m: Machine): MachineView => {
   const link = live.get(m.id);
-  return { id: m.id, name: m.name, added: m.added, seen: link ? Date.now() : m.seen, online: !!link, ip: link?.ip ?? "", info: m.info ?? null, status: link?.status ?? null, outdated: !!m.info && m.info.version !== VERSION, dataRoot: m.dataRoot ?? "/DATA" };
+  return { id: m.id, name: m.name, added: m.added, seen: link ? Date.now() : m.seen, online: !!link, ip: link?.ip ?? "", info: m.info ?? null, status: link?.status ?? null, outdated: !!m.info && m.info.version !== VERSION, dataRoot: m.dataRoot ?? "/DATA", people: !!m.people };
 };
 
 /** The data folder of a machine's apps */
@@ -323,9 +329,9 @@ export async function updateClient(id: string, by: string): Promise<void> {
 // --- Adding a machine -------------------------------------------------------------------------------
 
 /** A new install line's code; the line itself is put together by the page around Hata's address */
-export async function invite(by: string): Promise<{ code: string; expires: number; fingerprint: string }> {
+export async function invite(by: string, people = false): Promise<{ code: string; expires: number; fingerprint: string }> {
   const key = await ownKey();
-  const item: Invite = { id: hex(4), secret: random(24), expires: Date.now() + INVITE_MS, by };
+  const item: Invite = { id: hex(4), secret: random(24), expires: Date.now() + INVITE_MS, by, ...(people ? { people: true as const } : {}) };
   state.invites.push(item);
   // a page that asks again and again must not grow the file without bound
   state.invites = state.invites.slice(-20);
@@ -438,7 +444,7 @@ async function onWelcome(ws: ServerWebSocket<LinkSocket>, plain: Uint8Array): Pr
     const inv = d.invite!;
     if (!state.invites.includes(inv)) return void ws.close(1008, "The install line was used already");
     state.invites = state.invites.filter((i) => i !== inv);
-    m = { id: hex(4), name: freeName(about.hostname), key: d.clientKey!, added: Date.now(), by: inv.by, seen: Date.now(), info: about };
+    m = { id: hex(4), name: freeName(about.hostname), key: d.clientKey!, added: Date.now(), by: inv.by, seen: Date.now(), info: about, ...(inv.people ? { people: true as const } : {}) };
     state.machines.push(m);
     record("machine.added", { user: inv.by, detail: `${m.name} (${d.ip})` });
   }
@@ -468,7 +474,26 @@ async function onWelcome(ws: ServerWebSocket<LinkSocket>, plain: Uint8Array): Pr
   });
   live.set(machine.id, { peer: d.peer, since: Date.now(), ip: d.ip, status: null, containers: null, ws });
   bus.publish("machines");
+  for (const listener of upListeners) listener(machine.id);
 }
+
+const upListeners: ((id: string) => void)[] = [];
+
+/** Who wants to hear that a machine connected (again): what it should have may have changed meanwhile */
+export const onMachineUp = (listener: (id: string) => void): void => void upListeners.push(listener);
+
+/** Lets a machine to the other users of Hata, or takes it back */
+export function setPeople(id: string, on: boolean): MachineView {
+  const m = state.machines.find((one) => one.id === id);
+  if (!m) throw new AppError("machine.notFound", 404);
+  if (on) m.people = true;
+  else delete m.people;
+  save();
+  bus.publish("machines");
+  return view(m);
+}
+
+export const isOnline = (id: string): boolean => live.has(id);
 
 /** The handlers of the clients' WebSockets (`/client/link`) */
 export const linkHandlers = {
