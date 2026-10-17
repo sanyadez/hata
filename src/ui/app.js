@@ -858,6 +858,8 @@ function userMenu(e) {
     "menu dropdown",
     h("header", null, h("span", { class: "avatar" }, state.user.name.slice(0, 1).toUpperCase()), h("div", null, h("h2", null, state.user.name), h("span", { class: "muted small" }, t("user.role." + state.user.role)))),
     h("a", { class: "menu-item", href: "#/settings/account", onclick: () => dialog.close() }, icon("user"), t("settings.account")),
+    isAdmin() && h("button", { type: "button", class: "menu-item", onclick: () => (dialog.close(), serverPowerDialog("reboot")) }, icon("refresh"), t("power.reboot")),
+    isAdmin() && h("button", { type: "button", class: "menu-item", onclick: () => (dialog.close(), serverPowerDialog("poweroff")) }, icon("stop"), t("power.poweroff")),
     h("button", { type: "button", class: "menu-item", onclick: () => (dialog.close(), signOut()) }, icon("signout"), t("nav.signOut")),
   );  // it hangs under the button it was opened from, by its right edge
   dialog.style.top = anchor.bottom + 8 + "px";
@@ -2695,6 +2697,48 @@ function powerDialog(m, action) {
       }, action === "reboot" ? "refresh" : "stop"),
     ),
   );
+}
+
+/** Restarts or shuts down the server Hata runs on; after a restart the page waits for it and reloads */
+function serverPowerDialog(action) {
+  let dialog;
+  dialog = openDialog(
+    "confirm",
+    h("h2", { class: "wrap" }, t(`power.${action}Title`)),
+    h("p", { class: "muted" }, t(`power.${action}Lead`)),
+    h(
+      "footer",
+      null,
+      closeButton(() => dialog, t("common.cancel")),
+      button(t(`power.${action}`), {
+        class: "danger",
+        onclick: async (e) => {
+          e.currentTarget.disabled = true;
+          try {
+            await api("POST", "/api/system/power", { action });
+            dialog.close();
+            toast(t(`power.${action}Done`));
+            if (action === "reboot") void waitForReturn();
+          } catch (err) {
+            toast(errorText(err), "error");
+          }
+        },
+      }, action === "reboot" ? "refresh" : "stop"),
+    ),
+  );
+}
+
+/** Waits for the server to go away and to answer again, then reloads the page */
+async function waitForReturn() {
+  const answers = () => fetch("/api/state", { cache: "no-store" }).then((r) => r.ok, () => false);
+  const started = Date.now();
+  let gone = false;
+  while (Date.now() - started < 15 * 60_000) {
+    await new Promise((r) => setTimeout(r, 3000));
+    const up = await answers();
+    if (!up) gone = true;
+    else if (gone) return location.reload();
+  }
 }
 
 async function updateMachine(m, el) {
@@ -7351,6 +7395,7 @@ function settingsSection(section) {
     const port = h("input", { type: "number", min: 1, max: 65535, class: "short mono", value: s?.port || "", placeholder: String(location.port || 80) });
     return [
       h("section", { class: "card pad" }, h("h2", null, t("settings.general")), settingRow(t("settings.language"), t("settings.languageHint"), language), isAdmin() && settingRow(t("settings.port"), t("settings.portHint"), h("span", { class: "pair" }, port, button(t("settings.save"), { onclick: () => save({ port: Number(port.value) || 0 }) }))), isAdmin() && settingRow(t("welcome.again"), t("welcome.againHint"), h("a", { class: "btn", href: "#/welcome" }, t("common.open"))), error),
+      isAdmin() && h("section", { class: "card pad" }, h("h2", null, t("power.title")), settingRow(t("power.reboot"), t("power.rebootHint"), button(t("power.reboot"), { onclick: () => serverPowerDialog("reboot") }, "refresh")), settingRow(t("power.poweroff"), t("power.poweroffHint"), button(t("power.poweroff"), { onclick: () => serverPowerDialog("poweroff") }, "stop"))),
     ];
   }
   if (section === "apps") {
