@@ -87,10 +87,11 @@ function networkPorts(copy: Compose): GateTarget[] {
 export function gateTarget(compose: Compose, dataRoot: string, env: Env = {}): GateTarget | "noPort" | "hostNetwork" {
   const copy = resolved(compose, dataRoot, env);
   const ports = networkPorts(copy);
-  const web = Number(appMeta(copy, "en").port) || ports[0]?.port;
-  if (!web) return "noPort";
-  // the app says it has a web UI on this port but publishes nothing there: it shares the host's network
-  return ports.find((p) => p.port === web) ?? "hostNetwork";
+  const named = Number(appMeta(copy, "en").port);
+  // the app says it has a web UI on this port but publishes nothing: it shares the host's network
+  if (named && !ports.length) return "hostNetwork";
+  // a port changed by hand in the compose file leaves the metadata behind: then the first one published
+  return ports.find((p) => p.port === named) ?? ports[0] ?? "noPort";
 }
 
 /**

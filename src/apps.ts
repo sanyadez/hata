@@ -298,13 +298,18 @@ export function appEnv(name: string): Record<string, string> {
   }
 }
 
-function firstPublishedPort(name: string, compose: Compose | null): string {
-  if (!compose) return "";
+/**
+ * The port an app's page is opened at: the one its metadata names while the compose file still publishes
+ * it (or publishes nothing — an app on the host's network), else the first published TCP port. A port
+ * changed by hand in the compose file leaves `port_map` behind.
+ */
+function webPortIn(name: string, compose: Compose | null, named: string): string {
+  if (!compose) return named;
   const copy = structuredClone(compose);
   resolvePorts(copy, appEnv(name));
   normalize(copy, settings.dataRoot);
-  const port = publishedPorts(copy).find((p) => p.protocol === "tcp");
-  return port ? String(port.port) : "";
+  const tcp = publishedPorts(copy).filter((p) => p.protocol === "tcp").map((p) => String(p.port));
+  return !tcp.length || tcp.includes(named) ? named : tcp[0]!;
 }
 
 function describeApp(name: string, containers: ContainerSummary[] | null, lang: string): InstalledApp {
@@ -318,7 +323,7 @@ function describeApp(name: string, containers: ContainerSummary[] | null, lang: 
     title: meta.title || name,
     icon: ownIconUrl(name) || meta.icon,
     // an app without store metadata still gets a working tile: its first published TCP port
-    port: meta.port || firstPublishedPort(name, compose),
+    port: webPortIn(name, compose, meta.port),
     index: meta.index,
     scheme: meta.scheme,
     hostname: meta.hostname,

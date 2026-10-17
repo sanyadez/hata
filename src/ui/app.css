@@ -385,6 +385,9 @@ textarea.code, pre { white-space: pre-wrap; overflow-wrap: anywhere; overflow-x:
   table:not(.file-table) > tbody > tr > td:not([data-label=""])[data-label]::before { content: attr(data-label); display: block; margin-top: 4px; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--faint); }
   table:not(.file-table) td .clip { max-width: 100%; }
   table:not(.file-table) .row-actions { justify-content: flex-start; margin-top: 6px; }
+  table.trash > tbody > tr > td.tick { width: auto; }
+  table.trash > tbody > tr.chosen { background: var(--accent-soft); }
+  table.trash > tbody > tr.chosen > td { background: none; }
 }
 
 /* between a phone and a wide screen the sections are icons, their names in the tooltip */
@@ -646,6 +649,10 @@ dialog.xwide textarea.code { min-height: 56dvh; }
 .card-head .section-head { flex-wrap: wrap; }
 .card-head .section-head .small { white-space: nowrap; }
 table.disks td:last-child { padding-left: 0; }
+.trash-keep { display: flex; align-items: center; gap: 8px 16px; flex-wrap: wrap; }
+.trash-keep > p { margin: 0; min-width: 240px; }
+table.trash th.tick, table.trash td.tick { width: 1%; padding-right: 0; }
+table.trash tr.chosen td { background: var(--accent-soft); }
 tr.clickable { cursor: pointer; }
 tr.clickable:hover td { background: var(--surface-2); }
 .usage { min-width: 150px; display: grid; gap: 6px; }

@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { attention } from "../src/attention";
 import { healthOf, parseLsblk, parseMounts, parseSmart, remember, verdict, type DiskReport, type Smart } from "../src/disks";
+import { smartLimits } from "../src/config";
 import { keyOf } from "../src/notify";
 import type { SystemStatus } from "../src/system";
 
@@ -162,6 +163,10 @@ test("verdict: what counts against a disk", () => {
   // flash runs hotter than a spinning disk may
   expect(verdict({ ...healthy, temperature: 58 }, true)).toEqual([{ code: "hot", severity: "warn", n: 58 }]);
   expect(verdict({ ...healthy, temperature: 58 }, false)).toEqual([]);
+  // the limits are the administrator's
+  expect(verdict({ ...healthy, temperature: 58 }, true, { hotHdd: 60, hotFlash: 70, wear: 90 })).toEqual([]);
+  expect(verdict({ ...healthy, temperature: 58 }, false, { hotHdd: 55, hotFlash: 50, wear: 90 })).toEqual([{ code: "hot", severity: "warn", n: 58 }]);
+  expect(verdict({ ...healthy, wear: 80 }, false, { hotHdd: 55, hotFlash: 70, wear: 80 })).toEqual([{ code: "worn", severity: "warn", n: 80 }]);
 });
 
 test("attention: one line per disk in trouble, about the worst it reports", () => {
@@ -247,4 +252,14 @@ test("attention: a counter that grew makes the disk's item news again", () => {
   expect(item(null).at).toBeUndefined();
   expect(keyOf(item(null))).toBe("smart:WD-1");
   expect(keyOf(item(5000))).toBe("smart:WD-1@5000");
+});
+
+test("the limits of SMART as a change gives them: whole numbers in their ranges, the ones given only", () => {
+  expect(smartLimits({ hotHdd: 60 })).toEqual({ hotHdd: 60 });
+  expect(smartLimits({ hotHdd: 50, hotFlash: 80, wear: 95 })).toEqual({ hotHdd: 50, hotFlash: 80, wear: 95 });
+  expect(smartLimits({ hotHdd: 20 })).toBeNull();
+  expect(smartLimits({ wear: 101 })).toBeNull();
+  expect(smartLimits({ hotFlash: 70.5 })).toBeNull();
+  expect(smartLimits({ wear: "90" })).toBeNull();
+  expect(smartLimits(null)).toBeNull();
 });

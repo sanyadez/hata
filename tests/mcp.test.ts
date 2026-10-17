@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { allows, createKey, keyOf, listKeys, removeKey } from "../src/agents";
+import { allows, createKey, keyOf, listKeys, removeKey, renameKey } from "../src/agents";
 import { parseCompose } from "../src/appform";
 import { describeTool, handleMessage, ToolError, toolsFor, type Caller, type Tool } from "../src/mcp";
 import { findings, happened, HIDDEN, instructions, maskCompose, TOOLS, type ContainerState } from "../src/mcptools";
@@ -189,8 +189,18 @@ test("access keys: shown once, found by the Bearer token, gone when removed", ()
   expect(listKeys()[0]).toMatchObject({ lastIp: "192.0.2.9" });
   expect(listKeys()[0]!.lastUsed).toBeGreaterThan(0);
 
+  // renamed: the same key goes on working under the new name
+  const other = createKey("desktop", "read", "admin");
+  if (typeof other === "string") throw new Error(other);
+  expect(renameKey(made.info.id, "Desktop")).toBe("agents.nameTaken");
+  expect(renameKey(made.info.id, " ")).toBe("agents.badName");
+  expect(renameKey("no-such-id", "x")).toBe("agents.notFound");
+  expect(renameKey(made.info.id, "  Work   laptop ")).toMatchObject({ was: "My laptop", key: { name: "Work laptop" } });
+  expect(keyOf(request(made.key))?.name).toBe("Work laptop");
+  removeKey(other.info.id);
+
   expect(removeKey("no-such-id")).toBeNull();
-  expect(removeKey(made.info.id)?.name).toBe("My laptop");
+  expect(removeKey(made.info.id)?.name).toBe("Work laptop");
   expect(keyOf(request(made.key))).toBeNull();
   expect(listKeys()).toEqual([]);
 });

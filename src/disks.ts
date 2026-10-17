@@ -13,7 +13,7 @@
 import { existsSync, readFileSync, statfsSync } from "node:fs";
 import { roomOf } from "./netroom";
 import { join } from "node:path";
-import { DATA_DIR } from "./config";
+import { DATA_DIR, DEFAULT_SMART, settings, type SmartLimits } from "./config";
 import { isPlainObject, readJsonFile, writeJsonAtomic } from "./fsutil";
 import { installCommand, installPackage, PATH, run } from "./packages";
 
@@ -248,16 +248,11 @@ export interface Finding {
   n?: number;
 }
 
-const WEAR_WARN = 90;
-// a spinning disk ages fast above 55 °C; flash is rated for more
-const HOT_HDD = 55;
-const HOT_FLASH = 70;
-
 /**
  * What is wrong with a disk, worst first. Any moved, waiting or unreadable sector counts: on disks that
  * went on to fail these counters were the ones that had left zero.
  */
-export function verdict(smart: Smart, rotational: boolean): Finding[] {
+export function verdict(smart: Smart, rotational: boolean, limits: SmartLimits = DEFAULT_SMART): Finding[] {
   const out: Finding[] = [];
   if (smart.passed === false) out.push({ code: "failing", severity: "danger" });
   if (smart.critical) out.push({ code: "critical", severity: "danger" });
@@ -267,8 +262,8 @@ export function verdict(smart: Smart, rotational: boolean): Finding[] {
   if (smart.pending) out.push({ code: "pending", severity: "warn", n: smart.pending });
   if (smart.uncorrectable) out.push({ code: "uncorrectable", severity: "warn", n: smart.uncorrectable });
   if (smart.mediaErrors) out.push({ code: "media", severity: "warn", n: smart.mediaErrors });
-  if (smart.wear !== null && smart.wear >= WEAR_WARN) out.push({ code: "worn", severity: "warn", n: smart.wear });
-  if (smart.temperature !== null && smart.temperature >= (rotational ? HOT_HDD : HOT_FLASH)) out.push({ code: "hot", severity: "warn", n: smart.temperature });
+  if (smart.wear !== null && smart.wear >= limits.wear) out.push({ code: "worn", severity: "warn", n: smart.wear });
+  if (smart.temperature !== null && smart.temperature >= (rotational ? limits.hotHdd : limits.hotFlash)) out.push({ code: "hot", severity: "warn", n: smart.temperature });
   return out;
 }
 
@@ -451,14 +446,14 @@ function usage(path: string): { total: number; used: number } | null {
 
 const report = (disk: Disk): DiskReport => {
   const reading = records[idOf(disk)];
-  const findings = reading?.smart ? verdict(reading.smart, disk.rotational) : null;
+  const findings = reading?.smart ? verdict(reading.smart, disk.rotational, settings.storage.smart) : null;
   return { ...disk, smart: reading?.smart ?? null, health: healthOf(findings), findings: findings ?? [], checkedAt: reading?.at ?? null, log: reading?.log ?? {}, grew: reading?.grew ?? null, hottest: reading?.hottest ?? null };
 };
 
 /** The disks as last seen, with their health — for the "needs attention" list */
 export const diskHealth = (): DiskReport[] => known.map(report);
 
-export async function listDisks(): Promise<{ disks: DiskReport[]; mounts: MountReport[]; tool: ToolState; install: string }> {
+export async function listDisks(): Promise<{ disks: DiskReport[]; mounts: MountReport[]; tool: ToolState; install: string; limits: SmartLimits }> {
   // what is plugged in and mounted is cheap to ask and changes under our feet; SMART is the cached part
   const now = await connected();
   if (now.length || !known.length) known = now;
@@ -480,7 +475,7 @@ export async function listDisks(): Promise<{ disks: DiskReport[]; mounts: MountR
   // the same count as everywhere else in Hata: used is what is not free to an ordinary program
   const disks = known.map(report).map((disk) => ({ ...disk, volumes: disk.volumes.map((v) => ({ ...v, ...((v.mounts[0] && usage(v.mounts[0])) || {}) })) }));
   const state: ToolState = outOfReach(known) ? "denied" : smartctl() ? (tool === "missing" ? "ok" : tool) : "missing";
-  return { disks, mounts, tool: state, install: state === "missing" ? installCommand(PACKAGE) : "" };
+  return { disks, mounts, tool: state, install: state === "missing" ? installCommand(PACKAGE) : "", limits: settings.storage.smart };
 }
 
 /** Starts the disk's own self-test; the outcome shows up in its SMART data when it is done */

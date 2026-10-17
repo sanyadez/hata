@@ -26,6 +26,8 @@ test("the web port is found; apps without one cannot be guarded", () => {
   expect(gateTarget(parseCompose("services:\n  a:\n    image: x\n    ports:\n      - 53:53/udp\n      - 3000:3000"), "/DATA")).toEqual({ service: "a", target: 3000, port: 3000 });
   expect(gateTarget(parseCompose("services:\n  a:\n    image: x"), "/DATA")).toBe("noPort");
   expect(gateTarget(parseCompose("services:\n  a:\n    image: x\n    network_mode: host\nx-casaos:\n  port_map: '8123'"), "/DATA")).toBe("hostNetwork");
+  // the port moved by hand, the metadata left behind: the port that is published
+  expect(gateTarget(parseCompose("services:\n  a:\n    image: x\n    ports:\n      - 9090:80\nx-casaos:\n  port_map: '8080'"), "/DATA")).toEqual({ service: "a", target: 80, port: 9090 });
 });
 
 test("the override moves only the web port to localhost and keeps the others", () => {
