@@ -96,6 +96,21 @@ export function cleanShares(value: unknown): Share[] {
   return out;
 }
 
+/** A folder of another machine shared with users of Hata: in Files only, that machine has no Samba of Hata's */
+export type MachineShare = Pick<Share, "name" | "path" | "users">;
+
+/** Machine id → its shared folders, as kept in the settings */
+export function cleanMachineShares(value: unknown): Record<string, MachineShare[]> {
+  const out: Record<string, MachineShare[]> = {};
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return out;
+  for (const [id, list] of Object.entries(value)) {
+    if (!/^[a-f0-9]{8}$/.test(id)) continue;
+    const shares = cleanShares(list).map(({ name, path, users }) => ({ name, path, users }));
+    if (shares.length) out[id] = shares;
+  }
+  return out;
+}
+
 const MARK = "# Written by Hata from its settings (Settings → Network folders).";
 
 /** Whether this `smb.conf` is one Hata wrote */

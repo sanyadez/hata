@@ -71,3 +71,20 @@ test("a link is judged by where it leads when opened, by where it lies when acte
   expect(rights.may(join(root, "Media/out"), "write", true)).toBe(true);
   expect(rights.may(join(root, "Media/out/secret"), "read")).toBe(false);
 });
+
+test("folders of machines are kept by machine id, as shares without guests", async () => {
+  const { cleanMachineShares } = await import("../src/smbconf");
+  expect(cleanMachineShares({ "304015a8": [{ name: "Photos", path: "/srv/photos", guest: "write", users: { u1: "write", u2: "all" } }, { name: "photos", path: "/srv/other", users: {} }], nope: [{ name: "X", path: "/x", users: {} }] })).toEqual({ "304015a8": [{ name: "Photos", path: "/srv/photos", users: { u1: "write" } }] });
+  expect(cleanMachineShares([])).toEqual({});
+});
+
+test("a machine says where a path really is, and where the entry itself lies", async () => {
+  const { real } = await import("../src/clientfiles");
+  expect(real({ paths: [join(root, "Media/out/secret"), join(root, "Media/out"), join(root, "Media/new/file")] })).toEqual([
+    // inside a link the entry lies where the link leads
+    { target: join(outside, "secret"), entry: join(outside, "secret") },
+    { target: outside, entry: join(root, "Media/out") },
+    { target: join(root, "Media/new/file"), entry: join(root, "Media/new/file") },
+  ]);
+  expect(() => real({ paths: ["relative"] })).toThrow();
+});

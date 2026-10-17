@@ -18,6 +18,7 @@ import { containerCommand, shellCommand, TerminalManager, terminalEnv, type Term
 import { diskUsage, dockerInfo, listContainers, PROJECT_LABEL, pruneBuildCache, pruneImages, pruneVolumes, removeImage, removeVolume, run, SERVICE_LABEL, startContainer, stopContainer, type ContainerSummary } from "./docker";
 import * as apps from "./clientapps";
 import * as files from "./clientfiles";
+import { syncUsers } from "./clientusers";
 import { keyPair, linkKeys, Opener, Sealer, splitCode, type KeyPair } from "./link";
 import { MuxError, Peer, type Channel, type Handler } from "./mux";
 import { checkPackages, upgradePackages } from "./pkgupdates";
@@ -422,6 +423,9 @@ function handlersFor(state: LinkState): Record<string, Handler> {
     "fs.pack": (args, channel) => files.pack(args, channel),
     "fs.unpack": (args, channel) => files.unpack(args, channel),
     "fs.dropData": (args) => files.dropData(args),
+    "fs.real": (args) => files.real(args),
+    // the users of Hata, as accounts of this machine: only while it is let to them
+    "users.sync": (args) => syncUsers(args),
     ping: () => "pong",
   };
 }

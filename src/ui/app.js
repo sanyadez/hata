@@ -313,7 +313,7 @@ function parseRoute() {
   if (parts[0] === "store" && state.user?.role !== "guest") return { view: "store" };
   // "#/files" is the data root, wherever it is; "#/files/" is the root of the server
   // "#/files/@<machine>/<folders>" is a folder of another machine
-  if (parts[0] === "files" && isAdmin() && parts[1]?.startsWith("@")) return { view: "files", machine: parts[1].slice(1), path: "/" + parts.slice(2).join("/") };
+  if (parts[0] === "files" && mayFiles() && parts[1]?.startsWith("@")) return { view: "files", machine: parts[1].slice(1), path: "/" + parts.slice(2).join("/") };
   if (parts[0] === "files" && mayFiles()) return { view: "files", machine: "", path: /^#\/?files$/.test(location.hash) ? "" : "/" + parts.slice(1).join("/") };
   if (parts[0] === "trash" && mayFiles()) return { view: "trash" };
   if (parts[0] === "hata" && mayFiles()) return { view: "myhata" };
@@ -785,8 +785,21 @@ const NAV = [
 const isAdmin = () => state.user?.role === "admin" && !state.user.mustTwoFactor;
 /** Files are an administrator's, and theirs with whom a folder is shared — only those folders then */
 const mayFiles = () => isAdmin() || !!state.user?.files;
-/** The folders shared with one who is not an administrator; null for an administrator */
-const myShares = () => (isAdmin() ? null : (state.files?.shares ?? state.myShares ?? []));
+/** The folders shared with one who is not an administrator, of this server or of a machine; null for an administrator */
+function myShares(machine = state.route.view === "files" ? filesMachine() : "") {
+  if (isAdmin()) return null;
+  if ((state.files?.machine ?? "") === machine && state.files?.shares) return state.files.shares;
+  return machine ? (state.myMachines?.find((m) => m.id === machine)?.shares ?? []) : (state.myShares ?? []);
+}
+
+/** The folders shared with them, here and on the machines, asked once for the sidebar and My Hata */
+async function loadMine() {
+  const mine = await api("GET", "/api/files/shares").catch(() => null);
+  if (!mine) return;
+  state.myShares = mine.shares;
+  state.myMachines = mine.machines;
+  state.favorites = mine.favorites;
+}
 
 const navCurrent = () => (state.route.view === "machine" ? "machines" : state.route.view === "app" ? "home" : state.route.view === "import" ? "store" : state.route.view === "trash" || state.route.view === "myhata" ? "files" : state.route.view);
 const navItems = () => NAV.filter((item) => (!item.admin || isAdmin()) && (!item.files || mayFiles()) && (item.guest !== false || state.user.role !== "guest"));
@@ -2521,6 +2534,21 @@ async function addMachineDialog() {
   } catch (e) {
     return toast(errorText(e), "error");
   }
+  // whether the machine is let to the other users: a line of its own, so another code is asked for
+  const people = h("input", {
+    type: "checkbox",
+    onchange: async () => {
+      people.disabled = true;
+      try {
+        invite = { ...invite, ...(await api("POST", "/api/machines/invite", { people: people.checked })) };
+        cmd.textContent = line();
+      } catch (e) {
+        people.checked = !people.checked;
+        toast(errorText(e), "error");
+      }
+      people.disabled = false;
+    },
+  });
   const known = new Set((machinesUi.list?.machines ?? []).map((m) => m.id));
   const addresses = [...new Set([location.origin, invite.lan, invite.local].filter(Boolean).map((a) => a.replace(/\/$/, "")))];
   let address = addresses[0];
@@ -2554,6 +2582,7 @@ async function addMachineDialog() {
     h("p", { class: "cmd" }, cmd, h("button", { type: "button", class: "icon-btn", title: t("twofa.copy"), "aria-label": t("twofa.copy"), onclick: () => copyText(line()) }, icon("copy"))),
     h("p", { class: "muted small" }, t("machines.addHint", { minutes: Math.round(invite.valid / 60000) })),
     h("p", { class: "muted small" }, t("machines.addNeeds")),
+    h("label", { class: "check" }, people, h("span", null, h("strong", null, t("machines.people.tick")), h("span", { class: "muted small block" }, t("machines.people.tickHint")))),
     waiting,
     h("footer", null, closeButton(() => dialog)),
   );
@@ -2774,6 +2803,7 @@ function machineOverview(m, box) {
           : h("p", { class: "card pad muted" }, t("machines.offlineLead", { ago: ago(m.seen) })),
         h("div", { id: "m-disks" }),
         m.online && h("div", { id: "machine-sysupdates" }, sysUpdatesCard(m.id)),
+        h("div", { id: "machine-people" }, machinePeopleCard(m)),
       ),
       h(
         "aside",
@@ -2797,6 +2827,126 @@ function machineOverview(m, box) {
   );
   paintMachineStats(m);
   if (m.online && !sysUpdates[m.id]) void loadSysUpdates(m.id);
+}
+
+/** Who else may use the machine: its accounts for the users of Hata, and its folders shared with them */
+const machinePeople = {};
+
+async function loadMachinePeople(id) {
+  try {
+    const [shares, users] = await Promise.all([api("GET", `/api/machines/${id}/shares`), api("GET", "/api/users")]);
+    machinePeople[id] = { shares: shares.shares, users };
+  } catch (e) {
+    return toast(errorText(e), "error");
+  }
+  const box = document.getElementById("machine-people");
+  if (box && machinesUi.current?.id === id) box.replaceChildren(machinePeopleCard(machinesUi.current));
+}
+
+function machinePeopleCard(m) {
+  const data = machinePeople[m.id];
+  if (m.people && !data) void loadMachinePeople(m.id);
+  const others = (data?.users ?? []).filter((user) => user.role !== "admin");
+  const who = (share) =>
+    Object.entries(share.users)
+      .map(([id, access]) => `${(data?.users ?? []).find((user) => user.id === id)?.name ?? "?"} — ${t("shares.access." + access).toLowerCase()}`)
+      .join(", ");
+  const row = (share) =>
+    h(
+      "tr",
+      null,
+      h("td", null, h("div", { class: "with-icon strong" }, icon("share"), h("span", { class: "clip" }, share.name)), h("div", { class: "muted small mono clip" }, share.path)),
+      h("td", { class: "muted small" }, who(share)),
+      h("td", null, h("div", { class: "row-actions" }, button(t("machines.people.change"), { class: "small", onclick: () => machineShareDialog(m, share.path) }), h("a", { class: "btn small", href: filesHash(share.path, m.id) }, icon("folder"), h("span", null, t("common.open"))))),
+    );
+  return h(
+    "section",
+    { class: "card table-wrap" },
+    h(
+      "div",
+      { class: "pad card-head stack-s" },
+      h("div", { class: "section-head" }, h("h2", null, t("machines.people.title")), m.people ? h("div", { class: "row-actions" }, button(t("machines.people.share"), { class: "small primary", disabled: !m.online, onclick: () => folderPicker({ title: t("machines.people.pick", { name: m.name }), start: "/", machine: m.id, confirmLabel: t("machines.people.pickHere"), allowed: (at) => at !== "/", action: async (at) => machineShareDialog(m, at) }) }, "share"), button(t("machines.people.off"), { class: "small", onclick: () => letMachineDialog(m, false) })) : button(t("machines.people.on"), { class: "small primary", onclick: () => letMachineDialog(m, true) })),
+      h("p", { class: "muted small" }, t(m.people ? "machines.people.onLead" : "machines.people.offLead")),
+      m.people && data && !others.length && h("p", { class: "muted small" }, t("machines.people.nobody")),
+    ),
+    m.people && data?.shares.length > 0 && h("table", null, h("thead", null, h("tr", null, h("th", null, t("machines.people.col.folder")), h("th", null, t("shares.who")), h("th"))), h("tbody", null, data.shares.map(row))),
+  );
+}
+
+/** Lets the machine to the other users of Hata, or takes it back — what that does is said first */
+function letMachineDialog(m, on) {
+  let dialog;
+  dialog = openDialog(
+    "confirm",
+    h("h2", { class: "wrap" }, t(on ? "machines.people.onTitle" : "machines.people.offTitle", { name: m.name })),
+    h("p", { class: "muted" }, t(on ? "machines.people.onWhat" : "machines.people.offWhat")),
+    h(
+      "footer",
+      null,
+      closeButton(() => dialog, t("common.cancel")),
+      button(t(on ? "machines.people.on" : "machines.people.off"), {
+        class: on ? "primary" : "danger",
+        onclick: async (e) => {
+          const pressed = e.currentTarget;
+          pressed.disabled = true;
+          try {
+            const answer = await api("PUT", `/api/machines/${m.id}/people`, { on });
+            machinesUi.current = { ...machinesUi.current, people: answer.people };
+            delete machinePeople[m.id];
+            dialog.close();
+            paintMachineOverview();
+          } catch (err) {
+            toast(errorText(err), "error");
+            pressed.disabled = false;
+          }
+        },
+      }),
+    ),
+  );
+}
+
+/** The machine, when an administrator is in its files and it is let to the other users of Hata */
+const machineLet = (id) => (id && isAdmin() && machinesUi.list?.machines.find((m) => m.id === id && m.people)) || null;
+
+/** A folder of the machine shared with users of Hata: its name and who may do what; nobody — not shared */
+async function machineShareDialog(m, path) {
+  if (!machinePeople[m.id]) await loadMachinePeople(m.id);
+  const data = machinePeople[m.id];
+  if (!data) return;
+  const share = data.shares.find((one) => one.path === path);
+  const folder = path.split("/").pop() || "/";
+  const name = h("input", { value: share?.name ?? "", placeholder: folder, maxLength: 40, spellcheck: false, autocomplete: "off" });
+  const users = data.users
+    .filter((user) => user.role !== "admin")
+    .map((user) => ({ user, select: h("select", null, ["none", "read", "write"].map((access) => h("option", { value: access, selected: access === (share?.users[user.id] ?? "none") }, t("shares.access." + access)))) }));
+  const error = h("p", { class: "error", role: "alert" });
+  let dialog;
+  const save = async (all) => {
+    error.textContent = "";
+    try {
+      const answer = await api("PUT", `/api/machines/${m.id}/shares`, { path, name: name.value.trim(), users: all ? Object.fromEntries(users.filter(({ select }) => select.value !== "none").map(({ user, select }) => [user.id, select.value])) : {} });
+      data.shares = answer.shares;
+      dialog.close();
+      toast(t(answer.shares.some((one) => one.path === path) ? "shares.saved" : "machines.people.unshared", { name: folder }));
+      const box = document.getElementById("machine-people");
+      if (box && machinesUi.current?.id === m.id) box.replaceChildren(machinePeopleCard(machinesUi.current));
+    } catch (e) {
+      error.textContent = errorText(e);
+    }
+  };
+  dialog = openDialog(
+    "confirm",
+    h(
+      "form",
+      { onsubmit: (e) => (e.preventDefault(), save(true)) },
+      h("header", null, h("span", { class: "badge-icon plain" }, icon("share")), h("div", null, h("h2", null, t(share ? "machines.people.dialogEdit" : "machines.people.dialogNew", { name: folder })), h("span", { class: "muted small mono clip" }, `${m.name}:${path}`))),
+      h("p", { class: "muted small" }, t("machines.people.shareLead")),
+      field(t("machines.people.name"), name, t("machines.people.nameHint")),
+      h("div", { class: "field" }, h("span", { class: "label" }, t("shares.who")), users.length ? h("div", { class: "share-access" }, users.map(({ user, select }) => h("label", null, h("span", { class: "grow" }, h("strong", null, user.name), user.role === "guest" && h("span", { class: "muted small block" }, t("user.role.guest"))), select))) : h("p", { class: "muted small" }, t("machines.people.nobody"))),
+      error,
+      h("footer", null, share && button(t("machines.people.unshare"), { class: "danger", onclick: () => save(false) }), closeButton(() => dialog, t("common.cancel")), button(t("settings.save"), { type: "submit", class: "primary" })),
+    ),
+  );
 }
 
 function paintMachineOverview() {
@@ -4286,6 +4436,7 @@ async function loadFiles() {
   const machine = filesMachine();
   // theirs with whom folders are shared start from those folders
   if (!isAdmin() && !path) return go("#/hata");
+  if (!isAdmin() && !state.myMachines) await loadMine();
   // the other machines are places of the sidebar
   if (!machinesUi.list && isAdmin()) machinesUi.list = await api("GET", "/api/machines").catch(() => null);
   let listing;
@@ -4383,7 +4534,8 @@ function filesPlaces(path) {
         h("div", { class: "cat-title" }, t("files.places")),
         h("a", { class: "cat" + (path === "#hata" ? " active" : ""), href: "#/hata" }, h("span", { class: "with-icon" }, icon("home"), h("span", { class: "clip" }, t("myhata.title")))),
         h("a", { class: "cat" + (trash ? " active" : ""), href: "#/trash" }, h("span", { class: "with-icon" }, icon("trash"), h("span", { class: "clip" }, t("trash.title")))),
-        shares.length > 0 && [h("div", { class: "cat-title" }, t("myhata.shared")), shares.map((share) => place(share.name, share.path, "share", inside(share.path), ""))],
+        (state.myShares ?? []).length > 0 && [h("div", { class: "cat-title" }, t("myhata.shared")), state.myShares.map((share) => place(share.name, share.path, "share", !machine && inside(share.path), ""))],
+        (state.myMachines ?? []).map((m) => [h("div", { class: "cat-title" }, m.name), m.shares.map((share) => place(share.name, share.path, "share", machine === m.id && inside(share.path), m.id))]),
         favorites.length > 0 && [h("div", { class: "cat-title" }, t("files.favorites")), favorites.map(favoriteRow)],
       ),
     );
@@ -4543,7 +4695,7 @@ function stepTrail() {
 function goUp() {
   const path = state.route.path;
   // above the data folder and the whole server is My Hata, where every place is
-  if (!filesMachine() && (!path || path === "/" || path === state.files?.home || myShares()?.some((share) => share.path === path))) return go("#/hata");
+  if ((!filesMachine() && (!path || path === "/" || path === state.files?.home)) || myShares()?.some((share) => share.path === path)) return go("#/hata");
   if (!path || path === "/") return;
   filesUi.cursorNext = path.split("/").pop();
   go(filesHash(path.slice(0, path.lastIndexOf("/")) || "/"));
@@ -4836,13 +4988,7 @@ const outerVolumes = (listing) => (listing?.disks ?? []).filter((d) => !(d.path 
  */
 async function loadMyHata() {
   if (!isAdmin()) {
-    const mine = await api("GET", "/api/files/shares").catch(() => null);
-    if (mine) {
-      state.myShares = mine.shares;
-      state.favorites = mine.favorites;
-    }
-    // the sidebar reads the folders from the listing when there is one
-    if (state.files) state.files.shares = state.myShares;
+    await loadMine();
     if (state.route.view === "myhata") renderMyHata();
     return;
   }
@@ -4929,7 +5075,8 @@ function renderMySharedFolders() {
   const shares = state.myShares;
   const favorites = state.favorites ?? [];
   const section = (title, tiles) => h("section", { class: "card pad stack my-hata" }, h("div", { class: "section-head" }, h("h2", null, title)), h("div", { class: "disk-strip hata-grid" }, tiles));
-  const shareTile = (share) => hataTile({ href: filesHash(share.path, ""), iconName: "share", title: share.name, sub: t(share.access === "write" ? "myhata.mayWrite" : "myhata.mayRead"), words: true, menu: (at) => sidebarMenu(at, { label: share.name, path: share.path, iconName: "share" }) });
+  // a machine that is away keeps its tiles, greyed: its folders open once it is back
+  const shareTile = (share, m) => hataTile({ href: filesHash(share.path, m ? m.id : ""), iconName: "share", title: share.name, sub: m && !m.online ? t("machines.offline") : t(share.access === "write" ? "myhata.mayWrite" : "myhata.mayRead"), words: true, cls: m && !m.online ? "away" : "", menu: (at) => sidebarMenu(at, { label: share.name, path: share.path, machine: m ? m.id : "", iconName: "share" }) });
   const favoriteTile = (one) => {
     const name = one.path.split("/").pop() || "/";
     const parent = one.path.slice(0, one.path.lastIndexOf("/")) || "/";
@@ -4946,7 +5093,11 @@ function renderMySharedFolders() {
         h("div", { class: "page-head card pad" }, h("div", null, h("h1", null, t("myhata.title")), h("p", { class: "muted" }, t("myhata.sharedLead")))),
         !shares
           ? h("p", { class: "card pad muted" }, "…")
-          : [section(t("myhata.shared"), shares.length ? shares.map(shareTile) : h("p", { class: "muted small" }, t("myhata.nothingShared"))), favorites.length > 0 && section(t("files.favorites"), favorites.map(favoriteTile))],
+          : [
+              (shares.length > 0 || !(state.myMachines ?? []).length) && section(t("myhata.shared"), shares.length ? shares.map((share) => shareTile(share, "")) : h("p", { class: "muted small" }, t("myhata.nothingShared"))),
+              (state.myMachines ?? []).map((m) => section(t("myhata.onMachine", { name: m.name }), m.shares.map((share) => shareTile(share, m)))),
+              favorites.length > 0 && section(t("files.favorites"), favorites.map(favoriteTile)),
+            ],
       ),
     ),
   );
@@ -5314,6 +5465,7 @@ function folderMenu(at) {
     !listing.machine && item(t(isFavorite(path) ? "files.unfavorite" : "files.favorite"), "star", () => favorite(path, !isFavorite(path))),
     !listing.machine && isAdmin() && item(t(listing.pinned.includes(path) ? "files.unpin" : "files.pin"), "home", () => pinFolder(path, !listing.pinned.includes(path))),
     !listing.machine && isAdmin() && item(t(listing.shared.includes(path) ? "files.shareSettings" : "files.share"), "share", () => shareDialog(path)),
+    machineLet(listing.machine) && path !== "/" && item(t("machines.people.shareHere"), "share", () => machineShareDialog(machineLet(listing.machine), path)),
   );
   placeAt(dialog, at);
 }
@@ -5336,6 +5488,7 @@ function entryMenu(entry, at) {
     entry.type !== "other" && !filesMachine() && item(t(isFavorite(path) ? "files.unfavorite" : "files.favorite"), "star", () => favorite(path, !isFavorite(path), entry.name)),
     entry.type === "dir" && !filesMachine() && isAdmin() && (state.files.pinned.includes(path) ? item(t("files.unpin"), "home", () => pinFolder(path, false)) : item(t("files.pin"), "home", () => pinFolder(path, true))),
     entry.type === "dir" && !filesMachine() && isAdmin() && item(t(state.files.shared.includes(path) ? "files.shareSettings" : "files.share"), "share", () => shareDialog(path)),
+    entry.type === "dir" && machineLet(filesMachine()) && item(t("machines.people.shareHere"), "share", () => machineShareDialog(machineLet(filesMachine()), path)),
     !state.files.readOnly && item(t("files.rename"), "edit", () => renameDialog(entry)),
     !state.files.readOnly && item(t("files.move"), "arrow", () => transferDialog([entry], false)),
     item(t("files.copy"), "copy", () => transferDialog([entry], true)),
@@ -5536,7 +5689,7 @@ async function loadTrash() {
   }
   // opened straight from a link: the places on the left come with a listing of Files
   if (!state.files && isAdmin()) state.files = await api("GET", "/api/files?path=").catch(() => null);
-  if (!isAdmin() && !state.myShares) await loadMyHata();
+  if (!isAdmin() && !state.myShares) await loadMine();
   if (state.files?.favorites) state.favorites = state.files.favorites;
   if (state.route.view === "trash") renderTrash();
 }

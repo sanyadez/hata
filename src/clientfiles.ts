@@ -56,6 +56,18 @@ function locate(path: unknown): string {
   return resolve(path as string);
 }
 
+/**
+ * Where paths really are — what they lead to, and where the entry itself lies (a link not followed):
+ * Hata judges a member's rights by these, as Samba does with `wide links = no`
+ */
+export function real(args: { paths?: unknown }): { target: string; entry: string }[] {
+  if (!Array.isArray(args.paths) || args.paths.length > 1000) fail("files.badPath");
+  return (args.paths as unknown[]).map((path) => {
+    const abs = locate(path);
+    return { target: realish(abs), entry: abs === "/" ? "/" : join(realish(dirname(abs)), basename(abs)) };
+  });
+}
+
 const isVirtual = (abs: string): boolean => VIRTUAL.some((dir) => inside(abs, dir) || inside(realish(abs), dir));
 
 function mustWrite(abs: string): void {

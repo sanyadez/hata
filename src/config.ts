@@ -7,7 +7,7 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { cleanLayout, type Layout } from "./dashboard";
 import { cleanOutside } from "./outside";
-import { cleanShares, type Share } from "./smbconf";
+import { cleanMachineShares, cleanShares, type MachineShare, type Share } from "./smbconf";
 import { changeAppearance, cleanAppearance, DEFAULT_APPEARANCE, type Appearance } from "./wallpapers";
 import { isPlainObject, readJsonFile, writeJsonAtomic } from "./fsutil";
 import { POINTER_FILE, serviceStateDir, stateIsMissing, SYSTEM_SECRETS_DIR } from "./statedir";
@@ -105,6 +105,8 @@ export interface Settings {
   favorites: Record<string, Favorite[]>;
   /** Folders shared over the network (SMB) */
   shares: Share[];
+  /** Machine id → folders of that machine shared with users of Hata (in Files: it has no Samba of Hata's) */
+  machineShares: Record<string, MachineShare[]>;
   /** How the dashboard is arranged: groups, links, folders of tiles */
   dashboard: Layout;
   /** Colours and the background picture of the UI */
@@ -224,6 +226,7 @@ const DEFAULTS: Settings = {
   folders: [],
   favorites: {},
   shares: [],
+  machineShares: {},
   dashboard: cleanLayout(null),
   appearance: DEFAULT_APPEARANCE,
   welcome: false,
@@ -267,6 +270,7 @@ export const settings: Settings = {
   folders: Array.isArray(saved.folders) ? saved.folders.filter((path): path is string => typeof path === "string") : [],
   favorites: isPlainObject(saved.favorites) ? Object.fromEntries(Object.entries(saved.favorites).map(([id, list]) => [id, Array.isArray(list) ? list.filter((one): one is Favorite => isPlainObject(one) && typeof one.path === "string").map((one) => ({ path: one.path, dir: one.dir !== false })) : []])) : {},
   shares: cleanShares(saved.shares),
+  machineShares: cleanMachineShares(saved.machineShares),
   dashboard: cleanLayout(saved.dashboard),
   appearance: cleanAppearance(saved.appearance),
   https: { ...DEFAULTS.https, ...(isPlainObject(saved.https) ? saved.https : {}) },

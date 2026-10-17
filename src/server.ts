@@ -109,6 +109,7 @@ import { containerCommand, MAX_BUFFERED_BYTES, shellCommand, TerminalError, Term
 import { MuxError, type Channel } from "./mux";
 import { crossTransfer } from "./machinefiles";
 import { rightsOf } from "./memberfiles";
+import { letMachine, machineRights, machineShares, sharedOnMachines, shareOnMachine, startMachineUsers } from "./machineusers";
 import { moveApp, moveCheck } from "./moveapp";
 import { backupMachineApp, restoreMachineApp } from "./machinebackup";
 import { machineAccessRows, setMachineAccess, startMachineGates } from "./machinegate";
@@ -284,7 +285,7 @@ function passkeyDomain(req: Request): string {
 const mustSetUpTwoFactor = (user: User): boolean => user.role === "admin" && settings.security.adminTwoFactor && !user.totp;
 /** The user the page is told it is signed in as */
 // `files` — folders are shared with one who is not an administrator, so Files is there for them
-const signedIn = (user: User) => ({ ...publicUser(user), mustTwoFactor: mustSetUpTwoFactor(user), files: user.role !== "admin" || mustSetUpTwoFactor(user) ? rightsOf(user).shares.length > 0 : true });
+const signedIn = (user: User) => ({ ...publicUser(user), mustTwoFactor: mustSetUpTwoFactor(user), files: user.role !== "admin" || mustSetUpTwoFactor(user) ? rightsOf(user).shares.length > 0 || sharedOnMachines(user).length > 0 : true });
 
 const publicSettings = () => ({ ...settings, systemTimezone: timezone(), languages: Object.keys(LANGUAGES), stateDir: DATA_DIR, stateMovable: cannotMove() === null });
 
@@ -296,7 +297,7 @@ export function memberMay(method: string, path: string, role: Role = "member"): 
   // a guest is a shared account: whoever holds it must not be able to lock the others out of it
   if (path.startsWith("/api/account/")) return role !== "guest";
   // the folders shared with them; what they may do inside is `memberFiles`'s to say
-  if (path === "/api/files" || path.startsWith("/api/files/")) return true;
+  if (path === "/api/files" || path.startsWith("/api/files/") || /^\/api\/machines\/[a-f0-9]{8}\/files(\/|$)/.test(path)) return true;
   if (method !== "GET") return false;
   if (["/api/events", "/api/overview", "/api/apps"].includes(path) || /^\/api\/apps\/[a-z0-9_-]+(\/(stats|icon))?$/.test(path)) return true;
   return role === "member" && (path === "/api/store" || /^\/api\/store\/[a-z0-9-]+\/apps\/[a-z0-9_-]+$/.test(path));
@@ -653,6 +654,8 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
   if (!admin && !memberMay(method, path, user.role === "admin" ? "member" : user.role)) return fail(403, user.role === "admin" ? "auth.twoFactorRequired" : "auth.forbidden");
   // a member's Files: the shared folders, with the rights given there
   if (!admin && path.startsWith("/api/files")) return memberFiles(req, url, server, user);
+  const onMachine = /^\/api\/machines\/([a-f0-9]{8})\/files(\/.*)?$/.exec(path);
+  if (!admin && onMachine) return memberMachineFiles(req, url, server, user, onMachine[1]!, onMachine[2] ?? "");
 
   // ---- the signed-in user's own account ----
   if (path === "/api/account" && method === "GET") {
@@ -1933,7 +1936,7 @@ async function memberFiles(req: Request, url: URL, server: Server, user: User): 
   const data = method === "POST" || (method === "PUT" && path === "/api/files/text") ? await body(req.clone()) : {};
   const paths = (value: unknown): unknown[] => (Array.isArray(value) ? value : [value]);
   const favorites = () => favoritesOf(user.id).filter((one) => rights.may(one.path, "read"));
-  if (path === "/api/files/shares" && method === "GET") return json({ shares: rights.shares, favorites: favorites() });
+  if (path === "/api/files/shares" && method === "GET") return json({ shares: rights.shares, machines: sharedOnMachines(user), favorites: favorites() });
   if (path === "/api/files" && method === "GET") {
     const at = q.get("path") ?? "";
     read(at);
@@ -1977,6 +1980,39 @@ async function memberFiles(req: Request, url: URL, server: Server, user: User): 
   })();
   if (!checked) return fail(403, "auth.forbidden");
   return (await files(req, url, server, user.name, user.id)) ?? fail(404, "request.notFound");
+}
+
+/** A machine's files for one who is not an administrator: its folders shared with them, with the rights given */
+async function memberMachineFiles(req: Request, url: URL, server: Server, user: User, id: string, sub: string): Promise<Response> {
+  const method = req.method;
+  const q = url.searchParams;
+  const rights = await machineRights(user, id);
+  const data = method === "POST" || (method === "PUT" && sub === "/text") ? await body(req.clone()) : {};
+  const list = (value: unknown): unknown[] => (Array.isArray(value) ? value : [value]);
+  const read = (p: unknown) => rights.need(list(p), "read");
+  const write = (p: unknown) => rights.need(list(p), "write");
+  if (sub === "" && method === "GET") {
+    await read(q.get("path"));
+    const listing = await machineCall<Record<string, unknown> & { path: string; readOnly: boolean }>(id, "fs.list", { path: q.get("path") ?? "" });
+    // the machine's disks and places are not theirs to see
+    return json({ ...listing, readOnly: listing.readOnly || !(await rights.may(listing.path, "write")), disks: [], places: [], shares: rights.shares });
+  }
+  if ((sub === "/raw" || sub === "/text") && method === "GET") await read(q.get("path"));
+  else if (sub === "/zip" && method === "GET") await read(q.getAll("path"));
+  else if (sub === "/summary" && method === "POST") await rights.need(list(data.paths), "read", { entry: true });
+  else if (sub === "/text" && method === "PUT") await write(data.path);
+  else if ((sub === "/folder" || sub === "/file") && method === "POST") await write(data.path);
+  else if (sub === "/rename" && method === "POST") await rights.need(list(data.path), "write", { entry: true, inner: true });
+  else if ((sub === "/move" || sub === "/copy") && method === "POST") {
+    await rights.need(list(data.paths), sub === "/copy" ? "read" : "write", { entry: true, inner: sub !== "/copy" });
+    await write(data.to);
+  } else if (sub === "/delete" && method === "POST") await rights.need(list(data.paths), "write", { entry: true, inner: true });
+  else if (sub === "/upload" && (method === "PUT" || method === "DELETE")) {
+    const dir = q.get("dir") ?? "";
+    // where the part lands, folders of the upload included — one of them may be a link already there
+    await write([dir, ...(q.get("sub") ?? "").split("/").filter(Boolean).map(validName)].join("/").replace(/\/+/g, "/"));
+  } else return fail(403, "auth.forbidden");
+  return machineFiles(req, url, server, id, sub, user.name);
 }
 
 // --- Other machines ---------------------------------------------------------------------------------
@@ -2090,7 +2126,9 @@ async function machinesApi(req: Request, url: URL, server: Server, by: string): 
     // the name on the home network too: a machine that understands .local names finds Hata by it whatever address the router gives
     const { port } = listenAddress();
     const local = localDomain() ? `http://${localDomain()}${port === 80 ? "" : ":" + port}/` : "";
-    return json({ ...(await machineInvite(by)), valid: INVITE_MS, lan: baseUrl(), local });
+    // whether the machine is let to the other users of Hata from the start
+    const people = (req.headers.get("content-type") ?? "").startsWith("application/json") && (await body(req)).people === true;
+    return json({ ...(await machineInvite(by, people)), valid: INVITE_MS, lan: baseUrl(), local });
   }
   const m = /^\/api\/machines\/([a-f0-9]{8})(\/.*)?$/.exec(path);
   if (!m) return null;
@@ -2109,6 +2147,12 @@ async function machinesApi(req: Request, url: URL, server: Server, by: string): 
     }
     return json({ ok: true });
   }
+  if (rest === "/people" && method === "PUT") {
+    await letMachine(id, (await body(req)).on === true, by);
+    return json({ ...machineView(id), shares: machineShares(id) });
+  }
+  if (rest === "/shares" && method === "GET") return json({ shares: machineShares(id) });
+  if (rest === "/shares" && method === "PUT") return json({ shares: shareOnMachine(id, await body(req), by) });
   if (rest === "/containers" && method === "GET") return json(await containersOf(id));
   const one = /^\/(containers|projects)\/([^/]+)$/.exec(rest);
   if (one && method === "POST") {
@@ -2377,6 +2421,7 @@ export async function serve(): Promise<void> {
   scheduleUpdateChecks();
   startSampler(() => settings.dataRoot);
   startMachines();
+  startMachineUsers();
   startMachineGates();
   startDisks();
   startFills();

@@ -111,6 +111,16 @@ export function onPasswords(seen: PasswordListener, changed: () => void): void {
   usersChanged = changed;
 }
 
+const changeListeners: (() => void)[] = [];
+
+/** Who else keeps accounts of Hata's users (the machines do): told when a user comes or goes */
+export const onUsersChanged = (listener: () => void): void => void changeListeners.push(listener);
+
+const peopleChanged = (): void => {
+  usersChanged();
+  for (const listener of changeListeners) listener();
+};
+
 export function validName(name: unknown): name is string {
   return typeof name === "string" && /^[a-z0-9][a-z0-9._-]{0,31}$/i.test(name);
 }
@@ -294,6 +304,7 @@ export async function createUser(name: unknown, password: unknown, role: unknown
   users.push(user);
   saveUsers();
   passwordSeen(user, password);
+  for (const listener of changeListeners) listener();
   return user;
 }
 
@@ -324,7 +335,7 @@ export async function updateUser(id: string, patch: Record<string, unknown>): Pr
   if (patch.shares === false) user.noShares = true;
   if (patch.shares === true) delete user.noShares;
   saveUsers();
-  if ("shares" in patch) usersChanged();
+  if ("shares" in patch) peopleChanged();
   return null;
 }
 
@@ -336,7 +347,7 @@ export function deleteUser(id: string, acting: User): string | null {
   users.splice(users.indexOf(user), 1);
   saveUsers();
   revokeSessions(user);
-  usersChanged();
+  peopleChanged();
   return null;
 }
 
@@ -437,7 +448,7 @@ export async function acceptInvite(token: unknown, name: unknown, password: unkn
   if (!invites.includes(invite)) {
     users.splice(users.indexOf(user), 1);
     saveUsers();
-    usersChanged();
+    peopleChanged();
     return "invite.invalid";
   }
   invites = invites.filter((i) => i !== invite);
