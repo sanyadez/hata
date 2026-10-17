@@ -1185,3 +1185,5 @@ body:has(.assistant.paged) > .assistant-fab { display: none; }
 .pve-node + .pve-node { border-left: 1px solid var(--border); }
 .pve-self { display: flex; align-items: center; gap: 10px; margin: 0; padding: 12px 20px; }
 .pve-here { margin-left: 8px; vertical-align: middle; }
+.pve-offer { display: flex; align-items: center; gap: 12px; }
+.pve-gives { margin: 0; padding-left: 20px; }

@@ -3108,6 +3108,7 @@ function pveGuests(x) {
           g.may.power && !up && small(t("pve.start"), "play", (el) => pvePower(x, g, g.status === "paused" ? "resume" : "start", el)),
           g.may.power && up && small(t("pve.shutdown"), "stop", () => pvePowerDialog(x, g, "shutdown")),
           g.may.power && up && small(t("pve.reboot"), "refresh", () => pvePowerDialog(x, g, "reboot")),
+          !m && g.id !== x.self && small(t("pve.client.button"), "download", () => pveClientDialog(x, g)),
           small(t("app.more"), "more", () => pveGuestDialog(x, g)),
         ),
       ),
@@ -3160,6 +3161,68 @@ function pvePowerDialog(x, g, action, then) {
   );
 }
 
+/** The commands that put Hata's client on a guest of this system, typed in its console as root; null — it cannot have it */
+function clientLineFor(os, address, code) {
+  const line = `curl -fsSL ${address}/client/${code} | sh`;
+  if (/^(debian|ubuntu)$/.test(os)) return `apt-get update && apt-get install -y curl ca-certificates && ${line}`;
+  if (/^(fedora|centos|rocky|alma)/.test(os)) return `dnf install -y curl && ${line}`;
+  // a virtual machine says only "l26"; the line works wherever curl is
+  if (!os || os === "l26") return line;
+  return null;
+}
+
+/**
+ * Hata's client put on a guest that is there already: Proxmox runs no command inside one for a token,
+ * so the person pastes a line into its console — opened in Proxmox's own page — and Hata waits for it.
+ */
+async function pveClientDialog(x, g) {
+  let invite;
+  try {
+    invite = await api("POST", "/api/machines/invite", {});
+  } catch (e) {
+    return toast(errorText(e), "error");
+  }
+  const os = g.config?.os ?? "";
+  const known = new Set((machinesUi.list?.machines ?? []).map((m) => m.id));
+  // the guest is on the home network: the server's own number reaches it first
+  const addresses = [...new Set([invite.lan, location.origin, invite.local].filter(Boolean).map((a) => a.replace(/\/$/, "")))];
+  let address = addresses[0];
+  const line = () => clientLineFor(os, address, invite.code);
+  const cmd = h("span", { class: "grow mono machine-line" }, line() ?? "");
+  const waiting = h("p", { class: "machine-wait" }, h("span", { class: "machine-pulse" }), t("pve.client.waiting"));
+  const consoleUrl = `${x.url}/?console=${g.type === "lxc" ? "lxc" : "kvm"}&${g.type === "lxc" ? "xtermjs=1&" : "novnc=1&"}vmid=${g.vmid}&vmname=${encodeURIComponent(g.name)}&node=${encodeURIComponent(g.node)}`;
+  let dialog;
+  dialog = openDialog(
+    "wide",
+    h("header", null, h("h2", { class: "grow" }, t("pve.client.title", { name: g.name })), closeX(() => dialog)),
+    h("p", null, t("pve.client.lead")),
+    h("ul", { class: "stack-s small pve-gives" }, ["apps", "files", "terminal", "backups", "power"].map((k) => h("li", null, t("pve.client.gives." + k)))),
+    line() === null
+      ? h("p", { class: "card pad warn-box" }, t("pve.client.unsupported", { os }))
+      : [
+          h("p", { class: "strong" }, t("pve.client.how")),
+          h("ol", { class: "stack-s small" }, h("li", null, t("pve.client.step1"), " ", h("a", { class: "link", href: consoleUrl, target: "_blank", rel: "noopener noreferrer" }, t("pve.client.openConsole"))), h("li", null, t("pve.client.step2")), h("li", null, t(g.status === "running" ? "pve.client.step3" : "pve.client.step3stopped"))),
+          addresses.length > 1 && h("select", { onchange: (e) => ((address = e.target.value), (cmd.textContent = line())) }, addresses.map((a) => h("option", { value: a }, a))),
+          h("p", { class: "cmd whole" }, cmd, h("button", { type: "button", class: "icon-btn", title: t("twofa.copy"), "aria-label": t("twofa.copy"), onclick: () => copyText(line()) }, icon("copy"))),
+          h("p", { class: "muted small" }, t("machines.addHint", { minutes: Math.round(invite.valid / 60000) })),
+          waiting,
+        ],
+    h("footer", null, closeButton(() => dialog)),
+  );
+  const look = async () => {
+    const list = await api("GET", "/api/machines").catch(() => null);
+    const fresh = list?.machines.find((m) => !known.has(m.id));
+    if (!fresh) return;
+    machinesUi.list = list;
+    waiting.replaceChildren(icon("check"), h("span", null, t("machines.addDone", { name: fresh.name })), h("a", { class: "btn small primary", href: `#/machines/${fresh.id}`, onclick: () => dialog.close() }, t("common.open")));
+    waiting.classList.add("done");
+    clearInterval(timer);
+    void loadPve();
+  };
+  const timer = setInterval(look, 3000);
+  dialog.addEventListener("close", () => clearInterval(timer));
+}
+
 /** One guest: what it is, its power, its snapshots and backups */
 function pveGuestDialog(x, g) {
   const up = g.status === "running";
@@ -3198,6 +3261,7 @@ function pveGuestDialog(x, g) {
       row(t("pve.pool"), g.pool),
       row(t("pve.tags"), g.tags.join(", ")),
       m && h("div", { class: "kv" }, h("span", { class: "muted" }, t("nav.machines")), h("a", { class: "link", href: `#/machines/${m.id}`, onclick: () => dialog.close() }, m.name)),
+      !m && g.id !== x.self && h("div", { class: "card pad pve-offer" }, h("div", { class: "grow" }, h("strong", null, t("pve.client.offer")), h("p", { class: "muted small" }, t("pve.client.offerLead"))), button(t("pve.client.button"), { class: "small", onclick: () => (dialog.close(), pveClientDialog(x, g)) }, "download")),
       c?.description && h("p", { class: "muted small wrap" }, c.description),
     ),
     h("div", { class: "section-head" }, h("h3", null, t("pve.snapshots")), g.may.snapshot && button(t("pve.snapshotTake"), { class: "small", onclick: () => (dialog.close(), pveSnapshotDialog(x, g)) }, "plus")),
