@@ -13,15 +13,18 @@
  * the servers are often small —, the tasks every minute, the guests' configurations and the disks'
  * health every few minutes. A server that does not answer is asked again at the same pace.
  */
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { request } from "node:https";
+import { tmpdir } from "node:os";
 import { connect, type TLSSocket } from "node:tls";
 import { join } from "node:path";
 import { record } from "./activity";
-import { AppError } from "./apps";
+import { AppError, startJob, type Log } from "./apps";
 import { bus } from "./bus";
 import { SECRETS_DIR } from "./config";
 import { readJsonFile, writeJsonAtomic } from "./fsutil";
-import { cleanFingerprint, cleanUrl, failed, GUEST_RE, guestOfMacs, guestRights, mayPath, POWER, readConfig, readResources, readTask, SECRET_RE, SNAPSHOT_RE, snapshotName, TOKEN_RE, trouble, type Guest, type GuestConfig, type Permissions, type PveItem, type Resource, type Task, type Watched } from "./pve";
+import { invite, machines } from "./machines";
+import { cleanFingerprint, cleanUrl, failed, GUEST_RE, guestOfMachine as findGuest, guestRights, mayPath, POWER, readConfig, readResources, readTask, SECRET_RE, SNAPSHOT_RE, snapshotName, TOKEN_RE, trouble, hostKeysIn, nextId, readNewGuest, setupScript, type NewOptions, type Guest, type GuestConfig, type Permissions, type PveItem, type Resource, type Task, type Watched } from "./pve";
 
 const FILE = join(SECRETS_DIR, "proxmox.json");
 const ID_RE = /^[a-f0-9]{8}$/;
@@ -44,15 +47,20 @@ export interface Host {
   secret: string;
   /** The certificate confirmed by the person; null — one a system authority vouches for */
   fingerprint: string | null;
+  /** The numbers new guests made here take: a range the person keeps for Hata */
+  ids?: { from: number; to: number };
   added: number;
   by: string;
 }
 
 interface State {
   hosts: Host[];
+  /** Which guest each machine of Hata's was found to be: kept, because a machine that is off has no address to be found by */
+  links: Record<string, { host: string; guest: string }>;
 }
 
-const state: State = readJsonFile<State>(FILE, { hosts: [] }, (v) => typeof v === "object" && v !== null && Array.isArray((v as State).hosts));
+const state: State = readJsonFile<State>(FILE, { hosts: [], links: {} }, (v) => typeof v === "object" && v !== null && Array.isArray((v as State).hosts));
+state.links ??= {};
 const save = () => writeJsonAtomic(FILE, state);
 
 // --- Talking to the server --------------------------------------------------------------------------
@@ -135,6 +143,8 @@ interface Live extends Watched {
   at: number;
   version: string;
   perms: Permissions;
+  /** The pool of each guest: `/cluster/resources` leaves it out where the pool's own rights hide the auditor's */
+  pools: Record<number, string>;
   /** When each slower question was asked last */
   asked: { tasks: number; configs: number; disks: number };
   busy: boolean;
@@ -145,7 +155,7 @@ const live = new Map<string, Live>();
 function liveOf(h: Host): Live {
   let l = live.get(h.id);
   if (!l) {
-    l = { id: h.id, name: h.name, error: null, nodes: [], guests: [], storages: [], configs: {}, tasks: [], disks: [], unprotected: null, at: 0, version: "", perms: {}, asked: { tasks: 0, configs: 0, disks: 0 }, busy: false };
+    l = { id: h.id, name: h.name, error: null, nodes: [], guests: [], storages: [], configs: {}, tasks: [], disks: [], unprotected: null, ips: {}, at: 0, version: "", perms: {}, pools: {}, asked: { tasks: 0, configs: 0, disks: 0 }, busy: false };
     live.set(h.id, l);
   }
   l.name = h.name;
@@ -161,6 +171,7 @@ async function look(h: Host, all = false): Promise<void> {
   try {
     const resources = await pve<Resource[]>(h, "GET", "/cluster/resources");
     const read = readResources(resources);
+    for (const g of read.guests) if (!g.pool && l.pools[g.vmid]) g.pool = l.pools[g.vmid]!;
     const fresh = l.error !== null || !l.at;
     l.nodes = read.nodes;
     l.guests = read.guests;
@@ -177,6 +188,14 @@ async function look(h: Host, all = false): Promise<void> {
       l.asked.configs = now;
       if (!l.version) l.version = (await pve<{ version: string }>(h, "GET", "/version").catch(() => null))?.version ?? "";
       l.perms = (await pve<Permissions>(h, "GET", "/access/permissions").catch(() => null)) ?? l.perms;
+      // the members of the pools the token has rights in: `/pools?poolid=` answers where `/pools/<id>` is refused
+      const pools: Record<number, string> = {};
+      for (const pool of Object.keys(l.perms).flatMap((path) => /^\/pool\/([^/]+)$/.exec(path)?.[1] ?? [])) {
+        const list = await pve<{ poolid: string; members?: { vmid?: number }[] }[]>(h, "GET", "/pools", { poolid: pool }).catch(() => []);
+        for (const p of list) for (const m of p.members ?? []) if (typeof m.vmid === "number") pools[m.vmid] = p.poolid;
+      }
+      l.pools = pools;
+      for (const g of read.guests) if (!g.pool && pools[g.vmid]) g.pool = pools[g.vmid]!;
       const configs: Record<string, GuestConfig> = {};
       for (const g of read.guests) {
         if (!online.includes(g.node)) {
@@ -188,6 +207,14 @@ async function look(h: Host, all = false): Promise<void> {
         else if (l.configs[g.id]) configs[g.id] = l.configs[g.id]!;
       }
       l.configs = configs;
+      // what the running containers' cards have now; a virtual machine says it only through its agent
+      const ips: Record<string, string[]> = {};
+      for (const g of read.guests.filter((x) => x.type === "lxc" && x.status === "running" && online.includes(x.node))) {
+        const list = await pve<{ name: string; inet?: string }[]>(h, "GET", `/nodes/${g.node}/lxc/${g.vmid}/interfaces`).catch(() => null);
+        if (list) ips[g.id] = list.filter((x) => x.name !== "lo" && x.inet).map((x) => x.inet!.split("/")[0]!);
+        else if (l.ips[g.id]) ips[g.id] = l.ips[g.id]!;
+      }
+      l.ips = ips;
       const left = await pve<{ vmid: number; name?: string; type?: string }[]>(h, "GET", "/cluster/backup-info/not-backed-up").catch(() => null);
       l.unprotected = left ? left.filter((g) => !read.guests.find((x) => x.vmid === g.vmid)?.template).map((g) => ({ vmid: g.vmid, name: g.name ?? "" })) : null;
     }
@@ -221,12 +248,22 @@ export function startProxmox(): void {
 /** What every server is worth on the home page */
 export const proxmoxTrouble = (): PveItem[] => state.hosts.flatMap((h) => trouble(liveOf(h)));
 
-/** The guest a machine is, found by its network cards */
-export function guestOfMachine(macs: string[]): { host: string; hostName: string; id: string; vmid: number; name: string; status: string; node: string; power: boolean } | null {
-  const found = guestOfMacs(state.hosts.map(liveOf), macs);
+/** The guest a machine is: found by its cards or its address while it is connected, remembered for when it is not */
+export function guestOfMachine(machine: string, macs: string[], ip: string): { host: string; hostName: string; id: string; type: string; vmid: number; name: string; status: string; node: string; power: boolean } | null {
+  let found = findGuest(state.hosts.map(liveOf), macs, ip);
+  const kept = state.links[machine];
+  if (found && (kept?.host !== found.host || kept.guest !== found.guest.id)) {
+    state.links[machine] = { host: found.host, guest: found.guest.id };
+    save();
+  }
+  if (!found && kept) {
+    const h = state.hosts.find((x) => x.id === kept.host);
+    const g = h && liveOf(h).guests.find((x) => x.id === kept.guest);
+    if (g) found = { host: h.id, hostName: h.name, guest: g };
+  }
   if (!found) return null;
   const l = liveOf(state.hosts.find((h) => h.id === found.host)!);
-  return { host: found.host, hostName: found.hostName, id: found.guest.id, vmid: found.guest.vmid, name: found.guest.name, status: found.guest.status, node: found.guest.node, power: guestRights(l.perms, found.guest).power };
+  return { host: found.host, hostName: found.hostName, id: found.guest.id, type: found.guest.type, vmid: found.guest.vmid, name: found.guest.name, status: found.guest.status, node: found.guest.node, power: guestRights(l.perms, found.guest).power };
 }
 
 // --- For the page -----------------------------------------------------------------------------------
@@ -251,6 +288,7 @@ const summary = (h: Host) => {
     name: h.name,
     url: h.url,
     token: h.token,
+    ids: h.ids ?? null,
     fingerprint: h.fingerprint,
     online: !l.error && l.at > 0,
     error: l.error,
@@ -289,6 +327,7 @@ const cleanName = (value: unknown, fallback: string): string => {
 };
 
 interface Input {
+  ids?: unknown;
   name?: unknown;
   url?: unknown;
   token?: unknown;
@@ -323,10 +362,22 @@ async function tryHost(input: Input, old?: Host): Promise<Omit<Host, "id" | "add
   return { ...probe, name: cleanName(input.name, old?.name ?? fallback) };
 }
 
+/** A range of numbers for new guests, `{ from, to }`; anything else is none */
+function cleanIds(value: unknown): { from: number; to: number } | null {
+  if (!value || typeof value !== "object") return null;
+  const { from, to } = value as Record<string, unknown>;
+  if (!Number.isInteger(from) || !Number.isInteger(to) || (from as number) < 100 || (to as number) < (from as number) || (to as number) > 999_999_999) {
+    if (from === undefined || from === null || from === "") return null;
+    throw new AppError("pve.badIds");
+  }
+  return { from: from as number, to: to as number };
+}
+
 export async function addHost(input: Input, by: string) {
   const tried = await tryHost(input);
   if (state.hosts.some((h) => h.url === tried.url)) throw new AppError("pve.taken", 409, { name: state.hosts.find((h) => h.url === tried.url)!.name });
-  const h: Host = { id: Buffer.from(crypto.getRandomValues(new Uint8Array(4))).toString("hex"), ...tried, added: Date.now(), by };
+  const ids = cleanIds(input.ids);
+  const h: Host = { id: Buffer.from(crypto.getRandomValues(new Uint8Array(4))).toString("hex"), ...tried, ...(ids ? { ids } : {}), added: Date.now(), by };
   state.hosts.push(h);
   save();
   record("pve.added", { user: by, detail: `${h.name} (${h.url})` });
@@ -340,6 +391,11 @@ export async function changeHost(id: string, input: Input, by: string) {
   const onlyName = input.url === undefined && input.token === undefined && input.secret === undefined && input.fingerprint === undefined;
   if (onlyName) h.name = cleanName(input.name, h.name);
   else Object.assign(h, await tryHost(input, h));
+  if (input.ids !== undefined) {
+    const ids = cleanIds(input.ids);
+    if (ids) h.ids = ids;
+    else delete h.ids;
+  }
   save();
   record("pve.changed", { user: by, detail: h.name });
   await look(h, true);
@@ -349,6 +405,7 @@ export async function changeHost(id: string, input: Input, by: string) {
 export function removeHost(id: string, by: string): void {
   const h = hostOf(id);
   state.hosts = state.hosts.filter((x) => x.id !== id);
+  for (const [m, link] of Object.entries(state.links)) if (link.host === id) delete state.links[m];
   live.delete(id);
   save();
   record("pve.removed", { user: by, detail: h.name });
@@ -467,4 +524,188 @@ export async function taskLog(id: string, upid: string): Promise<string[]> {
   if (!upid.startsWith("UPID:") || !/^[A-Za-z0-9.-]+$/.test(node)) throw new AppError("pve.noTask", 404);
   const lines = await pve<{ n: number; t: string }[]>(h, "GET", `/nodes/${node}/tasks/${encodeURIComponent(upid)}/log`, { limit: 1000 });
   return lines.map((l) => l.t);
+}
+
+// --- A new container with Hata's client -------------------------------------------------------------
+
+/** What the server offers for a new container: templates, storages, bridges and pools the token may use */
+export async function newOptions(id: string): Promise<NewOptions & { next: number | null; offer: boolean }> {
+  const h = hostOf(id);
+  // what was said in the last minute is fresh enough; the rights and pools come with the slower round
+  if (Date.now() - liveOf(h).at > 60_000) await look(h);
+  const l = liveOf(h);
+  const nodes = l.nodes.filter((n) => n.online).map((n) => n.name);
+  const templates: Record<string, string[]> = {};
+  const storages: Record<string, string[]> = {};
+  const bridges: Record<string, string[]> = {};
+  for (const node of nodes) {
+    const here = l.storages.filter((s) => s.node === node && s.active);
+    templates[node] = [];
+    for (const s of here.filter((x) => x.content.includes("vztmpl"))) {
+      const list = await pve<{ volid: string }[]>(h, "GET", `/nodes/${node}/storage/${s.name}/content`, { content: "vztmpl" }).catch(() => []);
+      templates[node]!.push(...list.map((x) => x.volid));
+    }
+    storages[node] = here.filter((s) => s.content.includes("rootdir") && mayPath(l.perms, `/storage/${s.name}`, "Datastore.AllocateSpace")).map((s) => s.name);
+    const nets = await pve<{ iface: string }[]>(h, "GET", `/nodes/${node}/network`, { type: "any_bridge" }).catch(() => []);
+    bridges[node] = nets.map((n) => n.iface).filter((b) => mayPath(l.perms, `/sdn/zones/localnetwork/${b}`, "SDN.Use")).sort();
+  }
+  // a role given on a pool hides the auditor's rights there, and /pools no longer lists it: the token's own rights name it too
+  const listed = ((await pve<{ poolid: string }[]>(h, "GET", "/pools").catch(() => [])) ?? []).map((p) => p.poolid);
+  const named = Object.keys(l.perms).flatMap((path) => /^\/pool\/([^/]+)$/.exec(path)?.[1] ?? []);
+  const pools = [...new Set([...listed, ...named])].filter((p) => mayPath(l.perms, `/pool/${p}`, "VM.Allocate")).sort();
+  const free = mayPath(l.perms, "/vms", "VM.Allocate");
+  const o: NewOptions = { nodes, templates, storages, bridges, pools, free, ids: h.ids ?? null, taken: l.guests.map((g) => g.vmid) };
+  return { ...o, next: nextId(o), offer: free || pools.length > 0 };
+}
+
+/** Runs a command, each line of what it prints to the log; the exit code back */
+async function logged(cmd: string[], log: Log, input?: string): Promise<number> {
+  const proc = Bun.spawn({ cmd, stdin: input === undefined ? "ignore" : new TextEncoder().encode(input), stdout: "pipe", stderr: "pipe", env: { ...process.env, LC_ALL: "C.UTF-8" } });
+  const pump = async (stream: ReadableStream<Uint8Array>) => {
+    let rest = "";
+    for await (const chunk of stream.pipeThrough(new TextDecoderStream())) {
+      const parts = (rest + chunk).split(/\r?\n|\r/);
+      rest = parts.pop() ?? "";
+      for (const line of parts) if (line.trim()) log(line);
+    }
+    if (rest.trim()) log(rest);
+  };
+  await Promise.all([pump(proc.stdout), pump(proc.stderr)]);
+  return proc.exited;
+}
+
+/**
+ * A new container on the server, made into a machine of Hata's: Proxmox makes it with a key of
+ * Hata's for root, Hata waits for its address, then over SSH installs curl, Docker when asked and
+ * the client — with an install line of its own, like a person would — and the key is taken out
+ * again. The container's host key cannot be known beforehand: it was made a minute ago on the same
+ * network, so it is taken as it comes.
+ */
+export async function createGuest(id: string, input: Record<string, unknown>, by: string, hata: string) {
+  const h = hostOf(id);
+  const o = await newOptions(id);
+  let g: ReturnType<typeof readNewGuest>;
+  try {
+    g = readNewGuest(input, o);
+  } catch (e) {
+    throw new AppError("pve.badField", 400, { field: (e as { field?: string }).field ?? "" });
+  }
+  if (!Bun.which("ssh") || !Bun.which("ssh-keygen")) throw new AppError("pve.noSsh", 409);
+  const job = startJob(`pve:${h.id}:${g.vmid}`, "guest", by, async (log) => {
+    const dir = mkdtempSync(join(tmpdir(), "hata-ct-"));
+    try {
+      const keyFile = join(dir, "key");
+      if ((await logged(["ssh-keygen", "-q", "-t", "ed25519", "-N", "", "-C", "hata-setup", "-f", keyFile], log)) !== 0) throw new AppError("pve.noSsh", 409);
+      const key = readFileSync(keyFile + ".pub", "utf8").trim();
+      log(`Proxmox ${h.name}: CT ${g.vmid} ${g.hostname}`);
+      const made = await pve<string>(h, "POST", `/nodes/${g.node}/lxc`, { ...g.params, "ssh-public-keys": key + "\n" });
+      const keys = hostKeysIn(await followTask(h, g.node, made, log, 10 * 60_000));
+      await pve(h, "PUT", `/nodes/${g.node}/lxc/${g.vmid}/config`, g.later);
+      record("pve.guest.created", { user: by, detail: `${g.hostname} (${g.vmid}, ${h.name})` });
+      log("Starting");
+      await followTask(h, g.node, await pve<string>(h, "POST", `/nodes/${g.node}/lxc/${g.vmid}/status/start`), log, 2 * 60_000);
+      const config = readConfig(await pve<Record<string, unknown>>(h, "GET", `/nodes/${g.node}/lxc/${g.vmid}/config`));
+      void look(h, true);
+      if (!g.client) return;
+      const address = g.address ?? (await addressOf(h, g.node, g.vmid, log));
+      log(`Address: ${address}`);
+      // the container's keys as it shows them, kept only when they are the ones Proxmox just made
+      const known = join(dir, "known_hosts");
+      for (let i = 0; ; i++) {
+        const scan = Bun.spawnSync({ cmd: ["ssh-keyscan", "-T", "5", address], stdout: "pipe", stderr: "ignore" }).stdout.toString();
+        const lines = scan.split("\n").filter((l) => l && !l.startsWith("#"));
+        const good = lines.filter((line) => {
+          writeFileSync(known + ".one", line + "\n");
+          const fp = Bun.spawnSync({ cmd: ["ssh-keygen", "-l", "-f", known + ".one"], stdout: "pipe", stderr: "ignore" }).stdout.toString().split(" ")[1] ?? "";
+          return keys.includes(fp);
+        });
+        if (good.length) {
+          writeFileSync(known, good.join("\n") + "\n");
+          break;
+        }
+        if (lines.length && keys.length) throw new AppError("pve.hostKey", 409, { address });
+        if (i >= 24) throw new AppError("pve.noSshIn", 409, { address });
+        await Bun.sleep(5000);
+      }
+      const ssh = ["ssh", "-i", keyFile, "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes", "-o", `UserKnownHostsFile=${known}`, "-o", "LogLevel=ERROR", "-o", "ConnectTimeout=10", `root@${address}`];
+      const { code } = await invite(by);
+      const line = `curl -fsSL ${hata.replace(/\/$/, "")}/client/${code} | sh`;
+      const before = new Set(machines().map((m) => m.id));
+      if ((await logged([...ssh, "sh", "-s"], log, setupScript(g, line, key))) !== 0) throw new AppError("pve.setupFailed", 409, { address });
+      log("Waiting for the machine to connect");
+      for (let i = 0; i < 60; i++) {
+        // the new machine of this line: the client names itself by the container's host name
+        const fresh = machines().find((m) => !before.has(m.id) && (m.info?.hostname === g.hostname || (m.info?.macs ?? []).some((c) => config.macs.includes(c.mac.toLowerCase()))));
+        if (fresh) {
+          log(`Connected: ${fresh.name}`);
+          job.result = { machine: fresh.id };
+          return;
+        }
+        await Bun.sleep(2000);
+      }
+      throw new AppError("pve.notConnected", 409, { address });
+    } catch (e) {
+      // the job keeps the code; what Proxmox said goes to the log for the person to read
+      if (e instanceof AppError && e.detail.message) log(String(e.detail.message));
+      throw e;
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+      void look(h, true);
+    }
+  }, true, { app: g.hostname, machine: h.name });
+  return { job: job.id, vmid: g.vmid };
+}
+
+/** Follows a task to its end, its lines into the log */
+async function followTask(h: Host, node: string, upid: string, log: Log, ms: number): Promise<string[]> {
+  const until = Date.now() + ms;
+  const said: string[] = [];
+  let shown = 0;
+  for (;;) {
+    await Bun.sleep(1500);
+    const lines = await pve<{ n: number; t: string }[]>(h, "GET", `/nodes/${node}/tasks/${encodeURIComponent(upid)}/log`, { start: shown, limit: 500 }).catch(() => []);
+    for (const l of lines) if (l.n > shown) (log(l.t), said.push(l.t), (shown = l.n));
+    const s = await pve<Record<string, unknown>>(h, "GET", `/nodes/${node}/tasks/${encodeURIComponent(upid)}/status`).catch(() => null);
+    const t = s && readTask({ ...s, upid });
+    if (t && t.end !== null) {
+      if (failed(t)) throw new AppError("pve.taskFailed", 409, { name: h.name, message: t.status });
+      return said;
+    }
+    if (Date.now() > until) throw new AppError("pve.taskFailed", 409, { name: h.name, message: "timeout" });
+  }
+}
+
+/** The address a container got from the router, as Proxmox sees it */
+async function addressOf(h: Host, node: string, vmid: number, log: Log): Promise<string> {
+  log("Waiting for an address from the router");
+  for (let i = 0; i < 30; i++) {
+    const list = await pve<{ name: string; inet?: string }[]>(h, "GET", `/nodes/${node}/lxc/${vmid}/interfaces`).catch(() => []);
+    const ip = list.find((x) => x.name !== "lo" && x.inet)?.inet?.split("/")[0];
+    if (ip) return ip;
+    await Bun.sleep(2000);
+  }
+  throw new AppError("pve.noAddress", 409);
+}
+
+/** A stopped guest deleted with its disks; the person types its name, so a slip of the mouse cannot do it */
+export async function removeGuest(id: string, guest: string, typed: unknown, by: string) {
+  const h = hostOf(id);
+  const g = guestOf(h, guest);
+  if (typed !== g.name) throw new AppError("pve.typeName", 400, { name: g.name });
+  // what was said a few seconds ago may be before a shutdown: Proxmox is asked now
+  const now = await pve<{ status?: string }>(h, "GET", `/nodes/${g.node}/${g.type}/${g.vmid}/status/current`);
+  if (now.status !== "stopped") throw new AppError("pve.stopFirst", 409, { name: g.name });
+  const path = `/nodes/${g.node}/${g.type}/${g.vmid}`;
+  let result: { upid: string; done: boolean };
+  try {
+    result = await waitTask(h, g.node, await pve<string>(h, "DELETE", path, { purge: 1, "destroy-unreferenced-disks": 1 }), 60_000);
+  } catch (e) {
+    // looking for disks it no longer uses, Proxmox asks every storage, and one that is off (a NAS) stops it:
+    // the guest's own disks go without that look
+    if (!(e instanceof AppError && /is not online|not available|unable to activate/i.test(String(e.detail.message ?? "")))) throw e;
+    result = await waitTask(h, g.node, await pve<string>(h, "DELETE", path), 60_000);
+  }
+  record("pve.guest.removed", { user: by, detail: label(h, g) });
+  void look(h, true);
+  return result;
 }

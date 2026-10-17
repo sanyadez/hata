@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { cleanFingerprint, cleanUrl, guestOfMacs, guestRights, mayPath, readConfig, readResources, readTask, snapshotName, trouble, type Watched } from "../src/pve";
+import { cleanFingerprint, cleanUrl, failed, hostKeysIn, familyOf, nextId, readNewGuest, setupScript, guestOfMachine, guestRights, mayPath, readConfig, readResources, readTask, snapshotName, trouble, type Watched } from "../src/pve";
 
 test("an address as typed becomes the API's origin", () => {
   expect(cleanUrl("192.168.1.198")).toBe("https://192.168.1.198:8006");
@@ -58,8 +58,8 @@ test("a guest's configuration gives its cards and addresses", () => {
 test("rights: the most specific path that gives something", () => {
   const perms = { "/": { "VM.Audit": 1 }, "/pool/hata": { "VM.PowerMgmt": 1, "VM.Snapshot": 1 }, "/storage/local-lvm": { "Datastore.AllocateSpace": 1 } };
   const g = readResources(resources).guests;
-  expect(guestRights(perms, g[0]!)).toEqual({ power: false, snapshot: false, rollback: false, backup: false });
-  expect(guestRights(perms, g[1]!)).toEqual({ power: true, snapshot: true, rollback: false, backup: false });
+  expect(guestRights(perms, g[0]!)).toEqual({ power: false, snapshot: false, rollback: false, backup: false, remove: false });
+  expect(guestRights(perms, g[1]!)).toEqual({ power: true, snapshot: true, rollback: false, backup: false, remove: false });
   expect(guestRights({ "/": { "VM.PowerMgmt": 1 } }, g[0]!).power).toBe(true);
   expect(mayPath(perms, "/storage/local-lvm", "Datastore.AllocateSpace")).toBe(true);
   expect(mayPath(perms, "/storage/local", "Datastore.AllocateSpace")).toBe(false);
@@ -71,11 +71,16 @@ test("tasks: running, done, failed", () => {
   expect(readTask({ upid: "x" })).toBeNull();
   // a task's own /status says stopped and puts the result in exitstatus
   expect(readTask({ upid: "UPID:i5:1", status: "stopped", exitstatus: "command failed", endtime: 9 })!.status).toBe("command failed");
+  // what /status answers: no end time at all
+  const ended = readTask({ upid: "UPID:i5:1", status: "stopped", exitstatus: "WARNINGS: 1", starttime: 100 })!;
+  expect(ended.end).toBeGreaterThan(0);
+  expect(failed(ended)).toBe(false);
+  expect(readTask({ upid: "UPID:i5:1", status: "running", starttime: 100 })!.end).toBeNull();
 });
 
 const watched = (over: Partial<Watched> = {}): Watched => {
   const r = readResources(resources);
-  return { id: "abcd1234", name: "i5", error: null, ...r, configs: {}, tasks: [], disks: [], unprotected: [], ...over };
+  return { id: "abcd1234", name: "i5", error: null, ...r, configs: {}, tasks: [], disks: [], unprotected: [], ips: {}, ...over };
 };
 
 test("a quiet server is worth no word", () => {
@@ -125,13 +130,75 @@ test("an offline node: its guests and storages are not judged", () => {
   expect(items.map((i) => i.code)).toEqual(["pve.nodeOffline"]);
 });
 
-test("a machine is found among the guests by its card", () => {
-  const w = watched({ configs: { "lxc/218": { macs: ["bc:24:11:aa:bb:cc"], addresses: [], onboot: true, unprivileged: true, os: "debian", description: "" } } });
-  expect(guestOfMacs([w], ["BC:24:11:AA:BB:CC"])?.guest.vmid).toBe(218);
-  expect(guestOfMacs([w], ["00:00:00:00:00:01"])).toBeNull();
-  expect(guestOfMacs([w], [])).toBeNull();
+test("a machine is found among the guests by its card or its address", () => {
+  const w = watched({ configs: { "qemu/233": { macs: ["bc:24:11:aa:bb:cc"], addresses: [], onboot: true, unprivileged: false, os: "l26", description: "" }, "lxc/218": { macs: ["bc:24:11:00:00:01"], addresses: ["192.168.1.218"], onboot: true, unprivileged: true, os: "debian", description: "" } }, ips: { "lxc/900": ["192.168.1.120"] } });
+  expect(guestOfMachine([w], ["BC:24:11:AA:BB:CC"], "")?.guest.vmid).toBe(233);
+  expect(guestOfMachine([w], [], "192.168.1.218")?.guest.vmid).toBe(218);
+  expect(guestOfMachine([w], [], "192.168.1.120")?.guest.vmid).toBe(900);
+  expect(guestOfMachine([w], ["00:00:00:00:00:01"], "192.168.1.5")).toBeNull();
+  expect(guestOfMachine([w], [], "")).toBeNull();
 });
 
 test("a snapshot's default name", () => {
   expect(snapshotName(new Date(2026, 9, 17, 22, 5))).toBe("hata-20261017-2205");
+});
+
+const offer = { nodes: ["i5"], templates: { i5: ["local:vztmpl/debian-13-standard_13.6-1_amd64.tar.zst", "local:vztmpl/alpine-3.22-default_20250617_amd64.tar.xz"] }, storages: { i5: ["local-lvm"] }, bridges: { i5: ["vmbr0"] }, pools: ["hata"], free: false, ids: { from: 243, to: 252 }, taken: [243, 210] };
+const answers = { node: "i5", vmid: 244, hostname: "Docker-1", template: "local:vztmpl/debian-13-standard_13.6-1_amd64.tar.zst", storage: "local-lvm", disk: 4, cores: 2, memory: 1024, bridge: "vmbr0", address: "dhcp", pool: "hata", docker: true };
+
+test("a new container's answers become Proxmox's parameters", () => {
+  const g = readNewGuest(answers, offer);
+  expect(g.hostname).toBe("docker-1");
+  expect(g.family).toBe("apt");
+  expect(g.docker).toBe(true);
+  expect(g.address).toBeNull();
+  expect(g.params).toEqual({ vmid: 244, hostname: "docker-1", ostemplate: answers.template, rootfs: "local-lvm:4", cores: 2, memory: 1024, swap: 512, net0: "name=eth0,bridge=vmbr0,ip=dhcp", unprivileged: 1, pool: "hata" });
+  expect(g.later).toEqual({ features: "nesting=1", onboot: 1, tags: "hata", description: "Made by Hata" });
+  const fixed = readNewGuest({ ...answers, address: "192.168.1.244/24", gateway: "192.168.1.1", onboot: false }, offer);
+  expect(fixed.address).toBe("192.168.1.244");
+  expect(fixed.params.net0).toBe("name=eth0,bridge=vmbr0,ip=192.168.1.244/24,gw=192.168.1.1");
+  expect(fixed.later.onboot).toBe(0);
+});
+
+test("a new container's answers refused field by field", () => {
+  const field = (over: Record<string, unknown>, o = offer) => {
+    try {
+      readNewGuest({ ...answers, ...over }, o);
+      return "";
+    } catch (e) {
+      return (e as { field: string }).field;
+    }
+  };
+  expect(field({ vmid: 243 })).toBe("vmidTaken");
+  expect(field({ vmid: 260 })).toBe("vmidRange");
+  expect(field({ hostname: "-x" })).toBe("hostname");
+  expect(field({ template: "local:vztmpl/other.tar.zst" })).toBe("template");
+  expect(field({ template: offer.templates.i5[1] })).toBe("templateNoClient");
+  expect(field({ template: offer.templates.i5[1], client: false })).toBe("");
+  expect(field({ pool: "" })).toBe("pool");
+  expect(field({ pool: "" }, { ...offer, free: true })).toBe("");
+  expect(field({ address: "192.168.1.300/24", gateway: "192.168.1.1" })).toBe("address");
+  expect(field({ address: "192.168.1.50/24" })).toBe("gateway");
+  expect(field({ disk: 1 })).toBe("disk");
+  expect(field({ storage: "local" })).toBe("storage");
+});
+
+test("the next free number, in the range when there is one", () => {
+  expect(nextId({ ids: { from: 243, to: 252 }, taken: [243, 244] })).toBe(245);
+  expect(nextId({ ids: { from: 243, to: 244 }, taken: [243, 244] })).toBeNull();
+  expect(nextId({ ids: null, taken: [100, 101, 210] })).toBe(102);
+  expect(familyOf("local:vztmpl/ubuntu-24.04-standard_24.04-2_amd64.tar.zst")).toBe("apt");
+  expect(familyOf("local:vztmpl/rockylinux-9-default_20240912_amd64.tar.xz")).toBe("dnf");
+  expect(familyOf("local:vztmpl/alpine-3.22-default_20250617_amd64.tar.xz")).toBeNull();
+});
+
+test("the setup script takes Hata's key out whatever happens", () => {
+  const script = setupScript({ family: "apt", docker: false, client: true }, "curl -fsSL http://h/client/c | sh", "ssh-ed25519 AAAAkey hata-setup");
+  expect(script.split("\n")[0]).toBe(`trap "sed -i '\\|AAAAkey|d' /root/.ssh/authorized_keys" EXIT`);
+  expect(script).toContain("apt-get install -y -q curl ca-certificates\ncurl -fsSL http://h/client/c | sh\n");
+  expect(script).not.toContain("get.docker.com");
+});
+
+test("a new container's key fingerprints from the task's lines", () => {
+  expect(hostKeysIn(["Creating SSH host key 'ssh_host_ed25519_key' - this may take some time ...", "done: SHA256:Q/PWaZvdCe2vZ/p5Dp+7eTp8sqhZyaFeISPWoC6igWs root@hata-ct1", "done: nothing"])).toEqual(["SHA256:Q/PWaZvdCe2vZ/p5Dp+7eTp8sqhZyaFeISPWoC6igWs"]);
 });

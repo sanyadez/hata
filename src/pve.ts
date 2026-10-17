@@ -219,6 +219,7 @@ export const guestRights = (perms: Permissions, g: Guest) => ({
   snapshot: mayGuest(perms, g.vmid, g.pool, "VM.Snapshot"),
   rollback: mayGuest(perms, g.vmid, g.pool, "VM.Snapshot.Rollback"),
   backup: mayGuest(perms, g.vmid, g.pool, "VM.Backup"),
+  remove: mayGuest(perms, g.vmid, g.pool, "VM.Allocate"),
 });
 
 /** A task of Proxmox, from `/cluster/tasks` or a task's `/status` */
@@ -238,9 +239,10 @@ export interface Task {
 export function readTask(t: Record<string, unknown>): Task | null {
   const upid = str(t.upid);
   if (!upid.startsWith("UPID:")) return null;
+  // the list says when a task ended; a task's own /status says only "stopped" and how
   const end = num(t.endtime);
-  const running = t.status === "running" || (!end && !t.status);
-  return { upid, node: str(t.node), type: str(t.type), id: str(t.id), user: str(t.user), start: num(t.starttime), end: end || null, status: running ? "" : str(t.exitstatus) || str(t.status) };
+  const over = t.status === "stopped" || typeof t.exitstatus === "string" || (end > 0 && t.status !== "running");
+  return { upid, node: str(t.node), type: str(t.type), id: str(t.id), user: str(t.user), start: num(t.starttime), end: over ? end || Math.floor(Date.now() / 1000) : null, status: over ? str(t.exitstatus) || str(t.status) : "" };
 }
 
 /** A task that ended badly; a warning is not a failure */
@@ -275,6 +277,8 @@ export interface Watched {
   disks: { node: string; device: string; model: string; health: string }[];
   /** Guests no backup job covers; null when not known */
   unprotected: { vmid: number; name: string }[] | null;
+  /** The addresses running containers have now, from the router too: guest id → addresses */
+  ips: Record<string, string[]>;
 }
 
 /** What of a Proxmox server is worth a word on the home page */
@@ -327,13 +331,22 @@ export function trouble(h: Watched, now = Date.now()): PveItem[] {
   return items;
 }
 
-/** The guest of any watched server whose card is one of a machine's: a container or VM with Hata's client in it */
-export function guestOfMacs(hosts: Watched[], macs: string[]): { host: string; hostName: string; guest: Guest } | null {
+/**
+ * The guest of any watched server that is a machine of Hata's: by a card of the machine (a virtual
+ * machine's), else by the address the machine connects from — a container's card is virtual, and the
+ * client names only real ones.
+ */
+export function guestOfMachine(hosts: Watched[], macs: string[], ip: string): { host: string; hostName: string; guest: Guest } | null {
   const wanted = new Set(macs.map((m) => m.toLowerCase()));
-  if (!wanted.size) return null;
   for (const h of hosts) {
     for (const g of h.guests) {
-      if (h.configs[g.id]?.macs.some((m) => wanted.has(m))) return { host: h.id, hostName: h.name, guest: g };
+      if (wanted.size && h.configs[g.id]?.macs.some((m) => wanted.has(m))) return { host: h.id, hostName: h.name, guest: g };
+    }
+  }
+  if (!ip) return null;
+  for (const h of hosts) {
+    for (const g of h.guests) {
+      if (h.configs[g.id]?.addresses.includes(ip) || h.ips[g.id]?.includes(ip)) return { host: h.id, hostName: h.name, guest: g };
     }
   }
   return null;
@@ -343,4 +356,142 @@ export function guestOfMacs(hosts: Watched[], macs: string[]): { host: string; h
 export function snapshotName(now = new Date()): string {
   const p = (n: number) => String(n).padStart(2, "0");
   return `hata-${now.getFullYear()}${p(now.getMonth() + 1)}${p(now.getDate())}-${p(now.getHours())}${p(now.getMinutes())}`;
+}
+
+// --- A new container ---------------------------------------------------------------------------------
+
+/** What the server offers for a new container, per node */
+export interface NewOptions {
+  nodes: string[];
+  templates: Record<string, string[]>;
+  storages: Record<string, string[]>;
+  bridges: Record<string, string[]>;
+  /** Pools the token may put a guest into; `free` — it may make one outside any pool too */
+  pools: string[];
+  free: boolean;
+  /** The numbers new guests take, when the person keeps them in a range */
+  ids: { from: number; to: number } | null;
+  /** Numbers already used by guests */
+  taken: number[];
+}
+
+export interface NewGuest {
+  node: string;
+  vmid: number;
+  hostname: string;
+  /** The address it gets, without the mask; null — from the router */
+  address: string | null;
+  family: "apt" | "dnf" | null;
+  docker: boolean;
+  client: boolean;
+  /** For `POST /nodes/<node>/lxc`, the key added by the caller */
+  params: Record<string, string | number>;
+  /**
+   * Set once it exists: Proxmox judges these by the rights on the guest's own path while it is being
+   * made, before it is in its pool — a token with rights on a pool only would be refused
+   */
+  later: Record<string, string | number>;
+}
+
+const HOSTNAME_RE = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/;
+const CIDR_RE = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})\/(\d{1,2})$/;
+const IP_RE = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/;
+const octets = (m: RegExpExecArray, n: number) => m.slice(1, n + 1).every((x) => Number(x) <= 255);
+
+/** How a template's system installs packages; Hata's client needs systemd, so the families it knows are those */
+export function familyOf(template: string): "apt" | "dnf" | null {
+  const name = template.split("/").pop()!.toLowerCase();
+  if (/^(debian|ubuntu)-/.test(name)) return "apt";
+  if (/^(fedora|rockylinux|almalinux|centos)-/.test(name)) return "dnf";
+  return null;
+}
+
+/** The first free number in the range, or after 100 when there is none */
+export function nextId(o: Pick<NewOptions, "ids" | "taken">): number | null {
+  const taken = new Set(o.taken);
+  const [from, to] = o.ids ? [o.ids.from, o.ids.to] : [100, 999_999_999];
+  for (let id = from; id <= to; id++) if (!taken.has(id)) return id;
+  return null;
+}
+
+const int = (v: unknown, min: number, max: number): number | null => {
+  const n = typeof v === "number" ? v : typeof v === "string" && /^\d+$/.test(v.trim()) ? Number(v) : NaN;
+  return Number.isInteger(n) && n >= min && n <= max ? n : null;
+};
+
+/** The new container's answers checked against what the server offers; every refusal names its field */
+export function readNewGuest(input: Record<string, unknown>, o: NewOptions): NewGuest {
+  const bad = (field: string): never => {
+    throw Object.assign(new Error("pve.badField"), { field });
+  };
+  const node = typeof input.node === "string" && o.nodes.includes(input.node) ? input.node : bad("node");
+  const vmid = int(input.vmid, 100, 999_999_999) ?? bad("vmid");
+  if (o.taken.includes(vmid)) bad("vmidTaken");
+  if (o.ids && (vmid < o.ids.from || vmid > o.ids.to)) bad("vmidRange");
+  const hostname = typeof input.hostname === "string" ? input.hostname.trim().toLowerCase() : "";
+  if (!HOSTNAME_RE.test(hostname)) bad("hostname");
+  const template = typeof input.template === "string" && o.templates[node]?.includes(input.template) ? input.template : bad("template");
+  const storage = typeof input.storage === "string" && o.storages[node]?.includes(input.storage) ? input.storage : bad("storage");
+  const bridge = typeof input.bridge === "string" && o.bridges[node]?.includes(input.bridge) ? input.bridge : bad("bridge");
+  const disk = int(input.disk, 2, 4096) ?? bad("disk");
+  const cores = int(input.cores, 1, 128) ?? bad("cores");
+  const memory = int(input.memory, 256, 1_048_576) ?? bad("memory");
+  const pool = typeof input.pool === "string" && input.pool ? (o.pools.includes(input.pool) ? input.pool : bad("pool")) : o.free ? "" : bad("pool");
+  let net = `name=eth0,bridge=${bridge},ip=dhcp`;
+  let address: string | null = null;
+  if (input.address !== undefined && input.address !== "dhcp" && input.address !== "") {
+    const cidr = typeof input.address === "string" ? CIDR_RE.exec(input.address.trim()) : null;
+    if (!cidr || !octets(cidr, 4) || Number(cidr[5]) < 8 || Number(cidr[5]) > 30) bad("address");
+    const gw = typeof input.gateway === "string" ? IP_RE.exec(input.gateway.trim()) : null;
+    if (!gw || !octets(gw, 4)) bad("gateway");
+    address = cidr![0].split("/")[0]!;
+    net = `name=eth0,bridge=${bridge},ip=${cidr![0]},gw=${gw![0]}`;
+  }
+  const client = input.client !== false;
+  const family = familyOf(template);
+  if (client && !family) bad("templateNoClient");
+  return {
+    node,
+    vmid,
+    hostname,
+    address,
+    family,
+    docker: client && input.docker === true,
+    client,
+    params: {
+      vmid,
+      hostname,
+      ostemplate: template,
+      rootfs: `${storage}:${disk}`,
+      cores,
+      memory,
+      swap: 512,
+      net0: net,
+      unprivileged: 1,
+      ...(pool ? { pool } : {}),
+    },
+    later: {
+      // Docker in an unprivileged container needs it; keyctl only root@pam may set
+      features: "nesting=1",
+      onboot: input.onboot === false ? 0 : 1,
+      tags: "hata",
+      description: "Made by Hata",
+    },
+  };
+}
+
+/** The commands run in a new container: packages, Docker if asked, Hata's client, then Hata's key taken out */
+export function setupScript(g: Pick<NewGuest, "family" | "docker" | "client">, installLine: string, key: string): string {
+  // Hata's key was for this once: nothing of it stays in the container, whatever happens below
+  const lines = [`trap "sed -i '\\|${key.split(" ")[1]}|d' /root/.ssh/authorized_keys" EXIT`, "set -e", "export DEBIAN_FRONTEND=noninteractive"];
+  if (g.family === "apt") lines.push("apt-get update -q", "apt-get install -y -q curl ca-certificates");
+  if (g.family === "dnf") lines.push("dnf install -y -q curl ca-certificates");
+  if (g.docker) lines.push("curl -fsSL https://get.docker.com | sh");
+  if (g.client) lines.push(installLine);
+  return lines.join("\n") + "\n";
+}
+
+/** The fingerprints of a new container's SSH keys, as Proxmox's task wrote them while making them */
+export function hostKeysIn(lines: string[]): string[] {
+  return lines.flatMap((l) => /^done: (SHA256:[A-Za-z0-9+/]{43})\b/.exec(l.trim())?.[1] ?? []);
 }

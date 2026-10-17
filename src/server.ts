@@ -116,7 +116,7 @@ import { machineAccessRows, setMachineAccess, startMachineGates } from "./machin
 import { applyMachineCompose, installComposeOnMachine, machineTiles, installOnMachine, machineAppAction, machineAppLogs, machineApps, machineCompose, removeMachineApp, storeAppFor } from "./machineapps";
 import { addStore, ARCH, catalogue, removeStore, scheduleStoreSync, StoreError, syncStore } from "./store";
 import { startSampler, systemStatus } from "./system";
-import { addHost as addPve, backupJobs as pveBackupJobs, backups as pveBackups, changeHost as changePve, guestOfMachine, host as pveHost, hosts as pveHosts, power as pvePower, proxmoxTrouble, refresh as refreshPve, removeHost as removePve, snapshotAction as pveSnapshotAction, snapshots as pveSnapshots, startProxmox, takeBackup as pveTakeBackup, takeSnapshot as pveTakeSnapshot, taskLog as pveTaskLog } from "./proxmox";
+import { removeGuest as pveRemoveGuest, addHost as addPve, createGuest as pveCreateGuest, newOptions as pveNewOptions, backupJobs as pveBackupJobs, backups as pveBackups, changeHost as changePve, guestOfMachine, host as pveHost, hosts as pveHosts, power as pvePower, proxmoxTrouble, refresh as refreshPve, removeHost as removePve, snapshotAction as pveSnapshotAction, snapshots as pveSnapshots, startProxmox, takeBackup as pveTakeBackup, takeSnapshot as pveTakeSnapshot, taskLog as pveTaskLog } from "./proxmox";
 import { call as machineCall, clientBinary, containersOf, installScript, invite as machineInvite, INVITE_MS, linkData, linkHandlers, machine as machineView, MACHINE_ID_RE, machines as machineList, machinesAway, open as machineOpen, remove as removeMachine, rename as renameMachine, startMachines, updateClient, wake as wakeMachine, power as powerMachine, type LinkSocket } from "./machines";
 import { availableUpdate, checkForUpdate, confirmUpdate, scheduleUpdateChecks, startRollback, startUpdate, updateStatus } from "./update";
 import { VERSION } from "./version";
@@ -2161,6 +2161,14 @@ async function proxmoxApi(req: Request, url: URL, server: Server, by: string): P
     return json(pveHost(id));
   }
   if (rest === "/jobs" && method === "GET") return json({ jobs: await pveBackupJobs(id) });
+  if (rest === "/new" && method === "GET") {
+    server.timeout(req, 60);
+    return json(await pveNewOptions(id));
+  }
+  if (rest === "/guests" && method === "POST") {
+    server.timeout(req, 60);
+    return json(await pveCreateGuest(id, await body(req), by, baseUrl()), 202);
+  }
   if (rest === "/tasks/log" && method === "GET") return json({ lines: await pveTaskLog(id, url.searchParams.get("upid") ?? "") });
   const g = /^\/guests\/(lxc|qemu)\/(\d+)(\/[a-z]+)?(?:\/([A-Za-z0-9_-]+))?$/.exec(rest);
   if (!g) return null;
@@ -2168,6 +2176,7 @@ async function proxmoxApi(req: Request, url: URL, server: Server, by: string): P
   const part = g[3] ?? "";
   const name = g[4];
   server.timeout(req, 0);
+  if (part === "" && method === "DELETE") return json(await pveRemoveGuest(id, guest, (await body(req)).name, by));
   if (part === "/power" && method === "POST" && !name) return json(await pvePower(id, guest, (await body(req)).action, by));
   if (part === "/snapshots" && !name && method === "GET") return json({ snapshots: await pveSnapshots(id, guest) });
   if (part === "/snapshots" && !name && method === "POST") return json(await pveTakeSnapshot(id, guest, await body(req), by));
@@ -2182,7 +2191,7 @@ async function machinesApi(req: Request, url: URL, server: Server, by: string): 
   const path = url.pathname;
   const method = req.method;
   // a machine that is a guest of a Proxmox server is said to be one: it can be started from there
-  if (path === "/api/machines" && method === "GET") return json({ machines: machineList().map((m) => ({ ...m, pve: guestOfMachine((m.info?.macs ?? []).map((c) => c.mac)) })), version: VERSION });
+  if (path === "/api/machines" && method === "GET") return json({ machines: machineList().map((m) => ({ ...m, pve: guestOfMachine(m.id, (m.info?.macs ?? []).map((c) => c.mac), m.ip.replace(/^::ffff:/, "")) })), version: VERSION });
   if (path === "/api/machines/invite" && method === "POST") {
     // the name on the home network too: a machine that understands .local names finds Hata by it whatever address the router gives
     const { port } = listenAddress();

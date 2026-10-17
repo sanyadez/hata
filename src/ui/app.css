@@ -1171,3 +1171,5 @@ body:has(.assistant.paged) > .assistant-fab { display: none; }
 .pve-row { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-top: 1px solid var(--border); }
 .pve-row:first-child { border-top: 0; }
 .pve-row .chip { margin-left: 8px; }
+.form-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+@media (max-width: 640px) { .form-pair { grid-template-columns: 1fr; } }

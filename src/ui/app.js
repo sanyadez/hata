@@ -2703,6 +2703,8 @@ function pveDialog(old = null) {
   const url = h("input", { value: old?.url ?? "", placeholder: "192.168.1.10", required: true, autocapitalize: "none", spellcheck: false, class: "mono" });
   const token = h("input", { value: old?.token ?? "", placeholder: "hata@pve!panel", required: true, autocapitalize: "none", spellcheck: false, class: "mono" });
   const secret = h("input", { type: "password", placeholder: old ? t("pve.secretKeep") : "xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx", autocomplete: "off", class: "mono", required: !old });
+  const idsFrom = h("input", { type: "number", min: 100, value: old?.ids?.from ?? "", placeholder: "100" });
+  const idsTo = h("input", { type: "number", min: 100, value: old?.ids?.to ?? "", placeholder: "999" });
   const cert = h("div");
   const error = h("p", { class: "error", role: "alert" });
   let fingerprint = null;
@@ -2712,7 +2714,7 @@ function pveDialog(old = null) {
     error.textContent = "";
     const submit = dialog.querySelector("button[type=submit]");
     submit.disabled = true;
-    const data = { name: name.value, url: url.value, token: token.value, ...(secret.value ? { secret: secret.value } : {}), ...(fingerprint ? { fingerprint } : {}) };
+    const data = { ids: idsFrom.value && idsTo.value ? { from: Number(idsFrom.value), to: Number(idsTo.value) } : null, name: name.value, url: url.value, token: token.value, ...(secret.value ? { secret: secret.value } : {}), ...(fingerprint ? { fingerprint } : {}) };
     try {
       const saved = old ? await api("PATCH", `/api/proxmox/${old.id}`, data) : await api("POST", "/api/proxmox", data);
       dialog.close();
@@ -2750,6 +2752,7 @@ function pveDialog(old = null) {
       field(t("pve.token"), token, t("pve.tokenHint")),
       field(t("pve.secret"), secret, old ? t("pve.secretKeepHint") : null),
       field(t("pve.name"), name, t("pve.nameHint")),
+      h("div", { class: "field" }, h("span", { class: "label" }, t("pve.ids")), h("div", { class: "form-pair" }, idsFrom, idsTo), h("span", { class: "hint" }, t("pve.idsHint"))),
       !old &&
         h(
           "details",
@@ -2817,6 +2820,110 @@ function removePveDialog(x) {
   );
 }
 
+/** A new container on the server, with Hata's client in it: it becomes one of the machines */
+async function pveNewDialog(x) {
+  let o;
+  try {
+    o = await api("GET", `/api/proxmox/${x.id}/new`);
+  } catch (e) {
+    return toast(errorText(e), "error");
+  }
+  if (!o.offer) return toast(t("pve.new.denied", { name: x.name }), "error");
+  const opt = (value, label = value) => h("option", { value }, label);
+  const node = h("select", { onchange: () => fill() }, o.nodes.map((n) => opt(n)));
+  const template = h("select");
+  const storage = h("select");
+  const bridge = h("select");
+  const fill = () => {
+    const n = node.value;
+    const list = o.templates[n] ?? [];
+    template.replaceChildren(...list.map((v) => opt(v, v.split("/").pop() + (/(^|\/)(debian|ubuntu|fedora|rockylinux|almalinux|centos)-/.test(v) ? "" : " — " + t("pve.new.noClientHere")))));
+    const debian = list.find((v) => /\/debian-/.test(v));
+    if (debian) template.value = debian;
+    storage.replaceChildren(...(o.storages[n] ?? []).map((v) => opt(v)));
+    bridge.replaceChildren(...(o.bridges[n] ?? []).map((v) => opt(v)));
+  };
+  fill();
+  const hostname = h("input", { required: true, placeholder: "docker-1", pattern: "[a-z0-9]([a-z0-9\\-]{0,61}[a-z0-9])?", autocapitalize: "none", spellcheck: false, class: "mono" });
+  const vmid = h("input", { type: "number", required: true, min: o.ids?.from ?? 100, max: o.ids?.to ?? 999999999, value: o.next ?? "" });
+  const disk = h("input", { type: "number", required: true, min: 2, max: 4096, value: 8 });
+  const cores = h("input", { type: "number", required: true, min: 1, max: 128, value: 2 });
+  const memory = h("select", null, [512, 1024, 2048, 4096, 8192, 16384].map((mb) => opt(String(mb), mb < 1024 ? `${mb} MB` : `${mb / 1024} GB`)));
+  memory.value = "2048";
+  const how = h("select", { onchange: () => (fixed.hidden = how.value !== "fixed") }, opt("dhcp", t("pve.new.dhcp")), opt("fixed", t("pve.new.fixed")));
+  const address = h("input", { placeholder: "192.168.1.50/24", class: "mono" });
+  const gateway = h("input", { placeholder: "192.168.1.1", class: "mono" });
+  const fixed = h("div", { class: "stack-s", hidden: true }, field(t("pve.new.address"), address), field(t("pve.new.gateway"), gateway));
+  const pool = h("select", null, o.free && opt("", t("pve.new.noPool")), o.pools.map((p) => opt(p)));
+  const tick = (label, hint, checked = true) => {
+    const box = h("input", { type: "checkbox", checked });
+    return [box, h("label", { class: "check" }, box, h("span", null, h("strong", null, label), hint && h("span", { class: "muted small block" }, hint)))];
+  };
+  const [client, clientRow] = tick(t("pve.new.client"), t("pve.new.clientHint"));
+  const [docker, dockerRow] = tick(t("pve.new.docker"), t("pve.new.dockerHint"));
+  const [onboot, onbootRow] = tick(t("pve.onboot"), null);
+  client.addEventListener("change", () => ((docker.disabled = !client.checked), !client.checked && (docker.checked = false)));
+  const error = h("p", { class: "error", role: "alert" });
+  let dialog;
+  const send = async (e) => {
+    e.preventDefault();
+    error.textContent = "";
+    const submit = dialog.querySelector("button[type=submit]");
+    submit.disabled = true;
+    try {
+      const r = await api("POST", `/api/proxmox/${x.id}/guests`, {
+        node: node.value,
+        vmid: Number(vmid.value),
+        hostname: hostname.value.trim().toLowerCase(),
+        template: template.value,
+        storage: storage.value,
+        disk: Number(disk.value),
+        cores: Number(cores.value),
+        memory: Number(memory.value),
+        bridge: bridge.value,
+        address: how.value === "fixed" ? address.value.trim() : "dhcp",
+        gateway: gateway.value.trim(),
+        pool: pool.value,
+        client: client.checked,
+        docker: docker.checked,
+        onboot: onboot.checked,
+      });
+      dialog.close();
+      void jobDialog(r.job, "guest", hostname.value, () => {
+        toast(t(client.checked ? "pve.new.doneMachine" : "pve.new.done", { name: hostname.value }));
+        void loadPve();
+        void loadMachines();
+      });
+    } catch (err) {
+      error.textContent = err.code === "pve.badField" ? t("pve.new.bad." + err.detail.field) : errorText(err);
+      submit.disabled = false;
+    }
+  };
+  const pair = (...items) => h("div", { class: "form-pair" }, ...items);
+  dialog = openDialog(
+    "wide",
+    h(
+      "form",
+      { class: "stack", onsubmit: send },
+      h("header", null, h("h2", { class: "grow" }, t("pve.new.title", { name: x.name })), closeX(() => dialog)),
+      h("p", { class: "muted small" }, t("pve.new.lead")),
+      pair(field(t("pve.new.hostname"), hostname, t("pve.new.hostnameHint")), field("ID", vmid, o.ids ? t("pve.new.idsHint", o.ids) : null)),
+      o.nodes.length > 1 && field(t("pve.col.node"), node),
+      field(t("pve.new.template"), template, (o.templates[node.value] ?? []).length ? null : t("pve.new.noTemplates")),
+      pair(field(t("pve.new.storage"), storage), field(t("pve.new.disk"), disk)),
+      pair(field(t("pve.new.cores"), cores), field(t("pve.new.memory"), memory)),
+      pair(field(t("pve.new.bridge"), bridge), field(t("pve.new.how"), how)),
+      fixed,
+      (o.pools.length > 0 || !o.free) && field(t("pve.pool"), pool, o.free ? null : t("pve.new.poolHint")),
+      clientRow,
+      dockerRow,
+      onbootRow,
+      error,
+      h("footer", null, closeButton(() => dialog, t("common.cancel")), h("button", { type: "submit", class: "btn primary" }, icon("plus"), h("span", null, t("pve.new.create")))),
+    ),
+  );
+}
+
 // --- One Proxmox server ---
 
 function renderPve() {
@@ -2840,7 +2947,7 @@ function renderPveBody() {
       { class: "app-head", menu: (at) => pveMenu(x, at) },
       h("span", { class: "machine-icon" }, icon("server")),
       h("div", { class: "grow" }, h("div", { class: "app-title" }, h("h1", null, x.name), pveChip(x)), h("p", { class: "meta" }, ["Proxmox VE " + (x.version || ""), x.url, x.at ? t("pve.askedAgo", { ago: ago(x.at) }) : null].filter(Boolean).flatMap((part, i) => (i ? [h("span", { class: "dot-sep" }, "·"), part] : [part])))),
-      h("div", { class: "actions" }, button(t("pve.refresh"), { onclick: (e) => refreshPve(x, e.currentTarget) }, "refresh"), h("button", { type: "button", class: "btn square", "aria-label": t("app.more"), onclick: () => pveMenu(x) }, icon("more"))),
+      h("div", { class: "actions" }, x.online && button(t("pve.new.button"), { class: "primary", onclick: async (e) => ((e.currentTarget.disabled = true), await pveNewDialog(x), (e.target.closest("button").disabled = false)) }, "plus"), button(t("pve.refresh"), { onclick: (e) => refreshPve(x, e.currentTarget) }, "refresh"), h("button", { type: "button", class: "btn square", "aria-label": t("app.more"), onclick: () => pveMenu(x) }, icon("more"))),
     ),
     h("div", { class: "tabs" }, tab("overview", "grid"), tab("guests", "box"), tab("tasks", "logs")),
     x.error && h("p", { class: "card pad warn-box" }, pveError(x), " ", t("pve.since", { ago: ago(x.error.since) })),
@@ -3030,6 +3137,7 @@ function pveGuestDialog(x, g) {
       up && g.type === "qemu" && act(t("pve.suspend"), "clock", "suspend"),
       up && act(t("pve.stop"), "x", "stop", "danger"),
       !g.may.power && h("span", { class: "muted small" }, t("pve.noPower")),
+      g.may.remove && g.status === "stopped" && button(t("pve.guestRemove"), { class: "small danger", onclick: () => (dialog.close(), pveRemoveDialog(x, g)) }, "trash"),
     ),
     h(
       "section",
@@ -3144,6 +3252,29 @@ function pveSnapshotAct(x, g, s, action) {
       }, action === "rollback" ? "undo" : "trash"),
     ),
   );
+}
+
+/** Deleting a guest with its disks: its name typed first */
+function pveRemoveDialog(x, g) {
+  const typed = h("input", { autocomplete: "off", spellcheck: false, class: "mono", oninput: () => (go.disabled = typed.value !== g.name) });
+  let dialog;
+  const go = button(t("pve.guestRemove"), {
+    class: "danger",
+    disabled: true,
+    onclick: async () => {
+      go.disabled = true;
+      try {
+        const r = await api("DELETE", `/api/proxmox/${x.id}/guests/${g.id}`, { name: typed.value });
+        dialog.close();
+        toast(t(r.done ? "pve.guestRemoved" : "pve.going", { name: g.name }));
+        void loadPve();
+      } catch (e) {
+        toast(errorText(e), "error");
+        go.disabled = false;
+      }
+    },
+  }, "trash");
+  dialog = openDialog("confirm", h("h2", { class: "wrap" }, t("pve.guestRemoveTitle", { name: g.name })), h("p", { class: "muted" }, t("pve.guestRemoveLead", { kind: guestKind(g), name: x.name })), field(t("pve.typeName", { name: g.name }), typed), h("footer", null, closeButton(() => dialog, t("common.cancel")), go));
 }
 
 async function pveBackupNow(x, g, el) {
