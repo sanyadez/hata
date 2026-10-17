@@ -2928,7 +2928,7 @@ async function pveNewDialog(x) {
 
 function renderPve() {
   if (pveUi.host?.id !== state.route.id) pveUi.host = null;
-  shell(h("div", { id: "pve-body" }));
+  shell(h("div", { id: "pve-body", class: "stack" }));
   if (pveUi.host) renderPveBody();
   void loadPve();
 }
@@ -2941,15 +2941,20 @@ function renderPveBody() {
   const body = state.route.tab === "guests" ? pveGuests(x) : state.route.tab === "tasks" ? pveTasks(x) : pveOverview(x);
   put(
     box,
-    h("nav", { class: "crumbs" }, h("a", { href: "#/machines" }, t("nav.machines")), icon("chevron"), h("span", null, x.name)),
+    // the head as the machine's: on a wallpaper it gets a panel of its own, or its words are lost
     h(
+      "div",
+      { id: "pve-head" },
+      h("nav", { class: "crumbs" }, h("a", { href: "#/machines" }, t("nav.machines")), icon("chevron"), h("span", null, x.name)),
+      h(
       "div",
       { class: "app-head", menu: (at) => pveMenu(x, at) },
       h("span", { class: "machine-icon" }, icon("server")),
       h("div", { class: "grow" }, h("div", { class: "app-title" }, h("h1", null, x.name), pveChip(x)), h("p", { class: "meta" }, ["Proxmox VE " + (x.version || ""), x.url, x.at ? t("pve.askedAgo", { ago: ago(x.at) }) : null].filter(Boolean).flatMap((part, i) => (i ? [h("span", { class: "dot-sep" }, "·"), part] : [part])))),
       h("div", { class: "actions" }, x.online && button(t("pve.new.button"), { class: "primary", onclick: async (e) => ((e.currentTarget.disabled = true), await pveNewDialog(x), (e.target.closest("button").disabled = false)) }, "plus"), button(t("pve.refresh"), { onclick: (e) => refreshPve(x, e.currentTarget) }, "refresh"), h("button", { type: "button", class: "btn square", "aria-label": t("app.more"), onclick: () => pveMenu(x) }, icon("more"))),
     ),
-    h("div", { class: "tabs" }, tab("overview", "grid"), tab("guests", "box"), tab("tasks", "logs")),
+      h("div", { class: "tabs" }, tab("overview", "grid"), tab("guests", "box"), tab("tasks", "logs")),
+    ),
     x.error && h("p", { class: "card pad warn-box" }, pveError(x), " ", t("pve.since", { ago: ago(x.error.since) })),
     body,
   );
@@ -2960,7 +2965,7 @@ function pveOverview(x) {
   return h(
     "div",
     { class: "stack" },
-    x.trouble.length > 0 && h("section", { class: "card pad" }, x.trouble.map(attentionItem)),
+    x.trouble.length > 0 && h("section", { class: "card pve-trouble" }, x.trouble.map(attentionItem)),
     h("div", { class: "section-head" }, h("h2", null, t("pve.nodesTitle"))),
     h(
       "div",

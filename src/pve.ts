@@ -141,7 +141,7 @@ export function readResources(list: Resource[]): { nodes: Node[]; guests: Guest[
         uptime: num(r.uptime),
       });
     } else if (r.type === "storage") {
-      storages.push({ id: `${str(r.node)}/${str(r.storage)}`, name: str(r.storage), node: str(r.node), type: str(r.plugintype), active: r.status === "available", shared: r.shared === 1, content: str(r.content).split(",").filter(Boolean), used: num(r.disk), total: num(r.maxdisk) });
+      storages.push({ id: `${str(r.node)}/${str(r.storage)}`, name: str(r.storage), node: str(r.node), type: str(r.plugintype), active: r.status === "available", shared: r.shared === 1, content: str(r.content).split(",").filter(Boolean).sort(), used: num(r.disk), total: num(r.maxdisk) });
     }
   }
   nodes.sort((a, b) => a.name.localeCompare(b.name));
