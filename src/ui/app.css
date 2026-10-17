@@ -238,8 +238,10 @@ textarea.code.page { min-height: 60dvh; background: var(--surface); padding: 16p
 #view { max-width: 1440px; margin: 0 auto; padding: 36px 32px 72px; display: grid; gap: 24px; }
 .bottom-bar { display: none; }
 .nav-more .menu-item.active { color: var(--accent-text); }
-.machine-block { display: grid; gap: 10px; position: relative; }
-.machine-block .section-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+/* the numbers of a server — this one or a machine — under its name, in one card */
+.machine-block { position: relative; overflow: hidden; }
+.machine-block .block-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 12px 20px; border-bottom: 1px solid var(--border); }
+.machine-block .block-head h2 { display: inline-flex; align-items: center; gap: 8px; margin: 0; font-size: 15px; }
 .machine-block h2 a { display: inline-flex; align-items: center; gap: 8px; }
 .machine-block h2 a:hover { color: var(--accent-text); }
 .machine-block h2 .ico { width: 16px; height: 16px; color: var(--muted); }
@@ -434,7 +436,8 @@ td .clip { max-width: 320px; }
 .check.inline { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
 .history-day h3 { margin: 0 0 8px; }
 .center-row { display: flex; justify-content: center; text-align: center; }
-.tool { display: flex; align-items: flex-start; gap: 16px; padding: 14px 0; border-top: 1px solid var(--border); }
+.tool { display: flex; align-items: flex-start; gap: 8px 16px; padding: 14px 0; border-top: 1px solid var(--border); flex-wrap: wrap; }
+.tool > .grow { flex: 1 1 260px; min-width: 0; }
 .tool:first-of-type { border-top: 0; }
 .tool-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin-bottom: 4px; }
 .tool .cmd { margin-top: 8px; }
@@ -496,19 +499,8 @@ tr.removed .app-icon { opacity: 0.5; }
 .tile-room { display: grid; gap: 5px; min-width: 0; }
 .tile-room .bar { height: 4px; margin: 0; }
 .disk-pick .tile-text { display: grid; gap: 4px; min-width: 0; flex: 1; }
-.cat.vol { flex-wrap: wrap; row-gap: 6px; padding: 9px 10px; border: 1px solid var(--border); background: color-mix(in srgb, var(--bg) 60%, transparent); }
 .files-side { display: grid; gap: 12px; position: sticky; top: 88px; min-width: 0; }
 .files-side .cats { position: static; }
-.side-disks { display: grid; gap: 8px; }
-.side-disks .cat.vol { padding: 12px; border-radius: var(--radius-md); background: var(--surface); color: var(--text); }
-.side-disks .cat.vol.active { background: var(--surface-2); }
-.side-disks .cat.vol.add { border-style: dashed; background: transparent; color: var(--muted); }
-.side-disks .cat.vol.add:hover { color: var(--text); }
-.cat.vol:hover { border-color: var(--border-strong); }
-.cat.vol.active { border-color: color-mix(in srgb, var(--accent) 55%, var(--border)); background: var(--surface-2); }
-.cat.vol .vol-room { flex-basis: calc(100% - 26px); margin-left: 26px; display: grid; gap: 4px; }
-.cat.vol .vol-room .small { font-size: 11px; font-weight: 400; }
-.cat.vol .bar { height: 3px; margin: 0; background: color-mix(in srgb, var(--text) 12%, transparent); }
 .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
 .store-card { display: grid; gap: 14px; align-content: start; padding: 16px; text-align: left; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); }
 .store-card:hover { border-color: var(--border-strong); }
@@ -531,6 +523,12 @@ a.cat .with-icon { min-width: 0; }
 .disk-tile:hover { border-color: var(--border-strong); background: var(--surface-2); }
 .disk-text { display: grid; gap: 4px; min-width: 0; flex: 1; }
 .disk-text .bar { margin: 4px 0 0; }
+/* My Hata: the tiles sit inside their section's card */
+.my-hata .disk-tile { background: color-mix(in srgb, var(--bg) 40%, transparent); }
+.my-hata .disk-tile:hover { background: var(--surface-2); }
+.my-hata .disk-tile.add { border-style: dashed; color: var(--muted); }
+.my-hata .disk-tile.add:hover { color: var(--text); }
+.my-hata .disk-tile.away { opacity: 0.6; }
 /* the data folder and the disks above the folders of a picker */
 .store-meta { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
 .picker-quick { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -782,19 +780,14 @@ dialog.dropdown header { padding: 4px 6px; margin-bottom: 8px; }
   .cats { position: static; display: grid; gap: 4px; }
   .cat-title { display: none; }
   .files-side { position: static; gap: 4px; }
-  .side-disks { gap: 4px; }
   .cat { border: 1px solid var(--border); gap: 8px; position: relative; }
   /* a list of sections shows the open one; tapped, it shows them all to choose from */
   .fold:not(.open):has(.cat.active) :is(.cat:not(.active), .cat-title) { display: none; }
-  .fold:not(.open):has(.cat.active) .side-disks:not(:has(.cat.active)) { display: none; }
   .fold:not(.open):has(.cat.active) .cats:not(:has(.cat.active)) { display: none; }
   .fold .cat.active { padding-right: 36px; }
   .fold .cat.active::after { content: ""; position: absolute; right: 16px; top: calc(50% - 6px); width: 7px; height: 7px; border: solid currentColor; border-width: 0 2px 2px 0; transform: rotate(45deg); }
-  .fold .cat.vol.active::after { top: 16px; }
   .fold.open .cat.active::after { top: calc(50% - 2px); transform: rotate(225deg); }
-  .fold.open .cat.vol.active::after { top: 20px; }
   .fold.open .cat-title { display: block; padding: 10px 4px 2px; }
-  .disk-strip { display: none; }
   /* no sideways scrolling: tabs go on a second line, a table row is a card, code wraps */
   .tabs { flex-wrap: wrap; overflow: visible; gap: 0 20px; }
   .section-head, .snapshot, .section-head .row-actions { flex-wrap: wrap; }
@@ -878,8 +871,6 @@ input[type="range"] { accent-color: var(--accent); width: 100%; }
 :root.has-wallpaper #view .ico { filter: drop-shadow(0 0 3px var(--bg)); }
 :root.has-wallpaper #view :is(.card, .tile, .btn, .page-head, :is(.side > .pad-x, .loose), .section-head, .cats, :is(#app-head, #machine-head)) .ico { filter: none; }
 :root.has-wallpaper .cats.cats { padding: 8px; }
-:root.has-wallpaper .side-disks .cat.vol:not(.add, .active) { background: color-mix(in srgb, var(--surface) 88%, transparent); backdrop-filter: blur(16px); }
-:root.has-wallpaper .side-disks .cat.vol.add { background: color-mix(in srgb, var(--surface) 60%, transparent); backdrop-filter: blur(16px); }
 
 /* --- Moving groups and blocks of the dashboard -------------------------------------------------- */
 
@@ -1108,9 +1099,17 @@ body:has(> .assistant-fab) #view:not(.fill) { padding-bottom: 104px; }
 .machine-wait .btn { margin-left: auto; }
 .machine-pulse { width: 10px; height: 10px; border-radius: 50%; background: var(--accent); animation: machine-pulse 1.2s ease-in-out infinite; }
 @keyframes machine-pulse { 50% { opacity: 0.25; } }
-.machine-project .section-head { flex-wrap: wrap; }
-.machine-project .section-head .row-actions { margin-left: auto; }
-.machine-project { gap: 10px; }
+/* a compose project of a machine: its name and buttons, then its containers, in one card */
+.machine-project { overflow: hidden; }
+.project-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 14px 20px; border-bottom: 1px solid var(--border); }
+.project-head h2 { flex: 1; display: flex; align-items: baseline; gap: 10px; margin: 0; }
+.project-head h2 .muted { font-size: 13px; font-weight: 400; }
+.project-head .row-actions { margin-left: auto; }
+/* a last column of icon buttons stands in one row: as narrow as it can be, it would stack them */
+@container tablebox (min-width: 641px) {
+  td:last-child:has(> .row-actions:not(:has(.btn))) { width: 1%; white-space: nowrap; }
+  td:last-child > .row-actions:not(:has(.btn)) { flex-wrap: nowrap; gap: 2px; }
+}
 .machine-containers th:nth-child(1) { width: 38%; }
 .machine-containers th:nth-child(2) { width: 24%; }
 .machine-containers th:last-child { width: 1%; }

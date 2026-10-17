@@ -316,6 +316,7 @@ function parseRoute() {
   if (parts[0] === "files" && isAdmin() && parts[1]?.startsWith("@")) return { view: "files", machine: parts[1].slice(1), path: "/" + parts.slice(2).join("/") };
   if (parts[0] === "files" && isAdmin()) return { view: "files", machine: "", path: /^#\/?files$/.test(location.hash) ? "" : "/" + parts.slice(1).join("/") };
   if (parts[0] === "trash" && isAdmin()) return { view: "trash" };
+  if (parts[0] === "hata" && isAdmin()) return { view: "myhata" };
   if (parts[0] === "activity" && isAdmin()) return { view: "activity" };
   if (parts[0] === "backups" && isAdmin()) return { view: "backups" };
   if (parts[0] === "users" && isAdmin()) return { view: "users" };
@@ -362,6 +363,7 @@ function onRoute() {
   if (state.route.view === "settings") void loadSettings();
   if (state.route.view === "files") void loadFiles();
   if (state.route.view === "trash") void loadTrash();
+  if (state.route.view === "myhata") void loadMyHata();
   if (state.route.view === "backups") void loadBackups();
   if (state.route.view === "users") void loadUsers();
   if (state.route.view === "import") void loadImport();
@@ -407,6 +409,7 @@ function startEvents() {
       disksEventTimer = setTimeout(async () => {
         if (state.route.view === "settings" && state.route.section === "storage") setDisks(await api("GET", "/api/disks").catch(() => state.disks));
         else if (state.route.view === "files") void loadFiles?.();
+        else if (state.route.view === "myhata") void loadMyHata();
       }, 1200);
     } else if (event.type === "assistant") {
       assistantEvent(event);
@@ -781,7 +784,7 @@ const NAV = [
 // an administrator the rules ask for two-factor sign-in is a member until it is on — the server says so too
 const isAdmin = () => state.user?.role === "admin" && !state.user.mustTwoFactor;
 
-const navCurrent = () => (state.route.view === "machine" ? "machines" : state.route.view === "app" ? "home" : state.route.view === "import" ? "store" : state.route.view === "trash" ? "files" : state.route.view);
+const navCurrent = () => (state.route.view === "machine" ? "machines" : state.route.view === "app" ? "home" : state.route.view === "import" ? "store" : state.route.view === "trash" || state.route.view === "myhata" ? "files" : state.route.view);
 const navItems = () => NAV.filter((item) => (!item.admin || isAdmin()) && (item.guest !== false || state.user.role !== "guest"));
 
 function navLinks(className, items = navItems()) {
@@ -974,6 +977,7 @@ function render() {
   if (view === "settings") return renderSettings();
   if (view === "files") return renderFiles();
   if (view === "trash") return renderTrash();
+  if (view === "myhata") return renderMyHata();
   if (view === "activity") return renderActivity();
   if (view === "backups") return renderBackups();
   if (view === "users") return renderUsers();
@@ -1061,6 +1065,8 @@ function renderSystem() {
   const s = state.overview?.system;
   if (!s || state.route.view !== "home") return;
   const meta = document.getElementById("host");
+  const own = document.getElementById("own-name");
+  if (own) own.textContent = s.hostname;
   if (meta) meta.replaceChildren(...[s.hostname, location.host, t("sys.uptime", { time: duration(s.uptime) }), "Hata " + state.version].flatMap((part, i) => (i ? [h("span", { class: "dot-sep" }, "·"), part] : [part])));
 
   setStat("cpu", s.cpu == null ? "—" : String(s.cpu), "%", t("sys.cores", { n: s.cores }) + " · " + t("sys.load", { load: s.load[0] }), sparkline(s.history.cpu, 100));
@@ -1990,7 +1996,7 @@ function machineBlock(id) {
   const prefix = "mb-" + m.id;
   let el = homeUi.widgets[id];
   if (!el) {
-    el = widget(id, h("section", { class: "machine-block" }, h("div", { class: "section-head" }), h("div", { class: "stats card" }, statCells(prefix)), h("p", { class: "card pad muted", hidden: true }), blockRemover(id)));
+    el = widget(id, h("section", { class: "card machine-block" }, h("div", { class: "block-head" }), h("div", { class: "stats" }, statCells(prefix)), h("p", { class: "pad muted", hidden: true }), blockRemover(id)));
     homeUi.widgets[id] = el;
   }
   const [head, cells, away] = el.children;
@@ -2007,7 +2013,7 @@ function renderHome() {
   const greeting = t(hour < 5 ? "home.night" : hour < 12 ? "home.morning" : hour < 18 ? "home.afternoon" : "home.evening", { name: state.user.name });
   // the blocks are made once and then only moved and refilled: the numbers of the system live in one of them
   homeUi.widgets = {
-    stats: widget("stats", h("section", { class: "stats card" }, statCell("cpu", "cpu", t("sys.cpu")), statCell("memory", "memory", t("sys.memory")), statCell("disk", "disk", t("sys.disk")), statCell("network", "network", t("sys.network")), h("div", { class: "stat", id: "stat-temp", hidden: true }, h("div", { class: "stat-label" }, icon("temp"), t("sys.temperature")), h("div", { class: "stat-row" }, h("div", { class: "stat-value" }, h("strong", null, "—"), h("span", { class: "unit" })), h("div", { class: "stat-chart" })), h("div", { class: "stat-hint" }, " ")), blockRemover("stats"))),
+    stats: widget("stats", h("section", { class: "card machine-block" }, h("div", { class: "block-head" }, h("h2", null, icon("server"), h("span", { id: "own-name" }, state.overview?.system?.hostname ?? "…")), h("span", { class: "muted small grow" }, t("home.thisServer"))), h("div", { class: "stats" }, statCell("cpu", "cpu", t("sys.cpu")), statCell("memory", "memory", t("sys.memory")), statCell("disk", "disk", t("sys.disk")), statCell("network", "network", t("sys.network")), h("div", { class: "stat", id: "stat-temp", hidden: true }, h("div", { class: "stat-label" }, icon("temp"), t("sys.temperature")), h("div", { class: "stat-row" }, h("div", { class: "stat-value" }, h("strong", null, "—"), h("span", { class: "unit" })), h("div", { class: "stat-chart" })), h("div", { class: "stat-hint" }, " "))), blockRemover("stats"))),
     attention: widget("attention", h("section", { class: "card pad" })),
     activity: widget("activity", h("section", { class: "pad-x loose" })),
   };
@@ -2858,7 +2864,7 @@ function paintMachineApps() {
   if (!box || !m || !list) return;
   const head = h(
     "div",
-    { class: "section-head" },
+    { class: list.length ? "project-head" : "section-head" },
     h("h2", null, t("machines.apps"), h("span", { class: "muted" }, String(list.length))),
     h(
       "div",
@@ -2910,10 +2916,11 @@ function paintMachineApps() {
     h(
       "div",
       { class: "stack" },
-      head,
       list.length
-        ? h("div", { class: "card table-wrap" }, h("table", { class: "machine-apps" }, h("thead", null, h("tr", null, h("th", null, t("machines.app")), h("th", null, t("app.col.state")), h("th", null, t("app.address")), h("th"))), h("tbody", null, list.map(row))))
-        : h("div", { class: "card empty" }, icon("store"), h("p", null, t("machines.noApps")), button(t("machines.fromStore"), { class: "primary", onclick: () => ((state.installTarget = m.id), go("#/store")) }, "store")),
+        ? h("section", { class: "card machine-project" }, head, h("div", { class: "table-wrap" }, h("table", { class: "machine-apps" }, h("thead", null, h("tr", null, h("th", null, t("machines.app")), h("th", null, t("app.col.state")), h("th", null, t("app.address")), h("th"))), h("tbody", null, list.map(row)))))
+        : head,
+      !list.length &&
+        h("div", { class: "card empty" }, icon("store"), h("p", null, t("machines.noApps")), button(t("machines.fromStore"), { class: "primary", onclick: () => ((state.installTarget = m.id), go("#/store")) }, "store")),
     ),
   );
 }
@@ -3113,10 +3120,10 @@ function paintMachineContainers() {
       const running = list.filter((c) => c.state === "running").length;
       return h(
         "section",
-        { class: "stack machine-project" },
+        { class: "card machine-project" },
         h(
           "div",
-          { class: "section-head" },
+          { class: "project-head" },
           h("h2", null, name || t("machines.loose"), h("span", { class: "muted" }, t("machines.running", { n: running, total: list.length }))),
           name &&
             h(
@@ -3126,7 +3133,7 @@ function paintMachineContainers() {
               running > 0 && button(t("app.restart"), { class: "small", onclick: act(`projects/${encodeURIComponent(name)}`, "restart") }, "refresh"),
             ),
         ),
-        h("div", { class: "card table-wrap" }, h("table", { class: "machine-containers" }, h("thead", null, h("tr", null, h("th", null, t("app.col.container")), h("th", null, t("app.col.state")), h("th", null, t("app.col.ports")), h("th"))), h("tbody", null, list.map(row)))),
+        h("div", { class: "table-wrap" }, h("table", { class: "machine-containers" }, h("thead", null, h("tr", null, h("th", null, t("app.col.container")), h("th", null, t("app.col.state")), h("th", null, t("app.col.ports")), h("th"))), h("tbody", null, list.map(row)))),
       );
     })),
   );
@@ -4248,6 +4255,7 @@ async function favorite(path, on, name = path.split("/").pop() || "/") {
   }
   if (state.route.view === "files") renderFilesBody();
   else if (state.route.view === "trash") filesPlaces(null);
+  else if (state.route.view === "myhata") renderMyHata();
 }
 
 /** Puts a folder on the dashboard or takes it off */
@@ -4331,22 +4339,13 @@ function filesPlaces(path) {
   const machine = trash ? "" : filesMachine();
   const listing = trash ? null : state.files;
   const home = machine ? "" : (state.files?.home ?? "");
-  const inHome = !trash && home !== "" && within(path, home);
-  const inside = (folder) => !trash && within(path, folder);
-  // a disk says how full it is, as its tile does: a thin bar and the numbers under the name
-  const room = (volume) => {
-    if (!volume?.total) return null;
-    const used = Math.round(((volume.total - volume.free) / volume.total) * 100);
-    const fill = h("i", { class: level(used) });
-    fill.style.width = used + "%";
-    return h("span", { class: "vol-room" }, h("span", { class: "bar" }, fill), h("span", { class: "muted small" }, t("files.free", { free: bytes(volume.free), total: bytes(volume.total) })));
-  };
-  const place = (label, to, iconName, active, on = machine, volume = null) =>
+  const inHome = !trash && path !== "#hata" && home !== "" && within(path, home);
+  const inside = (folder) => !trash && path !== "#hata" && within(path, folder);
+  const place = (label, to, iconName, active, on = machine) =>
     h(
       "a",
-      { class: "cat" + (active ? " active" : "") + (volume ? " vol" : ""), href: filesHash(to, on), menu: (at) => sidebarMenu(at, { label, path: to, machine: on, volume, iconName }) },
+      { class: "cat" + (active ? " active" : ""), href: filesHash(to, on), menu: (at) => sidebarMenu(at, { label, path: to, machine: on, iconName }) },
       h("span", { class: "with-icon" }, icon(iconName), h("span", { class: "clip" }, label)),
-      room(volume),
     );
   // a favourite file opens its folder with the file chosen
   const favorites = state.favorites ?? [];
@@ -4377,12 +4376,13 @@ function filesPlaces(path) {
         "nav",
         { class: "cats" },
         h("div", { class: "cat-title" }, t("files.places")),
-        h("a", { class: "cat", href: "#/files" }, h("span", { class: "with-icon" }, icon("home"), h("span", { class: "clip" }, t("files.home")))),
+        h("a", { class: "cat", href: "#/hata" }, h("span", { class: "with-icon" }, icon("home"), h("span", { class: "clip" }, t("myhata.title")))),
+        h("a", { class: "cat", href: "#/files" }, h("span", { class: "with-icon" }, icon("folder"), h("span", { class: "clip" }, t("files.home")))),
         machinesList,
         volumes.length > 0 && h("div", { class: "cat-title" }, m?.name ?? t("files.disks")),
         volumes.length > 0 && place(t("files.root"), "/", "disk", !volumes.some((d) => within(path, d.path))),
+        volumes.map((d) => place(volumeName(d), d.path, d.network ? "globe" : "disk", inside(d.path), machine)),
       ),
-      volumes.length > 0 && h("div", { class: "side-disks" }, volumes.map((d) => place(volumeName(d), d.path, d.network ? "globe" : "disk", inside(d.path), machine, d))),
     );
   }
   // the disks are tiles of their own under the places, as on the top of the data folder
@@ -4392,18 +4392,12 @@ function filesPlaces(path) {
       "nav",
       { class: "cats" },
       h("div", { class: "cat-title" }, t("files.places")),
-      home && place(t("files.home"), home, "home", path === home),
-      home && (state.files?.places ?? []).map((name) => place(name, joinPath(home, name), name === "AppData" ? "box" : "folder", inside(joinPath(home, name)))),
-      place(t("files.root"), "/", "disk", !trash && path !== "" && !inHome && !(state.files?.disks ?? []).some((d) => within(path, d.path))),
+      h("a", { class: "cat" + (path === "#hata" ? " active" : ""), href: "#/hata" }, h("span", { class: "with-icon" }, icon("home"), h("span", { class: "clip" }, t("myhata.title")))),
+      home && place(t("files.home"), home, "folder", inHome),
+      place(t("files.root"), "/", "disk", !trash && path !== "#hata" && path !== "" && !inHome),
       h("a", { class: "cat" + (trash ? " active" : ""), href: "#/trash" }, h("span", { class: "with-icon" }, icon("trash"), h("span", { class: "clip" }, t("trash.title")))),
       favorites.length > 0 && [h("div", { class: "cat-title" }, t("files.favorites")), favorites.map(favoriteRow)],
       machinesList,
-    ),
-    h(
-      "div",
-      { class: "side-disks" },
-      (state.files?.disks ?? []).map((d) => place(volumeName(d), d.path, d.network ? "globe" : "disk", inside(d.path), machine, d)),
-      h("a", { class: "cat vol add", href: "#/settings/storage", title: t("netplace.sidebarHint"), onclick: addPlaceHere }, h("span", { class: "with-icon" }, icon("plus"), h("span", { class: "clip" }, t("netplace.sidebar")))),
     ),
   );
 }
@@ -4449,7 +4443,7 @@ function renderFilesBody() {
         { class: "files-nav" },
         navButton(t("files.back"), "arrow", !(trail && trail.at > trail.first), () => history.back(), "flip"),
         navButton(t("files.forward"), "arrow", !(trail && trail.at < trail.last), () => history.forward()),
-        navButton(t("files.up"), "up", !path || path === "/", goUp),
+        navButton(t("files.up"), "up", !!filesMachine() && path === "/", goUp),
       ),
       filesUi.edit ? addressEditor() : filesAddress(path),
     ),
@@ -4498,7 +4492,7 @@ function renderFilesBody() {
   const inCard = !finding && status && body.classList.contains("table-wrap");
   if (inCard) body.append(status);
 
-  put(main, head, selection, listing && path === listing.home && diskStrip(listing), body, listing?.truncated && h("p", { class: "muted small" }, t("files.truncated")), !finding && !inCard && status && h("div", { class: "card" }, status), uploadBox);
+  put(main, head, selection, body, listing?.truncated && h("p", { class: "muted small" }, t("files.truncated")), !finding && !inCard && status && h("div", { class: "card" }, status), uploadBox);
   renderSelection();
   if (filesUi.edit) {
     const input = main.querySelector(".address-input");
@@ -4527,6 +4521,8 @@ function stepTrail() {
 /** One level up; the folder left is the one the keys stand on there */
 function goUp() {
   const path = state.route.path;
+  // above the data folder and the whole server is My Hata, where every place is
+  if (!filesMachine() && (!path || path === "/" || path === state.files?.home)) return go("#/hata");
   if (!path || path === "/") return;
   filesUi.cursorNext = path.split("/").pop();
   go(filesHash(path.slice(0, path.lastIndexOf("/")) || "/"));
@@ -4537,7 +4533,7 @@ function pathAnchor(path) {
   const machine = filesMachine();
   const files = state.files;
   const named = [
-    !machine && files?.home && { path: files.home, label: t("files.home"), icon: "home" },
+    !machine && files?.home && { path: files.home, label: t("files.home"), icon: "folder" },
     ...((files?.machine ?? "") === machine ? (files?.disks ?? []) : []).map((d) => ({ path: d.path, label: volumeName(d), icon: d.network ? "globe" : "disk" })),
   ].filter((place) => place && within(path, place.path));
   const root = machine ? { path: "/", label: machinesUi.list?.machines.find((m) => m.id === machine)?.name ?? machine, icon: "server" } : { path: "/", label: t("files.root"), icon: "disk" };
@@ -4812,22 +4808,86 @@ const volumeName = (volume) => volume.label || volume.path.split("/").pop() || v
 /** The disks that are not inside the data folder already, where people look for them */
 const outerVolumes = (listing) => (listing?.disks ?? []).filter((d) => !(d.path + "/").startsWith((listing.home || "\0") + "/"));
 
-/** The other disks of the server, at the top of the data folder: they are mounted elsewhere, not in it */
-function diskStrip(listing) {
-  const volumes = outerVolumes(listing);
-  if (!volumes.length) return null;
-  const card = (volume) => {
-    const used = volume.total ? Math.round(((volume.total - volume.free) / volume.total) * 100) : 0;
+/**
+ * My Hata: everything Files can open, in one page — this server's places, its disks, the network
+ * places, the favourites and the machines — like "This PC" of a desktop
+ */
+async function loadMyHata() {
+  const [data, root] = await Promise.all([api("GET", "/api/files?path=").catch(() => null), api("GET", "/api/files?path=" + encodeURIComponent("/")).catch(() => null)]);
+  if (data) {
+    state.files = data;
+    if (data.favorites) state.favorites = data.favorites;
+  }
+  myHataUi.root = root?.disk ?? null;
+  if (!machinesUi.list) await loadMachines().catch(() => {});
+  if (state.route.view === "myhata") renderMyHata();
+}
+
+const myHataUi = { root: null };
+
+/** A tile of My Hata: what it is, where, and how full when it is a file system */
+function hataTile({ href, onclick, iconName, title, sub, room, menu, cls = "" }) {
+  let bar = null;
+  if (room?.total) {
+    const used = Math.round(((room.total - room.free) / room.total) * 100);
     const fill = h("i", { class: level(used) });
     fill.style.width = used + "%";
-    return h(
-      "a",
-      { class: "disk-tile", href: filesHash(volume.path), title: volume.path, menu: (at) => sidebarMenu(at, { label: volumeName(volume), path: volume.path, volume, iconName: volume.network ? "globe" : "disk" }) },
-      h("span", { class: "badge-icon plain" }, icon(volume.network ? "globe" : "disk")),
-      h("span", { class: "disk-text" }, h("span", { class: "clip strong" }, volumeName(volume)), h("span", { class: "muted small mono clip" }, volume.path), volume.total > 0 && h("span", { class: "bar" }, fill), volume.total > 0 && h("span", { class: "muted small" }, t("files.free", { free: bytes(volume.free), total: bytes(volume.total) }))),
-    );
+    bar = [h("span", { class: "bar" }, fill), h("span", { class: "muted small" }, t("files.free", { free: bytes(room.free), total: bytes(room.total) }))];
+  }
+  return h(
+    "a",
+    { class: "disk-tile " + cls, href: href ?? "#", onclick, menu },
+    h("span", { class: "badge-icon plain" }, icon(iconName)),
+    h("span", { class: "disk-text" }, h("span", { class: "clip strong" }, title), sub && h("span", { class: "muted small mono clip" }, sub), bar),
+  );
+}
+
+function renderMyHata() {
+  const listing = state.files;
+  const home = listing?.home ?? "";
+  const disks = listing?.disks ?? [];
+  const volumeTile = (volume) => hataTile({ href: filesHash(volume.path, ""), iconName: volume.network ? "globe" : "disk", title: volumeName(volume), sub: volume.path, room: volume, menu: (at) => sidebarMenu(at, { label: volumeName(volume), path: volume.path, volume, iconName: volume.network ? "globe" : "disk" }) });
+  const favoriteTile = (one) => {
+    const name = one.path.split("/").pop() || "/";
+    const parent = one.path.slice(0, one.path.lastIndexOf("/")) || "/";
+    return hataTile({ href: filesHash(one.dir ? one.path : parent, ""), onclick: one.dir ? null : () => (filesUi.pick = name), iconName: one.dir ? "folder" : "file", title: name, sub: one.path, menu: (at) => menuAt(at, menuHeader(name, one.path, one.dir ? "folder" : "file"), [{ label: t("files.copyPath"), icon: "copy", run: () => copyText(one.path) }, { label: t("files.unfavorite"), icon: "star", run: () => favorite(one.path, false, name) }]) });
   };
-  return h("div", { class: "disk-strip" }, volumes.map(card));
+  const machineTile = (m) => hataTile({ href: m.online ? filesHash("/", m.id) : `#/machines/${m.id}`, iconName: "server", title: m.name, sub: m.online ? machineOs(m) : t("machines.offline"), cls: m.online ? "" : "away" });
+  const section = (title, tiles, extra) => h("section", { class: "card pad stack my-hata" }, h("div", { class: "section-head" }, h("h2", null, title), extra), h("div", { class: "disk-strip hata-grid" }, tiles));
+  const local = disks.filter((d) => !d.network);
+  const network = disks.filter((d) => d.network);
+  const machines = machinesUi.list?.machines ?? [];
+  const favorites = state.favorites ?? [];
+  shell(
+    h(
+      "div",
+      { class: "files" },
+      h("aside", { class: "files-side fold", id: "files-places" }),
+      h(
+        "section",
+        { class: "stack", id: "files-main" },
+        h("div", { class: "page-head card pad" }, h("div", null, h("h1", null, t("myhata.title")), h("p", { class: "muted" }, t("myhata.lead")))),
+        !listing
+          ? h("p", { class: "card pad muted" }, "…")
+          : [
+              section(t("myhata.server"), [
+                home && hataTile({ href: filesHash(home, ""), iconName: "folder", title: t("files.home"), sub: home, room: listing.disk }),
+                hataTile({ href: filesHash("/", ""), iconName: "disk", title: t("files.root"), sub: "/", room: myHataUi.root }),
+                hataTile({ href: "#/trash", iconName: "trash", title: t("trash.title"), sub: t("myhata.trash") }),
+              ]),
+              section(t("files.disks"), local.length ? local.map(volumeTile) : h("p", { class: "muted small" }, t("myhata.noDisks")), h("a", { class: "link small", href: "#/settings/storage" }, t("myhata.storage"))),
+              section(t("myhata.network"), [
+                ...network.map(volumeTile),
+                hataTile({ onclick: (e) => (e.preventDefault(), findPlacesDialog()), iconName: "search", title: t("myhata.browse"), sub: t("myhata.browseLead"), cls: "add" }),
+                hataTile({ onclick: addPlaceHere, iconName: "plus", title: t("netplace.sidebar"), sub: t("myhata.addPlace"), cls: "add" }),
+              ]),
+              favorites.length > 0 && section(t("files.favorites"), favorites.map(favoriteTile)),
+              section(t("nav.machines"), machines.length ? machines.map(machineTile) : hataTile({ href: "#/machines", iconName: "plus", title: t("myhata.addMachine"), sub: t("myhata.addMachineLead"), cls: "add" }), machines.length > 0 && h("a", { class: "link small", href: "#/machines" }, t("myhata.allMachines"))),
+            ],
+      ),
+    ),
+  );
+  filesPlaces("#hata");
 }
 
 const selectedEntries = () => (state.files?.entries ?? []).filter((entry) => filesUi.selected.has(entry.name));

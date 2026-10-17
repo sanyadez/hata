@@ -2768,5 +2768,19 @@
   "activity.app.sysupdate.failed": "Оновити пакети системи не вдалося",
   "activity.app.sysupdate.done": "Пакети системи оновлено",
   "activity.system.packages.all": "Пакети системи оновлено",
-  "activity.system.packages.updated": "Оновлено пакети системи: {target}"
+  "activity.system.packages.updated": "Оновлено пакети системи: {target}",
+  "home.thisServer": "цей сервер",
+  "myhata.title": "Моя хата",
+  "myhata.lead": "Усе, що можна відкрити у Файлах: цей сервер, його диски, мережеві місця, обране й машини.",
+  "myhata.server": "Цей сервер",
+  "myhata.trash": "Видалені файли",
+  "myhata.noDisks": "Інших дисків не під'єднано.",
+  "myhata.storage": "Диски та їх під'єднання",
+  "myhata.network": "Мережа",
+  "myhata.browse": "Переглянути мережу",
+  "myhata.browseLead": "Сервери, що відкривають теки",
+  "myhata.addPlace": "Тека іншої машини",
+  "myhata.addMachine": "Підключити машину",
+  "myhata.addMachineLead": "Її файли й застосунки тут",
+  "myhata.allMachines": "Усі машини"
 }

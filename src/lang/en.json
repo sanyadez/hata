@@ -2768,5 +2768,19 @@
   "activity.app.sysupdate.failed": "Updating the system's packages failed",
   "activity.app.sysupdate.done": "The system's packages were updated",
   "activity.system.packages.all": "The system's packages were updated",
-  "activity.system.packages.updated": "System packages updated: {target}"
+  "activity.system.packages.updated": "System packages updated: {target}",
+  "home.thisServer": "this server",
+  "myhata.title": "My Hata",
+  "myhata.lead": "Everything Files can open: this server, its disks, the network places, the favourites and the machines.",
+  "myhata.server": "This server",
+  "myhata.trash": "Deleted files",
+  "myhata.noDisks": "No other disks are connected.",
+  "myhata.storage": "Disks and connecting them",
+  "myhata.network": "Network",
+  "myhata.browse": "Look around the network",
+  "myhata.browseLead": "Servers that share folders",
+  "myhata.addPlace": "A folder of another machine",
+  "myhata.addMachine": "Connect a machine",
+  "myhata.addMachineLead": "Its files and apps here",
+  "myhata.allMachines": "All machines"
 }
