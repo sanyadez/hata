@@ -4,7 +4,9 @@
  * update and the volumes of a project removed without them; this is where they are seen and cleared.
  */
 import { record } from "./activity";
-import { AppError, installedNames, viewOf } from "./apps";
+import { AppError, installedNames, viewOf, viewOfFiles, type AppFiles } from "./apps";
+import type { Compose } from "./appform";
+import { call, machine } from "./machines";
 import { diskUsage, listContainers, PROJECT_LABEL, pruneBuildCache, pruneImages, pruneVolumes, removeImage, removeVolume, type ContainerSummary, type DiskUsage } from "./docker";
 
 /** Who uses an image or a volume: a container, and the app it belongs to when it is a compose project */
@@ -86,56 +88,92 @@ export function describeSpace(df: DiskUsage, containers: ContainerSummary[], nam
   return { images: images.sort(order), volumes: volumes.sort(order), cache: (df.BuildCache ?? []).filter((c) => !c.InUse).reduce((n, c) => n + c.Size, 0) };
 }
 
-/** The image references the compose files of the installed apps name */
-function namedImages(): Record<string, string[]> {
-  const out: Record<string, string[]> = {};
-  for (const name of installedNames()) {
-    const compose = viewOf(name);
-    out[name] = Object.values(compose?.services ?? {}).map((service) => (typeof service?.image === "string" ? service.image : "")).filter(Boolean);
-  }
-  return out;
+/** Docker where it runs: on this server, or on a machine through its client */
+interface Engine {
+  usage(): Promise<{ df: DiskUsage; containers: ContainerSummary[] }>;
+  /** Installed app → the image references its compose file names */
+  named(): Promise<Record<string, string[]>>;
+  removeImage(id: string): Promise<unknown>;
+  removeVolume(name: string): Promise<unknown>;
+  prune(kind: "images" | "volumes" | "cache"): Promise<{ SpaceReclaimed: number; VolumesDeleted?: string[] | null }>;
+  /** The machine's name for the activity log; "" here */
+  machine: string;
 }
 
-export async function dockerSpace(): Promise<SpaceReport> {
-  const [df, containers] = await Promise.all([diskUsage(), listContainers()]);
-  return describeSpace(df, containers, namedImages());
+const imagesOf = (compose: Compose | null): string[] => Object.values(compose?.services ?? {}).map((service) => (typeof service?.image === "string" ? service.image : "")).filter(Boolean);
+
+const here: Engine = {
+  usage: async () => {
+    const [df, containers] = await Promise.all([diskUsage(), listContainers()]);
+    return { df, containers };
+  },
+  named: async () => Object.fromEntries(installedNames().map((name) => [name, imagesOf(viewOf(name))])),
+  removeImage,
+  removeVolume: (name) =>
+    removeVolume(name).catch((e) => {
+      throw e?.status === 404 ? new AppError("docker.notFound", 404) : e?.status === 409 ? new AppError("docker.volumeInUse", 409) : e;
+    }),
+  prune: (kind) => (kind === "images" ? pruneImages() : kind === "volumes" ? pruneVolumes() : pruneBuildCache()),
+  machine: "",
+};
+
+function onMachine(id: string): Engine {
+  const { name } = machine(id);
+  // a client older than these calls does not know them: it is to be brought to Hata's version
+  const ask = <T>(op: string, args: unknown = {}): Promise<T> =>
+    call<T>(id, op, args).catch((e) => {
+      throw e instanceof AppError && e.code === "machine.unknownOperation" ? new AppError("machine.clientOutdated", 409, { name }) : e;
+    });
+  return {
+    usage: () => ask("docker.space"),
+    named: async () => Object.fromEntries((await ask<(AppFiles & { name: string })[]>("apps.list")).map((files) => [files.name, imagesOf(viewOfFiles(files))])),
+    removeImage: (image) => ask("docker.image.remove", { id: image }),
+    removeVolume: (volume) => ask("docker.volume.remove", { name: volume }),
+    prune: (kind) => ask("docker.prune", { kind }),
+    machine: name,
+  };
+}
+
+const engine = (machineId?: string): Engine => (machineId ? onMachine(machineId) : here);
+
+/** Images and volumes of this server, or of a machine */
+export async function dockerSpace(machineId?: string): Promise<SpaceReport> {
+  const docker = engine(machineId);
+  const [{ df, containers }, named] = await Promise.all([docker.usage(), docker.named()]);
+  return describeSpace(df, containers, named);
 }
 
 const short = (id: string) => id.replace(/^sha256:/, "").slice(0, 12);
+const said = (docker: Engine) => (docker.machine ? { machine: docker.machine } : {});
 
 /** Takes away one image no container uses */
-export async function dropImage(id: string, user: string): Promise<void> {
-  const containers = await listContainers();
+export async function dropImage(id: string, user: string, machineId?: string): Promise<void> {
+  const docker = engine(machineId);
+  const { df, containers } = await docker.usage();
   if (containers.some((c) => c.ImageID === id)) throw new AppError("docker.imageInUse", 409);
-  const df = await diskUsage();
   const image = df.Images?.find((one) => one.Id === id);
   if (!image) throw new AppError("docker.notFound", 404);
-  await removeImage(id);
-  record("system.docker.image", { user, detail: (image.RepoTags ?? []).filter((t) => t !== "<none>:<none>").map(shortName)[0] ?? short(id) });
+  await docker.removeImage(id);
+  record("system.docker.image", { user, ...said(docker), detail: (image.RepoTags ?? []).filter((t) => t !== "<none>:<none>").map(shortName)[0] ?? short(id) });
 }
 
 /** Takes away one volume no container uses — and the data in it */
-export async function dropVolume(name: string, user: string): Promise<void> {
-  const containers = await listContainers();
+export async function dropVolume(name: string, user: string, machineId?: string): Promise<void> {
+  const docker = engine(machineId);
+  const { containers } = await docker.usage();
   if (containers.some((c) => c.Mounts?.some((m) => m.Type === "volume" && m.Name === name))) throw new AppError("docker.volumeInUse", 409);
-  await removeVolume(name).catch((e) => {
-    throw e?.status === 404 ? new AppError("docker.notFound", 404) : e?.status === 409 ? new AppError("docker.volumeInUse", 409) : e;
-  });
-  record("system.docker.volume", { user, detail: name });
+  await docker.removeVolume(name);
+  record("system.docker.volume", { user, ...said(docker), detail: name });
 }
 
 /** Takes away everything of a kind nothing uses; answers how much room it gave back (and how many volumes) */
-export async function prune(kind: "images" | "volumes" | "cache", user: string): Promise<{ count: number; freed: number }> {
-  if (kind === "volumes") {
-    // Docker answers 0 for the room volumes gave back: their sizes are taken from before
-    const before = new Map((await diskUsage()).Volumes?.map((v) => [v.Name, Math.max(0, v.UsageData?.Size ?? 0)]) ?? []);
-    const done = await pruneVolumes();
-    const gone = done.VolumesDeleted ?? [];
-    const freed = done.SpaceReclaimed || gone.reduce((n, name) => n + (before.get(name) ?? 0), 0);
-    record("system.docker.prune.volumes", { user, detail: `${gone.length}, ${amount(freed)}` });
-    return { count: gone.length, freed };
-  }
-  const done = kind === "images" ? await pruneImages() : await pruneBuildCache();
-  record(`system.docker.prune.${kind}`, { user, detail: amount(done.SpaceReclaimed) });
-  return { count: 0, freed: done.SpaceReclaimed };
+export async function prune(kind: "images" | "volumes" | "cache", user: string, machineId?: string): Promise<{ count: number; freed: number }> {
+  const docker = engine(machineId);
+  // Docker answers 0 for the room volumes gave back: their sizes are taken from before
+  const before = kind === "volumes" ? new Map((await docker.usage()).df.Volumes?.map((v) => [v.Name, Math.max(0, v.UsageData?.Size ?? 0)]) ?? []) : new Map<string, number>();
+  const done = await docker.prune(kind);
+  const gone = done.VolumesDeleted ?? [];
+  const freed = done.SpaceReclaimed || gone.reduce((n, name) => n + (before.get(name) ?? 0), 0);
+  record(`system.docker.prune.${kind}`, { user, ...said(docker), detail: kind === "volumes" ? `${gone.length}, ${amount(freed)}` : amount(freed) });
+  return { count: gone.length, freed };
 }

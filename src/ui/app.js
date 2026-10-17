@@ -2508,7 +2508,7 @@ async function addMachineDialog() {
 
 // --- One machine ---
 
-const MACHINE_TABS = ["overview", "apps", "containers", "terminal"];
+const MACHINE_TABS = ["overview", "apps", "containers", "docker", "terminal"];
 
 function renderMachine() {
   if (machinesUi.current?.id !== state.route.id) {
@@ -2542,7 +2542,7 @@ function renderMachineHead() {
         h("button", { type: "button", class: "btn square", "aria-label": t("app.more"), onclick: () => machineMenu(m) }, icon("more")),
       ),
     ),
-    h("div", { class: "tabs" }, tab("overview", "grid"), tab("apps", "store"), tab("containers", "box"), tab("terminal", "terminal")),
+    h("div", { class: "tabs" }, tab("overview", "grid"), tab("apps", "store"), tab("containers", "box"), tab("docker", "disk"), tab("terminal", "terminal")),
   );
 }
 
@@ -2682,6 +2682,10 @@ function renderMachineTab() {
     box.replaceChildren(h("div", { id: "machine-apps" }, h("p", { class: "muted" }, t("machines.loading"))));
     if (machinesUi.apps?.machine === m.id) paintMachineApps();
     void loadMachineApps();
+  } else if (state.route.tab === "docker") {
+    box.replaceChildren(h("div", { id: "machine-docker", class: "stack" }));
+    paintSpace(m.id);
+    void loadSpace(m.id);
   } else if (state.route.tab === "terminal") {
     box.replaceChildren(h("div", { class: "term-holder" }, terminalFrame({ machine: m.id })));
   } else machineOverview(m, box);
@@ -8002,17 +8006,28 @@ function toolsSection() {
   ];
 }
 
-async function loadSpace() {
+/** Images and volumes as last counted: "" — this server, else a machine's id */
+const spaces = {};
+const spaceApi = (at) => (at ? `/api/machines/${at}/docker` : "/api/docker");
+
+async function loadSpace(at = "") {
   try {
-    state.space = await api("GET", "/api/docker/space");
+    spaces[at] = await api("GET", `${spaceApi(at)}/space`);
   } catch (e) {
-    state.space = { error: errorText(e) };
+    spaces[at] = { error: errorText(e) };
   }
-  if (state.route.view === "settings" && state.route.section === "docker") renderSettings();
+  paintSpace(at);
+}
+
+/** Shows what was counted where it is looked at: Settings → Docker, or the machine's tab */
+function paintSpace(at) {
+  if (!at && state.route.view === "settings" && state.route.section === "docker") renderSettings();
+  const box = document.getElementById("machine-docker");
+  if (at && box && state.route.view === "machine" && state.route.id === at) box.replaceChildren(...dockerSection(at).filter(Boolean));
 }
 
 /** Asks before something of Docker's is taken away; `password` — for what takes data with it in bulk */
-function dockerDropDialog({ title, lead, warn, command, password: ask, go: label, run }) {
+function dockerDropDialog({ at, title, lead, warn, command, password: ask, go: label, run }) {
   const error = h("p", { class: "error", role: "alert" });
   const password = ask ? h("input", { type: "password", autocomplete: "current-password", required: true }) : null;
   const go = h("button", { class: "btn danger" }, label);
@@ -8030,7 +8045,7 @@ function dockerDropDialog({ title, lead, warn, command, password: ask, go: label
             const done = await run(password?.value);
             dialog.close();
             toast(done);
-            await loadSpace();
+            await loadSpace(at);
           } catch (err) {
             error.textContent = errorText(err);
             go.disabled = false;
@@ -8048,13 +8063,18 @@ function dockerDropDialog({ title, lead, warn, command, password: ask, go: label
   );
 }
 
-/** Settings → Docker: images and volumes, who uses them, and taking away what nothing uses */
-function dockerSection() {
-  const space = state.space;
+/**
+ * Images and volumes, who uses them, and taking away what nothing uses: of this server (Settings →
+ * Docker) or of a machine (`at`, its tab "Docker")
+ */
+function dockerSection(at = "") {
+  const space = spaces[at];
+  const base = spaceApi(at);
   if (!space) return [h("section", { class: "card pad" }, h("p", { class: "with-icon muted" }, icon("refresh"), t("docker.counting")))];
   if (space.error) return [h("section", { class: "card pad" }, h("p", { class: "error" }, space.error))];
   const sum = (list) => list.reduce((n, one) => n + Math.max(0, one.size), 0);
-  const appLink = (name) => (state.overview?.apps ?? []).some((a) => a.name === name) ? h("a", { class: "link", href: `#/apps/${name}` }, name) : h("span", null, name);
+  // an app of this server opens its page; a machine's apps are on the machine's tab
+  const appLink = (name) => (at ? h("a", { class: "link", href: `#/machines/${at}/apps` }, name) : (state.overview?.apps ?? []).some((a) => a.name === name) ? h("a", { class: "link", href: `#/apps/${name}` }, name) : h("span", null, name));
   // who uses it: the app when it is one, else the container
   const users = (one) =>
     one.used.length
@@ -8067,12 +8087,13 @@ function dockerSection() {
   const imageName = (i) => (i.name ? h("div", { class: "strong mono clip" }, i.name) : h("div", null, h("span", { class: "strong" }, t("docker.noName")), h("span", { class: "muted small mono" }, " " + i.id.slice(7, 19))));
   const dropImage = (i) =>
     dockerDropDialog({
+      at,
       title: t("docker.image.dropTitle"),
       lead: i.name || i.id.slice(7, 19),
       warn: i.wanted.length ? t("docker.image.wanted", { apps: i.wanted.join(", ") }) : "",
       command: `docker image rm ${i.name || i.id.slice(7, 19)}`,
       go: t("docker.drop"),
-      run: async () => (await api("DELETE", `/api/docker/images/${i.id}`), t("docker.image.dropped")),
+      run: async () => (await api("DELETE", `${base}/images/${i.id}`), t("docker.image.dropped")),
     });
   const imageRow = (i) =>
     h(
@@ -8086,12 +8107,13 @@ function dockerSection() {
     );
   const pruneImages = () =>
     dockerDropDialog({
+      at,
       title: t("docker.image.pruneTitle"),
       lead: t("docker.image.pruneLead", { n: idle.length, size: bytes(sum(idle)) }),
       warn: wanted.length ? t("docker.image.wanted", { apps: [...new Set(wanted.flatMap((i) => i.wanted))].join(", ") }) : "",
       command: "docker image prune -a",
       go: t("docker.pruneGo"),
-      run: async () => t("docker.freed", { size: bytes((await api("POST", "/api/docker/images/prune", {})).freed) }),
+      run: async () => t("docker.freed", { size: bytes((await api("POST", `${base}/images/prune`, {})).freed) }),
     });
 
   const volumes = space.volumes;
@@ -8099,12 +8121,13 @@ function dockerSection() {
   const volumeName = (v) => h("div", null, h("div", { class: "strong mono clip" }, v.anonymous ? v.name.slice(0, 12) + "…" : v.name), h("div", { class: "muted small" }, v.anonymous ? t("docker.volume.anonymous") : v.project ? t("docker.volume.of", { app: v.project }) : t("docker.volume.byHand")));
   const dropVolume = (v) =>
     dockerDropDialog({
+      at,
       title: t("docker.volume.dropTitle"),
       lead: v.name,
       warn: t("docker.volume.dataGoes"),
       command: `docker volume rm ${v.name}`,
       go: t("docker.drop"),
-      run: async () => (await api("DELETE", `/api/docker/volumes/${encodeURIComponent(v.name)}`), t("docker.volume.dropped")),
+      run: async () => (await api("DELETE", `${base}/volumes/${encodeURIComponent(v.name)}`), t("docker.volume.dropped")),
     });
   const volumeRow = (v) =>
     h(
@@ -8118,6 +8141,7 @@ function dockerSection() {
     );
   const pruneVolumes = () =>
     dockerDropDialog({
+      at,
       title: t("docker.volume.pruneTitle"),
       lead: t("docker.volume.pruneLead", { n: spare.length, size: bytes(sum(spare)), names: spare.map((v) => (v.anonymous ? v.name.slice(0, 12) + "…" : v.name)).join(", ") }),
       warn: t("docker.volume.dataGoesAll"),
@@ -8125,17 +8149,18 @@ function dockerSection() {
       password: true,
       go: t("docker.pruneGo"),
       run: async (password) => {
-        const done = await api("POST", "/api/docker/volumes/prune", { password });
+        const done = await api("POST", `${base}/volumes/prune`, { password });
         return t("docker.volume.pruned", { n: done.count, size: bytes(done.freed) });
       },
     });
   const pruneCache = () =>
     dockerDropDialog({
+      at,
       title: t("docker.cache.title"),
       lead: t("docker.cache.lead", { size: bytes(space.cache) }),
       command: "docker builder prune -a",
       go: t("docker.pruneGo"),
-      run: async () => t("docker.freed", { size: bytes((await api("POST", "/api/docker/cache/prune", {})).freed) }),
+      run: async () => t("docker.freed", { size: bytes((await api("POST", `${base}/cache/prune`, {})).freed) }),
     });
 
   const head = (title, list, unused, prune) =>
@@ -8151,8 +8176,8 @@ function dockerSection() {
     h(
       "section",
       { class: "card pad stack" },
-      h("div", { class: "section-head" }, h("h2", { class: "grow" }, t("settings.docker")), button(t("docker.recount"), { class: "small", onclick: () => ((state.space = null), renderSettings(), loadSpace()) }, "refresh")),
-      h("p", { class: "muted small" }, t("docker.lead")),
+      h("div", { class: "section-head" }, h("h2", { class: "grow" }, at ? t("docker.onMachine") : t("settings.docker")), button(t("docker.recount"), { class: "small", onclick: () => (delete spaces[at], paintSpace(at), loadSpace(at)) }, "refresh")),
+      h("p", { class: "muted small" }, t(at ? "docker.leadMachine" : "docker.lead")),
       space.cache > 0 && h("div", { class: "section-head" }, h("p", { class: "muted small grow" }, t("docker.cache.line", { size: bytes(space.cache) })), button(t("docker.cache.clear"), { class: "small", onclick: pruneCache })),
     ),
     h("section", { class: "card" }, head(t("docker.images"), images, idle, pruneImages), images.length ? table(columns(t("docker.image")), images.map(imageRow)) : h("p", { class: "muted pad" }, t("docker.none"))),

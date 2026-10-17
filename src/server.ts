@@ -1315,28 +1315,35 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
   // Docker itself, for a server that has none: the button on the home page
   if (path === "/api/docker" && method === "GET") return json({ ...(await dockerInfo()), install: DOCKER_INSTALL_COMMAND });
   if (path === "/api/docker/install" && method === "POST") return json({ job: installDocker(user.name).id }, 202);
-  // images and volumes: what uses them, and taking away what nothing uses (never through MCP)
-  if (path === "/api/docker/space" && method === "GET") {
-    // the sizes of volumes are counted by walking them
-    server.timeout(req, 0);
-    return json(await dockerSpace());
-  }
-  const dockerImage = /^\/api\/docker\/images\/(sha256:[0-9a-f]{64})$/.exec(path);
-  if (dockerImage && method === "DELETE") {
-    await dropImage(dockerImage[1]!, user.name);
-    return json({ ok: true });
-  }
-  const dockerVolume = /^\/api\/docker\/volumes\/([A-Za-z0-9][A-Za-z0-9_.-]{0,254})$/.exec(path);
-  if (dockerVolume && method === "DELETE") {
-    await dropVolume(dockerVolume[1]!, user.name);
-    return json({ ok: true });
-  }
-  const dockerPrune = /^\/api\/docker\/(images|volumes|cache)\/prune$/.exec(path);
-  if (dockerPrune && method === "POST") {
-    // every volume nothing uses goes with its data: asked like erasing a disk
-    if (dockerPrune[1] === "volumes" && !(await checkOwnPassword(user, (await body(req)).password))) return fail(400, "auth.wrongPassword");
-    server.timeout(req, 0);
-    return json(await pruneDocker(dockerPrune[1] as "images" | "volumes" | "cache", user.name));
+  // images and volumes — of this server, or of a machine (`/api/machines/<id>/docker/…`): what uses
+  // them, and taking away what nothing uses (never through MCP)
+  const dockerOf = /^\/api\/(?:machines\/([a-f0-9]{8})\/)?docker\/(.+)$/.exec(path);
+  if (dockerOf && dockerOf[2] !== "install" && dockerOf[2] !== "start") {
+    const at = dockerOf[1];
+    const rest = dockerOf[2]!;
+    if (rest === "space" && method === "GET") {
+      // the sizes of volumes are counted by walking them
+      server.timeout(req, 0);
+      return json(await dockerSpace(at));
+    }
+    const image = /^images\/(sha256:[0-9a-f]{64})$/.exec(rest);
+    if (image && method === "DELETE") {
+      await dropImage(image[1]!, user.name, at);
+      return json({ ok: true });
+    }
+    const volume = /^volumes\/([A-Za-z0-9][A-Za-z0-9_.-]{0,254})$/.exec(rest);
+    if (volume && method === "DELETE") {
+      await dropVolume(volume[1]!, user.name, at);
+      return json({ ok: true });
+    }
+    const pruned = /^(images|volumes|cache)\/prune$/.exec(rest);
+    if (pruned && method === "POST") {
+      // every volume nothing uses goes with its data: asked like erasing a disk
+      if (pruned[1] === "volumes" && !(await checkOwnPassword(user, (await body(req)).password))) return fail(400, "auth.wrongPassword");
+      server.timeout(req, 0);
+      return json(await pruneDocker(pruned[1] as "images" | "volumes" | "cache", user.name, at));
+    }
+    return fail(404, "request.notFound");
   }
   if (path === "/api/docker/start" && method === "POST") {
     await startDocker();
