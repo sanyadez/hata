@@ -640,3 +640,29 @@ export function settingsChange(old: GuestSettings, input: Record<string, unknown
   }
   return out;
 }
+
+// --- A backup put back -------------------------------------------------------------------------------
+
+/** How a backup comes back: over the guest it was taken of, or as a new guest beside it */
+export interface Restore {
+  volid: string;
+  vmid: number;
+  /** Where the disks go; empty — where the backup says they were (virtual machines only) */
+  storage: string;
+  replace: boolean;
+  pool: string;
+}
+
+/**
+ * The request that restores a backup. A new guest gets new network cards (`unique`): with the old ones
+ * it would take the original's address from the router while that one runs.
+ */
+export function restoreParams(type: "lxc" | "qemu", r: Restore): Record<string, string | number> {
+  return {
+    vmid: r.vmid,
+    ...(type === "lxc" ? { ostemplate: r.volid, restore: 1 } : { archive: r.volid }),
+    ...(r.storage ? { storage: r.storage } : {}),
+    ...(r.replace ? { force: 1 } : { unique: 1 }),
+    ...(r.pool && !r.replace ? { pool: r.pool } : {}),
+  };
+}

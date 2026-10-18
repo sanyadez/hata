@@ -25,7 +25,7 @@ import { SECRETS_DIR } from "./config";
 import { readJsonFile, writeJsonAtomic } from "./fsutil";
 import { invite, machines } from "./machines";
 import { acceptFor, BINARY, CLOSE, encodeFrame, FrameReader, PING, PONG, PVE_PING, sized, TEXT, typed } from "./wsframe";
-import { cleanFingerprint, cleanUrl, failed, GUEST_RE, guestOfMachine as findGuest, guestRights, mayPath, POWER, readConfig, readResources, readTask, SECRET_RE, SNAPSHOT_RE, snapshotName, TOKEN_RE, trouble, clientLine, hostKeysIn, nextId, readNewGuest, readSettings, settingsChange, setupScript, type NewOptions, type SettingsChange, type Guest, type GuestConfig, type Permissions, type PveItem, type Resource, type Task, type Watched } from "./pve";
+import { cleanFingerprint, cleanUrl, failed, GUEST_RE, guestOfMachine as findGuest, guestRights, mayPath, POWER, readConfig, readResources, readTask, SECRET_RE, SNAPSHOT_RE, snapshotName, TOKEN_RE, trouble, clientLine, hostKeysIn, nextId, readNewGuest, readSettings, restoreParams, settingsChange, setupScript, type NewOptions, type SettingsChange, type Guest, type GuestConfig, type Permissions, type PveItem, type Resource, type Task, type Watched } from "./pve";
 
 const FILE = join(SECRETS_DIR, "proxmox.json");
 const ID_RE = /^[a-f0-9]{8}$/;
@@ -579,6 +579,83 @@ export async function takeBackup(id: string, guest: string, input: { storage?: u
   record("pve.backup.started", { user: by, detail: `${label(h, g)} → ${storage.name}` });
   void look(h, true);
   return { upid };
+}
+
+/** What the restore dialog offers for a guest's backup: where its disks may go, the next free number, the pools */
+export async function restoreOptions(id: string, guest: string) {
+  const h = hostOf(id);
+  const g = guestOf(h, guest);
+  const l = liveOf(h);
+  const config = await pve<Record<string, unknown>>(h, "GET", `/nodes/${g.node}/${g.type}/${g.vmid}/config`).catch(() => ({}));
+  const storages = l.storages.filter((s) => s.node === g.node && s.active && s.content.includes(g.type === "lxc" ? "rootdir" : "images") && mayPath(l.perms, `/storage/${s.name}`, "Datastore.AllocateSpace")).map((s) => s.name);
+  const listed = ((await pve<{ poolid: string }[]>(h, "GET", "/pools").catch(() => [])) ?? []).map((p) => p.poolid);
+  const named = Object.keys(l.perms).flatMap((path) => /^\/pool\/([^/]+)$/.exec(path)?.[1] ?? []);
+  const pools = [...new Set([...listed, ...named])].filter((p) => mayPath(l.perms, `/pool/${p}`, "VM.Allocate")).sort();
+  const free = mayPath(l.perms, "/vms", "VM.Allocate");
+  return {
+    storages,
+    // where its disks lie now: what a restore over it keeps
+    storage: readSettings(config, g.type).disks[0]?.storage ?? storages[0] ?? "",
+    next: nextId({ ids: h.ids ?? null, taken: l.guests.map((x) => x.vmid) }),
+    ids: h.ids ?? null,
+    pools,
+    pool: g.pool,
+    free,
+    self: selfOf(l) === g.id,
+  };
+}
+
+/**
+ * Puts a guest's backup back — over the guest (stopped, its name typed: what it has now is lost) or as a
+ * new guest with new network cards. Proxmox's task takes minutes, so it is a job; its lines are the log.
+ */
+export async function restoreBackup(id: string, guest: string, input: Record<string, unknown>, by: string) {
+  const h = hostOf(id);
+  const g = guestOf(h, guest);
+  const l = liveOf(h);
+  const { backups: list } = await backups(id, guest);
+  const backup = list.find((b) => b.volid === input.volid);
+  if (!backup) throw new AppError("pve.noBackup", 404);
+  const o = await restoreOptions(id, guest);
+  const replace = input.replace === true;
+  let vmid = g.vmid;
+  let pool = "";
+  if (replace) {
+    if (input.name !== g.name) throw new AppError("pve.typeName", 400, { name: g.name });
+    if (o.self) throw new AppError("pve.isSelfRestore", 409, { name: g.name });
+    const now = await pve<{ status?: string }>(h, "GET", `/nodes/${g.node}/${g.type}/${g.vmid}/status/current`);
+    if (now.status !== "stopped") throw new AppError("pve.stopFirst", 409, { name: g.name });
+  } else {
+    const asked = typeof input.vmid === "number" ? input.vmid : Number(input.vmid);
+    if (!Number.isInteger(asked) || asked < 100 || asked > 999_999_999) throw new AppError("pve.setting.vmid", 400);
+    if (l.guests.some((x) => x.vmid === asked)) throw new AppError("pve.vmidTaken", 409, { vmid: asked });
+    if (o.ids && (asked < o.ids.from || asked > o.ids.to)) throw new AppError("pve.vmidRange", 400, o.ids);
+    vmid = asked;
+    pool = typeof input.pool === "string" && input.pool ? input.pool : o.free ? "" : (o.pools.includes(g.pool) ? g.pool : (o.pools[0] ?? ""));
+    if (pool && !o.pools.includes(pool)) throw new AppError("pve.setting.pool", 400);
+  }
+  const storage = typeof input.storage === "string" && input.storage ? input.storage : g.type === "lxc" ? o.storage : "";
+  if (storage && !o.storages.includes(storage)) throw new AppError("pve.setting.storage", 400);
+  const params = restoreParams(g.type, { volid: backup.volid, vmid, storage, replace, pool });
+  const start = input.start === true;
+  const job = startJob(`pve:${h.id}:${vmid}`, "restore", by, async (log) => {
+    try {
+      log(`Proxmox ${h.name}: ${backup.volid} → ${g.type === "lxc" ? "CT" : "VM"} ${vmid}${replace ? ` (${g.name})` : ""}`);
+      await followTask(h, g.node, await pve<string>(h, "POST", `/nodes/${g.node}/${g.type}`, params), log, 60 * 60_000);
+      record(replace ? "pve.backup.restored" : "pve.backup.restoredNew", { user: by, detail: `${label(h, g)}${replace ? "" : ` → ${vmid}`}: ${new Date(backup.at).toISOString().slice(0, 16).replace("T", " ")}` });
+      if (start) {
+        log("Starting");
+        await followTask(h, g.node, await pve<string>(h, "POST", `/nodes/${g.node}/${g.type}/${vmid}/status/start`), log, 2 * 60_000);
+      }
+      job.result = { vmid };
+    } catch (e) {
+      if (e instanceof AppError && e.detail.message) log(String(e.detail.message));
+      throw e;
+    } finally {
+      void look(h, true);
+    }
+  }, true, { app: g.name, machine: h.name });
+  return { job: job.id, vmid };
 }
 
 /** The backup jobs of the server, as its schedule says */

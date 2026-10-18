@@ -3330,7 +3330,7 @@ function pveGuestDialog(x, g) {
       const r = await api("GET", `/api/proxmox/${x.id}/guests/${g.id}/backups`);
       put(
         backs,
-        r.backups.length ? r.backups.slice(0, 10).map((b) => h("div", { class: "pve-row" }, h("div", { class: "grow" }, h("div", null, dateTime(b.at), b.protected && h("span", { class: "chip" }, t("pve.protected"))), b.notes && h("div", { class: "muted small" }, b.notes)), h("span", { class: "muted small" }, `${b.storage} · ${bytes(b.size)}`))) : h("p", { class: "muted small" }, r.storages.length ? t("pve.noBackups") : t("pve.noBackupStorages")),
+        r.backups.length ? r.backups.slice(0, 10).map((b) => h("div", { class: "pve-row" }, h("div", { class: "grow" }, h("div", null, dateTime(b.at), b.protected && h("span", { class: "chip" }, t("pve.protected"))), b.notes && h("div", { class: "muted small" }, b.notes)), h("span", { class: "muted small" }, `${b.storage} · ${bytes(b.size)}`), g.may.remove && button(t("pve.restore.button"), { class: "small", onclick: () => (dialog.close(), pveRestoreDialog(x, g, b)) }, "undo"))) : h("p", { class: "muted small" }, r.storages.length ? t("pve.noBackups") : t("pve.noBackupStorages")),
         r.backups.length > 10 && h("p", { class: "muted small" }, t("pve.moreBackups", { n: r.backups.length - 10 })),
         r.unreachable.length > 0 && h("p", { class: "muted small" }, t("pve.storagesUnreachable", { list: r.unreachable.join(", ") })),
       );
@@ -3404,6 +3404,74 @@ async function pveEditDialog(x, g) {
       h("footer", null, closeButton(() => (dialog.close(), pveGuestDialog(x, g), dialog), t("common.cancel")), h("button", { type: "submit", class: "btn primary" }, icon("check"), h("span", null, t("settings.save")))),
     ),
   );
+}
+
+/** A backup put back: as a new guest beside the old one, or instead of it (stopped, its name typed) */
+async function pveRestoreDialog(x, g, b) {
+  let o;
+  try {
+    o = await api("GET", `/api/proxmox/${x.id}/guests/${g.id}/restore`);
+  } catch (e) {
+    return toast(errorText(e), "error");
+  }
+  const stopped = g.status === "stopped";
+  const radio = (value, checked, disabled) => h("input", { type: "radio", name: "pve-restore", value, checked, disabled, onchange: () => paint() });
+  const asNew = radio("new", true, false);
+  const instead = radio("replace", false, o.self || !stopped);
+  const opt = (value, label = value) => h("option", { value }, label);
+  const vmid = h("input", { type: "number", required: true, min: o.ids?.from ?? 100, max: o.ids?.to ?? 999999999, value: o.next ?? "" });
+  const storage = h("select", null, g.type === "qemu" && opt("", t("pve.restore.storageAsBackup")), o.storages.map((v) => opt(v)));
+  storage.value = g.type === "qemu" ? "" : o.storage;
+  const pool = h("select", null, o.free && opt("", t("pve.new.noPool")), o.pools.map((p) => opt(p)));
+  pool.value = o.pools.includes(o.pool) ? o.pool : (pool.options[0]?.value ?? "");
+  const start = h("input", { type: "checkbox" });
+  const typed = h("input", { autocomplete: "off", spellcheck: false, class: "mono", oninput: () => paint() });
+  const newPart = h("div", { class: "stack-s" }, h("div", { class: "form-pair" }, field("ID", vmid, o.ids ? t("pve.new.idsHint", o.ids) : null), (o.pools.length > 0 || !o.free) && field(t("pve.pool"), pool)));
+  const replacePart = h("div", { class: "stack-s", hidden: true }, field(t("pve.typeName", { name: g.name }), typed));
+  const error = h("p", { class: "error", role: "alert" });
+  const go = h("button", { type: "submit", class: "btn primary" }, icon("undo"), h("span", null, t("pve.restore.go")));
+  const paint = () => {
+    newPart.hidden = !asNew.checked;
+    replacePart.hidden = asNew.checked;
+    go.className = "btn " + (asNew.checked ? "primary" : "danger");
+    go.disabled = !asNew.checked && typed.value !== g.name;
+  };
+  let dialog;
+  const send = async (e) => {
+    e.preventDefault();
+    error.textContent = "";
+    go.disabled = true;
+    try {
+      const r = await api("POST", `/api/proxmox/${x.id}/guests/${g.id}/restore`, { volid: b.volid, replace: instead.checked, name: typed.value, vmid: Number(vmid.value), storage: storage.value, pool: pool.value, start: start.checked });
+      dialog.close();
+      void jobDialog(r.job, "restore", g.name, () => {
+        toast(t("pve.restore.done", { name: g.name }));
+        void loadPve();
+      });
+    } catch (err) {
+      error.textContent = errorText(err);
+      go.disabled = false;
+    }
+  };
+  const choice = (input, title, hint) => h("label", { class: "check" }, input, h("span", null, h("strong", null, title), h("span", { class: "muted small block" }, hint)));
+  dialog = openDialog(
+    "wide",
+    h(
+      "form",
+      { class: "stack", onsubmit: send },
+      h("header", null, h("h2", { class: "grow wrap" }, t("pve.restore.title", { name: g.name, when: dateTime(b.at) })), closeX(() => dialog)),
+      h("p", { class: "muted small mono" }, `${b.volid} · ${bytes(b.size)}`),
+      choice(asNew, t("pve.restore.new"), t("pve.restore.newHint")),
+      newPart,
+      choice(instead, t("pve.restore.replace", { name: g.name }), o.self ? t("pve.restore.selfNo") : !stopped ? t("pve.restore.stopFirst", { name: g.name }) : t("pve.restore.replaceHint", { name: g.name })),
+      replacePart,
+      field(t("pve.restore.storage"), storage),
+      h("label", { class: "check" }, start, h("span", null, h("strong", null, t("pve.restore.start")))),
+      error,
+      h("footer", null, closeButton(() => (dialog.close(), pveGuestDialog(x, g), dialog), t("common.cancel")), go),
+    ),
+  );
+  paint();
 }
 
 function pveSnapshotDialog(x, g) {

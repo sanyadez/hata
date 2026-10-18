@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { rolesFor } from "../src/proxmox";
-import { clientLine, gibOf, readSettings, settingsChange } from "../src/pve";
+import { clientLine, gibOf, readSettings, restoreParams, settingsChange } from "../src/pve";
 import { cleanFingerprint, cleanUrl, failed, hostKeysIn, familyOf, nextId, readNewGuest, setupScript, guestOfMachine, guestRights, mayPath, readConfig, readResources, readTask, snapshotName, trouble, type Watched } from "../src/pve";
 
 test("an address as typed becomes the API's origin", () => {
@@ -256,4 +256,11 @@ test("a guest's settings changed: only what differs, with the rights it needs", 
   // a virtual machine's name may have dots, and has no swap
   const vm = readSettings({ name: "vm", cores: 1, memory: 2048 }, "qemu");
   expect(settingsChange(vm, { name: "vm.home", swap: 512 }, "qemu").params).toEqual({ name: "vm.home" });
+});
+
+test("a backup restored over its guest or as a new one", () => {
+  const volid = "local:backup/vzdump-lxc-243-2026_10_18-10_00_00.tar.zst";
+  expect(restoreParams("lxc", { volid, vmid: 243, storage: "local-lvm", replace: true, pool: "hata" })).toEqual({ vmid: 243, ostemplate: volid, restore: 1, storage: "local-lvm", force: 1 });
+  expect(restoreParams("lxc", { volid, vmid: 245, storage: "local-lvm", replace: false, pool: "hata" })).toEqual({ vmid: 245, ostemplate: volid, restore: 1, storage: "local-lvm", unique: 1, pool: "hata" });
+  expect(restoreParams("qemu", { volid: "local:backup/vzdump-qemu-245.vma.zst", vmid: 246, storage: "", replace: false, pool: "" })).toEqual({ vmid: 246, archive: "local:backup/vzdump-qemu-245.vma.zst", unique: 1 });
 });

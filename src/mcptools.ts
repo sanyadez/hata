@@ -34,7 +34,7 @@ import { applyMachineCompose, installOnMachine, machineTiles, machineAppAction, 
 import { backupMachineApp, restoreMachineApp } from "./machinebackup";
 import { containersOf, machinesAway, machines as machineList, open as openOnMachine, power as powerMachine, wake as wakeMachine, type MachineView } from "./machines";
 import { moveApp } from "./moveapp";
-import { backups as pveBackups, changeGuest, createGuest, guestSettings, guestOfMachine, host as pveHost, hosts as pveHosts, newOptions, power as pvePower, proxmoxTrouble, refresh as refreshPve, removeGuest, snapshotAction, snapshots as pveSnapshots, takeBackup, takeSnapshot, taskLog, taskNow } from "./proxmox";
+import { backups as pveBackups, changeGuest, restoreBackup, createGuest, guestSettings, guestOfMachine, host as pveHost, hosts as pveHosts, newOptions, power as pvePower, proxmoxTrouble, refresh as refreshPve, removeGuest, snapshotAction, snapshots as pveSnapshots, takeBackup, takeSnapshot, taskLog, taskNow } from "./proxmox";
 import { MuxError } from "./mux";
 import { VERSION } from "./version";
 import en from "./lang/en.json";
@@ -911,7 +911,7 @@ const pveRead: Omit<Tool, "level" | "effect">[] = [
 async function pveBackupsOf(host: string, guest: string) {
   try {
     const { backups, unreachable } = await pveBackups(host, guest);
-    return { list: backups.slice(0, 20).map((b) => ({ storage: b.storage, at: when(b.at), sizeGiB: gib(b.size), ...(b.notes ? { notes: b.notes } : {}), ...(b.protected ? { protected: true } : {}) })), ...(unreachable.length ? { storagesNotAnswering: unreachable } : {}) };
+    return { list: backups.slice(0, 20).map((b) => ({ backup: b.volid, storage: b.storage, at: when(b.at), sizeGiB: gib(b.size), ...(b.notes ? { notes: b.notes } : {}), ...(b.protected ? { protected: true } : {}) })), ...(unreachable.length ? { storagesNotAnswering: unreachable } : {}) };
   } catch (e) {
     return e instanceof AppError ? say(e.code, e.detail) : String(e);
   }
@@ -1030,6 +1030,32 @@ const pveFull: (Omit<Tool, "level" | "effect"> & { effect?: Tool["effect"] })[] 
       }),
   },
   {
+    name: "proxmox_backup_restore",
+    title: "Restore a Proxmox guest from a backup",
+    description: "Puts a backup of a guest back (proxmox_guest lists them as `backup`). By default as a NEW guest beside it, with new network cards — `vmid` must be free (proxmox_container_options gives the next free one). With `replace` it goes over the guest itself: everything it has now, its snapshots too, is LOST — the guest must be shut down first and `name` must repeat its name exactly. Takes minutes: expect a running job and ask job_get.",
+    input: {
+      ...GUEST,
+      backup: { type: "string", description: "The backup, as proxmox_guest lists it" },
+      replace: { type: "boolean", description: "Over the guest itself instead of a new one; false by default" },
+      name: { type: "string", description: "With replace: the guest's name exactly" },
+      vmid: { type: "number", description: "Without replace: the new guest's number" },
+      storage: { type: "string", description: "Where the disks go; by default where the guest's disks are" },
+      pool: { type: "string" },
+      start: { type: "boolean", description: "Start it afterwards; false by default" },
+    },
+    required: ["guest", "backup"],
+    run: (args, caller) =>
+      wrap(async () => {
+        const h = await serverOf(args);
+        const g = guestIn(h, args);
+        need(h, g, "remove");
+        if (args.replace === true) notSelf(h, g, "put back over itself");
+        const { job } = await restoreBackup(h.id, g.id, { volid: args.backup, replace: args.replace === true, name: args.name, vmid: args.vmid, storage: args.storage, pool: args.pool, start: args.start === true }, caller.user);
+        const made = getJob(job);
+        return made ? settle(made) : { job };
+      }),
+  },
+  {
     name: "proxmox_guest_change",
     title: "Change a Proxmox guest's settings",
     description: "Changes a container's or virtual machine's name, processors (`cores`), memory and swap (MB), whether it starts with the server, tags and notes, and makes its disks larger (`disks`: { \"rootfs\": 16 } — GB; a disk is never made smaller). Only what is given changes. A running container takes most at once; what waits for a restart comes back as `pending`. proxmox_guest_settings shows what it has now.",
@@ -1118,7 +1144,7 @@ export const TOOLS: Tool[] = [
 const LEVEL_WORDS: Record<Level, string> = {
   read: "It can look at everything listed in the tools and change nothing.",
   operate: "It can look, start, stop, restart and update apps — here and on the other machines — install apps from the store, take snapshots, wake a machine up, and start, shut down, restart, snapshot and back up the guests of Proxmox. It cannot change compose files, remove apps, restore snapshots, move apps, restart machines, or stop, roll back, delete or make Proxmox guests.",
-  full: "It can also change compose files, install apps from a compose file, remove apps, restore snapshots, move apps between machines, restart or shut down machines, and change the settings of Proxmox guests (processors, memory, disks made larger), stop them by force, roll them back to a snapshot, delete them and their snapshots, and make new containers there.",
+  full: "It can also change compose files, install apps from a compose file, remove apps, restore snapshots, move apps between machines, restart or shut down machines, and change the settings of Proxmox guests (processors, memory, disks made larger), stop them by force, roll them back to a snapshot or restore them from a backup, delete them and their snapshots, and make new containers there.",
 };
 
 /** What the model is told when it connects */
