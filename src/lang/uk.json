@@ -3485,7 +3485,7 @@
   "pve.img.removeTitle": "Видалити {name}?",
   "pve.img.removeLead": "Його буде видалено з {storage}. Гості, зроблені з нього, зберігають власні диски.",
   "pve.iso.title": "Інсталяційні диски (ISO)",
-  "pve.iso.lead": "Диск, з якого віртуальну машину встановлюють вручну. Файл цього сервера потрапляє туди з його меню у «Файлах»: «Надіслати в Proxmox».",
+  "pve.iso.lead": "Диск, з якого віртуальну машину встановлюють вручну: за посиланням, з цього комп'ютера або файл цього сервера з його меню у «Файлах» («Надіслати в Proxmox»).",
   "pve.iso.noRight": "Токен не може класти файли в жодне сховище цього сервера, що тримає диски (вміст: iso). Дайте йому Datastore.AllocateTemplate на такому сховищі в Proxmox (Datacenter → Permissions).",
   "pve.send.noHost": "Жоден сервер Proxmox не під'єднано.",
   "pve.send.iso": "Інсталяційний диск (ISO)",
@@ -3522,5 +3522,12 @@
   "error.pve.upload.badName": "Proxmox не прийме файл із такою назвою чи такого виду.",
   "error.pve.upload.exists": "У {storage} вже є {name}.",
   "error.pve.upload.noRoom": "У {storage} для нього замало місця.",
-  "error.pve.noSudo": "Користувач на {name} не може стати root через sudo."
+  "error.pve.noSudo": "Користувач на {name} не може стати root через sudo.",
+  "pve.send.sending": "Надсилається: {done} з {size}",
+  "pve.send.placing": "Надіслано; Proxmox кладе його на місце…",
+  "pve.send.localTitle": "Надіслати файл із цього комп'ютера",
+  "pve.send.localLead": "Браузер надсилає файл через Hata просто в сховище: на Hata нічого не лишається. Не закривайте це вікно, поки не скінчиться.",
+  "pve.send.file": "Файл",
+  "pve.img.fromComputer": "З цього комп'ютера…",
+  "pve.img.noRemove": "Файли {storages} видаляються в Proxmox: для видалення потрібне Datastore.Allocate на сховищі, а воно дає доступ і до бекапів — у токена його там немає."
 }

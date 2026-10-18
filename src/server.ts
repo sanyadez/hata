@@ -116,7 +116,7 @@ import { machineAccessRows, setMachineAccess, startMachineGates } from "./machin
 import { applyMachineCompose, installComposeOnMachine, machineTiles, installOnMachine, machineAppAction, machineAppLogs, machineApps, machineCompose, removeMachineApp, storeAppFor } from "./machineapps";
 import { addStore, ARCH, catalogue, removeStore, scheduleStoreSync, StoreError, syncStore } from "./store";
 import { startSampler, systemStatus } from "./system";
-import { askScreen as pveAskScreen, openScreen as pveOpenScreen, storageContent as pveStorageContent, removeVolume as pveRemoveVolume, cloneOptions as pveCloneOptions, cloneGuest as pveCloneGuest, makeTemplate as pveMakeTemplate, load as pveLoad, templates as pveTemplates, downloadTemplate as pveDownloadTemplate, removeTemplate as pveRemoveTemplate, setSchedule as pveSetSchedule, runScheduleNow as pveRunSchedule, restoreBackup as pveRestoreBackup, restoreOptions as pveRestoreOptions, changeGuest as pveChangeGuest, guestSettings as pveGuestSettings, installByConsole as pveInstallByConsole, openConsole as pveOpenConsole, type Console as PveConsole, addBySignIn as addPveBySignIn, removeGuest as pveRemoveGuest, addHost as addPve, createGuest as pveCreateGuest, createVm as pveCreateVm, sendFile as pveSendFile, newOptions as pveNewOptions, backupJobs as pveBackupJobs, backups as pveBackups, changeHost as changePve, guestOfMachine, host as pveHost, hosts as pveHosts, power as pvePower, proxmoxTrouble, refresh as refreshPve, removeHost as removePve, snapshotAction as pveSnapshotAction, snapshots as pveSnapshots, startProxmox, takeBackup as pveTakeBackup, takeSnapshot as pveTakeSnapshot, taskLog as pveTaskLog } from "./proxmox";
+import { askScreen as pveAskScreen, openScreen as pveOpenScreen, storageContent as pveStorageContent, removeVolume as pveRemoveVolume, cloneOptions as pveCloneOptions, cloneGuest as pveCloneGuest, makeTemplate as pveMakeTemplate, load as pveLoad, templates as pveTemplates, downloadTemplate as pveDownloadTemplate, removeTemplate as pveRemoveTemplate, setSchedule as pveSetSchedule, runScheduleNow as pveRunSchedule, restoreBackup as pveRestoreBackup, restoreOptions as pveRestoreOptions, changeGuest as pveChangeGuest, guestSettings as pveGuestSettings, installByConsole as pveInstallByConsole, openConsole as pveOpenConsole, type Console as PveConsole, addBySignIn as addPveBySignIn, removeGuest as pveRemoveGuest, addHost as addPve, createGuest as pveCreateGuest, createVm as pveCreateVm, sendFile as pveSendFile, receiveFile as pveReceiveFile, newOptions as pveNewOptions, backupJobs as pveBackupJobs, backups as pveBackups, changeHost as changePve, guestOfMachine, host as pveHost, hosts as pveHosts, power as pvePower, proxmoxTrouble, refresh as refreshPve, removeHost as removePve, snapshotAction as pveSnapshotAction, snapshots as pveSnapshots, startProxmox, takeBackup as pveTakeBackup, takeSnapshot as pveTakeSnapshot, taskLog as pveTaskLog } from "./proxmox";
 import { call as machineCall, clientBinary, containersOf, installScript, invite as machineInvite, INVITE_MS, linkData, linkHandlers, machine as machineView, MACHINE_ID_RE, machines as machineList, machinesAway, open as machineOpen, remove as removeMachine, rename as renameMachine, startMachines, updateClient, wake as wakeMachine, power as powerMachine, type LinkSocket } from "./machines";
 import { availableUpdate, checkForUpdate, confirmUpdate, scheduleUpdateChecks, startRollback, startUpdate, updateStatus } from "./update";
 import { VERSION } from "./version";
@@ -663,7 +663,7 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
   if (write && !sameOrigin(req, url)) return fail(403, "request.crossSite");
   const ip = clientIp(req, server);
   // the API takes small JSON bodies; the server's own limit is the apps' (they upload files through it)
-  if (write && path !== "/api/files/upload" && !/^\/api\/machines\/[a-f0-9]{8}\/files\/upload$/.test(path) && path !== "/api/appearance/wallpaper" && Number(req.headers.get("content-length") ?? 0) > MAX_API_BODY) return fail(413, "request.tooLarge");
+  if (write && path !== "/api/files/upload" && !/^\/api\/(machines|proxmox)\/[a-f0-9]{8}\/files\/upload$/.test(path) && path !== "/api/appearance/wallpaper" && Number(req.headers.get("content-length") ?? 0) > MAX_API_BODY) return fail(413, "request.tooLarge");
   const cookie = (token: string) => sessionCookie(token, requestProto(req) === "https", cookieDomain(requestHost(req)));
   const client = { ip, userAgent: req.headers.get("user-agent") ?? "" };
 
@@ -2304,6 +2304,12 @@ async function proxmoxApi(req: Request, url: URL, server: Server, by: string): P
   }
   if (rest === "/templates" && method === "POST") return json(await pveDownloadTemplate(id, await body(req), by), 202);
   if (rest === "/templates" && method === "DELETE") return json(await pveRemoveTemplate(id, await body(req), by));
+  if (rest === "/files/upload" && method === "POST") {
+    // the file is the body: as long as it takes
+    server.timeout(req, 0);
+    const q = url.searchParams;
+    return json(await pveReceiveFile(id, { kind: q.get("kind"), node: q.get("node"), storage: q.get("storage"), name: q.get("name") }, Number(req.headers.get("content-length") ?? NaN), req.body, by));
+  }
   if (rest === "/files" && method === "POST") {
     server.timeout(req, 60);
     return json(await pveSendFile(id, await body(req), by), 202);

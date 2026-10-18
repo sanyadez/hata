@@ -3278,6 +3278,8 @@ function paintPveTemplates(x, box, d) {
         ),
       ),
     );
+  // where a file cannot be deleted from here, the page says why rather than leaving the person to look for a button
+  const noRemove = (list) => list.some((v) => !d.removable.includes(v.storage)) && h("p", { class: "muted small pve-note" }, t("pve.img.noRemove", { storages: [...new Set(list.filter((v) => !d.removable.includes(v.storage)).map((v) => v.storage))].join(", ") }));
   const images = d.images ?? { have: [], storages: [], offered: [] };
   const isos = d.isos ?? { have: [], storages: [] };
   const imageNames = new Set(images.have.map((v) => v.name));
@@ -3294,6 +3296,7 @@ function paintPveTemplates(x, box, d) {
         !images.storages.length && h("p", { class: "banner small" }, t("pve.img.noRight")),
       ),
       images.have.length > 0 && keptTable(images.have),
+      noRemove(images.have),
       h(
         "div",
         { class: "table-wrap" },
@@ -3316,7 +3319,7 @@ function paintPveTemplates(x, box, d) {
           ),
         ),
       ),
-      images.storages.length > 0 && h("div", { class: "pve-note actions" }, button(t("pve.img.fromLink"), { class: "small", onclick: (e) => send("import", {}, e.currentTarget) }, "link")),
+      images.storages.length > 0 && h("div", { class: "pve-note actions" }, button(t("pve.img.fromLink"), { class: "small", onclick: (e) => send("import", {}, e.currentTarget) }, "link"), button(t("pve.img.fromComputer"), { class: "small", onclick: (e) => send("import", { local: true }, e.currentTarget) }, "upload")),
     ),
     pveSection(
       t("pve.iso.title"),
@@ -3327,7 +3330,8 @@ function paintPveTemplates(x, box, d) {
         !isos.storages.length && h("p", { class: "banner small" }, t("pve.iso.noRight")),
       ),
       isos.have.length > 0 && keptTable(isos.have),
-      isos.storages.length > 0 && h("div", { class: "pve-note actions" }, button(t("pve.img.fromLink"), { class: "small", onclick: (e) => send("iso", {}, e.currentTarget) }, "link")),
+      noRemove(isos.have),
+      isos.storages.length > 0 && h("div", { class: "pve-note actions" }, button(t("pve.img.fromLink"), { class: "small", onclick: (e) => send("iso", {}, e.currentTarget) }, "link"), button(t("pve.img.fromComputer"), { class: "small", onclick: (e) => send("iso", { local: true }, e.currentTarget) }, "upload")),
     ),
     pveSection(
       t("pve.tpl.haveTitle"),
@@ -3356,6 +3360,7 @@ function paintPveTemplates(x, box, d) {
             ),
           )
         : h("p", { class: "muted pve-note first" }, t("pve.tpl.none")),
+      noRemove(d.have),
     ),
     pveSection(
       t("pve.tpl.offeredTitle"),
@@ -3398,9 +3403,10 @@ const PVE_SEND_RE = /\.(iso|img|qcow2|raw|vmdk)$/i;
 
 /**
  * Puts a disk image or a disc on a storage of a Proxmox server: a cloud image Hata knows (`image`), a file
- * from a link, or a file of this server (`path`, from Files). Without `host` the person chooses the server.
+ * from a link, a file of this server (`path`, from Files) or one of this computer (`local`: the browser sends
+ * it, passed on as it comes). Without `host` the person chooses the server.
  */
-async function pveSendDialog({ host = null, kind = "import", image = null, path = "" }, el = null) {
+async function pveSendDialog({ host = null, kind = "import", image = null, path = "", local = false }, el = null) {
   if (el) el.disabled = true;
   let hosts;
   try {
@@ -3418,6 +3424,13 @@ async function pveSendDialog({ host = null, kind = "import", image = null, path 
   const where = h("select");
   const url = h("input", { type: "url", required: !image && !path, placeholder: "https://…", class: "mono", spellcheck: false });
   const checksum = h("input", { class: "mono small", spellcheck: false, placeholder: "sha256 / sha512" });
+  const picked = h("input", { type: "file", required: local, accept: ".iso,.img,.qcow2,.raw,.vmdk", onchange: () => {
+    const f = picked.files[0];
+    if (f) what.value = /\.iso$/i.test(f.name) ? "iso" : /\.(qcow2|raw|vmdk)$/i.test(f.name) ? "import" : what.value;
+    void places();
+  } });
+  const fill = h("i");
+  const progress = h("div", { class: "stack-s", hidden: true }, h("div", { class: "bar" }, fill), h("p", { class: "muted small" }));
   const error = h("p", { class: "error", role: "alert" });
   const lists = new Map();
   const places = async () => {
@@ -3444,6 +3457,7 @@ async function pveSendDialog({ host = null, kind = "import", image = null, path 
     go.disabled = true;
     error.textContent = "";
     const [node, storage] = where.value.split("/");
+    if (local) return sendLocal(node, storage, go);
     try {
       const r = await api("POST", `/api/proxmox/${server.value}/files`, { kind: what.value, node, storage, ...(image ? { image: image.id } : path ? { path } : { url: url.value.trim() }), checksum: checksum.value.trim() });
       dialog.close();
@@ -3458,18 +3472,52 @@ async function pveSendDialog({ host = null, kind = "import", image = null, path 
       go.disabled = false;
     }
   };
+  /** The browser sends the file itself; the answer comes once Proxmox has put it in place */
+  const sendLocal = (node, storage, go) => {
+    const f = picked.files[0];
+    if (!f) return void (go.disabled = false);
+    progress.hidden = false;
+    const said = progress.querySelector("p");
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `/api/proxmox/${server.value}/files/upload?${new URLSearchParams({ kind: what.value, node, storage, name: f.name })}`);
+    xhr.upload.onprogress = (e) => {
+      const percent = e.total ? Math.floor((e.loaded / e.total) * 100) : 0;
+      fill.style.width = percent + "%";
+      said.textContent = percent < 100 ? t("pve.send.sending", { done: bytes(e.loaded), size: bytes(f.size) }) : t("pve.send.placing");
+    };
+    const failed = (text) => ((error.textContent = text), (progress.hidden = true), (go.disabled = false), dialog.removeEventListener("cancel", stay));
+    xhr.onerror = () => failed(t("error.network"));
+    xhr.onload = () => {
+      let payload = {};
+      try {
+        payload = JSON.parse(xhr.responseText);
+      } catch {}
+      if (xhr.status < 200 || xhr.status >= 300) return failed(errorText(new ApiError(xhr.status, payload.error?.code ?? "request.failed", payload.error?.detail)));
+      dialog.removeEventListener("cancel", stay);
+      dialog.close();
+      toast(t("pve.send.done", { name: payload.name ?? f.name }));
+      pveUi.templates = null;
+      if (state.route.view === "proxmox") renderPveBody();
+    };
+    // Escape would cut the sending off
+    dialog.addEventListener("cancel", stay);
+    xhr.send(f);
+  };
+  const stay = (e) => e.preventDefault();
   dialog = openDialog(
     "wide",
     h(
       "form",
       { class: "stack", onsubmit: submit },
-      h("header", null, h("h2", { class: "grow wrap" }, image ? t("pve.send.imageTitle", { name: image.name }) : path ? t("pve.send.fileTitle", { name: path.split("/").pop() }) : t(kind === "iso" ? "pve.send.isoTitle" : "pve.send.linkTitle")), closeX(() => dialog)),
-      h("p", { class: "muted small" }, t(image ? "pve.send.imageLead" : path ? "pve.send.fileLead" : "pve.send.linkLead")),
+      h("header", null, h("h2", { class: "grow wrap" }, image ? t("pve.send.imageTitle", { name: image.name }) : path ? t("pve.send.fileTitle", { name: path.split("/").pop() }) : local ? t("pve.send.localTitle") : t(kind === "iso" ? "pve.send.isoTitle" : "pve.send.linkTitle")), closeX(() => dialog)),
+      h("p", { class: "muted small" }, t(image ? "pve.send.imageLead" : path ? "pve.send.fileLead" : local ? "pve.send.localLead" : "pve.send.linkLead")),
       hosts.length > 1 && field(t("pve.send.server"), server),
-      path && field(t("pve.send.what"), what),
-      !image && !path && field(t("pve.send.url"), url, t(kind === "iso" ? "pve.send.urlIsoHint" : "pve.send.urlHint")),
+      local && field(t("pve.send.file"), picked),
+      (path || local) && field(t("pve.send.what"), what),
+      !image && !path && !local && field(t("pve.send.url"), url, t(kind === "iso" ? "pve.send.urlIsoHint" : "pve.send.urlHint")),
       field(t("pve.send.where"), where),
-      !image && field(t("pve.send.checksum"), checksum, t("pve.send.checksumHint")),
+      !image && !local && field(t("pve.send.checksum"), checksum, t("pve.send.checksumHint")),
+      progress,
       error,
       h("footer", null, closeButton(() => dialog, t("common.cancel")), h("button", { type: "submit", class: "btn primary" }, icon("upload"), h("span", null, t("pve.send.go")))),
     ),

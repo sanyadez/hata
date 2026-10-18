@@ -34,7 +34,7 @@ import { applyMachineCompose, installOnMachine, machineTiles, machineAppAction, 
 import { backupMachineApp, restoreMachineApp } from "./machinebackup";
 import { containersOf, machinesAway, machines as machineList, open as openOnMachine, power as powerMachine, wake as wakeMachine, type MachineView } from "./machines";
 import { moveApp } from "./moveapp";
-import { backups as pveBackups, cloneGuest, load as pveLoad, changeGuest, restoreBackup, createGuest, guestSettings, guestOfMachine, host as pveHost, hosts as pveHosts, newOptions, power as pvePower, proxmoxTrouble, refresh as refreshPve, removeGuest, snapshotAction, snapshots as pveSnapshots, takeBackup, takeSnapshot, taskLog, taskNow } from "./proxmox";
+import { backups as pveBackups, cloneGuest, load as pveLoad, changeGuest, restoreBackup, createGuest, createVm, sendFile, templates as pveTemplates, guestSettings, guestOfMachine, host as pveHost, hosts as pveHosts, newOptions, power as pvePower, proxmoxTrouble, refresh as refreshPve, removeGuest, snapshotAction, snapshots as pveSnapshots, takeBackup, takeSnapshot, taskLog, taskNow } from "./proxmox";
 import { MuxError } from "./mux";
 import { VERSION } from "./version";
 import en from "./lang/en.json";
@@ -931,10 +931,29 @@ const pveRead: Omit<Tool, "level" | "effect">[] = [
   },
   {
     name: "proxmox_container_options",
-    title: "What a new container can be made of",
-    description: "For proxmox_container_create: the nodes, templates, storages, network bridges and pools the token may use, the numbers already taken and the next free one.",
+    title: "What a new container or virtual machine can be made of",
+    description: "For proxmox_container_create and proxmox_vm_create: the nodes, container templates, disk images (`images`) and installation discs (`isos`) per node, the storages a container's disk (`storages`) or a virtual machine's disk (`disks`) may go to, network bridges and pools the token may use, the numbers already taken and the next free one.",
     input: SERVER,
     run: (args) => wrap(async () => newOptions((await serverOf(args)).id)),
+  },
+  {
+    name: "proxmox_images",
+    title: "Disk images, discs and templates on a Proxmox server",
+    description: "What the storages keep — disk images new virtual machines start from, installation discs (ISO), container templates — the cloud images Hata can download (`cloud`, by `image` id for proxmox_download) and the storages the token may put each kind on, with their free room.",
+    input: SERVER,
+    run: (args) =>
+      wrap(async () => {
+        const t = await pveTemplates((await serverOf(args)).id);
+        const kept = (list: { node: string; storage: string; volid: string; size: number }[]) => list.map((v) => ({ volid: v.volid, node: v.node, storage: v.storage, sizeGiB: gib(v.size) }));
+        const where = (list: { node: string; storage: string; free: number }[]) => list.map((s) => ({ node: s.node, storage: s.storage, freeGiB: gib(s.free) }));
+        return {
+          images: kept(t.images.have),
+          isos: kept(t.isos.have),
+          templates: kept(t.have),
+          cloud: t.images.offered.map((o) => ({ image: o.id, name: o.name, file: o.file, onServer: t.images.have.some((v) => v.name === o.file) })),
+          mayPut: { images: where(t.images.storages), isos: where(t.isos.storages), templates: where(t.storages) },
+        };
+      }),
   },
 ];
 
@@ -1125,6 +1144,69 @@ const pveFull: (Omit<Tool, "level" | "effect"> & { effect?: Tool["effect"] })[] 
         const g = guestIn(h, args);
         need(h, g, "clone");
         const { job } = await cloneGuest(h.id, g.id, { vmid: args.vmid, name: args.name, linked: args.linked === true, storage: args.storage, pool: args.pool, start: args.start === true }, caller.user);
+        const made = getJob(job);
+        return made ? settle(made) : { job };
+      }),
+  },
+  {
+    name: "proxmox_vm_create",
+    title: "Make a new virtual machine in Proxmox",
+    description: "Makes a new virtual machine. From a disk image (`source` among proxmox_container_options' `images`): cloud-init makes `user` (default hata) with a password of Hata's that is locked afterwards, and — unless `client` is false — Hata signs in on its serial console and installs the guest agent and its client, so it becomes one of Hata's machines (`machines`). From an installation disc (`source` among `isos`): an empty disk and the disc; the system is installed by a person on its screen, and `client`, `user`, `sshKeys`, `address` do not apply. Takes minutes: expect a running job and ask job_get.",
+    effect: "change",
+    input: {
+      ...SERVER,
+      node: { type: "string" },
+      vmid: { type: "number", description: "The new guest's number; proxmox_container_options gives the next free one" },
+      hostname: { type: "string", description: "Its name and host name: lowercase Latin letters, digits and -" },
+      source: { type: "string", description: "A disk image or a disc, as proxmox_container_options lists them for the node" },
+      storage: { type: "string", description: "Where its disk lies: one of `disks`" },
+      bridge: { type: "string", description: "The network bridge, usually vmbr0" },
+      pool: { type: "string", description: "Required when the token may make guests only inside a pool" },
+      disk: { type: "number", description: "GB, 2–4096; a disk image's disk is made this large" },
+      cores: { type: "number" },
+      memory: { type: "number", description: "MB, at least 256" },
+      address: { type: "string", description: "A fixed address with its mask, e.g. 192.168.1.50/24; left out — from the router" },
+      gateway: { type: "string", description: "With a fixed address: the router's address" },
+      user: { type: "string", description: "The user cloud-init makes, with sudo; hata by default" },
+      sshKeys: { type: "string", description: "Public SSH keys for the user, one per line" },
+      onboot: { type: "boolean", description: "Start with the server; true by default" },
+      start: { type: "boolean", description: "From a disc: start it at once; true by default" },
+      client: { type: "boolean", description: "From a disk image: install Hata's client; true by default" },
+      docker: { type: "boolean", description: "Install Docker too; false by default" },
+    },
+    required: ["node", "vmid", "hostname", "source", "storage", "bridge", "disk", "cores", "memory"],
+    run: (args, caller) =>
+      wrap(async () => {
+        if (!caller.origin) throw new ToolError("Hata's own address is not known for this call.");
+        const h = await serverOf(args);
+        // the password stays Hata's own, locked once it is done: a person sets theirs on the page
+        const { server: _, password: _p, ...input } = args;
+        const { job } = await createVm(h.id, input, caller.user, caller.origin);
+        const made = getJob(job);
+        return made ? settle(made) : { job };
+      }),
+  },
+  {
+    name: "proxmox_download",
+    title: "Put a disk image or a disc on a Proxmox storage",
+    description: "Downloads a file and passes it on to a storage of the server as it comes (nothing is kept on Hata): a cloud image Hata knows (`image` — an id proxmox_images lists under `cloud`, checked against its published checksum), or any `url` of a disk image (`kind` import: qcow2, raw, vmdk, img) or an installation disc (`kind` iso), optionally with its SHA-256 or SHA-512 `checksum`, which Proxmox then compares. `storage` must be one proxmox_images lists under `mayPut` for the kind. Large files take minutes: expect a running job and ask job_get.",
+    effect: "change",
+    input: {
+      ...SERVER,
+      kind: { type: "string", enum: ["import", "iso"], description: "import — a disk image for new virtual machines; iso — an installation disc" },
+      node: { type: "string" },
+      storage: { type: "string" },
+      image: { type: "string", description: "A cloud image's id (debian-13, ubuntu-24.04, …); kind import" },
+      url: { type: "string", description: "http or https" },
+      checksum: { type: "string" },
+    },
+    required: ["kind", "node", "storage"],
+    run: (args, caller) =>
+      wrap(async () => {
+        const h = await serverOf(args);
+        // files of this server never go out through here: only a cloud image or a link
+        const { server: _, path: _p, ...input } = args;
+        const { job } = await sendFile(h.id, input, caller.user);
         const made = getJob(job);
         return made ? settle(made) : { job };
       }),

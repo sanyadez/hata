@@ -3485,7 +3485,7 @@
   "pve.img.removeTitle": "Delete {name}?",
   "pve.img.removeLead": "It is deleted from {storage}. Guests made from it keep their own disks.",
   "pve.iso.title": "Installation discs (ISO)",
-  "pve.iso.lead": "A disc a virtual machine is installed from by hand. A file of this server goes there from its menu in Files: Send to Proxmox.",
+  "pve.iso.lead": "A disc a virtual machine is installed from by hand: from a link, from this computer, or a file of this server from its menu in Files (Send to Proxmox).",
   "pve.iso.noRight": "The token may not put files on any storage of this server that keeps discs (content: iso). Give it Datastore.AllocateTemplate on such a storage in Proxmox (Datacenter → Permissions).",
   "pve.send.noHost": "No Proxmox server is connected.",
   "pve.send.iso": "An installation disc (ISO)",
@@ -3522,5 +3522,12 @@
   "error.pve.upload.badName": "Proxmox would not take a file of that name or kind.",
   "error.pve.upload.exists": "{storage} already has {name}.",
   "error.pve.upload.noRoom": "There is not enough room on {storage} for it.",
-  "error.pve.noSudo": "The user on {name} cannot become root with sudo."
+  "error.pve.noSudo": "The user on {name} cannot become root with sudo.",
+  "pve.send.sending": "Sending: {done} of {size}",
+  "pve.send.placing": "Sent; Proxmox puts it in place…",
+  "pve.send.localTitle": "Send a file of this computer",
+  "pve.send.localLead": "The browser sends the file through Hata to the storage as it comes: nothing is kept on Hata. Keep this window open until it is done.",
+  "pve.send.file": "File",
+  "pve.img.fromComputer": "From this computer…",
+  "pve.img.noRemove": "Files of {storages} are deleted in Proxmox: deleting takes Datastore.Allocate on the storage, which reaches its backups too, and the token does not have it there."
 }

@@ -1221,6 +1221,41 @@ export async function sendFile(id: string, input: Record<string, unknown>, by: s
   return { job: job.id };
 }
 
+/**
+ * A file the browser sends (`POST …/files/upload`, the file as the body): passed on to the storage as it
+ * comes, like a link's; the request lasts as long as the sending and Proxmox's moving it in.
+ */
+export async function receiveFile(id: string, q: { kind?: string | null; node?: string | null; storage?: string | null; name?: string | null }, size: number, body: ReadableStream<Uint8Array> | null, by: string) {
+  const h = hostOf(id);
+  await readNow(h);
+  const l = liveOf(h);
+  const nodes = l.nodes.filter((n) => n.online).map((n) => n.name);
+  const kind: UploadKind = q.kind === "iso" ? "iso" : "import";
+  const node = q.node ?? "";
+  const storage = q.storage ?? "";
+  const where = keepers(l, nodes, kind).find((s) => s.node === node && s.storage === storage);
+  if (!where) throw new AppError("pve.upload.storage", 400, { name: h.name });
+  if (!body || !Number.isFinite(size) || size <= 0) throw new AppError("pve.upload.noSize", 400);
+  if (size > where.free) throw new AppError("pve.upload.noRoom", 409, { storage, size });
+  const chunks = (body as unknown as AsyncIterable<Uint8Array>)[Symbol.asyncIterator]();
+  const firstRead = await chunks.next();
+  const first = firstRead.done ? new Uint8Array(0) : firstRead.value;
+  const name = uploadName(q.name ?? "", kind, first);
+  if (!name) throw new AppError("pve.upload.badName", 400);
+  const have = await keptOf(h, l, [node], kind);
+  if (have.some((x) => x.storage === storage && x.name === name)) throw new AppError("pve.upload.exists", 409, { name, storage });
+  const said: string[] = [];
+  const log = (line: string) => void said.push(line);
+  try {
+    await followTask(h, node, await upload(h, node, storage, kind, name, size, chunks, first, null, log), log, 30 * 60_000);
+  } catch (e) {
+    if (e instanceof AppError && !e.detail.message && said.length) e.detail.message = said.at(-1);
+    throw e;
+  }
+  record("pve.upload.done", { user: by, detail: `${h.name}: ${name} → ${storage}` });
+  return { name, storage };
+}
+
 // --- A new container with Hata's client -------------------------------------------------------------
 
 /** What the server offers for a new guest: templates, images, discs, storages, bridges and pools the token may use */
