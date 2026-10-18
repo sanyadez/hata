@@ -34,7 +34,7 @@ import { applyMachineCompose, installOnMachine, machineTiles, machineAppAction, 
 import { backupMachineApp, restoreMachineApp } from "./machinebackup";
 import { containersOf, machinesAway, machines as machineList, open as openOnMachine, power as powerMachine, wake as wakeMachine, type MachineView } from "./machines";
 import { moveApp } from "./moveapp";
-import { backups as pveBackups, load as pveLoad, changeGuest, restoreBackup, createGuest, guestSettings, guestOfMachine, host as pveHost, hosts as pveHosts, newOptions, power as pvePower, proxmoxTrouble, refresh as refreshPve, removeGuest, snapshotAction, snapshots as pveSnapshots, takeBackup, takeSnapshot, taskLog, taskNow } from "./proxmox";
+import { backups as pveBackups, cloneGuest, load as pveLoad, changeGuest, restoreBackup, createGuest, guestSettings, guestOfMachine, host as pveHost, hosts as pveHosts, newOptions, power as pvePower, proxmoxTrouble, refresh as refreshPve, removeGuest, snapshotAction, snapshots as pveSnapshots, takeBackup, takeSnapshot, taskLog, taskNow } from "./proxmox";
 import { MuxError } from "./mux";
 import { VERSION } from "./version";
 import en from "./lang/en.json";
@@ -1107,6 +1107,23 @@ const pveFull: (Omit<Tool, "level" | "effect"> & { effect?: Tool["effect"] })[] 
         const { server: _s, guest: _g, notes, ...rest } = args;
         const done = await changeGuest(h.id, g.id, { ...rest, ...(notes !== undefined ? { description: notes } : {}) }, caller.user);
         return { guest: `${g.name} (${g.vmid})`, server: h.name, changed: done.changed, ...(done.pending.length ? { pending: done.pending, note: "These take effect after the guest is restarted." } : {}) };
+      }),
+  },
+  {
+    name: "proxmox_guest_clone",
+    title: "Copy a Proxmox guest",
+    description: "Makes a copy of a container or virtual machine as a new guest, with new network cards. A container is copied only while it is stopped, or from a template; from a template the copy may be `linked` (shares its disks: made in seconds). `vmid` must be free — proxmox_container_options gives the next one. Copying disks takes minutes: expect a running job and ask job_get.",
+    effect: "change",
+    input: { ...GUEST, vmid: { type: "number" }, name: { type: "string", description: "The copy's name (a container's host name)" }, linked: { type: "boolean", description: "From a template only; false by default" }, storage: { type: "string" }, pool: { type: "string" }, start: { type: "boolean" } },
+    required: ["guest", "vmid", "name"],
+    run: (args, caller) =>
+      wrap(async () => {
+        const h = await serverOf(args);
+        const g = guestIn(h, args);
+        need(h, g, "clone");
+        const { job } = await cloneGuest(h.id, g.id, { vmid: args.vmid, name: args.name, linked: args.linked === true, storage: args.storage, pool: args.pool, start: args.start === true }, caller.user);
+        const made = getJob(job);
+        return made ? settle(made) : { job };
       }),
   },
   {

@@ -3438,7 +3438,15 @@ function loadPveJobs(x) {
 function pveGuests(x) {
   const guests = x.guests.filter((g) => !g.template);
   const templates = x.guests.filter((g) => g.template);
-  const note = templates.length > 0 && h("p", { class: "muted small pve-note" }, t("pve.templates", { list: templates.map((g) => `${g.name} (${g.vmid})`).join(", ") }));
+  const note =
+    templates.length > 0 &&
+    h(
+      "p",
+      { class: "muted small pve-note" },
+      t("pve.templatesLead"),
+      " ",
+      templates.flatMap((g, i) => [i ? ", " : "", g.may.clone ? h("a", { class: "link", href: "#", title: t("pve.clone.button"), onclick: (e) => (e.preventDefault(), pveCloneDialog(x, g)) }, `${g.name} (${g.vmid})`) : `${g.name} (${g.vmid})`]),
+    );
   const small = (label, iconName, onclick, off) => h("button", { type: "button", class: "icon-btn", title: label, "aria-label": label, disabled: off, onclick: (e) => (e.stopPropagation(), onclick(e.currentTarget)) }, icon(iconName));
   const machineOf = (g) => machinesUi.list?.machines.find((m) => m.pve?.host === x.id && m.pve?.id === g.id);
   const row = (g) => {
@@ -3639,6 +3647,8 @@ function pveGuestDialog(x, g) {
       !g.may.power && h("span", { class: "muted small" }, t("pve.noPower")),
       (g.may.configure || g.may.cpu || g.may.memory || g.may.disk) && button(t("pve.edit.button"), { class: "small", onclick: () => (dialog.close(), pveEditDialog(x, g)) }, "sliders"),
       g.id === x.self && h("span", { class: "chip accent" }, t("pve.selfChip")),
+      g.may.clone && button(t("pve.clone.button"), { class: "small", onclick: () => (dialog.close(), pveCloneDialog(x, g)) }, "copy"),
+      g.may.remove && g.status === "stopped" && !g.template && g.id !== x.self && button(t("pve.tmpl.button"), { class: "small", onclick: () => (dialog.close(), pveTemplateDialog(x, g)) }, "archive"),
       g.may.remove && g.status === "stopped" && g.id !== x.self && button(t("pve.guestRemove"), { class: "small danger", onclick: () => (dialog.close(), pveRemoveDialog(x, g)) }, "trash"),
     ),
     h(
@@ -3759,6 +3769,85 @@ async function pveEditDialog(x, g) {
       h("footer", null, closeButton(() => (dialog.close(), pveGuestDialog(x, g), dialog), t("common.cancel")), h("button", { type: "submit", class: "btn primary" }, icon("check"), h("span", null, t("settings.save")))),
     ),
   );
+}
+
+/** A copy of a guest as a new one: from a template linked or whole, otherwise whole */
+async function pveCloneDialog(x, g) {
+  let o;
+  try {
+    o = await api("GET", `/api/proxmox/${x.id}/guests/${g.id}/clone`);
+  } catch (e) {
+    return toast(errorText(e), "error");
+  }
+  const blocked = g.type === "lxc" && !g.template && g.status !== "stopped";
+  const opt = (value, label = value) => h("option", { value }, label);
+  const vmid = h("input", { type: "number", required: true, min: o.ids?.from ?? 100, max: o.ids?.to ?? 999999999, value: o.next ?? "" });
+  const name = h("input", { required: true, value: `${g.name.replace(/[^A-Za-z0-9.-]/g, "-").slice(0, 56)}-copy`, autocapitalize: "none", spellcheck: false, class: "mono" });
+  const storage = h("select", null, o.storages.map((v) => opt(v)));
+  storage.value = o.storage;
+  const pool = h("select", null, o.free && opt("", t("pve.new.noPool")), o.pools.map((p) => opt(p)));
+  pool.value = o.pools.includes(o.pool) ? o.pool : (pool.options[0]?.value ?? "");
+  const linked = h("input", { type: "checkbox", checked: g.template, onchange: () => (storage.disabled = linked.checked) });
+  storage.disabled = g.template;
+  const start = h("input", { type: "checkbox" });
+  const error = h("p", { class: "error", role: "alert" });
+  let dialog;
+  const send = async (e) => {
+    e.preventDefault();
+    error.textContent = "";
+    const submit = dialog.querySelector("button[type=submit]");
+    submit.disabled = true;
+    try {
+      const r = await api("POST", `/api/proxmox/${x.id}/guests/${g.id}/clone`, { vmid: Number(vmid.value), name: name.value.trim(), linked: g.template && linked.checked, storage: storage.value, pool: pool.value, start: start.checked });
+      dialog.close();
+      void jobDialog(r.job, "clone", name.value.trim(), () => {
+        toast(t("pve.clone.done", { name: name.value.trim() }));
+        void loadPve();
+      });
+    } catch (err) {
+      error.textContent = errorText(err);
+      submit.disabled = false;
+    }
+  };
+  dialog = openDialog(
+    "wide",
+    h(
+      "form",
+      { class: "stack", onsubmit: send },
+      h("header", null, h("h2", { class: "grow" }, t("pve.clone.title", { name: g.name })), closeX(() => dialog)),
+      h("p", { class: "muted small" }, t(g.template ? "pve.clone.leadTemplate" : "pve.clone.lead")),
+      blocked && h("p", { class: "banner small" }, t("pve.clone.stopFirst", { name: g.name })),
+      h("div", { class: "form-pair" }, field(t(g.type === "lxc" ? "pve.new.hostname" : "pve.edit.name"), name), field("ID", vmid, o.ids ? t("pve.new.idsHint", o.ids) : null)),
+      g.template && h("label", { class: "check" }, linked, h("span", null, h("strong", null, t("pve.clone.linked")), h("span", { class: "muted small block" }, t("pve.clone.linkedHint")))),
+      h("div", { class: "form-pair" }, field(t("pve.restore.storage"), storage), (o.pools.length > 0 || !o.free) && field(t("pve.pool"), pool)),
+      h("label", { class: "check" }, start, h("span", null, h("strong", null, t("pve.clone.start")))),
+      error,
+      h("footer", null, closeButton(() => dialog, t("common.cancel")), h("button", { type: "submit", class: "btn primary", disabled: blocked }, icon("copy"), h("span", null, t("pve.clone.go")))),
+    ),
+  );
+}
+
+/** A stopped guest made a template: its name typed, because Proxmox cannot turn it back */
+function pveTemplateDialog(x, g) {
+  const typed = h("input", { autocomplete: "off", spellcheck: false, class: "mono", oninput: () => (go.disabled = typed.value !== g.name) });
+  let dialog;
+  const go = button(t("pve.tmpl.button"), {
+    class: "danger",
+    disabled: true,
+    onclick: async () => {
+      go.disabled = true;
+      try {
+        await api("POST", `/api/proxmox/${x.id}/guests/${g.id}/template`, { name: typed.value });
+        dialog.close();
+        toast(t("pve.tmpl.done", { name: g.name }));
+        void loadPve();
+      } catch (e) {
+        toast(errorText(e), "error");
+        go.disabled = false;
+      }
+    },
+  }, "archive");
+  dialog = openDialog("confirm", h("h2", { class: "wrap" }, t("pve.tmpl.title", { name: g.name })), h("p", { class: "muted" }, t("pve.tmpl.lead")), field(t("pve.typeName", { name: g.name }), typed), h("footer", null, closeButton(() => dialog, t("common.cancel")), go));
 }
 
 /** A backup put back: as a new guest beside the old one, or instead of it (stopped, its name typed) */

@@ -25,7 +25,7 @@ import { SECRETS_DIR } from "./config";
 import { readJsonFile, writeJsonAtomic } from "./fsutil";
 import { invite, machines } from "./machines";
 import { acceptFor, BINARY, CLOSE, encodeFrame, FrameReader, PING, PONG, PVE_PING, sized, TEXT, typed } from "./wsframe";
-import { cleanFingerprint, cleanUrl, failed, GUEST_RE, guestOfMachine as findGuest, guestRights, mayPath, POWER, readConfig, readResources, readTask, SECRET_RE, SNAPSHOT_RE, snapshotName, TOKEN_RE, trouble, clientLine, hostKeysIn, nextId, readNewGuest, readSettings, restoreParams, settingsChange, cleanSchedule, readRrd, TIMEFRAMES, archOf, readOffered, TEMPLATE_RE, type Offered, dayOf, scheduleDue, scheduled, toPrune, SCHEDULE_MARK, type Schedule, setupScript, type NewOptions, type SettingsChange, type Guest, type GuestConfig, type Permissions, type PveItem, type Resource, type Task, type Watched } from "./pve";
+import { cleanFingerprint, cleanUrl, failed, GUEST_RE, guestOfMachine as findGuest, guestRights, mayPath, POWER, readConfig, readResources, readTask, SECRET_RE, SNAPSHOT_RE, snapshotName, TOKEN_RE, trouble, clientLine, hostKeysIn, nextId, readNewGuest, readSettings, restoreParams, cloneParams, settingsChange, cleanSchedule, readRrd, TIMEFRAMES, archOf, readOffered, TEMPLATE_RE, type Offered, dayOf, scheduleDue, scheduled, toPrune, SCHEDULE_MARK, type Schedule, setupScript, type NewOptions, type SettingsChange, type Guest, type GuestConfig, type Permissions, type PveItem, type Resource, type Task, type Watched } from "./pve";
 
 const FILE = join(SECRETS_DIR, "proxmox.json");
 const ID_RE = /^[a-f0-9]{8}$/;
@@ -776,6 +776,72 @@ export async function restoreBackup(id: string, guest: string, input: Record<str
     }
   }, true, { app: g.name, machine: h.name });
   return { job: job.id, vmid };
+}
+
+/** What the clone dialog offers: where disks may go, the next free number, the pools */
+export async function cloneOptions(id: string, guest: string) {
+  const o = await restoreOptions(id, guest);
+  return { ...o, template: guestOf(hostOf(id), guest).template };
+}
+
+/**
+ * A copy of a guest as a new one, with new network cards. Proxmox copies a running virtual machine but
+ * not a running container (only a stopped one or a template). It is a job: copying disks takes minutes.
+ */
+export async function cloneGuest(id: string, guest: string, input: Record<string, unknown>, by: string) {
+  const h = hostOf(id);
+  const g = guestOf(h, guest);
+  const l = liveOf(h);
+  const o = await cloneOptions(id, guest);
+  if (g.type === "lxc" && !g.template) {
+    const now = await pve<{ status?: string }>(h, "GET", `/nodes/${g.node}/lxc/${g.vmid}/status/current`);
+    if (now.status !== "stopped") throw new AppError("pve.cloneStopFirst", 409, { name: g.name });
+  }
+  const newid = typeof input.vmid === "number" ? input.vmid : Number(input.vmid);
+  if (!Number.isInteger(newid) || newid < 100 || newid > 999_999_999) throw new AppError("pve.setting.vmid", 400);
+  if (l.guests.some((x) => x.vmid === newid)) throw new AppError("pve.vmidTaken", 409, { vmid: newid });
+  if (o.ids && (newid < o.ids.from || newid > o.ids.to)) throw new AppError("pve.vmidRange", 400, o.ids);
+  const name = typeof input.name === "string" ? input.name.trim() : "";
+  if (!(g.type === "lxc" ? /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/i : /^[a-z0-9]([a-z0-9.-]{0,61}[a-z0-9])?$/i).test(name)) throw new AppError("pve.setting.name", 400);
+  const linked = input.linked === true && g.template;
+  const storage = typeof input.storage === "string" && input.storage && !linked ? input.storage : "";
+  if (storage && !o.storages.includes(storage)) throw new AppError("pve.setting.storage", 400);
+  const pool = typeof input.pool === "string" && input.pool ? input.pool : o.free ? "" : (o.pools.includes(g.pool) ? g.pool : (o.pools[0] ?? ""));
+  if (pool && !o.pools.includes(pool)) throw new AppError("pve.setting.pool", 400);
+  const start = input.start === true;
+  const job = startJob(`pve:${h.id}:${newid}`, "clone", by, async (log) => {
+    try {
+      log(`Proxmox ${h.name}: ${g.name} (${g.vmid}) → ${name} (${newid})${linked ? ", linked" : ""}`);
+      await followTask(h, g.node, await pve<string>(h, "POST", `/nodes/${g.node}/${g.type}/${g.vmid}/clone`, cloneParams(g.type, { newid, name, linked, storage, pool })), log, 60 * 60_000);
+      record("pve.guest.cloned", { user: by, detail: `${label(h, g)} → ${name} (${newid})` });
+      if (start) {
+        log("Starting");
+        await followTask(h, g.node, await pve<string>(h, "POST", `/nodes/${g.node}/${g.type}/${newid}/status/start`), log, 2 * 60_000);
+      }
+      job.result = { vmid: newid };
+    } catch (e) {
+      if (e instanceof AppError && e.detail.message) log(String(e.detail.message));
+      throw e;
+    } finally {
+      void look(h, true);
+    }
+  }, true, { app: name, machine: h.name });
+  return { job: job.id, vmid: newid };
+}
+
+/** A stopped guest made a template: it can no longer be started, only cloned — Proxmox cannot undo it */
+export async function makeTemplate(id: string, guest: string, typed: unknown, by: string) {
+  const h = hostOf(id);
+  const g = guestOf(h, guest);
+  if (typed !== g.name) throw new AppError("pve.typeName", 400, { name: g.name });
+  if (selfOf(liveOf(h)) === g.id) throw new AppError("pve.isSelf", 409, { name: g.name });
+  const now = await pve<{ status?: string }>(h, "GET", `/nodes/${g.node}/${g.type}/${g.vmid}/status/current`);
+  if (now.status !== "stopped") throw new AppError("pve.stopFirst", 409, { name: g.name });
+  const upid = await pve<string | null>(h, "POST", `/nodes/${g.node}/${g.type}/${g.vmid}/template`);
+  if (typeof upid === "string" && upid.startsWith("UPID:")) await waitTask(h, g.node, upid, 120_000);
+  record("pve.guest.template", { user: by, detail: label(h, g) });
+  void look(h, true);
+  return { ok: true };
 }
 
 /** The backup jobs of the server, as its schedule says */

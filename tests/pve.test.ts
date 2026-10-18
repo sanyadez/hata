@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { rolesFor } from "../src/proxmox";
-import { clientLine, gibOf, readSettings, restoreParams, settingsChange, cleanSchedule, scheduleDue, scheduled, toPrune, SCHEDULE_MARK, readOffered, TEMPLATE_RE, archOf, readRrd } from "../src/pve";
+import { clientLine, gibOf, readSettings, restoreParams, settingsChange, cleanSchedule, scheduleDue, scheduled, toPrune, SCHEDULE_MARK, readOffered, TEMPLATE_RE, archOf, readRrd, cloneParams } from "../src/pve";
 import { cleanFingerprint, cleanUrl, failed, hostKeysIn, familyOf, nextId, readNewGuest, setupScript, guestOfMachine, guestRights, mayPath, readConfig, readResources, readTask, snapshotName, trouble, type Watched } from "../src/pve";
 
 test("an address as typed becomes the API's origin", () => {
@@ -60,8 +60,8 @@ test("a guest's configuration gives its cards and addresses", () => {
 test("rights: the most specific path that gives something", () => {
   const perms = { "/": { "VM.Audit": 1 }, "/pool/hata": { "VM.PowerMgmt": 1, "VM.Snapshot": 1 }, "/storage/local-lvm": { "Datastore.AllocateSpace": 1 } };
   const g = readResources(resources).guests;
-  expect(guestRights(perms, g[0]!)).toEqual({ power: false, snapshot: false, rollback: false, backup: false, remove: false, console: false, configure: false, cpu: false, memory: false, disk: false });
-  expect(guestRights(perms, g[1]!)).toEqual({ power: true, snapshot: true, rollback: false, backup: false, remove: false, console: false, configure: false, cpu: false, memory: false, disk: false });
+  expect(guestRights(perms, g[0]!)).toEqual({ power: false, snapshot: false, rollback: false, backup: false, remove: false, console: false, configure: false, cpu: false, memory: false, disk: false, clone: false });
+  expect(guestRights(perms, g[1]!)).toEqual({ power: true, snapshot: true, rollback: false, backup: false, remove: false, console: false, configure: false, cpu: false, memory: false, disk: false, clone: false });
   expect(guestRights({ "/": { "VM.PowerMgmt": 1 } }, g[0]!).power).toBe(true);
   expect(mayPath(perms, "/storage/local-lvm", "Datastore.AllocateSpace")).toBe(true);
   expect(mayPath(perms, "/storage/local", "Datastore.AllocateSpace")).toBe(false);
@@ -322,4 +322,9 @@ test("load over time: a node's and a guest's fields, gaps kept", () => {
     { t: 20_000, cpu: 0.5, mem: 4, maxmem: 8, netin: 10, netout: 2 },
     { t: 30_000, cpu: null, mem: null, maxmem: null, netin: null, netout: null },
   ]);
+});
+
+test("a clone: full by default, linked only as asked, storage only for a full one", () => {
+  expect(cloneParams("lxc", { newid: 246, name: "web-2", linked: false, storage: "local-lvm", pool: "hata" })).toEqual({ newid: 246, hostname: "web-2", full: 1, storage: "local-lvm", pool: "hata" });
+  expect(cloneParams("qemu", { newid: 247, name: "vm-2", linked: true, storage: "local-lvm", pool: "" })).toEqual({ newid: 247, name: "vm-2", full: 0 });
 });

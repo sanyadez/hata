@@ -225,6 +225,7 @@ export const guestRights = (perms: Permissions, g: Guest) => ({
   cpu: mayGuest(perms, g.vmid, g.pool, "VM.Config.CPU"),
   memory: mayGuest(perms, g.vmid, g.pool, "VM.Config.Memory"),
   disk: mayGuest(perms, g.vmid, g.pool, "VM.Config.Disk"),
+  clone: mayGuest(perms, g.vmid, g.pool, "VM.Clone"),
 });
 
 /** A task of Proxmox, from `/cluster/tasks` or a task's `/status` */
@@ -778,4 +779,26 @@ export function readRrd(list: Record<string, unknown>[]): Point[] {
     .map((p) => ({ t: (n(p.time) ?? 0) * 1000, cpu: n(p.cpu), mem: n(p.mem) ?? n(p.memused), maxmem: n(p.maxmem) ?? n(p.memtotal), netin: n(p.netin), netout: n(p.netout) }))
     .filter((p) => p.t > 0)
     .sort((a, b) => a.t - b.t);
+}
+
+// --- Clones --------------------------------------------------------------------------------------------
+
+export interface Clone {
+  newid: number;
+  name: string;
+  /** A linked clone shares its template's disks: only from a template, and only on the same storage */
+  linked: boolean;
+  storage: string;
+  pool: string;
+}
+
+/** The request that clones a guest: a container names its host, a virtual machine itself; a full clone may move storage */
+export function cloneParams(type: "lxc" | "qemu", c: Clone): Record<string, string | number> {
+  return {
+    newid: c.newid,
+    [type === "lxc" ? "hostname" : "name"]: c.name,
+    full: c.linked ? 0 : 1,
+    ...(c.storage && !c.linked ? { storage: c.storage } : {}),
+    ...(c.pool ? { pool: c.pool } : {}),
+  };
 }
