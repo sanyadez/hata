@@ -25,7 +25,7 @@ import { SECRETS_DIR } from "./config";
 import { readJsonFile, writeJsonAtomic } from "./fsutil";
 import { invite, machines } from "./machines";
 import { acceptFor, BINARY, CLOSE, encodeFrame, FrameReader, PING, PONG, PVE_PING, sized, TEXT, typed } from "./wsframe";
-import { cleanFingerprint, cleanUrl, failed, GUEST_RE, guestOfMachine as findGuest, guestRights, mayPath, POWER, readConfig, readResources, readTask, SECRET_RE, SNAPSHOT_RE, snapshotName, TOKEN_RE, trouble, clientLine, hostKeysIn, nextId, readNewGuest, readSettings, restoreParams, settingsChange, setupScript, type NewOptions, type SettingsChange, type Guest, type GuestConfig, type Permissions, type PveItem, type Resource, type Task, type Watched } from "./pve";
+import { cleanFingerprint, cleanUrl, failed, GUEST_RE, guestOfMachine as findGuest, guestRights, mayPath, POWER, readConfig, readResources, readTask, SECRET_RE, SNAPSHOT_RE, snapshotName, TOKEN_RE, trouble, clientLine, hostKeysIn, nextId, readNewGuest, readSettings, restoreParams, settingsChange, cleanSchedule, dayOf, scheduleDue, scheduled, toPrune, SCHEDULE_MARK, type Schedule, setupScript, type NewOptions, type SettingsChange, type Guest, type GuestConfig, type Permissions, type PveItem, type Resource, type Task, type Watched } from "./pve";
 
 const FILE = join(SECRETS_DIR, "proxmox.json");
 const ID_RE = /^[a-f0-9]{8}$/;
@@ -50,6 +50,11 @@ export interface Host {
   fingerprint: string | null;
   /** The numbers new guests made here take: a range the person keeps for Hata */
   ids?: { from: number; to: number };
+  /** Hata's own schedule of backups for this server's guests */
+  schedule?: Schedule;
+  /** The day it last ran, and how */
+  ran?: string;
+  last?: { at: number; ok: boolean; guests: number; pruned: number; message: string; /** Proxmox's backup task ran: its failure is its own item */ task?: boolean };
   added: number;
   by: string;
 }
@@ -226,7 +231,9 @@ async function look(h: Host, all = false): Promise<void> {
       }
       l.ips = ips;
       const left = await pve<{ vmid: number; name?: string; type?: string }[]>(h, "GET", "/cluster/backup-info/not-backed-up").catch(() => null);
-      l.unprotected = left ? left.filter((g) => !read.guests.find((x) => x.vmid === g.vmid)?.template).map((g) => ({ vmid: g.vmid, name: g.name ?? "" })) : null;
+      // the guests Hata's own schedule backs up are not left out
+      const ours = h.schedule?.on ? scheduled(h.schedule, mayBackUp(read.guests, l.perms)) : [];
+      l.unprotected = left ? left.filter((g) => !read.guests.find((x) => x.vmid === g.vmid)?.template && !ours.includes(g.vmid)).map((g) => ({ vmid: g.vmid, name: g.name ?? "" })) : null;
     }
     if (all || fresh || now - l.asked.disks > DISKS_MS) {
       l.asked.disks = now;
@@ -246,17 +253,127 @@ async function look(h: Host, all = false): Promise<void> {
   }
 }
 
-/** Keeps every server's picture fresh */
+/** Keeps every server's picture fresh, and runs Hata's schedules of backups when their time comes */
 export function startProxmox(): void {
   const tick = () => {
     for (const h of state.hosts) void look(h);
   };
   setTimeout(tick, 5_000).unref?.();
   setInterval(tick, RESOURCES_MS).unref?.();
+  setInterval(() => {
+    for (const h of state.hosts) {
+      if (!scheduleDue(h.schedule, h.ran, new Date())) continue;
+      h.ran = dayOf(new Date());
+      save();
+      try {
+        runSchedule(h, "schedule");
+      } catch {
+        // a run still going (started by hand) is this day's run
+      }
+    }
+  }, 60_000).unref?.();
+}
+
+// --- Hata's own schedule of backups ----------------------------------------------------------------------
+
+/** The guests the token may back up: what "all" means for a schedule */
+const mayBackUp = (guests: Guest[], perms: Permissions): number[] => guests.filter((g) => !g.template && guestRights(perms, g).backup).map((g) => g.vmid);
+
+/** The storages a schedule may write to: holding backups, on every node, where the token may write */
+function scheduleStorages(h: Host): string[] {
+  const l = liveOf(h);
+  return [...new Set(l.storages.filter((s) => s.content.includes("backup") && mayPath(l.perms, `/storage/${s.name}`, "Datastore.AllocateSpace")).map((s) => s.name))].sort();
+}
+
+export function setSchedule(id: string, input: Record<string, unknown>, by: string) {
+  const h = hostOf(id);
+  let schedule: Schedule;
+  try {
+    schedule = cleanSchedule(input, scheduleStorages(h));
+  } catch (e) {
+    throw new AppError(`pve.schedule.${(e as { field?: string }).field ?? "time"}`, 400);
+  }
+  const was = h.schedule;
+  h.schedule = schedule;
+  // a schedule moved to a later hour today still runs today
+  if (!was || was.time !== schedule.time) delete h.ran;
+  save();
+  record(schedule.on ? "pve.schedule.set" : "pve.schedule.off", { user: by, detail: schedule.on ? `${h.name}: ${schedule.time} → ${schedule.storage}` : h.name });
+  void look(h, true);
+  return { schedule, storages: scheduleStorages(h) };
+}
+
+export function runScheduleNow(id: string, by: string) {
+  const h = hostOf(id);
+  if (!h.schedule?.storage) throw new AppError("pve.schedule.storage", 400);
+  return { job: runSchedule(h, by).id };
+}
+
+/**
+ * One run: a backup of every scheduled guest, node by node (one task per node), then the schedule's own
+ * copies beyond `keep` deleted. A guest that failed keeps all its copies: the newest might be the broken one.
+ */
+function runSchedule(h: Host, by: string) {
+  const s = h.schedule!;
+  return startJob(`pve:${h.id}:schedule`, "backup", by, async (log) => {
+    const l = liveOf(h);
+    const guests = l.guests.filter((g) => scheduled(s, mayBackUp(l.guests, l.perms)).includes(g.vmid));
+    let failedOnes: string[] = [];
+    let pruned = 0;
+    let message = "";
+    let task = false;
+    try {
+      if (!guests.length) throw new AppError("pve.schedule.nothing", 409, { name: h.name });
+      const nodes = [...new Set(guests.map((g) => g.node))];
+      for (const node of nodes) {
+        const here = guests.filter((g) => g.node === node);
+        log(`${h.name} / ${node}: ${here.map((g) => `${g.name} (${g.vmid})`).join(", ")} → ${s.storage}`);
+        const upid = await pve<string>(h, "POST", `/nodes/${node}/vzdump`, { vmid: here.map((g) => g.vmid).join(","), storage: s.storage, mode: "snapshot", compress: "zstd", "notes-template": `{{guestname}} ${SCHEDULE_MARK}` });
+        task = true;
+        try {
+          await followTask(h, node, upid, log, 6 * 3600_000);
+        } catch (e) {
+          // which guests failed: their lines say "ERROR: Backup of VM <id> failed"
+          const lines = await taskLog(h.id, upid).catch(() => []);
+          const bad = here.filter((g) => lines.some((line) => new RegExp(`Backup of VM ${g.vmid} failed`).test(line)));
+          failedOnes.push(...(bad.length ? bad : here).map((g) => `${g.name} (${g.vmid})`));
+          message = e instanceof AppError ? String(e.detail.message ?? e.code) : String(e);
+        }
+        const content = await pve<{ volid: string; vmid?: number; ctime?: number; notes?: string; protected?: number }[]>(h, "GET", `/nodes/${node}/storage/${s.storage}/content`, { content: "backup" }).catch(() => []);
+        const keepAll = new Set(failedOnes);
+        const list = content.filter((b) => here.some((g) => g.vmid === b.vmid && !keepAll.has(`${g.name} (${g.vmid})`))).map((b) => ({ volid: b.volid, vmid: b.vmid!, at: (b.ctime ?? 0) * 1000, notes: b.notes ?? "", protected: b.protected === 1 }));
+        for (const volid of toPrune(list, s.keep)) {
+          try {
+            const upid = await pve<string | null>(h, "DELETE", `/nodes/${node}/storage/${s.storage}/content/${encodeURIComponent(volid)}`);
+            if (typeof upid === "string" && upid.startsWith("UPID:")) await waitTask(h, node, upid, 60_000);
+            log(`Deleted the older copy ${volid}`);
+            pruned++;
+          } catch (e) {
+            log(`Could not delete ${volid}: ${e instanceof AppError ? String(e.detail.message ?? e.code) : String(e)}`);
+          }
+        }
+      }
+    } catch (e) {
+      message = e instanceof AppError ? String(e.detail.message ?? e.code) : String(e);
+      failedOnes = guests.map((g) => `${g.name} (${g.vmid})`);
+      if (!guests.length) failedOnes = [h.name];
+    } finally {
+      h.last = { at: Date.now(), ok: !failedOnes.length, task, guests: guests.length, pruned, message: failedOnes.length ? `${failedOnes.join(", ")}: ${message}` : "" };
+      save();
+      record(failedOnes.length ? "pve.schedule.failed" : "pve.schedule.ran", { user: by, detail: failedOnes.length ? `${h.name}: ${failedOnes.join(", ")}` : `${h.name}: ${guests.length} → ${s.storage}` });
+      void look(h, true);
+    }
+    if (failedOnes.length) throw new AppError("pve.schedule.failedRun", 409, { name: h.name, message: h.last.message });
+  }, true, { app: h.name, machine: h.name });
 }
 
 /** What every server is worth on the home page */
-export const proxmoxTrouble = (): PveItem[] => state.hosts.flatMap((h) => trouble(liveOf(h)));
+export const proxmoxTrouble = (): PveItem[] =>
+  state.hosts.flatMap((h) => [
+    ...trouble(liveOf(h)),
+    // a run that failed before Proxmox's task: a failed task is an item of its own already
+    ...(h.schedule?.on && h.last && !h.last.ok && !h.last.task ? [{ id: `pve:${h.id}:schedule`, severity: "danger" as const, code: "pve.scheduleFailed", detail: { host: h.id, name: h.name, message: h.last.message.slice(0, 200) }, at: h.last.at }] : []),
+  ]);
 
 /** The guest a machine is: found by its cards or its address while it is connected, remembered for when it is not */
 export function guestOfMachine(machine: string, macs: string[], ip: string): { host: string; hostName: string; id: string; type: string; vmid: number; name: string; status: string; node: string; power: boolean } | null {
@@ -332,6 +449,9 @@ export function host(id: string) {
     tasks: l.tasks.slice(0, 100).map((t) => ({ ...t, failed: failed(t) })),
     disks: l.disks,
     unprotected: l.unprotected,
+    schedule: h.schedule ?? null,
+    scheduleStorages: scheduleStorages(h),
+    last: h.last ?? null,
     trouble: trouble(l),
   };
 }

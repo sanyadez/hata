@@ -3057,6 +3057,86 @@ function pveOverview(x) {
       ),
     pveSection(t("pve.jobsTitle"), h("div", { id: "pve-jobs" }, h("p", { class: "muted pve-note first" }, t("machines.loading")))),
     loadPveJobs(x),
+    pveSection(t("pve.sched.title"), pveScheduleBody(x)),
+  );
+}
+
+/** Hata's own schedule of backups: what it does, how it last went, and its buttons */
+function pveScheduleBody(x) {
+  const s = x.schedule;
+  const who = (sc) => (sc.guests === "all" ? t("pve.sched.all") : sc.guests.map((id) => x.guests.find((g) => g.vmid === id)?.name ?? id).join(", "));
+  const last = x.last && h("p", { class: "small " + (x.last.ok ? "muted" : "error") }, t("pve.sched.last", { when: dateTime(x.last.at), result: x.last.ok ? t("pve.sched.lastOk", { n: x.last.guests, pruned: x.last.pruned }) : t("pve.sched.lastFailed", { message: x.last.message }) }));
+  return h(
+    "div",
+    { class: "stack-s pve-note first" },
+    h("p", { class: "muted small" }, t("pve.sched.lead")),
+    h("p", null, s?.on ? t("pve.sched.on", { time: s.time, guests: who(s), storage: s.storage, keep: s.keep }) : t("pve.sched.off")),
+    last,
+    h(
+      "div",
+      { class: "row-actions" },
+      button(t("pve.sched.edit"), { class: "small", onclick: () => pveScheduleDialog(x) }, "sliders"),
+      s?.storage && button(t("pve.sched.run"), {
+        class: "small",
+        onclick: async (e) => {
+          const el = e.currentTarget;
+          el.disabled = true;
+          try {
+            const r = await api("POST", `/api/proxmox/${x.id}/schedule/run`, {});
+            void jobDialog(r.job, "backup", x.name, () => void loadPve());
+          } catch (err) {
+            toast(errorText(err), "error");
+          }
+          el.disabled = false;
+        },
+      }, "play"),
+    ),
+  );
+}
+
+function pveScheduleDialog(x) {
+  const s = x.schedule ?? { on: false, time: "03:30", storage: x.scheduleStorages[0] ?? "", keep: 3, guests: "all" };
+  const on = h("input", { type: "checkbox", checked: s.on || !x.schedule });
+  const time = h("input", { type: "time", required: true, value: s.time });
+  const opt = (value) => h("option", { value }, value);
+  const storage = h("select", null, x.scheduleStorages.map((v) => opt(v)));
+  storage.value = x.scheduleStorages.includes(s.storage) ? s.storage : (x.scheduleStorages[0] ?? "");
+  const keep = h("input", { type: "number", required: true, min: 1, max: 30, value: s.keep });
+  const radio = (value, checked) => h("input", { type: "radio", name: "pve-sched", value, checked, onchange: () => (list.hidden = all.checked) });
+  const all = radio("all", s.guests === "all");
+  const chosen = radio("chosen", s.guests !== "all");
+  const mine = x.guests.filter((g) => !g.template && g.may.backup);
+  const boxes = mine.map((g) => ({ g, box: h("input", { type: "checkbox", checked: s.guests !== "all" && s.guests.includes(g.vmid) }) }));
+  const list = h("div", { class: "stack-s pve-pick", hidden: s.guests === "all" }, boxes.map(({ g, box }) => h("label", { class: "check" }, box, h("span", null, `${g.name} (${g.vmid})`))));
+  const error = h("p", { class: "error", role: "alert" });
+  let dialog;
+  const send = async (e) => {
+    e.preventDefault();
+    error.textContent = "";
+    try {
+      await api("PUT", `/api/proxmox/${x.id}/schedule`, { on: on.checked, time: time.value, storage: storage.value, keep: Number(keep.value), guests: all.checked ? "all" : boxes.filter(({ box }) => box.checked).map(({ g }) => g.vmid) });
+      dialog.close();
+      toast(t("pve.sched.saved"));
+      void loadPve();
+    } catch (err) {
+      error.textContent = errorText(err);
+    }
+  };
+  dialog = openDialog(
+    "wide",
+    h(
+      "form",
+      { class: "stack", onsubmit: send },
+      h("header", null, h("h2", { class: "grow" }, t("pve.sched.dialog", { name: x.name })), closeX(() => dialog)),
+      h("p", { class: "muted small" }, t("pve.sched.lead")),
+      !x.scheduleStorages.length && h("p", { class: "banner small" }, t("pve.sched.noStorage")),
+      h("label", { class: "check" }, on, h("span", null, h("strong", null, t("pve.sched.enable")))),
+      h("div", { class: "form-pair" }, field(t("pve.sched.time"), time), field(t("pve.sched.storage"), storage)),
+      field(t("pve.sched.keep"), keep),
+      h("div", { class: "stack-s" }, h("span", { class: "label" }, t("pve.sched.guests")), h("label", { class: "check" }, all, h("span", null, t("pve.sched.guestsAll"))), h("label", { class: "check" }, chosen, h("span", null, t("pve.sched.guestsChosen"))), list),
+      error,
+      h("footer", null, closeButton(() => dialog, t("common.cancel")), h("button", { type: "submit", class: "btn primary" }, icon("check"), h("span", null, t("settings.save")))),
+    ),
   );
 }
 

@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { rolesFor } from "../src/proxmox";
-import { clientLine, gibOf, readSettings, restoreParams, settingsChange } from "../src/pve";
+import { clientLine, gibOf, readSettings, restoreParams, settingsChange, cleanSchedule, scheduleDue, scheduled, toPrune, SCHEDULE_MARK } from "../src/pve";
 import { cleanFingerprint, cleanUrl, failed, hostKeysIn, familyOf, nextId, readNewGuest, setupScript, guestOfMachine, guestRights, mayPath, readConfig, readResources, readTask, snapshotName, trouble, type Watched } from "../src/pve";
 
 test("an address as typed becomes the API's origin", () => {
@@ -263,4 +263,35 @@ test("a backup restored over its guest or as a new one", () => {
   expect(restoreParams("lxc", { volid, vmid: 243, storage: "local-lvm", replace: true, pool: "hata" })).toEqual({ vmid: 243, ostemplate: volid, restore: 1, storage: "local-lvm", force: 1 });
   expect(restoreParams("lxc", { volid, vmid: 245, storage: "local-lvm", replace: false, pool: "hata" })).toEqual({ vmid: 245, ostemplate: volid, restore: 1, storage: "local-lvm", unique: 1, pool: "hata" });
   expect(restoreParams("qemu", { volid: "local:backup/vzdump-qemu-245.vma.zst", vmid: 246, storage: "", replace: false, pool: "" })).toEqual({ vmid: 246, archive: "local:backup/vzdump-qemu-245.vma.zst", unique: 1 });
+});
+
+test("Hata's schedule of backups: checked, due once a day, keeps only its own copies", () => {
+  expect(cleanSchedule({ on: true, time: "03:30", storage: "local", keep: 3, guests: [245, 243, 243] }, ["local"])).toEqual({ on: true, time: "03:30", storage: "local", keep: 3, guests: [243, 245] });
+  expect(cleanSchedule({ on: false, time: "03:30", storage: "gone", keep: 1, guests: "all" }, ["local"]).storage).toBe("");
+  const field = (input: Record<string, unknown>) => {
+    try {
+      cleanSchedule({ on: true, time: "03:30", storage: "local", keep: 3, guests: "all", ...input }, ["local"]);
+      return "";
+    } catch (e) {
+      return (e as { field: string }).field;
+    }
+  };
+  expect(field({ time: "25:00" })).toBe("time");
+  expect(field({ storage: "nas" })).toBe("storage");
+  expect(field({ keep: 0 })).toBe("keep");
+  expect(field({ guests: [] })).toBe("guests");
+  expect(field({ guests: ["x"] })).toBe("guests");
+  const s = cleanSchedule({ on: true, time: "03:30", storage: "local", keep: 2, guests: "all" }, ["local"]);
+  const at = (h: number, m: number) => new Date(2026, 9, 18, h, m);
+  expect(scheduleDue(s, undefined, at(3, 29))).toBe(false);
+  expect(scheduleDue(s, undefined, at(3, 30))).toBe(true);
+  expect(scheduleDue(s, "2026-10-17", at(23, 0))).toBe(true);
+  expect(scheduleDue(s, "2026-10-18", at(23, 0))).toBe(false);
+  expect(scheduleDue({ ...s, on: false }, undefined, at(4, 0))).toBe(false);
+  expect(scheduled(s, [243, 245])).toEqual([243, 245]);
+  expect(scheduled({ ...s, guests: [243, 999] }, [243, 245])).toEqual([243]);
+  const b = (volid: string, vmid: number, at: number, notes: string, isProtected = false) => ({ volid, vmid, at, notes, protected: isProtected });
+  expect(
+    toPrune([b("a1", 243, 1, `ct ${SCHEDULE_MARK}`), b("a2", 243, 2, `ct ${SCHEDULE_MARK}`), b("a3", 243, 3, `ct ${SCHEDULE_MARK}`), b("m", 243, 0, "ct — Hata"), b("p", 243, 0, `ct ${SCHEDULE_MARK}`, true), b("c1", 245, 5, `x ${SCHEDULE_MARK}`)], 2),
+  ).toEqual(["a1"]);
 });

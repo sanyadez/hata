@@ -666,3 +666,61 @@ export function restoreParams(type: "lxc" | "qemu", r: Restore): Record<string, 
     ...(r.pool && !r.replace ? { pool: r.pool } : {}),
   };
 }
+
+// --- Hata's own schedule of backups ------------------------------------------------------------------
+// Proxmox's own jobs (`/cluster/backup`) need Sys.Modify on the whole server: a token kept narrow cannot
+// make one. Hata runs its own instead, with the rights the token has, and keeps only its own copies.
+
+export interface Schedule {
+  on: boolean;
+  /** HH:MM, the server's local time */
+  time: string;
+  storage: string;
+  /** How many of the schedule's copies each guest keeps; older ones are deleted, no other copy is */
+  keep: number;
+  /** Every guest the token may back up, or these numbers */
+  guests: "all" | number[];
+}
+
+/** What the notes of a scheduled copy end with: the only copies the schedule ever deletes */
+export const SCHEDULE_MARK = "— Hata, by schedule";
+
+/** The schedule's answers checked; a wrong one is refused by its name */
+export function cleanSchedule(input: Record<string, unknown>, storages: string[]): Schedule {
+  const bad = (field: string): never => {
+    throw Object.assign(new Error("pve.schedule"), { field });
+  };
+  const on = input.on === true;
+  const time = typeof input.time === "string" && /^([01]\d|2[0-3]):[0-5]\d$/.test(input.time) ? input.time : bad("time");
+  const storage = typeof input.storage === "string" && storages.includes(input.storage) ? input.storage : on ? bad("storage") : "";
+  const keep = typeof input.keep === "number" && Number.isInteger(input.keep) && input.keep >= 1 && input.keep <= 30 ? input.keep : bad("keep");
+  let guests: Schedule["guests"];
+  if (input.guests === "all") guests = "all";
+  else if (Array.isArray(input.guests) && input.guests.every((v) => Number.isInteger(v) && (v as number) >= 100)) guests = [...new Set(input.guests as number[])].sort((a, b) => a - b);
+  else guests = bad("guests");
+  if (on && Array.isArray(guests) && !guests.length) bad("guests");
+  return { on, time, storage, keep, guests };
+}
+
+/** The local day, `2026-10-18` */
+export const dayOf = (d: Date): string => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+
+/** Whether the schedule should run now: on, its time of today has come, and it has not run today */
+export function scheduleDue(s: Schedule | undefined, ran: string | undefined, now: Date): boolean {
+  if (!s?.on) return false;
+  const [hh, mm] = s.time.split(":").map(Number) as [number, number];
+  return now.getHours() * 60 + now.getMinutes() >= hh * 60 + mm && ran !== dayOf(now);
+}
+
+/** The guests a schedule covers among those the token may back up */
+export const scheduled = (s: Schedule, may: number[]): number[] => (s.guests === "all" ? may : s.guests.filter((v) => may.includes(v)));
+
+/** The schedule's own copies beyond `keep`, per guest, oldest ones; a copy someone made or protected stays */
+export function toPrune(list: { volid: string; vmid: number; at: number; notes: string; protected: boolean }[], keep: number): string[] {
+  const out: string[] = [];
+  const mine = list.filter((b) => !b.protected && b.notes.trim().endsWith(SCHEDULE_MARK));
+  for (const vmid of new Set(mine.map((b) => b.vmid))) {
+    out.push(...mine.filter((b) => b.vmid === vmid).sort((a, b) => b.at - a.at).slice(keep).map((b) => b.volid));
+  }
+  return out;
+}
