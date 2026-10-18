@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { rolesFor } from "../src/proxmox";
 import { clientLine, gibOf, readSettings, restoreParams, settingsChange, cleanSchedule, scheduleDue, scheduled, toPrune, SCHEDULE_MARK, readOffered, TEMPLATE_RE, archOf, readRrd, cloneParams, readVersions, versionCompare, readContent } from "../src/pve";
-import { cleanFingerprint, cleanUrl, failed, hostKeysIn, familyOf, nextId, readNewGuest, setupScript, guestOfMachine, guestRights, mayPath, readConfig, readResources, readTask, snapshotName, trouble, type Watched } from "../src/pve";
+import { cloudImages, imageFamily, readNewVm, sumFor, uploadName, vmSetupLine, cleanFingerprint, cleanUrl, failed, hostKeysIn, familyOf, nextId, readNewGuest, setupScript, guestOfMachine, guestRights, mayPath, readConfig, readResources, readTask, snapshotName, trouble, type Watched } from "../src/pve";
 
 test("an address as typed becomes the API's origin", () => {
   expect(cleanUrl("192.168.1.198")).toBe("https://192.168.1.198:8006");
@@ -362,4 +362,108 @@ test("what a storage holds: whose it is, what is left of guests that are gone", 
     ["local-lvm:vm-243-disk-0", "hata-ct1", false],
     ["local:iso/debian.iso", "", false],
   ]);
+});
+
+const vmOffer = { ...offer, disks: { i5: ["local-lvm"] }, images: { i5: ["local:import/debian-13-genericcloud-amd64.qcow2"] }, isos: { i5: ["local:iso/alpine-virt-3.22.iso"] } };
+const vmAnswers = { node: "i5", vmid: 245, hostname: "vm-1", source: "local:import/debian-13-genericcloud-amd64.qcow2", storage: "local-lvm", disk: 4, cores: 2, memory: 2048, bridge: "vmbr0", address: "dhcp", pool: "hata", docker: false };
+
+test("a new virtual machine from a disk image: imported, cloud-init with a user, a serial console", () => {
+  const g = readNewVm(vmAnswers, vmOffer, "pw-of-hata");
+  expect(g.from).toBe("image");
+  expect(g.family).toBe("apt");
+  expect(g.client).toBe(true);
+  expect(g.start).toBe(true);
+  expect(g.user).toBe("hata");
+  expect(g.ownPassword).toBe(false);
+  expect(g.params).toEqual({
+    vmid: 245,
+    name: "vm-1",
+    ostype: "l26",
+    cpu: "x86-64-v2-AES",
+    cores: 2,
+    memory: 2048,
+    scsihw: "virtio-scsi-single",
+    net0: "virtio,bridge=vmbr0",
+    agent: 1,
+    pool: "hata",
+    scsi0: "local-lvm:0,import-from=local:import/debian-13-genericcloud-amd64.qcow2,discard=on,iothread=1",
+    ide2: "local-lvm:cloudinit",
+    serial0: "socket",
+    boot: "order=scsi0",
+    ciuser: "hata",
+    cipassword: "pw-of-hata",
+    ipconfig0: "ip=dhcp",
+  });
+  const own = readNewVm({ ...vmAnswers, user: "alex", password: "my long pass", sshKeys: "ssh-ed25519 AAAAC3Nza me@laptop\n", address: "192.168.1.245/24", gateway: "192.168.1.1" }, vmOffer);
+  expect(own.ownPassword).toBe(true);
+  expect(own.params.cipassword).toBe("my long pass");
+  expect(own.params.ipconfig0).toBe("ip=192.168.1.245/24,gw=192.168.1.1");
+  // encoded once here, once more by the form
+  expect(own.params.sshkeys).toBe("ssh-ed25519%20AAAAC3Nza%20me%40laptop%0A");
+  expect(readNewVm(vmAnswers, vmOffer).password).toMatch(/^[A-Za-z0-9_-]{24}$/);
+});
+
+test("a new virtual machine from a disc: an empty disk, the disc, nothing of cloud-init", () => {
+  const g = readNewVm({ ...vmAnswers, source: "local:iso/alpine-virt-3.22.iso", start: false }, vmOffer);
+  expect(g.from).toBe("iso");
+  expect(g.client).toBe(false);
+  expect(g.start).toBe(false);
+  expect(g.params.scsi0).toBe("local-lvm:4,discard=on,iothread=1");
+  expect(g.params.ide2).toBe("local:iso/alpine-virt-3.22.iso,media=cdrom");
+  expect(g.params.boot).toBe("order=scsi0;ide2");
+  expect(g.params.ciuser).toBeUndefined();
+  expect(g.params.serial0).toBeUndefined();
+});
+
+test("a new virtual machine's answers refused field by field", () => {
+  const field = (over: Record<string, unknown>) => {
+    try {
+      readNewVm({ ...vmAnswers, ...over }, vmOffer);
+      return "";
+    } catch (e) {
+      return (e as { field: string }).field;
+    }
+  };
+  expect(field({})).toBe("");
+  expect(field({ source: "local:import/other.qcow2" })).toBe("source");
+  expect(field({ storage: "local" })).toBe("storage");
+  expect(field({ user: "root" })).toBe("user");
+  expect(field({ user: "Alex" })).toBe("user");
+  expect(field({ password: "short" })).toBe("password");
+  expect(field({ password: "two\nlines here" })).toBe("password");
+  expect(field({ sshKeys: "not a key" })).toBe("sshKeys");
+  expect(field({ vmid: 243 })).toBe("vmidTaken");
+  expect(field({ address: "192.168.1.50/24" })).toBe("gateway");
+});
+
+test("the line typed into a new virtual machine: agent, Docker, client, the password locked", () => {
+  const g = { family: "apt" as const, docker: true, client: true, user: "hata", ownPassword: false };
+  const line = vmSetupLine(g, "curl -fsSL http://hata/client/x | sh");
+  expect(line.startsWith("(cloud-init status --wait >/dev/null 2>&1 || true && export DEBIAN_FRONTEND=noninteractive && apt-get update -q && apt-get install -y -q qemu-guest-agent curl ca-certificates")).toBe(true);
+  expect(line).toContain("curl -fsSL https://get.docker.com | sh && curl -fsSL http://hata/client/x | sh)");
+  expect(line.endsWith("; r=$?; passwd -l hata >/dev/null; (exit $r)")).toBe(true);
+  expect(vmSetupLine({ ...g, ownPassword: true, docker: false }, "X")).not.toContain("passwd");
+  expect(line).not.toContain("\n");
+});
+
+test("cloud images, their checksums and the names files get on a storage", () => {
+  const images = cloudImages("amd64");
+  expect(images.map((i) => i.id)).toEqual(["debian-13", "debian-12", "ubuntu-26.04", "ubuntu-24.04"]);
+  expect(images[0]!.url).toBe("https://cloud.debian.org/images/cloud/trixie/latest/debian-13-genericcloud-amd64.qcow2");
+  expect(images[3]!.file).toBe("noble-server-cloudimg-amd64.qcow2");
+  expect(cloudImages("arm64")[0]!.file).toBe("debian-13-genericcloud-arm64.qcow2");
+  expect(cloudImages("")).toEqual([]);
+  const h64 = "a".repeat(64);
+  expect(sumFor(`${"b".repeat(64)} *other.img\n${h64} *noble-server-cloudimg-amd64.img\n`, "noble-server-cloudimg-amd64.img")).toBe(h64);
+  expect(sumFor(`${"c".repeat(128)}  debian-13-genericcloud-amd64.qcow2`, "debian-13-genericcloud-amd64.qcow2")).toBe("c".repeat(128));
+  expect(sumFor("nothing", "x")).toBeNull();
+  const qcow = new Uint8Array([0x51, 0x46, 0x49, 0xfb, 0]);
+  expect(uploadName("https://x/images/noble.img?raw=1", "import", qcow)).toBe("noble.qcow2");
+  expect(uploadName("/DATA/disk image.img", "import", new Uint8Array(8))).toBe("disk-image.raw");
+  expect(uploadName("https://x/alpine-virt-3.22.ISO", "iso", qcow)).toBe("alpine-virt-3.22.iso");
+  expect(uploadName("https://x/download", "iso", qcow)).toBe("download.iso");
+  expect(uploadName("https://x/", "iso", qcow)).toBeNull();
+  expect(imageFamily("local:import/noble-server-cloudimg-amd64.qcow2")).toBe("apt");
+  expect(imageFamily("local:import/Fedora-Cloud-Base.qcow2")).toBe("dnf");
+  expect(imageFamily("local:import/arch.qcow2")).toBeNull();
 });

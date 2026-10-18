@@ -81,7 +81,8 @@ test("the real tools: unique names, every level present, nothing that reaches us
   const names = TOOLS.map((t) => t.name);
   expect(new Set(names).size).toBe(names.length);
   for (const name of names) expect(name).toMatch(/^[a-z][a-z_]*$/);
-  expect(names.filter((n) => /user|password|file|terminal|shell|exec|key|setting|session/.test(n))).toEqual([]);
+  // a Proxmox guest's settings are the guest's, not Hata's
+  expect(names.filter((n) => /user|password|file|terminal|shell|exec|key|setting|session/.test(n) && n !== "proxmox_guest_settings")).toEqual([]);
   // looking never needs more than the lowest level, and nothing that only looks is marked as changing
   for (const tool of TOOLS) expect(tool.effect === "read").toBe(tool.level === "read");
   expect(toolsFor(TOOLS, "read").map((t) => t.name)).toEqual(["overview", "activity", "apps_list", "app_get", "app_logs", "app_diagnose", "app_compose", "store_search", "store_app", "backups", "disks", "job_get", "machines", "machine_apps", "machine_containers", "machine_app_logs", "machine_app_compose", "proxmox", "proxmox_guests", "proxmox_guest", "proxmox_tasks", "proxmox_guest_settings", "proxmox_load", "proxmox_container_options"]);

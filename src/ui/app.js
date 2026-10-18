@@ -734,7 +734,12 @@ function openPick(select) {
   const items = [...select.options].map((o, i) =>
     h("button", { type: "button", class: "menu-item", role: "option", "aria-selected": String(i === current), disabled: o.disabled, onclick: () => choose(i) }, h("span", { class: "grow" }, o.textContent), i === current && icon("check", "on-mark")),
   );
-  dialog = openDialog("menu dropdown select-list", h("div", { role: "listbox", "aria-label": select.getAttribute("aria-label") ?? "" }, items));
+  // the options of a group follow its name
+  const shown = items.flatMap((b, i) => {
+    const group = select.options[i].parentElement;
+    return group?.tagName === "OPTGROUP" && group.firstElementChild === select.options[i] ? [h("div", { class: "select-group muted small", role: "presentation" }, group.label), b] : [b];
+  });
+  dialog = openDialog("menu dropdown select-list", h("div", { role: "listbox", "aria-label": select.getAttribute("aria-label") ?? "" }, shown));
   pick.setAttribute("aria-expanded", "true");
   dialog.addEventListener("close", () => (pick.removeAttribute("aria-expanded"), pick.isConnected && pick.focus()));
   const box = pick.getBoundingClientRect();
@@ -2854,7 +2859,7 @@ function removePveDialog(x) {
 }
 
 /** A new container on the server, with Hata's client in it: it becomes one of the machines */
-async function pveNewDialog(x) {
+async function pveNewDialog(x, kind = "lxc") {
   let o;
   try {
     o = await api("GET", `/api/proxmox/${x.id}/new`);
@@ -2865,6 +2870,7 @@ async function pveNewDialog(x) {
   const opt = (value, label = value) => h("option", { value }, label);
   const node = h("select", { onchange: () => fill() }, o.nodes.map((n) => opt(n)));
   const template = h("select");
+  const source = h("select", { onchange: () => shape() });
   const storage = h("select");
   const bridge = h("select");
   const fill = () => {
@@ -2873,10 +2879,15 @@ async function pveNewDialog(x) {
     template.replaceChildren(...list.map((v) => opt(v, v.split("/").pop() + (/(^|\/)(debian|ubuntu|fedora|rockylinux|almalinux|centos)-/.test(v) ? "" : " — " + t("pve.new.noClientHere")))));
     const debian = list.find((v) => /\/debian-/.test(v));
     if (debian) template.value = debian;
-    storage.replaceChildren(...(o.storages[n] ?? []).map((v) => opt(v)));
+    const images = o.images[n] ?? [];
+    const isos = o.isos[n] ?? [];
+    source.replaceChildren(
+      ...[images.length > 0 && h("optgroup", { label: t("pve.vm.images") }, images.map((v) => opt(v, v.split("/").pop()))), isos.length > 0 && h("optgroup", { label: t("pve.vm.discs") }, isos.map((v) => opt(v, v.split("/").pop())))].filter(Boolean),
+    );
+    storage.replaceChildren(...((kind === "lxc" ? o.storages[n] : o.disks[n]) ?? []).map((v) => opt(v)));
     bridge.replaceChildren(...(o.bridges[n] ?? []).map((v) => opt(v)));
+    shape();
   };
-  fill();
   const hostname = h("input", { required: true, placeholder: "docker-1", pattern: "[a-z0-9]([a-z0-9\\-]{0,61}[a-z0-9])?", autocapitalize: "none", spellcheck: false, class: "mono" });
   const vmid = h("input", { type: "number", required: true, min: o.ids?.from ?? 100, max: o.ids?.to ?? 999999999, value: o.next ?? "" });
   const disk = h("input", { type: "number", required: true, min: 2, max: 4096, value: 8 });
@@ -2887,6 +2898,9 @@ async function pveNewDialog(x) {
   const address = h("input", { placeholder: "192.168.1.50/24", class: "mono" });
   const gateway = h("input", { placeholder: "192.168.1.1", class: "mono" });
   const fixed = h("div", { class: "stack-s", hidden: true }, field(t("pve.new.address"), address), field(t("pve.new.gateway"), gateway));
+  const user = h("input", { value: "hata", autocapitalize: "none", spellcheck: false, class: "mono", autocomplete: "off" });
+  const password = h("input", { type: "password", autocomplete: "new-password", minLength: 8 });
+  const keys = h("textarea", { rows: 2, class: "mono small", spellcheck: false, placeholder: "ssh-ed25519 AAAA… me@laptop" });
   const pool = h("select", null, o.free && opt("", t("pve.new.noPool")), o.pools.map((p) => opt(p)));
   const tick = (label, hint, checked = true) => {
     const box = h("input", { type: "checkbox", checked });
@@ -2895,35 +2909,73 @@ async function pveNewDialog(x) {
   const [client, clientRow] = tick(t("pve.new.client"), t("pve.new.clientHint"));
   const [docker, dockerRow] = tick(t("pve.new.docker"), t("pve.new.dockerHint"));
   const [onboot, onbootRow] = tick(t("pve.onboot"), null);
+  const [start, startRow] = tick(t("pve.vm.start"), t("pve.vm.startHint"));
   client.addEventListener("change", () => ((docker.disabled = !client.checked), !client.checked && (docker.checked = false)));
   const error = h("p", { class: "error", role: "alert" });
+  const lead = h("p", { class: "muted small" });
+  const clientHint = clientRow.querySelector(".block");
+  const pair = (...items) => h("div", { class: "form-pair" }, ...items);
+  const templateRow = field(t("pve.new.template"), template, (o.templates[node.value] ?? []).length ? null : t("pve.new.noTemplates"));
+  const sourceRow = field(t("pve.vm.source"), source, (o.images[node.value] ?? []).length + (o.isos[node.value] ?? []).length ? null : t("pve.vm.noSource"));
+  const signRow = h("div", { class: "stack-s" }, pair(field(t("pve.vm.user"), user, t("pve.vm.userHint")), field(t("pve.vm.password"), password, t("pve.vm.passwordHint"))), field(t("pve.vm.keys"), keys, t("pve.vm.keysHint")));
+  const netRow = pair(field(t("pve.new.bridge"), bridge), field(t("pve.new.how"), how));
+  const discNote = h("p", { class: "banner small" }, t("pve.vm.discNote"));
+  const isDisc = () => kind === "qemu" && (o.isos[node.value] ?? []).includes(source.value);
+  /** What the dialog shows for the kind and the source chosen */
+  const shape = () => {
+    const disc = isDisc();
+    title.textContent = t(kind === "lxc" ? "pve.new.title" : "pve.vm.title", { name: x.name });
+    lead.textContent = t(kind === "lxc" ? "pve.new.lead" : disc ? "pve.vm.discLead" : "pve.vm.lead");
+    clientHint.textContent = t(kind === "lxc" ? "pve.new.clientHint" : "pve.vm.clientHint");
+    templateRow.hidden = kind !== "lxc";
+    sourceRow.hidden = kind === "lxc";
+    signRow.hidden = kind === "lxc" || disc;
+    how.closest(".field").hidden = disc;
+    if (disc) fixed.hidden = true;
+    else fixed.hidden = how.value !== "fixed";
+    clientRow.hidden = dockerRow.hidden = disc;
+    startRow.hidden = !disc;
+    discNote.hidden = !disc;
+    for (const b of seg.children) b.classList.toggle("active", b.dataset.kind === kind);
+  };
+  const title = h("h2", { class: "grow" });
+  const seg = h(
+    "div",
+    { class: "seg" },
+    ["lxc", "qemu"].map((k) => h("button", { type: "button", class: "btn", "data-kind": k, onclick: () => ((kind = k), fill()) }, t(k === "lxc" ? "pve.new.kindLxc" : "pve.new.kindVm"))),
+  );
   let dialog;
   const send = async (e) => {
     e.preventDefault();
     error.textContent = "";
     const submit = dialog.querySelector("button[type=submit]");
     submit.disabled = true;
+    const disc = isDisc();
+    const common = {
+      node: node.value,
+      vmid: Number(vmid.value),
+      hostname: hostname.value.trim().toLowerCase(),
+      storage: storage.value,
+      disk: Number(disk.value),
+      cores: Number(cores.value),
+      memory: Number(memory.value),
+      bridge: bridge.value,
+      address: how.value === "fixed" ? address.value.trim() : "dhcp",
+      gateway: gateway.value.trim(),
+      pool: pool.value,
+      client: !disc && client.checked,
+      docker: !disc && docker.checked,
+      onboot: onboot.checked,
+    };
     try {
-      const r = await api("POST", `/api/proxmox/${x.id}/guests`, {
-        node: node.value,
-        vmid: Number(vmid.value),
-        hostname: hostname.value.trim().toLowerCase(),
-        template: template.value,
-        storage: storage.value,
-        disk: Number(disk.value),
-        cores: Number(cores.value),
-        memory: Number(memory.value),
-        bridge: bridge.value,
-        address: how.value === "fixed" ? address.value.trim() : "dhcp",
-        gateway: gateway.value.trim(),
-        pool: pool.value,
-        client: client.checked,
-        docker: docker.checked,
-        onboot: onboot.checked,
-      });
+      const r =
+        kind === "lxc"
+          ? await api("POST", `/api/proxmox/${x.id}/guests`, { ...common, template: template.value })
+          : await api("POST", `/api/proxmox/${x.id}/vms`, { ...common, source: source.value, user: user.value.trim(), password: password.value, sshKeys: keys.value, start: start.checked });
       dialog.close();
+      const machine = !disc && client.checked;
       void jobDialog(r.job, "guest", hostname.value, () => {
-        toast(t(client.checked ? "pve.new.doneMachine" : "pve.new.done", { name: hostname.value }));
+        toast(t(machine ? "pve.new.doneMachine" : "pve.new.done", { name: hostname.value }));
         void loadPve();
         void loadMachines();
       });
@@ -2932,29 +2984,34 @@ async function pveNewDialog(x) {
       submit.disabled = false;
     }
   };
-  const pair = (...items) => h("div", { class: "form-pair" }, ...items);
   dialog = openDialog(
     "wide",
     h(
       "form",
       { class: "stack", onsubmit: send },
-      h("header", null, h("h2", { class: "grow" }, t("pve.new.title", { name: x.name })), closeX(() => dialog)),
-      h("p", { class: "muted small" }, t("pve.new.lead")),
+      h("header", null, title, closeX(() => dialog)),
+      seg,
+      lead,
       pair(field(t("pve.new.hostname"), hostname, t("pve.new.hostnameHint")), field("ID", vmid, o.ids ? t("pve.new.idsHint", o.ids) : null)),
       o.nodes.length > 1 && field(t("pve.col.node"), node),
-      field(t("pve.new.template"), template, (o.templates[node.value] ?? []).length ? null : t("pve.new.noTemplates")),
+      templateRow,
+      sourceRow,
+      discNote,
       pair(field(t("pve.new.storage"), storage), field(t("pve.new.disk"), disk)),
       pair(field(t("pve.new.cores"), cores), field(t("pve.new.memory"), memory)),
-      pair(field(t("pve.new.bridge"), bridge), field(t("pve.new.how"), how)),
+      netRow,
       fixed,
+      signRow,
       (o.pools.length > 0 || !o.free) && field(t("pve.pool"), pool, o.free ? null : t("pve.new.poolHint")),
       clientRow,
       dockerRow,
+      startRow,
       onbootRow,
       error,
       h("footer", null, closeButton(() => dialog, t("common.cancel")), h("button", { type: "submit", class: "btn primary" }, icon("plus"), h("span", null, t("pve.new.create")))),
     ),
   );
+  fill();
 }
 
 // --- One Proxmox server ---
@@ -2984,7 +3041,7 @@ function renderPveBody() {
       { class: "app-head", menu: (at) => pveMenu(x, at) },
       h("span", { class: "machine-icon" }, icon("server")),
       h("div", { class: "grow" }, h("div", { class: "app-title" }, h("h1", null, x.name), pveChip(x)), h("p", { class: "meta" }, ["Proxmox VE " + (x.version || ""), x.url, x.at ? t("pve.askedAgo", { ago: ago(x.at) }) : null].filter(Boolean).flatMap((part, i) => (i ? [h("span", { class: "dot-sep" }, "·"), part] : [part])))),
-      h("div", { class: "actions" }, x.online && button(t("pve.new.button"), { class: "primary", onclick: async (e) => ((e.currentTarget.disabled = true), await pveNewDialog(x), (e.target.closest("button").disabled = false)) }, "plus"), button(t("pve.refresh"), { onclick: (e) => refreshPve(x, e.currentTarget) }, "refresh"), h("button", { type: "button", class: "btn square", "aria-label": t("app.more"), onclick: () => pveMenu(x) }, icon("more"))),
+      h("div", { class: "actions" }, x.online && button(t("pve.new.button"), { class: "primary", onclick: async (e) => { const b = e.currentTarget; b.disabled = true; await pveNewDialog(x); b.disabled = false; } }, "plus"), button(t("pve.refresh"), { onclick: (e) => refreshPve(x, e.currentTarget) }, "refresh"), h("button", { type: "button", class: "btn square", "aria-label": t("app.more"), onclick: () => pveMenu(x) }, icon("more"))),
     ),
       h("div", { class: "tabs" }, tab("overview", "grid"), tab("guests", "box"), tab("templates", "archive"), tab("tasks", "logs")),
     ),
@@ -3197,9 +3254,81 @@ function paintPveTemplates(x, box, d) {
     for (const { o, row } of rows) row.hidden = !!q && !`${o.headline} ${o.template} ${o.os} ${o.description}`.toLowerCase().includes(q);
   };
   filter();
+  const keptTable = (list) =>
+    h(
+      "div",
+      { class: "table-wrap" },
+      h(
+        "table",
+        null,
+        h("thead", null, h("tr", null, h("th", null, t("pve.img.col.name")), h("th", null, t("pve.col.storage")), h("th", null, t("pve.tpl.col.size")), h("th"))),
+        h(
+          "tbody",
+          null,
+          list.map((v) =>
+            h(
+              "tr",
+              null,
+              h("td", { class: "mono small wrap" }, v.name),
+              h("td", { class: "small" }, v.storage, d.nodes.length > 1 && h("span", { class: "muted" }, ` · ${v.node}`)),
+              h("td", { class: "small" }, bytes(v.size)),
+              h("td", null, d.removable.includes(v.storage) && button("", { class: "small ghost", title: t("pve.img.remove"), "aria-label": t("pve.img.remove"), onclick: () => pveTemplateRemove(x, v, "img") }, "trash")),
+            ),
+          ),
+        ),
+      ),
+    );
+  const images = d.images ?? { have: [], storages: [], offered: [] };
+  const isos = d.isos ?? { have: [], storages: [] };
+  const imageNames = new Set(images.have.map((v) => v.name));
+  const send = (kind, extra, el) => pveSendDialog({ host: x, kind, ...extra }, el);
   put(
     box,
     d.error && h("p", { class: "card pad warn-box" }, d.error),
+    pveSection(
+      t("pve.img.title"),
+      h(
+        "div",
+        { class: "pve-note first stack-s" },
+        h("p", { class: "muted small" }, t("pve.img.lead")),
+        !images.storages.length && h("p", { class: "banner small" }, t("pve.img.noRight")),
+      ),
+      images.have.length > 0 && keptTable(images.have),
+      h(
+        "div",
+        { class: "table-wrap" },
+        h(
+          "table",
+          null,
+          h("thead", null, h("tr", null, h("th", null, t("pve.img.col.system")), h("th", null, t("pve.img.col.file")), h("th"))),
+          h(
+            "tbody",
+            null,
+            images.offered.map((o) =>
+              h(
+                "tr",
+                null,
+                h("td", { class: "strong" }, o.name),
+                h("td", { class: "muted small mono wrap" }, o.file),
+                h("td", null, imageNames.has(o.file) ? h("span", { class: "chip" }, t("pve.tpl.have")) : images.storages.length > 0 && button(t("pve.tpl.download"), { class: "small", onclick: (e) => send("import", { image: o }, e.currentTarget) }, "download")),
+              ),
+            ),
+          ),
+        ),
+      ),
+      images.storages.length > 0 && h("div", { class: "pve-note actions" }, button(t("pve.img.fromLink"), { class: "small", onclick: (e) => send("import", {}, e.currentTarget) }, "link")),
+    ),
+    pveSection(
+      t("pve.iso.title"),
+      h(
+        "div",
+        { class: "pve-note first stack-s" },
+        h("p", { class: "muted small" }, t("pve.iso.lead")),
+        !isos.storages.length && h("p", { class: "banner small" }, t("pve.iso.noRight")),
+      ),
+      isos.have.length > 0 && keptTable(isos.have),
+      isos.storages.length > 0 && h("div", { class: "pve-note actions" }, button(t("pve.img.fromLink"), { class: "small", onclick: (e) => send("iso", {}, e.currentTarget) }, "link")),
+    ),
     pveSection(
       t("pve.tpl.haveTitle"),
       d.have.length
@@ -3236,17 +3365,17 @@ function paintPveTemplates(x, box, d) {
   );
 }
 
-function pveTemplateRemove(x, v) {
+function pveTemplateRemove(x, v, kind = "tpl") {
   let dialog;
   dialog = openDialog(
     "confirm",
-    h("h2", { class: "wrap" }, t("pve.tpl.removeTitle", { name: v.name })),
-    h("p", { class: "muted" }, t("pve.tpl.removeLead", { storage: v.storage })),
+    h("h2", { class: "wrap" }, t(`pve.${kind}.removeTitle`, { name: v.name })),
+    h("p", { class: "muted" }, t(`pve.${kind}.removeLead`, { storage: v.storage })),
     h(
       "footer",
       null,
       closeButton(() => dialog, t("common.cancel")),
-      button(t("pve.tpl.remove"), {
+      button(t(kind === "img" ? "pve.img.remove" : "pve.tpl.remove"), {
         class: "danger",
         onclick: async (e) => {
           e.currentTarget.disabled = true;
@@ -3263,6 +3392,89 @@ function pveTemplateRemove(x, v) {
       }, "trash"),
     ),
   );
+}
+
+const PVE_SEND_RE = /\.(iso|img|qcow2|raw|vmdk)$/i;
+
+/**
+ * Puts a disk image or a disc on a storage of a Proxmox server: a cloud image Hata knows (`image`), a file
+ * from a link, or a file of this server (`path`, from Files). Without `host` the person chooses the server.
+ */
+async function pveSendDialog({ host = null, kind = "import", image = null, path = "" }, el = null) {
+  if (el) el.disabled = true;
+  let hosts;
+  try {
+    hosts = host ? [host] : (await api("GET", "/api/proxmox")).hosts.filter((x) => x.online);
+  } catch (e) {
+    if (el) el.disabled = false;
+    return toast(errorText(e), "error");
+  }
+  if (el) el.disabled = false;
+  if (!hosts.length) return toast(t("pve.send.noHost"), "error");
+  const opt = (value, label = value) => h("option", { value }, label);
+  const server = h("select", { onchange: () => void places() }, hosts.map((x) => opt(x.id, x.name)));
+  const what = h("select", { onchange: () => void places() }, opt("iso", t("pve.send.iso")), opt("import", t("pve.send.import")));
+  what.value = path ? (/\.iso$/i.test(path) ? "iso" : /\.(qcow2|raw|vmdk)$/i.test(path) ? "import" : kind) : kind;
+  const where = h("select");
+  const url = h("input", { type: "url", required: !image && !path, placeholder: "https://…", class: "mono", spellcheck: false });
+  const checksum = h("input", { class: "mono small", spellcheck: false, placeholder: "sha256 / sha512" });
+  const error = h("p", { class: "error", role: "alert" });
+  const lists = new Map();
+  const places = async () => {
+    error.textContent = "";
+    let d = lists.get(server.value);
+    if (!d) {
+      try {
+        d = await api("GET", `/api/proxmox/${server.value}/templates`);
+        lists.set(server.value, d);
+      } catch (e) {
+        error.textContent = errorText(e);
+        return;
+      }
+    }
+    const list = (what.value === "iso" ? d.isos : d.images)?.storages ?? [];
+    where.replaceChildren(...list.map((s) => opt(`${s.node}/${s.storage}`, `${d.nodes.length > 1 ? `${s.storage} (${s.node})` : s.storage} · ${t("pve.send.free", { size: bytes(s.free) })}`)));
+    if (!list.length) error.textContent = t(what.value === "iso" ? "pve.iso.noRight" : "pve.img.noRight");
+  };
+  let dialog;
+  const submit = async (e) => {
+    e.preventDefault();
+    const go = dialog.querySelector("button[type=submit]");
+    if (!where.value) return;
+    go.disabled = true;
+    error.textContent = "";
+    const [node, storage] = where.value.split("/");
+    try {
+      const r = await api("POST", `/api/proxmox/${server.value}/files`, { kind: what.value, node, storage, ...(image ? { image: image.id } : path ? { path } : { url: url.value.trim() }), checksum: checksum.value.trim() });
+      dialog.close();
+      const name = image ? image.file : (path || url.value).split("/").pop();
+      void jobDialog(r.job, "upload", name, () => {
+        toast(t("pve.send.done", { name }));
+        pveUi.templates = null;
+        if (state.route.view === "proxmox") renderPveBody();
+      });
+    } catch (err) {
+      error.textContent = errorText(err);
+      go.disabled = false;
+    }
+  };
+  dialog = openDialog(
+    "wide",
+    h(
+      "form",
+      { class: "stack", onsubmit: submit },
+      h("header", null, h("h2", { class: "grow wrap" }, image ? t("pve.send.imageTitle", { name: image.name }) : path ? t("pve.send.fileTitle", { name: path.split("/").pop() }) : t(kind === "iso" ? "pve.send.isoTitle" : "pve.send.linkTitle")), closeX(() => dialog)),
+      h("p", { class: "muted small" }, t(image ? "pve.send.imageLead" : path ? "pve.send.fileLead" : "pve.send.linkLead")),
+      hosts.length > 1 && field(t("pve.send.server"), server),
+      path && field(t("pve.send.what"), what),
+      !image && !path && field(t("pve.send.url"), url, t(kind === "iso" ? "pve.send.urlIsoHint" : "pve.send.urlHint")),
+      field(t("pve.send.where"), where),
+      !image && field(t("pve.send.checksum"), checksum, t("pve.send.checksumHint")),
+      error,
+      h("footer", null, closeButton(() => dialog, t("common.cancel")), h("button", { type: "submit", class: "btn primary" }, icon("upload"), h("span", null, t("pve.send.go")))),
+    ),
+  );
+  await places();
 }
 
 /** What a storage holds, the largest first: whose each thing is, what is left of guests that are gone */
@@ -3743,7 +3955,7 @@ function pveGuestDialog(x, g) {
     h("header", null, h("span", { class: "machine-icon" }, icon(g.type === "lxc" ? "box" : "server")), h("div", { class: "grow" }, h("h2", null, g.name), h("p", { class: "muted small" }, guestKind(g), " · ", guestChip(g))), closeX(() => dialog)),
     h(
       "div",
-      { class: "row-actions" },
+      { class: "row-actions wrap" },
       !up && act(t("pve.start"), "play", g.status === "paused" ? "resume" : "start", "primary"),
       up && act(t("pve.shutdown"), "stop", "shutdown"),
       up && act(t("pve.reboot"), "refresh", "reboot"),
@@ -6093,6 +6305,8 @@ async function loadFiles() {
 }
 
 function renderFiles() {
+  // whether a Proxmox server is there to send a disc to, from a file's menu
+  if (isAdmin() && !pveUi.list) void api("GET", "/api/proxmox").then((list) => (pveUi.list ??= list), () => {});
   const box = h("div", { class: "files" }, h("aside", { class: "files-side fold", id: "files-places" }), h("section", { class: "stack", id: "files-main" }));
   box.addEventListener("contextmenu", filesContext);
   // files and folders dropped anywhere on the page go into the folder on screen
@@ -7109,6 +7323,7 @@ function entryMenu(entry, at) {
     entry.type === "file" && entry.size <= TEXT_MAX && !["image", "video", "audio", "pdf"].includes(kind) && item(t("files.edit"), "edit", () => textDialog(path)),
     entry.type !== "other" && item(t(entry.type === "dir" ? "files.downloadZip" : "files.download"), "download", () => downloadEntries([entry])),
     entry.type === "file" && ARCHIVE_RE.test(entry.name) && !state.files.readOnly && !filesMachine() && isAdmin() && item(t("files.extract"), "archive", () => extractArchive(path)),
+    entry.type === "file" && PVE_SEND_RE.test(entry.name) && !filesMachine() && isAdmin() && pveUi.list?.hosts?.length !== 0 && item(t("pve.send.menu"), "upload", () => pveSendDialog({ path })),
     item(t("files.copyPath"), "link", () => copyText(path)),
     entry.type !== "other" && !filesMachine() && item(t(isFavorite(path) ? "files.unfavorite" : "files.favorite"), "star", () => favorite(path, !isFavorite(path), entry.name)),
     entry.type === "dir" && !filesMachine() && isAdmin() && (state.files.pinned.includes(path) ? item(t("files.unpin"), "home", () => pinFolder(path, false)) : item(t("files.pin"), "home", () => pinFolder(path, true))),

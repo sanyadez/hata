@@ -557,6 +557,7 @@ body:has(> .assistant-fab) .files { min-height: calc(100dvh - 204px); }
 .path .ico { width: 14px; height: 14px; color: var(--faint); }
 :is(select, .select-btn).sort { width: auto; }
 .seg { display: flex; }
+.select-group { padding: 8px 12px 2px; font-weight: 600; }
 .seg .btn { border-radius: 0; color: var(--muted); }
 .seg .btn:first-child { border-radius: var(--radius-sm) 0 0 var(--radius-sm); }
 .seg .btn:last-child { border-radius: 0 var(--radius-sm) var(--radius-sm) 0; margin-left: -1px; }

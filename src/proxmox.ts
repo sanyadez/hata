@@ -13,7 +13,7 @@
  * the servers are often small —, the tasks every minute, the guests' configurations and the disks'
  * health every few minutes. A server that does not answer is asked again at the same pace.
  */
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { request } from "node:https";
 import { networkInterfaces, tmpdir } from "node:os";
 import { connect, type TLSSocket } from "node:tls";
@@ -25,7 +25,7 @@ import { SECRETS_DIR } from "./config";
 import { readJsonFile, writeJsonAtomic } from "./fsutil";
 import { invite, machines } from "./machines";
 import { acceptFor, BINARY, CLOSE, encodeFrame, FrameReader, PING, PONG, PVE_PING, sized, TEXT, typed } from "./wsframe";
-import { cleanFingerprint, cleanUrl, failed, GUEST_RE, guestOfMachine as findGuest, guestRights, mayPath, POWER, readConfig, readResources, readTask, SECRET_RE, SNAPSHOT_RE, snapshotName, TOKEN_RE, trouble, clientLine, hostKeysIn, nextId, readNewGuest, readSettings, restoreParams, cloneParams, readVersions, readContent, type Versions, type Volume, settingsChange, cleanSchedule, readRrd, TIMEFRAMES, archOf, readOffered, TEMPLATE_RE, type Offered, dayOf, scheduleDue, scheduled, toPrune, SCHEDULE_MARK, type Schedule, setupScript, type NewOptions, type SettingsChange, type Guest, type GuestConfig, type Permissions, type PveItem, type Resource, type Task, type Watched } from "./pve";
+import { cleanFingerprint, cleanUrl, failed, GUEST_RE, guestOfMachine as findGuest, guestRights, mayPath, POWER, readConfig, readResources, readTask, SECRET_RE, SNAPSHOT_RE, snapshotName, TOKEN_RE, trouble, clientLine, hostKeysIn, nextId, readNewGuest, readSettings, restoreParams, cloneParams, readVersions, readContent, type Versions, type Volume, settingsChange, cleanSchedule, readRrd, TIMEFRAMES, archOf, readOffered, TEMPLATE_RE, type Offered, dayOf, scheduleDue, scheduled, toPrune, SCHEDULE_MARK, type Schedule, setupScript, gibOf, cloudImages, sumFor, uploadName, readNewVm, vmSetupLine, ISO_RE, IMPORT_RE, type CloudImage, type NewVm, type NewVmOptions, type UploadKind, type NewOptions, type SettingsChange, type Guest, type GuestConfig, type Permissions, type PveItem, type Resource, type Task, type Watched } from "./pve";
 
 const FILE = join(SECRETS_DIR, "proxmox.json");
 const ID_RE = /^[a-f0-9]{8}$/;
@@ -264,6 +264,16 @@ async function look(h: Host, all = false): Promise<void> {
 }
 
 /** Keeps every server's picture fresh, and runs Hata's schedules of backups when their time comes */
+/**
+ * What a question about rights needs: what was said in the last minute, with the rights read. Right after
+ * a start the first round may still be on its way (then it is waited for) and the rights come with it.
+ */
+async function readNow(h: Host): Promise<void> {
+  for (let i = 0; i < 120 && liveOf(h).busy; i++) await Bun.sleep(250);
+  const l = liveOf(h);
+  if (Date.now() - l.at > 60_000 || !Object.keys(l.perms).length) await look(h, !Object.keys(l.perms).length);
+}
+
 export function startProxmox(): void {
   const tick = () => {
     for (const h of state.hosts) void look(h);
@@ -943,29 +953,69 @@ export async function load(id: string, input: { node?: string | null; guest?: st
 /** Proxmox's list of templates changes rarely: asked once an hour */
 const offered = new Map<string, { at: number; list: Offered[] }>();
 
-/** What can be downloaded, what is there already, and where the token may keep templates */
+/** A node's processor, asked once: it does not change */
+const arches = new Map<string, string>();
+
+async function archOfNode(h: Host, node: string): Promise<string> {
+  const key = `${h.id}/${node}`;
+  if (!arches.has(key)) {
+    const arch = archOf(await pve<{ cpuinfo?: { flags?: string } }>(h, "GET", `/nodes/${node}/status`).catch(() => ({})));
+    if (arch) arches.set(key, arch);
+    return arch;
+  }
+  return arches.get(key)!;
+}
+
+/** A file a storage keeps: a template, a disk image, a disc */
+interface Kept {
+  node: string;
+  storage: string;
+  volid: string;
+  name: string;
+  size: number;
+  at: number;
+}
+
+/** What the storages of the online nodes keep of one kind, a shared storage listed once */
+async function keptOf(h: Host, l: Live, nodes: string[], kind: "vztmpl" | UploadKind): Promise<Kept[]> {
+  const have: Kept[] = [];
+  for (const s of l.storages.filter((x) => x.active && x.content.includes(kind) && nodes.includes(x.node))) {
+    if (s.shared && have.some((x) => x.storage === s.name)) continue;
+    const content = await pve<{ volid: string; size?: number; ctime?: number }[]>(h, "GET", `/nodes/${s.node}/storage/${s.name}/content`, { content: kind }).catch(() => []);
+    for (const c of content) have.push({ node: s.node, storage: s.name, volid: c.volid, name: c.volid.split("/").pop() ?? c.volid, size: c.size ?? 0, at: (c.ctime ?? 0) * 1000 });
+  }
+  return have.sort((a, b) => a.name.localeCompare(b.name, "en", { numeric: true }));
+}
+
+/** Where the token may put files of a kind: Datastore.AllocateTemplate on a storage that takes them */
+function keepers(l: Live, nodes: string[], kind: "vztmpl" | UploadKind) {
+  return l.storages.filter((s) => s.active && s.content.includes(kind) && nodes.includes(s.node) && mayPath(l.perms, `/storage/${s.name}`, "Datastore.AllocateTemplate")).map((s) => ({ node: s.node, storage: s.name, free: Math.max(0, s.total - s.used) }));
+}
+
+/** What can be downloaded, what is there already, and where the token may keep it: templates of containers, disk images, discs */
 export async function templates(id: string) {
   const h = hostOf(id);
+  await readNow(h);
   const l = liveOf(h);
   const nodes = l.nodes.filter((n) => n.online).map((n) => n.name);
   const node = nodes[0];
   let list = offered.get(h.id);
+  const arch = node ? await archOfNode(h, node) : "";
   if (node && (!list || Date.now() - list.at > 3600_000)) {
-    const arch = archOf(await pve<{ cpuinfo?: { flags?: string } }>(h, "GET", `/nodes/${node}/status`).catch(() => ({})));
     list = { at: Date.now(), list: readOffered(await pve<Record<string, unknown>[]>(h, "GET", `/nodes/${node}/aplinfo`).catch(() => []), arch) };
     offered.set(h.id, list);
   }
-  const have: { node: string; storage: string; volid: string; name: string; size: number; at: number }[] = [];
-  for (const s of l.storages.filter((x) => x.active && x.content.includes("vztmpl") && nodes.includes(x.node))) {
-    // a shared storage is the same on every node: listed once
-    if (s.shared && have.some((x) => x.storage === s.name)) continue;
-    const content = await pve<{ volid: string; size?: number; ctime?: number }[]>(h, "GET", `/nodes/${s.node}/storage/${s.name}/content`, { content: "vztmpl" }).catch(() => []);
-    for (const c of content) have.push({ node: s.node, storage: s.name, volid: c.volid, name: c.volid.split("/").pop() ?? c.volid, size: c.size ?? 0, at: (c.ctime ?? 0) * 1000 });
-  }
-  const storages = l.storages.filter((s) => s.active && s.content.includes("vztmpl") && nodes.includes(s.node) && mayPath(l.perms, `/storage/${s.name}`, "Datastore.AllocateTemplate")).map((s) => ({ node: s.node, storage: s.name }));
   // deleting a file of a storage is a right of its own, wider than keeping templates there: it reaches backups too
   const removable = [...new Set(l.storages.filter((s) => mayPath(l.perms, `/storage/${s.name}`, "Datastore.Allocate")).map((s) => s.name))];
-  return { nodes, offered: list?.list ?? [], have: have.sort((a, b) => a.name.localeCompare(b.name, "en", { numeric: true })), storages, removable };
+  return {
+    nodes,
+    offered: list?.list ?? [],
+    have: await keptOf(h, l, nodes, "vztmpl"),
+    storages: keepers(l, nodes, "vztmpl"),
+    removable,
+    images: { have: await keptOf(h, l, nodes, "import"), storages: keepers(l, nodes, "import"), offered: cloudImages(arch).map(({ id, name, file, url }) => ({ id, name, file, url })) },
+    isos: { have: await keptOf(h, l, nodes, "iso"), storages: keepers(l, nodes, "iso") },
+  };
 }
 
 export async function downloadTemplate(id: string, input: Record<string, unknown>, by: string) {
@@ -991,8 +1041,8 @@ export async function downloadTemplate(id: string, input: Record<string, unknown
 
 export async function removeTemplate(id: string, input: Record<string, unknown>, by: string) {
   const h = hostOf(id);
-  const { have, removable } = await templates(id);
-  const t = have.find((x) => x.volid === input.volid && x.node === input.node);
+  const { have, removable, images, isos } = await templates(id);
+  const t = [...have, ...images.have, ...isos.have].find((x) => x.volid === input.volid && x.node === input.node);
   if (!t) throw new AppError("pve.template.unknown", 404);
   if (!removable.includes(t.storage)) throw new AppError("pve.template.noRemove", 403, { name: h.name, storage: t.storage });
   const upid = await pve<string | null>(h, "DELETE", `/nodes/${t.node}/storage/${t.storage}/content/${encodeURIComponent(t.volid)}`);
@@ -1001,18 +1051,190 @@ export async function removeTemplate(id: string, input: Record<string, unknown>,
   return { ok: true };
 }
 
+// --- Disk images and discs sent to a storage --------------------------------------------------------
+
+/**
+ * Sends a file to a storage (`POST …/storage/<s>/upload`) over a connection checked like every request,
+ * as one multipart body streamed from `chunks`: Proxmox needs its length beforehand. With a checksum
+ * Proxmox itself compares the file once it has it all. The answer is the task that moves the file in.
+ */
+async function upload(h: Host, node: string, storage: string, kind: UploadKind, name: string, size: number, chunks: AsyncIterator<Uint8Array>, first: Uint8Array, checksum: { algorithm: string; value: string } | null, log: Log): Promise<string> {
+  const { socket, shown } = await reach(h.url);
+  if (h.fingerprint ? shown.fingerprint !== h.fingerprint : !shown.trusted) {
+    socket.destroy();
+    throw new AppError("pve.certChanged", 409, { name: h.name, fingerprint: shown.fingerprint });
+  }
+  // a large file is read by Proxmox before it answers: the connection may stay quiet that long
+  socket.setTimeout(0);
+  const boundary = "----hata" + Buffer.from(crypto.getRandomValues(new Uint8Array(12))).toString("hex");
+  const part = (field: string, value: string) => `--${boundary}\r\nContent-Disposition: form-data; name="${field}"\r\n\r\n${value}\r\n`;
+  const head = Buffer.from(part("content", kind) + (checksum ? part("checksum-algorithm", checksum.algorithm) + part("checksum", checksum.value) : "") + `--${boundary}\r\nContent-Disposition: form-data; name="filename"; filename="${name}"\r\nContent-Type: application/octet-stream\r\n\r\n`);
+  const tail = Buffer.from(`\r\n--${boundary}--\r\n`);
+  const u = new URL(h.url);
+  return new Promise<string>((resolve, reject) => {
+    let settled = false;
+    const fail = (e: unknown) => {
+      if (settled) return;
+      settled = true;
+      socket.destroy();
+      reject(e instanceof AppError ? e : new AppError("pve.unreachable", 502, { name: h.name, message: (e as NodeJS.ErrnoException)?.code ?? String((e as Error)?.message ?? e) }));
+    };
+    const req = request(
+      {
+        host: u.hostname,
+        port: Number(u.port || 443),
+        method: "POST",
+        path: `/api2/json/nodes/${node}/storage/${storage}/upload`,
+        createConnection: () => socket,
+        headers: { ...auth(h, "POST"), Accept: "application/json", Connection: "close", "Content-Type": `multipart/form-data; boundary=${boundary}`, "Content-Length": head.length + size + tail.length },
+      } as Parameters<typeof request>[0],
+      (res) => {
+        const parts: Buffer[] = [];
+        res.on("data", (c: Buffer) => parts.push(c));
+        res.on("end", () => {
+          if (settled) return;
+          settled = true;
+          let body: { data?: unknown; errors?: Record<string, string> } = {};
+          try {
+            body = JSON.parse(Buffer.concat(parts).toString("utf8"));
+          } catch {}
+          const status = res.statusCode ?? 0;
+          const message = [res.statusMessage ?? "", ...Object.entries(body.errors ?? {}).map(([k, v]) => `${k}: ${String(v).trim()}`)].filter(Boolean).join("; ").slice(0, 400);
+          if (status === 401) return reject(new AppError("pve.badToken", 401, { name: h.name }));
+          if (status === 403) return reject(new AppError("pve.denied", 403, { name: h.name, message }));
+          if (status >= 400 || typeof body.data !== "string") return reject(new AppError("pve.failed", 502, { name: h.name, message: message || String(status) }));
+          resolve(body.data);
+        });
+      },
+    );
+    req.on("error", fail);
+    const write = (b: Uint8Array) => (req.write(b) ? Promise.resolve() : new Promise<void>((r) => req.once("drain", () => r())));
+    void (async () => {
+      let sent = 0;
+      let said = Date.now();
+      const step = async (b: Uint8Array) => {
+        sent += b.length;
+        if (sent > size) throw new AppError("pve.upload.size", 409, { name });
+        await write(b);
+        if (Date.now() - said > 5000) {
+          said = Date.now();
+          log(`${Math.floor((sent / size) * 100)}% · ${(sent / 1e9).toFixed(2)} of ${(size / 1e9).toFixed(2)} GB`);
+        }
+      };
+      await write(head);
+      if (first.length) await step(first);
+      for (;;) {
+        const { value, done } = await chunks.next();
+        if (done) break;
+        await step(value);
+      }
+      if (sent !== size) throw new AppError("pve.upload.size", 409, { name });
+      log(`100% · ${(size / 1e9).toFixed(2)} GB; Proxmox puts it in place`);
+      req.end(tail);
+    })().catch(fail);
+  });
+}
+
+/** A checksum given by the person: its algorithm by its length */
+function checksumOf(value: unknown): { algorithm: string; value: string } | null {
+  const v = typeof value === "string" ? value.trim().toLowerCase().replace(/^(sha256|sha512|sha1|md5)[:=]/, "") : "";
+  if (!v) return null;
+  const algorithm = ({ 32: "md5", 40: "sha1", 64: "sha256", 128: "sha512" } as Record<number, string>)[v.length];
+  if (!algorithm || !/^[0-9a-f]+$/.test(v)) throw new AppError("pve.upload.badChecksum", 400);
+  return { algorithm, value: v };
+}
+
+/**
+ * A disk image or a disc put on a storage: one of the cloud images Hata knows (with its published
+ * checksum), a file from a link, or a file of this server. It passes through Hata as it comes —
+ * nothing is kept here; Proxmox's own download needs a right on the node (Sys.Modify) a token is rarely given.
+ */
+export async function sendFile(id: string, input: Record<string, unknown>, by: string) {
+  const h = hostOf(id);
+  await readNow(h);
+  const l = liveOf(h);
+  const nodes = l.nodes.filter((n) => n.online).map((n) => n.name);
+  const kind: UploadKind = input.kind === "iso" ? "iso" : "import";
+  const node = String(input.node ?? "");
+  const storage = String(input.storage ?? "");
+  const where = keepers(l, nodes, kind).find((s) => s.node === node && s.storage === storage);
+  if (!where) throw new AppError("pve.upload.storage", 400, { name: h.name });
+  let image: CloudImage | undefined;
+  let from: string;
+  let checksum = checksumOf(input.checksum);
+  if (typeof input.image === "string") {
+    image = cloudImages(await archOfNode(h, node)).find((x) => x.id === input.image);
+    if (!image || kind !== "import") throw new AppError("pve.template.unknown", 404);
+    from = image.url;
+  } else if (typeof input.url === "string" && /^https?:\/\/[^\s]+$/i.test(input.url.trim())) {
+    from = input.url.trim();
+  } else if (typeof input.path === "string" && input.path.startsWith("/")) {
+    from = input.path;
+    const st = statSync(from, { throwIfNoEntry: false });
+    if (!st?.isFile()) throw new AppError("files.notFound", 404);
+  } else throw new AppError("pve.upload.from", 400);
+  const have = await keptOf(h, l, [node], kind);
+  // what the file will be called is known before anything is downloaded, but for a disk image's extension
+  const guess = image ? image.file : uploadName(from, kind, new Uint8Array(0));
+  const stem = (n: string) => (kind === "import" ? n.replace(/\.[^.]+$/, "") : n);
+  const taken = guess && have.find((x) => x.storage === storage && stem(x.name) === stem(guess));
+  if (taken) throw new AppError("pve.upload.exists", 409, { name: taken.name, storage });
+  const label = image ? image.file : from;
+  const job = startJob(`pve:${h.id}:upload:${label.split("/").pop()}`, "upload", by, async (log) => {
+    try {
+      let size: number;
+      let chunks: AsyncIterator<Uint8Array>;
+      if (from.startsWith("/")) {
+        size = statSync(from).size;
+        chunks = (Bun.file(from).stream() as unknown as AsyncIterable<Uint8Array>)[Symbol.asyncIterator]();
+      } else {
+        if (image) {
+          log(`${image.sums}`);
+          const sums = await fetch(image.sums, { signal: AbortSignal.timeout(30_000) });
+          const value = sums.ok ? sumFor(await sums.text(), image.listed) : null;
+          if (!value) throw new AppError("pve.upload.noChecksum", 502, { message: image.sums });
+          checksum = { algorithm: image.algorithm, value };
+        }
+        log(from);
+        const res = await fetch(from, { redirect: "follow" });
+        size = Number(res.headers.get("content-length") ?? NaN);
+        if (!res.ok || !res.body) throw new AppError("pve.upload.fetch", 502, { message: `${res.status} ${res.statusText}` });
+        if (!Number.isFinite(size) || size <= 0) throw new AppError("pve.upload.noSize", 409);
+        chunks = (res.body as unknown as AsyncIterable<Uint8Array>)[Symbol.asyncIterator]();
+      }
+      // the name needs the first bytes: Proxmox reads a disk image's format from its extension
+      const firstRead = await chunks.next();
+      const first = firstRead.done ? new Uint8Array(0) : firstRead.value;
+      const name = image ? image.file : uploadName(from, kind, first);
+      if (!name || !(kind === "iso" ? ISO_RE : IMPORT_RE).test(name)) throw new AppError("pve.upload.badName", 400);
+      if (have.some((x) => x.storage === storage && x.name === name)) throw new AppError("pve.upload.exists", 409, { name, storage });
+      // Proxmox keeps the whole upload in a folder of its own system disk before moving it in
+      if (size > where.free) throw new AppError("pve.upload.noRoom", 409, { storage, size });
+      log(`${h.name} / ${node}: ${name} → ${storage}${checksum ? ` (${checksum.algorithm} checked by Proxmox)` : ""}`);
+      await followTask(h, node, await upload(h, node, storage, kind, name, size, chunks, first, checksum, log), log, 30 * 60_000);
+      record("pve.upload.done", { user: by, detail: `${h.name}: ${name} → ${storage}` });
+    } catch (e) {
+      if (e instanceof AppError && e.detail.message) log(String(e.detail.message));
+      throw e;
+    }
+  }, true, { app: label.split("/").pop() ?? label, machine: h.name });
+  return { job: job.id };
+}
+
 // --- A new container with Hata's client -------------------------------------------------------------
 
-/** What the server offers for a new container: templates, storages, bridges and pools the token may use */
-export async function newOptions(id: string): Promise<NewOptions & { next: number | null; offer: boolean }> {
+/** What the server offers for a new guest: templates, images, discs, storages, bridges and pools the token may use */
+export async function newOptions(id: string): Promise<NewVmOptions & { next: number | null; offer: boolean }> {
   const h = hostOf(id);
-  // what was said in the last minute is fresh enough; the rights and pools come with the slower round
-  if (Date.now() - liveOf(h).at > 60_000) await look(h);
+  await readNow(h);
   const l = liveOf(h);
   const nodes = l.nodes.filter((n) => n.online).map((n) => n.name);
   const templates: Record<string, string[]> = {};
   const storages: Record<string, string[]> = {};
   const bridges: Record<string, string[]> = {};
+  const disks: Record<string, string[]> = {};
+  const images: Record<string, string[]> = {};
+  const isos: Record<string, string[]> = {};
   for (const node of nodes) {
     const here = l.storages.filter((s) => s.node === node && s.active);
     templates[node] = [];
@@ -1021,6 +1243,17 @@ export async function newOptions(id: string): Promise<NewOptions & { next: numbe
       templates[node]!.push(...list.map((x) => x.volid));
     }
     storages[node] = here.filter((s) => s.content.includes("rootdir") && mayPath(l.perms, `/storage/${s.name}`, "Datastore.AllocateSpace")).map((s) => s.name);
+    disks[node] = here.filter((s) => s.content.includes("images") && mayPath(l.perms, `/storage/${s.name}`, "Datastore.AllocateSpace")).map((s) => s.name);
+    // a disc or an image the token may not read is no use to a new guest
+    images[node] = [];
+    isos[node] = [];
+    for (const s of here.filter((x) => (x.content.includes("import") || x.content.includes("iso")) && (mayPath(l.perms, `/storage/${x.name}`, "Datastore.AllocateSpace") || mayPath(l.perms, `/storage/${x.name}`, "Datastore.Audit")))) {
+      for (const kind of ["import", "iso"] as const) {
+        if (!s.content.includes(kind)) continue;
+        const list = await pve<{ volid: string }[]>(h, "GET", `/nodes/${node}/storage/${s.name}/content`, { content: kind }).catch(() => []);
+        (kind === "import" ? images : isos)[node]!.push(...list.map((x) => x.volid).filter((v) => kind === "iso" || /\.(qcow2|raw|vmdk)$/.test(v)));
+      }
+    }
     const nets = await pve<{ iface: string }[]>(h, "GET", `/nodes/${node}/network`, { type: "any_bridge" }).catch(() => []);
     bridges[node] = nets.map((n) => n.iface).filter((b) => mayPath(l.perms, `/sdn/zones/localnetwork/${b}`, "SDN.Use")).sort();
   }
@@ -1029,7 +1262,7 @@ export async function newOptions(id: string): Promise<NewOptions & { next: numbe
   const named = Object.keys(l.perms).flatMap((path) => /^\/pool\/([^/]+)$/.exec(path)?.[1] ?? []);
   const pools = [...new Set([...listed, ...named])].filter((p) => mayPath(l.perms, `/pool/${p}`, "VM.Allocate")).sort();
   const free = mayPath(l.perms, "/vms", "VM.Allocate");
-  const o: NewOptions = { nodes, templates, storages, bridges, pools, free, ids: h.ids ?? null, taken: l.guests.map((g) => g.vmid) };
+  const o: NewVmOptions = { nodes, templates, storages, bridges, pools, free, ids: h.ids ?? null, taken: l.guests.map((g) => g.vmid), disks, images, isos };
   return { ...o, next: nextId(o), offer: free || pools.length > 0 };
 }
 
@@ -1128,6 +1361,88 @@ export async function createGuest(id: string, input: Record<string, unknown>, by
       void look(h, true);
     }
   }, true, { app: g.hostname, machine: h.name });
+  return { job: job.id, vmid: g.vmid };
+}
+
+/**
+ * A new virtual machine. From a disk image: Proxmox imports the image as its disk, cloud-init makes a
+ * user with a password, and Hata — with no key and no address needed — signs in on the machine's serial
+ * console, as on a container's, installs the guest agent, Docker when asked and its client, then locks
+ * the password when it was Hata's. From a disc: an empty disk and the disc, for the person to install
+ * from on the machine's screen.
+ */
+export async function createVm(id: string, input: Record<string, unknown>, by: string, hata: string) {
+  const h = hostOf(id);
+  const o = await newOptions(id);
+  let g: NewVm;
+  try {
+    g = readNewVm(input, o);
+  } catch (e) {
+    throw new AppError("pve.badField", 400, { field: (e as { field?: string }).field ?? "" });
+  }
+  const path = `/nodes/${g.node}/qemu/${g.vmid}`;
+  const job = startJob(`pve:${h.id}:${g.vmid}`, "guest", by, async (log) => {
+    let t: Typist | null = null;
+    try {
+      log(`Proxmox ${h.name}: VM ${g.vmid} ${g.name}`);
+      await followTask(h, g.node, await pve<string>(h, "POST", `/nodes/${g.node}/qemu`, g.params), log, 30 * 60_000);
+      await pve(h, "PUT", `${path}/config`, g.later);
+      // an image's disk is as large as the image made it: grown to what was asked, cloud-init grows the system into it
+      const disk = /size=([^,]+)/.exec(String((await pve<Record<string, unknown>>(h, "GET", `${path}/config`)).scsi0 ?? ""))?.[1];
+      if (g.from === "image" && disk && gibOf(disk) < g.disk) {
+        log(`Disk: ${disk} → ${g.disk}G`);
+        const upid = await pve<string | null>(h, "PUT", `${path}/resize`, { disk: "scsi0", size: `${g.disk}G` });
+        if (typeof upid === "string" && upid.startsWith("UPID:")) await waitTask(h, g.node, upid, 60_000);
+      }
+      record("pve.guest.created", { user: by, detail: `${g.name} (${g.vmid}, ${h.name})` });
+      void look(h, true);
+      if (!g.start) return;
+      log("Starting");
+      await followTask(h, g.node, await pve<string>(h, "POST", `${path}/status/start`), log, 2 * 60_000);
+      if (!g.client) return;
+      const config = readConfig(await pve<Record<string, unknown>>(h, "GET", `${path}/config`));
+      // the console from the first moment: the system's start is seen in the log
+      const con = await consoleOf(h, { node: g.node, type: "qemu", vmid: g.vmid, name: g.name } as Guest, 160, 40);
+      t = typist(con, log, g.name, () => g.password);
+      try {
+        log("Waiting for the system to start");
+        const prompt = await t.signIn(g.user, g.password, 5 * 60_000, 3 * 60_000);
+        log(`Signed in to ${g.name} as ${g.user}`);
+        if (prompt === "$") {
+          const mark = t.at();
+          t.type("sudo -i\r");
+          if (!(await t.until(/# $/, 30_000, mark))) throw new AppError("pve.noSudo", 409, { name: g.name });
+        }
+        const { code } = await invite(by);
+        const before = new Set(machines().map((m) => m.id));
+        t.speak();
+        if ((await t.run(vmSetupLine(g, `curl -fsSL ${hata.replace(/\/$/, "")}/client/${code} | sh`), 30 * 60_000)) !== 0) throw new AppError("pve.setupFailed", 409, { address: g.name });
+        t.type("exit\r");
+        await Bun.sleep(300);
+        if (prompt === "$") t.type("exit\r");
+        await Bun.sleep(500);
+        log("Waiting for the machine to connect");
+        for (let i = 0; i < 60; i++) {
+          const fresh = machines().find((m) => !before.has(m.id) && (m.info?.hostname === g.name || (m.info?.macs ?? []).some((c) => config.macs.includes(c.mac.toLowerCase()))));
+          if (fresh) {
+            log(`Connected: ${fresh.name}`);
+            job.result = { machine: fresh.id };
+            return;
+          }
+          await Bun.sleep(2000);
+        }
+        throw new AppError("pve.notConnected", 409, { address: g.name });
+      } finally {
+        con.close();
+      }
+    } catch (e) {
+      if (t) for (const line of t.last(6)) log("> " + line);
+      if (e instanceof AppError && e.detail.message) log(String(e.detail.message));
+      throw e;
+    } finally {
+      void look(h, true);
+    }
+  }, true, { app: g.name, machine: h.name });
   return { job: job.id, vmid: g.vmid };
 }
 
@@ -1287,6 +1602,8 @@ async function vncSocket(h: Host, g: Guest, port: number | string, ticket: strin
     socket.destroy();
     throw new AppError("pve.certChanged", 409, { name: h.name, fingerprint: shown.fingerprint });
   }
+  // a console may stay quiet for minutes (a command that prints nothing): the time limit was for reaching it
+  socket.setTimeout(0);
   const u = new URL(h.url);
   const key = Buffer.from(crypto.getRandomValues(new Uint8Array(16))).toString("base64");
   const path = `/api2/json/nodes/${g.node}/${g.type}/${g.vmid}/vncwebsocket?port=${encodeURIComponent(String(port))}&vncticket=${encodeURIComponent(ticket)}`;
@@ -1351,7 +1668,12 @@ export async function openConsole(id: string, guest: string, cols: number, rows:
   const g = guestOf(h, guest);
   if (g.type !== "lxc") throw new AppError("pve.noConsole", 409);
   if (g.status !== "running") throw new AppError("pve.notRunning", 409, { name: g.name });
-  const proxy = await pve<{ port: number | string; ticket: string; user: string }>(h, "POST", `/nodes/${g.node}/lxc/${g.vmid}/termproxy`);
+  return consoleOf(h, g, cols, rows);
+}
+
+/** A container's console, or the serial console of a virtual machine that has one (`serial0: socket`) */
+async function consoleOf(h: Host, g: Guest, cols: number, rows: number): Promise<Console> {
+  const proxy = await pve<{ port: number | string; ticket: string; user: string }>(h, "POST", `/nodes/${g.node}/${g.type}/${g.vmid}/termproxy`, g.type === "qemu" ? { serial: "serial0" } : undefined);
   const ws = await vncSocket(h, g, proxy.port, proxy.ticket);
   let closed = false;
   const con: Console = {
@@ -1424,7 +1746,118 @@ export async function openScreen(key: string): Promise<{ socket: PveSocket; name
 }
 
 /** What a console printed, as lines for a job's log: colours and cursor moves taken out */
-const plain = (text: string) => text.replace(/\x1b\[[0-9;?]*[A-Za-z]|\x1b\][^\x07]*\x07|\x1b[()][A-Z0-9]/g, "").replace(/\r/g, "");
+const plain = (text: string) => text.replace(/\x1b\[[0-9;?!]*[A-Za-z]|\x1b\][^\x07]*\x07|\x1b[()][A-Z0-9]/g, "").replace(/\r/g, "");
+
+/** A console Hata types into and reads, the way a person would */
+interface Typist {
+  type(text: string): void;
+  /** Waits up to `ms` for what the console shows from `from` on to match */
+  until(re: RegExp, ms: number, from?: number): Promise<RegExpExecArray | null>;
+  /** How much has been shown: a mark to read from */
+  at(): number;
+  /** Lines shown from now on go to the log too */
+  speak(): void;
+  /** Signs in as `user` with `password`; a sign-in left half-way is ended first. `wait` — how long the sign-in may take to appear */
+  signIn(user: string, password: string, wait: number, retry?: number): Promise<"#" | "$">;
+  /** Types a line and follows it to its end; its exit code */
+  run(line: string, ms: number): Promise<number | null>;
+  /** The last lines shown, the password hidden */
+  last(n: number): string[];
+}
+
+/** What a console asks for, as the last thing it shows: a sign-in, a password, a shell's prompt */
+const PROMPT = /(login:|Password:|[#$]) $/;
+
+function typist(con: Console, log: Log, name: string, secret: () => string): Typist {
+  let screen = "";
+  let pending = "";
+  let quiet = true;
+  let wake: () => void = () => {};
+  let gone = false;
+  // a sequence of the terminal's may come cut in two: the cut end waits for the next piece
+  let cut = "";
+  const decoder = new TextDecoder();
+  con.onData = (bytes) => {
+    let raw = cut + decoder.decode(bytes, { stream: true });
+    const esc = raw.lastIndexOf("\x1b");
+    cut = esc >= 0 && raw.length - esc < 16 && !/^\x1b(\[[0-9;?!]*[A-Za-z]|[()][A-Z0-9])/.test(raw.slice(esc)) ? raw.slice(esc) : "";
+    if (cut) raw = raw.slice(0, esc);
+    const text = plain(raw);
+    screen += text;
+    if (!quiet) {
+      const parts = (pending + text).split("\n");
+      pending = parts.pop() ?? "";
+      for (const p of parts) if (p.trim() && !/HATA-[0-9a-f]{6}/.test(p)) log(p);
+    }
+    wake();
+  };
+  con.onClose = () => ((gone = true), wake());
+  const type = (text: string) => con.send(new TextEncoder().encode(text));
+  const until = async (re: RegExp, ms: number, from = 0): Promise<RegExpExecArray | null> => {
+    const end = Date.now() + ms;
+    for (;;) {
+      let m = re.exec(screen.slice(from));
+      // what is asked for at the end of the screen counts once the console is quiet: output comes in pieces,
+      // and a piece of a starting system's lines may end like a prompt
+      if (m && re.source.endsWith("$")) {
+        const seen = screen.length;
+        await Bun.sleep(700);
+        if (screen.length !== seen) m = null;
+      }
+      if (m || gone || Date.now() > end) return m;
+      await Promise.race([new Promise<void>((r) => (wake = r)), Bun.sleep(500)]);
+    }
+  };
+  const silent = () => new AppError("pve.consoleSilent", 409, { name });
+  return {
+    type,
+    until,
+    at: () => screen.length,
+    speak: () => void (quiet = false),
+    async signIn(user, password, wait, retry = 0) {
+      const giveUp = Date.now() + retry;
+      for (;;) {
+        // the console shows its last screen or nothing: Enter brings the sign-in back. What is asked is the
+        // last thing shown — a line of a starting system may end with "#" too —, and a system still
+        // starting may print over its sign-in: Enter again until it is there
+        let mark = 0;
+        let first: RegExpExecArray | null = null;
+        for (const end = Date.now() + wait; !first && !gone && Date.now() < end; ) {
+          mark = screen.length;
+          type("\r");
+          first = await until(PROMPT, Math.min(10_000, Math.max(1000, end - Date.now())), mark);
+        }
+        // a sign-in left half-way (by somebody, or by that Enter): an empty password ends it
+        if (first && first[1] === "Password:") {
+          mark = screen.length;
+          type("\r");
+          first = await until(/login: $/, 15_000, mark);
+        }
+        if (!first) throw silent();
+        if (first[1] === "#" || first[1] === "$") return first[1];
+        mark = screen.length;
+        type(user + "\r");
+        if (!(await until(/Password: $/, 10_000, mark))) throw silent();
+        mark = screen.length;
+        type(password + "\r");
+        const after = await until(/Login incorrect|[#$] $/, 20_000, mark);
+        if (after && !after[0].startsWith("Login")) return after[0].trim() as "#" | "$";
+        // a system just started may show its sign-in before cloud-init has set the password
+        if (Date.now() > giveUp) throw new AppError("pve.badRootPassword", 400, { name });
+        await Bun.sleep(5000);
+        wait = 20_000;
+      }
+    },
+    async run(line, ms) {
+      const marker = `HATA-${Buffer.from(crypto.getRandomValues(new Uint8Array(3))).toString("hex")}`;
+      const mark = screen.length;
+      type(`${line}; echo ${marker}-$?\r`);
+      const end = await until(new RegExp(`${marker}-(\\d+)`), ms, mark);
+      return end ? Number(end[1]) : null;
+    },
+    last: (n) => plain(screen.replaceAll(secret() || "\0", "***")).split("\n").map((x) => x.trim()).filter(Boolean).slice(-n),
+  };
+}
 
 /**
  * Hata's client put on a running container through its console: Hata signs in there as root with the
@@ -1449,68 +1882,19 @@ export async function installByConsole(id: string, guest: string, input: { passw
   if (!line) throw new AppError("pve.noClientHere", 409, { os });
   const before = new Set(machines().map((m) => m.id));
   const job = startJob(`pve:${h.id}:${g.vmid}`, "client", by, async (log) => {
-    const con = await openConsole(id, guest, 160, 40);
-    const type = (text: string) => con.send(new TextEncoder().encode(text));
-    let screen = "";
-    const shown = () => screen.replace(password, "***");
+    const con = await consoleOf(h, g, 160, 40);
+    const t = typist(con, log, g.name, () => password);
     try {
-      let pending = "";
-      let quiet = true;
-      let wake: () => void = () => {};
-      con.onData = (bytes) => {
-        const text = plain(new TextDecoder().decode(bytes));
-        screen += text;
-        if (!quiet) {
-          const parts = (pending + text).split("\n");
-          pending = parts.pop() ?? "";
-          for (const p of parts) if (p.trim() && !/HATA-[0-9a-f]{6}/.test(p)) log(p);
-        }
-        wake();
-      };
-      let gone = false;
-      con.onClose = () => ((gone = true), wake());
-      /** Waits for what the console shows to match, up to `ms`; the screen is read from `from` on */
-      const until = async (re: RegExp, ms: number, from = 0): Promise<RegExpExecArray | null> => {
-        const end = Date.now() + ms;
-        for (;;) {
-          const m = re.exec(screen.slice(from));
-          if (m || gone || Date.now() > end) return m;
-          await Promise.race([new Promise<void>((r) => (wake = r)), Bun.sleep(500)]);
-        }
-      };
-      // the console shows its last screen or nothing: Enter brings the sign-in back
-      let mark0 = screen.length;
-      type("\r");
-      let first = await until(/login:\s*$|Password:\s*$|[#$]\s*$/m, 15_000, mark0);
-      // a sign-in left half-way (by somebody, or by that Enter): an empty password ends it
-      if (first && first[0].startsWith("Password")) {
-        mark0 = screen.length;
-        type("\r");
-        first = await until(/login:\s*$/m, 15_000, mark0);
-      }
-      if (!first) throw new AppError("pve.consoleSilent", 409, { name: g.name });
-      if (!/[#]\s*$/.test(first[0])) {
-        let mark = screen.length;
-        type("root\r");
-        if (!(await until(/Password:\s*$/m, 10_000, mark))) throw new AppError("pve.consoleSilent", 409, { name: g.name });
-        mark = screen.length;
-        type(password + "\r");
-        const after = await until(/Login incorrect|#\s*$/m, 15_000, mark);
-        if (!after || after[0].startsWith("Login")) throw new AppError("pve.badRootPassword", 400, { name: g.name });
-      }
+      if ((await t.signIn("root", password, 15_000)) !== "#") throw new AppError("pve.badRootPassword", 400, { name: g.name });
       log(`Signed in to ${g.name}`);
-      quiet = false;
-      const marker = `HATA-${Buffer.from(crypto.getRandomValues(new Uint8Array(3))).toString("hex")}`;
-      const mark = screen.length;
-      type(`${line}; echo ${marker}-$?\r`);
-      const end = await until(new RegExp(`${marker}-(\\d+)`), 15 * 60_000, mark);
-      if (!end || Number(end[1]) !== 0) throw new AppError("pve.setupFailed", 409, { address: g.name });
+      t.speak();
+      if ((await t.run(line, 15 * 60_000)) !== 0) throw new AppError("pve.setupFailed", 409, { address: g.name });
       // the sign-in ends with the work
-      type("exit\r");
+      t.type("exit\r");
       await Bun.sleep(500);
     } catch (e) {
       // what the console showed last says why better than any word of Hata's
-      for (const line of plain(shown()).split("\n").map((x) => x.trim()).filter(Boolean).slice(-6)) log("> " + line);
+      for (const line of t.last(6)) log("> " + line);
       throw e;
     } finally {
       con.close();
