@@ -25,7 +25,7 @@ import { SECRETS_DIR } from "./config";
 import { readJsonFile, writeJsonAtomic } from "./fsutil";
 import { invite, machines } from "./machines";
 import { acceptFor, BINARY, CLOSE, encodeFrame, FrameReader, PING, PONG, PVE_PING, sized, TEXT, typed } from "./wsframe";
-import { cleanFingerprint, cleanUrl, failed, GUEST_RE, guestOfMachine as findGuest, guestRights, mayPath, POWER, readConfig, readResources, readTask, SECRET_RE, SNAPSHOT_RE, snapshotName, TOKEN_RE, trouble, clientLine, hostKeysIn, nextId, readNewGuest, readSettings, restoreParams, cloneParams, readVersions, type Versions, settingsChange, cleanSchedule, readRrd, TIMEFRAMES, archOf, readOffered, TEMPLATE_RE, type Offered, dayOf, scheduleDue, scheduled, toPrune, SCHEDULE_MARK, type Schedule, setupScript, type NewOptions, type SettingsChange, type Guest, type GuestConfig, type Permissions, type PveItem, type Resource, type Task, type Watched } from "./pve";
+import { cleanFingerprint, cleanUrl, failed, GUEST_RE, guestOfMachine as findGuest, guestRights, mayPath, POWER, readConfig, readResources, readTask, SECRET_RE, SNAPSHOT_RE, snapshotName, TOKEN_RE, trouble, clientLine, hostKeysIn, nextId, readNewGuest, readSettings, restoreParams, cloneParams, readVersions, readContent, type Versions, type Volume, settingsChange, cleanSchedule, readRrd, TIMEFRAMES, archOf, readOffered, TEMPLATE_RE, type Offered, dayOf, scheduleDue, scheduled, toPrune, SCHEDULE_MARK, type Schedule, setupScript, type NewOptions, type SettingsChange, type Guest, type GuestConfig, type Permissions, type PveItem, type Resource, type Task, type Watched } from "./pve";
 
 const FILE = join(SECRETS_DIR, "proxmox.json");
 const ID_RE = /^[a-f0-9]{8}$/;
@@ -879,6 +879,45 @@ export async function taskLog(id: string, upid: string): Promise<string[]> {
   if (!upid.startsWith("UPID:") || !/^[A-Za-z0-9.-]+$/.test(node)) throw new AppError("pve.noTask", 404);
   const lines = await pve<{ n: number; t: string }[]>(h, "GET", `/nodes/${node}/tasks/${encodeURIComponent(upid)}/log`, { limit: 1000 });
   return lines.map((l) => l.t);
+}
+
+// --- What a storage holds ------------------------------------------------------------------------------------
+
+/**
+ * A storage's contents with what may be deleted from here: a backup of a guest the token may back up (as
+ * the schedule's pruning does), or anything where it has Datastore.Allocate — except a disk of a guest
+ * that is there: that goes with the guest.
+ */
+export async function storageContent(id: string, node: string, storage: string) {
+  const h = hostOf(id);
+  const l = liveOf(h);
+  const s = l.storages.find((x) => x.node === node && x.name === storage);
+  if (!s) throw new AppError("pve.noStorage", 404);
+  if (!s.active) throw new AppError("pve.storageOff", 409, { storage });
+  const list = readContent(await pve<Record<string, unknown>[]>(h, "GET", `/nodes/${node}/storage/${storage}/content`), new Map(l.guests.map((g) => [g.vmid, g.name])));
+  const allocate = mayPath(l.perms, `/storage/${storage}`, "Datastore.Allocate");
+  const space = mayPath(l.perms, `/storage/${storage}`, "Datastore.AllocateSpace");
+  const deletable = (v: Volume): boolean => {
+    if (v.protected) return false;
+    if ((v.content === "images" || v.content === "rootdir") && !v.orphan) return false;
+    if (allocate) return true;
+    const g = v.vmid !== null ? l.guests.find((x) => x.vmid === v.vmid) : undefined;
+    return v.content === "backup" && space && !!g && guestRights(l.perms, g).backup;
+  };
+  return { node, storage, type: s.type, used: s.used, total: s.total, items: list.map((v) => ({ ...v, deletable: deletable(v) })) };
+}
+
+export async function removeVolume(id: string, input: Record<string, unknown>, by: string) {
+  const h = hostOf(id);
+  const { items, node, storage } = await storageContent(id, String(input.node ?? ""), String(input.storage ?? ""));
+  const v = items.find((x) => x.volid === input.volid);
+  if (!v) throw new AppError("pve.noVolume", 404);
+  if (!v.deletable) throw new AppError("pve.volumeKept", 403);
+  const upid = await pve<string | null>(h, "DELETE", `/nodes/${node}/storage/${storage}/content/${encodeURIComponent(v.volid)}`);
+  if (typeof upid === "string" && upid.startsWith("UPID:")) await waitTask(h, node, upid, 120_000);
+  record("pve.volume.removed", { user: by, detail: `${h.name}: ${v.volid}` });
+  void look(h, true);
+  return { ok: true };
 }
 
 // --- Load over time -----------------------------------------------------------------------------------------

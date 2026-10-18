@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { rolesFor } from "../src/proxmox";
-import { clientLine, gibOf, readSettings, restoreParams, settingsChange, cleanSchedule, scheduleDue, scheduled, toPrune, SCHEDULE_MARK, readOffered, TEMPLATE_RE, archOf, readRrd, cloneParams, readVersions, versionCompare } from "../src/pve";
+import { clientLine, gibOf, readSettings, restoreParams, settingsChange, cleanSchedule, scheduleDue, scheduled, toPrune, SCHEDULE_MARK, readOffered, TEMPLATE_RE, archOf, readRrd, cloneParams, readVersions, versionCompare, readContent } from "../src/pve";
 import { cleanFingerprint, cleanUrl, failed, hostKeysIn, familyOf, nextId, readNewGuest, setupScript, guestOfMachine, guestRights, mayPath, readConfig, readResources, readTask, snapshotName, trouble, type Watched } from "../src/pve";
 
 test("an address as typed becomes the API's origin", () => {
@@ -346,4 +346,20 @@ test("a node's versions: newer packages, a newer kernel waiting for a restart", 
   const waiting = readVersions([...list, { Package: "proxmox-kernel-7.0.14-24-pve-signed", OldVersion: "7.0.14-24", Version: "7.0.14-24", CurrentState: "Installed" }]);
   expect(waiting.newest).toBe("7.0.14-24-pve");
   expect(waiting.reboot).toBe(true);
+});
+
+test("what a storage holds: whose it is, what is left of guests that are gone", () => {
+  const list = readContent(
+    [
+      { volid: "local-lvm:vm-243-disk-0", content: "rootdir", size: 5e9, vmid: 243 },
+      { volid: "local-lvm:vm-199-disk-0", content: "images", size: 8e9, vmid: "199" },
+      { volid: "local:iso/debian.iso", content: "iso", size: 6e8 },
+    ],
+    new Map([[243, "hata-ct1"]]),
+  );
+  expect(list.map((v) => [v.volid, v.guest, v.orphan])).toEqual([
+    ["local-lvm:vm-199-disk-0", "", true],
+    ["local-lvm:vm-243-disk-0", "hata-ct1", false],
+    ["local:iso/debian.iso", "", false],
+  ]);
 });

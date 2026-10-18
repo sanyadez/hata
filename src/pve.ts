@@ -844,3 +844,31 @@ export function readVersions(list: Record<string, unknown>[]): Versions {
     .filter((p) => !seen.has(p.name) && seen.add(p.name));
   return { manager: str(list.find((p) => p.Package === "pve-manager")?.OldVersion), running, newest, reboot: !!running && !!newest && versionCompare(newest, running) > 0, newer };
 }
+
+// --- What a storage holds -------------------------------------------------------------------------------
+
+export interface Volume {
+  volid: string;
+  /** images, rootdir, backup, iso, vztmpl, import, snippets */
+  content: string;
+  size: number;
+  at: number;
+  vmid: number | null;
+  /** The guest it belongs to, when it is still there */
+  guest: string;
+  /** A disk or a backup of a guest that is gone */
+  orphan: boolean;
+  notes: string;
+  protected: boolean;
+}
+
+/** `/storage/<s>/content` read against the guests there are; the largest first */
+export function readContent(list: Record<string, unknown>[], guests: Map<number, string>): Volume[] {
+  return list
+    .map((v) => {
+      const vmid = typeof v.vmid === "number" ? v.vmid : typeof v.vmid === "string" && /^\d+$/.test(v.vmid) ? Number(v.vmid) : null;
+      return { volid: str(v.volid), content: str(v.content), size: num(v.size), at: num(v.ctime) * 1000, vmid, guest: vmid !== null ? (guests.get(vmid) ?? "") : "", orphan: vmid !== null && !guests.has(vmid), notes: str(v.notes), protected: v.protected === 1 };
+    })
+    .filter((v) => v.volid)
+    .sort((a, b) => b.size - a.size);
+}

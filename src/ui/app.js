@@ -3265,6 +3265,85 @@ function pveTemplateRemove(x, v) {
   );
 }
 
+/** What a storage holds, the largest first: whose each thing is, what is left of guests that are gone */
+async function pveStorageDialog(x, s) {
+  let dialog;
+  const body = h("div", { class: "stack" }, h("p", { class: "muted" }, t("machines.loading")));
+  dialog = openDialog("wide", h("header", null, h("h2", { class: "grow" }, t("pve.content.title", { storage: s.name })), closeX(() => dialog)), body, h("footer", null, closeButton(() => dialog)));
+  const paint = async () => {
+    let d;
+    try {
+      d = await api("GET", `/api/proxmox/${x.id}/content?${new URLSearchParams({ node: s.node, storage: s.name })}`);
+    } catch (e) {
+      return put(body, h("p", { class: "error" }, errorText(e)));
+    }
+    const kinds = {};
+    for (const v of d.items) kinds[v.content] = (kinds[v.content] ?? 0) + v.size;
+    const left = d.items.filter((v) => v.orphan);
+    put(
+      body,
+      h("p", { class: "muted small" }, t("sys.free", { free: bytes(d.total - d.used), total: bytes(d.total) }), " · ", Object.entries(kinds).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${t("pve.content." + k)} ${bytes(n)}`).join(" · ")),
+      h("p", { class: "muted small" }, t("pve.content.scope")),
+      left.length > 0 && h("p", { class: "banner small" }, t("pve.content.orphans", { n: left.length, size: bytes(left.reduce((a, v) => a + v.size, 0)) })),
+      d.items.length
+        ? h(
+            "div",
+            { class: "table-wrap" },
+            h(
+              "table",
+              null,
+              h("thead", null, h("tr", null, h("th", null, t("pve.content.col.name")), h("th", null, t("pve.col.content")), h("th", null, t("pve.content.col.whose")), h("th", null, t("pve.tpl.col.size")), h("th"))),
+              h(
+                "tbody",
+                null,
+                d.items.map((v) =>
+                  h(
+                    "tr",
+                    null,
+                    h("td", null, h("div", { class: "mono small wrap" }, v.volid.replace(/^[^:]+:/, "")), (v.at > 0 || v.notes) && h("div", { class: "muted small" }, [v.at ? dateTime(v.at) : "", v.notes].filter(Boolean).join(" · "))),
+                    h("td", { class: "small" }, t("pve.content." + v.content)),
+                    h("td", { class: "small" }, v.orphan ? h("span", { class: "chip warn" }, t("pve.content.gone", { vmid: v.vmid })) : v.guest ? `${v.guest} (${v.vmid})` : "—", v.protected && h("span", { class: "chip" }, t("pve.protected"))),
+                    h("td", { class: "small" }, bytes(v.size)),
+                    h("td", null, v.deletable && button("", { class: "small ghost", title: t("pve.content.remove"), "aria-label": t("pve.content.remove"), onclick: () => pveVolumeRemove(x, s, v, paint) }, "trash")),
+                  ),
+                ),
+              ),
+            ),
+          )
+        : h("p", { class: "muted" }, t("pve.content.empty")),
+    );
+  };
+  void paint();
+}
+
+function pveVolumeRemove(x, s, v, after) {
+  let dialog;
+  dialog = openDialog(
+    "confirm",
+    h("h2", { class: "wrap" }, t("pve.content.removeTitle", { name: v.volid.replace(/^[^:]+:/, "") })),
+    h("p", { class: "muted" }, t(v.content === "backup" ? "pve.content.removeBackup" : v.orphan ? "pve.content.removeOrphan" : "pve.content.removeLead", { storage: s.name, size: bytes(v.size) })),
+    h(
+      "footer",
+      null,
+      closeButton(() => dialog, t("common.cancel")),
+      button(t("pve.content.remove"), {
+        class: "danger",
+        onclick: async (e) => {
+          e.currentTarget.disabled = true;
+          try {
+            await api("DELETE", `/api/proxmox/${x.id}/content`, { node: s.node, storage: s.name, volid: v.volid });
+            toast(t("pve.content.removed"));
+          } catch (err) {
+            toast(errorText(err), "error");
+          }
+          dialog.close();
+          void after();
+        },
+      }, "trash"),
+    ),
+  );
+}
+
 /** A node's versions: Proxmox, the kernel, a newer kernel waiting for a restart, packages with newer versions */
 function pveVersionsLine(x, node, v) {
   return h(
@@ -3336,7 +3415,7 @@ function pveOverview(x) {
               fill.style.width = (p ?? 0) + "%";
               return h(
                 "tr",
-                null,
+                s.active ? { class: "clickable", onclick: () => pveStorageDialog(x, s) } : null,
                 h("td", null, h("div", { class: "strong" }, s.name), x.nodes.length > 1 && h("div", { class: "muted small" }, s.node)),
                 h("td", { class: "small" }, s.type, s.shared && h("span", { class: "muted" }, " · " + t("pve.shared"))),
                 h("td", { class: "small muted" }, s.content.map((c) => t("pve.content." + c)).join(", ")),
