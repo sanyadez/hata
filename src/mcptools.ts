@@ -821,7 +821,10 @@ const pveRead: Omit<Tool, "level" | "effect">[] = [
             version: h.version,
             ...(h.ids ? { newGuestNumbers: h.ids } : {}),
             guests: h.counts,
-            nodes: h.nodes.map((n) => ({ name: n.name, online: n.online, cores: n.cores, cpuPercent: Math.round(n.cpu * 100), memoryGiB: { used: gib(n.memory.used), total: gib(n.memory.total) }, upHours: Math.round(n.uptime / 360) / 10 })),
+            nodes: h.nodes.map((n) => {
+            const v = h.versions[n.name];
+            return { name: n.name, online: n.online, cores: n.cores, cpuPercent: Math.round(n.cpu * 100), memoryGiB: { used: gib(n.memory.used), total: gib(n.memory.total) }, upHours: Math.round(n.uptime / 360) / 10, ...(v ? { proxmox: v.manager, kernel: v.running, ...(v.reboot ? { newerKernelWaitsForRestart: v.newest } : {}), ...(v.newer.length ? { newerProxmoxPackages: v.newer.map((p) => `${p.name} ${p.from} → ${p.to}`) } : {}), ...(v.all !== null ? { systemUpdates: v.all } : {}) } : {}) };
+          }),
             storages: h.storages.map((st) => ({ name: st.name, node: st.node, type: st.type, active: st.active, content: st.content, usedPercent: percent(st.used, st.total), freeGiB: gib(st.total - st.used), ...(st.backup ? { backupsAllowed: true } : {}) })),
             ...(h.unprotected ? { notBackedUp: h.unprotected.map((g) => `${g.name} (${g.vmid})`) } : {}),
             problems: h.trouble.map((item) => {

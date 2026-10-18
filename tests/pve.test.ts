@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { rolesFor } from "../src/proxmox";
-import { clientLine, gibOf, readSettings, restoreParams, settingsChange, cleanSchedule, scheduleDue, scheduled, toPrune, SCHEDULE_MARK, readOffered, TEMPLATE_RE, archOf, readRrd, cloneParams } from "../src/pve";
+import { clientLine, gibOf, readSettings, restoreParams, settingsChange, cleanSchedule, scheduleDue, scheduled, toPrune, SCHEDULE_MARK, readOffered, TEMPLATE_RE, archOf, readRrd, cloneParams, readVersions, versionCompare } from "../src/pve";
 import { cleanFingerprint, cleanUrl, failed, hostKeysIn, familyOf, nextId, readNewGuest, setupScript, guestOfMachine, guestRights, mayPath, readConfig, readResources, readTask, snapshotName, trouble, type Watched } from "../src/pve";
 
 test("an address as typed becomes the API's origin", () => {
@@ -327,4 +327,23 @@ test("load over time: a node's and a guest's fields, gaps kept", () => {
 test("a clone: full by default, linked only as asked, storage only for a full one", () => {
   expect(cloneParams("lxc", { newid: 246, name: "web-2", linked: false, storage: "local-lvm", pool: "hata" })).toEqual({ newid: 246, hostname: "web-2", full: 1, storage: "local-lvm", pool: "hata" });
   expect(cloneParams("qemu", { newid: 247, name: "vm-2", linked: true, storage: "local-lvm", pool: "" })).toEqual({ newid: 247, name: "vm-2", full: 0 });
+});
+
+test("a node's versions: newer packages, a newer kernel waiting for a restart", () => {
+  expect(versionCompare("7.0.14-24", "7.0.14-20")).toBe(1);
+  expect(versionCompare("10.6.1-1+pve3", "10.6.1-1+pve10")).toBe(-1);
+  expect(versionCompare("9.2.0", "9.2.0")).toBe(0);
+  const list = [
+    { Package: "proxmox-ve", OldVersion: "9.2.0", Version: "9.2.0", CurrentState: "Installed", RunningKernel: "7.0.14-20-pve" },
+    { Package: "pve-manager", OldVersion: "9.2.21", Version: "9.2.21", CurrentState: "Installed" },
+    { Package: "proxmox-kernel-7.0", OldVersion: "7.0.14-20", Version: "7.0.14-24", CurrentState: "Installed" },
+    { Package: "proxmox-kernel-7.0.14-20-pve-signed", OldVersion: "7.0.14-20", Version: "7.0.14-20", CurrentState: "Installed" },
+    { Package: "proxmox-kernel-7.0.14-8-pve-signed", OldVersion: "7.0.14-8", Version: "7.0.14-8", CurrentState: "Installed" },
+    { Package: "qemu-server", OldVersion: "9.2.10", Version: "9.2.11", CurrentState: "Installed" },
+    { Package: "zfsutils-linux", OldVersion: "", Version: "2.3.4", CurrentState: "NotInstalled" },
+  ];
+  expect(readVersions(list)).toEqual({ manager: "9.2.21", running: "7.0.14-20-pve", newest: "7.0.14-20-pve", reboot: false, newer: [{ name: "proxmox-kernel-7.0", from: "7.0.14-20", to: "7.0.14-24" }, { name: "qemu-server", from: "9.2.10", to: "9.2.11" }] });
+  const waiting = readVersions([...list, { Package: "proxmox-kernel-7.0.14-24-pve-signed", OldVersion: "7.0.14-24", Version: "7.0.14-24", CurrentState: "Installed" }]);
+  expect(waiting.newest).toBe("7.0.14-24-pve");
+  expect(waiting.reboot).toBe(true);
 });

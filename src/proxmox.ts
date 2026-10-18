@@ -25,7 +25,7 @@ import { SECRETS_DIR } from "./config";
 import { readJsonFile, writeJsonAtomic } from "./fsutil";
 import { invite, machines } from "./machines";
 import { acceptFor, BINARY, CLOSE, encodeFrame, FrameReader, PING, PONG, PVE_PING, sized, TEXT, typed } from "./wsframe";
-import { cleanFingerprint, cleanUrl, failed, GUEST_RE, guestOfMachine as findGuest, guestRights, mayPath, POWER, readConfig, readResources, readTask, SECRET_RE, SNAPSHOT_RE, snapshotName, TOKEN_RE, trouble, clientLine, hostKeysIn, nextId, readNewGuest, readSettings, restoreParams, cloneParams, settingsChange, cleanSchedule, readRrd, TIMEFRAMES, archOf, readOffered, TEMPLATE_RE, type Offered, dayOf, scheduleDue, scheduled, toPrune, SCHEDULE_MARK, type Schedule, setupScript, type NewOptions, type SettingsChange, type Guest, type GuestConfig, type Permissions, type PveItem, type Resource, type Task, type Watched } from "./pve";
+import { cleanFingerprint, cleanUrl, failed, GUEST_RE, guestOfMachine as findGuest, guestRights, mayPath, POWER, readConfig, readResources, readTask, SECRET_RE, SNAPSHOT_RE, snapshotName, TOKEN_RE, trouble, clientLine, hostKeysIn, nextId, readNewGuest, readSettings, restoreParams, cloneParams, readVersions, type Versions, settingsChange, cleanSchedule, readRrd, TIMEFRAMES, archOf, readOffered, TEMPLATE_RE, type Offered, dayOf, scheduleDue, scheduled, toPrune, SCHEDULE_MARK, type Schedule, setupScript, type NewOptions, type SettingsChange, type Guest, type GuestConfig, type Permissions, type PveItem, type Resource, type Task, type Watched } from "./pve";
 
 const FILE = join(SECRETS_DIR, "proxmox.json");
 const ID_RE = /^[a-f0-9]{8}$/;
@@ -160,6 +160,8 @@ interface Live extends Watched {
   perms: Permissions;
   /** The pool of each guest: `/cluster/resources` leaves it out where the pool's own rights hide the auditor's */
   pools: Record<number, string>;
+  /** Each node's versions, and how many packages of the whole system have updates (null — the token may not ask) */
+  versions: Record<string, Versions & { all: number | null }>;
   /** When each slower question was asked last */
   asked: { tasks: number; configs: number; disks: number };
   busy: boolean;
@@ -170,7 +172,7 @@ const live = new Map<string, Live>();
 function liveOf(h: Host): Live {
   let l = live.get(h.id);
   if (!l) {
-    l = { id: h.id, name: h.name, error: null, nodes: [], guests: [], storages: [], configs: {}, tasks: [], disks: [], unprotected: null, ips: {}, at: 0, version: "", perms: {}, pools: {}, asked: { tasks: 0, configs: 0, disks: 0 }, busy: false };
+    l = { id: h.id, name: h.name, error: null, nodes: [], guests: [], storages: [], configs: {}, tasks: [], disks: [], unprotected: null, ips: {}, at: 0, version: "", perms: {}, pools: {}, versions: {}, asked: { tasks: 0, configs: 0, disks: 0 }, busy: false };
     live.set(h.id, l);
   }
   l.name = h.name;
@@ -243,6 +245,14 @@ async function look(h: Host, all = false): Promise<void> {
         for (const d of list ?? []) disks.push({ node, device: d.devpath, model: d.model ?? "", health: d.health ?? "" });
       }
       l.disks = disks;
+      // versions and updates: as slow to change as the disks' health
+      for (const node of online) {
+        const list = await pve<Record<string, unknown>[]>(h, "GET", `/nodes/${node}/apt/versions`).catch(() => null);
+        if (!list) continue;
+        // the whole system's list needs Sys.Modify on the node: most tokens get a refusal, and that is fine
+        const all = await pve<unknown[]>(h, "GET", `/nodes/${node}/apt/update`).catch(() => null);
+        l.versions[node] = { ...readVersions(list), all: all ? all.length : null };
+      }
     }
   } catch (e) {
     const code = e instanceof AppError ? e.code : "pve.unreachable";
@@ -448,6 +458,7 @@ export function host(id: string) {
     storages: l.storages.map((s) => ({ ...s, backup: s.content.includes("backup") && mayPath(l.perms, `/storage/${s.name}`, "Datastore.AllocateSpace") })),
     tasks: l.tasks.slice(0, 100).map((t) => ({ ...t, failed: failed(t) })),
     disks: l.disks,
+    versions: l.versions,
     unprotected: l.unprotected,
     schedule: h.schedule ?? null,
     scheduleStorages: scheduleStorages(h),

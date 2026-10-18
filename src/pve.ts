@@ -802,3 +802,45 @@ export function cloneParams(type: "lxc" | "qemu", c: Clone): Record<string, stri
     ...(c.pool ? { pool: c.pool } : {}),
   };
 }
+
+// --- A node's versions ------------------------------------------------------------------------------------
+
+/** Two Debian-like versions compared part by part, numbers as numbers: `7.0.14-24` > `7.0.14-20`; enough for Proxmox's own */
+export function versionCompare(a: string, b: string): number {
+  const pa = a.split(/[.\-+~:]/);
+  const pb = b.split(/[.\-+~:]/);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const x = pa[i] ?? "";
+    const y = pb[i] ?? "";
+    const c = /^\d+$/.test(x) && /^\d+$/.test(y) ? Number(x) - Number(y) : x.localeCompare(y, "en", { numeric: true });
+    if (c) return Math.sign(c);
+  }
+  return 0;
+}
+
+export interface Versions {
+  /** pve-manager */
+  manager: string;
+  running: string;
+  /** The newest kernel installed: when it is not the running one, a restart is needed to use it */
+  newest: string;
+  reboot: boolean;
+  /** Proxmox's packages with a newer version to install */
+  newer: { name: string; from: string; to: string }[];
+}
+
+/** `/nodes/<n>/apt/versions` read: `OldVersion` is installed, `Version` the one apt would install */
+export function readVersions(list: Record<string, unknown>[]): Versions {
+  const running = str(list.find((p) => p.RunningKernel)?.RunningKernel);
+  const kernels = list
+    .map((p) => /^proxmox-kernel-(\d[\w.]*-\d+-pve)(-signed)?$/.exec(str(p.Package))?.[1])
+    .filter((k): k is string => !!k)
+    .sort((a, b) => versionCompare(b, a));
+  const newest = kernels[0] ?? running;
+  const seen = new Set<string>();
+  const newer = list
+    .filter((p) => str(p.CurrentState) === "Installed" && str(p.OldVersion) && str(p.Version) && versionCompare(str(p.Version), str(p.OldVersion)) > 0)
+    .map((p) => ({ name: str(p.Package), from: str(p.OldVersion), to: str(p.Version) }))
+    .filter((p) => !seen.has(p.name) && seen.add(p.name));
+  return { manager: str(list.find((p) => p.Package === "pve-manager")?.OldVersion), running, newest, reboot: !!running && !!newest && versionCompare(newest, running) > 0, newer };
+}

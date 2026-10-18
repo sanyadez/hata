@@ -3411,5 +3411,16 @@
   "pve.tmpl.title": "Зробити {name} шаблоном?",
   "pve.tmpl.lead": "Шаблон більше не запускається — з нього роблять нових гостей копіюванням. Назад на гостя Proxmox його не перетворить.",
   "pve.tmpl.done": "{name} тепер шаблон",
-  "pve.clone.start": "Запустити, щойно буде готова"
+  "pve.clone.start": "Запустити, щойно буде готова",
+  "pve.ver.line": "Proxmox VE {manager} · ядро {kernel}",
+  "pve.ver.reboot": "Встановлено ядро {kernel}: його ввімкне перезапуск",
+  "pve.ver.newer": "Новіші версії пакетів Proxmox: {n}",
+  "pve.ver.all": "Оновлень системи: {n}",
+  "pve.ver.title": "Оновлення {node}",
+  "pve.ver.leadProxmox": "Пакети самого Proxmox, що мають новішу версію. Повний перелік системи потребує токена, якому можна змінювати вузол (Sys.Modify), тож його не показано.",
+  "pve.ver.leadAll": "Новішу версію мають пакетів системи: {n}; тут — пакети самого Proxmox.",
+  "pve.ver.col.package": "Пакет",
+  "pve.ver.col.now": "Стоїть",
+  "pve.ver.col.new": "Новіша",
+  "pve.ver.how": "Оновлення ставляться на сторінці самого Proxmox, від root: вузол → Updates → Upgrade."
 }

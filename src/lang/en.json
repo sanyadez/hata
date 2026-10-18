@@ -3411,5 +3411,16 @@
   "pve.tmpl.title": "Make {name} a template?",
   "pve.tmpl.lead": "A template cannot be started any more — new guests are made from it as copies. Proxmox cannot turn it back into a guest.",
   "pve.tmpl.done": "{name} is a template now",
-  "pve.clone.start": "Start it once made"
+  "pve.clone.start": "Start it once made",
+  "pve.ver.line": "Proxmox VE {manager} · kernel {kernel}",
+  "pve.ver.reboot": "Kernel {kernel} is installed: a restart puts it to use",
+  "pve.ver.newer": "Newer versions of Proxmox's packages: {n}",
+  "pve.ver.all": "Updates for the system: {n}",
+  "pve.ver.title": "Updates of {node}",
+  "pve.ver.leadProxmox": "Proxmox's own packages that have a newer version. The whole list of the system needs a token that may change the node (Sys.Modify), so it is not shown.",
+  "pve.ver.leadAll": "{n} packages of the system have a newer version; Proxmox's own are listed.",
+  "pve.ver.col.package": "Package",
+  "pve.ver.col.now": "Installed",
+  "pve.ver.col.new": "Newer",
+  "pve.ver.how": "Updates are installed in Proxmox's own page, as root: the node → Updates → Upgrade."
 }

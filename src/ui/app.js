@@ -3265,6 +3265,29 @@ function pveTemplateRemove(x, v) {
   );
 }
 
+/** A node's versions: Proxmox, the kernel, a newer kernel waiting for a restart, packages with newer versions */
+function pveVersionsLine(x, node, v) {
+  return h(
+    "div",
+    { class: "stack-s" },
+    h("p", { class: "muted small" }, t("pve.ver.line", { manager: v.manager, kernel: v.running })),
+    v.reboot && h("p", { class: "small" }, h("span", { class: "chip warn" }, t("pve.ver.reboot", { kernel: v.newest }))),
+    (v.newer.length > 0 || v.all) && h("a", { class: "link small", href: "#", onclick: (e) => (e.preventDefault(), pveUpdatesDialog(x, node, v)) }, v.all ? t("pve.ver.all", { n: v.all }) : t("pve.ver.newer", { n: v.newer.length })),
+  );
+}
+
+function pveUpdatesDialog(x, node, v) {
+  let dialog;
+  dialog = openDialog(
+    "wide",
+    h("header", null, h("h2", { class: "grow" }, t("pve.ver.title", { node })), closeX(() => dialog)),
+    h("p", { class: "muted small" }, t(v.all === null ? "pve.ver.leadProxmox" : "pve.ver.leadAll", { n: v.all ?? 0 })),
+    v.newer.length > 0 && h("div", { class: "table-wrap" }, h("table", null, h("thead", null, h("tr", null, h("th", null, t("pve.ver.col.package")), h("th", null, t("pve.ver.col.now")), h("th", null, t("pve.ver.col.new")))), h("tbody", null, v.newer.map((p) => h("tr", null, h("td", { class: "mono small" }, p.name), h("td", { class: "mono small muted" }, p.from), h("td", { class: "mono small" }, p.to)))))),
+    h("p", { class: "muted small" }, t("pve.ver.how"), " ", h("a", { class: "link", href: x.url, target: "_blank", rel: "noopener noreferrer" }, x.url)),
+    h("footer", null, closeButton(() => dialog)),
+  );
+}
+
 /** A part of the server's page: its title and what it shows in one card */
 const pveSection = (title, ...body) => h("section", { class: "card pve-section" }, h("header", { class: "pve-section-head" }, h("h2", null, title)), ...body);
 
@@ -3287,6 +3310,7 @@ function pveOverview(x) {
             { class: "pve-node" },
             h("div", { class: "machine-title" }, icon("server"), h("strong", { class: "clip grow" }, n.name), pveChip(n), n.online && button("", { class: "small ghost", title: t("pve.load.button"), "aria-label": t("pve.load.button"), onclick: () => pveLoadDialog(x, { node: n.name }, n.name) }, "chart")),
             h("p", { class: "muted small" }, n.online ? t("pve.up", { time: duration(n.uptime) }) : "—"),
+            x.versions?.[n.name] && pveVersionsLine(x, n.name, x.versions[n.name]),
             meterRow(t("sys.cpu"), n.online ? Math.round(n.cpu * 100) : null, t("sys.cores", { n: n.cores })),
             meterRow(t("sys.memory"), n.online ? pct(n.memory.used, n.memory.total) : null, bytes(n.memory.total)),
             meterRow(t("pve.rootDisk"), n.online ? pct(n.disk.used, n.disk.total) : null, t("sys.free", { free: bytes(n.disk.total - n.disk.used), total: bytes(n.disk.total) })),
