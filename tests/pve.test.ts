@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { rolesFor } from "../src/proxmox";
-import { clientLine, gibOf, readSettings, restoreParams, settingsChange, cleanSchedule, scheduleDue, scheduled, toPrune, SCHEDULE_MARK } from "../src/pve";
+import { clientLine, gibOf, readSettings, restoreParams, settingsChange, cleanSchedule, scheduleDue, scheduled, toPrune, SCHEDULE_MARK, readOffered, TEMPLATE_RE, archOf } from "../src/pve";
 import { cleanFingerprint, cleanUrl, failed, hostKeysIn, familyOf, nextId, readNewGuest, setupScript, guestOfMachine, guestRights, mayPath, readConfig, readResources, readTask, snapshotName, trouble, type Watched } from "../src/pve";
 
 test("an address as typed becomes the API's origin", () => {
@@ -294,4 +294,24 @@ test("Hata's schedule of backups: checked, due once a day, keeps only its own co
   expect(
     toPrune([b("a1", 243, 1, `ct ${SCHEDULE_MARK}`), b("a2", 243, 2, `ct ${SCHEDULE_MARK}`), b("a3", 243, 3, `ct ${SCHEDULE_MARK}`), b("m", 243, 0, "ct — Hata"), b("p", 243, 0, `ct ${SCHEDULE_MARK}`, true), b("c1", 245, 5, `x ${SCHEDULE_MARK}`)], 2),
   ).toEqual(["a1"]);
+});
+
+test("the templates Proxmox offers: systems first, newest first", () => {
+  const list = readOffered([
+    { type: "lxc", section: "turnkeylinux", template: "debian-12-turnkey-xoops_18.0-1_amd64.tar.gz", headline: "TurnKey Xoops", os: "debian-12", version: "18.0-1" },
+    { type: "lxc", section: "system", template: "debian-12-standard_12.12-1_amd64.tar.zst", headline: "Debian 12", os: "debian-12", version: "12.12-1" },
+    { type: "lxc", section: "system", template: "alpine-3.22-default_20250617_amd64.tar.xz", headline: "Alpine 3.22", os: "alpine", version: "3.22" },
+    { type: "qemu", section: "system", template: "x.qcow2" },
+  ]);
+  expect(readOffered([{ type: "lxc", template: "alpine-arm.tar.xz", architecture: "arm64" }, { type: "lxc", template: "alpine.tar.xz", architecture: "amd64" }], "amd64").map((t) => t.template)).toEqual(["alpine.tar.xz"]);
+  expect(archOf({ cpuinfo: { flags: "fpu sse sse2 lm" } })).toBe("amd64");
+  expect(archOf({ cpuinfo: { flags: "fp asimd evtstrm" } })).toBe("arm64");
+  expect(archOf({})).toBe("");
+  expect(list.map((t) => [t.template, t.client])).toEqual([
+    ["alpine-3.22-default_20250617_amd64.tar.xz", false],
+    ["debian-12-standard_12.12-1_amd64.tar.zst", true],
+    ["debian-12-turnkey-xoops_18.0-1_amd64.tar.gz", true],
+  ]);
+  expect(TEMPLATE_RE.test("debian-12-standard_12.12-1_amd64.tar.zst")).toBe(true);
+  expect(TEMPLATE_RE.test("../etc/passwd.tar.gz")).toBe(false);
 });

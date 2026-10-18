@@ -724,3 +724,35 @@ export function toPrune(list: { volid: string; vmid: number; at: number; notes: 
   }
   return out;
 }
+
+// --- Templates of containers --------------------------------------------------------------------------
+
+/** A template Proxmox offers to download (`/nodes/<node>/aplinfo`) */
+export interface Offered {
+  template: string;
+  /** system, turnkeylinux, mail */
+  section: string;
+  os: string;
+  version: string;
+  headline: string;
+  description: string;
+  /** Hata's client can go in: a system with apt or dnf */
+  client: boolean;
+  /** amd64, arm64; "" when Proxmox does not say */
+  arch: string;
+}
+
+/** Proxmox's list read: the plain systems first, newest version of a name first; with `arch`, only what runs there */
+export function readOffered(list: Record<string, unknown>[], arch = ""): Offered[] {
+  const order = (s: string) => (s === "system" ? 0 : s === "turnkeylinux" ? 2 : 1);
+  return list
+    .filter((t) => str(t.type) === "lxc" && str(t.template) && (!arch || !str(t.architecture) || str(t.architecture) === arch))
+    .map((t) => ({ template: str(t.template), section: str(t.section), os: str(t.os), version: str(t.version), headline: str(t.headline), description: str(t.description).slice(0, 300), client: familyOf(str(t.template)) !== null, arch: str(t.architecture) }))
+    .sort((a, b) => order(a.section) - order(b.section) || a.headline.localeCompare(b.headline, "en") || b.version.localeCompare(a.version, "en", { numeric: true }));
+}
+
+/** A node's processor as its `/status` says it: x86 shows SSE2 among its flags */
+export const archOf = (status: { cpuinfo?: { flags?: string } }): string => (/\bsse2\b/.test(status.cpuinfo?.flags ?? "") ? "amd64" : status.cpuinfo?.flags ? "arm64" : "");
+
+/** A template's file name as Proxmox checks it: no folder, no way out of the storage */
+export const TEMPLATE_RE = /^[A-Za-z0-9][A-Za-z0-9._+-]*\.tar\.(gz|xz|zst)$/;

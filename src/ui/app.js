@@ -2621,7 +2621,7 @@ async function addMachineDialog() {
 // --- Proxmox servers ---
 // Looked after through their API with a token: the list on the Machines page, a page of each
 
-const PVE_TABS = ["overview", "guests", "tasks"];
+const PVE_TABS = ["overview", "guests", "templates", "tasks"];
 const pveUi = { list: null, host: null, timer: null };
 
 async function loadPve() {
@@ -2970,7 +2970,7 @@ function renderPveBody() {
   const x = pveUi.host;
   if (!box || !x) return;
   const tab = (id, iconName) => h("a", { class: "tab" + (state.route.tab === id ? " active" : ""), href: `#/proxmox/${x.id}${id === "overview" ? "" : "/" + id}` }, icon(iconName), t("pve.tab." + id));
-  const body = state.route.tab === "guests" ? pveGuests(x) : state.route.tab === "tasks" ? pveTasks(x) : pveOverview(x);
+  const body = state.route.tab === "guests" ? pveGuests(x) : state.route.tab === "tasks" ? pveTasks(x) : state.route.tab === "templates" ? pveTemplates(x) : pveOverview(x);
   put(
     box,
     // the head as the machine's: on a wallpaper it gets a panel of its own, or its words are lost
@@ -2985,10 +2985,146 @@ function renderPveBody() {
       h("div", { class: "grow" }, h("div", { class: "app-title" }, h("h1", null, x.name), pveChip(x)), h("p", { class: "meta" }, ["Proxmox VE " + (x.version || ""), x.url, x.at ? t("pve.askedAgo", { ago: ago(x.at) }) : null].filter(Boolean).flatMap((part, i) => (i ? [h("span", { class: "dot-sep" }, "·"), part] : [part])))),
       h("div", { class: "actions" }, x.online && button(t("pve.new.button"), { class: "primary", onclick: async (e) => ((e.currentTarget.disabled = true), await pveNewDialog(x), (e.target.closest("button").disabled = false)) }, "plus"), button(t("pve.refresh"), { onclick: (e) => refreshPve(x, e.currentTarget) }, "refresh"), h("button", { type: "button", class: "btn square", "aria-label": t("app.more"), onclick: () => pveMenu(x) }, icon("more"))),
     ),
-      h("div", { class: "tabs" }, tab("overview", "grid"), tab("guests", "box"), tab("tasks", "logs")),
+      h("div", { class: "tabs" }, tab("overview", "grid"), tab("guests", "box"), tab("templates", "archive"), tab("tasks", "logs")),
     ),
     x.error && h("p", { class: "card pad warn-box" }, pveError(x), " ", t("pve.since", { ago: ago(x.error.since) })),
     body,
+  );
+}
+
+// --- Templates of containers ---
+
+/** The templates tab: drawn from what was read last, read again when older than five minutes or after a change */
+function pveTemplates(x) {
+  const box = h("div", { class: "stack" });
+  const data = pveUi.templates?.id === x.id ? pveUi.templates : null;
+  if (data) paintPveTemplates(x, box, data);
+  else box.append(h("p", { class: "muted" }, t("machines.loading")));
+  if (!data || Date.now() - data.at > 5 * 60_000) void loadPveTemplates(x);
+  return box;
+}
+
+async function loadPveTemplates(x) {
+  try {
+    pveUi.templates = { id: x.id, at: Date.now(), ...(await api("GET", `/api/proxmox/${x.id}/templates`)) };
+  } catch (e) {
+    pveUi.templates = { id: x.id, at: Date.now(), error: errorText(e), nodes: [], offered: [], have: [], storages: [] };
+  }
+  if (state.route.view === "proxmox" && state.route.tab === "templates") renderPveBody();
+}
+
+function paintPveTemplates(x, box, d) {
+  const where = h("select", null, d.storages.map((s) => h("option", { value: `${s.node}/${s.storage}` }, d.nodes.length > 1 ? `${s.storage} (${s.node})` : s.storage)));
+  if (pveUi.templateWhere && d.storages.some((s) => `${s.node}/${s.storage}` === pveUi.templateWhere)) where.value = pveUi.templateWhere;
+  where.addEventListener("change", () => (pveUi.templateWhere = where.value));
+  const find = h("input", { type: "search", placeholder: t("pve.tpl.find"), value: pveUi.templateFind ?? "", oninput: () => ((pveUi.templateFind = find.value), filter()) });
+  const haveNames = new Set(d.have.map((v) => v.name));
+  const may = d.storages.length > 0;
+  const rows = d.offered.map((o) => ({
+    o,
+    row: h(
+      "tr",
+      null,
+      h("td", null, h("div", { class: "strong" }, o.headline || o.template), h("div", { class: "muted small mono wrap" }, o.template)),
+      h("td", { class: "small" }, o.section === "turnkeylinux" ? "TurnKey" : o.section === "system" ? t("pve.tpl.system") : o.section, o.client && h("div", null, h("span", { class: "chip ok" }, t("pve.tpl.client")))),
+      h("td", { class: "small muted" }, o.description),
+      h(
+        "td",
+        null,
+        haveNames.has(o.template)
+          ? h("span", { class: "chip" }, t("pve.tpl.have"))
+          : may &&
+              button(t("pve.tpl.download"), {
+                class: "small",
+                onclick: async (e) => {
+                  const el = e.currentTarget;
+                  el.disabled = true;
+                  const [node, storage] = where.value.split("/");
+                  try {
+                    const r = await api("POST", `/api/proxmox/${x.id}/templates`, { node, storage, template: o.template });
+                    void jobDialog(r.job, "template", o.template, () => {
+                      pveUi.templates = null;
+                      renderPveBody();
+                    });
+                  } catch (err) {
+                    toast(errorText(err), "error");
+                    el.disabled = false;
+                  }
+                },
+              }, "download"),
+      ),
+    ),
+  }));
+  const filter = () => {
+    const q = find.value.trim().toLowerCase();
+    for (const { o, row } of rows) row.hidden = !!q && !`${o.headline} ${o.template} ${o.os} ${o.description}`.toLowerCase().includes(q);
+  };
+  filter();
+  put(
+    box,
+    d.error && h("p", { class: "card pad warn-box" }, d.error),
+    pveSection(
+      t("pve.tpl.haveTitle"),
+      d.have.length
+        ? h(
+            "div",
+            { class: "table-wrap" },
+            h(
+              "table",
+              null,
+              h("thead", null, h("tr", null, h("th", null, t("pve.tpl.col.name")), h("th", null, t("pve.col.storage")), h("th", null, t("pve.tpl.col.size")), h("th"))),
+              h(
+                "tbody",
+                null,
+                d.have.map((v) =>
+                  h(
+                    "tr",
+                    null,
+                    h("td", { class: "mono small wrap" }, v.name),
+                    h("td", { class: "small" }, v.storage, d.nodes.length > 1 && h("span", { class: "muted" }, ` · ${v.node}`)),
+                    h("td", { class: "small" }, bytes(v.size)),
+                    h("td", null, d.removable.includes(v.storage) && button("", { class: "small ghost", title: t("pve.tpl.remove"), "aria-label": t("pve.tpl.remove"), onclick: () => pveTemplateRemove(x, v) }, "trash")),
+                  ),
+                ),
+              ),
+            ),
+          )
+        : h("p", { class: "muted pve-note first" }, t("pve.tpl.none")),
+    ),
+    pveSection(
+      t("pve.tpl.offeredTitle"),
+      h("div", { class: "pve-note first stack-s" }, !may && h("p", { class: "banner small" }, t("pve.tpl.noRight")), h("div", { class: "form-pair" }, field(t("pve.tpl.find"), find), may && field(t("pve.tpl.where"), where))),
+      h("div", { class: "table-wrap" }, h("table", null, h("thead", null, h("tr", null, h("th", null, t("pve.tpl.col.name")), h("th", null, t("pve.tpl.col.kind")), h("th", null, t("pve.tpl.col.about")), h("th"))), h("tbody", null, rows.map((r) => r.row)))),
+    ),
+  );
+}
+
+function pveTemplateRemove(x, v) {
+  let dialog;
+  dialog = openDialog(
+    "confirm",
+    h("h2", { class: "wrap" }, t("pve.tpl.removeTitle", { name: v.name })),
+    h("p", { class: "muted" }, t("pve.tpl.removeLead", { storage: v.storage })),
+    h(
+      "footer",
+      null,
+      closeButton(() => dialog, t("common.cancel")),
+      button(t("pve.tpl.remove"), {
+        class: "danger",
+        onclick: async (e) => {
+          e.currentTarget.disabled = true;
+          try {
+            await api("DELETE", `/api/proxmox/${x.id}/templates`, { node: v.node, volid: v.volid });
+            toast(t("pve.tpl.removed", { name: v.name }));
+          } catch (err) {
+            toast(errorText(err), "error");
+          }
+          dialog.close();
+          pveUi.templates = null;
+          renderPveBody();
+        },
+      }, "trash"),
+    ),
   );
 }
 
@@ -3299,7 +3435,8 @@ async function pveClientDialog(x, g) {
                 class: "primary",
                 onclick: async (e) => {
                   if (!rootPassword.value) return rootPassword.focus();
-                  e.currentTarget.disabled = true;
+                  const el = e.currentTarget;
+                  el.disabled = true;
                   try {
                     const r = await api("POST", `/api/proxmox/${x.id}/guests/${g.id}/client`, { password: rootPassword.value });
                     dialog.close();
@@ -3310,7 +3447,7 @@ async function pveClientDialog(x, g) {
                     });
                   } catch (err) {
                     toast(errorText(err), "error");
-                    e.currentTarget.disabled = false;
+                    el.disabled = false;
                   }
                 },
               }, "download"),
@@ -4327,7 +4464,8 @@ async function moveAppDialog(from, app) {
     class: "primary",
     disabled: !places.length,
     onclick: async (e) => {
-      e.currentTarget.disabled = true;
+      const el = e.currentTarget;
+      el.disabled = true;
       error.textContent = "";
       try {
         const res = await api("POST", "/api/moveapp", { from, to: to.value, name: app.name, dropOld: drop.checked });
@@ -4336,7 +4474,7 @@ async function moveAppDialog(from, app) {
         jobDialog(res.job, "moveapp", app.title, () => go(target ? `#/machines/${target}/apps` : `#/apps/${app.name}`));
       } catch (err) {
         error.textContent = errorText(err);
-        e.currentTarget.disabled = false;
+        el.disabled = false;
       }
     },
   }, "server");

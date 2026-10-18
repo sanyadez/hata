@@ -25,7 +25,7 @@ import { SECRETS_DIR } from "./config";
 import { readJsonFile, writeJsonAtomic } from "./fsutil";
 import { invite, machines } from "./machines";
 import { acceptFor, BINARY, CLOSE, encodeFrame, FrameReader, PING, PONG, PVE_PING, sized, TEXT, typed } from "./wsframe";
-import { cleanFingerprint, cleanUrl, failed, GUEST_RE, guestOfMachine as findGuest, guestRights, mayPath, POWER, readConfig, readResources, readTask, SECRET_RE, SNAPSHOT_RE, snapshotName, TOKEN_RE, trouble, clientLine, hostKeysIn, nextId, readNewGuest, readSettings, restoreParams, settingsChange, cleanSchedule, dayOf, scheduleDue, scheduled, toPrune, SCHEDULE_MARK, type Schedule, setupScript, type NewOptions, type SettingsChange, type Guest, type GuestConfig, type Permissions, type PveItem, type Resource, type Task, type Watched } from "./pve";
+import { cleanFingerprint, cleanUrl, failed, GUEST_RE, guestOfMachine as findGuest, guestRights, mayPath, POWER, readConfig, readResources, readTask, SECRET_RE, SNAPSHOT_RE, snapshotName, TOKEN_RE, trouble, clientLine, hostKeysIn, nextId, readNewGuest, readSettings, restoreParams, settingsChange, cleanSchedule, archOf, readOffered, TEMPLATE_RE, type Offered, dayOf, scheduleDue, scheduled, toPrune, SCHEDULE_MARK, type Schedule, setupScript, type NewOptions, type SettingsChange, type Guest, type GuestConfig, type Permissions, type PveItem, type Resource, type Task, type Watched } from "./pve";
 
 const FILE = join(SECRETS_DIR, "proxmox.json");
 const ID_RE = /^[a-f0-9]{8}$/;
@@ -364,7 +364,7 @@ function runSchedule(h: Host, by: string) {
       void look(h, true);
     }
     if (failedOnes.length) throw new AppError("pve.schedule.failedRun", 409, { name: h.name, message: h.last.message });
-  }, true, { app: h.name, machine: h.name });
+  }, true, { app: h.name, machine: "" });
 }
 
 /** What every server is worth on the home page */
@@ -802,6 +802,69 @@ export async function taskLog(id: string, upid: string): Promise<string[]> {
   if (!upid.startsWith("UPID:") || !/^[A-Za-z0-9.-]+$/.test(node)) throw new AppError("pve.noTask", 404);
   const lines = await pve<{ n: number; t: string }[]>(h, "GET", `/nodes/${node}/tasks/${encodeURIComponent(upid)}/log`, { limit: 1000 });
   return lines.map((l) => l.t);
+}
+
+// --- Templates of containers -------------------------------------------------------------------------
+
+/** Proxmox's list of templates changes rarely: asked once an hour */
+const offered = new Map<string, { at: number; list: Offered[] }>();
+
+/** What can be downloaded, what is there already, and where the token may keep templates */
+export async function templates(id: string) {
+  const h = hostOf(id);
+  const l = liveOf(h);
+  const nodes = l.nodes.filter((n) => n.online).map((n) => n.name);
+  const node = nodes[0];
+  let list = offered.get(h.id);
+  if (node && (!list || Date.now() - list.at > 3600_000)) {
+    const arch = archOf(await pve<{ cpuinfo?: { flags?: string } }>(h, "GET", `/nodes/${node}/status`).catch(() => ({})));
+    list = { at: Date.now(), list: readOffered(await pve<Record<string, unknown>[]>(h, "GET", `/nodes/${node}/aplinfo`).catch(() => []), arch) };
+    offered.set(h.id, list);
+  }
+  const have: { node: string; storage: string; volid: string; name: string; size: number; at: number }[] = [];
+  for (const s of l.storages.filter((x) => x.active && x.content.includes("vztmpl") && nodes.includes(x.node))) {
+    // a shared storage is the same on every node: listed once
+    if (s.shared && have.some((x) => x.storage === s.name)) continue;
+    const content = await pve<{ volid: string; size?: number; ctime?: number }[]>(h, "GET", `/nodes/${s.node}/storage/${s.name}/content`, { content: "vztmpl" }).catch(() => []);
+    for (const c of content) have.push({ node: s.node, storage: s.name, volid: c.volid, name: c.volid.split("/").pop() ?? c.volid, size: c.size ?? 0, at: (c.ctime ?? 0) * 1000 });
+  }
+  const storages = l.storages.filter((s) => s.active && s.content.includes("vztmpl") && nodes.includes(s.node) && mayPath(l.perms, `/storage/${s.name}`, "Datastore.AllocateTemplate")).map((s) => ({ node: s.node, storage: s.name }));
+  // deleting a file of a storage is a right of its own, wider than keeping templates there: it reaches backups too
+  const removable = [...new Set(l.storages.filter((s) => mayPath(l.perms, `/storage/${s.name}`, "Datastore.Allocate")).map((s) => s.name))];
+  return { nodes, offered: list?.list ?? [], have: have.sort((a, b) => a.name.localeCompare(b.name, "en", { numeric: true })), storages, removable };
+}
+
+export async function downloadTemplate(id: string, input: Record<string, unknown>, by: string) {
+  const h = hostOf(id);
+  const { storages, offered: list } = await templates(id);
+  const node = String(input.node ?? "");
+  const storage = String(input.storage ?? "");
+  const template = String(input.template ?? "");
+  if (!storages.some((s) => s.node === node && s.storage === storage)) throw new AppError("pve.template.storage", 400, { name: h.name });
+  if (!TEMPLATE_RE.test(template) || !list.some((t) => t.template === template)) throw new AppError("pve.template.unknown", 404);
+  const job = startJob(`pve:${h.id}:template:${template}`, "template", by, async (log) => {
+    try {
+      log(`${h.name} / ${node}: ${template} → ${storage}`);
+      await followTask(h, node, await pve<string>(h, "POST", `/nodes/${node}/aplinfo`, { storage, template }), log, 60 * 60_000);
+      record("pve.template.downloaded", { user: by, detail: `${h.name}: ${template} → ${storage}` });
+    } catch (e) {
+      if (e instanceof AppError && e.detail.message) log(String(e.detail.message));
+      throw e;
+    }
+  }, true, { app: template, machine: "" });
+  return { job: job.id };
+}
+
+export async function removeTemplate(id: string, input: Record<string, unknown>, by: string) {
+  const h = hostOf(id);
+  const { have, removable } = await templates(id);
+  const t = have.find((x) => x.volid === input.volid && x.node === input.node);
+  if (!t) throw new AppError("pve.template.unknown", 404);
+  if (!removable.includes(t.storage)) throw new AppError("pve.template.noRemove", 403, { name: h.name, storage: t.storage });
+  const upid = await pve<string | null>(h, "DELETE", `/nodes/${t.node}/storage/${t.storage}/content/${encodeURIComponent(t.volid)}`);
+  if (typeof upid === "string" && upid.startsWith("UPID:")) await waitTask(h, t.node, upid, 60_000);
+  record("pve.template.removed", { user: by, detail: `${h.name}: ${t.name}` });
+  return { ok: true };
 }
 
 // --- A new container with Hata's client -------------------------------------------------------------
