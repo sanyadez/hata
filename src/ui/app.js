@@ -8333,20 +8333,18 @@ async function storeDialog(entry, target = state.installTarget ?? "") {
     h("header", null, appIcon(app, "lg"), h("div", { class: "grow" }, h("h2", null, app.title), h("p", { class: "muted" }, app.tagline), h("p", { class: "muted small" }, [app.category, app.developer && t("store.by", { developer: app.developer }), app.version && t("store.version", { version: app.version })].filter(Boolean).join(" · "))), closeX(() => dialog)),
     !supported && h("p", { class: "banner" }, t("store.unsupported", { arch: arch ?? "" })),
     app.screenshots.length > 0 && shotsView(app.screenshots),
+    // one column, the description across the whole width and what is asked under it (the user's wish, 2026-10-18):
+    // two columns squeezed long descriptions with commands into a narrow strip
     h(
       "div",
       { class: "store-app-body" },
-      h(
-        "div",
-        { class: "stack" },
-        h("div", { class: "description prose" }, md(app.description)),
-        app.tips && h("div", { class: "tips prose" }, h("strong", null, t("store.tips")), md(app.tips)),
-        permissions,
-        app.website && h("a", { class: "link", href: app.website, target: "_blank", rel: "noopener noreferrer" }, app.website.replace(/^https?:\/\//, "").replace(/\/$/, ""), icon("external")),
-        h("p", { class: "cmd small" }, icon("terminal"), `docker compose -p ${app.name} up -d`),
-      ),
+      h("div", { class: "description prose" }, md(app.description)),
+      app.tips && h("div", { class: "tips prose" }, h("strong", null, t("store.tips")), md(app.tips)),
       hasForm && settingsForm && h("div", { class: "stack install-form" }, formSection(t("store.settings"), t("store.settingsHint"), settingsForm.rows), settingsForm.more),
       hasForm && !settingsForm && h("div", { class: "stack install-form" }, formSection(t("store.ports"), target ? t("store.portsOn", { name: targets.find((m) => m.id === target)?.name ?? "" }) : t("store.portsHint"), ports), formSection(t("store.volumes"), target ? t("store.volumesHint", { path: app.form.volumes[0]?.source.split("/AppData/")[0] || "/DATA" }) : state.settings ? t("store.volumesHint", { path: state.settings.dataRoot }) : "", volumes), formSection(t("store.envs"), t("store.envsHint"), envs)),
+      permissions,
+      app.website && h("a", { class: "link", href: app.website, target: "_blank", rel: "noopener noreferrer" }, app.website.replace(/^https?:\/\//, "").replace(/\/$/, ""), icon("external")),
+      h("p", { class: "cmd small" }, icon("terminal"), `docker compose -p ${app.name} up -d`),
     ),
     error,
     h("footer", null, where, closeButton(() => dialog, t("common.cancel")), install),

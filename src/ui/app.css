@@ -730,8 +730,8 @@ dialog.dropdown header { padding: 4px 6px; margin-bottom: 8px; }
 .menu-item:disabled { opacity: 0.5; cursor: default; }
 .menu-item.danger { color: var(--danger); }
 
-.store-app-body { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 28px; align-items: start; }
-.store-app-body > :only-child { grid-column: 1 / -1; }
+.store-app-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; align-items: start; }
+.store-app-body > .link { justify-self: start; }
 .description { overflow-wrap: anywhere; color: var(--muted); max-height: 260px; overflow-y: auto; }
 .prose { display: grid; gap: 8px; }
 .prose p { margin: 0; }
@@ -764,7 +764,6 @@ dialog.dropdown header { padding: 4px 6px; margin-bottom: 8px; }
 
 @media (max-width: 1080px) {
   .columns { grid-template-columns: minmax(0, 1fr); }
-  .store-app-body { grid-template-columns: minmax(0, 1fr); }
 }
 
 @media (max-width: 760px) {
@@ -1011,7 +1010,7 @@ body:has(.assistant.paged) > .assistant-fab { display: none; }
 .assistant .msg.user { align-self: flex-end; max-width: 88%; background: var(--accent-soft); border-radius: var(--radius-md); padding: 8px 12px; white-space: pre-wrap; }
 .assistant .msg ul, .assistant .msg ol { margin: 0; padding-left: 20px; display: grid; gap: 4px; }
 .assistant .msg code { background: var(--surface-2); border-radius: 4px; padding: 1px 4px; }
-.md-code { margin: 0; padding: 10px 12px; background: var(--console); color: #e8e4de; border-radius: var(--radius-sm); overflow: auto; max-height: 260px; white-space: pre; font-size: 12px; }
+.md-code { margin: 0; padding: 10px 12px; background: var(--console); color: #e8e4de; border-radius: var(--radius-sm); overflow-x: hidden; overflow-y: auto; max-height: 260px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 12px; }
 .assistant-call summary { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 13px; cursor: pointer; list-style: none; }
 .assistant-call summary::-webkit-details-marker { display: none; }
 .assistant-call summary:hover { color: var(--text); }
