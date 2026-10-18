@@ -1211,3 +1211,7 @@ body:has(.assistant.paged) > .assistant-fab { display: none; }
 .chart-tip { position: absolute; top: 4px; padding: 6px 10px; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-md); pointer-events: none; white-space: nowrap; z-index: 2; }
 .seg { display: flex; flex-wrap: wrap; gap: 6px; }
 .seg .btn.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-text); }
+
+/* The screen of a virtual machine: noVNC draws into the box, scaled to it */
+.screen-box { flex: 1; min-height: 0; display: flex; background: #000; }
+.screen-actions { display: flex; gap: 6px; }

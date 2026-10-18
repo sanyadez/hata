@@ -1269,17 +1269,19 @@ export interface Console {
   onClose: (why: string) => void;
 }
 
+/** A WebSocket of Proxmox reached from here: what comes in, what goes out, how it ends */
+interface PveSocket {
+  send(bytes: Uint8Array): void;
+  close(): void;
+  onData: (bytes: Uint8Array) => void;
+  onClose: (why: string) => void;
+}
+
 /**
- * Opens a container's console: `termproxy` starts one, its WebSocket is reached over a connection whose
- * certificate was checked like every other request, and the first line hands the console's ticket in.
- * Proxmox's own page talks the same way: `0:<bytes>:<data>` typed, `1:<cols>:<rows>:` a size, `2` alive.
+ * Opens `vncwebsocket` of a guest over a connection whose certificate was checked like every other
+ * request; the upgrade is written by hand (Bun's WebSocket client cannot take a socket of ours).
  */
-export async function openConsole(id: string, guest: string, cols: number, rows: number): Promise<Console> {
-  const h = hostOf(id);
-  const g = guestOf(h, guest);
-  if (g.type !== "lxc") throw new AppError("pve.noConsole", 409);
-  if (g.status !== "running") throw new AppError("pve.notRunning", 409, { name: g.name });
-  const proxy = await pve<{ port: number | string; ticket: string; user: string }>(h, "POST", `/nodes/${g.node}/lxc/${g.vmid}/termproxy`);
+async function vncSocket(h: Host, g: Guest, port: number | string, ticket: string): Promise<PveSocket> {
   const { socket, shown } = await reach(h.url);
   if (h.fingerprint ? shown.fingerprint !== h.fingerprint : !shown.trusted) {
     socket.destroy();
@@ -1287,36 +1289,31 @@ export async function openConsole(id: string, guest: string, cols: number, rows:
   }
   const u = new URL(h.url);
   const key = Buffer.from(crypto.getRandomValues(new Uint8Array(16))).toString("base64");
-  const path = `/api2/json/nodes/${g.node}/lxc/${g.vmid}/vncwebsocket?port=${encodeURIComponent(String(proxy.port))}&vncticket=${encodeURIComponent(proxy.ticket)}`;
+  const path = `/api2/json/nodes/${g.node}/${g.type}/${g.vmid}/vncwebsocket?port=${encodeURIComponent(String(port))}&vncticket=${encodeURIComponent(ticket)}`;
   socket.write([`GET ${path} HTTP/1.1`, `Host: ${u.host}`, "Upgrade: websocket", "Connection: Upgrade", `Sec-WebSocket-Key: ${key}`, "Sec-WebSocket-Version: 13", "Sec-WebSocket-Protocol: binary", `Authorization: PVEAPIToken=${h.token}=${h.secret}`, "", ""].join("\r\n"));
   const reader = new FrameReader();
   const accept = await acceptFor(key);
   let head = Buffer.alloc(0);
   let open = false;
   let closed = false;
-  const con: Console = {
-    send: (bytes) => !closed && socket.write(encodeFrame(BINARY, typed(bytes))),
-    resize: (c, r) => !closed && socket.write(encodeFrame(BINARY, new TextEncoder().encode(sized(c, r)))),
+  const ws: PveSocket = {
+    send: (bytes) => !closed && socket.write(encodeFrame(BINARY, bytes)),
     close: () => {
       if (closed) return;
       closed = true;
-      clearInterval(alive);
       socket.end(encodeFrame(CLOSE, new Uint8Array(0)));
       socket.destroy();
     },
     onData: () => {},
     onClose: () => {},
   };
-  const alive = setInterval(() => !closed && socket.write(encodeFrame(BINARY, new TextEncoder().encode(PVE_PING))), 30_000);
   const end = (why: string) => {
     if (closed) return;
     closed = true;
-    clearInterval(alive);
     socket.destroy();
-    con.onClose(why);
+    ws.onClose(why);
   };
   await new Promise<void>((resolve, reject) => {
-    let said = false;
     socket.on("data", (chunk: Buffer) => {
       if (!open) {
         head = Buffer.concat([head, chunk]);
@@ -1327,36 +1324,103 @@ export async function openConsole(id: string, guest: string, cols: number, rows:
         const ok = status === 101 && lines.some((l) => /^sec-websocket-accept:\s*/i.test(l) && l.split(":")[1]!.trim() === accept);
         if (!ok) return reject(new AppError(status === 401 ? "pve.badToken" : "pve.failed", 409, { name: h.name, message: lines[0] ?? "" }));
         open = true;
-        // the console's own sign-in: its user and the ticket termproxy gave
-        socket.write(encodeFrame(BINARY, new TextEncoder().encode(`${proxy.user}:${proxy.ticket}\n`)));
+        resolve();
         chunk = head.subarray(at + 4);
         if (!chunk.length) return;
       }
       for (const f of reader.push(new Uint8Array(chunk))) {
         if (f.opcode === CLOSE) return end("closed");
         if (f.opcode === PING) socket.write(encodeFrame(PONG, f.data));
-        else if (f.opcode === TEXT || f.opcode === BINARY) {
-          // the first word is "OK" when the ticket was taken
-          if (!said) {
-            said = true;
-            const text = new TextDecoder().decode(f.data);
-            if (text.startsWith("OK")) {
-              con.resize(cols, rows);
-              resolve();
-              if (f.data.length > 2) con.onData(f.data.subarray(2));
-              continue;
-            }
-            return reject(new AppError("pve.failed", 409, { name: h.name, message: text.slice(0, 200) }));
-          }
-          con.onData(f.data);
-        }
+        else if (f.opcode === TEXT || f.opcode === BINARY) ws.onData(f.data);
       }
     });
     socket.on("close", () => (open ? end("closed") : reject(new AppError("pve.unreachable", 502, { name: h.name, message: "closed" }))));
     socket.on("error", (e: Error) => (open ? end(e.message) : reject(new AppError("pve.unreachable", 502, { name: h.name, message: e.message }))));
     setTimeout(() => reject(new AppError("pve.unreachable", 502, { name: h.name, message: "timeout" })), TIMEOUT_MS);
   });
+  return ws;
+}
+
+/**
+ * Opens a container's console: `termproxy` starts one, its WebSocket is reached by `vncSocket`, and the
+ * first line hands the console's ticket in. Proxmox's own page talks the same way: `0:<bytes>:<data>`
+ * typed, `1:<cols>:<rows>:` a size, `2` alive.
+ */
+export async function openConsole(id: string, guest: string, cols: number, rows: number): Promise<Console> {
+  const h = hostOf(id);
+  const g = guestOf(h, guest);
+  if (g.type !== "lxc") throw new AppError("pve.noConsole", 409);
+  if (g.status !== "running") throw new AppError("pve.notRunning", 409, { name: g.name });
+  const proxy = await pve<{ port: number | string; ticket: string; user: string }>(h, "POST", `/nodes/${g.node}/lxc/${g.vmid}/termproxy`);
+  const ws = await vncSocket(h, g, proxy.port, proxy.ticket);
+  let closed = false;
+  const con: Console = {
+    send: (bytes) => !closed && ws.send(typed(bytes)),
+    resize: (c, r) => !closed && ws.send(new TextEncoder().encode(sized(c, r))),
+    close: () => {
+      if (closed) return;
+      closed = true;
+      clearInterval(alive);
+      ws.close();
+    },
+    onData: () => {},
+    onClose: () => {},
+  };
+  const alive = setInterval(() => !closed && ws.send(new TextEncoder().encode(PVE_PING)), 30_000);
+  ws.onClose = (why) => {
+    if (closed) return;
+    closed = true;
+    clearInterval(alive);
+    con.onClose(why);
+  };
+  // the console's own sign-in: its user and the ticket termproxy gave; the first word back is "OK"
+  await new Promise<void>((resolve, reject) => {
+    const timer = setTimeout(() => (ws.close(), reject(new AppError("pve.unreachable", 502, { name: h.name, message: "timeout" }))), TIMEOUT_MS);
+    ws.onData = (data) => {
+      clearTimeout(timer);
+      const text = new TextDecoder().decode(data);
+      if (!text.startsWith("OK")) {
+        ws.close();
+        return reject(new AppError("pve.failed", 409, { name: h.name, message: text.slice(0, 200) }));
+      }
+      ws.onData = (bytes) => con.onData(bytes);
+      con.resize(cols, rows);
+      resolve();
+      if (data.length > 2) con.onData(data.subarray(2));
+    };
+    ws.send(new TextEncoder().encode(`${proxy.user}:${proxy.ticket}\n`));
+  });
   return con;
+}
+
+/** The screens of virtual machines asked for and not yet opened: the browser opens its socket with the id */
+const screens = new Map<string, { host: string; guest: string; port: number | string; ticket: string; at: number }>();
+
+/**
+ * Asks Proxmox for a virtual machine's screen (`vncproxy`). The answer's ticket is also the VNC password,
+ * so the browser gets it to sign in to the screen with; the socket is opened by `openScreen` with the id.
+ */
+export async function askScreen(id: string, guest: string) {
+  const h = hostOf(id);
+  const g = guestOf(h, guest);
+  if (g.type !== "qemu") throw new AppError("pve.noScreen", 409);
+  if (g.status !== "running") throw new AppError("pve.notRunning", 409, { name: g.name });
+  if (!guestRights(liveOf(h).perms, g).console) throw new AppError("pve.denied", 403, { name: h.name, message: "VM.Console" });
+  const proxy = await pve<{ port: number | string; ticket: string }>(h, "POST", `/nodes/${g.node}/qemu/${g.vmid}/vncproxy`, { websocket: 1 });
+  for (const [k, v] of screens) if (Date.now() - v.at > 60_000) screens.delete(k);
+  const key = Buffer.from(crypto.getRandomValues(new Uint8Array(16))).toString("hex");
+  screens.set(key, { host: h.id, guest: g.id, port: proxy.port, ticket: proxy.ticket, at: Date.now() });
+  return { screen: key, password: proxy.ticket, name: g.name };
+}
+
+/** The socket of a screen asked for a minute ago at most; once */
+export async function openScreen(key: string): Promise<{ socket: PveSocket; name: string }> {
+  const s = screens.get(key);
+  screens.delete(key);
+  if (!s || Date.now() - s.at > 60_000) throw new AppError("pve.screenGone", 410);
+  const h = hostOf(s.host);
+  const g = guestOf(h, s.guest);
+  return { socket: await vncSocket(h, g, s.port, s.ticket), name: g.name };
 }
 
 /** What a console printed, as lines for a job's log: colours and cursor moves taken out */

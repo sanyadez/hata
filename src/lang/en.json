@@ -3440,5 +3440,15 @@
   "error.pve.storageOff": "{storage} does not answer now.",
   "error.pve.noVolume": "There is no such file on the storage (any more).",
   "error.pve.volumeKept": "This is not deleted from here: it is a disk of a guest that is there, it is protected, or the token may not delete it.",
-  "pve.content.scope": "Proxmox lists only what the token may see: the backups and disks of other guests can be there too."
+  "pve.content.scope": "Proxmox lists only what the token may see: the backups and disks of other guests can be there too.",
+  "screen.again": "Connect again",
+  "screen.failed": "Not connected",
+  "screen.closed": "Disconnected",
+  "screen.lost": "Connection lost",
+  "screen.lostHint": "The machine may have been shut down, or the connection to Proxmox dropped. “Connect again” asks for the screen anew.",
+  "screen.refused": "The screen refused the sign-in: {reason}",
+  "error.pve.noScreen": "Only a virtual machine has a screen; a container has a console.",
+  "error.pve.screenGone": "The screen was asked for more than a minute ago: connect again.",
+  "pve.screen": "Screen",
+  "pve.screenHint": "The virtual machine's screen, as on a monitor: the keyboard and the mouse go to it. Ctrl+Alt+Del is a button above."
 }

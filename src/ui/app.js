@@ -3572,7 +3572,7 @@ function pveGuests(x) {
           g.may.power && !up && small(t("pve.start"), "play", (el) => pvePower(x, g, g.status === "paused" ? "resume" : "start", el)),
           g.may.power && up && small(t("pve.shutdown"), "stop", () => pvePowerDialog(x, g, "shutdown")),
           g.may.power && up && small(t("pve.reboot"), "refresh", () => pvePowerDialog(x, g, "reboot")),
-          up && g.type === "lxc" && g.may.console && small(t("pve.console"), "terminal", () => pveConsoleDialog(x, g)),
+          up && g.may.console && small(t(g.type === "lxc" ? "pve.console" : "pve.screen"), "terminal", () => pveConsoleDialog(x, g)),
           !m && g.id !== x.self && small(t("pve.client.button"), "download", () => pveClientDialog(x, g)),
           small(t("app.more"), "more", () => pveGuestDialog(x, g)),
         ),
@@ -3639,6 +3639,10 @@ function clientLineFor(os, address, code) {
 /** A container's console from Proxmox, in Hata's own terminal */
 function pveConsoleDialog(x, g) {
   let dialog;
+  if (g.type === "qemu") {
+    dialog = openDialog("xwide", h("header", null, h("h2", { class: "clip grow" }, `${g.name} · ${guestKind(g)}`), closeX(() => dialog)), h("p", { class: "muted small" }, t("pve.screenHint")), h("div", { class: "term-holder" }, h("iframe", { class: "term-frame", src: "/screen.html?" + new URLSearchParams({ pve: x.id, guest: g.id, lang: state.lang }), title: t("pve.screen") })));
+    return;
+  }
   dialog = openDialog("xwide", h("header", null, h("h2", { class: "clip grow" }, `${g.name} · ${guestKind(g)}`), closeX(() => dialog)), h("p", { class: "muted small" }, t("pve.consoleHint")), h("div", { class: "term-holder" }, terminalFrame({ pve: x.id, guest: g.id })));
 }
 
@@ -3746,7 +3750,7 @@ function pveGuestDialog(x, g) {
       up && g.type === "qemu" && act(t("pve.suspend"), "clock", "suspend"),
       up && act(t("pve.stop"), "x", "stop", "danger"),
       button(t("pve.load.button"), { class: "small", onclick: () => (dialog.close(), pveLoadDialog(x, { guest: g.id }, g.name)) }, "chart"),
-      up && g.type === "lxc" && g.may.console && button(t("pve.console"), { class: "small", onclick: () => (dialog.close(), pveConsoleDialog(x, g)) }, "terminal"),
+      up && g.may.console && button(t(g.type === "lxc" ? "pve.console" : "pve.screen"), { class: "small", onclick: () => (dialog.close(), pveConsoleDialog(x, g)) }, "terminal"),
       !g.may.power && h("span", { class: "muted small" }, t("pve.noPower")),
       (g.may.configure || g.may.cpu || g.may.memory || g.may.disk) && button(t("pve.edit.button"), { class: "small", onclick: () => (dialog.close(), pveEditDialog(x, g)) }, "sliders"),
       g.id === x.self && h("span", { class: "chip accent" }, t("pve.selfChip")),
