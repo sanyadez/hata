@@ -537,6 +537,16 @@ export async function backupJobs(id: string) {
   return jobs.map((j) => ({ id: j.id, enabled: j.enabled !== 0, schedule: j.schedule ?? "", storage: j.storage ?? "", guests: j.all ? "all" : j.pool ? `pool:${j.pool}` : (j.vmid ?? ""), exclude: j.exclude ?? "", mode: j.mode ?? "", next: (j["next-run"] ?? 0) * 1000, comment: j.comment ?? "" }));
 }
 
+/** One task as Proxmox says it now: the list is asked once a minute */
+export async function taskNow(id: string, upid: string): Promise<(Task & { failed: boolean }) | null> {
+  const h = hostOf(id);
+  const node = upid.split(":")[1] ?? "";
+  if (!upid.startsWith("UPID:") || !/^[A-Za-z0-9.-]+$/.test(node)) throw new AppError("pve.noTask", 404);
+  const s = await pve<Record<string, unknown>>(h, "GET", `/nodes/${node}/tasks/${encodeURIComponent(upid)}/status`).catch(() => null);
+  const t = s && readTask({ ...s, upid });
+  return t ? { ...t, failed: failed(t) } : null;
+}
+
 /** What a task wrote, for its line on the page */
 export async function taskLog(id: string, upid: string): Promise<string[]> {
   const h = hostOf(id);
