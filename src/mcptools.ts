@@ -34,7 +34,7 @@ import { applyMachineCompose, installOnMachine, machineTiles, machineAppAction, 
 import { backupMachineApp, restoreMachineApp } from "./machinebackup";
 import { containersOf, machinesAway, machines as machineList, open as openOnMachine, power as powerMachine, wake as wakeMachine, type MachineView } from "./machines";
 import { moveApp } from "./moveapp";
-import { backups as pveBackups, createGuest, guestOfMachine, host as pveHost, hosts as pveHosts, newOptions, power as pvePower, proxmoxTrouble, refresh as refreshPve, removeGuest, snapshotAction, snapshots as pveSnapshots, takeBackup, takeSnapshot, taskLog, taskNow } from "./proxmox";
+import { backups as pveBackups, cloneGuest, load as pveLoad, changeGuest, restoreBackup, createGuest, createVm, sendFile, templates as pveTemplates, guestSettings, guestOfMachine, host as pveHost, hosts as pveHosts, newOptions, power as pvePower, proxmoxTrouble, refresh as refreshPve, removeGuest, snapshotAction, snapshots as pveSnapshots, takeBackup, takeSnapshot, taskLog, taskNow } from "./proxmox";
 import { MuxError } from "./mux";
 import { VERSION } from "./version";
 import en from "./lang/en.json";
@@ -821,7 +821,10 @@ const pveRead: Omit<Tool, "level" | "effect">[] = [
             version: h.version,
             ...(h.ids ? { newGuestNumbers: h.ids } : {}),
             guests: h.counts,
-            nodes: h.nodes.map((n) => ({ name: n.name, online: n.online, cores: n.cores, cpuPercent: Math.round(n.cpu * 100), memoryGiB: { used: gib(n.memory.used), total: gib(n.memory.total) }, upHours: Math.round(n.uptime / 360) / 10 })),
+            nodes: h.nodes.map((n) => {
+            const v = h.versions[n.name];
+            return { name: n.name, online: n.online, cores: n.cores, cpuPercent: Math.round(n.cpu * 100), memoryGiB: { used: gib(n.memory.used), total: gib(n.memory.total) }, upHours: Math.round(n.uptime / 360) / 10, ...(v ? { proxmox: v.manager, kernel: v.running, ...(v.reboot ? { newerKernelWaitsForRestart: v.newest } : {}), ...(v.newer.length ? { newerProxmoxPackages: v.newer.map((p) => `${p.name} ${p.from} → ${p.to}`) } : {}), ...(v.all !== null ? { systemUpdates: v.all } : {}) } : {}) };
+          }),
             storages: h.storages.map((st) => ({ name: st.name, node: st.node, type: st.type, active: st.active, content: st.content, usedPercent: percent(st.used, st.total), freeGiB: gib(st.total - st.used), ...(st.backup ? { backupsAllowed: true } : {}) })),
             ...(h.unprotected ? { notBackedUp: h.unprotected.map((g) => `${g.name} (${g.vmid})`) } : {}),
             problems: h.trouble.map((item) => {
@@ -884,11 +887,73 @@ const pveRead: Omit<Tool, "level" | "effect">[] = [
       }),
   },
   {
+    name: "proxmox_guest_settings",
+    title: "A Proxmox guest's settings",
+    description: "What proxmox_guest_change can change, as the guest has it now: name, cores, memory and swap (MB), start with the server, tags, notes, its disks with their sizes in GB, and what waits for a restart (`pending`).",
+    input: GUEST,
+    required: ["guest"],
+    run: (args, caller) =>
+      wrap(async () => {
+        const h = await serverOf(args);
+        const g = guestIn(h, args);
+        const { settings, pending } = await guestSettings(h.id, g.id);
+        const { description, ...rest } = settings;
+        return { ...rest, ...(description ? { notes: caller.level === "full" ? description : HIDDEN } : {}), ...(pending.length ? { pending } : {}) };
+      }),
+  },
+  {
+    name: "proxmox_load",
+    title: "Load of a Proxmox node or guest over time",
+    description: "How busy a node (`node`) or a guest (`guest`) was over the last hour, day, week or month: processor and memory in percent, network in and out in bytes a second — now, on average and at the most, with when the most was.",
+    input: { ...SERVER, node: { type: "string", description: "A node's name, as `proxmox` lists them" }, guest: GUEST.guest, timeframe: { type: "string", enum: ["hour", "day", "week", "month"], description: "hour by default" } },
+    run: (args) =>
+      wrap(async () => {
+        const h = await serverOf(args);
+        const target = args.guest ? { guest: guestIn(h, args).id } : { node: typeof args.node === "string" && args.node ? args.node : h.nodes[0]?.name };
+        const { timeframe, points } = await pveLoad(h.id, { ...target, timeframe: typeof args.timeframe === "string" ? args.timeframe : "hour" });
+        const sum = (value: (p: (typeof points)[number]) => number | null, round: (v: number) => number) => {
+          const seen = points.map((p) => ({ t: p.t, v: value(p) })).filter((p): p is { t: number; v: number } => p.v !== null);
+          if (!seen.length) return null;
+          const top = seen.reduce((a, b) => (b.v > a.v ? b : a));
+          return { now: round(seen.at(-1)!.v), average: round(seen.reduce((a, b) => a + b.v, 0) / seen.length), most: round(top.v), mostAt: when(top.t) };
+        };
+        const pct = (v: number) => Math.round(v * 10) / 10;
+        return {
+          ...target,
+          timeframe,
+          cpuPercent: sum((p) => (p.cpu === null ? null : p.cpu * 100), pct),
+          memoryPercent: sum((p) => (p.mem !== null && p.maxmem ? (p.mem / p.maxmem) * 100 : null), pct),
+          memoryTotalGiB: gib(points.at(-1)?.maxmem ?? 0),
+          networkInBytesPerSecond: sum((p) => p.netin, Math.round),
+          networkOutBytesPerSecond: sum((p) => p.netout, Math.round),
+        };
+      }),
+  },
+  {
     name: "proxmox_container_options",
-    title: "What a new container can be made of",
-    description: "For proxmox_container_create: the nodes, templates, storages, network bridges and pools the token may use, the numbers already taken and the next free one.",
+    title: "What a new container or virtual machine can be made of",
+    description: "For proxmox_container_create and proxmox_vm_create: the nodes, container templates, disk images (`images`) and installation discs (`isos`) per node, the storages a container's disk (`storages`) or a virtual machine's disk (`disks`) may go to, network bridges and pools the token may use, the numbers already taken and the next free one.",
     input: SERVER,
     run: (args) => wrap(async () => newOptions((await serverOf(args)).id)),
+  },
+  {
+    name: "proxmox_images",
+    title: "Disk images, discs and templates on a Proxmox server",
+    description: "What the storages keep — disk images new virtual machines start from, installation discs (ISO), container templates — the cloud images Hata can download (`cloud`, by `image` id for proxmox_download) and the storages the token may put each kind on, with their free room.",
+    input: SERVER,
+    run: (args) =>
+      wrap(async () => {
+        const t = await pveTemplates((await serverOf(args)).id);
+        const kept = (list: { node: string; storage: string; volid: string; size: number }[]) => list.map((v) => ({ volid: v.volid, node: v.node, storage: v.storage, sizeGiB: gib(v.size) }));
+        const where = (list: { node: string; storage: string; free: number }[]) => list.map((s) => ({ node: s.node, storage: s.storage, freeGiB: gib(s.free) }));
+        return {
+          images: kept(t.images.have),
+          isos: kept(t.isos.have),
+          templates: kept(t.have),
+          cloud: t.images.offered.map((o) => ({ image: o.id, name: o.name, file: o.file, onServer: t.images.have.some((v) => v.name === o.file) })),
+          mayPut: { images: where(t.images.storages), isos: where(t.isos.storages), templates: where(t.storages) },
+        };
+      }),
   },
 ];
 
@@ -896,7 +961,7 @@ const pveRead: Omit<Tool, "level" | "effect">[] = [
 async function pveBackupsOf(host: string, guest: string) {
   try {
     const { backups, unreachable } = await pveBackups(host, guest);
-    return { list: backups.slice(0, 20).map((b) => ({ storage: b.storage, at: when(b.at), sizeGiB: gib(b.size), ...(b.notes ? { notes: b.notes } : {}), ...(b.protected ? { protected: true } : {}) })), ...(unreachable.length ? { storagesNotAnswering: unreachable } : {}) };
+    return { list: backups.slice(0, 20).map((b) => ({ backup: b.volid, storage: b.storage, at: when(b.at), sizeGiB: gib(b.size), ...(b.notes ? { notes: b.notes } : {}), ...(b.protected ? { protected: true } : {}) })), ...(unreachable.length ? { storagesNotAnswering: unreachable } : {}) };
   } catch (e) {
     return e instanceof AppError ? say(e.code, e.detail) : String(e);
   }
@@ -1015,6 +1080,138 @@ const pveFull: (Omit<Tool, "level" | "effect"> & { effect?: Tool["effect"] })[] 
       }),
   },
   {
+    name: "proxmox_backup_restore",
+    title: "Restore a Proxmox guest from a backup",
+    description: "Puts a backup of a guest back (proxmox_guest lists them as `backup`). By default as a NEW guest beside it, with new network cards — `vmid` must be free (proxmox_container_options gives the next free one). With `replace` it goes over the guest itself: everything it has now, its snapshots too, is LOST — the guest must be shut down first and `name` must repeat its name exactly. Takes minutes: expect a running job and ask job_get.",
+    input: {
+      ...GUEST,
+      backup: { type: "string", description: "The backup, as proxmox_guest lists it" },
+      replace: { type: "boolean", description: "Over the guest itself instead of a new one; false by default" },
+      name: { type: "string", description: "With replace: the guest's name exactly" },
+      vmid: { type: "number", description: "Without replace: the new guest's number" },
+      storage: { type: "string", description: "Where the disks go; by default where the guest's disks are" },
+      pool: { type: "string" },
+      start: { type: "boolean", description: "Start it afterwards; false by default" },
+    },
+    required: ["guest", "backup"],
+    run: (args, caller) =>
+      wrap(async () => {
+        const h = await serverOf(args);
+        const g = guestIn(h, args);
+        need(h, g, "remove");
+        if (args.replace === true) notSelf(h, g, "put back over itself");
+        const { job } = await restoreBackup(h.id, g.id, { volid: args.backup, replace: args.replace === true, name: args.name, vmid: args.vmid, storage: args.storage, pool: args.pool, start: args.start === true }, caller.user);
+        const made = getJob(job);
+        return made ? settle(made) : { job };
+      }),
+  },
+  {
+    name: "proxmox_guest_change",
+    title: "Change a Proxmox guest's settings",
+    description: "Changes a container's or virtual machine's name, processors (`cores`), memory and swap (MB), whether it starts with the server, tags and notes, and makes its disks larger (`disks`: { \"rootfs\": 16 } — GB; a disk is never made smaller). Only what is given changes. A running container takes most at once; what waits for a restart comes back as `pending`. proxmox_guest_settings shows what it has now.",
+    effect: "change",
+    input: {
+      ...GUEST,
+      name: { type: "string" },
+      cores: { type: "number" },
+      memory: { type: "number", description: "MB" },
+      swap: { type: "number", description: "MB, containers only" },
+      onboot: { type: "boolean" },
+      tags: { type: "array", items: { type: "string" } },
+      notes: { type: "string" },
+      disks: { type: "object", description: "Disk key → its new size in GB, larger than now" },
+    },
+    required: ["guest"],
+    run: (args, caller) =>
+      wrap(async () => {
+        const h = await serverOf(args);
+        const g = guestIn(h, args);
+        const { server: _s, guest: _g, notes, ...rest } = args;
+        const done = await changeGuest(h.id, g.id, { ...rest, ...(notes !== undefined ? { description: notes } : {}) }, caller.user);
+        return { guest: `${g.name} (${g.vmid})`, server: h.name, changed: done.changed, ...(done.pending.length ? { pending: done.pending, note: "These take effect after the guest is restarted." } : {}) };
+      }),
+  },
+  {
+    name: "proxmox_guest_clone",
+    title: "Copy a Proxmox guest",
+    description: "Makes a copy of a container or virtual machine as a new guest, with new network cards. A container is copied only while it is stopped, or from a template; from a template the copy may be `linked` (shares its disks: made in seconds). `vmid` must be free — proxmox_container_options gives the next one. Copying disks takes minutes: expect a running job and ask job_get.",
+    effect: "change",
+    input: { ...GUEST, vmid: { type: "number" }, name: { type: "string", description: "The copy's name (a container's host name)" }, linked: { type: "boolean", description: "From a template only; false by default" }, storage: { type: "string" }, pool: { type: "string" }, start: { type: "boolean" } },
+    required: ["guest", "vmid", "name"],
+    run: (args, caller) =>
+      wrap(async () => {
+        const h = await serverOf(args);
+        const g = guestIn(h, args);
+        need(h, g, "clone");
+        const { job } = await cloneGuest(h.id, g.id, { vmid: args.vmid, name: args.name, linked: args.linked === true, storage: args.storage, pool: args.pool, start: args.start === true }, caller.user);
+        const made = getJob(job);
+        return made ? settle(made) : { job };
+      }),
+  },
+  {
+    name: "proxmox_vm_create",
+    title: "Make a new virtual machine in Proxmox",
+    description: "Makes a new virtual machine. From a disk image (`source` among proxmox_container_options' `images`): cloud-init makes `user` (default hata) with a password of Hata's that is locked afterwards, and — unless `client` is false — Hata signs in on its serial console and installs the guest agent and its client, so it becomes one of Hata's machines (`machines`). From an installation disc (`source` among `isos`): an empty disk and the disc; the system is installed by a person on its screen, and `client`, `user`, `sshKeys`, `address` do not apply. Takes minutes: expect a running job and ask job_get.",
+    effect: "change",
+    input: {
+      ...SERVER,
+      node: { type: "string" },
+      vmid: { type: "number", description: "The new guest's number; proxmox_container_options gives the next free one" },
+      hostname: { type: "string", description: "Its name and host name: lowercase Latin letters, digits and -" },
+      source: { type: "string", description: "A disk image or a disc, as proxmox_container_options lists them for the node" },
+      storage: { type: "string", description: "Where its disk lies: one of `disks`" },
+      bridge: { type: "string", description: "The network bridge, usually vmbr0" },
+      pool: { type: "string", description: "Required when the token may make guests only inside a pool" },
+      disk: { type: "number", description: "GB, 2–4096; a disk image's disk is made this large" },
+      cores: { type: "number" },
+      memory: { type: "number", description: "MB, at least 256" },
+      address: { type: "string", description: "A fixed address with its mask, e.g. 192.168.1.50/24; left out — from the router" },
+      gateway: { type: "string", description: "With a fixed address: the router's address" },
+      user: { type: "string", description: "The user cloud-init makes, with sudo; hata by default" },
+      sshKeys: { type: "string", description: "Public SSH keys for the user, one per line" },
+      onboot: { type: "boolean", description: "Start with the server; true by default" },
+      start: { type: "boolean", description: "From a disc: start it at once; true by default" },
+      client: { type: "boolean", description: "From a disk image: install Hata's client; true by default" },
+      docker: { type: "boolean", description: "Install Docker too; false by default" },
+    },
+    required: ["node", "vmid", "hostname", "source", "storage", "bridge", "disk", "cores", "memory"],
+    run: (args, caller) =>
+      wrap(async () => {
+        if (!caller.origin) throw new ToolError("Hata's own address is not known for this call.");
+        const h = await serverOf(args);
+        // the password stays Hata's own, locked once it is done: a person sets theirs on the page
+        const { server: _, password: _p, ...input } = args;
+        const { job } = await createVm(h.id, input, caller.user, caller.origin);
+        const made = getJob(job);
+        return made ? settle(made) : { job };
+      }),
+  },
+  {
+    name: "proxmox_download",
+    title: "Put a disk image or a disc on a Proxmox storage",
+    description: "Downloads a file and passes it on to a storage of the server as it comes (nothing is kept on Hata): a cloud image Hata knows (`image` — an id proxmox_images lists under `cloud`, checked against its published checksum), or any `url` of a disk image (`kind` import: qcow2, raw, vmdk, img) or an installation disc (`kind` iso), optionally with its SHA-256 or SHA-512 `checksum`, which Proxmox then compares. `storage` must be one proxmox_images lists under `mayPut` for the kind. Large files take minutes: expect a running job and ask job_get.",
+    effect: "change",
+    input: {
+      ...SERVER,
+      kind: { type: "string", enum: ["import", "iso"], description: "import — a disk image for new virtual machines; iso — an installation disc" },
+      node: { type: "string" },
+      storage: { type: "string" },
+      image: { type: "string", description: "A cloud image's id (debian-13, ubuntu-24.04, …); kind import" },
+      url: { type: "string", description: "http or https" },
+      checksum: { type: "string" },
+    },
+    required: ["kind", "node", "storage"],
+    run: (args, caller) =>
+      wrap(async () => {
+        const h = await serverOf(args);
+        // files of this server never go out through here: only a cloud image or a link
+        const { server: _, path: _p, ...input } = args;
+        const { job } = await sendFile(h.id, input, caller.user);
+        const made = getJob(job);
+        return made ? settle(made) : { job };
+      }),
+  },
+  {
     name: "proxmox_container_create",
     title: "Make a new container in Proxmox",
     description: "Makes a new unprivileged container from a template, starts it and — unless `client` is false — installs Hata's client in it, so it becomes one of Hata's machines (`machines`) and apps can be installed there. Look at proxmox_container_options first: node, template, storage, bridge and pool must be among what it lists. Takes minutes: expect a running job and ask job_get.",
@@ -1077,7 +1274,7 @@ export const TOOLS: Tool[] = [
 const LEVEL_WORDS: Record<Level, string> = {
   read: "It can look at everything listed in the tools and change nothing.",
   operate: "It can look, start, stop, restart and update apps — here and on the other machines — install apps from the store, take snapshots, wake a machine up, and start, shut down, restart, snapshot and back up the guests of Proxmox. It cannot change compose files, remove apps, restore snapshots, move apps, restart machines, or stop, roll back, delete or make Proxmox guests.",
-  full: "It can also change compose files, install apps from a compose file, remove apps, restore snapshots, move apps between machines, restart or shut down machines, and stop Proxmox guests by force, roll them back to a snapshot, delete them and their snapshots, and make new containers there.",
+  full: "It can also change compose files, install apps from a compose file, remove apps, restore snapshots, move apps between machines, restart or shut down machines, and change the settings of Proxmox guests (processors, memory, disks made larger), stop them by force, roll them back to a snapshot or restore them from a backup, delete them and their snapshots, and make new containers there.",
 };
 
 /** What the model is told when it connects */

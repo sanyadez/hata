@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { rolesFor } from "../src/proxmox";
-import { clientLine } from "../src/pve";
-import { cleanFingerprint, cleanUrl, failed, hostKeysIn, familyOf, nextId, readNewGuest, setupScript, guestOfMachine, guestRights, mayPath, readConfig, readResources, readTask, snapshotName, trouble, type Watched } from "../src/pve";
+import { clientLine, gibOf, readSettings, restoreParams, settingsChange, cleanSchedule, scheduleDue, scheduled, toPrune, SCHEDULE_MARK, readOffered, TEMPLATE_RE, archOf, readRrd, cloneParams, readVersions, versionCompare, readContent } from "../src/pve";
+import { cloudImages, imageFamily, readNewVm, sumFor, uploadName, vmSetupLine, cleanFingerprint, cleanUrl, failed, hostKeysIn, familyOf, nextId, readNewGuest, setupScript, guestOfMachine, guestRights, mayPath, readConfig, readResources, readTask, snapshotName, trouble, type Watched } from "../src/pve";
 
 test("an address as typed becomes the API's origin", () => {
   expect(cleanUrl("192.168.1.198")).toBe("https://192.168.1.198:8006");
@@ -60,8 +60,8 @@ test("a guest's configuration gives its cards and addresses", () => {
 test("rights: the most specific path that gives something", () => {
   const perms = { "/": { "VM.Audit": 1 }, "/pool/hata": { "VM.PowerMgmt": 1, "VM.Snapshot": 1 }, "/storage/local-lvm": { "Datastore.AllocateSpace": 1 } };
   const g = readResources(resources).guests;
-  expect(guestRights(perms, g[0]!)).toEqual({ power: false, snapshot: false, rollback: false, backup: false, remove: false, console: false, configure: false });
-  expect(guestRights(perms, g[1]!)).toEqual({ power: true, snapshot: true, rollback: false, backup: false, remove: false, console: false, configure: false });
+  expect(guestRights(perms, g[0]!)).toEqual({ power: false, snapshot: false, rollback: false, backup: false, remove: false, console: false, configure: false, cpu: false, memory: false, disk: false, clone: false });
+  expect(guestRights(perms, g[1]!)).toEqual({ power: true, snapshot: true, rollback: false, backup: false, remove: false, console: false, configure: false, cpu: false, memory: false, disk: false, clone: false });
   expect(guestRights({ "/": { "VM.PowerMgmt": 1 } }, g[0]!).power).toBe(true);
   expect(mayPath(perms, "/storage/local-lvm", "Datastore.AllocateSpace")).toBe(true);
   expect(mayPath(perms, "/storage/local", "Datastore.AllocateSpace")).toBe(false);
@@ -215,4 +215,255 @@ test("the client's line per system", () => {
   expect(clientLine("debian", "http://h/", "c")).toBe("export DEBIAN_FRONTEND=noninteractive; apt-get update -q && apt-get install -y -q curl ca-certificates && curl -fsSL http://h/client/c | sh");
   expect(clientLine("alpine", "http://h", "c")).toBeNull();
   expect(clientLine("l26", "http://h", "c")).toBe("curl -fsSL http://h/client/c | sh");
+});
+
+test("a guest's settings read from its configuration", () => {
+  const ct = readSettings({ hostname: "web", cores: 2, memory: 1024, swap: 256, onboot: 1, tags: "hata;web", description: "Notes\n", rootfs: "local-lvm:vm-243-disk-0,size=4G", mp0: "local-lvm:vm-243-disk-1,mp=/data,size=512M", mp1: "/srv/media,mp=/media" }, "lxc");
+  expect(ct).toEqual({ name: "web", cores: 2, memory: 1024, swap: 256, onboot: true, tags: ["hata", "web"], description: "Notes\n", disks: [{ key: "rootfs", storage: "local-lvm", size: 4 }, { key: "mp0", storage: "local-lvm", size: 0.5 }] });
+  const vm = readSettings({ name: "win", cores: 4, memory: "current=8192", scsi0: "local-lvm:vm-100-disk-0,iothread=1,size=1T", ide2: "local:iso/debian.iso,media=cdrom,size=600M", efidisk0: "local-lvm:vm-100-disk-1,size=4M" }, "qemu");
+  expect(vm.memory).toBe(8192);
+  expect(vm.swap).toBeNull();
+  expect(vm.onboot).toBe(false);
+  expect(vm.disks).toEqual([{ key: "scsi0", storage: "local-lvm", size: 1024 }]);
+  expect(gibOf("32G")).toBe(32);
+  expect(gibOf("nonsense")).toBe(0);
+});
+
+test("a guest's settings changed: only what differs, with the rights it needs", () => {
+  const old = readSettings({ hostname: "web", cores: 2, memory: 1024, swap: 256, onboot: 1, tags: "hata", description: "x", rootfs: "local-lvm:vm-243-disk-0,size=4G" }, "lxc");
+  expect(settingsChange(old, { name: "web", cores: 2, memory: 1024, onboot: true, tags: ["hata"], description: "x", disks: { rootfs: 4 } }, "lxc")).toEqual({ params: {}, remove: [], grow: [], needs: [] });
+  expect(settingsChange(old, { name: "web2", cores: "4", memory: 2048, swap: 0, onboot: false, tags: [], description: "", disks: { rootfs: 8 } }, "lxc")).toEqual({
+    params: { hostname: "web2", cores: 4, memory: 2048, swap: 0, onboot: 0 },
+    remove: ["tags", "description"],
+    grow: [{ disk: "rootfs", size: "8G" }],
+    needs: ["options", "cpu", "memory", "disk"],
+  });
+  const field = (input: Record<string, unknown>) => {
+    try {
+      settingsChange(old, input, "lxc");
+      return "";
+    } catch (e) {
+      return (e as { field: string }).field;
+    }
+  };
+  expect(field({ name: "-bad" })).toBe("name");
+  expect(field({ cores: 0 })).toBe("cores");
+  expect(field({ memory: 10 })).toBe("memory");
+  expect(field({ tags: ["ok", "not ok"] })).toBe("tags");
+  expect(field({ disks: { rootfs: 3 } })).toBe("diskShrink");
+  expect(field({ disks: { mp9: 10 } })).toBe("disk");
+  expect(field({ onboot: "yes" })).toBe("onboot");
+  // a virtual machine's name may have dots, and has no swap
+  const vm = readSettings({ name: "vm", cores: 1, memory: 2048 }, "qemu");
+  expect(settingsChange(vm, { name: "vm.home", swap: 512 }, "qemu").params).toEqual({ name: "vm.home" });
+});
+
+test("a backup restored over its guest or as a new one", () => {
+  const volid = "local:backup/vzdump-lxc-243-2026_10_18-10_00_00.tar.zst";
+  expect(restoreParams("lxc", { volid, vmid: 243, storage: "local-lvm", replace: true, pool: "hata" })).toEqual({ vmid: 243, ostemplate: volid, restore: 1, storage: "local-lvm", force: 1 });
+  expect(restoreParams("lxc", { volid, vmid: 245, storage: "local-lvm", replace: false, pool: "hata" })).toEqual({ vmid: 245, ostemplate: volid, restore: 1, storage: "local-lvm", unique: 1, pool: "hata" });
+  expect(restoreParams("qemu", { volid: "local:backup/vzdump-qemu-245.vma.zst", vmid: 246, storage: "", replace: false, pool: "" })).toEqual({ vmid: 246, archive: "local:backup/vzdump-qemu-245.vma.zst", unique: 1 });
+});
+
+test("Hata's schedule of backups: checked, due once a day, keeps only its own copies", () => {
+  expect(cleanSchedule({ on: true, time: "03:30", storage: "local", keep: 3, guests: [245, 243, 243] }, ["local"])).toEqual({ on: true, time: "03:30", storage: "local", keep: 3, guests: [243, 245] });
+  expect(cleanSchedule({ on: false, time: "03:30", storage: "gone", keep: 1, guests: "all" }, ["local"]).storage).toBe("");
+  const field = (input: Record<string, unknown>) => {
+    try {
+      cleanSchedule({ on: true, time: "03:30", storage: "local", keep: 3, guests: "all", ...input }, ["local"]);
+      return "";
+    } catch (e) {
+      return (e as { field: string }).field;
+    }
+  };
+  expect(field({ time: "25:00" })).toBe("time");
+  expect(field({ storage: "nas" })).toBe("storage");
+  expect(field({ keep: 0 })).toBe("keep");
+  expect(field({ guests: [] })).toBe("guests");
+  expect(field({ guests: ["x"] })).toBe("guests");
+  const s = cleanSchedule({ on: true, time: "03:30", storage: "local", keep: 2, guests: "all" }, ["local"]);
+  const at = (h: number, m: number) => new Date(2026, 9, 18, h, m);
+  expect(scheduleDue(s, undefined, at(3, 29))).toBe(false);
+  expect(scheduleDue(s, undefined, at(3, 30))).toBe(true);
+  expect(scheduleDue(s, "2026-10-17", at(23, 0))).toBe(true);
+  expect(scheduleDue(s, "2026-10-18", at(23, 0))).toBe(false);
+  expect(scheduleDue({ ...s, on: false }, undefined, at(4, 0))).toBe(false);
+  expect(scheduled(s, [243, 245])).toEqual([243, 245]);
+  expect(scheduled({ ...s, guests: [243, 999] }, [243, 245])).toEqual([243]);
+  const b = (volid: string, vmid: number, at: number, notes: string, isProtected = false) => ({ volid, vmid, at, notes, protected: isProtected });
+  expect(
+    toPrune([b("a1", 243, 1, `ct ${SCHEDULE_MARK}`), b("a2", 243, 2, `ct ${SCHEDULE_MARK}`), b("a3", 243, 3, `ct ${SCHEDULE_MARK}`), b("m", 243, 0, "ct — Hata"), b("p", 243, 0, `ct ${SCHEDULE_MARK}`, true), b("c1", 245, 5, `x ${SCHEDULE_MARK}`)], 2),
+  ).toEqual(["a1"]);
+});
+
+test("the templates Proxmox offers: systems first, newest first", () => {
+  const list = readOffered([
+    { type: "lxc", section: "turnkeylinux", template: "debian-12-turnkey-xoops_18.0-1_amd64.tar.gz", headline: "TurnKey Xoops", os: "debian-12", version: "18.0-1" },
+    { type: "lxc", section: "system", template: "debian-12-standard_12.12-1_amd64.tar.zst", headline: "Debian 12", os: "debian-12", version: "12.12-1" },
+    { type: "lxc", section: "system", template: "alpine-3.22-default_20250617_amd64.tar.xz", headline: "Alpine 3.22", os: "alpine", version: "3.22" },
+    { type: "qemu", section: "system", template: "x.qcow2" },
+  ]);
+  expect(readOffered([{ type: "lxc", template: "alpine-arm.tar.xz", architecture: "arm64" }, { type: "lxc", template: "alpine.tar.xz", architecture: "amd64" }], "amd64").map((t) => t.template)).toEqual(["alpine.tar.xz"]);
+  expect(archOf({ cpuinfo: { flags: "fpu sse sse2 lm" } })).toBe("amd64");
+  expect(archOf({ cpuinfo: { flags: "fp asimd evtstrm" } })).toBe("arm64");
+  expect(archOf({})).toBe("");
+  expect(list.map((t) => [t.template, t.client])).toEqual([
+    ["alpine-3.22-default_20250617_amd64.tar.xz", false],
+    ["debian-12-standard_12.12-1_amd64.tar.zst", true],
+    ["debian-12-turnkey-xoops_18.0-1_amd64.tar.gz", true],
+  ]);
+  expect(TEMPLATE_RE.test("debian-12-standard_12.12-1_amd64.tar.zst")).toBe(true);
+  expect(TEMPLATE_RE.test("../etc/passwd.tar.gz")).toBe(false);
+});
+
+test("load over time: a node's and a guest's fields, gaps kept", () => {
+  expect(readRrd([{ time: 20, cpu: 0.5, memused: 4, memtotal: 8, netin: 10, netout: 2 }, { time: 10, cpu: 0.1, mem: 1, maxmem: 2 }, { time: 30 }])).toEqual([
+    { t: 10_000, cpu: 0.1, mem: 1, maxmem: 2, netin: null, netout: null },
+    { t: 20_000, cpu: 0.5, mem: 4, maxmem: 8, netin: 10, netout: 2 },
+    { t: 30_000, cpu: null, mem: null, maxmem: null, netin: null, netout: null },
+  ]);
+});
+
+test("a clone: full by default, linked only as asked, storage only for a full one", () => {
+  expect(cloneParams("lxc", { newid: 246, name: "web-2", linked: false, storage: "local-lvm", pool: "hata" })).toEqual({ newid: 246, hostname: "web-2", full: 1, storage: "local-lvm", pool: "hata" });
+  expect(cloneParams("qemu", { newid: 247, name: "vm-2", linked: true, storage: "local-lvm", pool: "" })).toEqual({ newid: 247, name: "vm-2", full: 0 });
+});
+
+test("a node's versions: newer packages, a newer kernel waiting for a restart", () => {
+  expect(versionCompare("7.0.14-24", "7.0.14-20")).toBe(1);
+  expect(versionCompare("10.6.1-1+pve3", "10.6.1-1+pve10")).toBe(-1);
+  expect(versionCompare("9.2.0", "9.2.0")).toBe(0);
+  const list = [
+    { Package: "proxmox-ve", OldVersion: "9.2.0", Version: "9.2.0", CurrentState: "Installed", RunningKernel: "7.0.14-20-pve" },
+    { Package: "pve-manager", OldVersion: "9.2.21", Version: "9.2.21", CurrentState: "Installed" },
+    { Package: "proxmox-kernel-7.0", OldVersion: "7.0.14-20", Version: "7.0.14-24", CurrentState: "Installed" },
+    { Package: "proxmox-kernel-7.0.14-20-pve-signed", OldVersion: "7.0.14-20", Version: "7.0.14-20", CurrentState: "Installed" },
+    { Package: "proxmox-kernel-7.0.14-8-pve-signed", OldVersion: "7.0.14-8", Version: "7.0.14-8", CurrentState: "Installed" },
+    { Package: "qemu-server", OldVersion: "9.2.10", Version: "9.2.11", CurrentState: "Installed" },
+    { Package: "zfsutils-linux", OldVersion: "", Version: "2.3.4", CurrentState: "NotInstalled" },
+  ];
+  expect(readVersions(list)).toEqual({ manager: "9.2.21", running: "7.0.14-20-pve", newest: "7.0.14-20-pve", reboot: false, newer: [{ name: "proxmox-kernel-7.0", from: "7.0.14-20", to: "7.0.14-24" }, { name: "qemu-server", from: "9.2.10", to: "9.2.11" }] });
+  const waiting = readVersions([...list, { Package: "proxmox-kernel-7.0.14-24-pve-signed", OldVersion: "7.0.14-24", Version: "7.0.14-24", CurrentState: "Installed" }]);
+  expect(waiting.newest).toBe("7.0.14-24-pve");
+  expect(waiting.reboot).toBe(true);
+});
+
+test("what a storage holds: whose it is, what is left of guests that are gone", () => {
+  const list = readContent(
+    [
+      { volid: "local-lvm:vm-243-disk-0", content: "rootdir", size: 5e9, vmid: 243 },
+      { volid: "local-lvm:vm-199-disk-0", content: "images", size: 8e9, vmid: "199" },
+      { volid: "local:iso/debian.iso", content: "iso", size: 6e8 },
+    ],
+    new Map([[243, "hata-ct1"]]),
+  );
+  expect(list.map((v) => [v.volid, v.guest, v.orphan])).toEqual([
+    ["local-lvm:vm-199-disk-0", "", true],
+    ["local-lvm:vm-243-disk-0", "hata-ct1", false],
+    ["local:iso/debian.iso", "", false],
+  ]);
+});
+
+const vmOffer = { ...offer, disks: { i5: ["local-lvm"] }, images: { i5: ["local:import/debian-13-genericcloud-amd64.qcow2"] }, isos: { i5: ["local:iso/alpine-virt-3.22.iso"] } };
+const vmAnswers = { node: "i5", vmid: 245, hostname: "vm-1", source: "local:import/debian-13-genericcloud-amd64.qcow2", storage: "local-lvm", disk: 4, cores: 2, memory: 2048, bridge: "vmbr0", address: "dhcp", pool: "hata", docker: false };
+
+test("a new virtual machine from a disk image: imported, cloud-init with a user, a serial console", () => {
+  const g = readNewVm(vmAnswers, vmOffer, "pw-of-hata");
+  expect(g.from).toBe("image");
+  expect(g.family).toBe("apt");
+  expect(g.client).toBe(true);
+  expect(g.start).toBe(true);
+  expect(g.user).toBe("hata");
+  expect(g.ownPassword).toBe(false);
+  expect(g.params).toEqual({
+    vmid: 245,
+    name: "vm-1",
+    ostype: "l26",
+    cpu: "x86-64-v2-AES",
+    cores: 2,
+    memory: 2048,
+    scsihw: "virtio-scsi-single",
+    net0: "virtio,bridge=vmbr0",
+    agent: 1,
+    pool: "hata",
+    scsi0: "local-lvm:0,import-from=local:import/debian-13-genericcloud-amd64.qcow2,discard=on,iothread=1",
+    ide2: "local-lvm:cloudinit",
+    serial0: "socket",
+    boot: "order=scsi0",
+    ciuser: "hata",
+    cipassword: "pw-of-hata",
+    ipconfig0: "ip=dhcp",
+  });
+  const own = readNewVm({ ...vmAnswers, user: "alex", password: "my long pass", sshKeys: "ssh-ed25519 AAAAC3Nza me@laptop\n", address: "192.168.1.245/24", gateway: "192.168.1.1" }, vmOffer);
+  expect(own.ownPassword).toBe(true);
+  expect(own.params.cipassword).toBe("my long pass");
+  expect(own.params.ipconfig0).toBe("ip=192.168.1.245/24,gw=192.168.1.1");
+  // encoded once here, once more by the form
+  expect(own.params.sshkeys).toBe("ssh-ed25519%20AAAAC3Nza%20me%40laptop%0A");
+  expect(readNewVm(vmAnswers, vmOffer).password).toMatch(/^[A-Za-z0-9_-]{24}$/);
+});
+
+test("a new virtual machine from a disc: an empty disk, the disc, nothing of cloud-init", () => {
+  const g = readNewVm({ ...vmAnswers, source: "local:iso/alpine-virt-3.22.iso", start: false }, vmOffer);
+  expect(g.from).toBe("iso");
+  expect(g.client).toBe(false);
+  expect(g.start).toBe(false);
+  expect(g.params.scsi0).toBe("local-lvm:4,discard=on,iothread=1");
+  expect(g.params.ide2).toBe("local:iso/alpine-virt-3.22.iso,media=cdrom");
+  expect(g.params.boot).toBe("order=scsi0;ide2");
+  expect(g.params.ciuser).toBeUndefined();
+  expect(g.params.serial0).toBeUndefined();
+});
+
+test("a new virtual machine's answers refused field by field", () => {
+  const field = (over: Record<string, unknown>) => {
+    try {
+      readNewVm({ ...vmAnswers, ...over }, vmOffer);
+      return "";
+    } catch (e) {
+      return (e as { field: string }).field;
+    }
+  };
+  expect(field({})).toBe("");
+  expect(field({ source: "local:import/other.qcow2" })).toBe("source");
+  expect(field({ storage: "local" })).toBe("storage");
+  expect(field({ user: "root" })).toBe("user");
+  expect(field({ user: "Alex" })).toBe("user");
+  expect(field({ password: "short" })).toBe("password");
+  expect(field({ password: "two\nlines here" })).toBe("password");
+  expect(field({ sshKeys: "not a key" })).toBe("sshKeys");
+  expect(field({ vmid: 243 })).toBe("vmidTaken");
+  expect(field({ address: "192.168.1.50/24" })).toBe("gateway");
+});
+
+test("the line typed into a new virtual machine: agent, Docker, client, the password locked", () => {
+  const g = { family: "apt" as const, docker: true, client: true, user: "hata", ownPassword: false };
+  const line = vmSetupLine(g, "curl -fsSL http://hata/client/x | sh");
+  expect(line.startsWith("(cloud-init status --wait >/dev/null 2>&1 || true && export DEBIAN_FRONTEND=noninteractive && apt-get update -q && apt-get install -y -q qemu-guest-agent curl ca-certificates")).toBe(true);
+  expect(line).toContain("curl -fsSL https://get.docker.com | sh && curl -fsSL http://hata/client/x | sh)");
+  expect(line.endsWith("; r=$?; passwd -l hata >/dev/null; (exit $r)")).toBe(true);
+  expect(vmSetupLine({ ...g, ownPassword: true, docker: false }, "X")).not.toContain("passwd");
+  expect(line).not.toContain("\n");
+});
+
+test("cloud images, their checksums and the names files get on a storage", () => {
+  const images = cloudImages("amd64");
+  expect(images.map((i) => i.id)).toEqual(["debian-13", "debian-12", "ubuntu-26.04", "ubuntu-24.04"]);
+  expect(images[0]!.url).toBe("https://cloud.debian.org/images/cloud/trixie/latest/debian-13-genericcloud-amd64.qcow2");
+  expect(images[3]!.file).toBe("noble-server-cloudimg-amd64.qcow2");
+  expect(cloudImages("arm64")[0]!.file).toBe("debian-13-genericcloud-arm64.qcow2");
+  expect(cloudImages("")).toEqual([]);
+  const h64 = "a".repeat(64);
+  expect(sumFor(`${"b".repeat(64)} *other.img\n${h64} *noble-server-cloudimg-amd64.img\n`, "noble-server-cloudimg-amd64.img")).toBe(h64);
+  expect(sumFor(`${"c".repeat(128)}  debian-13-genericcloud-amd64.qcow2`, "debian-13-genericcloud-amd64.qcow2")).toBe("c".repeat(128));
+  expect(sumFor("nothing", "x")).toBeNull();
+  const qcow = new Uint8Array([0x51, 0x46, 0x49, 0xfb, 0]);
+  expect(uploadName("https://x/images/noble.img?raw=1", "import", qcow)).toBe("noble.qcow2");
+  expect(uploadName("/DATA/disk image.img", "import", new Uint8Array(8))).toBe("disk-image.raw");
+  expect(uploadName("https://x/alpine-virt-3.22.ISO", "iso", qcow)).toBe("alpine-virt-3.22.iso");
+  expect(uploadName("https://x/download", "iso", qcow)).toBe("download.iso");
+  expect(uploadName("https://x/", "iso", qcow)).toBeNull();
+  expect(imageFamily("local:import/noble-server-cloudimg-amd64.qcow2")).toBe("apt");
+  expect(imageFamily("local:import/Fedora-Cloud-Base.qcow2")).toBe("dnf");
+  expect(imageFamily("local:import/arch.qcow2")).toBeNull();
 });

@@ -116,7 +116,7 @@ import { machineAccessRows, setMachineAccess, startMachineGates } from "./machin
 import { applyMachineCompose, installComposeOnMachine, machineTiles, installOnMachine, machineAppAction, machineAppLogs, machineApps, machineCompose, removeMachineApp, storeAppFor } from "./machineapps";
 import { addStore, ARCH, catalogue, removeStore, scheduleStoreSync, StoreError, syncStore } from "./store";
 import { startSampler, systemStatus } from "./system";
-import { installByConsole as pveInstallByConsole, openConsole as pveOpenConsole, type Console as PveConsole, addBySignIn as addPveBySignIn, removeGuest as pveRemoveGuest, addHost as addPve, createGuest as pveCreateGuest, newOptions as pveNewOptions, backupJobs as pveBackupJobs, backups as pveBackups, changeHost as changePve, guestOfMachine, host as pveHost, hosts as pveHosts, power as pvePower, proxmoxTrouble, refresh as refreshPve, removeHost as removePve, snapshotAction as pveSnapshotAction, snapshots as pveSnapshots, startProxmox, takeBackup as pveTakeBackup, takeSnapshot as pveTakeSnapshot, taskLog as pveTaskLog } from "./proxmox";
+import { askScreen as pveAskScreen, openScreen as pveOpenScreen, storageContent as pveStorageContent, removeVolume as pveRemoveVolume, cloneOptions as pveCloneOptions, cloneGuest as pveCloneGuest, makeTemplate as pveMakeTemplate, load as pveLoad, templates as pveTemplates, downloadTemplate as pveDownloadTemplate, removeTemplate as pveRemoveTemplate, setSchedule as pveSetSchedule, runScheduleNow as pveRunSchedule, restoreBackup as pveRestoreBackup, restoreOptions as pveRestoreOptions, changeGuest as pveChangeGuest, guestSettings as pveGuestSettings, installByConsole as pveInstallByConsole, openConsole as pveOpenConsole, type Console as PveConsole, addBySignIn as addPveBySignIn, removeGuest as pveRemoveGuest, addHost as addPve, createGuest as pveCreateGuest, createVm as pveCreateVm, sendFile as pveSendFile, receiveFile as pveReceiveFile, newOptions as pveNewOptions, backupJobs as pveBackupJobs, backups as pveBackups, changeHost as changePve, guestOfMachine, host as pveHost, hosts as pveHosts, power as pvePower, proxmoxTrouble, refresh as refreshPve, removeHost as removePve, snapshotAction as pveSnapshotAction, snapshots as pveSnapshots, startProxmox, takeBackup as pveTakeBackup, takeSnapshot as pveTakeSnapshot, taskLog as pveTaskLog } from "./proxmox";
 import { call as machineCall, clientBinary, containersOf, installScript, invite as machineInvite, INVITE_MS, linkData, linkHandlers, machine as machineView, MACHINE_ID_RE, machines as machineList, machinesAway, open as machineOpen, remove as removeMachine, rename as renameMachine, startMachines, updateClient, wake as wakeMachine, power as powerMachine, type LinkSocket } from "./machines";
 import { availableUpdate, checkForUpdate, confirmUpdate, scheduleUpdateChecks, startRollback, startUpdate, updateStatus } from "./update";
 import { VERSION } from "./version";
@@ -126,6 +126,9 @@ import appCss from "./ui/app.css" with { type: "text" };
 import appJs from "./ui/app.js" with { type: "text" };
 import indexHtml from "./ui/index.html" with { type: "text" };
 import terminalHtml from "./ui/terminal.html" with { type: "text" };
+import screenHtml from "./ui/screen.html" with { type: "text" };
+import screenJs from "./ui/screen.js" with { type: "text" };
+import novncJs from "./ui/vendor/novnc.js" with { type: "text" };
 import terminalJs from "./ui/terminal.js" with { type: "text" };
 import xtermFit from "./ui/vendor/xterm-addon-fit.js" with { type: "text" };
 import xtermCss from "./ui/vendor/xterm.css" with { type: "text" };
@@ -180,6 +183,17 @@ const STATIC: Record<string, { body: string; type: string; headers?: Record<stri
   },
   "/sw.js": { body: swJs, type: "text/javascript; charset=utf-8" },
   "/terminal.js": { body: terminalJs, type: "text/javascript; charset=utf-8" },
+  // a virtual machine's screen: a page of its own too, so the VNC library lives apart from the UI
+  "/screen.html": {
+    body: screenHtml,
+    type: "text/html; charset=utf-8",
+    headers: {
+      "content-security-policy": "default-src 'self'; img-src 'self' data: blob:; object-src 'none'; base-uri 'none'; frame-ancestors 'self'; form-action 'none'",
+      "x-frame-options": "SAMEORIGIN",
+    },
+  },
+  "/screen.js": { body: screenJs, type: "text/javascript; charset=utf-8" },
+  "/vendor/novnc.js": { body: novncJs, type: "text/javascript; charset=utf-8" },
   "/vendor/xterm.js": { body: xtermJs, type: "text/javascript; charset=utf-8" },
   "/vendor/xterm-addon-fit.js": { body: xtermFit, type: "text/javascript; charset=utf-8" },
   "/vendor/xterm.css": { body: xtermCss, type: "text/css; charset=utf-8" },
@@ -372,6 +386,14 @@ async function openTerminal(req: Request, url: URL, server: Server, user: string
   const upgrade = req.headers.get("upgrade")?.toLowerCase() === "websocket";
   // a page of another site can open a WebSocket here with our cookie; it cannot fake where it comes from
   if (upgrade && (req.headers.get("origin") === null || !sameOrigin(req, url))) return fail(403, "request.crossSite");
+  // a virtual machine's screen on a Proxmox server: asked for a minute ago by the page, once
+  const screen = url.searchParams.get("screen");
+  if (screen !== null) {
+    if (!upgrade || !/^[a-f0-9]{32}$/.test(screen)) return fail(400, "request.notFound");
+    const data: PveScreenSocket = { kind: "pveScreen", key: screen, user, socket: null, name: "" };
+    if (server.upgrade(req, { data })) return undefined as never;
+    return fail(400, "request.notFound");
+  }
   // a container's console on a Proxmox server
   const pveId = url.searchParams.get("pve");
   if (pveId !== null) {
@@ -551,7 +573,37 @@ function pveTerminalMessage(ws: ServerWebSocket<PveTerminalSocket>, message: str
   }
 }
 
-type AnySocket = ServerWebSocket<TerminalSocket | MachineTerminalSocket | PveTerminalSocket | LinkSocket | Parameters<typeof tunnelHandlers.open>[0]["data"]>;
+/** A virtual machine's screen: the browser's VNC joined to Proxmox's, byte for byte */
+interface PveScreenSocket {
+  kind: "pveScreen";
+  key: string;
+  user: string;
+  name: string;
+  socket: Awaited<ReturnType<typeof pveOpenScreen>>["socket"] | null;
+}
+
+/** What waits to reach a slow browser before the screen is closed: a frame of a big screen is megabytes */
+const MAX_SCREEN_BUFFER = 64 * 1024 * 1024;
+
+function pveScreenOpen(ws: ServerWebSocket<PveScreenSocket>): void {
+  pveOpenScreen(ws.data.key).then(
+    ({ socket, name }) => {
+      if (ws.readyState !== 1) return socket.close();
+      ws.data.socket = socket;
+      ws.data.name = name;
+      record("pve.console", { user: ws.data.user, detail: name });
+      socket.onData = (bytes) => {
+        if (ws.getBufferedAmount() > MAX_SCREEN_BUFFER) return socket.close();
+        ws.send(bytes);
+      };
+      socket.onClose = () => ws.close(1000, "ended");
+    },
+    (e) => ws.close(1011, e instanceof AppError ? e.code : "pve.unreachable"),
+  );
+}
+
+type AnySocket = ServerWebSocket<TerminalSocket | MachineTerminalSocket | PveTerminalSocket | PveScreenSocket | LinkSocket | Parameters<typeof tunnelHandlers.open>[0]["data"]>;
+const isPveScreen = (ws: AnySocket): ws is ServerWebSocket<PveScreenSocket> => (ws.data as { kind?: string }).kind === "pveScreen";
 const isTerminal = (ws: AnySocket): ws is ServerWebSocket<TerminalSocket> => (ws.data as { kind?: string }).kind === "terminal";
 const isLink = (ws: AnySocket): ws is ServerWebSocket<LinkSocket> => (ws.data as { kind?: string }).kind === "machine";
 const isMachineTerminal = (ws: AnySocket): ws is ServerWebSocket<MachineTerminalSocket> => (ws.data as { kind?: string }).kind === "machineTerminal";
@@ -563,6 +615,7 @@ const sockets = {
     if (isLink(ws)) return linkHandlers.open(ws);
     if (isMachineTerminal(ws)) return machineTerminalOpen(ws);
     if (isPveTerminal(ws)) return pveTerminalOpen(ws);
+    if (isPveScreen(ws)) return pveScreenOpen(ws);
     if (!isTerminal(ws)) return tunnelHandlers.open(ws as never);
     const client = ws as unknown as TerminalClient;
     try {
@@ -577,6 +630,7 @@ const sockets = {
     if (isLink(ws)) return linkHandlers.message(ws, message);
     if (isMachineTerminal(ws)) return machineTerminalMessage(ws, message);
     if (isPveTerminal(ws)) return pveTerminalMessage(ws, message);
+    if (isPveScreen(ws)) return void (typeof message !== "string" && ws.data.socket?.send(new Uint8Array(message)));
     if (!isTerminal(ws)) return tunnelHandlers.message(ws as never, message);
     const client = ws as unknown as TerminalClient;
     if (typeof message !== "string") {
@@ -594,6 +648,7 @@ const sockets = {
     if (isLink(ws)) return linkHandlers.close(ws);
     if (isMachineTerminal(ws)) return ws.data.channel?.cancel();
     if (isPveTerminal(ws)) return ws.data.console?.close();
+    if (isPveScreen(ws)) return ws.data.socket?.close();
     if (!isTerminal(ws)) return tunnelHandlers.close(ws as never, code, reason);
     terminals.detach(ws as unknown as TerminalClient);
   },
@@ -608,7 +663,7 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
   if (write && !sameOrigin(req, url)) return fail(403, "request.crossSite");
   const ip = clientIp(req, server);
   // the API takes small JSON bodies; the server's own limit is the apps' (they upload files through it)
-  if (write && path !== "/api/files/upload" && !/^\/api\/machines\/[a-f0-9]{8}\/files\/upload$/.test(path) && path !== "/api/appearance/wallpaper" && Number(req.headers.get("content-length") ?? 0) > MAX_API_BODY) return fail(413, "request.tooLarge");
+  if (write && path !== "/api/files/upload" && !/^\/api\/(machines|proxmox)\/[a-f0-9]{8}\/files\/upload$/.test(path) && path !== "/api/appearance/wallpaper" && Number(req.headers.get("content-length") ?? 0) > MAX_API_BODY) return fail(413, "request.tooLarge");
   const cookie = (token: string) => sessionCookie(token, requestProto(req) === "https", cookieDomain(requestHost(req)));
   const client = { ip, userAgent: req.headers.get("user-agent") ?? "" };
 
@@ -2240,6 +2295,27 @@ async function proxmoxApi(req: Request, url: URL, server: Server, by: string): P
     return json(pveHost(id));
   }
   if (rest === "/jobs" && method === "GET") return json({ jobs: await pveBackupJobs(id) });
+  if (rest === "/content" && method === "GET") return json(await pveStorageContent(id, url.searchParams.get("node") ?? "", url.searchParams.get("storage") ?? ""));
+  if (rest === "/content" && method === "DELETE") return json(await pveRemoveVolume(id, await body(req), by));
+  if (rest === "/load" && method === "GET") return json(await pveLoad(id, { node: url.searchParams.get("node"), guest: url.searchParams.get("guest"), timeframe: url.searchParams.get("timeframe") }));
+  if (rest === "/templates" && method === "GET") {
+    server.timeout(req, 60);
+    return json(await pveTemplates(id));
+  }
+  if (rest === "/templates" && method === "POST") return json(await pveDownloadTemplate(id, await body(req), by), 202);
+  if (rest === "/templates" && method === "DELETE") return json(await pveRemoveTemplate(id, await body(req), by));
+  if (rest === "/files/upload" && method === "POST") {
+    // the file is the body: as long as it takes
+    server.timeout(req, 0);
+    const q = url.searchParams;
+    return json(await pveReceiveFile(id, { kind: q.get("kind"), node: q.get("node"), storage: q.get("storage"), name: q.get("name") }, Number(req.headers.get("content-length") ?? NaN), req.body, by));
+  }
+  if (rest === "/files" && method === "POST") {
+    server.timeout(req, 60);
+    return json(await pveSendFile(id, await body(req), by), 202);
+  }
+  if (rest === "/schedule" && method === "PUT") return json(pveSetSchedule(id, await body(req), by));
+  if (rest === "/schedule/run" && method === "POST") return json(pveRunSchedule(id, by), 202);
   if (rest === "/new" && method === "GET") {
     server.timeout(req, 60);
     return json(await pveNewOptions(id));
@@ -2247,6 +2323,10 @@ async function proxmoxApi(req: Request, url: URL, server: Server, by: string): P
   if (rest === "/guests" && method === "POST") {
     server.timeout(req, 60);
     return json(await pveCreateGuest(id, await body(req), by, baseUrl()), 202);
+  }
+  if (rest === "/vms" && method === "POST") {
+    server.timeout(req, 60);
+    return json(await pveCreateVm(id, await body(req), by, baseUrl()), 202);
   }
   if (rest === "/tasks/log" && method === "GET") return json({ lines: await pveTaskLog(id, url.searchParams.get("upid") ?? "") });
   const g = /^\/guests\/(lxc|qemu)\/(\d+)(\/[a-z]+)?(?:\/([A-Za-z0-9_-]+))?$/.exec(rest);
@@ -2262,6 +2342,14 @@ async function proxmoxApi(req: Request, url: URL, server: Server, by: string): P
   if (part === "/snapshots" && !name && method === "POST") return json(await pveTakeSnapshot(id, guest, await body(req), by));
   if (part === "/snapshots" && name && method === "POST") return json(await pveSnapshotAction(id, guest, name, "rollback", by));
   if (part === "/snapshots" && name && method === "DELETE") return json(await pveSnapshotAction(id, guest, name, "delete", by));
+  if (part === "/settings" && !name && method === "GET") return json(await pveGuestSettings(id, guest));
+  if (part === "/settings" && !name && method === "PUT") return json(await pveChangeGuest(id, guest, await body(req), by));
+  if (part === "/screen" && !name && method === "POST") return json(await pveAskScreen(id, guest));
+  if (part === "/clone" && !name && method === "GET") return json(await pveCloneOptions(id, guest));
+  if (part === "/clone" && !name && method === "POST") return json(await pveCloneGuest(id, guest, await body(req), by), 202);
+  if (part === "/template" && !name && method === "POST") return json(await pveMakeTemplate(id, guest, (await body(req)).name, by));
+  if (part === "/restore" && !name && method === "GET") return json(await pveRestoreOptions(id, guest));
+  if (part === "/restore" && !name && method === "POST") return json(await pveRestoreBackup(id, guest, await body(req), by), 202);
   if (part === "/backups" && !name && method === "GET") return json(await pveBackups(id, guest));
   if (part === "/backups" && !name && method === "POST") return json(await pveTakeBackup(id, guest, await body(req), by));
   return null;
