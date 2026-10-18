@@ -34,7 +34,7 @@ import { applyMachineCompose, installOnMachine, machineTiles, machineAppAction, 
 import { backupMachineApp, restoreMachineApp } from "./machinebackup";
 import { containersOf, machinesAway, machines as machineList, open as openOnMachine, power as powerMachine, wake as wakeMachine, type MachineView } from "./machines";
 import { moveApp } from "./moveapp";
-import { backups as pveBackups, changeGuest, restoreBackup, createGuest, guestSettings, guestOfMachine, host as pveHost, hosts as pveHosts, newOptions, power as pvePower, proxmoxTrouble, refresh as refreshPve, removeGuest, snapshotAction, snapshots as pveSnapshots, takeBackup, takeSnapshot, taskLog, taskNow } from "./proxmox";
+import { backups as pveBackups, load as pveLoad, changeGuest, restoreBackup, createGuest, guestSettings, guestOfMachine, host as pveHost, hosts as pveHosts, newOptions, power as pvePower, proxmoxTrouble, refresh as refreshPve, removeGuest, snapshotAction, snapshots as pveSnapshots, takeBackup, takeSnapshot, taskLog, taskNow } from "./proxmox";
 import { MuxError } from "./mux";
 import { VERSION } from "./version";
 import en from "./lang/en.json";
@@ -896,6 +896,34 @@ const pveRead: Omit<Tool, "level" | "effect">[] = [
         const { settings, pending } = await guestSettings(h.id, g.id);
         const { description, ...rest } = settings;
         return { ...rest, ...(description ? { notes: caller.level === "full" ? description : HIDDEN } : {}), ...(pending.length ? { pending } : {}) };
+      }),
+  },
+  {
+    name: "proxmox_load",
+    title: "Load of a Proxmox node or guest over time",
+    description: "How busy a node (`node`) or a guest (`guest`) was over the last hour, day, week or month: processor and memory in percent, network in and out in bytes a second — now, on average and at the most, with when the most was.",
+    input: { ...SERVER, node: { type: "string", description: "A node's name, as `proxmox` lists them" }, guest: GUEST.guest, timeframe: { type: "string", enum: ["hour", "day", "week", "month"], description: "hour by default" } },
+    run: (args) =>
+      wrap(async () => {
+        const h = await serverOf(args);
+        const target = args.guest ? { guest: guestIn(h, args).id } : { node: typeof args.node === "string" && args.node ? args.node : h.nodes[0]?.name };
+        const { timeframe, points } = await pveLoad(h.id, { ...target, timeframe: typeof args.timeframe === "string" ? args.timeframe : "hour" });
+        const sum = (value: (p: (typeof points)[number]) => number | null, round: (v: number) => number) => {
+          const seen = points.map((p) => ({ t: p.t, v: value(p) })).filter((p): p is { t: number; v: number } => p.v !== null);
+          if (!seen.length) return null;
+          const top = seen.reduce((a, b) => (b.v > a.v ? b : a));
+          return { now: round(seen.at(-1)!.v), average: round(seen.reduce((a, b) => a + b.v, 0) / seen.length), most: round(top.v), mostAt: when(top.t) };
+        };
+        const pct = (v: number) => Math.round(v * 10) / 10;
+        return {
+          ...target,
+          timeframe,
+          cpuPercent: sum((p) => (p.cpu === null ? null : p.cpu * 100), pct),
+          memoryPercent: sum((p) => (p.mem !== null && p.maxmem ? (p.mem / p.maxmem) * 100 : null), pct),
+          memoryTotalGiB: gib(points.at(-1)?.maxmem ?? 0),
+          networkInBytesPerSecond: sum((p) => p.netin, Math.round),
+          networkOutBytesPerSecond: sum((p) => p.netout, Math.round),
+        };
       }),
   },
   {

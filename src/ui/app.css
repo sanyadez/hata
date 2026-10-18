@@ -1188,3 +1188,26 @@ body:has(.assistant.paged) > .assistant-fab { display: none; }
 .pve-here { margin-left: 8px; vertical-align: middle; }
 .pve-offer { display: flex; align-items: center; gap: 12px; }
 .pve-gives { margin: 0; padding-left: 20px; }
+
+/* Line charts: thin lines on recessive axes, a crosshair with every series in its readout */
+.chart-wrap { display: grid; gap: 6px; }
+.chart-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 16px; }
+.chart-legend { display: flex; flex-wrap: wrap; gap: 12px; }
+.chart { position: relative; }
+.chart svg { display: block; width: 100%; height: auto; overflow: visible; }
+.chart .grid { stroke: var(--border); stroke-width: 1; }
+.chart .axis { fill: var(--muted); font-size: 10px; font-family: var(--font-mono, monospace); }
+.chart .line { fill: none; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.chart .cross { stroke: var(--border-strong); stroke-width: 1; }
+.chart .dot { stroke: var(--surface); stroke-width: 2; }
+.chart .hit { fill: transparent; cursor: crosshair; touch-action: pan-y; }
+.chart .s1 { stroke: light-dark(#2a78d6, #3987e5); }
+.chart .s2 { stroke: light-dark(#eb6834, #d95926); }
+.chart .dot.s1 { fill: light-dark(#2a78d6, #3987e5); stroke: var(--surface); }
+.chart .dot.s2 { fill: light-dark(#eb6834, #d95926); stroke: var(--surface); }
+.series-key { display: inline-block; width: 10px; height: 3px; border-radius: 2px; margin-right: 6px; vertical-align: middle; }
+.series-key.s1 { background: light-dark(#2a78d6, #3987e5); }
+.series-key.s2 { background: light-dark(#eb6834, #d95926); }
+.chart-tip { position: absolute; top: 4px; padding: 6px 10px; background: var(--surface-2); border: 1px solid var(--border); border-radius: var(--radius-md); pointer-events: none; white-space: nowrap; z-index: 2; }
+.seg { display: flex; flex-wrap: wrap; gap: 6px; }
+.seg .btn.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-text); }

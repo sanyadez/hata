@@ -25,7 +25,7 @@ import { SECRETS_DIR } from "./config";
 import { readJsonFile, writeJsonAtomic } from "./fsutil";
 import { invite, machines } from "./machines";
 import { acceptFor, BINARY, CLOSE, encodeFrame, FrameReader, PING, PONG, PVE_PING, sized, TEXT, typed } from "./wsframe";
-import { cleanFingerprint, cleanUrl, failed, GUEST_RE, guestOfMachine as findGuest, guestRights, mayPath, POWER, readConfig, readResources, readTask, SECRET_RE, SNAPSHOT_RE, snapshotName, TOKEN_RE, trouble, clientLine, hostKeysIn, nextId, readNewGuest, readSettings, restoreParams, settingsChange, cleanSchedule, archOf, readOffered, TEMPLATE_RE, type Offered, dayOf, scheduleDue, scheduled, toPrune, SCHEDULE_MARK, type Schedule, setupScript, type NewOptions, type SettingsChange, type Guest, type GuestConfig, type Permissions, type PveItem, type Resource, type Task, type Watched } from "./pve";
+import { cleanFingerprint, cleanUrl, failed, GUEST_RE, guestOfMachine as findGuest, guestRights, mayPath, POWER, readConfig, readResources, readTask, SECRET_RE, SNAPSHOT_RE, snapshotName, TOKEN_RE, trouble, clientLine, hostKeysIn, nextId, readNewGuest, readSettings, restoreParams, settingsChange, cleanSchedule, readRrd, TIMEFRAMES, archOf, readOffered, TEMPLATE_RE, type Offered, dayOf, scheduleDue, scheduled, toPrune, SCHEDULE_MARK, type Schedule, setupScript, type NewOptions, type SettingsChange, type Guest, type GuestConfig, type Permissions, type PveItem, type Resource, type Task, type Watched } from "./pve";
 
 const FILE = join(SECRETS_DIR, "proxmox.json");
 const ID_RE = /^[a-f0-9]{8}$/;
@@ -802,6 +802,24 @@ export async function taskLog(id: string, upid: string): Promise<string[]> {
   if (!upid.startsWith("UPID:") || !/^[A-Za-z0-9.-]+$/.test(node)) throw new AppError("pve.noTask", 404);
   const lines = await pve<{ n: number; t: string }[]>(h, "GET", `/nodes/${node}/tasks/${encodeURIComponent(upid)}/log`, { limit: 1000 });
   return lines.map((l) => l.t);
+}
+
+// --- Load over time -----------------------------------------------------------------------------------------
+
+/** The graphs of a node (`node`) or a guest (`guest`) over an hour, a day, a week or a month */
+export async function load(id: string, input: { node?: string | null; guest?: string | null; timeframe?: string | null }) {
+  const h = hostOf(id);
+  const timeframe = (TIMEFRAMES as readonly string[]).includes(input.timeframe ?? "") ? input.timeframe! : "hour";
+  let path: string;
+  if (input.guest) {
+    const g = guestOf(h, input.guest);
+    path = `/nodes/${g.node}/${g.type}/${g.vmid}/rrddata`;
+  } else {
+    const node = liveOf(h).nodes.find((n) => n.name === input.node);
+    if (!node) throw new AppError("pve.noNode", 404);
+    path = `/nodes/${node.name}/rrddata`;
+  }
+  return { timeframe, points: readRrd(await pve<Record<string, unknown>[]>(h, "GET", path, { timeframe, cf: "AVERAGE" })) };
 }
 
 // --- Templates of containers -------------------------------------------------------------------------

@@ -3382,5 +3382,15 @@
   "pve.tpl.removeTitle": "Видалити шаблон {name}?",
   "pve.tpl.removeLead": "Його буде видалено з {storage}. Контейнери, зроблені з нього, лишаються як є; новий з нього не зробити, поки його не звантажити знову.",
   "pve.tpl.removed": "{name} видалено",
-  "error.pve.template.noRemove": "Токен {name} не може видаляти файли з {storage}: для цього потрібне Datastore.Allocate на сховище, а воно сягає й копій. Видаліть шаблон у Proxmox."
+  "error.pve.template.noRemove": "Токен {name} не може видаляти файли з {storage}: для цього потрібне Datastore.Allocate на сховище, а воно сягає й копій. Видаліть шаблон у Proxmox.",
+  "error.pve.noNode": "Такого вузла немає.",
+  "pve.load.button": "Навантаження",
+  "pve.load.title": "Навантаження {name}",
+  "pve.load.hour": "Година",
+  "pve.load.day": "День",
+  "pve.load.week": "Тиждень",
+  "pve.load.month": "Місяць",
+  "pve.load.in": "Вхід",
+  "pve.load.out": "Вихід",
+  "pve.load.empty": "За цей час у Proxmox немає даних."
 }

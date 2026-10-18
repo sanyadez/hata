@@ -756,3 +756,26 @@ export const archOf = (status: { cpuinfo?: { flags?: string } }): string => (/\b
 
 /** A template's file name as Proxmox checks it: no folder, no way out of the storage */
 export const TEMPLATE_RE = /^[A-Za-z0-9][A-Za-z0-9._+-]*\.tar\.(gz|xz|zst)$/;
+
+// --- Load over time ---------------------------------------------------------------------------------------
+
+export const TIMEFRAMES = ["hour", "day", "week", "month"] as const;
+
+/** One point of a graph: CPU 0..1, memory in bytes, network in bytes a second; null where Proxmox has nothing */
+export interface Point {
+  t: number;
+  cpu: number | null;
+  mem: number | null;
+  maxmem: number | null;
+  netin: number | null;
+  netout: number | null;
+}
+
+/** `rrddata` read: a node says `memused`/`memtotal`, a guest `mem`/`maxmem`; a point with nothing at all is a gap */
+export function readRrd(list: Record<string, unknown>[]): Point[] {
+  const n = (v: unknown): number | null => (typeof v === "number" && Number.isFinite(v) ? v : null);
+  return list
+    .map((p) => ({ t: (n(p.time) ?? 0) * 1000, cpu: n(p.cpu), mem: n(p.mem) ?? n(p.memused), maxmem: n(p.maxmem) ?? n(p.memtotal), netin: n(p.netin), netout: n(p.netout) }))
+    .filter((p) => p.t > 0)
+    .sort((a, b) => a.t - b.t);
+}

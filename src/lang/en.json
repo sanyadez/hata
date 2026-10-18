@@ -3382,5 +3382,15 @@
   "pve.tpl.removeTitle": "Delete the template {name}?",
   "pve.tpl.removeLead": "It is deleted from {storage}. Containers made from it stay as they are; a new one cannot be made from it until it is downloaded again.",
   "pve.tpl.removed": "{name} deleted",
-  "error.pve.template.noRemove": "The token of {name} may not delete files of {storage}: that takes Datastore.Allocate on the storage, which reaches its backups too. Delete the template in Proxmox."
+  "error.pve.template.noRemove": "The token of {name} may not delete files of {storage}: that takes Datastore.Allocate on the storage, which reaches its backups too. Delete the template in Proxmox.",
+  "error.pve.noNode": "There is no such node.",
+  "pve.load.button": "Load",
+  "pve.load.title": "Load of {name}",
+  "pve.load.hour": "Hour",
+  "pve.load.day": "Day",
+  "pve.load.week": "Week",
+  "pve.load.month": "Month",
+  "pve.load.in": "In",
+  "pve.load.out": "Out",
+  "pve.load.empty": "Proxmox has no readings for this time."
 }

@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { rolesFor } from "../src/proxmox";
-import { clientLine, gibOf, readSettings, restoreParams, settingsChange, cleanSchedule, scheduleDue, scheduled, toPrune, SCHEDULE_MARK, readOffered, TEMPLATE_RE, archOf } from "../src/pve";
+import { clientLine, gibOf, readSettings, restoreParams, settingsChange, cleanSchedule, scheduleDue, scheduled, toPrune, SCHEDULE_MARK, readOffered, TEMPLATE_RE, archOf, readRrd } from "../src/pve";
 import { cleanFingerprint, cleanUrl, failed, hostKeysIn, familyOf, nextId, readNewGuest, setupScript, guestOfMachine, guestRights, mayPath, readConfig, readResources, readTask, snapshotName, trouble, type Watched } from "../src/pve";
 
 test("an address as typed becomes the API's origin", () => {
@@ -314,4 +314,12 @@ test("the templates Proxmox offers: systems first, newest first", () => {
   ]);
   expect(TEMPLATE_RE.test("debian-12-standard_12.12-1_amd64.tar.zst")).toBe(true);
   expect(TEMPLATE_RE.test("../etc/passwd.tar.gz")).toBe(false);
+});
+
+test("load over time: a node's and a guest's fields, gaps kept", () => {
+  expect(readRrd([{ time: 20, cpu: 0.5, memused: 4, memtotal: 8, netin: 10, netout: 2 }, { time: 10, cpu: 0.1, mem: 1, maxmem: 2 }, { time: 30 }])).toEqual([
+    { t: 10_000, cpu: 0.1, mem: 1, maxmem: 2, netin: null, netout: null },
+    { t: 20_000, cpu: 0.5, mem: 4, maxmem: 8, netin: 10, netout: 2 },
+    { t: 30_000, cpu: null, mem: null, maxmem: null, netin: null, netout: null },
+  ]);
 });

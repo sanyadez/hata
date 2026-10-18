@@ -28,6 +28,7 @@ function h(tag, attrs, ...children) {
 const ICONS = {
   home: "M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z",
   grid: "M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z",
+  chart: "M4 4v16h16M7 15l4-5 3 3 5-6",
   sliders: "M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1M15 4v4M9 10v4M17 16v4",
   search: "M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM20 20l-4-4",
   cpu: "M7 7h10v10H7zM10 3v4M14 3v4M10 17v4M14 17v4M3 10h4M3 14h4M17 10h4M17 14h4",
@@ -2992,6 +2993,142 @@ function renderPveBody() {
   );
 }
 
+// --- Load over time ---
+
+/**
+ * A line chart of points over time: thin lines, one shared y-axis from zero, a crosshair that snaps to the
+ * nearest point with every series in its readout. Series carry `cls` (s1, s2 — the colours) and `value`.
+ */
+function lineChart(points, series, { max = null, fmt, label }) {
+  const box = h("div", { class: "chart" });
+  const tip = h("div", { class: "chart-tip", hidden: true });
+  const draw = () => {
+    const W = Math.max(280, box.clientWidth || 600);
+    const H = 150;
+    const L = 52, R = 10, T = 10, B = 22;
+    const values = points.flatMap((p) => series.map((s) => s.value(p))).filter((v) => v != null);
+    const top = max ?? niceTop(Math.max(0, ...values));
+    const t0 = points[0]?.t ?? 0;
+    const t1 = points.at(-1)?.t ?? 1;
+    const x = (t) => L + ((t - t0) / Math.max(1, t1 - t0)) * (W - L - R);
+    const y = (v) => T + (1 - Math.min(1, v / (top || 1))) * (H - T - B);
+    const el = (name, attrs, text) => {
+      const e = document.createElementNS(SVG_NS, name);
+      for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, String(v));
+      if (text != null) e.textContent = text;
+      return e;
+    };
+    const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, width: W, height: H, role: "img", "aria-label": label });
+    for (const f of [0, 0.5, 1]) {
+      svg.append(el("line", { class: "grid", x1: L, x2: W - R, y1: y(top * f), y2: y(top * f) }));
+      svg.append(el("text", { class: "axis", x: L - 6, y: y(top * f) + 3, "text-anchor": "end" }, fmt(top * f)));
+    }
+    const span = t1 - t0;
+    for (let i = 0; i <= 3; i++) {
+      const t = t0 + (span * i) / 3;
+      const d = new Date(t);
+      svg.append(el("text", { class: "axis", x: x(t), y: H - 6, "text-anchor": i === 0 ? "start" : i === 3 ? "end" : "middle" }, span > 2 * 86400_000 ? d.toLocaleDateString(state.lang, { day: "numeric", month: "short" }) : d.toLocaleTimeString(state.lang, { hour: "2-digit", minute: "2-digit" })));
+    }
+    for (const s of series) {
+      let d = "";
+      let pen = false;
+      for (const p of points) {
+        const v = s.value(p);
+        if (v == null) {
+          pen = false;
+          continue;
+        }
+        d += `${pen ? "L" : "M"}${x(p.t).toFixed(1)} ${y(v).toFixed(1)}`;
+        pen = true;
+      }
+      svg.append(el("path", { class: "line " + s.cls, d }));
+    }
+    const cross = el("line", { class: "cross", y1: T, y2: H - B, visibility: "hidden" });
+    const dots = series.map((s) => el("circle", { class: "dot " + s.cls, r: 4, visibility: "hidden" }));
+    svg.append(cross, ...dots);
+    const hit = el("rect", { class: "hit", x: L, y: 0, width: W - L - R, height: H });
+    svg.append(hit);
+    const show = (e) => {
+      const r = svg.getBoundingClientRect();
+      const px = ((e.clientX - r.left) / r.width) * W;
+      let best = 0;
+      for (let i = 1; i < points.length; i++) if (Math.abs(x(points[i].t) - px) < Math.abs(x(points[best].t) - px)) best = i;
+      const p = points[best];
+      if (!p) return;
+      cross.setAttribute("x1", x(p.t));
+      cross.setAttribute("x2", x(p.t));
+      cross.setAttribute("visibility", "visible");
+      series.forEach((s, i) => {
+        const v = s.value(p);
+        dots[i].setAttribute("visibility", v == null ? "hidden" : "visible");
+        if (v != null) (dots[i].setAttribute("cx", x(p.t)), dots[i].setAttribute("cy", y(v)));
+      });
+      put(tip, h("div", { class: "muted small" }, dateTime(p.t)), series.map((s) => h("div", { class: "small" }, h("i", { class: "series-key " + s.cls }), s.label, ": ", h("strong", null, s.value(p) == null ? "—" : (s.show ?? fmt)(s.value(p), p)))));
+      tip.hidden = false;
+      const left = (x(p.t) / W) * r.width;
+      tip.style.left = Math.min(Math.max(0, left + 12), r.width - tip.offsetWidth) + "px";
+    };
+    const hide = () => {
+      cross.setAttribute("visibility", "hidden");
+      dots.forEach((d) => d.setAttribute("visibility", "hidden"));
+      tip.hidden = true;
+    };
+    hit.addEventListener("pointermove", show);
+    hit.addEventListener("pointerdown", show);
+    hit.addEventListener("pointerleave", hide);
+    box.replaceChildren(svg, tip);
+  };
+  // drawn at the width it has: the text of an SVG scaled down would shrink with it
+  let drawn = 0;
+  new ResizeObserver(() => {
+    if (box.isConnected && Math.abs(box.clientWidth - drawn) > 16) ((drawn = box.clientWidth), draw());
+  }).observe(box);
+  return h(
+    "div",
+    { class: "chart-wrap" },
+    h("div", { class: "chart-head" }, h("strong", null, label), series.length > 1 && h("span", { class: "chart-legend" }, series.map((s) => h("span", { class: "small muted" }, h("i", { class: "series-key " + s.cls }), s.label)))),
+    points.some((p) => series.some((s) => s.value(p) != null)) ? box : h("p", { class: "muted small" }, t("pve.load.empty")),
+  );
+}
+
+/** A round top for an axis: 1, 2 or 5 times a power of ten */
+function niceTop(v) {
+  if (!(v > 0)) return 1;
+  const p = 10 ** Math.floor(Math.log10(v));
+  return [1, 2, 5, 10].map((m) => m * p).find((m) => m >= v);
+}
+
+const rate = (v) => {
+  const b = bytes(v);
+  return b === "0 B" ? "0" : b + "/s";
+};
+
+/** The load of a node (`{ node }`) or a guest (`{ guest }`) over an hour, a day, a week or a month */
+function pveLoadDialog(x, target, title) {
+  let timeframe = "hour";
+  const body = h("div", { class: "stack" }, h("p", { class: "muted" }, t("machines.loading")));
+  const seg = h("div", { class: "seg" });
+  const load = async () => {
+    put(seg, ["hour", "day", "week", "month"].map((tf) => button(t("pve.load." + tf), { class: "small" + (tf === timeframe ? " on" : ""), "aria-pressed": String(tf === timeframe), onclick: () => ((timeframe = tf), load()) })));
+    try {
+      const q = new URLSearchParams({ timeframe, ...target });
+      const { points } = await api("GET", `/api/proxmox/${x.id}/load?${q}`);
+      const pctOf = (p) => (p.mem != null && p.maxmem ? (p.mem / p.maxmem) * 100 : null);
+      put(
+        body,
+        lineChart(points, [{ cls: "s1", label: t("sys.cpu"), value: (p) => (p.cpu == null ? null : p.cpu * 100) }], { max: 100, fmt: (v) => Math.round(v) + "%", label: t("sys.cpu") }),
+        lineChart(points, [{ cls: "s1", label: t("sys.memory"), value: pctOf, show: (v, p) => `${Math.round(v)}% · ${bytes(p.mem)} / ${bytes(p.maxmem)}` }], { max: 100, fmt: (v) => Math.round(v) + "%", label: t("sys.memory") }),
+        lineChart(points, [{ cls: "s1", label: t("pve.load.in"), value: (p) => p.netin }, { cls: "s2", label: t("pve.load.out"), value: (p) => p.netout }], { fmt: rate, label: t("sys.network") }),
+      );
+    } catch (e) {
+      put(body, h("p", { class: "error" }, errorText(e)));
+    }
+  };
+  let dialog;
+  dialog = openDialog("wide", h("header", null, h("h2", { class: "grow" }, t("pve.load.title", { name: title })), closeX(() => dialog)), seg, body, h("footer", null, closeButton(() => dialog)));
+  void load();
+}
+
 // --- Templates of containers ---
 
 /** The templates tab: drawn from what was read last, read again when older than five minutes or after a change */
@@ -3148,7 +3285,7 @@ function pveOverview(x) {
           h(
             "div",
             { class: "pve-node" },
-            h("div", { class: "machine-title" }, icon("server"), h("strong", { class: "clip grow" }, n.name), pveChip(n)),
+            h("div", { class: "machine-title" }, icon("server"), h("strong", { class: "clip grow" }, n.name), pveChip(n), n.online && button("", { class: "small ghost", title: t("pve.load.button"), "aria-label": t("pve.load.button"), onclick: () => pveLoadDialog(x, { node: n.name }, n.name) }, "chart")),
             h("p", { class: "muted small" }, n.online ? t("pve.up", { time: duration(n.uptime) }) : "—"),
             meterRow(t("sys.cpu"), n.online ? Math.round(n.cpu * 100) : null, t("sys.cores", { n: n.cores })),
             meterRow(t("sys.memory"), n.online ? pct(n.memory.used, n.memory.total) : null, bytes(n.memory.total)),
@@ -3497,6 +3634,7 @@ function pveGuestDialog(x, g) {
       up && act(t("pve.reboot"), "refresh", "reboot"),
       up && g.type === "qemu" && act(t("pve.suspend"), "clock", "suspend"),
       up && act(t("pve.stop"), "x", "stop", "danger"),
+      button(t("pve.load.button"), { class: "small", onclick: () => (dialog.close(), pveLoadDialog(x, { guest: g.id }, g.name)) }, "chart"),
       up && g.type === "lxc" && g.may.console && button(t("pve.console"), { class: "small", onclick: () => (dialog.close(), pveConsoleDialog(x, g)) }, "terminal"),
       !g.may.power && h("span", { class: "muted small" }, t("pve.noPower")),
       (g.may.configure || g.may.cpu || g.may.memory || g.may.disk) && button(t("pve.edit.button"), { class: "small", onclick: () => (dialog.close(), pveEditDialog(x, g)) }, "sliders"),
