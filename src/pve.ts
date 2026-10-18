@@ -222,6 +222,9 @@ export const guestRights = (perms: Permissions, g: Guest) => ({
   remove: mayGuest(perms, g.vmid, g.pool, "VM.Allocate"),
   console: mayGuest(perms, g.vmid, g.pool, "VM.Console"),
   configure: mayGuest(perms, g.vmid, g.pool, "VM.Config.Options"),
+  cpu: mayGuest(perms, g.vmid, g.pool, "VM.Config.CPU"),
+  memory: mayGuest(perms, g.vmid, g.pool, "VM.Config.Memory"),
+  disk: mayGuest(perms, g.vmid, g.pool, "VM.Config.Disk"),
 });
 
 /** A task of Proxmox, from `/cluster/tasks` or a task's `/status` */
@@ -505,4 +508,135 @@ export function clientLine(os: string, hata: string, code: string): string | nul
   if (/^(fedora|centos|rocky|alma)/.test(os)) return `dnf install -y -q curl && ${line}`;
   if (!os || os === "l26") return line;
   return null;
+}
+
+// --- A guest's settings --------------------------------------------------------------------------------
+
+/** What the settings dialog changes in a guest */
+export interface GuestSettings {
+  /** A container's host name, a virtual machine's name */
+  name: string;
+  cores: number;
+  /** MB */
+  memory: number;
+  /** MB, containers only */
+  swap: number | null;
+  onboot: boolean;
+  tags: string[];
+  description: string;
+  /** The guest's own disks: they can be made larger, never smaller */
+  disks: { key: string; storage: string; size: number }[];
+}
+
+/** `4G`, `512M`, `1T` in GiB; Proxmox writes a disk's size so */
+export function gibOf(size: string): number {
+  const m = /^(\d+(?:\.\d+)?)([KMGT]?)$/i.exec(size.trim());
+  if (!m) return 0;
+  const n = Number(m[1]);
+  const unit = m[2]!.toUpperCase();
+  return unit === "T" ? n * 1024 : unit === "G" ? n : unit === "M" ? n / 1024 : unit === "K" ? n / 1024 ** 2 : n / 1024 ** 3;
+}
+
+const QEMU_DISK = /^(scsi|virtio|sata|ide)\d+$/;
+const LXC_DISK = /^(rootfs|mp\d+)$/;
+
+/** A guest's `/config` read for the settings dialog */
+export function readSettings(config: Record<string, unknown>, type: "lxc" | "qemu"): GuestSettings {
+  const disks: GuestSettings["disks"] = [];
+  for (const [key, value] of Object.entries(config)) {
+    if (typeof value !== "string" || !(type === "lxc" ? LXC_DISK : QEMU_DISK).test(key)) continue;
+    const [volume = "", ...opts] = value.split(",");
+    // a CD drive, a folder of the host bound in, a passed-through device: nothing to grow
+    if (opts.includes("media=cdrom") || volume === "none" || volume.startsWith("/") || !volume.includes(":")) continue;
+    const size = opts.find((o) => o.startsWith("size="))?.slice(5);
+    if (!size) continue;
+    disks.push({ key, storage: volume.split(":")[0]!, size: gibOf(size) });
+  }
+  disks.sort((a, b) => (a.key === "rootfs" ? -1 : b.key === "rootfs" ? 1 : a.key.localeCompare(b.key, "en", { numeric: true })));
+  const memory = Number(/(\d+)/.exec(String(config.memory ?? ""))?.[1] ?? 0);
+  return {
+    name: str(type === "lxc" ? config.hostname : config.name),
+    cores: Number(config.cores ?? 1) || 1,
+    memory: memory || (type === "lxc" ? 512 : 2048),
+    swap: type === "lxc" ? Number(config.swap ?? 512) : null,
+    onboot: config.onboot === 1 || config.onboot === "1",
+    tags: str(config.tags).split(/[;, ]+/).filter(Boolean),
+    description: str(config.description),
+    disks,
+  };
+}
+
+const GUEST_NAME_RE = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/i;
+const VM_NAME_RE = /^[a-z0-9]([a-z0-9.-]{0,61}[a-z0-9])?$/i;
+export const TAG_RE = /^[a-z0-9_][a-z0-9_+.-]{0,63}$/i;
+
+/** What changes, as Proxmox takes it: `params` and `delete` for `/config`, then each disk to grow */
+export interface SettingsChange {
+  params: Record<string, string | number>;
+  remove: string[];
+  grow: { disk: string; size: string }[];
+  /** Which rights the change needs: cpu, memory, disk, options */
+  needs: ("cpu" | "memory" | "disk" | "options")[];
+}
+
+/** The answers of the dialog against what the guest has; a field not sent stays. A wrong one is refused by its name */
+export function settingsChange(old: GuestSettings, input: Record<string, unknown>, type: "lxc" | "qemu"): SettingsChange {
+  const bad = (field: string): never => {
+    throw Object.assign(new Error("pve.setting"), { field });
+  };
+  const out: SettingsChange = { params: {}, remove: [], grow: [], needs: [] };
+  const need = (what: SettingsChange["needs"][number]) => out.needs.includes(what) || out.needs.push(what);
+  const whole = (v: unknown, min: number, max: number, field: string): number => {
+    const n = typeof v === "number" ? v : typeof v === "string" && /^\d+$/.test(v.trim()) ? Number(v) : NaN;
+    return Number.isInteger(n) && n >= min && n <= max ? n : bad(field);
+  };
+  if (input.name !== undefined) {
+    const name = typeof input.name === "string" ? input.name.trim() : "";
+    if (!(type === "lxc" ? GUEST_NAME_RE : VM_NAME_RE).test(name)) bad("name");
+    if (name !== old.name) (out.params[type === "lxc" ? "hostname" : "name"] = name), need("options");
+  }
+  if (input.cores !== undefined) {
+    const cores = whole(input.cores, 1, 512, "cores");
+    if (cores !== old.cores) (out.params.cores = cores), need("cpu");
+  }
+  if (input.memory !== undefined) {
+    const memory = whole(input.memory, 64, 4_194_304, "memory");
+    if (memory !== old.memory) (out.params.memory = memory), need("memory");
+  }
+  if (input.swap !== undefined && type === "lxc") {
+    const swap = whole(input.swap, 0, 4_194_304, "swap");
+    if (swap !== old.swap) (out.params.swap = swap), need("memory");
+  }
+  if (input.onboot !== undefined) {
+    if (typeof input.onboot !== "boolean") bad("onboot");
+    if (input.onboot !== old.onboot) (out.params.onboot = input.onboot ? 1 : 0), need("options");
+  }
+  if (input.tags !== undefined) {
+    const tags = Array.isArray(input.tags) ? [...new Set(input.tags.map((x) => (typeof x === "string" ? x.trim().toLowerCase() : "")).filter(Boolean))] : bad("tags");
+    if (tags.length > 20 || tags.some((x) => !TAG_RE.test(x))) bad("tags");
+    if (tags.join(";") !== old.tags.join(";")) {
+      if (tags.length) out.params.tags = tags.join(";");
+      else out.remove.push("tags");
+      need("options");
+    }
+  }
+  if (input.description !== undefined) {
+    const description = typeof input.description === "string" ? input.description.replace(/\r\n/g, "\n").replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, "") : bad("description");
+    if (description.length > 8000) bad("description");
+    if (description.trim() !== old.description.trim()) {
+      if (description.trim()) out.params.description = description;
+      else out.remove.push("description");
+      need("options");
+    }
+  }
+  if (input.disks !== undefined) {
+    if (!input.disks || typeof input.disks !== "object" || Array.isArray(input.disks)) bad("disk");
+    for (const [key, value] of Object.entries(input.disks as Record<string, unknown>)) {
+      const disk = old.disks.find((d) => d.key === key) ?? bad("disk");
+      const size = whole(value, 1, 65_536, "disk");
+      if (size < Math.ceil(disk.size - 0.001)) bad("diskShrink");
+      if (size > disk.size + 0.001) out.grow.push({ disk: key, size: `${size}G` }), need("disk");
+    }
+  }
+  return out;
 }

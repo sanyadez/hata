@@ -25,7 +25,7 @@ import { SECRETS_DIR } from "./config";
 import { readJsonFile, writeJsonAtomic } from "./fsutil";
 import { invite, machines } from "./machines";
 import { acceptFor, BINARY, CLOSE, encodeFrame, FrameReader, PING, PONG, PVE_PING, sized, TEXT, typed } from "./wsframe";
-import { cleanFingerprint, cleanUrl, failed, GUEST_RE, guestOfMachine as findGuest, guestRights, mayPath, POWER, readConfig, readResources, readTask, SECRET_RE, SNAPSHOT_RE, snapshotName, TOKEN_RE, trouble, clientLine, hostKeysIn, nextId, readNewGuest, setupScript, type NewOptions, type Guest, type GuestConfig, type Permissions, type PveItem, type Resource, type Task, type Watched } from "./pve";
+import { cleanFingerprint, cleanUrl, failed, GUEST_RE, guestOfMachine as findGuest, guestRights, mayPath, POWER, readConfig, readResources, readTask, SECRET_RE, SNAPSHOT_RE, snapshotName, TOKEN_RE, trouble, clientLine, hostKeysIn, nextId, readNewGuest, readSettings, settingsChange, setupScript, type NewOptions, type SettingsChange, type Guest, type GuestConfig, type Permissions, type PveItem, type Resource, type Task, type Watched } from "./pve";
 
 const FILE = join(SECRETS_DIR, "proxmox.json");
 const ID_RE = /^[a-f0-9]{8}$/;
@@ -494,6 +494,57 @@ export async function snapshotAction(id: string, guest: string, name: string, ac
   const result = await waitTask(h, g.node, upid, 60_000);
   void look(h, true);
   return result;
+}
+
+/** What the settings dialog shows: the guest's settings now, and what waits for a restart to take effect */
+export async function guestSettings(id: string, guest: string) {
+  const h = hostOf(id);
+  const g = guestOf(h, guest);
+  const path = `/nodes/${g.node}/${g.type}/${g.vmid}`;
+  const [config, pending] = await Promise.all([pve<Record<string, unknown>>(h, "GET", path + "/config"), pve<{ key: string; pending?: unknown; delete?: number }[]>(h, "GET", path + "/pending").catch(() => [])]);
+  return { settings: readSettings(config, g.type), pending: pendingOf(pending), may: guestRights(liveOf(h).perms, g), running: g.status === "running" };
+}
+
+/** The keys whose new value Proxmox keeps until the guest is restarted */
+const pendingOf = (list: { key: string; pending?: unknown; delete?: number }[]): string[] => list.filter((p) => p.pending !== undefined || p.delete).map((p) => p.key);
+
+const NEEDS: Record<SettingsChange["needs"][number], keyof ReturnType<typeof guestRights>> = { cpu: "cpu", memory: "memory", disk: "disk", options: "configure" };
+
+/**
+ * Changes a guest's settings: what differs goes to `/config` in one request (with the digest of the
+ * configuration read, so a change made meanwhile in Proxmox is not overwritten), then each disk that
+ * grows. A running guest takes some at once; what it takes after a restart comes back as `pending`.
+ */
+export async function changeGuest(id: string, guest: string, input: Record<string, unknown>, by: string) {
+  const h = hostOf(id);
+  const g = guestOf(h, guest);
+  const path = `/nodes/${g.node}/${g.type}/${g.vmid}`;
+  const config = await pve<Record<string, unknown>>(h, "GET", path + "/config");
+  let change: SettingsChange;
+  try {
+    change = settingsChange(readSettings(config, g.type), input, g.type);
+  } catch (e) {
+    throw new AppError(`pve.setting.${(e as { field?: string }).field ?? "name"}`, 400);
+  }
+  const may = guestRights(liveOf(h).perms, g);
+  const refused = change.needs.filter((n) => !may[NEEDS[n]]);
+  if (refused.length) throw new AppError("pve.mayNot", 403, { name: h.name, guest: g.name, what: refused.join(", ") });
+  const said: string[] = [];
+  if (Object.keys(change.params).length || change.remove.length) {
+    const params: Record<string, string | number> = { ...change.params, ...(change.remove.length ? { delete: change.remove.join(",") } : {}) };
+    if (typeof config.digest === "string") params.digest = config.digest;
+    await pve(h, "PUT", path + "/config", params);
+    said.push(...Object.keys(change.params), ...change.remove);
+  }
+  for (const d of change.grow) {
+    const upid = await pve<string | null>(h, "PUT", path + "/resize", { disk: d.disk, size: d.size });
+    if (typeof upid === "string" && upid.startsWith("UPID:")) await waitTask(h, g.node, upid, 60_000);
+    said.push(`${d.disk} → ${d.size}`);
+  }
+  if (said.length) record("pve.guest.changed", { user: by, detail: `${label(h, g)}: ${said.join(", ")}` });
+  void look(h, true);
+  const pending = pendingOf(await pve<{ key: string; pending?: unknown; delete?: number }[]>(h, "GET", path + "/pending").catch(() => []));
+  return { changed: said, pending, settings: readSettings(await pve<Record<string, unknown>>(h, "GET", path + "/config"), g.type) };
 }
 
 /** The backups of a guest kept on the storages of its node that are reachable now */

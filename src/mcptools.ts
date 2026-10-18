@@ -34,7 +34,7 @@ import { applyMachineCompose, installOnMachine, machineTiles, machineAppAction, 
 import { backupMachineApp, restoreMachineApp } from "./machinebackup";
 import { containersOf, machinesAway, machines as machineList, open as openOnMachine, power as powerMachine, wake as wakeMachine, type MachineView } from "./machines";
 import { moveApp } from "./moveapp";
-import { backups as pveBackups, createGuest, guestOfMachine, host as pveHost, hosts as pveHosts, newOptions, power as pvePower, proxmoxTrouble, refresh as refreshPve, removeGuest, snapshotAction, snapshots as pveSnapshots, takeBackup, takeSnapshot, taskLog, taskNow } from "./proxmox";
+import { backups as pveBackups, changeGuest, createGuest, guestSettings, guestOfMachine, host as pveHost, hosts as pveHosts, newOptions, power as pvePower, proxmoxTrouble, refresh as refreshPve, removeGuest, snapshotAction, snapshots as pveSnapshots, takeBackup, takeSnapshot, taskLog, taskNow } from "./proxmox";
 import { MuxError } from "./mux";
 import { VERSION } from "./version";
 import en from "./lang/en.json";
@@ -884,6 +884,21 @@ const pveRead: Omit<Tool, "level" | "effect">[] = [
       }),
   },
   {
+    name: "proxmox_guest_settings",
+    title: "A Proxmox guest's settings",
+    description: "What proxmox_guest_change can change, as the guest has it now: name, cores, memory and swap (MB), start with the server, tags, notes, its disks with their sizes in GB, and what waits for a restart (`pending`).",
+    input: GUEST,
+    required: ["guest"],
+    run: (args, caller) =>
+      wrap(async () => {
+        const h = await serverOf(args);
+        const g = guestIn(h, args);
+        const { settings, pending } = await guestSettings(h.id, g.id);
+        const { description, ...rest } = settings;
+        return { ...rest, ...(description ? { notes: caller.level === "full" ? description : HIDDEN } : {}), ...(pending.length ? { pending } : {}) };
+      }),
+  },
+  {
     name: "proxmox_container_options",
     title: "What a new container can be made of",
     description: "For proxmox_container_create: the nodes, templates, storages, network bridges and pools the token may use, the numbers already taken and the next free one.",
@@ -1015,6 +1030,32 @@ const pveFull: (Omit<Tool, "level" | "effect"> & { effect?: Tool["effect"] })[] 
       }),
   },
   {
+    name: "proxmox_guest_change",
+    title: "Change a Proxmox guest's settings",
+    description: "Changes a container's or virtual machine's name, processors (`cores`), memory and swap (MB), whether it starts with the server, tags and notes, and makes its disks larger (`disks`: { \"rootfs\": 16 } — GB; a disk is never made smaller). Only what is given changes. A running container takes most at once; what waits for a restart comes back as `pending`. proxmox_guest_settings shows what it has now.",
+    effect: "change",
+    input: {
+      ...GUEST,
+      name: { type: "string" },
+      cores: { type: "number" },
+      memory: { type: "number", description: "MB" },
+      swap: { type: "number", description: "MB, containers only" },
+      onboot: { type: "boolean" },
+      tags: { type: "array", items: { type: "string" } },
+      notes: { type: "string" },
+      disks: { type: "object", description: "Disk key → its new size in GB, larger than now" },
+    },
+    required: ["guest"],
+    run: (args, caller) =>
+      wrap(async () => {
+        const h = await serverOf(args);
+        const g = guestIn(h, args);
+        const { server: _s, guest: _g, notes, ...rest } = args;
+        const done = await changeGuest(h.id, g.id, { ...rest, ...(notes !== undefined ? { description: notes } : {}) }, caller.user);
+        return { guest: `${g.name} (${g.vmid})`, server: h.name, changed: done.changed, ...(done.pending.length ? { pending: done.pending, note: "These take effect after the guest is restarted." } : {}) };
+      }),
+  },
+  {
     name: "proxmox_container_create",
     title: "Make a new container in Proxmox",
     description: "Makes a new unprivileged container from a template, starts it and — unless `client` is false — installs Hata's client in it, so it becomes one of Hata's machines (`machines`) and apps can be installed there. Look at proxmox_container_options first: node, template, storage, bridge and pool must be among what it lists. Takes minutes: expect a running job and ask job_get.",
@@ -1077,7 +1118,7 @@ export const TOOLS: Tool[] = [
 const LEVEL_WORDS: Record<Level, string> = {
   read: "It can look at everything listed in the tools and change nothing.",
   operate: "It can look, start, stop, restart and update apps — here and on the other machines — install apps from the store, take snapshots, wake a machine up, and start, shut down, restart, snapshot and back up the guests of Proxmox. It cannot change compose files, remove apps, restore snapshots, move apps, restart machines, or stop, roll back, delete or make Proxmox guests.",
-  full: "It can also change compose files, install apps from a compose file, remove apps, restore snapshots, move apps between machines, restart or shut down machines, and stop Proxmox guests by force, roll them back to a snapshot, delete them and their snapshots, and make new containers there.",
+  full: "It can also change compose files, install apps from a compose file, remove apps, restore snapshots, move apps between machines, restart or shut down machines, and change the settings of Proxmox guests (processors, memory, disks made larger), stop them by force, roll them back to a snapshot, delete them and their snapshots, and make new containers there.",
 };
 
 /** What the model is told when it connects */

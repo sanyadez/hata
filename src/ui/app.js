@@ -3282,6 +3282,7 @@ function pveGuestDialog(x, g) {
       up && act(t("pve.stop"), "x", "stop", "danger"),
       up && g.type === "lxc" && g.may.console && button(t("pve.console"), { class: "small", onclick: () => (dialog.close(), pveConsoleDialog(x, g)) }, "terminal"),
       !g.may.power && h("span", { class: "muted small" }, t("pve.noPower")),
+      (g.may.configure || g.may.cpu || g.may.memory || g.may.disk) && button(t("pve.edit.button"), { class: "small", onclick: () => (dialog.close(), pveEditDialog(x, g)) }, "sliders"),
       g.id === x.self && h("span", { class: "chip accent" }, t("pve.selfChip")),
       g.may.remove && g.status === "stopped" && g.id !== x.self && button(t("pve.guestRemove"), { class: "small danger", onclick: () => (dialog.close(), pveRemoveDialog(x, g)) }, "trash"),
     ),
@@ -3337,6 +3338,72 @@ function pveGuestDialog(x, g) {
       backs.replaceChildren(h("p", { class: "muted small" }, errorText(e)));
     }
   })();
+}
+
+/** A guest's settings: name, processor, memory, disks made larger, start with the server, tags and notes */
+async function pveEditDialog(x, g) {
+  let r;
+  try {
+    r = await api("GET", `/api/proxmox/${x.id}/guests/${g.id}/settings`);
+  } catch (e) {
+    return toast(errorText(e), "error");
+  }
+  const s = r.settings;
+  const lxc = g.type === "lxc";
+  const num = (value, min, max, may) => h("input", { type: "number", required: true, min, max, value, disabled: !may });
+  const name = h("input", { required: true, value: s.name, pattern: lxc ? "[A-Za-z0-9]([A-Za-z0-9\\-]{0,61}[A-Za-z0-9])?" : "[A-Za-z0-9]([A-Za-z0-9.\\-]{0,61}[A-Za-z0-9])?", autocapitalize: "none", spellcheck: false, class: "mono", disabled: !r.may.configure });
+  const cores = num(s.cores, 1, 512, r.may.cpu);
+  const memory = num(s.memory, 64, 4194304, r.may.memory);
+  const swap = lxc && num(s.swap, 0, 4194304, r.may.memory);
+  const disks = s.disks.map((d) => ({ d, input: num(Math.ceil(d.size - 0.001), Math.ceil(d.size - 0.001), 65536, r.may.disk) }));
+  const onboot = h("input", { type: "checkbox", checked: s.onboot, disabled: !r.may.configure });
+  const tags = h("input", { value: s.tags.join(" "), placeholder: "web media", autocapitalize: "none", spellcheck: false, class: "mono", disabled: !r.may.configure });
+  const notes = h("textarea", { rows: 4, maxLength: 8000, disabled: !r.may.configure });
+  notes.value = s.description;
+  const error = h("p", { class: "error", role: "alert" });
+  let dialog;
+  const send = async (e) => {
+    e.preventDefault();
+    error.textContent = "";
+    const submit = dialog.querySelector("button[type=submit]");
+    submit.disabled = true;
+    const grow = Object.fromEntries(disks.filter(({ d, input }) => Number(input.value) > Math.ceil(d.size - 0.001)).map(({ d, input }) => [d.key, Number(input.value)]));
+    try {
+      const done = await api("PUT", `/api/proxmox/${x.id}/guests/${g.id}/settings`, {
+        ...(r.may.configure ? { name: name.value.trim(), onboot: onboot.checked, tags: tags.value.split(/[\s,;]+/).filter(Boolean), description: notes.value } : {}),
+        ...(r.may.cpu ? { cores: Number(cores.value) } : {}),
+        ...(r.may.memory ? { memory: Number(memory.value), ...(lxc ? { swap: Number(swap.value) } : {}) } : {}),
+        ...(Object.keys(grow).length ? { disks: grow } : {}),
+      });
+      dialog.close();
+      toast(!done.changed.length ? t("pve.edit.nothing") : done.pending.length ? t("pve.edit.pending", { name: g.name, list: done.pending.join(", ") }) : t("pve.edit.done", { name: g.name }));
+      await loadPve();
+      pveGuestDialog(x, pveUi.host?.guests.find((y) => y.id === g.id) ?? g);
+    } catch (err) {
+      error.textContent = errorText(err);
+      submit.disabled = false;
+    }
+  };
+  const pair = (...items) => h("div", { class: "form-pair" }, ...items);
+  dialog = openDialog(
+    "wide",
+    h(
+      "form",
+      { class: "stack", onsubmit: send },
+      h("header", null, h("h2", { class: "grow" }, t("pve.edit.title", { name: g.name })), closeX(() => dialog)),
+      r.pending.length > 0 && h("p", { class: "banner small" }, t("pve.edit.waiting", { list: r.pending.join(", ") })),
+      field(t(lxc ? "pve.new.hostname" : "pve.edit.name"), name),
+      pair(field(t("pve.new.cores"), cores), field(t("pve.edit.memory"), memory, r.running && !lxc ? t("pve.edit.vmRestart") : null)),
+      lxc && field(t("pve.edit.swap"), swap),
+      disks.map(({ d, input }) => field(t("pve.edit.disk", { disk: d.key, storage: d.storage }), input, t("pve.edit.diskHint"))),
+      h("label", { class: "check" }, onboot, h("span", null, h("strong", null, t("pve.onboot")))),
+      field(t("pve.tags"), tags, t("pve.edit.tagsHint")),
+      field(t("pve.edit.notes"), notes),
+      !(r.may.configure && r.may.cpu && r.may.memory && r.may.disk) && h("p", { class: "muted small" }, t("pve.edit.someRefused")),
+      error,
+      h("footer", null, closeButton(() => (dialog.close(), pveGuestDialog(x, g), dialog), t("common.cancel")), h("button", { type: "submit", class: "btn primary" }, icon("check"), h("span", null, t("settings.save")))),
+    ),
+  );
 }
 
 function pveSnapshotDialog(x, g) {

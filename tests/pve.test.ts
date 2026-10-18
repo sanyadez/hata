@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { rolesFor } from "../src/proxmox";
-import { clientLine } from "../src/pve";
+import { clientLine, gibOf, readSettings, settingsChange } from "../src/pve";
 import { cleanFingerprint, cleanUrl, failed, hostKeysIn, familyOf, nextId, readNewGuest, setupScript, guestOfMachine, guestRights, mayPath, readConfig, readResources, readTask, snapshotName, trouble, type Watched } from "../src/pve";
 
 test("an address as typed becomes the API's origin", () => {
@@ -60,8 +60,8 @@ test("a guest's configuration gives its cards and addresses", () => {
 test("rights: the most specific path that gives something", () => {
   const perms = { "/": { "VM.Audit": 1 }, "/pool/hata": { "VM.PowerMgmt": 1, "VM.Snapshot": 1 }, "/storage/local-lvm": { "Datastore.AllocateSpace": 1 } };
   const g = readResources(resources).guests;
-  expect(guestRights(perms, g[0]!)).toEqual({ power: false, snapshot: false, rollback: false, backup: false, remove: false, console: false, configure: false });
-  expect(guestRights(perms, g[1]!)).toEqual({ power: true, snapshot: true, rollback: false, backup: false, remove: false, console: false, configure: false });
+  expect(guestRights(perms, g[0]!)).toEqual({ power: false, snapshot: false, rollback: false, backup: false, remove: false, console: false, configure: false, cpu: false, memory: false, disk: false });
+  expect(guestRights(perms, g[1]!)).toEqual({ power: true, snapshot: true, rollback: false, backup: false, remove: false, console: false, configure: false, cpu: false, memory: false, disk: false });
   expect(guestRights({ "/": { "VM.PowerMgmt": 1 } }, g[0]!).power).toBe(true);
   expect(mayPath(perms, "/storage/local-lvm", "Datastore.AllocateSpace")).toBe(true);
   expect(mayPath(perms, "/storage/local", "Datastore.AllocateSpace")).toBe(false);
@@ -215,4 +215,45 @@ test("the client's line per system", () => {
   expect(clientLine("debian", "http://h/", "c")).toBe("export DEBIAN_FRONTEND=noninteractive; apt-get update -q && apt-get install -y -q curl ca-certificates && curl -fsSL http://h/client/c | sh");
   expect(clientLine("alpine", "http://h", "c")).toBeNull();
   expect(clientLine("l26", "http://h", "c")).toBe("curl -fsSL http://h/client/c | sh");
+});
+
+test("a guest's settings read from its configuration", () => {
+  const ct = readSettings({ hostname: "web", cores: 2, memory: 1024, swap: 256, onboot: 1, tags: "hata;web", description: "Notes\n", rootfs: "local-lvm:vm-243-disk-0,size=4G", mp0: "local-lvm:vm-243-disk-1,mp=/data,size=512M", mp1: "/srv/media,mp=/media" }, "lxc");
+  expect(ct).toEqual({ name: "web", cores: 2, memory: 1024, swap: 256, onboot: true, tags: ["hata", "web"], description: "Notes\n", disks: [{ key: "rootfs", storage: "local-lvm", size: 4 }, { key: "mp0", storage: "local-lvm", size: 0.5 }] });
+  const vm = readSettings({ name: "win", cores: 4, memory: "current=8192", scsi0: "local-lvm:vm-100-disk-0,iothread=1,size=1T", ide2: "local:iso/debian.iso,media=cdrom,size=600M", efidisk0: "local-lvm:vm-100-disk-1,size=4M" }, "qemu");
+  expect(vm.memory).toBe(8192);
+  expect(vm.swap).toBeNull();
+  expect(vm.onboot).toBe(false);
+  expect(vm.disks).toEqual([{ key: "scsi0", storage: "local-lvm", size: 1024 }]);
+  expect(gibOf("32G")).toBe(32);
+  expect(gibOf("nonsense")).toBe(0);
+});
+
+test("a guest's settings changed: only what differs, with the rights it needs", () => {
+  const old = readSettings({ hostname: "web", cores: 2, memory: 1024, swap: 256, onboot: 1, tags: "hata", description: "x", rootfs: "local-lvm:vm-243-disk-0,size=4G" }, "lxc");
+  expect(settingsChange(old, { name: "web", cores: 2, memory: 1024, onboot: true, tags: ["hata"], description: "x", disks: { rootfs: 4 } }, "lxc")).toEqual({ params: {}, remove: [], grow: [], needs: [] });
+  expect(settingsChange(old, { name: "web2", cores: "4", memory: 2048, swap: 0, onboot: false, tags: [], description: "", disks: { rootfs: 8 } }, "lxc")).toEqual({
+    params: { hostname: "web2", cores: 4, memory: 2048, swap: 0, onboot: 0 },
+    remove: ["tags", "description"],
+    grow: [{ disk: "rootfs", size: "8G" }],
+    needs: ["options", "cpu", "memory", "disk"],
+  });
+  const field = (input: Record<string, unknown>) => {
+    try {
+      settingsChange(old, input, "lxc");
+      return "";
+    } catch (e) {
+      return (e as { field: string }).field;
+    }
+  };
+  expect(field({ name: "-bad" })).toBe("name");
+  expect(field({ cores: 0 })).toBe("cores");
+  expect(field({ memory: 10 })).toBe("memory");
+  expect(field({ tags: ["ok", "not ok"] })).toBe("tags");
+  expect(field({ disks: { rootfs: 3 } })).toBe("diskShrink");
+  expect(field({ disks: { mp9: 10 } })).toBe("disk");
+  expect(field({ onboot: "yes" })).toBe("onboot");
+  // a virtual machine's name may have dots, and has no swap
+  const vm = readSettings({ name: "vm", cores: 1, memory: 2048 }, "qemu");
+  expect(settingsChange(vm, { name: "vm.home", swap: 512 }, "qemu").params).toEqual({ name: "vm.home" });
 });
