@@ -273,6 +273,13 @@ export interface ForeignProject {
   workingDir: string;
 }
 
+/**
+ * Where Hata's client keeps the apps of a machine (`clientapps.ts`). A client on this same server — the
+ * server added as a machine of its own — runs them on this Docker: they are looked after already, and
+ * taken over a second time both would drive the same containers.
+ */
+export const CLIENT_APPS = "/var/lib/hata-client/apps/";
+
 /** Containers that no app of Hata owns: compose projects started elsewhere, and containers on their own */
 export function foreign(containers: ContainerSummary[], installed: Iterable<string>): { projects: ForeignProject[]; single: ContainerSummary[] } {
   const ours = new Set(installed);
@@ -280,8 +287,9 @@ export function foreign(containers: ContainerSummary[], installed: Iterable<stri
   const single: ContainerSummary[] = [];
   for (const c of containers) {
     const project = c.Labels[PROJECT_LABEL];
+    const client = (c.Labels[WORKDIR_LABEL] ?? "").startsWith(CLIENT_APPS) || (c.Labels[FILES_LABEL] ?? "").startsWith(CLIENT_APPS);
     if (project === undefined) single.push(c);
-    else if (!ours.has(project)) {
+    else if (!ours.has(project) && !client) {
       const entry = projects.get(project) ?? { name: project, containers: [], files: (c.Labels[FILES_LABEL] ?? "").split(",").filter(Boolean), workingDir: c.Labels[WORKDIR_LABEL] ?? "" };
       entry.containers.push(c);
       projects.set(project, entry);

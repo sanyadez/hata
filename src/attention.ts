@@ -32,7 +32,7 @@ const FAILURE_WINDOW_MS = 24 * 3600 * 1000;
 /** A trash smaller than this is not worth a word when its disk fills up, bytes */
 const TRASH_WORTH = 100 * 1024 * 1024;
 
-export function attention(input: { system: SystemStatus; docker: DockerInfo; apps: InstalledApp[]; activity: Activity[]; update?: string | null; offsite?: { error: string } | null; disks?: DiskReport[]; trash?: (path: string) => number; absent?: { path: string; holds: string | null }[]; internet?: Trouble[]; exposed?: { nic: string; address: string }[]; array?: { code: string; detail: Record<string, string | number> }[]; shares?: { code: string; detail: Record<string, string> }[]; places?: { id: string; name: string; path: string }[]; machines?: { id: string; name: string; since: number }[]; machineApps?: { key: string; title: string; status: string; containers: { name: string; state: string; done?: boolean }[]; machine: { id: string; name: string; online: boolean } }[]; unused?: { id: string; title: string; size: number; carries: boolean }[]; filling?: { path: string; days: number; percent: number } | null; now?: number }): AttentionItem[] {
+export function attention(input: { system: SystemStatus; docker: DockerInfo; apps: InstalledApp[]; activity: Activity[]; update?: string | null; offsite?: { error: string } | null; disks?: DiskReport[]; trash?: (path: string) => number; absent?: { path: string; holds: string | null }[]; internet?: Trouble[]; exposed?: { nic: string; address: string }[]; array?: { code: string; detail: Record<string, string | number> }[]; shares?: { code: string; detail: Record<string, string> }[]; places?: { id: string; name: string; path: string }[]; machines?: { id: string; name: string; since: number }[]; machineApps?: { key: string; title: string; status: string; containers: { name: string; state: string; done?: boolean }[]; machine: { id: string; name: string; online: boolean } }[]; unused?: { id: string; title: string; size: number; carries: boolean }[]; filling?: { path: string; days: number; percent: number } | null; pve?: AttentionItem[]; now?: number }): AttentionItem[] {
   const { system, docker, apps, activity } = input;
   const now = input.now ?? Date.now();
   const items: AttentionItem[] = [];
@@ -150,6 +150,9 @@ export function attention(input: { system: SystemStatus; docker: DockerInfo; app
   if (input.offsite) items.push({ id: "offsite", severity: "warn", code: "offsite", detail: { message: input.offsite.error } });
 
   if (input.update) items.push({ id: "update", severity: "warn", code: "update", detail: { version: input.update } });
+
+  // Proxmox servers say their own: `proxmox.ts` knows what they answered
+  items.push(...(input.pve ?? []));
 
   return items.sort((a, b) => Number(b.severity === "danger") - Number(a.severity === "danger"));
 }

@@ -163,6 +163,8 @@ textarea.code.page { min-height: 60dvh; background: var(--surface); padding: 16p
 .chip.ok { border-color: transparent; color: var(--ok); padding: 0; }
 .chip.ok .ico { width: 13px; height: 13px; }
 .chip.warn { border-color: transparent; background: var(--warn-soft); color: var(--warn); }
+.chip.danger { border-color: transparent; background: var(--danger-soft); color: var(--danger); max-width: 100%; }
+.warn-box { border-color: var(--warn); background: var(--warn-soft); }
 .pill { display: inline-grid; place-items: center; min-width: 20px; height: 20px; padding: 0 6px; margin-left: 8px; border-radius: 10px; background: var(--accent); color: var(--on-accent); font: 700 12px var(--font-body); vertical-align: 2px; }
 .banner { background: var(--warn-soft); border: 1px solid var(--warn); border-radius: var(--radius-md); padding: 12px 16px; }
 .empty { text-align: center; color: var(--muted); padding: 56px 16px; display: grid; gap: 16px; justify-items: center; }
@@ -873,14 +875,14 @@ input[type="range"] { accent-color: var(--accent); width: 100%; }
 /* Text that lies on the picture itself: what stands alone gets a pane of its own, the rest a halo of the
    background colour — the picture may be of any brightness */
 :root.has-wallpaper #view { text-shadow: 0 0 2px var(--bg), 0 0 6px var(--bg), 0 0 16px var(--bg); }
-:root.has-wallpaper #view :is(.card, .tile, .btn, .page-head, :is(.side > .pad-x, .loose), .section-head, :is(#app-head, #machine-head), input, select, .select-btn, textarea, table, pre, .cats, .tabs) { text-shadow: none; }
-:root.has-wallpaper :is(.page-head, :is(.side > .pad-x, .loose), .cats, :is(#app-head, #machine-head), #view .section-head:not(:is(.card, :is(.side > .pad-x, .loose), :is(#app-head, #machine-head)) *)) { background: color-mix(in srgb, var(--surface) 88%, transparent); backdrop-filter: blur(16px); border: 1px solid var(--border); border-radius: var(--radius-lg); }
+:root.has-wallpaper #view :is(.card, .tile, .btn, .page-head, :is(.side > .pad-x, .loose), .section-head, :is(#app-head, #machine-head, #pve-head), input, select, .select-btn, textarea, table, pre, .cats, .tabs) { text-shadow: none; }
+:root.has-wallpaper :is(.page-head, :is(.side > .pad-x, .loose), .cats, :is(#app-head, #machine-head, #pve-head), #view .section-head:not(:is(.card, :is(.side > .pad-x, .loose), :is(#app-head, #machine-head, #pve-head)) *)) { background: color-mix(in srgb, var(--surface) 88%, transparent); backdrop-filter: blur(16px); border: 1px solid var(--border); border-radius: var(--radius-lg); }
 :root.has-wallpaper :is(.page-head, :is(.side > .pad-x, .loose)) { padding: 18px 20px; }
-:root.has-wallpaper :is(#app-head, #machine-head) { padding: 18px 20px 0; }
-:root.has-wallpaper :is(#app-head, #machine-head) .tabs { box-shadow: none; }
-:root.has-wallpaper #view .section-head:not(:is(.card, :is(.side > .pad-x, .loose), :is(#app-head, #machine-head)) *) { padding: 8px 14px; border-radius: var(--radius-md); }
+:root.has-wallpaper :is(#app-head, #machine-head, #pve-head) { padding: 18px 20px 0; }
+:root.has-wallpaper :is(#app-head, #machine-head, #pve-head) .tabs { box-shadow: none; }
+:root.has-wallpaper #view .section-head:not(:is(.card, :is(.side > .pad-x, .loose), :is(#app-head, #machine-head, #pve-head)) *) { padding: 8px 14px; border-radius: var(--radius-md); }
 :root.has-wallpaper #view .ico { filter: drop-shadow(0 0 3px var(--bg)); }
-:root.has-wallpaper #view :is(.card, .tile, .btn, .page-head, :is(.side > .pad-x, .loose), .section-head, .cats, :is(#app-head, #machine-head)) .ico { filter: none; }
+:root.has-wallpaper #view :is(.card, .tile, .btn, .page-head, :is(.side > .pad-x, .loose), .section-head, .cats, :is(#app-head, #machine-head, #pve-head)) .ico { filter: none; }
 :root.has-wallpaper .cats.cats { padding: 8px; }
 
 /* --- Moving groups and blocks of the dashboard -------------------------------------------------- */
@@ -1164,3 +1166,24 @@ body:has(.assistant.paged) > .assistant-fab { display: none; }
 .pool-erase { color: var(--danger); }
 .pool-name { display: inline-flex; align-items: center; gap: 4px; }
 .pool-name input { width: 160px; }
+
+/* Proxmox: a snapshot or a backup in the guest's dialog */
+.pve-row { display: flex; align-items: center; gap: 12px; padding: 8px 0; border-top: 1px solid var(--border); }
+.pve-row:first-child { border-top: 0; }
+.pve-row .chip { margin-left: 8px; }
+.form-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+@media (max-width: 640px) { .form-pair { grid-template-columns: 1fr; } }
+.pve-trouble { padding: 2px 20px; }
+.pve-trouble .attention-item:first-child { border-top: 0; }
+.pve-note { margin: 0; padding: 12px 20px; border-top: 1px solid var(--border); }
+.pve-note.first { border-top: 0; }
+.pve-section { overflow: hidden; }
+.pve-section-head { padding: 16px 20px 6px; }
+.pve-section-head h2 { font-size: 16px; }
+.pve-nodes { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); }
+.pve-node { padding: 12px 20px 18px; display: flex; flex-direction: column; gap: 8px; }
+.pve-node + .pve-node { border-left: 1px solid var(--border); }
+.pve-self { display: flex; align-items: center; gap: 10px; margin: 0; padding: 12px 20px; }
+.pve-here { margin-left: 8px; vertical-align: middle; }
+.pve-offer { display: flex; align-items: center; gap: 12px; }
+.pve-gives { margin: 0; padding-left: 20px; }
