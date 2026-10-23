@@ -311,7 +311,7 @@ export function trouble(h: Watched, now = Date.now()): PveItem[] {
   // a guest set to start with the server that is not running: it fell, or it did not come up
   for (const g of h.guests) {
     if (g.template || offline.has(g.node) || g.status !== "stopped" || !h.configs[g.id]?.onboot) continue;
-    items.push({ id: `pve:${h.id}:down:${g.id}`, severity: "warn", code: "pve.guestDown", detail: { ...base, guest: g.name, vmid: g.vmid } });
+    items.push({ id: `pve:${h.id}:down:${g.id}`, severity: "warn", code: "pve.guestDown", detail: { ...base, guest: g.name, vmid: g.vmid, guestId: g.id } });
   }
   // a backup that failed: the latest run of each guest's backup decides, so a run that worked afterwards clears it
   const latest = new Map<string, Task>();
