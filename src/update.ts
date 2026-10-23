@@ -119,6 +119,8 @@ let checkError = "";
 let stage: "" | "download" | "verify" | "restart" = "";
 /** How much of the new binary has come, while it downloads; `total` is 0 when the server did not say */
 let progress = { got: 0, total: 0 };
+/** Stops an install while it downloads or checks; once the binary is swapped there is nothing to stop */
+let stopper: AbortController | null = null;
 let installError = "";
 
 const FILE = `hata-linux-${process.arch}`;
@@ -244,19 +246,22 @@ export function confirmUpdate(): void {
 
 // --- Install ----------------------------------------------------------------------------------------
 
-async function download(url: string, path: string): Promise<void> {
-  const res = await fetch(url, { headers: { "user-agent": `hata/${VERSION}` }, signal: AbortSignal.timeout(15 * 60_000) });
+async function download(url: string, path: string, signal: AbortSignal): Promise<void> {
+  const res = await fetch(url, { headers: { "user-agent": `hata/${VERSION}` }, signal: AbortSignal.any([signal, AbortSignal.timeout(15 * 60_000)]) });
   if (!res.ok) throw new Error(`Download of ${url} failed: ${res.status}`);
   progress = { got: 0, total: Number(res.headers.get("content-length")) || 0 };
   const out = Bun.file(path).writer();
-  for await (const chunk of res.body!) {
-    out.write(chunk);
-    progress.got += chunk.byteLength;
+  try {
+    for await (const chunk of res.body!) {
+      out.write(chunk);
+      progress.got += chunk.byteLength;
+    }
+  } finally {
+    await out.end();
   }
-  await out.end();
 }
 
-async function install(release: Found, user: string): Promise<void> {
+async function install(release: Found, user: string, signal: AbortSignal): Promise<void> {
   const [binary, sums] = [release.assets[FILE], release.assets.SHA256SUMS];
   if (!binary || !sums) throw new Error(`The release has no ${FILE} or no SHA256SUMS`);
   const fresh = SERVICE_BIN + ".download";
@@ -265,15 +270,20 @@ async function install(release: Found, user: string): Promise<void> {
     const sumsText = await (await fetch(sums, { headers: { "user-agent": `hata/${VERSION}` }, signal: AbortSignal.timeout(30_000) })).text();
     const expected = checksumFor(sumsText, FILE);
     if (!expected) throw new Error(`SHA256SUMS has no entry for ${FILE}`);
-    await download(binary, fresh);
+    await download(binary, fresh, signal);
     stage = "verify";
     const hasher = new Bun.CryptoHasher("sha256");
-    for await (const chunk of Bun.file(fresh).stream()) hasher.update(chunk);
+    for await (const chunk of Bun.file(fresh).stream()) {
+      signal.throwIfAborted();
+      hasher.update(chunk);
+    }
     if (hasher.digest("hex") !== expected) throw new Error("The download is damaged: its checksum does not match SHA256SUMS");
     chmodSync(fresh, 0o755);
     // does it run here at all, and is it what the release says?
     const probe = Bun.spawnSync({ cmd: [fresh, "version"], stdout: "pipe", stderr: "pipe" });
     if (probe.exitCode !== 0 || probe.stdout.toString().trim() !== release.version) throw new Error("The downloaded binary does not run on this machine");
+    signal.throwIfAborted();
+    stopper = null;
 
     swapIn(fresh, release.version, user);
   } finally {
@@ -340,13 +350,23 @@ export function startUpdate(user: string): string | null {
   if (!release || compareVersions(release.version, VERSION) <= 0) return "update.none";
   installError = "";
   stage = "download";
-  void install(release, user).catch((e) => {
+  const own = (stopper = new AbortController());
+  void install(release, user, own.signal).catch((e) => {
     stage = "";
+    if (stopper === own) stopper = null;
+    if (own.signal.aborted) return void record("system.update.cancelled", { user, detail: release.version });
     installError = e instanceof Error ? e.message : String(e);
     record("system.update.failed", { user, detail: installError.slice(0, 300) });
     console.error(`Update to ${release.version} failed: ${installError}`);
   });
   return null;
+}
+
+/** Stops the install started from here while it still downloads or checks; false when there is nothing to stop */
+export function cancelUpdate(): boolean {
+  if (!stopper || (stage !== "download" && stage !== "verify")) return false;
+  stopper.abort();
+  return true;
 }
 
 // --- The watcher (`hata update-watch`, run from the previous binary) --------------------------------

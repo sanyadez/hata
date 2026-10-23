@@ -2,7 +2,7 @@
 
 **English** · [Українська](COMPARISON.uk.md)
 
-What the home server programs of Hata's kind have, as of **October 2026**. Versions compared: Hata 0.18,
+What the home server programs of Hata's kind have, as of **October 2026**. Versions compared: Hata 0.24,
 umbrelOS 2.0, ZimaOS 1.7, CasaOS 0.4.15, Runtipi 4.10, Cosmos 0.23, Unraid 7.3.
 
 Every cell about another product comes from its own documentation, release notes or source code — see
@@ -24,9 +24,9 @@ or a plugin is named as such. These products change fast: if a cell is wrong or 
 
 | | Hata | umbrelOS | ZimaOS | CasaOS | Runtipi | Cosmos | Unraid |
 |---|---|---|---|---|---|---|---|
-| Users | administrators, members, guests; who opens which app | owner and members; shared apps and folders | owner and members; per-folder access | one | one administrator; a guest dashboard | users and administrators; groups in Pro | one administrator; separate users for shares |
+| Users | administrators, members, guests; who opens which app; members' folders in Files, read or write | owner and members; shared apps and folders | owner and members; per-folder access | one | one administrator; a guest dashboard | users and administrators; groups in Pro | one administrator; separate users for shares |
 | Two-factor sign-in | authenticator app, passkeys; can be required for administrators | authenticator app | — | — | authenticator app | yes | through an OpenID provider of your own |
-| Sign-in in front of apps | any app, by its port; no domain needed | yes | — | — | per app, with a domain | yes; also an OpenID Connect provider for apps | — |
+| Sign-in in front of apps | any app, by its port; no domain needed; the app is told who came in | yes | — | — | per app, with a domain | yes; also an OpenID Connect provider for apps | — |
 | HTTPS | Let's Encrypt, or behind your own proxy | its own certificate authority for `.local` names | — (Nginx Proxy Manager from the store) | — | Let's Encrypt (Traefik); self-signed on the home network | Let's Encrypt, wildcard by DNS | Let's Encrypt on myunraid.net, or your own |
 
 ## Apps
@@ -45,8 +45,8 @@ or a plugin is named as such. These products change fast: if a cell is wrong or 
 | Copy elsewhere | SFTP, or S3-compatible storage; encrypted before it leaves | external drive, NAS, another Umbrel | Google Drive, Dropbox, OneDrive, the network, USB | — | — | Rclone destinations | configuration only, to its cloud |
 | Disk health | SMART in plain words, with the history of the counters | SMART, temperature, wear | yes | SMART pass/fail | — | SMART | SMART |
 | Formatting | ext4, exFAT, FAT32, NTFS; partitions; erase | ext4, exFAT (external disks) | yes | ext4 | — | ext4, XFS, NTFS, FAT32, exFAT | XFS, Btrfs, ZFS, ext4, NTFS, exFAT |
-| Several disks / a failed disk | mergerfs pool; SnapRAID parity | ZFS mirror or RAIDZ | RAID 0/1/5/6, JBOD | mergerfs pool (beta) | — | MergerFS pool; SnapRAID parity | parity array; ZFS |
-| Folders over the network (SMB) | users of Hata, read or write per folder, guests; found in Explorer and Finder by itself | each share for the account that made it | members, read or write; guests | guest shares only | — | yes; also NFS, SFTP, WebDAV | SMB and NFS, per user |
+| Several disks / a failed disk | mergerfs pool; SnapRAID parity; one wizard sets up both | ZFS mirror or RAIDZ | RAID 0/1/5/6, JBOD | mergerfs pool (beta) | — | MergerFS pool; SnapRAID parity | parity array; ZFS |
+| Folders over the network (SMB) | users of Hata, read or write per folder, guests; found in Explorer and Finder by itself; Time Machine | each share for the account that made it | members, read or write; guests | guest shares only | — | yes; also NFS, SFTP, WebDAV | SMB and NFS, per user |
 | Mounting network places | SMB, NFS, SFTP, WebDAV, FTP | SMB; files from cloud drives | SMB | SMB; Google Drive, Dropbox | — | Rclone (SMB, SFTP, WebDAV, FTP, S3…) | plugin |
 | File manager in the browser | yes, with a trash and archives | yes | yes, with a recycle bin | yes | — | — | yes |
 
@@ -61,21 +61,21 @@ or a plugin is named as such. These products change fast: if a cell is wrong or 
 
 | | Hata | umbrelOS | ZimaOS | CasaOS | Runtipi | Cosmos | Unraid |
 |---|---|---|---|---|---|---|---|
-| Other machines | a small client on any Linux: containers, apps, files, backups, moving an app over, Wake-on-LAN | — | switching between Zima devices in its app | — | — | servers linked over Constellation; deploying across them in Pro | Unraid Connect, a cloud dashboard |
-| Virtual machines | — | Windows, Linux, Android | yes | — | — | — | yes (KVM) |
+| Other machines | a small client on any Linux: containers, apps, files, backups, Docker's images and volumes, system updates, moving an app over, Wake-on-LAN | — | switching between Zima devices in its app | — | — | servers linked over Constellation; deploying across them in Pro | Unraid Connect, a cloud dashboard |
+| Virtual machines | those of a Proxmox VE server: power, settings, snapshots, backups, clones, console and screen; new ones from cloud images or discs | Windows, Linux, Android | yes | — | — | — | yes (KVM) |
 | AI agents (MCP) | MCP with three levels per key, approval of what destroys, OAuth sign-in; an assistant built into the page | MCP, one set of permissions for all its tokens | local AI search; agents as store apps | — | — | — | API; MCP by plugin |
 | Phone and desktop apps | — (the page installs as an app, with notifications) | iPhone, Mac; Photos | Windows, macOS, iOS, Android; photos in beta | — | — | Android, Windows, macOS, Linux (beta) | — |
 | Notifications | browser push, Telegram, ntfy, mail, webhook | in the page | in the page | in the page | in the page | in the page, mail, webhook | browser, mail, Telegram, Discord, ntfy and more |
-| Updating itself | from the page; put back by itself if the new version fails, a button to go back | yes | yes | yes | from the command line | yes | yes, and downgrade |
+| Updating itself | from the page, every step shown, cancel until swapped; put back by itself if the new version fails, a button to go back; stable or pre-releases, at a set time | yes | yes | yes | from the command line | yes | yes, and downgrade |
 | Terminal in the browser | the server and each container | the server and each container | containers; the server in developer mode | yes | — | the server and each container | yes |
 
 ## What Hata does not have
 
-- Virtual machines.
+- A hypervisor of its own: the virtual machines it manages are those of a Proxmox VE server.
 - Phone and desktop apps, and a photos app.
 - RAID and ZFS: protection from a disk failure is SnapRAID parity over plain disks.
-- An OpenID Connect provider for apps: Hata's sign-in stands in front of an app, the app itself does not
-  learn who came in.
+- An OpenID Connect provider for apps: Hata's sign-in stands in front of an app and tells it who came in by
+  headers (`Remote-User`), which only apps that read such headers use.
 - Years of use: it is young, and verified on a handful of machines.
 
 ## Sources
