@@ -1862,7 +1862,6 @@ function attentionItem(item) {
   const below = [
     item.code === "update" && doIt(t("update.install", { version: item.detail.version }), "up", async () => {
       await api("POST", "/api/update/install", {});
-      toast(t("update.stage.download"));
       void followUpdate(item.detail.version);
     }),
     (item.code === "restarting" || item.code === "partial") && app && doIt(t("app.restart"), "refresh", () => startAction(app, "restart")),
@@ -9027,19 +9026,84 @@ function settingRow(title, hint, control) {
   return h("div", { class: "setting" }, h("div", { class: "grow" }, h("strong", null, title), hint && h("p", { class: "muted small" }, hint)), h("div", { class: "setting-control" }, control));
 }
 
-/** Asks until the server answers with another version (the update went through) or says why it did not */
-async function followUpdate(target) {
+/** The steps an update goes through as the page sees them; going back skips the download */
+const UPDATE_STEPS = ["download", "verify", "restart", "start"];
+let updateFollow = null;
+
+/**
+ * Asks until the server answers with another version (the update went through) or says why it did not,
+ * showing every step in a window of its own; asked again while one is followed, it only shows that window
+ */
+async function followUpdate(target, back = false) {
+  if (updateFollow) return updateFollow.show();
+  const steps = back ? UPDATE_STEPS.slice(2) : UPDATE_STEPS;
+  const rows = new Map(steps.map((step) => [step, h("li", null, h("span", { class: "step-mark" }), h("div", { class: "grow" }, h("span", null, t("update.step." + step, { version: target })), h("small", { class: "muted" })))]));
+  const fill = h("i");
+  rows.get("download")?.querySelector(".grow").append(h("div", { class: "bar" }, fill));
+  const said = h("p", { class: "muted small" }, t(back ? "update.stepsLeadBack" : "update.stepsLead"));
+  const error = h("p", { class: "error", role: "alert" });
+  const close = closeButton(() => dialog, t("update.hide"));
+  let dialog;
+  const show = () => {
+    if (dialog?.open) return;
+    dialog = openDialog("update-dialog", h("h2", null, t(back ? "update.goingBack" : "update.going", { version: target })), said, h("ol", { class: "update-steps" }, [...rows.values()]), error, h("footer", null, close));
+  };
+  // the steps before `at` are done, `at` goes on (or failed), the rest wait; past the last — all done
+  const mark = (at, failed = false) => {
+    const index = at === "all" ? steps.length : steps.indexOf(at);
+    steps.forEach((step, i) => {
+      const row = rows.get(step);
+      row.className = i < index ? "done" : i === index ? (failed ? "failed" : "now") : "";
+      put(row.querySelector(".step-mark"), i < index ? icon("check") : i === index ? icon(failed ? "x" : "refresh", failed ? "" : "spin") : null);
+    });
+  };
+  updateFollow = { show };
+  show();
+  mark(back ? "restart" : "download");
   const started = Date.now();
+  let at = back ? "restart" : "download";
+  let outcome = "slow";
   while (Date.now() - started < 4 * 60_000) {
-    await new Promise((r) => setTimeout(r, 2000));
+    await new Promise((r) => setTimeout(r, 1000));
     const now = await fetch("/api/state").then((r) => (r.ok ? r.json() : null), () => null);
     // the new version brings a new UI with it
-    if (now?.version === target) return location.reload();
+    if (now?.version === target) {
+      outcome = "done";
+      break;
+    }
     const status = await api("GET", "/api/update").catch(() => null);
-    if (!status) continue;
-    state.update = status;
-    if (!status.stage && (status.error || status.last?.status === "rolledBack")) break;
+    // no answer: the server is between the old version and the new one
+    if (!status) at = at === "download" || at === "verify" ? at : "start";
+    else {
+      state.update = status;
+      if (!status.stage && (status.error || status.last?.status === "rolledBack")) {
+        outcome = status.error ? "error" : "rolledBack";
+        error.textContent = status.error ? t("update.error", { message: status.error }) : t("update.rolledBack", { version: target });
+        break;
+      }
+      if (status.stage) at = status.stage;
+      const p = status.progress;
+      const row = rows.get("download")?.querySelector("small");
+      if (p && row) {
+        // without the size from the server there is nothing to measure against: the bar waits for the check
+        fill.style.width = p.total ? Math.round((p.got / p.total) * 100) + "%" : "0";
+        row.textContent = p.total ? `${bytes(p.got)} / ${bytes(p.total)}` : bytes(p.got);
+      }
+    }
+    if (at !== "download") fill.style.width = "100%";
+    mark(at);
   }
+  updateFollow = null;
+  if (outcome === "done") {
+    mark("all");
+    said.textContent = t("update.ready", { version: target });
+    close.disabled = true;
+    return setTimeout(() => location.reload(), 1200);
+  }
+  if (!dialog.isConnected) show();
+  mark(at, true);
+  if (outcome === "slow") error.textContent = t("update.slow");
+  close.lastChild.textContent = t("common.close");
   if (state.route.view === "settings") renderSettings();
 }
 
@@ -9084,7 +9148,9 @@ function updateRow() {
   return settingRow(
     u.available ? t("update.available", { version: u.latest.version }) : t("update.title2"),
     hint,
-    h("div", { class: "row-actions" }, u.available && u.latest.url && h("a", { class: "link small", href: u.latest.url, target: "_blank", rel: "noopener noreferrer" }, t("update.notes"), icon("external")), back, check, install),
+    busy
+      ? h("div", { class: "row-actions" }, button(t("update.showSteps"), { class: "small primary", onclick: () => followUpdate(u.latest?.version ?? u.previous) }, "refresh"))
+      : h("div", { class: "row-actions" }, u.available && u.latest.url && h("a", { class: "link small", href: u.latest.url, target: "_blank", rel: "noopener noreferrer" }, t("update.notes"), icon("external")), back, check, install),
   );
 }
 
@@ -9142,7 +9208,7 @@ function rollbackDialog(u) {
         dialog.close();
         state.update = { ...u, stage: "restart", error: "" };
         renderSettings();
-        void followUpdate(u.previous);
+        void followUpdate(u.previous, true);
       } catch (e) {
         error.textContent = errorText(e);
         go.disabled = false;
