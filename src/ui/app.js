@@ -8948,6 +8948,8 @@ function paintWelcome() {
   const docker = state.overview?.docker;
   const installed = new Set((state.overview?.apps ?? []).map((a) => a.name));
   const offered = (store?.apps ?? []).filter((a) => a.recommended && a.supported).slice(0, 9);
+  // the same app in two stores: each card says whose it is
+  const twice = new Set(offered.filter((a, i) => offered.findIndex((b) => b.name === a.name) !== i).map((a) => a.name));
   const busy = store?.stores.some((x) => x.syncing);
   put(
     box,
