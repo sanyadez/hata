@@ -9043,10 +9043,27 @@ async function followUpdate(target, back = false) {
   const said = h("p", { class: "muted small" }, t(back ? "update.stepsLeadBack" : "update.stepsLead"));
   const error = h("p", { class: "error", role: "alert" });
   const close = closeButton(() => dialog, t("update.hide"));
+  // a stray Enter only hides the window
+  close.autofocus = true;
+  // until the new binary is put in place nothing is changed yet, so the update can be called off
+  const cancel = !back && button(t("update.cancel"), {
+    class: "danger-text",
+    onclick: async () => {
+      cancel.disabled = true;
+      try {
+        await api("POST", "/api/update/cancel", {});
+        stopped = true;
+      } catch (e) {
+        cancel.disabled = false;
+        toast(errorText(e), "error");
+      }
+    },
+  });
   let dialog;
+  let stopped = false;
   const show = () => {
     if (dialog?.open) return;
-    dialog = openDialog("update-dialog", h("h2", null, t(back ? "update.goingBack" : "update.going", { version: target })), said, h("ol", { class: "update-steps" }, [...rows.values()]), error, h("footer", null, close));
+    dialog = openDialog("update-dialog", h("h2", null, t(back ? "update.goingBack" : "update.going", { version: target })), said, h("ol", { class: "update-steps" }, [...rows.values()]), error, h("footer", null, cancel || h("span"), close));
   };
   // the steps before `at` are done, `at` goes on (or failed), the rest wait; past the last — all done
   const mark = (at, failed = false) => {
@@ -9081,6 +9098,11 @@ async function followUpdate(target, back = false) {
         error.textContent = status.error ? t("update.error", { message: status.error }) : t("update.rolledBack", { version: target });
         break;
       }
+      // stopped here or from another page before anything was swapped
+      if (!status.stage && (stopped || at === "download" || at === "verify")) {
+        outcome = "cancelled";
+        break;
+      }
       if (status.stage) at = status.stage;
       const p = status.progress;
       const row = rows.get("download")?.querySelector("small");
@@ -9091,9 +9113,16 @@ async function followUpdate(target, back = false) {
       }
     }
     if (at !== "download") fill.style.width = "100%";
+    if (cancel) cancel.hidden = at !== "download" && at !== "verify";
     mark(at);
   }
   updateFollow = null;
+  if (outcome === "cancelled") {
+    if (dialog.open) dialog.close();
+    toast(t("update.cancelled", { version: target }));
+    if (state.route.view === "settings") renderSettings();
+    return;
+  }
   if (outcome === "done") {
     mark("all");
     said.textContent = t("update.ready", { version: target });
@@ -9101,6 +9130,7 @@ async function followUpdate(target, back = false) {
     return setTimeout(() => location.reload(), 1200);
   }
   if (!dialog.isConnected) show();
+  if (cancel) cancel.hidden = true;
   mark(at, true);
   if (outcome === "slow") error.textContent = t("update.slow");
   close.lastChild.textContent = t("common.close");
