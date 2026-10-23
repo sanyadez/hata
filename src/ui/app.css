@@ -700,6 +700,9 @@ pre.said { margin: 0; padding: 10px 12px; max-height: 240px; overflow: auto; bor
 .setting-control { width: 280px; max-width: 100%; display: flex; justify-content: flex-end; }
 /* a row of buttons takes the room it needs instead of spilling over the text */
 .setting-control:has(.row-actions, .swatches) { width: auto; flex: none; }
+/* the words keep room to be read: buttons that do not fit beside them go under them, to the right */
+.setting > .grow { min-width: min(220px, 100%); }
+.setting-control { margin-left: auto; }
 .setting-control .row-actions { flex-wrap: wrap; }
 .settings footer { display: flex; justify-content: flex-end; padding-top: 14px; border-top: 1px solid var(--border); }
 
@@ -815,8 +818,22 @@ dialog.dropdown header { padding: 4px 6px; margin-bottom: 8px; }
   th, td { padding-left: 14px; padding-right: 14px; }
 }
 
+/* What a check of updates found: the words come in, and the row says it once */
+.setting.checked .muted { animation: fade-in 0.35s ease-out; }
+.fresh-check { width: 14px; height: 14px; margin-right: 6px; vertical-align: -2px; color: var(--ok); animation: pop 0.45s cubic-bezier(0.3, 1.6, 0.5, 1); }
+.setting.checked-found { border-radius: var(--radius-md); animation: glow 1.6s ease-out; }
+.btn.arrive { animation: arrive 0.45s cubic-bezier(0.2, 1.2, 0.4, 1); }
+.setting.checked-error .muted { color: var(--danger); }
+.setting.checked-error .setting-control { animation: shake 0.4s ease-in-out; }
+@keyframes fade-in { from { opacity: 0; transform: translateY(3px); } }
+@keyframes pop { 0% { transform: scale(0); } 100% { transform: scale(1); } }
+@keyframes glow { 0% { background: var(--accent-soft); box-shadow: 0 0 0 6px var(--accent-soft); } 100% { background: transparent; box-shadow: 0 0 0 6px transparent; } }
+@keyframes arrive { from { opacity: 0; transform: translateX(16px); } }
+@keyframes shake { 20%, 60% { transform: translateX(-4px); } 40%, 80% { transform: translateX(4px); } }
+
 @media (prefers-reduced-motion: reduce) {
   .dot.busy { animation: none; }
+  .setting.checked .muted, .fresh-check, .setting.checked-found, .btn.arrive, .setting.checked-error .setting-control, .ico.spin { animation: none; }
 }
 
 /* --- Terminal ---------------------------------------------------------------------------------- */

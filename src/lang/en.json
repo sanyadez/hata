@@ -590,6 +590,7 @@
   "update.stage.verify": "Checking the download…",
   "update.stage.restart": "Restarting into the new version…",
   "update.check": "Check now",
+  "update.checking": "Checking…",
   "update.back": "Back to {version}",
   "update.backTitle": "Go back to Hata {version}?",
   "update.backLead": "The version that ran here before {from} is put back, and Hata restarts into it; apps keep running. {from} is kept, so you can return to it the same way. Settings made since stay as they are — a feature that came with {from} is simply not there in {version}.",

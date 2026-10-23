@@ -9107,6 +9107,8 @@ async function followUpdate(target, back = false) {
   if (state.route.view === "settings") renderSettings();
 }
 
+let updateFx = "";
+
 function updateRow() {
   const u = state.update;
   if (!u) return null;
@@ -9121,12 +9123,20 @@ function updateRow() {
         : u.available
           ? u.unsupported ? t("update.manual") : t("update.availableHint")
           : u.checkedAt ? t("update.upToDate", { time: ago(u.checkedAt) }) : t("update.notChecked");
+  // what the last check found, said once by the row drawn after it
+  const fx = updateFx;
+  updateFx = "";
   const check = button(t("update.check"), {
     class: "small ghost",
     disabled: busy,
     onclick: async () => {
       check.disabled = true;
-      state.update = await api("POST", "/api/update/check", {}).catch(() => state.update);
+      check.querySelector(".ico").classList.add("spin");
+      check.lastChild.textContent = t("update.checking");
+      // a quick answer would only blink: the turn lasts long enough to be seen
+      const [res] = await Promise.all([api("POST", "/api/update/check", {}).catch((e) => ({ ...state.update, error: errorText(e) })), new Promise((r) => setTimeout(r, 700))]);
+      state.update = res;
+      updateFx = res.error ? "error" : res.available ? "found" : "latest";
       renderSettings();
     },
   }, "refresh");
@@ -9145,13 +9155,19 @@ function updateRow() {
     },
   }, "up");
   const back = u.previous && !u.unsupported && button(t("update.back", { version: u.previous }), { class: "small ghost", disabled: busy, onclick: () => rollbackDialog(u) });
-  return settingRow(
+  const row = settingRow(
     u.available ? t("update.available", { version: u.latest.version }) : t("update.title2"),
     hint,
     busy
       ? h("div", { class: "row-actions" }, button(t("update.showSteps"), { class: "small primary", onclick: () => followUpdate(u.latest?.version ?? u.previous) }, "refresh"))
       : h("div", { class: "row-actions" }, u.available && u.latest.url && h("a", { class: "link small", href: u.latest.url, target: "_blank", rel: "noopener noreferrer" }, t("update.notes"), icon("external")), back, check, install),
   );
+  if (fx) {
+    row.classList.add("checked", "checked-" + fx);
+    if (fx === "latest") row.querySelector("p")?.prepend(icon("check", "fresh-check"));
+    if (fx === "found" && install) install.classList.add("arrive");
+  }
+  return row;
 }
 
 /** Which releases are offered: stable ones, or pre-releases too; the check runs again at once */
