@@ -32,7 +32,7 @@ const FAILURE_WINDOW_MS = 24 * 3600 * 1000;
 /** A trash smaller than this is not worth a word when its disk fills up, bytes */
 const TRASH_WORTH = 100 * 1024 * 1024;
 
-export function attention(input: { system: SystemStatus; docker: DockerInfo; apps: InstalledApp[]; activity: Activity[]; update?: string | null; offsite?: { error: string } | null; disks?: DiskReport[]; trash?: (path: string) => number; absent?: { path: string; holds: string | null }[]; internet?: Trouble[]; exposed?: { nic: string; address: string }[]; array?: { code: string; detail: Record<string, string | number> }[]; shares?: { code: string; detail: Record<string, string> }[]; places?: { id: string; name: string; path: string }[]; machines?: { id: string; name: string; since: number }[]; machineApps?: { key: string; title: string; status: string; containers: { name: string; state: string; done?: boolean }[]; machine: { id: string; name: string; online: boolean } }[]; unused?: { id: string; title: string; size: number; carries: boolean }[]; filling?: { path: string; days: number; percent: number } | null; pve?: AttentionItem[]; now?: number }): AttentionItem[] {
+export function attention(input: { system: SystemStatus; docker: DockerInfo; apps: InstalledApp[]; activity: Activity[]; update?: string | null; offsite?: { error: string } | null; disks?: DiskReport[]; trash?: (path: string) => number; absent?: { path: string; holds: string | null }[]; internet?: Trouble[]; exposed?: { nic: string; address: string }[]; array?: { code: string; detail: Record<string, string | number> }[]; shares?: { code: string; detail: Record<string, string> }[]; places?: { id: string; name: string; path: string }[]; machines?: { id: string; name: string; since: number; wake?: string; pve?: { host: string; hostName: string; guest: string; status: string } }[]; machineApps?: { key: string; title: string; status: string; containers: { name: string; state: string; done?: boolean }[]; machine: { id: string; name: string; online: boolean } }[]; unused?: { id: string; title: string; size: number; carries: boolean }[]; filling?: { path: string; days: number; percent: number } | null; pve?: AttentionItem[]; now?: number }): AttentionItem[] {
   const { system, docker, apps, activity } = input;
   const now = input.now ?? Date.now();
   const items: AttentionItem[] = [];
@@ -54,7 +54,7 @@ export function attention(input: { system: SystemStatus; docker: DockerInfo; app
   for (const app of input.machineApps ?? []) {
     if (!app.machine.online) continue;
     const restarting = app.containers.filter((c) => c.state === "restarting");
-    const detail = { title: app.title, machine: app.machine.name, id: app.machine.id };
+    const detail = { title: app.title, machine: app.machine.name, id: app.machine.id, name: app.key.slice(0, app.key.lastIndexOf("@")) };
     if (restarting.length) items.push({ id: `restarting:${app.key}`, severity: "danger", code: "machine.restarting", detail: { ...detail, container: restarting[0]!.name } });
     else if (app.status === "partial") items.push({ id: `partial:${app.key}`, severity: "warn", code: "machine.partial", detail: { ...detail, container: app.containers.find((c) => c.state !== "running" && !c.done)?.name ?? "" } });
   }
@@ -127,12 +127,12 @@ export function attention(input: { system: SystemStatus; docker: DockerInfo; app
 
   // a folder of another machine that should be mounted and is not: the server is off or away
   for (const place of input.places ?? []) {
-    items.push({ id: `netplace:${place.id}`, severity: "warn", code: "netplace.down", detail: { name: place.name, path: place.path } });
+    items.push({ id: `netplace:${place.id}`, severity: "warn", code: "netplace.down", detail: { name: place.name, path: place.path, id: place.id } });
   }
 
   // a machine whose client has not been connected for a while: off, or the client stopped
   for (const m of input.machines ?? []) {
-    items.push({ id: `machine:${m.id}`, severity: "warn", code: "machine.away", detail: { name: m.name, id: m.id } });
+    items.push({ id: `machine:${m.id}`, severity: "warn", code: "machine.away", detail: { name: m.name, id: m.id, wake: m.wake ?? "", ...(m.pve ? { pveHost: m.pve.host, pveName: m.pve.hostName, pveGuest: m.pve.guest, pveStatus: m.pve.status } : {}) } });
   }
 
   // a disk nothing uses yet: a new one to put to use, or a USB stick with files to copy from

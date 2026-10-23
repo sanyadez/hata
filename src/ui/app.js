@@ -1837,8 +1837,53 @@ function attentionItem(item) {
   const detail = { ...item.detail, free: item.detail.free == null ? "" : bytes(item.detail.free), trash: item.detail.trash == null ? "" : bytes(item.detail.trash), size: item.detail.size == null ? "" : bytes(item.detail.size) };
   const base = "attention." + item.code;
   const open = (href, label = t("common.open")) => h("a", { class: "btn small", href }, label);
+  // the button that does the thing itself: it waits for the answer, says a refusal and looks again
+  const doIt = (label, iconName, work) =>
+    isAdmin() &&
+    button(label, {
+      class: "small primary",
+      onclick: async (e) => {
+        const el = e.currentTarget;
+        el.disabled = true;
+        try {
+          await work(el);
+        } catch (err) {
+          toast(errorText(err), "error");
+        }
+        el.disabled = false;
+        void refresh();
+      },
+    }, iconName);
+  const app = item.app && { name: item.app, title: item.detail.title || item.app };
+  const onMachine = { name: item.detail.name, title: item.detail.title };
+  const away = { id: item.detail.id, name: item.detail.name, pve: item.detail.pveHost ? { host: item.detail.pveHost, id: item.detail.pveGuest, status: item.detail.pveStatus } : null };
+  const runArray = (path, data = {}) => api("POST", "/api/disks/array" + path, data);
   // every button sits under the words, the one that does the thing first: beside them it leaves the words a narrow column
   const below = [
+    item.code === "update" && doIt(t("update.install", { version: item.detail.version }), "up", async () => {
+      await api("POST", "/api/update/install", {});
+      toast(t("update.stage.download"));
+      void followUpdate(item.detail.version);
+    }),
+    (item.code === "restarting" || item.code === "partial") && app && doIt(t("app.restart"), "refresh", () => startAction(app, "restart")),
+    (item.code === "failed.start" || item.code === "failed.update" || item.code === "failed.backup") && app && doIt(t("attention.retry"), "refresh", () => startAction(app, item.code.slice(7))),
+    (item.code === "machine.restarting" || item.code === "machine.partial") && item.detail.name && doIt(t("app.restart"), "refresh", async () => {
+      const res = await api("POST", `/api/machines/${item.detail.id}/apps/${onMachine.name}/restart`, {});
+      jobDialog(res.job, "restart", onMachine.title);
+    }),
+    item.code === "machine.away" && away.pve && doIt(t("pve.startHere", { host: item.detail.pveName }), "play", (el) => startGuestOf(away, el)),
+    item.code === "machine.away" && item.detail.wake === "lan" && doIt(t("machines.wake"), "play", (el) => wakeMachine(away, el)),
+    item.code === "pve.guestDown" && item.detail.guestId && doIt(t("pve.start"), "play", async () => {
+      const r = await api("POST", `/api/proxmox/${item.detail.host}/guests/${item.detail.guestId}/power`, { action: "start" });
+      toast(t(r.done ? "pve.done.start" : "pve.going", { name: item.detail.guest }));
+    }),
+    item.code === "netplace.down" && item.detail.id && doIt(t("attention.reconnect"), "refresh", () => api("POST", `/api/netplaces/${item.detail.id}/retry`, {})),
+    item.code === "share.stopped" && doIt(t("attention.startSamba"), "play", () => api("POST", "/api/shares/tool", {})),
+    item.code === "offsite" && doIt(t("attention.retry"), "refresh", async () => (await api("POST", "/api/backups/offsite/sync", {}), toast(t("attention.started")))),
+    item.code === "array.errors" && doIt(t("array.repair"), "refresh", () => runArray("/repair")),
+    item.code === "array.parityLost" && doIt(t("array.rebuild"), "refresh", () => runArray("/rebuild")),
+    item.code === "array.held" && doIt(t("array.bringBack"), "refresh", () => runArray("/fix")),
+    item.code === "array.failed" && doIt(t("array.syncNow"), "refresh", () => runArray("/sync")),
     item.app && isAdmin() && assistantReady() && button(t("assistant.askWhy"), { class: "small", onclick: () => openAssistant({ ask: t("assistant.whyDown", { title: item.detail.title || item.app, app: item.app }) }) }, "chat"),
     item.code === "docker.missing" && isAdmin() && button(t("docker.install"), { class: "small primary", onclick: () => dockerDialog() }, "download"),
     item.code === "docker.stopped" && isAdmin() && dockerStartButton(),
