@@ -1022,6 +1022,19 @@ body:has(.assistant.paged) > .assistant-fab { display: none; }
 .assistant-form textarea { flex: 1; min-width: 0; resize: none; max-height: 30dvh; field-sizing: content; }
 .ico.spin { animation: spin 1.1s linear infinite; }
 @keyframes spin { to { transform: rotate(360deg); } }
+.update-dialog { width: min(460px, 100%); }
+.update-steps { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 14px; }
+.update-steps li { display: flex; gap: 12px; align-items: flex-start; color: var(--muted); }
+.update-steps li.now, .update-steps li.done, .update-steps li.failed { color: var(--text); }
+.update-steps .grow { display: grid; gap: 6px; min-width: 0; }
+.update-steps .bar { margin: 0; }
+.update-steps .bar i { background: var(--accent); }
+.update-steps li.done .bar i { background: var(--ok); }
+.step-mark { flex: none; display: grid; place-items: center; width: 22px; height: 22px; border-radius: 50%; border: 1.5px solid var(--border); }
+.step-mark .ico { width: 14px; height: 14px; }
+.update-steps li.now .step-mark { border-color: var(--accent); color: var(--accent); }
+.update-steps li.done .step-mark { border-color: var(--ok); background: var(--ok); color: var(--surface); }
+.update-steps li.failed .step-mark { border-color: var(--danger); color: var(--danger); }
 @media (max-width: 760px) {
   .assistant, .assistant.wide { inset: 0; width: auto; height: auto; border: 0; border-radius: 0; z-index: 30; }
   .assistant .wide-only { display: none; }

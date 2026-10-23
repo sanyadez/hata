@@ -116,7 +116,9 @@ interface Found extends Release {
 let latest: Found | null = null;
 let checkedAt = 0;
 let checkError = "";
-let stage: "" | "download" | "restart" = "";
+let stage: "" | "download" | "verify" | "restart" = "";
+/** How much of the new binary has come, while it downloads; `total` is 0 when the server did not say */
+let progress = { got: 0, total: 0 };
 let installError = "";
 
 const FILE = `hata-linux-${process.arch}`;
@@ -138,6 +140,8 @@ export interface UpdateStatus {
   error: string;
   /** What an install started from here is doing right now */
   stage: string;
+  /** Bytes of the new binary downloaded so far, while `stage` is "download" */
+  progress?: { got: number; total: number };
   last: UpdateRecord | null;
   /** The version kept as `hata.previous` that can be put back, when there is one and it is another one */
   previous: string | null;
@@ -161,7 +165,7 @@ function previousVersion(): string | null {
 
 export function updateStatus(): UpdateStatus {
   const release = latest && { version: latest.version, url: latest.url, notes: latest.notes, publishedAt: latest.publishedAt };
-  return { current: VERSION, latest: release, available: !!latest && compareVersions(latest.version, VERSION) > 0, unsupported: unsupported(), checkedAt, error: installError || checkError, stage, last: readRecord(), previous: previousVersion() };
+  return { current: VERSION, latest: release, available: !!latest && compareVersions(latest.version, VERSION) > 0, unsupported: unsupported(), checkedAt, error: installError || checkError, stage, ...(stage === "download" ? { progress: { ...progress } } : {}), last: readRecord(), previous: previousVersion() };
 }
 
 /** The newer version, when there is one — for the hint on the home page */
@@ -243,7 +247,13 @@ export function confirmUpdate(): void {
 async function download(url: string, path: string): Promise<void> {
   const res = await fetch(url, { headers: { "user-agent": `hata/${VERSION}` }, signal: AbortSignal.timeout(15 * 60_000) });
   if (!res.ok) throw new Error(`Download of ${url} failed: ${res.status}`);
-  await Bun.write(path, res);
+  progress = { got: 0, total: Number(res.headers.get("content-length")) || 0 };
+  const out = Bun.file(path).writer();
+  for await (const chunk of res.body!) {
+    out.write(chunk);
+    progress.got += chunk.byteLength;
+  }
+  await out.end();
 }
 
 async function install(release: Found, user: string): Promise<void> {
@@ -256,6 +266,7 @@ async function install(release: Found, user: string): Promise<void> {
     const expected = checksumFor(sumsText, FILE);
     if (!expected) throw new Error(`SHA256SUMS has no entry for ${FILE}`);
     await download(binary, fresh);
+    stage = "verify";
     const hasher = new Bun.CryptoHasher("sha256");
     for await (const chunk of Bun.file(fresh).stream()) hasher.update(chunk);
     if (hasher.digest("hex") !== expected) throw new Error("The download is damaged: its checksum does not match SHA256SUMS");
