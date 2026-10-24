@@ -8,7 +8,7 @@
  * made by Hata from a person's sign-in — then the password is used once and not kept.
  */
 import { createSocket } from "node:dgram";
-import { hostname } from "node:os";
+import { hostname, networkInterfaces } from "node:os";
 import { join } from "node:path";
 import { record } from "./activity";
 import { AppError } from "./apps";
@@ -87,11 +87,19 @@ interface Live {
   registryTimer: Timer | null;
   backupsAt: number;
   closed: boolean;
+  /**
+   * Whether Home Assistant on this server takes Hata as its proxy — Hata opens apps by its own address
+   * through itself, and Home Assistant answers such a request with 400 unless the proxy is trusted:
+   * `ok`, `missing`; "" — not known (not on this server, or the token may not read it)
+   */
+  proxy: "" | "ok" | "missing";
+  /** Hata asked Home Assistant to trust it: the trial config is confirmed once it is back */
+  promote: boolean;
 }
 
 const live = new Map<string, Live>();
 
-const fresh = (): Live => ({ ws: null, next: 1, pending: new Map(), online: false, error: null, ready: false, config: null, states: new Map(), areas: new Map(), devices: new Map(), registry: new Map(), backups: [], backupState: "", backupAgent: "", changed: new Set(), flush: null, retry: null, backoff: RETRY_MIN_MS, ping: null, registryTimer: null, backupsAt: 0, closed: false });
+const fresh = (): Live => ({ ws: null, next: 1, pending: new Map(), online: false, error: null, ready: false, config: null, states: new Map(), areas: new Map(), devices: new Map(), registry: new Map(), backups: [], backupState: "", backupAgent: "", changed: new Set(), flush: null, retry: null, backoff: RETRY_MIN_MS, ping: null, registryTimer: null, backupsAt: 0, closed: false, proxy: "", promote: false });
 const liveOf = (s: Server): Live => live.get(s.id) ?? (live.set(s.id, fresh()), live.get(s.id)!);
 const wsUrl = (url: string) => url.replace(/^http/, "ws") + "/api/websocket";
 
@@ -201,7 +209,46 @@ async function ready(s: Server, l: Live, version: string): Promise<void> {
     if (Date.now() - l.backupsAt > BACKUPS_MS) void readBackups(l);
   }, PING_MS);
   void readBackups(l);
+  await readProxy(s, l);
   bus.publish("ha", { id: s.id, server: true });
+}
+
+/** The proxies Hata's requests come from on this server */
+const LOOPBACK = ["127.0.0.1", "::1"];
+type HttpConf = Record<string, unknown> & { use_x_forwarded_for?: boolean; trusted_proxies?: string[] };
+const trusts = (c: HttpConf | null | undefined) => !!c?.use_x_forwarded_for && (c.trusted_proxies ?? []).some((p) => /^127\.0\.0\.(1|0\/\d+)(\/32)?$/.test(p));
+
+/**
+ * Reads Home Assistant's own HTTP settings (an administrator's token can): whether it trusts Hata as a proxy.
+ * After Hata asked it to, the trial settings it restarted with are confirmed here — or Home Assistant
+ * would go back to the old ones by itself five minutes later.
+ */
+async function readProxy(s: Server, l: Live): Promise<void> {
+  if (!isHere(s.url)) return void (l.proxy = "");
+  try {
+    const c = await call<{ stable: HttpConf; pending: HttpConf | null; active_config_type?: string }>(l, { type: "http/config" });
+    const active = c.active_config_type === "pending" && c.pending ? c.pending : c.stable;
+    if (l.promote && c.active_config_type === "pending" && trusts(c.pending)) {
+      await call(l, { type: "http/config/promote" });
+      l.promote = false;
+    }
+    l.proxy = trusts(active) ? "ok" : "missing";
+  } catch {
+    l.proxy = "";
+  }
+}
+
+/** Home Assistant on this server is asked to trust Hata as its proxy; it restarts to apply it */
+export async function allowProxy(id: string, by: string): Promise<void> {
+  const s = serverOf(id);
+  const l = liveOf(s);
+  if (!isHere(s.url)) throw new AppError("ha.notHere", 400);
+  const c = await call<{ stable: HttpConf }>(l, { type: "http/config" });
+  const { created_at: _, error: __, error_message: ___, ...stable } = c.stable;
+  const proxies = [...new Set([...((stable.trusted_proxies as string[] | undefined) ?? []), ...LOOPBACK])];
+  l.promote = true;
+  await call(l, { type: "http/config/configure", config: { ...stable, use_x_forwarded_for: true, trusted_proxies: proxies } });
+  record("ha.proxy", { user: by, detail: s.name });
 }
 
 async function readRegistry(l: Live): Promise<void> {
@@ -282,6 +329,14 @@ function serverOf(id: string): Server {
   return s;
 }
 
+/** The server is this machine: a page may then open it the way the app's tile does, by Hata's domain */
+function isHere(url: string): boolean {
+  const host = new URL(url).hostname.replace(/^\[|\]$/g, "");
+  if (host === "localhost" || host === "127.0.0.1" || host === "::1") return true;
+  return Object.values(networkInterfaces()).some((list) => (list ?? []).some((a) => a.address === host));
+}
+const portOf = (url: string) => Number(new URL(url).port) || (url.startsWith("https:") ? 443 : 80);
+
 function summary(s: Server) {
   const l = liveOf(s);
   const updates = updatesOf(l.states.values());
@@ -291,11 +346,14 @@ function summary(s: Server) {
     id: s.id,
     name: s.name,
     url: s.url,
+    here: isHere(s.url),
+    port: portOf(s.url),
     online: l.online && l.ready,
     error: l.error && { code: l.error.code, message: l.error.message, since: l.error.since },
     version: l.config?.version ?? "",
     location: l.config?.location ?? "",
     entities: l.states.size,
+    proxy: l.proxy,
     on,
     updates: updates.length,
     low: lowBatteries(l.states.values()).length,
@@ -318,7 +376,7 @@ export function entities(id: string): Shown[] {
 }
 
 /** The servers a user sees tiles of: id, name, address, whether it answers */
-export const visibleTo = (user: { id: string; role: string }) => state.servers.filter((s) => user.role === "admin" || s.people === "all" || (Array.isArray(s.people) && s.people.includes(user.id))).map((s) => ({ id: s.id, name: s.name, url: s.url, online: liveOf(s).online && liveOf(s).ready }));
+export const visibleTo = (user: { id: string; role: string }) => state.servers.filter((s) => user.role === "admin" || s.people === "all" || (Array.isArray(s.people) && s.people.includes(user.id))).map((s) => ({ id: s.id, name: s.name, url: s.url, here: isHere(s.url), port: portOf(s.url), online: liveOf(s).online && liveOf(s).ready }));
 
 /** The states of the tiles asked for (`<server>/<entity>`); null — not known (yet) */
 export function tileStates(keys: string[]): Record<string, Shown | null> {
@@ -335,7 +393,7 @@ export function tileStates(keys: string[]): Record<string, Shown | null> {
 export const homeAssistantTrouble = () =>
   state.servers.flatMap((s) => {
     const l = liveOf(s);
-    return trouble({ id: s.id, name: s.name, error: l.error && { code: l.error.code, since: l.error.since }, ready: l.ready, updates: updatesOf(l.states.values()), low: lowBatteries(l.states.values()) });
+    return trouble({ id: s.id, name: s.name, error: l.error && { code: l.error.code, since: l.error.since }, ready: l.ready, updates: updatesOf(l.states.values()), low: lowBatteries(l.states.values()), proxy: l.proxy === "missing" });
   });
 
 // --- Doing things -----------------------------------------------------------------------------------

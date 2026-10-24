@@ -3633,7 +3633,7 @@
   "ha.pick.added": "Tiles added: {n}",
   "ha.pick.none": "Nothing found.",
   "ha.pick.there": "on Home already",
-  "ha.tile.more": "Controls",
+  "ha.tile.more": "Details",
   "ha.tile.missing": "not in Home Assistant",
   "ha.tile.away": "{name} does not answer",
   "ha.brightness": "Brightness",
@@ -3776,5 +3776,16 @@
   "ha.binary.cold.on": "cold",
   "ha.binary.cold.off": "normal",
   "ha.binary.heat.on": "hot",
-  "ha.binary.heat.off": "normal"
+  "ha.binary.heat.off": "normal",
+  "ha.changedAgo": "changed {ago}",
+  "ha.asked": "set to",
+  "ha.move": "Move…",
+  "ha.proxy.title": "Opened by Hata's address, Home Assistant answers “400: Bad Request”",
+  "ha.proxy.lead": "Hata opens apps by its own address ({address}) and passes the requests on. Home Assistant answers such a request only from a proxy it trusts, and Hata is not one yet. Hata can add itself to the trusted proxies of Home Assistant (Settings → System → Network there); Home Assistant restarts once to apply it, and Hata confirms the new settings when it is back.",
+  "ha.proxy.allow": "Trust Hata",
+  "ha.proxy.asked": "{name} is restarting with the new settings",
+  "attention.ha.proxy.title": "{name} cannot be opened by Hata's address",
+  "attention.ha.proxy.text": "Home Assistant does not trust Hata as its proxy and answers “400: Bad Request”. Hata can set it on the page of Home Assistant.",
+  "activity.ha.proxy": "Home Assistant told to trust Hata as its proxy: {target}",
+  "error.ha.notHere": "This Home Assistant is not on this server."
 }

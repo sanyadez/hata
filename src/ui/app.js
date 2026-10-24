@@ -1266,6 +1266,7 @@ function tile(item) {
         // "Add" offers what it adds, where the pointer is
         if (isAddTile(item)) addDialog({ x: e.clientX, y: e.clientY });
         else if (item.type === "app" && !target.machine) appTileMenu(target, null, { x: e.clientX, y: e.clientY });
+        else if (item.type === "ha") e.currentTarget.querySelector(".tile-open")?.click();
         else tileMenu(item, { x: e.clientX, y: e.clientY });
       }, ondragstart: (e) => e.preventDefault() }, main, side);
 }
@@ -1445,8 +1446,7 @@ function tileMenu(item, point = null) {
     point ? "menu dropdown" : "menu",
     h("header", null, tileIcon(item), h("div", null, h("h2", { class: "clip" }, tileTitle(item)), h("span", { class: "muted small" }, at.folder ? at.folder.title || t("home.folder") : groupName(at.group)))),
     item.type === "link" && entry(t("home.editLink"), "edit", () => linkDialog(item)),
-    item.type === "ha" && haMore(tileTarget(item)?.state) && tileTarget(item).server.online && entry(t("ha.tile.more"), "sliders", () => haControlDialog(item.server, tileTarget(item).state)),
-    item.type === "ha" && tileTarget(item) && entry(t("ha.openThere"), "external", () => window.open(tileTarget(item).server.url, "_blank", "noopener")),
+    item.type === "ha" && tileTarget(item) && entry(t("ha.openThere"), "external", () => window.open(haEntityUrl(tileTarget(item).server, item.entity), "_blank", "noopener")),
     item.type === "folder" && entry(t("common.open"), "folder", () => openFolder(item.id)),
     item.type === "folder" && entry(t("files.rename"), "edit", () => renameFolderDialog(item)),
     neighbour(-1) && entry(t("home.moveEarlier"), "arrow", () => moveTile(key, { before: tileKey(neighbour(-1)) }), "flip"),
@@ -2748,8 +2748,6 @@ function haPrimary(s) {
   if (s.domain === "vacuum") return s.state === "cleaning" ? (a.includes("dock") ? { action: "dock" } : null) : a.includes("start") ? { action: "start" } : null;
   return null;
 }
-/** The entity can do more than its one press: a slider, a number, other buttons */
-const haMore = (s) => !haGone(s) && (s.actions.includes("brightness") || s.actions.includes("temperature") || s.actions.length > 1);
 
 /** A press: Home Assistant is asked, and what it answers is shown at once — its event follows anyway */
 async function haPress(server, s, action, value, el) {
@@ -2809,22 +2807,58 @@ function haEvent(event) {
   }, 600);
 }
 
-/** The controls of one entity: brightness, the temperature asked for, every button it has */
-function haControlDialog(server, s) {
+/** Where a person opens a server: one on this machine as its app's tile does (by Hata's domain), else its address */
+function haWebUrl(x) {
+  if (x?.here) {
+    const app = (state.overview?.apps ?? []).find((a) => Number(a.port) === x.port && appUrl(a));
+    if (app) return appUrl(app).replace(/\/$/, "");
+  }
+  return x?.url ?? "";
+}
+/** Home Assistant opens the card of one entity by this address */
+const haEntityUrl = (x, entity) => `${haWebUrl(x)}/?more-info-entity-id=${encodeURIComponent(entity)}`;
+const haServerOf = (id) => (state.overview?.ha?.servers ?? []).find((x) => x.id === id) ?? (haUi.server?.id === id ? haUi.server : null) ?? (haUi.list?.servers ?? []).find((x) => x.id === id) ?? null;
+
+const HA_BUTTON_ICONS = { open: "up", close: "down", stop: "stop", lock: "lock", unlock: "lock", run: "play", press: "play", playPause: "play", start: "play", dock: "home" };
+
+/**
+ * One entity: its state, what it can do, and — from a tile — where it opens and how the tile is moved or taken
+ * off. Every tile of Home Assistant opens this, whatever the entity is.
+ */
+function haEntityDialog(server, s, item = null) {
   let dialog;
   let now = s;
-  const body = h("div", { class: "stack" });
+  const x = haServerOf(server);
+  const badge = h("span", { class: "app-icon plus" }, icon(haIcon(s)));
+  const sub = h("span", { class: "muted small" });
+  const body = h("div", { class: "stack ha-dialog" });
   const paint = () => {
-    const a = now.actions;
-    const buttons = a.filter((x) => !["brightness", "temperature"].includes(x));
-    const bright = a.includes("brightness") && h("input", { type: "range", min: 0, max: 100, step: 1, value: now.state === "on" ? (now.brightness ?? 100) : 0, "aria-label": t("ha.brightness"), onchange: (e) => haPress(server, now, "brightness", Number(e.target.value)) });
+    const gone = haGone(now) || !x?.online;
+    const a = now ? now.actions : [];
+    const lit = haLit(now);
+    badge.classList.toggle("on", lit);
+    sub.textContent = [now?.area, now?.at ? t("ha.changedAgo", { ago: ago(now.at) }) : null].filter(Boolean).join(" · ");
+    const toggle = a.includes("toggle") && h("button", { type: "button", role: "switch", class: "ha-switch", "aria-checked": String(lit), "aria-label": now.name, disabled: gone, onclick: (e) => haPress(server, now, "toggle", undefined, e.currentTarget) }, h("i"));
+    const level = now?.state === "on" ? (now.brightness ?? 100) : 0;
+    const shown = h("span", { class: "small" }, `${level}%`);
+    const bright = a.includes("brightness") && h("input", { type: "range", min: 0, max: 100, step: 1, value: level, disabled: gone, "aria-label": t("ha.brightness"), oninput: (e) => (shown.textContent = `${e.target.value}%`), onchange: (e) => haPress(server, now, "brightness", Number(e.target.value)) });
+    const step = now?.step ?? 0.5;
     const temp = (delta) => () => haPress(server, now, "temperature", Math.min(now.max ?? 100, Math.max(now.min ?? -50, (now.target ?? now.current ?? 20) + delta)));
+    const others = a.filter((one) => !["toggle", "brightness", "temperature"].includes(one));
+    const main = haPrimary(now)?.action;
     put(
       body,
-      h("p", { class: "ha-big" }, haStateText(now)),
-      bright && h("label", { class: "field" }, h("span", { class: "label" }, t("ha.brightness")), bright),
-      a.includes("temperature") && h("div", { class: "row-actions" }, button("−", { onclick: temp(-(now.step ?? 0.5)), "aria-label": t("ha.colder") }), h("strong", { class: "ha-target" }, now.target != null ? `${haNumber(now.target)}°` : "—"), button("+", { onclick: temp(now.step ?? 0.5), "aria-label": t("ha.warmer") })),
-      buttons.length > 0 && h("div", { class: "row-actions" }, buttons.map((x) => button(t("ha.action." + x), { class: haPrimary(now)?.action === x ? "primary" : "", disabled: haGone(now), onclick: (e) => (x === "unlock" ? haPressAsked(server, now, { action: x, ask: true }) : haPress(server, now, x, undefined, e.currentTarget)) }))),
+      h("div", { class: "ha-now" }, h("p", { class: "ha-big grow" }, x?.online === false ? t("ha.tile.away", { name: x.name }) : a.includes("temperature") ? [now.current != null && `${haNumber(now.current)}°`, haWord(now.state)].filter(Boolean).join(" · ") : haStateText(now)), toggle),
+      bright && h("div", { class: "stack-s" }, h("div", { class: "kv" }, h("span", { class: "label" }, t("ha.brightness")), shown), bright),
+      a.includes("temperature") &&
+        h(
+          "div",
+          { class: "ha-stepper" },
+          h("button", { type: "button", class: "btn", disabled: gone, "aria-label": t("ha.colder"), onclick: temp(-step) }, "−"),
+          h("div", { class: "ha-target" }, h("strong", null, now.target != null ? `${haNumber(now.target)}°` : "—"), h("span", { class: "muted small" }, t("ha.asked"))),
+          h("button", { type: "button", class: "btn", disabled: gone, "aria-label": t("ha.warmer"), onclick: temp(step) }, "+"),
+        ),
+      others.length > 0 && h("div", { class: "ha-buttons" }, others.map((one) => button(t("ha.action." + one), { class: one === main ? "primary" : "", disabled: gone, onclick: (e) => (one === "unlock" ? haPressAsked(server, now, { action: one, ask: true }) : haPress(server, now, one, undefined, e.currentTarget)) }, HA_BUTTON_ICONS[one]))),
     );
   };
   const listener = (id, next, entity) => {
@@ -2832,7 +2866,13 @@ function haControlDialog(server, s) {
   };
   (haUi.listeners ??= new Set()).add(listener);
   paint();
-  dialog = openDialog("", h("header", null, h("span", { class: "app-icon plus" }, icon(haIcon(s))), h("div", { class: "grow" }, h("h2", { class: "clip" }, s.name), s.area && h("span", { class: "muted small" }, s.area)), closeX(() => dialog)), body, h("footer", null, closeButton(() => dialog)));
+  const admin = isAdmin();
+  const links = [
+    admin && x && h("a", { class: "btn small", href: haEntityUrl(x, s.id), target: "_blank", rel: "noopener noreferrer" }, icon("external"), h("span", null, t("ha.openThere"))),
+    admin && item && button(t("ha.move"), { class: "small", onclick: () => (dialog.close(), tileMenu(item)) }, "arrow"),
+    admin && item && button(t("ha.offHome"), { class: "small danger", onclick: () => (dialog.close(), changeLayout((next) => void takeTile(next, tileKey(item)))) }, "trash"),
+  ].filter(Boolean);
+  dialog = openDialog("ha-entity", h("header", null, badge, h("div", { class: "grow" }, h("h2", { class: "clip" }, s.name), sub), closeX(() => dialog)), body, links.length > 0 && h("footer", { class: "ha-links" }, links));
   dialog.addEventListener("close", () => haUi.listeners.delete(listener));
 }
 
@@ -2850,11 +2890,11 @@ function haTile(item, target, title) {
   const primary = online ? haPrimary(s) : null;
   const cls = !online || haGone(s) ? "stopped" : haLit(s) ? "on" : "";
   const sub = online ? haStateText(s) : t("ha.tile.away", { name: target.server.name });
-  const side = online && haMore(s) && h("button", { type: "button", class: "tile-open", title: t("ha.tile.more"), "aria-label": `${t("ha.tile.more")}: ${title}`, onclick: () => haControlDialog(item.server, s) }, icon("sliders"));
+  // every tile of Home Assistant has the same button: the entity's own window
+  const side = h("button", { type: "button", class: "tile-open", title: t("ha.tile.more"), "aria-label": `${t("ha.tile.more")}: ${title}`, onclick: () => haEntityDialog(item.server, s ?? { id: item.entity, name: title, domain: item.entity.split(".")[0], state: "unavailable", actions: [] }, item) }, icon("more"));
   const content = [tileIcon(item), h("span", { class: "tile-text" }, h("span", { class: "tile-top" }, h("span", { class: "tile-name" }, title)), h("span", { class: "tile-sub" }, sub))];
-  const main = primary
-    ? h("button", { type: "button", class: "tile-main", title: t("ha.action." + primary.action), onclick: (e) => homeUi.drag?.moved || haPressAsked(item.server, s, primary, e.currentTarget) }, content)
-    : h("div", { class: "tile-main" }, content);
+  // a press does what the entity is for; one with nothing to press (a sensor) opens its window
+  const main = h("button", { type: "button", class: "tile-main", title: primary ? t("ha.action." + primary.action) : t("ha.tile.more"), onclick: (e) => homeUi.drag?.moved || (primary ? haPressAsked(item.server, s, primary, e.currentTarget) : side.click()) }, content);
   return { cls, main, side };
 }
 
@@ -2997,7 +3037,7 @@ function renderHaBody() {
         { class: "app-head", menu: (at) => haMenu(x, at) },
         h("span", { class: "machine-icon" }, icon("home")),
         h("div", { class: "grow" }, h("div", { class: "app-title" }, h("h1", null, x.name), haChip(x)), h("p", { class: "meta" }, ["Home Assistant " + (x.version || ""), x.url, x.location && x.location !== x.name ? x.location : null].filter(Boolean).flatMap((part, i) => (i ? [h("span", { class: "dot-sep" }, "·"), part] : [part])))),
-        h("div", { class: "actions" }, h("a", { class: "btn primary", href: x.url, target: "_blank", rel: "noopener noreferrer" }, icon("external"), h("span", null, t("ha.open"))), h("button", { type: "button", class: "btn square", "aria-label": t("app.more"), onclick: () => haMenu(x) }, icon("more"))),
+        h("div", { class: "actions" }, h("a", { class: "btn primary", href: haWebUrl(x), target: "_blank", rel: "noopener noreferrer" }, icon("external"), h("span", null, t("ha.open"))), h("button", { type: "button", class: "btn square", "aria-label": t("app.more"), onclick: () => haMenu(x) }, icon("more"))),
       ),
       h("div", { class: "tabs" }, tab("overview", "grid"), tab("devices", "bulb")),
     ),
@@ -3035,6 +3075,7 @@ function haOverview(x) {
   return h(
     "div",
     { class: "stack" },
+    x.proxy === "missing" && haProxyCard(x),
     h("div", { class: "card pad stack-s" }, h("div", { class: "section-head" }, h("h2", null, t("ha.updates"))), x.updates.length ? x.updates.map(update) : h("p", { class: "muted small" }, x.online ? t("ha.noUpdates") : "—")),
     x.low.length > 0 && h("div", { class: "card pad stack-s" }, h("div", { class: "section-head" }, h("h2", null, t("ha.batteries"))), x.low.map((b) => h("div", { class: "tool" }, h("span", { class: "app-icon plus sm" }, icon("battery")), h("div", { class: "grow" }, h("strong", null, b.name)), h("span", { class: "state restarting" }, b.level == null ? t("ha.batteryLowWord") : `${b.level}%`)))),
     h(
@@ -3055,6 +3096,28 @@ function haOverview(x) {
       x.backups.length ? h("div", { class: "table-wrap" }, h("table", null, h("thead", null, h("tr", null, h("th", null, t("ha.backup.name")), h("th", null, t("ha.backup.when")), h("th", null, t("ha.backup.size")))), h("tbody", null, x.backups.map((b) => h("tr", null, h("td", null, b.name, b.automatic && h("span", { class: "muted small" }, " · " + t("ha.backup.auto"))), h("td", null, new Date(b.date).toLocaleString(state.lang)), h("td", null, b.size ? bytes(b.size) : "—")))))) : h("p", { class: "muted small" }, x.online ? t("ha.noBackups") : "—"),
     ),
     haPeopleCard(x),
+  );
+}
+
+/** Home Assistant on this server does not take Hata as its proxy: opened by Hata's address it answers 400 */
+function haProxyCard(x) {
+  const app = (state.overview?.apps ?? []).find((a) => Number(a.port) === x.port && appUrl(a));
+  return h(
+    "div",
+    { class: "card pad stack-s warn-box" },
+    h("strong", null, t("ha.proxy.title")),
+    h("p", { class: "small" }, t("ha.proxy.lead", { address: app ? appAddress(app) : location.host })),
+    h("div", { class: "row-actions" }, button(t("ha.proxy.allow"), { class: "small primary", disabled: !x.online, onclick: async (e) => {
+        const b = e.currentTarget;
+        b.disabled = true;
+        try {
+          await api("POST", `/api/ha/${x.id}/proxy`, {});
+          toast(t("ha.proxy.asked", { name: x.name }));
+        } catch (err) {
+          toast(errorText(err), "error");
+          b.disabled = false;
+        }
+      } }, "check")),
   );
 }
 
@@ -3096,10 +3159,10 @@ function haRow(server, s) {
       "div",
       { class: "row-actions" },
       primary && button(t("ha.action." + primary.action), { class: "small", onclick: (e) => haPressAsked(server, s, primary, e.currentTarget) }),
-      haMore(s) && button(null, { class: "small square", title: t("ha.tile.more"), "aria-label": `${t("ha.tile.more")}: ${s.name}`, onclick: () => haControlDialog(server, s) }, "sliders"),
+      button(null, { class: "small square", title: t("ha.tile.more"), "aria-label": `${t("ha.tile.more")}: ${s.name}`, onclick: () => haEntityDialog(server, s) }, "more"),
       haOnHome(server, s.id)
-        ? button(null, { class: "small square active", title: t("ha.offHome"), "aria-label": `${t("ha.offHome")}: ${s.name}`, onclick: () => haHome(server, s.id, false) }, "star")
-        : button(null, { class: "small square", title: t("ha.onHome"), "aria-label": `${t("ha.onHome")}: ${s.name}`, onclick: () => haHome(server, s.id, true) }, "star"),
+        ? button(null, { class: "small square active", title: t("ha.offHome"), "aria-pressed": "true", "aria-label": `${t("ha.offHome")}: ${s.name}`, onclick: () => haHome(server, s.id, false) }, "star")
+        : button(null, { class: "small square", title: t("ha.onHome"), "aria-pressed": "false", "aria-label": `${t("ha.onHome")}: ${s.name}`, onclick: () => haHome(server, s.id, true) }, "star"),
     ),
   );
 }
@@ -3160,7 +3223,7 @@ function haMenu(x, at = null) {
   dialog = openDialog(
     at ? "menu dropdown" : "menu",
     h("header", null, h("span", { class: "machine-icon" }, icon("home")), h("div", null, h("h2", null, x.name), haChip(x))),
-    item(t("ha.open"), "external", () => window.open(x.url, "_blank", "noopener")),
+    item(t("ha.open"), "external", () => window.open(haWebUrl(x), "_blank", "noopener")),
     item(t("ha.change"), "edit", () => haDialog(x)),
     item(t("ha.remove"), "trash", () => removeHaDialog(x), "danger"),
   );

@@ -257,6 +257,8 @@ export interface Watched {
   ready: boolean;
   updates: Update[];
   low: { entity: string; name: string; level: number | null }[];
+  /** On this server, and it does not take Hata as its proxy: opened by Hata's address it answers 400 */
+  proxy?: boolean;
 }
 
 export function trouble(h: Watched, now = Date.now()): AttentionItem[] {
@@ -272,6 +274,7 @@ export function trouble(h: Watched, now = Date.now()): AttentionItem[] {
     // a new version is news: the latest one decides when it "happened"
     items.push({ id: `ha:${h.id}:updates`, severity: "warn", code: "ha.updates", detail: { ...base, n: h.updates.length, update: first.title || first.name, version: first.latest }, at: Math.max(...h.updates.map((u) => u.at)) || undefined });
   }
+  if (h.proxy) items.push({ id: `ha:${h.id}:proxy`, severity: "warn", code: "ha.proxy", detail: base });
   for (const b of h.low) items.push({ id: `ha:${h.id}:battery:${b.entity}`, severity: "warn", code: b.level === null ? "ha.batteryLow" : "ha.battery", detail: { ...base, device: b.name, level: b.level ?? "" } });
   return items.map((item) => (item.at === undefined ? (delete item.at, item) : item));
 }

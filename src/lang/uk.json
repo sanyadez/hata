@@ -3633,7 +3633,7 @@
   "ha.pick.added": "Додано плиток: {n}",
   "ha.pick.none": "Нічого не знайдено.",
   "ha.pick.there": "уже на Головній",
-  "ha.tile.more": "Керування",
+  "ha.tile.more": "Докладно",
   "ha.tile.missing": "немає в Home Assistant",
   "ha.tile.away": "{name} не відповідає",
   "ha.brightness": "Яскравість",
@@ -3776,5 +3776,16 @@
   "ha.binary.cold.on": "холодно",
   "ha.binary.cold.off": "норма",
   "ha.binary.heat.on": "гаряче",
-  "ha.binary.heat.off": "норма"
+  "ha.binary.heat.off": "норма",
+  "ha.changedAgo": "змінилося {ago}",
+  "ha.asked": "задано",
+  "ha.move": "Перемістити…",
+  "ha.proxy.title": "За адресою Хати Home Assistant відповідає «400: Bad Request»",
+  "ha.proxy.lead": "Хата відкриває застосунки за своєю адресою ({address}) і передає запити далі. Home Assistant відповідає на такий запит лише від проксі, якому довіряє, а Хата ним ще не є. Хата може додати себе до довірених проксі Home Assistant (там: Налаштування → Система → Мережа); Home Assistant один раз перезапуститься, щоб застосувати це, а Хата підтвердить нові налаштування, коли він повернеться.",
+  "ha.proxy.allow": "Довіряти Хаті",
+  "ha.proxy.asked": "{name} перезапускається з новими налаштуваннями",
+  "attention.ha.proxy.title": "{name} не відкривається за адресою Хати",
+  "attention.ha.proxy.text": "Home Assistant не довіряє Хаті як проксі й відповідає «400: Bad Request». Хата може це налаштувати на сторінці Home Assistant.",
+  "activity.ha.proxy": "Home Assistant довіряє Хаті як проксі: {target}",
+  "error.ha.notHere": "Цей Home Assistant не на цьому сервері."
 }

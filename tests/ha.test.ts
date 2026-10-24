@@ -124,3 +124,8 @@ test("what is worth the person's attention", () => {
     { id: "ha:8bf90303:battery:binary_sensor.r", severity: "warn", code: "ha.batteryLow", detail: { host: "8bf90303", name: "Home", device: "R", level: "" } },
   ]);
 });
+
+test("Home Assistant on this server that does not trust Hata as its proxy is worth a line", () => {
+  const items = trouble({ id: "8bf90303", name: "Home", error: null, ready: true, updates: [], low: [], proxy: true });
+  expect(items).toEqual([{ id: "ha:8bf90303:proxy", severity: "warn", code: "ha.proxy", detail: { host: "8bf90303", name: "Home" } }]);
+});
