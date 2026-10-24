@@ -85,9 +85,11 @@ import {
   sessionUser,
   setupToken,
 } from "./auth";
-import { bus } from "./bus";
+import { bus, type BusEvent } from "./bus";
 import { DATA_DIR, dropOldSecrets, listenAddress, saveSettings, settings, timezone, updateSettings } from "./config";
-import { arrange, cleanLayout, layoutText, parseLayoutText } from "./dashboard";
+import { arrange, cleanLayout, dropServer, haTiles, layoutText, parseLayoutText } from "./dashboard";
+import { act as haAct, addServer as addHa, changeServer as changeHa, discover as discoverHa, entities as haEntities, forgetUser as haForgetUser, homeAssistantTrouble, installUpdate as haInstallUpdate, makeBackup as haMakeBackup, removeServer as removeHa, server as haServer, servers as haServers, startHomeAssistant, tileStates as haTileStates, visibleTo as haVisibleTo } from "./homeassistant";
+import { sees as haSees } from "./ha";
 import { dockerInfo, listContainers, watchEvents } from "./docker";
 import { abortUpload, copyIn, locate, validName, archivePlan, dropFavorites, emptyTrash, favoritesOf, setFavorite, extract as extractArchive, find as findFiles, list as listFiles, makeFile, makeFolder, pinFolder, pinnedFolders, readable, readText, remove as removeFiles, rename as renameFile, restore as restoreFiles, setTrashDays, startTrash, summary as filesSummary, transfer, trash, upload, writeText } from "./files";
 import { adoptProject, casaosState, containerDraft, importCount, importList, moveInCasaos, projectDraft, rebuildContainer } from "./import";
@@ -324,6 +326,8 @@ export function memberMay(method: string, path: string, role: Role = "member"): 
   if (path.startsWith("/api/account/")) return role !== "guest";
   // the folders shared with them; what they may do inside is `memberFiles`'s to say
   if (path === "/api/files" || path.startsWith("/api/files/") || /^\/api\/machines\/[a-f0-9]{8}\/files(\/|$)/.test(path)) return true;
+  // a press on a tile of Home Assistant: whether this one may is `haAllowed`'s to say
+  if (method === "POST" && /^\/api\/ha\/[a-f0-9]{8}\/act$/.test(path)) return true;
   if (method !== "GET") return false;
   if (["/api/events", "/api/overview", "/api/apps"].includes(path) || /^\/api\/apps\/[a-z0-9_-]+(\/(stats|icon))?$/.test(path)) return true;
   return role === "member" && (path === "/api/store" || /^\/api\/store\/[a-z0-9-]+\/apps\/[a-z0-9_-]+$/.test(path));
@@ -332,7 +336,19 @@ export function memberMay(method: string, path: string, role: Role = "member"): 
 /** Events a member's page receives: job output and the activity log are not for them */
 const MEMBER_EVENTS = new Set(["system", "apps", "store"]);
 
-function events(req: Request, server: Server, admin: boolean): Response {
+/**
+ * What of an event of Home Assistant a member's page is told: the states of the tiles on the home page,
+ * of the servers they see; null — nothing.
+ */
+function haEventFor(user: User, event: BusEvent): BusEvent | null {
+  const server = haServers().find((s) => s.id === event.id);
+  if (!server || !haSees(server.people, { id: user.id, role: "member" }) || !event.states) return null;
+  const tiled = new Set(haTiles(settings.dashboard).filter((key) => key.startsWith(server.id + "/")).map((key) => key.slice(9)));
+  const states = Object.fromEntries(Object.entries(event.states as Record<string, unknown>).filter(([entity]) => tiled.has(entity)));
+  return Object.keys(states).length ? { type: "ha", ts: event.ts, id: event.id, states } : null;
+}
+
+function events(req: Request, server: Server, admin: boolean, user: User): Response {
   // an event stream is silent for long stretches; the default idle timeout would cut it
   server.timeout(req, 0);
   const encoder = new TextEncoder();
@@ -353,6 +369,10 @@ function events(req: Request, server: Server, admin: boolean): Response {
       };
       unsubscribe = bus.subscribe((event) => {
         if (admin || MEMBER_EVENTS.has(event.type)) send(`data: ${JSON.stringify(event)}\n\n`);
+        else if (event.type === "ha") {
+          const own = haEventFor(user, event);
+          if (own) send(`data: ${JSON.stringify(own)}\n\n`);
+        }
       });
       heartbeat = setInterval(() => send(": ping\n\n"), 25_000);
       req.signal.addEventListener("abort", close, { once: true });
@@ -884,6 +904,7 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
     if (error) return fail(error === "users.notFound" ? 404 : 400, error);
     dropUser(target[1]!);
     dropFavorites(target[1]!);
+    haForgetUser(target[1]!);
     record("users.remove", { user: user.name, detail: name });
     return json({ ok: true });
   }
@@ -1027,7 +1048,7 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
     return json({ apps: [...apps, ...(await machineAccessRows(language(url)).catch(() => []))], users: listUsers().map(({ id, name, role }) => ({ id, name, role })) });
   }
 
-  if (path === "/api/events" && method === "GET") return events(req, server, admin);
+  if (path === "/api/events" && method === "GET") return events(req, server, admin, user);
 
   if (path === "/api/overview" && method === "GET") {
     const [docker, all, containers, everywhere] = await Promise.all([dockerInfo(), listApps(language(url)), admin ? listContainers().catch(() => []) : [], user.role === "guest" && !Object.keys(settings.access).some((k) => k.includes("@")) ? [] : machineTiles(machineList(), language(url))]);
@@ -1035,6 +1056,8 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
     const onMachines = everywhere.filter((app) => mayOpen(user, app.key));
     const apps = all.filter((app) => mayOpen(user, app.name));
     const system = systemStatus();
+    const haSeen = haVisibleTo(admin ? user : { id: user.id, role: "member" });
+    let dashboard;
     return json({
       system,
       docker,
@@ -1044,7 +1067,7 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
       site: { domain: siteDomain(), mode: settings.https.mode, local: localDomain() },
       // whether the assistant can be asked: the pages offer it next to what is wrong
       assistant: admin && assistantReady(assistantConfig()),
-      attention: admin ? notSnoozed(attention({ system, docker, apps, activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), exposed: exposedNics(), array: arrayTrouble(), shares: shareTrouble(), places: placesDown(), machines: awayMachines(), machineApps: onMachines, unused: unusedDisks(), filling: fillingUp(), pve: proxmoxTrouble() })) : [],
+      attention: admin ? notSnoozed(attention({ system, docker, apps, activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), exposed: exposedNics(), array: arrayTrouble(), shares: shareTrouble(), places: placesDown(), machines: awayMachines(), machineApps: onMachines, unused: unusedDisks(), filling: fillingUp(), pve: proxmoxTrouble(), ha: homeAssistantTrouble() })) : [],
       // who signed in from where, and what was installed by whom, is the administrators' business
       activity: admin ? recent(8) : [],
       // containers and compose projects on this machine that are not apps here yet
@@ -1055,7 +1078,9 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
       machineApps: onMachines,
       // the other machines and their numbers, for their blocks on the dashboard
       machines: admin ? machineList().map((m) => ({ id: m.id, name: m.name, online: m.online, seen: m.seen, os: [m.info?.os, m.info?.arch].filter(Boolean).join(" · "), status: m.status })) : [],
-      dashboard: arrange(settings.dashboard, [...apps.map((app) => app.name), ...onMachines.map((app) => app.key)], admin ? settings.folders : [], admin ? ["store", "add"] : user.role === "guest" ? [] : ["store"]),
+      dashboard: (dashboard = arrange(settings.dashboard, [...apps.map((app) => app.name), ...onMachines.map((app) => app.key)], admin ? settings.folders : [], admin ? ["store", "add"] : user.role === "guest" ? [] : ["store"], haSeen.map((s) => s.id))),
+      // Home Assistant: the servers this user sees, and the states of the tiles on the page
+      ha: { servers: haSeen, states: haTileStates(haTiles(dashboard)) },
       jobs: admin ? listJobs().filter((j) => j.status === "running").map(({ log: _, ...job }) => job) : [],
     });
   }
@@ -1696,6 +1721,12 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
     return json({ ok: true });
   }
 
+  // ---- Home Assistant: a press on a tile (members too), the rest for administrators ----
+  if (path.startsWith("/api/ha")) {
+    const response = await homeAssistantApi(req, url, server, user);
+    if (response) return response;
+  }
+
   // ---- Proxmox servers (administrators only) ----
   if (path.startsWith("/api/proxmox")) {
     const response = await proxmoxApi(req, url, server, user.name);
@@ -2278,6 +2309,53 @@ async function machineFiles(req: Request, url: URL, server: Server, id: string, 
   return fail(404, "request.notFound");
 }
 
+async function homeAssistantApi(req: Request, url: URL, server: Server, user: User): Promise<Response | null> {
+  const path = url.pathname;
+  const method = req.method;
+  const by = user.name;
+  const m = /^\/api\/ha\/([a-f0-9]{8})(\/.*)?$/.exec(path);
+  if (m && m[2] === "/act" && method === "POST") {
+    const data = await body(req);
+    // a member presses only what an administrator put on the home page, of a server they see
+    if (user.role !== "admin" || mustSetUpTwoFactor(user)) {
+      const seen = haVisibleTo({ id: user.id, role: "member" }).some((s) => s.id === m[1]);
+      if (!seen || !haTiles(settings.dashboard).includes(`${m[1]}/${String(data.entity)}`)) return fail(403, "auth.forbidden");
+    }
+    return json(await haAct(m[1]!, data.entity, data.action, data.value));
+  }
+  if (path === "/api/ha" && method === "GET") return json({ servers: haServers() });
+  if (path === "/api/ha" && method === "POST") {
+    server.timeout(req, 60);
+    return json(await addHa(await body(req), by), 201);
+  }
+  if (path === "/api/ha/found" && method === "GET") return json({ found: await discoverHa() });
+  if (!m) return null;
+  const id = m[1]!;
+  const rest = m[2] ?? "";
+  if (rest === "" && method === "GET") return json(haServer(id));
+  if (rest === "" && method === "PATCH") {
+    server.timeout(req, 60);
+    return json(await changeHa(id, await body(req), by));
+  }
+  if (rest === "" && method === "DELETE") {
+    removeHa(id, by);
+    settings.dashboard = dropServer(settings.dashboard, id);
+    saveSettings();
+    return json({ ok: true });
+  }
+  if (rest === "/entities" && method === "GET") return json({ entities: haEntities(id) });
+  if (rest === "/backups" && method === "POST") {
+    await haMakeBackup(id, by);
+    return json({ ok: true }, 202);
+  }
+  if (rest === "/updates" && method === "POST") {
+    const data = await body(req);
+    await haInstallUpdate(id, data.entity, data.backup, by);
+    return json({ ok: true }, 202);
+  }
+  return null;
+}
+
 async function proxmoxApi(req: Request, url: URL, server: Server, by: string): Promise<Response | null> {
   const path = url.pathname;
   const method = req.method;
@@ -2672,6 +2750,7 @@ export async function serve(): Promise<void> {
   startSampler(() => settings.dataRoot);
   startMachines();
   startProxmox();
+  startHomeAssistant();
   startMachineUsers();
   startMachineGates();
   startDisks();
@@ -2699,7 +2778,7 @@ export async function serve(): Promise<void> {
   void refreshHttps();
   refreshLocalNames();
   startNotifications({
-    attention: async () => notSnoozed(attention({ system: systemStatus(), docker: await dockerInfo(), apps: await listApps("en"), activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), exposed: exposedNics(), array: arrayTrouble(), shares: shareTrouble(), places: placesDown(), machines: awayMachines(), machineApps: await machineTiles(machineList(), "en").catch(() => []), unused: unusedDisks(), filling: fillingUp(), pve: proxmoxTrouble() })),
+    attention: async () => notSnoozed(attention({ system: systemStatus(), docker: await dockerInfo(), apps: await listApps("en"), activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), exposed: exposedNics(), array: arrayTrouble(), shares: shareTrouble(), places: placesDown(), machines: awayMachines(), machineApps: await machineTiles(machineList(), "en").catch(() => []), unused: unusedDisks(), filling: fillingUp(), pve: proxmoxTrouble(), ha: homeAssistantTrouble() })),
     baseUrl: publicUrl,
     isAdmin: (id) => findUser(id)?.role === "admin",
   });

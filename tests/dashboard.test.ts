@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { arrange, cleanLayout, cleanWidgets, layoutText, movePath, parseLayoutText, webUrl } from "../src/dashboard";
+import { arrange, cleanLayout, cleanWidgets, dropServer, haTiles, layoutText, movePath, parseLayoutText, webUrl } from "../src/dashboard";
 
 const link = (title: string, url = "https://example.com/") => ({ type: "link", id: title.toLowerCase(), title, url, icon: "" });
 
@@ -159,4 +159,24 @@ test("an app of another machine is a tile of its own, `<name>@<machine>`", () =>
   expect(layout.groups[0]!.items).toEqual([{ type: "app", name: "memos@1a2b3c4d" }, { type: "app", name: "memos" }]);
   const shown = arrange(layout, ["memos", "memos@1a2b3c4d", "kuma@1a2b3c4d"], []);
   expect(shown.groups[0]!.items.map((item) => (item.type === "app" ? item.name : item.type))).toEqual(["memos@1a2b3c4d", "memos", "kuma@1a2b3c4d"]);
+});
+
+test("tiles of Home Assistant: kept while their server is seen, also when it does not answer", () => {
+  const layout = cleanLayout({
+    groups: [{ id: "main", title: "", items: [
+      { type: "ha", server: "8bf90303", entity: "light.bed" },
+      { type: "ha", server: "8bf90303", entity: "light.bed" },
+      { type: "ha", server: "8bf90303", entity: "not an entity" },
+      { type: "ha", server: "nope", entity: "light.bed" },
+      { type: "folder", id: "f", title: "Kitchen", items: [{ type: "ha", server: "aaaaaaaa", entity: "switch.kettle" }] },
+      { type: "app", name: "memos" },
+    ] }],
+  });
+  expect(haTiles(layout)).toEqual(["8bf90303/light.bed", "aaaaaaaa/switch.kettle"]);
+  // a member who sees only the first server; nothing of Home Assistant is added by itself
+  const seen = arrange(layout, ["memos"], [], [], ["8bf90303"]);
+  expect(seen.groups[0]!.items).toEqual([{ type: "ha", server: "8bf90303", entity: "light.bed" }, { type: "app", name: "memos" }]);
+  expect(arrange(layout, ["memos"], []).groups[0]!.items).toEqual([{ type: "app", name: "memos" }]);
+  const left = dropServer(layout, "aaaaaaaa");
+  expect(haTiles(left)).toEqual(["8bf90303/light.bed"]);
 });

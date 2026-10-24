@@ -297,6 +297,16 @@ textarea.code.page { min-height: 60dvh; background: var(--surface); padding: 16p
 .tile.stopped .app-icon { opacity: 0.45; }
 .tile.stopped .tile-name { color: var(--muted); }
 .tile.add { border-style: dashed; }
+/* an entity of Home Assistant that is on: a light, a switch, an open window */
+.tile.kind-ha.on .app-icon.plus, .ha-row.on .app-icon.plus { background: var(--accent); color: #fff; }
+.tile.kind-ha .tile-main:is(div) { cursor: default; }
+.ha-big { font: 600 22px var(--font-heading); }
+.ha-target { min-width: 64px; text-align: center; font: 600 20px var(--font-heading); font-variant-numeric: tabular-nums; }
+.ha-state { white-space: nowrap; color: var(--muted); }
+.ha-pick { display: grid; gap: 14px; max-height: min(60vh, 520px); overflow-y: auto; }
+.ha-pick-row { align-items: center; }
+.ha-people { padding-left: 26px; }
+.ha-found .chip-btn { max-width: none; }
 button.tile { padding: 0; font: inherit; color: inherit; text-align: left; cursor: pointer; }
 .tile-main { flex: 1; display: flex; align-items: center; gap: 10px; padding: 14px 12px; min-width: 0; border-radius: var(--radius-md); }
 .tile-text { display: grid; gap: 3px; min-width: 0; }
