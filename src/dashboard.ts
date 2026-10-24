@@ -10,6 +10,8 @@ export type Entry =
   | { type: "app"; name: string }
   | { type: "link"; id: string; title: string; url: string; icon: string }
   | { type: "files"; path: string }
+  /** An entity of a Home Assistant server Hata is connected to: a light, a switch, a sensor */
+  | { type: "ha"; server: string; entity: string }
   /** A tile of Hata's own, which can be moved but not taken off: the store, the "Add" tile */
   | { type: "builtin"; id: string };
 
@@ -88,6 +90,8 @@ const MAX_URL = 2000;
 const ID_RE = /^[a-z0-9-]{1,40}$/;
 /** An app of this server, or `<name>@<machine>` — an app of another machine */
 const APP_RE = /^[a-z0-9_-]{1,64}(@[a-f0-9]{8})?$/;
+const SERVER_RE = /^[a-f0-9]{8}$/;
+const ENTITY_RE = /^[a-z0-9_]{1,64}\.[a-z0-9_]{1,200}$/;
 
 const isObject = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
 const text = (value: unknown, max: number) => (typeof value === "string" ? value.replace(/\s+/g, " ").trim().slice(0, max) : "");
@@ -125,6 +129,7 @@ export function cleanLayout(input: unknown): Layout {
     // "Add" is a doorway, not a thing to keep in a folder
     if (raw.type === "builtin" && typeof raw.id === "string" && (BUILTINS as readonly string[]).includes(raw.id) && !(inFolder && raw.id === "add") && once("builtin " + raw.id)) made = { type: "builtin", id: raw.id };
     if (raw.type === "app" && typeof raw.name === "string" && APP_RE.test(raw.name) && once("app " + raw.name)) made = { type: "app", name: raw.name };
+    if (raw.type === "ha" && typeof raw.server === "string" && SERVER_RE.test(raw.server) && typeof raw.entity === "string" && ENTITY_RE.test(raw.entity) && once(`ha ${raw.server}/${raw.entity}`)) made = { type: "ha", server: raw.server, entity: raw.entity };
     if (raw.type === "files" && typeof raw.path === "string" && raw.path.startsWith("/") && raw.path.length <= 4096 && once("files " + raw.path)) made = { type: "files", path: raw.path };
     if (raw.type === "link") {
       const url = webUrl(raw.url);
@@ -172,11 +177,12 @@ export function cleanLayout(input: unknown): Layout {
  * open) are left out, and those not placed yet come at the end of the first group — a newly installed app
  * needs no arranging to show up. `builtins` are Hata's own tiles this user has: they are always there.
  */
-export function arrange(layout: Layout, apps: string[], folders: string[], builtins: string[] = []): Layout {
+export function arrange(layout: Layout, apps: string[], folders: string[], builtins: string[] = [], servers: string[] = []): Layout {
   const there = new Set([...apps.map((name) => "app " + name), ...folders.map((path) => "files " + path), ...builtins.map((id) => "builtin " + id)]);
-  const key = (e: Entry) => (e.type === "app" ? "app " + e.name : e.type === "files" ? "files " + e.path : e.type === "builtin" ? "builtin " + e.id : "");
+  const key = (e: Entry) => (e.type === "app" ? "app " + e.name : e.type === "files" ? "files " + e.path : e.type === "builtin" ? "builtin " + e.id : e.type === "ha" ? `ha ${e.server}/${e.entity}` : "");
   const placed = new Set<string>();
-  const keep = (e: Entry) => e.type === "link" || (there.has(key(e)) && !!placed.add(key(e)));
+  // a tile of Home Assistant stays while its server is one this user sees — also while it does not answer
+  const keep = (e: Entry) => e.type === "link" || (e.type === "ha" ? servers.includes(e.server) && !!placed.add(key(e)) : there.has(key(e)) && !!placed.add(key(e)));
 
   const groups = layout.groups.map((group): Group => ({
     ...group,
@@ -202,4 +208,18 @@ export function movePath(layout: Layout, from: string, to: string | null): Layou
   const inside = (path: string) => path === from || path.startsWith(from.endsWith("/") ? from : from + "/");
   const entry = (e: Entry): Entry[] => (e.type !== "files" || !inside(e.path) ? [e] : to === null ? [] : [{ type: "files", path: to + e.path.slice(from.length) }]);
   return cleanLayout({ widgets: layout.widgets, groups: layout.groups.map((group) => ({ ...group, items: group.items.flatMap((item) => (item.type === "folder" ? [{ ...item, items: item.items.flatMap(entry) }] : entry(item))) })) });
+}
+
+/** The Home Assistant entities the layout shows, as `<server>/<entity>` */
+export function haTiles(layout: Layout): string[] {
+  const out: string[] = [];
+  const take = (e: Entry) => e.type === "ha" && out.push(`${e.server}/${e.entity}`);
+  for (const group of layout.groups) for (const item of group.items) item.type === "folder" ? item.items.forEach(take) : take(item);
+  return out;
+}
+
+/** The layout without the tiles of a Home Assistant server that was removed */
+export function dropServer(layout: Layout, server: string): Layout {
+  const keep = (e: Entry) => !(e.type === "ha" && e.server === server);
+  return cleanLayout({ widgets: layout.widgets, groups: layout.groups.map((group) => ({ ...group, items: group.items.flatMap((item) => (item.type === "folder" ? [{ ...item, items: item.items.filter(keep) }] : keep(item) ? [item] : [])) })) });
 }

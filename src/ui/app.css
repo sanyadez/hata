@@ -297,6 +297,35 @@ textarea.code.page { min-height: 60dvh; background: var(--surface); padding: 16p
 .tile.stopped .app-icon { opacity: 0.45; }
 .tile.stopped .tile-name { color: var(--muted); }
 .tile.add { border-style: dashed; }
+/* an entity of Home Assistant that is on: a light, a switch, an open window */
+.tile.kind-ha.on .app-icon.plus, .ha-row.on .app-icon.plus, .app-icon.plus.on { background: var(--accent); color: #fff; }
+.ha-pick { display: grid; gap: 14px; max-height: min(60vh, 520px); overflow-y: auto; }
+.ha-pick-row { align-items: center; }
+.ha-people { padding-left: 26px; }
+.ha-found .chip-btn { max-width: none; }
+.tool.ha-row { align-items: center; }
+.ha-state { white-space: nowrap; color: var(--muted); }
+.ha-row .btn.square.active { border-color: var(--accent); color: var(--accent-text); }
+.ha-row .btn.square.active .ico { fill: currentColor; }
+/* the window of one entity */
+dialog.ha-entity { width: min(580px, calc(100vw - 32px)); }
+.ha-dialog { gap: 18px; }
+.ha-now { display: flex; align-items: center; gap: 16px; min-height: 34px; }
+.ha-big { margin: 0; font: 600 22px/1.25 var(--font-heading); }
+.ha-switch { position: relative; flex: none; width: 52px; height: 30px; padding: 0; border: 1px solid var(--border-strong); border-radius: 15px; background: var(--surface-2); cursor: pointer; }
+.ha-switch i { position: absolute; top: 3px; left: 3px; width: 22px; height: 22px; border-radius: 50%; background: var(--muted); transition: transform 0.15s, background 0.15s; }
+.ha-switch[aria-checked="true"] { background: var(--accent); border-color: var(--accent); }
+.ha-switch[aria-checked="true"] i { transform: translateX(22px); background: #fff; }
+.ha-switch:disabled { opacity: 0.5; cursor: default; }
+.ha-dialog input[type="range"] { width: 100%; accent-color: var(--accent); }
+.ha-stepper { display: flex; align-items: center; justify-content: center; gap: 24px; }
+.ha-stepper .btn { width: 48px; height: 48px; padding: 0; border-radius: 50%; font-size: 22px; justify-content: center; }
+.ha-target { display: grid; justify-items: center; min-width: 90px; }
+.ha-target strong { font: 600 32px var(--font-heading); font-variant-numeric: tabular-nums; }
+.ha-buttons { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 8px; }
+.ha-buttons .btn { justify-content: center; }
+footer.ha-links { flex-wrap: wrap; justify-content: flex-start; gap: 8px; padding-top: 14px; border-top: 1px solid var(--border); }
+dialog footer.ha-links > :first-child { margin-right: 0; }
 button.tile { padding: 0; font: inherit; color: inherit; text-align: left; cursor: pointer; }
 .tile-main { flex: 1; display: flex; align-items: center; gap: 10px; padding: 14px 12px; min-width: 0; border-radius: var(--radius-md); }
 .tile-text { display: grid; gap: 3px; min-width: 0; }

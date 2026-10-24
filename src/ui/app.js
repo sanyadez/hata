@@ -86,6 +86,15 @@ const ICONS = {
   shrink: "M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7",
   down: "M6 9l6 6 6-6",
   server: "M4 4h16v7H4zM4 13h16v7H4zM8 7.5h.01M8 16.5h.01M12 7.5h4M12 16.5h4",
+  bulb: "M9 18h6M10 21h4M12 3a6 6 0 0 0-3.6 10.8c.7.6 1.1 1.3 1.1 2.2v.5h5V16c0-.9.4-1.6 1.1-2.2A6 6 0 0 0 12 3z",
+  power: "M12 3v8M6.3 6.8a8 8 0 1 0 11.4 0",
+  fan: "M12 12h.01M12 10c-1-3 0-6 3-6s3 4-1 7M14 12c3-1 6 0 6 3s-4 3-7-1M12 14c1 3 0 6-3 6s-3-4 1-7M10 12c-3 1-6 0-6-3s4-3 7 1",
+  blinds: "M4 3h16M5 3v18M19 3v18M5 7h14M5 11h14M5 15h14M12 15v3",
+  droplet: "M12 3s6 6.5 6 11a6 6 0 0 1-12 0c0-4.5 6-11 6-11z",
+  bolt: "M13 3 5 14h6l-1 7 8-11h-6z",
+  door: "M6 21V3h12v18M3 21h18M14.5 12h.01",
+  speaker: "M4 9h4l5-4v14l-5-4H4zM16.5 9.5a3.5 3.5 0 0 1 0 5M19 7a7 7 0 0 1 0 10",
+  battery: "M3 8h15v8H3zM21 11v2M6 11v2M9 11v2",
 };
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -325,6 +334,7 @@ function parseRoute() {
   if (parts[0] === "import" && isAdmin()) return { view: "import" };
   if (parts[0] === "terminal" && isAdmin()) return { view: "terminal" };
   if (parts[0] === "assistant" && isAdmin()) return { view: "assistant" };
+  if (parts[0] === "ha" && parts[1] && isAdmin()) return { view: "ha", id: parts[1], tab: HA_TABS.includes(parts[2]) ? parts[2] : "overview" };
   if (parts[0] === "proxmox" && parts[1] && isAdmin()) return { view: "proxmox", id: parts[1], tab: PVE_TABS.includes(parts[2]) ? parts[2] : "overview" };
   if (parts[0] === "machines" && isAdmin()) return parts[1] ? { view: "machine", id: parts[1], tab: MACHINE_TABS.includes(parts[2]) ? parts[2] : "overview" } : { view: "machines" };
   if (parts[0] === "apps" && parts[1]) return { view: "app", name: parts[1], tab: isAdmin() && ["settings", "logs", "compose", "backups", "terminal"].includes(parts[2]) ? parts[2] : "overview" };
@@ -375,6 +385,7 @@ function onRoute() {
   if (state.route.view === "app") void loadApp();
   if (state.route.view === "machines" || state.route.view === "machine" || state.route.view === "proxmox") void loadMachines();
   if (state.route.view === "machines") void loadPve();
+  if (state.route.view === "machines") void loadHa();
   window.scrollTo(0, 0);
 }
 window.addEventListener("hashchange", onRoute);
@@ -426,6 +437,8 @@ function startEvents() {
       machineEvent(event);
     } else if (event.type === "proxmox") {
       pveEvent(event);
+    } else if (event.type === "ha") {
+      haEvent(event);
     } else if (event.type === "approvals") {
       void loadApprovals();
     } else if (event.type === "tailscale") {
@@ -814,7 +827,7 @@ async function loadMine() {
   state.favorites = mine.favorites;
 }
 
-const navCurrent = () => (state.route.view === "machine" || state.route.view === "proxmox" ? "machines" : state.route.view === "backups" || state.route.view === "users" ? "settings" : state.route.view === "app" ? "home" : state.route.view === "import" ? "store" : state.route.view === "trash" || state.route.view === "myhata" ? "files" : state.route.view);
+const navCurrent = () => (state.route.view === "machine" || state.route.view === "proxmox" || state.route.view === "ha" ? "machines" : state.route.view === "backups" || state.route.view === "users" ? "settings" : state.route.view === "app" ? "home" : state.route.view === "import" ? "store" : state.route.view === "trash" || state.route.view === "myhata" ? "files" : state.route.view);
 const navItems = () => NAV.filter((item) => (!item.admin || isAdmin()) && (!item.files || mayFiles()) && (!item.assistant || !!(assistantUi.config?.ready ?? state.overview?.assistant)) && (item.guest !== false || state.user.role !== "guest"));
 
 function navLinks(className, items = navItems()) {
@@ -1019,6 +1032,7 @@ function render() {
   if (view === "machines") return renderMachines();
   if (view === "machine") return renderMachine();
   if (view === "proxmox") return renderPve();
+  if (view === "ha") return renderHa();
   if (view === "app") return renderApp();
   renderHome();
 }
@@ -1129,7 +1143,7 @@ function renderSystem() {
 /** `folder` — the open folder of tiles; `drag` — what is in the air; `widgets` — the blocks of the page */
 const homeUi = { folder: null, drag: null, stale: false, widgets: null };
 
-const tileKey = (item) => item.type + ":" + (item.type === "app" ? item.name : item.type === "files" ? item.path : item.id);
+const tileKey = (item) => item.type + ":" + (item.type === "app" ? item.name : item.type === "files" ? item.path : item.type === "ha" ? `${item.server}/${item.entity}` : item.id);
 /** The "Add" tile: a doorway, which is moved about but never put into a folder */
 const isAddTile = (item) => item.type === "builtin" && item.id === "add";
 const newId = () => Array.from(crypto.getRandomValues(new Uint8Array(6)), (byte) => byte.toString(16).padStart(2, "0")).join("");
@@ -1156,12 +1170,14 @@ function tileTarget(item) {
   // `<name>@<machine>` — an app of another machine
   if (item.type === "app") return item.name.includes("@") ? ((o.machineApps ?? []).find((app) => app.key === item.name) ?? null) : (o.apps.find((app) => app.name === item.name) ?? null);
   if (item.type === "files") return (o.folders ?? []).find((folder) => folder.path === item.path) ?? null;
+  if (item.type === "ha") return haTarget(item);
   return item;
 }
 
 const tileTitle = (item) => {
   const target = tileTarget(item);
   if (item.type === "builtin") return t(item.id === "store" ? "home.store" : "home.add");
+  if (item.type === "ha") return target?.state?.name ?? item.entity;
   return item.type === "app" ? (target?.title ?? item.name) : item.type === "files" ? (target?.name ?? item.path) : item.title || (item.type === "folder" ? t("home.folder") : linkHost(item.url));
 };
 
@@ -1171,6 +1187,7 @@ function tileIcon(item, size = "") {
   if (item.type === "link") return appIcon({ name: item.id, title: tileTitle(item), icon: linkIcon(item) }, size);
   if (item.type === "files") return h("span", { class: `app-icon plus ${size}` }, icon(tileTarget(item)?.disk ? (tileTarget(item).disk.network ? "globe" : "disk") : "folder"));
   if (item.type === "builtin") return h("span", { class: `app-icon plus ${size}` }, icon(item.id === "store" ? "store" : "plus"));
+  if (item.type === "ha") return h("span", { class: `app-icon plus ${size}` }, icon(haIcon(target?.state ?? { domain: item.entity.split(".")[0] })));
   return h("span", { class: "app-icon stack" }, item.items.filter(tileTarget).slice(0, 4).map((inner) => tileIcon(inner, "mini")));
 }
 
@@ -1185,6 +1202,7 @@ function tile(item) {
   let sub;
   let side = null;
   let badges = null;
+  let haMain = null;
   if (item.type === "app" && target.machine) {
     // an app of another machine: opened at the machine's address, managed on the machine's page
     const app = target;
@@ -1208,6 +1226,8 @@ function tile(item) {
     side = admin
       ? h("button", { type: "button", class: "tile-open", title: t("home.tileActions"), "aria-label": `${t("home.tileActions")}: ${title}`, onclick: (e) => appTileMenu(app, e.currentTarget) }, icon("more"))
       : h("a", { class: "tile-open", href: `#/apps/${app.name}`, title: t("home.manage"), "aria-label": `${t("home.manage")}: ${title}` }, icon("sliders"));
+  } else if (item.type === "ha") {
+    ({ cls, side, main: haMain } = haTile(item, target, title));
   } else if (item.type === "link") {
     href = item.url;
     external = true;
@@ -1232,10 +1252,10 @@ function tile(item) {
   if (admin && !side && !isAddTile(item)) side = h("button", { type: "button", class: "tile-open", title: t("home.tileActions"), "aria-label": `${t("home.tileActions")}: ${title}`, onclick: () => tileMenu(item) }, icon("more"));
   const content = [tileIcon(item), h("span", { class: "tile-text" }, h("span", { class: "tile-top" }, h("span", { class: "tile-name" }, title), badges), h("span", { class: "tile-sub" }, sub))];
   const key = tileKey(item);
-  const main =
-    item.type === "folder" || isAddTile(item)
+  const main = haMain ??
+    (item.type === "folder" || isAddTile(item)
       ? h("button", { type: "button", class: "tile-main", onclick: () => homeUi.drag?.moved || (isAddTile(item) ? addDialog() : openFolder(item.id)) }, content)
-      : h("a", { class: "tile-main", href, draggable: false, ...(external ? { target: "_blank", rel: "noopener noreferrer" } : {}) }, content);
+      : h("a", { class: "tile-main", href, draggable: false, ...(external ? { target: "_blank", rel: "noopener noreferrer" } : {}) }, content));
   if (!admin) return h("div", { class: `tile kind-${item.type} ${cls}`, "data-key": key }, main, side);
   // an administrator moves tiles by dragging them; a long press of a finger is the start of that, not a menu
   return h("div", { class: `tile kind-${item.type} ${cls} movable`, "data-key": key, onpointerdown: (e) => dragStart(e, item), oncontextmenu: (e) => {
@@ -1246,6 +1266,7 @@ function tile(item) {
         // "Add" offers what it adds, where the pointer is
         if (isAddTile(item)) addDialog({ x: e.clientX, y: e.clientY });
         else if (item.type === "app" && !target.machine) appTileMenu(target, null, { x: e.clientX, y: e.clientY });
+        else if (item.type === "ha") e.currentTarget.querySelector(".tile-open")?.click();
         else tileMenu(item, { x: e.clientX, y: e.clientY });
       }, ondragstart: (e) => e.preventDefault() }, main, side);
 }
@@ -1425,6 +1446,7 @@ function tileMenu(item, point = null) {
     point ? "menu dropdown" : "menu",
     h("header", null, tileIcon(item), h("div", null, h("h2", { class: "clip" }, tileTitle(item)), h("span", { class: "muted small" }, at.folder ? at.folder.title || t("home.folder") : groupName(at.group)))),
     item.type === "link" && entry(t("home.editLink"), "edit", () => linkDialog(item)),
+    item.type === "ha" && tileTarget(item) && entry(t("ha.openThere"), "external", () => window.open(haEntityUrl(tileTarget(item).server, item.entity), "_blank", "noopener")),
     item.type === "folder" && entry(t("common.open"), "folder", () => openFolder(item.id)),
     item.type === "folder" && entry(t("files.rename"), "edit", () => renameFolderDialog(item)),
     neighbour(-1) && entry(t("home.moveEarlier"), "arrow", () => moveTile(key, { before: tileKey(neighbour(-1)) }), "flip"),
@@ -1436,6 +1458,7 @@ function tileMenu(item, point = null) {
     entry(t("home.toNewGroup"), "plus", () => newGroupDialog((id) => moveTile(key, { group: id }))),
     item.type === "folder" && entry(t("home.ungroup"), "x", () => changeLayout((next) => void locate(next, key).list.splice(at.index, 1, ...item.items))),
     item.type === "link" && entry(t("home.removeLink"), "trash", () => changeLayout((next) => void takeTile(next, key)), "danger"),
+    item.type === "ha" && entry(t("ha.offHome"), "trash", () => changeLayout((next) => void takeTile(next, key)), "danger"),
     item.type === "files" && entry(t("files.unpin"), "home", () => pinFolder(item.path, false)),
   );
   if (point) placeAt(dialog, point);
@@ -1468,6 +1491,7 @@ function addDialog(at = null) {
     h("header", null, h("h2", null, t("home.addTitle"))),
     entry(t("home.addApp"), t("home.addAppHint"), "store", () => go("#/store")),
     state.overview.importable > 0 && entry(t("home.import"), t("home.importHint", { n: state.overview.importable }), "download", () => go("#/import")),
+    (state.overview.ha?.servers ?? []).length > 0 && entry(t("ha.pick.item"), t("ha.pick.hint"), "bulb", () => haPickDialog()),
     entry(t("home.addLinkItem"), t("home.addLinkHint"), "link", () => linkDialog()),
     entry(t("home.addGroupItem"), t("home.addGroupHint"), "grid", () => newGroupDialog()),
     state.overview.dashboard.widgets.hidden.map((id) =>
@@ -1831,7 +1855,7 @@ function dragEnd(drop) {
   drag.kind.drop(drag, target);
 }
 
-const ATTENTION_ICONS = { update: "up", docker: "box", restarting: "refresh", partial: "alert", disk: "disk", smart: "disk", memory: "memory", temperature: "temp", internet: "network", network: "network", array: "disk", share: "share", netplace: "globe", machine: "server", pve: "server", absent: "disk" };
+const ATTENTION_ICONS = { update: "up", docker: "box", restarting: "refresh", partial: "alert", disk: "disk", smart: "disk", memory: "memory", temperature: "temp", internet: "network", network: "network", array: "disk", share: "share", netplace: "globe", machine: "server", pve: "server", ha: "home", absent: "disk" };
 
 function attentionItem(item) {
   const detail = { ...item.detail, free: item.detail.free == null ? "" : bytes(item.detail.free), trash: item.detail.trash == null ? "" : bytes(item.detail.trash), size: item.detail.size == null ? "" : bytes(item.detail.size) };
@@ -1895,6 +1919,7 @@ function attentionItem(item) {
     item.code.startsWith("share.") && open("#/settings/shares"),
     item.code === "netplace.down" && open("#/settings/storage"),
     item.code === "machine.away" && open(`#/machines/${item.detail.id}`),
+    item.code.startsWith("ha.") && !(state.route.view === "ha" && state.route.id === item.detail.host) && open(`#/ha/${item.detail.host}`),
     item.code.startsWith("pve.") && state.route.view !== "proxmox" && open(`#/proxmox/${item.detail.host}${item.code === "pve.guestDown" ? "/guests" : item.code === "pve.backupFailed" ? "/tasks" : ""}`),
     (item.code === "machine.restarting" || item.code === "machine.partial") && open(`#/machines/${item.detail.id}/apps`),
     item.app && open(`#/apps/${item.app}${item.code === "restarting" || item.code === "partial" ? "/logs" : ""}`, t(item.code === "restarting" || item.code === "partial" ? "app.logs" : "common.open")),
@@ -2545,12 +2570,14 @@ const machineOs = (m) => [m.info?.os, m.info?.arch].filter(Boolean).join(" · ")
 
 function renderMachines() {
   shell(
-    h("div", { class: "page-head" }, h("div", null, h("h1", null, t("nav.machines")), h("p", { class: "meta", id: "machines-meta" }, t("machines.lead"))), h("div", { class: "actions" }, button(t("pve.add"), { onclick: () => pveDialog() }, "plus"), button(t("machines.add"), { class: "primary", onclick: addMachineDialog }, "plus"))),
+    h("div", { class: "page-head" }, h("div", null, h("h1", null, t("nav.machines")), h("p", { class: "meta", id: "machines-meta" }, t("machines.lead"))), h("div", { class: "actions" }, button(t("ha.add"), { onclick: () => haDialog() }, "plus"), button(t("pve.add"), { onclick: () => pveDialog() }, "plus"), button(t("machines.add"), { class: "primary", onclick: addMachineDialog }, "plus"))),
     h("div", { id: "machines-body" }),
     h("div", { id: "pve-list", class: "stack" }),
+    h("div", { id: "ha-list", class: "stack" }),
   );
   if (machinesUi.list) renderMachinesBody();
   if (pveUi.list) paintPveList();
+  if (haUi.list) paintHaList();
 }
 
 function renderMachinesBody() {
@@ -2666,6 +2693,644 @@ async function addMachineDialog() {
   const timer = setInterval(look, 3000);
   const stop = () => clearInterval(timer);
   dialog.addEventListener("close", stop);
+}
+
+// --- Home Assistant ---
+// Connected through its API: the servers under the machines, a page of each, its entities as tiles on Home
+
+const HA_TABS = ["overview", "devices"];
+const haUi = { list: null, server: null, entities: null, search: "", extra: false, timer: null, users: null };
+
+const HA_ICONS = { light: "bulb", switch: "power", input_boolean: "power", fan: "fan", cover: "blinds", valve: "droplet", lock: "lock", climate: "temp", water_heater: "temp", media_player: "speaker", vacuum: "home", scene: "play", script: "play", button: "play", input_button: "play", automation: "refresh", siren: "bell", humidifier: "droplet", camera: "image", weather: "sun", sun: "sun", person: "user", device_tracker: "user", update: "up", alarm_control_panel: "lock", remote: "network" };
+const HA_KIND_ICONS = { temperature: "temp", humidity: "droplet", moisture: "droplet", battery: "battery", power: "bolt", energy: "bolt", voltage: "bolt", current: "bolt", door: "door", window: "door", opening: "door", garage_door: "door", garage: "door", motion: "user", occupancy: "user", presence: "user", illuminance: "sun", light: "sun", smoke: "alert", gas: "alert", problem: "alert", safety: "alert", connectivity: "network", plug: "power", outlet: "power", timestamp: "clock" };
+const haIcon = (s) => HA_KIND_ICONS[s?.kind] ?? HA_ICONS[s?.domain] ?? "chart";
+/** Binary sensors whose "on" and "off" have words of their own */
+const HA_BINARY = ["door", "window", "opening", "garage_door", "motion", "occupancy", "presence", "moisture", "smoke", "gas", "battery", "connectivity", "lock", "plug", "problem", "safety", "sound", "vibration", "light", "power", "running", "tamper", "cold", "heat"];
+/** States in which a tile is lit */
+const HA_LIT = new Set(["on", "open", "opening", "unlocked", "playing", "cleaning"]);
+
+/** A sensor's number, shortened: 15.62 → 15.6; null — not a number */
+function haNumber(text) {
+  const n = Number(text);
+  if (text === "" || text == null || !Number.isFinite(n)) return null;
+  return n.toLocaleString(state.lang, { maximumFractionDigits: Math.abs(n) >= 100 ? 0 : Math.abs(n) >= 10 ? 1 : 2 });
+}
+const haWord = (st) => (has("ha.state." + st) ? t("ha.state." + st) : st);
+
+function haStateText(s) {
+  if (!s) return t("ha.tile.missing");
+  if (s.state === "unavailable" || s.state === "unknown") return t("ha.state." + s.state);
+  if (s.domain === "binary_sensor") return HA_BINARY.includes(s.kind) ? t(`ha.binary.${s.kind}.${s.state}`) : haWord(s.state);
+  if (s.domain === "climate") return [s.current != null && `${haNumber(s.current)}°`, s.target != null && t("ha.climate.target", { t: haNumber(s.target) }), haWord(s.state)].filter(Boolean).join(" · ");
+  if (s.domain === "light" && s.state === "on" && s.brightness != null) return t("ha.light.on", { n: s.brightness });
+  if (s.kind === "timestamp" && !Number.isNaN(Date.parse(s.state))) return new Date(s.state).toLocaleString(state.lang, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+  const n = haNumber(s.state);
+  if (n != null) return s.unit ? `${n} ${s.unit}` : n;
+  return haWord(s.state);
+}
+
+const haLit = (s) => !!s && (s.domain === "binary_sensor" || s.domain === "sensor" ? false : HA_LIT.has(s.state) || (s.domain === "climate" && s.state !== "off"));
+const haGone = (s) => !s || s.state === "unavailable";
+
+/** What one press on the tile does; null — nothing (a sensor), or the controls dialog */
+function haPrimary(s) {
+  if (haGone(s)) return null;
+  const a = s.actions;
+  if (a.includes("toggle")) return { action: "toggle" };
+  if (a.includes("run")) return { action: "run" };
+  if (a.includes("press")) return { action: "press" };
+  // a door is not unlocked by a slip of the finger: that one asks
+  if (s.domain === "lock") return { action: s.state === "locked" ? "unlock" : "lock", ask: s.state === "locked" };
+  if (s.domain === "cover" || s.domain === "valve") {
+    const open = s.state === "open" || s.state === "opening";
+    return open ? (a.includes("close") ? { action: "close" } : null) : a.includes("open") ? { action: "open" } : null;
+  }
+  if (s.domain === "vacuum") return s.state === "cleaning" ? (a.includes("dock") ? { action: "dock" } : null) : a.includes("start") ? { action: "start" } : null;
+  return null;
+}
+
+/** A press: Home Assistant is asked, and what it answers is shown at once — its event follows anyway */
+async function haPress(server, s, action, value, el) {
+  if (el) el.disabled = true;
+  try {
+    const next = await api("POST", `/api/ha/${server}/act`, { entity: s.id, action, ...(value !== undefined ? { value } : {}) });
+    haSetState(server, next);
+  } catch (e) {
+    toast(errorText(e), "error");
+  }
+  if (el) el.disabled = false;
+}
+
+function haPressAsked(server, s, primary, el) {
+  if (!primary.ask) return haPress(server, s, primary.action, undefined, el);
+  let dialog;
+  dialog = openDialog(
+    "confirm",
+    h("h2", { class: "wrap" }, t("ha.unlockTitle", { name: s.name })),
+    h("footer", null, closeButton(() => dialog, t("common.cancel")), button(t("ha.action.unlock"), { class: "primary", onclick: () => (dialog.close(), haPress(server, s, "unlock")) }, "lock")),
+  );
+}
+
+/** A new state of one entity: the tile, the row of the server's page and the controls dialog follow */
+function haSetState(server, s, entity = s?.id) {
+  const key = `${server}/${entity}`;
+  const o = state.overview;
+  if (o?.ha && key in o.ha.states) {
+    o.ha.states[key] = s;
+    if (state.route.view === "home" && !homeUi.drag?.active) {
+      const at = locate(o.dashboard, "ha:" + key);
+      const old = document.querySelector(`.tile[data-key="${CSS.escape("ha:" + key)}"]`);
+      const fresh = at && tile(at.item);
+      if (old && fresh) old.replaceWith(fresh);
+    }
+  }
+  if (haUi.entities && haUi.server?.id === server) {
+    const i = haUi.entities.findIndex((one) => one.id === entity);
+    if (s && i >= 0) haUi.entities[i] = s;
+    else if (s) haUi.entities.push(s);
+    else if (i >= 0) haUi.entities.splice(i, 1);
+    const row = document.getElementById("ha-row-" + entity);
+    if (row && s) row.replaceWith(haRow(server, s));
+  }
+  for (const listener of haUi.listeners ?? []) listener(server, s, entity);
+}
+
+function haEvent(event) {
+  for (const [entity, s] of Object.entries(event.states ?? {})) haSetState(event.id, s, entity);
+  if (!event.server) return;
+  // the server came, went, or says something new about itself: whoever shows it asks again
+  clearTimeout(haUi.timer);
+  haUi.timer = setTimeout(() => {
+    if (state.route.view === "home") void refresh();
+    if (state.route.view === "machines") void loadHa();
+    if (state.route.view === "ha" && state.route.id === event.id) void loadHa();
+  }, 600);
+}
+
+/** Where a person opens a server: one on this machine as its app's tile does (by Hata's domain), else its address */
+function haWebUrl(x) {
+  if (x?.here) {
+    const app = (state.overview?.apps ?? []).find((a) => Number(a.port) === x.port && appUrl(a));
+    if (app) return appUrl(app).replace(/\/$/, "");
+  }
+  return x?.url ?? "";
+}
+/** Home Assistant opens the card of one entity by this address */
+const haEntityUrl = (x, entity) => `${haWebUrl(x)}/?more-info-entity-id=${encodeURIComponent(entity)}`;
+const haServerOf = (id) => (state.overview?.ha?.servers ?? []).find((x) => x.id === id) ?? (haUi.server?.id === id ? haUi.server : null) ?? (haUi.list?.servers ?? []).find((x) => x.id === id) ?? null;
+
+const HA_BUTTON_ICONS = { open: "up", close: "down", stop: "stop", lock: "lock", unlock: "lock", run: "play", press: "play", playPause: "play", start: "play", dock: "home" };
+
+/**
+ * One entity: its state, what it can do, and — from a tile — where it opens and how the tile is moved or taken
+ * off. Every tile of Home Assistant opens this, whatever the entity is.
+ */
+function haEntityDialog(server, s, item = null) {
+  let dialog;
+  let now = s;
+  const x = haServerOf(server);
+  const badge = h("span", { class: "app-icon plus" }, icon(haIcon(s)));
+  const sub = h("span", { class: "muted small" });
+  const body = h("div", { class: "stack ha-dialog" });
+  const paint = () => {
+    const gone = haGone(now) || !x?.online;
+    const a = now ? now.actions : [];
+    const lit = haLit(now);
+    badge.classList.toggle("on", lit);
+    sub.textContent = [now?.area, now?.at ? t("ha.changedAgo", { ago: ago(now.at) }) : null].filter(Boolean).join(" · ");
+    const toggle = a.includes("toggle") && h("button", { type: "button", role: "switch", class: "ha-switch", "aria-checked": String(lit), "aria-label": now.name, disabled: gone, onclick: (e) => haPress(server, now, "toggle", undefined, e.currentTarget) }, h("i"));
+    const level = now?.state === "on" ? (now.brightness ?? 100) : 0;
+    const shown = h("span", { class: "small" }, `${level}%`);
+    const bright = a.includes("brightness") && h("input", { type: "range", min: 0, max: 100, step: 1, value: level, disabled: gone, "aria-label": t("ha.brightness"), oninput: (e) => (shown.textContent = `${e.target.value}%`), onchange: (e) => haPress(server, now, "brightness", Number(e.target.value)) });
+    const step = now?.step ?? 0.5;
+    const temp = (delta) => () => haPress(server, now, "temperature", Math.min(now.max ?? 100, Math.max(now.min ?? -50, (now.target ?? now.current ?? 20) + delta)));
+    const others = a.filter((one) => !["toggle", "brightness", "temperature"].includes(one));
+    const main = haPrimary(now)?.action;
+    put(
+      body,
+      h("div", { class: "ha-now" }, h("p", { class: "ha-big grow" }, x?.online === false ? t("ha.tile.away", { name: x.name }) : a.includes("temperature") ? [now.current != null && `${haNumber(now.current)}°`, haWord(now.state)].filter(Boolean).join(" · ") : haStateText(now)), toggle),
+      bright && h("div", { class: "stack-s" }, h("div", { class: "kv" }, h("span", { class: "label" }, t("ha.brightness")), shown), bright),
+      a.includes("temperature") &&
+        h(
+          "div",
+          { class: "ha-stepper" },
+          h("button", { type: "button", class: "btn", disabled: gone, "aria-label": t("ha.colder"), onclick: temp(-step) }, "−"),
+          h("div", { class: "ha-target" }, h("strong", null, now.target != null ? `${haNumber(now.target)}°` : "—"), h("span", { class: "muted small" }, t("ha.asked"))),
+          h("button", { type: "button", class: "btn", disabled: gone, "aria-label": t("ha.warmer"), onclick: temp(step) }, "+"),
+        ),
+      others.length > 0 && h("div", { class: "ha-buttons" }, others.map((one) => button(t("ha.action." + one), { class: one === main ? "primary" : "", disabled: gone, onclick: (e) => (one === "unlock" ? haPressAsked(server, now, { action: one, ask: true }) : haPress(server, now, one, undefined, e.currentTarget)) }, HA_BUTTON_ICONS[one]))),
+    );
+  };
+  const listener = (id, next, entity) => {
+    if (id === server && entity === s.id && next) (now = next), paint();
+  };
+  (haUi.listeners ??= new Set()).add(listener);
+  paint();
+  const admin = isAdmin();
+  const links = [
+    admin && x && h("a", { class: "btn small", href: haEntityUrl(x, s.id), target: "_blank", rel: "noopener noreferrer" }, icon("external"), h("span", null, t("ha.openThere"))),
+    admin && item && button(t("ha.move"), { class: "small", onclick: () => (dialog.close(), tileMenu(item)) }, "arrow"),
+    admin && item && button(t("ha.offHome"), { class: "small danger", onclick: () => (dialog.close(), changeLayout((next) => void takeTile(next, tileKey(item)))) }, "trash"),
+  ].filter(Boolean);
+  dialog = openDialog("ha-entity", h("header", null, badge, h("div", { class: "grow" }, h("h2", { class: "clip" }, s.name), sub), closeX(() => dialog)), body, links.length > 0 && h("footer", { class: "ha-links" }, links));
+  dialog.addEventListener("close", () => haUi.listeners.delete(listener));
+}
+
+// The tile of an entity on Home
+
+function haTarget(item) {
+  const o = state.overview;
+  const server = (o.ha?.servers ?? []).find((one) => one.id === item.server);
+  return server ? { server, state: o.ha.states[`${item.server}/${item.entity}`] ?? null } : null;
+}
+
+function haTile(item, target, title) {
+  const s = target.state;
+  const online = target.server.online;
+  const primary = online ? haPrimary(s) : null;
+  const cls = !online || haGone(s) ? "stopped" : haLit(s) ? "on" : "";
+  const sub = online ? haStateText(s) : t("ha.tile.away", { name: target.server.name });
+  // every tile of Home Assistant has the same button: the entity's own window
+  const side = h("button", { type: "button", class: "tile-open", title: t("ha.tile.more"), "aria-label": `${t("ha.tile.more")}: ${title}`, onclick: () => haEntityDialog(item.server, s ?? { id: item.entity, name: title, domain: item.entity.split(".")[0], state: "unavailable", actions: [] }, item) }, icon("more"));
+  const content = [tileIcon(item), h("span", { class: "tile-text" }, h("span", { class: "tile-top" }, h("span", { class: "tile-name" }, title)), h("span", { class: "tile-sub" }, sub))];
+  // a press does what the entity is for; one with nothing to press (a sensor) opens its window
+  const main = h("button", { type: "button", class: "tile-main", title: primary ? t("ha.action." + primary.action) : t("ha.tile.more"), onclick: (e) => homeUi.drag?.moved || (primary ? haPressAsked(item.server, s, primary, e.currentTarget) : side.click()) }, content);
+  return { cls, main, side };
+}
+
+/** The entities of the servers, to put some on Home */
+async function haPickDialog() {
+  const servers = state.overview.ha?.servers ?? [];
+  if (!servers.length) return;
+  let dialog;
+  let server = servers[0].id;
+  let list = [];
+  let query = "";
+  let extra = false;
+  const chosen = new Set();
+  const on = new Set((state.overview.ha?.states ? Object.keys(state.overview.ha.states) : []));
+  const box = h("div", { class: "ha-pick" });
+  const add = h("button", { type: "button", class: "btn primary", disabled: true, onclick: () => {
+    dialog.close();
+    changeLayout((layout) => {
+      const first = layout.groups[0] ?? (layout.groups.push({ id: newId(), title: "", items: [] }), layout.groups[0]);
+      const at = first.items.findIndex(isAddTile);
+      const tiles = [...chosen].map((key) => ({ type: "ha", server: key.split("/")[0], entity: key.split("/")[1] }));
+      first.items.splice(at < 0 ? first.items.length : at, 0, ...tiles);
+    });
+    toast(t("ha.pick.added", { n: chosen.size }));
+  } }, t("ha.pick.add", { n: 0 }));
+  const paint = () => {
+    const q = query.trim().toLowerCase();
+    const shown = list.filter((s) => (extra || !s.extra) && (!q || `${s.name} ${s.id} ${s.area}`.toLowerCase().includes(q)));
+    const rooms = new Map();
+    for (const s of shown) rooms.set(s.area, [...(rooms.get(s.area) ?? []), s]);
+    put(
+      box,
+      !shown.length && h("p", { class: "muted" }, t("ha.pick.none")),
+      [...rooms].map(([room, items]) =>
+        h("div", { class: "stack-s" }, h("h3", { class: "small muted" }, room || t("ha.noRoom")),
+          items.map((s) => {
+            const key = `${server}/${s.id}`;
+            const there = on.has(key);
+            const box = h("input", { type: "checkbox", checked: there || chosen.has(key), disabled: there, onchange: (e) => (e.target.checked ? chosen.add(key) : chosen.delete(key), (add.disabled = !chosen.size), (add.textContent = t("ha.pick.add", { n: chosen.size }))) });
+            return h("label", { class: "check ha-pick-row" }, box, h("span", { class: "app-icon plus sm" }, icon(haIcon(s))), h("span", { class: "grow clip" }, h("strong", null, s.name), h("span", { class: "muted small block" }, there ? t("ha.pick.there") : haStateText(s))));
+          }),
+        ),
+      ),
+    );
+  };
+  const load = async () => {
+    put(box, h("p", { class: "muted" }, t("ha.loading")));
+    try {
+      list = (await api("GET", `/api/ha/${server}/entities`)).entities;
+    } catch (e) {
+      return put(box, h("p", { class: "error" }, errorText(e)));
+    }
+    paint();
+  };
+  dialog = openDialog(
+    "wide",
+    h("header", null, h("h2", { class: "grow" }, t("ha.pick.title")), closeX(() => dialog)),
+    servers.length > 1 && h("select", { onchange: (e) => ((server = e.target.value), load()) }, servers.map((s) => h("option", { value: s.id }, s.name))),
+    h("input", { type: "search", placeholder: t("ha.search"), oninput: (e) => ((query = e.target.value), paint()) }),
+    h("label", { class: "check" }, h("input", { type: "checkbox", onchange: (e) => ((extra = e.target.checked), paint()) }), h("span", null, t("ha.showExtra"))),
+    box,
+    h("footer", null, closeButton(() => dialog, t("common.cancel")), add),
+  );
+  void load();
+}
+
+// The servers under the machines, and the page of each
+
+async function loadHa() {
+  try {
+    if (state.route.view === "ha") {
+      haUi.server = await api("GET", `/api/ha/${state.route.id}`);
+      if (state.route.tab === "devices" && !haUi.entities) haUi.entities = (await api("GET", `/api/ha/${state.route.id}/entities`)).entities;
+      return renderHaBody();
+    }
+    haUi.list = await api("GET", "/api/ha");
+  } catch (e) {
+    if (state.route.view === "ha") {
+      const box = document.getElementById("ha-body");
+      if (box) put(box, h("nav", { class: "crumbs" }, h("a", { href: "#/machines" }, t("nav.machines"))), h("p", { class: "card pad muted" }, errorText(e)));
+      return;
+    }
+    return toast(errorText(e), "error");
+  }
+  if (state.route.view === "machines") paintHaList();
+}
+
+const haChip = (x) => h("span", { class: "state " + (x.online ? "running" : "") }, x.online ? t("ha.online") : x.error ? t("ha.offline") : t("ha.asking"));
+const haError = (x) => (x.error ? (has("error." + x.error.code) ? t("error." + x.error.code, { name: x.name, message: x.error.message ?? "" }) : x.error.code) : "");
+
+function paintHaList() {
+  const box = document.getElementById("ha-list");
+  if (!box) return;
+  const list = haUi.list?.servers ?? [];
+  if (!list.length) return box.replaceChildren();
+  box.replaceChildren(
+    h("div", { class: "section-head" }, h("h2", null, "Home Assistant")),
+    h(
+      "div",
+      { class: "cards" },
+      list.map((x) =>
+        h(
+          "a",
+          { class: "card pad machine-card", href: `#/ha/${x.id}`, menu: (at) => haMenu(x, at) },
+          h("div", { class: "machine-title" }, icon("home"), h("strong", { class: "clip grow" }, x.name), haChip(x)),
+          h("p", { class: "muted small clip" }, ["Home Assistant " + (x.version || ""), x.url.replace(/^https?:\/\//, "")].join(" · ")),
+          x.online
+            ? [
+                h("p", { class: "small" }, t("ha.counts", { n: x.entities, on: x.on })),
+                x.updates > 0 && h("p", { class: "small accent-text" }, icon("up"), " ", t("ha.updatesN", { n: x.updates })),
+                x.low > 0 && h("p", { class: "small" }, icon("battery"), " ", t("ha.lowN", { n: x.low })),
+              ]
+            : h("p", { class: "muted small" }, haError(x) || t("ha.asking")),
+        ),
+      ),
+    ),
+  );
+}
+
+function renderHa() {
+  if (haUi.server?.id !== state.route.id) (haUi.server = null), (haUi.entities = null);
+  shell(h("div", { id: "ha-body", class: "stack" }));
+  if (haUi.server) renderHaBody();
+  void loadHa();
+}
+
+function renderHaBody() {
+  const box = document.getElementById("ha-body");
+  const x = haUi.server;
+  if (!box || !x) return;
+  const tab = (id, iconName) => h("a", { class: "tab" + (state.route.tab === id ? " active" : ""), href: `#/ha/${x.id}${id === "overview" ? "" : "/" + id}` }, icon(iconName), t("ha.tab." + id));
+  put(
+    box,
+    h(
+      "div",
+      { id: "pve-head" },
+      h("nav", { class: "crumbs" }, h("a", { href: "#/machines" }, t("nav.machines")), icon("chevron"), h("span", null, x.name)),
+      h(
+        "div",
+        { class: "app-head", menu: (at) => haMenu(x, at) },
+        h("span", { class: "machine-icon" }, icon("home")),
+        h("div", { class: "grow" }, h("div", { class: "app-title" }, h("h1", null, x.name), haChip(x)), h("p", { class: "meta" }, ["Home Assistant " + (x.version || ""), x.url, x.location && x.location !== x.name ? x.location : null].filter(Boolean).flatMap((part, i) => (i ? [h("span", { class: "dot-sep" }, "·"), part] : [part])))),
+        h("div", { class: "actions" }, h("a", { class: "btn primary", href: haWebUrl(x), target: "_blank", rel: "noopener noreferrer" }, icon("external"), h("span", null, t("ha.open"))), h("button", { type: "button", class: "btn square", "aria-label": t("app.more"), onclick: () => haMenu(x) }, icon("more"))),
+      ),
+      h("div", { class: "tabs" }, tab("overview", "grid"), tab("devices", "bulb")),
+    ),
+    x.error && h("p", { class: "card pad warn-box" }, haError(x), " ", t("pve.since", { ago: ago(x.error.since) })),
+    state.route.tab === "devices" ? haDevices(x) : haOverview(x),
+  );
+}
+
+function haOverview(x) {
+  const update = (u) => {
+    const backup = u.backup && h("input", { type: "checkbox", checked: true });
+    return h(
+      "div",
+      { class: "tool" },
+      h("span", { class: "app-icon plus sm" }, icon("up")),
+      h("div", { class: "grow" }, h("strong", null, u.title && !u.name.includes(u.title) ? `${u.name} · ${u.title}` : u.name), h("p", { class: "muted small" }, `${u.installed || "—"} → ${u.latest}`, u.summary && " · " + u.summary), u.url && h("a", { class: "small", href: u.url, target: "_blank", rel: "noopener noreferrer" }, t("ha.notes"))),
+      u.running
+        ? h("span", { class: "state restarting" }, u.percent != null ? t("ha.installingPct", { n: Math.round(u.percent) }) : t("ha.installing"))
+        : u.install
+          ? h("div", { class: "row-actions" }, backup && h("label", { class: "check small" }, backup, h("span", null, t("ha.withBackup"))), button(t("ha.install"), { class: "small primary", disabled: !x.online, onclick: async (e) => {
+                const b = e.currentTarget;
+                b.disabled = true;
+                try {
+                  await api("POST", `/api/ha/${x.id}/updates`, { entity: u.entity, backup: backup ? backup.checked : false });
+                  toast(t("ha.installStarted", { name: u.title || u.name }));
+                  void loadHa();
+                } catch (err) {
+                  toast(errorText(err), "error");
+                  b.disabled = false;
+                }
+              } }, "download"))
+          : h("span", { class: "muted small" }, t("ha.notInstallable")),
+    );
+  };
+  return h(
+    "div",
+    { class: "stack" },
+    x.proxy === "missing" && haProxyCard(x),
+    h("div", { class: "card pad stack-s" }, h("div", { class: "section-head" }, h("h2", null, t("ha.updates"))), x.updates.length ? x.updates.map(update) : h("p", { class: "muted small" }, x.online ? t("ha.noUpdates") : "—")),
+    x.low.length > 0 && h("div", { class: "card pad stack-s" }, h("div", { class: "section-head" }, h("h2", null, t("ha.batteries"))), x.low.map((b) => h("div", { class: "tool" }, h("span", { class: "app-icon plus sm" }, icon("battery")), h("div", { class: "grow" }, h("strong", null, b.name)), h("span", { class: "state restarting" }, b.level == null ? t("ha.batteryLowWord") : `${b.level}%`)))),
+    h(
+      "div",
+      { class: "card pad stack-s" },
+      h("div", { class: "section-head" }, h("h2", null, t("ha.backups")), x.canBackup && button(t("ha.backupNow"), { class: "small", disabled: !x.online || (x.backupState && x.backupState !== "idle"), onclick: async (e) => {
+          const b = e.currentTarget;
+          b.disabled = true;
+          try {
+            await api("POST", `/api/ha/${x.id}/backups`, {});
+            toast(t("ha.backupStarted"));
+          } catch (err) {
+            toast(errorText(err), "error");
+            b.disabled = false;
+          }
+        } }, "archive")),
+      x.backupState && x.backupState !== "idle" && h("p", { class: "small accent-text" }, t("ha.backupRunning")),
+      x.backups.length ? h("div", { class: "table-wrap" }, h("table", null, h("thead", null, h("tr", null, h("th", null, t("ha.backup.name")), h("th", null, t("ha.backup.when")), h("th", null, t("ha.backup.size")))), h("tbody", null, x.backups.map((b) => h("tr", null, h("td", null, b.name, b.automatic && h("span", { class: "muted small" }, " · " + t("ha.backup.auto"))), h("td", null, new Date(b.date).toLocaleString(state.lang)), h("td", null, b.size ? bytes(b.size) : "—")))))) : h("p", { class: "muted small" }, x.online ? t("ha.noBackups") : "—"),
+    ),
+    haPeopleCard(x),
+  );
+}
+
+/** Home Assistant on this server does not take Hata as its proxy: opened by Hata's address it answers 400 */
+function haProxyCard(x) {
+  const app = (state.overview?.apps ?? []).find((a) => Number(a.port) === x.port && appUrl(a));
+  return h(
+    "div",
+    { class: "card pad stack-s warn-box" },
+    h("strong", null, t("ha.proxy.title")),
+    h("p", { class: "small" }, t("ha.proxy.lead", { address: app ? appAddress(app) : location.host })),
+    h("div", { class: "row-actions" }, button(t("ha.proxy.allow"), { class: "small primary", disabled: !x.online, onclick: async (e) => {
+        const b = e.currentTarget;
+        b.disabled = true;
+        try {
+          await api("POST", `/api/ha/${x.id}/proxy`, {});
+          toast(t("ha.proxy.asked", { name: x.name }));
+        } catch (err) {
+          toast(errorText(err), "error");
+          b.disabled = false;
+        }
+      } }, "check")),
+  );
+}
+
+/** Who sees the server's tiles on Home: administrators always; everybody, or the users chosen */
+function haPeopleCard(x) {
+  const card = h("div", { class: "card pad stack-s" }, h("div", { class: "section-head" }, h("h2", null, t("ha.people.title"))), h("p", { class: "muted small" }, t("ha.people.lead")));
+  const paint = (users) => {
+    const others = users.filter((u) => u.role !== "admin");
+    let mode = x.people === "all" ? "all" : x.people.length ? "some" : "none";
+    const picked = new Set(Array.isArray(x.people) ? x.people : []);
+    const save = async () => {
+      const people = mode === "all" ? "all" : mode === "some" ? [...picked] : [];
+      try {
+        haUi.server = { ...x, ...(await api("PATCH", `/api/ha/${x.id}`, { people })) };
+        x.people = haUi.server.people;
+        toast(t("ha.people.saved"));
+      } catch (e) {
+        toast(errorText(e), "error");
+      }
+    };
+    const list = h("div", { class: "stack-s ha-people", hidden: mode !== "some" }, others.map((u) => h("label", { class: "check" }, h("input", { type: "checkbox", checked: picked.has(u.id), onchange: (e) => (e.target.checked ? picked.add(u.id) : picked.delete(u.id), save()) }), h("span", null, u.name, h("span", { class: "muted small" }, " · " + t("user.role." + u.role))))));
+    const radio = (value) => h("label", { class: "check" }, h("input", { type: "radio", name: "ha-people", value, checked: mode === value, onchange: () => ((mode = value), (list.hidden = value !== "some"), save()) }), h("span", null, t("ha.people." + value)));
+    card.append(others.length ? h("div", { class: "stack-s" }, radio("none"), radio("all"), radio("some"), list) : h("p", { class: "muted small" }, t("ha.people.nobody")));
+  };
+  if (haUi.users) paint(haUi.users);
+  else api("GET", "/api/users").then((users) => paint((haUi.users = users)), (e) => card.append(h("p", { class: "error" }, errorText(e))));
+  return card;
+}
+
+function haRow(server, s) {
+  const primary = haPrimary(s);
+  return h(
+    "div",
+    { class: "tool ha-row" + (haLit(s) ? " on" : ""), id: "ha-row-" + s.id },
+    h("span", { class: "app-icon plus sm" }, icon(haIcon(s))),
+    h("div", { class: "grow" }, h("strong", { class: "clip" }, s.name), h("p", { class: "muted small clip mono" }, s.id)),
+    h("span", { class: "small ha-state" }, haStateText(s)),
+    h(
+      "div",
+      { class: "row-actions" },
+      primary && button(t("ha.action." + primary.action), { class: "small", onclick: (e) => haPressAsked(server, s, primary, e.currentTarget) }),
+      button(null, { class: "small square", title: t("ha.tile.more"), "aria-label": `${t("ha.tile.more")}: ${s.name}`, onclick: () => haEntityDialog(server, s) }, "more"),
+      haOnHome(server, s.id)
+        ? button(null, { class: "small square active", title: t("ha.offHome"), "aria-pressed": "true", "aria-label": `${t("ha.offHome")}: ${s.name}`, onclick: () => haHome(server, s.id, false) }, "star")
+        : button(null, { class: "small square", title: t("ha.onHome"), "aria-pressed": "false", "aria-label": `${t("ha.onHome")}: ${s.name}`, onclick: () => haHome(server, s.id, true) }, "star"),
+    ),
+  );
+}
+
+const haOnHome = (server, entity) => !!state.overview && !!locate(state.overview.dashboard, `ha:${server}/${entity}`);
+
+async function haHome(server, entity, on) {
+  if (!state.overview) await refresh();
+  await changeLayout((layout) => {
+    if (!on) return void takeTile(layout, `ha:${server}/${entity}`);
+    const first = layout.groups[0] ?? (layout.groups.push({ id: newId(), title: "", items: [] }), layout.groups[0]);
+    const at = first.items.findIndex(isAddTile);
+    first.items.splice(at < 0 ? first.items.length : at, 0, { type: "ha", server, entity });
+  });
+  // the page of Home asks the server for the new tile's state; here the row shows it is there
+  await refresh();
+  const s = haUi.entities?.find((one) => one.id === entity);
+  if (s) haSetState(server, s);
+  toast(t(on ? "ha.addedHome" : "ha.removedHome", { name: s?.name ?? entity }));
+}
+
+function haDevices(x) {
+  const list = haUi.entities;
+  if (!list) return h("p", { class: "card pad muted" }, t("ha.loading"));
+  const q = haUi.search.trim().toLowerCase();
+  const shown = list.filter((s) => (haUi.extra || !s.extra) && (!q || `${s.name} ${s.id} ${s.area}`.toLowerCase().includes(q)));
+  const rooms = new Map();
+  for (const s of shown) rooms.set(s.area, [...(rooms.get(s.area) ?? []), s]);
+  const body = h("div", { class: "stack" });
+  const paint = () => renderHaBody();
+  put(
+    body,
+    h(
+      "div",
+      { class: "row-actions" },
+      h("input", { type: "search", class: "grow", placeholder: t("ha.search"), value: haUi.search, oninput: (e) => {
+          haUi.search = e.target.value;
+          clearTimeout(haUi.searchTimer);
+          haUi.searchTimer = setTimeout(() => {
+            paint();
+            const field = document.querySelector("#ha-body input[type=search]");
+            field?.focus();
+            field?.setSelectionRange(field.value.length, field.value.length);
+          }, 250);
+        } }),
+      h("label", { class: "check" }, h("input", { type: "checkbox", checked: haUi.extra, onchange: (e) => ((haUi.extra = e.target.checked), paint()) }), h("span", null, t("ha.showExtra"))),
+    ),
+    !x.online && h("p", { class: "muted small" }, t("ha.lastKnown")),
+    !shown.length && h("p", { class: "card pad muted" }, t("ha.pick.none")),
+    [...rooms].map(([room, items]) => h("div", { class: "card pad stack-s" }, h("div", { class: "section-head" }, h("h2", null, room || t("ha.noRoom")), h("span", { class: "muted small" }, String(items.length))), items.map((s) => haRow(x.id, s)))),
+  );
+  return body;
+}
+
+function haMenu(x, at = null) {
+  let dialog;
+  const item = (label, iconName, action, cls = "") => h("button", { type: "button", class: "menu-item " + cls, onclick: () => (dialog.close(), action()) }, icon(iconName), label);
+  dialog = openDialog(
+    at ? "menu dropdown" : "menu",
+    h("header", null, h("span", { class: "machine-icon" }, icon("home")), h("div", null, h("h2", null, x.name), haChip(x))),
+    item(t("ha.open"), "external", () => window.open(haWebUrl(x), "_blank", "noopener")),
+    item(t("ha.change"), "edit", () => haDialog(x)),
+    item(t("ha.remove"), "trash", () => removeHaDialog(x), "danger"),
+  );
+  if (at) placeAt(dialog, at);
+}
+
+function removeHaDialog(x) {
+  let dialog;
+  dialog = openDialog(
+    "confirm",
+    h("h2", { class: "wrap" }, t("ha.removeTitle", { name: x.name })),
+    h("p", { class: "muted" }, t("ha.removeLead")),
+    h("footer", null, closeButton(() => dialog, t("common.cancel")), button(t("ha.remove"), { class: "danger", onclick: async () => {
+        try {
+          await api("DELETE", `/api/ha/${x.id}`);
+          dialog.close();
+          go("#/machines");
+        } catch (e) {
+          toast(errorText(e), "error");
+        }
+      } }, "trash")),
+  );
+}
+
+/** Adding a server, or giving it a new address or token: by a person's sign-in or a token pasted */
+function haDialog(old = null) {
+  let mode = "login";
+  let flow = null;
+  const name = h("input", { value: old?.name ?? "", placeholder: "Home Assistant", maxLength: 40 });
+  const url = h("input", { value: old?.url ?? "", placeholder: "192.168.1.5", required: true, autocapitalize: "none", spellcheck: false, class: "mono" });
+  const user = h("input", { autocapitalize: "none", spellcheck: false, autocomplete: "off", name: "ha-user", required: !old });
+  const password = h("input", { type: "password", autocomplete: "new-password", name: "ha-password", required: !old });
+  const code = h("input", { inputmode: "numeric", autocomplete: "one-time-code", maxLength: 8, class: "mono" });
+  const codeRow = field(t("ha.code"), code, t("ha.codeHint"));
+  codeRow.hidden = true;
+  const token = h("textarea", { rows: 3, class: "mono small", spellcheck: false, autocomplete: "off", placeholder: "eyJhbGciOi…" });
+  const found = h("div", { class: "row-actions ha-found" });
+  const error = h("p", { class: "error", role: "alert" });
+  const loginPart = h("div", { class: "stack" }, h("div", { class: "form-pair" }, field(t("ha.user"), user), field(t("ha.password"), password)), codeRow, h("p", { class: "muted small" }, t(old ? "ha.loginLeadOld" : "ha.loginLead")));
+  const tokenPart = h("div", { class: "stack" }, field(t("ha.token"), token, t("ha.tokenHint")));
+  let dialog;
+  const setMode = (m) => {
+    mode = m;
+    loginPart.hidden = m !== "login";
+    tokenPart.hidden = m !== "token";
+    user.required = password.required = m === "login" && !old;
+    token.required = m === "token" && !old;
+    dialog?.querySelectorAll("[data-mode]").forEach((b) => b.classList.toggle("active", b.dataset.mode === m));
+    error.textContent = "";
+  };
+  const modeTab = (m) => h("button", { type: "button", class: "btn" + (mode === m ? " active" : ""), "data-mode": m, onclick: () => setMode(m) }, t("ha.mode." + m));
+  setMode(mode);
+  const send = async (e) => {
+    e.preventDefault();
+    error.textContent = "";
+    const submit = dialog.querySelector("button[type=submit]");
+    submit.disabled = true;
+    const data = { name: name.value, url: url.value };
+    if (mode === "login" && flow && code.value) Object.assign(data, { flow, code: code.value });
+    else if (mode === "login" && (password.value || !old)) Object.assign(data, { user: user.value, password: password.value });
+    else if (mode === "token" && token.value.trim()) data.token = token.value.trim();
+    try {
+      const saved = old ? await api("PATCH", `/api/ha/${old.id}`, data) : await api("POST", "/api/ha", data);
+      dialog.close();
+      toast(t(old ? "ha.changed" : "ha.added", { name: saved.name }));
+      if (old) void loadHa();
+      else go(`#/ha/${saved.id}`);
+    } catch (err) {
+      if (err.code === "ha.needCode" || err.code === "ha.badCode") {
+        flow = err.detail.flow;
+        codeRow.hidden = false;
+        code.value = "";
+        code.focus();
+        if (err.code === "ha.badCode") error.textContent = errorText(err);
+      } else error.textContent = errorText(err);
+    }
+    submit.disabled = false;
+  };
+  dialog = openDialog(
+    "wide",
+    h(
+      "form",
+      { class: "stack", onsubmit: send },
+      h("header", null, h("h2", { class: "grow" }, old ? t("ha.changeTitle", { name: old.name }) : t("ha.addTitle")), closeX(() => dialog)),
+      !old && h("p", null, t("ha.addLead")),
+      field(t("ha.url"), url, t("ha.urlHint")),
+      !old && found,
+      h("div", { class: "seg" }, modeTab("login"), modeTab("token")),
+      loginPart,
+      tokenPart,
+      field(t("ha.name"), name, t("ha.nameHint")),
+      error,
+      h("footer", null, closeButton(() => dialog, t("common.cancel")), h("button", { type: "submit", class: "btn primary" }, h("span", null, old ? t("ha.save") : t("ha.add")))),
+    ),
+  );
+  if (old) return;
+  // what answers on the home network, and Home Assistant installed here from the store
+  const chip = (label, address) => h("button", { type: "button", class: "chip-btn", onclick: () => ((url.value = address), user.focus()) }, icon("home"), h("span", null, label), h("span", { class: "muted mono small" }, " " + address.replace(/^https?:\/\//, "")));
+  const here = (state.overview?.apps ?? []).some((a) => a.name === "home-assistant") ? `http://${location.hostname}:8123` : null;
+  put(found, h("span", { class: "muted small" }, t("ha.looking")));
+  api("GET", "/api/ha/found").then(
+    ({ found: list }) => {
+      const fresh = list.filter((f) => !f.known && f.url !== here);
+      put(found, here && chip(t("ha.foundHere"), here), fresh.map((f) => chip(f.name, f.url)), !here && !fresh.length && h("span", { class: "muted small" }, t("ha.foundNone")));
+    },
+    () => put(found, here && chip(t("ha.foundHere"), here)),
+  );
 }
 
 // --- Proxmox servers ---
