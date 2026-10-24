@@ -386,6 +386,8 @@ dialog.tile-folder.drop-out .tiles { opacity: 0.5; }
 .badge-icon { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 8px; flex: none; }
 .badge-icon.danger { background: var(--danger-soft); color: var(--danger); }
 .badge-icon.warn { background: var(--warn-soft); color: var(--warn); }
+/* in the attention list a warning wears the accent; a danger stays red */
+.attention-item .badge-icon.warn { background: var(--accent-soft); color: var(--accent-text); }
 .all-good { display: flex; align-items: center; gap: 10px; color: var(--muted); }
 .activity-item { display: flex; align-items: flex-start; gap: 12px; padding: 8px 0; }
 .activity-item > .ico { margin-top: 3px; color: var(--faint); }
