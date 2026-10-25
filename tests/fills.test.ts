@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import { addSample, breakdown, fullIn, parseDu, weekly, type Sample } from "../src/fills";
+import { Ages, whoUses } from "../src/fills";
 
 const GB = 1024 ** 3;
 const DAY = 24 * 3600_000;
@@ -97,4 +98,37 @@ test("fullIn: a straight line through the last month", () => {
   expect(fullIn(growing.map((s, i) => ({ ...s, used: (100 + i * 0.1) * GB })), now)).toBeNull();
   // the disk was replaced with a larger one two days ago: too little to go by
   expect(fullIn([...growing.slice(0, 8), sample(9, 880 * GB, {}, 4000 * GB), sample(10, 890 * GB, {}, 4000 * GB)], now)).toBeNull();
+});
+
+test("Ages: old bytes per folder of the data folder, and the largest files", () => {
+  const now = Date.UTC(2026, 9, 25);
+  const day = 24 * 3600;
+  const ages = new Ages("/DATA", now);
+  const old = now / 1000 - 100 * day;
+  const fresh = now / 1000 - 5 * day;
+  ages.line(`${5e9}\t${old}\tMedia/Films/a.mkv`);
+  ages.line(`${1e9}\t${fresh}\tMedia/b.mkv`);
+  ages.line(`${2e9}\t${old}\tDownloads/c.iso`);
+  ages.line(`${3e6}\t${old}\tnotes.txt`);
+  // a name with a tab in it stays whole
+  ages.line(`${7e9}\t${fresh}\tDownloads/x\ty.bin`);
+  ages.line("");
+  expect(ages.old).toEqual({ "/DATA/Media": 5e9, "/DATA/Downloads": 2e9, "/DATA": 3e6 });
+  expect(ages.oldTotal).toBe(5e9 + 2e9 + 3e6);
+  expect(ages.largest.map((f) => f.path)).toEqual(["/DATA/Downloads/x\ty.bin", "/DATA/Media/Films/a.mkv", "/DATA/Downloads/c.iso", "/DATA/Media/b.mkv", "/DATA/notes.txt"]);
+  expect(ages.largest[1]!.at).toBe(old * 1000);
+  const many = new Ages("/DATA", now);
+  for (let i = 1; i <= 30; i++) many.add(i, fresh, `f${i}`);
+  expect(many.largest.map((f) => f.size)).toEqual([30, 29, 28, 27, 26, 25, 24, 23, 22, 21]);
+});
+
+test("whoUses: the apps whose folders are, hold or lie inside a folder", () => {
+  const apps = [
+    { name: "jellyfin", folders: ["/DATA/Media"] },
+    { name: "qbit", folders: ["/DATA/Downloads", "/DATA/Media/Films"] },
+    { name: "whole", folders: ["/DATA"] },
+    { name: "other", folders: ["/DATA/Mediaval"] },
+  ];
+  expect(whoUses("/DATA/Media", apps)).toEqual(["jellyfin", "qbit", "whole"]);
+  expect(whoUses("/DATA/Photos", apps)).toEqual(["whole"]);
 });

@@ -7,6 +7,10 @@
  *
  * Reading `du`, splitting the folder into parts (`breakdown`), the pace (`weekly`) and the forecast
  * (`fullIn`) are pure functions. Nothing here changes a file.
+ *
+ * The same measurement walks the files once more (`find`, outside AppData and the trash, which are the
+ * apps' and Hata's own): how much of each folder has not changed for `OLD_DAYS`, and the largest files —
+ * what a person may want to look at when the disk fills. Which apps use a folder is said by `whoUses`.
  */
 import { statfsSync, statSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
@@ -114,6 +118,80 @@ export function fullIn(samples: Sample[], now: number): number | null {
   return days <= FORECAST_FAR ? Math.max(days, 0) : null;
 }
 
+// ---- how old the files are ----
+
+/** Files not changed for this many days are "old" */
+export const OLD_DAYS = 90;
+const LARGEST_KEPT = 10;
+
+export interface BigFile {
+  path: string;
+  size: number;
+  /** When it was last changed, ms */
+  at: number;
+}
+
+/**
+ * Adds files up as they come from `find`: the bytes not changed for `OLD_DAYS` per part of the data
+ * folder (a folder of its own, or the folder itself for the files lying in it), and the largest files.
+ */
+export class Ages {
+  old: Record<string, number> = {};
+  oldTotal = 0;
+  largest: BigFile[] = [];
+  constructor(
+    readonly root: string,
+    readonly now: number,
+  ) {}
+  /** `rel` — the path inside the data folder; `mtime` — seconds */
+  add(size: number, mtime: number, rel: string): void {
+    if (!rel || !Number.isFinite(size)) return;
+    const at = mtime * 1000;
+    if (this.now - at >= OLD_DAYS * DAY_MS) {
+      const slash = rel.indexOf("/");
+      const part = slash < 0 ? this.root : join(this.root, rel.slice(0, slash));
+      this.old[part] = (this.old[part] ?? 0) + size;
+      this.oldTotal += size;
+    }
+    if (this.largest.length < LARGEST_KEPT || size > this.largest.at(-1)!.size) {
+      this.largest.push({ path: join(this.root, rel), size, at });
+      this.largest.sort((a, b) => b.size - a.size);
+      if (this.largest.length > LARGEST_KEPT) this.largest.pop();
+    }
+  }
+  /** One record of `find -printf "%s\t%T@\t%P\0"` */
+  line(record: string): void {
+    const [size, mtime, ...rel] = record.split("\t");
+    this.add(Number(size), Number(mtime), rel.join("\t"));
+  }
+}
+
+/** The apps that use a folder: one of an app's folders is the folder, lies inside it, or holds it */
+export function whoUses(path: string, apps: { name: string; folders: string[] }[]): string[] {
+  const near = (a: string, b: string) => a === b || a.startsWith(b + "/") || b.startsWith(a + "/");
+  return apps.filter((app) => app.folders.some((folder) => near(folder, path))).map((app) => app.name);
+}
+
+/** Walks the data folder's files, its own file system only, without the apps' data and the trash */
+async function ages(root: string, gently: string[]): Promise<Ages | null> {
+  const found = new Ages(root, Date.now());
+  const skip = [join(root, APP_DATA), join(root, TRASH)];
+  try {
+    const proc = Bun.spawn({ cmd: [...gently, "find", root, "-xdev", "(", "-path", skip[0]!, "-o", "-path", skip[1]!, ")", "-prune", "-o", "-type", "f", "-printf", "%s\\t%T@\\t%P\\0"], stdout: "pipe", stderr: "ignore", stdin: "ignore", timeout: MEASURE_TIMEOUT_MS, env: { ...process.env, PATH, LC_ALL: "C" } });
+    const decoder = new TextDecoder();
+    let rest = "";
+    for await (const chunk of proc.stdout as ReadableStream<Uint8Array>) {
+      const records = (rest + decoder.decode(chunk, { stream: true })).split("\0");
+      rest = records.pop() ?? "";
+      for (const record of records) found.line(record);
+    }
+    await proc.exited;
+    return found;
+  } catch {
+    return null;
+  }
+}
+
 // ---- the running part ----
 
 interface State {
@@ -124,6 +202,10 @@ interface State {
   total: number;
   parts: Part[];
   samples: Sample[];
+  /** Bytes not changed for OLD_DAYS, per part, and in all */
+  old?: Record<string, number>;
+  oldTotal?: number;
+  largest?: BigFile[];
 }
 
 const FILE = join(DATA_DIR, "fills.json");
@@ -168,7 +250,8 @@ async function measure(): Promise<void> {
   const { total, parts } = breakdown(rows, root, elsewhere);
   const at = Date.now();
   const sample: Sample = { at, ...fs, parts: Object.fromEntries(parts.filter((part) => part.kind !== "mount").map((part) => [part.path, part.size])) };
-  state = { root, at, took: at - started, total, parts, samples: addSample(state?.root === root ? state.samples : [], sample) };
+  const aged = await ages(root, gently);
+  state = { root, at, took: Date.now() - started, total, parts, samples: addSample(state?.root === root ? state.samples : [], sample), ...(aged ? { old: aged.old, oldTotal: aged.oldTotal, largest: aged.largest } : {}) };
   writeJsonAtomic(FILE, state);
 }
 
@@ -190,12 +273,17 @@ export interface FillsReport {
   total: number;
   /** What the data folder itself holds */
   size: number;
-  parts: (Part & { week: number | null })[];
+  parts: (Part & { week: number | null; old: number | null; apps: string[] })[];
+  /** Bytes of files not changed for `oldDays`, outside AppData and the trash; null — not counted yet */
+  oldTotal: number | null;
+  oldDays: number;
+  largest: BigFile[];
   /** Days until the file system is full at the pace of the last month */
   fullIn: number | null;
 }
 
-export function fills(): FillsReport | null {
+/** `apps` — every installed app with its folders outside AppData, to say which ones use a folder */
+export function fills(apps: { name: string; folders: string[] }[] = []): FillsReport | null {
   const root = settings.dataRoot;
   const fs = fileSystem(root);
   if (!fs) return null;
@@ -207,7 +295,15 @@ export function fills(): FillsReport | null {
     at: measured?.at ?? null,
     ...fs,
     size: measured?.total ?? 0,
-    parts: (measured?.parts ?? []).map((part) => ({ ...part, week: part.kind === "mount" ? null : weekly(measured!.samples, part.path, now) })),
+    parts: (measured?.parts ?? []).map((part) => ({
+      ...part,
+      week: part.kind === "mount" ? null : weekly(measured!.samples, part.path, now),
+      old: measured?.old && (part.kind === "folder" || part.kind === "rest") ? (measured.old[part.path] ?? 0) : null,
+      apps: part.kind === "folder" || part.kind === "mount" ? whoUses(part.path, apps) : [],
+    })),
+    oldTotal: measured?.oldTotal ?? null,
+    oldDays: OLD_DAYS,
+    largest: measured?.largest ?? [],
     fullIn: measured ? fullIn(measured.samples, now) : null,
   };
 }

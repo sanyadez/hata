@@ -3922,5 +3922,12 @@
   "error.array.parity2Few": "Для другої парності потрібно щонайменше два захищені диски.",
   "activity.array.fix.file": "Файл повернуто з парності: {target}",
   "activity.array.fix.fileFailed": "Не вдалося повернути файл із парності: {target}",
-  "array.goneLooking": "Переглядаю диски…"
+  "array.goneLooking": "Переглядаю диски…",
+  "fills.oldHere": "{size} не змінювалось понад {days} днів",
+  "fills.usedBy": "Користуються:",
+  "fills.oldAll": "{size} файлів поза даними застосунків не змінювались понад {days} днів, найбільше — у {folder}. Коли диск заповнюється, туди варто зазирнути першим ділом.",
+  "fills.oldAllNowhere": "{size} файлів поза даними застосунків не змінювались понад {days} днів.",
+  "fills.largest": "Найбільші файли (поза даними застосунків)",
+  "fills.changedAgo": "змінено {n} дн. тому",
+  "fills.changedToday": "змінено сьогодні"
 }

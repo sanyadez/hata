@@ -3922,5 +3922,12 @@
   "error.array.parity2Few": "A second parity needs at least two protected disks.",
   "activity.array.fix.file": "File brought back from the parity: {target}",
   "activity.array.fix.fileFailed": "A file could not be brought back from the parity: {target}",
-  "array.goneLooking": "Looking at the disks…"
+  "array.goneLooking": "Looking at the disks…",
+  "fills.oldHere": "{size} not changed for over {days} days",
+  "fills.usedBy": "Used by:",
+  "fills.oldAll": "{size} of files outside the apps' data have not changed for over {days} days, most of it in {folder}. When the disk fills, that is the first place to look.",
+  "fills.oldAllNowhere": "{size} of files outside the apps' data have not changed for over {days} days.",
+  "fills.largest": "The largest files (outside the apps' data)",
+  "fills.changedAgo": "changed {n} days ago",
+  "fills.changedToday": "changed today"
 }

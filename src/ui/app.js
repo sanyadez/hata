@@ -13925,13 +13925,57 @@ function fillsCard(fills, busy) {
     return h(
       "tr",
       null,
-      h("td", null, h("div", { class: "with-icon" }, h("i", { class: "dot " + (part.kind === "mount" ? "c-rest" : colour(i, part)) }), h("div", null, href ? h("a", { class: "strong", href }, name) : h("div", { class: "strong" }, name), part.kind === "outside" ? h("div", { class: "muted small" }, t("fills.outsideHint")) : part.path && h("div", { class: "muted small mono clip" }, part.path)))),
+      h(
+        "td",
+        null,
+        h(
+          "div",
+          { class: "with-icon" },
+          h("i", { class: "dot " + (part.kind === "mount" ? "c-rest" : colour(i, part)) }),
+          h(
+            "div",
+            null,
+            href ? h("a", { class: "strong", href }, name) : h("div", { class: "strong" }, name),
+            part.kind === "outside" ? h("div", { class: "muted small" }, t("fills.outsideHint")) : part.path && h("div", { class: "muted small mono clip" }, part.path),
+            // how much of it has not changed for long, and which apps keep files there
+            part.old > 0 && part.old >= part.size * 0.05 && h("div", { class: "muted small" }, t("fills.oldHere", { size: bytes(part.old), days: fills.oldDays })),
+            part.apps?.length > 0 && h("div", { class: "muted small fills-apps" }, t("fills.usedBy"), " ", part.apps.map((app, n) => [n > 0 && ", ", h("a", { href: `#/apps/${app}` }, apps.get(app)?.title ?? app)])),
+          ),
+        ),
+      ),
       h("td", { class: "num" }, part.kind === "mount" ? "" : bytes(part.size)),
       h("td", { class: "num muted" }, part.kind === "mount" ? "" : percent < 1 ? "<1%" : Math.round(percent) + "%"),
       h("td", null, trend(part)),
     );
   };
   const measure = busy(t("fills.measuring"), { path: "/api/disks/fills" });
+  // where the files nobody touched for long lie: a hint for when the disk fills
+  const oldest = fills.parts.filter((part) => part.old > 0).sort((a, b) => b.old - a.old)[0];
+  const advice = fills.at && fills.oldTotal >= Math.max(1024 ** 3, fills.size * 0.1) && h("p", { class: "banner small" }, t(oldest ? "fills.oldAll" : "fills.oldAllNowhere", { size: bytes(fills.oldTotal), days: fills.oldDays, folder: oldest ? partName(oldest) : "" }));
+  const ageOf = (at) => Math.max(0, Math.floor((Date.now() - at) / 86_400_000));
+  const largest =
+    fills.at &&
+    fills.largest?.length > 0 &&
+    h(
+      "details",
+      { class: "pad fills-largest" },
+      h("summary", { class: "muted small" }, t("fills.largest")),
+      h(
+        "div",
+        { class: "stack" },
+        fills.largest.map((file) => {
+          const name = file.path.split("/").pop();
+          const folder = file.path.slice(0, file.path.length - name.length - 1) || "/";
+          return h(
+            "div",
+            { class: "snapshot" },
+            h("span", { class: "badge-icon plain" }, icon("file")),
+            h("div", { class: "grow" }, h("a", { class: "strong clip", href: filesHash(folder), onclick: () => (filesUi.pick = name) }, name), h("div", { class: "muted small mono clip" }, folder)),
+            h("div", { class: "num" }, h("div", { class: "strong" }, bytes(file.size)), h("div", { class: "muted small" }, ageOf(file.at) ? t("fills.changedAgo", { n: ageOf(file.at) }) : t("fills.changedToday"))),
+          );
+        }),
+      ),
+    );
   return h(
     "section",
     { class: "card table-wrap fills" },
@@ -13946,8 +13990,10 @@ function fillsCard(fills, busy) {
       ),
       h("p", { class: "muted small" }, t(fills.at ? "fills.lead" : "fills.never")),
       fills.at && bar,
+      advice,
     ),
     fills.at && h("table", { class: "disks" }, h("thead", null, h("tr", null, h("th", null, t("fills.col.folder")), h("th", { class: "num" }, t("fills.col.size")), h("th", { class: "num" }, t("fills.col.share")), h("th", null, t("fills.col.week")))), h("tbody", null, parts.map(row))),
+    largest,
   );
 }
 

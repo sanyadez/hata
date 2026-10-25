@@ -1318,7 +1318,9 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
     const work = listJobs().find((j) => j.app === "" && j.status === "running" && ["format", "fsck", "wipe", "pool", "resize"].includes(j.kind));
     const working = work ? { id: work.id, kind: work.kind, target: work.target ?? "", stoppable: !!work.stoppable, line: work.log.at(-1) ?? "" } : null;
     noteTypes([...new Set(listed.disks.flatMap((d) => d.volumes.map((v) => v.fstype)))]);
-    return json({ ...listed, fills: fills(), mounting: mountingReport(listed.disks), array: arrayReport(), raids: poolsReport(), working, ...more });
+    // which apps use a folder of the data folder: their folders outside AppData
+    const folders = installedNames().map((name) => ({ name, folders: appFolders(name).other }));
+    return json({ ...listed, fills: fills(folders), mounting: mountingReport(listed.disks), array: arrayReport(), raids: poolsReport(), working, ...more });
   };
   const refused = (failure: Extract<Outcome, { error: string }>) => fail(400, failure.error, { message: failure.message ?? "", ...(failure.needs ?? {}) });
   // a long piece of work on a disk: answered at once with the job the page then follows
