@@ -878,6 +878,11 @@ dialog.dropdown header { padding: 4px 6px; margin-bottom: 8px; }
 .term-frame { display: block; width: 100%; flex: 1; min-height: 360px; border: 1px solid var(--border); border-radius: var(--radius-md); background: var(--console); }
 .term-holder { display: flex; height: max(360px, calc(100dvh - 410px)); }
 .cmd-row { display: flex; align-items: center; gap: 12px; }
+/* A console with the command it shows as its head, so the command reads on any wallpaper. */
+.console-frame { background: var(--console); border: 1px solid var(--border); border-radius: var(--radius-md); overflow: hidden; }
+.console-frame > .cmd, .console-frame > .cmd-row { padding: 8px 16px; border-bottom: 1px solid #ffffff14; color: #9a938a; }
+.console-frame > .cmd-row > .cmd { color: inherit; }
+.console-frame > .console, .console-frame .term-frame { border: 0; border-radius: 0; }
 body.term-page { margin: 0; height: 100dvh; display: flex; flex-direction: column; background: var(--console); color: #d9d2c9; overflow: hidden; }
 .term-bar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 6px 8px 6px 14px; border-bottom: 1px solid #ffffff14; font-size: 12px; }
 .term-bar .btn { color: #a8a099; }
