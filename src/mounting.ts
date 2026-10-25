@@ -23,7 +23,8 @@ import { record } from "./activity";
 import { bus } from "./bus";
 import { DATA_DIR, SECRETS_DIR, saveSettings, settings } from "./config";
 import { connected, diskLabel, type Disk, type Volume } from "./disks";
-import { CHECKERS, checkCommand, checkVerdict, cleanLabel, familyOf, FAT_MAX, FORMATS, FS_NAMES, isFs, labelCommand, LABELLERS, mkfsCommand, partLine, PART_MIN, partType, passProgress, TABLE_ROOM, tableFor, tableScript, unallocated, type Fs, type Verdict } from "./format";
+import { parseBtrfsShow } from "./raid";
+import { CHECKERS, checkCommand, checkVerdict, cleanLabel, familyOf, FAT_MAX, FORMATS, FS_NAMES, isFs, isPosix, labelCommand, LABELLERS, labelsInUse, mendable, fsResizeCommand, mkfsCommand, nested, parseSfdisk, partLine, PART_MIN, partType, passProgress, MIB, RESIZE, resizeScript, roomFor, TABLE_ROOM, tableFor, tableScript, unallocated, type Fs, type Table, type Verdict } from "./format";
 import { isPlainObject, readJsonFile, writeJsonAtomic, writeTextAtomic } from "./fsutil";
 import { installCommand, packageManager, PATH, run, runLogged } from "./packages";
 
@@ -186,9 +187,9 @@ export function poolOptions(name: string, branches: string[]): string {
  * The connected folders that can be merged: Hata's own, kept, of a file system with owners, in no merged
  * folder yet, and not the parity of the protection — new files would land in the room the parity needs
  */
-export function mergeable(entries: FstabEntry[], mounted: string[], parity = ""): string[] {
-  const taken = new Set(Object.values(pools(entries)).flat());
-  return entries.filter((e) => e.ours && POSIX_FS.test(e.fstype) && mounted.includes(e.path) && !taken.has(e.path) && e.path !== parity).map((e) => e.path);
+export function mergeable(entries: FstabEntry[], mounted: string[], parity: string | string[] = ""): string[] {
+  const taken = new Set([...Object.values(pools(entries)).flat(), ...[parity].flat().filter(Boolean)]);
+  return entries.filter((e) => e.ours && POSIX_FS.test(e.fstype) && mounted.includes(e.path) && !taken.has(e.path)).map((e) => e.path);
 }
 
 // ---- the running part ----
@@ -519,7 +520,7 @@ export function formatDisk(name: string, seen: { serial: string; size: number },
     const failed = await attach({ path: target.path, uuid, fstype: fs }, path, ask.connect === "keep");
     if (failed) return failed;
     // the apps' own user owns the new disk, as it owns their data: an app can write to it at once
-    if (fs === "ext4") {
+    if (isPosix(fs)) {
       try {
         chownSync(path, settings.puid, settings.pgid);
         chmodSync(path, 0o775);
@@ -635,6 +636,7 @@ export function checkVolume(device: string, repair: boolean, user: string, log: 
     if ("error" in found) return found;
     const { volume, fs } = found;
     if (!has(CHECKERS[fs])) return lacks("disk.noCheckTool", FORMATS[fs].package);
+    if (repair && !mendable(fs)) return { error: "disk.noRepair" };
     const folder = volume.mounts[0];
     if (folder && (volume.mounts.length > 1 || keeps(folder))) return { error: volume.mounts.length > 1 ? "disk.inUse" : keeps(folder)! };
     if (dry) return { device, verdict: "clean", output: "", repaired: repair, back: "" };
@@ -670,8 +672,8 @@ export function relabel(device: string, text: string, user: string): Promise<Out
     if (!label) return { error: "disk.badLabel" };
     if (!has(LABELLERS[fs])) return lacks("disk.noLabelTool", FORMATS[fs].package);
     const name = () => run(labelCommand(fs, volume.path, label), 60_000, UTF8);
-    // ext4 takes a new label while it is in use; the others have to be let go of
-    const ran = fs === "ext4" ? { done: await name(), back: "" } : await paused(volume, name);
+    // ext4 and btrfs take a new label while in use; the others have to be let go of
+    const ran = labelsInUse(fs) && volume.mounts[0] ? { done: await run(labelCommand(fs, fs === "btrfs" ? volume.mounts[0] : volume.path, label), 60_000, UTF8), back: "" } : await paused(volume, name);
     if ("error" in ran) return ran;
     if (ran.done.code !== 0) return { error: "disk.labelFailed", message: said(ran.done) };
     // a file system in use is not looked at again by itself: lsblk would go on showing the old label
@@ -680,6 +682,222 @@ export function relabel(device: string, text: string, user: string): Promise<Out
     record("system.disk.label", { user, detail: `${volume.label || volume.name} → ${label}` });
     if (ran.back) return { error: "disk.mountFailed", message: ran.back };
     return { path: volume.mounts[0] ?? "" };
+  });
+}
+
+// ---- one partition made larger or smaller, or taken away ----
+
+/** A partition as the size dialog sees it */
+export interface PartInfo {
+  path: string;
+  number: number;
+  size: number;
+  /** As large as it may grow: up to the next partition or the end of the disk */
+  max: number;
+  /** As small as it may sensibly be made: what its files take and some room; null — not known */
+  min: number | null;
+  fs: Fs | null;
+  grow: boolean;
+  shrink: boolean;
+  removable: boolean;
+  /** Why nothing can be done to it, as an error code; "" — something can */
+  why: string;
+}
+
+async function tableOf(disk: Disk): Promise<Table | null> {
+  if (!has("sfdisk")) return null;
+  const ran = await run(["sfdisk", "-J", disk.path], 15_000);
+  try {
+    return parseSfdisk(JSON.parse(ran.out), disk.size);
+  } catch {
+    return null;
+  }
+}
+
+/** Bytes the files of an ext4 that is not mounted take, from its superblock */
+async function usedOffline(volume: Volume, fs: Fs | null): Promise<number | null> {
+  if (fs !== "ext4" || !has("dumpe2fs")) return null;
+  const head = (await run(["dumpe2fs", "-h", volume.path], 15_000)).out;
+  const n = (key: string) => Number(new RegExp(`^${key}:\\s+(\\d+)`, "m").exec(head)?.[1] ?? NaN);
+  const used = (n("Block count") - n("Free blocks")) * n("Block size");
+  return Number.isFinite(used) ? used : null;
+}
+
+/** The partitions of a disk with what may be done to each one's size */
+export async function partsOf(name: string): Promise<{ table: string; parts: PartInfo[] } | Failure> {
+  const disk = (await connected()).find((d) => d.name === name);
+  if (!disk || !existsSync(disk.path)) return { error: "disk.unknown" };
+  if (!has("sfdisk")) return lacks("disk.noPartitionTool", partitionPackage());
+  const table = await tableOf(disk);
+  if (!table) return { error: "disk.noTable" };
+  const may = changeable(disk, Object.keys(oursNow()));
+  const out: PartInfo[] = [];
+  for (const volume of disk.volumes.filter((v) => v.kind === "part")) {
+    const entry = table.parts.find((p) => p.node === volume.path);
+    if (!entry) continue;
+    const fs = familyOf(volume.fstype);
+    const can = fs ? RESIZE[fs] : null;
+    const used = volume.used ?? (await usedOffline(volume, fs));
+    const min = used === null ? null : Math.min(volume.size, Math.ceil((used * 1.1 + 256 * MIB) / MIB) * MIB);
+    const max = roomFor(table, entry);
+    // a folder something of Hata's stands on (the data, the backups, a share, a pool, the array) stays as it is
+    const kept = volume.mounts.map(keeps).find(Boolean);
+    const why = nested(table, entry) ? "disk.nested" : !may.volumes.includes(volume.path) || held(volume.name) ? "disk.inUse" : kept ?? "";
+    out.push({ path: volume.path, number: entry.number, size: volume.size, max, min, fs, grow: !why && !!can?.grow && max > volume.size + MIB, shrink: !why && !!can?.shrink, removable: !why || (why === "disk.nested" && entry.number > 4 && may.volumes.includes(volume.path) && !kept), why });
+  }
+  return { table: table.label, parts: out };
+}
+
+/** Mounts a file system for a moment where nothing sees it, and lets it go afterwards */
+async function mountedFor<T>(volume: Volume, work: (place: string) => Promise<T>): Promise<T | Failure> {
+  if (volume.mounts[0]) return work(volume.mounts[0]);
+  let dir = "";
+  try {
+    dir = mkdtempSync("/run/hata-resize-");
+    const up = await run(["mount", "-t", volume.fstype, volume.path, dir], 60_000);
+    if (up.code !== 0) return { error: "disk.mountFailed", message: said(up) };
+    try {
+      return await work(dir);
+    } finally {
+      await run(["umount", dir], 120_000);
+    }
+  } finally {
+    try {
+      if (dir) rmdirSync(dir);
+    } catch {}
+  }
+}
+
+/**
+ * Makes a partition larger or smaller, its files kept: the file system grows after the partition, or
+ * shrinks before it, so it never reaches past its partition. ext4 and NTFS are changed while not
+ * mounted (a folder Hata connected is let go for it and connected back), btrfs and XFS while mounted.
+ * XFS cannot shrink, FAT and exFAT cannot change at all. `seen` — the disk as the person saw it.
+ */
+export function resizePart(name: string, seen: { serial: string; size: number }, device: string, bytes: number, user: string, log: (line: string) => void = () => {}, dry = false): Promise<Outcome> {
+  return oneAtATime(async () => {
+    const disk = (await connected()).find((d) => d.name === name);
+    if (!disk || !existsSync(disk.path)) return { error: "disk.unknown" };
+    if (disk.serial !== seen.serial || disk.size !== seen.size) return { error: "disk.changed" };
+    const listed = await partsOf(name);
+    if ("error" in listed) return listed;
+    const info = listed.parts.find((p) => p.path === device);
+    const volume = disk.volumes.find((v) => v.path === device);
+    if (!info || !volume) return { error: "disk.unknown" };
+    if (info.why) return { error: info.why };
+    if (!info.fs || (!info.grow && !info.shrink)) return { error: "disk.cantResize" };
+    const fs = info.fs;
+    const target = Math.floor(bytes / MIB) * MIB;
+    if (!Number.isFinite(target) || target < PART_MIN || target > info.max) return { error: "disk.badSize" };
+    if (Math.abs(target - info.size) < MIB) return { error: "disk.sameSize" };
+    const grow = target > info.size;
+    if (grow ? !info.grow : !info.shrink) return { error: grow ? "disk.cantResize" : "disk.cantShrink" };
+    if (!grow && info.min !== null && target < info.min) return { error: "disk.tooSmall", message: `${Math.ceil(info.min / 1e9)} GB` };
+    const can = RESIZE[fs];
+    if (!has(can.tool)) return lacks("disk.noResizeTool", can.package);
+    if (fs === "ext4" && !has("e2fsck")) return lacks("disk.noCheckTool", "e2fsprogs");
+    if (!has("partx")) return lacks("disk.noPartitionTool", "util-linux");
+    // let go of while it changes: then nothing of Hata's may stand on it
+    const folder = volume.mounts[0];
+    if (!can.mounted && folder && keeps(folder)) return { error: keeps(folder)! };
+    if (dry) return { path: folder ?? "" };
+
+    const table = (await tableOf(disk))!;
+    const sectors = Math.floor(target / table.sectorSize);
+    const repartition = async (): Promise<Failure | null> => {
+      log(`Setting partition ${info.number} of ${disk.path} to ${Math.round(target / MIB)} MiB`);
+      const ran = await run(["sfdisk", "--no-reread", "-N", String(info.number), disk.path], 60_000, {}, resizeScript(sectors));
+      if (ran.code !== 0) return { error: "disk.resizeFailed", message: said(ran) };
+      // the kernel takes the new size of a partition in use from partx, not from a reread of the whole table
+      await run(["partx", "-u", "--nr", String(info.number), disk.path], 30_000);
+      await settle();
+      return null;
+    };
+    const step = async (command: string[]): Promise<Failure | null> => {
+      log(command.join(" "));
+      const ran = await runLogged(command, log, 6 * 60 * 60_000);
+      return ran.code === 0 ? null : { error: "disk.resizeFailed", message: said(ran) };
+    };
+    const ntfs = async (command: string[]): Promise<Failure | null> => {
+      log(command.join(" "));
+      const ran = await run(command, 6 * 60 * 60_000, {}, "y\n");
+      for (const line of `${ran.out}\n${ran.err}`.split("\n").filter((l) => l.trim()).slice(-8)) log(line);
+      if (ran.code !== 0) return { error: "disk.resizeFailed", message: said(ran) };
+      // ntfsresize marks the volume for a check by Windows, and the kernel's driver then refuses to mount it
+      const clean = await run(["ntfsfix", "-d", volume.path], 10 * 60_000);
+      log(clean.code === 0 ? "The mark “to be checked by Windows” taken off" : `ntfsfix: ${said(clean)}`);
+      return null;
+    };
+
+    let failed: Failure | null = null;
+    if (can.mounted) {
+      // btrfs and XFS change while mounted
+      const devid = async (place: string): Promise<number> => {
+        const shown = parseBtrfsShow((await run(["btrfs", "filesystem", "show", "--raw", place], 15_000)).out)[0];
+        return shown?.devices.find((d) => d.path === device)?.id || 1;
+      };
+      const done = await mountedFor(volume, async (place) => {
+        if (grow) {
+          const cut = await repartition();
+          if (cut) return cut;
+          return step(fsResizeCommand(fs, place, "max", fs === "btrfs" ? await devid(place) : 1));
+        }
+        const shrunk = await step(fsResizeCommand(fs, place, target, await devid(place)));
+        return shrunk ?? (await repartition());
+      });
+      failed = done && "error" in done ? done : null;
+    } else {
+      if (folder) log(`Disconnecting ${folder} for the change`);
+      const ran = await paused(volume, async (): Promise<Failure | null> => {
+        if (fs === "ext4") {
+          // resize2fs works only on a file system checked just before
+          const checked = await runLogged(["e2fsck", "-f", "-y", "-C", "1", volume.path], log, 12 * 60 * 60_000, {}, (line) => passProgress(line) ?? line);
+          if (checked.code >= 4) return { error: "disk.resizeFailed", message: "The file system has damage the check could not mend." };
+          if (grow) return (await repartition()) ?? (await step(fsResizeCommand(fs, volume.path, "max")));
+          return (await step(fsResizeCommand(fs, volume.path, target))) ?? (await repartition());
+        }
+        if (grow) return (await repartition()) ?? (await ntfs(fsResizeCommand(fs, volume.path, "max")));
+        return (await ntfs(fsResizeCommand(fs, volume.path, target))) ?? (await repartition());
+      });
+      if ("error" in ran) return ran;
+      if (folder) log(ran.back ? `Could not connect ${folder} again: ${ran.back}` : `${folder} is connected again`);
+      failed = ran.done ?? (ran.back ? { error: "disk.mountFailed", message: `The size is changed, but ${folder} could not be connected again: ${ran.back}` } : null);
+    }
+    if (failed) return failed;
+    record("system.disk.resize", { user, detail: `${volume.label || volume.name}: ${Math.round(info.size / 1e9)} → ${Math.round(target / 1e9)} GB` });
+    return { path: folder ?? "" };
+  }, dry ? "asked" : "long");
+}
+
+/** Takes a partition away: its file system is erased, the room left becomes free for a new one */
+export function deletePart(name: string, seen: { serial: string; size: number }, device: string, user: string, dry = false): Promise<Outcome> {
+  return oneAtATime(async () => {
+    const disk = (await connected()).find((d) => d.name === name);
+    if (!disk || !existsSync(disk.path)) return { error: "disk.unknown" };
+    if (disk.serial !== seen.serial || disk.size !== seen.size) return { error: "disk.changed" };
+    const listed = await partsOf(name);
+    if ("error" in listed) return listed;
+    const info = listed.parts.find((p) => p.path === device);
+    const volume = disk.volumes.find((v) => v.path === device);
+    if (!info || !volume) return { error: "disk.unknown" };
+    if (!info.removable) return { error: info.why || "disk.inUse" };
+    for (const folder of volume.mounts) {
+      const why = keeps(folder);
+      if (why) return { error: why };
+    }
+    if (dry) return { path: "" };
+    for (const folder of volume.mounts) {
+      const gone = await release(folder);
+      if ("error" in gone) return gone;
+    }
+    if (inUse({ name: volume.name, path: volume.path, volumes: [] })) return { error: "disk.inUse" };
+    await run(["wipefs", "-a", volume.path], 30_000);
+    const ran = await run(["sfdisk", "--no-reread", "--delete", disk.path, String(info.number)], 60_000);
+    if (ran.code !== 0) return { error: "disk.resizeFailed", message: said(ran) };
+    await run(["partx", "-d", "--nr", String(info.number), disk.path], 30_000);
+    await settle();
+    record("system.disk.partDelete", { user, detail: `${volume.name}${volume.label ? ` “${volume.label}”` : ""} · ${diskLabel(disk)}` });
+    return { path: "" };
   });
 }
 
@@ -724,7 +942,7 @@ export function mergeFolders(branches: unknown, label: string, user: string): Pr
   return oneAtATime(async () => {
     if (!NAME_RE.test(label)) return { error: "disk.badName" };
     const lines = fstab();
-    const can = mergeable(lines, [...mountedAt().keys()], settings.snapraid.parity);
+    const can = mergeable(lines, [...mountedAt().keys()], [settings.snapraid.parity, settings.snapraid.parity2]);
     const chosen = Array.isArray(branches) ? [...new Set(branches.filter((b): b is string => typeof b === "string"))] : [];
     if (chosen.length < 2 || chosen.some((b) => !can.includes(b))) return { error: "disk.badMerge" };
     if (!has("mergerfs")) return { error: "disk.noMergeTool", needs: { package: "mergerfs", install: installCommand("mergerfs") } };
@@ -774,7 +992,7 @@ function keeps(path: string): string | null {
   if (Object.values(pools(fstab())).some((branches) => branches.includes(path))) return "disk.holds.pool";
   // a disk of the array taken away is a disk that failed, as far as the parity knows
   // (one that is gone already is let go: its replacement takes the same folder)
-  if (mountedAt().has(path) && (settings.snapraid.parity === path || settings.snapraid.data.some((d) => d.path === path))) return "disk.holds.array";
+  if (mountedAt().has(path) && (settings.snapraid.parity === path || (settings.snapraid.parity2 !== "" && settings.snapraid.parity2 === path) || settings.snapraid.data.some((d) => d.path === path))) return "disk.holds.array";
   const used = holds(path, { dataRoot: settings.dataRoot, backupDir: settings.backup.dir, state: [DATA_DIR, SECRETS_DIR], shares: settings.shares.map((s) => s.path) });
   return used ? `disk.holds.${used}` : null;
 }
@@ -1050,7 +1268,7 @@ export interface MountingReport {
 }
 
 /** The connected folders that can be merged into one now */
-export const mergeableNow = (): string[] => mergeable(fstab(), [...mountedAt().keys()], settings.snapraid.parity);
+export const mergeableNow = (): string[] => mergeable(fstab(), [...mountedAt().keys()], [settings.snapraid.parity, settings.snapraid.parity2]);
 
 /** The folders Hata connected */
 function oursNow(): MountingReport["ours"] {
@@ -1071,7 +1289,7 @@ export function mountingReport(disks: Disk[]): MountingReport {
     mountable: disks.flatMap((d) => d.volumes.filter(mountable).map((v) => v.path)),
     ours,
     pools: pools(lines),
-    mergeable: mergeable(lines, [...mountedAt().keys()], settings.snapraid.parity),
+    mergeable: mergeable(lines, [...mountedAt().keys()], [settings.snapraid.parity, settings.snapraid.parity2]),
     unused,
     free: Object.fromEntries(disks.map((d) => [d.name, blockers(d).some((b) => b !== "mounted") ? 0 : unallocated(d)])),
     changeable: Object.fromEntries(disks.map((d) => [d.name, changeable(d, Object.keys(ours))])),

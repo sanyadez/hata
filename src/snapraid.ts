@@ -10,6 +10,8 @@
  * night: `diff`, then `sync` — unless more files have disappeared than the limit, which is what a wrong
  * `rm` or a disk that came up empty looks like; then nothing is written and the person decides: bring
  * the files back, or sync anyway. Once a week a part of the array is read and compared (`scrub`).
+ * A second parity disk is optional: with it, any two disks may fail at once. One file that is gone
+ * since the last sync can be brought back by itself (`bringBackFile`).
  *
  * SnapRAID keeps no owners and no permissions: a file it brings back is root's, mode 0600. Hata gives
  * such files the owner of the disk's top folder and makes them readable.
@@ -34,6 +36,7 @@ const MARK = "# Written by Hata";
 const CONTENT_DIR = "/var/lib/snapraid";
 const CONTENT = "snapraid.content";
 const PARITY = "snapraid.parity";
+const PARITY2 = "snapraid.2-parity";
 const POSIX = /^(ext[234]|xfs|btrfs|f2fs)$/;
 
 export const isOurs = (conf: string): boolean => conf.startsWith(MARK);
@@ -41,6 +44,8 @@ export const isOurs = (conf: string): boolean => conf.startsWith(MARK);
 export interface ArraySettings {
   /** The folder of the disk that holds parity; "" — protection is off */
   parity: string;
+  /** The folder of a second parity disk; "" — none. With it, two disks may fail at once */
+  parity2: string;
   /** The disks that are protected: the name SnapRAID knows each by, and its folder */
   data: { name: string; path: string }[];
   /** Protect AppData too; off by default: it changes all day, and its owners would not come back */
@@ -82,10 +87,11 @@ export function appDataRule(dataRoot: string, disks: string[], merged: Record<st
 }
 
 /** `/etc/snapraid.conf`, whole */
-export function snapraidConf(array: Pick<ArraySettings, "parity" | "data">, exclude: string[]): string {
+export function snapraidConf(array: Pick<ArraySettings, "parity" | "data"> & { parity2?: string }, exclude: string[]): string {
   return [
     `${MARK}: Settings → Storage, "Protection from a disk failure". Changes made here are overwritten.`,
     `parity ${join(array.parity, PARITY)}`,
+    ...(array.parity2 ? [`2-parity ${join(array.parity2, PARITY2)}`] : []),
     `content ${join(CONTENT_DIR, CONTENT)}`,
     ...array.data.map((disk) => `content ${join(disk.path, CONTENT)}`),
     ...array.data.map((disk) => `data ${disk.name} ${disk.path}/`),
@@ -144,6 +150,22 @@ export const progressOf = (line: string): number | null => {
   return m ? Math.min(100, Number(m[1])) : null;
 };
 
+/** A name as SnapRAID's log writes it: `\d` is a colon, `\n` a new line */
+const unlog = (text: string): string => text.replace(/\\(.)/g, (_, c: string) => (c === "d" ? ":" : c === "n" ? "\n" : c));
+
+/** The files gone since the last sync, from the log of `diff -l`: each with the disk it was on */
+export function goneFiles(log: string): { disk: string; path: string }[] {
+  const out: { disk: string; path: string }[] = [];
+  for (const m of log.matchAll(/^scan:remove:([^:]+):(.+)$/gm)) out.push({ disk: m[1]!, path: unlog(m[2]!) });
+  return out;
+}
+
+/**
+ * The filter that picks one file for `fix`: a path from the top of its disk, with the characters of a
+ * pattern taken as themselves
+ */
+export const fileFilter = (path: string): string => "/" + path.replace(/^\/+/, "").replace(/[\\*?[\]]/g, (c) => "\\" + c);
+
 /** What a `fix` brought back, and how much it could not; names as SnapRAID prints them, inside a disk */
 export function fixed(out: string): { recovered: string[]; unrecoverable: number } {
   const unrecoverable = /^\s*(\d+) unrecoverable errors?/m.exec(out);
@@ -164,6 +186,10 @@ interface State {
   errors: number;
   /** What the person has to decide about before a sync can go on */
   trouble: Refusal;
+  /** A parity level was added: the next sync computes it whole */
+  fullNext?: boolean;
+  /** The files gone since the last sync, as the last `diff` found them (the first thousands) */
+  gone?: { disk: string; path: string }[];
 }
 
 const STATE_FILE = join(DATA_DIR, "snapraid.json");
@@ -233,7 +259,7 @@ const lastLine = (out: string): string => out.split("\n").filter((line) => line.
 /** The disks of the array that are not connected right now */
 function missing(): string[] {
   const now = mounted();
-  return [settings.snapraid.parity, ...settings.snapraid.data.map((d) => d.path)].filter((path) => !now.has(path));
+  return [settings.snapraid.parity, settings.snapraid.parity2, ...settings.snapraid.data.map((d) => d.path)].filter((path) => path && !now.has(path));
 }
 
 /** Nothing of a person's lies on the disk: only what a new file system and the array itself put there */
@@ -245,9 +271,15 @@ function bare(path: string): boolean {
   }
 }
 
+const GONE_KEPT = 5000;
+
 async function refreshDiff(): Promise<Diff | null> {
-  const diff = parseDiff((await snap("diff", ["diff"])).out);
+  // the log names the disk of every file; what diff prints does not
+  const log = join("/run", `hata-snapraid-${process.pid}.log`);
+  const diff = parseDiff((await snap("diff", ["diff", "-l", log])).out);
   state.diff = diff && { ...diff, at: Date.now() };
+  state.gone = goneFiles(readText(log)).slice(0, GONE_KEPT);
+  rmSync(log, { force: true });
   return diff;
 }
 
@@ -302,8 +334,11 @@ export interface ArrayReport {
   candidates: ArrayDisk[];
   /** Of the array's disks, the folders that are not connected now */
   missing: string[];
-  /** Bytes the parity file takes */
+  /** Bytes the parity file takes, and the second one */
   paritySize: number;
+  parity2Size: number;
+  /** How many files are gone since the last sync, as listed for bringing one back */
+  gone: number;
   /** The rule that leaves AppData out; null — the data folder is not in the array */
   appDataRule: string | null;
   lastSync: State["lastSync"];
@@ -338,8 +373,10 @@ const rule = (): string | null => appDataRule(settings.dataRoot, settings.snapra
 
 export function arrayReport(): ArrayReport {
   let paritySize = 0;
+  let parity2Size = 0;
   try {
     if (isOn()) paritySize = statSync(join(settings.snapraid.parity, PARITY)).size;
+    if (isOn() && settings.snapraid.parity2) parity2Size = statSync(join(settings.snapraid.parity2, PARITY2)).size;
   } catch {}
   return {
     tool: installed() ? "ok" : "missing",
@@ -349,6 +386,8 @@ export function arrayReport(): ArrayReport {
     candidates: candidates(),
     missing: isOn() ? missing() : [],
     paritySize,
+    parity2Size,
+    gone: state.gone?.length ?? 0,
     appDataRule: rule(),
     lastSync: state.lastSync,
     lastScrub: state.lastScrub,
@@ -399,6 +438,7 @@ function writeConf(): void {
 /** Forgets what the array knew: with other disks in it, the parity it has is of no use */
 function startAfresh(old: ArraySettings): void {
   if (old.parity) rmSync(join(old.parity, PARITY), { force: true });
+  if (old.parity2) rmSync(join(old.parity2, PARITY2), { force: true });
   rmSync(join(CONTENT_DIR, CONTENT), { force: true });
   for (const disk of old.data) rmSync(join(disk.path, CONTENT), { force: true });
   Object.assign(state, { lastSync: null, lastScrub: null, diff: null, held: null, errors: 0, trouble: null });
@@ -420,6 +460,16 @@ export function setUp(input: Record<string, unknown>, user: string): void {
   const largest = Math.max(...paths.map((p) => disk(p)!.size));
   // the same model of disk comes out a few megabytes apart
   if (parityDisk.size < largest * 0.99) throw new ArrayError("array.parityTooSmall");
+  const parity2 = typeof input.parity2 === "string" ? input.parity2 : "";
+  if (parity2) {
+    const second = disk(parity2);
+    if (!second || parity2 === parity || paths.includes(parity2)) throw new ArrayError("array.badDisks");
+    if (second.merged) throw new ArrayError("array.parityMerged");
+    if (second.holds) throw new ArrayError("array.parityHolds");
+    if (second.size < largest * 0.99) throw new ArrayError("array.parityTooSmall");
+    // SnapRAID keeps its list of files on three disks at least, and a data disk is where it keeps them
+    if (paths.length < 2) throw new ArrayError("array.parity2Few");
+  }
   const time = typeof input.time === "string" && /^([01]\d|2[0-3]):[0-5]\d$/.test(input.time) ? input.time : old.time;
   const limit = Number.isInteger(input.deleteLimit) && (input.deleteLimit as number) >= 0 && (input.deleteLimit as number) <= 1_000_000 ? (input.deleteLimit as number) : old.deleteLimit;
   const names: string[] = [];
@@ -430,8 +480,14 @@ export function setUp(input: Record<string, unknown>, user: string): void {
   });
   const kept = old.parity === parity && old.data.every((d) => paths.includes(d.path));
   if (!kept) startAfresh(old);
+  // the second parity alone changed: the first one stays, the new one is computed whole by the next sync
+  else if (old.parity2 !== parity2) {
+    if (old.parity2) rmSync(join(old.parity2, PARITY2), { force: true });
+    if (parity2 && state.lastSync) state.fullNext = true;
+    if (!parity2) state.fullNext = false;
+  }
   const was = isOn();
-  settings.snapraid = { parity, data, appData: input.appData === true, time, scrub: input.scrub !== false, deleteLimit: limit };
+  settings.snapraid = { parity, parity2, data, appData: input.appData === true, time, scrub: input.scrub !== false, deleteLimit: limit };
   saveSettings();
   writeConf();
   save();
@@ -447,7 +503,7 @@ export function turnOff(wipe: boolean, user: string): void {
   const old = settings.snapraid;
   if (wipe) startAfresh(old);
   else Object.assign(state, { held: null, trouble: null, errors: 0 });
-  settings.snapraid = { ...old, parity: "", data: [] };
+  settings.snapraid = { ...old, parity: "", parity2: "", data: [] };
   saveSettings();
   if (isOurs(readText(CONF))) {
     if (existsSync(CONF_BEFORE)) renameSync(CONF_BEFORE, CONF);
@@ -497,6 +553,8 @@ async function syncNow(force: boolean, user: string, args: string[] = []): Promi
     state.held = { removed: diff.removed, at: Date.now() };
     return;
   }
+  // a parity level that was just added is computed whole: an ordinary sync refuses a parity file that is short
+  if (state.fullNext && !args.includes("--force-full")) args = [...args, "--force-full"];
   const result = await snap(args.includes("--force-full") ? "rebuild" : "sync", [...args, "sync"]);
   if (result.code === -2) return;
   if (result.code !== 0) {
@@ -507,6 +565,8 @@ async function syncNow(force: boolean, user: string, args: string[] = []): Promi
   }
   state.held = null;
   state.trouble = null;
+  state.fullNext = false;
+  state.gone = [];
   state.lastSync = { at: Date.now(), ok: true, message: "" };
   state.diff = { equal: diff.equal + diff.added + diff.updated + diff.moved + diff.copied + diff.restored, added: 0, removed: 0, updated: 0, moved: 0, copied: 0, restored: 0, at: Date.now() };
   record("array.sync.done", { user, detail: String(diff.added + diff.updated) });
@@ -576,6 +636,43 @@ export function bringBack(name: unknown, user: string): void {
     record(done.unrecoverable || result.code !== 0 ? "array.fix.failed" : "array.fix.done", { user, detail: done.unrecoverable ? `${done.recovered.length} / ${done.unrecoverable}` : String(done.recovered.length) });
     await refreshDiff();
   });
+}
+
+/**
+ * Brings back one file that is gone since the last sync, as it was then. Only a file the last look
+ * found gone: one that is there is never touched.
+ */
+export function bringBackFile(diskName: unknown, path: unknown, user: string): void {
+  must();
+  const disk = settings.snapraid.data.find((d) => d.name === diskName);
+  if (!disk || typeof path !== "string" || !state.gone?.some((g) => g.disk === disk.name && g.path === path)) throw new ArrayError("array.notGone");
+  if (missing().length) throw new ArrayError("array.missing", { disks: missing().join(", ") });
+  background(async () => {
+    const result = await snap("fix", ["-d", disk.name, "-f", fileFilter(path), "fix", "-m"]);
+    if (result.code === -2) return;
+    const done = fixed(result.out);
+    giveBack(disk.path, done.recovered);
+    const back = done.recovered.length > 0 && !done.unrecoverable;
+    record(back ? "array.fix.file" : "array.fix.fileFailed", { user, detail: join(disk.path, path) });
+    await refreshDiff();
+  });
+}
+
+/** Looks at the disks again — for a list a person is about to choose from — unless that was done just now */
+export async function lookAgain(): Promise<void> {
+  if (!isOn() || !installed() || current || missing().length) return;
+  if (state.diff && Date.now() - state.diff.at < 5_000) return;
+  await refreshDiff();
+  save();
+}
+
+/** The files gone since the last sync, for choosing one to bring back; `q` — part of the name */
+export function goneList(q: unknown): { disk: string; folder: string; path: string }[] {
+  const words = typeof q === "string" ? q.toLowerCase().trim() : "";
+  return (state.gone ?? [])
+    .filter((g) => !words || g.path.toLowerCase().includes(words))
+    .slice(0, 300)
+    .map((g) => ({ disk: g.disk, folder: settings.snapraid.data.find((d) => d.name === g.disk)?.path ?? "", path: g.path }));
 }
 
 /** Stops the run that is going; SnapRAID saves how far it got */

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { appDataRule, diskName, fixed, isOurs, parseDiff, parseStatus, progressOf, refusal, snapraidConf, unprotected } from "../src/snapraid";
+import { appDataRule, diskName, fileFilter, fixed, goneFiles, isOurs, parseDiff, parseStatus, progressOf, refusal, snapraidConf, unprotected } from "../src/snapraid";
 
 test("diskName: what SnapRAID calls a disk, never a name that is taken", () => {
   expect(diskName("/mnt/d1", [])).toBe("d1");
@@ -74,4 +74,19 @@ test("progressOf and fixed: how far a run got, what came back", () => {
   expect(progressOf("100% of the array is not scrubbed.")).toBeNull();
   expect(fixed("Fixing...\nrecovered Media/film2.bin\nrecovered Docs/док\\ 1.bin\n      12 errors\n      12 recovered errors\n       0 unrecoverable errors\nEverything OK\n")).toEqual({ recovered: ["Media/film2.bin", "Docs/док 1.bin"], unrecoverable: 0 });
   expect(fixed("unrecoverable Media/x.bin\n       4 errors\n       0 recovered errors\n       4 unrecoverable errors\n")).toEqual({ recovered: [], unrecoverable: 4 });
+});
+
+test("a second parity, and one file brought back", () => {
+  const conf = snapraidConf({ parity: "/mnt/big", parity2: "/mnt/big2", data: [{ name: "d1", path: "/mnt/d1" }, { name: "d2", path: "/mnt/d2" }] }, []);
+  expect(conf).toContain("parity /mnt/big/snapraid.parity\n2-parity /mnt/big2/snapraid.2-parity\n");
+  expect(snapraidConf({ parity: "/mnt/big", parity2: "", data: [{ name: "d1", path: "/mnt/d1" }] }, [])).not.toContain("2-parity");
+  const log = "statfs:ext2/3/4: /mnt/e4/ \nscan:update:e4:Films/film3.mkv: 20971520 1.5 -> 20971522 1.6\nscan:remove:e4:Films/film1.mkv\nscan:remove:d6:Music/пісня 2.mp3\nscan:remove:d6:a\\db\\nc\nsummary:removed:3\n";
+  expect(goneFiles(log)).toEqual([
+    { disk: "e4", path: "Films/film1.mkv" },
+    { disk: "d6", path: "Music/пісня 2.mp3" },
+    { disk: "d6", path: "a:b\nc" },
+  ]);
+  // from the top of the disk, the characters of a pattern taken as themselves
+  expect(fileFilter("Music/x [1].mp3")).toBe("/Music/x \\[1\\].mp3");
+  expect(fileFilter("a*b?.txt")).toBe("/a\\*b\\?.txt");
 });

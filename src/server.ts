@@ -29,6 +29,7 @@ import { findInTrash, trashSizeOn } from "./trash";
 import { discover as discoverPlaces, installFor as installPlaceTools, listPlaces, placesDown, removePlace, retryPlace, savePlace, shares as placeShares, startNetPlaces } from "./netplaces";
 import { addShare, changeShare, installSamba, listShares, refreshShares, removeShare, shareTrouble, startShares } from "./shares";
 import { checkDisks, diskHealth, installTool, listDisks, startDisks, startSelfTest } from "./disks";
+import { lookAtPools, noteTypes, poolCheck, poolClear, PoolError, poolsReport, poolsTrouble, startPools } from "./raid";
 import { fills, measureFills, startFills } from "./fills";
 import { checkImages, imagesStatus, startImages } from "./images";
 import { afterPackage, exposedNics, giveBack, internetTrouble, setSide, startNetwork, setCheck, setRole, startHotspot, stopHotspot, wifiQrText, changeNic, confirmChange, handOver, NETWORK_PACKAGES, networkReport, NetworkError, revertChange, wifiConnect, wifiForget, wifiNetworks } from "./network";
@@ -36,9 +37,9 @@ import { DOCKER_INSTALL_COMMAND, installDocker, startDocker } from "./dockerinst
 import { installOne, removeOne, toolsReport } from "./tools";
 import { checkUpdates, packageUpdates, startSysUpdates, upgrade as upgradeSystem } from "./sysupdates";
 import { checkPlan, readPlan, runPlan } from "./diskplan";
-import { ArrayError, arrayReport, arrayTrouble, bringBack, rebuild as rebuildParity, repair as repairArray, scrub as scrubArray, setUp as setUpArray, startSnapraid, stop as stopArray, sync as syncArray, turnOff as turnOffArray } from "./snapraid";
+import { ArrayError, arrayReport, arrayTrouble, bringBack, bringBackFile, goneList, lookAgain, rebuild as rebuildParity, repair as repairArray, scrub as scrubArray, setUp as setUpArray, startSnapraid, stop as stopArray, sync as syncArray, turnOff as turnOffArray } from "./snapraid";
 import { dockerSpace, dropImage, dropVolume, prune as pruneDocker } from "./dockerspace";
-import { ignoreDisk, unusedDisks, absent, onDiskBack, connectVolume, disconnect, checkVolume, wipeDisk, formatDisk, mergeFolders, mountingReport, relabel, startMounting, type Outcome } from "./mounting";
+import { ignoreDisk, unusedDisks, absent, onDiskBack, connectVolume, disconnect, checkVolume, wipeDisk, formatDisk, mergeFolders, mountingReport, relabel, startMounting, partsOf, resizePart, deletePart, type Outcome } from "./mounting";
 import { moveData } from "./movedata";
 import { installPackage } from "./packages";
 import {
@@ -1067,7 +1068,7 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
       site: { domain: siteDomain(), mode: settings.https.mode, local: localDomain() },
       // whether the assistant can be asked: the pages offer it next to what is wrong
       assistant: admin && assistantReady(assistantConfig()),
-      attention: admin ? notSnoozed(attention({ system, docker, apps, activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), exposed: exposedNics(), array: arrayTrouble(), shares: shareTrouble(), places: placesDown(), machines: awayMachines(), machineApps: onMachines, unused: unusedDisks(), filling: fillingUp(), pve: proxmoxTrouble(), ha: homeAssistantTrouble() })) : [],
+      attention: admin ? notSnoozed(attention({ system, docker, apps, activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), exposed: exposedNics(), array: arrayTrouble(), shares: shareTrouble(), places: placesDown(), machines: awayMachines(), machineApps: onMachines, unused: unusedDisks(), filling: fillingUp(), pve: proxmoxTrouble(), ha: homeAssistantTrouble(), raid: poolsTrouble() })) : [],
       // who signed in from where, and what was installed by whom, is the administrators' business
       activity: admin ? recent(8) : [],
       // containers and compose projects on this machine that are not apps here yet
@@ -1314,14 +1315,17 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
   const storage = async (more: Record<string, unknown> = {}) => {
     const listed = await listDisks();
     // long work on a disk, so a page opened meanwhile can follow it and stop it
-    const work = listJobs().find((j) => j.app === "" && j.status === "running" && ["format", "fsck", "wipe", "pool"].includes(j.kind));
+    const work = listJobs().find((j) => j.app === "" && j.status === "running" && ["format", "fsck", "wipe", "pool", "resize"].includes(j.kind));
     const working = work ? { id: work.id, kind: work.kind, target: work.target ?? "", stoppable: !!work.stoppable, line: work.log.at(-1) ?? "" } : null;
-    return json({ ...listed, fills: fills(), mounting: mountingReport(listed.disks), array: arrayReport(), working, ...more });
+    noteTypes([...new Set(listed.disks.flatMap((d) => d.volumes.map((v) => v.fstype)))]);
+    // which apps use a folder of the data folder: their folders outside AppData
+    const folders = installedNames().map((name) => ({ name, folders: appFolders(name).other }));
+    return json({ ...listed, fills: fills(folders), mounting: mountingReport(listed.disks), array: arrayReport(), raids: poolsReport(), working, ...more });
   };
   const refused = (failure: Extract<Outcome, { error: string }>) => fail(400, failure.error, { message: failure.message ?? "", ...(failure.needs ?? {}) });
   // a long piece of work on a disk: answered at once with the job the page then follows
   // `canStop` — the page offers "Stop"; `work` gets the signal
-  const diskJob = (kind: "format" | "fsck" | "wipe" | "pool", target: string, by: string, work: (log: (line: string) => void, stop?: AbortSignal) => Promise<void>, started: (job: Job) => void = () => {}, canStop = false) => {
+  const diskJob = (kind: "format" | "fsck" | "wipe" | "pool" | "resize", target: string, by: string, work: (log: (line: string) => void, stop?: AbortSignal) => Promise<void>, started: (job: Job) => void = () => {}, canStop = false) => {
     try {
       const stopper = new AbortController();
       const job = startJob("", kind, by, (log) => work(log, canStop ? stopper.signal : undefined), true);
@@ -1334,9 +1338,24 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
       throw e;
     }
   };
-  const failureWords = (failure: Extract<Outcome, { error: string }>) => `${({ "disk.busy": "Something is still using the folder.", "disk.mountFailed": "The disk could not be connected.", "disk.formatFailed": "The disk could not be formatted.", "disk.wipeFailed": "The disk could not be erased.", "disk.inUse": "The disk is in use.", "disk.stopped": "Stopped." } as Record<string, string>)[failure.error] ?? failure.error} ${failure.message ?? ""}`.trim();
+  const failureWords = (failure: Extract<Outcome, { error: string }>) => `${({ "disk.busy": "Something is still using the folder.", "disk.mountFailed": "The disk could not be connected.", "disk.formatFailed": "The disk could not be formatted.", "disk.wipeFailed": "The disk could not be erased.", "disk.resizeFailed": "The size could not be changed.", "disk.inUse": "The disk is in use.", "disk.stopped": "Stopped." } as Record<string, string>)[failure.error] ?? failure.error} ${failure.message ?? ""}`.trim();
   const changed = (outcome: Outcome) => ("error" in outcome ? refused(outcome) : storage());
-  if (path === "/api/disks" && method === "GET") return storage();
+  if (path === "/api/disks" && method === "GET") {
+    await lookAtPools();
+    return storage();
+  }
+  // arrays and pools the system has (md, ZFS, btrfs): their own check started or stopped, error counters cleared
+  if ((path === "/api/disks/raid/check" || path === "/api/disks/raid/clear") && method === "POST") {
+    const data = await body(req);
+    try {
+      if (path.endsWith("/check")) await poolCheck(data.id, data.action, user.name);
+      else await poolClear(data.id, user.name);
+    } catch (e) {
+      if (e instanceof PoolError) return fail(400, e.code, { message: e.message });
+      throw e;
+    }
+    return storage();
+  }
 
   // ---- folders of other machines mounted here (never through MCP: passwords) ----
   if (path === "/api/netplaces" && method === "GET") return json(await listPlaces());
@@ -1378,10 +1397,11 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
   // what a disk action said it lacks, installed by the button next to the reason and the command
   if (path === "/api/disks/package" && method === "POST") {
     const name = (await body(req)).package;
-    if (typeof name !== "string" || !["ntfs-3g", "fdisk", "sfdisk", "util-linux", "e2fsprogs", "dosfstools", "exfatprogs", "mergerfs", "snapraid"].includes(name)) return fail(400, "disk.packageFailed", { message: "not a package Hata installs" });
+    if (typeof name !== "string" || !["ntfs-3g", "fdisk", "sfdisk", "util-linux", "e2fsprogs", "dosfstools", "exfatprogs", "mergerfs", "snapraid", "btrfs-progs", "xfsprogs"].includes(name)) return fail(400, "disk.packageFailed", { message: "not a package Hata installs" });
     server.timeout(req, 0);
     const message = await installPackage(name);
     if (message) return fail(500, "disk.packageFailed", { message });
+    await lookAtPools();
     return storage();
   }
   // erasing a disk asks for the password, like everything that cannot be undone by a second click
@@ -1402,6 +1422,35 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
       if ("error" in done) throw new Error(failureWords(done));
       log(done.path ? `Done: connected as ${done.path}` : "Done");
     });
+  }
+  // the partitions of a disk with what may be done to each one's size; one made larger or smaller, or taken away
+  const diskParts = /^\/api\/disks\/([A-Za-z0-9_-]+)\/parts$/.exec(path);
+  if (diskParts && method === "GET") {
+    const listed = await partsOf(diskParts[1]!);
+    return "error" in listed ? refused(listed) : json(listed);
+  }
+  const partResize = /^\/api\/disks\/([A-Za-z0-9_-]+)\/resize$/.exec(path);
+  if (partResize && method === "POST") {
+    const data = await body(req);
+    if (!(await checkOwnPassword(user, data.password))) return fail(400, "auth.wrongPassword");
+    server.timeout(req, 0);
+    const seen = { serial: String(data.serial ?? ""), size: Number(data.size) };
+    const device = String(data.device ?? "");
+    const bytes = Number(data.bytes);
+    const may = await resizePart(partResize[1]!, seen, device, bytes, user.name, undefined, true);
+    if ("error" in may) return refused(may);
+    return diskJob("resize", device, user.name, async (log) => {
+      const done = await resizePart(partResize[1]!, seen, device, bytes, user.name, log);
+      if ("error" in done) throw new Error(failureWords(done));
+      log("Done");
+    });
+  }
+  const partDelete = /^\/api\/disks\/([A-Za-z0-9_-]+)\/delete-part$/.exec(path);
+  if (partDelete && method === "POST") {
+    const data = await body(req);
+    if (!(await checkOwnPassword(user, data.password))) return fail(400, "auth.wrongPassword");
+    server.timeout(req, 0);
+    return changed(await deletePart(partDelete[1]!, { serial: String(data.serial ?? ""), size: Number(data.size) }, String(data.device ?? ""), user.name));
   }
   const diskWipe = /^\/api\/disks\/([A-Za-z0-9_-]+)\/wipe$/.exec(path);
   if (diskWipe && method === "POST") {
@@ -1574,6 +1623,13 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
     return json({ ok: true });
   }
   // protection from a disk failure; the long runs answer at once and the page follows them
+  // the files gone since the last sync, to bring one back by its name
+  if (path === "/api/disks/array/gone" && method === "GET") {
+    server.timeout(req, 0);
+    // the window looks once as it opens; typing a name searches what that look found
+    if (url.searchParams.get("look") === "1") await lookAgain();
+    return json(goneList(url.searchParams.get("q")));
+  }
   if (path.startsWith("/api/disks/array")) {
     try {
       const what = path.slice("/api/disks/array".length);
@@ -1587,6 +1643,10 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
       else if (what === "/scrub") scrubArray((await body(req)).whole === true, user.name);
       else if (what === "/repair") repairArray(user.name);
       else if (what === "/fix") bringBack((await body(req)).disk, user.name);
+      else if (what === "/fix-file") {
+        const asked = await body(req);
+        bringBackFile(asked.disk, asked.path, user.name);
+      }
       else if (what === "/rebuild") rebuildParity(user.name);
       else if (what === "/stop") stopArray();
       else return fail(404, "notFound");
@@ -2758,6 +2818,7 @@ export async function serve(): Promise<void> {
   startMachineUsers();
   startMachineGates();
   startDisks();
+  startPools();
   startFills();
   startImages({
     apps: installedNames,
@@ -2782,7 +2843,7 @@ export async function serve(): Promise<void> {
   void refreshHttps();
   refreshLocalNames();
   startNotifications({
-    attention: async () => notSnoozed(attention({ system: systemStatus(), docker: await dockerInfo(), apps: await listApps("en"), activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), exposed: exposedNics(), array: arrayTrouble(), shares: shareTrouble(), places: placesDown(), machines: awayMachines(), machineApps: await machineTiles(machineList(), "en").catch(() => []), unused: unusedDisks(), filling: fillingUp(), pve: proxmoxTrouble(), ha: homeAssistantTrouble() })),
+    attention: async () => notSnoozed(attention({ system: systemStatus(), docker: await dockerInfo(), apps: await listApps("en"), activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), exposed: exposedNics(), array: arrayTrouble(), shares: shareTrouble(), places: placesDown(), machines: awayMachines(), machineApps: await machineTiles(machineList(), "en").catch(() => []), unused: unusedDisks(), filling: fillingUp(), pve: proxmoxTrouble(), ha: homeAssistantTrouble(), raid: poolsTrouble() })),
     baseUrl: publicUrl,
     isAdmin: (id) => findUser(id)?.role === "admin",
   });

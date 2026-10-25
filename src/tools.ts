@@ -53,6 +53,8 @@ const SPECS: Spec[] = [
   { id: "dosfstools", name: "dosfstools", package: "dosfstools", bin: "mkfs.fat", version: ["mkfs.fat", "--help"], page: "#/settings/storage" },
   { id: "exfatprogs", name: "exfatprogs", package: "exfatprogs", bin: "mkfs.exfat", version: ["mkfs.exfat", "-V"], page: "#/settings/storage" },
   { id: "ntfs-3g", name: "ntfs-3g", package: "ntfs-3g", bin: "ntfs-3g", version: ["ntfs-3g", "--version"], page: "#/settings/storage" },
+  { id: "btrfs-progs", name: "btrfs-progs", package: "btrfs-progs", bin: "mkfs.btrfs", version: ["btrfs", "--version"], page: "#/settings/storage" },
+  { id: "xfsprogs", name: "xfsprogs", package: "xfsprogs", bin: "mkfs.xfs", version: ["mkfs.xfs", "-V"], page: "#/settings/storage" },
   { id: "mergerfs", name: "mergerfs", package: "mergerfs", bin: "mergerfs", version: ["mergerfs", "--version"], page: "#/settings/storage" },
   { id: "snapraid", name: "SnapRAID", package: "snapraid", bin: "snapraid", version: ["snapraid", "--version"], page: "#/settings/storage" },
   { id: "cifs-utils", name: "cifs-utils", package: "cifs-utils", bin: "mount.cifs", version: ["mount.cifs", "-V"], page: "#/settings/storage" },
@@ -157,6 +159,8 @@ function holdsOf(id: string, nics: Nic[], remote: boolean): string {
   // Docker's packages depend on it: the package manager would take Docker away with it
   if (id === "iptables" && has("docker")) return "docker";
   if (id === "ntfs-3g" && /\sfuseblk\s/.test(readText("/proc/mounts"))) return "ntfs";
+  // a btrfs pool is looked after through it; an XFS disk can still be read without its tools
+  if (id === "btrfs-progs" && /\sbtrfs\s/.test(readText("/proc/mounts"))) return "btrfs";
   if (packagesInUse().includes(id)) return "places";
   return "";
 }

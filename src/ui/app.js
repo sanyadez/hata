@@ -1914,7 +1914,8 @@ function attentionItem(item) {
     (item.code === "disk.new" || item.code.startsWith("absent")) && isAdmin() && open("#/settings/storage", t("attention.disk.open")),
     item.code === "update" && open("#/settings/about"),
     item.code === "disk.trash" && open("#/trash", t("trash.title")),
-    (item.code.startsWith("smart.") || item.code === "disk.filling" || item.code.startsWith("array.")) && open("#/settings/storage"),
+    (item.code === "raid.errors" || item.code === "raid.mismatch") && doIt(t("raid.check"), "refresh", () => api("POST", "/api/disks/raid/check", { id: item.detail.id, action: "check" })),
+    (item.code.startsWith("smart.") || item.code === "disk.filling" || item.code.startsWith("array.") || item.code.startsWith("raid.")) && open("#/settings/storage"),
     (item.code.startsWith("internet.") || item.code === "network.exposed") && open("#/settings/network"),
     item.code.startsWith("share.") && open("#/settings/shares"),
     item.code === "netplace.down" && open("#/settings/storage"),
@@ -12098,6 +12099,8 @@ function diskDialog(name) {
                 canTend(disk, v) && button(t("fsck.go"), { class: "small quiet", onclick: () => (dialog.close(), checkDialog(disk, v)) }),
                 canTend(disk, v) && button(t("mounting.rename"), { class: "small quiet", onclick: () => (dialog.close(), labelDialog(disk, v)) }),
                 v.kind === "part" && disk.volumes.length > 1 && changeable(disk).volumes.includes(v.path) && button(t("mounting.format"), { class: "small quiet", onclick: () => (dialog.close(), formatDialog(disk, v)) }),
+                v.kind === "part" && changeable(disk).volumes.includes(v.path) && RESIZABLE.includes(fsFamily(v.fstype)) && button(t("resize.button"), { class: "small quiet", onclick: () => (dialog.close(), resizeDialog(disk, v)) }),
+                v.kind === "part" && changeable(disk).volumes.includes(v.path) && button(t("partDelete.button"), { class: "small quiet", onclick: () => (dialog.close(), deletePartDialog(disk, v)) }),
               ),
             ),
           ),
@@ -12119,10 +12122,12 @@ const canPrepare = (disk) => state.disks?.mounting?.possible && state.disks.moun
 const canConnect = (disk) => (state.disks?.mounting?.possible ? disk.volumes.filter((v) => state.disks.mounting.mountable.includes(v.path)) : []);
 /** What of a disk may be formatted, checked or renamed — the server's word */
 const changeable = (disk) => (state.disks?.mounting?.possible && state.disks.mounting.changeable?.[disk.name]) || { whole: false, volumes: [] };
-const fsFamily = (fstype) => (/^ext[234]$/.test(fstype) ? "ext4" : ["exfat", "vfat", "ntfs"].includes(fstype) ? fstype : null);
+const fsFamily = (fstype) => (/^ext[234]$/.test(fstype) ? "ext4" : ["exfat", "vfat", "ntfs", "btrfs", "xfs"].includes(fstype) ? fstype : null);
 /** A file system Hata can check and rename */
 const canTend = (disk, volume) => !!fsFamily(volume.fstype) && changeable(disk).volumes.includes(volume.path);
-const FS_NAMES = { ext4: "ext4", exfat: "exFAT", vfat: "FAT32", ntfs: "NTFS" };
+const FS_NAMES = { ext4: "ext4", btrfs: "btrfs", xfs: "XFS", exfat: "exFAT", vfat: "FAT32", ntfs: "NTFS" };
+/** File systems with owners and permissions: for a disk that stays in the server */
+const POSIX_FS = ["ext4", "btrfs", "xfs"];
 
 /** The label as the file system will carry it — the server makes it the same way */
 function fsLabel(fs, text) {
@@ -12138,7 +12143,7 @@ function fsLabel(fs, text) {
   };
   const plain = text.replace(/[\u0000-\u001f\u007f]/g, " ").replace(/\s+/g, " ").trim();
   if (fs === "vfat") return fit(plain.normalize("NFKD").replace(/[^\x20-\x7e]/g, "").replace(/[*?.,;:/\\|+=<>[\]"]/g, "").toUpperCase().trim(), 11, () => 1);
-  if (fs === "ext4") return fit(plain.replace(/\//g, "-"), 16, (char) => new TextEncoder().encode(char).length);
+  if (POSIX_FS.includes(fs)) return fit(plain.replace(fs === "xfs" ? /[/\s]/g : /\//g, "-"), { ext4: 16, xfs: 12, btrfs: 255 }[fs], (char) => new TextEncoder().encode(char).length);
   return fit(plain.replace(/["*/:<>?\\|]/g, ""), fs === "exfat" ? 11 : 32, (char) => char.length);
 }
 const MOUNT_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$/;
@@ -12235,7 +12240,7 @@ function formatDialog(disk, part, free = 0) {
     afterHint.textContent = t("mounting.afterHint." + after.value);
     where.textContent = "/mnt/" + name.value;
     folder.hidden = !connects;
-    open.hidden = !connects || fs.value === "ext4";
+    open.hidden = !connects || POSIX_FS.includes(fs.value);
     open.textContent = t("mounting.noOwners", { fs: FS_NAMES[fs.value] });
     const sized = size.value.trim() !== "";
     const fits = !sized || (asked() >= 64 * 1024 * 1024 && asked() <= room);
@@ -12256,7 +12261,7 @@ function formatDialog(disk, part, free = 0) {
       jobDialog(data.job, "format", part ? part.name : diskTitle(disk), async () => {
         if (free) return toast(how === "no" ? t("mounting.formatted", { fs: FS_NAMES[kind] }) : t("mounting.formattedAt", { fs: FS_NAMES[kind], path }));
         setDisks(await api("GET", "/api/disks").catch(() => state.disks));
-        if (how === "keep" && kind === "ext4") {
+        if (how === "keep" && POSIX_FS.includes(kind)) {
           document.querySelectorAll("dialog[open]").forEach((d) => d.close());
           preparedDialog("/mnt/" + into);
         } else toast(how === "no" ? t("mounting.formatted", { fs: FS_NAMES[kind] }) : t("mounting.formattedAt", { fs: FS_NAMES[kind], path }));
@@ -12340,6 +12345,109 @@ function wipeDialog(disk) {
   check();
 }
 
+/** File systems whose size Hata can change; FAT and exFAT have no tool for it */
+const RESIZABLE = ["ext4", "btrfs", "xfs", "ntfs"];
+
+/** Makes a partition larger, into the free room after it, or smaller; its files stay */
+async function resizeDialog(disk, volume) {
+  let dialog;
+  const body = h("div", { class: "stack" }, h("p", { class: "muted" }, "…"));
+  dialog = openDialog("wide", h("header", null, h("div", { class: "grow" }, h("h2", null, t("resize.title", { name: volume.label || volume.name })), h("p", { class: "muted small" }, [volume.name, volume.fstype, bytes(volume.size), diskTitle(disk)].join(" · "))), closeX(() => dialog)), body);
+  let info;
+  try {
+    info = (await api("GET", `/api/disks/${disk.name}/parts`)).parts.find((p) => p.path === volume.path);
+  } catch (err) {
+    return put(body, h("p", { class: "error" }, errorText(err)));
+  }
+  if (!info) return put(body, h("p", { class: "error" }, t("error.disk.unknown")));
+  if (info.why || (!info.grow && !info.shrink)) return put(body, h("p", { class: "banner" }, info.why ? t("error." + info.why) : t("resize.cannot", { fs: FS_NAMES[info.fs] ?? volume.fstype })), h("footer", null, closeButton(() => dialog, t("common.close"))));
+  // the same gigabytes as every size on the page (bytes() counts by 1024)
+  const GB = 1024 ** 3;
+  const low = info.shrink ? Math.max(64 * 1024 * 1024, info.min ?? 64 * 1024 * 1024) : info.size;
+  const high = info.grow ? info.max : info.size;
+  const start = info.grow ? high : info.size;
+  const shown = (start / GB).toFixed(start % GB ? 2 : 1);
+  const size = h("input", { type: "text", inputMode: "decimal", class: "short", value: shown, "aria-label": t("mounting.size") });
+  const hint = h("span", { class: "hint" });
+  const password = h("input", { type: "password", autocomplete: "current-password" });
+  const cmd = h("span");
+  const slot = h("div");
+  const go = button(t("resize.go"), { class: "primary", disabled: true });
+  // the number as first shown stands for the exact size it was rounded from
+  const asked = () => (size.value.trim() === shown ? start : Math.round(Number(size.value.trim().replace(",", ".")) * GB));
+  const fs = info.fs;
+  const check = () => {
+    const n = asked();
+    const fits = Number.isFinite(n) && n >= low && n <= high && Math.abs(n - info.size) >= 1024 * 1024;
+    const grow = n > info.size;
+    hint.textContent = t("resize.range", { min: bytes(low), max: bytes(high) }) + (Number.isFinite(n) && fits ? " " + t(grow ? "resize.grows" : "resize.shrinks", { by: bytes(Math.abs(n - info.size)) }) : "");
+    const part = `sfdisk -N ${info.number} ${disk.path}`;
+    const own = { ext4: "resize2fs", btrfs: "btrfs filesystem resize", xfs: "xfs_growfs", ntfs: "ntfsresize" }[fs];
+    cmd.textContent = (grow ? [part, own] : [own, part]).join("; ");
+    go.disabled = !fits || !password.value;
+  };
+  for (const input of [size, password]) input.addEventListener("input", check);
+  const slow = fs === "ext4" || fs === "ntfs";
+  go.onclick = diskAction(
+    () => dialog,
+    slot,
+    () => api("POST", `/api/disks/${disk.name}/resize`, { serial: disk.serial, size: disk.size, device: volume.path, bytes: asked(), password: password.value }),
+    (data) => {
+      dialog.close();
+      jobDialog(data.job, "resize", volume.label || volume.name, async () => {
+        setDisks(await api("GET", "/api/disks").catch(() => state.disks));
+        toast(t("resize.done"));
+      });
+    },
+  );
+  put(
+    body,
+    h("p", { class: "muted" }, t(info.grow && info.shrink ? "resize.lead" : info.grow ? "resize.leadGrow" : "resize.leadShrink")),
+    info.grow && !info.shrink && fs === "xfs" && h("p", { class: "muted small" }, t("resize.xfs")),
+    !info.grow && info.max <= info.size + 1024 * 1024 && h("p", { class: "muted small" }, t("resize.noRoomAfter")),
+    slow && volume.mounts.length > 0 && h("p", { class: "banner" }, t("resize.offline", { path: volume.mounts[0] })),
+    h("p", { class: "banner" }, t("resize.backup")),
+    h("label", { class: "field" }, h("span", { class: "label" }, t("resize.size")), size, hint),
+    field(t("account.password"), password, t("resize.passwordHint")),
+    h("p", { class: "cmd" }, icon("terminal"), cmd),
+    slot,
+    h("footer", null, closeButton(() => dialog, t("common.cancel")), go),
+  );
+  check();
+  size.focus();
+}
+
+/** Takes a partition away; its room becomes free for a new one */
+function deletePartDialog(disk, volume) {
+  const typed = h("input", { type: "text", autocomplete: "off", spellcheck: false, placeholder: volume.name });
+  const password = h("input", { type: "password", autocomplete: "current-password" });
+  const slot = h("div");
+  let dialog;
+  const go = button(t("partDelete.go"), { class: "danger", disabled: true });
+  const check = () => (go.disabled = typed.value.trim() !== volume.name || !password.value);
+  for (const input of [typed, password]) input.addEventListener("input", check);
+  go.onclick = diskAction(
+    () => dialog,
+    slot,
+    () => api("POST", `/api/disks/${disk.name}/delete-part`, { serial: disk.serial, size: disk.size, device: volume.path, password: password.value }),
+    () => {
+      dialog.close();
+      toast(t("partDelete.done", { name: volume.name }));
+    },
+  );
+  dialog = openDialog(
+    "wide",
+    h("h2", null, t("partDelete.title", { name: volume.label ? `${volume.name} “${volume.label}”` : volume.name })),
+    h("p", { class: "muted small" }, [volume.fstype, bytes(volume.size), diskTitle(disk)].filter(Boolean).join(" · ")),
+    h("p", { class: "banner danger" }, t("partDelete.lead"), volume.mounts.length > 0 && h("span", { class: "block" }, t("mounting.formatLeaves", { paths: volume.mounts.join(", ") }))),
+    field(t("mounting.typeName", { name: volume.name }), typed),
+    field(t("account.password"), password, t("mounting.passwordHint")),
+    h("p", { class: "cmd" }, icon("terminal"), `wipefs -a ${volume.path}; sfdisk --delete ${disk.path} ${/(\d+)$/.exec(volume.name)?.[1] ?? ""}`),
+    slot,
+    h("footer", null, closeButton(() => dialog, t("common.cancel")), go),
+  );
+}
+
 /** Looks a file system over without changing it; damage that is found can then be repaired */
 function checkDialog(disk, volume) {
   const title = volume.label || volume.name;
@@ -12367,7 +12475,8 @@ function checkDialog(disk, volume) {
         if (job.stopped) return put(result, h("p", { class: "banner" }, t("fsck.stopped")), job.error && job.error !== "Stopped." && h("p", { class: "error" }, job.error));
         if (job.status !== "done" || !job.result) return put(result, h("p", { class: "banner danger" }, t("fsck.verdict.failed")), h("pre", { class: "said" }, job.error || lines.textContent));
         const { verdict, output, back } = job.result;
-        const mend = verdict === "errors" && !repair;
+        // btrfs is mended by a scrub while mounted, never offline
+        const mend = verdict === "errors" && !repair && volume.fstype !== "btrfs";
         put(
           result,
           h("p", { class: "banner " + (verdict === "errors" || verdict === "failed" ? "danger" : "ok") }, t("fsck.verdict." + verdict)),
@@ -12384,7 +12493,7 @@ function checkDialog(disk, volume) {
     h("header", null, h("div", { class: "grow" }, h("h2", null, t("fsck.title", { name: title })), h("p", { class: "muted small" }, [volume.name, volume.fstype, bytes(volume.size)].join(" · "))), closeX(() => dialog)),
     h("p", { class: "muted" }, t("fsck.lead")),
     volume.mounts.length > 0 && h("p", { class: "banner" }, t("fsck.leadMounted", { path: volume.mounts[0] })),
-    volume.fstype === "ntfs" && h("p", { class: "muted small" }, t("fsck.ntfs")),
+    (volume.fstype === "ntfs" || volume.fstype === "btrfs" || volume.fstype === "xfs") && h("p", { class: "muted small" }, t("fsck." + volume.fstype)),
     result,
     slot,
     h("footer", null, closeButton(() => dialog, t("common.close")), go),
@@ -12741,12 +12850,12 @@ function storageSection() {
 
   // while a disk tests itself or the data folder is measured, the progress is worth watching
   clearTimeout(disksTimer);
-  if (data.fills?.running || data.disks.some((d) => d.smart?.testing != null)) {
+  if (data.fills?.running || data.raids?.pools.some((p) => p.work) || data.disks.some((d) => d.smart?.testing != null)) {
     disksTimer = setTimeout(
       async () => {
         if (state.route.view === "settings" && state.route.section === "storage") setDisks(await api("GET", "/api/disks").catch(() => state.disks));
       },
-      data.fills?.running ? 3000 : 20_000,
+      data.fills?.running || data.raids?.pools.some((p) => p.work) ? 3000 : 20_000,
     );
   }
 
@@ -12850,6 +12959,7 @@ function storageSection() {
       ),
       data.disks.length > 0 && h("table", { class: "disks" }, h("thead", null, h("tr", null, h("th", null, t("disks.col.disk")), h("th", null, t("disks.col.health")), h("th", { class: "num" }, t("disks.col.temp")), h("th", null, t("disks.col.usage")), h("th", null, t("disks.col.mounted")), h("th"))), h("tbody", null, data.disks.map(row))),
     ),
+    data.raids && (data.raids.pools.length > 0 || data.raids.lacking.length > 0) && raidCard(data),
     (data.mounts.length > 0 || absent.length > 0) &&
       h(
         "section",
@@ -12862,6 +12972,86 @@ function storageSection() {
     data.array && data.mounting?.possible && arrayCard(data, data.array),
     data.fills && fillsCard(data.fills, busy),
   ].filter(Boolean);
+}
+
+// --- Arrays and pools the system has: md, ZFS, btrfs ----------------------------------------------
+
+const RAID_KINDS = { md: "Linux RAID", zfs: "ZFS", btrfs: "btrfs" };
+
+/** Each array or pool with its state, its disks and its own check; Hata reads them and makes none */
+function raidCard(data) {
+  const error = h("p", { class: "error", role: "alert" });
+  const call = (path, body) => async (e) => {
+    const el = e.currentTarget;
+    el.disabled = true;
+    error.textContent = "";
+    try {
+      setDisks(await api("POST", path, body));
+    } catch (err) {
+      error.textContent = errorText(err);
+      el.disabled = false;
+    }
+  };
+  const diskOf = (path) => data.disks.find((d) => d.path === path || d.volumes.some((v) => v.path === path));
+  const chip = (pool) => {
+    const cls = { ok: "running", degraded: "partial", failed: "restarting", inactive: "restarting" }[pool.state];
+    return h("span", { class: "state " + cls }, t("raid.state." + pool.state));
+  };
+  const workLine = (w) => h("div", { class: "muted small with-icon" }, icon("refresh"), [t("raid.work." + w.what), w.percent != null ? `${Math.floor(w.percent)}%` : t("raid.waiting"), w.left != null && t("raid.left", { n: w.left })].filter(Boolean).join(" · "));
+  const lastLine = (pool) => {
+    const c = pool.lastCheck;
+    if (!c) return h("div", { class: "muted small" }, t(pool.kind === "md" ? "raid.neverSeen" : "raid.never"));
+    const left = pool.kind === "md" ? c.errors : (c.unmended ?? 0);
+    const found = pool.kind === "md" ? (c.errors ? t("raid.lastMismatch", { n: c.errors }) : t("raid.lastClean")) : left ? t("raid.lastUnmended", { n: left }) : c.mended ? t("raid.lastMendedSize", { size: c.mended }) : c.errors ? t("raid.lastMended", { n: c.errors }) : t("raid.lastClean");
+    return h("div", { class: "muted small" + (left ? " bad" : "") }, t("raid.last", { when: ago(c.at), what: found }));
+  };
+  const member = (m) => {
+    const disk = m.path && diskOf(m.path);
+    return h(
+      "div",
+      { class: "raid-member" },
+      h("span", { class: "mono" }, m.path || t("raid.gone")),
+      disk && h("span", { class: "muted small" }, diskTitle(disk)),
+      m.state !== "ok" && h("span", { class: "chip" + (m.state === "missing" || m.state === "faulty" ? " bad" : "") }, t("raid.member." + m.state)),
+      m.errors > 0 && h("span", { class: "chip bad" }, t("raid.memberErrors", { n: m.errors })),
+    );
+  };
+  const row = (pool) => {
+    const busy = !!pool.work;
+    const stoppable = busy && ["check", "repair", "scrub"].includes(pool.work.what);
+    const counted = pool.errors > 0 || pool.dataErrors > 0;
+    return h(
+      "tr",
+      null,
+      h("td", null, h("div", { class: "with-icon" }, h("span", { class: "badge-icon " + (pool.state === "ok" ? (counted ? "warn" : "plain") : "danger") }, icon("disk")), h("div", null, h("div", { class: "strong" }, pool.name), h("div", { class: "muted small" }, [RAID_KINDS[pool.kind], pool.level].filter(Boolean).join(" · ")), pool.mount && h("a", { class: "mono small", href: filesHash(pool.mount) }, pool.mount)))),
+      h("td", null, chip(pool), busy && workLine(pool.work), !busy && pool.state === "ok" && lastLine(pool), pool.dataErrors > 0 && h("div", { class: "small bad" }, t("raid.dataErrors", { n: pool.dataErrors }))),
+      h("td", null, pool.members.map(member)),
+      h("td", null, pool.used != null && pool.size ? usageBar(pool.used, pool.size) : pool.size ? h("span", { class: "muted" }, bytes(pool.size)) : h("span", { class: "muted" }, "—")),
+      h(
+        "td",
+        null,
+        h(
+          "div",
+          { class: "row-actions" },
+          !busy && pool.state === "ok" && button(t("raid.check"), { class: "small", onclick: call("/api/disks/raid/check", { id: pool.id, action: "check" }) }, "refresh"),
+          stoppable && button(t("raid.stop"), { class: "small", onclick: call("/api/disks/raid/check", { id: pool.id, action: "stop" }) }),
+          !busy && pool.kind === "md" && pool.state === "ok" && pool.errors > 0 && button(t("raid.repair"), { class: "small primary", onclick: call("/api/disks/raid/check", { id: pool.id, action: "repair" }) }),
+          !busy && counted && button(t(pool.kind === "md" ? "raid.forget" : "raid.clear"), { class: "small quiet", onclick: call("/api/disks/raid/clear", { id: pool.id }) }),
+        ),
+      ),
+    );
+  };
+  const lacking = (need) =>
+    need.kind === "btrfs"
+      ? packageCard({ package: need.package, install: need.install }, () => setDisks(state.disks))
+      : h("div", { class: "banner stack" }, h("strong", null, t("raid.needs.zfs")), h("p", { class: "muted small" }, t("raid.needs.zfsWhy")), need.install && h("p", { class: "cmd" }, icon("terminal"), need.install));
+  const pools = data.raids.pools;
+  return h(
+    "section",
+    { class: "card table-wrap" },
+    h("div", { class: "pad card-head" }, h("h2", null, t("raid.title")), h("p", { class: "muted small" }, t("raid.lead")), data.raids.lacking.map(lacking), error),
+    pools.length > 0 && h("table", { class: "disks" }, h("thead", null, h("tr", null, h("th", null, t("raid.col.pool")), h("th", null, t("raid.col.state")), h("th", null, t("raid.col.disks")), h("th", null, t("disks.col.usage")), h("th"))), h("tbody", null, pools.map(row))),
+  );
 }
 
 // --- Network places: folders of other machines mounted here -----------------------------------------
@@ -13212,9 +13402,10 @@ function arrayCard(data, array) {
       "div",
       { class: "kv-list" },
       row(t("array.parity"), h("span", null, h("span", { class: "mono" }, array.settings.parity), array.paritySize > 0 && h("span", { class: "muted small" }, ` · ${bytes(array.paritySize)}`))),
+      array.settings.parity2 && row(t("array.parity2"), h("span", null, h("span", { class: "mono" }, array.settings.parity2), array.parity2Size > 0 ? h("span", { class: "muted small" }, ` · ${bytes(array.parity2Size)}`) : h("span", { class: "muted small" }, ` · ${t("array.parity2Pending")}`))),
       array.settings.data.map((disk, i) => row(i === 0 ? t("array.data") : "", h("span", { class: "with-actions" }, h("span", { class: "mono" }, disk.path), " ", button(t("array.recover"), { class: "small quiet", disabled: busy, onclick: () => recoverDialog(disk) })))),
       row(t("array.lastSync"), array.lastSync?.ok ? ago(array.lastSync.at) : array.lastSync ? t("array.lastFailed", { when: ago(array.lastSync.at) }) : t("array.never")),
-      row(t("array.waiting"), !array.lastSync?.ok && !d ? "—" : waiting || d?.removed ? [waiting > 0 && t("array.waitingNew", { n: waiting }), d.removed > 0 && t("array.waitingGone", { n: d.removed })].filter(Boolean).join(" · ") : t("array.waitingNone")),
+      row(t("array.waiting"), h("span", { class: "with-actions" }, !array.lastSync?.ok && !d ? "—" : waiting || d?.removed ? [waiting > 0 && t("array.waitingNew", { n: waiting }), d.removed > 0 && t("array.waitingGone", { n: d.removed })].filter(Boolean).join(" · ") : t("array.waitingNone"), array.lastSync?.ok && button(t("array.goneOne"), { class: "small quiet", disabled: busy, onclick: () => goneDialog() }))),
       row(t("array.lastScrub"), array.lastScrub ? `${ago(array.lastScrub.at)} · ${t(array.lastScrub.ok ? "array.scrubOk" : "array.scrubBad")}` : t("array.never")),
       row(t("array.schedule"), t(array.settings.scrub ? "array.scheduleScrub" : "array.scheduleSync", { time: array.settings.time })),
       array.appDataRule !== null && row("AppData", t(array.settings.appData ? "array.appDataIn" : "array.appDataOut")),
@@ -13538,6 +13729,9 @@ function arrayDialog(array) {
   const size = (c) => `${bytes(c.size)} · ${t("array.used", { size: bytes(c.used) })}`;
   const parity = array.candidates.map((c) => ({ c, input: h("input", { type: "radio", name: "parity", value: c.path, checked: cfg.parity === c.path, disabled: c.merged || !!c.holds }) }));
   const data = array.candidates.map((c) => ({ c, input: h("input", { type: "checkbox", value: c.path, checked: cfg.data.some((x) => x.path === c.path) }) }));
+  // a second parity disk is a choice of its own; none by default
+  const none = h("input", { type: "radio", name: "parity2", value: "", checked: !cfg.parity2 });
+  const parity2 = array.candidates.map((c) => ({ c, input: h("input", { type: "radio", name: "parity2", value: c.path, checked: cfg.parity2 === c.path, disabled: c.merged || !!c.holds }) }));
   const appData = h("input", { type: "checkbox", checked: cfg.appData });
   const time = h("input", { type: "time", value: cfg.time, required: true });
   const scrub = h("input", { type: "checkbox", checked: cfg.scrub });
@@ -13546,15 +13740,20 @@ function arrayDialog(array) {
   const go = h("button", { class: "btn primary" }, t(array.on ? "settings.save" : "array.turnOn"));
   const check = () => {
     const chosen = parity.find((p) => p.input.checked)?.c.path ?? "";
+    for (const x of parity2) {
+      x.input.disabled = x.c.merged || !!x.c.holds || x.c.path === chosen;
+      if (x.input.disabled && x.input.checked) none.checked = true;
+    }
+    const second = parity2.find((p) => p.input.checked)?.c.path ?? "";
     for (const x of data) {
-      x.input.disabled = x.c.path === chosen;
+      x.input.disabled = x.c.path === chosen || x.c.path === second;
       if (x.input.disabled) x.input.checked = false;
     }
     const paths = data.filter((x) => x.input.checked).map((x) => x.c.path);
-    go.disabled = !chosen || !paths.length;
+    go.disabled = !chosen || !paths.length || (!!second && paths.length < 2);
     anew.hidden = !array.on || (chosen === cfg.parity && cfg.data.every((x) => paths.includes(x.path)));
   };
-  for (const x of [...parity, ...data]) x.input.addEventListener("change", check);
+  for (const x of [...parity, ...parity2, ...data, { input: none }]) x.input.addEventListener("change", check);
   const dialog = openDialog(
     "wide",
     h(
@@ -13566,7 +13765,7 @@ function arrayDialog(array) {
           error.textContent = "";
           go.disabled = true;
           try {
-            setDisks(await api("PUT", "/api/disks/array", { parity: parity.find((p) => p.input.checked).c.path, data: data.filter((x) => x.input.checked).map((x) => x.c.path), appData: appData.checked, time: time.value, scrub: scrub.checked, deleteLimit: Number(limit.value) }));
+            setDisks(await api("PUT", "/api/disks/array", { parity: parity.find((p) => p.input.checked).c.path, parity2: parity2.find((p) => p.input.checked)?.c.path ?? "", data: data.filter((x) => x.input.checked).map((x) => x.c.path), appData: appData.checked, time: time.value, scrub: scrub.checked, deleteLimit: Number(limit.value) }));
             dialog.close();
             toast(t(array.on ? "settings.saved" : "array.turnedOn"));
           } catch (err) {
@@ -13580,6 +13779,10 @@ function arrayDialog(array) {
       h("h3", null, t("array.parityDisk")),
       h("p", { class: "muted small" }, t("array.parityDiskHint")),
       parity.map(({ c, input }) => h("label", { class: "check" }, input, h("span", null, h("strong", { class: "mono" }, c.path), h("span", { class: "muted small block" }, c.merged ? t("array.cannot.merged") : c.holds ? t("array.cannot.holds") : size(c))))),
+      h("h3", null, t("array.parity2Disk")),
+      h("p", { class: "muted small" }, t("array.parity2Hint")),
+      h("label", { class: "check" }, none, h("span", null, h("strong", null, t("array.parity2None")))),
+      parity2.map(({ c, input }) => h("label", { class: "check" }, input, h("span", null, h("strong", { class: "mono" }, c.path), h("span", { class: "muted small block" }, c.merged ? t("array.cannot.merged") : c.holds ? t("array.cannot.holds") : size(c))))),
       h("h3", null, t("array.dataDisks")),
       data.map(({ c, input }) => h("label", { class: "check" }, input, h("span", null, h("strong", { class: "mono" }, c.path), h("span", { class: "muted small block" }, size(c))))),
       h("label", { class: "check" }, appData, h("span", null, h("strong", null, t("array.appData")), h("span", { class: "muted small block" }, t("array.appDataHint")))),
@@ -13591,6 +13794,55 @@ function arrayDialog(array) {
     ),
   );
   check();
+}
+
+/** The files gone since the last sync: one is chosen by its name and brought back as it was then */
+function goneDialog() {
+  let dialog;
+  const q = h("input", { type: "search", placeholder: t("array.goneSearch"), spellcheck: false });
+  const list = h("div", { class: "stack" });
+  const error = h("p", { class: "error", role: "alert" });
+  let timer = 0;
+  const load = async (look = false) => {
+    try {
+      const files = await api("GET", `/api/disks/array/gone?q=${encodeURIComponent(q.value)}${look ? "&look=1" : ""}`);
+      put(
+        list,
+        files.length
+          ? files.map((f) =>
+              h(
+                "div",
+                { class: "snapshot" },
+                h("span", { class: "badge-icon plain" }, icon("file")),
+                h("div", { class: "grow" }, h("strong", { class: "mono clip" }, f.path.split("/").pop()), h("div", { class: "muted small mono clip" }, `${f.folder}/${f.path}`)),
+                button(t("array.goneBack"), {
+                  class: "small primary",
+                  onclick: async (e) => {
+                    e.currentTarget.disabled = true;
+                    error.textContent = "";
+                    try {
+                      setDisks(await api("POST", "/api/disks/array/fix-file", { disk: f.disk, path: f.path }));
+                      dialog.close();
+                      toast(t("array.goneStarted", { name: f.path.split("/").pop() }));
+                    } catch (err) {
+                      error.textContent = errorText(err);
+                      e.target.closest("button").disabled = false;
+                    }
+                  },
+                }),
+              ),
+            )
+          : h("p", { class: "muted" }, t(q.value ? "array.goneNoMatch" : "array.goneNone")),
+      );
+    } catch (err) {
+      error.textContent = errorText(err);
+    }
+  };
+  q.addEventListener("input", () => (clearTimeout(timer), (timer = setTimeout(() => load(), 250))));
+  put(list, h("p", { class: "with-icon muted" }, icon("refresh"), t("array.goneLooking")));
+  dialog = openDialog("wide", h("header", null, h("div", { class: "grow" }, h("h2", null, t("array.goneTitle")), h("p", { class: "muted small" }, t("array.goneLead"))), closeX(() => dialog)), q, error, list);
+  void load(true);
+  q.focus();
 }
 
 function arrayOffDialog() {
@@ -13673,13 +13925,57 @@ function fillsCard(fills, busy) {
     return h(
       "tr",
       null,
-      h("td", null, h("div", { class: "with-icon" }, h("i", { class: "dot " + (part.kind === "mount" ? "c-rest" : colour(i, part)) }), h("div", null, href ? h("a", { class: "strong", href }, name) : h("div", { class: "strong" }, name), part.kind === "outside" ? h("div", { class: "muted small" }, t("fills.outsideHint")) : part.path && h("div", { class: "muted small mono clip" }, part.path)))),
+      h(
+        "td",
+        null,
+        h(
+          "div",
+          { class: "with-icon" },
+          h("i", { class: "dot " + (part.kind === "mount" ? "c-rest" : colour(i, part)) }),
+          h(
+            "div",
+            null,
+            href ? h("a", { class: "strong", href }, name) : h("div", { class: "strong" }, name),
+            part.kind === "outside" ? h("div", { class: "muted small" }, t("fills.outsideHint")) : part.path && h("div", { class: "muted small mono clip" }, part.path),
+            // how much of it has not changed for long, and which apps keep files there
+            part.old > 0 && part.old >= part.size * 0.05 && h("div", { class: "muted small" }, t("fills.oldHere", { size: bytes(part.old), days: fills.oldDays })),
+            part.apps?.length > 0 && h("div", { class: "muted small fills-apps" }, t("fills.usedBy"), " ", part.apps.map((app, n) => [n > 0 && ", ", h("a", { href: `#/apps/${app}` }, apps.get(app)?.title ?? app)])),
+          ),
+        ),
+      ),
       h("td", { class: "num" }, part.kind === "mount" ? "" : bytes(part.size)),
       h("td", { class: "num muted" }, part.kind === "mount" ? "" : percent < 1 ? "<1%" : Math.round(percent) + "%"),
       h("td", null, trend(part)),
     );
   };
   const measure = busy(t("fills.measuring"), { path: "/api/disks/fills" });
+  // where the files nobody touched for long lie: a hint for when the disk fills
+  const oldest = fills.parts.filter((part) => part.old > 0).sort((a, b) => b.old - a.old)[0];
+  const advice = fills.at && fills.oldTotal >= Math.max(1024 ** 3, fills.size * 0.1) && h("p", { class: "banner small" }, t(oldest ? "fills.oldAll" : "fills.oldAllNowhere", { size: bytes(fills.oldTotal), days: fills.oldDays, folder: oldest ? partName(oldest) : "" }));
+  const ageOf = (at) => Math.max(0, Math.floor((Date.now() - at) / 86_400_000));
+  const largest =
+    fills.at &&
+    fills.largest?.length > 0 &&
+    h(
+      "details",
+      { class: "pad fills-largest" },
+      h("summary", { class: "muted small" }, t("fills.largest")),
+      h(
+        "div",
+        { class: "stack" },
+        fills.largest.map((file) => {
+          const name = file.path.split("/").pop();
+          const folder = file.path.slice(0, file.path.length - name.length - 1) || "/";
+          return h(
+            "div",
+            { class: "snapshot" },
+            h("span", { class: "badge-icon plain" }, icon("file")),
+            h("div", { class: "grow" }, h("a", { class: "strong clip", href: filesHash(folder), onclick: () => (filesUi.pick = name) }, name), h("div", { class: "muted small mono clip" }, folder)),
+            h("div", { class: "num" }, h("div", { class: "strong" }, bytes(file.size)), h("div", { class: "muted small" }, ageOf(file.at) ? t("fills.changedAgo", { n: ageOf(file.at) }) : t("fills.changedToday"))),
+          );
+        }),
+      ),
+    );
   return h(
     "section",
     { class: "card table-wrap fills" },
@@ -13694,8 +13990,10 @@ function fillsCard(fills, busy) {
       ),
       h("p", { class: "muted small" }, t(fills.at ? "fills.lead" : "fills.never")),
       fills.at && bar,
+      advice,
     ),
     fills.at && h("table", { class: "disks" }, h("thead", null, h("tr", null, h("th", null, t("fills.col.folder")), h("th", { class: "num" }, t("fills.col.size")), h("th", { class: "num" }, t("fills.col.share")), h("th", null, t("fills.col.week")))), h("tbody", null, parts.map(row))),
+    largest,
   );
 }
 

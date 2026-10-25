@@ -98,7 +98,7 @@ export interface Settings {
   /** `outside` — the interfaces the internet comes in on: nothing of the server answers there (`outside.ts`) */
   network: { outside: string[] };
   /** Protection from a disk failure: which disk holds parity and which are protected (`snapraid.ts`) */
-  snapraid: { parity: string; data: { name: string; path: string }[]; appData: boolean; time: string; scrub: boolean; deleteLimit: number };
+  snapraid: { parity: string; parity2: string; data: { name: string; path: string }[]; appData: boolean; time: string; scrub: boolean; deleteLimit: number };
   /** Folders put on the dashboard from the file manager, absolute paths */
   folders: string[];
   /** User id → the folders and files that user marked as favourites in the file manager, absolute paths */
@@ -222,7 +222,7 @@ const DEFAULTS: Settings = {
   storage: { automount: false, ignored: [], smart: DEFAULT_SMART },
   security: { adminTwoFactor: false },
   network: { outside: [] },
-  snapraid: { parity: "", data: [], appData: false, time: "05:00", scrub: true, deleteLimit: 50 },
+  snapraid: { parity: "", parity2: "", data: [], appData: false, time: "05:00", scrub: true, deleteLimit: 50 },
   folders: [],
   favorites: {},
   shares: [],
