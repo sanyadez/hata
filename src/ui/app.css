@@ -612,6 +612,7 @@ button.tile-open { border: 0; background: transparent; }
 .file-table tr.selected:hover td { background: var(--accent-soft); }
 .file-name { display: flex; align-items: center; gap: 10px; width: 100%; min-width: 0; padding: 4px 0; border: 0; background: transparent; text-align: left; font-weight: 500; }
 .file-name:hover .clip { color: var(--accent-text); }
+.file-name .clip { max-width: none; flex: 0 1 auto; min-width: 0; }
 
 .file-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
 .file-tile { position: relative; display: flex; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); min-width: 0; }
