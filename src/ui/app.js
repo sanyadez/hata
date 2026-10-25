@@ -2499,7 +2499,7 @@ function appLogsTab(app, box) {
   const log = h("pre", { class: "console page" });
   const abort = new AbortController();
   cleanups.push(() => abort.abort());
-  box.replaceChildren(h("p", { class: "cmd" }, icon("terminal"), `docker compose -p ${app.name} logs --follow --tail 200`), log);
+  box.replaceChildren(h("div", { class: "console-frame" }, h("p", { class: "cmd" }, icon("terminal"), `docker compose -p ${app.name} logs --follow --tail 200`), log));
   void streamLogs(app, log, abort.signal);
 }
 
@@ -2522,7 +2522,7 @@ function appTerminalTab(app, box) {
   const frame = h("div", { class: "term-holder" });
   const open = (name) => frame.replaceChildren(terminalFrame({ app: app.name, container: name }));
   const pick = running.length > 1 && h("select", { "aria-label": t("terminal.container"), onchange: (e) => open(e.target.value) }, running.map((c) => h("option", { value: c.name }, c.service || c.name)));
-  box.replaceChildren(h("div", { class: "cmd-row" }, h("p", { class: "cmd grow" }, icon("terminal"), `docker exec -it ${running[0].name} sh`), pick), frame);
+  box.replaceChildren(h("div", { class: "console-frame" }, h("div", { class: "cmd-row" }, h("p", { class: "cmd grow" }, icon("terminal"), `docker exec -it ${running[0].name} sh`), pick), frame));
   if (pick) pick.addEventListener("change", () => (box.querySelector(".cmd").lastChild.textContent = `docker exec -it ${pick.value} sh`));
   open(running[0].name);
 }
