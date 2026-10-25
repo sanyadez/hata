@@ -1,14 +1,16 @@
 import { expect, test } from "bun:test";
 import { pieces } from "../src/packages";
-import { passProgress, checkCommand, checkVerdict, cleanLabel, familyOf, FAT_MAX, isFs, labelCommand, mkfsCommand, partType, tableFor, tableScript, partLine, unallocated } from "../src/format";
+import { passProgress, checkCommand, checkVerdict, cleanLabel, familyOf, FAT_MAX, isFs, labelCommand, mkfsCommand, partType, tableFor, tableScript, partLine, unallocated, parseSfdisk, roomFor, nested, MIB, fsResizeCommand, resizeScript, RESIZE } from "../src/format";
 
 test("isFs, familyOf: the file systems Hata makes, and the ones it checks", () => {
-  for (const fs of ["ext4", "exfat", "vfat", "ntfs"]) expect(isFs(fs)).toBe(true);
-  for (const other of ["", "btrfs", "ext3", "constructor", 4, null]) expect(isFs(other)).toBe(false);
+  for (const fs of ["ext4", "exfat", "vfat", "ntfs", "btrfs", "xfs"]) expect(isFs(fs)).toBe(true);
+  for (const other of ["", "zfs", "ext3", "constructor", 4, null]) expect(isFs(other)).toBe(false);
   expect(familyOf("ext2")).toBe("ext4");
   expect(familyOf("ext4")).toBe("ext4");
   expect(familyOf("vfat")).toBe("vfat");
-  expect(familyOf("xfs")).toBeNull();
+  expect(familyOf("xfs")).toBe("xfs");
+  expect(familyOf("btrfs")).toBe("btrfs");
+  expect(familyOf("f2fs")).toBeNull();
   expect(familyOf("")).toBeNull();
 });
 
@@ -24,6 +26,27 @@ test("cleanLabel: what each file system can carry of a typed name", () => {
   expect(cleanLabel("ext4", "Резервні копії")).toBe("Резервні");
   expect(cleanLabel("ext4", "  two\twords\n ")).toBe("two words");
   expect(cleanLabel("exfat", "")).toBe("");
+  // twelve bytes for XFS
+  expect(cleanLabel("xfs", "Резервні копії")).toBe("Резерв");
+  expect(cleanLabel("xfs", "xfs test")).toBe("xfs-test");
+  expect(cleanLabel("btrfs", "pool/one")).toBe("pool-one");
+});
+
+test("btrfs and XFS: made, looked over, named", () => {
+  expect(mkfsCommand("btrfs", "pool", "/dev/sdb1", { size: 1e9 })).toEqual(["mkfs.btrfs", "-f", "-L", "pool", "/dev/sdb1"]);
+  expect(mkfsCommand("xfs", "", "/dev/sdb1", { size: 1e9 })).toEqual(["mkfs.xfs", "-f", "/dev/sdb1"]);
+  expect(checkCommand("btrfs", false, "/dev/sdb1")).toEqual(["btrfs", "check", "--readonly", "/dev/sdb1"]);
+  expect(checkCommand("xfs", false, "/dev/sdb1")).toEqual(["xfs_repair", "-n", "/dev/sdb1"]);
+  expect(checkCommand("xfs", true, "/dev/sdb1")).toEqual(["xfs_repair", "/dev/sdb1"]);
+  expect(checkVerdict("btrfs", false, 1)).toBe("errors");
+  expect(checkVerdict("xfs", false, 1)).toBe("errors");
+  expect(checkVerdict("xfs", true, 0)).toBe("fixed");
+  // a journal to play back first
+  expect(checkVerdict("xfs", true, 2)).toBe("failed");
+  expect(labelCommand("btrfs", "/mnt/pool", "x")).toEqual(["btrfs", "filesystem", "label", "/mnt/pool", "x"]);
+  expect(labelCommand("xfs", "/dev/sdb1", "x")).toEqual(["xfs_admin", "-L", "x", "/dev/sdb1"]);
+  expect(partType("gpt", "xfs")).toBe("0FC63DAF-8483-4772-8E79-3D69D8477DE4");
+  expect(tableFor("btrfs", 32e9, true)).toBe("gpt");
 });
 
 test("tableFor, partType: the old table for what other devices read, and a type Windows takes for its own", () => {
@@ -105,4 +128,31 @@ test("a partition of a given size, and the room no partition takes", () => {
   // no table: the whole disk is to be formatted, not added to
   expect(unallocated({ size: 100e9, volumes: [] })).toBe(0);
   expect(unallocated({ size: 100e9, volumes: [{ kind: "disk", size: 100e9 }] })).toBe(0);
+});
+
+test("parseSfdisk, roomFor, nested: how far a partition may grow", () => {
+  const disk = 500107862016;
+  const json = { partitiontable: { label: "gpt", unit: "sectors", firstlba: 2048, lastlba: 976773134, sectorsize: 512, partitions: [{ node: "/dev/sdb1", start: 2048, size: 390623232, type: "0FC63DAF-8483-4772-8E79-3D69D8477DE4" }, { node: "/dev/sdb2", start: 390625280, size: 195311616, type: "0FC63DAF-8483-4772-8E79-3D69D8477DE4" }] } };
+  const table = parseSfdisk(json, disk)!;
+  expect(table).toMatchObject({ label: "gpt", sectorSize: 512, end: 976773135 });
+  expect(table.parts.map((p) => p.number)).toEqual([1, 2]);
+  // the first one only up to where the second starts; the last one to the end of the disk, in whole MiB
+  expect(roomFor(table, table.parts[0]!)).toBe((390625280 - 2048) * 512);
+  expect(roomFor(table, table.parts[1]!)).toBe(Math.floor(((976773135 - 390625280) * 512) / MIB) * MIB);
+  expect(parseSfdisk(null, disk)).toBeNull();
+  const mbr = parseSfdisk({ partitiontable: { label: "dos", sectorsize: 512, partitions: [{ node: "/dev/sdc1", start: 2048, size: 100, type: "83" }, { node: "/dev/sdc2", start: 4096, size: 1000, type: "5" }, { node: "/dev/sdc5", start: 6144, size: 100, type: "83" }] } }, 1e9)!;
+  expect(mbr.end).toBe(Math.floor(1e9 / 512));
+  expect(mbr.parts.map((p) => nested(mbr, p))).toEqual([false, true, true]);
+});
+
+test("fsResizeCommand: each file system's own way to change its size", () => {
+  expect(fsResizeCommand("ext4", "/dev/sdb3", "max")).toEqual(["resize2fs", "/dev/sdb3"]);
+  expect(fsResizeCommand("ext4", "/dev/sdb3", 2 * 1024 ** 3)).toEqual(["resize2fs", "/dev/sdb3", "2097152K"]);
+  expect(fsResizeCommand("btrfs", "/mnt/x", "max", 2)).toEqual(["btrfs", "filesystem", "resize", "2:max", "/mnt/x"]);
+  expect(fsResizeCommand("btrfs", "/mnt/x", 1024 ** 3)).toEqual(["btrfs", "filesystem", "resize", "1:1048576k", "/mnt/x"]);
+  expect(fsResizeCommand("xfs", "/mnt/x", "max")).toEqual(["xfs_growfs", "/mnt/x"]);
+  expect(fsResizeCommand("ntfs", "/dev/sdb3", 1e9)).toEqual(["ntfsresize", "--force", "--size", "1000000000", "/dev/sdb3"]);
+  expect(resizeScript(4096)).toBe(",4096\n");
+  expect(RESIZE.xfs.shrink).toBe(false);
+  expect(RESIZE.exfat.grow).toBe(false);
 });
