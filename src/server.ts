@@ -37,7 +37,7 @@ import { DOCKER_INSTALL_COMMAND, installDocker, startDocker } from "./dockerinst
 import { installOne, removeOne, toolsReport } from "./tools";
 import { checkUpdates, packageUpdates, startSysUpdates, upgrade as upgradeSystem } from "./sysupdates";
 import { checkPlan, readPlan, runPlan } from "./diskplan";
-import { ArrayError, arrayReport, arrayTrouble, bringBack, rebuild as rebuildParity, repair as repairArray, scrub as scrubArray, setUp as setUpArray, startSnapraid, stop as stopArray, sync as syncArray, turnOff as turnOffArray } from "./snapraid";
+import { ArrayError, arrayReport, arrayTrouble, bringBack, bringBackFile, goneList, lookAgain, rebuild as rebuildParity, repair as repairArray, scrub as scrubArray, setUp as setUpArray, startSnapraid, stop as stopArray, sync as syncArray, turnOff as turnOffArray } from "./snapraid";
 import { dockerSpace, dropImage, dropVolume, prune as pruneDocker } from "./dockerspace";
 import { ignoreDisk, unusedDisks, absent, onDiskBack, connectVolume, disconnect, checkVolume, wipeDisk, formatDisk, mergeFolders, mountingReport, relabel, startMounting, partsOf, resizePart, deletePart, type Outcome } from "./mounting";
 import { moveData } from "./movedata";
@@ -1621,6 +1621,13 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
     return json({ ok: true });
   }
   // protection from a disk failure; the long runs answer at once and the page follows them
+  // the files gone since the last sync, to bring one back by its name
+  if (path === "/api/disks/array/gone" && method === "GET") {
+    server.timeout(req, 0);
+    // the window looks once as it opens; typing a name searches what that look found
+    if (url.searchParams.get("look") === "1") await lookAgain();
+    return json(goneList(url.searchParams.get("q")));
+  }
   if (path.startsWith("/api/disks/array")) {
     try {
       const what = path.slice("/api/disks/array".length);
@@ -1634,6 +1641,10 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
       else if (what === "/scrub") scrubArray((await body(req)).whole === true, user.name);
       else if (what === "/repair") repairArray(user.name);
       else if (what === "/fix") bringBack((await body(req)).disk, user.name);
+      else if (what === "/fix-file") {
+        const asked = await body(req);
+        bringBackFile(asked.disk, asked.path, user.name);
+      }
       else if (what === "/rebuild") rebuildParity(user.name);
       else if (what === "/stop") stopArray();
       else return fail(404, "notFound");

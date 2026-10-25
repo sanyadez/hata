@@ -13402,9 +13402,10 @@ function arrayCard(data, array) {
       "div",
       { class: "kv-list" },
       row(t("array.parity"), h("span", null, h("span", { class: "mono" }, array.settings.parity), array.paritySize > 0 && h("span", { class: "muted small" }, ` · ${bytes(array.paritySize)}`))),
+      array.settings.parity2 && row(t("array.parity2"), h("span", null, h("span", { class: "mono" }, array.settings.parity2), array.parity2Size > 0 ? h("span", { class: "muted small" }, ` · ${bytes(array.parity2Size)}`) : h("span", { class: "muted small" }, ` · ${t("array.parity2Pending")}`))),
       array.settings.data.map((disk, i) => row(i === 0 ? t("array.data") : "", h("span", { class: "with-actions" }, h("span", { class: "mono" }, disk.path), " ", button(t("array.recover"), { class: "small quiet", disabled: busy, onclick: () => recoverDialog(disk) })))),
       row(t("array.lastSync"), array.lastSync?.ok ? ago(array.lastSync.at) : array.lastSync ? t("array.lastFailed", { when: ago(array.lastSync.at) }) : t("array.never")),
-      row(t("array.waiting"), !array.lastSync?.ok && !d ? "—" : waiting || d?.removed ? [waiting > 0 && t("array.waitingNew", { n: waiting }), d.removed > 0 && t("array.waitingGone", { n: d.removed })].filter(Boolean).join(" · ") : t("array.waitingNone")),
+      row(t("array.waiting"), h("span", { class: "with-actions" }, !array.lastSync?.ok && !d ? "—" : waiting || d?.removed ? [waiting > 0 && t("array.waitingNew", { n: waiting }), d.removed > 0 && t("array.waitingGone", { n: d.removed })].filter(Boolean).join(" · ") : t("array.waitingNone"), array.lastSync?.ok && button(t("array.goneOne"), { class: "small quiet", disabled: busy, onclick: () => goneDialog() }))),
       row(t("array.lastScrub"), array.lastScrub ? `${ago(array.lastScrub.at)} · ${t(array.lastScrub.ok ? "array.scrubOk" : "array.scrubBad")}` : t("array.never")),
       row(t("array.schedule"), t(array.settings.scrub ? "array.scheduleScrub" : "array.scheduleSync", { time: array.settings.time })),
       array.appDataRule !== null && row("AppData", t(array.settings.appData ? "array.appDataIn" : "array.appDataOut")),
@@ -13728,6 +13729,9 @@ function arrayDialog(array) {
   const size = (c) => `${bytes(c.size)} · ${t("array.used", { size: bytes(c.used) })}`;
   const parity = array.candidates.map((c) => ({ c, input: h("input", { type: "radio", name: "parity", value: c.path, checked: cfg.parity === c.path, disabled: c.merged || !!c.holds }) }));
   const data = array.candidates.map((c) => ({ c, input: h("input", { type: "checkbox", value: c.path, checked: cfg.data.some((x) => x.path === c.path) }) }));
+  // a second parity disk is a choice of its own; none by default
+  const none = h("input", { type: "radio", name: "parity2", value: "", checked: !cfg.parity2 });
+  const parity2 = array.candidates.map((c) => ({ c, input: h("input", { type: "radio", name: "parity2", value: c.path, checked: cfg.parity2 === c.path, disabled: c.merged || !!c.holds }) }));
   const appData = h("input", { type: "checkbox", checked: cfg.appData });
   const time = h("input", { type: "time", value: cfg.time, required: true });
   const scrub = h("input", { type: "checkbox", checked: cfg.scrub });
@@ -13736,15 +13740,20 @@ function arrayDialog(array) {
   const go = h("button", { class: "btn primary" }, t(array.on ? "settings.save" : "array.turnOn"));
   const check = () => {
     const chosen = parity.find((p) => p.input.checked)?.c.path ?? "";
+    for (const x of parity2) {
+      x.input.disabled = x.c.merged || !!x.c.holds || x.c.path === chosen;
+      if (x.input.disabled && x.input.checked) none.checked = true;
+    }
+    const second = parity2.find((p) => p.input.checked)?.c.path ?? "";
     for (const x of data) {
-      x.input.disabled = x.c.path === chosen;
+      x.input.disabled = x.c.path === chosen || x.c.path === second;
       if (x.input.disabled) x.input.checked = false;
     }
     const paths = data.filter((x) => x.input.checked).map((x) => x.c.path);
-    go.disabled = !chosen || !paths.length;
+    go.disabled = !chosen || !paths.length || (!!second && paths.length < 2);
     anew.hidden = !array.on || (chosen === cfg.parity && cfg.data.every((x) => paths.includes(x.path)));
   };
-  for (const x of [...parity, ...data]) x.input.addEventListener("change", check);
+  for (const x of [...parity, ...parity2, ...data, { input: none }]) x.input.addEventListener("change", check);
   const dialog = openDialog(
     "wide",
     h(
@@ -13756,7 +13765,7 @@ function arrayDialog(array) {
           error.textContent = "";
           go.disabled = true;
           try {
-            setDisks(await api("PUT", "/api/disks/array", { parity: parity.find((p) => p.input.checked).c.path, data: data.filter((x) => x.input.checked).map((x) => x.c.path), appData: appData.checked, time: time.value, scrub: scrub.checked, deleteLimit: Number(limit.value) }));
+            setDisks(await api("PUT", "/api/disks/array", { parity: parity.find((p) => p.input.checked).c.path, parity2: parity2.find((p) => p.input.checked)?.c.path ?? "", data: data.filter((x) => x.input.checked).map((x) => x.c.path), appData: appData.checked, time: time.value, scrub: scrub.checked, deleteLimit: Number(limit.value) }));
             dialog.close();
             toast(t(array.on ? "settings.saved" : "array.turnedOn"));
           } catch (err) {
@@ -13770,6 +13779,10 @@ function arrayDialog(array) {
       h("h3", null, t("array.parityDisk")),
       h("p", { class: "muted small" }, t("array.parityDiskHint")),
       parity.map(({ c, input }) => h("label", { class: "check" }, input, h("span", null, h("strong", { class: "mono" }, c.path), h("span", { class: "muted small block" }, c.merged ? t("array.cannot.merged") : c.holds ? t("array.cannot.holds") : size(c))))),
+      h("h3", null, t("array.parity2Disk")),
+      h("p", { class: "muted small" }, t("array.parity2Hint")),
+      h("label", { class: "check" }, none, h("span", null, h("strong", null, t("array.parity2None")))),
+      parity2.map(({ c, input }) => h("label", { class: "check" }, input, h("span", null, h("strong", { class: "mono" }, c.path), h("span", { class: "muted small block" }, c.merged ? t("array.cannot.merged") : c.holds ? t("array.cannot.holds") : size(c))))),
       h("h3", null, t("array.dataDisks")),
       data.map(({ c, input }) => h("label", { class: "check" }, input, h("span", null, h("strong", { class: "mono" }, c.path), h("span", { class: "muted small block" }, size(c))))),
       h("label", { class: "check" }, appData, h("span", null, h("strong", null, t("array.appData")), h("span", { class: "muted small block" }, t("array.appDataHint")))),
@@ -13781,6 +13794,55 @@ function arrayDialog(array) {
     ),
   );
   check();
+}
+
+/** The files gone since the last sync: one is chosen by its name and brought back as it was then */
+function goneDialog() {
+  let dialog;
+  const q = h("input", { type: "search", placeholder: t("array.goneSearch"), spellcheck: false });
+  const list = h("div", { class: "stack" });
+  const error = h("p", { class: "error", role: "alert" });
+  let timer = 0;
+  const load = async (look = false) => {
+    try {
+      const files = await api("GET", `/api/disks/array/gone?q=${encodeURIComponent(q.value)}${look ? "&look=1" : ""}`);
+      put(
+        list,
+        files.length
+          ? files.map((f) =>
+              h(
+                "div",
+                { class: "snapshot" },
+                h("span", { class: "badge-icon plain" }, icon("file")),
+                h("div", { class: "grow" }, h("strong", { class: "mono clip" }, f.path.split("/").pop()), h("div", { class: "muted small mono clip" }, `${f.folder}/${f.path}`)),
+                button(t("array.goneBack"), {
+                  class: "small primary",
+                  onclick: async (e) => {
+                    e.currentTarget.disabled = true;
+                    error.textContent = "";
+                    try {
+                      setDisks(await api("POST", "/api/disks/array/fix-file", { disk: f.disk, path: f.path }));
+                      dialog.close();
+                      toast(t("array.goneStarted", { name: f.path.split("/").pop() }));
+                    } catch (err) {
+                      error.textContent = errorText(err);
+                      e.target.closest("button").disabled = false;
+                    }
+                  },
+                }),
+              ),
+            )
+          : h("p", { class: "muted" }, t(q.value ? "array.goneNoMatch" : "array.goneNone")),
+      );
+    } catch (err) {
+      error.textContent = errorText(err);
+    }
+  };
+  q.addEventListener("input", () => (clearTimeout(timer), (timer = setTimeout(() => load(), 250))));
+  put(list, h("p", { class: "with-icon muted" }, icon("refresh"), t("array.goneLooking")));
+  dialog = openDialog("wide", h("header", null, h("div", { class: "grow" }, h("h2", null, t("array.goneTitle")), h("p", { class: "muted small" }, t("array.goneLead"))), closeX(() => dialog)), q, error, list);
+  void load(true);
+  q.focus();
 }
 
 function arrayOffDialog() {

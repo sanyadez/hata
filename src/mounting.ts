@@ -187,9 +187,9 @@ export function poolOptions(name: string, branches: string[]): string {
  * The connected folders that can be merged: Hata's own, kept, of a file system with owners, in no merged
  * folder yet, and not the parity of the protection — new files would land in the room the parity needs
  */
-export function mergeable(entries: FstabEntry[], mounted: string[], parity = ""): string[] {
-  const taken = new Set(Object.values(pools(entries)).flat());
-  return entries.filter((e) => e.ours && POSIX_FS.test(e.fstype) && mounted.includes(e.path) && !taken.has(e.path) && e.path !== parity).map((e) => e.path);
+export function mergeable(entries: FstabEntry[], mounted: string[], parity: string | string[] = ""): string[] {
+  const taken = new Set([...Object.values(pools(entries)).flat(), ...[parity].flat().filter(Boolean)]);
+  return entries.filter((e) => e.ours && POSIX_FS.test(e.fstype) && mounted.includes(e.path) && !taken.has(e.path)).map((e) => e.path);
 }
 
 // ---- the running part ----
@@ -942,7 +942,7 @@ export function mergeFolders(branches: unknown, label: string, user: string): Pr
   return oneAtATime(async () => {
     if (!NAME_RE.test(label)) return { error: "disk.badName" };
     const lines = fstab();
-    const can = mergeable(lines, [...mountedAt().keys()], settings.snapraid.parity);
+    const can = mergeable(lines, [...mountedAt().keys()], [settings.snapraid.parity, settings.snapraid.parity2]);
     const chosen = Array.isArray(branches) ? [...new Set(branches.filter((b): b is string => typeof b === "string"))] : [];
     if (chosen.length < 2 || chosen.some((b) => !can.includes(b))) return { error: "disk.badMerge" };
     if (!has("mergerfs")) return { error: "disk.noMergeTool", needs: { package: "mergerfs", install: installCommand("mergerfs") } };
@@ -992,7 +992,7 @@ function keeps(path: string): string | null {
   if (Object.values(pools(fstab())).some((branches) => branches.includes(path))) return "disk.holds.pool";
   // a disk of the array taken away is a disk that failed, as far as the parity knows
   // (one that is gone already is let go: its replacement takes the same folder)
-  if (mountedAt().has(path) && (settings.snapraid.parity === path || settings.snapraid.data.some((d) => d.path === path))) return "disk.holds.array";
+  if (mountedAt().has(path) && (settings.snapraid.parity === path || (settings.snapraid.parity2 !== "" && settings.snapraid.parity2 === path) || settings.snapraid.data.some((d) => d.path === path))) return "disk.holds.array";
   const used = holds(path, { dataRoot: settings.dataRoot, backupDir: settings.backup.dir, state: [DATA_DIR, SECRETS_DIR], shares: settings.shares.map((s) => s.path) });
   return used ? `disk.holds.${used}` : null;
 }
@@ -1268,7 +1268,7 @@ export interface MountingReport {
 }
 
 /** The connected folders that can be merged into one now */
-export const mergeableNow = (): string[] => mergeable(fstab(), [...mountedAt().keys()], settings.snapraid.parity);
+export const mergeableNow = (): string[] => mergeable(fstab(), [...mountedAt().keys()], [settings.snapraid.parity, settings.snapraid.parity2]);
 
 /** The folders Hata connected */
 function oursNow(): MountingReport["ours"] {
@@ -1289,7 +1289,7 @@ export function mountingReport(disks: Disk[]): MountingReport {
     mountable: disks.flatMap((d) => d.volumes.filter(mountable).map((v) => v.path)),
     ours,
     pools: pools(lines),
-    mergeable: mergeable(lines, [...mountedAt().keys()], settings.snapraid.parity),
+    mergeable: mergeable(lines, [...mountedAt().keys()], [settings.snapraid.parity, settings.snapraid.parity2]),
     unused,
     free: Object.fromEntries(disks.map((d) => [d.name, blockers(d).some((b) => b !== "mounted") ? 0 : unallocated(d)])),
     changeable: Object.fromEntries(disks.map((d) => [d.name, changeable(d, Object.keys(ours))])),
