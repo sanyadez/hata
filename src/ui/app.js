@@ -2618,7 +2618,7 @@ function paintMachineCard(m) {
     h("div", { class: "machine-title" }, icon("server"), h("strong", { class: "clip grow" }, m.name), machineChip(m)),
     h("p", { class: "muted small clip" }, machineOs(m) || "—"),
     m.pve && h("p", { class: "muted small clip" }, t("pve.guestOn", { guest: guestKind(m.pve), host: m.pve.hostName })),
-    m.incus && h("p", { class: "muted small clip" }, t("incus.onThisServer")),
+    m.incus && h("p", { class: "muted small clip" }, t(m.incus === "vm" ? "incus.vmOnThisServer" : "incus.onThisServer")),
     m.online && s
       ? [meter(t("sys.cpu"), s.cpu, t("sys.cores", { n: s.cores })), meter(t("sys.memory"), mem, bytes(s.memory.total)), disk && meter(t("sys.disk"), diskPercent, t("sys.free", { free: bytes(disk.total - disk.used), total: bytes(disk.total) }))]
       : h("p", { class: "muted small" }, m.online ? t("machines.waiting") : t("machines.seen", { ago: ago(m.seen) })),
@@ -2735,7 +2735,7 @@ function paintIncusCard() {
         "a",
         { class: "card pad machine-card", href: "#/containers" },
         h("div", { class: "machine-title" }, icon("box"), h("strong", { class: "clip grow" }, t("incus.thisServer")), d.state === "ready" && h("span", { class: "state " + (running ? "running" : "") }, t("incus.runningN", { n: running }))),
-        h("p", { class: "muted small" }, d.state === "ready" ? t("incus.countN", { n: d.containers.length }) : t("incus.state." + d.state)),
+        h("p", { class: "muted small" }, d.state === "ready" ? [t("incus.countN", { n: d.containers.filter((c) => c.kind !== "vm").length }), d.containers.some((c) => c.kind === "vm") && t("incus.vm.countN", { n: d.containers.filter((c) => c.kind === "vm").length })].filter(Boolean).join(" · ") : t("incus.state." + d.state)),
       ),
     ),
   );
@@ -2761,7 +2761,7 @@ function renderContainersBody() {
   const actions = document.getElementById("incus-actions");
   const d = incusUi.data;
   if (!box || !d) return;
-  put(actions, d.state === "ready" && button(t("incus.new"), { class: "primary", onclick: () => newContainerDialog() }, "plus"));
+  put(actions, d.state === "ready" && button(t(d.vms?.state === "ready" ? "incus.newAny" : "incus.new"), { class: "primary", onclick: () => newContainerDialog() }, "plus"));
   if (d.state === "error") return put(box, h("p", { class: "card pad warn-box" }, d.error));
   if (d.state === "blocked") return put(box, h("div", { class: "card pad stack" }, h("h2", null, t("incus.blocked.title")), h("p", null, t("incus.blocked." + d.why)), h("p", { class: "muted small" }, t("incus.blocked.how"))));
   if (d.state === "missing") {
@@ -2832,9 +2832,10 @@ function renderContainersBody() {
       ),
     );
   }
-  document.getElementById("incus-meta").textContent = [t("incus.countN", { n: d.containers.length }), d.version && "Incus " + d.version, d.network && t("incus.network", { name: d.network.name, address: d.network.address })].filter(Boolean).join(" · ");
+  const vmCount = d.containers.filter((c) => c.kind === "vm").length;
+  document.getElementById("incus-meta").textContent = [t("incus.countN", { n: d.containers.length - vmCount }), vmCount > 0 && t("incus.vm.countN", { n: vmCount }), d.version && "Incus " + d.version, d.network && t("incus.network", { name: d.network.name, address: d.network.address })].filter(Boolean).join(" · ");
   if (!d.containers.length) {
-    return put(box, h("div", { class: "card empty" }, icon("box"), h("h2", null, t("incus.none")), h("p", null, t("incus.noneLead")), button(t("incus.new"), { class: "primary", onclick: () => newContainerDialog() }, "plus")));
+    return put(box, h("div", { class: "card empty" }, icon("box"), h("h2", null, t("incus.none")), h("p", null, t("incus.noneLead")), button(t("incus.new"), { class: "primary", onclick: () => newContainerDialog() }, "plus")), vmCard(d));
   }
   put(
     box,
@@ -2853,6 +2854,44 @@ function renderContainersBody() {
       ),
     ),
     d.storage && h("p", { class: "muted small" }, t("incus.storage", { path: d.storage.path || "/var/lib/incus", driver: d.storage.driver })),
+    vmCard(d),
+  );
+}
+
+/** Virtual machines: a test feature of their own, with what it needs and what it cannot do yet */
+function vmCard(d) {
+  const vms = d.vms;
+  if (!vms || vms.state === "ready") return null;
+  const head = h("h2", null, t("incus.vm.title"), " ", h("span", { class: "chip" }, t("incus.vm.test")));
+  if (vms.state !== "missing") return h("section", { class: "card pad stack" }, head, h("p", null, t("incus.vm." + vms.state)));
+  return h(
+    "section",
+    { class: "card pad stack" },
+    head,
+    h("p", null, t("incus.vm.lead")),
+    h("ul", { class: "stack-s small pve-gives" }, ["limits", "images", "screen", "space"].map((k) => h("li", null, t("incus.vm.limit." + k)))),
+    vms.install ? h("p", { class: "cmd" }, icon("terminal"), vms.install) : h("p", { class: "banner small" }, t("incus.missing.byHand")),
+    vms.install &&
+      h(
+        "div",
+        { class: "actions" },
+        button(
+          t("incus.vm.install"),
+          {
+            onclick: async (e) => {
+              e.currentTarget.disabled = true;
+              try {
+                const r = await api("POST", "/api/containers/vms/install");
+                void jobDialog(r.job, "incus", "QEMU", () => void loadContainers());
+              } catch (err) {
+                toast(errorText(err), "error");
+              }
+              e.target.closest("button").disabled = false;
+            },
+          },
+          "download",
+        ),
+      ),
   );
 }
 
@@ -2866,7 +2905,7 @@ function containerRow(c) {
       "td",
       null,
       h("div", { class: "strong" }, c.name, c.machine && h("a", { class: "small", href: `#/machines/${c.machine}` }, " · ", t("incus.asMachine"))),
-      h("div", { class: "muted small" }, [c.os, c.nesting && "Docker", c.snapshots.length > 0 && t("incus.snapshotsN", { n: c.snapshots.length })].filter(Boolean).join(" · ")),
+      h("div", { class: "muted small" }, [c.kind === "vm" && t("incus.vm.short"), c.os, c.nesting && "Docker", c.snapshots.length > 0 && t("incus.snapshotsN", { n: c.snapshots.length })].filter(Boolean).join(" · ")),
     ),
     h("td", null, incusStatus(c)),
     h("td", { class: "mono small" }, c.address || "—"),
@@ -2903,7 +2942,7 @@ async function containerAct(c, action, el) {
 }
 
 function containerMenu(c, at) {
-  menuAt(at, menuHeader(c.name, c.os, "box"), [
+  menuAt(at, menuHeader(c.name, c.os, c.kind === "vm" ? "server" : "box"), [
     c.status === "running" && { label: t("incus.restart"), icon: "refresh", run: () => containerAct(c, "restart") },
     c.status === "running" && { label: t("incus.console"), icon: "terminal", run: () => containerConsole(c) },
     c.machine && { label: t("incus.openMachine"), icon: "server", href: `#/machines/${c.machine}` },
@@ -2918,16 +2957,22 @@ function containerConsole(c) {
   dialog = openDialog("xwide", h("header", null, h("h2", { class: "clip grow" }, c.name), closeX(() => dialog)), h("p", { class: "muted small" }, t("incus.consoleHint")), h("div", { class: "term-holder" }, terminalFrame({ incus: c.name })));
 }
 
-/** The fields of the limits, shared by the new-container and the limits dialogs */
-function limitFields(c) {
+/** The fields of the limits, shared by the new-container and the limits dialogs; a virtual machine always has its memory */
+function limitFields(c, vm = c?.kind === "vm") {
   const opt = (value, label) => h("option", { value }, label);
   const cores = h("select", null, opt("0", t("incus.allCores")), [1, 2, 3, 4, 6, 8, 12, 16].map((n) => opt(String(n), t("incus.cores", { n }))));
   cores.value = String(c?.cores ?? 2);
   if (cores.value === "") cores.value = "0";
-  const memory = h("select", null, opt("0", t("incus.allMemory")), [256, 512, 1024, 2048, 4096, 8192, 16384].map((mb) => opt(String(mb), mb < 1024 ? `${mb} MB` : `${mb / 1024} GB`)));
-  memory.value = String(c?.memory ?? 1024);
-  if (memory.value === "") memory.value = "0";
-  return { cores, memory };
+  const memory = h("select");
+  const fillMemory = (forVm) => {
+    const was = memory.value;
+    memory.replaceChildren(...[!forVm && opt("0", t("incus.allMemory")), ...[256, 512, 1024, 2048, 4096, 8192, 16384].map((mb) => opt(String(mb), mb < 1024 ? `${mb} MB` : `${mb / 1024} GB`))].filter(Boolean));
+    memory.value = was || String(c?.memory || 1024);
+    if (memory.value === "") memory.value = forVm ? "1024" : "0";
+  };
+  memory.value = "";
+  fillMemory(vm);
+  return { cores, memory, fillMemory };
 }
 
 const tickRow = (label, hint, checked) => {
@@ -2937,17 +2982,44 @@ const tickRow = (label, hint, checked) => {
 
 function newContainerDialog() {
   const d = incusUi.data;
+  const vmsReady = d.vms?.state === "ready";
+  let kind = "container";
   const name = h("input", { required: true, placeholder: "docker-1", pattern: "[a-z][a-z0-9\\-]{0,61}[a-z0-9]", autocapitalize: "none", spellcheck: false, class: "mono" });
-  const image = h("select", { onchange: () => shape() }, d.images.map((i) => h("option", { value: i.id }, i.client ? i.name : `${i.name} — ${t("incus.noClient")}`)));
-  const { cores, memory } = limitFields(null);
+  const image = h("select", { onchange: () => shape() });
+  const { cores, memory, fillMemory } = limitFields(null, false);
+  const disk = h("input", { type: "number", min: 4, max: 4096, value: 10, required: true });
+  const diskRow = field(t("incus.vm.disk"), disk, t("incus.vm.diskHint"));
   const [client, clientRow] = tickRow(t("incus.client"), t("incus.clientHint"), true);
   const [docker, dockerRow] = tickRow(t("incus.docker"), t("incus.dockerHint"), true);
   const [autostart, autostartRow] = tickRow(t("incus.autostart"), null, true);
+  const vmNote = h("p", { class: "banner small" }, t("incus.vm.note"));
+  const lead = h("p", { class: "muted small" });
+  const title = h("h2", { class: "grow" });
+  const seg = h(
+    "div",
+    { class: "seg" },
+    ["container", "vm"].map((k) => h("button", { type: "button", class: "btn", "data-kind": k, onclick: () => ((kind = k), fillImages(), shape()) }, t(k === "vm" ? "incus.kind.vm" : "incus.kind.container"))),
+  );
+  const fillImages = () => {
+    const was = image.value;
+    image.replaceChildren(...d.images.filter((i) => kind !== "vm" || i.vm).map((i) => h("option", { value: i.id }, i.client ? i.name : `${i.name} — ${t("incus.noClient")}`)));
+    if ([...image.options].some((o) => o.value === was)) image.value = was;
+    fillMemory(kind === "vm");
+  };
   const shape = () => {
+    const vm = kind === "vm";
+    title.textContent = t(vm ? "incus.vm.new" : "incus.new");
+    lead.textContent = t(vm ? "incus.vm.newLead" : "incus.newLead");
+    dockerRow.querySelector(".block").textContent = t(vm ? "incus.vm.dockerHint" : "incus.dockerHint");
+    clientRow.querySelector(".block").textContent = t(vm ? "incus.vm.clientHint" : "incus.clientHint");
+    diskRow.hidden = !vm;
+    disk.disabled = !vm;
+    vmNote.hidden = !vm;
+    for (const b of seg.children) b.classList.toggle("active", b.dataset.kind === kind);
     const can = d.images.find((i) => i.id === image.value)?.client;
-    client.disabled = docker.disabled = !can;
-    if (!can) client.checked = docker.checked = false;
-    if (can && !client.checked) docker.checked = false;
+    client.disabled = !can;
+    if (!can) client.checked = false;
+    if (!client.checked) docker.checked = false;
     docker.disabled = !can || !client.checked;
   };
   client.addEventListener("change", shape);
@@ -2960,7 +3032,7 @@ function newContainerDialog() {
     submit.disabled = true;
     const n = name.value.trim().toLowerCase();
     try {
-      const r = await api("POST", "/api/containers", { name: n, image: image.value, cores: Number(cores.value), memory: Number(memory.value), client: client.checked, docker: docker.checked, autostart: autostart.checked });
+      const r = await api("POST", "/api/containers", { kind, name: n, image: image.value, cores: Number(cores.value), memory: Number(memory.value), disk: kind === "vm" ? Number(disk.value) : 0, client: client.checked, docker: docker.checked, autostart: autostart.checked });
       dialog.close();
       const machine = client.checked;
       void loadContainers();
@@ -2979,10 +3051,13 @@ function newContainerDialog() {
     h(
       "form",
       { class: "stack", onsubmit: send },
-      h("header", null, h("h2", { class: "grow" }, t("incus.new")), closeX(() => dialog)),
-      h("p", { class: "muted small" }, t("incus.newLead")),
+      h("header", null, title, closeX(() => dialog)),
+      vmsReady && seg,
+      lead,
+      vmNote,
       h("div", { class: "form-pair" }, field(t("incus.name"), name, t("incus.nameHint")), field(t("incus.image"), image, t("incus.imageHint"))),
       h("div", { class: "form-pair" }, field(t("incus.coresLabel"), cores), field(t("incus.memoryLabel"), memory)),
+      diskRow,
       clientRow,
       dockerRow,
       autostartRow,
@@ -2990,6 +3065,7 @@ function newContainerDialog() {
       h("footer", null, closeButton(() => dialog, t("common.cancel")), h("button", { type: "submit", class: "btn primary" }, icon("plus"), t("incus.make"))),
     ),
   );
+  fillImages();
   shape();
   name.focus();
 }
@@ -2998,6 +3074,7 @@ function containerLimitsDialog(c) {
   const { cores, memory } = limitFields(c);
   const [autostart, autostartRow] = tickRow(t("incus.autostart"), null, c.autostart);
   const [nesting, nestingRow] = tickRow(t("incus.nesting"), t("incus.nestingHint"), c.nesting);
+  nestingRow.hidden = c.kind === "vm";
   const error = h("p", { class: "error", role: "alert" });
   let dialog;
   const send = async (e) => {
@@ -3020,7 +3097,7 @@ function containerLimitsDialog(c) {
       "form",
       { class: "stack", onsubmit: send },
       h("header", null, h("h2", { class: "grow clip" }, t("incus.limitsTitle", { name: c.name })), closeX(() => dialog)),
-      h("p", { class: "muted small" }, t("incus.limitsLead")),
+      h("p", { class: "muted small" }, t(c.kind === "vm" ? "incus.vm.limitsLead" : "incus.limitsLead")),
       h("div", { class: "form-pair" }, field(t("incus.coresLabel"), cores), field(t("incus.memoryLabel"), memory)),
       autostartRow,
       nestingRow,

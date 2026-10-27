@@ -1,6 +1,6 @@
 /**
- * Containers on this server itself, made with Incus: what the page sends read and checked, what Incus
- * answers put into the shape the page shows, and the commands run inside a new container.
+ * Containers and virtual machines on this server itself, made with Incus: what the page sends read and
+ * checked, what Incus answers put into the shape the page shows, and the commands run inside a new one.
  *
  * Pure and tested; the requests themselves are in `containers.ts`.
  */
@@ -13,13 +13,15 @@ export interface Image {
   name: string;
   /** How its packages are installed; "" — Hata's client does not go on it (no systemd) */
   family: "apt" | "";
+  /** Offered for a virtual machine too: only images tried as one */
+  vm: boolean;
 }
 
 export const IMAGES: Image[] = [
-  { id: "debian-13", alias: "debian/13", name: "Debian 13", family: "apt" },
-  { id: "debian-12", alias: "debian/12", name: "Debian 12", family: "apt" },
-  { id: "ubuntu-24.04", alias: "ubuntu/24.04", name: "Ubuntu 24.04", family: "apt" },
-  { id: "alpine-3.22", alias: "alpine/3.22", name: "Alpine 3.22", family: "" },
+  { id: "debian-13", alias: "debian/13", name: "Debian 13", family: "apt", vm: true },
+  { id: "debian-12", alias: "debian/12", name: "Debian 12", family: "apt", vm: false },
+  { id: "ubuntu-24.04", alias: "ubuntu/24.04", name: "Ubuntu 24.04", family: "apt", vm: false },
+  { id: "alpine-3.22", alias: "alpine/3.22", name: "Alpine 3.22", family: "", vm: false },
 ];
 
 /** Where the images come from: the server of the people who make Incus */
@@ -30,8 +32,14 @@ export const BRIDGE = "hatabr0";
 
 /** A container's name: Incus takes it as the host name too */
 export const NAME_RE = /^[a-z][a-z0-9-]{0,61}[a-z0-9]$/;
+/** Names the routes of the page take for themselves */
+export const RESERVED = ["install", "setup", "vms"];
 export const SNAPSHOT_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$/;
 export const MEMORY = { min: 128, max: 262144 };
+/** A virtual machine's disk, GB; Incus's own default is 10 */
+export const DISK = { min: 4, max: 4096, standard: 10 };
+
+export type Kind = "container" | "vm";
 
 export class FieldError extends Error {
   constructor(readonly field: string) {
@@ -40,15 +48,18 @@ export class FieldError extends Error {
 }
 
 export interface NewContainer {
+  kind: Kind;
   name: string;
   image: Image;
   cores: number;
   /** MB; 0 — as much as the server has */
   memory: number;
   autostart: boolean;
-  /** Docker inside: needs nesting */
+  /** Docker inside: a container needs nesting for it */
   docker: boolean;
   client: boolean;
+  /** GB, a virtual machine's disk */
+  disk: number;
 }
 
 const whole = (value: unknown, min: number, max: number, field: string): number => {
@@ -60,12 +71,14 @@ const whole = (value: unknown, min: number, max: number, field: string): number 
 /** What the "New container" dialog sent, checked */
 export function readNew(input: Record<string, unknown>, taken: string[]): NewContainer {
   const name = String(input.name ?? "").trim().toLowerCase();
-  if (!NAME_RE.test(name) || name.includes("--")) throw new FieldError("name");
+  if (!NAME_RE.test(name) || name.includes("--") || RESERVED.includes(name)) throw new FieldError("name");
   if (taken.includes(name)) throw new FieldError("taken");
+  const kind: Kind = input.kind === "vm" ? "vm" : "container";
   const image = IMAGES.find((i) => i.id === input.image);
-  if (!image) throw new FieldError("image");
+  if (!image || (kind === "vm" && !image.vm)) throw new FieldError("image");
   const client = input.client !== false && image.family !== "";
   return {
+    kind,
     name,
     image,
     cores: whole(input.cores, 0, 256, "cores"),
@@ -74,17 +87,25 @@ export function readNew(input: Record<string, unknown>, taken: string[]): NewCon
     // Docker is put in by the same script as the client
     docker: client && input.docker === true,
     client,
+    disk: kind === "vm" ? (input.disk ? whole(input.disk, DISK.min, DISK.max, "disk") : DISK.standard) : 0,
   };
 }
 
 /** The settings of a container Hata keeps: limits, start with the server, nesting */
-export function configOf(c: Pick<NewContainer, "cores" | "memory" | "autostart"> & { docker?: boolean }): Record<string, string> {
+export function configOf(c: Pick<NewContainer, "cores" | "memory" | "autostart"> & { docker?: boolean; kind?: Kind }): Record<string, string> {
   const config: Record<string, string> = { "boot.autostart": String(c.autostart), "user.hata": "true" };
   if (c.cores) config["limits.cpu"] = String(c.cores);
   if (c.memory) config["limits.memory"] = `${c.memory}MiB`;
   // Docker's own containers inside need it; it stays unprivileged on the host
-  if (c.docker) config["security.nesting"] = "true";
+  if (c.docker && c.kind !== "vm") config["security.nesting"] = "true";
+  // the images of linuxcontainers.org are not signed for Secure Boot's keys
+  if (c.kind === "vm") config["security.secureboot"] = "false";
   return config;
+}
+
+/** The devices a new one gets besides the profile's: a virtual machine's disk of the size asked */
+export function devicesOf(c: Pick<NewContainer, "kind" | "disk">, pool: string): Record<string, Record<string, string>> {
+  return c.kind === "vm" ? { root: { type: "disk", path: "/", pool, size: `${c.disk}GiB` } } : {};
 }
 
 /** What the limits dialog changes: only what differs, as Incus keys ("" takes a limit away) */
@@ -119,6 +140,7 @@ export interface Snapshot {
 }
 
 export interface Container {
+  kind: Kind;
   name: string;
   status: "running" | "stopped" | "frozen" | "error" | "other";
   /** The system it was made from, as the image said */
@@ -144,9 +166,9 @@ const statusOf = (s: string): Container["status"] => {
   return low === "running" || low === "stopped" || low === "frozen" || low === "error" ? low : "other";
 };
 
-/** A container as `GET /1.0/instances?recursion=2` gives it; null — not a container (a virtual machine) */
+/** A container or a virtual machine as `GET /1.0/instances?recursion=2` gives it; null — something else */
 export function readInstance(raw: Raw): Container | null {
-  if (raw.type !== "container") return null;
+  if (raw.type !== "container" && raw.type !== "virtual-machine") return null;
   const config: Record<string, string> = raw.config ?? {};
   const st: Raw | null = raw.state ?? null;
   // the container's own card first: Docker inside adds bridges of its own (docker0 172.17.0.1)
@@ -157,6 +179,7 @@ export function readInstance(raw: Raw): Container | null {
   const inet = nics.flatMap(([, n]) => ((n.addresses ?? []) as Raw[]).filter((a) => a.family === "inet" && a.scope === "global").map((a) => String(a.address)));
   const os = [config["image.os"], config["image.release"] ?? config["image.version"]].filter(Boolean).join(" ");
   return {
+    kind: raw.type === "virtual-machine" ? "vm" : "container",
     name: String(raw.name),
     status: statusOf(raw.status),
     os: os ? os.charAt(0).toUpperCase() + os.slice(1) : String(config["image.description"] ?? ""),

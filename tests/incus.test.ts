@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { bridgeRules, configOf, FieldError, insideNarrowMap, limitsChange, megabytes, readInstance, readNew, setupScript, snapshotName } from "../src/incus";
+import { bridgeRules, configOf, devicesOf, FieldError, insideNarrowMap, limitsChange, megabytes, readInstance, readNew, setupScript, snapshotName } from "../src/incus";
 
 const field = (f: () => unknown): string => {
   try {
@@ -76,7 +76,8 @@ test("an instance as Incus gives it", () => {
   expect(c.usage?.memory).toBe(26 * 1024 * 1024);
   expect(c.snapshots.map((s) => s.name)).toEqual(["b", "a"]);
   expect(readInstance({ ...raw, status: "Stopped", state: null })!.usage).toBeNull();
-  expect(readInstance({ ...raw, type: "virtual-machine" })).toBeNull();
+  expect(readInstance({ ...raw, type: "virtual-machine" })!.kind).toBe("vm");
+  expect(readInstance({ ...raw, type: "image" })).toBeNull();
 });
 
 test("inside a container with part of the user ids", () => {
@@ -101,4 +102,21 @@ test("a snapshot's name", () => {
   expect(snapshotName("before-update")).toBe("before-update");
   expect(snapshotName("", new Date(2026, 9, 27, 9, 5, 7))).toBe("snap-20261027-090507");
   expect(field(() => snapshotName("a/b"))).toBe("snapshot");
+});
+
+test("a virtual machine: only the images tried as one, a disk of its own, no nesting", () => {
+  const v = readNew({ kind: "vm", name: "vm1", image: "debian-13", cores: 2, memory: 2048, disk: 20, docker: true }, []);
+  expect(v).toMatchObject({ kind: "vm", disk: 20, docker: true, client: true });
+  expect(readNew({ kind: "vm", name: "vm2", image: "debian-13" }, []).disk).toBe(10);
+  expect(readNew({ name: "ct", image: "debian-13", disk: 50 }, []).disk).toBe(0);
+  expect(field(() => readNew({ kind: "vm", name: "vm3", image: "ubuntu-24.04" }, []))).toBe("image");
+  expect(field(() => readNew({ kind: "vm", name: "vm4", image: "debian-13", disk: 2 }, []))).toBe("disk");
+  expect(configOf({ ...v, kind: "vm" })).toEqual({ "boot.autostart": "true", "user.hata": "true", "limits.cpu": "2", "limits.memory": "2048MiB", "security.secureboot": "false" });
+  expect(devicesOf(v, "default")).toEqual({ root: { type: "disk", path: "/", pool: "default", size: "20GiB" } });
+  expect(devicesOf({ kind: "container", disk: 0 }, "default")).toEqual({});
+  expect(readInstance({ name: "vm1", type: "virtual-machine", status: "Stopped", config: {} })!.kind).toBe("vm");
+});
+
+test("the names the page's routes take are refused", () => {
+  for (const name of ["install", "setup", "vms"]) expect(field(() => readNew({ name, image: "debian-13" }, []))).toBe("name");
 });

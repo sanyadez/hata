@@ -15,13 +15,19 @@ import { record } from "./activity";
 import { AppError, startJob, type Job } from "./apps";
 import { bus } from "./bus";
 import { listenAddress } from "./config";
-import { BRIDGE, bridgeRules, configOf, FieldError, IMAGE_SERVER, IMAGES, insideNarrowMap, limitsChange, NAME_RE, readInstance, readNew, setupScript, snapshotName, SNAPSHOT_RE, type Container } from "./incus";
+import { BRIDGE, bridgeRules, configOf, devicesOf, FieldError, IMAGE_SERVER, IMAGES, insideNarrowMap, limitsChange, NAME_RE, readInstance, readNew, setupScript, snapshotName, SNAPSHOT_RE, type Container } from "./incus";
 import { invite, machines, remove as removeMachine } from "./machines";
 import { packageManager, PATH, run, runLogged } from "./packages";
 
 const SOCKET = "/var/lib/incus/unix.socket";
 /** What the button installs: containers only — the virtual machines' packages come later, by a button of their own */
 export const PACKAGES = ["incus-base", "dnsmasq-base"];
+/**
+ * What virtual machines add, by a button of their own: `incus` brings QEMU, the agent and the rest it
+ * depends on; the firmware, the disk tool and the display module are only "recommended" by the packages,
+ * and without each of them Incus refuses to make a machine.
+ */
+export const VM_PACKAGES = ["incus", "ovmf", "qemu-utils", "qemu-system-modules-spice"];
 
 const has = (bin: string): boolean => !!Bun.which(bin, { PATH });
 
@@ -54,6 +60,19 @@ function blocked(): string {
   }
 }
 
+/**
+ * Whether virtual machines can be made here: noArch — Hata knows the packages of x86 only; noKvm — the
+ * processor gives no virtualisation (switched off in the firmware, or Hata itself is in a virtual
+ * machine without nested virtualisation); missing — their packages are not installed; ready.
+ */
+export type VmState = "noArch" | "noKvm" | "missing" | "ready";
+
+async function vmState(driver: string): Promise<VmState> {
+  if (process.arch !== "x64") return "noArch";
+  if (!existsSync("/dev/kvm")) return "noKvm";
+  return /\bqemu\b/.test(driver) && has("qemu-system-x86_64") ? "ready" : "missing";
+}
+
 export interface ContainersReport {
   /** missing — Incus is not installed; blocked — may not be here; setup — installed, not set up; ready */
   state: "missing" | "blocked" | "setup" | "ready";
@@ -66,10 +85,12 @@ export interface ContainersReport {
   /** Where Incus keeps them, and how much room is there */
   storage: { driver: string; path: string } | null;
   containers: (Container & { machine: string })[];
-  images: { id: string; name: string; client: boolean }[];
+  images: { id: string; name: string; client: boolean; vm: boolean }[];
+  /** Virtual machines: a test feature, installed apart */
+  vms: { state: VmState; install: string };
 }
 
-const installCommand = (): string => (packageManager() === "apt-get" ? `apt-get install -y --no-install-recommends ${PACKAGES.join(" ")}` : "");
+const installCommand = (packages = PACKAGES): string => (packageManager() === "apt-get" ? `apt-get install -y --no-install-recommends ${packages.join(" ")}` : "");
 
 /** The network of the default profile's first card: the one new containers go on */
 async function networkOf(): Promise<{ name: string; address: string } | null> {
@@ -87,22 +108,23 @@ async function setUp(): Promise<boolean> {
 }
 
 /** The containers as last seen, by their cards and names: which machine is one of them */
-let seen: { name: string; mac: string }[] = [];
+let seen: { name: string; mac: string; kind: string }[] = [];
 
-/** The container a machine is, by one of its cards or its host name; "" — none */
+/** What a machine is here, by one of its cards or its host name: "container", "vm"; "" — neither */
 export function containerOfMachine(macs: string[], hostname: string): string {
   const cards = new Set(macs.map((m) => m.toLowerCase()));
-  return seen.find((c) => (c.mac && cards.has(c.mac)) || c.name === hostname)?.name ?? "";
+  return seen.find((c) => (c.mac && cards.has(c.mac)) || c.name === hostname)?.kind ?? "";
 }
 
 export async function report(): Promise<ContainersReport> {
-  const base = { why: "", install: installCommand(), version: "", network: null, storage: null, containers: [], images: IMAGES.map((i) => ({ id: i.id, name: i.name, client: i.family !== "" })) };
+  const base = { why: "", install: installCommand(), version: "", network: null, storage: null, containers: [], images: IMAGES.map((i) => ({ id: i.id, name: i.name, client: i.family !== "", vm: i.vm })), vms: { state: "missing" as VmState, install: installCommand(VM_PACKAGES) } };
   const why = blocked();
   if (why) return { ...base, state: "blocked", why };
   if (!has("incus") || !existsSync(SOCKET)) return { ...base, state: "missing" };
   const server = (await incus("GET", "/1.0")).metadata;
   const version = String(server?.environment?.server_version ?? "");
-  if (!(await setUp())) return { ...base, state: "setup", version };
+  const vms = { ...base.vms, state: await vmState(String(server?.environment?.driver ?? "")) };
+  if (!(await setUp())) return { ...base, state: "setup", version, vms };
   const [list, network, pool] = await Promise.all([incus("GET", "/1.0/instances?recursion=2"), networkOf(), incus("GET", "/1.0/storage-pools/default").catch(() => null)]);
   const known = machines();
   const containers = ((list.metadata ?? []) as any[]).flatMap((raw) => {
@@ -112,8 +134,8 @@ export async function report(): Promise<ContainersReport> {
     const machine = known.find((m) => (c.mac && (m.info?.macs ?? []).some((card) => card.mac.toLowerCase() === c.mac)) || m.info?.hostname === c.name);
     return [{ ...c, machine: machine?.id ?? "" }];
   });
-  seen = containers.map((c) => ({ name: c.name, mac: c.mac }));
-  return { ...base, state: "ready", version, network, storage: pool ? { driver: String(pool.metadata.driver), path: String(pool.metadata.config?.source ?? "") } : null, containers: containers.sort((a, b) => a.name.localeCompare(b.name)) };
+  seen = containers.map((c) => ({ name: c.name, mac: c.mac, kind: c.kind }));
+  return { ...base, state: "ready", version, vms, network, storage: pool ? { driver: String(pool.metadata.driver), path: String(pool.metadata.config?.source ?? "") } : null, containers: containers.sort((a, b) => a.name.localeCompare(b.name)) };
 }
 
 /**
@@ -169,6 +191,33 @@ export function install(by: string): Job {
   }, true);
 }
 
+/**
+ * Installs what virtual machines need (a quiet job of kind `incus`), then restarts Incus: it looks for
+ * QEMU only when it starts.
+ */
+export async function installVms(by: string): Promise<Job> {
+  const r = await ready();
+  if (r.vms.state === "noArch" || r.vms.state === "noKvm") throw new AppError("containers.vm." + r.vms.state, 409);
+  if (packageManager() !== "apt-get") throw new AppError("containers.noInstaller", 409);
+  return startJob("incus-vm", "incus", by, async (log) => {
+    const env = { DEBIAN_FRONTEND: "noninteractive" };
+    const done = await runLogged(["apt-get", "install", "-y", "--no-install-recommends", ...VM_PACKAGES], log, 20 * 60_000, env);
+    if (done.code !== 0) throw new AppError("containers.installFailed", 409, { message: (done.err || done.out).trim().split("\n").slice(-3).join("\n") });
+    log("Restarting Incus");
+    await run(["systemctl", "restart", "incus"], 60_000);
+    for (let i = 0; i < 30; i++) {
+      const driver = String((await incus("GET", "/1.0").catch(() => null))?.metadata?.environment?.driver ?? "");
+      if (/\bqemu\b/.test(driver)) {
+        record("containers.vmsInstalled", { user: by });
+        bus.publish("containers");
+        return;
+      }
+      await Bun.sleep(1000);
+    }
+    throw new AppError("containers.vm.notReady", 409);
+  }, true);
+}
+
 /** Sets up an Incus that was installed by hand and never set up */
 export async function setUpNow(by: string): Promise<void> {
   if (blocked()) throw new AppError("containers.nested", 409);
@@ -220,19 +269,32 @@ export async function create(input: Record<string, unknown>, by: string): Promis
   } catch (e) {
     throw new AppError("containers.badField", 400, { field: e instanceof FieldError ? e.field : "" });
   }
+  if (c.kind === "vm" && r.vms.state !== "ready") throw new AppError("containers.vm." + (r.vms.state === "missing" ? "notInstalled" : r.vms.state), 409);
+  const vm = c.kind === "vm";
+  const pool = String(Object.values(((await incus("GET", "/1.0/profiles/default")).metadata?.devices ?? {}) as Record<string, any>).find((d) => d.type === "disk" && d.path === "/")?.pool ?? "default");
   const job = startJob(`incus:${c.name}`, "container", by, async (log) => {
     log(`Making ${c.name} from ${c.image.name} (the image is downloaded once)`);
-    const op = await incus("POST", "/1.0/instances", { name: c.name, type: "container", start: true, source: { type: "image", protocol: "simplestreams", server: IMAGE_SERVER, alias: c.image.alias }, config: configOf(c) });
+    const op = await incus("POST", "/1.0/instances", { name: c.name, type: vm ? "virtual-machine" : "container", start: true, source: { type: "image", protocol: "simplestreams", server: IMAGE_SERVER, alias: c.image.alias }, config: configOf(c), devices: devicesOf(c, pool) });
     await finished(op, 1800);
     bus.publish("containers");
+    // a virtual machine boots its own kernel first: its address and its agent come later
     let address = "";
-    for (let i = 0; i < 60 && !address; i++) {
+    for (let i = 0; i < (vm ? 180 : 60) && !address; i++) {
       address = (await findContainer(c.name)).address;
       if (!address) await Bun.sleep(1000);
     }
     log(address ? `Started, address ${address}` : "Started, no address yet");
-    record("containers.created", { user: by, detail: c.name });
+    record(vm ? "containers.vmCreated" : "containers.created", { user: by, detail: c.name });
     if (!c.client && !c.docker) return;
+    if (vm) {
+      log("Waiting for the machine's agent");
+      let agent = false;
+      for (let i = 0; i < 60 && !agent; i++) {
+        agent = (await run(["incus", "exec", c.name, "--", "true"], 15_000)).code === 0;
+        if (!agent) await Bun.sleep(3000);
+      }
+      if (!agent) throw new AppError("containers.vm.noAgent", 409, { name: c.name });
+    }
     const gateway = r.network?.address.split("/")[0] ?? "";
     if (c.client && !gateway) throw new AppError("containers.noNetwork", 409);
     const before = new Set(machines().map((m) => m.id));
@@ -353,10 +415,10 @@ export async function shellReady(name: string): Promise<"ok" | "notFound" | "not
 /** The shell of a container for the terminal: bash where it has one, sh otherwise */
 export const shellCommand = (name: string): string[] => ["incus", "exec", name, "--env", "TERM=xterm-256color", "--", "sh", "-c", "if command -v bash >/dev/null 2>&1; then exec bash -l; else exec sh -l; fi"];
 
-/** Whether something of Hata's stands on Incus: containers are there */
-export async function inUse(): Promise<boolean> {
+/** Whether something of Hata's stands on Incus: instances are there (only virtual machines, when asked) */
+export async function inUse(kind?: "vm"): Promise<boolean> {
   if (!existsSync(SOCKET)) return false;
-  const list = await incus("GET", "/1.0/instances").catch(() => null);
+  const list = await incus("GET", `/1.0/instances${kind ? "?filter=" + encodeURIComponent("type eq virtual-machine") : ""}`).catch(() => null);
   return ((list?.metadata ?? []) as string[]).length > 0;
 }
 
