@@ -2960,7 +2960,7 @@ function incusPlacesCard(d) {
         h(
           "div",
           { class: "row" },
-          h("div", { class: "grow" }, h("strong", null, p.name), " ", p.standard && h("span", { class: "chip" }, t("incus.place.standard")), h("div", { class: "muted small mono" }, (p.path || t("incus.place.systemPath")) + " · " + p.driver)),
+          h("div", { class: "grow" }, h("strong", null, p.name), " ", p.standard && h("span", { class: "chip" }, t("incus.place.standard")), " ", p.away && h("span", { class: "state restarting" }, t("incus.place.away")), h("div", { class: "muted small mono" }, (p.path || t("incus.place.systemPath")) + " · " + p.driver)),
           h(
             "div",
             { class: "row-actions" },
@@ -2970,6 +2970,7 @@ function incusPlacesCard(d) {
         ),
         p.total > 0 && h("div", { class: "bar" }, fill),
         h("p", { class: "muted small" }, [p.total ? t("sys.free", { free: bytes(p.total - p.used), total: bytes(p.total) }) : null, t("incus.place.instancesN", { n: p.instances })].filter(Boolean).join(" · ")),
+        p.away && h("p", { class: "small" }, t("incus.place.awayHint")),
       );
     }),
   );

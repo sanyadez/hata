@@ -94,6 +94,8 @@ export interface Place {
   profile: boolean;
   /** Instances that live there */
   instances: number;
+  /** Incus cannot reach its folder (the disk it is on is not connected): its room is not known then */
+  away: boolean;
   used: number;
   total: number;
 }
@@ -114,13 +116,13 @@ function stoppedOnPurpose(name: string, on: boolean): void {
 }
 
 /** What was last seen, for the attention list (asked every minute, read without waiting) */
-const lastLook: { silentSince: number | null; instances: Container[] } = { silentSince: null, instances: [] };
+const lastLook: { silentSince: number | null; instances: Container[]; placesAway: { name: string; path: string }[] } = { silentSince: null, instances: [], placesAway: [] };
 
 /** The attention items of the containers: Incus silent, an instance in error, one that should run and does not */
 export function containersTrouble() {
   // one a job holds (a backup stops it for a while, a restore replaces it) is not looked at meanwhile
   const instances = lastLook.instances.filter((c) => !isBusy(`incus:${c.name}`));
-  return trouble({ installed: has("incus"), silentSince: lastLook.silentSince, instances, stoppedByHand: own.stopped, now: Date.now() });
+  return trouble({ installed: has("incus"), silentSince: lastLook.silentSince, instances, stoppedByHand: own.stopped, now: Date.now(), placesAway: lastLook.placesAway });
 }
 
 /** Looks at Incus once: whether it answers and in what state the instances are */
@@ -129,6 +131,8 @@ async function lookAtIncus(): Promise<void> {
   try {
     const list = await incus("GET", "/1.0/instances?recursion=1", undefined, 15_000);
     lastLook.instances = ((list.metadata ?? []) as any[]).flatMap((raw) => readInstance({ ...raw, state: null, snapshots: [] }) ?? []);
+    const pools = ((await incus("GET", "/1.0/storage-pools?recursion=1", undefined, 15_000)).metadata ?? []) as any[];
+    lastLook.placesAway = pools.filter((p) => p.status === "Unavailable").map((p) => ({ name: String(p.name), path: String(p.config?.source ?? "") }));
     lastLook.silentSince = null;
   } catch {
     lastLook.silentSince ??= Date.now();
@@ -161,8 +165,10 @@ async function places(): Promise<Place[]> {
       standard: p.name === standard,
       profile: p.name === inProfile,
       instances: ((p.used_by ?? []) as string[]).filter((u) => u.startsWith("/1.0/instances/")).length,
-      used: Number(res?.space?.used ?? 0),
-      total: Number(res?.space?.total ?? 0),
+      away: p.status === "Unavailable",
+      // an unavailable place's "room" is that of the folder under its mount point: the system's disk
+      used: p.status === "Unavailable" ? 0 : Number(res?.space?.used ?? 0),
+      total: p.status === "Unavailable" ? 0 : Number(res?.space?.total ?? 0),
     });
   }
   placePaths = out.map((p) => p.path).filter(Boolean);

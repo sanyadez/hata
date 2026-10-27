@@ -219,3 +219,10 @@ test("Docker on Rocky Linux comes from Docker's RHEL packages: its script does n
   expect(script).toContain("download.docker.com/linux/rhel/docker-ce.repo");
   expect(script).not.toContain("get.docker.com");
 });
+
+test("a container whose place is gone waits for its disk instead of being said to be down", () => {
+  const base = { installed: true, silentSince: null, stoppedByHand: [], now: 0 };
+  const instances = [{ name: "c1", kind: "container" as const, status: "stopped", autostart: true, place: "big" }];
+  expect(trouble({ ...base, instances, placesAway: [{ name: "big", path: "/mnt/big/incus" }] })).toEqual([{ id: "incus:c1", severity: "warn", code: "containers.placeAway", detail: { name: "c1", kind: "container", place: "big", path: "/mnt/big/incus" } }]);
+  expect(trouble({ ...base, instances, placesAway: [] })[0]!.code).toBe("containers.down");
+});

@@ -383,14 +383,18 @@ export interface Trouble {
  * The attention items of the containers: Incus that stopped answering, an instance in an error state,
  * one that starts with the server but is stopped — unless somebody stopped it through Hata.
  */
-export function trouble(input: { installed: boolean; silentSince: number | null; instances: Pick<Container, "name" | "kind" | "status" | "autostart">[]; stoppedByHand: string[]; now: number }): Trouble[] {
+export function trouble(input: { installed: boolean; silentSince: number | null; instances: Pick<Container, "name" | "kind" | "status" | "autostart" | "place">[]; stoppedByHand: string[]; now: number; placesAway?: { name: string; path: string }[] }): Trouble[] {
   if (!input.installed) return [];
   if (input.silentSince !== null) return input.now - input.silentSince >= SILENT_MS ? [{ id: "incus:away", severity: "danger", code: "containers.away", detail: {} }] : [];
   const items: Trouble[] = [];
   for (const c of input.instances) {
     const kind = c.kind === "vm" ? "vm" : "container";
     if (c.status === "error") items.push({ id: `incus:${c.name}`, severity: "danger", code: "containers.error", detail: { name: c.name, kind } });
-    else if (c.status === "stopped" && c.autostart && !input.stoppedByHand.includes(c.name)) items.push({ id: `incus:${c.name}`, severity: "warn", code: "containers.down", detail: { name: c.name, kind } });
+    else if (c.status === "stopped" && c.autostart && !input.stoppedByHand.includes(c.name)) {
+      // its place is gone (a disk not connected): Incus starts it by itself once the place is back
+      const away = input.placesAway?.find((p) => p.name === c.place);
+      items.push(away ? { id: `incus:${c.name}`, severity: "warn", code: "containers.placeAway", detail: { name: c.name, kind, place: away.name, path: away.path } } : { id: `incus:${c.name}`, severity: "warn", code: "containers.down", detail: { name: c.name, kind } });
+    }
   }
   return items;
 }
