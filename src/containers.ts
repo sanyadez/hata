@@ -13,12 +13,12 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmdirSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { record } from "./activity";
-import { AppError, startJob, type Job } from "./apps";
+import { AppError, isBusy, startJob, type Job } from "./apps";
 import { bus } from "./bus";
 import { DATA_DIR, listenAddress, SECRETS_DIR, settings } from "./config";
 import { onContainerPlaces } from "./mounting";
 import { readJsonFile, writeJsonAtomic } from "./fsutil";
-import { BRIDGE, bridgeRules, configOf, devicesOf, diskChange, LIMITED, FieldError, placeFor, poolName, IMAGE_SERVER, IMAGES, insideNarrowMap, limitsChange, NAME_RE, readInstance, readNew, setupScript, snapshotName, SNAPSHOT_RE, type Container } from "./incus";
+import { trouble, BRIDGE, bridgeRules, configOf, devicesOf, diskChange, LIMITED, FieldError, placeFor, poolName, IMAGE_SERVER, IMAGES, insideNarrowMap, limitsChange, NAME_RE, readInstance, readNew, setupScript, snapshotName, SNAPSHOT_RE, type Container } from "./incus";
 import { invite, machines, remove as removeMachine } from "./machines";
 import { packageManager, PATH, run, runLogged } from "./packages";
 
@@ -94,9 +94,39 @@ export interface Place {
 /** The folders the pools are in, as last seen: a disk holding one is not disconnected or formatted */
 let placePaths: string[] = [];
 
-/** What Hata keeps of its own about the containers: the place new ones go to */
+/** What Hata keeps of its own about the containers: the place new ones go to, the ones stopped on purpose */
 const OWN_FILE = join(DATA_DIR, "containers.json");
-const own: { standard: string } = readJsonFile(OWN_FILE, { standard: "" });
+const own: { standard: string; stopped: string[] } = { standard: "", stopped: [], ...readJsonFile(OWN_FILE, {}) };
+
+/** A container stopped through Hata is not a problem while it stays stopped; started again, it is watched again */
+function stoppedOnPurpose(name: string, on: boolean): void {
+  const was = own.stopped.includes(name);
+  if (on === was) return;
+  own.stopped = on ? [...own.stopped, name] : own.stopped.filter((n) => n !== name);
+  writeJsonAtomic(OWN_FILE, own);
+}
+
+/** What was last seen, for the attention list (asked every minute, read without waiting) */
+const lastLook: { silentSince: number | null; instances: Container[] } = { silentSince: null, instances: [] };
+
+/** The attention items of the containers: Incus silent, an instance in error, one that should run and does not */
+export function containersTrouble() {
+  // one a job holds (a backup stops it for a while, a restore replaces it) is not looked at meanwhile
+  const instances = lastLook.instances.filter((c) => !isBusy(`incus:${c.name}`));
+  return trouble({ installed: has("incus"), silentSince: lastLook.silentSince, instances, stoppedByHand: own.stopped, now: Date.now() });
+}
+
+/** Looks at Incus once: whether it answers and in what state the instances are */
+async function lookAtIncus(): Promise<void> {
+  if (!has("incus") || blocked()) return;
+  try {
+    const list = await incus("GET", "/1.0/instances?recursion=1", undefined, 15_000);
+    lastLook.instances = ((list.metadata ?? []) as any[]).flatMap((raw) => readInstance({ ...raw, state: null, snapshots: [] }) ?? []);
+    lastLook.silentSince = null;
+  } catch {
+    lastLook.silentSince ??= Date.now();
+  }
+}
 onContainerPlaces(() => placePaths);
 
 const INCUS_POOLS = "/var/lib/incus/storage-pools";
@@ -431,6 +461,8 @@ export async function act(name: string, action: unknown, by: string): Promise<vo
     if (action === "start") throw e;
     await finished(await incus("PUT", `/1.0/instances/${name}/state`, { action, timeout: 30, force: true }), 60);
   }
+  stoppedOnPurpose(name, action === "stop");
+  await lookAtIncus();
   record(`containers.${action}`, { user: by, detail: name });
   bus.publish("containers");
 }
@@ -443,6 +475,8 @@ export async function removeContainer(name: string, by: string): Promise<void> {
   await finished(await incus("DELETE", `/1.0/instances/${name}`), 300);
   const machine = machines().find((m) => (c.mac && (m.info?.macs ?? []).some((card) => card.mac.toLowerCase() === c.mac)) || m.info?.hostname === c.name);
   if (machine) await removeMachine(machine.id, by).catch(() => {});
+  stoppedOnPurpose(name, false);
+  await lookAtIncus();
   record("containers.removed", { user: by, detail: name });
   bus.publish("containers");
   bus.publish("machines");
@@ -539,6 +573,7 @@ export async function inUse(kind?: "vm"): Promise<boolean> {
 export function startContainers(): void {
   const tick = () => {
     void openBridges().catch(() => {});
+    void lookAtIncus();
     if (existsSync(SOCKET)) void report().catch(() => {});
   };
   setTimeout(tick, 20_000);

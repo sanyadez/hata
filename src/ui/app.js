@@ -1860,7 +1860,7 @@ function dragEnd(drop) {
   drag.kind.drop(drag, target);
 }
 
-const ATTENTION_ICONS = { update: "up", docker: "box", restarting: "refresh", partial: "alert", disk: "disk", smart: "disk", memory: "memory", temperature: "temp", internet: "network", network: "network", array: "disk", share: "share", netplace: "globe", machine: "server", pve: "server", ha: "home", absent: "disk" };
+const ATTENTION_ICONS = { update: "up", docker: "box", restarting: "refresh", partial: "alert", disk: "disk", smart: "disk", memory: "memory", temperature: "temp", internet: "network", network: "network", array: "disk", share: "share", netplace: "globe", machine: "server", pve: "server", ha: "home", containers: "box", absent: "disk" };
 
 function attentionItem(item) {
   const detail = { ...item.detail, free: item.detail.free == null ? "" : bytes(item.detail.free), trash: item.detail.trash == null ? "" : bytes(item.detail.trash), size: item.detail.size == null ? "" : bytes(item.detail.size) };
@@ -1905,6 +1905,7 @@ function attentionItem(item) {
       const r = await api("POST", `/api/proxmox/${item.detail.host}/guests/${item.detail.guestId}/power`, { action: "start" });
       toast(t(r.done ? "pve.done.start" : "pve.going", { name: item.detail.guest }));
     }),
+    item.code === "containers.down" && doIt(t("incus.start"), "play", () => api("POST", `/api/containers/${item.detail.name}/state`, { action: "start" })),
     item.code === "netplace.down" && item.detail.id && doIt(t("attention.reconnect"), "refresh", () => api("POST", `/api/netplaces/${item.detail.id}/retry`, {})),
     item.code === "share.stopped" && doIt(t("attention.startSamba"), "play", () => api("POST", "/api/shares/tool", {})),
     item.code === "offsite" && doIt(t("attention.retry"), "refresh", async () => (await api("POST", "/api/backups/offsite/sync", {}), toast(t("attention.started")))),
@@ -1925,6 +1926,7 @@ function attentionItem(item) {
     item.code.startsWith("share.") && open("#/settings/shares"),
     item.code === "netplace.down" && open("#/settings/storage"),
     item.code === "machine.away" && open(`#/machines/${item.detail.id}`),
+    item.code.startsWith("containers.") && state.route.view !== "containers" && open("#/containers"),
     item.code.startsWith("ha.") && !(state.route.view === "ha" && state.route.id === item.detail.host) && open(`#/ha/${item.detail.host}`),
     item.code.startsWith("pve.") && state.route.view !== "proxmox" && open(`#/proxmox/${item.detail.host}${item.code === "pve.guestDown" ? "/guests" : item.code === "pve.backupFailed" ? "/tasks" : ""}`),
     (item.code === "machine.restarting" || item.code === "machine.partial") && open(`#/machines/${item.detail.id}/apps`),

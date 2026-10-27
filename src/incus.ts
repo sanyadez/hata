@@ -331,3 +331,31 @@ export function poolName(path: string, taken: string[]): string {
   for (let i = 2; taken.includes(name); i++) name = `${base}-${i}`;
   return name;
 }
+
+// --- What needs attention -----------------------------------------------------------------------------
+
+/** How long Incus may stay silent before it is said: a restart of it (new packages) takes a moment */
+export const SILENT_MS = 2 * 60_000;
+
+export interface Trouble {
+  id: string;
+  severity: "danger" | "warn";
+  code: string;
+  detail: Record<string, string | number>;
+}
+
+/**
+ * The attention items of the containers: Incus that stopped answering, an instance in an error state,
+ * one that starts with the server but is stopped — unless somebody stopped it through Hata.
+ */
+export function trouble(input: { installed: boolean; silentSince: number | null; instances: Pick<Container, "name" | "kind" | "status" | "autostart">[]; stoppedByHand: string[]; now: number }): Trouble[] {
+  if (!input.installed) return [];
+  if (input.silentSince !== null) return input.now - input.silentSince >= SILENT_MS ? [{ id: "incus:away", severity: "danger", code: "containers.away", detail: {} }] : [];
+  const items: Trouble[] = [];
+  for (const c of input.instances) {
+    const kind = c.kind === "vm" ? "vm" : "container";
+    if (c.status === "error") items.push({ id: `incus:${c.name}`, severity: "danger", code: "containers.error", detail: { name: c.name, kind } });
+    else if (c.status === "stopped" && c.autostart && !input.stoppedByHand.includes(c.name)) items.push({ id: `incus:${c.name}`, severity: "warn", code: "containers.down", detail: { name: c.name, kind } });
+  }
+  return items;
+}

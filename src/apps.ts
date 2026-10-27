@@ -88,6 +88,9 @@ const jobs = new Map<string, Job>();
 /** app name → id of the job that currently owns it */
 const busy = new Map<string, string>();
 
+/** Whether a job runs for this key now */
+export const isBusy = (key: string): boolean => busy.has(key);
+
 export const getJob = (id: string): Job | null => jobs.get(id) ?? null;
 export const listJobs = (): Job[] => [...jobs.values()];
 

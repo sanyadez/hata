@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { bridgeRules, configOf, devicesOf, diskChange, FieldError, placeFor, poolName, insideNarrowMap, limitsChange, megabytes, readInstance, readNew, setupScript, snapshotName } from "../src/incus";
+import { trouble, SILENT_MS, bridgeRules, configOf, devicesOf, diskChange, FieldError, placeFor, poolName, insideNarrowMap, limitsChange, megabytes, readInstance, readNew, setupScript, snapshotName } from "../src/incus";
 
 const field = (f: () => unknown): string => {
   try {
@@ -170,4 +170,20 @@ test("a disk's size: a container's limit set or taken away, a virtual machine's 
   expect(field(() => diskChange(8, 10, "vm"))).toBe("diskShrink");
   expect(field(() => diskChange(-1, 10, "container"))).toBe("disk");
   expect(readInstance({ name: "c", type: "container", status: "Stopped", config: {}, expanded_devices: { root: { pool: "ct", size: "8GiB" } } })).toMatchObject({ place: "ct", disk: 8 });
+});
+
+test("what of the containers needs attention", () => {
+  const c = (name: string, status: string, autostart = true) => ({ name, kind: "container" as const, status: status as "running", autostart });
+  const base = { installed: true, silentSince: null, stoppedByHand: [] as string[], now: 1_000_000 };
+  expect(trouble({ ...base, installed: false, instances: [c("a", "stopped")] })).toEqual([]);
+  expect(trouble({ ...base, instances: [c("a", "running"), c("b", "stopped", false)] })).toEqual([]);
+  expect(trouble({ ...base, instances: [c("a", "stopped"), c("b", "error")] })).toEqual([
+    { id: "incus:a", severity: "warn", code: "containers.down", detail: { name: "a", kind: "container" } },
+    { id: "incus:b", severity: "danger", code: "containers.error", detail: { name: "b", kind: "container" } },
+  ]);
+  // stopped through Hata on purpose: not a problem
+  expect(trouble({ ...base, stoppedByHand: ["a"], instances: [c("a", "stopped")] })).toEqual([]);
+  // silent for a moment (a restart of Incus) is not said; for long, it is, and nothing else is
+  expect(trouble({ ...base, silentSince: base.now - 30_000, instances: [c("a", "stopped")] })).toEqual([]);
+  expect(trouble({ ...base, silentSince: base.now - SILENT_MS, instances: [c("a", "stopped")] }).map((i) => i.code)).toEqual(["containers.away"]);
 });
