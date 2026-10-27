@@ -4102,5 +4102,11 @@
   "incus.vm.countN": "virtual machines: {n}",
   "incus.newAny": "New…",
   "incus.vm.clientHint": "The machine becomes one of the machines of Hata: its apps, files, terminal and backups.",
-  "incus.vm.limitsLead": "The processor changes at once. The memory of a running virtual machine can be lowered, but raised above what it started with only after it is stopped."
+  "incus.vm.limitsLead": "The processor changes at once. The memory of a running virtual machine can be lowered, but raised above what it started with only after it is stopped.",
+  "backup.incus.title": "Containers and virtual machines",
+  "backup.incus.lead": "Each is kept whole — its system and everything in it — and is stopped while the snapshot is taken. Incus writes the export into /var/lib/incus first, so the room for it is needed there for a moment too.",
+  "backup.incus.restoreLead": "{name} is put back whole as it was at {time}: what changed in it since then is lost, and so are its own snapshots. If it is a machine of Hata, it connects again by itself.",
+  "incus.backupNow": "Back up now",
+  "incus.backups": "Its backups",
+  "activity.containers.restored": "Restored from a backup: {target}"
 }

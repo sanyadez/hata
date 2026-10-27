@@ -19,7 +19,7 @@ import { BRIDGE, bridgeRules, configOf, devicesOf, FieldError, IMAGE_SERVER, IMA
 import { invite, machines, remove as removeMachine } from "./machines";
 import { packageManager, PATH, run, runLogged } from "./packages";
 
-const SOCKET = "/var/lib/incus/unix.socket";
+export const SOCKET = "/var/lib/incus/unix.socket";
 /** What the button installs: containers only — the virtual machines' packages come later, by a button of their own */
 export const PACKAGES = ["incus-base", "dnsmasq-base"];
 /**
@@ -32,7 +32,7 @@ export const VM_PACKAGES = ["incus", "ovmf", "qemu-utils", "qemu-system-modules-
 const has = (bin: string): boolean => !!Bun.which(bin, { PATH });
 
 /** Incus's answer to a request; an error of Incus is a 409 with its own words */
-async function incus(method: string, path: string, body?: unknown, timeout = 30_000): Promise<any> {
+export async function incus(method: string, path: string, body?: unknown, timeout = 30_000): Promise<any> {
   let r: Response;
   try {
     r = await fetch(`http://incus${path}`, { unix: SOCKET, method, body: body === undefined ? undefined : JSON.stringify(body), headers: { "content-type": "application/json" }, signal: AbortSignal.timeout(timeout) } as RequestInit);
@@ -45,7 +45,7 @@ async function incus(method: string, path: string, body?: unknown, timeout = 30_
 }
 
 /** Waits for a background operation of Incus to end; its failure is said in Incus's words */
-async function finished(op: any, seconds = 600): Promise<void> {
+export async function finished(op: any, seconds = 600): Promise<void> {
   if (op.type !== "async") return;
   const done = await incus("GET", `${op.operation}/wait?timeout=${seconds}`, undefined, (seconds + 10) * 1000);
   if (done.metadata?.status_code >= 400) throw new AppError("containers.failed", 409, { message: String(done.metadata.err ?? "") });
@@ -241,7 +241,7 @@ export async function openBridges(): Promise<void> {
   }
 }
 
-const findContainer = async (name: string): Promise<Container> => {
+export const findContainer = async (name: string): Promise<Container> => {
   if (!NAME_RE.test(name)) throw new AppError("containers.notFound", 404, { name });
   const raw = await incus("GET", `/1.0/instances/${name}?recursion=1`).catch(() => null);
   const c = raw && readInstance({ ...raw.metadata, snapshots: [] });

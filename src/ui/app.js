@@ -2948,6 +2948,8 @@ function containerMenu(c, at) {
     c.machine && { label: t("incus.openMachine"), icon: "server", href: `#/machines/${c.machine}` },
     { label: t("incus.limits") + "…", icon: "settings", run: () => containerLimitsDialog(c) },
     { label: t("incus.snapshots") + "…", icon: "clock", run: () => containerSnapshotsDialog(c) },
+    { label: t("incus.backupNow"), icon: "archive", run: () => backupNow({ name: `${c.name}@incus`, title: c.name, incus: { kind: c.kind } }) },
+    { label: t("incus.backups"), icon: "archive", href: "#/settings/backups" },
     { label: t("incus.remove") + "…", icon: "trash", danger: true, run: () => removeContainerDialog(c) },
   ]);
 }
@@ -6936,8 +6938,8 @@ const dateTime = (ts) => new Date(ts).toLocaleString(state.lang, { day: "numeric
 async function backupNow(app) {
   try {
     // an app of another machine: its snapshot is taken there and kept here
-    const res = await api("POST", app.machine ? `/api/backups/${app.name}/take` : `/api/apps/${app.name}/backup`, {});
-    jobDialog(res.job, "backup", app.title, () => (state.route.view === "backups" ? loadBackups() : loadApp(true)));
+    const res = await api("POST", app.machine || app.incus ? `/api/backups/${app.name}/take` : `/api/apps/${app.name}/backup`, {});
+    jobDialog(res.job, "backup", app.title, () => (state.route.view === "backups" ? loadBackups() : state.route.view === "containers" ? loadContainers() : loadApp(true)));
   } catch (e) {
     toast(errorText(e), "error");
   }
@@ -6947,9 +6949,13 @@ function restoreDialog(app, snapshot) {
   const dialog = openDialog(
     "confirm",
     h("h2", null, t("backup.restoreTitle", { title: app.title })),
-    h("p", { class: "muted" }, t("backup.restoreLead", { time: dateTime(snapshot.at) })),
-    h("ul", { class: "paths mono small" }, snapshot.paths.map((path) => h("li", null, path))),
-    h("p", { class: "cmd" }, icon("terminal"), `tar -xzf ${snapshot.id}.tar.gz -C /`),
+    app.incus
+      ? h("p", { class: "muted" }, t("backup.incus.restoreLead", { time: dateTime(snapshot.at), name: app.title }))
+      : [
+          h("p", { class: "muted" }, t("backup.restoreLead", { time: dateTime(snapshot.at) })),
+          h("ul", { class: "paths mono small" }, snapshot.paths.map((path) => h("li", null, path))),
+          h("p", { class: "cmd" }, icon("terminal"), `tar -xzf ${snapshot.id}.tar.gz -C /`),
+        ],
     h(
       "footer",
       null,
@@ -6982,7 +6988,7 @@ function snapshotList(app, snapshots, reload) {
         "div",
         { class: "snapshot" },
         h("div", { class: "grow" }, h("strong", null, dateTime(s.at)), h("div", { class: "muted small" }, [t("backup.reason." + s.reason), bytes(s.size), s.images[0]].filter(Boolean).join(" · "))),
-        button(t("backup.files"), { class: "small", onclick: () => snapshotFilesDialog(app, s) }, "folder"),
+        !app.incus && button(t("backup.files"), { class: "small", onclick: () => snapshotFilesDialog(app, s) }, "folder"),
         button(t("backup.restore"), { class: "small", onclick: () => restoreDialog(app, s) }, "undo"),
         h(
           "button",
@@ -7223,7 +7229,7 @@ function renderBackupsBody() {
     return h(
       "tr",
       { class: app.installed ? "" : "removed" },
-      h("td", null, h("div", { class: "with-icon" }, appIcon(app, "sm"), h("div", { class: "stack-s backup-name" }, app.installed ? h("a", { class: "strong", href: app.machine ? `#/machines/${app.machine.id}/apps` : `#/apps/${app.name}/backups` }, app.title) : h("span", { class: "strong" }, app.title), app.machine && h("div", { class: "muted small with-icon" }, icon("server"), app.machine.name), !app.installed && h("div", { class: "muted small" }, t("backup.removedApp")), app.otherFolders.length > 0 && h("button", { type: "button", class: "text-btn muted small", title: app.otherFolders.join("\n"), onclick: () => backupFoldersDialog(app, loadBackups) }, t("backup.folders.row", { n: app.otherFolders.length, m: app.extraFolders.length }))))),
+      h("td", null, h("div", { class: "with-icon" }, appIcon(app, "sm"), h("div", { class: "stack-s backup-name" }, app.installed ? h("a", { class: "strong", href: app.incus ? "#/containers" : app.machine ? `#/machines/${app.machine.id}/apps` : `#/apps/${app.name}/backups` }, app.title) : h("span", { class: "strong" }, app.title), app.machine && h("div", { class: "muted small with-icon" }, icon("server"), app.machine.name), app.incus?.kind && h("div", { class: "muted small with-icon" }, icon(app.incus.kind === "vm" ? "server" : "box"), t(app.incus.kind === "vm" ? "incus.kind.vm" : "incus.kind.container")), !app.installed && h("div", { class: "muted small" }, t("backup.removedApp")), app.otherFolders.length > 0 && h("button", { type: "button", class: "text-btn muted small", title: app.otherFolders.join("\n"), onclick: () => backupFoldersDialog(app, loadBackups) }, t("backup.folders.row", { n: app.otherFolders.length, m: app.extraFolders.length }))))),
       h("td", null, newest ? h("div", null, ago(newest.at), h("div", { class: "muted small" }, t("backup.reason." + newest.reason))) : h("span", { class: "muted" }, t("backup.noneShort"))),
       h("td", { class: "num" }, size ? bytes(size) : "—"),
       h("td", { class: "num" }, app.snapshots.length || "—"),
@@ -7255,9 +7261,15 @@ function renderBackupsBody() {
       h("p", { class: "cmd" }, icon("terminal"), `sudo hata restore ${b.dir}`),
     ),
     h("div", { class: "section-head" }, h("h2", null, t("home.apps"))),
-    b.apps.length
-      ? h("div", { class: "card table-wrap" }, h("table", null, h("thead", null, h("tr", null, h("th", null, t("backup.col.app")), h("th", null, t("backup.col.last")), h("th", { class: "num" }, t("backup.col.size")), h("th", { class: "num" }, t("backup.col.count")), h("th", null, t("backup.col.daily")), h("th"))), h("tbody", null, b.apps.map(row))))
+    b.apps.some((a) => !a.incus)
+      ? h("div", { class: "card table-wrap" }, h("table", null, h("thead", null, h("tr", null, h("th", null, t("backup.col.app")), h("th", null, t("backup.col.last")), h("th", { class: "num" }, t("backup.col.size")), h("th", { class: "num" }, t("backup.col.count")), h("th", null, t("backup.col.daily")), h("th"))), h("tbody", null, b.apps.filter((a) => !a.incus).map(row))))
       : h("p", { class: "card pad muted" }, t("backup.noApps")),
+    // the containers and virtual machines of this server, kept whole
+    ...(b.apps.some((a) => a.incus) ? [
+      h("div", { class: "section-head" }, h("h2", null, t("backup.incus.title"))),
+      h("p", { class: "muted small" }, t("backup.incus.lead")),
+      h("div", { class: "card table-wrap" }, h("table", null, h("thead", null, h("tr", null, h("th", null, t("incus.col.name")), h("th", null, t("backup.col.last")), h("th", { class: "num" }, t("backup.col.size")), h("th", { class: "num" }, t("backup.col.count")), h("th", null, t("backup.col.daily")), h("th"))), h("tbody", null, b.apps.filter((a) => a.incus).map(row)))),
+    ] : []),
   );
 
   // the schedule form is redrawn only when it is not being edited

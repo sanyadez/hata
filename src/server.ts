@@ -116,6 +116,7 @@ import { rightsOf } from "./memberfiles";
 import { letMachine, machineRights, machineShares, sharedOnMachines, shareOnMachine, startMachineUsers } from "./machineusers";
 import { moveApp, moveCheck } from "./moveapp";
 import { backupMachineApp, restoreMachineApp } from "./machinebackup";
+import { backupInstance, restoreInstance } from "./incusbackup";
 import { machineAccessRows, setMachineAccess, startMachineGates } from "./machinegate";
 import { applyMachineCompose, installComposeOnMachine, machineTiles, installOnMachine, machineAppAction, machineAppLogs, machineApps, machineCompose, removeMachineApp, storeAppFor } from "./machineapps";
 import { addStore, ARCH, catalogue, removeStore, scheduleStoreSync, StoreError, syncStore } from "./store";
@@ -1809,15 +1810,15 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
     }
     if (inside[3] === "restore-files" && method === "POST") return json({ job: restoreFromSnapshot(inside[1]!, inside[2]!, (await body(req)).paths, user.name).id }, 202);
   }
-  // an app of another machine: its snapshot is taken there and kept here
-  const take = /^\/api\/backups\/([a-z0-9_-]+@[a-f0-9]{8})\/take$/.exec(path);
-  if (take && method === "POST") return json({ job: backupMachineApp(take[1]!, user.name).id }, 202);
-  const b = /^\/api\/backups\/([a-z0-9_-]+(?:@[a-f0-9]{8})?)\/(\d{8}-\d{6})(\/restore)?$/.exec(path);
-  if (b && b[3] && method === "POST") return json({ job: (b[1]!.includes("@") ? restoreMachineApp(b[1]!, b[2]!, user.name) : restoreSnapshot(b[1]!, b[2]!, user.name)).id }, 202);
+  // an app of another machine: its snapshot is taken there and kept here; a container or virtual machine of this server whole
+  const take = /^\/api\/backups\/([a-z0-9_-]+@(?:[a-f0-9]{8}|incus))\/take$/.exec(path);
+  if (take && method === "POST") return json({ job: (take[1]!.endsWith("@incus") ? backupInstance(take[1]!, user.name) : backupMachineApp(take[1]!, user.name)).id }, 202);
+  const b = /^\/api\/backups\/([a-z0-9_-]+(?:@[a-f0-9]{8}|@incus)?)\/(\d{8}-\d{6})(\/restore)?$/.exec(path);
+  if (b && b[3] && method === "POST") return json({ job: (b[1]!.endsWith("@incus") ? restoreInstance(b[1]!, b[2]!, user.name) : b[1]!.includes("@") ? restoreMachineApp(b[1]!, b[2]!, user.name) : restoreSnapshot(b[1]!, b[2]!, user.name)).id }, 202);
   if (b && !b[3] && method === "DELETE") {
     deleteSnapshot(b[1]!, b[2]!);
     const [app, on] = b[1]!.split("@");
-    record("app.snapshot.remove", { app, user: user.name, ...(on ? { machine: machineList().find((m) => m.id === on)?.name ?? on } : {}) });
+    record("app.snapshot.remove", { app, user: user.name, ...(on && on !== "incus" ? { machine: machineList().find((m) => m.id === on)?.name ?? on } : {}) });
     return json({ ok: true });
   }
 

@@ -120,3 +120,13 @@ test("a virtual machine: only the images tried as one, a disk of its own, no nes
 test("the names the page's routes take are refused", () => {
   for (const name of ["install", "setup", "vms"]) expect(field(() => readNew({ name, image: "debian-13" }, []))).toBe("name");
 });
+
+test("a container's or virtual machine's snapshots are a folder of their own, also in the second copy", async () => {
+  const { BACKUP_KEY_RE } = await import("../src/backup");
+  const { isCopyFolder } = await import("../src/remote");
+  for (const key of ["box1@incus", "nextcloud", "app@0a1b2c3d"]) {
+    expect(BACKUP_KEY_RE.test(key)).toBe(true);
+    expect(isCopyFolder(key)).toBe(true);
+  }
+  for (const key of ["box1@lxd", "box1@", "@incus"]) expect(BACKUP_KEY_RE.test(key)).toBe(false);
+});

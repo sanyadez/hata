@@ -360,7 +360,7 @@ export function updateSettings(patch: Record<string, unknown>): string | null {
     }
     if ("exclude" in b) {
       // an app here, or `<name>@<machine>` — an app of another machine
-      if (!Array.isArray(b.exclude) || b.exclude.some((n) => typeof n !== "string" || !/^[a-z0-9][a-z0-9_-]{0,62}(@[a-f0-9]{8})?$/.test(n))) return "settings.badBackup";
+      if (!Array.isArray(b.exclude) || b.exclude.some((n) => typeof n !== "string" || !/^[a-z0-9][a-z0-9_-]{0,62}(@[a-f0-9]{8}|@incus)?$/.test(n))) return "settings.badBackup";
       backup.exclude = [...new Set(b.exclude as string[])];
     }
     if ("folders" in b) {

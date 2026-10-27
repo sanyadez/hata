@@ -49,8 +49,11 @@ export interface Snapshot {
 
 const KEEP_PRE_UPDATE = 3;
 export const SNAPSHOT_ID_RE = /^\d{8}-\d{6}$/;
-/** Whose snapshots a folder holds: an app here, or `<name>@<machine>` — an app of another machine */
-export const BACKUP_KEY_RE = /^[a-z0-9][a-z0-9_-]{0,63}(@[a-f0-9]{8})?$/;
+/**
+ * Whose snapshots a folder holds: an app here, `<name>@<machine>` — an app of another machine, or
+ * `<name>@incus` — a container or virtual machine of this server, kept whole
+ */
+export const BACKUP_KEY_RE = /^[a-z0-9][a-z0-9_-]{0,63}(@[a-f0-9]{8}|@incus)?$/;
 
 export const backupDir = (): string => settings.backup.dir || join(settings.dataRoot, "Backups");
 export const appBackupDir = (name: string) => join(backupDir(), name);
@@ -439,6 +442,8 @@ export interface BackupApp {
   name: string;
   /** The machine it is on, when not this server */
   machine?: { id: string; name: string };
+  /** A container or virtual machine of this server, backed up whole */
+  incus?: { kind: string };
   title: string;
   icon: string;
   installed: boolean;
@@ -484,13 +489,18 @@ export function nextRun(time: string, now: Date): Date {
   return next;
 }
 
-/** The apps of other machines on the Backups page, given by `machinebackup.ts` (it imports this module) */
-let machineEntries: (lang: string) => Promise<BackupApp[]> = async () => [];
-export function onMachineBackups(entries: (lang: string) => Promise<BackupApp[]>, run: (user: string, reason: SnapshotReason) => Promise<{ ok: number; failed: string[] }>): void {
-  machineEntries = entries;
-  machineRun = run;
+/**
+ * What else is backed up besides the apps here, each given by its own module (they import this one):
+ * the apps of other machines (`machinebackup.ts`), the containers and virtual machines (`incusbackup.ts`)
+ */
+interface Source {
+  entries: (lang: string) => Promise<BackupApp[]>;
+  run: (user: string, reason: SnapshotReason) => Promise<{ ok: number; failed: string[] }>;
 }
-let machineRun: (user: string, reason: SnapshotReason) => Promise<{ ok: number; failed: string[] }> = async () => ({ ok: 0, failed: [] });
+const sources: Source[] = [];
+export function addBackupSource(entries: Source["entries"], run: Source["run"]): void {
+  sources.push({ entries, run });
+}
 
 export async function backupOverview(lang: string): Promise<BackupOverview> {
   const dir = backupDir();
@@ -512,7 +522,7 @@ export async function backupOverview(lang: string): Promise<BackupOverview> {
       extraFolders: installed.includes(name) ? appFolders(name).extra : [],
     };
   });
-  const apps = [...local, ...(await machineEntries(lang).catch(() => []))];
+  const apps = [...local, ...(await Promise.all(sources.map((s) => s.entries(lang).catch(() => [])))).flat()];
   let free: number | null = null;
   try {
     const s = statfsSync(dir);
@@ -559,10 +569,12 @@ export async function runBackups(user: string, reason: SnapshotReason = "schedul
         failed.push(name);
       }
     }
-    // the apps of the other machines: their snapshots are kept here
-    const other = await machineRun(user, reason).catch(() => ({ ok: 0, failed: [] as string[] }));
-    ok += other.ok;
-    failed.push(...other.failed);
+    // the apps of the other machines, the containers and virtual machines: their snapshots are kept here
+    for (const source of sources) {
+      const other = await source.run(user, reason).catch(() => ({ ok: 0, failed: [] as string[] }));
+      ok += other.ok;
+      failed.push(...other.failed);
+    }
     // the server's own state last: it is small, and the run is whole only with it
     await takeServerSnapshot(reason === "manual" ? "manual" : "schedule").catch((e) => {
       console.error("Could not back up the server's state:", e instanceof Error ? e.message : e);
