@@ -57,9 +57,12 @@ const text = (v: unknown): string => (typeof v === "string" ? v.trim() : typeof 
 const flag = (v: unknown): boolean => v === true || v === 1 || v === "1";
 const amount = (v: unknown): number | null => (v === null || v === undefined || v === "" || Number.isNaN(Number(v)) ? null : Number(v));
 
+/** Where programs mount a disk again for themselves (Docker, Incus's pools and devices): not a place of the person's */
+const PROGRAMS = /^\/(snap|var\/lib\/(docker|containers|incus))(\/|$)/;
+
 function mountsOf(row: Row): string[] {
   const list = Array.isArray(row.mountpoints) ? row.mountpoints : [row.mountpoint];
-  return [...new Set(list.map(text).filter((m) => m.startsWith("/")))];
+  return [...new Set(list.map(text).filter((m) => m.startsWith("/") && !PROGRAMS.test(m)))];
 }
 
 function volume(row: Row, kind: string): Volume {
@@ -131,7 +134,7 @@ export function parseMounts(mounts: string): Mount[] {
     const network = NETWORK_FS.test(fstype);
     if (!network && !LOCAL_FS.test(fstype)) continue;
     const path = unescapeMount(rawPath);
-    if (/^\/(boot|snap|var\/lib\/docker|var\/lib\/containers|run)(\/|$)/.test(path)) continue;
+    if (/^\/(boot|run)(\/|$)/.test(path) || PROGRAMS.test(path)) continue;
     const key = unescapeMount(device);
     if (seen.has(key)) continue;
     seen.add(key);

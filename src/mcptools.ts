@@ -1409,7 +1409,7 @@ const ctFull: (Omit<Tool, "level" | "effect"> & { effect?: Tool["effect"] })[] =
   {
     name: "container_create",
     title: "Make a container or virtual machine on this server",
-    description: "Makes a new system container — or a virtual machine, a test feature, Debian 13 only — on this server with Incus, starts it and, unless `client` is false, installs Hata's client in it, so it becomes one of Hata's machines (`machines`). `system` must be one `containers` lists. Takes minutes: expect a running job and ask job_get.",
+    description: "Makes a new system container — or a virtual machine, a test feature (a system `containers` marks as virtualMachine) — on this server with Incus, starts it and, unless `client` is false, installs Hata's client in it, so it becomes one of Hata's machines (`machines`). `system` must be one `containers` lists. Takes minutes: expect a running job and ask job_get.",
     effect: "change",
     input: {
       name: { type: "string", description: "Lowercase Latin letters, digits and -, starting with a letter; also the host name" },
