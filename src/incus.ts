@@ -33,7 +33,7 @@ export const BRIDGE = "hatabr0";
 /** A container's name: Incus takes it as the host name too */
 export const NAME_RE = /^[a-z][a-z0-9-]{0,61}[a-z0-9]$/;
 /** Names the routes of the page take for themselves */
-export const RESERVED = ["install", "setup", "vms"];
+export const RESERVED = ["install", "setup", "vms", "places"];
 export const SNAPSHOT_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$/;
 export const MEMORY = { min: 128, max: 262144 };
 /** A virtual machine's disk, GB; Incus's own default is 10 */
@@ -103,9 +103,9 @@ export function configOf(c: Pick<NewContainer, "cores" | "memory" | "autostart">
   return config;
 }
 
-/** The devices a new one gets besides the profile's: a virtual machine's disk of the size asked */
+/** The disk a new one gets: in the place chosen, of the size asked for a virtual machine */
 export function devicesOf(c: Pick<NewContainer, "kind" | "disk">, pool: string): Record<string, Record<string, string>> {
-  return c.kind === "vm" ? { root: { type: "disk", path: "/", pool, size: `${c.disk}GiB` } } : {};
+  return { root: { type: "disk", path: "/", pool, ...(c.kind === "vm" ? { size: `${c.disk}GiB` } : {}) } };
 }
 
 /** What the limits dialog changes: only what differs, as Incus keys ("" takes a limit away) */
@@ -155,6 +155,8 @@ export interface Container {
   created: number;
   address: string;
   mac: string;
+  /** The pool it lives in */
+  place: string;
   usage: { memory: number; cpu: number; disk: number; processes: number } | null;
   snapshots: Snapshot[];
 }
@@ -191,6 +193,7 @@ export function readInstance(raw: Raw): Container | null {
     created: Date.parse(raw.created_at) || 0,
     address: inet[0] ?? "",
     mac: mac || String(nics[0]?.[1]?.hwaddr ?? "").toLowerCase(),
+    place: String(raw.expanded_devices?.root?.pool ?? raw.devices?.root?.pool ?? ""),
     usage: st && statusOf(raw.status) === "running" ? { memory: Number(st.memory?.usage ?? 0), cpu: Number(st.cpu?.usage ?? 0), disk: Number(st.disk?.root?.usage ?? 0), processes: Number(st.processes ?? 0) } : null,
     snapshots: ((raw.snapshots ?? []) as Raw[]).map((s) => ({ name: String(s.name).split("/").pop()!, created: Date.parse(s.created_at) || 0 })).sort((a, b) => b.created - a.created),
   };
@@ -250,4 +253,54 @@ export function snapshotName(input: unknown, now = new Date()): string {
   }
   const p = (n: number) => String(n).padStart(2, "0");
   return `snap-${now.getFullYear()}${p(now.getMonth() + 1)}${p(now.getDate())}-${p(now.getHours())}${p(now.getMinutes())}${p(now.getSeconds())}`;
+}
+
+// --- Where the containers live -------------------------------------------------------------------------
+
+/** Whether `path` is `dir` or lies inside it */
+const inside = (path: string, dir: string): boolean => path === dir || path.startsWith(dir.replace(/\/$/, "") + "/");
+
+/** File systems a pool cannot live on: no owners (FAT, exFAT, NTFS), another machine's, or a program's (FUSE) */
+const UNFIT_FS = /^(vfat|msdos|exfat|ntfs3?|fuseblk|nfs\d?|cifs|smb3|smbfs|9p|ceph|glusterfs|fuse\..+|tmpfs|ramfs|overlay|squashfs)$/;
+
+export interface PlaceUses {
+  /** Every mount, longest path wins */
+  mounts: { path: string; fstype: string }[];
+  dataRoot: string;
+  backupDir: string;
+  /** Hata's own state and secrets */
+  state: string[];
+  /** The folders the pools there are already in */
+  pools: string[];
+}
+
+/**
+ * Whether a folder may hold a storage pool, and which driver Incus is given for it: btrfs where the
+ * file system is btrfs (then a container's disk can be limited), plain folders elsewhere. Not inside the
+ * data folder (it is mounted into apps and shared), the backups or Hata's state, not inside another pool
+ * and none inside it, not on a file system that keeps no owners or belongs to another machine.
+ */
+export function placeFor(input: unknown, uses: PlaceUses): { path: string; driver: "dir" | "btrfs"; fstype: string } | { error: string } {
+  if (typeof input === "string" && input.trim() === "/") return { error: "containers.place.system" };
+  const path = typeof input === "string" ? input.trim().replace(/\/+$/, "") : "";
+  if (!path.startsWith("/") || path.includes("/../") || path.endsWith("/..") || path.includes("\0")) return { error: "containers.place.bad" };
+  const top = path.split("/")[1] ?? "";
+  if (!path || ["bin", "boot", "dev", "etc", "lib", "lib64", "proc", "run", "sbin", "sys", "usr", "tmp"].includes(top) || path === "/" || path === "/var") return { error: "containers.place.system" };
+  if (uses.state.some((dir) => inside(path, dir) || inside(dir, path))) return { error: "containers.place.state" };
+  if (uses.dataRoot && (inside(path, uses.dataRoot) || inside(uses.dataRoot, path))) return { error: "containers.place.data" };
+  if (uses.backupDir && (inside(path, uses.backupDir) || inside(uses.backupDir, path))) return { error: "containers.place.backups" };
+  if (uses.pools.some((pool) => inside(path, pool) || inside(pool, path))) return { error: "containers.place.taken" };
+  const holder = uses.mounts.filter((m) => inside(path, m.path)).sort((a, b) => b.path.length - a.path.length)[0];
+  const fstype = holder?.fstype ?? "";
+  if (UNFIT_FS.test(fstype)) return { error: "containers.place.fs" };
+  return { path, driver: fstype === "btrfs" ? "btrfs" : "dir", fstype };
+}
+
+/** A pool's name made of its folder: `disk1` for /mnt/disk1/containers' parent… the last word that fits */
+export function poolName(path: string, taken: string[]): string {
+  const words = path.split("/").filter(Boolean).reverse();
+  const base = (words.find((w) => /^[a-z0-9][a-z0-9-]*$/i.test(w) && !/^(containers|incus|storage-pools)$/i.test(w)) ?? "place").toLowerCase().slice(0, 40);
+  let name = base;
+  for (let i = 2; taken.includes(name); i++) name = `${base}-${i}`;
+  return name;
 }

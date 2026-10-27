@@ -10,12 +10,15 @@
  * terminal. Nothing is offered while Hata itself runs inside a container that maps only part of the
  * user ids: the person's decision is that neither containers nor virtual machines are made there.
  */
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmdirSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { record } from "./activity";
 import { AppError, startJob, type Job } from "./apps";
 import { bus } from "./bus";
-import { listenAddress } from "./config";
-import { BRIDGE, bridgeRules, configOf, devicesOf, FieldError, IMAGE_SERVER, IMAGES, insideNarrowMap, limitsChange, NAME_RE, readInstance, readNew, setupScript, snapshotName, SNAPSHOT_RE, type Container } from "./incus";
+import { DATA_DIR, listenAddress, SECRETS_DIR, settings } from "./config";
+import { onContainerPlaces } from "./mounting";
+import { readJsonFile, writeJsonAtomic } from "./fsutil";
+import { BRIDGE, bridgeRules, configOf, devicesOf, FieldError, placeFor, poolName, IMAGE_SERVER, IMAGES, insideNarrowMap, limitsChange, NAME_RE, readInstance, readNew, setupScript, snapshotName, SNAPSHOT_RE, type Container } from "./incus";
 import { invite, machines, remove as removeMachine } from "./machines";
 import { packageManager, PATH, run, runLogged } from "./packages";
 
@@ -73,6 +76,88 @@ async function vmState(driver: string): Promise<VmState> {
   return /\bqemu\b/.test(driver) && has("qemu-system-x86_64") ? "ready" : "missing";
 }
 
+export interface Place {
+  name: string;
+  driver: string;
+  /** The folder; "" — Incus's own under /var/lib/incus */
+  path: string;
+  /** Where new ones go */
+  standard: boolean;
+  /** Incus's default profile keeps its disk there: it cannot be taken away */
+  profile: boolean;
+  /** Instances that live there */
+  instances: number;
+  used: number;
+  total: number;
+}
+
+/** The folders the pools are in, as last seen: a disk holding one is not disconnected or formatted */
+let placePaths: string[] = [];
+
+/** What Hata keeps of its own about the containers: the place new ones go to */
+const OWN_FILE = join(DATA_DIR, "containers.json");
+const own: { standard: string } = readJsonFile(OWN_FILE, { standard: "" });
+onContainerPlaces(() => placePaths);
+
+const INCUS_POOLS = "/var/lib/incus/storage-pools";
+
+/** Every pool, with the room the file system under it has */
+async function places(): Promise<Place[]> {
+  const [list, profile] = await Promise.all([incus("GET", "/1.0/storage-pools?recursion=1"), incus("GET", "/1.0/profiles/default")]);
+  const inProfile = String(Object.values((profile.metadata?.devices ?? {}) as Record<string, any>).find((d) => d.type === "disk" && d.path === "/")?.pool ?? "");
+  const names = ((list.metadata ?? []) as any[]).map((p) => String(p.name));
+  const standard = names.includes(own.standard) ? own.standard : inProfile;
+  const out: Place[] = [];
+  for (const p of (list.metadata ?? []) as any[]) {
+    const res = (await incus("GET", `/1.0/storage-pools/${encodeURIComponent(p.name)}/resources`).catch(() => null))?.metadata;
+    const source = String(p.config?.source ?? "");
+    out.push({
+      name: String(p.name),
+      driver: String(p.driver),
+      path: source.startsWith(INCUS_POOLS) ? "" : source,
+      standard: p.name === standard,
+      profile: p.name === inProfile,
+      instances: ((p.used_by ?? []) as string[]).filter((u) => u.startsWith("/1.0/instances/")).length,
+      used: Number(res?.space?.used ?? 0),
+      total: Number(res?.space?.total ?? 0),
+    });
+  }
+  placePaths = out.map((p) => p.path).filter(Boolean);
+  return out;
+}
+
+const mounts = (): { path: string; fstype: string }[] => {
+  try {
+    return readFileSync("/proc/mounts", "utf8")
+      .split("\n")
+      .map((line) => line.split(" "))
+      .filter((f) => f[1])
+      .map((f) => ({ path: f[1]!.replace(/\\([0-7]{3})/g, (_, oct: string) => String.fromCharCode(parseInt(oct, 8))), fstype: f[2] ?? "" }));
+  } catch {
+    return [];
+  }
+};
+
+/** A folder checked as a new place: the pool's folder and driver, or the error to answer with */
+function checkPlace(path: unknown) {
+  const place = placeFor(path, { mounts: mounts(), dataRoot: settings.dataRoot, backupDir: settings.backup.dir, state: [DATA_DIR, SECRETS_DIR], pools: placePaths });
+  if ("error" in place) throw new AppError(place.error, 400);
+  if (existsSync(place.path) && readdirSync(place.path).length) throw new AppError("containers.place.notEmpty", 400, { path: place.path });
+  return place;
+}
+
+/** Makes a pool in a folder that was checked; the folder is made when it is not there */
+async function makePool(place: { path: string; driver: string }, taken: string[], name?: string): Promise<string> {
+  // btrfs makes the folder itself, as a subvolume; it refuses one that is there
+  if (place.driver === "btrfs") {
+    mkdirSync(dirname(place.path), { recursive: true, mode: 0o711 });
+    if (existsSync(place.path)) rmdirSync(place.path);
+  } else mkdirSync(place.path, { recursive: true, mode: 0o711 });
+  const pool = name ?? poolName(place.path, taken);
+  await incus("POST", "/1.0/storage-pools", { name: pool, driver: place.driver, config: { source: place.path } });
+  return pool;
+}
+
 export interface ContainersReport {
   /** missing — Incus is not installed; blocked — may not be here; setup — installed, not set up; ready */
   state: "missing" | "blocked" | "setup" | "ready";
@@ -82,8 +167,8 @@ export interface ContainersReport {
   version: string;
   /** The network the containers are on and its address */
   network: { name: string; address: string } | null;
-  /** Where Incus keeps them, and how much room is there */
-  storage: { driver: string; path: string } | null;
+  /** Where Incus keeps them: every pool, the room on it, which one new ones go to */
+  places: Place[];
   containers: (Container & { machine: string })[];
   images: { id: string; name: string; client: boolean; vm: boolean }[];
   /** Virtual machines: a test feature, installed apart */
@@ -117,7 +202,7 @@ export function containerOfMachine(macs: string[], hostname: string): string {
 }
 
 export async function report(): Promise<ContainersReport> {
-  const base = { why: "", install: installCommand(), version: "", network: null, storage: null, containers: [], images: IMAGES.map((i) => ({ id: i.id, name: i.name, client: i.family !== "", vm: i.vm })), vms: { state: "missing" as VmState, install: installCommand(VM_PACKAGES) } };
+  const base = { why: "", install: installCommand(), version: "", network: null, places: [] as Place[], containers: [], images: IMAGES.map((i) => ({ id: i.id, name: i.name, client: i.family !== "", vm: i.vm })), vms: { state: "missing" as VmState, install: installCommand(VM_PACKAGES) } };
   const why = blocked();
   if (why) return { ...base, state: "blocked", why };
   if (!has("incus") || !existsSync(SOCKET)) return { ...base, state: "missing" };
@@ -125,7 +210,7 @@ export async function report(): Promise<ContainersReport> {
   const version = String(server?.environment?.server_version ?? "");
   const vms = { ...base.vms, state: await vmState(String(server?.environment?.driver ?? "")) };
   if (!(await setUp())) return { ...base, state: "setup", version, vms };
-  const [list, network, pool] = await Promise.all([incus("GET", "/1.0/instances?recursion=2"), networkOf(), incus("GET", "/1.0/storage-pools/default").catch(() => null)]);
+  const [list, network, pools] = await Promise.all([incus("GET", "/1.0/instances?recursion=2"), networkOf(), places().catch(() => [] as Place[])]);
   const known = machines();
   const containers = ((list.metadata ?? []) as any[]).flatMap((raw) => {
     const c = readInstance(raw);
@@ -135,7 +220,7 @@ export async function report(): Promise<ContainersReport> {
     return [{ ...c, machine: machine?.id ?? "" }];
   });
   seen = containers.map((c) => ({ name: c.name, mac: c.mac, kind: c.kind }));
-  return { ...base, state: "ready", version, vms, network, storage: pool ? { driver: String(pool.metadata.driver), path: String(pool.metadata.config?.source ?? "") } : null, containers: containers.sort((a, b) => a.name.localeCompare(b.name)) };
+  return { ...base, state: "ready", version, vms, network, places: pools, containers: containers.sort((a, b) => a.name.localeCompare(b.name)) };
 }
 
 /**
@@ -143,11 +228,12 @@ export async function report(): Promise<ContainersReport> {
  * plain folders, a bridge with NAT, and the default profile's disk and card. A setup somebody made by
  * hand stays as it is.
  */
-async function setUpIncus(log: (line: string) => void): Promise<void> {
+async function setUpIncus(log: (line: string) => void, place?: { path: string; driver: string }): Promise<void> {
   const pools = ((await incus("GET", "/1.0/storage-pools")).metadata ?? []) as string[];
   if (!pools.length) {
-    log("Making the storage pool");
-    await incus("POST", "/1.0/storage-pools", { name: "default", driver: "dir" });
+    log(place ? `Making the storage pool in ${place.path} (${place.driver})` : "Making the storage pool");
+    if (place) await makePool(place, [], "default");
+    else await incus("POST", "/1.0/storage-pools", { name: "default", driver: "dir" });
   }
   const pool = pools.length ? String(pools[0]).split("/").pop()! : "default";
   const nets = ((await incus("GET", "/1.0/networks?recursion=1")).metadata ?? []) as any[];
@@ -167,9 +253,11 @@ async function setUpIncus(log: (line: string) => void): Promise<void> {
 }
 
 /** Installs Incus (a job of kind `incus`) and sets it up */
-export function install(by: string): Job {
+export function install(by: string, where?: unknown): Job {
   if (blocked()) throw new AppError("containers.nested", 409);
   if (packageManager() !== "apt-get") throw new AppError("containers.noInstaller", 409);
+  // the folder is checked before anything is installed; "" — Incus's own under /var/lib/incus
+  const place = typeof where === "string" && where.trim() ? checkPlace(where) : undefined;
   return startJob("incus", "incus", by, async (log) => {
     if (!has("incus")) {
       const env = { DEBIAN_FRONTEND: "noninteractive" };
@@ -185,7 +273,7 @@ export function install(by: string): Job {
       if (i === 0) await run(["systemctl", "enable", "--now", "incus.socket"], 30_000);
       await Bun.sleep(1000);
     }
-    await setUpIncus(log);
+    await setUpIncus(log, place);
     record("containers.installed", { user: by });
     bus.publish("containers");
   }, true);
@@ -271,8 +359,10 @@ export async function create(input: Record<string, unknown>, by: string): Promis
   }
   if (c.kind === "vm" && r.vms.state !== "ready") throw new AppError("containers.vm." + (r.vms.state === "missing" ? "notInstalled" : r.vms.state), 409);
   const vm = c.kind === "vm";
-  const pool = String(Object.values(((await incus("GET", "/1.0/profiles/default")).metadata?.devices ?? {}) as Record<string, any>).find((d) => d.type === "disk" && d.path === "/")?.pool ?? "default");
-  const job = startJob(`incus:${c.name}`, "container", by, async (log) => {
+  const chosen = typeof input.place === "string" && input.place ? r.places.find((p) => p.name === input.place) : r.places.find((p) => p.standard);
+  if (!chosen) throw new AppError("containers.badField", 400, { field: "place" });
+  const pool = chosen.name;
+  const job = startJob(`incus:${c.name}`, "container", by, async (log) => told(log, async () => {
     log(`Making ${c.name} from ${c.image.name} (the image is downloaded once)`);
     const op = await incus("POST", "/1.0/instances", { name: c.name, type: vm ? "virtual-machine" : "container", start: true, source: { type: "image", protocol: "simplestreams", server: IMAGE_SERVER, alias: c.image.alias }, config: configOf(c), devices: devicesOf(c, pool) });
     await finished(op, 1800);
@@ -314,8 +404,18 @@ export async function create(input: Record<string, unknown>, by: string): Promis
       await Bun.sleep(2000);
     }
     throw new AppError("containers.notConnected", 409, { name: c.name });
-  }, true, { app: c.name, machine: "" });
+  }), true, { app: c.name, machine: "" });
   return { job: job.id, name: c.name };
+}
+
+/** Runs a job's work, putting Incus's own words into its log when it fails: the job keeps only the code */
+async function told(log: (line: string) => void, work: () => Promise<void>): Promise<void> {
+  try {
+    await work();
+  } catch (e) {
+    if (e instanceof AppError && e.detail.message) log(String(e.detail.message));
+    throw e;
+  }
 }
 
 /** Start, stop or restart; a container that does not stop in 30 s is stopped hard */
@@ -429,4 +529,81 @@ export function startContainers(): void {
   };
   setTimeout(tick, 20_000);
   setInterval(tick, 60_000);
+}
+
+// --- Places -------------------------------------------------------------------------------------------
+
+/** Another place for containers: a pool in a folder of the person's choosing */
+export async function addPlace(path: unknown, by: string): Promise<Place[]> {
+  await ready();
+  const place = checkPlace(path);
+  const taken = (await places()).map((p) => p.name);
+  const name = await makePool(place, taken);
+  record("containers.place.added", { user: by, detail: `${name} · ${place.path}` });
+  bus.publish("containers");
+  return places();
+}
+
+/** The place new containers go to unless another is chosen: the default profile's disk */
+export async function setStandardPlace(name: string, by: string): Promise<Place[]> {
+  await ready();
+  if (!(await places()).some((p) => p.name === name)) throw new AppError("containers.place.notFound", 404, { name });
+  // Hata's own word, not the default profile's disk: Incus refuses to move that while containers lean on it
+  own.standard = name;
+  writeJsonAtomic(OWN_FILE, own);
+  record("containers.place.standard", { user: by, detail: name });
+  bus.publish("containers");
+  return places();
+}
+
+/** Takes an empty place away; its folder stays */
+export async function removePlace(name: string, by: string): Promise<Place[]> {
+  await ready();
+  const place = (await places()).find((p) => p.name === name);
+  if (!place) throw new AppError("containers.place.notFound", 404, { name });
+  if (place.standard) throw new AppError("containers.place.isStandard", 409, { name });
+  if (place.profile) throw new AppError("containers.place.profile", 409, { name });
+  if (place.instances) throw new AppError("containers.place.inUse", 409, { name, n: place.instances });
+  await incus("DELETE", `/1.0/storage-pools/${encodeURIComponent(name)}`);
+  record("containers.place.removed", { user: by, detail: name });
+  bus.publish("containers");
+  return places();
+}
+
+/**
+ * Moves a container or virtual machine to another place (a job of kind `container`): Incus copies it
+ * while it is stopped; one that ran is started again. Its snapshots go with it.
+ */
+export async function moveInstance(name: string, to: unknown, by: string): Promise<{ job: string }> {
+  const r = await ready();
+  const c = await findContainer(name);
+  const target = r.places.find((p) => p.name === to);
+  if (!target) throw new AppError("containers.place.notFound", 404, { name: String(to) });
+  const raw = (await incus("GET", `/1.0/instances/${name}`)).metadata;
+  const from = String(raw.expanded_devices?.root?.pool ?? "");
+  if (from === target.name) throw new AppError("containers.place.same", 400, { name: target.name });
+  const job = startJob(`incus:${name}`, "container", by, async (log) => {
+    const running = c.status === "running";
+    if (running) {
+      log(`Stopping ${name}`);
+      await finished(await incus("PUT", `/1.0/instances/${name}/state`, { action: "stop", timeout: 60 }), 90).catch(async () => finished(await incus("PUT", `/1.0/instances/${name}/state`, { action: "stop", timeout: 30, force: true }), 60));
+    }
+    try {
+      log(`Moving ${name} from ${from} to ${target.name}`);
+      // Incus's API moves between pools only as a copy and a rename the client makes; its own program does that
+      const done = await runLogged(["incus", "move", name, "--storage", target.name], log, 6 * 3600_000, {}, (line) => (/^\s*Transferring instance:/.test(line) ? null : line));
+      if (done.code !== 0) throw new AppError("containers.failed", 409, { message: (done.err || done.out).trim().split("\n").pop() ?? "" });
+      record("containers.moved", { user: by, detail: `${name} → ${target.name}` });
+    } catch (e) {
+      if (e instanceof AppError && e.detail.message) log(String(e.detail.message));
+      throw e;
+    } finally {
+      if (running) {
+        log(`Starting ${name}`);
+        await finished(await incus("PUT", `/1.0/instances/${name}/state`, { action: "start" }), 120).catch((e) => log(String(e instanceof Error ? e.message : e)));
+      }
+      bus.publish("containers");
+    }
+  }, true, { app: name, machine: "" });
+  return { job: job.id };
 }

@@ -2775,6 +2775,7 @@ function renderContainersBody() {
         h("ul", { class: "stack-s small pve-gives" }, ["system", "docker", "machine", "snapshots"].map((k) => h("li", null, t("incus.gives." + k)))),
         h("p", { class: "muted small" }, t("incus.missing.what")),
         d.install ? h("p", { class: "cmd" }, icon("terminal"), d.install) : h("p", { class: "banner small" }, t("incus.missing.byHand")),
+        d.install && installPlaceRow(),
         d.install &&
           h(
             "div",
@@ -2786,7 +2787,7 @@ function renderContainersBody() {
                 onclick: async (e) => {
                   e.currentTarget.disabled = true;
                   try {
-                    const r = await api("POST", "/api/containers/install");
+                    const r = await api("POST", "/api/containers/install", { place: incusUi.place ?? "" });
                     void jobDialog(r.job, "incus", "Incus", () => void loadContainers());
                   } catch (err) {
                     toast(errorText(err), "error");
@@ -2853,7 +2854,7 @@ function renderContainersBody() {
         ),
       ),
     ),
-    d.storage && h("p", { class: "muted small" }, t("incus.storage", { path: d.storage.path || "/var/lib/incus", driver: d.storage.driver })),
+    incusPlacesCard(d),
     vmCard(d),
   );
 }
@@ -2892,6 +2893,115 @@ function vmCard(d) {
           "download",
         ),
       ),
+  );
+}
+
+/** Where Incus is to keep the containers, chosen before it is installed: the system disk unless another folder is picked */
+function installPlaceRow() {
+  const shown = h("span", { class: "grow mono small" });
+  const reset = button(t("incus.place.system"), { class: "small ghost", onclick: () => ((incusUi.place = ""), paint()) });
+  const paint = () => {
+    shown.textContent = incusUi.place || t("incus.place.systemPath");
+    reset.hidden = !incusUi.place;
+  };
+  paint();
+  return h(
+    "div",
+    { class: "stack-s" },
+    h("strong", null, t("incus.place.where")),
+    h("p", { class: "muted small" }, t("incus.place.whereHint")),
+    h("div", { class: "row-actions" }, icon("folder"), shown, reset, button(t("incus.place.choose"), { class: "small", onclick: () => folderPicker({ title: t("incus.place.pickTitle"), start: "/mnt", confirmLabel: t("incus.place.pickHere"), action: (path) => ((incusUi.place = path), paint()) }) }, "folder")),
+  );
+}
+
+/** The places containers live in: room, which one new ones go to, another one added */
+function incusPlacesCard(d) {
+  const list = d.places ?? [];
+  const act = async (el, method, path, body) => {
+    el.disabled = true;
+    try {
+      await api(method, path, body);
+      await loadContainers();
+    } catch (e) {
+      toast(errorText(e), "error");
+      el.disabled = false;
+    }
+  };
+  const add = () =>
+    folderPicker({
+      title: t("incus.place.addTitle"),
+      start: "/mnt",
+      confirmLabel: t("incus.place.pickHere"),
+      action: async (path) => {
+        try {
+          await api("POST", "/api/containers/places", { path });
+          toast(t("incus.place.added", { path }));
+          await loadContainers();
+        } catch (e) {
+          toast(errorText(e), "error");
+        }
+      },
+    });
+  return h(
+    "section",
+    { class: "card pad stack" },
+    h("div", { class: "row" }, h("h2", { class: "grow" }, t("incus.place.title")), button(t("incus.place.add"), { class: "small", onclick: add }, "plus")),
+    h("p", { class: "muted small" }, t("incus.place.lead")),
+    list.map((p) => {
+      const percent = p.total ? Math.round((p.used / p.total) * 100) : 0;
+      const fill = h("i", { class: level(percent) });
+      fill.style.width = percent + "%";
+      return h(
+        "div",
+        { class: "stack-s", menu: true },
+        h(
+          "div",
+          { class: "row" },
+          h("div", { class: "grow" }, h("strong", null, p.name), " ", p.standard && h("span", { class: "chip" }, t("incus.place.standard")), h("div", { class: "muted small mono" }, (p.path || t("incus.place.systemPath")) + " · " + p.driver)),
+          h(
+            "div",
+            { class: "row-actions" },
+            !p.standard && button(t("incus.place.makeStandard"), { class: "small", onclick: (e) => act(e.currentTarget, "PUT", `/api/containers/places/${p.name}`) }, "check"),
+            !p.standard && !p.profile && !p.instances && button("", { class: "small ghost", title: t("incus.place.remove"), "aria-label": t("incus.place.remove"), onclick: (e) => act(e.currentTarget, "DELETE", `/api/containers/places/${p.name}`) }, "trash"),
+          ),
+        ),
+        p.total > 0 && h("div", { class: "bar" }, fill),
+        h("p", { class: "muted small" }, [p.total ? t("sys.free", { free: bytes(p.total - p.used), total: bytes(p.total) }) : null, t("incus.place.instancesN", { n: p.instances })].filter(Boolean).join(" · ")),
+      );
+    }),
+  );
+}
+
+/** Moves a container or virtual machine to another place */
+function moveContainerDialog(c) {
+  const d = incusUi.data;
+  const others = (d.places ?? []).filter((p) => p.name !== c.place);
+  const select = h("select", null, others.map((p) => h("option", { value: p.name }, `${p.name} — ${p.path || t("incus.place.systemPath")}`)));
+  let dialog;
+  dialog = openDialog(
+    "",
+    h("header", null, h("h2", { class: "grow clip" }, t("incus.place.moveTitle", { name: c.name })), closeX(() => dialog)),
+    h("p", { class: "muted small" }, t(c.status === "running" ? "incus.place.moveLeadRunning" : "incus.place.moveLead")),
+    field(t("incus.place.to"), select),
+    h(
+      "footer",
+      null,
+      closeButton(() => dialog, t("common.cancel")),
+      button(t("incus.place.move"), {
+        class: "primary",
+        onclick: async (e) => {
+          e.currentTarget.disabled = true;
+          try {
+            const r = await api("POST", `/api/containers/${c.name}/move`, { place: select.value });
+            dialog.close();
+            void jobDialog(r.job, "container", c.name, () => void loadContainers());
+          } catch (err) {
+            toast(errorText(err), "error");
+            e.target.closest("button").disabled = false;
+          }
+        },
+      }, "arrow"),
+    ),
   );
 }
 
@@ -2948,6 +3058,7 @@ function containerMenu(c, at) {
     c.machine && { label: t("incus.openMachine"), icon: "server", href: `#/machines/${c.machine}` },
     { label: t("incus.limits") + "…", icon: "settings", run: () => containerLimitsDialog(c) },
     { label: t("incus.snapshots") + "…", icon: "clock", run: () => containerSnapshotsDialog(c) },
+    (incusUi.data?.places ?? []).length > 1 && { label: t("incus.place.moveItem"), icon: "arrow", run: () => moveContainerDialog(c) },
     { label: t("incus.backupNow"), icon: "archive", run: () => backupNow({ name: `${c.name}@incus`, title: c.name, incus: { kind: c.kind } }) },
     { label: t("incus.backups"), icon: "archive", href: "#/settings/backups" },
     { label: t("incus.remove") + "…", icon: "trash", danger: true, run: () => removeContainerDialog(c) },
@@ -2995,6 +3106,8 @@ function newContainerDialog() {
   const [docker, dockerRow] = tickRow(t("incus.docker"), t("incus.dockerHint"), true);
   const [autostart, autostartRow] = tickRow(t("incus.autostart"), null, true);
   const vmNote = h("p", { class: "banner small" }, t("incus.vm.note"));
+  const placeSelect = h("select", null, (d.places ?? []).map((p) => h("option", { value: p.name, selected: p.standard }, `${p.name} — ${p.path || t("incus.place.systemPath")}${p.total ? " · " + t("incus.place.freeShort", { free: bytes(p.total - p.used) }) : ""}`)));
+  const placeRow = (d.places ?? []).length > 1 && field(t("incus.place.label"), placeSelect);
   const lead = h("p", { class: "muted small" });
   const title = h("h2", { class: "grow" });
   const seg = h(
@@ -3034,7 +3147,7 @@ function newContainerDialog() {
     submit.disabled = true;
     const n = name.value.trim().toLowerCase();
     try {
-      const r = await api("POST", "/api/containers", { kind, name: n, image: image.value, cores: Number(cores.value), memory: Number(memory.value), disk: kind === "vm" ? Number(disk.value) : 0, client: client.checked, docker: docker.checked, autostart: autostart.checked });
+      const r = await api("POST", "/api/containers", { kind, name: n, image: image.value, cores: Number(cores.value), memory: Number(memory.value), disk: kind === "vm" ? Number(disk.value) : 0, client: client.checked, docker: docker.checked, autostart: autostart.checked, place: placeSelect.value });
       dialog.close();
       const machine = client.checked;
       void loadContainers();
@@ -3060,6 +3173,7 @@ function newContainerDialog() {
       h("div", { class: "form-pair" }, field(t("incus.name"), name, t("incus.nameHint")), field(t("incus.image"), image, t("incus.imageHint"))),
       h("div", { class: "form-pair" }, field(t("incus.coresLabel"), cores), field(t("incus.memoryLabel"), memory)),
       diskRow,
+      placeRow,
       clientRow,
       dockerRow,
       autostartRow,

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { bridgeRules, configOf, devicesOf, FieldError, insideNarrowMap, limitsChange, megabytes, readInstance, readNew, setupScript, snapshotName } from "../src/incus";
+import { bridgeRules, configOf, devicesOf, FieldError, placeFor, poolName, insideNarrowMap, limitsChange, megabytes, readInstance, readNew, setupScript, snapshotName } from "../src/incus";
 
 const field = (f: () => unknown): string => {
   try {
@@ -113,7 +113,7 @@ test("a virtual machine: only the images tried as one, a disk of its own, no nes
   expect(field(() => readNew({ kind: "vm", name: "vm4", image: "debian-13", disk: 2 }, []))).toBe("disk");
   expect(configOf({ ...v, kind: "vm" })).toEqual({ "boot.autostart": "true", "user.hata": "true", "limits.cpu": "2", "limits.memory": "2048MiB", "security.secureboot": "false" });
   expect(devicesOf(v, "default")).toEqual({ root: { type: "disk", path: "/", pool: "default", size: "20GiB" } });
-  expect(devicesOf({ kind: "container", disk: 0 }, "default")).toEqual({});
+  expect(devicesOf({ kind: "container", disk: 0 }, "disk1")).toEqual({ root: { type: "disk", path: "/", pool: "disk1" } });
   expect(readInstance({ name: "vm1", type: "virtual-machine", status: "Stopped", config: {} })!.kind).toBe("vm");
 });
 
@@ -129,4 +129,26 @@ test("a container's or virtual machine's snapshots are a folder of their own, al
     expect(isCopyFolder(key)).toBe(true);
   }
   for (const key of ["box1@lxd", "box1@", "@incus"]) expect(BACKUP_KEY_RE.test(key)).toBe(false);
+});
+
+test("a folder as a place for containers", () => {
+  const uses = { mounts: [{ path: "/", fstype: "ext4" }, { path: "/mnt/disk1", fstype: "btrfs" }, { path: "/mnt/usb", fstype: "exfat" }, { path: "/mnt/net/nas", fstype: "cifs" }, { path: "/mnt/storage", fstype: "fuse.mergerfs" }], dataRoot: "/DATA", backupDir: "/DATA/Backups", state: ["/var/lib/hata", "/etc/hata"], pools: ["/srv/ct"] };
+  expect(placeFor("/mnt/disk1/containers/", uses)).toEqual({ path: "/mnt/disk1/containers", driver: "btrfs", fstype: "btrfs" });
+  expect(placeFor("/srv/other", uses)).toEqual({ path: "/srv/other", driver: "dir", fstype: "ext4" });
+  const error = (p: string) => (placeFor(p, uses) as { error?: string }).error;
+  expect(error("relative")).toBe("containers.place.bad");
+  expect(error("/mnt/../etc")).toBe("containers.place.bad");
+  expect(error("/etc/incus")).toBe("containers.place.system");
+  expect(error("/")).toBe("containers.place.system");
+  expect(error("/var/lib/hata/ct")).toBe("containers.place.state");
+  expect(error("/DATA/ct")).toBe("containers.place.data");
+  expect(error("/srv/ct/inner")).toBe("containers.place.taken");
+  expect(error("/srv")).toBe("containers.place.taken");
+  for (const p of ["/mnt/usb/ct", "/mnt/net/nas/ct", "/mnt/storage/ct"]) expect(error(p)).toBe("containers.place.fs");
+});
+
+test("a place's name", () => {
+  expect(poolName("/mnt/disk1/containers", [])).toBe("disk1");
+  expect(poolName("/mnt/disk1/containers", ["disk1"])).toBe("disk1-2");
+  expect(poolName("/srv/Фото", [])).toBe("srv");
 });

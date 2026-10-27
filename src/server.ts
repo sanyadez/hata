@@ -121,7 +121,7 @@ import { machineAccessRows, setMachineAccess, startMachineGates } from "./machin
 import { applyMachineCompose, installComposeOnMachine, machineTiles, installOnMachine, machineAppAction, machineAppLogs, machineApps, machineCompose, removeMachineApp, storeAppFor } from "./machineapps";
 import { addStore, ARCH, catalogue, removeStore, scheduleStoreSync, StoreError, syncStore } from "./store";
 import { startSampler, systemStatus } from "./system";
-import { act as containerAct, containerOfMachine, create as createContainer, install as installIncus, installVms as installIncusVms, removeContainer, removeSnapshot as removeContainerSnapshot, report as containersReport, restoreSnapshot as restoreContainerSnapshot, setLimits as setContainerLimits, setUpNow as setUpContainers, shellCommand as containerShell, shellReady as containerShellReady, startContainers, takeSnapshot as takeContainerSnapshot } from "./containers";
+import { act as containerAct, addPlace as addContainerPlace, moveInstance as moveContainer, removePlace as removeContainerPlace, setStandardPlace, containerOfMachine, create as createContainer, install as installIncus, installVms as installIncusVms, removeContainer, removeSnapshot as removeContainerSnapshot, report as containersReport, restoreSnapshot as restoreContainerSnapshot, setLimits as setContainerLimits, setUpNow as setUpContainers, shellCommand as containerShell, shellReady as containerShellReady, startContainers, takeSnapshot as takeContainerSnapshot } from "./containers";
 import { askScreen as pveAskScreen, openScreen as pveOpenScreen, storageContent as pveStorageContent, removeVolume as pveRemoveVolume, cloneOptions as pveCloneOptions, cloneGuest as pveCloneGuest, makeTemplate as pveMakeTemplate, load as pveLoad, templates as pveTemplates, downloadTemplate as pveDownloadTemplate, removeTemplate as pveRemoveTemplate, setSchedule as pveSetSchedule, runScheduleNow as pveRunSchedule, restoreBackup as pveRestoreBackup, restoreOptions as pveRestoreOptions, changeGuest as pveChangeGuest, guestSettings as pveGuestSettings, installByConsole as pveInstallByConsole, openConsole as pveOpenConsole, type Console as PveConsole, addBySignIn as addPveBySignIn, removeGuest as pveRemoveGuest, addHost as addPve, createGuest as pveCreateGuest, createVm as pveCreateVm, sendFile as pveSendFile, receiveFile as pveReceiveFile, newOptions as pveNewOptions, backupJobs as pveBackupJobs, backups as pveBackups, changeHost as changePve, guestOfMachine, host as pveHost, hosts as pveHosts, power as pvePower, proxmoxTrouble, refresh as refreshPve, removeHost as removePve, snapshotAction as pveSnapshotAction, snapshots as pveSnapshots, startProxmox, takeBackup as pveTakeBackup, takeSnapshot as pveTakeSnapshot, taskLog as pveTaskLog } from "./proxmox";
 import { call as machineCall, clientBinary, containersOf, installScript, invite as machineInvite, INVITE_MS, linkData, linkHandlers, machine as machineView, MACHINE_ID_RE, machines as machineList, machinesAway, open as machineOpen, remove as removeMachine, rename as renameMachine, startMachines, updateClient, wake as wakeMachine, power as powerMachine, type LinkSocket } from "./machines";
 import { availableUpdate, cancelUpdate, checkForUpdate, confirmUpdate, scheduleUpdateChecks, startRollback, startUpdate, updateStatus } from "./update";
@@ -2471,7 +2471,12 @@ async function containersApi(req: Request, url: URL, server: Server, by: string)
   const path = url.pathname;
   const method = req.method;
   if (path === "/api/containers" && method === "GET") return json(await containersReport());
-  if (path === "/api/containers/install" && method === "POST") return json({ job: installIncus(by).id });
+  if (path === "/api/containers/install" && method === "POST") return json({ job: installIncus(by, (await body(req)).place).id });
+  // the places the containers live in
+  if (path === "/api/containers/places" && method === "POST") return json({ places: await addContainerPlace((await body(req)).path, by) });
+  const place = /^\/api\/containers\/places\/([a-z0-9][a-z0-9-]{0,62})$/.exec(path);
+  if (place && method === "PUT") return json({ places: await setStandardPlace(place[1]!, by) });
+  if (place && method === "DELETE") return json({ places: await removeContainerPlace(place[1]!, by) });
   if (path === "/api/containers/vms/install" && method === "POST") return json({ job: (await installIncusVms(by)).id });
   if (path === "/api/containers/setup" && method === "POST") {
     server.timeout(req, 60);
@@ -2498,6 +2503,7 @@ async function containersApi(req: Request, url: URL, server: Server, by: string)
     await containerAct(name, (await body(req)).action, by);
     return json({ ok: true });
   }
+  if (rest === "/move" && method === "POST") return json(await moveContainer(name, (await body(req)).place, by), 202);
   if (rest === "/snapshots" && method === "POST") {
     server.timeout(req, 0);
     return json({ name: await takeContainerSnapshot(name, (await body(req)).name, by) });
