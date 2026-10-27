@@ -112,7 +112,7 @@ test("a virtual machine: only the images tried as one, a disk of its own, no nes
   expect(v).toMatchObject({ kind: "vm", disk: 20, docker: true, client: true });
   expect(readNew({ kind: "vm", name: "vm2", image: "debian-13" }, []).disk).toBe(10);
   expect(readNew({ name: "ct", image: "debian-13", disk: 50 }, []).disk).toBe(50);
-  expect(field(() => readNew({ kind: "vm", name: "vm3", image: "ubuntu-24.04" }, []))).toBe("image");
+  expect(field(() => readNew({ kind: "vm", name: "vm3", image: "alpine-3.22" }, []))).toBe("image");
   expect(field(() => readNew({ kind: "vm", name: "vm4", image: "debian-13", disk: 2 }, []))).toBe("disk");
   expect(configOf({ ...v, kind: "vm" })).toEqual({ "boot.autostart": "true", "user.hata": "true", "limits.cpu": "2", "limits.memory": "2048MiB", "security.secureboot": "false" });
   expect(devicesOf(v, "default")).toEqual({ root: { type: "disk", path: "/", pool: "default", size: "20GiB" } });
@@ -195,4 +195,27 @@ test("a virtual machine's screen is QEMU's VNC socket in its own folder of Incus
   expect(withScreen(" -m 2G ", "vm1")).toBe("-m 2G -vnc unix:/run/incus/vm1/vnc.sock");
   const once = withScreen("-m 2G", "vm1");
   expect(withScreen(once, "vm1")).toBe(once);
+});
+
+test("the systems offered: a desktop is a virtual machine with room enough, dnf systems install with dnf", () => {
+  const desk = { name: "desk", image: "ubuntu-24.04-desktop", kind: "vm", memory: 4096 };
+  expect(() => readNew({ ...desk, kind: "container" }, [])).toThrow(FieldError);
+  expect(() => readNew({ ...desk, memory: 2048 }, [])).toThrow(FieldError);
+  expect(readNew(desk, []).disk).toBe(20);
+  expect(() => readNew({ ...desk, disk: 10 }, [])).toThrow(FieldError);
+  expect(() => readNew({ name: "a1", image: "alpine-3.22", kind: "vm" }, [])).toThrow(FieldError);
+  // Docker only where its script knows the system
+  expect(readNew({ name: "a1", image: "alpine-3.22", docker: true }, []).docker).toBe(false);
+  const dnf = setupScript({ docker: true, client: true, family: "dnf" }, "line");
+  expect(dnf).toContain("dnf install -y -q curl ca-certificates");
+  expect(dnf).not.toContain("apt-get");
+  expect(setupScript({ docker: false, client: true, family: "apt" }, "line")).toContain("apt-get install");
+});
+
+test("Docker on Rocky Linux comes from Docker's RHEL packages: its script does not know the system", () => {
+  const rocky = readNew({ name: "r1", image: "rockylinux-9", docker: true }, []);
+  expect(rocky.docker).toBe(true);
+  const script = setupScript({ ...rocky, family: rocky.image.family, dockerFrom: rocky.image.docker }, "line");
+  expect(script).toContain("download.docker.com/linux/rhel/docker-ce.repo");
+  expect(script).not.toContain("get.docker.com");
 });

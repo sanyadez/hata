@@ -16,7 +16,7 @@ import { AppError, jobFinished, startJob, type Job, type Log } from "./apps";
 import { addBackupSource, appBackupDir, backupDir, deleteFiles, expired, listSnapshots, mirror, SNAPSHOT_ID_RE, snapshotId, type BackupApp, type Snapshot, type SnapshotReason } from "./backup";
 import { bus } from "./bus";
 import { settings } from "./config";
-import { findContainer, finished, incus, SOCKET } from "./containers";
+import { findContainer, finished, incus, placeForRestore, SOCKET } from "./containers";
 import { writeJsonAtomic } from "./fsutil";
 import { readInstance, type Container } from "./incus";
 
@@ -87,7 +87,7 @@ async function takeSnapshot(c: Container, reason: SnapshotReason, log: Log): Pro
     await incus("DELETE", `/1.0/instances/${c.name}/backups/${backup}`).then((op) => finished(op, 300)).catch(() => {});
     if (running) await start(c.name).catch((e) => log(`Could not start ${c.name} again: ${e instanceof Error ? e.message : e}`));
   }
-  const snapshot: Snapshot = { id, app: key, at: at.getTime(), reason, size: statSync(archive).size, paths: [], images: c.os ? [c.os] : [] };
+  const snapshot: Snapshot = { id, app: key, at: at.getTime(), reason, size: statSync(archive).size, paths: [], images: c.os ? [c.os] : [], ...(c.place ? { place: c.place } : {}) };
   writeJsonAtomic(join(dir, id + ".json"), snapshot);
   log(`Snapshot ${id}: ${mb(snapshot.size)}, in ${dir}`);
   for (const old of expired(listSnapshots(key), settings.backup.keep)) {
@@ -120,7 +120,10 @@ export function restoreInstance(key: string, snap: string, user: string): Job {
   return startJob(`incus:${name}`, "restore", user, async (log) => {
     const temp = `${name.slice(0, 54)}-restoring`;
     await incus("DELETE", `/1.0/instances/${temp}`).then((op) => finished(op, 300)).catch(() => {});
-    const pool = String(Object.values(((await incus("GET", "/1.0/profiles/default")).metadata?.devices ?? {}) as Record<string, any>).find((d) => d.type === "disk" && d.path === "/")?.pool ?? "default");
+    // back where it lived (a snapshot keeps its place too), or where new ones go once that place is gone
+    const old = await findContainer(name).catch(() => null);
+    const was = old?.place || String(listSnapshots(key).find((s) => s.id === snap)?.place ?? "");
+    const pool = await placeForRestore(was);
     log(`Importing ${snap} (${mb(statSync(archive).size)})`);
     let r: Response;
     try {
@@ -136,7 +139,6 @@ export function restoreInstance(key: string, snap: string, user: string): Job {
       await incus("DELETE", `/1.0/instances/${temp}`).then((o) => finished(o, 300)).catch(() => {});
       throw e;
     }
-    const old = await findContainer(name).catch(() => null);
     if (old) {
       log(`Replacing ${name}`);
       if (old.status === "running") await finished(await incus("PUT", `/1.0/instances/${name}/state`, { action: "stop", timeout: 30, force: true }), 60);

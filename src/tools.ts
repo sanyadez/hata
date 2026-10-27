@@ -10,11 +10,11 @@
  * Pure and tested: reading a version out of what a program prints.
  */
 import { existsSync, readFileSync } from "node:fs";
-import type { Job } from "./apps";
+import { AppError, type Job } from "./apps";
 import { settings } from "./config";
 import { installTool } from "./disks";
 import { dockerInfo } from "./docker";
-import { cannotInstall, install as installIncus, installVms as installIncusVms, inUse as containersInUse, PACKAGES as INCUS_PACKAGES, VM_PACKAGES as INCUS_VM_PACKAGES } from "./containers";
+import { afterIncusRemoved, letIncusGo, cannotInstall, install as installIncus, installVms as installIncusVms, inUse as containersInUse, PACKAGES as INCUS_PACKAGES, VM_PACKAGES as INCUS_VM_PACKAGES } from "./containers";
 import { DOCKER_INSTALL_COMMAND, installDocker } from "./dockerinstall";
 import { parseFstab, pools } from "./mounting";
 import { packagesInUse } from "./netplaces";
@@ -257,8 +257,17 @@ export async function removeOne(id: string, user: string): Promise<{ code: strin
   if (tool.holds) return { code: "tools.holds." + tool.holds };
   const packages = await packagesOf(spec);
   if (!tool.remove || !packages.length) return { code: "tools.notPackage" };
+  // Incus leaves networks, rules in DOCKER-USER and places of its own: taken away while it still answers
+  if (spec.id === "incus") {
+    try {
+      await letIncusGo();
+    } catch (e) {
+      return { code: e instanceof AppError ? e.code : "tools.removeFailed", message: e instanceof Error ? e.message : String(e) };
+    }
+  }
   const failed = await removePackages(packages);
   if (failed) return { code: "tools.removeFailed", message: failed };
+  if (spec.id === "incus") afterIncusRemoved();
   record("system.tool.removed", { user, detail: spec.name });
   bus.publish("apps");
   bus.publish("disks");

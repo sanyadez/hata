@@ -10,7 +10,7 @@
  * terminal. Nothing is offered while Hata itself runs inside a container that maps only part of the
  * user ids: the person's decision is that neither containers nor virtual machines are made there.
  */
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmdirSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmdirSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { record } from "./activity";
 import { AppError, isBusy, startJob, type Job } from "./apps";
@@ -138,6 +138,12 @@ onContainerPlaces(() => placePaths);
 
 const INCUS_POOLS = "/var/lib/incus/storage-pools";
 
+/** The place a restored instance goes to: where it lived, while that place is there; else where new ones go */
+export async function placeForRestore(was: string): Promise<string> {
+  const all = await places();
+  return (all.find((p) => p.name === was) ?? all.find((p) => p.standard) ?? all[0])?.name ?? "default";
+}
+
 /** Every pool, with the room the file system under it has */
 async function places(): Promise<Place[]> {
   const [list, profile] = await Promise.all([incus("GET", "/1.0/storage-pools?recursion=1"), incus("GET", "/1.0/profiles/default")]);
@@ -207,7 +213,7 @@ export interface ContainersReport {
   /** Where Incus keeps them: every pool, the room on it, which one new ones go to */
   places: Place[];
   containers: (Container & { machine: string })[];
-  images: { id: string; name: string; client: boolean; vm: boolean }[];
+  images: { id: string; name: string; client: boolean; container: boolean; vm: boolean; docker: boolean; least: { memory: number; disk: number } | null }[];
   /** Virtual machines: a test feature, installed apart */
   vms: { state: VmState; install: string };
 }
@@ -239,7 +245,7 @@ export function containerOfMachine(macs: string[], hostname: string): string {
 }
 
 export async function report(): Promise<ContainersReport> {
-  const base = { why: "", install: installCommand(), version: "", network: null, places: [] as Place[], containers: [], images: IMAGES.map((i) => ({ id: i.id, name: i.name, client: i.family !== "", vm: i.vm })), vms: { state: "missing" as VmState, install: installCommand(VM_PACKAGES) } };
+  const base = { why: "", install: installCommand(), version: "", network: null, places: [] as Place[], containers: [], images: IMAGES.map((i) => ({ id: i.id, name: i.name, client: i.family !== "", container: i.container, vm: i.vm, docker: i.docker !== false, least: i.least ?? null })), vms: { state: "missing" as VmState, install: installCommand(VM_PACKAGES) } };
   const why = blocked();
   if (why) return { ...base, state: "blocked", why };
   if (!has("incus") || !existsSync(SOCKET)) return { ...base, state: "missing" };
@@ -406,9 +412,9 @@ export async function create(input: Record<string, unknown>, by: string): Promis
     const op = await incus("POST", "/1.0/instances", { name: c.name, type: vm ? "virtual-machine" : "container", start: true, source: { type: "image", protocol: "simplestreams", server: IMAGE_SERVER, alias: c.image.alias }, config: { ...configOf(c), ...(vm ? { "raw.qemu": withScreen("", c.name) } : {}) }, devices: devicesOf(c, pool) });
     await finished(op, 1800);
     bus.publish("containers");
-    // a virtual machine boots its own kernel first: its address and its agent come later
+    // a virtual machine boots its own kernel first: its address and its agent come later (a desktop takes ~3 min)
     let address = "";
-    for (let i = 0; i < (vm ? 180 : 60) && !address; i++) {
+    for (let i = 0; i < (vm ? 360 : 60) && !address; i++) {
       address = (await findContainer(c.name)).address;
       if (!address) await Bun.sleep(1000);
     }
@@ -429,7 +435,7 @@ export async function create(input: Record<string, unknown>, by: string): Promis
     const before = new Set(machines().map((m) => m.id));
     const line = c.client ? `curl -fsSL http://${gateway}:${listenAddress().port}/client/${(await invite(by)).code} | sh` : "";
     log(c.docker ? "Putting Docker and Hata's client in" : "Putting Hata's client in");
-    const ran = await runLogged(["incus", "exec", c.name, "--", "sh", "-c", setupScript(c, line)], log, 30 * 60_000);
+    const ran = await runLogged(["incus", "exec", c.name, "--", "sh", "-c", setupScript({ ...c, family: c.image.family, dockerFrom: c.image.docker }, line)], log, 30 * 60_000);
     if (ran.code !== 0) throw new AppError("containers.setupFailed", 409, { name: c.name });
     if (!c.client) return;
     log("Waiting for the machine to connect");
@@ -742,3 +748,44 @@ export async function openScreen(key: string): Promise<{ socket: ScreenSocket; n
 
 /** Whether a key is one of these screens (the page's socket asks before Proxmox's) */
 export const isContainerScreen = (key: string): boolean => screens.has(key);
+
+// --- Taking Incus away ---------------------------------------------------------------------------------------
+
+/**
+ * What Hata set up for Incus, taken away before its packages are removed (System programs → Remove): the
+ * images kept, the default profile's disk and card, the networks with their rules in DOCKER-USER, every
+ * place (Incus empties the folders it made). Only when no container or virtual machine is left — the
+ * removal is refused before that. Incus's own folders go after the packages (`afterIncusRemoved`).
+ */
+export async function letIncusGo(): Promise<void> {
+  if (!existsSync(SOCKET)) return;
+  const list = ((await incus("GET", "/1.0/instances")).metadata ?? []) as string[];
+  if (list.length) throw new AppError("tools.holds.containers", 409);
+  for (const path of ((await incus("GET", "/1.0/images")).metadata ?? []) as string[]) await incus("DELETE", path).then((op) => finished(op, 120)).catch(() => {});
+  const profile = (await incus("GET", "/1.0/profiles/default")).metadata;
+  await incus("PUT", "/1.0/profiles/default", { config: profile.config ?? {}, description: profile.description ?? "", devices: {} });
+  const nets = ((await incus("GET", "/1.0/networks?recursion=1")).metadata ?? []) as any[];
+  for (const net of nets.filter((n) => n.managed)) {
+    await incus("DELETE", `/1.0/networks/${net.name}`).catch(() => {});
+    if (net.type !== "bridge" || !has("iptables")) continue;
+    for (const rule of bridgeRules(net.name)) while ((await run(["iptables", "-w", "-D", "DOCKER-USER", ...rule], 10_000)).code === 0);
+  }
+  for (const pool of ((await incus("GET", "/1.0/storage-pools")).metadata ?? []) as string[]) {
+    // what Incus left in a pool (its own volumes of images) goes with it
+    const name = pool.split("/").pop()!;
+    for (const vol of ((await incus("GET", `/1.0/storage-pools/${name}/volumes`).catch(() => null))?.metadata ?? []) as string[]) {
+      if (/\/volumes\/(image|custom)\//.test(vol)) await incus("DELETE", vol).catch(() => {});
+    }
+    await incus("DELETE", pool).catch(() => {});
+  }
+  own.standard = "";
+  own.stopped = [];
+  writeJsonAtomic(OWN_FILE, own);
+  lastLook.instances = [];
+  lastLook.silentSince = null;
+}
+
+/** Incus's own folders, once its packages are gone: a later install starts afresh */
+export function afterIncusRemoved(): void {
+  for (const dir of ["/var/lib/incus", "/var/log/incus", "/var/cache/incus"]) rmSync(dir, { recursive: true, force: true });
+}

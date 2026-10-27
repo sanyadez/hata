@@ -1335,7 +1335,7 @@ const ctRead: Omit<Tool, "level" | "effect">[] = [
           version: r.version,
           network: r.network,
           virtualMachines: r.vms.state === "ready" ? "available (a test feature)" : r.vms.state === "missing" ? "not installed" : say("containers.vm." + r.vms.state),
-          systems: r.images.map((i) => ({ id: i.id, name: i.name, hataClient: i.client, virtualMachine: i.vm })),
+          systems: r.images.map((i) => ({ id: i.id, name: i.name, hataClient: i.client, container: i.container, virtualMachine: i.vm, docker: i.docker, ...(i.least ? { virtualMachineNeeds: { memoryMB: i.least.memory, diskGB: i.least.disk } } : {}) })),
           places: r.places.map((p) => ({ name: p.name, folder: p.path || "/var/lib/incus", newOnesGoHere: p.standard, containerDiskLimit: LIMITED.includes(p.driver), freeGB: p.total ? Math.round((p.total - p.used) / 1e9) : null })),
           instances: r.containers.map(instanceBrief),
         };

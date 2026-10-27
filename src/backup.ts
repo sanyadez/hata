@@ -40,6 +40,8 @@ export interface Snapshot {
   images: string[];
   /** The data folder of that moment; older snapshots do not say */
   dataRoot?: string;
+  /** A container's or virtual machine's place (its Incus pool) when it was taken: a restore goes back there */
+  place?: string;
   /**
    * Those of `paths` that are folders outside AppData the person chose to copy too. They may be shared
    * with other apps and hold newer files, so a restore unpacks over them and deletes nothing there.

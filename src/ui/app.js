@@ -3136,7 +3136,7 @@ function newContainerDialog() {
   );
   const fillImages = () => {
     const was = image.value;
-    image.replaceChildren(...d.images.filter((i) => kind !== "vm" || i.vm).map((i) => h("option", { value: i.id }, i.client ? i.name : `${i.name} — ${t("incus.noClient")}`)));
+    image.replaceChildren(...d.images.filter((i) => (kind === "vm" ? i.vm : i.container !== false)).map((i) => h("option", { value: i.id }, i.client ? i.name : `${i.name} — ${t("incus.noClient")}`)));
     if ([...image.options].some((o) => o.value === was)) image.value = was;
     fillMemory(kind === "vm");
   };
@@ -3158,11 +3158,19 @@ function newContainerDialog() {
     diskHint.textContent = t(vm ? "incus.vm.diskHint" : "incus.diskLimitHint");
     vmNote.hidden = !vm;
     for (const b of seg.children) b.classList.toggle("active", b.dataset.kind === kind);
-    const can = d.images.find((i) => i.id === image.value)?.client;
+    const chosen = d.images.find((i) => i.id === image.value);
+    const can = chosen?.client;
     client.disabled = !can;
     if (!can) client.checked = false;
-    if (!client.checked) docker.checked = false;
-    docker.disabled = !can || !client.checked;
+    // Docker's own script does not know every system
+    if (!client.checked || chosen?.docker === false) docker.checked = false;
+    docker.disabled = !can || !client.checked || chosen?.docker === false;
+    // a desktop needs room: less is not offered
+    const least = vm ? chosen?.least : null;
+    disk.min = String(least?.disk ?? (vm ? 4 : 1));
+    if (least && Number(disk.value) < least.disk) disk.value = String(least.disk);
+    for (const o of memory.options) o.disabled = !!least && Number(o.value) < least.memory;
+    if (least && Number(memory.value) < least.memory) memory.value = String(least.memory);
   };
   client.addEventListener("change", shape);
   const error = h("p", { class: "error", role: "alert" });

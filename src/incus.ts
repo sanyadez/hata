@@ -12,16 +12,25 @@ export interface Image {
   alias: string;
   name: string;
   /** How its packages are installed; "" — Hata's client does not go on it (no systemd) */
-  family: "apt" | "";
+  family: "apt" | "dnf" | "";
+  /** Offered as a container; a desktop is a virtual machine only */
+  container: boolean;
   /** Offered for a virtual machine too: only images tried as one */
   vm: boolean;
+  /** Docker can go in: by Docker's own script, or — "rhel" — from Docker's RHEL packages (its script does not know Rocky) */
+  docker: boolean | "rhel";
+  /** What a virtual machine of it needs at least: memory in MB, disk in GB */
+  least?: { memory: number; disk: number };
 }
 
 export const IMAGES: Image[] = [
-  { id: "debian-13", alias: "debian/13", name: "Debian 13", family: "apt", vm: true },
-  { id: "debian-12", alias: "debian/12", name: "Debian 12", family: "apt", vm: false },
-  { id: "ubuntu-24.04", alias: "ubuntu/24.04", name: "Ubuntu 24.04", family: "apt", vm: false },
-  { id: "alpine-3.22", alias: "alpine/3.22", name: "Alpine 3.22", family: "", vm: false },
+  { id: "debian-13", alias: "debian/13", name: "Debian 13", family: "apt", container: true, vm: true, docker: true },
+  { id: "debian-12", alias: "debian/12", name: "Debian 12", family: "apt", container: true, vm: true, docker: true },
+  { id: "ubuntu-24.04", alias: "ubuntu/24.04", name: "Ubuntu 24.04", family: "apt", container: true, vm: true, docker: true },
+  { id: "ubuntu-24.04-desktop", alias: "ubuntu/24.04/desktop", name: "Ubuntu 24.04 Desktop", family: "apt", container: false, vm: true, docker: true, least: { memory: 4096, disk: 20 } },
+  { id: "fedora-43", alias: "fedora/43", name: "Fedora 43", family: "dnf", container: true, vm: true, docker: true },
+  { id: "rockylinux-9", alias: "rockylinux/9", name: "Rocky Linux 9", family: "dnf", container: true, vm: true, docker: "rhel" },
+  { id: "alpine-3.22", alias: "alpine/3.22", name: "Alpine 3.22", family: "", container: true, vm: false, docker: false },
 ];
 
 /** Where the images come from: the server of the people who make Incus */
@@ -78,19 +87,25 @@ export function readNew(input: Record<string, unknown>, taken: string[]): NewCon
   if (taken.includes(name)) throw new FieldError("taken");
   const kind: Kind = input.kind === "vm" ? "vm" : "container";
   const image = IMAGES.find((i) => i.id === input.image);
-  if (!image || (kind === "vm" && !image.vm)) throw new FieldError("image");
+  if (!image || (kind === "vm" ? !image.vm : !image.container)) throw new FieldError("image");
   const client = input.client !== false && image.family !== "";
+  const least = kind === "vm" ? image.least : undefined;
+  const memory = input.memory ? whole(input.memory, MEMORY.min, MEMORY.max, "memory") : 0;
+  const disk = kind === "vm" ? (input.disk ? whole(input.disk, DISK.min, DISK.max, "disk") : Math.max(DISK.standard, least?.disk ?? 0)) : input.disk ? whole(input.disk, 1, DISK.max, "disk") : 0;
+  // a desktop does not start in less: the page offers no less, a request asking less is refused
+  if (least && memory < least.memory) throw new FieldError("memory");
+  if (least && disk < least.disk) throw new FieldError("disk");
   return {
     kind,
     name,
     image,
     cores: whole(input.cores, 0, 256, "cores"),
-    memory: input.memory ? whole(input.memory, MEMORY.min, MEMORY.max, "memory") : 0,
+    memory,
     autostart: input.autostart !== false,
     // Docker is put in by the same script as the client
-    docker: client && input.docker === true,
+    docker: client && image.docker !== false && input.docker === true,
     client,
-    disk: kind === "vm" ? (input.disk ? whole(input.disk, DISK.min, DISK.max, "disk") : DISK.standard) : input.disk ? whole(input.disk, 1, DISK.max, "disk") : 0,
+    disk,
   };
 }
 
@@ -271,16 +286,22 @@ export function bridgeRulesDown(bridge: string): string[] {
  * What runs inside a new container: the network awaited, then Docker when asked and Hata's client.
  * `clientLine` is the usual `curl … | sh` with an invite, or "" when the client is not wanted.
  */
-export function setupScript(c: Pick<NewContainer, "docker" | "client">, clientLine: string): string {
+export function setupScript(c: Pick<NewContainer, "docker" | "client"> & { family?: Image["family"]; dockerFrom?: Image["docker"] }, clientLine: string): string {
   const lines = [
     "set -e",
     "export DEBIAN_FRONTEND=noninteractive",
     // the container gets its address a moment after it starts
-    'for i in $(seq 1 60); do getent hosts deb.debian.org >/dev/null 2>&1 && break; sleep 1; done',
-    "apt-get update -q",
-    "apt-get install -y -q curl ca-certificates",
+    `for i in $(seq 1 60); do getent hosts ${c.family === "dnf" ? "mirrors.fedoraproject.org" : "deb.debian.org"} >/dev/null 2>&1 && break; sleep 1; done`,
+    ...(c.family === "dnf" ? ["dnf install -y -q curl ca-certificates"] : ["apt-get update -q", "apt-get install -y -q curl ca-certificates"]),
   ];
-  if (c.docker) lines.push("curl -fsSL https://get.docker.com | sh");
+  if (c.docker && c.dockerFrom === "rhel") {
+    lines.push(
+      "dnf install -y -q dnf-plugins-core",
+      "dnf config-manager --add-repo https://download.docker.com/linux/rhel/docker-ce.repo",
+      "dnf install -y -q docker-ce docker-ce-cli containerd.io docker-compose-plugin",
+      "systemctl enable --now docker",
+    );
+  } else if (c.docker) lines.push("curl -fsSL https://get.docker.com | sh");
   if (c.client && clientLine) lines.push(clientLine);
   return lines.join("\n") + "\n";
 }
