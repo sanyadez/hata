@@ -17,6 +17,7 @@ import { DATA_DIR, saveSettings, settings } from "./config";
 import { locate, mustBeSharable, onSharesMoved } from "./files";
 import { readJsonFile, writeJsonAtomic, writeTextAtomic } from "./fsutil";
 import { answersItself, homeLinks, offer, offering, type Service } from "./mdns";
+import { answered } from "./netroom";
 import { installCommand, installPackage, PATH, run } from "./packages";
 import { localDomain } from "./site";
 import { adiskTxt, isOurs, nameFor, nameLine, parseUsers, shareName, SMB_CONF, SMB_CONF_BEFORE, smbConf, UNIX_NAME_RE, unixName, USER_MAP, userMap, writablePath, timeMachineOf, type Access, type Share } from "./smbconf";
@@ -227,7 +228,10 @@ export interface SharesReport {
   shares: ShareReport[];
 }
 
+/** Whether a shared folder is there; one on a network place whose server is silent is not, one not heard of yet is taken as there */
 const isDir = (path: string): boolean => {
+  const heard = answered(path);
+  if (heard !== true) return heard === null;
   try {
     return statSync(path).isDirectory();
   } catch {

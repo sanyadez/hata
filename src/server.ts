@@ -20,13 +20,14 @@ import { AppError, appAction, startAfterDisk, startJob, stoppable, stopJob, type
 import { certificateStates, challengeResponse, ensureCertificates, loadCertificates } from "./acme";
 import { attention } from "./attention";
 import { folderSize, restoreFromSnapshot, snapshotFile, snapshotFiles } from "./snapshot";
-import { appFolders, onScheduledRun, extraAllowed, backupApp, backupOverview, deleteSnapshot, listSnapshots, mirror, restoreSnapshot, resumeRestore, runBackups, scheduleBackups, takeServerSnapshot } from "./backup";
+import { appFolders, backupDir, onScheduledRun, extraAllowed, backupApp, backupOverview, deleteSnapshot, listSnapshots, mirror, restoreSnapshot, resumeRestore, runBackups, scheduleBackups, takeServerSnapshot } from "./backup";
 import { allowed as oauthAllowed, declined as oauthDeclined, findClient, holdQuestion, question as oauthQuestion, readAuthorize, register as oauthRegister, resourceMetadata, serverMetadata, spendCode } from "./oauth";
 import { checkOffsite, forgetHost, offsiteFailure, saveOffsite } from "./offsite";
 import { notSnoozed, snooze } from "./snooze";
 import { APP_NAME_RE, dumpCompose } from "./appform";
 import { findInTrash, trashSizeOn } from "./trash";
 import { discover as discoverPlaces, installFor as installPlaceTools, listPlaces, placesDown, removePlace, retryPlace, savePlace, shares as placeShares, startNetPlaces } from "./netplaces";
+import { answers, networkMountOf } from "./netroom";
 import { addShare, changeShare, installSamba, listShares, refreshShares, removeShare, shareTrouble, startShares } from "./shares";
 import { checkDisks, diskHealth, installTool, listDisks, startDisks, startSelfTest } from "./disks";
 import { lookAtPools, noteTypes, poolCheck, poolClear, PoolError, poolsReport, poolsTrouble, startPools } from "./raid";
@@ -282,6 +283,27 @@ async function body(req: Request): Promise<Record<string, unknown>> {
   const data: unknown = await req.json().catch(() => null);
   if (typeof data !== "object" || data === null || Array.isArray(data)) throw new AppError("request.notJson", 400);
   return data as Record<string, unknown>;
+}
+
+/**
+ * The folders a file request names — in its address and in its body — that lie on a network place:
+ * every look there is a call this process waits in, and while its server is silent that would stop the
+ * whole server, so each is asked first (a few seconds at most) and a silent one is refused in words.
+ */
+async function silentPlace(req: Request, url: URL): Promise<string> {
+  const named: string[] = [];
+  const collect = (value: unknown, depth: number): void => {
+    if (named.length > 200) return;
+    if (typeof value === "string") value.startsWith("/") && named.push(value);
+    else if (depth < 3 && Array.isArray(value)) value.forEach((one) => collect(one, depth + 1));
+    else if (depth < 3 && typeof value === "object" && value !== null) Object.values(value).forEach((one) => collect(one, depth + 1));
+  };
+  for (const [key, value] of url.searchParams) if (key === "path" || key === "dir") collect(value || settings.dataRoot, 0);
+  if (!url.searchParams.has("path") && (url.pathname === "/api/files" || url.pathname === "/api/files/find")) named.push(settings.dataRoot);
+  if ((req.headers.get("content-type") ?? "").startsWith("application/json")) collect(await req.clone().json().catch(() => null), 0);
+  const mounts = [...new Set(named.map(networkMountOf).filter(Boolean))];
+  for (const mount of mounts) if (!(await answers(mount))) return mount;
+  return "";
 }
 
 /** A cross-site page can make the browser send our cookie; it cannot fake the Origin header */
@@ -817,6 +839,10 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
   // an administrator the rules ask for two-factor sign-in is a member until it is set up
   const admin = user.role === "admin" && !mustSetUpTwoFactor(user);
   if (!admin && !memberMay(method, path, user.role === "admin" ? "member" : user.role)) return fail(403, user.role === "admin" ? "auth.twoFactorRequired" : "auth.forbidden");
+  if (path.startsWith("/api/files")) {
+    const silent = await silentPlace(req, url);
+    if (silent) return fail(503, "files.placeSilent", { path: silent });
+  }
   // a member's Files: the shared folders, with the rights given there
   if (!admin && path.startsWith("/api/files")) return memberFiles(req, url, server, user);
   const onMachine = /^\/api\/machines\/([a-f0-9]{8})\/files(\/.*)?$/.exec(path);
@@ -1702,6 +1728,8 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
     return error ? fail(409, error) : json({ started: true }, 202);
   }
 
+  // the backup folder on a network place is read in this process: not while its server is silent
+  if ((path === "/api/backups" || path.startsWith("/api/backups/")) && !(await answers(backupDir()))) return fail(503, "backup.placeSilent", { path: networkMountOf(backupDir()) });
   if (path === "/api/backups" && method === "GET") return json(await backupOverview(language(url)));
   if (path === "/api/backups/run" && method === "POST") {
     // the run takes minutes; its progress shows up as jobs and in the overview
