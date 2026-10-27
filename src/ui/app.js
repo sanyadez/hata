@@ -1865,7 +1865,8 @@ const ATTENTION_ICONS = { update: "up", docker: "box", restarting: "refresh", pa
 function attentionItem(item) {
   const detail = { ...item.detail, free: item.detail.free == null ? "" : bytes(item.detail.free), trash: item.detail.trash == null ? "" : bytes(item.detail.trash), size: item.detail.size == null ? "" : bytes(item.detail.size) };
   const base = "attention." + item.code;
-  const open = (href, label = t("common.open")) => h("a", { class: "btn small", href }, label);
+  // only what does the thing is a button; the ways elsewhere and the rest are entries of its menu
+  const open = (href, label = t("common.open")) => ({ href, label, icon: "external" });
   // the button that does the thing itself: it waits for the answer, says a refusal and looks again
   const doIt = (label, iconName, work) =>
     isAdmin() &&
@@ -1930,16 +1931,30 @@ function attentionItem(item) {
     item.code.startsWith("pve.") && state.route.view !== "proxmox" && open(`#/proxmox/${item.detail.host}${item.code === "pve.guestDown" ? "/guests" : item.code === "pve.backupFailed" ? "/tasks" : ""}`),
     (item.code === "machine.restarting" || item.code === "machine.partial") && open(`#/machines/${item.detail.id}/apps`),
     item.app && open(`#/apps/${item.app}${item.code === "restarting" || item.code === "partial" ? "/logs" : ""}`, t(item.code === "restarting" || item.code === "partial" ? "app.logs" : "common.open")),
-    (item.code === "disk.new" || item.code === "disk.usb") && isAdmin() && button(t("mounting.ignore"), { class: "small quiet", onclick: () => void api("POST", "/api/disks/ignore", { id: item.detail.id }).then(refresh, (e) => toast(errorText(e), "error")) }),
     // the assistant is asked with the item's own words: it looks with its tools where it can and explains the rest
-    isAdmin() && button(t(item.app ? "assistant.askWhy" : "assistant.ask"), { class: "small", onclick: () => openAssistant({ ask: item.app ? t("assistant.whyDown", { title: item.detail.title || item.app, app: item.app }) : t("assistant.whyItem", { title: t(base + ".title", detail), text: t(base + ".text", detail).trim() }) }) }, "chat"),
-    isAdmin() && button(t("attention.later", { n: SNOOZE_DAYS }), { class: "small quiet", title: t("attention.laterHint"), onclick: () => snoozeItem(item) }, "clock"),
+    isAdmin() && { label: t(item.app ? "assistant.askWhy" : "assistant.ask"), icon: "chat", run: () => openAssistant({ ask: item.app ? t("assistant.whyDown", { title: item.detail.title || item.app, app: item.app }) : t("assistant.whyItem", { title: t(base + ".title", detail), text: t(base + ".text", detail).trim() }) }) },
+    isAdmin() && { label: t("attention.later", { n: SNOOZE_DAYS }), icon: "clock", run: () => snoozeItem(item) },
+    (item.code === "disk.new" || item.code === "disk.usb") && isAdmin() && { label: t("mounting.ignore"), icon: "x", run: () => void api("POST", "/api/disks/ignore", { id: item.detail.id }).then(refresh, (e) => toast(errorText(e), "error")) },
   ].filter(Boolean);
+  const main = below.filter((x) => x instanceof Node);
+  const more = below.filter((x) => !(x instanceof Node));
+  // with nothing to do right here, the way to where it is done stays in sight
+  const way = !main.length && more.find((x) => x.href);
+  if (way) main.push(h("a", { class: "btn small", href: way.href }, way.label));
+  const rest = more.filter((x) => x !== way);
+  const title = t(base + ".title", detail);
+  const openMore = (at) => menuAt(at, menuHeader(title, null, ATTENTION_ICONS[item.code.split(".")[0]] ?? "alert"), rest);
+  if (rest.length) {
+    main.push(button("", { class: "small ghost", title: t("attention.more"), "aria-label": t("attention.more"), onclick: (e) => {
+      const r = e.currentTarget.getBoundingClientRect();
+      openMore({ x: r.left, y: r.bottom + 4 });
+    } }, "more"));
+  }
   return h(
     "div",
-    { class: "attention-item" },
+    { class: "attention-item", menu: rest.length ? openMore : undefined },
     h("span", { class: "badge-icon " + item.severity }, icon(ATTENTION_ICONS[item.code.split(".")[0]] ?? "alert")),
-    h("div", { class: "grow" }, h("strong", null, t(base + ".title", detail)), h("p", { class: "muted small" }, t(base + ".text", detail).trim()), below.length > 0 && h("div", { class: "row-actions under" }, below)),
+    h("div", { class: "grow" }, h("strong", null, title), h("p", { class: "muted small" }, t(base + ".text", detail).trim()), main.length > 0 && h("div", { class: "row-actions under" }, main)),
   );
 }
 

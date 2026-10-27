@@ -312,7 +312,7 @@ Early development. What works today:
   server's address, and an administrator says in Hata what it may do;
 - an assistant on every page of Hata, in a window opened from the button in the corner or on a page of its own with the chats listed: ask in your own words why an app is down or what fills the disk, and
   it looks with the same tools and acts — what only looks runs at once, every change is shown first
-  and waits for "Run". Every item under "needs attention" has a button that asks it about that item, and
+  and waits for "Run". Every item under "needs attention" has it in its menu, asking about that item, and
   before a model is set the window says what the assistant can do and keeps the question until it is. The model is yours to name: the API of a provider you have a key for, or a model
   on your own machine;
 - updates of Hata itself from the web UI: a newer release is downloaded, checked against its checksums and

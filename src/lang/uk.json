@@ -227,6 +227,7 @@
   "attention.startSamba": "Запустити Samba",
   "attention.started": "Запущено — результат з'явиться в подіях",
   "attention.laterHint": "До того часу сховано тут і в сповіщеннях; повернеться раніше, якщо стане гірше.",
+  "attention.more": "Ще",
   "attention.snoozed": "Нагадаю {date}",
   "error.attention.badItem": "Цей пункт не можна відкласти.",
   "error.attention.badDays": "Відкласти можна на 1–30 днів.",
