@@ -120,6 +120,7 @@ import { machineAccessRows, setMachineAccess, startMachineGates } from "./machin
 import { applyMachineCompose, installComposeOnMachine, machineTiles, installOnMachine, machineAppAction, machineAppLogs, machineApps, machineCompose, removeMachineApp, storeAppFor } from "./machineapps";
 import { addStore, ARCH, catalogue, removeStore, scheduleStoreSync, StoreError, syncStore } from "./store";
 import { startSampler, systemStatus } from "./system";
+import { act as containerAct, containerOfMachine, create as createContainer, install as installIncus, removeContainer, removeSnapshot as removeContainerSnapshot, report as containersReport, restoreSnapshot as restoreContainerSnapshot, setLimits as setContainerLimits, setUpNow as setUpContainers, shellCommand as containerShell, shellReady as containerShellReady, startContainers, takeSnapshot as takeContainerSnapshot } from "./containers";
 import { askScreen as pveAskScreen, openScreen as pveOpenScreen, storageContent as pveStorageContent, removeVolume as pveRemoveVolume, cloneOptions as pveCloneOptions, cloneGuest as pveCloneGuest, makeTemplate as pveMakeTemplate, load as pveLoad, templates as pveTemplates, downloadTemplate as pveDownloadTemplate, removeTemplate as pveRemoveTemplate, setSchedule as pveSetSchedule, runScheduleNow as pveRunSchedule, restoreBackup as pveRestoreBackup, restoreOptions as pveRestoreOptions, changeGuest as pveChangeGuest, guestSettings as pveGuestSettings, installByConsole as pveInstallByConsole, openConsole as pveOpenConsole, type Console as PveConsole, addBySignIn as addPveBySignIn, removeGuest as pveRemoveGuest, addHost as addPve, createGuest as pveCreateGuest, createVm as pveCreateVm, sendFile as pveSendFile, receiveFile as pveReceiveFile, newOptions as pveNewOptions, backupJobs as pveBackupJobs, backups as pveBackups, changeHost as changePve, guestOfMachine, host as pveHost, hosts as pveHosts, power as pvePower, proxmoxTrouble, refresh as refreshPve, removeHost as removePve, snapshotAction as pveSnapshotAction, snapshots as pveSnapshots, startProxmox, takeBackup as pveTakeBackup, takeSnapshot as pveTakeSnapshot, taskLog as pveTaskLog } from "./proxmox";
 import { call as machineCall, clientBinary, containersOf, installScript, invite as machineInvite, INVITE_MS, linkData, linkHandlers, machine as machineView, MACHINE_ID_RE, machines as machineList, machinesAway, open as machineOpen, remove as removeMachine, rename as renameMachine, startMachines, updateClient, wake as wakeMachine, power as powerMachine, type LinkSocket } from "./machines";
 import { availableUpdate, cancelUpdate, checkForUpdate, confirmUpdate, scheduleUpdateChecks, startRollback, startUpdate, updateStatus } from "./update";
@@ -471,6 +472,17 @@ async function openTerminal(req: Request, url: URL, server: Server, user: string
     if (container !== null && !/^[a-f0-9]{12,64}$/.test(container)) return fail(404, "machine.noContainer");
     if (!upgrade) return json({ ok: true });
     const data: MachineTerminalSocket = { kind: "machineTerminal", machine: machineId, name: m.name, user, key: container ? `c:${container}` : "host", cols: url.searchParams.get("cols"), rows: url.searchParams.get("rows"), channel: null };
+    if (server.upgrade(req, { data })) return undefined as never;
+    return fail(400, "request.notFound");
+  }
+  // a container of this server's Incus
+  const incusName = url.searchParams.get("incus");
+  if (incusName !== null) {
+    const ready = await containerShellReady(incusName);
+    if (ready !== "ok") return fail(ready === "notFound" ? 404 : 409, ready === "notFound" ? "containers.notFound" : "terminal.notRunning", { name: incusName });
+    if (!terminals.supported()) return fail(501, "terminal.unsupported");
+    if (!upgrade) return json({ ok: true });
+    const data: TerminalSocket = { kind: "terminal", key: `incus:${incusName}`, cols: url.searchParams.get("cols"), rows: url.searchParams.get("rows"), start: () => ({ cmd: containerShell(incusName), cwd: "/", env: terminalEnv() }), opened: () => record("system.terminal.container", { user, detail: incusName }) };
     if (server.upgrade(req, { data })) return undefined as never;
     return fail(400, "request.notFound");
   }
@@ -1815,6 +1827,12 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
     if (response) return response;
   }
 
+  // ---- containers on this server, made with Incus (administrators only) ----
+  if (path.startsWith("/api/containers")) {
+    const response = await containersApi(req, url, server, user.name);
+    if (response) return response;
+  }
+
   // ---- Proxmox servers (administrators only) ----
   if (path.startsWith("/api/proxmox")) {
     const response = await proxmoxApi(req, url, server, user.name);
@@ -2448,6 +2466,53 @@ async function homeAssistantApi(req: Request, url: URL, server: Server, user: Us
   return null;
 }
 
+async function containersApi(req: Request, url: URL, server: Server, by: string): Promise<Response | null> {
+  const path = url.pathname;
+  const method = req.method;
+  if (path === "/api/containers" && method === "GET") return json(await containersReport());
+  if (path === "/api/containers/install" && method === "POST") return json({ job: installIncus(by).id });
+  if (path === "/api/containers/setup" && method === "POST") {
+    server.timeout(req, 60);
+    await setUpContainers(by);
+    return json(await containersReport());
+  }
+  if (path === "/api/containers" && method === "POST") return json(await createContainer(await body(req), by), 202);
+  const m = /^\/api\/containers\/([a-z][a-z0-9-]{0,62})(\/.*)?$/.exec(path);
+  if (!m) return null;
+  const name = m[1]!;
+  const rest = m[2] ?? "";
+  server.timeout(req, 120);
+  if (rest === "" && method === "DELETE") {
+    // the name typed, as for anything that cannot be undone
+    if ((await body(req)).confirm !== name) return fail(400, "containers.confirm");
+    await removeContainer(name, by);
+    return json({ ok: true });
+  }
+  if (rest === "" && method === "PATCH") {
+    await setContainerLimits(name, await body(req), by);
+    return json({ ok: true });
+  }
+  if (rest === "/state" && method === "POST") {
+    await containerAct(name, (await body(req)).action, by);
+    return json({ ok: true });
+  }
+  if (rest === "/snapshots" && method === "POST") {
+    server.timeout(req, 0);
+    return json({ name: await takeContainerSnapshot(name, (await body(req)).name, by) });
+  }
+  const snap = /^\/snapshots\/([^/]+)(\/restore)?$/.exec(rest);
+  if (snap && snap[2] && method === "POST") {
+    server.timeout(req, 0);
+    await restoreContainerSnapshot(name, decodeURIComponent(snap[1]!), by);
+    return json({ ok: true });
+  }
+  if (snap && !snap[2] && method === "DELETE") {
+    await removeContainerSnapshot(name, decodeURIComponent(snap[1]!), by);
+    return json({ ok: true });
+  }
+  return null;
+}
+
 async function proxmoxApi(req: Request, url: URL, server: Server, by: string): Promise<Response | null> {
   const path = url.pathname;
   const method = req.method;
@@ -2541,7 +2606,7 @@ async function machinesApi(req: Request, url: URL, server: Server, by: string): 
   const path = url.pathname;
   const method = req.method;
   // a machine that is a guest of a Proxmox server is said to be one: it can be started from there
-  if (path === "/api/machines" && method === "GET") return json({ machines: machineList().map((m) => ({ ...m, pve: guestOfMachine(m.id, (m.info?.macs ?? []).map((c) => c.mac), m.ip.replace(/^::ffff:/, "")) })), version: VERSION });
+  if (path === "/api/machines" && method === "GET") return json({ machines: machineList().map((m) => ({ ...m, pve: guestOfMachine(m.id, (m.info?.macs ?? []).map((c) => c.mac), m.ip.replace(/^::ffff:/, "")), incus: containerOfMachine((m.info?.macs ?? []).map((c) => c.mac), m.info?.hostname ?? "") })), version: VERSION });
   if (path === "/api/machines/invite" && method === "POST") {
     // the name on the home network too: a machine that understands .local names finds Hata by it whatever address the router gives
     const { port } = listenAddress();
@@ -2842,6 +2907,7 @@ export async function serve(): Promise<void> {
   startSampler(() => settings.dataRoot);
   startMachines();
   startProxmox();
+  startContainers();
   startHomeAssistant();
   startMachineUsers();
   startMachineGates();

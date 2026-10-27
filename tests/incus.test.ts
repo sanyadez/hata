@@ -1,0 +1,104 @@
+import { expect, test } from "bun:test";
+import { bridgeRules, configOf, FieldError, insideNarrowMap, limitsChange, megabytes, readInstance, readNew, setupScript, snapshotName } from "../src/incus";
+
+const field = (f: () => unknown): string => {
+  try {
+    f();
+  } catch (e) {
+    return e instanceof FieldError ? e.field : "other";
+  }
+  return "";
+};
+
+test("a new container is read and checked", () => {
+  const c = readNew({ name: " Docker-1 ", image: "debian-13", cores: 2, memory: 1024, docker: true }, []);
+  expect(c).toMatchObject({ name: "docker-1", cores: 2, memory: 1024, autostart: true, docker: true, client: true });
+  expect(c.image.alias).toBe("debian/13");
+  expect(field(() => readNew({ name: "1abc", image: "debian-13" }, []))).toBe("name");
+  expect(field(() => readNew({ name: "a--b", image: "debian-13" }, []))).toBe("name");
+  expect(field(() => readNew({ name: "web", image: "debian-13" }, ["web"]))).toBe("taken");
+  expect(field(() => readNew({ name: "web", image: "arch" }, []))).toBe("image");
+  expect(field(() => readNew({ name: "web", image: "debian-13", memory: 64 }, []))).toBe("memory");
+  expect(field(() => readNew({ name: "web", image: "debian-13", cores: 1.5 }, []))).toBe("cores");
+  // no client without systemd, and Docker only comes with it
+  expect(readNew({ name: "tiny", image: "alpine-3.22", docker: true }, [])).toMatchObject({ client: false, docker: false });
+  expect(readNew({ name: "plain", image: "debian-12", client: false, docker: true }, [])).toMatchObject({ client: false, docker: false });
+});
+
+test("a container's settings", () => {
+  expect(configOf({ cores: 2, memory: 512, autostart: true, docker: true })).toEqual({ "boot.autostart": "true", "user.hata": "true", "limits.cpu": "2", "limits.memory": "512MiB", "security.nesting": "true" });
+  expect(configOf({ cores: 0, memory: 0, autostart: false })).toEqual({ "boot.autostart": "false", "user.hata": "true" });
+});
+
+test("only what differs changes, and a limit taken away is an empty value", () => {
+  const now = { "limits.cpu": "2", "limits.memory": "1024MiB", "boot.autostart": "true", "security.nesting": "true" };
+  expect(limitsChange({ cores: 2, memory: 1024, autostart: true, nesting: true }, now)).toEqual({});
+  expect(limitsChange({ cores: 0, memory: 2048, autostart: false, nesting: false }, now)).toEqual({ "limits.cpu": "", "limits.memory": "2048MiB", "boot.autostart": "false", "security.nesting": "" });
+  // a container made elsewhere has no autostart key: "off" is what it is already
+  expect(limitsChange({ cores: 0, memory: 0, autostart: false }, {})).toEqual({});
+  expect(field(() => limitsChange({ cores: -1 }, {}))).toBe("cores");
+});
+
+test("sizes in megabytes", () => {
+  expect(megabytes("512MiB")).toBe(512);
+  expect(megabytes("2GiB")).toBe(2048);
+  expect(megabytes("1GB")).toBe(954);
+  expect(megabytes("1073741824")).toBe(1024);
+  expect(megabytes(undefined)).toBe(0);
+  expect(megabytes("50%")).toBe(0);
+});
+
+test("an instance as Incus gives it", () => {
+  const raw = {
+    name: "t1",
+    type: "container",
+    status: "Running",
+    created_at: "2026-10-27T16:20:00Z",
+    config: { "image.os": "debian", "image.release": "trixie", "limits.cpu": "2", "limits.memory": "1GiB", "boot.autostart": "true", "user.hata": "true", "volatile.eth0.hwaddr": "10:66:6A:AA:BB:CC" },
+    state: {
+      memory: { usage: 26 * 1024 * 1024 },
+      cpu: { usage: 5 },
+      processes: 12,
+      disk: {},
+      network: {
+        docker0: { type: "broadcast", hwaddr: "02:42:00:00:00:01", addresses: [{ family: "inet", address: "172.17.0.1", scope: "global" }] },
+        lo: { type: "loopback", addresses: [{ family: "inet", address: "127.0.0.1", scope: "local" }] },
+        eth0: { type: "broadcast", hwaddr: "10:66:6a:aa:bb:cc", addresses: [{ family: "inet6", address: "fe80::1", scope: "link" }, { family: "inet", address: "10.254.231.206", scope: "global" }] },
+      },
+    },
+    snapshots: [
+      { name: "t1/a", created_at: "2026-10-27T17:00:00Z" },
+      { name: "t1/b", created_at: "2026-10-27T18:00:00Z" },
+    ],
+  };
+  const c = readInstance(raw)!;
+  expect(c).toMatchObject({ name: "t1", status: "running", os: "Debian trixie", cores: 2, memory: 1024, autostart: true, nesting: false, ours: true, address: "10.254.231.206", mac: "10:66:6a:aa:bb:cc" });
+  expect(c.usage?.memory).toBe(26 * 1024 * 1024);
+  expect(c.snapshots.map((s) => s.name)).toEqual(["b", "a"]);
+  expect(readInstance({ ...raw, status: "Stopped", state: null })!.usage).toBeNull();
+  expect(readInstance({ ...raw, type: "virtual-machine" })).toBeNull();
+});
+
+test("inside a container with part of the user ids", () => {
+  expect(insideNarrowMap("         0          0 4294967295\n")).toBe(false);
+  expect(insideNarrowMap("         0     100000      65536\n")).toBe(true);
+  expect(insideNarrowMap("0 1000000 1000000000")).toBe(true);
+  expect(insideNarrowMap("")).toBe(false);
+});
+
+test("the bridge's rules and the setup inside", () => {
+  expect(bridgeRules("hatabr0")).toEqual([
+    ["-i", "hatabr0", "-j", "ACCEPT"],
+    ["-o", "hatabr0", "-m", "conntrack", "--ctstate", "RELATED,ESTABLISHED", "-j", "ACCEPT"],
+  ]);
+  const script = setupScript({ docker: true, client: true }, "curl -fsSL http://10.0.0.1:80/client/x | sh");
+  expect(script).toContain("get.docker.com");
+  expect(script.trim().split("\n").pop()).toBe("curl -fsSL http://10.0.0.1:80/client/x | sh");
+  expect(setupScript({ docker: false, client: true }, "line")).not.toContain("docker");
+});
+
+test("a snapshot's name", () => {
+  expect(snapshotName("before-update")).toBe("before-update");
+  expect(snapshotName("", new Date(2026, 9, 27, 9, 5, 7))).toBe("snap-20261027-090507");
+  expect(field(() => snapshotName("a/b"))).toBe("snapshot");
+});

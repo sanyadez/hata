@@ -25,7 +25,7 @@ import { listeningPort } from "./wireguard";
 
 const TRIAL_S = 90;
 /** Interfaces that are Docker's or a tunnel's, not the server's way to the network */
-const NOT_OURS = /^(lo|docker|br-|veth|virbr|cni|flannel|lxcbr|podman|tun|tap|wg|tailscale|zt)/;
+const NOT_OURS = /^(lo|docker|br-|veth|virbr|cni|flannel|lxcbr|incusbr|hatabr|podman|tun|tap|wg|tailscale|zt)/;
 const PACKAGE = "network-manager";
 /** Without it NetworkManager has a Wi-Fi device and cannot use it */
 const WIFI_PACKAGE = "wpasupplicant";

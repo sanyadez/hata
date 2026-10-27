@@ -14,6 +14,7 @@ import type { Job } from "./apps";
 import { settings } from "./config";
 import { installTool } from "./disks";
 import { dockerInfo } from "./docker";
+import { install as installIncus, inUse as containersInUse, PACKAGES as INCUS_PACKAGES } from "./containers";
 import { DOCKER_INSTALL_COMMAND, installDocker } from "./dockerinstall";
 import { parseFstab, pools } from "./mounting";
 import { packagesInUse } from "./netplaces";
@@ -68,6 +69,7 @@ const SPECS: Spec[] = [
   { id: "iptables", name: "iptables", package: "iptables", bin: "iptables", version: ["iptables", "--version"], page: "#/settings/network" },
   { id: "wireguard-tools", name: "WireGuard tools", package: "wireguard-tools", bin: "wg-quick", version: ["wg", "--version"], page: "#/settings/remote" },
   { id: "tailscale", name: "Tailscale", package: "tailscale", bin: "tailscale", version: ["tailscale", "version"], page: "#/settings/remote" },
+  { id: "incus", name: "Incus", package: "incus-base", bin: "incus", version: ["incus", "--version"], page: "#/containers", family: ["incus-base", "incus-client", "incus"] },
   { id: "openssh-client", name: "OpenSSH client", package: "openssh-client", bin: "sftp", version: ["ssh", "-V"], page: "#/settings/backups", base: true },
 ];
 
@@ -144,9 +146,10 @@ async function packagesOf(spec: Spec): Promise<string[]> {
 }
 
 /** What of Hata's stands on a program right now, so that taking it away would break it */
-function holdsOf(id: string, nics: Nic[], remote: boolean): string {
+function holdsOf(id: string, nics: Nic[], remote: boolean, containers: boolean): string {
   // whoever is on this page from afar came through it
   if (id === "tailscale" && remote) return "remote";
+  if (id === "incus" && containers) return "containers";
   if (id === "wireguard-tools" && wireguardInUse()) return "wireguard";
   if (id === "samba" && settings.shares.length > 0) return "shares";
   if (id === "snapraid" && settings.snapraid.parity !== "") return "array";
@@ -178,6 +181,7 @@ export async function toolsReport(): Promise<Tool[]> {
   const ntfs = await kernelReadsNtfs();
   const nics = (await networkReport().catch(() => null))?.nics ?? [];
   const remote = (await tailscaleReport(0).catch(() => null))?.state === "running";
+  const containers = await containersInUse().catch(() => false);
   const offered = packageUpdates().list ?? [];
   return Promise.all(
     SPECS.map(async (spec) => {
@@ -192,11 +196,11 @@ export async function toolsReport(): Promise<Tool[]> {
         state: installed ? ("installed" as const) : ("missing" as const),
         builtIn: spec.id === "ntfs-3g" && ntfs,
         version,
-        install: spec.id === "docker" ? DOCKER_INSTALL_COMMAND : spec.id === "tailscale" ? TAILSCALE_INSTALL_COMMAND : installCommand(spec.package),
+        install: spec.id === "docker" ? DOCKER_INSTALL_COMMAND : spec.id === "tailscale" ? TAILSCALE_INSTALL_COMMAND : spec.id === "incus" ? installCommand(INCUS_PACKAGES.join(" ")) : installCommand(spec.package),
         page: spec.page,
         used: installed ? usedNow(spec.id, docker.available) : null,
         remove: installed && !spec.base ? removeCommand(await packagesOf(spec)) : "",
-        holds: !installed ? "" : spec.base ? "base" : holdsOf(spec.id, nics, remote),
+        holds: !installed ? "" : spec.base ? "base" : holdsOf(spec.id, nics, remote, containers),
         newer: (own.find((item) => item.name === spec.package) ?? own[0])?.to.replace(/^\d+:/, "").replace(/~(debian|ubuntu)[^-]*$/, "") ?? "",
         upgrade: own.map((item) => item.name),
       };
@@ -213,6 +217,7 @@ export async function installOne(id: string, user: string): Promise<{ job: Job }
   if (!spec) return { error: "not a program Hata installs" };
   if (spec.id === "docker") return { job: installDocker(user) };
   if (spec.id === "tailscale") return { job: installTailscale(user) };
+  if (spec.id === "incus") return { job: installIncus(user) };
   if (spec.id === "smartmontools") return { error: await installTool() };
   if (spec.id === "samba") {
     try {

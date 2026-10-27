@@ -136,7 +136,7 @@
     refit();
     const url = new URL("/api/terminal/ws", location.href);
     url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
-    for (const name of ["app", "container", "machine", "pve", "guest"]) if (params.get(name)) url.searchParams.set(name, params.get(name));
+    for (const name of ["app", "container", "machine", "pve", "guest", "incus"]) if (params.get(name)) url.searchParams.set(name, params.get(name));
     url.searchParams.set("cols", term.cols);
     url.searchParams.set("rows", term.rows);
     const socket = new WebSocket(url);
@@ -195,7 +195,7 @@
   async function refused() {
     setState("failed");
     const url = new URL("/api/terminal/ws", location.href);
-    for (const name of ["app", "container", "machine", "pve", "guest"]) if (params.get(name)) url.searchParams.set(name, params.get(name));
+    for (const name of ["app", "container", "machine", "pve", "guest", "incus"]) if (params.get(name)) url.searchParams.set(name, params.get(name));
     const res = await fetch(url).catch(() => null);
     const error = res && !res.ok ? (await res.json().catch(() => null))?.error : null;
     setNote(error?.code && (dict["error." + error.code] ?? fallback["error." + error.code]) ? t("error." + error.code, error.detail) : t("terminal.failed"), t("terminal.retry"), () => {

@@ -335,6 +335,7 @@ function parseRoute() {
   if (parts[0] === "terminal" && isAdmin()) return { view: "terminal" };
   if (parts[0] === "assistant" && isAdmin()) return { view: "assistant" };
   if (parts[0] === "ha" && parts[1] && isAdmin()) return { view: "ha", id: parts[1], tab: HA_TABS.includes(parts[2]) ? parts[2] : "overview" };
+  if (parts[0] === "containers" && isAdmin()) return { view: "containers" };
   if (parts[0] === "proxmox" && parts[1] && isAdmin()) return { view: "proxmox", id: parts[1], tab: PVE_TABS.includes(parts[2]) ? parts[2] : "overview" };
   if (parts[0] === "machines" && isAdmin()) return parts[1] ? { view: "machine", id: parts[1], tab: MACHINE_TABS.includes(parts[2]) ? parts[2] : "overview" } : { view: "machines" };
   if (parts[0] === "apps" && parts[1]) return { view: "app", name: parts[1], tab: isAdmin() && ["settings", "logs", "compose", "backups", "terminal"].includes(parts[2]) ? parts[2] : "overview" };
@@ -386,6 +387,7 @@ function onRoute() {
   if (state.route.view === "machines" || state.route.view === "machine" || state.route.view === "proxmox") void loadMachines();
   if (state.route.view === "machines") void loadPve();
   if (state.route.view === "machines") void loadHa();
+  if (state.route.view === "machines" || state.route.view === "containers") void loadContainers();
   window.scrollTo(0, 0);
 }
 window.addEventListener("hashchange", onRoute);
@@ -437,6 +439,8 @@ function startEvents() {
       machineEvent(event);
     } else if (event.type === "proxmox") {
       pveEvent(event);
+    } else if (event.type === "containers") {
+      if (state.route.view === "machines" || state.route.view === "containers") void loadContainers();
     } else if (event.type === "ha") {
       haEvent(event);
     } else if (event.type === "approvals") {
@@ -827,7 +831,7 @@ async function loadMine() {
   state.favorites = mine.favorites;
 }
 
-const navCurrent = () => (state.route.view === "machine" || state.route.view === "proxmox" || state.route.view === "ha" ? "machines" : state.route.view === "backups" || state.route.view === "users" ? "settings" : state.route.view === "app" ? "home" : state.route.view === "import" ? "store" : state.route.view === "trash" || state.route.view === "myhata" ? "files" : state.route.view);
+const navCurrent = () => (state.route.view === "machine" || state.route.view === "proxmox" || state.route.view === "containers" || state.route.view === "ha" ? "machines" : state.route.view === "backups" || state.route.view === "users" ? "settings" : state.route.view === "app" ? "home" : state.route.view === "import" ? "store" : state.route.view === "trash" || state.route.view === "myhata" ? "files" : state.route.view);
 const navItems = () => NAV.filter((item) => (!item.admin || isAdmin()) && (!item.files || mayFiles()) && (!item.assistant || !!(assistantUi.config?.ready ?? state.overview?.assistant)) && (item.guest !== false || state.user.role !== "guest"));
 
 function navLinks(className, items = navItems()) {
@@ -1032,6 +1036,7 @@ function render() {
   if (view === "machines") return renderMachines();
   if (view === "machine") return renderMachine();
   if (view === "proxmox") return renderPve();
+  if (view === "containers") return renderContainers();
   if (view === "ha") return renderHa();
   if (view === "app") return renderApp();
   renderHome();
@@ -2573,10 +2578,12 @@ function renderMachines() {
   shell(
     h("div", { class: "page-head" }, h("div", null, h("h1", null, t("nav.machines")), h("p", { class: "meta", id: "machines-meta" }, t("machines.lead"))), h("div", { class: "actions" }, button(t("ha.add"), { onclick: () => haDialog() }, "plus"), button(t("pve.add"), { onclick: () => pveDialog() }, "plus"), button(t("machines.add"), { class: "primary", onclick: addMachineDialog }, "plus"))),
     h("div", { id: "machines-body" }),
+    h("div", { id: "incus-list", class: "stack" }),
     h("div", { id: "pve-list", class: "stack" }),
     h("div", { id: "ha-list", class: "stack" }),
   );
   if (machinesUi.list) renderMachinesBody();
+  if (incusUi.data) paintIncusCard();
   if (pveUi.list) paintPveList();
   if (haUi.list) paintHaList();
 }
@@ -2611,6 +2618,7 @@ function paintMachineCard(m) {
     h("div", { class: "machine-title" }, icon("server"), h("strong", { class: "clip grow" }, m.name), machineChip(m)),
     h("p", { class: "muted small clip" }, machineOs(m) || "—"),
     m.pve && h("p", { class: "muted small clip" }, t("pve.guestOn", { guest: guestKind(m.pve), host: m.pve.hostName })),
+    m.incus && h("p", { class: "muted small clip" }, t("incus.onThisServer")),
     m.online && s
       ? [meter(t("sys.cpu"), s.cpu, t("sys.cores", { n: s.cores })), meter(t("sys.memory"), mem, bytes(s.memory.total)), disk && meter(t("sys.disk"), diskPercent, t("sys.free", { free: bytes(disk.total - disk.used), total: bytes(disk.total) }))]
       : h("p", { class: "muted small" }, m.online ? t("machines.waiting") : t("machines.seen", { ago: ago(m.seen) })),
@@ -2694,6 +2702,451 @@ async function addMachineDialog() {
   const timer = setInterval(look, 3000);
   const stop = () => clearInterval(timer);
   dialog.addEventListener("close", stop);
+}
+
+// --- Containers on this server (Incus) ---
+// Incus keeps them; Hata installs it by a button, sets it up, makes containers with its client in them
+
+const incusUi = { data: null };
+
+async function loadContainers() {
+  try {
+    incusUi.data = await api("GET", "/api/containers");
+  } catch (e) {
+    incusUi.data = { state: "error", error: errorText(e), containers: [] };
+  }
+  if (state.route.view === "containers") renderContainersBody();
+  if (state.route.view === "machines") paintIncusCard();
+}
+
+/** The block on the Machines page: what is here, or how to begin */
+function paintIncusCard() {
+  const box = document.getElementById("incus-list");
+  const d = incusUi.data;
+  if (!box || !d) return;
+  const running = (d.containers ?? []).filter((c) => c.status === "running").length;
+  put(
+    box,
+    h("div", { class: "section-head" }, h("h2", null, t("incus.title"))),
+    h(
+      "div",
+      { class: "cards" },
+      h(
+        "a",
+        { class: "card pad machine-card", href: "#/containers" },
+        h("div", { class: "machine-title" }, icon("box"), h("strong", { class: "clip grow" }, t("incus.thisServer")), d.state === "ready" && h("span", { class: "state " + (running ? "running" : "") }, t("incus.runningN", { n: running }))),
+        h("p", { class: "muted small" }, d.state === "ready" ? t("incus.countN", { n: d.containers.length }) : t("incus.state." + d.state)),
+      ),
+    ),
+  );
+}
+
+function renderContainers() {
+  shell(
+    h(
+      "div",
+      { class: "page-head" },
+      h("div", null, h("p", { class: "meta" }, h("a", { href: "#/machines" }, t("nav.machines"))), h("h1", null, t("incus.title")), h("p", { class: "meta", id: "incus-meta" }, t("incus.lead"))),
+      h("div", { class: "actions", id: "incus-actions" }),
+    ),
+    h("div", { id: "incus-body", class: "stack" }),
+  );
+  if (incusUi.data) renderContainersBody();
+}
+
+const incusStatus = (c) => h("span", { class: "state " + (c.status === "running" ? "running" : c.status === "error" ? "failed" : "") }, t("incus.status." + c.status));
+
+function renderContainersBody() {
+  const box = document.getElementById("incus-body");
+  const actions = document.getElementById("incus-actions");
+  const d = incusUi.data;
+  if (!box || !d) return;
+  put(actions, d.state === "ready" && button(t("incus.new"), { class: "primary", onclick: () => newContainerDialog() }, "plus"));
+  if (d.state === "error") return put(box, h("p", { class: "card pad warn-box" }, d.error));
+  if (d.state === "blocked") return put(box, h("div", { class: "card pad stack" }, h("h2", null, t("incus.blocked.title")), h("p", null, t("incus.blocked." + d.why)), h("p", { class: "muted small" }, t("incus.blocked.how"))));
+  if (d.state === "missing") {
+    return put(
+      box,
+      h(
+        "div",
+        { class: "card pad stack" },
+        h("h2", null, t("incus.missing.title")),
+        h("p", null, t("incus.missing.lead")),
+        h("ul", { class: "stack-s small pve-gives" }, ["system", "docker", "machine", "snapshots"].map((k) => h("li", null, t("incus.gives." + k)))),
+        h("p", { class: "muted small" }, t("incus.missing.what")),
+        d.install ? h("p", { class: "cmd" }, icon("terminal"), d.install) : h("p", { class: "banner small" }, t("incus.missing.byHand")),
+        d.install &&
+          h(
+            "div",
+            { class: "actions" },
+            button(
+              t("incus.missing.install"),
+              {
+                class: "primary",
+                onclick: async (e) => {
+                  e.currentTarget.disabled = true;
+                  try {
+                    const r = await api("POST", "/api/containers/install");
+                    void jobDialog(r.job, "incus", "Incus", () => void loadContainers());
+                  } catch (err) {
+                    toast(errorText(err), "error");
+                  }
+                  e.target.closest("button").disabled = false;
+                },
+              },
+              "download",
+            ),
+          ),
+      ),
+    );
+  }
+  if (d.state === "setup") {
+    return put(
+      box,
+      h(
+        "div",
+        { class: "card pad stack" },
+        h("h2", null, t("incus.setup.title")),
+        h("p", null, t("incus.setup.lead")),
+        h(
+          "div",
+          { class: "actions" },
+          button(
+            t("incus.setup.button"),
+            {
+              class: "primary",
+              onclick: async (e) => {
+                e.currentTarget.disabled = true;
+                try {
+                  incusUi.data = await api("POST", "/api/containers/setup");
+                  renderContainersBody();
+                } catch (err) {
+                  toast(errorText(err), "error");
+                  e.target.closest("button").disabled = false;
+                }
+              },
+            },
+            "check",
+          ),
+        ),
+      ),
+    );
+  }
+  document.getElementById("incus-meta").textContent = [t("incus.countN", { n: d.containers.length }), d.version && "Incus " + d.version, d.network && t("incus.network", { name: d.network.name, address: d.network.address })].filter(Boolean).join(" · ");
+  if (!d.containers.length) {
+    return put(box, h("div", { class: "card empty" }, icon("box"), h("h2", null, t("incus.none")), h("p", null, t("incus.noneLead")), button(t("incus.new"), { class: "primary", onclick: () => newContainerDialog() }, "plus")));
+  }
+  put(
+    box,
+    h(
+      "section",
+      { class: "card" },
+      h(
+        "div",
+        { class: "table-wrap" },
+        h(
+          "table",
+          null,
+          h("thead", null, h("tr", null, h("th", null, t("incus.col.name")), h("th", null, t("incus.col.state")), h("th", null, t("incus.col.address")), h("th", null, t("incus.col.use")), h("th"))),
+          h("tbody", null, d.containers.map((c) => containerRow(c))),
+        ),
+      ),
+    ),
+    d.storage && h("p", { class: "muted small" }, t("incus.storage", { path: d.storage.path || "/var/lib/incus", driver: d.storage.driver })),
+  );
+}
+
+function containerRow(c) {
+  const running = c.status === "running";
+  const limits = [c.cores ? t("incus.cores", { n: c.cores }) : t("incus.allCores"), c.memory ? bytes(c.memory * 1024 * 1024) : t("incus.allMemory")].join(" · ");
+  return h(
+    "tr",
+    { menu: (at) => containerMenu(c, at) },
+    h(
+      "td",
+      null,
+      h("div", { class: "strong" }, c.name, c.machine && h("a", { class: "small", href: `#/machines/${c.machine}` }, " · ", t("incus.asMachine"))),
+      h("div", { class: "muted small" }, [c.os, c.nesting && "Docker", c.snapshots.length > 0 && t("incus.snapshotsN", { n: c.snapshots.length })].filter(Boolean).join(" · ")),
+    ),
+    h("td", null, incusStatus(c)),
+    h("td", { class: "mono small" }, c.address || "—"),
+    h("td", { class: "small" }, running && c.usage ? t("incus.memoryUsed", { used: bytes(c.usage.memory) }) : "—", h("div", { class: "muted small" }, limits)),
+    h(
+      "td",
+      null,
+      h(
+        "div",
+        { class: "row-actions" },
+        running
+          ? button(t("incus.stop"), { class: "small", onclick: (e) => containerAct(c, "stop", e.currentTarget) }, "stop")
+          : button(t("incus.start"), { class: "small", onclick: (e) => containerAct(c, "start", e.currentTarget) }, "play"),
+        running && button(t("incus.console"), { class: "small", onclick: () => containerConsole(c) }, "terminal"),
+        button("", { class: "small ghost", title: t("incus.more"), "aria-label": t("incus.more"), onclick: (e) => {
+          const r = e.currentTarget.getBoundingClientRect();
+          containerMenu(c, { x: r.left, y: r.bottom + 4 });
+        } }, "more"),
+      ),
+    ),
+  );
+}
+
+async function containerAct(c, action, el) {
+  if (el) el.disabled = true;
+  try {
+    await api("POST", `/api/containers/${c.name}/state`, { action });
+    toast(t("incus.did." + action, { name: c.name }));
+  } catch (e) {
+    toast(errorText(e), "error");
+  }
+  if (el) el.disabled = false;
+  void loadContainers();
+}
+
+function containerMenu(c, at) {
+  menuAt(at, menuHeader(c.name, c.os, "box"), [
+    c.status === "running" && { label: t("incus.restart"), icon: "refresh", run: () => containerAct(c, "restart") },
+    c.status === "running" && { label: t("incus.console"), icon: "terminal", run: () => containerConsole(c) },
+    c.machine && { label: t("incus.openMachine"), icon: "server", href: `#/machines/${c.machine}` },
+    { label: t("incus.limits") + "…", icon: "settings", run: () => containerLimitsDialog(c) },
+    { label: t("incus.snapshots") + "…", icon: "clock", run: () => containerSnapshotsDialog(c) },
+    { label: t("incus.remove") + "…", icon: "trash", danger: true, run: () => removeContainerDialog(c) },
+  ]);
+}
+
+function containerConsole(c) {
+  let dialog;
+  dialog = openDialog("xwide", h("header", null, h("h2", { class: "clip grow" }, c.name), closeX(() => dialog)), h("p", { class: "muted small" }, t("incus.consoleHint")), h("div", { class: "term-holder" }, terminalFrame({ incus: c.name })));
+}
+
+/** The fields of the limits, shared by the new-container and the limits dialogs */
+function limitFields(c) {
+  const opt = (value, label) => h("option", { value }, label);
+  const cores = h("select", null, opt("0", t("incus.allCores")), [1, 2, 3, 4, 6, 8, 12, 16].map((n) => opt(String(n), t("incus.cores", { n }))));
+  cores.value = String(c?.cores ?? 2);
+  if (cores.value === "") cores.value = "0";
+  const memory = h("select", null, opt("0", t("incus.allMemory")), [256, 512, 1024, 2048, 4096, 8192, 16384].map((mb) => opt(String(mb), mb < 1024 ? `${mb} MB` : `${mb / 1024} GB`)));
+  memory.value = String(c?.memory ?? 1024);
+  if (memory.value === "") memory.value = "0";
+  return { cores, memory };
+}
+
+const tickRow = (label, hint, checked) => {
+  const box = h("input", { type: "checkbox", checked });
+  return [box, h("label", { class: "check" }, box, h("span", null, h("strong", null, label), hint && h("span", { class: "muted small block" }, hint)))];
+};
+
+function newContainerDialog() {
+  const d = incusUi.data;
+  const name = h("input", { required: true, placeholder: "docker-1", pattern: "[a-z][a-z0-9\\-]{0,61}[a-z0-9]", autocapitalize: "none", spellcheck: false, class: "mono" });
+  const image = h("select", { onchange: () => shape() }, d.images.map((i) => h("option", { value: i.id }, i.client ? i.name : `${i.name} — ${t("incus.noClient")}`)));
+  const { cores, memory } = limitFields(null);
+  const [client, clientRow] = tickRow(t("incus.client"), t("incus.clientHint"), true);
+  const [docker, dockerRow] = tickRow(t("incus.docker"), t("incus.dockerHint"), true);
+  const [autostart, autostartRow] = tickRow(t("incus.autostart"), null, true);
+  const shape = () => {
+    const can = d.images.find((i) => i.id === image.value)?.client;
+    client.disabled = docker.disabled = !can;
+    if (!can) client.checked = docker.checked = false;
+    if (can && !client.checked) docker.checked = false;
+    docker.disabled = !can || !client.checked;
+  };
+  client.addEventListener("change", shape);
+  const error = h("p", { class: "error", role: "alert" });
+  let dialog;
+  const send = async (e) => {
+    e.preventDefault();
+    error.textContent = "";
+    const submit = dialog.querySelector("button[type=submit]");
+    submit.disabled = true;
+    const n = name.value.trim().toLowerCase();
+    try {
+      const r = await api("POST", "/api/containers", { name: n, image: image.value, cores: Number(cores.value), memory: Number(memory.value), client: client.checked, docker: docker.checked, autostart: autostart.checked });
+      dialog.close();
+      const machine = client.checked;
+      void loadContainers();
+      void jobDialog(r.job, "container", n, () => {
+        toast(t(machine ? "incus.made.machine" : "incus.made.plain", { name: n }));
+        void loadContainers();
+        void loadMachines();
+      });
+    } catch (err) {
+      error.textContent = err.code === "containers.badField" ? t("incus.bad." + err.detail.field) : errorText(err);
+      submit.disabled = false;
+    }
+  };
+  dialog = openDialog(
+    "wide",
+    h(
+      "form",
+      { class: "stack", onsubmit: send },
+      h("header", null, h("h2", { class: "grow" }, t("incus.new")), closeX(() => dialog)),
+      h("p", { class: "muted small" }, t("incus.newLead")),
+      h("div", { class: "form-pair" }, field(t("incus.name"), name, t("incus.nameHint")), field(t("incus.image"), image, t("incus.imageHint"))),
+      h("div", { class: "form-pair" }, field(t("incus.coresLabel"), cores), field(t("incus.memoryLabel"), memory)),
+      clientRow,
+      dockerRow,
+      autostartRow,
+      error,
+      h("footer", null, closeButton(() => dialog, t("common.cancel")), h("button", { type: "submit", class: "btn primary" }, icon("plus"), t("incus.make"))),
+    ),
+  );
+  shape();
+  name.focus();
+}
+
+function containerLimitsDialog(c) {
+  const { cores, memory } = limitFields(c);
+  const [autostart, autostartRow] = tickRow(t("incus.autostart"), null, c.autostart);
+  const [nesting, nestingRow] = tickRow(t("incus.nesting"), t("incus.nestingHint"), c.nesting);
+  const error = h("p", { class: "error", role: "alert" });
+  let dialog;
+  const send = async (e) => {
+    e.preventDefault();
+    const submit = dialog.querySelector("button[type=submit]");
+    submit.disabled = true;
+    try {
+      await api("PATCH", `/api/containers/${c.name}`, { cores: Number(cores.value), memory: Number(memory.value), autostart: autostart.checked, nesting: nesting.checked });
+      dialog.close();
+      toast(t("incus.saved", { name: c.name }));
+      void loadContainers();
+    } catch (err) {
+      error.textContent = err.code === "containers.badField" ? t("incus.bad." + err.detail.field) : errorText(err);
+      submit.disabled = false;
+    }
+  };
+  dialog = openDialog(
+    "",
+    h(
+      "form",
+      { class: "stack", onsubmit: send },
+      h("header", null, h("h2", { class: "grow clip" }, t("incus.limitsTitle", { name: c.name })), closeX(() => dialog)),
+      h("p", { class: "muted small" }, t("incus.limitsLead")),
+      h("div", { class: "form-pair" }, field(t("incus.coresLabel"), cores), field(t("incus.memoryLabel"), memory)),
+      autostartRow,
+      nestingRow,
+      error,
+      h("footer", null, closeButton(() => dialog, t("common.cancel")), h("button", { type: "submit", class: "btn primary" }, icon("check"), t("incus.save"))),
+    ),
+  );
+}
+
+function containerSnapshotsDialog(c) {
+  let dialog;
+  const list = h("div", { class: "stack-s" });
+  const paint = (snaps) =>
+    put(
+      list,
+      snaps.length
+        ? h(
+            "div",
+            { class: "table-wrap" },
+            h(
+              "table",
+              null,
+              h("thead", null, h("tr", null, h("th", null, t("incus.snap.name")), h("th", null, t("incus.snap.when")), h("th"))),
+              h(
+                "tbody",
+                null,
+                snaps.map((s) =>
+                  h(
+                    "tr",
+                    null,
+                    h("td", { class: "mono small" }, s.name),
+                    h("td", { class: "small" }, new Date(s.created).toLocaleString(state.lang)),
+                    h(
+                      "td",
+                      null,
+                      h(
+                        "div",
+                        { class: "row-actions" },
+                        button(t("incus.snap.restore"), { class: "small", onclick: (e) => snapAction(e.currentTarget, "POST", `/api/containers/${c.name}/snapshots/${encodeURIComponent(s.name)}/restore`, t("incus.snap.restoreAsk", { name: s.name }), "incus.snap.restored") }, "undo"),
+                        button("", { class: "small ghost", title: t("incus.snap.remove"), "aria-label": t("incus.snap.remove"), onclick: (e) => snapAction(e.currentTarget, "DELETE", `/api/containers/${c.name}/snapshots/${encodeURIComponent(s.name)}`, null, "incus.snap.removed") }, "trash"),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          )
+        : h("p", { class: "muted small" }, t("incus.snap.none")),
+    );
+  const again = async () => {
+    await loadContainers();
+    const fresh = incusUi.data?.containers?.find((x) => x.name === c.name);
+    if (fresh) paint(fresh.snapshots);
+  };
+  const snapAction = async (el, method, path, ask, done) => {
+    if (ask && !confirm(ask)) return;
+    el.disabled = true;
+    try {
+      await api(method, path);
+      toast(t(done));
+    } catch (e) {
+      toast(errorText(e), "error");
+    }
+    el.disabled = false;
+    await again();
+  };
+  const name = h("input", { placeholder: t("incus.snap.namePlaceholder"), class: "mono", spellcheck: false, autocapitalize: "none" });
+  const take = button(
+    t("incus.snap.take"),
+    {
+      class: "primary",
+      onclick: async () => {
+        take.disabled = true;
+        try {
+          const r = await api("POST", `/api/containers/${c.name}/snapshots`, { name: name.value.trim() });
+          toast(t("incus.snap.taken", { name: r.name }));
+          name.value = "";
+        } catch (e) {
+          toast(errorText(e), "error");
+        }
+        take.disabled = false;
+        await again();
+      },
+    },
+    "plus",
+  );
+  dialog = openDialog("wide", h("header", null, h("h2", { class: "grow clip" }, t("incus.snapTitle", { name: c.name })), closeX(() => dialog)), h("p", { class: "muted small" }, t("incus.snapLead")), h("div", { class: "actions" }, name, take), list, h("footer", null, closeButton(() => dialog)));
+  paint(c.snapshots);
+}
+
+function removeContainerDialog(c) {
+  const typed = h("input", { class: "mono", autocapitalize: "none", spellcheck: false, placeholder: c.name });
+  const error = h("p", { class: "error", role: "alert" });
+  let dialog;
+  dialog = openDialog(
+    "confirm",
+    h("h2", { class: "wrap" }, t("incus.removeTitle", { name: c.name })),
+    h("p", { class: "muted" }, t(c.machine ? "incus.removeLeadMachine" : "incus.removeLead")),
+    field(t("incus.removeType", { name: c.name }), typed),
+    error,
+    h(
+      "footer",
+      null,
+      closeButton(() => dialog, t("common.cancel")),
+      button(
+        t("incus.remove"),
+        {
+          class: "danger",
+          onclick: async (e) => {
+            e.currentTarget.disabled = true;
+            try {
+              await api("DELETE", `/api/containers/${c.name}`, { confirm: typed.value.trim() });
+              dialog.close();
+              toast(t("incus.removed", { name: c.name }));
+              void loadContainers();
+              void loadMachines();
+            } catch (err) {
+              error.textContent = errorText(err);
+              e.target.closest("button").disabled = false;
+            }
+          },
+        },
+        "trash",
+      ),
+    ),
+  );
 }
 
 // --- Home Assistant ---
