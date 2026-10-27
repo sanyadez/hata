@@ -1062,6 +1062,8 @@ body:has(.assistant.paged) > .assistant-fab { display: none; }
 .assistant-head .pick :is(select, .select-btn) { max-width: 100%; width: 100%; }
 .assistant-body { overflow-y: auto; padding: 16px 18px; display: flex; flex-direction: column; gap: 10px; min-height: 0; overscroll-behavior: contain; }
 .assistant-empty { margin: auto 0; display: grid; gap: 10px; justify-items: start; }
+.assistant-can { margin: 0; padding-left: 18px; display: grid; gap: 4px; color: var(--muted); }
+.assistant-empty .msg.user { justify-self: stretch; }
 .assistant-starts { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 6px; }
 .assistant .msg { max-width: 100%; overflow-wrap: anywhere; display: grid; gap: 8px; }
 .assistant .msg.user { align-self: flex-end; max-width: 88%; background: var(--accent-soft); border-radius: var(--radius-md); padding: 8px 12px; white-space: pre-wrap; }

@@ -63,6 +63,13 @@ function blocked(): string {
   }
 }
 
+/** Why its programs cannot be put to use here: nested (both), noArch / noKvm (virtual machines); "" — they can */
+export function cannotInstall(what: "incus" | "vm"): string {
+  const why = blocked();
+  if (why || what === "incus") return why;
+  return process.arch !== "x64" ? "noArch" : existsSync("/dev/kvm") ? "" : "noKvm";
+}
+
 /**
  * Whether virtual machines can be made here: noArch — Hata knows the packages of x86 only; noKvm — the
  * processor gives no virtualisation (switched off in the firmware, or Hata itself is in a virtual

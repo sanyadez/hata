@@ -14,7 +14,7 @@ import type { Job } from "./apps";
 import { settings } from "./config";
 import { installTool } from "./disks";
 import { dockerInfo } from "./docker";
-import { install as installIncus, installVms as installIncusVms, inUse as containersInUse, PACKAGES as INCUS_PACKAGES, VM_PACKAGES as INCUS_VM_PACKAGES } from "./containers";
+import { cannotInstall, install as installIncus, installVms as installIncusVms, inUse as containersInUse, PACKAGES as INCUS_PACKAGES, VM_PACKAGES as INCUS_VM_PACKAGES } from "./containers";
 import { DOCKER_INSTALL_COMMAND, installDocker } from "./dockerinstall";
 import { parseFstab, pools } from "./mounting";
 import { packagesInUse } from "./netplaces";
@@ -94,6 +94,8 @@ export interface Tool {
    * off first (shares, merged, array, network, wifi, hotspot, ntfs); "" — it can.
    */
   holds: string;
+  /** Why installing it would be of no use here (nested, noArch, noKvm): said instead of the button; "" — nothing */
+  cannot: string;
   /** The newer version the package manager offers; "" — none known */
   newer: string;
   /** Its packages that have one, for the "Update" button */
@@ -198,6 +200,7 @@ export async function toolsReport(): Promise<Tool[]> {
         package: spec.package,
         state: installed ? ("installed" as const) : ("missing" as const),
         builtIn: spec.id === "ntfs-3g" && ntfs,
+        cannot: installed ? "" : spec.id === "incus" ? cannotInstall("incus") : spec.id === "incus-vm" ? cannotInstall("vm") : "",
         version,
         install: spec.id === "docker" ? DOCKER_INSTALL_COMMAND : spec.id === "tailscale" ? TAILSCALE_INSTALL_COMMAND : spec.id === "incus" ? installCommand(INCUS_PACKAGES.join(" ")) : spec.id === "incus-vm" ? installCommand(INCUS_VM_PACKAGES.join(" ")) : installCommand(spec.package),
         page: spec.page,

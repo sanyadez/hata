@@ -1913,8 +1913,6 @@ function attentionItem(item) {
     item.code === "array.parityLost" && doIt(t("array.rebuild"), "refresh", () => runArray("/rebuild")),
     item.code === "array.held" && doIt(t("array.bringBack"), "refresh", () => runArray("/fix")),
     item.code === "array.failed" && doIt(t("array.syncNow"), "refresh", () => runArray("/sync")),
-    // the assistant is asked with the item's own words: it looks with its tools where it can and explains the rest
-    isAdmin() && assistantReady() && button(t(item.app ? "assistant.askWhy" : "assistant.ask"), { class: "small", onclick: () => openAssistant({ ask: item.app ? t("assistant.whyDown", { title: item.detail.title || item.app, app: item.app }) : t("assistant.whyItem", { title: t(base + ".title", detail), text: t(base + ".text", detail).trim() }) }) }, "chat"),
     item.code === "docker.missing" && isAdmin() && button(t("docker.install"), { class: "small primary", onclick: () => dockerDialog() }, "download"),
     item.code === "docker.stopped" && isAdmin() && dockerStartButton(),
     item.code === "disk.usb" && isAdmin() && button(t("copyin.button"), { class: "small primary", onclick: () => ((state.copyInFrom = item.detail.id), go("#/settings/storage")) }, "download"),
@@ -1933,6 +1931,8 @@ function attentionItem(item) {
     (item.code === "machine.restarting" || item.code === "machine.partial") && open(`#/machines/${item.detail.id}/apps`),
     item.app && open(`#/apps/${item.app}${item.code === "restarting" || item.code === "partial" ? "/logs" : ""}`, t(item.code === "restarting" || item.code === "partial" ? "app.logs" : "common.open")),
     (item.code === "disk.new" || item.code === "disk.usb") && isAdmin() && button(t("mounting.ignore"), { class: "small quiet", onclick: () => void api("POST", "/api/disks/ignore", { id: item.detail.id }).then(refresh, (e) => toast(errorText(e), "error")) }),
+    // the assistant is asked with the item's own words: it looks with its tools where it can and explains the rest
+    isAdmin() && button(t(item.app ? "assistant.askWhy" : "assistant.ask"), { class: "small", onclick: () => openAssistant({ ask: item.app ? t("assistant.whyDown", { title: item.detail.title || item.app, app: item.app }) : t("assistant.whyItem", { title: t(base + ".title", detail), text: t(base + ".text", detail).trim() }) }) }, "chat"),
     isAdmin() && button(t("attention.later", { n: SNOOZE_DAYS }), { class: "small quiet", title: t("attention.laterHint"), onclick: () => snoozeItem(item) }, "clock"),
   ].filter(Boolean);
   return h(
@@ -2291,7 +2291,7 @@ function appTileMenu(app, anchor, at) {
     page(t("app.logs"), "logs", "logs"),
     page(t("app.tab.terminal"), "terminal", "terminal"),
     page(t("app.tab.backups"), "archive", "backups"),
-    assistantReady() && item(t("assistant.ask"), "chat", () => openAssistant({ draft: t("assistant.aboutApp", { title: app.title, app: app.name }) })),
+    isAdmin() && item(t("assistant.ask"), "chat", () => openAssistant({ draft: t("assistant.aboutApp", { title: app.title, app: app.name }) })),
     page(t("home.manage"), "grid", ""),
     item(t("app.remove"), "trash", () => removeDialog(app), "danger", busy),
   );
@@ -2308,7 +2308,7 @@ function appMoreMenu(app, at = null) {
   dialog = openDialog(
     at ? "menu dropdown" : "menu",
     h("header", null, appIcon(app), h("div", null, h("h2", null, app.title), stateChip(app))),
-    assistantReady() && h("button", { type: "button", class: "menu-item", onclick: () => (dialog.close(), openAssistant({ draft: t("assistant.aboutApp", { title: app.title, app: app.name }) })) }, icon("chat"), t("assistant.ask")),
+    isAdmin() && h("button", { type: "button", class: "menu-item", onclick: () => (dialog.close(), openAssistant({ draft: t("assistant.aboutApp", { title: app.title, app: app.name }) })) }, icon("chat"), t("assistant.ask")),
     item(t("app.update"), "up", () => startAction(app, "update")),
     item(t("machines.move"), "server", () => moveAppDialog("", app)),
     item(t("app.remove"), "trash", () => removeDialog(app), "danger"),
@@ -2342,7 +2342,7 @@ function renderAppHead() {
         app.job && button(t("status.busy"), { onclick: () => jobDialog(app.job.id, app.job.kind, app.title) }, "terminal"),
         app.update && !app.job && button(t("app.storeUpdate"), { class: "accent", onclick: () => storeUpdateDialog(app) }, "up"),
         !app.update && app.newer?.length > 0 && !app.job && button(t("app.update"), { class: "accent", title: `${t("app.newer")}: ${app.newer.join(", ")}`, onclick: () => startAction(app, "update") }, "up"),
-        (app.status === "partial" || app.status === "restarting") && assistantReady() && button(t("assistant.askWhy"), { onclick: () => openAssistant({ ask: t("assistant.whyDown", { title: app.title, app: app.name }) }) }, "chat"),
+        (app.status === "partial" || app.status === "restarting") && isAdmin() && button(t("assistant.askWhy"), { onclick: () => openAssistant({ ask: t("assistant.whyDown", { title: app.title, app: app.name }) }) }, "chat"),
         isUp(app) && button(t("app.restart"), { disabled: !!app.job, onclick: () => startAction(app, "restart") }, "refresh"),
         isUp(app) ? button(t("app.stop"), { disabled: !!app.job, onclick: () => startAction(app, "stop") }, "stop") : button(t("app.start"), { class: url ? "" : "primary", disabled: !!app.job, onclick: () => startAction(app, "start") }, "play"),
         url && h("a", { class: "btn primary", href: url, target: "_blank", rel: "noopener noreferrer" }, icon("external"), h("span", null, t("app.open"))),
@@ -11845,9 +11845,10 @@ function toolsSection() {
         h("p", { class: "muted small" }, t(`tools.${tool.id}.what`), " ", h("a", { class: "link", href: tool.page }, t(`tools.${tool.id}.where`))),
         tool.builtIn && h("p", { class: "muted small" }, t(`tools.${tool.id}.builtIn`)),
         tool.state === "installed" && tool.holds && h("p", { class: "muted small" }, t("tools.holds." + tool.holds)),
-        tool.state !== "installed" && (tool.install ? h("p", { class: "cmd" }, icon("terminal"), tool.install) : h("p", { class: "muted small" }, t("mounting.needs.byHand", { package: tool.package }))),
+        tool.cannot && h("p", { class: "muted small" }, t("tools.cannot." + tool.cannot)),
+        tool.state !== "installed" && !tool.cannot && (tool.install ? h("p", { class: "cmd" }, icon("terminal"), tool.install) : h("p", { class: "muted small" }, t("mounting.needs.byHand", { package: tool.package }))),
       ),
-      tool.state !== "installed" && tool.install && install(tool),
+      tool.state !== "installed" && !tool.cannot && tool.install && install(tool),
       tool.state === "installed" && tool.upgrade?.length > 0 && button(t("tools.update"), { class: "small accent", onclick: () => sysUpgradeDialog("", tool.upgrade, tool.name) }, "up"),
       tool.state === "installed" && !tool.holds && tool.remove && button(t("tools.remove"), { class: "small", onclick: () => toolRemoveDialog(tool) }, "trash"),
     );
@@ -14907,10 +14908,9 @@ function agentKeyDialog(made) {
 
 // --- The assistant: a chat with a model that works with Hata's tools --------------------------------
 
-const assistantUi = { open: false, panel: null, fab: null, config: null, chats: [], chat: null, timer: 0 };
+const assistantUi = { open: false, panel: null, fab: null, config: null, chats: [], chat: null, timer: 0, waiting: localStorage.getItem("hata.assistant.waiting") ?? "" };
 /** Whether the window was open and how big, kept across pages and reloads */
 const ASSISTANT_KEY = "hata.assistant";
-const assistantReady = () => !!state.overview?.assistant;
 
 /** A model's answer as elements: paragraphs, lists, code, bold — built from text, never as markup */
 function mdInline(text) {
@@ -14988,7 +14988,20 @@ function assistantBody() {
   const chat = assistantUi.chat;
   if (!assistantUi.config) return [h("p", { class: "muted" }, "…")];
   if (!assistantUi.config.ready) {
-    return [h("div", { class: "assistant-empty" }, h("p", null, t("assistant.notSet")), h("p", { class: "muted small" }, t("assistant.notSetHint")), h("a", { class: "btn primary", href: "#/settings/assistant", onclick: () => innerWidth < 900 && closeAssistant() }, t("assistant.setUp")))];
+    // asked before there is a model: what it would do, how to give it one, and the question kept for then
+    return [
+      h(
+        "div",
+        { class: "assistant-empty" },
+        h("p", null, t("assistant.notSet")),
+        h("p", { class: "muted small" }, t("assistant.notSetHint")),
+        h("p", { class: "small" }, t("assistant.canDo")),
+        h("ul", { class: "small assistant-can" }, ["apps", "machines", "backups", "changes"].map((k) => h("li", null, t("assistant.can." + k)))),
+        assistantUi.waiting && h("div", { class: "msg user" }, assistantUi.waiting),
+        assistantUi.waiting && h("p", { class: "muted small" }, t("assistant.waitingQuestion")),
+        h("a", { class: "btn primary", href: "#/settings/assistant", onclick: () => innerWidth < 900 && closeAssistant() }, t("assistant.setUp")),
+      ),
+    ];
   }
   if (!chat) {
     const ask = (key) => button(t(key), { class: "small", onclick: () => sendToAssistant(t(key), true) });
@@ -15080,6 +15093,12 @@ function paintAssistant() {
   if (follow) body.scrollTop = body.scrollHeight;
   const busy = chat?.status === "thinking" || chat?.status === "asking";
   panel.querySelector(".assistant-form").hidden = !assistantUi.config?.ready;
+  // a question asked before the assistant was set up waits in the field once it is
+  if (assistantUi.config?.ready && assistantUi.waiting) {
+    const input = panel.querySelector("textarea");
+    if (!input.value.trim()) input.value = assistantUi.waiting;
+    keepWaiting("");
+  }
   panel.querySelector(".assistant-form button").disabled = busy;
 }
 
@@ -15137,6 +15156,12 @@ function markAssistantFab() {
   assistantUi.fab.classList.toggle("open", assistantUi.open);
 }
 
+function keepWaiting(text) {
+  assistantUi.waiting = text;
+  if (text) localStorage.setItem("hata.assistant.waiting", text);
+  else localStorage.removeItem("hata.assistant.waiting");
+}
+
 const rememberAssistant = () => assistantUi.panel?.classList.contains("paged") || (assistantUi.open ? localStorage.setItem(ASSISTANT_KEY, assistantUi.panel?.classList.contains("wide") ? "wide" : "open") : localStorage.removeItem(ASSISTANT_KEY));
 
 /** The window of the assistant, made once: floating over the pages, or the whole page #/assistant */
@@ -15177,7 +15202,13 @@ function openAssistant({ ask, draft, restore } = {}) {
   if (ask) assistantUi.chat = null;
   if (draft) input.value = draft;
   paintAssistant();
-  void loadAssistant().then(() => ask && assistantUi.config?.ready && sendToAssistant(ask, true));
+  void loadAssistant().then(() => {
+    if (assistantUi.config?.ready) return ask && sendToAssistant(ask, true);
+    if (ask || draft) {
+      keepWaiting(ask || draft);
+      paintAssistant();
+    }
+  });
   // a window put back after a reload does not take the keyboard from the page
   if (!restore) input.focus();
 }
