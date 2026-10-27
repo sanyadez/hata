@@ -267,7 +267,7 @@ export async function removeOne(id: string, user: string): Promise<{ code: strin
   }
   const failed = await removePackages(packages);
   if (failed) return { code: "tools.removeFailed", message: failed };
-  if (spec.id === "incus") afterIncusRemoved();
+  if (spec.id === "incus") await afterIncusRemoved().catch(() => {});
   record("system.tool.removed", { user, detail: spec.name });
   bus.publish("apps");
   bus.publish("disks");

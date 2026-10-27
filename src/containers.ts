@@ -776,22 +776,34 @@ export async function letIncusGo(): Promise<void> {
     if (net.type !== "bridge" || !has("iptables")) continue;
     for (const rule of bridgeRules(net.name)) while ((await run(["iptables", "-w", "-D", "DOCKER-USER", ...rule], 10_000)).code === 0);
   }
-  for (const pool of ((await incus("GET", "/1.0/storage-pools")).metadata ?? []) as string[]) {
+  for (const pool of ((await incus("GET", "/1.0/storage-pools?recursion=1")).metadata ?? []) as any[]) {
     // what Incus left in a pool (its own volumes of images) goes with it
-    const name = pool.split("/").pop()!;
+    const name = String(pool.name);
     for (const vol of ((await incus("GET", `/1.0/storage-pools/${name}/volumes`).catch(() => null))?.metadata ?? []) as string[]) {
       if (/\/volumes\/(image|custom)\//.test(vol)) await incus("DELETE", vol).catch(() => {});
     }
-    await incus("DELETE", pool).catch(() => {});
+    await incus("DELETE", `/1.0/storage-pools/${name}`).catch(() => {});
+    // a place in a folder of the person's: the folder Hata made for it goes once Incus has emptied it
+    const source = String(pool.config?.source ?? "");
+    if (source && !source.startsWith(INCUS_POOLS)) {
+      try {
+        rmdirSync(source);
+      } catch {}
+    }
   }
   own.standard = "";
   own.stopped = [];
   writeJsonAtomic(OWN_FILE, own);
   lastLook.instances = [];
   lastLook.silentSince = null;
+  // the daemon keeps running when its package goes, its folders mounted
+  await run(["systemctl", "stop", "incus.service", "incus.socket", "incus-user.service", "incus-user.socket", "incus-startup.service"], 120_000);
 }
 
 /** Incus's own folders, once its packages are gone: a later install starts afresh */
-export function afterIncusRemoved(): void {
+export async function afterIncusRemoved(): Promise<void> {
+  // what it left mounted inside them (shmounts, guestapi), deepest first
+  const mounts = readFileSync("/proc/mounts", "utf8").split("\n").map((l) => (l.split(" ")[1] ?? "").replace(/\\040/g, " ")).filter((m) => m.startsWith("/var/lib/incus/") || m === "/var/lib/incus");
+  for (const m of mounts.sort((a, b) => b.length - a.length)) await run(["umount", "-l", m], 30_000);
   for (const dir of ["/var/lib/incus", "/var/log/incus", "/var/cache/incus"]) rmSync(dir, { recursive: true, force: true });
 }
