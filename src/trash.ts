@@ -17,6 +17,7 @@ import { rm } from "node:fs/promises";
 import { basename, dirname, join, sep } from "node:path";
 import { DATA_DIR, settings } from "./config";
 import { readJsonFile, writeJsonAtomic } from "./fsutil";
+import { answered } from "./netroom";
 
 export const TRASH_DIR = ".hata-trash";
 /** How long a deleted thing is kept unless the administrator chose otherwise */
@@ -131,7 +132,9 @@ const isDir = (path: string): boolean => {
 /** Every trash there is: at the mount points, and the remembered ones */
 function roots(): string[] {
   const kernel = /^\/(proc|sys|dev|run)(\/|$)/;
-  const found = [...[dataTop(), ...world.mounts().filter((path) => !kernel.test(path))].map((path) => join(path, TRASH_DIR)), ...world.remembered].filter(isDir);
+  const found = [...[dataTop(), ...world.mounts().filter((path) => !kernel.test(path))].map((path) => join(path, TRASH_DIR)), ...world.remembered]
+    // the trash of a network place is left out while its server is silent: a look there would stop the server
+    .filter((root) => answered(root) === true && isDir(root));
   // one trash reached by two paths (a disk mounted twice) is one trash
   const seen = new Set<string>();
   return found.filter((root) => {

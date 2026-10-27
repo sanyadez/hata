@@ -23,7 +23,7 @@ import { AppError, startJob, type Job } from "./apps";
 import { DATA_DIR, saveSettings, SECRETS_DIR, settings, trashDays, type Favorite } from "./config";
 import { movePath } from "./dashboard";
 import { parseMounts } from "./disks";
-import { roomOf } from "./netroom";
+import { answered, networkMounts, roomOf } from "./netroom";
 import { readJsonFile } from "./fsutil";
 import { writablePath } from "./smbconf";
 import { findInTrash, inTrash, keepDays, listTrash, purgeTrash, putInTrash, sweepTrash, takeFromTrash, TRASH_DIR, type TrashItem } from "./trash";
@@ -213,6 +213,8 @@ function inheritOwner(path: string): void {
 
 async function entryOf(dir: string, name: string): Promise<Entry | null> {
   const abs = join(dir, name);
+  // a network place whose server is silent (or not heard of yet) is shown as a folder without a look inside
+  if (networkMounts().includes(abs) && answered(abs) !== true) return { name, type: "dir", size: 0, modified: 0 };
   const own = await lstat(abs).catch(() => null);
   if (!own) return null;
   let st = own;
@@ -340,7 +342,9 @@ export function pinnedFolders(): { path: string; name: string; missing: boolean;
   const disks = settings.folders.length ? otherDisks(resolve(root())) : [];
   return settings.folders.map((path) => {
     const disk = disks.find((volume) => volume.path === path);
-    return { path, name: disk?.label || basename(path) || "/", missing: !existsSync(path), ...(disk ? { disk } : {}) };
+    // a folder on a network place is not looked at while its server is silent: that look would stop the whole server
+    const missing = answered(path) === false || (answered(path) === true && !existsSync(path));
+    return { path, name: disk?.label || basename(path) || "/", missing, ...(disk ? { disk } : {}) };
   });
 }
 

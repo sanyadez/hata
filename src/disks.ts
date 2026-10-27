@@ -11,7 +11,7 @@
  * disk's own self-test.
  */
 import { existsSync, readFileSync, statfsSync } from "node:fs";
-import { roomOf } from "./netroom";
+import { NETWORK_FS, roomOf } from "./netroom";
 import { join } from "node:path";
 import { DATA_DIR, DEFAULT_SMART, settings, type SmartLimits } from "./config";
 import { isPlainObject, readJsonFile, writeJsonAtomic } from "./fsutil";
@@ -115,7 +115,6 @@ export interface Mount {
   network: boolean;
 }
 
-const NETWORK_FS = /^(nfs\d?|cifs|smb3|smbfs|9p|ceph|glusterfs|fuse\.(sshfs|rclone|glusterfs|s3fs))$/;
 const LOCAL_FS = /^(ext[234]|xfs|btrfs|zfs|vfat|exfat|ntfs3?|fuseblk|f2fs|jfs|reiserfs|bcachefs|virtiofs|fuse\.mergerfs)$/;
 const unescapeMount = (s: string) => s.replace(/\\([0-7]{3})/g, (_, oct: string) => String.fromCharCode(parseInt(oct, 8)));
 
