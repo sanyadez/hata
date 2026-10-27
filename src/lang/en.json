@@ -1680,6 +1680,7 @@
   "assistant.ask": "Ask the assistant",
   "assistant.askWhy": "Ask why",
   "assistant.whyDown": "Why is the app “{title}” ({app}) not working? Find the cause and say what to do.",
+  "assistant.whyItem": "{title}. Hata says: {text} What does it mean, what is the cause, and what should I do? Look with your tools where you can.",
   "assistant.aboutApp": "About the app “{title}” ({app}): ",
   "assistant.tool.overview": "look at the state of the server",
   "assistant.tool.activity": "read the recent activity",

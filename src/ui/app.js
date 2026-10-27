@@ -1913,7 +1913,8 @@ function attentionItem(item) {
     item.code === "array.parityLost" && doIt(t("array.rebuild"), "refresh", () => runArray("/rebuild")),
     item.code === "array.held" && doIt(t("array.bringBack"), "refresh", () => runArray("/fix")),
     item.code === "array.failed" && doIt(t("array.syncNow"), "refresh", () => runArray("/sync")),
-    item.app && isAdmin() && assistantReady() && button(t("assistant.askWhy"), { class: "small", onclick: () => openAssistant({ ask: t("assistant.whyDown", { title: item.detail.title || item.app, app: item.app }) }) }, "chat"),
+    // the assistant is asked with the item's own words: it looks with its tools where it can and explains the rest
+    isAdmin() && assistantReady() && button(t(item.app ? "assistant.askWhy" : "assistant.ask"), { class: "small", onclick: () => openAssistant({ ask: item.app ? t("assistant.whyDown", { title: item.detail.title || item.app, app: item.app }) : t("assistant.whyItem", { title: t(base + ".title", detail), text: t(base + ".text", detail).trim() }) }) }, "chat"),
     item.code === "docker.missing" && isAdmin() && button(t("docker.install"), { class: "small primary", onclick: () => dockerDialog() }, "download"),
     item.code === "docker.stopped" && isAdmin() && dockerStartButton(),
     item.code === "disk.usb" && isAdmin() && button(t("copyin.button"), { class: "small primary", onclick: () => ((state.copyInFrom = item.detail.id), go("#/settings/storage")) }, "download"),

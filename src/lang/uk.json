@@ -1680,6 +1680,7 @@
   "assistant.ask": "Запитати помічника",
   "assistant.askWhy": "Запитати, чому",
   "assistant.whyDown": "Чому не працює застосунок «{title}» ({app})? Знайди причину й скажи, що робити.",
+  "assistant.whyItem": "{title}. Хата пише: {text} Що це означає, яка причина і що мені робити? Подивись своїми інструментами, де можеш.",
   "assistant.aboutApp": "Про застосунок «{title}» ({app}): ",
   "assistant.tool.overview": "подивитися стан сервера",
   "assistant.tool.activity": "прочитати останні події",
