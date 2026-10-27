@@ -36,6 +36,9 @@ import { containersOf, machinesAway, machines as machineList, open as openOnMach
 import { moveApp } from "./moveapp";
 import { backups as pveBackups, cloneGuest, load as pveLoad, changeGuest, restoreBackup, createGuest, createVm, sendFile, templates as pveTemplates, guestSettings, guestOfMachine, host as pveHost, hosts as pveHosts, newOptions, power as pvePower, proxmoxTrouble, refresh as refreshPve, removeGuest, snapshotAction, snapshots as pveSnapshots, takeBackup, takeSnapshot, taskLog, taskNow } from "./proxmox";
 import { MuxError } from "./mux";
+import { act as containerAct, create as createContainer, removeContainer, removeSnapshot as removeContainerSnapshot, report as containersReport, restoreSnapshot as restoreContainerSnapshot, setLimits as setContainerLimits, takeSnapshot as takeContainerSnapshot } from "./containers";
+import { NAME_RE as INSTANCE_RE } from "./incus";
+import { backupInstance, restoreInstance } from "./incusbackup";
 import { VERSION } from "./version";
 import en from "./lang/en.json";
 
@@ -1259,6 +1262,245 @@ async function answers(url: string): Promise<{ url: string; answer: string }> {
 }
 
 /** An entry of the activity log in words, as the page says it: a bare code leaves the reader guessing */
+// --- Containers and virtual machines of this server (Incus) -------------------------------------------
+
+const INSTANCE = { container: { type: "string", description: "The name of a container or virtual machine, as `containers` lists it" } };
+
+function instanceName(args: Record<string, unknown>): string {
+  const value = text(args, "container");
+  if (!INSTANCE_RE.test(value)) throw new ToolError(say("containers.notFound", { name: value }));
+  return value;
+}
+
+/** Which argument of the tools a field the form checks is, and what it wants */
+const FIELD_WORDS: Record<string, string> = {
+  name: "`name`: lowercase Latin letters, digits and -, starting with a letter, up to 63, not install / setup / vms",
+  taken: "`name`: a container or virtual machine of that name is there already",
+  image: "`system`: one of `systems` from `containers` — and for a virtual machine one marked virtualMachine",
+  cores: "`cores`: a whole number from 0 to 256",
+  memory: "`memory`: MB, from 128 to 262144, or 0",
+  disk: "`disk`: GB, from 4 to 4096",
+  snapshot: "`name`: Latin letters, digits, dots, - and _",
+};
+
+/** The form's "a field is not right" said as which argument and what it wants */
+async function fields<T>(work: () => Promise<T>): Promise<T> {
+  try {
+    return await work();
+  } catch (e) {
+    if (e instanceof AppError && e.code === "containers.badField") throw new ToolError(FIELD_WORDS[String(e.detail.field)] ?? say(e.code));
+    throw e;
+  }
+}
+
+/** Incus is there and set up: the tools that change something need it */
+async function incusReady() {
+  const r = await containersReport();
+  if (r.state === "blocked") throw new ToolError(say("containers.nested"));
+  if (r.state !== "ready") throw new ToolError("Containers are not set up on this server: the person installs Incus on the page Machines → Containers on this server first.");
+  return r;
+}
+
+const instanceBrief = (c: Awaited<ReturnType<typeof containersReport>>["containers"][number]) => ({
+  name: c.name,
+  kind: c.kind === "vm" ? "virtual machine" : "container",
+  status: c.status,
+  system: c.os,
+  ...(c.address ? { address: c.address } : {}),
+  cores: c.cores || "all",
+  memoryMB: c.memory || "all",
+  startsWithServer: c.autostart,
+  ...(c.kind === "container" ? { nesting: c.nesting } : {}),
+  ...(c.usage ? { memoryUsedMB: Math.round(c.usage.memory / 1024 ** 2), processes: c.usage.processes } : {}),
+  snapshots: c.snapshots.length,
+  ...(c.machine ? { machine: c.machine } : {}),
+});
+
+const ctRead: Omit<Tool, "level" | "effect">[] = [
+  {
+    name: "containers",
+    title: "Containers and virtual machines of this server",
+    description: "The system containers and virtual machines Incus runs on this server itself: state, system, address on their own network, limits, snapshots, and which ones are machines of Hata's (`machine` — their apps are reached with the machine_* tools). Also whether Incus is installed, whether virtual machines can be made here (a test feature), and the systems a new one can be made from.",
+    input: {},
+    run: () =>
+      wrap(async () => {
+        const r = await containersReport();
+        if (r.state !== "ready") return { state: r.state, ...(r.state === "blocked" ? { why: say("containers.nested") } : {}), note: r.state === "missing" ? "Incus is not installed; the person installs it in Hata's web UI." : r.state === "setup" ? "Incus is installed but not set up; the person sets it up in Hata's web UI." : undefined };
+        return {
+          state: r.state,
+          version: r.version,
+          network: r.network,
+          virtualMachines: r.vms.state === "ready" ? "available (a test feature)" : r.vms.state === "missing" ? "not installed" : say("containers.vm." + r.vms.state),
+          systems: r.images.map((i) => ({ id: i.id, name: i.name, hataClient: i.client, virtualMachine: i.vm })),
+          instances: r.containers.map(instanceBrief),
+        };
+      }),
+  },
+  {
+    name: "container",
+    title: "A container or virtual machine of this server",
+    description: "One container or virtual machine: its state, its snapshots (newest first) and the backups of it kept in Hata's backup folder (newest first, the ids container_backup_restore takes).",
+    input: INSTANCE,
+    required: ["container"],
+    run: (args) =>
+      wrap(async () => {
+        const r = await incusReady();
+        const name = instanceName(args);
+        const c = r.containers.find((x) => x.name === name);
+        if (!c) throw new ToolError(say("containers.notFound", { name }));
+        return {
+          ...instanceBrief(c),
+          snapshots: c.snapshots.map((s) => ({ name: s.name, taken: when(s.created) })),
+          backups: listSnapshots(`${name}@incus`).map((s) => ({ id: s.id, taken: when(s.at), reason: s.reason, sizeMB: Math.round(s.size / 1024 ** 2) })),
+        };
+      }),
+  },
+];
+
+const ctOperate: Omit<Tool, "level" | "effect">[] = [
+  {
+    name: "container_power",
+    title: "Start, stop or restart a container or virtual machine",
+    description: "Starts, stops or restarts a container or virtual machine of this server. A stop asks the system inside first and stops it by force after half a minute.",
+    input: { ...INSTANCE, action: { type: "string", enum: ["start", "stop", "restart"] } },
+    required: ["container", "action"],
+    run: (args, caller) =>
+      wrap(async () => {
+        await incusReady();
+        const name = instanceName(args);
+        const action = text(args, "action");
+        await containerAct(name, action, caller.user);
+        return { done: true, container: name, action };
+      }),
+  },
+  {
+    name: "container_snapshot_take",
+    title: "Take a snapshot of a container or virtual machine",
+    description: "Takes an Incus snapshot of a container or virtual machine now, before a risky change; container_snapshot_restore puts it back. It lives inside Incus — a copy in the backup folder is container_backup_take. The name is made from the date when not given.",
+    input: { ...INSTANCE, name: { type: "string", description: "Latin letters, digits, dots, - and _" } },
+    required: ["container"],
+    run: (args, caller) =>
+      wrap(async () => {
+        await incusReady();
+        const name = instanceName(args);
+        return { container: name, snapshot: await fields(() => takeContainerSnapshot(name, args.name, caller.user)) };
+      }),
+  },
+  {
+    name: "container_backup_take",
+    title: "Back up a container or virtual machine",
+    description: "Copies the whole container or virtual machine into Hata's backup folder (it is stopped meanwhile and started again). Takes minutes: expect a running job and ask job_get.",
+    input: INSTANCE,
+    required: ["container"],
+    run: (args, caller) =>
+      wrap(async () => {
+        await incusReady();
+        return settle(backupInstance(`${instanceName(args)}@incus`, caller.user));
+      }),
+  },
+];
+
+const ctFull: (Omit<Tool, "level" | "effect"> & { effect?: Tool["effect"] })[] = [
+  {
+    name: "container_create",
+    title: "Make a container or virtual machine on this server",
+    description: "Makes a new system container — or a virtual machine, a test feature, Debian 13 only — on this server with Incus, starts it and, unless `client` is false, installs Hata's client in it, so it becomes one of Hata's machines (`machines`). `system` must be one `containers` lists. Takes minutes: expect a running job and ask job_get.",
+    effect: "change",
+    input: {
+      name: { type: "string", description: "Lowercase Latin letters, digits and -, starting with a letter; also the host name" },
+      system: { type: "string", description: "An id of `systems` from `containers`, e.g. debian-13" },
+      kind: { type: "string", enum: ["container", "vm"], description: "container by default" },
+      cores: { type: "number", description: "0 or left out — all of them" },
+      memory: { type: "number", description: "MB; 0 or left out — all of it (a virtual machine gets 1024)" },
+      disk: { type: "number", description: "A virtual machine's disk, GB; 10 by default" },
+      client: { type: "boolean", description: "Install Hata's client; true by default" },
+      docker: { type: "boolean", description: "Install Docker too; false by default" },
+      startsWithServer: { type: "boolean", description: "true by default" },
+    },
+    required: ["name", "system"],
+    run: (args, caller) =>
+      wrap(async () => {
+        await incusReady();
+        const made = await fields(() => createContainer({ name: args.name, image: args.system, kind: args.kind, cores: args.cores, memory: args.memory, disk: args.disk, client: args.client, docker: args.docker, autostart: args.startsWithServer }, caller.user));
+        const job = getJob(made.job);
+        return job ? settle(job) : { container: made.name, job: made.job };
+      }),
+  },
+  {
+    name: "container_limits",
+    title: "Change the limits of a container or virtual machine",
+    description: "Sets how many processor cores and how much memory a container or virtual machine may use (0 — no limit), whether it starts with the server, and — for a container — nesting (Docker inside needs it). Applied at once; a running virtual machine's memory can only be lowered.",
+    effect: "change",
+    input: { ...INSTANCE, cores: { type: "number" }, memory: { type: "number", description: "MB" }, startsWithServer: { type: "boolean" }, nesting: { type: "boolean" } },
+    required: ["container"],
+    run: (args, caller) =>
+      wrap(async () => {
+        const r = await incusReady();
+        const name = instanceName(args);
+        const c = r.containers.find((x) => x.name === name);
+        if (!c) throw new ToolError(say("containers.notFound", { name }));
+        // what is not given stays as it is
+        await fields(() => setContainerLimits(name, { cores: args.cores ?? c.cores, memory: args.memory ?? c.memory, autostart: args.startsWithServer ?? c.autostart, nesting: args.nesting ?? c.nesting }, caller.user));
+        return { done: true, container: name };
+      }),
+  },
+  {
+    name: "container_snapshot_restore",
+    title: "Put a container or virtual machine back to a snapshot",
+    description: "Puts a container or virtual machine back as it was in one of its snapshots (`container` lists them). What changed after it is LOST; a running one is stopped for it and started again.",
+    input: { ...INSTANCE, snapshot: { type: "string" } },
+    required: ["container", "snapshot"],
+    run: (args, caller) =>
+      wrap(async () => {
+        await incusReady();
+        const name = instanceName(args);
+        await restoreContainerSnapshot(name, text(args, "snapshot"), caller.user);
+        return { done: true, container: name };
+      }),
+  },
+  {
+    name: "container_snapshot_delete",
+    title: "Delete a snapshot of a container or virtual machine",
+    description: "Deletes one snapshot of a container or virtual machine.",
+    input: { ...INSTANCE, snapshot: { type: "string" } },
+    required: ["container", "snapshot"],
+    run: (args, caller) =>
+      wrap(async () => {
+        await incusReady();
+        const name = instanceName(args);
+        await removeContainerSnapshot(name, text(args, "snapshot"), caller.user);
+        return { done: true, container: name };
+      }),
+  },
+  {
+    name: "container_backup_restore",
+    title: "Restore a container or virtual machine from a backup",
+    description: "Puts a container or virtual machine back whole from a backup in Hata's backup folder (`container` lists them as `backups`). Everything it has now — its own snapshots too — is LOST; a machine of Hata's in it connects again by itself. Takes minutes: expect a running job and ask job_get.",
+    input: { ...INSTANCE, backup: { type: "string", description: "The id of the backup, e.g. 20261027-214745" } },
+    required: ["container", "backup"],
+    run: (args, caller) =>
+      wrap(async () => {
+        await incusReady();
+        return settle(restoreInstance(`${instanceName(args)}@incus`, text(args, "backup"), caller.user));
+      }),
+  },
+  {
+    name: "container_remove",
+    title: "Delete a container or virtual machine",
+    description: "Stops and deletes a container or virtual machine of this server with its snapshots and everything inside; its machine leaves Hata's list. It cannot be undone: only a backup brings it back. `name` must repeat its name exactly, as a check that it is the right one.",
+    input: { ...INSTANCE, name: { type: "string" } },
+    required: ["container", "name"],
+    run: (args, caller) =>
+      wrap(async () => {
+        await incusReady();
+        const name = instanceName(args);
+        if (text(args, "name") !== name) throw new ToolError("`name` must repeat the container's name exactly.");
+        await removeContainer(name, caller.user);
+        return { done: true, removed: name };
+      }),
+  },
+];
+
 export function happened(entry: { code: string; app?: string; user?: string; detail?: string }): string {
   const text = (en as Record<string, string>)["activity." + entry.code];
   if (!text) return entry.code;
@@ -1266,15 +1508,15 @@ export function happened(entry: { code: string; app?: string; user?: string; det
 }
 
 export const TOOLS: Tool[] = [
-  ...[...read, ...machineRead, ...pveRead].map((tool) => ({ ...tool, level: "read" as const, effect: "read" as const })),
-  ...[...operate, ...machineOperate, ...pveOperate].map((tool) => ({ ...tool, level: "operate" as const, effect: "change" as const })),
-  ...[...full, ...machineFull, ...pveFull].map((tool) => ({ ...tool, level: "full" as const, effect: tool.effect ?? ("destroy" as const) })),
+  ...[...read, ...machineRead, ...pveRead, ...ctRead].map((tool) => ({ ...tool, level: "read" as const, effect: "read" as const })),
+  ...[...operate, ...machineOperate, ...pveOperate, ...ctOperate].map((tool) => ({ ...tool, level: "operate" as const, effect: "change" as const })),
+  ...[...full, ...machineFull, ...pveFull, ...ctFull].map((tool) => ({ ...tool, level: "full" as const, effect: tool.effect ?? ("destroy" as const) })),
 ];
 
 const LEVEL_WORDS: Record<Level, string> = {
   read: "It can look at everything listed in the tools and change nothing.",
-  operate: "It can look, start, stop, restart and update apps — here and on the other machines — install apps from the store, take snapshots, wake a machine up, and start, shut down, restart, snapshot and back up the guests of Proxmox. It cannot change compose files, remove apps, restore snapshots, move apps, restart machines, or stop, roll back, delete or make Proxmox guests.",
-  full: "It can also change compose files, install apps from a compose file, remove apps, restore snapshots, move apps between machines, restart or shut down machines, and change the settings of Proxmox guests (processors, memory, disks made larger), stop them by force, roll them back to a snapshot or restore them from a backup, delete them and their snapshots, and make new containers there.",
+  operate: "It can look, start, stop, restart and update apps — here and on the other machines — install apps from the store, take snapshots, wake a machine up, start, shut down, restart, snapshot and back up the guests of Proxmox, and the containers and virtual machines of this server. It cannot change compose files, remove apps, restore snapshots, move apps, restart machines, or stop, roll back, delete or make Proxmox guests.",
+  full: "It can also change compose files, install apps from a compose file, remove apps, restore snapshots, move apps between machines, restart or shut down machines, and change the settings of Proxmox guests (processors, memory, disks made larger), stop them by force, roll them back to a snapshot or restore them from a backup, delete them and their snapshots, and make new containers there; and here, make, limit, roll back, restore and delete containers and virtual machines of this server.",
 };
 
 /** What the model is told when it connects */
@@ -1285,6 +1527,7 @@ export function instructions(caller: Caller): string {
     "An app's page is `address` in apps_list, app_get and what starting it returns: give that address as it is — never build one from the machine's host name, which is often not reachable.",
     "Besides this server there may be other machines it looks after (`machines`): their apps have tools of their own (`machine_apps`, `machine_app_*`), and an app can be moved between them (`app_move`).",
     "There may also be Proxmox VE servers (`proxmox`, `proxmox_guests`, `proxmox_*`): what Hata may do with their containers and virtual machines is what the server's API token allows — `may` of each guest says it. A guest marked `machine` has Hata's client inside: its apps are reached with the machine_* tools. The guest marked `thisHata` is the one this server runs in: it is never shut down, stopped, rolled back or deleted from here.",
+    "This server may also run system containers and virtual machines of its own with Incus (`containers`, `container_*`): like Proxmox guests, one marked `machine` has Hata's client inside, and its apps are reached with the machine_* tools. Installing Incus itself is the person's, in the web UI.",
     "Start with `overview`. When an app does not work, `app_diagnose` gives its state, the tail of its log and the likely causes in one call.",
     "Operations that take long (install, update, backup) wait up to half a minute and then return a job that is still running: ask `job_get` until it is done or failed.",
     ...(caller.confirm ? ["Removing an app, restoring a snapshot, replacing a compose file and the other calls that can lose something (stopping, rolling back or deleting a Proxmox guest, among them) need the word of an administrator in Hata each time, for this access key. Such a call waits for it for half a minute; when it answers that nobody has allowed it yet, ask the person to open Hata and allow it, then repeat the call with the same arguments."] : []),
