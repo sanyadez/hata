@@ -305,7 +305,9 @@ async function setUpIncus(log: (line: string) => void, place?: { path: string; d
 export function install(by: string, where?: unknown): Job {
   if (blocked()) throw new AppError("containers.nested", 409);
   if (packageManager() !== "apt-get") throw new AppError("containers.noInstaller", 409);
-  // the folder is checked before anything is installed; "" — Incus's own under /var/lib/incus
+  // the folder is checked before anything is installed; "" — Incus's own under /var/lib/incus. Places
+  // remembered from an Incus taken away by hand are gone with it
+  if (!has("incus")) placePaths = [];
   const place = typeof where === "string" && where.trim() ? checkPlace(where) : undefined;
   return startJob("incus", "incus", by, async (log) => {
     if (!has("incus")) {
@@ -794,6 +796,8 @@ export async function letIncusGo(): Promise<void> {
   own.standard = "";
   own.stopped = [];
   writeJsonAtomic(OWN_FILE, own);
+  // the places are gone: a disk may be let go of, and a new install may use the same folder
+  placePaths = [];
   lastLook.instances = [];
   lastLook.silentSince = null;
   // the daemon keeps running when its package goes, its folders mounted
