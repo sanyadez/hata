@@ -106,6 +106,20 @@ export function configOf(c: Pick<NewContainer, "cores" | "memory" | "autostart">
   return config;
 }
 
+/**
+ * Where QEMU shows a virtual machine's screen over VNC. Incus itself offers the screen over SPICE only, and the
+ * page speaks VNC (the same client as for Proxmox), so QEMU is asked for a VNC socket too, in the instance's own
+ * folder of Incus (made before QEMU starts, root's only).
+ */
+export const screenSocket = (name: string): string => `/run/incus/${name}/vnc.sock`;
+const screenArg = (name: string): string => `-vnc unix:${screenSocket(name)}`;
+
+/** `raw.qemu` with the screen in it; what was there is kept */
+export function withScreen(raw: string, name: string): string {
+  const arg = screenArg(name);
+  return raw.includes(arg) ? raw : [raw.trim(), arg].filter(Boolean).join(" ");
+}
+
 /** The disk a new one gets: in the place chosen, of the size asked (a container's only where the place can hold it to one) */
 export function devicesOf(c: Pick<NewContainer, "kind" | "disk">, pool: string): Record<string, Record<string, string>> {
   return { root: { type: "disk", path: "/", pool, ...(c.disk ? { size: `${c.disk}GiB` } : {}) } };

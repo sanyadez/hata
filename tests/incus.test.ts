@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { trouble, SILENT_MS, bridgeRules, configOf, devicesOf, diskChange, FieldError, placeFor, poolName, insideNarrowMap, limitsChange, megabytes, readInstance, readNew, setupScript, snapshotName } from "../src/incus";
+import { screenSocket, withScreen, trouble, SILENT_MS, bridgeRules, configOf, devicesOf, diskChange, FieldError, placeFor, poolName, insideNarrowMap, limitsChange, megabytes, readInstance, readNew, setupScript, snapshotName } from "../src/incus";
 
 const field = (f: () => unknown): string => {
   try {
@@ -186,4 +186,13 @@ test("what of the containers needs attention", () => {
   // silent for a moment (a restart of Incus) is not said; for long, it is, and nothing else is
   expect(trouble({ ...base, silentSince: base.now - 30_000, instances: [c("a", "stopped")] })).toEqual([]);
   expect(trouble({ ...base, silentSince: base.now - SILENT_MS, instances: [c("a", "stopped")] }).map((i) => i.code)).toEqual(["containers.away"]);
+});
+
+test("a virtual machine's screen is QEMU's VNC socket in its own folder of Incus", () => {
+  expect(screenSocket("vm1")).toBe("/run/incus/vm1/vnc.sock");
+  expect(withScreen("", "vm1")).toBe("-vnc unix:/run/incus/vm1/vnc.sock");
+  // what the person put there stays, and asking twice changes nothing
+  expect(withScreen(" -m 2G ", "vm1")).toBe("-m 2G -vnc unix:/run/incus/vm1/vnc.sock");
+  const once = withScreen("-m 2G", "vm1");
+  expect(withScreen(once, "vm1")).toBe(once);
 });

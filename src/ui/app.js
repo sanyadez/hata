@@ -3032,6 +3032,7 @@ function containerRow(c) {
         running
           ? button(t("incus.stop"), { class: "small", onclick: (e) => containerAct(c, "stop", e.currentTarget) }, "stop")
           : button(t("incus.start"), { class: "small", onclick: (e) => containerAct(c, "start", e.currentTarget) }, "play"),
+        running && c.kind === "vm" && button(t("incus.screen"), { class: "small", onclick: () => containerScreen(c) }, "server"),
         running && button(t("incus.console"), { class: "small", onclick: () => containerConsole(c) }, "terminal"),
         button("", { class: "small ghost", title: t("incus.more"), "aria-label": t("incus.more"), onclick: (e) => {
           const r = e.currentTarget.getBoundingClientRect();
@@ -3057,6 +3058,7 @@ async function containerAct(c, action, el) {
 function containerMenu(c, at) {
   menuAt(at, menuHeader(c.name, c.os, c.kind === "vm" ? "server" : "box"), [
     c.status === "running" && { label: t("incus.restart"), icon: "refresh", run: () => containerAct(c, "restart") },
+    c.status === "running" && c.kind === "vm" && { label: t("incus.screen"), icon: "server", run: () => containerScreen(c) },
     c.status === "running" && { label: t("incus.console"), icon: "terminal", run: () => containerConsole(c) },
     c.machine && { label: t("incus.openMachine"), icon: "server", href: `#/machines/${c.machine}` },
     { label: t("incus.limits") + "…", icon: "settings", run: () => containerLimitsDialog(c) },
@@ -3071,6 +3073,12 @@ function containerMenu(c, at) {
 function containerConsole(c) {
   let dialog;
   dialog = openDialog("xwide", h("header", null, h("h2", { class: "clip grow" }, c.name), closeX(() => dialog)), h("p", { class: "muted small" }, t("incus.consoleHint")), h("div", { class: "term-holder" }, terminalFrame({ incus: c.name })));
+}
+
+/** A virtual machine's screen: the page of Proxmox's screens, on QEMU's own VNC socket */
+function containerScreen(c) {
+  let dialog;
+  dialog = openDialog("xwide", h("header", null, h("h2", { class: "clip grow" }, c.name), closeX(() => dialog)), h("p", { class: "muted small" }, t("incus.screenHint")), h("div", { class: "term-holder" }, h("iframe", { class: "term-frame", src: "/screen.html?" + new URLSearchParams({ incus: c.name, lang: state.lang }), title: t("incus.screen") })));
 }
 
 /** The fields of the limits, shared by the new-container and the limits dialogs; a virtual machine always has its memory */

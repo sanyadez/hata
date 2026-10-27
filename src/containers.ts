@@ -18,7 +18,7 @@ import { bus } from "./bus";
 import { DATA_DIR, listenAddress, SECRETS_DIR, settings } from "./config";
 import { onContainerPlaces } from "./mounting";
 import { readJsonFile, writeJsonAtomic } from "./fsutil";
-import { trouble, BRIDGE, bridgeRules, configOf, devicesOf, diskChange, LIMITED, FieldError, placeFor, poolName, IMAGE_SERVER, IMAGES, insideNarrowMap, limitsChange, NAME_RE, readInstance, readNew, setupScript, snapshotName, SNAPSHOT_RE, type Container } from "./incus";
+import { screenSocket, withScreen, trouble, BRIDGE, bridgeRules, configOf, devicesOf, diskChange, LIMITED, FieldError, placeFor, poolName, IMAGE_SERVER, IMAGES, insideNarrowMap, limitsChange, NAME_RE, readInstance, readNew, setupScript, snapshotName, SNAPSHOT_RE, type Container } from "./incus";
 import { invite, machines, remove as removeMachine } from "./machines";
 import { packageManager, PATH, run, runLogged } from "./packages";
 
@@ -403,7 +403,7 @@ export async function create(input: Record<string, unknown>, by: string): Promis
   if (c.kind === "container" && c.disk && !LIMITED.includes(chosen.driver)) throw new AppError("containers.disk.notHere", 400, { name: pool });
   const job = startJob(`incus:${c.name}`, "container", by, async (log) => told(log, async () => {
     log(`Making ${c.name} from ${c.image.name} (the image is downloaded once)`);
-    const op = await incus("POST", "/1.0/instances", { name: c.name, type: vm ? "virtual-machine" : "container", start: true, source: { type: "image", protocol: "simplestreams", server: IMAGE_SERVER, alias: c.image.alias }, config: configOf(c), devices: devicesOf(c, pool) });
+    const op = await incus("POST", "/1.0/instances", { name: c.name, type: vm ? "virtual-machine" : "container", start: true, source: { type: "image", protocol: "simplestreams", server: IMAGE_SERVER, alias: c.image.alias }, config: { ...configOf(c), ...(vm ? { "raw.qemu": withScreen("", c.name) } : {}) }, devices: devicesOf(c, pool) });
     await finished(op, 1800);
     bus.publish("containers");
     // a virtual machine boots its own kernel first: its address and its agent come later
@@ -663,3 +663,82 @@ export async function moveInstance(name: string, to: unknown, by: string): Promi
   }, true, { app: name, machine: "" });
   return { job: job.id };
 }
+
+// --- A virtual machine's screen ------------------------------------------------------------------------------
+
+/** Screens the page asked for, opened by its socket within a minute; once */
+const screens = new Map<string, { name: string; at: number }>();
+
+/**
+ * A virtual machine's screen: a key for the page's socket. One made before Hata asked QEMU for a VNC screen has
+ * none until it is turned on and the machine restarted (`screenOff`); `screenAway` — asked for, but not there.
+ */
+export async function askScreen(name: string): Promise<{ screen: string; name: string }> {
+  await ready();
+  const c = await findContainer(name);
+  if (c.kind !== "vm") throw new AppError("containers.noScreen", 409, { name });
+  if (c.status !== "running") throw new AppError("containers.notRunning", 409, { name });
+  // by the config, not the file: a socket of an earlier start stays in the folder after QEMU is gone
+  const raw = String((await incus("GET", `/1.0/instances/${name}`)).metadata?.config?.["raw.qemu"] ?? "");
+  if (withScreen(raw, name) !== raw) throw new AppError("containers.screenOff", 409, { name });
+  if (!existsSync(screenSocket(name))) throw new AppError("containers.screenAway", 409, { name });
+  for (const [k, v] of screens) if (Date.now() - v.at > 60_000) screens.delete(k);
+  const key = Buffer.from(crypto.getRandomValues(new Uint8Array(16))).toString("hex");
+  screens.set(key, { name, at: Date.now() });
+  return { screen: key, name };
+}
+
+/**
+ * Asks QEMU for the screen of an older virtual machine. Incus changes `raw.qemu` of a stopped one only, so a
+ * running machine is stopped (cleanly, by force after 30 s), changed and started again.
+ */
+export async function screenOn(name: string, by: string): Promise<void> {
+  await ready();
+  const c = await findContainer(name);
+  if (c.kind !== "vm") throw new AppError("containers.noScreen", 409, { name });
+  const raw = String((await incus("GET", `/1.0/instances/${name}`)).metadata?.config?.["raw.qemu"] ?? "");
+  const running = c.status === "running";
+  if (running) {
+    try {
+      await finished(await incus("PUT", `/1.0/instances/${name}/state`, { action: "stop", timeout: 30 }), 60);
+    } catch {
+      await finished(await incus("PUT", `/1.0/instances/${name}/state`, { action: "stop", timeout: 30, force: true }), 60);
+    }
+  }
+  try {
+    await finished(await incus("PATCH", `/1.0/instances/${name}`, { config: { "raw.qemu": withScreen(raw, name) } }), 60);
+  } finally {
+    if (running) await finished(await incus("PUT", `/1.0/instances/${name}/state`, { action: "start" }), 120);
+  }
+  record("containers.screenOn", { user: by, detail: name });
+  bus.publish("containers");
+}
+
+/** What the page's socket is joined to: QEMU's VNC socket, byte for byte */
+export interface ScreenSocket {
+  send(bytes: Uint8Array): void;
+  close(): void;
+  onData: (bytes: Uint8Array) => void;
+  onClose: (why: string) => void;
+}
+
+export async function openScreen(key: string): Promise<{ socket: ScreenSocket; name: string }> {
+  const s = screens.get(key);
+  screens.delete(key);
+  if (!s || Date.now() - s.at > 60_000) throw new AppError("containers.screenGone", 410);
+  const out: ScreenSocket = { send: () => {}, close: () => {}, onData: () => {}, onClose: () => {} };
+  const sock = await Bun.connect({
+    unix: screenSocket(s.name),
+    socket: {
+      data: (_, bytes) => out.onData(new Uint8Array(bytes)),
+      close: () => out.onClose("closed"),
+      error: () => out.onClose("error"),
+    },
+  });
+  out.send = (bytes) => void sock.write(bytes);
+  out.close = () => sock.end();
+  return { socket: out, name: s.name };
+}
+
+/** Whether a key is one of these screens (the page's socket asks before Proxmox's) */
+export const isContainerScreen = (key: string): boolean => screens.has(key);

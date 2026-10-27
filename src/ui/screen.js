@@ -1,5 +1,5 @@
-// The screen of a virtual machine on a Proxmox server, shown in a frame by the UI: `?pve=<server>&guest=qemu/<id>`.
-// Hata asks Proxmox for the screen, and the browser speaks VNC to it through Hata's socket. The VNC client
+// The screen of a virtual machine, shown in a frame by the UI: on a Proxmox server `?pve=<server>&guest=qemu/<id>`,
+// on this server `?incus=<name>` (QEMU's own VNC socket). Hata asks for the screen, and the browser speaks VNC to it through Hata's socket. The VNC client
 // is noVNC (vendor/, third-party code).
 import RFB from "/vendor/novnc.js";
 
@@ -21,6 +21,8 @@ const note = (text) => {
 };
 $("keys").textContent = "Ctrl+Alt+Del";
 $("again").textContent = t("screen.again");
+$("on").textContent = t("screen.turnOn");
+const incus = params.get("incus");
 
 let rfb = null;
 
@@ -28,14 +30,18 @@ async function connect() {
   rfb?.disconnect();
   rfb = null;
   note("");
+  $("on").hidden = true;
   status(t("terminal.state.connecting"));
   let asked;
   try {
-    const res = await fetch(`/api/proxmox/${encodeURIComponent(params.get("pve") ?? "")}/guests/${params.get("guest") ?? ""}/screen`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
+    const where = incus !== null ? `/api/containers/${encodeURIComponent(incus)}/screen` : `/api/proxmox/${encodeURIComponent(params.get("pve") ?? "")}/guests/${params.get("guest") ?? ""}/screen`;
+    const res = await fetch(where, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" });
     asked = await res.json();
     if (!res.ok) throw Object.assign(new Error(), { code: asked.error?.code, detail: asked.error?.detail });
   } catch (e) {
     status(t("screen.failed"), "bad");
+    // a machine made before Hata asked QEMU for a screen gets one by a restart
+    $("on").hidden = e.code !== "containers.screenOff";
     return note(e.code ? t("error." + e.code, e.detail ?? {}) : String(e.message || e));
   }
   const url = `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/api/terminal/ws?screen=${asked.screen}`;
@@ -55,4 +61,17 @@ async function connect() {
 
 $("keys").addEventListener("click", () => rfb?.sendCtrlAltDel());
 $("again").addEventListener("click", () => void connect());
+$("on").addEventListener("click", async () => {
+  $("on").disabled = true;
+  status(t("screen.restarting"));
+  const res = await fetch(`/api/containers/${encodeURIComponent(incus ?? "")}/screen/on`, { method: "POST", headers: { "content-type": "application/json" }, body: "{}" }).catch(() => null);
+  $("on").disabled = false;
+  if (!res?.ok) {
+    const e = (await res?.json().catch(() => null))?.error;
+    status(t("screen.failed"), "bad");
+    return note(e?.code ? t("error." + e.code, e.detail ?? {}) : t("screen.lostHint"));
+  }
+  // the machine starts again: its screen is there once QEMU is up
+  setTimeout(() => void connect(), 2000);
+});
 void connect();

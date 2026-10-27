@@ -121,7 +121,7 @@ import { machineAccessRows, setMachineAccess, startMachineGates } from "./machin
 import { applyMachineCompose, installComposeOnMachine, machineTiles, installOnMachine, machineAppAction, machineAppLogs, machineApps, machineCompose, removeMachineApp, storeAppFor } from "./machineapps";
 import { addStore, ARCH, catalogue, removeStore, scheduleStoreSync, StoreError, syncStore } from "./store";
 import { startSampler, systemStatus } from "./system";
-import { act as containerAct, addPlace as addContainerPlace, moveInstance as moveContainer, removePlace as removeContainerPlace, setStandardPlace, containerOfMachine, containersTrouble, create as createContainer, install as installIncus, installVms as installIncusVms, removeContainer, removeSnapshot as removeContainerSnapshot, report as containersReport, restoreSnapshot as restoreContainerSnapshot, setLimits as setContainerLimits, setUpNow as setUpContainers, shellCommand as containerShell, shellReady as containerShellReady, startContainers, takeSnapshot as takeContainerSnapshot } from "./containers";
+import { askScreen as containerAskScreen, openScreen as containerOpenScreen, isContainerScreen, screenOn as containerScreenOn, act as containerAct, addPlace as addContainerPlace, moveInstance as moveContainer, removePlace as removeContainerPlace, setStandardPlace, containerOfMachine, containersTrouble, create as createContainer, install as installIncus, installVms as installIncusVms, removeContainer, removeSnapshot as removeContainerSnapshot, report as containersReport, restoreSnapshot as restoreContainerSnapshot, setLimits as setContainerLimits, setUpNow as setUpContainers, shellCommand as containerShell, shellReady as containerShellReady, startContainers, takeSnapshot as takeContainerSnapshot } from "./containers";
 import { askScreen as pveAskScreen, openScreen as pveOpenScreen, storageContent as pveStorageContent, removeVolume as pveRemoveVolume, cloneOptions as pveCloneOptions, cloneGuest as pveCloneGuest, makeTemplate as pveMakeTemplate, load as pveLoad, templates as pveTemplates, downloadTemplate as pveDownloadTemplate, removeTemplate as pveRemoveTemplate, setSchedule as pveSetSchedule, runScheduleNow as pveRunSchedule, restoreBackup as pveRestoreBackup, restoreOptions as pveRestoreOptions, changeGuest as pveChangeGuest, guestSettings as pveGuestSettings, installByConsole as pveInstallByConsole, openConsole as pveOpenConsole, type Console as PveConsole, addBySignIn as addPveBySignIn, removeGuest as pveRemoveGuest, addHost as addPve, createGuest as pveCreateGuest, createVm as pveCreateVm, sendFile as pveSendFile, receiveFile as pveReceiveFile, newOptions as pveNewOptions, backupJobs as pveBackupJobs, backups as pveBackups, changeHost as changePve, guestOfMachine, host as pveHost, hosts as pveHosts, power as pvePower, proxmoxTrouble, refresh as refreshPve, removeHost as removePve, snapshotAction as pveSnapshotAction, snapshots as pveSnapshots, startProxmox, takeBackup as pveTakeBackup, takeSnapshot as pveTakeSnapshot, taskLog as pveTaskLog } from "./proxmox";
 import { call as machineCall, clientBinary, containersOf, installScript, invite as machineInvite, INVITE_MS, linkData, linkHandlers, machine as machineView, MACHINE_ID_RE, machines as machineList, machinesAway, open as machineOpen, remove as removeMachine, rename as renameMachine, startMachines, updateClient, wake as wakeMachine, power as powerMachine, type LinkSocket } from "./machines";
 import { availableUpdate, cancelUpdate, checkForUpdate, confirmUpdate, scheduleUpdateChecks, startRollback, startUpdate, updateStatus } from "./update";
@@ -653,12 +653,14 @@ interface PveScreenSocket {
 const MAX_SCREEN_BUFFER = 64 * 1024 * 1024;
 
 function pveScreenOpen(ws: ServerWebSocket<PveScreenSocket>): void {
-  pveOpenScreen(ws.data.key).then(
+  // the same page shows a virtual machine of this server: QEMU's VNC socket instead of Proxmox's
+  const here = isContainerScreen(ws.data.key);
+  (here ? containerOpenScreen(ws.data.key) : pveOpenScreen(ws.data.key)).then(
     ({ socket, name }) => {
       if (ws.readyState !== 1) return socket.close();
       ws.data.socket = socket;
       ws.data.name = name;
-      record("pve.console", { user: ws.data.user, detail: name });
+      record(here ? "containers.screen" : "pve.console", { user: ws.data.user, detail: name });
       socket.onData = (bytes) => {
         if (ws.getBufferedAmount() > MAX_SCREEN_BUFFER) return socket.close();
         ws.send(bytes);
@@ -2501,6 +2503,11 @@ async function containersApi(req: Request, url: URL, server: Server, by: string)
   }
   if (rest === "/state" && method === "POST") {
     await containerAct(name, (await body(req)).action, by);
+    return json({ ok: true });
+  }
+  if (rest === "/screen" && method === "POST") return json(await containerAskScreen(name));
+  if (rest === "/screen/on" && method === "POST") {
+    await containerScreenOn(name, by);
     return json({ ok: true });
   }
   if (rest === "/move" && method === "POST") return json(await moveContainer(name, (await body(req)).place, by), 202);
