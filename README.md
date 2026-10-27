@@ -34,7 +34,8 @@ a home server needs: a dashboard with the state of the machine, a file manager, 
 network, disks, their health and protection from a disk failure, backups with restore of a whole app or of
 single files, the server's own network — Wi-Fi, a spare way to the internet, an access point —, users and
 who may open what, HTTPS, notifications when something breaks. It also looks after the other computers of
-the house through a small client, and the virtual machines and containers of a Proxmox VE server. The full
+the house through a small client, makes containers and virtual machines on the server itself, looks after
+those of a Proxmox VE server, and puts the devices of a Home Assistant server on its home page. The full
 list is under [Status](#status).
 
 **What is it an alternative to?**
@@ -49,7 +50,7 @@ home: a store, one-click installs, a dashboard of tiles, backups of app data, fa
 their apps and nothing else. Cockpit has no app store and no idea of "an app with its data"; Hata does
 not manage systemd services or system accounts. Of the system it keeps what a home server needs: the
 packages are updated from the page — of the server and of the other machines —, the server is restarted
-or shut down, and virtual machines are those of a Proxmox VE server, not of the machine Hata runs on. Of the network it does what a home server needs: it
+or shut down, and containers and virtual machines are made on the server itself or on a Proxmox VE server. Of the network it does what a home server needs: it
 shows the interfaces and changes an address — IPv4 and IPv6 —, with the previous one coming back by itself
 if the server can no longer be reached; it joins Wi-Fi, keeps a USB modem as a spare way to the internet,
 and can turn the Wi-Fi adapter into an access point. The two do not get in each other's way and can run on one machine.
@@ -182,12 +183,13 @@ Early development. What works today:
   onto the server — all of it or the folders and files you choose, into the folder you choose. Erasing
   asks for the disk's name and your password, and is never offered for the system's disk, a disk
   something else uses or a member of an array;
-- formatting for other devices too: a disk, a stick or a single partition becomes ext4, exFAT, FAT32 or
-  NTFS under the label you type, with the partition table and type each kind of device expects, and is
+- formatting for other devices too: a disk, a stick or a single partition becomes ext4, Btrfs, XFS, exFAT,
+  FAT32 or NTFS under the label you type, with the partition table and type each kind of device expects, and is
   then kept connected, connected until unplugged, or left ready to take away — a stick Hata connected
   is let go of for it. A file system can be checked and repaired (what an unplugging without ejecting
   leaves behind, the NTFS mark that stops a disk from connecting included) and renamed. A partition can
-  be smaller than the disk, with another made later in the room that is left; a disk that goes to
+  be smaller than the disk, with another made later in the room that is left, and a partition is made
+  larger or smaller (its file system with it) or deleted; a disk that goes to
   somebody else is erased, with every block written over if you ask. Long runs show what the programs
   say and how far they are, and a data disk on its way to full is said a month ahead;
 - the data folder moves to a disk with one button (Settings → Apps, or right after formatting a disk):
@@ -201,13 +203,19 @@ Early development. What works today:
   everything that is erased; when a disk the apps keep data on comes back after being away, the apps it
   stopped start again by themselves;
 - protection from a disk failure (SnapRAID, installed on request): one disk holds parity for the
-  others, the disks stay plain disks; a sync every night and a check every week; when a disk dies, a
-  new one in its place is filled back from the parity; files deleted by mistake since the last sync
-  come back the same way — and a sync after which too many files would be forgotten waits for your
-  word; damage a check finds is repaired from the parity;
+  others — or two, and any two disks may fail at once —, the disks stay plain disks; a sync every night
+  and a check every week; when a disk dies, a new one in its place is filled back from the parity; files
+  deleted by mistake since the last sync come back the same way, all of them or one found by its name —
+  and a sync after which too many files would be forgotten waits for your word; damage a check finds is
+  repaired from the parity;
+- arrays and pools the system already has — Linux RAID (mdadm), ZFS, Btrfs over several disks — on the same
+  page: their state, their disks, a resync or a rebuild with how far it is, and their own check (a scrub)
+  started and stopped from there; a failed or missing disk, damage a check found and errors of a disk
+  show up under "needs attention". Hata makes no arrays and changes none;
 - what fills the data folder (same page): measured once a day — its folders, the data of each app, the
-  trash — with how much each grew over the week and, when the disk is filling up, in how long it will
-  be full at this pace;
+  trash — with how much each grew over the week, how much of it has not changed for three months, the
+  largest files and the apps that use a folder, and, when the disk is filling up, in how long it will be
+  full at this pace;
 - folders shared over the network (Settings → Network folders, or a folder's menu in Files): a folder of
   the server opens in Explorer, Finder or a phone's file manager like a network disk (SMB). People connect
   with the name and password they sign in to Hata with; for every folder each user may look, change or
@@ -269,6 +277,22 @@ Early development. What works today:
   Hata's client by itself and shows up as a machine; images and discs are downloaded by a link or sent
   from this server or from the browser. Hata keeps a schedule of backups of its own, and says when a
   node is away, a storage fills up, a backup failed or a guest that should run does not;
+- containers and virtual machines on the server itself (Incus, installed by a button): a Debian, Ubuntu,
+  Fedora, Rocky Linux or Alpine system of its own in a minute, with Docker and Hata's client in it if
+  you wish — it then shows up as one more machine; its cores, memory and disk held to what you give it,
+  start and stop, snapshots taken and put back, a shell inside, and a whole copy of it in the daily
+  backups next to the apps. Where they live is yours to choose — a folder on another disk, Btrfs used
+  where the disk has it — and they move between places. A container that should run and does not, or an
+  Incus that stops answering, shows up under "needs attention". Virtual machines are a test feature, for
+  now on x86 servers only: QEMU is installed by a button of its own, the machine's screen is in the page
+  (Ubuntu with a desktop among the systems), its disk grows when asked. Inside a container that was given
+  only part of the user ids (an unprivileged LXC, for one of Proxmox) none of this is offered, and the
+  page says why;
+- Home Assistant servers, by a sign-in or a token: their devices put on Hata's home page next to the
+  apps — a light switched, its brightness, a thermostat, a lock that asks first —, who sees them chosen
+  per server, members switching only what is on their home page. A server's updates, its backups and its
+  devices with a low battery are on its page and under "needs attention"; one running as an app of this
+  server is opened by Hata's domain once it is told to trust Hata, which a button does;
 - HTTPS, your choice of three: none (address and ports, for a home network); behind your own proxy (nginx,
   Caddy, Traefik) with a check that the proxy is set up right; or by Hata itself with certificates from
   Let's Encrypt. With a domain, every app has its own address, `<app>.<domain>`;
@@ -288,7 +312,8 @@ Early development. What works today:
   server's address, and an administrator says in Hata what it may do;
 - an assistant on every page of Hata, in a window opened from the button in the corner or on a page of its own with the chats listed: ask in your own words why an app is down or what fills the disk, and
   it looks with the same tools and acts — what only looks runs at once, every change is shown first
-  and waits for "Run". The model is yours to name: the API of a provider you have a key for, or a model
+  and waits for "Run". Every item under "needs attention" has a button that asks it about that item, and
+  before a model is set the window says what the assistant can do and keeps the question until it is. The model is yours to name: the API of a provider you have a key for, or a model
   on your own machine;
 - updates of Hata itself from the web UI: a newer release is downloaded, checked against its checksums and
   started, every step shown in a window — and the update can be cancelled until the new version is put in
@@ -337,6 +362,19 @@ in Google Drive or Box.
 | ![A Proxmox server: nodes, storages, backup jobs, Hata's own schedule](screenshots/proxmox.png) A Proxmox server: nodes, storages, backup jobs, Hata's own schedule | ![Its guests, with what the token may do to each](screenshots/proxmox-guests.png) Its guests, with what the token may do to each |
 | ![A guest: power, snapshots, backups, settings, clone](screenshots/proxmox-guest.png) A guest: power, snapshots, backups, settings, clone | ![The load of a node over a day](screenshots/proxmox-load.png) The load of a node over a day |
 | ![Templates, cloud images and discs](screenshots/proxmox-images.png) Templates, cloud images and discs | ![A new container or virtual machine with Hata's client in it](screenshots/proxmox-new.png) A new container or virtual machine with Hata's client in it |
+
+### Containers and virtual machines on the server
+
+| | |
+|---|---|
+| ![Containers and virtual machines of this server, with their limits and the place they live in](screenshots/containers.png) Containers and virtual machines of this server, with their limits and the place they live in | ![A new virtual machine: Ubuntu with a desktop](screenshots/container-new.png) A new virtual machine: Ubuntu with a desktop |
+| ![A virtual machine's screen in the page](screenshots/vm-screen.png) A virtual machine's screen in the page | |
+
+### Home Assistant
+
+| | |
+|---|---|
+| ![A Home Assistant server: its updates, backups and batteries](screenshots/home-assistant.png) A Home Assistant server: its updates, backups and batteries | ![Its devices by room, a star puts one on the home page](screenshots/home-assistant-devices.png) Its devices by room, a star puts one on the home page |
 
 ### First run
 
