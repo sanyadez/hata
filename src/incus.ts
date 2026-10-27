@@ -36,6 +36,9 @@ export const NAME_RE = /^[a-z][a-z0-9-]{0,61}[a-z0-9]$/;
 export const RESERVED = ["install", "setup", "vms", "places"];
 export const SNAPSHOT_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$/;
 export const MEMORY = { min: 128, max: 262144 };
+/** The drivers whose pools can hold a container's disk to a size: a plain folder cannot */
+export const LIMITED = ["btrfs", "zfs", "lvm"];
+
 /** A virtual machine's disk, GB; Incus's own default is 10 */
 export const DISK = { min: 4, max: 4096, standard: 10 };
 
@@ -58,7 +61,7 @@ export interface NewContainer {
   /** Docker inside: a container needs nesting for it */
   docker: boolean;
   client: boolean;
-  /** GB, a virtual machine's disk */
+  /** GB: a virtual machine's disk, a container's limit (0 — none) */
   disk: number;
 }
 
@@ -87,7 +90,7 @@ export function readNew(input: Record<string, unknown>, taken: string[]): NewCon
     // Docker is put in by the same script as the client
     docker: client && input.docker === true,
     client,
-    disk: kind === "vm" ? (input.disk ? whole(input.disk, DISK.min, DISK.max, "disk") : DISK.standard) : 0,
+    disk: kind === "vm" ? (input.disk ? whole(input.disk, DISK.min, DISK.max, "disk") : DISK.standard) : input.disk ? whole(input.disk, 1, DISK.max, "disk") : 0,
   };
 }
 
@@ -103,21 +106,42 @@ export function configOf(c: Pick<NewContainer, "cores" | "memory" | "autostart">
   return config;
 }
 
-/** The disk a new one gets: in the place chosen, of the size asked for a virtual machine */
+/** The disk a new one gets: in the place chosen, of the size asked (a container's only where the place can hold it to one) */
 export function devicesOf(c: Pick<NewContainer, "kind" | "disk">, pool: string): Record<string, Record<string, string>> {
-  return { root: { type: "disk", path: "/", pool, ...(c.kind === "vm" ? { size: `${c.disk}GiB` } : {}) } };
+  return { root: { type: "disk", path: "/", pool, ...(c.disk ? { size: `${c.disk}GiB` } : {}) } };
 }
 
-/** What the limits dialog changes: only what differs, as Incus keys ("" takes a limit away) */
+/**
+ * The size a disk is to have after the limits dialog: `undefined` — unchanged; "" — no limit (a container
+ * only); else Incus's size. A virtual machine's disk only grows: its file system would be cut otherwise.
+ */
+export function diskChange(input: unknown, now: number, kind: Kind): string | undefined {
+  if (input === undefined || input === null || input === "") return undefined;
+  const gb = whole(input, 0, DISK.max, "disk");
+  if (gb === now) return undefined;
+  if (kind === "vm") {
+    if (gb < now || gb < DISK.min) throw new FieldError("diskShrink");
+    return `${gb}GiB`;
+  }
+  return gb ? `${gb}GiB` : "";
+}
+
+/**
+ * What the limits dialog changes: only what differs, as Incus keys ("" takes a limit away). A field not
+ * sent stays as it is — an empty request takes nothing away.
+ */
 export function limitsChange(input: Record<string, unknown>, now: Record<string, string>): Record<string, string> {
-  const cores = whole(input.cores, 0, 256, "cores");
-  const memory = input.memory ? whole(input.memory, MEMORY.min, MEMORY.max, "memory") : 0;
-  const wanted: Record<string, string> = {
-    "limits.cpu": cores ? String(cores) : "",
-    "limits.memory": memory ? `${memory}MiB` : "",
-    "boot.autostart": String(input.autostart !== false),
-    "security.nesting": input.nesting === true ? "true" : "",
-  };
+  const wanted: Record<string, string> = {};
+  if (input.cores !== undefined) {
+    const cores = whole(input.cores, 0, 256, "cores");
+    wanted["limits.cpu"] = cores ? String(cores) : "";
+  }
+  if (input.memory !== undefined) {
+    const memory = input.memory ? whole(input.memory, MEMORY.min, MEMORY.max, "memory") : 0;
+    wanted["limits.memory"] = memory ? `${memory}MiB` : "";
+  }
+  if (input.autostart !== undefined) wanted["boot.autostart"] = String(input.autostart !== false);
+  if (input.nesting !== undefined) wanted["security.nesting"] = input.nesting === true ? "true" : "";
   const change: Record<string, string> = {};
   for (const [key, value] of Object.entries(wanted)) if ((now[key] ?? "") !== value && !(key === "boot.autostart" && !now[key] && value === "false")) change[key] = value;
   return change;
@@ -157,6 +181,8 @@ export interface Container {
   mac: string;
   /** The pool it lives in */
   place: string;
+  /** GB its disk is held to; 0 — none */
+  disk: number;
   usage: { memory: number; cpu: number; disk: number; processes: number } | null;
   snapshots: Snapshot[];
 }
@@ -194,6 +220,7 @@ export function readInstance(raw: Raw): Container | null {
     address: inet[0] ?? "",
     mac: mac || String(nics[0]?.[1]?.hwaddr ?? "").toLowerCase(),
     place: String(raw.expanded_devices?.root?.pool ?? raw.devices?.root?.pool ?? ""),
+    disk: Math.round(megabytes(raw.expanded_devices?.root?.size ?? raw.devices?.root?.size) / 1024),
     usage: st && statusOf(raw.status) === "running" ? { memory: Number(st.memory?.usage ?? 0), cpu: Number(st.cpu?.usage ?? 0), disk: Number(st.disk?.root?.usage ?? 0), processes: Number(st.processes ?? 0) } : null,
     snapshots: ((raw.snapshots ?? []) as Raw[]).map((s) => ({ name: String(s.name).split("/").pop()!, created: Date.parse(s.created_at) || 0 })).sort((a, b) => b.created - a.created),
   };

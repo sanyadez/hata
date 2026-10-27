@@ -37,7 +37,7 @@ import { moveApp } from "./moveapp";
 import { backups as pveBackups, cloneGuest, load as pveLoad, changeGuest, restoreBackup, createGuest, createVm, sendFile, templates as pveTemplates, guestSettings, guestOfMachine, host as pveHost, hosts as pveHosts, newOptions, power as pvePower, proxmoxTrouble, refresh as refreshPve, removeGuest, snapshotAction, snapshots as pveSnapshots, takeBackup, takeSnapshot, taskLog, taskNow } from "./proxmox";
 import { MuxError } from "./mux";
 import { act as containerAct, create as createContainer, removeContainer, removeSnapshot as removeContainerSnapshot, report as containersReport, restoreSnapshot as restoreContainerSnapshot, setLimits as setContainerLimits, takeSnapshot as takeContainerSnapshot } from "./containers";
-import { NAME_RE as INSTANCE_RE } from "./incus";
+import { LIMITED, NAME_RE as INSTANCE_RE } from "./incus";
 import { backupInstance, restoreInstance } from "./incusbackup";
 import { VERSION } from "./version";
 import en from "./lang/en.json";
@@ -1279,7 +1279,9 @@ const FIELD_WORDS: Record<string, string> = {
   image: "`system`: one of `systems` from `containers` — and for a virtual machine one marked virtualMachine",
   cores: "`cores`: a whole number from 0 to 256",
   memory: "`memory`: MB, from 128 to 262144, or 0",
-  disk: "`disk`: GB, from 4 to 4096",
+  disk: "`disk`: GB, up to 4096 (a virtual machine's at least 4); 0 takes a container's limit away",
+  diskShrink: "`disk`: a virtual machine's disk only grows — give at least its size now",
+  place: "`place`: one of `places` from `containers`",
   snapshot: "`name`: Latin letters, digits, dots, - and _",
 };
 
@@ -1310,6 +1312,8 @@ const instanceBrief = (c: Awaited<ReturnType<typeof containersReport>>["containe
   cores: c.cores || "all",
   memoryMB: c.memory || "all",
   startsWithServer: c.autostart,
+  place: c.place,
+  diskGB: c.disk || "no limit",
   ...(c.kind === "container" ? { nesting: c.nesting } : {}),
   ...(c.usage ? { memoryUsedMB: Math.round(c.usage.memory / 1024 ** 2), processes: c.usage.processes } : {}),
   snapshots: c.snapshots.length,
@@ -1332,6 +1336,7 @@ const ctRead: Omit<Tool, "level" | "effect">[] = [
           network: r.network,
           virtualMachines: r.vms.state === "ready" ? "available (a test feature)" : r.vms.state === "missing" ? "not installed" : say("containers.vm." + r.vms.state),
           systems: r.images.map((i) => ({ id: i.id, name: i.name, hataClient: i.client, virtualMachine: i.vm })),
+          places: r.places.map((p) => ({ name: p.name, folder: p.path || "/var/lib/incus", newOnesGoHere: p.standard, containerDiskLimit: LIMITED.includes(p.driver), freeGB: p.total ? Math.round((p.total - p.used) / 1e9) : null })),
           instances: r.containers.map(instanceBrief),
         };
       }),
@@ -1412,7 +1417,8 @@ const ctFull: (Omit<Tool, "level" | "effect"> & { effect?: Tool["effect"] })[] =
       kind: { type: "string", enum: ["container", "vm"], description: "container by default" },
       cores: { type: "number", description: "0 or left out — all of them" },
       memory: { type: "number", description: "MB; 0 or left out — all of it (a virtual machine gets 1024)" },
-      disk: { type: "number", description: "A virtual machine's disk, GB; 10 by default" },
+      disk: { type: "number", description: "GB. A virtual machine's disk, 10 by default; a container's limit — only in a place with containerDiskLimit, none by default" },
+      place: { type: "string", description: "One of `places` from `containers`; where new ones go by default" },
       client: { type: "boolean", description: "Install Hata's client; true by default" },
       docker: { type: "boolean", description: "Install Docker too; false by default" },
       startsWithServer: { type: "boolean", description: "true by default" },
@@ -1421,7 +1427,7 @@ const ctFull: (Omit<Tool, "level" | "effect"> & { effect?: Tool["effect"] })[] =
     run: (args, caller) =>
       wrap(async () => {
         await incusReady();
-        const made = await fields(() => createContainer({ name: args.name, image: args.system, kind: args.kind, cores: args.cores, memory: args.memory, disk: args.disk, client: args.client, docker: args.docker, autostart: args.startsWithServer }, caller.user));
+        const made = await fields(() => createContainer({ name: args.name, image: args.system, kind: args.kind, cores: args.cores, memory: args.memory, disk: args.disk, place: args.place, client: args.client, docker: args.docker, autostart: args.startsWithServer }, caller.user));
         const job = getJob(made.job);
         return job ? settle(job) : { container: made.name, job: made.job };
       }),
@@ -1429,9 +1435,9 @@ const ctFull: (Omit<Tool, "level" | "effect"> & { effect?: Tool["effect"] })[] =
   {
     name: "container_limits",
     title: "Change the limits of a container or virtual machine",
-    description: "Sets how many processor cores and how much memory a container or virtual machine may use (0 — no limit), whether it starts with the server, and — for a container — nesting (Docker inside needs it). Applied at once; a running virtual machine's memory can only be lowered.",
+    description: "Sets how many processor cores and how much memory a container or virtual machine may use (0 — no limit), its disk (GB: a container's limit, 0 taking it away, only in a place with containerDiskLimit; a virtual machine's disk only grows), whether it starts with the server, and — for a container — nesting (Docker inside needs it). Applied at once; a running virtual machine's memory can only be lowered.",
     effect: "change",
-    input: { ...INSTANCE, cores: { type: "number" }, memory: { type: "number", description: "MB" }, startsWithServer: { type: "boolean" }, nesting: { type: "boolean" } },
+    input: { ...INSTANCE, cores: { type: "number" }, memory: { type: "number", description: "MB" }, disk: { type: "number", description: "GB" }, startsWithServer: { type: "boolean" }, nesting: { type: "boolean" } },
     required: ["container"],
     run: (args, caller) =>
       wrap(async () => {
@@ -1440,7 +1446,7 @@ const ctFull: (Omit<Tool, "level" | "effect"> & { effect?: Tool["effect"] })[] =
         const c = r.containers.find((x) => x.name === name);
         if (!c) throw new ToolError(say("containers.notFound", { name }));
         // what is not given stays as it is
-        await fields(() => setContainerLimits(name, { cores: args.cores ?? c.cores, memory: args.memory ?? c.memory, autostart: args.startsWithServer ?? c.autostart, nesting: args.nesting ?? c.nesting }, caller.user));
+        await fields(() => setContainerLimits(name, { cores: args.cores ?? c.cores, memory: args.memory ?? c.memory, disk: args.disk, autostart: args.startsWithServer ?? c.autostart, nesting: args.nesting ?? c.nesting }, caller.user));
         return { done: true, container: name };
       }),
   },

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { bridgeRules, configOf, devicesOf, FieldError, placeFor, poolName, insideNarrowMap, limitsChange, megabytes, readInstance, readNew, setupScript, snapshotName } from "../src/incus";
+import { bridgeRules, configOf, devicesOf, diskChange, FieldError, placeFor, poolName, insideNarrowMap, limitsChange, megabytes, readInstance, readNew, setupScript, snapshotName } from "../src/incus";
 
 const field = (f: () => unknown): string => {
   try {
@@ -37,6 +37,9 @@ test("only what differs changes, and a limit taken away is an empty value", () =
   // a container made elsewhere has no autostart key: "off" is what it is already
   expect(limitsChange({ cores: 0, memory: 0, autostart: false }, {})).toEqual({});
   expect(field(() => limitsChange({ cores: -1 }, {}))).toBe("cores");
+  // what is not sent stays: a request with the disk alone took the cores and the memory away once
+  expect(limitsChange({ disk: 8 }, now)).toEqual({});
+  expect(limitsChange({ memory: 512 }, now)).toEqual({ "limits.memory": "512MiB" });
 });
 
 test("sizes in megabytes", () => {
@@ -108,7 +111,7 @@ test("a virtual machine: only the images tried as one, a disk of its own, no nes
   const v = readNew({ kind: "vm", name: "vm1", image: "debian-13", cores: 2, memory: 2048, disk: 20, docker: true }, []);
   expect(v).toMatchObject({ kind: "vm", disk: 20, docker: true, client: true });
   expect(readNew({ kind: "vm", name: "vm2", image: "debian-13" }, []).disk).toBe(10);
-  expect(readNew({ name: "ct", image: "debian-13", disk: 50 }, []).disk).toBe(0);
+  expect(readNew({ name: "ct", image: "debian-13", disk: 50 }, []).disk).toBe(50);
   expect(field(() => readNew({ kind: "vm", name: "vm3", image: "ubuntu-24.04" }, []))).toBe("image");
   expect(field(() => readNew({ kind: "vm", name: "vm4", image: "debian-13", disk: 2 }, []))).toBe("disk");
   expect(configOf({ ...v, kind: "vm" })).toEqual({ "boot.autostart": "true", "user.hata": "true", "limits.cpu": "2", "limits.memory": "2048MiB", "security.secureboot": "false" });
@@ -151,4 +154,20 @@ test("a place's name", () => {
   expect(poolName("/mnt/disk1/containers", [])).toBe("disk1");
   expect(poolName("/mnt/disk1/containers", ["disk1"])).toBe("disk1-2");
   expect(poolName("/srv/Фото", [])).toBe("srv");
+});
+
+test("a disk's size: a container's limit set or taken away, a virtual machine's only grown", () => {
+  expect(readNew({ name: "c1", image: "debian-13", disk: 8 }, []).disk).toBe(8);
+  expect(readNew({ name: "c2", image: "debian-13" }, []).disk).toBe(0);
+  expect(devicesOf({ kind: "container", disk: 8 }, "ct")).toEqual({ root: { type: "disk", path: "/", pool: "ct", size: "8GiB" } });
+  expect(diskChange(undefined, 8, "container")).toBeUndefined();
+  expect(diskChange("", 8, "container")).toBeUndefined();
+  expect(diskChange(8, 8, "container")).toBeUndefined();
+  expect(diskChange(12, 8, "container")).toBe("12GiB");
+  expect(diskChange(4, 8, "container")).toBe("4GiB");
+  expect(diskChange(0, 8, "container")).toBe("");
+  expect(diskChange(20, 10, "vm")).toBe("20GiB");
+  expect(field(() => diskChange(8, 10, "vm"))).toBe("diskShrink");
+  expect(field(() => diskChange(-1, 10, "container"))).toBe("disk");
+  expect(readInstance({ name: "c", type: "container", status: "Stopped", config: {}, expanded_devices: { root: { pool: "ct", size: "8GiB" } } })).toMatchObject({ place: "ct", disk: 8 });
 });

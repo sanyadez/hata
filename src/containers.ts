@@ -18,7 +18,7 @@ import { bus } from "./bus";
 import { DATA_DIR, listenAddress, SECRETS_DIR, settings } from "./config";
 import { onContainerPlaces } from "./mounting";
 import { readJsonFile, writeJsonAtomic } from "./fsutil";
-import { BRIDGE, bridgeRules, configOf, devicesOf, FieldError, placeFor, poolName, IMAGE_SERVER, IMAGES, insideNarrowMap, limitsChange, NAME_RE, readInstance, readNew, setupScript, snapshotName, SNAPSHOT_RE, type Container } from "./incus";
+import { BRIDGE, bridgeRules, configOf, devicesOf, diskChange, LIMITED, FieldError, placeFor, poolName, IMAGE_SERVER, IMAGES, insideNarrowMap, limitsChange, NAME_RE, readInstance, readNew, setupScript, snapshotName, SNAPSHOT_RE, type Container } from "./incus";
 import { invite, machines, remove as removeMachine } from "./machines";
 import { packageManager, PATH, run, runLogged } from "./packages";
 
@@ -362,6 +362,8 @@ export async function create(input: Record<string, unknown>, by: string): Promis
   const chosen = typeof input.place === "string" && input.place ? r.places.find((p) => p.name === input.place) : r.places.find((p) => p.standard);
   if (!chosen) throw new AppError("containers.badField", 400, { field: "place" });
   const pool = chosen.name;
+  // a plain folder cannot hold a container's disk to a size: Incus would take the limit and keep none
+  if (c.kind === "container" && c.disk && !LIMITED.includes(chosen.driver)) throw new AppError("containers.disk.notHere", 400, { name: pool });
   const job = startJob(`incus:${c.name}`, "container", by, async (log) => told(log, async () => {
     log(`Making ${c.name} from ${c.image.name} (the image is downloaded once)`);
     const op = await incus("POST", "/1.0/instances", { name: c.name, type: vm ? "virtual-machine" : "container", start: true, source: { type: "image", protocol: "simplestreams", server: IMAGE_SERVER, alias: c.image.alias }, config: configOf(c), devices: devicesOf(c, pool) });
@@ -448,22 +450,34 @@ export async function removeContainer(name: string, by: string): Promise<void> {
 
 /** Changes the limits, the start with the server and nesting; Incus applies them to a running container at once */
 export async function setLimits(name: string, input: Record<string, unknown>, by: string): Promise<void> {
-  await ready();
-  await findContainer(name);
+  const r = await ready();
+  const c = await findContainer(name);
   const raw = (await incus("GET", `/1.0/instances/${name}`)).metadata;
   let change;
+  let size;
   try {
     change = limitsChange(input, raw.config ?? {});
+    size = diskChange(input.disk, c.disk, c.kind);
   } catch (e) {
     throw new AppError("containers.badField", 400, { field: e instanceof FieldError ? e.field : "" });
   }
-  if (!Object.keys(change).length) return;
+  if (!Object.keys(change).length && size === undefined) return;
   const config = { ...raw.config };
   for (const [key, value] of Object.entries(change)) {
     if (value) config[key] = value;
     else delete config[key];
   }
-  await finished(await incus("PUT", `/1.0/instances/${name}`, { ...raw, config }), 60);
+  const devices = { ...(raw.devices ?? {}) };
+  if (size !== undefined) {
+    const place = r.places.find((p) => p.name === c.place);
+    if (c.kind === "container" && size && !LIMITED.includes(place?.driver ?? "")) throw new AppError("containers.disk.notHere", 400, { name: c.place });
+    // the disk of an older one comes from the profile: it gets one of its own, the same but for the size
+    const root = { ...(raw.expanded_devices?.root ?? { type: "disk", path: "/", pool: c.place }), ...(devices.root ?? {}) };
+    if (size) root.size = size;
+    else delete root.size;
+    devices.root = root;
+  }
+  await finished(await incus("PUT", `/1.0/instances/${name}`, { ...raw, config, devices }), 120);
   record("containers.changed", { user: by, detail: name });
   bus.publish("containers");
 }

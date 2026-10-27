@@ -3007,7 +3007,7 @@ function moveContainerDialog(c) {
 
 function containerRow(c) {
   const running = c.status === "running";
-  const limits = [c.cores ? t("incus.cores", { n: c.cores }) : t("incus.allCores"), c.memory ? bytes(c.memory * 1024 * 1024) : t("incus.allMemory")].join(" · ");
+  const limits = [c.cores ? t("incus.cores", { n: c.cores }) : t("incus.allCores"), c.memory ? bytes(c.memory * 1024 * 1024) : t("incus.allMemory"), c.disk ? t("incus.diskOf", { size: bytes(c.disk * 1024 ** 3) }) : null].filter(Boolean).join(" · ");
   return h(
     "tr",
     { menu: (at) => containerMenu(c, at) },
@@ -3080,13 +3080,18 @@ function limitFields(c, vm = c?.kind === "vm") {
   const fillMemory = (forVm) => {
     const was = memory.value;
     memory.replaceChildren(...[!forVm && opt("0", t("incus.allMemory")), ...[256, 512, 1024, 2048, 4096, 8192, 16384].map((mb) => opt(String(mb), mb < 1024 ? `${mb} MB` : `${mb / 1024} GB`))].filter(Boolean));
-    memory.value = was || String(c?.memory || 1024);
+    // a container with no limit keeps none: 0 is "all memory"; only a virtual machine always has some
+    memory.value = was || String(c ? c.memory || (forVm ? 1024 : 0) : 1024);
     if (memory.value === "") memory.value = forVm ? "1024" : "0";
   };
   memory.value = "";
   fillMemory(vm);
   return { cores, memory, fillMemory };
 }
+
+/** The drivers whose places can hold a container's disk to a size */
+const LIMITED_PLACES = ["btrfs", "zfs", "lvm"];
+const placeLimits = (name) => LIMITED_PLACES.includes((incusUi.data?.places ?? []).find((p) => p.name === name)?.driver);
 
 const tickRow = (label, hint, checked) => {
   const box = h("input", { type: "checkbox", checked });
@@ -3100,14 +3105,17 @@ function newContainerDialog() {
   const name = h("input", { required: true, placeholder: "docker-1", pattern: "[a-z][a-z0-9\\-]{0,61}[a-z0-9]", autocapitalize: "none", spellcheck: false, class: "mono" });
   const image = h("select", { onchange: () => shape() });
   const { cores, memory, fillMemory } = limitFields(null, false);
-  const disk = h("input", { type: "number", min: 4, max: 4096, value: 10, required: true });
-  const diskRow = field(t("incus.vm.disk"), disk, t("incus.vm.diskHint"));
+  const disk = h("input", { type: "number", min: 4, max: 4096, value: 10 });
+  const diskHint = h("span");
+  const diskRow = field(t("incus.vm.disk"), disk, diskHint);
+  const diskLabel = diskRow.querySelector("label") ?? diskRow.firstChild;
   const [client, clientRow] = tickRow(t("incus.client"), t("incus.clientHint"), true);
   const [docker, dockerRow] = tickRow(t("incus.docker"), t("incus.dockerHint"), true);
   const [autostart, autostartRow] = tickRow(t("incus.autostart"), null, true);
   const vmNote = h("p", { class: "banner small" }, t("incus.vm.note"));
   const placeSelect = h("select", null, (d.places ?? []).map((p) => h("option", { value: p.name, selected: p.standard }, `${p.name} — ${p.path || t("incus.place.systemPath")}${p.total ? " · " + t("incus.place.freeShort", { free: bytes(p.total - p.used) }) : ""}`)));
   const placeRow = (d.places ?? []).length > 1 && field(t("incus.place.label"), placeSelect);
+  placeSelect.addEventListener("change", () => shape());
   const lead = h("p", { class: "muted small" });
   const title = h("h2", { class: "grow" });
   const seg = h(
@@ -3127,8 +3135,16 @@ function newContainerDialog() {
     lead.textContent = t(vm ? "incus.vm.newLead" : "incus.newLead");
     dockerRow.querySelector(".block").textContent = t(vm ? "incus.vm.dockerHint" : "incus.dockerHint");
     clientRow.querySelector(".block").textContent = t(vm ? "incus.vm.clientHint" : "incus.clientHint");
-    diskRow.hidden = !vm;
-    disk.disabled = !vm;
+    // a container's disk is held to a size only in a place that can do it; empty — no limit
+    const limited = vm || placeLimits(placeSelect.value);
+    diskRow.hidden = !limited;
+    disk.disabled = !limited;
+    disk.required = vm;
+    disk.min = vm ? 4 : 1;
+    if (!vm && disk.value === "10" && !disk.dataset.touched) disk.value = "";
+    if (vm && !disk.value) disk.value = "10";
+    diskLabel.textContent = t(vm ? "incus.vm.disk" : "incus.diskLimit");
+    diskHint.textContent = t(vm ? "incus.vm.diskHint" : "incus.diskLimitHint");
     vmNote.hidden = !vm;
     for (const b of seg.children) b.classList.toggle("active", b.dataset.kind === kind);
     const can = d.images.find((i) => i.id === image.value)?.client;
@@ -3147,7 +3163,7 @@ function newContainerDialog() {
     submit.disabled = true;
     const n = name.value.trim().toLowerCase();
     try {
-      const r = await api("POST", "/api/containers", { kind, name: n, image: image.value, cores: Number(cores.value), memory: Number(memory.value), disk: kind === "vm" ? Number(disk.value) : 0, client: client.checked, docker: docker.checked, autostart: autostart.checked, place: placeSelect.value });
+      const r = await api("POST", "/api/containers", { kind, name: n, image: image.value, cores: Number(cores.value), memory: Number(memory.value), disk: disk.disabled ? 0 : Number(disk.value || 0), client: client.checked, docker: docker.checked, autostart: autostart.checked, place: placeSelect.value });
       dialog.close();
       const machine = client.checked;
       void loadContainers();
@@ -3191,6 +3207,11 @@ function containerLimitsDialog(c) {
   const [autostart, autostartRow] = tickRow(t("incus.autostart"), null, c.autostart);
   const [nesting, nestingRow] = tickRow(t("incus.nesting"), t("incus.nestingHint"), c.nesting);
   nestingRow.hidden = c.kind === "vm";
+  // a virtual machine's disk only grows; a container's is held to a size only in a place that can do it
+  const vm = c.kind === "vm";
+  const limited = vm || placeLimits(c.place);
+  const disk = h("input", { type: "number", min: vm ? c.disk || 4 : 0, max: 4096, value: c.disk || "", placeholder: vm ? "" : t("incus.diskNone") });
+  const diskRow = limited ? field(t(vm ? "incus.vm.disk" : "incus.diskLimit"), disk, t(vm ? "incus.vm.diskGrow" : "incus.diskLimitHint")) : h("p", { class: "muted small" }, t("incus.diskNotHere", { place: c.place }));
   const error = h("p", { class: "error", role: "alert" });
   let dialog;
   const send = async (e) => {
@@ -3198,7 +3219,7 @@ function containerLimitsDialog(c) {
     const submit = dialog.querySelector("button[type=submit]");
     submit.disabled = true;
     try {
-      await api("PATCH", `/api/containers/${c.name}`, { cores: Number(cores.value), memory: Number(memory.value), autostart: autostart.checked, nesting: nesting.checked });
+      await api("PATCH", `/api/containers/${c.name}`, { cores: Number(cores.value), memory: Number(memory.value), autostart: autostart.checked, nesting: nesting.checked, ...(limited ? { disk: Number(disk.value || 0) } : {}) });
       dialog.close();
       toast(t("incus.saved", { name: c.name }));
       void loadContainers();
@@ -3215,6 +3236,7 @@ function containerLimitsDialog(c) {
       h("header", null, h("h2", { class: "grow clip" }, t("incus.limitsTitle", { name: c.name })), closeX(() => dialog)),
       h("p", { class: "muted small" }, t(c.kind === "vm" ? "incus.vm.limitsLead" : "incus.limitsLead")),
       h("div", { class: "form-pair" }, field(t("incus.coresLabel"), cores), field(t("incus.memoryLabel"), memory)),
+      diskRow,
       autostartRow,
       nestingRow,
       error,

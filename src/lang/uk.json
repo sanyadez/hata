@@ -4151,5 +4151,13 @@
   "activity.containers.place.standard": "Нові контейнери — у {target}",
   "activity.containers.place.removed": "Прибрано місце для контейнерів: {target}",
   "activity.containers.moved": "Перенесено: {target}",
-  "error.containers.place.profile": "Типовий профіль Incus тримає свій диск у {name}: це місце прибрати не можна."
+  "error.containers.place.profile": "Типовий профіль Incus тримає свій диск у {name}: це місце прибрати не можна.",
+  "incus.diskLimit": "Ліміт диска, ГБ",
+  "incus.diskLimitHint": "Порожньо — скільки має місце.",
+  "incus.diskNone": "без ліміту",
+  "incus.diskOf": "диск {size}",
+  "incus.diskNotHere": "{place} — звичайна тека: вона не може обмежити диск контейнера. Місце на btrfs може — перенесіть контейнер туди, щоб обмежити диск.",
+  "incus.vm.diskGrow": "Лише збільшується — менший диск обрізав би систему всередині. Запущена машина отримає новий розмір після перезапуску.",
+  "incus.bad.diskShrink": "Диск віртуальної машини лише збільшується.",
+  "error.containers.disk.notHere": "{name} — звичайна тека: вона не може обмежити диск контейнера. Виберіть місце на btrfs."
 }

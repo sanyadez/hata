@@ -4151,5 +4151,13 @@
   "activity.containers.place.standard": "New containers go to {target}",
   "activity.containers.place.removed": "Place for containers taken away: {target}",
   "activity.containers.moved": "Moved: {target}",
-  "error.containers.place.profile": "Incus's default profile keeps its disk in {name}: this place cannot be taken away."
+  "error.containers.place.profile": "Incus's default profile keeps its disk in {name}: this place cannot be taken away.",
+  "incus.diskLimit": "Disk limit, GB",
+  "incus.diskLimitHint": "Empty — as much as the place has.",
+  "incus.diskNone": "no limit",
+  "incus.diskOf": "disk {size}",
+  "incus.diskNotHere": "{place} is a plain folder: it cannot hold a container's disk to a size. A place on btrfs can — move the container there to limit its disk.",
+  "incus.vm.diskGrow": "Only grows — a smaller disk would cut the system inside. A running machine gets the new size when it restarts.",
+  "incus.bad.diskShrink": "A virtual machine's disk only grows.",
+  "error.containers.disk.notHere": "{name} is a plain folder: it cannot hold a container's disk to a size. Choose a place on btrfs."
 }
