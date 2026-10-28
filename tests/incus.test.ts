@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { screenSocket, withScreen, trouble, SILENT_MS, bridgeRules, configOf, devicesOf, diskChange, FieldError, placeFor, poolName, insideNarrowMap, limitsChange, megabytes, readInstance, readNew, setupScript, snapshotName } from "../src/incus";
+import { cloneRequest, hostFiles, nicsOf, readName, screenRenamed, screenSocket, withScreen, trouble, SILENT_MS, bridgeRules, configOf, devicesOf, diskChange, FieldError, placeFor, poolName, insideNarrowMap, limitsChange, megabytes, readInstance, readNew, setupScript, snapshotName } from "../src/incus";
 
 const field = (f: () => unknown): string => {
   try {
@@ -225,4 +225,45 @@ test("a container whose place is gone waits for its disk instead of being said t
   const instances = [{ name: "c1", kind: "container" as const, status: "stopped", autostart: true, place: "big" }];
   expect(trouble({ ...base, instances, placesAway: [{ name: "big", path: "/mnt/big/incus" }] })).toEqual([{ id: "incus:c1", severity: "warn", code: "containers.placeAway", detail: { name: "c1", kind: "container", place: "big", path: "/mnt/big/incus" } }]);
   expect(trouble({ ...base, instances, placesAway: [] })[0]!.code).toBe("containers.down");
+});
+
+test("a renamed or copied machine's screen moves to the new name's folder; none stays none", () => {
+  expect(screenRenamed("-m 2G -vnc unix:/run/incus/vm1/vnc.sock", "vm1", "web")).toBe("-m 2G -vnc unix:/run/incus/web/vnc.sock");
+  expect(screenRenamed("-m 2G", "vm1", "web")).toBe("-m 2G");
+  expect(screenRenamed("-vnc unix:/run/incus/vm10/vnc.sock", "vm1", "web")).toBe("-vnc unix:/run/incus/vm10/vnc.sock");
+});
+
+test("a new name takes the rules of a new instance", () => {
+  expect(readName(" Web-2 ", ["box1"])).toBe("web-2");
+  expect(() => readName("box1", ["box1"])).toThrow(FieldError);
+  for (const bad of ["", "1box", "box-", "a--b", "places", "ДІМ"]) expect(() => readName(bad, [])).toThrow(FieldError);
+});
+
+test("the host files change only where they still say the old name, as a whole word", () => {
+  expect(hostFiles({ hostname: "box1\n", hosts: "127.0.0.1 localhost\n127.0.1.1 box1\n10.0.0.2 box10 box1-db\n" }, "box1", "web")).toEqual({ hostname: "web\n", hosts: "127.0.0.1 localhost\n127.0.1.1 web\n10.0.0.2 box10 box1-db\n" });
+  // an image's own templates made it already, or the person named it otherwise
+  expect(hostFiles({ hostname: "web\n", hosts: "127.0.1.1 box1\n" }, "box1", "web")).toBeNull();
+  expect(hostFiles({ hostname: null, hosts: null }, "box1", "web")).toBeNull();
+  expect(hostFiles({ hostname: null, hosts: "127.0.1.1 box1\n" }, "box1", "web")).toEqual({ hosts: "127.0.1.1 web\n" });
+  expect(hostFiles({ hostname: "box1", hosts: "127.0.0.1 localhost\n" }, "box1", "web")).toEqual({ hostname: "web\n" });
+  expect(hostFiles({ hostname: "box1", hosts: null }, "box1", "web")).toEqual({ hostname: "web\n" });
+});
+
+test("a copy goes to the place chosen without snapshots, its cards off, a container's size only where it can be held", () => {
+  const src = { type: "container", config: { "limits.cpu": "2" }, devices: { root: { type: "disk", path: "/", pool: "fast", size: "8GiB" } }, expanded_devices: { root: { type: "disk", path: "/", pool: "fast", size: "8GiB" }, eth0: { type: "nic", network: "hatabr0", name: "eth0" } } };
+  const quiet = nicsOf(src.expanded_devices);
+  expect(quiet).toEqual(["eth0"]);
+  expect(cloneRequest(src, { from: "box1", name: "box2", source: "box1/hata-copy-x", pool: "default", driver: "dir", quiet })).toEqual({
+    name: "box2",
+    type: "container",
+    source: { type: "copy", source: "box1/hata-copy-x", instance_only: true },
+    config: {},
+    devices: { root: { type: "disk", path: "/", pool: "default" }, eth0: { type: "none" } },
+  });
+  expect((cloneRequest(src, { from: "box1", name: "box2", source: "box1", pool: "fast", driver: "btrfs", quiet: [] }).devices as any).root.size).toBe("8GiB");
+  const vm = { type: "virtual-machine", config: { "raw.qemu": "-vnc unix:/run/incus/vm1/vnc.sock" }, expanded_devices: { root: { type: "disk", path: "/", pool: "default", size: "20GiB" } } };
+  const req = cloneRequest(vm, { from: "vm1", name: "vm2", source: "vm1", pool: "default", driver: "dir", quiet: [] });
+  expect(req.config).toEqual({ "raw.qemu": "-vnc unix:/run/incus/vm2/vnc.sock" });
+  // a machine's disk is its system: it keeps its size anywhere
+  expect((req.devices as any).root.size).toBe("20GiB");
 });

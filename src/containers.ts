@@ -18,8 +18,8 @@ import { bus } from "./bus";
 import { DATA_DIR, listenAddress, SECRETS_DIR, settings } from "./config";
 import { onContainerPlaces } from "./mounting";
 import { readJsonFile, writeJsonAtomic } from "./fsutil";
-import { screenSocket, withScreen, trouble, BRIDGE, bridgeRules, configOf, devicesOf, diskChange, LIMITED, FieldError, placeFor, poolName, IMAGE_SERVER, IMAGES, insideNarrowMap, limitsChange, NAME_RE, readInstance, readNew, setupScript, snapshotName, SNAPSHOT_RE, type Container } from "./incus";
-import { invite, machines, remove as removeMachine } from "./machines";
+import { CLONE_SCRIPT, cloneRequest, hostFiles, nicsOf, readName, screenRenamed, screenSocket, withScreen, trouble, BRIDGE, bridgeRules, configOf, devicesOf, diskChange, LIMITED, FieldError, placeFor, poolName, IMAGE_SERVER, IMAGES, insideNarrowMap, limitsChange, NAME_RE, readInstance, readNew, setupScript, snapshotName, SNAPSHOT_RE, type Container } from "./incus";
+import { invite, machines, remove as removeMachine, rename as renameMachine } from "./machines";
 import { packageManager, PATH, run, runLogged } from "./packages";
 
 export const SOCKET = "/var/lib/incus/unix.socket";
@@ -453,19 +453,23 @@ export async function create(input: Record<string, unknown>, by: string): Promis
     const ran = await runLogged(["incus", "exec", c.name, "--", "sh", "-c", setupScript({ ...c, family: c.image.family, dockerFrom: c.image.docker }, line)], log, 30 * 60_000);
     if (ran.code !== 0) throw new AppError("containers.setupFailed", 409, { name: c.name });
     if (!c.client) return;
-    log("Waiting for the machine to connect");
-    for (let i = 0; i < 60; i++) {
-      const fresh = machines().find((m) => !before.has(m.id) && m.info?.hostname === c.name);
-      if (fresh) {
-        log(`Connected: ${fresh.name}`);
-        job.result = { machine: fresh.id };
-        return;
-      }
-      await Bun.sleep(2000);
-    }
-    throw new AppError("containers.notConnected", 409, { name: c.name });
+    job.result = { machine: await awaitMachine(c.name, before, log) };
   }), true, { app: c.name, machine: "" });
   return { job: job.id, name: c.name };
+}
+
+/** Waits for Hata's client in a new instance to pair: the machine that was not there before, by its host name */
+async function awaitMachine(name: string, before: Set<string>, log: (line: string) => void): Promise<string> {
+  log("Waiting for the machine to connect");
+  for (let i = 0; i < 60; i++) {
+    const fresh = machines().find((m) => !before.has(m.id) && m.info?.hostname === name);
+    if (fresh) {
+      log(`Connected: ${fresh.name}`);
+      return fresh.id;
+    }
+    await Bun.sleep(2000);
+  }
+  throw new AppError("containers.notConnected", 409, { name });
 }
 
 /** Runs a job's work, putting Incus's own words into its log when it fails: the job keeps only the code */
@@ -683,6 +687,201 @@ export async function moveInstance(name: string, to: unknown, by: string): Promi
     }
   }, true, { app: name, machine: "" });
   return { job: job.id };
+}
+
+// --- Renamed and copied ------------------------------------------------------------------------------------
+
+const stopNow = async (name: string): Promise<void> => {
+  try {
+    await finished(await incus("PUT", `/1.0/instances/${name}/state`, { action: "stop", timeout: 30 }), 60);
+  } catch {
+    await finished(await incus("PUT", `/1.0/instances/${name}/state`, { action: "stop", timeout: 30, force: true }), 60);
+  }
+};
+const startNow = async (name: string): Promise<void> => finished(await incus("PUT", `/1.0/instances/${name}/state`, { action: "start" }), 120);
+
+/** Waits for a running virtual machine's agent (a container answers at once): what is done inside goes through it */
+async function agentOf(name: string, vm: boolean): Promise<boolean> {
+  for (let i = 0; i < (vm ? 60 : 10); i++) {
+    if ((await run(["incus", "exec", name, "--", "true"], 15_000)).code === 0) return true;
+    await Bun.sleep(3000);
+  }
+  return false;
+}
+
+/** A file inside an instance, by Incus's own file API (a stopped container's too); `null` — not there */
+async function readInside(name: string, path: string): Promise<string | null> {
+  const r = await fetch(`http://incus/1.0/instances/${name}/files?path=${encodeURIComponent(path)}`, { unix: SOCKET, signal: AbortSignal.timeout(30_000) } as RequestInit).catch(() => null);
+  if (!r?.ok || r.headers.get("x-incus-type") === "directory") return null;
+  return r.text();
+}
+
+async function writeInside(name: string, path: string, text: string): Promise<void> {
+  const r = await fetch(`http://incus/1.0/instances/${name}/files?path=${encodeURIComponent(path)}`, { unix: SOCKET, method: "POST", body: text, headers: { "content-type": "application/octet-stream", "X-Incus-type": "file", "X-Incus-uid": "0", "X-Incus-gid": "0", "X-Incus-mode": "0644", "X-Incus-write": "overwrite" }, signal: AbortSignal.timeout(30_000) } as RequestInit);
+  if (!r.ok) throw new AppError("containers.failed", 409, { message: String(((await r.json().catch(() => null)) as any)?.error ?? `HTTP ${r.status}`) });
+}
+
+/** Gives the system inside its new name where it still says the old one; a running one takes it at once */
+async function renameInside(name: string, from: string, running: boolean, log: (line: string) => void): Promise<void> {
+  try {
+    const change = hostFiles({ hostname: await readInside(name, "/etc/hostname"), hosts: await readInside(name, "/etc/hosts") }, from, name);
+    if (!change) return;
+    if (change.hostname) await writeInside(name, "/etc/hostname", change.hostname);
+    if (change.hosts) await writeInside(name, "/etc/hosts", change.hosts);
+    if (running) await run(["incus", "exec", name, "--", "hostname", name], 15_000);
+    log(`The system inside is called ${name} now`);
+  } catch (e) {
+    log(`The system inside keeps its old host name: ${e instanceof AppError ? (e.detail.message ?? e.code) : e instanceof Error ? e.message : e}`);
+  }
+}
+
+const renameListeners: ((from: string, to: string) => void)[] = [];
+/** Told when an instance takes another name: its backups follow it */
+export const onInstanceRenamed = (listener: (from: string, to: string) => void): void => void renameListeners.push(listener);
+
+/**
+ * Gives a container or virtual machine another name (a job of kind `container`). Incus renames only a stopped
+ * one, so a running one is stopped and started again. The name is its host name too: the system inside is
+ * given it (not a stopped virtual machine's — its files cannot be reached then), a machine of the same name
+ * in Hata's list is renamed, and its backups go with it.
+ */
+export async function renameInstance(name: string, input: unknown, by: string): Promise<{ job: string; name: string }> {
+  const r = await ready();
+  const c = await findContainer(name);
+  let to: string;
+  try {
+    to = readName(input, r.containers.map((x) => x.name));
+  } catch (e) {
+    throw new AppError("containers.badField", 400, { field: e instanceof FieldError ? e.field : "" });
+  }
+  if (isBusy(`incus:${to}`)) throw new AppError("app.busy", 409);
+  const job = startJob(`incus:${name}`, "container", by, async (log) => told(log, async () => {
+    const running = c.status === "running";
+    const vm = c.kind === "vm";
+    if (running) {
+      log(`Stopping ${name}`);
+      await stopNow(name);
+    }
+    try {
+      log(`Renaming ${name} to ${to}`);
+      await finished(await incus("POST", `/1.0/instances/${name}`, { name: to }), 300);
+    } catch (e) {
+      if (running) await startNow(name).catch(() => {});
+      throw e;
+    }
+    if (vm) {
+      const raw = String((await incus("GET", `/1.0/instances/${to}`)).metadata?.config?.["raw.qemu"] ?? "");
+      const next = screenRenamed(raw, name, to);
+      if (next !== raw) await finished(await incus("PATCH", `/1.0/instances/${to}`, { config: { "raw.qemu": next } }), 60);
+    }
+    if (own.stopped.includes(name)) {
+      own.stopped = own.stopped.map((n) => (n === name ? to : n));
+      writeJsonAtomic(OWN_FILE, own);
+    }
+    for (const listener of renameListeners) {
+      try {
+        listener(name, to);
+      } catch (e) {
+        log(String(e instanceof Error ? e.message : e));
+      }
+    }
+    // a container's files are reachable while it is stopped: it starts with its new name already
+    if (!vm) await renameInside(to, name, false, log);
+    if (running) {
+      log(`Starting ${to}`);
+      await startNow(to);
+      if (vm && (await agentOf(to, true))) await renameInside(to, name, true, log);
+    } else if (vm) log("The system inside takes the new host name when it is renamed there too: a stopped virtual machine's files cannot be reached");
+    const machine = machines().find((m) => (c.mac && (m.info?.macs ?? []).some((card) => card.mac.toLowerCase() === c.mac)) || m.info?.hostname === name);
+    if (machine && machine.name === name) {
+      try {
+        renameMachine(machine.id, to, by);
+      } catch (e) {
+        log(`The machine keeps its name: ${e instanceof AppError ? e.code : e}`);
+      }
+    }
+    record("containers.renamed", { user: by, detail: `${name} → ${to}` });
+    await lookAtIncus();
+    bus.publish("containers");
+  }), true, { app: to, machine: "" });
+  return { job: job.id, name: to };
+}
+
+/**
+ * A copy of a container or virtual machine under a new name (a job of kind `container`), in the place chosen,
+ * without its snapshots. A running one is copied from a snapshot of the moment, taken for it and deleted
+ * after, so it goes on running. The copy is left running. Its first start is without its network: what makes it the same
+ * system as the original is taken away first (`CLONE_SCRIPT`), and only then it is let out — with Hata's
+ * client it pairs anew as a machine of its own.
+ */
+export async function cloneInstance(name: string, input: Record<string, unknown>, by: string): Promise<{ job: string; name: string }> {
+  const r = await ready();
+  const c = await findContainer(name);
+  let to: string;
+  try {
+    to = readName(input.name, r.containers.map((x) => x.name));
+  } catch (e) {
+    throw new AppError("containers.badField", 400, { field: e instanceof FieldError ? e.field : "" });
+  }
+  const target = typeof input.place === "string" && input.place ? r.places.find((p) => p.name === input.place) : r.places.find((p) => p.name === c.place);
+  if (!target) throw new AppError("containers.place.notFound", 404, { name: String(input.place ?? c.place) });
+  if (target.away) throw new AppError("containers.place.away", 409, { name: target.name });
+  if (c.kind === "vm" && r.vms.state !== "ready") throw new AppError("containers.vm." + (r.vms.state === "missing" ? "notInstalled" : r.vms.state), 409);
+  const job = startJob(`incus:${to}`, "container", by, async (log) => told(log, async () => {
+    const vm = c.kind === "vm";
+    const raw = (await incus("GET", `/1.0/instances/${name}`)).metadata;
+    const quiet = nicsOf(raw.expanded_devices);
+    let snap = "";
+    if (c.status === "running") {
+      snap = `hata-copy-${Date.now().toString(36)}`;
+      log(`Taking a snapshot of ${name} to copy from (it keeps running)`);
+      await finished(await incus("POST", `/1.0/instances/${name}/snapshots`, { name: snap }), 1800);
+    }
+    try {
+      log(`Copying ${name} to ${to} in ${target.name}`);
+      await finished(await incus("POST", "/1.0/instances", cloneRequest(raw, { from: name, name: to, source: snap ? `${name}/${snap}` : name, pool: target.name, driver: target.driver, quiet })), 6 * 3600);
+    } finally {
+      if (snap) await incus("DELETE", `/1.0/instances/${name}/snapshots/${snap}`).then((op) => finished(op, 600)).catch((e) => log(`The snapshot ${snap} of ${name} stays: ${e instanceof Error ? e.message : e}`));
+    }
+    bus.publish("containers");
+    record(vm ? "containers.vmCloned" : "containers.cloned", { user: by, detail: `${name} → ${to}` });
+    let client = false;
+    try {
+      log(`First start of ${to}, without its network`);
+      await startNow(to);
+      if (await agentOf(to, vm)) {
+        const ran = await run(["incus", "exec", to, "--", "sh", "-c", CLONE_SCRIPT], 120_000);
+        client = ran.out.includes("hata-client");
+        await renameInside(to, name, true, log);
+        log("Made a system of its own: identity, SSH keys" + (client ? ", Hata's client unpaired" : ""));
+      } else log("Its system did not answer: it is the same system as the original inside (identity, keys, Hata's client)");
+      await stopNow(to);
+    } finally {
+      // the network back whatever happened: a copy is never left cut off
+      const now = (await incus("GET", `/1.0/instances/${to}`)).metadata;
+      const devices = { ...(now.devices ?? {}) };
+      for (const k of quiet) {
+        if (raw.devices?.[k]) devices[k] = raw.devices[k];
+        else delete devices[k];
+      }
+      await finished(await incus("PUT", `/1.0/instances/${to}`, { ...now, devices }), 120);
+    }
+    log(`Starting ${to}`);
+    await startNow(to);
+    if (!client) return;
+    const gateway = r.network?.address.split("/")[0] ?? "";
+    if (!gateway) throw new AppError("containers.noNetwork", 409);
+    if (vm && !(await agentOf(to, true))) throw new AppError("containers.vm.noAgent", 409, { name: to });
+    const before = new Set(machines().map((m) => m.id));
+    const url = `http://${gateway}:${listenAddress().port}`;
+    log("Pairing Hata's client again");
+    // the copy gets its address a moment after it starts
+    const line = `for i in $(seq 1 90); do curl -fsS -o /dev/null ${url}/ 2>/dev/null && break; sleep 2; done; curl -fsSL ${url}/client/${(await invite(by)).code} | sh`;
+    const ran = await runLogged(["incus", "exec", to, "--", "sh", "-c", line], log, 10 * 60_000);
+    if (ran.code !== 0) throw new AppError("containers.setupFailed", 409, { name: to });
+    job.result = { machine: await awaitMachine(to, before, log) };
+  }), true, { app: to, machine: "" });
+  return { job: job.id, name: to };
 }
 
 // --- A virtual machine's screen ------------------------------------------------------------------------------

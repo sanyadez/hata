@@ -36,7 +36,7 @@ import { containersOf, machinesAway, machines as machineList, open as openOnMach
 import { moveApp } from "./moveapp";
 import { backups as pveBackups, cloneGuest, load as pveLoad, changeGuest, restoreBackup, createGuest, createVm, sendFile, templates as pveTemplates, guestSettings, guestOfMachine, host as pveHost, hosts as pveHosts, newOptions, power as pvePower, proxmoxTrouble, refresh as refreshPve, removeGuest, snapshotAction, snapshots as pveSnapshots, takeBackup, takeSnapshot, taskLog, taskNow } from "./proxmox";
 import { MuxError } from "./mux";
-import { act as containerAct, create as createContainer, removeContainer, removeSnapshot as removeContainerSnapshot, report as containersReport, restoreSnapshot as restoreContainerSnapshot, setLimits as setContainerLimits, takeSnapshot as takeContainerSnapshot } from "./containers";
+import { act as containerAct, cloneInstance as cloneContainer, create as createContainer, renameInstance as renameContainer, removeContainer, removeSnapshot as removeContainerSnapshot, report as containersReport, restoreSnapshot as restoreContainerSnapshot, setLimits as setContainerLimits, takeSnapshot as takeContainerSnapshot } from "./containers";
 import { LIMITED, NAME_RE as INSTANCE_RE } from "./incus";
 import { backupInstance, restoreInstance } from "./incusbackup";
 import { VERSION } from "./version";
@@ -1274,7 +1274,7 @@ function instanceName(args: Record<string, unknown>): string {
 
 /** Which argument of the tools a field the form checks is, and what it wants */
 const FIELD_WORDS: Record<string, string> = {
-  name: "`name`: lowercase Latin letters, digits and -, starting with a letter, up to 63, not install / setup / vms",
+  name: "`name`: lowercase Latin letters, digits and -, starting with a letter, up to 63, not install / setup / vms / places",
   taken: "`name`: a container or virtual machine of that name is there already",
   image: "`system`: one of `systems` from `containers` — and for a virtual machine one marked virtualMachine",
   cores: "`cores`: a whole number from 0 to 256",
@@ -1448,6 +1448,36 @@ const ctFull: (Omit<Tool, "level" | "effect"> & { effect?: Tool["effect"] })[] =
         // what is not given stays as it is
         await fields(() => setContainerLimits(name, { cores: args.cores ?? c.cores, memory: args.memory ?? c.memory, disk: args.disk, autostart: args.startsWithServer ?? c.autostart, nesting: args.nesting ?? c.nesting }, caller.user));
         return { done: true, container: name };
+      }),
+  },
+  {
+    name: "container_rename",
+    title: "Rename a container or virtual machine",
+    description: "Gives a container or virtual machine of this server another name, which is its host name too: a running one is stopped for it and started again, the system inside is given the new name, its machine in Hata's list and its backups follow. Expect a running job and ask job_get.",
+    effect: "change",
+    input: { ...INSTANCE, name: { type: "string", description: "The new name: lowercase Latin letters, digits and -, starting with a letter" } },
+    required: ["container", "name"],
+    run: (args, caller) =>
+      wrap(async () => {
+        await incusReady();
+        const made = await fields(() => renameContainer(instanceName(args), args.name, caller.user));
+        const job = getJob(made.job);
+        return job ? settle(job) : { container: made.name, job: made.job };
+      }),
+  },
+  {
+    name: "container_clone",
+    title: "Copy a container or virtual machine",
+    description: "Makes a copy of a container or virtual machine of this server under a new name, without its snapshots, and starts it; a running original goes on running (it is copied from a snapshot of the moment). The copy gets its own address, identity and SSH keys, and with Hata's client in it becomes a machine of its own (`machine` in the job's result). Takes minutes: expect a running job and ask job_get.",
+    effect: "change",
+    input: { ...INSTANCE, name: { type: "string", description: "The copy's name: lowercase Latin letters, digits and -, starting with a letter" }, place: { type: "string", description: "One of `places` from `containers`; the original's by default" } },
+    required: ["container", "name"],
+    run: (args, caller) =>
+      wrap(async () => {
+        await incusReady();
+        const made = await fields(() => cloneContainer(instanceName(args), { name: args.name, place: args.place }, caller.user));
+        const job = getJob(made.job);
+        return job ? settle(job) : { container: made.name, job: made.job };
       }),
   },
   {

@@ -15,9 +15,9 @@ import { record } from "./activity";
 import { AppError, jobFinished, startJob, type Job, type Log } from "./apps";
 import { addBackupSource, appBackupDir, backupDir, deleteFiles, expired, listSnapshots, mirror, SNAPSHOT_ID_RE, snapshotId, type BackupApp, type Snapshot, type SnapshotReason } from "./backup";
 import { bus } from "./bus";
-import { settings } from "./config";
-import { findContainer, finished, incus, placeForRestore, SOCKET } from "./containers";
-import { writeJsonAtomic } from "./fsutil";
+import { saveSettings, settings } from "./config";
+import { findContainer, finished, incus, onInstanceRenamed, placeForRestore, SOCKET } from "./containers";
+import { readJsonFile, writeJsonAtomic } from "./fsutil";
 import { readInstance, type Container } from "./incus";
 
 export const INCUS_KEY_RE = /^([a-z][a-z0-9-]{0,62})@incus$/;
@@ -202,3 +202,22 @@ async function runAll(user: string, reason: SnapshotReason): Promise<{ ok: numbe
 }
 
 addBackupSource(entries, runAll);
+
+/**
+ * A renamed instance keeps its backups: their folder takes the new name (unless one of that name is kept already —
+ * a deleted instance's — then they stay where they are), and so does its place in the list left out of the daily run.
+ */
+onInstanceRenamed((from, to) => {
+  const [was, now] = [keyOf(from), keyOf(to)];
+  if (settings.backup.exclude.includes(was)) {
+    settings.backup.exclude = settings.backup.exclude.map((k) => (k === was ? now : k));
+    saveSettings();
+  }
+  const [old, next] = [appBackupDir(was), appBackupDir(now)];
+  if (!existsSync(old) || existsSync(next)) return;
+  renameSync(old, next);
+  for (const file of readdirSync(next).filter((f) => f.endsWith(".json"))) {
+    const snapshot = readJsonFile<Snapshot | null>(join(next, file), null);
+    if (snapshot?.app === was) writeJsonAtomic(join(next, file), { ...snapshot, app: now });
+  }
+});

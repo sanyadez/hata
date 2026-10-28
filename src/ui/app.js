@@ -3030,6 +3030,64 @@ function moveContainerDialog(c) {
   );
 }
 
+/** The name field of a renamed or copied instance: the rules of a new one */
+const instanceNameInput = (value) => h("input", { required: true, value, pattern: "[a-z][a-z0-9\\-]{0,61}[a-z0-9]", autocapitalize: "none", spellcheck: false, class: "mono" });
+
+/** Sends a rename or a copy and follows its job; a field that is not right is said under the form */
+async function instanceJob(path, data, error, dialog, button) {
+  button.disabled = true;
+  error.textContent = "";
+  try {
+    const r = await api("POST", path, data);
+    dialog.close();
+    void jobDialog(r.job, "container", r.name, () => {
+      void loadContainers();
+      void loadMachines();
+    });
+  } catch (err) {
+    error.textContent = err.code === "containers.badField" ? t("incus.bad." + err.detail.field) : errorText(err);
+    button.disabled = false;
+  }
+}
+
+function renameContainerDialog(c) {
+  const name = instanceNameInput(c.name);
+  const error = h("p", { class: "error", role: "alert" });
+  let dialog;
+  const go = (e) => instanceJob(`/api/containers/${c.name}/rename`, { name: name.value.trim() }, error, dialog, e.currentTarget);
+  dialog = openDialog(
+    "",
+    h("header", null, h("h2", { class: "grow clip" }, t("incus.renameTitle", { name: c.name })), closeX(() => dialog)),
+    h("p", { class: "muted small" }, t(c.status !== "running" ? (c.kind === "vm" ? "incus.renameLeadVmStopped" : "incus.renameLead") : "incus.renameLeadRunning", { name: c.name })),
+    field(t("incus.newName"), name, t("incus.nameHint")),
+    error,
+    h("footer", null, closeButton(() => dialog, t("common.cancel")), button(t("incus.rename"), { class: "primary", onclick: go }, "edit")),
+  );
+  name.select();
+}
+
+function cloneContainerDialog(c) {
+  const d = incusUi.data;
+  const name = instanceNameInput(`${c.name.slice(0, 57)}-copy`);
+  const places = d?.places ?? [];
+  const place = h("select", null, places.map((p) => h("option", { value: p.name }, `${p.name} — ${p.path || t("incus.place.systemPath")}`)));
+  place.value = c.place;
+  const error = h("p", { class: "error", role: "alert" });
+  let dialog;
+  const go = (e) => instanceJob(`/api/containers/${c.name}/clone`, { name: name.value.trim(), place: place.value }, error, dialog, e.currentTarget);
+  dialog = openDialog(
+    "",
+    h("header", null, h("h2", { class: "grow clip" }, t("incus.cloneTitle", { name: c.name })), closeX(() => dialog)),
+    h("p", { class: "muted small" }, t(c.status === "running" ? "incus.cloneLeadRunning" : "incus.cloneLead", { name: c.name })),
+    c.machine && h("p", { class: "muted small" }, t("incus.cloneMachine")),
+    field(t("incus.name"), name, t("incus.nameHint")),
+    places.length > 1 && field(t("incus.place.label"), place),
+    error,
+    h("footer", null, closeButton(() => dialog, t("common.cancel")), button(t("incus.clone"), { class: "primary", onclick: go }, "copy")),
+  );
+  name.select();
+}
+
 function containerRow(c) {
   const running = c.status === "running";
   const limits = [c.cores ? t("incus.cores", { n: c.cores }) : t("incus.allCores"), c.memory ? bytes(c.memory * 1024 * 1024) : t("incus.allMemory"), c.disk ? t("incus.diskOf", { size: bytes(c.disk * 1024 ** 3) }) : null].filter(Boolean).join(" · ");
@@ -3085,6 +3143,8 @@ function containerMenu(c, at) {
     c.machine && { label: t("incus.openMachine"), icon: "server", href: `#/machines/${c.machine}` },
     { label: t("incus.limits") + "…", icon: "settings", run: () => containerLimitsDialog(c) },
     { label: t("incus.snapshots") + "…", icon: "clock", run: () => containerSnapshotsDialog(c) },
+    { label: t("incus.rename") + "…", icon: "edit", run: () => renameContainerDialog(c) },
+    { label: t("incus.clone") + "…", icon: "copy", run: () => cloneContainerDialog(c) },
     (incusUi.data?.places ?? []).length > 1 && { label: t("incus.place.moveItem"), icon: "arrow", run: () => moveContainerDialog(c) },
     { label: t("incus.backupNow"), icon: "archive", run: () => backupNow({ name: `${c.name}@incus`, title: c.name, incus: { kind: c.kind } }) },
     { label: t("incus.backups"), icon: "archive", href: "#/settings/backups" },

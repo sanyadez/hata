@@ -80,11 +80,17 @@ const whole = (value: unknown, min: number, max: number, field: string): number 
   return n;
 };
 
-/** What the "New container" dialog sent, checked */
-export function readNew(input: Record<string, unknown>, taken: string[]): NewContainer {
-  const name = String(input.name ?? "").trim().toLowerCase();
+/** A name for a new instance, a copy or a renamed one: also its host name, so the rules of one */
+export function readName(input: unknown, taken: string[]): string {
+  const name = String(input ?? "").trim().toLowerCase();
   if (!NAME_RE.test(name) || name.includes("--") || RESERVED.includes(name)) throw new FieldError("name");
   if (taken.includes(name)) throw new FieldError("taken");
+  return name;
+}
+
+/** What the "New container" dialog sent, checked */
+export function readNew(input: Record<string, unknown>, taken: string[]): NewContainer {
+  const name = readName(input.name, taken);
   const kind: Kind = input.kind === "vm" ? "vm" : "container";
   const image = IMAGES.find((i) => i.id === input.image);
   if (!image || (kind === "vm" ? !image.vm : !image.container)) throw new FieldError("image");
@@ -134,6 +140,61 @@ export function withScreen(raw: string, name: string): string {
   const arg = screenArg(name);
   return raw.includes(arg) ? raw : [raw.trim(), arg].filter(Boolean).join(" ");
 }
+
+/** `raw.qemu` of a machine renamed or copied: its screen moves to the folder of the new name; one without a screen stays so */
+export function screenRenamed(raw: string, from: string, to: string): string {
+  return raw.split(screenArg(from)).join(screenArg(to));
+}
+
+/**
+ * `/etc/hostname` and `/etc/hosts` of a system renamed or copied, where they still say the old name (an image's
+ * own templates may have done it already on a copy); `null` — nothing to change.
+ */
+export function hostFiles(files: { hostname: string | null; hosts: string | null }, from: string, to: string): { hostname?: string; hosts?: string } | null {
+  // a system without the file (Fedora) takes its name from Incus; its hosts may still say the old one
+  if (files.hostname !== null && files.hostname.trim() !== from) return null;
+  const out: { hostname?: string; hosts?: string } = files.hostname === null ? {} : { hostname: to + "\n" };
+  // the name as a whole word of a line: `127.0.1.1 box1`, never a part of another name
+  const hosts = files.hosts?.replace(new RegExp(`(?<=^|\\s)${from}(?=\\s|$)`, "gm"), to);
+  if (hosts !== undefined && hosts !== files.hosts) out.hosts = hosts;
+  return Object.keys(out).length ? out : null;
+}
+
+/**
+ * What a copy runs once, started without its network, so it is not taken for the original: Hata's client
+ * forgets its pairing (it pairs anew, as a machine of its own; "hata-client" is printed when it was there),
+ * the system gets an identity of its own (DHCP knows a system by it, so the copy would take the original's
+ * address) and SSH host keys of its own.
+ */
+export const CLONE_SCRIPT = [
+  "if [ -f /var/lib/hata-client/link.json ]; then systemctl disable --now hata-client.service >/dev/null 2>&1 || true; rm -f /var/lib/hata-client/link.json; echo hata-client; fi",
+  // Debian's /var/lib/dbus/machine-id is a link to it: only a file of its own is removed
+  "if [ -s /etc/machine-id ]; then rm -f /etc/machine-id; [ -L /var/lib/dbus/machine-id ] || rm -f /var/lib/dbus/machine-id; systemd-machine-id-setup >/dev/null 2>&1 || dbus-uuidgen --ensure=/etc/machine-id >/dev/null 2>&1 || true; fi",
+  "if ls /etc/ssh/ssh_host_*_key >/dev/null 2>&1; then rm -f /etc/ssh/ssh_host_*; ssh-keygen -A >/dev/null 2>&1 || true; fi",
+].join("\n") + "\n";
+
+/**
+ * The request that copies an instance (`source` — its name, or `name/snapshot` for a running one): into the place
+ * chosen, without its snapshots; its network cards switched off for the first start (`quiet`). Incus adds what
+ * the original has and the request does not say, and gives the copy new MAC addresses.
+ */
+export function cloneRequest(src: { type: string; config?: Record<string, string>; devices?: Record<string, Record<string, string>>; expanded_devices?: Record<string, Record<string, string>> }, o: { from: string; name: string; source: string; pool: string; driver: string; quiet: string[] }): Record<string, unknown> {
+  const root: Record<string, string> = { type: "disk", path: "/", ...(src.expanded_devices?.root ?? {}), ...(src.devices?.root ?? {}), pool: o.pool };
+  // a plain folder cannot hold a container's disk to a size
+  if (src.type === "container" && !LIMITED.includes(o.driver)) delete root.size;
+  const raw = src.config?.["raw.qemu"] ?? "";
+  const config = src.type === "virtual-machine" && raw.includes(screenArg(o.from)) ? { "raw.qemu": screenRenamed(raw, o.from, o.name) } : {};
+  return {
+    name: o.name,
+    type: src.type,
+    source: { type: "copy", source: o.source, instance_only: true },
+    config,
+    devices: { root, ...Object.fromEntries(o.quiet.map((k) => [k, { type: "none" }])) },
+  };
+}
+
+/** The network cards of an instance, by device name: switched off for a copy's first start */
+export const nicsOf = (devices: Record<string, Record<string, string>> | undefined): string[] => Object.entries(devices ?? {}).filter(([, d]) => d.type === "nic").map(([k]) => k);
 
 /** The disk a new one gets: in the place chosen, of the size asked (a container's only where the place can hold it to one) */
 export function devicesOf(c: Pick<NewContainer, "kind" | "disk">, pool: string): Record<string, Record<string, string>> {
