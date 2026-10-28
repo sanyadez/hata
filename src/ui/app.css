@@ -504,6 +504,11 @@ details > summary { cursor: pointer; margin-bottom: 8px; }
 .import .card.pad > footer { align-items: center; }
 .row-actions .link { white-space: nowrap; }
 .row-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
+/* a split button: an action and the arrow of its menu, one shape */
+.split { display: inline-flex; }
+.split > .btn:not(:last-child) { border-top-right-radius: 0; border-bottom-right-radius: 0; }
+.split > .btn + .btn { border-top-left-radius: 0; border-bottom-left-radius: 0; margin-left: -1px; padding: 0 8px; }
+.split > .btn.primary + .btn.primary { border-left-color: color-mix(in srgb, var(--on-accent), transparent 70%); }
 tr.removed .app-icon { opacity: 0.5; }
 .side form footer { display: flex; justify-content: flex-end; }
 

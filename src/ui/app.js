@@ -1945,10 +1945,16 @@ function attentionItem(item) {
   const title = t(base + ".title", detail);
   const openMore = (at) => menuAt(at, menuHeader(title, null, ATTENTION_ICONS[item.code.split(".")[0]] ?? "alert"), rest);
   if (rest.length) {
-    main.push(button("", { class: "small ghost", title: t("attention.more"), "aria-label": t("attention.more"), onclick: (e) => {
-      const r = e.currentTarget.getBoundingClientRect();
+    // a split button: the arrow is joined to the first action, so the rest is seen to be there
+    const opener = (e) => {
+      const r = e.currentTarget.closest(".split").getBoundingClientRect();
       openMore({ x: r.left, y: r.bottom + 4 });
-    } }, "more"));
+    };
+    const first = main[0];
+    if (first) {
+      const arrow = button("", { class: first.className.replace(/\bbtn\b/, "").trim() + " split-more", title: t("attention.more"), "aria-label": t("attention.more"), "aria-haspopup": "menu", onclick: opener }, "down");
+      main[0] = h("span", { class: "split" }, first, arrow);
+    } else main.push(h("span", { class: "split" }, button(t("attention.more"), { class: "small split-more", "aria-haspopup": "menu", onclick: opener }, "down")));
   }
   return h(
     "div",

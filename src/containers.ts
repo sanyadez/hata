@@ -245,6 +245,13 @@ async function setUp(): Promise<boolean> {
 let seen: { name: string; mac: string; kind: string }[] = [];
 
 /** What a machine is here, by one of its cards or its host name: "container", "vm"; "" — neither */
+/** The instance of this server a machine is, as last looked at, and whether it runs */
+export function instanceOfMachine(macs: string[], hostname: string): { name: string; running: boolean } | null {
+  const cards = new Set(macs.map((m) => m.toLowerCase()));
+  const c = lastLook.instances.find((x) => (x.mac && cards.has(x.mac)) || x.name === hostname);
+  return c ? { name: c.name, running: c.status === "running" } : null;
+}
+
 export function containerOfMachine(macs: string[], hostname: string): string {
   const cards = new Set(macs.map((m) => m.toLowerCase()));
   return seen.find((c) => (c.mac && cards.has(c.mac)) || c.name === hostname)?.kind ?? "";
