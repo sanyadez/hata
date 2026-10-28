@@ -280,7 +280,8 @@ Early development. What works today:
 - containers and virtual machines on the server itself (Incus, installed by a button): a Debian, Ubuntu,
   Fedora, Rocky Linux or Alpine system of its own in a minute, with Docker and Hata's client in it if
   you wish — it then shows up as one more machine; its cores, memory and disk held to what you give it,
-  start and stop, snapshots taken and put back, a shell inside, and a whole copy of it in the daily
+  start and stop, renamed or cloned (a clone is a machine of its own),
+  snapshots taken and put back, a shell inside, and a whole copy of it in the daily
   backups next to the apps. Where they live is yours to choose — a folder on another disk, Btrfs used
   where the disk has it — and they move between places. A container that should run and does not, or an
   Incus that stops answering, shows up under "needs attention". Virtual machines are a test feature, for
