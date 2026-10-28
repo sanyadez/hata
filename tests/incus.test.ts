@@ -1,0 +1,269 @@
+import { expect, test } from "bun:test";
+import { cloneRequest, hostFiles, nicsOf, readName, screenRenamed, screenSocket, withScreen, trouble, SILENT_MS, bridgeRules, configOf, devicesOf, diskChange, FieldError, placeFor, poolName, insideNarrowMap, limitsChange, megabytes, readInstance, readNew, setupScript, snapshotName } from "../src/incus";
+
+const field = (f: () => unknown): string => {
+  try {
+    f();
+  } catch (e) {
+    return e instanceof FieldError ? e.field : "other";
+  }
+  return "";
+};
+
+test("a new container is read and checked", () => {
+  const c = readNew({ name: " Docker-1 ", image: "debian-13", cores: 2, memory: 1024, docker: true }, []);
+  expect(c).toMatchObject({ name: "docker-1", cores: 2, memory: 1024, autostart: true, docker: true, client: true });
+  expect(c.image.alias).toBe("debian/13");
+  expect(field(() => readNew({ name: "1abc", image: "debian-13" }, []))).toBe("name");
+  expect(field(() => readNew({ name: "a--b", image: "debian-13" }, []))).toBe("name");
+  expect(field(() => readNew({ name: "web", image: "debian-13" }, ["web"]))).toBe("taken");
+  expect(field(() => readNew({ name: "web", image: "arch" }, []))).toBe("image");
+  expect(field(() => readNew({ name: "web", image: "debian-13", memory: 64 }, []))).toBe("memory");
+  expect(field(() => readNew({ name: "web", image: "debian-13", cores: 1.5 }, []))).toBe("cores");
+  // no client without systemd, and Docker only comes with it
+  expect(readNew({ name: "tiny", image: "alpine-3.22", docker: true }, [])).toMatchObject({ client: false, docker: false });
+  expect(readNew({ name: "plain", image: "debian-12", client: false, docker: true }, [])).toMatchObject({ client: false, docker: false });
+});
+
+test("a container's settings", () => {
+  expect(configOf({ cores: 2, memory: 512, autostart: true, docker: true })).toEqual({ "boot.autostart": "true", "user.hata": "true", "limits.cpu": "2", "limits.memory": "512MiB", "security.nesting": "true" });
+  expect(configOf({ cores: 0, memory: 0, autostart: false })).toEqual({ "boot.autostart": "false", "user.hata": "true" });
+});
+
+test("only what differs changes, and a limit taken away is an empty value", () => {
+  const now = { "limits.cpu": "2", "limits.memory": "1024MiB", "boot.autostart": "true", "security.nesting": "true" };
+  expect(limitsChange({ cores: 2, memory: 1024, autostart: true, nesting: true }, now)).toEqual({});
+  expect(limitsChange({ cores: 0, memory: 2048, autostart: false, nesting: false }, now)).toEqual({ "limits.cpu": "", "limits.memory": "2048MiB", "boot.autostart": "false", "security.nesting": "" });
+  // a container made elsewhere has no autostart key: "off" is what it is already
+  expect(limitsChange({ cores: 0, memory: 0, autostart: false }, {})).toEqual({});
+  expect(field(() => limitsChange({ cores: -1 }, {}))).toBe("cores");
+  // what is not sent stays: a request with the disk alone took the cores and the memory away once
+  expect(limitsChange({ disk: 8 }, now)).toEqual({});
+  expect(limitsChange({ memory: 512 }, now)).toEqual({ "limits.memory": "512MiB" });
+});
+
+test("sizes in megabytes", () => {
+  expect(megabytes("512MiB")).toBe(512);
+  expect(megabytes("2GiB")).toBe(2048);
+  expect(megabytes("1GB")).toBe(954);
+  expect(megabytes("1073741824")).toBe(1024);
+  expect(megabytes(undefined)).toBe(0);
+  expect(megabytes("50%")).toBe(0);
+});
+
+test("an instance as Incus gives it", () => {
+  const raw = {
+    name: "t1",
+    type: "container",
+    status: "Running",
+    created_at: "2026-10-27T16:20:00Z",
+    config: { "image.os": "debian", "image.release": "trixie", "limits.cpu": "2", "limits.memory": "1GiB", "boot.autostart": "true", "user.hata": "true", "volatile.eth0.hwaddr": "10:66:6A:AA:BB:CC" },
+    state: {
+      memory: { usage: 26 * 1024 * 1024 },
+      cpu: { usage: 5 },
+      processes: 12,
+      disk: {},
+      network: {
+        docker0: { type: "broadcast", hwaddr: "02:42:00:00:00:01", addresses: [{ family: "inet", address: "172.17.0.1", scope: "global" }] },
+        lo: { type: "loopback", addresses: [{ family: "inet", address: "127.0.0.1", scope: "local" }] },
+        eth0: { type: "broadcast", hwaddr: "10:66:6a:aa:bb:cc", addresses: [{ family: "inet6", address: "fe80::1", scope: "link" }, { family: "inet", address: "10.254.231.206", scope: "global" }] },
+      },
+    },
+    snapshots: [
+      { name: "t1/a", created_at: "2026-10-27T17:00:00Z" },
+      { name: "t1/b", created_at: "2026-10-27T18:00:00Z" },
+    ],
+  };
+  const c = readInstance(raw)!;
+  expect(c).toMatchObject({ name: "t1", status: "running", os: "Debian trixie", cores: 2, memory: 1024, autostart: true, nesting: false, ours: true, address: "10.254.231.206", mac: "10:66:6a:aa:bb:cc" });
+  expect(c.usage?.memory).toBe(26 * 1024 * 1024);
+  expect(c.snapshots.map((s) => s.name)).toEqual(["b", "a"]);
+  expect(readInstance({ ...raw, status: "Stopped", state: null })!.usage).toBeNull();
+  expect(readInstance({ ...raw, type: "virtual-machine" })!.kind).toBe("vm");
+  expect(readInstance({ ...raw, type: "image" })).toBeNull();
+});
+
+test("inside a container with part of the user ids", () => {
+  expect(insideNarrowMap("         0          0 4294967295\n")).toBe(false);
+  expect(insideNarrowMap("         0     100000      65536\n")).toBe(true);
+  expect(insideNarrowMap("0 1000000 1000000000")).toBe(true);
+  expect(insideNarrowMap("")).toBe(false);
+});
+
+test("the bridge's rules and the setup inside", () => {
+  expect(bridgeRules("hatabr0")).toEqual([
+    ["-i", "hatabr0", "-j", "ACCEPT"],
+    ["-o", "hatabr0", "-m", "conntrack", "--ctstate", "RELATED,ESTABLISHED", "-j", "ACCEPT"],
+  ]);
+  const script = setupScript({ docker: true, client: true }, "curl -fsSL http://10.0.0.1:80/client/x | sh");
+  expect(script).toContain("get.docker.com");
+  expect(script.trim().split("\n").pop()).toBe("curl -fsSL http://10.0.0.1:80/client/x | sh");
+  expect(setupScript({ docker: false, client: true }, "line")).not.toContain("docker");
+});
+
+test("a snapshot's name", () => {
+  expect(snapshotName("before-update")).toBe("before-update");
+  expect(snapshotName("", new Date(2026, 9, 27, 9, 5, 7))).toBe("snap-20261027-090507");
+  expect(field(() => snapshotName("a/b"))).toBe("snapshot");
+});
+
+test("a virtual machine: only the images tried as one, a disk of its own, no nesting", () => {
+  const v = readNew({ kind: "vm", name: "vm1", image: "debian-13", cores: 2, memory: 2048, disk: 20, docker: true }, []);
+  expect(v).toMatchObject({ kind: "vm", disk: 20, docker: true, client: true });
+  expect(readNew({ kind: "vm", name: "vm2", image: "debian-13" }, []).disk).toBe(10);
+  expect(readNew({ name: "ct", image: "debian-13", disk: 50 }, []).disk).toBe(50);
+  expect(field(() => readNew({ kind: "vm", name: "vm3", image: "alpine-3.22" }, []))).toBe("image");
+  expect(field(() => readNew({ kind: "vm", name: "vm4", image: "debian-13", disk: 2 }, []))).toBe("disk");
+  expect(configOf({ ...v, kind: "vm" })).toEqual({ "boot.autostart": "true", "user.hata": "true", "limits.cpu": "2", "limits.memory": "2048MiB", "security.secureboot": "false" });
+  expect(devicesOf(v, "default")).toEqual({ root: { type: "disk", path: "/", pool: "default", size: "20GiB" } });
+  expect(devicesOf({ kind: "container", disk: 0 }, "disk1")).toEqual({ root: { type: "disk", path: "/", pool: "disk1" } });
+  expect(readInstance({ name: "vm1", type: "virtual-machine", status: "Stopped", config: {} })!.kind).toBe("vm");
+});
+
+test("the names the page's routes take are refused", () => {
+  for (const name of ["install", "setup", "vms"]) expect(field(() => readNew({ name, image: "debian-13" }, []))).toBe("name");
+});
+
+test("a container's or virtual machine's snapshots are a folder of their own, also in the second copy", async () => {
+  const { BACKUP_KEY_RE } = await import("../src/backup");
+  const { isCopyFolder } = await import("../src/remote");
+  for (const key of ["box1@incus", "nextcloud", "app@0a1b2c3d"]) {
+    expect(BACKUP_KEY_RE.test(key)).toBe(true);
+    expect(isCopyFolder(key)).toBe(true);
+  }
+  for (const key of ["box1@lxd", "box1@", "@incus"]) expect(BACKUP_KEY_RE.test(key)).toBe(false);
+});
+
+test("a folder as a place for containers", () => {
+  const uses = { mounts: [{ path: "/", fstype: "ext4" }, { path: "/mnt/disk1", fstype: "btrfs" }, { path: "/mnt/usb", fstype: "exfat" }, { path: "/mnt/net/nas", fstype: "cifs" }, { path: "/mnt/storage", fstype: "fuse.mergerfs" }], dataRoot: "/DATA", backupDir: "/DATA/Backups", state: ["/var/lib/hata", "/etc/hata"], pools: ["/srv/ct"] };
+  expect(placeFor("/mnt/disk1/containers/", uses)).toEqual({ path: "/mnt/disk1/containers", driver: "btrfs", fstype: "btrfs" });
+  expect(placeFor("/srv/other", uses)).toEqual({ path: "/srv/other", driver: "dir", fstype: "ext4" });
+  const error = (p: string) => (placeFor(p, uses) as { error?: string }).error;
+  expect(error("relative")).toBe("containers.place.bad");
+  expect(error("/mnt/../etc")).toBe("containers.place.bad");
+  expect(error("/etc/incus")).toBe("containers.place.system");
+  expect(error("/")).toBe("containers.place.system");
+  expect(error("/var/lib/hata/ct")).toBe("containers.place.state");
+  expect(error("/DATA/ct")).toBe("containers.place.data");
+  expect(error("/srv/ct/inner")).toBe("containers.place.taken");
+  expect(error("/srv")).toBe("containers.place.taken");
+  for (const p of ["/mnt/usb/ct", "/mnt/net/nas/ct", "/mnt/storage/ct"]) expect(error(p)).toBe("containers.place.fs");
+});
+
+test("a place's name", () => {
+  expect(poolName("/mnt/disk1/containers", [])).toBe("disk1");
+  expect(poolName("/mnt/disk1/containers", ["disk1"])).toBe("disk1-2");
+  expect(poolName("/srv/Фото", [])).toBe("srv");
+});
+
+test("a disk's size: a container's limit set or taken away, a virtual machine's only grown", () => {
+  expect(readNew({ name: "c1", image: "debian-13", disk: 8 }, []).disk).toBe(8);
+  expect(readNew({ name: "c2", image: "debian-13" }, []).disk).toBe(0);
+  expect(devicesOf({ kind: "container", disk: 8 }, "ct")).toEqual({ root: { type: "disk", path: "/", pool: "ct", size: "8GiB" } });
+  expect(diskChange(undefined, 8, "container")).toBeUndefined();
+  expect(diskChange("", 8, "container")).toBeUndefined();
+  expect(diskChange(8, 8, "container")).toBeUndefined();
+  expect(diskChange(12, 8, "container")).toBe("12GiB");
+  expect(diskChange(4, 8, "container")).toBe("4GiB");
+  expect(diskChange(0, 8, "container")).toBe("");
+  expect(diskChange(20, 10, "vm")).toBe("20GiB");
+  expect(field(() => diskChange(8, 10, "vm"))).toBe("diskShrink");
+  expect(field(() => diskChange(-1, 10, "container"))).toBe("disk");
+  expect(readInstance({ name: "c", type: "container", status: "Stopped", config: {}, expanded_devices: { root: { pool: "ct", size: "8GiB" } } })).toMatchObject({ place: "ct", disk: 8 });
+});
+
+test("what of the containers needs attention", () => {
+  const c = (name: string, status: string, autostart = true) => ({ name, kind: "container" as const, status: status as "running", autostart });
+  const base = { installed: true, silentSince: null, stoppedByHand: [] as string[], now: 1_000_000 };
+  expect(trouble({ ...base, installed: false, instances: [c("a", "stopped")] })).toEqual([]);
+  expect(trouble({ ...base, instances: [c("a", "running"), c("b", "stopped", false)] })).toEqual([]);
+  expect(trouble({ ...base, instances: [c("a", "stopped"), c("b", "error")] })).toEqual([
+    { id: "incus:a", severity: "warn", code: "containers.down", detail: { name: "a", kind: "container" } },
+    { id: "incus:b", severity: "danger", code: "containers.error", detail: { name: "b", kind: "container" } },
+  ]);
+  // stopped through Hata on purpose: not a problem
+  expect(trouble({ ...base, stoppedByHand: ["a"], instances: [c("a", "stopped")] })).toEqual([]);
+  // silent for a moment (a restart of Incus) is not said; for long, it is, and nothing else is
+  expect(trouble({ ...base, silentSince: base.now - 30_000, instances: [c("a", "stopped")] })).toEqual([]);
+  expect(trouble({ ...base, silentSince: base.now - SILENT_MS, instances: [c("a", "stopped")] }).map((i) => i.code)).toEqual(["containers.away"]);
+});
+
+test("a virtual machine's screen is QEMU's VNC socket in its own folder of Incus", () => {
+  expect(screenSocket("vm1")).toBe("/run/incus/vm1/vnc.sock");
+  expect(withScreen("", "vm1")).toBe("-vnc unix:/run/incus/vm1/vnc.sock");
+  // what the person put there stays, and asking twice changes nothing
+  expect(withScreen(" -m 2G ", "vm1")).toBe("-m 2G -vnc unix:/run/incus/vm1/vnc.sock");
+  const once = withScreen("-m 2G", "vm1");
+  expect(withScreen(once, "vm1")).toBe(once);
+});
+
+test("the systems offered: a desktop is a virtual machine with room enough, dnf systems install with dnf", () => {
+  const desk = { name: "desk", image: "ubuntu-24.04-desktop", kind: "vm", memory: 4096 };
+  expect(() => readNew({ ...desk, kind: "container" }, [])).toThrow(FieldError);
+  expect(() => readNew({ ...desk, memory: 2048 }, [])).toThrow(FieldError);
+  expect(readNew(desk, []).disk).toBe(20);
+  expect(() => readNew({ ...desk, disk: 10 }, [])).toThrow(FieldError);
+  expect(() => readNew({ name: "a1", image: "alpine-3.22", kind: "vm" }, [])).toThrow(FieldError);
+  // Docker only where its script knows the system
+  expect(readNew({ name: "a1", image: "alpine-3.22", docker: true }, []).docker).toBe(false);
+  const dnf = setupScript({ docker: true, client: true, family: "dnf" }, "line");
+  expect(dnf).toContain("dnf install -y -q curl ca-certificates");
+  expect(dnf).not.toContain("apt-get");
+  expect(setupScript({ docker: false, client: true, family: "apt" }, "line")).toContain("apt-get install");
+});
+
+test("Docker on Rocky Linux comes from Docker's RHEL packages: its script does not know the system", () => {
+  const rocky = readNew({ name: "r1", image: "rockylinux-9", docker: true }, []);
+  expect(rocky.docker).toBe(true);
+  const script = setupScript({ ...rocky, family: rocky.image.family, dockerFrom: rocky.image.docker }, "line");
+  expect(script).toContain("download.docker.com/linux/rhel/docker-ce.repo");
+  expect(script).not.toContain("get.docker.com");
+});
+
+test("a container whose place is gone waits for its disk instead of being said to be down", () => {
+  const base = { installed: true, silentSince: null, stoppedByHand: [], now: 0 };
+  const instances = [{ name: "c1", kind: "container" as const, status: "stopped", autostart: true, place: "big" }];
+  expect(trouble({ ...base, instances, placesAway: [{ name: "big", path: "/mnt/big/incus" }] })).toEqual([{ id: "incus:c1", severity: "warn", code: "containers.placeAway", detail: { name: "c1", kind: "container", place: "big", path: "/mnt/big/incus" } }]);
+  expect(trouble({ ...base, instances, placesAway: [] })[0]!.code).toBe("containers.down");
+});
+
+test("a renamed or copied machine's screen moves to the new name's folder; none stays none", () => {
+  expect(screenRenamed("-m 2G -vnc unix:/run/incus/vm1/vnc.sock", "vm1", "web")).toBe("-m 2G -vnc unix:/run/incus/web/vnc.sock");
+  expect(screenRenamed("-m 2G", "vm1", "web")).toBe("-m 2G");
+  expect(screenRenamed("-vnc unix:/run/incus/vm10/vnc.sock", "vm1", "web")).toBe("-vnc unix:/run/incus/vm10/vnc.sock");
+});
+
+test("a new name takes the rules of a new instance", () => {
+  expect(readName(" Web-2 ", ["box1"])).toBe("web-2");
+  expect(() => readName("box1", ["box1"])).toThrow(FieldError);
+  for (const bad of ["", "1box", "box-", "a--b", "places", "ДІМ"]) expect(() => readName(bad, [])).toThrow(FieldError);
+});
+
+test("the host files change only where they still say the old name, as a whole word", () => {
+  expect(hostFiles({ hostname: "box1\n", hosts: "127.0.0.1 localhost\n127.0.1.1 box1\n10.0.0.2 box10 box1-db\n" }, "box1", "web")).toEqual({ hostname: "web\n", hosts: "127.0.0.1 localhost\n127.0.1.1 web\n10.0.0.2 box10 box1-db\n" });
+  // an image's own templates made it already, or the person named it otherwise
+  expect(hostFiles({ hostname: "web\n", hosts: "127.0.1.1 box1\n" }, "box1", "web")).toBeNull();
+  expect(hostFiles({ hostname: null, hosts: null }, "box1", "web")).toBeNull();
+  expect(hostFiles({ hostname: null, hosts: "127.0.1.1 box1\n" }, "box1", "web")).toEqual({ hosts: "127.0.1.1 web\n" });
+  expect(hostFiles({ hostname: "box1", hosts: "127.0.0.1 localhost\n" }, "box1", "web")).toEqual({ hostname: "web\n" });
+  expect(hostFiles({ hostname: "box1", hosts: null }, "box1", "web")).toEqual({ hostname: "web\n" });
+});
+
+test("a copy goes to the place chosen without snapshots, its cards off, a container's size only where it can be held", () => {
+  const src = { type: "container", config: { "limits.cpu": "2" }, devices: { root: { type: "disk", path: "/", pool: "fast", size: "8GiB" } }, expanded_devices: { root: { type: "disk", path: "/", pool: "fast", size: "8GiB" }, eth0: { type: "nic", network: "hatabr0", name: "eth0" } } };
+  const quiet = nicsOf(src.expanded_devices);
+  expect(quiet).toEqual(["eth0"]);
+  expect(cloneRequest(src, { from: "box1", name: "box2", source: "box1/hata-copy-x", pool: "default", driver: "dir", quiet })).toEqual({
+    name: "box2",
+    type: "container",
+    source: { type: "copy", source: "box1/hata-copy-x", instance_only: true },
+    config: {},
+    devices: { root: { type: "disk", path: "/", pool: "default" }, eth0: { type: "none" } },
+  });
+  expect((cloneRequest(src, { from: "box1", name: "box2", source: "box1", pool: "fast", driver: "btrfs", quiet: [] }).devices as any).root.size).toBe("8GiB");
+  const vm = { type: "virtual-machine", config: { "raw.qemu": "-vnc unix:/run/incus/vm1/vnc.sock" }, expanded_devices: { root: { type: "disk", path: "/", pool: "default", size: "20GiB" } } };
+  const req = cloneRequest(vm, { from: "vm1", name: "vm2", source: "vm1", pool: "default", driver: "dir", quiet: [] });
+  expect(req.config).toEqual({ "raw.qemu": "-vnc unix:/run/incus/vm2/vnc.sock" });
+  // a machine's disk is its system: it keeps its size anywhere
+  expect((req.devices as any).root.size).toBe("20GiB");
+});

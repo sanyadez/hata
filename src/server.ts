@@ -116,10 +116,12 @@ import { rightsOf } from "./memberfiles";
 import { letMachine, machineRights, machineShares, sharedOnMachines, shareOnMachine, startMachineUsers } from "./machineusers";
 import { moveApp, moveCheck } from "./moveapp";
 import { backupMachineApp, restoreMachineApp } from "./machinebackup";
+import { backupInstance, restoreInstance } from "./incusbackup";
 import { machineAccessRows, setMachineAccess, startMachineGates } from "./machinegate";
 import { applyMachineCompose, installComposeOnMachine, machineTiles, installOnMachine, machineAppAction, machineAppLogs, machineApps, machineCompose, removeMachineApp, storeAppFor } from "./machineapps";
 import { addStore, ARCH, catalogue, removeStore, scheduleStoreSync, StoreError, syncStore } from "./store";
 import { startSampler, systemStatus } from "./system";
+import { askScreen as containerAskScreen, openScreen as containerOpenScreen, isContainerScreen, screenOn as containerScreenOn, act as containerAct, cloneInstance as cloneContainer, renameInstance as renameContainer, addPlace as addContainerPlace, moveInstance as moveContainer, removePlace as removeContainerPlace, setStandardPlace, containerOfMachine, instanceOfMachine, containersTrouble, create as createContainer, install as installIncus, installVms as installIncusVms, removeContainer, removeSnapshot as removeContainerSnapshot, report as containersReport, restoreSnapshot as restoreContainerSnapshot, setLimits as setContainerLimits, setUpNow as setUpContainers, shellCommand as containerShell, shellReady as containerShellReady, startContainers, takeSnapshot as takeContainerSnapshot } from "./containers";
 import { askScreen as pveAskScreen, openScreen as pveOpenScreen, storageContent as pveStorageContent, removeVolume as pveRemoveVolume, cloneOptions as pveCloneOptions, cloneGuest as pveCloneGuest, makeTemplate as pveMakeTemplate, load as pveLoad, templates as pveTemplates, downloadTemplate as pveDownloadTemplate, removeTemplate as pveRemoveTemplate, setSchedule as pveSetSchedule, runScheduleNow as pveRunSchedule, restoreBackup as pveRestoreBackup, restoreOptions as pveRestoreOptions, changeGuest as pveChangeGuest, guestSettings as pveGuestSettings, installByConsole as pveInstallByConsole, openConsole as pveOpenConsole, type Console as PveConsole, addBySignIn as addPveBySignIn, removeGuest as pveRemoveGuest, addHost as addPve, createGuest as pveCreateGuest, createVm as pveCreateVm, sendFile as pveSendFile, receiveFile as pveReceiveFile, newOptions as pveNewOptions, backupJobs as pveBackupJobs, backups as pveBackups, changeHost as changePve, guestOfMachine, host as pveHost, hosts as pveHosts, power as pvePower, proxmoxTrouble, refresh as refreshPve, removeHost as removePve, snapshotAction as pveSnapshotAction, snapshots as pveSnapshots, startProxmox, takeBackup as pveTakeBackup, takeSnapshot as pveTakeSnapshot, taskLog as pveTaskLog } from "./proxmox";
 import { call as machineCall, clientBinary, containersOf, installScript, invite as machineInvite, INVITE_MS, linkData, linkHandlers, machine as machineView, MACHINE_ID_RE, machines as machineList, machinesAway, open as machineOpen, remove as removeMachine, rename as renameMachine, startMachines, updateClient, wake as wakeMachine, power as powerMachine, type LinkSocket } from "./machines";
 import { availableUpdate, cancelUpdate, checkForUpdate, confirmUpdate, scheduleUpdateChecks, startRollback, startUpdate, updateStatus } from "./update";
@@ -160,11 +162,16 @@ const LANGUAGES: Record<string, Record<string, string>> = { en, uk };
 /** Machines that are away, with what can bring each back: its guest started in Proxmox, or a wake-up signal */
 function awayMachines() {
   const all = machineList();
-  return machinesAway().map((away) => {
+  return machinesAway().flatMap((away) => {
     const m = all.find((x) => x.id === away.id);
-    const guest = m && guestOfMachine(m.id, (m.info?.macs ?? []).map((c) => c.mac), m.ip.replace(/^::ffff:/, ""));
+    const macs = (m?.info?.macs ?? []).map((c) => c.mac);
+    // a stopped container or virtual machine of this server: the containers' own item says so (and starts
+    // it) when it should run; one stopped through Hata is no news
+    const here = m ? instanceOfMachine(macs, m.info?.hostname ?? m.name) : null;
+    if (here && !here.running) return [];
+    const guest = m && guestOfMachine(m.id, macs, m.ip.replace(/^::ffff:/, ""));
     const pve = guest?.power && guest.status !== "running" ? { host: guest.host, hostName: guest.hostName, guest: guest.id, status: guest.status } : undefined;
-    return { ...away, wake: !pve && m?.info?.macs?.length ? "lan" : "", pve };
+    return [{ ...away, wake: !pve && !here && m?.info?.macs?.length ? "lan" : "", pve }];
   });
 }
 
@@ -474,6 +481,17 @@ async function openTerminal(req: Request, url: URL, server: Server, user: string
     if (server.upgrade(req, { data })) return undefined as never;
     return fail(400, "request.notFound");
   }
+  // a container of this server's Incus
+  const incusName = url.searchParams.get("incus");
+  if (incusName !== null) {
+    const ready = await containerShellReady(incusName);
+    if (ready !== "ok") return fail(ready === "notFound" ? 404 : 409, ready === "notFound" ? "containers.notFound" : "terminal.notRunning", { name: incusName });
+    if (!terminals.supported()) return fail(501, "terminal.unsupported");
+    if (!upgrade) return json({ ok: true });
+    const data: TerminalSocket = { kind: "terminal", key: `incus:${incusName}`, cols: url.searchParams.get("cols"), rows: url.searchParams.get("rows"), start: () => ({ cmd: containerShell(incusName), cwd: "/", env: terminalEnv() }), opened: () => record("system.terminal.container", { user, detail: incusName }) };
+    if (server.upgrade(req, { data })) return undefined as never;
+    return fail(400, "request.notFound");
+  }
   const app = url.searchParams.get("app");
   let key = "host";
   let start = (): TerminalStart => ({ cmd: shellCommand(), cwd: existsSync(homedir()) ? homedir() : "/", env: terminalEnv() });
@@ -640,12 +658,14 @@ interface PveScreenSocket {
 const MAX_SCREEN_BUFFER = 64 * 1024 * 1024;
 
 function pveScreenOpen(ws: ServerWebSocket<PveScreenSocket>): void {
-  pveOpenScreen(ws.data.key).then(
+  // the same page shows a virtual machine of this server: QEMU's VNC socket instead of Proxmox's
+  const here = isContainerScreen(ws.data.key);
+  (here ? containerOpenScreen(ws.data.key) : pveOpenScreen(ws.data.key)).then(
     ({ socket, name }) => {
       if (ws.readyState !== 1) return socket.close();
       ws.data.socket = socket;
       ws.data.name = name;
-      record("pve.console", { user: ws.data.user, detail: name });
+      record(here ? "containers.screen" : "pve.console", { user: ws.data.user, detail: name });
       socket.onData = (bytes) => {
         if (ws.getBufferedAmount() > MAX_SCREEN_BUFFER) return socket.close();
         ws.send(bytes);
@@ -1094,7 +1114,7 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
       site: { domain: siteDomain(), mode: settings.https.mode, local: localDomain() },
       // whether the assistant can be asked: the pages offer it next to what is wrong
       assistant: admin && assistantReady(assistantConfig()),
-      attention: admin ? notSnoozed(attention({ system, docker, apps, activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), exposed: exposedNics(), array: arrayTrouble(), shares: shareTrouble(), places: placesDown(), machines: awayMachines(), machineApps: onMachines, unused: unusedDisks(), filling: fillingUp(), pve: proxmoxTrouble(), ha: homeAssistantTrouble(), raid: poolsTrouble() })) : [],
+      attention: admin ? notSnoozed(attention({ system, docker, apps, activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), exposed: exposedNics(), array: arrayTrouble(), shares: shareTrouble(), places: placesDown(), machines: awayMachines(), machineApps: onMachines, unused: unusedDisks(), filling: fillingUp(), pve: proxmoxTrouble(), ha: homeAssistantTrouble(), raid: poolsTrouble(), containers: containersTrouble() })) : [],
       // who signed in from where, and what was installed by whom, is the administrators' business
       activity: admin ? recent(8) : [],
       // containers and compose projects on this machine that are not apps here yet
@@ -1797,21 +1817,27 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
     }
     if (inside[3] === "restore-files" && method === "POST") return json({ job: restoreFromSnapshot(inside[1]!, inside[2]!, (await body(req)).paths, user.name).id }, 202);
   }
-  // an app of another machine: its snapshot is taken there and kept here
-  const take = /^\/api\/backups\/([a-z0-9_-]+@[a-f0-9]{8})\/take$/.exec(path);
-  if (take && method === "POST") return json({ job: backupMachineApp(take[1]!, user.name).id }, 202);
-  const b = /^\/api\/backups\/([a-z0-9_-]+(?:@[a-f0-9]{8})?)\/(\d{8}-\d{6})(\/restore)?$/.exec(path);
-  if (b && b[3] && method === "POST") return json({ job: (b[1]!.includes("@") ? restoreMachineApp(b[1]!, b[2]!, user.name) : restoreSnapshot(b[1]!, b[2]!, user.name)).id }, 202);
+  // an app of another machine: its snapshot is taken there and kept here; a container or virtual machine of this server whole
+  const take = /^\/api\/backups\/([a-z0-9_-]+@(?:[a-f0-9]{8}|incus))\/take$/.exec(path);
+  if (take && method === "POST") return json({ job: (take[1]!.endsWith("@incus") ? backupInstance(take[1]!, user.name) : backupMachineApp(take[1]!, user.name)).id }, 202);
+  const b = /^\/api\/backups\/([a-z0-9_-]+(?:@[a-f0-9]{8}|@incus)?)\/(\d{8}-\d{6})(\/restore)?$/.exec(path);
+  if (b && b[3] && method === "POST") return json({ job: (b[1]!.endsWith("@incus") ? restoreInstance(b[1]!, b[2]!, user.name) : b[1]!.includes("@") ? restoreMachineApp(b[1]!, b[2]!, user.name) : restoreSnapshot(b[1]!, b[2]!, user.name)).id }, 202);
   if (b && !b[3] && method === "DELETE") {
     deleteSnapshot(b[1]!, b[2]!);
     const [app, on] = b[1]!.split("@");
-    record("app.snapshot.remove", { app, user: user.name, ...(on ? { machine: machineList().find((m) => m.id === on)?.name ?? on } : {}) });
+    record("app.snapshot.remove", { app, user: user.name, ...(on && on !== "incus" ? { machine: machineList().find((m) => m.id === on)?.name ?? on } : {}) });
     return json({ ok: true });
   }
 
   // ---- Home Assistant: a press on a tile (members too), the rest for administrators ----
   if (path.startsWith("/api/ha")) {
     const response = await homeAssistantApi(req, url, server, user);
+    if (response) return response;
+  }
+
+  // ---- containers on this server, made with Incus (administrators only) ----
+  if (path.startsWith("/api/containers")) {
+    const response = await containersApi(req, url, server, user.name);
     if (response) return response;
   }
 
@@ -2448,6 +2474,67 @@ async function homeAssistantApi(req: Request, url: URL, server: Server, user: Us
   return null;
 }
 
+async function containersApi(req: Request, url: URL, server: Server, by: string): Promise<Response | null> {
+  const path = url.pathname;
+  const method = req.method;
+  if (path === "/api/containers" && method === "GET") return json(await containersReport());
+  if (path === "/api/containers/install" && method === "POST") return json({ job: installIncus(by, (await body(req)).place).id });
+  // the places the containers live in
+  if (path === "/api/containers/places" && method === "POST") return json({ places: await addContainerPlace((await body(req)).path, by) });
+  const place = /^\/api\/containers\/places\/([a-z0-9][a-z0-9-]{0,62})$/.exec(path);
+  if (place && method === "PUT") return json({ places: await setStandardPlace(place[1]!, by) });
+  if (place && method === "DELETE") return json({ places: await removeContainerPlace(place[1]!, by) });
+  if (path === "/api/containers/vms/install" && method === "POST") return json({ job: (await installIncusVms(by)).id });
+  if (path === "/api/containers/setup" && method === "POST") {
+    server.timeout(req, 60);
+    await setUpContainers(by);
+    return json(await containersReport());
+  }
+  if (path === "/api/containers" && method === "POST") return json(await createContainer(await body(req), by), 202);
+  const m = /^\/api\/containers\/([a-z][a-z0-9-]{0,62})(\/.*)?$/.exec(path);
+  if (!m) return null;
+  const name = m[1]!;
+  const rest = m[2] ?? "";
+  server.timeout(req, 120);
+  if (rest === "" && method === "DELETE") {
+    // the name typed, as for anything that cannot be undone
+    if ((await body(req)).confirm !== name) return fail(400, "containers.confirm");
+    await removeContainer(name, by);
+    return json({ ok: true });
+  }
+  if (rest === "" && method === "PATCH") {
+    await setContainerLimits(name, await body(req), by);
+    return json({ ok: true });
+  }
+  if (rest === "/state" && method === "POST") {
+    await containerAct(name, (await body(req)).action, by);
+    return json({ ok: true });
+  }
+  if (rest === "/screen" && method === "POST") return json(await containerAskScreen(name));
+  if (rest === "/screen/on" && method === "POST") {
+    await containerScreenOn(name, by);
+    return json({ ok: true });
+  }
+  if (rest === "/move" && method === "POST") return json(await moveContainer(name, (await body(req)).place, by), 202);
+  if (rest === "/rename" && method === "POST") return json(await renameContainer(name, (await body(req)).name, by), 202);
+  if (rest === "/clone" && method === "POST") return json(await cloneContainer(name, await body(req), by), 202);
+  if (rest === "/snapshots" && method === "POST") {
+    server.timeout(req, 0);
+    return json({ name: await takeContainerSnapshot(name, (await body(req)).name, by) });
+  }
+  const snap = /^\/snapshots\/([^/]+)(\/restore)?$/.exec(rest);
+  if (snap && snap[2] && method === "POST") {
+    server.timeout(req, 0);
+    await restoreContainerSnapshot(name, decodeURIComponent(snap[1]!), by);
+    return json({ ok: true });
+  }
+  if (snap && !snap[2] && method === "DELETE") {
+    await removeContainerSnapshot(name, decodeURIComponent(snap[1]!), by);
+    return json({ ok: true });
+  }
+  return null;
+}
+
 async function proxmoxApi(req: Request, url: URL, server: Server, by: string): Promise<Response | null> {
   const path = url.pathname;
   const method = req.method;
@@ -2541,7 +2628,7 @@ async function machinesApi(req: Request, url: URL, server: Server, by: string): 
   const path = url.pathname;
   const method = req.method;
   // a machine that is a guest of a Proxmox server is said to be one: it can be started from there
-  if (path === "/api/machines" && method === "GET") return json({ machines: machineList().map((m) => ({ ...m, pve: guestOfMachine(m.id, (m.info?.macs ?? []).map((c) => c.mac), m.ip.replace(/^::ffff:/, "")) })), version: VERSION });
+  if (path === "/api/machines" && method === "GET") return json({ machines: machineList().map((m) => ({ ...m, pve: guestOfMachine(m.id, (m.info?.macs ?? []).map((c) => c.mac), m.ip.replace(/^::ffff:/, "")), incus: containerOfMachine((m.info?.macs ?? []).map((c) => c.mac), m.info?.hostname ?? "") })), version: VERSION });
   if (path === "/api/machines/invite" && method === "POST") {
     // the name on the home network too: a machine that understands .local names finds Hata by it whatever address the router gives
     const { port } = listenAddress();
@@ -2842,6 +2929,7 @@ export async function serve(): Promise<void> {
   startSampler(() => settings.dataRoot);
   startMachines();
   startProxmox();
+  startContainers();
   startHomeAssistant();
   startMachineUsers();
   startMachineGates();
@@ -2871,7 +2959,7 @@ export async function serve(): Promise<void> {
   void refreshHttps();
   refreshLocalNames();
   startNotifications({
-    attention: async () => notSnoozed(attention({ system: systemStatus(), docker: await dockerInfo(), apps: await listApps("en"), activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), exposed: exposedNics(), array: arrayTrouble(), shares: shareTrouble(), places: placesDown(), machines: awayMachines(), machineApps: await machineTiles(machineList(), "en").catch(() => []), unused: unusedDisks(), filling: fillingUp(), pve: proxmoxTrouble(), ha: homeAssistantTrouble(), raid: poolsTrouble() })),
+    attention: async () => notSnoozed(attention({ system: systemStatus(), docker: await dockerInfo(), apps: await listApps("en"), activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), exposed: exposedNics(), array: arrayTrouble(), shares: shareTrouble(), places: placesDown(), machines: awayMachines(), machineApps: await machineTiles(machineList(), "en").catch(() => []), unused: unusedDisks(), filling: fillingUp(), pve: proxmoxTrouble(), ha: homeAssistantTrouble(), raid: poolsTrouble(), containers: containersTrouble() })),
     baseUrl: publicUrl,
     isAdmin: (id) => findUser(id)?.role === "admin",
   });

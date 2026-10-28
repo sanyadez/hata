@@ -263,3 +263,8 @@ test("the limits of SMART as a change gives them: whole numbers in their ranges,
   expect(smartLimits({ wear: "90" })).toBeNull();
   expect(smartLimits(null)).toBeNull();
 });
+
+test("Incus's own mounts of a disk are not the person's places", () => {
+  const mounts = parseMounts("/dev/sdb1 /var/lib/incus/storage-pools/default ext4 rw 0 0\n/dev/sdb1 /mnt/500 ext4 rw 0 0\n");
+  expect(mounts.map((m) => m.path)).toEqual(["/mnt/500"]);
+});

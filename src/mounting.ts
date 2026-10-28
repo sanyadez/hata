@@ -987,8 +987,13 @@ async function powerDown(device: string): Promise<void> {
   } catch {}
 }
 
+/** The folders the containers' storage pools are in, told by `containers.ts` (it imports this module) */
+let containerPlaces: () => string[] = () => [];
+export const onContainerPlaces = (list: () => string[]): void => void (containerPlaces = list);
+
 /** Why a folder cannot be taken away now: what of Hata's stands on it, as an error code; null — nothing */
 function keeps(path: string): string | null {
+  if (containerPlaces().some((place) => place === path || place.startsWith(path.replace(/\/$/, "") + "/"))) return "disk.holds.containers";
   if (Object.values(pools(fstab())).some((branches) => branches.includes(path))) return "disk.holds.pool";
   // a disk of the array taken away is a disk that failed, as far as the parity knows
   // (one that is gone already is let go: its replacement takes the same folder)

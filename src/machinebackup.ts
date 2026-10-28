@@ -11,7 +11,7 @@ import { createReadStream, existsSync, mkdirSync, readdirSync, renameSync, rmSyn
 import { join } from "node:path";
 import { appMeta } from "./appform";
 import { AppError, jobFinished, startJob, viewOfFiles, type Job, type Log } from "./apps";
-import { appBackupDir, backupDir, BACKUP_KEY_RE, deleteFiles, expired, listSnapshots, mirror, onMachineBackups, SNAPSHOT_ID_RE, snapshotId, type BackupApp, type Snapshot, type SnapshotReason } from "./backup";
+import { appBackupDir, backupDir, BACKUP_KEY_RE, deleteFiles, expired, listSnapshots, mirror, addBackupSource, SNAPSHOT_ID_RE, snapshotId, type BackupApp, type Snapshot, type SnapshotReason } from "./backup";
 import { settings } from "./config";
 import { writeJsonAtomic } from "./fsutil";
 import { call, machine, machineDataRoot, machines, open } from "./machines";
@@ -172,4 +172,4 @@ const readdirSafe = (): string[] => {
   }
 };
 
-onMachineBackups(entries, runAll);
+addBackupSource(entries, runAll);

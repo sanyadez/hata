@@ -335,6 +335,7 @@ function parseRoute() {
   if (parts[0] === "terminal" && isAdmin()) return { view: "terminal" };
   if (parts[0] === "assistant" && isAdmin()) return { view: "assistant" };
   if (parts[0] === "ha" && parts[1] && isAdmin()) return { view: "ha", id: parts[1], tab: HA_TABS.includes(parts[2]) ? parts[2] : "overview" };
+  if (parts[0] === "containers" && isAdmin()) return { view: "containers" };
   if (parts[0] === "proxmox" && parts[1] && isAdmin()) return { view: "proxmox", id: parts[1], tab: PVE_TABS.includes(parts[2]) ? parts[2] : "overview" };
   if (parts[0] === "machines" && isAdmin()) return parts[1] ? { view: "machine", id: parts[1], tab: MACHINE_TABS.includes(parts[2]) ? parts[2] : "overview" } : { view: "machines" };
   if (parts[0] === "apps" && parts[1]) return { view: "app", name: parts[1], tab: isAdmin() && ["settings", "logs", "compose", "backups", "terminal"].includes(parts[2]) ? parts[2] : "overview" };
@@ -386,6 +387,7 @@ function onRoute() {
   if (state.route.view === "machines" || state.route.view === "machine" || state.route.view === "proxmox") void loadMachines();
   if (state.route.view === "machines") void loadPve();
   if (state.route.view === "machines") void loadHa();
+  if (state.route.view === "machines" || state.route.view === "containers") void loadContainers();
   window.scrollTo(0, 0);
 }
 window.addEventListener("hashchange", onRoute);
@@ -437,6 +439,8 @@ function startEvents() {
       machineEvent(event);
     } else if (event.type === "proxmox") {
       pveEvent(event);
+    } else if (event.type === "containers") {
+      if (state.route.view === "machines" || state.route.view === "containers") void loadContainers();
     } else if (event.type === "ha") {
       haEvent(event);
     } else if (event.type === "approvals") {
@@ -827,7 +831,7 @@ async function loadMine() {
   state.favorites = mine.favorites;
 }
 
-const navCurrent = () => (state.route.view === "machine" || state.route.view === "proxmox" || state.route.view === "ha" ? "machines" : state.route.view === "backups" || state.route.view === "users" ? "settings" : state.route.view === "app" ? "home" : state.route.view === "import" ? "store" : state.route.view === "trash" || state.route.view === "myhata" ? "files" : state.route.view);
+const navCurrent = () => (state.route.view === "machine" || state.route.view === "proxmox" || state.route.view === "containers" || state.route.view === "ha" ? "machines" : state.route.view === "backups" || state.route.view === "users" ? "settings" : state.route.view === "app" ? "home" : state.route.view === "import" ? "store" : state.route.view === "trash" || state.route.view === "myhata" ? "files" : state.route.view);
 const navItems = () => NAV.filter((item) => (!item.admin || isAdmin()) && (!item.files || mayFiles()) && (!item.assistant || !!(assistantUi.config?.ready ?? state.overview?.assistant)) && (item.guest !== false || state.user.role !== "guest"));
 
 function navLinks(className, items = navItems()) {
@@ -1032,6 +1036,7 @@ function render() {
   if (view === "machines") return renderMachines();
   if (view === "machine") return renderMachine();
   if (view === "proxmox") return renderPve();
+  if (view === "containers") return renderContainers();
   if (view === "ha") return renderHa();
   if (view === "app") return renderApp();
   renderHome();
@@ -1855,12 +1860,13 @@ function dragEnd(drop) {
   drag.kind.drop(drag, target);
 }
 
-const ATTENTION_ICONS = { update: "up", docker: "box", restarting: "refresh", partial: "alert", disk: "disk", smart: "disk", memory: "memory", temperature: "temp", internet: "network", network: "network", array: "disk", share: "share", netplace: "globe", machine: "server", pve: "server", ha: "home", absent: "disk" };
+const ATTENTION_ICONS = { update: "up", docker: "box", restarting: "refresh", partial: "alert", disk: "disk", smart: "disk", memory: "memory", temperature: "temp", internet: "network", network: "network", array: "disk", share: "share", netplace: "globe", machine: "server", pve: "server", ha: "home", containers: "box", absent: "disk" };
 
 function attentionItem(item) {
   const detail = { ...item.detail, free: item.detail.free == null ? "" : bytes(item.detail.free), trash: item.detail.trash == null ? "" : bytes(item.detail.trash), size: item.detail.size == null ? "" : bytes(item.detail.size) };
   const base = "attention." + item.code;
-  const open = (href, label = t("common.open")) => h("a", { class: "btn small", href }, label);
+  // only what does the thing is a button; the ways elsewhere and the rest are entries of its menu
+  const open = (href, label = t("common.open")) => ({ href, label, icon: "external" });
   // the button that does the thing itself: it waits for the answer, says a refusal and looks again
   const doIt = (label, iconName, work) =>
     isAdmin() &&
@@ -1900,6 +1906,7 @@ function attentionItem(item) {
       const r = await api("POST", `/api/proxmox/${item.detail.host}/guests/${item.detail.guestId}/power`, { action: "start" });
       toast(t(r.done ? "pve.done.start" : "pve.going", { name: item.detail.guest }));
     }),
+    item.code === "containers.down" && doIt(t("incus.start"), "play", () => api("POST", `/api/containers/${item.detail.name}/state`, { action: "start" })),
     item.code === "netplace.down" && item.detail.id && doIt(t("attention.reconnect"), "refresh", () => api("POST", `/api/netplaces/${item.detail.id}/retry`, {})),
     item.code === "share.stopped" && doIt(t("attention.startSamba"), "play", () => api("POST", "/api/shares/tool", {})),
     item.code === "offsite" && doIt(t("attention.retry"), "refresh", async () => (await api("POST", "/api/backups/offsite/sync", {}), toast(t("attention.started")))),
@@ -1907,7 +1914,6 @@ function attentionItem(item) {
     item.code === "array.parityLost" && doIt(t("array.rebuild"), "refresh", () => runArray("/rebuild")),
     item.code === "array.held" && doIt(t("array.bringBack"), "refresh", () => runArray("/fix")),
     item.code === "array.failed" && doIt(t("array.syncNow"), "refresh", () => runArray("/sync")),
-    item.app && isAdmin() && assistantReady() && button(t("assistant.askWhy"), { class: "small", onclick: () => openAssistant({ ask: t("assistant.whyDown", { title: item.detail.title || item.app, app: item.app }) }) }, "chat"),
     item.code === "docker.missing" && isAdmin() && button(t("docker.install"), { class: "small primary", onclick: () => dockerDialog() }, "download"),
     item.code === "docker.stopped" && isAdmin() && dockerStartButton(),
     item.code === "disk.usb" && isAdmin() && button(t("copyin.button"), { class: "small primary", onclick: () => ((state.copyInFrom = item.detail.id), go("#/settings/storage")) }, "download"),
@@ -1920,18 +1926,41 @@ function attentionItem(item) {
     item.code.startsWith("share.") && open("#/settings/shares"),
     item.code === "netplace.down" && open("#/settings/storage"),
     item.code === "machine.away" && open(`#/machines/${item.detail.id}`),
+    item.code.startsWith("containers.") && state.route.view !== "containers" && open("#/containers"),
     item.code.startsWith("ha.") && !(state.route.view === "ha" && state.route.id === item.detail.host) && open(`#/ha/${item.detail.host}`),
     item.code.startsWith("pve.") && state.route.view !== "proxmox" && open(`#/proxmox/${item.detail.host}${item.code === "pve.guestDown" ? "/guests" : item.code === "pve.backupFailed" ? "/tasks" : ""}`),
     (item.code === "machine.restarting" || item.code === "machine.partial") && open(`#/machines/${item.detail.id}/apps`),
     item.app && open(`#/apps/${item.app}${item.code === "restarting" || item.code === "partial" ? "/logs" : ""}`, t(item.code === "restarting" || item.code === "partial" ? "app.logs" : "common.open")),
-    (item.code === "disk.new" || item.code === "disk.usb") && isAdmin() && button(t("mounting.ignore"), { class: "small quiet", onclick: () => void api("POST", "/api/disks/ignore", { id: item.detail.id }).then(refresh, (e) => toast(errorText(e), "error")) }),
-    isAdmin() && button(t("attention.later", { n: SNOOZE_DAYS }), { class: "small quiet", title: t("attention.laterHint"), onclick: () => snoozeItem(item) }, "clock"),
+    // the assistant is asked with the item's own words: it looks with its tools where it can and explains the rest
+    isAdmin() && { label: t(item.app ? "assistant.askWhy" : "assistant.ask"), icon: "chat", run: () => openAssistant({ ask: item.app ? t("assistant.whyDown", { title: item.detail.title || item.app, app: item.app }) : t("assistant.whyItem", { title: t(base + ".title", detail), text: t(base + ".text", detail).trim() }) }) },
+    isAdmin() && { label: t("attention.later", { n: SNOOZE_DAYS }), icon: "clock", run: () => snoozeItem(item) },
+    (item.code === "disk.new" || item.code === "disk.usb") && isAdmin() && { label: t("mounting.ignore"), icon: "x", run: () => void api("POST", "/api/disks/ignore", { id: item.detail.id }).then(refresh, (e) => toast(errorText(e), "error")) },
   ].filter(Boolean);
+  const main = below.filter((x) => x instanceof Node);
+  const more = below.filter((x) => !(x instanceof Node));
+  // with nothing to do right here, the way to where it is done stays in sight
+  const way = !main.length && more.find((x) => x.href);
+  if (way) main.push(h("a", { class: "btn small", href: way.href }, way.label));
+  const rest = more.filter((x) => x !== way);
+  const title = t(base + ".title", detail);
+  const openMore = (at) => menuAt(at, menuHeader(title, null, ATTENTION_ICONS[item.code.split(".")[0]] ?? "alert"), rest);
+  if (rest.length) {
+    // a split button: the arrow is joined to the first action, so the rest is seen to be there
+    const opener = (e) => {
+      const r = e.currentTarget.closest(".split").getBoundingClientRect();
+      openMore({ x: r.left, y: r.bottom + 4 });
+    };
+    const first = main[0];
+    if (first) {
+      const arrow = button("", { class: first.className.replace(/\bbtn\b/, "").trim() + " split-more", title: t("attention.more"), "aria-label": t("attention.more"), "aria-haspopup": "menu", onclick: opener }, "down");
+      main[0] = h("span", { class: "split" }, first, arrow);
+    } else main.push(h("span", { class: "split" }, button(t("attention.more"), { class: "small split-more", "aria-haspopup": "menu", onclick: opener }, "down")));
+  }
   return h(
     "div",
-    { class: "attention-item" },
+    { class: "attention-item", menu: rest.length ? openMore : undefined },
     h("span", { class: "badge-icon " + item.severity }, icon(ATTENTION_ICONS[item.code.split(".")[0]] ?? "alert")),
-    h("div", { class: "grow" }, h("strong", null, t(base + ".title", detail)), h("p", { class: "muted small" }, t(base + ".text", detail).trim()), below.length > 0 && h("div", { class: "row-actions under" }, below)),
+    h("div", { class: "grow" }, h("strong", null, title), h("p", { class: "muted small" }, t(base + ".text", detail).trim()), main.length > 0 && h("div", { class: "row-actions under" }, main)),
   );
 }
 
@@ -2283,7 +2312,7 @@ function appTileMenu(app, anchor, at) {
     page(t("app.logs"), "logs", "logs"),
     page(t("app.tab.terminal"), "terminal", "terminal"),
     page(t("app.tab.backups"), "archive", "backups"),
-    assistantReady() && item(t("assistant.ask"), "chat", () => openAssistant({ draft: t("assistant.aboutApp", { title: app.title, app: app.name }) })),
+    isAdmin() && item(t("assistant.ask"), "chat", () => openAssistant({ draft: t("assistant.aboutApp", { title: app.title, app: app.name }) })),
     page(t("home.manage"), "grid", ""),
     item(t("app.remove"), "trash", () => removeDialog(app), "danger", busy),
   );
@@ -2300,7 +2329,7 @@ function appMoreMenu(app, at = null) {
   dialog = openDialog(
     at ? "menu dropdown" : "menu",
     h("header", null, appIcon(app), h("div", null, h("h2", null, app.title), stateChip(app))),
-    assistantReady() && h("button", { type: "button", class: "menu-item", onclick: () => (dialog.close(), openAssistant({ draft: t("assistant.aboutApp", { title: app.title, app: app.name }) })) }, icon("chat"), t("assistant.ask")),
+    isAdmin() && h("button", { type: "button", class: "menu-item", onclick: () => (dialog.close(), openAssistant({ draft: t("assistant.aboutApp", { title: app.title, app: app.name }) })) }, icon("chat"), t("assistant.ask")),
     item(t("app.update"), "up", () => startAction(app, "update")),
     item(t("machines.move"), "server", () => moveAppDialog("", app)),
     item(t("app.remove"), "trash", () => removeDialog(app), "danger"),
@@ -2334,7 +2363,7 @@ function renderAppHead() {
         app.job && button(t("status.busy"), { onclick: () => jobDialog(app.job.id, app.job.kind, app.title) }, "terminal"),
         app.update && !app.job && button(t("app.storeUpdate"), { class: "accent", onclick: () => storeUpdateDialog(app) }, "up"),
         !app.update && app.newer?.length > 0 && !app.job && button(t("app.update"), { class: "accent", title: `${t("app.newer")}: ${app.newer.join(", ")}`, onclick: () => startAction(app, "update") }, "up"),
-        (app.status === "partial" || app.status === "restarting") && assistantReady() && button(t("assistant.askWhy"), { onclick: () => openAssistant({ ask: t("assistant.whyDown", { title: app.title, app: app.name }) }) }, "chat"),
+        (app.status === "partial" || app.status === "restarting") && isAdmin() && button(t("assistant.askWhy"), { onclick: () => openAssistant({ ask: t("assistant.whyDown", { title: app.title, app: app.name }) }) }, "chat"),
         isUp(app) && button(t("app.restart"), { disabled: !!app.job, onclick: () => startAction(app, "restart") }, "refresh"),
         isUp(app) ? button(t("app.stop"), { disabled: !!app.job, onclick: () => startAction(app, "stop") }, "stop") : button(t("app.start"), { class: url ? "" : "primary", disabled: !!app.job, onclick: () => startAction(app, "start") }, "play"),
         url && h("a", { class: "btn primary", href: url, target: "_blank", rel: "noopener noreferrer" }, icon("external"), h("span", null, t("app.open"))),
@@ -2573,10 +2602,12 @@ function renderMachines() {
   shell(
     h("div", { class: "page-head" }, h("div", null, h("h1", null, t("nav.machines")), h("p", { class: "meta", id: "machines-meta" }, t("machines.lead"))), h("div", { class: "actions" }, button(t("ha.add"), { onclick: () => haDialog() }, "plus"), button(t("pve.add"), { onclick: () => pveDialog() }, "plus"), button(t("machines.add"), { class: "primary", onclick: addMachineDialog }, "plus"))),
     h("div", { id: "machines-body" }),
+    h("div", { id: "incus-list", class: "stack" }),
     h("div", { id: "pve-list", class: "stack" }),
     h("div", { id: "ha-list", class: "stack" }),
   );
   if (machinesUi.list) renderMachinesBody();
+  if (incusUi.data) paintIncusCard();
   if (pveUi.list) paintPveList();
   if (haUi.list) paintHaList();
 }
@@ -2611,6 +2642,7 @@ function paintMachineCard(m) {
     h("div", { class: "machine-title" }, icon("server"), h("strong", { class: "clip grow" }, m.name), machineChip(m)),
     h("p", { class: "muted small clip" }, machineOs(m) || "—"),
     m.pve && h("p", { class: "muted small clip" }, t("pve.guestOn", { guest: guestKind(m.pve), host: m.pve.hostName })),
+    m.incus && h("p", { class: "muted small clip" }, t(m.incus === "vm" ? "incus.vmOnThisServer" : "incus.onThisServer")),
     m.online && s
       ? [meter(t("sys.cpu"), s.cpu, t("sys.cores", { n: s.cores })), meter(t("sys.memory"), mem, bytes(s.memory.total)), disk && meter(t("sys.disk"), diskPercent, t("sys.free", { free: bytes(disk.total - disk.used), total: bytes(disk.total) }))]
       : h("p", { class: "muted small" }, m.online ? t("machines.waiting") : t("machines.seen", { ago: ago(m.seen) })),
@@ -2694,6 +2726,743 @@ async function addMachineDialog() {
   const timer = setInterval(look, 3000);
   const stop = () => clearInterval(timer);
   dialog.addEventListener("close", stop);
+}
+
+// --- Containers on this server (Incus) ---
+// Incus keeps them; Hata installs it by a button, sets it up, makes containers with its client in them
+
+const incusUi = { data: null };
+
+async function loadContainers() {
+  try {
+    incusUi.data = await api("GET", "/api/containers");
+  } catch (e) {
+    incusUi.data = { state: "error", error: errorText(e), containers: [] };
+  }
+  if (state.route.view === "containers") renderContainersBody();
+  if (state.route.view === "machines") paintIncusCard();
+}
+
+/** The block on the Machines page: what is here, or how to begin */
+function paintIncusCard() {
+  const box = document.getElementById("incus-list");
+  const d = incusUi.data;
+  if (!box || !d) return;
+  const running = (d.containers ?? []).filter((c) => c.status === "running").length;
+  put(
+    box,
+    h("div", { class: "section-head" }, h("h2", null, t("incus.title"))),
+    h(
+      "div",
+      { class: "cards" },
+      h(
+        "a",
+        { class: "card pad machine-card", href: "#/containers" },
+        h("div", { class: "machine-title" }, icon("box"), h("strong", { class: "clip grow" }, t("incus.thisServer")), d.state === "ready" && h("span", { class: "state " + (running ? "running" : "") }, t("incus.runningN", { n: running }))),
+        h("p", { class: "muted small" }, d.state === "ready" ? [t("incus.countN", { n: d.containers.filter((c) => c.kind !== "vm").length }), d.containers.some((c) => c.kind === "vm") && t("incus.vm.countN", { n: d.containers.filter((c) => c.kind === "vm").length })].filter(Boolean).join(" · ") : t("incus.state." + d.state)),
+      ),
+    ),
+  );
+}
+
+function renderContainers() {
+  shell(
+    h(
+      "div",
+      { class: "page-head" },
+      h("div", null, h("p", { class: "meta" }, h("a", { href: "#/machines" }, t("nav.machines"))), h("h1", null, t("incus.title")), h("p", { class: "meta", id: "incus-meta" }, t("incus.lead"))),
+      h("div", { class: "actions", id: "incus-actions" }),
+    ),
+    h("div", { id: "incus-body", class: "stack" }),
+  );
+  if (incusUi.data) renderContainersBody();
+}
+
+const incusStatus = (c) => h("span", { class: "state " + (c.status === "running" ? "running" : c.status === "error" ? "failed" : "") }, t("incus.status." + c.status));
+
+function renderContainersBody() {
+  const box = document.getElementById("incus-body");
+  const actions = document.getElementById("incus-actions");
+  const d = incusUi.data;
+  if (!box || !d) return;
+  put(actions, d.state === "ready" && button(t(d.vms?.state === "ready" ? "incus.newAny" : "incus.new"), { class: "primary", onclick: () => newContainerDialog() }, "plus"));
+  if (d.state === "error") return put(box, h("p", { class: "card pad warn-box" }, d.error));
+  if (d.state === "blocked") return put(box, h("div", { class: "card pad stack" }, h("h2", null, t("incus.blocked.title")), h("p", null, t("incus.blocked." + d.why)), h("p", { class: "muted small" }, t("incus.blocked.how"))));
+  if (d.state === "missing") {
+    return put(
+      box,
+      h(
+        "div",
+        { class: "card pad stack" },
+        h("h2", null, t("incus.missing.title")),
+        h("p", null, t("incus.missing.lead")),
+        h("ul", { class: "stack-s small pve-gives" }, ["system", "docker", "machine", "snapshots"].map((k) => h("li", null, t("incus.gives." + k)))),
+        h("p", { class: "muted small" }, t("incus.missing.what")),
+        d.install ? h("p", { class: "cmd" }, icon("terminal"), d.install) : h("p", { class: "banner small" }, t("incus.missing.byHand")),
+        d.install && installPlaceRow(),
+        d.install &&
+          h(
+            "div",
+            { class: "actions" },
+            button(
+              t("incus.missing.install"),
+              {
+                class: "primary",
+                onclick: async (e) => {
+                  e.currentTarget.disabled = true;
+                  try {
+                    const r = await api("POST", "/api/containers/install", { place: incusUi.place ?? "" });
+                    void jobDialog(r.job, "incus", "Incus", () => void loadContainers());
+                  } catch (err) {
+                    toast(errorText(err), "error");
+                  }
+                  e.target.closest("button").disabled = false;
+                },
+              },
+              "download",
+            ),
+          ),
+      ),
+    );
+  }
+  if (d.state === "setup") {
+    return put(
+      box,
+      h(
+        "div",
+        { class: "card pad stack" },
+        h("h2", null, t("incus.setup.title")),
+        h("p", null, t("incus.setup.lead")),
+        h(
+          "div",
+          { class: "actions" },
+          button(
+            t("incus.setup.button"),
+            {
+              class: "primary",
+              onclick: async (e) => {
+                e.currentTarget.disabled = true;
+                try {
+                  incusUi.data = await api("POST", "/api/containers/setup");
+                  renderContainersBody();
+                } catch (err) {
+                  toast(errorText(err), "error");
+                  e.target.closest("button").disabled = false;
+                }
+              },
+            },
+            "check",
+          ),
+        ),
+      ),
+    );
+  }
+  const vmCount = d.containers.filter((c) => c.kind === "vm").length;
+  document.getElementById("incus-meta").textContent = [t("incus.countN", { n: d.containers.length - vmCount }), vmCount > 0 && t("incus.vm.countN", { n: vmCount }), d.version && "Incus " + d.version, d.network && t("incus.network", { name: d.network.name, address: d.network.address })].filter(Boolean).join(" · ");
+  if (!d.containers.length) {
+    return put(box, h("div", { class: "card empty" }, icon("box"), h("h2", null, t("incus.none")), h("p", null, t("incus.noneLead")), button(t("incus.new"), { class: "primary", onclick: () => newContainerDialog() }, "plus")), vmCard(d));
+  }
+  put(
+    box,
+    h(
+      "section",
+      { class: "card" },
+      h(
+        "div",
+        { class: "table-wrap" },
+        h(
+          "table",
+          null,
+          h("thead", null, h("tr", null, h("th", null, t("incus.col.name")), h("th", null, t("incus.col.state")), h("th", null, t("incus.col.address")), h("th", null, t("incus.col.use")), h("th"))),
+          h("tbody", null, d.containers.map((c) => containerRow(c))),
+        ),
+      ),
+    ),
+    incusPlacesCard(d),
+    vmCard(d),
+  );
+}
+
+/** Virtual machines: a test feature of their own, with what it needs and what it cannot do yet */
+function vmCard(d) {
+  const vms = d.vms;
+  if (!vms || vms.state === "ready") return null;
+  const head = h("h2", null, t("incus.vm.title"), " ", h("span", { class: "chip" }, t("incus.vm.test")));
+  if (vms.state !== "missing") return h("section", { class: "card pad stack" }, head, h("p", null, t("incus.vm." + vms.state)));
+  return h(
+    "section",
+    { class: "card pad stack" },
+    head,
+    h("p", null, t("incus.vm.lead")),
+    h("ul", { class: "stack-s small pve-gives" }, ["limits", "images", "screen", "space"].map((k) => h("li", null, t("incus.vm.limit." + k)))),
+    vms.install ? h("p", { class: "cmd" }, icon("terminal"), vms.install) : h("p", { class: "banner small" }, t("incus.missing.byHand")),
+    vms.install &&
+      h(
+        "div",
+        { class: "actions" },
+        button(
+          t("incus.vm.install"),
+          {
+            onclick: async (e) => {
+              e.currentTarget.disabled = true;
+              try {
+                const r = await api("POST", "/api/containers/vms/install");
+                void jobDialog(r.job, "incus", "QEMU", () => void loadContainers());
+              } catch (err) {
+                toast(errorText(err), "error");
+              }
+              e.target.closest("button").disabled = false;
+            },
+          },
+          "download",
+        ),
+      ),
+  );
+}
+
+/** Where Incus is to keep the containers, chosen before it is installed: the system disk unless another folder is picked */
+function installPlaceRow() {
+  const shown = h("span", { class: "grow mono small" });
+  const reset = button(t("incus.place.system"), { class: "small ghost", onclick: () => ((incusUi.place = ""), paint()) });
+  const paint = () => {
+    shown.textContent = incusUi.place || t("incus.place.systemPath");
+    reset.hidden = !incusUi.place;
+  };
+  paint();
+  return h(
+    "div",
+    { class: "stack-s" },
+    h("strong", null, t("incus.place.where")),
+    h("p", { class: "muted small" }, t("incus.place.whereHint")),
+    h("div", { class: "row-actions" }, icon("folder"), shown, reset, button(t("incus.place.choose"), { class: "small", onclick: () => folderPicker({ title: t("incus.place.pickTitle"), start: "/mnt", confirmLabel: t("incus.place.pickHere"), action: (path) => ((incusUi.place = path), paint()) }) }, "folder")),
+  );
+}
+
+/** The places containers live in: room, which one new ones go to, another one added */
+function incusPlacesCard(d) {
+  const list = d.places ?? [];
+  const act = async (el, method, path, body) => {
+    el.disabled = true;
+    try {
+      await api(method, path, body);
+      await loadContainers();
+    } catch (e) {
+      toast(errorText(e), "error");
+      el.disabled = false;
+    }
+  };
+  const add = () =>
+    folderPicker({
+      title: t("incus.place.addTitle"),
+      start: "/mnt",
+      confirmLabel: t("incus.place.pickHere"),
+      action: async (path) => {
+        try {
+          await api("POST", "/api/containers/places", { path });
+          toast(t("incus.place.added", { path }));
+          await loadContainers();
+        } catch (e) {
+          toast(errorText(e), "error");
+        }
+      },
+    });
+  return h(
+    "section",
+    { class: "card pad stack" },
+    h("div", { class: "row" }, h("h2", { class: "grow" }, t("incus.place.title")), button(t("incus.place.add"), { class: "small", onclick: add }, "plus")),
+    h("p", { class: "muted small" }, t("incus.place.lead")),
+    list.map((p) => {
+      const percent = p.total ? Math.round((p.used / p.total) * 100) : 0;
+      const fill = h("i", { class: level(percent) });
+      fill.style.width = percent + "%";
+      return h(
+        "div",
+        { class: "stack-s", menu: true },
+        h(
+          "div",
+          { class: "row" },
+          h("div", { class: "grow" }, h("strong", null, p.name), " ", p.standard && h("span", { class: "chip" }, t("incus.place.standard")), " ", p.away && h("span", { class: "state restarting" }, t("incus.place.away")), h("div", { class: "muted small mono" }, (p.path || t("incus.place.systemPath")) + " · " + p.driver)),
+          h(
+            "div",
+            { class: "row-actions" },
+            !p.standard && button(t("incus.place.makeStandard"), { class: "small", onclick: (e) => act(e.currentTarget, "PUT", `/api/containers/places/${p.name}`) }, "check"),
+            !p.standard && !p.profile && !p.instances && button("", { class: "small ghost", title: t("incus.place.remove"), "aria-label": t("incus.place.remove"), onclick: (e) => act(e.currentTarget, "DELETE", `/api/containers/places/${p.name}`) }, "trash"),
+          ),
+        ),
+        p.total > 0 && h("div", { class: "bar" }, fill),
+        h("p", { class: "muted small" }, [p.total ? t("sys.free", { free: bytes(p.total - p.used), total: bytes(p.total) }) : null, t("incus.place.instancesN", { n: p.instances })].filter(Boolean).join(" · ")),
+        p.away && h("p", { class: "small" }, t("incus.place.awayHint")),
+      );
+    }),
+  );
+}
+
+/** Moves a container or virtual machine to another place */
+function moveContainerDialog(c) {
+  const d = incusUi.data;
+  const others = (d.places ?? []).filter((p) => p.name !== c.place);
+  const select = h("select", null, others.map((p) => h("option", { value: p.name }, `${p.name} — ${p.path || t("incus.place.systemPath")}`)));
+  let dialog;
+  dialog = openDialog(
+    "",
+    h("header", null, h("h2", { class: "grow clip" }, t("incus.place.moveTitle", { name: c.name })), closeX(() => dialog)),
+    h("p", { class: "muted small" }, t(c.status === "running" ? "incus.place.moveLeadRunning" : "incus.place.moveLead")),
+    field(t("incus.place.to"), select),
+    h(
+      "footer",
+      null,
+      closeButton(() => dialog, t("common.cancel")),
+      button(t("incus.place.move"), {
+        class: "primary",
+        onclick: async (e) => {
+          e.currentTarget.disabled = true;
+          try {
+            const r = await api("POST", `/api/containers/${c.name}/move`, { place: select.value });
+            dialog.close();
+            void jobDialog(r.job, "container", c.name, () => void loadContainers());
+          } catch (err) {
+            toast(errorText(err), "error");
+            e.target.closest("button").disabled = false;
+          }
+        },
+      }, "arrow"),
+    ),
+  );
+}
+
+/** The name field of a renamed or copied instance: the rules of a new one */
+const instanceNameInput = (value) => h("input", { required: true, value, pattern: "[a-z][a-z0-9\\-]{0,61}[a-z0-9]", autocapitalize: "none", spellcheck: false, class: "mono" });
+
+/** Sends a rename or a copy and follows its job; a field that is not right is said under the form */
+async function instanceJob(path, data, error, dialog, button) {
+  button.disabled = true;
+  error.textContent = "";
+  try {
+    const r = await api("POST", path, data);
+    dialog.close();
+    void jobDialog(r.job, "container", r.name, () => {
+      void loadContainers();
+      void loadMachines();
+    });
+  } catch (err) {
+    error.textContent = err.code === "containers.badField" ? t("incus.bad." + err.detail.field) : errorText(err);
+    button.disabled = false;
+  }
+}
+
+function renameContainerDialog(c) {
+  const name = instanceNameInput(c.name);
+  const error = h("p", { class: "error", role: "alert" });
+  let dialog;
+  const go = (e) => instanceJob(`/api/containers/${c.name}/rename`, { name: name.value.trim() }, error, dialog, e.currentTarget);
+  dialog = openDialog(
+    "",
+    h("header", null, h("h2", { class: "grow clip" }, t("incus.renameTitle", { name: c.name })), closeX(() => dialog)),
+    h("p", { class: "muted small" }, t(c.status !== "running" ? (c.kind === "vm" ? "incus.renameLeadVmStopped" : "incus.renameLead") : "incus.renameLeadRunning", { name: c.name })),
+    field(t("incus.newName"), name, t("incus.nameHint")),
+    error,
+    h("footer", null, closeButton(() => dialog, t("common.cancel")), button(t("incus.rename"), { class: "primary", onclick: go }, "edit")),
+  );
+  name.select();
+}
+
+function cloneContainerDialog(c) {
+  const d = incusUi.data;
+  const name = instanceNameInput(`${c.name.slice(0, 57)}-copy`);
+  const places = d?.places ?? [];
+  const place = h("select", null, places.map((p) => h("option", { value: p.name }, `${p.name} — ${p.path || t("incus.place.systemPath")}`)));
+  place.value = c.place;
+  const error = h("p", { class: "error", role: "alert" });
+  let dialog;
+  const go = (e) => instanceJob(`/api/containers/${c.name}/clone`, { name: name.value.trim(), place: place.value }, error, dialog, e.currentTarget);
+  dialog = openDialog(
+    "",
+    h("header", null, h("h2", { class: "grow clip" }, t("incus.cloneTitle", { name: c.name })), closeX(() => dialog)),
+    h("p", { class: "muted small" }, t(c.status === "running" ? "incus.cloneLeadRunning" : "incus.cloneLead", { name: c.name })),
+    c.machine && h("p", { class: "muted small" }, t("incus.cloneMachine")),
+    field(t("incus.name"), name, t("incus.nameHint")),
+    places.length > 1 && field(t("incus.place.label"), place),
+    error,
+    h("footer", null, closeButton(() => dialog, t("common.cancel")), button(t("incus.clone"), { class: "primary", onclick: go }, "copy")),
+  );
+  name.select();
+}
+
+function containerRow(c) {
+  const running = c.status === "running";
+  const limits = [c.cores ? t("incus.cores", { n: c.cores }) : t("incus.allCores"), c.memory ? bytes(c.memory * 1024 * 1024) : t("incus.allMemory"), c.disk ? t("incus.diskOf", { size: bytes(c.disk * 1024 ** 3) }) : null].filter(Boolean).join(" · ");
+  return h(
+    "tr",
+    { menu: (at) => containerMenu(c, at) },
+    h(
+      "td",
+      null,
+      h("div", { class: "strong" }, c.name, c.machine && h("a", { class: "small", href: `#/machines/${c.machine}` }, " · ", t("incus.asMachine"))),
+      h("div", { class: "muted small" }, [c.kind === "vm" && t("incus.vm.short"), c.os, c.nesting && "Docker", c.snapshots.length > 0 && t("incus.snapshotsN", { n: c.snapshots.length })].filter(Boolean).join(" · ")),
+    ),
+    h("td", null, incusStatus(c)),
+    h("td", { class: "mono small" }, c.address || "—"),
+    h("td", { class: "small" }, running && c.usage ? t("incus.memoryUsed", { used: bytes(c.usage.memory) }) : "—", h("div", { class: "muted small" }, limits)),
+    h(
+      "td",
+      null,
+      h(
+        "div",
+        { class: "row-actions" },
+        running
+          ? button(t("incus.stop"), { class: "small", onclick: (e) => containerAct(c, "stop", e.currentTarget) }, "stop")
+          : button(t("incus.start"), { class: "small", onclick: (e) => containerAct(c, "start", e.currentTarget) }, "play"),
+        running && c.kind === "vm" && button(t("incus.screen"), { class: "small", onclick: () => containerScreen(c) }, "server"),
+        running && button(t("incus.console"), { class: "small", onclick: () => containerConsole(c) }, "terminal"),
+        button("", { class: "small ghost", title: t("incus.more"), "aria-label": t("incus.more"), onclick: (e) => {
+          const r = e.currentTarget.getBoundingClientRect();
+          containerMenu(c, { x: r.left, y: r.bottom + 4 });
+        } }, "more"),
+      ),
+    ),
+  );
+}
+
+async function containerAct(c, action, el) {
+  if (el) el.disabled = true;
+  try {
+    await api("POST", `/api/containers/${c.name}/state`, { action });
+    toast(t("incus.did." + action, { name: c.name }));
+  } catch (e) {
+    toast(errorText(e), "error");
+  }
+  if (el) el.disabled = false;
+  void loadContainers();
+}
+
+function containerMenu(c, at) {
+  menuAt(at, menuHeader(c.name, c.os, c.kind === "vm" ? "server" : "box"), [
+    c.status === "running" && { label: t("incus.restart"), icon: "refresh", run: () => containerAct(c, "restart") },
+    c.status === "running" && c.kind === "vm" && { label: t("incus.screen"), icon: "server", run: () => containerScreen(c) },
+    c.status === "running" && { label: t("incus.console"), icon: "terminal", run: () => containerConsole(c) },
+    c.machine && { label: t("incus.openMachine"), icon: "server", href: `#/machines/${c.machine}` },
+    { label: t("incus.limits") + "…", icon: "settings", run: () => containerLimitsDialog(c) },
+    { label: t("incus.snapshots") + "…", icon: "clock", run: () => containerSnapshotsDialog(c) },
+    { label: t("incus.rename") + "…", icon: "edit", run: () => renameContainerDialog(c) },
+    { label: t("incus.clone") + "…", icon: "copy", run: () => cloneContainerDialog(c) },
+    (incusUi.data?.places ?? []).length > 1 && { label: t("incus.place.moveItem"), icon: "arrow", run: () => moveContainerDialog(c) },
+    { label: t("incus.backupNow"), icon: "archive", run: () => backupNow({ name: `${c.name}@incus`, title: c.name, incus: { kind: c.kind } }) },
+    { label: t("incus.backups"), icon: "archive", href: "#/settings/backups" },
+    { label: t("incus.remove") + "…", icon: "trash", danger: true, run: () => removeContainerDialog(c) },
+  ]);
+}
+
+function containerConsole(c) {
+  let dialog;
+  dialog = openDialog("xwide", h("header", null, h("h2", { class: "clip grow" }, c.name), closeX(() => dialog)), h("p", { class: "muted small" }, t("incus.consoleHint")), h("div", { class: "term-holder" }, terminalFrame({ incus: c.name })));
+}
+
+/** A virtual machine's screen: the page of Proxmox's screens, on QEMU's own VNC socket */
+function containerScreen(c) {
+  let dialog;
+  dialog = openDialog("xwide", h("header", null, h("h2", { class: "clip grow" }, c.name), closeX(() => dialog)), h("p", { class: "muted small" }, t("incus.screenHint")), h("div", { class: "term-holder" }, h("iframe", { class: "term-frame", src: "/screen.html?" + new URLSearchParams({ incus: c.name, lang: state.lang }), title: t("incus.screen") })));
+}
+
+/** The fields of the limits, shared by the new-container and the limits dialogs; a virtual machine always has its memory */
+function limitFields(c, vm = c?.kind === "vm") {
+  const opt = (value, label) => h("option", { value }, label);
+  const cores = h("select", null, opt("0", t("incus.allCores")), [1, 2, 3, 4, 6, 8, 12, 16].map((n) => opt(String(n), t("incus.cores", { n }))));
+  cores.value = String(c?.cores ?? 2);
+  if (cores.value === "") cores.value = "0";
+  const memory = h("select");
+  const fillMemory = (forVm) => {
+    const was = memory.value;
+    memory.replaceChildren(...[!forVm && opt("0", t("incus.allMemory")), ...[256, 512, 1024, 2048, 4096, 8192, 16384].map((mb) => opt(String(mb), mb < 1024 ? `${mb} MB` : `${mb / 1024} GB`))].filter(Boolean));
+    // a container with no limit keeps none: 0 is "all memory"; only a virtual machine always has some
+    memory.value = was || String(c ? c.memory || (forVm ? 1024 : 0) : 1024);
+    if (memory.value === "") memory.value = forVm ? "1024" : "0";
+  };
+  memory.value = "";
+  fillMemory(vm);
+  return { cores, memory, fillMemory };
+}
+
+/** The drivers whose places can hold a container's disk to a size */
+const LIMITED_PLACES = ["btrfs", "zfs", "lvm"];
+const placeLimits = (name) => LIMITED_PLACES.includes((incusUi.data?.places ?? []).find((p) => p.name === name)?.driver);
+
+const tickRow = (label, hint, checked) => {
+  const box = h("input", { type: "checkbox", checked });
+  return [box, h("label", { class: "check" }, box, h("span", null, h("strong", null, label), hint && h("span", { class: "muted small block" }, hint)))];
+};
+
+function newContainerDialog() {
+  const d = incusUi.data;
+  const vmsReady = d.vms?.state === "ready";
+  let kind = "container";
+  const name = h("input", { required: true, placeholder: "docker-1", pattern: "[a-z][a-z0-9\\-]{0,61}[a-z0-9]", autocapitalize: "none", spellcheck: false, class: "mono" });
+  const image = h("select", { onchange: () => shape() });
+  const { cores, memory, fillMemory } = limitFields(null, false);
+  const disk = h("input", { type: "number", min: 4, max: 4096, value: 10 });
+  const diskHint = h("span");
+  const diskRow = field(t("incus.vm.disk"), disk, diskHint);
+  const diskLabel = diskRow.querySelector("label") ?? diskRow.firstChild;
+  const [client, clientRow] = tickRow(t("incus.client"), t("incus.clientHint"), true);
+  const [docker, dockerRow] = tickRow(t("incus.docker"), t("incus.dockerHint"), true);
+  const [autostart, autostartRow] = tickRow(t("incus.autostart"), null, true);
+  const vmNote = h("p", { class: "banner small" }, t("incus.vm.note"));
+  const placeSelect = h("select", null, (d.places ?? []).map((p) => h("option", { value: p.name, selected: p.standard }, `${p.name} — ${p.path || t("incus.place.systemPath")}${p.total ? " · " + t("incus.place.freeShort", { free: bytes(p.total - p.used) }) : ""}`)));
+  const placeRow = (d.places ?? []).length > 1 && field(t("incus.place.label"), placeSelect);
+  placeSelect.addEventListener("change", () => shape());
+  const lead = h("p", { class: "muted small" });
+  const title = h("h2", { class: "grow" });
+  const seg = h(
+    "div",
+    { class: "seg" },
+    ["container", "vm"].map((k) => h("button", { type: "button", class: "btn", "data-kind": k, onclick: () => ((kind = k), fillImages(), shape()) }, t(k === "vm" ? "incus.kind.vm" : "incus.kind.container"))),
+  );
+  const fillImages = () => {
+    const was = image.value;
+    image.replaceChildren(...d.images.filter((i) => (kind === "vm" ? i.vm : i.container !== false)).map((i) => h("option", { value: i.id }, i.client ? i.name : `${i.name} — ${t("incus.noClient")}`)));
+    if ([...image.options].some((o) => o.value === was)) image.value = was;
+    fillMemory(kind === "vm");
+  };
+  const shape = () => {
+    const vm = kind === "vm";
+    title.textContent = t(vm ? "incus.vm.new" : "incus.new");
+    lead.textContent = t(vm ? "incus.vm.newLead" : "incus.newLead");
+    dockerRow.querySelector(".block").textContent = t(vm ? "incus.vm.dockerHint" : "incus.dockerHint");
+    clientRow.querySelector(".block").textContent = t(vm ? "incus.vm.clientHint" : "incus.clientHint");
+    // a container's disk is held to a size only in a place that can do it; empty — no limit
+    const limited = vm || placeLimits(placeSelect.value);
+    diskRow.hidden = !limited;
+    disk.disabled = !limited;
+    disk.required = vm;
+    disk.min = vm ? 4 : 1;
+    if (!vm && disk.value === "10" && !disk.dataset.touched) disk.value = "";
+    if (vm && !disk.value) disk.value = "10";
+    diskLabel.textContent = t(vm ? "incus.vm.disk" : "incus.diskLimit");
+    diskHint.textContent = t(vm ? "incus.vm.diskHint" : "incus.diskLimitHint");
+    vmNote.hidden = !vm;
+    for (const b of seg.children) b.classList.toggle("active", b.dataset.kind === kind);
+    const chosen = d.images.find((i) => i.id === image.value);
+    const can = chosen?.client;
+    client.disabled = !can;
+    if (!can) client.checked = false;
+    // Docker's own script does not know every system
+    if (!client.checked || chosen?.docker === false) docker.checked = false;
+    docker.disabled = !can || !client.checked || chosen?.docker === false;
+    // a desktop needs room: less is not offered
+    const least = vm ? chosen?.least : null;
+    disk.min = String(least?.disk ?? (vm ? 4 : 1));
+    if (least && Number(disk.value) < least.disk) disk.value = String(least.disk);
+    for (const o of memory.options) o.disabled = !!least && Number(o.value) < least.memory;
+    if (least && Number(memory.value) < least.memory) memory.value = String(least.memory);
+  };
+  client.addEventListener("change", shape);
+  const error = h("p", { class: "error", role: "alert" });
+  let dialog;
+  const send = async (e) => {
+    e.preventDefault();
+    error.textContent = "";
+    const submit = dialog.querySelector("button[type=submit]");
+    submit.disabled = true;
+    const n = name.value.trim().toLowerCase();
+    try {
+      const r = await api("POST", "/api/containers", { kind, name: n, image: image.value, cores: Number(cores.value), memory: Number(memory.value), disk: disk.disabled ? 0 : Number(disk.value || 0), client: client.checked, docker: docker.checked, autostart: autostart.checked, place: placeSelect.value });
+      dialog.close();
+      const machine = client.checked;
+      void loadContainers();
+      void jobDialog(r.job, "container", n, () => {
+        toast(t(machine ? "incus.made.machine" : "incus.made.plain", { name: n }));
+        void loadContainers();
+        void loadMachines();
+      });
+    } catch (err) {
+      error.textContent = err.code === "containers.badField" ? t("incus.bad." + err.detail.field) : errorText(err);
+      submit.disabled = false;
+    }
+  };
+  dialog = openDialog(
+    "wide",
+    h(
+      "form",
+      { class: "stack", onsubmit: send },
+      h("header", null, title, closeX(() => dialog)),
+      vmsReady && seg,
+      lead,
+      vmNote,
+      h("div", { class: "form-pair" }, field(t("incus.name"), name, t("incus.nameHint")), field(t("incus.image"), image, t("incus.imageHint"))),
+      h("div", { class: "form-pair" }, field(t("incus.coresLabel"), cores), field(t("incus.memoryLabel"), memory)),
+      diskRow,
+      placeRow,
+      clientRow,
+      dockerRow,
+      autostartRow,
+      error,
+      h("footer", null, closeButton(() => dialog, t("common.cancel")), h("button", { type: "submit", class: "btn primary" }, icon("plus"), t("incus.make"))),
+    ),
+  );
+  fillImages();
+  shape();
+  name.focus();
+}
+
+function containerLimitsDialog(c) {
+  const { cores, memory } = limitFields(c);
+  const [autostart, autostartRow] = tickRow(t("incus.autostart"), null, c.autostart);
+  const [nesting, nestingRow] = tickRow(t("incus.nesting"), t("incus.nestingHint"), c.nesting);
+  nestingRow.hidden = c.kind === "vm";
+  // a virtual machine's disk only grows; a container's is held to a size only in a place that can do it
+  const vm = c.kind === "vm";
+  const limited = vm || placeLimits(c.place);
+  const disk = h("input", { type: "number", min: vm ? c.disk || 4 : 0, max: 4096, value: c.disk || "", placeholder: vm ? "" : t("incus.diskNone") });
+  const diskRow = limited ? field(t(vm ? "incus.vm.disk" : "incus.diskLimit"), disk, t(vm ? "incus.vm.diskGrow" : "incus.diskLimitHint")) : h("p", { class: "muted small" }, t("incus.diskNotHere", { place: c.place }));
+  const error = h("p", { class: "error", role: "alert" });
+  let dialog;
+  const send = async (e) => {
+    e.preventDefault();
+    const submit = dialog.querySelector("button[type=submit]");
+    submit.disabled = true;
+    try {
+      await api("PATCH", `/api/containers/${c.name}`, { cores: Number(cores.value), memory: Number(memory.value), autostart: autostart.checked, nesting: nesting.checked, ...(limited ? { disk: Number(disk.value || 0) } : {}) });
+      dialog.close();
+      toast(t("incus.saved", { name: c.name }));
+      void loadContainers();
+    } catch (err) {
+      error.textContent = err.code === "containers.badField" ? t("incus.bad." + err.detail.field) : errorText(err);
+      submit.disabled = false;
+    }
+  };
+  dialog = openDialog(
+    "",
+    h(
+      "form",
+      { class: "stack", onsubmit: send },
+      h("header", null, h("h2", { class: "grow clip" }, t("incus.limitsTitle", { name: c.name })), closeX(() => dialog)),
+      h("p", { class: "muted small" }, t(c.kind === "vm" ? "incus.vm.limitsLead" : "incus.limitsLead")),
+      h("div", { class: "form-pair" }, field(t("incus.coresLabel"), cores), field(t("incus.memoryLabel"), memory)),
+      diskRow,
+      autostartRow,
+      nestingRow,
+      error,
+      h("footer", null, closeButton(() => dialog, t("common.cancel")), h("button", { type: "submit", class: "btn primary" }, icon("check"), t("incus.save"))),
+    ),
+  );
+}
+
+function containerSnapshotsDialog(c) {
+  let dialog;
+  const list = h("div", { class: "stack-s" });
+  const paint = (snaps) =>
+    put(
+      list,
+      snaps.length
+        ? h(
+            "div",
+            { class: "table-wrap" },
+            h(
+              "table",
+              null,
+              h("thead", null, h("tr", null, h("th", null, t("incus.snap.name")), h("th", null, t("incus.snap.when")), h("th"))),
+              h(
+                "tbody",
+                null,
+                snaps.map((s) =>
+                  h(
+                    "tr",
+                    null,
+                    h("td", { class: "mono small" }, s.name),
+                    h("td", { class: "small" }, new Date(s.created).toLocaleString(state.lang)),
+                    h(
+                      "td",
+                      null,
+                      h(
+                        "div",
+                        { class: "row-actions" },
+                        button(t("incus.snap.restore"), { class: "small", onclick: (e) => snapAction(e.currentTarget, "POST", `/api/containers/${c.name}/snapshots/${encodeURIComponent(s.name)}/restore`, t("incus.snap.restoreAsk", { name: s.name }), "incus.snap.restored") }, "undo"),
+                        button("", { class: "small ghost", title: t("incus.snap.remove"), "aria-label": t("incus.snap.remove"), onclick: (e) => snapAction(e.currentTarget, "DELETE", `/api/containers/${c.name}/snapshots/${encodeURIComponent(s.name)}`, null, "incus.snap.removed") }, "trash"),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          )
+        : h("p", { class: "muted small" }, t("incus.snap.none")),
+    );
+  const again = async () => {
+    await loadContainers();
+    const fresh = incusUi.data?.containers?.find((x) => x.name === c.name);
+    if (fresh) paint(fresh.snapshots);
+  };
+  const snapAction = async (el, method, path, ask, done) => {
+    if (ask && !confirm(ask)) return;
+    el.disabled = true;
+    try {
+      await api(method, path);
+      toast(t(done));
+    } catch (e) {
+      toast(errorText(e), "error");
+    }
+    el.disabled = false;
+    await again();
+  };
+  const name = h("input", { placeholder: t("incus.snap.namePlaceholder"), class: "mono", spellcheck: false, autocapitalize: "none" });
+  const take = button(
+    t("incus.snap.take"),
+    {
+      class: "primary",
+      onclick: async () => {
+        take.disabled = true;
+        try {
+          const r = await api("POST", `/api/containers/${c.name}/snapshots`, { name: name.value.trim() });
+          toast(t("incus.snap.taken", { name: r.name }));
+          name.value = "";
+        } catch (e) {
+          toast(errorText(e), "error");
+        }
+        take.disabled = false;
+        await again();
+      },
+    },
+    "plus",
+  );
+  dialog = openDialog("wide", h("header", null, h("h2", { class: "grow clip" }, t("incus.snapTitle", { name: c.name })), closeX(() => dialog)), h("p", { class: "muted small" }, t("incus.snapLead")), h("div", { class: "actions" }, name, take), list, h("footer", null, closeButton(() => dialog)));
+  paint(c.snapshots);
+}
+
+function removeContainerDialog(c) {
+  const typed = h("input", { class: "mono", autocapitalize: "none", spellcheck: false, placeholder: c.name });
+  const error = h("p", { class: "error", role: "alert" });
+  let dialog;
+  dialog = openDialog(
+    "confirm",
+    h("h2", { class: "wrap" }, t("incus.removeTitle", { name: c.name })),
+    h("p", { class: "muted" }, t(c.machine ? "incus.removeLeadMachine" : "incus.removeLead")),
+    field(t("incus.removeType", { name: c.name }), typed),
+    error,
+    h(
+      "footer",
+      null,
+      closeButton(() => dialog, t("common.cancel")),
+      button(
+        t("incus.remove"),
+        {
+          class: "danger",
+          onclick: async (e) => {
+            e.currentTarget.disabled = true;
+            try {
+              await api("DELETE", `/api/containers/${c.name}`, { confirm: typed.value.trim() });
+              dialog.close();
+              toast(t("incus.removed", { name: c.name }));
+              void loadContainers();
+              void loadMachines();
+            } catch (err) {
+              error.textContent = errorText(err);
+              e.target.closest("button").disabled = false;
+            }
+          },
+        },
+        "trash",
+      ),
+    ),
+  );
 }
 
 // --- Home Assistant ---
@@ -6406,8 +7175,8 @@ const dateTime = (ts) => new Date(ts).toLocaleString(state.lang, { day: "numeric
 async function backupNow(app) {
   try {
     // an app of another machine: its snapshot is taken there and kept here
-    const res = await api("POST", app.machine ? `/api/backups/${app.name}/take` : `/api/apps/${app.name}/backup`, {});
-    jobDialog(res.job, "backup", app.title, () => (state.route.view === "backups" ? loadBackups() : loadApp(true)));
+    const res = await api("POST", app.machine || app.incus ? `/api/backups/${app.name}/take` : `/api/apps/${app.name}/backup`, {});
+    jobDialog(res.job, "backup", app.title, () => (state.route.view === "backups" ? loadBackups() : state.route.view === "containers" ? loadContainers() : loadApp(true)));
   } catch (e) {
     toast(errorText(e), "error");
   }
@@ -6417,9 +7186,13 @@ function restoreDialog(app, snapshot) {
   const dialog = openDialog(
     "confirm",
     h("h2", null, t("backup.restoreTitle", { title: app.title })),
-    h("p", { class: "muted" }, t("backup.restoreLead", { time: dateTime(snapshot.at) })),
-    h("ul", { class: "paths mono small" }, snapshot.paths.map((path) => h("li", null, path))),
-    h("p", { class: "cmd" }, icon("terminal"), `tar -xzf ${snapshot.id}.tar.gz -C /`),
+    app.incus
+      ? h("p", { class: "muted" }, t("backup.incus.restoreLead", { time: dateTime(snapshot.at), name: app.title }))
+      : [
+          h("p", { class: "muted" }, t("backup.restoreLead", { time: dateTime(snapshot.at) })),
+          h("ul", { class: "paths mono small" }, snapshot.paths.map((path) => h("li", null, path))),
+          h("p", { class: "cmd" }, icon("terminal"), `tar -xzf ${snapshot.id}.tar.gz -C /`),
+        ],
     h(
       "footer",
       null,
@@ -6452,7 +7225,7 @@ function snapshotList(app, snapshots, reload) {
         "div",
         { class: "snapshot" },
         h("div", { class: "grow" }, h("strong", null, dateTime(s.at)), h("div", { class: "muted small" }, [t("backup.reason." + s.reason), bytes(s.size), s.images[0]].filter(Boolean).join(" · "))),
-        button(t("backup.files"), { class: "small", onclick: () => snapshotFilesDialog(app, s) }, "folder"),
+        !app.incus && button(t("backup.files"), { class: "small", onclick: () => snapshotFilesDialog(app, s) }, "folder"),
         button(t("backup.restore"), { class: "small", onclick: () => restoreDialog(app, s) }, "undo"),
         h(
           "button",
@@ -6693,7 +7466,7 @@ function renderBackupsBody() {
     return h(
       "tr",
       { class: app.installed ? "" : "removed" },
-      h("td", null, h("div", { class: "with-icon" }, appIcon(app, "sm"), h("div", { class: "stack-s backup-name" }, app.installed ? h("a", { class: "strong", href: app.machine ? `#/machines/${app.machine.id}/apps` : `#/apps/${app.name}/backups` }, app.title) : h("span", { class: "strong" }, app.title), app.machine && h("div", { class: "muted small with-icon" }, icon("server"), app.machine.name), !app.installed && h("div", { class: "muted small" }, t("backup.removedApp")), app.otherFolders.length > 0 && h("button", { type: "button", class: "text-btn muted small", title: app.otherFolders.join("\n"), onclick: () => backupFoldersDialog(app, loadBackups) }, t("backup.folders.row", { n: app.otherFolders.length, m: app.extraFolders.length }))))),
+      h("td", null, h("div", { class: "with-icon" }, appIcon(app, "sm"), h("div", { class: "stack-s backup-name" }, app.installed ? h("a", { class: "strong", href: app.incus ? "#/containers" : app.machine ? `#/machines/${app.machine.id}/apps` : `#/apps/${app.name}/backups` }, app.title) : h("span", { class: "strong" }, app.title), app.machine && h("div", { class: "muted small with-icon" }, icon("server"), app.machine.name), app.incus?.kind && h("div", { class: "muted small with-icon" }, icon(app.incus.kind === "vm" ? "server" : "box"), t(app.incus.kind === "vm" ? "incus.kind.vm" : "incus.kind.container")), !app.installed && h("div", { class: "muted small" }, t("backup.removedApp")), app.otherFolders.length > 0 && h("button", { type: "button", class: "text-btn muted small", title: app.otherFolders.join("\n"), onclick: () => backupFoldersDialog(app, loadBackups) }, t("backup.folders.row", { n: app.otherFolders.length, m: app.extraFolders.length }))))),
       h("td", null, newest ? h("div", null, ago(newest.at), h("div", { class: "muted small" }, t("backup.reason." + newest.reason))) : h("span", { class: "muted" }, t("backup.noneShort"))),
       h("td", { class: "num" }, size ? bytes(size) : "—"),
       h("td", { class: "num" }, app.snapshots.length || "—"),
@@ -6725,9 +7498,15 @@ function renderBackupsBody() {
       h("p", { class: "cmd" }, icon("terminal"), `sudo hata restore ${b.dir}`),
     ),
     h("div", { class: "section-head" }, h("h2", null, t("home.apps"))),
-    b.apps.length
-      ? h("div", { class: "card table-wrap" }, h("table", null, h("thead", null, h("tr", null, h("th", null, t("backup.col.app")), h("th", null, t("backup.col.last")), h("th", { class: "num" }, t("backup.col.size")), h("th", { class: "num" }, t("backup.col.count")), h("th", null, t("backup.col.daily")), h("th"))), h("tbody", null, b.apps.map(row))))
+    b.apps.some((a) => !a.incus)
+      ? h("div", { class: "card table-wrap" }, h("table", null, h("thead", null, h("tr", null, h("th", null, t("backup.col.app")), h("th", null, t("backup.col.last")), h("th", { class: "num" }, t("backup.col.size")), h("th", { class: "num" }, t("backup.col.count")), h("th", null, t("backup.col.daily")), h("th"))), h("tbody", null, b.apps.filter((a) => !a.incus).map(row))))
       : h("p", { class: "card pad muted" }, t("backup.noApps")),
+    // the containers and virtual machines of this server, kept whole
+    ...(b.apps.some((a) => a.incus) ? [
+      h("div", { class: "section-head" }, h("h2", null, t("backup.incus.title"))),
+      h("p", { class: "muted small" }, t("backup.incus.lead")),
+      h("div", { class: "card table-wrap" }, h("table", null, h("thead", null, h("tr", null, h("th", null, t("incus.col.name")), h("th", null, t("backup.col.last")), h("th", { class: "num" }, t("backup.col.size")), h("th", { class: "num" }, t("backup.col.count")), h("th", null, t("backup.col.daily")), h("th"))), h("tbody", null, b.apps.filter((a) => a.incus).map(row)))),
+    ] : []),
   );
 
   // the schedule form is redrawn only when it is not being edited
@@ -11164,9 +11943,10 @@ function toolsSection() {
         h("p", { class: "muted small" }, t(`tools.${tool.id}.what`), " ", h("a", { class: "link", href: tool.page }, t(`tools.${tool.id}.where`))),
         tool.builtIn && h("p", { class: "muted small" }, t(`tools.${tool.id}.builtIn`)),
         tool.state === "installed" && tool.holds && h("p", { class: "muted small" }, t("tools.holds." + tool.holds)),
-        tool.state !== "installed" && (tool.install ? h("p", { class: "cmd" }, icon("terminal"), tool.install) : h("p", { class: "muted small" }, t("mounting.needs.byHand", { package: tool.package }))),
+        tool.cannot && h("p", { class: "muted small" }, t("tools.cannot." + tool.cannot)),
+        tool.state !== "installed" && !tool.cannot && (tool.install ? h("p", { class: "cmd" }, icon("terminal"), tool.install) : h("p", { class: "muted small" }, t("mounting.needs.byHand", { package: tool.package }))),
       ),
-      tool.state !== "installed" && tool.install && install(tool),
+      tool.state !== "installed" && !tool.cannot && tool.install && install(tool),
       tool.state === "installed" && tool.upgrade?.length > 0 && button(t("tools.update"), { class: "small accent", onclick: () => sysUpgradeDialog("", tool.upgrade, tool.name) }, "up"),
       tool.state === "installed" && !tool.holds && tool.remove && button(t("tools.remove"), { class: "small", onclick: () => toolRemoveDialog(tool) }, "trash"),
     );
@@ -14226,10 +15006,9 @@ function agentKeyDialog(made) {
 
 // --- The assistant: a chat with a model that works with Hata's tools --------------------------------
 
-const assistantUi = { open: false, panel: null, fab: null, config: null, chats: [], chat: null, timer: 0 };
+const assistantUi = { open: false, panel: null, fab: null, config: null, chats: [], chat: null, timer: 0, waiting: localStorage.getItem("hata.assistant.waiting") ?? "" };
 /** Whether the window was open and how big, kept across pages and reloads */
 const ASSISTANT_KEY = "hata.assistant";
-const assistantReady = () => !!state.overview?.assistant;
 
 /** A model's answer as elements: paragraphs, lists, code, bold — built from text, never as markup */
 function mdInline(text) {
@@ -14307,7 +15086,20 @@ function assistantBody() {
   const chat = assistantUi.chat;
   if (!assistantUi.config) return [h("p", { class: "muted" }, "…")];
   if (!assistantUi.config.ready) {
-    return [h("div", { class: "assistant-empty" }, h("p", null, t("assistant.notSet")), h("p", { class: "muted small" }, t("assistant.notSetHint")), h("a", { class: "btn primary", href: "#/settings/assistant", onclick: () => innerWidth < 900 && closeAssistant() }, t("assistant.setUp")))];
+    // asked before there is a model: what it would do, how to give it one, and the question kept for then
+    return [
+      h(
+        "div",
+        { class: "assistant-empty" },
+        h("p", null, t("assistant.notSet")),
+        h("p", { class: "muted small" }, t("assistant.notSetHint")),
+        h("p", { class: "small" }, t("assistant.canDo")),
+        h("ul", { class: "small assistant-can" }, ["apps", "machines", "backups", "changes"].map((k) => h("li", null, t("assistant.can." + k)))),
+        assistantUi.waiting && h("div", { class: "msg user" }, assistantUi.waiting),
+        assistantUi.waiting && h("p", { class: "muted small" }, t("assistant.waitingQuestion")),
+        h("a", { class: "btn primary", href: "#/settings/assistant", onclick: () => innerWidth < 900 && closeAssistant() }, t("assistant.setUp")),
+      ),
+    ];
   }
   if (!chat) {
     const ask = (key) => button(t(key), { class: "small", onclick: () => sendToAssistant(t(key), true) });
@@ -14399,6 +15191,12 @@ function paintAssistant() {
   if (follow) body.scrollTop = body.scrollHeight;
   const busy = chat?.status === "thinking" || chat?.status === "asking";
   panel.querySelector(".assistant-form").hidden = !assistantUi.config?.ready;
+  // a question asked before the assistant was set up waits in the field once it is
+  if (assistantUi.config?.ready && assistantUi.waiting) {
+    const input = panel.querySelector("textarea");
+    if (!input.value.trim()) input.value = assistantUi.waiting;
+    keepWaiting("");
+  }
   panel.querySelector(".assistant-form button").disabled = busy;
 }
 
@@ -14456,6 +15254,12 @@ function markAssistantFab() {
   assistantUi.fab.classList.toggle("open", assistantUi.open);
 }
 
+function keepWaiting(text) {
+  assistantUi.waiting = text;
+  if (text) localStorage.setItem("hata.assistant.waiting", text);
+  else localStorage.removeItem("hata.assistant.waiting");
+}
+
 const rememberAssistant = () => assistantUi.panel?.classList.contains("paged") || (assistantUi.open ? localStorage.setItem(ASSISTANT_KEY, assistantUi.panel?.classList.contains("wide") ? "wide" : "open") : localStorage.removeItem(ASSISTANT_KEY));
 
 /** The window of the assistant, made once: floating over the pages, or the whole page #/assistant */
@@ -14496,7 +15300,13 @@ function openAssistant({ ask, draft, restore } = {}) {
   if (ask) assistantUi.chat = null;
   if (draft) input.value = draft;
   paintAssistant();
-  void loadAssistant().then(() => ask && assistantUi.config?.ready && sendToAssistant(ask, true));
+  void loadAssistant().then(() => {
+    if (assistantUi.config?.ready) return ask && sendToAssistant(ask, true);
+    if (ask || draft) {
+      keepWaiting(ask || draft);
+      paintAssistant();
+    }
+  });
   // a window put back after a reload does not take the keyboard from the page
   if (!restore) input.focus();
 }

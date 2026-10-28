@@ -58,7 +58,7 @@ function assertInstalled(name: string): void {
 
 // --- Jobs -------------------------------------------------------------------------------------------
 
-export type JobKind = "install" | "update" | "start" | "stop" | "restart" | "remove" | "apply" | "backup" | "restore" | "import" | "move" | "docker" | "tailscale" | "copyin" | "transfer" | "moveapp" | "extract" | "format" | "fsck" | "wipe" | "pool" | "sysupdate" | "guest" | "client" | "template" | "clone" | "resize";
+export type JobKind = "install" | "update" | "start" | "stop" | "restart" | "remove" | "apply" | "backup" | "restore" | "import" | "move" | "docker" | "tailscale" | "copyin" | "transfer" | "moveapp" | "extract" | "format" | "fsck" | "wipe" | "pool" | "sysupdate" | "guest" | "client" | "template" | "clone" | "resize" | "incus" | "container";
 
 export interface Job {
   id: string;
@@ -87,6 +87,9 @@ const KEEP_FINISHED_JOBS = 20;
 const jobs = new Map<string, Job>();
 /** app name → id of the job that currently owns it */
 const busy = new Map<string, string>();
+
+/** Whether a job runs for this key now */
+export const isBusy = (key: string): boolean => busy.has(key);
 
 export const getJob = (id: string): Job | null => jobs.get(id) ?? null;
 export const listJobs = (): Job[] => [...jobs.values()];

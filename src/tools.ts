@@ -10,10 +10,11 @@
  * Pure and tested: reading a version out of what a program prints.
  */
 import { existsSync, readFileSync } from "node:fs";
-import type { Job } from "./apps";
+import { AppError, type Job } from "./apps";
 import { settings } from "./config";
 import { installTool } from "./disks";
 import { dockerInfo } from "./docker";
+import { afterIncusRemoved, letIncusGo, cannotInstall, install as installIncus, installVms as installIncusVms, inUse as containersInUse, PACKAGES as INCUS_PACKAGES, VM_PACKAGES as INCUS_VM_PACKAGES } from "./containers";
 import { DOCKER_INSTALL_COMMAND, installDocker } from "./dockerinstall";
 import { parseFstab, pools } from "./mounting";
 import { packagesInUse } from "./netplaces";
@@ -68,6 +69,8 @@ const SPECS: Spec[] = [
   { id: "iptables", name: "iptables", package: "iptables", bin: "iptables", version: ["iptables", "--version"], page: "#/settings/network" },
   { id: "wireguard-tools", name: "WireGuard tools", package: "wireguard-tools", bin: "wg-quick", version: ["wg", "--version"], page: "#/settings/remote" },
   { id: "tailscale", name: "Tailscale", package: "tailscale", bin: "tailscale", version: ["tailscale", "version"], page: "#/settings/remote" },
+  { id: "incus", name: "Incus", package: "incus-base", bin: "incus", version: ["incus", "--version"], page: "#/containers", family: ["incus-base", "incus-client", "incus"] },
+  { id: "incus-vm", name: "QEMU for Incus", package: "qemu-system-x86", bin: "qemu-system-x86_64", version: ["qemu-system-x86_64", "--version"], page: "#/containers", family: ["incus", "incus-agent", "qemu-system-x86", "qemu-system-modules-spice", "qemu-utils", "ovmf"] },
   { id: "openssh-client", name: "OpenSSH client", package: "openssh-client", bin: "sftp", version: ["ssh", "-V"], page: "#/settings/backups", base: true },
 ];
 
@@ -91,6 +94,8 @@ export interface Tool {
    * off first (shares, merged, array, network, wifi, hotspot, ntfs); "" — it can.
    */
   holds: string;
+  /** Why installing it would be of no use here (nested, noArch, noKvm): said instead of the button; "" — nothing */
+  cannot: string;
   /** The newer version the package manager offers; "" — none known */
   newer: string;
   /** Its packages that have one, for the "Update" button */
@@ -144,9 +149,11 @@ async function packagesOf(spec: Spec): Promise<string[]> {
 }
 
 /** What of Hata's stands on a program right now, so that taking it away would break it */
-function holdsOf(id: string, nics: Nic[], remote: boolean): string {
+function holdsOf(id: string, nics: Nic[], remote: boolean, containers: boolean, vms: boolean): string {
   // whoever is on this page from afar came through it
   if (id === "tailscale" && remote) return "remote";
+  if (id === "incus" && containers) return "containers";
+  if (id === "incus-vm" && vms) return "vms";
   if (id === "wireguard-tools" && wireguardInUse()) return "wireguard";
   if (id === "samba" && settings.shares.length > 0) return "shares";
   if (id === "snapraid" && settings.snapraid.parity !== "") return "array";
@@ -178,6 +185,8 @@ export async function toolsReport(): Promise<Tool[]> {
   const ntfs = await kernelReadsNtfs();
   const nics = (await networkReport().catch(() => null))?.nics ?? [];
   const remote = (await tailscaleReport(0).catch(() => null))?.state === "running";
+  const containers = await containersInUse().catch(() => false);
+  const vms = await containersInUse("vm").catch(() => false);
   const offered = packageUpdates().list ?? [];
   return Promise.all(
     SPECS.map(async (spec) => {
@@ -191,12 +200,13 @@ export async function toolsReport(): Promise<Tool[]> {
         package: spec.package,
         state: installed ? ("installed" as const) : ("missing" as const),
         builtIn: spec.id === "ntfs-3g" && ntfs,
+        cannot: installed ? "" : spec.id === "incus" ? cannotInstall("incus") : spec.id === "incus-vm" ? cannotInstall("vm") : "",
         version,
-        install: spec.id === "docker" ? DOCKER_INSTALL_COMMAND : spec.id === "tailscale" ? TAILSCALE_INSTALL_COMMAND : installCommand(spec.package),
+        install: spec.id === "docker" ? DOCKER_INSTALL_COMMAND : spec.id === "tailscale" ? TAILSCALE_INSTALL_COMMAND : spec.id === "incus" ? installCommand(INCUS_PACKAGES.join(" ")) : spec.id === "incus-vm" ? installCommand(INCUS_VM_PACKAGES.join(" ")) : installCommand(spec.package),
         page: spec.page,
         used: installed ? usedNow(spec.id, docker.available) : null,
         remove: installed && !spec.base ? removeCommand(await packagesOf(spec)) : "",
-        holds: !installed ? "" : spec.base ? "base" : holdsOf(spec.id, nics, remote),
+        holds: !installed ? "" : spec.base ? "base" : holdsOf(spec.id, nics, remote, containers, vms),
         newer: (own.find((item) => item.name === spec.package) ?? own[0])?.to.replace(/^\d+:/, "").replace(/~(debian|ubuntu)[^-]*$/, "") ?? "",
         upgrade: own.map((item) => item.name),
       };
@@ -213,6 +223,14 @@ export async function installOne(id: string, user: string): Promise<{ job: Job }
   if (!spec) return { error: "not a program Hata installs" };
   if (spec.id === "docker") return { job: installDocker(user) };
   if (spec.id === "tailscale") return { job: installTailscale(user) };
+  if (spec.id === "incus") return { job: installIncus(user) };
+  if (spec.id === "incus-vm") {
+    try {
+      return { job: await installIncusVms(user) };
+    } catch (e) {
+      return { error: e instanceof Error ? e.message : String(e) };
+    }
+  }
   if (spec.id === "smartmontools") return { error: await installTool() };
   if (spec.id === "samba") {
     try {
@@ -239,8 +257,17 @@ export async function removeOne(id: string, user: string): Promise<{ code: strin
   if (tool.holds) return { code: "tools.holds." + tool.holds };
   const packages = await packagesOf(spec);
   if (!tool.remove || !packages.length) return { code: "tools.notPackage" };
+  // Incus leaves networks, rules in DOCKER-USER and places of its own: taken away while it still answers
+  if (spec.id === "incus") {
+    try {
+      await letIncusGo();
+    } catch (e) {
+      return { code: e instanceof AppError ? e.code : "tools.removeFailed", message: e instanceof Error ? e.message : String(e) };
+    }
+  }
   const failed = await removePackages(packages);
   if (failed) return { code: "tools.removeFailed", message: failed };
+  if (spec.id === "incus") await afterIncusRemoved().catch(() => {});
   record("system.tool.removed", { user, detail: spec.name });
   bus.publish("apps");
   bus.publish("disks");

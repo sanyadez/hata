@@ -2,7 +2,7 @@
 
 **English** · [Українська](COMPARISON.uk.md)
 
-What the home server programs of Hata's kind have, as of **October 2026**. Versions compared: Hata 0.24,
+What the home server programs of Hata's kind have, as of **October 2026**. Versions compared: Hata 0.26,
 umbrelOS 2.0, ZimaOS 1.7, CasaOS 0.4.15, Runtipi 4.10, Cosmos 0.23, Unraid 7.3.
 
 Every cell about another product comes from its own documentation, release notes or source code — see
@@ -44,8 +44,8 @@ or a plugin is named as such. These products change fast: if a cell is wrong or 
 | Backups | per app, daily and before every update; single files back; whole server restored by one command | the whole data folder, hourly, encrypted, snapshots browsable | folders between devices on a schedule, with versions | — | per app, on the server; before updates | Restic: encrypted, scheduled, single files back | plugin |
 | Copy elsewhere | SFTP, or S3-compatible storage; encrypted before it leaves | external drive, NAS, another Umbrel | Google Drive, Dropbox, OneDrive, the network, USB | — | — | Rclone destinations | configuration only, to its cloud |
 | Disk health | SMART in plain words, with the history of the counters | SMART, temperature, wear | yes | SMART pass/fail | — | SMART | SMART |
-| Formatting | ext4, exFAT, FAT32, NTFS; partitions; erase | ext4, exFAT (external disks) | yes | ext4 | — | ext4, XFS, NTFS, FAT32, exFAT | XFS, Btrfs, ZFS, ext4, NTFS, exFAT |
-| Several disks / a failed disk | mergerfs pool; SnapRAID parity; one wizard sets up both | ZFS mirror or RAIDZ | RAID 0/1/5/6, JBOD | mergerfs pool (beta) | — | MergerFS pool; SnapRAID parity | parity array; ZFS |
+| Formatting | ext4, Btrfs, XFS, exFAT, FAT32, NTFS; partitions made, resized, deleted; erase | ext4, exFAT (external disks) | yes | ext4 | — | ext4, XFS, NTFS, FAT32, exFAT | XFS, Btrfs, ZFS, ext4, NTFS, exFAT |
+| Several disks / a failed disk | mergerfs pool; SnapRAID parity, one or two disks; one wizard sets up both; Linux RAID, ZFS and Btrfs pools the system has watched and checked | ZFS mirror or RAIDZ | RAID 0/1/5/6, JBOD | mergerfs pool (beta) | — | MergerFS pool; SnapRAID parity | parity array; ZFS |
 | Folders over the network (SMB) | users of Hata, read or write per folder, guests; found in Explorer and Finder by itself; Time Machine | each share for the account that made it | members, read or write; guests | guest shares only | — | yes; also NFS, SFTP, WebDAV | SMB and NFS, per user |
 | Mounting network places | SMB, NFS, SFTP, WebDAV, FTP | SMB; files from cloud drives | SMB | SMB; Google Drive, Dropbox | — | Rclone (SMB, SFTP, WebDAV, FTP, S3…) | plugin |
 | File manager in the browser | yes, with a trash and archives | yes | yes, with a recycle bin | yes | — | — | yes |
@@ -62,7 +62,9 @@ or a plugin is named as such. These products change fast: if a cell is wrong or 
 | | Hata | umbrelOS | ZimaOS | CasaOS | Runtipi | Cosmos | Unraid |
 |---|---|---|---|---|---|---|---|
 | Other machines | a small client on any Linux: containers, apps, files, backups, Docker's images and volumes, system updates, moving an app over, Wake-on-LAN | — | switching between Zima devices in its app | — | — | servers linked over Constellation; deploying across them in Pro | Unraid Connect, a cloud dashboard |
-| Virtual machines | those of a Proxmox VE server: power, settings, snapshots, backups, clones, console and screen; new ones from cloud images or discs | Windows, Linux, Android | yes | — | — | — | yes (KVM) |
+| Virtual machines | on the server itself (Incus, a test feature): Debian, Ubuntu (with a desktop too), Fedora, Rocky Linux, with a screen in the page and clones; and those of a Proxmox VE server: power, settings, snapshots, backups, clones, console and screen; new ones from cloud images or discs | Windows, Linux, Android | yes | — | — | — | yes (KVM) |
+| System containers | on the server itself (Incus): Debian, Ubuntu, Fedora, Rocky Linux, Alpine, with limits, snapshots, clones, backups and Docker inside; and those of a Proxmox VE server | — | — | — | — | — | LXC (plugin) |
+| Home Assistant | its devices on the home page, its updates, backups and low batteries | — | — | — | — | — | — |
 | AI agents (MCP) | MCP with three levels per key, approval of what destroys, OAuth sign-in; an assistant built into the page | MCP, one set of permissions for all its tokens | local AI search; agents as store apps | — | — | — | API; MCP by plugin |
 | Phone and desktop apps | — (the page installs as an app, with notifications) | iPhone, Mac; Photos | Windows, macOS, iOS, Android; photos in beta | — | — | Android, Windows, macOS, Linux (beta) | — |
 | Notifications | browser push, Telegram, ntfy, mail, webhook | in the page | in the page | in the page | in the page | in the page, mail, webhook | browser, mail, Telegram, Discord, ntfy and more |
@@ -71,9 +73,9 @@ or a plugin is named as such. These products change fast: if a cell is wrong or 
 
 ## What Hata does not have
 
-- A hypervisor of its own: the virtual machines it manages are those of a Proxmox VE server.
+- Years of virtual machines: those on the server itself are a test feature, x86 only, from a short list of systems — installing an OS from a disc is done on a Proxmox VE server.
 - Phone and desktop apps, and a photos app.
-- RAID and ZFS: protection from a disk failure is SnapRAID parity over plain disks.
+- Making RAID or ZFS: the arrays and pools a system has are watched and checked, but the protection Hata sets up is SnapRAID parity over plain disks.
 - An OpenID Connect provider for apps: Hata's sign-in stands in front of an app and tells it who came in by
   headers (`Remote-User`), which only apps that read such headers use.
 - Years of use: it is young, and verified on a handful of machines.

@@ -40,6 +40,8 @@ const CLIENT_FROM = process.env.HATA_CLIENT_FROM ?? `https://github.com/sanyadez
 export const INVITE_MS = 30 * 60_000;
 /** A machine silent for longer than this is away */
 const TICK_MS = 30_000;
+/** A client says its numbers every few seconds; this long without a word is a connection gone */
+const SILENT_MS = 60_000;
 export const ARCHES = ["x64", "arm64"] as const;
 export const MACHINE_ID_RE = /^[a-f0-9]{8}$/;
 
@@ -99,6 +101,8 @@ const hex = (bytes: number) => Buffer.from(crypto.getRandomValues(new Uint8Array
 interface Live {
   peer: Peer;
   since: number;
+  /** When the client was last heard: it says its numbers every few seconds */
+  heard: number;
   ip: string;
   status: SystemStatus | null;
   containers: { docker: MachineInfo["docker"]; containers: MachineContainer[] } | null;
@@ -201,7 +205,8 @@ export async function remove(id: string, by: string): Promise<void> {
   if (!m) throw new AppError("machine.notFound", 404);
   const link = live.get(id);
   if (link) {
-    await link.peer.call("forget").catch(() => {});
+    // a machine switched off hard leaves its link looking alive for a while: its answer is not waited for long
+    await Promise.race([link.peer.call("forget").catch(() => {}), Bun.sleep(5000)]);
     link.ws.close(1000, "removed");
     live.delete(id);
   }
@@ -472,7 +477,7 @@ async function onWelcome(ws: ServerWebSocket<LinkSocket>, plain: Uint8Array): Pr
       }
     },
   });
-  live.set(machine.id, { peer: d.peer, since: Date.now(), ip: d.ip, status: null, containers: null, ws });
+  live.set(machine.id, { peer: d.peer, since: Date.now(), heard: Date.now(), ip: d.ip, status: null, containers: null, ws });
   bus.publish("machines");
   for (const listener of upListeners) listener(machine.id);
 }
@@ -509,6 +514,8 @@ export const linkHandlers = {
         if (typeof message === "string") return void ws.close(1008, "sealed frames only");
         const plain = await d.opener!.open(new Uint8Array(message));
         if (d.stage === "welcome") return await onWelcome(ws, plain);
+        const link = d.machine && live.get(d.machine.id);
+        if (link && link.ws === ws) link.heard = Date.now();
         d.peer?.receive(plain);
       } catch {
         // a frame that does not open: whoever this is, the conversation is over
@@ -531,6 +538,24 @@ export const linkHandlers = {
 /** Keeps the connections talking: a client that hears nothing for long takes the connection for dead */
 export function startMachines(): void {
   setInterval(() => {
-    for (const link of live.values()) link.peer.event("tick", Date.now());
+    for (const [id, link] of live) {
+      // a machine switched off hard (a virtual machine stopped, a cable pulled) closes nothing: the
+      // connection would look alive until TCP gives up, many minutes later
+      if (Date.now() - link.heard > SILENT_MS) {
+        live.delete(id);
+        const m = state.machines.find((x) => x.id === id);
+        if (m) {
+          m.seen = link.heard;
+          save();
+        }
+        link.peer.close();
+        try {
+          link.ws.terminate();
+        } catch {}
+        bus.publish("machines");
+        continue;
+      }
+      link.peer.event("tick", Date.now());
+    }
   }, TICK_MS).unref?.();
 }
