@@ -352,7 +352,7 @@ in Google Drive or Box.
 
 | | |
 |---|---|
-| ![Machines: the other computers of the house](screenshots/machines.png) Machines: the other computers of the house | ![A machine: its state at a glance](screenshots/machine.png) A machine: its state at a glance |
+| ![Servers: the other computers of the house](screenshots/machines.png) Servers: the other computers of the house | ![A machine: its state at a glance](screenshots/machine.png) A machine: its state at a glance |
 | ![A machine's apps: installed, updated, backed up and moved from here](screenshots/machine-apps.png) A machine's apps: installed, updated, backed up and moved from here | ![A machine's Docker containers](screenshots/machine-containers.png) A machine's Docker containers |
 | ![A terminal on the machine](screenshots/machine-terminal.png) A terminal on the machine | ![A machine's files in Files](screenshots/machine-files.png) A machine's files in Files |
 
