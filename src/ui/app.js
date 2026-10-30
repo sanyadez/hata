@@ -2600,7 +2600,7 @@ const machineOs = (m) => [m.info?.os, m.info?.arch].filter(Boolean).join(" · ")
 
 function renderMachines() {
   shell(
-    h("div", { class: "page-head" }, h("div", null, h("h1", null, t("nav.machines")), h("p", { class: "meta", id: "machines-meta" }, t("machines.lead"))), h("div", { class: "actions" }, button(t("ha.add"), { onclick: () => haDialog() }, "plus"), button(t("pve.add"), { onclick: () => pveDialog() }, "plus"), button(t("machines.add"), { class: "primary", onclick: addMachineDialog }, "plus"))),
+    h("div", { class: "page-head" }, h("div", null, h("h1", null, t("nav.machines")), h("p", { class: "meta", id: "machines-meta" }, t("machines.lead"))), h("div", { class: "actions" }, button(t("machines.addAny"), { class: "primary", onclick: (e) => addToMachinesMenu(e.currentTarget) }, "plus"))),
     h("div", { id: "machines-body" }),
     h("div", { id: "incus-list", class: "stack" }),
     h("div", { id: "pve-list", class: "stack" }),
@@ -2612,13 +2612,50 @@ function renderMachines() {
   if (haUi.list) paintHaList();
 }
 
+/** Everything the Machines page can gain, in one menu: a computer that is there, a container or a virtual machine made here, a Proxmox server, Home Assistant */
+function addToMachinesMenu(at = null) {
+  let dialog;
+  const entry = (label, hint, iconName, action) => h("button", { type: "button", class: "menu-item", disabled: !action, onclick: () => (dialog.close(), action()) }, h("span", { class: "app-icon plus" }, icon(iconName)), h("span", { class: "tile-text" }, h("span", { class: "tile-name" }, label), h("span", { class: "muted small" }, hint)));
+  const d = incusUi.data;
+  // not ready yet — the page of containers says what is needed and has the button
+  const here = (kind) => {
+    if (!d || d.state === "blocked") return null;
+    if (d.state !== "ready" || (kind === "vm" && d.vms?.state !== "ready")) return () => go("#/containers");
+    return () => newContainerDialog(kind);
+  };
+  const hint = (kind) => {
+    if (!d) return t("machines.addHere.unknown");
+    if (d.state === "blocked") return t("machines.addHere.blocked");
+    if (d.state === "missing") return t("machines.addHere.missing");
+    if (d.state !== "ready") return t("incus.state." + d.state);
+    if (kind === "vm" && d.vms?.state !== "ready") return t(d.vms?.state === "missing" ? "machines.addHere.vmMissing" : "machines.addHere.vmNo");
+    return t(kind === "vm" ? "machines.addHere.vmHint" : "machines.addHere.containerHint");
+  };
+  dialog = openDialog(
+    at ? "menu dropdown" : "menu",
+    h("header", null, h("h2", null, t("machines.addWhat"))),
+    entry(t("machines.addExisting"), t("machines.addExistingHint"), "server", addMachineDialog),
+    entry(t("machines.addContainer"), hint("container"), "box", here("container")),
+    entry(t("machines.addVm"), hint("vm"), "box", here("vm")),
+    entry(t("machines.addPve"), t("machines.addPveHint"), "server", () => pveDialog()),
+    entry(t("machines.addHa"), t("machines.addHaHint"), "bulb", () => haDialog()),
+  );
+  if (at) {
+    // under the button, its right edge on the button's
+    const r = at.getBoundingClientRect();
+    placeAt(dialog, { x: r.right - dialog.offsetWidth, y: r.bottom + 4 });
+    dialog.tabIndex = -1;
+    dialog.focus();
+  }
+}
+
 function renderMachinesBody() {
   const box = document.getElementById("machines-body");
   if (!box) return;
   const list = machinesUi.list.machines;
   document.getElementById("machines-meta").textContent = list.length ? t("machines.count", { n: list.length, online: list.filter((m) => m.online).length }) : t("machines.lead");
   if (!list.length) {
-    return box.replaceChildren(h("div", { class: "card empty" }, icon("server"), h("h2", null, t("machines.none")), h("p", null, t("machines.noneLead")), button(t("machines.add"), { class: "primary", onclick: addMachineDialog }, "plus")));
+    return box.replaceChildren(h("div", { class: "card empty" }, icon("server"), h("h2", null, t("machines.none")), h("p", null, t("machines.noneLead")), button(t("machines.addAny"), { class: "primary", onclick: (e) => addToMachinesMenu(e.currentTarget) }, "plus")));
   }
   box.replaceChildren(h("div", { class: "cards" }, list.map((m) => h("a", { class: "card pad machine-card", href: `#/machines/${m.id}`, id: "machine-" + m.id, menu: (at) => machineMenu(m, at) }))));
   for (const m of list) paintMachineCard(m);
@@ -3191,10 +3228,10 @@ const tickRow = (label, hint, checked) => {
   return [box, h("label", { class: "check" }, box, h("span", null, h("strong", null, label), hint && h("span", { class: "muted small block" }, hint)))];
 };
 
-function newContainerDialog() {
+function newContainerDialog(start = "container") {
   const d = incusUi.data;
   const vmsReady = d.vms?.state === "ready";
-  let kind = "container";
+  let kind = vmsReady ? start : "container";
   const name = h("input", { required: true, placeholder: "docker-1", pattern: "[a-z][a-z0-9\\-]{0,61}[a-z0-9]", autocapitalize: "none", spellcheck: false, class: "mono" });
   const image = h("select", { onchange: () => shape() });
   const { cores, memory, fillMemory } = limitFields(null, false);

@@ -334,6 +334,7 @@ button.tile { padding: 0; font: inherit; color: inherit; text-align: left; curso
 .tile-text { display: grid; gap: 3px; min-width: 0; }
 .tile-top { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .tile-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
+.menu-item .tile-name { white-space: normal; }
 .tile-sub { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .tile.add .tile-sub { white-space: normal; }
 .tile.restarting .tile-sub { color: var(--danger); }
