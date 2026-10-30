@@ -125,6 +125,14 @@ export interface SystemStatus {
   temperature: number | null;
   /** The last minute or so of samples, oldest first, for the sparklines: percentages and bytes per second */
   history: { cpu: number[]; memory: number[]; net: number[] };
+  /** The last 40 minutes, one average a minute, oldest first; `at` is when the last one closed */
+  trend: Trend;
+}
+
+export interface Trend {
+  at: number;
+  cpu: (number | null)[];
+  memory: (number | null)[];
 }
 
 const HISTORY = 40;
@@ -133,6 +141,32 @@ const history: SystemStatus["history"] = { cpu: [], memory: [], net: [] };
 function remember(list: number[], value: number): void {
   list.push(value);
   if (list.length > HISTORY) list.shift();
+}
+
+const TREND = 40;
+const MINUTE = 60_000;
+const trend: Trend = { at: 0, cpu: [], memory: [] };
+let minute = { at: 0, cpu: 0, cpuN: 0, memory: 0, memoryN: 0 };
+
+/** Adds a sample to the minute it falls in; a minute that is over becomes a point of the trend */
+export function addToTrend(into: Trend, open: typeof minute, now: number, cpu: number | null, memory: number): typeof minute {
+  const start = now - (now % MINUTE);
+  if (open.at && start > open.at) {
+    const add = (cpu: number | null, memory: number | null) => {
+      into.cpu.push(cpu);
+      into.memory.push(memory);
+      if (into.cpu.length > TREND) into.cpu.shift();
+      if (into.memory.length > TREND) into.memory.shift();
+    };
+    add(open.cpuN ? Math.round(open.cpu / open.cpuN) : null, open.memoryN ? Math.round(open.memory / open.memoryN) : null);
+    // minutes with no sample at all (the machine asleep) are gaps in the line, not zeros
+    for (let at = open.at + MINUTE; at < start && at - open.at <= TREND * MINUTE; at += MINUTE) add(null, null);
+    into.at = start;
+  }
+  const next = !open.at || start > open.at ? { at: start, cpu: 0, cpuN: 0, memory: 0, memoryN: 0 } : open;
+  if (cpu !== null) ((next.cpu += cpu), next.cpuN++);
+  ((next.memory += memory), next.memoryN++);
+  return next;
 }
 
 let prev: { at: number; cpu: CpuTimes | null; net: NetTotals } | null = null;
@@ -156,7 +190,9 @@ export function sample(): SystemStatus {
   const memory = parseMemory(read("/proc/meminfo"));
   if (cpu !== null) remember(history.cpu, cpu);
   if (net) remember(history.net, net.rx + net.tx);
-  remember(history.memory, memory.total ? Math.round((memory.used / memory.total) * 100) : 0);
+  const memoryPercent = memory.total ? Math.round((memory.used / memory.total) * 100) : 0;
+  remember(history.memory, memoryPercent);
+  minute = addToTrend(trend, minute, now, cpu, memoryPercent);
   last = {
     hostname: hostname(),
     uptime: Math.floor(Number(read("/proc/uptime").split(" ")[0]) || 0),
@@ -168,6 +204,7 @@ export function sample(): SystemStatus {
     net,
     temperature: temperature(),
     history,
+    trend,
   };
   return last;
 }

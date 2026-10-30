@@ -159,19 +159,24 @@ onAppRemoved(dropAccess);
 
 const LANGUAGES: Record<string, Record<string, string>> = { en, uk };
 
-/** Machines that are away, with what can bring each back: its guest started in Proxmox, or a wake-up signal */
+/** What can bring a machine back: its guest started in Proxmox, its container of this server started, or a wake-up signal */
+function wayBack(m: ReturnType<typeof machineList>[number] | undefined) {
+  const macs = (m?.info?.macs ?? []).map((c) => c.mac);
+  const here = m ? instanceOfMachine(macs, m.info?.hostname ?? m.name) : null;
+  const guest = m && guestOfMachine(m.id, macs, m.ip.replace(/^::ffff:/, ""));
+  const pve = guest?.power && guest.status !== "running" ? { host: guest.host, hostName: guest.hostName, guest: guest.id, status: guest.status } : undefined;
+  return { here, pve, wake: !pve && !here && m?.info?.macs?.length ? "lan" : "" };
+}
+
+/** Machines that are away, with what can bring each back */
 function awayMachines() {
   const all = machineList();
   return machinesAway().flatMap((away) => {
-    const m = all.find((x) => x.id === away.id);
-    const macs = (m?.info?.macs ?? []).map((c) => c.mac);
+    const { here, pve, wake } = wayBack(all.find((x) => x.id === away.id));
     // a stopped container or virtual machine of this server: the containers' own item says so (and starts
     // it) when it should run; one stopped through Hata is no news
-    const here = m ? instanceOfMachine(macs, m.info?.hostname ?? m.name) : null;
     if (here && !here.running) return [];
-    const guest = m && guestOfMachine(m.id, macs, m.ip.replace(/^::ffff:/, ""));
-    const pve = guest?.power && guest.status !== "running" ? { host: guest.host, hostName: guest.hostName, guest: guest.id, status: guest.status } : undefined;
-    return [{ ...away, wake: !pve && !here && m?.info?.macs?.length ? "lan" : "", pve }];
+    return [{ ...away, wake, pve }];
   });
 }
 
@@ -1124,7 +1129,12 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
       // apps of the other machines, for administrators: their tiles are `<name>@<machine>`
       machineApps: onMachines,
       // the other machines and their numbers, for their blocks on the dashboard
-      machines: admin ? machineList().map((m) => ({ id: m.id, name: m.name, online: m.online, seen: m.seen, os: [m.info?.os, m.info?.arch].filter(Boolean).join(" · "), status: m.status })) : [],
+      machines: admin
+        ? machineList().map((m) => {
+            const back = m.online ? null : wayBack(m);
+            return { id: m.id, name: m.name, online: m.online, seen: m.seen, os: [m.info?.os, m.info?.arch].filter(Boolean).join(" · "), status: m.status, ...(back && { wake: back.wake, pve: back.pve, instance: back.here?.name }) };
+          })
+        : [],
       dashboard: (dashboard = arrange(settings.dashboard, [...apps.map((app) => app.name), ...onMachines.map((app) => app.key)], admin ? settings.folders : [], admin ? ["store", "add"] : user.role === "guest" ? [] : ["store"], haSeen.map((s) => s.id))),
       // Home Assistant: the servers this user sees, and the states of the tiles on the page
       ha: { servers: haSeen, states: haTileStates(haTiles(dashboard)) },
@@ -1164,7 +1174,8 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
   if (path === "/api/dashboard/text" && method === "GET") {
     const apps = await listApps("en");
     const onMachines = await machineTiles(machineList(), "en");
-    return json({ text: layoutText(arrange(settings.dashboard, [...apps.map((app) => app.name), ...onMachines.map((app) => app.key)], settings.folders, ["store", "add"])) });
+    // the tiles of every Home Assistant server stay in the text: what is not written there is gone on saving
+    return json({ text: layoutText(arrange(settings.dashboard, [...apps.map((app) => app.name), ...onMachines.map((app) => app.key)], settings.folders, ["store", "add"], haVisibleTo(user).map((s) => s.id))) });
   }
   if (path === "/api/dashboard/text" && method === "PUT") {
     const data = await body(req);

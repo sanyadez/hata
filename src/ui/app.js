@@ -1114,33 +1114,101 @@ function setStat(id, value, unit, hint, chart, level = "") {
 
 const level = (percent) => (percent >= 95 ? "danger" : percent >= 85 ? "warn" : "");
 
+/** A bar of a share: `percent` of it filled, coloured by how full it is */
+function meterBar(percent, cls = level(percent)) {
+  const fill = h("i", { class: cls });
+  fill.style.width = Math.max(0, Math.min(100, percent)) + "%";
+  return h("div", { class: "bar" }, fill);
+}
+
+/** One number of the block of this server: label, the value and its unit, a bar or a little chart, a line under it */
+function kpi(id, iconName, label, key = "") {
+  return h(
+    "div",
+    { class: "kpi", id: "kpi-" + id },
+    h("div", { class: "kpi-label" }, key ? h("i", { class: "series-key " + key }) : icon(iconName), h("span", { class: "clip" }, label)),
+    h("div", { class: "kpi-value" }, h("strong", null, "—"), h("span", { class: "unit" })),
+    h("div", { class: "kpi-gauge" }),
+    h("div", { class: "kpi-hint" }, " "),
+  );
+}
+
+function setKpi(id, value, unit, hint, gauge, cls = "") {
+  const el = document.getElementById("kpi-" + id);
+  if (!el) return;
+  const strong = el.querySelector("strong");
+  strong.textContent = value;
+  strong.className = cls;
+  el.querySelector(".unit").textContent = unit;
+  el.querySelector(".kpi-hint").textContent = hint || " ";
+  el.querySelector(".kpi-gauge").replaceChildren(gauge ?? "");
+}
+
+/** The block of this server's numbers: made once, refilled as the numbers come */
+function statsBlock() {
+  return widget(
+    "stats",
+    h(
+      "section",
+      { class: "card numbers" },
+      h("div", { class: "block-head" }, h("span", { class: "block-icon" }, icon("server")), h("h2", { class: "clip", id: "own-name" }, state.overview?.system?.hostname ?? "…"), h("span", { class: "muted small grow" }, t("home.thisServer")), h("span", { class: "mono muted small", id: "own-up" })),
+      h("div", { class: "kpis" }, kpi("cpu", "cpu", t("sys.cpu"), "s2"), kpi("memory", "memory", t("sys.memory"), "s1"), kpi("disk", "disk", t("sys.disk")), kpi("network", "network", t("sys.network")), kpi("temp", "temp", t("sys.temperature"))),
+      h("div", { class: "trend", id: "own-trend" }),
+      blockRemover("stats"),
+    ),
+  );
+}
+
+const MINUTE_MS = 60_000;
+
+/** CPU and memory of the last 40 minutes, a point a minute: drawn again only when a minute is over */
+function paintTrend(trend) {
+  const box = document.getElementById("own-trend");
+  if (!box || !trend || box.dataset.at === String(trend.at)) return;
+  box.dataset.at = String(trend.at);
+  const n = trend.cpu.length;
+  const points = trend.cpu.map((cpu, i) => ({ t: trend.at - (n - 1 - i) * MINUTE_MS, cpu, memory: trend.memory[i] }));
+  const series = [
+    { cls: "s2", label: t("sys.cpu"), value: (p) => p.cpu },
+    { cls: "s1", label: t("sys.memory"), value: (p) => p.memory },
+  ];
+  put(
+    box,
+    n < 2 ? h("p", { class: "muted small" }, t("home.trendSoon")) : h("div", { class: "trend-head muted small" }, t("home.trend", { n })),
+    n >= 2 && lineChart(points, series, { max: 100, fmt: (v) => Math.round(v) + "%", label: t("home.trend", { n }), height: 120, head: false }),
+  );
+}
+
 function renderSystem() {
   const s = state.overview?.system;
   if (!s || state.route.view !== "home") return;
   const meta = document.getElementById("host");
   const own = document.getElementById("own-name");
   if (own) own.textContent = s.hostname;
-  if (meta) meta.replaceChildren(...[s.hostname, location.host, t("sys.uptime", { time: duration(s.uptime) }), "Hata " + state.version].flatMap((part, i) => (i ? [h("span", { class: "dot-sep" }, "·"), part] : [part])));
+  const up = document.getElementById("own-up");
+  if (up) up.textContent = t("sys.uptime", { time: duration(s.uptime) });
+  if (meta) meta.replaceChildren(...[s.hostname, location.host, "Hata " + state.version].flatMap((part, i) => (i ? [h("span", { class: "dot-sep" }, "·"), part] : [part])));
 
-  setStat("cpu", s.cpu == null ? "—" : String(s.cpu), "%", t("sys.cores", { n: s.cores }) + " · " + t("sys.load", { load: s.load[0] }), sparkline(s.history.cpu, 100));
+  setKpi("cpu", s.cpu == null ? "—" : String(s.cpu), "%", t("sys.cores", { n: s.cores }) + " · " + t("sys.load", { load: s.load[0] }), meterBar(s.cpu ?? 0, ""));
   const mem = s.memory;
   const memPercent = mem.total ? Math.round((mem.used / mem.total) * 100) : 0;
   const used = bytesParts(mem.used);
-  setStat("memory", used.value, used.unit, t("sys.ofPercent", { total: bytes(mem.total), percent: memPercent }), sparkline(s.history.memory, 100), level(memPercent));
+  setKpi("memory", used.value, used.unit, t("sys.ofPercent", { total: bytes(mem.total), percent: memPercent }), meterBar(memPercent, level(memPercent) || "info"), level(memPercent));
   const disk = s.disks[s.disks.length - 1];
+  const diskCell = document.getElementById("kpi-disk");
+  if (diskCell) diskCell.hidden = !disk;
   if (disk) {
     const percent = Math.round((disk.used / disk.total) * 100);
-    const fill = h("i", { class: level(percent) });
-    fill.style.width = percent + "%";
-    setStat("disk", String(percent), "%", t("sys.free", { free: bytes(disk.total - disk.used), total: bytes(disk.total) }), h("div", { class: "bar" }, fill), level(percent));
-    const label = document.querySelector("#stat-disk .stat-label");
-    if (label) label.lastChild.textContent = `${t("sys.disk")} ${disk.path}`;
+    setKpi("disk", String(percent), "%", t("sys.free", { free: bytes(disk.total - disk.used), total: bytes(disk.total) }), meterBar(percent, level(percent) || "ok"), level(percent));
+    const label = diskCell.querySelector(".kpi-label .clip");
+    if (label) label.textContent = `${t("sys.disk")} ${disk.path}`;
   }
   const net = s.net ? bytesParts(s.net.rx + s.net.tx) : null;
-  setStat("network", net ? net.value : "—", net ? net.unit + "/s" : "", s.net ? `↓ ${bytes(s.net.rx)}/s · ↑ ${bytes(s.net.tx)}/s` : "", sparkline(s.history.net));
-  const temp = document.getElementById("stat-temp");
+  setKpi("network", net ? net.value : "—", net ? net.unit + "/s" : "", s.net ? `↓ ${bytes(s.net.rx)}/s · ↑ ${bytes(s.net.tx)}/s` : "", sparkline(s.history.net));
+  const temp = document.getElementById("kpi-temp");
   if (temp) temp.hidden = s.temperature == null;
-  if (s.temperature != null) setStat("temp", String(s.temperature), "°C", t("sys.cpu"), null, s.temperature >= 85 ? "warn" : "");
+  if (s.temperature != null) setKpi("temp", String(s.temperature), "°C", t("sys.cpu"), meterBar(s.temperature, s.temperature >= 85 ? "warn" : ""), s.temperature >= 85 ? "warn" : "");
+  paintTrend(s.trend);
 }
 
 // --- Dashboard: tiles, groups, folders of tiles -------------------------------------------------
@@ -1196,6 +1264,16 @@ function tileIcon(item, size = "") {
   return h("span", { class: "app-icon stack" }, item.items.filter(tileTarget).slice(0, 4).map((inner) => tileIcon(inner, "mini")));
 }
 
+/** What every tile is made of: the picture with the marks beside it, the name (two lines at most), how it is, where */
+function tileContent(item, title, sub, { badges = null, where = null, big = "" } = {}) {
+  return [
+    h("span", { class: "tile-head" }, tileIcon(item), big && h("span", { class: "tile-big" }, big), h("span", { class: "tile-badges" }, badges)),
+    h("span", { class: "tile-name", title }, title),
+    h("span", { class: "tile-sub" }, sub),
+    where,
+  ];
+}
+
 function tile(item) {
   const target = tileTarget(item);
   if (!target) return null;
@@ -1208,6 +1286,7 @@ function tile(item) {
   let side = null;
   let badges = null;
   let haMain = null;
+  let where = null;
   if (item.type === "app" && target.machine) {
     // an app of another machine: opened at the machine's address, managed on the machine's page
     const app = target;
@@ -1216,7 +1295,8 @@ function tile(item) {
     href = url ?? `#/machines/${target.machine.id}/apps`;
     external = !!url;
     sub = [h("i", { class: "dot " + st }), target.machine.online ? (st === "running" && (app.guarded || app.port) ? (app.guarded ? `${location.hostname}:${app.guarded}` : `${target.machine.ip}:${app.port}`) : t("status." + st)) : t("machines.offline")];
-    badges = [app.guarded && h("span", { class: "lock", title: t("access.protected") }, icon("lock")), h("span", { class: "lock", title: target.machine.name }, icon("server"))];
+    badges = [app.guarded && h("span", { class: "lock", title: t("access.protected") }, icon("lock"))];
+    where = h("span", { class: "tile-where" }, icon("server"), h("span", { class: "clip" }, target.machine.name));
     side = admin && h("a", { class: "tile-open", href: `#/machines/${target.machine.id}/apps`, title: target.machine.name, "aria-label": `${target.machine.name}: ${title}` }, icon("sliders"));
   } else if (item.type === "app") {
     const app = target;
@@ -1237,6 +1317,7 @@ function tile(item) {
     href = item.url;
     external = true;
     sub = linkHost(item.url);
+    badges = h("span", { class: "lock" }, icon("external"));
     side = isAdmin() && h("button", { type: "button", class: "tile-open", title: t("home.editLink"), "aria-label": `${t("home.editLink")}: ${title}`, onclick: () => linkDialog(item) }, icon("sliders"));
   } else if (item.type === "builtin") {
     // Hata's own tiles: the store opens like an app, "Add" asks what to add
@@ -1255,7 +1336,7 @@ function tile(item) {
   }
   // what has no page of its own to manage it gets a menu: where to move it, how to take it off
   if (admin && !side && !isAddTile(item)) side = h("button", { type: "button", class: "tile-open", title: t("home.tileActions"), "aria-label": `${t("home.tileActions")}: ${title}`, onclick: () => tileMenu(item) }, icon("more"));
-  const content = [tileIcon(item), h("span", { class: "tile-text" }, h("span", { class: "tile-top" }, h("span", { class: "tile-name" }, title), badges), h("span", { class: "tile-sub" }, sub))];
+  const content = tileContent(item, title, sub, { badges, where });
   const key = tileKey(item);
   const main = haMain ??
     (item.type === "folder" || isAddTile(item)
@@ -1483,7 +1564,7 @@ function groupHead(group, index, count) {
       layout.groups.length > 1 && tool(t("home.removeGroup"), "trash", () => changeLayout((next) => void next.groups[first ? 1 : 0].items.push(...next.groups.splice(index, 1)[0].items)), { class: "quiet" }),
     ],
   );
-  return h("div", { class: "section-head" }, h("h2", null, title, first && !group.title && h("span", { class: "muted small" }, t("home.installed", { n: count }))), tools);
+  return h("div", { class: "section-head group-head" }, h("h2", null, h("span", { class: "clip" }, title), h("span", { class: "group-count" }, count)), tools);
 }
 
 /** What can be put on the dashboard, to choose from */
@@ -1559,7 +1640,7 @@ function renderDashboard(box) {
       const tiles = group.items.map(tile).filter(Boolean);
       // a group with nothing in it for this user is not theirs to see
       if (!tiles.length && !admin) return null;
-      const head = groupHead(group, index, o.apps.length);
+      const head = groupHead(group, index, tiles.filter((el) => !el.classList.contains("add")).length);
       if (admin && groups.length > 1) {
         head.classList.add("handle");
         head.addEventListener("pointerdown", (e) => dragStart(e, group.id, GROUP_DRAG, head.parentElement));
@@ -1871,7 +1952,7 @@ function attentionItem(item) {
   const doIt = (label, iconName, work) =>
     isAdmin() &&
     button(label, {
-      class: "small primary",
+      class: "small",
       onclick: async (e) => {
         const el = e.currentTarget;
         el.disabled = true;
@@ -1914,9 +1995,9 @@ function attentionItem(item) {
     item.code === "array.parityLost" && doIt(t("array.rebuild"), "refresh", () => runArray("/rebuild")),
     item.code === "array.held" && doIt(t("array.bringBack"), "refresh", () => runArray("/fix")),
     item.code === "array.failed" && doIt(t("array.syncNow"), "refresh", () => runArray("/sync")),
-    item.code === "docker.missing" && isAdmin() && button(t("docker.install"), { class: "small primary", onclick: () => dockerDialog() }, "download"),
-    item.code === "docker.stopped" && isAdmin() && dockerStartButton(),
-    item.code === "disk.usb" && isAdmin() && button(t("copyin.button"), { class: "small primary", onclick: () => ((state.copyInFrom = item.detail.id), go("#/settings/storage")) }, "download"),
+    item.code === "docker.missing" && isAdmin() && button(t("docker.install"), { class: "small", onclick: () => dockerDialog() }, "download"),
+    item.code === "docker.stopped" && isAdmin() && dockerStartButton("small"),
+    item.code === "disk.usb" && isAdmin() && button(t("copyin.button"), { class: "small", onclick: () => ((state.copyInFrom = item.detail.id), go("#/settings/storage")) }, "download"),
     (item.code === "disk.new" || item.code.startsWith("absent")) && isAdmin() && open("#/settings/storage", t("attention.disk.open")),
     item.code === "update" && open("#/settings/about"),
     item.code === "disk.trash" && open("#/trash", t("trash.title")),
@@ -1936,32 +2017,38 @@ function attentionItem(item) {
     isAdmin() && { label: t("attention.later", { n: SNOOZE_DAYS }), icon: "clock", run: () => snoozeItem(item) },
     (item.code === "disk.new" || item.code === "disk.usb") && isAdmin() && { label: t("mounting.ignore"), icon: "x", run: () => void api("POST", "/api/disks/ignore", { id: item.detail.id }).then(refresh, (e) => toast(errorText(e), "error")) },
   ].filter(Boolean);
-  const main = below.filter((x) => x instanceof Node);
-  const more = below.filter((x) => !(x instanceof Node));
-  // with nothing to do right here, the way to where it is done stays in sight
-  const way = !main.length && more.find((x) => x.href);
-  if (way) main.push(h("a", { class: "btn small", href: way.href }, way.label));
-  const rest = more.filter((x) => x !== way);
   const title = t(base + ".title", detail);
-  const openMore = (at) => menuAt(at, menuHeader(title, null, ATTENTION_ICONS[item.code.split(".")[0]] ?? "alert"), rest);
-  if (rest.length) {
-    // a split button: the arrow is joined to the first action, so the rest is seen to be there
-    const opener = (e) => {
-      const r = e.currentTarget.closest(".split").getBoundingClientRect();
-      openMore({ x: r.left, y: r.bottom + 4 });
-    };
-    const first = main[0];
-    if (first) {
-      const arrow = button("", { class: first.className.replace(/\bbtn\b/, "").trim() + " split-more", title: t("attention.more"), "aria-label": t("attention.more"), "aria-haspopup": "menu", onclick: opener }, "down");
-      main[0] = h("span", { class: "split" }, first, arrow);
-    } else main.push(h("span", { class: "split" }, button(t("attention.more"), { class: "small split-more", "aria-haspopup": "menu", onclick: opener }, "down")));
-  }
+  const { buttons, openMore } = splitActions(below, menuHeader(title, null, ATTENTION_ICONS[item.code.split(".")[0]] ?? "alert"));
   return h(
     "div",
-    { class: "attention-item", menu: rest.length ? openMore : undefined },
-    h("span", { class: "badge-icon " + item.severity }, icon(ATTENTION_ICONS[item.code.split(".")[0]] ?? "alert")),
-    h("div", { class: "grow" }, h("strong", null, title), h("p", { class: "muted small" }, t(base + ".text", detail).trim()), main.length > 0 && h("div", { class: "row-actions under" }, main)),
+    { class: "attention-item " + item.severity, menu: openMore },
+    h("div", { class: "attention-title" }, icon(ATTENTION_ICONS[item.code.split(".")[0]] ?? "alert"), h("strong", null, title)),
+    h("p", { class: "muted small" }, t(base + ".text", detail).trim()),
+    buttons.length > 0 && h("div", { class: "row-actions" }, buttons),
   );
+}
+
+/**
+ * The buttons of an item, all in one look: what does the thing (elements), then the rest (menu entries) under an
+ * arrow joined to the first button, so the rest is seen to be there; with nothing to do right here, the first way
+ * elsewhere is the button. Gives the buttons and what opens the rest (also the item's right click).
+ */
+function splitActions(entries, header) {
+  const main = entries.filter((x) => x instanceof Node);
+  const more = entries.filter((x) => x && !(x instanceof Node));
+  const way = !main.length && more.find((x) => x.href);
+  if (way) main.push(h("a", { class: "btn small", href: way.href }, icon(way.icon ?? "external"), way.label));
+  const rest = more.filter((x) => x !== way);
+  if (!rest.length) return { buttons: main, openMore: undefined };
+  const openMore = (at) => menuAt(at, header, rest);
+  const opener = (e) => {
+    const r = e.currentTarget.closest(".split").getBoundingClientRect();
+    openMore({ x: r.left, y: r.bottom + 4 });
+  };
+  const first = main[0];
+  if (first) main[0] = h("span", { class: "split" }, first, button("", { class: "small split-more", title: t("attention.more"), "aria-label": t("attention.more"), "aria-haspopup": "menu", onclick: opener }, "down"));
+  else main.push(h("span", { class: "split" }, button(t("attention.more"), { class: "small split-more", "aria-haspopup": "menu", onclick: opener }, "down")));
+  return { buttons: main, openMore };
 }
 
 /** How long "remind me later" puts an item off; it comes back sooner if it gets worse */
@@ -1977,9 +2064,9 @@ async function snoozeItem(item) {
   }
 }
 
-function dockerStartButton() {
+function dockerStartButton(cls = "small primary") {
   return button(t("docker.start"), {
-    class: "small primary",
+    class: cls,
     onclick: async (e) => {
       const el = e.currentTarget;
       el.disabled = true;
@@ -2123,22 +2210,66 @@ function widget(id, el) {
 const isNumbers = (id) => id === "stats" || id.startsWith("machine:");
 const machineOfBlock = (id) => (state.overview?.machines ?? []).find((m) => "machine:" + m.id === id);
 
-/** The block of another machine's numbers: made when it is first on the page, refilled as its numbers come */
+/** One number of a machine's row: label and value on a line, a bar or a little chart, a line under it; empty when not known */
+function meter(label, value, gauge, hint, cls = "") {
+  if (value == null) return h("div", { class: "meter empty" });
+  return h("div", { class: "meter" }, h("div", { class: "meter-top" }, h("span", { class: "clip" }, label), h("strong", { class: cls }, value)), gauge, h("span", { class: "meter-hint" }, hint || " "));
+}
+
+/** The numbers of a machine as one row of cells, so the rows of several machines line up */
+function machineMeters(s) {
+  const mem = s.memory;
+  const memPercent = mem.total ? Math.round((mem.used / mem.total) * 100) : 0;
+  const disk = s.disks[0];
+  const diskPercent = disk ? Math.round((disk.used / disk.total) * 100) : 0;
+  return [
+    meter(t("sys.cpu"), s.cpu == null ? null : s.cpu + "%", meterBar(s.cpu ?? 0), t("sys.cores", { n: s.cores }), level(s.cpu ?? 0)),
+    meter(t("sys.memory"), bytes(mem.used), meterBar(memPercent), t("sys.ofPercent", { total: bytes(mem.total), percent: memPercent }), level(memPercent)),
+    meter(t("sys.disk"), disk ? diskPercent + "%" : null, meterBar(diskPercent), disk && t("sys.free", { free: bytes(disk.total - disk.used), total: bytes(disk.total) }), level(diskPercent)),
+    meter(t("sys.network"), s.net ? bytes(s.net.rx + s.net.tx) + "/s" : null, sparkline(s.history.net), s.net && `↓ ${bytes(s.net.rx)}/s · ↑ ${bytes(s.net.tx)}/s`),
+    meter(t("sys.temperature"), s.temperature == null ? null : s.temperature + " °C", meterBar(s.temperature ?? 0, s.temperature >= 85 ? "warn" : ""), t("sys.cpu"), s.temperature >= 85 ? "warn" : ""),
+  ];
+}
+
+/** What brings a machine that is away back, as the buttons of its row */
+function machineBack(m) {
+  return splitActions(
+    [
+      m.pve && isAdmin() && button(t("pve.startHere", { host: m.pve.hostName }), { class: "small", onclick: (e) => startGuestOf({ ...m, pve: { host: m.pve.host, id: m.pve.guest, status: m.pve.status } }, e.currentTarget) }, "play"),
+      m.instance && isAdmin() && button(t("incus.start"), { class: "small", onclick: (e) => ((e.currentTarget.disabled = true), api("POST", `/api/containers/${m.instance}/state`, { action: "start" }).then(refresh, (err) => toast(errorText(err), "error"))) }, "play"),
+      m.wake === "lan" && isAdmin() && button(t("machines.wake"), { class: "small", onclick: (e) => wakeMachine(m, e.currentTarget) }, "play"),
+      { href: `#/machines/${m.id}`, label: t("common.open"), icon: "server" },
+    ],
+    menuHeader(m.name, null, "server"),
+  );
+}
+
+/** The block of another machine's numbers: one row — who it is, then its numbers or why there are none */
 function machineBlock(id) {
   const m = machineOfBlock(id);
   if (!m) return null;
-  const prefix = "mb-" + m.id;
   let el = homeUi.widgets[id];
   if (!el) {
-    el = widget(id, h("section", { class: "card machine-block" }, h("div", { class: "block-head" }), h("div", { class: "stats" }, statCells(prefix)), h("p", { class: "pad muted", hidden: true }), blockRemover(id)));
+    el = widget(id, h("section", { class: "card machine-row" }));
     homeUi.widgets[id] = el;
   }
-  const [head, cells, away] = el.children;
-  put(head, h("h2", null, h("a", { href: `#/machines/${m.id}` }, icon("server"), m.name)), machineChip(m), h("span", { class: "muted small grow" }, m.os));
-  cells.hidden = !m.online || !m.status;
-  away.hidden = !cells.hidden;
-  away.textContent = m.online ? "…" : t("machines.offlineLead", { ago: ago(m.seen) });
-  if (!cells.hidden) paintStats(prefix, m.status);
+  const waiting = m.online && !m.status;
+  const who = h(
+    "div",
+    { class: "mrow-who" },
+    h("a", { class: "mrow-name", href: `#/machines/${m.id}` }, h("i", { class: "dot " + (m.online ? "running" : "stopped") }), h("span", { class: "clamp2" }, m.name)),
+    h("span", { class: "muted small" }, !m.online ? t("home.machineAway", { ago: ago(m.seen) }) : waiting ? t("home.machineWaiting") : t("machines.online")),
+    m.os && h("span", { class: "muted small clip" }, m.os),
+  );
+  let body;
+  el.classList.toggle("away", !m.online);
+  el.oncontextmenu = null;
+  if (!m.online) {
+    const { buttons, openMore } = machineBack(m);
+    body = [h("p", { class: "mrow-away muted small" }, t("machines.offlineLead", { ago: ago(m.seen) })), h("div", { class: "row-actions" }, buttons)];
+    if (openMore) el.oncontextmenu = (e) => (e.preventDefault(), openMore({ x: e.clientX, y: e.clientY }));
+  } else body = h("div", { class: "meters" + (waiting ? " waiting" : "") }, waiting ? Array.from({ length: 5 }, () => h("div", { class: "meter skeleton" }, h("i"), h("i"), h("i"))) : machineMeters(m.status));
+  put(el, who, body, blockRemover(id));
   return el;
 }
 
@@ -2146,19 +2277,36 @@ function renderHome() {
   const hour = new Date().getHours();
   const greeting = t(hour < 5 ? "home.night" : hour < 12 ? "home.morning" : hour < 18 ? "home.afternoon" : "home.evening", { name: state.user.name });
   // the blocks are made once and then only moved and refilled: the numbers of the system live in one of them
+  // what needs attention and what happened are the administrators': a member's page has no such blocks
   homeUi.widgets = {
-    stats: widget("stats", h("section", { class: "card machine-block" }, h("div", { class: "block-head" }, h("h2", null, icon("server"), h("span", { id: "own-name" }, state.overview?.system?.hostname ?? "…")), h("span", { class: "muted small grow" }, t("home.thisServer"))), h("div", { class: "stats" }, statCell("cpu", "cpu", t("sys.cpu")), statCell("memory", "memory", t("sys.memory")), statCell("disk", "disk", t("sys.disk")), statCell("network", "network", t("sys.network")), h("div", { class: "stat", id: "stat-temp", hidden: true }, h("div", { class: "stat-label" }, icon("temp"), t("sys.temperature")), h("div", { class: "stat-row" }, h("div", { class: "stat-value" }, h("strong", null, "—"), h("span", { class: "unit" })), h("div", { class: "stat-chart" })), h("div", { class: "stat-hint" }, " "))), blockRemover("stats"))),
-    attention: widget("attention", h("section", { class: "card pad" })),
-    activity: widget("activity", h("section", { class: "pad-x loose" })),
+    stats: statsBlock(),
+    attention: isAdmin() ? widget("attention", h("section", { class: "card pad attention-block" })) : null,
+    activity: isAdmin() ? widget("activity", h("section", { class: "card pad activity-block" })) : null,
   };
   const zone = (name, tag = "div") => h(tag, { class: "zone" + (name === "side" ? " side" : ""), id: "zone-" + name, "data-zone": name });
   shell(
-    h("div", { class: "page-head" }, h("div", null, h("h1", null, greeting), h("p", { class: "meta", id: "host" }, " ")), h("div", { class: "counts", id: "counts" })),
+    h("div", { class: "page-head home-head" }, h("div", null, h("h1", null, greeting), h("p", { class: "meta", id: "host" }, " ")), h("div", { class: "counts", id: "counts" })),
     zone("top"),
     h("div", { class: "columns", id: "home-columns" }, h("section", { id: "home-apps" }), zone("side", "aside")),
     zone("bottom"),
   );
   renderHomeBody();
+}
+
+/** How many items of the attention list are open; the rest wait under "N more" */
+const ATTENTION_OPEN = 3;
+
+function attentionBlock(list) {
+  const shown = homeUi.attentionAll ? list : list.slice(0, ATTENTION_OPEN);
+  const hidden = list.length - shown.length;
+  const toggle = (all) => () => ((homeUi.attentionAll = all), renderHomeBody());
+  return [
+    blockRemover("attention"),
+    h("div", { class: "section-head" }, h("h2", null, t("attention.title"), list.length > 0 && h("span", { class: "pill" }, list.length))),
+    list.length ? h("div", { class: "attention-list" }, shown.map(attentionItem)) : h("p", { class: "all-good" }, icon("check", "ok"), t("attention.none")),
+    hidden > 0 && h("button", { type: "button", class: "link small more-items", onclick: toggle(true) }, t("attention.moreItems", { n: hidden }), icon("down")),
+    homeUi.attentionAll && list.length > ATTENTION_OPEN && h("button", { type: "button", class: "link small more-items", onclick: toggle(false) }, t("attention.fewer"), icon("up")),
+  ];
 }
 
 function renderHomeBody() {
@@ -2169,7 +2317,7 @@ function renderHomeBody() {
 
   const count = (st) => apps.filter((a) => appState(a) === st).length;
   const counts = [["running", count("running")], ["restarting", count("restarting")], ["partial", count("partial")], ["stopped", count("stopped")]].filter(([, n]) => n > 0);
-  document.getElementById("counts")?.replaceChildren(...counts.map(([st, n]) => h("span", { class: "count" }, h("i", { class: "dot " + st }), t("home.count." + st, { n }))));
+  document.getElementById("counts")?.replaceChildren(...(counts.length ? [h("span", { class: "status-pill" }, counts.flatMap(([st, n], i) => [i > 0 && h("span", { class: "dot-sep" }, "·"), h("span", { class: "count" }, h("i", { class: "dot " + st }), t("home.count." + st, { n }))]))] : []));
 
   // a tile in the air belongs to the page as it is; the news is drawn when it lands
   if (homeUi.drag?.active) homeUi.stale = true;
@@ -2178,8 +2326,8 @@ function renderHomeBody() {
     renderDashboard(appsBox);
   }
 
-  put(homeUi.widgets.attention, blockRemover("attention"), h("div", { class: "section-head" }, h("h2", null, t("attention.title"), o.attention.length > 0 && h("span", { class: "pill" }, o.attention.length))), o.attention.length ? o.attention.map(attentionItem) : h("p", { class: "all-good" }, icon("check", "ok"), t("attention.none")));
-  put(homeUi.widgets.activity, blockRemover("activity"), h("div", { class: "section-head" }, h("h2", null, t("activity.title"))), o.activity.length ? o.activity.map(activityItem) : h("p", { class: "muted small" }, t("activity.none")), isAdmin() && o.activity.length > 0 && h("a", { class: "link small all-activity", href: "#/activity" }, t("activity.all"), icon("chevron")));
+  if (homeUi.widgets.attention) put(homeUi.widgets.attention, attentionBlock(o.attention));
+  if (homeUi.widgets.activity) put(homeUi.widgets.activity, blockRemover("activity"), h("div", { class: "section-head" }, h("h2", null, t("activity.title"))), o.activity.length ? h("div", { class: "timeline" }, o.activity.map(activityItem)) : h("p", { class: "muted small" }, t("activity.none")), isAdmin() && o.activity.length > 0 && h("a", { class: "link small all-activity", href: "#/activity" }, t("activity.all"), icon("chevron")));
   for (const name of ZONES) for (const id of o.dashboard.widgets[name]) if (id.startsWith("machine:")) machineBlock(id);
   if (!homeUi.drag?.active) placeWidgets();
   renderSystem();
@@ -2249,7 +2397,8 @@ function placeWidgets() {
     zone.classList.toggle("movable", isAdmin());
     zone.dataset.hint = t("home.dropBlock");
   }
-  document.getElementById("home-columns")?.classList.toggle("no-side", !state.overview.dashboard.widgets.side.length);
+  // a place whose blocks are none of this person's takes no room
+  document.getElementById("home-columns")?.classList.toggle("no-side", !state.overview.dashboard.widgets.side.some((id) => homeUi.widgets[id]));
 }
 
 // --- App page -----------------------------------------------------------------------------------
@@ -3536,6 +3685,20 @@ function haStateText(s) {
   return haWord(s.state);
 }
 
+/** The state a tile shows large: a light's brightness, a thermostat's temperature; "" — none */
+function haBigText(s) {
+  if (s.state === "unavailable" || s.state === "unknown") return "";
+  if (s.domain === "light" && s.state === "on" && s.brightness != null) return `${s.brightness}%`;
+  if (s.domain === "climate" && s.current != null) return `${haNumber(s.current)}°`;
+  return "";
+}
+
+/** The line under the name when the state is shown large */
+function haSubText(s) {
+  if (s.domain === "climate") return [s.target != null && t("ha.climate.target", { t: haNumber(s.target) }), haWord(s.state)].filter(Boolean).join(" · ");
+  return haWord(s.state);
+}
+
 const haLit = (s) => !!s && (s.domain === "binary_sensor" || s.domain === "sensor" ? false : HA_LIT.has(s.state) || (s.domain === "climate" && s.state !== "off"));
 const haGone = (s) => !s || s.state === "unavailable";
 
@@ -3699,7 +3862,7 @@ function haTile(item, target, title) {
   const sub = online ? haStateText(s) : t("ha.tile.away", { name: target.server.name });
   // every tile of Home Assistant has the same button: the entity's own window
   const side = h("button", { type: "button", class: "tile-open", title: t("ha.tile.more"), "aria-label": `${t("ha.tile.more")}: ${title}`, onclick: () => haEntityDialog(item.server, s ?? { id: item.entity, name: title, domain: item.entity.split(".")[0], state: "unavailable", actions: [] }, item) }, icon("more"));
-  const content = [tileIcon(item), h("span", { class: "tile-text" }, h("span", { class: "tile-top" }, h("span", { class: "tile-name" }, title)), h("span", { class: "tile-sub" }, sub))];
+  const content = tileContent(item, title, online && s && haBigText(s) ? haSubText(s) : sub, { big: online && s ? haBigText(s) : "" });
   // a press does what the entity is for; one with nothing to press (a sensor) opens its window
   const main = h("button", { type: "button", class: "tile-main", title: primary ? t("ha.action." + primary.action) : t("ha.tile.more"), onclick: (e) => homeUi.drag?.moved || (primary ? haPressAsked(item.server, s, primary, e.currentTarget) : side.click()) }, content);
   return { cls, main, side };
@@ -4572,12 +4735,12 @@ function renderPveBody() {
  * A line chart of points over time: thin lines, one shared y-axis from zero, a crosshair that snaps to the
  * nearest point with every series in its readout. Series carry `cls` (s1, s2 — the colours) and `value`.
  */
-function lineChart(points, series, { max = null, fmt, label }) {
+function lineChart(points, series, { max = null, fmt, label, height = 150, head = true }) {
   const box = h("div", { class: "chart" });
   const tip = h("div", { class: "chart-tip", hidden: true });
   const draw = () => {
     const W = Math.max(280, box.clientWidth || 600);
-    const H = 150;
+    const H = height;
     const L = 52, R = 10, T = 10, B = 22;
     const values = points.flatMap((p) => series.map((s) => s.value(p))).filter((v) => v != null);
     const top = max ?? niceTop(Math.max(0, ...values));
@@ -4659,7 +4822,7 @@ function lineChart(points, series, { max = null, fmt, label }) {
   return h(
     "div",
     { class: "chart-wrap" },
-    h("div", { class: "chart-head" }, h("strong", null, label), series.length > 1 && h("span", { class: "chart-legend" }, series.map((s) => h("span", { class: "small muted" }, h("i", { class: "series-key " + s.cls }), s.label)))),
+    head && h("div", { class: "chart-head" }, h("strong", null, label), series.length > 1 && h("span", { class: "chart-legend" }, series.map((s) => h("span", { class: "small muted" }, h("i", { class: "series-key " + s.cls }), s.label)))),
     points.some((p) => series.some((s) => s.value(p) != null)) ? box : h("p", { class: "muted small" }, t("pve.load.empty")),
   );
 }
