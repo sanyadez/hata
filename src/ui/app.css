@@ -243,13 +243,6 @@ textarea.code.page { min-height: 60dvh; background: var(--surface); padding: 16p
 #view { max-width: 1440px; margin: 0 auto; padding: 36px 32px 72px; display: grid; gap: 24px; }
 .bottom-bar { display: none; }
 .nav-more .menu-item.active { color: var(--accent-text); }
-/* the numbers of a server — this one or a machine — under its name, in one card */
-.machine-block { position: relative; overflow: hidden; }
-.machine-block .block-head { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; padding: 12px 20px; border-bottom: 1px solid var(--border); }
-.machine-block .block-head h2 { display: inline-flex; align-items: center; gap: 8px; margin: 0; font-size: 15px; }
-.machine-block h2 a { display: inline-flex; align-items: center; gap: 8px; }
-.machine-block h2 a:hover { color: var(--accent-text); }
-.machine-block h2 .ico { width: 16px; height: 16px; color: var(--muted); }
 
 .page-head { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
 .page-head > div:first-child { display: grid; gap: 8px; min-width: 0; }
@@ -263,7 +256,7 @@ textarea.code.page { min-height: 60dvh; background: var(--surface); padding: 16p
 .section-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .section-head h2 .muted { margin-left: 10px; font: 400 12px var(--font-body); letter-spacing: 0; }
 
-.columns { display: grid; grid-template-columns: minmax(0, 1fr) 372px; gap: 32px; align-items: start; }
+.columns { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 24px; align-items: start; }
 .columns > section, .side { display: grid; gap: 16px; min-width: 0; }
 /* a grid item is as wide as its longest line unless told otherwise */
 .columns > *, .side > *, .stack > *, #view > * { min-width: 0; }
@@ -294,8 +287,6 @@ textarea.code.page { min-height: 60dvh; background: var(--surface); padding: 16p
 
 /* --- Tiles ------------------------------------------------------------------------------------- */
 
-.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
-.tile { position: relative; display: flex; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); }
 .tile:hover { border-color: var(--border-strong); }
 .tile.stopped .app-icon { opacity: 0.45; }
 .tile.stopped .tile-name { color: var(--muted); }
@@ -330,16 +321,11 @@ dialog.ha-entity { width: min(580px, calc(100vw - 32px)); }
 footer.ha-links { flex-wrap: wrap; justify-content: flex-start; gap: 8px; padding-top: 14px; border-top: 1px solid var(--border); }
 dialog footer.ha-links > :first-child { margin-right: 0; }
 button.tile { padding: 0; font: inherit; color: inherit; text-align: left; cursor: pointer; }
-.tile-main { flex: 1; display: flex; align-items: center; gap: 10px; padding: 14px 12px; min-width: 0; border-radius: var(--radius-md); }
 .tile-text { display: grid; gap: 3px; min-width: 0; }
 .tile-top { display: flex; align-items: center; gap: 6px; min-width: 0; }
-.tile-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; display: block; }
 .menu-item .tile-name { white-space: normal; }
-.tile-sub { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .tile.add .tile-sub { white-space: normal; }
 .tile.restarting .tile-sub { color: var(--danger); }
-.tile-open { display: grid; place-items: center; width: 38px; color: var(--faint); border-left: 1px solid transparent; border-radius: 0 var(--radius-md) var(--radius-md) 0; }
-.tile-open:hover { color: var(--accent-text); background: var(--surface-2); }
 
 .app-icon { width: 40px; height: 40px; border-radius: 10px; object-fit: contain; flex: none; }
 .app-icon.sm { width: 24px; height: 24px; border-radius: 6px; font-size: 12px; }
@@ -382,20 +368,150 @@ dialog.tile-folder.drop-out .tiles { opacity: 0.5; }
 
 /* --- Attention and activity -------------------------------------------------------------------- */
 
-.attention-item { display: flex; align-items: flex-start; gap: 14px; padding: 14px 0; border-top: 1px solid var(--border); }
-.attention-item strong { display: block; font-weight: 600; margin-bottom: 4px; }
 .attention-item p { overflow-wrap: anywhere; }
 .side .card > .section-head { margin-bottom: 14px; }
-.side .card > .attention-item:last-child { padding-bottom: 0; }
 .badge-icon { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 8px; flex: none; }
 .badge-icon.danger { background: var(--danger-soft); color: var(--danger); }
 .badge-icon.warn { background: var(--warn-soft); color: var(--warn); }
-/* in the attention list a warning wears the accent; a danger stays red */
-.attention-item .badge-icon.warn { background: var(--accent-soft); color: var(--accent-text); }
 .all-good { display: flex; align-items: center; gap: 10px; color: var(--muted); }
 .activity-item { display: flex; align-items: flex-start; gap: 12px; padding: 8px 0; }
 .activity-item > .ico { margin-top: 3px; color: var(--faint); }
 .activity-item > .ico.danger { color: var(--danger); }
+
+/* --- Home: the head, the numbers, the machines, the lists, the tiles ------------------------------ */
+
+.home-head { align-items: flex-start; }
+.home-head h1 { font-size: 30px; }
+.status-pill { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; padding: 7px 14px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); color: var(--muted); font-size: 13px; }
+.status-pill .count { gap: 7px; }
+.status-pill .dot-sep { color: var(--faint); }
+
+/* every block of the page is a card of the same look; a block decides its own inner layout by its width */
+.widget.card { border-radius: var(--radius-lg); container-type: inline-size; }
+.block-icon { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 8px; background: var(--surface-2); color: var(--muted); flex: none; }
+.block-icon .ico { width: 16px; height: 16px; }
+
+/* this server: big numbers, then CPU and memory of the last 40 minutes */
+.numbers { position: relative; }
+.numbers .block-head { display: flex; align-items: center; gap: 10px; padding: 16px 20px 0; min-width: 0; }
+.numbers .block-head h2 { font-size: 16px; min-width: 0; }
+.kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 18px 24px; padding: 18px 20px 16px; }
+.kpi { display: grid; gap: 7px; align-content: start; min-width: 0; }
+.kpi[hidden] { display: none; }
+.kpi-label { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; min-width: 0; }
+.kpi-label .ico { width: 14px; height: 14px; color: var(--faint); flex: none; }
+.kpi-label .series-key { margin-right: 0; flex: none; }
+.kpi-value { display: flex; align-items: baseline; gap: 5px; white-space: nowrap; }
+.kpi-value strong { font: 500 28px/1.1 var(--font-mono); font-variant-numeric: tabular-nums; letter-spacing: -0.03em; }
+.kpi-value strong.warn { color: var(--warn); }
+.kpi-value strong.danger { color: var(--danger); }
+.kpi-value .unit { color: var(--muted); font-size: 12px; }
+.kpi-gauge { display: flex; align-items: center; height: 18px; min-width: 0; overflow: hidden; }
+.kpi-gauge .bar, .meter .bar { margin: 0; height: 4px; }
+.kpi .bar i:not(.warn, .danger), .meter .bar i:not(.warn, .danger) { background: var(--faint); }
+.kpi-gauge .spark, .meter .spark { height: 18px; }
+.kpi-hint { color: var(--faint); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+.trend { display: grid; gap: 4px; padding: 14px 20px 16px; border-top: 1px solid var(--border); }
+.trend:empty { display: none; }
+.trend .chart .axis { font-size: 10px; }
+
+/* another machine: one row — who, then five cells that line up with the rows of the other machines */
+.machine-row { display: grid; grid-template-columns: 200px minmax(0, 1fr); align-items: center; gap: 12px 24px; padding: 16px 20px; position: relative; }
+.mrow-who { display: grid; gap: 2px; min-width: 0; }
+.mrow-name { display: flex; align-items: baseline; gap: 8px; font-weight: 600; min-width: 0; }
+.mrow-name .dot { flex: none; transform: translateY(-2px); }
+.mrow-name:hover { color: var(--accent-text); }
+.meters { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 16px; }
+.meter { display: grid; gap: 6px; align-content: start; min-width: 0; }
+.meter-top { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; color: var(--muted); font-size: 12px; min-width: 0; }
+.meter-top strong { color: var(--text); font: 500 13px var(--font-mono); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.meter-top strong.warn { color: var(--warn); }
+.meter-top strong.danger { color: var(--danger); }
+.meter-hint { color: var(--faint); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.meter.skeleton { gap: 8px; }
+.meter.skeleton i { display: block; height: 8px; border-radius: 4px; background: var(--surface-2); }
+.meter.skeleton i:first-child { width: 70%; }
+.meter.skeleton i:nth-child(2) { height: 4px; }
+.meter.skeleton i:last-child { width: 55%; }
+.machine-row.away { grid-template-columns: 200px minmax(0, 1fr) auto; background: color-mix(in srgb, var(--surface) 55%, transparent); }
+.machine-row.away .mrow-name { color: var(--muted); }
+.mrow-away { margin: 0; overflow-wrap: anywhere; }
+.machine-row > .block-remove, .numbers > .block-remove { position: absolute; top: 6px; right: 6px; }
+/* the row itself is the container, so its own columns follow the place it is in, not a container query */
+.side .machine-row, .side .machine-row.away { grid-template-columns: minmax(0, 1fr); }
+@media (max-width: 760px) { .machine-row, .machine-row.away { grid-template-columns: minmax(0, 1fr); padding: 14px 16px; } }
+@container (max-width: 640px) {
+  .meters { grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  /* a narrow place (the side column, a phone): a cell is one line — label, bar, value */
+  .meter { grid-template-columns: 76px minmax(0, 1fr) auto; grid-template-areas: "label gauge value"; align-items: center; gap: 12px; }
+  .meter-top { display: contents; }
+  .meter-top > span { grid-area: label; }
+  .meter-top strong { grid-area: value; text-align: right; }
+  .meter > .bar, .meter > .spark { grid-area: gauge; }
+  .meter-hint, .meter.empty, .meter.skeleton i:last-child { display: none; }
+  .meter.skeleton i:first-child { grid-area: label; width: auto; }
+  .meter.skeleton i:nth-child(2) { grid-area: gauge; }
+  .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; }
+}
+
+/* the lists: what needs attention and what happened */
+.attention-block > .section-head, .activity-block > .section-head { margin-bottom: 14px; }
+.attention-block, .activity-block { position: relative; }
+.attention-block > .block-remove, .activity-block > .block-remove { position: absolute; top: 10px; right: 10px; }
+.attention-list { display: grid; gap: 10px; }
+.attention-item { display: grid; gap: 6px; padding: 12px 14px; border-radius: var(--radius-md); background: var(--surface-2); border-left: 3px solid var(--faint); min-width: 0; }
+.attention-item.warn { border-left-color: var(--accent); }
+.attention-item.danger { border-left-color: var(--danger); }
+.attention-item.info { border-left-color: var(--info); }
+.attention-title { display: flex; align-items: flex-start; gap: 8px; min-width: 0; }
+.attention-title .ico { width: 15px; height: 15px; margin-top: 2px; flex: none; color: var(--muted); }
+.attention-item.warn .attention-title .ico { color: var(--accent-text); }
+.attention-item.danger .attention-title .ico { color: var(--danger); }
+.attention-title strong { font-weight: 600; overflow-wrap: anywhere; }
+.attention-item p { margin: 0; overflow-wrap: anywhere; }
+.attention-item .row-actions { margin-top: 4px; justify-content: flex-start; }
+.more-items { margin-top: 12px; color: var(--muted); }
+.more-items:hover { color: var(--text); }
+.more-items .ico { width: 14px; height: 14px; }
+/* the activity: a line of events, each on the thread; in a wide place, a table of time, event and who */
+.timeline .activity-item { position: relative; gap: 12px; padding: 0 0 14px; }
+.timeline .activity-item > .ico { position: relative; z-index: 1; width: 26px; height: 26px; padding: 6px; margin: 0; border-radius: 50%; background: var(--surface-2); flex: none; }
+.timeline .activity-item:not(:last-child)::before { content: ""; position: absolute; left: 12.5px; top: 26px; bottom: 0; width: 1px; background: var(--border); }
+.timeline .activity-item .grow { padding-top: 3px; min-width: 0; }
+.activity-block .all-activity { margin-top: 2px; }
+
+/* --- Tiles: a card with the picture on top, the name in two lines at most, how it is in one ---------- */
+
+.tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: 12px; }
+.tile { position: relative; display: flex; min-height: 118px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); }
+.tile-main { flex: 1; display: flex; flex-direction: column; align-items: stretch; gap: 3px; padding: 12px; min-width: 0; border-radius: var(--radius-lg); }
+.tile-head { display: flex; align-items: flex-start; gap: 8px; margin-bottom: 9px; min-width: 0; }
+.tile-big { flex: 1; text-align: right; font: 600 22px/1.1 var(--font-heading); font-variant-numeric: tabular-nums; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tile-badges { display: flex; gap: 4px; margin-left: auto; color: var(--faint); }
+.tile-badges:empty { display: none; }
+.tile-badges .lock .ico { width: 13px; height: 13px; }
+.tile-name { font-weight: 600; line-height: 1.3; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow-wrap: anywhere; }
+.tile-sub { display: block; color: var(--muted); font-size: 12px; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.tile-sub > .dot { margin-right: 6px; vertical-align: 1px; }
+.tile-where { display: flex; align-items: center; gap: 5px; color: var(--faint); font: 12px var(--font-mono); min-width: 0; }
+.tile-where .ico { width: 12px; height: 12px; flex: none; }
+.tile.on .tile-sub, .tile.kind-ha.on .tile-big { color: var(--accent-text); }
+.tile.add .tile-sub { white-space: normal; }
+.tile .tile-room { margin-top: 4px; }
+/* the button of what can be done shows where the pointer is; the marks step aside for it */
+.tile-open { position: absolute; top: 8px; right: 8px; display: grid; place-items: center; width: 28px; height: 28px; border-radius: var(--radius-sm); color: var(--muted); background: var(--surface-2); opacity: 0; }
+.tile:is(:hover, :focus-within) .tile-open { opacity: 1; }
+.tile:is(:hover, :focus-within):has(.tile-open) .tile-badges { visibility: hidden; }
+.tile-open:hover { color: var(--accent-text); }
+@media (pointer: coarse) { .tile-open { opacity: 1; background: transparent; } .tile:has(.tile-open) .tile-badges { visibility: hidden; } }
+.tile.kind-ha:has(.tile-big) .tile-open { top: auto; bottom: 8px; }
+
+/* the groups: a heading of plain text with its count, the tools of an administrator beside it */
+.group-head h2 { display: flex; align-items: baseline; gap: 8px; min-width: 0; font-size: 17px; }
+.group-count { color: var(--faint); font: 500 12px var(--font-body); }
+@container (min-width: 700px) {
+  .timeline .activity-item .grow { display: flex; flex-wrap: wrap; align-items: baseline; column-gap: 12px; }
+}
 
 /* --- App page ---------------------------------------------------------------------------------- */
 
@@ -828,8 +944,12 @@ dialog.dropdown header { padding: 4px 6px; margin-bottom: 8px; }
   .stat:nth-child(odd) { border-right: 1px solid var(--border); }
   .stat:last-child { border-bottom: 0; }
   .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-  .tile-main { flex-direction: column; align-items: flex-start; }
-  .tile-open { position: absolute; top: 4px; right: 4px; width: 32px; height: 32px; border-radius: var(--radius-sm); }
+  .home-head h1 { font-size: 24px; }
+  /* on a phone what needs attention comes before the tiles, the rest of the side column after them */
+  #home-columns { display: flex; flex-direction: column; align-items: stretch; gap: 20px; }
+  #home-columns > .side { display: contents; }
+  #home-columns > .side > [data-widget="attention"] { order: -1; }
+  .tile { min-height: 112px; }
   .store, .settings, .files { grid-template-columns: minmax(0, 1fr); gap: 16px; }
   .files, body:has(> .assistant-fab) .files { min-height: 0; }
   .file-table .when, .sort { display: none; }
@@ -941,6 +1061,8 @@ input[type="range"] { accent-color: var(--accent); width: 100%; }
 :root.has-wallpaper #view :is(.card, .tile, .btn, .page-head, :is(.side > .pad-x, .loose), .section-head, :is(#app-head, #machine-head, #pve-head), input, select, .select-btn, textarea, table, pre, .cats, .tabs) { text-shadow: none; }
 :root.has-wallpaper :is(.page-head, :is(.side > .pad-x, .loose), .cats, :is(#app-head, #machine-head, #pve-head), #view .section-head:not(:is(.card, :is(.side > .pad-x, .loose), :is(#app-head, #machine-head, #pve-head)) *)) { background: color-mix(in srgb, var(--surface) 88%, transparent); backdrop-filter: blur(16px); border: 1px solid var(--border); border-radius: var(--radius-lg); }
 :root.has-wallpaper :is(.page-head, :is(.side > .pad-x, .loose)) { padding: 18px 20px; }
+/* (the rule above reaches into #view through :is, so only !important is stronger) */
+:root.has-wallpaper #view :is(.home-head, .group-head) { background: none !important; backdrop-filter: none !important; border: 0 !important; padding: 0 !important; text-shadow: 0 0 2px var(--bg), 0 0 6px var(--bg), 0 0 16px var(--bg); }
 :root.has-wallpaper :is(#app-head, #machine-head, #pve-head) { padding: 18px 20px 0; }
 :root.has-wallpaper :is(#app-head, #machine-head, #pve-head) .tabs { box-shadow: none; }
 :root.has-wallpaper #view .section-head:not(:is(.card, :is(.side > .pad-x, .loose), :is(#app-head, #machine-head, #pve-head)) *) { padding: 8px 14px; border-radius: var(--radius-md); }
