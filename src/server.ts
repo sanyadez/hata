@@ -2479,7 +2479,7 @@ async function homeAssistantApi(req: Request, url: URL, server: Server, user: Us
   }
   if (rest === "/rename" && method === "POST") {
     const data = await body(req);
-    return json(await haRename(id, data.entity, data.name, by));
+    return json(await haRename(id, data.entity, data.name, data.there, by));
   }
   if (rest === "/updates" && method === "POST") {
     const data = await body(req);

@@ -72,6 +72,8 @@ export interface Shown {
   extra?: true;
   /** In Home Assistant's registry, so it can be renamed there; one without a unique id cannot */
   renamable?: true;
+  /** Home Assistant's own name, when Hata shows a name of its own instead */
+  haName?: string;
 }
 
 /** The longest name Hata gives an entity in Home Assistant */

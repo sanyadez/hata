@@ -3810,11 +3810,11 @@ function haEntityDialog(server, s, item = null) {
   const paint = () => {
     const gone = haGone(now) || !x?.online;
     title.textContent = now?.name ?? s.name;
-    rename.hidden = !isAdmin() || gone || !now?.renamable;
+    rename.hidden = !isAdmin() || gone;
     const a = now ? now.actions : [];
     const lit = haLit(now);
     badge.classList.toggle("on", lit);
-    sub.textContent = [now?.area, now?.at ? t("ha.changedAgo", { ago: ago(now.at) }) : null].filter(Boolean).join(" · ");
+    sub.textContent = [now?.area, now?.haName && t("ha.inHa", { name: now.haName }), now?.at ? t("ha.changedAgo", { ago: ago(now.at) }) : null].filter(Boolean).join(" · ");
     const toggle = a.includes("toggle") && h("button", { type: "button", role: "switch", class: "ha-switch", "aria-checked": String(lit), "aria-label": now.name, disabled: gone, onclick: (e) => haPress(server, now, "toggle", undefined, e.currentTarget) }, h("i"));
     const level = now?.state === "on" ? (now.brightness ?? 100) : 0;
     const shown = h("span", { class: "small" }, `${level}%`);
@@ -3854,7 +3854,12 @@ function haEntityDialog(server, s, item = null) {
 }
 
 function haRenameDialog(server, s) {
-  const input = h("input", { maxlength: 100, value: s.name, placeholder: s.id, "aria-label": t("ha.name") });
+  const input = h("input", { maxlength: 100, value: s.name, placeholder: s.haName ?? s.id, "aria-label": t("ha.name") });
+  const hint = h("p", { class: "muted small" });
+  // as in Zigbee2MQTT: the name is Hata's, and a tick sends it to Home Assistant as well
+  const there = h("input", { type: "checkbox", onchange: () => paint() });
+  const paint = () => (hint.textContent = t(there.checked ? "ha.rename.hintThere" : "ha.rename.hint"));
+  paint();
   const error = h("p", { class: "error", role: "alert" });
   let dialog;
   dialog = openDialog(
@@ -3866,9 +3871,9 @@ function haRenameDialog(server, s) {
           e.preventDefault();
           error.textContent = "";
           try {
-            haSetState(server, await api("POST", `/api/ha/${server}/rename`, { entity: s.id, name: input.value.trim() }));
+            haSetState(server, await api("POST", `/api/ha/${server}/rename`, { entity: s.id, name: input.value.trim(), there: there.checked }));
             dialog.close();
-            toast(t("ha.rename.done"));
+            toast(t(there.checked ? "ha.rename.doneThere" : "ha.rename.done"));
           } catch (err) {
             error.textContent = errorText(err);
           }
@@ -3877,7 +3882,8 @@ function haRenameDialog(server, s) {
       h("h2", null, t("ha.rename.title", { name: s.name })),
       h("p", { class: "muted" }, t("ha.rename.lead")),
       input,
-      h("p", { class: "muted small" }, t("ha.rename.hint")),
+      hint,
+      s.renamable && h("label", { class: "check" }, there, h("span", null, t("ha.rename.there"))),
       error,
       h("footer", null, closeButton(() => dialog, t("common.cancel")), h("button", { class: "btn primary" }, t("ha.rename"))),
     ),
