@@ -23,7 +23,7 @@ import { folderSize, restoreFromSnapshot, snapshotFile, snapshotFiles } from "./
 import { appFolders, backupDir, onScheduledRun, extraAllowed, backupApp, backupOverview, deleteSnapshot, listSnapshots, mirror, restoreSnapshot, resumeRestore, runBackups, scheduleBackups, takeServerSnapshot } from "./backup";
 import { allowed as oauthAllowed, declined as oauthDeclined, findClient, holdQuestion, question as oauthQuestion, readAuthorize, register as oauthRegister, resourceMetadata, serverMetadata, spendCode } from "./oauth";
 import { checkOffsite, forgetHost, offsiteFailure, saveOffsite } from "./offsite";
-import { notSnoozed, snooze } from "./snooze";
+import { hidden, hiddenCount, notSnoozed, snooze, wake as unsnooze } from "./snooze";
 import { APP_NAME_RE, dumpCompose } from "./appform";
 import { findInTrash, trashSizeOn } from "./trash";
 import { discover as discoverPlaces, installFor as installPlaceTools, listPlaces, placesDown, removePlace, retryPlace, savePlace, shares as placeShares, startNetPlaces } from "./netplaces";
@@ -1120,6 +1120,8 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
       // whether the assistant can be asked: the pages offer it next to what is wrong
       assistant: admin && assistantReady(assistantConfig()),
       attention: admin ? notSnoozed(attention({ system, docker, apps, activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), exposed: exposedNics(), array: arrayTrouble(), shares: shareTrouble(), places: placesDown(), machines: awayMachines(), machineApps: onMachines, unused: unusedDisks(), filling: fillingUp(), pve: proxmoxTrouble(), ha: homeAssistantTrouble(), raid: poolsTrouble(), containers: containersTrouble() })) : [],
+      // how many items are put off: the list says so and leads to them
+      attentionHidden: admin ? hiddenCount() : 0,
       // who signed in from where, and what was installed by whom, is the administrators' business
       activity: admin ? recent(8) : [],
       // containers and compose projects on this machine that are not apps here yet
@@ -1776,6 +1778,13 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
   if (path === "/api/attention/snooze" && method === "POST") {
     const error = snooze(await body(req));
     return error ? fail(400, error) : json({ ok: true });
+  }
+  // what is put off, for the page that brings it back
+  if (path === "/api/attention/hidden" && method === "GET") return json({ hidden: hidden() });
+  if (path === "/api/attention/wake" && method === "POST") {
+    const id = (await body(req)).id;
+    if (typeof id !== "string" || !unsnooze(id)) return fail(404, "attention.badItem");
+    return json({ hidden: hidden() });
   }
   if (path === "/api/backups/offsite" && method === "PUT") {
     const error = saveOffsite(await body(req));

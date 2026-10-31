@@ -69,6 +69,7 @@ const ICONS = {
   undo: "M9 7 4 12l5 5M4 12h11a5 5 0 0 1 0 10h-2",
   lock: "M6 11h12v9H6zM8.5 11V8a3.5 3.5 0 0 1 7 0v3",
   bell: "M6 17V11a6 6 0 0 1 12 0v6l2 2H4zM10 21h4",
+  "bell-off": "M6 17V11a6 6 0 0 1 9-5.2M18 11v6l2 2H4M10 21h4M4 4l16 16",
   file: "M6 3h9l4 4v14H6zM14 3v5h5",
   image: "M4 5h16v14H4zM4 16l5-5 4 4 3-3 4 4M15 9h.01",
   film: "M4 5h16v14H4zM10 9l5 3-5 3z",
@@ -1946,9 +1947,39 @@ function dragEnd(drop) {
 
 const ATTENTION_ICONS = { update: "up", docker: "box", restarting: "refresh", partial: "alert", disk: "disk", smart: "disk", memory: "memory", temperature: "temp", internet: "network", network: "network", array: "disk", share: "share", netplace: "globe", machine: "server", pve: "server", ha: "home", containers: "box", absent: "disk" };
 
-function attentionItem(item) {
+/** The title and the words of an item of the list, sizes said as sizes */
+function attentionWords(item) {
   const detail = { ...item.detail, free: item.detail.free == null ? "" : bytes(item.detail.free), trash: item.detail.trash == null ? "" : bytes(item.detail.trash), size: item.detail.size == null ? "" : bytes(item.detail.size) };
   const base = "attention." + item.code;
+  return { title: t(base + ".title", detail), text: t(base + ".text", detail).trim() };
+}
+
+const attentionIcon = (code) => ATTENTION_ICONS[code.split(".")[0]] ?? "alert";
+
+/** Asks before something that cannot be taken back by a click, does it, says a refusal in the window and looks again */
+function confirmAction({ title, lead, label, run, kind = "danger", iconName = "trash" }) {
+  let dialog;
+  const error = h("p", { class: "error", role: "alert" });
+  const go = button(label, {
+    class: kind,
+    onclick: async () => {
+      go.disabled = true;
+      error.textContent = "";
+      try {
+        await run();
+        dialog.close();
+        void refresh();
+      } catch (err) {
+        error.textContent = errorText(err);
+        go.disabled = false;
+      }
+    },
+  }, iconName);
+  dialog = openDialog("confirm", h("h2", { class: "wrap" }, title), lead && h("p", { class: "muted" }, lead), error, h("footer", null, closeButton(() => dialog, t("common.cancel")), go));
+}
+
+function attentionItem(item) {
+  const { title, text } = attentionWords(item);
   // only what does the thing is a button; the ways elsewhere and the rest are entries of its menu
   const open = (href, label = t("common.open")) => ({ href, label, icon: "external" });
   // the button that does the thing itself: it waits for the answer, says a refusal and looks again
@@ -2016,17 +2047,19 @@ function attentionItem(item) {
     (item.code === "machine.restarting" || item.code === "machine.partial") && open(`#/machines/${item.detail.id}/apps`),
     item.app && open(`#/apps/${item.app}${item.code === "restarting" || item.code === "partial" ? "/logs" : ""}`, t(item.code === "restarting" || item.code === "partial" ? "app.logs" : "common.open")),
     // the assistant is asked with the item's own words: it looks with its tools where it can and explains the rest
-    isAdmin() && { label: t(item.app ? "assistant.askWhy" : "assistant.ask"), icon: "chat", run: () => openAssistant({ ask: item.app ? t("assistant.whyDown", { title: item.detail.title || item.app, app: item.app }) : t("assistant.whyItem", { title: t(base + ".title", detail), text: t(base + ".text", detail).trim() }) }) },
+    // what ends the thing the item is about, asked first: the menu, not a button, so it is not pressed by the way
+    ...(isAdmin() ? attentionEnds(item, app, onMachine) : []),
+    isAdmin() && { label: t(item.app ? "assistant.askWhy" : "assistant.ask"), icon: "chat", run: () => openAssistant({ ask: item.app ? t("assistant.whyDown", { title: item.detail.title || item.app, app: item.app }) : t("assistant.whyItem", { title, text }) }) },
     isAdmin() && { label: t("attention.later", { n: SNOOZE_DAYS }), icon: "clock", run: () => snoozeItem(item) },
+    isAdmin() && { label: t("attention.never"), icon: "bell-off", run: () => snoozeItem(item, true) },
     (item.code === "disk.new" || item.code === "disk.usb") && isAdmin() && { label: t("mounting.ignore"), icon: "x", run: () => void api("POST", "/api/disks/ignore", { id: item.detail.id }).then(refresh, (e) => toast(errorText(e), "error")) },
   ].filter(Boolean);
-  const title = t(base + ".title", detail);
-  const { buttons, openMore } = splitActions(below, menuHeader(title, null, ATTENTION_ICONS[item.code.split(".")[0]] ?? "alert"));
+  const { buttons, openMore } = splitActions(below, menuHeader(title, null, attentionIcon(item.code)));
   return h(
     "div",
     { class: "attention-item " + item.severity, menu: openMore },
-    h("div", { class: "attention-title" }, icon(ATTENTION_ICONS[item.code.split(".")[0]] ?? "alert"), h("strong", null, title)),
-    h("p", { class: "muted small" }, t(base + ".text", detail).trim()),
+    h("div", { class: "attention-title" }, icon(attentionIcon(item.code)), h("strong", null, title)),
+    h("p", { class: "muted small" }, text),
     buttons.length > 0 && h("div", { class: "row-actions" }, buttons),
   );
 }
@@ -2054,13 +2087,43 @@ function splitActions(entries, header) {
   return { buttons: main, openMore };
 }
 
+/**
+ * What puts an end to the thing an item is about rather than mending it: a shared folder that is gone stops being
+ * shared, a machine that is gone is removed, a disk that is gone is let go, an app that keeps failing is stopped
+ */
+function attentionEnds(item, app, onMachine) {
+  const d = item.detail;
+  const ask = (label, iconName, confirm) => ({ label, icon: iconName, run: () => confirmAction({ label, iconName, ...confirm }) });
+  return [
+    item.code === "share.missing" && d.name && ask(t("shares.stop"), "x", { title: t("attention.end.share", { name: d.name }), lead: t("attention.end.shareLead", { path: d.path }), run: () => api("DELETE", `/api/shares/${encodeURIComponent(d.name)}`) }),
+    item.code === "machine.away" && d.id && { label: t("machines.remove") + "…", icon: "trash", run: () => removeMachineDialog({ id: d.id, name: d.name, online: false }, refresh) },
+    item.code === "netplace.down" && d.id && ask(t("netplace.remove"), "trash", { title: t("netplace.removeTitle", { name: d.name }), lead: t("netplace.removeLead", { path: d.path }), run: () => api("DELETE", `/api/netplaces/${d.id}`) }),
+    item.code === "absent" && d.path && ask(t("mounting.disconnect"), "x", { title: t("mounting.disconnectTitle", { path: d.path }), lead: t("attention.end.absentLead"), run: () => api("POST", "/api/disks/disconnect", { path: d.path }) }),
+    (item.code === "restarting" || item.code === "partial") && app && { label: t("app.stop"), icon: "stop", run: () => startAction(app, "stop") },
+    (item.code === "machine.restarting" || item.code === "machine.partial") && d.name && {
+      label: t("app.stop"),
+      icon: "stop",
+      run: async () => {
+        try {
+          const res = await api("POST", `/api/machines/${d.id}/apps/${onMachine.name}/stop`, {});
+          jobDialog(res.job, "stop", onMachine.title);
+        } catch (err) {
+          toast(errorText(err), "error");
+        }
+      },
+    },
+    item.code === "network.exposed" && d.nic && ask(t("attention.end.outside"), "lock", { kind: "primary", title: t("attention.end.outsideTitle", { nic: d.nic }), lead: t("attention.end.outsideLead", { address: d.address }), run: () => api("PUT", `/api/network/${encodeURIComponent(d.nic)}/side`, { side: "outside" }) }),
+  ].filter(Boolean);
+}
+
 /** How long "remind me later" puts an item off; it comes back sooner if it gets worse */
 const SNOOZE_DAYS = 3;
 
-async function snoozeItem(item) {
+/** Puts an item off for some days or for good; it keeps its words, so the list of what is hidden can say it */
+async function snoozeItem(item, forever = false) {
   try {
-    await api("POST", "/api/attention/snooze", { id: item.id, severity: item.severity, ...(item.at ? { at: item.at } : {}), days: SNOOZE_DAYS });
-    toast(t("attention.snoozed", { date: shortDate(Date.now() + SNOOZE_DAYS * 86_400_000) }));
+    await api("POST", "/api/attention/snooze", { id: item.id, severity: item.severity, ...(item.at ? { at: item.at } : {}), ...(forever ? { forever: true } : { days: SNOOZE_DAYS }), code: item.code, detail: item.detail, ...(item.app ? { app: item.app } : {}) });
+    toast(forever ? t("attention.neverDone") : t("attention.snoozed", { date: shortDate(Date.now() + SNOOZE_DAYS * 86_400_000) }));
     await refresh();
   } catch (e) {
     toast(errorText(e), "error");
@@ -2309,6 +2372,7 @@ function attentionBlock(list) {
     list.length ? h("div", { class: "attention-list" }, shown.map(attentionItem)) : h("p", { class: "all-good" }, icon("check", "ok"), t("attention.none")),
     hidden > 0 && h("button", { type: "button", class: "link small more-items", onclick: toggle(true) }, t("attention.moreItems", { n: hidden }), icon("down")),
     homeUi.attentionAll && list.length > ATTENTION_OPEN && h("button", { type: "button", class: "link small more-items", onclick: toggle(false) }, t("attention.fewer"), icon("up")),
+    state.overview?.attentionHidden > 0 && h("a", { class: "link small more-items", href: "#/settings/notifications/hidden" }, t("attention.hiddenLink", { n: state.overview.attentionHidden }), icon("chevron")),
   ];
 }
 
@@ -6569,7 +6633,7 @@ function renameMachineDialog(m) {
   field.select();
 }
 
-function removeMachineDialog(m) {
+function removeMachineDialog(m, after = () => go("#/machines")) {
   let dialog;
   dialog = openDialog(
     "confirm",
@@ -6587,7 +6651,7 @@ function removeMachineDialog(m) {
           try {
             await api("DELETE", `/api/machines/${m.id}`);
             dialog.close();
-            go("#/machines");
+            void after();
           } catch (err) {
             toast(errorText(err), "error");
           }
@@ -10894,6 +10958,7 @@ async function loadSettings() {
     if (isAdmin()) state.settings = await api("GET", "/api/settings");
     if (isAdmin()) state.update = await api("GET", "/api/update").catch(() => null);
     if (isAdmin()) state.notify = await api("GET", "/api/notify").catch(() => null);
+    if (isAdmin() && state.route.section === "notifications") state.hiddenItems = (await api("GET", "/api/attention/hidden").catch(() => null))?.hidden ?? null;
     if (isAdmin() && state.route.section === "apps") state.images = await api("GET", "/api/images").catch(() => null);
     if (isAdmin() && state.route.section === "network") state.network = await api("GET", "/api/network").catch(() => null);
     if (isAdmin() && state.route.section === "remote") [state.remote, state.wireguard] = await Promise.all([api("GET", "/api/tailscale").catch(() => null), api("GET", "/api/wireguard").catch(() => null)]);
@@ -10909,6 +10974,8 @@ async function loadSettings() {
     return toast(errorText(e), "error");
   }
   if (state.route.view === "settings") renderSettings();
+  // "N hidden" under the list leads straight to them
+  if (state.route.section === "notifications" && location.hash.endsWith("/hidden")) document.getElementById("hidden")?.scrollIntoView({ block: "start" });
 }
 
 const LANGUAGE_NAMES = { en: "English", uk: "Українська" };
@@ -13232,12 +13299,49 @@ function notificationsSection() {
   const hook = h("input", { type: "url", value: n.config.webhook.url, spellcheck: false, class: "mono", placeholder: "https://…" });
   return [
     h("section", { class: "card pad" }, h("h2", null, t("settings.notifications")), h("p", { class: "muted small" }, t("notify.lead")), settingRow(t("notify.problems"), t("notify.problemsHint"), toggle("problems")), settingRow(t("notify.resolved"), t("notify.resolvedHint"), toggle("resolved")), settingRow(t("notify.backups"), t("notify.backupsHint"), toggle("backups")), error),
+    hiddenItemsCard(),
     devicesCard(),
     telegramCard(),
     channelCard("ntfy", [settingRow(t("notify.ntfy.url"), t("notify.ntfy.urlHint"), ntfyUrl), settingRow(t("notify.ntfy.token"), t("notify.ntfy.tokenHint"), forget ? h("span", { class: "pair" }, ntfyToken, forget) : ntfyToken)], () => ({ url: ntfyUrl.value, ...typedToken(ntfyToken) })),
     emailCard(),
     channelCard("webhook", [settingRow(t("notify.webhook.url"), t("notify.webhook.urlHint"), hook)], () => ({ url: hook.value })),
   ];
+}
+
+/** What is put off from "Needs attention", with a way to bring each back at once */
+function hiddenItemsCard() {
+  const list = state.hiddenItems;
+  if (!list) return null;
+  const back = async (entry, el) => {
+    el.disabled = true;
+    try {
+      state.hiddenItems = (await api("POST", "/api/attention/wake", { id: entry.id })).hidden;
+      toast(t("attention.hidden.backDone"));
+      renderSettings();
+      void refresh();
+    } catch (err) {
+      el.disabled = false;
+      toast(errorText(err), "error");
+    }
+  };
+  const row = (entry) => {
+    // put off by an older version, which kept no words: said by its key
+    const words = entry.code ? attentionWords(entry) : { title: t("attention.hidden.old"), text: entry.id };
+    return h(
+      "div",
+      { class: "hidden-item " + entry.severity, menu: true },
+      icon(entry.code ? attentionIcon(entry.code) : "alert"),
+      h("div", { class: "grow" }, h("strong", null, words.title), words.text && h("p", { class: "muted small" }, words.text), h("p", { class: "small muted" }, entry.until === 0 ? t("attention.hidden.forever") : t("attention.hidden.until", { date: shortDate(entry.until) }))),
+      button(t("attention.hidden.back"), { class: "small", onclick: (e) => back(entry, e.currentTarget) }, "bell"),
+    );
+  };
+  return h(
+    "section",
+    { class: "card pad", id: "hidden" },
+    h("h2", null, t("attention.hidden.title")),
+    h("p", { class: "muted small" }, t("attention.hidden.lead")),
+    list.length ? h("div", { class: "hidden-items" }, list.map(row)) : h("p", { class: "muted" }, t("attention.hidden.none")),
+  );
 }
 
 // --- Disks --------------------------------------------------------------------------------------

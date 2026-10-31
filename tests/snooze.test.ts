@@ -17,3 +17,11 @@ test("an item put off stays away until its time, unless it gets worse or happens
   expect(asleep(item("warn"), { until: 1000, severity: "danger", at: 0 }, 500)).toBe(true);
   expect(awake([item("warn"), { ...item("warn"), id: "other" }], { "smart:X1": entry }, 500).map((i) => i.id)).toEqual(["other"]);
 });
+
+test("an item put off for good stays away when it happens again, and comes back only when it gets worse", () => {
+  const forever = { until: 0, severity: "warn" as const, at: 42 };
+  expect(asleep(item("warn", 42), forever, 10 ** 15)).toBe(true);
+  expect(asleep(item("warn", 43), forever, 10 ** 15)).toBe(true);
+  expect(asleep(item("warn"), forever, 10 ** 15)).toBe(true);
+  expect(asleep(item("danger", 42), forever, 500)).toBe(false);
+});

@@ -463,6 +463,13 @@ dialog.tile-folder.drop-out .tiles { opacity: 0.5; }
 .attention-list { display: grid; gap: 10px; }
 .attention-item { display: grid; gap: 6px; padding: 12px 14px; border-radius: var(--radius-md); background: var(--surface-2); border-left: 3px solid var(--faint); min-width: 0; }
 .attention-item.warn { border-left-color: var(--accent); }
+.hidden-items { display: grid; gap: 8px; margin-top: 12px; }
+.hidden-item { display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px; border-radius: var(--radius-md); background: var(--surface-2); border-left: 3px solid var(--accent); min-width: 0; }
+.hidden-item.danger { border-left-color: var(--danger); }
+.hidden-item > .ico { flex: none; width: 15px; height: 15px; margin-top: 3px; color: var(--muted); }
+.hidden-item .grow { min-width: 0; display: grid; gap: 2px; }
+.hidden-item p { margin: 0; overflow-wrap: anywhere; }
+@media (max-width: 760px) { .hidden-item { flex-wrap: wrap; } }
 .attention-item.danger { border-left-color: var(--danger); }
 .attention-item.info { border-left-color: var(--info); }
 .attention-title { display: flex; align-items: flex-start; gap: 8px; min-width: 0; }
@@ -1422,3 +1429,4 @@ body:has(.assistant.paged) > .assistant-fab { display: none; }
 /* The screen of a virtual machine: noVNC draws into the box, scaled to it */
 .screen-box { flex: 1; min-height: 0; display: flex; background: #000; }
 .screen-actions { display: flex; gap: 6px; }
+#hidden { scroll-margin-top: 84px; }
