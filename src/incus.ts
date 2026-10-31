@@ -42,7 +42,7 @@ export const BRIDGE = "hatabr0";
 /** A container's name: Incus takes it as the host name too */
 export const NAME_RE = /^[a-z][a-z0-9-]{0,61}[a-z0-9]$/;
 /** Names the routes of the page take for themselves */
-export const RESERVED = ["install", "setup", "vms", "places"];
+export const RESERVED = ["install", "setup", "vms", "places", "discs"];
 export const SNAPSHOT_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$/;
 export const MEMORY = { min: 128, max: 262144 };
 /** The drivers whose pools can hold a container's disk to a size: a plain folder cannot */
@@ -273,6 +273,8 @@ export interface Container {
   place: string;
   /** GB its disk is held to; 0 — none */
   disk: number;
+  /** The disc image in its drive (a virtual machine made from one); "" — none */
+  disc: string;
   usage: { memory: number; cpu: number; disk: number; processes: number } | null;
   snapshots: Snapshot[];
 }
@@ -311,9 +313,85 @@ export function readInstance(raw: Raw): Container | null {
     mac: mac || String(nics[0]?.[1]?.hwaddr ?? "").toLowerCase(),
     place: String(raw.expanded_devices?.root?.pool ?? raw.devices?.root?.pool ?? ""),
     disk: Math.round(megabytes(raw.expanded_devices?.root?.size ?? raw.devices?.root?.size) / 1024),
+    disc: String(raw.devices?.[DISC_DEVICE]?.source ?? ""),
     usage: st && statusOf(raw.status) === "running" ? { memory: Number(st.memory?.usage ?? 0), cpu: Number(st.cpu?.usage ?? 0), disk: Number(st.disk?.root?.usage ?? 0), processes: Number(st.processes ?? 0) } : null,
     snapshots: ((raw.snapshots ?? []) as Raw[]).map((s) => ({ name: String(s.name).split("/").pop()!, created: Date.parse(s.created_at) || 0 })).sort((a, b) => b.created - a.created),
   };
+}
+
+// --- Disc images -----------------------------------------------------------------------------------
+
+/** A disc image (ISO) Incus keeps as a volume of a place, for virtual machines to boot from */
+export interface Disc {
+  /** The place (pool) it is kept in */
+  place: string;
+  name: string;
+  /** Bytes; 0 — not known */
+  size: number;
+  /** The instances it is in the drive of */
+  usedBy: string[];
+}
+
+/** The device a disc image is put in as: booted before the virtual machine's own disk */
+export const DISC_DEVICE = "disc";
+export const DISC_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
+
+/** The disc images among a place's custom volumes, as `GET …/volumes/custom?recursion=1` gives them */
+export function readDiscs(place: string, volumes: Raw[]): Disc[] {
+  return volumes
+    .filter((v) => v.content_type === "iso")
+    .map((v) => ({
+      place,
+      name: String(v.name),
+      size: Number(v.config?.size ?? 0) || 0,
+      usedBy: ((v.used_by ?? []) as string[]).map((u) => decodeURIComponent(String(u).split("?")[0]!.split("/").pop() ?? "")).filter(Boolean),
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/**
+ * The name a disc image is kept under, from what it was called — a file's name or the last part of a link:
+ * what a volume's name cannot hold becomes "-", ".iso" stays at the end; "" — nothing usable is left.
+ */
+export function discName(from: unknown): string {
+  const last = decodeURIComponent(String(from ?? "").split(/[?#]/)[0]!.split(/[\\/]/).pop() ?? "").trim();
+  const bare = last.replace(/\.iso$/i, "").replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^[^A-Za-z0-9]+|[-.]+$/g, "").slice(0, 90);
+  return bare ? `${bare}.iso` : "";
+}
+
+/** A virtual machine to be made from a disc image: an empty disk of its size, the disc booted first */
+export interface NewFromDisc {
+  name: string;
+  disc: Disc;
+  cores: number;
+  memory: number;
+  disk: number;
+  autostart: boolean;
+}
+
+/** The new-machine dialog's answers for a machine from a disc (`image` is `disc:<place>/<name>`); a wrong field throws */
+export function readNewFromDisc(input: Record<string, unknown>, taken: string[], discs: Disc[]): NewFromDisc {
+  const name = readName(input.name, taken);
+  const wanted = String(input.image ?? "").replace(/^disc:/, "");
+  const disc = discs.find((d) => `${d.place}/${d.name}` === wanted);
+  if (!disc) throw new FieldError("image");
+  return {
+    name,
+    disc,
+    cores: whole(input.cores, 0, 256, "cores"),
+    memory: input.memory ? whole(input.memory, MEMORY.min, MEMORY.max, "memory") : 0,
+    // a system installed from a disc wants room: most installers ask for 10–20 GB
+    disk: input.disk ? whole(input.disk, DISK.min, DISK.max, "disk") : DISC_DISK,
+    autostart: input.autostart !== false,
+  };
+}
+
+/** GB of a new machine's disk when one is made from a disc */
+export const DISC_DISK = 20;
+
+/** The devices of a machine made from a disc: its own disk in the place, the disc in its drive */
+export function discDevices(c: NewFromDisc, pool: string): Record<string, Record<string, string>> {
+  return { ...devicesOf({ kind: "vm", disk: c.disk }, pool), [DISC_DEVICE]: { type: "disk", pool: c.disc.place, source: c.disc.name, "boot.priority": "10" } };
 }
 
 /**

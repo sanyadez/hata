@@ -3068,6 +3068,7 @@ function renderContainersBody() {
       ),
     ),
     incusPlacesCard(d),
+    d.vms?.state === "ready" && discsCard(d),
     vmCard(d),
   );
 }
@@ -3186,6 +3187,175 @@ function incusPlacesCard(d) {
   );
 }
 
+/** Disc images (ISO) for virtual machines installed from them: what is kept, and the ways to add one */
+function discsCard(d) {
+  const list = d.discs ?? [];
+  return h(
+    "section",
+    { class: "card pad stack" },
+    h(
+      "div",
+      { class: "row wrap" },
+      h("h2", { class: "grow" }, t("incus.disc.title")),
+      button(t("incus.disc.fromLink"), { class: "small", onclick: () => discAddDialog({ how: "url" }) }, "link"),
+      button(t("incus.disc.fromHere"), { class: "small", onclick: () => discAddDialog({ how: "local" }) }, "upload"),
+    ),
+    h("p", { class: "muted small" }, t("incus.disc.lead")),
+    list.length === 0
+      ? h("p", { class: "muted small" }, t("incus.disc.none"))
+      : list.map((x) =>
+          h(
+            "div",
+            { class: "row", menu: true },
+            h("span", { class: "app-icon plus small" }, icon("disk")),
+            h("div", { class: "grow" }, h("div", { class: "strong clip" }, x.name), h("div", { class: "muted small" }, [x.size ? bytes(x.size) : null, (d.places ?? []).length > 1 && x.place, x.usedBy.length ? t("incus.disc.usedBy", { names: x.usedBy.join(", ") }) : null].filter(Boolean).join(" · "))),
+            h(
+              "div",
+              { class: "row-actions" },
+              button(t("incus.disc.makeVm"), { class: "small", onclick: () => newDiscVm(x) }, "plus"),
+              button("", { class: "small ghost", title: t("incus.disc.remove"), "aria-label": `${t("incus.disc.remove")}: ${x.name}`, disabled: x.usedBy.length > 0, onclick: () => removeDiscDialog(x) }, "trash"),
+            ),
+          ),
+        ),
+  );
+}
+
+/** The new-machine dialog with this disc chosen */
+function newDiscVm(x) {
+  newContainerDialog("vm");
+  const image = document.querySelector("dialog[open] form select");
+  if (!image) return;
+  image.value = `disc:${x.place}/${x.name}`;
+  image.dispatchEvent(new Event("change"));
+}
+
+/**
+ * A disc image added by a link, from this computer (the browser sends the file as the body) or from a file of
+ * this server (`path`); Incus keeps it in a place.
+ */
+async function discAddDialog({ how, path = "" }) {
+  let d = incusUi.data;
+  if (!d || d.state !== "ready") {
+    try {
+      d = incusUi.data = await api("GET", "/api/containers");
+    } catch (e) {
+      return toast(errorText(e), "error");
+    }
+  }
+  if (d.state !== "ready" || d.vms?.state !== "ready") return toast(t("incus.disc.noVms"), "error");
+  const places = d.places ?? [];
+  const place = h("select", null, places.map((p) => h("option", { value: p.name, selected: p.standard }, `${p.name} — ${p.path || t("incus.place.systemPath")}${p.total ? " · " + t("incus.place.freeShort", { free: bytes(p.total - p.used) }) : ""}`)));
+  const url = h("input", { type: "url", required: how === "url", placeholder: "https://…/debian-13-amd64-netinst.iso", class: "mono", spellcheck: false });
+  const picked = h("input", { type: "file", required: how === "local", accept: ".iso" });
+  const fill = h("i");
+  const progress = h("div", { class: "stack-s", hidden: true }, h("div", { class: "bar" }, fill), h("p", { class: "muted small" }));
+  const error = h("p", { class: "error", role: "alert" });
+  const stay = (e) => e.preventDefault();
+  let dialog;
+  const done = (name) => {
+    dialog.removeEventListener("cancel", stay);
+    dialog.close();
+    toast(t("incus.disc.added", { name }));
+    void loadContainers();
+  };
+  const sendLocal = (go) => {
+    const f = picked.files[0];
+    if (!f) return void (go.disabled = false);
+    progress.hidden = false;
+    const said = progress.querySelector("p");
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `/api/containers/discs/upload?${new URLSearchParams({ place: place.value, name: f.name })}`);
+    xhr.upload.onprogress = (e) => {
+      const percent = e.total ? Math.floor((e.loaded / e.total) * 100) : 0;
+      fill.style.width = percent + "%";
+      said.textContent = percent < 100 ? t("pve.send.sending", { done: bytes(e.loaded), size: bytes(f.size) }) : t("incus.disc.placing");
+    };
+    const failed = (text) => ((error.textContent = text), (progress.hidden = true), (go.disabled = false), dialog.removeEventListener("cancel", stay));
+    xhr.onerror = () => failed(t("error.network"));
+    xhr.onload = () => {
+      let payload = {};
+      try {
+        payload = JSON.parse(xhr.responseText);
+      } catch {}
+      if (xhr.status < 200 || xhr.status >= 300) return failed(errorText(new ApiError(xhr.status, payload.error?.code ?? "request.failed", payload.error?.detail)));
+      done(payload.name ?? f.name);
+    };
+    // Escape would cut the sending off
+    dialog.addEventListener("cancel", stay);
+    xhr.send(f);
+  };
+  const submit = async (e) => {
+    e.preventDefault();
+    error.textContent = "";
+    const go = dialog.querySelector("button[type=submit]");
+    go.disabled = true;
+    if (how === "local") return sendLocal(go);
+    try {
+      const r = await api("POST", "/api/containers/discs", { place: place.value, ...(how === "url" ? { url: url.value.trim() } : { path }) });
+      dialog.close();
+      void jobDialog(r.job, "disc", r.name, () => void loadContainers());
+    } catch (err) {
+      error.textContent = errorText(err);
+      go.disabled = false;
+    }
+  };
+  dialog = openDialog(
+    "wide",
+    h(
+      "form",
+      { class: "stack", onsubmit: submit },
+      h("header", null, h("h2", { class: "grow wrap" }, how === "path" ? t("incus.disc.fileTitle", { name: path.split("/").pop() }) : t(how === "url" ? "incus.disc.linkTitle" : "incus.disc.localTitle")), closeX(() => dialog)),
+      h("p", { class: "muted small" }, t("incus.disc.addLead")),
+      how === "url" && field(t("incus.disc.url"), url, t("incus.disc.urlHint")),
+      how === "local" && field(t("pve.send.file"), picked),
+      places.length > 1 && field(t("incus.place.label"), place),
+      progress,
+      error,
+      h("footer", null, closeButton(() => dialog, t("common.cancel")), h("button", { type: "submit", class: "btn primary" }, icon(how === "url" ? "download" : "upload"), h("span", null, t("incus.disc.add")))),
+    ),
+  );
+  (how === "url" ? url : how === "local" ? picked : dialog.querySelector("button[type=submit]")).focus();
+}
+
+function removeDiscDialog(x) {
+  let dialog;
+  dialog = openDialog(
+    "confirm",
+    h("h2", null, t("incus.disc.removeTitle", { name: x.name })),
+    h("p", { class: "muted" }, t("incus.disc.removeLead")),
+    h(
+      "footer",
+      null,
+      closeButton(() => dialog, t("common.cancel")),
+      button(t("incus.disc.remove"), {
+        class: "danger",
+        onclick: async (e) => {
+          e.currentTarget.disabled = true;
+          try {
+            await api("DELETE", `/api/containers/discs/${encodeURIComponent(x.place)}/${encodeURIComponent(x.name)}`);
+            dialog.close();
+            void loadContainers();
+          } catch (err) {
+            toast(errorText(err), "error");
+            e.target.closest("button").disabled = false;
+          }
+        },
+      }, "trash"),
+    ),
+  );
+}
+
+/** The disc out of the drive: the machine boots from its own disk afterwards */
+async function ejectDisc(c) {
+  try {
+    await api("POST", `/api/containers/${c.name}/eject`);
+    toast(t("incus.disc.ejected", { name: c.name }));
+  } catch (e) {
+    toast(errorText(e), "error");
+  }
+  void loadContainers();
+}
+
 /** Moves a container or virtual machine to another place */
 function moveContainerDialog(c) {
   const d = incusUi.data;
@@ -3287,7 +3457,7 @@ function containerRow(c) {
       "td",
       null,
       h("div", { class: "strong" }, c.name, c.machine && h("a", { class: "small", href: `#/machines/${c.machine}` }, " · ", t("incus.asMachine"))),
-      h("div", { class: "muted small" }, [c.kind === "vm" && t("incus.vm.short"), c.os, c.nesting && "Docker", c.snapshots.length > 0 && t("incus.snapshotsN", { n: c.snapshots.length })].filter(Boolean).join(" · ")),
+      h("div", { class: "muted small" }, [c.kind === "vm" && t("incus.vm.short"), c.os, c.nesting && "Docker", c.snapshots.length > 0 && t("incus.snapshotsN", { n: c.snapshots.length }), c.disc && t("incus.disc.inDrive", { name: c.disc })].filter(Boolean).join(" · ")),
     ),
     h("td", null, incusStatus(c)),
     h("td", { class: "mono small" }, c.address || "—"),
@@ -3328,6 +3498,7 @@ function containerMenu(c, at) {
   menuAt(at, menuHeader(c.name, c.os, c.kind === "vm" ? "server" : "box"), [
     c.status === "running" && { label: t("incus.restart"), icon: "refresh", run: () => containerAct(c, "restart") },
     c.status === "running" && c.kind === "vm" && { label: t("incus.screen"), icon: "screen", run: () => containerScreen(c) },
+    c.disc && { label: t("incus.disc.eject"), icon: "up", run: () => ejectDisc(c) },
     c.status === "running" && { label: t("incus.console"), icon: "terminal", run: () => containerConsole(c) },
     c.machine && { label: t("incus.openMachine"), icon: "server", href: `#/machines/${c.machine}` },
     { label: t("incus.limits") + "…", icon: "settings", run: () => containerLimitsDialog(c) },
@@ -3395,6 +3566,9 @@ function newContainerDialog(start = "container") {
   const [docker, dockerRow] = tickRow(t("incus.docker"), t("incus.dockerHint"), true);
   const [autostart, autostartRow] = tickRow(t("incus.autostart"), null, true);
   const vmNote = h("p", { class: "banner small" }, t("incus.vm.note"));
+  const discNote = h("p", { class: "banner small", hidden: true }, t("incus.disc.note"));
+  const imageHint = h("span");
+  disk.addEventListener("input", () => (disk.dataset.touched = "1"));
   const placeSelect = h("select", null, (d.places ?? []).map((p) => h("option", { value: p.name, selected: p.standard }, `${p.name} — ${p.path || t("incus.place.systemPath")}${p.total ? " · " + t("incus.place.freeShort", { free: bytes(p.total - p.used) }) : ""}`)));
   const placeRow = (d.places ?? []).length > 1 && field(t("incus.place.label"), placeSelect);
   placeSelect.addEventListener("change", () => shape());
@@ -3407,7 +3581,10 @@ function newContainerDialog(start = "container") {
   );
   const fillImages = () => {
     const was = image.value;
-    image.replaceChildren(...d.images.filter((i) => (kind === "vm" ? i.vm : i.container !== false)).map((i) => h("option", { value: i.id }, i.client ? i.name : `${i.name} — ${t("incus.noClient")}`)));
+    const systems = d.images.filter((i) => (kind === "vm" ? i.vm : i.container !== false)).map((i) => h("option", { value: i.id }, i.client ? i.name : `${i.name} — ${t("incus.noClient")}`));
+    // a virtual machine can also be installed from a disc image, on its screen
+    const discs = kind === "vm" ? (d.discs ?? []).map((x) => h("option", { value: `disc:${x.place}/${x.name}` }, x.name)) : [];
+    image.replaceChildren(...(discs.length ? [h("optgroup", { label: t("incus.disc.systems") }, systems), h("optgroup", { label: t("incus.disc.group") }, discs)] : systems));
     if ([...image.options].some((o) => o.value === was)) image.value = was;
     fillMemory(kind === "vm");
   };
@@ -3430,6 +3607,15 @@ function newContainerDialog(start = "container") {
     vmNote.hidden = !vm;
     for (const b of seg.children) b.classList.toggle("active", b.dataset.kind === kind);
     const chosen = d.images.find((i) => i.id === image.value);
+    const fromDisc = vm && image.value.startsWith("disc:");
+    discNote.hidden = !fromDisc;
+    lead.hidden = fromDisc;
+    imageHint.textContent = t(fromDisc ? "incus.disc.imageHint" : "incus.imageHint");
+    vmNote.hidden = !vm || fromDisc;
+    clientRow.hidden = dockerRow.hidden = fromDisc;
+    // a system installed from a disc wants room: most installers ask for 10–20 GB
+    if (fromDisc && !disk.dataset.touched && Number(disk.value) < 20) disk.value = "20";
+    if (vm && !fromDisc && !disk.dataset.touched && !chosen?.least && disk.value === "20") disk.value = "10";
     const can = chosen?.client;
     client.disabled = !can;
     if (!can) client.checked = false;
@@ -3453,13 +3639,16 @@ function newContainerDialog(start = "container") {
     submit.disabled = true;
     const n = name.value.trim().toLowerCase();
     try {
+      const fromDisc = kind === "vm" && image.value.startsWith("disc:");
       const r = await api("POST", "/api/containers", { kind, name: n, image: image.value, cores: Number(cores.value), memory: Number(memory.value), disk: disk.disabled ? 0 : Number(disk.value || 0), client: client.checked, docker: docker.checked, autostart: autostart.checked, place: placeSelect.value });
       dialog.close();
-      const machine = client.checked;
+      const machine = client.checked && !fromDisc;
       void loadContainers();
       void jobDialog(r.job, "container", n, () => {
-        toast(t(machine ? "incus.made.machine" : "incus.made.plain", { name: n }));
         void loadContainers();
+        // the installer waits on the machine's screen
+        if (fromDisc) return containerScreen({ name: n });
+        toast(t(machine ? "incus.made.machine" : "incus.made.plain", { name: n }));
         void loadMachines();
       });
     } catch (err) {
@@ -3476,7 +3665,8 @@ function newContainerDialog(start = "container") {
       vmsReady && seg,
       lead,
       vmNote,
-      h("div", { class: "form-pair" }, field(t("incus.name"), name, t("incus.nameHint")), field(t("incus.image"), image, t("incus.imageHint"))),
+      discNote,
+      h("div", { class: "form-pair" }, field(t("incus.name"), name, t("incus.nameHint")), field(t("incus.image"), image, imageHint)),
       h("div", { class: "form-pair" }, field(t("incus.coresLabel"), cores), field(t("incus.memoryLabel"), memory)),
       diskRow,
       placeRow,
@@ -9119,6 +9309,7 @@ function entryMenu(entry, at) {
     entry.type !== "other" && item(t(entry.type === "dir" ? "files.downloadZip" : "files.download"), "download", () => downloadEntries([entry])),
     entry.type === "file" && ARCHIVE_RE.test(entry.name) && !state.files.readOnly && !filesMachine() && isAdmin() && item(t("files.extract"), "archive", () => extractArchive(path)),
     entry.type === "file" && PVE_SEND_RE.test(entry.name) && !filesMachine() && isAdmin() && pveUi.list?.hosts?.length !== 0 && item(t("pve.send.menu"), "upload", () => pveSendDialog({ path })),
+    entry.type === "file" && /\.iso$/i.test(entry.name) && !filesMachine() && isAdmin() && item(t("incus.disc.menu"), "disk", () => discAddDialog({ how: "path", path })),
     item(t("files.copyPath"), "link", () => copyText(path)),
     entry.type !== "other" && !filesMachine() && item(t(isFavorite(path) ? "files.unfavorite" : "files.favorite"), "star", () => favorite(path, !isFavorite(path), entry.name)),
     entry.type === "dir" && !filesMachine() && isAdmin() && (state.files.pinned.includes(path) ? item(t("files.unpin"), "home", () => pinFolder(path, false)) : item(t("files.pin"), "home", () => pinFolder(path, true))),

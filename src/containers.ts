@@ -10,7 +10,7 @@
  * terminal. Nothing is offered while Hata itself runs inside a container that maps only part of the
  * user ids: the person's decision is that neither containers nor virtual machines are made there.
  */
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmdirSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmdirSync, rmSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { record } from "./activity";
 import { AppError, isBusy, startJob, type Job } from "./apps";
@@ -18,7 +18,7 @@ import { bus } from "./bus";
 import { DATA_DIR, listenAddress, SECRETS_DIR, settings } from "./config";
 import { onContainerPlaces } from "./mounting";
 import { readJsonFile, writeJsonAtomic } from "./fsutil";
-import { CLONE_SCRIPT, cloneRequest, hostFiles, nicsOf, readName, screenRenamed, screenSocket, withScreen, trouble, BRIDGE, bridgeRules, configOf, devicesOf, diskChange, LIMITED, FieldError, placeFor, poolName, IMAGE_SERVER, IMAGES, insideNarrowMap, limitsChange, NAME_RE, readInstance, readNew, setupScript, snapshotName, SNAPSHOT_RE, type Container } from "./incus";
+import { DISC_DEVICE, DISC_RE, discDevices, discName, readDiscs, readNewFromDisc, type Disc, CLONE_SCRIPT, cloneRequest, hostFiles, nicsOf, readName, screenRenamed, screenSocket, withScreen, trouble, BRIDGE, bridgeRules, configOf, devicesOf, diskChange, LIMITED, FieldError, placeFor, poolName, IMAGE_SERVER, IMAGES, insideNarrowMap, limitsChange, NAME_RE, readInstance, readNew, setupScript, snapshotName, SNAPSHOT_RE, type Container } from "./incus";
 import { invite, machines, remove as removeMachine, rename as renameMachine } from "./machines";
 import { packageManager, PATH, run, runLogged } from "./packages";
 
@@ -222,6 +222,8 @@ export interface ContainersReport {
   images: { id: string; name: string; client: boolean; container: boolean; vm: boolean; docker: boolean; least: { memory: number; disk: number } | null }[];
   /** Virtual machines: a test feature, installed apart */
   vms: { state: VmState; install: string };
+  /** Disc images (ISO) kept in the places, for virtual machines installed from them */
+  discs: Disc[];
 }
 
 const installCommand = (packages = PACKAGES): string => (packageManager() === "apt-get" ? `apt-get install -y --no-install-recommends ${packages.join(" ")}` : "");
@@ -265,7 +267,7 @@ export function containerOfMachine(macs: string[], hostname: string): string {
 }
 
 export async function report(): Promise<ContainersReport> {
-  const base = { why: "", install: installCommand(), version: "", network: null, places: [] as Place[], containers: [], images: IMAGES.map((i) => ({ id: i.id, name: i.name, client: i.family !== "", container: i.container, vm: i.vm, docker: i.docker !== false, least: i.least ?? null })), vms: { state: "missing" as VmState, install: installCommand(VM_PACKAGES) } };
+  const base = { why: "", install: installCommand(), version: "", network: null, places: [] as Place[], containers: [], discs: [] as Disc[], images: IMAGES.map((i) => ({ id: i.id, name: i.name, client: i.family !== "", container: i.container, vm: i.vm, docker: i.docker !== false, least: i.least ?? null })), vms: { state: "missing" as VmState, install: installCommand(VM_PACKAGES) } };
   const why = blocked();
   if (why) return { ...base, state: "blocked", why };
   if (!has("incus") || !existsSync(SOCKET)) return { ...base, state: "missing" };
@@ -283,7 +285,7 @@ export async function report(): Promise<ContainersReport> {
     return [{ ...c, machine: machine?.id ?? "" }];
   });
   seen = containers.map((c) => ({ name: c.name, mac: c.mac, kind: c.kind }));
-  return { ...base, state: "ready", version, vms, network, places: pools, containers: containers.sort((a, b) => a.name.localeCompare(b.name)) };
+  return { ...base, state: "ready", version, vms, network, places: pools, discs: await discsIn(pools), containers: containers.sort((a, b) => a.name.localeCompare(b.name)) };
 }
 
 /**
@@ -416,6 +418,7 @@ const ready = async (): Promise<ContainersReport> => {
  */
 export async function create(input: Record<string, unknown>, by: string): Promise<{ job: string; name: string }> {
   const r = await ready();
+  if (String(input.image ?? "").startsWith("disc:")) return createFromDisc(input, r, by);
   let c;
   try {
     c = readNew(input, r.containers.map((x) => x.name));
@@ -463,6 +466,158 @@ export async function create(input: Record<string, unknown>, by: string): Promis
     job.result = { machine: await awaitMachine(c.name, before, log) };
   }), true, { app: c.name, machine: "" });
   return { job: job.id, name: c.name };
+}
+
+// --- Disc images and machines installed from them -----------------------------------------------------
+
+const discsIn = async (pools: Place[]): Promise<Disc[]> =>
+  (await Promise.all(pools.map(async (p) => readDiscs(p.name, (await incus("GET", `/1.0/storage-pools/${encodeURIComponent(p.name)}/volumes/custom?recursion=1`).catch(() => ({ metadata: [] }))).metadata ?? [])))).flat();
+
+/** The place a disc goes to: the one asked for, or where new instances go */
+function discPlace(r: ContainersReport, asked: unknown): Place {
+  const place = typeof asked === "string" && asked ? r.places.find((p) => p.name === asked) : r.places.find((p) => p.standard);
+  if (!place) throw new AppError("containers.badField", 400, { field: "place" });
+  return place;
+}
+
+/**
+ * A stream of a disc's bytes that tells how far it got every few seconds; Incus reads it to the end and
+ * keeps it as a volume of the place (`X-Incus-type: iso`).
+ */
+async function importDisc(place: string, name: string, source: ReadableStream<Uint8Array>, size: number, log: (line: string) => void): Promise<void> {
+  let got = 0;
+  let said = Date.now();
+  const mb = (n: number) => `${Math.round(n / 1048576)} MB`;
+  const counted = source.pipeThrough(
+    new TransformStream<Uint8Array, Uint8Array>({
+      transform(chunk, out) {
+        got += chunk.byteLength;
+        if (Date.now() - said > 3000) {
+          said = Date.now();
+          log(size ? `${mb(got)} of ${mb(size)} (${Math.floor((got / size) * 100)}%)` : mb(got));
+        }
+        out.enqueue(chunk);
+      },
+    }),
+  );
+  let r: Response;
+  try {
+    r = await fetch(`http://incus/1.0/storage-pools/${encodeURIComponent(place)}/volumes/custom`, { unix: SOCKET, method: "POST", body: counted, duplex: "half", headers: { "content-type": "application/octet-stream", "x-incus-name": name, "x-incus-type": "iso" } } as RequestInit);
+  } catch (e) {
+    throw new AppError("containers.noAnswer", 503, { message: e instanceof Error ? e.message : String(e) });
+  }
+  const answer = (await r.json().catch(() => null)) as any;
+  if (!answer || answer.type === "error") throw new AppError("containers.failed", 409, { message: String(answer?.error ?? `HTTP ${r.status}`) });
+  await finished(answer, 3600);
+  log(`Kept: ${name}, ${mb(got)}`);
+}
+
+/** A name a disc can be kept under in the place: free, and a name at all */
+async function freeDiscName(r: ContainersReport, place: string, from: unknown): Promise<string> {
+  const name = discName(from);
+  if (!name || !DISC_RE.test(name)) throw new AppError("containers.disc.badName", 400);
+  if (r.discs.some((d) => d.place === place && d.name === name)) throw new AppError("containers.disc.exists", 409, { name });
+  return name;
+}
+
+/**
+ * A disc image added by a link or from a file of this server (a job of kind `disc`): downloaded or read
+ * and passed on to Incus as it comes — nothing is kept on the way.
+ */
+export async function addDisc(input: Record<string, unknown>, by: string): Promise<{ job: string; name: string }> {
+  const r = await ready();
+  const place = discPlace(r, input.place).name;
+  const url = typeof input.url === "string" ? input.url.trim() : "";
+  const path = typeof input.path === "string" ? input.path : "";
+  if (url && !/^https?:\/\/[^\s]+$/i.test(url)) throw new AppError("containers.disc.badUrl", 400);
+  if (!url && !path) throw new AppError("containers.disc.badUrl", 400);
+  let size = 0;
+  if (!url) {
+    const st = statSync(path, { throwIfNoEntry: false });
+    if (!st?.isFile() || !/\.iso$/i.test(path)) throw new AppError("containers.disc.notIso", 400);
+    size = st.size;
+  }
+  const name = await freeDiscName(r, place, typeof input.name === "string" && input.name ? input.name : url || path);
+  const job = startJob(`incus-disc:${place}/${name}`, "disc", by, async (log) => told(log, async () => {
+    let source: ReadableStream<Uint8Array>;
+    if (url) {
+      log(`Downloading ${url}`);
+      const got = await fetch(url, { redirect: "follow" }).catch((e) => {
+        throw new AppError("containers.disc.download", 502, { message: e instanceof Error ? e.message : String(e) });
+      });
+      if (!got.ok || !got.body) throw new AppError("containers.disc.download", 502, { message: `HTTP ${got.status}` });
+      size = Number(got.headers.get("content-length") ?? 0) || 0;
+      source = got.body;
+    } else {
+      log(`Reading ${path}`);
+      source = Bun.file(path).stream();
+    }
+    await importDisc(place, name, source, size, log);
+    record("containers.disc.added", { user: by, detail: name });
+    bus.publish("containers");
+  }), true, { app: name, machine: "" });
+  return { job: job.id, name };
+}
+
+/** A disc image sent by the browser as the request's body: passed on to Incus as it comes */
+export async function receiveDisc(q: { place?: string | null; name?: string | null }, size: number, body: ReadableStream<Uint8Array> | null, by: string): Promise<{ name: string }> {
+  const r = await ready();
+  const place = discPlace(r, q.place);
+  if (!body) throw new AppError("containers.disc.notIso", 400);
+  if (!/\.iso$/i.test(q.name ?? "")) throw new AppError("containers.disc.notIso", 400);
+  const name = await freeDiscName(r, place.name, q.name);
+  if (Number.isFinite(size) && place.total && size > place.total - place.used) throw new AppError("containers.disc.noRoom", 409, { name: place.name });
+  await importDisc(place.name, name, body, Number.isFinite(size) ? size : 0, () => {});
+  record("containers.disc.added", { user: by, detail: name });
+  bus.publish("containers");
+  return { name };
+}
+
+export async function removeDisc(place: string, name: string, by: string): Promise<void> {
+  const r = await ready();
+  const disc = r.discs.find((d) => d.place === place && d.name === name);
+  if (!disc) throw new AppError("containers.disc.notFound", 404, { name });
+  if (disc.usedBy.length) throw new AppError("containers.disc.inUse", 409, { name, names: disc.usedBy.join(", ") });
+  await finished(await incus("DELETE", `/1.0/storage-pools/${encodeURIComponent(place)}/volumes/custom/${encodeURIComponent(name)}`));
+  record("containers.disc.removed", { user: by, detail: name });
+  bus.publish("containers");
+}
+
+/**
+ * A virtual machine to install a system on from a disc (a job of kind `container`): an empty disk, the disc
+ * in the drive and booted first, the screen on; the person installs it on the screen as on any computer.
+ */
+async function createFromDisc(input: Record<string, unknown>, r: ContainersReport, by: string): Promise<{ job: string; name: string }> {
+  if (r.vms.state !== "ready") throw new AppError("containers.vm." + (r.vms.state === "missing" ? "notInstalled" : r.vms.state), 409);
+  let c;
+  try {
+    c = readNewFromDisc(input, r.containers.map((x) => x.name), r.discs);
+  } catch (e) {
+    throw new AppError("containers.badField", 400, { field: e instanceof FieldError ? e.field : "" });
+  }
+  const pool = discPlace(r, input.place).name;
+  const job = startJob(`incus:${c.name}`, "container", by, async (log) => told(log, async () => {
+    log(`Making ${c.name} with ${c.disc.name} in its drive and an empty disk of ${c.disk} GB`);
+    const config = { ...configOf({ ...c, kind: "vm" }), "raw.qemu": withScreen("", c.name), "image.description": c.disc.name.replace(/\.iso$/i, "") };
+    await finished(await incus("POST", "/1.0/instances", { name: c.name, type: "virtual-machine", start: true, source: { type: "none" }, config, devices: discDevices(c, pool) }), 600);
+    log("Started: the installer is on its screen");
+    record("containers.vmCreated", { user: by, detail: c.name });
+    bus.publish("containers");
+    job.result = { screen: c.name };
+  }), true, { app: c.name, machine: "" });
+  return { job: job.id, name: c.name };
+}
+
+/** The disc taken out of a machine's drive: it boots from its own disk afterwards (taken out while running too) */
+export async function ejectDisc(name: string, by: string): Promise<void> {
+  if (!NAME_RE.test(name)) throw new AppError("containers.notFound", 404, { name });
+  const raw = (await incus("GET", `/1.0/instances/${name}`)).metadata;
+  if (!raw.devices?.[DISC_DEVICE]) throw new AppError("containers.disc.noneIn", 409, { name });
+  const devices = { ...raw.devices };
+  delete devices[DISC_DEVICE];
+  await finished(await incus("PUT", `/1.0/instances/${name}`, { architecture: raw.architecture, config: raw.config, devices, ephemeral: raw.ephemeral, profiles: raw.profiles, stateful: raw.stateful, description: raw.description }), 120);
+  record("containers.disc.ejected", { user: by, detail: name });
+  bus.publish("containers");
 }
 
 /** Waits for Hata's client in a new instance to pair: the machine that was not there before, by its host name */

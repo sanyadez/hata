@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { cloneRequest, hostFiles, nicsOf, readName, screenRenamed, screenSocket, withScreen, trouble, SILENT_MS, bridgeRules, configOf, devicesOf, diskChange, FieldError, placeFor, poolName, insideNarrowMap, limitsChange, megabytes, readInstance, readNew, setupScript, snapshotName } from "../src/incus";
+import { discDevices, discName, DISC_DISK, readDiscs, readNewFromDisc, cloneRequest, hostFiles, nicsOf, readName, screenRenamed, screenSocket, withScreen, trouble, SILENT_MS, bridgeRules, configOf, devicesOf, diskChange, FieldError, placeFor, poolName, insideNarrowMap, limitsChange, megabytes, readInstance, readNew, setupScript, snapshotName } from "../src/incus";
 
 const field = (f: () => unknown): string => {
   try {
@@ -266,4 +266,35 @@ test("a copy goes to the place chosen without snapshots, its cards off, a contai
   expect(req.config).toEqual({ "raw.qemu": "-vnc unix:/run/incus/vm2/vnc.sock" });
   // a machine's disk is its system: it keeps its size anywhere
   expect((req.devices as any).root.size).toBe("20GiB");
+});
+
+test("disc images: the ISO volumes of a place, who has them in the drive", () => {
+  const discs = readDiscs("default", [
+    { name: "debian-13.iso", content_type: "iso", config: { size: "663748608" }, used_by: ["/1.0/instances/inst1", "/1.0/instances/vm%202?project=default"] },
+    { name: "data", content_type: "filesystem", config: {} },
+    { name: "alpine.iso", content_type: "iso", config: {} },
+  ]);
+  expect(discs).toEqual([
+    { place: "default", name: "alpine.iso", size: 0, usedBy: [] },
+    { place: "default", name: "debian-13.iso", size: 663748608, usedBy: ["inst1", "vm 2"] },
+  ]);
+});
+
+test("a disc image's name from a file or a link", () => {
+  expect(discName("https://cdimage.debian.org/debian-cd/current/amd64/iso-cd/debian-13.1.0-amd64-netinst.iso")).toBe("debian-13.1.0-amd64-netinst.iso");
+  expect(discName("/DATA/Downloads/Ubuntu 24.04 Desktop.ISO")).toBe("Ubuntu-24.04-Desktop.iso");
+  expect(discName("https://example.com/get?file=x.iso")).toBe("get.iso");
+  expect(discName("https://example.com/Образ%20диска.iso")).toBe("");
+  expect(discName("../..")).toBe("");
+  expect(discName("")).toBe("");
+});
+
+test("a virtual machine from a disc: the disc is the place's volume, booted first; an empty disk of the size asked", () => {
+  const disc = { place: "default", name: "alpine.iso", size: 0, usedBy: [] };
+  const c = readNewFromDisc({ name: "inst", image: "disc:default/alpine.iso", memory: 2048 }, [], [disc]);
+  expect(c).toEqual({ name: "inst", disc, cores: 0, memory: 2048, disk: DISC_DISK, autostart: true });
+  expect(discDevices(c, "fast")).toEqual({ root: { type: "disk", path: "/", pool: "fast", size: `${DISC_DISK}GiB` }, disc: { type: "disk", pool: "default", source: "alpine.iso", "boot.priority": "10" } });
+  expect(() => readNewFromDisc({ name: "inst", image: "disc:default/other.iso" }, [], [disc])).toThrow("image");
+  expect(() => readNewFromDisc({ name: "inst", image: "disc:default/alpine.iso", disk: 2 }, [], [disc])).toThrow("disk");
+  expect(() => readNewFromDisc({ name: "discs", image: "disc:default/alpine.iso" }, [], [disc])).toThrow("name");
 });
