@@ -3199,6 +3199,7 @@ function discsCard(d) {
       h("h2", { class: "grow" }, t("incus.disc.title")),
       button(t("incus.disc.fromLink"), { class: "small", onclick: () => discAddDialog({ how: "url" }) }, "link"),
       button(t("incus.disc.fromHere"), { class: "small", onclick: () => discAddDialog({ how: "local" }) }, "upload"),
+      !list.some((x) => /^virtio-win/i.test(x.name)) && button(t("incus.win.drivers"), { class: "small", title: t("incus.win.driversHint"), onclick: (e) => addDrivers(e.currentTarget) }, "download"),
     ),
     h("p", { class: "muted small" }, t("incus.disc.lead")),
     list.length === 0
@@ -3218,6 +3219,18 @@ function discsCard(d) {
           ),
         ),
   );
+}
+
+/** Fedora's disc of virtio drivers, which Windows needs for its network: downloaded once */
+async function addDrivers(el) {
+  el.disabled = true;
+  try {
+    const r = await api("POST", "/api/containers/discs", { drivers: true });
+    void jobDialog(r.job, "disc", r.name, () => void loadContainers());
+  } catch (e) {
+    toast(errorText(e), "error");
+    el.disabled = false;
+  }
 }
 
 /** The new-machine dialog with this disc chosen */
@@ -3568,6 +3581,9 @@ function newContainerDialog(start = "container") {
   const vmNote = h("p", { class: "banner small" }, t("incus.vm.note"));
   const discNote = h("p", { class: "banner small", hidden: true }, t("incus.disc.note"));
   const imageHint = h("span");
+  const [windows, windowsRow] = tickRow(t("incus.win.tick"), t("incus.win.hint"), false);
+  windows.addEventListener("change", () => ((windows.dataset.touched = "1"), shape()));
+  let discWas = "";
   disk.addEventListener("input", () => (disk.dataset.touched = "1"));
   const placeSelect = h("select", null, (d.places ?? []).map((p) => h("option", { value: p.name, selected: p.standard }, `${p.name} — ${p.path || t("incus.place.systemPath")}${p.total ? " · " + t("incus.place.freeShort", { free: bytes(p.total - p.used) }) : ""}`)));
   const placeRow = (d.places ?? []).length > 1 && field(t("incus.place.label"), placeSelect);
@@ -3611,6 +3627,13 @@ function newContainerDialog(start = "container") {
     discNote.hidden = !fromDisc;
     lead.hidden = fromDisc;
     imageHint.textContent = t(fromDisc ? "incus.disc.imageHint" : "incus.imageHint");
+    // a disc of Windows is told by its name; the tick can be changed
+    if (fromDisc && image.value !== discWas && !windows.dataset.touched) windows.checked = /win/i.test(image.value.split("/").pop()) && !/^virtio-win/i.test(image.value.split("/").pop());
+    discWas = image.value;
+    windowsRow.hidden = !fromDisc;
+    const win = fromDisc && windows.checked;
+    const drivers = (d.discs ?? []).some((x) => /^virtio-win/i.test(x.name));
+    windowsRow.querySelector(".block").textContent = t(drivers ? "incus.win.hint" : "incus.win.hintNoDrivers");
     vmNote.hidden = !vm || fromDisc;
     clientRow.hidden = dockerRow.hidden = fromDisc;
     // a system installed from a disc wants room: most installers ask for 10–20 GB
@@ -3622,8 +3645,8 @@ function newContainerDialog(start = "container") {
     // Docker's own script does not know every system
     if (!client.checked || chosen?.docker === false) docker.checked = false;
     docker.disabled = !can || !client.checked || chosen?.docker === false;
-    // a desktop needs room: less is not offered
-    const least = vm ? chosen?.least : null;
+    // a desktop needs room: less is not offered; so does Windows
+    const least = win ? { memory: 4096, disk: 64 } : vm ? chosen?.least : null;
     disk.min = String(least?.disk ?? (vm ? 4 : 1));
     if (least && Number(disk.value) < least.disk) disk.value = String(least.disk);
     for (const o of memory.options) o.disabled = !!least && Number(o.value) < least.memory;
@@ -3640,7 +3663,7 @@ function newContainerDialog(start = "container") {
     const n = name.value.trim().toLowerCase();
     try {
       const fromDisc = kind === "vm" && image.value.startsWith("disc:");
-      const r = await api("POST", "/api/containers", { kind, name: n, image: image.value, cores: Number(cores.value), memory: Number(memory.value), disk: disk.disabled ? 0 : Number(disk.value || 0), client: client.checked, docker: docker.checked, autostart: autostart.checked, place: placeSelect.value });
+      const r = await api("POST", "/api/containers", { windows: fromDisc && windows.checked, kind, name: n, image: image.value, cores: Number(cores.value), memory: Number(memory.value), disk: disk.disabled ? 0 : Number(disk.value || 0), client: client.checked, docker: docker.checked, autostart: autostart.checked, place: placeSelect.value });
       dialog.close();
       const machine = client.checked && !fromDisc;
       void loadContainers();
@@ -3670,6 +3693,7 @@ function newContainerDialog(start = "container") {
       h("div", { class: "form-pair" }, field(t("incus.coresLabel"), cores), field(t("incus.memoryLabel"), memory)),
       diskRow,
       placeRow,
+      windowsRow,
       clientRow,
       dockerRow,
       autostartRow,

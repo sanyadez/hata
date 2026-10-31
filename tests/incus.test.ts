@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { discDevices, discName, DISC_DISK, readDiscs, readNewFromDisc, cloneRequest, hostFiles, nicsOf, readName, screenRenamed, screenSocket, withScreen, trouble, SILENT_MS, bridgeRules, configOf, devicesOf, diskChange, FieldError, placeFor, poolName, insideNarrowMap, limitsChange, megabytes, readInstance, readNew, setupScript, snapshotName } from "../src/incus";
+import { discConfig, discDevices, WINDOWS, discName, DISC_DISK, readDiscs, readNewFromDisc, cloneRequest, hostFiles, nicsOf, readName, screenRenamed, screenSocket, withScreen, trouble, SILENT_MS, bridgeRules, configOf, devicesOf, diskChange, FieldError, placeFor, poolName, insideNarrowMap, limitsChange, megabytes, readInstance, readNew, setupScript, snapshotName } from "../src/incus";
 
 const field = (f: () => unknown): string => {
   try {
@@ -292,9 +292,27 @@ test("a disc image's name from a file or a link", () => {
 test("a virtual machine from a disc: the disc is the place's volume, booted first; an empty disk of the size asked", () => {
   const disc = { place: "default", name: "alpine.iso", size: 0, usedBy: [] };
   const c = readNewFromDisc({ name: "inst", image: "disc:default/alpine.iso", memory: 2048 }, [], [disc]);
-  expect(c).toEqual({ name: "inst", disc, cores: 0, memory: 2048, disk: DISC_DISK, autostart: true });
+  expect(c).toEqual({ name: "inst", disc, cores: 0, memory: 2048, disk: DISC_DISK, autostart: true, windows: false, drivers: null });
   expect(discDevices(c, "fast")).toEqual({ root: { type: "disk", path: "/", pool: "fast", size: `${DISC_DISK}GiB` }, disc: { type: "disk", pool: "default", source: "alpine.iso", "boot.priority": "10" } });
   expect(() => readNewFromDisc({ name: "inst", image: "disc:default/other.iso" }, [], [disc])).toThrow("image");
   expect(() => readNewFromDisc({ name: "inst", image: "disc:default/alpine.iso", disk: 2 }, [], [disc])).toThrow("disk");
   expect(() => readNewFromDisc({ name: "discs", image: "disc:default/alpine.iso" }, [], [disc])).toThrow("name");
+});
+
+test("Windows from a disc: TPM, Secure Boot, NVMe and USB, the drivers' disc in a second drive, room it asks for", () => {
+  const win = { place: "default", name: "Win11_24H2.iso", size: 0, usedBy: [] };
+  const drivers = { place: "default", name: "virtio-win.iso", size: 0, usedBy: [] };
+  const c = readNewFromDisc({ name: "win", image: "disc:default/Win11_24H2.iso", windows: true }, [], [win, drivers]);
+  expect(c).toMatchObject({ memory: WINDOWS.memory, disk: WINDOWS.disk, windows: true, drivers });
+  expect(discConfig(c)).toMatchObject({ "security.secureboot": "true", "image.os": "Windows", "image.description": "Win11_24H2" });
+  expect(discDevices(c, "default")).toEqual({
+    root: { type: "disk", path: "/", pool: "default", size: "64GiB", "io.bus": "nvme" },
+    disc: { type: "disk", pool: "default", source: "Win11_24H2.iso", "boot.priority": "10", "io.bus": "usb" },
+    tpm: { type: "tpm", path: "/dev/tpm0" },
+    drivers: { type: "disk", pool: "default", source: "virtio-win.iso", "io.bus": "usb" },
+  });
+  expect(readNewFromDisc({ name: "win", image: "disc:default/Win11_24H2.iso", windows: true }, [], [win]).drivers).toBeNull();
+  expect(() => readNewFromDisc({ name: "win", image: "disc:default/Win11_24H2.iso", windows: true, memory: 2048 }, [], [win])).toThrow("memory");
+  expect(() => readNewFromDisc({ name: "win", image: "disc:default/Win11_24H2.iso", windows: true, disk: 32 }, [], [win])).toThrow("disk");
+  expect(discConfig(readNewFromDisc({ name: "lin", image: "disc:default/Win11_24H2.iso" }, [], [win]))["security.secureboot"]).toBe("false");
 });

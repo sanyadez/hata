@@ -18,7 +18,7 @@ import { bus } from "./bus";
 import { DATA_DIR, listenAddress, SECRETS_DIR, settings } from "./config";
 import { onContainerPlaces } from "./mounting";
 import { readJsonFile, writeJsonAtomic } from "./fsutil";
-import { DISC_DEVICE, DISC_RE, discDevices, discName, readDiscs, readNewFromDisc, type Disc, CLONE_SCRIPT, cloneRequest, hostFiles, nicsOf, readName, screenRenamed, screenSocket, withScreen, trouble, BRIDGE, bridgeRules, configOf, devicesOf, diskChange, LIMITED, FieldError, placeFor, poolName, IMAGE_SERVER, IMAGES, insideNarrowMap, limitsChange, NAME_RE, readInstance, readNew, setupScript, snapshotName, SNAPSHOT_RE, type Container } from "./incus";
+import { DISC_DEVICE, DRIVERS_DEVICE, DRIVERS_URL, discConfig, DISC_RE, discDevices, discName, readDiscs, readNewFromDisc, type Disc, CLONE_SCRIPT, cloneRequest, hostFiles, nicsOf, readName, screenRenamed, screenSocket, withScreen, trouble, BRIDGE, bridgeRules, configOf, devicesOf, diskChange, LIMITED, FieldError, placeFor, poolName, IMAGE_SERVER, IMAGES, insideNarrowMap, limitsChange, NAME_RE, readInstance, readNew, setupScript, snapshotName, SNAPSHOT_RE, type Container } from "./incus";
 import { invite, machines, remove as removeMachine, rename as renameMachine } from "./machines";
 import { packageManager, PATH, run, runLogged } from "./packages";
 
@@ -527,6 +527,8 @@ async function freeDiscName(r: ContainersReport, place: string, from: unknown): 
 export async function addDisc(input: Record<string, unknown>, by: string): Promise<{ job: string; name: string }> {
   const r = await ready();
   const place = discPlace(r, input.place).name;
+  // the drivers for Windows: Fedora's published disc, under the name it has
+  if (input.drivers === true) (input.url = DRIVERS_URL), (input.name = "virtio-win.iso");
   const url = typeof input.url === "string" ? input.url.trim() : "";
   const path = typeof input.path === "string" ? input.path : "";
   if (url && !/^https?:\/\/[^\s]+$/i.test(url)) throw new AppError("containers.disc.badUrl", 400);
@@ -598,7 +600,8 @@ async function createFromDisc(input: Record<string, unknown>, r: ContainersRepor
   const pool = discPlace(r, input.place).name;
   const job = startJob(`incus:${c.name}`, "container", by, async (log) => told(log, async () => {
     log(`Making ${c.name} with ${c.disc.name} in its drive and an empty disk of ${c.disk} GB`);
-    const config = { ...configOf({ ...c, kind: "vm" }), "raw.qemu": withScreen("", c.name), "image.description": c.disc.name.replace(/\.iso$/i, "") };
+    if (c.windows) log(c.drivers ? `Windows: TPM, Secure Boot, the disk on NVMe; ${c.drivers.name} in a second drive` : "Windows: TPM, Secure Boot, the disk on NVMe; no drivers' disc here — its network needs one");
+    const config = { ...discConfig(c), "raw.qemu": withScreen("", c.name) };
     await finished(await incus("POST", "/1.0/instances", { name: c.name, type: "virtual-machine", start: true, source: { type: "none" }, config, devices: discDevices(c, pool) }), 600);
     log("Started: the installer is on its screen");
     record("containers.vmCreated", { user: by, detail: c.name });
@@ -612,9 +615,10 @@ async function createFromDisc(input: Record<string, unknown>, r: ContainersRepor
 export async function ejectDisc(name: string, by: string): Promise<void> {
   if (!NAME_RE.test(name)) throw new AppError("containers.notFound", 404, { name });
   const raw = (await incus("GET", `/1.0/instances/${name}`)).metadata;
-  if (!raw.devices?.[DISC_DEVICE]) throw new AppError("containers.disc.noneIn", 409, { name });
+  if (!raw.devices?.[DISC_DEVICE] && !raw.devices?.[DRIVERS_DEVICE]) throw new AppError("containers.disc.noneIn", 409, { name });
   const devices = { ...raw.devices };
   delete devices[DISC_DEVICE];
+  delete devices[DRIVERS_DEVICE];
   await finished(await incus("PUT", `/1.0/instances/${name}`, { architecture: raw.architecture, config: raw.config, devices, ephemeral: raw.ephemeral, profiles: raw.profiles, stateful: raw.stateful, description: raw.description }), 120);
   record("containers.disc.ejected", { user: by, detail: name });
   bus.publish("containers");

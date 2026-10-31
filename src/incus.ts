@@ -313,7 +313,7 @@ export function readInstance(raw: Raw): Container | null {
     mac: mac || String(nics[0]?.[1]?.hwaddr ?? "").toLowerCase(),
     place: String(raw.expanded_devices?.root?.pool ?? raw.devices?.root?.pool ?? ""),
     disk: Math.round(megabytes(raw.expanded_devices?.root?.size ?? raw.devices?.root?.size) / 1024),
-    disc: String(raw.devices?.[DISC_DEVICE]?.source ?? ""),
+    disc: String(raw.devices?.[DISC_DEVICE]?.source ?? raw.devices?.[DRIVERS_DEVICE]?.source ?? ""),
     usage: st && statusOf(raw.status) === "running" ? { memory: Number(st.memory?.usage ?? 0), cpu: Number(st.cpu?.usage ?? 0), disk: Number(st.disk?.root?.usage ?? 0), processes: Number(st.processes ?? 0) } : null,
     snapshots: ((raw.snapshots ?? []) as Raw[]).map((s) => ({ name: String(s.name).split("/").pop()!, created: Date.parse(s.created_at) || 0 })).sort((a, b) => b.created - a.created),
   };
@@ -367,7 +367,18 @@ export interface NewFromDisc {
   memory: number;
   disk: number;
   autostart: boolean;
+  /** Windows: TPM, Secure Boot, its disk on NVMe and the disc on USB — both seen without drivers */
+  windows: boolean;
+  /** The disc of virtio drivers put in a second drive for Windows (its network needs them); null — none here */
+  drivers: Disc | null;
 }
+
+/** What Windows 11 asks of a machine: memory in MB, disk in GB */
+export const WINDOWS = { memory: 4096, disk: 64 };
+
+/** The drivers' disc for Windows, by the name of Fedora's published one */
+export const DRIVERS_RE = /^virtio-win/i;
+export const DRIVERS_URL = "https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/virtio-win.iso";
 
 /** The new-machine dialog's answers for a machine from a disc (`image` is `disc:<place>/<name>`); a wrong field throws */
 export function readNewFromDisc(input: Record<string, unknown>, taken: string[], discs: Disc[]): NewFromDisc {
@@ -375,15 +386,33 @@ export function readNewFromDisc(input: Record<string, unknown>, taken: string[],
   const wanted = String(input.image ?? "").replace(/^disc:/, "");
   const disc = discs.find((d) => `${d.place}/${d.name}` === wanted);
   if (!disc) throw new FieldError("image");
+  const windows = input.windows === true;
+  const memory = input.memory ? whole(input.memory, MEMORY.min, MEMORY.max, "memory") : windows ? WINDOWS.memory : 0;
+  // a system installed from a disc wants room: most installers ask for 10–20 GB, Windows 11 for 64
+  const disk = input.disk ? whole(input.disk, DISK.min, DISK.max, "disk") : windows ? WINDOWS.disk : DISC_DISK;
+  if (windows && memory < WINDOWS.memory) throw new FieldError("memory");
+  if (windows && disk < WINDOWS.disk) throw new FieldError("disk");
   return {
     name,
     disc,
     cores: whole(input.cores, 0, 256, "cores"),
-    memory: input.memory ? whole(input.memory, MEMORY.min, MEMORY.max, "memory") : 0,
-    // a system installed from a disc wants room: most installers ask for 10–20 GB
-    disk: input.disk ? whole(input.disk, DISK.min, DISK.max, "disk") : DISC_DISK,
+    memory,
+    disk,
     autostart: input.autostart !== false,
+    windows,
+    drivers: windows ? (discs.find((d) => DRIVERS_RE.test(d.name) && d !== disc) ?? null) : null,
   };
+}
+
+/** The settings of a machine from a disc; Windows boots with Secure Boot (Microsoft's keys) and is told so to Incus */
+export function discConfig(c: NewFromDisc): Record<string, string> {
+  const config = configOf({ ...c, kind: "vm" });
+  config["image.description"] = c.disc.name.replace(/\.iso$/i, "");
+  if (c.windows) {
+    config["security.secureboot"] = "true";
+    config["image.os"] = "Windows";
+  }
+  return config;
 }
 
 /** GB of a new machine's disk when one is made from a disc */
@@ -391,8 +420,18 @@ export const DISC_DISK = 20;
 
 /** The devices of a machine made from a disc: its own disk in the place, the disc in its drive */
 export function discDevices(c: NewFromDisc, pool: string): Record<string, Record<string, string>> {
-  return { ...devicesOf({ kind: "vm", disk: c.disk }, pool), [DISC_DEVICE]: { type: "disk", pool: c.disc.place, source: c.disc.name, "boot.priority": "10" } };
+  const devices: Record<string, Record<string, string>> = { ...devicesOf({ kind: "vm", disk: c.disk }, pool), [DISC_DEVICE]: { type: "disk", pool: c.disc.place, source: c.disc.name, "boot.priority": "10" } };
+  if (!c.windows) return devices;
+  // the installer of Windows knows neither virtio-scsi nor virtio's network: NVMe and USB it knows
+  devices.root!["io.bus"] = "nvme";
+  devices[DISC_DEVICE]!["io.bus"] = "usb";
+  devices.tpm = { type: "tpm", path: "/dev/tpm0" };
+  if (c.drivers) devices[DRIVERS_DEVICE] = { type: "disk", pool: c.drivers.place, source: c.drivers.name, "io.bus": "usb" };
+  return devices;
 }
+
+/** The second drive, with the drivers' disc for Windows */
+export const DRIVERS_DEVICE = "drivers";
 
 /**
  * Whether Hata itself runs inside a container that maps only a part of the user ids (an unprivileged
