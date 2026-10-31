@@ -86,6 +86,7 @@ const ICONS = {
   shrink: "M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7",
   down: "M6 9l6 6 6-6",
   server: "M4 4h16v7H4zM4 13h16v7H4zM8 7.5h.01M8 16.5h.01M12 7.5h4M12 16.5h4",
+  screen: "M3 4h18v12H3zM8 20h8M12 16v4",
   bulb: "M9 18h6M10 21h4M12 3a6 6 0 0 0-3.6 10.8c.7.6 1.1 1.3 1.1 2.2v.5h5V16c0-.9.4-1.6 1.1-2.2A6 6 0 0 0 12 3z",
   power: "M12 3v8M6.3 6.8a8 8 0 1 0 11.4 0",
   fan: "M12 12h.01M12 10c-1-3 0-6 3-6s3 4-1 7M14 12c3-1 6 0 6 3s-4 3-7-1M12 14c1 3 0 6-3 6s-3-4 1-7M10 12c-3 1-6 0-6-3s4-3 7 1",
@@ -3300,7 +3301,7 @@ function containerRow(c) {
         running
           ? button(t("incus.stop"), { class: "small", onclick: (e) => containerAct(c, "stop", e.currentTarget) }, "stop")
           : button(t("incus.start"), { class: "small", onclick: (e) => containerAct(c, "start", e.currentTarget) }, "play"),
-        running && c.kind === "vm" && button(t("incus.screen"), { class: "small", onclick: () => containerScreen(c) }, "server"),
+        running && c.kind === "vm" && button(t("incus.screen"), { class: "small", onclick: () => containerScreen(c) }, "screen"),
         running && button(t("incus.console"), { class: "small", onclick: () => containerConsole(c) }, "terminal"),
         button("", { class: "small ghost", title: t("incus.more"), "aria-label": t("incus.more"), onclick: (e) => {
           const r = e.currentTarget.getBoundingClientRect();
@@ -3326,7 +3327,7 @@ async function containerAct(c, action, el) {
 function containerMenu(c, at) {
   menuAt(at, menuHeader(c.name, c.os, c.kind === "vm" ? "server" : "box"), [
     c.status === "running" && { label: t("incus.restart"), icon: "refresh", run: () => containerAct(c, "restart") },
-    c.status === "running" && c.kind === "vm" && { label: t("incus.screen"), icon: "server", run: () => containerScreen(c) },
+    c.status === "running" && c.kind === "vm" && { label: t("incus.screen"), icon: "screen", run: () => containerScreen(c) },
     c.status === "running" && { label: t("incus.console"), icon: "terminal", run: () => containerConsole(c) },
     c.machine && { label: t("incus.openMachine"), icon: "server", href: `#/machines/${c.machine}` },
     { label: t("incus.limits") + "…", icon: "settings", run: () => containerLimitsDialog(c) },
@@ -6191,6 +6192,9 @@ function renderMachineHead() {
         "div",
         { class: "actions" },
         m.outdated && m.online && button(t("machines.update", { version: machinesUi.list.version }), { class: "accent", onclick: (e) => updateMachine(m, e.currentTarget) }, "up"),
+        // a virtual machine of this server or of Proxmox: what is on its screen, a desktop too
+        m.incusVm && m.online && button(t("incus.screen"), { onclick: () => containerScreen({ name: m.incusVm }) }, "screen"),
+        m.pve?.type === "qemu" && m.pve.status === "running" && button(t("pve.screen"), { onclick: () => pveConsoleDialog({ id: m.pve.host }, m.pve) }, "screen"),
         m.online && h("a", { class: "btn", href: filesHash("/", m.id) }, icon("folder"), h("span", null, t("machines.files"))),
         !m.online && m.pve?.power && m.pve.status !== "running" && button(t("pve.startHere", { host: m.pve.hostName }), { class: "primary", onclick: (e) => startGuestOf(m, e.currentTarget) }, "play"),
         !m.online && !(m.pve?.power && m.pve.status !== "running") && m.info?.macs?.length > 0 && button(t("machines.wake"), { class: "primary", onclick: (e) => wakeMachine(m, e.currentTarget) }, "play"),

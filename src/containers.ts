@@ -252,6 +252,13 @@ export function instanceOfMachine(macs: string[], hostname: string): { name: str
   return c ? { name: c.name, running: c.status === "running" } : null;
 }
 
+/** The name of the virtual machine of this server a machine is; "" — none */
+export function vmOfMachine(macs: string[], hostname: string): string {
+  const cards = new Set(macs.map((m) => m.toLowerCase()));
+  const c = seen.find((x) => (x.mac && cards.has(x.mac)) || x.name === hostname);
+  return c?.kind === "vm" ? c.name : "";
+}
+
 export function containerOfMachine(macs: string[], hostname: string): string {
   const cards = new Set(macs.map((m) => m.toLowerCase()));
   return seen.find((c) => (c.mac && cards.has(c.mac)) || c.name === hostname)?.kind ?? "";
