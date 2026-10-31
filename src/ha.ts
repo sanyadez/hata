@@ -70,6 +70,22 @@ export interface Shown {
   at: number;
   /** A config or diagnostic entity, or one hidden in Home Assistant: listed apart */
   extra?: true;
+  /** In Home Assistant's registry, so it can be renamed there; one without a unique id cannot */
+  renamable?: true;
+}
+
+/** The longest name Hata gives an entity in Home Assistant */
+export const NAME_MAX = 100;
+
+/**
+ * A name for an entity as typed: trimmed, without control characters, at most `NAME_MAX`;
+ * null — empty, Home Assistant's own name comes back; undefined — not a name
+ */
+export function entityName(value: unknown): string | null | undefined {
+  if (typeof value !== "string") return undefined;
+  const name = value.trim();
+  if (!name) return null;
+  return name.length <= NAME_MAX && !/[\u0000-\u001f\u007f]/.test(name) ? name : undefined;
 }
 
 const num = (value: unknown): number | undefined => (typeof value === "number" && Number.isFinite(value) ? value : undefined);

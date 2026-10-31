@@ -15,7 +15,7 @@ import { AppError } from "./apps";
 import { bus } from "./bus";
 import { SECRETS_DIR } from "./config";
 import { readJsonFile, writeJsonAtomic } from "./fsutil";
-import { areaOf, cleanPeople, cleanUrl, ENTITY_RE, lowBatteries, serviceOf, show, TOKEN_RE, trouble, updatesOf, type People, type RawState, type Shown, type Update } from "./ha";
+import { areaOf, cleanPeople, cleanUrl, ENTITY_RE, entityName, lowBatteries, serviceOf, show, TOKEN_RE, trouble, updatesOf, type People, type RawState, type Shown, type Update } from "./ha";
 import { browseQuery, parseAnswer } from "./netplace";
 
 const FILE = join(SECRETS_DIR, "homeassistant.json");
@@ -314,6 +314,7 @@ function shownOf(l: Live, raw: RawState): Shown {
   const out = show(raw, reg ? areaOf(reg, l.devices, l.areas) : "");
   // config and diagnostic entities, and those hidden in Home Assistant: listed apart
   if (reg && (reg.ec !== undefined || reg.hb)) out.extra = true;
+  if (reg) out.renamable = true;
   return out;
 }
 
@@ -409,6 +410,30 @@ export async function act(id: string, entity: unknown, action: unknown, value: u
   if (!service) throw new AppError("ha.badAction", 400);
   await call(l, { type: "call_service", domain: service.domain, service: service.service, service_data: service.data, target: { entity_id: entity } });
   // the new state comes as an event a moment after the answer: the tile is told that one, not the old
+  for (let waited = 0; waited < 1500 && l.states.get(entity) === raw; waited += 50) await Bun.sleep(50);
+  return shownOf(l, l.states.get(entity) ?? raw);
+}
+
+/**
+ * A new name for an entity, kept in Home Assistant's own registry — its pages and automations' lists show
+ * it too; an empty one gives back the name Home Assistant makes itself. Needs an administrator's token.
+ */
+export async function renameEntity(id: string, entity: unknown, value: unknown, by: string): Promise<Shown> {
+  const s = serverOf(id);
+  const l = liveOf(s);
+  if (typeof entity !== "string" || !ENTITY_RE.test(entity)) throw new AppError("ha.noEntity", 404);
+  const raw = l.states.get(entity);
+  if (!raw) throw new AppError(l.online ? "ha.noEntity" : "ha.away", l.online ? 404 : 502, { name: s.name });
+  if (!l.registry.has(entity)) throw new AppError("ha.notRenamable", 400);
+  const name = entityName(value);
+  if (name === undefined) throw new AppError("ha.badName", 400);
+  try {
+    await call(l, { type: "config/entity_registry/update", entity_id: entity, name });
+  } catch (e) {
+    if (e instanceof AppError && /unauthori[sz]ed/i.test(String(e.detail?.message ?? ""))) throw new AppError("ha.renameDenied", 403, { name: s.name });
+    throw e;
+  }
+  record("ha.rename", { user: by, detail: `${s.name}: ${raw.attributes.friendly_name ?? entity} → ${name ?? entity}` });
   for (let waited = 0; waited < 1500 && l.states.get(entity) === raw; waited += 50) await Bun.sleep(50);
   return shownOf(l, l.states.get(entity) ?? raw);
 }

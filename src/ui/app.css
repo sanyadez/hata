@@ -304,6 +304,8 @@ textarea.code.page { min-height: 60dvh; background: var(--surface); padding: 16p
 /* the window of one entity */
 dialog.ha-entity { width: min(580px, calc(100vw - 32px)); }
 .ha-dialog { gap: 18px; }
+.ha-name { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.ha-name .icon-btn { flex: none; }
 .ha-now { display: flex; align-items: center; gap: 16px; min-height: 34px; }
 .ha-big { margin: 0; font: 600 22px/1.25 var(--font-heading); }
 .ha-switch { position: relative; flex: none; width: 52px; height: 30px; padding: 0; border: 1px solid var(--border-strong); border-radius: 15px; background: var(--surface-2); cursor: pointer; }

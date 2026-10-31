@@ -3804,8 +3804,13 @@ function haEntityDialog(server, s, item = null) {
   const badge = h("span", { class: "app-icon plus" }, icon(haIcon(s)));
   const sub = h("span", { class: "muted small" });
   const body = h("div", { class: "stack ha-dialog" });
+  const title = h("h2", { class: "clip" });
+  // the name lives in Home Assistant: an administrator renames it there
+  const rename = h("button", { type: "button", class: "icon-btn small", title: t("ha.rename"), "aria-label": t("ha.rename"), onclick: () => haRenameDialog(server, now) }, icon("edit"));
   const paint = () => {
     const gone = haGone(now) || !x?.online;
+    title.textContent = now?.name ?? s.name;
+    rename.hidden = !isAdmin() || gone || !now?.renamable;
     const a = now ? now.actions : [];
     const lit = haLit(now);
     badge.classList.toggle("on", lit);
@@ -3844,8 +3849,41 @@ function haEntityDialog(server, s, item = null) {
     admin && item && button(t("ha.move"), { class: "small", onclick: () => (dialog.close(), tileMenu(item)) }, "arrow"),
     admin && item && button(t("ha.offHome"), { class: "small danger", onclick: () => (dialog.close(), changeLayout((next) => void takeTile(next, tileKey(item)))) }, "trash"),
   ].filter(Boolean);
-  dialog = openDialog("ha-entity", h("header", null, badge, h("div", { class: "grow" }, h("h2", { class: "clip" }, s.name), sub), closeX(() => dialog)), body, links.length > 0 && h("footer", { class: "ha-links" }, links));
+  dialog = openDialog("ha-entity", h("header", null, badge, h("div", { class: "grow" }, h("div", { class: "ha-name" }, title, rename), sub), closeX(() => dialog)), body, links.length > 0 && h("footer", { class: "ha-links" }, links));
   dialog.addEventListener("close", () => haUi.listeners.delete(listener));
+}
+
+function haRenameDialog(server, s) {
+  const input = h("input", { maxlength: 100, value: s.name, placeholder: s.id, "aria-label": t("ha.name") });
+  const error = h("p", { class: "error", role: "alert" });
+  let dialog;
+  dialog = openDialog(
+    "confirm",
+    h(
+      "form",
+      {
+        onsubmit: async (e) => {
+          e.preventDefault();
+          error.textContent = "";
+          try {
+            haSetState(server, await api("POST", `/api/ha/${server}/rename`, { entity: s.id, name: input.value.trim() }));
+            dialog.close();
+            toast(t("ha.rename.done"));
+          } catch (err) {
+            error.textContent = errorText(err);
+          }
+        },
+      },
+      h("h2", null, t("ha.rename.title", { name: s.name })),
+      h("p", { class: "muted" }, t("ha.rename.lead")),
+      input,
+      h("p", { class: "muted small" }, t("ha.rename.hint")),
+      error,
+      h("footer", null, closeButton(() => dialog, t("common.cancel")), h("button", { class: "btn primary" }, t("ha.rename"))),
+    ),
+  );
+  input.focus();
+  input.select();
 }
 
 // The tile of an entity on Home

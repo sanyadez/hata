@@ -90,7 +90,7 @@ import {
 import { bus, type BusEvent } from "./bus";
 import { DATA_DIR, dropOldSecrets, listenAddress, saveSettings, settings, timezone, updateSettings } from "./config";
 import { arrange, cleanLayout, dropServer, haTiles, layoutText, parseLayoutText } from "./dashboard";
-import { act as haAct, addServer as addHa, allowProxy as haAllowProxy, changeServer as changeHa, discover as discoverHa, entities as haEntities, forgetUser as haForgetUser, homeAssistantTrouble, installUpdate as haInstallUpdate, makeBackup as haMakeBackup, removeServer as removeHa, server as haServer, servers as haServers, startHomeAssistant, tileStates as haTileStates, visibleTo as haVisibleTo } from "./homeassistant";
+import { act as haAct, addServer as addHa, allowProxy as haAllowProxy, changeServer as changeHa, discover as discoverHa, entities as haEntities, forgetUser as haForgetUser, homeAssistantTrouble, installUpdate as haInstallUpdate, makeBackup as haMakeBackup, removeServer as removeHa, renameEntity as haRename, server as haServer, servers as haServers, startHomeAssistant, tileStates as haTileStates, visibleTo as haVisibleTo } from "./homeassistant";
 import { sees as haSees } from "./ha";
 import { dockerInfo, listContainers, watchEvents } from "./docker";
 import { abortUpload, copyIn, locate, validName, archivePlan, dropFavorites, emptyTrash, favoritesOf, setFavorite, extract as extractArchive, find as findFiles, list as listFiles, makeFile, makeFolder, pinFolder, pinnedFolders, readable, readText, remove as removeFiles, rename as renameFile, restore as restoreFiles, setTrashDays, startTrash, summary as filesSummary, transfer, trash, upload, writeText } from "./files";
@@ -2476,6 +2476,10 @@ async function homeAssistantApi(req: Request, url: URL, server: Server, user: Us
   if (rest === "/proxy" && method === "POST") {
     await haAllowProxy(id, by);
     return json({ ok: true }, 202);
+  }
+  if (rest === "/rename" && method === "POST") {
+    const data = await body(req);
+    return json(await haRename(id, data.entity, data.name, by));
   }
   if (rest === "/updates" && method === "POST") {
     const data = await body(req);
