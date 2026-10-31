@@ -1078,7 +1078,7 @@ input[type="range"] { accent-color: var(--accent); width: 100%; }
 /* a place with nothing in it appears when a block is picked up, to be dropped into */
 .dragging-widget .zone.empty { display: grid; min-height: 64px; border: 1px dashed var(--border-strong); place-items: center; background: color-mix(in srgb, var(--surface) 72%, transparent); backdrop-filter: blur(12px); }
 .dragging-widget .zone.empty::before { content: attr(data-hint); color: var(--muted); font-size: 13px; }
-.zone.movable .widget[data-widget="stats"], .zone.movable .widget > .section-head, .section-head.handle { cursor: grab; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
+.zone.movable .widget:is([data-widget="stats"], [data-widget^="machine:"]), .tile-dragging, .zone.movable .widget > .section-head, .section-head.handle { cursor: grab; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
 .widget { position: relative; }
 .block-remove { position: absolute; top: 6px; right: 6px; width: 24px; height: 24px; z-index: 1; }
 .widget:is(:hover, :focus-within) > .block-remove { opacity: 1; }

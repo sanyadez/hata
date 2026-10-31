@@ -1705,6 +1705,8 @@ function dragStart(e, item, kind = TILE_DRAG, el = e.currentTarget) {
   const begin = () => {
     if (homeUi.drag !== drag || drag.active) return;
     drag.active = true;
+    // the press may have started selecting the text under it
+    getSelection()?.removeAllRanges();
     const rect = el.getBoundingClientRect();
     drag.dx = drag.x - rect.left;
     drag.dy = drag.y - rect.top;
