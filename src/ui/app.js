@@ -345,6 +345,7 @@ function parseRoute() {
   if (parts[0] === "terminal" && isAdmin()) return { view: "terminal" };
   if (parts[0] === "assistant" && isAdmin()) return { view: "assistant" };
   if (parts[0] === "ha" && parts[1] && isAdmin()) return { view: "ha", id: parts[1] };
+  if (parts[0] === "qbit" && parts[1] && isAdmin()) return { view: "qbit", id: parts[1] };
   if ((parts[0] === "integrations" || parts[0] === "ha") && isAdmin()) return { view: "integrations" };
   if (parts[0] === "guest" && parts[3] && isAdmin()) return { view: "guest", host: parts[1], guest: `${parts[2]}/${parts[3]}` };
   if (parts[0] === "containers" && parts[1] === "i" && parts[2] && isAdmin()) return { view: "instance", name: parts[2], tab: parts[3] === "terminal" ? "terminal" : "overview" };
@@ -845,8 +846,8 @@ async function loadMine() {
   state.favorites = mine.favorites;
 }
 
-const navCurrent = () => (state.route.view === "ha" ? "integrations" : ["machine", "proxmox", "containers", "instance", "guest"].includes(state.route.view) ? "machines" : state.route.view === "backups" || state.route.view === "users" ? "settings" : state.route.view === "app" ? "home" : state.route.view === "import" ? "store" : state.route.view === "trash" || state.route.view === "myhata" ? "files" : state.route.view);
-const navItems = () => NAV.filter((item) => (!item.admin || isAdmin()) && (!item.integrations || (state.overview?.ha?.servers ?? []).length > 0) && (!item.files || mayFiles()) && (!item.assistant || !!(assistantUi.config?.ready ?? state.overview?.assistant)) && (item.guest !== false || state.user.role !== "guest"));
+const navCurrent = () => (state.route.view === "ha" || state.route.view === "qbit" ? "integrations" : ["machine", "proxmox", "containers", "instance", "guest"].includes(state.route.view) ? "machines" : state.route.view === "backups" || state.route.view === "users" ? "settings" : state.route.view === "app" ? "home" : state.route.view === "import" ? "store" : state.route.view === "trash" || state.route.view === "myhata" ? "files" : state.route.view);
+const navItems = () => NAV.filter((item) => (!item.admin || isAdmin()) && (!item.integrations || (state.overview?.ha?.servers ?? []).length > 0 || state.overview?.qbit?.count > 0) && (!item.files || mayFiles()) && (!item.assistant || !!(assistantUi.config?.ready ?? state.overview?.assistant)) && (item.guest !== false || state.user.role !== "guest"));
 
 function navLinks(className, items = navItems()) {
   const current = navCurrent();
@@ -1053,6 +1054,7 @@ function render() {
   if (view === "containers") return renderContainers();
   if (view === "ha") return renderHa();
   if (view === "integrations") return renderIntegrations();
+  if (view === "qbit") return renderQbit();
   if (view === "instance") return renderInstance();
   if (view === "guest") return renderGuest();
   if (view === "app") return renderApp();
@@ -1323,6 +1325,8 @@ function tile(item) {
     href = url ?? `#/apps/${app.name}`;
     external = !!url;
     sub = [h("i", { class: "dot " + st }), st === "running" && appAddress(app) ? appAddress(app) : t("status." + st)];
+    const torrents = st === "running" && state.overview?.qbit?.apps?.[app.name];
+    if (torrents?.online) where = h("span", { class: "tile-where" }, h("span", { class: "clip" }, qbitSpeeds(torrents)));
     badges = [app.protected && h("span", { class: "lock", title: t("access.protected") }, icon("lock")), (app.update || app.newer?.length > 0) && isAdmin() && h("span", { class: "lock", title: t(app.update ? "app.storeUpdate" : "app.newer") }, icon("up"))];
     // an administrator gets what can be done to the app right there; a member, the app's page
     side = admin
@@ -2062,6 +2066,7 @@ function attentionItem(item) {
     item.code === "machine.away" && open(`#/machines/${item.detail.id}`),
     item.code.startsWith("containers.") && state.route.view !== "containers" && open("#/containers"),
     item.code.startsWith("ha.") && !(state.route.view === "ha" && state.route.id === item.detail.host) && open(`#/ha/${item.detail.host}`),
+    item.code.startsWith("qbit.") && !(state.route.view === "qbit" && state.route.id === item.detail.host) && open(`#/qbit/${item.detail.host}`),
     item.code.startsWith("pve.") && state.route.view !== "proxmox" && open(`#/proxmox/${item.detail.host}${item.code === "pve.guestDown" ? "/guests" : item.code === "pve.backupFailed" ? "/tasks" : ""}`),
     (item.code === "machine.restarting" || item.code === "machine.partial") && open(`#/machines/${item.detail.id}/apps`),
     item.app && open(`#/apps/${item.app}${item.code === "restarting" || item.code === "partial" ? "/logs" : ""}`, t(item.code === "restarting" || item.code === "partial" ? "app.logs" : "common.open")),
@@ -2664,6 +2669,12 @@ function renderAppTab() {
   appOverviewTab(app, box);
 }
 
+/** The app runs a qBittorrent that is connected: what it is doing, and the way to its torrents */
+function appTorrentsCard(app) {
+  const q = state.overview?.qbit?.apps?.[app.name];
+  return q && h("section", { class: "card pad section-head" }, h("div", null, h("h2", null, t("qbit.title")), h("p", { class: "muted small" }, q.online ? `${qbitSpeeds(q)} · ${t("qbit.activeOf", { n: q.active, total: q.total })}` : t("qbit.offline"))), h("a", { class: "btn small", href: `#/qbit/${q.id}` }, icon("download"), h("span", null, t("common.open"))));
+}
+
 function appOverviewTab(app, box) {
   const row = (label, value, mono) => h("div", { class: "kv" }, h("span", { class: "muted" }, label), h("span", { class: mono ? "mono" : "" }, value));
   const statsBox = h("div", { class: "stats card three" }, statCell("app-cpu", "cpu", t("sys.cpu")), statCell("app-memory", "memory", t("sys.memory")), h("div", { class: "stat" }, h("div", { class: "stat-label" }, icon("box"), t("app.containers")), h("div", { class: "stat-row" }, h("div", { class: "stat-value" }, h("strong", null, String(app.containers.filter((c) => c.state === "running").length)), h("span", { class: "unit" }, "/ " + app.containers.length))), h("div", { class: "stat-hint" }, t("status." + app.status))));
@@ -2681,6 +2692,7 @@ function appOverviewTab(app, box) {
   };
 
   box.replaceChildren(
+    ...(appTorrentsCard(app) ? [appTorrentsCard(app)] : []),
     h(
       "div",
       { class: "columns" },
@@ -4553,12 +4565,12 @@ function renderHaBody() {
 // --- Integrations ---
 // Services Hata talks to through their own API. What runs on a machine of its own stays in Servers: these are what a service offers.
 
-const integrationsUi = { found: null };
+const integrationsUi = { found: null, qbit: null, qbitFound: null };
 const onIntegrations = () => state.route.view === "integrations" || (state.route.view === "settings" && state.route.section === "integrations");
 
 async function loadIntegrations() {
   try {
-    haUi.list = await api("GET", "/api/ha");
+    [haUi.list, integrationsUi.qbit] = await Promise.all([api("GET", "/api/ha"), api("GET", "/api/qbit")]);
     paintIntegrations();
   } catch (e) {
     const box = document.getElementById("integrations-body");
@@ -4571,10 +4583,14 @@ function integrationsBody(titled) {
   const box = h("div", { id: "integrations-body", class: "stack" });
   box.dataset.titled = titled ? "1" : "";
   requestAnimationFrame(() => {
-    if (haUi.list) paintIntegrations();
+    paintIntegrations();
     void loadIntegrations();
     api("GET", "/api/ha/found").then(
       ({ found }) => ((integrationsUi.found = found), paintIntegrations()),
+      () => {},
+    );
+    api("GET", "/api/qbit/found").then(
+      ({ found }) => ((integrationsUi.qbitFound = found), paintIntegrations()),
       () => {},
     );
   });
@@ -4588,7 +4604,8 @@ function renderIntegrations() {
 function paintIntegrations() {
   const box = document.getElementById("integrations-body");
   const list = haUi.list?.servers;
-  if (!box || !list) return;
+  const torrents = integrationsUi.qbit?.servers;
+  if (!box || !list || !torrents) return;
   const row = (y) =>
     h(
       "tr",
@@ -4598,6 +4615,16 @@ function paintIntegrations() {
       h("td", { class: "small" }, t("ha.counts", { n: y.entities, on: y.on })),
       h("td", null, h("div", { class: "row-actions" }, h("a", { class: "btn small", href: haWebUrl(y), target: "_blank", rel: "noopener noreferrer" }, icon("external"), h("span", null, t("ha.open"))), h("button", { type: "button", class: "btn small square", "aria-label": t("app.more"), onclick: (e) => haMenu(y, underButton(e.currentTarget)) }, icon("more")))),
     );
+  const torrentRow = (y) =>
+    h(
+      "tr",
+      { class: "clickable", menu: (at) => qbitMenu(y, at), onclick: (e) => !e.target.closest("a, button") && go(`#/qbit/${y.id}`) },
+      h("td", null, h("div", { class: "strong" }, y.name), h("div", { class: "muted small mono" }, ["qBittorrent", y.version, y.url].filter(Boolean).join(" · "))),
+      h("td", null, qbitChip(y)),
+      h("td", { class: "small" }, y.online ? `${t("qbit.activeOf", { n: y.totals.active, total: y.totals.total })} · ${qbitSpeeds(y.totals)}` : "—"),
+      h("td", null, h("div", { class: "row-actions" }, h("a", { class: "btn small", href: y.url, target: "_blank", rel: "noopener noreferrer" }, icon("external"), h("span", null, t("qbit.open"))), h("button", { type: "button", class: "btn small square", "aria-label": t("app.more"), onclick: (e) => qbitMenu(y, underButton(e.currentTarget)) }, icon("more")))),
+    );
+  const connected = list.length + torrents.length;
   // Home Assistant of this server's store, and what answers on the home network: a click leads to the same dialog with the address in it
   const here = (state.overview?.apps ?? []).some((a) => a.name === "home-assistant") && !list.some((y) => y.here) ? `http://${location.hostname}:8123` : null;
   const seen = (integrationsUi.found ?? []).filter((f) => !f.known && f.url !== here);
@@ -4607,8 +4634,8 @@ function paintIntegrations() {
     h(
       "section",
       { class: "card" },
-      h("div", { class: "tree-head" }, h("div", null, box.dataset.titled ? h("h1", null, t("nav.integrations")) : h("h2", null, t("integrations.connected")), h("p", { class: "meta" }, list.length ? t("integrations.lead") : t("integrations.none")))),
-      list.length > 0 && h("div", { class: "table-wrap" }, h("table", null, h("thead", null, h("tr", null, h("th", null, t("integrations.col.name")), h("th", null, t("app.col.state")), h("th", null, t("integrations.col.inside")), h("th"))), h("tbody", null, list.map(row)))),
+      h("div", { class: "tree-head" }, h("div", null, box.dataset.titled ? h("h1", null, t("nav.integrations")) : h("h2", null, t("integrations.connected")), h("p", { class: "meta" }, connected ? t("integrations.lead") : t("integrations.none")))),
+      connected > 0 && h("div", { class: "table-wrap" }, h("table", null, h("thead", null, h("tr", null, h("th", null, t("integrations.col.name")), h("th", null, t("app.col.state")), h("th", null, t("integrations.col.inside")), h("th"))), h("tbody", null, list.map(row), torrents.map(torrentRow)))),
     ),
     h(
       "section",
@@ -4621,6 +4648,239 @@ function paintIntegrations() {
         h("div", { class: "grow" }, h("strong", null, "Home Assistant"), h("p", { class: "muted small" }, t("integrations.ha.what")), (here || seen.length > 0) && h("div", { class: "integration-found ha-found" }, here && offer(t("ha.foundHere"), here), seen.map((f) => offer(f.name, f.url)))),
         button(t("integrations.connect"), { onclick: () => haDialog() }, "plus"),
       ),
+      h(
+        "div",
+        { class: "tool" },
+        h("span", { class: "app-icon plus sm" }, icon("download")),
+        h("div", { class: "grow" }, h("strong", null, "qBittorrent"), h("p", { class: "muted small" }, t("integrations.qbit.what")), integrationsUi.qbitFound?.length > 0 && h("div", { class: "integration-found ha-found" }, integrationsUi.qbitFound.map((f) => h("button", { type: "button", class: "chip-btn", onclick: () => qbitDialog(null, `http://${location.hostname}:${f.port}`) }, icon("plus"), h("span", null, t("ha.foundHere")), h("span", { class: "muted mono small" }, ` ${location.hostname}:${f.port}`))))),
+        button(t("integrations.connect"), { onclick: () => qbitDialog() }, "plus"),
+      ),
+    ),
+  );
+}
+
+// --- qBittorrent ---
+
+const qbitUi = { server: null, torrents: null, filter: "all", q: "", timer: 0 };
+const QBIT_FILTERS = ["all", "downloading", "seeding", "paused", "error"];
+const qbitChip = (x) => h("span", { class: "state " + (x.online ? "running" : "") }, t(x.online ? "qbit.online" : x.error ? "qbit.offline" : "qbit.asking"));
+const qbitError = (x) => (x.error ? (has("error." + x.error.code) ? t("error." + x.error.code, { url: x.url, message: x.error.message ?? "" }) : x.error.code) : "");
+const qbitSpeeds = (x) => `↓ ${bytes(x.down)}/s · ↑ ${bytes(x.up)}/s`;
+const qbitCrumbs = (name) => h("nav", { class: "crumbs" }, h("a", { href: "#/integrations" }, t("nav.integrations")), icon("chevron"), h("span", null, name));
+
+function renderQbit() {
+  if (qbitUi.server?.id !== state.route.id) Object.assign(qbitUi, { server: null, torrents: null, filter: "all", q: "" });
+  shell(h("div", { id: "qbit-body", class: "stack" }));
+  paintQbit();
+  void loadQbit();
+}
+
+/** Asked again every five seconds while the page is on screen */
+async function loadQbit() {
+  clearTimeout(qbitUi.timer);
+  const id = state.route.id;
+  if (state.route.view !== "qbit") return;
+  try {
+    // the torrents first: asking for them is what brings the server's numbers up to date
+    const torrents = await api("GET", `/api/qbit/${id}/torrents`).catch(() => null);
+    const server = await api("GET", `/api/qbit/${id}`);
+    if (state.route.view !== "qbit" || state.route.id !== id) return;
+    const whole = !qbitUi.server;
+    qbitUi.server = server;
+    if (torrents) qbitUi.torrents = torrents.torrents;
+    paintQbit(whole);
+  } catch (e) {
+    const box = document.getElementById("qbit-body");
+    if (box) put(box, qbitCrumbs(id), h("p", { class: "card pad muted" }, errorText(e)));
+    return;
+  }
+  qbitUi.timer = setTimeout(loadQbit, 5000);
+}
+
+function qbitAct(path, data) {
+  return api("POST", `/api/qbit/${qbitUi.server.id}/torrents${path}`, data).then(loadQbit, (e) => toast(errorText(e), "error"));
+}
+
+function qbitRow(x) {
+  const paused = x.group === "paused" || x.group === "finished";
+  const word = x.group === "downloading" && x.waiting ? "waiting" : x.group === "seeding" && x.waiting ? "seedingIdle" : x.group;
+  return h(
+    "tr",
+    null,
+    h("td", { class: "qbit-name" }, h("div", { class: "strong" }, x.name), h("div", { class: "muted small mono" }, x.path)),
+    h("td", { class: "qbit-progress" }, h("div", { class: "small" }, `${x.percent}% · ${bytes(x.size)}`), meterBar(x.percent, x.group === "error" ? "danger" : "")),
+    h("td", null, h("span", { class: "state " + (x.group === "error" ? "restarting" : paused ? "" : x.waiting ? "" : "running") }, t("qbit.group." + word))),
+    h("td", { class: "small nowrap" }, x.down || x.up ? qbitSpeeds(x) : "—", x.eta !== null && x.group === "downloading" && h("div", { class: "muted" }, t("qbit.left", { time: duration(Math.max(60, x.eta)) }))),
+    h("td", null, h("div", { class: "row-actions" }, button(t(paused ? "qbit.resume" : "qbit.pause"), { class: "small", onclick: () => qbitAct(paused ? "/resume" : "/pause", { hashes: [x.hash] }) }, paused ? "play" : "stop"), button(t("qbit.remove"), { class: "small", onclick: () => qbitRemoveDialog(x) }, "trash"))),
+  );
+}
+
+function paintQbitList() {
+  const box = document.getElementById("qbit-list");
+  if (!box) return;
+  const all = qbitUi.torrents;
+  if (!all) return put(box, h("p", { class: "muted pad" }, qbitUi.server?.error ? "—" : "…"));
+  const inGroup = (x, f) => f === "all" || x.group === f || (f === "paused" && x.group === "finished");
+  const q = qbitUi.q.trim().toLowerCase();
+  const shown = all.filter((x) => inGroup(x, qbitUi.filter) && (!q || x.name.toLowerCase().includes(q)));
+  document.querySelectorAll("#qbit-body [data-filter]").forEach((b) => {
+    const f = b.dataset.filter;
+    b.classList.toggle("active", f === qbitUi.filter);
+    b.textContent = `${t("qbit.filter." + f)} · ${all.filter((x) => inGroup(x, f)).length}`;
+  });
+  if (!shown.length) return put(box, h("p", { class: "muted pad" }, t(all.length ? "qbit.noneHere" : "qbit.none")));
+  put(box, h("div", { class: "table-wrap" }, h("table", null, h("thead", null, h("tr", null, h("th", null, t("qbit.col.name")), h("th", null, t("qbit.col.progress")), h("th", null, t("app.col.state")), h("th", null, t("qbit.col.speed")), h("th"))), h("tbody", null, shown.slice(0, 300).map(qbitRow)))), shown.length > 300 && h("p", { class: "muted small pad" }, t("qbit.firstOnly", { n: shown.length })));
+}
+
+function paintQbit(whole = true) {
+  const box = document.getElementById("qbit-body");
+  const x = qbitUi.server;
+  if (!box || !x) return;
+  const head = h(
+    "div",
+    { class: "tree-head" },
+    h("div", null, h("h1", null, x.name, " ", qbitChip(x)), h("p", { class: "meta" }, ["qBittorrent", x.version, x.url].filter(Boolean).join(" · ")), x.online && h("p", { class: "meta" }, `${qbitSpeeds(x.totals)} · ${t("qbit.activeOf", { n: x.totals.active, total: x.totals.total })}`)),
+    h("div", { class: "row-actions" }, h("a", { class: "btn", href: x.url, target: "_blank", rel: "noopener noreferrer" }, icon("external"), h("span", null, t("qbit.open"))), button(t("qbit.add"), { class: "primary", disabled: !x.online, onclick: () => qbitAddDialog() }, "plus"), h("button", { type: "button", class: "btn square", "aria-label": t("app.more"), onclick: (e) => qbitMenu(x, underButton(e.currentTarget)) }, icon("more"))),
+  );
+  // the field keeps its focus and the page its place: only what changed is drawn again
+  const standing = document.getElementById("qbit-head");
+  if (standing && !whole) {
+    put(standing, head);
+    put(document.getElementById("qbit-error"), x.error && h("p", { class: "card pad warn-box" }, qbitError(x), " ", t("pve.since", { ago: ago(x.error.since) })));
+    return paintQbitList();
+  }
+  const search = h("input", { type: "search", placeholder: t("qbit.search"), value: qbitUi.q, oninput: (e) => ((qbitUi.q = e.target.value), paintQbitList()) });
+  put(
+    box,
+    qbitCrumbs(x.name),
+    h("section", { class: "card", id: "qbit-head" }, head),
+    h("div", { id: "qbit-error" }, x.error && h("p", { class: "card pad warn-box" }, qbitError(x), " ", t("pve.since", { ago: ago(x.error.since) }))),
+    h(
+      "section",
+      { class: "card" },
+      h("div", { class: "qbit-tools" }, h("div", { class: "seg" }, QBIT_FILTERS.map((f) => h("button", { type: "button", class: "btn small", "data-filter": f, onclick: () => ((qbitUi.filter = f), paintQbitList()) }, t("qbit.filter." + f)))), search),
+      h("div", { id: "qbit-list" }),
+    ),
+  );
+  paintQbitList();
+}
+
+function qbitMenu(x, at) {
+  menuAt(at, menuHeader(x.name, x.url, "download"), [
+    { label: t("qbit.torrents"), icon: "download", href: `#/qbit/${x.id}` },
+    { label: t("qbit.open"), icon: "external", run: () => window.open(x.url, "_blank", "noopener") },
+    { label: t("qbit.change"), icon: "edit", run: () => qbitDialog(x) },
+    { label: t("qbit.disconnect"), icon: "trash", danger: true, run: () => qbitDisconnectDialog(x) },
+  ]);
+}
+
+function qbitDisconnectDialog(x) {
+  let dialog;
+  dialog = openDialog(
+    "confirm",
+    h("h2", { class: "wrap" }, t("qbit.disconnectTitle", { name: x.name })),
+    h("p", { class: "muted" }, t("qbit.disconnectLead")),
+    h("footer", null, closeButton(() => dialog, t("common.cancel")), button(t("qbit.disconnect"), { class: "danger", onclick: async () => {
+        try {
+          await api("DELETE", `/api/qbit/${x.id}`);
+          dialog.close();
+          await refresh();
+          go("#/integrations");
+        } catch (e) {
+          toast(errorText(e), "error");
+        }
+      } }, "trash")),
+  );
+}
+
+function qbitRemoveDialog(x) {
+  const withData = h("input", { type: "checkbox" });
+  let dialog;
+  dialog = openDialog(
+    "confirm",
+    h("h2", { class: "wrap" }, t("qbit.removeTitle", { name: x.name })),
+    h("p", { class: "muted" }, t("qbit.removeLead")),
+    h("label", { class: "check" }, withData, h("span", null, t("qbit.removeData"))),
+    h("p", { class: "muted small" }, t("qbit.removeDataHint")),
+    h("footer", null, closeButton(() => dialog, t("common.cancel")), button(t("qbit.remove"), { class: "danger", onclick: async () => {
+        dialog.close();
+        await qbitAct("/remove", { hashes: [x.hash], withData: withData.checked });
+      } }, "trash")),
+  );
+}
+
+function qbitDialog(old = null, address = "") {
+  const name = h("input", { value: old?.name ?? "", placeholder: "qBittorrent", maxLength: 40 });
+  const url = h("input", { value: old?.url ?? address, placeholder: "192.168.1.5:8080", required: true, autocapitalize: "none", spellcheck: false, class: "mono" });
+  const user = h("input", { value: old?.user ?? "admin", autocapitalize: "none", spellcheck: false, autocomplete: "off", name: "qbit-user" });
+  const password = h("input", { type: "password", autocomplete: "new-password", name: "qbit-password", placeholder: old ? t("qbit.passwordKept") : "" });
+  const error = h("p", { class: "error", role: "alert" });
+  let dialog;
+  const send = async (e) => {
+    e.preventDefault();
+    error.textContent = "";
+    const submit = dialog.querySelector("button[type=submit]");
+    submit.disabled = true;
+    try {
+      const data = { name: name.value, url: url.value, user: user.value, password: password.value };
+      const saved = old ? await api("PATCH", `/api/qbit/${old.id}`, data) : await api("POST", "/api/qbit", data);
+      dialog.close();
+      toast(t(old ? "qbit.changed" : "qbit.added", { name: saved.name }));
+      void refresh();
+      if (!old) go(`#/qbit/${saved.id}`);
+      else if (state.route.view === "qbit") void loadQbit();
+      else void loadIntegrations();
+    } catch (err) {
+      error.textContent = errorText(err);
+    }
+    submit.disabled = false;
+  };
+  dialog = openDialog(
+    "wide",
+    h(
+      "form",
+      { class: "stack", onsubmit: send },
+      h("header", null, h("h2", { class: "grow" }, old ? t("qbit.changeTitle", { name: old.name }) : t("qbit.addTitle")), closeX(() => dialog)),
+      !old && h("p", null, t("qbit.addLead")),
+      field(t("qbit.url"), url, t("qbit.urlHint")),
+      h("div", { class: "form-pair" }, field(t("qbit.user"), user), field(t("qbit.password"), password)),
+      h("p", { class: "muted small" }, t("qbit.passwordHint")),
+      field(t("qbit.name"), name),
+      error,
+      h("footer", null, closeButton(() => dialog, t("common.cancel")), h("button", { type: "submit", class: "btn primary" }, h("span", null, t(old ? "ha.save" : "integrations.connectIt")))),
+    ),
+  );
+}
+
+function qbitAddDialog() {
+  const links = h("textarea", { rows: 4, class: "mono small", spellcheck: false, placeholder: "magnet:?xt=urn:btih:…" });
+  const file = h("input", { type: "file", accept: ".torrent,application/x-bittorrent" });
+  const error = h("p", { class: "error", role: "alert" });
+  let dialog;
+  const send = async (e) => {
+    e.preventDefault();
+    error.textContent = "";
+    const picked = file.files?.[0];
+    try {
+      const data = picked ? { file: btoa(Array.from(new Uint8Array(await picked.arrayBuffer()), (b) => String.fromCharCode(b)).join("")) } : { links: links.value };
+      await api("POST", `/api/qbit/${qbitUi.server.id}/torrents`, data);
+      dialog.close();
+      toast(t("qbit.addedTorrent"));
+      setTimeout(loadQbit, 800);
+    } catch (err) {
+      error.textContent = errorText(err);
+    }
+  };
+  dialog = openDialog(
+    "wide",
+    h(
+      "form",
+      { class: "stack", onsubmit: send },
+      h("header", null, h("h2", { class: "grow" }, t("qbit.add")), closeX(() => dialog)),
+      field(t("qbit.links"), links, t("qbit.linksHint")),
+      field(t("qbit.file"), file),
+      error,
+      h("footer", null, closeButton(() => dialog, t("common.cancel")), h("button", { type: "submit", class: "btn primary" }, h("span", null, t("qbit.addIt")))),
     ),
   );
 }
@@ -17046,6 +17306,7 @@ function assistantStarts() {
   const here =
     v === "machines" || v === "machine" || v === "proxmox" ? ["servers.room", "servers.backups", "servers.away"]
     : v === "containers" ? ["containers.use", "containers.backups"]
+    : v === "qbit" ? ["qbit.stuck", "qbit.room"]
     : v === "ha" || v === "integrations" ? ["ha.batteries", "ha.updates"]
     : v === "app" ? ["app.slow", "app.update"]
     : v === "store" ? ["store.photos", "store.similar"]

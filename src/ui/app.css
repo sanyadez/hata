@@ -1551,3 +1551,12 @@ i.dot.danger { background: var(--danger); }
 /* what was found for an integration: under its words, on their left */
 .integration-found { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
 .tree-head .meta { margin-top: 4px; }
+
+/* the torrents of a qBittorrent */
+.qbit-tools { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding: 16px 20px; }
+.qbit-tools input[type="search"] { flex: 0 1 280px; min-width: 0; width: auto; }
+.qbit-name { min-width: 0; overflow-wrap: anywhere; }
+.qbit-progress { min-width: 130px; }
+.qbit-progress .bar { margin-top: 4px; }
+.nowrap { white-space: nowrap; }
+#qbit-head .row-actions { flex-wrap: wrap; justify-content: flex-start; min-width: 0; }

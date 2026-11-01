@@ -56,6 +56,7 @@ import { checkUpdates, packageUpdates, upgrade as upgradeSystem } from "./sysupd
 import { report as tailscaleReport } from "./tailscale";
 import { report as wireguardReport } from "./wireguard";
 import { act as haAct, entities as haEntities, servers as haServers } from "./homeassistant";
+import { addTorrents, qbitServers, qbitTorrents, removeTorrents, torrentsPower } from "./qbittorrent";
 import { VERSION } from "./version";
 import en from "./lang/en.json";
 
@@ -1588,7 +1589,43 @@ const HA_BY_HAND = (e: { domain: string; kind: string }, action: string): boolea
 let httpsLook: () => Promise<{ listening: boolean; error: string; names: string[] }> = async () => ({ listening: false, error: "", names: [] });
 export const tellHttps = (look: typeof httpsLook): void => void (httpsLook = look);
 
+const QBIT_SERVER = { server: { type: "string", description: "The qBittorrent's name or id, as `torrents` gives it; may be left out when there is one" } };
+const ONE_TORRENT = { ...QBIT_SERVER, torrent: { type: "string", description: "The torrent's hash or its exact name, as `torrents` gives them" } };
+
+function qbitServerOf(args: Record<string, unknown>) {
+  const list = qbitServers();
+  const asked = typeof args.server === "string" ? args.server.trim().toLowerCase() : "";
+  if (!list.length) throw new ToolError("No qBittorrent is connected. The person connects one at #/integrations.");
+  const s = asked ? list.find((x) => x.id === asked || x.name.toLowerCase() === asked) : list.length === 1 ? list[0] : undefined;
+  if (!s) throw new ToolError(`Say which qBittorrent. They are: ${list.map((x) => x.name).join(", ")}.`);
+  return s;
+}
+
+async function torrentOf(args: Record<string, unknown>) {
+  const s = qbitServerOf(args);
+  const asked = text(args, "torrent");
+  const { torrents } = await qbitTorrents(s.id);
+  const found = torrents.filter((x) => x.hash === asked.toLowerCase() || x.name === asked);
+  if (found.length !== 1) throw new ToolError(found.length ? `Several torrents are called "${asked}": name it by its hash.` : `There is no torrent "${asked}" in ${s.name}.`);
+  return { server: s, torrent: found[0]! };
+}
+
 const homeRead: Omit<Tool, "level" | "effect">[] = [
+  {
+    name: "torrents",
+    title: "Torrents in qBittorrent",
+    description: "The qBittorrent servers Hata is connected to, with what each is doing now and, for one server, its torrents: name, hash, how much is done, size, speeds, time left, the folder it downloads to and its `group`: downloading, seeding, paused, finished, checking or error. `waiting` means nothing is passing at the moment. For \"what is downloading\", \"why is it stuck\" and \"how much room do they take\".",
+    input: { ...QBIT_SERVER, find: { type: "string", description: "A piece of the torrent's name" }, group: { type: "string", description: "Only this group: downloading, seeding, paused, finished, checking or error" }, limit: { type: "number", description: "How many to give, 100 by default, 500 at most" } },
+    run: (args) =>
+      wrap(async () => {
+        const servers = qbitServers().map(({ url: _url, user: _user, ...s }) => s);
+        if (!servers.length || (servers.length > 1 && !args.server)) return { servers };
+        const s = qbitServerOf(args);
+        const find = typeof args.find === "string" ? args.find.toLowerCase() : "";
+        const found = (await qbitTorrents(s.id)).torrents.filter((x) => (!args.group || x.group === args.group) && (!find || x.name.toLowerCase().includes(find)));
+        return { servers, total: found.length, torrents: found.slice(0, Math.min(500, Math.max(1, Number(args.limit) || 100))) };
+      }),
+  },
   {
     name: "network",
     title: "The server's network",
@@ -1788,6 +1825,32 @@ const homeRead: Omit<Tool, "level" | "effect">[] = [
 
 const homeOperate: Omit<Tool, "level" | "effect">[] = [
   {
+    name: "torrent_pause",
+    title: "Pause a torrent",
+    description: "Pauses one torrent: it stops downloading and seeding until it is resumed. Its files stay.",
+    input: ONE_TORRENT,
+    required: ["torrent"],
+    run: (args, caller) =>
+      wrap(async () => {
+        const { server, torrent } = await torrentOf(args);
+        await torrentsPower(server.id, [torrent.hash], "pause", caller.user);
+        return { ok: true, name: torrent.name };
+      }),
+  },
+  {
+    name: "torrent_resume",
+    title: "Resume a torrent",
+    description: "Lets a paused torrent go on: it downloads what is left, or seeds again if it is complete.",
+    input: ONE_TORRENT,
+    required: ["torrent"],
+    run: (args, caller) =>
+      wrap(async () => {
+        const { server, torrent } = await torrentOf(args);
+        await torrentsPower(server.id, [torrent.hash], "resume", caller.user);
+        return { ok: true, name: torrent.name };
+      }),
+  },
+  {
     name: "ad_blocking_pause",
     title: "Pause ad blocking",
     description: "Stops blocking for every device for a while, and it comes back by itself; 0 ends a pause now. For \"is it the blocking that breaks this site\": pause, try, and resume. A name that turns out to be needed is better allowed with `ad_blocking_name`.",
@@ -1835,6 +1898,32 @@ const homeOperate: Omit<Tool, "level" | "effect">[] = [
 ];
 
 const homeFull: (Omit<Tool, "level" | "effect"> & { effect?: Tool["effect"] })[] = [
+  {
+    name: "torrent_add",
+    title: "Add a torrent",
+    effect: "change",
+    description: "Gives qBittorrent a magnet link, a web address of a .torrent or a hash: it starts downloading to the folder set there, taking room and sharing with others. It is the person's to want what is downloaded; add only what they named.",
+    input: { ...QBIT_SERVER, link: { type: "string", description: "A magnet link, a web address of a .torrent or a hash" } },
+    required: ["link"],
+    run: (args, caller) =>
+      wrap(async () => {
+        await addTorrents(qbitServerOf(args).id, { links: text(args, "link") }, caller.user);
+        return { ok: true };
+      }),
+  },
+  {
+    name: "torrent_remove",
+    title: "Remove a torrent",
+    description: "Takes a torrent off qBittorrent's list. With `with_data` its downloaded files are deleted too, for good: they do not go to Hata's trash.",
+    input: { ...ONE_TORRENT, with_data: { type: "boolean", description: "Also delete the downloaded files. Only when the person said so" } },
+    required: ["torrent"],
+    run: (args, caller) =>
+      wrap(async () => {
+        const { server, torrent } = await torrentOf(args);
+        await removeTorrents(server.id, [torrent.hash], args.with_data === true, caller.user);
+        return { ok: true, name: torrent.name, filesDeleted: args.with_data === true };
+      }),
+  },
   {
     name: "dns_queries",
     title: "What the devices asked",
@@ -1997,8 +2086,8 @@ export const TOOLS: Tool[] = [
 
 const LEVEL_WORDS: Record<Level, string> = {
   read: "It can look at everything listed in the tools and change nothing.",
-  operate: "It can look, pause ad blocking and allow or block a name, switch Home Assistant's devices, look for system updates, start, stop, restart and update apps — here and on the other machines — install apps from the store, take snapshots, wake a machine up, start, shut down, restart, snapshot and back up the guests of Proxmox, and the containers and virtual machines of this server. It cannot change compose files, remove apps, restore snapshots, move apps, restart machines, or stop, roll back, delete or make Proxmox guests.",
-  full: "It can also change names under the domain, ports passed on, DNS names and blocking lists and rules, read what the devices asked the DNS server, update the system's packages, change compose files, install apps from a compose file, remove apps, restore snapshots, move apps between machines, restart or shut down machines, and change the settings of Proxmox guests (processors, memory, disks made larger), stop them by force, roll them back to a snapshot or restore them from a backup, delete them and their snapshots, and make new containers there; and here, make, limit, roll back, restore and delete containers and virtual machines of this server.",
+  operate: "It can look, pause ad blocking and allow or block a name, switch Home Assistant's devices, pause and resume torrents, look for system updates, start, stop, restart and update apps — here and on the other machines — install apps from the store, take snapshots, wake a machine up, start, shut down, restart, snapshot and back up the guests of Proxmox, and the containers and virtual machines of this server. It cannot change compose files, remove apps, restore snapshots, move apps, restart machines, or stop, roll back, delete or make Proxmox guests.",
+  full: "It can also add and remove torrents, change names under the domain, ports passed on, DNS names and blocking lists and rules, read what the devices asked the DNS server, update the system's packages, change compose files, install apps from a compose file, remove apps, restore snapshots, move apps between machines, restart or shut down machines, and change the settings of Proxmox guests (processors, memory, disks made larger), stop them by force, roll them back to a snapshot or restore them from a backup, delete them and their snapshots, and make new containers there; and here, make, limit, roll back, restore and delete containers and virtual machines of this server.",
 };
 
 /** What the model is told when it connects */
