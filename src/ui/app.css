@@ -1526,3 +1526,16 @@ i.dot.danger { background: var(--danger); }
   .tree-bar { display: none; }
 }
 :root.has-wallpaper #view .settings-nav :is(.cats, .cats.cats) { background: none !important; border: 0 !important; border-radius: 0; padding: 0; box-shadow: none !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
+
+/* the column fits an ordinary window; in a short one only the list moves, under a field that stays */
+.settings-nav { gap: 6px; padding: 8px; overflow: hidden; grid-template-rows: auto minmax(0, 1fr); }
+.settings-nav .settings-list { gap: 4px; overflow: hidden auto; scrollbar-width: none; }
+.settings-nav .settings-list:hover { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+.settings-nav .cat { padding: 5px 10px; }
+.settings-nav .cat-title { padding: 4px 10px 2px; font-size: 10px; }
+.settings-find input { padding: 6px 0; }
+@media (max-width: 760px) {
+  .settings-nav { overflow: visible; grid-template-rows: none; }
+  .settings-nav .settings-list { overflow: visible; }
+  .settings-nav .cat { padding: 9px 10px; }
+}

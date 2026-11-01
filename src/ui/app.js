@@ -17695,7 +17695,14 @@ function settingsFrame(section, ...content) {
     cleanups.push(() => watch.disconnect());
   });
   // the open section stays in view in a column longer than the window
-  requestAnimationFrame(() => document.querySelector(".settings-nav .cat.active")?.scrollIntoView({ block: "nearest" }));
+  requestAnimationFrame(() => {
+    const list = document.querySelector(".settings-nav .settings-list");
+    const open = list?.querySelector(".cat.active");
+    if (!open || list.scrollHeight <= list.clientHeight) return;
+    // only the list moves, never the page
+    const at = open.getBoundingClientRect().top - list.getBoundingClientRect().top;
+    if (at < 0 || at > list.clientHeight - 40) list.scrollTop += at - list.clientHeight / 2;
+  });
   return [
     h(
       "div",
