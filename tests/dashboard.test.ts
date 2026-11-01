@@ -71,18 +71,18 @@ test("a pinned folder keeps its place when it is renamed and leaves when it is r
 });
 
 test("every block of the dashboard stands in exactly one place, or is put away", () => {
-  const usual = { top: ["stats"], side: ["attention", "activity"], bottom: [], hidden: ["adblock", "cameras"] };
+  const usual = { top: ["stats"], side: ["attention", "activity"], bottom: [], hidden: ["adblock"] };
   expect(cleanWidgets(null)).toEqual(usual);
   expect(cleanLayout({ groups: [] }).widgets).toEqual(usual);
-  expect(cleanWidgets({ top: ["activity", "nope", "activity"], side: "x", bottom: ["stats", "activity"], hidden: ["attention", "stats", "nope"] })).toEqual({ top: ["activity"], side: [], bottom: ["stats"], hidden: ["attention", "adblock", "cameras"] });
+  expect(cleanWidgets({ top: ["activity", "nope", "activity"], side: "x", bottom: ["stats", "activity"], hidden: ["attention", "stats", "nope"] })).toEqual({ top: ["activity"], side: [], bottom: ["stats"], hidden: ["attention", "adblock"] });
   // the layout carries them through arranging and through a folder being renamed
   const layout = cleanLayout({ groups: [], widgets: { top: [], side: ["stats"], bottom: ["activity"], hidden: ["attention"] } });
-  expect(arrange(layout, [], []).widgets).toEqual({ top: [], side: ["stats"], bottom: ["activity"], hidden: ["attention", "adblock", "cameras"] });
+  expect(arrange(layout, [], []).widgets).toEqual({ top: [], side: ["stats"], bottom: ["activity"], hidden: ["attention", "adblock"] });
   expect(movePath(layout, "/a", "/b").widgets).toEqual(layout.widgets);
 });
 
 test("the numbers of other machines are blocks put on the page by hand", () => {
-  expect(cleanWidgets({ top: ["stats", "machine:22d2efed", "machine:XYZ", "machine:22d2efed"], side: ["machine:304015a8", "attention", "activity"], hidden: ["machine:aaaaaaaa"] })).toEqual({ top: ["stats", "machine:22d2efed"], side: ["machine:304015a8", "attention", "activity"], bottom: [], hidden: ["adblock", "cameras"] });
+  expect(cleanWidgets({ top: ["stats", "machine:22d2efed", "machine:XYZ", "machine:22d2efed"], side: ["machine:304015a8", "attention", "activity"], hidden: ["machine:aaaaaaaa"] })).toEqual({ top: ["stats", "machine:22d2efed"], side: ["machine:304015a8", "attention", "activity"], bottom: [], hidden: ["adblock"] });
   // and survive arranging and the text of the layout
   const layout = cleanLayout({ groups: [], widgets: { top: ["machine:22d2efed", "stats"] } });
   expect(arrange(layout, [], []).widgets.top).toEqual(["machine:22d2efed", "stats"]);
@@ -90,8 +90,8 @@ test("the numbers of other machines are blocks put on the page by hand", () => {
 });
 
 test("a layout saved while the numbers were blocks of their own and there was a left column", () => {
-  expect(cleanWidgets({ top: ["cpu", "memory"], left: ["activity", "disk"], main: ["group:a"], side: ["attention"], bottom: ["temp"], hidden: ["network"] })).toEqual({ top: ["stats"], side: ["activity", "attention"], bottom: [], hidden: ["adblock", "cameras"] });
-  expect(cleanWidgets({ top: [], side: ["attention"], hidden: ["cpu", "memory", "activity"] }).hidden).toEqual(["stats", "activity", "adblock", "cameras"]);
+  expect(cleanWidgets({ top: ["cpu", "memory"], left: ["activity", "disk"], main: ["group:a"], side: ["attention"], bottom: ["temp"], hidden: ["network"] })).toEqual({ top: ["stats"], side: ["activity", "attention"], bottom: [], hidden: ["adblock"] });
+  expect(cleanWidgets({ top: [], side: ["attention"], hidden: ["cpu", "memory", "activity"] }).hidden).toEqual(["stats", "activity", "adblock"]);
 });
 
 test("a layout saved while the dashboard was a free grid comes back to the places", () => {
@@ -109,8 +109,8 @@ test("a layout saved while the dashboard was a free grid comes back to the place
   // groups in the order they stood in, tiles that stood alone in the group before them, no numbers among tiles
   expect(layout.groups).toEqual([{ id: "main", title: "", items: [app("memos"), app("gitea")] }, { id: "media", title: "Media", items: [app("jellyfin")] }, { id: "lost", title: "Lost", items: [] }] as never);
   // one number was on the board, so the numbers stay; the activity is back in the side column
-  expect(layout.widgets).toEqual({ top: ["stats"], side: ["activity"], bottom: [], hidden: ["attention", "adblock", "cameras"] });
-  expect(cleanLayout({ groups: [], blocks: [], hidden: ["cpu", "temp"] }).widgets.hidden).toEqual(["stats", "adblock", "cameras"]);
+  expect(layout.widgets).toEqual({ top: ["stats"], side: ["activity"], bottom: [], hidden: ["attention", "adblock"] });
+  expect(cleanLayout({ groups: [], blocks: [], hidden: ["cpu", "temp"] }).widgets.hidden).toEqual(["stats", "adblock"]);
   // tiles that stood above every group go into the first one; with no group at all they make one
   const loose = cleanLayout({ groups: [{ id: "main", title: "", items: [app("memos")] }, { id: "top", title: "", bare: true, items: [app("gitea")] }], blocks: [{ id: "group:top", x: 0, y: 0, w: 2 }, { id: "group:main", x: 0, y: 1, w: 8 }] });
   expect(loose.groups).toEqual([{ id: "main", title: "", items: [app("gitea"), app("memos")] }] as never);
@@ -179,4 +179,24 @@ test("tiles of Home Assistant: kept while their server is seen, also when it doe
   expect(arrange(layout, ["memos"], []).groups[0]!.items).toEqual([{ type: "app", name: "memos" }]);
   const left = dropServer(layout, "aaaaaaaa");
   expect(haTiles(left)).toEqual(["8bf90303/light.bed"]);
+});
+
+test("sizes and widgets: kept as given, what is not one left out", () => {
+  const widget = { type: "widget", id: "w1", source: "frigate", server: "abcd1234", view: "camera", camera: "front", size: "2x2" };
+  const layout = cleanLayout({ groups: [{ id: "a", title: "", items: [widget, { type: "widget", id: "w2", source: "qbit", server: "abcd1234", view: "torrents", size: "9x9" }, { type: "widget", id: "w3", source: "qbit", server: "abcd1234", view: "camera" }, { type: "widget", id: "w4", source: "frigate", server: "abcd1234", view: "camera", camera: "../x" }, { type: "ha", server: "abcd1234", entity: "light.a", size: "2x1" }] }] });
+  expect(layout.groups[0]!.items).toEqual([widget, { type: "widget", id: "w2", source: "qbit", server: "abcd1234", view: "torrents" }, { type: "ha", server: "abcd1234", entity: "light.a", size: "2x1" }] as never);
+});
+
+test("a widget does not go into a folder, and a tile in one has no size", () => {
+  const layout = cleanLayout({ groups: [{ id: "a", title: "", items: [{ type: "folder", id: "f", title: "F", items: [{ type: "widget", id: "w1", source: "qbit", server: "abcd1234", view: "torrents" }, { type: "ha", server: "abcd1234", entity: "light.a", size: "2x2" }] }] }] });
+  expect(layout.groups[0]!.items[0]).toMatchObject({ items: [{ type: "ha", entity: "light.a" }] });
+  expect((layout.groups[0]!.items[0] as { items: object[] }).items[0]).not.toHaveProperty("size");
+});
+
+test("a widget stays only for one who sees its server, and goes with it", () => {
+  const widget = { type: "widget", id: "w1", source: "qbit", server: "abcd1234", view: "torrents" };
+  const layout = cleanLayout({ groups: [{ id: "a", title: "", items: [widget] }] });
+  expect(arrange(layout, [], [], [], [], ["abcd1234"]).groups[0]!.items).toEqual([widget] as never);
+  expect(arrange(layout, [], [], [], [], []).groups[0]!.items).toEqual([]);
+  expect(dropServer(layout, "abcd1234").groups).toEqual(cleanLayout({ groups: [{ id: "a", title: "", items: [] }] }).groups);
 });

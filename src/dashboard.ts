@@ -11,11 +11,19 @@ export type Entry =
   | { type: "link"; id: string; title: string; url: string; icon: string }
   | { type: "files"; path: string }
   /** An entity of a Home Assistant server Hata is connected to: a light, a switch, a sensor */
-  | { type: "ha"; server: string; entity: string }
+  | { type: "ha"; server: string; entity: string; size?: Size }
+  /** What an integration shows right on the page: its numbers, a camera, what the cameras noticed */
+  | { type: "widget"; id: string; source: "qbit" | "frigate"; server: string; view: "torrents" | "camera" | "events"; camera?: string; size?: Size }
   /** A tile of Hata's own, which can be moved but not taken off: the store, the "Add" tile */
   | { type: "builtin"; id: string };
 
 export const BUILTINS = ["store", "add"] as const;
+/** Width × height in cells of the grid; a tile with no size takes one cell */
+export const SIZES = ["1x2", "2x1", "2x2"] as const;
+export type Size = (typeof SIZES)[number];
+const WIDGET_VIEWS: Record<string, string[]> = { qbit: ["torrents"], frigate: ["camera", "events"] };
+const CAMERA_RE = /^[A-Za-z0-9_-]{1,64}$/;
+const sized = (raw: Record<string, unknown>) => ((SIZES as readonly unknown[]).includes(raw.size) ? { size: raw.size as Size } : {});
 export type Item = Entry | { type: "folder"; id: string; title: string; items: Entry[] };
 
 export interface Group {
@@ -30,9 +38,9 @@ export interface Group {
  * the column beside them, a row below. A block may also be put away (`hidden`): it is offered again in
  * the "Add" menu.
  */
-export const WIDGETS = ["stats", "attention", "activity", "adblock", "cameras"] as const;
+export const WIDGETS = ["stats", "attention", "activity", "adblock"] as const;
 /** Not on the page until somebody adds it: it says nothing while nothing is being blocked */
-const OFFERED_ONLY = ["adblock", "cameras"];
+const OFFERED_ONLY = ["adblock"];
 export const ZONES = ["top", "side", "bottom"] as const;
 export type Zone = (typeof ZONES)[number];
 export type Widgets = Record<Zone, string[]> & { hidden: string[] };
@@ -131,7 +139,11 @@ export function cleanLayout(input: unknown): Layout {
     // "Add" is a doorway, not a thing to keep in a folder
     if (raw.type === "builtin" && typeof raw.id === "string" && (BUILTINS as readonly string[]).includes(raw.id) && !(inFolder && raw.id === "add") && once("builtin " + raw.id)) made = { type: "builtin", id: raw.id };
     if (raw.type === "app" && typeof raw.name === "string" && APP_RE.test(raw.name) && once("app " + raw.name)) made = { type: "app", name: raw.name };
-    if (raw.type === "ha" && typeof raw.server === "string" && SERVER_RE.test(raw.server) && typeof raw.entity === "string" && ENTITY_RE.test(raw.entity) && once(`ha ${raw.server}/${raw.entity}`)) made = { type: "ha", server: raw.server, entity: raw.entity };
+    if (raw.type === "ha" && typeof raw.server === "string" && SERVER_RE.test(raw.server) && typeof raw.entity === "string" && ENTITY_RE.test(raw.entity) && once(`ha ${raw.server}/${raw.entity}`)) made = { type: "ha", server: raw.server, entity: raw.entity, ...(inFolder ? {} : sized(raw)) };
+    // a widget is as large as the page lets it be: it does not go into a folder
+    if (!inFolder && raw.type === "widget" && typeof raw.source === "string" && WIDGET_VIEWS[raw.source]?.includes(String(raw.view)) && typeof raw.server === "string" && SERVER_RE.test(raw.server) && (raw.view !== "camera" || (typeof raw.camera === "string" && CAMERA_RE.test(raw.camera)))) {
+      made = { type: "widget", id: id(raw.id), source: raw.source as "qbit" | "frigate", server: raw.server, view: raw.view as "torrents" | "camera" | "events", ...(raw.view === "camera" ? { camera: raw.camera as string } : {}), ...sized(raw) };
+    }
     if (raw.type === "files" && typeof raw.path === "string" && raw.path.startsWith("/") && raw.path.length <= 4096 && once("files " + raw.path)) made = { type: "files", path: raw.path };
     if (raw.type === "link") {
       const url = webUrl(raw.url);
@@ -179,12 +191,12 @@ export function cleanLayout(input: unknown): Layout {
  * open) are left out, and those not placed yet come at the end of the first group — a newly installed app
  * needs no arranging to show up. `builtins` are Hata's own tiles this user has: they are always there.
  */
-export function arrange(layout: Layout, apps: string[], folders: string[], builtins: string[] = [], servers: string[] = []): Layout {
+export function arrange(layout: Layout, apps: string[], folders: string[], builtins: string[] = [], servers: string[] = [], widgetServers: string[] = []): Layout {
   const there = new Set([...apps.map((name) => "app " + name), ...folders.map((path) => "files " + path), ...builtins.map((id) => "builtin " + id)]);
   const key = (e: Entry) => (e.type === "app" ? "app " + e.name : e.type === "files" ? "files " + e.path : e.type === "builtin" ? "builtin " + e.id : e.type === "ha" ? `ha ${e.server}/${e.entity}` : "");
   const placed = new Set<string>();
   // a tile of Home Assistant stays while its server is one this user sees — also while it does not answer
-  const keep = (e: Entry) => e.type === "link" || (e.type === "ha" ? servers.includes(e.server) && !!placed.add(key(e)) : there.has(key(e)) && !!placed.add(key(e)));
+  const keep = (e: Entry) => e.type === "link" || (e.type === "widget" ? widgetServers.includes(e.server) : e.type === "ha" ? servers.includes(e.server) && !!placed.add(key(e)) : there.has(key(e)) && !!placed.add(key(e)));
 
   const groups = layout.groups.map((group): Group => ({
     ...group,
@@ -220,8 +232,8 @@ export function haTiles(layout: Layout): string[] {
   return out;
 }
 
-/** The layout without the tiles of a Home Assistant server that was removed */
+/** The layout without the tiles of a connected server that was removed */
 export function dropServer(layout: Layout, server: string): Layout {
-  const keep = (e: Entry) => !(e.type === "ha" && e.server === server);
+  const keep = (e: Entry) => !((e.type === "ha" || e.type === "widget") && e.server === server);
   return cleanLayout({ widgets: layout.widgets, groups: layout.groups.map((group) => ({ ...group, items: group.items.flatMap((item) => (item.type === "folder" ? [{ ...item, items: item.items.filter(keep) }] : keep(item) ? [item] : [])) })) });
 }

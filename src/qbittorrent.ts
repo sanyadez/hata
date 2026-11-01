@@ -167,6 +167,17 @@ function summary(s: Server) {
 }
 
 export const qbitServers = () => state.servers.map(summary);
+
+/** What a widget on Home shows: what is moving first, then what is left to finish */
+export const qbitWidgets = () =>
+  state.servers.map((s) => ({
+    ...summary(s),
+    top: [...liveOf(s).torrents]
+      .filter((x) => x.group === "downloading" || x.down > 0 || x.up > 0)
+      .sort((a, b) => b.down + b.up - (a.down + a.up) || a.percent - b.percent)
+      .slice(0, 6)
+      .map(({ hash, name, percent, down, up, group }) => ({ hash, name, percent, down, up, group })),
+  }));
 export const qbitServer = (id: string) => summary(serverOf(id));
 
 /** The torrents as they are right now */

@@ -1241,6 +1241,10 @@ const homeUi = { folder: null, drag: null, stale: false, widgets: null };
 const tileKey = (item) => item.type + ":" + (item.type === "app" ? item.name : item.type === "files" ? item.path : item.type === "ha" ? `${item.server}/${item.entity}` : item.id);
 /** The "Add" tile: a doorway, which is moved about but never put into a folder */
 const isAddTile = (item) => item.type === "builtin" && item.id === "add";
+/** What does not go into a folder: "Add", and a widget, which is as large as the page lets it be */
+const staysOut = (item) => isAddTile(item) || item.type === "widget";
+/** The classes of a tile larger than one cell */
+const sizeClass = (item) => ((item.type === "widget" || item.type === "ha") && item.size ? `size-${item.size}` : "");
 const newId = () => Array.from(crypto.getRandomValues(new Uint8Array(6)), (byte) => byte.toString(16).padStart(2, "0")).join("");
 const linkHost = (url) => {
   try {
@@ -1266,6 +1270,7 @@ function tileTarget(item) {
   if (item.type === "app") return item.name.includes("@") ? ((o.machineApps ?? []).find((app) => app.key === item.name) ?? null) : (o.apps.find((app) => app.name === item.name) ?? null);
   if (item.type === "files") return (o.folders ?? []).find((folder) => folder.path === item.path) ?? null;
   if (item.type === "ha") return haTarget(item);
+  if (item.type === "widget") return widgetServer(item);
   return item;
 }
 
@@ -1273,6 +1278,7 @@ const tileTitle = (item) => {
   const target = tileTarget(item);
   if (item.type === "builtin") return t(item.id === "store" ? "home.store" : "home.add");
   if (item.type === "ha") return target?.state?.name ?? item.entity;
+  if (item.type === "widget") return widgetTitle(item, target);
   return item.type === "app" ? (target?.title ?? item.name) : item.type === "files" ? (target?.name ?? item.path) : item.title || (item.type === "folder" ? t("home.folder") : linkHost(item.url));
 };
 
@@ -1283,6 +1289,7 @@ function tileIcon(item, size = "") {
   if (item.type === "files") return h("span", { class: `app-icon plus ${size}` }, icon(tileTarget(item)?.disk ? (tileTarget(item).disk.network ? "globe" : "disk") : "folder"));
   if (item.type === "builtin") return h("span", { class: `app-icon plus ${size}` }, icon(item.id === "store" ? "store" : "plus"));
   if (item.type === "ha") return h("span", { class: `app-icon plus ${size}` }, icon(haIcon(target?.state ?? { domain: item.entity.split(".")[0] })));
+  if (item.type === "widget") return h("span", { class: `app-icon plus ${size}` }, icon(item.source === "qbit" ? "download" : "camera"));
   return h("span", { class: "app-icon stack" }, item.items.filter(tileTarget).slice(0, 4).map((inner) => tileIcon(inner, "mini")));
 }
 
@@ -1299,6 +1306,7 @@ function tileContent(item, title, sub, { badges = null, where = null, big = "" }
 function tile(item) {
   const target = tileTarget(item);
   if (!target) return null;
+  if (item.type === "widget") return widgetTile(item, target);
   const admin = isAdmin();
   const title = tileTitle(item);
   let cls = "";
@@ -1366,9 +1374,9 @@ function tile(item) {
     (item.type === "folder" || isAddTile(item)
       ? h("button", { type: "button", class: "tile-main", onclick: () => homeUi.drag?.moved || (isAddTile(item) ? addDialog() : openFolder(item.id)) }, content)
       : h("a", { class: "tile-main", href, draggable: false, ...(external ? { target: "_blank", rel: "noopener noreferrer" } : {}) }, content));
-  if (!admin) return h("div", { class: `tile kind-${item.type} ${cls}`, "data-key": key }, main, side);
+  if (!admin) return h("div", { class: `tile kind-${item.type} ${cls} ${sizeClass(item)}`, "data-key": key }, main, side);
   // an administrator moves tiles by dragging them; a long press of a finger is the start of that, not a menu
-  return h("div", { class: `tile kind-${item.type} ${cls} movable`, "data-key": key, onpointerdown: (e) => dragStart(e, item), oncontextmenu: (e) => {
+  return h("div", { class: `tile kind-${item.type} ${cls} ${sizeClass(item)} movable`, "data-key": key, onpointerdown: (e) => dragStart(e, item), oncontextmenu: (e) => {
         if (homeUi.drag?.active) return e.preventDefault();
         // a right click on an app is the same menu as its button, where the pointer is
         if (e.pointerType === "touch") return;
@@ -1379,6 +1387,168 @@ function tile(item) {
         else if (item.type === "ha") e.currentTarget.querySelector(".tile-open")?.click();
         else tileMenu(item, { x: e.clientX, y: e.clientY });
       }, ondragstart: (e) => e.preventDefault() }, main, side);
+}
+
+// --- Widgets: what an integration shows right on the page, in one to four cells of the grid --------
+
+const WIDGET_SIZES = ["1x1", "2x1", "1x2", "2x2"];
+const widgetServer = (item) => (state.overview?.[item.source]?.servers ?? []).find((s) => s.id === item.server) ?? null;
+const widgetTitle = (item, x) => (item.view === "camera" ? item.camera : item.view === "events" ? t("frigate.events") : (x?.name ?? "qBittorrent"));
+/** A picture of a widget stays the same element across redraws and takes the next one only once it has come: no blinking */
+const widgetPictures = new Map();
+
+function widgetPicture(key, src, alt) {
+  let img = widgetPictures.get(key);
+  if (!img) widgetPictures.set(key, (img = picture(src, alt)));
+  return img;
+}
+
+function renewPicture(img, src) {
+  const next = h("img", { src });
+  next.addEventListener("load", () => (img.src = next.src));
+}
+
+function torrentsWidget(item, x) {
+  const size = item.size ?? "1x1";
+  const rows = { "1x1": 0, "2x1": 1, "1x2": 3, "2x2": 5 }[size];
+  const totals = x.totals;
+  return h(
+    "a",
+    { class: "tile-main widget-body", href: `#/qbit/${x.id}`, draggable: false },
+    h("span", { class: "widget-head" }, tileIcon(item), h("span", { class: "widget-title clip" }, x.name)),
+    x.online
+      ? [
+          h("span", { class: "widget-speeds" }, h("span", null, `↓ ${bytes(totals.down)}/s`), h("span", null, `↑ ${bytes(totals.up)}/s`)),
+          h("span", { class: "muted small" }, t("qbit.activeOf", { n: totals.active, total: totals.total })),
+          rows > 0 && x.top.length > 0 && h("span", { class: "widget-torrents" }, x.top.slice(0, rows).map((one) => h("span", { class: "widget-torrent" }, h("span", { class: "small clip" }, one.name), meterBar(one.percent, "")))),
+        ]
+      : h("span", { class: "muted small" }, t("qbit.offline")),
+  );
+}
+
+function cameraWidget(item, x) {
+  const c = x.cameras.find((one) => one.name === item.camera);
+  const key = `camera:${item.id}`;
+  const height = item.size === "2x2" || item.size === "1x2" ? 480 : 240;
+  const open = () => homeUi.drag?.moved || (c && cameraDialog(x, c));
+  return h(
+    "button",
+    { type: "button", class: "tile-main widget-picture", onclick: open },
+    c?.enabled && x.online ? widgetPicture(key, cameraPicture(x.id, c.name, height, Date.now()), item.camera) : h("span", { class: "camera-off" }, icon("camera")),
+    h("span", { class: "widget-caption" }, h("i", { class: "dot " + (c?.online && x.online ? "running" : "stopped") }), h("span", { class: "clip" }, item.camera)),
+  );
+}
+
+function eventsWidget(item, x) {
+  const count = { "1x1": 1, "2x1": 2, "1x2": 2, "2x2": 4 }[item.size ?? "1x1"];
+  const latest = x.latest.slice(0, count);
+  return h(
+    "a",
+    { class: `tile-main widget-events shows-${count} ${item.size === "1x2" ? "tall" : ""}`, href: `#/frigate/${x.id}`, draggable: false },
+    latest.length
+      ? latest.map((e) => h("span", { class: "widget-picture", title: `${eventWords(e)} · ${e.camera} · ${new Date(e.start).toLocaleString(state.lang)}` }, widgetPicture(`event:${e.id}`, eventPicture(x.id, e, "thumbnail"), e.label), h("span", { class: "widget-caption" }, h("span", { class: "clip" }, e.label), h("span", { class: "muted" }, ago(e.start)))))
+      : h("span", { class: "widget-body" }, h("span", { class: "widget-head" }, tileIcon(item), h("span", { class: "widget-title clip" }, t("frigate.events"))), h("span", { class: "muted small" }, t("frigate.none"))),
+  );
+}
+
+function widgetTile(item, x) {
+  const body = item.view === "torrents" ? torrentsWidget(item, x) : item.view === "camera" ? cameraWidget(item, x) : eventsWidget(item, x);
+  const title = tileTitle(item);
+  return h(
+    "div",
+    { class: `tile kind-widget view-${item.view} ${sizeClass(item)} movable`, "data-key": tileKey(item), onpointerdown: (e) => dragStart(e, item), oncontextmenu: (e) => {
+        if (homeUi.drag?.active) return e.preventDefault();
+        if (e.pointerType === "touch") return;
+        e.preventDefault();
+        tileMenu(item, { x: e.clientX, y: e.clientY });
+      }, ondragstart: (e) => e.preventDefault() },
+    body,
+    h("button", { type: "button", class: "tile-open", title: t("home.tileActions"), "aria-label": `${t("home.tileActions")}: ${title}`, onclick: () => tileMenu(item) }, icon("more")),
+  );
+}
+
+/** The widgets on the page follow their servers without the page being drawn again */
+async function widgetsTick() {
+  if (state.route?.view !== "home" || document.hidden || homeUi.drag || !isAdmin()) return;
+  const items = (state.overview?.dashboard?.groups ?? []).flatMap((group) => group.items).filter((item) => item.type === "widget");
+  if (!items.length) return;
+  const fresh = await api("GET", "/api/widgets").catch(() => null);
+  if (!fresh || state.route.view !== "home" || homeUi.drag) return;
+  state.overview.qbit.servers = fresh.qbit;
+  state.overview.frigate.servers = fresh.frigate;
+  for (const item of items) {
+    const old = document.querySelector(`.tile[data-key="widget:${item.id}"]`);
+    const made = old && tile(item);
+    if (made) old.replaceWith(made);
+    const x = widgetServer(item);
+    const c = item.view === "camera" && x?.cameras.find((one) => one.name === item.camera);
+    if (c?.enabled && x.online && widgetPictures.has(`camera:${item.id}`)) renewPicture(widgetPictures.get(`camera:${item.id}`), cameraPicture(x.id, c.name, item.size === "2x2" || item.size === "1x2" ? 480 : 240, Date.now()));
+  }
+}
+setInterval(() => void widgetsTick(), 10_000);
+
+/** Four small pictures of the grid: the one chosen is the tile's size */
+function sizePicker(current, pick) {
+  const box = h("div", { class: "size-picker", role: "group", "aria-label": t("home.size") });
+  const draw = (chosen) =>
+    put(box, WIDGET_SIZES.map((size) => {
+      const [w, hi] = size.split("x");
+      const mark = h("span", { class: `size-mark w${w} h${hi}` });
+      return h("button", { type: "button", class: "size-choice" + (size === chosen ? " active" : ""), "aria-pressed": size === chosen ? "true" : "false", onclick: () => (draw(size), pick(size)) }, h("span", { class: "size-cells" }, mark), h("span", { class: "small" }, `${w}×${hi}`));
+    }));
+  draw(current);
+  return box;
+}
+
+function sizeDialog(item) {
+  const key = tileKey(item);
+  let dialog;
+  dialog = openDialog(
+    "confirm",
+    h("h2", { class: "wrap" }, t("home.sizeOf", { name: tileTitle(item) })),
+    h("p", { class: "muted small" }, t("home.sizeHint")),
+    sizePicker(item.size ?? "1x1", (size) => {
+      widgetPictures.delete(`camera:${item.id}`);
+      changeLayout((layout) => {
+        const at = locate(layout, key);
+        if (!at) return false;
+        if (size === "1x1") delete at.item.size;
+        else at.item.size = size;
+      });
+    }),
+    h("footer", null, closeButton(() => dialog, t("common.close"))),
+  );
+}
+
+/** A new widget: what it shows, of the integrations connected, and how large */
+function widgetDialog() {
+  const choices = [
+    ...(state.overview.qbit?.servers ?? []).map((x) => ({ source: "qbit", server: x.id, view: "torrents", label: `${x.name} — ${t("qbit.torrents")}`, size: "2x1" })),
+    ...(state.overview.frigate?.servers ?? []).flatMap((x) => [{ source: "frigate", server: x.id, view: "events", label: `${x.name} — ${t("frigate.events")}`, size: "2x2" }, ...x.cameras.map((c) => ({ source: "frigate", server: x.id, view: "camera", camera: c.name, label: `${x.name} — ${t("widget.camera", { name: c.name })}`, size: "2x1" }))]),
+  ];
+  if (!choices.length) return;
+  let size = choices[0].size;
+  const what = h("select", null, choices.map((c, i) => h("option", { value: String(i) }, c.label)));
+  const sizes = h("div");
+  const paint = () => put(sizes, sizePicker(size, (next) => (size = next)));
+  what.addEventListener("change", () => ((size = choices[Number(what.value)].size), paint()));
+  paint();
+  let dialog;
+  dialog = openDialog(
+    "wide",
+    h("header", null, h("h2", { class: "grow" }, t("widget.title")), closeX(() => dialog)),
+    field(t("widget.what"), what),
+    field(t("home.size"), sizes, t("home.sizeHint")),
+    h("footer", null, closeButton(() => dialog, t("common.cancel")), button(t("widget.add"), { class: "primary", onclick: () => {
+        const { label: _label, size: _size, ...chosen } = choices[Number(what.value)];
+        changeLayout((layout) => {
+          const first = layout.groups[0] ?? (layout.groups.push({ id: newId(), title: "", items: [] }), layout.groups[0]);
+          const at = first.items.findIndex(isAddTile);
+          first.items.splice(at < 0 ? first.items.length : at, 0, { type: "widget", id: newId(), ...chosen, ...(size === "1x1" ? {} : { size }) });
+        });
+        dialog.close();
+      } }, "plus")),
+  );
 }
 
 // --- Changing the layout: every change is made on a copy, shown at once and sent to the server ----
@@ -1426,11 +1596,11 @@ function moveTile(key, where) {
   if (!item) return;
   if (where.before || where.after) {
     const at = locate(layout, where.before ?? where.after);
-    if (!at || (at.folder && (item.type === "folder" || isAddTile(item)))) return;
+    if (!at || (at.folder && (item.type === "folder" || staysOut(item)))) return;
     at.list.splice(at.index + (where.after ? 1 : 0), 0, item);
   } else if (where.folder) {
     const folder = allFolders(layout).find((f) => f.id === where.folder);
-    if (!folder || item.type === "folder" || isAddTile(item)) return;
+    if (!folder || item.type === "folder" || staysOut(item)) return;
     folder.items.push(item);
   } else {
     const group = layout.groups.find((g) => g.id === where.group) ?? layout.groups[0];
@@ -1443,7 +1613,7 @@ function moveTile(key, where) {
 function makeFolder(key, ontoKey, title = "") {
   const layout = layoutCopy();
   const own = locate(layout, key);
-  if (!own || own.item.type === "folder" || isAddTile(own.item)) return;
+  if (!own || own.item.type === "folder" || staysOut(own.item)) return;
   const folder = { type: "folder", id: newId(), title, items: [own.item] };
   if (!ontoKey) {
     if (own.folder) return;
@@ -1452,7 +1622,7 @@ function makeFolder(key, ontoKey, title = "") {
   }
   takeTile(layout, key);
   const at = locate(layout, ontoKey);
-  if (!at || at.folder || at.item.type === "folder" || isAddTile(at.item)) return;
+  if (!at || at.folder || at.item.type === "folder" || staysOut(at.item)) return;
   folder.items.unshift(at.item);
   at.list[at.index] = folder;
   return saveLayout(layout);
@@ -1559,16 +1729,18 @@ function tileMenu(item, point = null) {
     item.type === "ha" && tileTarget(item) && entry(t("ha.openThere"), "external", () => window.open(haEntityUrl(tileTarget(item).server, item.entity), "_blank", "noopener")),
     item.type === "folder" && entry(t("common.open"), "folder", () => openFolder(item.id)),
     item.type === "folder" && entry(t("files.rename"), "edit", () => renameFolderDialog(item)),
+    (item.type === "widget" || (item.type === "ha" && !at.folder)) && entry(t("home.size"), "grid", () => sizeDialog(item)),
     neighbour(-1) && entry(t("home.moveEarlier"), "arrow", () => moveTile(key, { before: tileKey(neighbour(-1)) }), "flip"),
     neighbour(1) && entry(t("home.moveLater"), "arrow", () => moveTile(key, { after: tileKey(neighbour(1)) })),
     at.folder && entry(t("home.outOfFolder"), "signout", () => outOfFolder(key)),
-    item.type !== "folder" && !isAddTile(item) && allFolders(layout).filter((folder) => folder !== at.folder).map((folder) => entry(t("home.intoFolder", { name: folder.title || t("home.folder") }), "folder", () => moveTile(key, { folder: folder.id }))),
-    item.type !== "folder" && !isAddTile(item) && !at.folder && entry(t("home.newFolder"), "plus", () => nameDialog(t("home.newFolder"), "", t("files.create"), (title) => makeFolder(key, null, title))),
+    item.type !== "folder" && !staysOut(item) && allFolders(layout).filter((folder) => folder !== at.folder).map((folder) => entry(t("home.intoFolder", { name: folder.title || t("home.folder") }), "folder", () => moveTile(key, { folder: folder.id }))),
+    item.type !== "folder" && !staysOut(item) && !at.folder && entry(t("home.newFolder"), "plus", () => nameDialog(t("home.newFolder"), "", t("files.create"), (title) => makeFolder(key, null, title))),
     layout.groups.filter((group) => group !== at.group || at.folder).map((group) => entry(t("home.toGroup", { name: groupName(group) }), "grid", () => moveTile(key, { group: group.id }))),
     entry(t("home.toNewGroup"), "plus", () => newGroupDialog((id) => moveTile(key, { group: id }))),
     item.type === "folder" && entry(t("home.ungroup"), "x", () => changeLayout((next) => void locate(next, key).list.splice(at.index, 1, ...item.items))),
     item.type === "link" && entry(t("home.removeLink"), "trash", () => changeLayout((next) => void takeTile(next, key)), "danger"),
     item.type === "ha" && entry(t("ha.offHome"), "trash", () => changeLayout((next) => void takeTile(next, key)), "danger"),
+    item.type === "widget" && entry(t("ha.offHome"), "trash", () => changeLayout((next) => void takeTile(next, key)), "danger"),
     item.type === "files" && entry(t("files.unpin"), "home", () => pinFolder(item.path, false)),
   );
   if (point) placeAt(dialog, point);
@@ -1602,6 +1774,7 @@ function addDialog(at = null) {
     entry(t("home.addApp"), t("home.addAppHint"), "store", () => go("#/store")),
     state.overview.importable > 0 && entry(t("home.import"), t("home.importHint", { n: state.overview.importable }), "download", () => go("#/import")),
     (state.overview.ha?.servers ?? []).length > 0 && entry(t("ha.pick.item"), t("ha.pick.hint"), "bulb", () => haPickDialog()),
+    ((state.overview.qbit?.servers ?? []).length > 0 || (state.overview.frigate?.servers ?? []).length > 0) && entry(t("widget.title"), t("widget.hint"), "grid", () => widgetDialog()),
     entry(t("home.addLinkItem"), t("home.addLinkHint"), "link", () => linkDialog()),
     entry(t("home.addGroupItem"), t("home.addGroupHint"), "grid", () => newGroupDialog()),
     state.overview.dashboard.widgets.hidden.map((id) =>
@@ -1882,7 +2055,7 @@ function dropTarget(drag) {
     const rect = over.getBoundingClientRect();
     const part = (drag.x - rect.left) / rect.width;
     const key = over.dataset.key;
-    const mayJoin = !open && drag.item.type !== "folder" && !isAddTile(drag.item) && key !== "builtin:add";
+    const mayJoin = !open && drag.item.type !== "folder" && !staysOut(drag.item) && key !== "builtin:add" && !key.startsWith("widget:");
     if (mayJoin && part > 0.28 && part < 0.72) return key.startsWith("folder:") ? { el: over, cls: "drop-into", folder: key.slice(7) } : { el: over, cls: "drop-into", onto: key };
     return part < 0.5 ? { el: over, cls: "drop-before", before: key } : { el: over, cls: "drop-after", after: key };
   }
@@ -2377,7 +2550,6 @@ function renderHome() {
     attention: isAdmin() ? widget("attention", h("section", { class: "card pad attention-block" })) : null,
     activity: isAdmin() ? widget("activity", h("section", { class: "card pad activity-block" })) : null,
     adblock: isAdmin() ? widget("adblock", h("section", { class: "card pad adblock-block" })) : null,
-    cameras: isAdmin() ? widget("cameras", h("section", { class: "card pad cameras-block" })) : null,
   };
   const zone = (name, tag = "div") => h(tag, { class: "zone" + (name === "side" ? " side" : ""), id: "zone-" + name, "data-zone": name });
   shell(
@@ -2425,7 +2597,6 @@ function renderHomeBody() {
 
   if (homeUi.widgets.attention) put(homeUi.widgets.attention, attentionBlock(o.attention));
   if (homeUi.widgets.adblock) adblockBlock(homeUi.widgets.adblock, o.adblock);
-  if (homeUi.widgets.cameras) camerasBlock(homeUi.widgets.cameras, o.frigate);
   if (homeUi.widgets.activity) put(homeUi.widgets.activity, blockRemover("activity"), h("div", { class: "section-head" }, h("h2", null, t("activity.title"))), o.activity.length ? h("div", { class: "timeline" }, o.activity.map(activityItem)) : h("p", { class: "muted small" }, t("activity.none")), isAdmin() && o.activity.length > 0 && h("a", { class: "link small all-activity", href: "#/activity" }, t("activity.all"), icon("chevron")));
   for (const name of ZONES) for (const id of o.dashboard.widgets[name]) if (id.startsWith("machine:")) machineBlock(id);
   if (!homeUi.drag?.active) placeWidgets();
@@ -2434,7 +2605,7 @@ function renderHomeBody() {
 
 const ZONES = ["top", "side", "bottom"];
 /** Hata's own blocks: the picture of one in the "Add" menu and where it goes when it is put back */
-const BLOCKS = { stats: { icon: "cpu", zone: "top" }, attention: { icon: "alert", zone: "side" }, activity: { icon: "list", zone: "side" }, adblock: { icon: "shield", zone: "side" }, cameras: { icon: "camera", zone: "side" } };
+const BLOCKS = { stats: { icon: "cpu", zone: "top" }, attention: { icon: "alert", zone: "side" }, activity: { icon: "list", zone: "side" }, adblock: { icon: "shield", zone: "side" } };
 const blockTitle = (id) => (id.startsWith("machine:") ? t("home.machineBlock", { name: machineOfBlock(id)?.name ?? id.slice(8) }) : t(id === "stats" ? "home.statsBlock" : id + ".title"));
 
 /** The small button that takes one of Hata's own blocks off the dashboard; the "Add" menu brings it back */
@@ -4910,25 +5081,6 @@ function frigateDialog(old = null, address = "") {
       error,
       h("footer", null, closeButton(() => dialog, t("common.cancel")), h("button", { type: "submit", class: "btn primary" }, h("span", null, t(old ? "ha.save" : "integrations.connectIt")))),
     ),
-  );
-}
-
-/** The block on Home: the latest of what the cameras noticed, of every Frigate */
-function camerasBlock(el, f) {
-  const servers = f?.servers ?? [];
-  const latest = servers.flatMap((x) => x.latest.map((e) => ({ x, e }))).sort((a, b) => b.e.start - a.e.start).slice(0, 6);
-  const down = servers.flatMap((x) => (x.online ? x.cameras.filter((c) => c.enabled && !c.online) : []));
-  const working = servers.reduce((n, x) => n + x.cameras.filter((c) => c.online).length, 0);
-  const total = servers.reduce((n, x) => n + x.cameras.length, 0);
-  put(
-    el,
-    blockRemover("cameras"),
-    h("div", { class: "section-head" }, h("h2", null, servers.length === 1 ? h("a", { href: `#/frigate/${servers[0].id}` }, t("frigate.cameras")) : h("a", { href: "#/integrations" }, t("frigate.cameras"))), servers.length > 0 && h("span", { class: "state " + (working === total && total ? "running" : down.length ? "restarting" : "") }, t("frigate.workingOf", { n: working, total }))),
-    !servers.length
-      ? h("p", { class: "muted small" }, t("frigate.block.none"), " ", h("a", { class: "link", href: "#/integrations" }, t("common.open")))
-      : latest.length
-        ? h("div", { class: "camera-tiles" }, latest.map(({ x, e }) => h("a", { class: "camera-tile", href: `#/frigate/${x.id}`, title: `${eventWords(e)} · ${e.camera} · ${new Date(e.start).toLocaleString(state.lang)}` }, picture(eventPicture(x.id, e, "thumbnail"), e.label), h("span", { class: "small clip" }, e.label), h("span", { class: "muted small clip" }, ago(e.start)))))
-        : h("p", { class: "muted small" }, t("frigate.none")),
   );
 }
 
