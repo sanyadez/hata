@@ -107,7 +107,7 @@ function describe(t: Target, guests: ReturnType<typeof allGuests>, tiles: Awaite
 }
 
 /** What the page shows: every name with where it leads now, and what a name can be given to */
-export async function domainsReport(lang: string) {
+export async function domainsReport<F extends { target: Target }>(lang: string, forwards: F[] = []) {
   const guests = allGuests();
   const tiles = await machineTiles(machines().map((m) => ({ id: m.id, name: m.name, ip: m.ip, online: m.online })), lang).catch(() => []);
   return {
@@ -119,6 +119,7 @@ export async function domainsReport(lang: string) {
         return { ...n, ...describe(n.target, guests, tiles), inherits, at: "away" in up ? null : `${up.host}:${up.port}`, away: "away" in up ? up.away : null };
       }),
     ),
+    forwards: forwards.map((f) => ({ ...f, ...describe(f.target, guests, tiles) })),
     apps: appLabels(),
     targets: {
       containers: await Promise.all(instancesSeen().map(async (c) => ({ name: c.name, kind: c.kind, address: (await instanceAddress(c.name)) ?? "", status: c.status }))),

@@ -33,7 +33,7 @@ import { checkDisks, diskHealth, installTool, listDisks, startDisks, startSelfTe
 import { lookAtPools, noteTypes, poolCheck, poolClear, PoolError, poolsReport, poolsTrouble, startPools } from "./raid";
 import { fills, measureFills, startFills } from "./fills";
 import { checkImages, imagesStatus, startImages } from "./images";
-import { afterPackage, exposedNics, giveBack, internetTrouble, setSide, startNetwork, setCheck, setRole, startHotspot, stopHotspot, wifiQrText, changeNic, confirmChange, handOver, makeBridge, takeBridgeApart, NETWORK_PACKAGES, networkReport, NetworkError, revertChange, wifiConnect, wifiForget, wifiNetworks } from "./network";
+import { afterPackage, closeOutside, exposedNics, giveBack, internetTrouble, setSide, startNetwork, setCheck, setRole, startHotspot, stopHotspot, wifiQrText, changeNic, confirmChange, handOver, makeBridge, takeBridgeApart, NETWORK_PACKAGES, networkReport, NetworkError, revertChange, wifiConnect, wifiForget, wifiNetworks } from "./network";
 import { DOCKER_INSTALL_COMMAND, installDocker, startDocker } from "./dockerinstall";
 import { installOne, removeOne, toolsReport } from "./tools";
 import { checkUpdates, packageUpdates, startSysUpdates, upgrade as upgradeSystem } from "./sysupdates";
@@ -98,6 +98,7 @@ import { adoptProject, casaosState, containerDraft, importCount, importList, mov
 import { accessOf, dropAccess, dropUser, gateTarget, guard, guardsOf, mayOpen, otherPorts, MAX_APP_BODY, page, passToApp, setAccess, startGates, tunnelHandlers } from "./gate";
 import { addName, changeName, domainsReport, nameOf as domainName, onNamesChanged, removeName, upstream as domainUpstream } from "./domains";
 import type { DomainName } from "./names";
+import { addForward, changeForward, forwardsReport, onForwardsChanged, removeForward, startForwards } from "./forwards";
 import { parseDockerRun } from "./dockerrun";
 import { cannotMove, finishMove, moveState } from "./relocate";
 import { isPlainObject } from "./fsutil";
@@ -1362,7 +1363,14 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
 
   if (path === "/api/local" && method === "GET") return json({ ...(await localNamesStatus()), port: listenAddress().port });
 
-  if (path === "/api/domains" && method === "GET") return json(await domainsReport(language(url)));
+  if (path === "/api/domains" && method === "GET") return json(await domainsReport(language(url), await forwardsReport()));
+  if (path === "/api/ports" && method === "POST") return json(await addForward(await body(req), user.name));
+  const forwarded = /^\/api\/ports\/(\d{1,5})$/.exec(path);
+  if (forwarded && method === "PUT") return json(await changeForward(Number(forwarded[1]), await body(req), user.name));
+  if (forwarded && method === "DELETE") {
+    await removeForward(Number(forwarded[1]), user.name);
+    return json({ ok: true });
+  }
   if (path === "/api/domains" && method === "POST") return json(addName(await body(req), user.name));
   const named = /^\/api\/domains\/([a-z0-9-]{1,63})$/.exec(path);
   if (named && method === "PUT") return json(changeName(named[1]!, await body(req), user.name));
@@ -3046,6 +3054,10 @@ export async function serve(): Promise<void> {
     baseUrl: publicUrl,
     isAdmin: (id) => findUser(id)?.role === "admin",
   });
+  onNamesChanged(() => void refreshHttps());
+  onForwardsChanged(() => void closeOutside().catch(() => {}));
+  // Incus's own devices are there already; Hata's relays start a little later, once the targets are looked at
+  setTimeout(() => void startForwards().catch((e) => console.error("Ports:", e)), 5_000);
   setInterval(() => void refreshHttps(), 10 * 60_000);
   // a newly installed app needs a certificate for its name
   let appsChanged: Timer | null = null;

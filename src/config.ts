@@ -7,6 +7,7 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { cleanLayout, type Layout } from "./dashboard";
 import { cleanOutside } from "./outside";
+import { cleanForwards, type Forward } from "./forward";
 import { cleanNames, type DomainName } from "./names";
 import { cleanMachineShares, cleanShares, type MachineShare, type Share } from "./smbconf";
 import { changeAppearance, cleanAppearance, DEFAULT_APPEARANCE, type Appearance } from "./wallpapers";
@@ -86,6 +87,8 @@ export interface Settings {
   https: HttpsSettings;
   /** Names under the domain for what is not an app of this server: containers, guests, machines, addresses (`names.ts`) */
   names: DomainName[];
+  /** Ports of this server passed on to containers, guests, machines, addresses (`forward.ts`) */
+  forwards: Forward[];
   /**
    * The name on the home network, and `<app>.<name>` for every app. One ending in `.local` Hata answers
    * for itself over multicast DNS; any other (`hata.lan`) the home's own DNS has to point here.
@@ -230,6 +233,7 @@ const DEFAULTS: Settings = {
   favorites: {},
   shares: [],
   names: [],
+  forwards: [],
   machineShares: {},
   dashboard: cleanLayout(null),
   appearance: DEFAULT_APPEARANCE,
@@ -275,6 +279,7 @@ export const settings: Settings = {
   favorites: isPlainObject(saved.favorites) ? Object.fromEntries(Object.entries(saved.favorites).map(([id, list]) => [id, Array.isArray(list) ? list.filter((one): one is Favorite => isPlainObject(one) && typeof one.path === "string").map((one) => ({ path: one.path, dir: one.dir !== false })) : []])) : {},
   shares: cleanShares(saved.shares),
   names: cleanNames(saved.names),
+  forwards: cleanForwards(saved.forwards),
   machineShares: cleanMachineShares(saved.machineShares),
   dashboard: cleanLayout(saved.dashboard),
   appearance: cleanAppearance(saved.appearance),

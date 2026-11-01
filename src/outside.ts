@@ -18,6 +18,8 @@ export const OUTSIDE_HOOKS = ["INPUT", "FORWARD", "DOCKER-USER"];
 export interface Openings {
   /** The UDP port of the server's WireGuard, while it is on: devices from afar come in through it */
   wireguard: number | null;
+  /** Ports of this server passed on to a target and opened on the internet side by the person (`forward.ts`) */
+  ports?: { port: number; proto: "tcp" | "udp" }[];
 }
 
 /** Tailscale's own port: it gets through without it, but straight connections are faster than relayed ones */
@@ -35,6 +37,7 @@ export function outsideRules(names: string[], open: Openings, family: "4" | "6")
       rule("-p", "udp", "--dport", "546", "-j", "RETURN");
     } else rule("-p", "udp", "--sport", "67", "--dport", "68", "-j", "RETURN");
     if (open.wireguard) rule("-p", "udp", "--dport", String(open.wireguard), "-j", "RETURN");
+    for (const p of open.ports ?? []) rule("-p", p.proto, "--dport", String(p.port), "-j", "RETURN");
     rule("-p", "udp", "--dport", String(TAILSCALE_PORT), "-j", "RETURN");
     rule("-j", "DROP");
   }

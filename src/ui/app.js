@@ -3593,6 +3593,7 @@ function containerMenu(c, at) {
     { label: t("incus.limits") + "…", icon: "settings", run: () => containerLimitsDialog(c) },
     (incusUi.data?.home || c.network === "home") && { label: t("incus.net.move") + "…", icon: "network", run: () => containerNetworkDialog(c) },
     { label: t("names.give") + "…", icon: "globe", run: () => domainNameDialog(null, { target: { kind: "container", name: c.name }, label: c.name }) },
+    { label: t("ports.open") + "…", icon: "network", run: () => forwardDialog(null, { target: { kind: "container", name: c.name } }) },
     { label: t("incus.snapshots") + "…", icon: "clock", run: () => containerSnapshotsDialog(c) },
     { label: t("incus.rename") + "…", icon: "edit", run: () => renameContainerDialog(c) },
     { label: t("incus.clone") + "…", icon: "copy", run: () => cloneContainerDialog(c) },
@@ -6545,6 +6546,7 @@ function machineMenu(m, at = null) {
     h("header", null, h("span", { class: "machine-icon" }, icon("server")), h("div", null, h("h2", null, m.name), machineChip(m))),
     item(t("machines.rename"), "edit", () => renameMachineDialog(m)),
     item(t("names.give") + "…", "globe", () => domainNameDialog(null, { target: { kind: "machine", id: m.id }, label: m.name })),
+    item(t("ports.open") + "…", "network", () => forwardDialog(null, { target: { kind: "machine", id: m.id } })),
     !m.online && m.info?.macs?.length > 0 && item(t("machines.wake"), "play", () => wakeMachine(m)),
     m.online && item(t("machines.reboot"), "refresh", () => powerDialog(m, "reboot")),
     m.online && item(t("machines.poweroff"), "stop", () => powerDialog(m, "poweroff")),
@@ -13234,6 +13236,7 @@ function httpsSection(save, error) {
       h("footer", null, h("button", { class: "btn primary" }, t("settings.save"))),
     ),
     namesCard(),
+    portsCard(),
     https.mode === "acme" && h("section", { class: "card pad" }, h("div", { class: "section-head" }, h("h2", null, t("https.certificates")), retry), h("p", { class: "muted small" }, t("https.certificatesLead")), certs),
     here && h("section", { class: "card pad" }, h("div", { class: "section-head" }, h("h2", null, t("https.checkTitle")), check), h("p", { class: "muted small" }, t("https.checkLead", { domain: here })), results),
     here && h("section", { class: "card pad" }, h("h2", null, t("https.addresses")), h("p", { class: "muted small" }, t("https.addressesLead")), settingRow("Hata", "", h("a", { class: "link mono", href: `https://${here}/` }, here)), (state.overview?.apps ?? []).filter((a) => a.port).map((a) => settingRow(a.title, a.protected ? t("access.protected") : "", h("a", { class: "link mono", href: `https://${a.name.replace(/_/g, "-")}.${here}/`, target: "_blank", rel: "noopener noreferrer" }, `${a.name.replace(/_/g, "-")}.${here}`)))),
@@ -13312,6 +13315,148 @@ function namesCard() {
   );
 }
 
+/**
+ * The server's address as people would type it, for "<server>:2222": its name on the home network, else the
+ * address this page is at — never the HTTPS domain, which may lead to a proxy that passes on web pages only
+ */
+const serverHost = () => (state.settings?.local?.enabled && state.settings.local.name) || location.hostname;
+
+/** Ports of this server passed on to a container, a guest, a machine or an address */
+function portsCard() {
+  const body = h("div", { class: "stack" }, h("p", { class: "muted small" }, "…"));
+  const paint = async () => {
+    let data;
+    try {
+      data = await api("GET", "/api/domains");
+    } catch (e) {
+      return put(body, h("p", { class: "error" }, errorText(e)));
+    }
+    if (!data.forwards.length) return put(body, h("p", { class: "muted small" }, t("ports.none")));
+    put(
+      body,
+      h(
+        "div",
+        { class: "table-wrap" },
+        h(
+          "table",
+          null,
+          h("thead", null, h("tr", null, h("th", null, t("ports.col.port")), h("th", null, t("names.col.to")), h("th", null, t("ports.col.how")), h("th"))),
+          h(
+            "tbody",
+            null,
+            data.forwards.map((f) =>
+              h(
+                "tr",
+                null,
+                h("td", null, h("div", { class: "mono strong" }, `${serverHost()}:${f.port}`), h("div", { class: "muted small" }, [t("ports.proto." + f.proto), f.note].filter(Boolean).join(" · "))),
+                h("td", null, h("div", null, t("names.kind." + f.kind, { name: f.title }) + " : " + f.to), h("div", { class: f.error || f.away ? "error small" : "muted small mono" }, f.error ? f.error : f.away ? t("error." + f.away) : f.by === "incus" ? t("ports.byIncus") : f.at)),
+                h("td", { class: "small" }, t(f.outside ? "ports.outsideToo" : "ports.homeOnly")),
+                h("td", null, h("div", { class: "row-actions" }, button(t("names.change"), { class: "small", onclick: () => forwardDialog(f, null, paint) }, "edit"))),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  };
+  void paint();
+  return h(
+    "section",
+    { class: "card pad stack" },
+    h("div", { class: "section-head" }, h("h2", null, t("ports.title")), h("div", { class: "actions" }, button(t("ports.add"), { class: "small", onclick: () => forwardDialog(null, null, paint) }, "plus"))),
+    h("p", { class: "muted small" }, t("ports.lead")),
+    body,
+  );
+}
+
+/** Opens a port of this server towards a target (or changes one) */
+async function forwardDialog(existing, preset, after) {
+  let data;
+  try {
+    data = await api("GET", "/api/domains");
+  } catch (e) {
+    return toast(errorText(e), "error");
+  }
+  const pick = targetPicker(data.targets, existing?.target ?? preset?.target, existing?.title);
+  const port = h("input", { type: "number", min: 1, max: 65535, value: existing?.port ?? "", required: true, placeholder: "2222", class: "short mono" });
+  const to = h("input", { type: "number", min: 1, max: 65535, value: existing?.to ?? "", required: true, placeholder: "22", class: "short mono" });
+  const proto = h("select", null, ["tcp", "udp", "both"].map((p) => h("option", { value: p, selected: (existing?.proto ?? "tcp") === p }, t("ports.proto." + p))));
+  const note = h("input", { value: existing?.note ?? "", maxLength: 60, placeholder: "SSH" });
+  const [outside, outsideRow] = tickRow(t("ports.outside"), t("ports.outsideHint"), existing?.outside ?? false);
+  const error = h("p", { class: "error", role: "alert" });
+  let dialog;
+  const send = async (e) => {
+    e.preventDefault();
+    error.textContent = "";
+    const payload = { port: Number(port.value), proto: proto.value, target: pick.value(), to: Number(to.value), note: note.value.trim(), outside: outside.checked };
+    try {
+      await api(existing ? "PUT" : "POST", existing ? `/api/ports/${existing.port}` : "/api/ports", payload);
+      dialog.close();
+      toast(t(existing ? "ports.saved" : "ports.added", { port: payload.port }));
+      after?.();
+    } catch (err) {
+      error.textContent = errorText(err);
+    }
+  };
+  const remove = existing && button(t("names.remove"), {
+    class: "danger",
+    onclick: async () => {
+      try {
+        await api("DELETE", `/api/ports/${existing.port}`);
+        dialog.close();
+        toast(t("ports.removed", { port: existing.port }));
+        after?.();
+      } catch (err) {
+        error.textContent = errorText(err);
+      }
+    },
+  }, "trash");
+  dialog = openDialog(
+    "",
+    h(
+      "form",
+      { class: "stack", onsubmit: send },
+      h("header", null, h("h2", { class: "grow" }, t(existing ? "ports.changeTitle" : "ports.addTitle")), closeX(() => dialog)),
+      h("p", { class: "muted small" }, t("ports.dialogLead")),
+      h("div", { class: "form-pair" }, field(t("ports.port"), h("span", { class: "web-address" }, h("span", { class: "muted mono" }, serverHost() + ":"), port), t("ports.portHint")), field(t("ports.proto"), proto)),
+      field(t("names.to"), pick.select),
+      pick.hostRow,
+      h("div", { class: "form-pair" }, field(t("ports.to"), to, t("ports.toHint")), field(t("ports.note"), note)),
+      outsideRow,
+      error,
+      h("footer", null, remove, h("span", { class: "grow" }), closeButton(() => dialog, t("common.cancel")), h("button", { class: "btn primary" }, t(existing ? "settings.save" : "ports.addGo"))),
+    ),
+  );
+  port.focus();
+}
+
+/** The list a name or a forwarded port picks its target from, with a field for an address of one's own */
+function targetPicker(tg, start, title, onchange) {
+  const key = (target) => JSON.stringify(target);
+  const option = (target, label, extra) => h("option", { value: key(target) }, label + (extra ? ` — ${extra}` : ""));
+  const select = h(
+    "select",
+    { onchange: () => onchange?.() },
+    tg.containers.length > 0 && h("optgroup", { label: t("names.group.containers") }, tg.containers.map((c) => option({ kind: "container", name: c.name }, c.name, c.address || t("names.noAddress")))),
+    tg.guests.length > 0 && h("optgroup", { label: t("names.group.guests") }, tg.guests.map((g) => option({ kind: "guest", host: g.host, guest: g.id }, `${g.name} (${g.hostName})`, g.address || t("names.noAddress")))),
+    tg.machines.length > 0 && h("optgroup", { label: t("names.group.machines") }, tg.machines.map((m) => option({ kind: "machine", id: m.id }, m.name, m.ip || t("machines.offline")))),
+    tg.machineApps.length > 0 && h("optgroup", { label: t("names.group.machineApps") }, tg.machineApps.map((a) => option({ kind: "machineApp", id: a.id, app: a.app }, `${a.title} (${a.machine})`, a.port ? String(a.port) : ""))),
+    h("optgroup", { label: t("names.group.other") }, h("option", { value: "address" }, t("names.address"))),
+  );
+  if (start && start.kind !== "address") {
+    if (![...select.options].some((o) => o.value === key(start))) select.prepend(option(start, title ?? start.name ?? start.id, ""));
+    select.value = key(start);
+  } else select.value = "address";
+  const host = h("input", { class: "mono", value: start?.kind === "address" ? start.host : "", placeholder: "192.168.1.1", spellcheck: false, autocapitalize: "none" });
+  const hostRow = field(t("names.host"), host, t("names.hostHint"));
+  const shape = () => {
+    hostRow.hidden = select.value !== "address";
+    host.required = select.value === "address";
+  };
+  shape();
+  return { select, hostRow, key, shape, value: () => (select.value === "address" ? { kind: "address", host: host.value.trim() } : JSON.parse(select.value)) };
+}
+
 /** Gives a name (or changes one): what it leads to, the port, HTTPS, the sign-in */
 async function domainNameDialog(existing, preset, after) {
   let data;
@@ -13321,32 +13466,15 @@ async function domainNameDialog(existing, preset, after) {
     return toast(errorText(e), "error");
   }
   const d = namesDomain();
-  const key = (target) => JSON.stringify(target);
-  const option = (target, label, extra) => h("option", { value: key(target) }, label + (extra ? ` — ${extra}` : ""));
   const tg = data.targets;
-  const to = h(
-    "select",
-    { onchange: () => shape(true) },
-    tg.containers.length > 0 && h("optgroup", { label: t("names.group.containers") }, tg.containers.map((c) => option({ kind: "container", name: c.name }, c.name, c.address || t("names.noAddress")))),
-    tg.guests.length > 0 && h("optgroup", { label: t("names.group.guests") }, tg.guests.map((g) => option({ kind: "guest", host: g.host, guest: g.id }, `${g.name} (${g.hostName})`, g.address || t("names.noAddress")))),
-    tg.machines.length > 0 && h("optgroup", { label: t("names.group.machines") }, tg.machines.map((m) => option({ kind: "machine", id: m.id }, m.name, m.ip || t("machines.offline")))),
-    tg.machineApps.length > 0 && h("optgroup", { label: t("names.group.machineApps") }, tg.machineApps.map((a) => option({ kind: "machineApp", id: a.id, app: a.app }, `${a.title} (${a.machine})`, a.port ? String(a.port) : ""))),
-    h("optgroup", { label: t("names.group.other") }, h("option", { value: "address" }, t("names.address"))),
-  );
-  const start = existing?.target ?? preset?.target;
-  if (start && start.kind !== "address") {
-    if (![...to.options].some((o) => o.value === key(start))) to.prepend(option(start, existing?.title ?? start.name ?? start.id, ""));
-    to.value = key(start);
-  } else to.value = "address";
-  const host = h("input", { class: "mono", value: start?.kind === "address" ? start.host : "", placeholder: "192.168.1.1", spellcheck: false, autocapitalize: "none" });
-  const hostRow = field(t("names.host"), host, t("names.hostHint"));
+  const pick = targetPicker(tg, existing?.target ?? preset?.target, existing?.title, () => shape(true));
+  const { select: to, hostRow, key } = pick;
   const label = h("input", { class: "mono", value: existing?.label ?? (preset?.label ?? "").toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, ""), required: true, pattern: "[a-z0-9]([a-z0-9\\-]{0,61}[a-z0-9])?", spellcheck: false, autocapitalize: "none" });
   const port = h("input", { type: "number", min: 1, max: 65535, value: existing?.port ?? 80, required: true, class: "short mono" });
   const [https, httpsRow] = tickRow(t("names.https"), t("names.httpsHint"), existing?.https ?? false);
   const [protect, protectRow] = tickRow(t("names.protect"), t("names.protectHint"), existing?.protect ?? false);
   const shape = (picked) => {
-    hostRow.hidden = to.value !== "address";
-    host.required = to.value === "address";
+    pick.shape();
     // a machine's app has its own port: offered once it is chosen
     const app = to.value !== "address" && JSON.parse(to.value).kind === "machineApp" ? tg.machineApps.find((a) => key({ kind: "machineApp", id: a.id, app: a.app }) === to.value) : null;
     if (picked && app?.port) port.value = String(app.port);
@@ -13357,7 +13485,7 @@ async function domainNameDialog(existing, preset, after) {
   const send = async (e) => {
     e.preventDefault();
     error.textContent = "";
-    const target = to.value === "address" ? { kind: "address", host: host.value.trim() } : JSON.parse(to.value);
+    const target = pick.value();
     const payload = { label: label.value.trim().toLowerCase(), target, port: Number(port.value), https: https.checked, protect: protect.checked, allowed: existing?.allowed ?? "all" };
     try {
       await api(existing ? "PUT" : "POST", existing ? `/api/domains/${existing.label}` : "/api/domains", payload);

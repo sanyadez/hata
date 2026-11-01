@@ -20,6 +20,7 @@ import { networkInterfaces } from "node:os";
 import { record } from "./activity";
 import { bus } from "./bus";
 import { saveSettings, settings } from "./config";
+import { outsideOpenings } from "./forward";
 import { HOME_BRIDGE } from "./incus";
 import { cleanOutside, inNetworkOf, isPublic, OUTSIDE_CHAIN, OUTSIDE_HOOKS, outsideDown, outsideRules } from "./outside";
 import { installCommand, PATH, run } from "./packages";
@@ -825,7 +826,7 @@ export async function closeOutside(): Promise<void> {
     written = "none";
     return;
   }
-  const open = { wireguard: listeningPort() };
+  const open = { wireguard: listeningPort(), ports: outsideOpenings(settings.forwards) };
   const wanted = JSON.stringify([names, open]);
   for (const [tool, family] of [["iptables", "4"], ["ip6tables", "6"]] as const) {
     if (wanted !== written) {
