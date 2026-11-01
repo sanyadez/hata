@@ -1624,7 +1624,14 @@ img.broken { visibility: hidden; }
 .pg.arranging .pg-card > .pg-grip { pointer-events: auto; }
 .pg-card.pg-moving { z-index: 3; outline: 2px solid var(--accent); outline-offset: 1px; border-radius: var(--radius-lg); cursor: grabbing; }
 .pg-cell { border: 1px dashed var(--border-strong); border-radius: var(--radius-lg); opacity: 0.6; z-index: 0; }
-.pg-grip { position: absolute; right: 6px; bottom: 6px; z-index: 2; display: grid; place-items: center; width: 26px; height: 26px; padding: 0; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); cursor: nwse-resize; touch-action: none; }
+.pg-grip { position: absolute; right: 6px; bottom: 6px; z-index: 2; display: grid; place-items: center; width: 26px; height: 26px; padding: 0; border: 0; border-radius: var(--radius-sm); background: var(--accent); color: #1a1205; box-shadow: 0 1px 4px #0006; cursor: nwse-resize; touch-action: none; }
+.pg-edge { position: absolute; z-index: 2; pointer-events: auto; }
+.pg.arranging .pg-card > .pg-edge { pointer-events: auto; }
+.pg-edge-r { top: 8px; bottom: 8px; right: -4px; width: 10px; cursor: ew-resize; }
+.pg-edge-b { left: 8px; right: 8px; bottom: -4px; height: 10px; cursor: ns-resize; }
+.pg-edge::after { content: ""; position: absolute; border-radius: 2px; background: var(--accent); opacity: 0.55; }
+.pg-edge-r::after { top: 50%; left: 3px; width: 4px; height: 28px; margin-top: -14px; }
+.pg-edge-b::after { left: 50%; top: 3px; height: 4px; width: 28px; margin-left: -14px; }
 .pg-grip .ico { transform: rotate(45deg); width: 14px; height: 14px; }
 .pg-hint { position: absolute; right: 38px; bottom: 6px; z-index: 2; padding: 4px 10px; border-radius: var(--radius-sm); background: var(--text); color: var(--surface); font: 500 12px var(--font-mono); white-space: nowrap; }
 .pg-bar { position: sticky; top: 64px; z-index: 4; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 12px; padding: 10px 14px; border: 1px solid var(--accent); border-radius: var(--radius-md); background: var(--surface); }

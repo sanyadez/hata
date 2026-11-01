@@ -1697,7 +1697,7 @@ function gridCard(card, free) {
   const box = gridUi.at[card.key];
   const body = gridBody(card, box);
   if (!body) return null;
-  const el = h("div", { class: `pg-card pg-h${box.h}`, "data-card": card.key }, body, gridUi.arranging && h("button", { type: "button", class: "pg-grip", "aria-label": t("home.size") }, icon("arrow")));
+  const el = h("div", { class: `pg-card pg-h${box.h}`, "data-card": card.key }, body, gridUi.arranging && [h("span", { class: "pg-edge pg-edge-r", "data-axis": "w" }), h("span", { class: "pg-edge pg-edge-b", "data-axis": "h" }), h("button", { type: "button", class: "pg-grip", "aria-label": t("home.size") }, icon("arrow"))]);
   gridPosition(el, box, free);
   if (free) el.addEventListener("pointerdown", (e) => gridStart(e, card, el), true);
   return el;
@@ -1708,14 +1708,14 @@ function gridStart(e, card, el) {
   // the page's own dragging of tiles and blocks stays out of this
   e.stopPropagation();
   if (e.button !== 0 || (e.pointerType === "touch" && !gridUi.arranging)) return;
-  const grip = e.target.closest(".pg-grip");
+  const grip = e.target.closest(".pg-grip, .pg-edge");
   if (!grip && e.target.closest(".tile-open, button:not(.tile-main), input, select, textarea")) return;
   const pg = document.getElementById("pg");
   const rect = pg.getBoundingClientRect();
   const gap = 12;
   const cell = { w: (rect.width - gap * (GRID_COLS - 1)) / GRID_COLS + gap, h: 128 + gap };
   const box = gridUi.at[card.key];
-  const drag = { key: card.key, el, kind: gridKind(card), grip: !!grip, sx: e.clientX, sy: e.clientY, base: structuredClone(gridUi.at), moved: false, rect, cell, grabX: Math.floor((e.clientX - rect.left) / cell.w) - box.x, grabY: Math.floor((e.clientY - rect.top) / cell.h) - box.y };
+  const drag = { key: card.key, el, kind: gridKind(card), grip: !!grip, axis: grip?.dataset.axis ?? "", sx: e.clientX, sy: e.clientY, base: structuredClone(gridUi.at), moved: false, rect, cell, grabX: Math.floor((e.clientX - rect.left) / cell.w) - box.x, grabY: Math.floor((e.clientY - rect.top) / cell.h) - box.y };
   gridUi.drag = drag;
   const move = (ev) => gridMove(ev, drag);
   const end = (ev) => {
@@ -1742,8 +1742,9 @@ function gridMove(e, drag) {
   // the scroll of the page counts: the grid's place is read again
   const top = document.getElementById("pg").getBoundingClientRect().top;
   if (drag.grip) {
-    const w = Math.max(minW, Math.min(maxW, GRID_COLS - old.x, Math.floor((e.clientX - drag.rect.left) / drag.cell.w) - old.x + 1));
-    let hi = Math.max(minH, Math.min(maxH, Math.floor((e.clientY - top) / drag.cell.h) - old.y + 1));
+    // the corner changes both, an edge its own side
+    const w = drag.axis === "h" ? old.w : Math.max(minW, Math.min(maxW, GRID_COLS - old.x, Math.floor((e.clientX - drag.rect.left) / drag.cell.w) - old.x + 1));
+    let hi = drag.axis === "w" ? old.h : Math.max(minH, Math.min(maxH, Math.floor((e.clientY - top) / drag.cell.h) - old.y + 1));
     // a camera is never a strip
     if (drag.kind === "camera") hi = Math.max(hi, Math.ceil(w / 3));
     box = { ...old, w, h: hi };
