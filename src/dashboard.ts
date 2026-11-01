@@ -30,9 +30,9 @@ export interface Group {
  * the column beside them, a row below. A block may also be put away (`hidden`): it is offered again in
  * the "Add" menu.
  */
-export const WIDGETS = ["stats", "attention", "activity", "adblock"] as const;
+export const WIDGETS = ["stats", "attention", "activity", "adblock", "cameras"] as const;
 /** Not on the page until somebody adds it: it says nothing while nothing is being blocked */
-const OFFERED_ONLY = ["adblock"];
+const OFFERED_ONLY = ["adblock", "cameras"];
 export const ZONES = ["top", "side", "bottom"] as const;
 export type Zone = (typeof ZONES)[number];
 export type Widgets = Record<Zone, string[]> & { hidden: string[] };

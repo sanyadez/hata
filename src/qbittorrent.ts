@@ -6,20 +6,19 @@
  * browser too if it comes from the same address. So a refused sign-in is not tried again by itself: only
  * a restart of Hata or a change of the sign-in tries once more.
  */
-import { networkInterfaces } from "node:os";
 import { join } from "node:path";
 import { record } from "./activity";
 import { AppError, listApps } from "./apps";
 import { SECRETS_DIR } from "./config";
 import { readJsonFile, writeJsonAtomic } from "./fsutil";
 import { cleanUrl } from "./ha";
+import { appOfServer, cleanName, isHere, newId, portOf } from "./integration";
 import { cleanHashes, cleanLinks, isTorrentFile, isWebApiVersion, MAX_TORRENT_BYTES, readTorrent, sessionCookie, type Torrent, totalsOf, trouble, verbsOf } from "./qbit";
 
 const FILE = join(SECRETS_DIR, "qbittorrent.json");
 const ID_RE = /^[a-f0-9]{8}$/;
 const CALL_MS = 10_000;
 const LOOK_MS = 15_000;
-const NAME_MAX = 40;
 const DEFAULT_PORT = "8080";
 
 export interface Server {
@@ -150,13 +149,6 @@ export function startQbittorrent(): void {
 
 // --- What the pages are told ------------------------------------------------------------------------
 
-function isHere(url: string): boolean {
-  const host = new URL(url).hostname.replace(/^\[|\]$/g, "");
-  if (host === "localhost" || host === "127.0.0.1" || host === "::1") return true;
-  return Object.values(networkInterfaces()).some((list) => (list ?? []).some((a) => a.address === host));
-}
-const portOf = (url: string) => Number(new URL(url).port) || (url.startsWith("https:") ? 443 : 80);
-
 function summary(s: Server) {
   const l = liveOf(s);
   return {
@@ -193,11 +185,10 @@ export const qbitTrouble = () =>
   });
 
 /** What the tile of an installed app says: the app whose published port this server is */
-export function qbitOfApps(apps: { name: string; port?: string | number }[]) {
+export function qbitOfApps(apps: { name: string; port?: string | number | null }[]) {
   const out: Record<string, { id: string; online: boolean; down: number; up: number; active: number; total: number }> = {};
   for (const s of qbitServers()) {
-    if (!s.here) continue;
-    const app = apps.find((a) => String(a.port) === String(s.port));
+    const app = appOfServer(apps, s);
     if (app) out[app.name] = { id: s.id, online: s.online, down: s.totals.down, up: s.totals.up, active: s.totals.active, total: s.totals.total };
   }
   return out;
@@ -219,7 +210,6 @@ interface Input {
   password?: unknown;
 }
 
-const cleanName = (value: unknown, fallback: string) => (typeof value === "string" && value.trim() ? value.trim().slice(0, NAME_MAX) : fallback);
 const words = (value: unknown) => (typeof value === "string" ? value : "");
 
 export async function addQbit(input: Input, by: string) {
@@ -229,9 +219,7 @@ export async function addQbit(input: Input, by: string) {
   const user = words(input.user).trim();
   const password = words(input.password);
   const about = await signIn(url, user, password);
-  let id = "";
-  while (!id || state.servers.some((s) => s.id === id)) id = Array.from(crypto.getRandomValues(new Uint8Array(4)), (b) => b.toString(16).padStart(2, "0")).join("");
-  const s: Server = { id, name: cleanName(input.name, "qBittorrent"), url, user, password, added: Date.now(), by };
+  const s: Server = { id: newId(state.servers), name: cleanName(input.name, "qBittorrent"), url, user, password, added: Date.now(), by };
   state.servers.push(s);
   save();
   Object.assign(liveOf(s), about);

@@ -91,6 +91,7 @@ import {
 import { bus, type BusEvent } from "./bus";
 import { DATA_DIR, dropOldSecrets, listenAddress, saveSettings, settings, timezone, updateSettings } from "./config";
 import { arrange, cleanLayout, dropServer, haTiles, layoutText, parseLayoutText } from "./dashboard";
+import { addFrigate, cameraPicture, changeFrigate, eventPicture, frigateEvents, frigateFound, frigateOfApps, frigateServer, frigateServers, frigateTrouble, removeFrigate, startFrigate } from "./frigates";
 import { addQbit, addTorrents, changeQbit, qbitFound, qbitOfApps, qbitServer, qbitServers, qbitTorrents, qbitTrouble, removeQbit, removeTorrents, startQbittorrent, torrentsPower } from "./qbittorrent";
 import { act as haAct, addServer as addHa, allowProxy as haAllowProxy, changeServer as changeHa, discover as discoverHa, entities as haEntities, forgetUser as haForgetUser, homeAssistantTrouble, installUpdate as haInstallUpdate, makeBackup as haMakeBackup, removeServer as removeHa, renameEntity as haRename, server as haServer, servers as haServers, startHomeAssistant, tileStates as haTileStates, visibleTo as haVisibleTo } from "./homeassistant";
 import { sees as haSees } from "./ha";
@@ -1137,7 +1138,7 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
       site: { domain: siteDomain(), mode: settings.https.mode, local: localDomain() },
       // whether the assistant can be asked: the pages offer it next to what is wrong
       assistant: admin && assistantReady(assistantConfig()),
-      attention: admin ? notSnoozed(attention({ system, docker, apps, activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), exposed: exposedNics(), array: arrayTrouble(), shares: shareTrouble(), places: placesDown(), machines: awayMachines(), machineApps: onMachines, unused: unusedDisks(), filling: fillingUp(), pve: proxmoxTrouble(), ha: [...homeAssistantTrouble(), ...qbitTrouble()], raid: poolsTrouble(), containers: containersTrouble(), dns: [...dnsTrouble(), ...blockTrouble(), ...wildcardTrouble()] })) : [],
+      attention: admin ? notSnoozed(attention({ system, docker, apps, activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), exposed: exposedNics(), array: arrayTrouble(), shares: shareTrouble(), places: placesDown(), machines: awayMachines(), machineApps: onMachines, unused: unusedDisks(), filling: fillingUp(), pve: proxmoxTrouble(), ha: [...homeAssistantTrouble(), ...qbitTrouble(), ...frigateTrouble()], raid: poolsTrouble(), containers: containersTrouble(), dns: [...dnsTrouble(), ...blockTrouble(), ...wildcardTrouble()] })) : [],
       // how many items are put off: the list says so and leads to them
       attentionHidden: admin ? hiddenCount() : 0,
       // who signed in from where, and what was installed by whom, is the administrators' business
@@ -1160,6 +1161,8 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
       ha: { servers: haSeen, states: haTileStates(haTiles(dashboard)) },
       // qBittorrent: how many are connected, and what the tiles of the apps that run it say
       qbit: admin ? { count: qbitServers().length, apps: qbitOfApps(apps) } : null,
+      // Frigate: the servers with their cameras and latest events (the block on Home), and the apps that run it
+      frigate: admin ? { servers: frigateServers(), apps: frigateOfApps(apps) } : null,
       jobs: admin ? listJobs().filter((j) => j.status === "running").map(({ log: _, ...job }) => job) : [],
     });
   }
@@ -1996,6 +1999,10 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
   }
 
   // ---- Home Assistant: a press on a tile (members too), the rest for administrators ----
+  if (path.startsWith("/api/frigate")) {
+    const response = await frigateApi(req, url, user);
+    if (response) return response;
+  }
   if (path.startsWith("/api/qbit")) {
     const response = await qbittorrentApi(req, url, user);
     if (response) return response;
@@ -2591,6 +2598,32 @@ async function machineFiles(req: Request, url: URL, server: Server, id: string, 
     return json({ ok: true });
   }
   return fail(404, "request.notFound");
+}
+
+async function frigateApi(req: Request, url: URL, user: User): Promise<Response | null> {
+  const path = url.pathname;
+  const method = req.method;
+  const by = user.name;
+  const jpeg = (bytes: Buffer) => new Response(bytes, { headers: { "content-type": "image/jpeg", "cache-control": "no-store", "x-content-type-options": "nosniff" } });
+  if (path === "/api/frigate" && method === "GET") return json({ servers: frigateServers() });
+  if (path === "/api/frigate" && method === "POST") return json(await addFrigate(await body(req), by), 201);
+  if (path === "/api/frigate/found" && method === "GET") return json({ found: await frigateFound(language(url)) });
+  const m = /^\/api\/frigate\/([a-f0-9]{8})(\/.*)?$/.exec(path);
+  if (!m) return null;
+  const id = m[1]!;
+  const rest = m[2] ?? "";
+  if (rest === "" && method === "GET") return json(frigateServer(id));
+  if (rest === "" && method === "PATCH") return json(await changeFrigate(id, await body(req), by));
+  if (rest === "" && method === "DELETE") {
+    removeFrigate(id, by);
+    return json({ ok: true });
+  }
+  if (rest === "/events" && method === "GET") return json(await frigateEvents(id, { camera: url.searchParams.get("camera") ?? undefined, label: url.searchParams.get("label") ?? undefined, before: url.searchParams.get("before") ?? undefined, limit: url.searchParams.get("limit") ?? undefined }));
+  const camera = /^\/cameras\/([^/]+)\/latest\.jpg$/.exec(rest);
+  if (camera && method === "GET") return jpeg(await cameraPicture(id, decodeURIComponent(camera[1]!), Number(url.searchParams.get("h"))));
+  const event = /^\/events\/([^/]+)\/(thumbnail|snapshot)\.jpg$/.exec(rest);
+  if (event && method === "GET") return jpeg(await eventPicture(id, decodeURIComponent(event[1]!), event[2] as "thumbnail" | "snapshot"));
+  return null;
 }
 
 async function qbittorrentApi(req: Request, url: URL, user: User): Promise<Response | null> {
@@ -3199,6 +3232,7 @@ export async function serve(): Promise<void> {
   startContainers();
   startHomeAssistant();
   startQbittorrent();
+  startFrigate();
   startMachineUsers();
   startMachineGates();
   startDisks();
@@ -3227,7 +3261,7 @@ export async function serve(): Promise<void> {
   void refreshHttps();
   refreshLocalNames();
   startNotifications({
-    attention: async () => notSnoozed(attention({ system: systemStatus(), docker: await dockerInfo(), apps: await listApps("en"), activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), exposed: exposedNics(), array: arrayTrouble(), shares: shareTrouble(), places: placesDown(), machines: awayMachines(), machineApps: await machineTiles(machineList(), "en").catch(() => []), unused: unusedDisks(), filling: fillingUp(), pve: proxmoxTrouble(), ha: [...homeAssistantTrouble(), ...qbitTrouble()], raid: poolsTrouble(), containers: containersTrouble(), dns: [...dnsTrouble(), ...blockTrouble(), ...wildcardTrouble()] })),
+    attention: async () => notSnoozed(attention({ system: systemStatus(), docker: await dockerInfo(), apps: await listApps("en"), activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), exposed: exposedNics(), array: arrayTrouble(), shares: shareTrouble(), places: placesDown(), machines: awayMachines(), machineApps: await machineTiles(machineList(), "en").catch(() => []), unused: unusedDisks(), filling: fillingUp(), pve: proxmoxTrouble(), ha: [...homeAssistantTrouble(), ...qbitTrouble(), ...frigateTrouble()], raid: poolsTrouble(), containers: containersTrouble(), dns: [...dnsTrouble(), ...blockTrouble(), ...wildcardTrouble()] })),
     baseUrl: publicUrl,
     isAdmin: (id) => findUser(id)?.role === "admin",
   });
