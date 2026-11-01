@@ -1559,9 +1559,9 @@ function widgetDialog() {
 const GRID_COLS = 8;
 /** Smallest and largest size of every kind of card, width × height in cells */
 const GRID_LIMITS = {
-  stats: [2, 2, 8, 3], attention: [2, 2, 4, 4], activity: [2, 2, 4, 4], adblock: [2, 1, 4, 2], machine: [2, 1, 8, 2],
-  app: [1, 1, 2, 1], link: [1, 1, 2, 1], files: [1, 1, 3, 1], builtin: [1, 1, 2, 1], folder: [1, 1, 2, 2], ha: [1, 1, 2, 2],
-  torrents: [1, 1, 4, 3], camera: [1, 1, 6, 4], events: [1, 1, 4, 4],
+  stats: [2, 2, 8, 6], attention: [2, 2, 8, 8], activity: [2, 2, 8, 8], adblock: [2, 1, 4, 4], machine: [2, 1, 8, 4],
+  app: [1, 1, 4, 4], link: [1, 1, 4, 4], files: [1, 1, 4, 4], builtin: [1, 1, 4, 4], folder: [1, 1, 4, 4], ha: [1, 1, 4, 4],
+  torrents: [1, 1, 8, 6], camera: [1, 1, 8, 6], events: [1, 1, 8, 6],
 };
 const GRID_FIRST = { stats: [5, 3], attention: [3, 3], activity: [3, 2], adblock: [2, 2], machine: [3, 1] };
 const gridUi = { at: null, arranging: false, undo: [], entry: null, drag: null, cards: [] };
@@ -1628,6 +1628,23 @@ function gridSized(item) {
   return { ...item, size: size === "1x1" ? undefined : size };
 }
 
+const gridEdit = () => ((gridUi.entry = structuredClone(gridUi.at)), (gridUi.undo = []), (gridUi.arranging = true), paintGrid());
+const gridReset = () => (localStorage.removeItem("hata.gridTrial"), (gridUi.arranging = false), gridLoad(), paintGrid());
+const gridMenuEntries = () => (gridColumns() === GRID_COLS && !gridUi.arranging ? [{ label: t("grid.edit"), icon: "grid", run: gridEdit }] : []).concat(gridUi.arranging ? [] : [{ label: t("grid.reset"), icon: "refresh", run: gridReset }]);
+
+/** The right click on a card: the grid, and what the card itself offers */
+function gridCardMenu(e, card) {
+  e.preventDefault();
+  e.stopPropagation();
+  if (gridUi.arranging) return;
+  const at = { x: e.clientX, y: e.clientY };
+  const target = card.item && tileTarget(card.item);
+  menuAt(at, null, [
+    ...gridMenuEntries(),
+    card.item && { label: t("home.tileActions"), icon: "more", run: () => (card.item.type === "app" && !target?.machine ? appTileMenu(target, null, at) : tileMenu(card.item, at)) },
+  ]);
+}
+
 function renderGrid() {
   homeUi.widgets = {
     stats: statsBlock(),
@@ -1648,7 +1665,7 @@ function gridBar() {
     box,
     gridUi.arranging
       ? h("div", { class: "pg-bar" }, h("strong", null, t("grid.arranging")), h("span", { class: "muted small grow" }, t("grid.arrangingHint")), button(t("grid.undo"), { class: "small", disabled: !gridUi.undo.length, onclick: () => ((gridUi.at = gridUi.undo.pop()), paintGrid()) }, "refresh"), button(t("common.cancel"), { class: "small", onclick: () => ((gridUi.at = gridUi.entry), (gridUi.arranging = false), paintGrid()) }), button(t("grid.done"), { class: "small primary", onclick: () => (gridSave(), (gridUi.arranging = false), paintGrid()) }, "check"))
-      : h("div", { class: "page-head" }, h("div", null, h("h1", null, t("grid.title")), h("p", { class: "meta" }, t("grid.lead"))), h("div", { class: "row-actions" }, button(t("grid.reset"), { onclick: () => (localStorage.removeItem("hata.gridTrial"), gridLoad(), paintGrid()) }), wide && button(t("grid.arrange"), { class: "primary", onclick: () => ((gridUi.entry = structuredClone(gridUi.at)), (gridUi.undo = []), (gridUi.arranging = true), paintGrid()) }, "grid"))),
+      : h("div", { class: "page-head" }, h("div", null, h("h1", null, t("grid.title")), h("p", { class: "meta" }, t(wide ? "grid.leadWide" : "grid.lead")))),
   );
 }
 
@@ -1677,7 +1694,8 @@ function paintGrid() {
   pg.className = "pg" + (gridUi.arranging ? " arranging" : "") + (free ? "" : " flowing");
   pg.style.setProperty("--pg-cols", String(cols));
   const cards = free ? gridUi.cards : [...gridUi.cards].sort((a, b) => gridUi.at[a.key].y - gridUi.at[b.key].y || gridUi.at[a.key].x - gridUi.at[b.key].x);
-  const rows = Math.max(...Object.values(gridUi.at).map((b) => b.y + b.h)) + 2;
+  // room to pull a card further down than anything stands yet
+  const rows = Math.max(...Object.values(gridUi.at).map((b) => b.y + b.h)) + 6;
   const cells = gridUi.arranging ? Array.from({ length: rows * cols }, (_, i) => {
     const cell = h("div", { class: "pg-cell" });
     cell.style.gridArea = `${Math.floor(i / cols) + 1} / ${(i % cols) + 1}`;
@@ -1700,6 +1718,7 @@ function gridCard(card, free) {
   const el = h("div", { class: `pg-card pg-h${box.h}`, "data-card": card.key }, body, gridUi.arranging && ["n", "e", "s", "w", "ne", "se", "sw", "nw"].map((side) => h("span", { class: `pg-side pg-${side}`, "data-side": side })));
   gridPosition(el, box, free);
   if (free) el.addEventListener("pointerdown", (e) => gridStart(e, card, el), true);
+  el.addEventListener("contextmenu", (e) => gridCardMenu(e, card), true);
   return el;
 }
 
@@ -1717,8 +1736,18 @@ function gridStart(e, card, el) {
   const box = gridUi.at[card.key];
   const drag = { key: card.key, el, kind: gridKind(card), side: grip?.dataset.side ?? "", sx: e.clientX, sy: e.clientY, base: structuredClone(gridUi.at), moved: false, rect, cell, grabX: Math.floor((e.clientX - rect.left) / cell.w) - box.x, grabY: Math.floor((e.clientY - rect.top) / cell.h) - box.y };
   gridUi.drag = drag;
-  const move = (ev) => gridMove(ev, drag);
+  const move = (ev) => ((drag.last = ev), gridMove(ev, drag));
+  // near the window's edge the page follows the pointer: a card can be pulled past what is on the screen
+  const follow = setInterval(() => {
+    if (!drag.last) return;
+    const y = drag.last.clientY;
+    const by = y > innerHeight - 70 ? 16 : y < 130 ? -16 : 0;
+    if (!by) return;
+    scrollBy(0, by);
+    gridMove(drag.last, drag);
+  }, 30);
   const end = (ev) => {
+    clearInterval(follow);
     window.removeEventListener("pointermove", move);
     window.removeEventListener("pointerup", end);
     window.removeEventListener("keydown", end);
@@ -10576,6 +10605,7 @@ function pageMenu(at) {
   const walls = ["", ...(state.wallpapers ?? []), ...(look.custom ? ["custom"] : [])];
   const nextWall = walls[(walls.indexOf(look.wallpaper ?? "") + 1) % walls.length];
   menuAt(at, menuHeader("Hata", state.version, "home"), [
+    ...(admin && state.route.view === "grid" ? gridMenuEntries() : []),
     admin && state.route.view === "home" && state.overview && { label: t("menu.addHere"), icon: "plus", run: () => addDialog() },
     admin && state.route.view === "home" && state.overview && { label: t("menu.dashboardConfig"), icon: "code", run: layoutTextDialog },
     admin && { label: t("menu.themeLight"), icon: "sun", on: theme === "light", run: () => changeLook({ background: BACKGROUNDS[6] }) },
