@@ -163,6 +163,8 @@ textarea.code.page { min-height: 60dvh; background: var(--surface); padding: 16p
 /* a disk of an array: its device, the disk it lies on, what is wrong with it */
 .raid-member { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 8px; min-height: 26px; }
 .raid-member .chip.bad { color: var(--danger); border-color: color-mix(in srgb, var(--danger) 40%, transparent); }
+/* a long line in a chip wraps: on a phone it would run past the card */
+p.small > .chip { height: auto; min-height: 24px; padding-block: 2px; white-space: normal; }
 .chip.ok { border-color: transparent; color: var(--ok); padding: 0; }
 .chip.ok .ico { width: 13px; height: 13px; }
 .chip.warn { border-color: transparent; background: var(--warn-soft); color: var(--warn); }
