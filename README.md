@@ -328,9 +328,16 @@ Early development. What works today:
   NetworkManager, mergerfs, SnapRAID and the rest — with what it is for, whether it is installed and in
   which version, and the button that installs a missing one or removes one you do not want (not while
   something of Hata's stands on it);
+- the home's DNS server, off until you turn it on: Hata's own names and names of your own answered by itself,
+  the rest from the servers you choose, encrypted if you wish;
+- ad blocking in that server, for every device that asks it — apps and TVs too: lists you choose by address
+  (hosts files, plain lists, AdGuard's and Pi-hole's syntax; well-known ones are offered, none is on by itself)
+  brought up to date daily, rules of your own that beat every list, a log of what was asked with "Allow" and
+  "Block", a pause, devices left out, a block for Home; moving in from Pi-hole (a Teleporter archive or
+  `gravity.db`) or AdGuard Home (`AdGuardHome.yaml`), also straight from such an app installed in Hata;
 - English and Ukrainian UI, light and dark, phone-friendly.
 
-Not there yet: wildcard certificates (DNS challenge), share links for files, a second copy of the backups
+Not there yet: share links for files, a second copy of the backups
 in Google Drive or Box.
 
 ## Screenshots

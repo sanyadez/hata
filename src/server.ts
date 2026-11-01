@@ -99,7 +99,8 @@ import { adoptProject, casaosState, containerDraft, importCount, importList, mov
 import { accessOf, dropAccess, dropUser, gateTarget, guard, guardsOf, mayOpen, otherPorts, MAX_APP_BODY, page, passToApp, setAccess, startGates, tunnelHandlers } from "./gate";
 import { addName, changeName, domainsReport, nameOf as domainName, onNamesChanged, removeName, upstream as domainUpstream } from "./domains";
 import type { DomainName } from "./names";
-import { addRecord, DnsError, dnsReport, dnsTrouble, removeRecord, setDns, startDns } from "./dnsserver";
+import { addRecord, applyImport, dnsClients, DnsError, dnsReport, dnsTrouble, removeRecord, setDns, startDns } from "./dnsserver";
+import { addList, BlockError, blockLog, blockReport, blockSummary, blockTrouble, changeList, checkName, importableApps, pauseBlock, planFromApp, planFromFile, refreshLists, removeList, ruleForName, setBlock, setDevice, setRules, startBlocker } from "./dnsblocker";
 import { addForward, changeForward, forwardsReport, onForwardsChanged, removeForward, startForwards } from "./forwards";
 import { parseDockerRun } from "./dockerrun";
 import { cannotMove, finishMove, moveState } from "./relocate";
@@ -747,7 +748,7 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
   if (write && !sameOrigin(req, url)) return fail(403, "request.crossSite");
   const ip = clientIp(req, server);
   // the API takes small JSON bodies; the server's own limit is the apps' (they upload files through it)
-  if (write && path !== "/api/files/upload" && !/^\/api\/(machines|proxmox)\/[a-f0-9]{8}\/files\/upload$/.test(path) && path !== "/api/containers/discs/upload" && path !== "/api/appearance/wallpaper" && Number(req.headers.get("content-length") ?? 0) > MAX_API_BODY) return fail(413, "request.tooLarge");
+  if (write && path !== "/api/files/upload" && !/^\/api\/(machines|proxmox)\/[a-f0-9]{8}\/files\/upload$/.test(path) && path !== "/api/containers/discs/upload" && path !== "/api/dns/block/import/file" && path !== "/api/appearance/wallpaper" && Number(req.headers.get("content-length") ?? 0) > MAX_API_BODY) return fail(413, "request.tooLarge");
   const cookie = (token: string) => sessionCookie(token, requestProto(req) === "https", cookieDomain(requestHost(req)));
   const client = { ip, userAgent: req.headers.get("user-agent") ?? "" };
 
@@ -1120,11 +1121,12 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
       docker,
       apps,
       arch: ARCH,
+      adblock: admin ? blockSummary() : null,
       // with a domain, apps are opened at <label>.<domain> when Hata itself is opened by that domain
       site: { domain: siteDomain(), mode: settings.https.mode, local: localDomain() },
       // whether the assistant can be asked: the pages offer it next to what is wrong
       assistant: admin && assistantReady(assistantConfig()),
-      attention: admin ? notSnoozed(attention({ system, docker, apps, activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), exposed: exposedNics(), array: arrayTrouble(), shares: shareTrouble(), places: placesDown(), machines: awayMachines(), machineApps: onMachines, unused: unusedDisks(), filling: fillingUp(), pve: proxmoxTrouble(), ha: homeAssistantTrouble(), raid: poolsTrouble(), containers: containersTrouble(), dns: [...dnsTrouble(), ...wildcardTrouble()] })) : [],
+      attention: admin ? notSnoozed(attention({ system, docker, apps, activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), exposed: exposedNics(), array: arrayTrouble(), shares: shareTrouble(), places: placesDown(), machines: awayMachines(), machineApps: onMachines, unused: unusedDisks(), filling: fillingUp(), pve: proxmoxTrouble(), ha: homeAssistantTrouble(), raid: poolsTrouble(), containers: containersTrouble(), dns: [...dnsTrouble(), ...blockTrouble(), ...wildcardTrouble()] })) : [],
       // how many items are put off: the list says so and leads to them
       attentionHidden: admin ? hiddenCount() : 0,
       // who signed in from where, and what was installed by whom, is the administrators' business
@@ -1365,6 +1367,72 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
 
   if (path === "/api/local" && method === "GET") return json({ ...(await localNamesStatus()), port: listenAddress().port });
 
+  if (path.startsWith("/api/dns/block")) {
+    const report = () => json(blockReport(dnsClients()));
+    try {
+      if (path === "/api/dns/block" && method === "GET") return report();
+      if (path === "/api/dns/block" && method === "PUT") {
+        await setBlock(await body(req), user.name);
+        return report();
+      }
+      if (path === "/api/dns/block/pause" && method === "POST") {
+        pauseBlock((await body(req)).minutes, user.name);
+        return report();
+      }
+      if (path === "/api/dns/block/refresh" && method === "POST") {
+        refreshLists();
+        return report();
+      }
+      if (path === "/api/dns/block/lists" && method === "POST") {
+        addList(await body(req), user.name);
+        return report();
+      }
+      const list = /^\/api\/dns\/block\/lists\/([a-z0-9]{1,16})(\/refresh)?$/.exec(path);
+      if (list && list[2] && method === "POST") {
+        refreshLists(list[1]!);
+        return report();
+      }
+      if (list && !list[2] && method === "PATCH") {
+        changeList(list[1]!, await body(req), user.name);
+        return report();
+      }
+      if (list && !list[2] && method === "DELETE") {
+        removeList(list[1]!, user.name);
+        return report();
+      }
+      if (path === "/api/dns/block/rules" && method === "PUT") {
+        setRules((await body(req)).text, user.name);
+        return report();
+      }
+      if (path === "/api/dns/block/name" && method === "POST") {
+        const b = await body(req);
+        ruleForName(b.name, b.allow === true, user.name);
+        return report();
+      }
+      if (path === "/api/dns/block/device" && method === "PUT") {
+        setDevice(await body(req), user.name);
+        return report();
+      }
+      if (path === "/api/dns/block/log" && method === "GET") return json(blockLog({ q: url.searchParams.get("q") ?? "", outcome: url.searchParams.get("outcome") ?? "", client: url.searchParams.get("client") ?? "", limit: Number(url.searchParams.get("limit") ?? 100) }));
+      if (path === "/api/dns/block/check" && method === "GET") return json(checkName(url.searchParams.get("name"), url.searchParams.get("client"), Number(url.searchParams.get("type") ?? 1)));
+      if (path === "/api/dns/block/import/apps" && method === "GET") return json(await importableApps());
+      if (path === "/api/dns/block/import/file" && method === "POST") {
+        if (Number(req.headers.get("content-length") ?? 0) > 1024 * 1024 * 1024) return fail(413, "request.tooLarge");
+        server.timeout(req, 0);
+        return json(await planFromFile(new Uint8Array(await req.arrayBuffer())));
+      }
+      if (path === "/api/dns/block/import/app" && method === "POST") return json(planFromApp((await body(req)).name));
+      if (path === "/api/dns/block/import/apply" && method === "POST") {
+        const b = await body(req);
+        await applyImport(String(b.id ?? ""), (b.parts ?? {}) as Record<string, boolean>, user.name);
+        return report();
+      }
+    } catch (e) {
+      if (e instanceof BlockError) return fail(400, e.code, e.detail);
+      if (e instanceof DnsError) return fail(400, e.code, e.detail);
+      throw e;
+    }
+  }
   if (path.startsWith("/api/dns")) {
     try {
       if (path === "/api/dns" && method === "GET") return json(dnsReport(clientIp(req, server)));
@@ -3097,11 +3165,12 @@ export async function serve(): Promise<void> {
   void refreshHttps();
   refreshLocalNames();
   startNotifications({
-    attention: async () => notSnoozed(attention({ system: systemStatus(), docker: await dockerInfo(), apps: await listApps("en"), activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), exposed: exposedNics(), array: arrayTrouble(), shares: shareTrouble(), places: placesDown(), machines: awayMachines(), machineApps: await machineTiles(machineList(), "en").catch(() => []), unused: unusedDisks(), filling: fillingUp(), pve: proxmoxTrouble(), ha: homeAssistantTrouble(), raid: poolsTrouble(), containers: containersTrouble(), dns: [...dnsTrouble(), ...wildcardTrouble()] })),
+    attention: async () => notSnoozed(attention({ system: systemStatus(), docker: await dockerInfo(), apps: await listApps("en"), activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), exposed: exposedNics(), array: arrayTrouble(), shares: shareTrouble(), places: placesDown(), machines: awayMachines(), machineApps: await machineTiles(machineList(), "en").catch(() => []), unused: unusedDisks(), filling: fillingUp(), pve: proxmoxTrouble(), ha: homeAssistantTrouble(), raid: poolsTrouble(), containers: containersTrouble(), dns: [...dnsTrouble(), ...blockTrouble(), ...wildcardTrouble()] })),
     baseUrl: publicUrl,
     isAdmin: (id) => findUser(id)?.role === "admin",
   });
   onNamesChanged(() => void refreshHttps());
+  startBlocker();
   startDns();
   onForwardsChanged(() => void closeOutside().catch(() => {}));
   // Incus's own devices are there already; Hata's relays start a little later, once the targets are looked at

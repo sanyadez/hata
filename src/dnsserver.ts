@@ -14,7 +14,9 @@ import { record } from "./activity";
 import type { AttentionItem } from "./attention";
 import { saveSettings, settings } from "./config";
 import { siteDomain } from "./site";
-import { aged, challengeAnswer, challengeName, cleanDns, cleanRecord, keepFor, loopName, nameservers, ownAnswer, queryFor, RCODE, readAsk, reply, truncated, TYPE, upstreamsOf, withId, type DnsSettings, type Upstream } from "./dns";
+import { aged, challengeAnswer, challengeName, cleanDns, cleanRecord, ipv4, ipv6, keepFor, loopName, nameData, nameservers, OWN_TTL, ownAnswer, queryFor, RCODE, readAsk, recordsOf, reply, truncated, txtData, TYPE, upstreamsOf, withId, type Answer, type Ask, type DnsSettings, type Upstream } from "./dns";
+import { blockedAnswer, type Rewrite } from "./dnsblock";
+import { blockFor, blocking, note, takePlan, type ImportParts } from "./dnsblocker";
 import { homeLinks } from "./mdns";
 import { isPublic } from "./outside";
 import { PATH, run } from "./packages";
@@ -34,7 +36,7 @@ const listeners = new Map<string, Listener>();
 /** Addresses that could not be listened on, with why and who holds the port */
 const failed = new Map<string, { error: string; holder: string }>();
 const cache = new Map<string, { at: number; keep: number; packet: Uint8Array }>();
-const stats = { queries: 0, cached: 0, own: 0, upstream: 0, failed: 0, refused: 0, since: Date.now() };
+const stats = { queries: 0, cached: 0, own: 0, upstream: 0, failed: 0, refused: 0, blocked: 0, since: Date.now() };
 /** Who asked lately: the page tells a device whether it uses Hata */
 const clients = new Map<string, { count: number; last: number }>();
 /** The upstream servers: when each last answered or failed, and the last failure */
@@ -172,18 +174,39 @@ export async function answer(packet: Uint8Array, from: string, here: string, tcp
   const own = ownAnswer(ask, { domains: domains(), records: settings.dns.records, hata: here });
   if (own) {
     stats.own++;
+    note(ask.name, ask.type, asker, "own");
     return reply(packet, ask, own.rcode, own.answers);
   }
+  // Hata's own names above are never blocked: nothing on a list may take the home's way to Hata
+  const hit = ask.cls === 1 ? blockFor(ask.name, ask.type, asker) : null;
+  if (hit?.action === "block") return blocked(packet, ask, asker, hit);
+  if (hit?.action === "rewrite") {
+    note(ask.name, ask.type, asker, "rewritten", hit);
+    return rewritten(packet, ask, hit.rewrite!, here, tcp);
+  }
+  // an allowed name is taken at its word; for any other the name its answer leads to may be on a list too
+  const cloaked = (p: Uint8Array) => {
+    if (hit || !blocking()) return null;
+    for (const r of recordsOf(p)) {
+      const found = r.target ? blockFor(r.target, ask.type, asker) : null;
+      if (found?.action === "block") return found;
+    }
+    return null;
+  };
   const key = `${ask.name}|${ask.type}|${ask.cls}`;
   const kept = cache.get(key);
   const now = Date.now();
   if (kept && now - kept.at < kept.keep * 1000) {
+    const behind = cloaked(kept.packet);
+    if (behind) return blocked(packet, ask, asker, behind);
     stats.cached++;
+    note(ask.name, ask.type, asker, hit ? "allowed" : "passed", hit);
     return withId(aged(kept.packet, Math.floor((now - kept.at) / 1000)), ask.id);
   }
   const got = await askUpstream(packet, tcp);
   if (!got) {
     stats.failed++;
+    note(ask.name, ask.type, asker, "failed");
     return reply(packet, ask, RCODE.SERVFAIL);
   }
   stats.upstream++;
@@ -192,7 +215,32 @@ export async function answer(packet: Uint8Array, from: string, here: string, tcp
     if (cache.size >= CACHE_MAX) cache.delete(cache.keys().next().value!);
     cache.set(key, { at: now, keep, packet: got });
   }
+  const behind = cloaked(got);
+  if (behind) return blocked(packet, ask, asker, behind);
+  note(ask.name, ask.type, asker, hit ? "allowed" : "passed", hit);
   return withId(got, ask.id);
+}
+
+function blocked(packet: Uint8Array, ask: Ask, asker: string, hit: NonNullable<ReturnType<typeof blockFor>>): Uint8Array {
+  stats.blocked++;
+  note(ask.name, ask.type, asker, "blocked", hit);
+  const made = blockedAnswer(ask.type, settings.dnsBlock.mode);
+  return reply(packet, ask, made.rcode, made.answers);
+}
+
+/** The answer of a `$dnsrewrite`. A name given instead is resolved here: `reply` answers under the name asked. */
+async function rewritten(packet: Uint8Array, ask: Ask, w: Rewrite, here: string, tcp: boolean): Promise<Uint8Array> {
+  if ("rcode" in w) return reply(packet, ask, w.rcode);
+  const of = (type: number, data: number[] | null): Answer[] => (data ? [{ type, ttl: OWN_TTL, data }] : []);
+  if (w.type === "A") return reply(packet, ask, RCODE.OK, ask.type === TYPE.A || ask.type === TYPE.ANY ? of(TYPE.A, ipv4(w.value)) : []);
+  if (w.type === "AAAA") return reply(packet, ask, RCODE.OK, ask.type === TYPE.AAAA || ask.type === TYPE.ANY ? of(TYPE.AAAA, ipv6(w.value)) : []);
+  if (w.type === "TXT") return reply(packet, ask, RCODE.OK, ask.type === TYPE.TXT ? of(TYPE.TXT, txtData(w.value)) : []);
+  if (ask.type !== TYPE.A && ask.type !== TYPE.AAAA) return reply(packet, ask, RCODE.OK, of(TYPE.CNAME, nameData(w.value)));
+  const local = ownAnswer({ ...ask, name: w.value }, { domains: domains(), records: settings.dns.records, hata: here });
+  if (local) return reply(packet, ask, local.rcode, local.answers);
+  const got = await askUpstream(queryFor(w.value, ask.type, Math.floor(Math.random() * 65535)), tcp);
+  if (!got) return reply(packet, ask, RCODE.SERVFAIL);
+  return reply(packet, ask, RCODE.OK, recordsOf(got).filter((r) => r.type === ask.type).map((r) => ({ type: r.type, ttl: Math.min(r.ttl, 3600), data: r.data })));
 }
 
 function listen(address: string): Promise<Listener> {
@@ -325,6 +373,25 @@ export function removeRecord(name: string, type: string, by: string): void {
   settings.dns = { ...settings.dns, records: settings.dns.records.filter((r) => !(r.name === name && r.type === type)) };
   saveSettings();
   record("dns.recordRemoved", { user: by, detail: name });
+}
+
+/** Who asked lately, for the page of blocking */
+export const dnsClients = () => [...clients.entries()].map(([address, c]) => ({ address, ...c }));
+
+/** What a move from Pi-hole or AdGuard Home brings for the server itself; the rest goes to the blocking */
+export async function applyImport(id: string, parts: ImportParts, by: string): Promise<void> {
+  const { records, upstream } = takePlan(id, parts, by);
+  let list = settings.dns.records;
+  for (const r of records) {
+    const clean = cleanRecord(r);
+    if (clean && !list.some((x) => x.name === clean.name && x.type === clean.type)) list = [...list, clean];
+  }
+  settings.dns = { ...settings.dns, records: list };
+  saveSettings();
+  if (upstream) {
+    const next = upstream.preset ? { upstream: upstream.preset, doh: upstream.doh === true } : { upstream: "custom", servers: upstream.servers ?? [] };
+    await setDns(next, by);
+  }
 }
 
 /** Everything the page shows; `ip` — the address the page's own request came from */

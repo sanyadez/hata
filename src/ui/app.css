@@ -1430,3 +1430,21 @@ body:has(.assistant.paged) > .assistant-fab { display: none; }
 .screen-box { flex: 1; min-height: 0; display: flex; background: #000; }
 .screen-actions { display: flex; gap: 6px; }
 #hidden { scroll-margin-top: 84px; }
+
+/* blocking by name */
+.adblock-list { align-items: flex-start; }
+.adblock-list, .adblock-list .grow { min-width: 0; }
+.adblock-url { overflow-wrap: anywhere; }
+.adblock-list input[type="checkbox"] { margin-top: 4px; }
+.adblock-filter { display: flex; flex-wrap: wrap; gap: 8px; }
+.adblock-filter > * { flex: 1 1 150px; width: auto; min-width: 0; }
+.adblock-filter input[type="search"] { flex: 2 1 200px; }
+.adblock-log td:nth-child(-n+2) { white-space: nowrap; }
+.adblock-log td:nth-child(n+3) { overflow-wrap: anywhere; }
+.adblock-log th:last-child, .adblock-log td:last-child { width: 1%; white-space: nowrap; }
+.adblock-why { max-width: 42ch; }
+.adblock-outcome { font-weight: 600; }
+.adblock-outcome.blocked, .adblock-outcome.failed { color: var(--danger); }
+.adblock-outcome.allowed, .adblock-outcome.rewritten { color: var(--accent-text); }
+.adblock-outcome.passed, .adblock-outcome.own { color: var(--muted); }
+.adblock-numbers strong { font-size: 1.5rem; }

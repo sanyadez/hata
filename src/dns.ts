@@ -166,6 +166,31 @@ export function aged(p: Uint8Array, seconds: number): Uint8Array {
   return out;
 }
 
+/** The records of an answer's answer section; the data of a CNAME read as a name, of anything else as bytes */
+export function recordsOf(p: Uint8Array): { type: number; ttl: number; data: number[]; target?: string }[] {
+  if (p.length < 12) return [];
+  const v = view(p);
+  const out: { type: number; ttl: number; data: number[]; target?: string }[] = [];
+  let pos = 12;
+  for (let i = 0; i < v.getUint16(4); i++) {
+    pos = skipName(p, pos);
+    if (pos < 0 || pos + 4 > p.length) return out;
+    pos += 4;
+  }
+  for (let i = 0; i < v.getUint16(6); i++) {
+    pos = skipName(p, pos);
+    if (pos < 0 || pos + 10 > p.length) return out;
+    const type = v.getUint16(pos);
+    const ttl = v.getUint32(pos + 4);
+    const size = v.getUint16(pos + 8);
+    if (pos + 10 + size > p.length) return out;
+    const target = type === TYPE.CNAME ? readName(p, pos + 10)?.toLowerCase().replace(/\.$/, "") : undefined;
+    out.push({ type, ttl, data: [...p.subarray(pos + 10, pos + 10 + size)], ...(target ? { target } : {}) });
+    pos += 10 + size;
+  }
+  return out;
+}
+
 // --- What is answered here ---------------------------------------------------------------------------
 
 /** A record of the person's: a name of the home network and the address it stands for */
