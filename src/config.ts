@@ -7,6 +7,7 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { cleanLayout, type Layout } from "./dashboard";
 import { cleanOutside } from "./outside";
+import { cleanDns, DNS_DEFAULTS, type DnsSettings } from "./dns";
 import { cleanForwards, type Forward } from "./forward";
 import { cleanNames, type DomainName } from "./names";
 import { cleanMachineShares, cleanShares, type MachineShare, type Share } from "./smbconf";
@@ -89,6 +90,8 @@ export interface Settings {
   names: DomainName[];
   /** Ports of this server passed on to containers, guests, machines, addresses (`forward.ts`) */
   forwards: Forward[];
+  /** Hata as the home's DNS server (`dns.ts`) */
+  dns: DnsSettings;
   /**
    * The name on the home network, and `<app>.<name>` for every app. One ending in `.local` Hata answers
    * for itself over multicast DNS; any other (`hata.lan`) the home's own DNS has to point here.
@@ -234,6 +237,7 @@ const DEFAULTS: Settings = {
   shares: [],
   names: [],
   forwards: [],
+  dns: DNS_DEFAULTS,
   machineShares: {},
   dashboard: cleanLayout(null),
   appearance: DEFAULT_APPEARANCE,
@@ -280,6 +284,7 @@ export const settings: Settings = {
   shares: cleanShares(saved.shares),
   names: cleanNames(saved.names),
   forwards: cleanForwards(saved.forwards),
+  dns: cleanDns(saved.dns),
   machineShares: cleanMachineShares(saved.machineShares),
   dashboard: cleanLayout(saved.dashboard),
   appearance: cleanAppearance(saved.appearance),

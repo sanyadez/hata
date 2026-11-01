@@ -2039,6 +2039,7 @@ function attentionItem(item) {
     (item.code.startsWith("smart.") || item.code === "disk.filling" || item.code.startsWith("array.") || item.code.startsWith("raid.")) && open("#/settings/storage"),
     (item.code.startsWith("internet.") || item.code === "network.exposed") && open("#/settings/network"),
     item.code.startsWith("share.") && open("#/settings/shares"),
+    item.code.startsWith("dns.") && open("#/settings/dns"),
     item.code === "netplace.down" && open("#/settings/storage"),
     item.code === "machine.away" && open(`#/machines/${item.detail.id}`),
     item.code.startsWith("containers.") && state.route.view !== "containers" && open("#/containers"),
@@ -11049,6 +11050,7 @@ const SECTIONS = [
   { id: "network", icon: "network", admin: true },
   { id: "remote", icon: "globe", admin: true },
   { id: "https", icon: "lock", admin: true },
+  { id: "dns", icon: "globe", admin: true },
   { id: "notifications", icon: "bell", admin: true },
   { id: "agents", icon: "key", admin: true },
   { id: "assistant", icon: "chat", admin: true },
@@ -11469,6 +11471,7 @@ function settingsSection(section) {
     ];
   }
   if (section === "https") return httpsSection(save, error);
+  if (section === "dns") return dnsSection();
   if (section === "notifications") return notificationsSection();
   if (section === "storage") return storageSection();
   if (section === "shares") return sharesSection();
@@ -13527,6 +13530,131 @@ async function domainNameDialog(existing, preset, after) {
     ),
   );
   label.focus();
+}
+
+// --- DNS server -------------------------------------------------------------------------------------
+
+const DNS_UPSTREAMS = ["system", "quad9", "cloudflare", "google", "adguard", "custom"];
+
+/** Hata as the home's DNS server: on or off, where it listens, where the rest goes, the names it answers */
+function dnsSection() {
+  const box = h("div", { class: "stack" }, h("section", { class: "card pad" }, h("p", { class: "muted" }, "…")));
+  let alive = true;
+  cleanups.push(() => (alive = false));
+  const load = async () => {
+    try {
+      const d = await api("GET", "/api/dns");
+      if (alive) paintDns(box, d, load);
+    } catch (e) {
+      put(box, h("section", { class: "card pad" }, h("p", { class: "error" }, errorText(e))));
+    }
+  };
+  void load();
+  return [box];
+}
+
+function paintDns(box, d, load) {
+  const s = d.settings;
+  const error = h("p", { class: "error", role: "alert" });
+  const send = async (patch, el) => {
+    if (el) el.disabled = true;
+    error.textContent = "";
+    try {
+      paintDns(box, await api("PUT", "/api/dns", patch), load);
+    } catch (e) {
+      error.textContent = errorText(e);
+      if (el) el.disabled = false;
+    }
+  };
+  const when = (ts) => (ts ? new Date(ts).toLocaleTimeString(state.lang, { hour: "2-digit", minute: "2-digit" }) : "—");
+  const address = d.listening[0] ?? d.wanted[0] ?? location.hostname;
+  // on or off, where it listens, and whether this device asks it
+  const status = h(
+    "section",
+    { class: "card pad stack" },
+    h("div", { class: "section-head" }, h("h2", null, t("dns.title"), " ", s.enabled && h("span", { class: "state " + (d.failed.length ? "restarting" : "running") }, t(d.failed.length ? "dns.partly" : "dns.working"))), h("div", { class: "actions" }, button(t(s.enabled ? "dns.turnOff" : "dns.turnOn"), { class: s.enabled ? "" : "primary", onclick: (e) => (s.enabled ? confirmDnsOff(() => send({ enabled: false })) : send({ enabled: true }, e.currentTarget)) }, "power"))),
+    h("p", { class: "muted small" }, t("dns.lead")),
+    !s.enabled && h("ul", { class: "muted small" }, ["router", "names", "split", "wg"].map((k) => h("li", null, t("dns.what." + k)))),
+    s.enabled && d.listening.length > 0 && settingRow(t("dns.listening"), "", h("span", { class: "mono" }, d.listening.map((a) => `${a}:${d.port}`).join(", "))),
+    ...d.failed.map((f) => h("p", { class: "banner small" }, t(f.holder ? "dns.failedHolder" : "dns.failed", { address: f.address, holder: f.holder, error: f.error }))),
+    s.enabled && h("p", { class: d.you.seen ? "banner small ok" : "banner small" }, t(d.you.seen ? "dns.youUse" : "dns.youDont", { address: d.you.address, when: when(d.you.seen) })),
+    s.enabled && h("div", { class: "stack-s" }, h("strong", null, t("dns.routerTitle")), h("p", { class: "muted small" }, t("dns.router", { address })), h("p", { class: "muted small" }, t("dns.routerOne"))),
+    error,
+  );
+  // where the questions not answered here go
+  const choice = h("select", null, DNS_UPSTREAMS.map((u) => h("option", { value: u, selected: s.upstream === u }, t("dns.up." + u))));
+  const [doh, dohRow] = tickRow(t("dns.doh"), t("dns.dohHint"), s.doh);
+  const servers = h("textarea", { rows: 3, class: "mono", placeholder: "9.9.9.9\nhttps://dns.example/dns-query", spellcheck: false }, s.servers.join("\n"));
+  const serversRow = field(t("dns.servers"), servers, t("dns.serversHint"));
+  const shape = () => {
+    dohRow.hidden = ["system", "custom"].includes(choice.value);
+    serversRow.hidden = choice.value !== "custom";
+  };
+  choice.addEventListener("change", shape);
+  shape();
+  const upstream = h(
+    "section",
+    { class: "card pad stack" },
+    h("h2", null, t("dns.upTitle")),
+    h("p", { class: "muted small" }, t("dns.upLead")),
+    field(t("dns.upChoice"), choice, choice.value === "system" ? t("dns.upSystem", { list: d.system.join(", ") || "—" }) : ""),
+    dohRow,
+    serversRow,
+    h("div", { class: "actions" }, button(t("settings.save"), { class: "primary", onclick: (e) => send({ upstream: choice.value, doh: doh.checked, servers: servers.value.split(/[\s,]+/).filter(Boolean) }, e.currentTarget) })),
+    d.looping.length > 0 && h("p", { class: "banner small" }, t("dns.looping", { list: d.looping.join(", ") })),
+    s.enabled && h("div", { class: "stack-s" }, h("strong", null, t("dns.upNow")), ...d.upstreams.map((u) => h("div", { class: "activity-item" }, icon(u.fail > u.ok ? "x" : u.ok ? "check" : "clock", u.fail > u.ok ? "danger" : u.ok ? "ok" : ""), h("div", { class: "grow" }, h("div", { class: "mono" }, u.kind === "doh" ? u.url : u.kind === "dot" ? `${u.host} · TLS (${u.name})` : u.host), h("div", { class: "muted small" }, u.fail > u.ok ? t("dns.upFailed", { error: u.error }) : u.ok ? t("dns.upOk", { when: when(u.ok) }) : t("dns.upNotYet")))))),
+  );
+  // the names answered here
+  const name = h("input", { class: "mono", placeholder: "printer.lan", spellcheck: false, autocapitalize: "none" });
+  const type = h("select", null, h("option", { value: "A" }, "IPv4 (A)"), h("option", { value: "AAAA" }, "IPv6 (AAAA)"));
+  const value = h("input", { class: "mono", placeholder: "192.168.1.40", spellcheck: false });
+  const recError = h("p", { class: "error", role: "alert" });
+  const names = h(
+    "section",
+    { class: "card pad stack" },
+    h("h2", null, t("dns.namesTitle")),
+    h("p", { class: "muted small" }, t("dns.namesLead")),
+    ...d.domains.map((dom) => settingRow(`${dom}, *.${dom}`, t("dns.ownDomain"), h("span", { class: "muted" }, t("dns.toHata")))),
+    d.domains.length === 0 && h("p", { class: "muted small" }, t("dns.noDomains")),
+    ...s.records.map((r) => h("div", { class: "activity-item" }, icon("globe"), h("div", { class: "grow" }, h("div", { class: "mono" }, r.name), h("div", { class: "muted small mono" }, `${r.type} ${r.value}`)), button("", { class: "small ghost", title: t("names.remove"), "aria-label": t("names.remove"), onclick: async () => paintDns(box, await api("DELETE", `/api/dns/records/${r.type}/${r.name}`), load) }, "trash"))),
+    h(
+      "form",
+      {
+        class: "stack-s",
+        onsubmit: async (e) => {
+          e.preventDefault();
+          recError.textContent = "";
+          try {
+            paintDns(box, await api("POST", "/api/dns/records", { name: name.value.trim(), type: type.value, value: value.value.trim() }), load);
+          } catch (err) {
+            recError.textContent = errorText(err);
+          }
+        },
+      },
+      h("div", { class: "web-address" }, name, type, value, h("button", { class: "btn" }, icon("plus"), t("dns.addRecord"))),
+      recError,
+    ),
+  );
+  // how it is used
+  const st = d.stats;
+  const usage = s.enabled && h(
+    "section",
+    { class: "card pad stack" },
+    h("div", { class: "section-head" }, h("h2", null, t("dns.usageTitle")), button(t("dns.refresh"), { class: "small", onclick: () => load() }, "refresh")),
+    h("p", { class: "muted small" }, t("dns.usage", { queries: st.queries, own: st.own, cached: st.cached, upstream: st.upstream, failed: st.failed, refused: st.refused, kept: st.kept })),
+    d.clients.length > 0 && h("div", { class: "table-wrap" }, h("table", null, h("thead", null, h("tr", null, h("th", null, t("dns.col.device")), h("th", null, t("dns.col.queries")), h("th", null, t("dns.col.last")))), h("tbody", null, d.clients.map((c) => h("tr", null, h("td", { class: "mono" }, c.address), h("td", null, String(c.count)), h("td", null, when(c.last))))))),
+  );
+  put(box, status, upstream, names, usage);
+}
+
+/** Turning it off takes the names away from every device that asks it */
+function confirmDnsOff(go) {
+  const dialog = openDialog(
+    "",
+    h("header", null, h("h2", { class: "grow" }, t("dns.offTitle")), closeX(() => dialog)),
+    h("p", null, t("dns.offLead")),
+    h("footer", null, closeButton(() => dialog, t("common.cancel")), button(t("dns.turnOff"), { class: "danger", onclick: () => (dialog.close(), go()) })),
+  );
 }
 
 // --- Notifications ------------------------------------------------------------------------------

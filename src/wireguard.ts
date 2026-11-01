@@ -18,7 +18,7 @@ import { chmodSync, mkdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { record } from "./activity";
 import { AppError } from "./apps";
-import { SECRETS_DIR } from "./config";
+import { SECRETS_DIR, settings } from "./config";
 import { isPlainObject, readJsonFile, writeJsonAtomic, writeTextAtomic } from "./fsutil";
 import { homeLinks } from "./mdns";
 import { installCommand, PATH, run } from "./packages";
@@ -139,11 +139,14 @@ export function serverConf(server: Saved["server"], iptables: boolean): string {
   return lines.join("\n") + "\n";
 }
 
-/** What a device is given: its own key, where the server is, and what goes into the tunnel */
-export function deviceConf(device: Device, server: Pick<Saved["server"], "publicKey" | "endpoint" | "port" | "subnet">, networks: string[]): string {
+/**
+ * What a device is given: its own key, where the server is, and what goes into the tunnel; `dns` — Hata is
+ * the home's DNS server, so the device asks it through the tunnel and gets the home's names too
+ */
+export function deviceConf(device: Device, server: Pick<Saved["server"], "publicKey" | "endpoint" | "port" | "subnet">, networks: string[], dns = false): string {
   const host = server.endpoint.includes(":") ? `[${server.endpoint}]` : server.endpoint;
   const allowed = [device.lan ? `${server.subnet}.0/24` : `${server.subnet}.1/32`, ...(device.lan ? networks : [])];
-  return ["[Interface]", `PrivateKey = ${device.privateKey}`, `Address = ${device.address}/32`, "", "[Peer]", `PublicKey = ${server.publicKey}`, `PresharedKey = ${device.presharedKey}`, `Endpoint = ${host}:${server.port}`, `AllowedIPs = ${allowed.join(", ")}`, "PersistentKeepalive = 25"].join("\n") + "\n";
+  return ["[Interface]", `PrivateKey = ${device.privateKey}`, `Address = ${device.address}/32`, ...(dns ? [`DNS = ${server.subnet}.1`] : []), "", "[Peer]", `PublicKey = ${server.publicKey}`, `PresharedKey = ${device.presharedKey}`, `Endpoint = ${host}:${server.port}`, `AllowedIPs = ${allowed.join(", ")}`, "PersistentKeepalive = 25"].join("\n") + "\n";
 }
 
 export interface ClientConf {
@@ -362,7 +365,7 @@ const find = (id: string): Device => {
 export function deviceFile(id: string): { name: string; conf: string } {
   const device = find(id);
   if (!saved.server.endpoint) throw new AppError("wireguard.needEndpoint", 400);
-  return { name: device.name, conf: deviceConf(device, saved.server, networks()) };
+  return { name: device.name, conf: deviceConf(device, saved.server, networks(), settings.dns.enabled) };
 }
 
 export async function addDevice(input: Record<string, unknown>, user: string): Promise<string> {

@@ -54,6 +54,8 @@ test("the server's file: a peer per device, and only the allowed ones pass into 
 test("a device's file: the server alone, or the home network with it", () => {
   expect(deviceConf(device(2, false), server, ["192.168.1.0/24"])).toBe(`[Interface]\nPrivateKey = ${K("s")}\nAddress = 10.77.0.2/32\n\n[Peer]\nPublicKey = ${K("P")}\nPresharedKey = ${K("h")}\nEndpoint = home.example.com:51820\nAllowedIPs = 10.77.0.1/32\nPersistentKeepalive = 25\n`);
   expect(deviceConf(device(3, true), server, ["192.168.1.0/24", "192.168.2.0/24"])).toContain("AllowedIPs = 10.77.0.0/24, 192.168.1.0/24, 192.168.2.0/24\n");
+  // Hata as the home's DNS server: asked through the tunnel
+  expect(deviceConf(device(2, false), server, [], true)).toContain("Address = 10.77.0.2/32\nDNS = 10.77.0.1\n");
   expect(deviceConf(device(2, false), { ...server, endpoint: "2001:db8::5" }, [])).toContain("Endpoint = [2001:db8::5]:51820\n");
   // it has to fit the code a phone reads
   expect(deviceConf(device(3, true), { ...server, endpoint: "a-rather-long-name.of-a-home.example.com" }, ["192.168.1.0/24", "192.168.100.0/24"]).length).toBeLessThan(666);

@@ -98,6 +98,7 @@ import { adoptProject, casaosState, containerDraft, importCount, importList, mov
 import { accessOf, dropAccess, dropUser, gateTarget, guard, guardsOf, mayOpen, otherPorts, MAX_APP_BODY, page, passToApp, setAccess, startGates, tunnelHandlers } from "./gate";
 import { addName, changeName, domainsReport, nameOf as domainName, onNamesChanged, removeName, upstream as domainUpstream } from "./domains";
 import type { DomainName } from "./names";
+import { addRecord, DnsError, dnsReport, dnsTrouble, removeRecord, setDns, startDns } from "./dnsserver";
 import { addForward, changeForward, forwardsReport, onForwardsChanged, removeForward, startForwards } from "./forwards";
 import { parseDockerRun } from "./dockerrun";
 import { cannotMove, finishMove, moveState } from "./relocate";
@@ -1122,7 +1123,7 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
       site: { domain: siteDomain(), mode: settings.https.mode, local: localDomain() },
       // whether the assistant can be asked: the pages offer it next to what is wrong
       assistant: admin && assistantReady(assistantConfig()),
-      attention: admin ? notSnoozed(attention({ system, docker, apps, activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), exposed: exposedNics(), array: arrayTrouble(), shares: shareTrouble(), places: placesDown(), machines: awayMachines(), machineApps: onMachines, unused: unusedDisks(), filling: fillingUp(), pve: proxmoxTrouble(), ha: homeAssistantTrouble(), raid: poolsTrouble(), containers: containersTrouble() })) : [],
+      attention: admin ? notSnoozed(attention({ system, docker, apps, activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), exposed: exposedNics(), array: arrayTrouble(), shares: shareTrouble(), places: placesDown(), machines: awayMachines(), machineApps: onMachines, unused: unusedDisks(), filling: fillingUp(), pve: proxmoxTrouble(), ha: homeAssistantTrouble(), raid: poolsTrouble(), containers: containersTrouble(), dns: dnsTrouble() })) : [],
       // how many items are put off: the list says so and leads to them
       attentionHidden: admin ? hiddenCount() : 0,
       // who signed in from where, and what was installed by whom, is the administrators' business
@@ -1363,6 +1364,27 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
 
   if (path === "/api/local" && method === "GET") return json({ ...(await localNamesStatus()), port: listenAddress().port });
 
+  if (path.startsWith("/api/dns")) {
+    try {
+      if (path === "/api/dns" && method === "GET") return json(dnsReport(clientIp(req, server)));
+      if (path === "/api/dns" && method === "PUT") {
+        await setDns(await body(req), user.name);
+        return json(dnsReport(clientIp(req, server)));
+      }
+      if (path === "/api/dns/records" && method === "POST") {
+        addRecord(await body(req), user.name);
+        return json(dnsReport(clientIp(req, server)));
+      }
+      const rec = /^\/api\/dns\/records\/(A|AAAA)\/([a-z0-9._-]{1,253})$/.exec(path);
+      if (rec && method === "DELETE") {
+        removeRecord(rec[2]!, rec[1]!, user.name);
+        return json(dnsReport(clientIp(req, server)));
+      }
+    } catch (e) {
+      if (e instanceof DnsError) return fail(400, e.code, e.detail);
+      throw e;
+    }
+  }
   if (path === "/api/domains" && method === "GET") return json(await domainsReport(language(url), await forwardsReport()));
   if (path === "/api/ports" && method === "POST") return json(await addForward(await body(req), user.name));
   const forwarded = /^\/api\/ports\/(\d{1,5})$/.exec(path);
@@ -3050,11 +3072,12 @@ export async function serve(): Promise<void> {
   void refreshHttps();
   refreshLocalNames();
   startNotifications({
-    attention: async () => notSnoozed(attention({ system: systemStatus(), docker: await dockerInfo(), apps: await listApps("en"), activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), exposed: exposedNics(), array: arrayTrouble(), shares: shareTrouble(), places: placesDown(), machines: awayMachines(), machineApps: await machineTiles(machineList(), "en").catch(() => []), unused: unusedDisks(), filling: fillingUp(), pve: proxmoxTrouble(), ha: homeAssistantTrouble(), raid: poolsTrouble(), containers: containersTrouble() })),
+    attention: async () => notSnoozed(attention({ system: systemStatus(), docker: await dockerInfo(), apps: await listApps("en"), activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), exposed: exposedNics(), array: arrayTrouble(), shares: shareTrouble(), places: placesDown(), machines: awayMachines(), machineApps: await machineTiles(machineList(), "en").catch(() => []), unused: unusedDisks(), filling: fillingUp(), pve: proxmoxTrouble(), ha: homeAssistantTrouble(), raid: poolsTrouble(), containers: containersTrouble(), dns: dnsTrouble() })),
     baseUrl: publicUrl,
     isAdmin: (id) => findUser(id)?.role === "admin",
   });
   onNamesChanged(() => void refreshHttps());
+  startDns();
   onForwardsChanged(() => void closeOutside().catch(() => {}));
   // Incus's own devices are there already; Hata's relays start a little later, once the targets are looked at
   setTimeout(() => void startForwards().catch((e) => console.error("Ports:", e)), 5_000);
