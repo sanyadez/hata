@@ -90,7 +90,7 @@ import {
 } from "./auth";
 import { bus, type BusEvent } from "./bus";
 import { DATA_DIR, dropOldSecrets, listenAddress, saveSettings, settings, timezone, updateSettings } from "./config";
-import { arrange, cleanLayout, dropServer, haTiles, layoutText, parseLayoutText } from "./dashboard";
+import { arrange, cleanLayout, dropBlock, dropServer, GRID, haTiles, layoutText, parseLayoutText } from "./dashboard";
 import { addFrigate, cameraPicture, changeFrigate, eventPicture, frigateEvents, frigateFound, frigateOfApps, frigateServer, frigateServers, frigateTrouble, removeFrigate, startFrigate } from "./frigates";
 import { lanAddress } from "./integration";
 import { addQbit, addTorrents, changeQbit, qbitFound, qbitOfApps, qbitServer, qbitServers, qbitTorrents, qbitTrouble, qbitWidgets, removeQbit, removeTorrents, startQbittorrent, torrentsPower } from "./qbittorrent";
@@ -1143,7 +1143,7 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
       // how many items are put off: the list says so and leads to them
       attentionHidden: admin ? hiddenCount() : 0,
       // who signed in from where, and what was installed by whom, is the administrators' business
-      activity: admin ? recent(8) : [],
+      activity: admin ? recent(40) : [],
       // containers and compose projects on this machine that are not apps here yet
       importable: admin ? importCount(containers) : 0,
       // folders an administrator put on the dashboard from the file manager
@@ -1157,7 +1157,8 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
             return { id: m.id, name: m.name, online: m.online, seen: m.seen, os: [m.info?.os, m.info?.arch].filter(Boolean).join(" · "), status: m.status, ...(back && { wake: back.wake, pve: back.pve, instance: back.here?.name }) };
           })
         : [],
-      dashboard: (dashboard = arrange(settings.dashboard, [...apps.map((app) => app.name), ...onMachines.map((app) => app.key)], admin ? settings.folders : [], admin ? ["store", "add"] : user.role === "guest" ? [] : ["store"], haSeen.map((s) => s.id), admin ? widgetServers() : [])),
+      dashboard: (dashboard = arrange(settings.dashboard, { apps: [...apps.map((app) => app.name), ...onMachines.map((app) => app.key)], folders: admin ? settings.folders : [], builtins: admin ? ["store", "add"] : user.role === "guest" ? [] : ["store"], servers: haSeen.map((s) => s.id), widgetServers: admin ? widgetServers() : [], admin })),
+      grid: GRID,
       // Home Assistant: the servers this user sees, and the states of the tiles on the page
       ha: { servers: haSeen, states: haTileStates(haTiles(dashboard)) },
       // qBittorrent: how many are connected, and what the tiles of the apps that run it say
@@ -1201,7 +1202,7 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
     const apps = await listApps("en");
     const onMachines = await machineTiles(machineList(), "en");
     // the tiles of every Home Assistant server stay in the text: what is not written there is gone on saving
-    return json({ text: layoutText(arrange(settings.dashboard, [...apps.map((app) => app.name), ...onMachines.map((app) => app.key)], settings.folders, ["store", "add"], haVisibleTo(user).map((s) => s.id), widgetServers())) });
+    return json({ text: layoutText(arrange(settings.dashboard, { apps: [...apps.map((app) => app.name), ...onMachines.map((app) => app.key)], folders: settings.folders, builtins: ["store", "add"], servers: haVisibleTo(user).map((s) => s.id), widgetServers: widgetServers(), admin: true })) });
   }
   if (path === "/api/dashboard/text" && method === "PUT") {
     const data = await body(req);
@@ -2913,12 +2914,8 @@ async function machinesApi(req: Request, url: URL, server: Server, by: string): 
   if (rest === "" && method === "DELETE") {
     await removeMachine(id, by);
     // its numbers on the dashboard go with it
-    const block = `machine:${id}`;
-    const zones = settings.dashboard.widgets;
-    if ([zones.top, zones.side, zones.bottom].some((list) => list.includes(block))) {
-      for (const zone of ["top", "side", "bottom"] as const) zones[zone] = zones[zone].filter((x) => x !== block);
-      saveSettings();
-    }
+    settings.dashboard = dropBlock(settings.dashboard, `machine:${id}`);
+    saveSettings();
     return json({ ok: true });
   }
   if (rest === "/people" && method === "PUT") {

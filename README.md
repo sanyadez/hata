@@ -14,7 +14,7 @@ curl -fsSL https://raw.githubusercontent.com/sanyadez/hata/main/install.sh | sud
 
 On a Linux machine with systemd, x86_64 or arm64 — see [Install](#install).
 
-![The dashboard: system numbers, app tiles and widgets in groups, what needs attention and recent activity](screenshots/dashboard.png)
+![Home: one grid of system numbers, app tiles, widgets, what needs attention and recent activity](screenshots/dashboard.png)
 
 | | |
 |---|---|
@@ -98,10 +98,14 @@ Early development. What works today:
   "needs attention" list (an app that keeps restarting, a failed install or update, a disk filling up) and
   recent activity; an item there carries the button that deals with it — update, restart, try again,
   connect again, wake the machine — and can be put off for three days, coming back at once if it gets worse;
-- the dashboard is yours to arrange: plain links next to the apps, named groups, folders of tiles that
-  open in place like on a phone — all by dragging, mouse or finger, with no editing mode to enter; groups
-  and the blocks of the page (system numbers, what needs attention, activity) are dragged too, and can be
-  taken off and added back; the whole layout can also be edited as text (YAML); a tile opens the app, its
+- Home is one grid, all of it yours to arrange: every card — an app, a link, a disk, a folder of tiles that
+  opens in place like on a phone, the numbers of this server or of a machine, what needs attention, recent
+  activity, a camera — has a place and a size of its own. A right click gives "Edit the grid": drag a card to
+  move it, pull any edge or corner to change its size within what suits that card, and a card shows as much
+  as its size lets it, with the rest under "N more". Empty places stay where you left them, a phone lays
+  the same cards out by itself, a layout made before the grid comes over by itself (the headings of its
+  groups do not). "Add" lists everything that can stand on Home, by sections, with a search; the whole
+  layout can also be edited as text (YAML); a tile opens the app, its
   menu (the button next to it, or a right click) starts, stops and restarts it and leads to its
   settings, logs, terminal and backups. The right click opens Hata's own menu everywhere — on a tile, a
   file, a row of a table — with what can be done to the thing clicked;
@@ -310,8 +314,8 @@ Early development. What works today:
 - Frigate: its cameras and what they noticed, with pictures that pass through and are not kept, for
   administrators only; a word when a camera stops. A certificate of its own is confirmed once, and the
   password goes only to that certificate. The moving video stays in Frigate;
-- widgets on the home page, in 1×1, 2×1, 1×2 or 2×2 cells: torrents, a camera, what the cameras noticed; tiles of
-  Home Assistant can be sized the same way;
+- widgets on Home, of any size the grid allows: torrents, a camera, what the cameras noticed; tiles of Home
+  Assistant are sized the same way;
 - HTTPS, your choice of three: none (address and ports, for a home network); behind your own proxy (nginx,
   Caddy, Traefik) with a check that the proxy is set up right; or by Hata itself with certificates from
   Let's Encrypt — one certificate per name, or one for the domain and every name under it, confirmed by a DNS
