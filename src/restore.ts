@@ -57,7 +57,7 @@ export function listServerSnapshots(backupDir: string): ServerSnapshot[] {
  */
 export function stateExcludes(dataDir: string, backupDir: string): string[] {
   // the mark of a moved folder belongs to this machine: a restore must neither bring one nor take it away
-  const skip = ["./sessions.json", "./stores", "./update.json", "./" + RESTORE_MARK, "./" + MOVED_MARK];
+  const skip = ["./sessions.json", "./stores", "./dnslists", "./update.json", "./" + RESTORE_MARK, "./" + MOVED_MARK];
   const inside = relative(dataDir, backupDir);
   if (inside && !inside.startsWith("..") && !inside.startsWith("/")) skip.push("./" + inside);
   return skip;

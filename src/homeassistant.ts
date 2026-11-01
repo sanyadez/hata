@@ -15,7 +15,7 @@ import { AppError } from "./apps";
 import { bus } from "./bus";
 import { SECRETS_DIR } from "./config";
 import { readJsonFile, writeJsonAtomic } from "./fsutil";
-import { areaOf, cleanPeople, cleanUrl, ENTITY_RE, lowBatteries, serviceOf, show, TOKEN_RE, trouble, updatesOf, type People, type RawState, type Shown, type Update } from "./ha";
+import { areaOf, cleanPeople, cleanUrl, ENTITY_RE, entityName, lowBatteries, serviceOf, show, TOKEN_RE, trouble, updatesOf, type People, type RawState, type Shown, type Update } from "./ha";
 import { browseQuery, parseAnswer } from "./netplace";
 
 const FILE = join(SECRETS_DIR, "homeassistant.json");
@@ -41,6 +41,8 @@ export interface Server {
   people: People;
   added: number;
   by: string;
+  /** Names given in Hata alone: entity → name, shown instead of Home Assistant's */
+  names?: Record<string, string>;
 }
 
 interface State {
@@ -301,7 +303,7 @@ function flush(s: Server, l: Live): void {
   let server = false;
   for (const id of l.changed) {
     const raw = l.states.get(id);
-    states[id] = raw ? shownOf(l, raw) : null;
+    states[id] = raw ? shownOf(s, l, raw) : null;
     // an update or a battery changes what the server's page and the attention list say
     if (id.startsWith("update.") || raw?.attributes.device_class === "battery") server = true;
   }
@@ -309,11 +311,14 @@ function flush(s: Server, l: Live): void {
   bus.publish("ha", { id: s.id, states, ...(server ? { server: true } : {}) });
 }
 
-function shownOf(l: Live, raw: RawState): Shown {
+function shownOf(s: Server, l: Live, raw: RawState): Shown {
   const reg = l.registry.get(raw.entity_id);
   const out = show(raw, reg ? areaOf(reg, l.devices, l.areas) : "");
+  const own = s.names?.[raw.entity_id];
+  if (own) (out.haName = out.name), (out.name = own);
   // config and diagnostic entities, and those hidden in Home Assistant: listed apart
   if (reg && (reg.ec !== undefined || reg.hb)) out.extra = true;
+  if (reg) out.renamable = true;
   return out;
 }
 
@@ -371,8 +376,9 @@ export function server(id: string) {
 
 /** Every entity of a server, with its room, for the list on its page and the picker of tiles */
 export function entities(id: string): Shown[] {
-  const l = liveOf(serverOf(id));
-  return [...l.states.values()].map((raw) => shownOf(l, raw)).sort((a, b) => (a.area || "￿").localeCompare(b.area || "￿") || a.name.localeCompare(b.name));
+  const s = serverOf(id);
+  const l = liveOf(s);
+  return [...l.states.values()].map((raw) => shownOf(s, l, raw)).sort((a, b) => (a.area || "￿").localeCompare(b.area || "￿") || a.name.localeCompare(b.name));
 }
 
 /** The servers a user sees tiles of: id, name, address, whether it answers */
@@ -385,7 +391,7 @@ export function tileStates(keys: string[]): Record<string, Shown | null> {
     const [id, entity] = key.split("/");
     const s = state.servers.find((one) => one.id === id);
     const raw = s ? liveOf(s).states.get(entity!) : undefined;
-    out[key] = raw && s ? shownOf(liveOf(s), raw) : null;
+    out[key] = raw && s ? shownOf(s, liveOf(s), raw) : null;
   }
   return out;
 }
@@ -410,7 +416,44 @@ export async function act(id: string, entity: unknown, action: unknown, value: u
   await call(l, { type: "call_service", domain: service.domain, service: service.service, service_data: service.data, target: { entity_id: entity } });
   // the new state comes as an event a moment after the answer: the tile is told that one, not the old
   for (let waited = 0; waited < 1500 && l.states.get(entity) === raw; waited += 50) await Bun.sleep(50);
-  return shownOf(l, l.states.get(entity) ?? raw);
+  return shownOf(s, l, l.states.get(entity) ?? raw);
+}
+
+/**
+ * A new name for an entity. In Hata alone it is kept with the server and shown instead of Home Assistant's;
+ * `there` puts it into Home Assistant's own registry instead — its pages and automations show it too — and
+ * drops Hata's own. Empty gives back Home Assistant's name (there: the one it makes itself). Renaming there
+ * needs an administrator's token.
+ */
+export async function renameEntity(id: string, entity: unknown, value: unknown, there: unknown, by: string): Promise<Shown> {
+  const s = serverOf(id);
+  const l = liveOf(s);
+  if (typeof entity !== "string" || !ENTITY_RE.test(entity)) throw new AppError("ha.noEntity", 404);
+  const raw = l.states.get(entity);
+  if (!raw) throw new AppError(l.online ? "ha.noEntity" : "ha.away", l.online ? 404 : 502, { name: s.name });
+  const name = entityName(value);
+  if (name === undefined) throw new AppError("ha.badName", 400);
+  const was = s.names?.[entity] ?? raw.attributes.friendly_name ?? entity;
+  if (there === true) {
+    if (!l.registry.has(entity)) throw new AppError("ha.notRenamable", 400);
+    try {
+      await call(l, { type: "config/entity_registry/update", entity_id: entity, name });
+    } catch (e) {
+      if (e instanceof AppError && /unauthori[sz]ed/i.test(String(e.detail.message ?? ""))) throw new AppError("ha.renameDenied", 403, { name: s.name });
+      throw e;
+    }
+  }
+  const names = { ...s.names };
+  if (there === true || name === null || name === raw.attributes.friendly_name) delete names[entity];
+  else names[entity] = name;
+  s.names = Object.keys(names).length ? names : undefined;
+  save();
+  record(there === true ? "ha.rename" : "ha.renameHere", { user: by, detail: `${s.name}: ${was} → ${name ?? entity}` });
+  if (there === true) for (let waited = 0; waited < 1500 && l.states.get(entity) === raw; waited += 50) await Bun.sleep(50);
+  // every page that shows it is told, the way a change of its state is
+  l.changed.add(entity);
+  l.flush ??= setTimeout(() => flush(s, l), FLUSH_MS);
+  return shownOf(s, l, l.states.get(entity) ?? raw);
 }
 
 export async function installUpdate(id: string, entity: unknown, backup: unknown, by: string): Promise<void> {

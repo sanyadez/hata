@@ -7,6 +7,10 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { cleanLayout, type Layout } from "./dashboard";
 import { cleanOutside } from "./outside";
+import { cleanDns, DNS_DEFAULTS, type DnsSettings } from "./dns";
+import { BLOCK_DEFAULTS, cleanBlock, type BlockSettings } from "./dnsblock";
+import { cleanForwards, type Forward } from "./forward";
+import { cleanNames, type DomainName } from "./names";
 import { cleanMachineShares, cleanShares, type MachineShare, type Share } from "./smbconf";
 import { changeAppearance, cleanAppearance, DEFAULT_APPEARANCE, type Appearance } from "./wallpapers";
 import { isPlainObject, readJsonFile, writeJsonAtomic } from "./fsutil";
@@ -30,7 +34,7 @@ if (stateIsMissing(DATA_DIR)) {
 mkdirSync(DATA_DIR, { recursive: true, mode: 0o700 });
 
 /** What must not be read by anyone but Hata: password hashes, sessions, keys, tokens */
-export const SECRET_NAMES = ["users.json", "sessions.json", "setup-token", "invites.json", "notify.json", "certs", "backup-remote.json", "backup-key", "backup-key.pub", "backup-known-hosts", "agents.json", "oauth.json", "assistant.json", "assistant-chats.json", "wireguard.json", "netplaces.json", "net-known-hosts", "proxmox.json", "homeassistant.json"];
+export const SECRET_NAMES = ["users.json", "sessions.json", "setup-token", "invites.json", "notify.json", "certs", "backup-remote.json", "backup-key", "backup-key.pub", "backup-known-hosts", "agents.json", "oauth.json", "assistant.json", "assistant-chats.json", "wireguard.json", "netplaces.json", "net-known-hosts", "proxmox.json", "homeassistant.json", "dns-api.json"];
 
 /**
  * Where the secrets lie. For the installed service that is `/etc/hata`, whatever the configuration
@@ -83,6 +87,14 @@ export interface Settings {
   /** Who may open which app, and which apps are behind Hata's sign-in; an app not listed is open to members */
   access: Record<string, AppAccess>;
   https: HttpsSettings;
+  /** Names under the domain for what is not an app of this server: containers, guests, machines, addresses (`names.ts`) */
+  names: DomainName[];
+  /** Ports of this server passed on to containers, guests, machines, addresses (`forward.ts`) */
+  forwards: Forward[];
+  /** Hata as the home's DNS server (`dns.ts`) */
+  dns: DnsSettings;
+  /** Blocking by name in that server (`dnsblock.ts`) */
+  dnsBlock: BlockSettings;
   /**
    * The name on the home network, and `<app>.<name>` for every app. One ending in `.local` Hata answers
    * for itself over multicast DNS; any other (`hata.lan`) the home's own DNS has to point here.
@@ -130,6 +142,11 @@ export interface HttpsSettings {
    * acme — Hata gets certificates from Let's Encrypt and serves HTTPS itself
    */
   mode: "off" | "proxy" | "acme";
+  /**
+   * One certificate for the domain and every name under it, and who confirms it (`wildcard.ts`): off — one
+   * certificate per name; api — the DNS provider's API; delegate — Hata's own DNS server; manual — the person
+   */
+  wildcard: "off" | "api" | "delegate" | "manual";
   /** The name Hata is reached by; apps are at `<app>.<domain>` */
   domain: string;
   /** Contact for the certificate authority (acme) */
@@ -217,7 +234,7 @@ const DEFAULTS: Settings = {
   backup: { enabled: false, time: "03:00", keep: 7, dir: "", beforeUpdate: true, exclude: [], folders: {} },
   access: {},
   images: { check: true, auto: false, time: "04:30", exclude: [] },
-  https: { mode: "off", domain: "", email: "" },
+  https: { mode: "off", domain: "", email: "", wildcard: "off" },
   local: { enabled: true, name: "hata.local" },
   storage: { automount: false, ignored: [], smart: DEFAULT_SMART },
   security: { adminTwoFactor: false },
@@ -226,6 +243,10 @@ const DEFAULTS: Settings = {
   folders: [],
   favorites: {},
   shares: [],
+  names: [],
+  forwards: [],
+  dns: DNS_DEFAULTS,
+  dnsBlock: BLOCK_DEFAULTS,
   machineShares: {},
   dashboard: cleanLayout(null),
   appearance: DEFAULT_APPEARANCE,
@@ -270,6 +291,10 @@ export const settings: Settings = {
   folders: Array.isArray(saved.folders) ? saved.folders.filter((path): path is string => typeof path === "string") : [],
   favorites: isPlainObject(saved.favorites) ? Object.fromEntries(Object.entries(saved.favorites).map(([id, list]) => [id, Array.isArray(list) ? list.filter((one): one is Favorite => isPlainObject(one) && typeof one.path === "string").map((one) => ({ path: one.path, dir: one.dir !== false })) : []])) : {},
   shares: cleanShares(saved.shares),
+  names: cleanNames(saved.names),
+  forwards: cleanForwards(saved.forwards),
+  dns: cleanDns(saved.dns),
+  dnsBlock: cleanBlock(saved.dnsBlock),
   machineShares: cleanMachineShares(saved.machineShares),
   dashboard: cleanLayout(saved.dashboard),
   appearance: cleanAppearance(saved.appearance),

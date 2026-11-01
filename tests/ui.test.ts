@@ -13,3 +13,12 @@ test("no top-level name of the page's scripts is declared twice", async () => {
     expect({ file, twice }).toEqual({ file, twice: [] });
   }
 });
+
+/** The scripts are served as text, so neither a run nor a build ever parses them: a slip shows only as a blank page */
+test("the page's scripts parse", async () => {
+  const transpiler = new Bun.Transpiler({ loader: "js" });
+  for (const file of ["app.js", "terminal.js", "screen.js", "sw.js"]) {
+    const text = await Bun.file(`${import.meta.dir}/../src/ui/${file}`).text();
+    expect(() => transpiler.transformSync(text)).not.toThrow();
+  }
+});

@@ -30,7 +30,9 @@ export interface Group {
  * the column beside them, a row below. A block may also be put away (`hidden`): it is offered again in
  * the "Add" menu.
  */
-export const WIDGETS = ["stats", "attention", "activity"] as const;
+export const WIDGETS = ["stats", "attention", "activity", "adblock"] as const;
+/** Not on the page until somebody adds it: it says nothing while nothing is being blocked */
+const OFFERED_ONLY = ["adblock"];
 export const ZONES = ["top", "side", "bottom"] as const;
 export type Zone = (typeof ZONES)[number];
 export type Widgets = Record<Zone, string[]> & { hidden: string[] };
@@ -67,7 +69,7 @@ export function cleanWidgets(input: unknown): Widgets {
   take(raw.hidden, out.hidden);
   // a machine's block taken off is simply gone: the "Add" menu offers every machine anyway
   out.hidden = out.hidden.filter((id) => !MACHINE_BLOCK_RE.test(id));
-  for (const id of WIDGETS) if (!seen.has(id)) out[usualZone(id)].push(id);
+  for (const id of WIDGETS) if (!seen.has(id)) (OFFERED_ONLY.includes(id) ? out.hidden : out[usualZone(id)]).push(id);
   return out;
 }
 

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { cloneRequest, hostFiles, nicsOf, readName, screenRenamed, screenSocket, withScreen, trouble, SILENT_MS, bridgeRules, configOf, devicesOf, diskChange, FieldError, placeFor, poolName, insideNarrowMap, limitsChange, megabytes, readInstance, readNew, setupScript, snapshotName } from "../src/incus";
+import { HOME_BRIDGE, movedLink, networkOf, nicFor, readNetwork, discConfig, discDevices, WINDOWS, discName, DISC_DISK, readDiscs, readNewFromDisc, cloneRequest, hostFiles, nicsOf, readName, screenRenamed, screenSocket, withScreen, trouble, SILENT_MS, bridgeRules, configOf, devicesOf, diskChange, FieldError, placeFor, poolName, insideNarrowMap, limitsChange, megabytes, readInstance, readNew, setupScript, snapshotName } from "../src/incus";
 
 const field = (f: () => unknown): string => {
   try {
@@ -266,4 +266,78 @@ test("a copy goes to the place chosen without snapshots, its cards off, a contai
   expect(req.config).toEqual({ "raw.qemu": "-vnc unix:/run/incus/vm2/vnc.sock" });
   // a machine's disk is its system: it keeps its size anywhere
   expect((req.devices as any).root.size).toBe("20GiB");
+});
+
+test("disc images: the ISO volumes of a place, who has them in the drive", () => {
+  const discs = readDiscs("default", [
+    { name: "debian-13.iso", content_type: "iso", config: { size: "663748608" }, used_by: ["/1.0/instances/inst1", "/1.0/instances/vm%202?project=default"] },
+    { name: "data", content_type: "filesystem", config: {} },
+    { name: "alpine.iso", content_type: "iso", config: {} },
+  ]);
+  expect(discs).toEqual([
+    { place: "default", name: "alpine.iso", size: 0, usedBy: [] },
+    { place: "default", name: "debian-13.iso", size: 663748608, usedBy: ["inst1", "vm 2"] },
+  ]);
+});
+
+test("a disc image's name from a file or a link", () => {
+  expect(discName("https://cdimage.debian.org/debian-cd/current/amd64/iso-cd/debian-13.1.0-amd64-netinst.iso")).toBe("debian-13.1.0-amd64-netinst.iso");
+  expect(discName("/DATA/Downloads/Ubuntu 24.04 Desktop.ISO")).toBe("Ubuntu-24.04-Desktop.iso");
+  expect(discName("https://example.com/get?file=x.iso")).toBe("get.iso");
+  expect(discName("https://example.com/Образ%20диска.iso")).toBe("");
+  expect(discName("../..")).toBe("");
+  expect(discName("")).toBe("");
+});
+
+test("a virtual machine from a disc: the disc is the place's volume, booted first; an empty disk of the size asked", () => {
+  const disc = { place: "default", name: "alpine.iso", size: 0, usedBy: [] };
+  const c = readNewFromDisc({ name: "inst", image: "disc:default/alpine.iso", memory: 2048 }, [], [disc]);
+  expect(c).toEqual({ name: "inst", disc, cores: 0, memory: 2048, disk: DISC_DISK, autostart: true, windows: false, drivers: null, network: null });
+  expect(discDevices(c, "fast")).toEqual({ root: { type: "disk", path: "/", pool: "fast", size: `${DISC_DISK}GiB` }, disc: { type: "disk", pool: "default", source: "alpine.iso", "boot.priority": "10" } });
+  expect(() => readNewFromDisc({ name: "inst", image: "disc:default/other.iso" }, [], [disc])).toThrow("image");
+  expect(() => readNewFromDisc({ name: "inst", image: "disc:default/alpine.iso", disk: 2 }, [], [disc])).toThrow("disk");
+  expect(() => readNewFromDisc({ name: "discs", image: "disc:default/alpine.iso" }, [], [disc])).toThrow("name");
+});
+
+test("Windows from a disc: TPM, Secure Boot, NVMe and USB, the drivers' disc in a second drive, room it asks for", () => {
+  const win = { place: "default", name: "Win11_24H2.iso", size: 0, usedBy: [] };
+  const drivers = { place: "default", name: "virtio-win.iso", size: 0, usedBy: [] };
+  const c = readNewFromDisc({ name: "win", image: "disc:default/Win11_24H2.iso", windows: true }, [], [win, drivers]);
+  expect(c).toMatchObject({ memory: WINDOWS.memory, disk: WINDOWS.disk, windows: true, drivers });
+  expect(discConfig(c)).toMatchObject({ "security.secureboot": "true", "image.os": "Windows", "image.description": "Win11_24H2" });
+  expect(discDevices(c, "default")).toEqual({
+    root: { type: "disk", path: "/", pool: "default", size: "64GiB", "io.bus": "nvme" },
+    disc: { type: "disk", pool: "default", source: "Win11_24H2.iso", "boot.priority": "10", "io.bus": "usb" },
+    tpm: { type: "tpm", path: "/dev/tpm0" },
+    drivers: { type: "disk", pool: "default", source: "virtio-win.iso", "io.bus": "usb" },
+  });
+  expect(readNewFromDisc({ name: "win", image: "disc:default/Win11_24H2.iso", windows: true }, [], [win]).drivers).toBeNull();
+  expect(() => readNewFromDisc({ name: "win", image: "disc:default/Win11_24H2.iso", windows: true, memory: 2048 }, [], [win])).toThrow("memory");
+  expect(() => readNewFromDisc({ name: "win", image: "disc:default/Win11_24H2.iso", windows: true, disk: 32 }, [], [win])).toThrow("disk");
+  expect(discConfig(readNewFromDisc({ name: "lin", image: "disc:default/Win11_24H2.iso" }, [], [win]))["security.secureboot"]).toBe("false");
+});
+
+test("the home network: a card on the home bridge, or on Incus's own network", () => {
+  expect(nicFor("home", "hatabr0")).toEqual({ type: "nic", name: "eth0", nictype: "bridged", parent: HOME_BRIDGE });
+  expect(nicFor("private", "hatabr0")).toEqual({ type: "nic", name: "eth0", network: "hatabr0" });
+  expect(networkOf({ root: { type: "disk" }, eth0: nicFor("home", "") })).toBe("home");
+  expect(networkOf({ eth0: { type: "nic", network: "hatabr0" } })).toBe("private");
+  expect(networkOf({ eth0: { type: "nic", nictype: "macvlan", parent: "enp3s0" } })).toBe("");
+  expect(networkOf({})).toBe("");
+  expect(readNetwork(undefined)).toBeNull();
+  expect(readNetwork("home")).toBe("home");
+  expect(() => readNetwork("lan")).toThrow(FieldError);
+  expect(readNew({ name: "web", image: "debian-13", network: "home" }, []).network).toBe("home");
+  expect(devicesOf({ kind: "container", disk: 0 }, "default", nicFor("home", ""))).toEqual({ root: { type: "disk", path: "/", pool: "default" }, eth0: nicFor("home", "") });
+  expect(readInstance({ type: "container", name: "web", status: "Running", config: {}, expanded_devices: { eth0: nicFor("home", "") } })?.network).toBe("home");
+});
+
+test("movedLink: Hata's address in the client's file follows the network the instance moves to", () => {
+  const text = JSON.stringify({ url: "http://10.163.64.1:80", hata: "k", key: { a: 1 } }, null, 2);
+  expect(JSON.parse(movedLink(text, "10.163.64.1", "192.168.1.128")!)).toEqual({ url: "http://192.168.1.128", hata: "k", key: { a: 1 } });
+  expect(JSON.parse(movedLink(JSON.stringify({ url: "http://10.163.64.1:8080" }), "10.163.64.1", "192.168.1.128")!).url).toBe("http://192.168.1.128:8080");
+  // Hata named by a domain, or another address: the file stays
+  expect(movedLink(JSON.stringify({ url: "https://hata.example.com" }), "10.163.64.1", "192.168.1.128")).toBeNull();
+  expect(movedLink("not json", "10.163.64.1", "192.168.1.128")).toBeNull();
+  expect(movedLink(text, "", "192.168.1.128")).toBeNull();
 });

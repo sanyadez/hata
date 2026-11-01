@@ -3,12 +3,16 @@
  * requests, the HTTP-01 challenge answered by our own server, a certificate request built by hand.
  *
  * One certificate per name — Hata's own and one for each app's subdomain — so a name that cannot be
- * validated does not hold the others back. Everything is in `data/certs/`.
+ * validated does not hold the others back; or one wildcard certificate for the domain and every name under
+ * it, confirmed by a TXT record (DNS-01: the authority takes a wildcard no other way, `wildcard.ts` says who
+ * puts the record in place). Everything is in `data/certs/`.
  */
 import { X509Certificate } from "node:crypto";
 import { existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { DOMAIN_RE, SECRETS_DIR, settings } from "./config";
+import { challengeName } from "./dns";
+import type { Presenter } from "./dnsapi";
 import { readJsonFile, writeJsonAtomic } from "./fsutil";
 
 const CERTS_DIR = join(SECRETS_DIR, "certs");
@@ -61,11 +65,13 @@ const pem = (label: string, bytes: Uint8Array | ArrayBuffer): string =>
 const EC = { name: "ECDSA", namedCurve: "P-256" } as const;
 const SIGN = { name: "ECDSA", hash: "SHA-256" } as const;
 
-/** A certificate signing request (PKCS #10) for one name, signed with its key */
-export async function certificateRequest(name: string, keys: CryptoKeyPair): Promise<Uint8Array> {
+/** A certificate signing request (PKCS #10) for its names, the first the common one, signed with its key */
+export async function certificateRequest(names: string | string[], keys: CryptoKeyPair): Promise<Uint8Array> {
+  const list = typeof names === "string" ? [names] : names;
+  const name = list[0]!;
   const spki = new Uint8Array(await crypto.subtle.exportKey("spki", keys.publicKey));
-  const dnsName = der(0x82, new TextEncoder().encode(name));
-  const extensions = der(0x30, der(0x30, OID_SUBJECT_ALT_NAME, der(0x04, der(0x30, dnsName))));
+  const dnsNames = list.map((one) => der(0x82, new TextEncoder().encode(one)));
+  const extensions = der(0x30, der(0x30, OID_SUBJECT_ALT_NAME, der(0x04, der(0x30, ...dnsNames))));
   const info = der(
     0x30,
     [0x02, 0x01, 0x00],
@@ -166,8 +172,8 @@ class Client {
     throw new AcmeError(problem.detail || `The certificate authority answered ${res.status}`, problem.type);
   }
 
-  newOrder(name: string): Promise<Response> {
-    return this.post(this.directory.newOrder, { identifiers: [{ type: "dns", value: name }] });
+  newOrder(names: string[]): Promise<Response> {
+    return this.post(this.directory.newOrder, { identifiers: names.map((value) => ({ type: "dns", value })) });
   }
 }
 
@@ -190,7 +196,9 @@ export interface StoredCertificate {
   issuer: string;
 }
 
-const certFile = (name: string) => join(CERTS_DIR, name + ".json");
+/** `*.<domain>` — the wildcard certificate of a domain, kept under a name no host name can have */
+export const isWildcard = (name: string): boolean => name.startsWith("*.");
+const certFile = (name: string) => join(CERTS_DIR, (isWildcard(name) ? "_wildcard." + name.slice(2) : name) + ".json");
 
 export function loadCertificates(): StoredCertificate[] {
   let files: string[] = [];
@@ -198,13 +206,13 @@ export function loadCertificates(): StoredCertificate[] {
     files = readdirSync(CERTS_DIR);
   } catch {}
   return files
-    .filter((f) => f.endsWith(".json") && f !== "account.json" && DOMAIN_RE.test(f.slice(0, -5)))
+    .filter((f) => f.endsWith(".json") && f !== "account.json" && DOMAIN_RE.test(f.slice(0, -5).replace(/^_wildcard\./, "")))
     .map((f) => readJsonFile<StoredCertificate | null>(join(CERTS_DIR, f), null))
     .filter((c): c is StoredCertificate => !!c && typeof c.cert === "string" && typeof c.key === "string");
 }
 
 export function forgetCertificate(name: string): void {
-  if (DOMAIN_RE.test(name)) rmSync(certFile(name), { force: true });
+  if (DOMAIN_RE.test(name.replace(/^\*\./, ""))) rmSync(certFile(name), { force: true });
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -219,11 +227,73 @@ async function poll(client: Client, url: string, waiting: string[]): Promise<Rec
   throw new AcmeError("The certificate authority took too long");
 }
 
+/** The order's names confirmed: asks for the certificate, keeps it under `name` */
+async function finish(client: Client, finalize: string, orderUrl: string, name: string, names: string[]): Promise<StoredCertificate> {
+  const keys = await crypto.subtle.generateKey(EC, true, ["sign", "verify"]);
+  await client.post(finalize, { csr: b64url(await certificateRequest(names, keys)) });
+  const done = (await poll(client, orderUrl, ["pending", "ready", "processing"])) as { status: string; certificate?: string };
+  if (done.status !== "valid" || !done.certificate) throw new AcmeError(`The order ended as "${done.status}"`);
+  const cert = await (await client.post(done.certificate, null)).text();
+  const parsed = new X509Certificate(cert);
+  const stored: StoredCertificate = {
+    name,
+    cert,
+    key: pem("PRIVATE KEY", await crypto.subtle.exportKey("pkcs8", keys.privateKey)),
+    notAfter: new Date(parsed.validTo).getTime(),
+    issuer: /(?:^|\n)O=([^\n]+)/.exec(parsed.issuer)?.[1] ?? /(?:^|\n)CN=([^\n]+)/.exec(parsed.issuer)?.[1] ?? "",
+  };
+  writeJsonAtomic(certFile(name), stored);
+  return stored;
+}
+
+/** How long a value of a provider that keeps one TXT value stays remembered by resolvers before the next */
+const ONE_AT_A_TIME_WAIT_MS = 70_000;
+
+/** The wildcard certificate of a domain, with the domain itself in it: every name confirmed by TXT values */
+export async function issueWildcard(name: string, email: string, present: Presenter): Promise<StoredCertificate> {
+  const domain = name.slice(2);
+  if (!DOMAIN_RE.test(domain)) throw new AcmeError(`"${domain}" is not a host name`);
+  const client = await Client.open(email);
+  const orderResponse = await client.newOrder([domain, name]);
+  const orderUrl = orderResponse.headers.get("location") ?? "";
+  const order = (await orderResponse.json()) as { authorizations: string[]; finalize: string };
+  const thumbprint = await client.thumbprint();
+  const waiting: { url: string; challenge: string; value: string }[] = [];
+  for (const url of order.authorizations) {
+    const auth = (await (await client.post(url, null)).json()) as { status: string; challenges: { type: string; url: string; token: string }[] };
+    if (auth.status === "valid") continue;
+    const dns = auth.challenges.find((c) => c.type === "dns-01");
+    if (!dns) throw new AcmeError("The certificate authority offers no DNS check for this name");
+    waiting.push({ url, challenge: dns.url, value: b64url(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${dns.token}.${thumbprint}`))) });
+  }
+  const at = challengeName(domain);
+  const rounds = present.oneAtATime ? waiting.map((one) => [one]) : waiting.length ? [waiting] : [];
+  for (const [i, round] of rounds.entries()) {
+    if (i > 0) await sleep(ONE_AT_A_TIME_WAIT_MS);
+    const values = round.map((one) => one.value);
+    await present.add(at, values);
+    try {
+      for (const one of round) await client.post(one.challenge, {});
+      for (const one of round) {
+        const checked = (await poll(client, one.url, ["pending", "processing"])) as { status: string; challenges?: { error?: { detail?: string } }[] };
+        if (checked.status !== "valid") throw new AcmeError(checked.challenges?.map((c) => c.error?.detail).find(Boolean) ?? `The name could not be confirmed (${checked.status})`);
+      }
+    } finally {
+      await present.remove(at, values).catch((e) => console.error(`The TXT record of ${at} stays: ${e instanceof Error ? e.message : e}`));
+    }
+  }
+  return finish(client, order.finalize, orderUrl, name, [domain, name]);
+}
+
+/** Who puts a wildcard's TXT values in place: asked when one is due */
+let presenter: (() => Presenter) | null = null;
+export const onWildcard = (make: () => Presenter): void => void (presenter = make);
+
 /** Gets a certificate for one name. The name must lead to this server's port 80 from where the authority is. */
 export async function issueCertificate(name: string, email: string): Promise<StoredCertificate> {
   if (!DOMAIN_RE.test(name)) throw new AcmeError(`"${name}" is not a host name`);
   const client = await Client.open(email);
-  const orderResponse = await client.newOrder(name);
+  const orderResponse = await client.newOrder([name]);
   const orderUrl = orderResponse.headers.get("location") ?? "";
   const order = (await orderResponse.json()) as { authorizations: string[]; finalize: string };
   const used: string[] = [];
@@ -242,21 +312,7 @@ export async function issueCertificate(name: string, email: string): Promise<Sto
         throw new AcmeError(why ?? `The name could not be confirmed (${checked.status})`);
       }
     }
-    const keys = await crypto.subtle.generateKey(EC, true, ["sign", "verify"]);
-    await client.post(order.finalize, { csr: b64url(await certificateRequest(name, keys)) });
-    const done = (await poll(client, orderUrl, ["pending", "ready", "processing"])) as { status: string; certificate?: string };
-    if (done.status !== "valid" || !done.certificate) throw new AcmeError(`The order ended as "${done.status}"`);
-    const cert = await (await client.post(done.certificate, null)).text();
-    const parsed = new X509Certificate(cert);
-    const stored: StoredCertificate = {
-      name,
-      cert,
-      key: pem("PRIVATE KEY", await crypto.subtle.exportKey("pkcs8", keys.privateKey)),
-      notAfter: new Date(parsed.validTo).getTime(),
-      issuer: /(?:^|\n)O=([^\n]+)/.exec(parsed.issuer)?.[1] ?? /(?:^|\n)CN=([^\n]+)/.exec(parsed.issuer)?.[1] ?? "",
-    };
-    writeJsonAtomic(certFile(name), stored);
-    return stored;
+    return await finish(client, order.finalize, orderUrl, name, [name]);
   } finally {
     for (const token of used) challenges.delete(token);
   }
@@ -311,7 +367,8 @@ export function ensureCertificates(names: string[], force = false): Promise<bool
       if (!force && failed && Date.now() - failed.at < RETRY_AFTER_MS) continue;
       working.add(name);
       try {
-        await issueCertificate(name, settings.https.email);
+        if (isWildcard(name)) await issueWildcard(name, settings.https.email, presenter!());
+        else await issueCertificate(name, settings.https.email);
         failures.delete(name);
         changed = true;
         console.log(`Certificate issued for ${name}`);

@@ -69,6 +69,15 @@ export function webAddress(app: { name: string; subdomain?: string; port?: numbe
   return `${app.scheme || "http"}://${app.hostname || at.hostname}:${app.port}${index}`;
 }
 
+/** Whether the names of the certificates served cover a host: by name, or a wildcard and the domain it is of */
+export function coveredBy(names: string[], host: string): boolean {
+  return names.some((name) => {
+    if (!name.startsWith("*.")) return name === host;
+    const domain = name.slice(2);
+    return host === domain || (host.endsWith("." + domain) && !host.slice(0, -domain.length - 1).includes("."));
+  });
+}
+
 export const appHost = (app: { name: string; subdomain?: string }): string => `${labelOf(app)}.${siteDomain()}`;
 
 /**

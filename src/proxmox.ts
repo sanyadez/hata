@@ -477,6 +477,23 @@ export function host(id: string) {
   };
 }
 
+/**
+ * A guest's address as last looked at: what its cards have now (a running container), what its settings
+ * say, or the address of the machine it is; "" — not known; null — no such guest
+ */
+export function guestAddress(hostId: string, guest: string): string | null {
+  const h = state.hosts.find((x) => x.id === hostId);
+  if (!h) return null;
+  const l = liveOf(h);
+  if (!l.guests.some((g) => g.id === guest)) return null;
+  const cards = l.configs[guest]?.macs ?? [];
+  const machine = cards.length ? machines().find((m) => m.online && (m.info?.macs ?? []).some((c) => cards.includes(c.mac.toLowerCase()))) : undefined;
+  return l.ips[guest]?.[0] ?? l.configs[guest]?.addresses[0] ?? machine?.ip ?? "";
+}
+
+/** Every guest of every server, for the list a name under the domain is chosen from */
+export const allGuests = () => state.hosts.flatMap((h) => liveOf(h).guests.filter((g) => !g.template).map((g) => ({ host: h.id, hostName: h.name, id: g.id, name: g.name, status: g.status, address: guestAddress(h.id, g.id) ?? "" })));
+
 /** Asks the server now, for a page that has just done something */
 export async function refresh(id: string): Promise<void> {
   await look(hostOf(id), true);

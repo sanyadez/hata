@@ -36,9 +36,9 @@ export const accessOf = (name: string): AppAccess => settings.access[name] ?? DE
  * May this user see and open the app? Administrators always; members unless the app is limited to
  * chosen people; guests only where they are named.
  */
-export function mayOpen(user: Pick<User, "id" | "role">, name: string): boolean {
+export function mayOpen(user: Pick<User, "id" | "role">, name: string, access: Pick<AppAccess, "allowed"> = accessOf(name)): boolean {
   if (user.role === "admin") return true;
-  const { allowed } = accessOf(name);
+  const { allowed } = access;
   return allowed === "all" ? user.role === "member" : allowed.includes(user.id);
 }
 
@@ -278,23 +278,32 @@ export const tunnelHandlers = {
  * Decides whether a request may reach an app that asks for sign-in. Returns the person to let through,
  * or the answer to give instead: a redirect to `signIn` for a page, a refusal for anything else.
  */
-export function guard(req: Request, name: string, signIn: string): Response | User {
+export function guard(req: Request, name: string, signIn: string, access?: Pick<AppAccess, "allowed">): Response | User {
   const user = sessionUser(req);
   if (!user) {
     // a page can be sent to sign in; a script's request can only be told why it failed
     return req.method === "GET" && (req.headers.get("accept") ?? "").includes("text/html") ? Response.redirect(signIn, 302) : new Response("Sign in to Hata first", { status: 401 });
   }
-  return mayOpen(user, name) ? user : page(403, "No access", `${user.name} may not open this app. Ask an administrator of this server.`);
+  return mayOpen(user, name, access) ? user : page(403, "No access", `${user.name} may not open this app. Ask an administrator of this server.`);
 }
 
-/** Passes a request (or a WebSocket upgrade) on to an app listening on a local port */
-export async function passToApp(req: Request, server: Server, upstream: number, proto: "http" | "https", ip: string, user: User | null = null): Promise<Response> {
+/** Where a request is passed on to: a local port, or a host of the home network (HTTPS when it speaks only that) */
+export type PassTarget = number | { host: string; port: number; https: boolean };
+
+/**
+ * Passes a request (or a WebSocket upgrade) on to an app listening on a local port, or to another host.
+ * The certificate of a host of the home network is not checked: it is its own, made by itself.
+ */
+export async function passToApp(req: Request, server: Server, upstream: PassTarget, proto: "http" | "https", ip: string, user: User | null = null): Promise<Response> {
   const url = new URL(req.url);
   const headers = forwardHeaders(req, ip, proto, user);
+  const to = typeof upstream === "number" ? { host: "127.0.0.1", port: upstream, https: false } : upstream;
+  const base = `${to.host.includes(":") ? `[${to.host}]` : to.host}:${to.port}${url.pathname}${url.search}`;
+  const tls = to.https ? { tls: { rejectUnauthorized: false } } : {};
   if (req.headers.get("upgrade")?.toLowerCase() === "websocket") {
     const protocols = req.headers.get("sec-websocket-protocol")?.split(",").map((p) => p.trim()).filter(Boolean);
     for (const h of ["upgrade", "connection", "sec-websocket-key", "sec-websocket-version", "sec-websocket-extensions", "sec-websocket-protocol"]) headers.delete(h);
-    const target = new WebSocket(`ws://127.0.0.1:${upstream}${url.pathname}${url.search}`, { headers: Object.fromEntries(headers), protocols } as never);
+    const target = new WebSocket(`${to.https ? "wss" : "ws"}://${base}`, { headers: Object.fromEntries(headers), protocols, ...tls } as never);
     target.binaryType = "arraybuffer";
     if (server.upgrade(req, { data: { upstream: target, queue: [] } })) return undefined as never;
     target.close();
@@ -303,7 +312,8 @@ export async function passToApp(req: Request, server: Server, upstream: number, 
   // a download or an event stream may be silent for a long time
   server.timeout(req, 0);
   try {
-    const res = await fetch(`http://127.0.0.1:${upstream}${url.pathname}${url.search}`, {
+    const res = await fetch(`${to.https ? "https" : "http"}://${base}`, {
+      ...tls,
       method: req.method,
       headers,
       body: req.body,

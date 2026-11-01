@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { actionsOf, areaOf, cleanPeople, cleanUrl, lowBatteries, sees, serviceOf, show, trouble, updatesOf, type RawState } from "../src/ha";
+import { actionsOf, areaOf, cleanPeople, cleanUrl, entityName, lowBatteries, sees, serviceOf, show, trouble, updatesOf, type RawState } from "../src/ha";
 
 const state = (entity_id: string, s: string, attributes: Record<string, unknown> = {}, last_changed = "2026-10-24T09:00:00Z"): RawState => ({ entity_id, state: s, attributes, last_changed });
 
@@ -128,4 +128,15 @@ test("what is worth the person's attention", () => {
 test("Home Assistant on this server that does not trust Hata as its proxy is worth a line", () => {
   const items = trouble({ id: "8bf90303", name: "Home", error: null, ready: true, updates: [], low: [], proxy: true });
   expect(items).toEqual([{ id: "ha:8bf90303:proxy", severity: "warn", code: "ha.proxy", detail: { host: "8bf90303", name: "Home" } }]);
+});
+
+test("a name typed for an entity: trimmed, empty gives Home Assistant's own back, nothing that is not a name", () => {
+  expect(entityName("  Кухня  ")).toBe("Кухня");
+  expect(entityName("")).toBeNull();
+  expect(entityName("   ")).toBeNull();
+  expect(entityName("a".repeat(100))).toBe("a".repeat(100));
+  expect(entityName("a".repeat(101))).toBeUndefined();
+  expect(entityName("two\nlines")).toBeUndefined();
+  expect(entityName(null)).toBeUndefined();
+  expect(entityName(5)).toBeUndefined();
 });

@@ -69,6 +69,7 @@ const ICONS = {
   undo: "M9 7 4 12l5 5M4 12h11a5 5 0 0 1 0 10h-2",
   lock: "M6 11h12v9H6zM8.5 11V8a3.5 3.5 0 0 1 7 0v3",
   bell: "M6 17V11a6 6 0 0 1 12 0v6l2 2H4zM10 21h4",
+  "bell-off": "M6 17V11a6 6 0 0 1 9-5.2M18 11v6l2 2H4M10 21h4M4 4l16 16",
   file: "M6 3h9l4 4v14H6zM14 3v5h5",
   image: "M4 5h16v14H4zM4 16l5-5 4 4 3-3 4 4M15 9h.01",
   film: "M4 5h16v14H4zM10 9l5 3-5 3z",
@@ -86,6 +87,8 @@ const ICONS = {
   shrink: "M4 14h6v6M20 10h-6V4M14 10l7-7M3 21l7-7",
   down: "M6 9l6 6 6-6",
   server: "M4 4h16v7H4zM4 13h16v7H4zM8 7.5h.01M8 16.5h.01M12 7.5h4M12 16.5h4",
+  screen: "M3 4h18v12H3zM8 20h8M12 16v4",
+  shield: "M12 3l7 3v5c0 4.6-2.9 8.3-7 10-4.1-1.7-7-5.4-7-10V6l7-3z",
   bulb: "M9 18h6M10 21h4M12 3a6 6 0 0 0-3.6 10.8c.7.6 1.1 1.3 1.1 2.2v.5h5V16c0-.9.4-1.6 1.1-2.2A6 6 0 0 0 12 3z",
   power: "M12 3v8M6.3 6.8a8 8 0 1 0 11.4 0",
   fan: "M12 12h.01M12 10c-1-3 0-6 3-6s3 4-1 7M14 12c3-1 6 0 6 3s-4 3-7-1M12 14c1 3 0 6-3 6s-3-4 1-7M10 12c-3 1-6 0-6-3s4-3 7 1",
@@ -1705,6 +1708,8 @@ function dragStart(e, item, kind = TILE_DRAG, el = e.currentTarget) {
   const begin = () => {
     if (homeUi.drag !== drag || drag.active) return;
     drag.active = true;
+    // the press may have started selecting the text under it
+    getSelection()?.removeAllRanges();
     const rect = el.getBoundingClientRect();
     drag.dx = drag.x - rect.left;
     drag.dy = drag.y - rect.top;
@@ -1943,9 +1948,39 @@ function dragEnd(drop) {
 
 const ATTENTION_ICONS = { update: "up", docker: "box", restarting: "refresh", partial: "alert", disk: "disk", smart: "disk", memory: "memory", temperature: "temp", internet: "network", network: "network", array: "disk", share: "share", netplace: "globe", machine: "server", pve: "server", ha: "home", containers: "box", absent: "disk" };
 
-function attentionItem(item) {
+/** The title and the words of an item of the list, sizes said as sizes */
+function attentionWords(item) {
   const detail = { ...item.detail, free: item.detail.free == null ? "" : bytes(item.detail.free), trash: item.detail.trash == null ? "" : bytes(item.detail.trash), size: item.detail.size == null ? "" : bytes(item.detail.size) };
   const base = "attention." + item.code;
+  return { title: t(base + ".title", detail), text: t(base + ".text", detail).trim() };
+}
+
+const attentionIcon = (code) => ATTENTION_ICONS[code.split(".")[0]] ?? "alert";
+
+/** Asks before something that cannot be taken back by a click, does it, says a refusal in the window and looks again */
+function confirmAction({ title, lead, label, run, kind = "danger", iconName = "trash" }) {
+  let dialog;
+  const error = h("p", { class: "error", role: "alert" });
+  const go = button(label, {
+    class: kind,
+    onclick: async () => {
+      go.disabled = true;
+      error.textContent = "";
+      try {
+        await run();
+        dialog.close();
+        void refresh();
+      } catch (err) {
+        error.textContent = errorText(err);
+        go.disabled = false;
+      }
+    },
+  }, iconName);
+  dialog = openDialog("confirm", h("h2", { class: "wrap" }, title), lead && h("p", { class: "muted" }, lead), error, h("footer", null, closeButton(() => dialog, t("common.cancel")), go));
+}
+
+function attentionItem(item) {
+  const { title, text } = attentionWords(item);
   // only what does the thing is a button; the ways elsewhere and the rest are entries of its menu
   const open = (href, label = t("common.open")) => ({ href, label, icon: "external" });
   // the button that does the thing itself: it waits for the answer, says a refusal and looks again
@@ -2005,6 +2040,9 @@ function attentionItem(item) {
     (item.code.startsWith("smart.") || item.code === "disk.filling" || item.code.startsWith("array.") || item.code.startsWith("raid.")) && open("#/settings/storage"),
     (item.code.startsWith("internet.") || item.code === "network.exposed") && open("#/settings/network"),
     item.code.startsWith("share.") && open("#/settings/shares"),
+    item.code.startsWith("dns.block") && open("#/settings/adblock"),
+    item.code.startsWith("dns.") && !item.code.startsWith("dns.block") && open("#/settings/dns"),
+    item.code.startsWith("https.") && open("#/settings/https"),
     item.code === "netplace.down" && open("#/settings/storage"),
     item.code === "machine.away" && open(`#/machines/${item.detail.id}`),
     item.code.startsWith("containers.") && state.route.view !== "containers" && open("#/containers"),
@@ -2013,17 +2051,19 @@ function attentionItem(item) {
     (item.code === "machine.restarting" || item.code === "machine.partial") && open(`#/machines/${item.detail.id}/apps`),
     item.app && open(`#/apps/${item.app}${item.code === "restarting" || item.code === "partial" ? "/logs" : ""}`, t(item.code === "restarting" || item.code === "partial" ? "app.logs" : "common.open")),
     // the assistant is asked with the item's own words: it looks with its tools where it can and explains the rest
-    isAdmin() && { label: t(item.app ? "assistant.askWhy" : "assistant.ask"), icon: "chat", run: () => openAssistant({ ask: item.app ? t("assistant.whyDown", { title: item.detail.title || item.app, app: item.app }) : t("assistant.whyItem", { title: t(base + ".title", detail), text: t(base + ".text", detail).trim() }) }) },
+    // what ends the thing the item is about, asked first: the menu, not a button, so it is not pressed by the way
+    ...(isAdmin() ? attentionEnds(item, app, onMachine) : []),
+    isAdmin() && { label: t(item.app ? "assistant.askWhy" : "assistant.ask"), icon: "chat", run: () => openAssistant({ ask: item.app ? t("assistant.whyDown", { title: item.detail.title || item.app, app: item.app }) : t("assistant.whyItem", { title, text }) }) },
     isAdmin() && { label: t("attention.later", { n: SNOOZE_DAYS }), icon: "clock", run: () => snoozeItem(item) },
+    isAdmin() && { label: t("attention.never"), icon: "bell-off", run: () => snoozeItem(item, true) },
     (item.code === "disk.new" || item.code === "disk.usb") && isAdmin() && { label: t("mounting.ignore"), icon: "x", run: () => void api("POST", "/api/disks/ignore", { id: item.detail.id }).then(refresh, (e) => toast(errorText(e), "error")) },
   ].filter(Boolean);
-  const title = t(base + ".title", detail);
-  const { buttons, openMore } = splitActions(below, menuHeader(title, null, ATTENTION_ICONS[item.code.split(".")[0]] ?? "alert"));
+  const { buttons, openMore } = splitActions(below, menuHeader(title, null, attentionIcon(item.code)));
   return h(
     "div",
     { class: "attention-item " + item.severity, menu: openMore },
-    h("div", { class: "attention-title" }, icon(ATTENTION_ICONS[item.code.split(".")[0]] ?? "alert"), h("strong", null, title)),
-    h("p", { class: "muted small" }, t(base + ".text", detail).trim()),
+    h("div", { class: "attention-title" }, icon(attentionIcon(item.code)), h("strong", null, title)),
+    h("p", { class: "muted small" }, text),
     buttons.length > 0 && h("div", { class: "row-actions" }, buttons),
   );
 }
@@ -2051,13 +2091,43 @@ function splitActions(entries, header) {
   return { buttons: main, openMore };
 }
 
+/**
+ * What puts an end to the thing an item is about rather than mending it: a shared folder that is gone stops being
+ * shared, a machine that is gone is removed, a disk that is gone is let go, an app that keeps failing is stopped
+ */
+function attentionEnds(item, app, onMachine) {
+  const d = item.detail;
+  const ask = (label, iconName, confirm) => ({ label, icon: iconName, run: () => confirmAction({ label, iconName, ...confirm }) });
+  return [
+    item.code === "share.missing" && d.name && ask(t("shares.stop"), "x", { title: t("attention.end.share", { name: d.name }), lead: t("attention.end.shareLead", { path: d.path }), run: () => api("DELETE", `/api/shares/${encodeURIComponent(d.name)}`) }),
+    item.code === "machine.away" && d.id && { label: t("machines.remove") + "…", icon: "trash", run: () => removeMachineDialog({ id: d.id, name: d.name, online: false }, refresh) },
+    item.code === "netplace.down" && d.id && ask(t("netplace.remove"), "trash", { title: t("netplace.removeTitle", { name: d.name }), lead: t("netplace.removeLead", { path: d.path }), run: () => api("DELETE", `/api/netplaces/${d.id}`) }),
+    item.code === "absent" && d.path && ask(t("mounting.disconnect"), "x", { title: t("mounting.disconnectTitle", { path: d.path }), lead: t("attention.end.absentLead"), run: () => api("POST", "/api/disks/disconnect", { path: d.path }) }),
+    (item.code === "restarting" || item.code === "partial") && app && { label: t("app.stop"), icon: "stop", run: () => startAction(app, "stop") },
+    (item.code === "machine.restarting" || item.code === "machine.partial") && d.name && {
+      label: t("app.stop"),
+      icon: "stop",
+      run: async () => {
+        try {
+          const res = await api("POST", `/api/machines/${d.id}/apps/${onMachine.name}/stop`, {});
+          jobDialog(res.job, "stop", onMachine.title);
+        } catch (err) {
+          toast(errorText(err), "error");
+        }
+      },
+    },
+    item.code === "network.exposed" && d.nic && ask(t("attention.end.outside"), "lock", { kind: "primary", title: t("attention.end.outsideTitle", { nic: d.nic }), lead: t("attention.end.outsideLead", { address: d.address }), run: () => api("PUT", `/api/network/${encodeURIComponent(d.nic)}/side`, { side: "outside" }) }),
+  ].filter(Boolean);
+}
+
 /** How long "remind me later" puts an item off; it comes back sooner if it gets worse */
 const SNOOZE_DAYS = 3;
 
-async function snoozeItem(item) {
+/** Puts an item off for some days or for good; it keeps its words, so the list of what is hidden can say it */
+async function snoozeItem(item, forever = false) {
   try {
-    await api("POST", "/api/attention/snooze", { id: item.id, severity: item.severity, ...(item.at ? { at: item.at } : {}), days: SNOOZE_DAYS });
-    toast(t("attention.snoozed", { date: shortDate(Date.now() + SNOOZE_DAYS * 86_400_000) }));
+    await api("POST", "/api/attention/snooze", { id: item.id, severity: item.severity, ...(item.at ? { at: item.at } : {}), ...(forever ? { forever: true } : { days: SNOOZE_DAYS }), code: item.code, detail: item.detail, ...(item.app ? { app: item.app } : {}) });
+    toast(forever ? t("attention.neverDone") : t("attention.snoozed", { date: shortDate(Date.now() + SNOOZE_DAYS * 86_400_000) }));
     await refresh();
   } catch (e) {
     toast(errorText(e), "error");
@@ -2282,6 +2352,7 @@ function renderHome() {
     stats: statsBlock(),
     attention: isAdmin() ? widget("attention", h("section", { class: "card pad attention-block" })) : null,
     activity: isAdmin() ? widget("activity", h("section", { class: "card pad activity-block" })) : null,
+    adblock: isAdmin() ? widget("adblock", h("section", { class: "card pad adblock-block" })) : null,
   };
   const zone = (name, tag = "div") => h(tag, { class: "zone" + (name === "side" ? " side" : ""), id: "zone-" + name, "data-zone": name });
   shell(
@@ -2306,6 +2377,7 @@ function attentionBlock(list) {
     list.length ? h("div", { class: "attention-list" }, shown.map(attentionItem)) : h("p", { class: "all-good" }, icon("check", "ok"), t("attention.none")),
     hidden > 0 && h("button", { type: "button", class: "link small more-items", onclick: toggle(true) }, t("attention.moreItems", { n: hidden }), icon("down")),
     homeUi.attentionAll && list.length > ATTENTION_OPEN && h("button", { type: "button", class: "link small more-items", onclick: toggle(false) }, t("attention.fewer"), icon("up")),
+    state.overview?.attentionHidden > 0 && h("a", { class: "link small more-items", href: "#/settings/notifications/hidden" }, t("attention.hiddenLink", { n: state.overview.attentionHidden }), icon("chevron")),
   ];
 }
 
@@ -2327,6 +2399,7 @@ function renderHomeBody() {
   }
 
   if (homeUi.widgets.attention) put(homeUi.widgets.attention, attentionBlock(o.attention));
+  if (homeUi.widgets.adblock) adblockBlock(homeUi.widgets.adblock, o.adblock);
   if (homeUi.widgets.activity) put(homeUi.widgets.activity, blockRemover("activity"), h("div", { class: "section-head" }, h("h2", null, t("activity.title"))), o.activity.length ? h("div", { class: "timeline" }, o.activity.map(activityItem)) : h("p", { class: "muted small" }, t("activity.none")), isAdmin() && o.activity.length > 0 && h("a", { class: "link small all-activity", href: "#/activity" }, t("activity.all"), icon("chevron")));
   for (const name of ZONES) for (const id of o.dashboard.widgets[name]) if (id.startsWith("machine:")) machineBlock(id);
   if (!homeUi.drag?.active) placeWidgets();
@@ -2335,7 +2408,7 @@ function renderHomeBody() {
 
 const ZONES = ["top", "side", "bottom"];
 /** Hata's own blocks: the picture of one in the "Add" menu and where it goes when it is put back */
-const BLOCKS = { stats: { icon: "cpu", zone: "top" }, attention: { icon: "alert", zone: "side" }, activity: { icon: "list", zone: "side" } };
+const BLOCKS = { stats: { icon: "cpu", zone: "top" }, attention: { icon: "alert", zone: "side" }, activity: { icon: "list", zone: "side" }, adblock: { icon: "shield", zone: "side" } };
 const blockTitle = (id) => (id.startsWith("machine:") ? t("home.machineBlock", { name: machineOfBlock(id)?.name ?? id.slice(8) }) : t(id === "stats" ? "home.statsBlock" : id + ".title"));
 
 /** The small button that takes one of Hata's own blocks off the dashboard; the "Add" menu brings it back */
@@ -3046,7 +3119,7 @@ function renderContainersBody() {
   const vmCount = d.containers.filter((c) => c.kind === "vm").length;
   document.getElementById("incus-meta").textContent = [t("incus.countN", { n: d.containers.length - vmCount }), vmCount > 0 && t("incus.vm.countN", { n: vmCount }), d.version && "Incus " + d.version, d.network && t("incus.network", { name: d.network.name, address: d.network.address })].filter(Boolean).join(" · ");
   if (!d.containers.length) {
-    return put(box, h("div", { class: "card empty" }, icon("box"), h("h2", null, t("incus.none")), h("p", null, t("incus.noneLead")), button(t("incus.new"), { class: "primary", onclick: () => newContainerDialog() }, "plus")), vmCard(d));
+    return put(box, h("div", { class: "card empty" }, icon("box"), h("h2", null, t("incus.none")), h("p", null, t("incus.noneLead")), button(t("incus.new"), { class: "primary", onclick: () => newContainerDialog() }, "plus")), homeNetCard(d), vmCard(d));
   }
   put(
     box,
@@ -3064,8 +3137,21 @@ function renderContainersBody() {
         ),
       ),
     ),
+    homeNetCard(d),
     incusPlacesCard(d),
+    d.vms?.state === "ready" && discsCard(d),
     vmCard(d),
+  );
+}
+
+/** Where new ones sit: the home network once its bridge is there, or the way to make it */
+function homeNetCard(d) {
+  const home = d.home;
+  return h(
+    "section",
+    { class: "card pad stack" },
+    h("div", { class: "section-head" }, h("h2", null, t("incus.net.title")), h("div", { class: "actions" }, home ? h("a", { class: "btn small", href: "#/settings/network" }, t("incus.net.settings")) : button(t("incus.net.make"), { class: "small", onclick: () => homeBridgeDialog(null, () => void loadContainers()) }, "box"))),
+    h("p", { class: "muted small" }, home ? t("incus.net.on", { bridge: home.name, address: home.address || "—" }) : t("incus.net.off", { network: d.network?.name ?? "" })),
   );
 }
 
@@ -3183,6 +3269,188 @@ function incusPlacesCard(d) {
   );
 }
 
+/** Disc images (ISO) for virtual machines installed from them: what is kept, and the ways to add one */
+function discsCard(d) {
+  const list = d.discs ?? [];
+  return h(
+    "section",
+    { class: "card pad stack" },
+    h(
+      "div",
+      { class: "row wrap" },
+      h("h2", { class: "grow" }, t("incus.disc.title")),
+      button(t("incus.disc.fromLink"), { class: "small", onclick: () => discAddDialog({ how: "url" }) }, "link"),
+      button(t("incus.disc.fromHere"), { class: "small", onclick: () => discAddDialog({ how: "local" }) }, "upload"),
+      !list.some((x) => /^virtio-win/i.test(x.name)) && button(t("incus.win.drivers"), { class: "small", title: t("incus.win.driversHint"), onclick: (e) => addDrivers(e.currentTarget) }, "download"),
+    ),
+    h("p", { class: "muted small" }, t("incus.disc.lead")),
+    list.length === 0
+      ? h("p", { class: "muted small" }, t("incus.disc.none"))
+      : list.map((x) =>
+          h(
+            "div",
+            { class: "row", menu: true },
+            h("span", { class: "app-icon plus small" }, icon("disk")),
+            h("div", { class: "grow" }, h("div", { class: "strong clip" }, x.name), h("div", { class: "muted small" }, [x.size ? bytes(x.size) : null, (d.places ?? []).length > 1 && x.place, x.usedBy.length ? t("incus.disc.usedBy", { names: x.usedBy.join(", ") }) : null].filter(Boolean).join(" · "))),
+            h(
+              "div",
+              { class: "row-actions" },
+              button(t("incus.disc.makeVm"), { class: "small", onclick: () => newDiscVm(x) }, "plus"),
+              button("", { class: "small ghost", title: t("incus.disc.remove"), "aria-label": `${t("incus.disc.remove")}: ${x.name}`, disabled: x.usedBy.length > 0, onclick: () => removeDiscDialog(x) }, "trash"),
+            ),
+          ),
+        ),
+  );
+}
+
+/** Fedora's disc of virtio drivers, which Windows needs for its network: downloaded once */
+async function addDrivers(el) {
+  el.disabled = true;
+  try {
+    const r = await api("POST", "/api/containers/discs", { drivers: true });
+    void jobDialog(r.job, "disc", r.name, () => void loadContainers());
+  } catch (e) {
+    toast(errorText(e), "error");
+    el.disabled = false;
+  }
+}
+
+/** The new-machine dialog with this disc chosen */
+function newDiscVm(x) {
+  newContainerDialog("vm");
+  const image = document.querySelector("dialog[open] form select");
+  if (!image) return;
+  image.value = `disc:${x.place}/${x.name}`;
+  image.dispatchEvent(new Event("change"));
+}
+
+/**
+ * A disc image added by a link, from this computer (the browser sends the file as the body) or from a file of
+ * this server (`path`); Incus keeps it in a place.
+ */
+async function discAddDialog({ how, path = "" }) {
+  let d = incusUi.data;
+  if (!d || d.state !== "ready") {
+    try {
+      d = incusUi.data = await api("GET", "/api/containers");
+    } catch (e) {
+      return toast(errorText(e), "error");
+    }
+  }
+  if (d.state !== "ready" || d.vms?.state !== "ready") return toast(t("incus.disc.noVms"), "error");
+  const places = d.places ?? [];
+  const place = h("select", null, places.map((p) => h("option", { value: p.name, selected: p.standard }, `${p.name} — ${p.path || t("incus.place.systemPath")}${p.total ? " · " + t("incus.place.freeShort", { free: bytes(p.total - p.used) }) : ""}`)));
+  const url = h("input", { type: "url", required: how === "url", placeholder: "https://…/debian-13-amd64-netinst.iso", class: "mono", spellcheck: false });
+  const picked = h("input", { type: "file", required: how === "local", accept: ".iso" });
+  const fill = h("i");
+  const progress = h("div", { class: "stack-s", hidden: true }, h("div", { class: "bar" }, fill), h("p", { class: "muted small" }));
+  const error = h("p", { class: "error", role: "alert" });
+  const stay = (e) => e.preventDefault();
+  let dialog;
+  const done = (name) => {
+    dialog.removeEventListener("cancel", stay);
+    dialog.close();
+    toast(t("incus.disc.added", { name }));
+    void loadContainers();
+  };
+  const sendLocal = (go) => {
+    const f = picked.files[0];
+    if (!f) return void (go.disabled = false);
+    progress.hidden = false;
+    const said = progress.querySelector("p");
+    const xhr = new XMLHttpRequest();
+    xhr.open("POST", `/api/containers/discs/upload?${new URLSearchParams({ place: place.value, name: f.name })}`);
+    xhr.upload.onprogress = (e) => {
+      const percent = e.total ? Math.floor((e.loaded / e.total) * 100) : 0;
+      fill.style.width = percent + "%";
+      said.textContent = percent < 100 ? t("pve.send.sending", { done: bytes(e.loaded), size: bytes(f.size) }) : t("incus.disc.placing");
+    };
+    const failed = (text) => ((error.textContent = text), (progress.hidden = true), (go.disabled = false), dialog.removeEventListener("cancel", stay));
+    xhr.onerror = () => failed(t("error.network"));
+    xhr.onload = () => {
+      let payload = {};
+      try {
+        payload = JSON.parse(xhr.responseText);
+      } catch {}
+      if (xhr.status < 200 || xhr.status >= 300) return failed(errorText(new ApiError(xhr.status, payload.error?.code ?? "request.failed", payload.error?.detail)));
+      done(payload.name ?? f.name);
+    };
+    // Escape would cut the sending off
+    dialog.addEventListener("cancel", stay);
+    xhr.send(f);
+  };
+  const submit = async (e) => {
+    e.preventDefault();
+    error.textContent = "";
+    const go = dialog.querySelector("button[type=submit]");
+    go.disabled = true;
+    if (how === "local") return sendLocal(go);
+    try {
+      const r = await api("POST", "/api/containers/discs", { place: place.value, ...(how === "url" ? { url: url.value.trim() } : { path }) });
+      dialog.close();
+      void jobDialog(r.job, "disc", r.name, () => void loadContainers());
+    } catch (err) {
+      error.textContent = errorText(err);
+      go.disabled = false;
+    }
+  };
+  dialog = openDialog(
+    "wide",
+    h(
+      "form",
+      { class: "stack", onsubmit: submit },
+      h("header", null, h("h2", { class: "grow wrap" }, how === "path" ? t("incus.disc.fileTitle", { name: path.split("/").pop() }) : t(how === "url" ? "incus.disc.linkTitle" : "incus.disc.localTitle")), closeX(() => dialog)),
+      h("p", { class: "muted small" }, t("incus.disc.addLead")),
+      how === "url" && field(t("incus.disc.url"), url, t("incus.disc.urlHint")),
+      how === "local" && field(t("pve.send.file"), picked),
+      places.length > 1 && field(t("incus.place.label"), place),
+      progress,
+      error,
+      h("footer", null, closeButton(() => dialog, t("common.cancel")), h("button", { type: "submit", class: "btn primary" }, icon(how === "url" ? "download" : "upload"), h("span", null, t("incus.disc.add")))),
+    ),
+  );
+  (how === "url" ? url : how === "local" ? picked : dialog.querySelector("button[type=submit]")).focus();
+}
+
+function removeDiscDialog(x) {
+  let dialog;
+  dialog = openDialog(
+    "confirm",
+    h("h2", null, t("incus.disc.removeTitle", { name: x.name })),
+    h("p", { class: "muted" }, t("incus.disc.removeLead")),
+    h(
+      "footer",
+      null,
+      closeButton(() => dialog, t("common.cancel")),
+      button(t("incus.disc.remove"), {
+        class: "danger",
+        onclick: async (e) => {
+          e.currentTarget.disabled = true;
+          try {
+            await api("DELETE", `/api/containers/discs/${encodeURIComponent(x.place)}/${encodeURIComponent(x.name)}`);
+            dialog.close();
+            void loadContainers();
+          } catch (err) {
+            toast(errorText(err), "error");
+            e.target.closest("button").disabled = false;
+          }
+        },
+      }, "trash"),
+    ),
+  );
+}
+
+/** The disc out of the drive: the machine boots from its own disk afterwards */
+async function ejectDisc(c) {
+  try {
+    await api("POST", `/api/containers/${c.name}/eject`);
+    toast(t("incus.disc.ejected", { name: c.name }));
+  } catch (e) {
+    toast(errorText(e), "error");
+  }
+  void loadContainers();
+}
+
 /** Moves a container or virtual machine to another place */
 function moveContainerDialog(c) {
   const d = incusUi.data;
@@ -3284,7 +3552,7 @@ function containerRow(c) {
       "td",
       null,
       h("div", { class: "strong" }, c.name, c.machine && h("a", { class: "small", href: `#/machines/${c.machine}` }, " · ", t("incus.asMachine"))),
-      h("div", { class: "muted small" }, [c.kind === "vm" && t("incus.vm.short"), c.os, c.nesting && "Docker", c.snapshots.length > 0 && t("incus.snapshotsN", { n: c.snapshots.length })].filter(Boolean).join(" · ")),
+      h("div", { class: "muted small" }, [c.kind === "vm" && t("incus.vm.short"), c.os, c.network === "home" && t("incus.net.homeShort"), c.nesting && "Docker", c.snapshots.length > 0 && t("incus.snapshotsN", { n: c.snapshots.length }), c.disc && t("incus.disc.inDrive", { name: c.disc })].filter(Boolean).join(" · ")),
     ),
     h("td", null, incusStatus(c)),
     h("td", { class: "mono small" }, c.address || "—"),
@@ -3298,7 +3566,7 @@ function containerRow(c) {
         running
           ? button(t("incus.stop"), { class: "small", onclick: (e) => containerAct(c, "stop", e.currentTarget) }, "stop")
           : button(t("incus.start"), { class: "small", onclick: (e) => containerAct(c, "start", e.currentTarget) }, "play"),
-        running && c.kind === "vm" && button(t("incus.screen"), { class: "small", onclick: () => containerScreen(c) }, "server"),
+        running && c.kind === "vm" && button(t("incus.screen"), { class: "small", onclick: () => containerScreen(c) }, "screen"),
         running && button(t("incus.console"), { class: "small", onclick: () => containerConsole(c) }, "terminal"),
         button("", { class: "small ghost", title: t("incus.more"), "aria-label": t("incus.more"), onclick: (e) => {
           const r = e.currentTarget.getBoundingClientRect();
@@ -3324,10 +3592,14 @@ async function containerAct(c, action, el) {
 function containerMenu(c, at) {
   menuAt(at, menuHeader(c.name, c.os, c.kind === "vm" ? "server" : "box"), [
     c.status === "running" && { label: t("incus.restart"), icon: "refresh", run: () => containerAct(c, "restart") },
-    c.status === "running" && c.kind === "vm" && { label: t("incus.screen"), icon: "server", run: () => containerScreen(c) },
+    c.status === "running" && c.kind === "vm" && { label: t("incus.screen"), icon: "screen", run: () => containerScreen(c) },
+    c.disc && { label: t("incus.disc.eject"), icon: "up", run: () => ejectDisc(c) },
     c.status === "running" && { label: t("incus.console"), icon: "terminal", run: () => containerConsole(c) },
     c.machine && { label: t("incus.openMachine"), icon: "server", href: `#/machines/${c.machine}` },
     { label: t("incus.limits") + "…", icon: "settings", run: () => containerLimitsDialog(c) },
+    (incusUi.data?.home || c.network === "home") && { label: t("incus.net.move") + "…", icon: "network", run: () => containerNetworkDialog(c) },
+    { label: t("names.give") + "…", icon: "globe", run: () => domainNameDialog(null, { target: { kind: "container", name: c.name }, label: c.name }) },
+    { label: t("ports.open") + "…", icon: "network", run: () => forwardDialog(null, { target: { kind: "container", name: c.name } }) },
     { label: t("incus.snapshots") + "…", icon: "clock", run: () => containerSnapshotsDialog(c) },
     { label: t("incus.rename") + "…", icon: "edit", run: () => renameContainerDialog(c) },
     { label: t("incus.clone") + "…", icon: "copy", run: () => cloneContainerDialog(c) },
@@ -3392,8 +3664,16 @@ function newContainerDialog(start = "container") {
   const [docker, dockerRow] = tickRow(t("incus.docker"), t("incus.dockerHint"), true);
   const [autostart, autostartRow] = tickRow(t("incus.autostart"), null, true);
   const vmNote = h("p", { class: "banner small" }, t("incus.vm.note"));
+  const discNote = h("p", { class: "banner small", hidden: true }, t("incus.disc.note"));
+  const imageHint = h("span");
+  const [windows, windowsRow] = tickRow(t("incus.win.tick"), t("incus.win.hint"), false);
+  windows.addEventListener("change", () => ((windows.dataset.touched = "1"), shape()));
+  let discWas = "";
+  disk.addEventListener("input", () => (disk.dataset.touched = "1"));
   const placeSelect = h("select", null, (d.places ?? []).map((p) => h("option", { value: p.name, selected: p.standard }, `${p.name} — ${p.path || t("incus.place.systemPath")}${p.total ? " · " + t("incus.place.freeShort", { free: bytes(p.total - p.used) }) : ""}`)));
   const placeRow = (d.places ?? []).length > 1 && field(t("incus.place.label"), placeSelect);
+  const netSelect = h("select", null, ["home", "private"].map((k) => h("option", { value: k }, t("incus.net." + k))));
+  const netRow = d.home ? field(t("incus.net.label"), netSelect, t("incus.net.hint")) : h("p", { class: "muted small" }, t("incus.net.none"), " ", h("a", { href: "#", class: "link", onclick: (e) => (e.preventDefault(), dialog.close(), homeBridgeDialog(null, () => void loadContainers())) }, t("incus.net.make")));
   placeSelect.addEventListener("change", () => shape());
   const lead = h("p", { class: "muted small" });
   const title = h("h2", { class: "grow" });
@@ -3404,7 +3684,10 @@ function newContainerDialog(start = "container") {
   );
   const fillImages = () => {
     const was = image.value;
-    image.replaceChildren(...d.images.filter((i) => (kind === "vm" ? i.vm : i.container !== false)).map((i) => h("option", { value: i.id }, i.client ? i.name : `${i.name} — ${t("incus.noClient")}`)));
+    const systems = d.images.filter((i) => (kind === "vm" ? i.vm : i.container !== false)).map((i) => h("option", { value: i.id }, i.client ? i.name : `${i.name} — ${t("incus.noClient")}`));
+    // a virtual machine can also be installed from a disc image, on its screen
+    const discs = kind === "vm" ? (d.discs ?? []).map((x) => h("option", { value: `disc:${x.place}/${x.name}` }, x.name)) : [];
+    image.replaceChildren(...(discs.length ? [h("optgroup", { label: t("incus.disc.systems") }, systems), h("optgroup", { label: t("incus.disc.group") }, discs)] : systems));
     if ([...image.options].some((o) => o.value === was)) image.value = was;
     fillMemory(kind === "vm");
   };
@@ -3427,14 +3710,30 @@ function newContainerDialog(start = "container") {
     vmNote.hidden = !vm;
     for (const b of seg.children) b.classList.toggle("active", b.dataset.kind === kind);
     const chosen = d.images.find((i) => i.id === image.value);
+    const fromDisc = vm && image.value.startsWith("disc:");
+    discNote.hidden = !fromDisc;
+    lead.hidden = fromDisc;
+    imageHint.textContent = t(fromDisc ? "incus.disc.imageHint" : "incus.imageHint");
+    // a disc of Windows is told by its name; the tick can be changed
+    if (fromDisc && image.value !== discWas && !windows.dataset.touched) windows.checked = /win/i.test(image.value.split("/").pop()) && !/^virtio-win/i.test(image.value.split("/").pop());
+    discWas = image.value;
+    windowsRow.hidden = !fromDisc;
+    const win = fromDisc && windows.checked;
+    const drivers = (d.discs ?? []).some((x) => /^virtio-win/i.test(x.name));
+    windowsRow.querySelector(".block").textContent = t(drivers ? "incus.win.hint" : "incus.win.hintNoDrivers");
+    vmNote.hidden = !vm || fromDisc;
+    clientRow.hidden = dockerRow.hidden = fromDisc;
+    // a system installed from a disc wants room: most installers ask for 10–20 GB
+    if (fromDisc && !disk.dataset.touched && Number(disk.value) < 20) disk.value = "20";
+    if (vm && !fromDisc && !disk.dataset.touched && !chosen?.least && disk.value === "20") disk.value = "10";
     const can = chosen?.client;
     client.disabled = !can;
     if (!can) client.checked = false;
     // Docker's own script does not know every system
     if (!client.checked || chosen?.docker === false) docker.checked = false;
     docker.disabled = !can || !client.checked || chosen?.docker === false;
-    // a desktop needs room: less is not offered
-    const least = vm ? chosen?.least : null;
+    // a desktop needs room: less is not offered; so does Windows
+    const least = win ? { memory: 4096, disk: 64 } : vm ? chosen?.least : null;
     disk.min = String(least?.disk ?? (vm ? 4 : 1));
     if (least && Number(disk.value) < least.disk) disk.value = String(least.disk);
     for (const o of memory.options) o.disabled = !!least && Number(o.value) < least.memory;
@@ -3450,13 +3749,16 @@ function newContainerDialog(start = "container") {
     submit.disabled = true;
     const n = name.value.trim().toLowerCase();
     try {
-      const r = await api("POST", "/api/containers", { kind, name: n, image: image.value, cores: Number(cores.value), memory: Number(memory.value), disk: disk.disabled ? 0 : Number(disk.value || 0), client: client.checked, docker: docker.checked, autostart: autostart.checked, place: placeSelect.value });
+      const fromDisc = kind === "vm" && image.value.startsWith("disc:");
+      const r = await api("POST", "/api/containers", { windows: fromDisc && windows.checked, kind, name: n, image: image.value, cores: Number(cores.value), memory: Number(memory.value), disk: disk.disabled ? 0 : Number(disk.value || 0), client: client.checked, docker: docker.checked, autostart: autostart.checked, place: placeSelect.value, ...(d.home ? { network: netSelect.value } : {}) });
       dialog.close();
-      const machine = client.checked;
+      const machine = client.checked && !fromDisc;
       void loadContainers();
       void jobDialog(r.job, "container", n, () => {
-        toast(t(machine ? "incus.made.machine" : "incus.made.plain", { name: n }));
         void loadContainers();
+        // the installer waits on the machine's screen
+        if (fromDisc) return containerScreen({ name: n });
+        toast(t(machine ? "incus.made.machine" : "incus.made.plain", { name: n }));
         void loadMachines();
       });
     } catch (err) {
@@ -3473,10 +3775,13 @@ function newContainerDialog(start = "container") {
       vmsReady && seg,
       lead,
       vmNote,
-      h("div", { class: "form-pair" }, field(t("incus.name"), name, t("incus.nameHint")), field(t("incus.image"), image, t("incus.imageHint"))),
+      discNote,
+      h("div", { class: "form-pair" }, field(t("incus.name"), name, t("incus.nameHint")), field(t("incus.image"), image, imageHint)),
       h("div", { class: "form-pair" }, field(t("incus.coresLabel"), cores), field(t("incus.memoryLabel"), memory)),
       diskRow,
       placeRow,
+      netRow,
+      windowsRow,
       clientRow,
       dockerRow,
       autostartRow,
@@ -3487,6 +3792,42 @@ function newContainerDialog(start = "container") {
   fillImages();
   shape();
   name.focus();
+}
+
+/** Moves an instance between the home network and Hata's own: restarted, a new address from the other network */
+function containerNetworkDialog(c) {
+  const d = incusUi.data;
+  const to = c.network === "home" ? "private" : "home";
+  const error = h("p", { class: "error", role: "alert" });
+  const dialog = openDialog(
+    "",
+    h("header", null, h("h2", { class: "grow" }, t("incus.net.moveTitle", { name: c.name })), closeX(() => dialog)),
+    h("p", null, t("incus.net.now." + (c.network || "other")), " ", t("incus.net.to." + to)),
+    h("ul", { class: "muted small" }, [c.status === "running" && t("incus.net.restarts"), t("incus.net.address"), c.machine && t("incus.net.client"), to === "home" && t("incus.net.open")].filter(Boolean).map((line) => h("li", null, line))),
+    to === "home" && !d.home?.address && h("p", { class: "banner small" }, t("incus.net.none")),
+    error,
+    h(
+      "footer",
+      null,
+      closeButton(() => dialog, t("common.cancel")),
+      button(t("incus.net.go." + to), {
+        class: "primary",
+        disabled: to === "home" && !d.home?.address,
+        onclick: async (e) => {
+          const el = e.currentTarget;
+          el.disabled = true;
+          try {
+            const r = await api("POST", `/api/containers/${c.name}/network`, { network: to });
+            dialog.close();
+            void jobDialog(r.job, "container", c.name, () => void loadContainers());
+          } catch (err) {
+            error.textContent = errorText(err);
+            el.disabled = false;
+          }
+        },
+      }),
+    ),
+  );
 }
 
 function containerLimitsDialog(c) {
@@ -3802,12 +4143,17 @@ function haEntityDialog(server, s, item = null) {
   const badge = h("span", { class: "app-icon plus" }, icon(haIcon(s)));
   const sub = h("span", { class: "muted small" });
   const body = h("div", { class: "stack ha-dialog" });
+  const title = h("h2", { class: "clip" });
+  // the name lives in Home Assistant: an administrator renames it there
+  const rename = h("button", { type: "button", class: "icon-btn small", title: t("ha.rename"), "aria-label": t("ha.rename"), onclick: () => haRenameDialog(server, now) }, icon("edit"));
   const paint = () => {
     const gone = haGone(now) || !x?.online;
+    title.textContent = now?.name ?? s.name;
+    rename.hidden = !isAdmin() || gone;
     const a = now ? now.actions : [];
     const lit = haLit(now);
     badge.classList.toggle("on", lit);
-    sub.textContent = [now?.area, now?.at ? t("ha.changedAgo", { ago: ago(now.at) }) : null].filter(Boolean).join(" · ");
+    sub.textContent = [now?.area, now?.haName && t("ha.inHa", { name: now.haName }), now?.at ? t("ha.changedAgo", { ago: ago(now.at) }) : null].filter(Boolean).join(" · ");
     const toggle = a.includes("toggle") && h("button", { type: "button", role: "switch", class: "ha-switch", "aria-checked": String(lit), "aria-label": now.name, disabled: gone, onclick: (e) => haPress(server, now, "toggle", undefined, e.currentTarget) }, h("i"));
     const level = now?.state === "on" ? (now.brightness ?? 100) : 0;
     const shown = h("span", { class: "small" }, `${level}%`);
@@ -3842,8 +4188,47 @@ function haEntityDialog(server, s, item = null) {
     admin && item && button(t("ha.move"), { class: "small", onclick: () => (dialog.close(), tileMenu(item)) }, "arrow"),
     admin && item && button(t("ha.offHome"), { class: "small danger", onclick: () => (dialog.close(), changeLayout((next) => void takeTile(next, tileKey(item)))) }, "trash"),
   ].filter(Boolean);
-  dialog = openDialog("ha-entity", h("header", null, badge, h("div", { class: "grow" }, h("h2", { class: "clip" }, s.name), sub), closeX(() => dialog)), body, links.length > 0 && h("footer", { class: "ha-links" }, links));
+  dialog = openDialog("ha-entity", h("header", null, badge, h("div", { class: "grow" }, h("div", { class: "ha-name" }, title, rename), sub), closeX(() => dialog)), body, links.length > 0 && h("footer", { class: "ha-links" }, links));
   dialog.addEventListener("close", () => haUi.listeners.delete(listener));
+}
+
+function haRenameDialog(server, s) {
+  const input = h("input", { maxlength: 100, value: s.name, placeholder: s.haName ?? s.id, "aria-label": t("ha.name") });
+  const hint = h("p", { class: "muted small" });
+  // as in Zigbee2MQTT: the name is Hata's, and a tick sends it to Home Assistant as well
+  const there = h("input", { type: "checkbox", onchange: () => paint() });
+  const paint = () => (hint.textContent = t(there.checked ? "ha.rename.hintThere" : "ha.rename.hint"));
+  paint();
+  const error = h("p", { class: "error", role: "alert" });
+  let dialog;
+  dialog = openDialog(
+    "confirm",
+    h(
+      "form",
+      {
+        onsubmit: async (e) => {
+          e.preventDefault();
+          error.textContent = "";
+          try {
+            haSetState(server, await api("POST", `/api/ha/${server}/rename`, { entity: s.id, name: input.value.trim(), there: there.checked }));
+            dialog.close();
+            toast(t(there.checked ? "ha.rename.doneThere" : "ha.rename.done"));
+          } catch (err) {
+            error.textContent = errorText(err);
+          }
+        },
+      },
+      h("h2", null, t("ha.rename.title", { name: s.name })),
+      h("p", { class: "muted" }, t("ha.rename.lead")),
+      input,
+      hint,
+      s.renamable && h("label", { class: "check" }, there, h("span", null, t("ha.rename.there"))),
+      error,
+      h("footer", null, closeButton(() => dialog, t("common.cancel")), h("button", { class: "btn primary" }, t("ha.rename"))),
+    ),
+  );
+  input.focus();
+  input.select();
 }
 
 // The tile of an entity on Home
@@ -6145,6 +6530,9 @@ function renderMachineHead() {
         "div",
         { class: "actions" },
         m.outdated && m.online && button(t("machines.update", { version: machinesUi.list.version }), { class: "accent", onclick: (e) => updateMachine(m, e.currentTarget) }, "up"),
+        // a virtual machine of this server or of Proxmox: what is on its screen, a desktop too
+        m.incusVm && m.online && button(t("incus.screen"), { onclick: () => containerScreen({ name: m.incusVm }) }, "screen"),
+        m.pve?.type === "qemu" && m.pve.status === "running" && button(t("pve.screen"), { onclick: () => pveConsoleDialog({ id: m.pve.host }, m.pve) }, "screen"),
         m.online && h("a", { class: "btn", href: filesHash("/", m.id) }, icon("folder"), h("span", null, t("machines.files"))),
         !m.online && m.pve?.power && m.pve.status !== "running" && button(t("pve.startHere", { host: m.pve.hostName }), { class: "primary", onclick: (e) => startGuestOf(m, e.currentTarget) }, "play"),
         !m.online && !(m.pve?.power && m.pve.status !== "running") && m.info?.macs?.length > 0 && button(t("machines.wake"), { class: "primary", onclick: (e) => wakeMachine(m, e.currentTarget) }, "play"),
@@ -6163,6 +6551,8 @@ function machineMenu(m, at = null) {
     at ? "menu dropdown" : "menu",
     h("header", null, h("span", { class: "machine-icon" }, icon("server")), h("div", null, h("h2", null, m.name), machineChip(m))),
     item(t("machines.rename"), "edit", () => renameMachineDialog(m)),
+    item(t("names.give") + "…", "globe", () => domainNameDialog(null, { target: { kind: "machine", id: m.id }, label: m.name })),
+    item(t("ports.open") + "…", "network", () => forwardDialog(null, { target: { kind: "machine", id: m.id } })),
     !m.online && m.info?.macs?.length > 0 && item(t("machines.wake"), "play", () => wakeMachine(m)),
     m.online && item(t("machines.reboot"), "refresh", () => powerDialog(m, "reboot")),
     m.online && item(t("machines.poweroff"), "stop", () => powerDialog(m, "poweroff")),
@@ -6305,7 +6695,7 @@ function renameMachineDialog(m) {
   field.select();
 }
 
-function removeMachineDialog(m) {
+function removeMachineDialog(m, after = () => go("#/machines")) {
   let dialog;
   dialog = openDialog(
     "confirm",
@@ -6323,7 +6713,7 @@ function removeMachineDialog(m) {
           try {
             await api("DELETE", `/api/machines/${m.id}`);
             dialog.close();
-            go("#/machines");
+            void after();
           } catch (err) {
             toast(errorText(err), "error");
           }
@@ -9069,6 +9459,7 @@ function entryMenu(entry, at) {
     entry.type !== "other" && item(t(entry.type === "dir" ? "files.downloadZip" : "files.download"), "download", () => downloadEntries([entry])),
     entry.type === "file" && ARCHIVE_RE.test(entry.name) && !state.files.readOnly && !filesMachine() && isAdmin() && item(t("files.extract"), "archive", () => extractArchive(path)),
     entry.type === "file" && PVE_SEND_RE.test(entry.name) && !filesMachine() && isAdmin() && pveUi.list?.hosts?.length !== 0 && item(t("pve.send.menu"), "upload", () => pveSendDialog({ path })),
+    entry.type === "file" && /\.iso$/i.test(entry.name) && !filesMachine() && isAdmin() && item(t("incus.disc.menu"), "disk", () => discAddDialog({ how: "path", path })),
     item(t("files.copyPath"), "link", () => copyText(path)),
     entry.type !== "other" && !filesMachine() && item(t(isFavorite(path) ? "files.unfavorite" : "files.favorite"), "star", () => favorite(path, !isFavorite(path), entry.name)),
     entry.type === "dir" && !filesMachine() && isAdmin() && (state.files.pinned.includes(path) ? item(t("files.unpin"), "home", () => pinFolder(path, false)) : item(t("files.pin"), "home", () => pinFolder(path, true))),
@@ -10629,6 +11020,7 @@ async function loadSettings() {
     if (isAdmin()) state.settings = await api("GET", "/api/settings");
     if (isAdmin()) state.update = await api("GET", "/api/update").catch(() => null);
     if (isAdmin()) state.notify = await api("GET", "/api/notify").catch(() => null);
+    if (isAdmin() && state.route.section === "notifications") state.hiddenItems = (await api("GET", "/api/attention/hidden").catch(() => null))?.hidden ?? null;
     if (isAdmin() && state.route.section === "apps") state.images = await api("GET", "/api/images").catch(() => null);
     if (isAdmin() && state.route.section === "network") state.network = await api("GET", "/api/network").catch(() => null);
     if (isAdmin() && state.route.section === "remote") [state.remote, state.wireguard] = await Promise.all([api("GET", "/api/tailscale").catch(() => null), api("GET", "/api/wireguard").catch(() => null)]);
@@ -10644,6 +11036,8 @@ async function loadSettings() {
     return toast(errorText(e), "error");
   }
   if (state.route.view === "settings") renderSettings();
+  // "N hidden" under the list leads straight to them
+  if (state.route.section === "notifications" && location.hash.endsWith("/hidden")) document.getElementById("hidden")?.scrollIntoView({ block: "start" });
 }
 
 const LANGUAGE_NAMES = { en: "English", uk: "Українська" };
@@ -10661,6 +11055,8 @@ const SECTIONS = [
   { id: "network", icon: "network", admin: true },
   { id: "remote", icon: "globe", admin: true },
   { id: "https", icon: "lock", admin: true },
+  { id: "dns", icon: "globe", admin: true },
+  { id: "adblock", icon: "shield", admin: true },
   { id: "notifications", icon: "bell", admin: true },
   { id: "agents", icon: "key", admin: true },
   { id: "assistant", icon: "chat", admin: true },
@@ -11081,6 +11477,8 @@ function settingsSection(section) {
     ];
   }
   if (section === "https") return httpsSection(save, error);
+  if (section === "dns") return dnsSection();
+  if (section === "adblock") return adblockSection();
   if (section === "notifications") return notificationsSection();
   if (section === "storage") return storageSection();
   if (section === "shares") return sharesSection();
@@ -11135,7 +11533,7 @@ async function loadNetwork() {
  * A change of the network is on trial: this page keeps it as soon as it reaches the server again. When
  * the address itself changed the page cannot follow it — the link with the token does, opened by hand.
  */
-function trialDialog(pending) {
+function trialDialog(pending, after) {
   let over = false;
   const left = h("strong", null, "");
   const note = h("p", { class: "muted small" }, t("network.trial.checking"));
@@ -11146,6 +11544,7 @@ function trialDialog(pending) {
     dialog.close();
     toast(message, kind);
     void loadNetwork();
+    after?.();
   };
   const dialog = openDialog(
     "",
@@ -11281,6 +11680,87 @@ function handOverDialog(nic) {
           } catch (err) {
             error.textContent = errorText(err);
             e.target.closest("button").disabled = false;
+          }
+        },
+      }),
+    ),
+  );
+}
+
+/** Why a card cannot become the home bridge (the server's `bridgeRefusal`); "" — it can */
+const bridgeWhy = (nic) => (nic.kind === "wifi" ? "wifi" : nic.kind === "modem" ? "modem" : nic.ports || nic.port ? "already" : nic.outside ? "outside" : nic.manager !== "nm" ? "notNm" : !nic.addresses.length ? "noAddress" : "");
+
+/**
+ * The home network for containers and virtual machines: the server's card goes into a bridge, as with
+ * Proxmox's vmbr0. Without a card given, the cards are read and the one that leads to the internet offered.
+ */
+async function homeBridgeDialog(nic, after) {
+  try {
+    state.network = await api("GET", "/api/network");
+  } catch (err) {
+    return toast(errorText(err), "error");
+  }
+  const cards = state.network.nics.filter((n) => n.kind !== "modem" && !n.port && !n.ports);
+  const fit = cards.filter((n) => !bridgeWhy(n));
+  const pick = h("select", null, fit.map((n) => h("option", { value: n.name, selected: nic ? n.name === nic.name : n.internet === "main" }, `${n.name} — ${n.addresses.join(", ")}`)));
+  const error = h("p", { class: "error", role: "alert" });
+  const go = button(t("bridge.go"), {
+    class: "primary",
+    disabled: !fit.length || state.network.tool !== "ok",
+    onclick: async (e) => {
+      const el = e.currentTarget;
+      el.disabled = true;
+      error.textContent = "";
+      try {
+        const pending = await api("POST", `/api/network/${pick.value}/bridge`, {});
+        dialog.close();
+        trialDialog(pending, after);
+      } catch (err) {
+        error.textContent = errorText(err);
+        el.disabled = false;
+      }
+    },
+  });
+  const dialog = openDialog(
+    "",
+    h("header", null, h("h2", { class: "grow" }, t("bridge.title")), closeX(() => dialog)),
+    h("p", null, t("bridge.lead")),
+    h("ul", { class: "muted small" }, ["router", "card", "nat", "wifi"].map((k) => h("li", null, t("bridge.what." + k)))),
+    state.network.tool !== "ok" && h("p", { class: "banner small" }, t("bridge.needsNm")),
+    fit.length ? field(t("bridge.card"), pick, t("bridge.cardHint")) : h("p", { class: "banner small" }, t("bridge.noCard")),
+    cards.filter((n) => bridgeWhy(n)).length > 0 && h("ul", { class: "muted small" }, cards.filter((n) => bridgeWhy(n)).map((n) => h("li", null, `${n.name}: ${t("error.network.bridge." + bridgeWhy(n))}`))),
+    h("p", { class: "muted small" }, t("bridge.how", { bridge: "hatalan0" })),
+    h("p", { class: "banner small" }, t("network.trial.promise", { n: state.network.trial })),
+    error,
+    h("footer", null, closeButton(() => dialog, t("common.cancel")), go),
+  );
+}
+
+/** Takes the home bridge apart: its card gets the address back */
+function bridgeApartDialog(nic) {
+  const error = h("p", { class: "error", role: "alert" });
+  const dialog = openDialog(
+    "",
+    h("header", null, h("h2", { class: "grow" }, t("bridge.apartTitle")), closeX(() => dialog)),
+    h("p", null, t("bridge.apartLead", { card: (nic.ports ?? [])[0] ?? "" })),
+    h("p", { class: "banner small" }, t("network.trial.promise", { n: state.network.trial })),
+    error,
+    h(
+      "footer",
+      null,
+      closeButton(() => dialog, t("common.cancel")),
+      button(t("bridge.apartGo"), {
+        class: "primary",
+        onclick: async (e) => {
+          const el = e.currentTarget;
+          el.disabled = true;
+          try {
+            const pending = await api("DELETE", "/api/network/bridge");
+            dialog.close();
+            trialDialog(pending);
+          } catch (err) {
+            error.textContent = errorText(err);
+            el.disabled = false;
           }
         },
       }),
@@ -11600,7 +12080,15 @@ function networkSection() {
   const error = h("p", { class: "error", role: "alert" });
   const row = (label, value, mono = true) => h("div", { class: "kv" }, h("span", { class: "muted" }, label), h("span", { class: mono ? "mono" : "" }, value || "—"));
   const card = (nic) =>
-    h(
+    nic.port
+      ? h(
+          "section",
+          { class: "card pad" },
+          h("div", { class: "section-head" }, h("h2", null, h("span", { class: "with-icon" }, icon("network"), nic.name), " ", h("span", { class: "state " + (nic.up ? "running" : "stopped") }, t(nic.up ? "network.up" : "network.down")))),
+          h("p", { class: "muted small" }, t("bridge.portOf", { bridge: nic.port })),
+          row(t("network.mac"), nic.mac + (nic.speed ? ` · ${nic.speed >= 1000 ? nic.speed / 1000 + " Gbit/s" : nic.speed + " Mbit/s"}` : "")),
+        )
+      : h(
       "section",
       { class: "card pad", menu: true },
       h(
@@ -11626,8 +12114,11 @@ function networkSection() {
           nic.manager === "nm" && !data.pending && (!nic.wifi || nic.wifi.ssid) && !nic.wifi?.hotspot && button(t("network.change"), { onclick: () => nicDialog(nic) }, "sliders"),
           (nic.manager === "networkd" || nic.manager === "ifupdown") && data.tool === "ok" && !data.pending && button(t("network.handover"), { onclick: () => handOverDialog(nic) }),
           nic.handed && !data.pending && button(t("network.handback"), { onclick: () => handBackDialog(nic) }, "undo"),
+          !bridgeWhy(nic) && !data.nics.some((n) => n.home) && !data.pending && button(t("bridge.make"), { onclick: () => homeBridgeDialog(nic) }, "box"),
+          nic.home && !data.pending && button(t("bridge.apart"), { onclick: () => bridgeApartDialog(nic) }, "undo"),
         ),
       ),
+      nic.home && h("p", { class: "muted small" }, t("bridge.is", { ports: (nic.ports ?? []).filter((p) => data.nics.some((n) => n.name === p)).join(", ") || "—" }), " ", t("bridge.guests", { n: (nic.ports ?? []).filter((p) => !data.nics.some((n) => n.name === p)).length })),
       nic.wifi && row("Wi-Fi", nic.wifi.hotspot ? t("hotspot.state", { ssid: nic.wifi.hotspot.ssid, n: nic.wifi.hotspot.clients.length }) : nic.wifi.ssid ? `${nic.wifi.ssid} · ${nic.wifi.signal}%` : t(nic.wifi.ready ? "wifi.notConnected" : "wifi.notReady"), false),
       nic.wifi?.needs && data.tool === "ok" && needsCard(nic.wifi.needs, "wifi.needs"),
       row(t("network.address"), nic.addresses.join(", ") + (nic.addresses.length ? ` · ${t(nic.dynamic ? "network.byRouter" : "network.fixed")}` : "")),
@@ -11644,6 +12135,7 @@ function networkSection() {
       nic.manager !== "nm" && h("p", { class: "muted small" }, t(nic.manager === "networkd" || nic.manager === "ifupdown" ? (data.tool === "ok" ? "network.handoverHint" : "network.needsTool") : "network.readOnly")),
     );
   const several = data.nics.filter((n) => n.internet !== "none").length > 1 || data.nics.some((n) => n.kind === "modem");
+  const rank = (nic) => (nic.home ? 0 : nic.port ? 1 : 2);
   const roleSelect = (nic) => {
     const select = h(
       "select",
@@ -11728,7 +12220,8 @@ function networkSection() {
   const needs = data.needs && needsCard(data.needs, "network.needs");
   return [
     h("section", { class: "card pad stack" }, h("h2", null, t("settings.network")), h("p", { class: "muted small" }, t("network.lead")), data.tool === "stopped" && h("p", { class: "banner small" }, t("network.stopped")), needs, data.tool === "ok" && h("label", { class: "check" }, checkBox, h("span", null, h("strong", null, t("network.check")), h("span", { class: "muted small block" }, t("network.checkHint", { url: data.check.url.replace(/^https?:\/\//, "").replace(/\/.*/, "") })))), error, data.pending && h("div", { class: "banner" }, t("network.trial.title", { nic: data.pending.nic }), " ", button(t("network.trial.show"), { class: "small", onclick: () => trialDialog(data.pending) }))),
-    ...data.nics.map(card),
+    // the home bridge stands right before the card in it
+    ...[...data.nics].sort((a, b) => rank(a) - rank(b) || data.nics.indexOf(a) - data.nics.indexOf(b)).map(card),
     !data.nics.length && h("p", { class: "card pad muted" }, t("network.none")),
   ];
 }
@@ -12752,10 +13245,884 @@ function httpsSection(save, error) {
       error,
       h("footer", null, h("button", { class: "btn primary" }, t("settings.save"))),
     ),
-    https.mode === "acme" && h("section", { class: "card pad" }, h("div", { class: "section-head" }, h("h2", null, t("https.certificates")), retry), h("p", { class: "muted small" }, t("https.certificatesLead")), certs),
+    namesCard(),
+    portsCard(),
+    https.mode === "acme" && https.domain && wildcardCard(paintCerts),
+    https.mode === "acme" && h("section", { class: "card pad" }, h("div", { class: "section-head" }, h("h2", null, t("https.certificates")), retry), h("p", { class: "muted small" }, t(https.wildcard && https.wildcard !== "off" ? "wildcard.certificatesLead" : "https.certificatesLead")), certs),
     here && h("section", { class: "card pad" }, h("div", { class: "section-head" }, h("h2", null, t("https.checkTitle")), check), h("p", { class: "muted small" }, t("https.checkLead", { domain: here })), results),
     here && h("section", { class: "card pad" }, h("h2", null, t("https.addresses")), h("p", { class: "muted small" }, t("https.addressesLead")), settingRow("Hata", "", h("a", { class: "link mono", href: `https://${here}/` }, here)), (state.overview?.apps ?? []).filter((a) => a.port).map((a) => settingRow(a.title, a.protected ? t("access.protected") : "", h("a", { class: "link mono", href: `https://${a.name.replace(/_/g, "-")}.${here}/`, target: "_blank", rel: "noopener noreferrer" }, `${a.name.replace(/_/g, "-")}.${here}`)))),
   ];
+}
+
+/** One certificate for the domain and every name under it: the way its TXT record gets into the DNS */
+function wildcardCard(afterChange) {
+  const body = h("div", { class: "stack" }, h("p", { class: "muted small" }, "…"));
+  const paint = async () => {
+    const status = await api("GET", "/api/https").catch(() => null);
+    if (!status) return;
+    const w = status.wildcard;
+    const via = h("select", null, ["off", "api", "delegate", "manual"].map((id) => h("option", { value: id, selected: w.via === id }, t("wildcard.via." + id))));
+    const provider = h("select", null, w.providers.map((id) => h("option", { value: id, selected: w.provider === id }, t("wildcard.provider." + id))));
+    const token = h("input", { type: "password", class: "mono", autocomplete: "off", placeholder: w.saved ? t("wildcard.keep") : "" });
+    const accessKey = h("input", { class: "mono", autocomplete: "off", spellcheck: false, placeholder: w.saved ? t("wildcard.keep") : "" });
+    const secret = h("input", { type: "password", class: "mono", autocomplete: "off", placeholder: w.saved ? t("wildcard.keep") : "" });
+    const tokenRow = field(t("wildcard.token"), token);
+    const hint = h("span");
+    const tokenWhy = h("p", { class: "muted small" }, hint);
+    const keyRow = field(t("wildcard.accessKey"), accessKey);
+    const secretRow = field(t("wildcard.secret"), secret);
+    const record = (name, type, value) => h("div", { class: "kv" }, h("span", { class: "mono small" }, `${name} ${type}`), h("span", { class: "mono small" }, value));
+    const delegate = h("div", { class: "stack-s" }, h("p", { class: "muted small" }, t("wildcard.delegateLead")), record(w.name, "NS", w.server), record(w.server, "A", t("wildcard.outsideAddress")), h("p", { class: "muted small" }, t("wildcard.delegatePort")), !w.dns && h("p", { class: "banner small" }, h("a", { class: "link", href: "#/settings/dns" }, t("wildcard.dnsNeeded"))));
+    const manualHint = h("p", { class: "muted small" }, t("wildcard.manualLead"));
+    const shape = () => {
+      const api = via.value === "api";
+      const r53 = provider.value === "route53";
+      provider.closest(".field, label, div").hidden = !api;
+      tokenRow.hidden = !api || r53;
+      tokenWhy.hidden = !api;
+      hint.textContent = api ? t("wildcard.how." + provider.value) : "";
+      keyRow.hidden = secretRow.hidden = !api || !r53;
+      delegate.hidden = via.value !== "delegate";
+      manualHint.hidden = via.value !== "manual";
+    };
+    via.addEventListener("change", shape);
+    provider.addEventListener("change", shape);
+    const error = h("p", { class: "error", role: "alert" });
+    const save = button(t("settings.save"), {
+      class: "primary",
+      onclick: async (e) => {
+        const el = e.currentTarget;
+        el.disabled = true;
+        error.textContent = "";
+        try {
+          await api("PUT", "/api/https/wildcard", { via: via.value, provider: provider.value, token: token.value, accessKey: accessKey.value, secret: secret.value });
+          toast(t("wildcard.saved"));
+          await paint();
+          setTimeout(afterChange, 800);
+        } catch (err) {
+          error.textContent = errorText(err);
+          el.disabled = false;
+        }
+      },
+    });
+    put(
+      body,
+      w.manual &&
+        h(
+          "div",
+          { class: "banner stack-s" },
+          h("strong", null, t("wildcard.manualWaits")),
+          ...w.manual.values.map((value) => record(w.manual.name, "TXT", value)),
+          h("p", { class: "muted small" }, t("wildcard.manualAll")),
+          h("div", { class: "actions" }, button(t("wildcard.manualDone"), {
+            class: "primary small",
+            onclick: async (e) => {
+              e.currentTarget.disabled = true;
+              try {
+                await api("POST", "/api/https/wildcard/done", {});
+                toast(t("wildcard.manualGoing"));
+              } catch (err) {
+                toast(errorText(err), "error");
+              }
+              setTimeout(paint, 3000);
+            },
+          })),
+        ),
+      field(t("wildcard.way"), via),
+      field(t("wildcard.providerLabel"), provider),
+      tokenRow,
+      keyRow,
+      secretRow,
+      tokenWhy,
+      delegate,
+      manualHint,
+      error,
+      h("div", { class: "actions" }, save),
+    );
+    shape();
+    if (via.value === "manual" && !w.manual) setTimeout(() => void (body.isConnected && paint()), 8000);
+  };
+  void paint();
+  return h("section", { class: "card pad stack" }, h("h2", null, t("wildcard.title")), h("p", { class: "muted small" }, t("wildcard.lead")), body);
+}
+
+// --- Names under the domain -------------------------------------------------------------------------
+
+/** The domain names are under, as this page would open them: the HTTPS one, else the local name */
+function namesDomain() {
+  const https = state.settings?.https;
+  if (https && https.mode !== "off" && https.domain) return { domain: https.domain, scheme: "https", port: "" };
+  const local = state.settings?.local;
+  if (local?.enabled && local.name) return { domain: local.name, scheme: "http", port: location.port ? ":" + location.port : "" };
+  return null;
+}
+
+const nameUrl = (label) => {
+  const d = namesDomain();
+  return d ? `${d.scheme}://${label}.${d.domain}${d.port}/` : "";
+};
+
+/** A name's target in words: what it is, and where */
+function nameTargetWords(n) {
+  return t("names.kind." + n.kind, { name: n.title });
+}
+
+/**
+ * Names under the domain for what is not an app of this server: containers, virtual machines, guests of
+ * Proxmox, machines, their apps and any address; Hata passes the request on, its sign-in in front when asked
+ */
+function namesCard() {
+  const body = h("div", { class: "stack" }, h("p", { class: "muted small" }, "…"));
+  const paint = async () => {
+    let data;
+    try {
+      data = await api("GET", "/api/domains");
+    } catch (e) {
+      return put(body, h("p", { class: "error" }, errorText(e)));
+    }
+    if (!data.names.length) return put(body, h("p", { class: "muted small" }, t("names.none")));
+    put(
+      body,
+      h(
+        "div",
+        { class: "table-wrap" },
+        h(
+          "table",
+          null,
+          h("thead", null, h("tr", null, h("th", null, t("names.col.name")), h("th", null, t("names.col.to")), h("th", null, t("names.col.access")), h("th"))),
+          h(
+            "tbody",
+            null,
+            data.names.map((n) =>
+              h(
+                "tr",
+                null,
+                h("td", null, nameUrl(n.label) ? h("a", { class: "link mono", href: nameUrl(n.label), target: "_blank", rel: "noopener noreferrer" }, nameUrl(n.label).replace(/^https?:\/\/|\/$/g, "")) : h("span", { class: "mono" }, n.label)),
+                h("td", null, h("div", null, nameTargetWords(n)), h("div", { class: "muted small mono" }, n.away ? t("error." + n.away) : `${n.https ? "https" : "http"}://${n.at}`)),
+                h("td", { class: "small" }, t(n.inherits ? "names.signedInApp" : n.protect ? "names.signedIn" : "names.open")),
+                h("td", null, h("div", { class: "row-actions" }, button(t("names.change"), { class: "small", onclick: () => domainNameDialog(n, null, paint) }, "edit"))),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  };
+  void paint();
+  return h(
+    "section",
+    { class: "card pad stack" },
+    h("div", { class: "section-head" }, h("h2", null, t("names.title")), h("div", { class: "actions" }, button(t("names.add"), { class: "small", onclick: () => domainNameDialog(null, null, paint) }, "plus"))),
+    h("p", { class: "muted small" }, t(namesDomain() ? "names.lead" : "names.noDomain")),
+    body,
+  );
+}
+
+/**
+ * The server's address as people would type it, for "<server>:2222": its name on the home network, else the
+ * address this page is at — never the HTTPS domain, which may lead to a proxy that passes on web pages only
+ */
+const serverHost = () => (state.settings?.local?.enabled && state.settings.local.name) || location.hostname;
+
+/** Ports of this server passed on to a container, a guest, a machine or an address */
+function portsCard() {
+  const body = h("div", { class: "stack" }, h("p", { class: "muted small" }, "…"));
+  const paint = async () => {
+    let data;
+    try {
+      data = await api("GET", "/api/domains");
+    } catch (e) {
+      return put(body, h("p", { class: "error" }, errorText(e)));
+    }
+    if (!data.forwards.length) return put(body, h("p", { class: "muted small" }, t("ports.none")));
+    put(
+      body,
+      h(
+        "div",
+        { class: "table-wrap" },
+        h(
+          "table",
+          null,
+          h("thead", null, h("tr", null, h("th", null, t("ports.col.port")), h("th", null, t("names.col.to")), h("th", null, t("ports.col.how")), h("th"))),
+          h(
+            "tbody",
+            null,
+            data.forwards.map((f) =>
+              h(
+                "tr",
+                null,
+                h("td", null, h("div", { class: "mono strong" }, `${serverHost()}:${f.port}`), h("div", { class: "muted small" }, [t("ports.proto." + f.proto), f.note].filter(Boolean).join(" · "))),
+                h("td", null, h("div", null, t("names.kind." + f.kind, { name: f.title }) + " : " + f.to), h("div", { class: f.error || f.away ? "error small" : "muted small mono" }, f.error ? f.error : f.away ? t("error." + f.away) : f.by === "incus" ? t("ports.byIncus") : f.at)),
+                h("td", { class: "small" }, t(f.outside ? "ports.outsideToo" : "ports.homeOnly")),
+                h("td", null, h("div", { class: "row-actions" }, button(t("names.change"), { class: "small", onclick: () => forwardDialog(f, null, paint) }, "edit"))),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  };
+  void paint();
+  return h(
+    "section",
+    { class: "card pad stack" },
+    h("div", { class: "section-head" }, h("h2", null, t("ports.title")), h("div", { class: "actions" }, button(t("ports.add"), { class: "small", onclick: () => forwardDialog(null, null, paint) }, "plus"))),
+    h("p", { class: "muted small" }, t("ports.lead")),
+    body,
+  );
+}
+
+/** Opens a port of this server towards a target (or changes one) */
+async function forwardDialog(existing, preset, after) {
+  let data;
+  try {
+    data = await api("GET", "/api/domains");
+  } catch (e) {
+    return toast(errorText(e), "error");
+  }
+  const pick = targetPicker(data.targets, existing?.target ?? preset?.target, existing?.title);
+  const port = h("input", { type: "number", min: 1, max: 65535, value: existing?.port ?? "", required: true, placeholder: "2222", class: "short mono" });
+  const to = h("input", { type: "number", min: 1, max: 65535, value: existing?.to ?? "", required: true, placeholder: "22", class: "short mono" });
+  const proto = h("select", null, ["tcp", "udp", "both"].map((p) => h("option", { value: p, selected: (existing?.proto ?? "tcp") === p }, t("ports.proto." + p))));
+  const note = h("input", { value: existing?.note ?? "", maxLength: 60, placeholder: "SSH" });
+  const [outside, outsideRow] = tickRow(t("ports.outside"), t("ports.outsideHint"), existing?.outside ?? false);
+  const error = h("p", { class: "error", role: "alert" });
+  let dialog;
+  const send = async (e) => {
+    e.preventDefault();
+    error.textContent = "";
+    const payload = { port: Number(port.value), proto: proto.value, target: pick.value(), to: Number(to.value), note: note.value.trim(), outside: outside.checked };
+    try {
+      await api(existing ? "PUT" : "POST", existing ? `/api/ports/${existing.port}` : "/api/ports", payload);
+      dialog.close();
+      toast(t(existing ? "ports.saved" : "ports.added", { port: payload.port }));
+      after?.();
+    } catch (err) {
+      error.textContent = errorText(err);
+    }
+  };
+  const remove = existing && button(t("names.remove"), {
+    class: "danger",
+    onclick: async () => {
+      try {
+        await api("DELETE", `/api/ports/${existing.port}`);
+        dialog.close();
+        toast(t("ports.removed", { port: existing.port }));
+        after?.();
+      } catch (err) {
+        error.textContent = errorText(err);
+      }
+    },
+  }, "trash");
+  dialog = openDialog(
+    "",
+    h(
+      "form",
+      { class: "stack", onsubmit: send },
+      h("header", null, h("h2", { class: "grow" }, t(existing ? "ports.changeTitle" : "ports.addTitle")), closeX(() => dialog)),
+      h("p", { class: "muted small" }, t("ports.dialogLead")),
+      h("div", { class: "form-pair" }, field(t("ports.port"), h("span", { class: "web-address" }, h("span", { class: "muted mono" }, serverHost() + ":"), port), t("ports.portHint")), field(t("ports.proto"), proto)),
+      field(t("names.to"), pick.select),
+      pick.hostRow,
+      h("div", { class: "form-pair" }, field(t("ports.to"), to, t("ports.toHint")), field(t("ports.note"), note)),
+      outsideRow,
+      error,
+      h("footer", null, remove, h("span", { class: "grow" }), closeButton(() => dialog, t("common.cancel")), h("button", { class: "btn primary" }, t(existing ? "settings.save" : "ports.addGo"))),
+    ),
+  );
+  port.focus();
+}
+
+/** The list a name or a forwarded port picks its target from, with a field for an address of one's own */
+function targetPicker(tg, start, title, onchange) {
+  const key = (target) => JSON.stringify(target);
+  const option = (target, label, extra) => h("option", { value: key(target) }, label + (extra ? ` — ${extra}` : ""));
+  const select = h(
+    "select",
+    { onchange: () => onchange?.() },
+    tg.containers.length > 0 && h("optgroup", { label: t("names.group.containers") }, tg.containers.map((c) => option({ kind: "container", name: c.name }, c.name, c.address || t("names.noAddress")))),
+    tg.guests.length > 0 && h("optgroup", { label: t("names.group.guests") }, tg.guests.map((g) => option({ kind: "guest", host: g.host, guest: g.id }, `${g.name} (${g.hostName})`, g.address || t("names.noAddress")))),
+    tg.machines.length > 0 && h("optgroup", { label: t("names.group.machines") }, tg.machines.map((m) => option({ kind: "machine", id: m.id }, m.name, m.ip || t("machines.offline")))),
+    tg.machineApps.length > 0 && h("optgroup", { label: t("names.group.machineApps") }, tg.machineApps.map((a) => option({ kind: "machineApp", id: a.id, app: a.app }, `${a.title} (${a.machine})`, a.port ? String(a.port) : ""))),
+    h("optgroup", { label: t("names.group.other") }, h("option", { value: "address" }, t("names.address"))),
+  );
+  if (start && start.kind !== "address") {
+    if (![...select.options].some((o) => o.value === key(start))) select.prepend(option(start, title ?? start.name ?? start.id, ""));
+    select.value = key(start);
+  } else select.value = "address";
+  const host = h("input", { class: "mono", value: start?.kind === "address" ? start.host : "", placeholder: "192.168.1.1", spellcheck: false, autocapitalize: "none" });
+  const hostRow = field(t("names.host"), host, t("names.hostHint"));
+  const shape = () => {
+    hostRow.hidden = select.value !== "address";
+    host.required = select.value === "address";
+  };
+  shape();
+  return { select, hostRow, key, shape, value: () => (select.value === "address" ? { kind: "address", host: host.value.trim() } : JSON.parse(select.value)) };
+}
+
+/** Gives a name (or changes one): what it leads to, the port, HTTPS, the sign-in */
+async function domainNameDialog(existing, preset, after) {
+  let data;
+  try {
+    data = await api("GET", "/api/domains");
+  } catch (e) {
+    return toast(errorText(e), "error");
+  }
+  const d = namesDomain();
+  const tg = data.targets;
+  const pick = targetPicker(tg, existing?.target ?? preset?.target, existing?.title, () => shape(true));
+  const { select: to, hostRow, key } = pick;
+  const label = h("input", { class: "mono", value: existing?.label ?? (preset?.label ?? "").toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, ""), required: true, pattern: "[a-z0-9]([a-z0-9\\-]{0,61}[a-z0-9])?", spellcheck: false, autocapitalize: "none" });
+  const port = h("input", { type: "number", min: 1, max: 65535, value: existing?.port ?? 80, required: true, class: "short mono" });
+  const [https, httpsRow] = tickRow(t("names.https"), t("names.httpsHint"), existing?.https ?? false);
+  const [protect, protectRow] = tickRow(t("names.protect"), t("names.protectHint"), existing?.protect ?? false);
+  const shape = (picked) => {
+    pick.shape();
+    // a machine's app has its own port: offered once it is chosen
+    const app = to.value !== "address" && JSON.parse(to.value).kind === "machineApp" ? tg.machineApps.find((a) => key({ kind: "machineApp", id: a.id, app: a.app }) === to.value) : null;
+    if (picked && app?.port) port.value = String(app.port);
+  };
+  shape(!existing);
+  const error = h("p", { class: "error", role: "alert" });
+  let dialog;
+  const send = async (e) => {
+    e.preventDefault();
+    error.textContent = "";
+    const target = pick.value();
+    const payload = { label: label.value.trim().toLowerCase(), target, port: Number(port.value), https: https.checked, protect: protect.checked, allowed: existing?.allowed ?? "all" };
+    try {
+      await api(existing ? "PUT" : "POST", existing ? `/api/domains/${existing.label}` : "/api/domains", payload);
+      dialog.close();
+      toast(t(existing ? "names.saved" : "names.added", { name: payload.label }));
+      after?.();
+    } catch (err) {
+      error.textContent = errorText(err);
+    }
+  };
+  const remove = existing && button(t("names.remove"), {
+    class: "danger",
+    onclick: async () => {
+      try {
+        await api("DELETE", `/api/domains/${existing.label}`);
+        dialog.close();
+        toast(t("names.removed", { name: existing.label }));
+        after?.();
+      } catch (err) {
+        error.textContent = errorText(err);
+      }
+    },
+  }, "trash");
+  dialog = openDialog(
+    "",
+    h(
+      "form",
+      { class: "stack", onsubmit: send },
+      h("header", null, h("h2", { class: "grow" }, t(existing ? "names.changeTitle" : "names.addTitle")), closeX(() => dialog)),
+      !d && h("p", { class: "banner small" }, t("names.noDomain")),
+      field(t("names.label"), h("span", { class: "web-address" }, label, d && h("span", { class: "muted mono" }, "." + d.domain)), t("names.labelHint")),
+      field(t("names.to"), to),
+      hostRow,
+      field(t("names.port"), port, t("names.portHint")),
+      httpsRow,
+      protectRow,
+      error,
+      h("footer", null, remove, h("span", { class: "grow" }), closeButton(() => dialog, t("common.cancel")), h("button", { class: "btn primary" }, t(existing ? "settings.save" : "names.addGo"))),
+    ),
+  );
+  label.focus();
+}
+
+// --- DNS server -------------------------------------------------------------------------------------
+
+const DNS_UPSTREAMS = ["system", "quad9", "cloudflare", "google", "adguard", "custom"];
+
+/** Hata as the home's DNS server: on or off, where it listens, where the rest goes, the names it answers */
+function dnsSection() {
+  const box = h("div", { class: "stack" }, h("section", { class: "card pad" }, h("p", { class: "muted" }, "…")));
+  let alive = true;
+  cleanups.push(() => (alive = false));
+  const load = async () => {
+    try {
+      const d = await api("GET", "/api/dns");
+      if (alive) paintDns(box, d, load);
+    } catch (e) {
+      put(box, h("section", { class: "card pad" }, h("p", { class: "error" }, errorText(e))));
+    }
+  };
+  void load();
+  return [box];
+}
+
+function paintDns(box, d, load) {
+  const s = d.settings;
+  const error = h("p", { class: "error", role: "alert" });
+  const send = async (patch, el) => {
+    if (el) el.disabled = true;
+    error.textContent = "";
+    try {
+      paintDns(box, await api("PUT", "/api/dns", patch), load);
+    } catch (e) {
+      error.textContent = errorText(e);
+      if (el) el.disabled = false;
+    }
+  };
+  const when = (ts) => (ts ? new Date(ts).toLocaleTimeString(state.lang, { hour: "2-digit", minute: "2-digit" }) : "—");
+  const address = d.listening[0] ?? d.wanted[0] ?? location.hostname;
+  // on or off, where it listens, and whether this device asks it
+  const status = h(
+    "section",
+    { class: "card pad stack" },
+    h("div", { class: "section-head" }, h("h2", null, t("dns.title"), " ", s.enabled && h("span", { class: "state " + (d.failed.length ? "restarting" : "running") }, t(d.failed.length ? "dns.partly" : "dns.working"))), h("div", { class: "actions" }, button(t(s.enabled ? "dns.turnOff" : "dns.turnOn"), { class: s.enabled ? "" : "primary", onclick: (e) => (s.enabled ? confirmDnsOff(() => send({ enabled: false })) : send({ enabled: true }, e.currentTarget)) }, "power"))),
+    h("p", { class: "muted small" }, t("dns.lead")),
+    !s.enabled && h("ul", { class: "muted small" }, ["router", "names", "split", "wg"].map((k) => h("li", null, t("dns.what." + k)))),
+    s.enabled && d.listening.length > 0 && settingRow(t("dns.listening"), "", h("span", { class: "mono" }, d.listening.map((a) => `${a}:${d.port}`).join(", "))),
+    ...d.failed.map((f) => h("p", { class: "banner small" }, t(f.holder ? "dns.failedHolder" : "dns.failed", { address: f.address, holder: f.holder, error: f.error }))),
+    s.enabled && h("p", { class: d.you.seen ? "banner small ok" : "banner small" }, t(d.you.seen ? "dns.youUse" : "dns.youDont", { address: d.you.address, when: when(d.you.seen) })),
+    h("p", { class: "muted small" }, t("dns.blockLead"), " ", h("a", { class: "link", href: "#/settings/adblock" }, t("settings.adblock"))),
+    s.enabled && h("div", { class: "stack-s" }, h("strong", null, t("dns.routerTitle")), h("p", { class: "muted small" }, t("dns.router", { address })), h("p", { class: "muted small" }, t("dns.routerOne"))),
+    error,
+  );
+  // where the questions not answered here go
+  const choice = h("select", null, DNS_UPSTREAMS.map((u) => h("option", { value: u, selected: s.upstream === u }, t("dns.up." + u))));
+  const [doh, dohRow] = tickRow(t("dns.doh"), t("dns.dohHint"), s.doh);
+  const servers = h("textarea", { rows: 3, class: "mono", placeholder: "9.9.9.9\nhttps://dns.example/dns-query", spellcheck: false }, s.servers.join("\n"));
+  const serversRow = field(t("dns.servers"), servers, t("dns.serversHint"));
+  const shape = () => {
+    dohRow.hidden = ["system", "custom"].includes(choice.value);
+    serversRow.hidden = choice.value !== "custom";
+  };
+  choice.addEventListener("change", shape);
+  shape();
+  const upstream = h(
+    "section",
+    { class: "card pad stack" },
+    h("h2", null, t("dns.upTitle")),
+    h("p", { class: "muted small" }, t("dns.upLead")),
+    field(t("dns.upChoice"), choice, choice.value === "system" ? t("dns.upSystem", { list: d.system.join(", ") || "—" }) : ""),
+    dohRow,
+    serversRow,
+    h("div", { class: "actions" }, button(t("settings.save"), { class: "primary", onclick: (e) => send({ upstream: choice.value, doh: doh.checked, servers: servers.value.split(/[\s,]+/).filter(Boolean) }, e.currentTarget) })),
+    d.looping.length > 0 && h("p", { class: "banner small" }, t("dns.looping", { list: d.looping.join(", ") })),
+    s.enabled && h("div", { class: "stack-s" }, h("strong", null, t("dns.upNow")), ...d.upstreams.map((u) => h("div", { class: "activity-item" }, icon(u.fail > u.ok ? "x" : u.ok ? "check" : "clock", u.fail > u.ok ? "danger" : u.ok ? "ok" : ""), h("div", { class: "grow" }, h("div", { class: "mono" }, u.kind === "doh" ? u.url : u.kind === "dot" ? `${u.host} · TLS (${u.name})` : u.host), h("div", { class: "muted small" }, u.fail > u.ok ? t("dns.upFailed", { error: u.error }) : u.ok ? t("dns.upOk", { when: when(u.ok) }) : t("dns.upNotYet")))))),
+  );
+  // the names answered here
+  const name = h("input", { class: "mono", placeholder: "printer.lan", spellcheck: false, autocapitalize: "none" });
+  const type = h("select", null, h("option", { value: "A" }, "IPv4 (A)"), h("option", { value: "AAAA" }, "IPv6 (AAAA)"));
+  const value = h("input", { class: "mono", placeholder: "192.168.1.40", spellcheck: false });
+  const recError = h("p", { class: "error", role: "alert" });
+  const names = h(
+    "section",
+    { class: "card pad stack" },
+    h("h2", null, t("dns.namesTitle")),
+    h("p", { class: "muted small" }, t("dns.namesLead")),
+    ...d.domains.map((dom) => settingRow(`${dom}, *.${dom}`, t("dns.ownDomain"), h("span", { class: "muted" }, t("dns.toHata")))),
+    d.domains.length === 0 && h("p", { class: "muted small" }, t("dns.noDomains")),
+    ...s.records.map((r) => h("div", { class: "activity-item" }, icon("globe"), h("div", { class: "grow" }, h("div", { class: "mono" }, r.name), h("div", { class: "muted small mono" }, `${r.type} ${r.value}`)), button("", { class: "small ghost", title: t("names.remove"), "aria-label": t("names.remove"), onclick: async () => paintDns(box, await api("DELETE", `/api/dns/records/${r.type}/${r.name}`), load) }, "trash"))),
+    h(
+      "form",
+      {
+        class: "stack-s",
+        onsubmit: async (e) => {
+          e.preventDefault();
+          recError.textContent = "";
+          try {
+            paintDns(box, await api("POST", "/api/dns/records", { name: name.value.trim(), type: type.value, value: value.value.trim() }), load);
+          } catch (err) {
+            recError.textContent = errorText(err);
+          }
+        },
+      },
+      h("div", { class: "web-address" }, name, type, value, h("button", { class: "btn" }, icon("plus"), t("dns.addRecord"))),
+      recError,
+    ),
+  );
+  // how it is used
+  const st = d.stats;
+  const usage = s.enabled && h(
+    "section",
+    { class: "card pad stack" },
+    h("div", { class: "section-head" }, h("h2", null, t("dns.usageTitle")), button(t("dns.refresh"), { class: "small", onclick: () => load() }, "refresh")),
+    h("p", { class: "muted small" }, t("dns.usage", { queries: st.queries, own: st.own, cached: st.cached, upstream: st.upstream, failed: st.failed, refused: st.refused, kept: st.kept })),
+    d.clients.length > 0 && h("div", { class: "table-wrap" }, h("table", null, h("thead", null, h("tr", null, h("th", null, t("dns.col.device")), h("th", null, t("dns.col.queries")), h("th", null, t("dns.col.last")))), h("tbody", null, d.clients.map((c) => h("tr", null, h("td", { class: "mono" }, c.address), h("td", null, String(c.count)), h("td", null, when(c.last))))))),
+  );
+  put(box, status, upstream, names, usage);
+}
+
+/** Turning it off takes the names away from every device that asks it */
+function confirmDnsOff(go) {
+  const dialog = openDialog(
+    "",
+    h("header", null, h("h2", { class: "grow" }, t("dns.offTitle")), closeX(() => dialog)),
+    h("p", null, t("dns.offLead")),
+    h("footer", null, closeButton(() => dialog, t("common.cancel")), button(t("dns.turnOff"), { class: "danger", onclick: () => (dialog.close(), go()) })),
+  );
+}
+
+// --- Blocking by name ---------------------------------------------------------------------------
+
+const adblockUi = { q: "", outcome: "", client: "", check: null };
+const PAUSES = [5, 30, 60, 240, 1440];
+
+const blockUntil = (ts) => new Date(ts).toLocaleTimeString(state.lang, { hour: "2-digit", minute: "2-digit" });
+
+function adblockSection() {
+  const box = h("div", { class: "stack" }, h("section", { class: "card pad" }, h("p", { class: "muted" }, "…")));
+  let alive = true;
+  let timer = 0;
+  cleanups.push(() => ((alive = false), clearTimeout(timer)));
+  const typing = () => box.contains(document.activeElement) && /^(TEXTAREA|INPUT)$/.test(document.activeElement.tagName);
+  const load = async () => {
+    clearTimeout(timer);
+    try {
+      const d = await api("GET", "/api/dns/block");
+      if (!alive) return;
+      if (!typing()) paintAdblock(box, d, load);
+      // a list being downloaded: its numbers are on the way
+      if (d.lists.some((l) => l.busy) || (d.settings.enabled && d.lists.some((l) => l.enabled && !l.counts && !l.error))) timer = setTimeout(load, 3000);
+    } catch (e) {
+      put(box, h("section", { class: "card pad" }, h("p", { class: "error" }, errorText(e))));
+    }
+  };
+  void load();
+  return [box];
+}
+
+function paintAdblock(box, d, load) {
+  const s = d.settings;
+  const error = h("p", { class: "error", role: "alert" });
+  const act = async (method, path, body, el) => {
+    if (el) el.disabled = true;
+    error.textContent = "";
+    try {
+      paintAdblock(box, await api(method, path, body), load);
+      if (method !== "GET") setTimeout(load, 1500);
+    } catch (e) {
+      error.textContent = errorText(e);
+      if (el) el.disabled = false;
+    }
+  };
+  const share = d.day.questions ? Math.round((d.day.blocked / d.day.questions) * 100) : 0;
+  const mode = h("select", { onchange: () => act("PUT", "/api/dns/block", { mode: mode.value }) }, ["zero", "nxdomain"].map((m) => h("option", { value: m, selected: s.mode === m }, t("adblock.mode." + m))));
+  const pauseMenu = (at) => menuAt(at, null, PAUSES.map((minutes) => ({ label: t("adblock.pauseFor", { what: pauseWords(minutes) }), icon: "clock", run: () => act("POST", "/api/dns/block/pause", { minutes }) })));
+  const status = h(
+    "section",
+    { class: "card pad stack" },
+    h(
+      "div",
+      { class: "section-head" },
+      h("h2", null, t("adblock.title"), " ", s.enabled && h("span", { class: "state " + (d.paused ? "restarting" : "running") }, d.paused ? t("adblock.pausedUntil", { when: blockUntil(s.pausedUntil) }) : t("adblock.working"))),
+      h(
+        "div",
+        { class: "actions" },
+        s.enabled && (d.paused ? button(t("adblock.resume"), { class: "primary", onclick: (e) => act("POST", "/api/dns/block/pause", { minutes: 0 }, e.currentTarget) }, "power") : button(t("adblock.pause"), { onclick: (e) => pauseMenu(e.currentTarget) }, "clock")),
+        button(t(s.enabled ? "dns.turnOff" : "dns.turnOn"), { class: s.enabled ? "" : "primary", onclick: (e) => act("PUT", "/api/dns/block", { enabled: !s.enabled }, e.currentTarget) }, "power"),
+      ),
+    ),
+    h("p", { class: "muted small" }, t("adblock.lead")),
+    s.enabled && d.lists.length === 0 && s.rules.length === 0 && h("p", { class: "banner small" }, t("adblock.nothingYet")),
+    h("div", { id: "adblock-serving" }),
+    s.enabled && d.day.questions > 0 && h("p", null, t("adblock.today", { questions: d.day.questions, blocked: d.day.blocked, share })),
+    d.hours.length >= 2 && lineChart(d.hours.map((p) => ({ t: p.at, ...p })), [{ cls: "s1", label: t("adblock.chart.questions"), value: (p) => p.questions }, { cls: "s2", label: t("adblock.chart.blocked"), value: (p) => p.blocked }], { fmt: (v) => String(Math.round(v)), label: t("adblock.chart.title"), height: 130, head: false }),
+    settingRow(t("adblock.modeTitle"), t("adblock.modeHint"), mode),
+    settingRow(t("adblock.memory"), t("adblock.memoryHint", { process: bytes(d.memory.process) }), h("span", { class: "mono" }, bytes(d.memory.lists))),
+    error,
+  );
+  void api("GET", "/api/dns").then((dns) => {
+    const at = status.querySelector("#adblock-serving");
+    if (at && s.enabled && !dns.settings.enabled) put(at, h("p", { class: "banner small" }, t("adblock.serverOff"), " ", h("a", { class: "link", href: "#/settings/dns" }, t("adblock.serverOpen"))));
+    else if (at && s.enabled && !dns.clients.length) put(at, h("p", { class: "banner small" }, t("adblock.nobodyAsks"), " ", h("a", { class: "link", href: "#/settings/dns" }, t("adblock.serverOpen"))));
+  }).catch(() => {});
+  // the lists
+  const updated = (l) => (l.updated ? new Date(l.updated).toLocaleString(state.lang, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "—");
+  const countsLine = (l) => {
+    if (l.busy) return t("adblock.list.downloading");
+    if (!l.counts) return l.error ? "" : t("adblock.list.waiting");
+    const c = l.counts;
+    return [t("adblock.list.names", { n: c.names.toLocaleString(state.lang) }), c.rules > 0 && t("adblock.list.rules", { n: c.rules.toLocaleString(state.lang) }), (c.cosmetic + c.notDns) > 0 && t("adblock.list.notDns", { n: (c.cosmetic + c.notDns).toLocaleString(state.lang) }), c.broken > 0 && t("adblock.list.broken", { n: c.broken.toLocaleString(state.lang) }), c.overLimit > 0 && t("adblock.list.over", { n: c.overLimit.toLocaleString(state.lang) }), l.memory > 0 && bytes(l.memory), t("adblock.list.updated", { when: updated(l) })].filter(Boolean).join(" · ");
+  };
+  const listRow = (l) =>
+    h(
+      "div",
+      { class: "activity-item adblock-list" },
+      h("input", { type: "checkbox", checked: l.enabled, "aria-label": l.name, onchange: (e) => act("PATCH", `/api/dns/block/lists/${l.id}`, { enabled: e.currentTarget.checked }, e.currentTarget) }),
+      h("div", { class: "grow" }, h("div", null, h("strong", null, l.name), l.allow && h("span", { class: "pill" }, t("adblock.list.exceptions"))), h("div", { class: "muted small adblock-url" }, l.url), h("div", { class: "muted small" }, countsLine(l)), l.error && h("div", { class: "error small" }, t("adblock.list.failed", { error: l.error }))),
+      button("", { class: "small ghost", disabled: l.busy, title: t("adblock.list.refresh"), "aria-label": t("adblock.list.refresh"), onclick: (e) => act("POST", `/api/dns/block/lists/${l.id}/refresh`, undefined, e.currentTarget) }, "refresh"),
+      button("", { class: "small ghost", title: t("names.remove"), "aria-label": t("names.remove"), onclick: () => confirmAction({ title: t("adblock.list.removeTitle", { name: l.name }), lead: t("adblock.list.removeLead"), label: t("names.remove"), run: () => act("DELETE", `/api/dns/block/lists/${l.id}`) }) }, "trash"),
+    );
+  const [auto, autoRow] = tickRow(t("adblock.update"), t("adblock.updateHint"), s.update);
+  auto.addEventListener("change", () => act("PUT", "/api/dns/block", { update: auto.checked }));
+  const lists = h(
+    "section",
+    { class: "card pad stack" },
+    h("div", { class: "section-head" }, h("h2", null, t("adblock.lists")), h("div", { class: "actions" }, d.lists.length > 0 && button(t("adblock.list.refreshAll"), { class: "small", onclick: (e) => act("POST", "/api/dns/block/refresh", undefined, e.currentTarget) }, "refresh"), button(t("adblock.list.add"), { class: "small primary", onclick: () => addBlockListDialog(d, (fresh) => (paintAdblock(box, fresh, load), load())) }, "plus"))),
+    d.lists.length ? h("div", { class: "stack-s" }, d.lists.map(listRow)) : h("p", { class: "muted small" }, t("adblock.list.none")),
+    d.lists.length > 0 && h("p", { class: "muted small" }, t("adblock.list.total", { n: d.names.toLocaleString(state.lang) })),
+    autoRow,
+  );
+  // the person's own rules
+  const rules = h("textarea", { rows: Math.min(14, Math.max(5, s.rules.length + 1)), class: "mono", spellcheck: false, autocapitalize: "none", placeholder: "||ads.example.com^\n@@||good.example.com^\n/^ad[0-9]+\\./\n||kids.example^$client=192.168.1.20" }, s.rules.join("\n"));
+  const own = h(
+    "section",
+    { class: "card pad stack" },
+    h("h2", null, t("adblock.own")),
+    h("p", { class: "muted small" }, t("adblock.ownLead")),
+    rules,
+    ...d.own.trouble.map((x) => h("p", { class: "banner small" }, h("code", null, x.line), " — ", t("adblock.own." + x.why))),
+    h("details", { class: "muted small" }, h("summary", null, t("adblock.syntax")), h("ul", null, ["sub", "exact", "allow", "wild", "regex", "important", "dnstype", "client", "rewrite", "badfilter"].map((k) => h("li", null, h("code", null, t("adblock.syntax." + k + ".code")), " — ", t("adblock.syntax." + k))))),
+    h("div", { class: "actions" }, button(t("settings.save"), { class: "primary", onclick: (e) => { const go = e.currentTarget; rules.blur(); return act("PUT", "/api/dns/block/rules", { text: rules.value }, go); } })),
+  );
+  // what was asked, and what a name would get
+  const logBody = h("div");
+  const paintLog = async () => {
+    try {
+      const params = new URLSearchParams({ q: adblockUi.q, outcome: adblockUi.outcome, client: adblockUi.client, limit: "100" });
+      const list = await api("GET", `/api/dns/block/log?${params}`);
+      paintBlockLog(logBody, list, d, (name, allow) => act("POST", "/api/dns/block/name", { name, allow }));
+    } catch (e) {
+      put(logBody, h("p", { class: "error" }, errorText(e)));
+    }
+  };
+  const search = h("input", { type: "search", placeholder: t("adblock.log.search"), value: adblockUi.q, oninput: () => ((adblockUi.q = search.value), void paintLog()) });
+  const outcome = h("select", { onchange: () => ((adblockUi.outcome = outcome.value), void paintLog()) }, ["", "blocked", "allowed", "rewritten", "passed", "own", "failed"].map((o) => h("option", { value: o, selected: adblockUi.outcome === o }, t("adblock.log.only." + (o || "all")))));
+  const device = h("select", { onchange: () => ((adblockUi.client = device.value), void paintLog()) }, h("option", { value: "" }, t("adblock.log.allDevices")), d.devices.map((x) => h("option", { value: x.address, selected: adblockUi.client === x.address }, x.name ? `${x.name} (${x.address})` : x.address)));
+  const [keep, keepRow] = tickRow(t("adblock.log.keep"), t("adblock.log.keepHint"), s.log);
+  keep.addEventListener("change", () => act("PUT", "/api/dns/block", { log: keep.checked }));
+  const checkName = h("input", { class: "mono", placeholder: "ads.example.com", spellcheck: false, autocapitalize: "none" });
+  const checkOut = h("div");
+  const runCheck = async (e) => {
+    e.preventDefault();
+    try {
+      const r = await api("GET", `/api/dns/block/check?${new URLSearchParams({ name: checkName.value.trim() })}`);
+      put(checkOut, h("p", { class: "banner small" + (r.hit?.action === "block" ? "" : " ok") }, r.hit ? t("adblock.check." + r.hit.action, { name: r.name, rule: r.hit.rule, source: r.hit.source === "own" ? t("adblock.own") : (r.hit.listName ?? "") }) : t("adblock.check.none", { name: r.name })));
+    } catch (err) {
+      put(checkOut, h("p", { class: "error" }, errorText(err)));
+    }
+  };
+  const logCard = h(
+    "section",
+    { class: "card pad stack" },
+    h("div", { class: "section-head" }, h("h2", null, t("adblock.log")), button(t("dns.refresh"), { class: "small", onclick: () => void paintLog() }, "refresh")),
+    h("form", { class: "web-address", onsubmit: runCheck }, checkName, h("button", { class: "btn" }, icon("search"), t("adblock.check"))),
+    checkOut,
+    h("div", { class: "adblock-filter" }, search, outcome, device),
+    logBody,
+    keepRow,
+  );
+  void paintLog();
+  // most blocked, devices
+  const top = d.top.length > 0 && h(
+    "section",
+    { class: "card pad stack" },
+    h("h2", null, t("adblock.top")),
+    h("div", { class: "table-wrap" }, h("table", null, h("thead", null, h("tr", null, h("th", null, t("adblock.col.name")), h("th", null, t("adblock.col.times")), h("th", null, ""))), h("tbody", null, d.top.map((x) => h("tr", null, h("td", { class: "mono" }, x.name), h("td", null, String(x.count)), h("td", null, button(t("adblock.allow"), { class: "small", onclick: (e) => act("POST", "/api/dns/block/name", { name: x.name, allow: true }, e.currentTarget) })))))),
+  ));
+  const newAddress = h("input", { class: "mono", placeholder: "192.168.1.20", spellcheck: false });
+  const newName = h("input", { placeholder: t("adblock.device.namePlace") });
+  const devices = h(
+    "section",
+    { class: "card pad stack" },
+    h("h2", null, t("adblock.devices")),
+    h("p", { class: "muted small" }, t("adblock.devicesLead")),
+    d.devices.length
+      ? h("div", { class: "table-wrap" }, h("table", null, h("thead", null, h("tr", null, h("th", null, t("dns.col.device")), h("th", null, t("dns.col.queries")), h("th", null, t("adblock.col.blocked")), h("th", null, t("adblock.col.on")), h("th", null, ""))), h("tbody", null, d.devices.map((x) => h("tr", null, h("td", null, h("strong", null, x.name || "—"), h("div", { class: "muted small mono" }, x.address)), h("td", null, String(x.count)), h("td", null, String(x.blocked)), h("td", null, h("input", { type: "checkbox", checked: x.on, "aria-label": t("adblock.col.on"), onchange: (e) => act("PUT", "/api/dns/block/device", { address: x.address, name: x.name, on: e.currentTarget.checked }, e.currentTarget) })), h("td", null, button(t("adblock.device.name"), { class: "small", onclick: () => blockDeviceDialog(x, (name) => act("PUT", "/api/dns/block/device", { address: x.address, name, on: x.on })) })))))))
+      : h("p", { class: "muted small" }, t("adblock.devicesNone")),
+    h("form", { class: "web-address", onsubmit: (e) => { e.preventDefault(); void act("PUT", "/api/dns/block/device", { address: newAddress.value.trim(), name: newName.value.trim(), on: true }); } }, newAddress, newName, h("button", { class: "btn" }, icon("plus"), t("dns.addRecord"))),
+  );
+  // moving in
+  const moveIn = h("section", { class: "card pad stack" }, h("h2", null, t("adblock.import")), h("p", { class: "muted small" }, t("adblock.importLead")));
+  const planError = h("p", { class: "error", role: "alert" });
+  const planFrom = async (promise) => {
+    planError.textContent = "";
+    try {
+      blockImportDialog(await promise, (fresh) => (paintAdblock(box, fresh, load), load()));
+    } catch (e) {
+      planError.textContent = errorText(e);
+    }
+  };
+  const picked = h("input", {
+    type: "file",
+    hidden: true,
+    onchange: async () => {
+      const f = picked.files[0];
+      if (!f) return;
+      picked.value = "";
+      await planFrom(fetch("/api/dns/block/import/file", { method: "POST", body: f }).then(async (r) => {
+        const payload = await r.json().catch(() => ({}));
+        if (!r.ok) throw new ApiError(r.status, payload.error?.code ?? "request.failed", payload.error?.detail);
+        return payload;
+      }));
+    },
+  });
+  const appsBox = h("div", { class: "stack-s" });
+  moveIn.append(h("div", { class: "actions" }, button(t("adblock.importFile"), { onclick: () => picked.click() }, "upload"), picked), appsBox, planError);
+  void api("GET", "/api/dns/block/import/apps").then((apps) => {
+    put(appsBox, ...apps.map((a) => h("div", { class: "activity-item" }, icon("box"), h("div", { class: "grow" }, h("strong", null, a.title || a.name), h("div", { class: "muted small" }, t(a.found ? "adblock.importApp" : "adblock.importAppNoFile", { kind: a.kind === "pihole" ? "Pi-hole" : "AdGuard Home" }))), a.found && button(t("adblock.importTake"), { class: "small", onclick: () => planFrom(api("POST", "/api/dns/block/import/app", { name: a.name })) }, "download"))));
+  }).catch(() => {});
+  put(box, status, lists, own, logCard, top, devices, moveIn);
+}
+
+const pauseWords = (minutes) => (minutes < 60 ? t("adblock.minutes", { n: minutes }) : t("adblock.hours", { n: minutes / 60 }));
+
+function paintBlockLog(body, list, d, rule) {
+  if (!list.length) return void put(body, h("p", { class: "muted small" }, t(d.settings.log ? "adblock.log.empty" : "adblock.log.off")));
+  const nameOf = (address) => d.devices.find((x) => x.address === address)?.name || address;
+  const typeName = { 1: "A", 2: "NS", 5: "CNAME", 6: "SOA", 12: "PTR", 15: "MX", 16: "TXT", 28: "AAAA", 33: "SRV", 64: "SVCB", 65: "HTTPS" };
+  put(
+    body,
+    h(
+      "div",
+      { class: "table-wrap adblock-log" },
+      h(
+        "table",
+        null,
+        h("thead", null, h("tr", null, h("th", null, t("dns.col.last")), h("th", null, t("dns.col.device")), h("th", null, t("adblock.col.name")), h("th", null, t("adblock.col.outcome")), h("th", null, ""))),
+        h(
+          "tbody",
+          null,
+          list.map((e) => {
+            const cut = e.outcome === "blocked";
+            return h(
+              "tr",
+              null,
+              h("td", { class: "small" }, new Date(e.at).toLocaleTimeString(state.lang)),
+              h("td", { class: "small" }, nameOf(e.client)),
+              h("td", null, h("span", { class: "mono" }, e.name), " ", h("span", { class: "muted small" }, typeName[e.type] ?? String(e.type))),
+              h("td", null, h("span", { class: "adblock-outcome " + e.outcome }, t("adblock.outcome." + e.outcome)), e.rule && h("div", { class: "muted small adblock-why" }, e.source === "own" ? t("adblock.own") : (e.listName ?? ""), " ", h("span", { class: "mono" }, e.rule))),
+              h("td", null, cut ? button(t("adblock.allow"), { class: "small", onclick: () => rule(e.name, true) }) : e.outcome === "passed" || e.outcome === "allowed" ? button(t("adblock.block"), { class: "small", onclick: () => rule(e.name, false) }) : null),
+            );
+          }),
+        ),
+      ),
+    ),
+  );
+}
+
+function blockDeviceDialog(x, save) {
+  const name = h("input", { value: x.name, maxlength: 40, placeholder: t("adblock.device.namePlace") });
+  const dialog = openDialog(
+    "",
+    h("header", null, h("h2", { class: "grow" }, x.address), closeX(() => dialog)),
+    field(t("adblock.device.name"), name, t("adblock.device.nameHint")),
+    h("footer", null, closeButton(() => dialog, t("common.cancel")), button(t("settings.save"), { class: "primary", onclick: () => (dialog.close(), save(name.value.trim())) })),
+  );
+}
+
+/** Lists anyone may choose from, none ticked; or any address */
+function addBlockListDialog(d, done) {
+  const have = new Set(d.lists.map((l) => l.url));
+  const offered = d.known.filter((k) => !have.has(k.url)).map((k) => {
+    const [box, row] = tickRow(k.name, `${t("adblock.known." + k.what)} · ${t("adblock.size." + k.size)}`, false);
+    return { k, box, row };
+  });
+  const url = h("input", { class: "mono", type: "url", placeholder: "https://example.com/list.txt", spellcheck: false });
+  const name = h("input", { placeholder: t("adblock.list.namePlace") });
+  const [allow, allowRow] = tickRow(t("adblock.list.exceptionsTick"), t("adblock.list.exceptionsHint"), false);
+  const error = h("p", { class: "error", role: "alert" });
+  const dialog = openDialog(
+    "",
+    h("header", null, h("h2", { class: "grow" }, t("adblock.list.add")), closeX(() => dialog)),
+    offered.length > 0 && h("div", { class: "stack-s" }, h("strong", null, t("adblock.known")), h("p", { class: "muted small" }, t("adblock.knownLead")), offered.map((o) => o.row)),
+    h("div", { class: "stack-s" }, h("strong", null, t("adblock.byAddress")), field(t("adblock.list.url"), url, t("adblock.list.urlHint")), field(t("adblock.list.name"), name), allowRow),
+    error,
+    h(
+      "footer",
+      null,
+      closeButton(() => dialog, t("common.cancel")),
+      button(t("adblock.list.add"), {
+        class: "primary",
+        onclick: async (e) => {
+          const go = e.currentTarget;
+          const chosen = offered.filter((o) => o.box.checked).map((o) => ({ url: o.k.url, name: o.k.name }));
+          if (url.value.trim()) chosen.push({ url: url.value.trim(), name: name.value.trim(), allow: allow.checked });
+          if (!chosen.length) return void (error.textContent = t("adblock.list.chooseOne"));
+          go.disabled = true;
+          try {
+            let fresh = null;
+            for (const one of chosen) fresh = await api("POST", "/api/dns/block/lists", one);
+            dialog.close();
+            done(fresh);
+          } catch (err) {
+            error.textContent = errorText(err);
+            go.disabled = false;
+          }
+        },
+      }),
+    ),
+  );
+}
+
+/** What a Pi-hole or an AdGuard Home brings, part by part; what has no place in Hata is said */
+function blockImportDialog(plan, done) {
+  const kind = plan.from === "pihole" ? "Pi-hole" : "AdGuard Home";
+  const part = (key, n, words) => {
+    if (!n) return null;
+    const [box, row] = tickRow(t("adblock.part." + key, { n }), words, true);
+    return { key, box, row };
+  };
+  const upstreamText = plan.upstream ? (plan.upstream.preset ? t("dns.up." + plan.upstream.preset) + (plan.upstream.doh ? " · TLS" : "") : plan.upstream.servers.join(", ")) : "";
+  const parts = [
+    part("lists", plan.lists.length, plan.lists.slice(0, 6).map((l) => l.name).join(", ") + (plan.lists.length > 6 ? " …" : "")),
+    part("rules", plan.rules.length, plan.rules.slice(0, 3).join("  ")),
+    part("records", plan.records.length, plan.records.slice(0, 3).map((r) => r.name).join(", ")),
+    part("devices", plan.devices.length, plan.devices.slice(0, 4).map((x) => x.name || x.address).join(", ")),
+    plan.mode && part("mode", 1, t("adblock.mode." + plan.mode)),
+    plan.upstream && part("upstream", 1, upstreamText),
+  ].filter(Boolean);
+  const error = h("p", { class: "error", role: "alert" });
+  const dialog = openDialog(
+    "",
+    h("header", null, h("h2", { class: "grow" }, t("adblock.importTitle", { kind })), closeX(() => dialog)),
+    h("p", { class: "muted small" }, t("adblock.importPlan")),
+    parts.length ? h("div", { class: "stack-s" }, parts.map((p) => p.row)) : h("p", null, t("adblock.importNothing")),
+    plan.leftOut.length > 0 && h("details", { class: "muted small" }, h("summary", null, t("adblock.leftOut", { n: plan.leftOut.length })), h("ul", null, plan.leftOut.slice(0, 40).map((x) => h("li", null, t("adblock.left." + x.code), x.detail && [" ", h("code", null, x.detail)])))),
+    h("p", { class: "muted small" }, t("adblock.importPort", { kind })),
+    error,
+    h(
+      "footer",
+      null,
+      closeButton(() => dialog, t("common.cancel")),
+      parts.length > 0 && button(t("adblock.importGo"), {
+        class: "primary",
+        onclick: async (e) => {
+          const go = e.currentTarget;
+          go.disabled = true;
+          try {
+            const fresh = await api("POST", "/api/dns/block/import/apply", { id: plan.id, parts: Object.fromEntries(parts.map((p) => [p.key, p.box.checked])) });
+            dialog.close();
+            done(fresh);
+          } catch (err) {
+            error.textContent = errorText(err);
+            go.disabled = false;
+          }
+        },
+      }),
+    ),
+  );
+}
+
+/** The block on Home: what was blocked in a day, and the pause within reach */
+function adblockBlock(el, b) {
+  if (!b) return;
+  const share = b.questions ? Math.round((b.blocked / b.questions) * 100) : 0;
+  const send = async (path, body) => {
+    try {
+      await api("POST", path, body);
+      await refresh();
+    } catch {}
+  };
+  put(
+    el,
+    blockRemover("adblock"),
+    h("div", { class: "section-head" }, h("h2", null, h("a", { href: "#/settings/adblock" }, t("adblock.title"))), b.enabled && h("span", { class: "state " + (b.paused ? "restarting" : b.serving ? "running" : "stopped") }, b.paused ? t("adblock.pausedUntil", { when: blockUntil(b.pausedUntil) }) : t(b.serving ? "adblock.working" : "adblock.notServing"))),
+    b.enabled
+      ? [
+          h("p", { class: "adblock-numbers" }, h("strong", null, b.blocked.toLocaleString(state.lang)), " ", h("span", { class: "muted small" }, t("adblock.block.ofDay", { questions: b.questions.toLocaleString(state.lang), share }))),
+          meterBar(share),
+          h("p", { class: "muted small" }, t("adblock.list.total", { n: b.names.toLocaleString(state.lang) })),
+          h("div", { class: "actions" }, b.paused ? button(t("adblock.resume"), { class: "small", onclick: () => send("/api/dns/block/pause", { minutes: 0 }) }, "power") : button(t("adblock.pauseFor", { what: pauseWords(30) }), { class: "small", onclick: () => send("/api/dns/block/pause", { minutes: 30 }) }, "clock")),
+        ]
+      : h("p", { class: "muted small" }, t("adblock.block.off"), " ", h("a", { class: "link", href: "#/settings/adblock" }, t("common.open"))),
+  );
 }
 
 // --- Notifications ------------------------------------------------------------------------------
@@ -12967,12 +14334,49 @@ function notificationsSection() {
   const hook = h("input", { type: "url", value: n.config.webhook.url, spellcheck: false, class: "mono", placeholder: "https://…" });
   return [
     h("section", { class: "card pad" }, h("h2", null, t("settings.notifications")), h("p", { class: "muted small" }, t("notify.lead")), settingRow(t("notify.problems"), t("notify.problemsHint"), toggle("problems")), settingRow(t("notify.resolved"), t("notify.resolvedHint"), toggle("resolved")), settingRow(t("notify.backups"), t("notify.backupsHint"), toggle("backups")), error),
+    hiddenItemsCard(),
     devicesCard(),
     telegramCard(),
     channelCard("ntfy", [settingRow(t("notify.ntfy.url"), t("notify.ntfy.urlHint"), ntfyUrl), settingRow(t("notify.ntfy.token"), t("notify.ntfy.tokenHint"), forget ? h("span", { class: "pair" }, ntfyToken, forget) : ntfyToken)], () => ({ url: ntfyUrl.value, ...typedToken(ntfyToken) })),
     emailCard(),
     channelCard("webhook", [settingRow(t("notify.webhook.url"), t("notify.webhook.urlHint"), hook)], () => ({ url: hook.value })),
   ];
+}
+
+/** What is put off from "Needs attention", with a way to bring each back at once */
+function hiddenItemsCard() {
+  const list = state.hiddenItems;
+  if (!list) return null;
+  const back = async (entry, el) => {
+    el.disabled = true;
+    try {
+      state.hiddenItems = (await api("POST", "/api/attention/wake", { id: entry.id })).hidden;
+      toast(t("attention.hidden.backDone"));
+      renderSettings();
+      void refresh();
+    } catch (err) {
+      el.disabled = false;
+      toast(errorText(err), "error");
+    }
+  };
+  const row = (entry) => {
+    // put off by an older version, which kept no words: said by its key
+    const words = entry.code ? attentionWords(entry) : { title: t("attention.hidden.old"), text: entry.id };
+    return h(
+      "div",
+      { class: "hidden-item " + entry.severity, menu: true },
+      icon(entry.code ? attentionIcon(entry.code) : "alert"),
+      h("div", { class: "grow" }, h("strong", null, words.title), words.text && h("p", { class: "muted small" }, words.text), h("p", { class: "small muted" }, entry.until === 0 ? t("attention.hidden.forever") : t("attention.hidden.until", { date: shortDate(entry.until) }))),
+      button(t("attention.hidden.back"), { class: "small", onclick: (e) => back(entry, e.currentTarget) }, "bell"),
+    );
+  };
+  return h(
+    "section",
+    { class: "card pad", id: "hidden" },
+    h("h2", null, t("attention.hidden.title")),
+    h("p", { class: "muted small" }, t("attention.hidden.lead")),
+    list.length ? h("div", { class: "hidden-items" }, list.map(row)) : h("p", { class: "muted" }, t("attention.hidden.none")),
+  );
 }
 
 // --- Disks --------------------------------------------------------------------------------------

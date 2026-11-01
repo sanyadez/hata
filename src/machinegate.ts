@@ -80,6 +80,9 @@ function forwarder(id: string, upstream: number): TCPSocketListener<unknown> {
   });
 }
 
+/** The local end of the tunnel to an app of a machine behind Hata's sign-in; 0 — it is not behind it */
+export const tunnelPort = (id: string, app: string): number => forwarders.get(keyOf(id, app))?.port ?? 0;
+
 function stopGate(key: string): void {
   listeners.get(key)?.stop(true);
   listeners.delete(key);

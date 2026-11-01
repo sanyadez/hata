@@ -17,13 +17,14 @@ import type { Level } from "./agents";
 import { Desk } from "./approvals";
 import { answerCall, assistantConfig, configured as assistantReady, findChat, listChats, ModelError, modelsFor, removeChat, retry as retryAssistant, say as sayToAssistant, shownChat, shownConfig as shownAssistant, stopChat, updateAssistant } from "./assistant";
 import { AppError, appAction, startAfterDisk, startJob, stoppable, stopJob, type Job, installedNames, jobFinished, appEnv, appDetail, appLogs, appIcon, appSettings, appStats, applyCompose, ICON_MIME, MAX_ICON, removeAppIcon, setAppIcon, applySettings, installFromSettings, applyStoreUpdate, composeText, getJob, installCustom, installFromStore, listApps, listJobs, onAppRemoved, planStoreUpdate, readCompose, refreshAppUrls, removeApp, storeAppDetail, viewOf } from "./apps";
-import { certificateStates, challengeResponse, ensureCertificates, loadCertificates } from "./acme";
+import { certificateStates, challengeResponse, ensureCertificates, isWildcard, loadCertificates, type StoredCertificate } from "./acme";
+import { manualDone, setWildcard, wildcardReport, wildcardTrouble } from "./wildcard";
 import { attention } from "./attention";
 import { folderSize, restoreFromSnapshot, snapshotFile, snapshotFiles } from "./snapshot";
 import { appFolders, backupDir, onScheduledRun, extraAllowed, backupApp, backupOverview, deleteSnapshot, listSnapshots, mirror, restoreSnapshot, resumeRestore, runBackups, scheduleBackups, takeServerSnapshot } from "./backup";
 import { allowed as oauthAllowed, declined as oauthDeclined, findClient, holdQuestion, question as oauthQuestion, readAuthorize, register as oauthRegister, resourceMetadata, serverMetadata, spendCode } from "./oauth";
 import { checkOffsite, forgetHost, offsiteFailure, saveOffsite } from "./offsite";
-import { notSnoozed, snooze } from "./snooze";
+import { hidden, hiddenCount, notSnoozed, snooze, wake as unsnooze } from "./snooze";
 import { APP_NAME_RE, dumpCompose } from "./appform";
 import { findInTrash, trashSizeOn } from "./trash";
 import { discover as discoverPlaces, installFor as installPlaceTools, listPlaces, placesDown, removePlace, retryPlace, savePlace, shares as placeShares, startNetPlaces } from "./netplaces";
@@ -33,7 +34,7 @@ import { checkDisks, diskHealth, installTool, listDisks, startDisks, startSelfTe
 import { lookAtPools, noteTypes, poolCheck, poolClear, PoolError, poolsReport, poolsTrouble, startPools } from "./raid";
 import { fills, measureFills, startFills } from "./fills";
 import { checkImages, imagesStatus, startImages } from "./images";
-import { afterPackage, exposedNics, giveBack, internetTrouble, setSide, startNetwork, setCheck, setRole, startHotspot, stopHotspot, wifiQrText, changeNic, confirmChange, handOver, NETWORK_PACKAGES, networkReport, NetworkError, revertChange, wifiConnect, wifiForget, wifiNetworks } from "./network";
+import { afterPackage, closeOutside, exposedNics, giveBack, internetTrouble, setSide, startNetwork, setCheck, setRole, startHotspot, stopHotspot, wifiQrText, changeNic, confirmChange, handOver, makeBridge, takeBridgeApart, NETWORK_PACKAGES, networkReport, NetworkError, revertChange, wifiConnect, wifiForget, wifiNetworks } from "./network";
 import { DOCKER_INSTALL_COMMAND, installDocker, startDocker } from "./dockerinstall";
 import { installOne, removeOne, toolsReport } from "./tools";
 import { checkUpdates, packageUpdates, startSysUpdates, upgrade as upgradeSystem } from "./sysupdates";
@@ -90,12 +91,17 @@ import {
 import { bus, type BusEvent } from "./bus";
 import { DATA_DIR, dropOldSecrets, listenAddress, saveSettings, settings, timezone, updateSettings } from "./config";
 import { arrange, cleanLayout, dropServer, haTiles, layoutText, parseLayoutText } from "./dashboard";
-import { act as haAct, addServer as addHa, allowProxy as haAllowProxy, changeServer as changeHa, discover as discoverHa, entities as haEntities, forgetUser as haForgetUser, homeAssistantTrouble, installUpdate as haInstallUpdate, makeBackup as haMakeBackup, removeServer as removeHa, server as haServer, servers as haServers, startHomeAssistant, tileStates as haTileStates, visibleTo as haVisibleTo } from "./homeassistant";
+import { act as haAct, addServer as addHa, allowProxy as haAllowProxy, changeServer as changeHa, discover as discoverHa, entities as haEntities, forgetUser as haForgetUser, homeAssistantTrouble, installUpdate as haInstallUpdate, makeBackup as haMakeBackup, removeServer as removeHa, renameEntity as haRename, server as haServer, servers as haServers, startHomeAssistant, tileStates as haTileStates, visibleTo as haVisibleTo } from "./homeassistant";
 import { sees as haSees } from "./ha";
 import { dockerInfo, listContainers, watchEvents } from "./docker";
 import { abortUpload, copyIn, locate, validName, archivePlan, dropFavorites, emptyTrash, favoritesOf, setFavorite, extract as extractArchive, find as findFiles, list as listFiles, makeFile, makeFolder, pinFolder, pinnedFolders, readable, readText, remove as removeFiles, rename as renameFile, restore as restoreFiles, setTrashDays, startTrash, summary as filesSummary, transfer, trash, upload, writeText } from "./files";
 import { adoptProject, casaosState, containerDraft, importCount, importList, moveInCasaos, projectDraft, rebuildContainer } from "./import";
 import { accessOf, dropAccess, dropUser, gateTarget, guard, guardsOf, mayOpen, otherPorts, MAX_APP_BODY, page, passToApp, setAccess, startGates, tunnelHandlers } from "./gate";
+import { addName, changeName, domainsReport, nameOf as domainName, onNamesChanged, removeName, upstream as domainUpstream } from "./domains";
+import type { DomainName } from "./names";
+import { addRecord, applyImport, dnsClients, DnsError, dnsReport, dnsTrouble, removeRecord, setDns, startDns } from "./dnsserver";
+import { addList, BlockError, blockLog, blockReport, blockSummary, blockTrouble, changeList, checkName, importableApps, pauseBlock, planFromApp, planFromFile, refreshLists, removeList, ruleForName, setBlock, setDevice, setRules, startBlocker } from "./dnsblocker";
+import { addForward, changeForward, forwardsReport, onForwardsChanged, removeForward, startForwards } from "./forwards";
 import { parseDockerRun } from "./dockerrun";
 import { cannotMove, finishMove, moveState } from "./relocate";
 import { isPlainObject } from "./fsutil";
@@ -103,7 +109,7 @@ import { mcpResponse } from "./mcp";
 import { instructions as mcpInstructions, TOOLS } from "./mcptools";
 import { localNamesStatus, refreshLocalNames } from "./mdns";
 import { addDevice, CHANNELS, listDevices, notifyStatus, pushKey, removeDevice, renewDevice, sendAsk, sendBackupRun, sendTest, startNotifications, telegramChats, updateNotify } from "./notify";
-import { appHost, appLabel, classifyHost, clientIp, cookieDomain, domainOf, localDomain, requestHost, requestPort, requestProto, siteDomain } from "./site";
+import { appHost, appLabel, classifyHost, coveredBy, clientIp, cookieDomain, domainOf, localDomain, requestHost, requestPort, requestProto, siteDomain } from "./site";
 import { newChallenge, PASSKEY_ALGORITHMS, spendChallenge, verifyAssertion, verifyRegistration } from "./passkey";
 import { qrMatrix } from "./qr";
 import { connect as connectTailscale, disconnect as disconnectTailscale, install as installTailscale, offerNetworks, report as tailscaleReport, signOut as signOutTailscale, start as startTailscale } from "./tailscale";
@@ -121,7 +127,7 @@ import { machineAccessRows, setMachineAccess, startMachineGates } from "./machin
 import { applyMachineCompose, installComposeOnMachine, machineTiles, installOnMachine, machineAppAction, machineAppLogs, machineApps, machineCompose, removeMachineApp, storeAppFor } from "./machineapps";
 import { addStore, ARCH, catalogue, removeStore, scheduleStoreSync, StoreError, syncStore } from "./store";
 import { startSampler, systemStatus } from "./system";
-import { askScreen as containerAskScreen, openScreen as containerOpenScreen, isContainerScreen, screenOn as containerScreenOn, act as containerAct, cloneInstance as cloneContainer, renameInstance as renameContainer, addPlace as addContainerPlace, moveInstance as moveContainer, removePlace as removeContainerPlace, setStandardPlace, containerOfMachine, instanceOfMachine, containersTrouble, create as createContainer, install as installIncus, installVms as installIncusVms, removeContainer, removeSnapshot as removeContainerSnapshot, report as containersReport, restoreSnapshot as restoreContainerSnapshot, setLimits as setContainerLimits, setUpNow as setUpContainers, shellCommand as containerShell, shellReady as containerShellReady, startContainers, takeSnapshot as takeContainerSnapshot } from "./containers";
+import { addDisc as addContainerDisc, receiveDisc as receiveContainerDisc, removeDisc as removeContainerDisc, ejectDisc as ejectContainerDisc, askScreen as containerAskScreen, openScreen as containerOpenScreen, isContainerScreen, screenOn as containerScreenOn, act as containerAct, cloneInstance as cloneContainer, renameInstance as renameContainer, addPlace as addContainerPlace, moveInstance as moveContainer, removePlace as removeContainerPlace, setStandardPlace, containerOfMachine, vmOfMachine, instanceOfMachine, containersTrouble, create as createContainer, install as installIncus, installVms as installIncusVms, removeContainer, removeSnapshot as removeContainerSnapshot, report as containersReport, restoreSnapshot as restoreContainerSnapshot, setLimits as setContainerLimits, setNetwork as setContainerNetwork, setUpNow as setUpContainers, shellCommand as containerShell, shellReady as containerShellReady, startContainers, takeSnapshot as takeContainerSnapshot } from "./containers";
 import { askScreen as pveAskScreen, openScreen as pveOpenScreen, storageContent as pveStorageContent, removeVolume as pveRemoveVolume, cloneOptions as pveCloneOptions, cloneGuest as pveCloneGuest, makeTemplate as pveMakeTemplate, load as pveLoad, templates as pveTemplates, downloadTemplate as pveDownloadTemplate, removeTemplate as pveRemoveTemplate, setSchedule as pveSetSchedule, runScheduleNow as pveRunSchedule, restoreBackup as pveRestoreBackup, restoreOptions as pveRestoreOptions, changeGuest as pveChangeGuest, guestSettings as pveGuestSettings, installByConsole as pveInstallByConsole, openConsole as pveOpenConsole, type Console as PveConsole, addBySignIn as addPveBySignIn, removeGuest as pveRemoveGuest, addHost as addPve, createGuest as pveCreateGuest, createVm as pveCreateVm, sendFile as pveSendFile, receiveFile as pveReceiveFile, newOptions as pveNewOptions, backupJobs as pveBackupJobs, backups as pveBackups, changeHost as changePve, guestOfMachine, host as pveHost, hosts as pveHosts, power as pvePower, proxmoxTrouble, refresh as refreshPve, removeHost as removePve, snapshotAction as pveSnapshotAction, snapshots as pveSnapshots, startProxmox, takeBackup as pveTakeBackup, takeSnapshot as pveTakeSnapshot, taskLog as pveTaskLog } from "./proxmox";
 import { call as machineCall, clientBinary, containersOf, installScript, invite as machineInvite, INVITE_MS, linkData, linkHandlers, machine as machineView, MACHINE_ID_RE, machines as machineList, machinesAway, open as machineOpen, remove as removeMachine, rename as renameMachine, startMachines, updateClient, wake as wakeMachine, power as powerMachine, type LinkSocket } from "./machines";
 import { availableUpdate, cancelUpdate, checkForUpdate, confirmUpdate, scheduleUpdateChecks, startRollback, startUpdate, updateStatus } from "./update";
@@ -742,7 +748,7 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
   if (write && !sameOrigin(req, url)) return fail(403, "request.crossSite");
   const ip = clientIp(req, server);
   // the API takes small JSON bodies; the server's own limit is the apps' (they upload files through it)
-  if (write && path !== "/api/files/upload" && !/^\/api\/(machines|proxmox)\/[a-f0-9]{8}\/files\/upload$/.test(path) && path !== "/api/appearance/wallpaper" && Number(req.headers.get("content-length") ?? 0) > MAX_API_BODY) return fail(413, "request.tooLarge");
+  if (write && path !== "/api/files/upload" && !/^\/api\/(machines|proxmox)\/[a-f0-9]{8}\/files\/upload$/.test(path) && path !== "/api/containers/discs/upload" && path !== "/api/dns/block/import/file" && path !== "/api/appearance/wallpaper" && Number(req.headers.get("content-length") ?? 0) > MAX_API_BODY) return fail(413, "request.tooLarge");
   const cookie = (token: string) => sessionCookie(token, requestProto(req) === "https", cookieDomain(requestHost(req)));
   const client = { ip, userAgent: req.headers.get("user-agent") ?? "" };
 
@@ -1115,11 +1121,14 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
       docker,
       apps,
       arch: ARCH,
+      adblock: admin ? blockSummary() : null,
       // with a domain, apps are opened at <label>.<domain> when Hata itself is opened by that domain
       site: { domain: siteDomain(), mode: settings.https.mode, local: localDomain() },
       // whether the assistant can be asked: the pages offer it next to what is wrong
       assistant: admin && assistantReady(assistantConfig()),
-      attention: admin ? notSnoozed(attention({ system, docker, apps, activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), exposed: exposedNics(), array: arrayTrouble(), shares: shareTrouble(), places: placesDown(), machines: awayMachines(), machineApps: onMachines, unused: unusedDisks(), filling: fillingUp(), pve: proxmoxTrouble(), ha: homeAssistantTrouble(), raid: poolsTrouble(), containers: containersTrouble() })) : [],
+      attention: admin ? notSnoozed(attention({ system, docker, apps, activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), exposed: exposedNics(), array: arrayTrouble(), shares: shareTrouble(), places: placesDown(), machines: awayMachines(), machineApps: onMachines, unused: unusedDisks(), filling: fillingUp(), pve: proxmoxTrouble(), ha: homeAssistantTrouble(), raid: poolsTrouble(), containers: containersTrouble(), dns: [...dnsTrouble(), ...blockTrouble(), ...wildcardTrouble()] })) : [],
+      // how many items are put off: the list says so and leads to them
+      attentionHidden: admin ? hiddenCount() : 0,
       // who signed in from where, and what was installed by whom, is the administrators' business
       activity: admin ? recent(8) : [],
       // containers and compose projects on this machine that are not apps here yet
@@ -1284,6 +1293,9 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
         await setRole(role[1]!, (await body(req)).role, user.name);
         return json(await networkReport());
       }
+      if (path === "/api/network/bridge" && method === "DELETE") return json(await takeBridgeApart(user.name));
+      const bridge = /^\/api\/network\/([A-Za-z0-9_.-]{1,15})\/bridge$/.exec(path);
+      if (bridge && method === "POST") return json(await makeBridge(bridge[1]!, user.name));
       const nic = /^\/api\/network\/([A-Za-z0-9_.-]{1,15})(\/handover|\/handback)?$/.exec(path);
       if (nic && method === "POST" && nic[2] === "/handover") return json(await handOver(nic[1]!, user.name));
       if (nic && method === "POST" && nic[2] === "/handback") return json(await giveBack(nic[1]!, user.name));
@@ -1355,8 +1367,121 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
 
   if (path === "/api/local" && method === "GET") return json({ ...(await localNamesStatus()), port: listenAddress().port });
 
+  if (path.startsWith("/api/dns/block")) {
+    const report = () => json(blockReport(dnsClients()));
+    try {
+      if (path === "/api/dns/block" && method === "GET") return report();
+      if (path === "/api/dns/block" && method === "PUT") {
+        await setBlock(await body(req), user.name);
+        return report();
+      }
+      if (path === "/api/dns/block/pause" && method === "POST") {
+        pauseBlock((await body(req)).minutes, user.name);
+        return report();
+      }
+      if (path === "/api/dns/block/refresh" && method === "POST") {
+        refreshLists();
+        return report();
+      }
+      if (path === "/api/dns/block/lists" && method === "POST") {
+        addList(await body(req), user.name);
+        return report();
+      }
+      const list = /^\/api\/dns\/block\/lists\/([a-z0-9]{1,16})(\/refresh)?$/.exec(path);
+      if (list && list[2] && method === "POST") {
+        refreshLists(list[1]!);
+        return report();
+      }
+      if (list && !list[2] && method === "PATCH") {
+        changeList(list[1]!, await body(req), user.name);
+        return report();
+      }
+      if (list && !list[2] && method === "DELETE") {
+        removeList(list[1]!, user.name);
+        return report();
+      }
+      if (path === "/api/dns/block/rules" && method === "PUT") {
+        setRules((await body(req)).text, user.name);
+        return report();
+      }
+      if (path === "/api/dns/block/name" && method === "POST") {
+        const b = await body(req);
+        ruleForName(b.name, b.allow === true, user.name);
+        return report();
+      }
+      if (path === "/api/dns/block/device" && method === "PUT") {
+        setDevice(await body(req), user.name);
+        return report();
+      }
+      if (path === "/api/dns/block/log" && method === "GET") return json(blockLog({ q: url.searchParams.get("q") ?? "", outcome: url.searchParams.get("outcome") ?? "", client: url.searchParams.get("client") ?? "", limit: Number(url.searchParams.get("limit") ?? 100) }));
+      if (path === "/api/dns/block/check" && method === "GET") return json(checkName(url.searchParams.get("name"), url.searchParams.get("client"), Number(url.searchParams.get("type") ?? 1)));
+      if (path === "/api/dns/block/import/apps" && method === "GET") return json(await importableApps());
+      if (path === "/api/dns/block/import/file" && method === "POST") {
+        if (Number(req.headers.get("content-length") ?? 0) > 1024 * 1024 * 1024) return fail(413, "request.tooLarge");
+        server.timeout(req, 0);
+        return json(await planFromFile(new Uint8Array(await req.arrayBuffer())));
+      }
+      if (path === "/api/dns/block/import/app" && method === "POST") return json(planFromApp((await body(req)).name));
+      if (path === "/api/dns/block/import/apply" && method === "POST") {
+        const b = await body(req);
+        await applyImport(String(b.id ?? ""), (b.parts ?? {}) as Record<string, boolean>, user.name);
+        return report();
+      }
+    } catch (e) {
+      if (e instanceof BlockError) return fail(400, e.code, e.detail);
+      if (e instanceof DnsError) return fail(400, e.code, e.detail);
+      throw e;
+    }
+  }
+  if (path.startsWith("/api/dns")) {
+    try {
+      if (path === "/api/dns" && method === "GET") return json(dnsReport(clientIp(req, server)));
+      if (path === "/api/dns" && method === "PUT") {
+        await setDns(await body(req), user.name);
+        return json(dnsReport(clientIp(req, server)));
+      }
+      if (path === "/api/dns/records" && method === "POST") {
+        addRecord(await body(req), user.name);
+        return json(dnsReport(clientIp(req, server)));
+      }
+      const rec = /^\/api\/dns\/records\/(A|AAAA)\/([a-z0-9._-]{1,253})$/.exec(path);
+      if (rec && method === "DELETE") {
+        removeRecord(rec[2]!, rec[1]!, user.name);
+        return json(dnsReport(clientIp(req, server)));
+      }
+    } catch (e) {
+      if (e instanceof DnsError) return fail(400, e.code, e.detail);
+      throw e;
+    }
+  }
+  if (path === "/api/domains" && method === "GET") return json(await domainsReport(language(url), await forwardsReport()));
+  if (path === "/api/ports" && method === "POST") return json(await addForward(await body(req), user.name));
+  const forwarded = /^\/api\/ports\/(\d{1,5})$/.exec(path);
+  if (forwarded && method === "PUT") return json(await changeForward(Number(forwarded[1]), await body(req), user.name));
+  if (forwarded && method === "DELETE") {
+    await removeForward(Number(forwarded[1]), user.name);
+    return json({ ok: true });
+  }
+  if (path === "/api/domains" && method === "POST") return json(addName(await body(req), user.name));
+  const named = /^\/api\/domains\/([a-z0-9-]{1,63})$/.exec(path);
+  if (named && method === "PUT") return json(changeName(named[1]!, await body(req), user.name));
+  if (named && method === "DELETE") {
+    removeName(named[1]!, user.name);
+    return json({ ok: true });
+  }
   if (path === "/api/https" && method === "GET") {
-    return json({ mode: settings.https.mode, listening: !!httpsServer, error: httpsError, httpPort: listenAddress().port, certificates: certificateStates(await httpsNames()) });
+    return json({ mode: settings.https.mode, listening: !!httpsServer, error: httpsError, httpPort: listenAddress().port, certificates: certificateStates(await httpsNames()), wildcard: wildcardReport() });
+  }
+  if (path === "/api/https/wildcard" && method === "PUT") {
+    server.timeout(req, 60);
+    await setWildcard(await body(req), user.name);
+    void closeOutside().catch(() => {});
+    void refreshHttps(true);
+    return json({ ok: true });
+  }
+  if (path === "/api/https/wildcard/done" && method === "POST") {
+    manualDone();
+    return json({ ok: true });
   }
   if (path === "/api/https/retry" && method === "POST") {
     void refreshHttps(true);
@@ -1776,6 +1901,13 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
   if (path === "/api/attention/snooze" && method === "POST") {
     const error = snooze(await body(req));
     return error ? fail(400, error) : json({ ok: true });
+  }
+  // what is put off, for the page that brings it back
+  if (path === "/api/attention/hidden" && method === "GET") return json({ hidden: hidden() });
+  if (path === "/api/attention/wake" && method === "POST") {
+    const id = (await body(req)).id;
+    if (typeof id !== "string" || !unsnooze(id)) return fail(404, "attention.badItem");
+    return json({ hidden: hidden() });
   }
   if (path === "/api/backups/offsite" && method === "PUT") {
     const error = saveOffsite(await body(req));
@@ -2477,6 +2609,10 @@ async function homeAssistantApi(req: Request, url: URL, server: Server, user: Us
     await haAllowProxy(id, by);
     return json({ ok: true }, 202);
   }
+  if (rest === "/rename" && method === "POST") {
+    const data = await body(req);
+    return json(await haRename(id, data.entity, data.name, data.there, by));
+  }
   if (rest === "/updates" && method === "POST") {
     const data = await body(req);
     await haInstallUpdate(id, data.entity, data.backup, by);
@@ -2502,6 +2638,18 @@ async function containersApi(req: Request, url: URL, server: Server, by: string)
     return json(await containersReport());
   }
   if (path === "/api/containers" && method === "POST") return json(await createContainer(await body(req), by), 202);
+  // disc images for virtual machines installed from them
+  if (path === "/api/containers/discs" && method === "POST") return json(await addContainerDisc(await body(req), by), 202);
+  if (path === "/api/containers/discs/upload" && method === "POST") {
+    // the file is the body: as long as it takes
+    server.timeout(req, 0);
+    return json(await receiveContainerDisc({ place: url.searchParams.get("place"), name: url.searchParams.get("name") }, Number(req.headers.get("content-length") ?? NaN), req.body, by));
+  }
+  const disc = /^\/api\/containers\/discs\/([a-z0-9][a-z0-9-]{0,62})\/([A-Za-z0-9][A-Za-z0-9._-]{0,99})$/.exec(path);
+  if (disc && method === "DELETE") {
+    await removeContainerDisc(disc[1]!, disc[2]!, by);
+    return json({ ok: true });
+  }
   const m = /^\/api\/containers\/([a-z][a-z0-9-]{0,62})(\/.*)?$/.exec(path);
   if (!m) return null;
   const name = m[1]!;
@@ -2522,10 +2670,15 @@ async function containersApi(req: Request, url: URL, server: Server, by: string)
     return json({ ok: true });
   }
   if (rest === "/screen" && method === "POST") return json(await containerAskScreen(name));
+  if (rest === "/eject" && method === "POST") {
+    await ejectContainerDisc(name, by);
+    return json({ ok: true });
+  }
   if (rest === "/screen/on" && method === "POST") {
     await containerScreenOn(name, by);
     return json({ ok: true });
   }
+  if (rest === "/network" && method === "POST") return json(await setContainerNetwork(name, (await body(req)).network, by), 202);
   if (rest === "/move" && method === "POST") return json(await moveContainer(name, (await body(req)).place, by), 202);
   if (rest === "/rename" && method === "POST") return json(await renameContainer(name, (await body(req)).name, by), 202);
   if (rest === "/clone" && method === "POST") return json(await cloneContainer(name, await body(req), by), 202);
@@ -2639,7 +2792,7 @@ async function machinesApi(req: Request, url: URL, server: Server, by: string): 
   const path = url.pathname;
   const method = req.method;
   // a machine that is a guest of a Proxmox server is said to be one: it can be started from there
-  if (path === "/api/machines" && method === "GET") return json({ machines: machineList().map((m) => ({ ...m, pve: guestOfMachine(m.id, (m.info?.macs ?? []).map((c) => c.mac), m.ip.replace(/^::ffff:/, "")), incus: containerOfMachine((m.info?.macs ?? []).map((c) => c.mac), m.info?.hostname ?? "") })), version: VERSION });
+  if (path === "/api/machines" && method === "GET") return json({ machines: machineList().map((m) => ({ ...m, pve: guestOfMachine(m.id, (m.info?.macs ?? []).map((c) => c.mac), m.ip.replace(/^::ffff:/, "")), incus: containerOfMachine((m.info?.macs ?? []).map((c) => c.mac), m.info?.hostname ?? ""), incusVm: vmOfMachine((m.info?.macs ?? []).map((c) => c.mac), m.info?.hostname ?? "") })), version: VERSION });
   if (path === "/api/machines/invite" && method === "POST") {
     // the name on the home network too: a machine that understands .local names finds Hata by it whatever address the router gives
     const { port } = listenAddress();
@@ -2754,7 +2907,36 @@ async function checkDomain(host: string): Promise<{ host: string; ok: boolean; p
 const INSTANCE = crypto.randomUUID();
 
 /** A request for `<app>.<domain>`: the app itself, behind sign-in if the app asks for it */
+/** A name of Settings → Domains: the request goes on to where it leads, past Hata's sign-in when it asks for one */
+async function serveName(req: Request, server: Server, name: DomainName): Promise<Response> {
+  const proto = requestProto(req);
+  let user: User | null = null;
+  // an app of a machine put behind Hata's sign-in keeps it under any name, with its own list of who may open it
+  const own = name.target.kind === "machineApp" ? accessOf(`${name.target.app}@${name.target.id}`) : null;
+  const access = own?.protect ? own : name.protect ? name : null;
+  if (access) {
+    const url = new URL(req.url);
+    const here = `${proto}://${req.headers.get("host") ?? url.host}${url.pathname}${url.search}`;
+    const passed = guard(req, `domain:${name.label}`, `${proto}://${domainOf(requestHost(req))}${requestPort(req)}/?next=${encodeURIComponent(here)}`, access);
+    if (passed instanceof Response) return passed;
+    user = passed;
+  }
+  const to = await domainUpstream(name);
+  if ("away" in to) return page(502, "Not reachable now", awayWords[to.away] ?? "The target is not reachable now.");
+  return passToApp(req, server, to, proto, clientIp(req, server), user);
+}
+
+const awayWords: Record<string, string> = {
+  "domains.away.noContainer": "This container or virtual machine is not on the server any more.",
+  "domains.away.noGuest": "This guest is not on the Proxmox server any more.",
+  "domains.away.noMachine": "This machine is not connected to Hata any more.",
+  "domains.away.machineAway": "The machine is not connected right now.",
+  "domains.away.noAddress": "It has no address right now: it may be stopped.",
+};
+
 async function serveApp(req: Request, server: Server, label: string): Promise<Response> {
+  const named = domainName(label);
+  if (named) return serveName(req, server, named);
   const apps = await listApps("en");
   // a name chosen for an app wins over a name another app merely has
   const app = apps.find((a) => a.subdomain === label) ?? apps.find((a) => !a.subdomain && appLabel(a.name) === label);
@@ -2785,8 +2967,22 @@ let httpsError = "";
 async function httpsNames(): Promise<string[]> {
   const domain = siteDomain();
   if (settings.https.mode !== "acme" || !domain) return [];
+  // one certificate for the domain and every name under it
+  if (settings.https.wildcard !== "off") return [`*.${domain}`];
   const apps = await listApps("en");
-  return [domain, ...apps.filter((app) => app.port).map((app) => appHost(app))];
+  return [domain, ...apps.filter((app) => app.port).map((app) => appHost(app)), ...settings.names.map((n) => `${n.label}.${domain}`)];
+}
+
+/**
+ * The certificates to serve. Hata's own name first: a client that sends no name gets that certificate. While
+ * a wildcard is on its way, what the names under it have keeps HTTPS going.
+ */
+function servable(names: string[]): StoredCertificate[] {
+  const stored = loadCertificates();
+  const wild = names.find(isWildcard);
+  if (!wild) return stored.filter((c) => names.includes(c.name)).sort((a, b) => names.indexOf(a.name) - names.indexOf(b.name));
+  const whole = stored.find((c) => c.name === wild);
+  return whole ? [whole] : stored.filter((c) => !isWildcard(c.name) && coveredBy([wild], c.name)).sort((a, b) => a.name.length - b.name.length);
 }
 
 /** (Re)starts the HTTPS listener with the certificates there are; without any, there is nothing to serve */
@@ -2794,14 +2990,13 @@ function restartHttps(names: string[]): void {
   httpsServer?.stop();
   httpsServer = null;
   httpsError = "";
-  // Hata's own name first: a client that sends no name gets that certificate
-  const certs = loadCertificates().filter((c) => names.includes(c.name)).sort((a, b) => names.indexOf(a.name) - names.indexOf(b.name));
+  const certs = servable(names);
   if (!certs.length) return;
   try {
     httpsServer = Bun.serve({
       port: HTTPS_PORT,
       hostname: listenAddress().hostname,
-      tls: certs.map((c) => ({ serverName: c.name, cert: c.cert, key: c.key })),
+      tls: certs.flatMap((c) => (isWildcard(c.name) ? [c.name.slice(2), c.name] : [c.name]).map((serverName) => ({ serverName, cert: c.cert, key: c.key }))),
       maxRequestBodySize: MAX_APP_BODY,
       fetch: handle,
       websocket: sockets,
@@ -2825,7 +3020,7 @@ function refreshHttps(force = false): Promise<void> {
     }
     const served = new Set((httpsServer as unknown as { names?: string[] } | null)?.names ?? []);
     const changed = await ensureCertificates(names, force);
-    const have = loadCertificates().filter((c) => names.includes(c.name)).map((c) => c.name);
+    const have = servable(names).map((c) => c.name);
     if (changed || !httpsServer || have.length !== served.size || have.some((n) => !served.has(n))) {
       restartHttps(names);
       if (httpsServer) (httpsServer as unknown as { names: string[] }).names = have;
@@ -2844,7 +3039,7 @@ async function handle(req: Request, server: Server): Promise<Response> {
     return answer ? new Response(answer, { headers: { "content-type": "application/octet-stream" } }) : new Response("Not found", { status: 404 });
   }
   // we serve HTTPS for this name: a plain request for it is sent there (by address, HTTP keeps working)
-  if (httpsServer && url.protocol === "http:" && (httpsServer as unknown as { names?: string[] }).names?.includes(requestHost(req))) {
+  if (httpsServer && url.protocol === "http:" && coveredBy((httpsServer as unknown as { names?: string[] }).names ?? [], requestHost(req))) {
     return Response.redirect(`https://${requestHost(req)}${HTTPS_PORT === 443 ? "" : ":" + HTTPS_PORT}${url.pathname}${url.search}`, 301);
   }
   if (url.pathname === "/.well-known/hata-check") return json({ instance: INSTANCE, host: requestHost(req), proto: requestProto(req) });
@@ -2970,10 +3165,16 @@ export async function serve(): Promise<void> {
   void refreshHttps();
   refreshLocalNames();
   startNotifications({
-    attention: async () => notSnoozed(attention({ system: systemStatus(), docker: await dockerInfo(), apps: await listApps("en"), activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), exposed: exposedNics(), array: arrayTrouble(), shares: shareTrouble(), places: placesDown(), machines: awayMachines(), machineApps: await machineTiles(machineList(), "en").catch(() => []), unused: unusedDisks(), filling: fillingUp(), pve: proxmoxTrouble(), ha: homeAssistantTrouble(), raid: poolsTrouble(), containers: containersTrouble() })),
+    attention: async () => notSnoozed(attention({ system: systemStatus(), docker: await dockerInfo(), apps: await listApps("en"), activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), exposed: exposedNics(), array: arrayTrouble(), shares: shareTrouble(), places: placesDown(), machines: awayMachines(), machineApps: await machineTiles(machineList(), "en").catch(() => []), unused: unusedDisks(), filling: fillingUp(), pve: proxmoxTrouble(), ha: homeAssistantTrouble(), raid: poolsTrouble(), containers: containersTrouble(), dns: [...dnsTrouble(), ...blockTrouble(), ...wildcardTrouble()] })),
     baseUrl: publicUrl,
     isAdmin: (id) => findUser(id)?.role === "admin",
   });
+  onNamesChanged(() => void refreshHttps());
+  startBlocker();
+  startDns();
+  onForwardsChanged(() => void closeOutside().catch(() => {}));
+  // Incus's own devices are there already; Hata's relays start a little later, once the targets are looked at
+  setTimeout(() => void startForwards().catch((e) => console.error("Ports:", e)), 5_000);
   setInterval(() => void refreshHttps(), 10 * 60_000);
   // a newly installed app needs a certificate for its name
   let appsChanged: Timer | null = null;

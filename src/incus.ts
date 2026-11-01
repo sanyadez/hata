@@ -39,10 +39,54 @@ export const IMAGE_SERVER = "https://images.linuxcontainers.org";
 /** The bridge Hata makes for its containers, unless Incus has a network of its own already */
 export const BRIDGE = "hatabr0";
 
+/**
+ * The bridge of the home network (made in Settings → Network, `network.ts`): an instance on it sits in the
+ * home network beside the server, with an address from the router, as Proxmox's guests do on vmbr0.
+ */
+export const HOME_BRIDGE = "hatalan0";
+
+/** Where an instance's network card is: in the home network, or on Hata's own network behind NAT; "" — elsewhere */
+export type Network = "home" | "private" | "";
+
+/** Where an instance's first network card leads, by its devices */
+export function networkOf(devices: Record<string, Record<string, string>> | undefined): Network {
+  const nic = Object.values(devices ?? {}).find((d) => d.type === "nic");
+  if (!nic) return "";
+  if (nic.parent === HOME_BRIDGE) return "home";
+  return nic.network ? "private" : "";
+}
+
+/** The network card an instance gets: on the home bridge, or on Incus's network `net` */
+export const nicFor = (network: "home" | "private", net: string): Record<string, string> => (network === "home" ? { type: "nic", name: "eth0", nictype: "bridged", parent: HOME_BRIDGE } : { type: "nic", name: "eth0", network: net });
+
+/**
+ * Hata's client file inside an instance moved to the other network: the address of Hata it names is the
+ * bridge's on the network the instance leaves, and becomes the one on the network it joins. A file naming
+ * Hata by another name (a domain) is left as it is; null — nothing to change.
+ */
+export function movedLink(text: string, from: string, to: string): string | null {
+  let state: Record<string, unknown>;
+  try {
+    state = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  if (typeof state.url !== "string" || !from || !to) return null;
+  let url: URL;
+  try {
+    url = new URL(state.url);
+  } catch {
+    return null;
+  }
+  if (url.hostname !== from) return null;
+  url.hostname = to;
+  return JSON.stringify({ ...state, url: url.origin }, null, 2);
+}
+
 /** A container's name: Incus takes it as the host name too */
 export const NAME_RE = /^[a-z][a-z0-9-]{0,61}[a-z0-9]$/;
 /** Names the routes of the page take for themselves */
-export const RESERVED = ["install", "setup", "vms", "places"];
+export const RESERVED = ["install", "setup", "vms", "places", "discs"];
 export const SNAPSHOT_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,62}$/;
 export const MEMORY = { min: 128, max: 262144 };
 /** The drivers whose pools can hold a container's disk to a size: a plain folder cannot */
@@ -72,6 +116,8 @@ export interface NewContainer {
   client: boolean;
   /** GB: a virtual machine's disk, a container's limit (0 — none) */
   disk: number;
+  /** In the home network, or on Hata's network behind NAT; null — as the default profile says */
+  network: "home" | "private" | null;
 }
 
 const whole = (value: unknown, min: number, max: number, field: string): number => {
@@ -112,7 +158,15 @@ export function readNew(input: Record<string, unknown>, taken: string[]): NewCon
     docker: client && image.docker !== false && input.docker === true,
     client,
     disk,
+    network: readNetwork(input.network),
   };
+}
+
+/** The network asked for: home, private; null — not said */
+export function readNetwork(input: unknown): "home" | "private" | null {
+  if (input === undefined || input === null || input === "") return null;
+  if (input !== "home" && input !== "private") throw new FieldError("network");
+  return input;
 }
 
 /** The settings of a container Hata keeps: limits, start with the server, nesting */
@@ -197,8 +251,8 @@ export function cloneRequest(src: { type: string; config?: Record<string, string
 export const nicsOf = (devices: Record<string, Record<string, string>> | undefined): string[] => Object.entries(devices ?? {}).filter(([, d]) => d.type === "nic").map(([k]) => k);
 
 /** The disk a new one gets: in the place chosen, of the size asked (a container's only where the place can hold it to one) */
-export function devicesOf(c: Pick<NewContainer, "kind" | "disk">, pool: string): Record<string, Record<string, string>> {
-  return { root: { type: "disk", path: "/", pool, ...(c.disk ? { size: `${c.disk}GiB` } : {}) } };
+export function devicesOf(c: Pick<NewContainer, "kind" | "disk">, pool: string, nic?: Record<string, string>): Record<string, Record<string, string>> {
+  return { root: { type: "disk", path: "/", pool, ...(c.disk ? { size: `${c.disk}GiB` } : {}) }, ...(nic ? { eth0: nic } : {}) };
 }
 
 /**
@@ -273,6 +327,10 @@ export interface Container {
   place: string;
   /** GB its disk is held to; 0 — none */
   disk: number;
+  /** The disc image in its drive (a virtual machine made from one); "" — none */
+  disc: string;
+  /** Where its network card is */
+  network: Network;
   usage: { memory: number; cpu: number; disk: number; processes: number } | null;
   snapshots: Snapshot[];
 }
@@ -311,10 +369,128 @@ export function readInstance(raw: Raw): Container | null {
     mac: mac || String(nics[0]?.[1]?.hwaddr ?? "").toLowerCase(),
     place: String(raw.expanded_devices?.root?.pool ?? raw.devices?.root?.pool ?? ""),
     disk: Math.round(megabytes(raw.expanded_devices?.root?.size ?? raw.devices?.root?.size) / 1024),
+    disc: String(raw.devices?.[DISC_DEVICE]?.source ?? raw.devices?.[DRIVERS_DEVICE]?.source ?? ""),
+    network: networkOf(raw.expanded_devices ?? raw.devices),
     usage: st && statusOf(raw.status) === "running" ? { memory: Number(st.memory?.usage ?? 0), cpu: Number(st.cpu?.usage ?? 0), disk: Number(st.disk?.root?.usage ?? 0), processes: Number(st.processes ?? 0) } : null,
     snapshots: ((raw.snapshots ?? []) as Raw[]).map((s) => ({ name: String(s.name).split("/").pop()!, created: Date.parse(s.created_at) || 0 })).sort((a, b) => b.created - a.created),
   };
 }
+
+// --- Disc images -----------------------------------------------------------------------------------
+
+/** A disc image (ISO) Incus keeps as a volume of a place, for virtual machines to boot from */
+export interface Disc {
+  /** The place (pool) it is kept in */
+  place: string;
+  name: string;
+  /** Bytes; 0 — not known */
+  size: number;
+  /** The instances it is in the drive of */
+  usedBy: string[];
+}
+
+/** The device a disc image is put in as: booted before the virtual machine's own disk */
+export const DISC_DEVICE = "disc";
+export const DISC_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,99}$/;
+
+/** The disc images among a place's custom volumes, as `GET …/volumes/custom?recursion=1` gives them */
+export function readDiscs(place: string, volumes: Raw[]): Disc[] {
+  return volumes
+    .filter((v) => v.content_type === "iso")
+    .map((v) => ({
+      place,
+      name: String(v.name),
+      size: Number(v.config?.size ?? 0) || 0,
+      usedBy: ((v.used_by ?? []) as string[]).map((u) => decodeURIComponent(String(u).split("?")[0]!.split("/").pop() ?? "")).filter(Boolean),
+    }))
+    .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+/**
+ * The name a disc image is kept under, from what it was called — a file's name or the last part of a link:
+ * what a volume's name cannot hold becomes "-", ".iso" stays at the end; "" — nothing usable is left.
+ */
+export function discName(from: unknown): string {
+  const last = decodeURIComponent(String(from ?? "").split(/[?#]/)[0]!.split(/[\\/]/).pop() ?? "").trim();
+  const bare = last.replace(/\.iso$/i, "").replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^[^A-Za-z0-9]+|[-.]+$/g, "").slice(0, 90);
+  return bare ? `${bare}.iso` : "";
+}
+
+/** A virtual machine to be made from a disc image: an empty disk of its size, the disc booted first */
+export interface NewFromDisc {
+  name: string;
+  disc: Disc;
+  cores: number;
+  memory: number;
+  disk: number;
+  autostart: boolean;
+  /** Windows: TPM, Secure Boot, its disk on NVMe and the disc on USB — both seen without drivers */
+  windows: boolean;
+  /** The disc of virtio drivers put in a second drive for Windows (its network needs them); null — none here */
+  drivers: Disc | null;
+  network: "home" | "private" | null;
+}
+
+/** What Windows 11 asks of a machine: memory in MB, disk in GB */
+export const WINDOWS = { memory: 4096, disk: 64 };
+
+/** The drivers' disc for Windows, by the name of Fedora's published one */
+export const DRIVERS_RE = /^virtio-win/i;
+export const DRIVERS_URL = "https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/stable-virtio/virtio-win.iso";
+
+/** The new-machine dialog's answers for a machine from a disc (`image` is `disc:<place>/<name>`); a wrong field throws */
+export function readNewFromDisc(input: Record<string, unknown>, taken: string[], discs: Disc[]): NewFromDisc {
+  const name = readName(input.name, taken);
+  const wanted = String(input.image ?? "").replace(/^disc:/, "");
+  const disc = discs.find((d) => `${d.place}/${d.name}` === wanted);
+  if (!disc) throw new FieldError("image");
+  const windows = input.windows === true;
+  const memory = input.memory ? whole(input.memory, MEMORY.min, MEMORY.max, "memory") : windows ? WINDOWS.memory : 0;
+  // a system installed from a disc wants room: most installers ask for 10–20 GB, Windows 11 for 64
+  const disk = input.disk ? whole(input.disk, DISK.min, DISK.max, "disk") : windows ? WINDOWS.disk : DISC_DISK;
+  if (windows && memory < WINDOWS.memory) throw new FieldError("memory");
+  if (windows && disk < WINDOWS.disk) throw new FieldError("disk");
+  return {
+    name,
+    disc,
+    cores: whole(input.cores, 0, 256, "cores"),
+    memory,
+    disk,
+    autostart: input.autostart !== false,
+    windows,
+    drivers: windows ? (discs.find((d) => DRIVERS_RE.test(d.name) && d !== disc) ?? null) : null,
+    network: readNetwork(input.network),
+  };
+}
+
+/** The settings of a machine from a disc; Windows boots with Secure Boot (Microsoft's keys) and is told so to Incus */
+export function discConfig(c: NewFromDisc): Record<string, string> {
+  const config = configOf({ ...c, kind: "vm" });
+  config["image.description"] = c.disc.name.replace(/\.iso$/i, "");
+  if (c.windows) {
+    config["security.secureboot"] = "true";
+    config["image.os"] = "Windows";
+  }
+  return config;
+}
+
+/** GB of a new machine's disk when one is made from a disc */
+export const DISC_DISK = 20;
+
+/** The devices of a machine made from a disc: its own disk in the place, the disc in its drive */
+export function discDevices(c: NewFromDisc, pool: string, nic?: Record<string, string>): Record<string, Record<string, string>> {
+  const devices: Record<string, Record<string, string>> = { ...devicesOf({ kind: "vm", disk: c.disk }, pool, nic), [DISC_DEVICE]: { type: "disk", pool: c.disc.place, source: c.disc.name, "boot.priority": "10" } };
+  if (!c.windows) return devices;
+  // the installer of Windows knows neither virtio-scsi nor virtio's network: NVMe and USB it knows
+  devices.root!["io.bus"] = "nvme";
+  devices[DISC_DEVICE]!["io.bus"] = "usb";
+  devices.tpm = { type: "tpm", path: "/dev/tpm0" };
+  if (c.drivers) devices[DRIVERS_DEVICE] = { type: "disk", pool: c.drivers.place, source: c.drivers.name, "io.bus": "usb" };
+  return devices;
+}
+
+/** The second drive, with the drivers' disc for Windows */
+export const DRIVERS_DEVICE = "drivers";
 
 /**
  * Whether Hata itself runs inside a container that maps only a part of the user ids (an unprivileged

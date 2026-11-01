@@ -50,15 +50,15 @@ export function address(place: Pick<S3Place, "endpoint" | "region" | "bucket">, 
 }
 
 /** The headers a request goes with, `authorization` among them. `bodyHash` is the SHA-256 of what is sent, in hex */
-export async function sign(method: string, url: URL, headers: Record<string, string>, bodyHash: string, place: Pick<S3Place, "region" | "accessKey" | "secret">, now: Date): Promise<Record<string, string>> {
+export async function sign(method: string, url: URL, headers: Record<string, string>, bodyHash: string, place: Pick<S3Place, "region" | "accessKey" | "secret">, now: Date, service = "s3"): Promise<Record<string, string>> {
   const stamp = now.toISOString().replace(/[-:]|\.\d{3}/g, "");
   const day = stamp.slice(0, 8);
   const all: Record<string, string> = { ...Object.fromEntries(Object.entries(headers).map(([name, value]) => [name.toLowerCase(), value.trim()])), host: url.host, "x-amz-content-sha256": bodyHash, "x-amz-date": stamp };
   const names = Object.keys(all).sort();
   const request = [method, url.pathname, url.search.slice(1), ...names.map((name) => `${name}:${all[name]}`), "", names.join(";"), bodyHash].join("\n");
-  const scope = `${day}/${place.region}/s3/aws4_request`;
+  const scope = `${day}/${place.region}/${service}/aws4_request`;
   let key: ArrayBuffer = await hmac(encoder.encode("AWS4" + place.secret), day);
-  for (const part of [place.region, "s3", "aws4_request"]) key = await hmac(key, part);
+  for (const part of [place.region, service, "aws4_request"]) key = await hmac(key, part);
   const signature = hex(await hmac(key, ["AWS4-HMAC-SHA256", stamp, scope, await sha256(request)].join("\n")));
   return { ...all, authorization: `AWS4-HMAC-SHA256 Credential=${place.accessKey}/${scope},SignedHeaders=${names.join(";")},Signature=${signature}` };
 }
