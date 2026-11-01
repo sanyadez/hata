@@ -106,7 +106,7 @@ import { parseDockerRun } from "./dockerrun";
 import { cannotMove, finishMove, moveState } from "./relocate";
 import { isPlainObject } from "./fsutil";
 import { mcpResponse } from "./mcp";
-import { instructions as mcpInstructions, TOOLS } from "./mcptools";
+import { instructions as mcpInstructions, tellHttps, TOOLS } from "./mcptools";
 import { localNamesStatus, refreshLocalNames } from "./mdns";
 import { addDevice, CHANNELS, listDevices, notifyStatus, pushKey, removeDevice, renewDevice, sendAsk, sendBackupRun, sendTest, startNotifications, telegramChats, updateNotify } from "./notify";
 import { appHost, appLabel, classifyHost, coveredBy, clientIp, cookieDomain, domainOf, localDomain, requestHost, requestPort, requestProto, siteDomain } from "./site";
@@ -2792,7 +2792,7 @@ async function machinesApi(req: Request, url: URL, server: Server, by: string): 
   const path = url.pathname;
   const method = req.method;
   // a machine that is a guest of a Proxmox server is said to be one: it can be started from there
-  if (path === "/api/machines" && method === "GET") return json({ machines: machineList().map((m) => ({ ...m, pve: guestOfMachine(m.id, (m.info?.macs ?? []).map((c) => c.mac), m.ip.replace(/^::ffff:/, "")), incus: containerOfMachine((m.info?.macs ?? []).map((c) => c.mac), m.info?.hostname ?? ""), incusVm: vmOfMachine((m.info?.macs ?? []).map((c) => c.mac), m.info?.hostname ?? "") })), version: VERSION });
+  if (path === "/api/machines" && method === "GET") return json({ machines: machineList().map((m) => ({ ...m, pve: guestOfMachine(m.id, (m.info?.macs ?? []).map((c) => c.mac), m.ip.replace(/^::ffff:/, "")), incus: containerOfMachine((m.info?.macs ?? []).map((c) => c.mac), m.info?.hostname ?? ""), incusVm: vmOfMachine((m.info?.macs ?? []).map((c) => c.mac), m.info?.hostname ?? ""), instance: instanceOfMachine((m.info?.macs ?? []).map((c) => c.mac), m.info?.hostname ?? m.name) })), version: VERSION });
   if (path === "/api/machines/invite" && method === "POST") {
     // the name on the home network too: a machine that understands .local names finds Hata by it whatever address the router gives
     const { port } = listenAddress();
@@ -3170,6 +3170,7 @@ export async function serve(): Promise<void> {
     isAdmin: (id) => findUser(id)?.role === "admin",
   });
   onNamesChanged(() => void refreshHttps());
+  tellHttps(async () => ({ listening: !!httpsServer, error: httpsError, names: await httpsNames() }));
   startBlocker();
   startDns();
   onForwardsChanged(() => void closeOutside().catch(() => {}));

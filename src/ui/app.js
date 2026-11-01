@@ -130,8 +130,11 @@ let dict = {};
 let fallbackDict = {};
 
 const has = (key) => key in dict || key in fallbackDict;
+/** "{n} cores" with one of them, in English; Ukrainian's strings are written so that they need no such thing */
+const oneOf = (text, vars, lang) => (Number(vars.n) === 1 && lang === "en" ? text.replace(/\{n\} ((?:[a-z]+ )?)([a-z]+?)(ie)?s\b/, (_, word, stem, ie) => `{n} ${word}${stem}${ie ? "y" : ""}`) : text);
+
 function t(key, vars = {}) {
-  const text = dict[key] ?? fallbackDict[key] ?? key;
+  const text = oneOf(dict[key] ?? fallbackDict[key] ?? key, vars, state.lang);
   return text.replace(/\{(\w+)\}/g, (_, name) => (name in vars ? vars[name] : ""));
 }
 
@@ -2907,8 +2910,18 @@ function paintMachineCard(m) {
       : h("p", { class: "muted small" }, m.online ? t("machines.waiting") : t("machines.seen", { ago: ago(m.seen) })),
     m.outdated && m.online && h("p", { class: "small accent-text" }, t("machines.outdated", { version: m.info.version })),
     !m.online && m.pve?.power && m.pve.status !== "running" && h("div", { class: "row-actions" }, button(t("pve.startHere", { host: m.pve.hostName }), { class: "small", onclick: (e) => (e.preventDefault(), e.stopPropagation(), startGuestOf(m, e.currentTarget)) }, "play")),
-    !m.online && !m.pve && m.info?.macs?.length > 0 && h("div", { class: "row-actions" }, button(t("machines.wake"), { class: "small", onclick: (e) => (e.preventDefault(), e.stopPropagation(), wakeMachine(m, e.currentTarget)) }, "play")),
+    !m.online && m.instance && h("div", { class: "row-actions" }, button(t("incus.start"), { class: "small", onclick: (e) => (e.preventDefault(), e.stopPropagation(), startInstanceOf(m, e.currentTarget)) }, "play")),
+    !m.online && !m.pve && !m.instance && m.info?.macs?.length > 0 && h("div", { class: "row-actions" }, button(t("machines.wake"), { class: "small", onclick: (e) => (e.preventDefault(), e.stopPropagation(), wakeMachine(m, e.currentTarget)) }, "play")),
   );
+}
+
+/** A machine that is a container or a virtual machine of this server is started, not woken */
+function startInstanceOf(m, el) {
+  if (el) el.disabled = true;
+  api("POST", `/api/containers/${m.instance}/state`, { action: "start" }).then(() => void loadMachines(), (e) => {
+    if (el) el.disabled = false;
+    toast(errorText(e), "error");
+  });
 }
 
 /** The install line for a new machine, and the wait for it to connect */
@@ -6535,7 +6548,8 @@ function renderMachineHead() {
         m.pve?.type === "qemu" && m.pve.status === "running" && button(t("pve.screen"), { onclick: () => pveConsoleDialog({ id: m.pve.host }, m.pve) }, "screen"),
         m.online && h("a", { class: "btn", href: filesHash("/", m.id) }, icon("folder"), h("span", null, t("machines.files"))),
         !m.online && m.pve?.power && m.pve.status !== "running" && button(t("pve.startHere", { host: m.pve.hostName }), { class: "primary", onclick: (e) => startGuestOf(m, e.currentTarget) }, "play"),
-        !m.online && !(m.pve?.power && m.pve.status !== "running") && m.info?.macs?.length > 0 && button(t("machines.wake"), { class: "primary", onclick: (e) => wakeMachine(m, e.currentTarget) }, "play"),
+        !m.online && m.instance && button(t("incus.start"), { class: "primary", onclick: (e) => startInstanceOf(m, e.currentTarget) }, "play"),
+        !m.online && !m.instance && !(m.pve?.power && m.pve.status !== "running") && m.info?.macs?.length > 0 && button(t("machines.wake"), { class: "primary", onclick: (e) => wakeMachine(m, e.currentTarget) }, "play"),
         m.pve && h("a", { class: "btn", href: `#/proxmox/${m.pve.host}/guests` }, icon("server"), h("span", null, guestKind(m.pve) + " · " + m.pve.hostName)),
         h("button", { type: "button", class: "btn square", "aria-label": t("app.more"), onclick: () => machineMenu(m) }, icon("more")),
       ),
@@ -6553,7 +6567,7 @@ function machineMenu(m, at = null) {
     item(t("machines.rename"), "edit", () => renameMachineDialog(m)),
     item(t("names.give") + "…", "globe", () => domainNameDialog(null, { target: { kind: "machine", id: m.id }, label: m.name })),
     item(t("ports.open") + "…", "network", () => forwardDialog(null, { target: { kind: "machine", id: m.id } })),
-    !m.online && m.info?.macs?.length > 0 && item(t("machines.wake"), "play", () => wakeMachine(m)),
+    !m.online && !m.instance && m.info?.macs?.length > 0 && item(t("machines.wake"), "play", () => wakeMachine(m)),
     m.online && item(t("machines.reboot"), "refresh", () => powerDialog(m, "reboot")),
     m.online && item(t("machines.poweroff"), "stop", () => powerDialog(m, "poweroff")),
     m.online && item(t("machines.updateAgain"), "up", () => updateMachine(m)),
@@ -16661,11 +16675,33 @@ function md(text) {
   return out;
 }
 
+/** Questions to begin with: the ones of the page the person is on come first */
+function assistantStarts() {
+  const v = state.route.view;
+  const section = state.route.section;
+  const here =
+    v === "machines" || v === "machine" || v === "proxmox" ? ["servers.room", "servers.backups", "servers.away"]
+    : v === "containers" ? ["containers.use", "containers.backups"]
+    : v === "ha" ? ["ha.batteries", "ha.updates"]
+    : v === "app" ? ["app.slow", "app.update"]
+    : v === "store" ? ["store.photos", "store.similar"]
+    : v === "settings" && section === "storage" ? ["storage.clean", "storage.dying", "storage.protected"]
+    : v === "settings" && (section === "network" || section === "remote") ? ["network.internet", "network.outside"]
+    : v === "settings" && (section === "dns" || section === "adblock") ? ["dns.breaks", "dns.who"]
+    : v === "settings" && section === "https" ? ["https.complains"]
+    : v === "settings" && section === "backups" ? ["backups.missing", "backups.restore"]
+    : ["health", "changed", "backups.missing"];
+  return [...here, "health", "updates", "space"].filter((key, i, all) => all.indexOf(key) === i).slice(0, 5).map((key) => "assistant.start." + key);
+}
+
+const toolTarget = (target) => String(target?.name ?? target?.app ?? target?.host ?? target?.guest ?? target?.id ?? "");
+
 /** What a call of the assistant does, in the page's words */
 function toolWords(call) {
   const key = `assistant.tool.${call.name}${call.name === "app_remove" && call.args.deleteData === true ? ".data" : ""}`;
   const a = call.args ?? {};
-  return has(key) ? t(key, { app: String(a.app ?? a.name ?? ""), query: String(a.query ?? ""), snapshot: String(a.snapshot ?? "") }) : call.name;
+  const said = Object.fromEntries(Object.entries(a).filter(([, value]) => typeof value !== "object").map(([name, value]) => [name, String(value)]));
+  return has(key) ? t(key, { ...said, app: String(a.app ?? a.name ?? ""), query: String(a.query ?? ""), snapshot: String(a.snapshot ?? ""), target: toolTarget(a.target) }) : call.name;
 }
 
 async function assistantCall(path, data = {}) {
@@ -16698,7 +16734,7 @@ function assistantBody() {
         h("p", null, t("assistant.notSet")),
         h("p", { class: "muted small" }, t("assistant.notSetHint")),
         h("p", { class: "small" }, t("assistant.canDo")),
-        h("ul", { class: "small assistant-can" }, ["apps", "machines", "backups", "changes"].map((k) => h("li", null, t("assistant.can." + k)))),
+        h("ul", { class: "small assistant-can" }, ["apps", "machines", "network", "backups", "changes"].map((k) => h("li", null, t("assistant.can." + k)))),
         assistantUi.waiting && h("div", { class: "msg user" }, assistantUi.waiting),
         assistantUi.waiting && h("p", { class: "muted small" }, t("assistant.waitingQuestion")),
         h("a", { class: "btn primary", href: "#/settings/assistant", onclick: () => innerWidth < 900 && closeAssistant() }, t("assistant.setUp")),
@@ -16707,7 +16743,7 @@ function assistantBody() {
   }
   if (!chat) {
     const ask = (key) => button(t(key), { class: "small", onclick: () => sendToAssistant(t(key), true) });
-    return [h("div", { class: "assistant-empty" }, h("p", null, t("assistant.hello")), h("p", { class: "muted small" }, t("assistant.helloHint")), h("div", { class: "assistant-starts" }, ask("assistant.start.health"), ask("assistant.start.updates"), ask("assistant.start.space")))];
+    return [h("div", { class: "assistant-empty" }, h("p", null, t("assistant.hello")), h("p", { class: "muted small" }, t("assistant.helloHint")), h("div", { class: "assistant-starts" }, ...assistantStarts().map(ask)))];
   }
   const results = new Map(chat.turns.filter((turn) => turn.role === "tool").map((turn) => [turn.id, turn]));
   const callRow = (call) => {

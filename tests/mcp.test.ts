@@ -4,6 +4,9 @@ import { parseCompose } from "../src/appform";
 import { describeTool, handleMessage, ToolError, toolsFor, type Caller, type Tool } from "../src/mcp";
 import { findings, happened, HIDDEN, instructions, maskCompose, TOOLS, type ContainerState } from "../src/mcptools";
 
+import en from "../src/lang/en.json";
+import uk from "../src/lang/uk.json";
+
 const caller = (level: Caller["level"]): Caller => ({ name: "laptop", level, user: "agent:laptop" });
 const info = { version: "1.2.3", instructions: () => "hello" };
 const call = (message: unknown, level: Caller["level"], tools: Tool[] = SAMPLE) => handleMessage(message, tools, caller(level), info) as Promise<any>;
@@ -85,11 +88,35 @@ test("the real tools: unique names, every level present, nothing that reaches us
   expect(names.filter((n) => /user|password|file|terminal|shell|exec|key|setting|session/.test(n) && n !== "proxmox_guest_settings")).toEqual([]);
   // looking never needs more than the lowest level, and nothing that only looks is marked as changing
   for (const tool of TOOLS) expect(tool.effect === "read").toBe(tool.level === "read");
-  expect(toolsFor(TOOLS, "read").map((t) => t.name)).toEqual(["overview", "activity", "apps_list", "app_get", "app_logs", "app_diagnose", "app_compose", "store_search", "store_app", "backups", "disks", "job_get", "machines", "machine_apps", "machine_containers", "machine_app_logs", "machine_app_compose", "proxmox", "proxmox_guests", "proxmox_guest", "proxmox_tasks", "proxmox_guest_settings", "proxmox_load", "proxmox_container_options", "proxmox_images", "containers", "container"]);
-  expect(toolsFor(TOOLS, "operate").filter((t) => t.level === "operate").map((t) => t.name)).toEqual(["app_start", "app_stop", "app_restart", "app_update", "app_install", "backup_take", "machine_app_start", "machine_app_stop", "machine_app_restart", "machine_app_update", "machine_app_install", "machine_backup_take", "machine_wake", "proxmox_guest_power", "proxmox_snapshot_take", "proxmox_backup_take", "container_power", "container_snapshot_take", "container_backup_take"]);
-  expect(TOOLS.filter((t) => t.level === "full").map((t) => t.name)).toEqual(["app_compose_set", "app_install_compose", "app_remove", "backup_restore", "machine_app_compose_set", "machine_app_remove", "machine_backup_restore", "app_move", "machine_power", "proxmox_guest_stop", "proxmox_snapshot_rollback", "proxmox_snapshot_delete", "proxmox_guest_remove", "proxmox_backup_restore", "proxmox_guest_change", "proxmox_guest_clone", "proxmox_vm_create", "proxmox_download", "proxmox_container_create", "container_create", "container_limits", "container_rename", "container_clone", "container_snapshot_restore", "container_snapshot_delete", "container_backup_restore", "container_remove"]);
+  expect(toolsFor(TOOLS, "read").map((t) => t.name)).toEqual(["overview", "activity", "apps_list", "app_get", "app_logs", "app_diagnose", "app_compose", "store_search", "store_app", "backups", "disks", "job_get", "machines", "machine_apps", "machine_containers", "machine_app_logs", "machine_app_compose", "proxmox", "proxmox_guests", "proxmox_guest", "proxmox_tasks", "proxmox_guest_settings", "proxmox_load", "proxmox_container_options", "proxmox_images", "containers", "container", "network", "dns_server", "ad_blocking", "ad_blocking_check", "domain_names", "ports", "https_state", "shares", "network_places", "disk_arrays", "docker_space", "system_updates", "remote_access", "disc_images", "home_assistant", "home_assistant_devices"]);
+  expect(toolsFor(TOOLS, "operate").filter((t) => t.level === "operate").map((t) => t.name)).toEqual(["app_start", "app_stop", "app_restart", "app_update", "app_install", "backup_take", "machine_app_start", "machine_app_stop", "machine_app_restart", "machine_app_update", "machine_app_install", "machine_backup_take", "machine_wake", "proxmox_guest_power", "proxmox_snapshot_take", "proxmox_backup_take", "container_power", "container_snapshot_take", "container_backup_take", "ad_blocking_pause", "ad_blocking_name", "home_assistant_control", "system_updates_check"]);
+  expect(TOOLS.filter((t) => t.level === "full").map((t) => t.name)).toEqual(["app_compose_set", "app_install_compose", "app_remove", "backup_restore", "machine_app_compose_set", "machine_app_remove", "machine_backup_restore", "app_move", "machine_power", "proxmox_guest_stop", "proxmox_snapshot_rollback", "proxmox_snapshot_delete", "proxmox_guest_remove", "proxmox_backup_restore", "proxmox_guest_change", "proxmox_guest_clone", "proxmox_vm_create", "proxmox_download", "proxmox_container_create", "container_create", "container_limits", "container_rename", "container_clone", "container_snapshot_restore", "container_snapshot_delete", "container_backup_restore", "container_remove", "dns_queries", "ad_blocking_switch", "ad_blocking_list_add", "ad_blocking_list_remove", "ad_blocking_rules_set", "dns_record_add", "dns_record_remove", "domain_name_set", "domain_name_remove", "port_set", "port_remove", "system_update"]);
   expect(TOOLS.filter((t) => t.effect === "destroy").map((t) => t.name)).toEqual(["app_compose_set", "app_remove", "backup_restore", "machine_app_compose_set", "machine_app_remove", "machine_backup_restore", "app_move", "machine_power", "proxmox_guest_stop", "proxmox_snapshot_rollback", "proxmox_snapshot_delete", "proxmox_guest_remove", "proxmox_backup_restore", "container_snapshot_restore", "container_snapshot_delete", "container_backup_restore", "container_remove"]);
   expect(instructions(caller("read"))).toContain('level "read"');
+});
+
+test("every tool says what it is for, in the words of both languages, and every argument is described", () => {
+  for (const tool of TOOLS) {
+    // the person is asked by these words: never a tool's bare name
+    expect({ tool: tool.name, en: typeof (en as Record<string, unknown>)["assistant.tool." + tool.name] }).toEqual({ tool: tool.name, en: "string" });
+    expect({ tool: tool.name, uk: typeof (uk as Record<string, unknown>)["assistant.tool." + tool.name] }).toEqual({ tool: tool.name, uk: "string" });
+    // whatever the words ask for, the tool's arguments give: an empty place in a question of consent says nothing
+    const given = ["app", "query", "snapshot", "target", ...Object.keys(tool.input ?? {})];
+    for (const lang of [en, uk] as Record<string, string>[]) for (const m of (lang["assistant.tool." + tool.name] ?? "").matchAll(/\{(\w+)\}/g)) expect({ tool: tool.name, word: m[1], given: given.includes(m[1]!) }).toEqual({ tool: tool.name, word: m[1], given: true });
+    expect({ tool: tool.name, long: tool.description.length >= 80 }).toEqual({ tool: tool.name, long: true });
+    for (const [name, spec] of Object.entries(tool.input ?? {})) expect({ tool: tool.name, name, described: typeof spec.description === "string" && spec.description.length > 3 }).toEqual({ tool: tool.name, name, described: true });
+  }
+});
+
+test("what an agent cannot be talked into: no way to the internet or into the house, no reading of a person's questions below full", () => {
+  const byName = (name: string) => TOOLS.find((t) => t.name === name)!;
+  expect(byName("dns_queries").level).toBe("full");
+  // it changes nothing, yet the person is asked for it each time
+  expect(byName("dns_queries").effect).toBe("change");
+  expect(Object.keys(byName("port_set").input!)).not.toContain("outside");
+  expect(byName("home_assistant_control").description).toContain("Unlocking");
+  expect(byName("ad_blocking").description).toContain("private");
+  for (const name of ["network", "shares", "network_places", "remote_access"]) expect(byName(name).level).toBe("read");
 });
 
 test("secrets of a compose file are hidden from a reader", () => {
