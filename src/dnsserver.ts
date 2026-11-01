@@ -14,7 +14,7 @@ import { record } from "./activity";
 import type { AttentionItem } from "./attention";
 import { saveSettings, settings } from "./config";
 import { siteDomain } from "./site";
-import { aged, cleanDns, cleanRecord, keepFor, loopName, nameservers, ownAnswer, queryFor, RCODE, readAsk, reply, truncated, TYPE, upstreamsOf, withId, type DnsSettings, type Upstream } from "./dns";
+import { aged, challengeAnswer, challengeName, cleanDns, cleanRecord, keepFor, loopName, nameservers, ownAnswer, queryFor, RCODE, readAsk, reply, truncated, TYPE, upstreamsOf, withId, type DnsSettings, type Upstream } from "./dns";
 import { homeLinks } from "./mdns";
 import { isPublic } from "./outside";
 import { PATH, run } from "./packages";
@@ -139,13 +139,24 @@ function domains(): string[] {
   return [settings.local.enabled ? settings.local.name : "", settings.https.mode === "acme" ? siteDomain() : ""].filter(Boolean);
 }
 
+/** The wildcard certificate's TXT values are answered here, with Hata the DNS server of that one name */
+const delegated = (): boolean => settings.https.mode === "acme" && settings.https.wildcard === "delegate" && !!siteDomain();
+let challengeValues: string[] = [];
+export const setChallenge = (values: string[]): void => void (challengeValues = values);
+
 /** The answer to one packet from `from`, asked at Hata's address `here`; null — nothing to answer */
-export async function answer(packet: Uint8Array, from: string, here: string, tcp = false): Promise<Uint8Array | null> {
+export async function answer(packet: Uint8Array, from: string, here: string, tcp = false, outsideSide = false): Promise<Uint8Array | null> {
   const ask = readAsk(packet);
   if (!ask) return null;
   const asker = from.replace(/^::ffff:/, "");
   stats.queries++;
-  if (isPublic(asker)) {
+  // a delegated confirmation is the one thing answered to anyone: the certificate authority asks from the internet
+  if (delegated() && ask.name === challengeName(siteDomain())) {
+    stats.own++;
+    const made = challengeAnswer(ask, siteDomain(), challengeValues);
+    return reply(packet, ask, made.rcode, made.answers);
+  }
+  if (isPublic(asker) || outsideSide) {
     stats.refused++;
     return reply(packet, ask, RCODE.REFUSED);
   }
@@ -188,7 +199,7 @@ function listen(address: string): Promise<Listener> {
   return new Promise((resolve, reject) => {
     const udp = createSocket({ type: "udp4", reuseAddr: false });
     udp.on("message", (msg, rinfo) => {
-      void answer(new Uint8Array(msg), rinfo.address, address).then((out) => out && udp.send(out, rinfo.port, rinfo.address)).catch(() => {});
+      void answer(new Uint8Array(msg), rinfo.address, address, false, onOutside(address)).then((out) => out && udp.send(out, rinfo.port, rinfo.address)).catch(() => {});
     });
     udp.once("error", reject);
     udp.bind(PORT, address, () => {
@@ -202,7 +213,7 @@ function listen(address: string): Promise<Listener> {
           while (got.length >= 2 && got.length >= 2 + got.readUInt16BE(0)) {
             const one = new Uint8Array(got.subarray(2, 2 + got.readUInt16BE(0)));
             got = got.subarray(2 + one.length);
-            void answer(one, socket.remoteAddress ?? "", address, true).then((out) => out && socket.write(Buffer.concat([Buffer.from([out.length >> 8, out.length & 0xff]), out]))).catch(() => socket.destroy());
+            void answer(one, socket.remoteAddress ?? "", address, true, onOutside(address)).then((out) => out && socket.write(Buffer.concat([Buffer.from([out.length >> 8, out.length & 0xff]), out]))).catch(() => socket.destroy());
           }
         });
         socket.on("error", () => socket.destroy());
@@ -229,8 +240,12 @@ async function holderOf(address: string): Promise<string> {
 function wantedAddresses(): string[] {
   const home = homeLinks().map((l) => l.address);
   const wg = networkInterfaces()["hata-wg"]?.find((a) => a.family === "IPv4")?.address;
-  return [...new Set([...home, ...(wg ? [wg] : [])])];
+  return [...new Set([...home, ...(wg ? [wg] : []), ...(delegated() ? outsideAddresses() : [])])];
 }
+
+/** The addresses on the internet side: listened on only for a delegated confirmation, nothing else answered there */
+const outsideAddresses = (): string[] => settings.network.outside.flatMap((name) => (networkInterfaces()[name] ?? []).filter((a) => a.family === "IPv4").map((a) => a.address));
+const onOutside = (address: string): boolean => outsideAddresses().includes(address);
 
 /** Brings the listeners in line with the settings and the addresses the server has now */
 export async function syncDns(): Promise<void> {

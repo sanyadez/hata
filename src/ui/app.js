@@ -2040,6 +2040,7 @@ function attentionItem(item) {
     (item.code.startsWith("internet.") || item.code === "network.exposed") && open("#/settings/network"),
     item.code.startsWith("share.") && open("#/settings/shares"),
     item.code.startsWith("dns.") && open("#/settings/dns"),
+    item.code.startsWith("https.") && open("#/settings/https"),
     item.code === "netplace.down" && open("#/settings/storage"),
     item.code === "machine.away" && open(`#/machines/${item.detail.id}`),
     item.code.startsWith("containers.") && state.route.view !== "containers" && open("#/containers"),
@@ -13240,10 +13241,103 @@ function httpsSection(save, error) {
     ),
     namesCard(),
     portsCard(),
-    https.mode === "acme" && h("section", { class: "card pad" }, h("div", { class: "section-head" }, h("h2", null, t("https.certificates")), retry), h("p", { class: "muted small" }, t("https.certificatesLead")), certs),
+    https.mode === "acme" && https.domain && wildcardCard(paintCerts),
+    https.mode === "acme" && h("section", { class: "card pad" }, h("div", { class: "section-head" }, h("h2", null, t("https.certificates")), retry), h("p", { class: "muted small" }, t(https.wildcard && https.wildcard !== "off" ? "wildcard.certificatesLead" : "https.certificatesLead")), certs),
     here && h("section", { class: "card pad" }, h("div", { class: "section-head" }, h("h2", null, t("https.checkTitle")), check), h("p", { class: "muted small" }, t("https.checkLead", { domain: here })), results),
     here && h("section", { class: "card pad" }, h("h2", null, t("https.addresses")), h("p", { class: "muted small" }, t("https.addressesLead")), settingRow("Hata", "", h("a", { class: "link mono", href: `https://${here}/` }, here)), (state.overview?.apps ?? []).filter((a) => a.port).map((a) => settingRow(a.title, a.protected ? t("access.protected") : "", h("a", { class: "link mono", href: `https://${a.name.replace(/_/g, "-")}.${here}/`, target: "_blank", rel: "noopener noreferrer" }, `${a.name.replace(/_/g, "-")}.${here}`)))),
   ];
+}
+
+/** One certificate for the domain and every name under it: the way its TXT record gets into the DNS */
+function wildcardCard(afterChange) {
+  const body = h("div", { class: "stack" }, h("p", { class: "muted small" }, "…"));
+  const paint = async () => {
+    const status = await api("GET", "/api/https").catch(() => null);
+    if (!status) return;
+    const w = status.wildcard;
+    const via = h("select", null, ["off", "api", "delegate", "manual"].map((id) => h("option", { value: id, selected: w.via === id }, t("wildcard.via." + id))));
+    const provider = h("select", null, w.providers.map((id) => h("option", { value: id, selected: w.provider === id }, t("wildcard.provider." + id))));
+    const token = h("input", { type: "password", class: "mono", autocomplete: "off", placeholder: w.saved ? t("wildcard.keep") : "" });
+    const accessKey = h("input", { class: "mono", autocomplete: "off", spellcheck: false, placeholder: w.saved ? t("wildcard.keep") : "" });
+    const secret = h("input", { type: "password", class: "mono", autocomplete: "off", placeholder: w.saved ? t("wildcard.keep") : "" });
+    const tokenRow = field(t("wildcard.token"), token);
+    const hint = h("span");
+    const tokenWhy = h("p", { class: "muted small" }, hint);
+    const keyRow = field(t("wildcard.accessKey"), accessKey);
+    const secretRow = field(t("wildcard.secret"), secret);
+    const record = (name, type, value) => h("div", { class: "kv" }, h("span", { class: "mono small" }, `${name} ${type}`), h("span", { class: "mono small" }, value));
+    const delegate = h("div", { class: "stack-s" }, h("p", { class: "muted small" }, t("wildcard.delegateLead")), record(w.name, "NS", w.server), record(w.server, "A", t("wildcard.outsideAddress")), h("p", { class: "muted small" }, t("wildcard.delegatePort")), !w.dns && h("p", { class: "banner small" }, h("a", { class: "link", href: "#/settings/dns" }, t("wildcard.dnsNeeded"))));
+    const manualHint = h("p", { class: "muted small" }, t("wildcard.manualLead"));
+    const shape = () => {
+      const api = via.value === "api";
+      const r53 = provider.value === "route53";
+      provider.closest(".field, label, div").hidden = !api;
+      tokenRow.hidden = !api || r53;
+      tokenWhy.hidden = !api;
+      hint.textContent = api ? t("wildcard.how." + provider.value) : "";
+      keyRow.hidden = secretRow.hidden = !api || !r53;
+      delegate.hidden = via.value !== "delegate";
+      manualHint.hidden = via.value !== "manual";
+    };
+    via.addEventListener("change", shape);
+    provider.addEventListener("change", shape);
+    const error = h("p", { class: "error", role: "alert" });
+    const save = button(t("settings.save"), {
+      class: "primary",
+      onclick: async (e) => {
+        const el = e.currentTarget;
+        el.disabled = true;
+        error.textContent = "";
+        try {
+          await api("PUT", "/api/https/wildcard", { via: via.value, provider: provider.value, token: token.value, accessKey: accessKey.value, secret: secret.value });
+          toast(t("wildcard.saved"));
+          await paint();
+          setTimeout(afterChange, 800);
+        } catch (err) {
+          error.textContent = errorText(err);
+          el.disabled = false;
+        }
+      },
+    });
+    put(
+      body,
+      w.manual &&
+        h(
+          "div",
+          { class: "banner stack-s" },
+          h("strong", null, t("wildcard.manualWaits")),
+          ...w.manual.values.map((value) => record(w.manual.name, "TXT", value)),
+          h("p", { class: "muted small" }, t("wildcard.manualAll")),
+          h("div", { class: "actions" }, button(t("wildcard.manualDone"), {
+            class: "primary small",
+            onclick: async (e) => {
+              e.currentTarget.disabled = true;
+              try {
+                await api("POST", "/api/https/wildcard/done", {});
+                toast(t("wildcard.manualGoing"));
+              } catch (err) {
+                toast(errorText(err), "error");
+              }
+              setTimeout(paint, 3000);
+            },
+          })),
+        ),
+      field(t("wildcard.way"), via),
+      field(t("wildcard.providerLabel"), provider),
+      tokenRow,
+      keyRow,
+      secretRow,
+      tokenWhy,
+      delegate,
+      manualHint,
+      error,
+      h("div", { class: "actions" }, save),
+    );
+    shape();
+    if (via.value === "manual" && !w.manual) setTimeout(() => void (body.isConnected && paint()), 8000);
+  };
+  void paint();
+  return h("section", { class: "card pad stack" }, h("h2", null, t("wildcard.title")), h("p", { class: "muted small" }, t("wildcard.lead")), body);
 }
 
 // --- Names under the domain -------------------------------------------------------------------------

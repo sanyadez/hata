@@ -17,7 +17,8 @@ import type { Level } from "./agents";
 import { Desk } from "./approvals";
 import { answerCall, assistantConfig, configured as assistantReady, findChat, listChats, ModelError, modelsFor, removeChat, retry as retryAssistant, say as sayToAssistant, shownChat, shownConfig as shownAssistant, stopChat, updateAssistant } from "./assistant";
 import { AppError, appAction, startAfterDisk, startJob, stoppable, stopJob, type Job, installedNames, jobFinished, appEnv, appDetail, appLogs, appIcon, appSettings, appStats, applyCompose, ICON_MIME, MAX_ICON, removeAppIcon, setAppIcon, applySettings, installFromSettings, applyStoreUpdate, composeText, getJob, installCustom, installFromStore, listApps, listJobs, onAppRemoved, planStoreUpdate, readCompose, refreshAppUrls, removeApp, storeAppDetail, viewOf } from "./apps";
-import { certificateStates, challengeResponse, ensureCertificates, loadCertificates } from "./acme";
+import { certificateStates, challengeResponse, ensureCertificates, isWildcard, loadCertificates, type StoredCertificate } from "./acme";
+import { manualDone, setWildcard, wildcardReport, wildcardTrouble } from "./wildcard";
 import { attention } from "./attention";
 import { folderSize, restoreFromSnapshot, snapshotFile, snapshotFiles } from "./snapshot";
 import { appFolders, backupDir, onScheduledRun, extraAllowed, backupApp, backupOverview, deleteSnapshot, listSnapshots, mirror, restoreSnapshot, resumeRestore, runBackups, scheduleBackups, takeServerSnapshot } from "./backup";
@@ -107,7 +108,7 @@ import { mcpResponse } from "./mcp";
 import { instructions as mcpInstructions, TOOLS } from "./mcptools";
 import { localNamesStatus, refreshLocalNames } from "./mdns";
 import { addDevice, CHANNELS, listDevices, notifyStatus, pushKey, removeDevice, renewDevice, sendAsk, sendBackupRun, sendTest, startNotifications, telegramChats, updateNotify } from "./notify";
-import { appHost, appLabel, classifyHost, clientIp, cookieDomain, domainOf, localDomain, requestHost, requestPort, requestProto, siteDomain } from "./site";
+import { appHost, appLabel, classifyHost, coveredBy, clientIp, cookieDomain, domainOf, localDomain, requestHost, requestPort, requestProto, siteDomain } from "./site";
 import { newChallenge, PASSKEY_ALGORITHMS, spendChallenge, verifyAssertion, verifyRegistration } from "./passkey";
 import { qrMatrix } from "./qr";
 import { connect as connectTailscale, disconnect as disconnectTailscale, install as installTailscale, offerNetworks, report as tailscaleReport, signOut as signOutTailscale, start as startTailscale } from "./tailscale";
@@ -1123,7 +1124,7 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
       site: { domain: siteDomain(), mode: settings.https.mode, local: localDomain() },
       // whether the assistant can be asked: the pages offer it next to what is wrong
       assistant: admin && assistantReady(assistantConfig()),
-      attention: admin ? notSnoozed(attention({ system, docker, apps, activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), exposed: exposedNics(), array: arrayTrouble(), shares: shareTrouble(), places: placesDown(), machines: awayMachines(), machineApps: onMachines, unused: unusedDisks(), filling: fillingUp(), pve: proxmoxTrouble(), ha: homeAssistantTrouble(), raid: poolsTrouble(), containers: containersTrouble(), dns: dnsTrouble() })) : [],
+      attention: admin ? notSnoozed(attention({ system, docker, apps, activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), exposed: exposedNics(), array: arrayTrouble(), shares: shareTrouble(), places: placesDown(), machines: awayMachines(), machineApps: onMachines, unused: unusedDisks(), filling: fillingUp(), pve: proxmoxTrouble(), ha: homeAssistantTrouble(), raid: poolsTrouble(), containers: containersTrouble(), dns: [...dnsTrouble(), ...wildcardTrouble()] })) : [],
       // how many items are put off: the list says so and leads to them
       attentionHidden: admin ? hiddenCount() : 0,
       // who signed in from where, and what was installed by whom, is the administrators' business
@@ -1401,7 +1402,18 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
     return json({ ok: true });
   }
   if (path === "/api/https" && method === "GET") {
-    return json({ mode: settings.https.mode, listening: !!httpsServer, error: httpsError, httpPort: listenAddress().port, certificates: certificateStates(await httpsNames()) });
+    return json({ mode: settings.https.mode, listening: !!httpsServer, error: httpsError, httpPort: listenAddress().port, certificates: certificateStates(await httpsNames()), wildcard: wildcardReport() });
+  }
+  if (path === "/api/https/wildcard" && method === "PUT") {
+    server.timeout(req, 60);
+    await setWildcard(await body(req), user.name);
+    void closeOutside().catch(() => {});
+    void refreshHttps(true);
+    return json({ ok: true });
+  }
+  if (path === "/api/https/wildcard/done" && method === "POST") {
+    manualDone();
+    return json({ ok: true });
   }
   if (path === "/api/https/retry" && method === "POST") {
     void refreshHttps(true);
@@ -2887,8 +2899,22 @@ let httpsError = "";
 async function httpsNames(): Promise<string[]> {
   const domain = siteDomain();
   if (settings.https.mode !== "acme" || !domain) return [];
+  // one certificate for the domain and every name under it
+  if (settings.https.wildcard !== "off") return [`*.${domain}`];
   const apps = await listApps("en");
   return [domain, ...apps.filter((app) => app.port).map((app) => appHost(app)), ...settings.names.map((n) => `${n.label}.${domain}`)];
+}
+
+/**
+ * The certificates to serve. Hata's own name first: a client that sends no name gets that certificate. While
+ * a wildcard is on its way, what the names under it have keeps HTTPS going.
+ */
+function servable(names: string[]): StoredCertificate[] {
+  const stored = loadCertificates();
+  const wild = names.find(isWildcard);
+  if (!wild) return stored.filter((c) => names.includes(c.name)).sort((a, b) => names.indexOf(a.name) - names.indexOf(b.name));
+  const whole = stored.find((c) => c.name === wild);
+  return whole ? [whole] : stored.filter((c) => !isWildcard(c.name) && coveredBy([wild], c.name)).sort((a, b) => a.name.length - b.name.length);
 }
 
 /** (Re)starts the HTTPS listener with the certificates there are; without any, there is nothing to serve */
@@ -2896,14 +2922,13 @@ function restartHttps(names: string[]): void {
   httpsServer?.stop();
   httpsServer = null;
   httpsError = "";
-  // Hata's own name first: a client that sends no name gets that certificate
-  const certs = loadCertificates().filter((c) => names.includes(c.name)).sort((a, b) => names.indexOf(a.name) - names.indexOf(b.name));
+  const certs = servable(names);
   if (!certs.length) return;
   try {
     httpsServer = Bun.serve({
       port: HTTPS_PORT,
       hostname: listenAddress().hostname,
-      tls: certs.map((c) => ({ serverName: c.name, cert: c.cert, key: c.key })),
+      tls: certs.flatMap((c) => (isWildcard(c.name) ? [c.name.slice(2), c.name] : [c.name]).map((serverName) => ({ serverName, cert: c.cert, key: c.key }))),
       maxRequestBodySize: MAX_APP_BODY,
       fetch: handle,
       websocket: sockets,
@@ -2927,7 +2952,7 @@ function refreshHttps(force = false): Promise<void> {
     }
     const served = new Set((httpsServer as unknown as { names?: string[] } | null)?.names ?? []);
     const changed = await ensureCertificates(names, force);
-    const have = loadCertificates().filter((c) => names.includes(c.name)).map((c) => c.name);
+    const have = servable(names).map((c) => c.name);
     if (changed || !httpsServer || have.length !== served.size || have.some((n) => !served.has(n))) {
       restartHttps(names);
       if (httpsServer) (httpsServer as unknown as { names: string[] }).names = have;
@@ -2946,7 +2971,7 @@ async function handle(req: Request, server: Server): Promise<Response> {
     return answer ? new Response(answer, { headers: { "content-type": "application/octet-stream" } }) : new Response("Not found", { status: 404 });
   }
   // we serve HTTPS for this name: a plain request for it is sent there (by address, HTTP keeps working)
-  if (httpsServer && url.protocol === "http:" && (httpsServer as unknown as { names?: string[] }).names?.includes(requestHost(req))) {
+  if (httpsServer && url.protocol === "http:" && coveredBy((httpsServer as unknown as { names?: string[] }).names ?? [], requestHost(req))) {
     return Response.redirect(`https://${requestHost(req)}${HTTPS_PORT === 443 ? "" : ":" + HTTPS_PORT}${url.pathname}${url.search}`, 301);
   }
   if (url.pathname === "/.well-known/hata-check") return json({ instance: INSTANCE, host: requestHost(req), proto: requestProto(req) });
@@ -3072,7 +3097,7 @@ export async function serve(): Promise<void> {
   void refreshHttps();
   refreshLocalNames();
   startNotifications({
-    attention: async () => notSnoozed(attention({ system: systemStatus(), docker: await dockerInfo(), apps: await listApps("en"), activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), exposed: exposedNics(), array: arrayTrouble(), shares: shareTrouble(), places: placesDown(), machines: awayMachines(), machineApps: await machineTiles(machineList(), "en").catch(() => []), unused: unusedDisks(), filling: fillingUp(), pve: proxmoxTrouble(), ha: homeAssistantTrouble(), raid: poolsTrouble(), containers: containersTrouble(), dns: dnsTrouble() })),
+    attention: async () => notSnoozed(attention({ system: systemStatus(), docker: await dockerInfo(), apps: await listApps("en"), activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), exposed: exposedNics(), array: arrayTrouble(), shares: shareTrouble(), places: placesDown(), machines: awayMachines(), machineApps: await machineTiles(machineList(), "en").catch(() => []), unused: unusedDisks(), filling: fillingUp(), pve: proxmoxTrouble(), ha: homeAssistantTrouble(), raid: poolsTrouble(), containers: containersTrouble(), dns: [...dnsTrouble(), ...wildcardTrouble()] })),
     baseUrl: publicUrl,
     isAdmin: (id) => findUser(id)?.role === "admin",
   });

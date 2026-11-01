@@ -208,6 +208,8 @@ export function ownAnswer(ask: Ask, ctx: { domains: string[]; records: DnsRecord
     const answers = mine.filter((r) => want === null || r.type === want).map((r) => ({ type: r.type === "A" ? TYPE.A : TYPE.AAAA, ttl: OWN_TTL, data: (r.type === "A" ? ipv4(r.value) : ipv6(r.value))! }));
     return { rcode: RCODE.OK, answers };
   }
+  // a confirmation's TXT record is the public DNS's, not one of Hata's names
+  if (ask.name.startsWith("_acme-challenge.")) return null;
   if (ctx.domains.some((d) => underDomain(ask.name, d))) {
     const at = ipv4(ctx.hata);
     // Hata has no IPv6 of its own to give here: "nothing of that type", so the asker takes the IPv4
@@ -294,4 +296,68 @@ export function queryFor(name: string, type: number, id: number): Uint8Array {
     return [bytes.length, ...bytes];
   });
   return new Uint8Array([...u16(id), ...u16(0x0100), ...u16(1), ...u16(0), ...u16(0), ...u16(0), ...labels, 0, ...u16(type), ...u16(1)]);
+}
+
+/** The TXT values in an answer */
+export function txtsOf(p: Uint8Array): string[] {
+  if (p.length < 12) return [];
+  const v = new DataView(p.buffer, p.byteOffset, p.byteLength);
+  let pos = 12;
+  for (let i = 0; i < v.getUint16(4); i++) {
+    pos = skipName(p, pos);
+    if (pos < 0) return [];
+    pos += 4;
+  }
+  const out: string[] = [];
+  for (let i = 0; i < v.getUint16(6); i++) {
+    pos = skipName(p, pos);
+    if (pos < 0 || pos + 10 > p.length) return out;
+    const type = v.getUint16(pos);
+    const length = v.getUint16(pos + 8);
+    pos += 10;
+    if (type === TYPE.TXT) {
+      let text = "";
+      for (let at = pos; at < pos + length && at < p.length; at += 1 + p[at]!) text += new TextDecoder().decode(p.subarray(at + 1, at + 1 + p[at]!));
+      out.push(text);
+    }
+    pos += length;
+  }
+  return out;
+}
+
+/** A TXT record's data: strings of up to 255 bytes, each with its length */
+export function txtData(text: string): number[] {
+  const bytes = [...new TextEncoder().encode(text)];
+  const out: number[] = [];
+  for (let i = 0; i === 0 || i < bytes.length; i += 255) {
+    const part = bytes.slice(i, i + 255);
+    out.push(part.length, ...part);
+  }
+  return out;
+}
+
+/** A name as record data, not compressed */
+export function nameData(name: string): number[] {
+  return [...name.split(".").flatMap((label) => {
+    const bytes = [...new TextEncoder().encode(label)];
+    return [bytes.length, ...bytes];
+  }), 0];
+}
+
+/** The name a domain's confirmation (ACME's DNS-01) is asked at */
+export const challengeName = (domain: string): string => `_acme-challenge.${domain}`;
+
+/** The name of the server Hata answers as, when the confirmation is delegated to it */
+export const delegateServer = (domain: string): string => `hata-dns.${domain}`;
+
+/**
+ * The answer about a delegated confirmation: Hata is the only server of that one name. The values are given
+ * to whoever asks, the internet included, so the certificate authority finds them.
+ */
+export function challengeAnswer(ask: Ask, domain: string, values: string[]): { rcode: number; answers: Answer[] } {
+  const ns = nameData(delegateServer(domain));
+  if (ask.type === TYPE.TXT) return { rcode: RCODE.OK, answers: values.map((value) => ({ type: TYPE.TXT, ttl: 10, data: txtData(value) })) };
+  if (ask.type === TYPE.NS) return { rcode: RCODE.OK, answers: [{ type: TYPE.NS, ttl: 300, data: ns }] };
+  if (ask.type === TYPE.SOA) return { rcode: RCODE.OK, answers: [{ type: TYPE.SOA, ttl: 300, data: [...ns, ...nameData(`hostmaster.${domain}`), ...u32(1), ...u32(3600), ...u32(600), ...u32(86400), ...u32(10)] }] };
+  return { rcode: RCODE.OK, answers: [] };
 }

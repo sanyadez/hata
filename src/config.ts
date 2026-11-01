@@ -33,7 +33,7 @@ if (stateIsMissing(DATA_DIR)) {
 mkdirSync(DATA_DIR, { recursive: true, mode: 0o700 });
 
 /** What must not be read by anyone but Hata: password hashes, sessions, keys, tokens */
-export const SECRET_NAMES = ["users.json", "sessions.json", "setup-token", "invites.json", "notify.json", "certs", "backup-remote.json", "backup-key", "backup-key.pub", "backup-known-hosts", "agents.json", "oauth.json", "assistant.json", "assistant-chats.json", "wireguard.json", "netplaces.json", "net-known-hosts", "proxmox.json", "homeassistant.json"];
+export const SECRET_NAMES = ["users.json", "sessions.json", "setup-token", "invites.json", "notify.json", "certs", "backup-remote.json", "backup-key", "backup-key.pub", "backup-known-hosts", "agents.json", "oauth.json", "assistant.json", "assistant-chats.json", "wireguard.json", "netplaces.json", "net-known-hosts", "proxmox.json", "homeassistant.json", "dns-api.json"];
 
 /**
  * Where the secrets lie. For the installed service that is `/etc/hata`, whatever the configuration
@@ -139,6 +139,11 @@ export interface HttpsSettings {
    * acme — Hata gets certificates from Let's Encrypt and serves HTTPS itself
    */
   mode: "off" | "proxy" | "acme";
+  /**
+   * One certificate for the domain and every name under it, and who confirms it (`wildcard.ts`): off — one
+   * certificate per name; api — the DNS provider's API; delegate — Hata's own DNS server; manual — the person
+   */
+  wildcard: "off" | "api" | "delegate" | "manual";
   /** The name Hata is reached by; apps are at `<app>.<domain>` */
   domain: string;
   /** Contact for the certificate authority (acme) */
@@ -226,7 +231,7 @@ const DEFAULTS: Settings = {
   backup: { enabled: false, time: "03:00", keep: 7, dir: "", beforeUpdate: true, exclude: [], folders: {} },
   access: {},
   images: { check: true, auto: false, time: "04:30", exclude: [] },
-  https: { mode: "off", domain: "", email: "" },
+  https: { mode: "off", domain: "", email: "", wildcard: "off" },
   local: { enabled: true, name: "hata.local" },
   storage: { automount: false, ignored: [], smart: DEFAULT_SMART },
   security: { adminTwoFactor: false },

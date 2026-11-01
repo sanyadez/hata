@@ -826,7 +826,7 @@ export async function closeOutside(): Promise<void> {
     written = "none";
     return;
   }
-  const open = { wireguard: listeningPort(), ports: outsideOpenings(settings.forwards) };
+  const open = { wireguard: listeningPort(), ports: [...outsideOpenings(settings.forwards), ...(settings.https.mode === "acme" && settings.https.wildcard === "delegate" ? [{ port: 53, proto: "udp" as const }, { port: 53, proto: "tcp" as const }] : [])] };
   const wanted = JSON.stringify([names, open]);
   for (const [tool, family] of [["iptables", "4"], ["ip6tables", "6"]] as const) {
     if (wanted !== written) {
