@@ -54,7 +54,8 @@ img { display: block; max-width: 100%; height: auto; }
 .hero .lead { max-width: 940px; margin-top: 20px; font-size: clamp(17px, 2vw, 21px); color: var(--muted); }
 .hero .under { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 24px; max-width: 940px; margin-top: 20px; font-size: 14px; color: var(--muted); }
 .hero .under a { display: inline-flex; align-items: center; min-height: 44px; font-weight: 600; color: var(--text); }
-.hero .hero-shot { margin-top: 44px; border-bottom: 0; border-radius: var(--radius-lg) var(--radius-lg) 0 0; }
+.hero-zoom { margin-top: 44px; border-radius: var(--radius-lg) var(--radius-lg) 0 0; }
+.hero .hero-shot { border-bottom: 0; border-radius: var(--radius-lg) var(--radius-lg) 0 0; }
 
 .cmd { display: flex; align-items: center; gap: 16px; max-width: 940px; margin-top: 20px; padding: 12px 12px 12px 20px; border-radius: var(--radius-lg); background: var(--console); color: var(--on-console); }
 .cmd code { flex: 1; min-width: 0; font: 400 14px/1.5 var(--font-mono); overflow-wrap: anywhere; }
@@ -70,6 +71,27 @@ img { display: block; max-width: 100%; height: auto; }
 .head h2 { margin-top: 12px; font-size: clamp(30px, 4vw, 44px); }
 .head p { margin-top: 12px; font-size: 18px; color: var(--muted); }
 .shot { width: 100%; border: 1px solid var(--shot-line); border-radius: var(--radius-lg); background: var(--console); }
+
+.zoom { position: relative; display: block; border-radius: var(--radius-lg); cursor: zoom-in; }
+.zoom::after { content: ""; position: absolute; top: 10px; right: 10px; width: 32px; height: 32px; border-radius: var(--radius-sm); background: #000000b3 url("img/expand.svg") center / 16px no-repeat; }
+.zoom:hover::after { background-color: #000; }
+/* the empty middle of the product's top bar: in its corner the mark would cover the account */
+.hero-zoom::after { right: auto; left: 55%; }
+.zoom:hover .shot { border-color: var(--accent); }
+
+.viewer { width: 100vw; max-width: none; height: 100dvh; max-height: none; margin: 0; padding: 24px 72px; border: 0; background: #0c0b0a; color: #f3eee8; overflow-y: auto; }
+.viewer:not([open]) { display: none; }
+.viewer[open] { display: flex; flex-direction: column; justify-content: safe center; }
+.viewer::backdrop { background: transparent; }
+html:has(.viewer[open]) { overflow: hidden; }
+.viewer img { flex: none; margin: 0 auto; width: auto; max-width: 100%; height: auto; border-radius: var(--radius-md); background: var(--console); }
+.viewer p { flex: none; max-width: 900px; margin: 12px auto 0; font-size: 14px; text-align: center; color: #d6cfc7; }
+.viewer-btn { position: fixed; display: grid; place-items: center; width: 48px; height: 48px; padding: 0; border: 1px solid #ffffff40; border-radius: var(--radius-md); background: #1b1917; color: #f3eee8; font: 400 26px/1 var(--font-body); cursor: pointer; }
+.viewer-btn:hover { border-color: var(--accent); }
+.viewer-btn:focus-visible { outline-color: var(--accent); }
+.viewer-btn.close { top: 16px; right: 12px; }
+.viewer-btn.previous { top: calc(50% - 24px); left: 12px; }
+.viewer-btn.next { top: calc(50% - 24px); right: 12px; }
 
 .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 48px 32px; margin-top: 48px; align-items: start; }
 .feature h3 { margin-top: 16px; font-size: 20px; }
@@ -111,10 +133,10 @@ footer { padding: 40px var(--side); border-top: 1px solid var(--border); }
 }
 @media (max-width: 760px) {
   /* a wide chat shrunk to a phone cannot be read: the words say it */
-  .no-phone-shot .shot { display: none; }
+  .no-phone-shot .zoom { display: none; }
   .top { min-height: 60px; }
   .hero { padding-top: 40px; }
-  .hero .hero-shot { margin-top: 28px; }
+  .hero-zoom { margin-top: 28px; }
   .section { padding-block: 56px; }
   .head { margin-bottom: 28px; }
   .head p { font-size: 16px; }
@@ -123,4 +145,9 @@ footer { padding: 40px var(--side); border-top: 1px solid var(--border); }
   .cmd { flex-direction: column; align-items: stretch; padding: 16px; }
   .cmd code { font-size: 13px; }
   footer { padding-block: 32px; }
+  .hero-zoom::after { display: none; }
+  .viewer { padding: 72px 8px 88px; }
+  .viewer-btn.previous, .viewer-btn.next { top: auto; bottom: 16px; }
+  .viewer-btn.previous { left: calc(50% - 56px); }
+  .viewer-btn.next { right: calc(50% - 56px); }
 }
