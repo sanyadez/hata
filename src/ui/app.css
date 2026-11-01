@@ -1608,3 +1608,23 @@ img.broken { visibility: hidden; }
 .size-mark.h2 { grid-row: span 2; }
 .widget-events.tile-main { padding: 0; }
 .tile.kind-widget .tile-main.widget-picture { padding: 0; }
+
+/* the trial of one grid for all of Home */
+.pg { --pg-cols: 8; display: grid; grid-template-columns: repeat(var(--pg-cols), minmax(0, 1fr)); grid-auto-rows: 128px; gap: 12px; }
+.pg.flowing { grid-auto-flow: dense; }
+.pg-card { position: relative; min-width: 0; min-height: 0; z-index: 1; user-select: none; }
+.pg-card > .card, .pg-card > .tile { height: 100%; min-height: 0; margin: 0; overflow: hidden; }
+.pg-card .block-remove { display: none; }
+.pg-card.pg-h1 .trend, .pg-card.pg-h2 .trend { display: none; }
+.pg-card .numbers { display: flex; flex-direction: column; }
+.pg-card .numbers .kpis { grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px 16px; padding: 12px 16px; }
+.pg-card .numbers .trend { flex: 1; min-height: 0; }
+.pg.arranging .pg-card { touch-action: none; cursor: grab; }
+.pg.arranging .pg-card > * { pointer-events: none; }
+.pg.arranging .pg-card > .pg-grip { pointer-events: auto; }
+.pg-card.pg-moving { z-index: 3; outline: 2px solid var(--accent); outline-offset: 1px; border-radius: var(--radius-lg); cursor: grabbing; }
+.pg-cell { border: 1px dashed var(--border-strong); border-radius: var(--radius-lg); opacity: 0.6; z-index: 0; }
+.pg-grip { position: absolute; right: 6px; bottom: 6px; z-index: 2; display: grid; place-items: center; width: 26px; height: 26px; padding: 0; border: 1px solid var(--border-strong); border-radius: var(--radius-sm); background: var(--surface); color: var(--text); cursor: nwse-resize; touch-action: none; }
+.pg-grip .ico { transform: rotate(45deg); width: 14px; height: 14px; }
+.pg-hint { position: absolute; right: 38px; bottom: 6px; z-index: 2; padding: 4px 10px; border-radius: var(--radius-sm); background: var(--text); color: var(--surface); font: 500 12px var(--font-mono); white-space: nowrap; }
+.pg-bar { position: sticky; top: 64px; z-index: 4; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 12px; padding: 10px 14px; border: 1px solid var(--accent); border-radius: var(--radius-md); background: var(--surface); }

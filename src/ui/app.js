@@ -345,6 +345,7 @@ function parseRoute() {
   if (parts[0] === "import" && isAdmin()) return { view: "import" };
   if (parts[0] === "terminal" && isAdmin()) return { view: "terminal" };
   if (parts[0] === "assistant" && isAdmin()) return { view: "assistant" };
+  if (parts[0] === "grid" && isAdmin()) return { view: "grid" };
   if (parts[0] === "ha" && parts[1] && isAdmin()) return { view: "ha", id: parts[1] };
   if (parts[0] === "qbit" && parts[1] && isAdmin()) return { view: "qbit", id: parts[1] };
   if (parts[0] === "frigate" && parts[1] && isAdmin()) return { view: "frigate", id: parts[1] };
@@ -492,6 +493,7 @@ async function refresh() {
     return;
   }
   if (state.route.view === "home") renderHomeBody();
+  if (state.route.view === "grid") paintGrid();
   if (state.route.view === "store") renderStoreList();
   if (state.route.view === "app") void loadApp(true);
   if (state.route.view === "machine" && state.route.tab === "apps") void loadMachineApps();
@@ -1056,6 +1058,7 @@ function render() {
   if (view === "containers") return renderContainers();
   if (view === "ha") return renderHa();
   if (view === "integrations") return renderIntegrations();
+  if (view === "grid") return renderGrid();
   if (view === "qbit") return renderQbit();
   if (view === "frigate") return renderFrigate();
   if (view === "instance") return renderInstance();
@@ -1203,7 +1206,7 @@ function paintTrend(trend) {
 
 function renderSystem() {
   const s = state.overview?.system;
-  if (!s || state.route.view !== "home") return;
+  if (!s || (state.route.view !== "home" && state.route.view !== "grid")) return;
   const meta = document.getElementById("host");
   const own = document.getElementById("own-name");
   if (own) own.textContent = s.hostname;
@@ -1469,16 +1472,16 @@ function widgetTile(item, x) {
 
 /** The widgets on the page follow their servers without the page being drawn again */
 async function widgetsTick() {
-  if (state.route?.view !== "home" || document.hidden || homeUi.drag || !isAdmin()) return;
+  if ((state.route?.view !== "home" && state.route?.view !== "grid") || document.hidden || homeUi.drag || gridUi.drag || !isAdmin()) return;
   const items = (state.overview?.dashboard?.groups ?? []).flatMap((group) => group.items).filter((item) => item.type === "widget");
   if (!items.length) return;
   const fresh = await api("GET", "/api/widgets").catch(() => null);
-  if (!fresh || state.route.view !== "home" || homeUi.drag) return;
+  if (!fresh || (state.route.view !== "home" && state.route.view !== "grid") || homeUi.drag || gridUi.drag) return;
   state.overview.qbit.servers = fresh.qbit;
   state.overview.frigate.servers = fresh.frigate;
   for (const item of items) {
     const old = document.querySelector(`.tile[data-key="widget:${item.id}"]`);
-    const made = old && tile(item);
+    const made = old && tile(state.route.view === "grid" ? gridSized(item) : item);
     if (made) old.replaceWith(made);
     const x = widgetServer(item);
     const c = item.view === "camera" && x?.cameras.find((one) => one.name === item.camera);
@@ -1550,6 +1553,231 @@ function widgetDialog() {
       } }, "plus")),
   );
 }
+
+// --- A trial of one grid for the whole of Home, at #/grid: kept in this browser, nothing else changes -
+
+const GRID_COLS = 8;
+/** Smallest and largest size of every kind of card, width × height in cells */
+const GRID_LIMITS = {
+  stats: [2, 2, 8, 3], attention: [2, 2, 4, 4], activity: [2, 2, 4, 4], adblock: [2, 1, 4, 2], machine: [2, 1, 8, 2],
+  app: [1, 1, 2, 1], link: [1, 1, 2, 1], files: [1, 1, 3, 1], builtin: [1, 1, 2, 1], folder: [1, 1, 2, 2], ha: [1, 1, 2, 2],
+  torrents: [1, 1, 4, 3], camera: [1, 1, 6, 4], events: [1, 1, 4, 4],
+};
+const GRID_FIRST = { stats: [5, 3], attention: [3, 3], activity: [3, 2], adblock: [2, 2], machine: [3, 1] };
+const gridUi = { at: null, arranging: false, undo: [], entry: null, drag: null, cards: [] };
+
+const gridKind = (card) => (card.block ? (card.block.startsWith("machine:") ? "machine" : card.block) : card.item.type === "widget" ? card.item.view : card.item.type);
+
+/** What is on Home today, all of it, in the order it stands */
+function gridCardsNow() {
+  const o = state.overview;
+  const blocks = ["stats", ...(isAdmin() ? ["attention"] : [])].map((block) => ({ key: "block:" + block, block }));
+  const tiles = o.dashboard.groups.flatMap((group) => group.items).filter(tileTarget).map((item) => ({ key: tileKey(item), item }));
+  const others = [...o.dashboard.widgets.top, ...o.dashboard.widgets.side, ...o.dashboard.widgets.bottom].filter((id) => id !== "stats" && id !== "attention").map((block) => ({ key: "block:" + block, block }));
+  return [...blocks, ...tiles, ...others];
+}
+
+const gridOverlaps = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+
+/** The first free place from the top: nothing already placed moves */
+function gridFit(at, w, h) {
+  const taken = Object.values(at);
+  for (let y = 0; ; y++) for (let x = 0; x + w <= GRID_COLS; x++) if (!taken.some((box) => gridOverlaps({ x, y, w, h }, box))) return { x, y, w, h };
+}
+
+/** A card put somewhere: what it covers goes down, and whatever that covers; nothing rises, so an empty place stays */
+function gridPlace(base, key, box) {
+  const at = structuredClone(base);
+  at[key] = box;
+  const queue = [key];
+  while (queue.length) {
+    const by = queue.shift();
+    for (const other of Object.keys(at)) {
+      if (other === key || other === by || !gridOverlaps(at[by], at[other])) continue;
+      at[other].y = at[by].y + at[by].h;
+      queue.push(other);
+    }
+  }
+  return at;
+}
+
+function gridLoad() {
+  let saved = {};
+  try {
+    saved = JSON.parse(localStorage.getItem("hata.gridTrial") ?? "{}");
+  } catch {}
+  const at = {};
+  gridUi.cards = gridCardsNow();
+  for (const card of gridUi.cards) if (saved[card.key]) at[card.key] = saved[card.key];
+  for (const card of gridUi.cards) {
+    if (at[card.key]) continue;
+    const kind = gridKind(card);
+    const [w, h] = GRID_FIRST[kind] ?? (card.item?.size ? card.item.size.split("x").map(Number) : [1, 1]);
+    at[card.key] = gridFit(at, w, h);
+  }
+  gridUi.at = at;
+}
+
+const gridSave = () => localStorage.setItem("hata.gridTrial", JSON.stringify(gridUi.at));
+
+/** A widget says as much as its cells let it: the nearest of the sizes it knows */
+function gridSized(item) {
+  const box = gridUi.at?.[tileKey(item)];
+  if (!box || item.type !== "widget") return { ...item, size: undefined };
+  const size = `${Math.min(box.w, 2)}x${Math.min(box.h, 2)}`;
+  return { ...item, size: size === "1x1" ? undefined : size };
+}
+
+function renderGrid() {
+  homeUi.widgets = {
+    stats: statsBlock(),
+    attention: isAdmin() ? widget("attention", h("section", { class: "card pad attention-block" })) : null,
+    activity: isAdmin() ? widget("activity", h("section", { class: "card pad activity-block" })) : null,
+    adblock: isAdmin() ? widget("adblock", h("section", { class: "card pad adblock-block" })) : null,
+  };
+  Object.assign(gridUi, { arranging: false, undo: [], entry: null, drag: null });
+  shell(h("div", { id: "grid-bar" }), h("div", { class: "pg", id: "pg" }));
+  if (state.overview) paintGrid();
+}
+
+function gridBar() {
+  const box = document.getElementById("grid-bar");
+  if (!box) return;
+  const wide = gridColumns() === GRID_COLS;
+  put(
+    box,
+    gridUi.arranging
+      ? h("div", { class: "pg-bar" }, h("strong", null, t("grid.arranging")), h("span", { class: "muted small grow" }, t("grid.arrangingHint")), button(t("grid.undo"), { class: "small", disabled: !gridUi.undo.length, onclick: () => ((gridUi.at = gridUi.undo.pop()), paintGrid()) }, "refresh"), button(t("common.cancel"), { class: "small", onclick: () => ((gridUi.at = gridUi.entry), (gridUi.arranging = false), paintGrid()) }), button(t("grid.done"), { class: "small primary", onclick: () => (gridSave(), (gridUi.arranging = false), paintGrid()) }, "check"))
+      : h("div", { class: "page-head" }, h("div", null, h("h1", null, t("grid.title")), h("p", { class: "meta" }, t("grid.lead"))), h("div", { class: "row-actions" }, button(t("grid.reset"), { onclick: () => (localStorage.removeItem("hata.gridTrial"), gridLoad(), paintGrid()) }), wide && button(t("grid.arrange"), { class: "primary", onclick: () => ((gridUi.entry = structuredClone(gridUi.at)), (gridUi.undo = []), (gridUi.arranging = true), paintGrid()) }, "grid"))),
+  );
+}
+
+const gridColumns = () => (document.getElementById("pg")?.clientWidth >= 1000 ? GRID_COLS : document.getElementById("pg")?.clientWidth >= 640 ? 4 : 2);
+
+function gridBody(card, box) {
+  const o = state.overview;
+  if (card.item) return tile(gridSized(card.item));
+  const id = card.block;
+  if (id.startsWith("machine:")) return machineBlock(id);
+  const el = homeUi.widgets[id];
+  if (id === "attention") put(el, attentionBlock(o.attention, Math.max(1, Math.floor((box.h * 140 - 110) / 72))));
+  if (id === "activity") put(el, ...activityBody(o));
+  if (id === "adblock") adblockBlock(el, o.adblock);
+  return el;
+}
+
+function paintGrid() {
+  const pg = document.getElementById("pg");
+  if (!pg || !state.overview || gridUi.drag) return;
+  if (!gridUi.arranging) gridLoad();
+  const cols = gridColumns();
+  const free = cols === GRID_COLS;
+  if (!free) gridUi.arranging = false;
+  gridBar();
+  pg.className = "pg" + (gridUi.arranging ? " arranging" : "") + (free ? "" : " flowing");
+  pg.style.setProperty("--pg-cols", String(cols));
+  const cards = free ? gridUi.cards : [...gridUi.cards].sort((a, b) => gridUi.at[a.key].y - gridUi.at[b.key].y || gridUi.at[a.key].x - gridUi.at[b.key].x);
+  const rows = Math.max(...Object.values(gridUi.at).map((b) => b.y + b.h)) + 2;
+  const cells = gridUi.arranging ? Array.from({ length: rows * cols }, (_, i) => {
+    const cell = h("div", { class: "pg-cell" });
+    cell.style.gridArea = `${Math.floor(i / cols) + 1} / ${(i % cols) + 1}`;
+    return cell;
+  }) : [];
+  put(pg, ...cells, ...cards.map((card) => gridCard(card, free)));
+  renderSystem();
+}
+
+function gridPosition(el, box, free) {
+  const cols = gridColumns();
+  el.style.gridColumn = free ? `${box.x + 1} / span ${box.w}` : `span ${Math.min(box.w, cols)}`;
+  el.style.gridRow = free ? `${box.y + 1} / span ${box.h}` : `span ${box.h}`;
+}
+
+function gridCard(card, free) {
+  const box = gridUi.at[card.key];
+  const body = gridBody(card, box);
+  if (!body) return null;
+  const el = h("div", { class: `pg-card pg-h${box.h}`, "data-card": card.key }, body, gridUi.arranging && h("button", { type: "button", class: "pg-grip", "aria-label": t("home.size") }, icon("arrow")));
+  gridPosition(el, box, free);
+  if (free) el.addEventListener("pointerdown", (e) => gridStart(e, card, el), true);
+  return el;
+}
+
+/** Moving a card, always; pulling its corner, only while arranging */
+function gridStart(e, card, el) {
+  // the page's own dragging of tiles and blocks stays out of this
+  e.stopPropagation();
+  if (e.button !== 0 || (e.pointerType === "touch" && !gridUi.arranging)) return;
+  const grip = e.target.closest(".pg-grip");
+  if (!grip && e.target.closest(".tile-open, button:not(.tile-main), input, select, textarea")) return;
+  const pg = document.getElementById("pg");
+  const rect = pg.getBoundingClientRect();
+  const gap = 12;
+  const cell = { w: (rect.width - gap * (GRID_COLS - 1)) / GRID_COLS + gap, h: 128 + gap };
+  const box = gridUi.at[card.key];
+  const drag = { key: card.key, el, kind: gridKind(card), grip: !!grip, sx: e.clientX, sy: e.clientY, base: structuredClone(gridUi.at), moved: false, rect, cell, grabX: Math.floor((e.clientX - rect.left) / cell.w) - box.x, grabY: Math.floor((e.clientY - rect.top) / cell.h) - box.y };
+  gridUi.drag = drag;
+  const move = (ev) => gridMove(ev, drag);
+  const end = (ev) => {
+    window.removeEventListener("pointermove", move);
+    window.removeEventListener("pointerup", end);
+    window.removeEventListener("keydown", end);
+    gridEnd(drag, ev.type === "keydown");
+  };
+  window.addEventListener("pointermove", move);
+  window.addEventListener("pointerup", end);
+  window.addEventListener("keydown", (ev) => ev.key === "Escape" && end(ev), { once: true });
+  if (grip) e.preventDefault();
+}
+
+function gridMove(e, drag) {
+  if (!drag.moved) {
+    if (Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) < 6) return;
+    drag.moved = true;
+    drag.el.classList.add("pg-moving");
+  }
+  const old = drag.base[drag.key];
+  const [minW, minH, maxW, maxH] = GRID_LIMITS[drag.kind];
+  let box;
+  // the scroll of the page counts: the grid's place is read again
+  const top = document.getElementById("pg").getBoundingClientRect().top;
+  if (drag.grip) {
+    const w = Math.max(minW, Math.min(maxW, GRID_COLS - old.x, Math.floor((e.clientX - drag.rect.left) / drag.cell.w) - old.x + 1));
+    let hi = Math.max(minH, Math.min(maxH, Math.floor((e.clientY - top) / drag.cell.h) - old.y + 1));
+    // a camera is never a strip
+    if (drag.kind === "camera") hi = Math.max(hi, Math.ceil(w / 3));
+    box = { ...old, w, h: hi };
+    gridHint(drag, box);
+  } else {
+    box = { ...old, x: Math.max(0, Math.min(GRID_COLS - old.w, Math.floor((e.clientX - drag.rect.left) / drag.cell.w) - drag.grabX)), y: Math.max(0, Math.floor((e.clientY - top) / drag.cell.h) - drag.grabY) };
+  }
+  gridUi.at = gridPlace(drag.base, drag.key, box);
+  for (const el of document.querySelectorAll(".pg-card")) gridPosition(el, gridUi.at[el.dataset.card], true);
+}
+
+function gridHint(drag, box) {
+  const [minW, minH, maxW, maxH] = GRID_LIMITS[drag.kind];
+  let hint = drag.el.querySelector(".pg-hint");
+  if (!hint) drag.el.append((hint = h("span", { class: "pg-hint" })));
+  hint.textContent = t("grid.hint", { size: `${box.w}×${box.h}`, min: `${minW}×${minH}`, max: `${maxW}×${maxH}` });
+}
+
+function gridEnd(drag, cancelled) {
+  gridUi.drag = null;
+  if (!drag.moved) return;
+  if (cancelled) gridUi.at = drag.base;
+  else {
+    if (gridUi.arranging) gridUi.undo.push(drag.base);
+    else gridSave();
+    // the click that ends a drag opens nothing
+    const swallow = (ev) => (ev.preventDefault(), ev.stopPropagation());
+    window.addEventListener("click", swallow, { capture: true, once: true });
+    setTimeout(() => window.removeEventListener("click", swallow, { capture: true }), 50);
+  }
+  paintGrid();
+}
+
+window.addEventListener("resize", () => state.route?.view === "grid" && paintGrid());
 
 // --- Changing the layout: every change is made on a copy, shown at once and sent to the server ----
 
@@ -2561,11 +2789,13 @@ function renderHome() {
   renderHomeBody();
 }
 
+const activityBody = (o) => [blockRemover("activity"), h("div", { class: "section-head" }, h("h2", null, t("activity.title"))), o.activity.length ? h("div", { class: "timeline" }, o.activity.map(activityItem)) : h("p", { class: "muted small" }, t("activity.none")), isAdmin() && o.activity.length > 0 && h("a", { class: "link small all-activity", href: "#/activity" }, t("activity.all"), icon("chevron"))];
+
 /** How many items of the attention list are open; the rest wait under "N more" */
 const ATTENTION_OPEN = 3;
 
-function attentionBlock(list) {
-  const shown = homeUi.attentionAll ? list : list.slice(0, ATTENTION_OPEN);
+function attentionBlock(list, open = ATTENTION_OPEN) {
+  const shown = homeUi.attentionAll ? list : list.slice(0, open);
   const hidden = list.length - shown.length;
   const toggle = (all) => () => ((homeUi.attentionAll = all), renderHomeBody());
   return [
@@ -2597,7 +2827,7 @@ function renderHomeBody() {
 
   if (homeUi.widgets.attention) put(homeUi.widgets.attention, attentionBlock(o.attention));
   if (homeUi.widgets.adblock) adblockBlock(homeUi.widgets.adblock, o.adblock);
-  if (homeUi.widgets.activity) put(homeUi.widgets.activity, blockRemover("activity"), h("div", { class: "section-head" }, h("h2", null, t("activity.title"))), o.activity.length ? h("div", { class: "timeline" }, o.activity.map(activityItem)) : h("p", { class: "muted small" }, t("activity.none")), isAdmin() && o.activity.length > 0 && h("a", { class: "link small all-activity", href: "#/activity" }, t("activity.all"), icon("chevron")));
+  if (homeUi.widgets.activity) put(homeUi.widgets.activity, ...activityBody(o));
   for (const name of ZONES) for (const id of o.dashboard.widgets[name]) if (id.startsWith("machine:")) machineBlock(id);
   if (!homeUi.drag?.active) placeWidgets();
   renderSystem();
