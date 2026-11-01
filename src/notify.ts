@@ -204,9 +204,12 @@ export interface Message {
   ask?: string;
 }
 
+/** "{n} sectors" with one of them, in English; Ukrainian's strings are written so that they need no such thing */
+export const oneOf = (text: string, vars: Record<string, string | number>, lang: string): string => (Number(vars.n) === 1 && lang === "en" ? text.replace(/\{n\} ((?:[a-z]+ )?)([a-z]+?)(ie)?s\b/, (_, word: string, stem: string, ie?: string) => `{n} ${word}${stem}${ie ? "y" : ""}`) : text);
+
 function tr(lang: string, key: string, vars: Record<string, string | number> = {}): string {
   const template = LANGUAGES[lang]?.[key] ?? LANGUAGES.en![key] ?? key;
-  return template.replace(/\{(\w+)\}/g, (_, name: string) => (name in vars ? String(vars[name]) : ""));
+  return oneOf(template, vars, lang).replace(/\{(\w+)\}/g, (_, name: string) => (name in vars ? String(vars[name]) : ""));
 }
 
 const UNITS = ["B", "KB", "MB", "GB", "TB", "PB"];

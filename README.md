@@ -35,13 +35,22 @@ network, disks, their health and protection from a disk failure, backups with re
 single files, the server's own network — Wi-Fi, a spare way to the internet, an access point —, users and
 who may open what, HTTPS, notifications when something breaks. It also looks after the other computers of
 the house through a small client, makes containers and virtual machines on the server itself, looks after
-those of a Proxmox VE server, and puts the devices of a Home Assistant server on its home page. The full
+those of a Proxmox VE server, puts the devices of a Home Assistant server on its home page, and can be the
+home's DNS server with ad blocking. The full
 list is under [Status](#status).
 
 **What is it an alternative to?**
 To the home server programs of that kind: Umbrel, Runtipi, Cosmos. Unlike some of them it is
 not an operating system: it is one program installed on the Linux you already have, and removed from it
 just as easily. What each of them has: [How Hata compares](COMPARISON.md).
+
+**Can it replace Pi-hole or AdGuard Home?**
+For most homes, yes. Hata has a DNS server of its own, off until you turn it on: it answers the names of the
+home itself, blocks by the lists you choose (hosts files, plain lists, AdGuard's and Pi-hole's syntax) and asks
+the servers you name for the rest, encrypted if you wish. A log shows what was asked, with "Allow" and "Block"
+next to each name. Moving in takes a Pi-hole Teleporter archive or `AdGuardHome.yaml`, or the app itself if it
+is installed in Hata. Not there: handing out addresses (DHCP), DNS over HTTPS for the devices, blocking whole
+services by name, groups of devices with lists of their own. Rules can name a device with `$client`.
 
 **How is it better than Cockpit?**
 It is not better, it does another job. Cockpit administers a Linux server: systemd services, the journal,
@@ -166,7 +175,7 @@ Early development. What works today:
   machine was off is caught up the next time, and a copy that falls behind shows up under "needs
   attention". `hata restore` opens such a copy when given the passphrase, and takes the copy's own
   address — `s3://bucket/folder` or `sftp://user@host/folder` — fetching the latest snapshots by itself;
-- disks and their health (Settings → Storage): every disk with what it says about itself (SMART) in plain
+- disks and their health (Settings → Disks): every disk with what it says about itself (SMART) in plain
   words — healthy, wearing out or failing, and why — its temperature, how full it is and where it is
   mounted; the file systems of the server, network folders included. Health is read every half an hour
   without waking a disk that sleeps, a disk in trouble shows up under "needs attention" and is sent as a
@@ -296,7 +305,9 @@ Early development. What works today:
   server is opened by Hata's domain once it is told to trust Hata, which a button does;
 - HTTPS, your choice of three: none (address and ports, for a home network); behind your own proxy (nginx,
   Caddy, Traefik) with a check that the proxy is set up right; or by Hata itself with certificates from
-  Let's Encrypt. With a domain, every app has its own address, `<app>.<domain>`;
+  Let's Encrypt — one certificate per name, or one for the domain and every name under it, confirmed by a DNS
+  provider's API (Cloudflare, deSEC, DuckDNS, Hetzner, DigitalOcean, Gandi, Route 53), Hata's own DNS server or
+  by hand. With a domain, every app has its own address, `<app>.<domain>`;
 - notifications: what the home page lists as needing attention also reaches you where you are — on your
   phone or computer (a notification from the browser, when Hata is opened over HTTPS), in Telegram through
   a bot of your own, in an ntfy topic, by mail through your provider's SMTP server or a relay of your own,
@@ -304,7 +315,9 @@ Early development. What works today:
   after it has lasted a minute and a half, in the words of the home page, and once more when it is over;
 - an MCP server for AI agents: an agent that speaks MCP can say why an app is down (state of the
   containers, the tail of the log and the likely causes in one answer), update apps, install from the store,
-  take and restore snapshots, look after the machines and the Proxmox servers. It connects with an access key made in the settings, and a key has one of
+  take and restore snapshots, look after the machines and the Proxmox servers and containers, see the network,
+  shares, arrays and updates, change names, ports, DNS names and blocking rules, switch Home Assistant's devices.
+  It never opens a port to the internet or unlocks a door. It connects with an access key made in the settings, and a key has one of
   three levels — look, operate, everything; no level reaches users, passwords, files or a shell. Secrets in
   compose files are hidden from keys that may not change them, and what an agent did is in the activity log
   under the key's name. A key can be made to ask first: a call that removes an app, restores a snapshot
@@ -328,6 +341,15 @@ Early development. What works today:
   NetworkManager, mergerfs, SnapRAID and the rest — with what it is for, whether it is installed and in
   which version, and the button that installs a missing one or removes one you do not want (not while
   something of Hata's stands on it);
+- a tree of everything on the Servers page: this server with its containers and virtual machines, each
+  Proxmox server with its guests, the other computers — one row and one page per thing, whatever it is;
+- names under the domain for what is not an app of this server — a container, a virtual machine, a Proxmox
+  guest, another machine or any address of the home network —, with Hata's certificate and, when asked, its
+  sign-in in front (Settings → Domains and HTTPS); ports of the server passed on to the same things (Settings →
+  Ports), for the home network, and for the internet side only when you say so;
+- containers and virtual machines in the home network, with addresses from the router, through a bridge made on
+  trial, or on Hata's own network, each movable between the two; virtual machines installed from a disc image,
+  Windows too;
 - the home's DNS server, off until you turn it on: Hata's own names and names of your own answered by itself,
   the rest from the servers you choose, encrypted if you wish;
 - ad blocking in that server, for every device that asks it — apps and TVs too: lists you choose by address
@@ -353,14 +375,14 @@ in Google Drive or Box.
 | ![Users, who can open what, invitations](screenshots/users.png) Users, who can open what, invitations | ![Inside a snapshot: a file taken out, chosen files and folders put back](screenshots/snapshot-files.png) Inside a snapshot: a file taken out, chosen files and folders put back |
 | ![The whole history: what happened on the server and who did it](screenshots/activity.png) The whole history: what happened on the server and who did it | ![An app from the store installed here or on another machine](screenshots/store-install-on.png) An app from the store installed here or on another machine |
 | ![The assistant looks first and asks before it changes anything](screenshots/assistant.png) The assistant looks first and asks before it changes anything | ![The assistant's answer once the change is made](screenshots/assistant-done.png) The assistant's answer once the change is made |
-| ![My Hata: the data folder, the disks, the network places, the favourites and the machines](screenshots/my-hata.png) My Hata: the data folder, the disks, the network places, the favourites and the machines | ![An update of Hata: every step, and a cancel until the new version is in place](screenshots/update.png) An update of Hata: every step, and a cancel until the new version is in place |
+| ![My Hata: the data folder, the disks, the network places, the favourites and the machines](screenshots/my-hata.png) My Hata: the data folder, the disks, the network places, the favourites and the machines | |
 
-### Other machines
+### Servers
 
 | | |
 |---|---|
-| ![Servers: the other computers of the house](screenshots/machines.png) Servers: the other computers of the house | ![A machine: its state at a glance](screenshots/machine.png) A machine: its state at a glance |
-| ![A machine's apps: installed, updated, backed up and moved from here](screenshots/machine-apps.png) A machine's apps: installed, updated, backed up and moved from here | ![A machine's Docker containers](screenshots/machine-containers.png) A machine's Docker containers |
+| ![Servers: one tree of what runs where](screenshots/machines.png) Servers: one tree of what runs where | ![A machine: its state at a glance](screenshots/machine.png) A machine: its state at a glance |
+| ![A machine's apps: installed, updated, backed up and moved from here](screenshots/machine-apps.png) A machine's apps: installed, updated, backed up and moved from here | ![A machine's Docker: containers, images, volumes](screenshots/machine-containers.png) A machine's Docker containers |
 | ![A terminal on the machine](screenshots/machine-terminal.png) A terminal on the machine | ![A machine's files in Files](screenshots/machine-files.png) A machine's files in Files |
 
 ### Proxmox VE
@@ -368,7 +390,7 @@ in Google Drive or Box.
 | | |
 |---|---|
 | ![A Proxmox server: nodes, storages, backup jobs, Hata's own schedule](screenshots/proxmox.png) A Proxmox server: nodes, storages, backup jobs, Hata's own schedule | ![Its guests, with what the token may do to each](screenshots/proxmox-guests.png) Its guests, with what the token may do to each |
-| ![A guest: power, snapshots, backups, settings, clone](screenshots/proxmox-guest.png) A guest: power, snapshots, backups, settings, clone | ![The load of a node over a day](screenshots/proxmox-load.png) The load of a node over a day |
+| ![A guest's page: power, snapshots, backups, settings, clone](screenshots/proxmox-guest.png) A guest's page: power, snapshots, backups, settings, clone | ![The load of a node over a day](screenshots/proxmox-load.png) The load of a node over a day |
 | ![Templates, cloud images and discs](screenshots/proxmox-images.png) Templates, cloud images and discs | ![A new container or virtual machine with Hata's client in it](screenshots/proxmox-new.png) A new container or virtual machine with Hata's client in it |
 
 ### Containers and virtual machines on the server
@@ -376,13 +398,13 @@ in Google Drive or Box.
 | | |
 |---|---|
 | ![Containers and virtual machines of this server, with their limits and the place they live in](screenshots/containers.png) Containers and virtual machines of this server, with their limits and the place they live in | ![A new virtual machine: Ubuntu with a desktop](screenshots/container-new.png) A new virtual machine: Ubuntu with a desktop |
-| ![A virtual machine's screen in the page](screenshots/vm-screen.png) A virtual machine's screen in the page | |
+| ![A virtual machine's page: its screen, limits, snapshots](screenshots/vm-screen.png) A virtual machine's page: its screen, limits, snapshots | ![Their network, places and disc images](screenshots/containers-settings.png) Their network, places and disc images |
 
 ### Home Assistant
 
 | | |
 |---|---|
-| ![A Home Assistant server: its updates, backups and batteries](screenshots/home-assistant.png) A Home Assistant server: its updates, backups and batteries | ![Its devices by room, a star puts one on the home page](screenshots/home-assistant-devices.png) Its devices by room, a star puts one on the home page |
+| ![Home Assistant: servers, devices by room, updates, batteries, backups](screenshots/home-assistant.png) Home Assistant: servers, devices by room, updates, batteries, backups | |
 
 ### First run
 
@@ -396,13 +418,17 @@ in Google Drive or Box.
 |---|---|
 | ![Account: password, two-factor sign-in, passkeys, sessions](screenshots/settings-account.png) Account: password, two-factor sign-in, passkeys, sessions | ![General](screenshots/settings-general.png) General |
 | ![Appearance](screenshots/settings-appearance.png) Appearance | ![Apps: the data and configuration folders](screenshots/settings-apps.png) Apps: the data and configuration folders |
-| ![App stores](screenshots/settings-stores.png) App stores | ![Storage: disks, file systems, what fills the data folder](screenshots/settings-storage.png) Storage: disks, file systems, what fills the data folder |
-| ![Network folders (SMB)](screenshots/settings-shares.png) Network folders (SMB) | ![HTTPS and domain](screenshots/settings-https.png) HTTPS and domain |
+| ![App stores](screenshots/settings-stores.png) App stores | ![Disks: their health, file systems, what fills the data folder](screenshots/settings-storage.png) Disks: their health, file systems, what fills the data folder |
+| ![Network folders (SMB)](screenshots/settings-shares.png) Network folders (SMB) | ![Domains and HTTPS: names for everything](screenshots/settings-https.png) Domains and HTTPS: names for everything |
 | ![Notifications](screenshots/settings-notifications.png) Notifications | ![Agents: access keys for the MCP server](screenshots/settings-agents.png) Agents: access keys for the MCP server |
 | ![About and updates](screenshots/settings-about.png) About and updates | ![Network: interfaces, Wi-Fi, the ways to the internet](screenshots/settings-network.png) Network: interfaces, Wi-Fi, the ways to the internet |
-| ![Storage: protection from a disk failure](screenshots/settings-protection.png) Storage: protection from a disk failure | ![Remote access: Tailscale and WireGuard](screenshots/settings-remote.png) Remote access: Tailscale and WireGuard |
+| ![Protection from a disk failure, arrays and pools](screenshots/settings-protection.png) Protection from a disk failure, arrays and pools | ![Remote access: Tailscale and WireGuard](screenshots/settings-remote.png) Remote access: Tailscale and WireGuard |
 | ![The assistant: which model it talks to and what it may do](screenshots/settings-assistant.png) The assistant: which model it talks to and what it may do | ![System programs: what Hata relies on, and the system's updates](screenshots/settings-tools.png) System programs: what Hata relies on, and the system's updates |
 | ![Docker: images and volumes, who uses them, what can go](screenshots/settings-docker.png) Docker: images and volumes, who uses them, what can go | ![Several disks together: one folder, protection, one confirmation](screenshots/settings-pool.png) Several disks together: one folder, protection, one confirmation |
+
+| ![Ad blocking: lists, own rules, what was asked](screenshots/settings-adblock.png) Ad blocking: lists, own rules, what was asked | ![The home's DNS server](screenshots/settings-dns.png) The home's DNS server |
+| ![Ports of the server passed on](screenshots/settings-ports.png) Ports of the server passed on | ![Find a setting: sections and cards by name](screenshots/settings-find.png) Find a setting: sections and cards by name |
+| ![Moving in from Pi-hole or AdGuard Home](screenshots/adblock-import.png) Moving in from Pi-hole or AdGuard Home | ![Network places: folders of other machines](screenshots/settings-places.png) Network places: folders of other machines |
 
 ### Looks
 

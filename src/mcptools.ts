@@ -13,8 +13,8 @@
  * the values that look like secrets hidden (`maskCompose`): what an agent reads leaves this machine.
  */
 import { localDomain, siteDomain, webAddress } from "./site";
-import { recent } from "./activity";
-import { settings } from "./config";
+import { recent, record } from "./activity";
+import { listenAddress, settings } from "./config";
 import { type Level } from "./agents";
 import { appDir, AppError, appAction, appDetail, appStats, applyCompose, composeText, getJob, installCustom, installFromStore, jobFinished, listApps, listJobs, removeApp, storeAppDetail, type InstalledApp, type Job } from "./apps";
 import { APP_NAME_RE, parseCompose, dumpCompose, type Compose } from "./appform";
@@ -39,6 +39,23 @@ import { MuxError } from "./mux";
 import { act as containerAct, cloneInstance as cloneContainer, create as createContainer, renameInstance as renameContainer, removeContainer, removeSnapshot as removeContainerSnapshot, report as containersReport, restoreSnapshot as restoreContainerSnapshot, setLimits as setContainerLimits, takeSnapshot as takeContainerSnapshot } from "./containers";
 import { LIMITED, NAME_RE as INSTANCE_RE } from "./incus";
 import { backupInstance, restoreInstance } from "./incusbackup";
+import { networkReport } from "./network";
+import { addRecord, dnsClients, DnsError, dnsReport, removeRecord } from "./dnsserver";
+import { addList, BlockError, blockLog, blockReport, checkName, pauseBlock, removeList, ruleForName, setBlock, setRules } from "./dnsblocker";
+import { TYPE } from "./dns";
+import { addName, changeName, domainsReport, removeName } from "./domains";
+import { addForward, changeForward, forwardsReport, removeForward } from "./forwards";
+import { wildcardReport } from "./wildcard";
+import { certificateStates } from "./acme";
+import { listShares } from "./shares";
+import { listPlaces } from "./netplaces";
+import { arrayReport } from "./snapraid";
+import { poolsReport } from "./raid";
+import { dockerSpace } from "./dockerspace";
+import { checkUpdates, packageUpdates, upgrade as upgradeSystem } from "./sysupdates";
+import { report as tailscaleReport } from "./tailscale";
+import { report as wireguardReport } from "./wireguard";
+import { act as haAct, entities as haEntities, servers as haServers } from "./homeassistant";
 import { VERSION } from "./version";
 import en from "./lang/en.json";
 
@@ -155,6 +172,7 @@ async function wrap<T>(work: () => T | Promise<T>): Promise<T> {
     return await work();
   } catch (e) {
     if (e instanceof AppError) throw new ToolError(say(e.code, e.detail));
+    if (e instanceof DnsError || e instanceof BlockError) throw new ToolError(say(e.code, e.detail));
     throw e;
   }
 }
@@ -274,7 +292,7 @@ const read: Omit<Tool, "level" | "effect">[] = [
   {
     name: "apps_list",
     title: "Installed apps",
-    description: "Every installed app with its status (running, partial, stopped), containers, images and published ports.",
+    description: "Every installed app of this server with its status (running, partial, stopped), containers, images, published ports and the address to open it at. Apps of other machines are in machine_apps.",
     run: async (_args: Record<string, unknown>, caller: Caller) => (await listApps("en")).map((app) => brief(app, caller)),
   },
   {
@@ -367,7 +385,7 @@ const read: Omit<Tool, "level" | "effect">[] = [
     name: "store_search",
     title: "Search the app store",
     description: "Apps that can be installed from the store. Without a query it lists what there is (see also `categories`); with one it matches the name, the title, the tagline and the category.",
-    input: { query: { type: "string", description: "Words to look for, e.g. \"photos\" or \"jellyfin\"" }, category: { type: "string" }, limit: { type: "number", description: "30 by default, 100 at most" } },
+    input: { query: { type: "string", description: "Words to look for, e.g. \"photos\" or \"jellyfin\"" }, category: { type: "string", description: "Only this category, as the app's `category` in the list says" }, limit: { type: "number", description: "30 by default, 100 at most" } },
     run: async (args) => {
       const all = catalogue("en");
       const installed = new Set((await listApps("en")).map((app) => app.name));
@@ -605,7 +623,7 @@ const machineRead: Omit<Tool, "level" | "effect">[] = [
   {
     name: "machine_app_logs",
     title: "Log of a machine's app",
-    description: "The last lines of the container logs of an app on another machine, with timestamps.",
+    description: "The last lines of the container logs of an app on another machine, with timestamps. Use it for the same questions as app_logs here: why it does not start, what it complains about.",
     input: { ...MACHINE_APP, service: { type: "string", description: "Only this service of the app" }, lines: { type: "number", description: "How many lines per container, 100 by default, 500 at most" } },
     required: ["machine", "app"],
     run: (args) =>
@@ -853,7 +871,7 @@ const pveRead: Omit<Tool, "level" | "effect">[] = [
   {
     name: "proxmox_guest",
     title: "A guest of Proxmox",
-    description: "One container or virtual machine: its state, its snapshots and its backups (newest first), and what the token may do with it.",
+    description: "One container or virtual machine: its state, snapshots and backups (newest first), and what the token may do with it. The list of guests is in proxmox_guests.",
     input: GUEST,
     required: ["guest"],
     run: (args, caller) =>
@@ -1056,7 +1074,7 @@ const pveFull: (Omit<Tool, "level" | "effect"> & { effect?: Tool["effect"] })[] 
   {
     name: "proxmox_snapshot_delete",
     title: "Delete a snapshot of a Proxmox guest",
-    description: "Deletes one snapshot of a container or virtual machine; the guest itself stays as it is.",
+    description: "Deletes one snapshot of a container or virtual machine; the guest itself stays as it is. What was kept only in that snapshot cannot be brought back afterwards.",
     input: { ...GUEST, snapshot: { type: "string", description: "The snapshot's name, as proxmox_guest lists them" } },
     required: ["guest", "snapshot"],
     run: (args, caller) =>
@@ -1093,7 +1111,7 @@ const pveFull: (Omit<Tool, "level" | "effect"> & { effect?: Tool["effect"] })[] 
       name: { type: "string", description: "With replace: the guest's name exactly" },
       vmid: { type: "number", description: "Without replace: the new guest's number" },
       storage: { type: "string", description: "Where the disks go; by default where the guest's disks are" },
-      pool: { type: "string" },
+      pool: { type: "string", description: "The pool of a new guest; the token's own by default" },
       start: { type: "boolean", description: "Start it afterwards; false by default" },
     },
     required: ["guest", "backup"],
@@ -1115,13 +1133,13 @@ const pveFull: (Omit<Tool, "level" | "effect"> & { effect?: Tool["effect"] })[] 
     effect: "change",
     input: {
       ...GUEST,
-      name: { type: "string" },
-      cores: { type: "number" },
-      memory: { type: "number", description: "MB" },
+      name: { type: "string", description: "The new name" },
+      cores: { type: "number", description: "Processor cores" },
+      memory: { type: "number", description: "Memory in MB" },
       swap: { type: "number", description: "MB, containers only" },
-      onboot: { type: "boolean" },
-      tags: { type: "array", items: { type: "string" } },
-      notes: { type: "string" },
+      onboot: { type: "boolean", description: "Start with the server" },
+      tags: { type: "array", items: { type: "string" }, description: "All its tags: what is not listed goes" },
+      notes: { type: "string", description: "The guest's notes, whole" },
       disks: { type: "object", description: "Disk key → its new size in GB, larger than now" },
     },
     required: ["guest"],
@@ -1139,7 +1157,7 @@ const pveFull: (Omit<Tool, "level" | "effect"> & { effect?: Tool["effect"] })[] 
     title: "Copy a Proxmox guest",
     description: "Makes a copy of a container or virtual machine as a new guest, with new network cards. A container is copied only while it is stopped, or from a template; from a template the copy may be `linked` (shares its disks: made in seconds). `vmid` must be free — proxmox_container_options gives the next one. Copying disks takes minutes: expect a running job and ask job_get.",
     effect: "change",
-    input: { ...GUEST, vmid: { type: "number" }, name: { type: "string", description: "The copy's name (a container's host name)" }, linked: { type: "boolean", description: "From a template only; false by default" }, storage: { type: "string" }, pool: { type: "string" }, start: { type: "boolean" } },
+    input: { ...GUEST, vmid: { type: "number", description: "The new guest's number; a free one of the range by default" }, name: { type: "string", description: "The copy's name (a container's host name)" }, linked: { type: "boolean", description: "From a template only; false by default" }, storage: { type: "string", description: "Where a full copy's disks go; the original's by default. Not for a linked one" }, pool: { type: "string", description: "The new guest's pool" }, start: { type: "boolean", description: "Start it when it is made" } },
     required: ["guest", "vmid", "name"],
     run: (args, caller) =>
       wrap(async () => {
@@ -1158,7 +1176,7 @@ const pveFull: (Omit<Tool, "level" | "effect"> & { effect?: Tool["effect"] })[] 
     effect: "change",
     input: {
       ...SERVER,
-      node: { type: "string" },
+      node: { type: "string", description: "The node, as proxmox_container_options lists them; the first by default" },
       vmid: { type: "number", description: "The new guest's number; proxmox_container_options gives the next free one" },
       hostname: { type: "string", description: "Its name and host name: lowercase Latin letters, digits and -" },
       source: { type: "string", description: "A disk image or a disc, as proxmox_container_options lists them for the node" },
@@ -1166,7 +1184,7 @@ const pveFull: (Omit<Tool, "level" | "effect"> & { effect?: Tool["effect"] })[] 
       bridge: { type: "string", description: "The network bridge, usually vmbr0" },
       pool: { type: "string", description: "Required when the token may make guests only inside a pool" },
       disk: { type: "number", description: "GB, 2–4096; a disk image's disk is made this large" },
-      cores: { type: "number" },
+      cores: { type: "number", description: "Processor cores" },
       memory: { type: "number", description: "MB, at least 256" },
       address: { type: "string", description: "A fixed address with its mask, e.g. 192.168.1.50/24; left out — from the router" },
       gateway: { type: "string", description: "With a fixed address: the router's address" },
@@ -1197,11 +1215,11 @@ const pveFull: (Omit<Tool, "level" | "effect"> & { effect?: Tool["effect"] })[] 
     input: {
       ...SERVER,
       kind: { type: "string", enum: ["import", "iso"], description: "import — a disk image for new virtual machines; iso — an installation disc" },
-      node: { type: "string" },
-      storage: { type: "string" },
+      node: { type: "string", description: "The node to keep it on; the first by default" },
+      storage: { type: "string", description: "The storage, as proxmox_images says which may take it" },
       image: { type: "string", description: "A cloud image's id (debian-13, ubuntu-24.04, …); kind import" },
       url: { type: "string", description: "http or https" },
-      checksum: { type: "string" },
+      checksum: { type: "string", description: "The file's published SHA-256 or SHA-512: Proxmox compares it. A known cloud image has its own" },
     },
     required: ["kind", "node", "storage"],
     run: (args, caller) =>
@@ -1221,7 +1239,7 @@ const pveFull: (Omit<Tool, "level" | "effect"> & { effect?: Tool["effect"] })[] 
     effect: "change",
     input: {
       ...SERVER,
-      node: { type: "string" },
+      node: { type: "string", description: "The node, as proxmox_container_options lists them; the first by default" },
       vmid: { type: "number", description: "The new guest's number; proxmox_container_options gives the next free one" },
       hostname: { type: "string", description: "Lowercase Latin letters, digits and -" },
       template: { type: "string", description: "As proxmox_container_options lists them for the node" },
@@ -1229,7 +1247,7 @@ const pveFull: (Omit<Tool, "level" | "effect"> & { effect?: Tool["effect"] })[] 
       bridge: { type: "string", description: "The network bridge, usually vmbr0" },
       pool: { type: "string", description: "Required when the token may make guests only inside a pool" },
       disk: { type: "number", description: "GB, 2–4096" },
-      cores: { type: "number" },
+      cores: { type: "number", description: "Processor cores" },
       memory: { type: "number", description: "MB, at least 256" },
       address: { type: "string", description: "A fixed address with its mask, e.g. 192.168.1.50/24; left out — from the router" },
       gateway: { type: "string", description: "With a fixed address: the router's address" },
@@ -1367,7 +1385,7 @@ const ctOperate: Omit<Tool, "level" | "effect">[] = [
     name: "container_power",
     title: "Start, stop or restart a container or virtual machine",
     description: "Starts, stops or restarts a container or virtual machine of this server. A stop asks the system inside first and stops it by force after half a minute.",
-    input: { ...INSTANCE, action: { type: "string", enum: ["start", "stop", "restart"] } },
+    input: { ...INSTANCE, action: { type: "string", enum: ["start", "stop", "restart"], description: "start, stop (the system inside is asked, then forced after 30 s) or restart" } },
     required: ["container", "action"],
     run: (args, caller) =>
       wrap(async () => {
@@ -1437,7 +1455,7 @@ const ctFull: (Omit<Tool, "level" | "effect"> & { effect?: Tool["effect"] })[] =
     title: "Change the limits of a container or virtual machine",
     description: "Sets how many processor cores and how much memory a container or virtual machine may use (0 — no limit), its disk (GB: a container's limit, 0 taking it away, only in a place with containerDiskLimit; a virtual machine's disk only grows), whether it starts with the server, and — for a container — nesting (Docker inside needs it). Applied at once; a running virtual machine's memory can only be lowered.",
     effect: "change",
-    input: { ...INSTANCE, cores: { type: "number" }, memory: { type: "number", description: "MB" }, disk: { type: "number", description: "GB" }, startsWithServer: { type: "boolean" }, nesting: { type: "boolean" } },
+    input: { ...INSTANCE, cores: { type: "number", description: "Processor cores, 0 — all of them" }, memory: { type: "number", description: "Memory in MB" }, disk: { type: "number", description: "Disk size in GB" }, startsWithServer: { type: "boolean", description: "Start it when the server starts" }, nesting: { type: "boolean", description: "Let containers run inside it; Docker needs this" } },
     required: ["container"],
     run: (args, caller) =>
       wrap(async () => {
@@ -1484,7 +1502,7 @@ const ctFull: (Omit<Tool, "level" | "effect"> & { effect?: Tool["effect"] })[] =
     name: "container_snapshot_restore",
     title: "Put a container or virtual machine back to a snapshot",
     description: "Puts a container or virtual machine back as it was in one of its snapshots (`container` lists them). What changed after it is LOST; a running one is stopped for it and started again.",
-    input: { ...INSTANCE, snapshot: { type: "string" } },
+    input: { ...INSTANCE, snapshot: { type: "string", description: "The snapshot's name, as `container` lists them" } },
     required: ["container", "snapshot"],
     run: (args, caller) =>
       wrap(async () => {
@@ -1497,8 +1515,8 @@ const ctFull: (Omit<Tool, "level" | "effect"> & { effect?: Tool["effect"] })[] =
   {
     name: "container_snapshot_delete",
     title: "Delete a snapshot of a container or virtual machine",
-    description: "Deletes one snapshot of a container or virtual machine.",
-    input: { ...INSTANCE, snapshot: { type: "string" } },
+    description: "Deletes one snapshot of a container or virtual machine of this server; the instance itself stays as it is. What was kept only in that snapshot cannot be brought back.",
+    input: { ...INSTANCE, snapshot: { type: "string", description: "The snapshot's name, as `container` lists them" } },
     required: ["container", "snapshot"],
     run: (args, caller) =>
       wrap(async () => {
@@ -1524,7 +1542,7 @@ const ctFull: (Omit<Tool, "level" | "effect"> & { effect?: Tool["effect"] })[] =
     name: "container_remove",
     title: "Delete a container or virtual machine",
     description: "Stops and deletes a container or virtual machine of this server with its snapshots and everything inside; its machine leaves Hata's list. It cannot be undone: only a backup brings it back. `name` must repeat its name exactly, as a check that it is the right one.",
-    input: { ...INSTANCE, name: { type: "string" } },
+    input: { ...INSTANCE, name: { type: "string", description: "Its name repeated: nothing is deleted when it differs from `container`" } },
     required: ["container", "name"],
     run: (args, caller) =>
       wrap(async () => {
@@ -1543,16 +1561,444 @@ export function happened(entry: { code: string; app?: string; user?: string; det
   return text.replace(/\{(\w+)\}/g, (_, name: string) => (name === "app" ? entry.app : name === "user" ? entry.user : name === "target" ? entry.detail : "") ?? "").trim();
 }
 
+// --- The rest of the house: the network, names, blocking, shares, arrays, Docker's room, packages, Home Assistant ---
+
+/** A question of a tool on the machine it names, or on this server when it names none */
+const placeOf = (args: Record<string, unknown>): string => (typeof args.machine === "string" && args.machine.trim() ? machineOf(args).id : "");
+const OPTIONAL_MACHINE = { machine: { type: "string", description: "A machine's name or id, as `machines` gives it. Leave it out for this server." } };
+const TARGET = {
+  target: {
+    type: "object",
+    description: 'Where it leads, one of: {"kind":"container","name":"web"} (a container or virtual machine of this server, as `containers` lists it), {"kind":"guest","host":"<Proxmox server id>","guest":"lxc/243"}, {"kind":"machine","id":"<machine id>"}, {"kind":"machineApp","id":"<machine id>","app":"radicale"}, {"kind":"address","host":"192.168.1.40"} (anything else of the home network).',
+  },
+};
+const HA_SERVER = { server: { type: "string", description: "The Home Assistant server's name or id, as `home_assistant` gives it" } };
+
+function haServerOf(args: Record<string, unknown>) {
+  const asked = text(args, "server").toLowerCase();
+  const s = haServers().find((x) => x.id === asked || x.name.toLowerCase() === asked);
+  if (!s) throw new ToolError(`There is no Home Assistant server "${asked}". They are: ${haServers().map((x) => x.name).join(", ") || "none"}.`);
+  return s;
+}
+
+/** What an agent is never let to do to the house from afar, however it is asked: this is for the person, at the door */
+const HA_BY_HAND = (e: { domain: string; kind: string }, action: string): boolean => action === "unlock" || (e.domain === "cover" && action === "open" && ["garage", "door", "gate"].includes(e.kind));
+
+/** The listener of HTTPS belongs to the server: it tells how it stands */
+let httpsLook: () => Promise<{ listening: boolean; error: string; names: string[] }> = async () => ({ listening: false, error: "", names: [] });
+export const tellHttps = (look: typeof httpsLook): void => void (httpsLook = look);
+
+const homeRead: Omit<Tool, "level" | "effect">[] = [
+  {
+    name: "network",
+    title: "The server's network",
+    description: "The server's network interfaces: kind (cable, Wi-Fi, USB modem), whether each is up, its addresses, gateway and DNS, whether the address comes from the router, which is the main way to the internet and which a spare one, whether the internet is reached through it, and which is marked as the internet side (nothing of the server answers there). For \"why is there no internet\" and \"what is the server's address\". Changing any of it stays in the web UI: a wrong change takes the server off the network.",
+    input: {},
+    run: () =>
+      wrap(async () => {
+        const r = await networkReport();
+        return {
+          interfaces: r.nics.map((n) => ({
+            name: n.name,
+            kind: n.kind,
+            ...(n.product ? { device: n.product } : {}),
+            up: n.up,
+            addresses: n.addresses,
+            addresses6: n.addresses6,
+            fromTheRouter: n.dynamic,
+            gateway: n.gateway,
+            dns: n.dns,
+            internet: n.internet,
+            internetReached: n.online,
+            internetSide: n.outside,
+            ...(n.public ? { publicAddress: n.public } : {}),
+            ...(n.speed ? { speedMbit: n.speed } : {}),
+            managedBy: n.manager,
+            ...(n.port ? { partOfBridge: n.port } : {}),
+            ...(n.wifi ? { wifi: { network: n.wifi.ssid, signal: n.wifi.signal, ...(n.wifi.hotspot ? { accessPoint: { name: n.wifi.hotspot.ssid, band: n.wifi.hotspot.band, devices: n.wifi.hotspot.clients.length } } : {}) } } : {}),
+          })),
+        };
+      }),
+  },
+  {
+    name: "dns_server",
+    title: "Hata's DNS server",
+    description: "Hata as the home's DNS server: whether it is on and where it listens (and why not, when port 53 is held by something else), which servers it asks for the rest and how they answer, its own names (`records`), the numbers of what it answered, and which devices ask it. A device that is not listed uses another DNS server: then nothing of Hata's names or blocking reaches it. Turning the server on or off and choosing the servers stay in the web UI (Settings → DNS server).",
+    input: {},
+    run: () =>
+      wrap(() => {
+        const r = dnsReport("");
+        return { enabled: r.settings.enabled, upstream: r.settings.upstream, encrypted: r.settings.doh, listening: r.listening, port: r.port, failed: r.failed, namesAnsweredHere: r.domains, records: r.settings.records, asks: r.upstreams.map((u) => ({ server: u.kind === "doh" ? u.url : u.host, kind: u.kind, lastAnswer: u.ok ? when(u.ok) : null, lastFailure: u.fail ? when(u.fail) : null, error: u.fail > u.ok ? u.error : "" })), sendsBackHere: r.looping, numbers: r.stats, devices: r.clients.map((c) => ({ address: c.address, questions: c.count, last: when(c.last) })) };
+      }),
+  },
+  {
+    name: "ad_blocking",
+    title: "Ad blocking",
+    description: "Blocking by name in Hata's DNS server: on, off or paused, what a blocked name gets, each list (`id`, how many names and rules, when updated, why it failed), the person's own rules, what they got wrong, the last day's numbers and the devices with whether blocking applies to them. What each device asked is not here: it is private, see `dns_queries`. To learn why one name is or is not blocked use `ad_blocking_check`.",
+    input: {},
+    run: () =>
+      wrap(() => {
+        const r = blockReport(dnsClients());
+        const s = r.settings;
+        return {
+          enabled: s.enabled,
+          dnsServerOn: settings.dns.enabled,
+          paused: r.paused,
+          ...(r.paused ? { pausedUntil: when(s.pausedUntil) } : {}),
+          answer: s.mode === "nxdomain" ? "no such name (NXDOMAIN)" : "the address 0.0.0.0",
+          updatedDaily: s.update,
+          lists: r.lists.map((l) => ({ id: l.id, name: l.name, url: l.url, enabled: l.enabled, exceptions: l.allow, counts: l.counts, updated: l.updated ? when(l.updated) : null, error: l.error })),
+          ownRules: s.rules,
+          ownRulesNotUnderstood: r.own.trouble,
+          namesInUse: r.names,
+          lastDay: r.day,
+          memoryOfTheListsMB: Math.round(r.memory.lists / 1e5) / 10,
+          devices: r.devices.map((d) => ({ address: d.address, name: d.name, blocked: d.on, questions: d.count, namesBlocked: d.blocked })),
+        };
+      }),
+  },
+  {
+    name: "ad_blocking_check",
+    title: "Why a name is or is not blocked",
+    description: "Says what would happen to one name now: which rule of which list blocks, allows or answers it, or that nothing says anything about it. Use it when a site or an app does not work, before suggesting `ad_blocking_name`. `client` — the address of the device asking, because a rule may hold for some devices only.",
+    input: { name: { type: "string", description: "The name, like ads.example.com" }, client: { type: "string", description: "The device's address; leave it out for a device with nothing special" } },
+    required: ["name"],
+    run: (args) => wrap(() => checkName(args.name, args.client, TYPE.A)),
+  },
+  {
+    name: "domain_names",
+    title: "Names under the domain",
+    description: "The names under Hata's domain that lead to something other than an app of this server: a container, a Proxmox guest, a machine, an app of a machine, or any address of the home network. For each: what it leads to, the address it reaches now, or why not, and whether Hata's sign-in stands in front of it. Also the labels apps of this server answer to, since one label means one thing, and the targets a new name can have.",
+    input: {},
+    run: () =>
+      wrap(async () => {
+        const r = await domainsReport("en");
+        return { domain: siteDomain(), localName: localDomain(), names: r.names.map((n) => ({ label: n.label, leadsTo: n.title, kind: n.kind, target: n.target, port: n.port, speaksHttps: n.https, signIn: n.protect || n.inherits, reachesNow: n.at, whyNot: n.away })), labelsOfApps: r.apps, targets: r.targets };
+      }),
+  },
+  {
+    name: "ports",
+    title: "Ports passed on",
+    description: "The ports of this server that lead to something else: a container, a virtual machine, a Proxmox guest, a machine or any address of the home network. For each: the protocol, where it leads and whether that answers now, and whether it is open on the internet side.",
+    input: {},
+    run: () =>
+      wrap(async () => {
+        const r = await domainsReport("en", await forwardsReport());
+        return { ports: r.forwards.map((f) => ({ port: f.port, protocol: f.proto, leadsTo: f.title, kind: f.kind, target: f.target, targetPort: f.to, openOnTheInternetSide: f.outside, note: f.note, reachesNow: f.at, whyNot: f.away })) };
+      }),
+  },
+  {
+    name: "https_state",
+    title: "HTTPS and the domain",
+    description: "How Hata is reached: without HTTPS, behind the person's own proxy, or with certificates of its own from Let's Encrypt; the domain and the name on the home network; each certificate and when it runs out, the last error, and the way a certificate for all the names is confirmed. For \"why does the browser complain\". Changing it stays in the web UI.",
+    input: {},
+    run: () =>
+      wrap(async () => {
+        const w = wildcardReport();
+        const now = await httpsLook();
+        return { mode: settings.https.mode, domain: siteDomain(), localName: localDomain(), listeningOnHttps: now.listening, error: now.error, certificates: certificateStates(now.names), wildcard: { via: w.via, provider: w.provider, tokenSaved: w.saved } };
+      }),
+  },
+  {
+    name: "shares",
+    title: "Network folders",
+    description: "The folders of this server shared over the network (SMB): each one's path, who may read or write it by the Hata user's name, what a guest may, and whether the folder is there. Also whether Samba runs, why not, the names the server is reached by, and which users cannot connect yet because Samba has not learned their password (it does at their next sign-in to Hata). Sharing is changed in the web UI.",
+    input: {},
+    run: () =>
+      wrap(async () => {
+        const r = await listShares();
+        const nameOf = (id: string) => r.users.find((u) => u.id === id)?.name ?? id;
+        return { samba: r.tool === "ok" ? (r.running ? "running" : "stopped") : "not installed", error: r.error, reachedAs: r.hosts, shares: r.shares.map((s) => ({ name: s.name, path: s.path, missing: s.missing, guest: s.guest, users: Object.fromEntries(Object.entries(s.users).map(([id, access]) => [nameOf(id), access])), ...(s.timeMachine ? { timeMachine: true } : {}) })), usersWaitingForSignIn: r.users.filter((u) => u.allowed && !u.ready).map((u) => u.name), usersKeptOut: r.users.filter((u) => !u.allowed).map((u) => u.name) };
+      }),
+  },
+  {
+    name: "network_places",
+    title: "Network places",
+    description: "The folders of other machines mounted on this server (SMB, NFS, SFTP, WebDAV, FTP): where each is mounted here, whether it is mounted and its server answers, and how much room it has. For an app or a backup whose folder has gone away. Sign-ins are never shown, and places are added in the web UI.",
+    input: {},
+    run: () => wrap(async () => ({ places: (await listPlaces()).places.map((p) => ({ name: p.name, kind: p.kind, server: p.host, folder: p.folder, mounted: p.mounted, serverAway: p.away, state: p.state, ...(p.total ? { freeGB: Math.round(p.free / 1e8) / 10, totalGB: Math.round(p.total / 1e8) / 10 } : {}) })) })),
+  },
+  {
+    name: "disk_arrays",
+    title: "Arrays and protection from a disk failure",
+    description: "How the disks are protected. `protection` is Hata's SnapRAID: its disks, the last sync and check, how many files changed and are not protected yet, damage found, why a sync is held. `pools` are the arrays the system already has (md RAID, ZFS, btrfs over several disks): state, each disk's state, a check running, errors. For the health of the disks themselves use `disks`. Disks are formatted and arrays changed only in the web UI.",
+    input: {},
+    run: () =>
+      wrap(() => {
+        const a = arrayReport();
+        return { protection: { on: a.on, installed: a.tool === "ok", parity: a.settings.parity, secondParity: a.settings.parity2 || null, data: a.settings.data, disksMissing: a.missing, lastSync: a.lastSync, lastCheck: a.lastScrub, changes: a.diff, held: a.held, errors: a.errors, trouble: a.trouble, filesGone: a.gone, running: a.running }, pools: poolsReport().pools };
+      }),
+  },
+  {
+    name: "docker_space",
+    title: "Room Docker takes",
+    description: "The images and volumes of Docker with their sizes and who uses each, unused ones and the largest first, and what builds left behind. An unused image an app's compose file names is marked: it would be downloaded again. For \"what takes up the disk\" after `disks`. On this server, or on a machine. Removing them stays in the web UI (Settings → Docker).",
+    input: OPTIONAL_MACHINE,
+    run: (args) => wrap(() => dockerSpace(placeOf(args) || undefined)),
+  },
+  {
+    name: "system_updates",
+    title: "Updates of the system's packages",
+    description: "What the last check found: the packages of the operating system with a newer version (security ones marked) and whether the system asks to be restarted. On this server, or on a machine. It says when it last looked: `system_updates_check` looks again. Not about apps (`apps_list`) or Hata itself (`overview`).",
+    input: OPTIONAL_MACHINE,
+    run: (args) => wrap(() => packageUpdates(placeOf(args))),
+  },
+  {
+    name: "remote_access",
+    title: "Remote access",
+    description: "How this server is reached from outside the home: Tailscale (state, its name and addresses in the private network, which home networks it offers and whether they are approved, when the sign-in runs out) and WireGuard (whether the server part is on, its port and address, the devices by name and whether each may reach the home network; whether this server connects to another). Keys and sign-in links are never shown, and all of it is set up in the web UI.",
+    input: {},
+    run: () =>
+      wrap(async () => {
+        const port = listenAddress().port;
+        const [ts, wg] = await Promise.all([tailscaleReport(port), wireguardReport(port)]);
+        return { tailscale: { state: ts.state, version: ts.version, name: ts.name ?? "", addresses: ts.addresses ?? [], offered: ts.offered, approved: ts.approved ?? [], signInEnds: ts.expires ? when(ts.expires) : null }, wireguard: { installed: wg.tool === "ok", server: { enabled: wg.server.enabled, running: wg.server.running, port: wg.server.port, address: wg.server.address, devices: wg.server.devices.map((d) => ({ name: d.name, address: d.address, reachesHomeNetwork: d.lan })) }, connectsToAnother: wg.client.enabled } };
+      }),
+  },
+  {
+    name: "disc_images",
+    title: "Disc images of this server",
+    description: "The installation discs (.iso) kept for virtual machines of this server: name, the place each lives in, its size. A virtual machine made from one is installed by the person on its screen, in the web UI. Discs are added there too.",
+    input: {},
+    run: () => wrap(async () => ({ discs: (await containersReport()).discs })),
+  },
+  {
+    name: "home_assistant",
+    title: "Home Assistant servers",
+    description: "The Home Assistant servers Hata is connected to: whether each answers, its version, how many entities it has, updates waiting and devices with a low battery. Its devices are in `home_assistant_devices`.",
+    input: {},
+    run: () => haServers().map(({ url: _url, ...s }) => s),
+  },
+  {
+    name: "home_assistant_devices",
+    title: "Devices of a Home Assistant server",
+    description: "The lights, switches, sensors, locks, covers and the rest of a Home Assistant server: name, room, state, unit, and `actions` — what `home_assistant_control` can do with it. Filter by a word in the name or room, or by `domain` (light, switch, sensor, climate, cover, lock…), since a house has hundreds.",
+    input: { ...HA_SERVER, find: { type: "string", description: "A word in the device's name, room or id" }, domain: { type: "string", description: "Only this kind: light, switch, sensor, climate, cover, lock…" }, limit: { type: "number", description: "At most this many, 100 by default" } },
+    required: ["server"],
+    run: (args) =>
+      wrap(() => {
+        const s = haServerOf(args);
+        const find = typeof args.find === "string" ? args.find.toLowerCase() : "";
+        const found = haEntities(s.id).filter((e) => (!args.domain || e.domain === args.domain) && (!find || `${e.name} ${e.area} ${e.id}`.toLowerCase().includes(find)));
+        const limit = Math.min(500, Math.max(1, Number(args.limit) || 100));
+        return { total: found.length, devices: found.slice(0, limit).map((e) => ({ id: e.id, name: e.name, room: e.area, kind: e.kind, state: e.state, unit: e.unit, actions: e.actions, ...(e.brightness === undefined ? {} : { brightness: e.brightness }), ...(e.target === undefined ? {} : { target: e.target }), ...(e.current === undefined ? {} : { current: e.current }) })) };
+      }),
+  },
+];
+
+const homeOperate: Omit<Tool, "level" | "effect">[] = [
+  {
+    name: "ad_blocking_pause",
+    title: "Pause ad blocking",
+    description: "Stops blocking for every device for a while, and it comes back by itself; 0 ends a pause now. For \"is it the blocking that breaks this site\": pause, try, and resume. A name that turns out to be needed is better allowed with `ad_blocking_name`.",
+    input: { minutes: { type: "number", description: "For how long, up to a week; 0 — resume now" } },
+    required: ["minutes"],
+    run: (args, caller) =>
+      wrap(() => {
+        pauseBlock(args.minutes, caller.user);
+        return { paused: Number(args.minutes) > 0, minutes: Number(args.minutes) };
+      }),
+  },
+  {
+    name: "ad_blocking_name",
+    title: "Allow or block a name",
+    description: "Adds one of the person's own rules for a name and everything under it, which beats every list: `allow` true lets it through, false blocks it. The opposite rule for that name goes. Look with `ad_blocking_check` first, and say what you did: a blocked name may stop an app.",
+    input: { name: { type: "string", description: "The name, like ads.example.com" }, allow: { type: "boolean", description: "true — let it through; false — block it" } },
+    required: ["name", "allow"],
+    run: (args, caller) => wrap(() => ({ rule: ruleForName(args.name, args.allow === true, caller.user) })),
+  },
+  {
+    name: "home_assistant_control",
+    title: "Control a Home Assistant device",
+    description: "Does one thing with a device: `toggle`, `brightness` (value 0–100), `open`, `close`, `stop`, `lock`, `run`, `press`, `playPause`, `start`, `dock`, `temperature` (value in degrees). `home_assistant_devices` lists what each device can do. Unlocking a lock and opening a garage, a door or a gate are not done from here, whatever the request: the person does that in the web UI.",
+    input: { ...HA_SERVER, entity: { type: "string", description: "The device's id, like light.kitchen" }, action: { type: "string", description: "One of the device's `actions`" }, value: { type: "number", description: "For `brightness` and `temperature`" } },
+    required: ["server", "entity", "action"],
+    run: (args, caller) =>
+      wrap(async () => {
+        const s = haServerOf(args);
+        const entity = text(args, "entity");
+        const action = text(args, "action");
+        const known = haEntities(s.id).find((e) => e.id === entity);
+        if (known && HA_BY_HAND(known, action)) throw new ToolError(`"${action}" on ${known.name} is left to the person, in the web UI: it opens the house.`);
+        const after = await haAct(s.id, entity, action, args.value);
+        record("ha.control", { user: caller.user, detail: `${after.name}: ${action}` });
+        return { name: after.name, state: after.state, ...(after.brightness === undefined ? {} : { brightness: after.brightness }) };
+      }),
+  },
+  {
+    name: "system_updates_check",
+    title: "Look for system updates",
+    description: "Asks the package manager what is newer now (`apt-get update` or `dnf check-update`: nothing is installed) and answers as `system_updates` does. May take a minute. On this server, or on a machine.",
+    input: OPTIONAL_MACHINE,
+    run: (args) => wrap(() => checkUpdates(placeOf(args))),
+  },
+];
+
+const homeFull: (Omit<Tool, "level" | "effect"> & { effect?: Tool["effect"] })[] = [
+  {
+    name: "dns_queries",
+    title: "What the devices asked",
+    // it changes nothing, but it says what each person of the house visits: asked for each time, never read in passing
+    effect: "change",
+    description: "The last names the devices of the house asked Hata for, newest first, with what happened to each and the rule that decided it, and the names blocked most often. This is private: it shows what each person visits, so read it only for the question at hand (a site that does not work, a device that behaves strangely), narrow it down with `find` or `client`, and do not repeat more than the question needs. Empty when the person switched keeping it off.",
+    input: { find: { type: "string", description: "A piece of the name" }, client: { type: "string", description: "Only this device's address" }, outcome: { type: "string", description: "Only: blocked, allowed, rewritten, passed, own, failed" }, limit: { type: "number", description: "At most this many, 50 by default, 500 at most" } },
+    run: (args) => wrap(() => ({ keptAtAll: settings.dnsBlock.log, questions: blockLog({ q: String(args.find ?? ""), client: String(args.client ?? ""), outcome: String(args.outcome ?? ""), limit: Number(args.limit) || 50 }).map((e) => ({ ...e, at: when(e.at) })), blockedMost: blockReport(dnsClients()).top })),
+  },
+  {
+    name: "ad_blocking_switch",
+    title: "Turn ad blocking on or off",
+    effect: "change",
+    description: "Turns blocking by name on or off for good, for every device; lists stay kept. For a while, `ad_blocking_pause` is the better choice. It works only while the DNS server is on and devices ask it: see `dns_server`.",
+    input: { on: { type: "boolean", description: "true — on; false — off" } },
+    required: ["on"],
+    run: (args, caller) =>
+      wrap(async () => {
+        await setBlock({ enabled: args.on === true }, caller.user);
+        return { enabled: settings.dnsBlock.enabled };
+      }),
+  },
+  {
+    name: "ad_blocking_list_add",
+    title: "Add a blocking list",
+    effect: "change",
+    description: "Adds a list by its address and downloads it (a hosts file, a plain list of names, or AdGuard's syntax; the format is told by its lines). A large list blocks more, and now and then something needed: suggest it to the person first. `allow` true — a list of exceptions. `ad_blocking` says how it went a minute later.",
+    input: { url: { type: "string", description: "The list's https:// address" }, name: { type: "string", description: "What to call it" }, allow: { type: "boolean", description: "A list of exceptions: what it names is let through" } },
+    required: ["url"],
+    run: (args, caller) =>
+      wrap(() => {
+        addList(args, caller.user);
+        return { added: true, note: "It is being downloaded: ad_blocking shows its numbers in a minute." };
+      }),
+  },
+  {
+    name: "ad_blocking_list_remove",
+    title: "Remove a blocking list",
+    effect: "change",
+    description: "Removes a list: what only it blocked is no longer blocked. `list` is the `id` from `ad_blocking`. The person's own rules stay.",
+    input: { list: { type: "string", description: "The list's id" } },
+    required: ["list"],
+    run: (args, caller) =>
+      wrap(() => {
+        removeList(text(args, "list"), caller.user);
+        return { removed: true };
+      }),
+  },
+  {
+    name: "ad_blocking_rules_set",
+    title: "Replace the own rules",
+    effect: "change",
+    description: "Replaces ALL of the person's own blocking rules with the text sent, one rule on a line, so read them from `ad_blocking` first and send them back with the change. `||ads.example^` blocks a name and all under it, `|ads.example^` only it, `@@||ok.example^` allows, `/^ad[0-9]+\\./` is a regular expression; `$client=192.168.1.20`, `$dnstype=AAAA`, `$dnsrewrite=192.168.1.5`, `$important` may follow. For one name `ad_blocking_name` is simpler. The answer lists the lines that were not understood.",
+    input: { text: { type: "string", description: "All the rules, one on a line" } },
+    required: ["text"],
+    run: (args, caller) =>
+      wrap(() => {
+        setRules(args.text, caller.user);
+        return { rules: settings.dnsBlock.rules.length, notUnderstood: blockReport(dnsClients()).own.trouble };
+      }),
+  },
+  {
+    name: "dns_record_add",
+    title: "Add a name to the DNS server",
+    effect: "change",
+    description: "Makes Hata's DNS server answer a name of the home network with an address: printer.lan → 192.168.1.40. Only devices that ask Hata get it (`dns_server` lists them).",
+    input: { name: { type: "string", description: "The name, like printer.lan" }, type: { type: "string", enum: ["A", "AAAA"], description: "A — an IPv4 address (the default), AAAA — IPv6" }, value: { type: "string", description: "The address" } },
+    required: ["name", "value"],
+    run: (args, caller) =>
+      wrap(() => {
+        addRecord({ name: args.name, type: args.type ?? "A", value: args.value }, caller.user);
+        return { records: settings.dns.records };
+      }),
+  },
+  {
+    name: "dns_record_remove",
+    title: "Remove a name from the DNS server",
+    effect: "change",
+    description: "Takes one of the names `dns_server` lists under `records` away: devices then ask the servers upstream for it.",
+    input: { name: { type: "string", description: "The name" }, type: { type: "string", enum: ["A", "AAAA"], description: "A by default" } },
+    required: ["name"],
+    run: (args, caller) =>
+      wrap(() => {
+        removeRecord(text(args, "name"), args.type === "AAAA" ? "AAAA" : "A", caller.user);
+        return { records: settings.dns.records };
+      }),
+  },
+  {
+    name: "domain_name_set",
+    title: "Make or change a name under the domain",
+    effect: "change",
+    description: "Makes `label`.<domain> lead to a target through Hata, or changes the name when the label is there. `protect` true puts Hata's sign-in in front of it: anything not meant for everybody on the network should have it. A label an app or another name answers to is refused. Names exist only when somebody wants them: make one when the person asked.",
+    input: { label: { type: "string", description: "One label, like git" }, ...TARGET, port: { type: "number", description: "The target's web port" }, https: { type: "boolean", description: "The target speaks HTTPS itself" }, protect: { type: "boolean", description: "Hata's sign-in in front of it" } },
+    required: ["label", "target", "port"],
+    run: (args, caller) =>
+      wrap(() => {
+        const label = text(args, "label").toLowerCase();
+        const made = settings.names.some((n) => n.label === label) ? changeName(label, args, caller.user) : addName(args, caller.user);
+        return { label: made.label, address: siteDomain() ? `${made.label}.${siteDomain()}` : localDomain() ? `${made.label}.${localDomain()}` : null };
+      }),
+  },
+  {
+    name: "domain_name_remove",
+    title: "Remove a name under the domain",
+    effect: "change",
+    description: "Takes a name of `domain_names` away, and it stops answering at once; what it led to stays as it is.",
+    input: { label: { type: "string", description: "The label" } },
+    required: ["label"],
+    run: (args, caller) =>
+      wrap(() => {
+        removeName(text(args, "label"), caller.user);
+        return { removed: true };
+      }),
+  },
+  {
+    name: "port_set",
+    title: "Pass a port on",
+    effect: "change",
+    description: "Makes a port of this server lead to a target, or changes it when the port is there; a port Hata or something else holds is refused. It is opened on the home network only: opening a port to the internet is the person's own step in the web UI.",
+    input: { port: { type: "number", description: "The port of this server" }, proto: { type: "string", enum: ["tcp", "udp", "both"], description: "tcp by default" }, ...TARGET, to: { type: "number", description: "The target's port; the same by default" }, note: { type: "string", description: "What it is for" } },
+    required: ["port", "target"],
+    run: (args, caller) =>
+      wrap(async () => {
+        const port = Number(args.port);
+        const asked = { ...args, to: args.to ?? port, proto: args.proto ?? "tcp" };
+        const existing = settings.forwards.find((f) => f.port === port);
+        // an agent never opens the house to the internet, and a change of its own does not close what the person opened
+        const made = existing ? await changeForward(port, { ...asked, outside: existing.outside }, caller.user) : await addForward({ ...asked, outside: false }, caller.user);
+        return { port: made.port, protocol: made.proto, targetPort: made.to, openOnTheInternetSide: made.outside };
+      }),
+  },
+  {
+    name: "port_remove",
+    title: "Close a port passed on",
+    effect: "change",
+    description: "Stops passing a port of `ports` on, and it is closed at once; what it led to stays as it is.",
+    input: { port: { type: "number", description: "The port" } },
+    required: ["port"],
+    run: (args, caller) =>
+      wrap(async () => {
+        await removeForward(Number(args.port), caller.user);
+        return { removed: true };
+      }),
+  },
+  {
+    name: "system_update",
+    title: "Update the system's packages",
+    effect: "change",
+    description: "Installs newer versions of the operating system's packages, on this server or on a machine: the ones named, or all with an empty list. Services whose packages change are restarted, and a new kernel takes a restart of the machine. Say what will be updated first; a long job is handed out for `job_get`.",
+    input: { ...OPTIONAL_MACHINE, packages: { type: "array", items: { type: "string" }, description: "Package names from `system_updates`; empty or left out — all of them" } },
+    run: (args, caller) => wrap(async () => settle(upgradeSystem(Array.isArray(args.packages) ? args.packages : [], caller.user, placeOf(args)))),
+  },
+];
+
 export const TOOLS: Tool[] = [
-  ...[...read, ...machineRead, ...pveRead, ...ctRead].map((tool) => ({ ...tool, level: "read" as const, effect: "read" as const })),
-  ...[...operate, ...machineOperate, ...pveOperate, ...ctOperate].map((tool) => ({ ...tool, level: "operate" as const, effect: "change" as const })),
-  ...[...full, ...machineFull, ...pveFull, ...ctFull].map((tool) => ({ ...tool, level: "full" as const, effect: tool.effect ?? ("destroy" as const) })),
+  ...[...read, ...machineRead, ...pveRead, ...ctRead, ...homeRead].map((tool) => ({ ...tool, level: "read" as const, effect: "read" as const })),
+  ...[...operate, ...machineOperate, ...pveOperate, ...ctOperate, ...homeOperate].map((tool) => ({ ...tool, level: "operate" as const, effect: "change" as const })),
+  ...[...full, ...machineFull, ...pveFull, ...ctFull, ...homeFull].map((tool) => ({ ...tool, level: "full" as const, effect: tool.effect ?? ("destroy" as const) })),
 ];
 
 const LEVEL_WORDS: Record<Level, string> = {
   read: "It can look at everything listed in the tools and change nothing.",
-  operate: "It can look, start, stop, restart and update apps — here and on the other machines — install apps from the store, take snapshots, wake a machine up, start, shut down, restart, snapshot and back up the guests of Proxmox, and the containers and virtual machines of this server. It cannot change compose files, remove apps, restore snapshots, move apps, restart machines, or stop, roll back, delete or make Proxmox guests.",
-  full: "It can also change compose files, install apps from a compose file, remove apps, restore snapshots, move apps between machines, restart or shut down machines, and change the settings of Proxmox guests (processors, memory, disks made larger), stop them by force, roll them back to a snapshot or restore them from a backup, delete them and their snapshots, and make new containers there; and here, make, limit, roll back, restore and delete containers and virtual machines of this server.",
+  operate: "It can look, pause ad blocking and allow or block a name, switch Home Assistant's devices, look for system updates, start, stop, restart and update apps — here and on the other machines — install apps from the store, take snapshots, wake a machine up, start, shut down, restart, snapshot and back up the guests of Proxmox, and the containers and virtual machines of this server. It cannot change compose files, remove apps, restore snapshots, move apps, restart machines, or stop, roll back, delete or make Proxmox guests.",
+  full: "It can also change names under the domain, ports passed on, DNS names and blocking lists and rules, read what the devices asked the DNS server, update the system's packages, change compose files, install apps from a compose file, remove apps, restore snapshots, move apps between machines, restart or shut down machines, and change the settings of Proxmox guests (processors, memory, disks made larger), stop them by force, roll them back to a snapshot or restore them from a backup, delete them and their snapshots, and make new containers there; and here, make, limit, roll back, restore and delete containers and virtual machines of this server.",
 };
 
 /** What the model is told when it connects */
@@ -1564,6 +2010,7 @@ export function instructions(caller: Caller): string {
     "Besides this server there may be other machines it looks after (`machines`): their apps have tools of their own (`machine_apps`, `machine_app_*`), and an app can be moved between them (`app_move`).",
     "There may also be Proxmox VE servers (`proxmox`, `proxmox_guests`, `proxmox_*`): what Hata may do with their containers and virtual machines is what the server's API token allows — `may` of each guest says it. A guest marked `machine` has Hata's client inside: its apps are reached with the machine_* tools. The guest marked `thisHata` is the one this server runs in: it is never shut down, stopped, rolled back or deleted from here.",
     "This server may also run system containers and virtual machines of its own with Incus (`containers`, `container_*`): like Proxmox guests, one marked `machine` has Hata's client inside, and its apps are reached with the machine_* tools. Installing Incus itself is the person's, in the web UI.",
+    "The rest of the house can be looked at too: `network`, `dns_server`, `ad_blocking`, `domain_names`, `ports`, `https_state`, `shares`, `network_places`, `disk_arrays`, `docker_space`, `system_updates`, `remote_access`, `disc_images`, `home_assistant`. Things that could cut the person off or open the house stay with the person in the web UI: the network itself, formatting disks, a port opened to the internet, unlocking a door.",
     "Start with `overview`. When an app does not work, `app_diagnose` gives its state, the tail of its log and the likely causes in one call.",
     "Operations that take long (install, update, backup) wait up to half a minute and then return a job that is still running: ask `job_get` until it is done or failed.",
     ...(caller.confirm ? ["Removing an app, restoring a snapshot, replacing a compose file and the other calls that can lose something (stopping, rolling back or deleting a Proxmox guest, among them) need the word of an administrator in Hata each time, for this access key. Such a call waits for it for half a minute; when it answers that nobody has allowed it yet, ask the person to open Hata and allow it, then repeat the call with the same arguments."] : []),

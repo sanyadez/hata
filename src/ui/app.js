@@ -88,6 +88,10 @@ const ICONS = {
   down: "M6 9l6 6 6-6",
   server: "M4 4h16v7H4zM4 13h16v7H4zM8 7.5h.01M8 16.5h.01M12 7.5h4M12 16.5h4",
   screen: "M3 4h18v12H3zM8 20h8M12 16v4",
+  users: "M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM2 21v-1a6 6 0 0 1 6-6h2a6 6 0 0 1 6 6v1M16 3.2a4 4 0 0 1 0 7.6M18 14.2a6 6 0 0 1 4 5.8v1",
+  plug: "M9 2v6M15 2v6M6 8h12v3a6 6 0 0 1-12 0V8zM12 17v5",
+  signpost: "M12 3v18M5 6h12l3 3-3 3H5V6zM8 21h8",
+  ban: "M12 3l7 3v5c0 4.6-2.9 8.3-7 10-4.1-1.7-7-5.4-7-10V6l7-3zM8.5 8.5l7 7",
   shield: "M12 3l7 3v5c0 4.6-2.9 8.3-7 10-4.1-1.7-7-5.4-7-10V6l7-3z",
   bulb: "M9 18h6M10 21h4M12 3a6 6 0 0 0-3.6 10.8c.7.6 1.1 1.3 1.1 2.2v.5h5V16c0-.9.4-1.6 1.1-2.2A6 6 0 0 0 12 3z",
   power: "M12 3v8M6.3 6.8a8 8 0 1 0 11.4 0",
@@ -130,8 +134,11 @@ let dict = {};
 let fallbackDict = {};
 
 const has = (key) => key in dict || key in fallbackDict;
+/** "{n} cores" with one of them, in English; Ukrainian's strings are written so that they need no such thing */
+const oneOf = (text, vars, lang) => (Number(vars.n) === 1 && lang === "en" ? text.replace(/\{n\} ((?:[a-z]+ )?)([a-z]+?)(ie)?s\b/, (_, word, stem, ie) => `{n} ${word}${stem}${ie ? "y" : ""}`) : text);
+
 function t(key, vars = {}) {
-  const text = dict[key] ?? fallbackDict[key] ?? key;
+  const text = oneOf(dict[key] ?? fallbackDict[key] ?? key, vars, state.lang);
   return text.replace(/\{(\w+)\}/g, (_, name) => (name in vars ? vars[name] : ""));
 }
 
@@ -337,12 +344,14 @@ function parseRoute() {
   if (parts[0] === "import" && isAdmin()) return { view: "import" };
   if (parts[0] === "terminal" && isAdmin()) return { view: "terminal" };
   if (parts[0] === "assistant" && isAdmin()) return { view: "assistant" };
-  if (parts[0] === "ha" && parts[1] && isAdmin()) return { view: "ha", id: parts[1], tab: HA_TABS.includes(parts[2]) ? parts[2] : "overview" };
-  if (parts[0] === "containers" && isAdmin()) return { view: "containers" };
+  if (parts[0] === "ha" && isAdmin()) return { view: "ha", id: parts[1] ?? "" };
+  if (parts[0] === "guest" && parts[3] && isAdmin()) return { view: "guest", host: parts[1], guest: `${parts[2]}/${parts[3]}` };
+  if (parts[0] === "containers" && parts[1] === "i" && parts[2] && isAdmin()) return { view: "instance", name: parts[2], tab: parts[3] === "terminal" ? "terminal" : "overview" };
+  if (parts[0] === "containers" && isAdmin()) return { view: "containers", tab: parts[1] === "settings" ? "settings" : "list" };
   if (parts[0] === "proxmox" && parts[1] && isAdmin()) return { view: "proxmox", id: parts[1], tab: PVE_TABS.includes(parts[2]) ? parts[2] : "overview" };
-  if (parts[0] === "machines" && isAdmin()) return parts[1] ? { view: "machine", id: parts[1], tab: MACHINE_TABS.includes(parts[2]) ? parts[2] : "overview" } : { view: "machines" };
+  if (parts[0] === "machines" && isAdmin()) return parts[1] ? { view: "machine", id: parts[1], tab: parts[2] === "docker" ? "containers" : MACHINE_TABS.includes(parts[2]) ? parts[2] : "overview" } : { view: "machines" };
   if (parts[0] === "apps" && parts[1]) return { view: "app", name: parts[1], tab: isAdmin() && ["settings", "logs", "compose", "backups", "terminal"].includes(parts[2]) ? parts[2] : "overview" };
-  if (parts[0] === "settings") return { view: "settings", section: sections().some((item) => item.id === parts[1]) ? parts[1] : "account" };
+  if (parts[0] === "settings") return { view: "settings", section: sections().some((item) => item.id === parts[1]) ? parts[1] : "account", tab: parts[2] };
   return { view: "home" };
 }
 
@@ -387,10 +396,10 @@ function onRoute() {
   if (state.route.view === "import") void loadImport();
   if (state.route.view === "welcome") void loadWelcome();
   if (state.route.view === "app") void loadApp();
-  if (state.route.view === "machines" || state.route.view === "machine" || state.route.view === "proxmox") void loadMachines();
+  if (["machines", "machine", "proxmox", "guest", "instance", "containers"].includes(state.route.view)) void loadMachines();
   if (state.route.view === "machines") void loadPve();
-  if (state.route.view === "machines") void loadHa();
-  if (state.route.view === "machines" || state.route.view === "containers") void loadContainers();
+  if (["machines", "containers", "machine", "instance"].includes(state.route.view)) void loadContainers();
+  if (state.route.view !== "settings") settingsUi.find = "";
   window.scrollTo(0, 0);
 }
 window.addEventListener("hashchange", onRoute);
@@ -428,7 +437,7 @@ function startEvents() {
       // a disk was plugged in, pulled out, connected: the pages that list disks look again
       clearTimeout(disksEventTimer);
       disksEventTimer = setTimeout(async () => {
-        if (state.route.view === "settings" && state.route.section === "storage") setDisks(await api("GET", "/api/disks").catch(() => state.disks));
+        if (onStorageSection()) setDisks(await api("GET", "/api/disks").catch(() => state.disks));
         else if (state.route.view === "files") void loadFiles?.();
         else if (state.route.view === "myhata") void loadMyHata();
       }, 1200);
@@ -809,6 +818,7 @@ const NAV = [
   { view: "store", hash: "#/store", icon: "grid", guest: false },
   { view: "files", hash: "#/files", icon: "folder", files: true },
   { view: "machines", hash: "#/machines", icon: "server", admin: true },
+  { view: "ha", hash: "#/ha", icon: "bulb", admin: true, ha: true },
   { view: "assistant", hash: "#/assistant", icon: "chat", admin: true, assistant: true },
   { view: "settings", hash: "#/settings", icon: "sliders" },
 ];
@@ -834,8 +844,8 @@ async function loadMine() {
   state.favorites = mine.favorites;
 }
 
-const navCurrent = () => (state.route.view === "machine" || state.route.view === "proxmox" || state.route.view === "containers" || state.route.view === "ha" ? "machines" : state.route.view === "backups" || state.route.view === "users" ? "settings" : state.route.view === "app" ? "home" : state.route.view === "import" ? "store" : state.route.view === "trash" || state.route.view === "myhata" ? "files" : state.route.view);
-const navItems = () => NAV.filter((item) => (!item.admin || isAdmin()) && (!item.files || mayFiles()) && (!item.assistant || !!(assistantUi.config?.ready ?? state.overview?.assistant)) && (item.guest !== false || state.user.role !== "guest"));
+const navCurrent = () => (["machine", "proxmox", "containers", "instance", "guest"].includes(state.route.view) ? "machines" : state.route.view === "backups" || state.route.view === "users" ? "settings" : state.route.view === "app" ? "home" : state.route.view === "import" ? "store" : state.route.view === "trash" || state.route.view === "myhata" ? "files" : state.route.view);
+const navItems = () => NAV.filter((item) => (!item.admin || isAdmin()) && (!item.ha || (state.overview?.ha?.servers ?? []).length > 0) && (!item.files || mayFiles()) && (!item.assistant || !!(assistantUi.config?.ready ?? state.overview?.assistant)) && (item.guest !== false || state.user.role !== "guest"));
 
 function navLinks(className, items = navItems()) {
   const current = navCurrent();
@@ -1041,6 +1051,8 @@ function render() {
   if (view === "proxmox") return renderPve();
   if (view === "containers") return renderContainers();
   if (view === "ha") return renderHa();
+  if (view === "instance") return renderInstance();
+  if (view === "guest") return renderGuest();
   if (view === "app") return renderApp();
   renderHome();
 }
@@ -2037,13 +2049,14 @@ function attentionItem(item) {
     item.code === "update" && open("#/settings/about"),
     item.code === "disk.trash" && open("#/trash", t("trash.title")),
     (item.code === "raid.errors" || item.code === "raid.mismatch") && doIt(t("raid.check"), "refresh", () => api("POST", "/api/disks/raid/check", { id: item.detail.id, action: "check" })),
-    (item.code.startsWith("smart.") || item.code === "disk.filling" || item.code.startsWith("array.") || item.code.startsWith("raid.")) && open("#/settings/storage"),
+    (item.code.startsWith("array.") || item.code.startsWith("raid.")) && open("#/settings/protection"),
+    (item.code.startsWith("smart.") || item.code === "disk.filling") && open("#/settings/storage"),
     (item.code.startsWith("internet.") || item.code === "network.exposed") && open("#/settings/network"),
     item.code.startsWith("share.") && open("#/settings/shares"),
     item.code.startsWith("dns.block") && open("#/settings/adblock"),
     item.code.startsWith("dns.") && !item.code.startsWith("dns.block") && open("#/settings/dns"),
     item.code.startsWith("https.") && open("#/settings/https"),
-    item.code === "netplace.down" && open("#/settings/storage"),
+    item.code === "netplace.down" && open("#/settings/places"),
     item.code === "machine.away" && open(`#/machines/${item.detail.id}`),
     item.code.startsWith("containers.") && state.route.view !== "containers" && open("#/containers"),
     item.code.startsWith("ha.") && !(state.route.view === "ha" && state.route.id === item.detail.host) && open(`#/ha/${item.detail.host}`),
@@ -2811,7 +2824,6 @@ function machineEvent(event) {
   const m = machinesUi.list?.machines.find((x) => x.id === event.id);
   if (!m) return;
   if (event.status) m.status = event.status;
-  if (state.route.view === "machines" && event.status) paintMachineCard(m);
   if (state.route.view !== "machine" || state.route.id !== event.id) return;
   if (event.status && state.route.tab === "overview") paintMachineStats(m);
   if (event.containers && state.route.tab === "containers") void loadMachineContainers();
@@ -2821,17 +2833,11 @@ const machineChip = (m) => h("span", { class: "state " + (m.online ? "running" :
 const machineOs = (m) => [m.info?.os, m.info?.arch].filter(Boolean).join(" · ");
 
 function renderMachines() {
-  shell(
-    h("div", { class: "page-head" }, h("div", null, h("h1", null, t("nav.machines")), h("p", { class: "meta", id: "machines-meta" }, t("machines.lead"))), h("div", { class: "actions" }, button(t("machines.addAny"), { class: "primary", onclick: (e) => addToMachinesMenu(e.currentTarget) }, "plus"))),
-    h("div", { id: "machines-body" }),
-    h("div", { id: "incus-list", class: "stack" }),
-    h("div", { id: "pve-list", class: "stack" }),
-    h("div", { id: "ha-list", class: "stack" }),
-  );
-  if (machinesUi.list) renderMachinesBody();
-  if (incusUi.data) paintIncusCard();
-  if (pveUi.list) paintPveList();
-  if (haUi.list) paintHaList();
+  shell(h("div", { id: "machines-body" }, h("section", { class: "card pad" }, h("p", { class: "muted" }, t("machines.loading")))));
+  if (treeUi.data) renderMachinesBody();
+  void loadTree();
+  const timer = setInterval(() => void loadTree(), 10_000);
+  cleanups.push(() => clearInterval(timer));
 }
 
 /** Everything the Machines page can gain, in one menu: a computer that is there, a container or a virtual machine made here, a Proxmox server, Home Assistant */
@@ -2871,43 +2877,164 @@ function addToMachinesMenu(at = null) {
   }
 }
 
-function renderMachinesBody() {
-  const box = document.getElementById("machines-body");
-  if (!box) return;
-  const list = machinesUi.list.machines;
-  document.getElementById("machines-meta").textContent = list.length ? t("machines.count", { n: list.length, online: list.filter((m) => m.online).length }) : t("machines.lead");
-  if (!list.length) {
-    return box.replaceChildren(h("div", { class: "card empty" }, icon("server"), h("h2", null, t("machines.none")), h("p", null, t("machines.noneLead")), button(t("machines.addAny"), { class: "primary", onclick: (e) => addToMachinesMenu(e.currentTarget) }, "plus")));
+const treeUi = { data: null, closed: new Set(JSON.parse(localStorage.getItem("hata.tree") || "[]")), shown: "" };
+
+async function loadTree() {
+  try {
+    treeUi.data = await api("GET", "/api/servers");
+  } catch (e) {
+    if (!treeUi.data) put(document.getElementById("machines-body"), h("section", { class: "card pad" }, h("p", { class: "error" }, errorText(e))));
+    return;
   }
-  box.replaceChildren(h("div", { class: "cards" }, list.map((m) => h("a", { class: "card pad machine-card", href: `#/machines/${m.id}`, id: "machine-" + m.id, menu: (at) => machineMenu(m, at) }))));
-  for (const m of list) paintMachineCard(m);
+  if (state.route.view === "machines") renderMachinesBody();
 }
 
-/** The card of a machine in the list: who it is, and its numbers while it is connected */
-function paintMachineCard(m) {
-  const card = document.getElementById("machine-" + m.id);
-  if (!card) return;
-  const s = m.status;
-  const mem = s?.memory.total ? Math.round((s.memory.used / s.memory.total) * 100) : null;
-  const disk = s?.disks[0];
-  const diskPercent = disk ? Math.round((disk.used / disk.total) * 100) : null;
-  const meter = (label, percent, hint) => {
-    const fill = h("i", { class: level(percent ?? 0) });
-    fill.style.width = (percent ?? 0) + "%";
-    return h("div", { class: "machine-meter" }, h("div", { class: "kv" }, h("span", { class: "muted small" }, label), h("span", { class: "small" }, percent == null ? "—" : `${percent}%`, hint && h("span", { class: "muted" }, " · " + hint))), h("div", { class: "bar" }, fill));
+/** A menu opened by a button stands under it */
+const underButton = (el) => {
+  const r = el.getBoundingClientRect();
+  return { x: r.left, y: r.bottom + 4 };
+};
+
+const rowPage = (r) => (r.machine ? `#/machines/${r.machine}` : r.instance ? `#/containers/i/${r.instance}` : `#/guest/${r.guest.host}/${r.guest.id}`);
+const guestOfRow = (r) => ({ id: r.guest.id, type: r.guest.type, name: r.name, vmid: Number(r.guest.id.split("/")[1]), status: r.status, may: r.may });
+
+/** How busy it is, in one line of the width of a column */
+function treeLoad(cpu, memory) {
+  if (cpu == null && !memory) return h("span", { class: "muted" }, "—");
+  const percent = cpu != null ? Math.round(cpu) : memory?.total ? Math.round((memory.used / memory.total) * 100) : 0;
+  const fill = h("i", { class: level(percent) });
+  fill.style.width = percent + "%";
+  return h("span", { class: "tree-load" }, h("span", { class: "tree-bar" }, fill), cpu != null && h("span", { class: "mono" }, `${Math.round(cpu)}%`), memory && h("span", { class: "mono muted" }, memory.total ? `${bytes(memory.used)} / ${bytes(memory.total)}` : bytes(memory.used)));
+}
+
+/** The one thing a row offers: what is first wanted of it in the state it is in */
+function treeAction(r) {
+  const up = r.status === "running";
+  const start = (run) => button(t("incus.start"), { class: "small", onclick: (e) => (e.stopPropagation(), run(e.currentTarget)) }, "play");
+  const on = (label, iconName, run) => button(label, { class: "small", onclick: (e) => (e.stopPropagation(), run()) }, iconName);
+  const open = () => h("a", { class: "btn small", href: rowPage(r), onclick: (e) => e.stopPropagation() }, icon("arrow"), h("span", null, t("common.open")));
+  if (!up) {
+    if (r.instance) return start((el) => containerAct({ name: r.instance }, "start", el).then(() => loadTree()));
+    if (r.guest && r.may.power) return start((el) => pvePower({ id: r.guest.host }, guestOfRow(r), r.status === "paused" ? "resume" : "start", el).then(() => loadTree()));
+    if (r.machine && r.wakes && !r.guest) return button(t("machines.wake"), { class: "small", onclick: (e) => (e.stopPropagation(), wakeMachine({ id: r.machine, name: r.name }, e.currentTarget)) }, "power");
+    return open();
+  }
+  if (r.kind === "vm" && r.instance) return on(t("incus.screen"), "screen", () => containerScreen({ name: r.instance }));
+  if (r.kind === "vm" && r.guest && r.may.console) return on(t("pve.screen"), "screen", () => pveConsoleDialog({ id: r.guest.host }, guestOfRow(r)));
+  if (r.machine && r.connected) return h("a", { class: "btn small", href: `#/machines/${r.machine}/terminal`, onclick: (e) => e.stopPropagation() }, icon("terminal"), h("span", null, t("machines.tab.terminal")));
+  if (r.instance) return on(t("machines.tab.terminal"), "terminal", () => containerConsole({ name: r.instance }));
+  if (r.guest && r.may.console) return on(t("machines.tab.terminal"), "terminal", () => pveConsoleDialog({ id: r.guest.host }, guestOfRow(r)));
+  return open();
+}
+
+/** Everything else a row can do: the menu of what it is */
+function treeMenu(r, at) {
+  const m = r.machine && machinesUi.list?.machines.find((x) => x.id === r.machine);
+  const c = r.instance && incusUi.data?.containers?.find((x) => x.name === r.instance);
+  if (c) return containerMenu(c, at);
+  if (r.guest) {
+    const x = { id: r.guest.host };
+    const g = guestOfRow(r);
+    const up = r.status === "running";
+    return menuAt(at, menuHeader(r.name, r.os, r.kind === "vm" ? "server" : "box"), [
+      { label: t("common.open"), icon: "arrow", href: rowPage(r) },
+      r.may.power && !up && { label: t("pve.start"), icon: "play", run: () => pvePower(x, g, "start").then(() => loadTree()) },
+      r.may.power && up && { label: t("pve.shutdown"), icon: "stop", run: () => pvePowerDialog(x, g, "shutdown") },
+      r.may.power && up && { label: t("pve.reboot"), icon: "refresh", run: () => pvePowerDialog(x, g, "reboot") },
+      m && { label: t("machines.rename"), icon: "edit", run: () => renameMachineDialog(m) },
+    ]);
+  }
+  if (m) return machineMenu(m, at);
+}
+
+function treeRow(r) {
+  const what = [t("tree.kind." + r.kind), r.os].filter(Boolean).join(" · ");
+  const word = r.status === "away" ? t("machines.seen", { ago: ago(r.seen) }) : r.kind === "machine" ? t("machines.online") : t("pve.status." + r.status);
+  return h(
+    "div",
+    { class: "tree-row child", role: "row", menu: (at) => treeMenu(r, at), onclick: (e) => !e.target.closest("a, button") && go(rowPage(r)) },
+    h("div", { class: "tree-name" }, h("i", { class: "dot " + (r.status === "running" ? "running" : r.status === "paused" ? "restarting" : "stopped") }), h("a", { class: "strong", href: rowPage(r) }, r.name), r.self && h("span", { class: "chip accent" }, t("pve.selfChip"))),
+    h("div", { class: "tree-what muted small" }, what),
+    h("div", { class: "tree-state small" }, word, r.noBackup && h("span", { class: "accent-text" }, " · ", t("tree.noBackup"))),
+    h("div", { class: "tree-busy small" }, treeLoad(r.cpu, r.memory)),
+    h("div", { class: "row-actions tree-actions" }, treeAction(r), h("button", { type: "button", class: "btn small square", "aria-label": t("app.more"), onclick: (e) => (e.stopPropagation(), treeMenu(r, underButton(e.currentTarget))) }, icon("more"))),
+  );
+}
+
+function treeGroup(g) {
+  const closed = treeUi.closed.has(g.key);
+  const toggle = (e) => {
+    e.stopPropagation();
+    if (closed) treeUi.closed.delete(g.key);
+    else treeUi.closed.add(g.key);
+    localStorage.setItem("hata.tree", JSON.stringify([...treeUi.closed]));
+    renderMachinesBody(true);
   };
+  const x = g.kind === "pve" && pveUi.list?.hosts?.find((y) => y.id === g.id);
+  const page = g.kind === "here" ? "#/" : g.kind === "pve" ? `#/proxmox/${g.id}` : null;
+  const head = {
+    here: { chip: t("tree.thisServer"), what: [g.os, g.address].filter(Boolean).join(" · "), state: t("tree.up", { time: duration(g.uptime) }) },
+    pve: { chip: "Proxmox", what: [g.os, g.online && t("tree.guests", { running: g.counts.running, all: g.counts.all })].filter(Boolean).join(" · "), state: g.online ? t("pve.online") : t("tree.noAnswer") },
+    others: { chip: "", what: t("tree.othersLead"), state: t("tree.connected", { running: g.counts.running, all: g.counts.all }) },
+  }[g.kind];
+  const menu =
+    g.kind === "here"
+      ? (at) => menuAt(at, menuHeader(g.name, g.os, "server"), [
+          { label: t("tree.containers"), icon: "box", href: "#/containers" },
+          { label: t("nav.settings"), icon: "sliders", href: "#/settings/general" },
+          { label: t("power.reboot"), icon: "refresh", run: () => serverPowerDialog("reboot") },
+          { label: t("power.poweroff"), icon: "stop", run: () => serverPowerDialog("poweroff") },
+        ])
+      : x
+        ? (at) => pveMenu(x, at)
+        : null;
+  return [
+    h(
+      "div",
+      { class: "tree-row group", role: "row", ...(menu ? { menu } : {}), onclick: (e) => page && !e.target.closest("a, button") && go(page) },
+      h("div", { class: "tree-name" }, h("button", { type: "button", class: "icon-btn tree-fold", "aria-expanded": !closed, "aria-label": g.name || t("tree.others"), onclick: toggle }, icon(closed ? "chevron" : "down")), g.kind !== "others" && h("i", { class: "dot " + (g.online ? "running" : "danger") }), page ? h("a", { class: "strong", href: page }, g.name) : h("strong", null, t("tree.others")), head.chip && h("span", { class: "chip" }, head.chip)),
+      h("div", { class: "tree-what muted small" }, head.what),
+      h("div", { class: "tree-state small" + (g.online ? "" : " error") }, head.state),
+      h("div", { class: "tree-busy small" }, g.kind === "others" ? null : treeLoad(g.cpu, g.memory)),
+      h(
+        "div",
+        { class: "row-actions tree-actions" },
+        g.kind === "here" && h("a", { class: "btn small", href: "#/terminal" }, icon("terminal"), h("span", null, t("machines.tab.terminal"))),
+        g.kind === "pve" && (g.online ? x?.url && h("a", { class: "btn small", href: x.url, target: "_blank", rel: "noopener noreferrer" }, icon("external"), h("span", null, t("tree.openProxmox"))) : button(t("tree.askAgain"), { class: "small", onclick: () => void loadPve().then(loadTree) }, "refresh")),
+        menu && h("button", { type: "button", class: "btn small square", "aria-label": t("app.more"), onclick: (e) => menu(underButton(e.currentTarget)) }, icon("more")),
+      ),
+    ),
+    !closed && g.rows.map(treeRow),
+    !closed && g.kind === "here" && !g.rows.length && h("div", { class: "tree-row child empty" }, h("p", { class: "muted small" }, t("tree.hereNone"))),
+  ];
+}
+
+async function updateClients(list, el) {
+  if (el) el.disabled = true;
+  for (const m of list) await updateMachine(m);
+  void loadTree();
+}
+
+/** The whole page; redrawn only when something shows differently, or a hovered menu would flicker every few seconds */
+function renderMachinesBody(force = false) {
+  const box = document.getElementById("machines-body");
+  const d = treeUi.data;
+  if (!box || !d) return;
+  const shown = JSON.stringify(d) + (pveUi.list ? "p" : "") + (machinesUi.list ? "m" : "") + (incusUi.data ? "c" : "");
+  if (!force && shown === treeUi.shown && box.querySelector(".server-tree")) return;
+  treeUi.shown = shown;
+  const meta = [t("tree.total", { total: d.total, running: d.running }), d.notAnswering > 0 && t("tree.metaNoAnswer", { n: d.notAnswering }), d.notConnected > 0 && t("tree.metaAway", { n: d.notConnected })].filter(Boolean).join(" · ");
   put(
-    card,
-    h("div", { class: "machine-title" }, icon("server"), h("strong", { class: "clip grow" }, m.name), machineChip(m)),
-    h("p", { class: "muted small clip" }, machineOs(m) || "—"),
-    m.pve && h("p", { class: "muted small clip" }, t("pve.guestOn", { guest: guestKind(m.pve), host: m.pve.hostName })),
-    m.incus && h("p", { class: "muted small clip" }, t(m.incus === "vm" ? "incus.vmOnThisServer" : "incus.onThisServer")),
-    m.online && s
-      ? [meter(t("sys.cpu"), s.cpu, t("sys.cores", { n: s.cores })), meter(t("sys.memory"), mem, bytes(s.memory.total)), disk && meter(t("sys.disk"), diskPercent, t("sys.free", { free: bytes(disk.total - disk.used), total: bytes(disk.total) }))]
-      : h("p", { class: "muted small" }, m.online ? t("machines.waiting") : t("machines.seen", { ago: ago(m.seen) })),
-    m.outdated && m.online && h("p", { class: "small accent-text" }, t("machines.outdated", { version: m.info.version })),
-    !m.online && m.pve?.power && m.pve.status !== "running" && h("div", { class: "row-actions" }, button(t("pve.startHere", { host: m.pve.hostName }), { class: "small", onclick: (e) => (e.preventDefault(), e.stopPropagation(), startGuestOf(m, e.currentTarget)) }, "play")),
-    !m.online && !m.pve && m.info?.macs?.length > 0 && h("div", { class: "row-actions" }, button(t("machines.wake"), { class: "small", onclick: (e) => (e.preventDefault(), e.stopPropagation(), wakeMachine(m, e.currentTarget)) }, "play")),
+    box,
+    h(
+      "section",
+      { class: "card server-tree" },
+      h("div", { class: "tree-head" }, h("div", null, h("h1", null, t("nav.machines")), h("p", { class: "meta" }, meta)), button(t("machines.addAny"), { class: "primary", onclick: (e) => addToMachinesMenu(e.currentTarget) }, "plus")),
+      d.outdated.length > 0 && h("div", { class: "tree-banner" }, icon("up", "accent-text"), h("span", { class: "grow" }, h("strong", null, t("tree.outdated", { version: d.version })), " ", h("span", { class: "muted" }, d.outdated.map((m) => m.name).join(", "))), button(t("tree.updateAll"), { class: "small", onclick: (e) => updateClients(d.outdated, e.currentTarget) }, "up")),
+      h("div", { class: "tree-row tree-cols small", role: "row" }, h("div", null, t("tree.col.name")), h("div", null, t("tree.col.what")), h("div", null, t("tree.col.state")), h("div", null, t("tree.col.load")), h("div")),
+      d.groups.flatMap(treeGroup),
+      h("a", { class: "tree-foot small muted", href: "#/containers/settings" }, icon("sliders"), h("span", { class: "grow" }, t("tree.foot")), icon("chevron")),
+    ),
   );
 }
 
@@ -2999,45 +3126,35 @@ async function loadContainers() {
     incusUi.data = { state: "error", error: errorText(e), containers: [] };
   }
   if (state.route.view === "containers") renderContainersBody();
-  if (state.route.view === "machines") paintIncusCard();
+  if (state.route.view === "machines") renderMachinesBody();
+  if (state.route.view === "instance") renderInstanceBody();
+  if (state.route.view === "machine" && state.route.tab === "overview") paintMachineExtra();
 }
 
-/** The block on the Machines page: what is here, or how to begin */
-function paintIncusCard() {
-  const box = document.getElementById("incus-list");
-  const d = incusUi.data;
-  if (!box || !d) return;
-  const running = (d.containers ?? []).filter((c) => c.status === "running").length;
-  put(
-    box,
-    h("div", { class: "section-head" }, h("h2", null, t("incus.title"))),
-    h(
-      "div",
-      { class: "cards" },
-      h(
-        "a",
-        { class: "card pad machine-card", href: "#/containers" },
-        h("div", { class: "machine-title" }, icon("box"), h("strong", { class: "clip grow" }, t("incus.thisServer")), d.state === "ready" && h("span", { class: "state " + (running ? "running" : "") }, t("incus.runningN", { n: running }))),
-        h("p", { class: "muted small" }, d.state === "ready" ? [t("incus.countN", { n: d.containers.filter((c) => c.kind !== "vm").length }), d.containers.some((c) => c.kind === "vm") && t("incus.vm.countN", { n: d.containers.filter((c) => c.kind === "vm").length })].filter(Boolean).join(" · ") : t("incus.state." + d.state)),
-      ),
-    ),
-  );
+const incusStatus = (c) => h("span", { class: "state " + (c.status === "running" ? "running" : c.status === "error" ? "failed" : "") }, t("incus.status." + c.status));
+
+/** A machine that is a container or a virtual machine of this server is started, not woken */
+function startInstanceOf(m, el) {
+  if (el) el.disabled = true;
+  api("POST", `/api/containers/${m.instance}/state`, { action: "start" }).then(() => void loadMachines(), (e) => {
+    if (el) el.disabled = false;
+    toast(errorText(e), "error");
+  });
 }
 
 function renderContainers() {
+  const tab = (id, label) => h("a", { class: "tab" + (state.route.tab === id ? " active" : ""), href: id === "list" ? "#/containers" : "#/containers/settings" }, label);
   shell(
     h(
       "div",
-      { class: "page-head" },
-      h("div", null, h("p", { class: "meta" }, h("a", { href: "#/machines" }, t("nav.machines"))), h("h1", null, t("incus.title")), h("p", { class: "meta", id: "incus-meta" }, t("incus.lead"))),
-      h("div", { class: "actions", id: "incus-actions" }),
+      { class: "page-head has-tabs" },
+      h("div", { class: "page-head-row" }, h("div", null, h("nav", { class: "crumbs" }, h("a", { href: "#/machines" }, t("nav.machines")), icon("chevron"), h("span", null, t("tree.thisServer"))), h("h1", null, t("incus.title")), h("p", { class: "meta", id: "incus-meta" }, t("incus.lead"))), h("div", { class: "actions", id: "incus-actions" })),
+      h("div", { class: "tabs", id: "incus-tabs", hidden: true }, tab("list", t("incus.tab.list")), tab("settings", t("incus.tab.settings"))),
     ),
     h("div", { id: "incus-body", class: "stack" }),
   );
   if (incusUi.data) renderContainersBody();
 }
-
-const incusStatus = (c) => h("span", { class: "state " + (c.status === "running" ? "running" : c.status === "error" ? "failed" : "") }, t("incus.status." + c.status));
 
 function renderContainersBody() {
   const box = document.getElementById("incus-body");
@@ -3116,10 +3233,12 @@ function renderContainersBody() {
       ),
     );
   }
+  document.getElementById("incus-tabs").hidden = false;
+  if (state.route.tab === "settings") return put(box, homeNetCard(d), incusPlacesCard(d), d.vms?.state === "ready" && discsCard(d), vmCard(d));
   const vmCount = d.containers.filter((c) => c.kind === "vm").length;
   document.getElementById("incus-meta").textContent = [t("incus.countN", { n: d.containers.length - vmCount }), vmCount > 0 && t("incus.vm.countN", { n: vmCount }), d.version && "Incus " + d.version, d.network && t("incus.network", { name: d.network.name, address: d.network.address })].filter(Boolean).join(" · ");
   if (!d.containers.length) {
-    return put(box, h("div", { class: "card empty" }, icon("box"), h("h2", null, t("incus.none")), h("p", null, t("incus.noneLead")), button(t("incus.new"), { class: "primary", onclick: () => newContainerDialog() }, "plus")), homeNetCard(d), vmCard(d));
+    return put(box, h("div", { class: "card empty" }, icon("box"), h("h2", null, t("incus.none")), h("p", null, t("incus.noneLead")), button(t("incus.new"), { class: "primary", onclick: () => newContainerDialog() }, "plus")));
   }
   put(
     box,
@@ -3137,10 +3256,6 @@ function renderContainersBody() {
         ),
       ),
     ),
-    homeNetCard(d),
-    incusPlacesCard(d),
-    d.vms?.state === "ready" && discsCard(d),
-    vmCard(d),
   );
 }
 
@@ -3551,7 +3666,7 @@ function containerRow(c) {
     h(
       "td",
       null,
-      h("div", { class: "strong" }, c.name, c.machine && h("a", { class: "small", href: `#/machines/${c.machine}` }, " · ", t("incus.asMachine"))),
+      h("a", { class: "strong", href: c.machine ? `#/machines/${c.machine}` : `#/containers/i/${c.name}` }, c.name),
       h("div", { class: "muted small" }, [c.kind === "vm" && t("incus.vm.short"), c.os, c.network === "home" && t("incus.net.homeShort"), c.nesting && "Docker", c.snapshots.length > 0 && t("incus.snapshotsN", { n: c.snapshots.length }), c.disc && t("incus.disc.inDrive", { name: c.disc })].filter(Boolean).join(" · ")),
     ),
     h("td", null, incusStatus(c)),
@@ -3608,6 +3723,74 @@ function containerMenu(c, at) {
     { label: t("incus.backups"), icon: "archive", href: "#/settings/backups" },
     { label: t("incus.remove") + "…", icon: "trash", danger: true, run: () => removeContainerDialog(c) },
   ]);
+}
+
+/** What only an instance of this server has, on its own page and on its machine's: its screen, disc, limits and snapshots */
+function instanceCards(c) {
+  const running = c.status === "running";
+  const fact = (label, value) => h("div", { class: "kv" }, h("span", { class: "muted" }, label), h("span", null, value));
+  const screen = c.kind === "vm" && running && h("section", { class: "card pad stack-s" }, h("h2", null, t("incus.screen")), h("div", { class: "term-holder instance-screen" }, h("iframe", { class: "term-frame", src: "/screen.html?" + new URLSearchParams({ incus: c.name, lang: state.lang }), title: t("incus.screen") })));
+  const disc = c.disc && h("section", { class: "card pad stack-s" }, h("div", { class: "section-head" }, h("h2", null, t("instance.disc")), button(t("incus.disc.eject"), { class: "small", onclick: () => ejectDisc(c) }, "up")), h("p", { class: "mono small" }, c.disc));
+  const limits = h(
+      "section",
+      { class: "card pad stack-s" },
+      h("div", { class: "section-head" }, h("h2", null, t("instance.limits")), button(t("instance.change"), { class: "small", onclick: () => containerLimitsDialog(c) }, "sliders")),
+      fact(t("instance.cores"), c.cores || t("incus.allCores")),
+      fact(t("sys.memory"), c.memory ? bytes(c.memory * 1024 * 1024) : t("incus.allMemory")),
+      c.disk > 0 && fact(t("sys.disk"), bytes(c.disk * 1024 ** 3)),
+      fact(t("instance.place"), c.place),
+      c.address && fact(t("machines.address"), c.address),
+      fact(t("instance.network"), c.network === "home" ? t("incus.net.homeShort") : t("instance.ownNetwork")),
+    );
+  const snapshots = h(
+      "section",
+      { class: "card pad stack-s" },
+      h("div", { class: "section-head" }, h("h2", null, t("incus.snapshots"), " ", h("span", { class: "muted" }, c.snapshots.length)), button(t("incus.snapshots") + "…", { class: "small", onclick: () => containerSnapshotsDialog(c) }, "clock")),
+      c.snapshots.length ? c.snapshots.slice(-5).reverse().map((s) => fact(s.name, new Date(s.created).toLocaleString(state.lang))) : h("p", { class: "muted small" }, t("incus.snap.none")),
+    );
+  return { main: [screen, snapshots].filter(Boolean), side: [disc, limits].filter(Boolean) };
+}
+
+function renderInstance() {
+  shell(h("div", { id: "instance-head", class: "card pad thing-head" }), h("div", { id: "instance-body", class: "stack" }));
+  if (incusUi.data) renderInstanceBody();
+}
+
+function renderInstanceBody() {
+  const head = document.getElementById("instance-head");
+  const box = document.getElementById("instance-body");
+  if (!head || !box) return;
+  const crumbs = (name) => h("nav", { class: "crumbs" }, h("a", { href: "#/machines" }, t("nav.machines")), icon("chevron"), h("a", { href: "#/containers" }, t("tree.thisServer")), icon("chevron"), h("span", null, name));
+  const c = incusUi.data?.containers?.find((x) => x.name === state.route.name);
+  if (!c) return put(head, crumbs(state.route.name)), put(box, h("p", { class: "card pad muted" }, t("instance.gone")));
+  // with Hata's client it is a machine: one thing, one page
+  if (c.machine) return void go(`#/machines/${c.machine}`);
+  const running = c.status === "running";
+  const tab = (id, iconName, label) => h("a", { class: "tab" + (state.route.tab === id ? " active" : ""), href: `#/containers/i/${c.name}${id === "overview" ? "" : "/" + id}` }, icon(iconName), label);
+  put(
+    head,
+    crumbs(c.name),
+    h(
+      "div",
+      { class: "app-head", menu: (at) => containerMenu(c, at) },
+      h("span", { class: "machine-icon" }, icon(c.kind === "vm" ? "screen" : "box")),
+      h("div", { class: "grow" }, h("div", { class: "app-title" }, h("h1", null, c.name), incusStatus(c)), h("p", { class: "meta" }, [t("tree.kind." + c.kind), c.os, c.address].filter(Boolean).join(" · "))),
+      h("div", { class: "actions" }, running ? button(t("incus.stop"), { onclick: (e) => containerAct(c, "stop", e.currentTarget) }, "stop") : button(t("incus.start"), { class: "primary", onclick: (e) => containerAct(c, "start", e.currentTarget) }, "play"), h("button", { type: "button", class: "btn square", "aria-label": t("app.more"), onclick: (e) => containerMenu(c, underButton(e.currentTarget)) }, icon("more"))),
+    ),
+    h("div", { class: "tabs" }, tab("overview", "grid", t("machines.tab.overview")), running && tab("terminal", "terminal", t("machines.tab.terminal"))),
+  );
+  if (state.route.tab === "terminal" && running) {
+    // drawn once: redrawing would cut the shell off
+    if (!box.querySelector(".term-holder")) put(box, h("div", { class: "term-holder" }, terminalFrame({ incus: c.name })));
+    return;
+  }
+  // a redraw must not reconnect the screen for news that does not concern it
+  const key = JSON.stringify(c);
+  if (box.dataset.shown !== key) {
+    box.dataset.shown = key;
+    const { main, side } = instanceCards(c);
+    put(box, h("div", { class: "columns" }, h("div", { class: "stack" }, main), h("aside", { class: "side stack" }, side)));
+  }
 }
 
 function containerConsole(c) {
@@ -3995,8 +4178,9 @@ function removeContainerDialog(c) {
 // --- Home Assistant ---
 // Connected through its API: the servers under the machines, a page of each, its entities as tiles on Home
 
-const HA_TABS = ["overview", "devices"];
-const haUi = { list: null, server: null, entities: null, search: "", extra: false, timer: null, users: null };
+/** A house has hundreds of things: a room shows this many until asked */
+const HA_ROOM_ROWS = 8;
+const haUi = { opened: new Set(), list: null, server: null, entities: null, search: "", extra: false, timer: null, users: null };
 
 const HA_ICONS = { light: "bulb", switch: "power", input_boolean: "power", fan: "fan", cover: "blinds", valve: "droplet", lock: "lock", climate: "temp", water_heater: "temp", media_player: "speaker", vacuum: "home", scene: "play", script: "play", button: "play", input_button: "play", automation: "refresh", siren: "bell", humidifier: "droplet", camera: "image", weather: "sun", sun: "sun", person: "user", device_tracker: "user", update: "up", alarm_control_panel: "lock", remote: "network" };
 const HA_KIND_ICONS = { temperature: "temp", humidity: "droplet", moisture: "droplet", battery: "battery", power: "bolt", energy: "bolt", voltage: "bolt", current: "bolt", door: "door", window: "door", opening: "door", garage_door: "door", garage: "door", motion: "user", occupancy: "user", presence: "user", illuminance: "sun", light: "sun", smoke: "alert", gas: "alert", problem: "alert", safety: "alert", connectivity: "network", plug: "power", outlet: "power", timestamp: "clock" };
@@ -4320,84 +4504,56 @@ async function haPickDialog() {
 
 async function loadHa() {
   try {
-    if (state.route.view === "ha") {
-      haUi.server = await api("GET", `/api/ha/${state.route.id}`);
-      if (state.route.tab === "devices" && !haUi.entities) haUi.entities = (await api("GET", `/api/ha/${state.route.id}/entities`)).entities;
-      return renderHaBody();
-    }
     haUi.list = await api("GET", "/api/ha");
+    if (state.route.view !== "ha") return;
+    const id = state.route.id || haUi.list.servers[0]?.id;
+    if (!id) return renderHaBody();
+    if (haUi.server?.id !== id) haUi.entities = null;
+    haUi.server = await api("GET", `/api/ha/${id}`);
+    if (!haUi.entities) haUi.entities = (await api("GET", `/api/ha/${id}/entities`)).entities;
+    renderHaBody();
   } catch (e) {
-    if (state.route.view === "ha") {
-      const box = document.getElementById("ha-body");
-      if (box) put(box, h("nav", { class: "crumbs" }, h("a", { href: "#/machines" }, t("nav.machines"))), h("p", { class: "card pad muted" }, errorText(e)));
-      return;
-    }
-    return toast(errorText(e), "error");
+    if (state.route.view !== "ha") return toast(errorText(e), "error");
+    const box = document.getElementById("ha-body");
+    if (box) put(box, h("p", { class: "card pad muted" }, errorText(e)));
   }
-  if (state.route.view === "machines") paintHaList();
 }
 
 const haChip = (x) => h("span", { class: "state " + (x.online ? "running" : "") }, x.online ? t("ha.online") : x.error ? t("ha.offline") : t("ha.asking"));
 const haError = (x) => (x.error ? (has("error." + x.error.code) ? t("error." + x.error.code, { name: x.name, message: x.error.message ?? "" }) : x.error.code) : "");
 
-function paintHaList() {
-  const box = document.getElementById("ha-list");
-  if (!box) return;
-  const list = haUi.list?.servers ?? [];
-  if (!list.length) return box.replaceChildren();
-  box.replaceChildren(
-    h("div", { class: "section-head" }, h("h2", null, "Home Assistant")),
-    h(
-      "div",
-      { class: "cards" },
-      list.map((x) =>
-        h(
-          "a",
-          { class: "card pad machine-card", href: `#/ha/${x.id}`, menu: (at) => haMenu(x, at) },
-          h("div", { class: "machine-title" }, icon("home"), h("strong", { class: "clip grow" }, x.name), haChip(x)),
-          h("p", { class: "muted small clip" }, ["Home Assistant " + (x.version || ""), x.url.replace(/^https?:\/\//, "")].join(" · ")),
-          x.online
-            ? [
-                h("p", { class: "small" }, t("ha.counts", { n: x.entities, on: x.on })),
-                x.updates > 0 && h("p", { class: "small accent-text" }, icon("up"), " ", t("ha.updatesN", { n: x.updates })),
-                x.low > 0 && h("p", { class: "small" }, icon("battery"), " ", t("ha.lowN", { n: x.low })),
-              ]
-            : h("p", { class: "muted small" }, haError(x) || t("ha.asking")),
-        ),
-      ),
-    ),
-  );
-}
-
 function renderHa() {
-  if (haUi.server?.id !== state.route.id) (haUi.server = null), (haUi.entities = null);
+  if (state.route.id && haUi.server?.id !== state.route.id) (haUi.server = null), (haUi.entities = null);
   shell(h("div", { id: "ha-body", class: "stack" }));
-  if (haUi.server) renderHaBody();
+  if (haUi.list) renderHaBody();
   void loadHa();
 }
 
 function renderHaBody() {
   const box = document.getElementById("ha-body");
+  const list = haUi.list?.servers ?? [];
+  if (!box) return;
   const x = haUi.server;
-  if (!box || !x) return;
-  const tab = (id, iconName) => h("a", { class: "tab" + (state.route.tab === id ? " active" : ""), href: `#/ha/${x.id}${id === "overview" ? "" : "/" + id}` }, icon(iconName), t("ha.tab." + id));
+  const answering = list.filter((y) => y.online).length;
+  const row = (y) =>
+    h(
+      "tr",
+      { class: "clickable", menu: (at) => haMenu(y, at), onclick: (e) => !e.target.closest("a, button") && go(`#/ha/${y.id}`) },
+      h("td", null, h("div", { class: "strong" }, y.name), h("div", { class: "muted small mono" }, [y.version, y.url].filter(Boolean).join(" · "))),
+      h("td", null, haChip(y)),
+      h("td", { class: "small" }, t("ha.counts", { n: y.entities, on: y.on })),
+      h("td", null, h("div", { class: "row-actions" }, h("a", { class: "btn small", href: haWebUrl(y), target: "_blank", rel: "noopener noreferrer" }, icon("external"), h("span", null, t("ha.open"))), h("button", { type: "button", class: "btn small square", "aria-label": t("app.more"), onclick: (e) => haMenu(y, underButton(e.currentTarget)) }, icon("more")))),
+    );
   put(
     box,
     h(
-      "div",
-      { id: "pve-head" },
-      h("nav", { class: "crumbs" }, h("a", { href: "#/machines" }, t("nav.machines")), icon("chevron"), h("span", null, x.name)),
-      h(
-        "div",
-        { class: "app-head", menu: (at) => haMenu(x, at) },
-        h("span", { class: "machine-icon" }, icon("home")),
-        h("div", { class: "grow" }, h("div", { class: "app-title" }, h("h1", null, x.name), haChip(x)), h("p", { class: "meta" }, ["Home Assistant " + (x.version || ""), x.url, x.location && x.location !== x.name ? x.location : null].filter(Boolean).flatMap((part, i) => (i ? [h("span", { class: "dot-sep" }, "·"), part] : [part])))),
-        h("div", { class: "actions" }, h("a", { class: "btn primary", href: haWebUrl(x), target: "_blank", rel: "noopener noreferrer" }, icon("external"), h("span", null, t("ha.open"))), h("button", { type: "button", class: "btn square", "aria-label": t("app.more"), onclick: () => haMenu(x) }, icon("more"))),
-      ),
-      h("div", { class: "tabs" }, tab("overview", "grid"), tab("devices", "bulb")),
+      "section",
+      { class: "card" },
+      h("div", { class: "tree-head" }, h("div", null, h("h1", null, "Home Assistant"), h("p", { class: "meta" }, list.length ? t("ha.answering", { n: answering, total: list.length }) : t("ha.noneYet"))), button(t("ha.addServer"), { class: "primary", onclick: () => haDialog() }, "plus")),
+      list.length > 0 && h("div", { class: "table-wrap" }, h("table", null, h("thead", null, h("tr", null, h("th", null, t("ha.col.server")), h("th", null, t("app.col.state")), h("th", null, t("ha.col.devices")), h("th"))), h("tbody", null, list.map(row)))),
     ),
-    x.error && h("p", { class: "card pad warn-box" }, haError(x), " ", t("pve.since", { ago: ago(x.error.since) })),
-    state.route.tab === "devices" ? haDevices(x) : haOverview(x),
+    x && x.error && h("p", { class: "card pad warn-box" }, haError(x), " ", t("pve.since", { ago: ago(x.error.since) })),
+    x && h("div", { class: "ha-page" }, h("div", { class: "stack" }, list.length > 1 && h("section", { class: "card pad" }, h("div", { class: "section-head" }, h("h2", null, t("ha.tab.devices")), h("div", { class: "seg" }, list.map((y) => h("a", { class: "btn small" + (y.id === x.id ? " active" : ""), href: `#/ha/${y.id}` }, y.name))))), haDevices(x)), haOverview(x)),
   );
 }
 
@@ -4567,7 +4723,7 @@ function haDevices(x) {
     ),
     !x.online && h("p", { class: "muted small" }, t("ha.lastKnown")),
     !shown.length && h("p", { class: "card pad muted" }, t("ha.pick.none")),
-    [...rooms].map(([room, items]) => h("div", { class: "card pad stack-s" }, h("div", { class: "section-head" }, h("h2", null, room || t("ha.noRoom")), h("span", { class: "muted small" }, String(items.length))), items.map((s) => haRow(x.id, s)))),
+    [...rooms].map(([room, items]) => h("div", { class: "card pad stack-s" }, h("div", { class: "section-head" }, h("h2", null, room || t("ha.noRoom")), h("span", { class: "muted small" }, String(items.length))), (q || haUi.opened.has(room) ? items : items.slice(0, HA_ROOM_ROWS)).map((s) => haRow(x.id, s)), !q && !haUi.opened.has(room) && items.length > HA_ROOM_ROWS && button(t("ha.moreInRoom", { n: items.length - HA_ROOM_ROWS }), { class: "small ghost", onclick: () => (haUi.opened.add(room), paint()) }, "down"))),
   );
   return body;
 }
@@ -4710,12 +4866,17 @@ async function loadPve() {
     }
     return toast(errorText(e), "error");
   }
-  if (state.route.view === "machines") paintPveList();
+  if (state.route.view === "machines") renderMachinesBody();
 }
 
 /** A Proxmox server said something new: the page that shows it asks again, at most every few seconds */
 function pveEvent(event) {
   if (state.route.view === "proxmox" && state.route.id !== event.id) return;
+  if (state.route.view === "guest") {
+    clearTimeout(pveUi.timer);
+    pveUi.timer = setTimeout(() => void loadGuest(), 800);
+    return;
+  }
   if (state.route.view !== "proxmox" && state.route.view !== "machines") return;
   clearTimeout(pveUi.timer);
   pveUi.timer = setTimeout(() => {
@@ -4735,37 +4896,6 @@ function meterRow(label, percent, hint) {
   const fill = h("i", { class: level(percent ?? 0) });
   fill.style.width = (percent ?? 0) + "%";
   return h("div", { class: "machine-meter" }, h("div", { class: "kv" }, h("span", { class: "muted small" }, label), h("span", { class: "small" }, percent == null ? "—" : `${percent}%`, hint && h("span", { class: "muted" }, " · " + hint))), h("div", { class: "bar" }, fill));
-}
-
-/** The Proxmox servers under the machines */
-function paintPveList() {
-  const box = document.getElementById("pve-list");
-  if (!box) return;
-  const list = pveUi.list?.hosts ?? [];
-  if (!list.length) return box.replaceChildren();
-  box.replaceChildren(
-    h("div", { class: "section-head" }, h("h2", null, t("pve.title"))),
-    h(
-      "div",
-      { class: "cards" },
-      list.map((x) => {
-        const node = x.nodes[0];
-        return h(
-          "a",
-          { class: "card pad machine-card", href: `#/proxmox/${x.id}`, menu: (at) => pveMenu(x, at) },
-          h("div", { class: "machine-title" }, icon("server"), h("strong", { class: "clip grow" }, x.name), pveChip(x)),
-          h("p", { class: "muted small clip" }, ["Proxmox VE " + (x.version || ""), x.nodes.length > 1 ? t("pve.nodes", { n: x.nodes.length }) : node?.name].filter(Boolean).join(" · ")),
-          x.self && h("p", { class: "small" }, icon("home"), " ", t("pve.selfShort", { guest: x.self.replace("lxc/", "CT ").replace("qemu/", "VM ") })),
-          x.online
-            ? [
-                h("p", { class: "small" }, t("pve.guestsRunning", { n: x.counts.running, total: x.counts.guests })),
-                ...x.nodes.slice(0, 3).flatMap((n) => [meterRow(x.nodes.length > 1 ? `${n.name} · ${t("sys.cpu")}` : t("sys.cpu"), n.online ? Math.round(n.cpu * 100) : null, t("sys.cores", { n: n.cores })), meterRow(t("sys.memory"), n.online ? pct(n.memory.used, n.memory.total) : null, bytes(n.memory.total))]),
-              ]
-            : h("p", { class: "muted small" }, x.error ? pveError(x) : t("pve.asking")),
-        );
-      }),
-    ),
-  );
 }
 
 /** Adding a server, or changing its token: the certificate is shown to be confirmed the first time */
@@ -5889,7 +6019,7 @@ function pveGuests(x) {
     const m = machineOf(g);
     return h(
       "tr",
-      { class: "clickable", onclick: () => pveGuestDialog(x, g) },
+      { class: "clickable", onclick: () => go(m ? `#/machines/${m.id}` : `#/guest/${x.id}/${g.id}`) },
       h("td", { class: "mono" }, g.vmid),
       h("td", null, h("div", { class: "strong" }, g.name, g.id === x.self && h("span", { class: "chip accent pve-here" }, t("pve.selfChip"))), h("div", { class: "muted small" }, [g.type === "lxc" ? t("pve.container") : t("pve.vm"), x.nodes.length > 1 ? g.node : null, g.config?.addresses[0], g.lock ? t("pve.locked", { lock: g.lock }) : null].filter(Boolean).join(" · ")), m && h("a", { class: "link small", href: `#/machines/${m.id}`, onclick: (e) => e.stopPropagation() }, icon("server"), " ", t("pve.isMachine", { name: m.name }))),
       h("td", null, guestChip(g)),
@@ -5906,7 +6036,7 @@ function pveGuests(x) {
           g.may.power && up && small(t("pve.reboot"), "refresh", () => pvePowerDialog(x, g, "reboot")),
           up && g.may.console && small(t(g.type === "lxc" ? "pve.console" : "pve.screen"), "terminal", () => pveConsoleDialog(x, g)),
           !m && g.id !== x.self && small(t("pve.client.button"), "download", () => pveClientDialog(x, g)),
-          small(t("app.more"), "more", () => pveGuestDialog(x, g)),
+          small(t("common.open"), "more", () => go(m ? `#/machines/${m.id}` : `#/guest/${x.id}/${g.id}`)),
         ),
       ),
     );
@@ -6060,19 +6190,17 @@ async function pveClientDialog(x, g) {
 }
 
 /** One guest: what it is, its power, its snapshots and backups */
-function pveGuestDialog(x, g) {
+/** What is known of a guest and what can be done with it: on its page, or on the page of the machine it is */
+function pveGuestParts(x, g) {
   const up = g.status === "running";
   const c = g.config;
   const row = (label, value, mono) => value && h("div", { class: "kv" }, h("span", { class: "muted" }, label), h("span", { class: mono ? "mono" : "" }, value));
   const m = machinesUi.list?.machines.find((mm) => mm.pve?.host === x.id && mm.pve?.id === g.id);
   const snaps = h("div", { class: "stack-s" }, h("p", { class: "muted small" }, t("machines.loading")));
   const backs = h("div", { class: "stack-s" }, h("p", { class: "muted small" }, t("machines.loading")));
-  let dialog;
-  const again = () => (dialog.close(), pveGuestDialog(x, pveUi.host?.guests.find((y) => y.id === g.id) ?? g));
-  const act = (label, iconName, action, cls = "") => g.may.power && button(label, { class: "small " + cls, onclick: async (e) => (action === "start" || action === "resume" ? (await pvePower(x, g, action, e.currentTarget), again()) : (dialog.close(), pvePowerDialog(x, g, action))) }, iconName);
-  dialog = openDialog(
-    "wide",
-    h("header", null, h("span", { class: "machine-icon" }, icon(g.type === "lxc" ? "box" : "server")), h("div", { class: "grow" }, h("h2", null, g.name), h("p", { class: "muted small" }, guestKind(g), " · ", guestChip(g))), closeX(() => dialog)),
+  const again = () => pveGuestDialog(x, pveUi.host?.guests.find((y) => y.id === g.id) ?? g);
+  const act = (label, iconName, action, cls = "") => g.may.power && button(label, { class: "small " + cls, onclick: async (e) => (action === "start" || action === "resume" ? (await pvePower(x, g, action, e.currentTarget), again()) : (pvePowerDialog(x, g, action))) }, iconName);
+  const parts = [
     h(
       "div",
       { class: "row-actions wrap" },
@@ -6081,14 +6209,14 @@ function pveGuestDialog(x, g) {
       up && act(t("pve.reboot"), "refresh", "reboot"),
       up && g.type === "qemu" && act(t("pve.suspend"), "clock", "suspend"),
       up && act(t("pve.stop"), "x", "stop", "danger"),
-      button(t("pve.load.button"), { class: "small", onclick: () => (dialog.close(), pveLoadDialog(x, { guest: g.id }, g.name)) }, "chart"),
-      up && g.may.console && button(t(g.type === "lxc" ? "pve.console" : "pve.screen"), { class: "small", onclick: () => (dialog.close(), pveConsoleDialog(x, g)) }, "terminal"),
+      button(t("pve.load.button"), { class: "small", onclick: () => (pveLoadDialog(x, { guest: g.id }, g.name)) }, "chart"),
+      up && g.may.console && button(t(g.type === "lxc" ? "pve.console" : "pve.screen"), { class: "small", onclick: () => (pveConsoleDialog(x, g)) }, "terminal"),
       !g.may.power && h("span", { class: "muted small" }, t("pve.noPower")),
-      (g.may.configure || g.may.cpu || g.may.memory || g.may.disk) && button(t("pve.edit.button"), { class: "small", onclick: () => (dialog.close(), pveEditDialog(x, g)) }, "sliders"),
+      (g.may.configure || g.may.cpu || g.may.memory || g.may.disk) && button(t("pve.edit.button"), { class: "small", onclick: () => (pveEditDialog(x, g)) }, "sliders"),
       g.id === x.self && h("span", { class: "chip accent" }, t("pve.selfChip")),
-      g.may.clone && button(t("pve.clone.button"), { class: "small", onclick: () => (dialog.close(), pveCloneDialog(x, g)) }, "copy"),
-      g.may.remove && g.status === "stopped" && !g.template && g.id !== x.self && button(t("pve.tmpl.button"), { class: "small", onclick: () => (dialog.close(), pveTemplateDialog(x, g)) }, "archive"),
-      g.may.remove && g.status === "stopped" && g.id !== x.self && button(t("pve.guestRemove"), { class: "small danger", onclick: () => (dialog.close(), pveRemoveDialog(x, g)) }, "trash"),
+      g.may.clone && button(t("pve.clone.button"), { class: "small", onclick: () => (pveCloneDialog(x, g)) }, "copy"),
+      g.may.remove && g.status === "stopped" && !g.template && g.id !== x.self && button(t("pve.tmpl.button"), { class: "small", onclick: () => (pveTemplateDialog(x, g)) }, "archive"),
+      g.may.remove && g.status === "stopped" && g.id !== x.self && button(t("pve.guestRemove"), { class: "small danger", onclick: () => (pveRemoveDialog(x, g)) }, "trash"),
     ),
     h(
       "section",
@@ -6101,17 +6229,16 @@ function pveGuestDialog(x, g) {
       row(t("pve.resources"), `${t("sys.cores", { n: g.cores })} · ${bytes(g.memory.total)}${g.disk.total ? " · " + bytes(g.disk.total) : ""}`),
       row(t("pve.pool"), g.pool),
       row(t("pve.tags"), g.tags.join(", ")),
-      m && h("div", { class: "kv" }, h("span", { class: "muted" }, t("nav.machines")), h("a", { class: "link", href: `#/machines/${m.id}`, onclick: () => dialog.close() }, m.name)),
-      !m && g.id !== x.self && h("div", { class: "card pad pve-offer" }, h("div", { class: "grow" }, h("strong", null, t("pve.client.offer")), h("p", { class: "muted small" }, t("pve.client.offerLead"))), button(t("pve.client.button"), { class: "small", onclick: () => (dialog.close(), pveClientDialog(x, g)) }, "download")),
+      m && h("div", { class: "kv" }, h("span", { class: "muted" }, t("nav.machines")), h("a", { class: "link", href: `#/machines/${m.id}` }, m.name)),
+      !m && g.id !== x.self && h("div", { class: "card pad pve-offer" }, h("div", { class: "grow" }, h("strong", null, t("pve.client.offer")), h("p", { class: "muted small" }, t("pve.client.offerLead"))), button(t("pve.client.button"), { class: "small", onclick: () => (pveClientDialog(x, g)) }, "download")),
       c?.description && h("p", { class: "muted small wrap" }, c.description),
     ),
-    h("div", { class: "section-head" }, h("h3", null, t("pve.snapshots")), g.may.snapshot && button(t("pve.snapshotTake"), { class: "small", onclick: () => (dialog.close(), pveSnapshotDialog(x, g)) }, "plus")),
+    h("div", { class: "section-head" }, h("h3", null, t("pve.snapshots")), g.may.snapshot && button(t("pve.snapshotTake"), { class: "small", onclick: () => (pveSnapshotDialog(x, g)) }, "plus")),
     snaps,
     h("div", { class: "section-head" }, h("h3", null, t("pve.backups")), g.may.backup && x.storages.some((st) => st.node === g.node && st.active && st.backup) && button(t("pve.backupTake"), { class: "small", onclick: (e) => pveBackupNow(x, g, e.currentTarget) }, "plus")),
     backs,
-    h("footer", null, closeButton(() => dialog)),
-  );
-  void (async () => {
+  ];
+  const load = async () => {
     try {
       const { snapshots } = await api("GET", `/api/proxmox/${x.id}/guests/${g.id}/snapshots`);
       put(
@@ -6122,7 +6249,7 @@ function pveGuestDialog(x, g) {
                 "div",
                 { class: "pve-row" },
                 h("div", { class: "grow" }, h("div", null, h("span", { class: "mono strong" }, s.name), s.memory && h("span", { class: "chip" }, t("pve.withMemory"))), h("div", { class: "muted small" }, [s.at ? dateTime(s.at) : "", s.description].filter(Boolean).join(" · "))),
-                h("div", { class: "row-actions" }, g.may.rollback && button(t("pve.rollback"), { class: "small", onclick: () => (dialog.close(), pveSnapshotAct(x, g, s, "rollback")) }, "undo"), g.may.snapshot && button("", { class: "small ghost", title: t("pve.snapshotRemove"), "aria-label": t("pve.snapshotRemove"), onclick: () => (dialog.close(), pveSnapshotAct(x, g, s, "delete")) }, "trash")),
+                h("div", { class: "row-actions" }, g.may.rollback && button(t("pve.rollback"), { class: "small", onclick: () => (pveSnapshotAct(x, g, s, "rollback")) }, "undo"), g.may.snapshot && button("", { class: "small ghost", title: t("pve.snapshotRemove"), "aria-label": t("pve.snapshotRemove"), onclick: () => (pveSnapshotAct(x, g, s, "delete")) }, "trash")),
               ),
             )
           : h("p", { class: "muted small" }, t("pve.noSnapshots")),
@@ -6134,14 +6261,62 @@ function pveGuestDialog(x, g) {
       const r = await api("GET", `/api/proxmox/${x.id}/guests/${g.id}/backups`);
       put(
         backs,
-        r.backups.length ? r.backups.slice(0, 10).map((b) => h("div", { class: "pve-row" }, h("div", { class: "grow" }, h("div", null, dateTime(b.at), b.protected && h("span", { class: "chip" }, t("pve.protected"))), b.notes && h("div", { class: "muted small" }, b.notes)), h("span", { class: "muted small" }, `${b.storage} · ${bytes(b.size)}`), g.may.remove && button(t("pve.restore.button"), { class: "small", onclick: () => (dialog.close(), pveRestoreDialog(x, g, b)) }, "undo"))) : h("p", { class: "muted small" }, r.storages.length ? t("pve.noBackups") : t("pve.noBackupStorages")),
+        r.backups.length ? r.backups.slice(0, 10).map((b) => h("div", { class: "pve-row" }, h("div", { class: "grow" }, h("div", null, dateTime(b.at), b.protected && h("span", { class: "chip" }, t("pve.protected"))), b.notes && h("div", { class: "muted small" }, b.notes)), h("span", { class: "muted small" }, `${b.storage} · ${bytes(b.size)}`), g.may.remove && button(t("pve.restore.button"), { class: "small", onclick: () => (pveRestoreDialog(x, g, b)) }, "undo"))) : h("p", { class: "muted small" }, r.storages.length ? t("pve.noBackups") : t("pve.noBackupStorages")),
         r.backups.length > 10 && h("p", { class: "muted small" }, t("pve.moreBackups", { n: r.backups.length - 10 })),
         r.unreachable.length > 0 && h("p", { class: "muted small" }, t("pve.storagesUnreachable", { list: r.unreachable.join(", ") })),
       );
     } catch (e) {
       backs.replaceChildren(h("p", { class: "muted small" }, errorText(e)));
     }
-  })();
+  };
+  return { header: () => h("header", null, h("span", { class: "machine-icon" }, icon(g.type === "lxc" ? "box" : "server")), h("div", { class: "grow" }, h("h2", null, g.name), h("p", { class: "muted small" }, guestKind(g), " · ", guestChip(g))), ), parts, load };
+}
+
+
+/** The same as a window, where a guest is not on a page of its own */
+function pveGuestDialog(x, g) {
+  // on a page that shows the guest already, that page is simply drawn again
+  if (state.route.view === "guest") return void loadGuest();
+  if (state.route.view === "machine" && machinesUi.current?.pve?.id === g.id) return paintMachineExtra();
+  go(`#/guest/${x.id}/${g.id}`);
+}
+
+/** Reads the server and puts a guest's parts into a box */
+async function paintGuestParts(box, hostId, guestId) {
+  try {
+    pveUi.host = await api("GET", `/api/proxmox/${hostId}`);
+  } catch (e) {
+    return put(box, h("p", { class: "card pad muted" }, errorText(e)));
+  }
+  const g = pveUi.host.guests.find((y) => y.id === guestId);
+  if (!g) return put(box, h("p", { class: "card pad muted" }, t("instance.gone")));
+  const { parts, load } = pveGuestParts(pveUi.host, g);
+  put(box, h("section", { class: "card pad stack-s pve-guest-page" }, parts));
+  void load();
+  return g;
+}
+
+function renderGuest() {
+  shell(h("div", { id: "guest-head", class: "card pad thing-head" }), h("div", { id: "guest-body", class: "stack" }));
+  void loadGuest();
+}
+
+async function loadGuest() {
+  const box = document.getElementById("guest-body");
+  const head = document.getElementById("guest-head");
+  if (!box || !head) return;
+  const { host, guest } = state.route;
+  const g = await paintGuestParts(box, host, guest);
+  const x = pveUi.host;
+  if (!g || !x) return;
+  // with Hata's client it is a machine: one thing, one page
+  const m = machinesUi.list?.machines.find((y) => y.pve?.host === host && y.pve?.id === guest);
+  if (m) return void go(`#/machines/${m.id}`);
+  put(
+    head,
+    h("nav", { class: "crumbs" }, h("a", { href: "#/machines" }, t("nav.machines")), icon("chevron"), h("a", { href: `#/proxmox/${x.id}` }, x.name), icon("chevron"), h("span", null, g.name)),
+    h("div", { class: "app-head" }, h("span", { class: "machine-icon" }, icon(g.type === "lxc" ? "box" : "screen")), h("div", { class: "grow" }, h("div", { class: "app-title" }, h("h1", null, g.name), guestChip(g)), h("p", { class: "meta" }, [guestKind(g), g.config?.os, g.config?.addresses?.[0]].filter(Boolean).join(" · ")))),
+  );
 }
 
 /** A guest's settings: name, processor, memory, disks made larger, start with the server, tags and notes */
@@ -6501,7 +6676,7 @@ async function pveTaskDialog(x, task, target) {
 
 // --- One machine ---
 
-const MACHINE_TABS = ["overview", "apps", "containers", "docker", "terminal"];
+const MACHINE_TABS = ["overview", "apps", "containers", "terminal"];
 
 function renderMachine() {
   if (machinesUi.current?.id !== state.route.id) {
@@ -6518,9 +6693,9 @@ function renderMachineHead() {
   const head = document.getElementById("machine-head");
   if (!head) return;
   if (!m) return put(head, h("nav", { class: "crumbs" }, h("a", { href: "#/machines" }, t("nav.machines"))), machinesUi.list && h("p", { class: "card pad muted" }, t("error.machine.notFound")));
-  const tab = (id, iconName) => h("a", { class: "tab" + (state.route.tab === id ? " active" : ""), href: `#/machines/${m.id}${id === "overview" ? "" : "/" + id}` }, icon(iconName), t("machines.tab." + id));
+  const tab = (id, iconName) => h("a", { class: "tab" + (state.route.tab === id ? " active" : ""), href: `#/machines/${m.id}${id === "overview" ? "" : "/" + id}` }, icon(iconName), t(id === "containers" ? "machines.tab.docker" : "machines.tab." + id));
   head.replaceChildren(
-    h("nav", { class: "crumbs" }, h("a", { href: "#/machines" }, t("nav.machines")), icon("chevron"), h("span", null, m.name)),
+    h("nav", { class: "crumbs" }, h("a", { href: "#/machines" }, t("nav.machines")), icon("chevron"), m.instance && [h("a", { href: "#/containers" }, t("tree.thisServer")), icon("chevron")], m.pve && [h("a", { href: `#/proxmox/${m.pve.host}` }, m.pve.hostName), icon("chevron")], h("span", null, m.name)),
     h(
       "div",
       { class: "app-head", menu: (at) => machineMenu(m, at) },
@@ -6533,14 +6708,14 @@ function renderMachineHead() {
         // a virtual machine of this server or of Proxmox: what is on its screen, a desktop too
         m.incusVm && m.online && button(t("incus.screen"), { onclick: () => containerScreen({ name: m.incusVm }) }, "screen"),
         m.pve?.type === "qemu" && m.pve.status === "running" && button(t("pve.screen"), { onclick: () => pveConsoleDialog({ id: m.pve.host }, m.pve) }, "screen"),
-        m.online && h("a", { class: "btn", href: filesHash("/", m.id) }, icon("folder"), h("span", null, t("machines.files"))),
         !m.online && m.pve?.power && m.pve.status !== "running" && button(t("pve.startHere", { host: m.pve.hostName }), { class: "primary", onclick: (e) => startGuestOf(m, e.currentTarget) }, "play"),
-        !m.online && !(m.pve?.power && m.pve.status !== "running") && m.info?.macs?.length > 0 && button(t("machines.wake"), { class: "primary", onclick: (e) => wakeMachine(m, e.currentTarget) }, "play"),
+        !m.online && m.instance && button(t("incus.start"), { class: "primary", onclick: (e) => startInstanceOf(m, e.currentTarget) }, "play"),
+        !m.online && !m.instance && !(m.pve?.power && m.pve.status !== "running") && m.info?.macs?.length > 0 && button(t("machines.wake"), { class: "primary", onclick: (e) => wakeMachine(m, e.currentTarget) }, "play"),
         m.pve && h("a", { class: "btn", href: `#/proxmox/${m.pve.host}/guests` }, icon("server"), h("span", null, guestKind(m.pve) + " · " + m.pve.hostName)),
         h("button", { type: "button", class: "btn square", "aria-label": t("app.more"), onclick: () => machineMenu(m) }, icon("more")),
       ),
     ),
-    h("div", { class: "tabs" }, tab("overview", "grid"), tab("apps", "store"), tab("containers", "box"), tab("docker", "disk"), tab("terminal", "terminal")),
+    h("div", { class: "tabs" }, tab("overview", "grid"), tab("apps", "store"), tab("containers", "box"), m.online && h("a", { class: "tab", href: filesHash("/", m.id) }, icon("folder"), t("machines.files")), tab("terminal", "terminal")),
   );
 }
 
@@ -6553,7 +6728,7 @@ function machineMenu(m, at = null) {
     item(t("machines.rename"), "edit", () => renameMachineDialog(m)),
     item(t("names.give") + "…", "globe", () => domainNameDialog(null, { target: { kind: "machine", id: m.id }, label: m.name })),
     item(t("ports.open") + "…", "network", () => forwardDialog(null, { target: { kind: "machine", id: m.id } })),
-    !m.online && m.info?.macs?.length > 0 && item(t("machines.wake"), "play", () => wakeMachine(m)),
+    !m.online && !m.instance && m.info?.macs?.length > 0 && item(t("machines.wake"), "play", () => wakeMachine(m)),
     m.online && item(t("machines.reboot"), "refresh", () => powerDialog(m, "reboot")),
     m.online && item(t("machines.poweroff"), "stop", () => powerDialog(m, "poweroff")),
     m.online && item(t("machines.updateAgain"), "up", () => updateMachine(m)),
@@ -6729,20 +6904,21 @@ function renderMachineTab() {
   if (!box || !m) return;
   if (!m.online && state.route.tab !== "overview") return box.replaceChildren(h("p", { class: "card pad muted" }, t("error.machine.offline", { name: m.name })));
   if (state.route.tab === "containers") {
-    box.replaceChildren(h("div", { id: "machine-containers" }, h("p", { class: "muted" }, t("machines.loading"))));
+    box.replaceChildren(h("div", { class: "stack" }, h("div", { id: "machine-containers" }, h("p", { class: "muted" }, t("machines.loading"))), h("div", { id: "machine-docker", class: "stack" })));
     if (machinesUi.containers) paintMachineContainers();
     void loadMachineContainers();
+    paintSpace(m.id);
+    void loadSpace(m.id);
   } else if (state.route.tab === "apps") {
     box.replaceChildren(h("div", { id: "machine-apps" }, h("p", { class: "muted" }, t("machines.loading"))));
     if (machinesUi.apps?.machine === m.id) paintMachineApps();
     void loadMachineApps();
-  } else if (state.route.tab === "docker") {
-    box.replaceChildren(h("div", { id: "machine-docker", class: "stack" }));
-    paintSpace(m.id);
-    void loadSpace(m.id);
   } else if (state.route.tab === "terminal") {
     box.replaceChildren(h("div", { class: "term-holder" }, terminalFrame({ machine: m.id })));
-  } else machineOverview(m, box);
+  } else {
+    machineOverview(m, box);
+    paintMachineExtra();
+  }
 }
 
 function machineOverview(m, box) {
@@ -6755,17 +6931,18 @@ function machineOverview(m, box) {
       h(
         "div",
         { class: "stack" },
-        h("div", { class: "section-head" }, h("h2", null, t("app.resources"))),
         m.online
           ? h("section", { class: "stats card" }, statCells("m"))
           : h("p", { class: "card pad muted" }, t("machines.offlineLead", { ago: ago(m.seen) })),
         h("div", { id: "m-disks" }),
         m.online && h("div", { id: "machine-sysupdates" }, sysUpdatesCard(m.id)),
+        h("div", { id: "machine-extra", class: "stack" }),
         h("div", { id: "machine-people" }, machinePeopleCard(m)),
       ),
       h(
         "aside",
-        { class: "side" },
+        { class: "side stack" },
+        h("div", { id: "machine-side", class: "stack" }),
         h(
           "section",
           { class: "card pad" },
@@ -6907,9 +7084,27 @@ async function machineShareDialog(m, path) {
   );
 }
 
+/** A machine that is also an instance of this server or a guest of Proxmox: what that gives, on the same page */
+function paintMachineExtra() {
+  const box = document.getElementById("machine-extra");
+  const m = machinesUi.current;
+  if (!box || !m) return;
+  if (m.instance) {
+    const c = incusUi.data?.containers?.find((x) => x.name === m.instance);
+    const key = c ? JSON.stringify(c) : "";
+    if (c && box.dataset.shown !== key) {
+      box.dataset.shown = key;
+      const { main, side } = instanceCards(c);
+      put(box, main);
+      put(document.getElementById("machine-side"), side);
+    }
+  } else if (m.pve) void paintGuestParts(box, m.pve.host, m.pve.id);
+}
+
 function paintMachineOverview() {
   const box = document.getElementById("machine-tab");
   if (box && machinesUi.current) machineOverview(machinesUi.current, box);
+  paintMachineExtra();
 }
 
 function paintMachineStats(m) {
@@ -8261,7 +8456,7 @@ function offsiteCard(o) {
     inPlace &&
       (o.places.length
         ? [field(t("offsite.place"), placeChoice), field(t("offsite.placePath"), placePath, t("offsite.placePathHint"))]
-        : h("p", { class: "muted" }, t("offsite.noPlaces"), " ", h("a", { href: "#/settings/storage" }, t("offsite.addPlace")))),
+        : h("p", { class: "muted" }, t("offsite.noPlaces"), " ", h("a", { href: "#/settings/places" }, t("offsite.addPlace")))),
     sftp && h("div", { class: "field-row" }, field(t("offsite.host"), host), field(t("offsite.port"), port)),
     sftp && field(t("offsite.user"), user),
     sftp && field(t("offsite.path"), path, t("offsite.pathHint")),
@@ -11027,7 +11222,7 @@ async function loadSettings() {
     if (isAdmin() && state.route.section === "tools") [state.tools, sysUpdates[""]] = await Promise.all([api("GET", "/api/tools").catch(() => null), api("GET", "/api/system/updates").catch((e) => ({ error: errorText(e) }))]);
     // counting the volumes takes a while: the page is shown first
     if (isAdmin() && state.route.section === "docker") void loadSpace();
-    if (isAdmin() && state.route.section === "storage") [state.disks, state.places] = await Promise.all([api("GET", "/api/disks").catch(() => null), api("GET", "/api/netplaces").catch(() => null)]);
+    if (isAdmin() && STORAGE_SECTIONS.includes(state.route.section)) [state.disks, state.places] = await Promise.all([api("GET", "/api/disks").catch(() => null), api("GET", "/api/netplaces").catch(() => null)]);
     if (isAdmin() && state.route.section === "shares") state.shares = await api("GET", "/api/shares").catch(() => null);
     if (isAdmin() && state.route.section === "agents") state.agents = await api("GET", "/api/agents").catch(() => null);
     if (isAdmin() && state.route.section === "assistant") state.assistant = await api("GET", "/api/assistant").catch(() => null);
@@ -11041,28 +11236,129 @@ async function loadSettings() {
 }
 
 const LANGUAGE_NAMES = { en: "English", uk: "Українська" };
+/** The sections of Settings by what they are about; a member sees those without `admin` */
 const SECTIONS = [
-  { id: "account", icon: "user" },
-  { id: "general", icon: "sliders" },
-  { id: "users", icon: "user", admin: true, label: "nav.users" },
-  { id: "backups", icon: "archive", admin: true, label: "nav.backups" },
-  { id: "appearance", icon: "image", admin: true },
-  { id: "apps", icon: "grid", admin: true },
-  { id: "docker", icon: "box", admin: true },
-  { id: "stores", icon: "store", admin: true },
-  { id: "storage", icon: "disk", admin: true },
-  { id: "shares", icon: "share", admin: true },
-  { id: "network", icon: "network", admin: true },
-  { id: "remote", icon: "globe", admin: true },
-  { id: "https", icon: "lock", admin: true },
-  { id: "dns", icon: "globe", admin: true },
-  { id: "adblock", icon: "shield", admin: true },
-  { id: "notifications", icon: "bell", admin: true },
-  { id: "agents", icon: "key", admin: true },
-  { id: "assistant", icon: "chat", admin: true },
-  { id: "tools", icon: "terminal", admin: true },
-  { id: "about", icon: "info" },
+  { id: "account", icon: "user", group: "you" },
+  { id: "general", icon: "sliders", group: "server" },
+  { id: "appearance", icon: "image", group: "server", admin: true },
+  { id: "notifications", icon: "bell", group: "server", admin: true },
+  { id: "tools", icon: "terminal", group: "server", admin: true },
+  { id: "about", icon: "info", group: "server" },
+  { id: "users", icon: "users", group: "people", admin: true, label: "nav.users" },
+  { id: "apps", icon: "grid", group: "apps", admin: true },
+  { id: "stores", icon: "store", group: "apps", admin: true },
+  { id: "docker", icon: "box", group: "apps", admin: true },
+  { id: "storage", icon: "disk", group: "storage", admin: true },
+  { id: "shares", icon: "share", group: "storage", admin: true },
+  { id: "places", icon: "network", group: "storage", admin: true },
+  { id: "protection", icon: "shield", group: "storage", admin: true },
+  { id: "backups", icon: "archive", group: "storage", admin: true, label: "nav.backups" },
+  { id: "network", icon: "network", group: "network", admin: true },
+  { id: "remote", icon: "globe", group: "network", admin: true },
+  { id: "https", icon: "lock", group: "network", admin: true },
+  { id: "ports", icon: "plug", group: "network", admin: true },
+  { id: "dns", icon: "signpost", group: "network", admin: true },
+  { id: "adblock", icon: "ban", group: "network", admin: true },
+  { id: "agents", icon: "key", group: "automation", admin: true },
+  { id: "assistant", icon: "chat", group: "automation", admin: true },
 ];
+const SECTION_GROUPS = ["you", "server", "people", "apps", "storage", "network", "automation"];
+/** The sections that read the disks' report */
+const STORAGE_SECTIONS = ["storage", "places", "protection"];
+const onStorageSection = () => state.route.view === "settings" && STORAGE_SECTIONS.includes(state.route.section);
+const sectionTitle = (item) => t(item.label ?? "settings." + item.id);
+
+/** What "Find a setting" looks through: each section's cards by their strings, and the words a person may think of (`settings.find.<id>`) */
+const SECTION_CARDS = {
+  account: ["account.password", "twofa.title", "passkey.title", "account.sessions"],
+  general: ["settings.language", "settings.port", "welcome.again"],
+  users: ["access.title", "invite.title2", "signins.title"],
+  backups: ["backup.server", "backup.schedule", "offsite.title"],
+  appearance: ["appearance.colours", "appearance.picture"],
+  apps: ["settings.dataRoot", "settings.timezone", "images.title", "state.title"],
+  docker: ["docker.images", "docker.volumes"],
+  storage: ["disks.title", "disks.fs.title"],
+  shares: ["shares.title", "shares.users.title", "shares.how.title"],
+  places: ["netplace.title"],
+  protection: ["array.title", "raid.title"],
+  remote: ["remote.networks", "remote.devices", "wg.in.title", "wg.out.title"],
+  https: ["local.title", "names.title", "https.checkTitle", "https.addresses"],
+  ports: ["ports.title"],
+  dns: ["dns.upTitle", "dns.namesTitle", "dns.usageTitle"],
+  adblock: ["adblock.lists", "adblock.own", "adblock.log", "adblock.import"],
+  notifications: ["notify.telegram.title", "notify.ntfy.title", "notify.email.title", "notify.webhook.title"],
+  agents: ["agents.title", "agents.how.title", "agents.levels.title"],
+  tools: ["sysupdates.title"],
+};
+
+/** Sections and cards whose names hold the words typed; a section's other words lead to the section itself */
+function findSettings(typed) {
+  const q = typed.trim().toLowerCase();
+  if (!q) return [];
+  return sections().flatMap((item) => {
+    const cards = (SECTION_CARDS[item.id] ?? []).map((key) => t(key)).filter((text) => text.toLowerCase().includes(q));
+    const named = sectionTitle(item).toLowerCase().includes(q) || t("settings.find." + item.id).toLowerCase().includes(q);
+    return cards.length || named ? [{ item, cards }] : [];
+  });
+}
+
+/** A piece of text with the words typed marked */
+function markFound(text, typed) {
+  const at = text.toLowerCase().indexOf(typed.trim().toLowerCase());
+  if (at < 0) return text;
+  const end = at + typed.trim().length;
+  return [text.slice(0, at), h("mark", null, text.slice(at, end)), text.slice(end)];
+}
+
+/** Opens a section and brings the card asked for into view: the section may draw it a moment later */
+function openSettingsCard(item, card) {
+  go(`#/settings/${item.id}`);
+  if (!card) return;
+  let tries = 0;
+  const look = () => {
+    const found = [...document.querySelectorAll(".settings :is(h2, h3, strong)")].find((el) => el.textContent.trim().startsWith(card));
+    if (found) return found.scrollIntoView({ block: "center" });
+    if (++tries < 20) setTimeout(look, 200);
+  };
+  setTimeout(look, 100);
+}
+
+/** The column of Settings: finding a setting on top, the sections by group, or what was found */
+function settingsNav(section) {
+  const list = h("div", { class: "settings-list" });
+  const paint = () => {
+    const typed = settingsUi.find;
+    clear.hidden = !typed;
+    if (!typed.trim()) {
+      return put(list, SECTION_GROUPS.map((group) => {
+        const items = sections().filter((item) => item.group === group);
+        return items.length > 0 && h("div", { class: "cats" }, h("div", { class: "cat-title" }, t("settings.group." + group)), items.map((item) => h("a", { class: "cat" + (section === item.id ? " active" : ""), href: `#/settings/${item.id}` }, h("span", { class: "with-icon" }, icon(item.icon), sectionTitle(item)))));
+      }));
+    }
+    const found = findSettings(typed);
+    if (!found.length) return put(list, h("div", { class: "settings-found" }, h("strong", null, t("settings.findNone", { text: typed.trim() })), h("p", { class: "muted small" }, t("settings.findNoneHint"))));
+    const count = found.reduce((sum, f) => sum + (f.cards.length || 1), 0);
+    put(
+      list,
+      h("p", { class: "muted small settings-found" }, t("settings.findCount", { n: count, sections: found.length })),
+      found.map(({ item, cards }) =>
+        h(
+          "div",
+          { class: "cats found" },
+          h("a", { class: "cat", href: `#/settings/${item.id}` }, h("span", null, h("strong", null, markFound(sectionTitle(item), typed)), h("span", { class: "muted small" }, " · ", t("settings.group." + item.group)))),
+          cards.map((card) => h("button", { type: "button", class: "cat", onclick: () => openSettingsCard(item, card) }, h("span", null, markFound(card, typed)))),
+        ),
+      ),
+    );
+  };
+  // on a phone the list closes over the section chosen: the words typed go with it
+  list.addEventListener("click", (e) => e.target.closest("a, button") && matchMedia("(max-width: 760px)").matches && (settingsUi.find = ""));
+  const input = h("input", { type: "search", placeholder: t("settings.find"), "aria-label": t("settings.find"), value: settingsUi.find, oninput: () => ((settingsUi.find = input.value), paint()) });
+  const clear = h("button", { type: "button", class: "icon-btn quiet", "aria-label": t("common.clear"), hidden: !settingsUi.find, onclick: () => ((settingsUi.find = input.value = ""), paint(), input.focus()) }, icon("x"));
+  paint();
+  return h("nav", { class: "settings-nav fold" }, h("label", { class: "settings-find" }, icon("search"), input, clear), list);
+}
+
 const sections = () => SECTIONS.filter((item) => !item.admin || isAdmin());
 
 function settingRow(title, hint, control) {
@@ -11480,7 +11776,8 @@ function settingsSection(section) {
   if (section === "dns") return dnsSection();
   if (section === "adblock") return adblockSection();
   if (section === "notifications") return notificationsSection();
-  if (section === "storage") return storageSection();
+  if (STORAGE_SECTIONS.includes(section)) return storageSection(section);
+  if (section === "ports") return [portsCard()];
   if (section === "shares") return sharesSection();
   if (section === "network") return networkSection();
   if (section === "tools") return toolsSection();
@@ -13246,7 +13543,6 @@ function httpsSection(save, error) {
       h("footer", null, h("button", { class: "btn primary" }, t("settings.save"))),
     ),
     namesCard(),
-    portsCard(),
     https.mode === "acme" && https.domain && wildcardCard(paintCerts),
     https.mode === "acme" && h("section", { class: "card pad" }, h("div", { class: "section-head" }, h("h2", null, t("https.certificates")), retry), h("p", { class: "muted small" }, t(https.wildcard && https.wildcard !== "off" ? "wildcard.certificatesLead" : "https.certificatesLead")), certs),
     here && h("section", { class: "card pad" }, h("div", { class: "section-head" }, h("h2", null, t("https.checkTitle")), check), h("p", { class: "muted small" }, t("https.checkLead", { domain: here })), results),
@@ -13803,7 +14099,7 @@ function paintAdblock(box, d, load) {
   };
   const share = d.day.questions ? Math.round((d.day.blocked / d.day.questions) * 100) : 0;
   const mode = h("select", { onchange: () => act("PUT", "/api/dns/block", { mode: mode.value }) }, ["zero", "nxdomain"].map((m) => h("option", { value: m, selected: s.mode === m }, t("adblock.mode." + m))));
-  const pauseMenu = (at) => menuAt(at, null, PAUSES.map((minutes) => ({ label: t("adblock.pauseFor", { what: pauseWords(minutes) }), icon: "clock", run: () => act("POST", "/api/dns/block/pause", { minutes }) })));
+  const pauseMenu = (el) => menuAt(underButton(el), null, PAUSES.map((minutes) => ({ label: t("adblock.pauseFor", { what: pauseWords(minutes) }), icon: "clock", run: () => act("POST", "/api/dns/block/pause", { minutes }) })));
   const status = h(
     "section",
     { class: "card pad stack" },
@@ -14409,7 +14705,7 @@ let diskDialogPaint = null;
 
 function setDisks(data) {
   state.disks = data;
-  if (state.route.view === "settings" && state.route.section === "storage") renderSettings();
+  if (onStorageSection()) renderSettings();
   if (state.route.view === "welcome") paintWelcome();
   diskDialogPaint?.();
 }
@@ -15213,7 +15509,7 @@ function smartLimitsDialog(limits) {
   );
 }
 
-function storageSection() {
+function storageSection(section = "storage") {
   const data = state.disks;
   if (!data) return [h("p", { class: "muted" }, "…")];
   const error = h("p", { class: "error", role: "alert" });
@@ -15237,7 +15533,7 @@ function storageSection() {
   if (data.fills?.running || data.raids?.pools.some((p) => p.work) || data.disks.some((d) => d.smart?.testing != null)) {
     disksTimer = setTimeout(
       async () => {
-        if (state.route.view === "settings" && state.route.section === "storage") setDisks(await api("GET", "/api/disks").catch(() => state.disks));
+        if (onStorageSection()) setDisks(await api("GET", "/api/disks").catch(() => state.disks));
       },
       data.fills?.running || data.raids?.pools.some((p) => p.work) ? 3000 : 20_000,
     );
@@ -15257,7 +15553,7 @@ function storageSection() {
       h("td", { class: "num" + (hot ? " bad" : "") }, disk.smart?.temperature != null ? disk.smart.temperature + " °C" : "—"),
       h("td", null, total ? usageBar(used, total) : h("span", { class: "muted" }, "—")),
       h("td", { class: "mono" }, mounts.length ? mounts.map((m) => h("div", { class: "clip" }, m)) : h("span", { class: "muted" }, t("disks.notMounted"))),
-      h("td", null, h("div", { class: "row-actions" }, canPrepare(disk) && !mounts.length && !canConnect(disk).length && button(t("mounting.format"), { class: "small primary", onclick: (e) => (e.stopPropagation(), formatDialog(disk)) }), (disk.removable || disk.transport === "usb") && state.disks.mounting?.possible && disk.volumes.some((v) => v.fstype && v.mounts.length > 0) && button(t("copyin.button"), { class: "small", onclick: (e) => (e.stopPropagation(), copyInDialog(disk)) }, "download"), canConnect(disk).length > 0 && button(t("mounting.connect"), { class: "small primary", onclick: (e) => (e.stopPropagation(), connectDialog(disk, canConnect(disk)[0])) }), button(t("disks.details"), { class: "small", onclick: (e) => (e.stopPropagation(), diskDialog(disk.name)) }))),
+      h("td", null, h("div", { class: "row-actions" }, canPrepare(disk) && !mounts.length && !canConnect(disk).length && button(t("mounting.format"), { class: "small", onclick: (e) => (e.stopPropagation(), formatDialog(disk)) }), (disk.removable || disk.transport === "usb") && state.disks.mounting?.possible && disk.volumes.some((v) => v.fstype && v.mounts.length > 0) && button(t("copyin.button"), { class: "small", onclick: (e) => (e.stopPropagation(), copyInDialog(disk)) }, "download"), canConnect(disk).length > 0 && button(t("mounting.connect"), { class: "small primary", onclick: (e) => (e.stopPropagation(), connectDialog(disk, canConnect(disk)[0])) }), button(t("disks.details"), { class: "small", onclick: (e) => (e.stopPropagation(), diskDialog(disk.name)) }))),
     );
   };
   const checked = Math.max(0, ...data.disks.map((d) => d.checkedAt ?? 0));
@@ -15316,6 +15612,28 @@ function storageSection() {
       ),
     );
   };
+  if (section === "places") return [state.places ? placesCard(state.places) : h("p", { class: "muted" }, "…")];
+  if (section === "protection") {
+    return [
+      data.working && diskWorkStrip(data.working),
+      data.array?.on && data.mounting?.possible && data.disks.length > 1 && h("section", { class: "card pad" }, h("div", { class: "section-head" }, h("h2", null, t("pool.open").replace(/…$/, "")), button(t("pool.open"), { class: "small", onclick: () => poolDialog() })), h("p", { class: "muted small" }, t("protection.poolLead"))),
+      data.array && data.mounting?.possible && arrayCard(data, data.array),
+      data.raids && (data.raids.pools.length > 0 || data.raids.lacking.length > 0) && raidCard(data),
+      !data.mounting?.possible && !(data.raids?.pools.length > 0) && h("section", { class: "card pad" }, h("p", { class: "muted" }, t("protection.notHere"))),
+    ].filter(Boolean);
+  }
+  const tab = settingsTab("storage");
+  if (tab === "fills") return [data.fills ? fillsCard(data.fills, busy) : h("section", { class: "card pad" }, h("p", { class: "muted" }, t("protection.noFills")))];
+  if (tab === "fs") {
+    return [
+      h(
+        "section",
+        { class: "card table-wrap" },
+        h("div", { class: "pad card-head" }, h("h2", null, t("disks.fs.title")), h("p", { class: "muted small" }, t("disks.fs.lead"))),
+        (data.mounts.length > 0 || absent.length > 0) && h("table", { class: "disks" }, h("thead", null, h("tr", null, h("th", null, t("disks.fs.col.path")), h("th", null, t("disks.fs.col.source")), h("th", null, t("disks.col.usage")), h("th"))), h("tbody", null, data.mounts.map(fsRow), absent.map(absentRow))),
+      ),
+    ];
+  }
   return [
     data.working && diskWorkStrip(data.working),
     fresh.map(freshCard),
@@ -15337,24 +15655,13 @@ function storageSection() {
       h(
         "div",
         { class: "pad card-head" },
-        h("div", { class: "section-head" }, h("h2", null, t("disks.title"), h("span", { class: "muted" }, t("disks.connected", { n: data.disks.length }))), h("div", { class: "row-actions" }, data.mounting?.possible && data.array && data.disks.length > 1 && button(t("pool.open"), { class: "small", onclick: () => poolDialog() }), (data.mounting?.mergeable.length ?? 0) > 1 && button(t("mounting.merge"), { class: "small", onclick: () => mergeDialog() }), data.tool === "ok" && data.disks.length > 0 && checked > 0 && h("span", { class: "muted small" }, t("disks.checked", { when: ago(checked) })), data.tool === "ok" && data.disks.length > 0 && data.limits && button(t("disks.limits"), { class: "small", onclick: () => smartLimitsDialog(data.limits) }), data.tool === "ok" && data.disks.length > 0 && button(t("disks.checkNow"), { class: "small", onclick: busy("…", { path: "/api/disks/check" }) }, "refresh"))),
+        h("div", { class: "section-head" }, h("h2", null, t("disks.title"), h("span", { class: "muted" }, t("disks.connected", { n: data.disks.length }))), h("div", { class: "row-actions" }, (data.mounting?.mergeable.length ?? 0) > 1 && button(t("mounting.merge"), { class: "small", onclick: () => mergeDialog() }), data.tool === "ok" && data.disks.length > 0 && checked > 0 && h("span", { class: "muted small" }, t("disks.checked", { when: ago(checked) })), data.tool === "ok" && data.disks.length > 0 && data.limits && button(t("disks.limits"), { class: "small", onclick: () => smartLimitsDialog(data.limits) }), data.tool === "ok" && data.disks.length > 0 && button(t("disks.checkNow"), { class: "small", onclick: busy("…", { path: "/api/disks/check" }) }, "refresh"))),
         h("p", { class: "muted small" }, t(data.disks.length ? "disks.lead" : "disks.none")),
         error,
       ),
       data.disks.length > 0 && h("table", { class: "disks" }, h("thead", null, h("tr", null, h("th", null, t("disks.col.disk")), h("th", null, t("disks.col.health")), h("th", { class: "num" }, t("disks.col.temp")), h("th", null, t("disks.col.usage")), h("th", null, t("disks.col.mounted")), h("th"))), h("tbody", null, data.disks.map(row))),
     ),
-    data.raids && (data.raids.pools.length > 0 || data.raids.lacking.length > 0) && raidCard(data),
-    (data.mounts.length > 0 || absent.length > 0) &&
-      h(
-        "section",
-        { class: "card table-wrap" },
-        h("div", { class: "pad card-head" }, h("h2", null, t("disks.fs.title")), h("p", { class: "muted small" }, t("disks.fs.lead"))),
-        h("table", { class: "disks" }, h("thead", null, h("tr", null, h("th", null, t("disks.fs.col.path")), h("th", null, t("disks.fs.col.source")), h("th", null, t("disks.col.usage")), h("th"))), h("tbody", null, data.mounts.map(fsRow), absent.map(absentRow))),
-      ),
     data.mounting?.possible && h("section", { class: "card pad" }, h("label", { class: "check" }, automount, h("span", null, h("strong", null, t("mounting.automount")), h("span", { class: "muted small block" }, t("mounting.automountHint"))))),
-    state.places && placesCard(state.places),
-    data.array && data.mounting?.possible && arrayCard(data, data.array),
-    data.fills && fillsCard(data.fills, busy),
   ].filter(Boolean);
 }
 
@@ -15445,7 +15752,7 @@ const placeAddress = (p) => (p.kind === "webdav" ? p.url : p.kind === "smb" ? `/
 
 async function reloadPlaces(list) {
   state.places = list ? { ...state.places, places: list } : await api("GET", "/api/netplaces").catch(() => state.places);
-  if (state.route.view === "settings" && state.route.section === "storage") renderSettings();
+  if (onStorageSection()) renderSettings();
 }
 
 function placesCard(data) {
@@ -15525,7 +15832,7 @@ async function sidebarMenu(at, { label, path, machine = "", volume = null, iconN
       if (removable && data.mounting?.possible) entries.push({ label: t("copyin.button"), icon: "download", run: () => copyInDialog(disk) });
       if (mount && data.mounting?.ours[mount.path] && !pooled) entries.push({ label: t(removable ? "mounting.eject" : "mounting.disconnect"), icon: "signout", run: () => disconnectDialog(mount) });
     }
-    entries.push({ label: t("menu.inStorage"), icon: "disk", href: "#/settings/storage" });
+    entries.push({ label: t("menu.inStorage"), icon: "disk", href: "#/settings/places" });
   }
   menuAt(at, menuHeader(label, path, iconName), entries);
 }
@@ -15534,7 +15841,7 @@ async function sidebarMenu(at, { label, path, machine = "", volume = null, iconN
 async function addPlaceHere(e) {
   e.preventDefault();
   if (!state.places) state.places = await api("GET", "/api/netplaces").catch(() => null);
-  if (!state.places) return go("#/settings/storage");
+  if (!state.places) return go("#/settings/places");
   const before = new Set(state.places.places.map((p) => p.id));
   placeDialog(null, {}, (list) => {
     const made = list.find((p) => !before.has(p.id));
@@ -15724,7 +16031,7 @@ async function arrayCall(method, path, data, done) {
 function arrayCard(data, array) {
   clearTimeout(arrayTimer);
   // a run moves without telling: the page looks again while one goes
-  if (array.running) arrayTimer = setTimeout(async () => state.route.view === "settings" && state.route.section === "storage" && setDisks(await api("GET", "/api/disks").catch(() => state.disks)), 3000);
+  if (array.running) arrayTimer = setTimeout(async () => onStorageSection() && setDisks(await api("GET", "/api/disks").catch(() => state.disks)), 3000);
   const row = (label, value) => h("div", { class: "kv" }, h("span", { class: "muted" }, label), h("span", null, value));
   const head = (...actions) => h("div", { class: "section-head" }, h("h2", null, t("array.title")), h("div", { class: "row-actions" }, actions));
   const lead = h("p", { class: "muted small" }, t("array.lead"));
@@ -16661,11 +16968,33 @@ function md(text) {
   return out;
 }
 
+/** Questions to begin with: the ones of the page the person is on come first */
+function assistantStarts() {
+  const v = state.route.view;
+  const section = state.route.section;
+  const here =
+    v === "machines" || v === "machine" || v === "proxmox" ? ["servers.room", "servers.backups", "servers.away"]
+    : v === "containers" ? ["containers.use", "containers.backups"]
+    : v === "ha" ? ["ha.batteries", "ha.updates"]
+    : v === "app" ? ["app.slow", "app.update"]
+    : v === "store" ? ["store.photos", "store.similar"]
+    : v === "settings" && STORAGE_SECTIONS.includes(section) ? ["storage.clean", "storage.dying", "storage.protected"]
+    : v === "settings" && ["network", "remote", "ports"].includes(section) ? ["network.internet", "network.outside"]
+    : v === "settings" && (section === "dns" || section === "adblock") ? ["dns.breaks", "dns.who"]
+    : v === "settings" && section === "https" ? ["https.complains"]
+    : v === "settings" && section === "backups" ? ["backups.missing", "backups.restore"]
+    : ["health", "changed", "backups.missing"];
+  return [...here, "health", "updates", "space"].filter((key, i, all) => all.indexOf(key) === i).slice(0, 5).map((key) => "assistant.start." + key);
+}
+
+const toolTarget = (target) => String(target?.name ?? target?.app ?? target?.host ?? target?.guest ?? target?.id ?? "");
+
 /** What a call of the assistant does, in the page's words */
 function toolWords(call) {
   const key = `assistant.tool.${call.name}${call.name === "app_remove" && call.args.deleteData === true ? ".data" : ""}`;
   const a = call.args ?? {};
-  return has(key) ? t(key, { app: String(a.app ?? a.name ?? ""), query: String(a.query ?? ""), snapshot: String(a.snapshot ?? "") }) : call.name;
+  const said = Object.fromEntries(Object.entries(a).filter(([, value]) => typeof value !== "object").map(([name, value]) => [name, String(value)]));
+  return has(key) ? t(key, { ...said, app: String(a.app ?? a.name ?? ""), query: String(a.query ?? ""), snapshot: String(a.snapshot ?? ""), target: toolTarget(a.target) }) : call.name;
 }
 
 async function assistantCall(path, data = {}) {
@@ -16698,7 +17027,7 @@ function assistantBody() {
         h("p", null, t("assistant.notSet")),
         h("p", { class: "muted small" }, t("assistant.notSetHint")),
         h("p", { class: "small" }, t("assistant.canDo")),
-        h("ul", { class: "small assistant-can" }, ["apps", "machines", "backups", "changes"].map((k) => h("li", null, t("assistant.can." + k)))),
+        h("ul", { class: "small assistant-can" }, ["apps", "machines", "network", "backups", "changes"].map((k) => h("li", null, t("assistant.can." + k)))),
         assistantUi.waiting && h("div", { class: "msg user" }, assistantUi.waiting),
         assistantUi.waiting && h("p", { class: "muted small" }, t("assistant.waitingQuestion")),
         h("a", { class: "btn primary", href: "#/settings/assistant", onclick: () => innerWidth < 900 && closeAssistant() }, t("assistant.setUp")),
@@ -16707,7 +17036,7 @@ function assistantBody() {
   }
   if (!chat) {
     const ask = (key) => button(t(key), { class: "small", onclick: () => sendToAssistant(t(key), true) });
-    return [h("div", { class: "assistant-empty" }, h("p", null, t("assistant.hello")), h("p", { class: "muted small" }, t("assistant.helloHint")), h("div", { class: "assistant-starts" }, ask("assistant.start.health"), ask("assistant.start.updates"), ask("assistant.start.space")))];
+    return [h("div", { class: "assistant-empty" }, h("p", null, t("assistant.hello")), h("p", { class: "muted small" }, t("assistant.helloHint")), h("div", { class: "assistant-starts" }, ...assistantStarts().map(ask)))];
   }
   const results = new Map(chat.turns.filter((turn) => turn.role === "tool").map((turn) => [turn.id, turn]));
   const callRow = (call) => {
@@ -17344,17 +17673,50 @@ function renderSettings() {
 }
 
 /** The head and the list of sections of Settings around what one section shows */
+/** The page's head says the section's name: its first card need not say it again */
+function dropTwinHeading() {
+  const stack = document.querySelector(".settings > .stack");
+  const title = stack?.querySelector(".settings-head h1")?.textContent;
+  const first = stack?.querySelector(":scope > :not(.settings-head) h2");
+  if (!first || !title || !first.textContent.trim().startsWith(title)) return;
+  // what stands next to the words (a state, a count) stays
+  if (first.children.length) for (const node of [...first.childNodes]) node.nodeType === Node.TEXT_NODE && node.remove();
+  else first.hidden = true;
+}
+
 function settingsFrame(section, ...content) {
+  const item = sections().find((x) => x.id === section);
+  setTimeout(() => {
+    dropTwinHeading();
+    const stack = document.querySelector(".settings > .stack");
+    if (!stack) return;
+    const watch = new MutationObserver(dropTwinHeading);
+    watch.observe(stack, { childList: true, subtree: true });
+    cleanups.push(() => watch.disconnect());
+  });
+  // the open section stays in view in a column longer than the window
+  requestAnimationFrame(() => {
+    const list = document.querySelector(".settings-nav .settings-list");
+    const open = list?.querySelector(".cat.active");
+    if (!open || list.scrollHeight <= list.clientHeight) return;
+    // only the list moves, never the page
+    const at = open.getBoundingClientRect().top - list.getBoundingClientRect().top;
+    if (at < 0 || at > list.clientHeight - 40) list.scrollTop += at - list.clientHeight / 2;
+  });
   return [
-    h("div", { class: "page-head" }, h("div", null, h("h1", null, t("nav.settings")), h("p", { class: "meta" }, `Hata ${state.version}`))),
     h(
       "div",
       { class: "settings" },
-      h("nav", { class: "cats fold" }, sections().map((item) => h("a", { class: "cat" + (section === item.id ? " active" : ""), href: `#/settings/${item.id}` }, h("span", { class: "with-icon" }, icon(item.icon), t(item.label ?? "settings." + item.id))))),
-      h("div", { class: "stack" }, content),
+      settingsNav(section),
+      h("div", { class: "stack" }, h("div", { class: "page-head settings-head" }, h("div", null, h("h1", null, item ? sectionTitle(item) : t("nav.settings")), h("p", { class: "meta" }, item ? `${t("settings.group." + item.group)} · Hata ${state.version}` : `Hata ${state.version}`)), STORAGE_TABS[section] && settingsTabs(section)), content),
     ),
   ];
 }
+/** The long sections are cut into tabs: the address says which */
+const STORAGE_TABS = { storage: ["disks", "fs", "fills"] };
+const settingsUi = { find: "" };
+const settingsTabs = (section) => h("div", { class: "tabs" }, STORAGE_TABS[section].map((tab, i) => h("a", { class: "tab" + (settingsTab(section) === tab ? " active" : ""), href: `#/settings/${section}${i ? "/" + tab : ""}` }, t(`settings.tab.${section}.${tab}`))));
+const settingsTab = (section) => (STORAGE_TABS[section].includes(state.route.tab) ? state.route.tab : STORAGE_TABS[section][0]);
 
 // --- Account and users --------------------------------------------------------------------------
 

@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import type { AttentionItem } from "../src/attention";
-import { backupMessage, resolvedWording, shownConfig, changeConfig, cleanConfig, DEFAULT_CONFIG, due, keyOf, ntfyRequest, QUIET_MS, SETTLE_MS, telegramRequest, webhookRequest, wording, type Seen } from "../src/notify";
+import { backupMessage, resolvedWording, shownConfig, changeConfig, cleanConfig, DEFAULT_CONFIG, due, keyOf, ntfyRequest, QUIET_MS, SETTLE_MS, telegramRequest, webhookRequest, wording, type Seen, oneOf } from "../src/notify";
 
 const disk = (severity: AttentionItem["severity"] = "warn"): AttentionItem => ({ id: "disk:/", severity, code: "disk", detail: { path: "/", percent: 91, free: 9 * 1024 ** 3 } });
 const restarting: AttentionItem = { id: "restarting:memos", severity: "danger", code: "restarting", detail: { title: "Memos", container: "memos" }, app: "memos" };
@@ -147,4 +147,13 @@ test("the words of a problem that is over, and of the night's backups", () => {
   expect(resolvedWording(many, "en")).toMatchObject([{ title: "4 problems are over", severity: "ok" }]);
   expect(backupMessage({ ok: 9, failed: [], took: 200_000 }, "en")).toMatchObject({ title: "Night backups: all 9 done", text: "It took 3 min.", severity: "ok", route: "#/settings/backups" });
   expect(backupMessage({ ok: 7, failed: ["memos", "kuma@nas"], took: 10_000 }, "uk")).toMatchObject({ title: "Нічні копії: не вдалося 2, зроблено 7", text: "Не скопійовано: memos, kuma на nas. Увесь запуск тривав 1 хв.", severity: "warn" });
+});
+
+test("one of something in English, and Ukrainian left as it is", () => {
+  expect(oneOf("{n} cores", { n: 1 }, "en")).toBe("{n} core");
+  expect(oneOf("{n} damaged sectors wait", { n: 1 }, "en")).toBe("{n} damaged sector wait");
+  expect(oneOf("{n} entities · {on} on", { n: 1 }, "en")).toBe("{n} entity · {on} on");
+  expect(oneOf("{n} cores", { n: 2 }, "en")).toBe("{n} cores");
+  expect(oneOf("{n} s left", { n: 1 }, "en")).toBe("{n} s left");
+  expect(oneOf("ядер: {n}", { n: 1 }, "uk")).toBe("ядер: {n}");
 });

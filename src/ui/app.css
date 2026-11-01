@@ -657,6 +657,7 @@ tr.removed .app-icon { opacity: 0.5; }
 /* --- Store ------------------------------------------------------------------------------------- */
 
 .store, .settings, .files { display: grid; grid-template-columns: 208px minmax(0, 1fr); gap: 32px; align-items: start; }
+.settings { grid-template-columns: 250px minmax(0, 1fr); gap: 16px; }
 #store-list { display: grid; gap: 16px; }
 .cats { display: grid; gap: 2px; position: sticky; top: 88px; }
 .cat-title { font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--faint); padding: 8px 10px; }
@@ -1429,6 +1430,12 @@ body:has(.assistant.paged) > .assistant-fab { display: none; }
 /* The screen of a virtual machine: noVNC draws into the box, scaled to it */
 .screen-box { flex: 1; min-height: 0; display: flex; background: #000; }
 .screen-actions { display: flex; gap: 6px; }
+/* on the whole screen the bar leaves the picture alone and comes down when the pointer reaches the top edge; it stays while there is no picture, and where nothing hovers */
+@media (hover: hover) {
+  :root:fullscreen .term-bar { position: fixed; inset: 0 0 auto; z-index: 2; background: var(--console); transform: translateY(-100%); transition: transform 0.15s; }
+  :root:fullscreen .term-bar::after { content: ""; position: absolute; inset: 100% 0 auto; height: 6px; }
+  :root:fullscreen .term-bar:hover, :root:fullscreen .term-bar:has(:focus-visible), :root:fullscreen .term-bar:has(.term-status:not(.live)) { transform: none; }
+}
 #hidden { scroll-margin-top: 84px; }
 
 /* blocking by name */
@@ -1448,3 +1455,95 @@ body:has(.assistant.paged) > .assistant-fab { display: none; }
 .adblock-outcome.allowed, .adblock-outcome.rewritten { color: var(--accent-text); }
 .adblock-outcome.passed, .adblock-outcome.own { color: var(--muted); }
 .adblock-numbers strong { font-size: 1.5rem; }
+.adblock-block { display: grid; gap: 10px; }
+.adblock-block p { margin: 0; }
+
+/* the column of Settings: finding on top, sections by group; longer than a window it scrolls by itself */
+.settings-nav { position: sticky; top: 88px; max-height: calc(100dvh - 104px); overflow: hidden auto; padding: 10px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); display: grid; gap: 8px; align-content: start; }
+.settings-nav .cats { position: static; }
+.settings-nav .cat-title:not(:first-child) { margin-top: 0; }
+.settings-list { display: grid; gap: 10px; min-width: 0; }
+.settings-find { display: flex; align-items: center; gap: 8px; padding: 0 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); color: var(--muted); }
+.settings-find input { flex: 1; min-width: 0; border: 0; background: none; box-shadow: none; padding: 8px 0; outline: none; }
+.settings-find .icon-btn { width: 24px; height: 24px; }
+.settings-found { padding: 4px 10px; }
+.settings-nav .cats.found .cat { white-space: normal; text-align: left; }
+.settings-nav mark { background: color-mix(in srgb, var(--accent) 30%, transparent); color: inherit; border-radius: 2px; }
+.settings-head { display: block; margin-bottom: 0; }
+.settings-head .tabs { margin-top: 14px; margin-bottom: -4px; }
+@media (max-width: 760px) {
+  .settings-nav { position: static; max-height: none; }
+  .settings-nav:not(.open):has(.cat.active) .settings-find { display: none; }
+  .settings-nav .cat-title { display: none; }
+  .settings-nav.open .cat-title { display: block; }
+}
+:root.has-wallpaper #view .settings-nav .cats.cats { background: none; border: 0; padding: 0; box-shadow: none; backdrop-filter: none; }
+:root.has-wallpaper #view .settings-nav { background: color-mix(in srgb, var(--surface) 88%, transparent); backdrop-filter: blur(14px); }
+.settings-nav .cat { white-space: nowrap; }
+h1, h2, h3 { word-spacing: 0.08em; }
+
+/* Servers: one tree of what runs where */
+.server-tree { overflow: hidden; }
+.tree-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 20px; flex-wrap: wrap; }
+.tree-banner { display: flex; align-items: center; gap: 10px; padding: 10px 20px; background: color-mix(in srgb, var(--accent) 16%, transparent); border-top: 1px solid var(--border); }
+.tree-row { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, 1.2fr) minmax(190px, auto); align-items: center; gap: 12px; padding: 7px 20px; border-top: 1px solid var(--border); min-height: 44px; }
+.tree-row.child { cursor: pointer; }
+.tree-row.child:hover { background: var(--surface-2); }
+.tree-row.group { background: var(--surface-2); cursor: pointer; }
+.tree-row.empty { display: block; cursor: default; padding-left: 54px; }
+.tree-cols { min-height: 0; color: var(--muted); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; }
+.tree-name { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.tree-row.child .tree-name { padding-left: 34px; }
+.tree-name .chip { flex: none; }
+.tree-name a { color: inherit; text-decoration: none; }
+.tree-fold { width: 26px; height: 26px; flex: none; }
+.tree-what, .tree-state, .tree-busy { min-width: 0; overflow-wrap: anywhere; }
+.tree-load { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.tree-bar { width: 44px; height: 4px; flex: none; border-radius: 2px; background: var(--border); overflow: hidden; display: block; }
+.tree-bar i { display: block; height: 100%; background: var(--ok, #2e9e6b); }
+.tree-bar i.warn { background: var(--accent); }
+.tree-bar i.danger { background: var(--danger); }
+.tree-actions { justify-content: flex-end; flex-wrap: nowrap; }
+.tree-foot { display: flex; align-items: center; gap: 8px; padding: 12px 20px; border-top: 1px solid var(--border); text-decoration: none; }
+i.dot.stopped { background: var(--faint); }
+i.dot.danger { background: var(--danger); }
+.ha-page { display: grid; grid-template-columns: minmax(0, 1.8fr) minmax(280px, 1fr); gap: 16px; align-items: start; }
+.page-head.has-tabs { display: block; }
+.page-head-row { display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+.page-head.has-tabs .tabs { margin-top: 14px; margin-bottom: -4px; }
+.instance-screen { height: 360px; }
+.pve-guest-page .section-head { margin-top: 10px; }
+@media (max-width: 900px) {
+  .ha-page { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 760px) {
+  .tree-cols { display: none; }
+  .tree-row { grid-template-columns: minmax(0, 1fr) auto; gap: 2px 10px; padding: 10px 14px; }
+  .tree-row > .tree-name { grid-column: 1; }
+  .tree-row > .tree-what, .tree-row > .tree-state, .tree-row > .tree-busy { grid-column: 1; }
+  .tree-row > .tree-actions { grid-column: 2; grid-row: 1 / span 4; }
+  .tree-row.child .tree-name { padding-left: 0; }
+  .tree-row.child { padding-left: 24px; }
+  .tree-busy:empty { display: none; }
+}
+.thing-head { display: grid; gap: 10px; }
+.thing-head .app-head { padding: 0; margin: 0; background: none; border: 0; }
+.tree-name a { overflow-wrap: break-word; min-width: 0; }
+.tree-load span { white-space: nowrap; }
+@media (max-width: 760px) {
+  .tree-bar { display: none; }
+}
+:root.has-wallpaper #view .settings-nav :is(.cats, .cats.cats) { background: none !important; border: 0 !important; border-radius: 0; padding: 0; box-shadow: none !important; backdrop-filter: none !important; -webkit-backdrop-filter: none !important; }
+
+/* the column fits an ordinary window; in a short one only the list moves, under a field that stays */
+.settings-nav { gap: 6px; padding: 8px; overflow: hidden; grid-template-rows: auto minmax(0, 1fr); }
+.settings-nav .settings-list { gap: 4px; overflow: hidden auto; scrollbar-width: none; }
+.settings-nav .settings-list:hover { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+.settings-nav .cat { padding: 5px 10px; }
+.settings-nav .cat-title { padding: 4px 10px 2px; font-size: 10px; }
+.settings-find input { padding: 6px 0; }
+@media (max-width: 760px) {
+  .settings-nav { overflow: visible; grid-template-rows: none; }
+  .settings-nav .settings-list { overflow: visible; }
+  .settings-nav .cat { padding: 9px 10px; }
+}

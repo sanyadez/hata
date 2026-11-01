@@ -272,7 +272,8 @@ let seen: { name: string; mac: string; kind: string }[] = [];
 /** The instance of this server a machine is, as last looked at, and whether it runs */
 export function instanceOfMachine(macs: string[], hostname: string): { name: string; running: boolean } | null {
   const cards = new Set(macs.map((m) => m.toLowerCase()));
-  const c = lastLook.instances.find((x) => (x.mac && cards.has(x.mac)) || x.name === hostname);
+  // right after a start the first look has not come yet: what the machines' list remembers will do
+  const c = [...lastLook.instances, ...seen].find((x) => (x.mac && cards.has(x.mac)) || x.name === hostname);
   return c ? { name: c.name, running: c.status === "running" } : null;
 }
 

@@ -22,3 +22,19 @@ test("the page's scripts parse", async () => {
     expect(() => transpiler.transformSync(text)).not.toThrow();
   }
 });
+
+/** A name called at the top of a function body and declared nowhere is an error only when that page opens */
+test("what the pages' main script calls by a plain name exists", async () => {
+  const text = await Bun.file(`${import.meta.dir}/../src/ui/app.js`).text();
+  const declared = new Set([...text.matchAll(/(?:function\*?|const|let|class|var)\s+([A-Za-z_$][\w$]*)/g)].map((m) => m[1]!));
+  for (const m of text.matchAll(/[({\[,]\s*([a-z]\w*)\s*:\s*(?=\()/g)) declared.add(m[1]!);
+  for (const m of text.matchAll(/[(,]\s*([A-Za-z_$][\w$]*)\s*(?=[,)=])/g)) declared.add(m[1]!);
+  for (const m of text.matchAll(/\b([A-Za-z_$][\w$]*)\s*=>/g)) declared.add(m[1]!);
+  for (const m of text.matchAll(/\{\s*([^{}]*?)\s*\}\s*(?:=|\)\s*=>)/g)) for (const n of m[1]!.split(",")) declared.add(n.split(":").pop()!.trim().split(" ")[0]!);
+  for (const m of text.matchAll(/\[\s*([^\[\]]*?)\s*\]\s*(?:=|of)/g)) for (const n of m[1]!.split(",")) declared.add(n.trim());
+  const builtIn = new Set(Object.getOwnPropertyNames(globalThis).concat(["if", "for", "while", "switch", "catch", "return", "function", "typeof", "await", "import", "super", "confirm", "matchMedia", "requestAnimationFrame", "getComputedStyle", "alert", "prompt", "cancelAnimationFrame", "scrollTo", "constructor", "EventSource", "MutationObserver", "getSelection", "scrollBy", "XMLHttpRequest", "ResizeObserver", "FileReader", "IntersectionObserver", "MouseEvent"]));
+  // what stands after a dot, in a string or in a comment is not called by a plain name
+  const code = text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "").replace(/`(?:[^`\\]|\\.)*`/g, '""').replace(/"(?:[^"\\\n]|\\.)*"/g, '""').replace(/'(?:[^'\\\n]|\\.)*'/g, '""');
+  const called = new Set([...code.matchAll(/(?<![.\w$])([a-zA-Z_$][\w$]*)\(/g)].map((m) => m[1]!));
+  expect([...called].filter((n) => !declared.has(n) && !builtIn.has(n))).toEqual([]);
+});
