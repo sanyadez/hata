@@ -289,6 +289,7 @@
   "error.settings.badPort": "Порт — це число від 1 до 65535.",
   "error.request.crossSite": "Запит надійшов з іншого сайту, його відхилено.",
   "error.request.failed": "Щось пішло не так: {message}",
+  "error.request.internal": "На сервері щось пішло не так. Що саме, адміністратор може дізнатися з його журналу.",
   "error.network": "Сервер недоступний.",
   "nav.backups": "Копії",
   "activity.bySchedule": "за розкладом",
