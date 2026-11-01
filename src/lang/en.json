@@ -289,6 +289,7 @@
   "error.settings.badPort": "A port is a number from 1 to 65535.",
   "error.request.crossSite": "The request came from another site and was refused.",
   "error.request.failed": "Something went wrong: {message}",
+  "error.request.internal": "Something went wrong on the server. An administrator can find out what in its log.",
   "error.network": "The server is not reachable.",
   "nav.backups": "Backups",
   "activity.bySchedule": "by schedule",

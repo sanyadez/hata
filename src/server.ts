@@ -96,7 +96,7 @@ import { lanAddress } from "./integration";
 import { addQbit, addTorrents, changeQbit, qbitFound, qbitOfApps, qbitServer, qbitServers, qbitTorrents, qbitTrouble, qbitWidgets, removeQbit, removeTorrents, startQbittorrent, torrentsPower } from "./qbittorrent";
 import { act as haAct, addServer as addHa, allowProxy as haAllowProxy, changeServer as changeHa, discover as discoverHa, entities as haEntities, forgetUser as haForgetUser, homeAssistantTrouble, installUpdate as haInstallUpdate, makeBackup as haMakeBackup, removeServer as removeHa, renameEntity as haRename, server as haServer, servers as haServers, startHomeAssistant, tileStates as haTileStates, visibleTo as haVisibleTo } from "./homeassistant";
 import { sees as haSees } from "./ha";
-import { dockerInfo, listContainers, watchEvents } from "./docker";
+import { dockerInfo, type DockerInfo, listContainers, watchEvents } from "./docker";
 import { abortUpload, copyIn, locate, validName, archivePlan, dropFavorites, emptyTrash, favoritesOf, setFavorite, extract as extractArchive, find as findFiles, list as listFiles, makeFile, makeFolder, pinFolder, pinnedFolders, readable, readText, remove as removeFiles, rename as renameFile, restore as restoreFiles, setTrashDays, startTrash, summary as filesSummary, transfer, trash, upload, writeText } from "./files";
 import { adoptProject, casaosState, containerDraft, importCount, importList, moveInCasaos, projectDraft, rebuildContainer } from "./import";
 import { accessOf, dropAccess, dropUser, gateTarget, guard, guardsOf, mayOpen, otherPorts, MAX_APP_BODY, page, passToApp, setAccess, startGates, tunnelHandlers } from "./gate";
@@ -302,6 +302,19 @@ function json(data: unknown, status = 200, headers: Record<string, string> = {})
 function fillingUp(): { path: string; days: number; percent: number } | null {
   const now = fills();
   return now && now.fullIn !== null && now.total > 0 ? { path: now.root, days: now.fullIn, percent: Math.round((now.used / now.total) * 100) } : null;
+}
+
+/**
+ * What an unexpected failure tells the caller. Its text may name folders and addresses of the server, so
+ * only an administrator is told it; everybody else gets plain words, and the log keeps it all.
+ */
+export function unexpected(e: unknown, administrator: boolean): { code: string; detail: Record<string, string> } {
+  return administrator ? { code: "request.failed", detail: { message: e instanceof Error ? e.message : String(e) } } : { code: "request.internal", detail: {} };
+}
+
+/** What the home page tells about Docker: its version and why it fails are the administrators' business */
+export function dockerShown(docker: DockerInfo, administrator: boolean): DockerInfo {
+  return administrator ? docker : { available: docker.available };
 }
 
 /** `code` is translated by the UI; `detail` fills the placeholders of its message */
@@ -1131,7 +1144,7 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
     let dashboard;
     return json({
       system,
-      docker,
+      docker: dockerShown(docker, admin),
       apps,
       arch: ARCH,
       adblock: admin ? blockSummary() : null,
@@ -3171,7 +3184,8 @@ async function handle(req: Request, server: Server): Promise<Response> {
   } catch (e) {
     if (e instanceof AppError) return fail(e.status, e.code, e.detail);
     console.error(`${req.method} ${url.pathname}:`, e);
-    return fail(500, "request.failed", { message: e instanceof Error ? e.message : String(e) });
+    const { code, detail } = unexpected(e, sessionUser(req)?.role === "admin");
+    return fail(500, code, detail);
   }
 }
 

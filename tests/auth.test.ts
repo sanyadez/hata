@@ -206,3 +206,14 @@ test("invitations are single-use links for members and guests", async () => {
   expect(inviteInfo(second.token)).toBeNull();
   if (typeof user === "object") deleteUser(user.id, admin);
 });
+
+test("an unexpected failure and what is wrong with Docker are told in full to an administrator only", async () => {
+  const { unexpected, dockerShown } = await import("../src/server");
+  const failure = new Error("EACCES: /var/lib/hata/secret.json");
+  expect(unexpected(failure, true)).toEqual({ code: "request.failed", detail: { message: failure.message } });
+  expect(unexpected("plain words", true).detail.message).toBe("plain words");
+  expect(unexpected(failure, false)).toEqual({ code: "request.internal", detail: {} });
+  const docker = { available: false, error: "connect ENOENT /run/docker.sock", state: "stopped" as const, version: "29", compose: "5" };
+  expect(dockerShown(docker, true)).toEqual(docker);
+  expect(dockerShown(docker, false)).toEqual({ available: false });
+});
