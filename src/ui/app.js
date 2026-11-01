@@ -344,7 +344,8 @@ function parseRoute() {
   if (parts[0] === "import" && isAdmin()) return { view: "import" };
   if (parts[0] === "terminal" && isAdmin()) return { view: "terminal" };
   if (parts[0] === "assistant" && isAdmin()) return { view: "assistant" };
-  if (parts[0] === "ha" && isAdmin()) return { view: "ha", id: parts[1] ?? "" };
+  if (parts[0] === "ha" && parts[1] && isAdmin()) return { view: "ha", id: parts[1] };
+  if ((parts[0] === "integrations" || parts[0] === "ha") && isAdmin()) return { view: "integrations" };
   if (parts[0] === "guest" && parts[3] && isAdmin()) return { view: "guest", host: parts[1], guest: `${parts[2]}/${parts[3]}` };
   if (parts[0] === "containers" && parts[1] === "i" && parts[2] && isAdmin()) return { view: "instance", name: parts[2], tab: parts[3] === "terminal" ? "terminal" : "overview" };
   if (parts[0] === "containers" && isAdmin()) return { view: "containers", tab: parts[1] === "settings" ? "settings" : "list" };
@@ -818,7 +819,7 @@ const NAV = [
   { view: "store", hash: "#/store", icon: "grid", guest: false },
   { view: "files", hash: "#/files", icon: "folder", files: true },
   { view: "machines", hash: "#/machines", icon: "server", admin: true },
-  { view: "ha", hash: "#/ha", icon: "bulb", admin: true, ha: true },
+  { view: "integrations", hash: "#/integrations", icon: "link", admin: true, integrations: true },
   { view: "assistant", hash: "#/assistant", icon: "chat", admin: true, assistant: true },
   { view: "settings", hash: "#/settings", icon: "sliders" },
 ];
@@ -844,8 +845,8 @@ async function loadMine() {
   state.favorites = mine.favorites;
 }
 
-const navCurrent = () => (["machine", "proxmox", "containers", "instance", "guest"].includes(state.route.view) ? "machines" : state.route.view === "backups" || state.route.view === "users" ? "settings" : state.route.view === "app" ? "home" : state.route.view === "import" ? "store" : state.route.view === "trash" || state.route.view === "myhata" ? "files" : state.route.view);
-const navItems = () => NAV.filter((item) => (!item.admin || isAdmin()) && (!item.ha || (state.overview?.ha?.servers ?? []).length > 0) && (!item.files || mayFiles()) && (!item.assistant || !!(assistantUi.config?.ready ?? state.overview?.assistant)) && (item.guest !== false || state.user.role !== "guest"));
+const navCurrent = () => (state.route.view === "ha" ? "integrations" : ["machine", "proxmox", "containers", "instance", "guest"].includes(state.route.view) ? "machines" : state.route.view === "backups" || state.route.view === "users" ? "settings" : state.route.view === "app" ? "home" : state.route.view === "import" ? "store" : state.route.view === "trash" || state.route.view === "myhata" ? "files" : state.route.view);
+const navItems = () => NAV.filter((item) => (!item.admin || isAdmin()) && (!item.integrations || (state.overview?.ha?.servers ?? []).length > 0) && (!item.files || mayFiles()) && (!item.assistant || !!(assistantUi.config?.ready ?? state.overview?.assistant)) && (item.guest !== false || state.user.role !== "guest"));
 
 function navLinks(className, items = navItems()) {
   const current = navCurrent();
@@ -1051,6 +1052,7 @@ function render() {
   if (view === "proxmox") return renderPve();
   if (view === "containers") return renderContainers();
   if (view === "ha") return renderHa();
+  if (view === "integrations") return renderIntegrations();
   if (view === "instance") return renderInstance();
   if (view === "guest") return renderGuest();
   if (view === "app") return renderApp();
@@ -2866,7 +2868,6 @@ function addToMachinesMenu(at = null) {
     entry(t("machines.addContainer"), hint("container"), "box", here("container")),
     entry(t("machines.addVm"), hint("vm"), "box", here("vm")),
     entry(t("machines.addPve"), t("machines.addPveHint"), "server", () => pveDialog()),
-    entry(t("machines.addHa"), t("machines.addHaHint"), "bulb", () => haDialog()),
   );
   if (at) {
     // under the button, its right edge on the button's
@@ -4297,7 +4298,7 @@ function haEvent(event) {
   clearTimeout(haUi.timer);
   haUi.timer = setTimeout(() => {
     if (state.route.view === "home") void refresh();
-    if (state.route.view === "machines") void loadHa();
+    if (onIntegrations()) void loadIntegrations();
     if (state.route.view === "ha" && state.route.id === event.id) void loadHa();
   }, 600);
 }
@@ -4504,10 +4505,8 @@ async function haPickDialog() {
 
 async function loadHa() {
   try {
-    haUi.list = await api("GET", "/api/ha");
-    if (state.route.view !== "ha") return;
-    const id = state.route.id || haUi.list.servers[0]?.id;
-    if (!id) return renderHaBody();
+    const id = state.route.id;
+    if (state.route.view !== "ha" || !id) return;
     if (haUi.server?.id !== id) haUi.entities = null;
     haUi.server = await api("GET", `/api/ha/${id}`);
     if (!haUi.entities) haUi.entities = (await api("GET", `/api/ha/${id}/entities`)).entities;
@@ -4515,45 +4514,114 @@ async function loadHa() {
   } catch (e) {
     if (state.route.view !== "ha") return toast(errorText(e), "error");
     const box = document.getElementById("ha-body");
-    if (box) put(box, h("p", { class: "card pad muted" }, errorText(e)));
+    if (box) put(box, haCrumbs(state.route.id), h("p", { class: "card pad muted" }, errorText(e)));
   }
 }
 
 const haChip = (x) => h("span", { class: "state " + (x.online ? "running" : "") }, x.online ? t("ha.online") : x.error ? t("ha.offline") : t("ha.asking"));
 const haError = (x) => (x.error ? (has("error." + x.error.code) ? t("error." + x.error.code, { name: x.name, message: x.error.message ?? "" }) : x.error.code) : "");
+const haCrumbs = (name) => h("nav", { class: "crumbs" }, h("a", { href: "#/integrations" }, t("nav.integrations")), icon("chevron"), h("span", null, name));
 
 function renderHa() {
-  if (state.route.id && haUi.server?.id !== state.route.id) (haUi.server = null), (haUi.entities = null);
+  if (haUi.server?.id !== state.route.id) (haUi.server = null), (haUi.entities = null);
   shell(h("div", { id: "ha-body", class: "stack" }));
-  if (haUi.list) renderHaBody();
   void loadHa();
 }
 
 function renderHaBody() {
   const box = document.getElementById("ha-body");
-  const list = haUi.list?.servers ?? [];
-  if (!box) return;
   const x = haUi.server;
-  const answering = list.filter((y) => y.online).length;
+  if (!box || !x) return;
+  put(
+    box,
+    haCrumbs(x.name),
+    h(
+      "section",
+      { class: "card" },
+      h(
+        "div",
+        { class: "tree-head" },
+        h("div", null, h("h1", null, x.name, " ", haChip(x)), h("p", { class: "meta" }, ["Home Assistant", x.version, x.url].filter(Boolean).join(" · "))),
+        h("div", { class: "row-actions" }, h("a", { class: "btn", href: haWebUrl(x), target: "_blank", rel: "noopener noreferrer" }, icon("external"), h("span", null, t("ha.open"))), h("button", { type: "button", class: "btn square", "aria-label": t("app.more"), onclick: (e) => haMenu(x, underButton(e.currentTarget)) }, icon("more"))),
+      ),
+    ),
+    x.error && h("p", { class: "card pad warn-box" }, haError(x), " ", t("pve.since", { ago: ago(x.error.since) })),
+    h("div", { class: "ha-page" }, h("div", { class: "stack" }, haDevices(x)), haOverview(x)),
+  );
+}
+
+// --- Integrations ---
+// Services Hata talks to through their own API. What runs on a machine of its own stays in Servers: these are what a service offers.
+
+const integrationsUi = { found: null };
+const onIntegrations = () => state.route.view === "integrations" || (state.route.view === "settings" && state.route.section === "integrations");
+
+async function loadIntegrations() {
+  try {
+    haUi.list = await api("GET", "/api/ha");
+    paintIntegrations();
+  } catch (e) {
+    const box = document.getElementById("integrations-body");
+    if (box) put(box, h("p", { class: "card pad muted" }, errorText(e)));
+  }
+}
+
+/** The holder both places show, the menu's page and the section of Settings. What answers on the network is asked once per opening: it takes two seconds. */
+function integrationsBody(titled) {
+  const box = h("div", { id: "integrations-body", class: "stack" });
+  box.dataset.titled = titled ? "1" : "";
+  requestAnimationFrame(() => {
+    if (haUi.list) paintIntegrations();
+    void loadIntegrations();
+    api("GET", "/api/ha/found").then(
+      ({ found }) => ((integrationsUi.found = found), paintIntegrations()),
+      () => {},
+    );
+  });
+  return box;
+}
+
+function renderIntegrations() {
+  shell(integrationsBody(true));
+}
+
+function paintIntegrations() {
+  const box = document.getElementById("integrations-body");
+  const list = haUi.list?.servers;
+  if (!box || !list) return;
   const row = (y) =>
     h(
       "tr",
       { class: "clickable", menu: (at) => haMenu(y, at), onclick: (e) => !e.target.closest("a, button") && go(`#/ha/${y.id}`) },
-      h("td", null, h("div", { class: "strong" }, y.name), h("div", { class: "muted small mono" }, [y.version, y.url].filter(Boolean).join(" · "))),
+      h("td", null, h("div", { class: "strong" }, y.name), h("div", { class: "muted small mono" }, ["Home Assistant", y.version, y.url].filter(Boolean).join(" · "))),
       h("td", null, haChip(y)),
       h("td", { class: "small" }, t("ha.counts", { n: y.entities, on: y.on })),
       h("td", null, h("div", { class: "row-actions" }, h("a", { class: "btn small", href: haWebUrl(y), target: "_blank", rel: "noopener noreferrer" }, icon("external"), h("span", null, t("ha.open"))), h("button", { type: "button", class: "btn small square", "aria-label": t("app.more"), onclick: (e) => haMenu(y, underButton(e.currentTarget)) }, icon("more")))),
     );
+  // Home Assistant of this server's store, and what answers on the home network: a click leads to the same dialog with the address in it
+  const here = (state.overview?.apps ?? []).some((a) => a.name === "home-assistant") && !list.some((y) => y.here) ? `http://${location.hostname}:8123` : null;
+  const seen = (integrationsUi.found ?? []).filter((f) => !f.known && f.url !== here);
+  const offer = (label, url) => h("button", { type: "button", class: "chip-btn", onclick: () => haDialog(null, url) }, icon("plus"), h("span", null, label), h("span", { class: "muted mono small" }, " " + url.replace(/^https?:\/\//, "")));
   put(
     box,
     h(
       "section",
       { class: "card" },
-      h("div", { class: "tree-head" }, h("div", null, h("h1", null, "Home Assistant"), h("p", { class: "meta" }, list.length ? t("ha.answering", { n: answering, total: list.length }) : t("ha.noneYet"))), button(t("ha.addServer"), { class: "primary", onclick: () => haDialog() }, "plus")),
-      list.length > 0 && h("div", { class: "table-wrap" }, h("table", null, h("thead", null, h("tr", null, h("th", null, t("ha.col.server")), h("th", null, t("app.col.state")), h("th", null, t("ha.col.devices")), h("th"))), h("tbody", null, list.map(row)))),
+      h("div", { class: "tree-head" }, h("div", null, box.dataset.titled ? h("h1", null, t("nav.integrations")) : h("h2", null, t("integrations.connected")), h("p", { class: "meta" }, list.length ? t("integrations.lead") : t("integrations.none")))),
+      list.length > 0 && h("div", { class: "table-wrap" }, h("table", null, h("thead", null, h("tr", null, h("th", null, t("integrations.col.name")), h("th", null, t("app.col.state")), h("th", null, t("integrations.col.inside")), h("th"))), h("tbody", null, list.map(row)))),
     ),
-    x && x.error && h("p", { class: "card pad warn-box" }, haError(x), " ", t("pve.since", { ago: ago(x.error.since) })),
-    x && h("div", { class: "ha-page" }, h("div", { class: "stack" }, list.length > 1 && h("section", { class: "card pad" }, h("div", { class: "section-head" }, h("h2", null, t("ha.tab.devices")), h("div", { class: "seg" }, list.map((y) => h("a", { class: "btn small" + (y.id === x.id ? " active" : ""), href: `#/ha/${y.id}` }, y.name))))), haDevices(x)), haOverview(x)),
+    h(
+      "section",
+      { class: "card pad stack-s" },
+      h("h2", null, t("integrations.available")),
+      h(
+        "div",
+        { class: "tool" },
+        h("span", { class: "app-icon plus sm" }, icon("bulb")),
+        h("div", { class: "grow" }, h("strong", null, "Home Assistant"), h("p", { class: "muted small" }, t("integrations.ha.what")), (here || seen.length > 0) && h("div", { class: "integration-found ha-found" }, here && offer(t("ha.foundHere"), here), seen.map((f) => offer(f.name, f.url)))),
+        button(t("integrations.connect"), { onclick: () => haDialog() }, "plus"),
+      ),
+    ),
   );
 }
 
@@ -4751,7 +4819,7 @@ function removeHaDialog(x) {
         try {
           await api("DELETE", `/api/ha/${x.id}`);
           dialog.close();
-          go("#/machines");
+          go("#/integrations");
         } catch (e) {
           toast(errorText(e), "error");
         }
@@ -4760,11 +4828,11 @@ function removeHaDialog(x) {
 }
 
 /** Adding a server, or giving it a new address or token: by a person's sign-in or a token pasted */
-function haDialog(old = null) {
+function haDialog(old = null, address = "") {
   let mode = "login";
   let flow = null;
   const name = h("input", { value: old?.name ?? "", placeholder: "Home Assistant", maxLength: 40 });
-  const url = h("input", { value: old?.url ?? "", placeholder: "192.168.1.5", required: true, autocapitalize: "none", spellcheck: false, class: "mono" });
+  const url = h("input", { value: old?.url ?? address, placeholder: "192.168.1.5", required: true, autocapitalize: "none", spellcheck: false, class: "mono" });
   const user = h("input", { autocapitalize: "none", spellcheck: false, autocomplete: "off", name: "ha-user", required: !old });
   const password = h("input", { type: "password", autocomplete: "new-password", name: "ha-password", required: !old });
   const code = h("input", { inputmode: "numeric", autocomplete: "one-time-code", maxLength: 8, class: "mono" });
@@ -4800,8 +4868,9 @@ function haDialog(old = null) {
       const saved = old ? await api("PATCH", `/api/ha/${old.id}`, data) : await api("POST", "/api/ha", data);
       dialog.close();
       toast(t(old ? "ha.changed" : "ha.added", { name: saved.name }));
-      if (old) void loadHa();
-      else go(`#/ha/${saved.id}`);
+      if (!old) go(`#/ha/${saved.id}`);
+      else if (state.route.view === "ha") void loadHa();
+      else void loadIntegrations();
     } catch (err) {
       if (err.code === "ha.needCode" || err.code === "ha.badCode") {
         flow = err.detail.flow;
@@ -11248,6 +11317,7 @@ const SECTIONS = [
   { id: "apps", icon: "grid", group: "apps", admin: true },
   { id: "stores", icon: "store", group: "apps", admin: true },
   { id: "docker", icon: "box", group: "apps", admin: true },
+  { id: "integrations", icon: "link", group: "apps", admin: true },
   { id: "storage", icon: "disk", group: "storage", admin: true },
   { id: "shares", icon: "share", group: "storage", admin: true },
   { id: "places", icon: "network", group: "storage", admin: true },
@@ -11785,6 +11855,7 @@ function settingsSection(section) {
   if (section === "remote") return remoteSection();
   if (section === "agents") return agentsSection();
   if (section === "assistant") return assistantSection();
+  if (section === "integrations") return integrationsBody(false);
   if (section === "stores") {
     const stores = state.store?.stores ?? [];
     return [
@@ -16975,7 +17046,7 @@ function assistantStarts() {
   const here =
     v === "machines" || v === "machine" || v === "proxmox" ? ["servers.room", "servers.backups", "servers.away"]
     : v === "containers" ? ["containers.use", "containers.backups"]
-    : v === "ha" ? ["ha.batteries", "ha.updates"]
+    : v === "ha" || v === "integrations" ? ["ha.batteries", "ha.updates"]
     : v === "app" ? ["app.slow", "app.update"]
     : v === "store" ? ["store.photos", "store.similar"]
     : v === "settings" && STORAGE_SECTIONS.includes(section) ? ["storage.clean", "storage.dying", "storage.protected"]

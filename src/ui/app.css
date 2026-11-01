@@ -1547,3 +1547,7 @@ i.dot.danger { background: var(--danger); }
   .settings-nav .settings-list { overflow: visible; }
   .settings-nav .cat { padding: 9px 10px; }
 }
+
+/* what was found for an integration: under its words, on their left */
+.integration-found { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+.tree-head .meta { margin-top: 4px; }
