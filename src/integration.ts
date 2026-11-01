@@ -1,5 +1,6 @@
 /** What the integrations share: they are services found by an address, often an app of this very server */
 import { networkInterfaces } from "node:os";
+import { homeLinks } from "./mdns";
 
 export function isHere(url: string): boolean {
   const host = new URL(url).hostname.replace(/^\[|\]$/g, "");
@@ -19,3 +20,12 @@ export const newId = (taken: { id: string }[]) => {
   while (!id || taken.some((s) => s.id === id)) id = Array.from(crypto.getRandomValues(new Uint8Array(4)), (b) => b.toString(16).padStart(2, "0")).join("");
   return id;
 };
+
+/**
+ * This server's address on the home network, for a service of this machine. The page must not lend it the
+ * host it was opened by: behind a domain that leads to a proxy, which knows nothing of the service's port.
+ */
+export function lanAddress(): string {
+  for (const link of homeLinks()) if (link.address) return link.address;
+  return "";
+}

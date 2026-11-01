@@ -92,6 +92,7 @@ import { bus, type BusEvent } from "./bus";
 import { DATA_DIR, dropOldSecrets, listenAddress, saveSettings, settings, timezone, updateSettings } from "./config";
 import { arrange, cleanLayout, dropServer, haTiles, layoutText, parseLayoutText } from "./dashboard";
 import { addFrigate, cameraPicture, changeFrigate, eventPicture, frigateEvents, frigateFound, frigateOfApps, frigateServer, frigateServers, frigateTrouble, removeFrigate, startFrigate } from "./frigates";
+import { lanAddress } from "./integration";
 import { addQbit, addTorrents, changeQbit, qbitFound, qbitOfApps, qbitServer, qbitServers, qbitTorrents, qbitTrouble, removeQbit, removeTorrents, startQbittorrent, torrentsPower } from "./qbittorrent";
 import { act as haAct, addServer as addHa, allowProxy as haAllowProxy, changeServer as changeHa, discover as discoverHa, entities as haEntities, forgetUser as haForgetUser, homeAssistantTrouble, installUpdate as haInstallUpdate, makeBackup as haMakeBackup, removeServer as removeHa, renameEntity as haRename, server as haServer, servers as haServers, startHomeAssistant, tileStates as haTileStates, visibleTo as haVisibleTo } from "./homeassistant";
 import { sees as haSees } from "./ha";
@@ -2679,7 +2680,7 @@ async function homeAssistantApi(req: Request, url: URL, server: Server, user: Us
     server.timeout(req, 60);
     return json(await addHa(await body(req), by), 201);
   }
-  if (path === "/api/ha/found" && method === "GET") return json({ found: await discoverHa() });
+  if (path === "/api/ha/found" && method === "GET") return json({ found: await discoverHa(), address: lanAddress() });
   if (!m) return null;
   const id = m[1]!;
   const rest = m[2] ?? "";

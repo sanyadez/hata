@@ -4577,7 +4577,7 @@ function renderHaBody() {
 // --- Integrations ---
 // Services Hata talks to through their own API. What runs on a machine of its own stays in Servers: these are what a service offers.
 
-const integrationsUi = { found: null, qbit: null, qbitFound: null, frigate: null, frigateFound: null };
+const integrationsUi = { found: null, address: "", qbit: null, qbitFound: null, frigate: null, frigateFound: null };
 const onIntegrations = () => state.route.view === "integrations" || (state.route.view === "settings" && state.route.section === "integrations");
 
 async function loadIntegrations() {
@@ -4598,7 +4598,7 @@ function integrationsBody(titled) {
     paintIntegrations();
     void loadIntegrations();
     api("GET", "/api/ha/found").then(
-      ({ found }) => ((integrationsUi.found = found), paintIntegrations()),
+      ({ found, address }) => (Object.assign(integrationsUi, { found, address }), paintIntegrations()),
       () => {},
     );
     api("GET", "/api/qbit/found").then(
@@ -4651,45 +4651,50 @@ function paintIntegrations() {
       h("td", null, h("div", { class: "row-actions" }, h("a", { class: "btn small", href: y.url, target: "_blank", rel: "noopener noreferrer" }, icon("external"), h("span", null, t("frigate.open"))), h("button", { type: "button", class: "btn small square", "aria-label": t("app.more"), onclick: (e) => frigateMenu(y, underButton(e.currentTarget)) }, icon("more")))),
     );
   const connected = list.length + torrents.length + frigates.length;
-  // Home Assistant of this server's store, and what answers on the home network: a click leads to the same dialog with the address in it
-  const here = (state.overview?.apps ?? []).some((a) => a.name === "home-assistant") && !list.some((y) => y.here) ? `http://${location.hostname}:8123` : null;
-  const seen = (integrationsUi.found ?? []).filter((f) => !f.known && f.url !== here);
-  const offer = (label, url) => h("button", { type: "button", class: "chip-btn", onclick: () => haDialog(null, url) }, icon("plus"), h("span", null, label), h("span", { class: "muted mono small" }, " " + url.replace(/^https?:\/\//, "")));
+  const found = integrationsFound(list);
   put(
     box,
     h(
       "section",
       { class: "card" },
-      h("div", { class: "tree-head" }, h("div", null, box.dataset.titled ? h("h1", null, t("nav.integrations")) : h("h2", null, t("integrations.connected")), h("p", { class: "meta" }, connected ? t("integrations.lead") : t("integrations.none")))),
+      h(
+        "div",
+        { class: "tree-head" },
+        h("div", null, box.dataset.titled ? h("h1", null, t("nav.integrations")) : h("h2", null, t("integrations.connected")), h("p", { class: "meta" }, connected ? t("integrations.lead") : t("integrations.none"))),
+        button(t("integrations.add"), { class: "primary", onclick: (e) => integrationsAddMenu(e.currentTarget) }, "plus"),
+      ),
       connected > 0 && h("div", { class: "table-wrap" }, h("table", null, h("thead", null, h("tr", null, h("th", null, t("integrations.col.name")), h("th", null, t("app.col.state")), h("th", null, t("integrations.col.inside")), h("th"))), h("tbody", null, list.map(row), torrents.map(torrentRow), frigates.map(frigateRow)))),
     ),
-    h(
-      "section",
-      { class: "card pad stack-s" },
-      h("h2", null, t("integrations.available")),
+    found.length > 0 &&
       h(
-        "div",
-        { class: "tool" },
-        h("span", { class: "app-icon plus sm" }, icon("bulb")),
-        h("div", { class: "grow" }, h("strong", null, "Home Assistant"), h("p", { class: "muted small" }, t("integrations.ha.what")), (here || seen.length > 0) && h("div", { class: "integration-found ha-found" }, here && offer(t("ha.foundHere"), here), seen.map((f) => offer(f.name, f.url)))),
-        button(t("integrations.connect"), { onclick: () => haDialog() }, "plus"),
+        "section",
+        { class: "card pad stack-s" },
+        h("div", null, h("h2", null, t("integrations.available")), h("p", { class: "muted small" }, t("integrations.foundLead"))),
+        found.map((f) => h("div", { class: "tool" }, h("span", { class: "app-icon plus sm" }, icon(f.icon)), h("div", { class: "grow" }, h("strong", null, f.name), h("p", { class: "muted small" }, f.kind, " · ", h("span", { class: "mono" }, f.url.replace(/^https?:\/\//, "")))), button(t("integrations.connect"), { onclick: f.connect }, "plus"))),
       ),
-      h(
-        "div",
-        { class: "tool" },
-        h("span", { class: "app-icon plus sm" }, icon("download")),
-        h("div", { class: "grow" }, h("strong", null, "qBittorrent"), h("p", { class: "muted small" }, t("integrations.qbit.what")), integrationsUi.qbitFound?.length > 0 && h("div", { class: "integration-found ha-found" }, integrationsUi.qbitFound.map((f) => h("button", { type: "button", class: "chip-btn", onclick: () => qbitDialog(null, `http://${location.hostname}:${f.port}`) }, icon("plus"), h("span", null, t("ha.foundHere")), h("span", { class: "muted mono small" }, ` ${location.hostname}:${f.port}`))))),
-        button(t("integrations.connect"), { onclick: () => qbitDialog() }, "plus"),
-      ),
-      h(
-        "div",
-        { class: "tool" },
-        h("span", { class: "app-icon plus sm" }, icon("camera")),
-        h("div", { class: "grow" }, h("strong", null, "Frigate"), h("p", { class: "muted small" }, t("integrations.frigate.what")), integrationsUi.frigateFound?.length > 0 && h("div", { class: "integration-found ha-found" }, integrationsUi.frigateFound.map((f) => h("button", { type: "button", class: "chip-btn", onclick: () => frigateDialog(null, `${f.scheme}://${location.hostname}:${f.port}`) }, icon("plus"), h("span", null, t("ha.foundHere")), h("span", { class: "muted mono small" }, ` ${location.hostname}:${f.port}`))))),
-        button(t("integrations.connect"), { onclick: () => frigateDialog() }, "plus"),
-      ),
-    ),
   );
+}
+
+/** What can be connected and was found: apps of this server first, then what answers on the home network. Everything else is under "Add". */
+function integrationsFound(list) {
+  const { found, address, qbitFound, frigateFound } = integrationsUi;
+  const out = [];
+  const here = (state.overview?.apps ?? []).some((a) => a.name === "home-assistant") && !list.some((y) => y.here) && `http://${address || location.hostname}:8123`;
+  if (here) out.push({ name: "Home Assistant", kind: t("ha.foundHere"), icon: "bulb", url: here, connect: () => haDialog(null, here) });
+  for (const f of qbitFound ?? []) out.push({ name: f.title, kind: t("ha.foundHere"), icon: "download", url: f.url, connect: () => qbitDialog(null, f.url) });
+  for (const f of frigateFound ?? []) out.push({ name: f.title, kind: t("ha.foundHere"), icon: "camera", url: f.url, connect: () => frigateDialog(null, f.url) });
+  for (const f of found ?? []) if (!f.known && f.url !== here) out.push({ name: f.name, kind: "Home Assistant", icon: "bulb", url: f.url, connect: () => haDialog(null, f.url) });
+  return out;
+}
+
+function integrationsAddMenu(at) {
+  let dialog;
+  const entry = (label, hint, iconName, action) => h("button", { type: "button", class: "menu-item", onclick: () => (dialog.close(), action()) }, h("span", { class: "app-icon plus" }, icon(iconName)), h("span", { class: "tile-text" }, h("span", { class: "tile-name" }, label), h("span", { class: "muted small" }, hint)));
+  dialog = openDialog("menu dropdown", h("header", null, h("h2", null, t("integrations.addWhat"))), entry("Home Assistant", t("integrations.ha.what"), "bulb", () => haDialog()), entry("qBittorrent", t("integrations.qbit.what"), "download", () => qbitDialog()), entry("Frigate", t("integrations.frigate.what"), "camera", () => frigateDialog()));
+  const r = at.getBoundingClientRect();
+  placeAt(dialog, { x: r.right - dialog.offsetWidth, y: r.bottom + 4 });
+  dialog.tabIndex = -1;
+  dialog.focus();
 }
 
 // --- Frigate ---
@@ -5430,14 +5435,15 @@ function haDialog(old = null, address = "") {
   if (old) return;
   // what answers on the home network, and Home Assistant installed here from the store
   const chip = (label, address) => h("button", { type: "button", class: "chip-btn", onclick: () => ((url.value = address), user.focus()) }, icon("home"), h("span", null, label), h("span", { class: "muted mono small" }, " " + address.replace(/^https?:\/\//, "")));
-  const here = (state.overview?.apps ?? []).some((a) => a.name === "home-assistant") ? `http://${location.hostname}:8123` : null;
+  const isHa = (state.overview?.apps ?? []).some((a) => a.name === "home-assistant");
   put(found, h("span", { class: "muted small" }, t("ha.looking")));
   api("GET", "/api/ha/found").then(
-    ({ found: list }) => {
+    ({ found: list, address: home }) => {
+      const here = isHa && `http://${home || location.hostname}:8123`;
       const fresh = list.filter((f) => !f.known && f.url !== here);
       put(found, here && chip(t("ha.foundHere"), here), fresh.map((f) => chip(f.name, f.url)), !here && !fresh.length && h("span", { class: "muted small" }, t("ha.foundNone")));
     },
-    () => put(found, here && chip(t("ha.foundHere"), here)),
+    () => put(found, isHa && chip(t("ha.foundHere"), `http://${location.hostname}:8123`)),
   );
 }
 

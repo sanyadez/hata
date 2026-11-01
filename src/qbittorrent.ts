@@ -12,7 +12,7 @@ import { AppError, listApps } from "./apps";
 import { SECRETS_DIR } from "./config";
 import { readJsonFile, writeJsonAtomic } from "./fsutil";
 import { cleanUrl } from "./ha";
-import { appOfServer, cleanName, isHere, newId, portOf } from "./integration";
+import { appOfServer, cleanName, isHere, lanAddress, newId, portOf } from "./integration";
 import { cleanHashes, cleanLinks, isTorrentFile, isWebApiVersion, MAX_TORRENT_BYTES, readTorrent, sessionCookie, type Torrent, totalsOf, trouble, verbsOf } from "./qbit";
 
 const FILE = join(SECRETS_DIR, "qbittorrent.json");
@@ -198,7 +198,7 @@ export function qbitOfApps(apps: { name: string; port?: string | number | null }
 export async function qbitFound(lang: string) {
   const apps = await listApps(lang);
   const known = new Set(qbitServers().filter((s) => s.here).map((s) => String(s.port)));
-  return apps.filter((a) => a.port && !known.has(String(a.port)) && a.containers.some((c) => /qbittorrent/i.test(c.image))).map((a) => ({ app: a.name, title: a.title, port: a.port }));
+  return apps.filter((a) => a.port && !known.has(String(a.port)) && a.containers.some((c) => /qbittorrent/i.test(c.image))).map((a) => ({ app: a.name, title: a.title, url: `http://${lanAddress()}:${a.port}` }));
 }
 
 // --- Changes ----------------------------------------------------------------------------------------

@@ -13,7 +13,7 @@ import { SECRETS_DIR } from "./config";
 import { readJsonFile, writeJsonAtomic } from "./fsutil";
 import { type Camera, EVENT_RE, eventsQuery, type FrigateEvent, NAME_RE, readCameras, readEvent, tokenCookie, trouble } from "./frigate";
 import { cleanUrl } from "./ha";
-import { appOfServer, cleanName, isHere, newId, portOf } from "./integration";
+import { appOfServer, cleanName, isHere, lanAddress, newId, portOf } from "./integration";
 import { CertificateChanged, type Answer, pinnedRequest, showCertificate } from "./pinned";
 import { cleanFingerprint } from "./pve";
 
@@ -175,7 +175,7 @@ export function frigateOfApps(apps: { name: string; port?: string | number | nul
 export async function frigateFound(lang: string) {
   const apps = await listApps(lang);
   const known = new Set(frigateServers().filter((s) => s.here).map((s) => String(s.port)));
-  return apps.filter((a) => a.port && !known.has(String(a.port)) && a.containers.some((c) => /frigate/i.test(c.image))).map((a) => ({ app: a.name, title: a.title, port: a.port, scheme: a.scheme === "https" ? "https" : "http" }));
+  return apps.filter((a) => a.port && !known.has(String(a.port)) && a.containers.some((c) => /frigate/i.test(c.image))).map((a) => ({ app: a.name, title: a.title, url: `${a.scheme === "https" ? "https" : "http"}://${lanAddress()}:${a.port}` }));
 }
 
 export async function frigateEvents(id: string, input: { camera?: unknown; label?: unknown; before?: unknown; limit?: unknown }): Promise<{ events: FrigateEvent[] }> {
