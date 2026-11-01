@@ -7,7 +7,7 @@
  * - everything else under `/api/` needs a session cookie;
  * - a request that changes something must come from this origin (CSRF) and carry JSON.
  */
-import { existsSync, rmSync } from "node:fs";
+import { existsSync, rmSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { homedir, networkInterfaces } from "node:os";
 import type { Server, ServerWebSocket } from "bun";
@@ -107,7 +107,8 @@ import { cannotMove, finishMove, moveState } from "./relocate";
 import { isPlainObject } from "./fsutil";
 import { mcpResponse } from "./mcp";
 import { instructions as mcpInstructions, tellHttps, TOOLS } from "./mcptools";
-import { localNamesStatus, refreshLocalNames } from "./mdns";
+import { serverTree } from "./servertree";
+import { homeLinks, localNamesStatus, refreshLocalNames } from "./mdns";
 import { addDevice, CHANNELS, listDevices, notifyStatus, pushKey, removeDevice, renewDevice, sendAsk, sendBackupRun, sendTest, startNotifications, telegramChats, updateNotify } from "./notify";
 import { appHost, appLabel, classifyHost, coveredBy, clientIp, cookieDomain, domainOf, localDomain, requestHost, requestPort, requestProto, siteDomain } from "./site";
 import { newChallenge, PASSKEY_ALGORITHMS, spendChallenge, verifyAssertion, verifyRegistration } from "./passkey";
@@ -164,6 +165,15 @@ onAppRemoved(dropAccess);
 // --- Static files -----------------------------------------------------------------------------------
 
 const LANGUAGES: Record<string, Record<string, string>> = { en, uk };
+
+/** The name of the system this server runs */
+const systemName = (): string => {
+  try {
+    return /^PRETTY_NAME="?([^"\n]*)"?/m.exec(readFileSync("/etc/os-release", "utf8"))?.[1] ?? "Linux";
+  } catch {
+    return "Linux";
+  }
+};
 
 /** What can bring a machine back: its guest started in Proxmox, its container of this server started, or a wake-up signal */
 function wayBack(m: ReturnType<typeof machineList>[number] | undefined) {
@@ -1453,6 +1463,16 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
       if (e instanceof DnsError) return fail(400, e.code, e.detail);
       throw e;
     }
+  }
+  if (path === "/api/servers" && method === "GET") {
+    const system = systemStatus();
+    const instances = await containersReport().then((r) => r.containers, () => []);
+    const machines = machineList().map((m) => {
+      const macs = (m.info?.macs ?? []).map((c) => c.mac);
+      const guest = guestOfMachine(m.id, macs, m.ip.replace(/^::ffff:/, ""));
+      return { ...m, instance: instanceOfMachine(macs, m.info?.hostname ?? m.name)?.name ?? "", guest: guest ? { host: guest.host, id: guest.id } : null };
+    });
+    return json(serverTree({ here: { name: system.hostname, os: systemName(), address: homeLinks()[0]?.address ?? "", cpu: system.cpu, memory: system.memory, uptime: system.uptime }, instances, hosts: pveHosts().map((x) => pveHost(x.id)), machines, version: VERSION }));
   }
   if (path === "/api/domains" && method === "GET") return json(await domainsReport(language(url), await forwardsReport()));
   if (path === "/api/ports" && method === "POST") return json(await addForward(await body(req), user.name));
