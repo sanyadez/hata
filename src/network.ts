@@ -16,9 +16,11 @@
  * commands of a change and of a hand-over.
  */
 import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { networkInterfaces } from "node:os";
 import { record } from "./activity";
 import { bus } from "./bus";
 import { saveSettings, settings } from "./config";
+import { HOME_BRIDGE } from "./incus";
 import { cleanOutside, inNetworkOf, isPublic, OUTSIDE_CHAIN, OUTSIDE_HOOKS, outsideDown, outsideRules } from "./outside";
 import { installCommand, PATH, run } from "./packages";
 import { listeningPort } from "./wireguard";
@@ -42,6 +44,18 @@ const UDEV_RULE = (name: string) => `/etc/udev/rules.d/99-zz-hata-${name}.rules`
 const WAIT_DIR = "/etc/systemd/system/systemd-networkd-wait-online.service.d";
 const WAIT_FILE = `${WAIT_DIR}/zz-hata.conf`;
 const profileName = (name: string) => `hata-${name}`;
+/**
+ * The bridge Hata makes so that containers and virtual machines sit in the home network beside the
+ * server, as with Proxmox's vmbr0: the server's own card goes into it, and its address with it.
+ */
+export { HOME_BRIDGE };
+const HOME_PROFILE = profileName(HOME_BRIDGE);
+const homePort = (name: string) => `hata-${HOME_BRIDGE}-${name}`;
+/**
+ * NetworkManager's checkpoint flag: profiles made after it are deleted on a rollback — the bridge's with
+ * them, and its device goes with its profile (taking new devices down too works only for all devices)
+ */
+const CHECKPOINT_NEW = String(0x02);
 
 export interface Nic {
   name: string;
@@ -78,6 +92,12 @@ export interface Nic {
   speed: number | null;
   /** Who configures it: NetworkManager, systemd-networkd (netplan writes for it too), ifupdown, "" — nobody we know */
   manager: "nm" | "networkd" | "ifupdown" | "";
+  /** A bridge: the interfaces in it; null — not a bridge */
+  ports: string[] | null;
+  /** The bridge it is a port of: its address is the bridge's then; "" — none */
+  port: string;
+  /** The bridge Hata made for the home network ("Containers and virtual machines in the home network") */
+  home: boolean;
   /** A Wi-Fi interface: whether it can be used, what it lacks, the network it is on */
   wifi?: { ready: boolean; needs: { package: string; install: string } | null; ssid: string; signal: number; /** The adapter can be an access point */ ap: boolean; hotspot: Hotspot | null };
 }
@@ -88,10 +108,12 @@ interface IpLink {
   address?: string;
   flags?: string[];
   addr_info?: { family: string; local: string; prefixlen: number; scope?: string; dynamic?: boolean }[];
+  /** The bridge it is a port of */
+  master?: string;
 }
 
 /** The interfaces out of `ip -j addr` and `ip -j route show default`, without Docker's and tunnels */
-export function parseLinks(addrJson: string, routeJson: string): Pick<Nic, "name" | "mac" | "up" | "addresses" | "addresses6" | "dynamic" | "gateway" | "internet">[] {
+export function parseLinks(addrJson: string, routeJson: string): Pick<Nic, "name" | "mac" | "up" | "addresses" | "addresses6" | "dynamic" | "gateway" | "internet" | "port">[] {
   let links: IpLink[] = [];
   let routes: { dev?: string; gateway?: string; metric?: number }[] = [];
   try {
@@ -114,6 +136,7 @@ export function parseLinks(addrJson: string, routeJson: string): Pick<Nic, "name
         dynamic: v4.some((a) => a.dynamic === true),
         gateway: way < 0 ? "" : ways[way]!.gateway!,
         internet: way < 0 ? ("none" as const) : way === 0 ? ("main" as const) : ("backup" as const),
+        port: l.master ?? "",
       };
     });
 }
@@ -299,6 +322,29 @@ export function profileArgs(change: Change): string[] {
 }
 
 /** IPv6 of a profile, out of `nmcli -t -f ipv6.method,ipv6.addresses,ipv6.gateway,ipv6.dns connection show` */
+/** The settings of an interface's profile that go over to the bridge it is put into: the address goes with it */
+export const BRIDGED_KEYS = ["ipv4.method", "ipv4.addresses", "ipv4.gateway", "ipv4.dns", "ipv4.dns-search", "ipv4.dhcp-client-id", "ipv4.route-metric", "ipv4.never-default", "ipv4.ignore-auto-dns", "ipv6.method", "ipv6.addresses", "ipv6.gateway", "ipv6.dns", "ipv6.route-metric", "ipv6.never-default", "ipv6.addr-gen-mode"];
+
+/**
+ * The arguments of `nmcli connection add` for the home bridge: the card's own address settings (a value
+ * nmcli shows as empty or "--" is left out — NetworkManager's default is the same), and the card's MAC
+ * address, so the router sees the same device and gives the same address. No spanning tree: one card.
+ */
+export function bridgeArgs(mac: string, from: Map<string, string>): string[] {
+  const args = ["connection", "add", "type", "bridge", "ifname", HOME_BRIDGE, "con-name", HOME_PROFILE, "autoconnect", "yes", "save", "yes", "bridge.stp", "no", "bridge.forward-delay", "2"];
+  if (/^([0-9a-f]{2}:){5}[0-9a-f]{2}$/i.test(mac)) args.push("bridge.mac-address", mac, "ethernet.cloned-mac-address", mac);
+  for (const key of BRIDGED_KEYS) {
+    const value = (from.get(key) ?? "").trim();
+    if (!value || value === "--" || (key.endsWith("route-metric") && value === "-1")) continue;
+    // a profile lists several addresses and servers with ", "; the command takes them with ","
+    args.push(key, value.replace(/,\s+/g, ","));
+  }
+  return args;
+}
+
+/** The arguments that put a card into the home bridge as its port */
+export const portArgs = (name: string): string[] => ["connection", "add", "type", "ethernet", "ifname", name, "con-name", homePort(name), "master", HOME_BRIDGE, "slave-type", "bridge", "autoconnect", "yes", "save", "yes"];
+
 export function parseV6(out: string): Nic["v6"] {
   const got = props(out);
   const field = (key: string) => got.get(key) ?? "";
@@ -521,6 +567,15 @@ export function wifiProfile(id: string, nic: string, net: { ssid: string; secure
 export const wifiProfileId = (ssid: string): string => "hata-wifi-" + (ssid.replace(/[^A-Za-z0-9._-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 32) || "network") + "-" + new Bun.CryptoHasher("sha256").update(ssid).digest("hex").slice(0, 6);
 
 const INTERFACES = "/etc/network/interfaces";
+
+/** The interfaces in a bridge, by the kernel's own list */
+function portsOf(bridge: string): string[] {
+  try {
+    return [...new Bun.Glob("*").scanSync({ cwd: `/sys/class/net/${bridge}/brif`, onlyFiles: false })].sort();
+  } catch {
+    return [];
+  }
+}
 const MARK = "#hata# ";
 
 /**
@@ -648,7 +703,7 @@ async function dnsOf(name: string, byNm: boolean): Promise<string[]> {
 
 export interface Pending {
   nic: string;
-  kind: "change" | "handover" | "handback";
+  kind: "change" | "handover" | "handback" | "bridge" | "unbridge";
   until: number;
   /** Opens `/network/confirm?token=…` at the new address, where the page's own session does not reach */
   token: string;
@@ -741,11 +796,13 @@ async function lookAtWays(): Promise<void> {
 /** Keeps an eye on the ways to the internet while the check is on, for the "needs attention" list, and keeps the internet side closed */
 export function startNetwork(): void {
   void closeOutside().catch(() => {});
+  void keepBridgeOpen().catch(() => {});
   setTimeout(() => void lookAtWays().catch(() => {}), 20_000);
   setInterval(() => {
     void lookAtWays().catch(() => {});
     // Docker makes its chain anew when it starts, and the WireGuard port may have changed
     void closeOutside().catch(() => {});
+    void keepBridgeOpen().catch(() => {});
   }, 60_000);
 }
 
@@ -892,8 +949,10 @@ export async function networkReport(): Promise<NetworkReport> {
       ...link,
       ...(wifi ? { wifi } : {}),
       v6: profile ? parseV6((await nmcli(["-t", "-f", "ipv6.method,ipv6.addresses,ipv6.gateway,ipv6.dns", "connection", "show", profile])).out) : { method: "", address: "", gateway: "", dns: [] },
-      handed: !byNm || isWifi ? "" : existsSync(HANDED(link.name)) ? "networkd" : withIface(interfaces, link.name) !== null ? "ifupdown" : "",
+      handed: !byNm || isWifi || link.port ? "" : existsSync(HANDED(link.name)) ? "networkd" : withIface(interfaces, link.name) !== null ? "ifupdown" : "",
       kind: isWifi ? "wifi" : modem ? "modem" : "ethernet",
+      ports: existsSync(`/sys/class/net/${link.name}/bridge`) ? portsOf(link.name) : null,
+      home: link.name === HOME_BRIDGE,
       // a USB interface hangs under its device, where the names are
       product: usb ? [read(`${device}/../manufacturer`), read(`${device}/../product`)].filter(Boolean).join(" ") : "",
       dns: link.addresses.length ? await dnsOf(link.name, byNm) : [],
@@ -966,7 +1025,7 @@ export async function confirmChange(token?: string): Promise<boolean> {
   pending = null;
   clearTimeout(kept.timer);
   await kept.keep().catch(() => {});
-  record(kept.kind === "handover" ? "network.handedOver" : kept.kind === "handback" ? "network.givenBack" : "network.changed", { detail: kept.nic });
+  record({ handover: "network.handedOver", handback: "network.givenBack", bridge: "network.bridged", unbridge: "network.unbridged", change: "network.changed" }[kept.kind], { detail: kept.nic });
   bus.publish("network");
   return true;
 }
@@ -1005,6 +1064,8 @@ export async function changeNic(name: string, input: Record<string, unknown>, us
   const change = cleanChange(input);
   if (typeof change === "string") throw new NetworkError(change);
   const nic = await findNic(name);
+  // its address is the bridge's
+  if (nic.port) throw new NetworkError("network.bridge.port");
   if (nic.manager !== "nm") throw new NetworkError("network.notOurs");
   if (change.method === "shared") {
     // the internet cannot be given out through the interface it comes in by
@@ -1114,6 +1175,7 @@ export async function giveBack(name: string, user: string): Promise<Pending> {
   if (pending) throw new NetworkError("network.pending");
   const nic = await findNic(name);
   if (!nic.handed) throw new NetworkError("network.notHanded");
+  if (nic.port) throw new NetworkError("network.bridge.port");
   const dir = `/run/hata-network-back-${name}`;
   const script = `${dir}/undo.sh`;
   const unit = `hata-network-undo-${name}`;
@@ -1166,6 +1228,195 @@ export async function giveBack(name: string, user: string): Promise<Pending> {
       rmSync(dir, { recursive: true, force: true });
     },
   });
+}
+
+// --- The home bridge --------------------------------------------------------------------------------
+
+/** Who stands on the home bridge (containers and virtual machines): it cannot be taken apart under them */
+let bridgeUsers: () => Promise<string[]> = async () => [];
+export function onBridgeUsers(find: () => Promise<string[]>): void {
+  bridgeUsers = find;
+}
+
+/** Why an interface cannot go into the home bridge; "" — it can */
+export function bridgeRefusal(nic: Pick<Nic, "kind" | "manager" | "outside" | "port" | "ports" | "addresses">): string {
+  // a Wi-Fi client may use one MAC address only: the bridge's guests would have none
+  if (nic.kind === "wifi") return "network.bridge.wifi";
+  if (nic.kind === "modem") return "network.bridge.modem";
+  if (nic.ports || nic.port) return "network.bridge.already";
+  if (nic.outside) return "network.bridge.outside";
+  if (nic.manager !== "nm") return "network.bridge.notNm";
+  if (!nic.addresses.length) return "network.bridge.noAddress";
+  return "";
+}
+
+/** A NetworkManager checkpoint of the devices named, rolled back by NetworkManager itself unless removed in time */
+async function checkpoint(devices: string[]): Promise<(method: "CheckpointRollback" | "CheckpointDestroy") => Promise<void>> {
+  const paths: string[] = [];
+  for (const device of devices) {
+    const path = (await nmcli(["-g", "GENERAL.DBUS-PATH", "device", "show", device])).out.trim();
+    if (path) paths.push(path);
+  }
+  if (!paths.length) throw new NetworkError("network.failed", { message: "the interface is not known to NetworkManager" });
+  const made = await must(run(["busctl", "call", ...NM, "CheckpointCreate", "aouu", String(paths.length), ...paths, String(TRIAL_S + 5), CHECKPOINT_NEW]));
+  const id = /"([^"]+)"/.exec(made)?.[1] ?? "";
+  return (method) => run(["busctl", "call", ...NM, method, "o", id]).then(() => {});
+}
+
+/** Waits for an interface to have an IPv4 address (DHCP takes its time) */
+async function addressed(name: string, seconds = 40): Promise<boolean> {
+  for (let i = 0; i < seconds; i++) {
+    if ((parseLinks((await run(["ip", "-j", "addr"])).out, "").find((l) => l.name === name)?.addresses.length ?? 0) > 0) return true;
+    await Bun.sleep(1000);
+  }
+  return false;
+}
+
+/**
+ * Puts a card of the server into the home bridge: the bridge takes the card's address settings and its
+ * MAC address (the router gives the same address), the card becomes its port, the card's own profile is
+ * switched off but kept, to come back when the bridge is taken apart. On trial: NetworkManager's
+ * checkpoint puts the card back by itself unless the change is kept in time.
+ */
+export async function makeBridge(name: string, user: string): Promise<Pending> {
+  if (pending) throw new NetworkError("network.pending");
+  if (!(await nmRunning())) throw new NetworkError("network.noTool");
+  const report = await networkReport();
+  if (report.nics.some((n) => n.home)) throw new NetworkError("network.bridge.exists");
+  const nic = report.nics.find((n) => n.name === name);
+  if (!nic) throw new NetworkError("network.noNic");
+  const why = bridgeRefusal(nic);
+  if (why) throw new NetworkError(why);
+  const uuid = (await nmcli(["-g", "GENERAL.CON-UUID", "device", "show", name])).out.trim();
+  if (!uuid) throw new NetworkError("network.failed", { message: "the interface has no connection" });
+  const from = props((await nmcli(["-t", "-f", BRIDGED_KEYS.join(","), "connection", "show", uuid])).out);
+  const drop = await checkpoint([name]);
+  try {
+    await nmcli(["connection", "delete", HOME_PROFILE]);
+    await nmcli(["connection", "delete", homePort(name)]);
+    await must(nmcli(bridgeArgs(nic.mac, from)));
+    await must(nmcli(portArgs(name)));
+    // kept for the way back; while it would connect by itself it would take the card out of the bridge
+    await must(nmcli(["connection", "modify", uuid, "connection.autoconnect", "no"]));
+  } catch (e) {
+    await drop("CheckpointRollback");
+    throw e;
+  }
+  setTimeout(async () => {
+    // a port brings its bridge up with it
+    const up = (await nmcli(["connection", "up", homePort(name)], 60_000)).code === 0;
+    await applied(up && (await addressed(HOME_BRIDGE)));
+    if (up) await keepBridgeOpen();
+  }, 400);
+  return startTrial({ nic: name, kind: "bridge", address: "" }, user, {
+    undo: async () => {
+      await drop("CheckpointRollback");
+      // what NetworkManager does not put back by itself, in case
+      await nmcli(["connection", "modify", uuid, "connection.autoconnect", "yes"]);
+      await nmcli(["connection", "delete", homePort(name)]);
+      await nmcli(["connection", "delete", HOME_PROFILE]);
+      if (!(parseLinks((await run(["ip", "-j", "addr"])).out, "").find((l) => l.name === name)?.addresses.length)) await nmcli(["connection", "up", uuid, "ifname", name], 60_000);
+    },
+    keep: () => drop("CheckpointDestroy"),
+  });
+}
+
+/**
+ * Takes the home bridge apart: its card gets its own profile back, with the address settings the bridge
+ * has now. Refused while a container or a virtual machine stands on it. On trial like making it.
+ */
+export async function takeBridgeApart(user: string): Promise<Pending> {
+  if (pending) throw new NetworkError("network.pending");
+  if (!(await nmRunning())) throw new NetworkError("network.noTool");
+  const users = await bridgeUsers();
+  if (users.length) throw new NetworkError("network.bridge.inUse", { names: users.join(", ") });
+  const report = await networkReport();
+  const bridge = report.nics.find((n) => n.home);
+  if (!bridge) throw new NetworkError("network.bridge.none");
+  const name = bridge.ports?.find((p) => report.nics.some((n) => n.name === p)) ?? "";
+  if (!name) throw new NetworkError("network.bridge.none");
+  const from = props((await nmcli(["-t", "-f", BRIDGED_KEYS.join(","), "connection", "show", HOME_PROFILE])).out);
+  // the card's own profile, kept when the bridge was made; a profile made anew when somebody removed it
+  let uuid = "";
+  for (const line of (await nmcli(["-t", "-f", "UUID,TYPE,DEVICE", "connection", "show"])).out.split("\n")) {
+    const [id, type] = terse(line);
+    if (!id || type !== "802-3-ethernet") continue;
+    const p = props((await nmcli(["-t", "-f", "connection.interface-name,connection.master,connection.id", "connection", "show", id])).out);
+    if (p.get("connection.interface-name") === name && !p.get("connection.master") && p.get("connection.id") !== homePort(name)) uuid = id;
+  }
+  const drop = await checkpoint([HOME_BRIDGE, name]);
+  try {
+    if (!uuid) {
+      // the bridge's own part of the arguments is the first 16
+      const args = bridgeArgs("", from).slice(16);
+      const made = await must(nmcli(["connection", "add", "type", "ethernet", "ifname", name, "con-name", profileName(name), "autoconnect", "no", "save", "yes", ...args]));
+      uuid = /\(([0-9a-f-]{36})\)/.exec(made)?.[1] ?? profileName(name);
+    } else {
+      // whatever the bridge's address is now, the card takes over
+      const settings = BRIDGED_KEYS.flatMap((key) => {
+        const value = (from.get(key) ?? "").trim();
+        return [key, !value || value === "--" ? "" : value.replace(/,\s+/g, ",")];
+      });
+      await must(nmcli(["connection", "modify", uuid, ...settings]));
+    }
+    await must(nmcli(["connection", "modify", HOME_PROFILE, "connection.autoconnect", "no"]));
+    await must(nmcli(["connection", "modify", homePort(name), "connection.autoconnect", "no"]));
+    await must(nmcli(["connection", "modify", uuid, "connection.autoconnect", "yes"]));
+  } catch (e) {
+    await drop("CheckpointRollback");
+    throw e;
+  }
+  setTimeout(async () => {
+    const up = (await nmcli(["connection", "up", uuid, "ifname", name], 60_000)).code === 0;
+    await nmcli(["connection", "down", HOME_PROFILE]);
+    await applied(up && (await addressed(name)));
+  }, 400);
+  return startTrial({ nic: name, kind: "unbridge", address: "" }, user, {
+    undo: async () => {
+      await drop("CheckpointRollback");
+      await nmcli(["connection", "modify", uuid, "connection.autoconnect", "no"]);
+      await nmcli(["connection", "modify", HOME_PROFILE, "connection.autoconnect", "yes"]);
+      await nmcli(["connection", "modify", homePort(name), "connection.autoconnect", "yes"]);
+      if (!(await addressed(HOME_BRIDGE, 3))) await nmcli(["connection", "up", homePort(name)], 60_000);
+    },
+    keep: async () => {
+      await drop("CheckpointDestroy");
+      await nmcli(["connection", "delete", homePort(name)]);
+      await nmcli(["connection", "delete", HOME_PROFILE]);
+      await unbridgeRules();
+    },
+  });
+}
+
+/**
+ * Lets the home bridge's own traffic pass while Docker is there: with the kernel's br_netfilter loaded,
+ * what crosses a bridge goes through FORWARD, whose policy Docker turns to DROP. Only port to port of the
+ * same bridge — nothing from the home network into Docker's own networks. Every minute, and after the
+ * bridge is made.
+ */
+export async function keepBridgeOpen(): Promise<void> {
+  if (!existsSync(`/sys/class/net/${HOME_BRIDGE}/bridge`)) return;
+  for (const tool of ["iptables", "ip6tables"]) {
+    if (!Bun.which(tool, { PATH }) || (await run([tool, "-w", "-S", "DOCKER-USER"], 10_000)).code !== 0) continue;
+    const rule = homeBridgeRule();
+    if ((await run([tool, "-w", "-C", "DOCKER-USER", ...rule], 10_000)).code !== 0) await run([tool, "-w", "-I", "DOCKER-USER", "1", ...rule], 10_000);
+  }
+}
+
+export const homeBridgeRule = (): string[] => ["-i", HOME_BRIDGE, "-o", HOME_BRIDGE, "-j", "ACCEPT"];
+
+async function unbridgeRules(): Promise<void> {
+  for (const tool of ["iptables", "ip6tables"]) {
+    if (!Bun.which(tool, { PATH })) continue;
+    while ((await run([tool, "-w", "-D", "DOCKER-USER", ...homeBridgeRule()], 10_000)).code === 0);
+  }
+}
+
+/** The home bridge as it is: its name and IPv4 address; null — there is none */
+export function homeBridge(): { name: string; address: string } | null {
+  if (!existsSync(`/sys/class/net/${HOME_BRIDGE}/bridge`)) return null;
+  const v4 = Object.entries(networkInterfaces()).find(([n]) => n === HOME_BRIDGE)?.[1]?.find((a) => a.family === "IPv4");
+  return { name: HOME_BRIDGE, address: v4?.address ?? "" };
 }
 
 // --- Wi-Fi ------------------------------------------------------------------------------------------

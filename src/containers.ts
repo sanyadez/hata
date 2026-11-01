@@ -18,7 +18,8 @@ import { bus } from "./bus";
 import { DATA_DIR, listenAddress, SECRETS_DIR, settings } from "./config";
 import { onContainerPlaces } from "./mounting";
 import { readJsonFile, writeJsonAtomic } from "./fsutil";
-import { DISC_DEVICE, DRIVERS_DEVICE, DRIVERS_URL, discConfig, DISC_RE, discDevices, discName, readDiscs, readNewFromDisc, type Disc, CLONE_SCRIPT, cloneRequest, hostFiles, nicsOf, readName, screenRenamed, screenSocket, withScreen, trouble, BRIDGE, bridgeRules, configOf, devicesOf, diskChange, LIMITED, FieldError, placeFor, poolName, IMAGE_SERVER, IMAGES, insideNarrowMap, limitsChange, NAME_RE, readInstance, readNew, setupScript, snapshotName, SNAPSHOT_RE, type Container } from "./incus";
+import { movedLink, nicFor, DISC_DEVICE, DRIVERS_DEVICE, DRIVERS_URL, discConfig, DISC_RE, discDevices, discName, readDiscs, readNewFromDisc, type Disc, CLONE_SCRIPT, cloneRequest, hostFiles, nicsOf, readName, screenRenamed, screenSocket, withScreen, trouble, BRIDGE, bridgeRules, configOf, devicesOf, diskChange, LIMITED, FieldError, placeFor, poolName, IMAGE_SERVER, IMAGES, insideNarrowMap, limitsChange, NAME_RE, readInstance, readNew, setupScript, snapshotName, SNAPSHOT_RE, type Container } from "./incus";
+import { homeBridge, onBridgeUsers } from "./network";
 import { invite, machines, remove as removeMachine, rename as renameMachine } from "./machines";
 import { packageManager, PATH, run, runLogged } from "./packages";
 
@@ -216,6 +217,8 @@ export interface ContainersReport {
   version: string;
   /** The network the containers are on and its address */
   network: { name: string; address: string } | null;
+  /** The bridge of the home network (Settings → Network) and the server's address there; null — none */
+  home: { name: string; address: string } | null;
   /** Where Incus keeps them: every pool, the room on it, which one new ones go to */
   places: Place[];
   containers: (Container & { machine: string })[];
@@ -267,7 +270,7 @@ export function containerOfMachine(macs: string[], hostname: string): string {
 }
 
 export async function report(): Promise<ContainersReport> {
-  const base = { why: "", install: installCommand(), version: "", network: null, places: [] as Place[], containers: [], discs: [] as Disc[], images: IMAGES.map((i) => ({ id: i.id, name: i.name, client: i.family !== "", container: i.container, vm: i.vm, docker: i.docker !== false, least: i.least ?? null })), vms: { state: "missing" as VmState, install: installCommand(VM_PACKAGES) } };
+  const base = { why: "", install: installCommand(), version: "", network: null, home: homeBridge(), places: [] as Place[], containers: [], discs: [] as Disc[], images: IMAGES.map((i) => ({ id: i.id, name: i.name, client: i.family !== "", container: i.container, vm: i.vm, docker: i.docker !== false, least: i.least ?? null })), vms: { state: "missing" as VmState, install: installCommand(VM_PACKAGES) } };
   const why = blocked();
   if (why) return { ...base, state: "blocked", why };
   if (!has("incus") || !existsSync(SOCKET)) return { ...base, state: "missing" };
@@ -411,6 +414,21 @@ const ready = async (): Promise<ContainersReport> => {
   return r;
 };
 
+/** Hata's address as seen from an instance's network: the bridge's own on either */
+const hataOn = (network: "home" | "private", r: Pick<ContainersReport, "home" | "network">): string => (network === "home" ? (r.home?.address ?? "") : (r.network?.address.split("/")[0] ?? ""));
+
+/**
+ * Where a new instance's card goes: the home network when asked, or by default once its bridge is there;
+ * otherwise the default profile's card (Hata's own network). `hata` — the address the client reaches Hata at.
+ */
+function joining(asked: "home" | "private" | null, r: Pick<ContainersReport, "home" | "network">): { nic?: Record<string, string>; hata: string } {
+  if (asked === "home" || (asked === null && r.home)) {
+    if (!r.home) throw new AppError("containers.network.noBridge", 409);
+    return { nic: nicFor("home", ""), hata: hataOn("home", r) };
+  }
+  return { hata: hataOn("private", r) };
+}
+
 /**
  * A new container (a job of kind `container`): made from the image and started, then — when asked —
  * Docker and Hata's client put in through `incus exec`, and the machine awaited. The client reaches
@@ -432,9 +450,10 @@ export async function create(input: Record<string, unknown>, by: string): Promis
   const pool = chosen.name;
   // a plain folder cannot hold a container's disk to a size: Incus would take the limit and keep none
   if (c.kind === "container" && c.disk && !LIMITED.includes(chosen.driver)) throw new AppError("containers.disk.notHere", 400, { name: pool });
+  const where = joining(c.network, r);
   const job = startJob(`incus:${c.name}`, "container", by, async (log) => told(log, async () => {
-    log(`Making ${c.name} from ${c.image.name} (the image is downloaded once)`);
-    const op = await incus("POST", "/1.0/instances", { name: c.name, type: vm ? "virtual-machine" : "container", start: true, source: { type: "image", protocol: "simplestreams", server: IMAGE_SERVER, alias: c.image.alias }, config: { ...configOf(c), ...(vm ? { "raw.qemu": withScreen("", c.name) } : {}) }, devices: devicesOf(c, pool) });
+    log(`Making ${c.name} from ${c.image.name} (the image is downloaded once)${where.nic ? ", in the home network" : ""}`);
+    const op = await incus("POST", "/1.0/instances", { name: c.name, type: vm ? "virtual-machine" : "container", start: true, source: { type: "image", protocol: "simplestreams", server: IMAGE_SERVER, alias: c.image.alias }, config: { ...configOf(c), ...(vm ? { "raw.qemu": withScreen("", c.name) } : {}) }, devices: devicesOf(c, pool, where.nic) });
     await finished(op, 1800);
     bus.publish("containers");
     // a virtual machine boots its own kernel first: its address and its agent come later (a desktop takes ~3 min)
@@ -455,7 +474,7 @@ export async function create(input: Record<string, unknown>, by: string): Promis
       }
       if (!agent) throw new AppError("containers.vm.noAgent", 409, { name: c.name });
     }
-    const gateway = r.network?.address.split("/")[0] ?? "";
+    const gateway = where.hata;
     if (c.client && !gateway) throw new AppError("containers.noNetwork", 409);
     const before = new Set(machines().map((m) => m.id));
     const line = c.client ? `curl -fsSL http://${gateway}:${listenAddress().port}/client/${(await invite(by)).code} | sh` : "";
@@ -598,11 +617,12 @@ async function createFromDisc(input: Record<string, unknown>, r: ContainersRepor
     throw new AppError("containers.badField", 400, { field: e instanceof FieldError ? e.field : "" });
   }
   const pool = discPlace(r, input.place).name;
+  const where = joining(c.network, r);
   const job = startJob(`incus:${c.name}`, "container", by, async (log) => told(log, async () => {
-    log(`Making ${c.name} with ${c.disc.name} in its drive and an empty disk of ${c.disk} GB`);
+    log(`Making ${c.name} with ${c.disc.name} in its drive and an empty disk of ${c.disk} GB${where.nic ? ", in the home network" : ""}`);
     if (c.windows) log(c.drivers ? `Windows: TPM, Secure Boot, the disk on NVMe; ${c.drivers.name} in a second drive` : "Windows: TPM, Secure Boot, the disk on NVMe; no drivers' disc here — its network needs one");
     const config = { ...discConfig(c), "raw.qemu": withScreen("", c.name) };
-    await finished(await incus("POST", "/1.0/instances", { name: c.name, type: "virtual-machine", start: true, source: { type: "none" }, config, devices: discDevices(c, pool) }), 600);
+    await finished(await incus("POST", "/1.0/instances", { name: c.name, type: "virtual-machine", start: true, source: { type: "none" }, config, devices: discDevices(c, pool, where.nic) }), 600);
     log("Started: the installer is on its screen");
     record("containers.vmCreated", { user: by, detail: c.name });
     bus.publish("containers");
@@ -623,6 +643,82 @@ export async function ejectDisc(name: string, by: string): Promise<void> {
   record("containers.disc.ejected", { user: by, detail: name });
   bus.publish("containers");
 }
+
+/** Where Hata's client keeps the address of Hata inside an instance */
+const CLIENT_LINK = "/var/lib/hata-client/link.json";
+
+/**
+ * Moves an instance's card to the home network or back to Hata's own (a job of kind `container`): stopped,
+ * the card changed (its MAC address stays, so the router knows it again), started if it ran. Hata's client
+ * inside is told Hata's address on the network it joins — a stopped virtual machine is started for that
+ * (its files are reached through its agent) and stopped again.
+ */
+export async function setNetwork(name: string, input: unknown, by: string): Promise<{ job: string }> {
+  const r = await ready();
+  const c = await findContainer(name);
+  if (input !== "home" && input !== "private") throw new AppError("containers.badField", 400, { field: "network" });
+  const to = input;
+  if (c.network === to) throw new AppError("containers.network.same", 409, { name });
+  if (to === "home" && !r.home?.address) throw new AppError("containers.network.noBridge", 409);
+  if (to === "private" && !r.network) throw new AppError("containers.noNetwork", 409);
+  const vm = c.kind === "vm";
+  const job = startJob(`incus:${name}`, "container", by, async (log) => told(log, async () => {
+    const ran = c.status === "running";
+    let running = ran;
+    // the address Hata has where it stands now, and where it goes
+    const from = c.network === "home" ? hataOn("home", r) : hataOn("private", r);
+    const there = hataOn(to, r);
+    if (vm && !running) {
+      log(`Starting ${name}: Hata's client inside is reached through its agent`);
+      await startNow(name);
+      running = true;
+    }
+    let before: string | null = null;
+    if (!vm || (await agentOf(name, true))) before = await readInside(name, CLIENT_LINK);
+    else log("Its agent did not answer: Hata's client inside keeps the old address");
+    const after = before === null ? null : movedLink(before, from, there);
+    if (after) {
+      await writeInside(name, CLIENT_LINK, after, "0600");
+      log(`Hata's client inside now reaches Hata at ${there}`);
+    }
+    try {
+      if (running) {
+        log(`Stopping ${name}`);
+        await stopNow(name);
+      }
+      const raw = (await incus("GET", `/1.0/instances/${name}`)).metadata;
+      const key = Object.entries((raw.expanded_devices ?? {}) as Record<string, Record<string, string>>).find(([, d]) => d.type === "nic")?.[0] ?? "eth0";
+      const devices = { ...(raw.devices ?? {}), [key]: { ...nicFor(to, r.network?.name ?? ""), name: raw.expanded_devices?.[key]?.name ?? "eth0" } };
+      await finished(await incus("PUT", `/1.0/instances/${name}`, { architecture: raw.architecture, config: raw.config, devices, ephemeral: raw.ephemeral, profiles: raw.profiles, stateful: raw.stateful, description: raw.description }), 120);
+    } catch (e) {
+      if (after && before !== null) await writeInside(name, CLIENT_LINK, before, "0600").catch(() => {});
+      if (ran) await startNow(name).catch(() => {});
+      throw e;
+    }
+    log(to === "home" ? "Its card is in the home network now" : "Its card is on Hata's own network now");
+    if (ran) {
+      log(`Starting ${name}`);
+      await startNow(name);
+      let address = "";
+      for (let i = 0; i < (vm ? 180 : 60) && !address; i++) {
+        address = (await findContainer(name)).address;
+        if (!address) await Bun.sleep(1000);
+      }
+      log(address ? `Its address: ${address}` : "No address yet");
+    }
+    record(to === "home" ? "containers.network.home" : "containers.network.private", { user: by, detail: name });
+    await lookAtIncus();
+    bus.publish("containers");
+  }), true, { app: name, machine: "" });
+  return { job: job.id };
+}
+
+// the home bridge is not taken apart under an instance standing on it
+onBridgeUsers(async () => {
+  if (!existsSync(SOCKET)) return [];
+  const list = ((await incus("GET", "/1.0/instances?recursion=1").catch(() => null))?.metadata ?? []) as any[];
+  return list.filter((raw) => readInstance({ ...raw, state: null })?.network === "home").map((raw) => String(raw.name));
+});
 
 /** Waits for Hata's client in a new instance to pair: the machine that was not there before, by its host name */
 async function awaitMachine(name: string, before: Set<string>, log: (line: string) => void): Promise<string> {
@@ -882,8 +978,8 @@ async function readInside(name: string, path: string): Promise<string | null> {
   return r.text();
 }
 
-async function writeInside(name: string, path: string, text: string): Promise<void> {
-  const r = await fetch(`http://incus/1.0/instances/${name}/files?path=${encodeURIComponent(path)}`, { unix: SOCKET, method: "POST", body: text, headers: { "content-type": "application/octet-stream", "X-Incus-type": "file", "X-Incus-uid": "0", "X-Incus-gid": "0", "X-Incus-mode": "0644", "X-Incus-write": "overwrite" }, signal: AbortSignal.timeout(30_000) } as RequestInit);
+async function writeInside(name: string, path: string, text: string, mode = "0644"): Promise<void> {
+  const r = await fetch(`http://incus/1.0/instances/${name}/files?path=${encodeURIComponent(path)}`, { unix: SOCKET, method: "POST", body: text, headers: { "content-type": "application/octet-stream", "X-Incus-type": "file", "X-Incus-uid": "0", "X-Incus-gid": "0", "X-Incus-mode": mode, "X-Incus-write": "overwrite" }, signal: AbortSignal.timeout(30_000) } as RequestInit);
   if (!r.ok) throw new AppError("containers.failed", 409, { message: String(((await r.json().catch(() => null)) as any)?.error ?? `HTTP ${r.status}`) });
 }
 
@@ -1035,7 +1131,7 @@ export async function cloneInstance(name: string, input: Record<string, unknown>
     log(`Starting ${to}`);
     await startNow(to);
     if (!client) return;
-    const gateway = r.network?.address.split("/")[0] ?? "";
+    const gateway = hataOn(c.network === "home" ? "home" : "private", r);
     if (!gateway) throw new AppError("containers.noNetwork", 409);
     if (vm && !(await agentOf(to, true))) throw new AppError("containers.vm.noAgent", 409, { name: to });
     const before = new Set(machines().map((m) => m.id));

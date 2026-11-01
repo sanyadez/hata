@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { props, giveBackScript, retakeScript, ifupRetakeScript, ip6Groups, overlaps, parseV6, shareAddress, trouble, withIface, cleanChange, checkConf, parseConnectivity, hotspotProfile, parseLeases, wifiQrText, isModem, roleArgs, parseWifi, wifiPassword, wifiProfile, wifiProfileId, dhcpcdClientId, withoutIface, handBackScript, handedFile, parseLinks, profileArgs, terse, udevRule, waitOnline } from "../src/network";
+import { bridgeArgs, bridgeRefusal, portArgs, HOME_BRIDGE, props, giveBackScript, retakeScript, ifupRetakeScript, ip6Groups, overlaps, parseV6, shareAddress, trouble, withIface, cleanChange, checkConf, parseConnectivity, hotspotProfile, parseLeases, wifiQrText, isModem, roleArgs, parseWifi, wifiPassword, wifiProfile, wifiProfileId, dhcpcdClientId, withoutIface, handBackScript, handedFile, parseLinks, profileArgs, terse, udevRule, waitOnline } from "../src/network";
 
 const ADDR = JSON.stringify([
   { ifname: "lo", link_type: "loopback", flags: ["LOOPBACK", "UP", "LOWER_UP"], addr_info: [{ family: "inet", local: "127.0.0.1", prefixlen: 8 }] },
@@ -23,8 +23,8 @@ const ROUTE = JSON.stringify([{ dst: "default", gateway: "192.168.1.1", dev: "et
 
 test("parseLinks: the server's own interfaces, without Docker's and tunnels", () => {
   expect(parseLinks(ADDR, ROUTE)).toEqual([
-    { name: "eth0", mac: "bc:24:11:b6:3a:39", up: true, addresses: ["192.168.1.233/24"], addresses6: ["2001:db8::5/64"], dynamic: true, gateway: "192.168.1.1", internet: "main" },
-    { name: "enp2s0", mac: "aa:bb:cc:dd:ee:ff", up: false, addresses: [], addresses6: [], dynamic: false, gateway: "", internet: "none" },
+    { name: "eth0", mac: "bc:24:11:b6:3a:39", up: true, addresses: ["192.168.1.233/24"], addresses6: ["2001:db8::5/64"], dynamic: true, gateway: "192.168.1.1", internet: "main", port: "" },
+    { name: "enp2s0", mac: "aa:bb:cc:dd:ee:ff", up: false, addresses: [], addresses6: [], dynamic: false, gateway: "", internet: "none", port: "" },
   ]);
   expect(parseLinks("not json", "")).toEqual([]);
 });
@@ -249,4 +249,46 @@ test("trouble: which way to the internet does not reach it", () => {
   expect(trouble(routes(100, 101), new Map([["cable", true]]))).toEqual([]);
   expect(trouble("", reached(false, false))).toEqual([]);
   expect(trouble("junk", reached(false, false))).toEqual([]);
+});
+
+test("bridgeArgs: the home bridge takes the card's address settings and its MAC address", () => {
+  const from = new Map([
+    ["ipv4.method", "auto"],
+    ["ipv4.addresses", ""],
+    ["ipv4.dhcp-client-id", "ff:5c:33:b9:0f:00:01"],
+    ["ipv4.route-metric", "-1"],
+    ["ipv4.dns", "1.1.1.1, 9.9.9.9"],
+    ["ipv6.method", "auto"],
+    ["ipv6.gateway", "--"],
+  ]);
+  const args = bridgeArgs("40:8d:5c:33:b9:0f", from);
+  expect(args.slice(0, 6)).toEqual(["connection", "add", "type", "bridge", "ifname", HOME_BRIDGE]);
+  // the first 16 are the bridge's own: a card's profile made from the same settings leaves them out
+  expect(args.slice(16)).toEqual(["bridge.mac-address", "40:8d:5c:33:b9:0f", "ethernet.cloned-mac-address", "40:8d:5c:33:b9:0f", "ipv4.method", "auto", "ipv4.dns", "1.1.1.1,9.9.9.9", "ipv4.dhcp-client-id", "ff:5c:33:b9:0f:00:01", "ipv6.method", "auto"]);
+  expect(bridgeArgs("", from).slice(16, 18)).toEqual(["ipv4.method", "auto"]);
+  expect(portArgs("enp3s0")).toContain("master");
+  expect(portArgs("enp3s0")[portArgs("enp3s0").indexOf("master") + 1]).toBe(HOME_BRIDGE);
+});
+
+test("bridgeRefusal: only a cable of NetworkManager's, on the home side, with an address", () => {
+  const nic = { kind: "ethernet" as const, manager: "nm" as const, outside: false, port: "", ports: null, addresses: ["192.168.1.5/24"] };
+  expect(bridgeRefusal(nic)).toBe("");
+  expect(bridgeRefusal({ ...nic, kind: "wifi" })).toBe("network.bridge.wifi");
+  expect(bridgeRefusal({ ...nic, kind: "modem" })).toBe("network.bridge.modem");
+  expect(bridgeRefusal({ ...nic, port: HOME_BRIDGE })).toBe("network.bridge.already");
+  expect(bridgeRefusal({ ...nic, ports: [] })).toBe("network.bridge.already");
+  expect(bridgeRefusal({ ...nic, outside: true })).toBe("network.bridge.outside");
+  expect(bridgeRefusal({ ...nic, manager: "ifupdown" })).toBe("network.bridge.notNm");
+  expect(bridgeRefusal({ ...nic, addresses: [] })).toBe("network.bridge.noAddress");
+});
+
+test("parseLinks: a card in a bridge says which", () => {
+  const addr = JSON.stringify([
+    { ifname: "enp3s0", link_type: "ether", address: "40:8d:5c:33:b9:0f", master: HOME_BRIDGE, flags: ["UP", "LOWER_UP"], addr_info: [] },
+    { ifname: HOME_BRIDGE, link_type: "ether", address: "40:8d:5c:33:b9:0f", flags: ["UP", "LOWER_UP"], addr_info: [{ family: "inet", local: "192.168.1.128", prefixlen: 24, dynamic: true }] },
+  ]);
+  expect(parseLinks(addr, JSON.stringify([{ gateway: "192.168.1.1", dev: HOME_BRIDGE }])).map((l) => [l.name, l.port, l.internet])).toEqual([
+    ["enp3s0", HOME_BRIDGE, "none"],
+    [HOME_BRIDGE, "", "main"],
+  ]);
 });

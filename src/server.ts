@@ -33,7 +33,7 @@ import { checkDisks, diskHealth, installTool, listDisks, startDisks, startSelfTe
 import { lookAtPools, noteTypes, poolCheck, poolClear, PoolError, poolsReport, poolsTrouble, startPools } from "./raid";
 import { fills, measureFills, startFills } from "./fills";
 import { checkImages, imagesStatus, startImages } from "./images";
-import { afterPackage, exposedNics, giveBack, internetTrouble, setSide, startNetwork, setCheck, setRole, startHotspot, stopHotspot, wifiQrText, changeNic, confirmChange, handOver, NETWORK_PACKAGES, networkReport, NetworkError, revertChange, wifiConnect, wifiForget, wifiNetworks } from "./network";
+import { afterPackage, exposedNics, giveBack, internetTrouble, setSide, startNetwork, setCheck, setRole, startHotspot, stopHotspot, wifiQrText, changeNic, confirmChange, handOver, makeBridge, takeBridgeApart, NETWORK_PACKAGES, networkReport, NetworkError, revertChange, wifiConnect, wifiForget, wifiNetworks } from "./network";
 import { DOCKER_INSTALL_COMMAND, installDocker, startDocker } from "./dockerinstall";
 import { installOne, removeOne, toolsReport } from "./tools";
 import { checkUpdates, packageUpdates, startSysUpdates, upgrade as upgradeSystem } from "./sysupdates";
@@ -121,7 +121,7 @@ import { machineAccessRows, setMachineAccess, startMachineGates } from "./machin
 import { applyMachineCompose, installComposeOnMachine, machineTiles, installOnMachine, machineAppAction, machineAppLogs, machineApps, machineCompose, removeMachineApp, storeAppFor } from "./machineapps";
 import { addStore, ARCH, catalogue, removeStore, scheduleStoreSync, StoreError, syncStore } from "./store";
 import { startSampler, systemStatus } from "./system";
-import { addDisc as addContainerDisc, receiveDisc as receiveContainerDisc, removeDisc as removeContainerDisc, ejectDisc as ejectContainerDisc, askScreen as containerAskScreen, openScreen as containerOpenScreen, isContainerScreen, screenOn as containerScreenOn, act as containerAct, cloneInstance as cloneContainer, renameInstance as renameContainer, addPlace as addContainerPlace, moveInstance as moveContainer, removePlace as removeContainerPlace, setStandardPlace, containerOfMachine, vmOfMachine, instanceOfMachine, containersTrouble, create as createContainer, install as installIncus, installVms as installIncusVms, removeContainer, removeSnapshot as removeContainerSnapshot, report as containersReport, restoreSnapshot as restoreContainerSnapshot, setLimits as setContainerLimits, setUpNow as setUpContainers, shellCommand as containerShell, shellReady as containerShellReady, startContainers, takeSnapshot as takeContainerSnapshot } from "./containers";
+import { addDisc as addContainerDisc, receiveDisc as receiveContainerDisc, removeDisc as removeContainerDisc, ejectDisc as ejectContainerDisc, askScreen as containerAskScreen, openScreen as containerOpenScreen, isContainerScreen, screenOn as containerScreenOn, act as containerAct, cloneInstance as cloneContainer, renameInstance as renameContainer, addPlace as addContainerPlace, moveInstance as moveContainer, removePlace as removeContainerPlace, setStandardPlace, containerOfMachine, vmOfMachine, instanceOfMachine, containersTrouble, create as createContainer, install as installIncus, installVms as installIncusVms, removeContainer, removeSnapshot as removeContainerSnapshot, report as containersReport, restoreSnapshot as restoreContainerSnapshot, setLimits as setContainerLimits, setNetwork as setContainerNetwork, setUpNow as setUpContainers, shellCommand as containerShell, shellReady as containerShellReady, startContainers, takeSnapshot as takeContainerSnapshot } from "./containers";
 import { askScreen as pveAskScreen, openScreen as pveOpenScreen, storageContent as pveStorageContent, removeVolume as pveRemoveVolume, cloneOptions as pveCloneOptions, cloneGuest as pveCloneGuest, makeTemplate as pveMakeTemplate, load as pveLoad, templates as pveTemplates, downloadTemplate as pveDownloadTemplate, removeTemplate as pveRemoveTemplate, setSchedule as pveSetSchedule, runScheduleNow as pveRunSchedule, restoreBackup as pveRestoreBackup, restoreOptions as pveRestoreOptions, changeGuest as pveChangeGuest, guestSettings as pveGuestSettings, installByConsole as pveInstallByConsole, openConsole as pveOpenConsole, type Console as PveConsole, addBySignIn as addPveBySignIn, removeGuest as pveRemoveGuest, addHost as addPve, createGuest as pveCreateGuest, createVm as pveCreateVm, sendFile as pveSendFile, receiveFile as pveReceiveFile, newOptions as pveNewOptions, backupJobs as pveBackupJobs, backups as pveBackups, changeHost as changePve, guestOfMachine, host as pveHost, hosts as pveHosts, power as pvePower, proxmoxTrouble, refresh as refreshPve, removeHost as removePve, snapshotAction as pveSnapshotAction, snapshots as pveSnapshots, startProxmox, takeBackup as pveTakeBackup, takeSnapshot as pveTakeSnapshot, taskLog as pveTaskLog } from "./proxmox";
 import { call as machineCall, clientBinary, containersOf, installScript, invite as machineInvite, INVITE_MS, linkData, linkHandlers, machine as machineView, MACHINE_ID_RE, machines as machineList, machinesAway, open as machineOpen, remove as removeMachine, rename as renameMachine, startMachines, updateClient, wake as wakeMachine, power as powerMachine, type LinkSocket } from "./machines";
 import { availableUpdate, cancelUpdate, checkForUpdate, confirmUpdate, scheduleUpdateChecks, startRollback, startUpdate, updateStatus } from "./update";
@@ -1286,6 +1286,9 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
         await setRole(role[1]!, (await body(req)).role, user.name);
         return json(await networkReport());
       }
+      if (path === "/api/network/bridge" && method === "DELETE") return json(await takeBridgeApart(user.name));
+      const bridge = /^\/api\/network\/([A-Za-z0-9_.-]{1,15})\/bridge$/.exec(path);
+      if (bridge && method === "POST") return json(await makeBridge(bridge[1]!, user.name));
       const nic = /^\/api\/network\/([A-Za-z0-9_.-]{1,15})(\/handover|\/handback)?$/.exec(path);
       if (nic && method === "POST" && nic[2] === "/handover") return json(await handOver(nic[1]!, user.name));
       if (nic && method === "POST" && nic[2] === "/handback") return json(await giveBack(nic[1]!, user.name));
@@ -2555,6 +2558,7 @@ async function containersApi(req: Request, url: URL, server: Server, by: string)
     await containerScreenOn(name, by);
     return json({ ok: true });
   }
+  if (rest === "/network" && method === "POST") return json(await setContainerNetwork(name, (await body(req)).network, by), 202);
   if (rest === "/move" && method === "POST") return json(await moveContainer(name, (await body(req)).place, by), 202);
   if (rest === "/rename" && method === "POST") return json(await renameContainer(name, (await body(req)).name, by), 202);
   if (rest === "/clone" && method === "POST") return json(await cloneContainer(name, await body(req), by), 202);

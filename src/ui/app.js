@@ -3113,7 +3113,7 @@ function renderContainersBody() {
   const vmCount = d.containers.filter((c) => c.kind === "vm").length;
   document.getElementById("incus-meta").textContent = [t("incus.countN", { n: d.containers.length - vmCount }), vmCount > 0 && t("incus.vm.countN", { n: vmCount }), d.version && "Incus " + d.version, d.network && t("incus.network", { name: d.network.name, address: d.network.address })].filter(Boolean).join(" · ");
   if (!d.containers.length) {
-    return put(box, h("div", { class: "card empty" }, icon("box"), h("h2", null, t("incus.none")), h("p", null, t("incus.noneLead")), button(t("incus.new"), { class: "primary", onclick: () => newContainerDialog() }, "plus")), vmCard(d));
+    return put(box, h("div", { class: "card empty" }, icon("box"), h("h2", null, t("incus.none")), h("p", null, t("incus.noneLead")), button(t("incus.new"), { class: "primary", onclick: () => newContainerDialog() }, "plus")), homeNetCard(d), vmCard(d));
   }
   put(
     box,
@@ -3131,9 +3131,21 @@ function renderContainersBody() {
         ),
       ),
     ),
+    homeNetCard(d),
     incusPlacesCard(d),
     d.vms?.state === "ready" && discsCard(d),
     vmCard(d),
+  );
+}
+
+/** Where new ones sit: the home network once its bridge is there, or the way to make it */
+function homeNetCard(d) {
+  const home = d.home;
+  return h(
+    "section",
+    { class: "card pad stack" },
+    h("div", { class: "section-head" }, h("h2", null, t("incus.net.title")), h("div", { class: "actions" }, home ? h("a", { class: "btn small", href: "#/settings/network" }, t("incus.net.settings")) : button(t("incus.net.make"), { class: "small", onclick: () => homeBridgeDialog(null, () => void loadContainers()) }, "box"))),
+    h("p", { class: "muted small" }, home ? t("incus.net.on", { bridge: home.name, address: home.address || "—" }) : t("incus.net.off", { network: d.network?.name ?? "" })),
   );
 }
 
@@ -3534,7 +3546,7 @@ function containerRow(c) {
       "td",
       null,
       h("div", { class: "strong" }, c.name, c.machine && h("a", { class: "small", href: `#/machines/${c.machine}` }, " · ", t("incus.asMachine"))),
-      h("div", { class: "muted small" }, [c.kind === "vm" && t("incus.vm.short"), c.os, c.nesting && "Docker", c.snapshots.length > 0 && t("incus.snapshotsN", { n: c.snapshots.length }), c.disc && t("incus.disc.inDrive", { name: c.disc })].filter(Boolean).join(" · ")),
+      h("div", { class: "muted small" }, [c.kind === "vm" && t("incus.vm.short"), c.os, c.network === "home" && t("incus.net.homeShort"), c.nesting && "Docker", c.snapshots.length > 0 && t("incus.snapshotsN", { n: c.snapshots.length }), c.disc && t("incus.disc.inDrive", { name: c.disc })].filter(Boolean).join(" · ")),
     ),
     h("td", null, incusStatus(c)),
     h("td", { class: "mono small" }, c.address || "—"),
@@ -3579,6 +3591,7 @@ function containerMenu(c, at) {
     c.status === "running" && { label: t("incus.console"), icon: "terminal", run: () => containerConsole(c) },
     c.machine && { label: t("incus.openMachine"), icon: "server", href: `#/machines/${c.machine}` },
     { label: t("incus.limits") + "…", icon: "settings", run: () => containerLimitsDialog(c) },
+    (incusUi.data?.home || c.network === "home") && { label: t("incus.net.move") + "…", icon: "network", run: () => containerNetworkDialog(c) },
     { label: t("incus.snapshots") + "…", icon: "clock", run: () => containerSnapshotsDialog(c) },
     { label: t("incus.rename") + "…", icon: "edit", run: () => renameContainerDialog(c) },
     { label: t("incus.clone") + "…", icon: "copy", run: () => cloneContainerDialog(c) },
@@ -3651,6 +3664,8 @@ function newContainerDialog(start = "container") {
   disk.addEventListener("input", () => (disk.dataset.touched = "1"));
   const placeSelect = h("select", null, (d.places ?? []).map((p) => h("option", { value: p.name, selected: p.standard }, `${p.name} — ${p.path || t("incus.place.systemPath")}${p.total ? " · " + t("incus.place.freeShort", { free: bytes(p.total - p.used) }) : ""}`)));
   const placeRow = (d.places ?? []).length > 1 && field(t("incus.place.label"), placeSelect);
+  const netSelect = h("select", null, ["home", "private"].map((k) => h("option", { value: k }, t("incus.net." + k))));
+  const netRow = d.home ? field(t("incus.net.label"), netSelect, t("incus.net.hint")) : h("p", { class: "muted small" }, t("incus.net.none"), " ", h("a", { href: "#", class: "link", onclick: (e) => (e.preventDefault(), dialog.close(), homeBridgeDialog(null, () => void loadContainers())) }, t("incus.net.make")));
   placeSelect.addEventListener("change", () => shape());
   const lead = h("p", { class: "muted small" });
   const title = h("h2", { class: "grow" });
@@ -3727,7 +3742,7 @@ function newContainerDialog(start = "container") {
     const n = name.value.trim().toLowerCase();
     try {
       const fromDisc = kind === "vm" && image.value.startsWith("disc:");
-      const r = await api("POST", "/api/containers", { windows: fromDisc && windows.checked, kind, name: n, image: image.value, cores: Number(cores.value), memory: Number(memory.value), disk: disk.disabled ? 0 : Number(disk.value || 0), client: client.checked, docker: docker.checked, autostart: autostart.checked, place: placeSelect.value });
+      const r = await api("POST", "/api/containers", { windows: fromDisc && windows.checked, kind, name: n, image: image.value, cores: Number(cores.value), memory: Number(memory.value), disk: disk.disabled ? 0 : Number(disk.value || 0), client: client.checked, docker: docker.checked, autostart: autostart.checked, place: placeSelect.value, ...(d.home ? { network: netSelect.value } : {}) });
       dialog.close();
       const machine = client.checked && !fromDisc;
       void loadContainers();
@@ -3757,6 +3772,7 @@ function newContainerDialog(start = "container") {
       h("div", { class: "form-pair" }, field(t("incus.coresLabel"), cores), field(t("incus.memoryLabel"), memory)),
       diskRow,
       placeRow,
+      netRow,
       windowsRow,
       clientRow,
       dockerRow,
@@ -3768,6 +3784,42 @@ function newContainerDialog(start = "container") {
   fillImages();
   shape();
   name.focus();
+}
+
+/** Moves an instance between the home network and Hata's own: restarted, a new address from the other network */
+function containerNetworkDialog(c) {
+  const d = incusUi.data;
+  const to = c.network === "home" ? "private" : "home";
+  const error = h("p", { class: "error", role: "alert" });
+  const dialog = openDialog(
+    "",
+    h("header", null, h("h2", { class: "grow" }, t("incus.net.moveTitle", { name: c.name })), closeX(() => dialog)),
+    h("p", null, t("incus.net.now." + (c.network || "other")), " ", t("incus.net.to." + to)),
+    h("ul", { class: "muted small" }, [c.status === "running" && t("incus.net.restarts"), t("incus.net.address"), c.machine && t("incus.net.client"), to === "home" && t("incus.net.open")].filter(Boolean).map((line) => h("li", null, line))),
+    to === "home" && !d.home?.address && h("p", { class: "banner small" }, t("incus.net.none")),
+    error,
+    h(
+      "footer",
+      null,
+      closeButton(() => dialog, t("common.cancel")),
+      button(t("incus.net.go." + to), {
+        class: "primary",
+        disabled: to === "home" && !d.home?.address,
+        onclick: async (e) => {
+          const el = e.currentTarget;
+          el.disabled = true;
+          try {
+            const r = await api("POST", `/api/containers/${c.name}/network`, { network: to });
+            dialog.close();
+            void jobDialog(r.job, "container", c.name, () => void loadContainers());
+          } catch (err) {
+            error.textContent = errorText(err);
+            el.disabled = false;
+          }
+        },
+      }),
+    ),
+  );
 }
 
 function containerLimitsDialog(c) {
@@ -11467,7 +11519,7 @@ async function loadNetwork() {
  * A change of the network is on trial: this page keeps it as soon as it reaches the server again. When
  * the address itself changed the page cannot follow it — the link with the token does, opened by hand.
  */
-function trialDialog(pending) {
+function trialDialog(pending, after) {
   let over = false;
   const left = h("strong", null, "");
   const note = h("p", { class: "muted small" }, t("network.trial.checking"));
@@ -11478,6 +11530,7 @@ function trialDialog(pending) {
     dialog.close();
     toast(message, kind);
     void loadNetwork();
+    after?.();
   };
   const dialog = openDialog(
     "",
@@ -11613,6 +11666,87 @@ function handOverDialog(nic) {
           } catch (err) {
             error.textContent = errorText(err);
             e.target.closest("button").disabled = false;
+          }
+        },
+      }),
+    ),
+  );
+}
+
+/** Why a card cannot become the home bridge (the server's `bridgeRefusal`); "" — it can */
+const bridgeWhy = (nic) => (nic.kind === "wifi" ? "wifi" : nic.kind === "modem" ? "modem" : nic.ports || nic.port ? "already" : nic.outside ? "outside" : nic.manager !== "nm" ? "notNm" : !nic.addresses.length ? "noAddress" : "");
+
+/**
+ * The home network for containers and virtual machines: the server's card goes into a bridge, as with
+ * Proxmox's vmbr0. Without a card given, the cards are read and the one that leads to the internet offered.
+ */
+async function homeBridgeDialog(nic, after) {
+  try {
+    state.network = await api("GET", "/api/network");
+  } catch (err) {
+    return toast(errorText(err), "error");
+  }
+  const cards = state.network.nics.filter((n) => n.kind !== "modem" && !n.port && !n.ports);
+  const fit = cards.filter((n) => !bridgeWhy(n));
+  const pick = h("select", null, fit.map((n) => h("option", { value: n.name, selected: nic ? n.name === nic.name : n.internet === "main" }, `${n.name} — ${n.addresses.join(", ")}`)));
+  const error = h("p", { class: "error", role: "alert" });
+  const go = button(t("bridge.go"), {
+    class: "primary",
+    disabled: !fit.length || state.network.tool !== "ok",
+    onclick: async (e) => {
+      const el = e.currentTarget;
+      el.disabled = true;
+      error.textContent = "";
+      try {
+        const pending = await api("POST", `/api/network/${pick.value}/bridge`, {});
+        dialog.close();
+        trialDialog(pending, after);
+      } catch (err) {
+        error.textContent = errorText(err);
+        el.disabled = false;
+      }
+    },
+  });
+  const dialog = openDialog(
+    "",
+    h("header", null, h("h2", { class: "grow" }, t("bridge.title")), closeX(() => dialog)),
+    h("p", null, t("bridge.lead")),
+    h("ul", { class: "muted small" }, ["router", "card", "nat", "wifi"].map((k) => h("li", null, t("bridge.what." + k)))),
+    state.network.tool !== "ok" && h("p", { class: "banner small" }, t("bridge.needsNm")),
+    fit.length ? field(t("bridge.card"), pick, t("bridge.cardHint")) : h("p", { class: "banner small" }, t("bridge.noCard")),
+    cards.filter((n) => bridgeWhy(n)).length > 0 && h("ul", { class: "muted small" }, cards.filter((n) => bridgeWhy(n)).map((n) => h("li", null, `${n.name}: ${t("error.network.bridge." + bridgeWhy(n))}`))),
+    h("p", { class: "muted small" }, t("bridge.how", { bridge: "hatalan0" })),
+    h("p", { class: "banner small" }, t("network.trial.promise", { n: state.network.trial })),
+    error,
+    h("footer", null, closeButton(() => dialog, t("common.cancel")), go),
+  );
+}
+
+/** Takes the home bridge apart: its card gets the address back */
+function bridgeApartDialog(nic) {
+  const error = h("p", { class: "error", role: "alert" });
+  const dialog = openDialog(
+    "",
+    h("header", null, h("h2", { class: "grow" }, t("bridge.apartTitle")), closeX(() => dialog)),
+    h("p", null, t("bridge.apartLead", { card: (nic.ports ?? [])[0] ?? "" })),
+    h("p", { class: "banner small" }, t("network.trial.promise", { n: state.network.trial })),
+    error,
+    h(
+      "footer",
+      null,
+      closeButton(() => dialog, t("common.cancel")),
+      button(t("bridge.apartGo"), {
+        class: "primary",
+        onclick: async (e) => {
+          const el = e.currentTarget;
+          el.disabled = true;
+          try {
+            const pending = await api("DELETE", "/api/network/bridge");
+            dialog.close();
+            trialDialog(pending);
+          } catch (err) {
+            error.textContent = errorText(err);
+            el.disabled = false;
           }
         },
       }),
@@ -11932,7 +12066,15 @@ function networkSection() {
   const error = h("p", { class: "error", role: "alert" });
   const row = (label, value, mono = true) => h("div", { class: "kv" }, h("span", { class: "muted" }, label), h("span", { class: mono ? "mono" : "" }, value || "—"));
   const card = (nic) =>
-    h(
+    nic.port
+      ? h(
+          "section",
+          { class: "card pad" },
+          h("div", { class: "section-head" }, h("h2", null, h("span", { class: "with-icon" }, icon("network"), nic.name), " ", h("span", { class: "state " + (nic.up ? "running" : "stopped") }, t(nic.up ? "network.up" : "network.down")))),
+          h("p", { class: "muted small" }, t("bridge.portOf", { bridge: nic.port })),
+          row(t("network.mac"), nic.mac + (nic.speed ? ` · ${nic.speed >= 1000 ? nic.speed / 1000 + " Gbit/s" : nic.speed + " Mbit/s"}` : "")),
+        )
+      : h(
       "section",
       { class: "card pad", menu: true },
       h(
@@ -11958,8 +12100,11 @@ function networkSection() {
           nic.manager === "nm" && !data.pending && (!nic.wifi || nic.wifi.ssid) && !nic.wifi?.hotspot && button(t("network.change"), { onclick: () => nicDialog(nic) }, "sliders"),
           (nic.manager === "networkd" || nic.manager === "ifupdown") && data.tool === "ok" && !data.pending && button(t("network.handover"), { onclick: () => handOverDialog(nic) }),
           nic.handed && !data.pending && button(t("network.handback"), { onclick: () => handBackDialog(nic) }, "undo"),
+          !bridgeWhy(nic) && !data.nics.some((n) => n.home) && !data.pending && button(t("bridge.make"), { onclick: () => homeBridgeDialog(nic) }, "box"),
+          nic.home && !data.pending && button(t("bridge.apart"), { onclick: () => bridgeApartDialog(nic) }, "undo"),
         ),
       ),
+      nic.home && h("p", { class: "muted small" }, t("bridge.is", { ports: (nic.ports ?? []).filter((p) => data.nics.some((n) => n.name === p)).join(", ") || "—" }), " ", t("bridge.guests", { n: (nic.ports ?? []).filter((p) => !data.nics.some((n) => n.name === p)).length })),
       nic.wifi && row("Wi-Fi", nic.wifi.hotspot ? t("hotspot.state", { ssid: nic.wifi.hotspot.ssid, n: nic.wifi.hotspot.clients.length }) : nic.wifi.ssid ? `${nic.wifi.ssid} · ${nic.wifi.signal}%` : t(nic.wifi.ready ? "wifi.notConnected" : "wifi.notReady"), false),
       nic.wifi?.needs && data.tool === "ok" && needsCard(nic.wifi.needs, "wifi.needs"),
       row(t("network.address"), nic.addresses.join(", ") + (nic.addresses.length ? ` · ${t(nic.dynamic ? "network.byRouter" : "network.fixed")}` : "")),
@@ -11976,6 +12121,7 @@ function networkSection() {
       nic.manager !== "nm" && h("p", { class: "muted small" }, t(nic.manager === "networkd" || nic.manager === "ifupdown" ? (data.tool === "ok" ? "network.handoverHint" : "network.needsTool") : "network.readOnly")),
     );
   const several = data.nics.filter((n) => n.internet !== "none").length > 1 || data.nics.some((n) => n.kind === "modem");
+  const rank = (nic) => (nic.home ? 0 : nic.port ? 1 : 2);
   const roleSelect = (nic) => {
     const select = h(
       "select",
@@ -12060,7 +12206,8 @@ function networkSection() {
   const needs = data.needs && needsCard(data.needs, "network.needs");
   return [
     h("section", { class: "card pad stack" }, h("h2", null, t("settings.network")), h("p", { class: "muted small" }, t("network.lead")), data.tool === "stopped" && h("p", { class: "banner small" }, t("network.stopped")), needs, data.tool === "ok" && h("label", { class: "check" }, checkBox, h("span", null, h("strong", null, t("network.check")), h("span", { class: "muted small block" }, t("network.checkHint", { url: data.check.url.replace(/^https?:\/\//, "").replace(/\/.*/, "") })))), error, data.pending && h("div", { class: "banner" }, t("network.trial.title", { nic: data.pending.nic }), " ", button(t("network.trial.show"), { class: "small", onclick: () => trialDialog(data.pending) }))),
-    ...data.nics.map(card),
+    // the home bridge stands right before the card in it
+    ...[...data.nics].sort((a, b) => rank(a) - rank(b) || data.nics.indexOf(a) - data.nics.indexOf(b)).map(card),
     !data.nics.length && h("p", { class: "card pad muted" }, t("network.none")),
   ];
 }
