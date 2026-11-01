@@ -3592,6 +3592,7 @@ function containerMenu(c, at) {
     c.machine && { label: t("incus.openMachine"), icon: "server", href: `#/machines/${c.machine}` },
     { label: t("incus.limits") + "…", icon: "settings", run: () => containerLimitsDialog(c) },
     (incusUi.data?.home || c.network === "home") && { label: t("incus.net.move") + "…", icon: "network", run: () => containerNetworkDialog(c) },
+    { label: t("names.give") + "…", icon: "globe", run: () => domainNameDialog(null, { target: { kind: "container", name: c.name }, label: c.name }) },
     { label: t("incus.snapshots") + "…", icon: "clock", run: () => containerSnapshotsDialog(c) },
     { label: t("incus.rename") + "…", icon: "edit", run: () => renameContainerDialog(c) },
     { label: t("incus.clone") + "…", icon: "copy", run: () => cloneContainerDialog(c) },
@@ -6543,6 +6544,7 @@ function machineMenu(m, at = null) {
     at ? "menu dropdown" : "menu",
     h("header", null, h("span", { class: "machine-icon" }, icon("server")), h("div", null, h("h2", null, m.name), machineChip(m))),
     item(t("machines.rename"), "edit", () => renameMachineDialog(m)),
+    item(t("names.give") + "…", "globe", () => domainNameDialog(null, { target: { kind: "machine", id: m.id }, label: m.name })),
     !m.online && m.info?.macs?.length > 0 && item(t("machines.wake"), "play", () => wakeMachine(m)),
     m.online && item(t("machines.reboot"), "refresh", () => powerDialog(m, "reboot")),
     m.online && item(t("machines.poweroff"), "stop", () => powerDialog(m, "poweroff")),
@@ -13231,10 +13233,172 @@ function httpsSection(save, error) {
       error,
       h("footer", null, h("button", { class: "btn primary" }, t("settings.save"))),
     ),
+    namesCard(),
     https.mode === "acme" && h("section", { class: "card pad" }, h("div", { class: "section-head" }, h("h2", null, t("https.certificates")), retry), h("p", { class: "muted small" }, t("https.certificatesLead")), certs),
     here && h("section", { class: "card pad" }, h("div", { class: "section-head" }, h("h2", null, t("https.checkTitle")), check), h("p", { class: "muted small" }, t("https.checkLead", { domain: here })), results),
     here && h("section", { class: "card pad" }, h("h2", null, t("https.addresses")), h("p", { class: "muted small" }, t("https.addressesLead")), settingRow("Hata", "", h("a", { class: "link mono", href: `https://${here}/` }, here)), (state.overview?.apps ?? []).filter((a) => a.port).map((a) => settingRow(a.title, a.protected ? t("access.protected") : "", h("a", { class: "link mono", href: `https://${a.name.replace(/_/g, "-")}.${here}/`, target: "_blank", rel: "noopener noreferrer" }, `${a.name.replace(/_/g, "-")}.${here}`)))),
   ];
+}
+
+// --- Names under the domain -------------------------------------------------------------------------
+
+/** The domain names are under, as this page would open them: the HTTPS one, else the local name */
+function namesDomain() {
+  const https = state.settings?.https;
+  if (https && https.mode !== "off" && https.domain) return { domain: https.domain, scheme: "https", port: "" };
+  const local = state.settings?.local;
+  if (local?.enabled && local.name) return { domain: local.name, scheme: "http", port: location.port ? ":" + location.port : "" };
+  return null;
+}
+
+const nameUrl = (label) => {
+  const d = namesDomain();
+  return d ? `${d.scheme}://${label}.${d.domain}${d.port}/` : "";
+};
+
+/** A name's target in words: what it is, and where */
+function nameTargetWords(n) {
+  return t("names.kind." + n.kind, { name: n.title });
+}
+
+/**
+ * Names under the domain for what is not an app of this server: containers, virtual machines, guests of
+ * Proxmox, machines, their apps and any address; Hata passes the request on, its sign-in in front when asked
+ */
+function namesCard() {
+  const body = h("div", { class: "stack" }, h("p", { class: "muted small" }, "…"));
+  const paint = async () => {
+    let data;
+    try {
+      data = await api("GET", "/api/domains");
+    } catch (e) {
+      return put(body, h("p", { class: "error" }, errorText(e)));
+    }
+    if (!data.names.length) return put(body, h("p", { class: "muted small" }, t("names.none")));
+    put(
+      body,
+      h(
+        "div",
+        { class: "table-wrap" },
+        h(
+          "table",
+          null,
+          h("thead", null, h("tr", null, h("th", null, t("names.col.name")), h("th", null, t("names.col.to")), h("th", null, t("names.col.access")), h("th"))),
+          h(
+            "tbody",
+            null,
+            data.names.map((n) =>
+              h(
+                "tr",
+                null,
+                h("td", null, nameUrl(n.label) ? h("a", { class: "link mono", href: nameUrl(n.label), target: "_blank", rel: "noopener noreferrer" }, nameUrl(n.label).replace(/^https?:\/\/|\/$/g, "")) : h("span", { class: "mono" }, n.label)),
+                h("td", null, h("div", null, nameTargetWords(n)), h("div", { class: "muted small mono" }, n.away ? t("error." + n.away) : `${n.https ? "https" : "http"}://${n.at}`)),
+                h("td", { class: "small" }, t(n.inherits ? "names.signedInApp" : n.protect ? "names.signedIn" : "names.open")),
+                h("td", null, h("div", { class: "row-actions" }, button(t("names.change"), { class: "small", onclick: () => domainNameDialog(n, null, paint) }, "edit"))),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  };
+  void paint();
+  return h(
+    "section",
+    { class: "card pad stack" },
+    h("div", { class: "section-head" }, h("h2", null, t("names.title")), h("div", { class: "actions" }, button(t("names.add"), { class: "small", onclick: () => domainNameDialog(null, null, paint) }, "plus"))),
+    h("p", { class: "muted small" }, t(namesDomain() ? "names.lead" : "names.noDomain")),
+    body,
+  );
+}
+
+/** Gives a name (or changes one): what it leads to, the port, HTTPS, the sign-in */
+async function domainNameDialog(existing, preset, after) {
+  let data;
+  try {
+    data = await api("GET", "/api/domains");
+  } catch (e) {
+    return toast(errorText(e), "error");
+  }
+  const d = namesDomain();
+  const key = (target) => JSON.stringify(target);
+  const option = (target, label, extra) => h("option", { value: key(target) }, label + (extra ? ` — ${extra}` : ""));
+  const tg = data.targets;
+  const to = h(
+    "select",
+    { onchange: () => shape(true) },
+    tg.containers.length > 0 && h("optgroup", { label: t("names.group.containers") }, tg.containers.map((c) => option({ kind: "container", name: c.name }, c.name, c.address || t("names.noAddress")))),
+    tg.guests.length > 0 && h("optgroup", { label: t("names.group.guests") }, tg.guests.map((g) => option({ kind: "guest", host: g.host, guest: g.id }, `${g.name} (${g.hostName})`, g.address || t("names.noAddress")))),
+    tg.machines.length > 0 && h("optgroup", { label: t("names.group.machines") }, tg.machines.map((m) => option({ kind: "machine", id: m.id }, m.name, m.ip || t("machines.offline")))),
+    tg.machineApps.length > 0 && h("optgroup", { label: t("names.group.machineApps") }, tg.machineApps.map((a) => option({ kind: "machineApp", id: a.id, app: a.app }, `${a.title} (${a.machine})`, a.port ? String(a.port) : ""))),
+    h("optgroup", { label: t("names.group.other") }, h("option", { value: "address" }, t("names.address"))),
+  );
+  const start = existing?.target ?? preset?.target;
+  if (start && start.kind !== "address") {
+    if (![...to.options].some((o) => o.value === key(start))) to.prepend(option(start, existing?.title ?? start.name ?? start.id, ""));
+    to.value = key(start);
+  } else to.value = "address";
+  const host = h("input", { class: "mono", value: start?.kind === "address" ? start.host : "", placeholder: "192.168.1.1", spellcheck: false, autocapitalize: "none" });
+  const hostRow = field(t("names.host"), host, t("names.hostHint"));
+  const label = h("input", { class: "mono", value: existing?.label ?? (preset?.label ?? "").toLowerCase().replace(/[^a-z0-9-]+/g, "-").replace(/^-+|-+$/g, ""), required: true, pattern: "[a-z0-9]([a-z0-9\\-]{0,61}[a-z0-9])?", spellcheck: false, autocapitalize: "none" });
+  const port = h("input", { type: "number", min: 1, max: 65535, value: existing?.port ?? 80, required: true, class: "short mono" });
+  const [https, httpsRow] = tickRow(t("names.https"), t("names.httpsHint"), existing?.https ?? false);
+  const [protect, protectRow] = tickRow(t("names.protect"), t("names.protectHint"), existing?.protect ?? false);
+  const shape = (picked) => {
+    hostRow.hidden = to.value !== "address";
+    host.required = to.value === "address";
+    // a machine's app has its own port: offered once it is chosen
+    const app = to.value !== "address" && JSON.parse(to.value).kind === "machineApp" ? tg.machineApps.find((a) => key({ kind: "machineApp", id: a.id, app: a.app }) === to.value) : null;
+    if (picked && app?.port) port.value = String(app.port);
+  };
+  shape(!existing);
+  const error = h("p", { class: "error", role: "alert" });
+  let dialog;
+  const send = async (e) => {
+    e.preventDefault();
+    error.textContent = "";
+    const target = to.value === "address" ? { kind: "address", host: host.value.trim() } : JSON.parse(to.value);
+    const payload = { label: label.value.trim().toLowerCase(), target, port: Number(port.value), https: https.checked, protect: protect.checked, allowed: existing?.allowed ?? "all" };
+    try {
+      await api(existing ? "PUT" : "POST", existing ? `/api/domains/${existing.label}` : "/api/domains", payload);
+      dialog.close();
+      toast(t(existing ? "names.saved" : "names.added", { name: payload.label }));
+      after?.();
+    } catch (err) {
+      error.textContent = errorText(err);
+    }
+  };
+  const remove = existing && button(t("names.remove"), {
+    class: "danger",
+    onclick: async () => {
+      try {
+        await api("DELETE", `/api/domains/${existing.label}`);
+        dialog.close();
+        toast(t("names.removed", { name: existing.label }));
+        after?.();
+      } catch (err) {
+        error.textContent = errorText(err);
+      }
+    },
+  }, "trash");
+  dialog = openDialog(
+    "",
+    h(
+      "form",
+      { class: "stack", onsubmit: send },
+      h("header", null, h("h2", { class: "grow" }, t(existing ? "names.changeTitle" : "names.addTitle")), closeX(() => dialog)),
+      !d && h("p", { class: "banner small" }, t("names.noDomain")),
+      field(t("names.label"), h("span", { class: "web-address" }, label, d && h("span", { class: "muted mono" }, "." + d.domain)), t("names.labelHint")),
+      field(t("names.to"), to),
+      hostRow,
+      field(t("names.port"), port, t("names.portHint")),
+      httpsRow,
+      protectRow,
+      error,
+      h("footer", null, remove, h("span", { class: "grow" }), closeButton(() => dialog, t("common.cancel")), h("button", { class: "btn primary" }, t(existing ? "settings.save" : "names.addGo"))),
+    ),
+  );
+  label.focus();
 }
 
 // --- Notifications ------------------------------------------------------------------------------

@@ -1139,6 +1139,8 @@ function editedCompose(compose: Compose, input: unknown, lang: string): Compose 
 function assertLabelFree(name: string, compose: Compose): void {
   const label = appMeta(compose, "en").subdomain;
   if (!label) return;
+  // a name of Settings → Domains answers there too
+  if (settings.names.some((n) => n.label === label)) throw new AppError("edit.domainTaken", 409, { app: label });
   for (const other of installedNames()) {
     if (other === name) continue;
     const theirs = viewOf(other);

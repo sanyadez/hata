@@ -7,6 +7,7 @@ import { homedir } from "node:os";
 import { join, resolve } from "node:path";
 import { cleanLayout, type Layout } from "./dashboard";
 import { cleanOutside } from "./outside";
+import { cleanNames, type DomainName } from "./names";
 import { cleanMachineShares, cleanShares, type MachineShare, type Share } from "./smbconf";
 import { changeAppearance, cleanAppearance, DEFAULT_APPEARANCE, type Appearance } from "./wallpapers";
 import { isPlainObject, readJsonFile, writeJsonAtomic } from "./fsutil";
@@ -83,6 +84,8 @@ export interface Settings {
   /** Who may open which app, and which apps are behind Hata's sign-in; an app not listed is open to members */
   access: Record<string, AppAccess>;
   https: HttpsSettings;
+  /** Names under the domain for what is not an app of this server: containers, guests, machines, addresses (`names.ts`) */
+  names: DomainName[];
   /**
    * The name on the home network, and `<app>.<name>` for every app. One ending in `.local` Hata answers
    * for itself over multicast DNS; any other (`hata.lan`) the home's own DNS has to point here.
@@ -226,6 +229,7 @@ const DEFAULTS: Settings = {
   folders: [],
   favorites: {},
   shares: [],
+  names: [],
   machineShares: {},
   dashboard: cleanLayout(null),
   appearance: DEFAULT_APPEARANCE,
@@ -270,6 +274,7 @@ export const settings: Settings = {
   folders: Array.isArray(saved.folders) ? saved.folders.filter((path): path is string => typeof path === "string") : [],
   favorites: isPlainObject(saved.favorites) ? Object.fromEntries(Object.entries(saved.favorites).map(([id, list]) => [id, Array.isArray(list) ? list.filter((one): one is Favorite => isPlainObject(one) && typeof one.path === "string").map((one) => ({ path: one.path, dir: one.dir !== false })) : []])) : {},
   shares: cleanShares(saved.shares),
+  names: cleanNames(saved.names),
   machineShares: cleanMachineShares(saved.machineShares),
   dashboard: cleanLayout(saved.dashboard),
   appearance: cleanAppearance(saved.appearance),

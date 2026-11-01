@@ -96,6 +96,8 @@ import { dockerInfo, listContainers, watchEvents } from "./docker";
 import { abortUpload, copyIn, locate, validName, archivePlan, dropFavorites, emptyTrash, favoritesOf, setFavorite, extract as extractArchive, find as findFiles, list as listFiles, makeFile, makeFolder, pinFolder, pinnedFolders, readable, readText, remove as removeFiles, rename as renameFile, restore as restoreFiles, setTrashDays, startTrash, summary as filesSummary, transfer, trash, upload, writeText } from "./files";
 import { adoptProject, casaosState, containerDraft, importCount, importList, moveInCasaos, projectDraft, rebuildContainer } from "./import";
 import { accessOf, dropAccess, dropUser, gateTarget, guard, guardsOf, mayOpen, otherPorts, MAX_APP_BODY, page, passToApp, setAccess, startGates, tunnelHandlers } from "./gate";
+import { addName, changeName, domainsReport, nameOf as domainName, onNamesChanged, removeName, upstream as domainUpstream } from "./domains";
+import type { DomainName } from "./names";
 import { parseDockerRun } from "./dockerrun";
 import { cannotMove, finishMove, moveState } from "./relocate";
 import { isPlainObject } from "./fsutil";
@@ -1360,6 +1362,14 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
 
   if (path === "/api/local" && method === "GET") return json({ ...(await localNamesStatus()), port: listenAddress().port });
 
+  if (path === "/api/domains" && method === "GET") return json(await domainsReport(language(url)));
+  if (path === "/api/domains" && method === "POST") return json(addName(await body(req), user.name));
+  const named = /^\/api\/domains\/([a-z0-9-]{1,63})$/.exec(path);
+  if (named && method === "PUT") return json(changeName(named[1]!, await body(req), user.name));
+  if (named && method === "DELETE") {
+    removeName(named[1]!, user.name);
+    return json({ ok: true });
+  }
   if (path === "/api/https" && method === "GET") {
     return json({ mode: settings.https.mode, listening: !!httpsServer, error: httpsError, httpPort: listenAddress().port, certificates: certificateStates(await httpsNames()) });
   }
@@ -2787,7 +2797,36 @@ async function checkDomain(host: string): Promise<{ host: string; ok: boolean; p
 const INSTANCE = crypto.randomUUID();
 
 /** A request for `<app>.<domain>`: the app itself, behind sign-in if the app asks for it */
+/** A name of Settings → Domains: the request goes on to where it leads, past Hata's sign-in when it asks for one */
+async function serveName(req: Request, server: Server, name: DomainName): Promise<Response> {
+  const proto = requestProto(req);
+  let user: User | null = null;
+  // an app of a machine put behind Hata's sign-in keeps it under any name, with its own list of who may open it
+  const own = name.target.kind === "machineApp" ? accessOf(`${name.target.app}@${name.target.id}`) : null;
+  const access = own?.protect ? own : name.protect ? name : null;
+  if (access) {
+    const url = new URL(req.url);
+    const here = `${proto}://${req.headers.get("host") ?? url.host}${url.pathname}${url.search}`;
+    const passed = guard(req, `domain:${name.label}`, `${proto}://${domainOf(requestHost(req))}${requestPort(req)}/?next=${encodeURIComponent(here)}`, access);
+    if (passed instanceof Response) return passed;
+    user = passed;
+  }
+  const to = await domainUpstream(name);
+  if ("away" in to) return page(502, "Not reachable now", awayWords[to.away] ?? "The target is not reachable now.");
+  return passToApp(req, server, to, proto, clientIp(req, server), user);
+}
+
+const awayWords: Record<string, string> = {
+  "domains.away.noContainer": "This container or virtual machine is not on the server any more.",
+  "domains.away.noGuest": "This guest is not on the Proxmox server any more.",
+  "domains.away.noMachine": "This machine is not connected to Hata any more.",
+  "domains.away.machineAway": "The machine is not connected right now.",
+  "domains.away.noAddress": "It has no address right now: it may be stopped.",
+};
+
 async function serveApp(req: Request, server: Server, label: string): Promise<Response> {
+  const named = domainName(label);
+  if (named) return serveName(req, server, named);
   const apps = await listApps("en");
   // a name chosen for an app wins over a name another app merely has
   const app = apps.find((a) => a.subdomain === label) ?? apps.find((a) => !a.subdomain && appLabel(a.name) === label);
@@ -2819,7 +2858,7 @@ async function httpsNames(): Promise<string[]> {
   const domain = siteDomain();
   if (settings.https.mode !== "acme" || !domain) return [];
   const apps = await listApps("en");
-  return [domain, ...apps.filter((app) => app.port).map((app) => appHost(app))];
+  return [domain, ...apps.filter((app) => app.port).map((app) => appHost(app)), ...settings.names.map((n) => `${n.label}.${domain}`)];
 }
 
 /** (Re)starts the HTTPS listener with the certificates there are; without any, there is nothing to serve */

@@ -119,6 +119,25 @@ function stoppedOnPurpose(name: string, on: boolean): void {
 /** What was last seen, for the attention list (asked every minute, read without waiting) */
 const lastLook: { silentSince: number | null; instances: Container[]; placesAway: { name: string; path: string }[] } = { silentSince: null, instances: [], placesAway: [] };
 
+/** The instances as last looked at (every minute), without their state: their names and kinds */
+export const instancesSeen = (): Container[] => lastLook.instances;
+
+/** Addresses asked for lately: a name under the domain asks on every request */
+const addresses = new Map<string, { at: number; address: string | null }>();
+
+/** An instance's address now (kept for 15 s); "" — none (stopped, or not up yet); null — no such instance */
+export async function instanceAddress(name: string): Promise<string | null> {
+  const kept = addresses.get(name);
+  if (kept && Date.now() - kept.at < 15_000) return kept.address;
+  let address: string | null = null;
+  if (NAME_RE.test(name) && existsSync(SOCKET)) {
+    const raw = await incus("GET", `/1.0/instances/${name}?recursion=1`, undefined, 5_000).catch(() => null);
+    address = raw ? (readInstance({ ...raw.metadata, snapshots: [] })?.address ?? "") : null;
+  }
+  addresses.set(name, { at: Date.now(), address });
+  return address;
+}
+
 /** The attention items of the containers: Incus silent, an instance in error, one that should run and does not */
 export function containersTrouble() {
   // one a job holds (a backup stops it for a while, a restore replaces it) is not looked at meanwhile
