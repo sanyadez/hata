@@ -3729,7 +3729,7 @@ function containerMenu(c, at) {
 function instanceCards(c) {
   const running = c.status === "running";
   const fact = (label, value) => h("div", { class: "kv" }, h("span", { class: "muted" }, label), h("span", null, value));
-  const screen = c.kind === "vm" && running && h("section", { class: "card pad stack-s" }, h("div", { class: "section-head" }, h("h2", null, t("incus.screen")), button(t("instance.fullScreen"), { class: "small", onclick: () => containerScreen(c) }, "screen")), h("div", { class: "term-holder instance-screen" }, h("iframe", { class: "term-frame", src: "/screen.html?" + new URLSearchParams({ incus: c.name }) })));
+  const screen = c.kind === "vm" && running && h("section", { class: "card pad stack-s" }, h("h2", null, t("incus.screen")), h("div", { class: "term-holder instance-screen" }, h("iframe", { class: "term-frame", src: "/screen.html?" + new URLSearchParams({ incus: c.name, lang: state.lang }), title: t("incus.screen") })));
   const disc = c.disc && h("section", { class: "card pad stack-s" }, h("div", { class: "section-head" }, h("h2", null, t("instance.disc")), button(t("incus.disc.eject"), { class: "small", onclick: () => ejectDisc(c) }, "up")), h("p", { class: "mono small" }, c.disc));
   const limits = h(
       "section",

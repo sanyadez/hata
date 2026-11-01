@@ -22,6 +22,10 @@ const note = (text) => {
 $("keys").textContent = "Ctrl+Alt+Del";
 $("again").textContent = t("screen.again");
 $("on").textContent = t("screen.turnOn");
+// the whole page goes: an iframe of the same origin may ask for it, and the machine's picture is scaled to what it gets
+const showFull = () => ($("full").textContent = t(document.fullscreenElement ? "screen.leaveFull" : "screen.fullScreen"));
+$("full").hidden = !document.fullscreenEnabled;
+showFull();
 const incus = params.get("incus");
 
 let rfb = null;
@@ -61,6 +65,14 @@ async function connect() {
 
 $("keys").addEventListener("click", () => rfb?.sendCtrlAltDel());
 $("again").addEventListener("click", () => void connect());
+$("full").addEventListener("click", () => {
+  const change = document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen();
+  change.catch(() => {}).finally(() => rfb?.focus());
+});
+document.addEventListener("fullscreenchange", () => {
+  showFull();
+  rfb?.focus();
+});
 $("on").addEventListener("click", async () => {
   $("on").disabled = true;
   status(t("screen.restarting"));

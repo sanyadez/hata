@@ -1430,6 +1430,12 @@ body:has(.assistant.paged) > .assistant-fab { display: none; }
 /* The screen of a virtual machine: noVNC draws into the box, scaled to it */
 .screen-box { flex: 1; min-height: 0; display: flex; background: #000; }
 .screen-actions { display: flex; gap: 6px; }
+/* on the whole screen the bar leaves the picture alone and comes down when the pointer reaches the top edge; it stays while there is no picture, and where nothing hovers */
+@media (hover: hover) {
+  :root:fullscreen .term-bar { position: fixed; inset: 0 0 auto; z-index: 2; background: var(--console); transform: translateY(-100%); transition: transform 0.15s; }
+  :root:fullscreen .term-bar::after { content: ""; position: absolute; inset: 100% 0 auto; height: 6px; }
+  :root:fullscreen .term-bar:hover, :root:fullscreen .term-bar:has(:focus-visible), :root:fullscreen .term-bar:has(.term-status:not(.live)) { transform: none; }
+}
 #hidden { scroll-margin-top: 84px; }
 
 /* blocking by name */
