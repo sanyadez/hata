@@ -2,7 +2,7 @@
 
 **English** · [Українська](COMPARISON.uk.md)
 
-What the home server programs of Hata's kind have, as of **October 2026**. Versions compared: Hata 0.27,
+What the home server programs of Hata's kind have, as of **October 2026**. Versions compared: Hata 0.28,
 umbrelOS 2.0, ZimaOS 1.7, CasaOS 0.4.15, Runtipi 4.10, Cosmos 0.23, Unraid 7.3.
 
 Every cell about another product comes from its own documentation, release notes or source code — see

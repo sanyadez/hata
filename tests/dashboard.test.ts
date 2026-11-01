@@ -180,3 +180,23 @@ test("tiles of Home Assistant: kept while their server is seen, also when it doe
   const left = dropServer(layout, "aaaaaaaa");
   expect(haTiles(left)).toEqual(["8bf90303/light.bed"]);
 });
+
+test("sizes and widgets: kept as given, what is not one left out", () => {
+  const widget = { type: "widget", id: "w1", source: "frigate", server: "abcd1234", view: "camera", camera: "front", size: "2x2" };
+  const layout = cleanLayout({ groups: [{ id: "a", title: "", items: [widget, { type: "widget", id: "w2", source: "qbit", server: "abcd1234", view: "torrents", size: "9x9" }, { type: "widget", id: "w3", source: "qbit", server: "abcd1234", view: "camera" }, { type: "widget", id: "w4", source: "frigate", server: "abcd1234", view: "camera", camera: "../x" }, { type: "ha", server: "abcd1234", entity: "light.a", size: "2x1" }] }] });
+  expect(layout.groups[0]!.items).toEqual([widget, { type: "widget", id: "w2", source: "qbit", server: "abcd1234", view: "torrents" }, { type: "ha", server: "abcd1234", entity: "light.a", size: "2x1" }] as never);
+});
+
+test("a widget does not go into a folder, and a tile in one has no size", () => {
+  const layout = cleanLayout({ groups: [{ id: "a", title: "", items: [{ type: "folder", id: "f", title: "F", items: [{ type: "widget", id: "w1", source: "qbit", server: "abcd1234", view: "torrents" }, { type: "ha", server: "abcd1234", entity: "light.a", size: "2x2" }] }] }] });
+  expect(layout.groups[0]!.items[0]).toMatchObject({ items: [{ type: "ha", entity: "light.a" }] });
+  expect((layout.groups[0]!.items[0] as { items: object[] }).items[0]).not.toHaveProperty("size");
+});
+
+test("a widget stays only for one who sees its server, and goes with it", () => {
+  const widget = { type: "widget", id: "w1", source: "qbit", server: "abcd1234", view: "torrents" };
+  const layout = cleanLayout({ groups: [{ id: "a", title: "", items: [widget] }] });
+  expect(arrange(layout, [], [], [], [], ["abcd1234"]).groups[0]!.items).toEqual([widget] as never);
+  expect(arrange(layout, [], [], [], [], []).groups[0]!.items).toEqual([]);
+  expect(dropServer(layout, "abcd1234").groups).toEqual(cleanLayout({ groups: [{ id: "a", title: "", items: [] }] }).groups);
+});

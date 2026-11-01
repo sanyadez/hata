@@ -91,6 +91,7 @@ const ICONS = {
   users: "M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM2 21v-1a6 6 0 0 1 6-6h2a6 6 0 0 1 6 6v1M16 3.2a4 4 0 0 1 0 7.6M18 14.2a6 6 0 0 1 4 5.8v1",
   plug: "M9 2v6M15 2v6M6 8h12v3a6 6 0 0 1-12 0V8zM12 17v5",
   signpost: "M12 3v18M5 6h12l3 3-3 3H5V6zM8 21h8",
+  camera: "M4 8h3l2-3h6l2 3h3v11H4zM12 16a3 3 0 1 0 0-6 3 3 0 0 0 0 6z",
   ban: "M12 3l7 3v5c0 4.6-2.9 8.3-7 10-4.1-1.7-7-5.4-7-10V6l7-3zM8.5 8.5l7 7",
   shield: "M12 3l7 3v5c0 4.6-2.9 8.3-7 10-4.1-1.7-7-5.4-7-10V6l7-3z",
   bulb: "M9 18h6M10 21h4M12 3a6 6 0 0 0-3.6 10.8c.7.6 1.1 1.3 1.1 2.2v.5h5V16c0-.9.4-1.6 1.1-2.2A6 6 0 0 0 12 3z",
@@ -344,7 +345,10 @@ function parseRoute() {
   if (parts[0] === "import" && isAdmin()) return { view: "import" };
   if (parts[0] === "terminal" && isAdmin()) return { view: "terminal" };
   if (parts[0] === "assistant" && isAdmin()) return { view: "assistant" };
-  if (parts[0] === "ha" && isAdmin()) return { view: "ha", id: parts[1] ?? "" };
+  if (parts[0] === "ha" && parts[1] && isAdmin()) return { view: "ha", id: parts[1] };
+  if (parts[0] === "qbit" && parts[1] && isAdmin()) return { view: "qbit", id: parts[1] };
+  if (parts[0] === "frigate" && parts[1] && isAdmin()) return { view: "frigate", id: parts[1] };
+  if ((parts[0] === "integrations" || parts[0] === "ha") && isAdmin()) return { view: "integrations" };
   if (parts[0] === "guest" && parts[3] && isAdmin()) return { view: "guest", host: parts[1], guest: `${parts[2]}/${parts[3]}` };
   if (parts[0] === "containers" && parts[1] === "i" && parts[2] && isAdmin()) return { view: "instance", name: parts[2], tab: parts[3] === "terminal" ? "terminal" : "overview" };
   if (parts[0] === "containers" && isAdmin()) return { view: "containers", tab: parts[1] === "settings" ? "settings" : "list" };
@@ -818,7 +822,7 @@ const NAV = [
   { view: "store", hash: "#/store", icon: "grid", guest: false },
   { view: "files", hash: "#/files", icon: "folder", files: true },
   { view: "machines", hash: "#/machines", icon: "server", admin: true },
-  { view: "ha", hash: "#/ha", icon: "bulb", admin: true, ha: true },
+  { view: "integrations", hash: "#/integrations", icon: "link", admin: true, integrations: true },
   { view: "assistant", hash: "#/assistant", icon: "chat", admin: true, assistant: true },
   { view: "settings", hash: "#/settings", icon: "sliders" },
 ];
@@ -844,8 +848,8 @@ async function loadMine() {
   state.favorites = mine.favorites;
 }
 
-const navCurrent = () => (["machine", "proxmox", "containers", "instance", "guest"].includes(state.route.view) ? "machines" : state.route.view === "backups" || state.route.view === "users" ? "settings" : state.route.view === "app" ? "home" : state.route.view === "import" ? "store" : state.route.view === "trash" || state.route.view === "myhata" ? "files" : state.route.view);
-const navItems = () => NAV.filter((item) => (!item.admin || isAdmin()) && (!item.ha || (state.overview?.ha?.servers ?? []).length > 0) && (!item.files || mayFiles()) && (!item.assistant || !!(assistantUi.config?.ready ?? state.overview?.assistant)) && (item.guest !== false || state.user.role !== "guest"));
+const navCurrent = () => (["ha", "qbit", "frigate"].includes(state.route.view) ? "integrations" : ["machine", "proxmox", "containers", "instance", "guest"].includes(state.route.view) ? "machines" : state.route.view === "backups" || state.route.view === "users" ? "settings" : state.route.view === "app" ? "home" : state.route.view === "import" ? "store" : state.route.view === "trash" || state.route.view === "myhata" ? "files" : state.route.view);
+const navItems = () => NAV.filter((item) => (!item.admin || isAdmin()) && (!item.integrations || (state.overview?.ha?.servers ?? []).length > 0 || state.overview?.qbit?.count > 0 || state.overview?.frigate?.servers?.length > 0) && (!item.files || mayFiles()) && (!item.assistant || !!(assistantUi.config?.ready ?? state.overview?.assistant)) && (item.guest !== false || state.user.role !== "guest"));
 
 function navLinks(className, items = navItems()) {
   const current = navCurrent();
@@ -1051,6 +1055,9 @@ function render() {
   if (view === "proxmox") return renderPve();
   if (view === "containers") return renderContainers();
   if (view === "ha") return renderHa();
+  if (view === "integrations") return renderIntegrations();
+  if (view === "qbit") return renderQbit();
+  if (view === "frigate") return renderFrigate();
   if (view === "instance") return renderInstance();
   if (view === "guest") return renderGuest();
   if (view === "app") return renderApp();
@@ -1234,6 +1241,10 @@ const homeUi = { folder: null, drag: null, stale: false, widgets: null };
 const tileKey = (item) => item.type + ":" + (item.type === "app" ? item.name : item.type === "files" ? item.path : item.type === "ha" ? `${item.server}/${item.entity}` : item.id);
 /** The "Add" tile: a doorway, which is moved about but never put into a folder */
 const isAddTile = (item) => item.type === "builtin" && item.id === "add";
+/** What does not go into a folder: "Add", and a widget, which is as large as the page lets it be */
+const staysOut = (item) => isAddTile(item) || item.type === "widget";
+/** The classes of a tile larger than one cell */
+const sizeClass = (item) => ((item.type === "widget" || item.type === "ha") && item.size ? `size-${item.size}` : "");
 const newId = () => Array.from(crypto.getRandomValues(new Uint8Array(6)), (byte) => byte.toString(16).padStart(2, "0")).join("");
 const linkHost = (url) => {
   try {
@@ -1259,6 +1270,7 @@ function tileTarget(item) {
   if (item.type === "app") return item.name.includes("@") ? ((o.machineApps ?? []).find((app) => app.key === item.name) ?? null) : (o.apps.find((app) => app.name === item.name) ?? null);
   if (item.type === "files") return (o.folders ?? []).find((folder) => folder.path === item.path) ?? null;
   if (item.type === "ha") return haTarget(item);
+  if (item.type === "widget") return widgetServer(item);
   return item;
 }
 
@@ -1266,6 +1278,7 @@ const tileTitle = (item) => {
   const target = tileTarget(item);
   if (item.type === "builtin") return t(item.id === "store" ? "home.store" : "home.add");
   if (item.type === "ha") return target?.state?.name ?? item.entity;
+  if (item.type === "widget") return widgetTitle(item, target);
   return item.type === "app" ? (target?.title ?? item.name) : item.type === "files" ? (target?.name ?? item.path) : item.title || (item.type === "folder" ? t("home.folder") : linkHost(item.url));
 };
 
@@ -1276,6 +1289,7 @@ function tileIcon(item, size = "") {
   if (item.type === "files") return h("span", { class: `app-icon plus ${size}` }, icon(tileTarget(item)?.disk ? (tileTarget(item).disk.network ? "globe" : "disk") : "folder"));
   if (item.type === "builtin") return h("span", { class: `app-icon plus ${size}` }, icon(item.id === "store" ? "store" : "plus"));
   if (item.type === "ha") return h("span", { class: `app-icon plus ${size}` }, icon(haIcon(target?.state ?? { domain: item.entity.split(".")[0] })));
+  if (item.type === "widget") return h("span", { class: `app-icon plus ${size}` }, icon(item.source === "qbit" ? "download" : "camera"));
   return h("span", { class: "app-icon stack" }, item.items.filter(tileTarget).slice(0, 4).map((inner) => tileIcon(inner, "mini")));
 }
 
@@ -1292,6 +1306,7 @@ function tileContent(item, title, sub, { badges = null, where = null, big = "" }
 function tile(item) {
   const target = tileTarget(item);
   if (!target) return null;
+  if (item.type === "widget") return widgetTile(item, target);
   const admin = isAdmin();
   const title = tileTitle(item);
   let cls = "";
@@ -1321,6 +1336,8 @@ function tile(item) {
     href = url ?? `#/apps/${app.name}`;
     external = !!url;
     sub = [h("i", { class: "dot " + st }), st === "running" && appAddress(app) ? appAddress(app) : t("status." + st)];
+    const torrents = st === "running" && state.overview?.qbit?.apps?.[app.name];
+    if (torrents?.online) where = h("span", { class: "tile-where" }, h("span", { class: "clip" }, qbitSpeeds(torrents)));
     badges = [app.protected && h("span", { class: "lock", title: t("access.protected") }, icon("lock")), (app.update || app.newer?.length > 0) && isAdmin() && h("span", { class: "lock", title: t(app.update ? "app.storeUpdate" : "app.newer") }, icon("up"))];
     // an administrator gets what can be done to the app right there; a member, the app's page
     side = admin
@@ -1357,9 +1374,9 @@ function tile(item) {
     (item.type === "folder" || isAddTile(item)
       ? h("button", { type: "button", class: "tile-main", onclick: () => homeUi.drag?.moved || (isAddTile(item) ? addDialog() : openFolder(item.id)) }, content)
       : h("a", { class: "tile-main", href, draggable: false, ...(external ? { target: "_blank", rel: "noopener noreferrer" } : {}) }, content));
-  if (!admin) return h("div", { class: `tile kind-${item.type} ${cls}`, "data-key": key }, main, side);
+  if (!admin) return h("div", { class: `tile kind-${item.type} ${cls} ${sizeClass(item)}`, "data-key": key }, main, side);
   // an administrator moves tiles by dragging them; a long press of a finger is the start of that, not a menu
-  return h("div", { class: `tile kind-${item.type} ${cls} movable`, "data-key": key, onpointerdown: (e) => dragStart(e, item), oncontextmenu: (e) => {
+  return h("div", { class: `tile kind-${item.type} ${cls} ${sizeClass(item)} movable`, "data-key": key, onpointerdown: (e) => dragStart(e, item), oncontextmenu: (e) => {
         if (homeUi.drag?.active) return e.preventDefault();
         // a right click on an app is the same menu as its button, where the pointer is
         if (e.pointerType === "touch") return;
@@ -1370,6 +1387,168 @@ function tile(item) {
         else if (item.type === "ha") e.currentTarget.querySelector(".tile-open")?.click();
         else tileMenu(item, { x: e.clientX, y: e.clientY });
       }, ondragstart: (e) => e.preventDefault() }, main, side);
+}
+
+// --- Widgets: what an integration shows right on the page, in one to four cells of the grid --------
+
+const WIDGET_SIZES = ["1x1", "2x1", "1x2", "2x2"];
+const widgetServer = (item) => (state.overview?.[item.source]?.servers ?? []).find((s) => s.id === item.server) ?? null;
+const widgetTitle = (item, x) => (item.view === "camera" ? item.camera : item.view === "events" ? t("frigate.events") : (x?.name ?? "qBittorrent"));
+/** A picture of a widget stays the same element across redraws and takes the next one only once it has come: no blinking */
+const widgetPictures = new Map();
+
+function widgetPicture(key, src, alt) {
+  let img = widgetPictures.get(key);
+  if (!img) widgetPictures.set(key, (img = picture(src, alt)));
+  return img;
+}
+
+function renewPicture(img, src) {
+  const next = h("img", { src });
+  next.addEventListener("load", () => (img.src = next.src));
+}
+
+function torrentsWidget(item, x) {
+  const size = item.size ?? "1x1";
+  const rows = { "1x1": 0, "2x1": 1, "1x2": 3, "2x2": 5 }[size];
+  const totals = x.totals;
+  return h(
+    "a",
+    { class: "tile-main widget-body", href: `#/qbit/${x.id}`, draggable: false },
+    h("span", { class: "widget-head" }, tileIcon(item), h("span", { class: "widget-title clip" }, x.name)),
+    x.online
+      ? [
+          h("span", { class: "widget-speeds" }, h("span", null, `↓ ${bytes(totals.down)}/s`), h("span", null, `↑ ${bytes(totals.up)}/s`)),
+          h("span", { class: "muted small" }, t("qbit.activeOf", { n: totals.active, total: totals.total })),
+          rows > 0 && x.top.length > 0 && h("span", { class: "widget-torrents" }, x.top.slice(0, rows).map((one) => h("span", { class: "widget-torrent" }, h("span", { class: "small clip" }, one.name), meterBar(one.percent, "")))),
+        ]
+      : h("span", { class: "muted small" }, t("qbit.offline")),
+  );
+}
+
+function cameraWidget(item, x) {
+  const c = x.cameras.find((one) => one.name === item.camera);
+  const key = `camera:${item.id}`;
+  const height = item.size === "2x2" || item.size === "1x2" ? 480 : 240;
+  const open = () => homeUi.drag?.moved || (c && cameraDialog(x, c));
+  return h(
+    "button",
+    { type: "button", class: "tile-main widget-picture", onclick: open },
+    c?.enabled && x.online ? widgetPicture(key, cameraPicture(x.id, c.name, height, Date.now()), item.camera) : h("span", { class: "camera-off" }, icon("camera")),
+    h("span", { class: "widget-caption" }, h("i", { class: "dot " + (c?.online && x.online ? "running" : "stopped") }), h("span", { class: "clip" }, item.camera)),
+  );
+}
+
+function eventsWidget(item, x) {
+  const count = { "1x1": 1, "2x1": 2, "1x2": 2, "2x2": 4 }[item.size ?? "1x1"];
+  const latest = x.latest.slice(0, count);
+  return h(
+    "a",
+    { class: `tile-main widget-events shows-${count} ${item.size === "1x2" ? "tall" : ""}`, href: `#/frigate/${x.id}`, draggable: false },
+    latest.length
+      ? latest.map((e) => h("span", { class: "widget-picture", title: `${eventWords(e)} · ${e.camera} · ${new Date(e.start).toLocaleString(state.lang)}` }, widgetPicture(`event:${e.id}`, eventPicture(x.id, e, "thumbnail"), e.label), h("span", { class: "widget-caption" }, h("span", { class: "clip" }, e.label), h("span", { class: "muted" }, ago(e.start)))))
+      : h("span", { class: "widget-body" }, h("span", { class: "widget-head" }, tileIcon(item), h("span", { class: "widget-title clip" }, t("frigate.events"))), h("span", { class: "muted small" }, t("frigate.none"))),
+  );
+}
+
+function widgetTile(item, x) {
+  const body = item.view === "torrents" ? torrentsWidget(item, x) : item.view === "camera" ? cameraWidget(item, x) : eventsWidget(item, x);
+  const title = tileTitle(item);
+  return h(
+    "div",
+    { class: `tile kind-widget view-${item.view} ${sizeClass(item)} movable`, "data-key": tileKey(item), onpointerdown: (e) => dragStart(e, item), oncontextmenu: (e) => {
+        if (homeUi.drag?.active) return e.preventDefault();
+        if (e.pointerType === "touch") return;
+        e.preventDefault();
+        tileMenu(item, { x: e.clientX, y: e.clientY });
+      }, ondragstart: (e) => e.preventDefault() },
+    body,
+    h("button", { type: "button", class: "tile-open", title: t("home.tileActions"), "aria-label": `${t("home.tileActions")}: ${title}`, onclick: () => tileMenu(item) }, icon("more")),
+  );
+}
+
+/** The widgets on the page follow their servers without the page being drawn again */
+async function widgetsTick() {
+  if (state.route?.view !== "home" || document.hidden || homeUi.drag || !isAdmin()) return;
+  const items = (state.overview?.dashboard?.groups ?? []).flatMap((group) => group.items).filter((item) => item.type === "widget");
+  if (!items.length) return;
+  const fresh = await api("GET", "/api/widgets").catch(() => null);
+  if (!fresh || state.route.view !== "home" || homeUi.drag) return;
+  state.overview.qbit.servers = fresh.qbit;
+  state.overview.frigate.servers = fresh.frigate;
+  for (const item of items) {
+    const old = document.querySelector(`.tile[data-key="widget:${item.id}"]`);
+    const made = old && tile(item);
+    if (made) old.replaceWith(made);
+    const x = widgetServer(item);
+    const c = item.view === "camera" && x?.cameras.find((one) => one.name === item.camera);
+    if (c?.enabled && x.online && widgetPictures.has(`camera:${item.id}`)) renewPicture(widgetPictures.get(`camera:${item.id}`), cameraPicture(x.id, c.name, item.size === "2x2" || item.size === "1x2" ? 480 : 240, Date.now()));
+  }
+}
+setInterval(() => void widgetsTick(), 10_000);
+
+/** Four small pictures of the grid: the one chosen is the tile's size */
+function sizePicker(current, pick) {
+  const box = h("div", { class: "size-picker", role: "group", "aria-label": t("home.size") });
+  const draw = (chosen) =>
+    put(box, WIDGET_SIZES.map((size) => {
+      const [w, hi] = size.split("x");
+      const mark = h("span", { class: `size-mark w${w} h${hi}` });
+      return h("button", { type: "button", class: "size-choice" + (size === chosen ? " active" : ""), "aria-pressed": size === chosen ? "true" : "false", onclick: () => (draw(size), pick(size)) }, h("span", { class: "size-cells" }, mark), h("span", { class: "small" }, `${w}×${hi}`));
+    }));
+  draw(current);
+  return box;
+}
+
+function sizeDialog(item) {
+  const key = tileKey(item);
+  let dialog;
+  dialog = openDialog(
+    "confirm",
+    h("h2", { class: "wrap" }, t("home.sizeOf", { name: tileTitle(item) })),
+    h("p", { class: "muted small" }, t("home.sizeHint")),
+    sizePicker(item.size ?? "1x1", (size) => {
+      widgetPictures.delete(`camera:${item.id}`);
+      changeLayout((layout) => {
+        const at = locate(layout, key);
+        if (!at) return false;
+        if (size === "1x1") delete at.item.size;
+        else at.item.size = size;
+      });
+    }),
+    h("footer", null, closeButton(() => dialog, t("common.close"))),
+  );
+}
+
+/** A new widget: what it shows, of the integrations connected, and how large */
+function widgetDialog() {
+  const choices = [
+    ...(state.overview.qbit?.servers ?? []).map((x) => ({ source: "qbit", server: x.id, view: "torrents", label: `${x.name} — ${t("qbit.torrents")}`, size: "2x1" })),
+    ...(state.overview.frigate?.servers ?? []).flatMap((x) => [{ source: "frigate", server: x.id, view: "events", label: `${x.name} — ${t("frigate.events")}`, size: "2x2" }, ...x.cameras.map((c) => ({ source: "frigate", server: x.id, view: "camera", camera: c.name, label: `${x.name} — ${t("widget.camera", { name: c.name })}`, size: "2x1" }))]),
+  ];
+  if (!choices.length) return;
+  let size = choices[0].size;
+  const what = h("select", null, choices.map((c, i) => h("option", { value: String(i) }, c.label)));
+  const sizes = h("div");
+  const paint = () => put(sizes, sizePicker(size, (next) => (size = next)));
+  what.addEventListener("change", () => ((size = choices[Number(what.value)].size), paint()));
+  paint();
+  let dialog;
+  dialog = openDialog(
+    "wide",
+    h("header", null, h("h2", { class: "grow" }, t("widget.title")), closeX(() => dialog)),
+    field(t("widget.what"), what),
+    field(t("home.size"), sizes, t("home.sizeHint")),
+    h("footer", null, closeButton(() => dialog, t("common.cancel")), button(t("widget.add"), { class: "primary", onclick: () => {
+        const { label: _label, size: _size, ...chosen } = choices[Number(what.value)];
+        changeLayout((layout) => {
+          const first = layout.groups[0] ?? (layout.groups.push({ id: newId(), title: "", items: [] }), layout.groups[0]);
+          const at = first.items.findIndex(isAddTile);
+          first.items.splice(at < 0 ? first.items.length : at, 0, { type: "widget", id: newId(), ...chosen, ...(size === "1x1" ? {} : { size }) });
+        });
+        dialog.close();
+      } }, "plus")),
+  );
 }
 
 // --- Changing the layout: every change is made on a copy, shown at once and sent to the server ----
@@ -1417,11 +1596,11 @@ function moveTile(key, where) {
   if (!item) return;
   if (where.before || where.after) {
     const at = locate(layout, where.before ?? where.after);
-    if (!at || (at.folder && (item.type === "folder" || isAddTile(item)))) return;
+    if (!at || (at.folder && (item.type === "folder" || staysOut(item)))) return;
     at.list.splice(at.index + (where.after ? 1 : 0), 0, item);
   } else if (where.folder) {
     const folder = allFolders(layout).find((f) => f.id === where.folder);
-    if (!folder || item.type === "folder" || isAddTile(item)) return;
+    if (!folder || item.type === "folder" || staysOut(item)) return;
     folder.items.push(item);
   } else {
     const group = layout.groups.find((g) => g.id === where.group) ?? layout.groups[0];
@@ -1434,7 +1613,7 @@ function moveTile(key, where) {
 function makeFolder(key, ontoKey, title = "") {
   const layout = layoutCopy();
   const own = locate(layout, key);
-  if (!own || own.item.type === "folder" || isAddTile(own.item)) return;
+  if (!own || own.item.type === "folder" || staysOut(own.item)) return;
   const folder = { type: "folder", id: newId(), title, items: [own.item] };
   if (!ontoKey) {
     if (own.folder) return;
@@ -1443,7 +1622,7 @@ function makeFolder(key, ontoKey, title = "") {
   }
   takeTile(layout, key);
   const at = locate(layout, ontoKey);
-  if (!at || at.folder || at.item.type === "folder" || isAddTile(at.item)) return;
+  if (!at || at.folder || at.item.type === "folder" || staysOut(at.item)) return;
   folder.items.unshift(at.item);
   at.list[at.index] = folder;
   return saveLayout(layout);
@@ -1550,16 +1729,18 @@ function tileMenu(item, point = null) {
     item.type === "ha" && tileTarget(item) && entry(t("ha.openThere"), "external", () => window.open(haEntityUrl(tileTarget(item).server, item.entity), "_blank", "noopener")),
     item.type === "folder" && entry(t("common.open"), "folder", () => openFolder(item.id)),
     item.type === "folder" && entry(t("files.rename"), "edit", () => renameFolderDialog(item)),
+    (item.type === "widget" || (item.type === "ha" && !at.folder)) && entry(t("home.size"), "grid", () => sizeDialog(item)),
     neighbour(-1) && entry(t("home.moveEarlier"), "arrow", () => moveTile(key, { before: tileKey(neighbour(-1)) }), "flip"),
     neighbour(1) && entry(t("home.moveLater"), "arrow", () => moveTile(key, { after: tileKey(neighbour(1)) })),
     at.folder && entry(t("home.outOfFolder"), "signout", () => outOfFolder(key)),
-    item.type !== "folder" && !isAddTile(item) && allFolders(layout).filter((folder) => folder !== at.folder).map((folder) => entry(t("home.intoFolder", { name: folder.title || t("home.folder") }), "folder", () => moveTile(key, { folder: folder.id }))),
-    item.type !== "folder" && !isAddTile(item) && !at.folder && entry(t("home.newFolder"), "plus", () => nameDialog(t("home.newFolder"), "", t("files.create"), (title) => makeFolder(key, null, title))),
+    item.type !== "folder" && !staysOut(item) && allFolders(layout).filter((folder) => folder !== at.folder).map((folder) => entry(t("home.intoFolder", { name: folder.title || t("home.folder") }), "folder", () => moveTile(key, { folder: folder.id }))),
+    item.type !== "folder" && !staysOut(item) && !at.folder && entry(t("home.newFolder"), "plus", () => nameDialog(t("home.newFolder"), "", t("files.create"), (title) => makeFolder(key, null, title))),
     layout.groups.filter((group) => group !== at.group || at.folder).map((group) => entry(t("home.toGroup", { name: groupName(group) }), "grid", () => moveTile(key, { group: group.id }))),
     entry(t("home.toNewGroup"), "plus", () => newGroupDialog((id) => moveTile(key, { group: id }))),
     item.type === "folder" && entry(t("home.ungroup"), "x", () => changeLayout((next) => void locate(next, key).list.splice(at.index, 1, ...item.items))),
     item.type === "link" && entry(t("home.removeLink"), "trash", () => changeLayout((next) => void takeTile(next, key)), "danger"),
     item.type === "ha" && entry(t("ha.offHome"), "trash", () => changeLayout((next) => void takeTile(next, key)), "danger"),
+    item.type === "widget" && entry(t("ha.offHome"), "trash", () => changeLayout((next) => void takeTile(next, key)), "danger"),
     item.type === "files" && entry(t("files.unpin"), "home", () => pinFolder(item.path, false)),
   );
   if (point) placeAt(dialog, point);
@@ -1593,6 +1774,7 @@ function addDialog(at = null) {
     entry(t("home.addApp"), t("home.addAppHint"), "store", () => go("#/store")),
     state.overview.importable > 0 && entry(t("home.import"), t("home.importHint", { n: state.overview.importable }), "download", () => go("#/import")),
     (state.overview.ha?.servers ?? []).length > 0 && entry(t("ha.pick.item"), t("ha.pick.hint"), "bulb", () => haPickDialog()),
+    ((state.overview.qbit?.servers ?? []).length > 0 || (state.overview.frigate?.servers ?? []).length > 0) && entry(t("widget.title"), t("widget.hint"), "grid", () => widgetDialog()),
     entry(t("home.addLinkItem"), t("home.addLinkHint"), "link", () => linkDialog()),
     entry(t("home.addGroupItem"), t("home.addGroupHint"), "grid", () => newGroupDialog()),
     state.overview.dashboard.widgets.hidden.map((id) =>
@@ -1873,7 +2055,7 @@ function dropTarget(drag) {
     const rect = over.getBoundingClientRect();
     const part = (drag.x - rect.left) / rect.width;
     const key = over.dataset.key;
-    const mayJoin = !open && drag.item.type !== "folder" && !isAddTile(drag.item) && key !== "builtin:add";
+    const mayJoin = !open && drag.item.type !== "folder" && !staysOut(drag.item) && key !== "builtin:add" && !key.startsWith("widget:");
     if (mayJoin && part > 0.28 && part < 0.72) return key.startsWith("folder:") ? { el: over, cls: "drop-into", folder: key.slice(7) } : { el: over, cls: "drop-into", onto: key };
     return part < 0.5 ? { el: over, cls: "drop-before", before: key } : { el: over, cls: "drop-after", after: key };
   }
@@ -2060,6 +2242,8 @@ function attentionItem(item) {
     item.code === "machine.away" && open(`#/machines/${item.detail.id}`),
     item.code.startsWith("containers.") && state.route.view !== "containers" && open("#/containers"),
     item.code.startsWith("ha.") && !(state.route.view === "ha" && state.route.id === item.detail.host) && open(`#/ha/${item.detail.host}`),
+    item.code.startsWith("frigate.") && !(state.route.view === "frigate" && state.route.id === item.detail.host) && open(`#/frigate/${item.detail.host}`),
+    item.code.startsWith("qbit.") && !(state.route.view === "qbit" && state.route.id === item.detail.host) && open(`#/qbit/${item.detail.host}`),
     item.code.startsWith("pve.") && state.route.view !== "proxmox" && open(`#/proxmox/${item.detail.host}${item.code === "pve.guestDown" ? "/guests" : item.code === "pve.backupFailed" ? "/tasks" : ""}`),
     (item.code === "machine.restarting" || item.code === "machine.partial") && open(`#/machines/${item.detail.id}/apps`),
     item.app && open(`#/apps/${item.app}${item.code === "restarting" || item.code === "partial" ? "/logs" : ""}`, t(item.code === "restarting" || item.code === "partial" ? "app.logs" : "common.open")),
@@ -2662,6 +2846,18 @@ function renderAppTab() {
   appOverviewTab(app, box);
 }
 
+/** The app runs a Frigate that is connected: its cameras, and the way to them */
+function appCamerasCard(app) {
+  const f = state.overview?.frigate?.apps?.[app.name];
+  return f && h("section", { class: "card pad section-head" }, h("div", null, h("h2", null, t("frigate.cameras")), h("p", { class: "muted small" }, f.online ? t("frigate.workingOf", { n: f.working, total: f.cameras }) : t("frigate.offline"))), h("a", { class: "btn small", href: `#/frigate/${f.id}` }, icon("camera"), h("span", null, t("common.open"))));
+}
+
+/** The app runs a qBittorrent that is connected: what it is doing, and the way to its torrents */
+function appTorrentsCard(app) {
+  const q = state.overview?.qbit?.apps?.[app.name];
+  return q && h("section", { class: "card pad section-head" }, h("div", null, h("h2", null, t("qbit.title")), h("p", { class: "muted small" }, q.online ? `${qbitSpeeds(q)} · ${t("qbit.activeOf", { n: q.active, total: q.total })}` : t("qbit.offline"))), h("a", { class: "btn small", href: `#/qbit/${q.id}` }, icon("download"), h("span", null, t("common.open"))));
+}
+
 function appOverviewTab(app, box) {
   const row = (label, value, mono) => h("div", { class: "kv" }, h("span", { class: "muted" }, label), h("span", { class: mono ? "mono" : "" }, value));
   const statsBox = h("div", { class: "stats card three" }, statCell("app-cpu", "cpu", t("sys.cpu")), statCell("app-memory", "memory", t("sys.memory")), h("div", { class: "stat" }, h("div", { class: "stat-label" }, icon("box"), t("app.containers")), h("div", { class: "stat-row" }, h("div", { class: "stat-value" }, h("strong", null, String(app.containers.filter((c) => c.state === "running").length)), h("span", { class: "unit" }, "/ " + app.containers.length))), h("div", { class: "stat-hint" }, t("status." + app.status))));
@@ -2679,6 +2875,7 @@ function appOverviewTab(app, box) {
   };
 
   box.replaceChildren(
+    ...[appTorrentsCard(app), appCamerasCard(app)].filter(Boolean),
     h(
       "div",
       { class: "columns" },
@@ -2866,7 +3063,6 @@ function addToMachinesMenu(at = null) {
     entry(t("machines.addContainer"), hint("container"), "box", here("container")),
     entry(t("machines.addVm"), hint("vm"), "box", here("vm")),
     entry(t("machines.addPve"), t("machines.addPveHint"), "server", () => pveDialog()),
-    entry(t("machines.addHa"), t("machines.addHaHint"), "bulb", () => haDialog()),
   );
   if (at) {
     // under the button, its right edge on the button's
@@ -4297,7 +4493,7 @@ function haEvent(event) {
   clearTimeout(haUi.timer);
   haUi.timer = setTimeout(() => {
     if (state.route.view === "home") void refresh();
-    if (state.route.view === "machines") void loadHa();
+    if (onIntegrations()) void loadIntegrations();
     if (state.route.view === "ha" && state.route.id === event.id) void loadHa();
   }, 600);
 }
@@ -4504,10 +4700,8 @@ async function haPickDialog() {
 
 async function loadHa() {
   try {
-    haUi.list = await api("GET", "/api/ha");
-    if (state.route.view !== "ha") return;
-    const id = state.route.id || haUi.list.servers[0]?.id;
-    if (!id) return renderHaBody();
+    const id = state.route.id;
+    if (state.route.view !== "ha" || !id) return;
     if (haUi.server?.id !== id) haUi.entities = null;
     haUi.server = await api("GET", `/api/ha/${id}`);
     if (!haUi.entities) haUi.entities = (await api("GET", `/api/ha/${id}/entities`)).entities;
@@ -4515,45 +4709,604 @@ async function loadHa() {
   } catch (e) {
     if (state.route.view !== "ha") return toast(errorText(e), "error");
     const box = document.getElementById("ha-body");
-    if (box) put(box, h("p", { class: "card pad muted" }, errorText(e)));
+    if (box) put(box, haCrumbs(state.route.id), h("p", { class: "card pad muted" }, errorText(e)));
   }
 }
 
 const haChip = (x) => h("span", { class: "state " + (x.online ? "running" : "") }, x.online ? t("ha.online") : x.error ? t("ha.offline") : t("ha.asking"));
 const haError = (x) => (x.error ? (has("error." + x.error.code) ? t("error." + x.error.code, { name: x.name, message: x.error.message ?? "" }) : x.error.code) : "");
+const haCrumbs = (name) => h("nav", { class: "crumbs" }, h("a", { href: "#/integrations" }, t("nav.integrations")), icon("chevron"), h("span", null, name));
 
 function renderHa() {
-  if (state.route.id && haUi.server?.id !== state.route.id) (haUi.server = null), (haUi.entities = null);
+  if (haUi.server?.id !== state.route.id) (haUi.server = null), (haUi.entities = null);
   shell(h("div", { id: "ha-body", class: "stack" }));
-  if (haUi.list) renderHaBody();
   void loadHa();
 }
 
 function renderHaBody() {
   const box = document.getElementById("ha-body");
-  const list = haUi.list?.servers ?? [];
-  if (!box) return;
   const x = haUi.server;
-  const answering = list.filter((y) => y.online).length;
+  if (!box || !x) return;
+  put(
+    box,
+    haCrumbs(x.name),
+    h(
+      "section",
+      { class: "card" },
+      h(
+        "div",
+        { class: "tree-head" },
+        h("div", null, h("h1", null, x.name, " ", haChip(x)), h("p", { class: "meta" }, ["Home Assistant", x.version, x.url].filter(Boolean).join(" · "))),
+        h("div", { class: "row-actions" }, h("a", { class: "btn", href: haWebUrl(x), target: "_blank", rel: "noopener noreferrer" }, icon("external"), h("span", null, t("ha.open"))), h("button", { type: "button", class: "btn square", "aria-label": t("app.more"), onclick: (e) => haMenu(x, underButton(e.currentTarget)) }, icon("more"))),
+      ),
+    ),
+    x.error && h("p", { class: "card pad warn-box" }, haError(x), " ", t("pve.since", { ago: ago(x.error.since) })),
+    h("div", { class: "ha-page" }, h("div", { class: "stack" }, haDevices(x)), haOverview(x)),
+  );
+}
+
+// --- Integrations ---
+// Services Hata talks to through their own API. What runs on a machine of its own stays in Servers: these are what a service offers.
+
+const integrationsUi = { found: null, address: "", qbit: null, qbitFound: null, frigate: null, frigateFound: null };
+const onIntegrations = () => state.route.view === "integrations" || (state.route.view === "settings" && state.route.section === "integrations");
+
+async function loadIntegrations() {
+  try {
+    [haUi.list, integrationsUi.qbit, integrationsUi.frigate] = await Promise.all([api("GET", "/api/ha"), api("GET", "/api/qbit"), api("GET", "/api/frigate")]);
+    paintIntegrations();
+  } catch (e) {
+    const box = document.getElementById("integrations-body");
+    if (box) put(box, h("p", { class: "card pad muted" }, errorText(e)));
+  }
+}
+
+/** The holder both places show, the menu's page and the section of Settings. What answers on the network is asked once per opening: it takes two seconds. */
+function integrationsBody(titled) {
+  const box = h("div", { id: "integrations-body", class: "stack" });
+  box.dataset.titled = titled ? "1" : "";
+  requestAnimationFrame(() => {
+    paintIntegrations();
+    void loadIntegrations();
+    api("GET", "/api/ha/found").then(
+      ({ found, address }) => (Object.assign(integrationsUi, { found, address }), paintIntegrations()),
+      () => {},
+    );
+    api("GET", "/api/qbit/found").then(
+      ({ found }) => ((integrationsUi.qbitFound = found), paintIntegrations()),
+      () => {},
+    );
+    api("GET", "/api/frigate/found").then(
+      ({ found }) => ((integrationsUi.frigateFound = found), paintIntegrations()),
+      () => {},
+    );
+  });
+  return box;
+}
+
+function renderIntegrations() {
+  shell(integrationsBody(true));
+}
+
+function paintIntegrations() {
+  const box = document.getElementById("integrations-body");
+  const list = haUi.list?.servers;
+  const torrents = integrationsUi.qbit?.servers;
+  const frigates = integrationsUi.frigate?.servers;
+  if (!box || !list || !torrents || !frigates) return;
   const row = (y) =>
     h(
       "tr",
       { class: "clickable", menu: (at) => haMenu(y, at), onclick: (e) => !e.target.closest("a, button") && go(`#/ha/${y.id}`) },
-      h("td", null, h("div", { class: "strong" }, y.name), h("div", { class: "muted small mono" }, [y.version, y.url].filter(Boolean).join(" · "))),
+      h("td", null, h("div", { class: "strong" }, y.name), h("div", { class: "muted small mono" }, ["Home Assistant", y.version, y.url].filter(Boolean).join(" · "))),
       h("td", null, haChip(y)),
       h("td", { class: "small" }, t("ha.counts", { n: y.entities, on: y.on })),
       h("td", null, h("div", { class: "row-actions" }, h("a", { class: "btn small", href: haWebUrl(y), target: "_blank", rel: "noopener noreferrer" }, icon("external"), h("span", null, t("ha.open"))), h("button", { type: "button", class: "btn small square", "aria-label": t("app.more"), onclick: (e) => haMenu(y, underButton(e.currentTarget)) }, icon("more")))),
     );
+  const torrentRow = (y) =>
+    h(
+      "tr",
+      { class: "clickable", menu: (at) => qbitMenu(y, at), onclick: (e) => !e.target.closest("a, button") && go(`#/qbit/${y.id}`) },
+      h("td", null, h("div", { class: "strong" }, y.name), h("div", { class: "muted small mono" }, ["qBittorrent", y.version, y.url].filter(Boolean).join(" · "))),
+      h("td", null, qbitChip(y)),
+      h("td", { class: "small" }, y.online ? `${t("qbit.activeOf", { n: y.totals.active, total: y.totals.total })} · ${qbitSpeeds(y.totals)}` : "—"),
+      h("td", null, h("div", { class: "row-actions" }, h("a", { class: "btn small", href: y.url, target: "_blank", rel: "noopener noreferrer" }, icon("external"), h("span", null, t("qbit.open"))), h("button", { type: "button", class: "btn small square", "aria-label": t("app.more"), onclick: (e) => qbitMenu(y, underButton(e.currentTarget)) }, icon("more")))),
+    );
+  const frigateRow = (y) =>
+    h(
+      "tr",
+      { class: "clickable", menu: (at) => frigateMenu(y, at), onclick: (e) => !e.target.closest("a, button") && go(`#/frigate/${y.id}`) },
+      h("td", null, h("div", { class: "strong" }, y.name), h("div", { class: "muted small mono" }, ["Frigate", y.version, y.url].filter(Boolean).join(" · "))),
+      h("td", null, frigateChip(y)),
+      h("td", { class: "small" }, y.online ? t("frigate.workingOf", { n: y.cameras.filter((c) => c.online).length, total: y.cameras.length }) : "—"),
+      h("td", null, h("div", { class: "row-actions" }, h("a", { class: "btn small", href: y.url, target: "_blank", rel: "noopener noreferrer" }, icon("external"), h("span", null, t("frigate.open"))), h("button", { type: "button", class: "btn small square", "aria-label": t("app.more"), onclick: (e) => frigateMenu(y, underButton(e.currentTarget)) }, icon("more")))),
+    );
+  const connected = list.length + torrents.length + frigates.length;
+  const found = integrationsFound(list);
   put(
     box,
     h(
       "section",
       { class: "card" },
-      h("div", { class: "tree-head" }, h("div", null, h("h1", null, "Home Assistant"), h("p", { class: "meta" }, list.length ? t("ha.answering", { n: answering, total: list.length }) : t("ha.noneYet"))), button(t("ha.addServer"), { class: "primary", onclick: () => haDialog() }, "plus")),
-      list.length > 0 && h("div", { class: "table-wrap" }, h("table", null, h("thead", null, h("tr", null, h("th", null, t("ha.col.server")), h("th", null, t("app.col.state")), h("th", null, t("ha.col.devices")), h("th"))), h("tbody", null, list.map(row)))),
+      h(
+        "div",
+        { class: "tree-head" },
+        h("div", null, box.dataset.titled ? h("h1", null, t("nav.integrations")) : h("h2", null, t("integrations.connected")), h("p", { class: "meta" }, connected ? t("integrations.lead") : t("integrations.none"))),
+        button(t("integrations.add"), { class: "primary", onclick: (e) => integrationsAddMenu(e.currentTarget) }, "plus"),
+      ),
+      connected > 0 && h("div", { class: "table-wrap" }, h("table", null, h("thead", null, h("tr", null, h("th", null, t("integrations.col.name")), h("th", null, t("app.col.state")), h("th", null, t("integrations.col.inside")), h("th"))), h("tbody", null, list.map(row), torrents.map(torrentRow), frigates.map(frigateRow)))),
     ),
-    x && x.error && h("p", { class: "card pad warn-box" }, haError(x), " ", t("pve.since", { ago: ago(x.error.since) })),
-    x && h("div", { class: "ha-page" }, h("div", { class: "stack" }, list.length > 1 && h("section", { class: "card pad" }, h("div", { class: "section-head" }, h("h2", null, t("ha.tab.devices")), h("div", { class: "seg" }, list.map((y) => h("a", { class: "btn small" + (y.id === x.id ? " active" : ""), href: `#/ha/${y.id}` }, y.name))))), haDevices(x)), haOverview(x)),
+    found.length > 0 &&
+      h(
+        "section",
+        { class: "card pad stack-s" },
+        h("div", null, h("h2", null, t("integrations.available")), h("p", { class: "muted small" }, t("integrations.foundLead"))),
+        found.map((f) => h("div", { class: "tool" }, h("span", { class: "app-icon plus sm" }, icon(f.icon)), h("div", { class: "grow" }, h("strong", null, f.name), h("p", { class: "muted small" }, f.kind, " · ", h("span", { class: "mono" }, f.url.replace(/^https?:\/\//, "")))), button(t("integrations.connect"), { onclick: f.connect }, "plus"))),
+      ),
+  );
+}
+
+/** What can be connected and was found: apps of this server first, then what answers on the home network. Everything else is under "Add". */
+function integrationsFound(list) {
+  const { found, address, qbitFound, frigateFound } = integrationsUi;
+  const out = [];
+  const here = (state.overview?.apps ?? []).some((a) => a.name === "home-assistant") && !list.some((y) => y.here) && `http://${address || location.hostname}:8123`;
+  if (here) out.push({ name: "Home Assistant", kind: t("ha.foundHere"), icon: "bulb", url: here, connect: () => haDialog(null, here) });
+  for (const f of qbitFound ?? []) out.push({ name: f.title, kind: t("ha.foundHere"), icon: "download", url: f.url, connect: () => qbitDialog(null, f.url) });
+  for (const f of frigateFound ?? []) out.push({ name: f.title, kind: t("ha.foundHere"), icon: "camera", url: f.url, connect: () => frigateDialog(null, f.url) });
+  for (const f of found ?? []) if (!f.known && f.url !== here) out.push({ name: f.name, kind: "Home Assistant", icon: "bulb", url: f.url, connect: () => haDialog(null, f.url) });
+  return out;
+}
+
+function integrationsAddMenu(at) {
+  let dialog;
+  const entry = (label, hint, iconName, action) => h("button", { type: "button", class: "menu-item", onclick: () => (dialog.close(), action()) }, h("span", { class: "app-icon plus" }, icon(iconName)), h("span", { class: "tile-text" }, h("span", { class: "tile-name" }, label), h("span", { class: "muted small" }, hint)));
+  dialog = openDialog("menu dropdown", h("header", null, h("h2", null, t("integrations.addWhat"))), entry("Home Assistant", t("integrations.ha.what"), "bulb", () => haDialog()), entry("qBittorrent", t("integrations.qbit.what"), "download", () => qbitDialog()), entry("Frigate", t("integrations.frigate.what"), "camera", () => frigateDialog()));
+  const r = at.getBoundingClientRect();
+  placeAt(dialog, { x: r.right - dialog.offsetWidth, y: r.bottom + 4 });
+  dialog.tabIndex = -1;
+  dialog.focus();
+}
+
+// --- Frigate ---
+
+const frigateUi = { server: null, events: null, camera: "", label: "", timer: 0, tick: 0 };
+const frigateChip = (x) => h("span", { class: "state " + (x.online ? "running" : "") }, t(x.online ? "frigate.online" : x.error ? "frigate.offline" : "frigate.asking"));
+const frigateError = (x) => (x.error ? (has("error." + x.error.code) ? t("error." + x.error.code, { url: x.url, message: x.error.message ?? "" }) : x.error.code) : "");
+const eventPicture = (serverId, e, kind) => `/api/frigate/${serverId}/events/${encodeURIComponent(e.id)}/${kind}.jpg`;
+const cameraPicture = (serverId, name, height, tick) => `/api/frigate/${serverId}/cameras/${encodeURIComponent(name)}/latest.jpg?h=${height}&t=${tick}`;
+const eventWords = (e) => [e.label, e.score !== null && `${e.score}%`].filter(Boolean).join(" · ");
+
+function renderFrigate() {
+  if (frigateUi.server?.id !== state.route.id) Object.assign(frigateUi, { server: null, events: null, camera: "", label: "" });
+  shell(h("div", { id: "frigate-body", class: "stack" }));
+  paintFrigate();
+  void loadFrigate();
+}
+
+async function loadFrigate() {
+  clearTimeout(frigateUi.timer);
+  const id = state.route.id;
+  if (state.route.view !== "frigate") return;
+  try {
+    const query = new URLSearchParams({ limit: "40", ...(frigateUi.camera ? { camera: frigateUi.camera } : {}), ...(frigateUi.label ? { label: frigateUi.label } : {}) });
+    const [server, events] = await Promise.all([api("GET", `/api/frigate/${id}`), api("GET", `/api/frigate/${id}/events?${query}`).catch(() => null)]);
+    if (state.route.view !== "frigate" || state.route.id !== id) return;
+    const whole = !frigateUi.server;
+    frigateUi.server = server;
+    if (events) frigateUi.events = events.events;
+    frigateUi.tick++;
+    paintFrigate(whole);
+  } catch (e) {
+    const box = document.getElementById("frigate-body");
+    if (box) put(box, h("nav", { class: "crumbs" }, h("a", { href: "#/integrations" }, t("nav.integrations"))), h("p", { class: "card pad muted" }, errorText(e)));
+    return;
+  }
+  frigateUi.timer = setTimeout(loadFrigate, 10_000);
+}
+
+/** A picture that failed says so instead of a broken image */
+function picture(src, alt, cls) {
+  const img = h("img", { src, alt, loading: "lazy", class: cls });
+  img.addEventListener("error", () => img.classList.add("broken"));
+  return img;
+}
+
+function frigateCamera(x, c) {
+  return h(
+    "button",
+    { type: "button", class: "camera", onclick: () => cameraDialog(x, c) },
+    c.enabled ? picture(cameraPicture(x.id, c.name, 360, frigateUi.tick), c.name) : h("span", { class: "camera-off" }, icon("camera")),
+    h("span", { class: "camera-name" }, h("i", { class: "dot " + (c.online ? "running" : "stopped") }), h("span", { class: "clip" }, c.name), c.online && c.fps !== null && h("span", { class: "muted small mono" }, `${Math.round(c.fps)} fps`), !c.enabled && h("span", { class: "muted small" }, t("frigate.switchedOff")), c.enabled && !c.online && h("span", { class: "muted small" }, t("frigate.noFrames"))),
+  );
+}
+
+/** One camera, larger, the picture asked for again every two seconds while the dialog is open */
+function cameraDialog(x, c) {
+  let tick = 0;
+  const img = picture(cameraPicture(x.id, c.name, 720, `d${tick}`), c.name, "camera-big");
+  let dialog;
+  dialog = openDialog("xwide", h("header", null, h("h2", { class: "clip grow" }, c.name), closeX(() => dialog)), img, h("p", { class: "muted small" }, t("frigate.notLive")));
+  const every = setInterval(() => {
+    if (!dialog.open) return clearInterval(every);
+    img.src = cameraPicture(x.id, c.name, 720, `d${++tick}`);
+  }, 2000);
+}
+
+function eventDialog(x, e) {
+  let dialog;
+  dialog = openDialog(
+    "xwide",
+    h("header", null, h("h2", { class: "clip grow" }, `${eventWords(e)} · ${e.camera}`), closeX(() => dialog)),
+    e.snapshot ? picture(eventPicture(x.id, e, "snapshot"), e.label, "camera-big") : picture(eventPicture(x.id, e, "thumbnail"), e.label, "camera-big"),
+    h("p", { class: "muted small" }, new Date(e.start).toLocaleString(state.lang), e.end ? "" : ` · ${t("frigate.goingOn")}`, e.zones.length ? ` · ${e.zones.join(", ")}` : ""),
+  );
+}
+
+function frigateEventRow(x, e) {
+  return h(
+    "button",
+    { type: "button", class: "camera-event", onclick: () => eventDialog(x, e) },
+    picture(eventPicture(x.id, e, "thumbnail"), e.label),
+    h("span", { class: "grow" }, h("strong", null, eventWords(e)), h("span", { class: "muted small" }, ` ${e.camera}`), h("span", { class: "muted small", title: new Date(e.start).toLocaleString(state.lang) }, ` · ${ago(e.start)}`), !e.end && h("span", { class: "state running small" }, t("frigate.goingOn"))),
+  );
+}
+
+function paintFrigateEvents() {
+  const box = document.getElementById("frigate-events");
+  const x = frigateUi.server;
+  if (!box || !x) return;
+  const list = frigateUi.events;
+  put(box, !list ? h("p", { class: "muted pad" }, "…") : list.length ? h("div", { class: "camera-events" }, list.map((e) => frigateEventRow(x, e))) : h("p", { class: "muted pad" }, t(frigateUi.camera || frigateUi.label ? "frigate.noneHere" : "frigate.none")));
+}
+
+function paintFrigate(whole = true) {
+  const box = document.getElementById("frigate-body");
+  const x = frigateUi.server;
+  if (!box || !x) return;
+  const working = x.cameras.filter((c) => c.online).length;
+  const head = h(
+    "div",
+    { class: "tree-head" },
+    h("div", null, h("h1", null, x.name, " ", frigateChip(x)), h("p", { class: "meta" }, ["Frigate", x.version, x.url].filter(Boolean).join(" · ")), x.online && h("p", { class: "meta" }, t("frigate.workingOf", { n: working, total: x.cameras.length }))),
+    h("div", { class: "row-actions" }, h("a", { class: "btn", href: x.url, target: "_blank", rel: "noopener noreferrer" }, icon("external"), h("span", null, t("frigate.open"))), h("button", { type: "button", class: "btn square", "aria-label": t("app.more"), onclick: (e) => frigateMenu(x, underButton(e.currentTarget)) }, icon("more"))),
+  );
+  const problem = () => x.error && h("p", { class: "card pad warn-box" }, frigateError(x), " ", t("pve.since", { ago: ago(x.error.since) }));
+  const cameras = () => x.cameras.map((c) => frigateCamera(x, c));
+  const standing = document.getElementById("frigate-head");
+  if (standing && !whole) {
+    put(standing, head);
+    put(document.getElementById("frigate-error"), problem());
+    // a picture stays until the next has come: no blinking every ten seconds
+    const grid = document.getElementById("frigate-cameras");
+    if (grid.children.length === x.cameras.length && x.cameras.every((c, i) => grid.children[i].dataset.name === c.name && grid.children[i].dataset.state === `${c.enabled}${c.online}`)) {
+      x.cameras.forEach((c, i) => {
+        const img = grid.children[i].querySelector("img");
+        if (img) {
+          const next = h("img", { src: cameraPicture(x.id, c.name, 360, frigateUi.tick) });
+          next.addEventListener("load", () => (img.src = next.src));
+        }
+      });
+    } else put(grid, markCameras(cameras(), x.cameras));
+    return paintFrigateEvents();
+  }
+  const cameraSelect = h("select", { onchange: (e) => ((frigateUi.camera = e.target.value), void loadFrigate()) }, h("option", { value: "" }, t("frigate.allCameras")), x.cameras.map((c) => h("option", { value: c.name }, c.name)));
+  cameraSelect.value = frigateUi.camera;
+  put(
+    box,
+    h("nav", { class: "crumbs" }, h("a", { href: "#/integrations" }, t("nav.integrations")), icon("chevron"), h("span", null, x.name)),
+    h("section", { class: "card", id: "frigate-head" }, head),
+    h("div", { id: "frigate-error" }, problem()),
+    h("section", { class: "card pad stack-s" }, h("h2", null, t("frigate.cameras")), x.cameras.length ? h("div", { class: "cameras", id: "frigate-cameras" }, markCameras(cameras(), x.cameras)) : h("p", { class: "muted", id: "frigate-cameras" }, x.online ? t("frigate.noCameras") : "—")),
+    h("section", { class: "card" }, h("div", { class: "qbit-tools" }, h("h2", null, t("frigate.events")), cameraSelect), h("div", { id: "frigate-events" })),
+  );
+  paintFrigateEvents();
+}
+
+const markCameras = (els, cameras) => els.map((el, i) => ((el.dataset.name = cameras[i].name), (el.dataset.state = `${cameras[i].enabled}${cameras[i].online}`), el));
+
+function frigateMenu(x, at) {
+  menuAt(at, menuHeader(x.name, x.url, "camera"), [
+    { label: t("frigate.cameras"), icon: "camera", href: `#/frigate/${x.id}` },
+    { label: t("frigate.open"), icon: "external", run: () => window.open(x.url, "_blank", "noopener") },
+    { label: t("frigate.change"), icon: "edit", run: () => frigateDialog(x) },
+    { label: t("frigate.disconnect"), icon: "trash", danger: true, run: () => frigateDisconnectDialog(x) },
+  ]);
+}
+
+function frigateDisconnectDialog(x) {
+  let dialog;
+  dialog = openDialog(
+    "confirm",
+    h("h2", { class: "wrap" }, t("frigate.disconnectTitle", { name: x.name })),
+    h("p", { class: "muted" }, t("frigate.disconnectLead")),
+    h("footer", null, closeButton(() => dialog, t("common.cancel")), button(t("frigate.disconnect"), { class: "danger", onclick: async () => {
+        try {
+          await api("DELETE", `/api/frigate/${x.id}`);
+          dialog.close();
+          await refresh();
+          go("#/integrations");
+        } catch (e) {
+          toast(errorText(e), "error");
+        }
+      } }, "trash")),
+  );
+}
+
+function frigateDialog(old = null, address = "") {
+  const name = h("input", { value: old?.name ?? "", placeholder: "Frigate", maxLength: 40 });
+  const url = h("input", { value: old?.url ?? address, placeholder: "192.168.1.5:8971", required: true, autocapitalize: "none", spellcheck: false, class: "mono" });
+  const user = h("input", { value: old?.user ?? "admin", autocapitalize: "none", spellcheck: false, autocomplete: "off", name: "frigate-user" });
+  const password = h("input", { type: "password", autocomplete: "new-password", name: "frigate-password", placeholder: old ? t("qbit.passwordKept") : "" });
+  const cert = h("div");
+  const error = h("p", { class: "error", role: "alert" });
+  let fingerprint = null;
+  let dialog;
+  const send = async (e) => {
+    e.preventDefault();
+    error.textContent = "";
+    const submit = dialog.querySelector("button[type=submit]");
+    submit.disabled = true;
+    try {
+      const data = { name: name.value, url: url.value, user: user.value, password: password.value, ...(fingerprint ? { fingerprint } : {}) };
+      const saved = old ? await api("PATCH", `/api/frigate/${old.id}`, data) : await api("POST", "/api/frigate", data);
+      dialog.close();
+      toast(t(old ? "frigate.changed" : "frigate.added", { name: saved.name }));
+      void refresh();
+      if (!old) go(`#/frigate/${saved.id}`);
+      else if (state.route.view === "frigate") void loadFrigate();
+      else void loadIntegrations();
+    } catch (err) {
+      if (err.code === "frigate.confirmCert") {
+        // the server's own certificate: the person compares it with what the server says, then it is kept
+        put(cert, h("div", { class: "card pad stack-s warn-box" }, h("strong", null, t("frigate.certTitle")), h("p", { class: "small" }, t("frigate.certLead", { subject: err.detail.subject || "—", issuer: err.detail.issuer || "—" })), h("p", { class: "mono small wrap" }, err.detail.fingerprint)));
+        fingerprint = err.detail.fingerprint;
+        submit.querySelector("span").textContent = t("frigate.certTrust");
+      } else error.textContent = errorText(err);
+    }
+    submit.disabled = false;
+  };
+  dialog = openDialog(
+    "wide",
+    h(
+      "form",
+      { class: "stack", onsubmit: send },
+      h("header", null, h("h2", { class: "grow" }, old ? t("frigate.changeTitle", { name: old.name }) : t("frigate.addTitle")), closeX(() => dialog)),
+      !old && h("p", null, t("frigate.addLead")),
+      field(t("frigate.url"), url, t("frigate.urlHint")),
+      h("div", { class: "form-pair" }, field(t("frigate.user"), user), field(t("frigate.password"), password)),
+      h("p", { class: "muted small" }, t("frigate.passwordHint")),
+      field(t("frigate.name"), name),
+      cert,
+      error,
+      h("footer", null, closeButton(() => dialog, t("common.cancel")), h("button", { type: "submit", class: "btn primary" }, h("span", null, t(old ? "ha.save" : "integrations.connectIt")))),
+    ),
+  );
+}
+
+// --- qBittorrent ---
+
+const qbitUi = { server: null, torrents: null, filter: "all", q: "", timer: 0 };
+const QBIT_FILTERS = ["all", "downloading", "seeding", "paused", "error"];
+const qbitChip = (x) => h("span", { class: "state " + (x.online ? "running" : "") }, t(x.online ? "qbit.online" : x.error ? "qbit.offline" : "qbit.asking"));
+const qbitError = (x) => (x.error ? (has("error." + x.error.code) ? t("error." + x.error.code, { url: x.url, message: x.error.message ?? "" }) : x.error.code) : "");
+const qbitSpeeds = (x) => `↓ ${bytes(x.down)}/s · ↑ ${bytes(x.up)}/s`;
+const qbitCrumbs = (name) => h("nav", { class: "crumbs" }, h("a", { href: "#/integrations" }, t("nav.integrations")), icon("chevron"), h("span", null, name));
+
+function renderQbit() {
+  if (qbitUi.server?.id !== state.route.id) Object.assign(qbitUi, { server: null, torrents: null, filter: "all", q: "" });
+  shell(h("div", { id: "qbit-body", class: "stack" }));
+  paintQbit();
+  void loadQbit();
+}
+
+/** Asked again every five seconds while the page is on screen */
+async function loadQbit() {
+  clearTimeout(qbitUi.timer);
+  const id = state.route.id;
+  if (state.route.view !== "qbit") return;
+  try {
+    // the torrents first: asking for them is what brings the server's numbers up to date
+    const torrents = await api("GET", `/api/qbit/${id}/torrents`).catch(() => null);
+    const server = await api("GET", `/api/qbit/${id}`);
+    if (state.route.view !== "qbit" || state.route.id !== id) return;
+    const whole = !qbitUi.server;
+    qbitUi.server = server;
+    if (torrents) qbitUi.torrents = torrents.torrents;
+    paintQbit(whole);
+  } catch (e) {
+    const box = document.getElementById("qbit-body");
+    if (box) put(box, qbitCrumbs(id), h("p", { class: "card pad muted" }, errorText(e)));
+    return;
+  }
+  qbitUi.timer = setTimeout(loadQbit, 5000);
+}
+
+function qbitAct(path, data) {
+  return api("POST", `/api/qbit/${qbitUi.server.id}/torrents${path}`, data).then(loadQbit, (e) => toast(errorText(e), "error"));
+}
+
+function qbitRow(x) {
+  const paused = x.group === "paused" || x.group === "finished";
+  const word = x.group === "downloading" && x.waiting ? "waiting" : x.group === "seeding" && x.waiting ? "seedingIdle" : x.group;
+  return h(
+    "tr",
+    null,
+    h("td", { class: "qbit-name" }, h("div", { class: "strong" }, x.name), h("div", { class: "muted small mono" }, x.path)),
+    h("td", { class: "qbit-progress" }, h("div", { class: "small" }, `${x.percent}% · ${bytes(x.size)}`), meterBar(x.percent, x.group === "error" ? "danger" : "")),
+    h("td", null, h("span", { class: "state " + (x.group === "error" ? "restarting" : paused ? "" : x.waiting ? "" : "running") }, t("qbit.group." + word))),
+    h("td", { class: "small nowrap" }, x.down || x.up ? qbitSpeeds(x) : "—", x.eta !== null && x.group === "downloading" && h("div", { class: "muted" }, t("qbit.left", { time: duration(Math.max(60, x.eta)) }))),
+    h("td", null, h("div", { class: "row-actions" }, button(t(paused ? "qbit.resume" : "qbit.pause"), { class: "small", onclick: () => qbitAct(paused ? "/resume" : "/pause", { hashes: [x.hash] }) }, paused ? "play" : "stop"), button(t("qbit.remove"), { class: "small", onclick: () => qbitRemoveDialog(x) }, "trash"))),
+  );
+}
+
+function paintQbitList() {
+  const box = document.getElementById("qbit-list");
+  if (!box) return;
+  const all = qbitUi.torrents;
+  if (!all) return put(box, h("p", { class: "muted pad" }, qbitUi.server?.error ? "—" : "…"));
+  const inGroup = (x, f) => f === "all" || x.group === f || (f === "paused" && x.group === "finished");
+  const q = qbitUi.q.trim().toLowerCase();
+  const shown = all.filter((x) => inGroup(x, qbitUi.filter) && (!q || x.name.toLowerCase().includes(q)));
+  document.querySelectorAll("#qbit-body [data-filter]").forEach((b) => {
+    const f = b.dataset.filter;
+    b.classList.toggle("active", f === qbitUi.filter);
+    b.textContent = `${t("qbit.filter." + f)} · ${all.filter((x) => inGroup(x, f)).length}`;
+  });
+  if (!shown.length) return put(box, h("p", { class: "muted pad" }, t(all.length ? "qbit.noneHere" : "qbit.none")));
+  put(box, h("div", { class: "table-wrap" }, h("table", null, h("thead", null, h("tr", null, h("th", null, t("qbit.col.name")), h("th", null, t("qbit.col.progress")), h("th", null, t("app.col.state")), h("th", null, t("qbit.col.speed")), h("th"))), h("tbody", null, shown.slice(0, 300).map(qbitRow)))), shown.length > 300 && h("p", { class: "muted small pad" }, t("qbit.firstOnly", { n: shown.length })));
+}
+
+function paintQbit(whole = true) {
+  const box = document.getElementById("qbit-body");
+  const x = qbitUi.server;
+  if (!box || !x) return;
+  const head = h(
+    "div",
+    { class: "tree-head" },
+    h("div", null, h("h1", null, x.name, " ", qbitChip(x)), h("p", { class: "meta" }, ["qBittorrent", x.version, x.url].filter(Boolean).join(" · ")), x.online && h("p", { class: "meta" }, `${qbitSpeeds(x.totals)} · ${t("qbit.activeOf", { n: x.totals.active, total: x.totals.total })}`)),
+    h("div", { class: "row-actions" }, h("a", { class: "btn", href: x.url, target: "_blank", rel: "noopener noreferrer" }, icon("external"), h("span", null, t("qbit.open"))), button(t("qbit.add"), { class: "primary", disabled: !x.online, onclick: () => qbitAddDialog() }, "plus"), h("button", { type: "button", class: "btn square", "aria-label": t("app.more"), onclick: (e) => qbitMenu(x, underButton(e.currentTarget)) }, icon("more"))),
+  );
+  // the field keeps its focus and the page its place: only what changed is drawn again
+  const standing = document.getElementById("qbit-head");
+  if (standing && !whole) {
+    put(standing, head);
+    put(document.getElementById("qbit-error"), x.error && h("p", { class: "card pad warn-box" }, qbitError(x), " ", t("pve.since", { ago: ago(x.error.since) })));
+    return paintQbitList();
+  }
+  const search = h("input", { type: "search", placeholder: t("qbit.search"), value: qbitUi.q, oninput: (e) => ((qbitUi.q = e.target.value), paintQbitList()) });
+  put(
+    box,
+    qbitCrumbs(x.name),
+    h("section", { class: "card", id: "qbit-head" }, head),
+    h("div", { id: "qbit-error" }, x.error && h("p", { class: "card pad warn-box" }, qbitError(x), " ", t("pve.since", { ago: ago(x.error.since) }))),
+    h(
+      "section",
+      { class: "card" },
+      h("div", { class: "qbit-tools" }, h("div", { class: "seg" }, QBIT_FILTERS.map((f) => h("button", { type: "button", class: "btn small", "data-filter": f, onclick: () => ((qbitUi.filter = f), paintQbitList()) }, t("qbit.filter." + f)))), search),
+      h("div", { id: "qbit-list" }),
+    ),
+  );
+  paintQbitList();
+}
+
+function qbitMenu(x, at) {
+  menuAt(at, menuHeader(x.name, x.url, "download"), [
+    { label: t("qbit.torrents"), icon: "download", href: `#/qbit/${x.id}` },
+    { label: t("qbit.open"), icon: "external", run: () => window.open(x.url, "_blank", "noopener") },
+    { label: t("qbit.change"), icon: "edit", run: () => qbitDialog(x) },
+    { label: t("qbit.disconnect"), icon: "trash", danger: true, run: () => qbitDisconnectDialog(x) },
+  ]);
+}
+
+function qbitDisconnectDialog(x) {
+  let dialog;
+  dialog = openDialog(
+    "confirm",
+    h("h2", { class: "wrap" }, t("qbit.disconnectTitle", { name: x.name })),
+    h("p", { class: "muted" }, t("qbit.disconnectLead")),
+    h("footer", null, closeButton(() => dialog, t("common.cancel")), button(t("qbit.disconnect"), { class: "danger", onclick: async () => {
+        try {
+          await api("DELETE", `/api/qbit/${x.id}`);
+          dialog.close();
+          await refresh();
+          go("#/integrations");
+        } catch (e) {
+          toast(errorText(e), "error");
+        }
+      } }, "trash")),
+  );
+}
+
+function qbitRemoveDialog(x) {
+  const withData = h("input", { type: "checkbox" });
+  let dialog;
+  dialog = openDialog(
+    "confirm",
+    h("h2", { class: "wrap" }, t("qbit.removeTitle", { name: x.name })),
+    h("p", { class: "muted" }, t("qbit.removeLead")),
+    h("label", { class: "check" }, withData, h("span", null, t("qbit.removeData"))),
+    h("p", { class: "muted small" }, t("qbit.removeDataHint")),
+    h("footer", null, closeButton(() => dialog, t("common.cancel")), button(t("qbit.remove"), { class: "danger", onclick: async () => {
+        dialog.close();
+        await qbitAct("/remove", { hashes: [x.hash], withData: withData.checked });
+      } }, "trash")),
+  );
+}
+
+function qbitDialog(old = null, address = "") {
+  const name = h("input", { value: old?.name ?? "", placeholder: "qBittorrent", maxLength: 40 });
+  const url = h("input", { value: old?.url ?? address, placeholder: "192.168.1.5:8080", required: true, autocapitalize: "none", spellcheck: false, class: "mono" });
+  const user = h("input", { value: old?.user ?? "admin", autocapitalize: "none", spellcheck: false, autocomplete: "off", name: "qbit-user" });
+  const password = h("input", { type: "password", autocomplete: "new-password", name: "qbit-password", placeholder: old ? t("qbit.passwordKept") : "" });
+  const error = h("p", { class: "error", role: "alert" });
+  let dialog;
+  const send = async (e) => {
+    e.preventDefault();
+    error.textContent = "";
+    const submit = dialog.querySelector("button[type=submit]");
+    submit.disabled = true;
+    try {
+      const data = { name: name.value, url: url.value, user: user.value, password: password.value };
+      const saved = old ? await api("PATCH", `/api/qbit/${old.id}`, data) : await api("POST", "/api/qbit", data);
+      dialog.close();
+      toast(t(old ? "qbit.changed" : "qbit.added", { name: saved.name }));
+      void refresh();
+      if (!old) go(`#/qbit/${saved.id}`);
+      else if (state.route.view === "qbit") void loadQbit();
+      else void loadIntegrations();
+    } catch (err) {
+      error.textContent = errorText(err);
+    }
+    submit.disabled = false;
+  };
+  dialog = openDialog(
+    "wide",
+    h(
+      "form",
+      { class: "stack", onsubmit: send },
+      h("header", null, h("h2", { class: "grow" }, old ? t("qbit.changeTitle", { name: old.name }) : t("qbit.addTitle")), closeX(() => dialog)),
+      !old && h("p", null, t("qbit.addLead")),
+      field(t("qbit.url"), url, t("qbit.urlHint")),
+      h("div", { class: "form-pair" }, field(t("qbit.user"), user), field(t("qbit.password"), password)),
+      h("p", { class: "muted small" }, t("qbit.passwordHint")),
+      field(t("qbit.name"), name),
+      error,
+      h("footer", null, closeButton(() => dialog, t("common.cancel")), h("button", { type: "submit", class: "btn primary" }, h("span", null, t(old ? "ha.save" : "integrations.connectIt")))),
+    ),
+  );
+}
+
+function qbitAddDialog() {
+  const links = h("textarea", { rows: 4, class: "mono small", spellcheck: false, placeholder: "magnet:?xt=urn:btih:…" });
+  const file = h("input", { type: "file", accept: ".torrent,application/x-bittorrent" });
+  const error = h("p", { class: "error", role: "alert" });
+  let dialog;
+  const send = async (e) => {
+    e.preventDefault();
+    error.textContent = "";
+    const picked = file.files?.[0];
+    try {
+      const data = picked ? { file: btoa(Array.from(new Uint8Array(await picked.arrayBuffer()), (b) => String.fromCharCode(b)).join("")) } : { links: links.value };
+      await api("POST", `/api/qbit/${qbitUi.server.id}/torrents`, data);
+      dialog.close();
+      toast(t("qbit.addedTorrent"));
+      setTimeout(loadQbit, 800);
+    } catch (err) {
+      error.textContent = errorText(err);
+    }
+  };
+  dialog = openDialog(
+    "wide",
+    h(
+      "form",
+      { class: "stack", onsubmit: send },
+      h("header", null, h("h2", { class: "grow" }, t("qbit.add")), closeX(() => dialog)),
+      field(t("qbit.links"), links, t("qbit.linksHint")),
+      field(t("qbit.file"), file),
+      error,
+      h("footer", null, closeButton(() => dialog, t("common.cancel")), h("button", { type: "submit", class: "btn primary" }, h("span", null, t("qbit.addIt")))),
+    ),
   );
 }
 
@@ -4751,7 +5504,7 @@ function removeHaDialog(x) {
         try {
           await api("DELETE", `/api/ha/${x.id}`);
           dialog.close();
-          go("#/machines");
+          go("#/integrations");
         } catch (e) {
           toast(errorText(e), "error");
         }
@@ -4760,11 +5513,11 @@ function removeHaDialog(x) {
 }
 
 /** Adding a server, or giving it a new address or token: by a person's sign-in or a token pasted */
-function haDialog(old = null) {
+function haDialog(old = null, address = "") {
   let mode = "login";
   let flow = null;
   const name = h("input", { value: old?.name ?? "", placeholder: "Home Assistant", maxLength: 40 });
-  const url = h("input", { value: old?.url ?? "", placeholder: "192.168.1.5", required: true, autocapitalize: "none", spellcheck: false, class: "mono" });
+  const url = h("input", { value: old?.url ?? address, placeholder: "192.168.1.5", required: true, autocapitalize: "none", spellcheck: false, class: "mono" });
   const user = h("input", { autocapitalize: "none", spellcheck: false, autocomplete: "off", name: "ha-user", required: !old });
   const password = h("input", { type: "password", autocomplete: "new-password", name: "ha-password", required: !old });
   const code = h("input", { inputmode: "numeric", autocomplete: "one-time-code", maxLength: 8, class: "mono" });
@@ -4800,8 +5553,9 @@ function haDialog(old = null) {
       const saved = old ? await api("PATCH", `/api/ha/${old.id}`, data) : await api("POST", "/api/ha", data);
       dialog.close();
       toast(t(old ? "ha.changed" : "ha.added", { name: saved.name }));
-      if (old) void loadHa();
-      else go(`#/ha/${saved.id}`);
+      if (!old) go(`#/ha/${saved.id}`);
+      else if (state.route.view === "ha") void loadHa();
+      else void loadIntegrations();
     } catch (err) {
       if (err.code === "ha.needCode" || err.code === "ha.badCode") {
         flow = err.detail.flow;
@@ -4833,14 +5587,15 @@ function haDialog(old = null) {
   if (old) return;
   // what answers on the home network, and Home Assistant installed here from the store
   const chip = (label, address) => h("button", { type: "button", class: "chip-btn", onclick: () => ((url.value = address), user.focus()) }, icon("home"), h("span", null, label), h("span", { class: "muted mono small" }, " " + address.replace(/^https?:\/\//, "")));
-  const here = (state.overview?.apps ?? []).some((a) => a.name === "home-assistant") ? `http://${location.hostname}:8123` : null;
+  const isHa = (state.overview?.apps ?? []).some((a) => a.name === "home-assistant");
   put(found, h("span", { class: "muted small" }, t("ha.looking")));
   api("GET", "/api/ha/found").then(
-    ({ found: list }) => {
+    ({ found: list, address: home }) => {
+      const here = isHa && `http://${home || location.hostname}:8123`;
       const fresh = list.filter((f) => !f.known && f.url !== here);
       put(found, here && chip(t("ha.foundHere"), here), fresh.map((f) => chip(f.name, f.url)), !here && !fresh.length && h("span", { class: "muted small" }, t("ha.foundNone")));
     },
-    () => put(found, here && chip(t("ha.foundHere"), here)),
+    () => put(found, isHa && chip(t("ha.foundHere"), `http://${location.hostname}:8123`)),
   );
 }
 
@@ -11248,6 +12003,7 @@ const SECTIONS = [
   { id: "apps", icon: "grid", group: "apps", admin: true },
   { id: "stores", icon: "store", group: "apps", admin: true },
   { id: "docker", icon: "box", group: "apps", admin: true },
+  { id: "integrations", icon: "link", group: "apps", admin: true },
   { id: "storage", icon: "disk", group: "storage", admin: true },
   { id: "shares", icon: "share", group: "storage", admin: true },
   { id: "places", icon: "network", group: "storage", admin: true },
@@ -11785,6 +12541,7 @@ function settingsSection(section) {
   if (section === "remote") return remoteSection();
   if (section === "agents") return agentsSection();
   if (section === "assistant") return assistantSection();
+  if (section === "integrations") return integrationsBody(false);
   if (section === "stores") {
     const stores = state.store?.stores ?? [];
     return [
@@ -16975,7 +17732,9 @@ function assistantStarts() {
   const here =
     v === "machines" || v === "machine" || v === "proxmox" ? ["servers.room", "servers.backups", "servers.away"]
     : v === "containers" ? ["containers.use", "containers.backups"]
-    : v === "ha" ? ["ha.batteries", "ha.updates"]
+    : v === "qbit" ? ["qbit.stuck", "qbit.room"]
+    : v === "frigate" ? ["frigate.working", "frigate.night"]
+    : v === "ha" || v === "integrations" ? ["ha.batteries", "ha.updates"]
     : v === "app" ? ["app.slow", "app.update"]
     : v === "store" ? ["store.photos", "store.similar"]
     : v === "settings" && STORAGE_SECTIONS.includes(section) ? ["storage.clean", "storage.dying", "storage.protected"]

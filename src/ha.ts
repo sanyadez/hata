@@ -18,7 +18,7 @@ export const BATTERY_LOW = 20;
  * The address of Home Assistant as typed — `192.168.1.5`, `homeassistant.local:8123`, `https://ha.example.com`
  * — as the origin its API is reached at. Without a scheme it is plain HTTP on 8123, as Home Assistant comes.
  */
-export function cleanUrl(value: unknown): string | null {
+export function cleanUrl(value: unknown, port = "8123"): string | null {
   if (typeof value !== "string") return null;
   let text = value.trim().replace(/\/+$/, "");
   if (!text || /\s/.test(text)) return null;
@@ -32,7 +32,7 @@ export function cleanUrl(value: unknown): string | null {
   }
   if (url.protocol !== "http:" && url.protocol !== "https:") return null;
   if (url.username || url.password || (url.pathname !== "/" && url.pathname !== "") || url.search) return null;
-  if (bare && !url.port) url.port = "8123";
+  if (bare && !url.port) url.port = port;
   return url.origin;
 }
 
