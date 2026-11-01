@@ -1233,18 +1233,17 @@ function renderSystem() {
   paintTrend(s.trend);
 }
 
-// --- Dashboard: tiles, groups, folders of tiles -------------------------------------------------
+// --- Home: tiles and folders of tiles --------------------------------------------------------------
 
-/** `folder` — the open folder of tiles; `drag` — what is in the air; `widgets` — the blocks of the page */
-const homeUi = { folder: null, drag: null, stale: false, widgets: null };
+/** `folder` — the open folder of tiles; `widgets` — the blocks of the page */
+const homeUi = { folder: null, widgets: null };
 
+/** What a card is called in the layout: blocks and tiles alike */
 const tileKey = (item) => item.type + ":" + (item.type === "app" ? item.name : item.type === "files" ? item.path : item.type === "ha" ? `${item.server}/${item.entity}` : item.id);
 /** The "Add" tile: a doorway, which is moved about but never put into a folder */
 const isAddTile = (item) => item.type === "builtin" && item.id === "add";
 /** What does not go into a folder: "Add", and a widget, which is as large as the page lets it be */
 const staysOut = (item) => isAddTile(item) || item.type === "widget";
-/** The classes of a tile larger than one cell */
-const sizeClass = (item) => ((item.type === "widget" || item.type === "ha") && item.size ? `size-${item.size}` : "");
 const newId = () => Array.from(crypto.getRandomValues(new Uint8Array(6)), (byte) => byte.toString(16).padStart(2, "0")).join("");
 const linkHost = (url) => {
   try {
@@ -1372,26 +1371,22 @@ function tile(item) {
   const key = tileKey(item);
   const main = haMain ??
     (item.type === "folder" || isAddTile(item)
-      ? h("button", { type: "button", class: "tile-main", onclick: () => homeUi.drag?.moved || (isAddTile(item) ? addDialog() : openFolder(item.id)) }, content)
+      ? h("button", { type: "button", class: "tile-main", onclick: () => (isAddTile(item) ? addDialog() : openFolder(item.id)) }, content)
       : h("a", { class: "tile-main", href, draggable: false, ...(external ? { target: "_blank", rel: "noopener noreferrer" } : {}) }, content));
-  if (!admin) return h("div", { class: `tile kind-${item.type} ${cls} ${sizeClass(item)}`, "data-key": key }, main, side);
-  // an administrator moves tiles by dragging them; a long press of a finger is the start of that, not a menu
-  return h("div", { class: `tile kind-${item.type} ${cls} ${sizeClass(item)} movable`, "data-key": key, onpointerdown: (e) => dragStart(e, item), oncontextmenu: (e) => {
-        if (homeUi.drag?.active) return e.preventDefault();
-        // a right click on an app is the same menu as its button, where the pointer is
+  if (!admin) return h("div", { class: `tile kind-${item.type} ${cls}`, "data-key": key }, main, side);
+  return h("div", { class: `tile kind-${item.type} ${cls}`, "data-key": key, oncontextmenu: (e) => {
         if (e.pointerType === "touch") return;
         e.preventDefault();
-        // "Add" offers what it adds, where the pointer is
-        if (isAddTile(item)) addDialog({ x: e.clientX, y: e.clientY });
-        else if (item.type === "app" && !target.machine) appTileMenu(target, null, { x: e.clientX, y: e.clientY });
-        else if (item.type === "ha") e.currentTarget.querySelector(".tile-open")?.click();
-        else tileMenu(item, { x: e.clientX, y: e.clientY });
+        const at = { x: e.clientX, y: e.clientY };
+        // "Add" offers what it adds; an app, the same menu as its button, where the pointer is
+        if (isAddTile(item)) menuAt(at, null, [{ label: t("home.add"), icon: "plus", run: () => addDialog() }, ...gridMenuEntries()]);
+        else if (item.type === "app" && !target.machine) appTileMenu(target, null, at);
+        else tileMenu(item, at);
       }, ondragstart: (e) => e.preventDefault() }, main, side);
 }
 
-// --- Widgets: what an integration shows right on the page, in one to four cells of the grid --------
+// --- Widgets: what an integration shows right on the page, as much as its cells let it -------------
 
-const WIDGET_SIZES = ["1x1", "2x1", "1x2", "2x2"];
 const widgetServer = (item) => (state.overview?.[item.source]?.servers ?? []).find((s) => s.id === item.server) ?? null;
 const widgetTitle = (item, x) => (item.view === "camera" ? item.camera : item.view === "events" ? t("frigate.events") : (x?.name ?? "qBittorrent"));
 /** A picture of a widget stays the same element across redraws and takes the next one only once it has come: no blinking */
@@ -1409,9 +1404,11 @@ function renewPicture(img, src) {
 }
 
 function torrentsWidget(item, x) {
-  const size = item.size ?? "1x1";
-  const rows = { "1x1": 0, "2x1": 1, "1x2": 3, "2x2": 5 }[size];
+  const { w = 1, h: tall = 1 } = item;
+  // what does not fit goes under "N more": a card has no scroll of its own
+  const rows = tall === 1 ? (w > 1 ? 1 : 0) : Math.max(1, Math.floor((tall * 140 - 148) / 38));
   const totals = x.totals;
+  const left = totals.total - Math.min(rows, x.top.length);
   return h(
     "a",
     { class: "tile-main widget-body", href: `#/qbit/${x.id}`, draggable: false },
@@ -1419,18 +1416,22 @@ function torrentsWidget(item, x) {
     x.online
       ? [
           h("span", { class: "widget-speeds" }, h("span", null, `↓ ${bytes(totals.down)}/s`), h("span", null, `↑ ${bytes(totals.up)}/s`)),
-          h("span", { class: "muted small" }, t("qbit.activeOf", { n: totals.active, total: totals.total })),
+          !(tall === 1 && rows > 0) && h("span", { class: "muted small" }, t("qbit.activeOf", { n: totals.active, total: totals.total })),
           rows > 0 && x.top.length > 0 && h("span", { class: "widget-torrents" }, x.top.slice(0, rows).map((one) => h("span", { class: "widget-torrent" }, h("span", { class: "small clip" }, one.name), meterBar(one.percent, "")))),
+          rows > 0 && left > 0 && h("span", { class: "muted small" }, t("attention.moreItems", { n: left })),
         ]
       : h("span", { class: "muted small" }, t("qbit.offline")),
   );
 }
 
+/** How tall a picture a camera's card asks for */
+const cameraHeight = (item) => Math.min(1080, (item.h ?? 1) * 240);
+
 function cameraWidget(item, x) {
   const c = x.cameras.find((one) => one.name === item.camera);
   const key = `camera:${item.id}`;
-  const height = item.size === "2x2" || item.size === "1x2" ? 480 : 240;
-  const open = () => homeUi.drag?.moved || (c && cameraDialog(x, c));
+  const height = cameraHeight(item);
+  const open = () => c && cameraDialog(x, c);
   return h(
     "button",
     { type: "button", class: "tile-main widget-picture", onclick: open },
@@ -1440,15 +1441,20 @@ function cameraWidget(item, x) {
 }
 
 function eventsWidget(item, x) {
-  const count = { "1x1": 1, "2x1": 2, "1x2": 2, "2x2": 4 }[item.size ?? "1x1"];
-  const latest = x.latest.slice(0, count);
-  return h(
+  const cols = item.w ?? 1;
+  const latest = x.latest.slice(0, cols * (item.h ?? 1));
+  const el = h(
     "a",
-    { class: `tile-main widget-events shows-${count} ${item.size === "1x2" ? "tall" : ""}`, href: `#/frigate/${x.id}`, draggable: false },
+    { class: "tile-main widget-events", href: `#/frigate/${x.id}`, draggable: false },
     latest.length
       ? latest.map((e) => h("span", { class: "widget-picture", title: `${eventWords(e)} · ${e.camera} · ${new Date(e.start).toLocaleString(state.lang)}` }, widgetPicture(`event:${e.id}`, eventPicture(x.id, e, "thumbnail"), e.label), h("span", { class: "widget-caption" }, h("span", { class: "clip" }, e.label), h("span", { class: "muted" }, ago(e.start)))))
       : h("span", { class: "widget-body" }, h("span", { class: "widget-head" }, tileIcon(item), h("span", { class: "widget-title clip" }, t("frigate.events"))), h("span", { class: "muted small" }, t("frigate.none"))),
   );
+  if (latest.length) {
+    el.style.gridTemplateColumns = `repeat(${Math.min(cols, latest.length)}, minmax(0, 1fr))`;
+    el.style.gridTemplateRows = `repeat(${Math.ceil(latest.length / cols)}, minmax(0, 1fr))`;
+  }
+  return el;
 }
 
 function widgetTile(item, x) {
@@ -1456,8 +1462,7 @@ function widgetTile(item, x) {
   const title = tileTitle(item);
   return h(
     "div",
-    { class: `tile kind-widget view-${item.view} ${sizeClass(item)} movable`, "data-key": tileKey(item), onpointerdown: (e) => dragStart(e, item), oncontextmenu: (e) => {
-        if (homeUi.drag?.active) return e.preventDefault();
+    { class: `tile kind-widget view-${item.view}`, "data-key": tileKey(item), oncontextmenu: (e) => {
         if (e.pointerType === "touch") return;
         e.preventDefault();
         tileMenu(item, { x: e.clientX, y: e.clientY });
@@ -1469,102 +1474,312 @@ function widgetTile(item, x) {
 
 /** The widgets on the page follow their servers without the page being drawn again */
 async function widgetsTick() {
-  if (state.route?.view !== "home" || document.hidden || homeUi.drag || !isAdmin()) return;
-  const items = (state.overview?.dashboard?.groups ?? []).flatMap((group) => group.items).filter((item) => item.type === "widget");
+  if (state.route?.view !== "home" || document.hidden || gridUi.drag || !isAdmin()) return;
+  const items = (state.overview?.dashboard?.cards ?? []).filter((item) => item.type === "widget");
   if (!items.length) return;
   const fresh = await api("GET", "/api/widgets").catch(() => null);
-  if (!fresh || state.route.view !== "home" || homeUi.drag) return;
+  if (!fresh || state.route.view !== "home" || gridUi.drag) return;
   state.overview.qbit.servers = fresh.qbit;
   state.overview.frigate.servers = fresh.frigate;
   for (const item of items) {
+    const sized = { ...item, ...gridUi.at?.[tileKey(item)] };
     const old = document.querySelector(`.tile[data-key="widget:${item.id}"]`);
-    const made = old && tile(item);
+    const made = old && tile(sized);
     if (made) old.replaceWith(made);
     const x = widgetServer(item);
     const c = item.view === "camera" && x?.cameras.find((one) => one.name === item.camera);
-    if (c?.enabled && x.online && widgetPictures.has(`camera:${item.id}`)) renewPicture(widgetPictures.get(`camera:${item.id}`), cameraPicture(x.id, c.name, item.size === "2x2" || item.size === "1x2" ? 480 : 240, Date.now()));
+    if (c?.enabled && x.online && widgetPictures.has(`camera:${item.id}`)) renewPicture(widgetPictures.get(`camera:${item.id}`), cameraPicture(x.id, c.name, cameraHeight(sized), Date.now()));
   }
 }
 setInterval(() => void widgetsTick(), 10_000);
 
-/** Four small pictures of the grid: the one chosen is the tile's size */
-function sizePicker(current, pick) {
-  const box = h("div", { class: "size-picker", role: "group", "aria-label": t("home.size") });
-  const draw = (chosen) =>
-    put(box, WIDGET_SIZES.map((size) => {
-      const [w, hi] = size.split("x");
-      const mark = h("span", { class: `size-mark w${w} h${hi}` });
-      return h("button", { type: "button", class: "size-choice" + (size === chosen ? " active" : ""), "aria-pressed": size === chosen ? "true" : "false", onclick: () => (draw(size), pick(size)) }, h("span", { class: "size-cells" }, mark), h("span", { class: "small" }, `${w}×${hi}`));
-    }));
-  draw(current);
-  return box;
+// --- The grid of Home: every card has a place and a size; they change only while editing the grid ---
+
+const gridUi = { at: null, arranging: false, undo: [], entry: null, drag: null };
+
+const cardKind = (card) => (card.type === "block" ? (card.id.startsWith("machine:") ? "machine" : card.id) : card.type === "widget" ? card.view : card.type);
+const boxOf = ({ x, y, w, h: tall }) => ({ x, y, w, h: tall });
+const gridOverlaps = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
+
+/** The first free place from the top: nothing already placed moves */
+function gridFit(taken, w, tall) {
+  const cols = state.overview.grid.cols;
+  for (let y = 0; ; y++) for (let x = 0; x + w <= cols; x++) if (!taken.some((box) => gridOverlaps({ x, y, w, h: tall }, box))) return { x, y, w, h: tall };
 }
 
-function sizeDialog(item) {
-  const key = tileKey(item);
-  let dialog;
-  dialog = openDialog(
-    "confirm",
-    h("h2", { class: "wrap" }, t("home.sizeOf", { name: tileTitle(item) })),
-    h("p", { class: "muted small" }, t("home.sizeHint")),
-    sizePicker(item.size ?? "1x1", (size) => {
-      widgetPictures.delete(`camera:${item.id}`);
-      changeLayout((layout) => {
-        const at = locate(layout, key);
-        if (!at) return false;
-        if (size === "1x1") delete at.item.size;
-        else at.item.size = size;
-      });
-    }),
-    h("footer", null, closeButton(() => dialog, t("common.close"))),
-  );
+/** A new card on a copy of the layout, of the size its kind first takes */
+function addCard(layout, item) {
+  const [w, tall] = state.overview.grid.first[cardKind(item)] ?? [1, 1];
+  layout.cards.push({ ...item, ...gridFit(layout.cards, w, tall) });
 }
 
-/** A new widget: what it shows, of the integrations connected, and how large */
-function widgetDialog() {
-  const choices = [
-    ...(state.overview.qbit?.servers ?? []).map((x) => ({ source: "qbit", server: x.id, view: "torrents", label: `${x.name} — ${t("qbit.torrents")}`, size: "2x1" })),
-    ...(state.overview.frigate?.servers ?? []).flatMap((x) => [{ source: "frigate", server: x.id, view: "events", label: `${x.name} — ${t("frigate.events")}`, size: "2x2" }, ...x.cameras.map((c) => ({ source: "frigate", server: x.id, view: "camera", camera: c.name, label: `${x.name} — ${t("widget.camera", { name: c.name })}`, size: "2x1" }))]),
-  ];
-  if (!choices.length) return;
-  let size = choices[0].size;
-  const what = h("select", null, choices.map((c, i) => h("option", { value: String(i) }, c.label)));
-  const sizes = h("div");
-  const paint = () => put(sizes, sizePicker(size, (next) => (size = next)));
-  what.addEventListener("change", () => ((size = choices[Number(what.value)].size), paint()));
-  paint();
-  let dialog;
-  dialog = openDialog(
-    "wide",
-    h("header", null, h("h2", { class: "grow" }, t("widget.title")), closeX(() => dialog)),
-    field(t("widget.what"), what),
-    field(t("home.size"), sizes, t("home.sizeHint")),
-    h("footer", null, closeButton(() => dialog, t("common.cancel")), button(t("widget.add"), { class: "primary", onclick: () => {
-        const { label: _label, size: _size, ...chosen } = choices[Number(what.value)];
-        changeLayout((layout) => {
-          const first = layout.groups[0] ?? (layout.groups.push({ id: newId(), title: "", items: [] }), layout.groups[0]);
-          const at = first.items.findIndex(isAddTile);
-          first.items.splice(at < 0 ? first.items.length : at, 0, { type: "widget", id: newId(), ...chosen, ...(size === "1x1" ? {} : { size }) });
-        });
-        dialog.close();
-      } }, "plus")),
-  );
+/** A card put somewhere: what it covers goes down, and whatever that covers; nothing rises, so an empty place stays */
+function gridPlace(base, key, box) {
+  const at = structuredClone(base);
+  at[key] = box;
+  const queue = [key];
+  while (queue.length) {
+    const by = queue.shift();
+    for (const other of Object.keys(at)) {
+      if (other === key || other === by || !gridOverlaps(at[by], at[other])) continue;
+      at[other].y = at[by].y + at[by].h;
+      queue.push(other);
+    }
+  }
+  return at;
 }
+
+/** Places as the layout has them; while editing, what came or went meanwhile is taken in and the rest stays */
+function gridLoad() {
+  const cards = state.overview.dashboard.cards;
+  const at = {};
+  if (gridUi.arranging) for (const card of cards) if (gridUi.at?.[tileKey(card)]) at[tileKey(card)] = gridUi.at[tileKey(card)];
+  for (const card of cards) at[tileKey(card)] ??= gridUi.arranging ? gridFit(Object.values(at), card.w, card.h) : boxOf(card);
+  gridUi.at = at;
+}
+
+const gridEdit = () => {
+  gridLoad();
+  Object.assign(gridUi, { entry: structuredClone(gridUi.at), undo: [], arranging: true });
+  paintGrid();
+};
+
+function gridDone() {
+  const at = gridUi.at;
+  gridUi.arranging = false;
+  changeLayout((layout) => {
+    for (const card of layout.cards) Object.assign(card, at[tileKey(card)]);
+  });
+}
+
+function gridCancel() {
+  gridUi.arranging = false;
+  paintGrid();
+}
+
+/** Everything laid out anew at its first size: the server finds places for cards with none */
+const gridReset = () =>
+  confirmAction({
+    title: t("grid.reset"),
+    lead: t("grid.resetLead"),
+    label: t("grid.reset"),
+    kind: "primary",
+    iconName: "refresh",
+    run: async () => {
+      const blocksFirst = [...state.overview.dashboard.cards].sort((a, b) => (b.type === "block") - (a.type === "block"));
+      await api("PUT", "/api/dashboard", { cards: blocksFirst.map(({ x: _x, y: _y, w: _w, h: _h, ...item }) => item) });
+      await refresh();
+    },
+  });
+
+/** The entries of the grid in the menus of Home; a screen narrower than the grid lays it out by itself */
+const gridMenuEntries = () => (!isAdmin() || gridUi.arranging || state.route.view !== "home" ? [] : [gridColumns() === state.overview.grid.cols && { label: t("grid.edit"), icon: "grid", run: gridEdit }, { label: t("grid.reset"), icon: "refresh", run: gridReset }].filter(Boolean));
+
+function gridBar() {
+  const box = document.getElementById("grid-bar");
+  if (!box) return;
+  const undo = () => ((gridUi.at = gridUi.undo.pop()), paintGrid());
+  box.hidden = !gridUi.arranging;
+  const head = document.getElementById("home-head");
+  if (head) head.hidden = gridUi.arranging;
+  put(box, gridUi.arranging && h("div", { class: "pg-bar" }, h("strong", null, t("grid.arranging")), h("span", { class: "muted small grow" }, t("grid.arrangingHint")), button(t("grid.undo"), { class: "small", disabled: !gridUi.undo.length, onclick: undo }, "refresh"), button(t("common.cancel"), { class: "small", onclick: gridCancel }), button(t("grid.done"), { class: "small primary", onclick: gridDone }, "check")));
+}
+
+const GRID_WIDE = 1000;
+const gridColumns = () => {
+  const width = document.getElementById("pg")?.clientWidth ?? innerWidth;
+  return width >= GRID_WIDE ? state.overview.grid.cols : width >= 640 ? 4 : 2;
+};
+
+function gridBody(card, box) {
+  const o = state.overview;
+  if (card.type !== "block") return tile({ ...card, ...box });
+  const id = card.id;
+  if (id.startsWith("machine:")) return machineBlock(id);
+  const el = homeUi.widgets[id];
+  if (id === "attention" && el) put(el, attentionBlock(o.attention));
+  if (id === "activity" && el) put(el, ...activityBody(o));
+  if (id === "adblock" && el) adblockBlock(el, o.adblock);
+  return el;
+}
+
+/** A list in a block shows what fits; the rest goes under its "N more" */
+function fitBlock(block) {
+  const list = block?.querySelector(".fits");
+  if (!list) return;
+  let left = 0;
+  const more = block.querySelector(".fits-more");
+  while (list.children.length > 1 && block.scrollHeight > block.clientHeight + 1) {
+    list.lastElementChild.remove();
+    left++;
+    if (more) {
+      more.hidden = false;
+      more.querySelector("span").textContent = t("attention.moreItems", { n: left });
+    }
+  }
+}
+
+function paintGrid() {
+  const pg = document.getElementById("pg");
+  if (!pg || !state.overview || gridUi.drag) return;
+  const cols = gridColumns();
+  const free = cols === state.overview.grid.cols;
+  if (!free) gridUi.arranging = false;
+  gridLoad();
+  gridBar();
+  pg.className = "pg" + (gridUi.arranging ? " arranging" : "") + (free ? "" : " flowing");
+  pg.style.setProperty("--pg-cols", String(cols));
+  const cards = state.overview.dashboard.cards;
+  const inOrder = free ? cards : [...cards].sort((a, b) => gridUi.at[tileKey(a)].y - gridUi.at[tileKey(b)].y || gridUi.at[tileKey(a)].x - gridUi.at[tileKey(b)].x);
+  // room to pull a card further down than anything stands yet
+  const rows = Math.max(0, ...Object.values(gridUi.at).map((b) => b.y + b.h)) + 6;
+  const cells = gridUi.arranging ? Array.from({ length: rows * cols }, (_, i) => {
+    const cell = h("div", { class: "pg-cell" });
+    cell.style.gridArea = `${Math.floor(i / cols) + 1} / ${(i % cols) + 1}`;
+    return cell;
+  }) : [];
+  put(pg, ...cells, ...inOrder.map((card) => gridCard(card, free)));
+  for (const id of ["attention", "activity"]) if (pg.contains(homeUi.widgets?.[id])) fitBlock(homeUi.widgets[id]);
+  renderSystem();
+}
+
+function gridPosition(el, box, free) {
+  el.style.gridColumn = free ? `${box.x + 1} / span ${box.w}` : `span ${Math.min(box.w, gridColumns())}`;
+  // on a phone the numbers are lines, with no graph: they need less height
+  const tall = gridColumns() === 2 && el.dataset.card === "block:stats" ? Math.min(box.h, 2) : box.h;
+  el.style.gridRow = free ? `${box.y + 1} / span ${box.h}` : `span ${tall}`;
+}
+
+function gridCard(card, free) {
+  const box = gridUi.at[tileKey(card)];
+  const body = gridBody(card, box);
+  if (!body) return null;
+  const el = h("div", { class: "pg-card", "data-card": tileKey(card) }, body, gridUi.arranging && ["n", "e", "s", "w", "ne", "se", "sw", "nw"].map((side) => h("span", { class: `pg-side pg-${side}`, "data-side": side })));
+  gridPosition(el, box, free);
+  if (gridUi.arranging) el.addEventListener("pointerdown", (e) => gridStart(e, card, el));
+  el.addEventListener("contextmenu", (e) => {
+    if (gridUi.arranging) return e.preventDefault();
+    if (card.type !== "block" || !isAdmin() || e.defaultPrevented || e.shiftKey || e.target.closest("a[href]")) return;
+    const picked = getSelection();
+    if (picked && !picked.isCollapsed && picked.containsNode(e.target, true)) return;
+    e.preventDefault();
+    menuAt({ x: e.clientX, y: e.clientY }, null, [...gridMenuEntries(), { label: t("home.removeBlock"), icon: "trash", danger: true, run: () => removeBlock(card.id) }]);
+  });
+  return el;
+}
+
+/** Moving a card by any part of it, or pulling one of its edges and corners */
+function gridStart(e, card, el) {
+  if (e.button !== 0) return;
+  const grip = e.target.closest(".pg-side");
+  const pg = document.getElementById("pg");
+  const rect = pg.getBoundingClientRect();
+  const gap = 12;
+  const cols = state.overview.grid.cols;
+  const cell = { w: (rect.width - gap * (cols - 1)) / cols + gap, h: 128 + gap };
+  const key = tileKey(card);
+  const box = gridUi.at[key];
+  const drag = { key, el, kind: cardKind(card), side: grip?.dataset.side ?? "", sx: e.clientX, sy: e.clientY, base: structuredClone(gridUi.at), moved: false, rect, cell, grabX: Math.floor((e.clientX - rect.left) / cell.w) - box.x, grabY: Math.floor((e.clientY - rect.top) / cell.h) - box.y };
+  gridUi.drag = drag;
+  const move = (ev) => ((drag.last = ev), gridMove(ev, drag));
+  // near the window's edge the page follows the pointer: a card can be pulled past what is on the screen
+  const follow = setInterval(() => {
+    if (!drag.last) return;
+    const y = drag.last.clientY;
+    const by = y > innerHeight - 70 ? 16 : y < 130 ? -16 : 0;
+    if (!by) return;
+    scrollBy(0, by);
+    gridMove(drag.last, drag);
+  }, 30);
+  const escape = (ev) => ev.key === "Escape" && end(ev);
+  const end = (ev) => {
+    clearInterval(follow);
+    removeEventListener("pointermove", move);
+    removeEventListener("pointerup", end);
+    removeEventListener("pointercancel", end);
+    removeEventListener("keydown", escape);
+    gridEnd(drag, ev.type !== "pointerup");
+  };
+  addEventListener("pointermove", move);
+  addEventListener("pointerup", end);
+  addEventListener("pointercancel", end);
+  addEventListener("keydown", escape);
+  e.preventDefault();
+}
+
+function gridMove(e, drag) {
+  if (!drag.moved) {
+    if (Math.hypot(e.clientX - drag.sx, e.clientY - drag.sy) < 6) return;
+    drag.moved = true;
+    drag.el.classList.add("pg-moving");
+  }
+  const old = drag.base[drag.key];
+  const { cols, limits } = state.overview.grid;
+  const [minW, minH, maxW, maxH] = limits[drag.kind];
+  let box;
+  // the scroll of the page counts: the grid's place is read again
+  const top = document.getElementById("pg").getBoundingClientRect().top;
+  if (drag.side) {
+    // the side pulled follows the pointer; the opposite one stays where it is
+    const col = Math.floor((e.clientX - drag.rect.left) / drag.cell.w);
+    const row = Math.max(0, Math.floor((e.clientY - top) / drag.cell.h));
+    let { x, y, w, h: tall } = old;
+    if (drag.side.includes("e")) w = Math.max(minW, Math.min(maxW, cols - old.x, col - old.x + 1));
+    if (drag.side.includes("s")) tall = Math.max(minH, Math.min(maxH, row - old.y + 1));
+    if (drag.side.includes("w")) {
+      const right = old.x + old.w;
+      w = Math.max(minW, Math.min(maxW, right, right - Math.max(0, col)));
+      x = right - w;
+    }
+    if (drag.side.includes("n")) {
+      const bottom = old.y + old.h;
+      tall = Math.max(minH, Math.min(maxH, bottom, bottom - row));
+      y = bottom - tall;
+    }
+    // a camera is never a strip
+    if (drag.kind === "camera" && tall < Math.ceil(w / 3)) {
+      const need = Math.ceil(w / 3);
+      if (drag.side.includes("n")) y = Math.max(0, y - (need - tall));
+      tall = need;
+    }
+    box = { x, y, w, h: tall };
+    gridHint(drag, box);
+  } else {
+    box = { ...old, x: Math.max(0, Math.min(cols - old.w, Math.floor((e.clientX - drag.rect.left) / drag.cell.w) - drag.grabX)), y: Math.max(0, Math.floor((e.clientY - top) / drag.cell.h) - drag.grabY) };
+  }
+  gridUi.at = gridPlace(drag.base, drag.key, box);
+  for (const el of document.querySelectorAll(".pg-card")) gridPosition(el, gridUi.at[el.dataset.card], true);
+}
+
+function gridHint(drag, box) {
+  const [minW, minH, maxW, maxH] = state.overview.grid.limits[drag.kind];
+  let hint = drag.el.querySelector(".pg-hint");
+  if (!hint) drag.el.append((hint = h("span", { class: "pg-hint" })));
+  hint.textContent = t("grid.hint", { size: `${box.w}×${box.h}`, min: `${minW}×${minH}`, max: `${maxW}×${maxH}` });
+}
+
+function gridEnd(drag, cancelled) {
+  gridUi.drag = null;
+  if (!drag.moved) return;
+  if (cancelled) gridUi.at = drag.base;
+  else gridUi.undo.push(drag.base);
+  paintGrid();
+}
+
+window.addEventListener("resize", () => state.route?.view === "home" && paintGrid());
 
 // --- Changing the layout: every change is made on a copy, shown at once and sent to the server ----
 
 const layoutCopy = () => structuredClone(state.overview.dashboard);
-const allFolders = (layout) => layout.groups.flatMap((group) => group.items.filter((item) => item.type === "folder"));
+const allFolders = (layout) => layout.cards.filter((item) => item.type === "folder");
 
-/** Where a tile is: its list, its place in it, the group and (inside one) the folder */
+/** Where a tile is: its list, its place in it and (inside one) the folder */
 function locate(layout, key) {
-  for (const group of layout.groups) {
-    for (const [index, item] of group.items.entries()) {
-      if (tileKey(item) === key) return { list: group.items, index, group, folder: null, item };
-      if (item.type !== "folder") continue;
-      const inner = item.items.findIndex((entry) => tileKey(entry) === key);
-      if (inner >= 0) return { list: item.items, index: inner, group, folder: item, item: item.items[inner] };
-    }
+  for (const [index, item] of layout.cards.entries()) {
+    if (tileKey(item) === key) return { list: layout.cards, index, folder: null, item };
+    if (item.type !== "folder") continue;
+    const inner = item.items.findIndex((entry) => tileKey(entry) === key);
+    if (inner >= 0) return { list: item.items, index: inner, folder: item, item: item.items[inner] };
   }
   return null;
 }
@@ -1574,7 +1789,7 @@ function takeTile(layout, key) {
   const at = locate(layout, key);
   if (!at) return null;
   at.list.splice(at.index, 1);
-  if (at.folder && !at.folder.items.length) at.group.items.splice(at.group.items.indexOf(at.folder), 1);
+  if (at.folder && !at.folder.items.length) layout.cards.splice(layout.cards.indexOf(at.folder), 1);
   return at.item;
 }
 
@@ -1589,54 +1804,32 @@ async function saveLayout(layout) {
   }
 }
 
-/** Moves a tile next to another (`before` / `after` its key), or to the end of a group or a folder */
-function moveTile(key, where) {
+const withoutBox = ({ x: _x, y: _y, w: _w, h: _h, ...item }) => item;
+
+/** Puts a tile into a folder of tiles */
+function intoFolder(key, id) {
   const layout = layoutCopy();
   const item = takeTile(layout, key);
-  if (!item) return;
-  if (where.before || where.after) {
-    const at = locate(layout, where.before ?? where.after);
-    if (!at || (at.folder && (item.type === "folder" || staysOut(item)))) return;
-    at.list.splice(at.index + (where.after ? 1 : 0), 0, item);
-  } else if (where.folder) {
-    const folder = allFolders(layout).find((f) => f.id === where.folder);
-    if (!folder || item.type === "folder" || staysOut(item)) return;
-    folder.items.push(item);
-  } else {
-    const group = layout.groups.find((g) => g.id === where.group) ?? layout.groups[0];
-    group.items.push(item);
-  }
+  const folder = allFolders(layout).find((f) => f.id === id);
+  if (!item || !folder || item.type === "folder" || staysOut(item)) return;
+  folder.items.push(withoutBox(item));
   return saveLayout(layout);
 }
 
-/** Two tiles become a folder where the second one was — what dropping one tile on another does; without a second, a folder of one */
-function makeFolder(key, ontoKey, title = "") {
+/** A new folder where the tile stands, with the tile in it */
+function makeFolder(key, title = "") {
   const layout = layoutCopy();
   const own = locate(layout, key);
-  if (!own || own.item.type === "folder" || staysOut(own.item)) return;
-  const folder = { type: "folder", id: newId(), title, items: [own.item] };
-  if (!ontoKey) {
-    if (own.folder) return;
-    own.list[own.index] = folder;
-    return saveLayout(layout);
-  }
-  takeTile(layout, key);
-  const at = locate(layout, ontoKey);
-  if (!at || at.folder || at.item.type === "folder" || staysOut(at.item)) return;
-  folder.items.unshift(at.item);
-  at.list[at.index] = folder;
+  if (!own || own.folder || own.item.type === "folder" || staysOut(own.item)) return;
+  own.list[own.index] = { type: "folder", id: newId(), title, items: [withoutBox(own.item)], ...boxOf(own.item) };
   return saveLayout(layout);
 }
 
-/** Takes a tile out of its folder and puts it right after the folder */
+/** Takes a tile out of its folder: it takes the first free place */
 function outOfFolder(key) {
   const layout = layoutCopy();
-  const at = locate(layout, key);
-  if (!at?.folder) return;
-  const after = at.group.items.indexOf(at.folder) + 1;
-  at.list.splice(at.index, 1);
-  at.group.items.splice(after, 0, at.item);
-  if (!at.folder.items.length) at.group.items.splice(after - 1, 1);
+  const item = takeTile(layout, key);
+  if (item) addCard(layout, item);
   return saveLayout(layout);
 }
 
@@ -1645,13 +1838,6 @@ function changeLayout(change) {
   if (change(layout) === false) return;
   return saveLayout(layout);
 }
-
-const newGroupDialog = (then) =>
-  nameDialog(t("home.newGroup"), "", t("files.create"), async (title) => {
-    const id = newId();
-    await changeLayout((layout) => void layout.groups.push({ id, title, items: [] }));
-    await then?.(id);
-  });
 
 function linkDialog(link) {
   const title = h("input", { value: link?.title ?? "", maxLength: 60, autocomplete: "off" });
@@ -1681,8 +1867,8 @@ function linkDialog(link) {
           dialog.close();
           await changeLayout((layout) => {
             const at = link && locate(layout, tileKey(link));
-            if (at) at.list[at.index] = made;
-            else layout.groups[0].items.push(made);
+            if (at) at.list[at.index] = { ...made, ...(at.folder ? {} : boxOf(at.item)) };
+            else addCard(layout, made);
           });
         },
       },
@@ -1712,7 +1898,7 @@ const renameFolderDialog = (folder) =>
     }),
   );
 
-/** Everything that can be done to a tile without dragging it */
+/** Everything that can be done to a tile */
 function tileMenu(item, point = null) {
   const key = tileKey(item);
   const layout = state.overview.dashboard;
@@ -1720,24 +1906,23 @@ function tileMenu(item, point = null) {
   if (!at) return;
   let dialog;
   const entry = (label, iconName, action, cls = "") => h("button", { type: "button", class: "menu-item " + cls, onclick: () => (dialog.close(), action()) }, icon(iconName), label);
-  const groupName = (group) => group.title || t("home.apps");
-  const neighbour = (step) => at.list[at.index + step];
   dialog = openDialog(
     point ? "menu dropdown" : "menu",
-    h("header", null, tileIcon(item), h("div", null, h("h2", { class: "clip" }, tileTitle(item)), h("span", { class: "muted small" }, at.folder ? at.folder.title || t("home.folder") : groupName(at.group)))),
+    h("header", null, tileIcon(item), h("div", null, h("h2", { class: "clip" }, tileTitle(item)), at.folder && h("span", { class: "muted small" }, at.folder.title || t("home.folder")))),
     item.type === "link" && entry(t("home.editLink"), "edit", () => linkDialog(item)),
+    item.type === "ha" && entry(t("ha.tile.more"), "sliders", () => haEntityDialog(item.server, tileTarget(item)?.state ?? { id: item.entity, name: item.entity, domain: item.entity.split(".")[0] }, item)),
     item.type === "ha" && tileTarget(item) && entry(t("ha.openThere"), "external", () => window.open(haEntityUrl(tileTarget(item).server, item.entity), "_blank", "noopener")),
     item.type === "folder" && entry(t("common.open"), "folder", () => openFolder(item.id)),
     item.type === "folder" && entry(t("files.rename"), "edit", () => renameFolderDialog(item)),
-    (item.type === "widget" || (item.type === "ha" && !at.folder)) && entry(t("home.size"), "grid", () => sizeDialog(item)),
-    neighbour(-1) && entry(t("home.moveEarlier"), "arrow", () => moveTile(key, { before: tileKey(neighbour(-1)) }), "flip"),
-    neighbour(1) && entry(t("home.moveLater"), "arrow", () => moveTile(key, { after: tileKey(neighbour(1)) })),
     at.folder && entry(t("home.outOfFolder"), "signout", () => outOfFolder(key)),
-    item.type !== "folder" && !staysOut(item) && allFolders(layout).filter((folder) => folder !== at.folder).map((folder) => entry(t("home.intoFolder", { name: folder.title || t("home.folder") }), "folder", () => moveTile(key, { folder: folder.id }))),
-    item.type !== "folder" && !staysOut(item) && !at.folder && entry(t("home.newFolder"), "plus", () => nameDialog(t("home.newFolder"), "", t("files.create"), (title) => makeFolder(key, null, title))),
-    layout.groups.filter((group) => group !== at.group || at.folder).map((group) => entry(t("home.toGroup", { name: groupName(group) }), "grid", () => moveTile(key, { group: group.id }))),
-    entry(t("home.toNewGroup"), "plus", () => newGroupDialog((id) => moveTile(key, { group: id }))),
-    item.type === "folder" && entry(t("home.ungroup"), "x", () => changeLayout((next) => void locate(next, key).list.splice(at.index, 1, ...item.items))),
+    item.type !== "folder" && !staysOut(item) && allFolders(layout).filter((folder) => folder !== at.folder).map((folder) => entry(t("home.intoFolder", { name: folder.title || t("home.folder") }), "folder", () => intoFolder(key, folder.id))),
+    item.type !== "folder" && !staysOut(item) && !at.folder && item.type !== "builtin" && entry(t("home.newFolder"), "plus", () => nameDialog(t("home.newFolder"), "", t("files.create"), (title) => makeFolder(key, title))),
+    !at.folder && gridMenuEntries().map((one) => entry(one.label, one.icon, one.run)),
+    item.type === "folder" && entry(t("home.ungroup"), "x", () => changeLayout((next) => {
+      const { list, index, item: folder } = locate(next, key);
+      list.splice(index, 1);
+      for (const inner of folder.items) addCard(next, inner);
+    })),
     item.type === "link" && entry(t("home.removeLink"), "trash", () => changeLayout((next) => void takeTile(next, key)), "danger"),
     item.type === "ha" && entry(t("ha.offHome"), "trash", () => changeLayout((next) => void takeTile(next, key)), "danger"),
     item.type === "widget" && entry(t("ha.offHome"), "trash", () => changeLayout((next) => void takeTile(next, key)), "danger"),
@@ -1746,56 +1931,104 @@ function tileMenu(item, point = null) {
   if (point) placeAt(dialog, point);
 }
 
-function groupHead(group, index, count) {
-  const layout = state.overview.dashboard;
-  const first = index === 0;
-  const title = group.title || t("home.apps");
-  const tool = (label, iconName, action, attrs = {}) => h("button", { type: "button", class: "icon-btn " + (attrs.class ?? ""), title: label, "aria-label": `${label}: ${title}`, disabled: attrs.disabled, onclick: action }, icon(iconName));
-  const tools = h(
-    "div",
-    { class: "group-tools" },
-    isAdmin() && [
-      tool(t("files.rename"), "edit", () => nameDialog(t("home.renameGroup"), title, t("files.rename"), (name) => changeLayout((next) => void (next.groups[index].title = name))), { class: "quiet" }),
-      // its tiles go to the group that takes its place at the top, or to the first one
-      layout.groups.length > 1 && tool(t("home.removeGroup"), "trash", () => changeLayout((next) => void next.groups[first ? 1 : 0].items.push(...next.groups.splice(index, 1)[0].items)), { class: "quiet" }),
-    ],
-  );
-  return h("div", { class: "section-head group-head" }, h("h2", null, h("span", { class: "clip" }, title), h("span", { class: "group-count" }, count)), tools);
+/** What can be put on Home, by sections, with a search over all of them */
+const addUi = { section: "machines", find: "" };
+
+function addSections() {
+  const o = state.overview;
+  const layout = () => o.dashboard;
+  const on = (key) => !!locate(state.overview.dashboard, key);
+  /** A row of what stands on Home or not; `found` — its card when there is one */
+  const card = (title, sub, lead, item, found = () => (on(tileKey(item)) ? tileKey(item) : null)) => ({
+    title,
+    sub,
+    lead,
+    placed: found,
+    add: () => changeLayout((next) => addCard(next, item)),
+    remove: () => changeLayout((next) => void takeTile(next, found())),
+  });
+  const action = (title, sub, lead, label, run) => ({ title, sub, lead, label, run });
+  const block = (id, sub) => card(blockTitle(id), sub, icon(BLOCKS[id]), { type: "block", id });
+  const widgetRow = (title, sub, lead, item) => card(title, sub, lead, { ...item, id: newId() }, () => {
+    const there = layout().cards.find((c) => c.type === "widget" && c.source === item.source && c.server === item.server && c.view === item.view && c.camera === item.camera);
+    return there ? tileKey(there) : null;
+  });
+  const pinned = () => (o.folders ?? []).map((folder) => folder.path);
+  const dot = (cls) => h("i", { class: "dot " + cls });
+  return [
+    { id: "apps", icon: "grid", rows: [action(t("home.addApp"), t("home.addAppHint"), icon("store"), t("common.open"), () => go("#/store")), o.importable > 0 && action(t("home.import"), t("home.importHint", { n: o.importable }), icon("download"), t("common.open"), () => go("#/import"))].filter(Boolean) },
+    {
+      id: "links",
+      icon: "link",
+      rows: [
+        action(t("home.addLinkItem"), t("home.addLinkHint"), icon("link"), t("home.add"), () => linkDialog()),
+        action(t("home.addDisk"), t("home.addDiskHint"), icon("disk"), t("home.add"), () => diskPickDialog(pinned())),
+        action(t("home.addFolder"), t("home.addFolderHint"), icon("folder"), t("home.add"), () => folderPicker({ title: t("home.addFolderTitle"), start: "", confirmLabel: t("home.addFolderHere"), allowed: (path) => !pinned().includes(path), action: (path) => pinFolder(path, true, false) })),
+        ...layout().cards.filter((c) => c.type === "link").map((c) => card(tileTitle(c), linkHost(c.url), icon("link"), c)),
+      ],
+    },
+    {
+      id: "machines",
+      icon: "server",
+      group: "state",
+      rows: [
+        { ...block("stats", o.system?.hostname ?? t("home.thisServer")), title: t("home.thisServer"), lead: dot("running") },
+        ...(o.machines ?? []).map((m) => card(m.name, [m.os, m.online ? t("machines.online") : t("machines.offline")].filter(Boolean).join(" · "), dot(m.online ? "running" : "stopped"), { type: "block", id: "machine:" + m.id })),
+      ],
+    },
+    { id: "overview", icon: "list", group: "state", rows: [block("attention", t("add.attentionHint")), block("activity", t("add.activityHint")), o.adblock && block("adblock", t("add.adblockHint"))].filter(Boolean) },
+    (o.ha?.servers ?? []).length > 0 && { id: "ha", icon: "home", group: "integrations", rows: [action(t("ha.pick.item"), t("ha.pick.hint"), icon("bulb"), t("add.choose"), () => haPickDialog())] },
+    (o.frigate?.servers ?? []).length > 0 && {
+      id: "frigate",
+      icon: "camera",
+      group: "integrations",
+      rows: o.frigate.servers.flatMap((x) => [
+        widgetRow(t("frigate.events"), x.name, icon("camera"), { type: "widget", source: "frigate", server: x.id, view: "events" }),
+        ...x.cameras.map((c) => widgetRow(c.name, `${x.name} · ${t("add.camera")}`, icon("camera"), { type: "widget", source: "frigate", server: x.id, view: "camera", camera: c.name })),
+      ]),
+    },
+    (o.qbit?.servers ?? []).length > 0 && { id: "qbit", icon: "download", group: "integrations", rows: o.qbit.servers.map((x) => widgetRow(x.name, t("qbit.torrents"), icon("download"), { type: "widget", source: "qbit", server: x.id, view: "torrents" })) },
+  ].filter(Boolean);
 }
 
-/** What can be put on the dashboard, to choose from */
-function addDialog(at = null) {
+function addDialog() {
   let dialog;
-  const entry = (label, hint, iconName, action) => h("button", { type: "button", class: "menu-item", onclick: () => (dialog.close(), action()) }, h("span", { class: "app-icon plus" }, icon(iconName)), h("span", { class: "tile-text" }, h("span", { class: "tile-name" }, label), h("span", { class: "muted small" }, hint)));
-  const pinned = () => (state.overview.folders ?? []).map((folder) => folder.path);
-  dialog = openDialog(
-    at ? "menu dropdown" : "menu",
-    h("header", null, h("h2", null, t("home.addTitle"))),
-    entry(t("home.addApp"), t("home.addAppHint"), "store", () => go("#/store")),
-    state.overview.importable > 0 && entry(t("home.import"), t("home.importHint", { n: state.overview.importable }), "download", () => go("#/import")),
-    (state.overview.ha?.servers ?? []).length > 0 && entry(t("ha.pick.item"), t("ha.pick.hint"), "bulb", () => haPickDialog()),
-    ((state.overview.qbit?.servers ?? []).length > 0 || (state.overview.frigate?.servers ?? []).length > 0) && entry(t("widget.title"), t("widget.hint"), "grid", () => widgetDialog()),
-    entry(t("home.addLinkItem"), t("home.addLinkHint"), "link", () => linkDialog()),
-    entry(t("home.addGroupItem"), t("home.addGroupHint"), "grid", () => newGroupDialog()),
-    state.overview.dashboard.widgets.hidden.map((id) =>
-      entry(blockTitle(id), t("home.addBlockHint"), BLOCKS[id].icon, () =>
-        changeLayout((layout) => {
-          layout.widgets.hidden = layout.widgets.hidden.filter((block) => block !== id);
-          layout.widgets[BLOCKS[id].zone].push(id);
-        }),
-      ),
-    ),
-    (state.overview.machines ?? []).filter((m) => !ZONES.some((name) => state.overview.dashboard.widgets[name].includes("machine:" + m.id))).map((m) =>
-      entry(t("home.machineBlock", { name: m.name }), t("home.machineBlockHint"), "server", () => changeLayout((layout) => layout.widgets.top.push("machine:" + m.id))),
-    ),
-    entry(t("home.addDisk"), t("home.addDiskHint"), "disk", () => diskPickDialog(pinned())),
-    entry(t("home.addFolder"), t("home.addFolderHint"), "folder", () => folderPicker({ title: t("home.addFolderTitle"), start: "", confirmLabel: t("home.addFolderHere"), allowed: (at) => !pinned().includes(at), action: (at) => pinFolder(at, true, false) })),
-  );
-  if (at) {
-    placeAt(dialog, at);
-    dialog.tabIndex = -1;
-    dialog.focus();
-  }
+  const nav = h("nav", { class: "cats fold add-nav" });
+  const main = h("div", { class: "add-main" });
+  const row = (one) => {
+    const there = one.placed?.();
+    return h(
+      "div",
+      { class: "add-row" },
+      h("span", { class: "add-lead" }, one.lead),
+      h("span", { class: "add-text" }, h("strong", { class: "clip" }, one.title), h("span", { class: "muted small clip" }, one.sub)),
+      one.placed
+        ? h("span", { class: "add-do" }, there && h("span", { class: "muted small add-on" }, icon("check", "ok"), t("add.onHome")), button(t(there ? "add.remove" : "home.add"), { class: "small", onclick: async () => (await (there ? one.remove() : one.add()), paint()) }, there ? null : "plus"))
+        : h("span", { class: "add-do" }, button(one.label, { class: "small", onclick: () => (dialog.close(), one.run()) })),
+    );
+  };
+  const counted = (section) => {
+    const rows = section.rows.filter((one) => one.placed);
+    return rows.length ? t("add.count", { n: rows.filter((one) => one.placed()).length, total: rows.length }) : "";
+  };
+  const paint = () => {
+    const sections = addSections();
+    if (!sections.some((one) => one.id === addUi.section)) addUi.section = "machines";
+    const entry = (section) => h("button", { type: "button", class: "cat" + (section.id === addUi.section && !addUi.find ? " active" : ""), onclick: () => ((addUi.section = section.id), (addUi.find = ""), (field.value = ""), paint()) }, h("span", { class: "add-cat" }, icon(section.icon), t("add.section." + section.id)), h("span", { class: "muted small" }, counted(section)));
+    const titled = (group) => [group && h("div", { class: "cat-title" }, t("add.group." + group)), sections.filter((one) => (one.group ?? "") === group).map(entry)];
+    put(nav, titled(""), titled("state"), titled("integrations"), h("a", { class: "cat", href: "#/integrations", onclick: () => dialog.close() }, h("span", { class: "add-cat" }, icon("plus"), t("add.connect"))));
+    const typed = addUi.find.trim().toLowerCase();
+    if (typed) {
+      const found = sections.flatMap((section) => section.rows.filter((one) => `${one.title} ${one.sub}`.toLowerCase().includes(typed)));
+      return put(main, found.length ? found.map(row) : h("p", { class: "muted add-none" }, t("add.none", { text: addUi.find.trim() })));
+    }
+    const section = sections.find((one) => one.id === addUi.section);
+    put(main, h("div", { class: "add-head" }, h("h3", null, t("add.section." + section.id)), h("p", { class: "muted small" }, t("add.lead." + section.id))), section.rows.map(row));
+  };
+  const field = h("input", { type: "search", placeholder: t("add.find"), "aria-label": t("add.find"), value: addUi.find, autocomplete: "off", oninput: () => ((addUi.find = field.value), paint()) });
+  dialog = openDialog("xwide add-dialog", h("header", null, h("h2", { class: "grow" }, t("home.addTitle")), closeX(() => dialog)), h("label", { class: "add-find" }, icon("search"), field), h("div", { class: "add-body" }, nav, main));
+  paint();
+  field.focus();
 }
 
 /** The disks and network places of the server, to put one on the dashboard: its tile says how full it is */
@@ -1827,37 +2060,6 @@ async function diskPickDialog(pinned) {
   );
 }
 
-function renderDashboard(box) {
-  const o = state.overview;
-  const admin = isAdmin();
-  const groups = o.dashboard.groups;
-  put(
-    box,
-    groups.map((group, index) => {
-      const tiles = group.items.map(tile).filter(Boolean);
-      // a group with nothing in it for this user is not theirs to see
-      if (!tiles.length && !admin) return null;
-      const head = groupHead(group, index, tiles.filter((el) => !el.classList.contains("add")).length);
-      if (admin && groups.length > 1) {
-        head.classList.add("handle");
-        head.addEventListener("pointerdown", (e) => dragStart(e, group.id, GROUP_DRAG, head.parentElement));
-      }
-      return h(
-        "div",
-        { class: "group", "data-group-id": group.id },
-        head,
-        h(
-          "div",
-          { class: "tiles", "data-group": group.id },
-          tiles,
-          admin && !tiles.length && h("p", { class: "muted small drop-hint" }, t("home.emptyGroup")),
-        ),
-      );
-    }),
-  );
-  renderFolder();
-}
-
 // --- A folder of tiles, opened ----------------------------------------------------------------------
 
 function openFolder(id) {
@@ -1865,7 +2067,7 @@ function openFolder(id) {
   const body = h("div", { class: "tiles", "data-folder": id });
   const head = h("h2", { class: "clip grow" });
   const rename = h("button", { type: "button", class: "icon-btn", title: t("files.rename"), "aria-label": t("files.rename"), onclick: () => renameFolderDialog(homeUi.folder.item) }, icon("edit"));
-  const dialog = openDialog("wide tile-folder", h("header", null, head, rename, closeX(() => dialog)), body, h("p", { class: "muted small drag-out" }, t("home.dragOut")));
+  const dialog = openDialog("wide tile-folder", h("header", null, head, rename, closeX(() => dialog)), body);
   dialog.addEventListener("close", () => (homeUi.folder = null));
   // a tile that leads somewhere takes the folder off the screen
   body.addEventListener("click", (e) => e.target.closest("a") && dialog.close());
@@ -1882,262 +2084,7 @@ function renderFolder() {
   open.item = item;
   open.head.textContent = item.title || t("home.folder");
   open.rename.hidden = !isAdmin();
-  open.dialog.classList.toggle("movable", isAdmin());
   open.body.replaceChildren(...tiles);
-}
-
-// --- Dragging a tile (mouse, pen and finger alike) -------------------------------------------------
-
-const DROP_CLASSES = ["drop-into"];
-
-/**
- * A press on something that can be moved — a tile, a group (by its heading), a block of the dashboard:
- * a mouse drags once it moves, a finger after holding still — moving first is scrolling. `kind` says
- * where it may land (`find`) and what a drop does (`drop`). What is dragged stays in the page as its own
- * outline and moves there as the pointer goes, the others making room: the page shows how it will be.
- */
-function dragStart(e, item, kind = TILE_DRAG, el = e.currentTarget) {
-  if (homeUi.drag || e.button > 0 || e.target.closest(kind.ignore)) return;
-  const drag = (homeUi.drag = { kind, item, key: kind === TILE_DRAG ? tileKey(item) : item, el, id: e.pointerId, x: e.clientX, y: e.clientY, active: false, moved: false, target: null, ghost: null, marked: null, timer: 0, scroll: 0 });
-  const begin = () => {
-    if (homeUi.drag !== drag || drag.active) return;
-    drag.active = true;
-    // the press may have started selecting the text under it
-    getSelection()?.removeAllRanges();
-    const rect = el.getBoundingClientRect();
-    drag.dx = drag.x - rect.left;
-    drag.dy = drag.y - rect.top;
-    drag.ghost = el.cloneNode(true);
-    drag.ghost.classList.add("drag-ghost");
-    drag.ghost.style.width = rect.width + "px";
-    drag.ghost.removeAttribute("id");
-    drag.home = { parent: el.parentNode, next: el.nextSibling };
-    for (const marked of drag.ghost.querySelectorAll("[id]")) marked.removeAttribute("id");
-    // a modal dialog is drawn above everything else on the page
-    // inside the page, so it keeps the looks the page gives it
-    (homeUi.folder?.dialog ?? document.getElementById("view") ?? document.body).append(drag.ghost);
-    el.classList.add("dragging");
-    document.documentElement.classList.add("tile-dragging", "dragging-" + kind.name);
-    dragMove(drag);
-    const step = () => {
-      if (homeUi.drag !== drag) return;
-      const edge = 70;
-      const speed = drag.y < edge ? -(edge - drag.y) / 5 : drag.y > innerHeight - edge ? (drag.y - (innerHeight - edge)) / 5 : 0;
-      if (speed && !homeUi.folder) {
-        scrollBy(0, speed);
-        dragMove(drag);
-      }
-      drag.scroll = requestAnimationFrame(step);
-    };
-    drag.scroll = requestAnimationFrame(step);
-  };
-  if (e.pointerType === "touch") drag.timer = setTimeout(begin, 280);
-  const move = (ev) => {
-    if (ev.pointerId !== drag.id) return;
-    const far = Math.hypot(ev.clientX - drag.x, ev.clientY - drag.y);
-    if (!drag.active) {
-      if (e.pointerType === "touch") {
-        if (far > 8) dragEnd(false);
-        return;
-      }
-      if (far < 6) return;
-      begin();
-    }
-    drag.x = ev.clientX;
-    drag.y = ev.clientY;
-    drag.moved = true;
-    dragMove(drag);
-  };
-  const up = (ev) => ev.pointerId === drag.id && dragEnd(ev.type === "pointerup");
-  // Escape puts it back where it was
-  const key = (ev) => ev.key === "Escape" && drag.active && (ev.preventDefault(), dragEnd(false));
-  // while a tile is in the air the page under the finger stays put
-  const still = (ev) => drag.active && ev.cancelable && ev.preventDefault();
-  drag.stop = () => {
-    removeEventListener("pointermove", move);
-    removeEventListener("pointerup", up);
-    removeEventListener("pointercancel", up);
-    removeEventListener("touchmove", still);
-    removeEventListener("keydown", key, true);
-  };
-  addEventListener("pointermove", move);
-  addEventListener("pointerup", up);
-  addEventListener("pointercancel", up);
-  addEventListener("touchmove", still, { passive: false });
-  addEventListener("keydown", key, true);
-}
-
-/** Above or below the block under the pointer, by which half of it the pointer is in */
-function besideBlock(drag, selector, name) {
-  const over = document.elementFromPoint(drag.x, drag.y)?.closest(selector);
-  if (!over || over === drag.el || over.classList.contains("drag-ghost")) return null;
-  const rect = over.getBoundingClientRect();
-  const above = drag.y < rect.top + rect.height / 2;
-  return { el: over, cls: above ? "drop-above" : "drop-below", [above ? "before" : "after"]: over.dataset[name] };
-}
-
-/** A group is moved among the groups */
-const GROUP_DRAG = {
-  name: "group",
-  sibling: ".group[data-group-id]",
-  key: "groupId",
-  ignore: "button, a, input",
-  find: (drag) => besideBlock(drag, ".group[data-group-id]", "groupId"),
-  drop: (drag, target) =>
-    changeLayout((layout) => {
-      const [group] = layout.groups.splice(layout.groups.findIndex((g) => g.id === drag.key), 1);
-      const at = layout.groups.findIndex((g) => g.id === (target.before ?? target.after));
-      if (!group || at < 0) return false;
-      layout.groups.splice(at + (target.after ? 1 : 0), 0, group);
-    }),
-};
-
-/** A block — the system's numbers, what needs attention, the activity — is moved among the blocks and the places for them */
-const WIDGET_DRAG = {
-  name: "widget",
-  sibling: ".widget[data-widget]",
-  key: "widget",
-  end: (zone) => ({ zone: zone.dataset.zone }),
-  ignore: "button, a, input",
-  find: (drag) => {
-    const beside = besideBlock(drag, ".widget[data-widget]", "widget");
-    if (beside) return beside;
-    // not over a block: the free room of a place below its blocks takes the block at its end
-    const under = document.elementFromPoint(drag.x, drag.y);
-    const zone = under?.closest("[data-zone]");
-    if (!zone || under.closest(".widget")) return null;
-    const last = [...zone.querySelectorAll(":scope > .widget")].filter((w) => w !== drag.el).at(-1);
-    return !last || drag.y > last.getBoundingClientRect().bottom ? { el: zone, cls: "drop-end", zone: zone.dataset.zone } : null;
-  },
-  drop: (drag, target) =>
-    changeLayout((layout) => {
-      const zones = Object.fromEntries(ZONES.map((name) => [name, layout.widgets[name]]));
-      for (const zone of Object.values(zones)) if (zone.includes(drag.key)) zone.splice(zone.indexOf(drag.key), 1);
-      const beside = target.before ?? target.after;
-      const zone = beside ? Object.values(zones).find((list) => list.includes(beside)) : zones[target.zone];
-      if (!zone) return false;
-      zone.splice(beside ? zone.indexOf(beside) + (target.after ? 1 : 0) : zone.length, 0, drag.key);
-    }),
-};
-
-/** A tile is moved among the tiles, into a folder, onto another tile (which makes a folder), out of an open folder */
-const TILE_DRAG = {
-  name: "tile",
-  sibling: ".tile[data-key]",
-  key: "key",
-  end: (list) => ({ group: list.dataset.group }),
-  ignore: ".tile-open",
-  find: dropTarget,
-  drop: (drag, target) => {
-    if (target.out) {
-      homeUi.folder?.dialog.close();
-      outOfFolder(drag.key);
-    } else if (target.onto) makeFolder(drag.key, target.onto);
-    else moveTile(drag.key, target);
-  },
-};
-
-/** Where the tile would land if it were let go here */
-function dropTarget(drag) {
-  const under = document.elementFromPoint(drag.x, drag.y);
-  if (!under) return null;
-  const open = homeUi.folder;
-  // out of the open folder: onto the dimmed page around it
-  if (open) {
-    if (under === open.dialog) {
-      const box = open.dialog.getBoundingClientRect();
-      if (drag.x < box.left || drag.x > box.right || drag.y < box.top || drag.y > box.bottom) return { out: true };
-    }
-    if (!open.dialog.contains(under)) return null;
-  }
-  const over = under.closest(".tile[data-key]");
-  if (over && over !== drag.el && !over.classList.contains("drag-ghost")) {
-    const rect = over.getBoundingClientRect();
-    const part = (drag.x - rect.left) / rect.width;
-    const key = over.dataset.key;
-    const mayJoin = !open && drag.item.type !== "folder" && !staysOut(drag.item) && key !== "builtin:add" && !key.startsWith("widget:");
-    if (mayJoin && part > 0.28 && part < 0.72) return key.startsWith("folder:") ? { el: over, cls: "drop-into", folder: key.slice(7) } : { el: over, cls: "drop-into", onto: key };
-    return part < 0.5 ? { el: over, cls: "drop-before", before: key } : { el: over, cls: "drop-after", after: key };
-  }
-  // the room after the last tile of a group; a gap between two tiles is not the end
-  const list = under.closest(".tiles[data-group]");
-  if (!list || over) return null;
-  const last = [...list.querySelectorAll(":scope > .tile[data-key]")].filter((tile) => tile !== drag.el).at(-1)?.getBoundingClientRect();
-  return !last || drag.y > last.bottom || (drag.y >= last.top && drag.x > last.right) ? { el: list, cls: "drop-end", group: list.dataset.group } : null;
-}
-
-function dragMove(drag) {
-  drag.ghost.style.transform = `translate(${drag.x - drag.dx}px, ${drag.y - drag.dy}px)`;
-  let target = drag.kind.find(drag);
-  // over its own outline, or between two things: it stays where it is shown
-  if (!target && drag.target && !drag.target.out && drag.target.cls !== "drop-into") target = drag.target;
-  drag.marked?.classList.remove(...DROP_CLASSES);
-  homeUi.folder?.dialog.classList.toggle("drop-out", !!target?.out);
-  drag.marked = null;
-  if (target?.cls === "drop-into") (drag.marked = target.el).classList.add("drop-into");
-  else if (target?.el && target !== drag.target) makeRoom(drag, target);
-  drag.target = target;
-}
-
-/** The outline of what is dragged goes where it would land, and the others move aside */
-function makeRoom(drag, target) {
-  const { el } = drag;
-  const before = target.cls === "drop-before" || target.cls === "drop-above";
-  const after = target.cls === "drop-after" || target.cls === "drop-below";
-  if (before && target.el.previousElementSibling !== el) target.el.before(el);
-  else if (after && target.el.nextElementSibling !== el) target.el.after(el);
-  else if (target.cls === "drop-end" && target.el.lastElementChild !== el) target.el.append(el);
-  else return;
-  drag.shifted = true;
-  if (drag.kind === WIDGET_DRAG) markEmptyZones();
-}
-
-const markEmptyZones = () => document.querySelectorAll(".zone[data-zone]").forEach((zone) => zone.classList.toggle("empty", !zone.querySelector(":scope > .widget")));
-
-/** Where the outline stands, said as the drop of the kind takes it: after the one before it, before the one after it, or at the end */
-function landing(drag) {
-  const { el, kind } = drag;
-  const near = (step) => {
-    let at = el[step];
-    while (at && !(at.matches(kind.sibling) && !at.classList.contains("drag-ghost"))) at = at[step];
-    return at;
-  };
-  const prev = near("previousElementSibling");
-  if (prev) return { after: prev.dataset[kind.key] };
-  const next = near("nextElementSibling");
-  if (next) return { before: next.dataset[kind.key] };
-  return kind.end?.(el.parentElement) ?? null;
-}
-
-function dragEnd(drop) {
-  const drag = homeUi.drag;
-  if (!drag) return;
-  clearTimeout(drag.timer);
-  cancelAnimationFrame(drag.scroll);
-  drag.stop();
-  drag.ghost?.remove();
-  drag.marked?.classList.remove(...DROP_CLASSES);
-  drag.el.classList.remove("dragging");
-  document.documentElement.classList.remove("tile-dragging", "dragging-" + drag.kind.name);
-  homeUi.folder?.dialog.classList.remove("drop-out");
-  // the click that ends a drag is not a click on what was dragged
-  if (drag.active) {
-    const swallow = (e) => (e.preventDefault(), e.stopPropagation());
-    addEventListener("click", swallow, { capture: true, once: true });
-    setTimeout(() => removeEventListener("click", swallow, { capture: true }));
-  }
-  setTimeout(() => homeUi.drag === drag && (homeUi.drag = null));
-  const last = drop && drag.active ? drag.target : null;
-  const target = last?.out || last?.cls === "drop-into" ? last : drop && drag.shifted ? landing(drag) : null;
-  if (!target) {
-    // let go somewhere else: it goes back where it was
-    if (drag.shifted && drag.home.parent.isConnected) drag.home.parent.insertBefore(drag.el, drag.home.next?.parentNode === drag.home.parent ? drag.home.next : null);
-    if (drag.kind === WIDGET_DRAG) markEmptyZones();
-    if (homeUi.stale) setTimeout(renderHomeBody);
-    return;
-  }
-  homeUi.drag = null;
-  drag.kind.drop(drag, target);
 }
 
 const ATTENTION_ICONS = { update: "up", docker: "box", restarting: "refresh", partial: "alert", disk: "disk", smart: "disk", memory: "memory", temperature: "temp", internet: "network", network: "network", array: "disk", share: "share", netplace: "globe", machine: "server", pve: "server", ha: "home", containers: "box", absent: "disk" };
@@ -2469,12 +2416,9 @@ function renderActivity() {
 function widget(id, el) {
   el.classList.add("widget");
   el.dataset.widget = id;
-  // the numbers are dragged by any part of them, save a link; a list with text to read and select, by its heading
-  el.addEventListener("pointerdown", (e) => isAdmin() && ((isNumbers(id) && !e.target.closest("a")) || e.target.closest(".section-head")) && dragStart(e, id, WIDGET_DRAG));
   return el;
 }
 
-const isNumbers = (id) => id === "stats" || id.startsWith("machine:");
 const machineOfBlock = (id) => (state.overview?.machines ?? []).find((m) => "machine:" + m.id === id);
 
 /** One number of a machine's row: label and value on a line, a bar or a little chart, a line under it; empty when not known */
@@ -2551,78 +2495,58 @@ function renderHome() {
     activity: isAdmin() ? widget("activity", h("section", { class: "card pad activity-block" })) : null,
     adblock: isAdmin() ? widget("adblock", h("section", { class: "card pad adblock-block" })) : null,
   };
-  const zone = (name, tag = "div") => h(tag, { class: "zone" + (name === "side" ? " side" : ""), id: "zone-" + name, "data-zone": name });
   shell(
-    h("div", { class: "page-head home-head" }, h("div", null, h("h1", null, greeting), h("p", { class: "meta", id: "host" }, " ")), h("div", { class: "counts", id: "counts" })),
-    zone("top"),
-    h("div", { class: "columns", id: "home-columns" }, h("section", { id: "home-apps" }), zone("side", "aside")),
-    zone("bottom"),
+    h("div", { id: "grid-bar" }),
+    h("div", { class: "page-head home-head", id: "home-head" }, h("div", null, h("h1", null, greeting), h("p", { class: "meta", id: "host" }, " ")), h("div", { class: "counts", id: "counts" })),
+    h("div", { class: "pg", id: "pg" }),
   );
+  Object.assign(gridUi, { arranging: false, undo: [], entry: null, drag: null });
   renderHomeBody();
 }
 
-/** How many items of the attention list are open; the rest wait under "N more" */
-const ATTENTION_OPEN = 3;
+const activityBody = (o) => [blockRemover("activity"), h("div", { class: "section-head" }, h("h2", null, t("activity.title"))), o.activity.length ? h("div", { class: "timeline fits" }, o.activity.map(activityItem)) : h("p", { class: "muted small" }, t("activity.none")), isAdmin() && o.activity.length > 0 && h("a", { class: "link small all-activity block-foot", href: "#/activity" }, t("activity.all"), icon("chevron"))];
+
+function attentionDialog(list) {
+  let dialog;
+  dialog = openDialog("wide", h("header", null, h("h2", { class: "grow" }, t("attention.title")), closeX(() => dialog)), h("div", { class: "attention-list" }, list.map(attentionItem)));
+}
 
 function attentionBlock(list) {
-  const shown = homeUi.attentionAll ? list : list.slice(0, ATTENTION_OPEN);
-  const hidden = list.length - shown.length;
-  const toggle = (all) => () => ((homeUi.attentionAll = all), renderHomeBody());
   return [
     blockRemover("attention"),
     h("div", { class: "section-head" }, h("h2", null, t("attention.title"), list.length > 0 && h("span", { class: "pill" }, list.length))),
-    list.length ? h("div", { class: "attention-list" }, shown.map(attentionItem)) : h("p", { class: "all-good" }, icon("check", "ok"), t("attention.none")),
-    hidden > 0 && h("button", { type: "button", class: "link small more-items", onclick: toggle(true) }, t("attention.moreItems", { n: hidden }), icon("down")),
-    homeUi.attentionAll && list.length > ATTENTION_OPEN && h("button", { type: "button", class: "link small more-items", onclick: toggle(false) }, t("attention.fewer"), icon("up")),
-    state.overview?.attentionHidden > 0 && h("a", { class: "link small more-items", href: "#/settings/notifications/hidden" }, t("attention.hiddenLink", { n: state.overview.attentionHidden }), icon("chevron")),
+    list.length ? h("div", { class: "attention-list fits" }, list.map(attentionItem)) : h("p", { class: "all-good" }, icon("check", "ok"), t("attention.none")),
+    h(
+      "div",
+      { class: "block-foot" },
+      h("button", { type: "button", class: "link small more-items fits-more", hidden: true, onclick: () => attentionDialog(state.overview.attention) }, h("span"), icon("chevron")),
+      state.overview?.attentionHidden > 0 && h("a", { class: "link small more-items", href: "#/settings/notifications/hidden" }, t("attention.hiddenLink", { n: state.overview.attentionHidden }), icon("chevron")),
+    ),
   ];
 }
 
 function renderHomeBody() {
   const o = state.overview;
-  const appsBox = document.getElementById("home-apps");
-  if (!o || !appsBox || !homeUi.widgets) return;
+  if (!o || !document.getElementById("pg") || !homeUi.widgets) return;
   const apps = o.apps;
 
   const count = (st) => apps.filter((a) => appState(a) === st).length;
   const counts = [["running", count("running")], ["restarting", count("restarting")], ["partial", count("partial")], ["stopped", count("stopped")]].filter(([, n]) => n > 0);
   document.getElementById("counts")?.replaceChildren(...(counts.length ? [h("span", { class: "status-pill" }, counts.flatMap(([st, n], i) => [i > 0 && h("span", { class: "dot-sep" }, "·"), h("span", { class: "count" }, h("i", { class: "dot " + st }), t("home.count." + st, { n }))]))] : []));
 
-  // a tile in the air belongs to the page as it is; the news is drawn when it lands
-  if (homeUi.drag?.active) homeUi.stale = true;
-  else {
-    homeUi.stale = false;
-    renderDashboard(appsBox);
-  }
-
-  if (homeUi.widgets.attention) put(homeUi.widgets.attention, attentionBlock(o.attention));
-  if (homeUi.widgets.adblock) adblockBlock(homeUi.widgets.adblock, o.adblock);
-  if (homeUi.widgets.activity) put(homeUi.widgets.activity, blockRemover("activity"), h("div", { class: "section-head" }, h("h2", null, t("activity.title"))), o.activity.length ? h("div", { class: "timeline" }, o.activity.map(activityItem)) : h("p", { class: "muted small" }, t("activity.none")), isAdmin() && o.activity.length > 0 && h("a", { class: "link small all-activity", href: "#/activity" }, t("activity.all"), icon("chevron")));
-  for (const name of ZONES) for (const id of o.dashboard.widgets[name]) if (id.startsWith("machine:")) machineBlock(id);
-  if (!homeUi.drag?.active) placeWidgets();
-  renderSystem();
+  paintGrid();
+  renderFolder();
 }
 
-const ZONES = ["top", "side", "bottom"];
-/** Hata's own blocks: the picture of one in the "Add" menu and where it goes when it is put back */
-const BLOCKS = { stats: { icon: "cpu", zone: "top" }, attention: { icon: "alert", zone: "side" }, activity: { icon: "list", zone: "side" }, adblock: { icon: "shield", zone: "side" } };
+/** The picture of each of Hata's own blocks */
+const BLOCKS = { stats: "cpu", attention: "alert", activity: "list", adblock: "shield" };
 const blockTitle = (id) => (id.startsWith("machine:") ? t("home.machineBlock", { name: machineOfBlock(id)?.name ?? id.slice(8) }) : t(id === "stats" ? "home.statsBlock" : id + ".title"));
+const removeBlock = (id) => changeLayout((layout) => void takeTile(layout, "block:" + id));
 
-/** The small button that takes one of Hata's own blocks off the dashboard; the "Add" menu brings it back */
+/** The small button that takes one of Hata's own blocks off Home; "Add" brings it back */
 function blockRemover(id) {
   if (!isAdmin()) return null;
-  return h("button", {
-    type: "button",
-    class: "icon-btn quiet block-remove",
-    title: t("home.removeBlock"),
-    "aria-label": `${t("home.removeBlock")}: ${blockTitle(id)}`,
-    onclick: () =>
-      changeLayout((layout) => {
-        for (const name of ZONES) layout.widgets[name] = layout.widgets[name].filter((block) => block !== id);
-        // a machine's block is offered again by the machine itself
-        if (!id.startsWith("machine:")) layout.widgets.hidden.push(id);
-      }),
-  }, icon("x"));
+  return h("button", { type: "button", class: "icon-btn quiet block-remove", title: t("home.removeBlock"), "aria-label": `${t("home.removeBlock")}: ${blockTitle(id)}`, onclick: () => removeBlock(id) }, icon("x"));
 }
 
 function layoutTextDialog() {
@@ -2652,23 +2576,6 @@ function layoutTextDialog() {
     },
     (e) => (error.textContent = errorText(e)),
   );
-}
-
-/** Puts every block into its place; a place with nothing in it shows only while a block is in the air */
-function placeWidgets() {
-  for (const name of ZONES) {
-    const ids = state.overview.dashboard.widgets[name];
-    const zone = document.getElementById("zone-" + name);
-    if (!zone) continue;
-    const blocks = ids.map((id) => homeUi.widgets[id]).filter(Boolean);
-    // only what changed is moved: a block taken out and put back would lose its scroll and focus
-    if (blocks.length !== zone.children.length || blocks.some((block, i) => zone.children[i] !== block)) zone.replaceChildren(...blocks);
-    zone.classList.toggle("empty", !blocks.length);
-    zone.classList.toggle("movable", isAdmin());
-    zone.dataset.hint = t("home.dropBlock");
-  }
-  // a place whose blocks are none of this person's takes no room
-  document.getElementById("home-columns")?.classList.toggle("no-side", !state.overview.dashboard.widgets.side.some((id) => homeUi.widgets[id]));
 }
 
 // --- App page -----------------------------------------------------------------------------------
@@ -2733,6 +2640,7 @@ function appTileMenu(app, anchor, at) {
     page(t("app.tab.backups"), "archive", "backups"),
     isAdmin() && item(t("assistant.ask"), "chat", () => openAssistant({ draft: t("assistant.aboutApp", { title: app.title, app: app.name }) })),
     page(t("home.manage"), "grid", ""),
+    state.route.view === "home" && gridMenuEntries().map((one) => item(one.label, one.icon, one.run)),
     item(t("app.remove"), "trash", () => removeDialog(app), "danger", busy),
   );
   if (at) return placeAt(dialog, at);
@@ -4468,7 +4376,7 @@ function haSetState(server, s, entity = s?.id) {
   const o = state.overview;
   if (o?.ha && key in o.ha.states) {
     o.ha.states[key] = s;
-    if (state.route.view === "home" && !homeUi.drag?.active) {
+    if (state.route.view === "home" && !gridUi.drag) {
       const at = locate(o.dashboard, "ha:" + key);
       const old = document.querySelector(`.tile[data-key="${CSS.escape("ha:" + key)}"]`);
       const fresh = at && tile(at.item);
@@ -4565,7 +4473,6 @@ function haEntityDialog(server, s, item = null) {
   const admin = isAdmin();
   const links = [
     admin && x && h("a", { class: "btn small", href: haEntityUrl(x, s.id), target: "_blank", rel: "noopener noreferrer" }, icon("external"), h("span", null, t("ha.openThere"))),
-    admin && item && button(t("ha.move"), { class: "small", onclick: () => (dialog.close(), tileMenu(item)) }, "arrow"),
     admin && item && button(t("ha.offHome"), { class: "small danger", onclick: () => (dialog.close(), changeLayout((next) => void takeTile(next, tileKey(item)))) }, "trash"),
   ].filter(Boolean);
   dialog = openDialog("ha-entity", h("header", null, badge, h("div", { class: "grow" }, h("div", { class: "ha-name" }, title, rename), sub), closeX(() => dialog)), body, links.length > 0 && h("footer", { class: "ha-links" }, links));
@@ -4629,7 +4536,7 @@ function haTile(item, target, title) {
   const side = h("button", { type: "button", class: "tile-open", title: t("ha.tile.more"), "aria-label": `${t("ha.tile.more")}: ${title}`, onclick: () => haEntityDialog(item.server, s ?? { id: item.entity, name: title, domain: item.entity.split(".")[0], state: "unavailable", actions: [] }, item) }, icon("more"));
   const content = tileContent(item, title, online && s && haBigText(s) ? haSubText(s) : sub, { big: online && s ? haBigText(s) : "" });
   // a press does what the entity is for; one with nothing to press (a sensor) opens its window
-  const main = h("button", { type: "button", class: "tile-main", title: primary ? t("ha.action." + primary.action) : t("ha.tile.more"), onclick: (e) => homeUi.drag?.moved || (primary ? haPressAsked(item.server, s, primary, e.currentTarget) : side.click()) }, content);
+  const main = h("button", { type: "button", class: "tile-main", title: primary ? t("ha.action." + primary.action) : t("ha.tile.more"), onclick: (e) => (primary ? haPressAsked(item.server, s, primary, e.currentTarget) : side.click()) }, content);
   return { cls, main, side };
 }
 
@@ -4648,10 +4555,7 @@ async function haPickDialog() {
   const add = h("button", { type: "button", class: "btn primary", disabled: true, onclick: () => {
     dialog.close();
     changeLayout((layout) => {
-      const first = layout.groups[0] ?? (layout.groups.push({ id: newId(), title: "", items: [] }), layout.groups[0]);
-      const at = first.items.findIndex(isAddTile);
-      const tiles = [...chosen].map((key) => ({ type: "ha", server: key.split("/")[0], entity: key.split("/")[1] }));
-      first.items.splice(at < 0 ? first.items.length : at, 0, ...tiles);
+      for (const key of chosen) addCard(layout, { type: "ha", server: key.split("/")[0], entity: key.split("/")[1] });
     });
     toast(t("ha.pick.added", { n: chosen.size }));
   } }, t("ha.pick.add", { n: 0 }));
@@ -5437,9 +5341,7 @@ async function haHome(server, entity, on) {
   if (!state.overview) await refresh();
   await changeLayout((layout) => {
     if (!on) return void takeTile(layout, `ha:${server}/${entity}`);
-    const first = layout.groups[0] ?? (layout.groups.push({ id: newId(), title: "", items: [] }), layout.groups[0]);
-    const at = first.items.findIndex(isAddTile);
-    first.items.splice(at < 0 ? first.items.length : at, 0, { type: "ha", server, entity });
+    addCard(layout, { type: "ha", server, entity });
   });
   // the page of Home asks the server for the new tile's state; here the row shows it is there
   await refresh();
@@ -10328,6 +10230,7 @@ function pageMenu(at) {
   const walls = ["", ...(state.wallpapers ?? []), ...(look.custom ? ["custom"] : [])];
   const nextWall = walls[(walls.indexOf(look.wallpaper ?? "") + 1) % walls.length];
   menuAt(at, menuHeader("Hata", state.version, "home"), [
+    ...(state.route.view === "home" && state.overview ? gridMenuEntries() : []),
     admin && state.route.view === "home" && state.overview && { label: t("menu.addHere"), icon: "plus", run: () => addDialog() },
     admin && state.route.view === "home" && state.overview && { label: t("menu.dashboardConfig"), icon: "code", run: layoutTextDialog },
     admin && { label: t("menu.themeLight"), icon: "sun", on: theme === "light", run: () => changeLook({ background: BACKGROUNDS[6] }) },

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { arrange, cleanLayout, cleanWidgets, dropServer, haTiles, layoutText, movePath, parseLayoutText, webUrl } from "../src/dashboard";
+import { arrange, cleanLayout, dropBlock, dropServer, GRID, haTiles, layoutText, movePath, parseLayoutText, webUrl } from "../src/dashboard";
 
 const link = (title: string, url = "https://example.com/") => ({ type: "link", id: title.toLowerCase(), title, url, icon: "" });
 
@@ -9,194 +9,131 @@ test("a link points to the web and nowhere else", () => {
   for (const bad of ["javascript:alert(1)", "data:text/html,x", "file:///etc/passwd", "example.com", "", null, 5]) expect(webUrl(bad)).toBe("");
 });
 
+const at = (x: number, y: number, w = 1, h = 1) => ({ x, y, w, h });
+const app = (name: string, box = at(0, 0)) => ({ type: "app", name, ...box });
+const overlaps = (cards: { x: number; y: number; w: number; h: number }[]) => cards.some((a, i) => cards.some((b, j) => i < j && a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h));
+
 test("what does not fit a layout is dropped", () => {
+  const layout = cleanLayout({ cards: [app("jellyfin"), { type: "app", name: "Bad Name", ...at(1, 0) }, "not a card", { ...link("Router", "http://192.168.1.1/"), ...at(2, 0) }, { type: "block", id: "nothing", ...at(3, 0) }, { ...link("Bad", "javascript:alert(1)"), ...at(4, 0) }] });
+  expect(layout.cards.map((c) => (c.type === "app" ? c.name : c.type))).toEqual(["jellyfin", "link"]);
+  expect(cleanLayout({ cards: {} }).cards.length).toBeGreaterThan(0);
+});
+
+test("an app is on Home once, ids are unique, a link without a title takes its host, a folder of nothing goes", () => {
   const layout = cleanLayout({
+    cards: [app("memos"), { type: "folder", id: "a", title: "Tools", items: [{ type: "app", name: "memos" }, { type: "app", name: "gitea" }], ...at(1, 0) }, { type: "folder", id: "a", title: "", items: [{ type: "app", name: "gitea" }], ...at(2, 0) }, { type: "link", id: "a", url: "https://example.com/x", title: "", ...at(3, 0) }],
+  });
+  expect(layout.cards[1]).toMatchObject({ type: "folder", id: "a", title: "Tools", items: [{ type: "app", name: "gitea" }] });
+  expect(layout.cards).toHaveLength(3);
+  expect(layout.cards[2]).toMatchObject({ type: "link", title: "example.com" });
+  expect((layout.cards[2] as unknown as { id: string }).id).not.toBe("a");
+});
+
+test("a size stays within the limits of its kind and the grid", () => {
+  const { cards } = cleanLayout({ cards: [{ type: "block", id: "stats", x: 0, y: 0, w: 1, h: 1 }, { type: "app", name: "big", x: 0, y: 5, w: 99, h: 99 }, { type: "app", name: "edge", x: 7, y: 20, w: 3, h: 1 }, { type: "app", name: "odd", x: 1.4, y: -3, w: 1, h: 1 }] });
+  const find = (name: string) => cards.find((c) => c.type === "app" && c.name === name)!;
+  expect(cards.find((c) => c.type === "block")).toMatchObject({ w: GRID.limits.stats![0], h: GRID.limits.stats![1] });
+  expect(find("big")).toMatchObject({ w: 4, h: 4 });
+  // what would stand past the right edge is moved in
+  expect(find("edge")).toMatchObject({ x: 5, w: 3 });
+  expect(find("odd")).toMatchObject({ x: 1 });
+  expect(find("odd").y).toBeGreaterThanOrEqual(0);
+});
+
+test("a card over another goes down; one with no place takes the first free one; an empty place stays", () => {
+  const { cards } = cleanLayout({ cards: [app("a", at(0, 4, 2, 2)), app("b", at(1, 5)), { type: "app", name: "free" }] });
+  expect(overlaps(cards)).toBe(false);
+  const find = (name: string) => cards.find((c) => c.type === "app" && c.name === name)!;
+  expect(find("a")).toMatchObject({ x: 0, y: 4 });
+  expect(find("b")).toMatchObject({ x: 1, y: 6 });
+  // rows 0–3 stay as they were left: only what has no place goes there
+  expect(find("free")).toMatchObject({ x: 0, y: 0 });
+});
+
+test("a layout of groups and zones becomes the grid", () => {
+  const { cards } = cleanLayout({
+    widgets: { top: ["stats", "machine:aaaaaaaa"], side: ["attention"], bottom: [], hidden: ["activity"] },
     groups: [
-      { id: "main", title: "  Home   media ", items: [{ type: "app", name: "jellyfin" }, { type: "app", name: "Bad Name" }, link("Router", "http://192.168.1.1"), link("Evil", "javascript:alert(1)"), { type: "files", path: "relative" }, { type: "widget" }, "text"] },
-      "not a group",
-      { title: "Second", items: "none" },
+      { id: "main", title: "Media", items: [{ type: "app", name: "memos" }, { type: "ha", server: "bbbbbbbb", entity: "light.x", size: "2x2" }] },
+      { id: "second", title: "Other", items: [{ type: "widget", id: "w1", source: "qbit", server: "cccccccc", view: "torrents", size: "2x1" }] },
     ],
   });
-  expect(layout.groups.map((g) => g.title)).toEqual(["Home media", "Second"]);
-  expect(layout.groups[0]!.items).toEqual([{ type: "app", name: "jellyfin" }, { type: "link", id: "router", title: "Router", url: "http://192.168.1.1/", icon: "" }]);
-  expect(layout.groups[1]!.id).toMatch(/^[a-z0-9-]+$/);
-  expect(cleanLayout(null).groups).toEqual([]);
-  expect(cleanLayout({ groups: {} }).groups).toEqual([]);
+  expect(overlaps(cards)).toBe(false);
+  expect(cards.map((c) => c.type)).toEqual(["block", "block", "block", "app", "ha", "widget"]);
+  expect(cards[0]).toMatchObject({ id: "stats", x: 0, y: 0, w: 5, h: 3 });
+  expect(cards[1]).toMatchObject({ id: "machine:aaaaaaaa", x: 5, y: 0, w: 3, h: 1 });
+  expect(cards[4]).toMatchObject({ w: 2, h: 2 });
+  expect(cards[5]).toMatchObject({ w: 2, h: 1 });
+  // what was put away stays away
+  expect(cards.some((c) => c.type === "block" && c.id === "activity")).toBe(false);
 });
 
-test("an app is on the dashboard once, ids are unique, a link without a title takes its host", () => {
-  const layout = cleanLayout({
-    groups: [
-      { id: "a", title: "", items: [{ type: "app", name: "memos" }, { type: "folder", id: "a", title: "Tools", items: [{ type: "app", name: "memos" }, { type: "app", name: "gitea" }, { type: "folder", id: "x", items: [] }] }] },
-      { id: "a", title: "", items: [{ type: "app", name: "gitea" }, { type: "link", id: "a", url: "https://example.com/x", title: "" }, { type: "folder", id: "empty", title: "Empty", items: [{ type: "app", name: "memos" }] }] },
-    ],
-  });
-  const folder = layout.groups[0]!.items[1]!;
-  expect(folder).toMatchObject({ type: "folder", title: "Tools", items: [{ type: "app", name: "gitea" }] });
-  // the second group lost the repeated app and the folder that held nothing else
-  expect(layout.groups[1]!.items).toHaveLength(1);
-  expect(layout.groups[1]!.items[0]).toMatchObject({ type: "link", title: "example.com" });
-  const ids = [layout.groups[0]!.id, layout.groups[1]!.id, (folder as { id: string }).id, (layout.groups[1]!.items[0] as { id: string }).id];
-  expect(new Set(ids).size).toBe(4);
-  expect(ids[0]).toBe("a");
+test("a layout of the free grid, and of the numbers as separate blocks, comes through", () => {
+  const free = cleanLayout({ hidden: ["attention"], blocks: [{ id: "group:b", x: 0, y: 0 }, { id: "group:a", x: 0, y: 3 }], groups: [{ id: "a", items: [{ type: "app", name: "second" }] }, { id: "b", bare: true, items: [{ type: "app", name: "first" }] }] });
+  expect(free.cards.filter((c) => c.type === "app").map((c) => (c as { name: string }).name)).toEqual(["first", "second"]);
+  expect(free.cards.some((c) => c.type === "block" && c.id === "attention")).toBe(false);
+  const numbers = cleanLayout({ widgets: { top: ["cpu", "memory"], side: [] }, groups: [] });
+  expect(numbers.cards.filter((c) => c.type === "block" && c.id === "stats")).toHaveLength(1);
 });
 
-test("arranging: what is gone is left out, what is new comes last in the first group", () => {
-  const layout = cleanLayout({
-    groups: [
-      { id: "main", title: "", items: [{ type: "app", name: "gone" }, { type: "app", name: "memos" }, link("Router")] },
-      { id: "media", title: "Media", items: [{ type: "folder", id: "f", title: "Video", items: [{ type: "app", name: "jellyfin" }, { type: "app", name: "hidden" }] }, { type: "folder", id: "g", title: "Gone", items: [{ type: "app", name: "gone2" }] }, { type: "files", path: "/DATA/Media" }, { type: "files", path: "/DATA/Unpinned" }] },
-    ],
-  });
-  const seen = arrange(layout, ["jellyfin", "memos", "new"], ["/DATA/Media", "/DATA/Photos"]);
-  expect(seen.groups[0]!.items).toEqual([{ type: "app", name: "memos" }, link("Router") as never, { type: "app", name: "new" }, { type: "files", path: "/DATA/Photos" }]);
-  expect(seen.groups[1]!.items).toEqual([{ type: "folder", id: "f", title: "Video", items: [{ type: "app", name: "jellyfin" }] }, { type: "files", path: "/DATA/Media" }]);
-  // the saved layout is not touched: an app that comes back takes its old place
-  expect(layout.groups[0]!.items).toHaveLength(3);
+test("a new server has the numbers, the attention list and the activity; ad blocking waits to be added", () => {
+  expect(cleanLayout(null).cards.map((c) => (c as { id: string }).id)).toEqual(["stats", "attention", "activity"]);
+  // a page laid out with no blocks stays so
+  expect(cleanLayout({ cards: [] }).cards).toEqual([]);
 });
 
-test("arranging an empty layout gives one group with everything", () => {
-  expect(arrange(cleanLayout(null), ["b", "a"], ["/x"])).toMatchObject({ groups: [{ id: "main", title: "", items: [{ type: "app", name: "b" }, { type: "app", name: "a" }, { type: "files", path: "/x" }] }] });
-  // a member sees the links and their own apps
-  const layout = cleanLayout({ groups: [{ id: "main", title: "", items: [link("Router"), { type: "files", path: "/DATA" }, { type: "app", name: "private" }] }] });
-  expect(arrange(layout, [], []).groups[0]!.items).toEqual([link("Router") as never]);
+test("arranging: what is gone is left out, what is new takes a free place, the saved layout is not touched", () => {
+  const layout = cleanLayout({ cards: [app("gone", at(0, 0)), app("memos", at(1, 0)), { ...link("Router"), ...at(2, 0) }, { type: "folder", id: "f", title: "Video", items: [{ type: "app", name: "jellyfin" }, { type: "app", name: "plex" }], ...at(3, 0) }] });
+  const seen = arrange(layout, { apps: ["jellyfin", "memos", "new"], folders: ["/DATA/Media"], builtins: ["store"], admin: true });
+  expect(overlaps(seen.cards)).toBe(false);
+  expect(seen.cards.find((c) => c.type === "folder")).toMatchObject({ items: [{ type: "app", name: "jellyfin" }] });
+  expect(seen.cards.some((c) => c.type === "app" && c.name === "gone")).toBe(false);
+  // the place left by what is gone is the first free one
+  expect(seen.cards.find((c) => c.type === "app" && c.name === "new")).toMatchObject({ x: 0, y: 0 });
+  expect(seen.cards.some((c) => c.type === "files")).toBe(true);
+  expect(seen.cards.some((c) => c.type === "builtin" && c.id === "store")).toBe(true);
+  expect(layout.cards).toHaveLength(4);
 });
 
-test("a pinned folder keeps its place when it is renamed and leaves when it is removed", () => {
-  const layout = cleanLayout({ groups: [{ id: "main", title: "", items: [{ type: "files", path: "/DATA/Media" }, { type: "folder", id: "f", title: "", items: [{ type: "files", path: "/DATA/Media/Films" }, { type: "files", path: "/DATA/Mediator" }] }] }] });
-  const renamed = movePath(layout, "/DATA/Media", "/DATA/Video");
-  expect(renamed.groups[0]!.items).toEqual([{ type: "files", path: "/DATA/Video" }, { type: "folder", id: "f", title: "", items: [{ type: "files", path: "/DATA/Video/Films" }, { type: "files", path: "/DATA/Mediator" }] }]);
-  const removed = movePath(layout, "/DATA/Media", null);
-  expect(removed.groups[0]!.items).toEqual([{ type: "folder", id: "f", title: "", items: [{ type: "files", path: "/DATA/Mediator" }] }]);
+test("a member has the numbers and their own tiles, closed up", () => {
+  const layout = cleanLayout({ cards: [{ type: "block", id: "attention", ...at(0, 0, 3, 3) }, { type: "block", id: "stats", ...at(3, 0, 5, 3) }, app("theirs", at(7, 9)), app("others", at(0, 3))] });
+  const seen = arrange(layout, { apps: ["theirs"] });
+  expect(seen.cards.map((c) => (c.type === "block" ? c.id : (c as { name: string }).name))).toEqual(["stats", "theirs"]);
+  expect(seen.cards[0]).toMatchObject({ x: 0, y: 0 });
+  expect(seen.cards[1]).toMatchObject({ x: 5, y: 0 });
+  // an administrator's page stays as it was laid out
+  expect(arrange(layout, { apps: ["theirs"], admin: true }).cards.find((c) => c.type === "app")).toMatchObject({ x: 7, y: 9 });
 });
 
-test("every block of the dashboard stands in exactly one place, or is put away", () => {
-  const usual = { top: ["stats"], side: ["attention", "activity"], bottom: [], hidden: ["adblock"] };
-  expect(cleanWidgets(null)).toEqual(usual);
-  expect(cleanLayout({ groups: [] }).widgets).toEqual(usual);
-  expect(cleanWidgets({ top: ["activity", "nope", "activity"], side: "x", bottom: ["stats", "activity"], hidden: ["attention", "stats", "nope"] })).toEqual({ top: ["activity"], side: [], bottom: ["stats"], hidden: ["attention", "adblock"] });
-  // the layout carries them through arranging and through a folder being renamed
-  const layout = cleanLayout({ groups: [], widgets: { top: [], side: ["stats"], bottom: ["activity"], hidden: ["attention"] } });
-  expect(arrange(layout, [], []).widgets).toEqual({ top: [], side: ["stats"], bottom: ["activity"], hidden: ["attention", "adblock"] });
-  expect(movePath(layout, "/a", "/b").widgets).toEqual(layout.widgets);
+test("a tile of Home Assistant and a widget stay while their server is seen", () => {
+  const layout = cleanLayout({ cards: [{ type: "ha", server: "bbbbbbbb", entity: "light.x", ...at(0, 0) }, { type: "widget", id: "w", source: "frigate", server: "cccccccc", view: "camera", camera: "yard", ...at(1, 0, 2, 2) }, { type: "widget", source: "frigate", server: "cccccccc", view: "camera", ...at(3, 0) }] });
+  expect(layout.cards).toHaveLength(2);
+  expect(arrange(layout, { apps: [], servers: ["bbbbbbbb"], widgetServers: ["cccccccc"], admin: true }).cards).toHaveLength(2);
+  expect(arrange(layout, { apps: [], admin: true }).cards).toHaveLength(0);
+  expect(haTiles(layout)).toEqual(["bbbbbbbb/light.x"]);
 });
 
-test("the numbers of other machines are blocks put on the page by hand", () => {
-  expect(cleanWidgets({ top: ["stats", "machine:22d2efed", "machine:XYZ", "machine:22d2efed"], side: ["machine:304015a8", "attention", "activity"], hidden: ["machine:aaaaaaaa"] })).toEqual({ top: ["stats", "machine:22d2efed"], side: ["machine:304015a8", "attention", "activity"], bottom: [], hidden: ["adblock"] });
-  // and survive arranging and the text of the layout
-  const layout = cleanLayout({ groups: [], widgets: { top: ["machine:22d2efed", "stats"] } });
-  expect(arrange(layout, [], []).widgets.top).toEqual(["machine:22d2efed", "stats"]);
-  expect(parseLayoutText(layoutText(layout)).widgets.top).toEqual(["machine:22d2efed", "stats"]);
+test("a removed server's cards go, also out of a folder; a machine's numbers go with the machine; places stay", () => {
+  const layout = cleanLayout({ cards: [{ type: "ha", server: "bbbbbbbb", entity: "light.x", ...at(0, 0) }, { type: "folder", id: "f", title: "", items: [{ type: "ha", server: "bbbbbbbb", entity: "light.y" }, { type: "app", name: "a" }], ...at(5, 5) }, { type: "folder", id: "g", title: "", items: [{ type: "ha", server: "bbbbbbbb", entity: "light.z" }], ...at(6, 5) }, { type: "block", id: "machine:aaaaaaaa", ...at(0, 1, 3, 1) }] });
+  const dropped = dropServer(layout, "bbbbbbbb");
+  expect(dropped.cards.map((c) => c.type)).toEqual(["block", "folder"]);
+  expect(dropped.cards[1]).toMatchObject({ x: 5, y: 5, items: [{ type: "app", name: "a" }] });
+  expect(dropBlock(dropped, "machine:aaaaaaaa").cards.map((c) => c.type)).toEqual(["folder"]);
 });
 
-test("a layout saved while the numbers were blocks of their own and there was a left column", () => {
-  expect(cleanWidgets({ top: ["cpu", "memory"], left: ["activity", "disk"], main: ["group:a"], side: ["attention"], bottom: ["temp"], hidden: ["network"] })).toEqual({ top: ["stats"], side: ["activity", "attention"], bottom: [], hidden: ["adblock"] });
-  expect(cleanWidgets({ top: [], side: ["attention"], hidden: ["cpu", "memory", "activity"] }).hidden).toEqual(["stats", "activity", "adblock"]);
+test("a folder of the file manager follows a move and goes with a removal", () => {
+  const layout = cleanLayout({ cards: [{ type: "files", path: "/DATA/a", ...at(2, 2) }, { type: "files", path: "/DATA/ab", ...at(3, 2) }, { type: "folder", id: "f", title: "", items: [{ type: "files", path: "/DATA/a/in" }], ...at(4, 2) }] });
+  const moved = movePath(layout, "/DATA/a", "/mnt/b");
+  expect(moved.cards[0]).toMatchObject({ path: "/mnt/b", x: 2, y: 2 });
+  expect(moved.cards[1]).toMatchObject({ path: "/DATA/ab" });
+  expect(moved.cards[2]).toMatchObject({ items: [{ path: "/mnt/b/in" }] });
+  expect(movePath(layout, "/DATA/a", null).cards.map((c) => c.type)).toEqual(["files"]);
 });
 
-test("a layout saved while the dashboard was a free grid comes back to the places", () => {
-  const app = (name: string) => ({ type: "app", name });
-  const layout = cleanLayout({
-    groups: [
-      { id: "media", title: "Media", items: [app("jellyfin")] },
-      { id: "main", title: "", items: [app("memos"), { type: "widget", id: "cpu" }] },
-      { id: "alone", title: "", bare: true, items: [app("gitea")] },
-      { id: "lost", title: "Lost", items: [] },
-    ],
-    blocks: [{ id: "activity", x: 0, y: 0, w: 12 }, { id: "group:media", x: 0, y: 3, w: 6 }, { id: "group:alone", x: 6, y: 1, w: 2 }, { id: "group:main", x: 0, y: 1, w: 6 }, { id: "memory", x: 0, y: 5, w: 2 }],
-    hidden: ["cpu", "attention"],
-  });
-  // groups in the order they stood in, tiles that stood alone in the group before them, no numbers among tiles
-  expect(layout.groups).toEqual([{ id: "main", title: "", items: [app("memos"), app("gitea")] }, { id: "media", title: "Media", items: [app("jellyfin")] }, { id: "lost", title: "Lost", items: [] }] as never);
-  // one number was on the board, so the numbers stay; the activity is back in the side column
-  expect(layout.widgets).toEqual({ top: ["stats"], side: ["activity"], bottom: [], hidden: ["attention", "adblock"] });
-  expect(cleanLayout({ groups: [], blocks: [], hidden: ["cpu", "temp"] }).widgets.hidden).toEqual(["stats", "adblock"]);
-  // tiles that stood above every group go into the first one; with no group at all they make one
-  const loose = cleanLayout({ groups: [{ id: "main", title: "", items: [app("memos")] }, { id: "top", title: "", bare: true, items: [app("gitea")] }], blocks: [{ id: "group:top", x: 0, y: 0, w: 2 }, { id: "group:main", x: 0, y: 1, w: 8 }] });
-  expect(loose.groups).toEqual([{ id: "main", title: "", items: [app("gitea"), app("memos")] }] as never);
-  expect(cleanLayout({ groups: [{ id: "a", title: "", bare: true, items: [app("memos")] }, { id: "b", title: "", bare: true, items: [app("gitea")] }], blocks: [] }).groups).toHaveLength(2);
-});
-
-test("the layout goes to text and back unchanged; text that is not a layout is refused", () => {
-  const layout = cleanLayout({
-    groups: [{ id: "main", title: "", items: [{ type: "app", name: "memos" }, { type: "link", id: "r", title: "Router: home", url: "http://192.168.1.1/", icon: "" }, { type: "folder", id: "f", title: "Tools", items: [{ type: "files", path: "/DATA/Media" }] }, { type: "builtin", id: "add" }] }],
-    widgets: { top: ["stats"], side: ["attention"], hidden: ["activity"] },
-  });
-  const text = layoutText(layout);
-  expect(text).toContain("title: \"Router: home\"");
-  expect(text).toContain("  bottom: []\n");
-  expect(text).toContain("  hidden:\n    - activity\n");
-  expect(parseLayoutText(text)).toEqual(layout);
-  // an edit by hand: a link added, a tile that is nothing dropped
-  const edited = parseLayoutText(text.replace("groups:", "groups:\n  - id: links\n    title: Links\n    items:\n      - type: link\n        url: https://example.com\n      - type: nothing"));
-  expect(edited.groups[0]).toMatchObject({ id: "links", title: "Links", items: [{ type: "link", title: "example.com", url: "https://example.com/" }] });
-  for (const bad of ["", "just text", "- a\n- b", "groups: 5", "groups: [\n"]) expect(() => parseLayoutText(bad)).toThrow();
-});
-
-test("Hata's own tiles are always there for those who have them, wherever they were put", () => {
-  // never arranged: after everything else, "Add" last
-  expect(arrange(cleanLayout(null), ["memos"], ["/x"], ["store", "add"]).groups[0]!.items).toEqual([{ type: "app", name: "memos" }, { type: "files", path: "/x" }, { type: "builtin", id: "store" }, { type: "builtin", id: "add" }]);
-  const layout = cleanLayout({
-    groups: [
-      { id: "main", title: "", items: [{ type: "builtin", id: "store" }, { type: "app", name: "memos" }, { type: "builtin", id: "add" }] },
-      { id: "more", title: "More", items: [{ type: "builtin", id: "store" }, { type: "builtin", id: "nope" }, { type: "folder", id: "f", title: "", items: [{ type: "builtin", id: "add" }, { type: "app", name: "gitea" }] }] },
-    ],
-  });
-  // named once, unknown ones dropped, "Add" does not live in a folder
-  expect(layout.groups[1]!.items).toEqual([{ type: "folder", id: "f", title: "", items: [{ type: "app", name: "gitea" }] }]);
-  // a new app comes before an "Add" that closes the first group
-  expect(arrange(layout, ["memos", "gitea", "new"], [], ["store", "add"]).groups[0]!.items).toEqual([{ type: "builtin", id: "store" }, { type: "app", name: "memos" }, { type: "app", name: "new" }, { type: "builtin", id: "add" }]);
-  // a member has the store and no "Add", a guest neither
-  expect(arrange(layout, ["memos"], [], ["store"]).groups[0]!.items).toEqual([{ type: "builtin", id: "store" }, { type: "app", name: "memos" }]);
-  expect(arrange(layout, ["memos"], []).groups[0]!.items).toEqual([{ type: "app", name: "memos" }]);
-  // moved elsewhere, "Add" stays where it was put
-  const moved = cleanLayout({ groups: [{ id: "main", title: "", items: [{ type: "builtin", id: "add" }, { type: "app", name: "memos" }] }] });
-  expect(arrange(moved, ["memos", "new"], [], ["store", "add"]).groups[0]!.items).toEqual([{ type: "builtin", id: "add" }, { type: "app", name: "memos" }, { type: "app", name: "new" }, { type: "builtin", id: "store" }]);
-});
-
-test("an app of another machine is a tile of its own, `<name>@<machine>`", () => {
-  const layout = cleanLayout({ groups: [{ id: "g", title: "", items: [{ type: "app", name: "memos@1a2b3c4d" }, { type: "app", name: "memos" }, { type: "app", name: "memos@nothex!" }] }] });
-  expect(layout.groups[0]!.items).toEqual([{ type: "app", name: "memos@1a2b3c4d" }, { type: "app", name: "memos" }]);
-  const shown = arrange(layout, ["memos", "memos@1a2b3c4d", "kuma@1a2b3c4d"], []);
-  expect(shown.groups[0]!.items.map((item) => (item.type === "app" ? item.name : item.type))).toEqual(["memos@1a2b3c4d", "memos", "kuma@1a2b3c4d"]);
-});
-
-test("tiles of Home Assistant: kept while their server is seen, also when it does not answer", () => {
-  const layout = cleanLayout({
-    groups: [{ id: "main", title: "", items: [
-      { type: "ha", server: "8bf90303", entity: "light.bed" },
-      { type: "ha", server: "8bf90303", entity: "light.bed" },
-      { type: "ha", server: "8bf90303", entity: "not an entity" },
-      { type: "ha", server: "nope", entity: "light.bed" },
-      { type: "folder", id: "f", title: "Kitchen", items: [{ type: "ha", server: "aaaaaaaa", entity: "switch.kettle" }] },
-      { type: "app", name: "memos" },
-    ] }],
-  });
-  expect(haTiles(layout)).toEqual(["8bf90303/light.bed", "aaaaaaaa/switch.kettle"]);
-  // a member who sees only the first server; nothing of Home Assistant is added by itself
-  const seen = arrange(layout, ["memos"], [], [], ["8bf90303"]);
-  expect(seen.groups[0]!.items).toEqual([{ type: "ha", server: "8bf90303", entity: "light.bed" }, { type: "app", name: "memos" }]);
-  expect(arrange(layout, ["memos"], []).groups[0]!.items).toEqual([{ type: "app", name: "memos" }]);
-  const left = dropServer(layout, "aaaaaaaa");
-  expect(haTiles(left)).toEqual(["8bf90303/light.bed"]);
-});
-
-test("sizes and widgets: kept as given, what is not one left out", () => {
-  const widget = { type: "widget", id: "w1", source: "frigate", server: "abcd1234", view: "camera", camera: "front", size: "2x2" };
-  const layout = cleanLayout({ groups: [{ id: "a", title: "", items: [widget, { type: "widget", id: "w2", source: "qbit", server: "abcd1234", view: "torrents", size: "9x9" }, { type: "widget", id: "w3", source: "qbit", server: "abcd1234", view: "camera" }, { type: "widget", id: "w4", source: "frigate", server: "abcd1234", view: "camera", camera: "../x" }, { type: "ha", server: "abcd1234", entity: "light.a", size: "2x1" }] }] });
-  expect(layout.groups[0]!.items).toEqual([widget, { type: "widget", id: "w2", source: "qbit", server: "abcd1234", view: "torrents" }, { type: "ha", server: "abcd1234", entity: "light.a", size: "2x1" }] as never);
-});
-
-test("a widget does not go into a folder, and a tile in one has no size", () => {
-  const layout = cleanLayout({ groups: [{ id: "a", title: "", items: [{ type: "folder", id: "f", title: "F", items: [{ type: "widget", id: "w1", source: "qbit", server: "abcd1234", view: "torrents" }, { type: "ha", server: "abcd1234", entity: "light.a", size: "2x2" }] }] }] });
-  expect(layout.groups[0]!.items[0]).toMatchObject({ items: [{ type: "ha", entity: "light.a" }] });
-  expect((layout.groups[0]!.items[0] as { items: object[] }).items[0]).not.toHaveProperty("size");
-});
-
-test("a widget stays only for one who sees its server, and goes with it", () => {
-  const widget = { type: "widget", id: "w1", source: "qbit", server: "abcd1234", view: "torrents" };
-  const layout = cleanLayout({ groups: [{ id: "a", title: "", items: [widget] }] });
-  expect(arrange(layout, [], [], [], [], ["abcd1234"]).groups[0]!.items).toEqual([widget] as never);
-  expect(arrange(layout, [], [], [], [], []).groups[0]!.items).toEqual([]);
-  expect(dropServer(layout, "abcd1234").groups).toEqual(cleanLayout({ groups: [{ id: "a", title: "", items: [] }] }).groups);
+test("the layout as text comes back the same; text of the old format is taken too; other text is refused", () => {
+  const layout = cleanLayout({ cards: [{ type: "block", id: "stats", ...at(0, 0, 4, 2) }, app("memos", at(4, 0)), { ...link("Router"), ...at(5, 1, 2, 1) }, { type: "folder", id: "f", title: "Tools", items: [{ type: "app", name: "gitea" }], ...at(0, 2) }] });
+  expect(parseLayoutText(layoutText(layout))).toEqual(layout);
+  expect(parseLayoutText("groups:\n  - id: a\n    items:\n      - type: app\n        name: memos\n").cards.some((c) => c.type === "app")).toBe(true);
+  expect(() => parseLayoutText("just words")).toThrow();
+  expect(() => parseLayoutText("a: 1")).toThrow();
 });
