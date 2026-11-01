@@ -15616,7 +15616,7 @@ function storageSection(section = "storage") {
   if (section === "protection") {
     return [
       data.working && diskWorkStrip(data.working),
-      data.array && data.mounting?.possible && data.disks.length > 1 && h("section", { class: "card pad" }, h("div", { class: "section-head" }, h("h2", null, t("pool.open").replace(/…$/, "")), button(t("pool.open"), { class: "small", onclick: () => poolDialog() })), h("p", { class: "muted small" }, t("protection.poolLead"))),
+      data.array?.on && data.mounting?.possible && data.disks.length > 1 && h("section", { class: "card pad" }, h("div", { class: "section-head" }, h("h2", null, t("pool.open").replace(/…$/, "")), button(t("pool.open"), { class: "small", onclick: () => poolDialog() })), h("p", { class: "muted small" }, t("protection.poolLead"))),
       data.array && data.mounting?.possible && arrayCard(data, data.array),
       data.raids && (data.raids.pools.length > 0 || data.raids.lacking.length > 0) && raidCard(data),
       !data.mounting?.possible && !(data.raids?.pools.length > 0) && h("section", { class: "card pad" }, h("p", { class: "muted" }, t("protection.notHere"))),
@@ -17678,7 +17678,10 @@ function dropTwinHeading() {
   const stack = document.querySelector(".settings > .stack");
   const title = stack?.querySelector(".settings-head h1")?.textContent;
   const first = stack?.querySelector(":scope > :not(.settings-head) h2");
-  if (first && title && first.textContent.trim().startsWith(title)) first.hidden = true;
+  if (!first || !title || !first.textContent.trim().startsWith(title)) return;
+  // what stands next to the words (a state, a count) stays
+  if (first.children.length) for (const node of [...first.childNodes]) node.nodeType === Node.TEXT_NODE && node.remove();
+  else first.hidden = true;
 }
 
 function settingsFrame(section, ...content) {

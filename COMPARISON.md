@@ -2,7 +2,7 @@
 
 **English** · [Українська](COMPARISON.uk.md)
 
-What the home server programs of Hata's kind have, as of **October 2026**. Versions compared: Hata 0.26,
+What the home server programs of Hata's kind have, as of **October 2026**. Versions compared: Hata 0.27,
 umbrelOS 2.0, ZimaOS 1.7, CasaOS 0.4.15, Runtipi 4.10, Cosmos 0.23, Unraid 7.3.
 
 Every cell about another product comes from its own documentation, release notes or source code — see
@@ -27,7 +27,7 @@ or a plugin is named as such. These products change fast: if a cell is wrong or 
 | Users | administrators, members, guests; who opens which app; members' folders in Files, read or write | owner and members; shared apps and folders | owner and members; per-folder access | one | one administrator; a guest dashboard | users and administrators; groups in Pro | one administrator; separate users for shares |
 | Two-factor sign-in | authenticator app, passkeys; can be required for administrators | authenticator app | — | — | authenticator app | yes | through an OpenID provider of your own |
 | Sign-in in front of apps | any app, by its port; no domain needed; the app is told who came in | yes | — | — | per app, with a domain | yes; also an OpenID Connect provider for apps | — |
-| HTTPS | Let's Encrypt, or behind your own proxy | its own certificate authority for `.local` names | — (Nginx Proxy Manager from the store) | — | Let's Encrypt (Traefik); self-signed on the home network | Let's Encrypt, wildcard by DNS | Let's Encrypt on myunraid.net, or your own |
+| HTTPS | Let's Encrypt (also one certificate for all the names), or behind your own proxy | its own certificate authority for `.local` names | — (Nginx Proxy Manager from the store) | — | Let's Encrypt (Traefik); self-signed on the home network | Let's Encrypt, wildcard by DNS | Let's Encrypt on myunraid.net, or your own |
 
 ## Apps
 
@@ -54,6 +54,7 @@ or a plugin is named as such. These products change fast: if a cell is wrong or 
 
 | | Hata | umbrelOS | ZimaOS | CasaOS | Runtipi | Cosmos | Unraid |
 |---|---|---|---|---|---|---|---|
+| Home DNS and ad blocking | built in, off until turned on: own names, lists in hosts, AdGuard and Pi-hole formats, a log, moving in from Pi-hole and AdGuard Home | an app from the store | an app from the store | an app from the store | an app from the store | — | an app from the store |
 | Remote access | WireGuard (server and client), Tailscale | Tailscale (store app) | its own client app; Tailscale and WireGuard as store apps | — | store apps | Constellation (a Nebula mesh VPN) | WireGuard; Tailscale (plugin) |
 | The server's network | addresses (IPv4, IPv6), Wi-Fi, an access point, a spare way to the internet, a closed internet side; every change undone by itself unless confirmed | address, Wi-Fi | address | — | — | — | address, bonding, VLANs, Wi-Fi |
 
