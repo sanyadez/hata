@@ -1491,6 +1491,8 @@ i.dot.danger { background: var(--danger); }
   .tree-row > .tree-name { grid-column: 1; }
   .tree-row > .tree-what, .tree-row > .tree-state, .tree-row > .tree-busy { grid-column: 1; }
   .tree-row > .tree-actions { grid-column: 2; grid-row: 1 / span 4; }
+  /* a name keeps its line: what stands next to it goes under it, not the name's letters one by one */
+  .tree-name { flex-wrap: wrap; }
   .tree-row.child .tree-name { padding-left: 0; }
   .tree-row.child { padding-left: 24px; }
   .tree-busy:empty { display: none; }
@@ -1588,6 +1590,8 @@ img.broken { visibility: hidden; }
   .pg-card .numbers .kpi-value strong { font-size: 13px; letter-spacing: 0; }
   .pg-card .numbers .kpi-hint { display: none; }
 }
+/* a phone gives the numbers two rows of the grid: they share that height, nothing stays empty under them */
+@container pg-card (max-width: 480px) and (max-height: 300px) { .pg-card .numbers .kpis { flex: 1; align-content: space-evenly; } }
 @container pg-card (min-width: 481px) and (max-height: 170px) { .pg-card .numbers .kpi-hint { display: none; } .pg-card .numbers .kpi-value strong { font-size: 20px; } }
 @container pg-card (min-width: 600px) and (min-height: 260px) and (max-height: 300px) {
   .pg-card .numbers { display: grid !important; grid-template-columns: 1fr 1fr; grid-template-rows: auto 1fr; }
