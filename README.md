@@ -14,7 +14,7 @@ curl -fsSL https://raw.githubusercontent.com/sanyadez/hata/main/install.sh | sud
 
 On a Linux machine with systemd, x86_64 or arm64 — see [Install](#install).
 
-![The dashboard: system numbers, app tiles in groups, what needs attention and recent activity](screenshots/dashboard.png)
+![The dashboard: system numbers, app tiles and widgets in groups, what needs attention and recent activity](screenshots/dashboard.png)
 
 | | |
 |---|---|
@@ -35,8 +35,8 @@ network, disks, their health and protection from a disk failure, backups with re
 single files, the server's own network — Wi-Fi, a spare way to the internet, an access point —, users and
 who may open what, HTTPS, notifications when something breaks. It also looks after the other computers of
 the house through a small client, makes containers and virtual machines on the server itself, looks after
-those of a Proxmox VE server, puts the devices of a Home Assistant server on its home page, and can be the
-home's DNS server with ad blocking. The full
+those of a Proxmox VE server, connects to services you already run — the devices of Home Assistant, the torrents of qBittorrent, the cameras of
+Frigate — and shows them right on its home page, and can be the home's DNS server with ad blocking. The full
 list is under [Status](#status).
 
 **What is it an alternative to?**
@@ -298,11 +298,20 @@ Early development. What works today:
   (Ubuntu with a desktop among the systems), its disk grows when asked. Inside a container that was given
   only part of the user ids (an unprivileged LXC, for one of Proxmox) none of this is offered, and the
   page says why;
-- Home Assistant servers, by a sign-in or a token: their devices put on Hata's home page next to the
+- Integrations, one page of what Hata is connected to, with what it found on the home network offered there and
+  an "Add" button for the rest; nothing is installed in the services themselves. Home Assistant servers, by a sign-in or a token: their devices put on Hata's home page next to the
   apps — a light switched, its brightness, a thermostat, a lock that asks first —, who sees them chosen
   per server, members switching only what is on their home page. A server's updates, its backups and its
   devices with a low battery are on its page and under "needs attention"; one running as an app of this
   server is opened by Hata's domain once it is told to trust Hata, which a button does;
+- qBittorrent: its torrents on a page of their own, searched and filtered, paused and resumed, added by a
+  link or a file, removed with or without their files; what it is doing on the app's tile and page; a word
+  when a torrent fails or the password stops being accepted;
+- Frigate: its cameras and what they noticed, with pictures that pass through and are not kept, for
+  administrators only; a word when a camera stops. A certificate of its own is confirmed once, and the
+  password goes only to that certificate. The moving video stays in Frigate;
+- widgets on the home page, in 1×1, 2×1, 1×2 or 2×2 cells: torrents, a camera, what the cameras noticed; tiles of
+  Home Assistant can be sized the same way;
 - HTTPS, your choice of three: none (address and ports, for a home network); behind your own proxy (nginx,
   Caddy, Traefik) with a check that the proxy is set up right; or by Hata itself with certificates from
   Let's Encrypt — one certificate per name, or one for the domain and every name under it, confirmed by a DNS
@@ -316,7 +325,7 @@ Early development. What works today:
 - an MCP server for AI agents: an agent that speaks MCP can say why an app is down (state of the
   containers, the tail of the log and the likely causes in one answer), update apps, install from the store,
   take and restore snapshots, look after the machines and the Proxmox servers and containers, see the network,
-  shares, arrays and updates, change names, ports, DNS names and blocking rules, switch Home Assistant's devices.
+  shares, arrays and updates, change names, ports, DNS names and blocking rules, switch Home Assistant's devices, look at the torrents and the cameras.
   It never opens a port to the internet or unlocks a door. It connects with an access key made in the settings, and a key has one of
   three levels — look, operate, everything; no level reaches users, passwords, files or a shell. Secrets in
   compose files are hidden from keys that may not change them, and what an agent did is in the activity log
@@ -400,10 +409,12 @@ in Google Drive or Box.
 | ![Containers and virtual machines of this server, with their limits and the place they live in](screenshots/containers.png) Containers and virtual machines of this server, with their limits and the place they live in | ![A new virtual machine: Ubuntu with a desktop](screenshots/container-new.png) A new virtual machine: Ubuntu with a desktop |
 | ![A virtual machine's page: its screen, limits, snapshots](screenshots/vm-screen.png) A virtual machine's page: its screen, limits, snapshots | ![Their network, places and disc images](screenshots/containers-settings.png) Their network, places and disc images |
 
-### Home Assistant
+### Integrations
 
 | | |
 |---|---|
+| ![What Hata is connected to, what it found, and everything else under "Add"](screenshots/integrations.png) What Hata is connected to, what it found, and everything else under "Add" | ![Widgets on Home, and the choice of a size](screenshots/widget-size.png) Widgets on Home, and the choice of a size |
+| ![The torrents of a qBittorrent](screenshots/qbittorrent.png) The torrents of a qBittorrent | ![The cameras of a Frigate and what they noticed (a test picture here)](screenshots/frigate.png) The cameras of a Frigate and what they noticed (a test picture here) |
 | ![Home Assistant: servers, devices by room, updates, batteries, backups](screenshots/home-assistant.png) Home Assistant: servers, devices by room, updates, batteries, backups | |
 
 ### First run
