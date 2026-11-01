@@ -1455,6 +1455,8 @@ body:has(.assistant.paged) > .assistant-fab { display: none; }
 .adblock-outcome.allowed, .adblock-outcome.rewritten { color: var(--accent-text); }
 .adblock-outcome.passed, .adblock-outcome.own { color: var(--muted); }
 .adblock-numbers strong { font-size: 1.5rem; }
+.adblock-block { display: grid; gap: 10px; }
+.adblock-block p { margin: 0; }
 
 /* the column of Settings: finding on top, sections by group; longer than a window it scrolls by itself */
 .settings-nav { position: sticky; top: 88px; max-height: calc(100dvh - 104px); overflow: hidden auto; padding: 10px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); display: grid; gap: 8px; align-content: start; }
