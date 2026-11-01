@@ -1639,7 +1639,7 @@ dialog.add-dialog:not([open]) { display: none; }
 .add-find { display: flex; align-items: center; gap: 8px; margin: 0 20px 12px; padding: 0 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); }
 .add-find input { flex: 1; min-width: 0; padding: 9px 0; border: 0; background: none; box-shadow: none; outline: none; }
 .add-body { flex: 1; display: grid; grid-template-columns: 240px minmax(0, 1fr); min-height: 0; border-top: 1px solid var(--border); }
-:root dialog .add-nav.add-nav { position: static; align-content: start; padding: 10px; border: 0; border-right: 1px solid var(--border); border-radius: 0; background: none; box-shadow: none; backdrop-filter: none; overflow: hidden auto; }
+:root dialog .add-nav.add-nav { position: static; align-content: start; padding: 10px; border: 0 !important; border-right: 1px solid var(--border) !important; border-radius: 0; background: none !important; box-shadow: none; backdrop-filter: none !important; overflow: hidden auto; }
 .add-cat { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .add-cat .ico { width: 16px; height: 16px; flex: none; }
 .add-nav .cat { text-align: left; color: var(--muted); text-decoration: none; font: inherit; background: none; cursor: pointer; }
@@ -1659,7 +1659,7 @@ dialog.add-dialog:not([open]) { display: none; }
 @media (max-width: 760px) {
   dialog.add-dialog { height: 92dvh; }
   .add-body { display: flex; flex-direction: column; overflow: hidden auto; }
-  :root dialog .add-nav.add-nav { flex: none; border-right: 0; border-bottom: 1px solid var(--border); overflow: visible; }
+  :root dialog .add-nav.add-nav { flex: none; border-right: 0 !important; border-bottom: 1px solid var(--border) !important; overflow: visible; }
   .add-main { overflow: visible; }
   .add-row { flex-wrap: wrap; }
   .add-text { flex-basis: calc(100% - 44px); }

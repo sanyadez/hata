@@ -417,7 +417,8 @@ in Google Drive or Box.
 
 | | |
 |---|---|
-| ![What Hata is connected to, what it found, and everything else under "Add"](screenshots/integrations.png) What Hata is connected to, what it found, and everything else under "Add" | ![Widgets on Home, and the choice of a size](screenshots/widget-size.png) Widgets on Home, and the choice of a size |
+| ![What Hata is connected to, what it found, and everything else under "Add"](screenshots/integrations.png) What Hata is connected to, what it found, and everything else under "Add" | ![Editing the grid of Home: every edge and corner of a card can be pulled](screenshots/grid-edit.png) Editing the grid of Home: every edge and corner of a card can be pulled |
+| ![Everything that can stand on Home, by sections, with a search](screenshots/add-dialog.png) Everything that can stand on Home, by sections, with a search | |
 | ![The torrents of a qBittorrent](screenshots/qbittorrent.png) The torrents of a qBittorrent | ![The cameras of a Frigate and what they noticed (a test picture here)](screenshots/frigate.png) The cameras of a Frigate and what they noticed (a test picture here) |
 | ![Home Assistant: servers, devices by room, updates, batteries, backups](screenshots/home-assistant.png) Home Assistant: servers, devices by room, updates, batteries, backups | |
 
