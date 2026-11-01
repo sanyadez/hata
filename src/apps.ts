@@ -199,12 +199,34 @@ export const ICON_MIME = { ...IMAGE_MIME, svg: "image/svg+xml" } as const;
 export const MAX_ICON = 1024 * 1024;
 type IconType = keyof typeof ICON_MIME;
 
+/**
+ * Whether text opens as an SVG: an XML declaration, comments and a doctype may come before the tag. Walked
+ * by hand, in one pass: the text comes from an upload, and a pattern for repeated comments backtracks
+ * exponentially, which on a few hundred bytes stops the whole server.
+ */
+function opensAsSvg(text: string): boolean {
+  const lower = text.toLowerCase();
+  let at = 0;
+  const past = (open: string, close: string): boolean => {
+    if (!lower.startsWith(open, at)) return false;
+    const end = lower.indexOf(close, at + open.length);
+    if (end < 0) return false;
+    at = end + close.length;
+    while (at < lower.length && /\s/.test(lower[at]!)) at++;
+    return true;
+  };
+  past("<?xml", ">");
+  while (past("<!--", "-->"));
+  past("<!doctype svg", ">");
+  return lower.startsWith("<svg", at) && /[\s>]/.test(lower[at + 4] ?? "");
+}
+
 /** What kind of picture an icon is; SVG is text, so it is told by its opening tag */
 export function iconType(bytes: Uint8Array): IconType | "" {
   const known = imageType(bytes.subarray(0, 16));
   if (known) return known;
   const head = new TextDecoder().decode(bytes.subarray(0, 1024)).replace(/^\uFEFF/, "").trimStart();
-  return /^(<\?xml[^>]*>\s*)?(<!--[\s\S]*?-->\s*)*(<!DOCTYPE svg[^>]*>\s*)?<svg[\s>]/i.test(head) ? "svg" : "";
+  return opensAsSvg(head) ? "svg" : "";
 }
 
 export function appIcon(name: string): { path: string; type: IconType; mtime: number } | null {

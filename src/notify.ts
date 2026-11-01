@@ -305,7 +305,7 @@ export interface Outgoing {
   body: string;
 }
 
-const escapeHtml = (value: string): string => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+const escapeHtml = (value: string): string => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 const MARKS = { danger: "🔴", warn: "🟠", info: "🏠", ok: "✅" } as const;
 
 export function telegramRequest(config: NotifyConfig["telegram"], message: Message, base: string): Outgoing {

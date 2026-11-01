@@ -85,6 +85,10 @@ test("the requests to the services", () => {
   expect(sent).toMatchObject({ chat_id: "42", parse_mode: "HTML" });
   expect(sent.text).toStartWith("🔴 <b>A &lt;b&gt; &amp; C keeps restarting</b>\nContainer c does not stay up");
   expect(sent.text).toContain('<a href="https://hata.example/#/apps/memos/logs">');
+  // a quote must not end the link's attribute, and Telegram reads &quot; back as a quote
+  const quoted = JSON.parse(telegramRequest({ enabled: true, token: "1:abc", chat: "42" }, { ...message!, title: 'The "A" app', route: '#/x" onclick="y' }, base).body);
+  expect(quoted.text).toContain('<a href="https://hata.example/#/x&quot; onclick=&quot;y">');
+  expect(quoted.text).toContain("<b>The &quot;A&quot; app</b>");
 
   const ntfy = ntfyRequest({ enabled: true, url: "https://ntfy.example/sub/home-alerts", token: "tk_1" }, message!, base);
   expect(ntfy.url).toBe("https://ntfy.example/");

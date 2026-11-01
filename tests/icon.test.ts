@@ -11,4 +11,16 @@ test("an icon is told by how the file begins, an SVG by its opening tag", () => 
   expect(iconType(bytes("<html><svg></svg></html>"))).toBe("");
   expect(iconType(bytes("GIF89a"))).toBe("");
   expect(iconType(new Uint8Array())).toBe("");
+  expect(iconType(bytes("<SVG>"))).toBe("svg");
+  expect(iconType(bytes("<!-- a --><!-- b -->\n<!-- c --><svg>"))).toBe("svg");
+  expect(iconType(bytes("<!-- never closed <svg>"))).toBe("");
+  expect(iconType(bytes("<svgfoo>"))).toBe("");
+});
+
+test("comments repeated many times take no time to look through", () => {
+  const started = performance.now();
+  // the pattern this replaced took about a second on 26 repeats, doubling with each one
+  expect(iconType(bytes("<!--" + "--><!--".repeat(26)))).toBe("");
+  expect(iconType(bytes("<!---->".repeat(140) + "<svg>"))).toBe("svg");
+  expect(performance.now() - started).toBeLessThan(100);
 });
