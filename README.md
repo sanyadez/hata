@@ -32,7 +32,7 @@ browser instead of a terminal. You pick an app in the store (Jellyfin, Nextcloud
 and well over a hundred more), press "Install", and it runs in Docker. Around the apps Hata does the rest of what
 a home server needs: a Home page with the state of the computer, a file manager, folders shared over the
 network, disks, their health and protection from a disk failure, backups with restore of a whole app or of
-single files, the server's own network — Wi-Fi, a spare way to the internet, an access point —, users and
+single files, the server's own network — Wi-Fi, a backup connection to the internet, an access point —, users and
 who may open what, HTTPS, notifications when something breaks. It also looks after the other computers of
 the house through a small client, makes containers and virtual machines on the server itself, looks after
 those of a Proxmox VE server, connects to services you already run — the devices of Home Assistant, the torrents of qBittorrent, the cameras of
@@ -61,7 +61,7 @@ not manage systemd services or system accounts. Of the system it keeps what a ho
 packages are updated from the page — of the server and of the other computers —, the server is restarted
 or shut down, and containers and virtual machines are made on the server itself or on a Proxmox VE server. Of the network it does what a home server needs: it
 shows the interfaces and changes an address — IPv4 and IPv6 —, with the previous one coming back by itself
-if the server can no longer be reached; it joins Wi-Fi, keeps a USB modem as a spare way to the internet,
+if the server can no longer be reached; it joins Wi-Fi, keeps a USB modem as a backup connection to the internet,
 and can turn the Wi-Fi adapter into an access point. The two do not get in each other's way and can run on one computer.
 
 **Can it manage containers and compose files like Portainer?**
@@ -140,7 +140,7 @@ Early development. What works today:
   up is handed over as it is), and every change is on trial: unless the page reaches the server again
   within a minute and a half, the previous settings come back by themselves; Wi-Fi: the networks in
   reach, joining one with its password, forgetting it; a USB modem or a phone sharing its connection is
-  recognised, and you choose which interface is the main way to the internet and which a spare one;
+  recognised, and you choose which interface is the main connection to the internet and which a backup one;
   the Wi-Fi adapter can be an access point of the server's own, joined by a QR code, with the
   internet shared through the server — on a network, a channel and an address of your choosing — and a
   spare cable port can give the internet out the same way; IPv6 is set next to IPv4 (from the router,
@@ -207,11 +207,11 @@ Early development. What works today:
   say and how far they are, and a data disk on its way to full is said a month ahead;
 - the data folder moves to a disk with one button (Settings → Apps, or right after formatting a disk):
   the apps are stopped, everything is copied, the apps' compose files — comments and all —, the backups,
-  the shared folders and the folders on Home are pointed at the new place, and the apps start
+  the network folders and the folders on Home are pointed at the new place, and the apps start
   again; the old folder is kept until you delete it, and a snapshot taken before the move still restores;
 - several disks as one folder (mergerfs, installed on request): a new file goes to the disk with the most
   free room, every file stays a plain file on one of the disks. A disk that is plugged in shows up on the
-  page by itself, and the disks are in the sidebar of Files. "Several disks together" sets the disks up in
+  page by itself, and the disks are in the sidebar of Files. "Set up RAID" sets the disks up in
   one go — what for, which disks, which of them holds the protection data — with a single confirmation for
   everything that is erased; when a disk the apps keep data on comes back after being away, the apps it
   stopped start again by themselves;
