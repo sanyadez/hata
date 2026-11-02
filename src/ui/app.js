@@ -60,7 +60,6 @@ const ICONS = {
   chevron: "M9 6l6 6-6 6",
   info: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 11v5M12 8h.01",
   sun: "M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zM12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4",
-  moon: "M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z",
   clock: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 7v5l3 2",
   globe: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM3 12h18M12 3c3 3.5 3 14.5 0 18M12 3c-3 3.5-3 14.5 0 18",
   terminal: "M5 8l4 4-4 4M12 16h7",
@@ -1410,7 +1409,7 @@ function tile(item) {
     sub = t("home.items", { n: shown });
   }
   // what has no page of its own to manage it gets a menu: where to move it, how to take it off
-  if (admin && !side && !isAddTile(item)) side = h("button", { type: "button", class: "tile-open", title: t("home.tileActions"), "aria-label": `${t("home.tileActions")}: ${title}`, onclick: () => tileMenu(item) }, icon("more"));
+  if (admin && !side && !isAddTile(item) && !tileHasNoMenu(item)) side = h("button", { type: "button", class: "tile-open", title: t("home.tileActions"), "aria-label": `${t("home.tileActions")}: ${title}`, onclick: () => tileMenu(item) }, icon("more"));
   const content = [...tileContent(item, title, sub, { badges, where }), bar];
   const key = tileKey(item);
   const main = haMain ??
@@ -1423,7 +1422,7 @@ function tile(item) {
         e.preventDefault();
         const at = { x: e.clientX, y: e.clientY };
         // "Add" offers what it adds; an app, the same menu as its button, where the pointer is
-        if (isAddTile(item)) menuAt(at, null, [{ label: t("home.add"), icon: "plus", run: () => addDialog() }, ...gridMenuEntries()]);
+        if (isAddTile(item)) menuAt(at, null, [{ label: t("home.add"), icon: "plus", run: () => addDialog() }]);
         else if (item.type === "app" && !target.machine) appTileMenu(target, null, at);
         else tileMenu(item, at);
       }, ondragstart: (e) => e.preventDefault() }, main, side);
@@ -1601,23 +1600,23 @@ function gridCancel() {
   paintGrid();
 }
 
-/** Everything laid out anew at its first size: the server finds places for cards with none */
+/** Everything laid out anew at its first size: the server finds places for cards with none. Offered only while arranging */
 const gridReset = () =>
   confirmAction({
-    title: t("grid.reset"),
+    title: t("grid.resetTitle"),
     lead: t("grid.resetLead"),
-    label: t("grid.reset"),
-    kind: "primary",
+    label: t("grid.resetGo"),
     iconName: "refresh",
     run: async () => {
       const blocksFirst = [...state.overview.dashboard.cards].sort((a, b) => (b.type === "block") - (a.type === "block"));
       await api("PUT", "/api/dashboard", { cards: blocksFirst.map(({ x: _x, y: _y, w: _w, h: _h, ...item }) => item) });
+      gridUi.arranging = false;
       await refresh();
     },
   });
 
-/** The entries of the grid in the menus of Home; a screen narrower than the grid lays it out by itself */
-const gridMenuEntries = () => (!isAdmin() || gridUi.arranging || state.route.view !== "home" ? [] : [gridColumns() === state.overview.grid.cols && { label: t("grid.edit"), icon: "grid", run: gridEdit }, { label: t("grid.reset"), icon: "refresh", run: gridReset }].filter(Boolean));
+/** Arranging is for a screen as wide as the grid: a narrower one lays Home out by itself */
+const mayArrange = () => isAdmin() && !gridUi.arranging && state.route.view === "home" && !!state.overview && gridColumns() === state.overview.grid.cols;
 
 function gridBar() {
   const box = document.getElementById("grid-bar");
@@ -1626,7 +1625,11 @@ function gridBar() {
   box.hidden = !gridUi.arranging;
   const head = document.getElementById("home-head");
   if (head) head.hidden = gridUi.arranging;
-  put(box, gridUi.arranging && h("div", { class: "pg-bar" }, h("strong", null, t("grid.arranging")), h("span", { class: "muted small grow" }, t("grid.arrangingHint")), button(t("grid.undo"), { class: "small", disabled: !gridUi.undo.length, onclick: undo }, "refresh"), button(t("common.cancel"), { class: "small", onclick: gridCancel }), button(t("grid.done"), { class: "small primary", onclick: gridDone }, "check")));
+  put(box, gridUi.arranging && h("div", { class: "pg-bar" }, h("strong", null, t("grid.arranging")), h("span", { class: "muted small grow" }, t("grid.arrangingHint")), button(t("grid.undo"), { class: "small", disabled: !gridUi.undo.length, onclick: undo }, "refresh"), button(t("grid.reset"), { class: "small danger", onclick: gridReset }, "refresh"), button(t("common.cancel"), { class: "small", onclick: gridCancel }), button(t("grid.done"), { class: "small primary", onclick: gridDone }, "check")));
+  // the button stays the same element across redraws: one under the pointer keeps its click
+  const slot = document.getElementById("grid-edit-slot");
+  const offer = mayArrange();
+  if (slot && !!slot.firstChild !== offer) put(slot, offer && button(t("grid.edit"), { class: "small", onclick: gridEdit }, "grid"));
 }
 
 const GRID_WIDE = 1000;
@@ -1707,7 +1710,7 @@ function gridCard(card, free) {
     const picked = getSelection();
     if (picked && !picked.isCollapsed && picked.containsNode(e.target, true)) return;
     e.preventDefault();
-    menuAt({ x: e.clientX, y: e.clientY }, null, [...gridMenuEntries(), { label: t("home.removeBlock"), icon: "trash", danger: true, run: () => removeBlock(card.id) }]);
+    menuAt({ x: e.clientX, y: e.clientY }, null, [{ label: t("home.removeBlock"), icon: "trash", danger: true, run: () => removeBlock(card.id) }]);
   });
   return el;
 }
@@ -1883,6 +1886,15 @@ function changeLayout(change) {
   return saveLayout(layout);
 }
 
+/** A link lives only on Home: gone from there, its address is gone */
+const removeLinkDialog = (link) =>
+  confirmAction({
+    title: t("home.removeLinkTitle", { name: link.title || linkHost(link.url) }),
+    lead: t("home.removeLinkLead", { url: link.url }),
+    label: t("home.removeLink"),
+    run: () => changeLayout((layout) => void takeTile(layout, tileKey(link))),
+  });
+
 function linkDialog(link) {
   const title = h("input", { value: link?.title ?? "", maxLength: 60, autocomplete: "off" });
   const url = h("input", { type: "url", value: link?.url ?? "", required: true, maxLength: 2000, placeholder: "https://", spellcheck: false, autocomplete: "off" });
@@ -1924,7 +1936,7 @@ function linkDialog(link) {
       h(
         "footer",
         null,
-        link && button(t("home.removeLink"), { class: "ghost danger-text", onclick: () => (dialog.close(), changeLayout((layout) => void takeTile(layout, tileKey(link)))) }, "trash"),
+        link && button(t("home.removeLink"), { class: "ghost danger-text", onclick: () => (dialog.close(), removeLinkDialog(link)) }, "trash"),
         closeButton(() => dialog, t("common.cancel")),
         h("button", { class: "btn primary" }, t(link ? "home.saveLink" : "home.add")),
       ),
@@ -1942,8 +1954,12 @@ const renameFolderDialog = (folder) =>
     }),
   );
 
+/** The store's tile only moves between folders: with no folder there is nothing to do to it */
+const tileHasNoMenu = (item) => item.type === "builtin" && !allFolders(state.overview.dashboard).length;
+
 /** Everything that can be done to a tile */
 function tileMenu(item, point = null) {
+  if (tileHasNoMenu(item)) return point ? pageMenu(point) : undefined;
   const key = tileKey(item);
   const layout = state.overview.dashboard;
   const at = locate(layout, key);
@@ -1960,14 +1976,13 @@ function tileMenu(item, point = null) {
     item.type === "folder" && entry(t("files.rename"), "edit", () => renameFolderDialog(item)),
     at.folder && entry(t("home.outOfFolder"), "signout", () => outOfFolder(key)),
     item.type !== "folder" && !staysOut(item) && allFolders(layout).filter((folder) => folder !== at.folder).map((folder) => entry(t("home.intoFolder", { name: folder.title || t("home.folder") }), "folder", () => intoFolder(key, folder.id))),
-    item.type !== "folder" && !staysOut(item) && !at.folder && item.type !== "builtin" && entry(t("home.newFolder"), "plus", () => nameDialog(t("home.newFolder"), "", t("files.create"), (title) => makeFolder(key, title))),
-    !at.folder && gridMenuEntries().map((one) => entry(one.label, one.icon, one.run)),
+    item.type !== "folder" && !staysOut(item) && !at.folder && item.type !== "builtin" && entry(t("home.intoNewFolder"), "plus", () => nameDialog(t("home.newFolder"), "", t("files.create"), (title) => makeFolder(key, title))),
     item.type === "folder" && entry(t("home.ungroup"), "x", () => changeLayout((next) => {
       const { list, index, item: folder } = locate(next, key);
       list.splice(index, 1);
       for (const inner of folder.items) addCard(next, inner);
     })),
-    item.type === "link" && entry(t("home.removeLink"), "trash", () => changeLayout((next) => void takeTile(next, key)), "danger"),
+    item.type === "link" && entry(t("home.removeLink"), "trash", () => removeLinkDialog(item), "danger"),
     item.type === "ha" && entry(t("ha.offHome"), "trash", () => changeLayout((next) => void takeTile(next, key)), "danger"),
     item.type === "widget" && entry(t("ha.offHome"), "trash", () => changeLayout((next) => void takeTile(next, key)), "danger"),
     item.type === "files" && entry(t("files.unpin"), "home", () => pinFolder(item.path, false)),
@@ -2541,7 +2556,7 @@ function renderHome() {
   };
   shell(
     h("div", { id: "grid-bar" }),
-    h("div", { class: "page-head home-head", id: "home-head" }, h("div", null, h("h1", null, greeting), h("p", { class: "meta", id: "host" }, " ")), h("div", { class: "counts", id: "counts" })),
+    h("div", { class: "page-head home-head", id: "home-head" }, h("div", null, h("h1", null, greeting), h("p", { class: "meta", id: "host" }, " ")), h("div", { class: "home-head-side" }, h("div", { class: "counts", id: "counts" }), h("span", { id: "grid-edit-slot" }))),
     h("div", { class: "pg", id: "pg" }),
   );
   Object.assign(gridUi, { arranging: false, undo: [], entry: null, drag: null });
@@ -2678,10 +2693,10 @@ function appTileMenu(app, anchor, at) {
     "menu dropdown",
     h("header", null, appIcon(app), h("div", null, h("h2", { class: "clip" }, app.title), stateChip(app))),
     url && h("a", { class: "menu-item", href: url, target: "_blank", rel: "noopener noreferrer", onclick: () => dialog.close() }, icon("external"), t("app.open")),
-    busy && item(t(app.job.kind === "update" ? "jobs.showLog" : "status.busy"), app.job.kind === "update" ? "logs" : "terminal", () => jobDialog(app.job.id, app.job.kind, app.title)),
+    busy && item(t("jobs.showLog"), "logs", () => jobDialog(app.job.id, app.job.kind, app.title)),
     isUp(app) ? item(t("app.stop"), "stop", () => startAction(app, "stop"), "", busy) : item(t("app.start"), "play", () => startAction(app, "start"), "", busy),
     isUp(app) && item(t("app.restart"), "refresh", () => startAction(app, "restart"), "", busy),
-    app.update && item(t("app.storeUpdate"), "up", () => storeUpdateDialog(app), "", busy),
+    app.update && item(t("app.storeUpdateGo"), "up", () => storeUpdateDialog(app), "", busy),
     !app.update && app.newer?.length > 0 && item(t("app.update"), "up", () => startAction(app, "update"), "", busy),
     page(t("app.tab.settings"), "sliders", "settings"),
     page(t("app.logs"), "logs", "logs"),
@@ -2689,7 +2704,6 @@ function appTileMenu(app, anchor, at) {
     page(t("app.tab.backups"), "archive", "backups"),
     isAdmin() && item(t("assistant.ask"), "chat", () => openAssistant({ draft: t("assistant.aboutApp", { title: app.title, app: app.name }) })),
     page(t("home.manage"), "grid", ""),
-    state.route.view === "home" && gridMenuEntries().map((one) => item(one.label, one.icon, one.run)),
     item(t("app.remove"), "trash", () => removeDialog(app), "danger", busy),
   );
   if (at) return placeAt(dialog, at);
@@ -2736,8 +2750,8 @@ function renderAppHead() {
         { class: "actions" },
         !isAdmin() && url && h("a", { class: "btn primary", href: url, target: "_blank", rel: "noopener noreferrer" }, icon("external"), h("span", null, t("app.open"))),
         ...(!isAdmin() ? [] : [
-        app.job && button(t("status.busy"), { onclick: () => jobDialog(app.job.id, app.job.kind, app.title) }, "terminal"),
-        app.update && !app.job && button(t("app.storeUpdate"), { class: "accent", onclick: () => storeUpdateDialog(app) }, "up"),
+        app.job && button(t("jobs.showLog"), { onclick: () => jobDialog(app.job.id, app.job.kind, app.title) }, "logs"),
+        app.update && !app.job && button(t("app.storeUpdateGo"), { class: "accent", onclick: () => storeUpdateDialog(app) }, "up"),
         !app.update && app.newer?.length > 0 && !app.job && button(t("app.update"), { class: "accent", title: `${t("app.newer")}: ${app.newer.join(", ")}`, onclick: () => startAction(app, "update") }, "up"),
         (app.status === "partial" || app.status === "restarting") && isAdmin() && button(t("assistant.askWhy"), { onclick: () => openAssistant({ ask: t("assistant.whyDown", { title: app.title, app: app.name }) }) }, "chat"),
         isUp(app) && button(t("app.restart"), { disabled: !!app.job, onclick: () => startAction(app, "restart") }, "refresh"),
@@ -3857,6 +3871,14 @@ async function containerAct(c, action, el) {
   void loadContainers();
 }
 
+/** The backups of one instance, in the dialog of the Backups page; with none kept, that page says what can be done */
+async function instanceBackups(c) {
+  await loadBackups();
+  const entry = state.backups?.apps.find((a) => a.name === `${c.name}@incus`);
+  if (entry?.snapshots.length) snapshotsDialog(entry);
+  else go("#/settings/backups");
+}
+
 function containerMenu(c, at) {
   menuAt(at, menuHeader(c.name, c.os, c.kind === "vm" ? "server" : "box"), [
     c.status === "running" && { label: t("incus.restart"), icon: "refresh", run: () => containerAct(c, "restart") },
@@ -3873,7 +3895,7 @@ function containerMenu(c, at) {
     { label: t("incus.clone") + "…", icon: "copy", run: () => cloneContainerDialog(c) },
     (incusUi.data?.places ?? []).length > 1 && { label: t("incus.place.moveItem"), icon: "arrow", run: () => moveContainerDialog(c) },
     { label: t("incus.backupNow"), icon: "archive", run: () => backupNow({ name: `${c.name}@incus`, title: c.name, incus: { kind: c.kind } }) },
-    { label: t("incus.backups"), icon: "archive", href: "#/settings/backups" },
+    { label: t("incus.backups"), icon: "archive", run: () => instanceBackups(c) },
     { label: t("incus.remove") + "…", icon: "trash", danger: true, run: () => removeContainerDialog(c) },
   ]);
 }
@@ -4238,8 +4260,8 @@ function containerSnapshotsDialog(c) {
                       h(
                         "div",
                         { class: "row-actions" },
-                        button(t("incus.snap.restore"), { class: "small", onclick: (e) => snapAction(e.currentTarget, "POST", `/api/containers/${c.name}/snapshots/${encodeURIComponent(s.name)}/restore`, t("incus.snap.restoreAsk", { name: s.name }), "incus.snap.restored") }, "undo"),
-                        button("", { class: "small ghost", title: t("incus.snap.remove"), "aria-label": t("incus.snap.remove"), onclick: (e) => snapAction(e.currentTarget, "DELETE", `/api/containers/${c.name}/snapshots/${encodeURIComponent(s.name)}`, null, "incus.snap.removed") }, "trash"),
+                        button(t("incus.snap.restore"), { class: "small", onclick: () => snapAction("POST", `/api/containers/${c.name}/snapshots/${encodeURIComponent(s.name)}/restore`, { title: t("incus.snap.restoreTitle", { name: s.name, instance: c.name }), lead: t("incus.snap.restoreLead", { instance: c.name }), label: t("incus.snap.restoreGo"), iconName: "undo" }, "incus.snap.restored") }, "undo"),
+                        button("", { class: "small ghost", title: t("incus.snap.remove"), "aria-label": t("incus.snap.remove"), onclick: () => snapAction("DELETE", `/api/containers/${c.name}/snapshots/${encodeURIComponent(s.name)}`, { title: t("incus.snap.removeTitle", { name: s.name }), lead: t("incus.snap.removeLead", { instance: c.name }), label: t("incus.snap.remove") }, "incus.snap.removed") }, "trash"),
                       ),
                     ),
                   ),
@@ -4254,18 +4276,15 @@ function containerSnapshotsDialog(c) {
     const fresh = incusUi.data?.containers?.find((x) => x.name === c.name);
     if (fresh) paint(fresh.snapshots);
   };
-  const snapAction = async (el, method, path, ask, done) => {
-    if (ask && !confirm(ask)) return;
-    el.disabled = true;
-    try {
-      await api(method, path);
-      toast(t(done));
-    } catch (e) {
-      toast(errorText(e), "error");
-    }
-    el.disabled = false;
-    await again();
-  };
+  const snapAction = (method, path, ask, done) =>
+    confirmAction({
+      ...ask,
+      run: async () => {
+        await api(method, path);
+        toast(t(done));
+        await again();
+      },
+    });
   const name = h("input", { placeholder: t("incus.snap.namePlaceholder"), class: "mono", spellcheck: false, autocapitalize: "none" });
   const take = button(
     t("incus.snap.take"),
@@ -4963,7 +4982,7 @@ function frigateMenu(x, at) {
     { label: t("frigate.cameras"), icon: "camera", href: `#/frigate/${x.id}` },
     { label: t("frigate.open"), icon: "external", run: () => window.open(x.url, "_blank", "noopener") },
     { label: t("frigate.change"), icon: "edit", run: () => frigateDialog(x) },
-    { label: t("frigate.disconnect"), icon: "trash", danger: true, run: () => frigateDisconnectDialog(x) },
+    { label: t("frigate.disconnect") + "…", icon: "trash", danger: true, run: () => frigateDisconnectDialog(x) },
   ]);
 }
 
@@ -5148,7 +5167,7 @@ function qbitMenu(x, at) {
     { label: t("qbit.torrents"), icon: "download", href: `#/qbit/${x.id}` },
     { label: t("qbit.open"), icon: "external", run: () => window.open(x.url, "_blank", "noopener") },
     { label: t("qbit.change"), icon: "edit", run: () => qbitDialog(x) },
-    { label: t("qbit.disconnect"), icon: "trash", danger: true, run: () => qbitDisconnectDialog(x) },
+    { label: t("qbit.disconnect") + "…", icon: "trash", danger: true, run: () => qbitDisconnectDialog(x) },
   ]);
 }
 
@@ -5440,7 +5459,7 @@ function haMenu(x, at = null) {
     h("header", null, h("span", { class: "machine-icon" }, icon("home")), h("div", null, h("h2", null, x.name), haChip(x))),
     item(t("ha.open"), "external", () => window.open(haWebUrl(x), "_blank", "noopener")),
     item(t("ha.change"), "edit", () => haDialog(x)),
-    item(t("ha.remove"), "trash", () => removeHaDialog(x), "danger"),
+    item(t("ha.remove") + "…", "trash", () => removeHaDialog(x), "danger"),
   );
   if (at) placeAt(dialog, at);
 }
@@ -5715,7 +5734,7 @@ function pveMenu(x, at = null) {
     item(t("pve.refresh"), "refresh", () => refreshPve(x)),
     item(t("pve.openWeb"), "external", () => window.open(x.url, "_blank", "noopener")),
     item(t("pve.change"), "edit", () => pveDialog(x)),
-    item(t("pve.remove"), "trash", () => removePveDialog(x), "danger"),
+    item(t("pve.remove") + "…", "trash", () => removePveDialog(x), "danger"),
   );
   if (at) placeAt(dialog, at);
 }
@@ -7282,7 +7301,7 @@ function pveSnapshotAct(x, g, s, action) {
       "footer",
       null,
       closeButton(() => (dialog.close(), pveGuestDialog(x, g), dialog), t("common.cancel")),
-      button(t(action === "rollback" ? "pve.rollback" : "pve.snapshotRemove"), {
+      button(t(action === "rollback" ? "pve.rollbackGo" : "pve.snapshotRemove"), {
         class: "danger",
         onclick: async (e) => {
           e.currentTarget.disabled = true;
@@ -7437,7 +7456,6 @@ function machineMenu(m, at = null) {
     !m.online && !m.instance && m.info?.macs?.length > 0 && item(t("machines.wake"), "play", () => wakeMachine(m)),
     m.online && item(t("machines.reboot"), "refresh", () => powerDialog(m, "reboot")),
     m.online && item(t("machines.poweroff"), "stop", () => powerDialog(m, "poweroff")),
-    m.online && item(t("machines.updateAgain"), "up", () => updateMachine(m)),
     item(t("machines.remove"), "trash", () => removeMachineDialog(m), "danger"),
   );
   if (at) placeAt(dialog, at);
@@ -7913,7 +7931,7 @@ function paintMachineApps() {
         h(
           "div",
           { class: "row-actions" },
-          busy && small(t("status.busy"), "terminal", () => jobDialog(app.job.id, app.job.kind, app.title, () => void loadMachineApps())),
+          busy && small(t("jobs.showLog"), "logs", () => jobDialog(app.job.id, app.job.kind, app.title, () => void loadMachineApps())),
           isUp(app) ? small(t("app.stop"), "stop", act(app, "stop"), busy) : small(t("app.start"), "play", act(app, "start"), busy),
           small(t("app.restart"), "refresh", act(app, "restart"), busy || !isUp(app)),
           small(t("app.update"), "up", act(app, "update"), busy),
@@ -10584,38 +10602,14 @@ function contextMenus() {
   });
 }
 
-/** Changes the look from anywhere (a right click on the page): shown at once, saved, taken back when refused */
-async function changeLook(patch) {
-  const before = state.appearance;
-  applyAppearance((state.appearance = { ...before, ...patch }));
-  try {
-    const saved = await api("PUT", "/api/settings", { appearance: patch });
-    state.appearance = saved.appearance;
-    if (state.settings) state.settings = saved;
-  } catch (e) {
-    applyAppearance((state.appearance = before));
-    toast(errorText(e), "error");
-  }
-}
-
-/** The menu of the page itself: the look, Hata's own places, and what the page on screen can add */
+/** The menu of the page itself: Hata's own places, and what the page on screen can add */
 function pageMenu(at) {
   const admin = isAdmin();
-  const look = state.appearance ?? {};
-  const theme = !look.background ? "system" : lightness(look.background) > 0.35 ? "light" : "dark";
-  // the built-in pictures and one's own, in turn; after the last — none
-  const walls = ["", ...(state.wallpapers ?? []), ...(look.custom ? ["custom"] : [])];
-  const nextWall = walls[(walls.indexOf(look.wallpaper ?? "") + 1) % walls.length];
   menuAt(at, menuHeader("Hata", state.version, "home"), [
-    ...(state.route.view === "home" && state.overview ? gridMenuEntries() : []),
+    mayArrange() && { label: t("grid.edit"), icon: "grid", run: gridEdit },
     admin && state.route.view === "home" && state.overview && { label: t("menu.addHere"), icon: "plus", run: () => addDialog() },
     admin && state.route.view === "home" && state.overview && { label: t("menu.dashboardConfig"), icon: "code", run: layoutTextDialog },
-    admin && { label: t("menu.themeLight"), icon: "sun", on: theme === "light", run: () => changeLook({ background: BACKGROUNDS[6] }) },
-    admin && { label: t("menu.themeDark"), icon: "moon", on: theme === "dark", run: () => changeLook({ background: BACKGROUNDS[0] }) },
-    admin && { label: t("menu.themeSystem"), icon: "sliders", on: theme === "system", run: () => changeLook({ background: "" }) },
-    admin && walls.length > 1 && { label: t("menu.nextWallpaper"), icon: "image", run: () => changeLook({ wallpaper: nextWall }) },
     admin && { label: t("menu.appearance"), icon: "image", href: "#/settings/appearance" },
-    { label: t("menu.reload"), icon: "refresh", run: () => location.reload() },
     { label: t("nav.settings"), icon: "sliders", href: "#/settings" },
     { label: t("menu.about"), icon: "info", href: "#/settings/about" },
   ]);
@@ -13435,14 +13429,16 @@ function networkSection() {
           nic.wifi?.ready && button(t("wifi.networks"), { onclick: () => wifiDialog(nic) }, "search"),
           nic.wifi?.ssid &&
             button(t("wifi.forget"), {
-              onclick: async () => {
-                try {
-                  state.network = await api("DELETE", `/api/network/${nic.name}/wifi`);
-                } catch (err) {
-                  toast(errorText(err), "error");
-                }
-                renderSettings();
-              },
+              onclick: () =>
+                confirmAction({
+                  title: t("wifi.forgetTitle", { ssid: nic.wifi.ssid }),
+                  lead: t("wifi.forgetLead"),
+                  label: t("wifi.forgetGo"),
+                  run: async () => {
+                    state.network = await api("DELETE", `/api/network/${nic.name}/wifi`);
+                    renderSettings();
+                  },
+                }),
             }),
           nic.manager === "nm" && !data.pending && (!nic.wifi || nic.wifi.ssid) && !nic.wifi?.hotspot && button(t("network.change"), { onclick: () => nicDialog(nic) }, "sliders"),
           (nic.manager === "networkd" || nic.manager === "ifupdown") && data.tool === "ok" && !data.pending && button(t("network.handover"), { onclick: () => handOverDialog(nic) }),
@@ -13803,7 +13799,19 @@ function wireguardCards() {
         "div",
         { class: "row-actions" },
         c.set
-          ? [button(t("wg.out.forget"), { class: "quiet", onclick: (e) => send("DELETE", "client", undefined, e.currentTarget, outError) }), c.enabled ? button(t("remote.turnOff"), { onclick: (e) => send("PUT", "client", { enabled: false }, e.currentTarget, outError) }) : button(t("remote.turnOn"), { class: "primary", onclick: (e) => send("PUT", "client", { enabled: true }, e.currentTarget, outError) })]
+          ? [button(t("wg.out.forget"), {
+            class: "quiet",
+            onclick: () =>
+              confirmAction({
+                title: t("wg.out.forgetTitle"),
+                lead: t("wg.out.forgetLead"),
+                label: t("wg.out.forgetGo"),
+                run: async () => {
+                  state.wireguard = await api("DELETE", "/api/wireguard/client");
+                  renderSettings();
+                },
+              }),
+          }), c.enabled ? button(t("remote.turnOff"), { onclick: (e) => send("PUT", "client", { enabled: false }, e.currentTarget, outError) }) : button(t("remote.turnOn"), { class: "primary", onclick: (e) => send("PUT", "client", { enabled: true }, e.currentTarget, outError) })]
           : [button(t("wg.out.file"), { onclick: () => pick.click() }), button(t("wg.out.join"), { class: "primary", onclick: join })],
       ),
     ),
@@ -13908,7 +13916,20 @@ function tailscaleCards() {
       settingRow(t("remote.account"), r.server ? t("remote.accountOwn", { server: r.server }) : r.expires ? t("remote.expires", { date: shortDate(r.expires) }) : "", h("span", null, r.tailnet || "—")),
       r.health.length > 0 && h("div", { class: "banner stack" }, r.health.map((line) => h("p", { class: "small" }, line))),
       error,
-      h("footer", null, h("div", { class: "row-actions" }, button(t("remote.signOut"), { class: "quiet", onclick: act("signout") }), on ? button(t("remote.turnOff"), { onclick: act("disconnect") }) : button(t("remote.turnOn"), { class: "primary", onclick: act("connect") }))),
+      h("footer", null, h("div", { class: "row-actions" }, button(t("remote.signOut"), {
+        class: "quiet",
+        onclick: () =>
+          confirmAction({
+            title: t("remote.signOutTitle"),
+            lead: t("remote.signOutLead"),
+            label: t("remote.signOutGo"),
+            iconName: "signout",
+            run: async () => {
+              state.remote = await api("POST", "/api/tailscale/signout", {});
+              renderSettings();
+            },
+          }),
+      }), on ? button(t("remote.turnOff"), { onclick: act("disconnect") }) : button(t("remote.turnOn"), { class: "primary", onclick: act("connect") }))),
     ),
     h(
       "section",
@@ -16708,6 +16729,7 @@ const RAID_KINDS = { md: "Linux RAID", zfs: "ZFS", btrfs: "btrfs" };
 /** Each array or pool with its state, its disks and its own check; Hata reads them and makes none */
 function raidCard(data) {
   const error = h("p", { class: "error", role: "alert" });
+  const askCall = (ask, path, body) => confirmAction({ ...ask, run: async () => setDisks(await api("POST", path, body)) });
   const call = (path, body) => async (e) => {
     const el = e.currentTarget;
     el.disabled = true;
@@ -16762,8 +16784,8 @@ function raidCard(data) {
           { class: "row-actions" },
           !busy && pool.state === "ok" && button(t("raid.check"), { class: "small", onclick: call("/api/disks/raid/check", { id: pool.id, action: "check" }) }, "refresh"),
           stoppable && button(t("raid.stop"), { class: "small", onclick: call("/api/disks/raid/check", { id: pool.id, action: "stop" }) }),
-          !busy && pool.kind === "md" && pool.state === "ok" && pool.errors > 0 && button(t("raid.repair"), { class: "small primary", onclick: call("/api/disks/raid/check", { id: pool.id, action: "repair" }) }),
-          !busy && counted && button(t(pool.kind === "md" ? "raid.forget" : "raid.clear"), { class: "small quiet", onclick: call("/api/disks/raid/clear", { id: pool.id }) }),
+          !busy && pool.kind === "md" && pool.state === "ok" && pool.errors > 0 && button(t("raid.repair"), { class: "small primary", onclick: () => askCall({ title: t("raid.repairTitle", { name: pool.name }), lead: t("raid.repairLead"), label: t("raid.repairGo"), iconName: "refresh" }, "/api/disks/raid/check", { id: pool.id, action: "repair" }) }),
+          !busy && counted && button(t(pool.kind === "md" ? "raid.forget" : "raid.clear"), { class: "small quiet", onclick: () => askCall({ title: t(pool.kind === "md" ? "raid.forgetTitle" : "raid.clearTitle", { name: pool.name }), lead: t(pool.kind === "md" ? "raid.forgetLead" : "raid.clearLead"), label: t(pool.kind === "md" ? "raid.forget" : "raid.clear"), iconName: "x" }, "/api/disks/raid/clear", { id: pool.id }) }),
         ),
       ),
     );
@@ -16868,7 +16890,7 @@ async function sidebarMenu(at, { label, path, machine = "", volume = null, iconN
       if (removable && data.mounting?.possible) entries.push({ label: t("copyin.button"), icon: "download", run: () => copyInDialog(disk) });
       if (mount && data.mounting?.ours[mount.path] && !pooled) entries.push({ label: t(removable ? "mounting.eject" : "mounting.disconnect"), icon: "signout", run: () => disconnectDialog(mount) });
     }
-    entries.push({ label: t("menu.inStorage"), icon: "disk", href: "#/settings/places" });
+    entries.push(volume.network ? { label: t("menu.inNetworkDrives"), icon: "network", href: "#/settings/places" } : { label: t("menu.inDisks"), icon: "disk", href: "#/settings/storage" });
   }
   menuAt(at, menuHeader(label, path, iconName), entries);
 }
@@ -18974,12 +18996,18 @@ function passkeysCard(account) {
       settingRow(
         key.name || t("passkey.unnamed"),
         [t("passkey.created", { date: new Date(key.createdAt).toLocaleDateString(state.lang, { day: "numeric", month: "short", year: "numeric" }) }), key.lastUsed && t("passkey.used", { time: ago(key.lastUsed) })].filter(Boolean).join(" · "),
-        button(t("app.remove"), {
+        button(t("passkey.remove"), {
           class: "small",
-          onclick: async () => {
-            await api("DELETE", `/api/account/passkeys/${key.id}`).catch((e) => toast(errorText(e), "error"));
-            void loadSettings();
-          },
+          onclick: () =>
+            confirmAction({
+              title: t("passkey.removeTitle", { name: key.name || t("passkey.unnamed") }),
+              lead: t("passkey.removeLead"),
+              label: t("passkey.removeGo"),
+              run: async () => {
+                await api("DELETE", `/api/account/passkeys/${key.id}`);
+                void loadSettings();
+              },
+            }),
         }),
       ),
     ),
@@ -19042,13 +19070,26 @@ function userMenuFor(user, at = null) {
       toast(errorText(e), "error");
     }
   };
+  /** What a person may do on this server changes most to or from administrator: it is asked first */
+  const askRole = (role, label) =>
+    confirmAction({
+      title: t(role === "admin" ? "users.makeAdminTitle" : "users.dropAdminTitle", { name: user.name }),
+      lead: t(role === "admin" ? "users.makeAdminLead" : "users.dropAdminLead", { name: user.name }),
+      label,
+      iconName: "user",
+      run: async () => {
+        await api("PUT", `/api/users/${user.id}`, { role });
+        toast(t("settings.saved"));
+        void loadUsers();
+      },
+    });
   const item = (label, iconName, action, cls = "") => h("button", { type: "button", class: "menu-item " + cls, onclick: () => (dialog.close(), action()) }, icon(iconName), label);
   dialog = openDialog(
     at ? "menu dropdown" : "menu",
     h("header", null, h("span", { class: "avatar" }, user.name.slice(0, 1).toUpperCase()), h("div", null, h("h2", null, user.name), h("span", { class: "muted small" }, t("user.role." + user.role)))),
-    user.role !== "member" && item(t("users.makeMember"), "user", () => change({ role: "member" })),
-    user.role !== "guest" && item(t("users.makeGuest"), "user", () => change({ role: "guest" })),
-    user.role !== "admin" && item(t("users.makeAdmin"), "sliders", () => change({ role: "admin" })),
+    user.role !== "member" && item(t("users.makeMember"), "user", () => (user.role === "admin" ? askRole("member", t("users.makeMember")) : change({ role: "member" }))),
+    user.role !== "guest" && item(t("users.makeGuest"), "user", () => (user.role === "admin" ? askRole("guest", t("users.makeGuest")) : change({ role: "guest" }))),
+    user.role !== "admin" && item(t("users.makeAdmin"), "sliders", () => askRole("admin", t("users.makeAdmin"))),
     item(t(user.shares === false ? "users.sharesAllow" : "users.sharesDeny"), "share", () => change({ shares: user.shares === false }, t(user.shares === false ? "users.sharesAllowed" : "users.sharesDenied"))),
     item(t("users.setPassword"), "refresh", () => {
       const password = passwordInput("new-password");
@@ -19079,16 +19120,30 @@ function userMenuFor(user, at = null) {
       );
       password.focus();
     }),
-    user.twoFactor && item(t("users.resetTwoFactor"), "x", () => change({ twoFactor: false })),
-    !self &&
-      item(t("users.remove"), "trash", async () => {
-        try {
-          await api("DELETE", `/api/users/${user.id}`);
+    user.twoFactor && item(t("users.resetTwoFactor"), "x", () =>
+      confirmAction({
+        title: t("users.resetTwoFactorTitle", { name: user.name }),
+        lead: t("users.resetTwoFactorLead", { name: user.name }),
+        label: t("users.resetTwoFactorGo"),
+        iconName: "x",
+        run: async () => {
+          await api("PUT", `/api/users/${user.id}`, { twoFactor: false });
+          toast(t("settings.saved"));
           void loadUsers();
-        } catch (e) {
-          toast(errorText(e), "error");
-        }
-      }, "danger"),
+        },
+      }),
+    ),
+    !self &&
+      item(t("users.remove"), "trash", () =>
+        confirmAction({
+          title: t("users.removeTitle", { name: user.name }),
+          lead: t("users.removeLead", { name: user.name }),
+          label: t("users.remove"),
+          run: async () => {
+            await api("DELETE", `/api/users/${user.id}`);
+            void loadUsers();
+          },
+        }), "danger"),
   );
   if (at) placeAt(dialog, at);
 }

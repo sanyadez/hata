@@ -374,6 +374,7 @@ dialog.tile-folder header { justify-content: space-between; }
 
 .home-head { align-items: flex-start; }
 .home-head h1 { font-size: 30px; }
+.home-head-side { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
 .status-pill { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; padding: 7px 14px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); color: var(--muted); font-size: 13px; }
 .status-pill .count { gap: 7px; }
 .status-pill .dot-sep { color: var(--faint); }
