@@ -88,7 +88,7 @@ test("only a destroying call of a key that asks waits for the word", async () =>
 
 test("the notification says what is asked, in the device's language", () => {
   const ask = { id: "7", agent: "laptop", tool: "app_remove", title: "Remove an app", args: { app: "memos", deleteData: true } };
-  expect(askMessage(ask, "en")).toMatchObject({ title: "The agent “laptop” asks for your word", text: "It wants to remove the app “memos” together with its data.", ask: "7", route: "#/settings/agents" });
+  expect(askMessage(ask, "en")).toMatchObject({ title: "The agent “laptop” asks for your permission", text: "It wants to remove the app “memos” together with its data.", ask: "7", route: "#/settings/agents" });
   expect(askMessage(ask, "uk").text).toBe("Він хоче видалити застосунок «memos» разом із даними.");
   // a tool the pages have no words for is named by its title
   expect(askMessage({ ...ask, tool: "new_tool", title: "Burn it" }, "en").text).toBe("It wants to Burn it.");

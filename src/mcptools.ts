@@ -6,7 +6,7 @@
  * through the same functions as the web UI and lands in the activity log under the key's name.
  *
  * What no tool does, at any level: users, passwords and sign-in, the access keys, a shell, files,
- * Hata's own settings, update and removal. An agent can be talked into things by a text it reads (a
+ * Hata's update and removal, and its settings other than names, ports, DNS and ad blocking. An agent can be talked into things by a text it reads (a
  * log line, a store description) — what it cannot reach, it cannot be talked into.
  *
  * A compose file is shown whole only to a key of the level that may change it; the others get it with

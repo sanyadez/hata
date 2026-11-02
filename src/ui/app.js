@@ -7803,7 +7803,7 @@ async function machineShareDialog(m, path) {
       field(t("machines.people.name"), name, t("machines.people.nameHint")),
       h("div", { class: "field" }, h("span", { class: "label" }, t("shares.who")), users.length ? h("div", { class: "share-access" }, users.map(({ user, select }) => h("label", null, h("span", { class: "grow" }, h("strong", null, user.name), user.role === "guest" && h("span", { class: "muted small block" }, t("user.role.guest"))), select))) : h("p", { class: "muted small" }, t("machines.people.nobody"))),
       error,
-      h("footer", null, share && button(t("machines.people.unshare"), { class: "danger", onclick: () => save(false) }), closeButton(() => dialog, t("common.cancel")), button(t("settings.save"), { type: "submit", class: "primary" })),
+      h("footer", null, share && button(t("machines.people.unshare"), { class: "danger", onclick: () => confirmAction({ title: t("machines.people.unshareTitle"), lead: t("machines.people.unshareLead"), label: t("machines.people.unshare"), iconName: "x", run: () => save(false) }) }), closeButton(() => dialog, t("common.cancel")), button(t("settings.save"), { type: "submit", class: "primary" })),
     ),
   );
 }
@@ -9071,14 +9071,16 @@ function snapshotList(app, snapshots, reload) {
             class: "icon-btn",
             "aria-label": t("backup.delete"),
             title: t("backup.delete"),
-            onclick: async () => {
-              try {
-                await api("DELETE", `/api/backups/${app.name}/${s.id}`);
-                reload();
-              } catch (e) {
-                toast(errorText(e), "error");
-              }
-            },
+            onclick: () =>
+              confirmAction({
+                title: t("backup.deleteTitle", { time: dateTime(s.at) }),
+                lead: t("backup.deleteLead"),
+                label: t("backup.delete"),
+                run: async () => {
+                  await api("DELETE", `/api/backups/${app.name}/${s.id}`);
+                  reload();
+                },
+              }),
           },
           icon("trash"),
         ),
@@ -13472,6 +13474,19 @@ function networkSection() {
         "aria-label": t("network.internet"),
         onchange: async () => {
           error.textContent = "";
+          if (select.value === "off" && nic.internet === "main") {
+            select.value = "main";
+            return confirmAction({
+              title: t("network.roleOffTitle", { nic: nic.name }),
+              lead: t("network.roleOffLead"),
+              label: t("network.roleOffGo"),
+              iconName: "x",
+              run: async () => {
+                state.network = await api("PUT", `/api/network/${nic.name}/role`, { role: "off" });
+                renderSettings();
+              },
+            });
+          }
           select.disabled = true;
           try {
             state.network = await api("PUT", `/api/network/${nic.name}/role`, { role: select.value });
@@ -13496,13 +13511,18 @@ function networkSection() {
             select.value = "home";
             return outsideDialog(nic);
           }
-          select.disabled = true;
-          try {
-            state.network = await api("PUT", `/api/network/${nic.name}/side`, { side: "home" });
-          } catch (err) {
-            error.textContent = errorText(err);
-          }
-          renderSettings();
+          // the firewall on this cable goes: pages, shares and Docker's ports answer there from now on
+          select.value = "outside";
+          confirmAction({
+            title: t("outside.homeTitle", { nic: nic.name }),
+            lead: t("outside.homeLead"),
+            label: t("outside.homeGo"),
+            iconName: "x",
+            run: async () => {
+              state.network = await api("PUT", `/api/network/${nic.name}/side`, { side: "home" });
+              renderSettings();
+            },
+          });
         },
       },
       ["home", "outside"].map((side) => h("option", { value: side, selected: (nic.outside ? "outside" : "home") === side }, t("outside.side." + side))),
@@ -13584,7 +13604,7 @@ function toolRemoveDialog(tool) {
         },
       },
       h("header", null, h("h2", { class: "grow" }, t("tools.removeTitle", { name: tool.name })), closeX(() => dialog)),
-      h("p", null, t("tools.removeLead")),
+      h("p", null, t(tool.id === "incus" ? "tools.removeLeadIncus" : "tools.removeLead")),
       tool.id === "docker" && h("p", { class: "banner" }, t("tools.removeDocker")),
       h("p", { class: "cmd whole" }, icon("terminal"), tool.remove),
       password && field(t("auth.password"), password),
@@ -13758,7 +13778,10 @@ function wireguardCards() {
     settingRow(t("wg.port"), t("wg.portHint", { port: s.port }), port),
     !s.firewall && h("p", { class: "banner" }, t("wg.noFirewall")),
     error,
-    h("footer", null, h("div", { class: "row-actions" }, s.enabled && button(t("remote.turnOff"), { onclick: (e) => send("PUT", "server", { enabled: false }, e.currentTarget) }), button(t(s.enabled ? "settings.save" : "remote.turnOn"), { class: "primary", onclick: (e) => send("PUT", "server", { ...typed(), enabled: true }, e.currentTarget) }))),
+    h("footer", null, h("div", { class: "row-actions" }, s.enabled && button(t("remote.turnOff"), { onclick: (e) => {
+      const el = e.currentTarget;
+      confirmAction({ title: t("wg.offTitle"), lead: t("wg.offLead"), label: t("remote.turnOff"), iconName: "x", run: () => send("PUT", "server", { enabled: false }, el) });
+    } }), button(t(s.enabled ? "settings.save" : "remote.turnOn"), { class: "primary", onclick: (e) => send("PUT", "server", { ...typed(), enabled: true }, e.currentTarget) }))),
   );
   const devices =
     s.address &&
@@ -13929,7 +13952,10 @@ function tailscaleCards() {
               renderSettings();
             },
           }),
-      }), on ? button(t("remote.turnOff"), { onclick: act("disconnect") }) : button(t("remote.turnOn"), { class: "primary", onclick: act("connect") }))),
+      }), on ? button(t("remote.turnOff"), { onclick: (e) => {
+        const el = e.currentTarget;
+        confirmAction({ title: t("remote.offTitle"), lead: t("remote.offLead"), label: t("remote.turnOff"), iconName: "x", run: () => act("disconnect")({ currentTarget: el, target: el }) });
+      } }) : button(t("remote.turnOn"), { class: "primary", onclick: act("connect") }))),
     ),
     h(
       "section",
@@ -16264,7 +16290,7 @@ function labelDialog(disk, volume) {
     "confirm",
     h("h2", null, t("relabel.title", { name: volume.label || volume.name })),
     h("p", { class: "muted" }, t("relabel.lead")),
-    volume.mounts.length > 0 && fs !== "ext4" && h("p", { class: "banner" }, t("relabel.leadMounted", { path: volume.mounts[0] })),
+    volume.mounts.length > 0 && fs !== "ext4" && fs !== "btrfs" && h("p", { class: "banner" }, t("relabel.leadMounted", { path: volume.mounts[0] })),
     h("label", { class: "field" }, h("span", { class: "label" }, t("mounting.label")), label, hint),
     slot,
     h("footer", null, closeButton(() => dialog, t("common.cancel")), go),
@@ -17134,7 +17160,7 @@ function arrayCard(data, array) {
       h("div", { class: "banner danger stack" }, h("strong", null, t("array.diskEmpty", { disk: array.settings.data.find((x) => x.name === array.trouble.disk)?.path ?? array.trouble.disk })), h("p", { class: "small" }, t("array.diskEmptyHint")), h("div", { class: "row-actions" }, button(t("array.recover"), { class: "small primary", disabled: busy, onclick: () => recoverDialog(array.settings.data.find((x) => x.name === array.trouble.disk)) }), act(t("array.emptyOnPurpose"), "/sync", { force: true, empty: true }))),
     array.trouble?.code === "parityLost" && h("div", { class: "banner danger stack" }, h("strong", null, t("array.parityLost", { disk: array.settings.parity })), h("p", { class: "small" }, t("array.parityLostHint")), h("div", { class: "row-actions" }, act(t("array.rebuild"), "/rebuild", {}, "small primary"))),
     array.errors > 0 && h("div", { class: "banner danger stack" }, h("strong", null, t("array.errors", { n: array.errors })), h("p", { class: "small" }, t("array.errorsHint")), h("div", { class: "row-actions" }, act(t("array.repair"), "/repair", {}, "small primary"))),
-    array.held && h("div", { class: "banner stack" }, h("strong", null, t("array.held", { n: array.held.removed })), h("p", { class: "small" }, t("array.heldHint")), h("div", { class: "row-actions" }, act(t("array.bringBack"), "/fix", {}, "small primary"), act(t("array.syncAnyway"), "/sync", { force: true }))),
+    array.held && h("div", { class: "banner stack" }, h("strong", null, t("array.held", { n: array.held.removed })), h("p", { class: "small" }, t("array.heldHint")), h("div", { class: "row-actions" }, act(t("array.bringBack"), "/fix", {}, "small primary"), button(t("array.syncAnyway"), { class: "small", disabled: busy, onclick: () => confirmAction({ title: t("array.syncTitle", { n: array.held.removed }), lead: t("array.syncLead"), label: t("array.syncGo"), iconName: "refresh", run: () => arrayCall("POST", "/sync", { force: true }) }) }))),
     !array.trouble && !array.held && array.lastSync && !array.lastSync.ok && h("p", { class: "banner small" }, t("array.failed", { message: array.lastSync.message })),
   ];
   const running =
@@ -17845,7 +17871,7 @@ async function shareDialog(path) {
       h("label", { class: "check" }, tm, h("span", null, h("strong", null, t("shares.tm.title")), h("span", { class: "muted small block" }, t("shares.tm.hint")))),
       limitField,
       error,
-      h("footer", null, share ? button(t("shares.stop"), { class: "danger", onclick: () => send("DELETE", `/api/shares/${encodeURIComponent(share.name)}`, undefined, t("shares.stoppedDone", { name: share.name })) }) : h("span"), closeButton(() => dialog, t("common.cancel")), h("button", { class: "btn primary" }, t(share ? "shares.save" : "shares.share"))),
+      h("footer", null, share ? button(t("shares.stop"), { class: "danger", onclick: () => confirmAction({ title: t("attention.end.share", { name: share.name }), lead: t("attention.end.shareLead", { path: share.path }), label: t("shares.stop"), iconName: "x", run: () => send("DELETE", `/api/shares/${encodeURIComponent(share.name)}`, undefined, t("shares.stoppedDone", { name: share.name })) }) }) : h("span"), closeButton(() => dialog, t("common.cancel")), h("button", { class: "btn primary" }, t(share ? "shares.save" : "shares.share"))),
     ),
   );
 }
@@ -18053,7 +18079,8 @@ const toolTarget = (target) => String(target?.name ?? target?.app ?? target?.hos
 function toolWords(call) {
   const key = `assistant.tool.${call.name}${call.name === "app_remove" && call.args.deleteData === true ? ".data" : ""}`;
   const a = call.args ?? {};
-  const said = Object.fromEntries(Object.entries(a).filter(([, value]) => typeof value !== "object").map(([name, value]) => [name, String(value)]));
+  // what a person is asked to allow is worded: `reboot` and `true` are the tool's values, not words
+  const said = Object.fromEntries(Object.entries(a).filter(([, value]) => typeof value !== "object").map(([name, value]) => [name, has(`assistant.value.${value}`) ? t(`assistant.value.${value}`) : String(value)]));
   return has(key) ? t(key, { ...said, app: String(a.app ?? a.name ?? ""), query: String(a.query ?? ""), snapshot: String(a.snapshot ?? ""), target: toolTarget(a.target) }) : call.name;
 }
 
@@ -18172,7 +18199,7 @@ function paintAssistant() {
     // with chats to choose from the list names the one on the screen; otherwise the window says what it is
     listed ? h("strong", { class: "grow ellipsis" }, title) : chats.length > 0 ? h("span", { class: "grow pick" }, pick) : h("strong", { class: "grow" }, t("assistant.title")),
     chat && !listed && tool(t("assistant.newChat"), "plus", fresh),
-    chat && tool(t("assistant.forget"), "trash", forgetAssistantChat),
+    chat && tool(t("assistant.forget"), "trash", () => confirmAction({ title: t("assistant.forgetTitle"), lead: t("assistant.forgetLead"), label: t("assistant.forget"), run: forgetAssistantChat })),
     !paged && tool(t("assistant.asPage"), "external", () => go("#/assistant"), "wide-only"),
     !paged && tool(t(wide ? "assistant.narrow" : "assistant.wide"), wide ? "shrink" : "expand", () => (panel.classList.toggle("wide"), rememberAssistant(), paintAssistant()), "wide-only"),
     !paged && tool(t("assistant.hide"), "down", closeAssistant),
@@ -18508,7 +18535,8 @@ const asksShown = new Set();
 
 function askedWhat(ask) {
   const key = `approvals.what.${ask.tool}${ask.tool === "app_remove" && ask.args.deleteData === true ? ".data" : ""}`;
-  return has(key) ? t(key, { app: String(ask.args.app ?? ""), snapshot: String(ask.args.snapshot ?? "") }) : ask.title;
+  if (has(key)) return t(key, { app: String(ask.args.app ?? ""), snapshot: String(ask.args.snapshot ?? "") });
+  return has(`assistant.tool.${ask.tool}`) ? toolWords({ name: ask.tool, args: ask.args }) : ask.title;
 }
 
 async function answerAsk(ask, allow) {
