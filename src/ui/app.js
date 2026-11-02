@@ -2688,6 +2688,68 @@ async function appNotesDialog(name, title) {
   }
 }
 
+/** Where "Show" asks for the values of an app's login: this server's or a machine's */
+const loginAsker = (name, machine) => Object.assign(() => api("POST", machine ? `/api/machines/${machine}/apps/${name}/login` : `/api/apps/${name}/login`), { key: `${name}@${machine ?? ""}` });
+
+/** What "Show" gave, for a while: the page is redrawn by every event, and asking made one. It is not kept any longer than this */
+const loginSeen = new Map();
+const LOGIN_SEEN_MS = 5 * 60_000;
+
+/** How to sign in to an app: one line, or the user name and the password apart, each to copy. A value the page does not hold yet comes by a button */
+function loginBlock(login, ask) {
+  if (login.kind === "first-visit" || login.kind === "none") return h("p", { class: "login-line muted small" }, t(`app.login.${login.kind}`));
+  const box = h("div", { class: "login-block" });
+  const copyButton = (label, value) => h("button", { type: "button", class: "icon-btn", title: `${t("twofa.copy")}: ${label}`, "aria-label": `${t("twofa.copy")}: ${label}`, onclick: () => copyQuietly(value) }, icon("copy"));
+  const row = (label, value) => h("div", { class: "login-row" }, h("span", { class: "muted small" }, label), h("span", { class: "mono login-value" }, value), copyButton(label, value));
+  const paint = () => {
+    const given = loginSeen.get(ask.key);
+    const seen = { ...login, ...(given ?? {}) };
+    const waits = !given && login.ask?.length;
+    const hiddenRow = (label) => h("div", { class: "login-row" }, h("span", { class: "muted small" }, label), h("span", { class: "mono login-value muted" }, "••••••••"));
+    const missing = (label, words) => h("div", { class: "login-row" }, h("span", { class: "muted small" }, label), h("span", { class: "muted small login-value" }, words));
+    const part = (field, label) => {
+      if (waits && login.ask.includes(field)) return hiddenRow(label);
+      if (seen[field]) return row(label, seen[field]);
+      return given && login.ask?.includes(field) ? missing(label, t(login.kind === "log" ? "app.login.notFound" : "app.login.empty")) : null;
+    };
+    const show = async (button) => {
+      button.disabled = true;
+      try {
+        loginSeen.set(ask.key, await ask());
+        setTimeout(() => loginSeen.delete(ask.key), LOGIN_SEEN_MS);
+        paint();
+      } catch (e) {
+        button.disabled = false;
+        toast(errorText(e), "error");
+      }
+    };
+    const showButton = (login.ask?.length && (waits || (login.kind === "log" && !seen.password))) ? button(t(login.kind === "log" ? "app.login.find" : "app.login.show"), { class: "small", onclick: (e) => void show(e.currentTarget) }, login.kind === "log" ? "search" : "key") : null;
+    box.replaceChildren(...[
+      part("user", t("app.login.user")),
+      part("password", t("auth.password")),
+      given?.line && h("p", { class: "muted small mono login-source" }, given.line),
+      h("p", { class: "muted small" }, t(`app.login.${login.kind}`)),
+      showButton && h("div", { class: "login-actions" }, showButton),
+    ].filter(Boolean));
+  };
+  paint();
+  return box;
+}
+
+function loginDialog(title, login, ask) {
+  let dialog;
+  dialog = openDialog("confirm", h("h2", null, t("app.loginOf", { title })), loginBlock(login, ask), h("footer", null, closeButton(() => dialog, t("common.close"))));
+}
+
+async function appLoginDialog(name, title) {
+  try {
+    const { login } = await api("GET", `/api/apps/${name}?lang=${state.lang}`);
+    if (login) loginDialog(title, login, loginAsker(name));
+  } catch (e) {
+    toast(errorText(e), "error");
+  }
+}
+
 function notesDialog(title, tips) {
   let dialog;
   dialog = openDialog("confirm", h("h2", null, t("app.notesOf", { title })), h("div", { class: "tips prose" }, md(tips)), h("footer", null, closeButton(() => dialog, t("common.close"))));
@@ -2713,6 +2775,7 @@ function appTileMenu(app, anchor, at) {
     isUp(app) && item(t("app.restart"), "refresh", () => startAction(app, "restart"), "", busy),
     app.update && item(t("app.storeUpdateGo"), "up", () => storeUpdateDialog(app), "", busy),
     !app.update && app.newer?.length > 0 && item(t("app.update"), "up", () => startAction(app, "update"), "", busy),
+    app.login && app.login !== "none" && isAdmin() && item(t("app.login"), "key", () => appLoginDialog(app.name, app.title)),
     app.notes && isAdmin() && item(t("app.notes"), "info", () => appNotesDialog(app.name, app.title)),
     page(t("app.tab.settings"), "sliders", "settings"),
     page(t("app.logs"), "logs", "logs"),
@@ -2880,6 +2943,7 @@ function appOverviewTab(app, box) {
         "aside",
         { class: "side" },
         h("section", { class: "card pad" }, h("div", { class: "section-head" }, h("h2", null, t("app.glance"))), app.port && row(t("app.address"), appAddress(app), true), row(t("app.composeFile"), app.composeFile, true), app.folders.map((f, i) => row(i ? "" : t("app.folders"), f, true)), row(t("app.source"), app.store ? t("app.fromStore", { store: app.store }) : t("app.custom")), row(t("app.installed"), new Date(app.installedAt).toLocaleDateString(state.lang, { day: "numeric", month: "short", year: "numeric" }))),
+        app.login && h("section", { class: "card pad" }, h("div", { class: "section-head" }, h("h2", null, t("app.login"))), loginBlock(app.login, loginAsker(app.name))),
         app.tips && h("section", { class: "card pad" }, h("div", { class: "section-head" }, h("h2", null, t("app.notes"))), h("div", { class: "tips prose" }, md(app.tips))),
         h("section", { class: "pad-x" }, h("div", { class: "section-head" }, h("h2", null, t("activity.title"))), app.activity.length ? app.activity.slice(0, 6).map(activityItem) : h("p", { class: "muted small" }, t("activity.none"))),
       ),
@@ -7949,6 +8013,7 @@ function paintMachineApps() {
           "div",
           { class: "row-actions" },
           busy && small(t("jobs.showLog"), "logs", () => jobDialog(app.job.id, app.job.kind, app.title, () => void loadMachineApps())),
+          app.login && app.login.kind !== "none" && small(t("app.login"), "key", () => loginDialog(app.title, app.login, loginAsker(app.name, m.id))),
           app.tips && small(t("app.notes"), "info", () => notesDialog(app.title, app.tips)),
           isUp(app) ? small(t("app.stop"), "stop", act(app, "stop"), busy) : small(t("app.start"), "play", act(app, "start"), busy),
           small(t("app.restart"), "refresh", act(app, "restart"), busy || !isUp(app)),
@@ -8670,6 +8735,27 @@ function jobNotes(e) {
   return there?.tips ? () => notesDialog(there.title, there.tips) : null;
 }
 
+/** What the page knows of how to sign in to an app just installed, by job: asked once, the tray is redrawn when it comes */
+const jobLogins = new Map();
+
+/** `{ login, ask }` for a finished install of an app with a `login`; none for a member or while it is being asked */
+function jobLogin(e) {
+  if (e.status !== "done" || e.kind !== "install" || !isAdmin()) return null;
+  const o = state.overview;
+  const there = o?.machineApps?.find((a) => a.key === e.app);
+  if (there) return there.login ? { login: there.login, ask: loginAsker(there.name, there.machine.id) } : null;
+  const here = o?.apps?.find((a) => a.name === e.app);
+  if (!here?.login) return null;
+  if (!jobLogins.has(e.id)) {
+    jobLogins.set(e.id, null);
+    api("GET", `/api/apps/${here.name}?lang=${state.lang}`).then(({ login }) => {
+      jobLogins.set(e.id, login && { login, ask: loginAsker(here.name) });
+      paintJobs();
+    }).catch(() => {});
+  }
+  return jobLogins.get(e.id);
+}
+
 const jobUrl = (e) => {
   const app = state.overview?.apps?.find((a) => a.name === e.app);
   return app && isUp(app) ? appUrl(app) : null;
@@ -8759,6 +8845,7 @@ function jobCard(e, row = false) {
   const url = e.status === "done" && e.kind === "install" ? jobUrl(e) : null;
   const page = e.status === "done" && e.kind === "install" && !e.machine ? `#/apps/${e.app}` : null;
   const notes = jobNotes(e);
+  const signIn = jobLogin(e);
   return h(
     "div",
     { class: `jt-card ${row ? "row" : ""} ${e.status} ${e.stopped ? "stopped" : ""}`, "data-job": e.id },
@@ -8766,6 +8853,7 @@ function jobCard(e, row = false) {
       appIcon({ name: e.app, title: jobName(e), icon: e.icon }, row ? "sm" : ""),
       h("div", { class: "jt-words" }, h("strong", { class: "jt-title" }, jobHeading(e)), h("span", { class: "jt-sub" + (e.kind !== "install" && !ended ? " mono" : "") }, jobSub(e))),
       row && (url || page) && h("a", { class: "icon-btn", href: url ?? page, title: t("common.open"), "aria-label": `${t("common.open")}: ${jobName(e)}`, ...(url ? { target: "_blank", rel: "noopener noreferrer" } : {}), onclick: () => closeJob(e.id) }, icon("external")),
+      row && signIn && signIn.login.kind !== "none" && h("button", { type: "button", class: "icon-btn", title: t("app.login"), "aria-label": `${t("app.login")}: ${jobName(e)}`, onclick: () => loginDialog(jobName(e), signIn.login, signIn.ask) }, icon("key")),
       row && h("button", { type: "button", class: "icon-btn", title: t("jobs.showLog"), "aria-label": `${t("jobs.showLog")}: ${jobName(e)}`, onclick: () => jobLog(e) }, icon("logs")),
       ended
         ? h("button", { type: "button", class: "icon-btn", title: t("jobs.dismiss"), "aria-label": `${t("jobs.dismiss")}: ${jobName(e)}`, onclick: () => closeJob(e.id) }, icon("x"))
@@ -8774,6 +8862,7 @@ function jobCard(e, row = false) {
     !ended && jobBar(e),
     h("p", { class: "jt-detail" + (jobWaits(e) ? " why" : "") }),
     !row && jobWaits(e) && e.kind === "install" && h("p", { class: "muted small jt-left" }, t("jobs.leftOver")),
+    !row && signIn && h("div", { class: "jt-login" }, signIn.login.kind !== "none" && h("strong", { class: "small" }, t("app.login")), loginBlock(signIn.login, signIn.ask)),
     !row && h("div", { class: "jt-actions" },
       button(t("jobs.showLog"), { class: "small", onclick: () => jobLog(e) }),
       notes && button(t("app.notes"), { class: "small", onclick: notes }, "info"),
@@ -8816,7 +8905,7 @@ function paintJobs() {
     document.body.append(tray);
     new ResizeObserver(() => document.documentElement.style.setProperty("--jobs-h", tray.offsetHeight + "px")).observe(tray);
   }
-  const sig = JSON.stringify([jobsUi.min, jobsUi.all, jobsUi.lost, state.lang, shown.map((e) => [e.id, e.status, e.stopped, jobHeading(e), e.icon, e.status === "done" && jobUrl(e), !!jobNotes(e)])]);
+  const sig = JSON.stringify([jobsUi.min, jobsUi.all, jobsUi.lost, state.lang, shown.map((e) => [e.id, e.status, e.stopped, jobHeading(e), e.icon, e.status === "done" && jobUrl(e), !!jobNotes(e), jobLogin(e)?.login.kind ?? ""])]);
   if (sig !== jobsUi.sig) {
     jobsUi.sig = sig;
     tray.className = jobsUi.min ? "min" : "";
@@ -8921,7 +9010,7 @@ function jobTileMenu(app, at) {
 setInterval(() => {
   if (document.hidden || jobsUi.hold) return;
   for (const e of [...jobsUi.list.values()]) {
-    if (!jobEnded(e) || !e.status || jobWaits(e) || jobNotes(e) || jobsUi.logs.has(e.id)) continue;
+    if (!jobEnded(e) || !e.status || jobWaits(e) || jobNotes(e) || (jobLogin(e) && jobLogin(e).login.kind !== "none") || jobsUi.logs.has(e.id)) continue;
     if (--e.left <= 0) closeJob(e.id);
   }
 }, 1000);
@@ -9604,6 +9693,19 @@ function copyText(text) {
     area.remove();
   }
   toast(t("files.pathCopied", { path: text }));
+}
+/** The same for what should not stand on the screen in a message: a password */
+function copyQuietly(text) {
+  try {
+    void navigator.clipboard.writeText(text);
+  } catch {
+    const area = h("textarea", { class: "offscreen", value: text, readOnly: true });
+    document.body.append(area);
+    area.select();
+    document.execCommand("copy");
+    area.remove();
+  }
+  toast(t("twofa.copied"));
 }
 const joinPath = (dir, name) => (dir === "/" ? "" : dir) + "/" + name;
 const rawUrl = (path, download = false) => `${filesApi("/raw")}?path=${encodeURIComponent(path)}${download ? "&download=1" : ""}`;

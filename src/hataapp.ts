@@ -129,6 +129,99 @@ export function cleanLogin(v: unknown, settings: Setting[]): Login | null {
   return null;
 }
 
+/** What the page gets of a `login`: no value it has to ask for. `ask` — the fields shown only when asked for */
+export interface LoginView {
+  kind: Login["kind"];
+  user?: string;
+  password?: string;
+  ask?: ("user" | "password")[];
+}
+
+/** What asking gives: the values, and for `log` the line they were found in. Nothing found — no `password` */
+export interface LoginValues {
+  user?: string;
+  password?: string;
+  line?: string;
+}
+
+const HIDDEN_TYPES = ["secret", "password"];
+
+function settingValue(ref: string, settings: Setting[], env: Record<string, string>): string {
+  const name = SETTING_REF.exec(ref)?.[1];
+  if (!name) return ref;
+  return env[name] ?? settings.find((s) => s.name === name)?.default ?? "";
+}
+
+export function loginView(login: Login, settings: Setting[], env: Record<string, string>): LoginView {
+  if (login.kind === "first-visit" || login.kind === "none") return { kind: login.kind };
+  if (login.kind === "default") return { ...login };
+  if (login.kind === "log") return { kind: "log", ...(login.user ? { user: login.user } : {}), ask: ["password"] };
+  const view: LoginView = { kind: "settings" };
+  const ask: ("user" | "password")[] = [];
+  if (login.user) {
+    const name = SETTING_REF.exec(login.user)?.[1];
+    if (name && HIDDEN_TYPES.includes(settings.find((s) => s.name === name)?.type ?? "")) ask.push("user");
+    else {
+      const user = settingValue(login.user, settings, env);
+      if (user) view.user = user;
+    }
+  }
+  // a password stays behind the button whatever type its setting has
+  if (login.password?.includes("$")) ask.push("password");
+  else if (login.password) view.password = login.password;
+  if (ask.length) view.ask = ask;
+  return view;
+}
+
+/** The values of a `settings` login, the ones the page has to ask for too */
+export function loginValues(login: Login, settings: Setting[], env: Record<string, string>): LoginValues {
+  if (login.kind !== "settings" && login.kind !== "default") return {};
+  const out: LoginValues = {};
+  const user = login.user ? settingValue(login.user, settings, env) : "";
+  const password = login.password ? settingValue(login.password, settings, env) : "";
+  if (user) out.user = user;
+  if (password) out.password = password;
+  return out;
+}
+
+const COLOURS = /\x1b\[[0-9;]*[A-Za-z]/g;
+/** What `docker compose logs` puts in front of a line: the container, and the time when asked for */
+const LOG_PREFIX = /^\S+\s+\|\s?(?:\d{4}-\d\d-\d\dT\S+\s)?/;
+
+/** Where the password stands in a line that holds it: its last word, when it comes after the words looked for */
+function passwordIn(line: string, find: string): { at: number; word: string } | null {
+  const after = line.toLowerCase().indexOf(find.toLowerCase());
+  if (after < 0) return null;
+  const end = line.trimEnd();
+  const word = end.split(/\s+/).at(-1) ?? "";
+  const at = end.length - word.length;
+  return word && at >= after + find.length ? { at, word } : null;
+}
+
+/** The newest line of a log with the words of a `log` login, as plain text: the password is the line's last word */
+export function foundInLog(log: string, find: string): LoginValues {
+  const lines = log.split("\n");
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i]!.replace(COLOURS, "").replace(LOG_PREFIX, "").trim();
+    const found = passwordIn(line, find);
+    if (found) return { password: found.word, line };
+  }
+  return {};
+}
+
+/** A log with the passwords of a `log` login taken out of it: what a key below `full` is given */
+export function logWithoutLogin(log: string, login: Login | null): string {
+  if (login?.kind !== "log") return log;
+  return log
+    .split("\n")
+    .map((raw) => {
+      const line = raw.replace(COLOURS, "");
+      const found = passwordIn(line, login.find);
+      return found ? line.slice(0, found.at) + "(hidden)" : raw;
+    })
+    .join("\n");
+}
+
 export interface IndexApp {
   name: string;
   meta: HataMeta;

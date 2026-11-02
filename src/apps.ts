@@ -25,7 +25,7 @@ import { compose as runCompose, composeCmd, containerStats, imageUser, inspectCo
 import { writeTextAtomic } from "./fsutil";
 import { newerImages } from "./images";
 import { guessBase, merge3, same, type MergeChange } from "./merge";
-import { answer, casaosOf, envLine, filled, ownCasaos, settingFolders, settingPorts, settingsForm, startingEnv, viewCompose, webPortOf, type FormSetting, type HataMeta, type IndexApp } from "./hataapp";
+import { answer, casaosOf, cleanLogin, envLine, foundInLog, loginValues, loginView, filled, ownCasaos, settingFolders, settingPorts, settingsForm, startingEnv, viewCompose, webPortOf, type FormSetting, type HataMeta, type IndexApp, type Login, type LoginValues, type LoginView } from "./hataapp";
 import { labelOf, siteDomain } from "./site";
 import { findStoreApp, storeApp, type StoreApp } from "./store";
 
@@ -343,6 +343,8 @@ export interface InstalledApp extends Pick<AppMeta, "title" | "icon" | "port" | 
   job: { id: string; kind: JobKind; stoppable?: boolean; progress?: JobProgress; last?: string } | null;
   /** The store has words on what to know of it: how to sign in, what to do first */
   notes: boolean;
+  /** How the store says one signs in to it; what to type is in `AppDetail.login` */
+  login: Login["kind"] | "";
   /** `done` — a step that ran once and ended as it should (`stepDone`) */
   containers: { id: string; name: string; service: string; image: string; state: string; status: string; ports: string[]; done: boolean }[];
 }
@@ -393,6 +395,7 @@ function describeApp(name: string, containers: ContainerSummary[] | null, lang: 
     protected: settings.access[name]?.protect === true,
     job: job ? { id: job.id, kind: job.kind, stoppable: job.stoppable, progress: job.progress, last: job.last } : null,
     notes: !!meta.tips,
+    login: loginOf(name)?.kind ?? "",
     containers: own.map((c) => ({
       id: c.Id.slice(0, 12),
       ports: [...new Set(c.Ports.filter((p) => p.PublicPort).map((p) => `${p.PublicPort}:${p.PrivatePort}/${p.Type}`))],
@@ -419,6 +422,33 @@ export interface AppDetail extends InstalledApp {
   installedAt: number;
   /** What the store says to know of it; may hold a default password, so for administrators only */
   tips: string;
+  /** How to sign in; may hold a default password, so for administrators only */
+  login: LoginView | null;
+}
+
+/**
+ * An app's `login`: what it was installed with, or what its store says now — a store may learn it later than
+ * the app was installed. Read again, since the file on disk can be edited.
+ */
+export function knownLogin(meta: HataMeta | null, store: string, name: string): Login | null {
+  if (!meta) return null;
+  return cleanLogin(meta.login, meta.settings) ?? cleanLogin(storeApp(store, name)?.hata?.meta.login, meta.settings);
+}
+
+export const loginOf = (name: string): Login | null => knownLogin(hataMetaOf(name), readHataFile(name)?.store ?? "", name);
+
+/** The values behind "Show": from the app's `.env`, or the password from its log. Each asking is written down */
+export async function revealLogin(name: string, user: string): Promise<LoginValues> {
+  assertInstalled(name);
+  const login = loginOf(name);
+  if (!login) throw new AppError("app.noLogin", 404);
+  let values: LoginValues;
+  if (login.kind === "log") {
+    const proc = Bun.spawn({ cmd: composeCmd(name, appDir(name), ["logs", "--no-color", "--tail", "5000"]), stdin: "ignore", stdout: "pipe", stderr: "ignore" });
+    values = { ...(login.user ? { user: login.user } : {}), ...foundInLog(await new Response(proc.stdout).text(), login.find) };
+  } else values = loginValues(login, hataMetaOf(name)!.settings, appEnv(name));
+  record("app.loginShown", { app: name, user });
+  return values;
 }
 
 export async function appDetail(name: string, lang: string): Promise<AppDetail> {
@@ -438,7 +468,12 @@ export async function appDetail(name: string, lang: string): Promise<AppDetail> 
     // removed while this was being put together
     throw new AppError("app.notFound", 404);
   }
-  return { ...describeApp(name, containers, lang), composeFile: composeFile(name), folders, installedAt, tips: appMeta(compose ?? { name }, lang).tips };
+  return { ...describeApp(name, containers, lang), composeFile: composeFile(name), folders, installedAt, tips: appMeta(compose ?? { name }, lang).tips, login: appLoginView(name) };
+}
+
+function appLoginView(name: string): LoginView | null {
+  const login = loginOf(name);
+  return login && loginView(login, hataMetaOf(name)!.settings, appEnv(name));
 }
 
 /** A stats sample of each running container of the app, keyed by container name */

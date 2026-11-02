@@ -16,7 +16,7 @@ import { localDomain, siteDomain, webAddress } from "./site";
 import { recent, record } from "./activity";
 import { listenAddress, settings } from "./config";
 import { type Level } from "./agents";
-import { appDir, AppError, appAction, appDetail, appStats, applyCompose, composeText, getJob, installCustom, installFromStore, jobFinished, listApps, listJobs, removeApp, storeAppDetail, type InstalledApp, type Job } from "./apps";
+import { appDir, AppError, loginOf, appAction, appDetail, appStats, applyCompose, composeText, getJob, installCustom, installFromStore, jobFinished, listApps, listJobs, removeApp, storeAppDetail, type InstalledApp, type Job } from "./apps";
 import { APP_NAME_RE, parseCompose, dumpCompose, type Compose } from "./appform";
 import { attention } from "./attention";
 import { backupApp, backupOverview, listSnapshots, restoreSnapshot } from "./backup";
@@ -30,7 +30,8 @@ import { catalogue } from "./store";
 import { systemStatus } from "./system";
 import { trashSizeOn } from "./trash";
 import { availableUpdate } from "./update";
-import { applyMachineCompose, installOnMachine, machineTiles, machineAppAction, machineApps, machineCompose, removeMachineApp } from "./machineapps";
+import { applyMachineCompose, installOnMachine, machineTiles, machineAppAction, machineApps, machineCompose, machineLogin, removeMachineApp } from "./machineapps";
+import { logWithoutLogin, type Login } from "./hataapp";
 import { backupMachineApp, restoreMachineApp } from "./machinebackup";
 import { containersOf, machinesAway, machines as machineList, open as openOnMachine, power as powerMachine, wake as wakeMachine, type MachineView } from "./machines";
 import { moveApp } from "./moveapp";
@@ -253,6 +254,18 @@ async function logTail(name: string, tail: number, service?: string): Promise<st
   return out.output;
 }
 
+/** An app's own password written to its log stays with those who may read its secrets */
+const shownLog = (log: string, login: Login | null, caller: Caller): string => (caller.level === "full" ? log : logWithoutLogin(log, login));
+
+/** How one signs in to an app, in words; the values themselves are for the person on Hata's page */
+const SIGN_IN: Record<Login["kind"], string> = {
+  default: "the app comes with a login, shown to the person on the app's page in Hata",
+  settings: "with what was chosen in the app's settings, shown to the person on the app's page in Hata",
+  "first-visit": "the app asks to make an account at the first visit",
+  log: "the app writes a password to its log, shown to the person on the app's page in Hata",
+  none: "the app has no sign-in of its own",
+};
+
 const APP = { app: { type: "string", description: "The app's name, as apps_list gives it (lowercase, e.g. \"jellyfin\")" } };
 
 // --- The tools --------------------------------------------------------------------------------------
@@ -307,7 +320,7 @@ const read: Omit<Tool, "level" | "effect">[] = [
       wrap(async () => {
         const name = appName(args);
         const [app, stats] = await Promise.all([appDetail(name, "en"), appStats(name).catch(() => ({}))]);
-        return { ...brief(app, caller), installedAt: when(app.installedAt), composeFile: app.composeFile, dataFolders: app.folders, usage: stats };
+        return { ...brief(app, caller), ...(app.login ? { signIn: SIGN_IN[app.login.kind] } : {}), installedAt: when(app.installedAt), composeFile: app.composeFile, dataFolders: app.folders, usage: stats };
       }),
   },
   {
@@ -316,12 +329,12 @@ const read: Omit<Tool, "level" | "effect">[] = [
     description: "The last lines of an app's container logs, with timestamps. For the question \"why does it not work\" use app_diagnose first — it includes the tail of the log.",
     input: { ...APP, service: { type: "string", description: "Only this service of the app (see the containers in app_get)" }, lines: { type: "number", description: "How many lines per container, 100 by default, 500 at most" } },
     required: ["app"],
-    run: (args) =>
+    run: (args, caller) =>
       wrap(async () => {
         const name = appName(args);
         composeText(name);
         const service = typeof args.service === "string" && /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(args.service) ? args.service : undefined;
-        return clip(await logTail(name, count(args.lines, 100, 500), service)) || "(the log is empty)";
+        return clip(shownLog(await logTail(name, count(args.lines, 100, 500), service), loginOf(name), caller)) || "(the log is empty)";
       }),
   },
   {
@@ -341,7 +354,7 @@ const read: Omit<Tool, "level" | "effect">[] = [
             return { name: c.name, state: state?.Status ?? c.state, exitCode: state?.ExitCode ?? null, oom: state?.OOMKilled === true, restarts: seen?.RestartCount ?? 0, error: state?.Error ?? "", health: state?.Health?.Status ?? "" };
           }),
         );
-        const log = docker.available ? await logTail(name, 40).catch((e) => (e instanceof Error ? e.message : String(e))) : "";
+        const log = docker.available ? shownLog(await logTail(name, 40).catch((e) => (e instanceof Error ? e.message : String(e))), loginOf(name), caller) : "";
         const system = systemStatus();
         const operations = recent(8, name);
         // a container that runs is not yet a page that answers: asked the way a browser on this server would
@@ -628,7 +641,7 @@ const machineRead: Omit<Tool, "level" | "effect">[] = [
     description: "The last lines of the container logs of an app on another machine, with timestamps. Use it for the same questions as app_logs here: why it does not start, what it complains about.",
     input: { ...MACHINE_APP, service: { type: "string", description: "Only this service of the app" }, lines: { type: "number", description: "How many lines per container, 100 by default, 500 at most" } },
     required: ["machine", "app"],
-    run: (args) =>
+    run: (args, caller) =>
       wrap(async () => {
         const m = machineOf(args);
         const channel = openOnMachine(m.id, "apps.logs", { name: appName(args), tail: count(args.lines, 100, 500), follow: false, service: args.service });
@@ -636,7 +649,7 @@ const machineRead: Omit<Tool, "level" | "effect">[] = [
         await channel.result.catch((e) => {
           throw e instanceof MuxError ? new AppError(e.code, 400, e.detail) : e;
         });
-        return clip(out) || "(the log is empty)";
+        return clip(shownLog(out, caller.level === "full" ? null : await machineLogin(m.id, appName(args)), caller)) || "(the log is empty)";
       }),
   },
   {

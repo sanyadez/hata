@@ -5208,5 +5208,19 @@
   "assistant.forgetTitle": "Delete this chat?",
   "assistant.forgetLead": "The conversation cannot be brought back. What the assistant already did stays done.",
   "app.notes": "What to know",
-  "app.notesOf": "What to know about {title}"
+  "app.notesOf": "What to know about {title}",
+  "app.login": "How to sign in",
+  "app.loginOf": "How to sign in to {title}",
+  "app.login.user": "User name",
+  "app.login.show": "Show",
+  "app.login.find": "Find in the log",
+  "app.login.empty": "Not set",
+  "app.login.notFound": "Not in the log yet. If the app has just started, wait a moment and look again. If you set your own password, the app no longer writes one.",
+  "app.login.default": "The app comes with these. Once changed in the app, they no longer work.",
+  "app.login.settings": "As set in the app's settings. Hata does not know of a change made inside the app itself.",
+  "app.login.log": "The app writes the password to its log. Hata notes each such look in the history.",
+  "app.login.first-visit": "The app asks you to make an account the first time you open it.",
+  "app.login.none": "The app has no sign-in of its own.",
+  "activity.app.loginShown": "Sign-in details of {app} looked at",
+  "error.app.noLogin": "The store does not say how to sign in to this app."
 }

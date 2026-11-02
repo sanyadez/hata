@@ -9,10 +9,11 @@
  * the activity log names the app and the machine.
  */
 import { appMeta, applyForm, appStatus, dumpCompose, stepDone, normalize, parseCompose, parseEnv, publishedPorts, resolvePorts, type Compose } from "./appform";
-import { AppError, assertName, envText, foldersOfFiles, hataAnswers, hataFileText, hataMetaIn, homeAddress, listJobs, ownVars, startJob, storeAppDetail, storeCompose, viewOfFiles, type AppFiles, type Job, type JobKind, type Log } from "./apps";
-import { filled, webPortOf, type HataMeta, type IndexApp } from "./hataapp";
+import { AppError, assertName, envText, knownLogin, foldersOfFiles, hataAnswers, hataFileText, hataMetaIn, homeAddress, listJobs, ownVars, startJob, storeAppDetail, storeCompose, viewOfFiles, type AppFiles, type Job, type JobKind, type Log } from "./apps";
+import { filled, foundInLog, loginValues, loginView, webPortOf, type HataMeta, type IndexApp, type Login, type LoginValues, type LoginView } from "./hataapp";
 import type { MachineContainer } from "./client";
 import type { JobProgress } from "./jobprogress";
+import { record } from "./activity";
 import { call, containersOf, machine, machineDataRoot, open } from "./machines";
 import { MuxError } from "./mux";
 import { settings } from "./config";
@@ -49,6 +50,8 @@ export interface MachineApp {
   job: { id: string; kind: JobKind; progress?: JobProgress; last?: string } | null;
   /** What the store says to know of it; may hold a default password, so for administrators only */
   tips: string;
+  /** How to sign in; may hold a default password, so for administrators only */
+  login: LoginView | null;
   containers: { id: string; name: string; service: string; image: string; state: string; status: string; ports: string[]; done: boolean }[];
 }
 
@@ -61,6 +64,19 @@ const asApp = (e: unknown): never => {
 function jobOf(id: string, name: string): MachineApp["job"] {
   const job = listJobs().find((j) => j.app === key(id, name) && j.status === "running");
   return job ? { id: job.id, kind: job.kind, progress: job.progress, last: job.last } : null;
+}
+
+function loginOfFiles(files: Files): Login | null {
+  let store = "";
+  try {
+    store = files.hata ? String((Bun.YAML.parse(files.hata) as { store?: unknown } | null)?.store ?? "") : "";
+  } catch {}
+  return knownLogin(hataMetaIn(files.hata)?.meta ?? null, store, files.name);
+}
+
+/** The `login` of a machine's app; null — it has none */
+export async function machineLogin(id: string, name: string): Promise<Login | null> {
+  return loginOfFiles(await filesOfApp(id, name));
 }
 
 function describe(id: string, files: Files, containers: MachineContainer[] | null, lang: string): MachineApp {
@@ -94,6 +110,10 @@ function describe(id: string, files: Files, containers: MachineContainer[] | nul
     })(),
     job: jobOf(id, files.name),
     tips: meta.tips,
+    login: (() => {
+      const login = loginOfFiles(files);
+      return login && loginView(login, hataMetaIn(files.hata)!.meta.settings, parseEnv(files.env));
+    })(),
     containers: own.map((c) => ({ id: c.id.slice(0, 12), name: c.name, service: c.service, image: c.image, state: c.state, status: c.status, done: stepDone(compose, c.service, c.state, c.status), ports: [...new Set(c.ports.filter((p) => p.public).map((p) => `${p.public}:${p.private}/${p.type}`))] })),
   };
 }
@@ -371,6 +391,23 @@ export async function removeMachineApp(id: string, name: string, withData: boole
     if (withData) log(`Removing ${data}`);
     await call(id, "apps.remove", { name, ...(withData ? { data, root: machineDataRoot(id) } : {}) }).catch(asApp);
   });
+}
+
+/** The values behind "Show" on a machine's app: from its `.env`, or the password from its log. Each asking is written down */
+export async function revealMachineLogin(id: string, name: string, user: string): Promise<LoginValues> {
+  assertName(name);
+  const files = await filesOfApp(id, name);
+  const login = loginOfFiles(files);
+  if (!login) throw new AppError("app.noLogin", 404);
+  let values: LoginValues;
+  if (login.kind === "log") {
+    const channel = open(id, "apps.logs", { name, tail: 5000, follow: false });
+    const out = await new Response(channel.readable()).text();
+    await channel.result.catch(asApp);
+    values = { ...(login.user ? { user: login.user } : {}), ...foundInLog(out, login.find) };
+  } else values = loginValues(login, hataMetaIn(files.hata)!.meta.settings, parseEnv(files.env));
+  record("app.loginShown", { app: name, machine: machine(id)?.name, user });
+  return values;
 }
 
 export function machineAppLogs(id: string, name: string, signal: AbortSignal): ReadableStream<Uint8Array> {
