@@ -12,6 +12,7 @@ import { appMeta, applyForm, appStatus, dumpCompose, stepDone, normalize, parseC
 import { AppError, assertName, envText, foldersOfFiles, hataAnswers, hataFileText, hataMetaIn, homeAddress, listJobs, ownVars, startJob, storeAppDetail, storeCompose, viewOfFiles, type AppFiles, type Job, type JobKind, type Log } from "./apps";
 import { filled, webPortOf, type HataMeta, type IndexApp } from "./hataapp";
 import type { MachineContainer } from "./client";
+import type { JobProgress } from "./jobprogress";
 import { call, containersOf, machine, machineDataRoot, open } from "./machines";
 import { MuxError } from "./mux";
 import { settings } from "./config";
@@ -45,7 +46,7 @@ export interface MachineApp {
   store: string;
   /** Behind Hata's sign-in: the port of this server it opens on */
   guarded: number | null;
-  job: { id: string; kind: JobKind } | null;
+  job: { id: string; kind: JobKind; progress?: JobProgress; last?: string } | null;
   containers: { id: string; name: string; service: string; image: string; state: string; status: string; ports: string[]; done: boolean }[];
 }
 
@@ -57,7 +58,7 @@ const asApp = (e: unknown): never => {
 
 function jobOf(id: string, name: string): MachineApp["job"] {
   const job = listJobs().find((j) => j.app === key(id, name) && j.status === "running");
-  return job ? { id: job.id, kind: job.kind } : null;
+  return job ? { id: job.id, kind: job.kind, progress: job.progress, last: job.last } : null;
 }
 
 function describe(id: string, files: Files, containers: MachineContainer[] | null, lang: string): MachineApp {
@@ -189,6 +190,7 @@ async function filesOfApp(id: string, name: string): Promise<Files> {
 async function dcOn(id: string, name: string, command: string, log: Log): Promise<void> {
   if (command === "up") await refreshEnv(id, name);
   if (command === "config" || command === "up") await beforeUp(id, name);
+  log(`$ docker compose ${command}`);
   const channel = open(id, "apps.compose", { name, command });
   const decoder = new TextDecoder();
   let rest = "";

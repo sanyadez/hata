@@ -437,6 +437,7 @@ function startEvents() {
       appsTimer = setTimeout(refresh, 150);
     } else if (event.type === "job") {
       for (const listener of jobListeners) listener(event);
+      takeJob(event.job, event.line);
     } else if (event.type === "disks") {
       // a disk was plugged in, pulled out, connected: the pages that list disks look again
       clearTimeout(disksEventTimer);
@@ -472,7 +473,13 @@ function startEvents() {
     }
   };
   // after a reconnect anything may have changed while we were away
+  source.onerror = () => {
+    jobsUi.lost = true;
+    paintJobs();
+  };
   source.onopen = () => {
+    jobsUi.lost = false;
+    paintJobs();
     void refresh();
     void loadApprovals();
   };
@@ -491,6 +498,8 @@ async function refresh() {
   } catch {
     return;
   }
+  seedJobs(state.overview.jobs ?? []);
+  failedTiles(state.overview);
   if (state.route.view === "home") renderHomeBody();
   if (state.route.view === "store") renderStoreList();
   if (state.route.view === "app") void loadApp(true);
@@ -1266,7 +1275,7 @@ const linkIcon = (link) => {
 function tileTarget(item) {
   const o = state.overview;
   // `<name>@<machine>` — an app of another machine
-  if (item.type === "app") return item.name.includes("@") ? ((o.machineApps ?? []).find((app) => app.key === item.name) ?? null) : (o.apps.find((app) => app.name === item.name) ?? null);
+  if (item.type === "app") return item.name.includes("@") ? ((o.machineApps ?? []).find((app) => app.key === item.name) ?? null) : (o.apps.find((app) => app.name === item.name) ?? o.failedApps?.find((app) => app.name === item.name) ?? null);
   if (item.type === "files") return (o.folders ?? []).find((folder) => folder.path === item.path) ?? null;
   if (item.type === "ha") return haTarget(item);
   if (item.type === "widget") return widgetServer(item);
@@ -1302,6 +1311,20 @@ function tileContent(item, title, sub, { badges = null, where = null, big = "" }
   ];
 }
 
+/** The thin bar of a tile whose app is being worked on; `install` also tells it apart by its number */
+function tileBar(job, install) {
+  const bar = h("span", { class: "tile-bar" }, h("i"));
+  bar.dataset.tileJob = job.id;
+  paintTileBar(bar, job, install);
+  return bar;
+}
+
+function paintTileBar(bar, job, install = true) {
+  const pct = install && job.progress?.step === "download" ? jobPercent(job.progress) : null;
+  bar.classList.toggle("moving", pct === null);
+  bar.firstChild.style.width = pct === null ? "" : pct + "%";
+}
+
 function tile(item) {
   const target = tileTarget(item);
   if (!target) return null;
@@ -1316,25 +1339,46 @@ function tile(item) {
   let badges = null;
   let haMain = null;
   let where = null;
+  let bar = null;
+  let onMain = null;
   if (item.type === "app" && target.machine) {
     // an app of another machine: opened at the machine's address, managed on the machine's page
     const app = target;
-    const st = (cls = target.machine.online ? appState(app) : "stopped");
+    const installing = app.job?.kind === "install";
+    if (installing && !admin) return null;
+    const st = (cls = target.machine.online ? (app.job?.kind === "update" ? app.status : appState(app)) : "stopped");
+    if (app.job) bar = tileBar(app.job, installing);
     const url = isUp(app) ? machineAppUrl(target.machine, app) : null;
     href = url ?? `#/machines/${target.machine.id}/apps`;
     external = !!url;
     sub = [h("i", { class: "dot " + st }), target.machine.online ? (st === "running" && (app.guarded || app.port) ? (app.guarded ? `${location.hostname}:${app.guarded}` : `${target.machine.ip}:${app.port}`) : t("status." + st)) : t("machines.offline")];
     badges = [app.guarded && h("span", { class: "lock", title: t("access.protected") }, icon("lock"))];
-    where = h("span", { class: "tile-where" }, icon("server"), h("span", { class: "clip" }, target.machine.name));
+    if (installing) {
+      cls = "installing";
+      sub = [h("i", { class: "dot" }), h("span", { class: "clip" }, jobShort(app.job, target.machine.name))];
+    }
+    where = !installing && h("span", { class: "tile-where" }, icon("server"), h("span", { class: "clip" }, target.machine.name));
     side = admin && h("a", { class: "tile-open", href: `#/machines/${target.machine.id}/apps`, title: target.machine.name, "aria-label": `${target.machine.name}: ${title}` }, icon("sliders"));
   } else if (item.type === "app") {
     const app = target;
-    const st = (cls = appState(app));
+    const installing = app.job?.kind === "install";
+    if ((installing || app.failedJob) && !admin) return null;
+    const st = (cls = app.failedJob ? "install-failed" : installing ? "installing" : app.job?.kind === "update" ? app.status : appState(app));
+    if (installing || app.job?.kind === "update") bar = tileBar(app.job, installing);
+    if (installing || app.failedJob) {
+      jobsUi.places[app.name] = { x: item.x, y: item.y };
+      onMain = () => jobDialog(app.failedJob ?? app.job.id, "install", app.title);
+    }
+    if (jobsUi.ready.delete(app.name)) cls += " just-ready";
     const url = isUp(app) ? appUrl(app) : null;
     // the tile opens the app; while it has no page to open, its own page here
     href = url ?? `#/apps/${app.name}`;
     external = !!url;
-    sub = [h("i", { class: "dot " + st }), st === "running" && appAddress(app) ? appAddress(app) : t("status." + st)];
+    sub = app.failedJob
+      ? [icon("x"), t("jobs.couldNotShort")]
+      : installing
+        ? [h("i", { class: "dot" }), h("span", { class: "jt-short clip", "data-job-short": app.job.id }, jobShort(app.job))]
+        : [h("i", { class: "dot " + st }), st === "running" && appAddress(app) ? appAddress(app) : t("status." + st)];
     const torrents = st === "running" && state.overview?.qbit?.apps?.[app.name];
     if (torrents?.online) where = h("span", { class: "tile-where" }, h("span", { class: "clip" }, qbitSpeeds(torrents)));
     badges = [app.protected && h("span", { class: "lock", title: t("access.protected") }, icon("lock")), (app.update || app.newer?.length > 0) && isAdmin() && h("span", { class: "lock", title: t(app.update ? "app.storeUpdate" : "app.newer") }, icon("up"))];
@@ -1367,10 +1411,10 @@ function tile(item) {
   }
   // what has no page of its own to manage it gets a menu: where to move it, how to take it off
   if (admin && !side && !isAddTile(item)) side = h("button", { type: "button", class: "tile-open", title: t("home.tileActions"), "aria-label": `${t("home.tileActions")}: ${title}`, onclick: () => tileMenu(item) }, icon("more"));
-  const content = tileContent(item, title, sub, { badges, where });
+  const content = [...tileContent(item, title, sub, { badges, where }), bar];
   const key = tileKey(item);
   const main = haMain ??
-    (item.type === "folder" || isAddTile(item)
+    (onMain ? h("button", { type: "button", class: "tile-main", onclick: onMain }, content) : item.type === "folder" || isAddTile(item)
       ? h("button", { type: "button", class: "tile-main", onclick: () => (isAddTile(item) ? addDialog() : openFolder(item.id)) }, content)
       : h("a", { class: "tile-main", href, draggable: false, ...(external ? { target: "_blank", rel: "noopener noreferrer" } : {}) }, content));
   if (!admin) return h("div", { class: `tile kind-${item.type} ${cls}`, "data-key": key }, main, side);
@@ -2611,7 +2655,8 @@ function renderApp() {
 async function startAction(app, action) {
   try {
     const res = await api("POST", `/api/apps/${app.name}/${action}`, {});
-    jobDialog(res.job, action, app.title);
+    if (action === "update") jobInBackground(res.job, action, app.title);
+    else jobDialog(res.job, action, app.title);
     void refresh();
   } catch (e) {
     toast(errorText(e), "error");
@@ -2620,6 +2665,10 @@ async function startAction(app, action) {
 
 /** What can be done to an app from its tile: open it, start or stop it, go to its settings, logs and the rest */
 function appTileMenu(app, anchor, at) {
+  if (app.failedJob || app.job?.kind === "install") {
+    const box = anchor?.getBoundingClientRect();
+    return jobTileMenu(app, at ?? { x: box.left, y: box.bottom + 6 });
+  }
   let dialog;
   const url = isUp(app) ? appUrl(app) : null;
   const busy = !!app.job;
@@ -2629,7 +2678,7 @@ function appTileMenu(app, anchor, at) {
     "menu dropdown",
     h("header", null, appIcon(app), h("div", null, h("h2", { class: "clip" }, app.title), stateChip(app))),
     url && h("a", { class: "menu-item", href: url, target: "_blank", rel: "noopener noreferrer", onclick: () => dialog.close() }, icon("external"), t("app.open")),
-    busy && item(t("status.busy"), "terminal", () => jobDialog(app.job.id, app.job.kind, app.title)),
+    busy && item(t(app.job.kind === "update" ? "jobs.showLog" : "status.busy"), app.job.kind === "update" ? "logs" : "terminal", () => jobDialog(app.job.id, app.job.kind, app.title)),
     isUp(app) ? item(t("app.stop"), "stop", () => startAction(app, "stop"), "", busy) : item(t("app.start"), "play", () => startAction(app, "start"), "", busy),
     isUp(app) && item(t("app.restart"), "refresh", () => startAction(app, "restart"), "", busy),
     app.update && item(t("app.storeUpdate"), "up", () => storeUpdateDialog(app), "", busy),
@@ -2731,7 +2780,7 @@ async function storeUpdateDialog(app) {
           dialog.close();
           try {
             const res = await api("POST", `/api/apps/${app.name}/storeupdate`, {});
-            jobDialog(res.job, "update", app.title, () => loadApp(true));
+            jobInBackground(res.job, "update", app.title, () => loadApp(true));
           } catch (e) {
             toast(errorText(e), "error");
           }
@@ -7924,7 +7973,8 @@ async function machineComposeDialog(m, app) {
           try {
             const res = app ? await api("PUT", `/api/machines/${m.id}/apps/${app.name}/compose`, { compose: area.value }) : await api("POST", `/api/machines/${m.id}/apps`, { name: name.value.trim(), compose: area.value });
             dialog.close();
-            jobDialog(res.job, app ? "apply" : "install", app ? app.title : name.value.trim(), () => void loadMachineApps());
+            if (app) jobDialog(res.job, "apply", app.title, () => void loadMachineApps());
+            else jobInBackground(res.job, "install", name.value.trim(), () => void loadMachineApps());
           } catch (err) {
             error.textContent = errorText(err);
           }
@@ -8511,6 +8561,323 @@ function followJob(id, onLine) {
   });
 }
 
+// --- Work in the background: a card for what runs out of sight, wherever the person goes ---------------
+
+const JOB_STEPS = ["check", "download", "start"];
+const JOB_CLOSED = "hata.jobs.closed";
+const JOB_HIDDEN = "hata.jobs.hidden";
+const JOB_MIN = "hata.jobs.min";
+const JOB_ROWS = 4;
+const JOB_LINGER_S = 10;
+const jobsUi = {
+  list: new Map(),
+  // a phone has no room to spare: there the card starts folded
+  min: (localStorage.getItem(JOB_MIN) ?? (innerWidth <= 760 ? "1" : "0")) === "1",
+  all: false,
+  lost: false,
+  hold: false,
+  logs: new Set(),
+  places: {},
+  ready: new Set(),
+  sig: "",
+};
+const storedIds = (store, key) => {
+  try {
+    return JSON.parse(store.getItem(key) ?? "[]");
+  } catch {
+    return [];
+  }
+};
+const remember = (store, key, id) => store.setItem(key, JSON.stringify([...storedIds(store, key).filter((one) => one !== id), id].slice(-40)));
+
+const jobPercent = (p) => (p?.layers ? Math.floor(((p.done ?? 0) / p.layers) * 100) : null);
+const jobEnded = (e) => e.status !== "running";
+const jobWaits = (e) => e.status === "failed" && !e.stopped;
+
+/** What a tile says of an app being installed: the number first, so that a cut leaves it */
+function jobShort(job, machine = "") {
+  const p = job?.progress;
+  const pct = jobPercent(p);
+  if (machine) return pct === null ? t("jobs.short.machineBusy", { machine }) : t("jobs.short.machine", { machine, pct });
+  if (p?.step === "download" && pct !== null) return t("jobs.short.downloading", { pct });
+  return t(p?.step ? `jobs.short.${p.step}` : "jobs.short.check");
+}
+
+function jobName(e) {
+  const o = state.overview;
+  return o?.apps?.find((a) => a.name === e.app)?.title ?? o?.machineApps?.find((a) => a.key === e.app)?.title ?? e.title ?? e.app ?? "";
+}
+
+function jobHeading(e) {
+  const app = jobName(e);
+  if (e.status === "failed" && !e.stopped && e.kind === "install") return t("jobs.couldNot", { app });
+  if (e.status === "done" && e.kind === "install") return t("jobs.ready", { app });
+  if (e.status === "done" && e.kind === "update") return t("jobs.updated", { app });
+  return has("job." + e.kind) ? t("job." + e.kind, { app }) : app;
+}
+
+/** How it ended, in one line: the end of the last line is where compose says why */
+function jobReason(e) {
+  const text = e.error ?? e.last ?? "";
+  if (has("error." + text)) return t("error." + text);
+  const line = text.split("\n").map((l) => l.trim()).filter(Boolean).at(-1) ?? "";
+  return line.length > 110 ? "…" + line.slice(-110) : line;
+}
+
+const jobUrl = (e) => {
+  const app = state.overview?.apps?.find((a) => a.name === e.app);
+  return app && isUp(app) ? appUrl(app) : null;
+};
+
+function jobSub(e) {
+  if (e.status === "running") {
+    if (jobsUi.lost) return t("jobs.lost");
+    if (e.kind !== "install" || !e.progress?.step) return e.kind === "install" ? t("job.running") : e.last ?? t("job.running");
+    const line = `${t("jobs.step." + e.progress.step)} · ${t("jobs.stepOf", { n: JOB_STEPS.indexOf(e.progress.step) + 1, m: JOB_STEPS.length })}`;
+    return e.machine ? `${t("jobs.onMachine", { machine: e.machine })} · ${line}` : line;
+  }
+  if (e.stopped) return t("job.stopped");
+  if (e.status === "failed") return e.kind === "install" ? "" : t("job.failed");
+  const app = state.overview?.apps?.find((a) => a.name === e.app);
+  return e.kind === "install" && app && appAddress(app) ? appAddress(app) : t("job.done");
+}
+
+function jobDetail(e, row = false) {
+  if (jobWaits(e)) return row && jobReason(e).length > 60 ? "…" + jobReason(e).slice(-60) : jobReason(e);
+  const p = e.progress;
+  if (e.status !== "running" || e.kind !== "install" || p?.step !== "download" || !p.layers) return "";
+  const count = t(p.layers === 1 ? "jobs.layersOne" : "jobs.layers", { done: p.done ?? 0, total: p.layers, pct: jobPercent(p) });
+  return p.bytes ? `${count} · ${t("jobs.downloaded", { size: bytes(p.bytes) })}` : count;
+}
+
+/** The parts of the bar: an install has its three steps, anything else one */
+function jobBars(e) {
+  const paint = (one, state_, pct = null) => {
+    one.className = "jt-seg " + state_;
+    one.firstChild.style.width = pct === null ? "" : pct + "%";
+    one.setAttribute("aria-hidden", "true");
+  };
+  return { paint, count: e.kind === "install" ? JOB_STEPS.length : 1 };
+}
+
+function paintJobBar(bar, e) {
+  const { paint } = jobBars(e);
+  const parts = [...bar.children];
+  if (e.kind !== "install") return parts[0] && paint(parts[0], jobsUi.lost ? "frozen" : "moving");
+  const at = Math.max(0, JOB_STEPS.indexOf(e.progress?.step ?? "check"));
+  parts.forEach((part, i) => {
+    if (i < at) return paint(part, "full");
+    if (i > at) return paint(part, "");
+    if (jobsUi.lost) return paint(part, "frozen");
+    const pct = e.progress?.step === "download" ? jobPercent(e.progress) : null;
+    paint(part, pct === null ? "moving" : "known", pct);
+  });
+}
+
+const jobBar = (e) => {
+  const bar = h("span", { class: "jt-bar" }, Array.from({ length: jobBars(e).count }, () => h("span", { class: "jt-seg" }, h("i"))));
+  paintJobBar(bar, e);
+  return bar;
+};
+
+const jobLog = (e) => jobDialog(e.id, e.kind, jobName(e));
+
+function closeJob(id) {
+  remember(localStorage, JOB_CLOSED, id);
+  jobsUi.list.delete(id);
+  paintJobs();
+  void refresh();
+}
+
+/** Where the words of a job stand, to be changed without drawing anything anew: a button under the pointer stays */
+function patchJobs() {
+  for (const e of jobsUi.list.values()) {
+    for (const root of document.querySelectorAll(`[data-job="${e.id}"]`)) {
+      const sub = root.querySelector(".jt-sub");
+      if (sub) sub.textContent = jobSub(e);
+      const detail = root.querySelector(".jt-detail");
+      if (detail) detail.textContent = jobDetail(e, root.classList.contains("row"));
+      const short = root.querySelector(".jt-short");
+      if (short) short.textContent = e.status === "running" ? jobShort(e) : jobSub(e) || t("job.failed");
+      const bar = root.querySelector(".jt-bar");
+      if (bar && e.status === "running") paintJobBar(bar, e);
+    }
+    if (e.status !== "running") continue;
+    for (const bar of document.querySelectorAll(`[data-tile-job="${e.id}"]`)) paintTileBar(bar, e, e.kind === "install");
+    for (const short of document.querySelectorAll(`[data-job-short="${e.id}"]`)) short.textContent = jobShort(e);
+  }
+}
+
+function jobCard(e, row = false) {
+  const ended = jobEnded(e);
+  const url = e.status === "done" && e.kind === "install" ? jobUrl(e) : null;
+  const page = e.status === "done" && e.kind === "install" && !e.machine ? `#/apps/${e.app}` : null;
+  return h(
+    "div",
+    { class: `jt-card ${row ? "row" : ""} ${e.status} ${e.stopped ? "stopped" : ""}`, "data-job": e.id },
+    h("div", { class: "jt-head" },
+      appIcon({ name: e.app, title: jobName(e), icon: e.icon }, row ? "sm" : ""),
+      h("div", { class: "jt-words" }, h("strong", { class: "jt-title" }, jobHeading(e)), h("span", { class: "jt-sub" + (e.kind !== "install" && !ended ? " mono" : "") }, jobSub(e))),
+      row && (url || page) && h("a", { class: "icon-btn", href: url ?? page, title: t("common.open"), "aria-label": `${t("common.open")}: ${jobName(e)}`, ...(url ? { target: "_blank", rel: "noopener noreferrer" } : {}), onclick: () => closeJob(e.id) }, icon("external")),
+      row && h("button", { type: "button", class: "icon-btn", title: t("jobs.showLog"), "aria-label": `${t("jobs.showLog")}: ${jobName(e)}`, onclick: () => jobLog(e) }, icon("logs")),
+      ended
+        ? h("button", { type: "button", class: "icon-btn", title: t("jobs.dismiss"), "aria-label": `${t("jobs.dismiss")}: ${jobName(e)}`, onclick: () => closeJob(e.id) }, icon("x"))
+        : !row && h("button", { type: "button", class: "icon-btn", title: t("jobs.minimise"), "aria-label": t("jobs.minimise"), onclick: () => minimiseJobs(true) }, icon("down")),
+    ),
+    !ended && jobBar(e),
+    h("p", { class: "jt-detail" + (jobWaits(e) ? " why" : "") }),
+    !row && jobWaits(e) && e.kind === "install" && h("p", { class: "muted small jt-left" }, t("jobs.leftOver")),
+    !row && h("div", { class: "jt-actions" },
+      button(t("jobs.showLog"), { class: "small", onclick: () => jobLog(e) }),
+      (url || page) && h("a", { class: "btn small primary", href: url ?? page, ...(url ? { target: "_blank", rel: "noopener noreferrer" } : {}), onclick: () => closeJob(e.id) }, icon("external"), t("common.open")),
+    ),
+  );
+}
+
+function minimiseJobs(min) {
+  jobsUi.min = min;
+  localStorage.setItem(JOB_MIN, min ? "1" : "0");
+  paintJobs();
+}
+
+function jobStrip(shown) {
+  const running = shown.filter((e) => !jobEnded(e));
+  const failed = shown.filter(jobWaits);
+  const first = shown[0];
+  const words = shown.length === 1 ? jobName(first) : failed.length && running.length ? t("jobs.counts", { n: running.length, m: failed.length }) : failed.length ? t("jobs.countsFailed", { m: failed.length }) : running.length ? t("jobs.countsRunning", { n: running.length }) : t("job.done");
+  return h("button", { type: "button", class: "jt-strip", "data-job": first.id, "aria-label": `${t("jobs.restore")}: ${words}`, onclick: () => minimiseJobs(false) },
+    appIcon({ name: first.app, title: jobName(first), icon: first.icon }, "sm"),
+    h("span", { class: "jt-words" }, h("strong", { class: "jt-title" }, words), shown.length === 1 && h("span", { class: "jt-short" })),
+    icon("up"),
+    !jobEnded(first) && h("span", { class: "jt-thin" }, jobBar(first)),
+  );
+}
+
+function paintJobs() {
+  let tray = document.getElementById("job-tray");
+  const shown = !state.user || !isAdmin() ? [] : [...jobsUi.list.values()].filter((e) => !jobsUi.logs.has(e.id)).sort((a, b) => jobWaits(b) - jobWaits(a) || jobEnded(a) - jobEnded(b));
+  document.body.classList.toggle("has-jobs", shown.length > 0);
+  if (!shown.length) {
+    tray?.remove();
+    jobsUi.sig = "";
+    jobsUi.hold = false;
+    return;
+  }
+  if (!tray) {
+    tray = h("aside", { id: "job-tray", "aria-label": t("jobs.tray"), onmouseenter: () => (jobsUi.hold = true), onmouseleave: () => (jobsUi.hold = false), onfocusin: () => (jobsUi.hold = true), onfocusout: () => (jobsUi.hold = false) });
+    document.body.append(tray);
+    new ResizeObserver(() => document.documentElement.style.setProperty("--jobs-h", tray.offsetHeight + "px")).observe(tray);
+  }
+  const sig = JSON.stringify([jobsUi.min, jobsUi.all, jobsUi.lost, state.lang, shown.map((e) => [e.id, e.status, e.stopped, jobHeading(e), e.icon, e.status === "done" && jobUrl(e)])]);
+  if (sig !== jobsUi.sig) {
+    jobsUi.sig = sig;
+    tray.className = jobsUi.min ? "min" : "";
+    if (jobsUi.min) tray.replaceChildren(jobStrip(shown));
+    else if (shown.length === 1) tray.replaceChildren(jobCard(shown[0]));
+    else {
+      const running = shown.filter((e) => !jobEnded(e)).length;
+      const failed = shown.filter(jobWaits).length;
+      const counted = failed && running ? t("jobs.counts", { n: running, m: failed }) : failed ? t("jobs.countsFailed", { m: failed }) : running ? t("jobs.countsRunning", { n: running }) : t("job.done");
+      const rows = jobsUi.all ? shown : shown.slice(0, JOB_ROWS);
+      tray.replaceChildren(h("div", { class: "jt-list" },
+        h("div", { class: "jt-list-head" },
+          h("strong", null, counted),
+          h("button", { type: "button", class: "icon-btn", title: t("jobs.minimise"), "aria-label": t("jobs.minimise"), onclick: () => minimiseJobs(true) }, icon("down"))),
+        rows.map((e) => jobCard(e, true)),
+        shown.length > rows.length && h("button", { type: "button", class: "jt-more", onclick: () => ((jobsUi.all = true), paintJobs()) }, t("jobs.showMore", { n: shown.length - rows.length })),
+      ));
+    }
+  }
+  patchJobs();
+}
+
+/** A job as the server tells of it. Tracked: every install, and what somebody sent to the background */
+function takeJob(job, line) {
+  if (!isAdmin()) return;
+  const known = jobsUi.list.get(job.id);
+  if (!known && !(job.kind === "install" || storedIds(sessionStorage, JOB_HIDDEN).includes(job.id))) return;
+  if (!known && storedIds(localStorage, JOB_CLOSED).includes(job.id)) return;
+  const e = known ?? { id: job.id, left: JOB_LINGER_S };
+  const was = e.status;
+  const step = e.progress?.step;
+  for (const [key, value] of Object.entries(job)) if (value !== undefined && key !== "title") e[key] = value;
+  e.title = job.title ?? e.title;
+  if (line !== undefined) e.last = line;
+  jobsUi.list.set(job.id, e);
+  if (was === "running" && e.status !== "running") {
+    if (e.status === "done") {
+      e.onDone?.();
+      jobsUi.ready.add(e.app);
+    }
+    // a failure opens the card once; afterwards folding it is the person's choice
+    if (jobWaits(e)) minimiseJobs(false);
+  }
+  // a new tile, a step that changes what the tile says, the end of the work: the page looks again
+  if (!known || was !== e.status || step !== e.progress?.step) {
+    clearTimeout(appsTimer);
+    appsTimer = setTimeout(refresh, 150);
+  }
+  paintJobs();
+}
+
+/** What the server says runs or ended lately: after a reload, a lost connection, or a restart of the server */
+function seedJobs(jobs) {
+  if (!isAdmin()) return;
+  const there = new Set(jobs.map((j) => j.id));
+  for (const job of jobs) takeJob(job);
+  for (const e of jobsUi.list.values()) if (!there.has(e.id) && !jobEnded(e) && e.status) jobsUi.list.delete(e.id);
+  paintJobs();
+}
+
+/** An install that failed leaves no app, yet its tile stays as long as the card that tells why */
+function failedTiles(o) {
+  o.failedApps = [];
+  for (const e of jobsUi.list.values()) {
+    if (!jobWaits(e) || e.kind !== "install" || e.machine || o.apps.some((a) => a.name === e.app)) continue;
+    o.failedApps.push({ name: e.app, title: jobName(e), icon: e.icon, failedJob: e.id, status: "stopped" });
+    o.dashboard.cards.push({ type: "app", name: e.app, ...(jobsUi.places[e.app] ?? gridFit(o.dashboard.cards.map(boxOf), 1, 1)), w: 1, h: 1 });
+  }
+}
+
+/** Off to the background, with no window: the card and the tile tell the rest */
+function jobInBackground(id, kind, title, onDone) {
+  remember(sessionStorage, JOB_HIDDEN, id);
+  const e = jobsUi.list.get(id) ?? { id, kind, status: "running", app: "", left: JOB_LINGER_S };
+  e.title = title;
+  if (e.status === "running") e.onDone = onDone;
+  else if (e.status === "done") onDone?.();
+  jobsUi.list.set(id, e);
+  paintJobs();
+  void refresh();
+}
+
+function jobStopDialog(id, app) {
+  let dialog;
+  dialog = openDialog("confirm", h("h2", null, t("jobs.stopTitle", { app })), h("p", { class: "muted" }, t("jobs.stopLead")),
+    h("footer", null, closeButton(() => dialog, t("common.cancel")), button(t("jobs.stopInstalling"), { class: "danger", onclick: async () => {
+      dialog.close();
+      await api("POST", `/api/jobs/${id}/stop`).catch((err) => toast(errorText(err), "error"));
+    } })));
+}
+
+/** The menu of a tile that is no app yet */
+function jobTileMenu(app, at) {
+  const failed = app.failedJob;
+  const id = failed ?? app.job.id;
+  menuAt(at, null, [
+    { label: t("jobs.showLog"), icon: "logs", run: () => jobDialog(id, "install", app.title) },
+    failed ? { label: t("jobs.dismiss"), icon: "x", run: () => closeJob(id) } : app.job.stoppable && { label: t("jobs.stopInstalling"), icon: "stop", danger: true, run: () => jobStopDialog(id, app.title) },
+  ].filter(Boolean));
+}
+
+setInterval(() => {
+  if (document.hidden || jobsUi.hold) return;
+  for (const e of [...jobsUi.list.values()]) {
+    if (!jobEnded(e) || !e.status || jobWaits(e) || jobsUi.logs.has(e.id)) continue;
+    if (--e.left <= 0) closeJob(e.id);
+  }
+}, 1000);
+
 /** Shows a running operation: its console output and how it ended */
 async function jobDialog(id, kind, title, onDone) {
   const log = h("pre", { class: "console" });
@@ -8554,7 +8921,17 @@ async function jobDialog(id, kind, title, onDone) {
   jobListeners.add(listener);
 
   dialog = openDialog("wide", h("h2", null, t("job." + kind, { app: title })), log, h("footer", null, status, stop, close));
-  dialog.addEventListener("close", () => jobListeners.delete(listener));
+  jobsUi.logs.add(id);
+  paintJobs();
+  dialog.addEventListener("close", () => {
+    jobListeners.delete(listener);
+    jobsUi.logs.delete(id);
+    // closed while it runs: it goes on out of sight, and the card keeps telling
+    if (status.classList.contains("running") && !jobsUi.list.has(id)) jobInBackground(id, kind, title, onDone);
+    const e = jobsUi.list.get(id);
+    if (e) e.left = JOB_LINGER_S;
+    paintJobs();
+  });
 
   try {
     const job = await api("GET", `/api/jobs/${id}`);
@@ -11137,7 +11514,7 @@ function renderStoreList() {
         h(
           "button",
           { type: "button", class: "store-card" + (a.supported ? "" : " unsupported"), onclick: () => (installed.has(a.name) ? go(`#/apps/${a.name}`) : storeDialog(a)), menu: (at) => storeCardMenu(a, installed.has(a.name), at) },
-          h("span", { class: "store-card-head" }, appIcon(a), h("span", { class: "grow" }, h("span", { class: "tile-name" }, a.title), h("span", { class: "muted small" }, twice.has(a.name) ? `${a.category} · ${a.storeName}` : a.category)), installed.has(a.name) ? h("span", { class: "chip ok" }, icon("check"), t("store.installed")) : h("span", { class: "chip" }, t("store.install"))),
+          h("span", { class: "store-card-head" }, appIcon(a), h("span", { class: "grow" }, h("span", { class: "tile-name" }, a.title), h("span", { class: "muted small" }, twice.has(a.name) ? `${a.category} · ${a.storeName}` : a.category)), installed.has(a.name) ? (state.overview?.apps?.find((one) => one.name === a.name)?.job?.kind === "install" ? h("span", { class: "chip" }, t("store.installing")) : h("span", { class: "chip ok" }, icon("check"), t("store.installed"))) : h("span", { class: "chip" }, t("store.install"))),
           h("span", { class: "tagline" }, a.tagline),
         ),
       ),
@@ -11245,7 +11622,7 @@ async function storeDialog(entry, target = state.installTarget ?? "") {
         const res = await api("POST", target ? `/api/machines/${target}/apps` : "/api/apps", { store: app.store, name: app.name, form });
         dialog.close();
         state.installTarget = "";
-        jobDialog(res.job, "install", app.title, () => go(target ? `#/machines/${target}/apps` : `#/apps/${app.name}`));
+        jobInBackground(res.job, "install", app.title);
       } catch (e) {
         error.textContent = errorText(e);
         install.disabled = false;
@@ -11386,9 +11763,8 @@ function customDialog() {
             const res = await api("POST", `/api/apps?lang=${state.lang}`, asForm ? { name: app, settings } : { name: app, compose: area.value });
             dialog.close();
             const picture = asForm ? form.pickedIcon() : null;
-            jobDialog(res.job, "install", (asForm && settings.title) || app, async () => {
+            jobInBackground(res.job, "install", (asForm && settings.title) || app, async () => {
               if (picture) await uploadAppIcon(app, picture).catch((err) => toast(errorText(err), "error"));
-              go(`#/apps/${app}`);
             });
           } catch (err) {
             error.textContent = errorText(err);
@@ -11854,7 +12230,7 @@ function paintWelcome() {
               h(
                 "button",
                 { type: "button", class: "store-card", onclick: () => (installed.has(a.name) ? go(`#/apps/${a.name}`) : storeDialog(a)), menu: (at) => storeCardMenu(a, installed.has(a.name), at) },
-                h("span", { class: "store-card-head" }, appIcon(a), h("span", { class: "grow" }, h("span", { class: "tile-name" }, a.title), h("span", { class: "muted small" }, twice.has(a.name) ? `${a.category} · ${a.storeName}` : a.category)), installed.has(a.name) ? h("span", { class: "chip ok" }, icon("check"), t("store.installed")) : h("span", { class: "chip" }, t("store.install"))),
+                h("span", { class: "store-card-head" }, appIcon(a), h("span", { class: "grow" }, h("span", { class: "tile-name" }, a.title), h("span", { class: "muted small" }, twice.has(a.name) ? `${a.category} · ${a.storeName}` : a.category)), installed.has(a.name) ? (state.overview?.apps?.find((one) => one.name === a.name)?.job?.kind === "install" ? h("span", { class: "chip" }, t("store.installing")) : h("span", { class: "chip ok" }, icon("check"), t("store.installed"))) : h("span", { class: "chip" }, t("store.install"))),
                 h("span", { class: "tagline" }, a.tagline),
               ),
             ),

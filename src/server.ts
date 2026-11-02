@@ -16,7 +16,7 @@ import { agentUser, cannotGrant, cleanName, createKey, grantKey, keyOf, listKeys
 import type { Level } from "./agents";
 import { Desk } from "./approvals";
 import { answerCall, assistantConfig, configured as assistantReady, findChat, listChats, ModelError, modelsFor, removeChat, retry as retryAssistant, say as sayToAssistant, shownChat, shownConfig as shownAssistant, stopChat, updateAssistant } from "./assistant";
-import { AppError, appAction, startAfterDisk, startJob, stoppable, stopJob, type Job, installedNames, jobFinished, appEnv, appDetail, appLogs, appIcon, appSettings, appStats, applyCompose, ICON_MIME, MAX_ICON, removeAppIcon, setAppIcon, applySettings, installFromSettings, applyStoreUpdate, composeText, getJob, installCustom, installFromStore, listApps, listJobs, onAppRemoved, planStoreUpdate, readCompose, refreshAppUrls, removeApp, storeAppDetail, viewOf } from "./apps";
+import { AppError, appAction, startAfterDisk, startJob, stoppable, stopJob, jobToTell, type Job, installedNames, jobFinished, appEnv, appDetail, appLogs, appIcon, appSettings, appStats, applyCompose, ICON_MIME, MAX_ICON, removeAppIcon, setAppIcon, applySettings, installFromSettings, applyStoreUpdate, composeText, getJob, installCustom, installFromStore, listApps, listJobs, onAppRemoved, planStoreUpdate, readCompose, refreshAppUrls, removeApp, storeAppDetail, viewOf } from "./apps";
 import { certificateStates, challengeResponse, ensureCertificates, isWildcard, loadCertificates, type StoredCertificate } from "./acme";
 import { manualDone, setWildcard, wildcardReport, wildcardTrouble } from "./wildcard";
 import { attention } from "./attention";
@@ -1178,7 +1178,7 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
       qbit: admin ? { count: qbitServers().length, apps: qbitOfApps(apps), servers: qbitWidgets() } : null,
       // Frigate: the servers with their cameras and latest events (the widgets on Home), and the apps that run it
       frigate: admin ? { servers: frigateServers(), apps: frigateOfApps(apps) } : null,
-      jobs: admin ? listJobs().filter((j) => j.status === "running").map(({ log: _, ...job }) => job) : [],
+      jobs: admin ? listJobs().filter(jobToTell).map(({ log: _, ...job }) => job) : [],
     });
   }
 
