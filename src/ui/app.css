@@ -1767,3 +1767,9 @@ body.has-jobs #view:not(.fill) { padding-bottom: calc(var(--jobs-h, 0px) + 48px)
 @media (prefers-reduced-motion: reduce) {
   .jt-seg.moving i, .tile-bar.moving i, .tile.just-ready .app-icon { animation: none; }
 }
+
+/* a long action on a phone wraps instead of pushing the page sideways */
+@media (max-width: 760px) {
+  .actions { min-width: 0; max-width: 100%; }
+  .actions .btn { white-space: normal; height: auto; min-height: 36px; max-width: 100%; text-align: left; }
+}
