@@ -142,6 +142,14 @@ test("a compose project without its file: services keep their names, generated c
   expect(compose.services.web.labels).toBeUndefined();
 });
 
+test("a project label is plain text, not a pattern", () => {
+  const named = (project: string, name: string) =>
+    serviceFromContainer(container({ Name: `/${name}`, Config: { Image: "ghost:5", Labels: { "com.docker.compose.project": project } } }), null).service.container_name;
+  expect(named("a(b", "a(b-web-1")).toBeUndefined();
+  expect(named("a(b", "other")).toBe("other");
+  expect(named("a.b", "axb-web-1")).toBe("axb-web-1");
+});
+
 test("names", () => {
   expect(safeName("/My_App.v2")).toBe("my_app-v2");
   expect(safeName("--")).toBe("app");

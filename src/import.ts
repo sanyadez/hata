@@ -116,7 +116,7 @@ export function serviceFromContainer(c: ContainerInspect, image: ImageConfig): S
   const draft: ServiceDraft = { service, volumes: [], networks: [], warnings: [] };
 
   // compose names its containers itself; a name of that shape was not chosen by anyone
-  const generated = project !== undefined && new RegExp(`^${project}[-_].+[-_]\\d+$`).test(name);
+  const generated = project !== undefined && new RegExp(`^${RegExp.escape(project)}[-_].+[-_]\\d+$`).test(name);
   if (!generated) service.container_name = name;
 
   const restart = host.RestartPolicy?.Name;

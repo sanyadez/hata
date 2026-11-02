@@ -1,0 +1,7 @@
+# The actions of the workflows are pinned to commits; this offers the newer ones as pull requests.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: "/"
+    schedule:
+      interval: weekly
