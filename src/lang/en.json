@@ -5206,5 +5206,7 @@
   "machines.people.unshareTitle": "Stop sharing this folder?",
   "machines.people.unshareLead": "People lose access, and the rights set for each of them are forgotten. The files stay on the computer.",
   "assistant.forgetTitle": "Delete this chat?",
-  "assistant.forgetLead": "The conversation cannot be brought back. What the assistant already did stays done."
+  "assistant.forgetLead": "The conversation cannot be brought back. What the assistant already did stays done.",
+  "app.notes": "What to know",
+  "app.notesOf": "What to know about {title}"
 }

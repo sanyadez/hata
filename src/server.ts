@@ -1162,7 +1162,7 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
       // folders an administrator put on the dashboard from the file manager
       folders: admin ? pinnedFolders() : [],
       // apps of the other machines, for administrators: their tiles are `<name>@<machine>`
-      machineApps: onMachines,
+      machineApps: admin ? onMachines : onMachines.map(({ tips: _, ...app }) => app),
       // the other machines and their numbers, for their blocks on the dashboard
       machines: admin
         ? machineList().map((m) => {
@@ -2155,7 +2155,10 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
       const job = setAccess(name, { allowed, protect: data.protect === true, ports }, user.name);
       return json({ job: job?.id ?? null }, job ? 202 : 200);
     }
-    if (!sub && method === "GET") return json(await appDetail(name, language(url)));
+    if (!sub && method === "GET") {
+      const detail = await appDetail(name, language(url));
+      return json(user.role === "admin" ? detail : { ...detail, tips: "" });
+    }
     if (!sub && method === "DELETE") return json({ job: removeApp(name, url.searchParams.get("data") === "1", user.name).id }, 202);
     if (sub === "stats" && method === "GET") return json(await appStats(name));
     if (sub === "backups" && method === "GET") return json(listSnapshots(name));

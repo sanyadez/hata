@@ -341,6 +341,8 @@ export interface InstalledApp extends Pick<AppMeta, "title" | "icon" | "port" | 
   protected: boolean;
   /** Running operation, if any */
   job: { id: string; kind: JobKind; stoppable?: boolean; progress?: JobProgress; last?: string } | null;
+  /** The store has words on what to know of it: how to sign in, what to do first */
+  notes: boolean;
   /** `done` — a step that ran once and ended as it should (`stepDone`) */
   containers: { id: string; name: string; service: string; image: string; state: string; status: string; ports: string[]; done: boolean }[];
 }
@@ -390,6 +392,7 @@ function describeApp(name: string, containers: ContainerSummary[] | null, lang: 
     newer: newerImages(own),
     protected: settings.access[name]?.protect === true,
     job: job ? { id: job.id, kind: job.kind, stoppable: job.stoppable, progress: job.progress, last: job.last } : null,
+    notes: !!meta.tips,
     containers: own.map((c) => ({
       id: c.Id.slice(0, 12),
       ports: [...new Set(c.Ports.filter((p) => p.PublicPort).map((p) => `${p.PublicPort}:${p.PrivatePort}/${p.Type}`))],
@@ -414,6 +417,8 @@ export interface AppDetail extends InstalledApp {
   /** Host folders the app keeps data in */
   folders: string[];
   installedAt: number;
+  /** What the store says to know of it; may hold a default password, so for administrators only */
+  tips: string;
 }
 
 export async function appDetail(name: string, lang: string): Promise<AppDetail> {
@@ -433,7 +438,7 @@ export async function appDetail(name: string, lang: string): Promise<AppDetail> 
     // removed while this was being put together
     throw new AppError("app.notFound", 404);
   }
-  return { ...describeApp(name, containers, lang), composeFile: composeFile(name), folders, installedAt };
+  return { ...describeApp(name, containers, lang), composeFile: composeFile(name), folders, installedAt, tips: appMeta(compose ?? { name }, lang).tips };
 }
 
 /** A stats sample of each running container of the app, keyed by container name */

@@ -2678,6 +2678,21 @@ async function startAction(app, action) {
   }
 }
 
+/** What the store says to know of an app once it is there: how to sign in, what to do first */
+async function appNotesDialog(name, title) {
+  try {
+    const { tips } = await api("GET", `/api/apps/${name}?lang=${state.lang}`);
+    notesDialog(title, tips);
+  } catch (e) {
+    toast(errorText(e), "error");
+  }
+}
+
+function notesDialog(title, tips) {
+  let dialog;
+  dialog = openDialog("confirm", h("h2", null, t("app.notesOf", { title })), h("div", { class: "tips prose" }, md(tips)), h("footer", null, closeButton(() => dialog, t("common.close"))));
+}
+
 /** What can be done to an app from its tile: open it, start or stop it, go to its settings, logs and the rest */
 function appTileMenu(app, anchor, at) {
   if (app.failedJob || app.job?.kind === "install") {
@@ -2698,6 +2713,7 @@ function appTileMenu(app, anchor, at) {
     isUp(app) && item(t("app.restart"), "refresh", () => startAction(app, "restart"), "", busy),
     app.update && item(t("app.storeUpdateGo"), "up", () => storeUpdateDialog(app), "", busy),
     !app.update && app.newer?.length > 0 && item(t("app.update"), "up", () => startAction(app, "update"), "", busy),
+    app.notes && isAdmin() && item(t("app.notes"), "info", () => appNotesDialog(app.name, app.title)),
     page(t("app.tab.settings"), "sliders", "settings"),
     page(t("app.logs"), "logs", "logs"),
     page(t("app.tab.terminal"), "terminal", "terminal"),
@@ -2864,6 +2880,7 @@ function appOverviewTab(app, box) {
         "aside",
         { class: "side" },
         h("section", { class: "card pad" }, h("div", { class: "section-head" }, h("h2", null, t("app.glance"))), app.port && row(t("app.address"), appAddress(app), true), row(t("app.composeFile"), app.composeFile, true), app.folders.map((f, i) => row(i ? "" : t("app.folders"), f, true)), row(t("app.source"), app.store ? t("app.fromStore", { store: app.store }) : t("app.custom")), row(t("app.installed"), new Date(app.installedAt).toLocaleDateString(state.lang, { day: "numeric", month: "short", year: "numeric" }))),
+        app.tips && h("section", { class: "card pad" }, h("div", { class: "section-head" }, h("h2", null, t("app.notes"))), h("div", { class: "tips prose" }, md(app.tips))),
         h("section", { class: "pad-x" }, h("div", { class: "section-head" }, h("h2", null, t("activity.title"))), app.activity.length ? app.activity.slice(0, 6).map(activityItem) : h("p", { class: "muted small" }, t("activity.none"))),
       ),
     ),
@@ -7932,6 +7949,7 @@ function paintMachineApps() {
           "div",
           { class: "row-actions" },
           busy && small(t("jobs.showLog"), "logs", () => jobDialog(app.job.id, app.job.kind, app.title, () => void loadMachineApps())),
+          app.tips && small(t("app.notes"), "info", () => notesDialog(app.title, app.tips)),
           isUp(app) ? small(t("app.stop"), "stop", act(app, "stop"), busy) : small(t("app.start"), "play", act(app, "start"), busy),
           small(t("app.restart"), "refresh", act(app, "restart"), busy || !isUp(app)),
           small(t("app.update"), "up", act(app, "update"), busy),
@@ -8642,6 +8660,16 @@ function jobReason(e) {
   return line.length > 110 ? "…" + line.slice(-110) : line;
 }
 
+/** How to reach the store's words on an app just installed; the card waits for the person while there are some */
+function jobNotes(e) {
+  if (e.status !== "done" || e.kind !== "install") return null;
+  const o = state.overview;
+  const here = o?.apps?.find((a) => a.name === e.app);
+  if (here?.notes) return () => appNotesDialog(here.name, here.title);
+  const there = o?.machineApps?.find((a) => a.key === e.app);
+  return there?.tips ? () => notesDialog(there.title, there.tips) : null;
+}
+
 const jobUrl = (e) => {
   const app = state.overview?.apps?.find((a) => a.name === e.app);
   return app && isUp(app) ? appUrl(app) : null;
@@ -8730,6 +8758,7 @@ function jobCard(e, row = false) {
   const ended = jobEnded(e);
   const url = e.status === "done" && e.kind === "install" ? jobUrl(e) : null;
   const page = e.status === "done" && e.kind === "install" && !e.machine ? `#/apps/${e.app}` : null;
+  const notes = jobNotes(e);
   return h(
     "div",
     { class: `jt-card ${row ? "row" : ""} ${e.status} ${e.stopped ? "stopped" : ""}`, "data-job": e.id },
@@ -8747,6 +8776,7 @@ function jobCard(e, row = false) {
     !row && jobWaits(e) && e.kind === "install" && h("p", { class: "muted small jt-left" }, t("jobs.leftOver")),
     !row && h("div", { class: "jt-actions" },
       button(t("jobs.showLog"), { class: "small", onclick: () => jobLog(e) }),
+      notes && button(t("app.notes"), { class: "small", onclick: notes }, "info"),
       (url || page) && h("a", { class: "btn small primary", href: url ?? page, ...(url ? { target: "_blank", rel: "noopener noreferrer" } : {}), onclick: () => closeJob(e.id) }, icon("external"), t("common.open")),
     ),
   );
@@ -8786,7 +8816,7 @@ function paintJobs() {
     document.body.append(tray);
     new ResizeObserver(() => document.documentElement.style.setProperty("--jobs-h", tray.offsetHeight + "px")).observe(tray);
   }
-  const sig = JSON.stringify([jobsUi.min, jobsUi.all, jobsUi.lost, state.lang, shown.map((e) => [e.id, e.status, e.stopped, jobHeading(e), e.icon, e.status === "done" && jobUrl(e)])]);
+  const sig = JSON.stringify([jobsUi.min, jobsUi.all, jobsUi.lost, state.lang, shown.map((e) => [e.id, e.status, e.stopped, jobHeading(e), e.icon, e.status === "done" && jobUrl(e), !!jobNotes(e)])]);
   if (sig !== jobsUi.sig) {
     jobsUi.sig = sig;
     tray.className = jobsUi.min ? "min" : "";
@@ -8891,7 +8921,7 @@ function jobTileMenu(app, at) {
 setInterval(() => {
   if (document.hidden || jobsUi.hold) return;
   for (const e of [...jobsUi.list.values()]) {
-    if (!jobEnded(e) || !e.status || jobWaits(e) || jobsUi.logs.has(e.id)) continue;
+    if (!jobEnded(e) || !e.status || jobWaits(e) || jobNotes(e) || jobsUi.logs.has(e.id)) continue;
     if (--e.left <= 0) closeJob(e.id);
   }
 }, 1000);

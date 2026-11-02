@@ -47,6 +47,8 @@ export interface MachineApp {
   /** Behind Hata's sign-in: the port of this server it opens on */
   guarded: number | null;
   job: { id: string; kind: JobKind; progress?: JobProgress; last?: string } | null;
+  /** What the store says to know of it; may hold a default password, so for administrators only */
+  tips: string;
   containers: { id: string; name: string; service: string; image: string; state: string; status: string; ports: string[]; done: boolean }[];
 }
 
@@ -91,6 +93,7 @@ function describe(id: string, files: Files, containers: MachineContainer[] | nul
       return access?.protect && access.listen ? access.listen : null;
     })(),
     job: jobOf(id, files.name),
+    tips: meta.tips,
     containers: own.map((c) => ({ id: c.id.slice(0, 12), name: c.name, service: c.service, image: c.image, state: c.state, status: c.status, done: stepDone(compose, c.service, c.state, c.status), ports: [...new Set(c.ports.filter((p) => p.public).map((p) => `${p.public}:${p.private}/${p.type}`))] })),
   };
 }
