@@ -2848,7 +2848,7 @@ function renderAppHead() {
 async function storeUpdateDialog(app) {
   let plan;
   try {
-    plan = await api("GET", `/api/apps/${app.name}/storeupdate`);
+    plan = await api("GET", `/api/apps/${app.name}/storeupdate?lang=${state.lang}`);
   } catch (e) {
     return toast(errorText(e), "error");
   }
@@ -2860,6 +2860,7 @@ async function storeUpdateDialog(app) {
     "wide",
     h("header", null, h("div", { class: "grow" }, h("h2", null, t("update.title", { title: app.title })), h("p", { class: "muted small" }, t("update.lead", { store: plan.store }))), closeX(() => dialog)),
     !plan.exact && h("p", { class: "banner small" }, t(plan.recorded ? "update.guessed" : "update.matched", { store: plan.store })),
+    plan.notes && h("div", { class: "tips prose" }, h("strong", null, t("update.before")), md(plan.notes)),
     fromStore.length > 0 && h("div", { class: "stack" }, h("h3", null, t("update.changes")), table("store")),
     conflicts.length > 0 && h("div", { class: "stack" }, h("h3", null, t("update.conflicts")), h("p", { class: "muted small" }, t("update.conflictsLead")), table("conflict")),
     h("details", null, h("summary", { class: "muted small" }, t("update.file")), h("textarea", { class: "code", spellcheck: false, wrap: "off", readOnly: true, value: plan.compose, "aria-label": "compose.yml" })),

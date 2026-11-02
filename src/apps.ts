@@ -25,7 +25,7 @@ import { compose as runCompose, composeCmd, containerStats, imageUser, inspectCo
 import { writeTextAtomic } from "./fsutil";
 import { newerImages } from "./images";
 import { guessBase, merge3, same, type MergeChange } from "./merge";
-import { answer, casaosOf, cleanLogin, movePorts, envLine, foundInLog, loginValues, loginView, filled, ownCasaos, settingFolders, settingPorts, settingsForm, startingEnv, viewCompose, webPortOf, type FormSetting, type HataMeta, type IndexApp, type Login, type LoginValues, type LoginView } from "./hataapp";
+import { answer, casaosOf, changedNotes, cleanLogin, movePorts, envLine, foundInLog, loginValues, loginView, filled, ownCasaos, settingFolders, settingPorts, settingsForm, startingEnv, viewCompose, webPortOf, type FormSetting, type HataMeta, type IndexApp, type Login, type LoginValues, type LoginView } from "./hataapp";
 import { labelOf, siteDomain } from "./site";
 import { findStoreApp, storeApp, type StoreApp } from "./store";
 
@@ -1133,6 +1133,9 @@ function hataPlan(app: StoreApp, compose: Compose, origin: HataFile | null, reco
   if (!changes.length && !filesChanged) return null;
   return { store: app.store, hata, recorded, exact: !!origin?.base, changes, merged, base: theirs };
 }
+
+/** The store's notes of the newer version, when they say something the installed ones do not */
+export const updateNotes = (name: string, plan: StoreUpdate, lang: string): string => (plan.hata ? changedNotes(hataMetaOf(name)?.notes, plan.hata.meta.notes, lang) : "");
 
 /** Moves the app to the store's newer version, keeping what the user changed */
 export function applyStoreUpdate(name: string, user: string): Job {

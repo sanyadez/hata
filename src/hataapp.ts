@@ -231,6 +231,12 @@ export function foundInLog(log: string, find: string): LoginValues {
   return {};
 }
 
+/** What a newer version's notes say, when they differ from the installed ones: read before updating */
+export function changedNotes(installed: unknown, newer: unknown, lang: string): string {
+  const text = textIn(newer, lang);
+  return text === textIn(installed, lang) ? "" : text;
+}
+
 /** A log with the passwords of a `log` login taken out of it: what a key below `full` is given */
 export function logWithoutLogin(log: string, login: Login | null): string {
   if (login?.kind !== "log") return log;

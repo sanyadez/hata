@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { appMeta, localize } from "../src/appform";
-import { answer, casaosOf, envLine, fill, filled, foundInLog, loginValues, loginView, logWithoutLogin, movePorts, ownCasaos, readIndexApp, settingFolders, settingPorts, settingsForm, startingEnv, textIn, viewCompose, webPortOf, type Login, type Setting } from "../src/hataapp";
+import { answer, casaosOf, changedNotes, envLine, fill, filled, foundInLog, loginValues, loginView, logWithoutLogin, movePorts, ownCasaos, readIndexApp, settingFolders, settingPorts, settingsForm, startingEnv, textIn, viewCompose, webPortOf, type Login, type Setting } from "../src/hataapp";
 
 const icon = `data:image/svg+xml;base64,${Buffer.from("<svg xmlns='http://www.w3.org/2000/svg'/>").toString("base64")}`;
 const entry = (extra: object = {}) => ({
@@ -252,5 +252,18 @@ describe("a port taken here", () => {
     const all = async () => true;
     expect((await movePorts([row("A", "80"), row("NAME", "80", "text")], taken(80)))[1]).toEqual(row("NAME", "80", "text"));
     expect(await movePorts([row("A", "80")], all)).toEqual([{ ...row("A", "80"), busy: 80 }]);
+  });
+});
+
+describe("changedNotes", () => {
+  const old = { en: "Back up first.", uk: "Спершу копія." };
+  const newer = { en: "This update resets it.", uk: "Це оновлення скине." };
+  test("says the newer notes in the person's language", () => {
+    expect(changedNotes(old, newer, "uk")).toBe(newer.uk);
+    expect(changedNotes(undefined, newer, "en")).toBe(newer.en);
+  });
+  test("says nothing when they did not change or are gone", () => {
+    expect(changedNotes(old, { ...old }, "en")).toBe("");
+    expect(changedNotes(old, undefined, "en")).toBe("");
   });
 });
