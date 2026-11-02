@@ -25,7 +25,7 @@ import { compose as runCompose, composeCmd, containerStats, imageUser, inspectCo
 import { writeTextAtomic } from "./fsutil";
 import { newerImages } from "./images";
 import { guessBase, merge3, same, type MergeChange } from "./merge";
-import { answer, casaosOf, cleanLogin, envLine, foundInLog, loginValues, loginView, filled, ownCasaos, settingFolders, settingPorts, settingsForm, startingEnv, viewCompose, webPortOf, type FormSetting, type HataMeta, type IndexApp, type Login, type LoginValues, type LoginView } from "./hataapp";
+import { answer, casaosOf, cleanLogin, movePorts, envLine, foundInLog, loginValues, loginView, filled, ownCasaos, settingFolders, settingPorts, settingsForm, startingEnv, viewCompose, webPortOf, type FormSetting, type HataMeta, type IndexApp, type Login, type LoginValues, type LoginView } from "./hataapp";
 import { labelOf, siteDomain } from "./site";
 import { findStoreApp, storeApp, type StoreApp } from "./store";
 
@@ -570,16 +570,7 @@ export async function storeAppDetail(store: string, name: string, lang: string, 
     const known = { ...ownVars(name, on?.dataRoot ?? settings.dataRoot), DATA_ROOT: on?.dataRoot ?? settings.dataRoot };
     const env = startingEnv(meta, known, () => "");
     const busy = async (port: number) => (on ? (await on.busy([{ port, protocol: "tcp" }])).includes(port) : !(await portFree(port, "tcp")));
-    const rows = await Promise.all(
-      settingsForm(meta, env, lang).map(async (row) => {
-        if (row.type !== "port" || !/^\d+$/.test(row.value) || !(await busy(Number(row.value)))) return row;
-        // the store's port is taken here: the next free one is offered instead
-        for (let port = Number(row.value) + 1; port < Math.min(65536, Number(row.value) + 100); port++) {
-          if (!(await busy(port))) return { ...row, value: String(port), busy: Number(row.value) };
-        }
-        return { ...row, busy: Number(row.value) };
-      }),
-    );
+    const rows = await movePorts(settingsForm(meta, env, lang), busy);
     const view = viewCompose(storeFile(app), meta, env);
     return {
       ...appMeta(view, lang),

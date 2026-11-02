@@ -129,6 +129,28 @@ export function cleanLogin(v: unknown, settings: Setting[]): Login | null {
   return null;
 }
 
+/**
+ * A port of the form that is taken here is offered as the next free one: free here, and not one this app
+ * uses for something else (a proxy on 80, 443 and 81 moved its 80 to its own 81, and did not start).
+ */
+export async function movePorts<T extends { type: string; value: string }>(rows: T[], busy: (port: number) => Promise<boolean>): Promise<(T & { busy?: number })[]> {
+  const isPort = (row: T) => row.type === "port" && /^\d+$/.test(row.value);
+  const mine = new Set(rows.filter(isPort).map((row) => Number(row.value)));
+  const out: (T & { busy?: number })[] = [];
+  for (const row of rows) {
+    const taken = Number(row.value);
+    if (!isPort(row) || !(await busy(taken))) {
+      out.push(row);
+      continue;
+    }
+    let moved = 0;
+    for (let port = taken + 1; port < Math.min(65536, taken + 100) && !moved; port++) if (!mine.has(port) && !(await busy(port))) moved = port;
+    if (moved) mine.add(moved);
+    out.push({ ...row, ...(moved ? { value: String(moved) } : {}), busy: taken });
+  }
+  return out;
+}
+
 /** What the page gets of a `login`: no value it has to ask for. `ask` — the fields shown only when asked for */
 export interface LoginView {
   kind: Login["kind"];

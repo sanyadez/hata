@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { appMeta, localize } from "../src/appform";
-import { answer, casaosOf, envLine, fill, filled, foundInLog, loginValues, loginView, logWithoutLogin, ownCasaos, readIndexApp, settingFolders, settingPorts, settingsForm, startingEnv, textIn, viewCompose, webPortOf, type Login, type Setting } from "../src/hataapp";
+import { answer, casaosOf, envLine, fill, filled, foundInLog, loginValues, loginView, logWithoutLogin, movePorts, ownCasaos, readIndexApp, settingFolders, settingPorts, settingsForm, startingEnv, textIn, viewCompose, webPortOf, type Login, type Setting } from "../src/hataapp";
 
 const icon = `data:image/svg+xml;base64,${Buffer.from("<svg xmlns='http://www.w3.org/2000/svg'/>").toString("base64")}`;
 const entry = (extra: object = {}) => ({
@@ -229,5 +229,28 @@ describe("how to sign in", () => {
     expect(shown).toContain("qbittorrent-1  | Connected");
     expect(logWithoutLogin(log, { kind: "first-visit" })).toBe(log);
     expect(logWithoutLogin(log, null)).toBe(log);
+  });
+});
+
+describe("a port taken here", () => {
+  const row = (name: string, value: string, type = "port") => ({ name, type, value });
+  const taken = (...ports: number[]) => async (port: number) => ports.includes(port);
+
+  test("does not move onto another port of the same app", async () => {
+    const rows = await movePorts([row("PORT_80", "80"), row("PORT_443", "443"), row("WEB_PORT", "81")], taken(80));
+    expect(rows.map((r) => r.value)).toEqual(["82", "443", "81"]);
+    expect(rows[0]!.busy).toBe(80);
+    expect(rows[2]!.busy).toBeUndefined();
+  });
+
+  test("two taken ports of an app get two different ones", async () => {
+    const rows = await movePorts([row("A", "80"), row("B", "81")], taken(80, 81));
+    expect(rows.map((r) => r.value)).toEqual(["82", "83"]);
+  });
+
+  test("anything else stays as it is; no room leaves the port and says it is taken", async () => {
+    const all = async () => true;
+    expect((await movePorts([row("A", "80"), row("NAME", "80", "text")], taken(80)))[1]).toEqual(row("NAME", "80", "text"));
+    expect(await movePorts([row("A", "80")], all)).toEqual([{ ...row("A", "80"), busy: 80 }]);
   });
 });
