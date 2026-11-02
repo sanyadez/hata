@@ -12,6 +12,7 @@
  */
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { rm } from "node:fs/promises";
+import { progressTracker, type JobProgress } from "./jobprogress";
 import { networkInterfaces } from "node:os";
 import { dirname, join } from "node:path";
 import { APP_NAME_RE, appMeta, applyForm, appStatus, stepDone, localize, bindSources, buildForm, dumpCompose, normalize, parseCompose, parseEnv, publishedPorts, resolvePorts, type AppForm, type AppMeta, type Compose } from "./appform";
@@ -24,7 +25,7 @@ import { compose as runCompose, composeCmd, containerStats, imageUser, inspectCo
 import { writeTextAtomic } from "./fsutil";
 import { newerImages } from "./images";
 import { guessBase, merge3, same, type MergeChange } from "./merge";
-import { answer, casaosOf, envLine, filled, ownCasaos, settingFolders, settingPorts, settingsForm, startingEnv, viewCompose, webPortOf, type FormSetting, type HataMeta, type IndexApp } from "./hataapp";
+import { answer, casaosOf, changedNotes, cleanLogin, movePorts, envLine, foundInLog, loginValues, loginView, filled, ownCasaos, settingFolders, settingPorts, settingsForm, startingEnv, viewCompose, webPortOf, type FormSetting, type HataMeta, type IndexApp, type Login, type LoginValues, type LoginView } from "./hataapp";
 import { labelOf, siteDomain } from "./site";
 import { findStoreApp, storeApp, type StoreApp } from "./store";
 
@@ -78,11 +79,21 @@ export interface Job {
   stoppable?: boolean;
   /** It was ended so */
   stopped?: boolean;
+  /** How far it got, as far as its output tells */
+  progress?: JobProgress;
+  /** The last line of its output */
+  last?: string;
+  /** How the page words what it works on, which outlives an app that failed to install */
+  title?: string;
+  icon?: string;
+  /** The machine it runs on, by name */
+  machine?: string;
   startedAt: number;
   finishedAt?: number;
 }
 
 const MAX_LOG_LINES = 500;
+const APP_KEY = /^[a-z0-9_-]+$/;
 const KEEP_FINISHED_JOBS = 20;
 const jobs = new Map<string, Job>();
 /** app name → id of the job that currently owns it */
@@ -93,6 +104,12 @@ export const isBusy = (key: string): boolean => busy.has(key);
 
 export const getJob = (id: string): Job | null => jobs.get(id) ?? null;
 export const listJobs = (): Job[] => [...jobs.values()];
+
+const TELL_DONE_MS = 10 * 60_000;
+const TELL_FAILED_MS = 24 * 3_600_000;
+/** What the page still has to tell: what runs; what ended while nobody looked, for a while; a failure for longer */
+export const jobToTell = (job: Job, now = Date.now()): boolean =>
+  job.status === "running" || now - (job.finishedAt ?? 0) < (job.status === "failed" && !job.stopped ? TELL_FAILED_MS : TELL_DONE_MS);
 
 export type Log = (line: string) => void;
 
@@ -110,13 +127,16 @@ export const jobFinished = (job: Job): Promise<void> => finished.get(job) ?? Pro
  */
 export function startJob(app: string, kind: JobKind, user: string, work: (log: Log) => Promise<void>, quiet = false, label?: { app: string; machine: string }): Job {
   if (busy.has(app)) throw new AppError("app.busy", 409);
-  const job: Job = { id: crypto.randomUUID(), app, kind, status: "running", log: [], lineCount: 0, startedAt: Date.now() };
+  const job: Job = { id: crypto.randomUUID(), app, kind, status: "running", log: [], lineCount: 0, startedAt: Date.now(), title: label?.app, machine: label?.machine };
   jobs.set(job.id, job);
   busy.set(app, job.id);
-  const summary = () => ({ id: job.id, app, kind, status: job.status, error: job.error, stoppable: job.stoppable, stopped: job.stopped });
+  const summary = () => ({ id: job.id, app, kind, status: job.status, error: job.error, stoppable: job.stoppable, stopped: job.stopped, progress: job.progress, last: job.last, title: job.title, icon: job.icon, machine: job.machine });
+  const track = progressTracker();
   const log: Log = (line) => {
     job.log.push(line);
     if (job.log.length > MAX_LOG_LINES) job.log.shift();
+    job.progress = track(line);
+    job.last = line.slice(0, 400);
     bus.publish("job", { job: summary(), line, n: job.lineCount++ });
   };
   bus.publish("job", { job: summary() });
@@ -139,6 +159,17 @@ export function startJob(app: string, kind: JobKind, user: string, work: (log: L
       bus.publish("apps");
     });
   finished.set(job, run);
+  // an install has written its files by now: from here on the app has a name and a picture
+  if (!label && APP_KEY.test(app) && existsSync(composeFile(app))) {
+    try {
+      const meta = appMeta(viewOf(app) ?? { name: app }, settings.language);
+      job.title = meta.title || app;
+      job.icon = ownIconUrl(app) || meta.icon;
+      bus.publish("job", { job: summary() });
+    } catch {
+      // a broken file: the job goes on by the app's name
+    }
+  }
   return job;
 }
 
@@ -180,11 +211,11 @@ export function onCompose(before: ComposeHook, after: ComposeHook): void {
   composeHooks.push({ before, after });
 }
 
-export async function dc(name: string, args: string[], log: Log): Promise<void> {
+export async function dc(name: string, args: string[], log: Log, stop?: AbortSignal): Promise<void> {
   for (const hook of composeHooks) hook.before(name);
   log(`$ docker compose ${args.join(" ")}`);
   try {
-    const { code, output } = await runCompose(name, appDir(name), args, log);
+    const { code, output } = await runCompose(name, appDir(name), args, log, stop);
     if (code !== 0) throw new Error(output.split("\n").slice(-3).join("\n") || `docker compose exited with ${code}`);
   } finally {
     if (args[0] === "up") for (const hook of composeHooks) hook.after(name);
@@ -309,7 +340,11 @@ export interface InstalledApp extends Pick<AppMeta, "title" | "icon" | "port" | 
   /** Behind Hata's sign-in */
   protected: boolean;
   /** Running operation, if any */
-  job: { id: string; kind: JobKind } | null;
+  job: { id: string; kind: JobKind; stoppable?: boolean; progress?: JobProgress; last?: string } | null;
+  /** The store has words on what to know of it: how to sign in, what to do first */
+  notes: boolean;
+  /** How the store says one signs in to it; what to type is in `AppDetail.login` */
+  login: Login["kind"] | "";
   /** `done` — a step that ran once and ended as it should (`stepDone`) */
   containers: { id: string; name: string; service: string; image: string; state: string; status: string; ports: string[]; done: boolean }[];
 }
@@ -358,7 +393,9 @@ function describeApp(name: string, containers: ContainerSummary[] | null, lang: 
     update: planStoreUpdate(name) !== null,
     newer: newerImages(own),
     protected: settings.access[name]?.protect === true,
-    job: job ? { id: job.id, kind: job.kind } : null,
+    job: job ? { id: job.id, kind: job.kind, stoppable: job.stoppable, progress: job.progress, last: job.last } : null,
+    notes: !!meta.tips,
+    login: loginOf(name)?.kind ?? "",
     containers: own.map((c) => ({
       id: c.Id.slice(0, 12),
       ports: [...new Set(c.Ports.filter((p) => p.PublicPort).map((p) => `${p.PublicPort}:${p.PrivatePort}/${p.Type}`))],
@@ -383,6 +420,35 @@ export interface AppDetail extends InstalledApp {
   /** Host folders the app keeps data in */
   folders: string[];
   installedAt: number;
+  /** What the store says to know of it; may hold a default password, so for administrators only */
+  tips: string;
+  /** How to sign in; may hold a default password, so for administrators only */
+  login: LoginView | null;
+}
+
+/**
+ * An app's `login`: what it was installed with, or what its store says now — a store may learn it later than
+ * the app was installed. Read again, since the file on disk can be edited.
+ */
+export function knownLogin(meta: HataMeta | null, store: string, name: string): Login | null {
+  if (!meta) return null;
+  return cleanLogin(meta.login, meta.settings) ?? cleanLogin(storeApp(store, name)?.hata?.meta.login, meta.settings);
+}
+
+export const loginOf = (name: string): Login | null => knownLogin(hataMetaOf(name), readHataFile(name)?.store ?? "", name);
+
+/** The values behind "Show": from the app's `.env`, or the password from its log. Each asking is written down */
+export async function revealLogin(name: string, user: string): Promise<LoginValues> {
+  assertInstalled(name);
+  const login = loginOf(name);
+  if (!login) throw new AppError("app.noLogin", 404);
+  let values: LoginValues;
+  if (login.kind === "log") {
+    const proc = Bun.spawn({ cmd: composeCmd(name, appDir(name), ["logs", "--no-color", "--tail", "5000"]), stdin: "ignore", stdout: "pipe", stderr: "ignore" });
+    values = { ...(login.user ? { user: login.user } : {}), ...foundInLog(await new Response(proc.stdout).text(), login.find) };
+  } else values = loginValues(login, hataMetaOf(name)!.settings, appEnv(name));
+  record("app.loginShown", { app: name, user });
+  return values;
 }
 
 export async function appDetail(name: string, lang: string): Promise<AppDetail> {
@@ -402,7 +468,12 @@ export async function appDetail(name: string, lang: string): Promise<AppDetail> 
     // removed while this was being put together
     throw new AppError("app.notFound", 404);
   }
-  return { ...describeApp(name, containers, lang), composeFile: composeFile(name), folders, installedAt };
+  return { ...describeApp(name, containers, lang), composeFile: composeFile(name), folders, installedAt, tips: appMeta(compose ?? { name }, lang).tips, login: appLoginView(name) };
+}
+
+function appLoginView(name: string): LoginView | null {
+  const login = loginOf(name);
+  return login && loginView(login, hataMetaOf(name)!.settings, appEnv(name));
 }
 
 /** A stats sample of each running container of the app, keyed by container name */
@@ -499,16 +570,7 @@ export async function storeAppDetail(store: string, name: string, lang: string, 
     const known = { ...ownVars(name, on?.dataRoot ?? settings.dataRoot), DATA_ROOT: on?.dataRoot ?? settings.dataRoot };
     const env = startingEnv(meta, known, () => "");
     const busy = async (port: number) => (on ? (await on.busy([{ port, protocol: "tcp" }])).includes(port) : !(await portFree(port, "tcp")));
-    const rows = await Promise.all(
-      settingsForm(meta, env, lang).map(async (row) => {
-        if (row.type !== "port" || !/^\d+$/.test(row.value) || !(await busy(Number(row.value)))) return row;
-        // the store's port is taken here: the next free one is offered instead
-        for (let port = Number(row.value) + 1; port < Math.min(65536, Number(row.value) + 100); port++) {
-          if (!(await busy(port))) return { ...row, value: String(port), busy: Number(row.value) };
-        }
-        return { ...row, busy: Number(row.value) };
-      }),
-    );
+    const rows = await movePorts(settingsForm(meta, env, lang), busy);
     const view = viewCompose(storeFile(app), meta, env);
     return {
       ...appMeta(view, lang),
@@ -654,7 +716,7 @@ async function assertPortsFree(compose: Compose): Promise<void> {
   }
 }
 
-async function install(name: string, text: string, compose: Compose, log: Log, origin?: { store: string; base: Compose; hata?: IndexApp; env?: Record<string, string> }): Promise<void> {
+async function install(name: string, text: string, compose: Compose, log: Log, stop: AbortSignal, origin?: { store: string; base: Compose; hata?: IndexApp; env?: Record<string, string> }): Promise<void> {
   const dir = appDir(name);
   mkdirSync(dir, { recursive: true });
   try {
@@ -662,20 +724,28 @@ async function install(name: string, text: string, compose: Compose, log: Log, o
     if (origin) writeHataFile(name, origin.store, origin.base, origin.hata);
     if (origin?.hata) writeFiles(name, origin.hata.files, {}, log);
     writeEnv(name, origin?.env);
-    await dc(name, ["config", "--quiet"], log);
+    await dc(name, ["config", "--quiet"], log, stop);
     // the folders are made from the file as compose will read it, with the settings' folders too
     const view = origin?.hata ? viewOf(name)! : compose;
     if (origin?.hata) normalize(view, settings.dataRoot, name);
     const made = createDataDirs(view, origin?.hata ? settingFolders(origin.hata.meta, appEnv(name)) : []);
-    await dc(name, ["pull"], log);
+    await dc(name, ["pull"], log, stop);
     await giveToImageUsers(view, made, log);
-    await dc(name, ["up", "-d", "--remove-orphans"], log);
+    await dc(name, ["up", "-d", "--remove-orphans"], log, stop);
   } catch (e) {
     // a failed install leaves nothing behind, so it can simply be tried again
     await runCompose(name, dir, ["down", "--remove-orphans"]).catch(() => {});
     rmSync(dir, { recursive: true, force: true });
     throw e;
   }
+}
+
+/** An install runs as a job that can be stopped: what it made goes, the way a failed one's does */
+function startInstall(name: string, user: string, work: (log: Log, stop: AbortSignal) => Promise<void>): Job {
+  const stopper = new AbortController();
+  const job = startJob(name, "install", user, (log) => work(log, stopper.signal));
+  stoppable(job, stopper);
+  return job;
 }
 
 // --- An app arriving from another machine, or leaving for one (`moveapp.ts`) --------------------------
@@ -830,7 +900,7 @@ async function installHata(app: StoreApp & { hata: IndexApp }, form: unknown, us
   const { values, compose, view } = hataAnswers(app, form);
   await assertPortsFree(view);
   const origin = { store: app.store, base: compose, hata, env: values };
-  return startJob(name, "install", user, (log) => install(name, hata.compose, view, log, origin));
+  return startInstall(name, user, (log, stop) => install(name, hata.compose, view, log, stop, origin));
 }
 
 export async function installFromStore(store: string, name: string, form: unknown, user: string): Promise<Job> {
@@ -846,7 +916,7 @@ export async function installFromStore(store: string, name: string, form: unknow
   if (error) throw new AppError(error);
   await assertPortsFree(compose);
   const origin = { store, base: structuredClone(storeApp(store, name)!.compose) };
-  return startJob(name, "install", user, (log) => install(name, dumpCompose(compose), compose, log, origin));
+  return startInstall(name, user, (log, stop) => install(name, dumpCompose(compose), compose, log, stop, origin));
 }
 
 /** Installs a compose file pasted by the user; the text is stored exactly as given */
@@ -864,7 +934,7 @@ export async function installCustom(name: unknown, text: unknown, user: string):
   if (existsSync(appDir(appName))) throw new AppError("app.exists", 409);
   normalize(compose, settings.dataRoot);
   await assertPortsFree(compose);
-  return startJob(appName, "install", user, (log) => install(appName, text, compose, log));
+  return startInstall(appName, user, (log, stop) => install(appName, text, compose, log, stop));
 }
 
 /** Called after an app is removed, for modules that keep something about it */
@@ -1063,6 +1133,9 @@ function hataPlan(app: StoreApp, compose: Compose, origin: HataFile | null, reco
   if (!changes.length && !filesChanged) return null;
   return { store: app.store, hata, recorded, exact: !!origin?.base, changes, merged, base: theirs };
 }
+
+/** The store's notes of the newer version, when they say something the installed ones do not */
+export const updateNotes = (name: string, plan: StoreUpdate, lang: string): string => (plan.hata ? changedNotes(hataMetaOf(name)?.notes, plan.hata.meta.notes, lang) : "");
 
 /** Moves the app to the store's newer version, keeping what the user changed */
 export function applyStoreUpdate(name: string, user: string): Job {

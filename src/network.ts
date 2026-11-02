@@ -1494,6 +1494,9 @@ export async function wifiForget(name: string, user: string): Promise<void> {
   const nic = await wifiNic(name);
   const profile = nic.wifi!.ssid ? (await savedWifi()).get(nic.wifi!.ssid) : undefined;
   if (!profile) throw new NetworkError("network.wifiGone");
+  // leaving the only network the server is on leaves Hata out of reach, with nothing here to bring it back
+  const others = (await networkReport()).nics.filter((n) => n.name !== name && n.addresses.length > 0);
+  if (!others.length) throw new NetworkError("network.wifiOnlyWay");
   await must(nmcli(["connection", "delete", profile]));
   record("network.wifi.forgotten", { user, detail: nic.wifi!.ssid });
   bus.publish("network");

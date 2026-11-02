@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { appMeta, localize } from "../src/appform";
-import { answer, casaosOf, envLine, fill, filled, ownCasaos, readIndexApp, settingFolders, settingPorts, settingsForm, startingEnv, textIn, viewCompose, webPortOf } from "../src/hataapp";
+import { answer, casaosOf, changedNotes, envLine, fill, filled, foundInLog, loginValues, loginView, logWithoutLogin, movePorts, ownCasaos, readIndexApp, settingFolders, settingPorts, settingsForm, startingEnv, textIn, viewCompose, webPortOf, type Login, type Setting } from "../src/hataapp";
 
 const icon = `data:image/svg+xml;base64,${Buffer.from("<svg xmlns='http://www.w3.org/2000/svg'/>").toString("base64")}`;
 const entry = (extra: object = {}) => ({
@@ -153,4 +153,117 @@ test("a secret of hexadecimal digits is made so", () => {
   const app = readIndexApp(entry({ settings: [{ name: "CREDS_KEY", type: "secret", length: 64, chars: "hex", label: "Key" }] }), "", {})!;
   expect(app.meta.settings[0]).toMatchObject({ length: 64, chars: "hex" });
   expect(startingEnv(app.meta, {}, (n, chars) => (chars === "hex" ? "f" : "x").repeat(n))).toEqual({ CREDS_KEY: "f".repeat(64) });
+});
+
+test("how to sign in is read from the index, checked again", () => {
+  const login = (value: unknown, settings: unknown[] = []) => read({ login: value, settings })!.meta.login;
+  expect(login({ kind: "default", user: "admin", password: "admin" })).toEqual({ kind: "default", user: "admin", password: "admin" });
+  expect(login({ kind: "first-visit", user: "dropped" })).toEqual({ kind: "first-visit" });
+  expect(login({ kind: "none" })).toEqual({ kind: "none" });
+  expect(login({ kind: "log", user: "admin", find: "temporary password" })).toEqual({ kind: "log", user: "admin", find: "temporary password" });
+  const pw = [{ name: "PW", type: "password", label: "Password" }];
+  expect(login({ kind: "settings", user: "admin", password: "${PW}" }, pw)).toEqual({ kind: "settings", user: "admin", password: "${PW}" });
+  // what cannot be understood is left out, and the app is still offered
+  for (const bad of [{ kind: "guess" }, "admin", { kind: "default" }, { kind: "default", password: "${PW}" }, { kind: "settings", password: "${NOPE}" }, { kind: "settings", user: "admin" }, { kind: "log" }, { kind: "default", password: 666 }]) {
+    expect(login(bad, pw)).toBeUndefined();
+  }
+  expect(read()!.meta.login).toBeUndefined();
+});
+
+
+describe("how to sign in", () => {
+  const settings = [
+    { name: "WEB_USER", type: "text", label: "User", default: "admin" },
+    { name: "WEB_PASSWORD", type: "password", label: "Password" },
+    { name: "API_SECRET", type: "secret", label: "Secret" },
+  ] as const as Setting[];
+
+  test("a default login is shown as it is, a first visit has nothing to show", () => {
+    expect(loginView({ kind: "default", user: "admin", password: "admin" }, [], {})).toEqual({ kind: "default", user: "admin", password: "admin" });
+    expect(loginView({ kind: "first-visit" }, [], {})).toEqual({ kind: "first-visit" });
+    expect(loginView({ kind: "none" }, [], {})).toEqual({ kind: "none" });
+  });
+
+  test("a password from the settings never reaches the page unasked", () => {
+    const login: Login = { kind: "settings", user: "${WEB_USER}", password: "${WEB_PASSWORD}" };
+    const env = { WEB_USER: "olia", WEB_PASSWORD: "s3cret" };
+    const view = loginView(login, settings, env);
+    expect(view).toEqual({ kind: "settings", user: "olia", ask: ["password"] });
+    expect(JSON.stringify(view)).not.toContain("s3cret");
+    expect(loginValues(login, settings, env)).toEqual({ user: "olia", password: "s3cret" });
+  });
+
+  test("a user name kept as a secret waits too; a value not in the file is its setting's default", () => {
+    expect(loginView({ kind: "settings", user: "${API_SECRET}", password: "plain" }, settings, { API_SECRET: "x" })).toEqual({ kind: "settings", password: "plain", ask: ["user"] });
+    expect(loginView({ kind: "settings", user: "${WEB_USER}", password: "${WEB_PASSWORD}" }, settings, {})).toEqual({ kind: "settings", user: "admin", ask: ["password"] });
+    expect(loginValues({ kind: "settings", user: "${WEB_USER}", password: "${WEB_PASSWORD}" }, settings, {})).toEqual({ user: "admin" });
+  });
+
+  test("a log login asks for the password and keeps what to look for on the server", () => {
+    expect(loginView({ kind: "log", user: "admin", find: "temporary password" }, [], {})).toEqual({ kind: "log", user: "admin", ask: ["password"] });
+  });
+
+  const log = [
+    "qbittorrent-1  | WebUI will be started shortly after internal preparations. Please wait...",
+    "qbittorrent-1  | \x1b[32mA temporary password is provided for this session: oldOne\x1b[0m",
+    "qbittorrent-1  | ******** Information ********",
+    "qbittorrent-1  | 2026-11-02T09:00:00.000000000Z A temporary password is provided for this session: newOne",
+    "qbittorrent-1  | Connected",
+    "",
+  ].join("\n");
+
+  test("the newest line with the words gives the password, whatever the case", () => {
+    expect(foundInLog(log, "TEMPORARY password")).toEqual({ password: "newOne", line: "A temporary password is provided for this session: newOne" });
+    expect(foundInLog(log, "no such words")).toEqual({});
+  });
+
+  test("a line that ends on the words holds no password", () => {
+    expect(foundInLog("app-1  | temporary password", "temporary password")).toEqual({});
+  });
+
+  test("a log for a key below full has the password out, and nothing else changed", () => {
+    const shown = logWithoutLogin(log, { kind: "log", find: "temporary password" });
+    expect(shown).not.toContain("newOne");
+    expect(shown).not.toContain("oldOne");
+    expect(shown).toContain("this session: (hidden)");
+    expect(shown).toContain("qbittorrent-1  | Connected");
+    expect(logWithoutLogin(log, { kind: "first-visit" })).toBe(log);
+    expect(logWithoutLogin(log, null)).toBe(log);
+  });
+});
+
+describe("a port taken here", () => {
+  const row = (name: string, value: string, type = "port") => ({ name, type, value });
+  const taken = (...ports: number[]) => async (port: number) => ports.includes(port);
+
+  test("does not move onto another port of the same app", async () => {
+    const rows = await movePorts([row("PORT_80", "80"), row("PORT_443", "443"), row("WEB_PORT", "81")], taken(80));
+    expect(rows.map((r) => r.value)).toEqual(["82", "443", "81"]);
+    expect(rows[0]!.busy).toBe(80);
+    expect(rows[2]!.busy).toBeUndefined();
+  });
+
+  test("two taken ports of an app get two different ones", async () => {
+    const rows = await movePorts([row("A", "80"), row("B", "81")], taken(80, 81));
+    expect(rows.map((r) => r.value)).toEqual(["82", "83"]);
+  });
+
+  test("anything else stays as it is; no room leaves the port and says it is taken", async () => {
+    const all = async () => true;
+    expect((await movePorts([row("A", "80"), row("NAME", "80", "text")], taken(80)))[1]).toEqual(row("NAME", "80", "text"));
+    expect(await movePorts([row("A", "80")], all)).toEqual([{ ...row("A", "80"), busy: 80 }]);
+  });
+});
+
+describe("changedNotes", () => {
+  const old = { en: "Back up first.", uk: "Спершу копія." };
+  const newer = { en: "This update resets it.", uk: "Це оновлення скине." };
+  test("says the newer notes in the person's language", () => {
+    expect(changedNotes(old, newer, "uk")).toBe(newer.uk);
+    expect(changedNotes(undefined, newer, "en")).toBe(newer.en);
+  });
+  test("says nothing when they did not change or are gone", () => {
+    expect(changedNotes(old, { ...old }, "en")).toBe("");
+    expect(changedNotes(old, undefined, "en")).toBe("");
+  });
 });

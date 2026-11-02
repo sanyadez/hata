@@ -60,7 +60,6 @@ const ICONS = {
   chevron: "M9 6l6 6-6 6",
   info: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 11v5M12 8h.01",
   sun: "M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zM12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4",
-  moon: "M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z",
   clock: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM12 7v5l3 2",
   globe: "M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM3 12h18M12 3c3 3.5 3 14.5 0 18M12 3c-3 3.5-3 14.5 0 18",
   terminal: "M5 8l4 4-4 4M12 16h7",
@@ -437,6 +436,7 @@ function startEvents() {
       appsTimer = setTimeout(refresh, 150);
     } else if (event.type === "job") {
       for (const listener of jobListeners) listener(event);
+      takeJob(event.job, event.line);
     } else if (event.type === "disks") {
       // a disk was plugged in, pulled out, connected: the pages that list disks look again
       clearTimeout(disksEventTimer);
@@ -472,7 +472,13 @@ function startEvents() {
     }
   };
   // after a reconnect anything may have changed while we were away
+  source.onerror = () => {
+    jobsUi.lost = true;
+    paintJobs();
+  };
   source.onopen = () => {
+    jobsUi.lost = false;
+    paintJobs();
     void refresh();
     void loadApprovals();
   };
@@ -491,6 +497,8 @@ async function refresh() {
   } catch {
     return;
   }
+  seedJobs(state.overview.jobs ?? []);
+  failedTiles(state.overview);
   if (state.route.view === "home") renderHomeBody();
   if (state.route.view === "store") renderStoreList();
   if (state.route.view === "app") void loadApp(true);
@@ -1266,7 +1274,7 @@ const linkIcon = (link) => {
 function tileTarget(item) {
   const o = state.overview;
   // `<name>@<machine>` — an app of another machine
-  if (item.type === "app") return item.name.includes("@") ? ((o.machineApps ?? []).find((app) => app.key === item.name) ?? null) : (o.apps.find((app) => app.name === item.name) ?? null);
+  if (item.type === "app") return item.name.includes("@") ? ((o.machineApps ?? []).find((app) => app.key === item.name) ?? null) : (o.apps.find((app) => app.name === item.name) ?? o.failedApps?.find((app) => app.name === item.name) ?? null);
   if (item.type === "files") return (o.folders ?? []).find((folder) => folder.path === item.path) ?? null;
   if (item.type === "ha") return haTarget(item);
   if (item.type === "widget") return widgetServer(item);
@@ -1302,6 +1310,20 @@ function tileContent(item, title, sub, { badges = null, where = null, big = "" }
   ];
 }
 
+/** The thin bar of a tile whose app is being worked on; `install` also tells it apart by its number */
+function tileBar(job, install) {
+  const bar = h("span", { class: "tile-bar" }, h("i"));
+  bar.dataset.tileJob = job.id;
+  paintTileBar(bar, job, install);
+  return bar;
+}
+
+function paintTileBar(bar, job, install = true) {
+  const pct = install && job.progress?.step === "download" ? jobPercent(job.progress) : null;
+  bar.classList.toggle("moving", pct === null);
+  bar.firstChild.style.width = pct === null ? "" : pct + "%";
+}
+
 function tile(item) {
   const target = tileTarget(item);
   if (!target) return null;
@@ -1316,25 +1338,46 @@ function tile(item) {
   let badges = null;
   let haMain = null;
   let where = null;
+  let bar = null;
+  let onMain = null;
   if (item.type === "app" && target.machine) {
     // an app of another machine: opened at the machine's address, managed on the machine's page
     const app = target;
-    const st = (cls = target.machine.online ? appState(app) : "stopped");
+    const installing = app.job?.kind === "install";
+    if (installing && !admin) return null;
+    const st = (cls = target.machine.online ? (app.job?.kind === "update" ? app.status : appState(app)) : "stopped");
+    if (app.job) bar = tileBar(app.job, installing);
     const url = isUp(app) ? machineAppUrl(target.machine, app) : null;
     href = url ?? `#/machines/${target.machine.id}/apps`;
     external = !!url;
     sub = [h("i", { class: "dot " + st }), target.machine.online ? (st === "running" && (app.guarded || app.port) ? (app.guarded ? `${location.hostname}:${app.guarded}` : `${target.machine.ip}:${app.port}`) : t("status." + st)) : t("machines.offline")];
     badges = [app.guarded && h("span", { class: "lock", title: t("access.protected") }, icon("lock"))];
-    where = h("span", { class: "tile-where" }, icon("server"), h("span", { class: "clip" }, target.machine.name));
+    if (installing) {
+      cls = "installing";
+      sub = [h("i", { class: "dot" }), h("span", { class: "clip" }, jobShort(app.job, target.machine.name))];
+    }
+    where = !installing && h("span", { class: "tile-where" }, icon("server"), h("span", { class: "clip" }, target.machine.name));
     side = admin && h("a", { class: "tile-open", href: `#/machines/${target.machine.id}/apps`, title: target.machine.name, "aria-label": `${target.machine.name}: ${title}` }, icon("sliders"));
   } else if (item.type === "app") {
     const app = target;
-    const st = (cls = appState(app));
+    const installing = app.job?.kind === "install";
+    if ((installing || app.failedJob) && !admin) return null;
+    const st = (cls = app.failedJob ? "install-failed" : installing ? "installing" : app.job?.kind === "update" ? app.status : appState(app));
+    if (installing || app.job?.kind === "update") bar = tileBar(app.job, installing);
+    if (installing || app.failedJob) {
+      jobsUi.places[app.name] = { x: item.x, y: item.y };
+      onMain = () => jobDialog(app.failedJob ?? app.job.id, "install", app.title);
+    }
+    if (jobsUi.ready.delete(app.name)) cls += " just-ready";
     const url = isUp(app) ? appUrl(app) : null;
     // the tile opens the app; while it has no page to open, its own page here
     href = url ?? `#/apps/${app.name}`;
     external = !!url;
-    sub = [h("i", { class: "dot " + st }), st === "running" && appAddress(app) ? appAddress(app) : t("status." + st)];
+    sub = app.failedJob
+      ? [icon("x"), t("jobs.couldNotShort")]
+      : installing
+        ? [h("i", { class: "dot" }), h("span", { class: "jt-short clip", "data-job-short": app.job.id }, jobShort(app.job))]
+        : [h("i", { class: "dot " + st }), st === "running" && appAddress(app) ? appAddress(app) : t("status." + st)];
     const torrents = st === "running" && state.overview?.qbit?.apps?.[app.name];
     if (torrents?.online) where = h("span", { class: "tile-where" }, h("span", { class: "clip" }, qbitSpeeds(torrents)));
     badges = [app.protected && h("span", { class: "lock", title: t("access.protected") }, icon("lock")), (app.update || app.newer?.length > 0) && isAdmin() && h("span", { class: "lock", title: t(app.update ? "app.storeUpdate" : "app.newer") }, icon("up"))];
@@ -1366,11 +1409,11 @@ function tile(item) {
     sub = t("home.items", { n: shown });
   }
   // what has no page of its own to manage it gets a menu: where to move it, how to take it off
-  if (admin && !side && !isAddTile(item)) side = h("button", { type: "button", class: "tile-open", title: t("home.tileActions"), "aria-label": `${t("home.tileActions")}: ${title}`, onclick: () => tileMenu(item) }, icon("more"));
-  const content = tileContent(item, title, sub, { badges, where });
+  if (admin && !side && !isAddTile(item) && !tileHasNoMenu(item)) side = h("button", { type: "button", class: "tile-open", title: t("home.tileActions"), "aria-label": `${t("home.tileActions")}: ${title}`, onclick: () => tileMenu(item) }, icon("more"));
+  const content = [...tileContent(item, title, sub, { badges, where }), bar];
   const key = tileKey(item);
   const main = haMain ??
-    (item.type === "folder" || isAddTile(item)
+    (onMain ? h("button", { type: "button", class: "tile-main", onclick: onMain }, content) : item.type === "folder" || isAddTile(item)
       ? h("button", { type: "button", class: "tile-main", onclick: () => (isAddTile(item) ? addDialog() : openFolder(item.id)) }, content)
       : h("a", { class: "tile-main", href, draggable: false, ...(external ? { target: "_blank", rel: "noopener noreferrer" } : {}) }, content));
   if (!admin) return h("div", { class: `tile kind-${item.type} ${cls}`, "data-key": key }, main, side);
@@ -1379,7 +1422,7 @@ function tile(item) {
         e.preventDefault();
         const at = { x: e.clientX, y: e.clientY };
         // "Add" offers what it adds; an app, the same menu as its button, where the pointer is
-        if (isAddTile(item)) menuAt(at, null, [{ label: t("home.add"), icon: "plus", run: () => addDialog() }, ...gridMenuEntries()]);
+        if (isAddTile(item)) menuAt(at, null, [{ label: t("home.add"), icon: "plus", run: () => addDialog() }]);
         else if (item.type === "app" && !target.machine) appTileMenu(target, null, at);
         else tileMenu(item, at);
       }, ondragstart: (e) => e.preventDefault() }, main, side);
@@ -1557,23 +1600,23 @@ function gridCancel() {
   paintGrid();
 }
 
-/** Everything laid out anew at its first size: the server finds places for cards with none */
+/** Everything laid out anew at its first size: the server finds places for cards with none. Offered only while arranging */
 const gridReset = () =>
   confirmAction({
-    title: t("grid.reset"),
+    title: t("grid.resetTitle"),
     lead: t("grid.resetLead"),
-    label: t("grid.reset"),
-    kind: "primary",
+    label: t("grid.resetGo"),
     iconName: "refresh",
     run: async () => {
       const blocksFirst = [...state.overview.dashboard.cards].sort((a, b) => (b.type === "block") - (a.type === "block"));
       await api("PUT", "/api/dashboard", { cards: blocksFirst.map(({ x: _x, y: _y, w: _w, h: _h, ...item }) => item) });
+      gridUi.arranging = false;
       await refresh();
     },
   });
 
-/** The entries of the grid in the menus of Home; a screen narrower than the grid lays it out by itself */
-const gridMenuEntries = () => (!isAdmin() || gridUi.arranging || state.route.view !== "home" ? [] : [gridColumns() === state.overview.grid.cols && { label: t("grid.edit"), icon: "grid", run: gridEdit }, { label: t("grid.reset"), icon: "refresh", run: gridReset }].filter(Boolean));
+/** Arranging is for a screen as wide as the grid: a narrower one lays Home out by itself */
+const mayArrange = () => isAdmin() && !gridUi.arranging && state.route.view === "home" && !!state.overview && gridColumns() === state.overview.grid.cols;
 
 function gridBar() {
   const box = document.getElementById("grid-bar");
@@ -1582,7 +1625,11 @@ function gridBar() {
   box.hidden = !gridUi.arranging;
   const head = document.getElementById("home-head");
   if (head) head.hidden = gridUi.arranging;
-  put(box, gridUi.arranging && h("div", { class: "pg-bar" }, h("strong", null, t("grid.arranging")), h("span", { class: "muted small grow" }, t("grid.arrangingHint")), button(t("grid.undo"), { class: "small", disabled: !gridUi.undo.length, onclick: undo }, "refresh"), button(t("common.cancel"), { class: "small", onclick: gridCancel }), button(t("grid.done"), { class: "small primary", onclick: gridDone }, "check")));
+  put(box, gridUi.arranging && h("div", { class: "pg-bar" }, h("strong", null, t("grid.arranging")), h("span", { class: "muted small grow" }, t("grid.arrangingHint")), button(t("grid.undo"), { class: "small", disabled: !gridUi.undo.length, onclick: undo }, "refresh"), button(t("grid.reset"), { class: "small danger", onclick: gridReset }, "refresh"), button(t("common.cancel"), { class: "small", onclick: gridCancel }), button(t("grid.done"), { class: "small primary", onclick: gridDone }, "check")));
+  // the button stays the same element across redraws: one under the pointer keeps its click
+  const slot = document.getElementById("grid-edit-slot");
+  const offer = mayArrange();
+  if (slot && !!slot.firstChild !== offer) put(slot, offer && button(t("grid.edit"), { class: "small", onclick: gridEdit }, "grid"));
 }
 
 const GRID_WIDE = 1000;
@@ -1663,7 +1710,7 @@ function gridCard(card, free) {
     const picked = getSelection();
     if (picked && !picked.isCollapsed && picked.containsNode(e.target, true)) return;
     e.preventDefault();
-    menuAt({ x: e.clientX, y: e.clientY }, null, [...gridMenuEntries(), { label: t("home.removeBlock"), icon: "trash", danger: true, run: () => removeBlock(card.id) }]);
+    menuAt({ x: e.clientX, y: e.clientY }, null, [{ label: t("home.removeBlock"), icon: "trash", danger: true, run: () => removeBlock(card.id) }]);
   });
   return el;
 }
@@ -1839,6 +1886,15 @@ function changeLayout(change) {
   return saveLayout(layout);
 }
 
+/** A link lives only on Home: gone from there, its address is gone */
+const removeLinkDialog = (link) =>
+  confirmAction({
+    title: t("home.removeLinkTitle", { name: link.title || linkHost(link.url) }),
+    lead: t("home.removeLinkLead", { url: link.url }),
+    label: t("home.removeLink"),
+    run: () => changeLayout((layout) => void takeTile(layout, tileKey(link))),
+  });
+
 function linkDialog(link) {
   const title = h("input", { value: link?.title ?? "", maxLength: 60, autocomplete: "off" });
   const url = h("input", { type: "url", value: link?.url ?? "", required: true, maxLength: 2000, placeholder: "https://", spellcheck: false, autocomplete: "off" });
@@ -1880,7 +1936,7 @@ function linkDialog(link) {
       h(
         "footer",
         null,
-        link && button(t("home.removeLink"), { class: "ghost danger-text", onclick: () => (dialog.close(), changeLayout((layout) => void takeTile(layout, tileKey(link)))) }, "trash"),
+        link && button(t("home.removeLink"), { class: "ghost danger-text", onclick: () => (dialog.close(), removeLinkDialog(link)) }, "trash"),
         closeButton(() => dialog, t("common.cancel")),
         h("button", { class: "btn primary" }, t(link ? "home.saveLink" : "home.add")),
       ),
@@ -1898,8 +1954,12 @@ const renameFolderDialog = (folder) =>
     }),
   );
 
+/** The store's tile only moves between folders: with no folder there is nothing to do to it */
+const tileHasNoMenu = (item) => item.type === "builtin" && !allFolders(state.overview.dashboard).length;
+
 /** Everything that can be done to a tile */
 function tileMenu(item, point = null) {
+  if (tileHasNoMenu(item)) return point ? pageMenu(point) : undefined;
   const key = tileKey(item);
   const layout = state.overview.dashboard;
   const at = locate(layout, key);
@@ -1916,14 +1976,13 @@ function tileMenu(item, point = null) {
     item.type === "folder" && entry(t("files.rename"), "edit", () => renameFolderDialog(item)),
     at.folder && entry(t("home.outOfFolder"), "signout", () => outOfFolder(key)),
     item.type !== "folder" && !staysOut(item) && allFolders(layout).filter((folder) => folder !== at.folder).map((folder) => entry(t("home.intoFolder", { name: folder.title || t("home.folder") }), "folder", () => intoFolder(key, folder.id))),
-    item.type !== "folder" && !staysOut(item) && !at.folder && item.type !== "builtin" && entry(t("home.newFolder"), "plus", () => nameDialog(t("home.newFolder"), "", t("files.create"), (title) => makeFolder(key, title))),
-    !at.folder && gridMenuEntries().map((one) => entry(one.label, one.icon, one.run)),
+    item.type !== "folder" && !staysOut(item) && !at.folder && item.type !== "builtin" && entry(t("home.intoNewFolder"), "plus", () => nameDialog(t("home.newFolder"), "", t("files.create"), (title) => makeFolder(key, title))),
     item.type === "folder" && entry(t("home.ungroup"), "x", () => changeLayout((next) => {
       const { list, index, item: folder } = locate(next, key);
       list.splice(index, 1);
       for (const inner of folder.items) addCard(next, inner);
     })),
-    item.type === "link" && entry(t("home.removeLink"), "trash", () => changeLayout((next) => void takeTile(next, key)), "danger"),
+    item.type === "link" && entry(t("home.removeLink"), "trash", () => removeLinkDialog(item), "danger"),
     item.type === "ha" && entry(t("ha.offHome"), "trash", () => changeLayout((next) => void takeTile(next, key)), "danger"),
     item.type === "widget" && entry(t("ha.offHome"), "trash", () => changeLayout((next) => void takeTile(next, key)), "danger"),
     item.type === "files" && entry(t("files.unpin"), "home", () => pinFolder(item.path, false)),
@@ -2497,7 +2556,7 @@ function renderHome() {
   };
   shell(
     h("div", { id: "grid-bar" }),
-    h("div", { class: "page-head home-head", id: "home-head" }, h("div", null, h("h1", null, greeting), h("p", { class: "meta", id: "host" }, " ")), h("div", { class: "counts", id: "counts" })),
+    h("div", { class: "page-head home-head", id: "home-head" }, h("div", null, h("h1", null, greeting), h("p", { class: "meta", id: "host" }, " ")), h("div", { class: "home-head-side" }, h("div", { class: "counts", id: "counts" }), h("span", { id: "grid-edit-slot" }))),
     h("div", { class: "pg", id: "pg" }),
   );
   Object.assign(gridUi, { arranging: false, undo: [], entry: null, drag: null });
@@ -2611,15 +2670,97 @@ function renderApp() {
 async function startAction(app, action) {
   try {
     const res = await api("POST", `/api/apps/${app.name}/${action}`, {});
-    jobDialog(res.job, action, app.title);
+    if (action === "update") jobInBackground(res.job, action, app.title);
+    else jobDialog(res.job, action, app.title);
     void refresh();
   } catch (e) {
     toast(errorText(e), "error");
   }
 }
 
+/** What the store says to know of an app once it is there: how to sign in, what to do first */
+async function appNotesDialog(name, title) {
+  try {
+    const { tips } = await api("GET", `/api/apps/${name}?lang=${state.lang}`);
+    notesDialog(title, tips);
+  } catch (e) {
+    toast(errorText(e), "error");
+  }
+}
+
+/** Where "Show" asks for the values of an app's login: this server's or a machine's */
+const loginAsker = (name, machine) => Object.assign(() => api("POST", machine ? `/api/machines/${machine}/apps/${name}/login` : `/api/apps/${name}/login`), { key: `${name}@${machine ?? ""}` });
+
+/** What "Show" gave, for a while: the page is redrawn by every event, and asking made one. It is not kept any longer than this */
+const loginSeen = new Map();
+const LOGIN_SEEN_MS = 5 * 60_000;
+
+/** How to sign in to an app: one line, or the user name and the password apart, each to copy. A value the page does not hold yet comes by a button */
+function loginBlock(login, ask) {
+  if (login.kind === "first-visit" || login.kind === "none") return h("p", { class: "login-line muted small" }, t(`app.login.${login.kind}`));
+  const box = h("div", { class: "login-block" });
+  const copyButton = (label, value) => h("button", { type: "button", class: "icon-btn", title: `${t("twofa.copy")}: ${label}`, "aria-label": `${t("twofa.copy")}: ${label}`, onclick: () => copyQuietly(value) }, icon("copy"));
+  const row = (label, value) => h("div", { class: "login-row" }, h("span", { class: "muted small" }, label), h("span", { class: "mono login-value" }, value), copyButton(label, value));
+  const paint = () => {
+    const given = loginSeen.get(ask.key);
+    const seen = { ...login, ...(given ?? {}) };
+    const waits = !given && login.ask?.length;
+    const hiddenRow = (label) => h("div", { class: "login-row" }, h("span", { class: "muted small" }, label), h("span", { class: "mono login-value muted" }, "••••••••"));
+    const missing = (label, words) => h("div", { class: "login-row" }, h("span", { class: "muted small" }, label), h("span", { class: "muted small login-value" }, words));
+    const part = (field, label) => {
+      if (waits && login.ask.includes(field)) return hiddenRow(label);
+      if (seen[field]) return row(label, seen[field]);
+      return given && login.ask?.includes(field) ? missing(label, t(login.kind === "log" ? "app.login.notFound" : "app.login.empty")) : null;
+    };
+    const show = async (button) => {
+      button.disabled = true;
+      try {
+        loginSeen.set(ask.key, await ask());
+        setTimeout(() => loginSeen.delete(ask.key), LOGIN_SEEN_MS);
+        paint();
+      } catch (e) {
+        button.disabled = false;
+        toast(errorText(e), "error");
+      }
+    };
+    const showButton = (login.ask?.length && (waits || (login.kind === "log" && !seen.password))) ? button(t(login.kind === "log" ? "app.login.find" : "app.login.show"), { class: "small", onclick: (e) => void show(e.currentTarget) }, login.kind === "log" ? "search" : "key") : null;
+    box.replaceChildren(...[
+      part("user", t("app.login.user")),
+      part("password", t("auth.password")),
+      given?.line && h("p", { class: "muted small mono login-source" }, given.line),
+      h("p", { class: "muted small" }, t(`app.login.${login.kind}`)),
+      showButton && h("div", { class: "login-actions" }, showButton),
+    ].filter(Boolean));
+  };
+  paint();
+  return box;
+}
+
+function loginDialog(title, login, ask) {
+  let dialog;
+  dialog = openDialog("confirm", h("h2", null, t("app.loginOf", { title })), loginBlock(login, ask), h("footer", null, closeButton(() => dialog, t("common.close"))));
+}
+
+async function appLoginDialog(name, title) {
+  try {
+    const { login } = await api("GET", `/api/apps/${name}?lang=${state.lang}`);
+    if (login) loginDialog(title, login, loginAsker(name));
+  } catch (e) {
+    toast(errorText(e), "error");
+  }
+}
+
+function notesDialog(title, tips) {
+  let dialog;
+  dialog = openDialog("confirm", h("h2", null, t("app.notesOf", { title })), h("div", { class: "tips prose" }, md(tips)), h("footer", null, closeButton(() => dialog, t("common.close"))));
+}
+
 /** What can be done to an app from its tile: open it, start or stop it, go to its settings, logs and the rest */
 function appTileMenu(app, anchor, at) {
+  if (app.failedJob || app.job?.kind === "install") {
+    const box = anchor?.getBoundingClientRect();
+    return jobTileMenu(app, at ?? { x: box.left, y: box.bottom + 6 });
+  }
   let dialog;
   const url = isUp(app) ? appUrl(app) : null;
   const busy = !!app.job;
@@ -2629,18 +2770,19 @@ function appTileMenu(app, anchor, at) {
     "menu dropdown",
     h("header", null, appIcon(app), h("div", null, h("h2", { class: "clip" }, app.title), stateChip(app))),
     url && h("a", { class: "menu-item", href: url, target: "_blank", rel: "noopener noreferrer", onclick: () => dialog.close() }, icon("external"), t("app.open")),
-    busy && item(t("status.busy"), "terminal", () => jobDialog(app.job.id, app.job.kind, app.title)),
+    busy && item(t("jobs.showLog"), "logs", () => jobDialog(app.job.id, app.job.kind, app.title)),
     isUp(app) ? item(t("app.stop"), "stop", () => startAction(app, "stop"), "", busy) : item(t("app.start"), "play", () => startAction(app, "start"), "", busy),
     isUp(app) && item(t("app.restart"), "refresh", () => startAction(app, "restart"), "", busy),
-    app.update && item(t("app.storeUpdate"), "up", () => storeUpdateDialog(app), "", busy),
+    app.update && item(t("app.storeUpdateGo"), "up", () => storeUpdateDialog(app), "", busy),
     !app.update && app.newer?.length > 0 && item(t("app.update"), "up", () => startAction(app, "update"), "", busy),
+    app.login && app.login !== "none" && isAdmin() && item(t("app.login"), "key", () => appLoginDialog(app.name, app.title)),
+    app.notes && isAdmin() && item(t("app.notes"), "info", () => appNotesDialog(app.name, app.title)),
     page(t("app.tab.settings"), "sliders", "settings"),
     page(t("app.logs"), "logs", "logs"),
     page(t("app.tab.terminal"), "terminal", "terminal"),
     page(t("app.tab.backups"), "archive", "backups"),
     isAdmin() && item(t("assistant.ask"), "chat", () => openAssistant({ draft: t("assistant.aboutApp", { title: app.title, app: app.name }) })),
     page(t("home.manage"), "grid", ""),
-    state.route.view === "home" && gridMenuEntries().map((one) => item(one.label, one.icon, one.run)),
     item(t("app.remove"), "trash", () => removeDialog(app), "danger", busy),
   );
   if (at) return placeAt(dialog, at);
@@ -2687,8 +2829,8 @@ function renderAppHead() {
         { class: "actions" },
         !isAdmin() && url && h("a", { class: "btn primary", href: url, target: "_blank", rel: "noopener noreferrer" }, icon("external"), h("span", null, t("app.open"))),
         ...(!isAdmin() ? [] : [
-        app.job && button(t("status.busy"), { onclick: () => jobDialog(app.job.id, app.job.kind, app.title) }, "terminal"),
-        app.update && !app.job && button(t("app.storeUpdate"), { class: "accent", onclick: () => storeUpdateDialog(app) }, "up"),
+        app.job && button(t("jobs.showLog"), { onclick: () => jobDialog(app.job.id, app.job.kind, app.title) }, "logs"),
+        app.update && !app.job && button(t("app.storeUpdateGo"), { class: "accent", onclick: () => storeUpdateDialog(app) }, "up"),
         !app.update && app.newer?.length > 0 && !app.job && button(t("app.update"), { class: "accent", title: `${t("app.newer")}: ${app.newer.join(", ")}`, onclick: () => startAction(app, "update") }, "up"),
         (app.status === "partial" || app.status === "restarting") && isAdmin() && button(t("assistant.askWhy"), { onclick: () => openAssistant({ ask: t("assistant.whyDown", { title: app.title, app: app.name }) }) }, "chat"),
         isUp(app) && button(t("app.restart"), { disabled: !!app.job, onclick: () => startAction(app, "restart") }, "refresh"),
@@ -2706,7 +2848,7 @@ function renderAppHead() {
 async function storeUpdateDialog(app) {
   let plan;
   try {
-    plan = await api("GET", `/api/apps/${app.name}/storeupdate`);
+    plan = await api("GET", `/api/apps/${app.name}/storeupdate?lang=${state.lang}`);
   } catch (e) {
     return toast(errorText(e), "error");
   }
@@ -2718,6 +2860,7 @@ async function storeUpdateDialog(app) {
     "wide",
     h("header", null, h("div", { class: "grow" }, h("h2", null, t("update.title", { title: app.title })), h("p", { class: "muted small" }, t("update.lead", { store: plan.store }))), closeX(() => dialog)),
     !plan.exact && h("p", { class: "banner small" }, t(plan.recorded ? "update.guessed" : "update.matched", { store: plan.store })),
+    plan.notes && h("div", { class: "tips prose" }, h("strong", null, t("update.before")), md(plan.notes)),
     fromStore.length > 0 && h("div", { class: "stack" }, h("h3", null, t("update.changes")), table("store")),
     conflicts.length > 0 && h("div", { class: "stack" }, h("h3", null, t("update.conflicts")), h("p", { class: "muted small" }, t("update.conflictsLead")), table("conflict")),
     h("details", null, h("summary", { class: "muted small" }, t("update.file")), h("textarea", { class: "code", spellcheck: false, wrap: "off", readOnly: true, value: plan.compose, "aria-label": "compose.yml" })),
@@ -2731,7 +2874,7 @@ async function storeUpdateDialog(app) {
           dialog.close();
           try {
             const res = await api("POST", `/api/apps/${app.name}/storeupdate`, {});
-            jobDialog(res.job, "update", app.title, () => loadApp(true));
+            jobInBackground(res.job, "update", app.title, () => loadApp(true));
           } catch (e) {
             toast(errorText(e), "error");
           }
@@ -2801,6 +2944,8 @@ function appOverviewTab(app, box) {
         "aside",
         { class: "side" },
         h("section", { class: "card pad" }, h("div", { class: "section-head" }, h("h2", null, t("app.glance"))), app.port && row(t("app.address"), appAddress(app), true), row(t("app.composeFile"), app.composeFile, true), app.folders.map((f, i) => row(i ? "" : t("app.folders"), f, true)), row(t("app.source"), app.store ? t("app.fromStore", { store: app.store }) : t("app.custom")), row(t("app.installed"), new Date(app.installedAt).toLocaleDateString(state.lang, { day: "numeric", month: "short", year: "numeric" }))),
+        app.login && h("section", { class: "card pad" }, h("div", { class: "section-head" }, h("h2", null, t("app.login"))), loginBlock(app.login, loginAsker(app.name))),
+        app.tips && h("section", { class: "card pad" }, h("div", { class: "section-head" }, h("h2", null, t("app.notes"))), h("div", { class: "tips prose" }, md(app.tips))),
         h("section", { class: "pad-x" }, h("div", { class: "section-head" }, h("h2", null, t("activity.title"))), app.activity.length ? app.activity.slice(0, 6).map(activityItem) : h("p", { class: "muted small" }, t("activity.none"))),
       ),
     ),
@@ -3808,6 +3953,14 @@ async function containerAct(c, action, el) {
   void loadContainers();
 }
 
+/** The backups of one instance, in the dialog of the Backups page; with none kept, that page says what can be done */
+async function instanceBackups(c) {
+  await loadBackups();
+  const entry = state.backups?.apps.find((a) => a.name === `${c.name}@incus`);
+  if (entry?.snapshots.length) snapshotsDialog(entry);
+  else go("#/settings/backups");
+}
+
 function containerMenu(c, at) {
   menuAt(at, menuHeader(c.name, c.os, c.kind === "vm" ? "server" : "box"), [
     c.status === "running" && { label: t("incus.restart"), icon: "refresh", run: () => containerAct(c, "restart") },
@@ -3824,7 +3977,7 @@ function containerMenu(c, at) {
     { label: t("incus.clone") + "…", icon: "copy", run: () => cloneContainerDialog(c) },
     (incusUi.data?.places ?? []).length > 1 && { label: t("incus.place.moveItem"), icon: "arrow", run: () => moveContainerDialog(c) },
     { label: t("incus.backupNow"), icon: "archive", run: () => backupNow({ name: `${c.name}@incus`, title: c.name, incus: { kind: c.kind } }) },
-    { label: t("incus.backups"), icon: "archive", href: "#/settings/backups" },
+    { label: t("incus.backups"), icon: "archive", run: () => instanceBackups(c) },
     { label: t("incus.remove") + "…", icon: "trash", danger: true, run: () => removeContainerDialog(c) },
   ]);
 }
@@ -4189,8 +4342,8 @@ function containerSnapshotsDialog(c) {
                       h(
                         "div",
                         { class: "row-actions" },
-                        button(t("incus.snap.restore"), { class: "small", onclick: (e) => snapAction(e.currentTarget, "POST", `/api/containers/${c.name}/snapshots/${encodeURIComponent(s.name)}/restore`, t("incus.snap.restoreAsk", { name: s.name }), "incus.snap.restored") }, "undo"),
-                        button("", { class: "small ghost", title: t("incus.snap.remove"), "aria-label": t("incus.snap.remove"), onclick: (e) => snapAction(e.currentTarget, "DELETE", `/api/containers/${c.name}/snapshots/${encodeURIComponent(s.name)}`, null, "incus.snap.removed") }, "trash"),
+                        button(t("incus.snap.restore"), { class: "small", onclick: () => snapAction("POST", `/api/containers/${c.name}/snapshots/${encodeURIComponent(s.name)}/restore`, { title: t("incus.snap.restoreTitle", { name: s.name, instance: c.name }), lead: t("incus.snap.restoreLead", { instance: c.name }), label: t("incus.snap.restoreGo"), iconName: "undo" }, "incus.snap.restored") }, "undo"),
+                        button("", { class: "small ghost", title: t("incus.snap.remove"), "aria-label": t("incus.snap.remove"), onclick: () => snapAction("DELETE", `/api/containers/${c.name}/snapshots/${encodeURIComponent(s.name)}`, { title: t("incus.snap.removeTitle", { name: s.name }), lead: t("incus.snap.removeLead", { instance: c.name }), label: t("incus.snap.remove") }, "incus.snap.removed") }, "trash"),
                       ),
                     ),
                   ),
@@ -4205,18 +4358,15 @@ function containerSnapshotsDialog(c) {
     const fresh = incusUi.data?.containers?.find((x) => x.name === c.name);
     if (fresh) paint(fresh.snapshots);
   };
-  const snapAction = async (el, method, path, ask, done) => {
-    if (ask && !confirm(ask)) return;
-    el.disabled = true;
-    try {
-      await api(method, path);
-      toast(t(done));
-    } catch (e) {
-      toast(errorText(e), "error");
-    }
-    el.disabled = false;
-    await again();
-  };
+  const snapAction = (method, path, ask, done) =>
+    confirmAction({
+      ...ask,
+      run: async () => {
+        await api(method, path);
+        toast(t(done));
+        await again();
+      },
+    });
   const name = h("input", { placeholder: t("incus.snap.namePlaceholder"), class: "mono", spellcheck: false, autocapitalize: "none" });
   const take = button(
     t("incus.snap.take"),
@@ -4914,7 +5064,7 @@ function frigateMenu(x, at) {
     { label: t("frigate.cameras"), icon: "camera", href: `#/frigate/${x.id}` },
     { label: t("frigate.open"), icon: "external", run: () => window.open(x.url, "_blank", "noopener") },
     { label: t("frigate.change"), icon: "edit", run: () => frigateDialog(x) },
-    { label: t("frigate.disconnect"), icon: "trash", danger: true, run: () => frigateDisconnectDialog(x) },
+    { label: t("frigate.disconnect") + "…", icon: "trash", danger: true, run: () => frigateDisconnectDialog(x) },
   ]);
 }
 
@@ -5099,7 +5249,7 @@ function qbitMenu(x, at) {
     { label: t("qbit.torrents"), icon: "download", href: `#/qbit/${x.id}` },
     { label: t("qbit.open"), icon: "external", run: () => window.open(x.url, "_blank", "noopener") },
     { label: t("qbit.change"), icon: "edit", run: () => qbitDialog(x) },
-    { label: t("qbit.disconnect"), icon: "trash", danger: true, run: () => qbitDisconnectDialog(x) },
+    { label: t("qbit.disconnect") + "…", icon: "trash", danger: true, run: () => qbitDisconnectDialog(x) },
   ]);
 }
 
@@ -5391,7 +5541,7 @@ function haMenu(x, at = null) {
     h("header", null, h("span", { class: "machine-icon" }, icon("home")), h("div", null, h("h2", null, x.name), haChip(x))),
     item(t("ha.open"), "external", () => window.open(haWebUrl(x), "_blank", "noopener")),
     item(t("ha.change"), "edit", () => haDialog(x)),
-    item(t("ha.remove"), "trash", () => removeHaDialog(x), "danger"),
+    item(t("ha.remove") + "…", "trash", () => removeHaDialog(x), "danger"),
   );
   if (at) placeAt(dialog, at);
 }
@@ -5666,7 +5816,7 @@ function pveMenu(x, at = null) {
     item(t("pve.refresh"), "refresh", () => refreshPve(x)),
     item(t("pve.openWeb"), "external", () => window.open(x.url, "_blank", "noopener")),
     item(t("pve.change"), "edit", () => pveDialog(x)),
-    item(t("pve.remove"), "trash", () => removePveDialog(x), "danger"),
+    item(t("pve.remove") + "…", "trash", () => removePveDialog(x), "danger"),
   );
   if (at) placeAt(dialog, at);
 }
@@ -7233,7 +7383,7 @@ function pveSnapshotAct(x, g, s, action) {
       "footer",
       null,
       closeButton(() => (dialog.close(), pveGuestDialog(x, g), dialog), t("common.cancel")),
-      button(t(action === "rollback" ? "pve.rollback" : "pve.snapshotRemove"), {
+      button(t(action === "rollback" ? "pve.rollbackGo" : "pve.snapshotRemove"), {
         class: "danger",
         onclick: async (e) => {
           e.currentTarget.disabled = true;
@@ -7388,7 +7538,6 @@ function machineMenu(m, at = null) {
     !m.online && !m.instance && m.info?.macs?.length > 0 && item(t("machines.wake"), "play", () => wakeMachine(m)),
     m.online && item(t("machines.reboot"), "refresh", () => powerDialog(m, "reboot")),
     m.online && item(t("machines.poweroff"), "stop", () => powerDialog(m, "poweroff")),
-    m.online && item(t("machines.updateAgain"), "up", () => updateMachine(m)),
     item(t("machines.remove"), "trash", () => removeMachineDialog(m), "danger"),
   );
   if (at) placeAt(dialog, at);
@@ -7736,7 +7885,7 @@ async function machineShareDialog(m, path) {
       field(t("machines.people.name"), name, t("machines.people.nameHint")),
       h("div", { class: "field" }, h("span", { class: "label" }, t("shares.who")), users.length ? h("div", { class: "share-access" }, users.map(({ user, select }) => h("label", null, h("span", { class: "grow" }, h("strong", null, user.name), user.role === "guest" && h("span", { class: "muted small block" }, t("user.role.guest"))), select))) : h("p", { class: "muted small" }, t("machines.people.nobody"))),
       error,
-      h("footer", null, share && button(t("machines.people.unshare"), { class: "danger", onclick: () => save(false) }), closeButton(() => dialog, t("common.cancel")), button(t("settings.save"), { type: "submit", class: "primary" })),
+      h("footer", null, share && button(t("machines.people.unshare"), { class: "danger", onclick: () => confirmAction({ title: t("machines.people.unshareTitle"), lead: t("machines.people.unshareLead"), label: t("machines.people.unshare"), iconName: "x", run: () => save(false) }) }), closeButton(() => dialog, t("common.cancel")), button(t("settings.save"), { type: "submit", class: "primary" })),
     ),
   );
 }
@@ -7864,7 +8013,9 @@ function paintMachineApps() {
         h(
           "div",
           { class: "row-actions" },
-          busy && small(t("status.busy"), "terminal", () => jobDialog(app.job.id, app.job.kind, app.title, () => void loadMachineApps())),
+          busy && small(t("jobs.showLog"), "logs", () => jobDialog(app.job.id, app.job.kind, app.title, () => void loadMachineApps())),
+          app.login && app.login.kind !== "none" && small(t("app.login"), "key", () => loginDialog(app.title, app.login, loginAsker(app.name, m.id))),
+          app.tips && small(t("app.notes"), "info", () => notesDialog(app.title, app.tips)),
           isUp(app) ? small(t("app.stop"), "stop", act(app, "stop"), busy) : small(t("app.start"), "play", act(app, "start"), busy),
           small(t("app.restart"), "refresh", act(app, "restart"), busy || !isUp(app)),
           small(t("app.update"), "up", act(app, "update"), busy),
@@ -7924,7 +8075,8 @@ async function machineComposeDialog(m, app) {
           try {
             const res = app ? await api("PUT", `/api/machines/${m.id}/apps/${app.name}/compose`, { compose: area.value }) : await api("POST", `/api/machines/${m.id}/apps`, { name: name.value.trim(), compose: area.value });
             dialog.close();
-            jobDialog(res.job, app ? "apply" : "install", app ? app.title : name.value.trim(), () => void loadMachineApps());
+            if (app) jobDialog(res.job, "apply", app.title, () => void loadMachineApps());
+            else jobInBackground(res.job, "install", name.value.trim(), () => void loadMachineApps());
           } catch (err) {
             error.textContent = errorText(err);
           }
@@ -8511,6 +8663,359 @@ function followJob(id, onLine) {
   });
 }
 
+// --- Work in the background: a card for what runs out of sight, wherever the person goes ---------------
+
+const JOB_STEPS = ["check", "download", "start"];
+const JOB_CLOSED = "hata.jobs.closed";
+const JOB_HIDDEN = "hata.jobs.hidden";
+const JOB_MIN = "hata.jobs.min";
+const JOB_ROWS = 4;
+const JOB_LINGER_S = 10;
+const jobsUi = {
+  list: new Map(),
+  // a phone has no room to spare: there the card starts folded
+  min: (localStorage.getItem(JOB_MIN) ?? (innerWidth <= 760 ? "1" : "0")) === "1",
+  all: false,
+  lost: false,
+  hold: false,
+  logs: new Set(),
+  places: {},
+  ready: new Set(),
+  sig: "",
+};
+const storedIds = (store, key) => {
+  try {
+    return JSON.parse(store.getItem(key) ?? "[]");
+  } catch {
+    return [];
+  }
+};
+const remember = (store, key, id) => store.setItem(key, JSON.stringify([...storedIds(store, key).filter((one) => one !== id), id].slice(-40)));
+
+const jobPercent = (p) => (p?.layers ? Math.floor(((p.done ?? 0) / p.layers) * 100) : null);
+const jobEnded = (e) => e.status !== "running";
+const jobWaits = (e) => e.status === "failed" && !e.stopped;
+
+/** What a tile says of an app being installed: the number first, so that a cut leaves it */
+function jobShort(job, machine = "") {
+  const p = job?.progress;
+  const pct = jobPercent(p);
+  if (machine) return pct === null ? t("jobs.short.machineBusy", { machine }) : t("jobs.short.machine", { machine, pct });
+  if (p?.step === "download" && pct !== null) return t("jobs.short.downloading", { pct });
+  return t(p?.step ? `jobs.short.${p.step}` : "jobs.short.check");
+}
+
+function jobName(e) {
+  const o = state.overview;
+  return o?.apps?.find((a) => a.name === e.app)?.title ?? o?.machineApps?.find((a) => a.key === e.app)?.title ?? e.title ?? e.app ?? "";
+}
+
+function jobHeading(e) {
+  const app = jobName(e);
+  if (e.status === "failed" && !e.stopped && e.kind === "install") return t("jobs.couldNot", { app });
+  if (e.status === "done" && e.kind === "install") return t("jobs.ready", { app });
+  if (e.status === "done" && e.kind === "update") return t("jobs.updated", { app });
+  return has("job." + e.kind) ? t("job." + e.kind, { app }) : app;
+}
+
+/** How it ended, in one line: the end of the last line is where compose says why */
+function jobReason(e) {
+  const text = e.error ?? e.last ?? "";
+  if (has("error." + text)) return t("error." + text);
+  const line = text.split("\n").map((l) => l.trim()).filter(Boolean).at(-1) ?? "";
+  return line.length > 110 ? "…" + line.slice(-110) : line;
+}
+
+/** How to reach the store's words on an app just installed; the card waits for the person while there are some */
+function jobNotes(e) {
+  if (e.status !== "done" || e.kind !== "install") return null;
+  const o = state.overview;
+  const here = o?.apps?.find((a) => a.name === e.app);
+  if (here?.notes) return () => appNotesDialog(here.name, here.title);
+  const there = o?.machineApps?.find((a) => a.key === e.app);
+  return there?.tips ? () => notesDialog(there.title, there.tips) : null;
+}
+
+/** What the page knows of how to sign in to an app just installed, by job: asked once, the tray is redrawn when it comes */
+const jobLogins = new Map();
+
+/** `{ login, ask }` for a finished install of an app with a `login`; none for a member or while it is being asked */
+function jobLogin(e) {
+  if (e.status !== "done" || e.kind !== "install" || !isAdmin()) return null;
+  const o = state.overview;
+  const there = o?.machineApps?.find((a) => a.key === e.app);
+  if (there) return there.login ? { login: there.login, ask: loginAsker(there.name, there.machine.id) } : null;
+  const here = o?.apps?.find((a) => a.name === e.app);
+  if (!here?.login) return null;
+  if (!jobLogins.has(e.id)) {
+    jobLogins.set(e.id, null);
+    api("GET", `/api/apps/${here.name}?lang=${state.lang}`).then(({ login }) => {
+      jobLogins.set(e.id, login && { login, ask: loginAsker(here.name) });
+      paintJobs();
+    }).catch(() => {});
+  }
+  return jobLogins.get(e.id);
+}
+
+const jobUrl = (e) => {
+  const app = state.overview?.apps?.find((a) => a.name === e.app);
+  return app && isUp(app) ? appUrl(app) : null;
+};
+
+function jobSub(e) {
+  if (e.status === "running") {
+    if (jobsUi.lost) return t("jobs.lost");
+    if (e.kind !== "install" || !e.progress?.step) return e.kind === "install" ? t("job.running") : e.last ?? t("job.running");
+    const line = `${t("jobs.step." + e.progress.step)} · ${t("jobs.stepOf", { n: JOB_STEPS.indexOf(e.progress.step) + 1, m: JOB_STEPS.length })}`;
+    return e.machine ? `${t("jobs.onMachine", { machine: e.machine })} · ${line}` : line;
+  }
+  if (e.stopped) return t("job.stopped");
+  if (e.status === "failed") return e.kind === "install" ? "" : t("job.failed");
+  const app = state.overview?.apps?.find((a) => a.name === e.app);
+  return e.kind === "install" && app && appAddress(app) ? appAddress(app) : t("job.done");
+}
+
+function jobDetail(e, row = false) {
+  if (jobWaits(e)) return row && jobReason(e).length > 60 ? "…" + jobReason(e).slice(-60) : jobReason(e);
+  const p = e.progress;
+  if (e.status !== "running" || e.kind !== "install" || p?.step !== "download" || !p.layers) return "";
+  const count = t(p.layers === 1 ? "jobs.layersOne" : "jobs.layers", { done: p.done ?? 0, total: p.layers, pct: jobPercent(p) });
+  return p.bytes ? `${count} · ${t("jobs.downloaded", { size: bytes(p.bytes) })}` : count;
+}
+
+/** The parts of the bar: an install has its three steps, anything else one */
+function jobBars(e) {
+  const paint = (one, state_, pct = null) => {
+    one.className = "jt-seg " + state_;
+    one.firstChild.style.width = pct === null ? "" : pct + "%";
+    one.setAttribute("aria-hidden", "true");
+  };
+  return { paint, count: e.kind === "install" ? JOB_STEPS.length : 1 };
+}
+
+function paintJobBar(bar, e) {
+  const { paint } = jobBars(e);
+  const parts = [...bar.children];
+  if (e.kind !== "install") return parts[0] && paint(parts[0], jobsUi.lost ? "frozen" : "moving");
+  const at = Math.max(0, JOB_STEPS.indexOf(e.progress?.step ?? "check"));
+  parts.forEach((part, i) => {
+    if (i < at) return paint(part, "full");
+    if (i > at) return paint(part, "");
+    if (jobsUi.lost) return paint(part, "frozen");
+    const pct = e.progress?.step === "download" ? jobPercent(e.progress) : null;
+    paint(part, pct === null ? "moving" : "known", pct);
+  });
+}
+
+const jobBar = (e) => {
+  const bar = h("span", { class: "jt-bar" }, Array.from({ length: jobBars(e).count }, () => h("span", { class: "jt-seg" }, h("i"))));
+  paintJobBar(bar, e);
+  return bar;
+};
+
+const jobLog = (e) => jobDialog(e.id, e.kind, jobName(e));
+
+function closeJob(id) {
+  remember(localStorage, JOB_CLOSED, id);
+  jobsUi.list.delete(id);
+  paintJobs();
+  void refresh();
+}
+
+/** Where the words of a job stand, to be changed without drawing anything anew: a button under the pointer stays */
+function patchJobs() {
+  for (const e of jobsUi.list.values()) {
+    for (const root of document.querySelectorAll(`[data-job="${e.id}"]`)) {
+      const sub = root.querySelector(".jt-sub");
+      if (sub) sub.textContent = jobSub(e);
+      const detail = root.querySelector(".jt-detail");
+      if (detail) detail.textContent = jobDetail(e, root.classList.contains("row"));
+      const short = root.querySelector(".jt-short");
+      if (short) short.textContent = e.status === "running" ? jobShort(e) : jobSub(e) || t("job.failed");
+      const bar = root.querySelector(".jt-bar");
+      if (bar && e.status === "running") paintJobBar(bar, e);
+    }
+    if (e.status !== "running") continue;
+    for (const bar of document.querySelectorAll(`[data-tile-job="${e.id}"]`)) paintTileBar(bar, e, e.kind === "install");
+    for (const short of document.querySelectorAll(`[data-job-short="${e.id}"]`)) short.textContent = jobShort(e);
+  }
+}
+
+function jobCard(e, row = false) {
+  const ended = jobEnded(e);
+  const url = e.status === "done" && e.kind === "install" ? jobUrl(e) : null;
+  const page = e.status === "done" && e.kind === "install" && !e.machine ? `#/apps/${e.app}` : null;
+  const notes = jobNotes(e);
+  const signIn = jobLogin(e);
+  return h(
+    "div",
+    { class: `jt-card ${row ? "row" : ""} ${e.status} ${e.stopped ? "stopped" : ""}`, "data-job": e.id },
+    h("div", { class: "jt-head" },
+      appIcon({ name: e.app, title: jobName(e), icon: e.icon }, row ? "sm" : ""),
+      h("div", { class: "jt-words" }, h("strong", { class: "jt-title" }, jobHeading(e)), h("span", { class: "jt-sub" + (e.kind !== "install" && !ended ? " mono" : "") }, jobSub(e))),
+      row && (url || page) && h("a", { class: "icon-btn", href: url ?? page, title: t("common.open"), "aria-label": `${t("common.open")}: ${jobName(e)}`, ...(url ? { target: "_blank", rel: "noopener noreferrer" } : {}), onclick: () => closeJob(e.id) }, icon("external")),
+      row && signIn && signIn.login.kind !== "none" && h("button", { type: "button", class: "icon-btn", title: t("app.login"), "aria-label": `${t("app.login")}: ${jobName(e)}`, onclick: () => loginDialog(jobName(e), signIn.login, signIn.ask) }, icon("key")),
+      row && h("button", { type: "button", class: "icon-btn", title: t("jobs.showLog"), "aria-label": `${t("jobs.showLog")}: ${jobName(e)}`, onclick: () => jobLog(e) }, icon("logs")),
+      ended
+        ? h("button", { type: "button", class: "icon-btn", title: t("jobs.dismiss"), "aria-label": `${t("jobs.dismiss")}: ${jobName(e)}`, onclick: () => closeJob(e.id) }, icon("x"))
+        : !row && h("button", { type: "button", class: "icon-btn", title: t("jobs.minimise"), "aria-label": t("jobs.minimise"), onclick: () => minimiseJobs(true) }, icon("down")),
+    ),
+    !ended && jobBar(e),
+    h("p", { class: "jt-detail" + (jobWaits(e) ? " why" : "") }),
+    !row && jobWaits(e) && e.kind === "install" && h("p", { class: "muted small jt-left" }, t("jobs.leftOver")),
+    !row && signIn && h("div", { class: "jt-login" }, signIn.login.kind !== "none" && h("strong", { class: "small" }, t("app.login")), loginBlock(signIn.login, signIn.ask)),
+    !row && h("div", { class: "jt-actions" },
+      button(t("jobs.showLog"), { class: "small", onclick: () => jobLog(e) }),
+      notes && button(t("app.notes"), { class: "small", onclick: notes }, "info"),
+      (url || page) && h("a", { class: "btn small primary", href: url ?? page, ...(url ? { target: "_blank", rel: "noopener noreferrer" } : {}), onclick: () => closeJob(e.id) }, icon("external"), t("common.open")),
+    ),
+  );
+}
+
+function minimiseJobs(min) {
+  jobsUi.min = min;
+  localStorage.setItem(JOB_MIN, min ? "1" : "0");
+  paintJobs();
+}
+
+function jobStrip(shown) {
+  const running = shown.filter((e) => !jobEnded(e));
+  const failed = shown.filter(jobWaits);
+  const first = shown[0];
+  const words = shown.length === 1 ? jobName(first) : failed.length && running.length ? t("jobs.counts", { n: running.length, m: failed.length }) : failed.length ? t("jobs.countsFailed", { m: failed.length }) : running.length ? t("jobs.countsRunning", { n: running.length }) : t("job.done");
+  return h("button", { type: "button", class: "jt-strip", "data-job": first.id, "aria-label": `${t("jobs.restore")}: ${words}`, onclick: () => minimiseJobs(false) },
+    appIcon({ name: first.app, title: jobName(first), icon: first.icon }, "sm"),
+    h("span", { class: "jt-words" }, h("strong", { class: "jt-title" }, words), shown.length === 1 && h("span", { class: "jt-short" })),
+    icon("up"),
+    !jobEnded(first) && h("span", { class: "jt-thin" }, jobBar(first)),
+  );
+}
+
+function paintJobs() {
+  let tray = document.getElementById("job-tray");
+  const shown = !state.user || !isAdmin() ? [] : [...jobsUi.list.values()].filter((e) => !jobsUi.logs.has(e.id)).sort((a, b) => jobWaits(b) - jobWaits(a) || jobEnded(a) - jobEnded(b));
+  document.body.classList.toggle("has-jobs", shown.length > 0);
+  if (!shown.length) {
+    tray?.remove();
+    jobsUi.sig = "";
+    jobsUi.hold = false;
+    return;
+  }
+  if (!tray) {
+    tray = h("aside", { id: "job-tray", "aria-label": t("jobs.tray"), onmouseenter: () => (jobsUi.hold = true), onmouseleave: () => (jobsUi.hold = false), onfocusin: () => (jobsUi.hold = true), onfocusout: () => (jobsUi.hold = false) });
+    document.body.append(tray);
+    new ResizeObserver(() => document.documentElement.style.setProperty("--jobs-h", tray.offsetHeight + "px")).observe(tray);
+  }
+  const sig = JSON.stringify([jobsUi.min, jobsUi.all, jobsUi.lost, state.lang, shown.map((e) => [e.id, e.status, e.stopped, jobHeading(e), e.icon, e.status === "done" && jobUrl(e), !!jobNotes(e), jobLogin(e)?.login.kind ?? ""])]);
+  if (sig !== jobsUi.sig) {
+    jobsUi.sig = sig;
+    tray.className = jobsUi.min ? "min" : "";
+    if (jobsUi.min) tray.replaceChildren(jobStrip(shown));
+    else if (shown.length === 1) tray.replaceChildren(jobCard(shown[0]));
+    else {
+      const running = shown.filter((e) => !jobEnded(e)).length;
+      const failed = shown.filter(jobWaits).length;
+      const counted = failed && running ? t("jobs.counts", { n: running, m: failed }) : failed ? t("jobs.countsFailed", { m: failed }) : running ? t("jobs.countsRunning", { n: running }) : t("job.done");
+      const rows = jobsUi.all ? shown : shown.slice(0, JOB_ROWS);
+      tray.replaceChildren(h("div", { class: "jt-list" },
+        h("div", { class: "jt-list-head" },
+          h("strong", null, counted),
+          h("button", { type: "button", class: "icon-btn", title: t("jobs.minimise"), "aria-label": t("jobs.minimise"), onclick: () => minimiseJobs(true) }, icon("down"))),
+        rows.map((e) => jobCard(e, true)),
+        shown.length > rows.length && h("button", { type: "button", class: "jt-more", onclick: () => ((jobsUi.all = true), paintJobs()) }, t("jobs.showMore", { n: shown.length - rows.length })),
+      ));
+    }
+  }
+  patchJobs();
+}
+
+/** A job as the server tells of it. Tracked: every install, and what somebody sent to the background */
+function takeJob(job, line) {
+  if (!isAdmin()) return;
+  const known = jobsUi.list.get(job.id);
+  if (!known && !(job.kind === "install" || storedIds(sessionStorage, JOB_HIDDEN).includes(job.id))) return;
+  if (!known && storedIds(localStorage, JOB_CLOSED).includes(job.id)) return;
+  const e = known ?? { id: job.id, left: JOB_LINGER_S };
+  const was = e.status;
+  const step = e.progress?.step;
+  for (const [key, value] of Object.entries(job)) if (value !== undefined && key !== "title") e[key] = value;
+  e.title = job.title ?? e.title;
+  if (line !== undefined) e.last = line;
+  jobsUi.list.set(job.id, e);
+  if (was === "running" && e.status !== "running") {
+    if (e.status === "done") {
+      e.onDone?.();
+      jobsUi.ready.add(e.app);
+    }
+    // a failure opens the card once; afterwards folding it is the person's choice
+    if (jobWaits(e)) minimiseJobs(false);
+  }
+  // a new tile, a step that changes what the tile says, the end of the work: the page looks again
+  if (!known || was !== e.status || step !== e.progress?.step) {
+    clearTimeout(appsTimer);
+    appsTimer = setTimeout(refresh, 150);
+  }
+  paintJobs();
+}
+
+/** What the server says runs or ended lately: after a reload, a lost connection, or a restart of the server */
+function seedJobs(jobs) {
+  if (!isAdmin()) return;
+  const there = new Set(jobs.map((j) => j.id));
+  for (const job of jobs) takeJob(job);
+  for (const e of jobsUi.list.values()) if (!there.has(e.id) && !jobEnded(e) && e.status) jobsUi.list.delete(e.id);
+  paintJobs();
+}
+
+/** An install that failed leaves no app, yet its tile stays as long as the card that tells why */
+function failedTiles(o) {
+  o.failedApps = [];
+  for (const e of jobsUi.list.values()) {
+    if (!jobWaits(e) || e.kind !== "install" || e.machine || o.apps.some((a) => a.name === e.app)) continue;
+    o.failedApps.push({ name: e.app, title: jobName(e), icon: e.icon, failedJob: e.id, status: "stopped" });
+    o.dashboard.cards.push({ type: "app", name: e.app, ...(jobsUi.places[e.app] ?? gridFit(o.dashboard.cards.map(boxOf), 1, 1)), w: 1, h: 1 });
+  }
+}
+
+/** Off to the background, with no window: the card and the tile tell the rest */
+function jobInBackground(id, kind, title, onDone) {
+  remember(sessionStorage, JOB_HIDDEN, id);
+  const e = jobsUi.list.get(id) ?? { id, kind, status: "running", app: "", left: JOB_LINGER_S };
+  e.title = title;
+  if (e.status === "running") e.onDone = onDone;
+  else if (e.status === "done") onDone?.();
+  jobsUi.list.set(id, e);
+  paintJobs();
+  void refresh();
+}
+
+function jobStopDialog(id, app) {
+  let dialog;
+  dialog = openDialog("confirm", h("h2", null, t("jobs.stopTitle", { app })), h("p", { class: "muted" }, t("jobs.stopLead")),
+    h("footer", null, closeButton(() => dialog, t("common.cancel")), button(t("jobs.stopInstalling"), { class: "danger", onclick: async () => {
+      dialog.close();
+      await api("POST", `/api/jobs/${id}/stop`).catch((err) => toast(errorText(err), "error"));
+    } })));
+}
+
+/** The menu of a tile that is no app yet */
+function jobTileMenu(app, at) {
+  const failed = app.failedJob;
+  const id = failed ?? app.job.id;
+  menuAt(at, null, [
+    { label: t("jobs.showLog"), icon: "logs", run: () => jobDialog(id, "install", app.title) },
+    failed ? { label: t("jobs.dismiss"), icon: "x", run: () => closeJob(id) } : app.job.stoppable && { label: t("jobs.stopInstalling"), icon: "stop", danger: true, run: () => jobStopDialog(id, app.title) },
+  ].filter(Boolean));
+}
+
+setInterval(() => {
+  if (document.hidden || jobsUi.hold) return;
+  for (const e of [...jobsUi.list.values()]) {
+    if (!jobEnded(e) || !e.status || jobWaits(e) || jobNotes(e) || (jobLogin(e) && jobLogin(e).login.kind !== "none") || jobsUi.logs.has(e.id)) continue;
+    if (--e.left <= 0) closeJob(e.id);
+  }
+}, 1000);
+
 /** Shows a running operation: its console output and how it ended */
 async function jobDialog(id, kind, title, onDone) {
   const log = h("pre", { class: "console" });
@@ -8554,7 +9059,17 @@ async function jobDialog(id, kind, title, onDone) {
   jobListeners.add(listener);
 
   dialog = openDialog("wide", h("h2", null, t("job." + kind, { app: title })), log, h("footer", null, status, stop, close));
-  dialog.addEventListener("close", () => jobListeners.delete(listener));
+  jobsUi.logs.add(id);
+  paintJobs();
+  dialog.addEventListener("close", () => {
+    jobListeners.delete(listener);
+    jobsUi.logs.delete(id);
+    // closed while it runs: it goes on out of sight, and the card keeps telling
+    if (status.classList.contains("running") && !jobsUi.list.has(id)) jobInBackground(id, kind, title, onDone);
+    const e = jobsUi.list.get(id);
+    if (e) e.left = JOB_LINGER_S;
+    paintJobs();
+  });
 
   try {
     const job = await api("GET", `/api/jobs/${id}`);
@@ -8676,14 +9191,16 @@ function snapshotList(app, snapshots, reload) {
             class: "icon-btn",
             "aria-label": t("backup.delete"),
             title: t("backup.delete"),
-            onclick: async () => {
-              try {
-                await api("DELETE", `/api/backups/${app.name}/${s.id}`);
-                reload();
-              } catch (e) {
-                toast(errorText(e), "error");
-              }
-            },
+            onclick: () =>
+              confirmAction({
+                title: t("backup.deleteTitle", { time: dateTime(s.at) }),
+                lead: t("backup.deleteLead"),
+                label: t("backup.delete"),
+                run: async () => {
+                  await api("DELETE", `/api/backups/${app.name}/${s.id}`);
+                  reload();
+                },
+              }),
           },
           icon("trash"),
         ),
@@ -9177,6 +9694,19 @@ function copyText(text) {
     area.remove();
   }
   toast(t("files.pathCopied", { path: text }));
+}
+/** The same for what should not stand on the screen in a message: a password */
+function copyQuietly(text) {
+  try {
+    void navigator.clipboard.writeText(text);
+  } catch {
+    const area = h("textarea", { class: "offscreen", value: text, readOnly: true });
+    document.body.append(area);
+    area.select();
+    document.execCommand("copy");
+    area.remove();
+  }
+  toast(t("twofa.copied"));
 }
 const joinPath = (dir, name) => (dir === "/" ? "" : dir) + "/" + name;
 const rawUrl = (path, download = false) => `${filesApi("/raw")}?path=${encodeURIComponent(path)}${download ? "&download=1" : ""}`;
@@ -10207,38 +10737,14 @@ function contextMenus() {
   });
 }
 
-/** Changes the look from anywhere (a right click on the page): shown at once, saved, taken back when refused */
-async function changeLook(patch) {
-  const before = state.appearance;
-  applyAppearance((state.appearance = { ...before, ...patch }));
-  try {
-    const saved = await api("PUT", "/api/settings", { appearance: patch });
-    state.appearance = saved.appearance;
-    if (state.settings) state.settings = saved;
-  } catch (e) {
-    applyAppearance((state.appearance = before));
-    toast(errorText(e), "error");
-  }
-}
-
-/** The menu of the page itself: the look, Hata's own places, and what the page on screen can add */
+/** The menu of the page itself: Hata's own places, and what the page on screen can add */
 function pageMenu(at) {
   const admin = isAdmin();
-  const look = state.appearance ?? {};
-  const theme = !look.background ? "system" : lightness(look.background) > 0.35 ? "light" : "dark";
-  // the built-in pictures and one's own, in turn; after the last — none
-  const walls = ["", ...(state.wallpapers ?? []), ...(look.custom ? ["custom"] : [])];
-  const nextWall = walls[(walls.indexOf(look.wallpaper ?? "") + 1) % walls.length];
   menuAt(at, menuHeader("Hata", state.version, "home"), [
-    ...(state.route.view === "home" && state.overview ? gridMenuEntries() : []),
+    mayArrange() && { label: t("grid.edit"), icon: "grid", run: gridEdit },
     admin && state.route.view === "home" && state.overview && { label: t("menu.addHere"), icon: "plus", run: () => addDialog() },
     admin && state.route.view === "home" && state.overview && { label: t("menu.dashboardConfig"), icon: "code", run: layoutTextDialog },
-    admin && { label: t("menu.themeLight"), icon: "sun", on: theme === "light", run: () => changeLook({ background: BACKGROUNDS[6] }) },
-    admin && { label: t("menu.themeDark"), icon: "moon", on: theme === "dark", run: () => changeLook({ background: BACKGROUNDS[0] }) },
-    admin && { label: t("menu.themeSystem"), icon: "sliders", on: theme === "system", run: () => changeLook({ background: "" }) },
-    admin && walls.length > 1 && { label: t("menu.nextWallpaper"), icon: "image", run: () => changeLook({ wallpaper: nextWall }) },
     admin && { label: t("menu.appearance"), icon: "image", href: "#/settings/appearance" },
-    { label: t("menu.reload"), icon: "refresh", run: () => location.reload() },
     { label: t("nav.settings"), icon: "sliders", href: "#/settings" },
     { label: t("menu.about"), icon: "info", href: "#/settings/about" },
   ]);
@@ -11137,7 +11643,7 @@ function renderStoreList() {
         h(
           "button",
           { type: "button", class: "store-card" + (a.supported ? "" : " unsupported"), onclick: () => (installed.has(a.name) ? go(`#/apps/${a.name}`) : storeDialog(a)), menu: (at) => storeCardMenu(a, installed.has(a.name), at) },
-          h("span", { class: "store-card-head" }, appIcon(a), h("span", { class: "grow" }, h("span", { class: "tile-name" }, a.title), h("span", { class: "muted small" }, twice.has(a.name) ? `${a.category} · ${a.storeName}` : a.category)), installed.has(a.name) ? h("span", { class: "chip ok" }, icon("check"), t("store.installed")) : h("span", { class: "chip" }, t("store.install"))),
+          h("span", { class: "store-card-head" }, appIcon(a), h("span", { class: "grow" }, h("span", { class: "tile-name" }, a.title), h("span", { class: "muted small" }, twice.has(a.name) ? `${a.category} · ${a.storeName}` : a.category)), installed.has(a.name) ? (state.overview?.apps?.find((one) => one.name === a.name)?.job?.kind === "install" ? h("span", { class: "chip" }, t("store.installing")) : h("span", { class: "chip ok" }, icon("check"), t("store.installed"))) : h("span", { class: "chip" }, t("store.install"))),
           h("span", { class: "tagline" }, a.tagline),
         ),
       ),
@@ -11245,7 +11751,7 @@ async function storeDialog(entry, target = state.installTarget ?? "") {
         const res = await api("POST", target ? `/api/machines/${target}/apps` : "/api/apps", { store: app.store, name: app.name, form });
         dialog.close();
         state.installTarget = "";
-        jobDialog(res.job, "install", app.title, () => go(target ? `#/machines/${target}/apps` : `#/apps/${app.name}`));
+        jobInBackground(res.job, "install", app.title);
       } catch (e) {
         error.textContent = errorText(e);
         install.disabled = false;
@@ -11386,9 +11892,8 @@ function customDialog() {
             const res = await api("POST", `/api/apps?lang=${state.lang}`, asForm ? { name: app, settings } : { name: app, compose: area.value });
             dialog.close();
             const picture = asForm ? form.pickedIcon() : null;
-            jobDialog(res.job, "install", (asForm && settings.title) || app, async () => {
+            jobInBackground(res.job, "install", (asForm && settings.title) || app, async () => {
               if (picture) await uploadAppIcon(app, picture).catch((err) => toast(errorText(err), "error"));
-              go(`#/apps/${app}`);
             });
           } catch (err) {
             error.textContent = errorText(err);
@@ -11854,7 +12359,7 @@ function paintWelcome() {
               h(
                 "button",
                 { type: "button", class: "store-card", onclick: () => (installed.has(a.name) ? go(`#/apps/${a.name}`) : storeDialog(a)), menu: (at) => storeCardMenu(a, installed.has(a.name), at) },
-                h("span", { class: "store-card-head" }, appIcon(a), h("span", { class: "grow" }, h("span", { class: "tile-name" }, a.title), h("span", { class: "muted small" }, twice.has(a.name) ? `${a.category} · ${a.storeName}` : a.category)), installed.has(a.name) ? h("span", { class: "chip ok" }, icon("check"), t("store.installed")) : h("span", { class: "chip" }, t("store.install"))),
+                h("span", { class: "store-card-head" }, appIcon(a), h("span", { class: "grow" }, h("span", { class: "tile-name" }, a.title), h("span", { class: "muted small" }, twice.has(a.name) ? `${a.category} · ${a.storeName}` : a.category)), installed.has(a.name) ? (state.overview?.apps?.find((one) => one.name === a.name)?.job?.kind === "install" ? h("span", { class: "chip" }, t("store.installing")) : h("span", { class: "chip ok" }, icon("check"), t("store.installed"))) : h("span", { class: "chip" }, t("store.install"))),
                 h("span", { class: "tagline" }, a.tagline),
               ),
             ),
@@ -13059,14 +13564,16 @@ function networkSection() {
           nic.wifi?.ready && button(t("wifi.networks"), { onclick: () => wifiDialog(nic) }, "search"),
           nic.wifi?.ssid &&
             button(t("wifi.forget"), {
-              onclick: async () => {
-                try {
-                  state.network = await api("DELETE", `/api/network/${nic.name}/wifi`);
-                } catch (err) {
-                  toast(errorText(err), "error");
-                }
-                renderSettings();
-              },
+              onclick: () =>
+                confirmAction({
+                  title: t("wifi.forgetTitle", { ssid: nic.wifi.ssid }),
+                  lead: t("wifi.forgetLead"),
+                  label: t("wifi.forgetGo"),
+                  run: async () => {
+                    state.network = await api("DELETE", `/api/network/${nic.name}/wifi`);
+                    renderSettings();
+                  },
+                }),
             }),
           nic.manager === "nm" && !data.pending && (!nic.wifi || nic.wifi.ssid) && !nic.wifi?.hotspot && button(t("network.change"), { onclick: () => nicDialog(nic) }, "sliders"),
           (nic.manager === "networkd" || nic.manager === "ifupdown") && data.tool === "ok" && !data.pending && button(t("network.handover"), { onclick: () => handOverDialog(nic) }),
@@ -13100,6 +13607,19 @@ function networkSection() {
         "aria-label": t("network.internet"),
         onchange: async () => {
           error.textContent = "";
+          if (select.value === "off" && nic.internet === "main") {
+            select.value = "main";
+            return confirmAction({
+              title: t("network.roleOffTitle", { nic: nic.name }),
+              lead: t("network.roleOffLead"),
+              label: t("network.roleOffGo"),
+              iconName: "x",
+              run: async () => {
+                state.network = await api("PUT", `/api/network/${nic.name}/role`, { role: "off" });
+                renderSettings();
+              },
+            });
+          }
           select.disabled = true;
           try {
             state.network = await api("PUT", `/api/network/${nic.name}/role`, { role: select.value });
@@ -13124,13 +13644,18 @@ function networkSection() {
             select.value = "home";
             return outsideDialog(nic);
           }
-          select.disabled = true;
-          try {
-            state.network = await api("PUT", `/api/network/${nic.name}/side`, { side: "home" });
-          } catch (err) {
-            error.textContent = errorText(err);
-          }
-          renderSettings();
+          // the firewall on this cable goes: pages, shares and Docker's ports answer there from now on
+          select.value = "outside";
+          confirmAction({
+            title: t("outside.homeTitle", { nic: nic.name }),
+            lead: t("outside.homeLead"),
+            label: t("outside.homeGo"),
+            iconName: "x",
+            run: async () => {
+              state.network = await api("PUT", `/api/network/${nic.name}/side`, { side: "home" });
+              renderSettings();
+            },
+          });
         },
       },
       ["home", "outside"].map((side) => h("option", { value: side, selected: (nic.outside ? "outside" : "home") === side }, t("outside.side." + side))),
@@ -13212,7 +13737,7 @@ function toolRemoveDialog(tool) {
         },
       },
       h("header", null, h("h2", { class: "grow" }, t("tools.removeTitle", { name: tool.name })), closeX(() => dialog)),
-      h("p", null, t("tools.removeLead")),
+      h("p", null, t(tool.id === "incus" ? "tools.removeLeadIncus" : "tools.removeLead")),
       tool.id === "docker" && h("p", { class: "banner" }, t("tools.removeDocker")),
       h("p", { class: "cmd whole" }, icon("terminal"), tool.remove),
       password && field(t("auth.password"), password),
@@ -13386,7 +13911,10 @@ function wireguardCards() {
     settingRow(t("wg.port"), t("wg.portHint", { port: s.port }), port),
     !s.firewall && h("p", { class: "banner" }, t("wg.noFirewall")),
     error,
-    h("footer", null, h("div", { class: "row-actions" }, s.enabled && button(t("remote.turnOff"), { onclick: (e) => send("PUT", "server", { enabled: false }, e.currentTarget) }), button(t(s.enabled ? "settings.save" : "remote.turnOn"), { class: "primary", onclick: (e) => send("PUT", "server", { ...typed(), enabled: true }, e.currentTarget) }))),
+    h("footer", null, h("div", { class: "row-actions" }, s.enabled && button(t("remote.turnOff"), { onclick: (e) => {
+      const el = e.currentTarget;
+      confirmAction({ title: t("wg.offTitle"), lead: t("wg.offLead"), label: t("remote.turnOff"), iconName: "x", run: () => send("PUT", "server", { enabled: false }, el) });
+    } }), button(t(s.enabled ? "settings.save" : "remote.turnOn"), { class: "primary", onclick: (e) => send("PUT", "server", { ...typed(), enabled: true }, e.currentTarget) }))),
   );
   const devices =
     s.address &&
@@ -13427,7 +13955,19 @@ function wireguardCards() {
         "div",
         { class: "row-actions" },
         c.set
-          ? [button(t("wg.out.forget"), { class: "quiet", onclick: (e) => send("DELETE", "client", undefined, e.currentTarget, outError) }), c.enabled ? button(t("remote.turnOff"), { onclick: (e) => send("PUT", "client", { enabled: false }, e.currentTarget, outError) }) : button(t("remote.turnOn"), { class: "primary", onclick: (e) => send("PUT", "client", { enabled: true }, e.currentTarget, outError) })]
+          ? [button(t("wg.out.forget"), {
+            class: "quiet",
+            onclick: () =>
+              confirmAction({
+                title: t("wg.out.forgetTitle"),
+                lead: t("wg.out.forgetLead"),
+                label: t("wg.out.forgetGo"),
+                run: async () => {
+                  state.wireguard = await api("DELETE", "/api/wireguard/client");
+                  renderSettings();
+                },
+              }),
+          }), c.enabled ? button(t("remote.turnOff"), { onclick: (e) => send("PUT", "client", { enabled: false }, e.currentTarget, outError) }) : button(t("remote.turnOn"), { class: "primary", onclick: (e) => send("PUT", "client", { enabled: true }, e.currentTarget, outError) })]
           : [button(t("wg.out.file"), { onclick: () => pick.click() }), button(t("wg.out.join"), { class: "primary", onclick: join })],
       ),
     ),
@@ -13532,7 +14072,23 @@ function tailscaleCards() {
       settingRow(t("remote.account"), r.server ? t("remote.accountOwn", { server: r.server }) : r.expires ? t("remote.expires", { date: shortDate(r.expires) }) : "", h("span", null, r.tailnet || "—")),
       r.health.length > 0 && h("div", { class: "banner stack" }, r.health.map((line) => h("p", { class: "small" }, line))),
       error,
-      h("footer", null, h("div", { class: "row-actions" }, button(t("remote.signOut"), { class: "quiet", onclick: act("signout") }), on ? button(t("remote.turnOff"), { onclick: act("disconnect") }) : button(t("remote.turnOn"), { class: "primary", onclick: act("connect") }))),
+      h("footer", null, h("div", { class: "row-actions" }, button(t("remote.signOut"), {
+        class: "quiet",
+        onclick: () =>
+          confirmAction({
+            title: t("remote.signOutTitle"),
+            lead: t("remote.signOutLead"),
+            label: t("remote.signOutGo"),
+            iconName: "signout",
+            run: async () => {
+              state.remote = await api("POST", "/api/tailscale/signout", {});
+              renderSettings();
+            },
+          }),
+      }), on ? button(t("remote.turnOff"), { onclick: (e) => {
+        const el = e.currentTarget;
+        confirmAction({ title: t("remote.offTitle"), lead: t("remote.offLead"), label: t("remote.turnOff"), iconName: "x", run: () => act("disconnect")({ currentTarget: el, target: el }) });
+      } }) : button(t("remote.turnOn"), { class: "primary", onclick: act("connect") }))),
     ),
     h(
       "section",
@@ -15867,7 +16423,7 @@ function labelDialog(disk, volume) {
     "confirm",
     h("h2", null, t("relabel.title", { name: volume.label || volume.name })),
     h("p", { class: "muted" }, t("relabel.lead")),
-    volume.mounts.length > 0 && fs !== "ext4" && h("p", { class: "banner" }, t("relabel.leadMounted", { path: volume.mounts[0] })),
+    volume.mounts.length > 0 && fs !== "ext4" && fs !== "btrfs" && h("p", { class: "banner" }, t("relabel.leadMounted", { path: volume.mounts[0] })),
     h("label", { class: "field" }, h("span", { class: "label" }, t("mounting.label")), label, hint),
     slot,
     h("footer", null, closeButton(() => dialog, t("common.cancel")), go),
@@ -16332,6 +16888,7 @@ const RAID_KINDS = { md: "Linux RAID", zfs: "ZFS", btrfs: "btrfs" };
 /** Each array or pool with its state, its disks and its own check; Hata reads them and makes none */
 function raidCard(data) {
   const error = h("p", { class: "error", role: "alert" });
+  const askCall = (ask, path, body) => confirmAction({ ...ask, run: async () => setDisks(await api("POST", path, body)) });
   const call = (path, body) => async (e) => {
     const el = e.currentTarget;
     el.disabled = true;
@@ -16386,8 +16943,8 @@ function raidCard(data) {
           { class: "row-actions" },
           !busy && pool.state === "ok" && button(t("raid.check"), { class: "small", onclick: call("/api/disks/raid/check", { id: pool.id, action: "check" }) }, "refresh"),
           stoppable && button(t("raid.stop"), { class: "small", onclick: call("/api/disks/raid/check", { id: pool.id, action: "stop" }) }),
-          !busy && pool.kind === "md" && pool.state === "ok" && pool.errors > 0 && button(t("raid.repair"), { class: "small primary", onclick: call("/api/disks/raid/check", { id: pool.id, action: "repair" }) }),
-          !busy && counted && button(t(pool.kind === "md" ? "raid.forget" : "raid.clear"), { class: "small quiet", onclick: call("/api/disks/raid/clear", { id: pool.id }) }),
+          !busy && pool.kind === "md" && pool.state === "ok" && pool.errors > 0 && button(t("raid.repair"), { class: "small primary", onclick: () => askCall({ title: t("raid.repairTitle", { name: pool.name }), lead: t("raid.repairLead"), label: t("raid.repairGo"), iconName: "refresh" }, "/api/disks/raid/check", { id: pool.id, action: "repair" }) }),
+          !busy && counted && button(t(pool.kind === "md" ? "raid.forget" : "raid.clear"), { class: "small quiet", onclick: () => askCall({ title: t(pool.kind === "md" ? "raid.forgetTitle" : "raid.clearTitle", { name: pool.name }), lead: t(pool.kind === "md" ? "raid.forgetLead" : "raid.clearLead"), label: t(pool.kind === "md" ? "raid.forget" : "raid.clear"), iconName: "x" }, "/api/disks/raid/clear", { id: pool.id }) }),
         ),
       ),
     );
@@ -16492,7 +17049,7 @@ async function sidebarMenu(at, { label, path, machine = "", volume = null, iconN
       if (removable && data.mounting?.possible) entries.push({ label: t("copyin.button"), icon: "download", run: () => copyInDialog(disk) });
       if (mount && data.mounting?.ours[mount.path] && !pooled) entries.push({ label: t(removable ? "mounting.eject" : "mounting.disconnect"), icon: "signout", run: () => disconnectDialog(mount) });
     }
-    entries.push({ label: t("menu.inStorage"), icon: "disk", href: "#/settings/places" });
+    entries.push(volume.network ? { label: t("menu.inNetworkDrives"), icon: "network", href: "#/settings/places" } : { label: t("menu.inDisks"), icon: "disk", href: "#/settings/storage" });
   }
   menuAt(at, menuHeader(label, path, iconName), entries);
 }
@@ -16736,7 +17293,7 @@ function arrayCard(data, array) {
       h("div", { class: "banner danger stack" }, h("strong", null, t("array.diskEmpty", { disk: array.settings.data.find((x) => x.name === array.trouble.disk)?.path ?? array.trouble.disk })), h("p", { class: "small" }, t("array.diskEmptyHint")), h("div", { class: "row-actions" }, button(t("array.recover"), { class: "small primary", disabled: busy, onclick: () => recoverDialog(array.settings.data.find((x) => x.name === array.trouble.disk)) }), act(t("array.emptyOnPurpose"), "/sync", { force: true, empty: true }))),
     array.trouble?.code === "parityLost" && h("div", { class: "banner danger stack" }, h("strong", null, t("array.parityLost", { disk: array.settings.parity })), h("p", { class: "small" }, t("array.parityLostHint")), h("div", { class: "row-actions" }, act(t("array.rebuild"), "/rebuild", {}, "small primary"))),
     array.errors > 0 && h("div", { class: "banner danger stack" }, h("strong", null, t("array.errors", { n: array.errors })), h("p", { class: "small" }, t("array.errorsHint")), h("div", { class: "row-actions" }, act(t("array.repair"), "/repair", {}, "small primary"))),
-    array.held && h("div", { class: "banner stack" }, h("strong", null, t("array.held", { n: array.held.removed })), h("p", { class: "small" }, t("array.heldHint")), h("div", { class: "row-actions" }, act(t("array.bringBack"), "/fix", {}, "small primary"), act(t("array.syncAnyway"), "/sync", { force: true }))),
+    array.held && h("div", { class: "banner stack" }, h("strong", null, t("array.held", { n: array.held.removed })), h("p", { class: "small" }, t("array.heldHint")), h("div", { class: "row-actions" }, act(t("array.bringBack"), "/fix", {}, "small primary"), button(t("array.syncAnyway"), { class: "small", disabled: busy, onclick: () => confirmAction({ title: t("array.syncTitle", { n: array.held.removed }), lead: t("array.syncLead"), label: t("array.syncGo"), iconName: "refresh", run: () => arrayCall("POST", "/sync", { force: true }) }) }))),
     !array.trouble && !array.held && array.lastSync && !array.lastSync.ok && h("p", { class: "banner small" }, t("array.failed", { message: array.lastSync.message })),
   ];
   const running =
@@ -17447,7 +18004,7 @@ async function shareDialog(path) {
       h("label", { class: "check" }, tm, h("span", null, h("strong", null, t("shares.tm.title")), h("span", { class: "muted small block" }, t("shares.tm.hint")))),
       limitField,
       error,
-      h("footer", null, share ? button(t("shares.stop"), { class: "danger", onclick: () => send("DELETE", `/api/shares/${encodeURIComponent(share.name)}`, undefined, t("shares.stoppedDone", { name: share.name })) }) : h("span"), closeButton(() => dialog, t("common.cancel")), h("button", { class: "btn primary" }, t(share ? "shares.save" : "shares.share"))),
+      h("footer", null, share ? button(t("shares.stop"), { class: "danger", onclick: () => confirmAction({ title: t("attention.end.share", { name: share.name }), lead: t("attention.end.shareLead", { path: share.path }), label: t("shares.stop"), iconName: "x", run: () => send("DELETE", `/api/shares/${encodeURIComponent(share.name)}`, undefined, t("shares.stoppedDone", { name: share.name })) }) }) : h("span"), closeButton(() => dialog, t("common.cancel")), h("button", { class: "btn primary" }, t(share ? "shares.save" : "shares.share"))),
     ),
   );
 }
@@ -17655,7 +18212,8 @@ const toolTarget = (target) => String(target?.name ?? target?.app ?? target?.hos
 function toolWords(call) {
   const key = `assistant.tool.${call.name}${call.name === "app_remove" && call.args.deleteData === true ? ".data" : ""}`;
   const a = call.args ?? {};
-  const said = Object.fromEntries(Object.entries(a).filter(([, value]) => typeof value !== "object").map(([name, value]) => [name, String(value)]));
+  // what a person is asked to allow is worded: `reboot` and `true` are the tool's values, not words
+  const said = Object.fromEntries(Object.entries(a).filter(([, value]) => typeof value !== "object").map(([name, value]) => [name, has(`assistant.value.${value}`) ? t(`assistant.value.${value}`) : String(value)]));
   return has(key) ? t(key, { ...said, app: String(a.app ?? a.name ?? ""), query: String(a.query ?? ""), snapshot: String(a.snapshot ?? ""), target: toolTarget(a.target) }) : call.name;
 }
 
@@ -17774,7 +18332,7 @@ function paintAssistant() {
     // with chats to choose from the list names the one on the screen; otherwise the window says what it is
     listed ? h("strong", { class: "grow ellipsis" }, title) : chats.length > 0 ? h("span", { class: "grow pick" }, pick) : h("strong", { class: "grow" }, t("assistant.title")),
     chat && !listed && tool(t("assistant.newChat"), "plus", fresh),
-    chat && tool(t("assistant.forget"), "trash", forgetAssistantChat),
+    chat && tool(t("assistant.forget"), "trash", () => confirmAction({ title: t("assistant.forgetTitle"), lead: t("assistant.forgetLead"), label: t("assistant.forget"), run: forgetAssistantChat })),
     !paged && tool(t("assistant.asPage"), "external", () => go("#/assistant"), "wide-only"),
     !paged && tool(t(wide ? "assistant.narrow" : "assistant.wide"), wide ? "shrink" : "expand", () => (panel.classList.toggle("wide"), rememberAssistant(), paintAssistant()), "wide-only"),
     !paged && tool(t("assistant.hide"), "down", closeAssistant),
@@ -18110,7 +18668,8 @@ const asksShown = new Set();
 
 function askedWhat(ask) {
   const key = `approvals.what.${ask.tool}${ask.tool === "app_remove" && ask.args.deleteData === true ? ".data" : ""}`;
-  return has(key) ? t(key, { app: String(ask.args.app ?? ""), snapshot: String(ask.args.snapshot ?? "") }) : ask.title;
+  if (has(key)) return t(key, { app: String(ask.args.app ?? ""), snapshot: String(ask.args.snapshot ?? "") });
+  return has(`assistant.tool.${ask.tool}`) ? toolWords({ name: ask.tool, args: ask.args }) : ask.title;
 }
 
 async function answerAsk(ask, allow) {
@@ -18598,12 +19157,18 @@ function passkeysCard(account) {
       settingRow(
         key.name || t("passkey.unnamed"),
         [t("passkey.created", { date: new Date(key.createdAt).toLocaleDateString(state.lang, { day: "numeric", month: "short", year: "numeric" }) }), key.lastUsed && t("passkey.used", { time: ago(key.lastUsed) })].filter(Boolean).join(" · "),
-        button(t("app.remove"), {
+        button(t("passkey.remove"), {
           class: "small",
-          onclick: async () => {
-            await api("DELETE", `/api/account/passkeys/${key.id}`).catch((e) => toast(errorText(e), "error"));
-            void loadSettings();
-          },
+          onclick: () =>
+            confirmAction({
+              title: t("passkey.removeTitle", { name: key.name || t("passkey.unnamed") }),
+              lead: t("passkey.removeLead"),
+              label: t("passkey.removeGo"),
+              run: async () => {
+                await api("DELETE", `/api/account/passkeys/${key.id}`);
+                void loadSettings();
+              },
+            }),
         }),
       ),
     ),
@@ -18666,13 +19231,26 @@ function userMenuFor(user, at = null) {
       toast(errorText(e), "error");
     }
   };
+  /** What a person may do on this server changes most to or from administrator: it is asked first */
+  const askRole = (role, label) =>
+    confirmAction({
+      title: t(role === "admin" ? "users.makeAdminTitle" : "users.dropAdminTitle", { name: user.name }),
+      lead: t(role === "admin" ? "users.makeAdminLead" : "users.dropAdminLead", { name: user.name }),
+      label,
+      iconName: "user",
+      run: async () => {
+        await api("PUT", `/api/users/${user.id}`, { role });
+        toast(t("settings.saved"));
+        void loadUsers();
+      },
+    });
   const item = (label, iconName, action, cls = "") => h("button", { type: "button", class: "menu-item " + cls, onclick: () => (dialog.close(), action()) }, icon(iconName), label);
   dialog = openDialog(
     at ? "menu dropdown" : "menu",
     h("header", null, h("span", { class: "avatar" }, user.name.slice(0, 1).toUpperCase()), h("div", null, h("h2", null, user.name), h("span", { class: "muted small" }, t("user.role." + user.role)))),
-    user.role !== "member" && item(t("users.makeMember"), "user", () => change({ role: "member" })),
-    user.role !== "guest" && item(t("users.makeGuest"), "user", () => change({ role: "guest" })),
-    user.role !== "admin" && item(t("users.makeAdmin"), "sliders", () => change({ role: "admin" })),
+    user.role !== "member" && item(t("users.makeMember"), "user", () => (user.role === "admin" ? askRole("member", t("users.makeMember")) : change({ role: "member" }))),
+    user.role !== "guest" && item(t("users.makeGuest"), "user", () => (user.role === "admin" ? askRole("guest", t("users.makeGuest")) : change({ role: "guest" }))),
+    user.role !== "admin" && item(t("users.makeAdmin"), "sliders", () => askRole("admin", t("users.makeAdmin"))),
     item(t(user.shares === false ? "users.sharesAllow" : "users.sharesDeny"), "share", () => change({ shares: user.shares === false }, t(user.shares === false ? "users.sharesAllowed" : "users.sharesDenied"))),
     item(t("users.setPassword"), "refresh", () => {
       const password = passwordInput("new-password");
@@ -18703,16 +19281,30 @@ function userMenuFor(user, at = null) {
       );
       password.focus();
     }),
-    user.twoFactor && item(t("users.resetTwoFactor"), "x", () => change({ twoFactor: false })),
-    !self &&
-      item(t("users.remove"), "trash", async () => {
-        try {
-          await api("DELETE", `/api/users/${user.id}`);
+    user.twoFactor && item(t("users.resetTwoFactor"), "x", () =>
+      confirmAction({
+        title: t("users.resetTwoFactorTitle", { name: user.name }),
+        lead: t("users.resetTwoFactorLead", { name: user.name }),
+        label: t("users.resetTwoFactorGo"),
+        iconName: "x",
+        run: async () => {
+          await api("PUT", `/api/users/${user.id}`, { twoFactor: false });
+          toast(t("settings.saved"));
           void loadUsers();
-        } catch (e) {
-          toast(errorText(e), "error");
-        }
-      }, "danger"),
+        },
+      }),
+    ),
+    !self &&
+      item(t("users.remove"), "trash", () =>
+        confirmAction({
+          title: t("users.removeTitle", { name: user.name }),
+          lead: t("users.removeLead", { name: user.name }),
+          label: t("users.remove"),
+          run: async () => {
+            await api("DELETE", `/api/users/${user.id}`);
+            void loadUsers();
+          },
+        }), "danger"),
   );
   if (at) placeAt(dialog, at);
 }

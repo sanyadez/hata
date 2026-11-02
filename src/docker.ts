@@ -312,7 +312,7 @@ async function pump(stream: ReadableStream<Uint8Array>, onLine: (line: string) =
 }
 
 /** Runs a command, calling `onLine` for every line of stdout and stderr */
-export async function run(cmd: string[], opts: { cwd?: string; onLine?: (line: string) => void; stdin?: string } = {}): Promise<RunResult> {
+export async function run(cmd: string[], opts: { cwd?: string; onLine?: (line: string) => void; stdin?: string; signal?: AbortSignal } = {}): Promise<RunResult> {
   const lines: string[] = [];
   const onLine = (line: string) => {
     lines.push(line);
@@ -327,6 +327,7 @@ export async function run(cmd: string[], opts: { cwd?: string; onLine?: (line: s
       stdout: "pipe",
       stderr: "pipe",
       env: { ...process.env, NO_COLOR: "1" },
+      signal: opts.signal,
     });
   } catch (e) {
     return { code: 127, output: e instanceof Error ? e.message : String(e) };
@@ -342,6 +343,6 @@ export function composeCmd(project: string, dir: string, args: string[]): string
   return ["docker", "compose", "--ansi", "never", "--progress", "plain", "-p", project, "--project-directory", dir, "-f", `${dir}/compose.yml`, ...override, ...args];
 }
 
-export function compose(project: string, dir: string, args: string[], onLine?: (line: string) => void): Promise<RunResult> {
-  return run(composeCmd(project, dir, args), { cwd: dir, onLine });
+export function compose(project: string, dir: string, args: string[], onLine?: (line: string) => void, signal?: AbortSignal): Promise<RunResult> {
+  return run(composeCmd(project, dir, args), { cwd: dir, onLine, signal });
 }

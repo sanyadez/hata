@@ -281,7 +281,13 @@ export function askedWhat(ask: Pick<Ask, "tool" | "title" | "args">, lang: strin
   const key = `approvals.what.${ask.tool}${ask.tool === "app_remove" && ask.args.deleteData === true ? ".data" : ""}`;
   const known = LANGUAGES.en![key] !== undefined;
   const words = (name: string) => (typeof ask.args[name] === "string" ? (ask.args[name] as string).slice(0, 80) : "");
-  return known ? tr(lang, key, { app: words("app"), snapshot: words("snapshot") }) : ask.title;
+  if (known) return tr(lang, key, { app: words("app"), snapshot: words("snapshot") });
+  if (LANGUAGES.en![`assistant.tool.${ask.tool}`] === undefined) return ask.title;
+  const said = Object.fromEntries(Object.entries(ask.args).filter(([, value]) => typeof value !== "object").map(([name, value]) => {
+    const worded = `assistant.value.${String(value)}`;
+    return [name, LANGUAGES.en![worded] !== undefined ? tr(lang, worded) : String(value).slice(0, 80)];
+  }));
+  return tr(lang, `assistant.tool.${ask.tool}`, said);
 }
 
 /** The message about an agent's call that waits for an administrator's word */

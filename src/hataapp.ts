@@ -32,11 +32,18 @@ export interface Setting {
   chars?: "hex";
 }
 
+/** How to get into an app the first time, as its store says. In `settings`, a `user` or `password` of the form `${NAME}` names a setting */
+export type Login =
+  | { kind: "default" | "settings"; user?: string; password?: string }
+  | { kind: "first-visit" | "none" }
+  | { kind: "log"; user?: string; find: string };
+
 export interface HataMeta {
   title: Text;
   tagline: Text;
   description: Text;
   notes?: Text;
+  login?: Login;
   /** The category's name in the store's languages */
   category: Text;
   developer: string;
@@ -100,6 +107,149 @@ function cleanSetting(v: unknown): Setting | null {
   return s;
 }
 
+const SETTING_REF = /^\$\{([A-Z][A-Z0-9_]*)\}$/;
+
+/** A store's `login`, checked again: what cannot be understood is left out, and the app stays */
+export function cleanLogin(v: unknown, settings: Setting[]): Login | null {
+  if (!isObject(v)) return null;
+  const text = (x: unknown) => (typeof x === "string" && x.trim() ? x : undefined);
+  const pair = { ...(text(v.user) ? { user: text(v.user)! } : {}), ...(text(v.password) ? { password: text(v.password)! } : {}) };
+  const values = Object.values(pair);
+  if (v.kind === "first-visit" || v.kind === "none") return { kind: v.kind };
+  if (v.kind === "log") {
+    const find = text(v.find);
+    return find && find.length <= 120 ? { kind: "log", find, ...(pair.user ? { user: pair.user } : {}) } : null;
+  }
+  if (v.kind === "default") return values.length && !values.some((x) => x.includes("$")) ? { kind: "default", ...pair } : null;
+  if (v.kind === "settings") {
+    const refs = values.filter((x) => x.includes("$"));
+    const known = (x: string) => settings.some((s) => s.name === SETTING_REF.exec(x)?.[1]);
+    return refs.length && refs.every(known) ? { kind: "settings", ...pair } : null;
+  }
+  return null;
+}
+
+/**
+ * A port of the form that is taken here is offered as the next free one: free here, and not one this app
+ * uses for something else (a proxy on 80, 443 and 81 moved its 80 to its own 81, and did not start).
+ */
+export async function movePorts<T extends { type: string; value: string }>(rows: T[], busy: (port: number) => Promise<boolean>): Promise<(T & { busy?: number })[]> {
+  const isPort = (row: T) => row.type === "port" && /^\d+$/.test(row.value);
+  const mine = new Set(rows.filter(isPort).map((row) => Number(row.value)));
+  const out: (T & { busy?: number })[] = [];
+  for (const row of rows) {
+    const taken = Number(row.value);
+    if (!isPort(row) || !(await busy(taken))) {
+      out.push(row);
+      continue;
+    }
+    let moved = 0;
+    for (let port = taken + 1; port < Math.min(65536, taken + 100) && !moved; port++) if (!mine.has(port) && !(await busy(port))) moved = port;
+    if (moved) mine.add(moved);
+    out.push({ ...row, ...(moved ? { value: String(moved) } : {}), busy: taken });
+  }
+  return out;
+}
+
+/** What the page gets of a `login`: no value it has to ask for. `ask` — the fields shown only when asked for */
+export interface LoginView {
+  kind: Login["kind"];
+  user?: string;
+  password?: string;
+  ask?: ("user" | "password")[];
+}
+
+/** What asking gives: the values, and for `log` the line they were found in. Nothing found — no `password` */
+export interface LoginValues {
+  user?: string;
+  password?: string;
+  line?: string;
+}
+
+const HIDDEN_TYPES = ["secret", "password"];
+
+function settingValue(ref: string, settings: Setting[], env: Record<string, string>): string {
+  const name = SETTING_REF.exec(ref)?.[1];
+  if (!name) return ref;
+  return env[name] ?? settings.find((s) => s.name === name)?.default ?? "";
+}
+
+export function loginView(login: Login, settings: Setting[], env: Record<string, string>): LoginView {
+  if (login.kind === "first-visit" || login.kind === "none") return { kind: login.kind };
+  if (login.kind === "default") return { ...login };
+  if (login.kind === "log") return { kind: "log", ...(login.user ? { user: login.user } : {}), ask: ["password"] };
+  const view: LoginView = { kind: "settings" };
+  const ask: ("user" | "password")[] = [];
+  if (login.user) {
+    const name = SETTING_REF.exec(login.user)?.[1];
+    if (name && HIDDEN_TYPES.includes(settings.find((s) => s.name === name)?.type ?? "")) ask.push("user");
+    else {
+      const user = settingValue(login.user, settings, env);
+      if (user) view.user = user;
+    }
+  }
+  // a password stays behind the button whatever type its setting has
+  if (login.password?.includes("$")) ask.push("password");
+  else if (login.password) view.password = login.password;
+  if (ask.length) view.ask = ask;
+  return view;
+}
+
+/** The values of a `settings` login, the ones the page has to ask for too */
+export function loginValues(login: Login, settings: Setting[], env: Record<string, string>): LoginValues {
+  if (login.kind !== "settings" && login.kind !== "default") return {};
+  const out: LoginValues = {};
+  const user = login.user ? settingValue(login.user, settings, env) : "";
+  const password = login.password ? settingValue(login.password, settings, env) : "";
+  if (user) out.user = user;
+  if (password) out.password = password;
+  return out;
+}
+
+const COLOURS = /\x1b\[[0-9;]*[A-Za-z]/g;
+/** What `docker compose logs` puts in front of a line: the container, and the time when asked for */
+const LOG_PREFIX = /^\S+\s+\|\s?(?:\d{4}-\d\d-\d\dT\S+\s)?/;
+
+/** Where the password stands in a line that holds it: its last word, when it comes after the words looked for */
+function passwordIn(line: string, find: string): { at: number; word: string } | null {
+  const after = line.toLowerCase().indexOf(find.toLowerCase());
+  if (after < 0) return null;
+  const end = line.trimEnd();
+  const word = end.split(/\s+/).at(-1) ?? "";
+  const at = end.length - word.length;
+  return word && at >= after + find.length ? { at, word } : null;
+}
+
+/** The newest line of a log with the words of a `log` login, as plain text: the password is the line's last word */
+export function foundInLog(log: string, find: string): LoginValues {
+  const lines = log.split("\n");
+  for (let i = lines.length - 1; i >= 0; i--) {
+    const line = lines[i]!.replace(COLOURS, "").replace(LOG_PREFIX, "").trim();
+    const found = passwordIn(line, find);
+    if (found) return { password: found.word, line };
+  }
+  return {};
+}
+
+/** What a newer version's notes say, when they differ from the installed ones: read before updating */
+export function changedNotes(installed: unknown, newer: unknown, lang: string): string {
+  const text = textIn(newer, lang);
+  return text === textIn(installed, lang) ? "" : text;
+}
+
+/** A log with the passwords of a `log` login taken out of it: what a key below `full` is given */
+export function logWithoutLogin(log: string, login: Login | null): string {
+  if (login?.kind !== "log") return log;
+  return log
+    .split("\n")
+    .map((raw) => {
+      const line = raw.replace(COLOURS, "");
+      const found = passwordIn(line, login.find);
+      return found ? line.slice(0, found.at) + "(hidden)" : raw;
+    })
+    .join("\n");
+}
+
 export interface IndexApp {
   name: string;
   meta: HataMeta;
@@ -137,6 +287,8 @@ export function readIndexApp(entry: unknown, base: string, categories: Record<st
     if (text) permissions[p] = text;
   }
   const category = typeof entry.category === "string" ? entry.category : "";
+  const settings = (Array.isArray(entry.settings) ? entry.settings : []).map(cleanSetting).filter((s): s is Setting => s !== null);
+  const login = cleanLogin(entry.login, settings);
   return {
     name: entry.id,
     compose: entry.compose,
@@ -146,6 +298,7 @@ export function readIndexApp(entry: unknown, base: string, categories: Record<st
       tagline: cleanText(entry.tagline) ?? "",
       description: cleanText(entry.description) ?? "",
       ...(cleanText(entry.notes) ? { notes: cleanText(entry.notes)! } : {}),
+      ...(login ? { login } : {}),
       category: categories[category] ?? category,
       developer: str(entry.developer),
       website: https(entry.website),
@@ -154,7 +307,7 @@ export function readIndexApp(entry: unknown, base: string, categories: Record<st
       icon: typeof entry.icon === "string" && /^data:image\/(svg\+xml|png|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(entry.icon) ? entry.icon : "",
       screenshots: (Array.isArray(entry.screenshots) ? entry.screenshots : []).filter((p: unknown) => typeof p === "string" && FILE_RE.test(p)).map((p: string) => base + p),
       web,
-      settings: (Array.isArray(entry.settings) ? entry.settings : []).map(cleanSetting).filter((s): s is Setting => s !== null),
+      settings,
       permissions,
       version: str(entry.version),
       architectures: (Array.isArray(entry.architectures) ? entry.architectures : []).filter((a: unknown): a is string => typeof a === "string"),

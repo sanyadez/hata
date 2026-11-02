@@ -16,7 +16,7 @@ import { agentUser, cannotGrant, cleanName, createKey, grantKey, keyOf, listKeys
 import type { Level } from "./agents";
 import { Desk } from "./approvals";
 import { answerCall, assistantConfig, configured as assistantReady, findChat, listChats, ModelError, modelsFor, removeChat, retry as retryAssistant, say as sayToAssistant, shownChat, shownConfig as shownAssistant, stopChat, updateAssistant } from "./assistant";
-import { AppError, appAction, startAfterDisk, startJob, stoppable, stopJob, type Job, installedNames, jobFinished, appEnv, appDetail, appLogs, appIcon, appSettings, appStats, applyCompose, ICON_MIME, MAX_ICON, removeAppIcon, setAppIcon, applySettings, installFromSettings, applyStoreUpdate, composeText, getJob, installCustom, installFromStore, listApps, listJobs, onAppRemoved, planStoreUpdate, readCompose, refreshAppUrls, removeApp, storeAppDetail, viewOf } from "./apps";
+import { AppError, appAction, startAfterDisk, startJob, stoppable, stopJob, jobToTell, type Job, installedNames, jobFinished, appEnv, appDetail, appLogs, appIcon, appSettings, appStats, applyCompose, ICON_MIME, MAX_ICON, removeAppIcon, setAppIcon, applySettings, installFromSettings, applyStoreUpdate, composeText, revealLogin, getJob, installCustom, installFromStore, listApps, listJobs, onAppRemoved, planStoreUpdate, readCompose, refreshAppUrls, removeApp, storeAppDetail, updateNotes, viewOf } from "./apps";
 import { certificateStates, challengeResponse, ensureCertificates, isWildcard, loadCertificates, type StoredCertificate } from "./acme";
 import { manualDone, setWildcard, wildcardReport, wildcardTrouble } from "./wildcard";
 import { attention } from "./attention";
@@ -128,7 +128,7 @@ import { moveApp, moveCheck } from "./moveapp";
 import { backupMachineApp, restoreMachineApp } from "./machinebackup";
 import { backupInstance, restoreInstance } from "./incusbackup";
 import { machineAccessRows, setMachineAccess, startMachineGates } from "./machinegate";
-import { applyMachineCompose, installComposeOnMachine, machineTiles, installOnMachine, machineAppAction, machineAppLogs, machineApps, machineCompose, removeMachineApp, storeAppFor } from "./machineapps";
+import { applyMachineCompose, installComposeOnMachine, machineTiles, installOnMachine, machineAppAction, machineAppLogs, machineApps, machineCompose, removeMachineApp, revealMachineLogin, storeAppFor } from "./machineapps";
 import { addStore, ARCH, catalogue, removeStore, scheduleStoreSync, StoreError, syncStore } from "./store";
 import { startSampler, systemStatus } from "./system";
 import { addDisc as addContainerDisc, receiveDisc as receiveContainerDisc, removeDisc as removeContainerDisc, ejectDisc as ejectContainerDisc, askScreen as containerAskScreen, openScreen as containerOpenScreen, isContainerScreen, screenOn as containerScreenOn, act as containerAct, cloneInstance as cloneContainer, renameInstance as renameContainer, addPlace as addContainerPlace, moveInstance as moveContainer, removePlace as removeContainerPlace, setStandardPlace, containerOfMachine, vmOfMachine, instanceOfMachine, containersTrouble, create as createContainer, install as installIncus, installVms as installIncusVms, removeContainer, removeSnapshot as removeContainerSnapshot, report as containersReport, restoreSnapshot as restoreContainerSnapshot, setLimits as setContainerLimits, setNetwork as setContainerNetwork, setUpNow as setUpContainers, shellCommand as containerShell, shellReady as containerShellReady, startContainers, takeSnapshot as takeContainerSnapshot } from "./containers";
@@ -1162,7 +1162,7 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
       // folders an administrator put on the dashboard from the file manager
       folders: admin ? pinnedFolders() : [],
       // apps of the other machines, for administrators: their tiles are `<name>@<machine>`
-      machineApps: onMachines,
+      machineApps: admin ? onMachines : onMachines.map(({ tips: _, login: __, ...app }) => app),
       // the other machines and their numbers, for their blocks on the dashboard
       machines: admin
         ? machineList().map((m) => {
@@ -1178,7 +1178,7 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
       qbit: admin ? { count: qbitServers().length, apps: qbitOfApps(apps), servers: qbitWidgets() } : null,
       // Frigate: the servers with their cameras and latest events (the widgets on Home), and the apps that run it
       frigate: admin ? { servers: frigateServers(), apps: frigateOfApps(apps) } : null,
-      jobs: admin ? listJobs().filter((j) => j.status === "running").map(({ log: _, ...job }) => job) : [],
+      jobs: admin ? listJobs().filter(jobToTell).map(({ log: _, ...job }) => job) : [],
     });
   }
 
@@ -2155,7 +2155,11 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
       const job = setAccess(name, { allowed, protect: data.protect === true, ports }, user.name);
       return json({ job: job?.id ?? null }, job ? 202 : 200);
     }
-    if (!sub && method === "GET") return json(await appDetail(name, language(url)));
+    if (!sub && method === "GET") {
+      const detail = await appDetail(name, language(url));
+      return json(user.role === "admin" ? detail : { ...detail, tips: "", login: null });
+    }
+    if (sub === "login" && method === "POST") return json(await revealLogin(name, user.name));
     if (!sub && method === "DELETE") return json({ job: removeApp(name, url.searchParams.get("data") === "1", user.name).id }, 202);
     if (sub === "stats" && method === "GET") return json(await appStats(name));
     if (sub === "backups" && method === "GET") return json(listSnapshots(name));
@@ -2163,7 +2167,7 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
     if (sub === "storeupdate" && method === "GET") {
       const plan = planStoreUpdate(name);
       if (!plan) return fail(404, "app.noUpdate");
-      return json({ store: plan.store, recorded: plan.recorded, exact: plan.exact, changes: plan.changes, compose: dumpCompose(plan.merged) });
+      return json({ store: plan.store, recorded: plan.recorded, exact: plan.exact, changes: plan.changes, compose: dumpCompose(plan.merged), notes: updateNotes(name, plan, language(url)) });
     }
     if (sub === "storeupdate" && method === "POST") return json({ job: applyStoreUpdate(name, user.name).id }, 202);
     if (sub === "icon" && method === "GET") {
@@ -2979,6 +2983,7 @@ async function machinesApi(req: Request, url: URL, server: Server, by: string): 
       return json(job ? { job: job.id } : { ok: true });
     }
     if (part === "compose" && method === "PUT") return json({ job: (await applyMachineCompose(id, name, (await body(req)).compose, by)).id }, 202);
+    if (part === "login" && method === "POST") return json(await revealMachineLogin(id, name, by));
     if (part === "logs" && method === "GET") {
       server.timeout(req, 0);
       return new Response(machineAppLogs(id, name, req.signal), { headers: { ...SECURITY_HEADERS, "content-type": "text/plain; charset=utf-8", "cache-control": "no-store", "x-accel-buffering": "no" } });
