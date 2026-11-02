@@ -212,15 +212,15 @@ Early development. What works today:
 - several disks as one folder (mergerfs, installed on request): a new file goes to the disk with the most
   free room, every file stays a plain file on one of the disks. A disk that is plugged in shows up on the
   page by itself, and the disks are in the sidebar of Files. "Set up RAID" sets the disks up in
-  one go — what for, which disks, which of them holds the protection data — with a single confirmation for
+  one go — what for, which disks, which of them holds the parity — with a single confirmation for
   everything that is erased; when a disk the apps keep data on comes back after being away, the apps it
   stopped start again by themselves;
-- protection from a disk failure (SnapRAID, installed on request): one disk holds protection data for the
+- protection from a disk failure (SnapRAID, installed on request): one disk holds parity for the
   others — or two, and any two disks may fail at once —, the disks stay plain disks; a sync every night
-  and a check every week; when a disk dies, a new one in its place is filled back from the protection data; files
+  and a check every week; when a disk dies, a new one in its place is filled back from the parity; files
   deleted by mistake since the last sync come back the same way, all of them or one found by its name —
   and a sync after which too many files would be forgotten waits for your word; damage a check finds is
-  repaired from the protection data;
+  repaired from the parity;
 - arrays and pools the system already has — Linux RAID (mdadm), ZFS, Btrfs over several disks — on the same
   page: their state, their disks, a resync or a rebuild with how far it is, and their own check (a scrub)
   started and stopped from there; a failed or missing disk, damage a check found and errors of a disk
