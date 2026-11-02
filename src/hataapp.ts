@@ -32,11 +32,18 @@ export interface Setting {
   chars?: "hex";
 }
 
+/** How to get into an app the first time, as its store says. In `settings`, a `user` or `password` of the form `${NAME}` names a setting */
+export type Login =
+  | { kind: "default" | "settings"; user?: string; password?: string }
+  | { kind: "first-visit" | "none" }
+  | { kind: "log"; user?: string; find: string };
+
 export interface HataMeta {
   title: Text;
   tagline: Text;
   description: Text;
   notes?: Text;
+  login?: Login;
   /** The category's name in the store's languages */
   category: Text;
   developer: string;
@@ -100,6 +107,28 @@ function cleanSetting(v: unknown): Setting | null {
   return s;
 }
 
+const SETTING_REF = /^\$\{([A-Z][A-Z0-9_]*)\}$/;
+
+/** A store's `login`, checked again: what cannot be understood is left out, and the app stays */
+export function cleanLogin(v: unknown, settings: Setting[]): Login | null {
+  if (!isObject(v)) return null;
+  const text = (x: unknown) => (typeof x === "string" && x.trim() ? x : undefined);
+  const pair = { ...(text(v.user) ? { user: text(v.user)! } : {}), ...(text(v.password) ? { password: text(v.password)! } : {}) };
+  const values = Object.values(pair);
+  if (v.kind === "first-visit" || v.kind === "none") return { kind: v.kind };
+  if (v.kind === "log") {
+    const find = text(v.find);
+    return find && find.length <= 120 ? { kind: "log", find, ...(pair.user ? { user: pair.user } : {}) } : null;
+  }
+  if (v.kind === "default") return values.length && !values.some((x) => x.includes("$")) ? { kind: "default", ...pair } : null;
+  if (v.kind === "settings") {
+    const refs = values.filter((x) => x.includes("$"));
+    const known = (x: string) => settings.some((s) => s.name === SETTING_REF.exec(x)?.[1]);
+    return refs.length && refs.every(known) ? { kind: "settings", ...pair } : null;
+  }
+  return null;
+}
+
 export interface IndexApp {
   name: string;
   meta: HataMeta;
@@ -137,6 +166,8 @@ export function readIndexApp(entry: unknown, base: string, categories: Record<st
     if (text) permissions[p] = text;
   }
   const category = typeof entry.category === "string" ? entry.category : "";
+  const settings = (Array.isArray(entry.settings) ? entry.settings : []).map(cleanSetting).filter((s): s is Setting => s !== null);
+  const login = cleanLogin(entry.login, settings);
   return {
     name: entry.id,
     compose: entry.compose,
@@ -146,6 +177,7 @@ export function readIndexApp(entry: unknown, base: string, categories: Record<st
       tagline: cleanText(entry.tagline) ?? "",
       description: cleanText(entry.description) ?? "",
       ...(cleanText(entry.notes) ? { notes: cleanText(entry.notes)! } : {}),
+      ...(login ? { login } : {}),
       category: categories[category] ?? category,
       developer: str(entry.developer),
       website: https(entry.website),
@@ -154,7 +186,7 @@ export function readIndexApp(entry: unknown, base: string, categories: Record<st
       icon: typeof entry.icon === "string" && /^data:image\/(svg\+xml|png|webp);base64,[A-Za-z0-9+/]+={0,2}$/.test(entry.icon) ? entry.icon : "",
       screenshots: (Array.isArray(entry.screenshots) ? entry.screenshots : []).filter((p: unknown) => typeof p === "string" && FILE_RE.test(p)).map((p: string) => base + p),
       web,
-      settings: (Array.isArray(entry.settings) ? entry.settings : []).map(cleanSetting).filter((s): s is Setting => s !== null),
+      settings,
       permissions,
       version: str(entry.version),
       architectures: (Array.isArray(entry.architectures) ? entry.architectures : []).filter((a: unknown): a is string => typeof a === "string"),

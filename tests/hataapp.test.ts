@@ -154,3 +154,19 @@ test("a secret of hexadecimal digits is made so", () => {
   expect(app.meta.settings[0]).toMatchObject({ length: 64, chars: "hex" });
   expect(startingEnv(app.meta, {}, (n, chars) => (chars === "hex" ? "f" : "x").repeat(n))).toEqual({ CREDS_KEY: "f".repeat(64) });
 });
+
+test("how to sign in is read from the index, checked again", () => {
+  const login = (value: unknown, settings: unknown[] = []) => read({ login: value, settings })!.meta.login;
+  expect(login({ kind: "default", user: "admin", password: "admin" })).toEqual({ kind: "default", user: "admin", password: "admin" });
+  expect(login({ kind: "first-visit", user: "dropped" })).toEqual({ kind: "first-visit" });
+  expect(login({ kind: "none" })).toEqual({ kind: "none" });
+  expect(login({ kind: "log", user: "admin", find: "temporary password" })).toEqual({ kind: "log", user: "admin", find: "temporary password" });
+  const pw = [{ name: "PW", type: "password", label: "Password" }];
+  expect(login({ kind: "settings", user: "admin", password: "${PW}" }, pw)).toEqual({ kind: "settings", user: "admin", password: "${PW}" });
+  // what cannot be understood is left out, and the app is still offered
+  for (const bad of [{ kind: "guess" }, "admin", { kind: "default" }, { kind: "default", password: "${PW}" }, { kind: "settings", password: "${NOPE}" }, { kind: "settings", user: "admin" }, { kind: "log" }, { kind: "default", password: 666 }]) {
+    expect(login(bad, pw)).toBeUndefined();
+  }
+  expect(read()!.meta.login).toBeUndefined();
+});
+
