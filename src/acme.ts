@@ -80,7 +80,7 @@ export async function certificateRequest(names: string | string[], keys: CryptoK
     der(0xa0, der(0x30, OID_EXTENSION_REQUEST, der(0x31, extensions))),
   );
   // WebCrypto signs to r‖s; X.509 wants the two as a DER sequence of integers
-  const raw = new Uint8Array(await crypto.subtle.sign(SIGN, keys.privateKey, info));
+  const raw = new Uint8Array(await crypto.subtle.sign(SIGN, keys.privateKey, info as BufferSource));
   const signature = der(0x30, derInteger(raw.slice(0, 32)), derInteger(raw.slice(32)));
   return der(0x30, info, der(0x30, OID_ECDSA_SHA256), der(0x03, [0], signature));
 }

@@ -87,7 +87,7 @@ export function safeRegex(src: string): boolean {
     }
     const endless = c === "*" || c === "+" || (c === "{" && /^\{\d*,\d*\}/.test(src.slice(i)));
     if (c === ")") {
-      const inner = unbounded;
+      const inner: boolean = unbounded;
       const next = src[i + 1];
       const repeated = next === "*" || next === "+" || (next === "{" && /^\{\d*,\d*\}/.test(src.slice(i + 1)));
       if (inner && repeated) return false;
@@ -406,7 +406,6 @@ export class ListBuilder {
   private bad: string[] = [];
   private complex: string[] = [];
   private ruleCount = 0;
-  private lineErrors: string[] = [];
   counts: ListCounts = { names: 0, rules: 0, cosmetic: 0, notDns: 0, broken: 0, overLimit: 0 };
   constructor(private readonly allow = false) {}
 

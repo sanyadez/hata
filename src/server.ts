@@ -16,7 +16,7 @@ import { agentUser, cannotGrant, cleanName, createKey, grantKey, keyOf, listKeys
 import type { Level } from "./agents";
 import { Desk } from "./approvals";
 import { answerCall, assistantConfig, configured as assistantReady, findChat, listChats, ModelError, modelsFor, removeChat, retry as retryAssistant, say as sayToAssistant, shownChat, shownConfig as shownAssistant, stopChat, updateAssistant } from "./assistant";
-import { AppError, appAction, startAfterDisk, startJob, stoppable, stopJob, jobToTell, type Job, installedNames, jobFinished, appEnv, appDetail, appLogs, appIcon, appSettings, appStats, applyCompose, ICON_MIME, MAX_ICON, removeAppIcon, setAppIcon, applySettings, installFromSettings, applyStoreUpdate, composeText, revealLogin, getJob, installCustom, installFromStore, listApps, listJobs, onAppRemoved, planStoreUpdate, readCompose, refreshAppUrls, removeApp, storeAppDetail, updateNotes, viewOf } from "./apps";
+import { AppError, appAction, startAfterDisk, startJob, stoppable, stopJob, jobToTell, type Job, installedNames, jobFinished, appEnv, appDetail, appLogs, appIcon, appSettings, appStats, applyCompose, ICON_MIME, MAX_ICON, removeAppIcon, setAppIcon, applySettings, installFromSettings, applyStoreUpdate, composeText, revealLogin, getJob, installCustom, installFromStore, listApps, listJobs, onAppRemoved, planStoreUpdate, refreshAppUrls, removeApp, storeAppDetail, updateNotes, viewOf } from "./apps";
 import { certificateStates, challengeResponse, ensureCertificates, isWildcard, loadCertificates, type StoredCertificate } from "./acme";
 import { manualDone, setWildcard, wildcardReport, wildcardTrouble } from "./wildcard";
 import { attention } from "./attention";
@@ -114,7 +114,7 @@ import { serverTree } from "./servertree";
 import { homeLinks, localNamesStatus, refreshLocalNames } from "./mdns";
 import { addDevice, CHANNELS, listDevices, notifyStatus, pushKey, removeDevice, renewDevice, sendAsk, sendBackupRun, sendTest, startNotifications, telegramChats, updateNotify } from "./notify";
 import { appHost, appLabel, classifyHost, coveredBy, clientIp, cookieDomain, domainOf, localDomain, requestHost, requestPort, requestProto, siteDomain } from "./site";
-import { newChallenge, PASSKEY_ALGORITHMS, spendChallenge, verifyAssertion, verifyRegistration } from "./passkey";
+import { newChallenge, PASSKEY_ALGORITHMS, spendChallenge, verifyAssertion, verifyRegistration, type AssertionInput } from "./passkey";
 import { qrMatrix } from "./qr";
 import { connect as connectTailscale, disconnect as disconnectTailscale, install as installTailscale, offerNetworks, report as tailscaleReport, signOut as signOutTailscale, start as startTailscale } from "./tailscale";
 import { addDevice as addWireguardDevice, changeDevice as changeWireguardDevice, deviceFile as wireguardDeviceFile, forgetClient as forgetWireguardClient, removeDevice as removeWireguardDevice, report as wireguardReport, setClient as setWireguardClient, setServer as setWireguardServer } from "./wireguard";
@@ -214,13 +214,13 @@ const MANIFEST = JSON.stringify({
 });
 
 const STATIC: Record<string, { body: string; type: string; headers?: Record<string, string> }> = {
-  "/": { body: indexHtml, type: "text/html; charset=utf-8" },
+  "/": { body: indexHtml as unknown as string, type: "text/html; charset=utf-8" },
   "/app.css": { body: appCss, type: "text/css; charset=utf-8" },
   "/app.js": { body: appJs, type: "text/javascript; charset=utf-8" },
   // the terminal is a page of its own, shown in a frame: its emulator writes styles into the page, which
   // the UI's policy forbids — here it is allowed, and nothing but the emulator lives there
   "/terminal.html": {
-    body: terminalHtml,
+    body: terminalHtml as unknown as string,
     type: "text/html; charset=utf-8",
     headers: {
       "content-security-policy": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; object-src 'none'; base-uri 'none'; frame-ancestors 'self'; form-action 'none'",
@@ -231,7 +231,7 @@ const STATIC: Record<string, { body: string; type: string; headers?: Record<stri
   "/terminal.js": { body: terminalJs, type: "text/javascript; charset=utf-8" },
   // a virtual machine's screen: a page of its own too, so the VNC library lives apart from the UI
   "/screen.html": {
-    body: screenHtml,
+    body: screenHtml as unknown as string,
     type: "text/html; charset=utf-8",
     headers: {
       "content-security-policy": "default-src 'self'; img-src 'self' data: blob:; object-src 'none'; base-uri 'none'; frame-ancestors 'self'; form-action 'none'",
@@ -415,7 +415,7 @@ function haEventFor(user: User, event: BusEvent): BusEvent | null {
   return Object.keys(states).length ? { type: "ha", ts: event.ts, id: event.id, states } : null;
 }
 
-function events(req: Request, server: Server, admin: boolean, user: User): Response {
+function events(req: Request, server: Server<unknown>, admin: boolean, user: User): Response {
   // an event stream is silent for long stretches; the default idle timeout would cut it
   server.timeout(req, 0);
   const encoder = new TextEncoder();
@@ -480,7 +480,7 @@ const MAX_TERMINAL_INPUT = 128 * 1024;
  * Opens the WebSocket of a terminal: the server's own shell, or (with `app` and `container`) a shell
  * inside a running container of that app. Administrators only — the caller has checked.
  */
-async function openTerminal(req: Request, url: URL, server: Server, user: string): Promise<Response> {
+async function openTerminal(req: Request, url: URL, server: Server<unknown>, user: string): Promise<Response> {
   const upgrade = req.headers.get("upgrade")?.toLowerCase() === "websocket";
   // a page of another site can open a WebSocket here with our cookie; it cannot fake where it comes from
   if (upgrade && (req.headers.get("origin") === null || !sameOrigin(req, url))) return fail(403, "request.crossSite");
@@ -767,7 +767,7 @@ const sockets = {
 
 // --- API --------------------------------------------------------------------------------------------
 
-async function api(req: Request, url: URL, server: Server): Promise<Response> {
+async function api(req: Request, url: URL, server: Server<unknown>): Promise<Response> {
   const path = url.pathname;
   const method = req.method;
   const write = method !== "GET" && method !== "HEAD";
@@ -859,7 +859,7 @@ async function api(req: Request, url: URL, server: Server): Promise<Response> {
     if (blocked > 0) return fail(429, "auth.locked", { seconds: Math.ceil(blocked / 1000) });
     const challenge = spendChallenge(data.clientDataJSON, "signin");
     const found = findPasskey(data.id);
-    const verified = challenge && found ? await verifyAssertion(data, found.key, { challenge, rpId }) : null;
+    const verified = challenge && found ? await verifyAssertion(data as unknown as AssertionInput, found.key, { challenge, rpId }) : null;
     if (!found || !verified) {
       registerLoginFailure(ip);
       recordSignIn(found?.user.name ?? "", ip, "wrongPasskey");
@@ -2267,7 +2267,7 @@ const desk = new Desk({ asked: (ask) => void sendAsk(ask), changed: () => bus.pu
  * The MCP server, for agents. It is not part of `/api/`: nothing here goes by a session cookie, so a
  * page in somebody's browser has no way in — only the holder of an access key, sent as a Bearer token.
  */
-async function mcp(req: Request, server: Server): Promise<Response> {
+async function mcp(req: Request, server: Server<unknown>): Promise<Response> {
   const key = keyOf(req, clientIp(req, server));
   // a connector that can sign in learns from the header where to; one whose token ran out, that it is time for the next
   if (!key) {
@@ -2329,7 +2329,7 @@ function filesNamed(paths: unknown): string {
   return (list.length > 3 ? `${names} +${list.length - 3}` : names).slice(0, 300);
 }
 
-async function files(req: Request, url: URL, server: Server, by: string, userId: string): Promise<Response | null> {
+async function files(req: Request, url: URL, server: Server<unknown>, by: string, userId: string): Promise<Response | null> {
   const path = url.pathname;
   const method = req.method;
   const q = url.searchParams;
@@ -2427,7 +2427,7 @@ async function files(req: Request, url: URL, server: Server, by: string, userId:
 }
 
 /** Files for one who is not an administrator: every path is checked against the shared folders first */
-async function memberFiles(req: Request, url: URL, server: Server, user: User): Promise<Response> {
+async function memberFiles(req: Request, url: URL, server: Server<unknown>, user: User): Promise<Response> {
   const path = url.pathname;
   const method = req.method;
   const q = url.searchParams;
@@ -2485,7 +2485,7 @@ async function memberFiles(req: Request, url: URL, server: Server, user: User): 
 }
 
 /** A machine's files for one who is not an administrator: its folders shared with them, with the rights given */
-async function memberMachineFiles(req: Request, url: URL, server: Server, user: User, id: string, sub: string): Promise<Response> {
+async function memberMachineFiles(req: Request, url: URL, server: Server<unknown>, user: User, id: string, sub: string): Promise<Response> {
   const method = req.method;
   const q = url.searchParams;
   const rights = await machineRights(user, id);
@@ -2519,7 +2519,7 @@ async function memberMachineFiles(req: Request, url: URL, server: Server, user: 
 
 // --- Other machines ---------------------------------------------------------------------------------
 
-async function clientRoutes(req: Request, url: URL, server: Server): Promise<Response> {
+async function clientRoutes(req: Request, url: URL, server: Server<unknown>): Promise<Response> {
   if (url.pathname === "/client/link") {
     if (req.headers.get("upgrade")?.toLowerCase() === "websocket" && server.upgrade(req, { data: linkData(clientIp(req, server)) })) return undefined as never;
     return fail(400, "request.notFound");
@@ -2549,7 +2549,7 @@ const CONTAINER_ACTIONS = ["start", "stop", "restart"];
  * The file manager's calls for a machine's files: the same shapes as `/api/files`, answered by the
  * machine's client. No trash there (a delete is for good), no pins, shares, search or unpacking.
  */
-async function machineFiles(req: Request, url: URL, server: Server, id: string, sub: string, by: string): Promise<Response> {
+async function machineFiles(req: Request, url: URL, server: Server<unknown>, id: string, sub: string, by: string): Promise<Response> {
   const method = req.method;
   const q = url.searchParams;
   const name = machineView(id).name;
@@ -2627,7 +2627,7 @@ async function frigateApi(req: Request, url: URL, user: User): Promise<Response 
   const path = url.pathname;
   const method = req.method;
   const by = user.name;
-  const jpeg = (bytes: Buffer) => new Response(bytes, { headers: { "content-type": "image/jpeg", "cache-control": "no-store", "x-content-type-options": "nosniff" } });
+  const jpeg = (bytes: Buffer) => new Response(bytes as BufferSource, { headers: { "content-type": "image/jpeg", "cache-control": "no-store", "x-content-type-options": "nosniff" } });
   if (path === "/api/frigate" && method === "GET") return json({ servers: frigateServers() });
   if (path === "/api/frigate" && method === "POST") return json(await addFrigate(await body(req), by), 201);
   if (path === "/api/frigate/found" && method === "GET") return json({ found: await frigateFound(language(url)) });
@@ -2687,7 +2687,7 @@ async function qbittorrentApi(req: Request, url: URL, user: User): Promise<Respo
   return null;
 }
 
-async function homeAssistantApi(req: Request, url: URL, server: Server, user: User): Promise<Response | null> {
+async function homeAssistantApi(req: Request, url: URL, server: Server<unknown>, user: User): Promise<Response | null> {
   const path = url.pathname;
   const method = req.method;
   const by = user.name;
@@ -2742,7 +2742,7 @@ async function homeAssistantApi(req: Request, url: URL, server: Server, user: Us
   return null;
 }
 
-async function containersApi(req: Request, url: URL, server: Server, by: string): Promise<Response | null> {
+async function containersApi(req: Request, url: URL, server: Server<unknown>, by: string): Promise<Response | null> {
   const path = url.pathname;
   const method = req.method;
   if (path === "/api/containers" && method === "GET") return json(await containersReport());
@@ -2820,7 +2820,7 @@ async function containersApi(req: Request, url: URL, server: Server, by: string)
   return null;
 }
 
-async function proxmoxApi(req: Request, url: URL, server: Server, by: string): Promise<Response | null> {
+async function proxmoxApi(req: Request, url: URL, server: Server<unknown>, by: string): Promise<Response | null> {
   const path = url.pathname;
   const method = req.method;
   if (path === "/api/proxmox" && method === "GET") return json({ hosts: pveHosts() });
@@ -2909,7 +2909,7 @@ async function proxmoxApi(req: Request, url: URL, server: Server, by: string): P
   return null;
 }
 
-async function machinesApi(req: Request, url: URL, server: Server, by: string): Promise<Response | null> {
+async function machinesApi(req: Request, url: URL, server: Server<unknown>, by: string): Promise<Response | null> {
   const path = url.pathname;
   const method = req.method;
   // a machine that is a guest of a Proxmox server is said to be one: it can be started from there
@@ -3026,7 +3026,7 @@ const INSTANCE = crypto.randomUUID();
 
 /** A request for `<app>.<domain>`: the app itself, behind sign-in if the app asks for it */
 /** A name of Settings → Domains: the request goes on to where it leads, past Hata's sign-in when it asks for one */
-async function serveName(req: Request, server: Server, name: DomainName): Promise<Response> {
+async function serveName(req: Request, server: Server<unknown>, name: DomainName): Promise<Response> {
   const proto = requestProto(req);
   let user: User | null = null;
   // an app of a machine put behind Hata's sign-in keeps it under any name, with its own list of who may open it
@@ -3052,7 +3052,7 @@ const awayWords: Record<string, string> = {
   "domains.away.noAddress": "It has no address right now: it may be stopped.",
 };
 
-async function serveApp(req: Request, server: Server, label: string): Promise<Response> {
+async function serveApp(req: Request, server: Server<unknown>, label: string): Promise<Response> {
   const named = domainName(label);
   if (named) return serveName(req, server, named);
   const apps = await listApps("en");
@@ -3078,7 +3078,7 @@ async function serveApp(req: Request, server: Server, label: string): Promise<Re
 // --- HTTPS served by Hata itself --------------------------------------------------------------------
 
 const HTTPS_PORT = Number(process.env.HATA_HTTPS_PORT ?? 443);
-let httpsServer: Server | null = null;
+let httpsServer: Server<unknown> | null = null;
 let httpsError = "";
 
 /** Every name that needs a certificate: Hata's own and one per app that has a web page */
@@ -3149,7 +3149,7 @@ function refreshHttps(force = false): Promise<void> {
   return refreshing;
 }
 
-async function handle(req: Request, server: Server): Promise<Response> {
+async function handle(req: Request, server: Server<unknown>): Promise<Response> {
   const url = new URL(req.url);
   const challenge = /^\/\.well-known\/acme-challenge\/([A-Za-z0-9_-]+)$/.exec(url.pathname);
   if (challenge) {
@@ -3197,7 +3197,7 @@ async function handle(req: Request, server: Server): Promise<Response> {
 // --- Start ------------------------------------------------------------------------------------------
 
 /** The first address of this machine on the local network, for the links we print */
-function lanAddress(): string {
+function printedAddress(): string {
   for (const list of Object.values(networkInterfaces())) {
     for (const a of list ?? []) if (a.family === "IPv4" && !a.internal) return a.address;
   }
@@ -3214,7 +3214,7 @@ function publicUrl(): string {
 
 export function baseUrl(): string {
   const { port } = listenAddress();
-  return `http://${lanAddress()}${port === 80 ? "" : ":" + port}/`;
+  return `http://${printedAddress()}${port === 80 ? "" : ":" + port}/`;
 }
 
 /**
@@ -3228,7 +3228,7 @@ export function setupUrl(): string | null {
 
 export async function serve(): Promise<void> {
   const { port, hostname } = listenAddress();
-  let server: Server;
+  let server: Server<unknown>;
   try {
     server = Bun.serve({ port, hostname, maxRequestBodySize: MAX_APP_BODY, fetch: handle, websocket: sockets });
   } catch (e) {

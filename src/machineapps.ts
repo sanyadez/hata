@@ -358,9 +358,8 @@ export async function machineCompose(id: string, name: string): Promise<{ text: 
 export async function applyMachineCompose(id: string, name: string, text: unknown, user: string): Promise<Job> {
   const files = await filesOfApp(id, name);
   if (typeof text !== "string" || text.length > 512 * 1024) throw new AppError("app.badCompose");
-  let compose: Compose;
   try {
-    compose = parseCompose(text);
+    parseCompose(text);
   } catch (e) {
     throw new AppError("app.badCompose", 400, { message: e instanceof Error ? e.message : String(e) });
   }

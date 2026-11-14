@@ -275,7 +275,7 @@ export function haTiles(layout: Layout): string[] {
 
 /** The layout without the tiles of a connected server that was removed */
 export function dropServer(layout: Layout, server: string): Layout {
-  const gone = (e: Entry | Block) => (e.type === "ha" || e.type === "widget") && e.server === server;
+  const gone = (e: Entry | Block | Card) => (e.type === "ha" || e.type === "widget") && e.server === server;
   return mapCards(layout, (card) => (gone(card) ? [] : [card]), (e) => (gone(e) ? [] : [e]));
 }
 

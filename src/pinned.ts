@@ -52,7 +52,7 @@ export async function pinnedRequest(url: string, fingerprint: string, path: stri
   const u = new URL(url);
   return new Promise((resolve, reject) => {
     const req = request(
-      { host: u.hostname, port: Number(u.port || 443), method: init.method ?? "GET", path, createConnection: () => socket, headers: { Connection: "close", ...init.headers, ...(init.body ? { "Content-Length": Buffer.byteLength(init.body) } : {}) }, timeout } as Parameters<typeof request>[0],
+      { host: u.hostname, port: Number(u.port || 443), method: init.method ?? "GET", path, createConnection: () => socket, headers: { Connection: "close", ...init.headers, ...(init.body ? { "Content-Length": Buffer.byteLength(init.body) } : {}) }, timeout } as unknown as Parameters<typeof request>[0],
       (res) => {
         const chunks: Buffer[] = [];
         res.on("data", (c: Buffer) => chunks.push(c));

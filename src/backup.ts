@@ -14,7 +14,7 @@ import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync
 import { rm } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { APP_NAME_RE, appMeta, bindSources, normalize } from "./appform";
-import { AppError, appAction, appDir, dc, installedNames, jobFinished, onBeforeUpdate, readCompose, startJob, viewOf, type Job, type Log } from "./apps";
+import { AppError, appAction, appDir, dc, installedNames, jobFinished, onBeforeUpdate, startJob, viewOf, type Job, type Log } from "./apps";
 import { record } from "./activity";
 import { DATA_DIR, SECRET_NAMES, SECRETS_DIR, settings } from "./config";
 import { dockerRoot, listContainers, PROJECT_LABEL, run } from "./docker";

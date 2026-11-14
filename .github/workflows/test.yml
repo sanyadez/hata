@@ -20,3 +20,9 @@ jobs:
           bun-version: 1.4.4 # by hand, the same in test.yml and release.yml: Dependabot does not move it
 
       - run: bun test
+
+      # the compiler is fetched into a folder outside the checkout; the versions are in the script
+      - run: bun run typecheck
+
+      # every page opened in the runner's own Chrome, against a server started from the source
+      - run: bun run smoke

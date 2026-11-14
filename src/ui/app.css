@@ -803,7 +803,8 @@ dialog.xwide textarea.code { min-height: 56dvh; }
 
 /* --- Settings ---------------------------------------------------------------------------------- */
 
-.settings .card { display: grid; gap: 4px; }
+/* the one column is never wider than the card: a line that does not wrap is cut inside it */
+.settings .card { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; }
 .settings .card > h2, .settings .card > .section-head { margin-bottom: 10px; }
 .settings .card.table-wrap { display: block; }
 .settings .card > .cmd { padding: 8px 0 14px; color: var(--muted); }
@@ -834,7 +835,9 @@ dialog.disk header .state { flex: none; }
 .disk-use { display: grid; gap: 4px; margin-top: 14px; padding-top: 14px; border-top: 1px solid var(--border); }
 .disk-use h3 { font: 600 13px var(--font-heading); margin: 0 0 4px; }
 .banner .block { display: block; margin-top: 6px; }
-.banner.stack { display: grid; gap: 8px; justify-items: start; }
+/* one column no wider than the banner: a command that does not wrap is cut, it does not widen the page */
+.banner.stack { display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; justify-items: start; }
+.banner.stack > .cmd { max-width: 100%; }
 pre.said { margin: 0; padding: 10px 12px; max-height: 240px; overflow: auto; border-radius: var(--radius-sm); background: var(--surface-2); border: 1px solid var(--border); font: 12px/1.5 var(--font-mono); white-space: pre-wrap; overflow-wrap: anywhere; }
 .new-disk { display: flex !important; align-items: center; gap: 14px; border-color: var(--accent); background: var(--accent-soft); }
 .new-disk .row-actions { flex: none; }

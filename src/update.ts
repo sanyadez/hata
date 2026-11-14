@@ -424,7 +424,8 @@ export async function updateFromConsole(args: string[]): Promise<number> {
   if (latest.notes.trim()) console.log(`\n${latest.notes.trim()}\n`);
   if (!ask(`Install ${latest.version}?`)) return 1;
   try {
-    await install(latest, "console");
+    // nothing stops an update started from a shell but Ctrl+C, which ends the process itself
+    await install(latest, "console", new AbortController().signal);
   } catch (e) {
     return console.error(e instanceof Error ? e.message : String(e)), 1;
   }

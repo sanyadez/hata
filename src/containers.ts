@@ -266,7 +266,7 @@ async function setUp(): Promise<boolean> {
 }
 
 /** The containers as last seen, by their cards and names: which machine is one of them */
-let seen: { name: string; mac: string; kind: string }[] = [];
+let seen: { name: string; mac: string; kind: string; status: string }[] = [];
 
 /** What a machine is here, by one of its cards or its host name: "container", "vm"; "" — neither */
 /** The instance of this server a machine is, as last looked at, and whether it runs */
@@ -307,7 +307,7 @@ export async function report(): Promise<ContainersReport> {
     const machine = known.find((m) => (c.mac && (m.info?.macs ?? []).some((card) => card.mac.toLowerCase() === c.mac)) || m.info?.hostname === c.name);
     return [{ ...c, machine: machine?.id ?? "" }];
   });
-  seen = containers.map((c) => ({ name: c.name, mac: c.mac, kind: c.kind }));
+  seen = containers.map((c) => ({ name: c.name, mac: c.mac, kind: c.kind, status: c.status }));
   return { ...base, state: "ready", version, vms, network, places: pools, discs: await discsIn(pools), containers: containers.sort((a, b) => a.name.localeCompare(b.name)) };
 }
 

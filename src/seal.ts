@@ -27,7 +27,7 @@ export class SealError extends Error {}
 
 async function deriveKey(passphrase: string, salt: Uint8Array, iterations: number): Promise<CryptoKey> {
   const material = await crypto.subtle.importKey("raw", new TextEncoder().encode(passphrase.normalize("NFKC")), "PBKDF2", false, ["deriveKey"]);
-  return crypto.subtle.deriveKey({ name: "PBKDF2", hash: "SHA-256", salt, iterations }, material, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
+  return crypto.subtle.deriveKey({ name: "PBKDF2", hash: "SHA-256", salt: salt as BufferSource, iterations }, material, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
 }
 
 function nonce(index: number, final: boolean): Uint8Array {
@@ -90,7 +90,7 @@ export async function sealFile(from: string, to: string, passphrase: string, chu
       const got = readFull(source, buffer, position);
       position += got;
       const final = position >= size;
-      const sealed = await crypto.subtle.encrypt({ name: "AES-GCM", iv: nonce(index, final) }, key, buffer.subarray(0, got));
+      const sealed = await crypto.subtle.encrypt({ name: "AES-GCM", iv: nonce(index, final) as BufferSource }, key, buffer.subarray(0, got) as BufferSource);
       writeSync(target, new Uint8Array(sealed));
       if (final) break;
     }
@@ -116,7 +116,7 @@ export async function openFile(from: string, to: string, passphrase: string): Pr
       const final = position >= size;
       let plain: ArrayBuffer;
       try {
-        plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv: nonce(index, final) }, key, buffer.subarray(0, got));
+        plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv: nonce(index, final) as BufferSource }, key, buffer.subarray(0, got) as BufferSource);
       } catch {
         throw new SealError(index === 0 ? "The passphrase is wrong, or the file is damaged." : "The file is damaged or not whole.");
       }

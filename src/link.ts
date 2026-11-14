@@ -35,8 +35,8 @@ export async function keyPair(): Promise<KeyPair> {
   };
 }
 
-const privateKey = (pkcs8: string) => crypto.subtle.importKey("pkcs8", fromB64(pkcs8), { name: "X25519" }, false, ["deriveBits"]);
-const publicKey = (raw: string) => crypto.subtle.importKey("raw", fromB64(raw), { name: "X25519" }, false, []);
+const privateKey = (pkcs8: string) => crypto.subtle.importKey("pkcs8", fromB64(pkcs8) as BufferSource, { name: "X25519" }, false, ["deriveBits"]);
+const publicKey = (raw: string) => crypto.subtle.importKey("raw", fromB64(raw) as BufferSource, { name: "X25519" }, false, []);
 
 async function dh(own: string, other: string): Promise<Uint8Array> {
   return new Uint8Array(await crypto.subtle.deriveBits({ name: "X25519", public: await publicKey(other) }, await privateKey(own), 256));
@@ -44,7 +44,7 @@ async function dh(own: string, other: string): Promise<Uint8Array> {
 
 /** A short form of a public key that a person can compare: the first 16 bytes of its SHA-256, hex */
 export async function fingerprint(publicKeyB64: string): Promise<string> {
-  const hash = new Uint8Array(await crypto.subtle.digest("SHA-256", fromB64(publicKeyB64)));
+  const hash = new Uint8Array(await crypto.subtle.digest("SHA-256", fromB64(publicKeyB64) as BufferSource));
   return Buffer.from(hash.subarray(0, 16)).toString("hex");
 }
 
@@ -109,10 +109,10 @@ export async function linkKeys(side: "client" | "hata", own: { staticKey: string
     side === "client"
       ? [await dh(own.ephemeral, other.ephemeral), await dh(own.staticKey, other.ephemeral), await dh(own.ephemeral, other.staticKey)]
       : [await dh(own.ephemeral, other.ephemeral), await dh(own.ephemeral, other.staticKey), await dh(own.staticKey, other.ephemeral)];
-  const ikm = await crypto.subtle.importKey("raw", concat(...parts, utf8(secret)), "HKDF", false, ["deriveBits"]);
-  const salt = new Uint8Array(await crypto.subtle.digest("SHA-256", concat(utf8(LINK_LABEL), utf8(hello), utf8(answer))));
+  const ikm = await crypto.subtle.importKey("raw", concat(...parts, utf8(secret)) as BufferSource, "HKDF", false, ["deriveBits"]);
+  const salt = new Uint8Array(await crypto.subtle.digest("SHA-256", concat(utf8(LINK_LABEL), utf8(hello), utf8(answer)) as BufferSource));
   const bits = new Uint8Array(await crypto.subtle.deriveBits({ name: "HKDF", hash: "SHA-256", salt, info: utf8("keys") }, ikm, 512));
-  const key = (raw: Uint8Array) => crypto.subtle.importKey("raw", raw, "AES-GCM", false, ["encrypt", "decrypt"]);
+  const key = (raw: Uint8Array) => crypto.subtle.importKey("raw", raw as BufferSource, "AES-GCM", false, ["encrypt", "decrypt"]);
   return { up: await key(bits.subarray(0, 32)), down: await key(bits.subarray(32, 64)) };
 }
 
@@ -134,7 +134,7 @@ export class Sealer {
 
   seal(plain: Uint8Array): Promise<Uint8Array> {
     const n = nonce(this.counter++);
-    const next = this.chain.then(async () => new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv: n }, this.key, plain)));
+    const next = this.chain.then(async () => new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv: n as BufferSource }, this.key, plain as BufferSource)));
     this.chain = next.catch(() => {});
     return next;
   }
@@ -149,7 +149,7 @@ export class Opener {
   /** Rejects when the frame is not the next one sealed with the other side's key */
   open(sealed: Uint8Array): Promise<Uint8Array> {
     const n = nonce(this.counter++);
-    const next = this.chain.then(async () => new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv: n }, this.key, sealed)));
+    const next = this.chain.then(async () => new Uint8Array(await crypto.subtle.decrypt({ name: "AES-GCM", iv: n as BufferSource }, this.key, sealed as BufferSource)));
     this.chain = next.catch(() => {});
     return next;
   }
