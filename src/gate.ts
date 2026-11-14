@@ -17,7 +17,7 @@ import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import type { Server, ServerWebSocket } from "bun";
 import { appMeta, normalize, resolvePorts, type Compose } from "./appform";
-import { AppError, appDir, appEnv, dc, onCompose, readCompose, startJob, viewOf, type Job } from "./apps";
+import { AppError, appDir, appEnv, dc, onCompose, startJob, viewOf, type Job } from "./apps";
 import { COOKIE_NAME, sessionUser, type User } from "./auth";
 import { anyAddress, listenAddress, saveSettings, settings, type AppAccess } from "./config";
 import { plainIp } from "./site";

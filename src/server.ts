@@ -16,7 +16,7 @@ import { agentUser, cannotGrant, cleanName, createKey, grantKey, keyOf, listKeys
 import type { Level } from "./agents";
 import { Desk } from "./approvals";
 import { answerCall, assistantConfig, configured as assistantReady, findChat, listChats, ModelError, modelsFor, removeChat, retry as retryAssistant, say as sayToAssistant, shownChat, shownConfig as shownAssistant, stopChat, updateAssistant } from "./assistant";
-import { AppError, appAction, startAfterDisk, startJob, stoppable, stopJob, jobToTell, type Job, installedNames, jobFinished, appEnv, appDetail, appLogs, appIcon, appSettings, appStats, applyCompose, ICON_MIME, MAX_ICON, removeAppIcon, setAppIcon, applySettings, installFromSettings, applyStoreUpdate, composeText, revealLogin, getJob, installCustom, installFromStore, listApps, listJobs, onAppRemoved, planStoreUpdate, readCompose, refreshAppUrls, removeApp, storeAppDetail, updateNotes, viewOf } from "./apps";
+import { AppError, appAction, startAfterDisk, startJob, stoppable, stopJob, jobToTell, type Job, installedNames, jobFinished, appEnv, appDetail, appLogs, appIcon, appSettings, appStats, applyCompose, ICON_MIME, MAX_ICON, removeAppIcon, setAppIcon, applySettings, installFromSettings, applyStoreUpdate, composeText, revealLogin, getJob, installCustom, installFromStore, listApps, listJobs, onAppRemoved, planStoreUpdate, refreshAppUrls, removeApp, storeAppDetail, updateNotes, viewOf } from "./apps";
 import { certificateStates, challengeResponse, ensureCertificates, isWildcard, loadCertificates, type StoredCertificate } from "./acme";
 import { manualDone, setWildcard, wildcardReport, wildcardTrouble } from "./wildcard";
 import { attention } from "./attention";
@@ -3197,7 +3197,7 @@ async function handle(req: Request, server: Server): Promise<Response> {
 // --- Start ------------------------------------------------------------------------------------------
 
 /** The first address of this machine on the local network, for the links we print */
-function lanAddress(): string {
+function printedAddress(): string {
   for (const list of Object.values(networkInterfaces())) {
     for (const a of list ?? []) if (a.family === "IPv4" && !a.internal) return a.address;
   }
@@ -3214,7 +3214,7 @@ function publicUrl(): string {
 
 export function baseUrl(): string {
   const { port } = listenAddress();
-  return `http://${lanAddress()}${port === 80 ? "" : ":" + port}/`;
+  return `http://${printedAddress()}${port === 80 ? "" : ":" + port}/`;
 }
 
 /**

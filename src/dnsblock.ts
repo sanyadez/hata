@@ -406,7 +406,6 @@ export class ListBuilder {
   private bad: string[] = [];
   private complex: string[] = [];
   private ruleCount = 0;
-  private lineErrors: string[] = [];
   counts: ListCounts = { names: 0, rules: 0, cosmetic: 0, notDns: 0, broken: 0, overLimit: 0 };
   constructor(private readonly allow = false) {}
 

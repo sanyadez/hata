@@ -25,7 +25,7 @@ import { compose as runCompose, composeCmd, containerStats, imageUser, inspectCo
 import { writeTextAtomic } from "./fsutil";
 import { newerImages } from "./images";
 import { guessBase, merge3, same, type MergeChange } from "./merge";
-import { answer, casaosOf, changedNotes, cleanLogin, movePorts, envLine, foundInLog, loginValues, loginView, filled, ownCasaos, settingFolders, settingPorts, settingsForm, startingEnv, viewCompose, webPortOf, type FormSetting, type HataMeta, type IndexApp, type Login, type LoginValues, type LoginView } from "./hataapp";
+import { answer, casaosOf, changedNotes, cleanLogin, movePorts, envLine, foundInLog, loginValues, loginView, filled, ownCasaos, settingFolders, settingsForm, startingEnv, viewCompose, webPortOf, type FormSetting, type HataMeta, type IndexApp, type Login, type LoginValues, type LoginView } from "./hataapp";
 import { labelOf, siteDomain } from "./site";
 import { findStoreApp, storeApp, type StoreApp } from "./store";
 
@@ -59,7 +59,7 @@ function assertInstalled(name: string): void {
 
 // --- Jobs -------------------------------------------------------------------------------------------
 
-export type JobKind = "install" | "update" | "start" | "stop" | "restart" | "remove" | "apply" | "backup" | "restore" | "import" | "move" | "docker" | "tailscale" | "copyin" | "transfer" | "moveapp" | "extract" | "format" | "fsck" | "wipe" | "pool" | "sysupdate" | "guest" | "client" | "template" | "clone" | "resize" | "incus" | "container";
+export type JobKind = "install" | "update" | "start" | "stop" | "restart" | "remove" | "apply" | "backup" | "restore" | "import" | "move" | "docker" | "tailscale" | "copyin" | "transfer" | "moveapp" | "extract" | "format" | "fsck" | "wipe" | "pool" | "sysupdate" | "guest" | "client" | "template" | "clone" | "resize" | "incus" | "container" | "disc" | "upload";
 
 export interface Job {
   id: string;

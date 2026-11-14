@@ -15,7 +15,7 @@ import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync
 import { arch, hostname, release, totalmem } from "node:os";
 import { dirname } from "node:path";
 import { containerCommand, shellCommand, TerminalManager, terminalEnv, type TerminalClient } from "./terminal";
-import { diskUsage, dockerInfo, listContainers, PROJECT_LABEL, pruneBuildCache, pruneImages, pruneVolumes, removeImage, removeVolume, run, SERVICE_LABEL, startContainer, stopContainer, type ContainerSummary } from "./docker";
+import { diskUsage, dockerInfo, listContainers, PROJECT_LABEL, pruneBuildCache, pruneImages, pruneVolumes, removeImage, removeVolume, SERVICE_LABEL, startContainer, stopContainer, type ContainerSummary } from "./docker";
 import * as apps from "./clientapps";
 import * as files from "./clientfiles";
 import { syncUsers } from "./clientusers";
