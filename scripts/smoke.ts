@@ -47,6 +47,9 @@ if (!browser) {
 const work = mkdtempSync(join(tmpdir(), "hata-smoke-"));
 const stateDir = join(work, "state");
 mkdirSync(stateDir);
+// a data folder of its own: the page of Files makes the data folder when it is missing, and that must not be /DATA
+mkdirSync(join(work, "data"));
+await Bun.write(join(stateDir, "settings.json"), JSON.stringify({ dataRoot: join(work, "data") }));
 
 function freePort(): number {
   const probe = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: () => new Response("") });
@@ -117,14 +120,20 @@ const waiting = new Map<number, (m: Message) => void>();
 /** What went wrong since the last look */
 let trouble: string[] = [];
 const requests = new Map<string, string>();
+/** Requests the server answered with 5xx; what it said is asked for when the page has settled */
+let failed: { id: string; line: string }[] = [];
 socket.onmessage = (event) => {
   const m = JSON.parse(String(event.data)) as Message;
-  if (m.id) return void waiting.get(m.id)?.(m);
+  if (typeof m.id === "number") {
+    const answer = waiting.get(m.id);
+    if (typeof answer === "function") answer(m);
+    return;
+  }
   const p = m.params;
   if (m.method === "Runtime.exceptionThrown") trouble.push(`exception: ${p.exceptionDetails.exception?.description ?? p.exceptionDetails.text}`);
   if (m.method === "Runtime.consoleAPICalled" && p.type === "error") trouble.push(`console: ${p.args.map((a: any) => a.value ?? a.description).join(" ")}`);
   if (m.method === "Network.requestWillBeSent") requests.set(p.requestId, `${p.request.method} ${new URL(p.request.url).pathname}`);
-  if (m.method === "Network.responseReceived" && p.response.status >= 500) trouble.push(`${p.response.status}: ${requests.get(p.requestId) ?? p.response.url}`);
+  if (m.method === "Network.responseReceived" && p.response.status >= 500) failed.push({ id: p.requestId, line: `${p.response.status}: ${requests.get(p.requestId) ?? p.response.url}` });
 };
 const send = (method: string, params: object = {}) =>
   new Promise<any>((done) => {
@@ -147,7 +156,11 @@ await send("Page.navigate", { url: base });
 
 // the sign-in form, as a person fills it
 await until("the sign-in form", () => js<boolean>(`!!document.querySelector("form [name=password]")`));
-await js(`(() => { const f = document.querySelector("form"); f.querySelector("[name=name]").value = ${JSON.stringify(NAME)}; f.querySelector("[name=password]").value = ${JSON.stringify(PASSWORD)}; f.requestSubmit(); })()`);
+await js(`document.querySelector("form [name=name]").focus()`);
+await send("Input.insertText", { text: NAME });
+await js(`document.querySelector("form [name=password]").focus()`);
+await send("Input.insertText", { text: PASSWORD });
+await js(`document.querySelector("form").requestSubmit()`);
 await until("the page after signing in", () => js<boolean>(`!document.querySelector("form [name=password]") && !!document.querySelector("#view")`));
 
 // --- The pages --------------------------------------------------------------------------------------
@@ -182,21 +195,31 @@ async function settled(): Promise<void> {
 const SIDEWAYS = `(() => {
   const out = [];
   const page = document.documentElement;
-  if (page.scrollWidth > page.clientWidth + 1) out.push("the page is " + page.scrollWidth + " px wide");
+  if (page.scrollWidth > page.clientWidth + 1) {
+    out.push("the page is " + page.scrollWidth + " px wide");
+    // what reaches past the edge, innermost first
+    const past = [...document.querySelectorAll("#app *")].filter((el) => el.getBoundingClientRect().right > page.clientWidth + 1);
+    for (const el of past.filter((el) => !past.some((other) => other !== el && el.contains(other))).slice(0, 3)) out.push("  past the edge: " + el.tagName.toLowerCase() + "." + [...el.classList].join(".") + " “" + el.textContent.trim().slice(0, 60) + "”");
+  }
   for (const el of document.querySelectorAll("#view *")) {
     const style = getComputedStyle(el);
     if (["auto", "scroll"].includes(style.overflowX) && el.scrollWidth > el.clientWidth + 1) out.push(el.tagName.toLowerCase() + "." + [...el.classList].join(".") + " " + el.clientWidth + "/" + el.scrollWidth);
   }
-  return out.slice(0, 5);
+  return out.slice(0, 8);
 })()`;
 
 const failures: string[] = [];
 async function walk(label: string, phone: boolean): Promise<void> {
   for (const route of ROUTES) {
     trouble = [];
-    await js(`location.hash = ${JSON.stringify(route)}`);
+    failed = [];
+    await send("Page.navigate", { url: `${base}/${route}` });
     await settled();
     const found = [...trouble];
+    for (const { id, line } of failed) {
+      const said = await send("Network.getResponseBody", { requestId: id });
+      found.push(`${line} ${typeof said.body === "string" ? said.body.slice(0, 300) : ""}`.trim());
+    }
     if (!(await js<boolean>(DRAWN))) found.push("the page is empty");
     if (phone) for (const wide of await js<string[]>(SIDEWAYS)) found.push(`scrolls sideways: ${wide}`);
     if (shotsAt) {
