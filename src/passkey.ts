@@ -37,7 +37,7 @@ export function fromB64url(text: unknown, max = 8192): Uint8Array | null {
   return new Uint8Array(Buffer.from(text, "base64url"));
 }
 
-const sha256 = async (data: Uint8Array): Promise<Uint8Array> => new Uint8Array(await crypto.subtle.digest("SHA-256", data));
+const sha256 = async (data: Uint8Array): Promise<Uint8Array> => new Uint8Array(await crypto.subtle.digest("SHA-256", data as BufferSource));
 const equal = (a: Uint8Array, b: Uint8Array): boolean => a.length === b.length && a.every((byte, i) => byte === b[i]);
 
 const FLAG_USER_PRESENT = 0x01;
@@ -103,7 +103,7 @@ const IMPORT: Record<number, { key: AlgorithmIdentifier | RsaHashedImportParams 
   [-257]: { key: { name: "RSASSA-PKCS1-v1_5", hash: "SHA-256" }, verify: { name: "RSASSA-PKCS1-v1_5" } },
 };
 
-const importKey = (spki: Uint8Array, alg: number) => crypto.subtle.importKey("spki", spki, IMPORT[alg]!.key, false, ["verify"]);
+const importKey = (spki: Uint8Array, alg: number) => crypto.subtle.importKey("spki", spki as BufferSource, IMPORT[alg]!.key, false, ["verify"]);
 
 /** An ECDSA signature arrives as ASN.1 `SEQUENCE { r, s }`; WebCrypto wants the two numbers side by side */
 export function derToRaw(der: Uint8Array, size = 32): Uint8Array | null {
@@ -187,7 +187,7 @@ export async function verifyAssertion(input: AssertionInput, key: StoredPasskey,
   signed.set(authData);
   signed.set(await sha256(clientData), authData.length);
   try {
-    const ok = await crypto.subtle.verify(IMPORT[key.alg]!.verify, await importKey(new Uint8Array(Buffer.from(key.publicKey, "base64")), key.alg), sig, signed);
+    const ok = await crypto.subtle.verify(IMPORT[key.alg]!.verify, await importKey(new Uint8Array(Buffer.from(key.publicKey, "base64")), key.alg), sig as BufferSource, signed as BufferSource);
     if (!ok) spendCryptoError();
     return ok ? { counter: parsed.counter } : null;
   } catch {

@@ -414,7 +414,7 @@ export async function listApps(lang: string): Promise<InstalledApp[]> {
   return installedNames().map((name) => describeApp(name, containers, lang));
 }
 
-export interface AppDetail extends InstalledApp {
+export interface AppDetail extends Omit<InstalledApp, "login"> {
   /** Where the app's compose file lies on disk */
   composeFile: string;
   /** Host folders the app keeps data in */

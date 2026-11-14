@@ -361,7 +361,7 @@ interface Remembered {
   checks: Record<string, LastCheck>;
 }
 const FILE = join(DATA_DIR, "raid.json");
-const remembered = readJsonFile<Remembered>(FILE, { checks: {} }, (v) => isPlainObject(v) && isPlainObject((v as Remembered).checks));
+const remembered = readJsonFile<Remembered>(FILE, { checks: {} }, (v) => isPlainObject(v) && isPlainObject((v as unknown as Remembered).checks));
 const doing = new Map<string, Work["what"]>();
 
 let pools: Pool[] = [];

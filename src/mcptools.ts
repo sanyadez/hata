@@ -224,9 +224,9 @@ async function settle(job: Job, wait = WAIT_MS) {
 }
 
 /** An app's page as the caller would open it; the host name of the machine is often no address at all */
-const addressOf = (app: InstalledApp, caller?: Caller): string | null => (caller?.origin ? webAddress(app, caller.origin, [siteDomain(), localDomain()].filter(Boolean)) : null);
+const addressOf = (app: Omit<InstalledApp, "login">, caller?: Caller): string | null => (caller?.origin ? webAddress(app, caller.origin, [siteDomain(), localDomain()].filter(Boolean)) : null);
 
-const brief = (app: InstalledApp, caller?: Caller) => ({
+const brief = (app: Omit<InstalledApp, "login">, caller?: Caller) => ({
   name: app.name,
   title: app.title,
   status: app.status,

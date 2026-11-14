@@ -56,7 +56,7 @@ export interface Status {
   devices: Device[];
 }
 
-export interface Report extends Partial<Status> {
+export interface Report extends Partial<Omit<Status, "state">> {
   /** missing — not installed; stopped — installed, the daemon does not run */
   state: "missing" | "stopped" | Status["state"];
   version: string;

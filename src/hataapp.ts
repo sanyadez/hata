@@ -179,6 +179,7 @@ export function loginView(login: Login, settings: Setting[], env: Record<string,
   if (login.kind === "default") return { ...login };
   if (login.kind === "log") return { kind: "log", ...(login.user ? { user: login.user } : {}), ask: ["password"] };
   const view: LoginView = { kind: "settings" };
+  if (login.kind !== "settings") return view;
   const ask: ("user" | "password")[] = [];
   if (login.user) {
     const name = SETTING_REF.exec(login.user)?.[1];

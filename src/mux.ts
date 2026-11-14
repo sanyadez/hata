@@ -255,7 +255,7 @@ export class Peer {
     const { header, body } = decoded;
     if (header.t === "event") return this.options.onEvent?.(String(header.name), header.value);
     const id = Number(header.id);
-    if (header.t === "open") return this.run(id, String(header.op), header.args);
+    if (header.t === "open") return void this.run(id, String(header.op), header.args);
     const channel = this.channels.get(id);
     if (!channel) return;
     switch (header.t) {

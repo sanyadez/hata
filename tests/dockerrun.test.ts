@@ -18,7 +18,7 @@ test("a docker run from a README becomes the form", () => {
     jellyfin/jellyfin:latest --nowebclient "--log dir"`) as RunImport;
   expect(run.name).toBe("jellyfin");
   expect(run.ignored).toEqual([]);
-  expect(run.edit.web).toEqual({ scheme: "http", host: "", port: "8096", path: "/" });
+  expect(run.edit.web).toEqual({ scheme: "http", host: "", port: "8096", path: "/", domain: "" });
   expect(run.edit.services).toEqual([
     {
       name: "jellyfin",

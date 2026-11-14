@@ -275,7 +275,7 @@ function otherDisks(home: string): Volume[] {
   const labels = labelsByDevice();
   // a network place is called by the name it was given (read here, not imported: no side effects)
   const saved = readJsonFile<{ places?: unknown }>(join(SECRETS_DIR, "netplaces.json"), {}).places;
-  const named = new Map((Array.isArray(saved) ? saved : []).filter((p) => typeof p?.slug === "string" && typeof p?.name === "string").map((p) => [`/mnt/net/${p.slug}`, p.name as string] as const));
+  const named = new Map<string, string>((Array.isArray(saved) ? saved : []).filter((p) => typeof p?.slug === "string" && typeof p?.name === "string").map((p) => [`/mnt/net/${p.slug}`, p.name as string] as const));
   return mounts.map((mount) => {
     // a server that does not answer would stop this process in statfs
     const room = mount.network ? roomOf(mount.path) : diskOf(mount.path);

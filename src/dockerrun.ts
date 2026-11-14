@@ -70,8 +70,8 @@ export function parseDockerRun(text: unknown): RunImport | string {
   if (words[0] === "sudo") words.shift();
   if (words[0] !== "docker" && words[0] !== "podman") return "run.notRun";
   words.shift();
-  if (words[0] === "container") words.shift();
-  if (words[0] !== "run" && words[0] !== "create") return "run.notRun";
+  if ((words[0] as string) === "container") words.shift();
+  if (!["run", "create"].includes(words[0] ?? "")) return "run.notRun";
   words.shift();
 
   const service = readService("", {});
@@ -149,5 +149,5 @@ export function parseDockerRun(text: unknown): RunImport | string {
   service.name = name;
   if (!service.restart) service.restart = "unless-stopped";
   const web = service.ports.find((p) => p.protocol === "tcp" && p.host);
-  return { name, edit: { title: "", icon: "", web: { scheme: "http", host: "", port: web?.host ?? "", path: "/" }, services: [service] }, ignored };
+  return { name, edit: { title: "", icon: "", web: { scheme: "http", host: "", port: web?.host ?? "", path: "/", domain: "" }, services: [service] }, ignored };
 }

@@ -323,7 +323,7 @@ function connect(state: LinkState, handlers: Record<string, Handler>, pairing?: 
           opener = new Opener(keys.down);
           stage = "welcome";
           const about = await info();
-          ws.send(await sealer.seal(new TextEncoder().encode(JSON.stringify({ hello: about }))));
+          ws.send((await sealer.seal(new TextEncoder().encode(JSON.stringify({ hello: about })))) as BufferSource);
           return;
         }
         const plain = await opener.open(new Uint8Array(event.data as ArrayBuffer));
@@ -331,7 +331,7 @@ function connect(state: LinkState, handlers: Record<string, Handler>, pairing?: 
           const welcome = JSON.parse(new TextDecoder().decode(plain)) as { machine?: string; name?: string };
           if (!welcome.machine) return fail("Hata did not accept this machine");
           stage = "live";
-          peer = new Peer({ side: "client", handlers, send: (frame) => void sealer.seal(frame).then((f) => ws.send(f)).catch(() => fail("sealing failed")) });
+          peer = new Peer({ side: "client", handlers, send: (frame) => void sealer.seal(frame).then((f) => ws.send(f as BufferSource)).catch(() => fail("sealing failed")) });
           silence = setInterval(() => Date.now() - heard > SILENCE_MS && fail("Hata went silent"), 10_000);
           resolve({ peer, machine: welcome.machine, name: welcome.name ?? "", closed, close: () => fail("closed") });
           return;

@@ -210,7 +210,7 @@ export interface Tunnel {
 }
 
 /** Per app: the port Hata listens on → the listener */
-const listeners = new Map<string, Map<number, Server>>();
+const listeners = new Map<string, Map<number, Server<unknown>>>();
 
 const HOP_HEADERS = ["connection", "keep-alive", "proxy-authenticate", "proxy-authorization", "te", "trailer", "transfer-encoding", "upgrade", "content-length"];
 
@@ -254,7 +254,7 @@ export const tunnelHandlers = {
   open(ws: ServerWebSocket<Tunnel>) {
     const { upstream: target, queue } = ws.data;
     target.onopen = () => {
-      for (const message of queue.splice(0)) target.send(message);
+      for (const message of queue.splice(0)) target.send(message as string | BufferSource);
     };
     target.onmessage = (event) => {
       ws.send(typeof event.data === "string" ? event.data : new Uint8Array(event.data as ArrayBuffer));
@@ -294,7 +294,7 @@ export type PassTarget = number | { host: string; port: number; https: boolean }
  * Passes a request (or a WebSocket upgrade) on to an app listening on a local port, or to another host.
  * The certificate of a host of the home network is not checked: it is its own, made by itself.
  */
-export async function passToApp(req: Request, server: Server, upstream: PassTarget, proto: "http" | "https", ip: string, user: User | null = null): Promise<Response> {
+export async function passToApp(req: Request, server: Server<unknown>, upstream: PassTarget, proto: "http" | "https", ip: string, user: User | null = null): Promise<Response> {
   const url = new URL(req.url);
   const headers = forwardHeaders(req, ip, proto, user);
   const to = typeof upstream === "number" ? { host: "127.0.0.1", port: upstream, https: false } : upstream;
@@ -321,7 +321,7 @@ export async function passToApp(req: Request, server: Server, upstream: PassTarg
       // pass the body through exactly as the app sent it, compressed or not
       decompress: false,
       signal: req.signal,
-    } as RequestInit);
+    } as RequestInit & { decompress: boolean });
     const out = new Headers(res.headers);
     for (const h of HOP_HEADERS) if (h !== "content-length") out.delete(h);
     return new Response(res.body, { status: res.status, statusText: res.statusText, headers: out });
@@ -331,7 +331,7 @@ export async function passToApp(req: Request, server: Server, upstream: PassTarg
   }
 }
 
-const listening = (name: string): Map<number, Server> => listeners.get(name) ?? listeners.set(name, new Map()).get(name)!;
+const listening = (name: string): Map<number, Server<unknown>> => listeners.get(name) ?? listeners.set(name, new Map()).get(name)!;
 
 function startListener(name: string, { port, upstream }: Guard): void {
   listening(name).get(port)?.stop(true);
@@ -342,7 +342,7 @@ function startListener(name: string, { port, upstream }: Guard): void {
  * A listener on `port` of this server that lets signed-in people who may open `name` through to
  * 127.0.0.1:`upstream` — the app itself, or (for an app of another machine) the end of a tunnel to it.
  */
-export function guardedServer(name: string, port: number, upstream: number): Server {
+export function guardedServer(name: string, port: number, upstream: number): Server<unknown> {
   return Bun.serve<Tunnel, never>({
     port,
     hostname: anyAddress(),

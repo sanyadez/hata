@@ -126,7 +126,7 @@ async function pve<T>(h: Caller, method: string, path: string, params?: Record<s
         createConnection: () => socket,
         headers: { ...auth(h, method), Accept: "application/json", Connection: "close", ...(payload ? { "Content-Type": "application/x-www-form-urlencoded", "Content-Length": Buffer.byteLength(payload) } : {}) },
         timeout: TIMEOUT_MS,
-      } as Parameters<typeof request>[0],
+      } as unknown as Parameters<typeof request>[0],
       (res) => {
         const chunks: Buffer[] = [];
         res.on("data", (c: Buffer) => chunks.push(c));
@@ -1104,7 +1104,7 @@ async function upload(h: Host, node: string, storage: string, kind: UploadKind, 
         path: `/api2/json/nodes/${node}/storage/${storage}/upload`,
         createConnection: () => socket,
         headers: { ...auth(h, "POST"), Accept: "application/json", Connection: "close", "Content-Type": `multipart/form-data; boundary=${boundary}`, "Content-Length": head.length + size + tail.length },
-      } as Parameters<typeof request>[0],
+      } as unknown as Parameters<typeof request>[0],
       (res) => {
         const parts: Buffer[] = [];
         res.on("data", (c: Buffer) => parts.push(c));
@@ -1266,7 +1266,7 @@ export async function receiveFile(id: string, q: { kind?: string | null; node?: 
   try {
     await followTask(h, node, await upload(h, node, storage, kind, name, size, chunks, first, null, log), log, 30 * 60_000);
   } catch (e) {
-    if (e instanceof AppError && !e.detail.message && said.length) e.detail.message = said.at(-1);
+    if (e instanceof AppError && !e.detail.message && said.length) e.detail.message = said.at(-1)!;
     throw e;
   }
   record("pve.upload.done", { user: by, detail: `${h.name}: ${name} → ${storage}` });
@@ -1323,7 +1323,7 @@ async function logged(cmd: string[], log: Log, input?: string): Promise<number> 
   const proc = Bun.spawn({ cmd, stdin: input === undefined ? "ignore" : new TextEncoder().encode(input), stdout: "pipe", stderr: "pipe", env: { ...process.env, LC_ALL: "C.UTF-8" } });
   const pump = async (stream: ReadableStream<Uint8Array>) => {
     let rest = "";
-    for await (const chunk of stream.pipeThrough(new TextDecoderStream())) {
+    for await (const chunk of stream.pipeThrough(new TextDecoderStream() as ReadableWritablePair<string, Uint8Array>)) {
       const parts = (rest + chunk).split(/\r?\n|\r/);
       rest = parts.pop() ?? "";
       for (const line of parts) if (line.trim()) log(line);
@@ -1600,7 +1600,7 @@ export async function addBySignIn(input: Input & { user?: unknown; password?: un
   if (signed.NeedTFA) {
     const otp = typeof input.otp === "string" ? input.otp.replace(/\s/g, "") : "";
     if (!/^\d{6,8}$/.test(otp)) throw new AppError("pve.needOtp", 409);
-    signed = await pve(bare, "POST", "/access/ticket", { username: user, "tfa-challenge": signed.ticket, password: `totp:${otp}` }).catch((e) => {
+    signed = await pve<typeof signed>(bare, "POST", "/access/ticket", { username: user, "tfa-challenge": signed.ticket, password: `totp:${otp}` }).catch((e) => {
       throw e instanceof AppError && e.code === "pve.badLogin" ? new AppError("pve.badOtp", 401) : e;
     });
   }

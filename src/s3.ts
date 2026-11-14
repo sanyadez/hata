@@ -27,9 +27,9 @@ export class S3Error extends Error {
 
 const encoder = new TextEncoder();
 const hex = (bytes: ArrayBuffer): string => Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, "0")).join("");
-const sha256 = async (data: string | ArrayBuffer | Uint8Array): Promise<string> => hex(await crypto.subtle.digest("SHA-256", typeof data === "string" ? encoder.encode(data) : data));
+const sha256 = async (data: string | ArrayBuffer | Uint8Array): Promise<string> => hex(await crypto.subtle.digest("SHA-256", typeof data === "string" ? encoder.encode(data) : (data as BufferSource)));
 async function hmac(key: ArrayBuffer | Uint8Array, text: string): Promise<ArrayBuffer> {
-  return crypto.subtle.sign("HMAC", await crypto.subtle.importKey("raw", key, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]), encoder.encode(text));
+  return crypto.subtle.sign("HMAC", await crypto.subtle.importKey("raw", key as BufferSource, { name: "HMAC", hash: "SHA-256" }, false, ["sign"]), encoder.encode(text));
 }
 
 /** As the signature wants it: everything but letters, digits and `-._~` in percent form */

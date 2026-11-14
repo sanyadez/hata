@@ -100,7 +100,7 @@ interface Engine {
   machine: string;
 }
 
-const imagesOf = (compose: Compose | null): string[] => Object.values(compose?.services ?? {}).map((service) => (typeof service?.image === "string" ? service.image : "")).filter(Boolean);
+const imagesOf = (compose: Compose | null): string[] => Object.values((compose?.services ?? {}) as Record<string, Compose | null>).map((service) => (typeof service?.image === "string" ? service.image : "")).filter(Boolean);
 
 const here: Engine = {
   usage: async () => {

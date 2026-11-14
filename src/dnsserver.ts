@@ -94,7 +94,7 @@ function overTcp(host: string, packet: Uint8Array, name?: string): Promise<Uint8
     const timer = setTimeout(() => (socket.destroy(), reject(new Error("no answer"))), DOH_WAIT_MS);
     socket.on(name ? "secureConnect" : "connect", () => socket.write(Buffer.concat([Buffer.from([packet.length >> 8, packet.length & 0xff]), packet])));
     socket.on("data", (chunk) => {
-      got = Buffer.concat([got, chunk]);
+      got = Buffer.concat([got, chunk as Uint8Array]);
       if (got.length >= 2 && got.length >= 2 + got.readUInt16BE(0)) {
         clearTimeout(timer);
         socket.end();
@@ -106,7 +106,7 @@ function overTcp(host: string, packet: Uint8Array, name?: string): Promise<Uint8
 }
 
 async function overHttps(url: string, packet: Uint8Array): Promise<Uint8Array> {
-  const r = await fetch(url, { method: "POST", body: packet, headers: { "content-type": "application/dns-message", accept: "application/dns-message" }, signal: AbortSignal.timeout(DOH_WAIT_MS) });
+  const r = await fetch(url, { method: "POST", body: packet as BufferSource, headers: { "content-type": "application/dns-message", accept: "application/dns-message" }, signal: AbortSignal.timeout(DOH_WAIT_MS) });
   if (!r.ok) throw new Error(`HTTP ${r.status}`);
   return new Uint8Array(await r.arrayBuffer());
 }
@@ -257,7 +257,7 @@ function listen(address: string): Promise<Listener> {
         let got = Buffer.alloc(0);
         socket.setTimeout(10_000, () => socket.destroy());
         socket.on("data", (chunk) => {
-          got = Buffer.concat([got, chunk]);
+          got = Buffer.concat([got, chunk as Uint8Array]);
           while (got.length >= 2 && got.length >= 2 + got.readUInt16BE(0)) {
             const one = new Uint8Array(got.subarray(2, 2 + got.readUInt16BE(0)));
             got = got.subarray(2 + one.length);

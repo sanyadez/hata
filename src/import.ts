@@ -48,7 +48,7 @@ const DEFAULT_SHM = 64 * 1024 * 1024;
 /** In a compose file `$` starts a variable; a literal one is written `$$` */
 const lit = (text: string): string => text.replace(/\$/g, "$$$$");
 const same = (a: unknown, b: unknown): boolean => JSON.stringify(a ?? null) === JSON.stringify(b ?? null);
-const filled = (list: unknown): list is unknown[] => Array.isArray(list) && list.length > 0;
+const filled = (list: unknown): list is Compose[] => Array.isArray(list) && list.length > 0;
 
 /** Nanoseconds, as Docker stores durations, in compose's notation */
 const span = (ns: number): string => (ns % 1e9 === 0 ? `${ns / 1e9}s` : `${Math.round(ns / 1e6)}ms`);
@@ -453,7 +453,7 @@ export interface ContainerDraft {
 
 async function findContainer(id: string): Promise<ContainerInspect> {
   if (!/^[0-9a-f]{12,64}$/.test(id)) throw new AppError("import.notFound", 404);
-  const [{ inspect }] = (await draftOf([id])) as [{ inspect: ContainerInspect }];
+  const [{ inspect }] = (await draftOf([id])) as unknown as [{ inspect: ContainerInspect }];
   if ((inspect.Config.Labels ?? {})[PROJECT_LABEL] !== undefined) throw new AppError("import.notFound", 404);
   if (inspect.HostConfig.AutoRemove) throw new AppError("import.autoRemove", 409);
   return inspect;

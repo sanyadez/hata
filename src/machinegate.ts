@@ -22,7 +22,7 @@ const MARK = "# Written by Hata";
 const keyOf = (id: string, name: string) => `${name}@${id}`;
 
 const forwarders = new Map<string, TCPSocketListener<unknown>>();
-const listeners = new Map<string, Server>();
+const listeners = new Map<string, Server<unknown>>();
 
 /** A local port whose connections are carried to 127.0.0.1:`upstream` of the machine */
 function forwarder(id: string, upstream: number): TCPSocketListener<unknown> {
@@ -67,7 +67,7 @@ function forwarder(id: string, upstream: number): TCPSocketListener<unknown> {
         const channel = socket.data.channel;
         if (!channel) return;
         const copy = new Uint8Array(data);
-        socket.data.sending = socket.data.sending.then(() => channel.send(copy)).catch(() => socket.end());
+        socket.data.sending = socket.data.sending.then(() => channel.send(copy)).catch(() => void socket.end());
       },
       drain(socket) {
         (socket.data as Conn & { write?: () => void }).write?.();

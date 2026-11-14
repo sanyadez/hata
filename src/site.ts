@@ -26,7 +26,7 @@ export function requestProto(req: Request): "http" | "https" {
 /** An IPv4 address as a listener on both families reports it (`::ffff:192.168.1.5`), in its usual form */
 export const plainIp = (address: string): string => address.replace(/^::ffff:(?=\d+\.\d+\.\d+\.\d+$)/i, "");
 
-export function clientIp(req: Request, server: Server): string {
+export function clientIp(req: Request, server: Server<unknown>): string {
   const direct = plainIp(server.requestIP(req)?.address ?? "unknown");
   if (!behindProxy()) return direct;
   return req.headers.get("x-forwarded-for")?.split(",").pop()?.trim() || direct;
@@ -56,7 +56,7 @@ export const labelOf = (app: { name: string; subdomain?: string }): string => ap
  * its domain (or its local name), `<label>.<domain>`; otherwise the host Hata was opened at and the
  * app's port. `origin` is where Hata was opened, `http://192.168.1.10`; null — the app has no page.
  */
-export function webAddress(app: { name: string; subdomain?: string; port?: number; scheme?: string; index?: string; hostname?: string }, origin: string, domains: string[]): string | null {
+export function webAddress(app: { name: string; subdomain?: string; port?: number | string; scheme?: string; index?: string; hostname?: string }, origin: string, domains: string[]): string | null {
   if (!app.port) return null;
   let at: URL;
   try {
