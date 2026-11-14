@@ -803,7 +803,8 @@ dialog.xwide textarea.code { min-height: 56dvh; }
 
 /* --- Settings ---------------------------------------------------------------------------------- */
 
-.settings .card { display: grid; gap: 4px; }
+/* the one column is never wider than the card: a line that does not wrap is cut inside it */
+.settings .card { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; }
 .settings .card > h2, .settings .card > .section-head { margin-bottom: 10px; }
 .settings .card.table-wrap { display: block; }
 .settings .card > .cmd { padding: 8px 0 14px; color: var(--muted); }

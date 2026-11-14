@@ -120,6 +120,8 @@ const waiting = new Map<number, (m: Message) => void>();
 /** What went wrong since the last look */
 let trouble: string[] = [];
 const requests = new Map<string, string>();
+/** Requests sent and not answered yet */
+const underWay = new Set<string>();
 /** Requests the server answered with 5xx; what it said is asked for when the page has settled */
 let failed: { id: string; line: string }[] = [];
 socket.onmessage = (event) => {
@@ -132,7 +134,12 @@ socket.onmessage = (event) => {
   const p = m.params;
   if (m.method === "Runtime.exceptionThrown") trouble.push(`exception: ${p.exceptionDetails.exception?.description ?? p.exceptionDetails.text}`);
   if (m.method === "Runtime.consoleAPICalled" && p.type === "error") trouble.push(`console: ${p.args.map((a: any) => a.value ?? a.description).join(" ")}`);
-  if (m.method === "Network.requestWillBeSent") requests.set(p.requestId, `${p.request.method} ${new URL(p.request.url).pathname}`);
+  if (m.method === "Network.requestWillBeSent") {
+    requests.set(p.requestId, `${p.request.method} ${new URL(p.request.url).pathname}`);
+    // the stream of events never ends: it is not something to wait for
+    if (p.type !== "EventSource" && p.type !== "WebSocket") underWay.add(p.requestId);
+  }
+  if (m.method === "Network.loadingFinished" || m.method === "Network.loadingFailed") underWay.delete(p.requestId);
   if (m.method === "Network.responseReceived" && p.response.status >= 500) failed.push({ id: p.requestId, line: `${p.response.status}: ${requests.get(p.requestId) ?? p.response.url}` });
 };
 const send = (method: string, params: object = {}) =>
@@ -185,11 +192,11 @@ const DRAWN = `!!(document.querySelector("#view")?.childElementCount || (!docume
 /** Quiet for a moment: the view is drawn and no request is on its way */
 async function settled(): Promise<void> {
   let calm = 0;
-  for (let i = 0; i < 80 && calm < 3; i++) {
+  for (let i = 0; i < 200 && calm < 4; i++) {
     await Bun.sleep(100);
-    const busy = await js<boolean>(`!(${DRAWN}) || performance.getEntriesByType("resource").some((r) => !r.responseEnd)`);
-    calm = busy ? 0 : calm + 1;
+    calm = underWay.size || !(await js<boolean>(DRAWN)) ? 0 : calm + 1;
   }
+  if (calm < 4) trouble.push(`still loading after 20 s: ${[...underWay].map((id) => requests.get(id)).join(", ") || "nothing drawn"}`);
 }
 
 const SIDEWAYS = `(() => {
