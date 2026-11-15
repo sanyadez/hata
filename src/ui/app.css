@@ -1810,9 +1810,14 @@ body.has-jobs #view:not(.fill) { padding-bottom: calc(var(--jobs-h, 0px) + 48px)
 .module-group .muted { font: 400 12px var(--font-body); }
 .module-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; }
 .module-card { display: flex; flex-direction: column; gap: 10px; padding: 16px; min-width: 0; }
-.module-card-head { display: flex; align-items: flex-start; gap: 12px; }
-.module-card-head .grow { min-width: 0; display: grid; gap: 4px; justify-items: start; overflow-wrap: anywhere; }
-.module-card-head .ha-switch { flex: none; margin-top: 4px; }
+/* icon | name | switch, the state under the name as wide as the name and the switch together: a state's one
+   long word ("використовується") once set the width of the name's column and both ran under the switch */
+.module-card-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; gap: 4px 12px; }
+.module-card-head .app-icon { grid-row: 1 / span 2; }
+.module-card-head .grow { display: contents; }
+.module-card-head .grow > strong { grid-column: 2; overflow-wrap: anywhere; align-self: center; }
+.module-card-head .grow > .state { grid-column: 2 / -1; justify-self: start; max-width: 100%; }
+.module-card-head .ha-switch { grid-column: 3; grid-row: 1; margin-top: 4px; }
 .module-card:not(.on) .app-icon { filter: grayscale(1); opacity: 0.7; }
 .module-chip { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: var(--radius-sm); background: var(--info-soft); color: var(--info); font-size: 12px; overflow-wrap: anywhere; text-decoration: none; }
 .module-chip .ico { width: 14px; height: 14px; flex: none; }
