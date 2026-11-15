@@ -12906,6 +12906,22 @@ function streamPlayer(path, { at = 0, audio = 0, sub = -1, played, failed } = {}
     if (e.key === "ArrowRight") void load(position() + 30);
     if (e.key === "ArrowLeft") void load(position() - 30);
   });
+  // on the whole screen the bar lies over the picture and goes away after a few quiet seconds of playing;
+  // a move of the pointer, a touch or a key brings it back, and it stays while paused or while a list is open
+  const panel = el.querySelector(".sp-bar");
+  const wake = () => {
+    el.classList.remove("idle");
+    clearTimeout(p.quiet);
+    p.quiet = setTimeout(() => {
+      if (p.gone) return;
+      if (video.paused || panel.matches(":hover") || document.querySelector("dialog.select-list[open]")) return wake();
+      el.classList.add("idle");
+    }, 3000);
+  };
+  for (const name of ["pointermove", "pointerdown", "keydown", "touchstart"]) el.addEventListener(name, wake, { passive: true });
+  video.addEventListener("pause", wake);
+  video.addEventListener("play", wake);
+  document.addEventListener("fullscreenchange", wake);
   void load(at);
   requestAnimationFrame(follow);
   return {
@@ -12914,6 +12930,8 @@ function streamPlayer(path, { at = 0, audio = 0, sub = -1, played, failed } = {}
     pause: () => video.pause(),
     stop: () => {
       p.gone = true;
+      clearTimeout(p.quiet);
+      document.removeEventListener("fullscreenchange", wake);
       p.reading?.abort();
       video.pause();
       video.removeAttribute("src");
