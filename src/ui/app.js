@@ -12120,7 +12120,7 @@ function importParts(data, nothing) {
 // The walk through a new server: every step only opens what the pages have anyway, so nothing here
 // is the one place a thing can be done.
 
-const WELCOME_STEPS = ["admin", "server", "existing", "data", "backups", "apps"];
+const WELCOME_STEPS = ["admin", "server", "existing", "data", "backups", "modules", "apps"];
 
 /** The language of this browser; `then` — what to load again in it */
 function languageSelect(then) {
@@ -12193,6 +12193,7 @@ async function loadWelcome() {
     step === "data" || step === "backups" ? quiet("/api/disks") : state.disks,
     step === "apps" ? quiet(`/api/store?lang=${state.lang}`) : state.store,
   ]);
+  if (step === "modules") state.modulesList = (await quiet("/api/modules"))?.modules ?? state.modulesList;
   Object.assign(state, { settings: settings ?? state.settings, local, import: found, disks, store });
   if (state.route.view === "welcome" && state.route.step === step) paintWelcome();
 }
@@ -12264,6 +12265,41 @@ function paintWelcome() {
         const patch = { timezone: tz.value.trim(), language: state.lang };
         if (name.value.trim().toLowerCase() !== s.local.name) patch.local = { name: name.value };
         state.settings = await api("PUT", "/api/settings", patch);
+      }),
+    );
+  }
+
+  if (step === "modules") {
+    const list = state.modulesList;
+    if (!list) return put(box, ...head, waiting);
+    // what is ticked is turned on, with what it stands on; nothing is installed by that
+    const ticks = new Map(list.map((m) => [m.id, h("input", { type: "checkbox", checked: m.on })]));
+    const row = (m) =>
+      h(
+        "label",
+        { class: "check tool" },
+        ticks.get(m.id),
+        h("span", { class: "app-icon plus" }, icon(MODULE_ICONS[m.id])),
+        h("span", { class: "grow" }, h("strong", null, moduleName(m.id)), h("span", { class: "muted small block" }, t(`modules.${m.id}.what`)), m.needs.length > 0 && h("span", { class: "muted small block" }, t("modules.needsLine", { needs: m.needs.map(moduleName).join(", ") }))),
+      );
+    return put(
+      box,
+      ...head,
+      MODULE_GROUPS.map((group) => {
+        const mine = list.filter((m) => m.group === group);
+        return mine.length > 0 && h("section", { class: "card pad" }, h("div", { class: "section-head" }, h("h2", null, t("modules.group." + group))), mine.map(row));
+      }),
+      h("p", { class: "muted small" }, t("welcome.modules.more"), " ", h("a", { class: "link", href: "#/settings/modules" }, t("modules.title"))),
+      ...welcomeFoot(step, async () => {
+        let now = list;
+        for (const m of list) {
+          const want = ticks.get(m.id).checked;
+          // one turned on a moment ago because another stands on it stays on
+          if (want === now.find((x) => x.id === m.id).on || (!want && list.some((x) => ticks.get(x.id).checked && x.needs.includes(m.id)))) continue;
+          now = (await api("PUT", `/api/modules/${m.id}`, { on: want, withNeeds: true })).modules;
+        }
+        state.modulesList = now;
+        state.modules = Object.fromEntries(now.map((m) => [m.id, m.on]));
       }),
     );
   }

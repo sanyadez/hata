@@ -182,7 +182,7 @@ const sections = [...sectionList.matchAll(/\{ id: "([a-z]+)"/g)].map((m) => m[1]
 if (sections.length < 10) giveUp("Could not read the sections of Settings from app.js.");
 
 const ROUTES = [
-  "#/welcome/server", "#/welcome/existing", "#/welcome/data", "#/welcome/backups", "#/welcome/apps",
+  "#/welcome/server", "#/welcome/existing", "#/welcome/data", "#/welcome/backups", "#/welcome/modules", "#/welcome/apps",
   "#/", "#/store", "#/files", "#/files/", "#/hata", "#/trash", "#/activity", "#/import",
   "#/machines", "#/containers", "#/containers/settings", "#/integrations", "#/ha", "#/assistant",
   ...sections.map((id) => `#/settings/${id}`),

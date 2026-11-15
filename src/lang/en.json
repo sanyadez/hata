@@ -2290,7 +2290,7 @@
   "welcome.finish": "Open Home",
   "welcome.leave": "Skip the rest",
   "welcome.again": "First-run guide",
-  "welcome.againHint": "The walk through the first choices of a new server: its name, what already runs here, where the data and the backups go, the first apps.",
+  "welcome.againHint": "The walk through the first choices of a new server: its name, what already runs here, where the data and the backups go, the modules, the first apps.",
   "welcome.step.admin": "Administrator",
   "welcome.step.admin.hint": "Name and password",
   "welcome.step.server": "Server",
@@ -2326,7 +2326,7 @@
   "welcome.backups.title": "Backups",
   "welcome.backups.lead": "Once a day Hata can copy the data of every app into a folder of snapshots, and it takes one before every update. An app comes back from a snapshot whole or file by file.",
   "welcome.backups.sameDisk": "This folder is on the same disk as the data. Such copies undo a bad update or a deleted file, but are lost together with the disk.",
-  "welcome.backups.more": "A second copy on another computer or in S3 storage, encryption and what exactly is copied are set up on the page",
+  "welcome.backups.more": "A second copy on another computer or in S3 storage is a module of the next step. What exactly is copied is set up on the page",
   "welcome.apps.title": "A few apps to start with",
   "welcome.apps.lead": "What the store recommends. Pick one to see what it is and install it, or leave it for later — the store is always a click away.",
   "welcome.apps.more": "Everything else, and your own compose files, are in the",
@@ -5313,5 +5313,10 @@
   "error.modules.needed": "Another module works through it; it cannot be turned off now.",
   "error.modules.inUse": "It is in use; it cannot be turned off now.",
   "activity.modules.on": "Module turned on: {target}",
-  "activity.modules.off": "Module turned off: {target}"
+  "activity.modules.off": "Module turned off: {target}",
+  "welcome.step.modules": "Modules",
+  "welcome.step.modules.hint": "What else is needed",
+  "welcome.modules.title": "What else do you want from the server?",
+  "welcome.modules.lead": "The server already has what each one needs: apps, files, backups, users, disks and the network. The rest are modules. Tick what you want now: its pages and settings will appear, and nothing is installed by that. What is not ticked stays out of the way.",
+  "welcome.modules.more": "Any of them can be turned on or off later in Settings →"
 }
