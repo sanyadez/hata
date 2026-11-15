@@ -74,6 +74,7 @@ const ICONS = {
   store: "M5 8h14l-1 12H6zM9 8V6a3 3 0 0 1 6 0v2",
   archive: "M3 5h18v4H3zM5 9v10h14V9M10 13h4",
   undo: "M9 7 4 12l5 5M4 12h11a5 5 0 0 1 0 10h-2",
+  keys: "M3 7a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1zM7 10h.01M11 10h.01M15 10h.01M7 14h10",
   lock: "M6 11h12v9H6zM8.5 11V8a3.5 3.5 0 0 1 7 0v3",
   bell: "M6 17V11a6 6 0 0 1 12 0v6l2 2H4zM10 21h4",
   "bell-off": "M6 17V11a6 6 0 0 1 9-5.2M18 11v6l2 2H4M10 21h4M4 4l16 16",
@@ -457,7 +458,7 @@ function startEvents() {
       }, 1200);
     } else if (event.type === "tv") {
       if ("playing" in event) {
-        state.tvNow = { on: !!event.on, screen: !!event.screen, playing: event.playing };
+        state.tvNow = { on: !!event.on, screen: !!event.screen, streams: !!event.streams, playing: event.playing };
         paintTvNow();
       }
       if (state.route.view === "tv") void loadTv();
@@ -11291,12 +11292,16 @@ function mediaDialog(entry) {
   };
   const prev = h("button", { type: "button", class: "icon-btn", "aria-label": t("files.previous"), title: t("files.previous"), onclick: () => step(-1) }, icon("chevron", "flip"));
   const next = h("button", { type: "button", class: "icon-btn", "aria-label": t("files.next"), title: t("files.next"), onclick: () => step(1) }, icon("chevron"));
-  const toTv = h("button", { type: "button", class: "icon-btn", onclick: () => void moveToTv(joinPath(dir, current.name), current.name, stage.querySelector("video, audio"), () => dialog.close()) }, icon("tv"));
+  // a video is played by Hata's own player where ffmpeg is: sound tracks, subtitles, formats a browser alone cannot
+  let player = null;
+  const toTv = h("button", { type: "button", class: "icon-btn", onclick: () => void moveToTv(joinPath(dir, current.name), current.name, player ?? stage.querySelector("video, audio"), () => dialog.close()) }, icon("tv"));
   const show = (item) => {
     current = item;
     const src = rawUrl(joinPath(dir, item.name));
     const kind = fileKind(item);
-    put(stage, kind === "image" ? h("img", { src, alt: item.name }) : kind === "video" ? h("video", { src, controls: true, autoplay: true, playsInline: true }) : h("audio", { src, controls: true, autoplay: true }));
+    player?.stop();
+    player = kind === "video" && tvStreams() && !filesMachine() ? streamPlayer(joinPath(dir, item.name)) : null;
+    put(stage, player ? player.el : kind === "image" ? h("img", { src, alt: item.name }) : kind === "video" ? h("video", { src, controls: true, autoplay: true, playsInline: true }) : h("audio", { src, controls: true, autoplay: true }));
     title.textContent = item.name;
     sub.textContent = `${bytes(item.size)} · ${fileTime(item.modified)}`;
     toTv.hidden = !!filesMachine() || !tvReady() || !TV_PLAYS_RE.test(item.name);
@@ -11314,13 +11319,13 @@ function mediaDialog(entry) {
   );
   // the keys work wherever the focus is while the viewer is open
   const keys = (e) => {
-    if (e.target instanceof HTMLMediaElement) return;
+    if (e.target instanceof HTMLMediaElement || e.target.closest?.(".sp")) return;
     if (e.key === "ArrowLeft") step(-1);
     if (e.key === "ArrowRight") step(1);
   };
   document.addEventListener("keydown", keys);
   // a video must not keep playing behind a closed dialog
-  dialog.addEventListener("close", () => (document.removeEventListener("keydown", keys), put(stage)));
+  dialog.addEventListener("close", () => (document.removeEventListener("keydown", keys), player?.stop(), put(stage)));
   show(entry);
 }
 
@@ -12684,7 +12689,8 @@ const tvReady = () => isAdmin() && hasModule("tv") && !!state.tvNow?.on && !!sta
 
 /** What plays in this browser goes on on the TV from the same place; here it stops */
 async function moveToTv(path, name, media, done) {
-  const at = media && Number.isFinite(media.currentTime) ? media.currentTime : 0;
+  // Hata's own player counts from where its stream began; a plain <video> from the file's start
+  const at = media?.position ? media.position() : media && Number.isFinite(media.currentTime) ? media.currentTime : 0;
   media?.pause();
   try {
     await api("POST", "/api/tv/play", { path, at });
@@ -12708,25 +12714,152 @@ function moveToBrowser(now) {
   if (wasPlaying) void tell("playpause");
   let dialog;
   let taken = false;
-  const media = h(TV_SOUND_RE.test(name) ? "audio" : "video", { src: `${filesApi("/raw", "")}?path=${encodeURIComponent(now.file)}`, controls: true, autoplay: true, playsInline: true });
-  media.addEventListener("loadedmetadata", () => (media.currentTime = Math.max(0, now.time - 2)), { once: true });
-  media.addEventListener("playing", () => {
+  const played = () => {
     if (!taken) void tell("stop");
     taken = true;
-  });
-  media.addEventListener("error", () => {
+  };
+  const failed = () => {
     if (taken) return;
     dialog.close();
     toast(t("tv.browserCannot"), "error");
-  });
+  };
+  const sound = TV_SOUND_RE.test(name);
+  // with ffmpeg here the same sound track and subtitles go on; without it the browser plays the file as it can
+  const player = !sound && tvStreams() ? streamPlayer(now.file, { at: Math.max(0, now.time - 2), audio: Math.max(0, now.audioNow ?? 0), sub: now.subNow ?? -1, played, failed }) : null;
+  const media = player ?? h(sound ? "audio" : "video", { src: `${filesApi("/raw", "")}?path=${encodeURIComponent(now.file)}`, controls: true, autoplay: true, playsInline: true });
+  if (!player) {
+    media.addEventListener("loadedmetadata", () => (media.currentTime = Math.max(0, now.time - 2)), { once: true });
+    media.addEventListener("playing", played);
+    media.addEventListener("error", failed);
+  }
   const back = button(t("tv.toTv"), { class: "small", onclick: () => void moveToTv(now.file, now.title, media, () => ((taken = true), dialog.close())) }, "tv");
-  dialog = openDialog("xwide viewer", h("header", null, h("div", { class: "grow" }, h("h2", { class: "clip" }, now.title), h("p", { class: "muted small" }, t("tv.browserHint"))), back, closeX(() => dialog)), h("div", { class: "stage" }, media));
+  dialog = openDialog("xwide viewer", h("header", null, h("div", { class: "grow" }, h("h2", { class: "clip" }, now.title), h("p", { class: "muted small" }, t(player ? "tv.browserFrom" : "tv.browserHint"))), back, closeX(() => dialog)), h("div", { class: "stage" }, player ? player.el : media));
   dialog.addEventListener("close", () => {
-    media.pause();
-    media.removeAttribute("src");
+    if (player) player.stop();
+    else (media.pause(), media.removeAttribute("src"));
     // closed before the browser played anything: the TV goes on as it was
     if (!taken && wasPlaying) void tell("playpause");
   });
+}
+
+/** ffmpeg is here: videos are played by Hata's own player */
+const tvStreams = () => isAdmin() && hasModule("tv") && !!state.tvNow?.streams;
+
+const languageNames = {};
+/** "ukr" as a person says it in the page's language; what is not a language's code stays as written */
+function languageName(code) {
+  if (!code || code === "und") return "";
+  try {
+    languageNames[state.lang] ??= new Intl.DisplayNames([state.lang], { type: "language" });
+    const name = languageNames[state.lang].of(code);
+    return name && name !== code ? name[0].toUpperCase() + name.slice(1) : code;
+  } catch {
+    return code;
+  }
+}
+
+/** A sound track or a subtitle in a list: its language, what the file calls it, else how it is coded */
+const trackLabel = (track) => [!track.name?.toLowerCase().startsWith(languageName(track.language).toLowerCase() || "\n") && languageName(track.language), track.name || [track.codec?.toUpperCase(), track.channels > 2 ? `${track.channels - 1}.1` : track.channels === 2 ? "2.0" : ""].filter(Boolean).join(" ")].filter(Boolean).join(" · ") || `#${track.index + 1}`;
+
+/**
+ * Hata's own player for a video of this server: the picture as it is, the chosen sound made into what
+ * a browser plays, subtitles of the file. The stream has no length and cannot be sought in, so the
+ * bar is ours: a jump asks for a new stream from that moment, and the clock counts from where it began.
+ */
+function streamPlayer(path, { at = 0, audio = 0, sub = -1, played, failed } = {}) {
+  const p = { start: 0, startText: "0", audio, sub, info: null, tries: 0, dragging: false, gone: false, reported: false };
+  const video = h("video", { playsInline: true, autoplay: true });
+  const where = `path=${encodeURIComponent(path)}`;
+  const from = (kind, n) => `/api/tv/media/${kind}?${where}&start=${p.startText}&n=${n}`;
+  const position = () => p.start + (video.currentTime || 0);
+  const note = h("p", { class: "sp-note", hidden: true });
+  const clock = h("span", { class: "sp-clock" }, "0:00");
+  const bar = h("input", { type: "range", class: "tvr-slider", min: 0, max: 0, step: 1, value: 0, "aria-label": t("tv.position") });
+  const play = h("button", { type: "button", class: "icon-btn", "aria-label": t("tv.key.playpause"), title: t("tv.key.playpause"), onclick: () => (video.paused ? void video.play().catch(() => {}) : video.pause()) }, icon("pause"));
+  const mute = h("button", { type: "button", class: "icon-btn", "aria-label": t("tv.mute"), title: t("tv.mute"), onclick: () => ((video.muted = !video.muted), mute.replaceChildren(icon(video.muted ? "volumeOff" : "volume"))) }, icon("volume"));
+  const sounds = h("select", { "aria-label": t("tv.track.audio"), title: t("tv.track.audio"), hidden: true, onchange: () => ((p.audio = Number(sounds.value)), void load(position())) });
+  const subs = h("select", { "aria-label": t("tv.track.subs"), title: t("tv.track.subs"), hidden: true, onchange: () => ((p.sub = Number(subs.value)), words()) });
+  const el = h("div", { class: "sp" }, video, note, h("div", { class: "sp-bar" }, play, clock, bar, sounds, subs, mute, h("button", { type: "button", class: "icon-btn", "aria-label": t("tv.fullScreen"), title: t("tv.fullScreen"), onclick: () => (document.fullscreenElement ? void document.exitFullscreen() : void el.requestFullscreen?.().catch(() => {})) }, icon("expand"))));
+  const shown = () => {
+    const total = p.info?.duration ?? 0;
+    const now = p.dragging ? Number(bar.value) : position();
+    clock.textContent = total ? `${tvClock(now)} / ${tvClock(total)}` : tvClock(now);
+    if (!p.dragging) bar.value = String(now);
+  };
+  const say = (text) => ((note.textContent = text), (note.hidden = !text));
+  /** The chosen subtitle from the moment the stream began */
+  const words = () => {
+    video.replaceChildren();
+    if (p.sub < 0) return;
+    const track = h("track", { kind: "subtitles", src: from("subs", p.sub), default: true });
+    video.append(track);
+    track.track.mode = "showing";
+  };
+  const load = async (moment) => {
+    say("");
+    let info;
+    try {
+      info = await api("GET", `/api/tv/media?${where}&at=${Math.max(0, moment).toFixed(3)}`);
+    } catch (e) {
+      say(errorText(e));
+      return failed?.();
+    }
+    if (p.gone) return;
+    if (!p.info) {
+      if (!info.audio.some((one) => one.index === p.audio)) p.audio = 0;
+      if (!info.subs.some((one) => one.index === p.sub && one.text)) p.sub = -1;
+      put(sounds, info.audio.map((one) => h("option", { value: String(one.index), selected: one.index === p.audio }, trackLabel(one))));
+      sounds.hidden = info.audio.length < 2;
+      const readable = info.subs.filter((one) => one.text);
+      put(subs, h("option", { value: "-1", selected: p.sub < 0 }, t("tv.track.noSubs")), readable.map((one) => h("option", { value: String(one.index), selected: one.index === p.sub }, trackLabel(one))));
+      subs.hidden = readable.length === 0;
+      bar.max = String(Math.floor(info.duration));
+      bar.hidden = !info.duration;
+    }
+    p.info = info;
+    p.startText = info.start;
+    p.start = Number(info.start);
+    video.src = from("stream", p.audio);
+    words();
+    void video.play().catch(() => {});
+  };
+  video.addEventListener("timeupdate", shown);
+  video.addEventListener("click", () => play.click());
+  video.addEventListener("play", () => play.replaceChildren(icon("pause")));
+  video.addEventListener("pause", () => play.replaceChildren(icon("play")));
+  video.addEventListener("playing", () => {
+    p.tries = 0;
+    if (!p.reported) played?.();
+    p.reported = true;
+  });
+  // a stream left paused for long is cut by the way it came: asked for again from where it stopped
+  video.addEventListener("error", () => {
+    if (p.gone || !video.getAttribute("src")) return;
+    if (p.reported && p.tries++ < 2) return void load(position());
+    say(t("tv.browserCannot"));
+    failed?.();
+  });
+  bar.addEventListener("input", () => ((p.dragging = true), shown()));
+  bar.addEventListener("change", () => ((p.dragging = false), void load(Number(bar.value))));
+  el.addEventListener("keydown", (e) => {
+    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
+    if (e.key === " ") (e.preventDefault(), play.click());
+    if (e.key === "ArrowRight") void load(position() + 30);
+    if (e.key === "ArrowLeft") void load(position() - 30);
+  });
+  void load(at);
+  return {
+    el,
+    position,
+    pause: () => video.pause(),
+    stop: () => {
+      p.gone = true;
+      video.pause();
+      video.replaceChildren();
+      video.removeAttribute("src");
+      video.load();
+    },
+  };
 }
 
 /** Sound alone among what the player plays: the browser needs no picture for it */
@@ -12781,18 +12914,40 @@ function tvRemoteParts(tv, press, turnOn) {
   const skip = (action, iconName, label) => h("button", { type: "button", class: "tvr-round skip", title: label, "aria-label": label, disabled: idle || !now, onclick: () => press(action) }, icon(iconName), h("span", null, "30"));
   const arrow = (action, cls, label) => h("button", { type: "button", class: "tvr-arrow " + cls, title: label, "aria-label": label, disabled: idle, onclick: () => press(action) }, icon("chevron"));
   const keyed = (action, iconName, label) => h("div", { class: "tvr-key" }, round(action, iconName, label), h("span", { class: "muted" }, label));
+  // the sound and the subtitles of what plays, chosen here instead of in the player's menu on the screen
+  const tracks = now && (now.audio?.length > 1 || now.subs?.length > 0) && h(
+    "div",
+    { class: "tvr-tracks" },
+    now.audio.length > 1 && h("label", null, h("span", { class: "muted" }, t("tv.track.audio")), h("select", { onchange: (e) => press("audio", Number(e.target.value)) }, now.audio.map((one) => h("option", { value: String(one.index), selected: one.index === now.audioNow }, trackLabel(one))))),
+    now.subs.length > 0 && h("label", null, h("span", { class: "muted" }, t("tv.track.subs")), h("select", { onchange: (e) => press("subtitle", e.target.value === "off" ? "off" : Number(e.target.value)) }, h("option", { value: "off", selected: now.subNow < 0 }, t("tv.track.noSubs")), now.subs.map((one) => h("option", { value: String(one.index), selected: one.index === now.subNow }, trackLabel(one))))),
+  );
+  const typed = h("div", { class: "tvr-key" }, h("button", { type: "button", class: "tvr-round", title: t("tv.key.textHint"), "aria-label": t("tv.key.text"), disabled: idle, onclick: () => tvTextDialog(press) }, icon("keys")), h("span", { class: "muted" }, t("tv.key.text")));
   return [
     idle
       ? note("refresh", t("tv.starting"), t("tv.startingLead"))
       : now
-        ? h("div", { class: "tvr-now" }, h("div", { class: "tvr-title" }, h("div", { class: "grow" }, h("strong", { class: "wrap" }, now.title), now.paused && h("span", { class: "state busy" }, t("tv.paused"))), round("stop", "stop", t("tv.key.stop"))), file && file !== now.title && h("p", { class: "tvr-file muted" }, file), position, h("div", { class: "tvr-times muted" }, h("span", null, tvClock(now.time)), h("span", null, tvClock(now.total))), now.file.startsWith("/") && TV_BROWSER_RE.test(now.file) && h("div", { class: "row-actions" }, button(t("tv.toBrowser"), { class: "small", onclick: () => moveToBrowser(now) }, "external")))
+        ? h("div", { class: "tvr-now" }, h("div", { class: "tvr-title" }, h("div", { class: "grow" }, h("strong", { class: "wrap" }, now.title), now.paused && h("span", { class: "state busy" }, t("tv.paused"))), round("stop", "stop", t("tv.key.stop"))), file && file !== now.title && h("p", { class: "tvr-file muted" }, file), position, h("div", { class: "tvr-times muted" }, h("span", null, tvClock(now.time)), h("span", null, tvClock(now.total))), tracks, now.file.startsWith("/") && (tvStreams() ? TV_PLAYS_RE.test(now.file) && fileKind({ type: "file", name: now.file }) !== "image" : TV_BROWSER_RE.test(now.file)) && h("div", { class: "row-actions" }, button(t("tv.toBrowser"), { class: "small", onclick: () => moveToBrowser(now) }, "external")))
         : note("tv", t("tv.nothingTitle"), t("tv.nothing")),
     h("div", { class: "tvr-transport" }, skip("rewind", "back30", t("tv.key.rewind")), h("button", { type: "button", class: "tvr-main", title: t("tv.key.playpause"), "aria-label": t("tv.key.playpause"), disabled: idle || !now, onclick: () => press("playpause") }, icon(now && !now.paused ? "pause" : "play")), skip("forward", "fwd30", t("tv.key.forward"))),
     h("div", { class: "tvr-volume" }, round("mute", tv.muted ? "volumeOff" : "volume", t(tv.muted ? "tv.unmute" : "tv.mute"), tv.muted ? "on" : ""), volume, h("span", { class: "tvr-value" + (tv.muted ? " muted" : "") }, tv.muted ? t("tv.muted") : `${tv.volume}%`)),
     h("hr", { class: "tvr-rule" }),
     h("div", { class: "tvr-pad" }, arrow("up", "up", t("tv.key.up")), arrow("left", "left", t("tv.key.left")), h("button", { type: "button", class: "tvr-ok", disabled: idle, onclick: () => press("select") }, "OK"), arrow("right", "right", t("tv.key.right")), arrow("down", "down", t("tv.key.down"))),
-    h("div", { class: "tvr-keys" }, keyed("back", "undo", t("tv.key.back")), keyed("home", "home", t("tv.key.home")), keyed("menu", "lines", t("tv.key.menu")), keyed("info", "info", t("tv.key.info"))),
+    h("div", { class: "tvr-keys" }, keyed("back", "undo", t("tv.key.back")), keyed("home", "home", t("tv.key.home")), keyed("menu", "lines", t("tv.key.menu")), keyed("info", "info", t("tv.key.info")), typed),
   ];
+}
+
+/** Text typed here goes into the field the player has open on the screen: a search, a name, a password */
+function tvTextDialog(press) {
+  let dialog;
+  const field = h("input", { type: "text", autocomplete: "off", maxLength: 500, "aria-label": t("tv.key.text") });
+  const send = async () => {
+    if (!field.value) return;
+    await press("text", field.value);
+    dialog.close();
+  };
+  field.addEventListener("keydown", (e) => e.key === "Enter" && void send());
+  dialog = openDialog("confirm", h("h2", null, t("tv.textTitle")), h("p", { class: "muted" }, t("tv.textLead")), field, h("footer", null, closeButton(() => dialog, t("common.cancel")), button(t("tv.textSend"), { class: "primary", onclick: () => void send() }, "check")));
+  field.focus();
 }
 
 /** The remote under the chip in the head: the screen is driven from any page, without leaving it */
@@ -12808,7 +12963,7 @@ function tvDropdown(at) {
     try {
       const tv = (state.tv = await api("GET", "/api/tv"));
       // a slider under the finger is not redrawn under it
-      if (!body.querySelector("input[type=range]:active")) put(body, tvRemoteParts(tv, press, turnOn));
+      if (!body.querySelector("input[type=range]:active") && !document.querySelector("dialog.select-list[open]")) put(body, tvRemoteParts(tv, press, turnOn));
     } catch (e) {
       put(body, h("p", { class: "error" }, errorText(e)));
     }
@@ -12900,11 +13055,57 @@ function paintTv() {
     tv.suggested.map((path) => h("div", { class: "kv" }, h("span", { class: "muted with-icon wrap" }, icon("folder"), path), button(t("tv.folderUse"), { class: "small", onclick: () => void change({ folders: [...tv.folders, path] }) }))),
   );
 
+  // one of Kodi's own settings as a row: a list of Kodi's values or of ours, or a switch
+  const pref = (id) => tv.prefs?.[id];
+  const set = (setting, value) => void change({ setting, value });
+  const listed = (id, title, hint, options) => pref(id) && settingRow(title, hint, h("select", { onchange: (e) => set(id, typeof pref(id).value === "number" ? Number(e.target.value) : e.target.value) }, (options ?? pref(id).options ?? []).map((o) => h("option", { value: String(o.value), selected: o.value === pref(id).value }, o.label))));
+  const flag = (id, title, hint) => {
+    if (!pref(id)) return null;
+    const el = h("button", { type: "button", role: "switch", class: "ha-switch", "aria-checked": String(pref(id).value === true), "aria-label": title, onclick: () => ((el.disabled = true), set(id, pref(id).value !== true)) }, h("i"));
+    return settingRow(title, hint, el);
+  };
   const audioCard = tv.audio && tv.audio.options.length > 0 && h(
     "section",
-    { class: "card pad" },
+    { class: "card pad stack" },
+    h("div", { class: "section-head" }, h("h2", null, t("tv.sound"))),
     settingRow(t("tv.audio"), t("tv.audioHint"), h("select", { onchange: (e) => void change({ audio: e.target.value }) }, tv.audio.options.map((o) => h("option", { value: o.value, selected: o.value === tv.audio.value }, o.label)))),
+    listed("audiooutput.channels", t("tv.channels"), t("tv.channelsHint")),
+    flag("audiooutput.passthrough", t("tv.passthrough"), t("tv.passthroughHint")),
+    flag("audiooutput.guisoundmode", t("tv.menuSounds"), null),
   );
+  const speaks = tv.language;
+  const languageCard = tv.answers && speaks && h(
+    "section",
+    { class: "card pad stack" },
+    h("div", { class: "section-head" }, h("h2", null, t("tv.language"))),
+    settingRow(
+      t("tv.languageOwn"),
+      speaks.busy ? t("tv.languageBusy") : speaks.failed ? t("tv.languageFailed") : t("tv.languageHint"),
+      h("select", { disabled: speaks.busy, onchange: (e) => void change({ language: e.target.value }) }, !speaks.value && h("option", { value: "", selected: true }, t("tv.languageOther")), state.languages.filter((code) => ["en", "uk"].includes(code)).map((code) => h("option", { value: code, selected: code === speaks.value }, LANGUAGE_NAMES[code] ?? code))),
+    ),
+    listed("locale.audiolanguage", t("tv.audioLanguage"), t("tv.audioLanguageHint")),
+    listed("locale.subtitlelanguage", t("tv.subsLanguage"), null),
+  );
+  const saver = pref("screensaver.mode") && [
+    listed("screensaver.mode", t("tv.saver"), t("tv.saverHint"), [{ value: "", label: t("tv.saver.off") }, { value: "screensaver.xbmc.builtin.dim", label: t("tv.saver.dim") }, { value: "screensaver.xbmc.builtin.black", label: t("tv.saver.black") }, ...(["", "screensaver.xbmc.builtin.dim", "screensaver.xbmc.builtin.black"].includes(pref("screensaver.mode").value) ? [] : [{ value: pref("screensaver.mode").value, label: pref("screensaver.mode").value }])]),
+    pref("screensaver.mode").value !== "" && listed("screensaver.time", t("tv.saverAfter"), null, [...new Set([1, 2, 3, 5, 10, 15, 30, 60, pref("screensaver.time")?.value])].filter(Number.isFinite).sort((a, b) => a - b).map((n) => ({ value: n, label: t("time.minutes", { n }) }))),
+  ];
+  // the browser's own player stands on ffmpeg: said with what it gives, the command and the button
+  const bring = button(t("mounting.needs.install", { package: "FFmpeg" }), {
+    class: "small",
+    onclick: async () => {
+      bring.disabled = true;
+      try {
+        await api("POST", "/api/tools/ffmpeg/install", {});
+        await refresh();
+        void loadTv();
+      } catch (e) {
+        error.textContent = errorText(e);
+        bring.disabled = false;
+      }
+    },
+  }, "download");
+  const browserCard = h("section", { class: "card pad stack" }, h("div", { class: "section-head" }, h("h2", null, t("tv.inBrowser")), tv.streams && h("span", { class: "state running" }, t("tv.inBrowserOn"))), h("p", { class: "muted small" }, t(tv.streams ? "tv.inBrowserLead" : "tv.inBrowserNeeds")), !tv.streams && [h("p", { class: "cmd" }, icon("terminal"), tv.streamsInstall), bring]);
 
   const picture = tv.picture;
   const follow = picture && h("button", { type: "button", role: "switch", class: "ha-switch", "aria-checked": String(picture.match), "aria-label": t("tv.match"), onclick: () => ((follow.disabled = true), void change({ match: !picture.match })) }, h("i"));
@@ -12915,10 +13116,11 @@ function paintTv() {
     settingRow(t("tv.resolution"), t("tv.resolutionHint", { n: TV_KEEP_SECONDS }), h("select", { onchange: (e) => void change({ resolution: Number(e.target.value) }) }, picture.resolution.options.map((o) => h("option", { value: String(o.value), selected: o.value === picture.resolution.value }, o.label)))),
     picture.rate.options.length > 1 && settingRow(t("tv.rate"), null, h("select", { onchange: (e) => void change({ rate: e.target.value }) }, picture.rate.options.map((o) => h("option", { value: o.value, selected: o.value === picture.rate.value }, t("tv.hz", { n: o.label }))))),
     settingRow(t("tv.match"), t("tv.matchHint"), follow),
+    saver,
   );
 
   // the remote is the page's main thing; what is set once stands beside it
-  put(box, h("div", { class: "tv-page" }, remoteCard, h("div", { class: "stack" }, playerCard, screenCard, pictureCard, foldersCard, audioCard)));
+  put(box, h("div", { class: "tv-page" }, remoteCard, h("div", { class: "stack" }, playerCard, screenCard, foldersCard, languageCard, audioCard, pictureCard, browserCard)));
   if (tv.asking) tvKeepDialog();
 }
 

@@ -12,7 +12,7 @@ import { AppError, startJob, type Job } from "./apps";
 import { bus } from "./bus";
 import { saveSettings, settings } from "./config";
 import { installCommand, packageManager, PATH, run, runLogged } from "./packages";
-import { advancedXml, cleanFolders, clickPacket, helloPacket, KEEP_NO, KEEP_SECONDS, KEEP_WINDOW, KEEP_YES, MATCH_OFF, MATCH_ON, pictureOf, decodePackages, isOurs, playable, portIn, readDisplay, hwdbText, keymapXml, polkitRule, remoteCall, seconds, shortTitle, sourcesXml, takeJson, TV_HOME, TV_HWDB, TV_POLKIT, TV_PORT, TV_UNIT, TV_USER, unitText, type Call, type Display, type Picture } from "./tv";
+import { advancedXml, builtinPacket, cleanFolders, cleanStart, clickPacket, keyframeArgs, mediaOf, prefsOf, prefValue, streamArgs, subsArgs, tracksOf, TV_LANGUAGES, type Media, type Pref, type Tracks, helloPacket, KEEP_NO, KEEP_SECONDS, KEEP_WINDOW, KEEP_YES, MATCH_OFF, MATCH_ON, pictureOf, decodePackages, isOurs, playable, portIn, readDisplay, hwdbText, keymapXml, polkitRule, remoteCall, seconds, shortTitle, sourcesXml, takeJson, TV_HOME, TV_HWDB, TV_POLKIT, TV_PORT, TV_UNIT, TV_USER, unitText, type Call, type Display, type Picture } from "./tv";
 
 const USERDATA = join(TV_HOME, ".kodi", "userdata");
 const UNIT_FILE = "/etc/systemd/system/" + TV_UNIT;
@@ -105,7 +105,7 @@ export const tvEnabled = (): boolean => existsSync("/etc/systemd/system/multi-us
 /** Hata has set the player up here before */
 export const tvSetUp = (): boolean => existsSync(UNIT_FILE);
 
-interface Playing {
+interface Playing extends Tracks {
   title: string;
   file: string;
   paused: boolean;
@@ -137,6 +137,14 @@ export interface TvReport {
   audio: { value: string; options: { label: string; value: string }[] } | null;
   /** The resolution, the refresh rate and whether the rate follows the film; null while Kodi does not answer */
   picture: Picture | null;
+  /** Kodi's own settings the page shows (`PREFS`), by their names there */
+  prefs: Record<string, Pref>;
+  /** The language Kodi speaks: one of Hata's ("en", "uk"), "" — another; `busy` while a language is fetched and set */
+  language: { value: string; busy: boolean; failed: boolean };
+  /** ffmpeg is here: the browser's player chooses sound and subtitles and plays what a browser alone cannot */
+  streams: boolean;
+  /** The command that brings ffmpeg, shown by its button */
+  streamsInstall: string;
   /** A new screen mode is on trial: seconds left to keep it before Kodi puts the old one back; 0 — none is */
   asking: number;
 }
@@ -147,10 +155,10 @@ async function nowPlaying(): Promise<{ player: number | null; playing: Playing |
   const players = (await rpc({ method: "Player.GetActivePlayers" })) as { playerid: number }[] | null;
   const player = players?.[0]?.playerid ?? null;
   if (player === null) return { player, playing: null };
-  const [props, item] = (await Promise.all([rpc({ method: "Player.GetProperties", params: { playerid: player, properties: ["time", "totaltime", "speed"] } }), rpc({ method: "Player.GetItem", params: { playerid: player, properties: ["title", "file"] } })])) as [Record<string, unknown> | null, { item?: Record<string, unknown> } | null];
+  const [props, item] = (await Promise.all([rpc({ method: "Player.GetProperties", params: { playerid: player, properties: ["time", "totaltime", "speed", "audiostreams", "currentaudiostream", "subtitles", "currentsubtitle", "subtitleenabled"] } }), rpc({ method: "Player.GetItem", params: { playerid: player, properties: ["title", "file"] } })])) as [Record<string, unknown> | null, { item?: Record<string, unknown> } | null];
   if (!props) return { player, playing: null };
   const file = String(item?.item?.file ?? "");
-  return { player, playing: { title: shortTitle(String(item?.item?.title || item?.item?.label || file.split("/").pop() || "")), file, paused: props.speed === 0, time: seconds(props.time), total: seconds(props.totaltime) } };
+  return { player, playing: { title: shortTitle(String(item?.item?.title || item?.item?.label || file.split("/").pop() || "")), file, paused: props.speed === 0, time: seconds(props.time), total: seconds(props.totaltime), ...tracksOf(props) } };
 }
 
 async function audioChoice(): Promise<TvReport["audio"]> {
@@ -164,6 +172,22 @@ async function pictureChoice(): Promise<Picture | null> {
   return pictureOf(said?.settings, adjust?.value);
 }
 
+let prefsKept: { at: number; prefs: Record<string, Pref>; language: string } | null = null;
+
+/** The settings shown on the page: asked at most twice a minute — Kodi's port answers one caller at a time */
+async function prefsChoice(): Promise<{ prefs: Record<string, Pref>; language: string }> {
+  if (prefsKept && Date.now() - prefsKept.at < 30_000) return prefsKept;
+  const lists = (await Promise.all([["player", "language"], ["system", "audio"], ["interface", "screensaver"]].map(([section, category]) => rpc({ method: "Settings.GetSettings", params: { level: "expert", filter: { section, category } } })))) as ({ settings?: unknown[] } | null)[];
+  const spoken = ((await rpc({ method: "Settings.GetSettingValue", params: { setting: "locale.language" } })) as { value?: unknown } | null)?.value;
+  const language = Object.entries(TV_LANGUAGES).find(([, addon]) => addon === spoken)?.[0] ?? "";
+  if (lists.some((one) => !one)) return { prefs: {}, language };
+  prefsKept = { at: Date.now(), prefs: prefsOf(lists.flatMap((one) => one?.settings ?? [])), language };
+  return prefsKept;
+}
+
+/** The programs the browser's player stands on */
+export const streamsHere = (): boolean => has("ffmpeg") && has("ffprobe");
+
 /** A screen mode on trial: Kodi's control port is silent until it is answered or its time is out */
 let trial: { until: number; done: Promise<unknown>; port: number } | null = null;
 let last: TvReport | null = null;
@@ -176,7 +200,7 @@ export async function tvReport(): Promise<TvReport> {
   const installed = has("kodi");
   const running = installed && tvSetUp() && (await unit("is-active")) === "active";
   const app = running ? ((await rpc({ method: "Application.GetProperties", params: { properties: ["volume", "muted", "version"] } }, 2500)) as { volume?: number; muted?: boolean; version?: { major?: number; minor?: number } } | null) : null;
-  const [playing, audio, picture] = app ? await Promise.all([nowPlaying().then((now) => now.playing), audioChoice(), pictureChoice()]) : [null, null, null];
+  const [playing, audio, picture, kept] = app ? await Promise.all([nowPlaying().then((now) => now.playing), audioChoice(), pictureChoice(), prefsChoice()]) : [null, null, null, null];
   const media = join(settings.dataRoot, "Media");
   return (last = {
     displays: displays(),
@@ -196,6 +220,10 @@ export async function tvReport(): Promise<TvReport> {
     muted: app?.muted ?? false,
     audio,
     picture,
+    prefs: kept?.prefs ?? {},
+    language: { value: kept?.language ?? "", busy: speaking === "busy", failed: speaking === "failed" },
+    streams: streamsHere(),
+    streamsInstall: installCommand("ffmpeg"),
     asking: secondsLeft(),
   });
 }
@@ -367,7 +395,7 @@ export async function setPicture(data: Record<string, unknown>, by: string): Pro
   if (chosen.value === picture[which].value) return tvReport();
   // the screen goes dark for a moment and a window covers it: not over a film somebody watches
   if ((await nowPlaying()).player !== null) throw new AppError("tv.picturePlaying", 409);
-  const port = ((await rpc({ method: "Settings.GetSettingValue", params: { setting: "services.esenabled" } })) as { value?: unknown } | null)?.value === true ? Number(((await rpc({ method: "Settings.GetSettingValue", params: { setting: "services.esport" } })) as { value?: unknown } | null)?.value) || 0 : 0;
+  const port = await eventPort();
   await tvReport();
   const label = which === "rate" ? chosen.label + " Hz" : chosen.label;
   const mine = { until: Date.now() + KEEP_SECONDS * 1000, port, done: rpc({ method: "Settings.SetSettingValue", params: { setting: which === "resolution" ? "videoscreen.resolution" : "videoscreen.screenmode", value: chosen.value } }, (KEEP_SECONDS + 10) * 1000) };
@@ -382,19 +410,83 @@ export async function setPicture(data: Record<string, unknown>, by: string): Pro
   return tvReport();
 }
 
+/** One of Kodi's settings of the page (`PREFS`) */
+export async function setPref(id: unknown, value: unknown, by: string): Promise<TvReport> {
+  if (trial) throw new AppError("tv.asking", 409);
+  prefsKept = null;
+  const { prefs } = await prefsChoice();
+  if (Object.keys(prefs).length === 0) throw new AppError("tv.notRunning", 409);
+  const next = typeof id === "string" ? prefValue(id, value, prefs) : undefined;
+  if (next === undefined) throw new AppError("tv.badSetting", 400);
+  await rpc({ method: "Settings.SetSettingValue", params: { setting: id as string, value: next } });
+  prefsKept = null;
+  record("tv.setting", { user: by, detail: id as string });
+  return tvReport();
+}
+
+/** A packet for Kodi's event port: its own commands and presses, which the control port has no call for */
+async function toEventPort(port: number, ...packets: Uint8Array[]): Promise<void> {
+  const socket = createSocket("udp4");
+  try {
+    for (const packet of packets) await new Promise<void>((resolve) => socket.send(packet, port, "127.0.0.1", () => resolve()));
+  } finally {
+    socket.close();
+  }
+}
+
+/** Kodi's event port, 0 when it is turned off there */
+async function eventPort(): Promise<number> {
+  const value = async (setting: string) => ((await rpc({ method: "Settings.GetSettingValue", params: { setting } })) as { value?: unknown } | null)?.value;
+  return (await value("services.esenabled")) === true ? Number(await value("services.esport")) || 0 : 0;
+}
+
+let speaking: "" | "busy" | "failed" = "";
+
+/**
+ * The language Kodi speaks. Debian's package has English alone: another one is a pack Kodi fetches from
+ * its own repository — asked for through the event port, its "install?" answered for the person — and
+ * only then the setting is changed. Goes on in the background; the page sees `language.busy`.
+ */
+export async function setLanguage(lang: unknown, by: string): Promise<TvReport> {
+  const addon = typeof lang === "string" ? TV_LANGUAGES[lang] : undefined;
+  if (!addon) throw new AppError("tv.badSetting", 400);
+  if (trial || speaking === "busy") throw new AppError("tv.asking", 409);
+  if ((await rpc({ method: "JSONRPC.Ping" }, 2000)) !== "pong") throw new AppError("tv.notRunning", 409);
+  // the whole screen is drawn anew in the other language: not over a film somebody watches
+  if ((await nowPlaying()).player !== null) throw new AppError("tv.languagePlaying", 409);
+  const there = async () => !!((await rpc({ method: "Addons.GetAddonDetails", params: { addonid: addon, properties: ["enabled"] } })) as { addon?: unknown } | null)?.addon;
+  speaking = "busy";
+  void (async () => {
+    try {
+      if (!(await there())) {
+        const port = await eventPort();
+        if (!port) throw new Error("no event port");
+        await toEventPort(port, helloPacket(), builtinPacket(`InstallAddon(${addon})`));
+        for (let i = 0; i < 60 && !(await there()); i++) {
+          await Bun.sleep(1500);
+          const shown = ((await rpc({ method: "GUI.GetProperties", params: { properties: ["currentwindow"] } })) as { currentwindow?: { id?: number } } | null)?.currentwindow?.id;
+          if (shown === KEEP_WINDOW) await toEventPort(port, clickPacket(KEEP_WINDOW, KEEP_YES));
+        }
+        if (!(await there())) throw new Error("not installed");
+      }
+      await rpc({ method: "Settings.SetSettingValue", params: { setting: "locale.language", value: addon } }, 30_000);
+      speaking = "";
+      record("tv.language", { user: by, detail: lang as string });
+    } catch {
+      speaking = "failed";
+    }
+    prefsKept = null;
+    bus.publish("tv");
+  })();
+  return tvReport();
+}
+
 /** The answer to Kodi's "keep it?", pressed for the person: its control port is deaf meanwhile, its event port is not */
 export async function keepPicture(keep: boolean): Promise<TvReport> {
   const mine = trial;
   if (!mine) return tvReport();
   if (!mine.port) throw new AppError("tv.answerOnScreen", 409);
-  const socket = createSocket("udp4");
-  const send = (packet: Uint8Array) => new Promise<void>((resolve) => socket.send(packet, mine.port, "127.0.0.1", () => resolve()));
-  try {
-    await send(helloPacket());
-    await send(clickPacket(KEEP_WINDOW, keep ? KEEP_YES : KEEP_NO));
-  } finally {
-    socket.close();
-  }
+  await toEventPort(mine.port, helloPacket(), clickPacket(KEEP_WINDOW, keep ? KEEP_YES : KEEP_NO));
   const kept = await Promise.race([mine.done, Bun.sleep(5000).then(() => "late")]);
   if (kept === "late") throw new AppError("tv.answerOnScreen", 409);
   if (keep && kept !== true) throw new AppError("tv.notKept", 409);
@@ -429,7 +521,7 @@ let watching = false;
 let heard = false;
 
 /** The player as every page shows it: whether it runs, and what plays (null — nothing) */
-export const tvNow = (): { on: boolean; screen: boolean; playing: TvNow | null } => ({ on: heard, screen: screenThere(), playing: now });
+export const tvNow = (): { on: boolean; screen: boolean; streams: boolean; playing: TvNow | null } => ({ on: heard, screen: screenThere(), streams: streamsHere(), playing: now });
 
 let screen = { at: 0, there: false };
 /** A TV or monitor is plugged in and seen: looked at anew every ten seconds at most */
@@ -488,7 +580,7 @@ export function watchTv(): void {
 
 /** A button of the page's remote */
 export async function remote(action: unknown, value: unknown): Promise<void> {
-  const { player } = typeof action === "string" && /^(playpause|stop|forward|rewind|seek)$/.test(action) ? await nowPlaying() : { player: null };
+  const { player } = typeof action === "string" && /^(playpause|stop|forward|rewind|seek|audio|subtitle)$/.test(action) ? await nowPlaying() : { player: null };
   let call = typeof action === "string" ? remoteCall(action, value, player) : null;
   if (!call) throw new AppError("tv.badAction", 400);
   // "Menu" is the menu of what is on the screen: over a film that is the player's own (sound, subtitles,
@@ -499,4 +591,90 @@ export async function remote(action: unknown, value: unknown): Promise<void> {
     else if (shown === WINDOW_OSD) call = { method: "Input.Back" };
   }
   if ((await rpc(call)) === null && (await rpc({ method: "JSONRPC.Ping" }, 1500)) !== "pong") throw new AppError("tv.notRunning", 409);
+}
+
+// --- The browser's player: a file of this server made into what a browser plays, by ffmpeg ---------
+
+const probed = new Map<string, Media>();
+
+async function fileFor(path: unknown): Promise<string> {
+  if (typeof path !== "string" || !path.startsWith("/") || /[\0\n]/.test(path)) throw new AppError("tv.noFile", 404);
+  if (!streamsHere()) throw new AppError("tv.noStreams", 409);
+  let file = false;
+  try {
+    file = statSync(path).isFile();
+  } catch {}
+  if (!file) throw new AppError("tv.noFile", 404);
+  return path;
+}
+
+/**
+ * What a file holds — its length, sound tracks and subtitles — and, for a moment asked, where the
+ * picture can really start (`start`): the page counts its clock and its subtitles from there.
+ */
+export async function mediaInfo(raw: unknown, at: number): Promise<Media & { start: string }> {
+  const path = await fileFor(raw);
+  const key = `${path}\n${statSync(path).mtimeMs}`;
+  let media = probed.get(key);
+  if (!media) {
+    const said = await run(["ffprobe", "-v", "error", "-print_format", "json", "-show_format", "-show_streams", path], 30_000);
+    if (said.code !== 0) throw new AppError("tv.notMedia", 409);
+    media = mediaOf(JSON.parse(said.out || "{}"));
+    if (probed.size > 50) probed.clear();
+    probed.set(key, media);
+  }
+  let start = "0";
+  if (at > 0.5 && media.video) {
+    const found = (await run(keyframeArgs(path, at), 20_000)).out.split("\n").map((line) => line.trim().replace(/,+$/, "")).find((line) => cleanStart(line));
+    start = found ?? at.toFixed(3);
+  }
+  return { ...media, start };
+}
+
+/**
+ * A program whose output is the answer: ended when the browser stops listening. A browser that went
+ * away while nothing was being read was seen to leave the program waiting for ever on its full pipe,
+ * so one nobody has read from for a minute is ended too — a player paused that long asks again.
+ */
+function piped(argv: string[], type: string, signal: AbortSignal): Response {
+  const proc = Bun.spawn(argv, { stdout: "pipe", stderr: "ignore", stdin: "ignore", env: { PATH } });
+  const end = () => proc.kill();
+  signal.addEventListener("abort", end, { once: true });
+  const reader = proc.stdout.getReader();
+  let read = Date.now();
+  let reading = false;
+  const watch = setInterval(() => !reading && Date.now() - read > STREAM_IDLE_MS && end(), 10_000);
+  void proc.exited.then(() => clearInterval(watch));
+  return new Response(
+    new ReadableStream<Uint8Array>({
+      async pull(controller) {
+        reading = true;
+        const { done, value } = await reader.read();
+        reading = false;
+        read = Date.now();
+        if (done) controller.close();
+        else controller.enqueue(value);
+      },
+      cancel: end,
+    }),
+    { headers: { "content-type": type, "cache-control": "no-store" } },
+  );
+}
+
+const STREAM_IDLE_MS = 60_000;
+
+/** The file from `start` on with one of its sound tracks, as a browser plays it */
+export async function mediaStream(raw: unknown, start: unknown, audio: number, signal: AbortSignal): Promise<Response> {
+  const path = await fileFor(raw);
+  const from = cleanStart(start);
+  if (from === null || !Number.isInteger(audio) || audio < 0 || audio > 99) throw new AppError("tv.badSetting", 400);
+  return piped(streamArgs(path, from, audio), "video/mp4", signal);
+}
+
+/** One of the file's subtitles from the same moment on */
+export async function mediaSubs(raw: unknown, start: unknown, index: number, signal: AbortSignal): Promise<Response> {
+  const path = await fileFor(raw);
+  const from = cleanStart(start);
+  if (from === null || !Number.isInteger(index) || index < 0 || index > 199) throw new AppError("tv.badSetting", 400);
+  return piped(subsArgs(path, from, index), "text/vtt; charset=utf-8", signal);
 }

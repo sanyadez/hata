@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { clickPacket, helloPacket, KEEP_WINDOW, KEEP_YES, pictureOf, advancedXml, cleanFolders, shortTitle, hwdbText, keymapXml, polkitRule, decodePackages, isOurs, monitorAudio, monitorName, playable, portIn, readDisplay, remoteCall, seconds, sourcesXml, takeJson, unitText } from "../src/tv";
+import { cleanStart, keyframeArgs, mediaOf, prefsOf, prefValue, streamArgs, subsArgs, tracksOf, clickPacket, helloPacket, KEEP_WINDOW, KEEP_YES, pictureOf, advancedXml, cleanFolders, shortTitle, hwdbText, keymapXml, polkitRule, decodePackages, isOurs, monitorAudio, monitorName, playable, portIn, readDisplay, remoteCall, seconds, sourcesXml, takeJson, unitText } from "../src/tv";
 
 function edid(name: string, audio: boolean): Uint8Array {
   const data = new Uint8Array(256);
@@ -139,4 +139,76 @@ test("a button of Kodi's window is pressed by a packet of its event port", () =>
   const hello = helloPacket();
   expect([...hello.subarray(6, 8)]).toEqual([0, 1]);
   expect(new TextDecoder().decode(hello.subarray(32, 36))).toBe("Hata");
+});
+
+test("the tracks of what plays, and the calls that choose them", () => {
+  const props = {
+    audiostreams: [{ index: 0, language: "ukr", name: "DUB", codec: "ac3", channels: 6 }, { index: 1, language: "eng", name: "Original", codec: "eac3", channels: 6 }, { nothing: 1 }],
+    currentaudiostream: { index: 1, language: "eng", name: "Original" },
+    subtitles: [{ index: 0, language: "ukr", name: "Forced" }, { index: 1, language: "eng", name: "Full" }],
+    currentsubtitle: { index: 1, language: "eng", name: "Full" },
+    subtitleenabled: true,
+  };
+  const tracks = tracksOf(props);
+  expect(tracks.audio).toEqual([{ index: 0, language: "ukr", name: "DUB", codec: "ac3", channels: 6 }, { index: 1, language: "eng", name: "Original", codec: "eac3", channels: 6 }]);
+  expect(tracks.audioNow).toBe(1);
+  expect(tracks.subNow).toBe(1);
+  expect(tracksOf({ ...props, subtitleenabled: false }).subNow).toBe(-1);
+  expect(tracksOf(null)).toEqual({ audio: [], audioNow: -1, subs: [], subNow: -1 });
+  expect(remoteCall("audio", 1, 0)).toEqual({ method: "Player.SetAudioStream", params: { playerid: 0, stream: 1 } });
+  expect(remoteCall("audio", "1", 0)).toBeNull();
+  expect(remoteCall("audio", 1, null)).toBeNull();
+  expect(remoteCall("subtitle", "off", 1)).toEqual({ method: "Player.SetSubtitle", params: { playerid: 1, subtitle: "off" } });
+  expect(remoteCall("subtitle", 2, 1)).toEqual({ method: "Player.SetSubtitle", params: { playerid: 1, subtitle: 2, enable: true } });
+  expect(remoteCall("text", "Людина-павук", null)).toEqual({ method: "Input.SendText", params: { text: "Людина-павук", done: true } });
+  expect(remoteCall("text", "", null)).toBeNull();
+  expect(remoteCall("text", "a\nb", null)).toBeNull();
+});
+
+test("Kodi's settings the page shows, and only its values go back", () => {
+  const prefs = prefsOf([
+    { id: "locale.audiolanguage", value: "mediadefault", options: [{ label: "Media default", value: "mediadefault" }, { label: "Ukrainian", value: "Ukrainian" }] },
+    { id: "audiooutput.passthrough", value: false },
+    { id: "audiooutput.guisoundmode", value: 1, options: [{ label: "Never", value: 0 }] },
+    { id: "screensaver.time", value: 3 },
+    { id: "services.webserver", value: true },
+  ]);
+  expect(Object.keys(prefs)).toEqual(["locale.audiolanguage", "audiooutput.passthrough", "audiooutput.guisoundmode", "screensaver.time"]);
+  expect(prefs["audiooutput.guisoundmode"]).toEqual({ value: true });
+  expect(prefs["screensaver.time"]).toEqual({ value: 3 });
+  expect(prefValue("locale.audiolanguage", "Ukrainian", prefs)).toBe("Ukrainian");
+  expect(prefValue("locale.audiolanguage", "Klingon", prefs)).toBeUndefined();
+  expect(prefValue("audiooutput.passthrough", true, prefs)).toBe(true);
+  expect(prefValue("audiooutput.guisoundmode", false, prefs)).toBe(0);
+  expect(prefValue("audiooutput.guisoundmode", 1, prefs)).toBeUndefined();
+  expect(prefValue("screensaver.time", 10, prefs)).toBe(10);
+  expect(prefValue("screensaver.time", 7, prefs)).toBeUndefined();
+  expect(prefValue("services.webserver", true, prefs)).toBeUndefined();
+  expect(prefValue("screensaver.mode", "", prefs)).toBeUndefined();
+});
+
+test("a file read for the browser's player, and the programs' arguments", () => {
+  const media = mediaOf({
+    format: { duration: "8700.5" },
+    streams: [
+      { codec_type: "video", codec_name: "h264", width: 1920, height: 1012 },
+      { codec_type: "video", codec_name: "mjpeg", disposition: { attached_pic: 1 } },
+      { codec_type: "audio", codec_name: "ac3", channels: 6, tags: { language: "ukr", title: "DUB" } },
+      { codec_type: "audio", codec_name: "aac", channels: 2, tags: { LANGUAGE: "eng" } },
+      { codec_type: "subtitle", codec_name: "subrip", tags: { language: "ukr", title: "Full" } },
+      { codec_type: "subtitle", codec_name: "hdmv_pgs_subtitle", tags: { language: "eng" } },
+    ],
+  });
+  expect(media.duration).toBe(8700.5);
+  expect(media.video).toEqual({ codec: "h264", width: 1920, height: 1012 });
+  expect(media.audio).toEqual([{ index: 0, language: "ukr", name: "DUB", codec: "ac3", channels: 6 }, { index: 1, language: "eng", name: "", codec: "aac", channels: 2 }]);
+  expect(media.subs.map((one) => [one.index, one.text])).toEqual([[0, true], [1, false]]);
+  expect(mediaOf(null)).toEqual({ duration: 0, video: null, audio: [], subs: [] });
+  expect(streamArgs("/a b/-x.mkv", "12.5", 1).join(" ")).toContain("-ss 12.5 -i /a b/-x.mkv -map 0:v:0 -map 0:a:1? -c:v copy");
+  expect(subsArgs("/f.mkv", "0", 2).slice(-5)).toEqual(["-map", "0:s:2", "-f", "webvtt", "pipe:1"]);
+  expect(keyframeArgs("/f.mkv", 61.25)).toContain("61.250%+#1");
+  expect(cleanStart("1234.567")).toBe("1234.567");
+  expect(cleanStart("-1")).toBeNull();
+  expect(cleanStart("1e5")).toBeNull();
+  expect(cleanStart(5)).toBeNull();
 });

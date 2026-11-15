@@ -73,6 +73,7 @@ const SPECS: Spec[] = [
   { id: "incus", name: "Incus", package: "incus-base", bin: "incus", version: ["incus", "--version"], page: "#/containers", family: ["incus-base", "incus-client", "incus"] },
   { id: "incus-vm", name: "QEMU for Incus", package: "qemu-system-x86", bin: "qemu-system-x86_64", version: ["qemu-system-x86_64", "--version"], page: "#/containers", family: ["incus", "incus-agent", "qemu-system-x86", "qemu-system-modules-spice", "qemu-utils", "ovmf"] },
   { id: "kodi", name: "Kodi", package: "kodi", bin: "kodi", version: ["kodi", "--version"], page: "#/tv" },
+  { id: "ffmpeg", name: "FFmpeg", package: "ffmpeg", bin: "ffmpeg", version: ["ffmpeg", "-version"], page: "#/tv" },
   { id: "openssh-client", name: "OpenSSH client", package: "openssh-client", bin: "sftp", version: ["ssh", "-V"], page: "#/settings/backups", base: true },
 ];
 

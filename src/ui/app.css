@@ -1928,3 +1928,21 @@ dialog.dropdown.tv-drop[open] { padding: 18px 20px 20px; display: grid; gap: 14p
 .tvr-note.warn { background: var(--warn-soft); }
 .tv-after { background: none; border-style: dashed; box-shadow: none; }
 .tv-page .cmd { white-space: normal; overflow-wrap: anywhere; }
+
+/* the sound and the subtitles of what plays, in the remote */
+.tvr-tracks { display: grid; gap: 8px; }
+.tvr-tracks label { display: grid; grid-template-columns: 84px minmax(0, 1fr); gap: 8px; align-items: center; font-size: 12.5px; }
+.tvr-tracks :is(select, .select-btn) { width: 100%; min-width: 0; }
+.tvr-keys { flex-wrap: wrap; }
+
+/* Hata's own player in the browser: the picture, and a bar of ours under it */
+.sp { display: grid; grid-template-rows: minmax(0, 1fr) auto; width: 100%; background: #000; position: relative; }
+.sp video { width: 100%; max-height: calc(100dvh - 250px); object-fit: contain; display: block; }
+.sp:fullscreen video { max-height: none; height: 100%; }
+.sp-bar { display: flex; align-items: center; gap: 8px; padding: 8px 10px; background: #141414; color: #ececec; flex-wrap: wrap; }
+.sp-bar .icon-btn { color: inherit; }
+.sp-bar .tvr-slider { flex: 1 1 160px; width: auto; }
+.sp-bar :is(select, .select-btn) { max-width: 200px; min-width: 0; }
+.sp-clock { font: 12px var(--font-mono, monospace); white-space: nowrap; }
+.sp-note { position: absolute; inset: 0 0 auto 0; margin: 0; padding: 10px 14px; background: rgb(0 0 0 / 0.7); color: #fff; font-size: 13px; }
+.sp video::cue { font-size: 1.1em; background: rgb(0 0 0 / 0.55); }

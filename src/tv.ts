@@ -226,6 +226,13 @@ export function remoteCall(action: string, value: unknown, player: number | null
       return Number.isFinite(volume) ? { method: "Application.SetVolume", params: { volume: Math.round(Math.min(100, Math.max(0, volume))) } } : null;
     }
     case "mute": return { method: "Application.SetMute", params: { mute: "toggle" } };
+    case "audio": return Number.isInteger(value) && (value as number) >= 0 ? playing((playerid) => ({ method: "Player.SetAudioStream", params: { playerid, stream: value } })) : null;
+    case "subtitle": {
+      if (value === "off") return playing((playerid) => ({ method: "Player.SetSubtitle", params: { playerid, subtitle: "off" } }));
+      return Number.isInteger(value) && (value as number) >= 0 ? playing((playerid) => ({ method: "Player.SetSubtitle", params: { playerid, subtitle: value, enable: true } })) : null;
+    }
+    // typed on a phone instead of picked letter by letter on the screen: goes into the field Kodi has open
+    case "text": return typeof value === "string" && value.length > 0 && value.length <= 500 && !/[\x00-\x1f]/.test(value) ? { method: "Input.SendText", params: { text: value, done: true } } : null;
     default: return null;
   }
 }
@@ -344,5 +351,134 @@ const bytes = (text: string): number[] => [...new TextEncoder().encode(text), 0]
 /** The greeting Kodi's event port expects first */
 export const helloPacket = (): Uint8Array => eventPacket(0x01, new Uint8Array([...bytes("Hata"), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]));
 
-/** A press of one button of one window, as Kodi's own command */
-export const clickPacket = (window: number, control: number): Uint8Array => eventPacket(0x0a, new Uint8Array([0x01, ...bytes(`SendClick(${window},${control})`)]));
+/** One of Kodi's own commands ("built-in functions"), which its control port has no call for */
+export const builtinPacket = (command: string): Uint8Array => eventPacket(0x0a, new Uint8Array([0x01, ...bytes(command)]));
+
+/** A press of one button of one window */
+export const clickPacket = (window: number, control: number): Uint8Array => builtinPacket(`SendClick(${window},${control})`);
+
+/** A sound track or a subtitle of what plays, as the page lists it */
+export interface Track {
+  index: number;
+  /** ukr, eng — as the file says */
+  language: string;
+  name: string;
+  codec?: string;
+  channels?: number;
+}
+
+export interface Tracks {
+  audio: Track[];
+  audioNow: number;
+  subs: Track[];
+  /** -1 — subtitles are off */
+  subNow: number;
+}
+
+const track = (raw: unknown): Track[] => {
+  const t = (raw ?? {}) as Record<string, unknown>;
+  if (!Number.isInteger(t.index)) return [];
+  return [{ index: t.index as number, language: typeof t.language === "string" ? t.language.slice(0, 12) : "", name: typeof t.name === "string" ? t.name.replace(/[\x00-\x1f]/g, "").slice(0, 120) : "", ...(typeof t.codec === "string" && t.codec ? { codec: t.codec.slice(0, 20) } : {}), ...(Number.isInteger(t.channels) && (t.channels as number) > 0 ? { channels: t.channels as number } : {}) }];
+};
+
+/** The tracks of what plays, out of Kodi's `Player.GetProperties` */
+export function tracksOf(props: Record<string, unknown> | null): Tracks {
+  const list = (value: unknown) => (Array.isArray(value) ? value.flatMap(track) : []);
+  const subs = list(props?.subtitles);
+  return {
+    audio: list(props?.audiostreams),
+    audioNow: track(props?.currentaudiostream)[0]?.index ?? -1,
+    subs,
+    subNow: props?.subtitleenabled === true && subs.length > 0 ? (track(props?.currentsubtitle)[0]?.index ?? -1) : -1,
+  };
+}
+
+/** Kodi's language packs for the languages Hata speaks */
+export const TV_LANGUAGES: Record<string, string> = { en: "resource.language.en_gb", uk: "resource.language.uk_ua" };
+
+/**
+ * The settings of Kodi the page shows as they are. `list` — one of the values Kodi itself offers;
+ * `fixed` — one of these; `flag` — on / off written as Kodi's two values.
+ */
+export const PREFS: Record<string, { kind: "list" } | { kind: "fixed"; values: (string | number)[] } | { kind: "flag"; on: unknown; off: unknown }> = {
+  "locale.audiolanguage": { kind: "list" },
+  "locale.subtitlelanguage": { kind: "list" },
+  "audiooutput.channels": { kind: "list" },
+  "audiooutput.passthrough": { kind: "flag", on: true, off: false },
+  "audiooutput.guisoundmode": { kind: "flag", on: 1, off: 0 },
+  "screensaver.mode": { kind: "fixed", values: ["", "screensaver.xbmc.builtin.dim", "screensaver.xbmc.builtin.black"] },
+  "screensaver.time": { kind: "fixed", values: [1, 2, 3, 5, 10, 15, 30, 60] },
+};
+
+export interface Pref {
+  value: string | number | boolean;
+  options?: { label: string; value: string | number }[];
+}
+
+/** Those settings out of Kodi's own lists (`Settings.GetSettings`, several categories put together) */
+export function prefsOf(list: unknown): Record<string, Pref> {
+  const out: Record<string, Pref> = {};
+  for (const one of (Array.isArray(list) ? list : []) as { id?: unknown; value?: unknown; options?: { label?: unknown; value?: unknown }[] }[]) {
+    const spec = typeof one?.id === "string" ? PREFS[one.id] : undefined;
+    if (!spec) continue;
+    if (spec.kind === "flag") out[one.id as string] = { value: one.value === spec.on || (spec.on === 1 && Number(one.value) > 0) };
+    else if (typeof one.value === "string" || typeof one.value === "number") {
+      const options = spec.kind === "list" ? (one.options ?? []).flatMap((o) => (typeof o.value === "string" || typeof o.value === "number" ? [{ label: String(o.label).replace(/[\x00-\x1f]/g, "").trim(), value: o.value }] : [])) : undefined;
+      out[one.id as string] = { value: one.value, ...(options ? { options } : {}) };
+    }
+  }
+  return out;
+}
+
+/** What a setting is to be in Kodi for what the page asked; undefined — not a setting of the page's, or not one of its values */
+export function prefValue(id: string, raw: unknown, now: Record<string, Pref>): unknown {
+  const spec = PREFS[id];
+  if (!spec || !now[id]) return undefined;
+  if (spec.kind === "flag") return typeof raw === "boolean" ? (raw ? spec.on : spec.off) : undefined;
+  if (spec.kind === "fixed") return spec.values.includes(raw as string | number) ? raw : undefined;
+  return now[id]!.options?.some((o) => o.value === raw) ? raw : undefined;
+}
+
+/** What a file holds, for the browser's player: read from `ffprobe -show_format -show_streams` */
+export interface Media {
+  duration: number;
+  video: { codec: string; width: number; height: number } | null;
+  audio: Track[];
+  /** `text` — written as text, so a browser can show it; pictures (discs' subtitles) it cannot */
+  subs: (Track & { text: boolean })[];
+}
+
+const TEXT_SUBS = new Set(["subrip", "srt", "ass", "ssa", "webvtt", "mov_text", "text"]);
+
+export function mediaOf(probe: unknown): Media {
+  const said = (probe ?? {}) as { format?: { duration?: unknown }; streams?: Record<string, unknown>[] };
+  const streams = Array.isArray(said.streams) ? said.streams : [];
+  const of = (type: string) => streams.filter((one) => one?.codec_type === type && (one.disposition as Record<string, unknown> | undefined)?.attached_pic !== 1);
+  const named = (one: Record<string, unknown>, index: number): Track => {
+    const tags = (one.tags ?? {}) as Record<string, unknown>;
+    const tag = (name: string) => String(tags[name] ?? tags[name.toUpperCase()] ?? "").replace(/[\x00-\x1f]/g, "");
+    return { index, language: tag("language").slice(0, 12), name: tag("title").slice(0, 120), codec: String(one.codec_name ?? "").slice(0, 20), ...(Number(one.channels) > 0 ? { channels: Number(one.channels) } : {}) };
+  };
+  const video = of("video")[0];
+  return {
+    duration: Number(said.format?.duration) || 0,
+    video: video ? { codec: String(video.codec_name ?? ""), width: Number(video.width) || 0, height: Number(video.height) || 0 } : null,
+    audio: of("audio").map(named),
+    subs: of("subtitle").map((one, index) => ({ ...named(one, index), text: TEXT_SUBS.has(String(one.codec_name)) })),
+  };
+}
+
+/** Asks where the picture can start at or before a moment: a copied video starts only at a whole frame of its own */
+export const keyframeArgs = (path: string, at: number): string[] => ["ffprobe", "-v", "error", "-select_streams", "v:0", "-read_intervals", `${at.toFixed(3)}%+#1`, "-show_entries", "packet=pts_time", "-of", "csv=p=0", path];
+
+/**
+ * The file as a browser plays it, from `start` on: the picture as it is, the chosen sound made into
+ * stereo AAC (browsers play neither AC3 nor DTS), in pieces a browser plays while they still come.
+ */
+export const streamArgs = (path: string, start: string, audio: number): string[] => ["ffmpeg", "-v", "error", "-nostdin", "-ss", start, "-i", path, "-map", "0:v:0", "-map", `0:a:${audio}?`, "-c:v", "copy", "-c:a", "aac", "-ac", "2", "-b:a", "192k", "-movflags", "frag_keyframe+empty_moov+default_base_moof", "-f", "mp4", "pipe:1"];
+
+/** One subtitle of the file from the same moment on, as the text format browsers show */
+export const subsArgs = (path: string, start: string, index: number): string[] => ["ffmpeg", "-v", "error", "-nostdin", "-ss", start, "-i", path, "-map", `0:s:${index}`, "-f", "webvtt", "pipe:1"];
+
+/** A moment of a file as the programs take it: seconds with a fraction, nothing else */
+export const cleanStart = (raw: unknown): string | null => (typeof raw === "string" && /^\d{1,6}(\.\d{1,6})?$/.test(raw) ? raw : null);

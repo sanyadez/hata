@@ -112,7 +112,7 @@ import { mcpResponse } from "./mcp";
 import { instructions as mcpInstructions, tellHttps, TOOLS } from "./mcptools";
 import { moduleOn, modulesOn, modulesReport, setModule, settleModules, startModules } from "./moduleruns";
 import { findForModules } from "./modulefinds";
-import { installTv, playOnTv, remote as tvRemote, keepPicture as keepTvPicture, setAudio as setTvAudio, setFolders as setTvFolders, setPicture as setTvPicture, switchTv, tvNow, tvReport } from "./television";
+import { installTv, playOnTv, remote as tvRemote, keepPicture as keepTvPicture, mediaInfo as tvMediaInfo, mediaStream as tvMediaStream, mediaSubs as tvMediaSubs, setLanguage as setTvLanguage, setPref as setTvPref, setAudio as setTvAudio, setFolders as setTvFolders, setPicture as setTvPicture, switchTv, tvNow, tvReport } from "./television";
 import { moduleOfPath, moduleOfTool } from "./modules";
 import { serverTree } from "./servertree";
 import { homeLinks, localNamesStatus, refreshLocalNames } from "./mdns";
@@ -1524,7 +1524,16 @@ async function api(req: Request, url: URL, server: Server<unknown>): Promise<Res
     if ("folders" in data) return json(await setTvFolders(data.folders, user.name));
     if ("audio" in data) return json(await setTvAudio(data.audio));
     if ("resolution" in data || "rate" in data || "match" in data) return json(await setTvPicture(data, user.name));
+    if ("language" in data) return json(await setTvLanguage(data.language, user.name));
+    if ("setting" in data) return json(await setTvPref(data.setting, data.value, user.name));
     return fail(400, "tv.badAction");
+  }
+  // the browser's own player: what the file holds, the file as a browser plays it, a subtitle of it
+  if (path === "/api/tv/media" && method === "GET") return json(await tvMediaInfo(url.searchParams.get("path"), Number(url.searchParams.get("at")) || 0));
+  if ((path === "/api/tv/media/stream" || path === "/api/tv/media/subs") && method === "GET") {
+    server.timeout(req, 0);
+    const [file, start, n] = [url.searchParams.get("path"), url.searchParams.get("start"), Number(url.searchParams.get("n") ?? "0")];
+    return path.endsWith("stream") ? await tvMediaStream(file, start, n, req.signal) : await tvMediaSubs(file, start, n, req.signal);
   }
   if (path === "/api/tv/keep" && method === "POST") return json(await keepTvPicture((await body(req)).keep === true));
   if (path === "/api/tv/play" && method === "POST") {
