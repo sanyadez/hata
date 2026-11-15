@@ -13043,9 +13043,19 @@ async function loadTv() {
   tvUi.timer = setTimeout(loadTv, state.tv?.running ? 2000 : 8000);
 }
 
+/**
+ * Where the remote stops while the page is scrolled: under the head, or — when it is higher than the
+ * window — as far up as shows its last row, so that it never needs a scroll of its own.
+ */
+function tvStick() {
+  const card = document.querySelector("#tv-body .tv-page > :first-child");
+  if (card) card.style.setProperty("--tv-top", `${Math.min(88, window.innerHeight - card.offsetHeight - 16)}px`);
+}
+
 function renderTv() {
   shell(h("div", { class: "page-head" }, h("div", null, h("h1", null, t("tv.title")), h("p", { class: "meta" }, t("tv.lead"))), h("div", { class: "actions" }, button(t("tv.link"), { onclick: playLinkDialog }, "link"))), h("div", { id: "tv-body", class: "stack" }, h("p", { class: "muted" }, "…")));
-  cleanups.push(() => clearTimeout(tvUi.timer));
+  window.addEventListener("resize", tvStick);
+  cleanups.push(() => (clearTimeout(tvUi.timer), window.removeEventListener("resize", tvStick)));
   if (state.tv) paintTv();
 }
 
@@ -13276,6 +13286,7 @@ function paintTv() {
 
   // the remote is the page's main thing; what is set once stands beside it
   put(box, h("div", { class: "tv-page" }, remoteCard, h("div", { class: "stack" }, playerCard, screenCard, foldersCard, languageCard, audioCard, pictureCard, browserCard)));
+  tvStick();
   if (tv.asking) tvKeepDialog();
 }
 

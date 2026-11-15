@@ -1835,9 +1835,9 @@ body.has-jobs #view:not(.fill) { padding-bottom: calc(var(--jobs-h, 0px) + 48px)
 #tv-body .setting { border-top: 0; padding-top: 0; }
 .tv-page { display: grid; grid-template-columns: minmax(0, 448px) minmax(0, 1fr); gap: 16px; align-items: start; }
 .tv-remote { display: grid; gap: 14px; }
-/* the remote stays in sight while the settings beside it are scrolled; in a window lower than the remote it scrolls by itself */
+/* the remote stays in sight while the settings beside it are scrolled; a remote higher than the window goes up with the page until its last row shows (--tv-top, set by the page) */
 @media (min-width: 901px) {
-  .tv-page > :first-child:not(:only-child) { position: sticky; top: 88px; max-height: calc(100dvh - 104px); overflow-y: auto; }
+  .tv-page > :first-child:not(:only-child) { position: sticky; top: var(--tv-top, 88px); }
 }
 .tvr-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; font-weight: 600; font-size: 13px; }
 .tvr-head .ico { width: 16px; height: 16px; }
