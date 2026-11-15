@@ -5214,15 +5214,17 @@ function qbitAct(path, data) {
 
 function qbitRow(x) {
   const paused = x.group === "paused" || x.group === "finished";
-  const word = x.group === "downloading" && x.waiting ? "waiting" : x.group === "seeding" && x.waiting ? "seedingIdle" : x.group;
+  const word = x.group === "downloading" && x.waiting ? "waiting" : x.group;
+  const act = paused ? (x.group === "finished" ? "qbit.seed" : "qbit.resume") : x.group === "seeding" ? "qbit.stopSeeding" : "qbit.pause";
+  const tool = (label, name, onclick) => h("button", { type: "button", class: "icon-btn", title: label, "aria-label": `${label}: ${x.name}`, onclick }, icon(name));
   return h(
     "tr",
     null,
     h("td", { class: "qbit-name" }, h("div", { class: "strong" }, x.name), h("div", { class: "muted small mono" }, x.path)),
     h("td", { class: "qbit-progress" }, h("div", { class: "small" }, `${x.percent}% · ${bytes(x.size)}`), meterBar(x.percent, x.group === "error" ? "danger" : "")),
-    h("td", null, h("span", { class: "state " + (x.group === "error" ? "restarting" : paused ? "" : x.waiting ? "" : "running") }, t("qbit.group." + word))),
+    h("td", null, h("span", { class: "state " + (x.group === "error" ? "restarting" : paused ? "" : x.group === "downloading" && x.waiting ? "" : "running") }, t("qbit.group." + word))),
     h("td", { class: "small nowrap" }, x.down || x.up ? qbitSpeeds(x) : "—", x.eta !== null && x.group === "downloading" && h("div", { class: "muted" }, t("qbit.left", { time: duration(Math.max(60, x.eta)) }))),
-    h("td", null, h("div", { class: "row-actions" }, button(t(paused ? "qbit.resume" : "qbit.pause"), { class: "small", onclick: () => qbitAct(paused ? "/resume" : "/pause", { hashes: [x.hash] }) }, paused ? "play" : "stop"), button(t("qbit.remove"), { class: "small", onclick: () => qbitRemoveDialog(x) }, "trash"))),
+    h("td", null, h("div", { class: "row-actions" }, tool(t(act), paused ? "play" : "pause", () => qbitAct(paused ? "/resume" : "/pause", { hashes: [x.hash] })), tool(t("qbit.remove"), "trash", () => qbitRemoveDialog(x)))),
   );
 }
 
