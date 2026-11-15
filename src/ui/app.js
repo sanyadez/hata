@@ -12869,6 +12869,9 @@ function streamPlayer(path, { at = 0, audio = 0, sub = -1, played, failed } = {}
       const readable = info.subs.filter((one) => one.text);
       put(subs, h("option", { value: "-1", selected: p.sub < 0 }, t("tv.track.noSubs")), readable.map((one) => h("option", { value: String(one.index), selected: one.index === p.sub }, trackLabel(one))));
       subs.hidden = readable.length === 0;
+      // the picture's shape is known from the file: the box keeps it while a new stream is asked for after a jump,
+      // or the window would fold to an empty player's size and spring back
+      if (info.video?.width > 0 && info.video.height > 0) video.style.aspectRatio = `${info.video.width} / ${info.video.height}`;
       bar.max = String(Math.floor(info.duration));
       bar.hidden = !info.duration;
     }
