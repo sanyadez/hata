@@ -125,7 +125,11 @@ export async function settleModules(): Promise<void> {
     const used: ModuleId[] = [];
     for (const id of MODULE_IDS) {
       const run = RUNS[id];
-      if (run.was?.() || (await Promise.resolve(run.uses()).catch(() => [{ what: "unknown" }])).length > 0) used.push(id);
+      // what cannot be asked, or takes too long to answer, counts as used: nothing goes away by mistake
+      const sure = [{ what: "unknown" }];
+      const asked = (async () => (run.was?.() ? sure : await run.uses()))().catch(() => sure);
+      const late = new Promise<Use[]>((resolve) => setTimeout(() => resolve(sure), 10_000));
+      if ((await Promise.race([asked, late])).length > 0) used.push(id);
     }
     settings.modules = switchesFor(used);
     console.log(used.length ? `Modules in use, left on: ${used.join(", ")}` : "No module is in use: all are off");

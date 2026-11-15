@@ -5342,5 +5342,6 @@
   "modules.found.frigate": "Frigate runs here: {detail}",
   "welcome.modules.looking": "Looking at what is here already and around the home network…",
   "welcome.modules.found": "Nothing is installed now. Ticked because found here: {names}.",
-  "welcome.modules.nothing": "Nothing is installed now. Nothing a module is for was found here or on the home network."
+  "welcome.modules.nothing": "Nothing is installed now. Nothing a module is for was found here or on the home network.",
+  "modules.turnItOff": "Turn it off"
 }

@@ -3274,9 +3274,10 @@ export async function serve(): Promise<void> {
     console.log(`The configuration folder was moved here; the old one is kept as ${aside}`);
     record("system.stateMoved", { detail: DATA_DIR });
   }
-  await settleModules();
   confirmUpdate();
   dropOldSecrets();
+  // after the update is confirmed: looking at what is in use may take a while, and must never count as a failed start
+  await settleModules();
   scheduleUpdateChecks();
   startSampler(() => settings.dataRoot);
   startDisks();

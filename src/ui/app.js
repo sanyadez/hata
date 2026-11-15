@@ -12667,7 +12667,9 @@ function moduleHeldDialog(m) {
   let dialog;
   const line = (iconName, text, href) => h("div", { class: "module-held" }, icon(iconName), h("strong", { class: "grow" }, text), h("a", { class: "link with-icon", href, onclick: () => dialog.close() }, t("common.open"), icon("chevron")));
   // the module that stands on it first, then what of the person's uses it
-  const rows = [...m.neededBy.map((other) => line(MODULE_ICONS[other], t("modules.heldBy", { name: moduleName(other) }), MODULE_HOME[other])), ...m.uses.map((use) => line(MODULE_ICONS[m.id], t("modules.use." + use.what, { n: use.count ?? "" }), MODULE_USE_AT[use.what] ?? "#/settings/modules"))];
+  // the module that stands on it can be turned off right from here — if nothing holds that one in its turn
+  const offToo = (other) => h("div", { class: "module-held" }, icon(MODULE_ICONS[other]), h("strong", { class: "grow" }, t("modules.heldBy", { name: moduleName(other) })), h("button", { type: "button", class: "link", onclick: () => { dialog.close(); const that = (state.modulesList ?? []).find((x) => x.id === other); if (that) void turnModuleOff(that); } }, t("modules.turnItOff")));
+  const rows = [...m.neededBy.map(offToo), ...m.uses.map((use) => line(MODULE_ICONS[m.id], t("modules.use." + use.what, { n: use.count ?? "" }), MODULE_USE_AT[use.what] ?? "#/settings/modules"))];
   dialog = openDialog("confirm", h("h2", { class: "wrap" }, t("modules.heldTitle")), h("p", { class: "muted" }, t(m.neededBy.length ? "modules.neededLead" : "modules.heldLead", { name: moduleName(m.id), by: m.neededBy.map(moduleName).join(", ") })), h("div", { class: "stack" }, rows), h("footer", null, button(t("modules.understood"), { class: "primary", onclick: () => dialog.close() })));
 }
 
