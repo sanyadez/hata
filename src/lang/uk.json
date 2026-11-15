@@ -5412,5 +5412,6 @@
   "activity.tv.on": "Увімкнено програвач на екрані",
   "activity.tv.off": "Вимкнено програвач на екрані",
   "activity.tv.folders": "Змінено теки програвача",
-  "activity.tv.play": "Надіслано на телевізор: {target}"
+  "activity.tv.play": "Надіслано на телевізор: {target}",
+  "tv.openPage": "Усе про телевізор"
 }

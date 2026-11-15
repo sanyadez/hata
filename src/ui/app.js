@@ -12624,7 +12624,7 @@ function paintTvNow() {
   const label = t("tv.playing", { name: now.title });
   box.replaceChildren(
     h("button", { type: "button", class: "icon-btn", title: t("tv.key.playpause"), "aria-label": t("tv.key.playpause"), onclick: () => api("POST", "/api/tv/do", { action: "playpause" }).catch((e) => toast(errorText(e), "error")) }, icon(now.paused ? "play" : "pause")),
-    h("a", { class: "tv-now-title", href: "#/tv", title: label, "aria-label": label }, icon("tv"), h("span", { class: "clip" }, now.title)),
+    h("button", { type: "button", class: "tv-now-title", title: label, "aria-label": label, "aria-haspopup": "dialog", onclick: () => tvDropdown(box) }, icon("tv"), h("span", { class: "clip" }, now.title)),
   );
 }
 
@@ -12646,7 +12646,7 @@ async function loadTv() {
     if (!state.tv) put(document.getElementById("tv-body"), h("section", { class: "card pad" }, h("p", { class: "error" }, errorText(e))));
   }
   // a slider under the finger or a list that is open is not redrawn under the person
-  if (state.tv && !tvUi.busy && !document.querySelector("dialog[open]") && !document.querySelector("#tv-body input[type=range]:active")) paintTv();
+  if (state.tv && !tvUi.busy && !document.querySelector("dialog[open]:not(.tv-drop)") && !document.querySelector("#tv-body input[type=range]:active")) paintTv();
   // while the player runs the page keeps up with what plays
   tvUi.timer = setTimeout(loadTv, state.tv?.running ? 2000 : 8000);
 }
@@ -12658,6 +12658,46 @@ function renderTv() {
 }
 
 const tvClock = (s) => `${Math.floor(s / 3600) ? Math.floor(s / 3600) + ":" : ""}${String(Math.floor((s % 3600) / 60)).padStart(Math.floor(s / 3600) ? 2 : 1, "0")}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+
+/** The remote itself: what plays, the transport, the volume, the arrows — on the TV page and in the head's dropdown alike */
+function tvRemoteParts(tv, press) {
+  const key = (action, iconName, label, cls = "") => h("button", { type: "button", class: "btn tv-key " + cls, title: label, "aria-label": label, onclick: () => press(action) }, iconName ? icon(iconName) : label);
+  const now = tv.playing;
+  const position = now && now.total > 0 && h("input", { type: "range", class: "tv-seek", min: 0, max: 100, step: 0.1, value: (now.time / now.total) * 100, "aria-label": t("tv.position"), onchange: (e) => press("seek", Number(e.target.value)) });
+  const volume = h("input", { type: "range", min: 0, max: 100, step: 1, value: tv.volume, "aria-label": t("tv.volume"), onchange: (e) => press("volume", Number(e.target.value)) });
+  return [
+    now ? h("div", { class: "stack" }, h("strong", { class: "wrap" }, now.title), position, h("div", { class: "kv muted small" }, h("span", null, tvClock(now.time)), h("span", null, tvClock(now.total)))) : h("p", { class: "muted" }, t("tv.nothing")),
+    h("div", { class: "tv-row" }, key("rewind", "undo", t("tv.key.rewind")), key("playpause", now && !now.paused ? "pause" : "play", t("tv.key.playpause"), "primary"), key("stop", "stop", t("tv.key.stop")), key("forward", "arrow", t("tv.key.forward"))),
+    h("div", { class: "tv-volume" }, h("button", { type: "button", class: "btn small", onclick: () => press("mute") }, t(tv.muted ? "tv.unmute" : "tv.mute")), volume, h("span", { class: "muted small" }, `${tv.volume}%`)),
+    h("div", { class: "tv-pad" }, h("span"), key("up", "", "▲"), h("span"), key("left", "", "◀"), key("select", "", "OK", "primary"), key("right", "", "▶"), h("span"), key("down", "", "▼"), h("span")),
+    h("div", { class: "tv-row" }, key("back", "", t("tv.key.back")), key("home", "", t("tv.key.home")), key("menu", "", t("tv.key.menu")), key("info", "", t("tv.key.info"))),
+  ];
+}
+
+/** The remote under the chip in the head: the screen is driven from any page, without leaving it */
+function tvDropdown(at) {
+  let dialog;
+  let timer = 0;
+  const body = h("div", { class: "stack" }, h("p", { class: "muted" }, "…"));
+  const press = (action, value) => api("POST", "/api/tv/do", { action, value }).then(() => setTimeout(load, 250), (e) => toast(errorText(e), "error"));
+  const load = async () => {
+    clearTimeout(timer);
+    if (!dialog.isConnected) return;
+    try {
+      const tv = (state.tv = await api("GET", "/api/tv"));
+      // a slider under the finger is not redrawn under it
+      if (!body.querySelector("input[type=range]:active")) put(body, tv.running && tv.answers ? tvRemoteParts(tv, press) : h("p", { class: "muted" }, t(tv.running ? "tv.starting" : "error.tv.notRunning")));
+    } catch (e) {
+      put(body, h("p", { class: "error" }, errorText(e)));
+    }
+    timer = setTimeout(load, 2000);
+  };
+  dialog = openDialog("dropdown tv-drop", h("div", { class: "section-head" }, h("h2", null, t("tv.remote")), h("a", { class: "link small", href: "#/tv", onclick: () => dialog.close() }, t("tv.openPage"))), body);
+  dialog.addEventListener("close", () => clearTimeout(timer));
+  const r = at.getBoundingClientRect();
+  placeAt(dialog, { x: r.right - dialog.offsetWidth, y: r.bottom + 6 });
+  void load();
+}
 
 function paintTv() {
   const box = document.getElementById("tv-body");
@@ -12717,24 +12757,7 @@ function paintTv() {
     error,
   );
 
-  const key = (action, iconName, label, cls = "") => h("button", { type: "button", class: "btn tv-key " + cls, title: label, "aria-label": label, onclick: () => press(action) }, iconName ? icon(iconName) : label);
-  const now = tv.playing;
-  const position = now && now.total > 0 && h("input", { type: "range", class: "tv-seek", min: 0, max: 100, step: 0.1, value: (now.time / now.total) * 100, "aria-label": t("tv.position"), onchange: (e) => press("seek", Number(e.target.value)) });
-  const volume = h("input", { type: "range", min: 0, max: 100, step: 1, value: tv.volume, "aria-label": t("tv.volume"), onchange: (e) => press("volume", Number(e.target.value)) });
-  const remoteCard = tv.running && h(
-    "section",
-    { class: "card pad stack tv-remote" },
-    h("div", { class: "section-head" }, h("h2", null, t("tv.remote"))),
-    !tv.answers
-      ? h("p", { class: "muted" }, t("tv.starting"))
-      : [
-          now ? h("div", { class: "stack" }, h("strong", { class: "wrap" }, now.title), position, h("div", { class: "kv muted small" }, h("span", null, tvClock(now.time)), h("span", null, tvClock(now.total)))) : h("p", { class: "muted" }, t("tv.nothing")),
-          h("div", { class: "tv-row" }, key("rewind", "undo", t("tv.key.rewind")), key("playpause", now && !now.paused ? "pause" : "play", t("tv.key.playpause"), "primary"), key("stop", "stop", t("tv.key.stop")), key("forward", "arrow", t("tv.key.forward"))),
-          h("div", { class: "tv-volume" }, h("button", { type: "button", class: "btn small", onclick: () => press("mute") }, t(tv.muted ? "tv.unmute" : "tv.mute")), volume, h("span", { class: "muted small" }, `${tv.volume}%`)),
-          h("div", { class: "tv-pad" }, h("span"), key("up", "", "▲"), h("span"), key("left", "", "◀"), key("select", "", "OK", "primary"), key("right", "", "▶"), h("span"), key("down", "", "▼"), h("span")),
-          h("div", { class: "tv-row" }, key("back", "", t("tv.key.back")), key("home", "", t("tv.key.home")), key("menu", "", t("tv.key.menu")), key("info", "", t("tv.key.info"))),
-        ],
-  );
+  const remoteCard = tv.running && h("section", { class: "card pad stack tv-remote" }, h("div", { class: "section-head" }, h("h2", null, t("tv.remote"))), tv.answers ? tvRemoteParts(tv, press) : h("p", { class: "muted" }, t("tv.starting")));
 
   const addFolder = () => folderPicker({ title: t("tv.folderPick"), start: state.settings?.dataRoot ?? "/", confirmLabel: t("tv.folderAdd"), action: async (path) => void (await change({ folders: [...tv.folders, path] })) });
   const foldersCard = h(

@@ -1834,7 +1834,7 @@ body.has-jobs #view:not(.fill) { padding-bottom: calc(var(--jobs-h, 0px) + 48px)
 /* TV */
 .tv-remote { max-width: 520px; }
 .tv-row { display: flex; gap: 10px; flex-wrap: wrap; }
-.tv-row .tv-key { flex: 1 1 60px; }
+.tv-row .tv-key { flex: 1 1 0; min-width: 0; padding-inline: 6px; }
 .tv-key { min-height: 48px; justify-content: center; font-weight: 600; }
 .tv-pad { display: grid; grid-template-columns: repeat(3, minmax(0, 72px)); gap: 10px; justify-content: center; }
 .tv-pad .tv-key { aspect-ratio: 1; padding: 0; }
@@ -1849,3 +1849,6 @@ body.has-jobs #view:not(.fill) { padding-bottom: calc(var(--jobs-h, 0px) + 48px)
   .tv-now { padding-right: 8px; }
   .tv-now-title .clip { display: none; }
 }
+button.tv-now-title { border: 0; background: none; padding: 6px 0; font: inherit; font-weight: 600; font-size: 13px; cursor: pointer; }
+dialog.dropdown.tv-drop { width: min(calc(100vw - 16px), 360px); max-height: calc(100dvh - 16px); overflow-y: auto; }
+dialog.dropdown.tv-drop[open] { padding: 16px; display: grid; gap: 14px; }

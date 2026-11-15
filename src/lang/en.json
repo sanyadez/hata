@@ -5412,5 +5412,6 @@
   "activity.tv.on": "The player on the screen turned on",
   "activity.tv.off": "The player on the screen turned off",
   "activity.tv.folders": "The player's folders changed",
-  "activity.tv.play": "Sent to the TV: {target}"
+  "activity.tv.play": "Sent to the TV: {target}",
+  "tv.openPage": "All of it"
 }
