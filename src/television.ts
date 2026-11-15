@@ -11,7 +11,7 @@ import { AppError, startJob, type Job } from "./apps";
 import { bus } from "./bus";
 import { saveSettings, settings } from "./config";
 import { installCommand, packageManager, PATH, run, runLogged } from "./packages";
-import { advancedXml, cleanFolders, decodePackages, isOurs, playable, portIn, readDisplay, hwdbText, remoteCall, seconds, sourcesXml, takeJson, TV_HOME, TV_HWDB, TV_PORT, TV_UNIT, TV_USER, unitText, type Call, type Display } from "./tv";
+import { advancedXml, cleanFolders, decodePackages, isOurs, playable, portIn, readDisplay, hwdbText, keymapXml, polkitRule, remoteCall, seconds, sourcesXml, takeJson, TV_HOME, TV_HWDB, TV_POLKIT, TV_PORT, TV_UNIT, TV_USER, unitText, type Call, type Display } from "./tv";
 
 const USERDATA = join(TV_HOME, ".kodi", "userdata");
 const UNIT_FILE = "/etc/systemd/system/" + TV_UNIT;
@@ -177,9 +177,13 @@ export async function tvReport(): Promise<TvReport> {
 }
 
 /** A file of Kodi's that Hata keeps, written unless the person keeps one of their own there */
-function writeOurs(name: string, body: string): void {
+function writeOurs(name: string, body: string): boolean {
   const path = join(USERDATA, name);
-  if (isOurs(text(path))) writeFileSync(path, body);
+  const was = text(path);
+  if (!isOurs(was) || was === body) return false;
+  mkdirSync(join(path, ".."), { recursive: true });
+  writeFileSync(path, body);
+  return true;
 }
 
 /** The player's user, its files and its service: everything but the program itself */
@@ -189,8 +193,12 @@ async function setUp(): Promise<void> {
     if (made.code !== 0) throw new AppError("tv.setupFailed", 409, { message: (made.err || made.out).trim() });
   }
   mkdirSync(USERDATA, { recursive: true });
-  writeOurs("advancedsettings.xml", advancedXml(TV_PORT));
-  writeOurs("sources.xml", sourcesXml(settings.tv.folders));
+  // Kodi reads these when it starts: a running one is started again when one of them changed
+  const changed = [writeOurs("advancedsettings.xml", advancedXml(TV_PORT)), writeOurs("keymaps/hata.xml", keymapXml()), writeOurs("sources.xml", sourcesXml(settings.tv.folders))].some(Boolean);
+  if (existsSync("/usr/share/polkit-1") && text(TV_POLKIT) !== polkitRule()) {
+    mkdirSync("/etc/polkit-1/rules.d", { recursive: true });
+    writeFileSync(TV_POLKIT, polkitRule());
+  }
   await run(["chown", "-R", `${TV_USER}:${TV_USER}`, join(TV_HOME, ".kodi")], 60_000);
   writeFileSync(UNIT_FILE, unitText());
   await run(["systemctl", "daemon-reload"], 30_000);
@@ -199,8 +207,12 @@ async function setUp(): Promise<void> {
     mkdirSync("/etc/udev/hwdb.d", { recursive: true });
     writeFileSync(TV_HWDB, hwdbText());
     await run(["systemd-hwdb", "update"], 60_000);
+    // udev is told to read the new table: a trigger right after the update was seen to go by the old one
+    await run(["udevadm", "control", "--reload"], 30_000);
     await run(["udevadm", "trigger", "--subsystem-match=input", "--action=change"], 30_000);
+    await run(["udevadm", "settle", "--timeout=10"], 15_000);
   }
+  if (changed && (await unit("is-active")) === "active") await run(["systemctl", "restart", TV_UNIT], 60_000);
 }
 
 /** Installs Kodi and the driver that decodes video (a quiet job of kind `tv`), then sets the player up; it is not started by that */

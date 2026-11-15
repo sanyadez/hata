@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { advancedXml, cleanFolders, hwdbText, decodePackages, isOurs, monitorAudio, monitorName, playable, portIn, readDisplay, remoteCall, seconds, sourcesXml, takeJson, unitText } from "../src/tv";
+import { advancedXml, cleanFolders, hwdbText, keymapXml, polkitRule, decodePackages, isOurs, monitorAudio, monitorName, playable, portIn, readDisplay, remoteCall, seconds, sourcesXml, takeJson, unitText } from "../src/tv";
 
 function edid(name: string, audio: boolean): Uint8Array {
   const data = new Uint8Array(256);
@@ -82,5 +82,16 @@ test("what can be sent to the screen is told by the file's name", () => {
 test("the buttons of Android remotes are read as the keys the player knows", () => {
   const text = hwdbText();
   expect(text).toContain("evdev:input:b*\n KEYBOARD_KEY_c0041=enter\n KEYBOARD_KEY_c0040=compose\n");
+  // a remote's power button must never reach the system as the server's own
+  expect(text).toContain("evdev:input:b0003*\n KEYBOARD_KEY_c0030=reserved");
+  expect(text).toContain("evdev:input:b0005*\n KEYBOARD_KEY_c0030=reserved");
   expect(text.startsWith("# Written by Hata")).toBe(true);
+});
+
+test("the player cannot be left or the server powered off from the sofa", () => {
+  expect(advancedXml(9391)).toContain("<showexitbutton>false</showexitbutton>");
+  expect(keymapXml()).toContain('<Home><keyboard><end mod="ctrl">noop</end></keyboard></Home>');
+  expect(keymapXml()).toContain("<power>noop</power>");
+  expect(polkitRule()).toContain('subject.user == "hata-tv"');
+  expect(polkitRule()).toContain("polkit.Result.NO");
 });

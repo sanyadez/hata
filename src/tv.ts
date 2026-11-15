@@ -61,7 +61,30 @@ const OURS = "<!-- Written by Hata";
 /** Whether a file of Kodi's is Hata's to rewrite: one the person made by hand is left alone */
 export const isOurs = (text: string): boolean => text === "" || text.startsWith(OURS);
 
-export const advancedXml = (port: number): string => `${OURS}: the port Hata reaches Kodi by -->\n<advancedsettings version="1.0"><jsonrpc><tcpport>${port}</tcpport></jsonrpc></advancedsettings>\n`;
+/** Kodi's own settings file of Hata's: the port Hata reaches it by, and no "Exit" in its power menu */
+export const advancedXml = (port: number): string => `${OURS}: the port Hata reaches Kodi by; the player is turned off in Hata, not from the sofa -->\n<advancedsettings version="1.0"><jsonrpc><tcpport>${port}</tcpport></jsonrpc><showexitbutton>false</showexitbutton></advancedsettings>\n`;
+
+/**
+ * The keys that would end the player straight away (Ctrl+End, the power and sleep buttons) do
+ * nothing in Kodi. Kodi binds Ctrl+End on its home and sign-in windows, not globally, so those are
+ * named too: a rule for "global" alone left it working (checked with a stand-in keyboard).
+ */
+export const keymapXml = (): string => `${OURS}: changes made here are lost -->
+<keymap>
+<global><keyboard><end mod="ctrl">noop</end><power>noop</power><sleep>noop</sleep></keyboard><remote><power>noop</power></remote></global>
+<Home><keyboard><end mod="ctrl">noop</end></keyboard></Home>
+<LoginScreen><keyboard><end mod="ctrl">noop</end></keyboard></LoginScreen>
+</keymap>
+`;
+
+export const TV_POLKIT = "/etc/polkit-1/rules.d/49-hata-tv.rules";
+
+/** Where the system lets whoever sits at the screen power it off, the player's user is told no */
+export const polkitRule = (): string => `// Written by Hata: the media player on the screen never powers the server off, restarts it or puts it to sleep
+polkit.addRule(function (action, subject) {
+  if (subject.user == "${TV_USER}" && action.id.indexOf("org.freedesktop.login1.") == 0) return polkit.Result.NO;
+});
+`;
 
 /** The port a hand-made advancedsettings.xml names for Kodi's control, when it does */
 export function portIn(text: string): number | null {
@@ -106,13 +129,30 @@ export const TV_HWDB = "/etc/udev/hwdb.d/70-hata-tv.hwdb";
  * Remotes made for Android boxes send "select" for OK and "menu" for the menu button; Kodi takes
  * neither (checked with a stand-in keyboard: Enter and Compose are what it obeys). The system is told
  * to read those two buttons as the keys the player knows, for every input device: a usual keyboard has
- * no such buttons.
+ * no such buttons. A remote's power button is another matter: the system takes it for the server's own
+ * (every keyboard is a "power switch" to systemd) and would shut the server down from the sofa.
  */
 export const hwdbText = (): string => `# Written by Hata: changes made here are lost
 # Remotes made for Android boxes: OK ("select") acts as Enter, the menu button as the context menu key
 evdev:input:b*
  KEYBOARD_KEY_c0041=enter
  KEYBOARD_KEY_c0040=compose
+
+# The power and sleep buttons of keyboards and remotes plugged in over USB or Bluetooth do nothing:
+# the system would power the whole server off for them. The server's own power button is not touched.
+evdev:input:b0003*
+ KEYBOARD_KEY_c0030=reserved
+ KEYBOARD_KEY_c0032=reserved
+ KEYBOARD_KEY_10081=reserved
+ KEYBOARD_KEY_10082=reserved
+ KEYBOARD_KEY_70066=reserved
+
+evdev:input:b0005*
+ KEYBOARD_KEY_c0030=reserved
+ KEYBOARD_KEY_c0032=reserved
+ KEYBOARD_KEY_10081=reserved
+ KEYBOARD_KEY_10082=reserved
+ KEYBOARD_KEY_70066=reserved
 `;
 
 /** The driver that lets the graphics card decode video, by who made the card (PCI vendor id) */
