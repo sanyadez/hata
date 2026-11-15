@@ -12549,7 +12549,7 @@ function settingsNav(section) {
     if (!typed.trim()) {
       return put(list, SECTION_GROUPS.map((group) => {
         const items = sections().filter((item) => item.group === group);
-        return items.length > 0 && h("div", { class: "cats" }, h("div", { class: "cat-title" }, t("settings.group." + group)), items.map((item) => h("a", { class: "cat" + (section === item.id ? " active" : ""), href: `#/settings/${item.id}` }, h("span", { class: "with-icon" }, icon(item.icon), sectionTitle(item)))));
+        return items.length > 0 && h("div", { class: "cats" }, h("div", { class: "cat-title" }, t("settings.group." + group)), items.map((item) => h("a", { class: "cat" + (section === item.id ? " active" : ""), href: `#/settings/${item.id}` }, h("span", { class: "with-icon" }, icon(item.icon), sectionTitle(item)), SECTION_MODULE[item.id] && h("span", { class: "module-mark" }, t("modules.mark")))));
       }));
     }
     const found = findSettings(typed);
@@ -12611,18 +12611,35 @@ async function turnModuleOn(id, then = "") {
     done(await api("PUT", `/api/modules/${id}`, { on: true }));
   } catch (e) {
     if (!(e instanceof ApiError) || e.code !== "modules.needs") return toast(errorText(e));
-    const needs = String(e.detail.needs).split(",").map(moduleName);
-    confirmAction({ title: t("modules.needsTitle", { name: moduleName(id) }), lead: t("modules.needsLead", { name: moduleName(id), needs: needs.join(", ") }), label: t("modules.turnOnBoth"), kind: "primary", iconName: "check", run: async () => done(await api("PUT", `/api/modules/${id}`, { on: true, withNeeds: true })) });
+    const needs = String(e.detail.needs).split(",");
+    let dialog;
+    const error = h("p", { class: "error", role: "alert" });
+    const one = (m) => h("div", { class: "module-held" }, icon(MODULE_ICONS[m]), h("span", { class: "grow" }, h("strong", null, moduleName(m)), h("span", { class: "muted small block" }, t(`modules.${m}.adds`))));
+    const both = button(t(needs.length > 1 ? "modules.turnOnAll" : "modules.turnOnBoth"), {
+      class: "primary",
+      onclick: async () => {
+        both.disabled = true;
+        try {
+          const res = await api("PUT", `/api/modules/${id}`, { on: true, withNeeds: true });
+          dialog.close();
+          done(res);
+        } catch (err) {
+          error.textContent = errorText(err);
+          both.disabled = false;
+        }
+      },
+    }, "check");
+    dialog = openDialog("confirm", h("h2", { class: "wrap" }, t("modules.needsTitle", { name: moduleName(id), needs: needs.map(moduleName).join(", ") })), h("p", { class: "muted" }, t("modules.needsLead", { name: moduleName(id), needs: needs.map(moduleName).join(", ") })), h("div", { class: "stack" }, [...needs, id].map(one)), error, h("footer", null, closeButton(() => dialog, t("common.cancel")), both));
   }
 }
 
 /** Why a module cannot be turned off now, and where to take away what holds it */
 function moduleHeldDialog(m) {
   let dialog;
-  const rows = m.neededBy.length
-    ? m.neededBy.map((other) => h("div", { class: "kv" }, h("span", null, t("modules.heldBy", { name: moduleName(other) })), h("a", { class: "link", href: "#/settings/modules", onclick: () => dialog.close() }, t("modules.title"))))
-    : m.uses.map((use) => h("div", { class: "kv" }, h("span", null, t("modules.use." + use.what, { n: use.count ?? "" })), h("a", { class: "link", href: MODULE_USE_AT[use.what] ?? "#/settings/modules", onclick: () => dialog.close() }, t("common.open"))));
-  dialog = openDialog("confirm", h("h2", { class: "wrap" }, t("modules.heldTitle", { name: moduleName(m.id) })), h("p", { class: "muted" }, t(m.neededBy.length ? "modules.neededLead" : "modules.heldLead")), h("div", { class: "stack" }, rows), h("footer", null, closeButton(() => dialog, t("common.close"))));
+  const line = (iconName, text, href) => h("div", { class: "module-held" }, icon(iconName), h("strong", { class: "grow" }, text), h("a", { class: "link with-icon", href, onclick: () => dialog.close() }, t("common.open"), icon("chevron")));
+  // the module that stands on it first, then what of the person's uses it
+  const rows = [...m.neededBy.map((other) => line(MODULE_ICONS[other], t("modules.heldBy", { name: moduleName(other) }), MODULE_HOME[other])), ...m.uses.map((use) => line(MODULE_ICONS[m.id], t("modules.use." + use.what, { n: use.count ?? "" }), MODULE_USE_AT[use.what] ?? "#/settings/modules"))];
+  dialog = openDialog("confirm", h("h2", { class: "wrap" }, t("modules.heldTitle")), h("p", { class: "muted" }, t(m.neededBy.length ? "modules.neededLead" : "modules.heldLead", { name: moduleName(m.id), by: m.neededBy.map(moduleName).join(", ") })), h("div", { class: "stack" }, rows), h("footer", null, button(t("modules.understood"), { class: "primary", onclick: () => dialog.close() })));
 }
 
 async function turnModuleOff(m) {
@@ -12670,7 +12687,8 @@ function modulesSection() {
       ),
     );
   return [
-    h("p", { class: "muted" }, t("modules.lead")),
+    h("div", { class: "module-top" }, h("p", { class: "muted grow" }, t("modules.lead")), h("div", { class: "module-count" }, h("strong", null, t("modules.count", { on: list.filter((m) => m.on).length, of: list.length })), h("span", { class: "muted small" }, t("modules.on")))),
+    h("div", { class: "module-base" }, icon("home"), h("span", null, h("strong", { class: "block" }, t("modules.base")), h("span", { class: "muted small" }, t("modules.baseList")))),
     MODULE_GROUPS.map((group) => {
       const mine = list.filter((m) => m.group === group);
       return mine.length > 0 && h("section", { class: "card pad stack" }, h("div", { class: "section-head" }, h("h2", null, t("modules.group." + group))), mine.map(row));
