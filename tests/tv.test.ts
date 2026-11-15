@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { advancedXml, cleanFolders, decodePackages, isOurs, monitorAudio, monitorName, playable, portIn, readDisplay, remoteCall, seconds, sourcesXml, takeJson, unitText } from "../src/tv";
+import { advancedXml, cleanFolders, hwdbText, decodePackages, isOurs, monitorAudio, monitorName, playable, portIn, readDisplay, remoteCall, seconds, sourcesXml, takeJson, unitText } from "../src/tv";
 
 function edid(name: string, audio: boolean): Uint8Array {
   const data = new Uint8Array(256);
@@ -77,4 +77,10 @@ test("what can be sent to the screen is told by the file's name", () => {
   expect(playable("photo.jpeg")).toBe(true);
   expect(playable("notes.txt")).toBe(false);
   expect(playable("archive.zip")).toBe(false);
+});
+
+test("the buttons of Android remotes are read as the keys the player knows", () => {
+  const text = hwdbText();
+  expect(text).toContain("evdev:input:b*\n KEYBOARD_KEY_c0041=enter\n KEYBOARD_KEY_c0040=compose\n");
+  expect(text.startsWith("# Written by Hata")).toBe(true);
 });

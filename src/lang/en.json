@@ -5354,7 +5354,7 @@
   "tv.noScreen": "No screen is plugged in. The server has outputs for one; plug in a TV or a monitor.",
   "tv.noOutput": "This server has no output for a screen (a virtual machine or a container often has none).",
   "tv.remotes": "Plugged in",
-  "tv.remotesHint": "A keyboard, a mouse or a remote plugged into the server drives the player by itself. A TV's own remote works only where the server's HDMI passes its buttons on; most small computers do not.",
+  "tv.remotesHint": "A keyboard, a mouse or a remote plugged into the server drives the player by itself. For remotes made for Android boxes Hata tells the system to read their OK and menu buttons as the keys Kodi knows. A TV's own remote works only where the server's HDMI passes its buttons on; most small computers do not.",
   "tv.needsTitle": "Kodi is needed",
   "tv.needsLead": "The player is Kodi, a free media centre. It takes about 350 MB with what it needs to draw and to decode video. Nothing is started by installing it.",
   "tv.cannot.noInstaller": "Hata installs it only where the system uses apt. Install Kodi by hand and come back.",

@@ -11,7 +11,7 @@ import { AppError, startJob, type Job } from "./apps";
 import { bus } from "./bus";
 import { saveSettings, settings } from "./config";
 import { installCommand, packageManager, PATH, run, runLogged } from "./packages";
-import { advancedXml, cleanFolders, decodePackages, isOurs, playable, portIn, readDisplay, remoteCall, seconds, sourcesXml, takeJson, TV_HOME, TV_PORT, TV_UNIT, TV_USER, unitText, type Call, type Display } from "./tv";
+import { advancedXml, cleanFolders, decodePackages, isOurs, playable, portIn, readDisplay, hwdbText, remoteCall, seconds, sourcesXml, takeJson, TV_HOME, TV_HWDB, TV_PORT, TV_UNIT, TV_USER, unitText, type Call, type Display } from "./tv";
 
 const USERDATA = join(TV_HOME, ".kodi", "userdata");
 const UNIT_FILE = "/etc/systemd/system/" + TV_UNIT;
@@ -194,6 +194,13 @@ async function setUp(): Promise<void> {
   await run(["chown", "-R", `${TV_USER}:${TV_USER}`, join(TV_HOME, ".kodi")], 60_000);
   writeFileSync(UNIT_FILE, unitText());
   await run(["systemctl", "daemon-reload"], 30_000);
+  // the buttons of Android remotes: read anew by devices already plugged in, no restart of anything
+  if (text(TV_HWDB) !== hwdbText()) {
+    mkdirSync("/etc/udev/hwdb.d", { recursive: true });
+    writeFileSync(TV_HWDB, hwdbText());
+    await run(["systemd-hwdb", "update"], 60_000);
+    await run(["udevadm", "trigger", "--subsystem-match=input", "--action=change"], 30_000);
+  }
 }
 
 /** Installs Kodi and the driver that decodes video (a quiet job of kind `tv`), then sets the player up; it is not started by that */

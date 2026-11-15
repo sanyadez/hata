@@ -99,6 +99,21 @@ RestartSec=5
 WantedBy=multi-user.target
 `;
 
+export const TV_HWDB = "/etc/udev/hwdb.d/70-hata-tv.hwdb";
+
+/**
+ * Remotes made for Android boxes send "select" for OK and "menu" for the menu button; Kodi takes
+ * neither (checked with a stand-in keyboard: Enter and Compose are what it obeys). The system is told
+ * to read those two buttons as the keys the player knows, for every input device: a usual keyboard has
+ * no such buttons.
+ */
+export const hwdbText = (): string => `# Written by Hata: changes made here are lost
+# Remotes made for Android boxes: OK ("select") acts as Enter, the menu button as the context menu key
+evdev:input:b*
+ KEYBOARD_KEY_c0041=enter
+ KEYBOARD_KEY_c0040=compose
+`;
+
 /** The driver that lets the graphics card decode video, by who made the card (PCI vendor id) */
 export function decodePackages(vendor: string): string[] {
   if (vendor === "0x8086") return ["intel-media-va-driver", "i965-va-driver"];
