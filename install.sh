@@ -9,14 +9,13 @@
 #
 # What it does: downloads the `hata` binary for this machine from the GitHub release and checks it
 # against the release's SHA256SUMS, installs Docker when it is missing (with Docker's own script from
-# get.docker.com) and Samba for sharing folders over the network (the system's own package), and runs `hata install`, which copies the binary to /usr/local/bin and starts the
+# get.docker.com), and runs `hata install`, which copies the binary to /usr/local/bin and starts the
 # `hata` systemd service. Running it again updates Hata to the latest release.
 #
 # Options:
 #   --migrate-casaos   take over the apps of a CasaOS install on this machine
 #   --port <number>    port of the web UI (default: 80, or the next free one if 80 is taken)
 #   --no-docker        do not install Docker
-#   --no-samba         do not install Samba (folders can then not be shared over the network)
 #   --version <tag>    install this release instead of the latest (also: HATA_VERSION)
 #
 # HATA_DOWNLOAD_URL overrides where the files are taken from (a directory URL holding
@@ -28,7 +27,6 @@ REPO="sanyadez/hata"
 VERSION="${HATA_VERSION:-latest}"
 MIGRATE_CASAOS=0
 INSTALL_DOCKER=1
-INSTALL_SAMBA=1
 PORT=""
 
 say() { printf '%s\n' "$*"; }
@@ -42,7 +40,8 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --migrate-casaos) MIGRATE_CASAOS=1 ;;
     --no-docker) INSTALL_DOCKER=0 ;;
-    --no-samba) INSTALL_SAMBA=0 ;;
+    # Samba is no longer installed here: the module "Network folders" has the button
+    --no-samba) ;;
     --port)
       [ $# -ge 2 ] || die "--port needs a number"
       PORT="$2"
@@ -126,35 +125,6 @@ elif [ "$INSTALL_DOCKER" -eq 1 ]; then
   systemctl enable --now docker >/dev/null 2>&1 || true
 else
   say "Docker is missing and --no-docker was given: Hata will start, but apps need Docker Engine with the compose plugin."
-fi
-
-# --- Samba ----------------------------------------------------------------------------------------
-# Folders shared over the network are served by Samba, which Hata then sets up itself. Hata works
-# without it, so a failure here is not the end of the installation.
-
-if command -v smbd >/dev/null 2>&1 || [ -x /usr/sbin/smbd ]; then
-  say "Samba is already installed."
-elif [ "$INSTALL_SAMBA" -eq 1 ]; then
-  step "Installing Samba"
-  if command -v apt-get >/dev/null 2>&1; then
-    DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends samba >/dev/null 2>&1 ||
-      { apt-get update >/dev/null 2>&1 && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends samba >/dev/null 2>&1; } || SAMBA_FAILED=1
-  elif command -v dnf >/dev/null 2>&1; then
-    dnf install -y samba >/dev/null 2>&1 || SAMBA_FAILED=1
-  elif command -v yum >/dev/null 2>&1; then
-    yum install -y samba >/dev/null 2>&1 || SAMBA_FAILED=1
-  elif command -v zypper >/dev/null 2>&1; then
-    zypper --non-interactive install samba >/dev/null 2>&1 || SAMBA_FAILED=1
-  elif command -v pacman >/dev/null 2>&1; then
-    pacman -S --noconfirm --needed samba >/dev/null 2>&1 || SAMBA_FAILED=1
-  else
-    SAMBA_FAILED=1
-  fi
-  if [ "${SAMBA_FAILED:-0}" -eq 1 ]; then
-    say "Samba could not be installed. Hata works without it; sharing folders over the network can be set up later in Settings → Network folders."
-  else
-    say "Samba is installed."
-  fi
 fi
 
 # --- Move in from CasaOS --------------------------------------------------------------------------

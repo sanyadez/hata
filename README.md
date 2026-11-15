@@ -91,6 +91,13 @@ Early development. What works today:
 
 - one-line install: one binary that sets itself up as a systemd service;
 - one-line move from CasaOS: its apps are taken over where they are, with an undo;
+- modules (Settings → Modules): a new server starts with the base — apps, files, backups, users, disks,
+  the network, HTTPS — and the rest is turned on when wanted: RAID and disk protection, network drives,
+  network folders, a copy of the backups on another machine, remote access, the DNS server, ad blocking,
+  domains and ports, computers, Proxmox, containers and VMs, integrations, the assistant and agents. A
+  module that is off shows no page, no setting and runs nothing; turning one on installs nothing on the
+  system. One that is in use cannot be turned off — the page says what uses it. A server updated from a
+  version before modules keeps on what it uses;
 - first run creates the administrator — there are no default credentials, and the setup needs a code
   that only the server's console shows; then it walks through the first choices: the server's name, what
   already runs on the computer, where the data and the backups go, a few apps to start with;
@@ -233,7 +240,7 @@ Early development. What works today:
   the server opens in Explorer, Finder or a phone's file manager like a network disk (SMB). People connect
   with the name and password they sign in to Hata with; for every folder each user may look, change or
   nothing at all, and so may "anyone without a password". What lands there takes the owner of its
-  folder, so apps still reach it. Samba does the serving: the installer puts it in and Hata sets it up
+  folder, so apps still reach it. Samba does the serving: the section has the button that installs it, and Hata sets it up
   whole — the `smb.conf` that was there is kept next to it and put back when Hata is removed. A Samba that
   stopped, or a shared folder whose disk is gone, shows up under "needs attention". No address
   has to be typed: while something is shared, the server shows up by itself under "Network" in Explorer on

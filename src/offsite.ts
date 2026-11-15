@@ -596,6 +596,9 @@ export function forgetSnapshot(dir: string, id: string): void {
 }
 
 /** The last run, if it failed: one of the things that need attention */
+/** The second copy is being made: what holds its module on */
+export const offsiteOn = (): boolean => saved.enabled;
+
 export const offsiteFailure = (): OffsiteRun | null => (saved.enabled && saved.last?.error ? saved.last : null);
 
 /** The network place the copy goes to, when it goes to one: it must not be taken away from under it */

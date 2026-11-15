@@ -27,11 +27,11 @@ import { checkOffsite, forgetHost, offsiteFailure, saveOffsite } from "./offsite
 import { hidden, hiddenCount, notSnoozed, snooze, wake as unsnooze } from "./snooze";
 import { APP_NAME_RE, dumpCompose } from "./appform";
 import { findInTrash, trashSizeOn } from "./trash";
-import { discover as discoverPlaces, installFor as installPlaceTools, listPlaces, placesDown, removePlace, retryPlace, savePlace, shares as placeShares, startNetPlaces } from "./netplaces";
+import { discover as discoverPlaces, installFor as installPlaceTools, listPlaces, placesDown, removePlace, retryPlace, savePlace, shares as placeShares } from "./netplaces";
 import { answers, networkMountOf } from "./netroom";
-import { addShare, changeShare, installSamba, listShares, refreshShares, removeShare, shareTrouble, startShares } from "./shares";
+import { addShare, changeShare, installSamba, listShares, refreshShares, removeShare, shareTrouble } from "./shares";
 import { checkDisks, diskHealth, installTool, listDisks, startDisks, startSelfTest } from "./disks";
-import { lookAtPools, noteTypes, poolCheck, poolClear, PoolError, poolsReport, poolsTrouble, startPools } from "./raid";
+import { lookAtPools, noteTypes, poolCheck, poolClear, PoolError, poolsReport, poolsTrouble } from "./raid";
 import { fills, measureFills, startFills } from "./fills";
 import { checkImages, imagesStatus, startImages } from "./images";
 import { afterPackage, closeOutside, exposedNics, giveBack, internetTrouble, setSide, startNetwork, setCheck, setRole, startHotspot, stopHotspot, wifiQrText, changeNic, confirmChange, handOver, makeBridge, takeBridgeApart, NETWORK_PACKAGES, networkReport, NetworkError, revertChange, wifiConnect, wifiForget, wifiNetworks } from "./network";
@@ -39,7 +39,7 @@ import { DOCKER_INSTALL_COMMAND, installDocker, startDocker } from "./dockerinst
 import { installOne, removeOne, toolsReport } from "./tools";
 import { checkUpdates, packageUpdates, startSysUpdates, upgrade as upgradeSystem } from "./sysupdates";
 import { checkPlan, readPlan, runPlan } from "./diskplan";
-import { ArrayError, arrayReport, arrayTrouble, bringBack, bringBackFile, goneList, lookAgain, rebuild as rebuildParity, repair as repairArray, scrub as scrubArray, setUp as setUpArray, startSnapraid, stop as stopArray, sync as syncArray, turnOff as turnOffArray } from "./snapraid";
+import { ArrayError, arrayReport, arrayTrouble, bringBack, bringBackFile, goneList, lookAgain, rebuild as rebuildParity, repair as repairArray, scrub as scrubArray, setUp as setUpArray, stop as stopArray, sync as syncArray, turnOff as turnOffArray } from "./snapraid";
 import { dockerSpace, dropImage, dropVolume, prune as pruneDocker } from "./dockerspace";
 import { ignoreDisk, unusedDisks, absent, onDiskBack, connectVolume, disconnect, checkVolume, wipeDisk, formatDisk, mergeFolders, mountingReport, relabel, startMounting, partsOf, resizePart, deletePart, type Outcome } from "./mounting";
 import { moveData } from "./movedata";
@@ -91,10 +91,10 @@ import {
 import { bus, type BusEvent } from "./bus";
 import { DATA_DIR, dropOldSecrets, listenAddress, saveSettings, settings, timezone, updateSettings } from "./config";
 import { arrange, cleanLayout, dropBlock, dropServer, GRID, haTiles, layoutText, parseLayoutText } from "./dashboard";
-import { addFrigate, cameraPicture, changeFrigate, eventPicture, frigateEvents, frigateFound, frigateOfApps, frigateServer, frigateServers, frigateTrouble, removeFrigate, startFrigate } from "./frigates";
+import { addFrigate, cameraPicture, changeFrigate, eventPicture, frigateEvents, frigateFound, frigateOfApps, frigateServer, frigateServers, frigateTrouble, removeFrigate } from "./frigates";
 import { lanAddress } from "./integration";
-import { addQbit, addTorrents, changeQbit, qbitFound, qbitOfApps, qbitServer, qbitServers, qbitTorrents, qbitTrouble, qbitWidgets, removeQbit, removeTorrents, startQbittorrent, torrentsPower } from "./qbittorrent";
-import { act as haAct, addServer as addHa, allowProxy as haAllowProxy, changeServer as changeHa, discover as discoverHa, entities as haEntities, forgetUser as haForgetUser, homeAssistantTrouble, installUpdate as haInstallUpdate, makeBackup as haMakeBackup, removeServer as removeHa, renameEntity as haRename, server as haServer, servers as haServers, startHomeAssistant, tileStates as haTileStates, visibleTo as haVisibleTo } from "./homeassistant";
+import { addQbit, addTorrents, changeQbit, qbitFound, qbitOfApps, qbitServer, qbitServers, qbitTorrents, qbitTrouble, qbitWidgets, removeQbit, removeTorrents, torrentsPower } from "./qbittorrent";
+import { act as haAct, addServer as addHa, allowProxy as haAllowProxy, changeServer as changeHa, discover as discoverHa, entities as haEntities, forgetUser as haForgetUser, homeAssistantTrouble, installUpdate as haInstallUpdate, makeBackup as haMakeBackup, removeServer as removeHa, renameEntity as haRename, server as haServer, servers as haServers, tileStates as haTileStates, visibleTo as haVisibleTo } from "./homeassistant";
 import { sees as haSees } from "./ha";
 import { dockerInfo, type DockerInfo, listContainers, watchEvents } from "./docker";
 import { abortUpload, copyIn, locate, validName, archivePlan, dropFavorites, emptyTrash, favoritesOf, setFavorite, extract as extractArchive, find as findFiles, list as listFiles, makeFile, makeFolder, pinFolder, pinnedFolders, readable, readText, remove as removeFiles, rename as renameFile, restore as restoreFiles, setTrashDays, startTrash, summary as filesSummary, transfer, trash, upload, writeText } from "./files";
@@ -102,14 +102,17 @@ import { adoptProject, casaosState, containerDraft, importCount, importList, mov
 import { accessOf, dropAccess, dropUser, gateTarget, guard, guardsOf, mayOpen, otherPorts, MAX_APP_BODY, page, passToApp, setAccess, startGates, tunnelHandlers } from "./gate";
 import { addName, changeName, domainsReport, nameOf as domainName, onNamesChanged, removeName, upstream as domainUpstream } from "./domains";
 import type { DomainName } from "./names";
-import { addRecord, applyImport, dnsClients, DnsError, dnsReport, dnsTrouble, removeRecord, setDns, startDns } from "./dnsserver";
-import { addList, BlockError, blockLog, blockReport, blockSummary, blockTrouble, changeList, checkName, importableApps, pauseBlock, planFromApp, planFromFile, refreshLists, removeList, ruleForName, setBlock, setDevice, setRules, startBlocker } from "./dnsblocker";
-import { addForward, changeForward, forwardsReport, onForwardsChanged, removeForward, startForwards } from "./forwards";
+import { addRecord, applyImport, dnsClients, DnsError, dnsReport, dnsTrouble, removeRecord, setDns } from "./dnsserver";
+import { addList, BlockError, blockLog, blockReport, blockSummary, blockTrouble, changeList, checkName, importableApps, pauseBlock, planFromApp, planFromFile, refreshLists, removeList, ruleForName, setBlock, setDevice, setRules } from "./dnsblocker";
+import { addForward, changeForward, forwardsReport, onForwardsChanged, removeForward } from "./forwards";
 import { parseDockerRun } from "./dockerrun";
 import { cannotMove, finishMove, moveState } from "./relocate";
 import { isPlainObject } from "./fsutil";
 import { mcpResponse } from "./mcp";
 import { instructions as mcpInstructions, tellHttps, TOOLS } from "./mcptools";
+import { moduleOn, modulesOn, modulesReport, setModule, settleModules, startModules } from "./moduleruns";
+import { findForModules } from "./modulefinds";
+import { moduleOfPath, moduleOfTool } from "./modules";
 import { serverTree } from "./servertree";
 import { homeLinks, localNamesStatus, refreshLocalNames } from "./mdns";
 import { addDevice, CHANNELS, listDevices, notifyStatus, pushKey, removeDevice, renewDevice, sendAsk, sendBackupRun, sendTest, startNotifications, telegramChats, updateNotify } from "./notify";
@@ -123,17 +126,17 @@ import { containerCommand, MAX_BUFFERED_BYTES, shellCommand, TerminalError, Term
 import { MuxError, type Channel } from "./mux";
 import { crossTransfer } from "./machinefiles";
 import { rightsOf } from "./memberfiles";
-import { letMachine, machineRights, machineShares, sharedOnMachines, shareOnMachine, startMachineUsers } from "./machineusers";
+import { letMachine, machineRights, machineShares, sharedOnMachines, shareOnMachine } from "./machineusers";
 import { moveApp, moveCheck } from "./moveapp";
 import { backupMachineApp, restoreMachineApp } from "./machinebackup";
 import { backupInstance, restoreInstance } from "./incusbackup";
-import { machineAccessRows, setMachineAccess, startMachineGates } from "./machinegate";
+import { machineAccessRows, setMachineAccess } from "./machinegate";
 import { applyMachineCompose, installComposeOnMachine, machineTiles, installOnMachine, machineAppAction, machineAppLogs, machineApps, machineCompose, removeMachineApp, revealMachineLogin, storeAppFor } from "./machineapps";
 import { addStore, ARCH, catalogue, removeStore, scheduleStoreSync, StoreError, syncStore } from "./store";
 import { startSampler, systemStatus } from "./system";
-import { addDisc as addContainerDisc, receiveDisc as receiveContainerDisc, removeDisc as removeContainerDisc, ejectDisc as ejectContainerDisc, askScreen as containerAskScreen, openScreen as containerOpenScreen, isContainerScreen, screenOn as containerScreenOn, act as containerAct, cloneInstance as cloneContainer, renameInstance as renameContainer, addPlace as addContainerPlace, moveInstance as moveContainer, removePlace as removeContainerPlace, setStandardPlace, containerOfMachine, vmOfMachine, instanceOfMachine, containersTrouble, create as createContainer, install as installIncus, installVms as installIncusVms, removeContainer, removeSnapshot as removeContainerSnapshot, report as containersReport, restoreSnapshot as restoreContainerSnapshot, setLimits as setContainerLimits, setNetwork as setContainerNetwork, setUpNow as setUpContainers, shellCommand as containerShell, shellReady as containerShellReady, startContainers, takeSnapshot as takeContainerSnapshot } from "./containers";
-import { askScreen as pveAskScreen, openScreen as pveOpenScreen, storageContent as pveStorageContent, removeVolume as pveRemoveVolume, cloneOptions as pveCloneOptions, cloneGuest as pveCloneGuest, makeTemplate as pveMakeTemplate, load as pveLoad, templates as pveTemplates, downloadTemplate as pveDownloadTemplate, removeTemplate as pveRemoveTemplate, setSchedule as pveSetSchedule, runScheduleNow as pveRunSchedule, restoreBackup as pveRestoreBackup, restoreOptions as pveRestoreOptions, changeGuest as pveChangeGuest, guestSettings as pveGuestSettings, installByConsole as pveInstallByConsole, openConsole as pveOpenConsole, type Console as PveConsole, addBySignIn as addPveBySignIn, removeGuest as pveRemoveGuest, addHost as addPve, createGuest as pveCreateGuest, createVm as pveCreateVm, sendFile as pveSendFile, receiveFile as pveReceiveFile, newOptions as pveNewOptions, backupJobs as pveBackupJobs, backups as pveBackups, changeHost as changePve, guestOfMachine, host as pveHost, hosts as pveHosts, power as pvePower, proxmoxTrouble, refresh as refreshPve, removeHost as removePve, snapshotAction as pveSnapshotAction, snapshots as pveSnapshots, startProxmox, takeBackup as pveTakeBackup, takeSnapshot as pveTakeSnapshot, taskLog as pveTaskLog } from "./proxmox";
-import { call as machineCall, clientBinary, containersOf, installScript, invite as machineInvite, INVITE_MS, linkData, linkHandlers, machine as machineView, MACHINE_ID_RE, machines as machineList, machinesAway, open as machineOpen, remove as removeMachine, rename as renameMachine, startMachines, updateClient, wake as wakeMachine, power as powerMachine, type LinkSocket } from "./machines";
+import { addDisc as addContainerDisc, receiveDisc as receiveContainerDisc, removeDisc as removeContainerDisc, ejectDisc as ejectContainerDisc, askScreen as containerAskScreen, openScreen as containerOpenScreen, isContainerScreen, screenOn as containerScreenOn, act as containerAct, cloneInstance as cloneContainer, renameInstance as renameContainer, addPlace as addContainerPlace, moveInstance as moveContainer, removePlace as removeContainerPlace, setStandardPlace, containerOfMachine, vmOfMachine, instanceOfMachine, containersTrouble, create as createContainer, install as installIncus, installVms as installIncusVms, removeContainer, removeSnapshot as removeContainerSnapshot, report as containersReport, restoreSnapshot as restoreContainerSnapshot, setLimits as setContainerLimits, setNetwork as setContainerNetwork, setUpNow as setUpContainers, shellCommand as containerShell, shellReady as containerShellReady, takeSnapshot as takeContainerSnapshot } from "./containers";
+import { askScreen as pveAskScreen, openScreen as pveOpenScreen, storageContent as pveStorageContent, removeVolume as pveRemoveVolume, cloneOptions as pveCloneOptions, cloneGuest as pveCloneGuest, makeTemplate as pveMakeTemplate, load as pveLoad, templates as pveTemplates, downloadTemplate as pveDownloadTemplate, removeTemplate as pveRemoveTemplate, setSchedule as pveSetSchedule, runScheduleNow as pveRunSchedule, restoreBackup as pveRestoreBackup, restoreOptions as pveRestoreOptions, changeGuest as pveChangeGuest, guestSettings as pveGuestSettings, installByConsole as pveInstallByConsole, openConsole as pveOpenConsole, type Console as PveConsole, addBySignIn as addPveBySignIn, removeGuest as pveRemoveGuest, addHost as addPve, createGuest as pveCreateGuest, createVm as pveCreateVm, sendFile as pveSendFile, receiveFile as pveReceiveFile, newOptions as pveNewOptions, backupJobs as pveBackupJobs, backups as pveBackups, changeHost as changePve, guestOfMachine, host as pveHost, hosts as pveHosts, power as pvePower, proxmoxTrouble, refresh as refreshPve, removeHost as removePve, snapshotAction as pveSnapshotAction, snapshots as pveSnapshots, takeBackup as pveTakeBackup, takeSnapshot as pveTakeSnapshot, taskLog as pveTaskLog } from "./proxmox";
+import { call as machineCall, clientBinary, containersOf, installScript, invite as machineInvite, INVITE_MS, linkData, linkHandlers, machine as machineView, MACHINE_ID_RE, machines as machineList, machinesAway, open as machineOpen, remove as removeMachine, rename as renameMachine, updateClient, wake as wakeMachine, power as powerMachine, type LinkSocket } from "./machines";
 import { availableUpdate, cancelUpdate, checkForUpdate, confirmUpdate, scheduleUpdateChecks, startRollback, startUpdate, updateStatus } from "./update";
 import { VERSION } from "./version";
 import { zipStream } from "./zip";
@@ -401,7 +404,7 @@ export function memberMay(method: string, path: string, role: Role = "member"): 
 }
 
 /** Events a member's page receives: job output and the activity log are not for them */
-const MEMBER_EVENTS = new Set(["system", "apps", "store"]);
+const MEMBER_EVENTS = new Set(["system", "apps", "store", "modules"]);
 
 /**
  * What of an event of Home Assistant a member's page is told: the states of the tiles on the home page,
@@ -784,6 +787,8 @@ async function api(req: Request, url: URL, server: Server<unknown>): Promise<Res
       version: VERSION,
       setup: needsSetup(),
       user: user ? signedIn(user) : null,
+      // which modules are on: the page shows only their parts
+      modules: user ? modulesOn() : null,
       language: settings.language,
       languages: Object.keys(LANGUAGES),
       passkeys: passkeyDomain(req) !== "",
@@ -896,6 +901,17 @@ async function api(req: Request, url: URL, server: Server<unknown>): Promise<Res
   // an administrator the rules ask for two-factor sign-in is a member until it is set up
   const admin = user.role === "admin" && !mustSetUpTwoFactor(user);
   if (!admin && !memberMay(method, path, user.role === "admin" ? "member" : user.role)) return fail(403, user.role === "admin" ? "auth.twoFactorRequired" : "auth.forbidden");
+  // a module that is off answers nothing: its pages are not there either
+  const part = moduleOfPath(path);
+  if (part && !moduleOn(part)) return fail(404, "modules.off", { module: part });
+  if (path === "/api/modules" && method === "GET") return json({ modules: await modulesReport() });
+  // what is here already that a module is for: the first run offers those ticked
+  if (path === "/api/modules/found" && method === "GET") return json({ found: await findForModules() });
+  const oneModule = /^\/api\/modules\/([a-z]+)$/.exec(path);
+  if (oneModule && method === "PUT") {
+    const data = await body(req);
+    return json({ modules: await setModule(oneModule[1], data.on === true, user.name, data.withNeeds === true) });
+  }
   if (path.startsWith("/api/files")) {
     const silent = await silentPlace(req, url);
     if (silent) return fail(503, "files.placeSilent", { path: silent });
@@ -1065,7 +1081,7 @@ async function api(req: Request, url: URL, server: Server<unknown>): Promise<Res
     }
   }
   // where the person has Hata open: the assistant gives the addresses of apps with that host
-  const assistantHost = { tools: TOOLS, instructions: mcpInstructions, origin: `${requestProto(req)}://${req.headers.get("host") ?? new URL(req.url).host}` };
+  const assistantHost = { tools: toolsNow(), instructions: mcpInstructions, origin: `${requestProto(req)}://${req.headers.get("host") ?? new URL(req.url).host}` };
   if (path === "/api/assistant/chats" && method === "POST") {
     const chat = sayToAssistant(user, null, (await body(req)).text, assistantHost);
     return typeof chat === "string" ? fail(400, chat) : json(shownChat(chat), 201);
@@ -1487,13 +1503,14 @@ async function api(req: Request, url: URL, server: Server<unknown>): Promise<Res
   }
   if (path === "/api/servers" && method === "GET") {
     const system = systemStatus();
-    const instances = await containersReport().then((r) => r.containers, () => []);
-    const machines = machineList().map((m) => {
+    // only what the modules that are on have: the tree shows nothing of the others
+    const instances = moduleOn("containers") ? await containersReport().then((r) => r.containers, () => []) : [];
+    const machines = (moduleOn("machines") ? machineList() : []).map((m) => {
       const macs = (m.info?.macs ?? []).map((c) => c.mac);
       const guest = guestOfMachine(m.id, macs, m.ip.replace(/^::ffff:/, ""));
       return { ...m, instance: instanceOfMachine(macs, m.info?.hostname ?? m.name)?.name ?? "", guest: guest ? { host: guest.host, id: guest.id } : null };
     });
-    return json(serverTree({ here: { name: system.hostname, os: systemName(), address: homeLinks()[0]?.address ?? "", cpu: system.cpu, memory: system.memory, uptime: system.uptime }, instances, hosts: pveHosts().map((x) => pveHost(x.id)), machines, version: VERSION }));
+    return json(serverTree({ here: { name: system.hostname, os: systemName(), address: homeLinks()[0]?.address ?? "", cpu: system.cpu, memory: system.memory, uptime: system.uptime }, instances, hosts: moduleOn("proxmox") ? pveHosts().map((x) => pveHost(x.id)) : [], machines, version: VERSION }));
   }
   if (path === "/api/domains" && method === "GET") return json(await domainsReport(language(url), await forwardsReport()));
   if (path === "/api/ports" && method === "POST") return json(await addForward(await body(req), user.name));
@@ -2204,6 +2221,12 @@ async function api(req: Request, url: URL, server: Server<unknown>): Promise<Res
 const MAX_API_BODY = 2 * 1024 * 1024;
 
 /** The address the caller reached the server at, as the OAuth documents must name it */
+/** The tools there are now: those of the base and of the modules that are on */
+const toolsNow = () => TOOLS.filter((tool) => {
+  const part = moduleOfTool(tool.name);
+  return !part || moduleOn(part);
+});
+
 const reachedAt = (req: Request): string => `${requestProto(req)}://${req.headers.get("host") ?? new URL(req.url).host}`;
 
 /** These are read by programs in other people's pages too; nothing here goes by a cookie */
@@ -2277,7 +2300,7 @@ async function mcp(req: Request, server: Server<unknown>): Promise<Response> {
   if (Number(req.headers.get("content-length") ?? 0) > MAX_API_BODY) return new Response(null, { status: 413 });
   // a tool waits for an operation for half a minute; the default idle timeout would cut the answer
   server.timeout(req, 120);
-  return mcpResponse(req, TOOLS, { name: key.name, level: key.level, user: agentUser(key), confirm: key.confirm, origin: `${requestProto(req)}://${req.headers.get("host") ?? new URL(req.url).host}` }, { version: VERSION, instructions: mcpInstructions, approve: (tool, args, caller) => desk.ask(caller.name, tool, args) });
+  return mcpResponse(req, toolsNow(), { name: key.name, level: key.level, user: agentUser(key), confirm: key.confirm, origin: `${requestProto(req)}://${req.headers.get("host") ?? new URL(req.url).host}` }, { version: VERSION, instructions: mcpInstructions, approve: (tool, args, caller) => desk.ask(caller.name, tool, args) });
 }
 
 /** A file name for the Content-Disposition header, whatever letters it has */
@@ -3163,6 +3186,9 @@ async function handle(req: Request, server: Server<unknown>): Promise<Response> 
   if (url.pathname === "/.well-known/hata-check") return json({ instance: INSTANCE, host: requestHost(req), proto: requestProto(req) });
   const host = classifyHost(requestHost(req));
   if (host.kind === "app") return serveApp(req, server, host.label);
+  // what a module that is off serves outside the API: agents, the sign-in of connectors, the clients of machines
+  const part = url.pathname.startsWith("/api/") ? null : moduleOfPath(url.pathname);
+  if (part && !moduleOn(part)) return fail(404, "modules.off", { module: part });
   if (url.pathname === "/mcp") return mcp(req, server);
   const signIn = await oauth(req, url);
   if (signIn) return signIn;
@@ -3250,18 +3276,11 @@ export async function serve(): Promise<void> {
   }
   confirmUpdate();
   dropOldSecrets();
+  // after the update is confirmed: looking at what is in use may take a while, and must never count as a failed start
+  await settleModules();
   scheduleUpdateChecks();
   startSampler(() => settings.dataRoot);
-  startMachines();
-  startProxmox();
-  startContainers();
-  startHomeAssistant();
-  startQbittorrent();
-  startFrigate();
-  startMachineUsers();
-  startMachineGates();
   startDisks();
-  startPools();
   startFills();
   startImages({
     apps: installedNames,
@@ -3275,9 +3294,6 @@ export async function serve(): Promise<void> {
   onDiskBack((paths) => void startAfterDisk(paths).catch((e) => console.error("Could not start the apps of a disk that came back:", e instanceof Error ? e.message : e)));
   startMounting();
   startNetwork();
-  startSnapraid();
-  startShares();
-  startNetPlaces();
   startTrash();
   scheduleStoreSync();
   scheduleBackups();
@@ -3292,11 +3308,9 @@ export async function serve(): Promise<void> {
   });
   onNamesChanged(() => void refreshHttps());
   tellHttps(async () => ({ listening: !!httpsServer, error: httpsError, names: await httpsNames() }));
-  startBlocker();
-  startDns();
   onForwardsChanged(() => void closeOutside().catch(() => {}));
-  // Incus's own devices are there already; Hata's relays start a little later, once the targets are looked at
-  setTimeout(() => void startForwards().catch((e) => console.error("Ports:", e)), 5_000);
+  // the modules that are on; a little later, once the base has looked around (the relays of ports need their targets)
+  setTimeout(startModules, 5_000);
   setInterval(() => void refreshHttps(), 10 * 60_000);
   // a newly installed app needs a certificate for its name
   let appsChanged: Timer | null = null;

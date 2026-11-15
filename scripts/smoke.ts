@@ -63,7 +63,7 @@ const base = `http://127.0.0.1:${port}`;
 const serverLog: string[] = [];
 const server = Bun.spawn([process.execPath, join(root, "src", "index.ts"), "serve"], {
   cwd: work,
-  env: { ...process.env, HATA_DATA_DIR: stateDir, HATA_PORT: String(port), HATA_HOST: "127.0.0.1" },
+  env: { ...process.env, HATA_DATA_DIR: stateDir, HATA_PORT: String(port), HATA_HOST: "127.0.0.1", HATA_NO_LOOK: "1" },
   stdout: "pipe",
   stderr: "pipe",
 });
@@ -122,6 +122,7 @@ let trouble: string[] = [];
 const requests = new Map<string, string>();
 /** Requests sent and not answered yet */
 const underWay = new Set<string>();
+const missing: { id: string; line: string }[] = [];
 /** Requests the server answered with 5xx; what it said is asked for when the page has settled */
 let failed: { id: string; line: string }[] = [];
 socket.onmessage = (event) => {
@@ -140,6 +141,8 @@ socket.onmessage = (event) => {
     if (p.type !== "EventSource" && p.type !== "WebSocket") underWay.add(p.requestId);
   }
   if (m.method === "Network.loadingFinished" || m.method === "Network.loadingFailed") underWay.delete(p.requestId);
+  // a page that asks a module that is off for something shows a part it should not have
+  if (m.method === "Network.responseReceived" && p.response.status === 404 && new URL(p.response.url).pathname.startsWith("/api/")) missing.push({ id: p.requestId, line: `${requests.get(p.requestId) ?? p.response.url}` });
   if (m.method === "Network.responseReceived" && p.response.status >= 500) failed.push({ id: p.requestId, line: `${p.response.status}: ${requests.get(p.requestId) ?? p.response.url}` });
 };
 const send = (method: string, params: object = {}) =>
@@ -179,7 +182,7 @@ const sections = [...sectionList.matchAll(/\{ id: "([a-z]+)"/g)].map((m) => m[1]
 if (sections.length < 10) giveUp("Could not read the sections of Settings from app.js.");
 
 const ROUTES = [
-  "#/welcome/server", "#/welcome/existing", "#/welcome/data", "#/welcome/backups", "#/welcome/apps",
+  "#/welcome/server", "#/welcome/existing", "#/welcome/data", "#/welcome/backups", "#/welcome/modules", "#/welcome/apps",
   "#/", "#/store", "#/files", "#/files/", "#/hata", "#/trash", "#/activity", "#/import",
   "#/machines", "#/containers", "#/containers/settings", "#/integrations", "#/ha", "#/assistant",
   ...sections.map((id) => `#/settings/${id}`),
@@ -227,6 +230,10 @@ async function walk(label: string, phone: boolean): Promise<void> {
       const said = await send("Network.getResponseBody", { requestId: id });
       found.push(`${line} ${typeof said.body === "string" ? said.body.slice(0, 300) : ""}`.trim());
     }
+    for (const { id, line } of missing.splice(0)) {
+      const said = await send("Network.getResponseBody", { requestId: id }).catch(() => ({ body: "" }));
+      if (typeof said.body === "string" && said.body.includes("modules.off")) found.push(`asked a module that is off: ${line}`);
+    }
     if (!(await js<boolean>(DRAWN))) found.push("the page is empty");
     if (phone) for (const wide of await js<string[]>(SIDEWAYS)) found.push(`scrolls sideways: ${wide}`);
     if (shotsAt) {
@@ -242,6 +249,24 @@ async function walk(label: string, phone: boolean): Promise<void> {
   }
 }
 
+// a new server as a person gets it: the base alone, the pages of modules saying they are off
+await walk("base ", false);
+// then with every module on, so their pages are walked too
+const MODULES_ON = `(async () => {
+  const list = (await (await fetch("/api/modules")).json()).modules;
+  for (const m of list) {
+    const res = await fetch("/api/modules/" + m.id, { method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ on: true, withNeeds: true }) });
+    const said = await res.text();
+    if (!res.ok) return m.id + ": " + res.status + " " + said.slice(0, 200);
+  }
+  return "";
+})()`;
+const notOn = await js<string>(MODULES_ON);
+if (notOn) giveUp(`Could not turn a module on: ${notOn}`);
+await send("Page.reload");
+await until("the page after a reload", () => js<boolean>(DRAWN));
+// what the page before the reload was still waiting for is gone with it
+underWay.clear();
 await walk("wide ", false);
 await width(390, 844, true);
 await send("Page.reload");
@@ -253,5 +278,5 @@ if (failures.length) {
   console.error(`\n${failures.length} problem${failures.length === 1 ? "" : "s"} on ${ROUTES.length} pages.`);
   process.exit(1);
 }
-console.log(`\n${ROUTES.length} pages, wide and at a phone's width: nothing wrong.`);
+console.log(`\n${ROUTES.length} pages — the base alone, every module on, and at a phone's width: nothing wrong.`);
 process.exit(0);
