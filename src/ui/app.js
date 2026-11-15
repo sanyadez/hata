@@ -12780,7 +12780,8 @@ function streamPlayer(path, { at = 0, audio = 0, sub = -1, played, failed } = {}
   const mute = h("button", { type: "button", class: "icon-btn", "aria-label": t("tv.mute"), title: t("tv.mute"), onclick: () => ((video.muted = !video.muted), mute.replaceChildren(icon(video.muted ? "volumeOff" : "volume"))) }, icon("volume"));
   const sounds = h("select", { "aria-label": t("tv.track.audio"), title: t("tv.track.audio"), hidden: true, onchange: () => ((p.audio = Number(sounds.value)), void load(position())) });
   const subs = h("select", { "aria-label": t("tv.track.subs"), title: t("tv.track.subs"), hidden: true, onchange: () => ((p.sub = Number(subs.value)), void words()) });
-  const el = h("div", { class: "sp" }, video, note, h("div", { class: "sp-bar" }, play, clock, bar, sounds, subs, mute, h("button", { type: "button", class: "icon-btn", "aria-label": t("tv.fullScreen"), title: t("tv.fullScreen"), onclick: () => (document.fullscreenElement ? void document.exitFullscreen() : void el.requestFullscreen?.().catch(() => {})) }, icon("expand"))));
+  const spoken = h("div", { class: "sp-words", "aria-live": "off" });
+  const el = h("div", { class: "sp" }, h("div", { class: "sp-view" }, video, spoken), note, h("div", { class: "sp-bar" }, play, clock, bar, sounds, subs, mute, h("button", { type: "button", class: "icon-btn", "aria-label": t("tv.fullScreen"), title: t("tv.fullScreen"), onclick: () => (document.fullscreenElement ? void document.exitFullscreen() : void el.requestFullscreen?.().catch(() => {})) }, icon("expand"))));
   const shown = () => {
     const total = p.info?.duration ?? 0;
     const now = p.dragging ? Number(bar.value) : position();
@@ -12789,26 +12790,28 @@ function streamPlayer(path, { at = 0, audio = 0, sub = -1, played, failed } = {}
   };
   const say = (text) => ((note.textContent = text), (note.hidden = !text));
   /**
-   * The chosen subtitle. Its lines come with the file's own times and are put on the stream's clock
-   * here, one track of ours for all of them: read as they come, so the first show at once.
+   * The chosen subtitle. Its lines come with the file's own times and are kept here, on the stream's
+   * clock; `paint` shows the ones of this very moment in a layer of ours over the picture. The
+   * browser's own subtitle tracks were tried first: a line of before a jump stayed drawn over the
+   * new ones. Every choice and every jump starts a list of its own, so nothing of the old one is left.
    */
   const words = async () => {
     p.reading?.abort();
-    p.lines ??= video.addTextTrack("subtitles");
-    for (const cue of [...(p.lines.cues ?? [])]) p.lines.removeCue(cue);
-    p.lines.mode = p.sub < 0 ? "disabled" : "showing";
+    const lines = (p.lines = []);
+    paint();
     if (p.sub < 0) return;
     const stop = (p.reading = new AbortController());
     const zero = p.start;
     const moment = (text) => text.split(":").reduce((sum, part) => sum * 60 + Number(part), 0);
     const place = (block) => {
-      const lines = block.split("\n");
-      const at = lines.findIndex((line) => line.includes("-->"));
-      const times = at < 0 ? null : /^\s*([\d:.]+)\s+-->\s+([\d:.]+)/.exec(lines[at]);
-      const text = lines.slice(at + 1).join("\n").trim();
+      const rows = block.split("\n");
+      const at = rows.findIndex((row) => row.includes("-->"));
+      const times = at < 0 ? null : /^\s*([\d:.]+)\s+-->\s+([\d:.]+)/.exec(rows[at]);
+      // the marks of the format (<i>, <c.yellow>, <00:01.000>) are left out: the words alone are shown
+      const text = rows.slice(at + 1).join("\n").replace(/<[^>]*>/g, "").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&nbsp;/g, " ").trim();
       if (!times || !text) return;
       const [from, to] = [moment(times[1]) - zero, moment(times[2]) - zero];
-      if (to > 0 && to > from) p.lines.addCue(new window.VTTCue(Math.max(0, from), to, text));
+      if (to > 0 && to > from) lines.push({ from, to, text });
     };
     try {
       const res = await fetch(from("subs", p.sub), { signal: stop.signal });
@@ -12828,6 +12831,20 @@ function streamPlayer(path, { at = 0, audio = 0, sub = -1, played, failed } = {}
     } catch {
       // stopped for another subtitle or another moment, or the server ended it: what came stays
     }
+  };
+  /** The lines of this moment, redrawn only when they are other ones */
+  const paint = () => {
+    const now = video.currentTime || 0;
+    const said = (p.lines ?? []).filter((line) => line.from <= now && now < line.to).map((line) => line.text);
+    const key = said.join("\n\n");
+    if (key === p.said) return;
+    p.said = key;
+    put(spoken, said.map((text) => h("p", null, text)));
+  };
+  const follow = () => {
+    if (p.gone) return;
+    paint();
+    requestAnimationFrame(follow);
   };
   const load = async (moment) => {
     say("");
@@ -12882,6 +12899,7 @@ function streamPlayer(path, { at = 0, audio = 0, sub = -1, played, failed } = {}
     if (e.key === "ArrowLeft") void load(position() - 30);
   });
   void load(at);
+  requestAnimationFrame(follow);
   return {
     el,
     position,
