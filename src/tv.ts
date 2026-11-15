@@ -408,6 +408,8 @@ export const PREFS: Record<string, { kind: "list" } | { kind: "fixed"; values: (
   "audiooutput.guisoundmode": { kind: "flag", on: 1, off: 0 },
   "screensaver.mode": { kind: "fixed", values: ["", "screensaver.xbmc.builtin.dim", "screensaver.xbmc.builtin.black"] },
   "screensaver.time": { kind: "fixed", values: [1, 2, 3, 5, 10, 15, 30, 60] },
+  // minutes of nothing happening before the picture's output is switched off, so that the TV or monitor goes to sleep; 0 — never
+  "powermanagement.displaysoff": { kind: "fixed", values: [0, 5, 10, 15, 30, 60, 120] },
 };
 
 export interface Pref {

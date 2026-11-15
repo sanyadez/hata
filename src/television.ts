@@ -182,7 +182,7 @@ let prefsKept: { at: number; prefs: Record<string, Pref>; language: string } | n
 /** The settings shown on the page: asked at most twice a minute — Kodi's port answers one caller at a time */
 async function prefsChoice(): Promise<{ prefs: Record<string, Pref>; language: string }> {
   if (prefsKept && Date.now() - prefsKept.at < 30_000) return prefsKept;
-  const lists = (await Promise.all([["player", "language"], ["system", "audio"], ["interface", "screensaver"]].map(([section, category]) => rpc({ method: "Settings.GetSettings", params: { level: "expert", filter: { section, category } } })))) as ({ settings?: unknown[] } | null)[];
+  const lists = (await Promise.all([["player", "language"], ["system", "audio"], ["interface", "screensaver"], ["system", "powermanagement"]].map(([section, category]) => rpc({ method: "Settings.GetSettings", params: { level: "expert", filter: { section, category } } })))) as ({ settings?: unknown[] } | null)[];
   const spoken = ((await rpc({ method: "Settings.GetSettingValue", params: { setting: "locale.language" } })) as { value?: unknown } | null)?.value;
   const language = Object.entries(TV_LANGUAGES).find(([, addon]) => addon === spoken)?.[0] ?? "";
   if (lists.some((one) => !one)) return { prefs: {}, language };

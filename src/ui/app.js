@@ -13243,6 +13243,7 @@ function paintTv() {
   const saver = pref("screensaver.mode") && [
     listed("screensaver.mode", t("tv.saver"), t("tv.saverHint"), [{ value: "", label: t("tv.saver.off") }, { value: "screensaver.xbmc.builtin.dim", label: t("tv.saver.dim") }, { value: "screensaver.xbmc.builtin.black", label: t("tv.saver.black") }, ...(["", "screensaver.xbmc.builtin.dim", "screensaver.xbmc.builtin.black"].includes(pref("screensaver.mode").value) ? [] : [{ value: pref("screensaver.mode").value, label: pref("screensaver.mode").value }])]),
     pref("screensaver.mode").value !== "" && listed("screensaver.time", t("tv.saverAfter"), null, [...new Set([1, 2, 3, 5, 10, 15, 30, 60, pref("screensaver.time")?.value])].filter(Number.isFinite).sort((a, b) => a - b).map((n) => ({ value: n, label: t("time.minutes", { n }) }))),
+    pref("powermanagement.displaysoff") && listed("powermanagement.displaysoff", t("tv.sleep"), t("tv.sleepHint"), [...new Set([0, 5, 10, 15, 30, 60, 120, pref("powermanagement.displaysoff").value])].filter(Number.isFinite).sort((a, b) => a - b).map((n) => ({ value: n, label: n ? t("time.minutes", { n }) : t("tv.sleep.never") }))),
   ];
   // the browser's own player stands on ffmpeg: said with what it gives, the command and the button
   const bring = button(t("mounting.needs.install", { package: "FFmpeg" }), {
