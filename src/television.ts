@@ -69,6 +69,10 @@ function controlPort(): number {
   return isOurs(file) ? TV_PORT : (portIn(file) ?? 9090);
 }
 
+/** Kodi's windows by number: a film on the whole screen, and the player's menu over it */
+const WINDOW_FULLSCREEN = 12005;
+const WINDOW_OSD = 12901;
+
 let asked = 0;
 
 /** One call of Kodi's JSON-RPC over its local port; null when Kodi does not answer */
@@ -400,7 +404,14 @@ export function watchTv(): void {
 /** A button of the page's remote */
 export async function remote(action: unknown, value: unknown): Promise<void> {
   const { player } = typeof action === "string" && /^(playpause|stop|forward|rewind|seek)$/.test(action) ? await nowPlaying() : { player: null };
-  const call = typeof action === "string" ? remoteCall(action, value, player) : null;
+  let call = typeof action === "string" ? remoteCall(action, value, player) : null;
   if (!call) throw new AppError("tv.badAction", 400);
+  // "Menu" is the menu of what is on the screen: over a film that is the player's own (sound, subtitles,
+  // settings) — Kodi's context menu does nothing there — and a second press closes it
+  if (action === "menu") {
+    const shown = ((await rpc({ method: "GUI.GetProperties", params: { properties: ["currentwindow"] } })) as { currentwindow?: { id?: number } } | null)?.currentwindow?.id;
+    if (shown === WINDOW_FULLSCREEN) call = { method: "Input.ShowOSD" };
+    else if (shown === WINDOW_OSD) call = { method: "Input.Back" };
+  }
   if ((await rpc(call)) === null && (await rpc({ method: "JSONRPC.Ping" }, 1500)) !== "pong") throw new AppError("tv.notRunning", 409);
 }
