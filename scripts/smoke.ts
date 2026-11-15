@@ -63,7 +63,7 @@ const base = `http://127.0.0.1:${port}`;
 const serverLog: string[] = [];
 const server = Bun.spawn([process.execPath, join(root, "src", "index.ts"), "serve"], {
   cwd: work,
-  env: { ...process.env, HATA_DATA_DIR: stateDir, HATA_PORT: String(port), HATA_HOST: "127.0.0.1" },
+  env: { ...process.env, HATA_DATA_DIR: stateDir, HATA_PORT: String(port), HATA_HOST: "127.0.0.1", HATA_NO_LOOK: "1" },
   stdout: "pipe",
   stderr: "pipe",
 });

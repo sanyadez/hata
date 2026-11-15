@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import { cleanModules, missingFor, MODULE_IDS, moduleOfPath, moduleOfTool, MODULES, neededBy, needsOf, switchesFor } from "../src/modules";
 import { TOOLS } from "../src/mcptools";
+import { neighbours } from "../src/modulefinds";
 
 test("requests are told apart: a module's own and the base's", () => {
   expect(moduleOfPath("/api/disks")).toBeNull();
@@ -65,4 +66,17 @@ test("what a module stands on goes on with it and holds it on", () => {
 test("an older server keeps what it uses", () => {
   const on = switchesFor(["adblock", "machines"]);
   expect(MODULE_IDS.filter((id) => on[id])).toEqual(["dns", "adblock", "machines"]);
+});
+
+test("the look around stays within the home network", () => {
+  const home = neighbours({ address: "192.168.1.128", netmask: "255.255.255.0" });
+  expect(home.length).toBe(253);
+  expect(home[0]).toBe("192.168.1.1");
+  expect(home.at(-1)).toBe("192.168.1.254");
+  expect(home.includes("192.168.1.128")).toBe(false);
+  // a larger network is cut down to the addresses around our own
+  const wide = neighbours({ address: "10.20.30.40", netmask: "255.0.0.0" });
+  expect(wide.length).toBe(253);
+  expect(wide.every((ip) => ip.startsWith("10.20.30."))).toBe(true);
+  expect(neighbours({ address: "192.168.5.2", netmask: "255.255.255.252" })).toEqual(["192.168.5.1"]);
 });

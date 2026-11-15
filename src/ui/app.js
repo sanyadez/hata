@@ -12120,7 +12120,8 @@ function importParts(data, nothing) {
 // The walk through a new server: every step only opens what the pages have anyway, so nothing here
 // is the one place a thing can be done.
 
-const WELCOME_STEPS = ["admin", "server", "existing", "data", "backups", "modules", "apps"];
+const WELCOME_STEPS = ["admin", "server", "existing", "modules", "data", "backups", "apps"];
+const welcomeUi = {};
 
 /** The language of this browser; `then` — what to load again in it */
 function languageSelect(then) {
@@ -12193,7 +12194,11 @@ async function loadWelcome() {
     step === "data" || step === "backups" ? quiet("/api/disks") : state.disks,
     step === "apps" ? quiet(`/api/store?lang=${state.lang}`) : state.store,
   ]);
-  if (step === "modules") state.modulesList = (await quiet("/api/modules"))?.modules ?? state.modulesList;
+  if (step === "modules") {
+    state.modulesList = (await quiet("/api/modules"))?.modules ?? state.modulesList;
+    // the look around takes a few seconds: the step shows at once and says what was found when it is known
+    void loadModuleFinds().then(() => state.route.view === "welcome" && state.route.step === "modules" && paintWelcome());
+  }
   Object.assign(state, { settings: settings ?? state.settings, local, import: found, disks, store });
   if (state.route.view === "welcome" && state.route.step === step) paintWelcome();
 }
@@ -12272,23 +12277,33 @@ function paintWelcome() {
   if (step === "modules") {
     const list = state.modulesList;
     if (!list) return put(box, ...head, waiting);
-    // what is ticked is turned on, with what it stands on; nothing is installed by that
-    const ticks = new Map(list.map((m) => [m.id, h("input", { type: "checkbox", checked: m.on })]));
-    const row = (m) =>
-      h(
+    const finds = state.moduleFinds;
+    // what the person ticked stays through a repaint; what was found is ticked until they say otherwise
+    const picks = (welcomeUi.picks ??= {});
+    const wanted = (m) => picks[m.id] ?? (m.on || findsFor(m.id).length > 0);
+    const ticks = new Map();
+    const pick = (m) => {
+      const found = m.on ? [] : findsFor(m.id);
+      const tick = h("input", { type: "checkbox", checked: wanted(m), onchange: () => ((picks[m.id] = tick.checked), label.classList.toggle("picked", tick.checked)) });
+      ticks.set(m.id, tick);
+      const label = h(
         "label",
-        { class: "check tool" },
-        ticks.get(m.id),
-        h("span", { class: "app-icon plus" }, icon(MODULE_ICONS[m.id])),
-        h("span", { class: "grow" }, h("strong", null, moduleName(m.id)), h("span", { class: "muted small block" }, t(`modules.${m.id}.what`)), m.needs.length > 0 && h("span", { class: "muted small block" }, t("modules.needsLine", { needs: m.needs.map(moduleName).join(", ") }))),
+        { class: "card module-pick" + (tick.checked ? " picked" : "") },
+        tick,
+        icon(MODULE_ICONS[m.id]),
+        h("span", { class: "grow" }, h("strong", { class: "block" }, moduleName(m.id)), h("span", { class: "muted small block" }, t(`modules.${m.id}.what`)), m.needs.length > 0 && h("span", { class: "muted small block" }, "↳ ", t("modules.needsModule", { needs: m.needs.map(moduleName).join(", ") })), found.map((f) => h("span", { class: "small block module-found" }, findWords(f)))),
       );
+      return label;
+    };
+    const foundNames = finds ? list.filter((m) => !m.on && findsFor(m.id).length > 0).map((m) => moduleName(m.id)) : [];
     return put(
       box,
       ...head,
       MODULE_GROUPS.map((group) => {
         const mine = list.filter((m) => m.group === group);
-        return mine.length > 0 && h("section", { class: "card pad" }, h("div", { class: "section-head" }, h("h2", null, t("modules.group." + group))), mine.map(row));
+        return mine.length > 0 && h("div", { class: "stack" }, h("div", { class: "cat-title" }, t("modules.group." + group)), h("div", { class: "module-picks" }, mine.map(pick)));
       }),
+      h("p", { class: "banner quiet" }, !finds ? t("welcome.modules.looking") : foundNames.length ? t("welcome.modules.found", { n: foundNames.length, names: foundNames.join(", ") }) : t("welcome.modules.nothing")),
       h("p", { class: "muted small" }, t("welcome.modules.more"), " ", h("a", { class: "link", href: "#/settings/modules" }, t("modules.title"))),
       ...welcomeFoot(step, async () => {
         let now = list;
@@ -12677,37 +12692,43 @@ function moduleOffCard(id) {
   return h("section", { class: "card pad stack" }, h("div", { class: "tool" }, h("span", { class: "app-icon plus" }, icon(MODULE_ICONS[id])), h("div", { class: "grow" }, h("div", { class: "tool-head" }, h("strong", null, moduleName(id)), h("span", { class: "state stopped" }, t("modules.off"))), h("p", { class: "muted small" }, t(`modules.${id}.what`)), h("p", { class: "muted small" }, t("modules.offLead"))), turn));
 }
 
+/** What was found here that a module is for, by module; asked once a page and kept */
+async function loadModuleFinds() {
+  if (state.moduleFinds) return;
+  state.moduleFinds = (await api("GET", "/api/modules/found").catch(() => null))?.found ?? [];
+}
+const findsFor = (id) => (state.moduleFinds ?? []).filter((f) => f.module === id);
+const findWords = (f) => t("modules.found." + f.what, { detail: f.detail });
+
 function modulesSection() {
   const list = state.modulesList;
   if (!list) return [h("p", { class: "muted" }, "…")];
-  const row = (m) =>
-    h(
-      "div",
-      { class: "tool" },
-      h("span", { class: "app-icon plus" }, icon(MODULE_ICONS[m.id])),
-      h(
-        "div",
-        { class: "grow" },
-        h("div", { class: "tool-head" }, h("strong", null, moduleName(m.id)), h("span", { class: "state " + (m.on ? "running" : "stopped") }, t(m.on ? "modules.on" : "modules.off")), m.uses.length > 0 && h("span", { class: "state running" }, t("tools.used"))),
-        h("p", { class: "muted small" }, t(`modules.${m.id}.what`)),
-        h("p", { class: "muted small" }, t("modules.adds"), " ", t(`modules.${m.id}.adds`)),
-        m.needs.length > 0 && h("p", { class: "muted small" }, t("modules.needsLine", { needs: m.needs.map(moduleName).join(", ") })),
-      ),
-      h(
-        "div",
-        { class: "row-actions" },
-        m.on && h("a", { class: "btn small", href: MODULE_HOME[m.id] }, t("common.open")),
-        m.on ? button(t("modules.turnOff"), { class: "small", onclick: () => void turnModuleOff(m) }) : button(t("modules.turnOn"), { class: "small primary", onclick: (e) => ((e.currentTarget.disabled = true), void turnModuleOn(m.id)) }, "check"),
-      ),
+  // what is here already shows on the cards of modules that are off; the look takes a few seconds
+  if (!state.moduleFinds) void loadModuleFinds().then(() => state.route.view === "settings" && state.route.section === "modules" && renderSettings());
+  const card = (m) => {
+    const held = m.uses.length > 0 || m.neededBy.length > 0;
+    const flip = h("button", { type: "button", role: "switch", class: "ha-switch", "aria-checked": String(m.on), "aria-label": t(m.on ? "modules.turnOff" : "modules.turnOn") + ": " + moduleName(m.id), onclick: (e) => (m.on ? void turnModuleOff(m) : ((e.currentTarget.disabled = true), void turnModuleOn(m.id))) }, h("i"));
+    return h(
+      "section",
+      { class: "card module-card" + (m.on ? " on" : "") },
+      h("div", { class: "module-card-head" }, h("span", { class: "app-icon plus" }, icon(MODULE_ICONS[m.id])), h("div", { class: "grow" }, h("strong", { class: "block" }, moduleName(m.id)), h("span", { class: "state " + (held ? "info" : m.on ? "running" : "stopped") }, t(held ? "modules.inUse" : m.on ? "modules.on" : "modules.off"))), flip),
+      h("p", { class: "muted small" }, t(`modules.${m.id}.what`)),
+      m.uses.map((use) => h("a", { class: "module-chip", href: MODULE_USE_AT[use.what] ?? MODULE_HOME[m.id] }, icon("link"), t("modules.use." + use.what, { n: use.count ?? "" }))),
+      m.neededBy.map((other) => h("span", { class: "module-chip" }, icon("link"), t("modules.neededFor", { name: moduleName(other) }))),
+      m.needs.length > 0 && h("p", { class: "muted small" }, "↳ ", t("modules.needsModule", { needs: m.needs.map(moduleName).join(", ") })),
+      !m.on && findsFor(m.id).map((f) => h("span", { class: "module-chip found" }, icon("search"), findWords(f))),
+      h("p", { class: "module-card-foot muted small" }, icon(m.on ? "check" : "plus"), h("span", { class: "grow" }, t(m.on ? "modules.added" : "modules.willAdd"), " ", t(`modules.${m.id}.adds`)), m.on && h("a", { class: "link", href: MODULE_HOME[m.id] }, t("common.open"))),
     );
+  };
+  const phone = matchMedia("(max-width: 760px)").matches;
   return [
     h("div", { class: "module-top" }, h("p", { class: "muted grow" }, t("modules.lead")), h("div", { class: "module-count" }, h("strong", null, t("modules.count", { on: list.filter((m) => m.on).length, of: list.length })), h("span", { class: "muted small" }, t("modules.on")))),
     h("div", { class: "module-base" }, icon("home"), h("span", null, h("strong", { class: "block" }, t("modules.base")), h("span", { class: "muted small" }, t("modules.baseList")))),
     // on a phone the groups are chosen one at a time
     h("div", { class: "module-filter" }, ["", ...MODULE_GROUPS].map((group) => h("button", { type: "button", class: "chip" + ((settingsUi.moduleGroup ?? "") === group ? " accent" : ""), onclick: () => ((settingsUi.moduleGroup = group), renderSettings()) }, group ? t("modules.group." + group) : t("modules.all")))),
-    MODULE_GROUPS.filter((group) => !settingsUi.moduleGroup || settingsUi.moduleGroup === group || !matchMedia("(max-width: 760px)").matches).map((group) => {
+    MODULE_GROUPS.filter((group) => !phone || !settingsUi.moduleGroup || settingsUi.moduleGroup === group).map((group) => {
       const mine = list.filter((m) => m.group === group);
-      return mine.length > 0 && h("section", { class: "card pad stack" }, h("div", { class: "section-head" }, h("h2", null, t("modules.group." + group), h("span", { class: "muted" }, t("modules.count", { on: mine.filter((m) => m.on).length, of: mine.length })))), mine.map(row));
+      return mine.length > 0 && h("div", { class: "stack" }, h("h2", { class: "module-group" }, t("modules.group." + group), h("span", { class: "muted" }, t("modules.groupCount", { on: mine.filter((m) => m.on).length, of: mine.length }))), h("div", { class: "module-cards" }, mine.map(card)));
     }),
   ];
 }

@@ -111,6 +111,7 @@ import { isPlainObject } from "./fsutil";
 import { mcpResponse } from "./mcp";
 import { instructions as mcpInstructions, tellHttps, TOOLS } from "./mcptools";
 import { moduleOn, modulesOn, modulesReport, setModule, settleModules, startModules } from "./moduleruns";
+import { findForModules } from "./modulefinds";
 import { moduleOfPath, moduleOfTool } from "./modules";
 import { serverTree } from "./servertree";
 import { homeLinks, localNamesStatus, refreshLocalNames } from "./mdns";
@@ -904,6 +905,8 @@ async function api(req: Request, url: URL, server: Server<unknown>): Promise<Res
   const part = moduleOfPath(path);
   if (part && !moduleOn(part)) return fail(404, "modules.off", { module: part });
   if (path === "/api/modules" && method === "GET") return json({ modules: await modulesReport() });
+  // what is here already that a module is for: the first run offers those ticked
+  if (path === "/api/modules/found" && method === "GET") return json({ found: await findForModules() });
   const oneModule = /^\/api\/modules\/([a-z]+)$/.exec(path);
   if (oneModule && method === "PUT") {
     const data = await body(req);
