@@ -112,7 +112,7 @@ import { mcpResponse } from "./mcp";
 import { instructions as mcpInstructions, tellHttps, TOOLS } from "./mcptools";
 import { moduleOn, modulesOn, modulesReport, setModule, settleModules, startModules } from "./moduleruns";
 import { findForModules } from "./modulefinds";
-import { installTv, playOnTv, remote as tvRemote, setAudio as setTvAudio, setFolders as setTvFolders, switchTv, tvNow, tvReport } from "./television";
+import { installTv, playOnTv, remote as tvRemote, keepPicture as keepTvPicture, setAudio as setTvAudio, setFolders as setTvFolders, setPicture as setTvPicture, switchTv, tvNow, tvReport } from "./television";
 import { moduleOfPath, moduleOfTool } from "./modules";
 import { serverTree } from "./servertree";
 import { homeLinks, localNamesStatus, refreshLocalNames } from "./mdns";
@@ -1523,8 +1523,10 @@ async function api(req: Request, url: URL, server: Server<unknown>): Promise<Res
     if ("on" in data) return json(await switchTv(data.on === true, user.name));
     if ("folders" in data) return json(await setTvFolders(data.folders, user.name));
     if ("audio" in data) return json(await setTvAudio(data.audio));
+    if ("resolution" in data || "rate" in data || "match" in data) return json(await setTvPicture(data, user.name));
     return fail(400, "tv.badAction");
   }
+  if (path === "/api/tv/keep" && method === "POST") return json(await keepTvPicture((await body(req)).keep === true));
   if (path === "/api/tv/play" && method === "POST") {
     await playOnTv((await body(req)).path, user.name);
     return json({ ok: true });

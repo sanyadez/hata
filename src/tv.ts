@@ -272,3 +272,77 @@ export function cleanFolders(raw: unknown): string[] {
   }
   return out.slice(0, 30);
 }
+
+/** Kodi's own window that asks whether a new screen mode is kept, and its two buttons */
+export const KEEP_WINDOW = 10100;
+export const KEEP_YES = 11;
+export const KEEP_NO = 10;
+/** How long Kodi waits for that answer before it puts the old mode back, seconds */
+export const KEEP_SECONDS = 15;
+/** Kodi's "adjust the display's refresh rate": off, and "when a film starts and when it stops" */
+export const MATCH_OFF = 0;
+export const MATCH_ON = 2;
+
+export interface Choice<T> {
+  value: T;
+  options: { label: string; value: T }[];
+}
+
+export interface Picture {
+  /** 1920×1080, 1280×720: Kodi's own list for the screen it draws on */
+  resolution: Choice<number>;
+  /** The refresh rates the chosen resolution has, in Hz */
+  rate: Choice<string>;
+  /** The screen's rate follows the film's while it plays */
+  match: boolean;
+}
+
+/**
+ * The picture's settings out of Kodi's own (`Settings.GetSettings` of system / display, and the value
+ * of `videoplayer.adjustrefreshrate`); null when Kodi names no resolution to choose from.
+ */
+export function pictureOf(list: unknown, adjust: unknown): Picture | null {
+  const all = (Array.isArray(list) ? list : []) as { id?: unknown; value?: unknown; options?: { label?: unknown; value?: unknown }[] }[];
+  const options = (id: string) => all.find((one) => one?.id === id);
+  const resolution = options("videoscreen.resolution");
+  const mode = options("videoscreen.screenmode");
+  const sizes = (resolution?.options ?? []).flatMap((o) => {
+    const found = /^(\d+)x(\d+)([pi])/.exec(String(o.label).trim());
+    return found && Number.isInteger(o.value) ? [{ label: `${found[1]}×${found[2]}${found[3] === "i" ? "i" : ""}`, value: o.value as number, area: Number(found[1]) * Number(found[2]) }] : [];
+  });
+  if (!resolution || sizes.length === 0) return null;
+  const rates = (mode?.options ?? []).flatMap((o) => (typeof o.value === "string" && Number.isFinite(parseFloat(String(o.label))) ? [{ label: String(parseFloat(String(o.label))), value: o.value, hz: parseFloat(String(o.label)) }] : []));
+  // Kodi names the screen's own rate "DESKTOP" until another is chosen, then by the mode's full name
+  const current = typeof mode?.value === "string" ? mode.value : "";
+  const rate = rates.find((o) => o.value === current) ?? rates.find((o) => current !== "DESKTOP" && Math.abs(o.hz - parseFloat(current.slice(11, 20))) < 0.005);
+  return {
+    resolution: { value: Number(resolution.value), options: sizes.sort((a, b) => b.area - a.area).map(({ label, value }) => ({ label, value })) },
+    rate: { value: rate?.value ?? current, options: rates.sort((a, b) => b.hz - a.hz).map(({ label, value }) => ({ label, value })) },
+    match: Number(adjust) !== MATCH_OFF,
+  };
+}
+
+/**
+ * A packet of Kodi's event port (UDP, this machine only): the one way to press a button of a window
+ * Kodi waits in, because its control port answers nobody until that window is closed.
+ */
+export function eventPacket(type: number, payload: Uint8Array): Uint8Array {
+  const packet = new Uint8Array(32 + payload.length);
+  const view = new DataView(packet.buffer);
+  packet.set([0x58, 0x42, 0x4d, 0x43, 2, 0]); // "XBMC", version 2.0
+  view.setUint16(6, type);
+  view.setUint32(8, 1); // this packet of
+  view.setUint32(12, 1); // this many
+  view.setUint16(16, payload.length);
+  view.setUint32(18, 0x48617461); // who sends: "Hata"
+  packet.set(payload, 32);
+  return packet;
+}
+
+const bytes = (text: string): number[] => [...new TextEncoder().encode(text), 0];
+
+/** The greeting Kodi's event port expects first */
+export const helloPacket = (): Uint8Array => eventPacket(0x01, new Uint8Array([...bytes("Hata"), 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]));
+
+/** A press of one button of one window, as Kodi's own command */
+export const clickPacket = (window: number, control: number): Uint8Array => eventPacket(0x0a, new Uint8Array([0x01, ...bytes(`SendClick(${window},${control})`)]));

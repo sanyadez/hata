@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { advancedXml, cleanFolders, shortTitle, hwdbText, keymapXml, polkitRule, decodePackages, isOurs, monitorAudio, monitorName, playable, portIn, readDisplay, remoteCall, seconds, sourcesXml, takeJson, unitText } from "../src/tv";
+import { clickPacket, helloPacket, KEEP_WINDOW, KEEP_YES, pictureOf, advancedXml, cleanFolders, shortTitle, hwdbText, keymapXml, polkitRule, decodePackages, isOurs, monitorAudio, monitorName, playable, portIn, readDisplay, remoteCall, seconds, sourcesXml, takeJson, unitText } from "../src/tv";
 
 function edid(name: string, audio: boolean): Uint8Array {
   const data = new Uint8Array(256);
@@ -105,4 +105,38 @@ test("a file's name is said as the film's name", () => {
   expect(shortTitle("2001.A.Space.Odyssey.1968.BDRip.mkv")).toBe("2001 A Space Odyssey");
   expect(shortTitle("Dune: Part Two")).toBe("Dune: Part Two");
   expect(shortTitle("song.flac")).toBe("song");
+});
+
+test("the picture's choices are read from Kodi's own settings", () => {
+  const list = [
+    { id: "videoscreen.resolution", value: 18, options: [{ label: "640x480p ", value: 38 }, { label: "1280x720p ", value: 29 }, { label: "1920x1080p ", value: 18 }, { label: "1920x1080i ", value: 20 }, { label: "odd", value: 1 }] },
+    { id: "videoscreen.screenmode", value: "DESKTOP", options: [{ label: "50.00", value: "0192001080050.00000pstd" }, { label: "59.94", value: "0192001080059.94006pstd" }, { label: "60.00", value: "DESKTOP" }] },
+  ];
+  const picture = pictureOf(list, 0)!;
+  expect(picture.resolution.value).toBe(18);
+  expect(picture.resolution.options.map((o) => o.label)).toEqual(["1920×1080", "1920×1080i", "1280×720", "640×480"]);
+  expect(picture.rate).toEqual({ value: "DESKTOP", options: [{ label: "60", value: "DESKTOP" }, { label: "59.94", value: "0192001080059.94006pstd" }, { label: "50", value: "0192001080050.00000pstd" }] });
+  expect(picture.match).toBe(false);
+  expect(pictureOf(list, 2)!.match).toBe(true);
+  // a rate chosen once is kept by the mode's full name, which the list may spell as the screen's own
+  list[1]!.value = "0192001080060.00000pstd";
+  expect(pictureOf(list, 0)!.rate.value).toBe("DESKTOP");
+  list[1]!.value = "0192001080050.00000pstd";
+  expect(pictureOf(list, 0)!.rate.value).toBe("0192001080050.00000pstd");
+  expect(pictureOf([], 0)).toBeNull();
+  expect(pictureOf(null, 0)).toBeNull();
+});
+
+test("a button of Kodi's window is pressed by a packet of its event port", () => {
+  const packet = clickPacket(KEEP_WINDOW, KEEP_YES);
+  expect(new TextDecoder().decode(packet.subarray(0, 4))).toBe("XBMC");
+  expect([...packet.subarray(4, 8)]).toEqual([2, 0, 0, 0x0a]);
+  const size = (packet[16]! << 8) | packet[17]!;
+  expect(packet.length).toBe(32 + size);
+  expect(packet[32]).toBe(1);
+  expect(new TextDecoder().decode(packet.subarray(33, -1))).toBe("SendClick(10100,11)");
+  expect(packet.at(-1)).toBe(0);
+  const hello = helloPacket();
+  expect([...hello.subarray(6, 8)]).toEqual([0, 1]);
+  expect(new TextDecoder().decode(hello.subarray(32, 36))).toBe("Hata");
 });

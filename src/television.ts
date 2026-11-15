@@ -4,6 +4,7 @@
  * keyboards and mice plugged into the server are Kodi's own business — it reads them itself.
  */
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { createSocket } from "node:dgram";
 import { connect } from "node:net";
 import { join } from "node:path";
 import { record } from "./activity";
@@ -11,7 +12,7 @@ import { AppError, startJob, type Job } from "./apps";
 import { bus } from "./bus";
 import { saveSettings, settings } from "./config";
 import { installCommand, packageManager, PATH, run, runLogged } from "./packages";
-import { advancedXml, cleanFolders, decodePackages, isOurs, playable, portIn, readDisplay, hwdbText, keymapXml, polkitRule, remoteCall, seconds, shortTitle, sourcesXml, takeJson, TV_HOME, TV_HWDB, TV_POLKIT, TV_PORT, TV_UNIT, TV_USER, unitText, type Call, type Display } from "./tv";
+import { advancedXml, cleanFolders, clickPacket, helloPacket, KEEP_NO, KEEP_SECONDS, KEEP_WINDOW, KEEP_YES, MATCH_OFF, MATCH_ON, pictureOf, decodePackages, isOurs, playable, portIn, readDisplay, hwdbText, keymapXml, polkitRule, remoteCall, seconds, shortTitle, sourcesXml, takeJson, TV_HOME, TV_HWDB, TV_POLKIT, TV_PORT, TV_UNIT, TV_USER, unitText, type Call, type Display, type Picture } from "./tv";
 
 const USERDATA = join(TV_HOME, ".kodi", "userdata");
 const UNIT_FILE = "/etc/systemd/system/" + TV_UNIT;
@@ -134,6 +135,10 @@ export interface TvReport {
   volume: number;
   muted: boolean;
   audio: { value: string; options: { label: string; value: string }[] } | null;
+  /** The resolution, the refresh rate and whether the rate follows the film; null while Kodi does not answer */
+  picture: Picture | null;
+  /** A new screen mode is on trial: seconds left to keep it before Kodi puts the old one back; 0 — none is */
+  asking: number;
 }
 
 const packages = (): string[] => ["kodi", ...(decodeDriver() ? [] : decodePackages(cardVendor()))];
@@ -154,13 +159,26 @@ async function audioChoice(): Promise<TvReport["audio"]> {
   return device ? { value: String(device.value), options: (device.options ?? []).map((o) => ({ label: String(o.label).replace(/[\x00-\x1f]/g, "").replace(/\s+/g, " ").trim(), value: String(o.value) })) } : null;
 }
 
+async function pictureChoice(): Promise<Picture | null> {
+  const [said, adjust] = (await Promise.all([rpc({ method: "Settings.GetSettings", params: { level: "expert", filter: { section: "system", category: "display" } } }), rpc({ method: "Settings.GetSettingValue", params: { setting: "videoplayer.adjustrefreshrate" } })])) as [{ settings?: unknown } | null, { value?: unknown } | null];
+  return pictureOf(said?.settings, adjust?.value);
+}
+
+/** A screen mode on trial: Kodi's control port is silent until it is answered or its time is out */
+let trial: { until: number; done: Promise<unknown>; port: number } | null = null;
+let last: TvReport | null = null;
+
+const secondsLeft = (): number => (trial ? Math.max(1, Math.ceil((trial.until - Date.now()) / 1000)) : 0);
+
 export async function tvReport(): Promise<TvReport> {
+  // Kodi answers nothing while it asks about the new mode: the page keeps what it had
+  if (trial && last) return { ...last, asking: secondsLeft() };
   const installed = has("kodi");
   const running = installed && tvSetUp() && (await unit("is-active")) === "active";
   const app = running ? ((await rpc({ method: "Application.GetProperties", params: { properties: ["volume", "muted", "version"] } }, 2500)) as { volume?: number; muted?: boolean; version?: { major?: number; minor?: number } } | null) : null;
-  const [playing, audio] = app ? await Promise.all([nowPlaying().then((now) => now.playing), audioChoice()]) : [null, null];
+  const [playing, audio, picture] = app ? await Promise.all([nowPlaying().then((now) => now.playing), audioChoice(), pictureChoice()]) : [null, null, null];
   const media = join(settings.dataRoot, "Media");
-  return {
+  return (last = {
     displays: displays(),
     installed,
     version: app?.version ? `${app.version.major}.${app.version.minor}` : "",
@@ -177,7 +195,9 @@ export async function tvReport(): Promise<TvReport> {
     volume: app?.volume ?? 0,
     muted: app?.muted ?? false,
     audio,
-  };
+    picture,
+    asking: secondsLeft(),
+  });
 }
 
 /** A file of Kodi's that Hata keeps, written unless the person keeps one of their own there */
@@ -323,6 +343,61 @@ export async function setAudio(value: unknown): Promise<TvReport> {
   await rpc({ method: "Settings.SetSettingValue", params: { setting: "audiooutput.audiodevice", value } });
   settings.tv.audioChosen = true;
   saveSettings();
+  return tvReport();
+}
+
+/**
+ * The picture: the resolution, the refresh rate, whether the rate follows the film. A new mode is on
+ * trial first — Kodi shows its own "keep it?" for a quarter of a minute and puts the old mode back
+ * unless somebody says yes, on the screen or from the page (`keepPicture`), so a mode the TV cannot
+ * show never stays. While it asks, its control port answers nobody.
+ */
+export async function setPicture(data: Record<string, unknown>, by: string): Promise<TvReport> {
+  if (trial) throw new AppError("tv.asking", 409);
+  const picture = await pictureChoice();
+  if (!picture) throw new AppError("tv.notRunning", 409);
+  if ("match" in data) {
+    await rpc({ method: "Settings.SetSettingValue", params: { setting: "videoplayer.adjustrefreshrate", value: data.match === true ? MATCH_ON : MATCH_OFF } });
+    record(data.match === true ? "tv.matchOn" : "tv.matchOff", { user: by });
+    return tvReport();
+  }
+  const which = "resolution" in data ? "resolution" : "rate";
+  const chosen = (picture[which].options as { label: string; value: unknown }[]).find((o) => o.value === data[which]);
+  if (!chosen) throw new AppError("tv.badPicture", 400);
+  if (chosen.value === picture[which].value) return tvReport();
+  // the screen goes dark for a moment and a window covers it: not over a film somebody watches
+  if ((await nowPlaying()).player !== null) throw new AppError("tv.picturePlaying", 409);
+  const port = ((await rpc({ method: "Settings.GetSettingValue", params: { setting: "services.esenabled" } })) as { value?: unknown } | null)?.value === true ? Number(((await rpc({ method: "Settings.GetSettingValue", params: { setting: "services.esport" } })) as { value?: unknown } | null)?.value) || 0 : 0;
+  await tvReport();
+  const label = which === "rate" ? chosen.label + " Hz" : chosen.label;
+  const mine = { until: Date.now() + KEEP_SECONDS * 1000, port, done: rpc({ method: "Settings.SetSettingValue", params: { setting: which === "resolution" ? "videoscreen.resolution" : "videoscreen.screenmode", value: chosen.value } }, (KEEP_SECONDS + 10) * 1000) };
+  trial = mine;
+  void mine.done.then((kept) => {
+    if (trial === mine) trial = null;
+    if (kept === true) record("tv.picture", { user: by, detail: label });
+    bus.publish("tv");
+  });
+  // a mode that needs no trial (Kodi did not ask) is done at once
+  await Promise.race([mine.done, Bun.sleep(1200)]);
+  return tvReport();
+}
+
+/** The answer to Kodi's "keep it?", pressed for the person: its control port is deaf meanwhile, its event port is not */
+export async function keepPicture(keep: boolean): Promise<TvReport> {
+  const mine = trial;
+  if (!mine) return tvReport();
+  if (!mine.port) throw new AppError("tv.answerOnScreen", 409);
+  const socket = createSocket("udp4");
+  const send = (packet: Uint8Array) => new Promise<void>((resolve) => socket.send(packet, mine.port, "127.0.0.1", () => resolve()));
+  try {
+    await send(helloPacket());
+    await send(clickPacket(KEEP_WINDOW, keep ? KEEP_YES : KEEP_NO));
+  } finally {
+    socket.close();
+  }
+  const kept = await Promise.race([mine.done, Bun.sleep(5000).then(() => "late")]);
+  if (kept === "late") throw new AppError("tv.answerOnScreen", 409);
+  if (keep && kept !== true) throw new AppError("tv.notKept", 409);
   return tvReport();
 }
 

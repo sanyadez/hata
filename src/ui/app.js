@@ -12781,6 +12781,7 @@ function paintTv() {
     }
     tvUi.busy = false;
     paintTv();
+    if (state.tv.asking) tvKeepDialog();
   };
   const press = (action, value) => api("POST", "/api/tv/do", { action, value }).then(() => setTimeout(loadTv, 250), (e) => toast(errorText(e), "error"));
 
@@ -12845,8 +12846,66 @@ function paintTv() {
     settingRow(t("tv.audio"), t("tv.audioHint"), h("select", { onchange: (e) => void change({ audio: e.target.value }) }, tv.audio.options.map((o) => h("option", { value: o.value, selected: o.value === tv.audio.value }, o.label)))),
   );
 
+  const picture = tv.picture;
+  const follow = picture && h("button", { type: "button", role: "switch", class: "ha-switch", "aria-checked": String(picture.match), "aria-label": t("tv.match"), onclick: () => ((follow.disabled = true), void change({ match: !picture.match })) }, h("i"));
+  const pictureCard = picture && h(
+    "section",
+    { class: "card pad stack" },
+    h("div", { class: "section-head" }, h("h2", null, t("tv.picture"))),
+    settingRow(t("tv.resolution"), t("tv.resolutionHint", { n: TV_KEEP_SECONDS }), h("select", { onchange: (e) => void change({ resolution: Number(e.target.value) }) }, picture.resolution.options.map((o) => h("option", { value: String(o.value), selected: o.value === picture.resolution.value }, o.label)))),
+    picture.rate.options.length > 1 && settingRow(t("tv.rate"), null, h("select", { onchange: (e) => void change({ rate: e.target.value }) }, picture.rate.options.map((o) => h("option", { value: o.value, selected: o.value === picture.rate.value }, t("tv.hz", { n: o.label }))))),
+    settingRow(t("tv.match"), t("tv.matchHint"), follow),
+  );
+
   // the remote is the page's main thing; what is set once stands beside it
-  put(box, h("div", { class: "tv-page" }, remoteCard, h("div", { class: "stack" }, playerCard, screenCard, foldersCard, audioCard)));
+  put(box, h("div", { class: "tv-page" }, remoteCard, h("div", { class: "stack" }, playerCard, screenCard, pictureCard, foldersCard, audioCard)));
+  if (tv.asking) tvKeepDialog();
+}
+
+/** How long Kodi keeps a new screen mode on trial, seconds */
+const TV_KEEP_SECONDS = 15;
+
+/**
+ * A new screen mode is on trial: Kodi asks on the screen whether to keep it and puts the old one back
+ * by itself. The same question here, for whoever holds no remote: the answer presses Kodi's button.
+ */
+function tvKeepDialog() {
+  if (document.querySelector("dialog.tv-keep")) return;
+  let left = state.tv?.asking ?? 0;
+  if (!left) return;
+  let dialog;
+  let answered = false;
+  const error = h("p", { class: "error", role: "alert" });
+  const count = h("p", { class: "muted" }, t("tv.keepLead", { n: left }));
+  const answer = async (keep) => {
+    answered = true;
+    clearInterval(timer);
+    for (const el of dialog.querySelectorAll("button")) el.disabled = true;
+    try {
+      state.tv = await api("POST", "/api/tv/keep", { keep });
+    } catch (e) {
+      // said too late, or Kodi's window cannot be reached from here: what the screen shows now is what stays
+      error.textContent = errorText(e);
+      setTimeout(() => (dialog.close(), void loadTv()), 4000);
+      return;
+    }
+    dialog.close();
+    paintTv();
+  };
+  const timer = setInterval(() => {
+    if (--left > 0) return void (count.textContent = t("tv.keepLead", { n: left }));
+    answered = true;
+    clearInterval(timer);
+    dialog.close();
+    toast(t("tv.keepGone"));
+    setTimeout(loadTv, 1500);
+  }, 1000);
+  dialog = openDialog("confirm tv-keep", h("h2", null, t("tv.keepTitle")), count, error, h("footer", null, button(t("tv.keepNo"), { onclick: () => void answer(false) }), button(t("tv.keepYes"), { class: "primary", onclick: () => void answer(true) }, "check")));
+  // closed without a word: the old mode comes back now, not when the time is out
+  dialog.addEventListener("close", () => {
+    clearInterval(timer);
+    if (!answered) void api("POST", "/api/tv/keep", { keep: false }).then(loadTv, loadTv);
+  });
 }
 
 // --- Modules: the parts of Hata a person turns on -------------------------------------------------
