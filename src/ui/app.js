@@ -42,6 +42,11 @@ const ICONS = {
   external: "M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5",
   refresh: "M20 11a8 8 0 0 0-14.9-3M4 5v3h3M4 13a8 8 0 0 0 14.9 3M20 19v-3h-3",
   tv: "M3 5h18v12H3zM8 21h8M12 17v4",
+  back30: "M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5",
+  fwd30: "M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5",
+  volume: "M11 5 6 9H3v6h3l5 4zM15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13",
+  volumeOff: "M11 5 6 9H3v6h3l5 4zM16 9.5l5 5M21 9.5l-5 5",
+  lines: "M4 6h16M4 12h16M4 18h16",
   pause: "M8 5v14M16 5v14",
   stop: "M6 6h12v12H6z",
   play: "M7 5l12 7-12 7z",
@@ -452,7 +457,7 @@ function startEvents() {
       }, 1200);
     } else if (event.type === "tv") {
       if ("playing" in event) {
-        state.tvNow = event.playing;
+        state.tvNow = { on: !!event.on, playing: event.playing };
         paintTvNow();
       }
       if (state.route.view === "tv") void loadTv();
@@ -12618,13 +12623,16 @@ const tvUi = { timer: 0, busy: false };
 function paintTvNow() {
   const box = document.getElementById("tv-now");
   if (!box) return;
-  const now = isAdmin() && hasModule("tv") ? state.tvNow : null;
-  box.hidden = !now;
-  if (!now) return box.replaceChildren();
-  const label = t("tv.playing", { name: now.title });
+  const tv = isAdmin() && hasModule("tv") ? state.tvNow : null;
+  box.hidden = !tv?.on;
+  box.className = "tv-now" + (tv?.playing ? " playing" : "") + (document.querySelector("dialog.tv-drop[open]") ? " open" : "");
+  if (!tv?.on) return box.replaceChildren();
+  const now = tv.playing;
+  const label = now ? t("tv.playing", { name: now.title }) : t("tv.remote");
+  // the left half pauses with one touch, the right one opens the remote; with nothing playing only the remote is left
   box.replaceChildren(
-    h("button", { type: "button", class: "icon-btn", title: t("tv.key.playpause"), "aria-label": t("tv.key.playpause"), onclick: () => api("POST", "/api/tv/do", { action: "playpause" }).catch((e) => toast(errorText(e), "error")) }, icon(now.paused ? "play" : "pause")),
-    h("button", { type: "button", class: "tv-now-title", title: label, "aria-label": label, "aria-haspopup": "dialog", onclick: () => tvDropdown(box) }, icon("tv"), h("span", { class: "clip" }, now.title)),
+    now && h("button", { type: "button", class: "tv-now-half", title: t("tv.key.playpause"), "aria-label": t("tv.key.playpause"), onclick: () => api("POST", "/api/tv/do", { action: "playpause" }).catch((e) => toast(errorText(e), "error")) }, icon(now.paused ? "play" : "pause")),
+    h("button", { type: "button", class: "tv-now-half tv-now-open", title: label, "aria-label": label, "aria-haspopup": "dialog", onclick: () => tvDropdown(box) }, icon("tv"), now && h("span", { class: "clip" }, now.title), now && icon("chevron")),
   );
 }
 
@@ -12659,18 +12667,33 @@ function renderTv() {
 
 const tvClock = (s) => `${Math.floor(s / 3600) ? Math.floor(s / 3600) + ":" : ""}${String(Math.floor((s % 3600) / 60)).padStart(Math.floor(s / 3600) ? 2 : 1, "0")}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 
-/** The remote itself: what plays, the transport, the volume, the arrows — on the TV page and in the head's dropdown alike */
-function tvRemoteParts(tv, press) {
-  const key = (action, iconName, label, cls = "") => h("button", { type: "button", class: "btn tv-key " + cls, title: label, "aria-label": label, onclick: () => press(action) }, iconName ? icon(iconName) : label);
+/**
+ * The remote itself, the same on the TV page and under the chip in the head: what plays, the transport
+ * with pause as the one loud button, the volume, a round pad with OK in the middle, four keys below.
+ */
+function tvRemoteParts(tv, press, turnOn) {
+  const note = (iconName, title, text, action) => h("div", { class: "tvr-note" }, h("strong", { class: "with-icon" }, icon(iconName), title), h("p", { class: "muted small" }, text), action);
+  if (!tv.running) return [note("power", t("tv.offTitle"), t("tv.offLead"), turnOn && button(t("tv.turnOn"), { class: "primary wide", onclick: (e) => ((e.currentTarget.disabled = true), turnOn()) }, "power"))];
+  const idle = !tv.answers;
   const now = tv.playing;
-  const position = now && now.total > 0 && h("input", { type: "range", class: "tv-seek", min: 0, max: 100, step: 0.1, value: (now.time / now.total) * 100, "aria-label": t("tv.position"), onchange: (e) => press("seek", Number(e.target.value)) });
-  const volume = h("input", { type: "range", min: 0, max: 100, step: 1, value: tv.volume, "aria-label": t("tv.volume"), onchange: (e) => press("volume", Number(e.target.value)) });
+  const round = (action, iconName, label, cls = "", off = false) => h("button", { type: "button", class: "tvr-round " + cls, title: label, "aria-label": label, disabled: idle || off, onclick: () => press(action) }, icon(iconName));
+  const position = now && now.total > 0 && h("input", { type: "range", class: "tvr-slider", min: 0, max: 100, step: 0.1, value: (now.time / now.total) * 100, "aria-label": t("tv.position"), onchange: (e) => press("seek", Number(e.target.value)) });
+  const file = now ? now.file.split("/").pop() : "";
+  const volume = h("input", { type: "range", class: "tvr-slider" + (tv.muted ? " muted" : ""), min: 0, max: 100, step: 1, value: tv.volume, disabled: idle, "aria-label": t("tv.volume"), onchange: (e) => press("volume", Number(e.target.value)) });
+  const skip = (action, iconName, label) => h("button", { type: "button", class: "tvr-round skip", title: label, "aria-label": label, disabled: idle || !now, onclick: () => press(action) }, icon(iconName), h("span", null, "30"));
+  const arrow = (action, cls, label) => h("button", { type: "button", class: "tvr-arrow " + cls, title: label, "aria-label": label, disabled: idle, onclick: () => press(action) }, icon("chevron"));
+  const keyed = (action, iconName, label) => h("div", { class: "tvr-key" }, round(action, iconName, label), h("span", { class: "muted" }, label));
   return [
-    now ? h("div", { class: "stack" }, h("strong", { class: "wrap", title: now.file.split("/").pop() }, now.title), position, h("div", { class: "kv muted small" }, h("span", null, tvClock(now.time)), h("span", null, tvClock(now.total)))) : h("p", { class: "muted" }, t("tv.nothing")),
-    h("div", { class: "tv-row" }, key("rewind", "undo", t("tv.key.rewind")), key("playpause", now && !now.paused ? "pause" : "play", t("tv.key.playpause"), "primary"), key("stop", "stop", t("tv.key.stop")), key("forward", "arrow", t("tv.key.forward"))),
-    h("div", { class: "tv-volume" }, h("button", { type: "button", class: "btn small", onclick: () => press("mute") }, t(tv.muted ? "tv.unmute" : "tv.mute")), volume, h("span", { class: "muted small" }, `${tv.volume}%`)),
-    h("div", { class: "tv-pad" }, h("span"), key("up", "", "▲"), h("span"), key("left", "", "◀"), key("select", "", "OK", "primary"), key("right", "", "▶"), h("span"), key("down", "", "▼"), h("span")),
-    h("div", { class: "tv-row" }, key("back", "", t("tv.key.back")), key("home", "", t("tv.key.home")), key("menu", "", t("tv.key.menu")), key("info", "", t("tv.key.info"))),
+    idle
+      ? note("refresh", t("tv.starting"), t("tv.startingLead"))
+      : now
+        ? h("div", { class: "tvr-now" }, h("div", { class: "tvr-title" }, h("div", { class: "grow" }, h("strong", { class: "wrap" }, now.title), now.paused && h("span", { class: "state busy" }, t("tv.paused"))), round("stop", "stop", t("tv.key.stop"))), file && file !== now.title && h("p", { class: "tvr-file muted" }, file), position, h("div", { class: "tvr-times muted" }, h("span", null, tvClock(now.time)), h("span", null, tvClock(now.total))))
+        : note("tv", t("tv.nothingTitle"), t("tv.nothing")),
+    h("div", { class: "tvr-transport" }, skip("rewind", "back30", t("tv.key.rewind")), h("button", { type: "button", class: "tvr-main", title: t("tv.key.playpause"), "aria-label": t("tv.key.playpause"), disabled: idle || !now, onclick: () => press("playpause") }, icon(now && !now.paused ? "pause" : "play")), skip("forward", "fwd30", t("tv.key.forward"))),
+    h("div", { class: "tvr-volume" }, round("mute", tv.muted ? "volumeOff" : "volume", t(tv.muted ? "tv.unmute" : "tv.mute"), tv.muted ? "on" : ""), volume, h("span", { class: "tvr-value" + (tv.muted ? " muted" : "") }, tv.muted ? t("tv.muted") : `${tv.volume}%`)),
+    h("hr", { class: "tvr-rule" }),
+    h("div", { class: "tvr-pad" }, arrow("up", "up", t("tv.key.up")), arrow("left", "left", t("tv.key.left")), h("button", { type: "button", class: "tvr-ok", disabled: idle, onclick: () => press("select") }, "OK"), arrow("right", "right", t("tv.key.right")), arrow("down", "down", t("tv.key.down"))),
+    h("div", { class: "tvr-keys" }, keyed("back", "undo", t("tv.key.back")), keyed("home", "home", t("tv.key.home")), keyed("menu", "lines", t("tv.key.menu")), keyed("info", "info", t("tv.key.info"))),
   ];
 }
 
@@ -12678,22 +12701,27 @@ function tvRemoteParts(tv, press) {
 function tvDropdown(at) {
   let dialog;
   let timer = 0;
-  const body = h("div", { class: "stack" }, h("p", { class: "muted" }, "…"));
+  const body = h("div", { class: "tvr" }, h("p", { class: "muted" }, "…"));
   const press = (action, value) => api("POST", "/api/tv/do", { action, value }).then(() => setTimeout(load, 250), (e) => toast(errorText(e), "error"));
+  const turnOn = () => api("PUT", "/api/tv", { on: true }).then(load, (e) => toast(errorText(e), "error"));
   const load = async () => {
     clearTimeout(timer);
     if (!dialog.isConnected) return;
     try {
       const tv = (state.tv = await api("GET", "/api/tv"));
       // a slider under the finger is not redrawn under it
-      if (!body.querySelector("input[type=range]:active")) put(body, tv.running && tv.answers ? tvRemoteParts(tv, press) : h("p", { class: "muted" }, t(tv.running ? "tv.starting" : "error.tv.notRunning")));
+      if (!body.querySelector("input[type=range]:active")) put(body, tvRemoteParts(tv, press, turnOn));
     } catch (e) {
       put(body, h("p", { class: "error" }, errorText(e)));
     }
     timer = setTimeout(load, 2000);
   };
-  dialog = openDialog("dropdown tv-drop", h("div", { class: "section-head" }, h("h2", null, t("tv.remote")), h("a", { class: "link small", href: "#/tv", onclick: () => dialog.close() }, t("tv.openPage"))), body);
-  dialog.addEventListener("close", () => clearTimeout(timer));
+  dialog = openDialog("dropdown tv-drop", h("div", { class: "tvr-head" }, h("span", { class: "with-icon muted" }, icon("tv"), t("tv.title")), h("a", { class: "link small with-icon", href: "#/tv", onclick: () => dialog.close() }, t("tv.openPage"), icon("arrow"))), body);
+  dialog.addEventListener("close", () => {
+    clearTimeout(timer);
+    paintTvNow();
+  });
+  at.classList.add("open");
   const r = at.getBoundingClientRect();
   placeAt(dialog, { x: r.right - dialog.offsetWidth, y: r.bottom + 6 });
   void load();
@@ -12757,7 +12785,7 @@ function paintTv() {
     error,
   );
 
-  const remoteCard = tv.running && h("section", { class: "card pad stack tv-remote" }, h("div", { class: "section-head" }, h("h2", null, t("tv.remote"))), tv.answers ? tvRemoteParts(tv, press) : h("p", { class: "muted" }, t("tv.starting")));
+  const remoteCard = h("section", { class: "card pad tv-remote" }, h("div", { class: "tvr-head" }, h("span", { class: "with-icon muted" }, icon("tv"), t("tv.remote"))), h("div", { class: "tvr big" }, tvRemoteParts(tv, press, () => void change({ on: true }))));
 
   const addFolder = () => folderPicker({ title: t("tv.folderPick"), start: state.settings?.dataRoot ?? "/", confirmLabel: t("tv.folderAdd"), action: async (path) => void (await change({ folders: [...tv.folders, path] })) });
   const foldersCard = h(
@@ -12777,7 +12805,8 @@ function paintTv() {
     settingRow(t("tv.audio"), t("tv.audioHint"), h("select", { onchange: (e) => void change({ audio: e.target.value }) }, tv.audio.options.map((o) => h("option", { value: o.value, selected: o.value === tv.audio.value }, o.label)))),
   );
 
-  put(box, playerCard, remoteCard, screenCard, foldersCard, audioCard);
+  // the remote is the page's main thing; what is set once stands beside it
+  put(box, h("div", { class: "tv-page" }, remoteCard, h("div", { class: "stack" }, playerCard, screenCard, foldersCard, audioCard)));
 }
 
 // --- Modules: the parts of Hata a person turns on -------------------------------------------------

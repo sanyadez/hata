@@ -1832,23 +1832,80 @@ body.has-jobs #view:not(.fill) { padding-bottom: calc(var(--jobs-h, 0px) + 48px)
 }
 
 /* TV */
-.tv-remote { max-width: 520px; }
-.tv-row { display: flex; gap: 10px; flex-wrap: wrap; }
-.tv-row .tv-key { flex: 1 1 0; min-width: 0; padding-inline: 6px; }
-.tv-key { min-height: 48px; justify-content: center; font-weight: 600; }
-.tv-pad { display: grid; grid-template-columns: repeat(3, minmax(0, 72px)); gap: 10px; justify-content: center; }
-.tv-pad .tv-key { aspect-ratio: 1; padding: 0; }
-.tv-volume { display: flex; align-items: center; gap: 12px; }
-.tv-volume input, .tv-seek { flex: 1; min-width: 0; width: 100%; }
 #tv-body .setting { border-top: 0; padding-top: 0; }
-.tv-now { display: flex; align-items: center; gap: 2px; max-width: 220px; flex: none; min-width: 0; padding-right: 12px; border-radius: 18px; background: var(--accent-soft); color: var(--accent-text); }
+.tv-page { display: grid; grid-template-columns: minmax(0, 448px) minmax(0, 1fr); gap: 16px; align-items: start; }
+.tv-remote { display: grid; gap: 14px; }
+.tvr-head { display: flex; justify-content: space-between; align-items: center; gap: 12px; font-weight: 600; font-size: 13px; }
+.tvr-head .ico { width: 16px; height: 16px; }
+.tvr { display: grid; gap: 16px; --pad: 192px; --main: 68px; }
+.tvr.big { --pad: 216px; --main: 76px; }
+.tvr-note { display: grid; gap: 6px; padding: 14px; border-radius: var(--radius-md); background: var(--surface-2); }
+.tvr-now { display: grid; gap: 8px; }
+.tvr-title { display: flex; gap: 12px; align-items: flex-start; }
+.tvr-title .grow { min-width: 0; display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; }
+.tvr-title strong { font: 600 16px var(--font-head, var(--font-body)); overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.tvr.big .tvr-title strong { font-size: 18px; }
+.tvr-file { font: 11.5px var(--font-mono, monospace); overflow-wrap: anywhere; margin: 0; }
+.tvr-times { display: flex; justify-content: space-between; font: 12px var(--font-mono, monospace); }
+.tvr-slider { width: 100%; min-width: 0; margin: 0; accent-color: var(--accent); }
+.tvr-slider.muted { accent-color: var(--muted); }
+.tvr-round { display: grid; place-items: center; width: 44px; height: 44px; flex: none; padding: 0; border-radius: 50%; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); cursor: pointer; }
+.tvr-round .ico { width: 18px; height: 18px; }
+.tvr-round.on { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-text); }
+.tvr-round.skip { width: 52px; height: 52px; gap: 0; align-content: center; }
+.tvr-round.skip span { font-size: 10px; font-weight: 700; line-height: 1; }
+.tvr-round:hover:not(:disabled), .tvr-arrow:hover:not(:disabled) { background: var(--surface-2); }
+.tvr :is(button):disabled { opacity: 0.4; cursor: default; }
+.tvr-transport { display: flex; justify-content: center; align-items: center; gap: 16px; }
+.tvr-main { display: grid; place-items: center; width: var(--main); height: var(--main); padding: 0; border: 0; border-radius: 50%; background: var(--accent); color: var(--on-accent); cursor: pointer; }
+.tvr-main .ico { width: 28px; height: 28px; }
+.tvr-main:disabled { background: var(--surface); border: 1px solid var(--border-strong); color: var(--text); }
+.tvr-volume { display: flex; align-items: center; gap: 12px; }
+.tvr-volume .tvr-slider { flex: 1; }
+.tvr-value { flex: none; min-width: 44px; text-align: right; font: 12px var(--font-mono, monospace); }
+.tvr-value.muted { color: var(--warn); }
+.tvr-rule { width: 100%; margin: 0; border: 0; border-top: 1px solid var(--border); }
+.tvr-pad { position: relative; width: var(--pad); height: var(--pad); margin: 0 auto; border-radius: 50%; background: var(--surface-2); border: 1px solid var(--border-strong); }
+.tvr-arrow { position: absolute; display: grid; place-items: center; width: 34%; height: 34%; padding: 0; border: 0; border-radius: 50%; background: none; color: var(--text); cursor: pointer; }
+.tvr-arrow .ico { width: 26px; height: 26px; }
+.tvr-arrow.up { top: 0; left: 33%; }
+.tvr-arrow.down { bottom: 0; left: 33%; }
+.tvr-arrow.left { left: 0; top: 33%; }
+.tvr-arrow.right { right: 0; top: 33%; }
+.tvr-arrow.up .ico { transform: rotate(-90deg); }
+.tvr-arrow.down .ico { transform: rotate(90deg); }
+.tvr-arrow.left .ico { transform: rotate(180deg); }
+.tvr-ok { position: absolute; inset: 31%; padding: 0; border: 1px solid var(--border); border-radius: 50%; background: var(--surface); color: var(--text); font: 700 15px var(--font-body); box-shadow: 0 2px 8px rgb(0 0 0 / 14%); cursor: pointer; }
+.tvr-ok:active:not(:disabled), .tvr-arrow:active:not(:disabled), .tvr-round:active:not(:disabled) { transform: scale(0.96); }
+.tvr-keys { display: flex; justify-content: space-around; gap: 8px; }
+.tvr-key { display: grid; justify-items: center; gap: 6px; font-size: 12px; }
+.tvr-key .tvr-round { width: 48px; height: 48px; }
+
+/* the chip in the head: pause on the left, the remote on the right */
+.tv-now { display: flex; align-items: stretch; flex: none; height: 36px; border-radius: 18px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); overflow: hidden; }
 .tv-now[hidden] { display: none; }
-.tv-now-title { display: flex; align-items: center; gap: 8px; min-width: 0; color: inherit; text-decoration: none; font-weight: 600; font-size: 13px; }
-.tv-now-title .clip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 16ch; }
+.tv-now.playing { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-text); }
+.tv-now.open { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.tv-now-half { display: flex; align-items: center; gap: 8px; min-width: 36px; padding: 0 10px; border: 0; background: none; color: inherit; font: 600 13px var(--font-body); cursor: pointer; }
+.tv-now-half + .tv-now-half { border-left: 1px solid color-mix(in srgb, currentColor 35%, transparent); }
+.tv-now-half .ico { width: 16px; height: 16px; flex: none; }
+.tv-now-open .ico:last-child { width: 14px; height: 14px; transform: rotate(90deg); }
+.tv-now-half .clip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 20ch; }
+dialog.dropdown.tv-drop { width: min(calc(100vw - 16px), 368px); max-height: calc(100dvh - 16px); overflow-y: auto; border-radius: 16px; }
+dialog.dropdown.tv-drop[open] { padding: 18px 20px 20px; display: grid; gap: 14px; }
 @media (max-width: 1500px) {
-  .tv-now { padding-right: 8px; }
-  .tv-now-title .clip { display: none; }
+  .tv-now-half .clip, .tv-now-open .ico:last-child { display: none; }
 }
-button.tv-now-title { border: 0; background: none; padding: 6px 0; font: inherit; font-weight: 600; font-size: 13px; cursor: pointer; }
-dialog.dropdown.tv-drop { width: min(calc(100vw - 16px), 360px); max-height: calc(100dvh - 16px); overflow-y: auto; }
-dialog.dropdown.tv-drop[open] { padding: 16px; display: grid; gap: 14px; }
+@media (max-width: 900px) {
+  .tv-page { grid-template-columns: minmax(0, 1fr); }
+}
+@media (max-width: 760px) {
+  .tv-now { height: 44px; border-radius: 22px; }
+  .tv-now-half { min-width: 48px; justify-content: center; }
+  /* on a phone the remote comes up from the bottom, under the thumb */
+  dialog.dropdown.tv-drop { left: 0 !important; right: 0 !important; top: auto !important; bottom: 0; width: 100vw; max-width: none; max-height: calc(100dvh - 100px); border-radius: 20px 20px 0 0; }
+  dialog.dropdown.tv-drop[open] { padding: 22px 24px calc(20px + env(safe-area-inset-bottom)); }
+  dialog.dropdown.tv-drop::before { content: ""; justify-self: center; width: 40px; height: 4px; margin-top: -10px; border-radius: 2px; background: var(--border-strong); }
+  dialog.dropdown.tv-drop .tvr { --pad: 216px; --main: 76px; }
+  .tvr-round { width: 48px; height: 48px; }
+}

@@ -5365,7 +5365,7 @@
   "tv.noDecode": "The graphics card has no driver for decoding video here, so the processor does it: large films may stutter.",
   "tv.remote": "Remote",
   "tv.starting": "Kodi is starting…",
-  "tv.nothing": "Nothing is playing. Choose a film on the screen, or a file in Files → \"Play on the TV\".",
+  "tv.nothing": "Choose a film on the screen, or a file in Files → \"Play on the TV\".",
   "tv.position": "Position",
   "tv.volume": "Volume",
   "tv.mute": "Mute",
@@ -5413,5 +5413,16 @@
   "activity.tv.off": "The player on the screen turned off",
   "activity.tv.folders": "The player's folders changed",
   "activity.tv.play": "Sent to the TV: {target}",
-  "tv.openPage": "All of it"
+  "tv.openPage": "All of it",
+  "tv.nothingTitle": "Nothing is playing",
+  "tv.startingLead": "A few seconds, and the remote comes to life by itself.",
+  "tv.paused": "paused",
+  "tv.muted": "muted",
+  "tv.offTitle": "The player is off",
+  "tv.offLead": "The screen shows the system's console now. Turn the player on to drive the TV.",
+  "tv.turnOn": "Turn the player on",
+  "tv.key.up": "Up",
+  "tv.key.down": "Down",
+  "tv.key.left": "Left",
+  "tv.key.right": "Right"
 }

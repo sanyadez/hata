@@ -343,16 +343,18 @@ export interface TvNow extends Playing {
 
 let now: TvNow | null = null;
 let watching = false;
+/** Kodi is there and listened to */
+let heard = false;
 
-/** What plays on the screen, as last heard from Kodi; null — nothing, or the player is off */
-export const tvNow = (): TvNow | null => now;
+/** The player as every page shows it: whether it runs, and what plays (null — nothing) */
+export const tvNow = (): { on: boolean; playing: TvNow | null } => ({ on: heard, playing: now });
 
 function tell(next: TvNow | null): void {
   const same = JSON.stringify(next && { ...next, at: 0, time: 0 }) === JSON.stringify(now && { ...now, at: 0, time: 0 });
   // the same film a little further on is news only when it jumped: the page counts the seconds itself
   const jumped = !!next && !!now && Math.abs(next.time - (now.time + (now.paused ? 0 : (next.at - now.at) / 1000))) > 3;
   now = next;
-  if (!same || jumped) bus.publish("tv", { playing: next });
+  if (!same || jumped) bus.publish("tv", { on: heard, playing: next });
 }
 
 /**
@@ -373,7 +375,11 @@ export function watchTv(): void {
     if (!tvSetUp()) return void setTimeout(listen, 30_000);
     let buffer = "";
     const socket = connect({ host: "127.0.0.1", port: controlPort() });
-    socket.once("connect", refresh);
+    socket.once("connect", () => {
+      heard = true;
+      bus.publish("tv", { on: true, playing: now });
+      refresh();
+    });
     socket.on("data", (piece) => {
       const taken = takeJson(buffer + piece.toString("utf8"));
       buffer = taken.rest.slice(-65536);
@@ -381,8 +387,11 @@ export function watchTv(): void {
     });
     socket.once("error", () => {});
     socket.once("close", () => {
-      tell(null);
-      setTimeout(listen, 10_000);
+      const was = heard;
+      heard = false;
+      now = null;
+      if (was) bus.publish("tv", { on: false, playing: null });
+      setTimeout(listen, was ? 3_000 : 10_000);
     });
   };
   listen();
