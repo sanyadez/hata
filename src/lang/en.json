@@ -5324,5 +5324,7 @@
   "modules.understood": "Got it",
   "modules.count": "{on} of {of}",
   "modules.base": "The base is always there and cannot be turned off",
-  "modules.baseList": "apps and the store · files · local backups · users · disks · network · HTTPS and the domain · notifications · updates · system programs · look"
+  "modules.baseList": "apps and the store · files · local backups · users · disks · network · HTTPS and the domain · notifications · updates · system programs · look",
+  "modules.undo": "Undo",
+  "modules.all": "All"
 }

@@ -1795,3 +1795,11 @@ body.has-jobs #view:not(.fill) { padding-bottom: calc(var(--jobs-h, 0px) + 48px)
 .module-held { display: flex; gap: 12px; align-items: center; padding: 12px 14px; border-radius: var(--radius-sm); background: var(--bg); flex-wrap: wrap; }
 .module-held .ico { flex: none; }
 .module-held .grow { flex: 1 1 180px; min-width: 0; }
+.toast-action { margin-left: 16px; padding: 0; border: 0; background: none; color: inherit; font: inherit; font-weight: 700; text-decoration: underline; cursor: pointer; }
+.module-filter { display: none; gap: 8px; flex-wrap: wrap; }
+.module-filter .chip { height: 36px; padding: 0 14px; background: var(--surface); cursor: pointer; font: inherit; font-weight: 600; }
+@media (max-width: 760px) {
+  .module-filter { display: flex; }
+  .module-top { flex-direction: column; gap: 8px; }
+  .module-count { justify-items: start; grid-auto-flow: column; gap: 6px; align-items: baseline; }
+}

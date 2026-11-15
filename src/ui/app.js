@@ -12602,9 +12602,23 @@ function modulesChanged(list) {
 
 /** Turns a module on; what it stands on is asked about first and goes on with it */
 async function turnModuleOn(id, then = "") {
+  const before = state.modules ?? {};
   const done = (res) => {
+    // what went on just now, the asked one first: "Undo" turns those off again
+    const turned = res.modules.filter((m) => m.on && !before[m.id]).map((m) => m.id).sort((a, b) => (a === id ? -1 : b === id ? 1 : 0));
     modulesChanged(res.modules);
-    toast(t("modules.nowOn", { name: moduleName(id) }));
+    const note = h("div", { class: "toast" }, h("span", null, t("modules.nowOn", { name: moduleName(id) })), h("button", { type: "button", class: "toast-action", onclick: async () => {
+      note.remove();
+      for (const one of turned) {
+        try {
+          modulesChanged((await api("PUT", `/api/modules/${one}`, { on: false })).modules);
+        } catch (e) {
+          return toast(errorText(e), "error");
+        }
+      }
+    } }, t("modules.undo")));
+    $toasts.append(note);
+    setTimeout(() => note.remove(), 8000);
     if (then) go(then);
   };
   try {
@@ -12689,9 +12703,11 @@ function modulesSection() {
   return [
     h("div", { class: "module-top" }, h("p", { class: "muted grow" }, t("modules.lead")), h("div", { class: "module-count" }, h("strong", null, t("modules.count", { on: list.filter((m) => m.on).length, of: list.length })), h("span", { class: "muted small" }, t("modules.on")))),
     h("div", { class: "module-base" }, icon("home"), h("span", null, h("strong", { class: "block" }, t("modules.base")), h("span", { class: "muted small" }, t("modules.baseList")))),
-    MODULE_GROUPS.map((group) => {
+    // on a phone the groups are chosen one at a time
+    h("div", { class: "module-filter" }, ["", ...MODULE_GROUPS].map((group) => h("button", { type: "button", class: "chip" + ((settingsUi.moduleGroup ?? "") === group ? " accent" : ""), onclick: () => ((settingsUi.moduleGroup = group), renderSettings()) }, group ? t("modules.group." + group) : t("modules.all")))),
+    MODULE_GROUPS.filter((group) => !settingsUi.moduleGroup || settingsUi.moduleGroup === group || !matchMedia("(max-width: 760px)").matches).map((group) => {
       const mine = list.filter((m) => m.group === group);
-      return mine.length > 0 && h("section", { class: "card pad stack" }, h("div", { class: "section-head" }, h("h2", null, t("modules.group." + group))), mine.map(row));
+      return mine.length > 0 && h("section", { class: "card pad stack" }, h("div", { class: "section-head" }, h("h2", null, t("modules.group." + group), h("span", { class: "muted" }, t("modules.count", { on: mine.filter((m) => m.on).length, of: mine.length })))), mine.map(row));
     }),
   ];
 }
