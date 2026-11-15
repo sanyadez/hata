@@ -1443,6 +1443,8 @@ body:has(.assistant.paged) > .assistant-fab { display: none; }
 /* the column of Settings: finding on top, sections by group; longer than a window it scrolls by itself */
 .settings-nav { position: sticky; top: 88px; max-height: calc(100dvh - 104px); overflow: hidden auto; padding: 10px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); display: grid; gap: 8px; align-content: start; }
 .settings-nav .cats { position: static; }
+/* the column is as wide as its card, whatever the longest name: a long one is cut with an ellipsis and the "module" mark stays whole */
+.settings-nav .settings-list, .settings-nav .cats { grid-template-columns: minmax(0, 1fr); }
 .settings-nav .cat-title:not(:first-child) { margin-top: 0; }
 .settings-list { display: grid; gap: 10px; min-width: 0; }
 .settings-find { display: flex; align-items: center; gap: 8px; padding: 0 8px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface-2); color: var(--muted); }
