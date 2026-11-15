@@ -1808,10 +1808,12 @@ body.has-jobs #view:not(.fill) { padding-bottom: calc(var(--jobs-h, 0px) + 48px)
   .module-count { justify-items: start; grid-auto-flow: column; gap: 6px; align-items: baseline; }
 }
 .state.info { background: var(--info-soft); color: var(--info); }
-.module-group { display: flex; align-items: baseline; gap: 10px; margin: 8px 0 0; }
+.module-group { display: flex; align-items: baseline; gap: 10px; margin: 0; }
 .module-group .muted { font: 400 12px var(--font-body); }
 .module-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(240px, 1fr)); gap: 16px; }
 .module-card { display: flex; flex-direction: column; gap: 10px; padding: 16px; min-width: 0; }
+/* a module is a tile inside its group's card */
+.module-cards .module-card { background: var(--surface-2); box-shadow: none; }
 /* icon | name | switch, the state under the name as wide as the name and the switch together: a state's one
    long word ("використовується") once set the width of the name's column and both ran under the switch */
 .module-card-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: start; gap: 4px 12px; }

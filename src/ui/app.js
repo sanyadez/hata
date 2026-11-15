@@ -13519,13 +13519,18 @@ function modulesSection() {
   };
   const phone = matchMedia("(max-width: 760px)").matches;
   return [
-    h("div", { class: "module-top" }, h("p", { class: "muted grow" }, t("modules.lead")), h("div", { class: "module-count" }, h("strong", null, t("modules.count", { on: list.filter((m) => m.on).length, of: list.length })), h("span", { class: "muted small" }, t("modules.on")))),
-    h("div", { class: "module-base" }, icon("home"), h("span", null, h("strong", { class: "block" }, t("modules.base")), h("span", { class: "muted small" }, t("modules.baseList")))),
+    // nothing is written straight on the page's background: over a wallpaper it could not be read
+    h(
+      "section",
+      { class: "card pad stack" },
+      h("div", { class: "module-top" }, h("p", { class: "muted grow" }, t("modules.lead")), h("div", { class: "module-count" }, h("strong", null, t("modules.count", { on: list.filter((m) => m.on).length, of: list.length })), h("span", { class: "muted small" }, t("modules.on")))),
+      h("div", { class: "module-base" }, icon("home"), h("span", null, h("strong", { class: "block" }, t("modules.base")), h("span", { class: "muted small" }, t("modules.baseList")))),
+    ),
     // on a phone the groups are chosen one at a time
     h("div", { class: "module-filter" }, ["", ...MODULE_GROUPS].map((group) => h("button", { type: "button", class: "chip" + ((settingsUi.moduleGroup ?? "") === group ? " accent" : ""), onclick: () => ((settingsUi.moduleGroup = group), renderSettings()) }, group ? t("modules.group." + group) : t("modules.all")))),
     MODULE_GROUPS.filter((group) => !phone || !settingsUi.moduleGroup || settingsUi.moduleGroup === group).map((group) => {
       const mine = list.filter((m) => m.group === group);
-      return mine.length > 0 && h("div", { class: "stack" }, h("h2", { class: "module-group" }, t("modules.group." + group), h("span", { class: "muted" }, t("modules.groupCount", { on: mine.filter((m) => m.on).length, of: mine.length }))), h("div", { class: "module-cards" }, mine.map(card)));
+      return mine.length > 0 && h("section", { class: "card pad stack" }, h("h2", { class: "module-group" }, t("modules.group." + group), h("span", { class: "muted" }, t("modules.groupCount", { on: mine.filter((m) => m.on).length, of: mine.length }))), h("div", { class: "module-cards" }, mine.map(card)));
     }),
   ];
 }
