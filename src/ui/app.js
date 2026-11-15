@@ -28,6 +28,7 @@ function h(tag, attrs, ...children) {
 const ICONS = {
   home: "M3 10.5 12 3l9 7.5V20a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z",
   grid: "M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z",
+  modules: "M4 4h6v6H4zM4 14h6v6H4zM14 14h6v6h-6zM17 4v6M14 7h6",
   chart: "M4 4v16h16M7 15l4-5 3 3 5-6",
   sliders: "M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1M15 4v4M9 10v4M17 16v4",
   search: "M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM20 20l-4-4",
@@ -445,6 +446,8 @@ function startEvents() {
         else if (state.route.view === "files") void loadFiles?.();
         else if (state.route.view === "myhata") void loadMyHata();
       }, 1200);
+    } else if (event.type === "modules") {
+      void loadModules().then(render);
     } else if (event.type === "assistant") {
       assistantEvent(event);
     } else if (event.type === "machines") {
@@ -838,6 +841,11 @@ const NAV = [
 /** Members look at the apps; everything that changes the server is an administrator's */
 // an administrator the rules ask for two-factor sign-in is a member until it is on — the server says so too
 const isAdmin = () => state.user?.role === "admin" && !state.user.mustTwoFactor;
+/** Whether a module is on: the page shows only the parts of those that are (`#/settings/modules`) */
+const hasModule = (id) => !state.modules || state.modules[id] === true;
+/** The sections of Settings and the pages that are a module's */
+const SECTION_MODULE = { protection: "raid", places: "netplaces", shares: "shares", remote: "remote", ports: "domains", dns: "dns", adblock: "adblock", integrations: "integrations", agents: "assistant", assistant: "assistant" };
+const VIEW_MODULES = { machines: ["machines", "proxmox", "containers"], machine: ["machines"], proxmox: ["proxmox"], guest: ["proxmox"], containers: ["containers"], instance: ["containers"], integrations: ["integrations"], ha: ["integrations"], qbit: ["integrations"], frigate: ["integrations"], assistant: ["assistant"], connect: ["assistant"] };
 /** Files are an administrator's, and theirs with whom a folder is shared — only those folders then */
 const mayFiles = () => isAdmin() || !!state.user?.files;
 /** The folders shared with one who is not an administrator, of this server or of a machine; null for an administrator */
@@ -857,7 +865,7 @@ async function loadMine() {
 }
 
 const navCurrent = () => (["ha", "qbit", "frigate"].includes(state.route.view) ? "integrations" : ["machine", "proxmox", "containers", "instance", "guest"].includes(state.route.view) ? "machines" : state.route.view === "backups" || state.route.view === "users" ? "settings" : state.route.view === "app" ? "home" : state.route.view === "import" ? "store" : state.route.view === "trash" || state.route.view === "myhata" ? "files" : state.route.view);
-const navItems = () => NAV.filter((item) => (!item.admin || isAdmin()) && (!item.integrations || (state.overview?.ha?.servers ?? []).length > 0 || state.overview?.qbit?.count > 0 || state.overview?.frigate?.servers?.length > 0) && (!item.files || mayFiles()) && (!item.assistant || !!(assistantUi.config?.ready ?? state.overview?.assistant)) && (item.guest !== false || state.user.role !== "guest"));
+const navItems = () => NAV.filter((item) => (!item.admin || isAdmin()) && (!VIEW_MODULES[item.view] || VIEW_MODULES[item.view].some(hasModule)) && (!item.integrations || (state.overview?.ha?.servers ?? []).length > 0 || state.overview?.qbit?.count > 0 || state.overview?.frigate?.servers?.length > 0) && (!item.files || mayFiles()) && (!item.assistant || !!(assistantUi.config?.ready ?? state.overview?.assistant)) && (item.guest !== false || state.user.role !== "guest"));
 
 function navLinks(className, items = navItems()) {
   const current = navCurrent();
@@ -1045,6 +1053,8 @@ function shell(...content) {
 function render() {
   if (state.setup || !state.user) return authScreen();
   const view = state.route.view;
+  // a page of a module that is off: it says so and offers to turn it on
+  if (VIEW_MODULES[view] && !VIEW_MODULES[view].some(hasModule)) return shell(h("div", { class: "stack" }, VIEW_MODULES[view].map(moduleOffCard)));
   if (view === "connect") return renderConnect();
   if (view === "welcome") return renderWelcome();
   if (view === "store") return renderStore();
@@ -2401,7 +2411,7 @@ function activityItem(entry, when) {
     "div",
     { class: "activity-item" },
     icon(group === "auth" ? "signin" : group === "users" ? "user" : failed ? "x" : (ACTIVITY_ICONS[kind] ?? "check"), failed ? "danger" : ""),
-    h("div", { class: "grow" }, h("div", null, has(key) ? t(key, { app: title, user: entry.user ?? "", target: entry.detail ?? "" }) : entry.code), h("div", { class: "muted small" }, meta), failed && entry.detail && h("div", { class: "muted small clip" }, entry.detail)),
+    h("div", { class: "grow" }, h("div", null, has(key) ? t(key, { app: title, user: entry.user ?? "", target: group === "modules" && entry.detail ? moduleName(entry.detail) : (entry.detail ?? "") }) : entry.code), h("div", { class: "muted small" }, meta), failed && entry.detail && h("div", { class: "muted small clip" }, entry.detail)),
     entry.code === "app.update.done" && !entry.machine && isAdmin() && Date.now() - entry.ts < UNDO_DAYS * 86400_000 && button(t("activity.undo"), { class: "small ghost", onclick: () => undoUpdate(entry) }, "undo"),
   );
 }
@@ -3048,6 +3058,7 @@ function appTerminalTab(app, box) {
 const machinesUi = { list: null, current: null, containers: null, apps: null };
 
 async function loadMachines() {
+  if (!hasModule("machines")) return;
   try {
     machinesUi.list = await api("GET", "/api/machines");
   } catch (e) {
@@ -3112,10 +3123,10 @@ function addToMachinesMenu(at = null) {
   dialog = openDialog(
     at ? "menu dropdown" : "menu",
     h("header", null, h("h2", null, t("machines.addWhat"))),
-    entry(t("machines.addExisting"), t("machines.addExistingHint"), "server", addMachineDialog),
-    entry(t("machines.addContainer"), hint("container"), "box", here("container")),
-    entry(t("machines.addVm"), hint("vm"), "box", here("vm")),
-    entry(t("machines.addPve"), t("machines.addPveHint"), "server", () => pveDialog()),
+    hasModule("machines") && entry(t("machines.addExisting"), t("machines.addExistingHint"), "server", addMachineDialog),
+    hasModule("containers") && entry(t("machines.addContainer"), hint("container"), "box", here("container")),
+    hasModule("containers") && entry(t("machines.addVm"), hint("vm"), "box", here("vm")),
+    hasModule("proxmox") && entry(t("machines.addPve"), t("machines.addPveHint"), "server", () => pveDialog()),
   );
   if (at) {
     // under the button, its right edge on the button's
@@ -3369,6 +3380,7 @@ async function addMachineDialog() {
 const incusUi = { data: null };
 
 async function loadContainers() {
+  if (!hasModule("containers")) return;
   try {
     incusUi.data = await api("GET", "/api/containers");
   } catch (e) {
@@ -5658,6 +5670,7 @@ const PVE_TABS = ["overview", "guests", "templates", "tasks"];
 const pveUi = { list: null, host: null, timer: null };
 
 async function loadPve() {
+  if (!hasModule("proxmox")) return;
   try {
     if (state.route.view === "proxmox") {
       pveUi.host = await api("GET", `/api/proxmox/${state.route.id}`);
@@ -9503,7 +9516,7 @@ function renderBackupsBody() {
       error,
       h("footer", null, h("button", { class: "btn primary" }, t("settings.save"))),
     ),
-    offsiteCard(b.offsite),
+    hasModule("offsite") && offsiteCard(b.offsite),
     h("p", { class: "muted small pad-x" }, t("backup.how")),
   );
   // a run of the copy shows no job: look again until it ends
@@ -9792,7 +9805,7 @@ async function loadFiles() {
   if (!isAdmin() && !path) return go("#/hata");
   if (!isAdmin() && !state.myMachines) await loadMine();
   // the other machines are places of the sidebar
-  if (!machinesUi.list && isAdmin()) machinesUi.list = await api("GET", "/api/machines").catch(() => null);
+  if (!machinesUi.list && isAdmin() && hasModule("machines")) machinesUi.list = await api("GET", "/api/machines").catch(() => null);
   let listing;
   try {
     listing = await api("GET", `${filesApi()}?path=${encodeURIComponent(path)}`);
@@ -9823,7 +9836,7 @@ async function loadFiles() {
 
 function renderFiles() {
   // whether a Proxmox server is there to send a disc to, from a file's menu
-  if (isAdmin() && !pveUi.list) void api("GET", "/api/proxmox").then((list) => (pveUi.list ??= list), () => {});
+  if (isAdmin() && hasModule("proxmox") && !pveUi.list) void api("GET", "/api/proxmox").then((list) => (pveUi.list ??= list), () => {});
   const box = h("div", { class: "files" }, h("aside", { class: "files-side fold", id: "files-places" }), h("section", { class: "stack", id: "files-main" }));
   box.addEventListener("contextmenu", filesContext);
   // files and folders dropped anywhere on the page go into the folder on screen
@@ -11702,7 +11715,7 @@ function settingFields(settings, installing) {
 /** `target` — the machine to install on; "" — this server */
 async function storeDialog(entry, target = state.installTarget ?? "") {
   // the machines an app can go to: connected, with Docker
-  if (isAdmin() && !machinesUi.list) machinesUi.list = await api("GET", "/api/machines").catch(() => null);
+  if (isAdmin() && hasModule("machines") && !machinesUi.list) machinesUi.list = await api("GET", "/api/machines").catch(() => null);
   const targets = isAdmin() ? (machinesUi.list?.machines ?? []).filter((m) => m.online && m.info?.docker?.available) : [];
   if (target && !targets.some((m) => m.id === target)) target = "";
   let app;
@@ -12381,14 +12394,15 @@ async function loadSettings() {
     if (isAdmin() && state.route.section === "notifications") state.hiddenItems = (await api("GET", "/api/attention/hidden").catch(() => null))?.hidden ?? null;
     if (isAdmin() && state.route.section === "apps") state.images = await api("GET", "/api/images").catch(() => null);
     if (isAdmin() && state.route.section === "network") state.network = await api("GET", "/api/network").catch(() => null);
-    if (isAdmin() && state.route.section === "remote") [state.remote, state.wireguard] = await Promise.all([api("GET", "/api/tailscale").catch(() => null), api("GET", "/api/wireguard").catch(() => null)]);
+    if (isAdmin() && state.route.section === "remote" && hasModule("remote")) [state.remote, state.wireguard] = await Promise.all([api("GET", "/api/tailscale").catch(() => null), api("GET", "/api/wireguard").catch(() => null)]);
     if (isAdmin() && state.route.section === "tools") [state.tools, sysUpdates[""]] = await Promise.all([api("GET", "/api/tools").catch(() => null), api("GET", "/api/system/updates").catch((e) => ({ error: errorText(e) }))]);
     // counting the volumes takes a while: the page is shown first
     if (isAdmin() && state.route.section === "docker") void loadSpace();
-    if (isAdmin() && STORAGE_SECTIONS.includes(state.route.section)) [state.disks, state.places] = await Promise.all([api("GET", "/api/disks").catch(() => null), api("GET", "/api/netplaces").catch(() => null)]);
-    if (isAdmin() && state.route.section === "shares") state.shares = await api("GET", "/api/shares").catch(() => null);
-    if (isAdmin() && state.route.section === "agents") state.agents = await api("GET", "/api/agents").catch(() => null);
-    if (isAdmin() && state.route.section === "assistant") state.assistant = await api("GET", "/api/assistant").catch(() => null);
+    if (isAdmin() && STORAGE_SECTIONS.includes(state.route.section)) [state.disks, state.places] = await Promise.all([api("GET", "/api/disks").catch(() => null), hasModule("netplaces") ? api("GET", "/api/netplaces").catch(() => null) : null]);
+    if (isAdmin() && state.route.section === "shares" && hasModule("shares")) state.shares = await api("GET", "/api/shares").catch(() => null);
+    if (isAdmin() && state.route.section === "agents" && hasModule("assistant")) state.agents = await api("GET", "/api/agents").catch(() => null);
+    if (isAdmin() && state.route.section === "modules") state.modulesList = (await api("GET", "/api/modules").catch(() => null))?.modules ?? null;
+    if (isAdmin() && state.route.section === "assistant" && hasModule("assistant")) state.assistant = await api("GET", "/api/assistant").catch(() => null);
     if (!state.store && isAdmin()) state.store = await api("GET", `/api/store?lang=${state.lang}`).catch(() => null);
   } catch (e) {
     return toast(errorText(e), "error");
@@ -12405,6 +12419,7 @@ const SECTIONS = [
   { id: "general", icon: "sliders", group: "server" },
   { id: "appearance", icon: "image", group: "server", admin: true },
   { id: "notifications", icon: "bell", group: "server", admin: true },
+  { id: "modules", icon: "modules", group: "server", admin: true },
   { id: "tools", icon: "terminal", group: "server", admin: true },
   { id: "about", icon: "info", group: "server" },
   { id: "users", icon: "users", group: "people", admin: true, label: "nav.users" },
@@ -12459,10 +12474,12 @@ const SECTION_CARDS = {
 function findSettings(typed) {
   const q = typed.trim().toLowerCase();
   if (!q) return [];
-  return sections().flatMap((item) => {
+  return SECTIONS.filter((item) => !item.admin || isAdmin()).flatMap((item) => {
+    // a section of a module that is off is found too: it is where the module is turned on
+    const off = SECTION_MODULE[item.id] && !hasModule(SECTION_MODULE[item.id]) ? SECTION_MODULE[item.id] : "";
     const cards = (SECTION_CARDS[item.id] ?? []).map((key) => t(key)).filter((text) => text.toLowerCase().includes(q));
     const named = sectionTitle(item).toLowerCase().includes(q) || t("settings.find." + item.id).toLowerCase().includes(q);
-    return cards.length || named ? [{ item, cards }] : [];
+    return cards.length || named ? [{ item, cards: off ? [] : cards, off }] : [];
   });
 }
 
@@ -12505,10 +12522,11 @@ function settingsNav(section) {
     put(
       list,
       h("p", { class: "muted small settings-found" }, t("settings.findCount", { n: count, sections: found.length })),
-      found.map(({ item, cards }) =>
+      found.map(({ item, cards, off }) =>
         h(
           "div",
           { class: "cats found" },
+          off && h("p", { class: "muted small settings-found" }, t("modules.foundOff", { name: t(`modules.${off}.name`) }), " ", h("button", { type: "button", class: "link", onclick: () => turnModuleOn(off, `#/settings/${item.id}`) }, t("modules.turnOn"))),
           h("a", { class: "cat", href: `#/settings/${item.id}` }, h("span", null, h("strong", null, markFound(sectionTitle(item), typed)), h("span", { class: "muted small" }, " · ", t("settings.group." + item.group)))),
           cards.map((card) => h("button", { type: "button", class: "cat", onclick: () => openSettingsCard(item, card) }, h("span", null, markFound(card, typed)))),
         ),
@@ -12523,7 +12541,108 @@ function settingsNav(section) {
   return h("nav", { class: "settings-nav fold" }, h("label", { class: "settings-find" }, icon("search"), input, clear), list);
 }
 
-const sections = () => SECTIONS.filter((item) => !item.admin || isAdmin());
+// --- Modules: the parts of Hata a person turns on -------------------------------------------------
+
+const MODULE_ICONS = { raid: "shield", netplaces: "network", shares: "share", offsite: "archive", remote: "globe", dns: "signpost", adblock: "ban", domains: "plug", machines: "server", proxmox: "server", containers: "box", integrations: "link", assistant: "chat" };
+const MODULE_GROUPS = ["storage", "network", "servers", "more"];
+/** Where a module's own things are once it is on */
+const MODULE_HOME = { raid: "#/settings/protection", netplaces: "#/settings/places", shares: "#/settings/shares", offsite: "#/settings/backups", remote: "#/settings/remote", dns: "#/settings/dns", adblock: "#/settings/adblock", domains: "#/settings/ports", machines: "#/machines", proxmox: "#/machines", containers: "#/containers", integrations: "#/settings/integrations", assistant: "#/settings/assistant" };
+/** Where the thing that holds a module on is taken away */
+const MODULE_USE_AT = { array: "#/settings/protection", merged: "#/settings/storage", pools: "#/settings/protection", places: "#/settings/places", shares: "#/settings/shares", offsite: "#/settings/backups", wireguard: "#/settings/remote", tailscale: "#/settings/remote", dnsOn: "#/settings/dns", blocking: "#/settings/adblock", names: "#/settings/https", ports: "#/settings/ports", machines: "#/machines", proxmox: "#/machines", containers: "#/containers", homeAssistant: "#/settings/integrations", qbit: "#/settings/integrations", frigate: "#/settings/integrations", keys: "#/settings/agents" };
+const moduleName = (id) => t(`modules.${id}.name`);
+
+/** Which modules are on, asked again: after a change made here or on another page */
+async function loadModules() {
+  const now = await api("GET", "/api/state").catch(() => null);
+  if (now?.modules) state.modules = now.modules;
+}
+
+function modulesChanged(list) {
+  state.modulesList = list;
+  state.modules = Object.fromEntries(list.map((m) => [m.id, m.on]));
+  render();
+  void refresh();
+}
+
+/** Turns a module on; what it stands on is asked about first and goes on with it */
+async function turnModuleOn(id, then = "") {
+  const done = (res) => {
+    modulesChanged(res.modules);
+    toast(t("modules.nowOn", { name: moduleName(id) }));
+    if (then) go(then);
+  };
+  try {
+    done(await api("PUT", `/api/modules/${id}`, { on: true }));
+  } catch (e) {
+    if (!(e instanceof ApiError) || e.code !== "modules.needs") return toast(errorText(e));
+    const needs = String(e.detail.needs).split(",").map(moduleName);
+    confirmAction({ title: t("modules.needsTitle", { name: moduleName(id) }), lead: t("modules.needsLead", { name: moduleName(id), needs: needs.join(", ") }), label: t("modules.turnOnBoth"), kind: "primary", iconName: "check", run: async () => done(await api("PUT", `/api/modules/${id}`, { on: true, withNeeds: true })) });
+  }
+}
+
+/** Why a module cannot be turned off now, and where to take away what holds it */
+function moduleHeldDialog(m) {
+  let dialog;
+  const rows = m.neededBy.length
+    ? m.neededBy.map((other) => h("div", { class: "kv" }, h("span", null, t("modules.heldBy", { name: moduleName(other) })), h("a", { class: "link", href: "#/settings/modules", onclick: () => dialog.close() }, t("modules.title"))))
+    : m.uses.map((use) => h("div", { class: "kv" }, h("span", null, t("modules.use." + use.what, { n: use.count ?? "" })), h("a", { class: "link", href: MODULE_USE_AT[use.what] ?? "#/settings/modules", onclick: () => dialog.close() }, t("common.open"))));
+  dialog = openDialog("confirm", h("h2", { class: "wrap" }, t("modules.heldTitle", { name: moduleName(m.id) })), h("p", { class: "muted" }, t(m.neededBy.length ? "modules.neededLead" : "modules.heldLead")), h("div", { class: "stack" }, rows), h("footer", null, closeButton(() => dialog, t("common.close"))));
+}
+
+async function turnModuleOff(m) {
+  if (m.uses.length || m.neededBy.length) return moduleHeldDialog(m);
+  try {
+    modulesChanged((await api("PUT", `/api/modules/${m.id}`, { on: false })).modules);
+    toast(t("modules.nowOff", { name: moduleName(m.id) }));
+  } catch (e) {
+    // it came into use since the list was read: the list is read again and says what holds it
+    const list = (await api("GET", "/api/modules").catch(() => null))?.modules;
+    const now = list?.find((x) => x.id === m.id);
+    if (list) state.modulesList = list;
+    if (now && (now.uses.length || now.neededBy.length)) moduleHeldDialog(now);
+    else toast(errorText(e));
+  }
+}
+
+/** In place of a page or a section of a module that is off: what it is, and the button */
+function moduleOffCard(id) {
+  const turn = isAdmin() && button(t("modules.turnOn"), { class: "primary", onclick: (e) => ((e.currentTarget.disabled = true), void turnModuleOn(id)) }, "check");
+  return h("section", { class: "card pad stack" }, h("div", { class: "tool" }, h("span", { class: "app-icon plus" }, icon(MODULE_ICONS[id])), h("div", { class: "grow" }, h("div", { class: "tool-head" }, h("strong", null, moduleName(id)), h("span", { class: "state stopped" }, t("modules.off"))), h("p", { class: "muted small" }, t(`modules.${id}.what`)), h("p", { class: "muted small" }, t("modules.offLead"))), turn));
+}
+
+function modulesSection() {
+  const list = state.modulesList;
+  if (!list) return [h("p", { class: "muted" }, "…")];
+  const row = (m) =>
+    h(
+      "div",
+      { class: "tool" },
+      h("span", { class: "app-icon plus" }, icon(MODULE_ICONS[m.id])),
+      h(
+        "div",
+        { class: "grow" },
+        h("div", { class: "tool-head" }, h("strong", null, moduleName(m.id)), h("span", { class: "state " + (m.on ? "running" : "stopped") }, t(m.on ? "modules.on" : "modules.off")), m.uses.length > 0 && h("span", { class: "state running" }, t("tools.used"))),
+        h("p", { class: "muted small" }, t(`modules.${m.id}.what`)),
+        h("p", { class: "muted small" }, t("modules.adds"), " ", t(`modules.${m.id}.adds`)),
+        m.needs.length > 0 && h("p", { class: "muted small" }, t("modules.needsLine", { needs: m.needs.map(moduleName).join(", ") })),
+      ),
+      h(
+        "div",
+        { class: "row-actions" },
+        m.on && h("a", { class: "btn small", href: MODULE_HOME[m.id] }, t("common.open")),
+        m.on ? button(t("modules.turnOff"), { class: "small", onclick: () => void turnModuleOff(m) }) : button(t("modules.turnOn"), { class: "small primary", onclick: (e) => ((e.currentTarget.disabled = true), void turnModuleOn(m.id)) }, "check"),
+      ),
+    );
+  return [
+    h("p", { class: "muted" }, t("modules.lead")),
+    MODULE_GROUPS.map((group) => {
+      const mine = list.filter((m) => m.group === group);
+      return mine.length > 0 && h("section", { class: "card pad stack" }, h("div", { class: "section-head" }, h("h2", null, t("modules.group." + group))), mine.map(row));
+    }),
+  ];
+}
+
+const sections = () => SECTIONS.filter((item) => (!item.admin || isAdmin()) && (!SECTION_MODULE[item.id] || hasModule(SECTION_MODULE[item.id])));
 
 function settingRow(title, hint, control) {
   return h("div", { class: "setting" }, h("div", { class: "grow" }, h("strong", null, title), hint && h("p", { class: "muted small" }, hint)), h("div", { class: "setting-control" }, control));
@@ -12900,6 +13019,8 @@ function settingsSection(section) {
     }
   };
 
+  if (SECTION_MODULE[section] && !hasModule(SECTION_MODULE[section])) return [moduleOffCard(SECTION_MODULE[section])];
+  if (section === "modules") return modulesSection();
   if (section === "account") return accountSection();
   if (section === "appearance") return appearanceSection(error);
   if (section === "general") {
@@ -14758,7 +14879,7 @@ function httpsSection(save, error) {
       error,
       h("footer", null, h("button", { class: "btn primary" }, t("settings.save"))),
     ),
-    namesCard(),
+    hasModule("domains") && namesCard(),
     https.mode === "acme" && https.domain && wildcardCard(paintCerts),
     https.mode === "acme" && h("section", { class: "card pad" }, h("div", { class: "section-head" }, h("h2", null, t("https.certificates")), retry), h("p", { class: "muted small" }, t(https.wildcard && https.wildcard !== "off" ? "wildcard.certificatesLead" : "https.certificatesLead")), certs),
     here && h("section", { class: "card pad" }, h("div", { class: "section-head" }, h("h2", null, t("https.checkTitle")), check), h("p", { class: "muted small" }, t("https.checkLead", { domain: here })), results),
@@ -16871,7 +16992,7 @@ function storageSection(section = "storage") {
       h(
         "div",
         { class: "pad card-head" },
-        h("div", { class: "section-head" }, h("h2", null, t("disks.title"), h("span", { class: "muted" }, t("disks.connected", { n: data.disks.length }))), h("div", { class: "row-actions" }, (data.mounting?.mergeable.length ?? 0) > 1 && button(t("mounting.merge"), { class: "small", onclick: () => mergeDialog() }), data.tool === "ok" && data.disks.length > 0 && checked > 0 && h("span", { class: "muted small" }, t("disks.checked", { when: ago(checked) })), data.tool === "ok" && data.disks.length > 0 && data.limits && button(t("disks.limits"), { class: "small", onclick: () => smartLimitsDialog(data.limits) }), data.tool === "ok" && data.disks.length > 0 && button(t("disks.checkNow"), { class: "small", onclick: busy("…", { path: "/api/disks/check" }) }, "refresh"))),
+        h("div", { class: "section-head" }, h("h2", null, t("disks.title"), h("span", { class: "muted" }, t("disks.connected", { n: data.disks.length }))), h("div", { class: "row-actions" }, hasModule("raid") && (data.mounting?.mergeable.length ?? 0) > 1 && button(t("mounting.merge"), { class: "small", onclick: () => mergeDialog() }), data.tool === "ok" && data.disks.length > 0 && checked > 0 && h("span", { class: "muted small" }, t("disks.checked", { when: ago(checked) })), data.tool === "ok" && data.disks.length > 0 && data.limits && button(t("disks.limits"), { class: "small", onclick: () => smartLimitsDialog(data.limits) }), data.tool === "ok" && data.disks.length > 0 && button(t("disks.checkNow"), { class: "small", onclick: busy("…", { path: "/api/disks/check" }) }, "refresh"))),
         h("p", { class: "muted small" }, t(data.disks.length ? "disks.lead" : "disks.none")),
         error,
       ),
@@ -18363,6 +18484,7 @@ async function loadAssistantChat(id) {
 }
 
 async function loadAssistant(keep = false) {
+  if (!hasModule("assistant")) return;
   try {
     const data = await api("GET", "/api/assistant");
     assistantUi.config = data.config;
@@ -18384,6 +18506,13 @@ async function forgetAssistantChat() {
 
 /** The round button in the corner of every page: opens the window, and shows when a change waits for a word */
 function assistantFab() {
+  // the module is off: the button goes with it
+  if (!hasModule("assistant")) {
+    if (assistantUi.open) closeAssistant();
+    assistantUi.fab?.remove();
+    assistantUi.fab = null;
+    return;
+  }
   if (!isAdmin()) return;
   leaveAssistantPage();
   if (!assistantUi.fab) {
@@ -18682,7 +18811,7 @@ async function answerAsk(ask, allow) {
 }
 
 async function loadApprovals() {
-  if (!isAdmin()) return;
+  if (!isAdmin() || !hasModule("assistant")) return;
   state.approvals = await api("GET", "/api/approvals").catch(() => state.approvals ?? []);
   // answered on another device, or lapsed
   if (askDialog && !state.approvals.some((ask) => ask.id === askDialog.ask)) askDialog.close();
@@ -18906,7 +19035,8 @@ function dropTwinHeading() {
 }
 
 function settingsFrame(section, ...content) {
-  const item = sections().find((x) => x.id === section);
+  // a section of a module that is off keeps its name on top; its body offers to turn the module on
+  const item = sections().find((x) => x.id === section) ?? (isAdmin() ? SECTIONS.find((x) => x.id === section) : undefined);
   setTimeout(() => {
     dropTwinHeading();
     const stack = document.querySelector(".settings > .stack");
@@ -19500,6 +19630,8 @@ function accessMatrix() {
 async function enter() {
   // sent here by a protected app: now that the visitor is signed in, back to it
   if (NEXT) return location.replace(NEXT);
+  // signed in just now: which modules are on came with nobody's name on the first answer
+  if (!state.modules) await loadModules();
   // a new server opens with the walk through its first choices; any other address is left alone
   if (state.welcome && isAdmin() && !/^#\/./.test(location.hash)) history.replaceState(null, "", location.pathname + "#/welcome");
   state.route = parseRoute();
@@ -19522,7 +19654,7 @@ async function main() {
   }
   applyAppearance((state.appearance = server.appearance ?? null));
   state.wallpapers = server.wallpapers ?? [];
-  Object.assign(state, { version: server.version, setup: server.setup, welcome: !!server.welcome, user: server.user, languages: server.languages, passkeys: !!server.passkeys && !!window.PublicKeyCredential });
+  Object.assign(state, { modules: server.modules ?? null, version: server.version, setup: server.setup, welcome: !!server.welcome, user: server.user, languages: server.languages, passkeys: !!server.passkeys && !!window.PublicKeyCredential });
   await loadLanguage(pickLanguage(server));
   if (state.user) await enter();
   else render();

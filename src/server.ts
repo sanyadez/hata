@@ -1500,13 +1500,14 @@ async function api(req: Request, url: URL, server: Server<unknown>): Promise<Res
   }
   if (path === "/api/servers" && method === "GET") {
     const system = systemStatus();
-    const instances = await containersReport().then((r) => r.containers, () => []);
-    const machines = machineList().map((m) => {
+    // only what the modules that are on have: the tree shows nothing of the others
+    const instances = moduleOn("containers") ? await containersReport().then((r) => r.containers, () => []) : [];
+    const machines = (moduleOn("machines") ? machineList() : []).map((m) => {
       const macs = (m.info?.macs ?? []).map((c) => c.mac);
       const guest = guestOfMachine(m.id, macs, m.ip.replace(/^::ffff:/, ""));
       return { ...m, instance: instanceOfMachine(macs, m.info?.hostname ?? m.name)?.name ?? "", guest: guest ? { host: guest.host, id: guest.id } : null };
     });
-    return json(serverTree({ here: { name: system.hostname, os: systemName(), address: homeLinks()[0]?.address ?? "", cpu: system.cpu, memory: system.memory, uptime: system.uptime }, instances, hosts: pveHosts().map((x) => pveHost(x.id)), machines, version: VERSION }));
+    return json(serverTree({ here: { name: system.hostname, os: systemName(), address: homeLinks()[0]?.address ?? "", cpu: system.cpu, memory: system.memory, uptime: system.uptime }, instances, hosts: moduleOn("proxmox") ? pveHosts().map((x) => pveHost(x.id)) : [], machines, version: VERSION }));
   }
   if (path === "/api/domains" && method === "GET") return json(await domainsReport(language(url), await forwardsReport()));
   if (path === "/api/ports" && method === "POST") return json(await addForward(await body(req), user.name));
