@@ -1840,3 +1840,4 @@ body.has-jobs #view:not(.fill) { padding-bottom: calc(var(--jobs-h, 0px) + 48px)
 .tv-pad .tv-key { aspect-ratio: 1; padding: 0; }
 .tv-volume { display: flex; align-items: center; gap: 12px; }
 .tv-volume input, .tv-seek { flex: 1; min-width: 0; width: 100%; }
+#tv-body .setting { border-top: 0; padding-top: 0; }
