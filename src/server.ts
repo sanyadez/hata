@@ -1528,7 +1528,8 @@ async function api(req: Request, url: URL, server: Server<unknown>): Promise<Res
   }
   if (path === "/api/tv/keep" && method === "POST") return json(await keepTvPicture((await body(req)).keep === true));
   if (path === "/api/tv/play" && method === "POST") {
-    await playOnTv((await body(req)).path, user.name);
+    const data = await body(req);
+    await playOnTv(data.path, user.name, data.at);
     return json({ ok: true });
   }
   if (path === "/api/tv/do" && method === "POST") {

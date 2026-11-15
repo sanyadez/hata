@@ -457,7 +457,7 @@ function startEvents() {
       }, 1200);
     } else if (event.type === "tv") {
       if ("playing" in event) {
-        state.tvNow = { on: !!event.on, playing: event.playing };
+        state.tvNow = { on: !!event.on, screen: !!event.screen, playing: event.playing };
         paintTvNow();
       }
       if (state.route.view === "tv") void loadTv();
@@ -11291,6 +11291,7 @@ function mediaDialog(entry) {
   };
   const prev = h("button", { type: "button", class: "icon-btn", "aria-label": t("files.previous"), title: t("files.previous"), onclick: () => step(-1) }, icon("chevron", "flip"));
   const next = h("button", { type: "button", class: "icon-btn", "aria-label": t("files.next"), title: t("files.next"), onclick: () => step(1) }, icon("chevron"));
+  const toTv = h("button", { type: "button", class: "icon-btn", onclick: () => void moveToTv(joinPath(dir, current.name), current.name, stage.querySelector("video, audio"), () => dialog.close()) }, icon("tv"));
   const show = (item) => {
     current = item;
     const src = rawUrl(joinPath(dir, item.name));
@@ -11298,13 +11299,17 @@ function mediaDialog(entry) {
     put(stage, kind === "image" ? h("img", { src, alt: item.name }) : kind === "video" ? h("video", { src, controls: true, autoplay: true, playsInline: true }) : h("audio", { src, controls: true, autoplay: true }));
     title.textContent = item.name;
     sub.textContent = `${bytes(item.size)} · ${fileTime(item.modified)}`;
+    toTv.hidden = !!filesMachine() || !tvReady() || !TV_PLAYS_RE.test(item.name);
+    const label = t(kind === "image" ? "tv.play" : "tv.toTv");
+    toTv.title = label;
+    toTv.setAttribute("aria-label", label);
     const index = list.findIndex((other) => other.name === item.name);
     prev.disabled = index <= 0;
     next.disabled = index >= list.length - 1;
   };
   dialog = openDialog(
     "xwide viewer",
-    h("header", null, h("div", { class: "grow" }, title, sub), list.length > 1 && prev, list.length > 1 && next, h("button", { type: "button", class: "icon-btn", "aria-label": t("files.download"), title: t("files.download"), onclick: () => downloadEntries([current]) }, icon("download")), closeX(() => dialog)),
+    h("header", null, h("div", { class: "grow" }, title, sub), list.length > 1 && prev, list.length > 1 && next, toTv, h("button", { type: "button", class: "icon-btn", "aria-label": t("files.download"), title: t("files.download"), onclick: () => downloadEntries([current]) }, icon("download")), closeX(() => dialog)),
     stage,
   );
   // the keys work wherever the focus is while the viewer is open
@@ -12674,6 +12679,61 @@ function paintTvMini(now) {
   tvUi.tick = setInterval(tick, 1000);
 }
 
+/** The player runs and a screen is plugged in: something can be sent there */
+const tvReady = () => isAdmin() && hasModule("tv") && !!state.tvNow?.on && !!state.tvNow.screen;
+
+/** What plays in this browser goes on on the TV from the same place; here it stops */
+async function moveToTv(path, name, media, done) {
+  const at = media && Number.isFinite(media.currentTime) ? media.currentTime : 0;
+  media?.pause();
+  try {
+    await api("POST", "/api/tv/play", { path, at });
+  } catch (e) {
+    return toast(errorText(e), "error");
+  }
+  toast(t("tv.playing", { name }));
+  done();
+}
+
+/**
+ * What plays on the TV goes on in this browser from the same place. The TV only pauses until the
+ * browser really plays — a browser knows fewer formats than Kodi — and stops then; a file the browser
+ * cannot play stays on the TV and plays on.
+ */
+function moveToBrowser(now) {
+  document.querySelector("dialog.tv-drop")?.close();
+  const name = now.file.split("/").pop();
+  const tell = (action) => api("POST", "/api/tv/do", { action }).catch(() => {});
+  const wasPlaying = !now.paused;
+  if (wasPlaying) void tell("playpause");
+  let dialog;
+  let taken = false;
+  const media = h(TV_SOUND_RE.test(name) ? "audio" : "video", { src: `${filesApi("/raw", "")}?path=${encodeURIComponent(now.file)}`, controls: true, autoplay: true, playsInline: true });
+  media.addEventListener("loadedmetadata", () => (media.currentTime = Math.max(0, now.time - 2)), { once: true });
+  media.addEventListener("playing", () => {
+    if (!taken) void tell("stop");
+    taken = true;
+  });
+  media.addEventListener("error", () => {
+    if (taken) return;
+    dialog.close();
+    toast(t("tv.browserCannot"), "error");
+  });
+  const back = button(t("tv.toTv"), { class: "small", onclick: () => void moveToTv(now.file, now.title, media, () => ((taken = true), dialog.close())) }, "tv");
+  dialog = openDialog("xwide viewer", h("header", null, h("div", { class: "grow" }, h("h2", { class: "clip" }, now.title), h("p", { class: "muted small" }, t("tv.browserHint"))), back, closeX(() => dialog)), h("div", { class: "stage" }, media));
+  dialog.addEventListener("close", () => {
+    media.pause();
+    media.removeAttribute("src");
+    // closed before the browser played anything: the TV goes on as it was
+    if (!taken && wasPlaying) void tell("playpause");
+  });
+}
+
+/** Sound alone among what the player plays: the browser needs no picture for it */
+const TV_SOUND_RE = /\.(mp3|flac|m4a|ogg|opus|wav|aac|wma)$/i;
+/** What a browser has a chance to play itself */
+const TV_BROWSER_RE = /\.(mp4|m4v|webm|mov|mkv|ogv|mp3|flac|m4a|ogg|opus|wav|aac)$/i;
+
 async function playOnTv(path, name) {
   try {
     await api("POST", "/api/tv/play", { path });
@@ -12725,7 +12785,7 @@ function tvRemoteParts(tv, press, turnOn) {
     idle
       ? note("refresh", t("tv.starting"), t("tv.startingLead"))
       : now
-        ? h("div", { class: "tvr-now" }, h("div", { class: "tvr-title" }, h("div", { class: "grow" }, h("strong", { class: "wrap" }, now.title), now.paused && h("span", { class: "state busy" }, t("tv.paused"))), round("stop", "stop", t("tv.key.stop"))), file && file !== now.title && h("p", { class: "tvr-file muted" }, file), position, h("div", { class: "tvr-times muted" }, h("span", null, tvClock(now.time)), h("span", null, tvClock(now.total))))
+        ? h("div", { class: "tvr-now" }, h("div", { class: "tvr-title" }, h("div", { class: "grow" }, h("strong", { class: "wrap" }, now.title), now.paused && h("span", { class: "state busy" }, t("tv.paused"))), round("stop", "stop", t("tv.key.stop"))), file && file !== now.title && h("p", { class: "tvr-file muted" }, file), position, h("div", { class: "tvr-times muted" }, h("span", null, tvClock(now.time)), h("span", null, tvClock(now.total))), now.file.startsWith("/") && TV_BROWSER_RE.test(now.file) && h("div", { class: "row-actions" }, button(t("tv.toBrowser"), { class: "small", onclick: () => moveToBrowser(now) }, "external")))
         : note("tv", t("tv.nothingTitle"), t("tv.nothing")),
     h("div", { class: "tvr-transport" }, skip("rewind", "back30", t("tv.key.rewind")), h("button", { type: "button", class: "tvr-main", title: t("tv.key.playpause"), "aria-label": t("tv.key.playpause"), disabled: idle || !now, onclick: () => press("playpause") }, icon(now && !now.paused ? "pause" : "play")), skip("forward", "fwd30", t("tv.key.forward"))),
     h("div", { class: "tvr-volume" }, round("mute", tv.muted ? "volumeOff" : "volume", t(tv.muted ? "tv.unmute" : "tv.mute"), tv.muted ? "on" : ""), volume, h("span", { class: "tvr-value" + (tv.muted ? " muted" : "") }, tv.muted ? t("tv.muted") : `${tv.volume}%`)),

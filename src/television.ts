@@ -402,7 +402,7 @@ export async function keepPicture(keep: boolean): Promise<TvReport> {
 }
 
 /** Plays a file of this server on the screen */
-export async function playOnTv(path: unknown, by: string): Promise<void> {
+export async function playOnTv(path: unknown, by: string, from?: unknown): Promise<void> {
   if (typeof path !== "string" || !path.startsWith("/") || !playable(path)) throw new AppError("tv.notPlayable", 400);
   let file = false;
   try {
@@ -410,7 +410,10 @@ export async function playOnTv(path: unknown, by: string): Promise<void> {
   } catch {}
   if (!file) throw new AppError("tv.noFile", 404);
   if ((await rpc({ method: "JSONRPC.Ping" }, 2000)) !== "pong") throw new AppError("tv.notRunning", 409);
-  if ((await rpc({ method: "Player.Open", params: { item: { file: path } } }, 8000)) !== "OK") throw new AppError("tv.playFailed", 409);
+  // carried over from a browser: it goes on from where it was watched to
+  const at = typeof from === "number" && Number.isFinite(from) && from >= 1 ? Math.floor(from) : 0;
+  const resume = at ? { options: { resume: { hours: Math.floor(at / 3600), minutes: Math.floor((at % 3600) / 60), seconds: at % 60, milliseconds: 0 } } } : {};
+  if ((await rpc({ method: "Player.Open", params: { item: { file: path }, ...resume } }, 8000)) !== "OK") throw new AppError("tv.playFailed", 409);
   record("tv.play", { user: by, detail: path });
   bus.publish("tv");
 }
@@ -426,14 +429,21 @@ let watching = false;
 let heard = false;
 
 /** The player as every page shows it: whether it runs, and what plays (null — nothing) */
-export const tvNow = (): { on: boolean; playing: TvNow | null } => ({ on: heard, playing: now });
+export const tvNow = (): { on: boolean; screen: boolean; playing: TvNow | null } => ({ on: heard, screen: screenThere(), playing: now });
+
+let screen = { at: 0, there: false };
+/** A TV or monitor is plugged in and seen: looked at anew every ten seconds at most */
+function screenThere(): boolean {
+  if (Date.now() - screen.at > 10_000) screen = { at: Date.now(), there: displays().some((d) => d.connected) };
+  return screen.there;
+}
 
 function tell(next: TvNow | null): void {
   const same = JSON.stringify(next && { ...next, at: 0, time: 0 }) === JSON.stringify(now && { ...now, at: 0, time: 0 });
   // the same film a little further on is news only when it jumped: the page counts the seconds itself
   const jumped = !!next && !!now && Math.abs(next.time - (now.time + (now.paused ? 0 : (next.at - now.at) / 1000))) > 3;
   now = next;
-  if (!same || jumped) bus.publish("tv", { on: heard, playing: next });
+  if (!same || jumped) bus.publish("tv", tvNow());
 }
 
 /**
@@ -456,7 +466,7 @@ export function watchTv(): void {
     const socket = connect({ host: "127.0.0.1", port: controlPort() });
     socket.once("connect", () => {
       heard = true;
-      bus.publish("tv", { on: true, playing: now });
+      bus.publish("tv", tvNow());
       refresh();
     });
     socket.on("data", (piece) => {
@@ -469,7 +479,7 @@ export function watchTv(): void {
       const was = heard;
       heard = false;
       now = null;
-      if (was) bus.publish("tv", { on: false, playing: null });
+      if (was) bus.publish("tv", tvNow());
       setTimeout(listen, was ? 3_000 : 10_000);
     });
   };
