@@ -472,13 +472,40 @@ export function mediaOf(probe: unknown): Media {
 export const keyframeArgs = (path: string, at: number): string[] => ["ffprobe", "-v", "error", "-select_streams", "v:0", "-read_intervals", `${at.toFixed(3)}%+#1`, "-show_entries", "packet=pts_time", "-of", "csv=p=0", path];
 
 /**
- * The file as a browser plays it, from `start` on: the picture as it is, the chosen sound made into
- * stereo AAC (browsers play neither AC3 nor DTS), in pieces a browser plays while they still come.
+ * How much earlier than its picture a stream's sound begins, seconds: silence, so that the sound has
+ * no hole at its start (a browser plays sound back to back and would run it ahead by the hole) and the
+ * stream's clock is known — its zero is this long before the keyframe it starts with.
  */
-export const streamArgs = (path: string, start: string, audio: number): string[] => ["ffmpeg", "-v", "error", "-nostdin", "-ss", start, "-i", path, "-map", "0:v:0", "-map", `0:a:${audio}?`, "-c:v", "copy", "-c:a", "aac", "-ac", "2", "-b:a", "192k", "-movflags", "frag_keyframe+empty_moov+default_base_moof", "-f", "mp4", "pipe:1"];
+export const STREAM_LEAD = 0.25;
+/** ffmpeg looks for a keyframe a little before the moment asked: asked this much after one, it lands on it */
+const PAST_KEYFRAME = 0.14;
 
-/** One subtitle of the file from the same moment on, as the text format browsers show */
-export const subsArgs = (path: string, start: string, index: number): string[] => ["ffmpeg", "-v", "error", "-nostdin", "-ss", start, "-i", path, "-map", `0:s:${index}`, "-f", "webvtt", "pipe:1"];
+/**
+ * The file as a browser plays it, from the keyframe at `start` on: the picture as it is, the chosen
+ * sound made into stereo AAC (browsers play neither AC3 nor DTS), in pieces a browser plays while
+ * they still come. The sound is cut exactly and padded back with silence to `STREAM_LEAD` before the
+ * picture: found live — without that the picture began up to a whole gap between keyframes earlier
+ * than the page counted, and the sound ran ahead.
+ */
+export function streamArgs(path: string, start: string, audio: number): string[] {
+  const from = Number(start);
+  const seek = from > 0 ? ["-ss", (from + PAST_KEYFRAME).toFixed(3)] : [];
+  const lead = Math.round(((from > 0 ? PAST_KEYFRAME : 0) + STREAM_LEAD) * 48000);
+  return ["ffmpeg", "-v", "error", "-nostdin", ...seek, "-i", path, "-map", "0:v:0", "-map", `0:a:${audio}?`, "-c:v", "copy", "-c:a", "aac", "-ac", "2", "-ar", "48000", "-b:a", "192k", "-af", `aresample=async=1:first_pts=-${lead}`, "-movflags", "frag_keyframe+empty_moov+default_base_moof", "-f", "mp4", "pipe:1"];
+}
+
+/**
+ * Where the clock of such a stream stands at its first moment, as a moment of the file: the silence
+ * before the keyframe, and the 1024 samples the AAC encoder puts in front of everything (measured).
+ */
+export const streamZero = (start: string): number => Number(start) - STREAM_LEAD - 1024 / 48000;
+
+/**
+ * One subtitle of the file from about that moment on, in the text format browsers know, WITH THE
+ * FILE'S OWN TIMES (`-copyts`): left to itself ffmpeg counts them from the first line it happens to
+ * find, so the page places each line by the stream's clock itself.
+ */
+export const subsArgs = (path: string, start: string, index: number): string[] => ["ffmpeg", "-v", "error", "-nostdin", ...(Number(start) > 5 ? ["-ss", (Number(start) - 5).toFixed(3)] : []), "-copyts", "-i", path, "-map", `0:s:${index}`, "-f", "webvtt", "pipe:1"];
 
 /** A moment of a file as the programs take it: seconds with a fraction, nothing else */
 export const cleanStart = (raw: unknown): string | null => (typeof raw === "string" && /^\d{1,6}(\.\d{1,6})?$/.test(raw) ? raw : null);

@@ -12,7 +12,7 @@ import { AppError, startJob, type Job } from "./apps";
 import { bus } from "./bus";
 import { saveSettings, settings } from "./config";
 import { installCommand, packageManager, PATH, run, runLogged } from "./packages";
-import { advancedXml, builtinPacket, cleanFolders, cleanStart, clickPacket, keyframeArgs, mediaOf, prefsOf, prefValue, streamArgs, subsArgs, tracksOf, TV_LANGUAGES, type Media, type Pref, type Tracks, helloPacket, KEEP_NO, KEEP_SECONDS, KEEP_WINDOW, KEEP_YES, MATCH_OFF, MATCH_ON, pictureOf, decodePackages, isOurs, playable, portIn, readDisplay, hwdbText, keymapXml, polkitRule, remoteCall, seconds, shortTitle, sourcesXml, takeJson, TV_HOME, TV_HWDB, TV_POLKIT, TV_PORT, TV_UNIT, TV_USER, unitText, type Call, type Display, type Picture } from "./tv";
+import { advancedXml, builtinPacket, cleanFolders, cleanStart, clickPacket, keyframeArgs, mediaOf, prefsOf, prefValue, streamArgs, subsArgs, tracksOf, streamZero, TV_LANGUAGES, type Media, type Pref, type Tracks, helloPacket, KEEP_NO, KEEP_SECONDS, KEEP_WINDOW, KEEP_YES, MATCH_OFF, MATCH_ON, pictureOf, decodePackages, isOurs, playable, portIn, readDisplay, hwdbText, keymapXml, polkitRule, remoteCall, seconds, shortTitle, sourcesXml, takeJson, TV_HOME, TV_HWDB, TV_POLKIT, TV_PORT, TV_UNIT, TV_USER, unitText, type Call, type Display, type Picture } from "./tv";
 
 const USERDATA = join(TV_HOME, ".kodi", "userdata");
 const UNIT_FILE = "/etc/systemd/system/" + TV_UNIT;
@@ -610,9 +610,9 @@ async function fileFor(path: unknown): Promise<string> {
 
 /**
  * What a file holds — its length, sound tracks and subtitles — and, for a moment asked, where the
- * picture can really start (`start`): the page counts its clock and its subtitles from there.
+ * picture can really start (`start`, a keyframe) and where the clock of the stream from there begins (`zero`).
  */
-export async function mediaInfo(raw: unknown, at: number): Promise<Media & { start: string }> {
+export async function mediaInfo(raw: unknown, at: number): Promise<Media & { start: string; zero: number }> {
   const path = await fileFor(raw);
   const key = `${path}\n${statSync(path).mtimeMs}`;
   let media = probed.get(key);
@@ -628,7 +628,8 @@ export async function mediaInfo(raw: unknown, at: number): Promise<Media & { sta
     const found = (await run(keyframeArgs(path, at), 20_000)).out.split("\n").map((line) => line.trim().replace(/,+$/, "")).find((line) => cleanStart(line));
     start = found ?? at.toFixed(3);
   }
-  return { ...media, start };
+  // `zero` — the moment of the file the stream's own clock starts at
+  return { ...media, start, zero: streamZero(start) };
 }
 
 /**

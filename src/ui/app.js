@@ -12779,7 +12779,7 @@ function streamPlayer(path, { at = 0, audio = 0, sub = -1, played, failed } = {}
   const play = h("button", { type: "button", class: "icon-btn", "aria-label": t("tv.key.playpause"), title: t("tv.key.playpause"), onclick: () => (video.paused ? void video.play().catch(() => {}) : video.pause()) }, icon("pause"));
   const mute = h("button", { type: "button", class: "icon-btn", "aria-label": t("tv.mute"), title: t("tv.mute"), onclick: () => ((video.muted = !video.muted), mute.replaceChildren(icon(video.muted ? "volumeOff" : "volume"))) }, icon("volume"));
   const sounds = h("select", { "aria-label": t("tv.track.audio"), title: t("tv.track.audio"), hidden: true, onchange: () => ((p.audio = Number(sounds.value)), void load(position())) });
-  const subs = h("select", { "aria-label": t("tv.track.subs"), title: t("tv.track.subs"), hidden: true, onchange: () => ((p.sub = Number(subs.value)), words()) });
+  const subs = h("select", { "aria-label": t("tv.track.subs"), title: t("tv.track.subs"), hidden: true, onchange: () => ((p.sub = Number(subs.value)), void words()) });
   const el = h("div", { class: "sp" }, video, note, h("div", { class: "sp-bar" }, play, clock, bar, sounds, subs, mute, h("button", { type: "button", class: "icon-btn", "aria-label": t("tv.fullScreen"), title: t("tv.fullScreen"), onclick: () => (document.fullscreenElement ? void document.exitFullscreen() : void el.requestFullscreen?.().catch(() => {})) }, icon("expand"))));
   const shown = () => {
     const total = p.info?.duration ?? 0;
@@ -12788,13 +12788,46 @@ function streamPlayer(path, { at = 0, audio = 0, sub = -1, played, failed } = {}
     if (!p.dragging) bar.value = String(now);
   };
   const say = (text) => ((note.textContent = text), (note.hidden = !text));
-  /** The chosen subtitle from the moment the stream began */
-  const words = () => {
-    video.replaceChildren();
+  /**
+   * The chosen subtitle. Its lines come with the file's own times and are put on the stream's clock
+   * here, one track of ours for all of them: read as they come, so the first show at once.
+   */
+  const words = async () => {
+    p.reading?.abort();
+    p.lines ??= video.addTextTrack("subtitles");
+    for (const cue of [...(p.lines.cues ?? [])]) p.lines.removeCue(cue);
+    p.lines.mode = p.sub < 0 ? "disabled" : "showing";
     if (p.sub < 0) return;
-    const track = h("track", { kind: "subtitles", src: from("subs", p.sub), default: true });
-    video.append(track);
-    track.track.mode = "showing";
+    const stop = (p.reading = new AbortController());
+    const zero = p.start;
+    const moment = (text) => text.split(":").reduce((sum, part) => sum * 60 + Number(part), 0);
+    const place = (block) => {
+      const lines = block.split("\n");
+      const at = lines.findIndex((line) => line.includes("-->"));
+      const times = at < 0 ? null : /^\s*([\d:.]+)\s+-->\s+([\d:.]+)/.exec(lines[at]);
+      const text = lines.slice(at + 1).join("\n").trim();
+      if (!times || !text) return;
+      const [from, to] = [moment(times[1]) - zero, moment(times[2]) - zero];
+      if (to > 0 && to > from) p.lines.addCue(new window.VTTCue(Math.max(0, from), to, text));
+    };
+    try {
+      const res = await fetch(from("subs", p.sub), { signal: stop.signal });
+      if (!res.ok) return;
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let rest = "";
+      for (;;) {
+        const { done, value } = await reader.read();
+        rest += decoder.decode(value ?? new Uint8Array(), { stream: !done }).replace(/\r/g, "");
+        const blocks = rest.split("\n\n");
+        rest = done ? "" : blocks.pop();
+        if (stop.signal.aborted) return;
+        blocks.forEach(place);
+        if (done) return;
+      }
+    } catch {
+      // stopped for another subtitle or another moment, or the server ended it: what came stays
+    }
   };
   const load = async (moment) => {
     say("");
@@ -12819,9 +12852,9 @@ function streamPlayer(path, { at = 0, audio = 0, sub = -1, played, failed } = {}
     }
     p.info = info;
     p.startText = info.start;
-    p.start = Number(info.start);
+    p.start = info.zero;
     video.src = from("stream", p.audio);
-    words();
+    void words();
     void video.play().catch(() => {});
   };
   video.addEventListener("timeupdate", shown);
@@ -12855,8 +12888,8 @@ function streamPlayer(path, { at = 0, audio = 0, sub = -1, played, failed } = {}
     pause: () => video.pause(),
     stop: () => {
       p.gone = true;
+      p.reading?.abort();
       video.pause();
-      video.replaceChildren();
       video.removeAttribute("src");
       video.load();
     },

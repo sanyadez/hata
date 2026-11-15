@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { cleanStart, keyframeArgs, mediaOf, prefsOf, prefValue, streamArgs, subsArgs, tracksOf, clickPacket, helloPacket, KEEP_WINDOW, KEEP_YES, pictureOf, advancedXml, cleanFolders, shortTitle, hwdbText, keymapXml, polkitRule, decodePackages, isOurs, monitorAudio, monitorName, playable, portIn, readDisplay, remoteCall, seconds, sourcesXml, takeJson, unitText } from "../src/tv";
+import { streamZero, cleanStart, keyframeArgs, mediaOf, prefsOf, prefValue, streamArgs, subsArgs, tracksOf, clickPacket, helloPacket, KEEP_WINDOW, KEEP_YES, pictureOf, advancedXml, cleanFolders, shortTitle, hwdbText, keymapXml, polkitRule, decodePackages, isOurs, monitorAudio, monitorName, playable, portIn, readDisplay, remoteCall, seconds, sourcesXml, takeJson, unitText } from "../src/tv";
 
 function edid(name: string, audio: boolean): Uint8Array {
   const data = new Uint8Array(256);
@@ -204,8 +204,14 @@ test("a file read for the browser's player, and the programs' arguments", () => 
   expect(media.audio).toEqual([{ index: 0, language: "ukr", name: "DUB", codec: "ac3", channels: 6 }, { index: 1, language: "eng", name: "", codec: "aac", channels: 2 }]);
   expect(media.subs.map((one) => [one.index, one.text])).toEqual([[0, true], [1, false]]);
   expect(mediaOf(null)).toEqual({ duration: 0, video: null, audio: [], subs: [] });
-  expect(streamArgs("/a b/-x.mkv", "12.5", 1).join(" ")).toContain("-ss 12.5 -i /a b/-x.mkv -map 0:v:0 -map 0:a:1? -c:v copy");
-  expect(subsArgs("/f.mkv", "0", 2).slice(-5)).toEqual(["-map", "0:s:2", "-f", "webvtt", "pipe:1"]);
+  // asked a little past the keyframe so that ffmpeg lands on it; the sound padded back to a quarter second before it
+  expect(streamArgs("/a b/-x.mkv", "12.5", 1).join(" ")).toContain("-ss 12.640 -i /a b/-x.mkv -map 0:v:0 -map 0:a:1? -c:v copy");
+  expect(streamArgs("/f.mkv", "12.5", 0).join(" ")).toContain("first_pts=-18720");
+  expect(streamArgs("/f.mkv", "0", 0).join(" ")).toContain("-nostdin -i /f.mkv");
+  expect(streamArgs("/f.mkv", "0", 0).join(" ")).toContain("first_pts=-12000");
+  expect(subsArgs("/f.mkv", "0", 2).slice(4)).toEqual(["-copyts", "-i", "/f.mkv", "-map", "0:s:2", "-f", "webvtt", "pipe:1"]);
+  expect(subsArgs("/f.mkv", "12.5", 2).slice(4, 7)).toEqual(["-ss", "7.500", "-copyts"]);
+  expect(streamZero("12.5")).toBeCloseTo(12.5 - 0.25 - 0.021333, 5);
   expect(keyframeArgs("/f.mkv", 61.25)).toContain("61.250%+#1");
   expect(cleanStart("1234.567")).toBe("1234.567");
   expect(cleanStart("-1")).toBeNull();
