@@ -852,7 +852,6 @@ const NAV = [
   { view: "files", hash: "#/files", icon: "folder", files: true },
   { view: "machines", hash: "#/machines", icon: "server", admin: true },
   { view: "integrations", hash: "#/integrations", icon: "link", admin: true, integrations: true },
-  { view: "tv", hash: "#/tv", icon: "tv", admin: true },
   { view: "assistant", hash: "#/assistant", icon: "chat", admin: true, assistant: true },
   { view: "settings", hash: "#/settings", icon: "sliders" },
 ];
@@ -12634,11 +12633,13 @@ function paintTvNow() {
   const box = document.getElementById("tv-now");
   if (!box) return;
   const tv = isAdmin() && hasModule("tv") ? state.tvNow : null;
-  box.hidden = !tv?.on;
+  // the chip is the one way to the TV: there while the module is on, also with the player off or not installed yet
+  const there = isAdmin() && hasModule("tv");
+  box.hidden = !there;
   box.className = "tv-now" + (tv?.playing ? " playing" : "") + (document.querySelector("dialog.tv-drop[open]") ? " open" : "");
-  if (!tv?.on) return box.replaceChildren();
-  const now = tv.playing;
-  const label = now ? t("tv.playing", { name: now.title }) : t("tv.remote");
+  if (!there) return box.replaceChildren();
+  const now = tv?.playing;
+  const label = now ? t("tv.playing", { name: now.title }) : t(tv?.on ? "tv.remote" : "tv.title");
   // no words here: grey while nothing plays, the accent colour while something does — the name is in the remote.
   // The left half pauses with one touch, the right one opens the remote; with nothing playing only that is left
   const halves = [
@@ -12904,6 +12905,7 @@ const tvClock = (s) => `${Math.floor(s / 3600) ? Math.floor(s / 3600) + ":" : ""
  */
 function tvRemoteParts(tv, press, turnOn) {
   const note = (iconName, title, text, action) => h("div", { class: "tvr-note" }, h("strong", { class: "with-icon" }, icon(iconName), title), h("p", { class: "muted small" }, text), action);
+  if (!tv.installed) return [note("tv", t("tv.needsTitle"), t("tv.needsShort"), h("a", { class: "btn primary wide", href: "#/tv", onclick: (e) => e.currentTarget.closest("dialog")?.close() }, h("span", null, t("tv.openPage"))))];
   if (!tv.running) return [note("power", t("tv.offTitle"), t("tv.offLead"), turnOn && button(t("tv.turnOn"), { class: "primary wide", onclick: (e) => ((e.currentTarget.disabled = true), turnOn()) }, "power"))];
   const idle = !tv.answers;
   const now = tv.playing;
