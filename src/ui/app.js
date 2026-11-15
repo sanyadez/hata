@@ -12666,7 +12666,7 @@ function tvRemoteParts(tv, press) {
   const position = now && now.total > 0 && h("input", { type: "range", class: "tv-seek", min: 0, max: 100, step: 0.1, value: (now.time / now.total) * 100, "aria-label": t("tv.position"), onchange: (e) => press("seek", Number(e.target.value)) });
   const volume = h("input", { type: "range", min: 0, max: 100, step: 1, value: tv.volume, "aria-label": t("tv.volume"), onchange: (e) => press("volume", Number(e.target.value)) });
   return [
-    now ? h("div", { class: "stack" }, h("strong", { class: "wrap" }, now.title), position, h("div", { class: "kv muted small" }, h("span", null, tvClock(now.time)), h("span", null, tvClock(now.total)))) : h("p", { class: "muted" }, t("tv.nothing")),
+    now ? h("div", { class: "stack" }, h("strong", { class: "wrap", title: now.file.split("/").pop() }, now.title), position, h("div", { class: "kv muted small" }, h("span", null, tvClock(now.time)), h("span", null, tvClock(now.total)))) : h("p", { class: "muted" }, t("tv.nothing")),
     h("div", { class: "tv-row" }, key("rewind", "undo", t("tv.key.rewind")), key("playpause", now && !now.paused ? "pause" : "play", t("tv.key.playpause"), "primary"), key("stop", "stop", t("tv.key.stop")), key("forward", "arrow", t("tv.key.forward"))),
     h("div", { class: "tv-volume" }, h("button", { type: "button", class: "btn small", onclick: () => press("mute") }, t(tv.muted ? "tv.unmute" : "tv.mute")), volume, h("span", { class: "muted small" }, `${tv.volume}%`)),
     h("div", { class: "tv-pad" }, h("span"), key("up", "", "▲"), h("span"), key("left", "", "◀"), key("select", "", "OK", "primary"), key("right", "", "▶"), h("span"), key("down", "", "▼"), h("span")),

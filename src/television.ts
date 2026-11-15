@@ -11,7 +11,7 @@ import { AppError, startJob, type Job } from "./apps";
 import { bus } from "./bus";
 import { saveSettings, settings } from "./config";
 import { installCommand, packageManager, PATH, run, runLogged } from "./packages";
-import { advancedXml, cleanFolders, decodePackages, isOurs, playable, portIn, readDisplay, hwdbText, keymapXml, polkitRule, remoteCall, seconds, sourcesXml, takeJson, TV_HOME, TV_HWDB, TV_POLKIT, TV_PORT, TV_UNIT, TV_USER, unitText, type Call, type Display } from "./tv";
+import { advancedXml, cleanFolders, decodePackages, isOurs, playable, portIn, readDisplay, hwdbText, keymapXml, polkitRule, remoteCall, seconds, shortTitle, sourcesXml, takeJson, TV_HOME, TV_HWDB, TV_POLKIT, TV_PORT, TV_UNIT, TV_USER, unitText, type Call, type Display } from "./tv";
 
 const USERDATA = join(TV_HOME, ".kodi", "userdata");
 const UNIT_FILE = "/etc/systemd/system/" + TV_UNIT;
@@ -141,7 +141,7 @@ async function nowPlaying(): Promise<{ player: number | null; playing: Playing |
   const [props, item] = (await Promise.all([rpc({ method: "Player.GetProperties", params: { playerid: player, properties: ["time", "totaltime", "speed"] } }), rpc({ method: "Player.GetItem", params: { playerid: player, properties: ["title", "file"] } })])) as [Record<string, unknown> | null, { item?: Record<string, unknown> } | null];
   if (!props) return { player, playing: null };
   const file = String(item?.item?.file ?? "");
-  return { player, playing: { title: String(item?.item?.title || item?.item?.label || file.split("/").pop() || ""), file, paused: props.speed === 0, time: seconds(props.time), total: seconds(props.totaltime) } };
+  return { player, playing: { title: shortTitle(String(item?.item?.title || item?.item?.label || file.split("/").pop() || "")), file, paused: props.speed === 0, time: seconds(props.time), total: seconds(props.totaltime) } };
 }
 
 async function audioChoice(): Promise<TvReport["audio"]> {
