@@ -11293,6 +11293,7 @@ function mediaDialog(entry) {
   const next = h("button", { type: "button", class: "icon-btn", "aria-label": t("files.next"), title: t("files.next"), onclick: () => step(1) }, icon("chevron"));
   // a video is played by Hata's own player where ffmpeg is: sound tracks, subtitles, formats a browser alone cannot
   let player = null;
+  const needs = h("p", { class: "muted small viewer-note", hidden: true });
   const toTv = h("button", { type: "button", class: "icon-btn", onclick: () => void moveToTv(joinPath(dir, current.name), current.name, player ?? stage.querySelector("video, audio"), () => dialog.close()) }, icon("tv"));
   const show = (item) => {
     current = item;
@@ -11304,6 +11305,9 @@ function mediaDialog(entry) {
     title.textContent = item.name;
     sub.textContent = `${bytes(item.size)} · ${fileTime(item.modified)}`;
     toTv.hidden = !!filesMachine() || !tvReady() || !TV_PLAYS_RE.test(item.name);
+    // without ffmpeg the browser plays a video as it can: said where one would miss the sound or the subtitles
+    put(needs, kind === "video" && !player && isAdmin() && !filesMachine() && [t("media.needs"), " ", h("a", { class: "link", href: "#/settings/tools", onclick: () => dialog.close() }, t("media.needsWhere"))]);
+    needs.hidden = !needs.firstChild;
     const label = t(kind === "image" ? "tv.play" : "tv.toTv");
     toTv.title = label;
     toTv.setAttribute("aria-label", label);
@@ -11315,6 +11319,7 @@ function mediaDialog(entry) {
     "xwide viewer",
     h("header", null, h("div", { class: "grow" }, title, sub), list.length > 1 && prev, list.length > 1 && next, toTv, h("button", { type: "button", class: "icon-btn", "aria-label": t("files.download"), title: t("files.download"), onclick: () => downloadEntries([current]) }, icon("download")), closeX(() => dialog)),
     stage,
+    needs,
   );
   // the keys work wherever the focus is while the viewer is open
   const keys = (e) => {
@@ -12744,7 +12749,7 @@ function moveToBrowser(now) {
 }
 
 /** ffmpeg is here: videos are played by Hata's own player */
-const tvStreams = () => isAdmin() && hasModule("tv") && !!state.tvNow?.streams;
+const tvStreams = () => isAdmin() && !!state.overview?.media;
 
 const languageNames = {};
 /** "ukr" as a person says it in the page's language; what is not a language's code stays as written */
@@ -12771,7 +12776,7 @@ function streamPlayer(path, { at = 0, audio = 0, sub = -1, played, failed } = {}
   const p = { start: 0, startText: "0", audio, sub, info: null, tries: 0, dragging: false, gone: false, reported: false };
   const video = h("video", { playsInline: true, autoplay: true });
   const where = `path=${encodeURIComponent(path)}`;
-  const from = (kind, n) => `/api/tv/media/${kind}?${where}&start=${p.startText}&n=${n}`;
+  const from = (kind, n) => `/api/media/${kind}?${where}&start=${p.startText}&n=${n}`;
   const position = () => p.start + (video.currentTime || 0);
   const note = h("p", { class: "sp-note", hidden: true });
   const clock = h("span", { class: "sp-clock" }, "0:00");
@@ -12850,7 +12855,7 @@ function streamPlayer(path, { at = 0, audio = 0, sub = -1, played, failed } = {}
     say("");
     let info;
     try {
-      info = await api("GET", `/api/tv/media?${where}&at=${Math.max(0, moment).toFixed(3)}`);
+      info = await api("GET", `/api/media?${where}&at=${Math.max(0, moment).toFixed(3)}`);
     } catch (e) {
       say(errorText(e));
       return failed?.();

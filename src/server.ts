@@ -112,7 +112,7 @@ import { mcpResponse } from "./mcp";
 import { instructions as mcpInstructions, tellHttps, TOOLS } from "./mcptools";
 import { moduleOn, modulesOn, modulesReport, setModule, settleModules, startModules } from "./moduleruns";
 import { findForModules } from "./modulefinds";
-import { installTv, playOnTv, remote as tvRemote, keepPicture as keepTvPicture, mediaInfo as tvMediaInfo, mediaStream as tvMediaStream, mediaSubs as tvMediaSubs, setLanguage as setTvLanguage, setPref as setTvPref, setAudio as setTvAudio, setFolders as setTvFolders, setPicture as setTvPicture, switchTv, tvNow, tvReport } from "./television";
+import { installTv, playOnTv, remote as tvRemote, keepPicture as keepTvPicture, mediaInfo as tvMediaInfo, streamsHere as tvStreamsHere, mediaStream as tvMediaStream, mediaSubs as tvMediaSubs, setLanguage as setTvLanguage, setPref as setTvPref, setAudio as setTvAudio, setFolders as setTvFolders, setPicture as setTvPicture, switchTv, tvNow, tvReport } from "./television";
 import { moduleOfPath, moduleOfTool } from "./modules";
 import { serverTree } from "./servertree";
 import { homeLinks, localNamesStatus, refreshLocalNames } from "./mdns";
@@ -1171,6 +1171,8 @@ async function api(req: Request, url: URL, server: Server<unknown>): Promise<Res
       assistant: admin && assistantReady(assistantConfig()),
       // what plays on the server's own screen, for the chip every page shows
       tv: admin && moduleOn("tv") ? tvNow() : null,
+      // ffmpeg is here: videos of this server are played in the browser by Hata's own player, the TV module on or off
+      media: admin && tvStreamsHere(),
       attention: admin ? notSnoozed(attention({ system, docker, apps, activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), exposed: exposedNics(), array: arrayTrouble(), shares: shareTrouble(), places: placesDown(), machines: awayMachines(), machineApps: onMachines, unused: unusedDisks(), filling: fillingUp(), pve: proxmoxTrouble(), ha: [...homeAssistantTrouble(), ...qbitTrouble(), ...frigateTrouble()], raid: poolsTrouble(), containers: containersTrouble(), dns: [...dnsTrouble(), ...blockTrouble(), ...wildcardTrouble()] })) : [],
       // how many items are put off: the list says so and leads to them
       attentionHidden: admin ? hiddenCount() : 0,
@@ -1528,9 +1530,9 @@ async function api(req: Request, url: URL, server: Server<unknown>): Promise<Res
     if ("setting" in data) return json(await setTvPref(data.setting, data.value, user.name));
     return fail(400, "tv.badAction");
   }
-  // the browser's own player: what the file holds, the file as a browser plays it, a subtitle of it
-  if (path === "/api/tv/media" && method === "GET") return json(await tvMediaInfo(url.searchParams.get("path"), Number(url.searchParams.get("at")) || 0));
-  if ((path === "/api/tv/media/stream" || path === "/api/tv/media/subs") && method === "GET") {
+  // the browser's own player (not the TV module's: Files plays with it whether the TV is on or not): what the file holds, the file as a browser plays it, a subtitle of it
+  if (path === "/api/media" && method === "GET") return json(await tvMediaInfo(url.searchParams.get("path"), Number(url.searchParams.get("at")) || 0));
+  if ((path === "/api/media/stream" || path === "/api/media/subs") && method === "GET") {
     server.timeout(req, 0);
     const [file, start, n] = [url.searchParams.get("path"), url.searchParams.get("start"), Number(url.searchParams.get("n") ?? "0")];
     return path.endsWith("stream") ? await tvMediaStream(file, start, n, req.signal) : await tvMediaSubs(file, start, n, req.signal);
