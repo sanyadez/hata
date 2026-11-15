@@ -1930,3 +1930,4 @@ dialog.dropdown.tv-drop[open] { padding: 18px 20px 20px; display: grid; gap: 14p
 }
 .tvr-note.warn { background: var(--warn-soft); }
 .tv-after { background: none; border-style: dashed; box-shadow: none; }
+.tv-page .cmd { white-space: normal; overflow-wrap: anywhere; }
