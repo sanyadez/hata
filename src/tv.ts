@@ -236,6 +236,26 @@ export const seconds = (time: unknown): number => {
   return (Number(t.hours) || 0) * 3600 + (Number(t.minutes) || 0) * 60 + (Number(t.seconds) || 0);
 };
 
+const RELEASE_TAG = /\b(2160p|1080p|1080i|720p|480p|4k|uhd|web[- ]?dl(rip)?|web[- ]?rip|bd[- ]?rip|br[- ]?rip|blu[- ]?ray|hd[- ]?tv|hd[- ]?rip|dvd[- ]?rip|remux|imax|x26[45]|h ?26[45]|hevc|avc|xvid|hdr|proper|repack|extended|unrated)\b/i;
+
+/**
+ * A film's name as a person would say it, from the name of its file: `Coyote.vs.Acme.(2026).WEB-DL.1080p.mkv`
+ * is "Coyote vs Acme". What stands after the year or the first mark of a release is left out; an episode's
+ * number stays. A name that is not a file's (Kodi's library gives real titles) comes back as it is.
+ */
+export function shortTitle(name: string): string {
+  if (!/\.[a-z0-9]{2,5}$/i.test(name)) return name.trim();
+  let text = name.replace(/\.[a-z0-9]{2,5}$/i, "").replace(/[._]+/g, " ").replace(/^\s*\[[^\]]*\]\s*/, "");
+  const episode = /\bS\d{1,2} ?E\d{1,3}\b/i.exec(text);
+  if (episode) return text.slice(0, episode.index + episode[0].length).replace(/\s+/g, " ").trim();
+  // a year that opens the name is part of it ("2001 A Space Odyssey"): the one meant comes later
+  const year = [...text.matchAll(/[([]?\b(19|20)\d{2}\b[)\]]?/g)].find((found) => found.index > 0)?.index;
+  const tag = RELEASE_TAG.exec(text)?.index;
+  const cut = Math.min(year ?? Infinity, tag && tag > 0 ? tag : Infinity);
+  if (Number.isFinite(cut)) text = text.slice(0, cut);
+  return text.replace(/[\s\-–([]+$/, "").replace(/\s+/g, " ").trim() || name;
+}
+
 const PLAYABLE = /\.(mkv|mp4|m4v|avi|mov|webm|ts|m2ts|mpg|mpeg|wmv|flv|ogv|3gp|iso|mp3|flac|m4a|ogg|opus|wav|aac|wma|jpe?g|png|gif|webp|bmp|heic)$/i;
 
 /** Whether a file is something a media player plays: video, music or a picture, by its name */

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { advancedXml, cleanFolders, hwdbText, keymapXml, polkitRule, decodePackages, isOurs, monitorAudio, monitorName, playable, portIn, readDisplay, remoteCall, seconds, sourcesXml, takeJson, unitText } from "../src/tv";
+import { advancedXml, cleanFolders, shortTitle, hwdbText, keymapXml, polkitRule, decodePackages, isOurs, monitorAudio, monitorName, playable, portIn, readDisplay, remoteCall, seconds, sourcesXml, takeJson, unitText } from "../src/tv";
 
 function edid(name: string, audio: boolean): Uint8Array {
   const data = new Uint8Array(256);
@@ -94,4 +94,15 @@ test("the player cannot be left or the server powered off from the sofa", () => 
   expect(keymapXml()).toContain("<power>noop</power>");
   expect(polkitRule()).toContain('subject.user == "hata-tv"');
   expect(polkitRule()).toContain("polkit.Result.NO");
+});
+
+test("a file's name is said as the film's name", () => {
+  expect(shortTitle("Coyote.vs.Acme.(2026).WEB-DL.1080p.2xUkr.Eng.mkv")).toBe("Coyote vs Acme");
+  expect(shortTitle("Spider-Man Brand New Day (2026) iMAX WEB-DLRip 1080p_grab777.mkv")).toBe("Spider-Man Brand New Day");
+  expect(shortTitle("The.Show.S02E07.1080p.WEB.h264.mkv")).toBe("The Show S02E07");
+  expect(shortTitle("[Group] Some_Anime_-_12_[720p].mkv")).toBe("Some Anime - 12");
+  expect(shortTitle("Тестовий фільм.mp4")).toBe("Тестовий фільм");
+  expect(shortTitle("2001.A.Space.Odyssey.1968.BDRip.mkv")).toBe("2001 A Space Odyssey");
+  expect(shortTitle("Dune: Part Two")).toBe("Dune: Part Two");
+  expect(shortTitle("song.flac")).toBe("song");
 });
