@@ -439,10 +439,51 @@ export function prefValue(id: string, raw: unknown, now: Record<string, Pref>): 
   return now[id]!.options?.some((o) => o.value === raw) ? raw : undefined;
 }
 
-/** What a file holds, for the browser's player: read from `ffprobe -show_format -show_streams` */
+/** An address on the network instead of a file of this server */
+export const isLink = (path: string): boolean => /^https?:\/\//i.test(path);
+
+/** An address a player may be sent to: http or https, whole, nothing a program could read as two arguments */
+export function cleanLink(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const text = raw.trim();
+  if (!text || text.length > 2000 || /[\s\x00-\x1f\x7f]/.test(text) || !isLink(text)) return null;
+  try {
+    const url = new URL(text);
+    return url.hostname ? url.href : null;
+  } catch {
+    return null;
+  }
+}
+
+/** An address as the log and a title may show it: where it leads, without a sign-in or what follows the "?" (keys live there) */
+export function linkName(link: string): string {
+  try {
+    const url = new URL(link);
+    let path = url.pathname;
+    try {
+      path = decodeURIComponent(path);
+    } catch {}
+    return (url.host + (path === "/" ? "" : path)).replace(/[\x00-\x1f]/g, "").slice(0, 200);
+  } catch {
+    return "";
+  }
+}
+
+/**
+ * How the programs open a source. For an address: only the web's own protocols — a playlist from the
+ * network may name anything, a file of this server too, and would be read without this — and an end
+ * to waiting for a server that went silent.
+ */
+export const sourceArgs = (path: string): string[] => [...(isLink(path) ? ["-protocol_whitelist", "http,https,tcp,tls,crypto", "-rw_timeout", "20000000"] : []), "-i", path];
+
+/** The number subtitles given by an address of their own go by among a source's subtitles */
+export const OUTSIDE_SUB = 1000;
+
+/** What a file holds, for the browser's player: read from `ffprobe -show_format -show_streams -show_programs` */
 export interface Media {
   duration: number;
-  video: { codec: string; width: number; height: number } | null;
+  /** `n` — which of the source's pictures: a stream from the network often carries the same film in several sizes, the largest is taken */
+  video: { codec: string; width: number; height: number; n: number } | null;
   audio: Track[];
   /** `text` — written as text, so a browser can show it; pictures (discs' subtitles) it cannot */
   subs: (Track & { text: boolean })[];
@@ -451,25 +492,39 @@ export interface Media {
 const TEXT_SUBS = new Set(["subrip", "srt", "ass", "ssa", "webvtt", "mov_text", "text"]);
 
 export function mediaOf(probe: unknown): Media {
-  const said = (probe ?? {}) as { format?: { duration?: unknown }; streams?: Record<string, unknown>[] };
+  const said = (probe ?? {}) as { format?: { duration?: unknown }; streams?: Record<string, unknown>[]; programs?: { streams?: Record<string, unknown>[] }[] };
   const streams = Array.isArray(said.streams) ? said.streams : [];
-  const of = (type: string) => streams.filter((one) => one?.codec_type === type && (one.disposition as Record<string, unknown> | undefined)?.attached_pic !== 1);
+  // the programs count a stream among all of its kind, cover pictures too: "0:a:1" is the second sound whatever is shown
+  const kind = (type: string) => streams.filter((one) => one?.codec_type === type).map((one, n) => ({ one, n }));
+  const shown = (type: string) => kind(type).filter(({ one }) => (one.disposition as Record<string, unknown> | undefined)?.attached_pic !== 1);
+  const size = (one: Record<string, unknown>) => (Number(one.width) || 0) * (Number(one.height) || 0);
+  const picture = shown("video").reduce<{ one: Record<string, unknown>; n: number } | null>((best, next) => (!best || size(next.one) > size(best.one) ? next : best), null);
+  // several sizes of one film come as programs, each with a sound of its own: the sound of the picture taken is the one offered
+  const programs = Array.isArray(said.programs) ? said.programs.map((program) => new Set((program?.streams ?? []).map((one) => one?.index))) : [];
+  const mine = picture ? programs.find((program) => program.has(picture.one.index)) : undefined;
+  const beside = (type: string) => {
+    const all = shown(type);
+    const own = mine && programs.length > 1 ? all.filter(({ one }) => mine.has(one.index)) : [];
+    return own.length ? own : all;
+  };
   const named = (one: Record<string, unknown>, index: number): Track => {
     const tags = (one.tags ?? {}) as Record<string, unknown>;
     const tag = (name: string) => String(tags[name] ?? tags[name.toUpperCase()] ?? "").replace(/[\x00-\x1f]/g, "");
     return { index, language: tag("language").slice(0, 12), name: tag("title").slice(0, 120), codec: String(one.codec_name ?? "").slice(0, 20), ...(Number(one.channels) > 0 ? { channels: Number(one.channels) } : {}) };
   };
-  const video = of("video")[0];
   return {
     duration: Number(said.format?.duration) || 0,
-    video: video ? { codec: String(video.codec_name ?? ""), width: Number(video.width) || 0, height: Number(video.height) || 0 } : null,
-    audio: of("audio").map(named),
-    subs: of("subtitle").map((one, index) => ({ ...named(one, index), text: TEXT_SUBS.has(String(one.codec_name)) })),
+    video: picture ? { codec: String(picture.one.codec_name ?? ""), width: Number(picture.one.width) || 0, height: Number(picture.one.height) || 0, n: picture.n } : null,
+    audio: beside("audio").map(({ one, n }) => named(one, n)),
+    subs: beside("subtitle").map(({ one, n }) => ({ ...named(one, n), text: TEXT_SUBS.has(String(one.codec_name)) })),
   };
 }
 
 /** Asks where the picture can start at or before a moment: a copied video starts only at a whole frame of its own */
-export const keyframeArgs = (path: string, at: number): string[] => ["ffprobe", "-v", "error", "-select_streams", "v:0", "-read_intervals", `${at.toFixed(3)}%+#1`, "-show_entries", "packet=pts_time", "-of", "csv=p=0", path];
+export const keyframeArgs = (path: string, at: number, video = 0): string[] => ["ffprobe", "-v", "error", "-select_streams", `v:${video}`, "-read_intervals", `${at.toFixed(3)}%+#1`, "-show_entries", "packet=pts_time", "-of", "csv=p=0", ...sourceArgs(path)];
+
+/** Asks what a source holds */
+export const probeArgs = (path: string): string[] => ["ffprobe", "-v", "error", "-print_format", "json", "-show_format", "-show_streams", "-show_programs", ...sourceArgs(path)];
 
 /**
  * How much earlier than its picture a stream's sound begins, seconds: silence, so that the sound has
@@ -487,11 +542,11 @@ const PAST_KEYFRAME = 0.14;
  * picture: found live — without that the picture began up to a whole gap between keyframes earlier
  * than the page counted, and the sound ran ahead.
  */
-export function streamArgs(path: string, start: string, audio: number): string[] {
+export function streamArgs(path: string, start: string, audio: number, video = 0): string[] {
   const from = Number(start);
   const seek = from > 0 ? ["-ss", (from + PAST_KEYFRAME).toFixed(3)] : [];
   const lead = Math.round(((from > 0 ? PAST_KEYFRAME : 0) + STREAM_LEAD) * 48000);
-  return ["ffmpeg", "-v", "error", "-nostdin", ...seek, "-i", path, "-map", "0:v:0", "-map", `0:a:${audio}?`, "-c:v", "copy", "-c:a", "aac", "-ac", "2", "-ar", "48000", "-b:a", "192k", "-af", `aresample=async=1:first_pts=-${lead}`, "-movflags", "frag_keyframe+empty_moov+default_base_moof", "-f", "mp4", "pipe:1"];
+  return ["ffmpeg", "-v", "error", "-nostdin", ...seek, ...sourceArgs(path), "-map", `0:v:${video}`, "-map", `0:a:${audio}?`, "-c:v", "copy", "-c:a", "aac", "-ac", "2", "-ar", "48000", "-b:a", "192k", "-af", `aresample=async=1:first_pts=-${lead}`, "-movflags", "frag_keyframe+empty_moov+default_base_moof", "-f", "mp4", "pipe:1"];
 }
 
 /**
@@ -505,7 +560,7 @@ export const streamZero = (start: string): number => Number(start) - STREAM_LEAD
  * FILE'S OWN TIMES (`-copyts`): left to itself ffmpeg counts them from the first line it happens to
  * find, so the page places each line by the stream's clock itself.
  */
-export const subsArgs = (path: string, start: string, index: number): string[] => ["ffmpeg", "-v", "error", "-nostdin", ...(Number(start) > 5 ? ["-ss", (Number(start) - 5).toFixed(3)] : []), "-copyts", "-i", path, "-map", `0:s:${index}`, "-f", "webvtt", "pipe:1"];
+export const subsArgs = (path: string, start: string, index: number): string[] => ["ffmpeg", "-v", "error", "-nostdin", ...(Number(start) > 5 ? ["-ss", (Number(start) - 5).toFixed(3)] : []), "-copyts", ...sourceArgs(path), "-map", `0:s:${index}`, "-f", "webvtt", "pipe:1"];
 
 /** A moment of a file as the programs take it: seconds with a fraction, nothing else */
 export const cleanStart = (raw: unknown): string | null => (typeof raw === "string" && /^\d{1,6}(\.\d{1,6})?$/.test(raw) ? raw : null);

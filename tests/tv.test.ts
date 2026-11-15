@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { streamZero, cleanStart, keyframeArgs, mediaOf, prefsOf, prefValue, streamArgs, subsArgs, tracksOf, clickPacket, helloPacket, KEEP_WINDOW, KEEP_YES, pictureOf, advancedXml, cleanFolders, shortTitle, hwdbText, keymapXml, polkitRule, decodePackages, isOurs, monitorAudio, monitorName, playable, portIn, readDisplay, remoteCall, seconds, sourcesXml, takeJson, unitText } from "../src/tv";
+import { cleanLink, isLink, linkName, probeArgs, sourceArgs, streamZero, cleanStart, keyframeArgs, mediaOf, prefsOf, prefValue, streamArgs, subsArgs, tracksOf, clickPacket, helloPacket, KEEP_WINDOW, KEEP_YES, pictureOf, advancedXml, cleanFolders, shortTitle, hwdbText, keymapXml, polkitRule, decodePackages, isOurs, monitorAudio, monitorName, playable, portIn, readDisplay, remoteCall, seconds, sourcesXml, takeJson, unitText } from "../src/tv";
 
 function edid(name: string, audio: boolean): Uint8Array {
   const data = new Uint8Array(256);
@@ -200,7 +200,7 @@ test("a file read for the browser's player, and the programs' arguments", () => 
     ],
   });
   expect(media.duration).toBe(8700.5);
-  expect(media.video).toEqual({ codec: "h264", width: 1920, height: 1012 });
+  expect(media.video).toEqual({ codec: "h264", width: 1920, height: 1012, n: 0 });
   expect(media.audio).toEqual([{ index: 0, language: "ukr", name: "DUB", codec: "ac3", channels: 6 }, { index: 1, language: "eng", name: "", codec: "aac", channels: 2 }]);
   expect(media.subs.map((one) => [one.index, one.text])).toEqual([[0, true], [1, false]]);
   expect(mediaOf(null)).toEqual({ duration: 0, video: null, audio: [], subs: [] });
@@ -217,4 +217,35 @@ test("a file read for the browser's player, and the programs' arguments", () => 
   expect(cleanStart("-1")).toBeNull();
   expect(cleanStart("1e5")).toBeNull();
   expect(cleanStart(5)).toBeNull();
+});
+
+test("an address instead of a file: what is let through, how it is named, how the programs open it", () => {
+  expect(cleanLink(" https://example.com/a/film.m3u8?key=1 ")).toBe("https://example.com/a/film.m3u8?key=1");
+  expect(cleanLink("http://192.168.1.5:8080/live")).toBe("http://192.168.1.5:8080/live");
+  for (const bad of ["", "/etc/passwd", "file:///etc/passwd", "ftp://example.com/a.mp4", "concat:a|b", "-i", "https://", "https://exa mple.com/a", "https://example.com/a\nb", "javascript:alert(1)", 5, null, "https://example.com/" + "a".repeat(2000)]) expect(cleanLink(bad)).toBeNull();
+  expect(isLink("HTTPS://example.com/a")).toBe(true);
+  expect(isLink("/DATA/a.mkv")).toBe(false);
+  // neither a sign-in nor a key goes into the log or a title
+  expect(linkName("https://user:secret@example.com/video/My%20Film.m3u8?token=abc#x")).toBe("example.com/video/My Film.m3u8");
+  expect(linkName("https://example.com/")).toBe("example.com");
+  expect(linkName("nothing")).toBe("");
+  // a playlist from the network may name a file of this server: only the web's protocols are opened
+  expect(sourceArgs("https://example.com/a.m3u8")).toEqual(["-protocol_whitelist", "http,https,tcp,tls,crypto", "-rw_timeout", "20000000", "-i", "https://example.com/a.m3u8"]);
+  expect(sourceArgs("/DATA/a.mkv")).toEqual(["-i", "/DATA/a.mkv"]);
+  expect(probeArgs("https://example.com/a.m3u8").join(" ")).toContain("-show_programs -protocol_whitelist http,https,tcp,tls,crypto");
+  expect(streamArgs("https://example.com/a.m3u8", "0", 2, 1).join(" ")).toContain("-i https://example.com/a.m3u8 -map 0:v:1 -map 0:a:2? -c:v copy");
+  expect(subsArgs("https://example.com/a.vtt", "0", 0).join(" ")).toContain("-protocol_whitelist http,https,tcp,tls,crypto");
+  expect(keyframeArgs("/f.mkv", 5, 2)).toContain("v:2");
+});
+
+test("a film that comes in several sizes: the largest picture and the sound that goes with it", () => {
+  const stream = (index: number, type: string, more: Record<string, unknown> = {}) => ({ index, codec_type: type, codec_name: type === "video" ? "h264" : "aac", ...more });
+  const streams = [stream(0, "video", { width: 854, height: 480 }), stream(1, "audio", { channels: 2 }), stream(2, "video", { width: 1920, height: 1080 }), stream(3, "audio", { channels: 2 }), stream(4, "video", { width: 1280, height: 720 }), stream(5, "audio", { channels: 2 })];
+  const media = mediaOf({ format: { duration: "100" }, streams, programs: [{ streams: [streams[0], streams[1]] }, { streams: [streams[2], streams[3]] }, { streams: [streams[4], streams[5]] }] });
+  expect(media.video).toEqual({ codec: "h264", width: 1920, height: 1080, n: 1 });
+  expect(media.audio.map((one) => one.index)).toEqual([1]);
+  // one program, or none: every sound is offered, counted as the programs count it
+  expect(mediaOf({ streams, programs: [{ streams }] }).audio.map((one) => one.index)).toEqual([0, 1, 2]);
+  // a cover picture in front of the film is not the film
+  expect(mediaOf({ streams: [{ codec_type: "video", codec_name: "mjpeg", width: 3000, height: 3000, disposition: { attached_pic: 1 } }, stream(1, "video", { width: 640, height: 360 })] }).video?.n).toBe(1);
 });

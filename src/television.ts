@@ -12,7 +12,7 @@ import { AppError, startJob, type Job } from "./apps";
 import { bus } from "./bus";
 import { saveSettings, settings } from "./config";
 import { installCommand, packageManager, PATH, run, runLogged } from "./packages";
-import { advancedXml, builtinPacket, cleanFolders, cleanStart, clickPacket, keyframeArgs, mediaOf, prefsOf, prefValue, streamArgs, subsArgs, tracksOf, streamZero, TV_LANGUAGES, type Media, type Pref, type Tracks, helloPacket, KEEP_NO, KEEP_SECONDS, KEEP_WINDOW, KEEP_YES, MATCH_OFF, MATCH_ON, pictureOf, decodePackages, isOurs, playable, portIn, readDisplay, hwdbText, keymapXml, polkitRule, remoteCall, seconds, shortTitle, sourcesXml, takeJson, TV_HOME, TV_HWDB, TV_POLKIT, TV_PORT, TV_UNIT, TV_USER, unitText, type Call, type Display, type Picture } from "./tv";
+import { advancedXml, builtinPacket, cleanFolders, cleanLink, cleanStart, clickPacket, isLink, keyframeArgs, linkName, mediaOf, OUTSIDE_SUB, probeArgs, prefsOf, prefValue, streamArgs, subsArgs, tracksOf, streamZero, TV_LANGUAGES, type Media, type Pref, type Tracks, helloPacket, KEEP_NO, KEEP_SECONDS, KEEP_WINDOW, KEEP_YES, MATCH_OFF, MATCH_ON, pictureOf, decodePackages, isOurs, playable, portIn, readDisplay, hwdbText, keymapXml, polkitRule, remoteCall, seconds, shortTitle, sourcesXml, takeJson, TV_HOME, TV_HWDB, TV_POLKIT, TV_PORT, TV_UNIT, TV_USER, unitText, type Call, type Display, type Picture } from "./tv";
 
 const USERDATA = join(TV_HOME, ".kodi", "userdata");
 const UNIT_FILE = "/etc/systemd/system/" + TV_UNIT;
@@ -108,6 +108,8 @@ export const tvSetUp = (): boolean => existsSync(UNIT_FILE);
 interface Playing extends Tracks {
   title: string;
   file: string;
+  /** An address played with subtitles of an address of their own: kept so that a browser taking the film over has them too */
+  outside?: string;
   paused: boolean;
   time: number;
   total: number;
@@ -158,7 +160,10 @@ async function nowPlaying(): Promise<{ player: number | null; playing: Playing |
   const [props, item] = (await Promise.all([rpc({ method: "Player.GetProperties", params: { playerid: player, properties: ["time", "totaltime", "speed", "audiostreams", "currentaudiostream", "subtitles", "currentsubtitle", "subtitleenabled"] } }), rpc({ method: "Player.GetItem", params: { playerid: player, properties: ["title", "file"] } })])) as [Record<string, unknown> | null, { item?: Record<string, unknown> } | null];
   if (!props) return { player, playing: null };
   const file = String(item?.item?.file ?? "");
-  return { player, playing: { title: shortTitle(String(item?.item?.title || item?.item?.label || file.split("/").pop() || "")), file, paused: props.speed === 0, time: seconds(props.time), total: seconds(props.totaltime), ...tracksOf(props) } };
+  const link = isLink(file);
+  // an address says little as a title, and may carry a key: where it leads is shown
+  const title = link ? String(item?.item?.title || "") || linkName(file) : shortTitle(String(item?.item?.title || item?.item?.label || file.split("/").pop() || ""));
+  return { player, playing: { title, file, ...(link && sent?.link === file && sent.subtitle ? { outside: sent.subtitle } : {}), paused: props.speed === 0, time: seconds(props.time), total: seconds(props.totaltime), ...tracksOf(props) } };
 }
 
 async function audioChoice(): Promise<TvReport["audio"]> {
@@ -493,20 +498,42 @@ export async function keepPicture(keep: boolean): Promise<TvReport> {
   return tvReport();
 }
 
-/** Plays a file of this server on the screen */
-export async function playOnTv(path: unknown, by: string, from?: unknown): Promise<void> {
-  if (typeof path !== "string" || !path.startsWith("/") || !playable(path)) throw new AppError("tv.notPlayable", 400);
-  let file = false;
+/** The address last sent to the screen, with the subtitles given for it */
+let sent: { link: string; subtitle: string } | null = null;
+
+/** Gives the film that starts on the screen subtitles from an address of their own, once the player has it */
+async function addSubtitle(link: string, subtitle: string): Promise<void> {
+  for (let tries = 0; tries < 20; tries++) {
+    await Bun.sleep(1000);
+    if (sent?.link !== link) return;
+    const { player, playing } = await nowPlaying();
+    if (player === null || playing?.file !== link) continue;
+    await rpc({ method: "Player.AddSubtitle", params: { playerid: player, subtitle } }, 8000);
+    return;
+  }
+}
+
+/** Plays a file of this server, or an address on the network, on the screen */
+export async function playOnTv(raw: unknown, by: string, from?: unknown, subs?: unknown): Promise<void> {
+  const link = typeof raw === "string" && !raw.startsWith("/");
+  const path = link ? cleanLink(raw) : raw;
+  if (link && !path) throw new AppError("tv.badLink", 400);
+  const subtitle = link && subs ? cleanLink(subs) : "";
+  if (subtitle === null) throw new AppError("tv.badLink", 400);
+  if (typeof path !== "string" || (!link && !playable(path))) throw new AppError("tv.notPlayable", 400);
+  let file = link;
   try {
-    file = statSync(path).isFile();
+    file ||= statSync(path).isFile();
   } catch {}
   if (!file) throw new AppError("tv.noFile", 404);
   if ((await rpc({ method: "JSONRPC.Ping" }, 2000)) !== "pong") throw new AppError("tv.notRunning", 409);
   // carried over from a browser: it goes on from where it was watched to
   const at = typeof from === "number" && Number.isFinite(from) && from >= 1 ? Math.floor(from) : 0;
   const resume = at ? { options: { resume: { hours: Math.floor(at / 3600), minutes: Math.floor((at % 3600) / 60), seconds: at % 60, milliseconds: 0 } } } : {};
-  if ((await rpc({ method: "Player.Open", params: { item: { file: path }, ...resume } }, 8000)) !== "OK") throw new AppError("tv.playFailed", 409);
-  record("tv.play", { user: by, detail: path });
+  if ((await rpc({ method: "Player.Open", params: { item: { file: path }, ...resume } }, link ? 25_000 : 8000)) !== "OK") throw new AppError(link ? "tv.linkFailed" : "tv.playFailed", 409);
+  sent = link ? { link: path, subtitle: subtitle ?? "" } : null;
+  if (link && subtitle) void addSubtitle(path, subtitle).catch(() => {});
+  record("tv.play", { user: by, detail: link ? linkName(path) : path });
   bus.publish("tv");
 }
 
@@ -598,8 +625,13 @@ export async function remote(action: unknown, value: unknown): Promise<void> {
 const probed = new Map<string, Media>();
 
 async function fileFor(path: unknown): Promise<string> {
-  if (typeof path !== "string" || !path.startsWith("/") || /[\0\n]/.test(path)) throw new AppError("tv.noFile", 404);
   if (!streamsHere()) throw new AppError("tv.noStreams", 409);
+  if (typeof path === "string" && !path.startsWith("/")) {
+    const link = cleanLink(path);
+    if (!link) throw new AppError("tv.badLink", 400);
+    return link;
+  }
+  if (typeof path !== "string" || /[\0\n]/.test(path)) throw new AppError("tv.noFile", 404);
   let file = false;
   try {
     file = statSync(path).isFile();
@@ -612,20 +644,31 @@ async function fileFor(path: unknown): Promise<string> {
  * What a file holds — its length, sound tracks and subtitles — and, for a moment asked, where the
  * picture can really start (`start`, a keyframe) and where the clock of the stream from there begins (`zero`).
  */
-export async function mediaInfo(raw: unknown, at: number): Promise<Media & { start: string; zero: number }> {
-  const path = await fileFor(raw);
-  const key = `${path}\n${statSync(path).mtimeMs}`;
+async function held(path: string): Promise<Media> {
+  const key = isLink(path) ? path : `${path}\n${statSync(path).mtimeMs}`;
   let media = probed.get(key);
   if (!media) {
-    const said = await run(["ffprobe", "-v", "error", "-print_format", "json", "-show_format", "-show_streams", path], 30_000);
-    if (said.code !== 0) throw new AppError("tv.notMedia", 409);
+    const said = await run(probeArgs(path), 30_000);
+    if (said.code !== 0) throw new AppError(isLink(path) ? "tv.linkNotMedia" : "tv.notMedia", 409);
     media = mediaOf(JSON.parse(said.out || "{}"));
+    if (isLink(path) && !media.video && !media.audio.length) throw new AppError("tv.linkNotMedia", 409);
     if (probed.size > 50) probed.clear();
     probed.set(key, media);
   }
+  return media;
+}
+
+export async function mediaInfo(raw: unknown, at: number, subs?: unknown): Promise<Media & { start: string; zero: number }> {
+  const path = await fileFor(raw);
+  let media = await held(path);
+  if (subs) {
+    if (!cleanLink(subs)) throw new AppError("tv.badLink", 400);
+    media = { ...media, subs: [...media.subs, { index: OUTSIDE_SUB, language: "", name: "", codec: "", text: true }] };
+  }
   let start = "0";
-  if (at > 0.5 && media.video) {
-    const found = (await run(keyframeArgs(path, at), 20_000)).out.split("\n").map((line) => line.trim().replace(/,+$/, "")).find((line) => cleanStart(line));
+  // a broadcast has no length and no earlier moment to go to
+  if (at > 0.5 && media.video && media.duration > 0) {
+    const found = (await run(keyframeArgs(path, at, media.video.n), 20_000)).out.split("\n").map((line) => line.trim().replace(/,+$/, "")).find((line) => cleanStart(line));
     start = found ?? at.toFixed(3);
   }
   // `zero` — the moment of the file the stream's own clock starts at
@@ -669,13 +712,19 @@ export async function mediaStream(raw: unknown, start: unknown, audio: number, s
   const path = await fileFor(raw);
   const from = cleanStart(start);
   if (from === null || !Number.isInteger(audio) || audio < 0 || audio > 99) throw new AppError("tv.badSetting", 400);
-  return piped(streamArgs(path, from, audio), "video/mp4", signal);
+  return piped(streamArgs(path, from, audio, (await held(path)).video?.n ?? 0), "video/mp4", signal);
 }
 
 /** One of the file's subtitles from the same moment on */
-export async function mediaSubs(raw: unknown, start: unknown, index: number, signal: AbortSignal): Promise<Response> {
+export async function mediaSubs(raw: unknown, start: unknown, index: number, signal: AbortSignal, subs?: unknown): Promise<Response> {
   const path = await fileFor(raw);
   const from = cleanStart(start);
+  if (index === OUTSIDE_SUB) {
+    // subtitles of an address of their own: a whole small file, read from its start
+    const link = cleanLink(subs);
+    if (from === null || !link) throw new AppError("tv.badLink", 400);
+    return piped(subsArgs(link, "0", 0), "text/vtt; charset=utf-8", signal);
+  }
   if (from === null || !Number.isInteger(index) || index < 0 || index > 199) throw new AppError("tv.badSetting", 400);
   return piped(subsArgs(path, from, index), "text/vtt; charset=utf-8", signal);
 }

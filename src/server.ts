@@ -1531,16 +1531,16 @@ async function api(req: Request, url: URL, server: Server<unknown>): Promise<Res
     return fail(400, "tv.badAction");
   }
   // the browser's own player (not the TV module's: Files plays with it whether the TV is on or not): what the file holds, the file as a browser plays it, a subtitle of it
-  if (path === "/api/media" && method === "GET") return json(await tvMediaInfo(url.searchParams.get("path"), Number(url.searchParams.get("at")) || 0));
+  if (path === "/api/media" && method === "GET") return json(await tvMediaInfo(url.searchParams.get("path"), Number(url.searchParams.get("at")) || 0, url.searchParams.get("subs")));
   if ((path === "/api/media/stream" || path === "/api/media/subs") && method === "GET") {
     server.timeout(req, 0);
     const [file, start, n] = [url.searchParams.get("path"), url.searchParams.get("start"), Number(url.searchParams.get("n") ?? "0")];
-    return path.endsWith("stream") ? await tvMediaStream(file, start, n, req.signal) : await tvMediaSubs(file, start, n, req.signal);
+    return path.endsWith("stream") ? await tvMediaStream(file, start, n, req.signal) : await tvMediaSubs(file, start, n, req.signal, url.searchParams.get("subs"));
   }
   if (path === "/api/tv/keep" && method === "POST") return json(await keepTvPicture((await body(req)).keep === true));
   if (path === "/api/tv/play" && method === "POST") {
     const data = await body(req);
-    await playOnTv(data.path, user.name, data.at);
+    await playOnTv(data.path, user.name, data.at, data.subtitle);
     return json({ ok: true });
   }
   if (path === "/api/tv/do" && method === "POST") {
