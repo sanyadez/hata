@@ -5351,7 +5351,7 @@
   "tv.screen": "Screen",
   "tv.screenSound": "plays sound",
   "tv.screenSilent": "no sound",
-  "tv.noScreen": "No screen is plugged in. The server has outputs for one; plug in a TV or a monitor.",
+  "tv.noScreen": "Hata sees no TV or monitor on any output. Check the cable and that the TV is on the right input.",
   "tv.noOutput": "This server has no output for a screen (a virtual machine or a container often has none).",
   "tv.remotes": "Plugged in",
   "tv.remotesHint": "A keyboard, a mouse or a remote plugged into the server drives the player by itself. For remotes made for Android boxes Hata tells the system to read their OK and menu buttons as the keys Kodi knows. The power and sleep buttons of plugged-in keyboards and remotes do nothing while this is set up: the system would shut the whole server down for them. A TV's own remote works only where the server's HDMI passes its buttons on; most small computers do not.",
@@ -5424,5 +5424,9 @@
   "tv.key.up": "Up",
   "tv.key.down": "Down",
   "tv.key.left": "Left",
-  "tv.key.right": "Right"
+  "tv.key.right": "Right",
+  "tv.noScreenTitle": "No screen is plugged in",
+  "tv.lookAgain": "Look again",
+  "tv.afterTitle": "After the install this page gets",
+  "tv.afterList": "the remote · the player's switch · the folders for Kodi · where the sound goes"
 }

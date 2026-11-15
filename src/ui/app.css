@@ -1889,19 +1889,38 @@ body.has-jobs #view:not(.fill) { padding-bottom: calc(var(--jobs-h, 0px) + 48px)
 .tv-now-half { display: flex; align-items: center; gap: 8px; min-width: 36px; padding: 0 10px; border: 0; background: none; color: inherit; font: 600 13px var(--font-body); cursor: pointer; }
 .tv-now-half + .tv-now-half { border-left: 1px solid color-mix(in srgb, currentColor 35%, transparent); }
 .tv-now-half .ico { width: 16px; height: 16px; flex: none; }
-.tv-now-open .ico:last-child { width: 14px; height: 14px; transform: rotate(90deg); }
-.tv-now-half .clip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 20ch; }
+.tv-now-half .clip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 12ch; font-size: 12px; }
 dialog.dropdown.tv-drop { width: min(calc(100vw - 16px), 368px); max-height: calc(100dvh - 16px); overflow-y: auto; border-radius: 16px; }
 dialog.dropdown.tv-drop[open] { padding: 18px 20px 20px; display: grid; gap: 14px; }
+.tv-now { height: 32px; border-radius: 16px; }
+.tv-now-half { min-width: 32px; padding: 0 8px; gap: 6px; }
+#tv-mini { display: none; }
 @media (max-width: 1500px) {
-  .tv-now-half .clip, .tv-now-open .ico:last-child { display: none; }
+  .tv-now-half .clip { display: none; }
 }
 @media (max-width: 900px) {
   .tv-page { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 760px) {
-  .tv-now { height: 44px; border-radius: 22px; }
-  .tv-now-half { min-width: 48px; justify-content: center; }
+  .tv-now { height: 40px; border-radius: 20px; }
+  .tv-now-half { min-width: 40px; justify-content: center; }
+  /* while something plays the strip below has the pause: the head keeps nothing */
+  .tv-now.playing { display: none; }
+  #tv-mini { position: fixed; left: 12px; right: 12px; bottom: calc(max(12px, env(safe-area-inset-bottom)) + 68px); z-index: 7; display: flex; align-items: center; gap: 10px; padding: 8px 10px 8px 14px; border-radius: 18px; border: 1px solid var(--border-strong); background: color-mix(in srgb, var(--surface) 94%, transparent); backdrop-filter: blur(14px); box-shadow: 0 8px 26px rgb(0 0 0 / 22%); overflow: hidden; }
+  .tv-mini-bar { position: absolute; left: 0; right: 0; top: 0; height: 2px; background: var(--border); }
+  .tv-mini-bar i { display: block; height: 100%; background: var(--accent); }
+  .tv-mini-open { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; padding: 0; border: 0; background: none; color: var(--text); font: inherit; text-align: left; cursor: pointer; }
+  .tv-mini-open .ico { flex: none; color: var(--accent-text); }
+  .tv-mini-open .grow { display: grid; min-width: 0; }
+  .tv-mini-open .clip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; }
+  .tv-mini-time { font: 12px var(--font-mono, monospace); }
+  #tv-mini .tvr-round.skip { width: 48px; height: 48px; }
+  #tv-mini .tvr-main { width: 48px; height: 48px; flex: none; }
+  #tv-mini .tvr-main .ico { width: 22px; height: 22px; }
+  /* what floats over the bottom bar moves up to make room */
+  body.tv-mini-on .assistant-fab { bottom: calc(max(12px, env(safe-area-inset-bottom)) + 144px); }
+  body.tv-mini-on #job-tray { bottom: calc(max(12px, env(safe-area-inset-bottom)) + 144px); }
+  body.tv-mini-on #view:not(.fill) { padding-bottom: 224px; }
   /* on a phone the remote comes up from the bottom, under the thumb */
   dialog.dropdown.tv-drop { left: 0 !important; right: 0 !important; top: auto !important; bottom: 0; width: 100vw; max-width: none; max-height: calc(100dvh - 100px); border-radius: 20px 20px 0 0; }
   dialog.dropdown.tv-drop[open] { padding: 22px 24px calc(20px + env(safe-area-inset-bottom)); }
@@ -1909,3 +1928,5 @@ dialog.dropdown.tv-drop[open] { padding: 18px 20px 20px; display: grid; gap: 14p
   dialog.dropdown.tv-drop .tvr { --pad: 216px; --main: 76px; }
   .tvr-round { width: 48px; height: 48px; }
 }
+.tvr-note.warn { background: var(--warn-soft); }
+.tv-after { background: none; border-style: dashed; box-shadow: none; }

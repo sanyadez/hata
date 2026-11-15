@@ -12617,7 +12617,7 @@ function settingsNav(section) {
 
 /** What the player plays, by the file's name: the same list the server goes by */
 const TV_PLAYS_RE = /\.(mkv|mp4|m4v|avi|mov|webm|ts|m2ts|mpg|mpeg|wmv|flv|ogv|3gp|iso|mp3|flac|m4a|ogg|opus|wav|aac|wma|jpe?g|png|gif|webp|bmp|heic)$/i;
-const tvUi = { timer: 0, busy: false };
+const tvUi = { timer: 0, busy: false, tick: 0 };
 
 /** What plays on the server's screen, in the head of every page: pause from anywhere, a click leads to the remote */
 function paintTvNow() {
@@ -12632,8 +12632,43 @@ function paintTvNow() {
   // the left half pauses with one touch, the right one opens the remote; with nothing playing only the remote is left
   box.replaceChildren(
     now && h("button", { type: "button", class: "tv-now-half", title: t("tv.key.playpause"), "aria-label": t("tv.key.playpause"), onclick: () => api("POST", "/api/tv/do", { action: "playpause" }).catch((e) => toast(errorText(e), "error")) }, icon(now.paused ? "play" : "pause")),
-    h("button", { type: "button", class: "tv-now-half tv-now-open", title: label, "aria-label": label, "aria-haspopup": "dialog", onclick: () => tvDropdown(box) }, icon("tv"), now && h("span", { class: "clip" }, now.title), now && icon("chevron")),
+    h("button", { type: "button", class: "tv-now-half tv-now-open", title: label, "aria-label": label, "aria-haspopup": "dialog", onclick: () => tvDropdown(box) }, icon("tv"), now && h("span", { class: "clip" }, now.title)),
   );
+  paintTvMini(now);
+}
+
+/** Where what plays has got to by now: the page counts the seconds on from what the server last said */
+const tvTimeNow = (now) => Math.min(now.total || Infinity, now.time + (now.paused ? 0 : (Date.now() - now.at) / 1000));
+
+/**
+ * On a phone what plays is a strip over the bottom bar: pause sits under the thumb, a touch anywhere
+ * else on it brings the remote up. It is there only while something plays or is paused.
+ */
+function paintTvMini(now) {
+  let mini = document.getElementById("tv-mini");
+  clearInterval(tvUi.tick);
+  if (!now) {
+    mini?.remove();
+    return document.body.classList.remove("tv-mini-on");
+  }
+  if (!mini) document.body.append((mini = h("aside", { id: "tv-mini" })));
+  document.body.classList.add("tv-mini-on");
+  const bar = h("i");
+  const times = h("span", { class: "tv-mini-time muted" });
+  const tick = () => {
+    const at = tvTimeNow(now);
+    times.textContent = `${tvClock(at)} / ${tvClock(now.total)}`;
+    bar.style.width = now.total > 0 ? `${(at / now.total) * 100}%` : "0";
+  };
+  const press = (action) => (e) => (e.stopPropagation(), api("POST", "/api/tv/do", { action }).catch((err) => toast(errorText(err), "error")));
+  mini.replaceChildren(
+    h("div", { class: "tv-mini-bar" }, bar),
+    h("button", { type: "button", class: "tv-mini-open", "aria-label": t("tv.remote"), "aria-haspopup": "dialog", onclick: () => tvDropdown(mini) }, icon("tv"), h("span", { class: "grow" }, h("strong", { class: "clip" }, now.title), times)),
+    h("button", { type: "button", class: "tvr-round skip", title: t("tv.key.forward"), "aria-label": t("tv.key.forward"), onclick: press("forward") }, icon("fwd30"), h("span", null, "30")),
+    h("button", { type: "button", class: "tvr-main", title: t("tv.key.playpause"), "aria-label": t("tv.key.playpause"), onclick: press("playpause") }, icon(now.paused ? "play" : "pause")),
+  );
+  tick();
+  tvUi.tick = setInterval(tick, 1000);
 }
 
 async function playOnTv(path, name) {
@@ -12753,7 +12788,7 @@ function paintTv() {
     h("div", { class: "section-head" }, h("h2", null, t("tv.screen"))),
     screens.length
       ? screens.map((d) => h("div", { class: "kv" }, h("span", { class: "with-icon" }, icon("tv"), [d.monitor, d.name].filter(Boolean).join(" · ")), h("span", { class: "muted" }, [d.mode.replace("x", "×"), t(d.audio ? "tv.screenSound" : "tv.screenSilent")].filter(Boolean).join(" · "))))
-      : h("p", { class: "muted" }, t(tv.displays.length ? "tv.noScreen" : "tv.noOutput")),
+      : h("div", { class: "tvr-note warn" }, h("strong", { class: "with-icon" }, icon("tv"), t("tv.noScreenTitle")), h("p", { class: "muted small" }, t(tv.displays.length ? "tv.noScreen" : "tv.noOutput")), tv.displays.length > 0 && h("div", { class: "row-actions" }, button(t("tv.lookAgain"), { class: "small", onclick: () => void loadTv() }, "refresh"))),
     tv.remotes.length > 0 && h("div", { class: "kv" }, h("span", { class: "muted" }, t("tv.remotes")), h("span", null, tv.remotes.join(", "))),
     h("p", { class: "muted small" }, t("tv.remotesHint")),
   );
@@ -12773,7 +12808,9 @@ function paintTv() {
         }
       },
     }, "download");
-    return put(box, screenCard, h("section", { class: "card pad stack" }, h("div", { class: "section-head" }, h("h2", null, t("tv.needsTitle"))), h("p", { class: "muted" }, t("tv.needsLead")), tv.cannot ? h("p", { class: "muted small" }, t("tv.cannot." + tv.cannot)) : h("p", { class: "cmd" }, icon("terminal"), tv.install), error, h("div", { class: "row-actions" }, install)));
+    install.classList.add("wide");
+    const installCard = h("section", { class: "card pad stack" }, h("span", { class: "app-icon plus" }, icon("tv")), h("h2", null, t("tv.needsTitle")), h("p", { class: "muted" }, t("tv.needsLead")), install, tv.cannot ? h("p", { class: "muted small" }, t("tv.cannot." + tv.cannot)) : h("p", { class: "cmd" }, icon("terminal"), tv.install), error);
+    return put(box, h("div", { class: "tv-page" }, installCard, h("div", { class: "stack" }, screenCard, h("section", { class: "card pad tv-after" }, h("strong", { class: "block" }, t("tv.afterTitle")), h("span", { class: "muted small" }, t("tv.afterList"))))));
   }
 
   const flip = h("button", { type: "button", role: "switch", class: "ha-switch", "aria-checked": String(tv.on), "aria-label": t("tv.switch"), onclick: () => ((flip.disabled = true), void change({ on: !tv.on })) }, h("i"));
