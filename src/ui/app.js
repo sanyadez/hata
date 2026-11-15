@@ -451,6 +451,10 @@ function startEvents() {
         else if (state.route.view === "myhata") void loadMyHata();
       }, 1200);
     } else if (event.type === "tv") {
+      if ("playing" in event) {
+        state.tvNow = event.playing;
+        paintTvNow();
+      }
       if (state.route.view === "tv") void loadTv();
     } else if (event.type === "modules") {
       void loadModules().then(render);
@@ -506,6 +510,8 @@ async function refresh() {
   } catch {
     return;
   }
+  state.tvNow = state.overview.tv ?? null;
+  paintTvNow();
   seedJobs(state.overview.jobs ?? []);
   failedTiles(state.overview);
   if (state.route.view === "home") renderHomeBody();
@@ -1050,11 +1056,12 @@ function shell(...content) {
       { class: "top" },
       h("a", { class: "brand", href: "#/" }, logo(), "hata"),
       h("nav", { class: "nav" }, navLinks("nav-link")),
-      h("div", { class: "top-right" }, globalSearch(), isAdmin() && h("a", { class: "icon-btn top-tool" + (state.route.view === "terminal" ? " active" : ""), href: "#/terminal", title: t("terminal.title"), "aria-label": t("terminal.title") }, icon("terminal")), h("button", { type: "button", class: "user", onclick: userMenu }, h("span", { class: "avatar" }, state.user.name.slice(0, 1).toUpperCase()), h("span", { class: "user-name" }, state.user.name))),
+      h("div", { class: "top-right" }, globalSearch(), h("span", { id: "tv-now", class: "tv-now", hidden: true }), isAdmin() && h("a", { class: "icon-btn top-tool" + (state.route.view === "terminal" ? " active" : ""), href: "#/terminal", title: t("terminal.title"), "aria-label": t("terminal.title") }, icon("terminal")), h("button", { type: "button", class: "user", onclick: userMenu }, h("span", { class: "avatar" }, state.user.name.slice(0, 1).toUpperCase()), h("span", { class: "user-name" }, state.user.name))),
     ),
     h("main", { id: "view" }, state.user.mustTwoFactor && h("p", { class: "banner" }, t("twofa.mustLead"), " ", h("a", { class: "link", href: "#/settings/account" }, t("twofa.mustGo"))), content),
     h("nav", { class: "bottom-bar" }, bottomLinks()),
   );
+  paintTvNow();
 }
 
 function render() {
@@ -12606,6 +12613,20 @@ function settingsNav(section) {
 /** What the player plays, by the file's name: the same list the server goes by */
 const TV_PLAYS_RE = /\.(mkv|mp4|m4v|avi|mov|webm|ts|m2ts|mpg|mpeg|wmv|flv|ogv|3gp|iso|mp3|flac|m4a|ogg|opus|wav|aac|wma|jpe?g|png|gif|webp|bmp|heic)$/i;
 const tvUi = { timer: 0, busy: false };
+
+/** What plays on the server's screen, in the head of every page: pause from anywhere, a click leads to the remote */
+function paintTvNow() {
+  const box = document.getElementById("tv-now");
+  if (!box) return;
+  const now = isAdmin() && hasModule("tv") ? state.tvNow : null;
+  box.hidden = !now;
+  if (!now) return box.replaceChildren();
+  const label = t("tv.playing", { name: now.title });
+  box.replaceChildren(
+    h("button", { type: "button", class: "icon-btn", title: t("tv.key.playpause"), "aria-label": t("tv.key.playpause"), onclick: () => api("POST", "/api/tv/do", { action: "playpause" }).catch((e) => toast(errorText(e), "error")) }, icon(now.paused ? "play" : "pause")),
+    h("a", { class: "tv-now-title", href: "#/tv", title: label, "aria-label": label }, icon("tv"), h("span", { class: "clip" }, now.title)),
+  );
+}
 
 async function playOnTv(path, name) {
   try {

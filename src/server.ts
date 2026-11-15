@@ -112,7 +112,7 @@ import { mcpResponse } from "./mcp";
 import { instructions as mcpInstructions, tellHttps, TOOLS } from "./mcptools";
 import { moduleOn, modulesOn, modulesReport, setModule, settleModules, startModules } from "./moduleruns";
 import { findForModules } from "./modulefinds";
-import { installTv, playOnTv, remote as tvRemote, setAudio as setTvAudio, setFolders as setTvFolders, switchTv, tvReport } from "./television";
+import { installTv, playOnTv, remote as tvRemote, setAudio as setTvAudio, setFolders as setTvFolders, switchTv, tvNow, tvReport } from "./television";
 import { moduleOfPath, moduleOfTool } from "./modules";
 import { serverTree } from "./servertree";
 import { homeLinks, localNamesStatus, refreshLocalNames } from "./mdns";
@@ -1169,6 +1169,8 @@ async function api(req: Request, url: URL, server: Server<unknown>): Promise<Res
       site: { domain: siteDomain(), mode: settings.https.mode, local: localDomain() },
       // whether the assistant can be asked: the pages offer it next to what is wrong
       assistant: admin && assistantReady(assistantConfig()),
+      // what plays on the server's own screen, for the chip every page shows
+      tv: admin && moduleOn("tv") ? tvNow() : null,
       attention: admin ? notSnoozed(attention({ system, docker, apps, activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), exposed: exposedNics(), array: arrayTrouble(), shares: shareTrouble(), places: placesDown(), machines: awayMachines(), machineApps: onMachines, unused: unusedDisks(), filling: fillingUp(), pve: proxmoxTrouble(), ha: [...homeAssistantTrouble(), ...qbitTrouble(), ...frigateTrouble()], raid: poolsTrouble(), containers: containersTrouble(), dns: [...dnsTrouble(), ...blockTrouble(), ...wildcardTrouble()] })) : [],
       // how many items are put off: the list says so and leads to them
       attentionHidden: admin ? hiddenCount() : 0,

@@ -72,6 +72,7 @@ export function portIn(text: string): number | null {
 /**
  * The service: Kodi without a desktop, as its own user with a session of its own on a console of its
  * own — so the keyboard and the remote are the player's alone, and the system's consoles stay as they are.
+ * It comes back whatever ends it ("Exit" in Kodi's own menu too): only Hata's switch turns the player off.
  */
 export const unitText = (): string => `# Written by Hata: changes made here are lost
 [Unit]
@@ -92,8 +93,8 @@ Environment=HOME=${TV_HOME}
 ExecStartPre=+/usr/bin/chvt ${TV_CONSOLE}
 ExecStart=/usr/bin/kodi --standalone --windowing=gbm
 ExecStopPost=+/usr/bin/chvt 1
-Restart=on-failure
-RestartSec=5
+Restart=always
+RestartSec=3
 
 [Install]
 WantedBy=multi-user.target

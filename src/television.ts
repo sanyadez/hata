@@ -324,6 +324,58 @@ export async function playOnTv(path: unknown, by: string): Promise<void> {
   bus.publish("tv");
 }
 
+export interface TvNow extends Playing {
+  /** When this was read: the page counts the seconds on from here while it plays */
+  at: number;
+}
+
+let now: TvNow | null = null;
+let watching = false;
+
+/** What plays on the screen, as last heard from Kodi; null — nothing, or the player is off */
+export const tvNow = (): TvNow | null => now;
+
+function tell(next: TvNow | null): void {
+  const same = JSON.stringify(next && { ...next, at: 0, time: 0 }) === JSON.stringify(now && { ...now, at: 0, time: 0 });
+  // the same film a little further on is news only when it jumped: the page counts the seconds itself
+  const jumped = !!next && !!now && Math.abs(next.time - (now.time + (now.paused ? 0 : (next.at - now.at) / 1000))) > 3;
+  now = next;
+  if (!same || jumped) bus.publish("tv", { playing: next });
+}
+
+/**
+ * Listens to Kodi for as long as Hata runs: Kodi tells every program connected to its port what
+ * happens (started, paused, sought, stopped — also when the remote in the person's hand did it), so
+ * every page can show what is on the screen without asking again and again.
+ */
+export function watchTv(): void {
+  if (watching) return;
+  watching = true;
+  let timer: Timer | null = null;
+  const refresh = () => {
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(() => void nowPlaying().then(({ playing }) => tell(playing ? { ...playing, at: Date.now() } : null), () => {}), 300);
+  };
+  const listen = () => {
+    // not set up here: nothing to listen to, looked at again later
+    if (!tvSetUp()) return void setTimeout(listen, 30_000);
+    let buffer = "";
+    const socket = connect({ host: "127.0.0.1", port: controlPort() });
+    socket.once("connect", refresh);
+    socket.on("data", (piece) => {
+      const taken = takeJson(buffer + piece.toString("utf8"));
+      buffer = taken.rest.slice(-65536);
+      if ((taken.values as { method?: unknown }[]).some((value) => typeof value?.method === "string" && value.method.startsWith("Player."))) refresh();
+    });
+    socket.once("error", () => {});
+    socket.once("close", () => {
+      tell(null);
+      setTimeout(listen, 10_000);
+    });
+  };
+  listen();
+}
+
 /** A button of the page's remote */
 export async function remote(action: unknown, value: unknown): Promise<void> {
   const { player } = typeof action === "string" && /^(playpause|stop|forward|rewind|seek)$/.test(action) ? await nowPlaying() : { player: null };
