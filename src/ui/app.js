@@ -249,6 +249,56 @@ function openDialog(className, ...content) {
   return dialog;
 }
 
+/**
+ * A window that comes up from the bottom of a phone is closed by pulling it down: by the bar on its
+ * top from anywhere, by the rest of it while it is not scrolled. Pulled a little it springs back;
+ * pulled far, or flicked, it goes. A slider under the finger is the slider's.
+ */
+function pullToClose(dialog) {
+  let pull = null;
+  const settle = (to, then) => {
+    dialog.style.transition = "transform 0.18s ease-out";
+    dialog.style.transform = to;
+    setTimeout(() => ((dialog.style.transition = ""), then?.()), 190);
+  };
+  dialog.addEventListener("touchstart", (e) => {
+    pull = null;
+    if (!phone.matches || e.touches.length !== 1) return;
+    const touch = e.touches[0];
+    const top = touch.clientY - dialog.getBoundingClientRect().top < 64;
+    if (!top && (dialog.scrollTop > 0 || e.target.closest?.("input[type=range], select, textarea"))) return;
+    pull = { x: touch.clientX, y: touch.clientY, at: performance.now(), by: 0, on: false };
+  }, { passive: true });
+  dialog.addEventListener("touchmove", (e) => {
+    if (!pull) return;
+    const [dx, dy] = [e.touches[0].clientX - pull.x, e.touches[0].clientY - pull.y];
+    if (!pull.on) {
+      // sideways or upwards it is something else: a slider's neighbour, the window's own scroll
+      if (Math.abs(dx) > 10 || dy < -6) return void (pull = null);
+      if (dy < 10) return;
+      pull.on = true;
+      dialog.classList.add("pulled");
+    }
+    if (e.cancelable) e.preventDefault();
+    pull.by = Math.max(0, dy);
+    dialog.style.transform = `translateY(${pull.by}px)`;
+  }, { passive: false });
+  const end = (e) => {
+    const was = pull;
+    pull = null;
+    if (!was?.on) return;
+    // the finger let go over a button: that is not a press of it
+    const swallow = (click) => (click.stopPropagation(), click.preventDefault());
+    dialog.addEventListener("click", swallow, { capture: true, once: true });
+    setTimeout(() => (dialog.removeEventListener("click", swallow, { capture: true }), dialog.classList.remove("pulled")), 400);
+    const fast = was.by / Math.max(1, performance.now() - was.at) > 0.6 && was.by > 40;
+    if (e.type === "touchend" && (fast || was.by > Math.min(160, dialog.offsetHeight / 3))) settle("translateY(100%)", () => dialog.close());
+    else settle("");
+  };
+  dialog.addEventListener("touchend", end);
+  dialog.addEventListener("touchcancel", end);
+}
+
 /** Replaces what an element holds; like h(), it takes arrays and skips what is false or missing */
 const put = (el, ...children) => el.replaceChildren(...h("div", null, children).childNodes);
 
@@ -13126,8 +13176,8 @@ function tvDropdown(at) {
     if (!dialog.isConnected) return;
     try {
       const tv = (state.tv = await api("GET", "/api/tv"));
-      // a slider under the finger is not redrawn under it
-      if (!body.querySelector("input[type=range]:active") && !document.querySelector("dialog.select-list[open]")) put(body, tvRemoteParts(tv, press, turnOn));
+      // a slider under the finger is not redrawn under it, nor the window while it is pulled down
+      if (!body.querySelector("input[type=range]:active") && !document.querySelector("dialog.select-list[open]") && !dialog.classList.contains("pulled")) put(body, tvRemoteParts(tv, press, turnOn));
     } catch (e) {
       put(body, h("p", { class: "error" }, errorText(e)));
     }
@@ -13138,6 +13188,7 @@ function tvDropdown(at) {
     clearTimeout(timer);
     paintTvNow();
   });
+  pullToClose(dialog);
   at.classList.add("open");
   const r = at.getBoundingClientRect();
   placeAt(dialog, { x: r.right - dialog.offsetWidth, y: r.bottom + 6 });

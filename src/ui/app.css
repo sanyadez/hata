@@ -1924,7 +1924,7 @@ dialog.dropdown.tv-drop[open] { padding: 18px 20px 20px; display: grid; gap: 14p
   body.tv-mini-on #view:not(.fill) { padding-bottom: 224px; }
   /* on a phone the remote comes up from the bottom, under the thumb */
   dialog.dropdown.tv-drop { left: 0 !important; right: 0 !important; top: auto !important; bottom: 0; width: 100vw; max-width: none; max-height: calc(100dvh - 100px); border-radius: 20px 20px 0 0; }
-  dialog.dropdown.tv-drop[open] { padding: 22px 24px calc(20px + env(safe-area-inset-bottom)); }
+  dialog.dropdown.tv-drop[open] { padding: 22px 24px calc(20px + env(safe-area-inset-bottom)); overscroll-behavior: contain; }
   dialog.dropdown.tv-drop::before { content: ""; justify-self: center; width: 40px; height: 4px; margin-top: -10px; border-radius: 2px; background: var(--border-strong); }
   dialog.dropdown.tv-drop .tvr { --pad: 216px; --main: 76px; }
   .tvr-round { width: 48px; height: 48px; }
