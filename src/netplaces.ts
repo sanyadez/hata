@@ -400,6 +400,9 @@ export async function shares(input: { kind?: unknown; host?: unknown; user?: unk
 let away = new Set<string>();
 const missed = new Map<string, number>();
 
+/** How many places are kept: what holds the module on */
+export const placesKept = (): number => places.length;
+
 export const placesDown = (): { id: string; name: string; path: string }[] => places.filter((p) => away.has(p.id)).map((p) => ({ id: p.id, name: p.name, path: where(p) }));
 
 /**

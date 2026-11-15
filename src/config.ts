@@ -10,6 +10,7 @@ import { cleanOutside } from "./outside";
 import { cleanDns, DNS_DEFAULTS, type DnsSettings } from "./dns";
 import { BLOCK_DEFAULTS, cleanBlock, type BlockSettings } from "./dnsblock";
 import { cleanForwards, type Forward } from "./forward";
+import { cleanModules, type ModuleSwitches } from "./modules";
 import { cleanNames, type DomainName } from "./names";
 import { cleanMachineShares, cleanShares, type MachineShare, type Share } from "./smbconf";
 import { changeAppearance, cleanAppearance, DEFAULT_APPEARANCE, type Appearance } from "./wallpapers";
@@ -132,6 +133,8 @@ export interface Settings {
   update: { channel: "stable" | "beta"; auto: boolean; time: string };
   /** How many days what is deleted in the file manager stays in the trash */
   trash: { days: number };
+  /** Which modules are on (`modules.ts`); null — not decided yet: a server from before modules, until its first start */
+  modules: ModuleSwitches | null;
 }
 
 export interface HttpsSettings {
@@ -253,6 +256,7 @@ const DEFAULTS: Settings = {
   welcome: false,
   update: { channel: "stable", auto: false, time: "05:00" },
   trash: { days: 30 },
+  modules: null,
 };
 
 /** A host name with at least two labels: letters, digits and hyphens */
@@ -291,6 +295,7 @@ export const settings: Settings = {
   folders: Array.isArray(saved.folders) ? saved.folders.filter((path): path is string => typeof path === "string") : [],
   favorites: isPlainObject(saved.favorites) ? Object.fromEntries(Object.entries(saved.favorites).map(([id, list]) => [id, Array.isArray(list) ? list.filter((one): one is Favorite => isPlainObject(one) && typeof one.path === "string").map((one) => ({ path: one.path, dir: one.dir !== false })) : []])) : {},
   shares: cleanShares(saved.shares),
+  modules: isPlainObject(saved.modules) ? cleanModules(saved.modules) : null,
   names: cleanNames(saved.names),
   forwards: cleanForwards(saved.forwards),
   dns: cleanDns(saved.dns),

@@ -1273,6 +1273,9 @@ export interface MountingReport {
 }
 
 /** The connected folders that can be merged into one now */
+/** How many merged folders of Hata's there are: what holds the module on */
+export const mergedFolders = (): number => Object.keys(pools(fstab())).length;
+
 export const mergeableNow = (): string[] => mergeable(fstab(), [...mountedAt().keys()], [settings.snapraid.parity, settings.snapraid.parity2]);
 
 /** The folders Hata connected */
