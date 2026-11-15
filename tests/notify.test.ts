@@ -54,7 +54,7 @@ test("many problems at once arrive as one message", () => {
   expect(wording(many.slice(0, 3), "en")).toHaveLength(3);
   const [message, ...rest] = wording([...many, restarting], "en");
   expect(rest).toEqual([]);
-  expect(message).toMatchObject({ title: "5 things need attention", severity: "danger", route: "#/" });
+  expect(message).toMatchObject({ title: "5 items need attention", severity: "danger", route: "#/" });
   expect(message!.text.split("\n")).toEqual(["• A is only partly running", "• B is only partly running", "• C is only partly running", "• D is only partly running", "• Memos keeps restarting"]);
 });
 
@@ -83,7 +83,7 @@ test("the requests to the services", () => {
   expect(telegram.url).toBe("https://api.telegram.org/bot1:abc/sendMessage");
   const sent = JSON.parse(telegram.body);
   expect(sent).toMatchObject({ chat_id: "42", parse_mode: "HTML" });
-  expect(sent.text).toStartWith("🔴 <b>A &lt;b&gt; &amp; C keeps restarting</b>\nContainer c does not stay up");
+  expect(sent.text).toStartWith("🔴 <b>A &lt;b&gt; &amp; C keeps restarting</b>\nContainer c keeps stopping");
   expect(sent.text).toContain('<a href="https://hata.example/#/apps/memos/logs">');
   // a quote must not end the link's attribute, and Telegram reads &quot; back as a quote
   const quoted = JSON.parse(telegramRequest({ enabled: true, token: "1:abc", chat: "42" }, { ...message!, title: 'The "A" app', route: '#/x" onclick="y' }, base).body);
@@ -146,9 +146,9 @@ test("one never sent, a failure and a new version are never said to be over", ()
 });
 
 test("the words of a problem that is over, and of the night's backups", () => {
-  expect(resolvedWording([disk()], "en")).toEqual([{ title: "Over: Disk / is 91% full", text: "It no longer needs attention.", severity: "ok", route: "#/", tag: "disk:/", code: "resolved.disk", app: undefined }]);
+  expect(resolvedWording([disk()], "en")).toEqual([{ title: "Resolved: Disk / is 91% full", text: "This no longer needs attention.", severity: "ok", route: "#/", tag: "disk:/", code: "resolved.disk", app: undefined }]);
   const many = ["a", "b", "c", "d"].map((name): AttentionItem => ({ id: `partial:${name}`, severity: "warn", code: "partial", detail: { title: name.toUpperCase(), container: name }, app: name }));
-  expect(resolvedWording(many, "en")).toMatchObject([{ title: "4 problems are over", severity: "ok" }]);
+  expect(resolvedWording(many, "en")).toMatchObject([{ title: "4 problems resolved", severity: "ok" }]);
   expect(backupMessage({ ok: 9, failed: [], took: 200_000 }, "en")).toMatchObject({ title: "Daily backups: all 9 done", text: "It took 3 min.", severity: "ok", route: "#/settings/backups" });
   expect(backupMessage({ ok: 7, failed: ["memos", "kuma@nas"], took: 10_000 }, "uk")).toMatchObject({ title: "Щоденні копії: не вдалося 2, зроблено 7", text: "Не скопійовано: memos, kuma на nas. Увесь запуск тривав 1 хв.", severity: "warn" });
 });
