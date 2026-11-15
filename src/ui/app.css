@@ -1882,22 +1882,19 @@ body.has-jobs #view:not(.fill) { padding-bottom: calc(var(--jobs-h, 0px) + 48px)
 .tvr-key .tvr-round { width: 48px; height: 48px; }
 
 /* the chip in the head: pause on the left, the remote on the right */
-.tv-now { display: flex; align-items: stretch; flex: none; height: 36px; border-radius: 18px; border: 1px solid var(--border-strong); background: var(--surface); color: var(--text); overflow: hidden; }
+.tv-now { display: flex; align-items: stretch; flex: none; height: 36px; border-radius: 18px; border: 1px solid var(--border); background: var(--surface-2); color: var(--muted); overflow: hidden; }
 .tv-now[hidden] { display: none; }
-.tv-now.playing { background: var(--accent-soft); border-color: var(--accent); color: var(--accent-text); }
-.tv-now.open { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.tv-now.playing { background: var(--accent); border-color: var(--accent); color: var(--on-accent); }
+.tv-now.open:not(.playing) { border-color: var(--border-strong); color: var(--text); }
 .tv-now-half { display: flex; align-items: center; gap: 8px; min-width: 36px; padding: 0 10px; border: 0; background: none; color: inherit; font: 600 13px var(--font-body); cursor: pointer; }
 .tv-now-half + .tv-now-half { border-left: 1px solid color-mix(in srgb, currentColor 35%, transparent); }
 .tv-now-half .ico { width: 16px; height: 16px; flex: none; }
-.tv-now-half .clip { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 12ch; font-size: 12px; }
 dialog.dropdown.tv-drop { width: min(calc(100vw - 16px), 368px); max-height: calc(100dvh - 16px); overflow-y: auto; border-radius: 16px; }
 dialog.dropdown.tv-drop[open] { padding: 18px 20px 20px; display: grid; gap: 14px; }
 .tv-now { height: 32px; border-radius: 16px; }
 .tv-now-half { min-width: 32px; padding: 0 8px; gap: 6px; }
 #tv-mini { display: none; }
-@media (max-width: 1500px) {
-  .tv-now-half .clip { display: none; }
-}
+
 @media (max-width: 900px) {
   .tv-page { grid-template-columns: minmax(0, 1fr); }
 }

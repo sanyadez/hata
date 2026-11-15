@@ -12629,11 +12629,14 @@ function paintTvNow() {
   if (!tv?.on) return box.replaceChildren();
   const now = tv.playing;
   const label = now ? t("tv.playing", { name: now.title }) : t("tv.remote");
-  // the left half pauses with one touch, the right one opens the remote; with nothing playing only the remote is left
-  box.replaceChildren(
+  // no words here: grey while nothing plays, the accent colour while something does — the name is in the remote.
+  // The left half pauses with one touch, the right one opens the remote; with nothing playing only that is left
+  const halves = [
     now && h("button", { type: "button", class: "tv-now-half", title: t("tv.key.playpause"), "aria-label": t("tv.key.playpause"), onclick: () => api("POST", "/api/tv/do", { action: "playpause" }).catch((e) => toast(errorText(e), "error")) }, icon(now.paused ? "play" : "pause")),
-    h("button", { type: "button", class: "tv-now-half tv-now-open", title: label, "aria-label": label, "aria-haspopup": "dialog", onclick: () => tvDropdown(box) }, icon("tv"), now && h("span", { class: "clip" }, now.title)),
-  );
+    h("button", { type: "button", class: "tv-now-half tv-now-open", title: label, "aria-label": label, "aria-haspopup": "dialog", onclick: () => tvDropdown(box) }, icon("tv")),
+  ];
+  // replaceChildren writes a missing one out as the word "null"
+  box.replaceChildren(...halves.filter(Boolean));
   paintTvMini(now);
 }
 
