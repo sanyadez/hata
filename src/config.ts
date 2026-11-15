@@ -12,6 +12,7 @@ import { BLOCK_DEFAULTS, cleanBlock, type BlockSettings } from "./dnsblock";
 import { cleanForwards, type Forward } from "./forward";
 import { cleanModules, type ModuleSwitches } from "./modules";
 import { cleanNames, type DomainName } from "./names";
+import { cleanFolders } from "./tv";
 import { cleanMachineShares, cleanShares, type MachineShare, type Share } from "./smbconf";
 import { changeAppearance, cleanAppearance, DEFAULT_APPEARANCE, type Appearance } from "./wallpapers";
 import { isPlainObject, readJsonFile, writeJsonAtomic } from "./fsutil";
@@ -133,6 +134,8 @@ export interface Settings {
   update: { channel: "stable" | "beta"; auto: boolean; time: string };
   /** How many days what is deleted in the file manager stays in the trash */
   trash: { days: number };
+  /** The media player on the server's screen (`tv.ts`): the folders it shows; whether its sound output was chosen */
+  tv: { folders: string[]; audioChosen: boolean };
   /** Which modules are on (`modules.ts`); null — not decided yet: a server from before modules, until its first start */
   modules: ModuleSwitches | null;
 }
@@ -257,6 +260,7 @@ const DEFAULTS: Settings = {
   update: { channel: "stable", auto: false, time: "05:00" },
   trash: { days: 30 },
   modules: null,
+  tv: { folders: [], audioChosen: false },
 };
 
 /** A host name with at least two labels: letters, digits and hyphens */
@@ -296,6 +300,7 @@ export const settings: Settings = {
   favorites: isPlainObject(saved.favorites) ? Object.fromEntries(Object.entries(saved.favorites).map(([id, list]) => [id, Array.isArray(list) ? list.filter((one): one is Favorite => isPlainObject(one) && typeof one.path === "string").map((one) => ({ path: one.path, dir: one.dir !== false })) : []])) : {},
   shares: cleanShares(saved.shares),
   modules: isPlainObject(saved.modules) ? cleanModules(saved.modules) : null,
+  tv: { folders: cleanFolders(isPlainObject(saved.tv) ? saved.tv.folders : []), audioChosen: isPlainObject(saved.tv) && saved.tv.audioChosen === true },
   names: cleanNames(saved.names),
   forwards: cleanForwards(saved.forwards),
   dns: cleanDns(saved.dns),

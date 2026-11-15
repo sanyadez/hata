@@ -112,6 +112,7 @@ import { mcpResponse } from "./mcp";
 import { instructions as mcpInstructions, tellHttps, TOOLS } from "./mcptools";
 import { moduleOn, modulesOn, modulesReport, setModule, settleModules, startModules } from "./moduleruns";
 import { findForModules } from "./modulefinds";
+import { installTv, playOnTv, remote as tvRemote, setAudio as setTvAudio, setFolders as setTvFolders, switchTv, tvReport } from "./television";
 import { moduleOfPath, moduleOfTool } from "./modules";
 import { serverTree } from "./servertree";
 import { homeLinks, localNamesStatus, refreshLocalNames } from "./mdns";
@@ -1511,6 +1512,25 @@ async function api(req: Request, url: URL, server: Server<unknown>): Promise<Res
       return { ...m, instance: instanceOfMachine(macs, m.info?.hostname ?? m.name)?.name ?? "", guest: guest ? { host: guest.host, id: guest.id } : null };
     });
     return json(serverTree({ here: { name: system.hostname, os: systemName(), address: homeLinks()[0]?.address ?? "", cpu: system.cpu, memory: system.memory, uptime: system.uptime }, instances, hosts: moduleOn("proxmox") ? pveHosts().map((x) => pveHost(x.id)) : [], machines, version: VERSION }));
+  }
+  // the media player on the server's own screen
+  if (path === "/api/tv" && method === "GET") return json(await tvReport());
+  if (path === "/api/tv/install" && method === "POST") return json({ job: installTv(user.name).id }, 202);
+  if (path === "/api/tv" && method === "PUT") {
+    const data = await body(req);
+    if ("on" in data) return json(await switchTv(data.on === true, user.name));
+    if ("folders" in data) return json(await setTvFolders(data.folders, user.name));
+    if ("audio" in data) return json(await setTvAudio(data.audio));
+    return fail(400, "tv.badAction");
+  }
+  if (path === "/api/tv/play" && method === "POST") {
+    await playOnTv((await body(req)).path, user.name);
+    return json({ ok: true });
+  }
+  if (path === "/api/tv/do" && method === "POST") {
+    const data = await body(req);
+    await tvRemote(data.action, data.value);
+    return json({ ok: true });
   }
   if (path === "/api/domains" && method === "GET") return json(await domainsReport(language(url), await forwardsReport()));
   if (path === "/api/ports" && method === "POST") return json(await addForward(await body(req), user.name));

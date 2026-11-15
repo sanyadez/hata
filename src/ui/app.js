@@ -41,6 +41,8 @@ const ICONS = {
   plus: "M12 5v14M5 12h14",
   external: "M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5",
   refresh: "M20 11a8 8 0 0 0-14.9-3M4 5v3h3M4 13a8 8 0 0 0 14.9 3M20 19v-3h-3",
+  tv: "M3 5h18v12H3zM8 21h8M12 17v4",
+  pause: "M8 5v14M16 5v14",
   stop: "M6 6h12v12H6z",
   play: "M7 5l12 7-12 7z",
   more: "M5 12h.01M12 12h.01M19 12h.01",
@@ -339,6 +341,7 @@ function parseRoute() {
   if (parts[0] === "trash" && mayFiles()) return { view: "trash" };
   if (parts[0] === "hata" && mayFiles()) return { view: "myhata" };
   if (parts[0] === "activity" && isAdmin()) return { view: "activity" };
+  if (parts[0] === "tv" && isAdmin()) return { view: "tv" };
   // both live in Settings; their own old addresses still lead there
   if ((parts[0] === "backups" || (parts[0] === "settings" && parts[1] === "backups")) && isAdmin()) return { view: "backups" };
   if ((parts[0] === "users" || (parts[0] === "settings" && parts[1] === "users")) && isAdmin()) return { view: "users" };
@@ -399,6 +402,7 @@ function onRoute() {
   if (state.route.view === "users") void loadUsers();
   if (state.route.view === "import") void loadImport();
   if (state.route.view === "welcome") void loadWelcome();
+  if (state.route.view === "tv") void loadTv();
   if (state.route.view === "app") void loadApp();
   if (["machines", "machine", "proxmox", "guest", "instance", "containers"].includes(state.route.view)) void loadMachines();
   if (state.route.view === "machines") void loadPve();
@@ -446,6 +450,8 @@ function startEvents() {
         else if (state.route.view === "files") void loadFiles?.();
         else if (state.route.view === "myhata") void loadMyHata();
       }, 1200);
+    } else if (event.type === "tv") {
+      if (state.route.view === "tv") void loadTv();
     } else if (event.type === "modules") {
       void loadModules().then(render);
     } else if (event.type === "assistant") {
@@ -834,6 +840,7 @@ const NAV = [
   { view: "files", hash: "#/files", icon: "folder", files: true },
   { view: "machines", hash: "#/machines", icon: "server", admin: true },
   { view: "integrations", hash: "#/integrations", icon: "link", admin: true, integrations: true },
+  { view: "tv", hash: "#/tv", icon: "tv", admin: true },
   { view: "assistant", hash: "#/assistant", icon: "chat", admin: true, assistant: true },
   { view: "settings", hash: "#/settings", icon: "sliders" },
 ];
@@ -845,7 +852,7 @@ const isAdmin = () => state.user?.role === "admin" && !state.user.mustTwoFactor;
 const hasModule = (id) => !state.modules || state.modules[id] === true;
 /** The sections of Settings and the pages that are a module's */
 const SECTION_MODULE = { protection: "raid", places: "netplaces", shares: "shares", remote: "remote", ports: "domains", dns: "dns", adblock: "adblock", integrations: "integrations", agents: "assistant", assistant: "assistant" };
-const VIEW_MODULES = { machines: ["machines", "proxmox", "containers"], machine: ["machines"], proxmox: ["proxmox"], guest: ["proxmox"], containers: ["containers"], instance: ["containers"], integrations: ["integrations"], ha: ["integrations"], qbit: ["integrations"], frigate: ["integrations"], assistant: ["assistant"], connect: ["assistant"] };
+const VIEW_MODULES = { machines: ["machines", "proxmox", "containers"], machine: ["machines"], proxmox: ["proxmox"], guest: ["proxmox"], containers: ["containers"], instance: ["containers"], integrations: ["integrations"], ha: ["integrations"], qbit: ["integrations"], frigate: ["integrations"], assistant: ["assistant"], connect: ["assistant"], tv: ["tv"] };
 /** Files are an administrator's, and theirs with whom a folder is shared — only those folders then */
 const mayFiles = () => isAdmin() || !!state.user?.files;
 /** The folders shared with one who is not an administrator, of this server or of a machine; null for an administrator */
@@ -1068,6 +1075,7 @@ function render() {
   if (view === "import") return renderImport();
   if (view === "terminal") return renderTerminal();
   if (view === "assistant") return renderAssistant();
+  if (view === "tv") return renderTv();
   if (view === "machines") return renderMachines();
   if (view === "machine") return renderMachine();
   if (view === "proxmox") return renderPve();
@@ -10830,6 +10838,7 @@ function entryMenu(entry, at) {
     entry.type === "file" && entry.size <= TEXT_MAX && !["image", "video", "audio", "pdf"].includes(kind) && item(t("files.edit"), "edit", () => textDialog(path)),
     entry.type !== "other" && item(t(entry.type === "dir" ? "files.downloadZip" : "files.download"), "download", () => downloadEntries([entry])),
     entry.type === "file" && ARCHIVE_RE.test(entry.name) && !state.files.readOnly && !filesMachine() && isAdmin() && item(t("files.extract"), "archive", () => extractArchive(path)),
+    entry.type === "file" && TV_PLAYS_RE.test(entry.name) && !filesMachine() && isAdmin() && hasModule("tv") && item(t("tv.play"), "tv", () => playOnTv(path, entry.name)),
     entry.type === "file" && PVE_SEND_RE.test(entry.name) && !filesMachine() && isAdmin() && pveUi.list?.hosts?.length !== 0 && item(t("pve.send.menu"), "upload", () => pveSendDialog({ path })),
     entry.type === "file" && /\.iso$/i.test(entry.name) && !filesMachine() && isAdmin() && item(t("incus.disc.menu"), "disk", () => discAddDialog({ how: "path", path })),
     item(t("files.copyPath"), "link", () => copyText(path)),
@@ -12592,14 +12601,149 @@ function settingsNav(section) {
   return h("nav", { class: "settings-nav fold" }, h("label", { class: "settings-find" }, icon("search"), input, clear), list);
 }
 
+// --- TV: the media player on the server's own screen ---------------------------------------------
+
+/** What the player plays, by the file's name: the same list the server goes by */
+const TV_PLAYS_RE = /\.(mkv|mp4|m4v|avi|mov|webm|ts|m2ts|mpg|mpeg|wmv|flv|ogv|3gp|iso|mp3|flac|m4a|ogg|opus|wav|aac|wma|jpe?g|png|gif|webp|bmp|heic)$/i;
+const tvUi = { timer: 0, busy: false };
+
+async function playOnTv(path, name) {
+  try {
+    await api("POST", "/api/tv/play", { path });
+    toast(t("tv.playing", { name }));
+  } catch (e) {
+    toast(errorText(e), "error");
+  }
+}
+
+async function loadTv() {
+  clearTimeout(tvUi.timer);
+  if (state.route.view !== "tv" || !hasModule("tv")) return;
+  try {
+    state.tv = await api("GET", "/api/tv");
+  } catch (e) {
+    if (!state.tv) put(document.getElementById("tv-body"), h("section", { class: "card pad" }, h("p", { class: "error" }, errorText(e))));
+  }
+  // a slider under the finger or a list that is open is not redrawn under the person
+  if (state.tv && !tvUi.busy && !document.querySelector("dialog[open]") && !document.querySelector("#tv-body input[type=range]:active")) paintTv();
+  // while the player runs the page keeps up with what plays
+  tvUi.timer = setTimeout(loadTv, state.tv?.running ? 2000 : 8000);
+}
+
+function renderTv() {
+  shell(h("div", { class: "page-head" }, h("div", null, h("h1", null, t("tv.title")), h("p", { class: "meta" }, t("tv.lead")))), h("div", { id: "tv-body", class: "stack" }, h("p", { class: "muted" }, "…")));
+  cleanups.push(() => clearTimeout(tvUi.timer));
+  if (state.tv) paintTv();
+}
+
+const tvClock = (s) => `${Math.floor(s / 3600) ? Math.floor(s / 3600) + ":" : ""}${String(Math.floor((s % 3600) / 60)).padStart(Math.floor(s / 3600) ? 2 : 1, "0")}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+
+function paintTv() {
+  const box = document.getElementById("tv-body");
+  const tv = state.tv;
+  if (!box || !tv) return;
+  const error = h("p", { class: "error", role: "alert" });
+  const change = async (data) => {
+    error.textContent = "";
+    tvUi.busy = true;
+    try {
+      state.tv = await api("PUT", "/api/tv", data);
+    } catch (e) {
+      tvUi.busy = false;
+      return void (error.textContent = errorText(e));
+    }
+    tvUi.busy = false;
+    paintTv();
+  };
+  const press = (action, value) => api("POST", "/api/tv/do", { action, value }).then(() => setTimeout(loadTv, 250), (e) => toast(errorText(e), "error"));
+
+  const screens = tv.displays.filter((d) => d.connected);
+  const screenCard = h(
+    "section",
+    { class: "card pad stack" },
+    h("div", { class: "section-head" }, h("h2", null, t("tv.screen"))),
+    screens.length
+      ? screens.map((d) => h("div", { class: "kv" }, h("span", { class: "with-icon" }, icon("tv"), [d.monitor, d.name].filter(Boolean).join(" · ")), h("span", { class: "muted" }, [d.mode.replace("x", "×"), t(d.audio ? "tv.screenSound" : "tv.screenSilent")].filter(Boolean).join(" · "))))
+      : h("p", { class: "muted" }, t(tv.displays.length ? "tv.noScreen" : "tv.noOutput")),
+    tv.remotes.length > 0 && h("div", { class: "kv" }, h("span", { class: "muted" }, t("tv.remotes")), h("span", null, tv.remotes.join(", "))),
+    h("p", { class: "muted small" }, t("tv.remotesHint")),
+  );
+
+  if (!tv.installed) {
+    const install = button(t("mounting.needs.install", { package: "Kodi" }), {
+      class: "primary",
+      disabled: !!tv.cannot,
+      onclick: async () => {
+        install.disabled = true;
+        try {
+          const res = await api("POST", "/api/tv/install", {});
+          jobDialog(res.job, "tv", "Kodi", loadTv);
+        } catch (e) {
+          error.textContent = errorText(e);
+          install.disabled = false;
+        }
+      },
+    }, "download");
+    return put(box, screenCard, h("section", { class: "card pad stack" }, h("div", { class: "section-head" }, h("h2", null, t("tv.needsTitle"))), h("p", { class: "muted" }, t("tv.needsLead")), tv.cannot ? h("p", { class: "muted small" }, t("tv.cannot." + tv.cannot)) : h("p", { class: "cmd" }, icon("terminal"), tv.install), error, h("div", { class: "row-actions" }, install)));
+  }
+
+  const flip = h("button", { type: "button", role: "switch", class: "ha-switch", "aria-checked": String(tv.on), "aria-label": t("tv.switch"), onclick: () => ((flip.disabled = true), void change({ on: !tv.on })) }, h("i"));
+  const playerCard = h(
+    "section",
+    { class: "card pad stack" },
+    h("div", { class: "setting" }, h("div", { class: "grow" }, h("strong", null, t("tv.switch"), " ", h("span", { class: "state " + (tv.running ? "running" : "stopped") }, t(tv.running ? "tv.running" : "tv.stopped"))), h("p", { class: "muted small" }, t("tv.switchHint"))), h("div", { class: "setting-control" }, flip)),
+    !tv.decodes && h("p", { class: "muted small" }, t("tv.noDecode")),
+    error,
+  );
+
+  const key = (action, iconName, label, cls = "") => h("button", { type: "button", class: "btn tv-key " + cls, title: label, "aria-label": label, onclick: () => press(action) }, iconName ? icon(iconName) : label);
+  const now = tv.playing;
+  const position = now && now.total > 0 && h("input", { type: "range", class: "tv-seek", min: 0, max: 100, step: 0.1, value: (now.time / now.total) * 100, "aria-label": t("tv.position"), onchange: (e) => press("seek", Number(e.target.value)) });
+  const volume = h("input", { type: "range", min: 0, max: 100, step: 1, value: tv.volume, "aria-label": t("tv.volume"), onchange: (e) => press("volume", Number(e.target.value)) });
+  const remoteCard = tv.running && h(
+    "section",
+    { class: "card pad stack tv-remote" },
+    h("div", { class: "section-head" }, h("h2", null, t("tv.remote"))),
+    !tv.answers
+      ? h("p", { class: "muted" }, t("tv.starting"))
+      : [
+          now ? h("div", { class: "stack" }, h("strong", { class: "wrap" }, now.title), position, h("div", { class: "kv muted small" }, h("span", null, tvClock(now.time)), h("span", null, tvClock(now.total)))) : h("p", { class: "muted" }, t("tv.nothing")),
+          h("div", { class: "tv-row" }, key("rewind", "undo", t("tv.key.rewind")), key("playpause", now && !now.paused ? "pause" : "play", t("tv.key.playpause"), "primary"), key("stop", "stop", t("tv.key.stop")), key("forward", "arrow", t("tv.key.forward"))),
+          h("div", { class: "tv-volume" }, h("button", { type: "button", class: "btn small", onclick: () => press("mute") }, t(tv.muted ? "tv.unmute" : "tv.mute")), volume, h("span", { class: "muted small" }, `${tv.volume}%`)),
+          h("div", { class: "tv-pad" }, h("span"), key("up", "", "▲"), h("span"), key("left", "", "◀"), key("select", "", "OK", "primary"), key("right", "", "▶"), h("span"), key("down", "", "▼"), h("span")),
+          h("div", { class: "tv-row" }, key("back", "", t("tv.key.back")), key("home", "", t("tv.key.home")), key("menu", "", t("tv.key.menu")), key("info", "", t("tv.key.info"))),
+        ],
+  );
+
+  const addFolder = () => folderPicker({ title: t("tv.folderPick"), start: state.settings?.dataRoot ?? "/", confirmLabel: t("tv.folderAdd"), action: async (path) => void (await change({ folders: [...tv.folders, path] })) });
+  const foldersCard = h(
+    "section",
+    { class: "card pad stack" },
+    h("div", { class: "section-head" }, h("h2", null, t("tv.folders")), h("div", { class: "row-actions" }, button(t("tv.folderAdd"), { class: "small", onclick: addFolder }, "plus"))),
+    h("p", { class: "muted small" }, t("tv.foldersLead")),
+    tv.folders.length
+      ? tv.folders.map((path) => h("div", { class: "kv" }, h("a", { class: "link with-icon wrap", href: filesHash(path) }, icon("folder"), path), button(t("tv.folderRemove"), { class: "small ghost", onclick: () => void change({ folders: tv.folders.filter((x) => x !== path) }) })))
+      : h("p", { class: "muted" }, t("tv.noFolders")),
+    tv.suggested.map((path) => h("div", { class: "kv" }, h("span", { class: "muted with-icon wrap" }, icon("folder"), path), button(t("tv.folderUse"), { class: "small", onclick: () => void change({ folders: [...tv.folders, path] }) }))),
+  );
+
+  const audioCard = tv.audio && tv.audio.options.length > 0 && h(
+    "section",
+    { class: "card pad" },
+    settingRow(t("tv.audio"), t("tv.audioHint"), h("select", { onchange: (e) => void change({ audio: e.target.value }) }, tv.audio.options.map((o) => h("option", { value: o.value, selected: o.value === tv.audio.value }, o.label)))),
+  );
+
+  put(box, playerCard, remoteCard, screenCard, foldersCard, audioCard);
+}
+
 // --- Modules: the parts of Hata a person turns on -------------------------------------------------
 
-const MODULE_ICONS = { raid: "shield", netplaces: "network", shares: "share", offsite: "archive", remote: "globe", dns: "signpost", adblock: "ban", domains: "plug", machines: "server", proxmox: "server", containers: "box", integrations: "link", assistant: "chat" };
+const MODULE_ICONS = { tv: "tv", raid: "shield", netplaces: "network", shares: "share", offsite: "archive", remote: "globe", dns: "signpost", adblock: "ban", domains: "plug", machines: "server", proxmox: "server", containers: "box", integrations: "link", assistant: "chat" };
 const MODULE_GROUPS = ["storage", "network", "servers", "more"];
 /** Where a module's own things are once it is on */
-const MODULE_HOME = { raid: "#/settings/protection", netplaces: "#/settings/places", shares: "#/settings/shares", offsite: "#/settings/backups", remote: "#/settings/remote", dns: "#/settings/dns", adblock: "#/settings/adblock", domains: "#/settings/ports", machines: "#/machines", proxmox: "#/machines", containers: "#/containers", integrations: "#/settings/integrations", assistant: "#/settings/assistant" };
+const MODULE_HOME = { tv: "#/tv", raid: "#/settings/protection", netplaces: "#/settings/places", shares: "#/settings/shares", offsite: "#/settings/backups", remote: "#/settings/remote", dns: "#/settings/dns", adblock: "#/settings/adblock", domains: "#/settings/ports", machines: "#/machines", proxmox: "#/machines", containers: "#/containers", integrations: "#/settings/integrations", assistant: "#/settings/assistant" };
 /** Where the thing that holds a module on is taken away */
-const MODULE_USE_AT = { array: "#/settings/protection", merged: "#/settings/storage", pools: "#/settings/protection", places: "#/settings/places", shares: "#/settings/shares", offsite: "#/settings/backups", wireguard: "#/settings/remote", tailscale: "#/settings/remote", dnsOn: "#/settings/dns", blocking: "#/settings/adblock", names: "#/settings/https", ports: "#/settings/ports", machines: "#/machines", proxmox: "#/machines", containers: "#/containers", homeAssistant: "#/settings/integrations", qbit: "#/settings/integrations", frigate: "#/settings/integrations", keys: "#/settings/agents" };
+const MODULE_USE_AT = { tv: "#/tv", array: "#/settings/protection", merged: "#/settings/storage", pools: "#/settings/protection", places: "#/settings/places", shares: "#/settings/shares", offsite: "#/settings/backups", wireguard: "#/settings/remote", tailscale: "#/settings/remote", dnsOn: "#/settings/dns", blocking: "#/settings/adblock", names: "#/settings/https", ports: "#/settings/ports", machines: "#/machines", proxmox: "#/machines", containers: "#/containers", homeAssistant: "#/settings/integrations", qbit: "#/settings/integrations", frigate: "#/settings/integrations", keys: "#/settings/agents" };
 const moduleName = (id) => t(`modules.${id}.name`);
 
 /** Which modules are on, asked again: after a change made here or on another page */

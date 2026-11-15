@@ -184,7 +184,7 @@ if (sections.length < 10) giveUp("Could not read the sections of Settings from a
 const ROUTES = [
   "#/welcome/server", "#/welcome/existing", "#/welcome/data", "#/welcome/backups", "#/welcome/modules", "#/welcome/apps",
   "#/", "#/store", "#/files", "#/files/", "#/hata", "#/trash", "#/activity", "#/import",
-  "#/machines", "#/containers", "#/containers/settings", "#/integrations", "#/ha", "#/assistant",
+  "#/machines", "#/containers", "#/containers/settings", "#/integrations", "#/ha", "#/assistant", "#/tv",
   ...sections.map((id) => `#/settings/${id}`),
   "#/settings/storage/fs", "#/settings/storage/fills",
 ];

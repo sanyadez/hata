@@ -23,6 +23,7 @@ import { bus } from "./bus";
 import { afterPackage, networkReport, type Nic } from "./network";
 import { installCommand, installPackage, PATH, removeCommand, removePackages, run } from "./packages";
 import { installSamba } from "./shares";
+import { installTv, tvEnabled } from "./television";
 import { packageUpdates } from "./sysupdates";
 import { inUse as wireguardInUse } from "./wireguard";
 import { INSTALL_COMMAND as TAILSCALE_INSTALL_COMMAND, install as installTailscale, report as tailscaleReport } from "./tailscale";
@@ -71,6 +72,7 @@ const SPECS: Spec[] = [
   { id: "tailscale", name: "Tailscale", package: "tailscale", bin: "tailscale", version: ["tailscale", "version"], page: "#/settings/remote" },
   { id: "incus", name: "Incus", package: "incus-base", bin: "incus", version: ["incus", "--version"], page: "#/containers", family: ["incus-base", "incus-client", "incus"] },
   { id: "incus-vm", name: "QEMU for Incus", package: "qemu-system-x86", bin: "qemu-system-x86_64", version: ["qemu-system-x86_64", "--version"], page: "#/containers", family: ["incus", "incus-agent", "qemu-system-x86", "qemu-system-modules-spice", "qemu-utils", "ovmf"] },
+  { id: "kodi", name: "Kodi", package: "kodi", bin: "kodi", version: ["kodi", "--version"], page: "#/tv" },
   { id: "openssh-client", name: "OpenSSH client", package: "openssh-client", bin: "sftp", version: ["ssh", "-V"], page: "#/settings/backups", base: true },
 ];
 
@@ -153,6 +155,8 @@ function holdsOf(id: string, nics: Nic[], remote: boolean, containers: boolean, 
   // whoever is on this page from afar came through it
   if (id === "tailscale" && remote) return "remote";
   if (id === "incus" && containers) return "containers";
+  // the player is set to start with the server
+  if (id === "kodi" && tvEnabled()) return "tv";
   if (id === "incus-vm" && vms) return "vms";
   if (id === "wireguard-tools" && wireguardInUse()) return "wireguard";
   if (id === "samba" && settings.shares.length > 0) return "shares";
@@ -224,6 +228,7 @@ export async function installOne(id: string, user: string): Promise<{ job: Job }
   if (spec.id === "docker") return { job: installDocker(user) };
   if (spec.id === "tailscale") return { job: installTailscale(user) };
   if (spec.id === "incus") return { job: installIncus(user) };
+  if (spec.id === "kodi") return { job: installTv(user) };
   if (spec.id === "incus-vm") {
     try {
       return { job: await installIncusVms(user) };

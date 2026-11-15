@@ -1830,3 +1830,13 @@ body.has-jobs #view:not(.fill) { padding-bottom: calc(var(--jobs-h, 0px) + 48px)
 @media (max-width: 760px) {
   .module-picks { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* TV */
+.tv-remote { max-width: 520px; }
+.tv-row { display: flex; gap: 10px; flex-wrap: wrap; }
+.tv-row .tv-key { flex: 1 1 60px; }
+.tv-key { min-height: 48px; justify-content: center; font-weight: 600; }
+.tv-pad { display: grid; grid-template-columns: repeat(3, minmax(0, 72px)); gap: 10px; justify-content: center; }
+.tv-pad .tv-key { aspect-ratio: 1; padding: 0; }
+.tv-volume { display: flex; align-items: center; gap: 12px; }
+.tv-volume input, .tv-seek { flex: 1; min-width: 0; width: 100%; }
