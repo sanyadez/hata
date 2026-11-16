@@ -18762,6 +18762,8 @@ function storageSection(section = "storage") {
     );
   }
 
+  // the folders of a disk that Hata connected itself and that are no branch of a merged folder: those it can disconnect
+  const ourMounts = (disk, mounts) => mounts.filter((path) => state.disks.mounting?.ours[path] && !Object.values(state.disks.mounting?.pools ?? {}).some((folders) => folders.includes(path)));
   const row = (disk) => {
     const mounted = disk.volumes.filter((v) => v.total != null);
     const total = mounted.reduce((n, v) => n + v.total, 0);
@@ -18776,7 +18778,7 @@ function storageSection(section = "storage") {
       h("td", { class: "num" + (hot ? " bad" : "") }, disk.smart?.temperature != null ? disk.smart.temperature + " °C" : "—"),
       h("td", null, total ? usageBar(used, total) : h("span", { class: "muted" }, "—")),
       h("td", { class: "mono" }, mounts.length ? mounts.map((m) => h("div", { class: "clip" }, m)) : h("span", { class: "muted" }, t("disks.notMounted"))),
-      h("td", null, h("div", { class: "row-actions" }, canPrepare(disk) && !mounts.length && !canConnect(disk).length && button(t("mounting.format"), { class: "small", onclick: (e) => (e.stopPropagation(), formatDialog(disk)) }), (disk.removable || disk.transport === "usb") && state.disks.mounting?.possible && disk.volumes.some((v) => v.fstype && v.mounts.length > 0) && button(t("copyin.button"), { class: "small", onclick: (e) => (e.stopPropagation(), copyInDialog(disk)) }, "download"), canConnect(disk).length > 0 && button(t("mounting.connect"), { class: "small primary", onclick: (e) => (e.stopPropagation(), connectDialog(disk, canConnect(disk)[0])) }), button(t("disks.details"), { class: "small", onclick: (e) => (e.stopPropagation(), diskDialog(disk.name)) }))),
+      h("td", null, h("div", { class: "row-actions" }, canPrepare(disk) && !mounts.length && !canConnect(disk).length && button(t("mounting.format"), { class: "small", onclick: (e) => (e.stopPropagation(), formatDialog(disk)) }), (disk.removable || disk.transport === "usb") && state.disks.mounting?.possible && disk.volumes.some((v) => v.fstype && v.mounts.length > 0) && button(t("copyin.button"), { class: "small", onclick: (e) => (e.stopPropagation(), copyInDialog(disk)) }, "download"), canConnect(disk).length > 0 && button(t("mounting.connect"), { class: "small primary", onclick: (e) => (e.stopPropagation(), connectDialog(disk, canConnect(disk)[0])) }), ...ourMounts(disk, mounts).map((path) => button(t(disk.removable || disk.transport === "usb" ? "mounting.eject" : "mounting.disconnect") + (ourMounts(disk, mounts).length > 1 ? " " + path : ""), { class: "small", onclick: (e) => (e.stopPropagation(), disconnectDialog({ path, disk: disk.name })) })), button(t("disks.details"), { class: "small", onclick: (e) => (e.stopPropagation(), diskDialog(disk.name)) }))),
     );
   };
   const checked = Math.max(0, ...data.disks.map((d) => d.checkedAt ?? 0));
