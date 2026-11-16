@@ -729,6 +729,9 @@ async function refresh() {
   paintTvNow();
   seedJobs(state.overview.jobs ?? []);
   failedTiles(state.overview);
+  // the numbers by the sections follow what needs attention now, and so does the section's own list
+  document.querySelector(".top .nav")?.replaceChildren(...navLinks("nav-link"));
+  paintAttentionHere();
   if (state.route.view === "home") renderHomeBody();
   if (state.route.view === "store") renderStoreList();
   if (state.route.view === "apps") renderAppsBody();
@@ -1111,6 +1114,32 @@ const ATTENTION_AREAS = [
   [/^(network|internet|dns|https)\b/, "network"],
 ];
 const attentionArea = (item) => ATTENTION_AREAS.find(([re]) => re.test(item.code))?.[1] ?? (item.app || /^(restarting|partial|update|failed|qbit)\b/.test(item.code) ? "apps" : "");
+/**
+ * What the number by a section's name counts, said in the section itself: a card under its head with the very
+ * items of Home's list. Kept up from outside the pages (they redraw themselves in many ways): put in when it is
+ * missing, built anew only when the items differ, so a button under the pointer stays.
+ */
+const attentionHere = { sig: "" };
+function paintAttentionHere() {
+  const view = document.getElementById("view");
+  if (!view || !state.user) return;
+  const area = navCurrent();
+  const head = view.querySelector(".area-head");
+  // the top pages of a section: those with its head, and the lists of Computers and Apps
+  const top = head || ["machines", "apps"].includes(state.route.view);
+  const list = isAdmin() && area && area !== "home" && top ? (state.overview?.attention ?? []).filter((item) => attentionArea(item) === area) : [];
+  const was = document.getElementById("area-attention");
+  if (!list.length) return void was?.remove();
+  const sig = area + JSON.stringify(list.map((item) => [item.id, item.code, item.severity, item.at, item.detail]));
+  if (was && was.isConnected && sig === attentionHere.sig) return;
+  attentionHere.sig = sig;
+  const card = h("section", { class: "card pad stack area-attention", id: "area-attention" }, h("div", { class: "section-head" }, h("h2", null, t("attention.title"), h("span", { class: "pill" }, list.length))), h("div", { class: "attention-list" }, list.map(attentionItem)));
+  if (was) return void was.replaceWith(card);
+  if (head) head.after(card);
+  else view.prepend(card);
+}
+setInterval(paintAttentionHere, 1500);
+
 /** How many things need attention in a section: the number by its name in the menu */
 function navCount(view) {
   if (!isAdmin() || view === "home") return 0;
@@ -1319,6 +1348,7 @@ function shell(...content) {
   );
   paintMusicNow();
   paintTvNow();
+  queueMicrotask(paintAttentionHere);
 }
 
 function render() {
@@ -2464,6 +2494,10 @@ function confirmAction({ title, lead, label, run, kind = "danger", iconName = "t
     onclick: async () => {
       go.disabled = true;
       error.textContent = "";
+      // it may take a while: the button turns, so the wait is seen to be one
+      const mark = go.querySelector(".ico");
+      const turning = icon("refresh", "spin");
+      mark?.replaceWith(turning);
       try {
         await run();
         dialog.close();
@@ -2471,6 +2505,7 @@ function confirmAction({ title, lead, label, run, kind = "danger", iconName = "t
       } catch (err) {
         error.textContent = errorText(err);
         go.disabled = false;
+        if (mark) turning.replaceWith(mark);
       }
     },
   }, iconName);

@@ -110,8 +110,13 @@ const systemctl = (...args: string[]) => run(["systemctl", ...args], 60_000);
 /** Takes a place's files away (the folder and its closed mark stay to the caller) */
 async function unwritePlace(place: Place): Promise<void> {
   const unit = unitOf(place);
-  await systemctl("disable", "--now", unit);
-  if (!byRclone(place.kind) && mountedAt().has(where(place))) await run(["umount", "-l", where(place)], 30_000);
+  // a place whose server is silent is in the middle of trying: stopping it the usual way waits for that try to
+  // give up (half a minute and more), so it is not waited for — its program is ended and the mount let go
+  await systemctl("disable", unit);
+  await systemctl("stop", "--no-block", unit);
+  await systemctl("kill", "--signal=SIGKILL", unit);
+  if (mountedAt().has(where(place))) await run(["umount", "-l", where(place)], 30_000);
+  await systemctl("reset-failed", unit);
   rmSync(join(UNITS, unit), { force: true });
   rmSync(credentialsFile(place), { force: true });
   rmSync(join(CACHE, place.slug), { recursive: true, force: true });
@@ -431,7 +436,9 @@ async function look(): Promise<void> {
     missed.set(place.id, n);
     if (n >= 2) next.add(place.id);
     // the server may be back: the kernel's units do not try again by themselves
-    if (!missing(place.kind).length) await systemctl("start", unitOf(place));
+    // not waited for: a silent server keeps the try going for half a minute, and whoever changes a place meanwhile
+    // (removing one, adding one) would stand behind it
+    if (!missing(place.kind).length) await systemctl("start", "--no-block", unitOf(place));
   }
   away = next;
 }

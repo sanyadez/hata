@@ -451,6 +451,8 @@ dialog.tile-folder header { justify-content: space-between; }
 .attention-block, .activity-block { position: relative; }
 .attention-block > .block-remove, .activity-block > .block-remove { position: absolute; top: 10px; right: 10px; }
 .attention-list { display: grid; gap: 10px; }
+.area-attention { margin: 0; }
+.area-attention .attention-list { grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr)); }
 .attention-item { display: grid; gap: 6px; padding: 12px 14px; border-radius: var(--radius-md); background: var(--surface-2); border-left: 3px solid var(--faint); min-width: 0; }
 .attention-item.warn { border-left-color: var(--accent); }
 .hidden-items { display: grid; gap: 8px; margin-top: 12px; }
