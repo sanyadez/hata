@@ -14,6 +14,8 @@ import { isPlainObject, readJsonFile, writeJsonAtomic } from "./fsutil";
 export interface Snoozed {
   /** When it comes back; 0 — never */
   until: number;
+  /** Hidden for this time only (with `until` 0): it comes back when the thing ends and happens again */
+  once?: boolean;
   /** What the item was when it was put off */
   severity: AttentionItem["severity"];
   at: number;
@@ -28,6 +30,7 @@ export interface Snoozed {
 export interface Hidden {
   id: string;
   until: number;
+  once?: boolean;
   put: number;
   severity: AttentionItem["severity"];
   code: string;
@@ -49,6 +52,7 @@ const RANK = { warn: 0, danger: 1 } as const;
 /** Whether an item is still put off: its time has not come and it is no worse than it was */
 export function asleep(item: AttentionItem, entry: Snoozed | undefined, now: number): boolean {
   if (!entry || RANK[item.severity] > RANK[entry.severity]) return false;
+  if (entry.once) return (item.at ?? 0) === entry.at;
   if (entry.until === 0) return true;
   return entry.until > now && (item.at ?? 0) === entry.at;
 }
@@ -83,10 +87,21 @@ function sweep(now: number) {
   writeJsonAtomic(FILE, saved);
 }
 
-/** The items of the list that are not put off now */
+/** What was hidden for one time and is over: its item is no longer in the list, so the next time is shown */
+export const over = (snoozed: Record<string, Snoozed>, items: AttentionItem[]): string[] => {
+  const there = new Set(items.map((item) => item.id));
+  return Object.keys(snoozed).filter((id) => snoozed[id]!.once && !there.has(id));
+};
+
+/** The items of the list that are not put off now; `items` is the whole list, as the rules gave it */
 export function notSnoozed(items: AttentionItem[]): AttentionItem[] {
   const now = Date.now();
   sweep(now);
+  const done = over(saved, items);
+  if (done.length) {
+    saved = Object.fromEntries(Object.entries(saved).filter(([id]) => !done.includes(id)));
+    writeJsonAtomic(FILE, saved);
+  }
   return awake(items, saved, now);
 }
 
@@ -94,16 +109,16 @@ export function notSnoozed(items: AttentionItem[]): AttentionItem[] {
 export function hidden(): Hidden[] {
   sweep(Date.now());
   return Object.entries(saved)
-    .map(([id, e]) => ({ id, until: e.until, put: e.put ?? 0, severity: e.severity, code: e.code ?? "", detail: e.detail ?? {}, ...(e.app ? { app: e.app } : {}) }))
+    .map(([id, e]) => ({ id, until: e.until, ...(e.once ? { once: true } : {}), put: e.put ?? 0, severity: e.severity, code: e.code ?? "", detail: e.detail ?? {}, ...(e.app ? { app: e.app } : {}) }))
     .sort((a, b) => (a.until === 0 ? 0 : 1) - (b.until === 0 ? 0 : 1) || a.until - b.until || b.put - a.put);
 }
 
 /** How many are put off now */
 export const hiddenCount = (): number => (sweep(Date.now()), Object.keys(saved).length);
 
-/** Puts an item off for `days`, or for good (`forever`); a string is the error's code */
+/** Puts an item off for `days`, for this time (`once`), or for good (`forever`); a string is the error's code */
 export function snooze(input: Record<string, unknown>): string | null {
-  const { id, severity, at, days, forever, code, app } = input;
+  const { id, severity, at, days, forever, once, code, app } = input;
   if (typeof id !== "string" || !id || id.length > 300) return "attention.badItem";
   if (severity !== "warn" && severity !== "danger") return "attention.badItem";
   if (at !== undefined && (typeof at !== "number" || !Number.isFinite(at))) return "attention.badItem";
@@ -111,9 +126,9 @@ export function snooze(input: Record<string, unknown>): string | null {
   if (app !== undefined && (typeof app !== "string" || app.length > 200)) return "attention.badItem";
   const detail = cleanDetail(input.detail);
   if (!detail) return "attention.badItem";
-  if (forever !== true && (typeof days !== "number" || !Number.isInteger(days) || days < 1 || days > MAX_DAYS)) return "attention.badDays";
+  if (forever !== true && once !== true && (typeof days !== "number" || !Number.isInteger(days) || days < 1 || days > MAX_DAYS)) return "attention.badDays";
   const now = Date.now();
-  saved = { ...saved, [id]: { until: forever === true ? 0 : now + (days as number) * DAY, severity, at: (at as number | undefined) ?? 0, put: now, code: (code as string | undefined) ?? "", detail, ...(app ? { app: app as string } : {}) } };
+  saved = { ...saved, [id]: { until: forever === true || once === true ? 0 : now + (days as number) * DAY, ...(once === true && forever !== true ? { once: true } : {}), severity, at: (at as number | undefined) ?? 0, put: now, code: (code as string | undefined) ?? "", detail, ...(app ? { app: app as string } : {}) } };
   writeJsonAtomic(FILE, saved);
   return null;
 }

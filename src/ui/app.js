@@ -2640,6 +2640,7 @@ function attentionItem(item) {
     ...(isAdmin() ? attentionEnds(item, app, onMachine) : []),
     isAdmin() && { label: t(item.app ? "assistant.askWhy" : "assistant.ask"), icon: "chat", run: () => openAssistant({ ask: item.app ? t("assistant.whyDown", { title: item.detail.title || item.app, app: item.app }) : t("assistant.whyItem", { title, text }) }) },
     isAdmin() && { label: t("attention.later", { n: SNOOZE_DAYS }), icon: "clock", run: () => snoozeItem(item) },
+    isAdmin() && { label: t("attention.once"), icon: "x", run: () => snoozeItem(item, "once") },
     isAdmin() && { label: t("attention.never"), icon: "bell-off", run: () => snoozeItem(item, true) },
     (item.code === "disk.new" || item.code === "disk.usb") && isAdmin() && { label: t("mounting.ignore"), icon: "x", run: () => void api("POST", "/api/disks/ignore", { id: item.detail.id }).then(refresh, (e) => toast(errorText(e), "error")) },
   ].filter(Boolean);
@@ -2735,8 +2736,8 @@ const SNOOZE_DAYS = 3;
 /** Puts an item off for some days or for good; it keeps its words, so the list of what is hidden can say it */
 async function snoozeItem(item, forever = false) {
   try {
-    await api("POST", "/api/attention/snooze", { id: item.id, severity: item.severity, ...(item.at ? { at: item.at } : {}), ...(forever ? { forever: true } : { days: SNOOZE_DAYS }), code: item.code, detail: item.detail, ...(item.app ? { app: item.app } : {}) });
-    toast(forever ? t("attention.neverDone") : t("attention.snoozed", { date: shortDate(Date.now() + SNOOZE_DAYS * 86_400_000) }));
+    await api("POST", "/api/attention/snooze", { id: item.id, severity: item.severity, ...(item.at ? { at: item.at } : {}), ...(forever === "once" ? { once: true } : forever ? { forever: true } : { days: SNOOZE_DAYS }), code: item.code, detail: item.detail, ...(item.app ? { app: item.app } : {}) });
+    toast(forever === "once" ? t("attention.onceDone") : forever ? t("attention.neverDone") : t("attention.snoozed", { date: shortDate(Date.now() + SNOOZE_DAYS * 86_400_000) }));
     await refresh();
   } catch (e) {
     toast(errorText(e), "error");
@@ -18113,7 +18114,7 @@ function hiddenItemsCard() {
       "div",
       { class: "hidden-item " + entry.severity, menu: true },
       icon(entry.code ? attentionIcon(entry.code) : "alert"),
-      h("div", { class: "grow" }, h("strong", null, words.title), words.text && h("p", { class: "muted small" }, words.text), h("p", { class: "small muted" }, entry.until === 0 ? t("attention.hidden.forever") : t("attention.hidden.until", { date: shortDate(entry.until) }))),
+      h("div", { class: "grow" }, h("strong", null, words.title), words.text && h("p", { class: "muted small" }, words.text), h("p", { class: "small muted" }, entry.once ? t("attention.hidden.once") : entry.until === 0 ? t("attention.hidden.forever") : t("attention.hidden.until", { date: shortDate(entry.until) }))),
       button(t("attention.hidden.back"), { class: "small", onclick: (e) => back(entry, e.currentTarget) }, "bell"),
     );
   };
