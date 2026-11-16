@@ -13327,6 +13327,16 @@ function streamPlayer(path, { at = 0, audio = 0, sub = -1, outside = "", played,
    * browser's own subtitle tracks were tried first: a line of before a jump stayed drawn over the
    * new ones. Every choice and every jump starts a list of its own, so nothing of the old one is left.
    */
+  // The words of a subtitle line. Marks are taken out until none is left (one cut can leave another: "<<i>b>"), and "&amp;" is
+  // read last, so "&amp;lt;" stays the text "&lt;". The words are put on the page as text, never as markup.
+  const cueWords = (raw) => {
+    let text = raw;
+    for (let before = ""; before !== text; ) {
+      before = text;
+      text = text.replace(/<[^>]*>/g, "");
+    }
+    return text.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").trim();
+  };
   const words = async () => {
     p.reading?.abort();
     const lines = (p.lines = []);
@@ -13340,7 +13350,7 @@ function streamPlayer(path, { at = 0, audio = 0, sub = -1, outside = "", played,
       const at = rows.findIndex((row) => row.includes("-->"));
       const times = at < 0 ? null : /^\s*([\d:.]+)\s+-->\s+([\d:.]+)/.exec(rows[at]);
       // the marks of the format (<i>, <c.yellow>, <00:01.000>) are left out: the words alone are shown
-      const text = rows.slice(at + 1).join("\n").replace(/<[^>]*>/g, "").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&nbsp;/g, " ").trim();
+      const text = cueWords(rows.slice(at + 1).join("\n"));
       if (!times || !text) return;
       const [from, to] = [moment(times[1]) - zero, moment(times[2]) - zero];
       if (to > 0 && to > from) lines.push({ from, to, text });
