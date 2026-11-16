@@ -9505,11 +9505,14 @@ function paintJobs() {
   patchJobs();
 }
 
-/** A job as the server tells of it. Tracked: every install, and what somebody sent to the background */
+/** Work that takes long and was started by a person: its card shows in every tab and on every device of an administrator */
+const JOBS_EVERYWHERE = ["install", "filecopy", "filemove", "copyin", "transfer", "extract"];
+
+/** A job as the server tells of it. Tracked: the kinds above wherever they were started, and what somebody sent to the background here */
 function takeJob(job, line) {
   if (!isAdmin()) return;
   const known = jobsUi.list.get(job.id);
-  if (!known && !(job.kind === "install" || storedIds(sessionStorage, JOB_HIDDEN).includes(job.id))) return;
+  if (!known && !(JOBS_EVERYWHERE.includes(job.kind) || storedIds(sessionStorage, JOB_HIDDEN).includes(job.id))) return;
   if (!known && storedIds(localStorage, JOB_CLOSED).includes(job.id)) return;
   const e = known ?? { id: job.id, left: JOB_LINGER_S };
   const was = e.status;

@@ -125,9 +125,10 @@ export const jobFinished = (job: Job): Promise<void> => finished.get(job) ?? Pro
  * `label` — for an app of another machine: `app` is then only the key that keeps one operation at a
  * time, the activity log gets the app's own name and the machine's.
  */
-export function startJob(app: string, kind: JobKind, user: string, work: (log: Log) => Promise<void>, quiet = false, label?: { app: string; machine: string }): Job {
+export function startJob(app: string, kind: JobKind, user: string, work: (log: Log) => Promise<void>, quiet = false, label?: { app: string; machine: string; id?: string }): Job {
   if (busy.has(app)) throw new AppError("app.busy", 409);
-  const job: Job = { id: crypto.randomUUID(), app, kind, status: "running", log: [], lineCount: 0, startedAt: Date.now(), title: label?.app, machine: label?.machine };
+  // a job taken up again after a restart of Hata keeps its id: the page that follows it goes on
+  const job: Job = { id: label?.id || crypto.randomUUID(), app, kind, status: "running", log: [], lineCount: 0, startedAt: Date.now(), title: label?.app, machine: label?.machine };
   jobs.set(job.id, job);
   busy.set(app, job.id);
   const summary = () => ({ id: job.id, app, kind, status: job.status, error: job.error, stoppable: job.stoppable, stopped: job.stopped, progress: job.progress, last: job.last, title: job.title, icon: job.icon, machine: job.machine });
