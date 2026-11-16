@@ -3159,13 +3159,25 @@ async function storeUpdateDialog(app) {
   const table = (kind) => h("div", { class: "card table-wrap" }, h("table", { class: "changes" }, h("tbody", null, rows(kind))));
   const fromStore = rows("store");
   const conflicts = rows("conflict");
+  // in words first: which version becomes which, what is added; the lines of the file are for whoever asks
+  const words = plan.words ?? [];
+  const versions = words.filter((w) => w.code === "version");
+  const several = new Set(words.map((w) => w.service).filter(Boolean)).size > 1;
+  const WORD_ICONS = { image: "refresh", added: "plus", addedFirst: "plus", removed: "trash", envAdded: "sliders", envChanged: "sliders", envRemoved: "sliders", ports: "network", volumes: "folder", other: "code", files: "file" };
+  const word = (w) => h("li", null, icon(WORD_ICONS[w.code] ?? "code"), h("div", { class: "grow" }, h("div", null, t("update.word." + w.code, w)), several && w.service && !["added", "addedFirst", "removed"].includes(w.code) && h("div", { class: "muted small" }, t("update.word.in", w))));
+  const others = words.filter((w) => w.code !== "version");
+  const lead = versions.length ? "update.leadVersion" : plan.staying ? "update.leadSame" : "update.leadSetup";
   const dialog = openDialog(
     "wide",
-    h("header", null, h("div", { class: "grow" }, h("h2", null, t("update.title", { title: app.title })), h("p", { class: "muted small" }, t("update.lead", { store: plan.store }))), closeX(() => dialog)),
+    h("header", null, h("div", { class: "grow" }, h("h2", null, t("update.title", { title: app.title })), h("p", { class: "muted small" }, t(lead, { store: plan.store, version: plan.staying }))), closeX(() => dialog)),
     !plan.exact && h("p", { class: "banner small" }, t(plan.recorded ? "update.guessed" : "update.matched", { store: plan.store })),
     plan.notes && h("div", { class: "tips prose" }, h("strong", null, t("update.before")), md(plan.notes)),
-    fromStore.length > 0 && h("div", { class: "stack" }, h("h3", null, t("update.changes")), table("store")),
+    versions.length > 0 && h("div", { class: "update-versions" }, versions.map((w) => h("div", { class: "update-version" }, h("span", { class: "muted" }, versions.length > 1 || w.name.replace(/[-_]/g, "") !== app.name.replace(/[-_]/g, "") ? w.name : t("update.version")), h("span", { class: "mono" }, w.from), icon("arrow"), h("strong", { class: "mono" }, w.to)))),
+    others.length > 0 && h("div", { class: "stack" }, h("h3", null, t(versions.length ? "update.also" : "update.what")), h("ul", { class: "update-words" }, others.map(word))),
+    words.length === 0 && fromStore.length > 0 && h("p", { class: "muted small" }, t("update.small")),
     conflicts.length > 0 && h("div", { class: "stack" }, h("h3", null, t("update.conflicts")), h("p", { class: "muted small" }, t("update.conflictsLead")), table("conflict")),
+    h("p", { class: "muted small" }, t(state.settings?.backup?.beforeUpdate ? "update.safe" : "update.safeNoCopy")),
+    fromStore.length > 0 && h("details", null, h("summary", { class: "muted small" }, t("update.lines")), table("store")),
     h("details", null, h("summary", { class: "muted small" }, t("update.file")), h("textarea", { class: "code", spellcheck: false, wrap: "off", readOnly: true, value: plan.compose, "aria-label": "compose.yml" })),
     h(
       "footer",

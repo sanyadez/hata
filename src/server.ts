@@ -29,6 +29,7 @@ import { APP_NAME_RE, dumpCompose } from "./appform";
 import { findInTrash, trashSizeOn } from "./trash";
 import { discover as discoverPlaces, installFor as installPlaceTools, listPlaces, placesDown, removePlace, retryPlace, savePlace, shares as placeShares } from "./netplaces";
 import { answers, networkMountOf } from "./netroom";
+import { stayingVersion, updateWords } from "./updatewords";
 import { addShare, changeShare, installSamba, listShares, refreshShares, removeShare, shareTrouble, writingNow } from "./shares";
 import { checkDisks, diskHealth, installTool, listDisks, startDisks, startSelfTest } from "./disks";
 import { lookAtPools, noteTypes, poolCheck, poolClear, PoolError, poolsReport, poolsTrouble } from "./raid";
@@ -2292,7 +2293,8 @@ async function api(req: Request, url: URL, server: Server<unknown>): Promise<Res
     if (sub === "storeupdate" && method === "GET") {
       const plan = planStoreUpdate(name);
       if (!plan) return fail(404, "app.noUpdate");
-      return json({ store: plan.store, recorded: plan.recorded, exact: plan.exact, changes: plan.changes, compose: dumpCompose(plan.merged), notes: updateNotes(name, plan, language(url)) });
+      const words = updateWords(plan.current, plan.merged, plan.filesChanged);
+      return json({ store: plan.store, recorded: plan.recorded, exact: plan.exact, changes: plan.changes, words, staying: stayingVersion(plan.merged, words), compose: dumpCompose(plan.merged), notes: updateNotes(name, plan, language(url)) });
     }
     if (sub === "storeupdate" && method === "POST") return json({ job: applyStoreUpdate(name, user.name).id }, 202);
     if (sub === "icon" && method === "GET") {

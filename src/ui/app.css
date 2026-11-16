@@ -612,6 +612,12 @@ a.strong:hover { color: var(--accent-text); }
 .block { display: block; }
 .changes td:first-child { width: 42%; overflow-wrap: anywhere; }
 .changes td { vertical-align: top; }
+.update-versions { display: grid; gap: 8px; }
+.update-version { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; padding: 14px 16px; background: var(--surface-2); border-radius: var(--radius-md); font-size: 16px; overflow-wrap: anywhere; }
+.update-version .icon { color: var(--muted); }
+.update-words { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.update-words li { display: flex; gap: 10px; align-items: flex-start; overflow-wrap: anywhere; }
+.update-words li > .icon { color: var(--muted); margin-top: 2px; flex: none; }
 details > summary { cursor: pointer; margin-bottom: 8px; }
 .btn.accent { border-color: var(--accent); color: var(--accent-text); }
 .steps { margin: 0; padding-left: 20px; display: grid; gap: 4px; }

@@ -1071,6 +1071,10 @@ export interface StoreUpdate {
   exact: boolean;
   changes: MergeChange[];
   merged: Compose;
+  /** The app's compose file as it is now, read the way `merged` is: what the update is compared with */
+  current: Compose;
+  /** The store's other files of the app differ from the ones it was installed with */
+  filesChanged: boolean;
   /** The store's file as it is today — the next base */
   base: Compose;
 }
@@ -1108,7 +1112,7 @@ export function planStoreUpdate(name: string): StoreUpdate | null {
     const { merged, changes } = merge3(origin?.base ? prepared(origin.base) : guessBase(ours, theirs), ours, theirs);
     // a store that only rewrote a description has no new version of the app
     if (changes.some((change) => !change.path.startsWith("x-casaos"))) {
-      plan = { store: app.store, recorded: store !== "", exact: !!origin?.base, changes, merged, base: structuredClone(app.compose) };
+      plan = { store: app.store, recorded: store !== "", exact: !!origin?.base, changes, merged, current: ours, filesChanged: false, base: structuredClone(app.compose) };
     }
   }
   plans.set(name, { compose, origin, theirs: app.compose, plan });
@@ -1131,7 +1135,7 @@ function hataPlan(app: StoreApp, compose: Compose, origin: HataFile | null, reco
   const { merged, changes } = merge3(origin?.base ? prepared(origin.base) : guessBase(ours, prepared(theirs)), ours, prepared(theirs));
   const filesChanged = !same(origin?.files ?? {}, hata.files);
   if (!changes.length && !filesChanged) return null;
-  return { store: app.store, hata, recorded, exact: !!origin?.base, changes, merged, base: theirs };
+  return { store: app.store, hata, recorded, exact: !!origin?.base, changes, merged, current: ours, filesChanged, base: theirs };
 }
 
 /** The store's notes of the newer version, when they say something the installed ones do not */
