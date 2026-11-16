@@ -4564,8 +4564,8 @@ function newContainerDialog(start = "container") {
     client.disabled = !can;
     if (!can) client.checked = false;
     // Docker's own script does not know every system
-    if (!client.checked || chosen?.docker === false) docker.checked = false;
-    docker.disabled = !can || !client.checked || chosen?.docker === false;
+    if (chosen?.docker === false) docker.checked = false;
+    docker.disabled = chosen?.docker === false;
     // a desktop needs room: less is not offered; so does Windows
     const least = win ? { memory: 4096, disk: 64 } : vm ? chosen?.least : null;
     disk.min = String(least?.disk ?? (vm ? 4 : 1));

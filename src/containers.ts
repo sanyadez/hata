@@ -498,7 +498,7 @@ export async function create(input: Record<string, unknown>, by: string): Promis
     if (c.client && !gateway) throw new AppError("containers.noNetwork", 409);
     const before = new Set(machines().map((m) => m.id));
     const line = c.client ? `curl -fsSL http://${gateway}:${listenAddress().port}/client/${(await invite(by)).code} | sh` : "";
-    log(c.docker ? "Putting Docker and Hata's client in" : "Putting Hata's client in");
+    log(c.docker && c.client ? "Putting Docker and Hata's client in" : c.docker ? "Putting Docker in" : "Putting Hata's client in");
     const ran = await runLogged(["incus", "exec", c.name, "--", "sh", "-c", setupScript({ ...c, family: c.image.family, dockerFrom: c.image.docker }, line)], log, 30 * 60_000);
     if (ran.code !== 0) throw new AppError("containers.setupFailed", 409, { name: c.name });
     if (!c.client) return;
