@@ -1443,9 +1443,18 @@ const MINUTE_MS = 60_000;
 function paintTrend(trend) {
   const box = document.getElementById("own-trend");
   if (!box || !trend || box.dataset.at === String(trend.at)) return;
-  // a card of Home just put on the page has no height yet: the chart is drawn to it a frame later
-  if (box.closest(".pg-card") && box.clientHeight < 60 && !box.dataset.waited) return void ((box.dataset.waited = "1"), requestAnimationFrame(() => paintTrend(trend)));
   box.dataset.at = String(trend.at);
+  // the chart is as high as its card of Home lets it be: drawn again when the card gets its size or is resized
+  if (!box.hataWatch && typeof ResizeObserver === "function") {
+    let high = box.clientHeight;
+    box.hataWatch = new ResizeObserver(() => {
+      if (Math.abs(box.clientHeight - high) < 12) return;
+      high = box.clientHeight;
+      box.dataset.at = "";
+      paintTrend(state.overview?.system?.trend);
+    });
+    box.hataWatch.observe(box);
+  }
   const n = trend.cpu.length;
   const points = trend.cpu.map((cpu, i) => ({ t: trend.at - (n - 1 - i) * MINUTE_MS, cpu, memory: trend.memory[i] }));
   const series = [
