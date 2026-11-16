@@ -8,6 +8,7 @@
  * on the phone, anything that scrolls sideways.
  *
  * The browser is Chrome or Chromium found on the machine (`HATA_CHROME` names one); nothing is installed.
+ * Words written straight on the background fail it too: everything stands on a card.
  * `bun run smoke --shots <folder>` also keeps a picture of every page.
  */
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
@@ -175,18 +176,27 @@ await until("the page after signing in", () => js<boolean>(`!document.querySelec
 
 // --- The pages --------------------------------------------------------------------------------------
 
-/** The sections of Settings, read from the page's own list so a new one is walked without a word here */
+/** The tabs of every section of the page, read from the page's own list so a new one is walked without a word here */
 const appJs = readFileSync(join(root, "src", "ui", "app.js"), "utf8");
-const sectionList = /const SECTIONS = \[([\s\S]*?)\n\];/.exec(appJs)?.[1] ?? "";
-const sections = [...sectionList.matchAll(/\{ id: "([a-z]+)"/g)].map((m) => m[1]!);
-if (sections.length < 10) giveUp("Could not read the sections of Settings from app.js.");
+const areaList = /const AREAS = \{([\s\S]*?)\n\};/.exec(appJs)?.[1] ?? "";
+const bases = Object.fromEntries([.../(\w+): "(#[^"]+)"/g[Symbol.matchAll](/const AREA_BASE = \{([^}]*)\}/.exec(appJs)?.[1] ?? "")].map((m) => [m[1]!, m[2]!]));
+const tabs: string[] = [];
+let area = "";
+for (const line of areaList.split("\n")) {
+  const opened = /^  (\w+): \[/.exec(line);
+  if (opened) area = opened[1]!;
+  for (const m of line.matchAll(/\{ id: "([a-z]+)"(?:, hash: "([^"]+)")?/g)) tabs.push(m[2] ?? `${bases[area]}/${m[1]}`);
+}
+if (tabs.length < 20 || tabs.some((x) => x.startsWith("undefined"))) giveUp("Could not read the sections of the page from app.js.");
 
 const ROUTES = [
   "#/welcome/server", "#/welcome/existing", "#/welcome/data", "#/welcome/backups", "#/welcome/modules", "#/welcome/apps",
-  "#/", "#/store", "#/files", "#/files/", "#/hata", "#/trash", "#/activity", "#/import",
-  "#/machines", "#/containers", "#/containers/settings", "#/integrations", "#/ha", "#/assistant",
-  ...sections.map((id) => `#/settings/${id}`),
-  "#/settings/storage/fs", "#/settings/storage/fills",
+  "#/", "#/files", "#/files/", "#/hata", "#/trash", "#/activity",
+  "#/machines", "#/containers", "#/containers/settings", "#/machines/this/apps", "#/house", "#/integrations", "#/assistant", "#/tv", "#/terminal",
+  ...new Set(tabs),
+  "#/settings/users/access", "#/settings/users/invites", "#/settings/users/signins",
+  // addresses from before the sections moved out of Settings
+  "#/settings/docker", "#/settings/storage/fs", "#/settings/ports",
 ];
 
 /** Whether the page shows something: the view of the usual frame, or the first run's own frame */
@@ -218,6 +228,29 @@ const SIDEWAYS = `(() => {
   return out.slice(0, 8);
 })()`;
 
+/** Words of the page that lie straight on the background: everything is written on a card */
+const BARE = `(() => {
+  const view = document.querySelector("#view");
+  if (!view) return [];
+  // as with a picture behind the page: what the page backs for that case counts as covered
+  document.documentElement.classList.add("has-wallpaper");
+  const out = new Set();
+  const walker = document.createTreeWalker(view, NodeFilter.SHOW_TEXT);
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    const text = node.textContent.trim();
+    if (text.length < 2 || !node.parentElement.getClientRects().length) continue;
+    let covered = false;
+    let shown = true;
+    for (let el = node.parentElement; el && el !== view; el = el.parentElement) {
+      const style = getComputedStyle(el);
+      if (style.display === "none" || style.visibility === "hidden") shown = false;
+      if (!/^(rgba\\(0, 0, 0, 0\\)|transparent)$/.test(style.backgroundColor)) covered = true;
+    }
+    if (shown && !covered) out.add(text.slice(0, 60));
+  }
+  return [...out].slice(0, 5);
+})()`;
+
 const failures: string[] = [];
 async function walk(label: string, phone: boolean): Promise<void> {
   for (const route of ROUTES) {
@@ -236,6 +269,7 @@ async function walk(label: string, phone: boolean): Promise<void> {
     }
     if (!(await js<boolean>(DRAWN))) found.push("the page is empty");
     if (phone) for (const wide of await js<string[]>(SIDEWAYS)) found.push(`scrolls sideways: ${wide}`);
+    if (!route.startsWith("#/welcome")) for (const words of await js<string[]>(BARE)) found.push(`written outside a card: “${words}”`);
     if (shotsAt) {
       mkdirSync(shotsAt, { recursive: true });
       const picture = await send("Page.captureScreenshot", { format: "png" });

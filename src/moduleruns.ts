@@ -28,6 +28,7 @@ import { qbitServers, startQbittorrent } from "./qbittorrent";
 import { lookAtPools, poolsReport, startPools } from "./raid";
 import { startShares } from "./shares";
 import { startSnapraid } from "./snapraid";
+import { tvEnabled, tvSetUp, watchTv } from "./television";
 import { installed as tailscaleInstalled, report as tailscaleReport } from "./tailscale";
 import { inUse as wireguardInUse } from "./wireguard";
 
@@ -92,6 +93,7 @@ const RUNS: Record<ModuleId, Run> = {
     },
     uses: () => [...some("homeAssistant", homeAssistants().length), ...some("qbit", qbitServers().length), ...some("frigate", frigateServers().length)],
   },
+  tv: { start: watchTv, uses: () => when("tv", tvEnabled()), was: tvSetUp },
   assistant: { uses: () => some("keys", listKeys().length), was: () => assistantReady(assistantConfig()) },
 };
 

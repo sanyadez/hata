@@ -30,6 +30,7 @@ const ICONS = {
   grid: "M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z",
   modules: "M4 4h6v6H4zM4 14h6v6H4zM14 14h6v6h-6zM17 4v6M14 7h6",
   chart: "M4 4v16h16M7 15l4-5 3 3 5-6",
+  gear: "M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z",
   sliders: "M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1M15 4v4M9 10v4M17 16v4",
   search: "M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM20 20l-4-4",
   cpu: "M7 7h10v10H7zM10 3v4M14 3v4M10 17v4M14 17v4M3 10h4M3 14h4M17 10h4M17 14h4",
@@ -41,8 +42,16 @@ const ICONS = {
   plus: "M12 5v14M5 12h14",
   external: "M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5",
   refresh: "M20 11a8 8 0 0 0-14.9-3M4 5v3h3M4 13a8 8 0 0 0 14.9 3M20 19v-3h-3",
+  tv: "M3 5h18v12H3zM8 21h8M12 17v4",
+  back30: "M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5",
+  fwd30: "M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5",
+  volume: "M11 5 6 9H3v6h3l5 4zM15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13",
+  volumeOff: "M11 5 6 9H3v6h3l5 4zM16 9.5l5 5M21 9.5l-5 5",
+  lines: "M4 6h16M4 12h16M4 18h16",
+  pause: "M8 5v14M16 5v14",
   stop: "M6 6h12v12H6z",
   play: "M7 5l12 7-12 7z",
+  menu: "M4 6h16M4 12h16M4 18h16",
   more: "M5 12h.01M12 12h.01M19 12h.01",
   logs: "M6 3h9l4 4v14H6zM14 3v5h5M9 13h7M9 17h7",
   code: "M9 8l-4 4 4 4M15 8l4 4-4 4",
@@ -67,6 +76,7 @@ const ICONS = {
   store: "M5 8h14l-1 12H6zM9 8V6a3 3 0 0 1 6 0v2",
   archive: "M3 5h18v4H3zM5 9v10h14V9M10 13h4",
   undo: "M9 7 4 12l5 5M4 12h11a5 5 0 0 1 0 10h-2",
+  keys: "M3 7a1 1 0 0 1 1-1h16a1 1 0 0 1 1 1v10a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1zM7 10h.01M11 10h.01M15 10h.01M7 14h10",
   lock: "M6 11h12v9H6zM8.5 11V8a3.5 3.5 0 0 1 7 0v3",
   bell: "M6 17V11a6 6 0 0 1 12 0v6l2 2H4zM10 21h4",
   "bell-off": "M6 17V11a6 6 0 0 1 9-5.2M18 11v6l2 2H4M10 21h4M4 4l16 16",
@@ -241,6 +251,56 @@ function openDialog(className, ...content) {
   return dialog;
 }
 
+/**
+ * A window that comes up from the bottom of a phone is closed by pulling it down: by the bar on its
+ * top from anywhere, by the rest of it while it is not scrolled. Pulled a little it springs back;
+ * pulled far, or flicked, it goes. A slider under the finger is the slider's.
+ */
+function pullToClose(dialog) {
+  let pull = null;
+  const settle = (to, then) => {
+    dialog.style.transition = "transform 0.18s ease-out";
+    dialog.style.transform = to;
+    setTimeout(() => ((dialog.style.transition = ""), then?.()), 190);
+  };
+  dialog.addEventListener("touchstart", (e) => {
+    pull = null;
+    if (!phone.matches || e.touches.length !== 1) return;
+    const touch = e.touches[0];
+    const top = touch.clientY - dialog.getBoundingClientRect().top < 64;
+    if (!top && (dialog.scrollTop > 0 || e.target.closest?.("input[type=range], select, textarea"))) return;
+    pull = { x: touch.clientX, y: touch.clientY, at: performance.now(), by: 0, on: false };
+  }, { passive: true });
+  dialog.addEventListener("touchmove", (e) => {
+    if (!pull) return;
+    const [dx, dy] = [e.touches[0].clientX - pull.x, e.touches[0].clientY - pull.y];
+    if (!pull.on) {
+      // sideways or upwards it is something else: a slider's neighbour, the window's own scroll
+      if (Math.abs(dx) > 10 || dy < -6) return void (pull = null);
+      if (dy < 10) return;
+      pull.on = true;
+      dialog.classList.add("pulled");
+    }
+    if (e.cancelable) e.preventDefault();
+    pull.by = Math.max(0, dy);
+    dialog.style.transform = `translateY(${pull.by}px)`;
+  }, { passive: false });
+  const end = (e) => {
+    const was = pull;
+    pull = null;
+    if (!was?.on) return;
+    // the finger let go over a button: that is not a press of it
+    const swallow = (click) => (click.stopPropagation(), click.preventDefault());
+    dialog.addEventListener("click", swallow, { capture: true, once: true });
+    setTimeout(() => (dialog.removeEventListener("click", swallow, { capture: true }), dialog.classList.remove("pulled")), 400);
+    const fast = was.by / Math.max(1, performance.now() - was.at) > 0.6 && was.by > 40;
+    if (e.type === "touchend" && (fast || was.by > Math.min(160, dialog.offsetHeight / 3))) settle("translateY(100%)", () => dialog.close());
+    else settle("");
+  };
+  dialog.addEventListener("touchend", end);
+  dialog.addEventListener("touchcancel", end);
+}
+
 /** Replaces what an element holds; like h(), it takes arrays and skips what is false or missing */
 const put = (el, ...children) => el.replaceChildren(...h("div", null, children).childNodes);
 
@@ -332,6 +392,8 @@ function parseRoute() {
   if (parts[0] === "connect" && parts[1]) return { view: "connect", id: parts[1] };
   if (parts[0] === "welcome" && isAdmin()) return { view: "welcome", step: WELCOME_STEPS.includes(parts[1]) && parts[1] !== "admin" ? parts[1] : "server" };
   if (parts[0] === "store" && state.user?.role !== "guest") return { view: "store" };
+  if (parts[0] === "apps" && !parts[1] && state.user?.role !== "guest") return { view: "apps" };
+  if (parts[0] === "apps-options" && isAdmin()) return areaRoute("apps", "options");
   // "#/files" is the data root, wherever it is; "#/files/" is the root of the server
   // "#/files/@<machine>/<folders>" is a folder of another machine
   if (parts[0] === "files" && mayFiles() && parts[1]?.startsWith("@")) return { view: "files", machine: parts[1].slice(1), path: "/" + parts.slice(2).join("/") };
@@ -339,24 +401,150 @@ function parseRoute() {
   if (parts[0] === "trash" && mayFiles()) return { view: "trash" };
   if (parts[0] === "hata" && mayFiles()) return { view: "myhata" };
   if (parts[0] === "activity" && isAdmin()) return { view: "activity" };
+  if (parts[0] === "tv" && isAdmin()) return { view: "tv", hash: "#/house/tv" };
+  // Hata the house: Home Assistant, the cameras, the TV — each a tab; a torrent client that is nobody's app too
+  if ((parts[0] === "house" || parts[0] === "integrations" || (parts[0] === "ha" && !parts[1]) || (parts[0] === "settings" && parts[1] === "integrations")) && isAdmin()) {
+    const tab = (parts[0] === "house" && areaTabs("house").find((x) => x.id === parts[1])) || areaTabs("house")[0];
+    if (!tab) return { view: "ha", id: "", hash: "#/house" };
+    const id = parts[0] === "house" ? (parts[2] ?? "") : "";
+    return tab.view === "tv" ? { view: "tv", hash: "#/house/tv" } : { view: tab.view, id, house: true, hash: tab.hash + (id ? "/" + id : "") };
+  }
   // both live in Settings; their own old addresses still lead there
-  if ((parts[0] === "backups" || (parts[0] === "settings" && parts[1] === "backups")) && isAdmin()) return { view: "backups" };
-  if ((parts[0] === "users" || (parts[0] === "settings" && parts[1] === "users")) && isAdmin()) return { view: "users" };
+  if ((parts[0] === "backups" || (parts[0] === "settings" && parts[1] === "backups")) && isAdmin()) return areaRoute("backups", parts[0] === "backups" ? parts[1] : parts[2]);
+  if ((parts[0] === "users" || (parts[0] === "settings" && parts[1] === "users")) && isAdmin()) return areaRoute("settings", "users", parts[0] === "users" ? parts[1] : parts[2]);
   if (parts[0] === "import" && isAdmin()) return { view: "import" };
   if (parts[0] === "terminal" && isAdmin()) return { view: "terminal" };
-  if (parts[0] === "assistant" && isAdmin()) return { view: "assistant" };
-  if (parts[0] === "ha" && parts[1] && isAdmin()) return { view: "ha", id: parts[1] };
+  // the assistant is a window over any page, not a page: its old address opens it over Home
+  if (parts[0] === "assistant" && isAdmin()) return { view: "home", hash: "#/", assistant: true };
+  if (parts[0] === "ha" && parts[1] && isAdmin()) return { view: "ha", id: parts[1], hash: `#/house/ha/${parts[1]}` };
   if (parts[0] === "qbit" && parts[1] && isAdmin()) return { view: "qbit", id: parts[1] };
-  if (parts[0] === "frigate" && parts[1] && isAdmin()) return { view: "frigate", id: parts[1] };
-  if ((parts[0] === "integrations" || parts[0] === "ha") && isAdmin()) return { view: "integrations" };
-  if (parts[0] === "guest" && parts[3] && isAdmin()) return { view: "guest", host: parts[1], guest: `${parts[2]}/${parts[3]}` };
-  if (parts[0] === "containers" && parts[1] === "i" && parts[2] && isAdmin()) return { view: "instance", name: parts[2], tab: parts[3] === "terminal" ? "terminal" : "overview" };
-  if (parts[0] === "containers" && isAdmin()) return { view: "containers", tab: parts[1] === "settings" ? "settings" : "list" };
+  if (parts[0] === "frigate" && parts[1] && isAdmin()) return { view: "frigate", id: parts[1], hash: `#/house/cameras/${parts[1]}` };
+  if ((parts[0] === "storage" || parts[0] === "network") && isAdmin()) return areaRoute(parts[0], parts[1], parts[2]);
+  if (parts[0] === "machines" && parts[1] === "this" && isAdmin()) return areaRoute("server", parts[2], parts[3]);
+  // a container, a virtual machine or a guest keeps its address when Hata's client is put on it: the client only adds tabs
+  if (parts[0] === "guest" && parts[3] && isAdmin()) {
+    const base = `#/guest/${parts[1]}/${parts[2]}/${parts[3]}`;
+    const m = machinesUi.list?.machines.find((y) => y.pve?.host === parts[1] && y.pve?.id === `${parts[2]}/${parts[3]}`);
+    return m ? { view: "machine", id: m.id, tab: machineTab(parts[4]), base } : { view: "guest", host: parts[1], guest: `${parts[2]}/${parts[3]}`, tab: parts[4] };
+  }
+  if (parts[0] === "containers" && parts[1] === "i" && parts[2] && isAdmin()) {
+    const base = `#/containers/i/${parts[2]}`;
+    const id = incusUi.data?.containers?.find((c) => c.name === parts[2])?.machine;
+    return id && machinesUi.list?.machines.some((y) => y.id === id) ? { view: "machine", id, tab: machineTab(parts[3]), base } : { view: "instance", name: parts[2], tab: parts[3] === "terminal" ? "terminal" : "overview", asked: parts[3] };
+  }
+  if (parts[0] === "containers" && isAdmin()) return areaRoute("server", "containers", parts[1]);
   if (parts[0] === "proxmox" && parts[1] && isAdmin()) return { view: "proxmox", id: parts[1], tab: PVE_TABS.includes(parts[2]) ? parts[2] : "overview" };
-  if (parts[0] === "machines" && isAdmin()) return parts[1] ? { view: "machine", id: parts[1], tab: parts[2] === "docker" ? "containers" : MACHINE_TABS.includes(parts[2]) ? parts[2] : "overview" } : { view: "machines" };
+  if (parts[0] === "machines" && isAdmin()) return parts[1] ? { view: "machine", id: parts[1], tab: machineTab(parts[2]) } : { view: "machines" };
+  // an app of another computer: its own page, like any app's
+  if (parts[0] === "apps" && parts[1]?.includes("@") && isAdmin()) return { view: "mapp", name: parts[1].split("@")[0], machine: parts[1].split("@")[1] };
   if (parts[0] === "apps" && parts[1]) return { view: "app", name: parts[1], tab: isAdmin() && ["settings", "logs", "compose", "backups", "terminal"].includes(parts[2]) ? parts[2] : "overview" };
-  if (parts[0] === "settings") return { view: "settings", section: sections().some((item) => item.id === parts[1]) ? parts[1] : "account", tab: parts[2] };
+  if (parts[0] === "settings") {
+    // a section that moved out of Settings is found where it lives now: its old address still leads to it
+    const moved = Object.keys(AREAS).find((area) => area !== "settings" && AREAS[area].some((tab) => tab.sections?.includes(parts[1]) && tabAllowed(tab)));
+    if (moved && !AREAS.settings.some((tab) => tab.id === parts[1])) {
+      const tabs = AREAS[moved].filter((tab) => tab.sections?.includes(parts[1]));
+      return areaRoute(moved, (tabs.find((tab) => tab.tab === parts[2]) ?? tabs[0]).id, parts[2]);
+    }
+    return areaRoute("settings", parts[1] === "agents" ? "assistant" : parts[1], parts[2]);
+  }
   return { view: "home" };
+}
+
+/** The sections of the page and the tabs in the head of each. A tab shows sections of the settings (the first names it for the
+ * rest of the page) or is a view of its own; `tab` is the part of a long section it opens */
+const AREAS = {
+  apps: [
+    { id: "installed", hash: "#/apps", view: "apps" },
+    { id: "store", hash: "#/store", view: "store" },
+    { id: "import", hash: "#/import", view: "import", admin: true },
+    { id: "options", hash: "#/apps-options", sections: ["apps", "stores"] },
+  ],
+  storage: [
+    { id: "disks", sections: ["storage"], tab: "disks" },
+    { id: "fs", sections: ["storage"], tab: "fs" },
+    { id: "fills", sections: ["storage"], tab: "fills" },
+    { id: "protection", sections: ["protection"] },
+    { id: "shares", sections: ["shares"] },
+    { id: "places", sections: ["places"] },
+  ],
+  backups: [
+    { id: "overview", hash: "#/backups", view: "backups", admin: true },
+    { id: "history", view: "backups", admin: true },
+    { id: "schedule", view: "backups", admin: true },
+    { id: "offsite", view: "backups", admin: true, module: "offsite" },
+  ],
+  house: [
+    { id: "ha", hash: "#/house/ha", view: "ha", module: "integrations" },
+    { id: "cameras", hash: "#/house/cameras", view: "frigate", module: "integrations" },
+    { id: "tv", hash: "#/house/tv", view: "tv", module: "tv" },
+    { id: "torrents", hash: "#/house/torrents", view: "qbit", module: "integrations", when: () => foreignTorrents() },
+  ],
+  network: [
+    { id: "connections", sections: ["network"] },
+    { id: "remote", sections: ["remote"] },
+    { id: "addresses", sections: ["https", "ports"] },
+    { id: "dns", sections: ["dns"] },
+    { id: "adblock", sections: ["adblock"] },
+  ],
+  server: [
+    { id: "overview", hash: "#/machines/this", view: "server" },
+    { id: "apps", view: "server" },
+    { id: "docker", sections: ["docker"] },
+    { id: "containers", view: "containers", module: "containers" },
+    { id: "files", hash: "#/files/", link: true },
+    { id: "system", sections: ["tools"] },
+  ],
+  settings: [
+    { id: "account", sections: ["account"] },
+    { id: "users", hash: "#/settings/users", view: "users", admin: true },
+    { id: "general", sections: ["general"] },
+    { id: "appearance", sections: ["appearance"] },
+    { id: "notifications", sections: ["notifications"] },
+    { id: "modules", sections: ["modules"] },
+    { id: "assistant", sections: ["assistant", "agents"] },
+    { id: "about", sections: ["about"] },
+  ],
+};
+const AREA_BASE = { backups: "#/backups", storage: "#/storage", network: "#/network", server: "#/machines/this", settings: "#/settings" };
+const tabHash = (area, tab) => tab.hash ?? `${AREA_BASE[area]}/${tab.id}`;
+/** Whether this person may open the tab at all, and whether it stands among the tabs: one of a module that is off does not */
+const tabAllowed = (tab) => (tab.sections ? SECTIONS.some((item) => item.id === tab.sections[0] && (!item.admin || isAdmin())) : (!tab.admin || isAdmin()) && state.user?.role !== "guest");
+const tabShown = (tab) => tabAllowed(tab) && (!tab.module || hasModule(tab.module)) && (!tab.when || tab.when()) && (!tab.sections || tab.sections.some((id) => !SECTION_MODULE[id] || hasModule(SECTION_MODULE[id])));
+const areaTabs = (area) => AREAS[area].filter(tabShown);
+/** The tab of a section of the settings, wherever it lives now */
+const sectionArea = (section) => Object.keys(AREAS).find((area) => AREAS[area].some((x) => x.sections?.includes(section))) ?? "settings";
+function sectionHash(section) {
+  for (const area of Object.keys(AREAS)) {
+    const tab = AREAS[area].find((x) => x.sections?.includes(section));
+    if (tab) return tabHash(area, tab);
+  }
+  return "#/settings";
+}
+
+function areaRoute(area, id, rest) {
+  const tab = AREAS[area].find((x) => x.id === id && !x.link && (x.sections ? tabAllowed(x) : tabShown(x))) ?? areaTabs(area)[0];
+  if (!tab) return { view: "home" };
+  // the containers of this server keep their own two parts: the list and what they stand on
+  if (tab.view === "containers") return { view: "containers", tab: rest === "settings" ? "settings" : "list", hash: tabHash(area, tab) + (rest === "settings" ? "/settings" : "") };
+  // people and what they may open: four parts under one head
+  if (tab.view === "users") return ((part) => ({ view: "users", tab: tab.id, part, hash: tabHash(area, tab) + (part === "people" ? "" : "/" + part) }))(USER_PARTS.includes(rest) ? rest : "people");
+  if (tab.view) return { view: tab.view, tab: tab.id, hash: tabHash(area, tab) };
+  return { view: "settings", area, at: tab.id, section: tab.sections[0], sections: tab.sections, tab: tab.tab ?? rest, hash: tabHash(area, tab) + (!tab.tab && rest ? "/" + rest : "") };
+}
+/** Whether the page shows this section of the settings: a tab may hold two */
+const showsSection = (id) => state.route.view === "settings" && state.route.sections.includes(id);
+/** The section of the page a view belongs to: what the menu marks */
+function areaOf(route = state.route) {
+  const view = route.view;
+  if (view === "settings") return route.area === "server" ? "machines" : route.area;
+  if (["apps", "store", "import", "app", "mapp"].includes(view)) return "apps";
+  if (["files", "trash", "myhata"].includes(view)) return "files";
+  if (["machines", "machine", "server", "proxmox", "containers", "instance", "guest", "terminal"].includes(view)) return "machines";
+  if (view === "qbit") return route.house || !torrentsApp(route.id) ? "house" : "apps";
+  if (["integrations", "ha", "frigate", "tv"].includes(view)) return "house";
+  if (view === "backups") return "backups";
+  if (view === "users") return "settings";
+  return view === "home" || view === "activity" ? "home" : "";
 }
 
 function go(hash) {
@@ -384,6 +572,8 @@ function onRoute() {
   if (/^#(setup|invite)=/.test(location.hash)) return;
   leaveView();
   state.route = parseRoute();
+  // an older address of a section: the bar shows where it lives now
+  if (state.route.hash && state.user && location.hash !== state.route.hash) history.replaceState(history.state, "", state.route.hash);
   if (state.route.view === "files") stepTrail();
   else filesUi.trail = null;
   // an install onto a machine is offered while the store is on screen
@@ -399,11 +589,15 @@ function onRoute() {
   if (state.route.view === "users") void loadUsers();
   if (state.route.view === "import") void loadImport();
   if (state.route.view === "welcome") void loadWelcome();
+  if (state.route.view === "tv") void loadTv();
   if (state.route.view === "app") void loadApp();
   if (["machines", "machine", "proxmox", "guest", "instance", "containers"].includes(state.route.view)) void loadMachines();
   if (state.route.view === "machines") void loadPve();
-  if (["machines", "containers", "machine", "instance"].includes(state.route.view)) void loadContainers();
+  if (["machines", "containers", "machine", "instance", "server"].includes(state.route.view) || state.route.area === "server") void loadContainers();
+  if (state.route.view === "guest") void loadContainers();
+  if (["server", "containers"].includes(state.route.view) || state.route.area === "server") void loadTree();
   if (state.route.view !== "settings") settingsUi.find = "";
+  if (state.route.assistant && hasModule("assistant")) openAssistant();
   window.scrollTo(0, 0);
 }
 window.addEventListener("hashchange", onRoute);
@@ -446,6 +640,12 @@ function startEvents() {
         else if (state.route.view === "files") void loadFiles?.();
         else if (state.route.view === "myhata") void loadMyHata();
       }, 1200);
+    } else if (event.type === "tv") {
+      if ("playing" in event) {
+        state.tvNow = { on: !!event.on, screen: !!event.screen, streams: !!event.streams, playing: event.playing };
+        paintTvNow();
+      }
+      if (state.route.view === "tv") void loadTv();
     } else if (event.type === "modules") {
       void loadModules().then(render);
     } else if (event.type === "assistant") {
@@ -465,11 +665,11 @@ function startEvents() {
     } else if (event.type === "approvals") {
       void loadApprovals();
     } else if (event.type === "tailscale") {
-      if (state.route.view === "settings" && state.route.section === "remote") void loadRemote();
+      if (state.route.view === "settings" && showsSection("remote")) void loadRemote();
     } else if (event.type === "sysupdates") {
       sysUpdatesEvent(event.at ?? "");
     } else if (event.type === "network") {
-      if (state.route.view === "settings" && state.route.section === "network") void loadNetwork();
+      if (state.route.view === "settings" && showsSection("network")) void loadNetwork();
     } else if (event.type === "store" && state.route.view === "store") {
       void loadStore();
     }
@@ -500,10 +700,14 @@ async function refresh() {
   } catch {
     return;
   }
+  state.tvNow = state.overview.tv ?? null;
+  paintTvNow();
   seedJobs(state.overview.jobs ?? []);
   failedTiles(state.overview);
   if (state.route.view === "home") renderHomeBody();
   if (state.route.view === "store") renderStoreList();
+  if (state.route.view === "apps") renderAppsBody();
+  if (state.route.view === "server") state.route.tab === "apps" ? renderAppsBody() : renderServerBody();
   if (state.route.view === "app") void loadApp(true);
   if (state.route.view === "machine" && state.route.tab === "apps") void loadMachineApps();
   if (state.route.view === "backups") void loadBackups();
@@ -830,12 +1034,13 @@ new MutationObserver((records) => {
 
 const NAV = [
   { view: "home", hash: "#/", icon: "home" },
-  { view: "store", hash: "#/store", icon: "grid", guest: false },
+  { view: "apps", hash: "#/apps", icon: "grid", guest: false },
   { view: "files", hash: "#/files", icon: "folder", files: true },
   { view: "machines", hash: "#/machines", icon: "server", admin: true },
-  { view: "integrations", hash: "#/integrations", icon: "link", admin: true, integrations: true },
-  { view: "assistant", hash: "#/assistant", icon: "chat", admin: true, assistant: true },
-  { view: "settings", hash: "#/settings", icon: "sliders" },
+  { view: "house", hash: "#/house", icon: "bulb", admin: true, modules: ["integrations", "tv"] },
+  { view: "storage", hash: "#/storage", icon: "disk", admin: true },
+  { view: "backups", hash: "#/backups", icon: "archive", admin: true },
+  { view: "network", hash: "#/network", icon: "network", admin: true },
 ];
 
 /** Members look at the apps; everything that changes the server is an administrator's */
@@ -845,7 +1050,7 @@ const isAdmin = () => state.user?.role === "admin" && !state.user.mustTwoFactor;
 const hasModule = (id) => !state.modules || state.modules[id] === true;
 /** The sections of Settings and the pages that are a module's */
 const SECTION_MODULE = { protection: "raid", places: "netplaces", shares: "shares", remote: "remote", ports: "domains", dns: "dns", adblock: "adblock", integrations: "integrations", agents: "assistant", assistant: "assistant" };
-const VIEW_MODULES = { machines: ["machines", "proxmox", "containers"], machine: ["machines"], proxmox: ["proxmox"], guest: ["proxmox"], containers: ["containers"], instance: ["containers"], integrations: ["integrations"], ha: ["integrations"], qbit: ["integrations"], frigate: ["integrations"], assistant: ["assistant"], connect: ["assistant"] };
+const VIEW_MODULES = { mapp: ["machines"], machine: ["machines"], proxmox: ["proxmox"], guest: ["proxmox"], containers: ["containers"], instance: ["containers"], integrations: ["integrations"], ha: ["integrations"], qbit: ["integrations"], frigate: ["integrations"], assistant: ["assistant"], connect: ["assistant"], tv: ["tv"] };
 /** Files are an administrator's, and theirs with whom a folder is shared — only those folders then */
 const mayFiles = () => isAdmin() || !!state.user?.files;
 /** The folders shared with one who is not an administrator, of this server or of a machine; null for an administrator */
@@ -864,42 +1069,62 @@ async function loadMine() {
   state.favorites = mine.favorites;
 }
 
-const navCurrent = () => (["ha", "qbit", "frigate"].includes(state.route.view) ? "integrations" : ["machine", "proxmox", "containers", "instance", "guest"].includes(state.route.view) ? "machines" : state.route.view === "backups" || state.route.view === "users" ? "settings" : state.route.view === "app" ? "home" : state.route.view === "import" ? "store" : state.route.view === "trash" || state.route.view === "myhata" ? "files" : state.route.view);
-const navItems = () => NAV.filter((item) => (!item.admin || isAdmin()) && (!VIEW_MODULES[item.view] || VIEW_MODULES[item.view].some(hasModule)) && (!item.integrations || (state.overview?.ha?.servers ?? []).length > 0 || state.overview?.qbit?.count > 0 || state.overview?.frigate?.servers?.length > 0) && (!item.files || mayFiles()) && (!item.assistant || !!(assistantUi.config?.ready ?? state.overview?.assistant)) && (item.guest !== false || state.user.role !== "guest"));
+const navCurrent = () => areaOf();
+const navItems = () => NAV.filter((item) => (!item.admin || isAdmin()) && (!item.modules || item.modules.some(hasModule)) && (!item.files || mayFiles()) && (item.guest !== false || state.user.role !== "guest"));
+
+/** Which section of the page an item of "Needs attention" is about, by its code */
+const ATTENTION_AREAS = [
+  [/^(machine|pve|containers|docker|memory|temperature)\b/, "machines"],
+  [/^(ha|frigate)\b/, "house"],
+  [/^(disk|smart|absent|array|raid|share|netplace)\b/, "storage"],
+  [/^(offsite|failed\.backup|backup)\b/, "backups"],
+  [/^(network|internet|dns|https)\b/, "network"],
+];
+const attentionArea = (item) => ATTENTION_AREAS.find(([re]) => re.test(item.code))?.[1] ?? (item.app || /^(restarting|partial|update|failed|qbit)\b/.test(item.code) ? "apps" : "");
+/** How many things need attention in a section: the number by its name in the menu */
+function navCount(view) {
+  if (!isAdmin() || view === "home") return 0;
+  return (state.overview?.attention ?? []).filter((item) => attentionArea(item) === view).length;
+}
 
 function navLinks(className, items = navItems()) {
   const current = navCurrent();
-  return items.map((item) =>
-    h("a", { class: className + (current === item.view ? " active" : ""), href: item.hash, title: t("nav." + item.view), "aria-current": current === item.view ? "page" : null }, icon(item.icon), h("span", null, t("nav." + item.view))),
-  );
+  return items.map((item) => {
+    const n = navCount(item.view);
+    return h("a", { class: className + (current === item.view ? " active" : ""), href: item.hash, title: t("nav." + item.view), "aria-current": current === item.view ? "page" : null }, icon(item.icon), h("span", null, t("nav." + item.view)), n > 0 && h("b", { class: "nav-count", title: t("nav.needs", { n }) }, String(n)));
+  });
 }
 
-/** The bar at the bottom of a phone holds five: past that, the first four and "More" with the rest */
-const BOTTOM_SLOTS = 5;
-
+/** The bar at the bottom of a phone: the first four sections and "Menu" with everything */
 function bottomLinks() {
   const items = navItems();
-  if (items.length <= BOTTOM_SLOTS) return navLinks("bottom-link", items);
-  const rest = items.slice(BOTTOM_SLOTS - 1);
-  const here = rest.some((item) => item.view === navCurrent());
-  const more = h("button", { type: "button", class: "bottom-link" + (here ? " active" : ""), "aria-haspopup": "menu", onclick: (e) => moreMenu(e.currentTarget, rest) }, icon("more"), h("span", null, t("nav.more")));
-  return [...navLinks("bottom-link", items.slice(0, BOTTOM_SLOTS - 1)), more];
+  const here = !items.slice(0, 4).some((item) => item.view === navCurrent()) && navCurrent() !== "";
+  const more = h("button", { type: "button", class: "bottom-link" + (here ? " active" : ""), "aria-haspopup": "dialog", onclick: () => navSheet() }, icon("menu"), h("span", null, t("nav.menu")));
+  return [...navLinks("bottom-link", items.slice(0, 4)), more];
 }
 
-function moreMenu(anchor, items) {
+/** "Menu" of a phone: the search, every section, the terminal, Settings and the person */
+function navSheet(search = false) {
   let dialog;
   const current = navCurrent();
+  const tile = (hash, iconName, label, active, n = 0) => h("a", { class: "sheet-tile" + (active ? " active" : ""), href: hash, onclick: () => dialog.close() }, icon(iconName), h("span", null, label), n > 0 && h("b", { class: "nav-count" }, String(n)));
+  const field = globalSearch(() => dialog.close());
   dialog = openDialog(
-    "menu dropdown nav-more",
-    items.map((item) => h("a", { class: "menu-item" + (current === item.view ? " active" : ""), href: item.hash, onclick: () => dialog.close() }, icon(item.icon), t("nav." + item.view))),
+    "nav-sheet",
+    h("div", { class: "sheet-bar" }),
+    field,
+    h(
+      "div",
+      { class: "sheet-tiles" },
+      navItems().map((item) => tile(item.hash, item.icon, t("nav." + item.view), current === item.view, navCount(item.view))),
+      isAdmin() && tile("#/terminal", "terminal", t("terminal.title"), state.route.view === "terminal"),
+      tile("#/settings", "gear", t("nav.settings"), current === "settings"),
+    ),
+    h("button", { type: "button", class: "sheet-user", onclick: (e) => userMenu(e, true) }, h("span", { class: "avatar" }, state.user.name.slice(0, 1).toUpperCase()), h("span", { class: "grow" }, h("strong", null, state.user.name), h("span", { class: "muted small block" }, t("user.role." + state.user.role))), icon("chevron")),
   );
-  // it stands over the bar, by the button's right edge
-  const at = anchor.getBoundingClientRect();
-  dialog.style.top = "auto";
-  dialog.style.bottom = document.documentElement.clientHeight - at.top + 8 + "px";
-  dialog.style.right = Math.max(8, document.documentElement.clientWidth - at.right) + "px";
-  // a finger opened it: no item is chosen yet
-  dialog.focus();
+  pullToClose(dialog);
+  if (search) field.querySelector("input").focus();
+  else dialog.focus();
 }
 
 async function signOut() {
@@ -914,23 +1139,25 @@ async function signOut() {
   render();
 }
 
-function userMenu(e) {
+function userMenu(e, above = false) {
   let dialog;
   const anchor = e.currentTarget.getBoundingClientRect();
   dialog = openDialog(
     "menu dropdown",
     h("header", null, h("span", { class: "avatar" }, state.user.name.slice(0, 1).toUpperCase()), h("div", null, h("h2", null, state.user.name), h("span", { class: "muted small" }, t("user.role." + state.user.role)))),
-    h("a", { class: "menu-item", href: "#/settings/account", onclick: () => dialog.close() }, icon("user"), t("settings.account")),
+    h("a", { class: "menu-item", href: "#/settings/account", onclick: () => (dialog.close(), document.querySelector("dialog.nav-sheet")?.close()) }, icon("user"), t("settings.account")),
     isAdmin() && h("button", { type: "button", class: "menu-item", onclick: () => (dialog.close(), serverPowerDialog("reboot")) }, icon("refresh"), t("power.reboot")),
     isAdmin() && h("button", { type: "button", class: "menu-item", onclick: () => (dialog.close(), serverPowerDialog("poweroff")) }, icon("stop"), t("power.poweroff")),
     h("button", { type: "button", class: "menu-item", onclick: () => (dialog.close(), signOut()) }, icon("signout"), t("nav.signOut")),
-  );  // it hangs under the button it was opened from, by its right edge
-  dialog.style.top = anchor.bottom + 8 + "px";
+  );
+  // it hangs under the button it was opened from, by its right edge; over it at the bottom of a phone's menu
+  if (above) dialog.style.bottom = document.documentElement.clientHeight - anchor.top + 8 + "px";
+  dialog.style.top = above ? "auto" : anchor.bottom + 8 + "px";
   dialog.style.right = Math.max(8, document.documentElement.clientWidth - anchor.right) + "px";
 }
 
 /** The search field of the header: installed apps first, then the store; for an administrator the data folder's files too */
-function globalSearch() {
+function globalSearch(after = () => {}) {
   const results = h("div", { class: "search-results", hidden: true });
   const withFiles = isAdmin();
   const input = h("input", { type: "search", placeholder: t(withFiles ? "search.placeholderFiles" : "search.placeholder"), "aria-label": t(withFiles ? "search.placeholderFiles" : "search.placeholder"), autocomplete: "off", spellcheck: false });
@@ -942,6 +1169,7 @@ function globalSearch() {
     input.value = "";
     results.hidden = true;
     input.blur();
+    after();
   };
   const openHit = (hit) => {
     done();
@@ -1041,13 +1269,24 @@ function shell(...content) {
     h(
       "header",
       { class: "top" },
-      h("a", { class: "brand", href: "#/" }, logo(), "hata"),
+      h("a", { class: "brand", href: "#/" }, logo(), h("span", null, "hata")),
+      h("strong", { class: "top-title" }, areaOf() ? t("nav." + areaOf()) : state.route.view === "terminal" ? t("terminal.title") : "hata"),
       h("nav", { class: "nav" }, navLinks("nav-link")),
-      h("div", { class: "top-right" }, globalSearch(), isAdmin() && h("a", { class: "icon-btn top-tool" + (state.route.view === "terminal" ? " active" : ""), href: "#/terminal", title: t("terminal.title"), "aria-label": t("terminal.title") }, icon("terminal")), h("button", { type: "button", class: "user", onclick: userMenu }, h("span", { class: "avatar" }, state.user.name.slice(0, 1).toUpperCase()), h("span", { class: "user-name" }, state.user.name))),
+      h(
+        "div",
+        { class: "top-right" },
+        globalSearch(),
+        h("button", { type: "button", class: "top-btn top-find", title: t("search.placeholder"), "aria-label": t("search.placeholder"), onclick: () => navSheet(true) }, icon("search")),
+        isAdmin() && h("a", { class: "top-btn top-term" + (state.route.view === "terminal" ? " active" : ""), href: "#/terminal", title: t("terminal.title"), "aria-label": t("terminal.title") }, icon("terminal")),
+        h("span", { id: "tv-now", class: "tv-now", hidden: true }),
+        h("a", { class: "top-btn top-gear" + (areaOf() === "settings" ? " active" : ""), href: "#/settings", title: t("nav.settings"), "aria-label": t("nav.settings") }, icon("gear")),
+        h("button", { type: "button", class: "top-btn top-user", title: state.user.name, "aria-label": state.user.name, "aria-haspopup": "menu", onclick: userMenu }, state.user.name.slice(0, 1).toUpperCase()),
+      ),
     ),
     h("main", { id: "view" }, state.user.mustTwoFactor && h("p", { class: "banner" }, t("twofa.mustLead"), " ", h("a", { class: "link", href: "#/settings/account" }, t("twofa.mustGo"))), content),
     h("nav", { class: "bottom-bar" }, bottomLinks()),
   );
+  paintTvNow();
 }
 
 function render() {
@@ -1058,6 +1297,9 @@ function render() {
   if (view === "connect") return renderConnect();
   if (view === "welcome") return renderWelcome();
   if (view === "store") return renderStore();
+  if (view === "apps") return renderApps();
+  if (view === "server") return renderServer();
+  if (view === "mapp") return renderMachineApp();
   if (view === "settings") return renderSettings();
   if (view === "files") return renderFiles();
   if (view === "trash") return renderTrash();
@@ -1067,13 +1309,12 @@ function render() {
   if (view === "users") return renderUsers();
   if (view === "import") return renderImport();
   if (view === "terminal") return renderTerminal();
-  if (view === "assistant") return renderAssistant();
+  if (view === "tv") return renderTv();
   if (view === "machines") return renderMachines();
   if (view === "machine") return renderMachine();
   if (view === "proxmox") return renderPve();
   if (view === "containers") return renderContainers();
   if (view === "ha") return renderHa();
-  if (view === "integrations") return renderIntegrations();
   if (view === "qbit") return renderQbit();
   if (view === "frigate") return renderFrigate();
   if (view === "instance") return renderInstance();
@@ -1206,6 +1447,17 @@ function paintTrend(trend) {
   const box = document.getElementById("own-trend");
   if (!box || !trend || box.dataset.at === String(trend.at)) return;
   box.dataset.at = String(trend.at);
+  // the chart is as high as its card of Home lets it be: drawn again when the card gets its size or is resized
+  if (!box.hataWatch && typeof ResizeObserver === "function") {
+    let high = box.clientHeight;
+    box.hataWatch = new ResizeObserver(() => {
+      if (Math.abs(box.clientHeight - high) < 12) return;
+      high = box.clientHeight;
+      box.dataset.at = "";
+      paintTrend(state.overview?.system?.trend);
+    });
+    box.hataWatch.observe(box);
+  }
   const n = trend.cpu.length;
   const points = trend.cpu.map((cpu, i) => ({ t: trend.at - (n - 1 - i) * MINUTE_MS, cpu, memory: trend.memory[i] }));
   const series = [
@@ -1214,14 +1466,17 @@ function paintTrend(trend) {
   ];
   put(
     box,
-    n < 2 ? h("p", { class: "muted small" }, t("home.trendSoon")) : h("div", { class: "trend-head muted small" }, t("home.trend", { n })),
-    n >= 2 && lineChart(points, series, { max: 100, fmt: (v) => Math.round(v) + "%", label: t("home.trend", { n }), height: 120, head: false }),
+    n < 2 ? h("p", { class: "muted small" }, t("home.trendSoon")) : h("div", { class: "trend-head muted small" }, h("span", { class: "grow" }, t("home.trend", { n })), series.map((s) => h("span", null, h("i", { class: "series-key " + s.cls }), s.label))),
+    // in a card of Home the chart takes the room the card has; elsewhere its usual height
+    n >= 2 && lineChart(points, series, { max: 100, fmt: (v) => Math.round(v) + "%", label: t("home.trend", { n }), height: box.closest(".pg-card") ? Math.max(90, box.clientHeight - 54) : 120, head: false }),
   );
 }
 
 function renderSystem() {
   const s = state.overview?.system;
-  if (!s || state.route.view !== "home") return;
+  if (!s || (state.route.view !== "home" && state.route.view !== "server")) return;
+  // of this server's page only the overview has the numbers
+  if (state.route.view === "server" && !document.getElementById("kpi-disk")) return void paintServerMeta();
   const meta = document.getElementById("host");
   const own = document.getElementById("own-name");
   if (own) own.textContent = s.hostname;
@@ -1639,7 +1894,7 @@ function gridBar() {
   // the button stays the same element across redraws: one under the pointer keeps its click
   const slot = document.getElementById("grid-edit-slot");
   const offer = mayArrange();
-  if (slot && !!slot.firstChild !== offer) put(slot, offer && button(t("grid.edit"), { class: "small", onclick: gridEdit }, "grid"));
+  if (slot && !!slot.firstChild !== offer) put(slot, offer && button(t("grid.editShort"), { class: "small", onclick: gridEdit }, "grid"));
 }
 
 const GRID_WIDE = 1000;
@@ -2085,7 +2340,7 @@ function addDialog() {
     if (!sections.some((one) => one.id === addUi.section)) addUi.section = "machines";
     const entry = (section) => h("button", { type: "button", class: "cat" + (section.id === addUi.section && !addUi.find ? " active" : ""), onclick: () => ((addUi.section = section.id), (addUi.find = ""), (field.value = ""), paint()) }, h("span", { class: "add-cat" }, icon(section.icon), t("add.section." + section.id)), h("span", { class: "muted small" }, counted(section)));
     const titled = (group) => [group && h("div", { class: "cat-title" }, t("add.group." + group)), sections.filter((one) => (one.group ?? "") === group).map(entry)];
-    put(nav, titled(""), titled("state"), titled("integrations"), h("a", { class: "cat", href: "#/integrations", onclick: () => dialog.close() }, h("span", { class: "add-cat" }, icon("plus"), t("add.connect"))));
+    put(nav, titled(""), titled("state"), titled("integrations"), h("a", { class: "cat", href: "#/house", onclick: () => dialog.close() }, h("span", { class: "add-cat" }, icon("plus"), t("add.connect"))));
     const typed = addUi.find.trim().toLowerCase();
     if (typed) {
       const found = sections.flatMap((section) => section.rows.filter((one) => `${one.title} ${one.sub}`.toLowerCase().includes(typed)));
@@ -2274,7 +2529,17 @@ function attentionItem(item) {
   const { buttons, openMore } = splitActions(below, menuHeader(title, null, attentionIcon(item.code)));
   return h(
     "div",
-    { class: "attention-item " + item.severity, menu: openMore },
+    {
+      class: "attention-item " + item.severity,
+      menu: openMore,
+      // on a phone the buttons do not fit beside the words: the item itself is the button
+      onclick: (e) => {
+        if (!phone.matches || e.target.closest("a, button")) return;
+        const first = e.currentTarget.querySelector(".row-actions :is(a, button)");
+        if (first) first.click();
+        else openMore({ x: e.clientX, y: e.clientY });
+      },
+    },
     h("div", { class: "attention-title" }, icon(attentionIcon(item.code)), h("strong", null, title)),
     h("p", { class: "muted small" }, text),
     buttons.length > 0 && h("div", { class: "row-actions" }, buttons),
@@ -2470,7 +2735,7 @@ function paintHistory() {
     box,
     days.size ? [...days].map(([day, rows]) => h("section", { class: "card pad history-day" }, h("h3", null, day), rows)) : h("p", { class: "card pad muted" }, t(words ? "activity.noMatch" : "activity.none")),
     historyUi.more && h("div", { class: "center-row" }, button(t("activity.older"), { onclick: (e) => ((e.currentTarget.disabled = true), loadHistory(true)) })),
-    !historyUi.more && days.size > 0 && h("p", { class: "muted small center-row" }, t("activity.start")),
+    !historyUi.more && days.size > 0 && h("p", { class: "card pad muted small center-row" }, t("activity.start")),
   );
 }
 
@@ -2566,7 +2831,7 @@ function renderHome() {
   };
   shell(
     h("div", { id: "grid-bar" }),
-    h("div", { class: "page-head home-head", id: "home-head" }, h("div", null, h("h1", null, greeting), h("p", { class: "meta", id: "host" }, " ")), h("div", { class: "home-head-side" }, h("div", { class: "counts", id: "counts" }), h("span", { id: "grid-edit-slot" }))),
+    h("div", { class: "card page-head home-head", id: "home-head" }, h("div", null, h("h1", null, greeting), h("p", { class: "meta", id: "host" }, " ")), h("div", { class: "home-head-side" }, h("div", { class: "counts", id: "counts" }), h("span", { id: "grid-edit-slot" }))),
     h("div", { class: "pg", id: "pg" }),
   );
   Object.assign(gridUi, { arranging: false, undo: [], entry: null, drag: null });
@@ -2919,6 +3184,45 @@ function appTorrentsCard(app) {
   return q && h("section", { class: "card pad section-head" }, h("div", null, h("h2", null, t("qbit.title")), h("p", { class: "muted small" }, q.online ? `${qbitSpeeds(q)} · ${t("qbit.activeOf", { n: q.active, total: q.total })}` : t("qbit.offline"))), h("a", { class: "btn small", href: `#/qbit/${q.id}` }, icon("download"), h("span", null, t("common.open"))));
 }
 
+/** A line that leads to the one table of access, for the places that show or change a part of it */
+const accessLink = () => h("p", { class: "muted small" }, t("access.givenAt"), " ", h("a", { class: "link", href: "#/settings/users/access", onclick: (e) => e.currentTarget.closest("dialog")?.close() }, `${t("area.settings.users")} → ${t("users.part.access")}`));
+
+/** Who opens the app and whether Hata's sign-in stands in front of it: said here, given in the one table of access */
+const appAccess = { name: "", at: 0, data: null };
+function appAccessCard(app) {
+  if (!isAdmin()) return null;
+  const box = h("section", { class: "card pad stack-s" });
+  const paint = () => {
+    const a = appAccess.data;
+    const users = a?.users ?? [];
+    const save = (patch) =>
+      api("PUT", `/api/apps/${app.name}/access`, { protect: a.protect, allowed: a.allowed, ...patch }).then(
+        (res) => ((appAccess.at = 0), res.job ? jobDialog(res.job, "apply", app.title, ask) : ask()),
+        (e) => (toast(errorText(e), "error"), (appAccess.at = 0), ask()),
+      );
+    const who = !a ? "…" : a.allowed === "all" ? t("access.everyone") : users.filter((u) => a.allowed.includes(u.id)).map((u) => u.name).join(", ") || t("app.accessAdmins");
+    put(
+      box,
+      h("div", { class: "section-head" }, h("h2", null, t("app.access")), h("a", { class: "link small", href: "#/settings/users/access" }, t("users.part.access"), " →")),
+      h("div", { class: "kv" }, h("span", { class: "muted" }, t("app.accessWho")), h("span", null, who)),
+      a && h("label", { class: "check" }, h("input", { type: "checkbox", checked: a.protect, disabled: !!a.cannotProtect, onchange: (e) => save({ protect: e.target.checked }) }), h("span", null, h("strong", null, t("access.signIn")), h("span", { class: "muted small block" }, a.cannotProtect ? t("access.cannot." + a.cannotProtect) : a.protect ? t("app.accessGuarded") : t("access.onlyHidden")))),
+      // sign-in stands in front of the web port; the app's other ports are listed so that nobody takes them for closed
+      a?.protect && a.others.length > 0 && h("div", { class: "muted small other-ports" }, t("access.others"), a.others.map((o) => h("label", null, h("input", { type: "checkbox", checked: o.guarded, onchange: (e) => save({ ports: a.others.filter((x) => (x.port === o.port ? e.target.checked : x.guarded)).map((x) => x.port) }) }), String(o.port)))),
+    );
+  };
+  const ask = async () => {
+    const all = await api("GET", `/api/access?lang=${state.lang}`).catch(() => null);
+    const mine = all?.apps.find((x) => x.name === app.name && !x.machine);
+    Object.assign(appAccess, { name: app.name, at: Date.now(), data: mine ? { ...mine, users: all.users } : null });
+    if (box.isConnected) paint();
+  };
+  // the page is redrawn with every tick of the numbers: what was asked a moment ago is shown as it is
+  if (appAccess.name !== app.name) Object.assign(appAccess, { name: app.name, at: 0, data: null });
+  paint();
+  if (Date.now() - appAccess.at > 15_000) void ask();
+  return box;
+}
+
 function appOverviewTab(app, box) {
   const row = (label, value, mono) => h("div", { class: "kv" }, h("span", { class: "muted" }, label), h("span", { class: mono ? "mono" : "" }, value));
   const statsBox = h("div", { class: "stats card three" }, statCell("app-cpu", "cpu", t("sys.cpu")), statCell("app-memory", "memory", t("sys.memory")), h("div", { class: "stat" }, h("div", { class: "stat-label" }, icon("box"), t("app.containers")), h("div", { class: "stat-row" }, h("div", { class: "stat-value" }, h("strong", null, String(app.containers.filter((c) => c.state === "running").length)), h("span", { class: "unit" }, "/ " + app.containers.length))), h("div", { class: "stat-hint" }, t("status." + app.status))));
@@ -2954,6 +3258,7 @@ function appOverviewTab(app, box) {
         "aside",
         { class: "side" },
         h("section", { class: "card pad" }, h("div", { class: "section-head" }, h("h2", null, t("app.glance"))), app.port && row(t("app.address"), appAddress(app), true), row(t("app.composeFile"), app.composeFile, true), app.folders.map((f, i) => row(i ? "" : t("app.folders"), f, true)), row(t("app.source"), app.store ? t("app.fromStore", { store: app.store }) : t("app.custom")), row(t("app.installed"), new Date(app.installedAt).toLocaleDateString(state.lang, { day: "numeric", month: "short", year: "numeric" }))),
+        appAccessCard(app),
         app.login && h("section", { class: "card pad" }, h("div", { class: "section-head" }, h("h2", null, t("app.login"))), loginBlock(app.login, loginAsker(app.name))),
         app.tips && h("section", { class: "card pad" }, h("div", { class: "section-head" }, h("h2", null, t("app.notes"))), h("div", { class: "tips prose" }, md(app.tips))),
         h("section", { class: "pad-x" }, h("div", { class: "section-head" }, h("h2", null, t("activity.title"))), app.activity.length ? app.activity.slice(0, 6).map(activityItem) : h("p", { class: "muted small" }, t("activity.none"))),
@@ -3147,6 +3452,7 @@ async function loadTree() {
     return;
   }
   if (state.route.view === "machines") renderMachinesBody();
+  paintServerMeta();
 }
 
 /** A menu opened by a button stands under it */
@@ -3155,7 +3461,7 @@ const underButton = (el) => {
   return { x: r.left, y: r.bottom + 4 };
 };
 
-const rowPage = (r) => (r.machine ? `#/machines/${r.machine}` : r.instance ? `#/containers/i/${r.instance}` : `#/guest/${r.guest.host}/${r.guest.id}`);
+const rowPage = (r) => (r.instance ? `#/containers/i/${r.instance}` : r.guest ? `#/guest/${r.guest.host}/${r.guest.id}` : r.machine ? `#/machines/${r.machine}` : r.instance ? `#/containers/i/${r.instance}` : `#/guest/${r.guest.host}/${r.guest.id}`);
 const guestOfRow = (r) => ({ id: r.guest.id, type: r.guest.type, name: r.name, vmid: Number(r.guest.id.split("/")[1]), status: r.status, may: r.may });
 
 /** How busy it is, in one line of the width of a column */
@@ -3231,7 +3537,7 @@ function treeGroup(g) {
     renderMachinesBody(true);
   };
   const x = g.kind === "pve" && pveUi.list?.hosts?.find((y) => y.id === g.id);
-  const page = g.kind === "here" ? "#/" : g.kind === "pve" ? `#/proxmox/${g.id}` : null;
+  const page = g.kind === "here" ? "#/machines/this" : g.kind === "pve" ? `#/proxmox/${g.id}` : null;
   const head = {
     here: { chip: t("tree.thisServer"), what: [g.os, g.address].filter(Boolean).join(" · "), state: t("tree.up", { time: duration(g.uptime) }) },
     pve: { chip: "Proxmox", what: [g.os, g.online && t("tree.guests", { running: g.counts.running, all: g.counts.all })].filter(Boolean).join(" · "), state: g.online ? t("pve.online") : t("tree.noAnswer") },
@@ -3240,8 +3546,9 @@ function treeGroup(g) {
   const menu =
     g.kind === "here"
       ? (at) => menuAt(at, menuHeader(g.name, g.os, "server"), [
-          { label: t("tree.containers"), icon: "box", href: "#/containers" },
-          { label: t("nav.settings"), icon: "sliders", href: "#/settings/general" },
+          { label: t("common.open"), icon: "arrow", href: "#/machines/this" },
+          { label: t("terminal.title"), icon: "terminal", href: "#/terminal" },
+          hasModule("containers") && { label: t("tree.containers"), icon: "box", href: "#/machines/this/containers" },
           { label: t("power.reboot"), icon: "refresh", run: () => serverPowerDialog("reboot") },
           { label: t("power.poweroff"), icon: "stop", run: () => serverPowerDialog("poweroff") },
         ])
@@ -3293,7 +3600,7 @@ function renderMachinesBody(force = false) {
       d.outdated.length > 0 && h("div", { class: "tree-banner" }, icon("up", "accent-text"), h("span", { class: "grow" }, h("strong", null, t("tree.outdated", { version: d.version })), " ", h("span", { class: "muted" }, d.outdated.map((m) => m.name).join(", "))), button(t("tree.updateAll"), { class: "small", onclick: (e) => updateClients(d.outdated, e.currentTarget) }, "up")),
       h("div", { class: "tree-row tree-cols small", role: "row" }, h("div", null, t("tree.col.name")), h("div", null, t("tree.col.what")), h("div", null, t("tree.col.state")), h("div", null, t("tree.col.load")), h("div")),
       d.groups.flatMap(treeGroup),
-      h("a", { class: "tree-foot small muted", href: "#/containers/settings" }, icon("sliders"), h("span", { class: "grow" }, t("tree.foot")), icon("chevron")),
+      hasModule("containers") && h("a", { class: "tree-foot small muted", href: "#/machines/this/containers/settings" }, icon("sliders"), h("span", { class: "grow" }, t("tree.foot")), icon("chevron")),
     ),
   );
 }
@@ -3387,6 +3694,7 @@ async function loadContainers() {
     incusUi.data = { state: "error", error: errorText(e), containers: [] };
   }
   if (state.route.view === "containers") renderContainersBody();
+  if (state.route.view === "server" && state.route.tab !== "apps") renderServerBody();
   if (state.route.view === "machines") renderMachinesBody();
   if (state.route.view === "instance") renderInstanceBody();
   if (state.route.view === "machine" && state.route.tab === "overview") paintMachineExtra();
@@ -3404,14 +3712,10 @@ function startInstanceOf(m, el) {
 }
 
 function renderContainers() {
-  const tab = (id, label) => h("a", { class: "tab" + (state.route.tab === id ? " active" : ""), href: id === "list" ? "#/containers" : "#/containers/settings" }, label);
+  const part = (id, label) => h("a", { class: "seg-pill" + (state.route.tab === id ? " active" : ""), href: id === "list" ? "#/machines/this/containers" : "#/machines/this/containers/settings" }, label);
   shell(
-    h(
-      "div",
-      { class: "page-head has-tabs" },
-      h("div", { class: "page-head-row" }, h("div", null, h("nav", { class: "crumbs" }, h("a", { href: "#/machines" }, t("nav.machines")), icon("chevron"), h("span", null, t("tree.thisServer"))), h("h1", null, t("incus.title")), h("p", { class: "meta", id: "incus-meta" }, t("incus.lead"))), h("div", { class: "actions", id: "incus-actions" })),
-      h("div", { class: "tabs", id: "incus-tabs", hidden: true }, tab("list", t("incus.tab.list")), tab("settings", t("incus.tab.settings"))),
-    ),
+    areaHead("server", "containers"),
+    h("div", { class: "card filter-bar" }, h("div", { class: "seg-pills", id: "incus-tabs", hidden: true }, part("list", t("incus.tab.list")), part("settings", t("incus.tab.settings"))), h("p", { class: "muted small grow", id: "incus-meta" }, t("incus.lead")), h("div", { class: "actions", id: "incus-actions" })),
     h("div", { id: "incus-body", class: "stack" }),
   );
   if (incusUi.data) renderContainersBody();
@@ -3927,7 +4231,7 @@ function containerRow(c) {
     h(
       "td",
       null,
-      h("a", { class: "strong", href: c.machine ? `#/machines/${c.machine}` : `#/containers/i/${c.name}` }, c.name),
+      h("a", { class: "strong", href: `#/containers/i/${c.name}` }, c.name),
       h("div", { class: "muted small" }, [c.kind === "vm" && t("incus.vm.short"), c.os, c.network === "home" && t("incus.net.homeShort"), c.nesting && "Docker", c.snapshots.length > 0 && t("incus.snapshotsN", { n: c.snapshots.length }), c.disc && t("incus.disc.inDrive", { name: c.disc })].filter(Boolean).join(" · ")),
     ),
     h("td", null, incusStatus(c)),
@@ -4029,11 +4333,11 @@ function renderInstanceBody() {
   const head = document.getElementById("instance-head");
   const box = document.getElementById("instance-body");
   if (!head || !box) return;
-  const crumbs = (name) => h("nav", { class: "crumbs" }, h("a", { href: "#/machines" }, t("nav.machines")), icon("chevron"), h("a", { href: "#/containers" }, t("tree.thisServer")), icon("chevron"), h("span", null, name));
+  const crumbs = (name) => h("nav", { class: "crumbs" }, h("a", { href: "#/machines" }, t("nav.machines")), icon("chevron"), h("a", { href: "#/machines/this" }, t("tree.thisServer")), icon("chevron"), h("span", null, name));
   const c = incusUi.data?.containers?.find((x) => x.name === state.route.name);
   if (!c) return put(head, crumbs(state.route.name)), put(box, h("p", { class: "card pad muted" }, t("instance.gone")));
-  // with Hata's client it is a machine: one thing, one page
-  if (c.machine) return void go(`#/machines/${c.machine}`);
+  // with Hata's client it is a computer: the same address, more tabs
+  if (c.machine && machinesUi.list?.machines.some((m) => m.id === c.machine)) return asMachine(c.machine, `#/containers/i/${c.name}`);
   const running = c.status === "running";
   const tab = (id, iconName, label) => h("a", { class: "tab" + (state.route.tab === id ? " active" : ""), href: `#/containers/i/${c.name}${id === "overview" ? "" : "/" + id}` }, icon(iconName), label);
   put(
@@ -4563,7 +4867,6 @@ function haEvent(event) {
   clearTimeout(haUi.timer);
   haUi.timer = setTimeout(() => {
     if (state.route.view === "home") void refresh();
-    if (onIntegrations()) void loadIntegrations();
     if (state.route.view === "ha" && state.route.id === event.id) void loadHa();
   }, 600);
 }
@@ -4781,12 +5084,74 @@ async function loadHa() {
 
 const haChip = (x) => h("span", { class: "state " + (x.online ? "running" : "") }, x.online ? t("ha.online") : x.error ? t("ha.offline") : t("ha.asking"));
 const haError = (x) => (x.error ? (has("error." + x.error.code) ? t("error." + x.error.code, { name: x.name, message: x.error.message ?? "" }) : x.error.code) : "");
-const haCrumbs = (name) => h("nav", { class: "crumbs" }, h("a", { href: "#/integrations" }, t("nav.integrations")), icon("chevron"), h("span", null, name));
+// the house's head and tabs say where this is
+const haCrumbs = () => null;
+
+/** The kinds of things the house holds: where their list is asked, where the page draws, how one is connected */
+const HOUSE = {
+  ha: { tab: "ha", list: "/api/ha", body: "ha-body", icon: "bulb", name: "Home Assistant", found: "found", load: () => void loadHa(), add: (url) => haDialog(null, url) },
+  frigate: { tab: "cameras", list: "/api/frigate", body: "frigate-body", icon: "camera", name: "Frigate", found: "frigateFound", load: () => (paintFrigate(), void loadFrigate()), add: (url) => frigateDialog(null, url) },
+  qbit: { tab: "torrents", list: "/api/qbit", body: "qbit-body", icon: "download", name: "qBittorrent", found: "qbitFound", load: () => (paintQbit(), void loadQbit()), add: (url) => qbitDialog(null, url) },
+};
+/** The app of this server a connected qBittorrent is, by the server's id; a torrent client that is nobody's app lives in the house */
+const torrentsApp = (id) => Object.entries(state.overview?.qbit?.apps ?? {}).find(([, q]) => q.id === id)?.[0] ?? "";
+const foreignTorrents = () => (state.overview?.qbit?.count ?? 0) > Object.keys(state.overview?.qbit?.apps ?? {}).length;
+const houseAdd = () => button(t("house.connect"), { onclick: (e) => integrationsAddMenu(e.currentTarget) }, "plus");
+
+/** A tab of the house: the head, a switch between the servers when there are several, and the page of the one chosen */
+function houseShell(view) {
+  shell(areaHead("house", HOUSE[view].tab, { actions: houseAdd() }), h("div", { id: "house-pick", class: "card filter-bar", hidden: true }), h("div", { id: HOUSE[view].body, class: "stack" }));
+  void houseOpen(view);
+}
+
+async function houseOpen(view) {
+  const k = HOUSE[view];
+  const box = document.getElementById(k.body);
+  let servers;
+  try {
+    servers = (await api("GET", k.list)).servers;
+  } catch (e) {
+    return state.route.view === view && box?.isConnected && put(box, h("p", { class: "card pad muted" }, errorText(e)));
+  }
+  if (state.route.view !== view || !box?.isConnected) return;
+  // the torrents' tab holds only those that are nobody's app: an app's own are on its page
+  if (view === "qbit") servers = servers.filter((x) => !torrentsApp(x.id));
+  if (!servers.length) return houseEmpty(view, box);
+  if (!servers.some((x) => x.id === state.route.id)) state.route.id = servers[0].id;
+  const pick = document.getElementById("house-pick");
+  pick.hidden = servers.length < 2;
+  put(pick, h("div", { class: "seg-pills" }, servers.map((x) => h("a", { class: "seg-pill" + (x.id === state.route.id ? " active" : ""), href: `#/house/${k.tab}/${x.id}` }, x.name))));
+  k.load();
+}
+
+/** Nothing of the kind is connected yet: what it gives, the button, and what was found on this server and around */
+function houseEmpty(view, box) {
+  const k = HOUSE[view];
+  const paint = () => {
+    if (!box.isConnected) return;
+    const found = integrationsFound([]).filter((f) => f.icon === k.icon);
+    put(
+      box,
+      h("section", { class: "card pad empty-state" }, h("span", { class: "app-icon plus" }, icon(k.icon)), h("h2", null, t("house.none", { name: k.name })), h("p", { class: "muted" }, t(`integrations.${view}.what`)), button(t("house.connectOne", { name: k.name }), { class: "primary", onclick: () => k.add() }, "plus")),
+      found.length > 0 &&
+        h(
+          "section",
+          { class: "card pad stack-s" },
+          h("div", null, h("h2", null, t("integrations.available")), h("p", { class: "muted small" }, t("integrations.foundLead"))),
+          found.map((f) => h("div", { class: "tool" }, h("span", { class: "app-icon plus sm" }, icon(f.icon)), h("div", { class: "grow" }, h("strong", null, f.name), h("p", { class: "muted small" }, f.kind, " · ", h("span", { class: "mono" }, f.url.replace(/^https?:\/\//, "")))), button(t("integrations.connect"), { onclick: f.connect }, "plus"))),
+        ),
+    );
+  };
+  paint();
+  api("GET", k.list + "/found").then(
+    (r) => (view === "ha" ? Object.assign(integrationsUi, { found: r.found, address: r.address }) : (integrationsUi[k.found] = r.found), paint()),
+    () => {},
+  );
+}
 
 function renderHa() {
   if (haUi.server?.id !== state.route.id) (haUi.server = null), (haUi.entities = null);
-  shell(h("div", { id: "ha-body", class: "stack" }));
-  void loadHa();
+  houseShell("ha");
 }
 
 function renderHaBody() {
@@ -4815,102 +5180,6 @@ function renderHaBody() {
 // Services Hata talks to through their own API. What runs on a machine of its own stays in Servers: these are what a service offers.
 
 const integrationsUi = { found: null, address: "", qbit: null, qbitFound: null, frigate: null, frigateFound: null };
-const onIntegrations = () => state.route.view === "integrations" || (state.route.view === "settings" && state.route.section === "integrations");
-
-async function loadIntegrations() {
-  try {
-    [haUi.list, integrationsUi.qbit, integrationsUi.frigate] = await Promise.all([api("GET", "/api/ha"), api("GET", "/api/qbit"), api("GET", "/api/frigate")]);
-    paintIntegrations();
-  } catch (e) {
-    const box = document.getElementById("integrations-body");
-    if (box) put(box, h("p", { class: "card pad muted" }, errorText(e)));
-  }
-}
-
-/** The holder both places show, the menu's page and the section of Settings. What answers on the network is asked once per opening: it takes two seconds. */
-function integrationsBody(titled) {
-  const box = h("div", { id: "integrations-body", class: "stack" });
-  box.dataset.titled = titled ? "1" : "";
-  requestAnimationFrame(() => {
-    paintIntegrations();
-    void loadIntegrations();
-    api("GET", "/api/ha/found").then(
-      ({ found, address }) => (Object.assign(integrationsUi, { found, address }), paintIntegrations()),
-      () => {},
-    );
-    api("GET", "/api/qbit/found").then(
-      ({ found }) => ((integrationsUi.qbitFound = found), paintIntegrations()),
-      () => {},
-    );
-    api("GET", "/api/frigate/found").then(
-      ({ found }) => ((integrationsUi.frigateFound = found), paintIntegrations()),
-      () => {},
-    );
-  });
-  return box;
-}
-
-function renderIntegrations() {
-  shell(integrationsBody(true));
-}
-
-function paintIntegrations() {
-  const box = document.getElementById("integrations-body");
-  const list = haUi.list?.servers;
-  const torrents = integrationsUi.qbit?.servers;
-  const frigates = integrationsUi.frigate?.servers;
-  if (!box || !list || !torrents || !frigates) return;
-  const row = (y) =>
-    h(
-      "tr",
-      { class: "clickable", menu: (at) => haMenu(y, at), onclick: (e) => !e.target.closest("a, button") && go(`#/ha/${y.id}`) },
-      h("td", null, h("div", { class: "strong" }, y.name), h("div", { class: "muted small mono" }, ["Home Assistant", y.version, y.url].filter(Boolean).join(" · "))),
-      h("td", null, haChip(y)),
-      h("td", { class: "small" }, t("ha.counts", { n: y.entities, on: y.on })),
-      h("td", null, h("div", { class: "row-actions" }, h("a", { class: "btn small", href: haWebUrl(y), target: "_blank", rel: "noopener noreferrer" }, icon("external"), h("span", null, t("ha.open"))), h("button", { type: "button", class: "btn small square", "aria-label": t("app.more"), onclick: (e) => haMenu(y, underButton(e.currentTarget)) }, icon("more")))),
-    );
-  const torrentRow = (y) =>
-    h(
-      "tr",
-      { class: "clickable", menu: (at) => qbitMenu(y, at), onclick: (e) => !e.target.closest("a, button") && go(`#/qbit/${y.id}`) },
-      h("td", null, h("div", { class: "strong" }, y.name), h("div", { class: "muted small mono" }, ["qBittorrent", y.version, y.url].filter(Boolean).join(" · "))),
-      h("td", null, qbitChip(y)),
-      h("td", { class: "small" }, y.online ? `${t("qbit.activeOf", { n: y.totals.active, total: y.totals.total })} · ${qbitSpeeds(y.totals)}` : "—"),
-      h("td", null, h("div", { class: "row-actions" }, h("a", { class: "btn small", href: y.url, target: "_blank", rel: "noopener noreferrer" }, icon("external"), h("span", null, t("qbit.open"))), h("button", { type: "button", class: "btn small square", "aria-label": t("app.more"), onclick: (e) => qbitMenu(y, underButton(e.currentTarget)) }, icon("more")))),
-    );
-  const frigateRow = (y) =>
-    h(
-      "tr",
-      { class: "clickable", menu: (at) => frigateMenu(y, at), onclick: (e) => !e.target.closest("a, button") && go(`#/frigate/${y.id}`) },
-      h("td", null, h("div", { class: "strong" }, y.name), h("div", { class: "muted small mono" }, ["Frigate", y.version, y.url].filter(Boolean).join(" · "))),
-      h("td", null, frigateChip(y)),
-      h("td", { class: "small" }, y.online ? t("frigate.workingOf", { n: y.cameras.filter((c) => c.online).length, total: y.cameras.length }) : "—"),
-      h("td", null, h("div", { class: "row-actions" }, h("a", { class: "btn small", href: y.url, target: "_blank", rel: "noopener noreferrer" }, icon("external"), h("span", null, t("frigate.open"))), h("button", { type: "button", class: "btn small square", "aria-label": t("app.more"), onclick: (e) => frigateMenu(y, underButton(e.currentTarget)) }, icon("more")))),
-    );
-  const connected = list.length + torrents.length + frigates.length;
-  const found = integrationsFound(list);
-  put(
-    box,
-    h(
-      "section",
-      { class: "card" },
-      h(
-        "div",
-        { class: "tree-head" },
-        h("div", null, box.dataset.titled ? h("h1", null, t("nav.integrations")) : h("h2", null, t("integrations.connected")), h("p", { class: "meta" }, connected ? t("integrations.lead") : t("integrations.none"))),
-        button(t("integrations.add"), { class: "primary", onclick: (e) => integrationsAddMenu(e.currentTarget) }, "plus"),
-      ),
-      connected > 0 && h("div", { class: "table-wrap" }, h("table", null, h("thead", null, h("tr", null, h("th", null, t("integrations.col.name")), h("th", null, t("app.col.state")), h("th", null, t("integrations.col.inside")), h("th"))), h("tbody", null, list.map(row), torrents.map(torrentRow), frigates.map(frigateRow)))),
-    ),
-    found.length > 0 &&
-      h(
-        "section",
-        { class: "card pad stack-s" },
-        h("div", null, h("h2", null, t("integrations.available")), h("p", { class: "muted small" }, t("integrations.foundLead"))),
-        found.map((f) => h("div", { class: "tool" }, h("span", { class: "app-icon plus sm" }, icon(f.icon)), h("div", { class: "grow" }, h("strong", null, f.name), h("p", { class: "muted small" }, f.kind, " · ", h("span", { class: "mono" }, f.url.replace(/^https?:\/\//, "")))), button(t("integrations.connect"), { onclick: f.connect }, "plus"))),
-      ),
-  );
-}
 
 /** What can be connected and was found: apps of this server first, then what answers on the home network. Everything else is under "Add". */
 function integrationsFound(list) {
@@ -4945,9 +5214,7 @@ const eventWords = (e) => [e.label, e.score !== null && `${e.score}%`].filter(Bo
 
 function renderFrigate() {
   if (frigateUi.server?.id !== state.route.id) Object.assign(frigateUi, { server: null, events: null, camera: "", label: "" });
-  shell(h("div", { id: "frigate-body", class: "stack" }));
-  paintFrigate();
-  void loadFrigate();
+  houseShell("frigate");
 }
 
 async function loadFrigate() {
@@ -4965,7 +5232,7 @@ async function loadFrigate() {
     paintFrigate(whole);
   } catch (e) {
     const box = document.getElementById("frigate-body");
-    if (box) put(box, h("nav", { class: "crumbs" }, h("a", { href: "#/integrations" }, t("nav.integrations"))), h("p", { class: "card pad muted" }, errorText(e)));
+    if (box) put(box, h("p", { class: "card pad muted" }, errorText(e)));
     return;
   }
   frigateUi.timer = setTimeout(loadFrigate, 10_000);
@@ -5060,7 +5327,6 @@ function paintFrigate(whole = true) {
   cameraSelect.value = frigateUi.camera;
   put(
     box,
-    h("nav", { class: "crumbs" }, h("a", { href: "#/integrations" }, t("nav.integrations")), icon("chevron"), h("span", null, x.name)),
     h("section", { class: "card", id: "frigate-head" }, head),
     h("div", { id: "frigate-error" }, problem()),
     h("section", { class: "card pad stack-s" }, h("h2", null, t("frigate.cameras")), x.cameras.length ? h("div", { class: "cameras", id: "frigate-cameras" }, markCameras(cameras(), x.cameras)) : h("p", { class: "muted", id: "frigate-cameras" }, x.online ? t("frigate.noCameras") : "—")),
@@ -5091,7 +5357,7 @@ function frigateDisconnectDialog(x) {
           await api("DELETE", `/api/frigate/${x.id}`);
           dialog.close();
           await refresh();
-          go("#/integrations");
+          go("#/house");
         } catch (e) {
           toast(errorText(e), "error");
         }
@@ -5121,7 +5387,6 @@ function frigateDialog(old = null, address = "") {
       void refresh();
       if (!old) go(`#/frigate/${saved.id}`);
       else if (state.route.view === "frigate") void loadFrigate();
-      else void loadIntegrations();
     } catch (err) {
       if (err.code === "frigate.confirmCert") {
         // the server's own certificate: the person compares it with what the server says, then it is kept
@@ -5157,13 +5422,22 @@ const QBIT_FILTERS = ["all", "downloading", "seeding", "paused", "error"];
 const qbitChip = (x) => h("span", { class: "state " + (x.online ? "running" : "") }, t(x.online ? "qbit.online" : x.error ? "qbit.offline" : "qbit.asking"));
 const qbitError = (x) => (x.error ? (has("error." + x.error.code) ? t("error." + x.error.code, { url: x.url, message: x.error.message ?? "" }) : x.error.code) : "");
 const qbitSpeeds = (x) => `↓ ${bytes(x.down)}/s · ↑ ${bytes(x.up)}/s`;
-const qbitCrumbs = (name) => h("nav", { class: "crumbs" }, h("a", { href: "#/integrations" }, t("nav.integrations")), icon("chevron"), h("span", null, name));
+/** An app's own torrents are a page of that app; a client that is nobody's app is a tab of the house */
+function qbitCrumbs(name) {
+  const app = torrentsApp(state.route.id);
+  const title = app && (state.overview?.apps ?? []).find((a) => a.name === app)?.title;
+  return app ? h("nav", { class: "crumbs card on-card" }, h("a", { href: "#/apps" }, t("nav.apps")), icon("chevron"), h("a", { href: `#/apps/${app}` }, title ?? app), icon("chevron"), h("span", null, t("qbit.torrents"))) : null;
+}
 
 function renderQbit() {
   if (qbitUi.server?.id !== state.route.id) Object.assign(qbitUi, { server: null, torrents: null, filter: "all", q: "" });
-  shell(h("div", { id: "qbit-body", class: "stack" }));
-  paintQbit();
-  void loadQbit();
+  // an app's own torrents: the page of that app's torrents; else a tab of the house
+  if (!state.route.house && torrentsApp(state.route.id)) {
+    shell(h("div", { id: "qbit-body", class: "stack" }));
+    paintQbit();
+    return void loadQbit();
+  }
+  houseShell("qbit");
 }
 
 /** Asked again every five seconds while the page is on screen */
@@ -5194,15 +5468,17 @@ function qbitAct(path, data) {
 
 function qbitRow(x) {
   const paused = x.group === "paused" || x.group === "finished";
-  const word = x.group === "downloading" && x.waiting ? "waiting" : x.group === "seeding" && x.waiting ? "seedingIdle" : x.group;
+  const word = x.group === "downloading" && x.waiting ? "waiting" : x.group;
+  const act = paused ? (x.group === "finished" ? "qbit.seed" : "qbit.resume") : x.group === "seeding" ? "qbit.stopSeeding" : "qbit.pause";
+  const tool = (label, name, onclick) => h("button", { type: "button", class: "icon-btn", title: label, "aria-label": `${label}: ${x.name}`, onclick }, icon(name));
   return h(
     "tr",
     null,
     h("td", { class: "qbit-name" }, h("div", { class: "strong" }, x.name), h("div", { class: "muted small mono" }, x.path)),
     h("td", { class: "qbit-progress" }, h("div", { class: "small" }, `${x.percent}% · ${bytes(x.size)}`), meterBar(x.percent, x.group === "error" ? "danger" : "")),
-    h("td", null, h("span", { class: "state " + (x.group === "error" ? "restarting" : paused ? "" : x.waiting ? "" : "running") }, t("qbit.group." + word))),
+    h("td", null, h("span", { class: "state " + (x.group === "error" ? "restarting" : paused ? "" : x.group === "downloading" && x.waiting ? "" : "running") }, t("qbit.group." + word))),
     h("td", { class: "small nowrap" }, x.down || x.up ? qbitSpeeds(x) : "—", x.eta !== null && x.group === "downloading" && h("div", { class: "muted" }, t("qbit.left", { time: duration(Math.max(60, x.eta)) }))),
-    h("td", null, h("div", { class: "row-actions" }, button(t(paused ? "qbit.resume" : "qbit.pause"), { class: "small", onclick: () => qbitAct(paused ? "/resume" : "/pause", { hashes: [x.hash] }) }, paused ? "play" : "stop"), button(t("qbit.remove"), { class: "small", onclick: () => qbitRemoveDialog(x) }, "trash"))),
+    h("td", null, h("div", { class: "row-actions" }, tool(t(act), paused ? "play" : "pause", () => qbitAct(paused ? "/resume" : "/pause", { hashes: [x.hash] })), tool(t("qbit.remove"), "trash", () => qbitRemoveDialog(x)))),
   );
 }
 
@@ -5276,7 +5552,7 @@ function qbitDisconnectDialog(x) {
           await api("DELETE", `/api/qbit/${x.id}`);
           dialog.close();
           await refresh();
-          go("#/integrations");
+          go("#/house");
         } catch (e) {
           toast(errorText(e), "error");
         }
@@ -5320,7 +5596,6 @@ function qbitDialog(old = null, address = "") {
       void refresh();
       if (!old) go(`#/qbit/${saved.id}`);
       else if (state.route.view === "qbit") void loadQbit();
-      else void loadIntegrations();
     } catch (err) {
       error.textContent = errorText(err);
     }
@@ -5453,7 +5728,7 @@ function haProxyCard(x) {
 
 /** Who sees the server's tiles on Home: administrators always; everybody, or the users chosen */
 function haPeopleCard(x) {
-  const card = h("div", { class: "card pad stack-s" }, h("div", { class: "section-head" }, h("h2", null, t("ha.people.title"))), h("p", { class: "muted small" }, t("ha.people.lead")));
+  const card = h("div", { class: "card pad stack-s" }, h("div", { class: "section-head" }, h("h2", null, t("ha.people.title"))), h("p", { class: "muted small" }, t("ha.people.lead")), accessLink());
   const paint = (users) => {
     const others = users.filter((u) => u.role !== "admin");
     let mode = x.people === "all" ? "all" : x.people.length ? "some" : "none";
@@ -5525,7 +5800,7 @@ function haDevices(x) {
     body,
     h(
       "div",
-      { class: "row-actions" },
+      { class: "card filter-bar ha-filter" },
       h("input", { type: "search", class: "grow", placeholder: t("ha.search"), value: haUi.search, oninput: (e) => {
           haUi.search = e.target.value;
           clearTimeout(haUi.searchTimer);
@@ -5568,7 +5843,7 @@ function removeHaDialog(x) {
         try {
           await api("DELETE", `/api/ha/${x.id}`);
           dialog.close();
-          go("#/integrations");
+          go("#/house");
         } catch (e) {
           toast(errorText(e), "error");
         }
@@ -5619,7 +5894,6 @@ function haDialog(old = null, address = "") {
       toast(t(old ? "ha.changed" : "ha.added", { name: saved.name }));
       if (!old) go(`#/ha/${saved.id}`);
       else if (state.route.view === "ha") void loadHa();
-      else void loadIntegrations();
     } catch (err) {
       if (err.code === "ha.needCode" || err.code === "ha.badCode") {
         flow = err.detail.flow;
@@ -7129,9 +7403,9 @@ async function loadGuest() {
   const g = await paintGuestParts(box, host, guest);
   const x = pveUi.host;
   if (!g || !x) return;
-  // with Hata's client it is a machine: one thing, one page
+  // with Hata's client it is a computer: the same address, more tabs
   const m = machinesUi.list?.machines.find((y) => y.pve?.host === host && y.pve?.id === guest);
-  if (m) return void go(`#/machines/${m.id}`);
+  if (m) return asMachine(m.id, `#/guest/${host}/${guest}`);
   put(
     head,
     h("nav", { class: "crumbs" }, h("a", { href: "#/machines" }, t("nav.machines")), icon("chevron"), h("a", { href: `#/proxmox/${x.id}` }, x.name), icon("chevron"), h("span", null, g.name)),
@@ -7497,6 +7771,17 @@ async function pveTaskDialog(x, task, target) {
 // --- One machine ---
 
 const MACHINE_TABS = ["overview", "apps", "containers", "terminal"];
+const machineTab = (part) => (part === "docker" ? "containers" : MACHINE_TABS.includes(part) ? part : "overview");
+/** The one address of a computer: where it lives — a container of this server, a guest of Proxmox, or by itself */
+const machineBase = (m) => (m.instance ? `#/containers/i/${m.instance}` : m.pve ? `#/guest/${m.pve.host}/${m.pve.id}` : `#/machines/${m.id}`);
+/** The page of a container or a guest turns into the computer's, in place, once Hata's client is on it */
+function asMachine(id, base) {
+  const tab = machineTab(state.route.asked ?? state.route.tab);
+  state.route = { view: "machine", id, tab, base };
+  render();
+  void loadMachines();
+  void loadContainers();
+}
 
 function renderMachine() {
   if (machinesUi.current?.id !== state.route.id) {
@@ -7513,9 +7798,14 @@ function renderMachineHead() {
   const head = document.getElementById("machine-head");
   if (!head) return;
   if (!m) return put(head, h("nav", { class: "crumbs" }, h("a", { href: "#/machines" }, t("nav.machines"))), machinesUi.list && h("p", { class: "card pad muted" }, t("error.machine.notFound")));
-  const tab = (id, iconName) => h("a", { class: "tab" + (state.route.tab === id ? " active" : ""), href: `#/machines/${m.id}${id === "overview" ? "" : "/" + id}` }, icon(iconName), t(id === "containers" ? "machines.tab.docker" : "machines.tab." + id));
+  // the address is where the thing lives: a container's or a guest's computer is shown at theirs
+  const base = machineBase(m);
+  const here = base + (state.route.tab === "overview" ? "" : "/" + (state.route.tab === "containers" ? "docker" : state.route.tab));
+  if (location.hash !== here && location.hash.startsWith("#/machines/")) history.replaceState(history.state, "", here);
+  state.route.base = base;
+  const tab = (id, iconName) => h("a", { class: "tab" + (state.route.tab === id ? " active" : ""), href: `${base}${id === "overview" ? "" : "/" + (id === "containers" ? "docker" : id)}` }, icon(iconName), t(id === "containers" ? "machines.tab.docker" : "machines.tab." + id));
   head.replaceChildren(
-    h("nav", { class: "crumbs" }, h("a", { href: "#/machines" }, t("nav.machines")), icon("chevron"), m.instance && [h("a", { href: "#/containers" }, t("tree.thisServer")), icon("chevron")], m.pve && [h("a", { href: `#/proxmox/${m.pve.host}` }, m.pve.hostName), icon("chevron")], h("span", null, m.name)),
+    h("nav", { class: "crumbs" }, h("a", { href: "#/machines" }, t("nav.machines")), icon("chevron"), m.instance && [h("a", { href: "#/machines/this" }, t("tree.thisServer")), icon("chevron")], m.pve && [h("a", { href: `#/proxmox/${m.pve.host}` }, m.pve.hostName), icon("chevron")], h("span", null, m.name)),
     h(
       "div",
       { class: "app-head", menu: (at) => machineMenu(m, at) },
@@ -7821,6 +8111,7 @@ function machinePeopleCard(m) {
       { class: "pad card-head stack-s" },
       h("div", { class: "section-head" }, h("h2", null, t("machines.people.title")), m.people ? h("div", { class: "row-actions" }, button(t("machines.people.share"), { class: "small primary", disabled: !m.online, onclick: () => folderPicker({ title: t("machines.people.pick", { name: m.name }), start: "/", machine: m.id, confirmLabel: t("machines.people.pickHere"), allowed: (at) => at !== "/", action: async (at) => machineShareDialog(m, at) }) }, "share"), button(t("machines.people.off"), { class: "small", onclick: () => letMachineDialog(m, false) })) : button(t("machines.people.on"), { class: "small primary", onclick: () => letMachineDialog(m, true) })),
       h("p", { class: "muted small" }, t(m.people ? "machines.people.onLead" : "machines.people.offLead")),
+      m.people && accessLink(),
       m.people && data && !others.length && h("p", { class: "muted small" }, t("machines.people.nobody")),
     ),
     m.people && data?.shares.length > 0 && h("table", null, h("thead", null, h("tr", null, h("th", null, t("machines.people.col.folder")), h("th", null, t("shares.who")), h("th"))), h("tbody", null, data.shares.map(row))),
@@ -7975,6 +8266,106 @@ async function loadMachineApps() {
   paintMachineApps();
 }
 
+// --- An app of another computer: a page of its own ---------------------------------------------------
+
+const mappUi = { key: "", machine: null, app: null, error: "", timer: 0 };
+
+function renderMachineApp() {
+  const key = `${state.route.name}@${state.route.machine}`;
+  if (mappUi.key !== key) Object.assign(mappUi, { key, machine: null, app: null, error: "" });
+  shell(h("div", { id: "mapp-body", class: "stack" }, h("p", { class: "card pad muted" }, "…")));
+  if (mappUi.app) paintMachineApp();
+  void loadMachineApp();
+  cleanups.push(() => clearTimeout(mappUi.timer));
+}
+
+async function loadMachineApp() {
+  clearTimeout(mappUi.timer);
+  const { name, machine } = state.route;
+  if (state.route.view !== "mapp") return;
+  try {
+    const [m, list] = await Promise.all([api("GET", `/api/machines/${machine}`), api("GET", `/api/machines/${machine}/apps?lang=${state.lang}`)]);
+    if (state.route.view !== "mapp" || state.route.machine !== machine || state.route.name !== name) return;
+    Object.assign(mappUi, { machine: m, app: list.find((a) => a.name === name) ?? null, error: "" });
+  } catch (e) {
+    mappUi.error = errorText(e);
+  }
+  paintMachineApp();
+  mappUi.timer = setTimeout(loadMachineApp, 8000);
+}
+
+function paintMachineApp() {
+  const box = document.getElementById("mapp-body");
+  if (!box) return;
+  const { machine: m, app, error } = mappUi;
+  const crumbs = (title) => h("nav", { class: "crumbs" }, h("a", { href: "#/apps" }, t("nav.apps")), icon("chevron"), h("span", null, title));
+  if (!m || !app) return put(box, h("div", { class: "card pad thing-head" }, crumbs(state.route.name), h("p", { class: "muted" }, error || (m ? t("mapp.gone", { name: m.name }) : "…"))));
+  // a window of this page is open: its words are not redrawn under the person
+  if (document.querySelector("dialog[open]:not(.tv-drop)")) return;
+  const again = () => void loadMachineApp();
+  const busy = !!app.job;
+  const url = isUp(app) ? machineAppUrl(m, app) : null;
+  const act = (action) => async () => {
+    try {
+      const res = await api("POST", `/api/machines/${m.id}/apps/${app.name}/${action}`, {});
+      jobDialog(res.job, action, app.title, again);
+    } catch (e) {
+      toast(errorText(e), "error");
+    }
+    again();
+  };
+  const menu = (at) =>
+    menuAt(at, menuHeader(app.title, m.name, "box"), [
+      busy && { label: t("jobs.showLog"), icon: "logs", run: () => jobDialog(app.job.id, app.job.kind, app.title, again) },
+      isUp(app) && { label: t("app.restart"), icon: "refresh", off: busy, run: act("restart") },
+      { label: t("app.update"), icon: "up", off: busy, run: act("update") },
+      { label: t("app.logs"), icon: "logs", run: () => machineAppLogsDialog(m, app) },
+      { label: t("app.tab.compose"), icon: "code", off: busy, run: () => machineComposeDialog(m, app) },
+      { label: t("machines.move"), icon: "server", off: busy, run: () => moveAppDialog(m.id, app) },
+      { label: t("app.remove"), icon: "trash", danger: true, off: busy, run: () => removeMachineAppDialog(m, app) },
+    ]);
+  const row = (label, value, mono) => h("div", { class: "kv" }, h("span", { class: "muted" }, label), h("span", { class: mono ? "mono" : "" }, value));
+  put(
+    box,
+    h(
+      "div",
+      { class: "card pad thing-head" },
+      crumbs(app.title),
+      h(
+        "div",
+        { class: "app-head", menu },
+        appIcon(app),
+        h("div", { class: "grow" }, h("div", { class: "app-title" }, h("h1", null, app.title), stateChip(app)), h("p", { class: "meta" }, h("a", { href: machineBase(m) }, icon("server"), m.name), app.store && h("span", { class: "dot-sep" }, "·"), app.store)),
+        h(
+          "div",
+          { class: "actions" },
+          url && h("a", { class: "btn primary", href: url, target: "_blank", rel: "noopener noreferrer" }, icon("external"), h("span", null, t("app.open"))),
+          isUp(app) ? button(t("app.stop"), { disabled: busy, onclick: act("stop") }, "stop") : button(t("app.start"), { class: url ? "" : "primary", disabled: busy, onclick: act("start") }, "play"),
+          h("button", { type: "button", class: "btn square", "aria-label": t("app.more"), "aria-haspopup": "menu", onclick: (e) => menu(underButton(e.currentTarget)) }, icon("more")),
+        ),
+      ),
+    ),
+    h(
+      "div",
+      { class: "columns" },
+      h(
+        "div",
+        { class: "stack" },
+        app.containers.length
+          ? h("div", { class: "card table-wrap" }, h("div", { class: "section-head pad-head" }, h("h2", null, t("app.containers"), " ", h("span", { class: "muted" }, String(app.containers.length)))), h("table", null, h("thead", null, h("tr", null, h("th", null, t("app.col.container")), h("th", null, t("app.col.state")))), h("tbody", null, app.containers.map((c) => h("tr", null, h("td", null, h("div", { class: "mono" }, c.name), h("div", { class: "muted small mono clip" }, c.image)), h("td", null, h("span", { class: "state " + (c.state === "running" ? "running" : c.state === "restarting" ? "restarting" : "") }, c.status || c.state)))))))
+          : h("p", { class: "card pad muted" }, t("app.noContainers")),
+      ),
+      h(
+        "aside",
+        { class: "side" },
+        h("section", { class: "card pad" }, h("div", { class: "section-head" }, h("h2", null, t("app.glance"))), row(t("apps.col.machine"), h("a", { class: "link", href: machineBase(m) }, m.name)), (url || app.port) && row(t("app.address"), url ? url.replace(/^https?:\/\//, "").replace(/\/$/, "") : `${m.ip}:${app.port}`, true), app.guarded && row(t("access.signIn"), t("access.through", { port: app.guarded })), accessLink()),
+        app.login && app.login.kind !== "none" && h("section", { class: "card pad" }, h("div", { class: "section-head" }, h("h2", null, t("app.login"))), loginBlock(app.login, loginAsker(app.name, m.id))),
+        app.tips && h("section", { class: "card pad" }, h("div", { class: "section-head" }, h("h2", null, t("app.notes"))), h("div", { class: "tips prose" }, md(app.tips))),
+      ),
+    ),
+  );
+}
+
 /** Where a machine's app answers: the machine's address and the app's port */
 function machineAppUrl(m, app) {
   // behind Hata's sign-in it opens through this server, on a port of its own
@@ -8017,7 +8408,7 @@ function paintMachineApps() {
     return h(
       "tr",
       null,
-      h("td", null, h("div", { class: "with-icon machine-app" }, appIcon(app), h("div", { class: "stack-s" }, h("strong", null, app.title), h("span", { class: "muted small mono" }, app.name + (app.store ? ` · ${app.store}` : ""))))),
+      h("td", null, h("div", { class: "with-icon machine-app" }, appIcon(app), h("div", { class: "stack-s" }, h("a", { class: "strong", href: `#/apps/${app.name}@${m.id}` }, app.title), h("span", { class: "muted small mono" }, app.name + (app.store ? ` · ${app.store}` : ""))))),
       h("td", null, stateChip(app)),
       h("td", { class: "mono small" }, app.guarded && h("span", { class: "lock-mark", title: t("access.protected") }, icon("lock")), url ? h("a", { class: "link", href: url, target: "_blank", rel: "noopener noreferrer" }, url.replace(/^https?:\/\//, "").replace(/\/$/, "")) : app.port ? `${m.ip}:${app.port}` : "—"),
       h(
@@ -9377,22 +9768,43 @@ async function appBackupsTab(app, box) {
 }
 
 function renderBackups() {
-  shell(
-    ...settingsFrame(
-      "backups",
-      h("div", { class: "page-head section-page" }, h("div", null, h("h2", null, t("nav.backups")), h("p", { class: "meta", id: "backup-meta" }, " ")), h("div", { class: "actions", id: "backup-actions" })),
-      h("section", { class: "stats card", id: "backup-stats" }),
-      h("div", { class: "columns" }, h("section", { id: "backup-apps" }), h("aside", { class: "side", id: "backup-side" })),
-    ),
-  );
+  const tab = state.route.tab ?? "overview";
+  shell(...settingsFrame("backups", tab === "overview" && h("section", { class: "stats card", id: "backup-stats" }), h("div", { class: "stack", id: "backup-body" }, h("p", { class: "card pad muted" }, "…"))));
   renderBackupsBody();
+  if (tab === "overview") void loadBackupsMore();
+  if (tab === "history") void loadBackupHistory();
+}
+
+/** What is backed up but not by Hata's own folder: the guests of Proxmox and Home Assistant — a row each in the one table */
+async function loadBackupsMore() {
+  const pve = hasModule("proxmox") ? await api("GET", "/api/proxmox").then((r) => Promise.all((r.hosts ?? []).map((x) => api("GET", `/api/proxmox/${x.id}`).catch(() => x))), () => []) : [];
+  const ha = hasModule("integrations") ? await api("GET", "/api/ha").then((r) => Promise.all((r.servers ?? []).map((x) => api("GET", `/api/ha/${x.id}`).catch(() => x))), () => []) : [];
+  state.backupsMore = { pve, ha };
+  if (state.route.view === "backups") renderBackupsBody();
+}
+
+/** The history of backups is the activity log's lines about them: there is no other record of the runs */
+const backupHistory = { entries: null };
+async function loadBackupHistory() {
+  const found = [];
+  let before = Date.now() + 60_000;
+  for (let i = 0; i < 4; i++) {
+    const page = await api("GET", `/api/activity?before=${before}`).catch(() => null);
+    if (!page) break;
+    found.push(...page.entries.filter((e) => /backup|restor|snapshot/i.test(e.code)));
+    if (!page.more || !page.entries.length) break;
+    before = page.entries[page.entries.length - 1].ts;
+  }
+  backupHistory.entries = found;
+  if (state.route.view === "backups") renderBackupsBody();
 }
 
 function renderBackupsBody() {
   const b = state.backups;
   const s = state.settings?.backup;
-  const box = document.getElementById("backup-apps");
+  const box = document.getElementById("backup-body");
   if (!b || !s || !box) return;
+  const tab = state.route.tab ?? "overview";
 
   document.getElementById("backup-meta").replaceChildren(b.dir, h("span", { class: "dot-sep" }, "·"), s.enabled ? t("backup.daily", { time: s.time, keep: s.keep }) : t("backup.scheduleOff"));
   document.getElementById("backup-actions").replaceChildren(
@@ -9406,14 +9818,20 @@ function renderBackupsBody() {
       },
     }, "play"),
   );
+  if (tab === "history") {
+    const list = backupHistory.entries;
+    return put(box, h("section", { class: "card pad" }, h("h2", null, t("area.backups.history")), h("p", { class: "muted small" }, t("backup.historyLead")), !list ? h("p", { class: "muted" }, "…") : list.length ? list.map((e) => activityItem(e, new Date(e.ts).toLocaleString(state.lang, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }))) : h("p", { class: "muted" }, t("activity.none"))));
+  }
+  if (tab === "offsite") return put(box, offsiteCard(b.offsite)), void (clearTimeout(offsiteTimer), b.offsite.running && (offsiteTimer = setTimeout(() => state.route.view === "backups" && loadBackups(), 3000)));
+  if (tab === "schedule") return box.contains(document.activeElement) ? undefined : put(box, backupScheduleForm(b, s), backupServerHow(b), h("p", { class: "card pad muted small" }, t("backup.how")));
 
-  const stat = (iconName, label, value, unit, hint, cls = "") => h("div", { class: "stat" }, h("div", { class: "stat-label" }, icon(iconName), label), h("div", { class: "stat-row" }, h("div", { class: "stat-value" }, h("strong", { class: cls }, value), h("span", { class: "unit" }, unit))), h("div", { class: "stat-hint" }, hint || " "));
+  const stat = (iconName, label, value, unit, hint, cls = "") => h("div", { class: "stat" }, h("div", { class: "stat-label" }, icon(iconName), label), h("div", { class: "stat-row" }, h("div", { class: "stat-value" }, h("strong", { class: cls }, value), h("span", { class: "unit" }, unit))), h("div", { class: "stat-hint" }, hint || " "));
   const last = b.lastRun;
   const count = b.apps.reduce((n, a) => n + a.snapshots.length, 0);
   const stored = bytesParts(b.stored);
   const free = b.free == null ? null : bytesParts(b.free);
   const installed = b.apps.filter((a) => a.installed);
-  document.getElementById("backup-stats").replaceChildren(
+  document.getElementById("backup-stats")?.replaceChildren(
     stat(last?.failed.length ? "alert" : "check", t("backup.lastRun"), last ? ago(last.at) : "—", "", last ? (last.failed.length ? t("backup.lastFailed", { ok: last.ok, failed: last.failed.join(", ") }) : t("backup.lastOk", { ok: last.ok })) : t("backup.never"), last?.failed.length ? "warn" : ""),
     stat("refresh", t("backup.nextRun"), b.nextRun ? s.time : "—", "", b.nextRun ? `${new Date(b.nextRun).toLocaleDateString(state.lang, { weekday: "long", timeZone: b.timezone })} · ${t("backup.serverTime", { tz: b.timezone })}` : t("backup.scheduleOff")),
     stat("archive", t("backup.stored"), stored.value, stored.unit, t("backup.snapshots", { n: count })),
@@ -9432,97 +9850,174 @@ function renderBackupsBody() {
       toast(errorText(e), "error");
     }
   };
+  const daily = s.enabled ? t("backup.everyDay", { time: s.time }) : t("backup.byHand");
+  const group = (title, lead) => h("tr", { class: "group-row" }, h("td", { colSpan: 6 }, h("strong", null, title), lead && h("span", { class: "muted small" }, " · ", lead)));
+  const when = (at, note) => (at ? h("div", { class: "with-dot" }, h("i", { class: "dot running" }), h("div", null, ago(at), note && h("div", { class: "muted small" }, note))) : h("span", { class: "muted" }, t("backup.noneShort")));
+  const more = (entries) => (e) => menuAt(underButton(e.currentTarget), null, entries);
+  const dots = (entries) => h("button", { type: "button", class: "btn small square", "aria-label": t("app.more"), "aria-haspopup": "menu", onclick: more(entries) }, icon("more"));
   const row = (app) => {
     const newest = app.snapshots[0];
     const size = app.snapshots.reduce((n, x) => n + x.size, 0);
+    const page = app.incus ? `#/containers/i/${app.name.replace(/@incus$/, "")}` : app.machine ? `#/machines/${app.machine.id}/apps` : `#/apps/${app.name}/backups`;
+    const kind = app.incus?.kind ? t(app.incus.kind === "vm" ? "incus.kind.vm" : "incus.kind.container") : app.machine ? app.machine.name : "";
     return h(
       "tr",
       { class: app.installed ? "" : "removed" },
-      h("td", null, h("div", { class: "with-icon" }, appIcon(app, "sm"), h("div", { class: "stack-s backup-name" }, app.installed ? h("a", { class: "strong", href: app.incus ? "#/containers" : app.machine ? `#/machines/${app.machine.id}/apps` : `#/apps/${app.name}/backups` }, app.title) : h("span", { class: "strong" }, app.title), app.machine && h("div", { class: "muted small with-icon" }, icon("server"), app.machine.name), app.incus?.kind && h("div", { class: "muted small with-icon" }, icon(app.incus.kind === "vm" ? "server" : "box"), t(app.incus.kind === "vm" ? "incus.kind.vm" : "incus.kind.container")), !app.installed && h("div", { class: "muted small" }, t("backup.removedApp")), app.otherFolders.length > 0 && h("button", { type: "button", class: "text-btn muted small", title: app.otherFolders.join("\n"), onclick: () => backupFoldersDialog(app, loadBackups) }, t("backup.folders.row", { n: app.otherFolders.length, m: app.extraFolders.length }))))),
-      h("td", null, newest ? h("div", null, ago(newest.at), h("div", { class: "muted small" }, t("backup.reason." + newest.reason))) : h("span", { class: "muted" }, t("backup.noneShort"))),
+      h("td", null, h("div", { class: "with-icon" }, app.incus ? h("span", { class: "app-icon sm plus" }, icon(app.incus.kind === "vm" ? "screen" : "box")) : appIcon(app, "sm"), h("div", { class: "stack-s backup-name" }, app.installed ? h("a", { class: "strong", href: page }, app.title) : h("span", { class: "strong" }, app.title), kind && h("div", { class: "muted small" }, kind), !app.installed && h("div", { class: "muted small" }, t("backup.removedApp")), app.otherFolders.length > 0 && h("button", { type: "button", class: "text-btn muted small", title: app.otherFolders.join("\n"), onclick: () => backupFoldersDialog(app, loadBackups) }, t("backup.folders.row", { n: app.otherFolders.length, m: app.extraFolders.length }))))),
+      h("td", { class: app.installed && !app.included ? "warn-text" : "muted" }, !app.installed ? "—" : app.included ? daily : t("backup.notDaily")),
+      h("td", null, when(newest?.at, newest && t("backup.reason." + newest.reason))),
       h("td", { class: "num" }, size ? bytes(size) : "—"),
-      h("td", { class: "num" }, app.snapshots.length || "—"),
-      h("td", null, app.installed && h("input", { type: "checkbox", checked: app.included, "aria-label": t("backup.include", { title: app.title }), onchange: (e) => toggleInclude(app, e.target.checked) })),
-      h("td", null, h("div", { class: "row-actions" }, app.snapshots.length > 0 && button(t("backup.restore"), { class: "small", onclick: () => snapshotsDialog(app) }, "undo"), app.installed && h("button", { type: "button", class: "icon-btn", title: t("backup.now"), "aria-label": `${t("backup.now")}: ${app.title}`, onclick: () => backupNow(app) }, icon("archive")))),
+      h("td", { class: "muted" }, app.snapshots.length ? t("backup.copies", { n: app.snapshots.length }) : "—"),
+      h(
+        "td",
+        null,
+        h(
+          "div",
+          { class: "row-actions" },
+          app.installed && !app.included && s.enabled ? button(t("backup.turnOn"), { class: "small primary", onclick: () => toggleInclude(app, true) }, "play") : app.snapshots.length > 0 ? button(t("backup.restore"), { class: "small", onclick: () => snapshotsDialog(app) }, "undo") : app.installed && button(t("backup.nowShort"), { class: "small", onclick: () => backupNow(app) }, "archive"),
+          dots([
+            app.installed && { label: t("backup.now"), icon: "archive", run: () => backupNow(app) },
+            app.snapshots.length > 0 && { label: t("backup.restore") + "…", icon: "undo", run: () => snapshotsDialog(app) },
+            app.installed && !app.incus && !app.machine && { label: t("backup.folders.open"), icon: "folder", run: () => backupFoldersDialog(app, loadBackups) },
+            app.installed && { label: t(app.included ? "backup.dailyOff" : "backup.dailyOn"), icon: app.included ? "x" : "check", run: () => toggleInclude(app, !app.included) },
+            app.installed && { label: t("common.open"), icon: "arrow", href: page },
+          ]),
+        ),
+      ),
     );
   };
   const newest = b.server[0];
-  const serverNow = button(t("backup.now"), {
-    class: "small",
-    onclick: async () => {
-      serverNow.disabled = true;
-      try {
-        state.backups = await api("POST", "/api/backups/server", {});
-        toast(t("backup.serverDone"));
-      } catch (e) {
-        toast(errorText(e), "error");
-      }
-      renderBackupsBody();
-    },
-  }, "archive");
-  box.replaceChildren(
-    h("div", { class: "section-head" }, h("h2", null, t("backup.server"))),
+  const serverNow = async () => {
+    try {
+      state.backups = await api("POST", "/api/backups/server", {});
+      toast(t("backup.serverDone"));
+    } catch (e) {
+      toast(errorText(e), "error");
+    }
+    renderBackupsBody();
+  };
+  const serverRow = h(
+    "tr",
+    null,
+    h("td", null, h("div", { class: "with-icon" }, h("span", { class: "app-icon sm plus" }, icon("server")), h("div", { class: "stack-s backup-name" }, h("a", { class: "strong", href: "#/machines/this" }, state.overview?.system?.hostname ?? t("tree.thisServer")), h("div", { class: "muted small" }, t("backup.serverWhat"))))),
+    h("td", { class: "muted" }, t("backup.withEveryRun")),
+    h("td", null, when(newest?.at)),
+    h("td", { class: "num" }, newest ? bytes(newest.size) : "—"),
+    h("td", { class: "muted" }, b.server.length ? t("backup.copies", { n: b.server.length }) : "—"),
+    h("td", null, h("div", { class: "row-actions" }, button(t("backup.nowShort"), { class: "small", onclick: serverNow }, "archive"), dots([{ label: t("backup.now"), icon: "archive", run: serverNow }, { label: t("backup.serverHowOpen"), icon: "info", href: "#/backups/schedule" }]))),
+  );
+  const moreData = state.backupsMore;
+  // a Proxmox server and, under it, each of its guests: whether something backs it up — the copies themselves are Proxmox's
+  const pveRow = (x) => {
+    const left = x.unprotected ?? [];
+    const sch = x.schedule;
+    const often = sch?.on ? t("backup.everyDay", { time: sch.time }) : t("backup.pveOwn");
+    const guests = (x.guests ?? []).filter((g) => !g.template);
+    return [
+      h(
+        "tr",
+        null,
+        h("td", null, h("div", { class: "with-icon" }, h("span", { class: "app-icon sm plus" }, icon("server")), h("div", { class: "stack-s backup-name" }, h("a", { class: "strong", href: `#/proxmox/${x.id}` }, x.name), h("div", { class: "muted small" }, t("backup.pveWhat", { n: guests.length }))))),
+        h("td", { class: "muted" }, often),
+        h("td", null, x.unprotected == null ? h("span", { class: "muted" }, "—") : left.length ? h("span", { class: "with-dot warn-text" }, h("i", { class: "dot partial" }), t("backup.pveLeft", { n: left.length })) : h("span", { class: "with-dot" }, h("i", { class: "dot running" }), t("backup.pveAll"))),
+        h("td", { class: "num" }, "—"),
+        h("td", { class: "muted" }, sch?.on ? t("backup.copies", { n: sch.keep }) : "—"),
+        h("td", null, h("div", { class: "row-actions" }, h("a", { class: "btn small", href: `#/proxmox/${x.id}` }, icon("arrow"), h("span", null, t("common.open"))))),
+      ),
+      ...guests.map((g) => {
+        const bare = left.some((y) => y.vmid === g.vmid);
+        return h(
+          "tr",
+          { class: "sub-row" },
+          h("td", null, h("div", { class: "with-icon" }, h("span", { class: "app-icon sm plus" }, icon(g.type === "lxc" ? "box" : "screen")), h("div", { class: "stack-s backup-name" }, h("a", { class: "strong", href: `#/guest/${x.id}/${g.id}` }, g.name || String(g.vmid)), h("div", { class: "muted small" }, guestKind(g))))),
+          h("td", { class: bare ? "warn-text" : "muted" }, x.unprotected == null ? "—" : bare ? t("backup.notBacked") : often),
+          h("td", null, x.unprotected == null ? h("span", { class: "muted" }, "—") : bare ? h("span", { class: "with-dot warn-text" }, h("i", { class: "dot partial" }), t("tree.noBackup")) : h("span", { class: "with-dot muted" }, h("i", { class: "dot running" }), t("backup.pveKept"))),
+          h("td", { class: "num" }, "—"),
+          h("td", { class: "muted" }, "—"),
+          h("td", null, h("div", { class: "row-actions" }, h("a", { class: "btn small", href: `#/guest/${x.id}/${g.id}` }, icon("arrow"), h("span", null, t("common.open"))))),
+        );
+      }),
+    ];
+  };
+  const haRow = (x) => {
+    const list = x.backups ?? [];
+    return h(
+      "tr",
+      null,
+      h("td", null, h("div", { class: "with-icon" }, h("span", { class: "app-icon sm plus" }, icon("bulb")), h("div", { class: "stack-s backup-name" }, h("a", { class: "strong", href: `#/house/ha/${x.id}` }, x.name), h("div", { class: "muted small" }, t("backup.haWhat"))))),
+      h("td", { class: "muted" }, t("backup.haOwn")),
+      h("td", null, when(list[0] && Date.parse(list[0].date), list[0]?.automatic ? t("backup.haAuto") : "")),
+      h("td", { class: "num" }, list[0]?.size ? bytes(list[0].size) : "—"),
+      h("td", { class: "muted" }, list.length ? t("backup.copies", { n: list.length }) : "—"),
+      h("td", null, h("div", { class: "row-actions" }, h("a", { class: "btn small", href: `#/house/ha/${x.id}` }, icon("arrow"), h("span", null, t("common.open"))))),
+    );
+  };
+  const own = b.apps.filter((a) => !a.incus && !a.machine);
+  const others = b.apps.filter((a) => a.incus || a.machine);
+  put(
+    box,
     h(
       "div",
-      { class: "card pad stack" },
-      h("div", { class: "setting plain" }, h("div", { class: "grow" }, h("strong", null, newest ? t("backup.serverLast", { when: ago(newest.at), size: bytes(newest.size), n: b.server.length }) : t("backup.serverNone")), h("p", { class: "muted small" }, t("backup.serverHint"))), h("div", { class: "row-actions" }, serverNow)),
-      h("p", { class: "muted small" }, t("backup.serverRestore")),
-      h("p", { class: "cmd" }, icon("terminal"), `sudo hata restore ${b.dir}`),
+      { class: "card table-wrap" },
+      h(
+        "table",
+        { class: "backups-table" },
+        h("thead", null, h("tr", null, h("th", null, t("backup.col.what")), h("th", null, t("backup.col.often")), h("th", null, t("backup.col.last")), h("th", { class: "num" }, t("backup.col.size")), h("th", null, t("backup.col.keeps")), h("th"))),
+        h(
+          "tbody",
+          null,
+          group(t("backup.group.server")),
+          serverRow,
+          group(t("nav.apps"), own.length ? "" : t("backup.noApps")),
+          own.map(row),
+          (others.length > 0 || moreData?.pve.length > 0) && group(t("nav.machines"), t("backup.machinesLead")),
+          others.map(row),
+          (moreData?.pve ?? []).map(pveRow),
+          moreData?.ha.length > 0 && group("Home Assistant", t("backup.haLead")),
+          (moreData?.ha ?? []).map(haRow),
+        ),
+      ),
     ),
-    h("div", { class: "section-head" }, h("h2", null, t("home.apps"))),
-    b.apps.some((a) => !a.incus)
-      ? h("div", { class: "card table-wrap" }, h("table", null, h("thead", null, h("tr", null, h("th", null, t("backup.col.app")), h("th", null, t("backup.col.last")), h("th", { class: "num" }, t("backup.col.size")), h("th", { class: "num" }, t("backup.col.count")), h("th", null, t("backup.col.daily")), h("th"))), h("tbody", null, b.apps.filter((a) => !a.incus).map(row))))
-      : h("p", { class: "card pad muted" }, t("backup.noApps")),
-    // the containers and virtual machines of this server, kept whole
-    ...(b.apps.some((a) => a.incus) ? [
-      h("div", { class: "section-head" }, h("h2", null, t("backup.incus.title"))),
-      h("p", { class: "muted small" }, t("backup.incus.lead")),
-      h("div", { class: "card table-wrap" }, h("table", null, h("thead", null, h("tr", null, h("th", null, t("incus.col.name")), h("th", null, t("backup.col.last")), h("th", { class: "num" }, t("backup.col.size")), h("th", { class: "num" }, t("backup.col.count")), h("th", null, t("backup.col.daily")), h("th"))), h("tbody", null, b.apps.filter((a) => a.incus).map(row)))),
-    ] : []),
   );
+}
 
-  // the schedule form is redrawn only when it is not being edited
-  const side = document.getElementById("backup-side");
-  if (side.contains(document.activeElement)) return;
+/** When and where the daily run copies: the form of the tab "Schedule and place" */
+function backupScheduleForm(b, s) {
   const enabled = h("input", { type: "checkbox", checked: s.enabled });
   const time = h("input", { type: "time", value: s.time, class: "short mono", required: true });
   const keep = h("input", { type: "number", min: 1, max: 365, value: s.keep, class: "short mono", required: true });
   const dir = h("input", { value: s.dir, placeholder: b.dir, spellcheck: false, class: "mono" });
   const beforeUpdate = h("input", { type: "checkbox", checked: s.beforeUpdate });
   const error = h("p", { class: "error", role: "alert" });
-  side.replaceChildren(
-    h(
-      "form",
-      {
-        class: "card pad stack",
-        onsubmit: async (e) => {
-          e.preventDefault();
-          error.textContent = "";
-          try {
-            state.settings = await api("PUT", "/api/settings", { backup: { enabled: enabled.checked, time: time.value, keep: Number(keep.value), dir: dir.value.trim(), beforeUpdate: beforeUpdate.checked } });
-            toast(t("settings.saved"));
-            document.activeElement?.blur();
-            await loadBackups();
-          } catch (err) {
-            error.textContent = errorText(err);
-          }
-        },
+  return h(
+    "form",
+    {
+      class: "card pad stack",
+      onsubmit: async (e) => {
+        e.preventDefault();
+        error.textContent = "";
+        try {
+          state.settings = await api("PUT", "/api/settings", { backup: { enabled: enabled.checked, time: time.value, keep: Number(keep.value), dir: dir.value.trim(), beforeUpdate: beforeUpdate.checked } });
+          toast(t("settings.saved"));
+          document.activeElement?.blur();
+          await loadBackups();
+        } catch (err) {
+          error.textContent = errorText(err);
+        }
       },
-      h("h2", null, t("backup.schedule")),
-      h("label", { class: "check" }, enabled, h("span", null, h("strong", null, t("backup.enable")), h("span", { class: "muted small block" }, t("backup.enableHint")))),
-      h("div", { class: "field-row" }, field(`${t("backup.time")} · ${b.timezone}`, time), field(t("backup.keep"), keep)),
-      field(t("backup.dir"), dir, t("backup.dirHint")),
-      h("label", { class: "check" }, beforeUpdate, h("span", null, h("strong", null, t("backup.beforeUpdate")), h("span", { class: "muted small block" }, t("backup.beforeUpdateHint")))),
-      error,
-      h("footer", null, h("button", { class: "btn primary" }, t("settings.save"))),
-    ),
-    hasModule("offsite") && offsiteCard(b.offsite),
-    h("p", { class: "muted small pad-x" }, t("backup.how")),
+    },
+    h("h2", null, t("backup.schedule")),
+    h("label", { class: "check" }, enabled, h("span", null, h("strong", null, t("backup.enable")), h("span", { class: "muted small block" }, t("backup.enableHint")))),
+    h("div", { class: "field-row" }, field(`${t("backup.time")} · ${b.timezone}`, time), field(t("backup.keep"), keep)),
+    field(t("backup.dir"), dir, t("backup.dirHint")),
+    h("label", { class: "check" }, beforeUpdate, h("span", null, h("strong", null, t("backup.beforeUpdate")), h("span", { class: "muted small block" }, t("backup.beforeUpdateHint")))),
+    error,
+    h("footer", null, h("button", { class: "btn primary" }, t("settings.save"))),
   );
-  // a run of the copy shows no job: look again until it ends
-  clearTimeout(offsiteTimer);
-  if (b.offsite.running) offsiteTimer = setTimeout(() => state.route.view === "backups" && loadBackups(), 3000);
 }
+
+/** How the server itself is brought back on a new computer */
+const backupServerHow = (b) => h("section", { class: "card pad stack-s" }, h("h2", null, t("backup.server")), h("p", { class: "muted small" }, t("backup.serverHint")), h("p", { class: "muted small" }, t("backup.serverRestore")), h("p", { class: "cmd" }, icon("terminal"), `sudo hata restore ${b.dir}`));
 
 let offsiteTimer = 0;
 
@@ -10830,6 +11325,7 @@ function entryMenu(entry, at) {
     entry.type === "file" && entry.size <= TEXT_MAX && !["image", "video", "audio", "pdf"].includes(kind) && item(t("files.edit"), "edit", () => textDialog(path)),
     entry.type !== "other" && item(t(entry.type === "dir" ? "files.downloadZip" : "files.download"), "download", () => downloadEntries([entry])),
     entry.type === "file" && ARCHIVE_RE.test(entry.name) && !state.files.readOnly && !filesMachine() && isAdmin() && item(t("files.extract"), "archive", () => extractArchive(path)),
+    entry.type === "file" && TV_PLAYS_RE.test(entry.name) && !filesMachine() && isAdmin() && hasModule("tv") && item(t("tv.play"), "tv", () => playOnTv(path, entry.name)),
     entry.type === "file" && PVE_SEND_RE.test(entry.name) && !filesMachine() && isAdmin() && pveUi.list?.hosts?.length !== 0 && item(t("pve.send.menu"), "upload", () => pveSendDialog({ path })),
     entry.type === "file" && /\.iso$/i.test(entry.name) && !filesMachine() && isAdmin() && item(t("incus.disc.menu"), "disk", () => discAddDialog({ how: "path", path })),
     item(t("files.copyPath"), "link", () => copyText(path)),
@@ -11270,31 +11766,45 @@ function mediaDialog(entry) {
   };
   const prev = h("button", { type: "button", class: "icon-btn", "aria-label": t("files.previous"), title: t("files.previous"), onclick: () => step(-1) }, icon("chevron", "flip"));
   const next = h("button", { type: "button", class: "icon-btn", "aria-label": t("files.next"), title: t("files.next"), onclick: () => step(1) }, icon("chevron"));
+  // a video is played by Hata's own player where ffmpeg is: sound tracks, subtitles, formats a browser alone cannot
+  let player = null;
+  const needs = h("p", { class: "muted small viewer-note", hidden: true });
+  const toTv = h("button", { type: "button", class: "icon-btn", onclick: () => void moveToTv(joinPath(dir, current.name), current.name, player ?? stage.querySelector("video, audio"), () => dialog.close()) }, icon("tv"));
   const show = (item) => {
     current = item;
     const src = rawUrl(joinPath(dir, item.name));
     const kind = fileKind(item);
-    put(stage, kind === "image" ? h("img", { src, alt: item.name }) : kind === "video" ? h("video", { src, controls: true, autoplay: true, playsInline: true }) : h("audio", { src, controls: true, autoplay: true }));
+    player?.stop();
+    player = kind === "video" && tvStreams() && !filesMachine() ? streamPlayer(joinPath(dir, item.name)) : null;
+    put(stage, player ? player.el : kind === "image" ? h("img", { src, alt: item.name }) : kind === "video" ? h("video", { src, controls: true, autoplay: true, playsInline: true }) : h("audio", { src, controls: true, autoplay: true }));
     title.textContent = item.name;
     sub.textContent = `${bytes(item.size)} · ${fileTime(item.modified)}`;
+    toTv.hidden = !!filesMachine() || !tvReady() || !TV_PLAYS_RE.test(item.name);
+    // without ffmpeg the browser plays a video as it can: said where one would miss the sound or the subtitles
+    put(needs, kind === "video" && !player && isAdmin() && !filesMachine() && [t("media.needs"), " ", h("a", { class: "link", href: "#/settings/tools", onclick: () => dialog.close() }, t("media.needsWhere"))]);
+    needs.hidden = !needs.firstChild;
+    const label = t(kind === "image" ? "tv.play" : "tv.toTv");
+    toTv.title = label;
+    toTv.setAttribute("aria-label", label);
     const index = list.findIndex((other) => other.name === item.name);
     prev.disabled = index <= 0;
     next.disabled = index >= list.length - 1;
   };
   dialog = openDialog(
     "xwide viewer",
-    h("header", null, h("div", { class: "grow" }, title, sub), list.length > 1 && prev, list.length > 1 && next, h("button", { type: "button", class: "icon-btn", "aria-label": t("files.download"), title: t("files.download"), onclick: () => downloadEntries([current]) }, icon("download")), closeX(() => dialog)),
+    h("header", null, h("div", { class: "grow" }, title, sub), list.length > 1 && prev, list.length > 1 && next, toTv, h("button", { type: "button", class: "icon-btn", "aria-label": t("files.download"), title: t("files.download"), onclick: () => downloadEntries([current]) }, icon("download")), closeX(() => dialog)),
     stage,
+    needs,
   );
   // the keys work wherever the focus is while the viewer is open
   const keys = (e) => {
-    if (e.target instanceof HTMLMediaElement) return;
+    if (e.target instanceof HTMLMediaElement || e.target.closest?.(".sp")) return;
     if (e.key === "ArrowLeft") step(-1);
     if (e.key === "ArrowRight") step(1);
   };
   document.addEventListener("keydown", keys);
   // a video must not keep playing behind a closed dialog
-  dialog.addEventListener("close", () => (document.removeEventListener("keydown", keys), put(stage)));
+  dialog.addEventListener("close", () => (document.removeEventListener("keydown", keys), player?.stop(), put(stage)));
   show(entry);
 }
 
@@ -11583,6 +12093,96 @@ async function syncStores() {
   if (state.route.view === "settings") renderSettings();
 }
 
+// --- Apps: what is installed, here and on the computers ------------------------------------------------
+
+const appsUi = { show: "all", machine: "" };
+const APP_SHOWS = ["all", "running", "stopped", "trouble", "updates"];
+
+/** Every installed app as one row: this server's and, for an administrator, the computers' */
+function installedApps() {
+  const o = state.overview;
+  const here = (o?.apps ?? []).map((app) => ({ app, machine: null, key: app.name, url: isUp(app) ? appUrl(app) : null, address: appAddress(app), page: `#/apps/${app.name}` }));
+  const there = (isAdmin() ? (o?.machineApps ?? []) : []).map((app) => ({ app, machine: app.machine, key: app.key, url: app.status === "running" || app.status === "partial" ? machineAppUrl(app.machine, app) : null, address: app.guarded ? `${location.hostname}:${app.guarded}` : app.port && app.machine.ip ? `${app.machine.ip}:${app.port}` : "", page: `#/apps/${app.name}@${app.machine.id}` }));
+  return [...here, ...there].sort((a, b) => a.app.title.localeCompare(b.app.title));
+}
+const appTrouble = (app) => appState(app) === "restarting" || app.status === "partial" || app.status === "unknown";
+const appNewer = (app) => !!app.update || app.newer?.length > 0;
+const appShown = {
+  all: () => true,
+  running: ({ app }) => app.status === "running" || app.status === "partial",
+  stopped: ({ app }) => app.status === "stopped",
+  trouble: ({ app }) => appTrouble(app),
+  updates: ({ app }) => appNewer(app),
+};
+
+function renderApps() {
+  shell(areaHead("apps", "installed", { meta: " ", metaId: "apps-meta", actionsId: "apps-actions" }), h("div", { class: "stack", id: "apps-body" }));
+  renderAppsBody();
+}
+
+function renderAppsBody() {
+  const box = document.getElementById("apps-body");
+  if (!box) return;
+  if (!state.overview) return put(box, h("p", { class: "card pad muted" }, "…"));
+  // on the page of this server: its own apps alone, and nothing of the section's head
+  const fixed = state.route.view === "server";
+  const all = installedApps().filter((row) => !fixed || !row.machine);
+  const count = (id) => all.filter(appShown[id]).length;
+  // an update from the store asks about every app by itself: only newer images go all at once
+  const newer = all.filter((row) => !row.machine && !row.app.update && row.app.newer?.length > 0 && !row.app.job);
+  if (!fixed) put(document.getElementById("apps-meta"), [t("apps.meta.installed", { n: all.length }), t("apps.meta.running", { n: count("running") }), count("updates") > 0 && t("apps.meta.updates", { n: count("updates") })].filter(Boolean).flatMap((part, i) => (i ? [h("span", { class: "dot-sep" }, "·"), part] : [part])));
+  if (!fixed) put(document.getElementById("apps-actions"), isAdmin() && newer.length > 0 && button(t("apps.updateAll", { n: newer.length }), { onclick: () => confirmAction({ title: t("apps.updateAll", { n: newer.length }), lead: t("apps.updateAllLead", { names: newer.map((row) => row.app.title).join(", ") }), label: t("app.update"), kind: "primary", iconName: "up", run: () => newer.forEach(({ app }) => void startAction(app, "update")) }) }, "up"));
+  if (!all.length) return put(box, h("section", { class: "card pad empty-state" }, h("h2", null, t("apps.none")), h("p", { class: "muted" }, t("apps.noneLead")), state.user.role !== "guest" && h("a", { class: "btn primary", href: "#/store" }, icon("store"), h("span", null, t("area.apps.store")))));
+  const machines = fixed ? [] : [...new Map(all.filter((row) => row.machine).map((row) => [row.machine.id, row.machine.name])).entries()];
+  const shown = all.filter(appShown[appsUi.show]).filter((row) => !appsUi.machine || (appsUi.machine === "." ? !row.machine : row.machine?.id === appsUi.machine));
+  const hostname = state.overview.system?.hostname ?? t("tree.thisServer");
+  const where = machines.length > 0 && h("select", { "aria-label": t("apps.col.machine"), onchange: (e) => ((appsUi.machine = e.target.value), renderAppsBody()) }, h("option", { value: "" }, t("apps.allMachines")), h("option", { value: ".", selected: appsUi.machine === "." }, hostname), machines.map(([id, name]) => h("option", { value: id, selected: appsUi.machine === id }, name)));
+  const state_ = ({ app }) => {
+    const st = appState(app);
+    const tone = st === "running" ? "running" : st === "busy" || st === "partial" ? "busy" : st === "restarting" ? "restarting" : "";
+    const words = app.job ? t("status.busy") : appNewer(app) && st === "running" ? t("apps.hasUpdate") : t("status." + st);
+    return h("span", { class: "with-dot" + (st === "restarting" || st === "partial" || (appNewer(app) && st === "running") ? " warn-text" : st === "stopped" || st === "unknown" ? " muted" : "") }, h("i", { class: "dot " + (appNewer(app) && st === "running" ? "partial" : tone) }), words);
+  };
+  const row = (r) => {
+    const { app, machine } = r;
+    const menu = (anchor, at) => (machine ? go(r.page) : isAdmin() ? appTileMenu(app, anchor, at) : null);
+    return h(
+      "tr",
+      { menu: machine || !isAdmin() ? true : (at) => appTileMenu(app, null, at) },
+      h("td", null, h("a", { class: "with-icon strong", href: r.page }, appIcon(app, "sm"), h("span", { class: "clip" }, app.title))),
+      h("td", { class: "muted mono small" }, r.address ? h("span", { class: "clip" }, r.address, app.protected || app.guarded ? ` · ${t("apps.behindSignIn")}` : "") : "—"),
+      machines.length > 0 && h("td", { class: "muted" }, machine ? h("a", { href: `#/machines/${machine.id}` }, machine.name) : hostname),
+      h("td", null, state_(r)),
+      h(
+        "td",
+        null,
+        h(
+          "div",
+          { class: "row-actions end" },
+          r.url ? h("a", { class: "btn small", href: r.url, target: "_blank", rel: "noopener noreferrer" }, icon("external"), h("span", null, t("app.open"))) : !machine && isAdmin() && app.status === "stopped" && !app.job ? button(t("app.start"), { class: "small", onclick: () => startAction(app, "start") }, "play") : null,
+          isAdmin() && h("button", { type: "button", class: "btn small square", "aria-label": t("app.more"), "aria-haspopup": "menu", onclick: (e) => menu(e.currentTarget) }, icon("more")),
+        ),
+      ),
+    );
+  };
+  put(
+    box,
+    h(
+      "div",
+      { class: "card filter-bar" },
+      h("div", { class: "seg-pills" }, APP_SHOWS.filter((id) => id === "all" || id === appsUi.show || count(id) > 0).map((id) => h("button", { type: "button", class: "seg-pill" + (appsUi.show === id ? " active" : ""), "aria-pressed": String(appsUi.show === id), onclick: () => ((appsUi.show = id), renderAppsBody()) }, t("apps.show." + id), " ", h("span", { class: "muted" }, String(count(id)))))),
+      where && h("label", { class: "pair" }, h("span", { class: "muted small" }, t("apps.col.machine")), where),
+    ),
+    h(
+      "div",
+      { class: "card table-wrap" },
+      shown.length
+        ? h("table", { class: "apps-table" }, h("thead", null, h("tr", null, h("th", null, t("apps.col.app")), h("th", null, t("apps.col.address")), machines.length > 0 && h("th", null, t("apps.col.machine")), h("th", null, t("apps.col.state")), h("th"))), h("tbody", null, shown.map(row)))
+        : h("p", { class: "pad muted" }, t("apps.noneShown")),
+    ),
+  );
+}
+
 function renderStore() {
   const search = h("input", {
     type: "search",
@@ -11595,7 +12195,7 @@ function renderStore() {
     },
   });
   shell(
-    h("div", { class: "page-head" }, h("div", null, h("h1", null, t("nav.store")), h("p", { class: "meta", id: "store-meta" }, " ")), isAdmin() && h("div", { class: "actions" }, button(t("store.sync"), { class: "ghost", onclick: syncStores }, "refresh"), h("a", { class: "btn", href: "#/import" }, icon("download"), h("span", null, t("import.open"))), button(t("store.custom"), { onclick: customDialog }, "plus"))),
+    areaHead("apps", "store", { meta: " ", metaId: "store-meta", actions: isAdmin() && [button(t("store.sync"), { class: "ghost", onclick: syncStores }, "refresh"), button(t("store.custom"), { onclick: customDialog }, "plus")] }),
     h("div", { class: "search wide" }, icon("search"), search),
     h("div", { class: "store" }, h("nav", { class: "cats fold", id: "cats", "aria-label": t("store.categories") }), h("div", { id: "store-list" })),
   );
@@ -11944,8 +12544,7 @@ async function loadImport() {
 
 function renderImport() {
   shell(
-    h("nav", { class: "crumbs" }, h("a", { href: "#/store" }, t("nav.store")), icon("chevron"), h("span", null, t("import.title"))),
-    h("div", { class: "page-head" }, h("div", null, h("h1", null, t("import.title")), h("p", { class: "muted" }, t("import.lead")))),
+    areaHead("apps", "import", { meta: t("import.lead") }),
     h("div", { class: "stack import", id: "import-body" }),
   );
   renderImportBody();
@@ -12442,25 +13041,25 @@ async function loadSettings() {
     if (isAdmin()) state.settings = await api("GET", "/api/settings");
     if (isAdmin()) state.update = await api("GET", "/api/update").catch(() => null);
     if (isAdmin()) state.notify = await api("GET", "/api/notify").catch(() => null);
-    if (isAdmin() && state.route.section === "notifications") state.hiddenItems = (await api("GET", "/api/attention/hidden").catch(() => null))?.hidden ?? null;
-    if (isAdmin() && state.route.section === "apps") state.images = await api("GET", "/api/images").catch(() => null);
-    if (isAdmin() && state.route.section === "network") state.network = await api("GET", "/api/network").catch(() => null);
-    if (isAdmin() && state.route.section === "remote" && hasModule("remote")) [state.remote, state.wireguard] = await Promise.all([api("GET", "/api/tailscale").catch(() => null), api("GET", "/api/wireguard").catch(() => null)]);
-    if (isAdmin() && state.route.section === "tools") [state.tools, sysUpdates[""]] = await Promise.all([api("GET", "/api/tools").catch(() => null), api("GET", "/api/system/updates").catch((e) => ({ error: errorText(e) }))]);
+    if (isAdmin() && showsSection("notifications")) state.hiddenItems = (await api("GET", "/api/attention/hidden").catch(() => null))?.hidden ?? null;
+    if (isAdmin() && showsSection("apps")) state.images = await api("GET", "/api/images").catch(() => null);
+    if (isAdmin() && showsSection("network")) state.network = await api("GET", "/api/network").catch(() => null);
+    if (isAdmin() && showsSection("remote") && hasModule("remote")) [state.remote, state.wireguard] = await Promise.all([api("GET", "/api/tailscale").catch(() => null), api("GET", "/api/wireguard").catch(() => null)]);
+    if (isAdmin() && showsSection("tools")) [state.tools, sysUpdates[""]] = await Promise.all([api("GET", "/api/tools").catch(() => null), api("GET", "/api/system/updates").catch((e) => ({ error: errorText(e) }))]);
     // counting the volumes takes a while: the page is shown first
-    if (isAdmin() && state.route.section === "docker") void loadSpace();
+    if (isAdmin() && showsSection("docker")) void loadSpace();
     if (isAdmin() && STORAGE_SECTIONS.includes(state.route.section)) [state.disks, state.places] = await Promise.all([api("GET", "/api/disks").catch(() => null), hasModule("netplaces") ? api("GET", "/api/netplaces").catch(() => null) : null]);
-    if (isAdmin() && state.route.section === "shares" && hasModule("shares")) state.shares = await api("GET", "/api/shares").catch(() => null);
-    if (isAdmin() && state.route.section === "agents" && hasModule("assistant")) state.agents = await api("GET", "/api/agents").catch(() => null);
-    if (isAdmin() && state.route.section === "modules") state.modulesList = (await api("GET", "/api/modules").catch(() => null))?.modules ?? null;
-    if (isAdmin() && state.route.section === "assistant" && hasModule("assistant")) state.assistant = await api("GET", "/api/assistant").catch(() => null);
+    if (isAdmin() && showsSection("shares") && hasModule("shares")) state.shares = await api("GET", "/api/shares").catch(() => null);
+    if (isAdmin() && showsSection("agents") && hasModule("assistant")) state.agents = await api("GET", "/api/agents").catch(() => null);
+    if (isAdmin() && showsSection("modules")) state.modulesList = (await api("GET", "/api/modules").catch(() => null))?.modules ?? null;
+    if (isAdmin() && showsSection("assistant") && hasModule("assistant")) state.assistant = await api("GET", "/api/assistant").catch(() => null);
     if (!state.store && isAdmin()) state.store = await api("GET", `/api/store?lang=${state.lang}`).catch(() => null);
   } catch (e) {
     return toast(errorText(e), "error");
   }
   if (state.route.view === "settings") renderSettings();
   // "N hidden" under the list leads straight to them
-  if (state.route.section === "notifications" && location.hash.endsWith("/hidden")) document.getElementById("hidden")?.scrollIntoView({ block: "start" });
+  if (showsSection("notifications") && location.hash.endsWith("/hidden")) document.getElementById("hidden")?.scrollIntoView({ block: "start" });
 }
 
 const LANGUAGE_NAMES = { en: "English", uk: "Українська" };
@@ -12477,7 +13076,6 @@ const SECTIONS = [
   { id: "apps", icon: "grid", group: "apps", admin: true },
   { id: "stores", icon: "store", group: "apps", admin: true },
   { id: "docker", icon: "box", group: "apps", admin: true },
-  { id: "integrations", icon: "link", group: "apps", admin: true },
   { id: "storage", icon: "disk", group: "storage", admin: true },
   { id: "shares", icon: "share", group: "storage", admin: true },
   { id: "places", icon: "network", group: "storage", admin: true },
@@ -12544,7 +13142,7 @@ function markFound(text, typed) {
 
 /** Opens a section and brings the card asked for into view: the section may draw it a moment later */
 function openSettingsCard(item, card) {
-  go(`#/settings/${item.id}`);
+  go(sectionHash(item.id));
   if (!card) return;
   let tries = 0;
   const look = () => {
@@ -12555,51 +13153,732 @@ function openSettingsCard(item, card) {
   setTimeout(look, 100);
 }
 
-/** The column of Settings: finding a setting on top, the sections by group, or what was found */
-function settingsNav(section) {
-  const list = h("div", { class: "settings-list" });
-  const paint = () => {
-    const typed = settingsUi.find;
-    clear.hidden = !typed;
-    if (!typed.trim()) {
-      return put(list, SECTION_GROUPS.map((group) => {
-        const items = sections().filter((item) => item.group === group);
-        return items.length > 0 && h("div", { class: "cats" }, h("div", { class: "cat-title" }, t("settings.group." + group)), items.map((item) => h("a", { class: "cat" + (section === item.id ? " active" : ""), href: `#/settings/${item.id}` }, h("span", { class: "with-icon" }, icon(item.icon), sectionTitle(item)), SECTION_MODULE[item.id] && h("span", { class: "module-mark" }, t("modules.mark")))));
-      }));
-    }
-    const found = findSettings(typed);
-    if (!found.length) return put(list, h("div", { class: "settings-found" }, h("strong", null, t("settings.findNone", { text: typed.trim() })), h("p", { class: "muted small" }, t("settings.findNoneHint"))));
-    const count = found.reduce((sum, f) => sum + (f.cards.length || 1), 0);
-    put(
-      list,
-      h("p", { class: "muted small settings-found" }, t("settings.findCount", { n: count, sections: found.length })),
-      found.map(({ item, cards, off }) =>
-        h(
-          "div",
-          { class: "cats found" },
-          off && h("p", { class: "muted small settings-found" }, t("modules.foundOff", { name: t(`modules.${off}.name`) }), " ", h("button", { type: "button", class: "link", onclick: () => turnModuleOn(off, `#/settings/${item.id}`) }, t("modules.turnOn"))),
-          h("a", { class: "cat", href: `#/settings/${item.id}` }, h("span", null, h("strong", null, markFound(sectionTitle(item), typed)), h("span", { class: "muted small" }, " · ", t("settings.group." + item.group)))),
-          cards.map((card) => h("button", { type: "button", class: "cat", onclick: () => openSettingsCard(item, card) }, h("span", null, markFound(card, typed)))),
-        ),
-      ),
-    );
+// --- TV: the media player on the server's own screen ---------------------------------------------
+
+/** What the player plays, by the file's name: the same list the server goes by */
+const TV_PLAYS_RE = /\.(mkv|mp4|m4v|avi|mov|webm|ts|m2ts|mpg|mpeg|wmv|flv|ogv|3gp|iso|mp3|flac|m4a|ogg|opus|wav|aac|wma|jpe?g|png|gif|webp|bmp|heic)$/i;
+const tvUi = { timer: 0, busy: false, tick: 0 };
+
+/** What plays on the server's screen, in the head of every page: pause from anywhere, a click leads to the remote */
+function paintTvNow() {
+  const box = document.getElementById("tv-now");
+  if (!box) return;
+  const tv = isAdmin() && hasModule("tv") ? state.tvNow : null;
+  // the chip is the one way to the TV: there while the module is on, also with the player off or not installed yet
+  const there = isAdmin() && hasModule("tv");
+  box.hidden = !there;
+  box.className = "tv-now" + (tv?.playing ? " playing" : "") + (document.querySelector("dialog.tv-drop[open]") ? " open" : "");
+  if (!there) return box.replaceChildren();
+  const now = tv?.playing;
+  const label = now ? t("tv.playing", { name: now.title }) : t(tv?.on ? "tv.remote" : "tv.title");
+  // no words here: grey while nothing plays, the accent colour while something does — the name is in the remote.
+  // The left half pauses with one touch, the right one opens the remote; with nothing playing only that is left
+  const halves = [
+    now && h("button", { type: "button", class: "tv-now-half", title: t("tv.key.playpause"), "aria-label": t("tv.key.playpause"), onclick: () => api("POST", "/api/tv/do", { action: "playpause" }).catch((e) => toast(errorText(e), "error")) }, icon(now.paused ? "play" : "pause")),
+    h("button", { type: "button", class: "tv-now-half tv-now-open", title: label, "aria-label": label, "aria-haspopup": "dialog", onclick: () => tvDropdown(box) }, icon("tv")),
+  ];
+  // replaceChildren writes a missing one out as the word "null"
+  box.replaceChildren(...halves.filter(Boolean));
+  paintTvMini(now);
+}
+
+/** Where what plays has got to by now: the page counts the seconds on from what the server last said */
+const tvTimeNow = (now) => Math.min(now.total || Infinity, now.time + (now.paused ? 0 : (Date.now() - now.at) / 1000));
+
+/**
+ * On a phone what plays is a strip over the bottom bar: pause sits under the thumb, a touch anywhere
+ * else on it brings the remote up. It is there only while something plays or is paused.
+ */
+function paintTvMini(now) {
+  let mini = document.getElementById("tv-mini");
+  clearInterval(tvUi.tick);
+  if (!now) {
+    mini?.remove();
+    return document.body.classList.remove("tv-mini-on");
+  }
+  if (!mini) document.body.append((mini = h("aside", { id: "tv-mini" })));
+  document.body.classList.add("tv-mini-on");
+  const bar = h("i");
+  const times = h("span", { class: "tv-mini-time muted" });
+  const tick = () => {
+    const at = tvTimeNow(now);
+    times.textContent = `${tvClock(at)} / ${tvClock(now.total)}`;
+    bar.style.width = now.total > 0 ? `${(at / now.total) * 100}%` : "0";
   };
-  // on a phone the list closes over the section chosen: the words typed go with it
-  list.addEventListener("click", (e) => e.target.closest("a, button") && matchMedia("(max-width: 760px)").matches && (settingsUi.find = ""));
-  const input = h("input", { type: "search", placeholder: t("settings.find"), "aria-label": t("settings.find"), value: settingsUi.find, oninput: () => ((settingsUi.find = input.value), paint()) });
-  const clear = h("button", { type: "button", class: "icon-btn quiet", "aria-label": t("common.clear"), hidden: !settingsUi.find, onclick: () => ((settingsUi.find = input.value = ""), paint(), input.focus()) }, icon("x"));
-  paint();
-  return h("nav", { class: "settings-nav fold" }, h("label", { class: "settings-find" }, icon("search"), input, clear), list);
+  const press = (action) => (e) => (e.stopPropagation(), api("POST", "/api/tv/do", { action }).catch((err) => toast(errorText(err), "error")));
+  mini.replaceChildren(
+    h("div", { class: "tv-mini-bar" }, bar),
+    h("button", { type: "button", class: "tv-mini-open", "aria-label": t("tv.remote"), "aria-haspopup": "dialog", onclick: () => tvDropdown(mini) }, icon("tv"), h("span", { class: "grow" }, h("strong", { class: "clip" }, now.title), times)),
+    h("button", { type: "button", class: "tvr-round skip", title: t("tv.key.forward"), "aria-label": t("tv.key.forward"), onclick: press("forward") }, icon("fwd30"), h("span", null, "30")),
+    h("button", { type: "button", class: "tvr-main", title: t("tv.key.playpause"), "aria-label": t("tv.key.playpause"), onclick: press("playpause") }, icon(now.paused ? "play" : "pause")),
+  );
+  tick();
+  tvUi.tick = setInterval(tick, 1000);
+}
+
+/** The player runs and a screen is plugged in: something can be sent there */
+const tvReady = () => isAdmin() && hasModule("tv") && !!state.tvNow?.on && !!state.tvNow.screen;
+
+/** What plays in this browser goes on on the TV from the same place; here it stops */
+async function moveToTv(path, name, media, done, subtitle = "") {
+  // Hata's own player counts from where its stream began; a plain <video> from the file's start
+  const at = media?.position ? media.position() : media && Number.isFinite(media.currentTime) ? media.currentTime : 0;
+  media?.pause();
+  try {
+    await api("POST", "/api/tv/play", { path, at, ...(subtitle ? { subtitle } : {}) });
+  } catch (e) {
+    return toast(errorText(e), "error");
+  }
+  toast(t("tv.playing", { name }));
+  done();
+}
+
+/**
+ * What plays on the TV goes on in this browser from the same place. The TV only pauses until the
+ * browser really plays — a browser knows fewer formats than Kodi — and stops then; a file the browser
+ * cannot play stays on the TV and plays on.
+ */
+function moveToBrowser(now) {
+  document.querySelector("dialog.tv-drop")?.close();
+  const link = isLink(now.file);
+  const name = link ? "" : now.file.split("/").pop();
+  const tell = (action) => api("POST", "/api/tv/do", { action }).catch(() => {});
+  const wasPlaying = !now.paused;
+  if (wasPlaying) void tell("playpause");
+  let dialog;
+  let taken = false;
+  const played = () => {
+    if (!taken) void tell("stop");
+    taken = true;
+  };
+  const failed = () => {
+    if (taken) return;
+    dialog.close();
+    toast(t("tv.browserCannot"), "error");
+  };
+  const sound = TV_SOUND_RE.test(name);
+  // with ffmpeg here the same sound track and subtitles go on; without it the browser plays the file as it can
+  const player = !sound && tvStreams() ? streamPlayer(now.file, { at: Math.max(0, now.time - 2), audio: link ? 0 : Math.max(0, now.audioNow ?? 0), sub: link ? (now.outside && now.subNow >= 0 ? OUTSIDE_SUB : -1) : (now.subNow ?? -1), outside: now.outside ?? "", played, failed }) : null;
+  const media = player ?? h(sound ? "audio" : "video", { src: `${filesApi("/raw", "")}?path=${encodeURIComponent(now.file)}`, controls: true, autoplay: true, playsInline: true });
+  if (!player) {
+    media.addEventListener("loadedmetadata", () => (media.currentTime = Math.max(0, now.time - 2)), { once: true });
+    media.addEventListener("playing", played);
+    media.addEventListener("error", failed);
+  }
+  const back = button(t("tv.toTv"), { class: "small", onclick: () => void moveToTv(now.file, now.title, media, () => ((taken = true), dialog.close()), now.outside ?? "") }, "tv");
+  dialog = openDialog("xwide viewer", h("header", null, h("div", { class: "grow" }, h("h2", { class: "clip" }, now.title), h("p", { class: "muted small" }, t(player ? "tv.browserFrom" : "tv.browserHint"))), back, closeX(() => dialog)), h("div", { class: "stage" }, player ? player.el : media));
+  dialog.addEventListener("close", () => {
+    if (player) player.stop();
+    else (media.pause(), media.removeAttribute("src"));
+    // closed before the browser played anything: the TV goes on as it was
+    if (!taken && wasPlaying) void tell("playpause");
+  });
+}
+
+/** ffmpeg is here: videos are played by Hata's own player */
+const tvStreams = () => isAdmin() && !!state.overview?.media;
+
+const languageNames = {};
+/** "ukr" as a person says it in the page's language; what is not a language's code stays as written */
+function languageName(code) {
+  if (!code || code === "und") return "";
+  try {
+    languageNames[state.lang] ??= new Intl.DisplayNames([state.lang], { type: "language" });
+    const name = languageNames[state.lang].of(code);
+    return name && name !== code ? name[0].toUpperCase() + name.slice(1) : code;
+  } catch {
+    return code;
+  }
+}
+
+/** A sound track or a subtitle in a list: its language, what the file calls it, else how it is coded */
+const trackLabel = (track) => [!track.name?.toLowerCase().startsWith(languageName(track.language).toLowerCase() || "\n") && languageName(track.language), track.name || [track.codec?.toUpperCase(), track.channels > 2 ? `${track.channels - 1}.1` : track.channels === 2 ? "2.0" : ""].filter(Boolean).join(" ")].filter(Boolean).join(" · ") || `#${track.index + 1}`;
+
+/**
+ * Hata's own player for a video of this server: the picture as it is, the chosen sound made into what
+ * a browser plays, subtitles of the file. The stream has no length and cannot be sought in, so the
+ * bar is ours: a jump asks for a new stream from that moment, and the clock counts from where it began.
+ */
+function streamPlayer(path, { at = 0, audio = 0, sub = -1, outside = "", played, failed } = {}) {
+  const p = { start: 0, startText: "0", audio, sub, info: null, tries: 0, dragging: false, gone: false, reported: false };
+  const video = h("video", { playsInline: true, autoplay: true });
+  const where = `path=${encodeURIComponent(path)}${outside ? `&subs=${encodeURIComponent(outside)}` : ""}`;
+  const from = (kind, n) => `/api/media/${kind}?${where}&start=${p.startText}&n=${n}`;
+  const position = () => p.start + (video.currentTime || 0);
+  const note = h("p", { class: "sp-note", hidden: true });
+  const clock = h("span", { class: "sp-clock" }, "0:00");
+  const bar = h("input", { type: "range", class: "tvr-slider", min: 0, max: 0, step: 1, value: 0, "aria-label": t("tv.position") });
+  const play = h("button", { type: "button", class: "icon-btn", "aria-label": t("tv.key.playpause"), title: t("tv.key.playpause"), onclick: () => (video.paused ? void video.play().catch(() => {}) : video.pause()) }, icon("pause"));
+  const mute = h("button", { type: "button", class: "icon-btn", "aria-label": t("tv.mute"), title: t("tv.mute"), onclick: () => ((video.muted = !video.muted), mute.replaceChildren(icon(video.muted ? "volumeOff" : "volume"))) }, icon("volume"));
+  const sounds = h("select", { "aria-label": t("tv.track.audio"), title: t("tv.track.audio"), hidden: true, onchange: () => ((p.audio = Number(sounds.value)), void load(position())) });
+  const subs = h("select", { "aria-label": t("tv.track.subs"), title: t("tv.track.subs"), hidden: true, onchange: () => ((p.sub = Number(subs.value)), void words()) });
+  const spoken = h("div", { class: "sp-words", "aria-live": "off" });
+  const el = h("div", { class: "sp" }, h("div", { class: "sp-view" }, video, spoken), note, h("div", { class: "sp-bar" }, play, clock, bar, sounds, subs, mute, h("button", { type: "button", class: "icon-btn", "aria-label": t("tv.fullScreen"), title: t("tv.fullScreen"), onclick: () => (document.fullscreenElement ? void document.exitFullscreen() : void el.requestFullscreen?.().catch(() => {})) }, icon("expand"))));
+  const shown = () => {
+    const total = p.info?.duration ?? 0;
+    const now = p.dragging ? Number(bar.value) : position();
+    clock.textContent = total ? `${tvClock(now)} / ${tvClock(total)}` : tvClock(now);
+    if (!p.dragging) bar.value = String(now);
+  };
+  const say = (text) => ((note.textContent = text), (note.hidden = !text));
+  /**
+   * The chosen subtitle. Its lines come with the file's own times and are kept here, on the stream's
+   * clock; `paint` shows the ones of this very moment in a layer of ours over the picture. The
+   * browser's own subtitle tracks were tried first: a line of before a jump stayed drawn over the
+   * new ones. Every choice and every jump starts a list of its own, so nothing of the old one is left.
+   */
+  // The words of a subtitle line. Marks are taken out until none is left (one cut can leave another: "<<i>b>"), and "&amp;" is
+  // read last, so "&amp;lt;" stays the text "&lt;". The words are put on the page as text, never as markup.
+  const cueWords = (raw) => {
+    let text = raw;
+    for (let before = ""; before !== text; ) {
+      before = text;
+      text = text.replace(/<[^>]*>/g, "");
+    }
+    return text.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").trim();
+  };
+  const words = async () => {
+    p.reading?.abort();
+    const lines = (p.lines = []);
+    paint();
+    if (p.sub < 0) return;
+    const stop = (p.reading = new AbortController());
+    const zero = p.start;
+    const moment = (text) => text.split(":").reduce((sum, part) => sum * 60 + Number(part), 0);
+    const place = (block) => {
+      const rows = block.split("\n");
+      const at = rows.findIndex((row) => row.includes("-->"));
+      const times = at < 0 ? null : /^\s*([\d:.]+)\s+-->\s+([\d:.]+)/.exec(rows[at]);
+      // the marks of the format (<i>, <c.yellow>, <00:01.000>) are left out: the words alone are shown
+      const text = cueWords(rows.slice(at + 1).join("\n"));
+      if (!times || !text) return;
+      const [from, to] = [moment(times[1]) - zero, moment(times[2]) - zero];
+      if (to > 0 && to > from) lines.push({ from, to, text });
+    };
+    try {
+      const res = await fetch(from("subs", p.sub), { signal: stop.signal });
+      if (!res.ok) return;
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let rest = "";
+      for (;;) {
+        const { done, value } = await reader.read();
+        rest += decoder.decode(value ?? new Uint8Array(), { stream: !done }).replace(/\r/g, "");
+        const blocks = rest.split("\n\n");
+        rest = done ? "" : blocks.pop();
+        if (stop.signal.aborted) return;
+        blocks.forEach(place);
+        if (done) return;
+      }
+    } catch {
+      // stopped for another subtitle or another moment, or the server ended it: what came stays
+    }
+  };
+  /** The lines of this moment, redrawn only when they are other ones */
+  const paint = () => {
+    const now = video.currentTime || 0;
+    const said = (p.lines ?? []).filter((line) => line.from <= now && now < line.to).map((line) => line.text);
+    const key = said.join("\n\n");
+    if (key === p.said) return;
+    p.said = key;
+    put(spoken, said.map((text) => h("p", null, text)));
+  };
+  const follow = () => {
+    if (p.gone) return;
+    paint();
+    requestAnimationFrame(follow);
+  };
+  const load = async (moment) => {
+    say("");
+    let info;
+    try {
+      info = await api("GET", `/api/media?${where}&at=${Math.max(0, moment).toFixed(3)}`);
+    } catch (e) {
+      say(errorText(e));
+      return failed?.();
+    }
+    if (p.gone) return;
+    if (!p.info) {
+      if (!info.audio.some((one) => one.index === p.audio)) p.audio = 0;
+      if (!info.subs.some((one) => one.index === p.sub && one.text)) p.sub = -1;
+      put(sounds, info.audio.map((one) => h("option", { value: String(one.index), selected: one.index === p.audio }, trackLabel(one))));
+      sounds.hidden = info.audio.length < 2;
+      const readable = info.subs.filter((one) => one.text);
+      put(subs, h("option", { value: "-1", selected: p.sub < 0 }, t("tv.track.noSubs")), readable.map((one) => h("option", { value: String(one.index), selected: one.index === p.sub }, one.index === OUTSIDE_SUB ? t("tv.link.ownSubs") : trackLabel(one))));
+      subs.hidden = readable.length === 0;
+      // the picture's shape is known from the file: the box keeps it while a new stream is asked for after a jump,
+      // or the window would fold to an empty player's size and spring back
+      if (info.video?.width > 0 && info.video.height > 0) video.style.aspectRatio = `${info.video.width} / ${info.video.height}`;
+      bar.max = String(Math.floor(info.duration));
+      bar.hidden = !info.duration;
+    }
+    p.info = info;
+    p.startText = info.start;
+    p.start = info.zero;
+    video.src = from("stream", p.audio);
+    void words();
+    void video.play().catch(() => {});
+  };
+  video.addEventListener("timeupdate", shown);
+  video.addEventListener("click", () => play.click());
+  video.addEventListener("play", () => play.replaceChildren(icon("pause")));
+  video.addEventListener("pause", () => play.replaceChildren(icon("play")));
+  video.addEventListener("playing", () => {
+    p.tries = 0;
+    if (!p.reported) played?.();
+    p.reported = true;
+  });
+  // a stream left paused for long is cut by the way it came: asked for again from where it stopped
+  video.addEventListener("error", () => {
+    if (p.gone || !video.getAttribute("src")) return;
+    if (p.reported && p.tries++ < 2) return void load(position());
+    say(t("tv.browserCannot"));
+    failed?.();
+  });
+  bar.addEventListener("input", () => ((p.dragging = true), shown()));
+  bar.addEventListener("change", () => ((p.dragging = false), void load(Number(bar.value))));
+  el.addEventListener("keydown", (e) => {
+    if (e.target instanceof HTMLInputElement || e.target instanceof HTMLSelectElement) return;
+    if (e.key === " ") (e.preventDefault(), play.click());
+    if (e.key === "ArrowRight") void load(position() + 30);
+    if (e.key === "ArrowLeft") void load(position() - 30);
+  });
+  // on the whole screen the bar lies over the picture and goes away after a few quiet seconds of playing;
+  // a move of the pointer, a touch or a key brings it back, and it stays while paused or while a list is open
+  const panel = el.querySelector(".sp-bar");
+  const wake = () => {
+    el.classList.remove("idle");
+    clearTimeout(p.quiet);
+    p.quiet = setTimeout(() => {
+      if (p.gone) return;
+      if (video.paused || panel.matches(":hover") || document.querySelector("dialog.select-list[open]")) return wake();
+      el.classList.add("idle");
+    }, 3000);
+  };
+  for (const name of ["pointermove", "pointerdown", "keydown", "touchstart"]) el.addEventListener(name, wake, { passive: true });
+  video.addEventListener("pause", wake);
+  video.addEventListener("play", wake);
+  document.addEventListener("fullscreenchange", wake);
+  void load(at);
+  requestAnimationFrame(follow);
+  return {
+    el,
+    position,
+    pause: () => video.pause(),
+    stop: () => {
+      p.gone = true;
+      clearTimeout(p.quiet);
+      document.removeEventListener("fullscreenchange", wake);
+      p.reading?.abort();
+      video.pause();
+      video.removeAttribute("src");
+      video.load();
+    },
+  };
+}
+
+/** Sound alone among what the player plays: the browser needs no picture for it */
+const TV_SOUND_RE = /\.(mp3|flac|m4a|ogg|opus|wav|aac|wma)$/i;
+/** What a browser has a chance to play itself */
+const TV_BROWSER_RE = /\.(mp4|m4v|webm|mov|mkv|ogv|mp3|flac|m4a|ogg|opus|wav|aac)$/i;
+
+/** An address on the network instead of a file of this server */
+const isLink = (path) => /^https?:\/\//i.test(path);
+/** The number subtitles given by an address of their own go by in the player */
+const OUTSIDE_SUB = 1000;
+/** Where an address leads, as a title: without what follows the "?" */
+const linkTitle = (link) => {
+  try {
+    const url = new URL(link);
+    return url.host + (url.pathname === "/" ? "" : decodeURIComponent(url.pathname));
+  } catch {
+    return link;
+  }
+};
+
+/** An address played in this browser by Hata's own player; from there it can go on on the TV */
+function playLinkHere(link, subtitle, at = 0) {
+  let dialog;
+  const title = linkTitle(link);
+  const player = streamPlayer(link, { at, sub: subtitle ? OUTSIDE_SUB : -1, outside: subtitle });
+  const toTv = tvReady() && button(t("tv.toTv"), { class: "small", onclick: () => void moveToTv(link, title, player, () => dialog.close(), subtitle) }, "tv");
+  dialog = openDialog("xwide viewer", h("header", null, h("div", { class: "grow" }, h("h2", { class: "clip" }, title)), toTv, closeX(() => dialog)), h("div", { class: "stage" }, player.el));
+  dialog.addEventListener("close", () => player.stop());
+}
+
+/** "Play a link": the address of a video or a broadcast, played on the TV or in this browser */
+function playLinkDialog() {
+  let dialog;
+  const address = h("input", { type: "url", inputMode: "url", autocomplete: "off", spellcheck: false, maxLength: 2000, placeholder: "https://", required: true });
+  const subtitle = h("input", { type: "url", inputMode: "url", autocomplete: "off", spellcheck: false, maxLength: 2000, placeholder: "https://" });
+  const error = h("p", { class: "error", role: "alert" });
+  const read = () => {
+    error.textContent = "";
+    const [link, subs] = [address.value.trim(), subtitle.value.trim()];
+    if (!isLink(link) || (subs && !isLink(subs))) return void (error.textContent = t("error.tv.badLink"));
+    return { link, subs };
+  };
+  const onTv = async (e) => {
+    const said = read();
+    if (!said) return;
+    e.currentTarget.disabled = true;
+    try {
+      await api("POST", "/api/tv/play", { path: said.link, ...(said.subs ? { subtitle: said.subs } : {}) });
+    } catch (err) {
+      e.target.closest("button").disabled = false;
+      return void (error.textContent = errorText(err));
+    }
+    toast(t("tv.playing", { name: linkTitle(said.link) }));
+    dialog.close();
+    setTimeout(loadTv, 500);
+  };
+  const here = () => {
+    const said = read();
+    if (!said) return;
+    dialog.close();
+    playLinkHere(said.link, said.subs);
+  };
+  const tv = tvReady();
+  const browser = tvStreams();
+  dialog = openDialog(
+    "",
+    h("h2", null, t("tv.link.title")),
+    h("p", { class: "muted" }, t("tv.link.lead")),
+    field(t("tv.link.address"), address),
+    field(t("tv.link.subs"), subtitle, t("tv.link.subsHint")),
+    !tv && h("p", { class: "muted small" }, t("tv.link.noTv")),
+    !browser && h("p", { class: "muted small" }, t("tv.link.noBrowser")),
+    error,
+    h("footer", null, closeButton(() => dialog, t("common.cancel")), browser && button(t("tv.link.here"), { class: tv ? "" : "primary", onclick: here }, "external"), tv && button(t("tv.link.onTv"), { class: "primary", onclick: (e) => void onTv(e) }, "tv")),
+  );
+  address.focus();
+}
+
+async function playOnTv(path, name) {
+  try {
+    await api("POST", "/api/tv/play", { path });
+    toast(t("tv.playing", { name }));
+  } catch (e) {
+    toast(errorText(e), "error");
+  }
+}
+
+async function loadTv() {
+  clearTimeout(tvUi.timer);
+  if (state.route.view !== "tv" || !hasModule("tv")) return;
+  try {
+    state.tv = await api("GET", "/api/tv");
+  } catch (e) {
+    if (!state.tv) put(document.getElementById("tv-body"), h("section", { class: "card pad" }, h("p", { class: "error" }, errorText(e))));
+  }
+  // a slider under the finger or a list that is open is not redrawn under the person
+  if (state.tv && !tvUi.busy && !document.querySelector("dialog[open]:not(.tv-drop)") && !document.querySelector("#tv-body input[type=range]:active")) paintTv();
+  // while the player runs the page keeps up with what plays
+  tvUi.timer = setTimeout(loadTv, state.tv?.running ? 2000 : 8000);
+}
+
+/**
+ * Where the remote stops while the page is scrolled: under the head, or — when it is higher than the
+ * window — as far up as shows its last row, so that it never needs a scroll of its own.
+ */
+function tvStick() {
+  const card = document.querySelector("#tv-body .tv-page > :first-child");
+  if (card) card.style.setProperty("--tv-top", `${Math.min(88, window.innerHeight - card.offsetHeight - 16)}px`);
+}
+
+function renderTv() {
+  shell(areaHead("house", "tv", { actions: button(t("tv.link"), { onclick: playLinkDialog }, "link") }), h("div", { id: "tv-body", class: "stack" }, h("p", { class: "card pad muted" }, "…")));
+  window.addEventListener("resize", tvStick);
+  cleanups.push(() => (clearTimeout(tvUi.timer), window.removeEventListener("resize", tvStick)));
+  if (state.tv) paintTv();
+}
+
+const tvClock = (s) => `${Math.floor(s / 3600) ? Math.floor(s / 3600) + ":" : ""}${String(Math.floor((s % 3600) / 60)).padStart(Math.floor(s / 3600) ? 2 : 1, "0")}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+
+/**
+ * The remote itself, the same on the TV page and under the chip in the head: what plays, the transport
+ * with pause as the one loud button, the volume, a round pad with OK in the middle, four keys below.
+ */
+function tvRemoteParts(tv, press, turnOn) {
+  const note = (iconName, title, text, action) => h("div", { class: "tvr-note" }, h("strong", { class: "with-icon" }, icon(iconName), title), h("p", { class: "muted small" }, text), action);
+  if (!tv.installed) return [note("tv", t("tv.needsTitle"), t("tv.needsShort"), h("a", { class: "btn primary wide", href: "#/tv", onclick: (e) => e.currentTarget.closest("dialog")?.close() }, h("span", null, t("tv.openPage"))))];
+  if (!tv.running) return [note("power", t("tv.offTitle"), t("tv.offLead"), turnOn && button(t("tv.turnOn"), { class: "primary wide", onclick: (e) => ((e.currentTarget.disabled = true), turnOn()) }, "power"))];
+  const idle = !tv.answers;
+  const now = tv.playing;
+  const round = (action, iconName, label, cls = "", off = false) => h("button", { type: "button", class: "tvr-round " + cls, title: label, "aria-label": label, disabled: idle || off, onclick: () => press(action) }, icon(iconName));
+  const position = now && now.total > 0 && h("input", { type: "range", class: "tvr-slider", min: 0, max: 100, step: 0.1, value: (now.time / now.total) * 100, "aria-label": t("tv.position"), onchange: (e) => press("seek", Number(e.target.value)) });
+  const file = now && !isLink(now.file) ? now.file.split("/").pop() : "";
+  const volume = h("input", { type: "range", class: "tvr-slider" + (tv.muted ? " muted" : ""), min: 0, max: 100, step: 1, value: tv.volume, disabled: idle, "aria-label": t("tv.volume"), onchange: (e) => press("volume", Number(e.target.value)) });
+  const skip = (action, iconName, label) => h("button", { type: "button", class: "tvr-round skip", title: label, "aria-label": label, disabled: idle || !now, onclick: () => press(action) }, icon(iconName), h("span", null, "30"));
+  const arrow = (action, cls, label) => h("button", { type: "button", class: "tvr-arrow " + cls, title: label, "aria-label": label, disabled: idle, onclick: () => press(action) }, icon("chevron"));
+  const keyed = (action, iconName, label) => h("div", { class: "tvr-key" }, round(action, iconName, label), h("span", { class: "muted" }, label));
+  // the sound and the subtitles of what plays, chosen here instead of in the player's menu on the screen
+  const tracks = now && (now.audio?.length > 1 || now.subs?.length > 0) && h(
+    "div",
+    { class: "tvr-tracks" },
+    now.audio.length > 1 && h("label", null, h("span", { class: "muted" }, t("tv.track.audio")), h("select", { onchange: (e) => press("audio", Number(e.target.value)) }, now.audio.map((one) => h("option", { value: String(one.index), selected: one.index === now.audioNow }, trackLabel(one))))),
+    now.subs.length > 0 && h("label", null, h("span", { class: "muted" }, t("tv.track.subs")), h("select", { onchange: (e) => press("subtitle", e.target.value === "off" ? "off" : Number(e.target.value)) }, h("option", { value: "off", selected: now.subNow < 0 }, t("tv.track.noSubs")), now.subs.map((one) => h("option", { value: String(one.index), selected: one.index === now.subNow }, trackLabel(one))))),
+  );
+  const typed = h("div", { class: "tvr-key" }, h("button", { type: "button", class: "tvr-round", title: t("tv.key.textHint"), "aria-label": t("tv.key.text"), disabled: idle, onclick: () => tvTextDialog(press) }, icon("keys")), h("span", { class: "muted" }, t("tv.key.text")));
+  return [
+    idle
+      ? note("refresh", t("tv.starting"), t("tv.startingLead"))
+      : now
+        ? h("div", { class: "tvr-now" }, h("div", { class: "tvr-title" }, h("div", { class: "grow" }, h("strong", { class: "wrap" }, now.title), now.paused && h("span", { class: "state busy" }, t("tv.paused"))), round("stop", "stop", t("tv.key.stop"))), file && file !== now.title && h("p", { class: "tvr-file muted" }, file), position, h("div", { class: "tvr-times muted" }, h("span", null, tvClock(now.time)), h("span", null, tvClock(now.total))), tracks, (isLink(now.file) ? tvStreams() : now.file.startsWith("/") && (tvStreams() ? TV_PLAYS_RE.test(now.file) && fileKind({ type: "file", name: now.file }) !== "image" : TV_BROWSER_RE.test(now.file))) && h("div", { class: "row-actions" }, button(t("tv.toBrowser"), { class: "small", onclick: () => moveToBrowser(now) }, "external")))
+        : note("tv", t("tv.nothingTitle"), t("tv.nothing")),
+    h("div", { class: "tvr-transport" }, skip("rewind", "back30", t("tv.key.rewind")), h("button", { type: "button", class: "tvr-main", title: t("tv.key.playpause"), "aria-label": t("tv.key.playpause"), disabled: idle || !now, onclick: () => press("playpause") }, icon(now && !now.paused ? "pause" : "play")), skip("forward", "fwd30", t("tv.key.forward"))),
+    h("div", { class: "tvr-volume" }, round("mute", tv.muted ? "volumeOff" : "volume", t(tv.muted ? "tv.unmute" : "tv.mute"), tv.muted ? "on" : ""), volume, h("span", { class: "tvr-value" + (tv.muted ? " muted" : "") }, tv.muted ? t("tv.muted") : `${tv.volume}%`)),
+    h("hr", { class: "tvr-rule" }),
+    h("div", { class: "tvr-pad" }, arrow("up", "up", t("tv.key.up")), arrow("left", "left", t("tv.key.left")), h("button", { type: "button", class: "tvr-ok", disabled: idle, onclick: () => press("select") }, "OK"), arrow("right", "right", t("tv.key.right")), arrow("down", "down", t("tv.key.down"))),
+    h("div", { class: "tvr-keys" }, keyed("back", "undo", t("tv.key.back")), keyed("home", "home", t("tv.key.home")), keyed("menu", "lines", t("tv.key.menu")), keyed("info", "info", t("tv.key.info")), typed),
+  ];
+}
+
+/** Text typed here goes into the field the player has open on the screen: a search, a name, a password */
+function tvTextDialog(press) {
+  let dialog;
+  const field = h("input", { type: "text", autocomplete: "off", maxLength: 500, "aria-label": t("tv.key.text") });
+  const send = async () => {
+    if (!field.value) return;
+    await press("text", field.value);
+    dialog.close();
+  };
+  field.addEventListener("keydown", (e) => e.key === "Enter" && void send());
+  dialog = openDialog("confirm", h("h2", null, t("tv.textTitle")), h("p", { class: "muted" }, t("tv.textLead")), field, h("footer", null, closeButton(() => dialog, t("common.cancel")), button(t("tv.textSend"), { class: "primary", onclick: () => void send() }, "check")));
+  field.focus();
+}
+
+/** The remote under the chip in the head: the screen is driven from any page, without leaving it */
+function tvDropdown(at) {
+  let dialog;
+  let timer = 0;
+  const body = h("div", { class: "tvr" }, h("p", { class: "muted" }, "…"));
+  const press = (action, value) => api("POST", "/api/tv/do", { action, value }).then(() => setTimeout(load, 250), (e) => toast(errorText(e), "error"));
+  const turnOn = () => api("PUT", "/api/tv", { on: true }).then(load, (e) => toast(errorText(e), "error"));
+  const load = async () => {
+    clearTimeout(timer);
+    if (!dialog.isConnected) return;
+    try {
+      const tv = (state.tv = await api("GET", "/api/tv"));
+      // a slider under the finger is not redrawn under it, nor the window while it is pulled down
+      if (!body.querySelector("input[type=range]:active") && !document.querySelector("dialog.select-list[open]") && !dialog.classList.contains("pulled")) put(body, tvRemoteParts(tv, press, turnOn));
+    } catch (e) {
+      put(body, h("p", { class: "error" }, errorText(e)));
+    }
+    timer = setTimeout(load, 2000);
+  };
+  dialog = openDialog("dropdown tv-drop", h("div", { class: "tvr-head" }, h("span", { class: "with-icon muted" }, icon("tv"), t("tv.title")), h("a", { class: "link small with-icon", href: "#/tv", onclick: () => dialog.close() }, t("tv.openPage"), icon("arrow"))), body);
+  dialog.addEventListener("close", () => {
+    clearTimeout(timer);
+    paintTvNow();
+  });
+  pullToClose(dialog);
+  at.classList.add("open");
+  const r = at.getBoundingClientRect();
+  placeAt(dialog, { x: r.right - dialog.offsetWidth, y: r.bottom + 6 });
+  void load();
+}
+
+function paintTv() {
+  const box = document.getElementById("tv-body");
+  const tv = state.tv;
+  if (!box || !tv) return;
+  const error = h("p", { class: "error", role: "alert" });
+  const change = async (data) => {
+    error.textContent = "";
+    tvUi.busy = true;
+    try {
+      state.tv = await api("PUT", "/api/tv", data);
+    } catch (e) {
+      tvUi.busy = false;
+      return void (error.textContent = errorText(e));
+    }
+    tvUi.busy = false;
+    paintTv();
+    if (state.tv.asking) tvKeepDialog();
+  };
+  const press = (action, value) => api("POST", "/api/tv/do", { action, value }).then(() => setTimeout(loadTv, 250), (e) => toast(errorText(e), "error"));
+
+  const screens = tv.displays.filter((d) => d.connected);
+  const screenCard = h(
+    "section",
+    { class: "card pad stack" },
+    h("div", { class: "section-head" }, h("h2", null, t("tv.screen"))),
+    screens.length
+      ? screens.map((d) => h("div", { class: "kv" }, h("span", { class: "with-icon" }, icon("tv"), [d.monitor, d.name].filter(Boolean).join(" · ")), h("span", { class: "muted" }, [d.mode.replace("x", "×"), t(d.audio ? "tv.screenSound" : "tv.screenSilent")].filter(Boolean).join(" · "))))
+      : h("div", { class: "tvr-note warn" }, h("strong", { class: "with-icon" }, icon("tv"), t("tv.noScreenTitle")), h("p", { class: "muted small" }, t(tv.displays.length ? "tv.noScreen" : "tv.noOutput")), tv.displays.length > 0 && h("div", { class: "row-actions" }, button(t("tv.lookAgain"), { class: "small", onclick: () => void loadTv() }, "refresh"))),
+    tv.remotes.length > 0 && h("div", { class: "kv" }, h("span", { class: "muted" }, t("tv.remotes")), h("span", null, tv.remotes.join(", "))),
+    h("p", { class: "muted small" }, t("tv.remotesHint")),
+  );
+
+  if (!tv.installed) {
+    const install = button(t("mounting.needs.install", { package: "Kodi" }), {
+      class: "primary",
+      disabled: !!tv.cannot,
+      onclick: async () => {
+        install.disabled = true;
+        try {
+          const res = await api("POST", "/api/tv/install", {});
+          jobDialog(res.job, "tv", "Kodi", loadTv);
+        } catch (e) {
+          error.textContent = errorText(e);
+          install.disabled = false;
+        }
+      },
+    }, "download");
+    install.classList.add("wide");
+    const installCard = h("section", { class: "card pad stack" }, h("span", { class: "app-icon plus" }, icon("tv")), h("h2", null, t("tv.needsTitle")), h("p", { class: "muted" }, t("tv.needsLead")), install, tv.cannot ? h("p", { class: "muted small" }, t("tv.cannot." + tv.cannot)) : h("p", { class: "cmd" }, icon("terminal"), tv.install), error);
+    return put(box, h("div", { class: "tv-page" }, installCard, h("div", { class: "stack" }, screenCard, h("section", { class: "card pad tv-after" }, h("strong", { class: "block" }, t("tv.afterTitle")), h("span", { class: "muted small" }, t("tv.afterList"))))));
+  }
+
+  const flip = h("button", { type: "button", role: "switch", class: "ha-switch", "aria-checked": String(tv.on), "aria-label": t("tv.switch"), onclick: () => ((flip.disabled = true), void change({ on: !tv.on })) }, h("i"));
+  const playerCard = h(
+    "section",
+    { class: "card pad stack" },
+    h("div", { class: "setting" }, h("div", { class: "grow" }, h("strong", null, t("tv.switch"), " ", h("span", { class: "state " + (tv.running ? "running" : "stopped") }, t(tv.running ? "tv.running" : "tv.stopped"))), h("p", { class: "muted small" }, t("tv.switchHint"))), h("div", { class: "setting-control" }, flip)),
+    !tv.decodes && h("p", { class: "muted small" }, t("tv.noDecode")),
+    error,
+  );
+
+  const remoteCard = h("section", { class: "card pad tv-remote" }, h("div", { class: "tvr-head" }, h("span", { class: "with-icon muted" }, icon("tv"), t("tv.remote"))), h("div", { class: "tvr big" }, tvRemoteParts(tv, press, () => void change({ on: true }))));
+
+  const addFolder = () => folderPicker({ title: t("tv.folderPick"), start: state.settings?.dataRoot ?? "/", confirmLabel: t("tv.folderAdd"), action: async (path) => void (await change({ folders: [...tv.folders, path] })) });
+  const foldersCard = h(
+    "section",
+    { class: "card pad stack" },
+    h("div", { class: "section-head" }, h("h2", null, t("tv.folders")), h("div", { class: "row-actions" }, button(t("tv.folderAdd"), { class: "small", onclick: addFolder }, "plus"))),
+    h("p", { class: "muted small" }, t("tv.foldersLead")),
+    tv.folders.length
+      ? tv.folders.map((path) => h("div", { class: "kv" }, h("a", { class: "link with-icon wrap", href: filesHash(path) }, icon("folder"), path), button(t("tv.folderRemove"), { class: "small ghost", onclick: () => void change({ folders: tv.folders.filter((x) => x !== path) }) })))
+      : h("p", { class: "muted" }, t("tv.noFolders")),
+    tv.suggested.map((path) => h("div", { class: "kv" }, h("span", { class: "muted with-icon wrap" }, icon("folder"), path), button(t("tv.folderUse"), { class: "small", onclick: () => void change({ folders: [...tv.folders, path] }) }))),
+  );
+
+  // one of Kodi's own settings as a row: a list of Kodi's values or of ours, or a switch
+  const pref = (id) => tv.prefs?.[id];
+  const set = (setting, value) => void change({ setting, value });
+  const listed = (id, title, hint, options) => pref(id) && settingRow(title, hint, h("select", { onchange: (e) => set(id, typeof pref(id).value === "number" ? Number(e.target.value) : e.target.value) }, (options ?? pref(id).options ?? []).map((o) => h("option", { value: String(o.value), selected: o.value === pref(id).value }, o.label))));
+  const flag = (id, title, hint) => {
+    if (!pref(id)) return null;
+    const el = h("button", { type: "button", role: "switch", class: "ha-switch", "aria-checked": String(pref(id).value === true), "aria-label": title, onclick: () => ((el.disabled = true), set(id, pref(id).value !== true)) }, h("i"));
+    return settingRow(title, hint, el);
+  };
+  const audioCard = tv.audio && tv.audio.options.length > 0 && h(
+    "section",
+    { class: "card pad stack" },
+    h("div", { class: "section-head" }, h("h2", null, t("tv.sound"))),
+    settingRow(t("tv.audio"), t("tv.audioHint"), h("select", { onchange: (e) => void change({ audio: e.target.value }) }, tv.audio.options.map((o) => h("option", { value: o.value, selected: o.value === tv.audio.value }, o.label)))),
+    listed("audiooutput.channels", t("tv.channels"), t("tv.channelsHint")),
+    flag("audiooutput.passthrough", t("tv.passthrough"), t("tv.passthroughHint")),
+    flag("audiooutput.guisoundmode", t("tv.menuSounds"), null),
+  );
+  const speaks = tv.language;
+  const languageCard = tv.answers && speaks && h(
+    "section",
+    { class: "card pad stack" },
+    h("div", { class: "section-head" }, h("h2", null, t("tv.language"))),
+    settingRow(
+      t("tv.languageOwn"),
+      speaks.busy ? t("tv.languageBusy") : speaks.failed ? t("tv.languageFailed") : t("tv.languageHint"),
+      h("select", { disabled: speaks.busy, onchange: (e) => void change({ language: e.target.value }) }, !speaks.value && h("option", { value: "", selected: true }, t("tv.languageOther")), state.languages.filter((code) => ["en", "uk"].includes(code)).map((code) => h("option", { value: code, selected: code === speaks.value }, LANGUAGE_NAMES[code] ?? code))),
+    ),
+    listed("locale.audiolanguage", t("tv.audioLanguage"), t("tv.audioLanguageHint")),
+    listed("locale.subtitlelanguage", t("tv.subsLanguage"), null),
+  );
+  const saver = pref("screensaver.mode") && [
+    listed("screensaver.mode", t("tv.saver"), t("tv.saverHint"), [{ value: "", label: t("tv.saver.off") }, { value: "screensaver.xbmc.builtin.dim", label: t("tv.saver.dim") }, { value: "screensaver.xbmc.builtin.black", label: t("tv.saver.black") }, ...(["", "screensaver.xbmc.builtin.dim", "screensaver.xbmc.builtin.black"].includes(pref("screensaver.mode").value) ? [] : [{ value: pref("screensaver.mode").value, label: pref("screensaver.mode").value }])]),
+    pref("screensaver.mode").value !== "" && listed("screensaver.time", t("tv.saverAfter"), null, [...new Set([1, 2, 3, 5, 10, 15, 30, 60, pref("screensaver.time")?.value])].filter(Number.isFinite).sort((a, b) => a - b).map((n) => ({ value: n, label: t("time.minutes", { n }) }))),
+    pref("powermanagement.displaysoff") && listed("powermanagement.displaysoff", t("tv.sleep"), t("tv.sleepHint"), [...new Set([0, 5, 10, 15, 30, 60, 120, pref("powermanagement.displaysoff").value])].filter(Number.isFinite).sort((a, b) => a - b).map((n) => ({ value: n, label: n ? t("time.minutes", { n }) : t("tv.sleep.never") }))),
+  ];
+  // the browser's own player stands on ffmpeg: said with what it gives, the command and the button
+  const bring = button(t("mounting.needs.install", { package: "FFmpeg" }), {
+    class: "small",
+    onclick: async () => {
+      bring.disabled = true;
+      try {
+        await api("POST", "/api/tools/ffmpeg/install", {});
+        await refresh();
+        void loadTv();
+      } catch (e) {
+        error.textContent = errorText(e);
+        bring.disabled = false;
+      }
+    },
+  }, "download");
+  const browserCard = h("section", { class: "card pad stack" }, h("div", { class: "section-head" }, h("h2", null, t("tv.inBrowser")), tv.streams && h("span", { class: "state running" }, t("tv.inBrowserOn"))), h("p", { class: "muted small" }, t(tv.streams ? "tv.inBrowserLead" : "tv.inBrowserNeeds")), !tv.streams && [h("p", { class: "cmd" }, icon("terminal"), tv.streamsInstall), bring]);
+
+  const picture = tv.picture;
+  const follow = picture && h("button", { type: "button", role: "switch", class: "ha-switch", "aria-checked": String(picture.match), "aria-label": t("tv.match"), onclick: () => ((follow.disabled = true), void change({ match: !picture.match })) }, h("i"));
+  const pictureCard = picture && h(
+    "section",
+    { class: "card pad stack" },
+    h("div", { class: "section-head" }, h("h2", null, t("tv.picture"))),
+    settingRow(t("tv.resolution"), t("tv.resolutionHint", { n: TV_KEEP_SECONDS }), h("select", { onchange: (e) => void change({ resolution: Number(e.target.value) }) }, picture.resolution.options.map((o) => h("option", { value: String(o.value), selected: o.value === picture.resolution.value }, o.label)))),
+    picture.rate.options.length > 1 && settingRow(t("tv.rate"), null, h("select", { onchange: (e) => void change({ rate: e.target.value }) }, picture.rate.options.map((o) => h("option", { value: o.value, selected: o.value === picture.rate.value }, t("tv.hz", { n: o.label }))))),
+    settingRow(t("tv.match"), t("tv.matchHint"), follow),
+    saver,
+  );
+
+  // the remote is the page's main thing; what is set once stands beside it
+  put(box, h("div", { class: "tv-page" }, remoteCard, h("div", { class: "stack" }, playerCard, screenCard, foldersCard, languageCard, audioCard, pictureCard, browserCard)));
+  tvStick();
+  if (tv.asking) tvKeepDialog();
+}
+
+/** How long Kodi keeps a new screen mode on trial, seconds */
+const TV_KEEP_SECONDS = 15;
+
+/**
+ * A new screen mode is on trial: Kodi asks on the screen whether to keep it and puts the old one back
+ * by itself. The same question here, for whoever holds no remote: the answer presses Kodi's button.
+ */
+function tvKeepDialog() {
+  if (document.querySelector("dialog.tv-keep")) return;
+  let left = state.tv?.asking ?? 0;
+  if (!left) return;
+  let dialog;
+  let answered = false;
+  const error = h("p", { class: "error", role: "alert" });
+  const count = h("p", { class: "muted" }, t("tv.keepLead", { n: left }));
+  const answer = async (keep) => {
+    answered = true;
+    clearInterval(timer);
+    for (const el of dialog.querySelectorAll("button")) el.disabled = true;
+    try {
+      state.tv = await api("POST", "/api/tv/keep", { keep });
+    } catch (e) {
+      // said too late, or Kodi's window cannot be reached from here: what the screen shows now is what stays
+      error.textContent = errorText(e);
+      setTimeout(() => (dialog.close(), void loadTv()), 4000);
+      return;
+    }
+    dialog.close();
+    paintTv();
+  };
+  const timer = setInterval(() => {
+    if (--left > 0) return void (count.textContent = t("tv.keepLead", { n: left }));
+    answered = true;
+    clearInterval(timer);
+    dialog.close();
+    toast(t("tv.keepGone"));
+    setTimeout(loadTv, 1500);
+  }, 1000);
+  dialog = openDialog("confirm tv-keep", h("h2", null, t("tv.keepTitle")), count, error, h("footer", null, button(t("tv.keepNo"), { onclick: () => void answer(false) }), button(t("tv.keepYes"), { class: "primary", onclick: () => void answer(true) }, "check")));
+  // closed without a word: the old mode comes back now, not when the time is out
+  dialog.addEventListener("close", () => {
+    clearInterval(timer);
+    if (!answered) void api("POST", "/api/tv/keep", { keep: false }).then(loadTv, loadTv);
+  });
 }
 
 // --- Modules: the parts of Hata a person turns on -------------------------------------------------
 
-const MODULE_ICONS = { raid: "shield", netplaces: "network", shares: "share", offsite: "archive", remote: "globe", dns: "signpost", adblock: "ban", domains: "plug", machines: "server", proxmox: "server", containers: "box", integrations: "link", assistant: "chat" };
+const MODULE_ICONS = { tv: "tv", raid: "shield", netplaces: "network", shares: "share", offsite: "archive", remote: "globe", dns: "signpost", adblock: "ban", domains: "plug", machines: "server", proxmox: "server", containers: "box", integrations: "link", assistant: "chat" };
 const MODULE_GROUPS = ["storage", "network", "servers", "more"];
 /** Where a module's own things are once it is on */
-const MODULE_HOME = { raid: "#/settings/protection", netplaces: "#/settings/places", shares: "#/settings/shares", offsite: "#/settings/backups", remote: "#/settings/remote", dns: "#/settings/dns", adblock: "#/settings/adblock", domains: "#/settings/ports", machines: "#/machines", proxmox: "#/machines", containers: "#/containers", integrations: "#/settings/integrations", assistant: "#/settings/assistant" };
+const MODULE_HOME = { tv: "#/house/tv", raid: "#/settings/protection", netplaces: "#/settings/places", shares: "#/settings/shares", offsite: "#/settings/backups", remote: "#/settings/remote", dns: "#/settings/dns", adblock: "#/settings/adblock", domains: "#/settings/ports", machines: "#/machines", proxmox: "#/machines", containers: "#/containers", integrations: "#/settings/integrations", assistant: "#/settings/assistant" };
 /** Where the thing that holds a module on is taken away */
-const MODULE_USE_AT = { array: "#/settings/protection", merged: "#/settings/storage", pools: "#/settings/protection", places: "#/settings/places", shares: "#/settings/shares", offsite: "#/settings/backups", wireguard: "#/settings/remote", tailscale: "#/settings/remote", dnsOn: "#/settings/dns", blocking: "#/settings/adblock", names: "#/settings/https", ports: "#/settings/ports", machines: "#/machines", proxmox: "#/machines", containers: "#/containers", homeAssistant: "#/settings/integrations", qbit: "#/settings/integrations", frigate: "#/settings/integrations", keys: "#/settings/agents" };
+const MODULE_USE_AT = { tv: "#/tv", array: "#/settings/protection", merged: "#/settings/storage", pools: "#/settings/protection", places: "#/settings/places", shares: "#/settings/shares", offsite: "#/settings/backups", wireguard: "#/settings/remote", tailscale: "#/settings/remote", dnsOn: "#/settings/dns", blocking: "#/settings/adblock", names: "#/settings/https", ports: "#/settings/ports", machines: "#/machines", proxmox: "#/machines", containers: "#/containers", homeAssistant: "#/settings/integrations", qbit: "#/settings/integrations", frigate: "#/settings/integrations", keys: "#/settings/agents" };
 const moduleName = (id) => t(`modules.${id}.name`);
 
 /** Which modules are on, asked again: after a change made here or on another page */
@@ -12706,7 +13985,7 @@ function modulesSection() {
   const list = state.modulesList;
   if (!list) return [h("p", { class: "muted" }, "…")];
   // what is here already shows on the cards of modules that are off; the look takes a few seconds
-  if (!state.moduleFinds) void loadModuleFinds().then(() => state.route.view === "settings" && state.route.section === "modules" && renderSettings());
+  if (!state.moduleFinds) void loadModuleFinds().then(() => state.route.view === "settings" && showsSection("modules") && renderSettings());
   const card = (m) => {
     const held = m.uses.length > 0 || m.neededBy.length > 0;
     const flip = h("button", { type: "button", role: "switch", class: "ha-switch", "aria-checked": String(m.on), "aria-label": t(m.on ? "modules.turnOff" : "modules.turnOn") + ": " + moduleName(m.id), onclick: (e) => (m.on ? void turnModuleOff(m) : ((e.currentTarget.disabled = true), void turnModuleOn(m.id))) }, h("i"));
@@ -12724,13 +14003,18 @@ function modulesSection() {
   };
   const phone = matchMedia("(max-width: 760px)").matches;
   return [
-    h("div", { class: "module-top" }, h("p", { class: "muted grow" }, t("modules.lead")), h("div", { class: "module-count" }, h("strong", null, t("modules.count", { on: list.filter((m) => m.on).length, of: list.length })), h("span", { class: "muted small" }, t("modules.on")))),
-    h("div", { class: "module-base" }, icon("home"), h("span", null, h("strong", { class: "block" }, t("modules.base")), h("span", { class: "muted small" }, t("modules.baseList")))),
+    // nothing is written straight on the page's background: over a wallpaper it could not be read
+    h(
+      "section",
+      { class: "card pad stack" },
+      h("div", { class: "module-top" }, h("p", { class: "muted grow" }, t("modules.lead")), h("div", { class: "module-count" }, h("strong", null, t("modules.count", { on: list.filter((m) => m.on).length, of: list.length })), h("span", { class: "muted small" }, t("modules.on")))),
+      h("div", { class: "module-base" }, icon("home"), h("span", null, h("strong", { class: "block" }, t("modules.base")), h("span", { class: "muted small" }, t("modules.baseList")))),
+    ),
     // on a phone the groups are chosen one at a time
     h("div", { class: "module-filter" }, ["", ...MODULE_GROUPS].map((group) => h("button", { type: "button", class: "chip" + ((settingsUi.moduleGroup ?? "") === group ? " accent" : ""), onclick: () => ((settingsUi.moduleGroup = group), renderSettings()) }, group ? t("modules.group." + group) : t("modules.all")))),
     MODULE_GROUPS.filter((group) => !phone || !settingsUi.moduleGroup || settingsUi.moduleGroup === group).map((group) => {
       const mine = list.filter((m) => m.group === group);
-      return mine.length > 0 && h("div", { class: "stack" }, h("h2", { class: "module-group" }, t("modules.group." + group), h("span", { class: "muted" }, t("modules.groupCount", { on: mine.filter((m) => m.on).length, of: mine.length }))), h("div", { class: "module-cards" }, mine.map(card)));
+      return mine.length > 0 && h("section", { class: "card pad stack" }, h("h2", { class: "module-group" }, t("modules.group." + group), h("span", { class: "muted" }, t("modules.groupCount", { on: mine.filter((m) => m.on).length, of: mine.length }))), h("div", { class: "module-cards" }, mine.map(card)));
     }),
   ];
 }
@@ -13121,7 +14405,6 @@ function settingsSection(section) {
     const port = h("input", { type: "number", min: 1, max: 65535, class: "short mono", value: s?.port || "", placeholder: String(location.port || 80) });
     return [
       h("section", { class: "card pad" }, h("h2", null, t("settings.general")), settingRow(t("settings.language"), t("settings.languageHint"), language), isAdmin() && settingRow(t("settings.port"), t("settings.portHint"), h("span", { class: "pair" }, port, button(t("settings.save"), { onclick: () => save({ port: Number(port.value) || 0 }) }))), isAdmin() && settingRow(t("welcome.again"), t("welcome.againHint"), h("a", { class: "btn", href: "#/welcome" }, t("common.open"))), error),
-      isAdmin() && h("section", { class: "card pad" }, h("h2", null, t("power.title")), settingRow(t("power.reboot"), t("power.rebootHint"), button(t("power.reboot"), { onclick: () => serverPowerDialog("reboot") }, "refresh")), settingRow(t("power.poweroff"), t("power.poweroffHint"), button(t("power.poweroff"), { onclick: () => serverPowerDialog("poweroff") }, "stop"))),
     ];
   }
   if (section === "apps") {
@@ -13163,7 +14446,6 @@ function settingsSection(section) {
   if (section === "remote") return remoteSection();
   if (section === "agents") return agentsSection();
   if (section === "assistant") return assistantSection();
-  if (section === "integrations") return integrationsBody(false);
   if (section === "stores") {
     const stores = state.store?.stores ?? [];
     return [
@@ -13202,7 +14484,7 @@ function settingsSection(section) {
 
 async function loadNetwork() {
   state.network = await api("GET", "/api/network").catch(() => state.network);
-  if (state.route.view === "settings" && state.route.section === "network") renderSettings();
+  if (state.route.view === "settings" && showsSection("network")) renderSettings();
 }
 
 /**
@@ -13963,7 +15245,7 @@ function toolRemoveDialog(tool) {
 
 async function loadRemote() {
   state.remote = await api("GET", "/api/tailscale").catch(() => state.remote);
-  if (state.route.view === "settings" && state.route.section === "remote") renderSettings();
+  if (state.route.view === "settings" && showsSection("remote")) renderSettings();
 }
 
 /** Settings → Remote access: Tailscale, then WireGuard in and out */
@@ -14331,7 +15613,7 @@ function toolsSection() {
   const error = h("p", { class: "error", role: "alert" });
   const again = async () => {
     state.tools = await api("GET", "/api/tools").catch(() => state.tools);
-    if (state.route.view === "settings" && state.route.section === "tools") renderSettings();
+    if (state.route.view === "settings" && showsSection("tools")) renderSettings();
   };
   const install = (tool) =>
     button(t("mounting.needs.install", { package: tool.name }), {
@@ -14402,7 +15684,7 @@ function paintSysUpdates(at) {
 
 /** A check began or ended somewhere: the page that shows that place looks again */
 async function sysUpdatesEvent(at) {
-  if (!at && state.route.view === "settings" && state.route.section === "tools") {
+  if (!at && state.route.view === "settings" && showsSection("tools")) {
     // the rows of the programs carry their newer versions too
     state.tools = await api("GET", "/api/tools").catch(() => state.tools);
     sysUpdates[""] = await api("GET", "/api/system/updates").catch(() => sysUpdates[""]);
@@ -14523,7 +15805,7 @@ async function loadSpace(at = "") {
 
 /** Shows what was counted where it is looked at: Settings → Docker, or the machine's tab */
 function paintSpace(at) {
-  if (!at && state.route.view === "settings" && state.route.section === "docker") renderSettings();
+  if (!at && state.route.view === "settings" && showsSection("docker")) renderSettings();
   const box = document.getElementById("machine-docker");
   if (at && box && state.route.view === "machine" && state.route.id === at) box.replaceChildren(...dockerSection(at).filter(Boolean));
 }
@@ -14710,7 +15992,7 @@ function imagesCard() {
     state.images = await api(method, path, method === "GET" ? undefined : {}).catch(() => state.images);
     // the marks on the apps come with the list of apps
     if (!state.images.running) await refresh();
-    if (state.route.view === "settings" && state.route.section === "apps") renderSettings();
+    if (state.route.view === "settings" && showsSection("apps")) renderSettings();
   };
   clearTimeout(imagesTimer);
   if (st.running) imagesTimer = setTimeout(() => state.route.view === "settings" && again("/api/images"), 3000);
@@ -14864,7 +16146,8 @@ function localNameCard() {
             ? [h("p", { class: "error" }, t("local.failed", { message: s.error || "…" }))]
             : [
               h("div", { class: "activity-item" }, icon("check", "ok"), h("div", { class: "grow" }, h("div", null, address(s.domain)), h("div", { class: "muted small" }, t("local.answers", { addresses: s.addresses.join(", ") || "—" })))),
-                (state.overview?.apps ?? []).some((a) => a.port) && h("p", { class: "muted small" }, t("local.apps", { example: `${(state.overview.apps.find((a) => a.port).name).replace(/_/g, "-")}.${s.domain}${port}` })),
+                // replaceChildren writes a missing one out as the word "false"
+                (state.overview?.apps ?? []).some((a) => a.port) ? h("p", { class: "muted small" }, t("local.apps", { example: `${(state.overview.apps.find((a) => a.port).name).replace(/_/g, "-")}.${s.domain}${port}` })) : "",
               ]),
     );
   };
@@ -15846,6 +17129,7 @@ function adblockBlock(el, b) {
           meterBar(share),
           h("p", { class: "muted small" }, t("adblock.list.total", { n: b.names.toLocaleString(state.lang) })),
           h("div", { class: "actions" }, b.paused ? button(t("adblock.resume"), { class: "small", onclick: () => send("/api/dns/block/pause", { minutes: 0 }) }, "power") : button(t("adblock.pauseFor", { what: pauseWords(30) }), { class: "small", onclick: () => send("/api/dns/block/pause", { minutes: 30 }) }, "clock")),
+          b.top?.length > 0 && h("div", { class: "adblock-top fits" }, h("div", { class: "muted small" }, t("adblock.block.most")), b.top.map((x) => h("div", { class: "mono small clip" }, x.name, " · ", x.count.toLocaleString(state.lang)))),
         ]
       : h("p", { class: "muted small" }, t("adblock.block.off"), " ", h("a", { class: "link", href: "#/settings/adblock" }, t("common.open"))),
   );
@@ -18124,7 +19408,7 @@ function fillsCard(fills, busy) {
 function setShares(data) {
   state.shares = data;
   if (state.files) state.files.shared = data.shares.map((share) => share.path);
-  if (state.route.view === "settings" && state.route.section === "shares") renderSettings();
+  if (state.route.view === "settings" && showsSection("shares")) renderSettings();
   if (state.route.view === "files") renderFilesBody();
 }
 
@@ -18297,6 +19581,7 @@ function sharesSection() {
       { class: "card pad" },
       h("h2", null, t("shares.users.title")),
       h("p", { class: "muted" }, t("shares.users.lead")),
+      accessLink(),
       h("p", { class: "muted small" }, t("shares.users.note")),
       data.users.map((user) => settingRow(user.name, t("shares.users.folders", { n: data.shares.filter((share) => share.users[user.id]).length }), user.allowed === false ? h("span", { class: "state" }, t("shares.users.denied")) : h("span", { class: user.ready ? "state running" : "state" }, t(user.ready ? "shares.users.ready" : "shares.users.notReady")))),
     ),
@@ -18547,7 +19832,6 @@ function paintAssistant() {
     listed ? h("strong", { class: "grow ellipsis" }, title) : chats.length > 0 ? h("span", { class: "grow pick" }, pick) : h("strong", { class: "grow" }, t("assistant.title")),
     chat && !listed && tool(t("assistant.newChat"), "plus", fresh),
     chat && tool(t("assistant.forget"), "trash", () => confirmAction({ title: t("assistant.forgetTitle"), lead: t("assistant.forgetLead"), label: t("assistant.forget"), run: forgetAssistantChat })),
-    !paged && tool(t("assistant.asPage"), "external", () => go("#/assistant"), "wide-only"),
     !paged && tool(t(wide ? "assistant.narrow" : "assistant.wide"), wide ? "shrink" : "expand", () => (panel.classList.toggle("wide"), rememberAssistant(), paintAssistant()), "wide-only"),
     !paged && tool(t("assistant.hide"), "down", closeAssistant),
   );
@@ -18607,7 +19891,6 @@ function assistantFab() {
     return;
   }
   if (!isAdmin()) return;
-  leaveAssistantPage();
   if (!assistantUi.fab) {
     assistantUi.fab = h("button", { type: "button", class: "assistant-fab", title: t("assistant.title"), "aria-label": t("assistant.title"), onclick: () => (assistantUi.open ? closeAssistant() : openAssistant()) }, icon("chat"), h("span", { class: "fab-dot", hidden: true }));
     document.body.append(assistantUi.fab);
@@ -18684,33 +19967,6 @@ function openAssistant({ ask, draft, restore } = {}) {
   });
   // a window put back after a reload does not take the keyboard from the page
   if (!restore) input.focus();
-}
-
-/** The assistant as a page of its own: the same window, with the chats on the left */
-function renderAssistant() {
-  const holder = h("div", { class: "assistant-page" });
-  shell(holder);
-  document.getElementById("view").classList.add("fill");
-  const panel = assistantPanel();
-  panel.classList.add("paged");
-  holder.append(panel);
-  panel.hidden = false;
-  assistantUi.open = true;
-  markAssistantFab();
-  paintAssistant();
-  void loadAssistant();
-}
-
-/** Leaving the page of the assistant: its window goes back to floating, closed */
-function leaveAssistantPage() {
-  const panel = assistantUi.panel;
-  if (!panel?.classList.contains("paged") || state.route.view === "assistant") return;
-  panel.classList.remove("paged");
-  panel.hidden = true;
-  document.body.append(panel);
-  assistantUi.open = false;
-  rememberAssistant();
-  markAssistantFab();
 }
 
 function closeAssistant() {
@@ -18910,7 +20166,7 @@ async function loadApprovals() {
   if (askDialog && !state.approvals.some((ask) => ask.id === askDialog.ask)) askDialog.close();
   const next = state.approvals.find((ask) => !asksShown.has(ask.id));
   if (next && !askDialog) approvalDialog(next);
-  if (state.route.view === "settings" && state.route.section === "agents") renderSettings();
+  if (state.route.view === "settings" && showsSection("agents")) renderSettings();
 }
 
 function approvalDialog(ask) {
@@ -19111,55 +20367,180 @@ function agentsSection() {
 }
 
 function renderSettings() {
-  const section = state.route.section;
-  shell(...settingsFrame(section, state.account && (state.settings || !isAdmin()) ? settingsSection(section) : h("p", { class: "muted" }, "…")));
+  const ready = state.account && (state.settings || !isAdmin());
+  // a tab may hold two sections; the second of a module that is off is simply not there
+  const body = ready ? state.route.sections.flatMap((id, i) => (i && SECTION_MODULE[id] && !hasModule(SECTION_MODULE[id]) ? [] : settingsSection(id))) : h("p", { class: "card pad muted" }, "…");
+  shell(...settingsFrame(state.route.section, body));
 }
 
-/** The head and the list of sections of Settings around what one section shows */
-/** The page's head says the section's name: its first card need not say it again */
-function dropTwinHeading() {
-  const stack = document.querySelector(".settings > .stack");
-  const title = stack?.querySelector(".settings-head h1")?.textContent;
-  const first = stack?.querySelector(":scope > :not(.settings-head) h2");
-  if (!first || !title || !first.textContent.trim().startsWith(title)) return;
-  // what stands next to the words (a state, a count) stays
-  if (first.children.length) for (const node of [...first.childNodes]) node.nodeType === Node.TEXT_NODE && node.remove();
-  else first.hidden = true;
-}
-
-function settingsFrame(section, ...content) {
-  // a section of a module that is off keeps its name on top; its body offers to turn the module on
-  const item = sections().find((x) => x.id === section) ?? (isAdmin() ? SECTIONS.find((x) => x.id === section) : undefined);
-  setTimeout(() => {
-    dropTwinHeading();
-    const stack = document.querySelector(".settings > .stack");
-    if (!stack) return;
-    const watch = new MutationObserver(dropTwinHeading);
-    watch.observe(stack, { childList: true, subtree: true });
-    cleanups.push(() => watch.disconnect());
-  });
-  // the open section stays in view in a column longer than the window
-  requestAnimationFrame(() => {
-    const list = document.querySelector(".settings-nav .settings-list");
-    const open = list?.querySelector(".cat.active");
-    if (!open || list.scrollHeight <= list.clientHeight) return;
-    // only the list moves, never the page
-    const at = open.getBoundingClientRect().top - list.getBoundingClientRect().top;
-    if (at < 0 || at > list.clientHeight - 40) list.scrollTop += at - list.clientHeight / 2;
-  });
-  return [
+/**
+ * The head of a section of the page: a card with its name, a line about it, what can be done there, and its tabs.
+ * `metaId` / `actionsId` name the line and the buttons for a page that fills them later.
+ */
+function areaHead(area, at, { meta = null, metaId = null, actions = null, actionsId = null } = {}) {
+  const tabs = areaTabs(area);
+  return h(
+    "header",
+    { class: "card area-head" },
     h(
       "div",
-      { class: "settings" },
-      settingsNav(section),
-      h("div", { class: "stack" }, h("div", { class: "page-head settings-head" }, h("div", null, h("h1", null, item ? sectionTitle(item) : t("nav.settings")), h("p", { class: "meta" }, item ? `${t("settings.group." + item.group)} · Hata ${state.version}` : `Hata ${state.version}`)), STORAGE_TABS[section] && settingsTabs(section)), content),
+      { class: "area-top" },
+      area === "server"
+        ? h(
+            "div",
+            { class: "area-name" },
+            h("nav", { class: "crumbs" }, h("a", { href: "#/machines" }, t("nav.machines")), icon("chevron"), h("span", null, t("tree.thisServer"))),
+            h("div", { class: "app-head", menu: serverMenu }, h("span", { class: "machine-icon" }, icon("server")), h("div", { class: "grow" }, h("div", { class: "app-title" }, h("h1", null, state.overview?.system?.hostname ?? t("tree.thisServer")), h("span", { class: "state running" }, t("status.running"))), h("p", { class: "meta", id: "server-meta" }, serverMeta()))),
+          )
+        : h("div", { class: "area-name" }, h("h1", null, t("area." + area)), h("p", { class: "meta", id: metaId }, meta ?? t(`area.${area}.lead`))),
+      area === "server"
+        ? h("div", { class: "actions" }, h("a", { class: "btn", href: "#/terminal" }, icon("terminal"), h("span", null, t("terminal.title"))), button(t("power.restart"), { onclick: () => serverPowerDialog("reboot") }, "refresh"), h("button", { type: "button", class: "btn square", "aria-label": t("app.more"), "aria-haspopup": "menu", onclick: (e) => serverMenu(underButton(e.currentTarget)) }, icon("more")))
+        : (actions || actionsId) && h("div", { class: "actions", id: actionsId }, actions),
     ),
-  ];
+    tabs.length > 1 && h("nav", { class: "tabs" }, tabs.map((tab) => h("a", { class: "tab" + (tab.id === at ? " active" : ""), href: tabHash(area, tab), "aria-current": tab.id === at ? "page" : null }, t(`area.${area}.${tab.id}`), area === "server" && serverTabCount(tab.id))),),
+  );
+}
+
+/** What stands under this server's name: the system, the address, how long it has been up */
+function serverMeta() {
+  const here = treeUi.data?.groups.find((g) => g.kind === "here");
+  const up = state.overview?.system?.uptime;
+  return [t("tree.thisServer"), here?.os, here?.address || location.hostname, up ? t("sys.uptime", { time: duration(up) }) : null].filter(Boolean).join(" · ");
+}
+const paintServerMeta = () => document.getElementById("server-meta")?.replaceChildren(serverMeta());
+/** The numbers by the tabs of this server: apps, containers, packages that wait */
+function serverTabCount(id) {
+  const n = id === "apps" ? (state.overview?.apps?.length ?? 0) : id === "containers" ? (incusUi.data?.containers?.length ?? 0) : id === "system" ? (sysUpdates[""]?.list?.length ?? 0) : 0;
+  return n > 0 ? h("span", { class: "muted tab-count" }, String(n)) : null;
+}
+function serverMenu(at) {
+  menuAt(at, menuHeader(state.overview?.system?.hostname ?? t("tree.thisServer"), t("tree.thisServer"), "server"), [
+    { label: t("terminal.title"), icon: "terminal", href: "#/terminal" },
+    { label: t("area.network"), icon: "network", href: "#/network" },
+    { label: t("power.reboot"), icon: "refresh", run: () => serverPowerDialog("reboot") },
+    { label: t("power.poweroff"), icon: "stop", run: () => serverPowerDialog("poweroff") },
+  ]);
+}
+
+// --- This server: a computer like the others, with a page of its own ---------------------------------
+
+function renderServer() {
+  const apps = state.route.tab === "apps";
+  shell(areaHead("server", state.route.tab), h("div", { class: "stack", id: apps ? "apps-body" : "server-body" }));
+  if (apps) return renderAppsBody();
+  renderServerBody();
+  if (!sysUpdates[""]) void loadSysUpdates("").then(() => state.route.view === "server" && renderServerBody());
+  if (!state.backups) void api("GET", `/api/backups?lang=${state.lang}`).then((b) => ((state.backups = b), state.route.view === "server" && renderServerBody())).catch(() => {});
+}
+
+function renderServerBody() {
+  const box = document.getElementById("server-body");
+  if (!box) return;
+  if (!box.childElementCount) {
+    put(
+      box,
+      h("section", { class: "card numbers" }, h("div", { class: "kpis" }, kpi("cpu", "cpu", t("sys.cpu"), "s2"), kpi("memory", "memory", t("sys.memory"), "s1"), kpi("disk", "disk", t("sys.disk")), kpi("network", "network", t("sys.network")), kpi("temp", "temp", t("sys.temperature"))), h("div", { class: "trend", id: "own-trend" })),
+      h("div", { class: "columns" }, h("div", { class: "stack", id: "server-main" }), h("aside", { class: "side stack", id: "server-side" })),
+    );
+  }
+  renderSystem();
+  const o = state.overview;
+  const fact = (label, value) => h("div", { class: "kv" }, h("span", { class: "muted" }, label), h("span", null, value));
+  const more = (hash, label) => h("a", { class: "link small", href: hash }, label, " →");
+  const d = hasModule("containers") ? incusUi.data : null;
+  const apps = o?.apps ?? [];
+  const row = (c) =>
+    h(
+      "div",
+      { class: "thing-row", menu: (at) => containerMenu(c, at) },
+      h("i", { class: "dot " + (c.status === "running" ? "running" : c.status === "error" ? "restarting" : "") }),
+      h("div", { class: "grow" }, h("a", { class: "strong", href: `#/containers/i/${c.name}` }, c.name), h("div", { class: "muted small" }, [t("tree.kind." + c.kind), c.os, c.address].filter(Boolean).join(" · "))),
+      c.status !== "running" && h("span", { class: "muted small" }, t("incus.status." + c.status)),
+      c.status !== "running" && button(t("incus.start"), { class: "small", onclick: (e) => containerAct(c, "start", e.currentTarget) }, "play"),
+      h("button", { type: "button", class: "btn small square", "aria-label": t("app.more"), onclick: (e) => containerMenu(c, underButton(e.currentTarget)) }, icon("more")),
+    );
+  put(
+    document.getElementById("server-main"),
+    d?.state === "ready" &&
+      h(
+        "section",
+        { class: "card" },
+        h("div", { class: "section-head pad-head" }, h("h2", null, t("area.server.containers"), " ", h("span", { class: "muted" }, String(d.containers.length))), button(t("server.new"), { class: "small", onclick: () => newContainerDialog() }, "plus")),
+        d.containers.length ? d.containers.map(row) : h("p", { class: "muted small pad-row" }, t("tree.hereNone")),
+      ),
+    h(
+      "section",
+      { class: "card pad stack-s" },
+      h("div", { class: "section-head" }, h("h2", null, t("area.server.apps"), " ", h("span", { class: "muted" }, String(apps.length))), more("#/machines/this/apps", t("server.all"))),
+      apps.length ? h("p", { class: "muted" }, t("server.appsLine", { running: apps.filter(isUp).length, all: apps.length })) : h("p", { class: "muted" }, t("apps.noneLead")),
+    ),
+  );
+  const updates = sysUpdates[""];
+  const b = state.backups;
+  put(
+    document.getElementById("server-side"),
+    h(
+      "section",
+      { class: "card pad stack-s" },
+      h("h2", null, t("area.server.system")),
+      fact(t("server.updates"), !updates ? "…" : updates.error ? "—" : updates.list?.length ? t("server.updatesN", { n: updates.list.length }) : t("server.updatesNone")),
+      fact("Docker", o?.docker?.available ? (o.docker.version ?? "—") : t("server.dockerNo")),
+      fact("Hata", state.version),
+      more("#/machines/this/system", t("server.toSystem")),
+    ),
+    h(
+      "section",
+      { class: "card pad stack-s" },
+      h("h2", null, t("server.backup")),
+      fact(t("server.backupLast"), !b ? "…" : b.lastRun ? ago(b.lastRun.at) : t("server.backupNever")),
+      fact(t("server.backupWhere"), b?.dir ?? "…"),
+      more("#/backups", t("server.toBackups")),
+    ),
+  );
+}
+
+
+/** "Find a setting" in the head of Settings: sections and cards by the words typed, wherever they live now */
+function settingsFind() {
+  const results = h("div", { class: "search-results", hidden: true });
+  const input = h("input", { type: "search", placeholder: t("settings.find"), "aria-label": t("settings.find"), autocomplete: "off", spellcheck: false });
+  const open = (action) => (e) => {
+    e.preventDefault();
+    input.value = "";
+    results.hidden = true;
+    action();
+  };
+  const paint = () => {
+    const typed = input.value;
+    if (!typed.trim()) return void (results.hidden = true);
+    const found = findSettings(typed);
+    put(
+      results,
+      !found.length && h("p", { class: "muted small pad" }, t("settings.findNone", { text: typed.trim() })),
+      found.flatMap(({ item, cards, off }) => [
+        h("button", { type: "button", class: "search-hit", onmousedown: open(() => (off ? turnModuleOn(off, sectionHash(item.id)) : openSettingsCard(item))) }, icon(item.icon), h("span", { class: "grow" }, markFound(sectionTitle(item), typed)), h("span", { class: "muted small" }, off ? t("modules.turnOn") : t("area." + sectionArea(item.id)))),
+        ...cards.map((card) => h("button", { type: "button", class: "search-hit sub", onmousedown: open(() => openSettingsCard(item, card)) }, h("span", { class: "grow" }, markFound(card, typed)))),
+      ]),
+    );
+    results.hidden = false;
+  };
+  input.addEventListener("input", paint);
+  input.addEventListener("focus", paint);
+  input.addEventListener("blur", () => (results.hidden = true));
+  input.addEventListener("keydown", (e) => e.key === "Escape" && input.blur());
+  return h("div", { class: "search settings-find" }, icon("search"), input, results);
+}
+
+/** The head of the section a part of the settings lives in, with its tabs, around what that part shows */
+function settingsFrame(section, ...content) {
+  const r = state.route;
+  const [area, at] = r.view === "settings" ? [r.area, r.at] : section === "users" ? ["settings", "users"] : ["backups", r.tab ?? "overview"];
+  const opts = area === "settings" ? { meta: `${t("area.settings.lead")} · ${state.version}`, actions: settingsFind() } : area === "backups" ? { metaId: "backup-meta", actionsId: "backup-actions" } : {};
+  return [h("div", { class: "settings" }, areaHead(area, at, opts), content)];
 }
 /** The long sections are cut into tabs: the address says which */
 const STORAGE_TABS = { storage: ["disks", "fs", "fills"] };
 const settingsUi = { find: "" };
-const settingsTabs = (section) => h("div", { class: "tabs" }, STORAGE_TABS[section].map((tab, i) => h("a", { class: "tab" + (settingsTab(section) === tab ? " active" : ""), href: `#/settings/${section}${i ? "/" + tab : ""}` }, t(`settings.tab.${section}.${tab}`))));
 const settingsTab = (section) => (STORAGE_TABS[section].includes(state.route.tab) ? state.route.tab : STORAGE_TABS[section][0]);
 
 // --- Account and users --------------------------------------------------------------------------
@@ -19402,6 +20783,17 @@ async function loadUsers() {
   try {
     const [users, invites, access, signIns] = await Promise.all([api("GET", "/api/users"), api("GET", "/api/invites"), api("GET", `/api/access?lang=${state.lang}`), api("GET", "/api/signins")]);
     Object.assign(state, { users, invites, access, signIns });
+    // the one table of access also holds the folders — this server's and the computers' — and Home Assistant
+    if (state.route.part === "access") {
+      const [shares, machines, ha] = await Promise.all([
+        hasModule("shares") ? api("GET", "/api/shares").catch(() => null) : null,
+        hasModule("machines") ? api("GET", "/api/machines").catch(() => null) : null,
+        hasModule("integrations") ? api("GET", "/api/ha").catch(() => null) : null,
+      ]);
+      const let_ = (machines?.machines ?? []).filter((m) => m.people);
+      const folders = await Promise.all(let_.map((m) => api("GET", `/api/machines/${m.id}/shares`).then((r) => ({ machine: m, shares: r.shares }), () => ({ machine: m, shares: [] }))));
+      state.accessMore = { shares: shares?.shares ?? [], kept: new Set((shares?.users ?? []).filter((u) => !u.allowed).map((u) => u.id)), folders, ha: ha?.servers ?? [] };
+    }
     if (!state.settings) state.settings = await api("GET", "/api/settings");
   } catch (e) {
     return toast(errorText(e), "error");
@@ -19532,17 +20924,19 @@ function userMenuFor(user, at = null) {
   if (at) placeAt(dialog, at);
 }
 
+const USER_PARTS = ["people", "access", "invites", "signins"];
+
 function renderUsers() {
   const users = state.users ?? [];
+  const part = state.route.part ?? "people";
   const admins = users.filter((u) => u.role === "admin").length;
   const without = users.filter((u) => !u.twoFactor).length;
-  shell(
-    ...settingsFrame(
-    "users",
-    h("div", { class: "page-head section-page" }, h("div", null, h("h2", null, t("nav.users")), h("p", { class: "meta" }, t("users.meta", { users: users.length, admins }), without > 0 && h("span", { class: "dot-sep" }, "·"), without > 0 && t("users.without2fa", { n: without }))), h("div", { class: "actions" }, button(t("users.add"), { class: "primary", onclick: userDialog }, "plus"))),
+  const invites = state.invites?.length ?? 0;
+  const people = () => [
     h(
       "div",
       { class: "card table-wrap" },
+      h("div", { class: "section-head pad-head" }, h("div", null, h("h2", null, t("users.part.people"), " ", h("span", { class: "muted" }, String(users.length))), h("p", { class: "meta" }, t("users.meta", { users: users.length, admins }), without > 0 && h("span", { class: "dot-sep" }, "·"), without > 0 && t("users.without2fa", { n: without })))),
       h(
         "table",
         null,
@@ -19564,13 +20958,25 @@ function renderUsers() {
           ),
         ),
       ),
+      h("p", { class: "table-foot muted small" }, t("users.rolesHint")),
     ),
-    h("p", { class: "muted small" }, t("users.rolesHint")),
     requireTwoFactorRow(),
-    h("div", { class: "columns" }, h("section", null, accessMatrix()), h("aside", { class: "side" }, invitesCard(), signInLog())),
+  ];
+  const body = part === "access" ? accessTable() : part === "invites" ? invitesCard() : part === "signins" ? signInLog() : people();
+  shell(
+    ...settingsFrame(
+      "users",
+      h(
+        "div",
+        { class: "card filter-bar" },
+        h("div", { class: "seg-pills" }, USER_PARTS.map((id) => h("a", { class: "seg-pill" + (part === id ? " active" : ""), href: `#/settings/users${id === "people" ? "" : "/" + id}` }, t("users.part." + id), id === "invites" && invites > 0 && h("span", { class: "muted" }, String(invites))))),
+        h("div", { class: "actions" }, button(t("invite.new"), { onclick: inviteDialog }, "link"), button(t("users.add"), { class: "primary", onclick: userDialog }, "plus")),
+      ),
+      body,
     ),
   );
 }
+
 
 /** The network folders a user may open, and how — under the name in the list of users */
 function userShares(user) {
@@ -19651,10 +21057,10 @@ function invitesCard() {
 }
 
 function signInLog() {
-  const list = (state.signIns ?? []).slice(0, 8);
+  const list = (state.signIns ?? []).slice(0, 60);
   return h(
     "section",
-    { class: "pad-x" },
+    { class: "card pad" },
     h("div", { class: "section-head" }, h("h2", null, t("signins.title"))),
     list.length
       ? list.map((entry) => h("div", { class: "activity-item" }, icon(entry.outcome === "ok" ? "signin" : "x", entry.outcome === "ok" ? "" : "danger"), h("div", { class: "grow" }, h("div", null, t("signins." + entry.outcome, { name: entry.name || "?" })), h("div", { class: "muted small" }, `${ago(entry.ts)} · ${entry.ip}`))))
@@ -19662,59 +21068,91 @@ function signInLog() {
   );
 }
 
-/** Who may open what: a row per app, a column per person who is not an administrator */
-function accessMatrix() {
+/**
+ * The one table of access: a row per thing — apps, network folders, the folders of the computers let to people, Home
+ * Assistant — and a column per person. A tick opens, "reads" is a folder without writing; an administrator opens all but
+ * the network folders, where everybody is named.
+ */
+function accessTable() {
   const access = state.access;
-  if (!access) return null;
-  const people = access.users.filter((u) => u.role !== "admin");
-  const update = async (app, patch) => {
+  const more = state.accessMore;
+  if (!access || !more) return h("p", { class: "card pad muted" }, "…");
+  const users = access.users;
+  const again = () => void loadUsers();
+  const fail = (e) => (toast(errorText(e), "error"), again());
+  const members = users.filter((u) => u.role === "member").map((u) => u.id);
+  const dash = () => h("span", { class: "muted" }, "—");
+  const fixed = (title) => h("span", { class: "mark on fixed", title }, icon("check"));
+  const tick = (on, label, set) => h("button", { type: "button", class: "mark" + (on ? " on" : ""), "aria-pressed": String(on), "aria-label": label, title: label, onclick: () => set(!on) }, on ? icon("check") : "—");
+  // a folder: none → reads → reads and writes → none
+  const level = (now, label, set) => {
+    const next = now === "read" ? "write" : now === "write" ? "none" : "read";
+    const words = `${label}: ${t("shares.access." + (now ?? "none"))}`;
+    return h("button", { type: "button", class: "mark" + (now === "write" ? " on" : now === "read" ? " reads" : ""), "aria-label": words, title: words, onclick: () => set(next) }, now === "write" ? icon("check") : now === "read" ? t("access.reads") : "—");
+  };
+  const group = (title, lead) => h("tr", { class: "group-row" }, h("td", { colSpan: users.length + 1 }, h("strong", null, title), lead && h("span", { class: "muted small" }, " · ", lead)));
+  const withLevel = (map, id, to) => Object.fromEntries(Object.entries({ ...map, [id]: to }).filter(([, v]) => v !== "none"));
+
+  const setApp = async (app, patch) => {
     try {
       const res = await api("PUT", app.machine ? `/api/machines/${app.machine.id}/apps/${app.app}/access` : `/api/apps/${app.name}/access`, { protect: app.protect, allowed: app.allowed, ...patch });
-      if (res.job) jobDialog(res.job, "apply", app.title, () => void loadUsers());
-      else void loadUsers();
+      if (res.job) jobDialog(res.job, "apply", app.title, again);
+      else again();
     } catch (e) {
-      toast(errorText(e), "error");
-      void loadUsers();
+      fail(e);
     }
   };
-  // sign-in stands in front of the web port; the app's other ports are listed so that nobody takes them for closed
-  const otherPorts = (app) =>
-    h(
-      "div",
-      { class: "muted small other-ports" },
-      t("access.others"),
-      app.others.map((o) =>
-        h(
-          "label",
-          null,
-          h("input", { type: "checkbox", checked: o.guarded, onchange: (e) => update(app, { ports: app.others.filter((x) => (x.port === o.port ? e.target.checked : x.guarded)).map((x) => x.port) }) }),
-          String(o.port),
-        ),
-      ),
-    );
-  const row = (app) => {
+  const appRow = (app) => {
     const everyone = app.allowed === "all";
-    const list = everyone ? [] : app.allowed;
-    const toggle = (user, on) => {
-      // leaving "every member" starts from the people who could open the app until now
-      const base = everyone ? people.filter((u) => u.role === "member").map((u) => u.id) : list;
-      update(app, { allowed: on ? [...new Set([...base, user.id])] : base.filter((id) => id !== user.id) });
-    };
+    const list = everyone ? members : app.allowed;
+    const signIn = h("label", { class: "check small" }, h("input", { type: "checkbox", checked: app.protect, disabled: !!app.cannotProtect, title: app.cannotProtect ? t("access.cannot." + app.cannotProtect) : "", onchange: (e) => setApp(app, { protect: e.target.checked }) }), h("span", null, t("access.signIn")));
     return h(
       "tr",
       null,
-      h("td", null, h("div", { class: "with-icon" }, appIcon(app, "sm"), h("div", { class: "stack-s backup-name" }, h("a", { class: "strong", href: app.machine ? `#/machines/${app.machine.id}/apps` : `#/apps/${app.name}` }, app.title), app.machine && h("div", { class: "muted small with-icon" }, icon("server"), app.machine.name, app.protect && app.listen ? ` · ${t("access.through", { port: app.listen })}` : ""), app.cannotProtect === "hostNetwork" && h("div", { class: "muted small" }, t("access.hostOpen")), !everyone && !app.protect && h("div", { class: "muted small" }, t("access.onlyHidden")), app.protect && app.others.length > 0 && otherPorts(app)))),
-      h("td", null, h("input", { type: "checkbox", checked: app.protect, disabled: !!app.cannotProtect, title: app.cannotProtect ? t("access.cannot." + app.cannotProtect) : "", "aria-label": t("access.protectApp", { title: app.title }), onchange: (e) => update(app, { protect: e.target.checked }) })),
-      h("td", null, h("input", { type: "checkbox", checked: everyone, "aria-label": t("access.everyone"), onchange: (e) => update(app, { allowed: e.target.checked ? "all" : people.filter((u) => u.role === "member").map((u) => u.id) }) })),
-      people.map((user) => h("td", null, h("input", { type: "checkbox", checked: everyone ? user.role === "member" : list.includes(user.id), "aria-label": `${user.name}: ${app.title}`, onchange: (e) => toggle(user, e.target.checked) }))),
+      h("td", null, h("div", { class: "with-icon" }, appIcon(app, "sm"), h("div", { class: "stack-s backup-name" }, h("a", { class: "strong", href: app.machine ? `#/machines/${app.machine.id}/apps` : `#/apps/${app.name}` }, app.title), app.machine && h("div", { class: "muted small with-icon" }, icon("server"), app.machine.name, app.protect && app.listen ? ` · ${t("access.through", { port: app.listen })}` : ""), signIn, app.cannotProtect === "hostNetwork" && h("div", { class: "muted small" }, t("access.hostOpen")), !everyone && !app.protect && h("div", { class: "muted small" }, t("access.onlyHidden"))))),
+      users.map((u) => h("td", null, u.role === "admin" ? fixed(t("access.adminAll")) : tick(everyone ? u.role === "member" : list.includes(u.id), `${u.name}: ${app.title}`, (on) => setApp(app, { allowed: on ? [...new Set([...list, u.id])] : list.filter((id) => id !== u.id) })))),
     );
   };
+  const shareRow = (share) =>
+    h(
+      "tr",
+      null,
+      h("td", null, h("div", { class: "with-icon" }, h("span", { class: "app-icon sm plus" }, icon("folder")), h("div", { class: "stack-s backup-name" }, h("a", { class: "strong", href: "#/storage/shares" }, share.name), h("div", { class: "muted small mono clip" }, share.path), share.guest !== "none" && h("div", { class: "muted small" }, t("access.guest", { level: t("shares.access." + share.guest).toLowerCase() }))))),
+      users.map((u) => h("td", null, more.kept.has(u.id) ? h("span", { class: "muted", title: t("access.keptOut") }, "—") : level(share.users[u.id], `${u.name}: ${share.name}`, (to) => api("PUT", `/api/shares/${encodeURIComponent(share.name)}`, { users: withLevel(share.users, u.id, to) }).then(again, fail)))),
+    );
+  const folderRow = (m, share) =>
+    h(
+      "tr",
+      null,
+      h("td", null, h("div", { class: "with-icon" }, h("span", { class: "app-icon sm plus" }, icon("folder")), h("div", { class: "stack-s backup-name" }, h("a", { class: "strong", href: machineBase(m) }, share.name), h("div", { class: "muted small mono clip" }, share.path)))),
+      users.map((u) => h("td", null, u.role === "admin" ? fixed(t("access.adminAll")) : level(share.users[u.id], `${u.name}: ${share.name}`, (to) => api("PUT", `/api/machines/${m.id}/shares`, { path: share.path, name: share.name, users: withLevel(share.users, u.id, to) }).then(again, fail)))),
+    );
+  const haRow = (x) => {
+    const all = x.people === "all";
+    const list = all ? users.filter((u) => u.role !== "admin").map((u) => u.id) : (x.people ?? []);
+    return h(
+      "tr",
+      null,
+      h("td", null, h("div", { class: "with-icon" }, h("span", { class: "app-icon sm plus" }, icon("bulb")), h("div", { class: "stack-s backup-name" }, h("a", { class: "strong", href: `#/house/ha/${x.id}` }, x.name), h("div", { class: "muted small" }, t("access.haWhat"))))),
+      users.map((u) => h("td", null, u.role === "admin" ? fixed(t("access.adminAll")) : tick(list.includes(u.id), `${u.name}: ${x.name}`, (on) => api("PATCH", `/api/ha/${x.id}`, { people: on ? [...new Set([...list, u.id])] : list.filter((id) => id !== u.id) }).then(again, fail)))),
+    );
+  };
+  const rows = [
+    access.apps.length > 0 && [group(t("nav.apps"), t("access.appsLead")), access.apps.map(appRow)],
+    more.shares.length > 0 && [group(t("area.storage.shares"), t("access.sharesLead")), more.shares.map(shareRow)],
+    more.folders.filter((f) => f.shares.length > 0).map((f) => [group(t("access.foldersOf", { name: f.machine.name })), f.shares.map((share) => folderRow(f.machine, share))]),
+    more.ha.length > 0 && [group("Home Assistant", t("access.haLead")), more.ha.map(haRow)],
+  ].filter(Boolean);
   return [
-    h("div", { class: "section-head" }, h("h2", null, t("access.title"))),
-    access.apps.length
-      ? h("div", { class: "card table-wrap" }, h("table", { class: "matrix" }, h("thead", null, h("tr", null, h("th", null, t("backup.col.app")), h("th", null, t("access.signIn")), h("th", null, t("access.everyone")), people.map((u) => h("th", null, u.name, u.role === "guest" && h("span", { class: "muted" }, ` · ${t("user.role.guest")}`))))), h("tbody", null, access.apps.map(row))))
-      : h("p", { class: "card pad muted" }, t("backup.noApps")),
-    h("p", { class: "muted small" }, t("access.how")),
+    h(
+      "div",
+      { class: "card table-wrap" },
+      h("div", { class: "section-head pad-head" }, h("h2", null, t("users.part.access"), " ", h("span", { class: "muted" }, t("access.people", { n: users.length })))),
+      rows.flat(3).length
+        ? h("table", { class: "matrix access" }, h("thead", null, h("tr", null, h("th"), users.map((u) => h("th", null, u.name, " ", h("span", { class: "muted block" }, t("user.role." + u.role)))))), h("tbody", null, rows))
+        : h("p", { class: "pad-row muted" }, t("access.nothing")),
+      h("p", { class: "table-foot muted small" }, t("access.one"), " ", t("access.how")),
+    ),
   ];
 }
 
