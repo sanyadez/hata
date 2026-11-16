@@ -113,6 +113,16 @@ const ICONS = {
   door: "M6 21V3h12v18M3 21h18M14.5 12h.01",
   speaker: "M4 9h4l5-4v14l-5-4H4zM16.5 9.5a3.5 3.5 0 0 1 0 5M19 7a7 7 0 0 1 0 10",
   battery: "M3 8h15v8H3zM21 11v2M6 11v2M9 11v2",
+  bluetooth: "M7 7l10 10-5 5V2l5 5L7 17",
+  next: "M5 5l10 7-10 7zM19 5v14",
+  previous: "M19 5L9 12l10 7zM5 5v14",
+  shuffle: "M4 7h3l10 10h3M4 17h3l3-3M14 10l3-3h3M18 4l3 3-3 3M18 14l3 3-3 3",
+  keyboard: "M3 6h18v12H3zM7 10h.01M11 10h.01M15 10h.01M7 14h10",
+  mouse: "M12 3a5 5 0 0 1 5 5v8a5 5 0 0 1-10 0V8a5 5 0 0 1 5-5zM12 7v3",
+  headphones: "M4 14v-2a8 8 0 0 1 16 0v2M4 14h3v6H5a1 1 0 0 1-1-1zM20 14h-3v6h2a1 1 0 0 0 1-1z",
+  gamepad: "M6 8h12a4 4 0 0 1 4 4v2a3 3 0 0 1-5.2 2L15 14H9l-1.8 2A3 3 0 0 1 2 14v-2a4 4 0 0 1 4-4zM7 11v2M6 12h2M16 12h.01",
+  remote: "M8 2h8v20H8zM12 6h.01M12 10h.01M12 14h.01",
+  phone: "M7 2h10v20H7zM11 18h2",
 };
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -402,11 +412,15 @@ function parseRoute() {
   if (parts[0] === "hata" && mayFiles()) return { view: "myhata" };
   if (parts[0] === "activity" && isAdmin()) return { view: "activity" };
   if (parts[0] === "tv" && isAdmin()) return { view: "tv", hash: "#/house/tv" };
+  // Bluetooth lived among this server's tabs at first
+  if (parts[0] === "machines" && parts[1] === "this" && parts[2] === "bluetooth" && isAdmin()) return areaRoute("house", "bluetooth");
   // Hata the house: Home Assistant, the cameras, the TV — each a tab; a torrent client that is nobody's app too
   if ((parts[0] === "house" || parts[0] === "integrations" || (parts[0] === "ha" && !parts[1]) || (parts[0] === "settings" && parts[1] === "integrations")) && isAdmin()) {
     const tab = (parts[0] === "house" && areaTabs("house").find((x) => x.id === parts[1])) || areaTabs("house")[0];
     if (!tab) return { view: "ha", id: "", hash: "#/house" };
     const id = parts[0] === "house" ? (parts[2] ?? "") : "";
+    if (tab.view === "music") return { view: "music", hash: "#/house/music" };
+    if (tab.sections) return areaRoute("house", tab.id);
     return tab.view === "tv" ? { view: "tv", hash: "#/house/tv" } : { view: tab.view, id, house: true, hash: tab.hash + (id ? "/" + id : "") };
   }
   // both live in Settings; their own old addresses still lead there
@@ -477,6 +491,8 @@ const AREAS = {
     { id: "ha", hash: "#/house/ha", view: "ha", module: "integrations" },
     { id: "cameras", hash: "#/house/cameras", view: "frigate", module: "integrations" },
     { id: "tv", hash: "#/house/tv", view: "tv", module: "tv" },
+    { id: "music", hash: "#/house/music", view: "music", module: "music" },
+    { id: "bluetooth", sections: ["bluetooth"] },
     { id: "torrents", hash: "#/house/torrents", view: "qbit", module: "integrations", when: () => foreignTorrents() },
   ],
   network: [
@@ -505,7 +521,7 @@ const AREAS = {
     { id: "about", sections: ["about"] },
   ],
 };
-const AREA_BASE = { backups: "#/backups", storage: "#/storage", network: "#/network", server: "#/machines/this", settings: "#/settings" };
+const AREA_BASE = { house: "#/house", backups: "#/backups", storage: "#/storage", network: "#/network", server: "#/machines/this", settings: "#/settings" };
 const tabHash = (area, tab) => tab.hash ?? `${AREA_BASE[area]}/${tab.id}`;
 /** Whether this person may open the tab at all, and whether it stands among the tabs: one of a module that is off does not */
 const tabAllowed = (tab) => (tab.sections ? SECTIONS.some((item) => item.id === tab.sections[0] && (!item.admin || isAdmin())) : (!tab.admin || isAdmin()) && state.user?.role !== "guest");
@@ -541,7 +557,7 @@ function areaOf(route = state.route) {
   if (["files", "trash", "myhata"].includes(view)) return "files";
   if (["machines", "machine", "server", "proxmox", "containers", "instance", "guest", "terminal"].includes(view)) return "machines";
   if (view === "qbit") return route.house || !torrentsApp(route.id) ? "house" : "apps";
-  if (["integrations", "ha", "frigate", "tv"].includes(view)) return "house";
+  if (["integrations", "ha", "frigate", "tv", "music"].includes(view)) return "house";
   if (view === "backups") return "backups";
   if (view === "users") return "settings";
   return view === "home" || view === "activity" ? "home" : "";
@@ -590,6 +606,7 @@ function onRoute() {
   if (state.route.view === "import") void loadImport();
   if (state.route.view === "welcome") void loadWelcome();
   if (state.route.view === "tv") void loadTv();
+  if (state.route.view === "music") void loadMusic();
   if (state.route.view === "app") void loadApp();
   if (["machines", "machine", "proxmox", "guest", "instance", "containers"].includes(state.route.view)) void loadMachines();
   if (state.route.view === "machines") void loadPve();
@@ -666,6 +683,12 @@ function startEvents() {
       void loadApprovals();
     } else if (event.type === "tailscale") {
       if (state.route.view === "settings" && showsSection("remote")) void loadRemote();
+    } else if (event.type === "music") {
+      state.musicNow = event.playing ?? null;
+      paintMusicNow();
+      if (state.route.view === "music") void loadMusic();
+    } else if (event.type === "bluetooth") {
+      if (state.route.view === "settings" && showsSection("bluetooth")) void loadBluetooth();
     } else if (event.type === "sysupdates") {
       sysUpdatesEvent(event.at ?? "");
     } else if (event.type === "network") {
@@ -701,6 +724,8 @@ async function refresh() {
     return;
   }
   state.tvNow = state.overview.tv ?? null;
+  state.musicNow = state.overview.music ?? null;
+  paintMusicNow();
   paintTvNow();
   seedJobs(state.overview.jobs ?? []);
   failedTiles(state.overview);
@@ -1037,7 +1062,7 @@ const NAV = [
   { view: "apps", hash: "#/apps", icon: "grid", guest: false },
   { view: "files", hash: "#/files", icon: "folder", files: true },
   { view: "machines", hash: "#/machines", icon: "server", admin: true },
-  { view: "house", hash: "#/house", icon: "bulb", admin: true, modules: ["integrations", "tv"] },
+  { view: "house", hash: "#/house", icon: "bulb", admin: true, modules: ["integrations", "tv", "music", "bluetooth"] },
   { view: "storage", hash: "#/storage", icon: "disk", admin: true },
   { view: "backups", hash: "#/backups", icon: "archive", admin: true },
   { view: "network", hash: "#/network", icon: "network", admin: true },
@@ -1049,8 +1074,8 @@ const isAdmin = () => state.user?.role === "admin" && !state.user.mustTwoFactor;
 /** Whether a module is on: the page shows only the parts of those that are (`#/settings/modules`) */
 const hasModule = (id) => !state.modules || state.modules[id] === true;
 /** The sections of Settings and the pages that are a module's */
-const SECTION_MODULE = { protection: "raid", places: "netplaces", shares: "shares", remote: "remote", ports: "domains", dns: "dns", adblock: "adblock", integrations: "integrations", agents: "assistant", assistant: "assistant" };
-const VIEW_MODULES = { mapp: ["machines"], machine: ["machines"], proxmox: ["proxmox"], guest: ["proxmox"], containers: ["containers"], instance: ["containers"], integrations: ["integrations"], ha: ["integrations"], qbit: ["integrations"], frigate: ["integrations"], assistant: ["assistant"], connect: ["assistant"], tv: ["tv"] };
+const SECTION_MODULE = { bluetooth: "bluetooth", protection: "raid", places: "netplaces", shares: "shares", remote: "remote", ports: "domains", dns: "dns", adblock: "adblock", integrations: "integrations", agents: "assistant", assistant: "assistant" };
+const VIEW_MODULES = { mapp: ["machines"], machine: ["machines"], proxmox: ["proxmox"], guest: ["proxmox"], containers: ["containers"], instance: ["containers"], integrations: ["integrations"], ha: ["integrations"], qbit: ["integrations"], frigate: ["integrations"], assistant: ["assistant"], connect: ["assistant"], tv: ["tv"], music: ["music"] };
 /** Files are an administrator's, and theirs with whom a folder is shared — only those folders then */
 const mayFiles = () => isAdmin() || !!state.user?.files;
 /** The folders shared with one who is not an administrator, of this server or of a machine; null for an administrator */
@@ -1278,6 +1303,7 @@ function shell(...content) {
         globalSearch(),
         h("button", { type: "button", class: "top-btn top-find", title: t("search.placeholder"), "aria-label": t("search.placeholder"), onclick: () => navSheet(true) }, icon("search")),
         isAdmin() && h("a", { class: "top-btn top-term" + (state.route.view === "terminal" ? " active" : ""), href: "#/terminal", title: t("terminal.title"), "aria-label": t("terminal.title") }, icon("terminal")),
+        h("span", { id: "music-now", class: "tv-now", hidden: true }),
         h("span", { id: "tv-now", class: "tv-now", hidden: true }),
         h("a", { class: "top-btn top-gear" + (areaOf() === "settings" ? " active" : ""), href: "#/settings", title: t("nav.settings"), "aria-label": t("nav.settings") }, icon("gear")),
         h("button", { type: "button", class: "top-btn top-user", title: state.user.name, "aria-label": state.user.name, "aria-haspopup": "menu", onclick: userMenu }, state.user.name.slice(0, 1).toUpperCase()),
@@ -1286,6 +1312,7 @@ function shell(...content) {
     h("main", { id: "view" }, state.user.mustTwoFactor && h("p", { class: "banner" }, t("twofa.mustLead"), " ", h("a", { class: "link", href: "#/settings/account" }, t("twofa.mustGo"))), content),
     h("nav", { class: "bottom-bar" }, bottomLinks()),
   );
+  paintMusicNow();
   paintTvNow();
 }
 
@@ -1310,6 +1337,7 @@ function render() {
   if (view === "import") return renderImport();
   if (view === "terminal") return renderTerminal();
   if (view === "tv") return renderTv();
+  if (view === "music") return renderMusic();
   if (view === "machines") return renderMachines();
   if (view === "machine") return renderMachine();
   if (view === "proxmox") return renderPve();
@@ -11326,6 +11354,8 @@ function entryMenu(entry, at) {
     entry.type !== "other" && item(t(entry.type === "dir" ? "files.downloadZip" : "files.download"), "download", () => downloadEntries([entry])),
     entry.type === "file" && ARCHIVE_RE.test(entry.name) && !state.files.readOnly && !filesMachine() && isAdmin() && item(t("files.extract"), "archive", () => extractArchive(path)),
     entry.type === "file" && TV_PLAYS_RE.test(entry.name) && !filesMachine() && isAdmin() && hasModule("tv") && item(t("tv.play"), "tv", () => playOnTv(path, entry.name)),
+    (entry.type === "dir" || (entry.type === "file" && MUSIC_PLAYS_RE.test(entry.name))) && !filesMachine() && isAdmin() && hasModule("music") && item(t("music.play"), "speaker", () => playMusic({ path }, entry.name)),
+    (entry.type === "dir" || (entry.type === "file" && MUSIC_PLAYS_RE.test(entry.name))) && !filesMachine() && isAdmin() && hasModule("music") && item(t("music.queue"), "list", () => playMusic({ path, add: true }, entry.name)),
     entry.type === "file" && PVE_SEND_RE.test(entry.name) && !filesMachine() && isAdmin() && pveUi.list?.hosts?.length !== 0 && item(t("pve.send.menu"), "upload", () => pveSendDialog({ path })),
     entry.type === "file" && /\.iso$/i.test(entry.name) && !filesMachine() && isAdmin() && item(t("incus.disc.menu"), "disk", () => discAddDialog({ how: "path", path })),
     item(t("files.copyPath"), "link", () => copyText(path)),
@@ -13045,6 +13075,7 @@ async function loadSettings() {
     if (isAdmin() && showsSection("apps")) state.images = await api("GET", "/api/images").catch(() => null);
     if (isAdmin() && showsSection("network")) state.network = await api("GET", "/api/network").catch(() => null);
     if (isAdmin() && showsSection("remote") && hasModule("remote")) [state.remote, state.wireguard] = await Promise.all([api("GET", "/api/tailscale").catch(() => null), api("GET", "/api/wireguard").catch(() => null)]);
+    if (isAdmin() && showsSection("bluetooth") && hasModule("bluetooth")) state.bluetooth = await api("GET", "/api/bluetooth").catch((e) => ({ error: errorText(e) }));
     if (isAdmin() && showsSection("tools")) [state.tools, sysUpdates[""]] = await Promise.all([api("GET", "/api/tools").catch(() => null), api("GET", "/api/system/updates").catch((e) => ({ error: errorText(e) }))]);
     // counting the volumes takes a while: the page is shown first
     if (isAdmin() && showsSection("docker")) void loadSpace();
@@ -13070,6 +13101,7 @@ const SECTIONS = [
   { id: "appearance", icon: "image", group: "server", admin: true },
   { id: "notifications", icon: "bell", group: "server", admin: true },
   { id: "modules", icon: "modules", group: "server", admin: true },
+  { id: "bluetooth", icon: "bluetooth", group: "server", admin: true },
   { id: "tools", icon: "terminal", group: "server", admin: true },
   { id: "about", icon: "info", group: "server" },
   { id: "users", icon: "users", group: "people", admin: true, label: "nav.users" },
@@ -13105,6 +13137,7 @@ const SECTION_CARDS = {
   appearance: ["appearance.colours", "appearance.picture"],
   apps: ["settings.dataRoot", "settings.timezone", "images.title", "state.title"],
   docker: ["docker.images", "docker.volumes"],
+  bluetooth: ["bt.devices", "bt.add"],
   storage: ["disks.title", "disks.fs.title"],
   shares: ["shares.title", "shares.users.title", "shares.how.title"],
   places: ["netplace.title"],
@@ -13167,17 +13200,13 @@ function paintTvNow() {
   // the chip is the one way to the TV: there while the module is on, also with the player off or not installed yet
   const there = isAdmin() && hasModule("tv");
   box.hidden = !there;
-  box.className = "tv-now" + (tv?.playing ? " playing" : "") + (document.querySelector("dialog.tv-drop[open]") ? " open" : "");
+  box.className = "tv-now" + (tv?.playing && !tv.playing.paused ? " playing" : "") + (document.querySelector("dialog.tv-drop[open]") ? " open" : "");
   if (!there) return box.replaceChildren();
   const now = tv?.playing;
   const label = now ? t("tv.playing", { name: now.title }) : t(tv?.on ? "tv.remote" : "tv.title");
   // no words here: grey while nothing plays, the accent colour while something does — the name is in the remote.
-  // The left half pauses with one touch, the right one opens the remote; with nothing playing only that is left
-  const halves = [
-    now && h("button", { type: "button", class: "tv-now-half", title: t("tv.key.playpause"), "aria-label": t("tv.key.playpause"), onclick: () => api("POST", "/api/tv/do", { action: "playpause" }).catch((e) => toast(errorText(e), "error")) }, icon(now.paused ? "play" : "pause")),
-    h("button", { type: "button", class: "tv-now-half tv-now-open", title: label, "aria-label": label, "aria-haspopup": "dialog", onclick: () => tvDropdown(box) }, icon("tv")),
-  ];
-  // replaceChildren writes a missing one out as the word "null"
+  // one button, as the music's next to it: pause is in the remote it opens
+  const halves = [h("button", { type: "button", class: "tv-now-half tv-now-open", title: label, "aria-label": label, "aria-haspopup": "dialog", onclick: () => tvDropdown(box) }, icon("tv"))];
   box.replaceChildren(...halves.filter(Boolean));
   paintTvMini(now);
 }
@@ -13563,6 +13592,240 @@ async function playOnTv(path, name) {
   }
 }
 
+/* Music: the second player, on the server's own speakers */
+
+const MUSIC_PLAYS_RE = /\.(mp3|flac|m4a|m4b|ogg|oga|opus|wav|aac|wma|ape|wv|aiff?|mka|m3u8?|pls)$/i;
+const musicUi = { timer: null, busy: false };
+
+async function playMusic(what, name) {
+  try {
+    state.music = await api("POST", "/api/music/play", what);
+    toast(t(what.add ? "music.queued" : "music.playing", { name }));
+    if (state.route.view === "music") paintMusic();
+  } catch (e) {
+    toast(errorText(e), "error");
+  }
+}
+
+async function loadMusic() {
+  clearTimeout(musicUi.timer);
+  if (state.route.view !== "music" || !hasModule("music")) return;
+  try {
+    state.music = await api("GET", "/api/music");
+  } catch (e) {
+    if (!state.music) put(document.getElementById("music-body"), h("section", { class: "card pad" }, h("p", { class: "error" }, errorText(e))));
+  }
+  // a slider under the finger or an open list is not redrawn under the person
+  if (state.music && !musicUi.busy && !document.querySelector("dialog[open]") && !document.querySelector("#music-body input[type=range]:active")) paintMusic();
+  musicUi.timer = setTimeout(loadMusic, state.music?.now ? 2000 : 8000);
+}
+
+/** What the second player plays, in the head of every page next to the TV's: one button, the player under it */
+function paintMusicNow() {
+  const box = document.getElementById("music-now");
+  if (!box) return;
+  const there = isAdmin() && hasModule("music");
+  const now = there ? state.musicNow : null;
+  box.hidden = !there;
+  box.className = "tv-now" + (now && !now.paused ? " playing" : "") + (document.querySelector("dialog.music-drop[open]") ? " open" : "");
+  if (!there) return box.replaceChildren();
+  const label = now ? t("music.playing", { name: now.title }) : t("music.title");
+  const halves = [h("button", { type: "button", class: "tv-now-half tv-now-open", title: label, "aria-label": label, "aria-haspopup": "dialog", onclick: () => musicDropdown(box) }, icon("music"))];
+  box.replaceChildren(...halves.filter(Boolean));
+}
+
+function musicDropdown(at) {
+  let dialog;
+  let timer = 0;
+  let busy = false;
+  const body = h("div", { class: "stack" }, h("p", { class: "muted pad" }, "…"));
+  const paint = () => {
+    const m = state.music;
+    if (!m || busy || body.querySelector("input[type=range]:active") || document.querySelector("dialog.select-list[open]") || dialog.classList.contains("pulled")) return;
+    put(body, m.state === "missing" ? h("p", { class: "muted pad" }, t("error.music.missing")) : musicPlayerCard(m, act));
+  };
+  const act = async (method, path, data) => {
+    busy = true;
+    try {
+      state.music = await api(method, path, data);
+    } catch (e) {
+      toast(errorText(e), "error");
+    }
+    busy = false;
+    paint();
+  };
+  const load = async () => {
+    clearTimeout(timer);
+    if (!dialog.isConnected) return;
+    try {
+      state.music = await api("GET", "/api/music");
+      paint();
+    } catch (e) {
+      put(body, h("p", { class: "error pad" }, errorText(e)));
+    }
+    timer = setTimeout(load, 2000);
+  };
+  dialog = openDialog("dropdown music-drop", h("div", { class: "tvr-head" }, h("span", { class: "with-icon muted" }, icon("music"), t("music.title")), h("a", { class: "link small with-icon", href: "#/house/music", onclick: () => dialog.close() }, t("music.open"), icon("chevron"))), body);
+  dialog.addEventListener("close", () => {
+    clearTimeout(timer);
+    paintMusicNow();
+  });
+  pullToClose(dialog);
+  at.classList.add("open");
+  const r = at.getBoundingClientRect();
+  placeAt(dialog, { x: r.right - dialog.offsetWidth, y: r.bottom + 6 });
+  void load().then(() => placeAt(dialog, { x: r.right - dialog.offsetWidth, y: r.bottom + 6 }));
+}
+
+function musicLinkDialog() {
+  let dialog;
+  const address = h("input", { type: "url", inputMode: "url", autocomplete: "off", spellcheck: false, maxLength: 2000, placeholder: "https://", required: true });
+  const error = h("p", { class: "error", role: "alert" });
+  const play = async (e) => {
+    e.preventDefault();
+    const url = address.value.trim();
+    if (!isLink(url)) return void (error.textContent = t("error.music.badLink"));
+    try {
+      state.music = await api("POST", "/api/music/play", { url });
+    } catch (err) {
+      return void (error.textContent = errorText(err));
+    }
+    dialog.close();
+    paintMusic();
+  };
+  dialog = openDialog("confirm", h("form", { class: "stack", onsubmit: play }, h("h2", null, t("music.link")), h("p", { class: "muted" }, t("music.linkLead")), address, error, h("footer", null, closeButton(() => dialog, t("common.cancel")), h("button", { type: "submit", class: "btn primary" }, icon("play"), h("span", null, t("music.playNow"))))));
+  address.focus();
+}
+
+const musicFolder = () => folderPicker({ title: t("music.folder"), start: state.settings?.dataRoot ?? "/", confirmLabel: t("music.playNow"), action: (path) => playMusic({ path }, path.split("/").pop() || path) });
+
+function renderMusic() {
+  shell(areaHead("house", "music", { actions: h("div", { class: "row-actions" }, button(t("music.link"), { onclick: musicLinkDialog }, "link"), button(t("music.folder"), { class: "primary", onclick: musicFolder }, "folder")) }), h("div", { id: "music-body", class: "stack" }, h("p", { class: "card pad muted" }, "…")));
+  cleanups.push(() => clearTimeout(musicUi.timer));
+  if (state.music) paintMusic();
+}
+
+/** The same speakers as a player of Music Assistant: Squeezelite, by its own button */
+function musicSpeakerCard(m, act) {
+  const s = m.speaker;
+  const error = h("p", { class: "error", role: "alert" });
+  if (s.state === "missing") {
+    const install = async (e) => {
+      const el = e.currentTarget;
+      el.disabled = true;
+      el.lastChild.textContent = t("tools.installing");
+      try {
+        await api("POST", "/api/tools/squeezelite/install", {});
+        void loadMusic();
+      } catch (err) {
+        error.textContent = errorText(err);
+        el.disabled = false;
+      }
+    };
+    return h("section", { class: "card pad stack" }, h("h2", null, t("music.speaker.title")), h("p", { class: "muted" }, t("music.speaker.lead")), h("p", null, t("music.speaker.what")), s.install ? h("p", { class: "cmd" }, icon("terminal"), s.install) : h("p", { class: "muted small" }, t("mounting.needs.byHand", { package: "squeezelite" })), error, s.install && h("footer", null, button(t("mounting.needs.install", { package: "Squeezelite" }), { onclick: install }, "download")));
+  }
+  const on = s.state === "on";
+  const name = h("input", { value: s.name, maxLength: 40, required: true, "aria-label": t("music.speaker.name") });
+  const server = h("input", { value: s.server, maxLength: 260, placeholder: t("music.speaker.serverAuto"), spellcheck: false, autocapitalize: "off", class: "mono", "aria-label": t("music.speaker.server") });
+  const typed = () => ({ name: name.value.trim(), server: server.value.trim() });
+  return h(
+    "section",
+    { class: "card pad stack" },
+    h("div", { class: "section-head" }, h("h2", null, t("music.speaker.title"), h("span", { class: "state " + (on ? (s.running ? "running" : "partial") : "stopped") }, t(on ? (s.running ? "bt.state.on" : "music.speaker.starting") : "bt.state.off")))),
+    h("p", { class: "muted" }, t("music.speaker.lead")),
+    settingRow(t("music.speaker.name"), t("music.speaker.nameHint"), name),
+    settingRow(t("music.speaker.server"), t("music.speaker.serverHint"), server),
+    on && h("p", { class: "muted small" }, t("music.speaker.how")),
+    h("footer", null, h("div", { class: "row-actions" }, on && button(t("bt.turnOff"), { onclick: () => act("PUT", "/api/music", { speaker: { on: false } }) }), button(t(on ? "settings.save" : "music.speaker.turnOn"), { class: "primary", onclick: () => act("PUT", "/api/music", { speaker: { ...typed(), on: true } }) }))),
+  );
+}
+
+/** The player itself — what plays, the keys, the volume, where the sound goes: on the Music tab and under the chip in the head */
+function musicPlayerCard(m, act, error = null) {
+  const press = (action, value) => act("POST", "/api/music/do", { action, value });
+  const now = m.now;
+  const round = (action, iconName, cls = "") => h("button", { type: "button", class: "tvr-round " + cls, title: t("music.key." + action), "aria-label": t("music.key." + action), disabled: !now, onclick: () => press(action) }, icon(iconName));
+  const seek = now?.duration ? h("input", { type: "range", class: "tvr-slider", min: 0, max: Math.floor(now.duration), value: Math.floor(now.position), "aria-label": t("music.position"), onchange: (e) => press("seek", Number(e.target.value)) }) : null;
+  const volume = h("input", { type: "range", class: "tvr-slider" + (m.muted ? " muted" : ""), min: 0, max: 100, value: m.volume, "aria-label": t("music.volume"), onchange: (e) => press("volume", Number(e.target.value)) });
+  const kind = (o) => t("music.out." + o.kind);
+  const output = m.outputs.length
+    ? h("select", { "aria-label": t("music.output"), onchange: (e) => act("PUT", "/api/music", { output: e.target.value }) }, m.outputs.map((o) => h("option", { value: o.id, selected: o.id === m.output }, `${o.name} — ${kind(o)}`)))
+    : h("span", { class: "muted" }, t("music.noOutput"));
+  const player = h(
+    "section",
+    { class: "card pad stack music-player" },
+    now
+      ? h("div", { class: "music-now" }, h("span", { class: "badge-icon plain" }, icon(now.link ? "globe" : "music")), h("div", { class: "grow" }, h("strong", { class: "wrap" }, now.title), now.by && h("div", { class: "muted small wrap" }, now.by)), now.paused && h("span", { class: "state busy" }, t("tv.paused")))
+      : h("div", { class: "music-now" }, h("span", { class: "badge-icon plain" }, icon("music")), h("div", { class: "grow" }, h("strong", null, t("music.idle")), h("div", { class: "muted small" }, t("music.idleLead")))),
+    seek && h("div", { class: "music-seek" }, h("span", { class: "muted small mono" }, tvClock(now.position)), seek, h("span", { class: "muted small mono" }, tvClock(now.duration))),
+    h("div", { class: "music-keys" }, round("previous", "previous"), h("button", { type: "button", class: "tvr-main", title: t("music.key.playpause"), "aria-label": t("music.key.playpause"), disabled: !now, onclick: () => press("playpause") }, icon(now && !now.paused ? "pause" : "play")), round("next", "next"), round("stop", "stop")),
+    h("div", { class: "tvr-volume" }, h("button", { type: "button", class: "icon-btn", title: t("music.key.mute"), "aria-label": t("music.key.mute"), disabled: !m.running, onclick: () => press("mute", !m.muted) }, icon(m.muted ? "volumeOff" : "volume")), volume, h("span", { class: "muted small mono" }, m.volume)),
+    m.volumeOf === "speaker" && h("p", { class: "muted small" }, t("music.volumeSpeaker")),
+    settingRow(t("music.output"), t("music.outputHint"), output),
+    error,
+  );
+  return player;
+}
+
+function paintMusic() {
+  const box = document.getElementById("music-body");
+  const m = state.music;
+  if (!box || !m) return;
+  const error = h("p", { class: "error", role: "alert" });
+  if (m.state === "missing") {
+    const install = async (e) => {
+      const el = e.currentTarget;
+      el.disabled = true;
+      el.lastChild.textContent = t("tools.installing");
+      try {
+        await api("POST", "/api/tools/mpv/install", {});
+        void loadMusic();
+      } catch (err) {
+        error.textContent = errorText(err);
+        el.disabled = false;
+      }
+    };
+    return put(box, h("section", { class: "card pad stack" }, h("h2", null, t("music.title")), h("p", { class: "muted" }, t("music.lead")), h("p", null, t("music.what")), m.install ? h("p", { class: "cmd" }, icon("terminal"), m.install) : h("p", { class: "muted small" }, t("mounting.needs.byHand", { package: "mpv" })), error, m.install && h("footer", null, button(t("mounting.needs.install", { package: "mpv" }), { class: "primary", onclick: install }, "download"))));
+  }
+  const act = async (method, path, data) => {
+    error.textContent = "";
+    musicUi.busy = true;
+    try {
+      state.music = await api(method, path, data);
+    } catch (e) {
+      musicUi.busy = false;
+      // the choice shown goes back to what is true
+      void loadMusic();
+      return toast(errorText(e), "error");
+    }
+    musicUi.busy = false;
+    paintMusic();
+  };
+  const press = (action, value) => act("POST", "/api/music/do", { action, value });
+  const player = musicPlayerCard(m, act, error);
+  const queue = h(
+    "section",
+    { class: "card pad stack" },
+    h("div", { class: "section-head" }, h("h2", null, t("music.queueTitle"), h("span", { class: "muted small" }, m.queue.length || "")), m.queue.length > 1 && h("div", { class: "row-actions" }, button(t("music.key.shuffle"), { class: "small", onclick: () => press("shuffle") }, "shuffle"), button(t("music.key.clear"), { class: "small", onclick: () => press("clear") }, "x"))),
+    m.queue.length
+      ? h(
+          "div",
+          { class: "music-queue" },
+          m.queue.slice(0, 300).map((q, i) =>
+            h(
+              "div",
+              { class: "music-row" + (q.current ? " current" : ""), menu: true },
+              h("button", { type: "button", class: "music-pick", title: t("music.key.jump"), onclick: () => press("jump", i) }, icon(q.current ? "play" : q.link ? "globe" : "music"), h("span", { class: "grow" }, h("span", { class: "clip" }, q.title), q.where && h("span", { class: "muted small clip" }, q.where))),
+              h("button", { type: "button", class: "icon-btn", title: t("music.key.remove"), "aria-label": t("music.key.remove"), onclick: () => press("remove", i) }, icon("x")),
+            ),
+          ),
+          m.queue.length > 300 && h("p", { class: "muted small" }, t("music.more", { n: m.queue.length - 300 })),
+        )
+      : h("p", { class: "muted" }, t("music.queueEmpty")),
+  );
+  put(box, h("div", { class: "music-page" }, h("div", { class: "stack" }, player, musicSpeakerCard(m, act)), queue));
+}
+
 async function loadTv() {
   clearTimeout(tvUi.timer);
   if (state.route.view !== "tv" || !hasModule("tv")) return;
@@ -13628,6 +13891,7 @@ function tvRemoteParts(tv, press, turnOn) {
         : note("tv", t("tv.nothingTitle"), t("tv.nothing")),
     h("div", { class: "tvr-transport" }, skip("rewind", "back30", t("tv.key.rewind")), h("button", { type: "button", class: "tvr-main", title: t("tv.key.playpause"), "aria-label": t("tv.key.playpause"), disabled: idle || !now, onclick: () => press("playpause") }, icon(now && !now.paused ? "pause" : "play")), skip("forward", "fwd30", t("tv.key.forward"))),
     h("div", { class: "tvr-volume" }, round("mute", tv.muted ? "volumeOff" : "volume", t(tv.muted ? "tv.unmute" : "tv.mute"), tv.muted ? "on" : ""), volume, h("span", { class: "tvr-value" + (tv.muted ? " muted" : "") }, tv.muted ? t("tv.muted") : `${tv.volume}%`)),
+    tv.audio && tv.audio.options.length > 1 && h("div", { class: "tvr-tracks" }, h("label", null, h("span", { class: "muted" }, t("tv.out")), h("select", { "aria-label": t("tv.audio"), onchange: (e) => api("PUT", "/api/tv", { audio: e.target.value }).then((said) => ((state.tv = said), state.route.view === "tv" && paintTv()), (err) => toast(errorText(err), "error")) }, tv.audio.options.map((o) => h("option", { value: o.value, selected: o.value === tv.audio.value }, o.label))))),
     h("hr", { class: "tvr-rule" }),
     h("div", { class: "tvr-pad" }, arrow("up", "up", t("tv.key.up")), arrow("left", "left", t("tv.key.left")), h("button", { type: "button", class: "tvr-ok", disabled: idle, onclick: () => press("select") }, "OK"), arrow("right", "right", t("tv.key.right")), arrow("down", "down", t("tv.key.down"))),
     h("div", { class: "tvr-keys" }, keyed("back", "undo", t("tv.key.back")), keyed("home", "home", t("tv.key.home")), keyed("menu", "lines", t("tv.key.menu")), keyed("info", "info", t("tv.key.info")), typed),
@@ -13763,11 +14027,21 @@ function paintTv() {
     const el = h("button", { type: "button", role: "switch", class: "ha-switch", "aria-checked": String(pref(id).value === true), "aria-label": title, onclick: () => ((el.disabled = true), set(id, pref(id).value !== true)) }, h("i"));
     return settingRow(title, hint, el);
   };
+  const haLine = (label, value) => h("div", { class: "kv-line" }, h("span", { class: "muted" }, label), h("code", { class: "wrap" }, value), h("button", { type: "button", class: "icon-btn", title: t("twofa.copy"), "aria-label": `${t("twofa.copy")}: ${label}`, onclick: () => copyQuietly(String(value)) }, icon("copy")));
+  const haCard = tv.ha && h(
+    "section",
+    { class: "card pad stack" },
+    h("div", { class: "section-head" }, h("h2", null, "Home Assistant", h("span", { class: "state " + (tv.ha.on ? "running" : "stopped") }, t(tv.ha.on ? "bt.state.on" : "bt.state.off"))), button(t(tv.ha.on ? "bt.turnOff" : "music.speaker.turnOn"), { class: "small" + (tv.ha.on ? "" : " primary"), onclick: () => void change({ ha: !tv.ha.on }) })),
+    h("p", { class: "muted" }, t("tv.ha.lead")),
+    tv.ha.on && h("div", { class: "stack" }, haLine(t("tv.ha.host"), tv.ha.address || location.hostname), haLine(t("tv.ha.port"), tv.ha.port), haLine(t("tv.ha.user"), tv.ha.user), haLine(t("tv.ha.password"), tv.ha.password)),
+    tv.ha.on && h("p", { class: "muted small" }, t("tv.ha.how")),
+  );
   const audioCard = tv.audio && tv.audio.options.length > 0 && h(
     "section",
     { class: "card pad stack" },
     h("div", { class: "section-head" }, h("h2", null, t("tv.sound"))),
     settingRow(t("tv.audio"), t("tv.audioHint"), h("select", { onchange: (e) => void change({ audio: e.target.value }) }, tv.audio.options.map((o) => h("option", { value: o.value, selected: o.value === tv.audio.value }, o.label)))),
+    settingRow(t("tv.offset"), t("tv.offsetHint"), h("div", { class: "row-actions" }, button("", { class: "small", title: t("tv.offsetEarlier"), "aria-label": t("tv.offsetEarlier"), disabled: tv.audio.offset <= -2000, onclick: () => void change({ offset: tv.audio.offset - 25 }) }, "previous"), h("span", { class: "mono tv-offset" }, t(tv.audio.offset < 0 ? "tv.offsetBefore" : tv.audio.offset > 0 ? "tv.offsetAfter" : "tv.offsetNone", { ms: Math.abs(tv.audio.offset) })), button("", { class: "small", title: t("tv.offsetLater"), "aria-label": t("tv.offsetLater"), disabled: tv.audio.offset >= 2000, onclick: () => void change({ offset: tv.audio.offset + 25 }) }, "next"))),
     listed("audiooutput.channels", t("tv.channels"), t("tv.channelsHint")),
     flag("audiooutput.passthrough", t("tv.passthrough"), t("tv.passthroughHint")),
     flag("audiooutput.guisoundmode", t("tv.menuSounds"), null),
@@ -13820,7 +14094,7 @@ function paintTv() {
   );
 
   // the remote is the page's main thing; what is set once stands beside it
-  put(box, h("div", { class: "tv-page" }, remoteCard, h("div", { class: "stack" }, playerCard, screenCard, foldersCard, languageCard, audioCard, pictureCard, browserCard)));
+  put(box, h("div", { class: "tv-page" }, remoteCard, h("div", { class: "stack" }, playerCard, screenCard, foldersCard, languageCard, audioCard, pictureCard, haCard, browserCard)));
   tvStick();
   if (tv.asking) tvKeepDialog();
 }
@@ -13873,12 +14147,12 @@ function tvKeepDialog() {
 
 // --- Modules: the parts of Hata a person turns on -------------------------------------------------
 
-const MODULE_ICONS = { tv: "tv", raid: "shield", netplaces: "network", shares: "share", offsite: "archive", remote: "globe", dns: "signpost", adblock: "ban", domains: "plug", machines: "server", proxmox: "server", containers: "box", integrations: "link", assistant: "chat" };
+const MODULE_ICONS = { music: "music", bluetooth: "bluetooth", tv: "tv", raid: "shield", netplaces: "network", shares: "share", offsite: "archive", remote: "globe", dns: "signpost", adblock: "ban", domains: "plug", machines: "server", proxmox: "server", containers: "box", integrations: "link", assistant: "chat" };
 const MODULE_GROUPS = ["storage", "network", "servers", "more"];
 /** Where a module's own things are once it is on */
-const MODULE_HOME = { tv: "#/house/tv", raid: "#/settings/protection", netplaces: "#/settings/places", shares: "#/settings/shares", offsite: "#/settings/backups", remote: "#/settings/remote", dns: "#/settings/dns", adblock: "#/settings/adblock", domains: "#/settings/ports", machines: "#/machines", proxmox: "#/machines", containers: "#/containers", integrations: "#/settings/integrations", assistant: "#/settings/assistant" };
+const MODULE_HOME = { music: "#/house/music", bluetooth: "#/house/bluetooth", tv: "#/house/tv", raid: "#/settings/protection", netplaces: "#/settings/places", shares: "#/settings/shares", offsite: "#/settings/backups", remote: "#/settings/remote", dns: "#/settings/dns", adblock: "#/settings/adblock", domains: "#/settings/ports", machines: "#/machines", proxmox: "#/machines", containers: "#/containers", integrations: "#/settings/integrations", assistant: "#/settings/assistant" };
 /** Where the thing that holds a module on is taken away */
-const MODULE_USE_AT = { tv: "#/tv", array: "#/settings/protection", merged: "#/settings/storage", pools: "#/settings/protection", places: "#/settings/places", shares: "#/settings/shares", offsite: "#/settings/backups", wireguard: "#/settings/remote", tailscale: "#/settings/remote", dnsOn: "#/settings/dns", blocking: "#/settings/adblock", names: "#/settings/https", ports: "#/settings/ports", machines: "#/machines", proxmox: "#/machines", containers: "#/containers", homeAssistant: "#/settings/integrations", qbit: "#/settings/integrations", frigate: "#/settings/integrations", keys: "#/settings/agents" };
+const MODULE_USE_AT = { speaker: "#/house/music", bluetooth: "#/house/bluetooth", tv: "#/tv", array: "#/settings/protection", merged: "#/settings/storage", pools: "#/settings/protection", places: "#/settings/places", shares: "#/settings/shares", offsite: "#/settings/backups", wireguard: "#/settings/remote", tailscale: "#/settings/remote", dnsOn: "#/settings/dns", blocking: "#/settings/adblock", names: "#/settings/https", ports: "#/settings/ports", machines: "#/machines", proxmox: "#/machines", containers: "#/containers", homeAssistant: "#/settings/integrations", qbit: "#/settings/integrations", frigate: "#/settings/integrations", keys: "#/settings/agents" };
 const moduleName = (id) => t(`modules.${id}.name`);
 
 /** Which modules are on, asked again: after a change made here or on another page */
@@ -14444,6 +14718,7 @@ function settingsSection(section) {
   if (section === "tools") return toolsSection();
   if (section === "docker") return dockerSection();
   if (section === "remote") return remoteSection();
+  if (section === "bluetooth") return bluetoothSection();
   if (section === "agents") return agentsSection();
   if (section === "assistant") return assistantSection();
   if (section === "stores") {
@@ -15249,6 +15524,240 @@ async function loadRemote() {
 }
 
 /** Settings → Remote access: Tailscale, then WireGuard in and out */
+/* Bluetooth: the devices of this server */
+
+const BT_ICONS = { keyboard: "keyboard", mouse: "mouse", gamepad: "gamepad", remote: "remote", input: "keyboard", speaker: "speaker", headphones: "headphones", phone: "phone", computer: "server", tv: "tv", other: "bluetooth" };
+const btUi = { dialog: null, paint: null, busy: "" };
+/** How strongly a device is heard, in four steps: the list must not jump with every decibel */
+const btBars = (signal) => (signal === null ? 0 : signal >= -60 ? 4 : signal >= -72 ? 3 : signal >= -84 ? 2 : 1);
+/** What of the report the page draws: it is redrawn only when this differs */
+const btSignature = (r) => JSON.stringify([r.state, r.error, r.hardware, r.hardBlocked, r.adapter, r.devices, (r.found ?? []).map((d) => [d.address, d.name, d.kind, btBars(d.signal)]), btUi.busy]);
+
+async function loadBluetooth() {
+  const before = state.bluetooth ? btSignature(state.bluetooth) : "";
+  state.bluetooth = await api("GET", "/api/bluetooth").catch((e) => ({ error: errorText(e) }));
+  btUi.paint?.();
+  if (state.route.view === "settings" && showsSection("bluetooth") && btSignature(state.bluetooth) !== before) renderSettings();
+}
+
+function btPairDialog(device) {
+  const body = h("div", { class: "stack" });
+  const foot = h("footer");
+  const dialog = openDialog("confirm bt-pair", h("h2", null, t("bt.pair.title", { name: device.name })), body, foot);
+  let timer = null;
+  const start = async () => {
+    try {
+      state.bluetooth = await api("POST", `/api/bluetooth/devices/${device.address}/pair`, {});
+    } catch (e) {
+      state.bluetooth = { ...state.bluetooth, pairing: { address: device.address, name: device.name, step: "failed", code: "", typed: 0, error: e.code ?? "bluetooth.pair.failed" } };
+    }
+    paint();
+  };
+  const code = (p) => h("div", { class: "bt-code", "aria-label": p.code }, [...p.code].map((digit, i) => h("span", { class: i < p.typed ? "typed" : "" }, digit)));
+  const paint = () => {
+    const p = state.bluetooth?.pairing;
+    const mine = p && p.address === device.address ? p : { step: "working", code: "", typed: 0, error: "" };
+    const over = mine.step === "done" || mine.step === "failed";
+    body.replaceChildren(
+      ...[
+        mine.step === "working" && h("p", { class: "muted" }, t("bt.pair.working")),
+        (mine.step === "passkey" || mine.step === "pin") && h("p", null, t("bt.pair.type", { name: device.name })),
+        mine.step === "confirm" && h("p", null, t("bt.pair.compare", { name: device.name })),
+        mine.code && !over && code(mine),
+        mine.step === "done" && h("p", { class: "bt-done" }, icon("check"), t(mine.error ? "bt.pair.donePaired" : "bt.pair.done", { name: device.name })),
+        mine.step === "done" && mine.error && h("p", { class: "muted" }, t("error." + mine.error)),
+        mine.step === "failed" && h("p", { class: "error", role: "alert" }, t("error." + mine.error)),
+        mine.step === "failed" && h("p", { class: "muted small" }, t("bt.pair.failedHint")),
+      ].filter(Boolean),
+    );
+    foot.replaceChildren(
+      ...[
+        mine.step === "failed" && button(t("bt.pair.again"), { onclick: start }, "refresh"),
+        button(t(over ? (mine.step === "done" ? "bt.pair.ok" : "common.close") : "common.cancel"), { class: mine.step === "done" ? "primary" : "", onclick: () => dialog.close() }),
+      ].filter(Boolean),
+    );
+  };
+  btUi.paint = paint;
+  // the bus tells of every step; asked as well, in case the stream is down
+  timer = setInterval(() => void loadBluetooth(), 2000);
+  dialog.addEventListener("close", async () => {
+    clearInterval(timer);
+    btUi.paint = null;
+    await api("DELETE", "/api/bluetooth/pairing").catch(() => {});
+    void loadBluetooth();
+  });
+  paint();
+  void start();
+}
+
+/** Speakers and headphones need one more program: what it is, why, the command, the button */
+function btSoundCard(r, error) {
+  if (r.sound === "ready") return h("section", { class: "card pad stack" }, h("div", { class: "section-head" }, h("h2", null, t("bt.sound.title"), h("span", { class: "state running" }, t("bt.sound.ready")))), h("p", { class: "muted" }, t("bt.sound.readyLead")));
+  const install = async (e) => {
+    const el = e.currentTarget;
+    el.disabled = true;
+    el.lastChild.textContent = t("tools.installing");
+    try {
+      await api("POST", "/api/tools/bluez-alsa/install", {});
+      await loadBluetooth();
+      renderSettings();
+    } catch (err) {
+      error.textContent = errorText(err);
+      el.disabled = false;
+    }
+  };
+  return h(
+    "section",
+    { class: "card pad stack" },
+    h("h2", null, t("bt.sound.title")),
+    h("p", { class: "muted" }, t("bt.sound.lead")),
+    h("p", null, t("bt.sound.what")),
+    r.soundInstall ? h("p", { class: "cmd" }, icon("terminal"), r.soundInstall) : h("p", { class: "muted small" }, t("mounting.needs.byHand", { package: "bluez-alsa-utils" })),
+    r.soundInstall && h("footer", null, button(t("mounting.needs.install", { package: "BlueALSA" }), { class: "primary", onclick: install }, "download")),
+  );
+}
+
+function bluetoothSection() {
+  const r = state.bluetooth;
+  if (!r) return [h("p", { class: "card pad muted" }, "…")];
+  const error = h("p", { class: "error", role: "alert" }, r.error ?? "");
+  const lead = h("p", { class: "muted" }, t("bt.lead"));
+  if (r.error) return [h("section", { class: "card pad stack" }, h("h2", null, "Bluetooth"), error)];
+  const send = (method, path, data, mark = "") => async (e) => {
+    const el = e?.currentTarget;
+    if (el) el.disabled = true;
+    btUi.busy = mark;
+    error.textContent = "";
+    try {
+      state.bluetooth = await api(method, path, data);
+    } catch (err) {
+      toast(errorText(err), "error");
+    }
+    btUi.busy = "";
+    renderSettings();
+  };
+  const noRadio = !r.hardware && h("p", { class: "banner" }, t("bt.noRadio"));
+
+  if (r.state === "missing")
+    return [
+      h(
+        "section",
+        { class: "card pad stack" },
+        h("h2", null, "Bluetooth"),
+        lead,
+        h("p", null, t("bt.what")),
+        noRadio,
+        r.install ? h("p", { class: "cmd" }, icon("terminal"), r.install) : h("p", { class: "muted small" }, t("mounting.needs.byHand", { package: "bluez" })),
+        error,
+        r.install &&
+          h(
+            "footer",
+            null,
+            button(t("mounting.needs.install", { package: "BlueZ" }), {
+              class: "primary",
+              onclick: async (e) => {
+                const el = e.currentTarget;
+                el.disabled = true;
+                el.lastChild.textContent = t("tools.installing");
+                try {
+                  await api("POST", "/api/tools/bluez/install", {});
+                  await loadBluetooth();
+                  renderSettings();
+                } catch (err) {
+                  error.textContent = errorText(err);
+                  el.disabled = false;
+                }
+              },
+            }, "download"),
+          ),
+      ),
+    ];
+  if (r.state === "stopped")
+    return [h("section", { class: "card pad stack" }, h("h2", null, "Bluetooth"), lead, h("p", { class: "banner" }, t("bt.stopped")), h("p", { class: "cmd" }, icon("terminal"), "systemctl enable --now bluetooth"), h("footer", null, button(t("bt.start"), { class: "primary", onclick: send("POST", "/api/bluetooth/start", {}) }, "power")))];
+  if (r.state === "noAdapter") return [h("section", { class: "card pad stack" }, h("h2", null, "Bluetooth"), lead, h("p", { class: "banner" }, t(r.hardware ? "bt.noAdapter" : "bt.noRadio")))];
+  if (r.state === "off")
+    return [
+      h(
+        "section",
+        { class: "card pad stack" },
+        h("div", { class: "section-head" }, h("h2", null, "Bluetooth", h("span", { class: "state stopped" }, t("bt.state.off")))),
+        lead,
+        h("p", { class: "muted small" }, t("bt.adapter", { name: r.adapter.name, address: r.adapter.address })),
+        r.hardBlocked && h("p", { class: "banner" }, t("error.bluetooth.hardBlocked")),
+        h("footer", null, button(t("bt.turnOn"), { class: "primary", disabled: r.hardBlocked, onclick: send("PUT", "/api/bluetooth", { on: true }) }, "power")),
+      ),
+    ];
+
+  const name = (d) => h("div", { class: "bt-name" }, h("span", { class: "badge-icon plain" }, icon(BT_ICONS[d.kind] ?? "bluetooth")), h("div", null, h("div", { class: "strong clip" }, d.name || d.address), h("div", { class: "muted small" }, t("bt.kind." + d.kind))));
+  const row = (d) =>
+    h(
+      "tr",
+      null,
+      h("td", null, name(d)),
+      h("td", null, h("span", { class: "state " + (d.connected ? "running" : "stopped") }, t(d.connected ? "bt.connected" : "bt.away"))),
+      h("td", null, d.battery === null ? h("span", { class: "muted" }, "—") : h("span", { class: "bt-battery" + (d.battery <= 20 ? " low" : "") }, icon("battery"), d.battery + "%")),
+      h(
+        "td",
+        null,
+        h(
+          "div",
+          { class: "row-actions" },
+          d.connected
+            ? button(t("bt.disconnect"), { class: "small", onclick: send("POST", `/api/bluetooth/devices/${d.address}/disconnect`, {}) })
+            : button(t(btUi.busy === d.address ? "bt.connecting" : "bt.connect"), { class: "small", disabled: btUi.busy === d.address, onclick: (e) => ((btUi.busy = d.address), renderSettings(), send("POST", `/api/bluetooth/devices/${d.address}/connect`, {}, d.address)(e)) }),
+          h("button", {
+            type: "button",
+            class: "icon-btn",
+            title: t("bt.forget"),
+            "aria-label": t("bt.forget"),
+            onclick: () => confirmAction({ title: t("bt.forgetTitle", { name: d.name || d.address }), lead: t("bt.forgetLead"), label: t("bt.forget"), run: () => send("DELETE", `/api/bluetooth/devices/${d.address}`)() }),
+          }, icon("trash")),
+        ),
+      ),
+    );
+  const looking = r.adapter.looking;
+  const bars = (d) => h("span", { class: "bt-signal l" + btBars(d.signal), title: d.signal === null ? "" : d.signal + " dBm" }, h("i"), h("i"), h("i"), h("i"));
+  const found = [...r.found].sort((a, b) => btBars(b.signal) - btBars(a.signal) || a.name.localeCompare(b.name));
+  return [
+    h(
+      "section",
+      { class: "card pad stack" },
+      h(
+        "div",
+        { class: "section-head" },
+        h("h2", null, t("bt.devices"), h("span", { class: "state running" }, t("bt.state.on"))),
+        button(t("bt.turnOff"), { class: "small", onclick: (e) => confirmAction({ title: t("bt.offTitle"), lead: t("bt.offLead"), label: t("bt.turnOff"), iconName: "power", run: () => send("PUT", "/api/bluetooth", { on: false })() }) }, "power"),
+      ),
+      lead,
+      r.devices.length
+        ? h("div", { class: "table-wrap" }, h("table", null, h("thead", null, h("tr", null, h("th", null, t("bt.col.device")), h("th", null, t("bt.col.state")), h("th", null, t("bt.col.battery")), h("th"))), h("tbody", null, r.devices.map(row))))
+        : h("p", { class: "muted" }, t("bt.none")),
+      error,
+      h("p", { class: "muted small" }, t("bt.adapter", { name: r.adapter.name, address: r.adapter.address })),
+    ),
+    h(
+      "section",
+      { class: "card pad stack" },
+      h(
+        "div",
+        { class: "section-head" },
+        h("h2", null, t("bt.add")),
+        looking ? button(t("bt.stopLooking"), { class: "small", onclick: send("POST", "/api/bluetooth/look", { on: false }) }, "x") : button(t("bt.look"), { class: "small primary", onclick: send("POST", "/api/bluetooth/look", { on: true }) }, "search"),
+      ),
+      h("p", { class: "muted" }, t("bt.addLead")),
+      looking && h("p", { class: "bt-looking muted small" }, icon("refresh", "spin"), t("bt.looking")),
+      found.length > 0 &&
+        h(
+          "div",
+          { class: "bt-found" },
+          found.map((d) => h("div", { class: "bt-found-row", menu: true }, name(d), bars(d), button(t("bt.pair"), { class: "small", onclick: () => btPairDialog(d) }, "plus"))),
+        ),
+      !looking && !found.length && h("p", { class: "muted small" }, t("bt.lookHint")),
+    ),
+    btSoundCard(r, error),
+  ];
+}
+
 const remoteSection = () => [...tailscaleCards(), ...wireguardCards()];
 
 /** A device that agreed on keys within the last three minutes is connected: WireGuard renews them every two */

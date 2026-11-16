@@ -12,6 +12,7 @@ import { BLOCK_DEFAULTS, cleanBlock, type BlockSettings } from "./dnsblock";
 import { cleanForwards, type Forward } from "./forward";
 import { cleanModules, type ModuleSwitches } from "./modules";
 import { cleanNames, type DomainName } from "./names";
+import { cleanSpeakerName, cleanSpeakerServer } from "./sound";
 import { cleanFolders } from "./tv";
 import { cleanMachineShares, cleanShares, type MachineShare, type Share } from "./smbconf";
 import { changeAppearance, cleanAppearance, DEFAULT_APPEARANCE, type Appearance } from "./wallpapers";
@@ -135,7 +136,10 @@ export interface Settings {
   /** How many days what is deleted in the file manager stays in the trash */
   trash: { days: number };
   /** The media player on the server's screen (`tv.ts`): the folders it shows; whether its sound output was chosen */
-  tv: { folders: string[]; audioChosen: boolean };
+  /** `offsets`: the sound output (Kodi's own name of it) → seconds its sound is moved by against the picture */
+  tv: { folders: string[]; audioChosen: boolean; offsets: Record<string, number>; /** The player's own volume from before a speaker's took over, put back when the sound leaves it; null — no speaker has it */ volume: number | null; /** The person sent the sound to a Bluetooth speaker: it goes back there when the speaker returns; `before` — the output used until then */ speaker: boolean; before: string };
+  /** The music player: where its sound goes (an ALSA device; "" — not chosen) and how loud */
+  music: { output: string; volume: number; speaker: { on: boolean; name: string; server: string } };
   /** Which modules are on (`modules.ts`); null — not decided yet: a server from before modules, until its first start */
   modules: ModuleSwitches | null;
 }
@@ -260,7 +264,8 @@ const DEFAULTS: Settings = {
   update: { channel: "stable", auto: false, time: "05:00" },
   trash: { days: 30 },
   modules: null,
-  tv: { folders: [], audioChosen: false },
+  tv: { folders: [], audioChosen: false, offsets: {}, volume: null, speaker: false, before: "" },
+  music: { output: "", volume: 60, speaker: { on: false, name: "", server: "" } },
 };
 
 /** A host name with at least two labels: letters, digits and hyphens */
@@ -300,7 +305,23 @@ export const settings: Settings = {
   favorites: isPlainObject(saved.favorites) ? Object.fromEntries(Object.entries(saved.favorites).map(([id, list]) => [id, Array.isArray(list) ? list.filter((one): one is Favorite => isPlainObject(one) && typeof one.path === "string").map((one) => ({ path: one.path, dir: one.dir !== false })) : []])) : {},
   shares: cleanShares(saved.shares),
   modules: isPlainObject(saved.modules) ? cleanModules(saved.modules) : null,
-  tv: { folders: cleanFolders(isPlainObject(saved.tv) ? saved.tv.folders : []), audioChosen: isPlainObject(saved.tv) && saved.tv.audioChosen === true },
+  tv: {
+    folders: cleanFolders(isPlainObject(saved.tv) ? saved.tv.folders : []),
+    audioChosen: isPlainObject(saved.tv) && saved.tv.audioChosen === true,
+    volume: isPlainObject(saved.tv) && typeof saved.tv.volume === "number" && Number.isInteger(saved.tv.volume) && saved.tv.volume >= 0 && saved.tv.volume <= 100 ? saved.tv.volume : null,
+    speaker: isPlainObject(saved.tv) && saved.tv.speaker === true,
+    before: isPlainObject(saved.tv) && typeof saved.tv.before === "string" && saved.tv.before.length <= 300 ? saved.tv.before : "",
+    offsets: Object.fromEntries(Object.entries(isPlainObject(saved.tv) && isPlainObject(saved.tv.offsets) ? saved.tv.offsets : {}).filter(([key, value]) => key.length <= 300 && typeof value === "number" && Math.abs(value) <= 2).slice(0, 50)) as Record<string, number>,
+  },
+  music: {
+    output: isPlainObject(saved.music) && typeof saved.music.output === "string" && /^[\w:=,.-]{1,120}$/.test(saved.music.output) ? saved.music.output : "",
+    volume: isPlainObject(saved.music) && Number.isInteger(saved.music.volume) && saved.music.volume >= 0 && saved.music.volume <= 100 ? saved.music.volume : 60,
+    speaker: {
+      on: isPlainObject(saved.music) && isPlainObject(saved.music.speaker) && saved.music.speaker.on === true,
+      name: isPlainObject(saved.music) && isPlainObject(saved.music.speaker) ? cleanSpeakerName(saved.music.speaker.name) : "",
+      server: (isPlainObject(saved.music) && isPlainObject(saved.music.speaker) ? cleanSpeakerServer(saved.music.speaker.server) : "") ?? "",
+    },
+  },
   names: cleanNames(saved.names),
   forwards: cleanForwards(saved.forwards),
   dns: cleanDns(saved.dns),

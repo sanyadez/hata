@@ -2065,3 +2065,45 @@ button.mark:hover { border-color: var(--border-strong); color: var(--text); }
 .sub-row > td:first-child { padding-left: 44px; }
 /* the tabs of a computer, a container, a guest and a Proxmox server say it in words, like every section's */
 :is(#machine-head, #instance-head, #guest-head, #pve-head) .tab > .ico { display: none; }
+
+/* Bluetooth */
+.bt-name { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.bt-name > div { min-width: 0; }
+.bt-battery { display: inline-flex; align-items: center; gap: 6px; }
+.bt-battery.low { color: var(--warn); }
+.bt-found { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; }
+.bt-found-row { display: flex; align-items: center; gap: 12px; min-width: 0; padding: 8px 0; border-top: 1px solid var(--border); }
+.bt-found-row .bt-name { flex: 1; }
+.bt-found-row .btn { flex: none; }
+.bt-signal { display: inline-flex; align-items: flex-end; gap: 2px; height: 14px; flex: none; }
+.bt-signal i { width: 3px; border-radius: 1px; background: var(--border); }
+.bt-signal i:nth-child(1) { height: 4px; }
+.bt-signal i:nth-child(2) { height: 7px; }
+.bt-signal i:nth-child(3) { height: 10px; }
+.bt-signal i:nth-child(4) { height: 14px; }
+.bt-signal.l1 i:nth-child(-n + 1), .bt-signal.l2 i:nth-child(-n + 2), .bt-signal.l3 i:nth-child(-n + 3), .bt-signal.l4 i { background: var(--accent); }
+.bt-looking { display: flex; align-items: center; gap: 8px; }
+.bt-code { display: flex; justify-content: center; gap: 8px; font: 600 34px var(--font-mono); padding: 8px 0; }
+.bt-code span { min-width: 1ch; text-align: center; }
+.bt-code .typed { color: var(--faint); }
+.bt-done { display: flex; align-items: center; gap: 8px; color: var(--ok); }
+
+/* Music */
+.music-page { display: grid; grid-template-columns: minmax(0, 420px) minmax(0, 1fr); gap: 16px; align-items: start; }
+.music-now { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.music-now .grow { min-width: 0; }
+.music-seek { display: flex; align-items: center; gap: 10px; }
+.music-seek .tvr-slider { flex: 1; }
+.music-keys { --main: 60px; display: flex; align-items: center; justify-content: center; gap: 14px; }
+.music-queue { display: grid; grid-template-columns: minmax(0, 1fr); }
+.music-row { display: flex; align-items: center; gap: 8px; min-width: 0; border-top: 1px solid var(--border); }
+.music-pick { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; padding: 8px 4px; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.music-pick .grow { display: grid; min-width: 0; }
+.music-pick:hover { color: var(--accent-text); }
+.music-row.current .music-pick { font-weight: 600; color: var(--accent-text); }
+@media (max-width: 900px) { .music-page { grid-template-columns: minmax(0, 1fr); } }
+.tv-offset { min-width: 12ch; text-align: center; }
+.music-drop { width: min(400px, calc(100vw - 16px)); padding: 12px; }
+.music-drop .music-player { border: 0; box-shadow: none; background: none; padding: 4px; backdrop-filter: none; }
+#music-now + #tv-now:not([hidden]) { margin-left: -2px; }
+.kv-line { display: grid; grid-template-columns: 9em minmax(0, 1fr) auto; align-items: center; gap: 10px; }

@@ -99,7 +99,7 @@ Early development. What works today:
   module that is off shows no page, no setting and runs nothing; turning one on installs nothing on the
   system. One that is in use cannot be turned off — the page says what uses it. A server updated from a
   version before modules keeps on what it uses;
-- one menu on top of every page — Home, Apps, Files, Computers, Hata, Storage, Backups, Network — and each
+- one menu on top of every page — Home, Apps, Files, Computers, Services, Storage, Backups, Network — and each
   section's parts as tabs in its head; Settings holds only how Hata itself behaves (the account, users and
   access, the look, notifications, modules, the assistant, updates), and "Find a setting" finds the rest
   where it lives. Every thing has one place and one address: this server is a computer like the others,
@@ -110,10 +110,17 @@ Early development. What works today:
   button. Any video, music or picture of Files is sent there with "Play on the TV", so is a link; the page
   has the remote (play, pause, seek, volume, the arrows, sound and subtitle tracks, text), the picture's
   resolution and refresh rate, the folders Kodi shows, its language and sound settings; a button in the
-  head of every page says what plays and pauses it. A film goes from the TV to the browser and back from
+  head of every page opens the remote and says what plays. A film goes from the TV to the browser and back from
   the same moment; the browser's own player (FFmpeg, by a button) plays formats a browser cannot, with a
   choice of sound track and subtitles. Air-mouse remotes, a mouse or a keyboard plugged into the server
-  drive the player, and their power button cannot shut the server down;
+  drive the player, and their power button cannot shut the server down. Its sound goes to any output of
+  the server — HDMI, the jack, a USB or a Bluetooth speaker, with the sound moved against the picture where
+  a speaker plays late — and Home Assistant's own Kodi integration can be let in by a switch;
+- music (a module): a second player without a screen — a folder, a file or a radio link on the server's
+  own speakers, with a queue and an output of its own, so the TV plays a film by HDMI while music plays on
+  a speaker. The same speakers can be a player of Music Assistant (Squeezelite, by a button);
+- Bluetooth (a module): keyboards, mice, remotes and speakers found, paired and connected from the page;
+  with a speaker that allows it the volume is the speaker's own, also from the remote's keys;
 - first run creates the administrator — there are no default credentials, and the setup needs a code
   that only the server's console shows; then it walks through the first choices: the server's name, what
   already runs on the computer, where the data and the backups go, a few apps to start with;
@@ -325,7 +332,7 @@ Early development. What works today:
   (Ubuntu with a desktop among the systems), its disk grows when asked. Inside a container that was given
   only part of the user ids (an unprivileged LXC, for one of Proxmox) none of this is offered, and the
   page says why;
-- the section "Hata" — Home Assistant, the cameras and the TV as tabs, each offering what it found on the
+- the section "Services" — Home Assistant, the cameras, the TV, music and Bluetooth as tabs, each offering what it found on the
   home network and a "Connect" button; nothing is installed in the services themselves. Home Assistant servers, by a sign-in or a token: their devices put on Hata's home page next to the
   apps — a light switched, its brightness, a thermostat, a lock that asks first —, who sees them chosen
   per server, members switching only what is on their home page. A server's updates, its backups and its
@@ -438,7 +445,7 @@ in Google Drive or Box.
 | ![Containers and virtual machines of this server, with their limits and where they are stored](screenshots/containers.png) Containers and virtual machines of this server, with their limits and where they are stored | ![A new virtual machine: Ubuntu with a desktop](screenshots/container-new.png) A new virtual machine: Ubuntu with a desktop |
 | ![A virtual machine's page: its screen, limits, snapshots](screenshots/vm-screen.png) A virtual machine's page: its screen, limits, snapshots | ![Their network, places and disc images](screenshots/containers-settings.png) Their network, places and disc images |
 
-### Hata: Home Assistant, cameras, TV
+### Services: Home Assistant, cameras, TV
 
 | | |
 |---|---|
