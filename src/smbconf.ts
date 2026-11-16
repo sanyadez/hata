@@ -209,3 +209,27 @@ export const userMap = (accounts: Account[]): string => "# Written by Hata: its 
 
 /** The names Samba has passwords for, from `pdbedit -L` (`name:uid:full name`) */
 export const parseUsers = (out: string): string[] => out.split("\n").map((line) => line.split(":")[0]!.trim()).filter(Boolean);
+
+/**
+ * The folders whose section differs between two files, or is in the first alone. Samba decides who may
+ * read and write when a device opens a folder, so one that had it open keeps the old rights until it
+ * opens it anew — these are the folders to close for everybody after a change.
+ */
+export function changedShares(before: string | null, after: string): string[] {
+  const sections = (text: string): Map<string, string> => {
+    const out = new Map<string, string>();
+    let name = "";
+    for (const line of text.split("\n")) {
+      const head = /^\[(.+)\]\s*$/.exec(line);
+      if (head) {
+        name = head[1]!;
+        out.set(name, "");
+      } else if (name) out.set(name, out.get(name) + line.trim() + "\n");
+    }
+    out.delete("global");
+    return out;
+  };
+  if (before === null) return [];
+  const [was, now] = [sections(before), sections(after)];
+  return [...was.keys()].filter((name) => was.get(name) !== now.get(name));
+}
