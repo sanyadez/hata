@@ -2188,3 +2188,7 @@ a.kpi:hover { background: var(--surface-2); }
 .top-picture { display: block; width: 100%; height: 100%; }
 .avatar.big { width: 72px; height: 72px; font-size: 28px; }
 .settings .card.avatar-card, .card.avatar-card { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
+
+/* the arranging bar's pictures: undo, YAML, lay out anew */
+.pg-tools { display: flex; align-items: center; gap: 2px; }
+.pg-tools .icon-btn.danger:not(:disabled):hover { background: var(--danger); color: #fff; }

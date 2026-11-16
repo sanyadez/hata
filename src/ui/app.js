@@ -2005,6 +2005,13 @@ const gridReset = () =>
     },
   });
 
+/** Home as YAML from the arranging bar: what was moved and not saved yet would not be in the text, so it is asked about first */
+function gridYaml() {
+  const open = () => (gridCancel(), layoutTextDialog());
+  if (!gridUi.undo.length && !gridUi.gone.size) return open();
+  confirmAction({ title: t("grid.yamlTitle"), lead: t("grid.yamlLead"), label: t("grid.yamlGo"), kind: "primary", iconName: "code", run: async () => open() });
+}
+
 /** Arranging is for a screen as wide as the grid: a narrower one lays Home out by itself */
 const mayArrange = () => isAdmin() && !gridUi.arranging && state.route.view === "home" && !!state.overview && gridColumns() === state.overview.grid.cols;
 
@@ -2012,10 +2019,12 @@ function gridBar() {
   const box = document.getElementById("grid-bar");
   if (!box) return;
   const undo = () => ((gridUi.at = gridUi.undo.pop()), paintGrid());
+  // the bar's rarer actions are pictures with their words on hover, so the two that end arranging stand out
+  const tool = (label, iconName, onclick, disabled = false, kind = "") => h("button", { type: "button", class: "icon-btn " + kind, title: label, "aria-label": label, disabled, onclick }, icon(iconName));
   box.hidden = !gridUi.arranging;
   const head = document.getElementById("home-head");
   if (head) head.hidden = gridUi.arranging;
-  put(box, gridUi.arranging && h("div", { class: "pg-bar" }, h("strong", null, t("grid.arranging")), h("span", { class: "muted small grow" }, t("grid.arrangingHint")), button(t("grid.undo"), { class: "small", disabled: !gridUi.undo.length, onclick: undo }, "refresh"), button(t("grid.reset"), { class: "small danger", onclick: gridReset }, "refresh"), button(t("common.cancel"), { class: "small", onclick: gridCancel }), button(t("grid.done"), { class: "small primary", onclick: gridDone }, "check")));
+  put(box, gridUi.arranging && h("div", { class: "pg-bar" }, h("strong", null, t("grid.arranging")), h("span", { class: "muted small grow" }, t("grid.arrangingHint")), h("div", { class: "pg-tools" }, tool(t("grid.undo"), "undo", undo, !gridUi.undo.length), tool(t("menu.dashboardConfig"), "code", gridYaml), tool(t("grid.reset"), "refresh", gridReset, false, "danger")), button(t("common.cancel"), { class: "small", onclick: gridCancel }), button(t("grid.done"), { class: "small primary", onclick: gridDone }, "check")));
   // the button stays the same element across redraws: one under the pointer keeps its click
   const slot = document.getElementById("grid-edit-slot");
   const offer = mayArrange();

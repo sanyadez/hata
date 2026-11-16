@@ -6012,5 +6012,8 @@
   "account.avatarSaved": "Зображення збережено",
   "account.avatarUnreadable": "Цей браузер не може прочитати файл як зображення.",
   "error.account.avatarTooLarge": "Зображення більше за {max} КБ.",
-  "error.account.avatarNotImage": "Це не зображення JPEG, PNG чи WebP."
+  "error.account.avatarNotImage": "Це не зображення JPEG, PNG чи WebP.",
+  "grid.yamlTitle": "Вийти з упорядкування до YAML?",
+  "grid.yamlLead": "Те, що ви перемістили чи прибрали й не зберегли кнопкою «Готово», пропаде: у тексті Головна така, як збережена.",
+  "grid.yamlGo": "Відкрити YAML"
 }

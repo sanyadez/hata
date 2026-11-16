@@ -6012,5 +6012,8 @@
   "account.avatarSaved": "Picture saved",
   "account.avatarUnreadable": "This browser cannot read that file as a picture.",
   "error.account.avatarTooLarge": "The picture is larger than {max} KB.",
-  "error.account.avatarNotImage": "That is not a JPEG, PNG or WebP picture."
+  "error.account.avatarNotImage": "That is not a JPEG, PNG or WebP picture.",
+  "grid.yamlTitle": "Leave arranging for YAML?",
+  "grid.yamlLead": "What you moved or took off and did not save with “Done” will be dropped: the text shows Home as it is saved.",
+  "grid.yamlGo": "Open YAML"
 }
