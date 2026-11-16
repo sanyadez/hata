@@ -2703,7 +2703,7 @@ function paintHistory() {
     box,
     days.size ? [...days].map(([day, rows]) => h("section", { class: "card pad history-day" }, h("h3", null, day), rows)) : h("p", { class: "card pad muted" }, t(words ? "activity.noMatch" : "activity.none")),
     historyUi.more && h("div", { class: "center-row" }, button(t("activity.older"), { onclick: (e) => ((e.currentTarget.disabled = true), loadHistory(true)) })),
-    !historyUi.more && days.size > 0 && h("p", { class: "muted small center-row" }, t("activity.start")),
+    !historyUi.more && days.size > 0 && h("p", { class: "card pad muted small center-row" }, t("activity.start")),
   );
 }
 

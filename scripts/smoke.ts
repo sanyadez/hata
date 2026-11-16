@@ -8,6 +8,7 @@
  * on the phone, anything that scrolls sideways.
  *
  * The browser is Chrome or Chromium found on the machine (`HATA_CHROME` names one); nothing is installed.
+ * Words written straight on the background fail it too: everything stands on a card.
  * `bun run smoke --shots <folder>` also keeps a picture of every page.
  */
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
@@ -226,6 +227,29 @@ const SIDEWAYS = `(() => {
   return out.slice(0, 8);
 })()`;
 
+/** Words of the page that lie straight on the background: everything is written on a card */
+const BARE = `(() => {
+  const view = document.querySelector("#view");
+  if (!view) return [];
+  // as with a picture behind the page: what the page backs for that case counts as covered
+  document.documentElement.classList.add("has-wallpaper");
+  const out = new Set();
+  const walker = document.createTreeWalker(view, NodeFilter.SHOW_TEXT);
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+    const text = node.textContent.trim();
+    if (text.length < 2 || !node.parentElement.getClientRects().length) continue;
+    let covered = false;
+    let shown = true;
+    for (let el = node.parentElement; el && el !== view; el = el.parentElement) {
+      const style = getComputedStyle(el);
+      if (style.display === "none" || style.visibility === "hidden") shown = false;
+      if (!/^(rgba\\(0, 0, 0, 0\\)|transparent)$/.test(style.backgroundColor)) covered = true;
+    }
+    if (shown && !covered) out.add(text.slice(0, 60));
+  }
+  return [...out].slice(0, 5);
+})()`;
+
 const failures: string[] = [];
 async function walk(label: string, phone: boolean): Promise<void> {
   for (const route of ROUTES) {
@@ -244,6 +268,7 @@ async function walk(label: string, phone: boolean): Promise<void> {
     }
     if (!(await js<boolean>(DRAWN))) found.push("the page is empty");
     if (phone) for (const wide of await js<string[]>(SIDEWAYS)) found.push(`scrolls sideways: ${wide}`);
+    if (!route.startsWith("#/welcome")) for (const words of await js<string[]>(BARE)) found.push(`written outside a card: “${words}”`);
     if (shotsAt) {
       mkdirSync(shotsAt, { recursive: true });
       const picture = await send("Page.captureScreenshot", { format: "png" });
