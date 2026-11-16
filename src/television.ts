@@ -12,7 +12,7 @@ import { AppError, startJob, type Job } from "./apps";
 import { bus } from "./bus";
 import { saveSettings, settings } from "./config";
 import { installCommand, packageManager, PATH, run, runLogged } from "./packages";
-import { advancedXml, builtinPacket, cleanFolders, cleanLink, cleanStart, clickPacket, isLink, keyframeArgs, linkName, mediaOf, OUTSIDE_SUB, probeArgs, prefsOf, prefValue, streamArgs, subsArgs, tracksOf, streamZero, TV_LANGUAGES, type Media, type Pref, type Tracks, helloPacket, KEEP_NO, KEEP_SECONDS, KEEP_WINDOW, KEEP_YES, MATCH_OFF, MATCH_ON, pictureOf, decodePackages, isOurs, playable, portIn, readDisplay, hwdbText, keymapXml, polkitRule, remoteCall, seconds, shortTitle, sourcesXml, takeJson, TV_HOME, TV_HWDB, TV_POLKIT, TV_PORT, TV_UNIT, TV_USER, unitText, type Call, type Display, type Picture } from "./tv";
+import { advancedXml, builtinPacket, cleanFolders, cleanOffset, cleanLink, cleanStart, clickPacket, isLink, keyframeArgs, linkName, mediaOf, OUTSIDE_SUB, probeArgs, prefsOf, prefValue, streamArgs, subsArgs, tracksOf, streamZero, TV_LANGUAGES, type Media, type Pref, type Tracks, helloPacket, KEEP_NO, KEEP_SECONDS, KEEP_WINDOW, KEEP_YES, MATCH_OFF, MATCH_ON, pictureOf, decodePackages, isOurs, playable, portIn, readDisplay, hwdbText, keymapXml, polkitRule, remoteCall, seconds, shortTitle, sourcesXml, takeJson, TV_HOME, TV_HWDB, TV_POLKIT, TV_PORT, TV_UNIT, TV_USER, unitText, type Call, type Display, type Picture } from "./tv";
 
 const USERDATA = join(TV_HOME, ".kodi", "userdata");
 const UNIT_FILE = "/etc/systemd/system/" + TV_UNIT;
@@ -136,7 +136,8 @@ export interface TvReport {
   playing: Playing | null;
   volume: number;
   muted: boolean;
-  audio: { value: string; options: { label: string; value: string }[] } | null;
+  /** `offset`: milliseconds the sound of a film is moved by on this output (below zero — earlier) */
+  audio: { value: string; options: { label: string; value: string }[]; offset: number } | null;
   /** The resolution, the refresh rate and whether the rate follows the film; null while Kodi does not answer */
   picture: Picture | null;
   /** Kodi's own settings the page shows (`PREFS`), by their names there */
@@ -169,7 +170,7 @@ async function nowPlaying(): Promise<{ player: number | null; playing: Playing |
 async function audioChoice(): Promise<TvReport["audio"]> {
   const said = (await rpc({ method: "Settings.GetSettings", params: { level: "expert", filter: { section: "system", category: "audio" } } })) as { settings?: { id: string; value: unknown; options?: { label: string; value: string }[] }[] } | null;
   const device = said?.settings?.find((one) => one.id === "audiooutput.audiodevice");
-  return device ? { value: String(device.value), options: (device.options ?? []).map((o) => ({ label: String(o.label).replace(/[\x00-\x1f]/g, "").replace(/\s+/g, " ").trim(), value: String(o.value) })) } : null;
+  return device ? { offset: Math.round((settings.tv.offsets[String(device.value)] ?? 0) * 1000), value: String(device.value), options: (device.options ?? []).map((o) => ({ label: String(o.label).replace(/[\x00-\x1f]/g, "").replace(/\s+/g, " ").trim(), value: String(o.value) })) } : null;
 }
 
 async function pictureChoice(): Promise<Picture | null> {
@@ -369,6 +370,30 @@ export async function setFolders(raw: unknown, by: string): Promise<TvReport> {
   return tvReport();
 }
 
+/** The sound offset kept for the output in use is given to the film that plays; a film alone has one */
+async function applyOffset(): Promise<void> {
+  const choice = await audioChoice();
+  const offset = choice ? settings.tv.offsets[choice.value] : undefined;
+  if (offset === undefined) return;
+  const { player } = await nowPlaying();
+  if (player === 1) await rpc({ method: "Player.SetAudioDelay", params: { playerid: 1, offset } });
+}
+
+/**
+ * Moves the sound of films against the picture on the output in use — a Bluetooth speaker plays a
+ * little late. Kept per output, given to every film as it starts.
+ */
+export async function setOffset(raw: unknown): Promise<TvReport> {
+  const offset = cleanOffset(raw);
+  const choice = await audioChoice();
+  if (!choice) throw new AppError("tv.notRunning", 409);
+  if (offset === null) throw new AppError("tv.badSetting", 400);
+  settings.tv.offsets[choice.value] = offset;
+  saveSettings();
+  await applyOffset().catch(() => {});
+  return tvReport();
+}
+
 export async function setAudio(value: unknown): Promise<TvReport> {
   const choice = await audioChoice();
   if (!choice) throw new AppError("tv.notRunning", 409);
@@ -376,6 +401,7 @@ export async function setAudio(value: unknown): Promise<TvReport> {
   await rpc({ method: "Settings.SetSettingValue", params: { setting: "audiooutput.audiodevice", value } });
   settings.tv.audioChosen = true;
   saveSettings();
+  await applyOffset().catch(() => {});
   return tvReport();
 }
 
@@ -592,6 +618,8 @@ export function watchTv(): void {
       const taken = takeJson(buffer + piece.toString("utf8"));
       buffer = taken.rest.slice(-65536);
       if ((taken.values as { method?: unknown }[]).some((value) => typeof value?.method === "string" && value.method.startsWith("Player."))) refresh();
+      // a film has begun: its sound is moved as the output in use needs
+      if ((taken.values as { method?: unknown }[]).some((value) => value?.method === "Player.OnAVStart")) void applyOffset().catch(() => {});
     });
     socket.once("error", () => {});
     socket.once("close", () => {

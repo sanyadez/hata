@@ -114,7 +114,7 @@ import { moduleOn, modulesOn, modulesReport, setModule, settleModules, startModu
 import { findForModules } from "./modulefinds";
 import { bluetoothReport, connectDevice as connectBluetooth, disconnectDevice as disconnectBluetooth, endPairing as endBluetoothPairing, forgetDevice as forgetBluetooth, lookAround as lookForBluetooth, pair as pairBluetooth, setPower as setBluetoothPower, startService as startBluetoothService } from "./bluetooth";
 import { musicDo, musicNow, musicReport, playMusic, setMusicOutput, setSpeaker } from "./music";
-import { installTv, playOnTv, remote as tvRemote, keepPicture as keepTvPicture, mediaInfo as tvMediaInfo, streamsHere as tvStreamsHere, mediaStream as tvMediaStream, mediaSubs as tvMediaSubs, setLanguage as setTvLanguage, setPref as setTvPref, setAudio as setTvAudio, setFolders as setTvFolders, setPicture as setTvPicture, switchTv, tvNow, tvReport } from "./television";
+import { installTv, playOnTv, remote as tvRemote, keepPicture as keepTvPicture, mediaInfo as tvMediaInfo, streamsHere as tvStreamsHere, mediaStream as tvMediaStream, mediaSubs as tvMediaSubs, setLanguage as setTvLanguage, setPref as setTvPref, setAudio as setTvAudio, setOffset as setTvOffset, setFolders as setTvFolders, setPicture as setTvPicture, switchTv, tvNow, tvReport } from "./television";
 import { moduleOfPath, moduleOfTool } from "./modules";
 import { serverTree } from "./servertree";
 import { homeLinks, localNamesStatus, refreshLocalNames } from "./mdns";
@@ -1573,6 +1573,7 @@ async function api(req: Request, url: URL, server: Server<unknown>): Promise<Res
     if ("on" in data) return json(await switchTv(data.on === true, user.name));
     if ("folders" in data) return json(await setTvFolders(data.folders, user.name));
     if ("audio" in data) return json(await setTvAudio(data.audio));
+    if ("offset" in data) return json(await setTvOffset(data.offset));
     if ("resolution" in data || "rate" in data || "match" in data) return json(await setTvPicture(data, user.name));
     if ("language" in data) return json(await setTvLanguage(data.language, user.name));
     if ("setting" in data) return json(await setTvPref(data.setting, data.value, user.name));

@@ -5833,5 +5833,12 @@
   "error.music.speakerMissing": "Squeezelite не встановлено.",
   "activity.music.speakerOn": "Колонку для Music Assistant увімкнено",
   "activity.music.speakerOff": "Колонку для Music Assistant вимкнено",
-  "error.music.outputBusy": "Вихід зайнятий іншим програвачем ({who}). Зупиніть те, що там грає, або оберіть інший вихід."
+  "error.music.outputBusy": "Вихід зайнятий іншим програвачем ({who}). Зупиніть те, що там грає, або оберіть інший вихід.",
+  "tv.offset": "Звук відносно картинки",
+  "tv.offsetHint": "Bluetooth-колонка грає трохи із запізненням. Якщо губи рухаються раніше за слова — зсуньте звук раніше. Зберігається для кожного виходу, діє на всі фільми.",
+  "tv.offsetEarlier": "Звук раніше на 25 мс",
+  "tv.offsetLater": "Звук пізніше на 25 мс",
+  "tv.offsetBefore": "на {ms} мс раніше",
+  "tv.offsetAfter": "на {ms} мс пізніше",
+  "tv.offsetNone": "без зсуву"
 }

@@ -33,6 +33,15 @@ export function monitorName(edid: Uint8Array): string {
   return "";
 }
 
+/**
+ * How much earlier (below zero) or later the sound of a film goes than its picture, in milliseconds as
+ * the page gives it → in seconds as Kodi takes it: steps of 25 ms, two seconds either way; null — not that.
+ */
+export function cleanOffset(raw: unknown): number | null {
+  if (typeof raw !== "number" || !isFinite(raw) || Math.abs(raw) > 2000) return null;
+  return (Math.round(raw / 25) * 25) / 1000;
+}
+
 /** Whether the monitor announces sound: the "basic audio" bit of its CTA extension block */
 export function monitorAudio(edid: Uint8Array): boolean {
   for (let at = 128; at + 128 <= edid.length; at += 128) if (edid[at] === 2 && (edid[at + 3]! & 0x40) !== 0) return true;

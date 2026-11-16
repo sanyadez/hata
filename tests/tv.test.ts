@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { cleanOffset } from "../src/tv";
 import { cleanLink, isLink, linkName, probeArgs, sourceArgs, streamZero, cleanStart, keyframeArgs, mediaOf, prefsOf, prefValue, streamArgs, subsArgs, tracksOf, clickPacket, helloPacket, KEEP_WINDOW, KEEP_YES, pictureOf, advancedXml, cleanFolders, shortTitle, hwdbText, keymapXml, polkitRule, decodePackages, isOurs, monitorAudio, monitorName, playable, portIn, readDisplay, remoteCall, seconds, sourcesXml, takeJson, unitText } from "../src/tv";
 
 function edid(name: string, audio: boolean): Uint8Array {
@@ -248,4 +249,12 @@ test("a film that comes in several sizes: the largest picture and the sound that
   expect(mediaOf({ streams, programs: [{ streams }] }).audio.map((one) => one.index)).toEqual([0, 1, 2]);
   // a cover picture in front of the film is not the film
   expect(mediaOf({ streams: [{ codec_type: "video", codec_name: "mjpeg", width: 3000, height: 3000, disposition: { attached_pic: 1 } }, stream(1, "video", { width: 640, height: 360 })] }).video?.n).toBe(1);
+});
+
+test("the sound offset: steps of 25 ms, two seconds either way", () => {
+  expect(cleanOffset(-160)).toBe(-0.15);
+  expect(cleanOffset(0)).toBe(0);
+  expect(cleanOffset(2000)).toBe(2);
+  expect(cleanOffset(2500)).toBeNull();
+  expect(cleanOffset("100")).toBeNull();
 });

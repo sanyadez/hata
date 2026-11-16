@@ -13961,6 +13961,7 @@ function paintTv() {
     { class: "card pad stack" },
     h("div", { class: "section-head" }, h("h2", null, t("tv.sound"))),
     settingRow(t("tv.audio"), t("tv.audioHint"), h("select", { onchange: (e) => void change({ audio: e.target.value }) }, tv.audio.options.map((o) => h("option", { value: o.value, selected: o.value === tv.audio.value }, o.label)))),
+    settingRow(t("tv.offset"), t("tv.offsetHint"), h("div", { class: "row-actions" }, button("", { class: "small", title: t("tv.offsetEarlier"), "aria-label": t("tv.offsetEarlier"), disabled: tv.audio.offset <= -2000, onclick: () => void change({ offset: tv.audio.offset - 25 }) }, "previous"), h("span", { class: "mono tv-offset" }, t(tv.audio.offset < 0 ? "tv.offsetBefore" : tv.audio.offset > 0 ? "tv.offsetAfter" : "tv.offsetNone", { ms: Math.abs(tv.audio.offset) })), button("", { class: "small", title: t("tv.offsetLater"), "aria-label": t("tv.offsetLater"), disabled: tv.audio.offset >= 2000, onclick: () => void change({ offset: tv.audio.offset + 25 }) }, "next"))),
     listed("audiooutput.channels", t("tv.channels"), t("tv.channelsHint")),
     flag("audiooutput.passthrough", t("tv.passthrough"), t("tv.passthroughHint")),
     flag("audiooutput.guisoundmode", t("tv.menuSounds"), null),

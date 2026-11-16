@@ -5833,5 +5833,12 @@
   "error.music.speakerMissing": "Squeezelite is not installed.",
   "activity.music.speakerOn": "Speaker for Music Assistant turned on",
   "activity.music.speakerOff": "Speaker for Music Assistant turned off",
-  "error.music.outputBusy": "The output is taken by another player ({who}). Stop what plays there, or choose another output."
+  "error.music.outputBusy": "The output is taken by another player ({who}). Stop what plays there, or choose another output.",
+  "tv.offset": "Sound against the picture",
+  "tv.offsetHint": "A Bluetooth speaker plays a little late. If lips move before the words, move the sound earlier. Kept for each output, used for every film.",
+  "tv.offsetEarlier": "Sound earlier by 25 ms",
+  "tv.offsetLater": "Sound later by 25 ms",
+  "tv.offsetBefore": "{ms} ms earlier",
+  "tv.offsetAfter": "{ms} ms later",
+  "tv.offsetNone": "as it is"
 }

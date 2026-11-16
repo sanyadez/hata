@@ -136,7 +136,8 @@ export interface Settings {
   /** How many days what is deleted in the file manager stays in the trash */
   trash: { days: number };
   /** The media player on the server's screen (`tv.ts`): the folders it shows; whether its sound output was chosen */
-  tv: { folders: string[]; audioChosen: boolean };
+  /** `offsets`: the sound output (Kodi's own name of it) → seconds its sound is moved by against the picture */
+  tv: { folders: string[]; audioChosen: boolean; offsets: Record<string, number> };
   /** The music player: where its sound goes (an ALSA device; "" — not chosen) and how loud */
   music: { output: string; volume: number; speaker: { on: boolean; name: string; server: string } };
   /** Which modules are on (`modules.ts`); null — not decided yet: a server from before modules, until its first start */
@@ -263,7 +264,7 @@ const DEFAULTS: Settings = {
   update: { channel: "stable", auto: false, time: "05:00" },
   trash: { days: 30 },
   modules: null,
-  tv: { folders: [], audioChosen: false },
+  tv: { folders: [], audioChosen: false, offsets: {} },
   music: { output: "", volume: 60, speaker: { on: false, name: "", server: "" } },
 };
 
@@ -304,7 +305,11 @@ export const settings: Settings = {
   favorites: isPlainObject(saved.favorites) ? Object.fromEntries(Object.entries(saved.favorites).map(([id, list]) => [id, Array.isArray(list) ? list.filter((one): one is Favorite => isPlainObject(one) && typeof one.path === "string").map((one) => ({ path: one.path, dir: one.dir !== false })) : []])) : {},
   shares: cleanShares(saved.shares),
   modules: isPlainObject(saved.modules) ? cleanModules(saved.modules) : null,
-  tv: { folders: cleanFolders(isPlainObject(saved.tv) ? saved.tv.folders : []), audioChosen: isPlainObject(saved.tv) && saved.tv.audioChosen === true },
+  tv: {
+    folders: cleanFolders(isPlainObject(saved.tv) ? saved.tv.folders : []),
+    audioChosen: isPlainObject(saved.tv) && saved.tv.audioChosen === true,
+    offsets: Object.fromEntries(Object.entries(isPlainObject(saved.tv) && isPlainObject(saved.tv.offsets) ? saved.tv.offsets : {}).filter(([key, value]) => key.length <= 300 && typeof value === "number" && Math.abs(value) <= 2).slice(0, 50)) as Record<string, number>,
+  },
   music: {
     output: isPlainObject(saved.music) && typeof saved.music.output === "string" && /^[\w:=,.-]{1,120}$/.test(saved.music.output) ? saved.music.output : "",
     volume: isPlainObject(saved.music) && Number.isInteger(saved.music.volume) && saved.music.volume >= 0 && saved.music.volume <= 100 ? saved.music.volume : 60,
