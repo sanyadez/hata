@@ -10,7 +10,7 @@ import { hostname } from "node:os";
 import { resolve } from "node:path";
 import { record } from "./activity";
 import { AppError } from "./apps";
-import { speakers } from "./bluetooth";
+import { setSpeakerVolume, speakers, speakerVolume } from "./bluetooth";
 import { bus } from "./bus";
 import { saveSettings, settings } from "./config";
 import { installCommand, PATH, run } from "./packages";
@@ -59,6 +59,12 @@ function heldBy(output: string): string {
   const name = pid ? text(`/proc/${pid}/comm`).trim() : "";
   return name === "mpv" ? "" : name.replace(/\.bin$/, "");
 }
+
+/** The Bluetooth speaker an output is, when its own volume can be set: then that is the volume, and the player plays at full */
+const ownVolumeOf = (output: string): string => {
+  const address = /^bluealsa:DEV=([0-9A-F:]{17}),/.exec(output)?.[1] ?? "";
+  return address && speakerVolume(address) !== null ? address : "";
+};
 
 let sock: Socket | null = null;
 let linking: Promise<boolean> | null = null;
@@ -148,6 +154,8 @@ export interface MusicReport {
   now: NowPlaying | null;
   queue: QueueItem[];
   volume: number;
+  /** Whose volume that is: the speaker's own (a Bluetooth speaker that lets it be set) or the player's */
+  volumeOf: "speaker" | "player";
   muted: boolean;
   /** Where the sound goes: an id of `outputs`; "" — this server has nothing that plays sound */
   output: string;
@@ -226,10 +234,11 @@ export const afterSpeakerRemoved = (): Promise<unknown> => run(["systemctl", "un
 
 export async function musicReport(): Promise<MusicReport> {
   const outputs = await soundOutputs();
-  const base: MusicReport = { state: musicInstalled() ? "ready" : "missing", install: installCommand("mpv"), running: false, now: null, queue: [], volume: settings.music.volume, muted: false, output: outputFor(settings.music.output, outputs), outputs, speaker: await speakerReport() };
+  const speaker = ownVolumeOf(outputFor(settings.music.output, outputs));
+  const base: MusicReport = { state: musicInstalled() ? "ready" : "missing", install: installCommand("mpv"), running: false, now: null, queue: [], volume: speaker ? speakerVolume(speaker)! : settings.music.volume, volumeOf: speaker ? "speaker" : "player", muted: false, output: outputFor(settings.music.output, outputs), outputs, speaker: await speakerReport() };
   if (base.state === "missing" || !(await link())) return base;
   const [idle, path, title, metadata, position, duration, paused, playlist, volume, muted] = await Promise.all(["idle-active", "path", "media-title", "metadata", "time-pos", "duration", "pause", "playlist", "volume", "mute"].map(get));
-  return { ...base, running: true, now: nowOf({ idle, path, title, metadata, position, duration, paused }), queue: queueOf(playlist), volume: typeof volume === "number" ? Math.round(volume) : base.volume, muted: muted === true };
+  return { ...base, running: true, now: nowOf({ idle, path, title, metadata, position, duration, paused }), queue: queueOf(playlist), volume: speaker || typeof volume !== "number" ? base.volume : Math.round(volume), muted: muted === true };
 }
 
 /** What the head of the page shows while music plays; null — nothing does */
@@ -255,7 +264,7 @@ async function ensure(): Promise<void> {
   if (!sock) throw new AppError("music.setupFailed", 409, { message: "the player did not come up" });
   const output = outputFor(settings.music.output, await soundOutputs());
   if (output) await command(["set_property", "audio-device", "alsa/" + output]).catch(() => {});
-  await command(["set_property", "volume", settings.music.volume]).catch(() => {});
+  await command(["set_property", "volume", ownVolumeOf(output) ? 100 : settings.music.volume]).catch(() => {});
 }
 
 /**
@@ -306,6 +315,12 @@ export async function musicDo(action: unknown, value: unknown): Promise<MusicRep
   const count = Number(await get("playlist-count")) || 0;
   const cmd = musicCommand(action, value, count);
   if (!cmd) throw new AppError("music.badAction", 400);
+  const speaker = action === "volume" && typeof value === "number" ? ownVolumeOf(outputFor(settings.music.output, await soundOutputs())) : "";
+  if (speaker) {
+    await command(["set_property", "volume", 100]).catch(() => {});
+    setSpeakerVolume(speaker, value as number);
+    return musicReport();
+  }
   await command(cmd).catch(() => {});
   if (action === "volume" && typeof value === "number") {
     settings.music.volume = Math.round(value);
@@ -323,6 +338,7 @@ export async function setMusicOutput(id: unknown, by: string): Promise<MusicRepo
   saveSettings();
   if (await link()) {
     await command(["set_property", "audio-device", "alsa/" + output.id]).catch(() => {});
+    await command(["set_property", "volume", ownVolumeOf(output.id) ? 100 : settings.music.volume]).catch(() => {});
     // the player opens the new output when it has something to play: said at once when it cannot
     if ((await get("idle-active")) === false && (await get("pause")) === false) {
       await Bun.sleep(1200);

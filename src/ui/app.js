@@ -412,12 +412,15 @@ function parseRoute() {
   if (parts[0] === "hata" && mayFiles()) return { view: "myhata" };
   if (parts[0] === "activity" && isAdmin()) return { view: "activity" };
   if (parts[0] === "tv" && isAdmin()) return { view: "tv", hash: "#/house/tv" };
+  // Bluetooth lived among this server's tabs at first
+  if (parts[0] === "machines" && parts[1] === "this" && parts[2] === "bluetooth" && isAdmin()) return areaRoute("house", "bluetooth");
   // Hata the house: Home Assistant, the cameras, the TV — each a tab; a torrent client that is nobody's app too
   if ((parts[0] === "house" || parts[0] === "integrations" || (parts[0] === "ha" && !parts[1]) || (parts[0] === "settings" && parts[1] === "integrations")) && isAdmin()) {
     const tab = (parts[0] === "house" && areaTabs("house").find((x) => x.id === parts[1])) || areaTabs("house")[0];
     if (!tab) return { view: "ha", id: "", hash: "#/house" };
     const id = parts[0] === "house" ? (parts[2] ?? "") : "";
     if (tab.view === "music") return { view: "music", hash: "#/house/music" };
+    if (tab.sections) return areaRoute("house", tab.id);
     return tab.view === "tv" ? { view: "tv", hash: "#/house/tv" } : { view: tab.view, id, house: true, hash: tab.hash + (id ? "/" + id : "") };
   }
   // both live in Settings; their own old addresses still lead there
@@ -489,6 +492,7 @@ const AREAS = {
     { id: "cameras", hash: "#/house/cameras", view: "frigate", module: "integrations" },
     { id: "tv", hash: "#/house/tv", view: "tv", module: "tv" },
     { id: "music", hash: "#/house/music", view: "music", module: "music" },
+    { id: "bluetooth", sections: ["bluetooth"] },
     { id: "torrents", hash: "#/house/torrents", view: "qbit", module: "integrations", when: () => foreignTorrents() },
   ],
   network: [
@@ -504,7 +508,6 @@ const AREAS = {
     { id: "docker", sections: ["docker"] },
     { id: "containers", view: "containers", module: "containers" },
     { id: "files", hash: "#/files/", link: true },
-    { id: "bluetooth", sections: ["bluetooth"] },
     { id: "system", sections: ["tools"] },
   ],
   settings: [
@@ -518,7 +521,7 @@ const AREAS = {
     { id: "about", sections: ["about"] },
   ],
 };
-const AREA_BASE = { backups: "#/backups", storage: "#/storage", network: "#/network", server: "#/machines/this", settings: "#/settings" };
+const AREA_BASE = { house: "#/house", backups: "#/backups", storage: "#/storage", network: "#/network", server: "#/machines/this", settings: "#/settings" };
 const tabHash = (area, tab) => tab.hash ?? `${AREA_BASE[area]}/${tab.id}`;
 /** Whether this person may open the tab at all, and whether it stands among the tabs: one of a module that is off does not */
 const tabAllowed = (tab) => (tab.sections ? SECTIONS.some((item) => item.id === tab.sections[0] && (!item.admin || isAdmin())) : (!tab.admin || isAdmin()) && state.user?.role !== "guest");
@@ -1055,7 +1058,7 @@ const NAV = [
   { view: "apps", hash: "#/apps", icon: "grid", guest: false },
   { view: "files", hash: "#/files", icon: "folder", files: true },
   { view: "machines", hash: "#/machines", icon: "server", admin: true },
-  { view: "house", hash: "#/house", icon: "bulb", admin: true, modules: ["integrations", "tv", "music"] },
+  { view: "house", hash: "#/house", icon: "bulb", admin: true, modules: ["integrations", "tv", "music", "bluetooth"] },
   { view: "storage", hash: "#/storage", icon: "disk", admin: true },
   { view: "backups", hash: "#/backups", icon: "archive", admin: true },
   { view: "network", hash: "#/network", icon: "network", admin: true },
@@ -13730,6 +13733,7 @@ function paintMusic() {
     seek && h("div", { class: "music-seek" }, h("span", { class: "muted small mono" }, tvClock(now.position)), seek, h("span", { class: "muted small mono" }, tvClock(now.duration))),
     h("div", { class: "music-keys" }, round("previous", "previous"), h("button", { type: "button", class: "tvr-main", title: t("music.key.playpause"), "aria-label": t("music.key.playpause"), disabled: !now, onclick: () => press("playpause") }, icon(now && !now.paused ? "pause" : "play")), round("next", "next"), round("stop", "stop")),
     h("div", { class: "tvr-volume" }, h("button", { type: "button", class: "icon-btn", title: t("music.key.mute"), "aria-label": t("music.key.mute"), disabled: !m.running, onclick: () => press("mute", !m.muted) }, icon(m.muted ? "volumeOff" : "volume")), volume, h("span", { class: "muted small mono" }, m.volume)),
+    m.volumeOf === "speaker" && h("p", { class: "muted small" }, t("music.volumeSpeaker")),
     settingRow(t("music.output"), t("music.outputHint"), output),
     error,
   );
@@ -14070,9 +14074,9 @@ function tvKeepDialog() {
 const MODULE_ICONS = { music: "music", bluetooth: "bluetooth", tv: "tv", raid: "shield", netplaces: "network", shares: "share", offsite: "archive", remote: "globe", dns: "signpost", adblock: "ban", domains: "plug", machines: "server", proxmox: "server", containers: "box", integrations: "link", assistant: "chat" };
 const MODULE_GROUPS = ["storage", "network", "servers", "more"];
 /** Where a module's own things are once it is on */
-const MODULE_HOME = { music: "#/house/music", bluetooth: "#/machines/this/bluetooth", tv: "#/house/tv", raid: "#/settings/protection", netplaces: "#/settings/places", shares: "#/settings/shares", offsite: "#/settings/backups", remote: "#/settings/remote", dns: "#/settings/dns", adblock: "#/settings/adblock", domains: "#/settings/ports", machines: "#/machines", proxmox: "#/machines", containers: "#/containers", integrations: "#/settings/integrations", assistant: "#/settings/assistant" };
+const MODULE_HOME = { music: "#/house/music", bluetooth: "#/house/bluetooth", tv: "#/house/tv", raid: "#/settings/protection", netplaces: "#/settings/places", shares: "#/settings/shares", offsite: "#/settings/backups", remote: "#/settings/remote", dns: "#/settings/dns", adblock: "#/settings/adblock", domains: "#/settings/ports", machines: "#/machines", proxmox: "#/machines", containers: "#/containers", integrations: "#/settings/integrations", assistant: "#/settings/assistant" };
 /** Where the thing that holds a module on is taken away */
-const MODULE_USE_AT = { speaker: "#/house/music", bluetooth: "#/machines/this/bluetooth", tv: "#/tv", array: "#/settings/protection", merged: "#/settings/storage", pools: "#/settings/protection", places: "#/settings/places", shares: "#/settings/shares", offsite: "#/settings/backups", wireguard: "#/settings/remote", tailscale: "#/settings/remote", dnsOn: "#/settings/dns", blocking: "#/settings/adblock", names: "#/settings/https", ports: "#/settings/ports", machines: "#/machines", proxmox: "#/machines", containers: "#/containers", homeAssistant: "#/settings/integrations", qbit: "#/settings/integrations", frigate: "#/settings/integrations", keys: "#/settings/agents" };
+const MODULE_USE_AT = { speaker: "#/house/music", bluetooth: "#/house/bluetooth", tv: "#/tv", array: "#/settings/protection", merged: "#/settings/storage", pools: "#/settings/protection", places: "#/settings/places", shares: "#/settings/shares", offsite: "#/settings/backups", wireguard: "#/settings/remote", tailscale: "#/settings/remote", dnsOn: "#/settings/dns", blocking: "#/settings/adblock", names: "#/settings/https", ports: "#/settings/ports", machines: "#/machines", proxmox: "#/machines", containers: "#/containers", homeAssistant: "#/settings/integrations", qbit: "#/settings/integrations", frigate: "#/settings/integrations", keys: "#/settings/agents" };
 const moduleName = (id) => t(`modules.${id}.name`);
 
 /** Which modules are on, asked again: after a change made here or on another page */

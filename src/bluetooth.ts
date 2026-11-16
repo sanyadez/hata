@@ -59,6 +59,8 @@ function heard(message: Message): void {
     Object.assign(kept, second);
     if (Array.isArray(third)) for (const name of third) delete kept[String(name)];
   } else return;
+  // a speaker that has begun to play takes the volume that waited for it
+  if (wanted.size && message.path?.includes("/dev_")) for (const address of wanted.keys()) giveVolume(address);
   changed();
 }
 
@@ -405,6 +407,47 @@ export async function soundAfterInstall(): Promise<void> {
   // BlueZ learns of the new sound profiles when the service registers them; a moment is enough
   await Bun.sleep(1000);
   changed();
+}
+
+const TRANSPORT = "org.bluez.MediaTransport1";
+/** The volume a speaker is to get once its sound runs: it takes none while it is silent */
+const wanted = new Map<string, number>();
+
+/** The sound channel BlueZ holds to a speaker: there while it is connected */
+function transportOf(address: string): { path: string; props: Record<string, unknown> } | null {
+  const device = pathOf(objects, address);
+  if (!device) return null;
+  const path = Object.keys(objects).find((one) => one.startsWith(device + "/") && objects[one]![TRANSPORT]);
+  return path ? { path, props: objects[path]![TRANSPORT]! } : null;
+}
+
+/** A speaker's own volume in percent; null — it is not connected, or its volume cannot be set from here */
+export function speakerVolume(address: string): number | null {
+  const volume = wanted.get(address) ?? transportOf(address)?.props.Volume;
+  return typeof volume === "number" ? Math.round((volume * 100) / 127) : null;
+}
+
+function giveVolume(address: string): void {
+  const value = wanted.get(address);
+  const transport = transportOf(address);
+  if (value === undefined || !transport || transport.props.State !== "active" || !conn?.open) return;
+  wanted.delete(address);
+  transport.props.Volume = value;
+  void setProp(conn, transport.path, TRANSPORT, "Volume", variant("q", value)).catch(() => {});
+}
+
+/** Sets a speaker's own volume (what its buttons change); false — this speaker has none to set */
+export function setSpeakerVolume(address: string, percent: number): boolean {
+  if (typeof transportOf(address)?.props.Volume !== "number") return false;
+  wanted.set(address, Math.round((Math.min(100, Math.max(0, percent)) * 127) / 100));
+  giveVolume(address);
+  changed();
+  return true;
+}
+
+/** The speaker a program reaches when it plays to "Bluetooth Audio" without naming one; "" — none is connected */
+export function playingSpeaker(): string {
+  return devicesOf(objects).devices.find((one) => one.connected && one.audio && transportOf(one.address))?.address ?? "";
 }
 
 /** How many devices are paired with this server, by what BlueZ keeps on the disk: known without asking it */
