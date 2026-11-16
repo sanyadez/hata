@@ -7,7 +7,7 @@
  * - Sessions are cookies; only the SHA-256 of a session token is stored, so a leaked state file does not
  *   give anyone a working session.
  */
-import { chmodSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { DATA_DIR, SECRETS_DIR } from "./config";
 import { readJsonFile, writeJsonAtomic } from "./fsutil";
@@ -50,6 +50,28 @@ export interface User {
   passkeys?: StoredPasskey[];
   /** Kept out of the network folders: two-factor sign-in does not reach SMB, so an administrator may say no */
   noShares?: true;
+  /** The picture the person chose for themselves: its kind and when it was put, so the page asks for the new one */
+  avatar?: { kind: AvatarKind; stamp: number };
+}
+
+export type AvatarKind = "jpg" | "png" | "webp";
+/** A person's picture is a small square the page made; anything larger is not one */
+export const MAX_AVATAR = 512 * 1024;
+const AVATARS_DIR = join(DATA_DIR, "avatars");
+export const avatarPath = (id: string): string => join(AVATARS_DIR, id);
+
+/** Puts the person's picture in place (the bytes are checked by the caller) */
+export async function setAvatar(user: User, kind: AvatarKind, bytes: Uint8Array): Promise<void> {
+  mkdirSync(AVATARS_DIR, { recursive: true });
+  await Bun.write(avatarPath(user.id), bytes);
+  user.avatar = { kind, stamp: Date.now() };
+  saveUsers();
+}
+
+export function dropAvatar(user: User): void {
+  rmSync(avatarPath(user.id), { force: true });
+  delete user.avatar;
+  saveUsers();
 }
 
 interface Session {
@@ -256,7 +278,7 @@ export function clearSessionCookie(domain?: string): string {
   return `${COOKIE_NAME}=; HttpOnly; Path=/; SameSite=Lax; Max-Age=0${domain ? "; Domain=" + domain : ""}`;
 }
 
-export const publicUser = (u: User) => ({ id: u.id, name: u.name, role: u.role, twoFactor: !!u.totp, passkeys: u.passkeys?.length ?? 0 });
+export const publicUser = (u: User) => ({ id: u.id, name: u.name, role: u.role, twoFactor: !!u.totp, passkeys: u.passkeys?.length ?? 0, avatar: u.avatar?.stamp ?? 0 });
 
 // --- Users ------------------------------------------------------------------------------------------
 
@@ -278,6 +300,8 @@ export interface UserInfo {
   sessions: number;
   /** May open the network folders (SMB) */
   shares: boolean;
+  /** When their picture was put; 0 — none */
+  avatar: number;
 }
 
 export function listUsers(): UserInfo[] {
@@ -291,6 +315,7 @@ export function listUsers(): UserInfo[] {
     lastSignIn: u.lastSignIn ?? null,
     sessions: sessions.filter((s) => s.userId === u.id && s.exp > now).length,
     shares: !u.noShares,
+    avatar: u.avatar?.stamp ?? 0,
   }));
 }
 
@@ -346,6 +371,7 @@ export function deleteUser(id: string, acting: User): string | null {
   if (user.role === "admin" && admins().length === 1) return "users.lastAdmin";
   users.splice(users.indexOf(user), 1);
   saveUsers();
+  rmSync(avatarPath(user.id), { force: true });
   revokeSessions(user);
   peopleChanged();
   return null;

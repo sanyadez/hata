@@ -6003,5 +6003,14 @@
   "attention.load.cpu.text": "{percent}% процесора вже {minutes} хв на {place}.",
   "error.settings.badLoad": "Введіть цілі числа в межах, указаних під полями.",
   "load.sessionsOf": "Сеанси {user} (SSH, термінали)",
-  "load.hostNet": "Окремо не рахується: користується мережею самого сервера"
+  "load.hostNet": "Окремо не рахується: користується мережею самого сервера",
+  "account.avatar": "Зображення",
+  "account.avatarHint": "Видно в шапці сторінки та адміністраторам у списку користувачів. Береться середина зображення у вигляді квадрата.",
+  "account.avatarUpload": "Обрати зображення…",
+  "account.avatarChange": "Обрати інше…",
+  "account.avatarRemove": "Прибрати",
+  "account.avatarSaved": "Зображення збережено",
+  "account.avatarUnreadable": "Цей браузер не може прочитати файл як зображення.",
+  "error.account.avatarTooLarge": "Зображення більше за {max} КБ.",
+  "error.account.avatarNotImage": "Це не зображення JPEG, PNG чи WebP."
 }

@@ -6003,5 +6003,14 @@
   "attention.load.cpu.text": "{percent}% of the processor for {minutes} minutes on {place}.",
   "error.settings.badLoad": "Enter whole numbers within the ranges shown under the fields.",
   "load.sessionsOf": "Sessions of {user} (SSH, terminals)",
-  "load.hostNet": "Not counted apart: it uses the server's own network"
+  "load.hostNet": "Not counted apart: it uses the server's own network",
+  "account.avatar": "Picture",
+  "account.avatarHint": "Shown in the head of the page and to the administrators in the list of users. The middle of the picture is taken as a square.",
+  "account.avatarUpload": "Choose a picture…",
+  "account.avatarChange": "Choose another…",
+  "account.avatarRemove": "Remove",
+  "account.avatarSaved": "Picture saved",
+  "account.avatarUnreadable": "This browser cannot read that file as a picture.",
+  "error.account.avatarTooLarge": "The picture is larger than {max} KB.",
+  "error.account.avatarNotImage": "That is not a JPEG, PNG or WebP picture."
 }

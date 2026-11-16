@@ -1180,7 +1180,7 @@ function navSheet(search = false) {
       isAdmin() && tile("#/terminal", "terminal", t("terminal.title"), state.route.view === "terminal"),
       tile("#/settings", "gear", t("nav.settings"), current === "settings"),
     ),
-    h("button", { type: "button", class: "sheet-user", onclick: (e) => userMenu(e, true) }, h("span", { class: "avatar" }, state.user.name.slice(0, 1).toUpperCase()), h("span", { class: "grow" }, h("strong", null, state.user.name), h("span", { class: "muted small block" }, t("user.role." + state.user.role))), icon("chevron")),
+    h("button", { type: "button", class: "sheet-user", onclick: (e) => userMenu(e, true) }, avatarOf(state.user), h("span", { class: "grow" }, h("strong", null, state.user.name), h("span", { class: "muted small block" }, t("user.role." + state.user.role))), icon("chevron")),
   );
   pullToClose(dialog);
   if (search) field.querySelector("input").focus();
@@ -1199,12 +1199,22 @@ async function signOut() {
   render();
 }
 
+/** A person's circle: their picture when they put one, else the first letter of their name */
+function avatarOf(user, cls = "avatar") {
+  const letter = (user?.name ?? "?").slice(0, 1).toUpperCase();
+  if (!user?.avatar) return h("span", { class: cls }, letter);
+  const img = h("img", { src: `/api/avatars/${user.id}?v=${user.avatar}`, alt: "", draggable: "false" });
+  // a picture that cannot be had (removed meanwhile) falls back to the letter
+  img.onerror = () => img.replaceWith(letter);
+  return h("span", { class: cls + " has-picture" }, img);
+}
+
 function userMenu(e, above = false) {
   let dialog;
   const anchor = e.currentTarget.getBoundingClientRect();
   dialog = openDialog(
     "menu dropdown",
-    h("header", null, h("span", { class: "avatar" }, state.user.name.slice(0, 1).toUpperCase()), h("div", null, h("h2", null, state.user.name), h("span", { class: "muted small" }, t("user.role." + state.user.role)))),
+    h("header", null, avatarOf(state.user), h("div", null, h("h2", null, state.user.name), h("span", { class: "muted small" }, t("user.role." + state.user.role)))),
     h("a", { class: "menu-item", href: "#/settings/account", onclick: () => (dialog.close(), document.querySelector("dialog.nav-sheet")?.close()) }, icon("user"), t("settings.account")),
     isAdmin() && h("button", { type: "button", class: "menu-item", onclick: () => (dialog.close(), serverPowerDialog("reboot")) }, icon("refresh"), t("power.reboot")),
     isAdmin() && h("button", { type: "button", class: "menu-item", onclick: () => (dialog.close(), serverPowerDialog("poweroff")) }, icon("stop"), t("power.poweroff")),
@@ -1341,7 +1351,7 @@ function shell(...content) {
         h("span", { id: "music-now", class: "tv-now", hidden: true }),
         h("span", { id: "tv-now", class: "tv-now", hidden: true }),
         h("a", { class: "top-btn top-gear" + (areaOf() === "settings" ? " active" : ""), href: "#/settings", title: t("nav.settings"), "aria-label": t("nav.settings") }, icon("gear")),
-        h("button", { type: "button", class: "top-btn top-user", title: state.user.name, "aria-label": state.user.name, "aria-haspopup": "menu", onclick: userMenu }, state.user.name.slice(0, 1).toUpperCase()),
+        h("button", { type: "button", class: "top-btn top-user" + (state.user.avatar ? " has-picture" : ""), title: state.user.name, "aria-label": state.user.name, "aria-haspopup": "menu", onclick: userMenu }, state.user.avatar ? avatarOf(state.user, "top-picture") : state.user.name.slice(0, 1).toUpperCase()),
       ),
     ),
     h("main", { id: "view" }, state.user.mustTwoFactor && h("p", { class: "banner" }, t("twofa.mustLead"), " ", h("a", { class: "link", href: "#/settings/account" }, t("twofa.mustGo"))), content),
@@ -21741,6 +21751,81 @@ function passwordPrompt(title, lead, confirmLabel, action, extra = null, kind = 
   password.focus();
 }
 
+const AVATAR_SIDE = 256;
+
+/** A picture the person chose, made into a small square: the middle of it, scaled down in the browser itself */
+async function avatarSquare(file) {
+  const picture = await createImageBitmap(file);
+  const side = Math.min(picture.width, picture.height);
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = Math.min(AVATAR_SIDE, side);
+  canvas.getContext("2d").drawImage(picture, (picture.width - side) / 2, (picture.height - side) / 2, side, side, 0, 0, canvas.width, canvas.height);
+  picture.close();
+  const as = (type) => new Promise((done) => canvas.toBlob(done, type, 0.9));
+  // a browser that cannot write WebP gives PNG back for it
+  return (await as("image/webp")) ?? (await as("image/jpeg"));
+}
+
+/** The person's picture in their account: chosen from the device, taken away */
+function avatarCard() {
+  const error = h("p", { class: "error", role: "alert" });
+  const picker = h("input", { type: "file", accept: "image/*", hidden: true });
+  const keep = (user) => {
+    state.user = { ...state.user, ...user };
+    if (state.account) state.account.user = { ...state.account.user, ...user };
+    render();
+  };
+  picker.onchange = async () => {
+    const file = picker.files?.[0];
+    picker.value = "";
+    if (!file) return;
+    error.textContent = "";
+    try {
+      const square = await avatarSquare(file).catch(() => null);
+      if (!square) throw new Error(t("account.avatarUnreadable"));
+      const res = await fetch("/api/account/avatar", { method: "PUT", headers: { "content-type": square.type }, body: square }).catch(() => {
+        throw new ApiError(0, "network");
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new ApiError(res.status, data.error?.code ?? "request.failed", data.error?.detail);
+      keep(data.user);
+      toast(t("account.avatarSaved"));
+    } catch (err) {
+      error.textContent = err instanceof ApiError ? errorText(err) : err.message;
+    }
+  };
+  const has = !!state.user.avatar;
+  return h(
+    "section",
+    { class: "card pad avatar-card" },
+    avatarOf(state.user, "avatar big"),
+    h(
+      "div",
+      { class: "grow stack-s" },
+      h("h2", null, t("account.avatar")),
+      h("p", { class: "muted small" }, t("account.avatarHint")),
+      error,
+      h(
+        "div",
+        { class: "actions" },
+        picker,
+        button(t(has ? "account.avatarChange" : "account.avatarUpload"), { class: "small", onclick: () => picker.click() }, "upload"),
+        has &&
+          button(t("account.avatarRemove"), {
+            class: "small",
+            onclick: async () => {
+              try {
+                keep((await api("DELETE", "/api/account/avatar")).user);
+              } catch (err) {
+                error.textContent = errorText(err);
+              }
+            },
+          }, "trash"),
+      ),
+    ),
+  );
+}
+
 function accountSection() {
   const account = state.account;
   const sessionsCard = h(
@@ -21770,6 +21855,7 @@ function accountSection() {
   const error = h("p", { class: "error", role: "alert" });
   const twoFactor = account.user.twoFactor;
   return [
+    avatarCard(),
     h(
       "form",
       {
@@ -21944,7 +22030,7 @@ function userMenuFor(user, at = null) {
   const item = (label, iconName, action, cls = "") => h("button", { type: "button", class: "menu-item " + cls, onclick: () => (dialog.close(), action()) }, icon(iconName), label);
   dialog = openDialog(
     at ? "menu dropdown" : "menu",
-    h("header", null, h("span", { class: "avatar" }, user.name.slice(0, 1).toUpperCase()), h("div", null, h("h2", null, user.name), h("span", { class: "muted small" }, t("user.role." + user.role)))),
+    h("header", null, avatarOf(user), h("div", null, h("h2", null, user.name), h("span", { class: "muted small" }, t("user.role." + user.role)))),
     user.role !== "member" && item(t("users.makeMember"), "user", () => (user.role === "admin" ? askRole("member", t("users.makeMember")) : change({ role: "member" }))),
     user.role !== "guest" && item(t("users.makeGuest"), "user", () => (user.role === "admin" ? askRole("guest", t("users.makeGuest")) : change({ role: "guest" }))),
     user.role !== "admin" && item(t("users.makeAdmin"), "sliders", () => askRole("admin", t("users.makeAdmin"))),
@@ -22030,7 +22116,7 @@ function renderUsers() {
             h(
               "tr",
               { menu: (at) => userMenuFor(u, at) },
-              h("td", null, h("div", { class: "with-icon" }, h("span", { class: "avatar" }, u.name.slice(0, 1).toUpperCase()), h("div", null, h("span", { class: "strong" }, u.name), u.id === state.user.id && h("span", { class: "muted small" }, " ", t("users.you")), userShares(u)))),
+              h("td", null, h("div", { class: "with-icon" }, avatarOf(u), h("div", null, h("span", { class: "strong" }, u.name), u.id === state.user.id && h("span", { class: "muted small" }, " ", t("users.you")), userShares(u)))),
               h("td", null, h("span", { class: "chip" + (u.role === "admin" ? " accent" : "") }, t("user.role." + u.role))),
               h("td", null, u.twoFactor ? h("span", { class: "chip ok" }, icon("check"), t("twofa.onShort")) : h("span", { class: "muted" }, t("twofa.offShort"))),
               h("td", null, u.lastSignIn ? ago(u.lastSignIn) : h("span", { class: "muted" }, t("users.never"))),

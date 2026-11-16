@@ -88,6 +88,10 @@ import {
   sessionCookie,
   sessionUser,
   setupToken,
+  avatarPath,
+  dropAvatar,
+  MAX_AVATAR,
+  setAvatar,
 } from "./auth";
 import { bus, type BusEvent } from "./bus";
 import { DATA_DIR, dropOldSecrets, listenAddress, saveSettings, settings, timezone, updateSettings } from "./config";
@@ -407,6 +411,8 @@ export function memberMay(method: string, path: string, role: Role = "member"): 
   // a press on a tile of Home Assistant: whether this one may is `haAllowed`'s to say
   if (method === "POST" && /^\/api\/ha\/[a-f0-9]{8}\/act$/.test(path)) return true;
   if (method !== "GET") return false;
+  // the pictures of the people: the head of every page shows one's own
+  if (/^\/api\/avatars\/[0-9a-f-]{36}$/.test(path)) return true;
   if (["/api/events", "/api/overview", "/api/apps"].includes(path) || /^\/api\/apps\/[a-z0-9_-]+(\/(stats|icon))?$/.test(path)) return true;
   return role === "member" && (path === "/api/store" || /^\/api\/store\/[a-z0-9-]+\/apps\/[a-z0-9_-]+$/.test(path));
 }
@@ -939,6 +945,27 @@ async function api(req: Request, url: URL, server: Server<unknown>): Promise<Res
     if (error) return fail(400, error);
     record("auth.password", { user: user.name });
     return json({ ok: true });
+  }
+  const avatar = /^\/api\/avatars\/([0-9a-f-]{36})$/.exec(path);
+  if (avatar && method === "GET") {
+    const who = findUser(avatar[1]!);
+    const file = who?.avatar ? Bun.file(avatarPath(who.id)) : null;
+    if (!who?.avatar || !file || !(await file.exists())) return fail(404, "request.notFound");
+    return new Response(file, { headers: { ...SECURITY_HEADERS, "content-security-policy": "default-src 'none'; sandbox", "content-type": IMAGE_MIME[who.avatar.kind], "cache-control": "private, max-age=31536000, immutable" } });
+  }
+  // the person's own picture: the page sends a small square it made; the kind is told by the bytes, not the name
+  if (path === "/api/account/avatar" && method === "PUT") {
+    if (!(Number(req.headers.get("content-length")) <= MAX_AVATAR)) return fail(413, "account.avatarTooLarge", { max: MAX_AVATAR / 1024 });
+    const bytes = new Uint8Array(await req.arrayBuffer());
+    if (bytes.length > MAX_AVATAR) return fail(413, "account.avatarTooLarge", { max: MAX_AVATAR / 1024 });
+    const kind = imageType(bytes.subarray(0, 16));
+    if (kind !== "jpg" && kind !== "png" && kind !== "webp") return fail(400, "account.avatarNotImage");
+    await setAvatar(user, kind, bytes);
+    return json({ user: signedIn(user) });
+  }
+  if (path === "/api/account/avatar" && method === "DELETE") {
+    dropAvatar(user);
+    return json({ user: signedIn(user) });
   }
   if (path === "/api/account/sessions/others" && method === "DELETE") {
     revokeSessions(user, req);

@@ -2178,3 +2178,11 @@ a.kpi:hover { background: var(--surface-2); }
 :root:not(.has-wallpaper) :is(#app-head, #machine-head, #pve-head) { padding: 18px 20px 0; }
 #view :is(#app-head, #machine-head, #pve-head, #instance-head, #guest-head) .tabs { margin: 16px -20px 0; padding: 0 20px; box-shadow: inset 0 1px var(--border); }
 #view :is(#instance-head, #guest-head):has(.tabs) { padding-bottom: 0; }
+
+/* A person's picture: the circle keeps its size, the picture fills it */
+.avatar.has-picture, .top-picture { overflow: hidden; background: var(--surface-2); padding: 0; }
+:is(.avatar, .top-picture) img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.top-btn.top-user.has-picture { padding: 0; overflow: hidden; }
+.top-picture { display: block; width: 100%; height: 100%; }
+.avatar.big { width: 72px; height: 72px; font-size: 28px; }
+.settings .card.avatar-card, .card.avatar-card { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
