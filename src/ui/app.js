@@ -3948,14 +3948,11 @@ function incusPlacesCard(d) {
       title: t("incus.place.addTitle"),
       start: "/mnt",
       confirmLabel: t("incus.place.pickHere"),
+      // a refusal stays in the window, where another folder can be chosen at once
       action: async (path) => {
-        try {
-          await api("POST", "/api/containers/places", { path });
-          toast(t("incus.place.added", { path }));
-          await loadContainers();
-        } catch (e) {
-          toast(errorText(e), "error");
-        }
+        await api("POST", "/api/containers/places", { path });
+        toast(t("incus.place.added", { path }));
+        await loadContainers();
       },
     });
   return h(

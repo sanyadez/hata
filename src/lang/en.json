@@ -4248,7 +4248,7 @@
   "error.containers.place.data": "The data folder cannot be used: it is mounted into apps and shared.",
   "error.containers.place.backups": "The backup folder cannot be used.",
   "error.containers.place.taken": "This folder is another storage, or lies inside or around one.",
-  "error.containers.place.fs": "This file system cannot be used: it does not keep file owners (FAT, exFAT, NTFS), or it is a network or merged folder.",
+  "error.containers.place.fs": "This folder is on a file system that cannot hold containers: FAT, exFAT and NTFS keep no owners of files, and network or merged folders do not fit either. Choose a folder on a disk with ext4, btrfs or XFS; a disk is formatted in Storage → Disks.",
   "error.containers.place.notEmpty": "{path} is not empty: choose an empty folder or a new one.",
   "error.containers.place.notFound": "There is no storage {name}.",
   "error.containers.place.isStandard": "{name} is the default storage: make another one the default first.",
