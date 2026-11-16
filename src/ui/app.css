@@ -1684,6 +1684,8 @@ dialog.add-dialog:not([open]) { display: none; }
 .pg.arranging .pg-card { touch-action: none; cursor: grab; }
 .pg.arranging .pg-card > * { pointer-events: none; }
 .pg.arranging .pg-card > .pg-side { pointer-events: auto; }
+/* the × takes the press itself, above the corner's handle; the rest of the card is grabbed whole */
+.pg.arranging .pg-card > .pg-remove { pointer-events: auto; z-index: 5; }
 .pg-side { position: absolute; z-index: 2; touch-action: none; }
 /* with a mouse the handles show on the card under it; a finger has nothing to hover with */
 @media (hover: hover) {

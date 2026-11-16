@@ -1947,6 +1947,8 @@ function cardName(card) {
   if (card.type === "block") return blockTitle(card.id);
   if (card.type === "link") return card.title || linkHost(card.url);
   if (card.type === "files") return card.path.split("/").filter(Boolean).pop() ?? card.path;
+  // what the card itself says: a Home Assistant device by its name, a widget by its own title
+  if (card.type === "ha" || card.type === "widget" || card.type === "builtin") return tileTitle(card);
   const it = tileTarget(card);
   return it?.title ?? it?.name ?? card.name ?? card.entity ?? "";
 }
@@ -2106,7 +2108,8 @@ function gridCard(card, free) {
 
 /** Moving a card by any part of it, or pulling one of its edges and corners */
 function gridStart(e, card, el) {
-  if (e.button !== 0) return;
+  // a press on the × is the ×'s own: it asks, it does not move the card
+  if (e.button !== 0 || e.target.closest(".pg-remove")) return;
   const grip = e.target.closest(".pg-side");
   const pg = document.getElementById("pg");
   const rect = pg.getBoundingClientRect();
