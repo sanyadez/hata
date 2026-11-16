@@ -1312,6 +1312,7 @@ function shell(...content) {
     h("main", { id: "view" }, state.user.mustTwoFactor && h("p", { class: "banner" }, t("twofa.mustLead"), " ", h("a", { class: "link", href: "#/settings/account" }, t("twofa.mustGo"))), content),
     h("nav", { class: "bottom-bar" }, bottomLinks()),
   );
+  paintMusicNow();
   paintTvNow();
 }
 
@@ -13199,7 +13200,7 @@ function paintTvNow() {
   // the chip is the one way to the TV: there while the module is on, also with the player off or not installed yet
   const there = isAdmin() && hasModule("tv");
   box.hidden = !there;
-  box.className = "tv-now" + (tv?.playing ? " playing" : "") + (document.querySelector("dialog.tv-drop[open]") ? " open" : "");
+  box.className = "tv-now" + (tv?.playing && !tv.playing.paused ? " playing" : "") + (document.querySelector("dialog.tv-drop[open]") ? " open" : "");
   if (!there) return box.replaceChildren();
   const now = tv?.playing;
   const label = now ? t("tv.playing", { name: now.title }) : t(tv?.on ? "tv.remote" : "tv.title");
@@ -13626,7 +13627,7 @@ function paintMusicNow() {
   const there = isAdmin() && hasModule("music");
   const now = there ? state.musicNow : null;
   box.hidden = !there;
-  box.className = "tv-now" + (now ? " playing" : "") + (document.querySelector("dialog.music-drop[open]") ? " open" : "");
+  box.className = "tv-now" + (now && !now.paused ? " playing" : "") + (document.querySelector("dialog.music-drop[open]") ? " open" : "");
   if (!there) return box.replaceChildren();
   const label = now ? t("music.playing", { name: now.title }) : t("music.title");
   const halves = [h("button", { type: "button", class: "tv-now-half tv-now-open", title: label, "aria-label": label, "aria-haspopup": "dialog", onclick: () => musicDropdown(box) }, icon("music"))];
