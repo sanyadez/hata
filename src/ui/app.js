@@ -18832,7 +18832,7 @@ function disconnectDialog(mount) {
   dialog = openDialog("confirm", h("h2", null, t(removable ? "mounting.ejectTitle" : "mounting.disconnectTitle", { path: mount.path })), h("p", { class: "muted" }, t(removable ? "mounting.ejectLead" : "mounting.disconnectLead")), what, slot, h("footer", null, closeButton(() => dialog, t("common.cancel")), go));
   // what stands on the folder is said before it is taken away; what keeps files open there is stopped first
   const ICON = { app: "box", tvPlaying: "tv", musicPlaying: "music", tvFolder: "tv", pin: "folder", favorite: "star", share: "share" };
-  const line = (use) => h("li", { class: "disk-use" }, icon(ICON[use.kind]), h("span", { class: "grow" }, h("span", { class: "strong" }, t("disks.use." + use.kind, { name: use.name })), h("span", { class: "muted small mono wrap" }, use.path)));
+  const line = (use) => h("li", { class: "disk-uses-item" }, icon(ICON[use.kind]), h("span", { class: "grow" }, h("span", { class: "strong" }, t("disks.use." + use.kind, { name: use.name })), h("span", { class: "muted small mono wrap" }, use.path)));
   void api("GET", `/api/disks/uses?path=${encodeURIComponent(mount.path)}`).then(
     ({ holds, uses }) => {
       if (!dialog.isConnected) return;
