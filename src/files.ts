@@ -19,7 +19,7 @@ import { chmodSync, chownSync, existsSync, readdirSync, lchownSync, lstatSync, m
 import { lstat, open, readdir, readFile, rm, stat } from "node:fs/promises";
 import { basename, dirname, extname, join, resolve, sep } from "node:path";
 import { record } from "./activity";
-import { AppError, startJob, type Job } from "./apps";
+import { AppError, startJob, stoppable, type Job } from "./apps";
 import { DATA_DIR, saveSettings, SECRETS_DIR, settings, trashDays, type Favorite } from "./config";
 import { movePath } from "./dashboard";
 import { parseMounts } from "./disks";
@@ -513,8 +513,12 @@ export function freeName(dir: string, name: string, taken = (candidate: string) 
 /**
  * Moves or copies entries into the folder `to`. Nothing is overwritten: a name taken there is an
  * error — except for a copy into the same folder, which gets the next free name.
+ *
+ * What can be done at once is: a move within one disk is a rename. A copy, and a move to another
+ * disk, take as long as the files are large — those go on as a job the page shows the progress of
+ * and can stop; the answer is that job, or null when everything is done already.
  */
-export async function transfer(paths: unknown, to: unknown, copy: boolean): Promise<void> {
+export function transfer(paths: unknown, to: unknown, copy: boolean, user: string): Job | null {
   const target = locate(to);
   mustBeDir(target);
   mustWrite(target);
@@ -531,25 +535,65 @@ export async function transfer(paths: unknown, to: unknown, copy: boolean): Prom
     if (st.isDirectory() && inside(realish(dest), realish(from))) throw new AppError("files.intoItself");
     return { from, dest };
   });
-  for (const { from, dest } of plan) {
-    if (copy) await copyTree(from, dest);
-    else {
+  const named = plan.length === 1 ? basename(plan[0]!.from) : `${basename(plan[0]?.from ?? "")} +${plan.length - 1}`;
+  const said = () => record(copy ? "files.copy" : "files.move", { user, detail: `${named} → ${target}` });
+  let long = plan;
+  if (!copy) {
+    long = [];
+    for (const one of plan) {
       try {
-        renameSync(from, dest);
-        repin(from, dest);
-        reshare(from, dest);
+        renameSync(one.from, one.dest);
+        repin(one.from, one.dest);
+        reshare(one.from, one.dest);
       } catch (e) {
         if ((e as NodeJS.ErrnoException).code !== "EXDEV") throw fsError(e);
         // another disk: a copy, then the original is removed
-        await copyTree(from, dest);
-        await rm(from, { recursive: true, force: false }).catch((e2) => {
-          throw fsError(e2);
-        });
-        repin(from, dest);
-        reshare(from, dest);
+        long.push(one);
       }
     }
   }
+  if (!long.length) {
+    if (plan.length) said();
+    return null;
+  }
+  const stopper = new AbortController();
+  // every such job has a name of its own: two copies may run side by side
+  const job = startJob(`files:${crypto.randomUUID().slice(0, 8)}`, copy ? "filecopy" : "filemove", user, async (log) => {
+    const du = Bun.spawn(["du", "-skxc", "--", ...long.map((one) => one.from)], { stdout: "pipe", stderr: "ignore", signal: stopper.signal });
+    const total = (Number(/^(\d+)\s+total$/m.exec(await new Response(du.stdout).text())?.[1]) || 0) * 1024;
+    const room = statfsSync(target);
+    if (total > room.bavail * room.bsize) throw new AppError("files.noSpace", 507);
+    log(`${copy ? "Copying" : "Moving"} ${megabytes(total)} to ${target}`);
+    const before = room.bfree * room.bsize;
+    const tick = setInterval(() => {
+      const now = statfsSync(target);
+      log(`  ${megabytes(Math.min(total, Math.max(0, before - now.bfree * now.bsize)))} of ${megabytes(total)}`);
+    }, 3000);
+    try {
+      for (const { from, dest } of long) {
+        log(`${from} → ${dest}`);
+        const cp = Bun.spawn(["cp", "-a", "--", from, dest], { stdout: "ignore", stderr: "pipe", signal: stopper.signal });
+        const [code, err] = await Promise.all([cp.exited, new Response(cp.stderr).text()]);
+        if (code !== 0) {
+          // half a copy is of no use to anybody; the original is still whole
+          await rm(dest, { recursive: true, force: true }).catch(() => {});
+          if (stopper.signal.aborted) throw new Error("Stopped: what was copied so far is removed, the original is untouched");
+          throw new Error(/No space left/i.test(err) ? "The disk is full" : err.trim().split("\n").pop() || `cp exited with ${code}`);
+        }
+        if (!copy) {
+          await rm(from, { recursive: true, force: false });
+          repin(from, dest);
+          reshare(from, dest);
+        }
+      }
+    } finally {
+      clearInterval(tick);
+    }
+    log(`Done: ${long.length} ${copy ? "copied" : "moved"} to ${target}`);
+    said();
+  }, true, { app: named, machine: "" });
+  stoppable(job, stopper);
+  return job;
 }
 
 /** Entries that are to be sent to another machine: they lie in one folder, which tar is run in */
@@ -639,15 +683,6 @@ export function copyIn(paths: unknown, to: unknown, user: string): Job {
     }
     log(`Done: ${sources.length} copied to ${target}`);
   });
-}
-
-/** The system's `cp -a`: owners, permissions, times and links stay as they are, which the apps depend on */
-async function copyTree(from: string, dest: string): Promise<void> {
-  const proc = Bun.spawn(["cp", "-a", "--", from, dest], { stdout: "ignore", stderr: "pipe" });
-  const [code, err] = await Promise.all([proc.exited, new Response(proc.stderr).text()]);
-  if (code === 0) return;
-  if (/No space left/i.test(err)) throw new AppError("files.noSpace", 507);
-  throw new AppError("files.failed", 500, { code: err.trim().split("\n").pop() || `cp exited with ${code}` });
 }
 
 /**

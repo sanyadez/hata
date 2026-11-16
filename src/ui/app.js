@@ -776,6 +776,11 @@ async function passkeyCreate(password, name) {
   await api("POST", "/api/account/passkeys", { name, clientDataJSON: toB64url(r.clientDataJSON), authenticatorData: toB64url(r.getAuthenticatorData()), publicKey: toB64url(publicKey), alg: r.getPublicKeyAlgorithm() });
 }
 
+/** Something is being asked for: a turning mark, in a card of its own where it stands outside one — never a bare "…" */
+function waitMark() {
+  return h("p", { class: "waiting", role: "status", "aria-label": t("common.loading") }, h("span", { class: "wait-ring" }));
+}
+
 function field(label, input, hint) {
   return h("label", { class: "field" }, h("span", { class: "label" }, label), input, hint && h("span", { class: "hint" }, hint));
 }
@@ -2747,7 +2752,7 @@ async function loadHistory(older = false) {
 function paintHistory() {
   const box = document.getElementById("history");
   if (!box) return;
-  if (!historyUi.loaded) return box.replaceChildren(h("p", { class: "muted" }, "…"));
+  if (!historyUi.loaded) return box.replaceChildren(waitMark());
   // each entry is worded first: the filter looks at what the person reads, in their language
   const words = historyUi.filter.trim().toLowerCase();
   const days = new Map();
@@ -5368,7 +5373,7 @@ function paintFrigateEvents() {
   const x = frigateUi.server;
   if (!box || !x) return;
   const list = frigateUi.events;
-  put(box, !list ? h("p", { class: "muted pad" }, "…") : list.length ? h("div", { class: "camera-events" }, list.map((e) => frigateEventRow(x, e))) : h("p", { class: "muted pad" }, t(frigateUi.camera || frigateUi.label ? "frigate.noneHere" : "frigate.none")));
+  put(box, !list ? waitMark() : list.length ? h("div", { class: "camera-events" }, list.map((e) => frigateEventRow(x, e))) : h("p", { class: "muted pad" }, t(frigateUi.camera || frigateUi.label ? "frigate.noneHere" : "frigate.none")));
 }
 
 function paintFrigate(whole = true) {
@@ -8351,7 +8356,7 @@ const mappUi = { key: "", machine: null, app: null, error: "", timer: 0 };
 function renderMachineApp() {
   const key = `${state.route.name}@${state.route.machine}`;
   if (mappUi.key !== key) Object.assign(mappUi, { key, machine: null, app: null, error: "" });
-  shell(h("div", { id: "mapp-body", class: "stack" }, h("p", { class: "card pad muted" }, "…")));
+  shell(h("div", { id: "mapp-body", class: "stack" }, waitMark()));
   if (mappUi.app) paintMachineApp();
   void loadMachineApp();
   cleanups.push(() => clearTimeout(mappUi.timer));
@@ -9174,7 +9179,9 @@ const storedIds = (store, key) => {
 };
 const remember = (store, key, id) => store.setItem(key, JSON.stringify([...storedIds(store, key).filter((one) => one !== id), id].slice(-40)));
 
-const jobPercent = (p) => (p?.layers ? Math.floor(((p.done ?? 0) / p.layers) * 100) : null);
+const jobPercent = (p) => (p?.total ? Math.min(99, Math.floor(((p.bytes ?? 0) / p.total) * 100)) : p?.layers ? Math.floor(((p.done ?? 0) / p.layers) * 100) : null);
+/** A copy or a move of files going on in the background */
+const isFileJob = (e) => e.kind === "filecopy" || e.kind === "filemove";
 const jobEnded = (e) => e.status !== "running";
 const jobWaits = (e) => e.status === "failed" && !e.stopped;
 
@@ -9247,6 +9254,7 @@ const jobUrl = (e) => {
 function jobSub(e) {
   if (e.status === "running") {
     if (jobsUi.lost) return t("jobs.lost");
+    if (isFileJob(e)) return e.progress?.total ? t("jobs.copied", { done: bytes(e.progress.bytes ?? 0), total: bytes(e.progress.total), pct: jobPercent(e.progress) }) : t("jobs.counting");
     if (e.kind !== "install" || !e.progress?.step) return e.kind === "install" ? t("job.running") : e.last ?? t("job.running");
     const line = `${t("jobs.step." + e.progress.step)} · ${t("jobs.stepOf", { n: JOB_STEPS.indexOf(e.progress.step) + 1, m: JOB_STEPS.length })}`;
     return e.machine ? `${t("jobs.onMachine", { machine: e.machine })} · ${line}` : line;
@@ -9278,7 +9286,10 @@ function jobBars(e) {
 function paintJobBar(bar, e) {
   const { paint } = jobBars(e);
   const parts = [...bar.children];
-  if (e.kind !== "install") return parts[0] && paint(parts[0], jobsUi.lost ? "frozen" : "moving");
+  if (e.kind !== "install") {
+    const pct = jobPercent(e.progress);
+    return parts[0] && paint(parts[0], jobsUi.lost ? "frozen" : pct === null ? "moving" : "known", pct);
+  }
   const at = Math.max(0, JOB_STEPS.indexOf(e.progress?.step ?? "check"));
   parts.forEach((part, i) => {
     if (i < at) return paint(part, "full");
@@ -9323,6 +9334,9 @@ function patchJobs() {
   }
 }
 
+/** A copy or a move ended before its time: what it copied so far goes, the original stays whole */
+const stopFileJob = (e) => api("POST", `/api/jobs/${e.id}/stop`).catch((err) => toast(errorText(err), "error"));
+
 function jobCard(e, row = false) {
   const ended = jobEnded(e);
   const url = e.status === "done" && e.kind === "install" ? jobUrl(e) : null;
@@ -9334,9 +9348,10 @@ function jobCard(e, row = false) {
     { class: `jt-card ${row ? "row" : ""} ${e.status} ${e.stopped ? "stopped" : ""}`, "data-job": e.id },
     h("div", { class: "jt-head" },
       appIcon({ name: e.app, title: jobName(e), icon: e.icon }, row ? "sm" : ""),
-      h("div", { class: "jt-words" }, h("strong", { class: "jt-title" }, jobHeading(e)), h("span", { class: "jt-sub" + (e.kind !== "install" && !ended ? " mono" : "") }, jobSub(e))),
+      h("div", { class: "jt-words" }, h("strong", { class: "jt-title" }, jobHeading(e)), h("span", { class: "jt-sub" + (e.kind !== "install" && !isFileJob(e) && !ended ? " mono" : "") }, jobSub(e))),
       row && (url || page) && h("a", { class: "icon-btn", href: url ?? page, title: t("common.open"), "aria-label": `${t("common.open")}: ${jobName(e)}`, ...(url ? { target: "_blank", rel: "noopener noreferrer" } : {}), onclick: () => closeJob(e.id) }, icon("external")),
       row && signIn && signIn.login.kind !== "none" && h("button", { type: "button", class: "icon-btn", title: t("app.login"), "aria-label": `${t("app.login")}: ${jobName(e)}`, onclick: () => loginDialog(jobName(e), signIn.login, signIn.ask) }, icon("key")),
+      row && !ended && isFileJob(e) && h("button", { type: "button", class: "icon-btn", title: t("jobs.stopFiles"), "aria-label": `${t("jobs.stopFiles")}: ${jobName(e)}`, onclick: () => stopFileJob(e) }, icon("stop")),
       row && h("button", { type: "button", class: "icon-btn", title: t("jobs.showLog"), "aria-label": `${t("jobs.showLog")}: ${jobName(e)}`, onclick: () => jobLog(e) }, icon("logs")),
       ended
         ? h("button", { type: "button", class: "icon-btn", title: t("jobs.dismiss"), "aria-label": `${t("jobs.dismiss")}: ${jobName(e)}`, onclick: () => closeJob(e.id) }, icon("x"))
@@ -9348,6 +9363,7 @@ function jobCard(e, row = false) {
     !row && signIn && h("div", { class: "jt-login" }, signIn.login.kind !== "none" && h("strong", { class: "small" }, t("app.login")), loginBlock(signIn.login, signIn.ask)),
     !row && h("div", { class: "jt-actions" },
       button(t("jobs.showLog"), { class: "small", onclick: () => jobLog(e) }),
+      !ended && isFileJob(e) && button(t("jobs.stopFiles"), { class: "small", onclick: () => stopFileJob(e) }, "stop"),
       notes && button(t("app.notes"), { class: "small", onclick: notes }, "info"),
       (url || page) && h("a", { class: "btn small primary", href: url ?? page, ...(url ? { target: "_blank", rel: "noopener noreferrer" } : {}), onclick: () => closeJob(e.id) }, icon("external"), t("common.open")),
     ),
@@ -9847,7 +9863,7 @@ async function appBackupsTab(app, box) {
 
 function renderBackups() {
   const tab = state.route.tab ?? "overview";
-  shell(...settingsFrame("backups", tab === "overview" && h("section", { class: "stats card", id: "backup-stats" }), h("div", { class: "stack", id: "backup-body" }, h("p", { class: "card pad muted" }, "…"))));
+  shell(...settingsFrame("backups", tab === "overview" && h("section", { class: "stats card", id: "backup-stats" }), h("div", { class: "stack", id: "backup-body" }, waitMark())));
   renderBackupsBody();
   if (tab === "overview") void loadBackupsMore();
   if (tab === "history") void loadBackupHistory();
@@ -9898,7 +9914,7 @@ function renderBackupsBody() {
   );
   if (tab === "history") {
     const list = backupHistory.entries;
-    return put(box, h("section", { class: "card pad" }, h("h2", null, t("area.backups.history")), h("p", { class: "muted small" }, t("backup.historyLead")), !list ? h("p", { class: "muted" }, "…") : list.length ? list.map((e) => activityItem(e, new Date(e.ts).toLocaleString(state.lang, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }))) : h("p", { class: "muted" }, t("activity.none"))));
+    return put(box, h("section", { class: "card pad" }, h("h2", null, t("area.backups.history")), h("p", { class: "muted small" }, t("backup.historyLead")), !list ? waitMark() : list.length ? list.map((e) => activityItem(e, new Date(e.ts).toLocaleString(state.lang, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }))) : h("p", { class: "muted" }, t("activity.none"))));
   }
   if (tab === "offsite") return put(box, offsiteCard(b.offsite)), void (clearTimeout(offsiteTimer), b.offsite.running && (offsiteTimer = setTimeout(() => state.route.view === "backups" && loadBackups(), 3000)));
   if (tab === "schedule") return box.contains(document.activeElement) ? undefined : put(box, backupScheduleForm(b, s), backupServerHow(b), h("p", { class: "card pad muted small" }, t("backup.how")));
@@ -10997,7 +11013,7 @@ function renderMyHata() {
         { class: "stack", id: "files-main" },
         h("div", { class: "page-head card pad" }, h("div", null, h("h1", null, t("myhata.title")), h("p", { class: "muted" }, t("myhata.lead")))),
         !listing
-          ? h("p", { class: "card pad muted" }, "…")
+          ? waitMark()
           : [
               section(t("myhata.server"), [
                 home && hataTile({ href: filesHash(home, ""), iconName: "folder", title: t("files.home"), sub: home, room: listing.disk }),
@@ -11041,7 +11057,7 @@ function renderMySharedFolders() {
         { class: "stack", id: "files-main" },
         h("div", { class: "page-head card pad" }, h("div", null, h("h1", null, t("myhata.title")), h("p", { class: "muted" }, t("myhata.sharedLead")))),
         !shares
-          ? h("p", { class: "card pad muted" }, "…")
+          ? waitMark()
           : [
               (shares.length > 0 || !(state.myMachines ?? []).length) && section(t("myhata.shared"), shares.length ? shares.map((share) => shareTile(share, "")) : h("p", { class: "muted small" }, t("myhata.nothingShared"))),
               (state.myMachines ?? []).map((m) => section(t("myhata.onMachine", { name: m.name }), m.shares.map((share) => shareTile(share, m)))),
@@ -11831,7 +11847,9 @@ function transferDialog(entries, copy) {
         const res = await api("POST", "/api/files/transfer", { from: { machine: source, paths }, to: { machine: on, dir: to }, copy });
         return jobDialog(res.job, "transfer", what, () => void loadFiles());
       }
-      await api("POST", filesApi(copy ? "/copy" : "/move", source), { paths, to });
+      const res = await api("POST", filesApi(copy ? "/copy" : "/move", source), { paths, to });
+      // large or to another disk: it goes on in the background, the card in the corner says how far it is
+      if (res?.job) return jobInBackground(res.job, copy ? "filecopy" : "filemove", what, () => void loadFiles());
       toast(t(copy ? "files.copied" : "files.moved", { n: entries.length, to: to === "/" ? "/" : to.split("/").pop() }));
       await loadFiles();
     },
@@ -12210,7 +12228,7 @@ function renderApps() {
 function renderAppsBody() {
   const box = document.getElementById("apps-body");
   if (!box) return;
-  if (!state.overview) return put(box, h("p", { class: "card pad muted" }, "…"));
+  if (!state.overview) return put(box, waitMark());
   // on the page of this server: its own apps alone, and nothing of the section's head
   const fixed = state.route.view === "server";
   const all = installedApps().filter((row) => !fixed || !row.machine);
@@ -12935,7 +12953,7 @@ function paintWelcome() {
   const s = state.settings;
   if (!box) return;
   const head = [h("h1", null, t(`welcome.${step}.title`)), h("p", { class: "muted welcome-lead" }, t(`welcome.${step}.lead`))];
-  const waiting = h("p", { class: "muted" }, "…");
+  const waiting = waitMark();
 
   if (step === "server") {
     if (!s) return put(box, ...head, waiting);
@@ -13695,7 +13713,7 @@ function musicDropdown(at) {
   let dialog;
   let timer = 0;
   let busy = false;
-  const body = h("div", { class: "stack" }, h("p", { class: "muted pad" }, "…"));
+  const body = h("div", { class: "stack" }, waitMark());
   const paint = () => {
     const m = state.music;
     if (!m || busy || body.querySelector("input[type=range]:active") || document.querySelector("dialog.select-list[open]") || dialog.classList.contains("pulled")) return;
@@ -13757,7 +13775,7 @@ function musicLinkDialog() {
 const musicFolder = () => folderPicker({ title: t("music.folder"), start: state.settings?.dataRoot ?? "/", confirmLabel: t("music.playNow"), action: (path) => playMusic({ path }, path.split("/").pop() || path) });
 
 function renderMusic() {
-  shell(areaHead("house", "music", { actions: h("div", { class: "row-actions" }, button(t("music.link"), { onclick: musicLinkDialog }, "link"), button(t("music.folder"), { class: "primary", onclick: musicFolder }, "folder")) }), h("div", { id: "music-body", class: "stack" }, h("p", { class: "card pad muted" }, "…")));
+  shell(areaHead("house", "music", { actions: h("div", { class: "row-actions" }, button(t("music.link"), { onclick: musicLinkDialog }, "link"), button(t("music.folder"), { class: "primary", onclick: musicFolder }, "folder")) }), h("div", { id: "music-body", class: "stack" }, waitMark()));
   cleanups.push(() => clearTimeout(musicUi.timer));
   if (state.music) paintMusic();
 }
@@ -13907,7 +13925,7 @@ function tvStick() {
 }
 
 function renderTv() {
-  shell(areaHead("house", "tv", { actions: button(t("tv.link"), { onclick: playLinkDialog }, "link") }), h("div", { id: "tv-body", class: "stack" }, h("p", { class: "card pad muted" }, "…")));
+  shell(areaHead("house", "tv", { actions: button(t("tv.link"), { onclick: playLinkDialog }, "link") }), h("div", { id: "tv-body", class: "stack" }, waitMark()));
   window.addEventListener("resize", tvStick);
   cleanups.push(() => (clearTimeout(tvUi.timer), window.removeEventListener("resize", tvStick)));
   if (state.tv) paintTv();
@@ -13973,7 +13991,7 @@ function tvTextDialog(press) {
 function tvDropdown(at) {
   let dialog;
   let timer = 0;
-  const body = h("div", { class: "tvr" }, h("p", { class: "muted" }, "…"));
+  const body = h("div", { class: "tvr" }, waitMark());
   const press = (action, value) => api("POST", "/api/tv/do", { action, value }).then(() => setTimeout(load, 250), (e) => toast(errorText(e), "error"));
   const turnOn = () => api("PUT", "/api/tv", { on: true }).then(load, (e) => toast(errorText(e), "error"));
   const load = async () => {
@@ -14314,7 +14332,7 @@ const findWords = (f) => t("modules.found." + f.what, { detail: f.detail });
 
 function modulesSection() {
   const list = state.modulesList;
-  if (!list) return [h("p", { class: "muted" }, "…")];
+  if (!list) return [waitMark()];
   // what is here already shows on the cards of modules that are off; the look takes a few seconds
   if (!state.moduleFinds) void loadModuleFinds().then(() => state.route.view === "settings" && showsSection("modules") && renderSettings());
   const card = (m) => {
@@ -15366,7 +15384,7 @@ function hotspotNeeds(detail, error) {
 
 function networkSection() {
   const data = state.network;
-  if (!data) return [h("p", { class: "muted" }, "…")];
+  if (!data) return [waitMark()];
   const error = h("p", { class: "error", role: "alert" });
   const row = (label, value, mono = true) => h("div", { class: "kv" }, h("span", { class: "muted" }, label), h("span", { class: mono ? "mono" : "" }, value || "—"));
   const card = (nic) =>
@@ -15676,7 +15694,7 @@ function btSoundCard(r, error) {
 
 function bluetoothSection() {
   const r = state.bluetooth;
-  if (!r) return [h("p", { class: "card pad muted" }, "…")];
+  if (!r) return [waitMark()];
   const error = h("p", { class: "error", role: "alert" }, r.error ?? "");
   const lead = h("p", { class: "muted" }, t("bt.lead"));
   if (r.error) return [h("section", { class: "card pad stack" }, h("h2", null, "Bluetooth"), error)];
@@ -16039,7 +16057,7 @@ function wireguardCards() {
 
 function tailscaleCards() {
   const r = state.remote;
-  if (!r) return [h("p", { class: "muted" }, "…")];
+  if (!r) return [waitMark()];
   const error = h("p", { class: "error", role: "alert" });
   const act = (what, data = {}, said) => async (e) => {
     const el = e.currentTarget;
@@ -16175,7 +16193,7 @@ function tailscaleCards() {
 /** Settings → System programs: everything of the system Hata relies on, installed or not */
 function toolsSection() {
   const tools = state.tools;
-  if (!tools) return [h("p", { class: "muted" }, "…")];
+  if (!tools) return [waitMark()];
   const error = h("p", { class: "error", role: "alert" });
   const again = async () => {
     state.tools = await api("GET", "/api/tools").catch(() => state.tools);
@@ -16281,7 +16299,7 @@ function sysUpdatesCard(at) {
     },
   }, "refresh");
   const head = h("div", { class: "section-head" }, h("h2", null, t("sysupdates.title")), check);
-  if (!info) return h("section", { class: "card pad stack" }, head, h("p", { class: "muted" }, "…"));
+  if (!info) return h("section", { class: "card pad stack" }, head, waitMark());
   if (info.error && !info.at) return h("section", { class: "card pad stack" }, head, h("p", { class: "error" }, info.error));
   if (info.at && !info.manager) return h("section", { class: "card pad stack" }, head, h("p", { class: "muted small" }, t("sysupdates.noManager")));
   const security = list.filter((p) => p.security).length;
@@ -16832,7 +16850,7 @@ function httpsSection(save, error) {
 
 /** One certificate for the domain and every name under it: the way its TXT record gets into the DNS */
 function wildcardCard(afterChange) {
-  const body = h("div", { class: "stack" }, h("p", { class: "muted small" }, "…"));
+  const body = h("div", { class: "stack" }, waitMark());
   const paint = async () => {
     const status = await api("GET", "/api/https").catch(() => null);
     if (!status) return;
@@ -16948,7 +16966,7 @@ function nameTargetWords(n) {
  * Proxmox, machines, their apps and any address; Hata passes the request on, its sign-in in front when asked
  */
 function namesCard() {
-  const body = h("div", { class: "stack" }, h("p", { class: "muted small" }, "…"));
+  const body = h("div", { class: "stack" }, waitMark());
   const paint = async () => {
     let data;
     try {
@@ -17002,7 +17020,7 @@ const serverHost = () => (state.settings?.local?.enabled && state.settings.local
 
 /** Ports of this server passed on to a container, a guest, a machine or an address */
 function portsCard() {
-  const body = h("div", { class: "stack" }, h("p", { class: "muted small" }, "…"));
+  const body = h("div", { class: "stack" }, waitMark());
   const paint = async () => {
     let data;
     try {
@@ -17215,7 +17233,7 @@ const DNS_UPSTREAMS = ["system", "quad9", "cloudflare", "google", "adguard", "cu
 
 /** Hata as the home's DNS server: on or off, where it listens, where the rest goes, the names it answers */
 function dnsSection() {
-  const box = h("div", { class: "stack" }, h("section", { class: "card pad" }, h("p", { class: "muted" }, "…")));
+  const box = h("div", { class: "stack" }, h("section", { class: "card pad" }, waitMark()));
   let alive = true;
   cleanups.push(() => (alive = false));
   const load = async () => {
@@ -17343,7 +17361,7 @@ const PAUSES = [5, 30, 60, 240, 1440];
 const blockUntil = (ts) => new Date(ts).toLocaleTimeString(state.lang, { hour: "2-digit", minute: "2-digit" });
 
 function adblockSection() {
-  const box = h("div", { class: "stack" }, h("section", { class: "card pad" }, h("p", { class: "muted" }, "…")));
+  const box = h("div", { class: "stack" }, h("section", { class: "card pad" }, waitMark()));
   let alive = true;
   let timer = 0;
   cleanups.push(() => ((alive = false), clearTimeout(timer)));
@@ -17879,7 +17897,7 @@ function emailCard() {
 
 function notificationsSection() {
   const n = state.notify;
-  if (!n) return [h("p", { class: "muted" }, "…")];
+  if (!n) return [waitMark()];
   const error = h("p", { class: "error", role: "alert" });
   const toggle = (key) => {
     const box = h("input", {
@@ -18313,7 +18331,7 @@ const RESIZABLE = ["ext4", "btrfs", "xfs", "ntfs"];
 /** Makes a partition larger, into the free room after it, or smaller; its files stay */
 async function resizeDialog(disk, volume) {
   let dialog;
-  const body = h("div", { class: "stack" }, h("p", { class: "muted" }, "…"));
+  const body = h("div", { class: "stack" }, waitMark());
   dialog = openDialog("wide", h("header", null, h("div", { class: "grow" }, h("h2", null, t("resize.title", { name: volume.label || volume.name })), h("p", { class: "muted small" }, [volume.name, volume.fstype, bytes(volume.size), diskTitle(disk)].join(" · "))), closeX(() => dialog)), body);
   let info;
   try {
@@ -18710,7 +18728,7 @@ function copyInDialog(disk) {
 function disconnectDialog(mount) {
   const removable = state.disks.disks.some((d) => d.name === mount.disk && (d.removable || d.transport === "usb"));
   const slot = h("div");
-  const what = h("div", { class: "stack" }, h("p", { class: "muted" }, "…"));
+  const what = h("div", { class: "stack" }, waitMark());
   let dialog;
   const go = button(t(removable ? "mounting.eject" : "mounting.disconnect"), { class: "primary", disabled: true });
   go.onclick = diskAction(
@@ -18818,7 +18836,7 @@ function smartLimitsDialog(limits) {
 
 function storageSection(section = "storage") {
   const data = state.disks;
-  if (!data) return [h("p", { class: "muted" }, "…")];
+  if (!data) return [waitMark()];
   const error = h("p", { class: "error", role: "alert" });
   const busy = (label, done) => async (e) => {
     const el = e.currentTarget;
@@ -18921,7 +18939,7 @@ function storageSection(section = "storage") {
       ),
     );
   };
-  if (section === "places") return [state.places ? placesCard(state.places) : h("p", { class: "muted" }, "…")];
+  if (section === "places") return [state.places ? placesCard(state.places) : waitMark()];
   if (section === "protection") {
     return [
       data.working && diskWorkStrip(data.working),
@@ -20132,7 +20150,7 @@ function sambaCard(done, cancel) {
 
 function sharesSection() {
   const data = state.shares;
-  if (!data) return [h("p", { class: "muted" }, "…")];
+  if (!data) return [waitMark()];
   const error = h("p", { class: "error", role: "alert" });
   if (data.tool === "missing") return [h("section", { class: "card pad" }, h("h2", null, t("shares.tool.missing")), h("p", { class: "muted" }, t("shares.lead")), sambaCard())];
   const host = data.hosts[0] ?? location.hostname;
@@ -20331,7 +20349,7 @@ async function sendToAssistant(text, fresh = false) {
 
 function assistantBody() {
   const chat = assistantUi.chat;
-  if (!assistantUi.config) return [h("p", { class: "muted" }, "…")];
+  if (!assistantUi.config) return [waitMark()];
   if (!assistantUi.config.ready) {
     // asked before there is a model: what it would do, how to give it one, and the question kept for then
     return [
@@ -20589,7 +20607,7 @@ function assistantEvent(event) {
 
 function assistantSection() {
   const config = state.assistant?.config;
-  if (!config) return h("p", { class: "muted" }, "…");
+  if (!config) return waitMark();
   const provider = h("select", null, ["anthropic", "openai"].map((id) => h("option", { value: id, selected: id === config.provider }, t("assistant.provider." + id))));
   const url = h("input", { type: "url", class: "mono", value: config.url, spellcheck: false });
   const urlHint = h("span", { class: "hint" });
@@ -20676,7 +20694,7 @@ function connectWhere(redirect) {
 
 function renderConnect() {
   const { id } = state.route;
-  const box = h("section", { class: "card pad stack-s connect" }, h("p", { class: "muted" }, "…"));
+  const box = h("section", { class: "card pad stack-s connect" }, waitMark());
   shell(box);
   const say = (text) => put(box, h("p", null, text), h("p", null, h("a", { class: "btn", href: "#/settings/agents" }, t("settings.agents"))));
   if (!isAdmin()) return put(box, h("p", null, t("connect.adminOnly")));
@@ -20884,7 +20902,7 @@ function removeAgentKey(key) {
 
 function agentsSection() {
   const keys = state.agents;
-  if (!keys) return h("p", { class: "muted" }, "…");
+  if (!keys) return waitMark();
   const row = (key) =>
     h(
       "div",
@@ -20964,7 +20982,7 @@ function agentsSection() {
 function renderSettings() {
   const ready = state.account && (state.settings || !isAdmin());
   // a tab may hold two sections; the second of a module that is off is simply not there
-  const body = ready ? state.route.sections.flatMap((id, i) => (i && SECTION_MODULE[id] && !hasModule(SECTION_MODULE[id]) ? [] : settingsSection(id))) : h("p", { class: "card pad muted" }, "…");
+  const body = ready ? state.route.sections.flatMap((id, i) => (i && SECTION_MODULE[id] && !hasModule(SECTION_MODULE[id]) ? [] : settingsSection(id))) : waitMark();
   shell(...settingsFrame(state.route.section, body));
 }
 
@@ -21723,7 +21741,7 @@ function signInLog() {
 function accessTable() {
   const access = state.access;
   const more = state.accessMore;
-  if (!access || !more) return h("p", { class: "card pad muted" }, "…");
+  if (!access || !more) return waitMark();
   const users = access.users;
   const again = () => void loadUsers();
   const fail = (e) => (toast(errorText(e), "error"), again());

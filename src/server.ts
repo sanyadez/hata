@@ -2462,7 +2462,7 @@ function filesNamed(paths: unknown): string {
   return (list.length > 3 ? `${names} +${list.length - 3}` : names).slice(0, 300);
 }
 
-async function files(req: Request, url: URL, server: Server<unknown>, by: string, userId: string): Promise<Response | null> {
+async function files(req: Request, url: URL, server: Server<unknown>, by: string, userId: string, follows = true): Promise<Response | null> {
   const path = url.pathname;
   const method = req.method;
   const q = url.searchParams;
@@ -2515,10 +2515,13 @@ async function files(req: Request, url: URL, server: Server<unknown>, by: string
   }
   if ((path === "/api/files/move" || path === "/api/files/copy") && method === "POST") {
     const data = await body(req);
-    // a large folder takes its time, and more so across disks
+    const job = transfer(data.paths, data.to, path.endsWith("copy"), by);
+    if (!job) return json({ ok: true });
+    // an administrator's page follows the job; a member's has no jobs, so its request waits as before
+    if (follows) return json({ job: job.id }, 202);
     server.timeout(req, 0);
-    await transfer(data.paths, data.to, path.endsWith("copy"));
-    record(path.endsWith("copy") ? "files.copy" : "files.move", { user: by, detail: `${filesNamed(data.paths)} → ${data.to}` });
+    await jobFinished(job);
+    if (job.status !== "done") throw new AppError("files.failed", 500, { code: job.error ?? "" });
     return json({ ok: true });
   }
   // between Hata and a machine, or two machines: a job
@@ -2614,7 +2617,7 @@ async function memberFiles(req: Request, url: URL, server: Server<unknown>, user
     return false;
   })();
   if (!checked) return fail(403, "auth.forbidden");
-  return (await files(req, url, server, user.name, user.id)) ?? fail(404, "request.notFound");
+  return (await files(req, url, server, user.name, user.id, false)) ?? fail(404, "request.notFound");
 }
 
 /** A machine's files for one who is not an administrator: its folders shared with them, with the rights given */

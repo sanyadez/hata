@@ -51,3 +51,12 @@ test("what is not known stays unknown", () => {
   expect(percentOf(undefined)).toBeNull();
   expect(percentOf({ step: "download" })).toBeNull();
 });
+
+test("a copy of files says how much of how much", () => {
+  const track = progressTracker();
+  expect(track("Copying 25.0 GB to /mnt/usb")).toEqual({});
+  const p = track("  512 MB of 25.0 GB");
+  expect(p).toEqual({ bytes: 512 * 1024 ** 2, total: 25 * 1024 ** 3 });
+  expect(percentOf(p)).toBe(2);
+  expect(percentOf(track("  25.0 GB of 25.0 GB"))).toBe(99);
+});

@@ -3,8 +3,17 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, symlinkS
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { DATA_DIR, settings } from "../src/config";
-import { archivePlan, dropFavorites, emptyTrash, favoritesOf, setFavorite, freeName, list, udevName, mustBeSharable, onSharesMoved, pinFolder, pinnedFolders, locate, makeFolder, readable, readText, remove, rename, restore, summary, transfer, trash, upload, validName, writeText, type UploadPart } from "../src/files";
+import { archivePlan, dropFavorites, emptyTrash, favoritesOf, setFavorite, freeName, list, udevName, mustBeSharable, onSharesMoved, pinFolder, pinnedFolders, locate, makeFolder, readable, readText, remove, rename, restore, summary, transfer as startTransfer, trash, upload, validName, writeText, type UploadPart } from "../src/files";
 import { world } from "../src/trash";
+import { AppError, jobFinished } from "../src/apps";
+
+/** A move or a copy to its end: a copy is a job now */
+async function transfer(paths: unknown, to: unknown, copy: boolean): Promise<void> {
+  const job = startTransfer(paths, to, copy, "test");
+  if (!job) return;
+  await jobFinished(job);
+  if (job.status !== "done") throw new AppError(job.error ?? "files.failed");
+}
 import { zipChunks } from "../src/zip";
 
 let root = "";
