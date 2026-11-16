@@ -884,7 +884,7 @@ dialog.wide { width: min(calc(100vw - 24px), 760px); }
 dialog.xwide { width: min(calc(100vw - 24px), 1040px); }
 dialog > form { display: grid; gap: 16px; }
 dialog header { display: flex; gap: 16px; align-items: center; }
-dialog header > div { display: grid; gap: 4px; min-width: 0; }
+dialog header > div { display: grid; gap: 4px; min-width: 0; overflow-wrap: anywhere; }
 dialog footer { display: flex; justify-content: flex-end; align-items: center; gap: 10px; flex-wrap: wrap; }
 dialog footer > :first-child { margin-right: auto; }
 dialog h2 { font-size: 18px; }
