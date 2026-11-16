@@ -5827,7 +5827,7 @@ function haDevices(x) {
     body,
     h(
       "div",
-      { class: "row-actions" },
+      { class: "card filter-bar ha-filter" },
       h("input", { type: "search", class: "grow", placeholder: t("ha.search"), value: haUi.search, oninput: (e) => {
           haUi.search = e.target.value;
           clearTimeout(haUi.searchTimer);
