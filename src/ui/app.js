@@ -3412,12 +3412,10 @@ function appOverviewTab(app, box) {
       h(
         "div",
         { class: "stack" },
-        h("div", { class: "section-head" }, h("h2", null, t("app.resources"))),
-        statsBox,
-        h("div", { class: "section-head" }, h("h2", null, t("app.containers"))),
+        h("section", { class: "card head-in" }, h("div", { class: "section-head pad-head" }, h("h2", null, t("app.resources"))), statsBox),
         app.containers.length
-          ? h("div", { class: "card table-wrap" }, h("table", null, h("thead", null, h("tr", null, h("th", null, t("app.col.container")), h("th", null, t("app.col.state")), h("th", { class: "num" }, t("sys.cpu")), h("th", { class: "num" }, t("sys.memory")), h("th", null, t("app.col.ports")))), h("tbody", { id: "containers" }, app.containers.map(containerRow))), h("p", { class: "cmd" }, icon("terminal"), `docker compose -p ${app.name} ps`))
-          : h("p", { class: "card pad muted" }, t("app.noContainers")),
+          ? h("div", { class: "card table-wrap" }, h("div", { class: "section-head pad-head" }, h("h2", null, t("app.containers"))), h("table", null, h("thead", null, h("tr", null, h("th", null, t("app.col.container")), h("th", null, t("app.col.state")), h("th", { class: "num" }, t("sys.cpu")), h("th", { class: "num" }, t("sys.memory")), h("th", null, t("app.col.ports")))), h("tbody", { id: "containers" }, app.containers.map(containerRow))), h("p", { class: "cmd" }, icon("terminal"), `docker compose -p ${app.name} ps`))
+          : h("section", { class: "card pad stack-s" }, h("div", { class: "section-head" }, h("h2", null, t("app.containers"))), h("p", { class: "muted" }, t("app.noContainers"))),
       ),
       h(
         "aside",
@@ -3426,7 +3424,7 @@ function appOverviewTab(app, box) {
         appAccessCard(app),
         app.login && h("section", { class: "card pad" }, h("div", { class: "section-head" }, h("h2", null, t("app.login"))), loginBlock(app.login, loginAsker(app.name))),
         app.tips && h("section", { class: "card pad" }, h("div", { class: "section-head" }, h("h2", null, t("app.notes"))), h("div", { class: "tips prose" }, md(app.tips))),
-        h("section", { class: "pad-x" }, h("div", { class: "section-head" }, h("h2", null, t("activity.title"))), app.activity.length ? app.activity.slice(0, 6).map(activityItem) : h("p", { class: "muted small" }, t("activity.none"))),
+        h("section", { class: "card pad" }, h("div", { class: "section-head" }, h("h2", null, t("activity.title"))), app.activity.length ? app.activity.slice(0, 6).map(activityItem) : h("p", { class: "muted small" }, t("activity.none"))),
       ),
     ),
   );
@@ -12743,7 +12741,6 @@ function renderStoreList() {
   }
   if (!apps.length) return list.replaceChildren(h("p", { class: "empty" }, t("store.nothing")));
   list.replaceChildren(
-    h("div", { class: "section-head" }, h("h2", null, category && category !== "*" && category !== "+" ? category : t(category === "*" ? "store.recommended" : category === "+" ? "store.installed" : "store.allApps"), h("span", { class: "muted small" }, apps.length))),
     h(
       "div",
       { class: "cards" },
