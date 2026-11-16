@@ -10634,6 +10634,13 @@ function renderFilesBody() {
       { class: "files-tools" },
       listing && !listing.error && !machine && findBox(path),
       h("span", { class: "grow" }),
+      // what the folder holds may have changed from elsewhere: over the network, by an app, in a terminal
+      h("button", { type: "button", class: "btn square", title: t("files.reload"), "aria-label": t("files.reload"), onclick: async (e) => {
+        const mark = e.currentTarget.querySelector(".ico");
+        mark?.classList.add("spin");
+        await loadFiles();
+        mark?.classList.remove("spin");
+      } }, icon("refresh")),
       listing && !listing.error && !machine && h("button", { type: "button", class: "btn square" + (isFavorite(path) ? " active" : ""), title: t(isFavorite(path) ? "files.unfavorite" : "files.favorite"), "aria-label": t(isFavorite(path) ? "files.unfavorite" : "files.favorite"), "aria-pressed": String(isFavorite(path)), onclick: () => favorite(path, !isFavorite(path)) }, icon("star")),
       listing && !listing.error && !machine && isAdmin() && h("button", { type: "button", class: "btn square" + (isPinned ? " active" : ""), title: t(isPinned ? "files.unpin" : "files.pin"), "aria-label": t(isPinned ? "files.unpin" : "files.pin"), "aria-pressed": String(isPinned), onclick: () => pinFolder(path, !isPinned) }, icon("home")),
       listing && !listing.error && !machine && isAdmin() && h("button", { type: "button", class: "btn square" + (isShared ? " active" : ""), title: t(isShared ? "files.shareSettings" : "files.share"), "aria-label": t(isShared ? "files.shareSettings" : "files.share"), onclick: () => shareDialog(path) }, icon("share")),

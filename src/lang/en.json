@@ -821,6 +821,7 @@
   "files.copyPath": "Copy the path",
   "files.back": "Back (Alt+←)",
   "files.forward": "Forward (Alt+→)",
+  "files.reload": "Read the folder again",
   "files.up": "Up one level (Alt+↑, Backspace)",
   "files.inside": "Folders in {name}",
   "files.earlier": "Parent folders",

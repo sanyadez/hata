@@ -821,6 +821,7 @@
   "files.copyPath": "Копіювати шлях",
   "files.back": "Назад (Alt+←)",
   "files.forward": "Вперед (Alt+→)",
+  "files.reload": "Оновити вміст теки",
   "files.up": "На рівень вгору (Alt+↑, Backspace)",
   "files.inside": "Теки в «{name}»",
   "files.earlier": "Теки вище",
