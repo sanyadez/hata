@@ -410,7 +410,7 @@ function parseRoute() {
     return tab.view === "tv" ? { view: "tv", hash: "#/house/tv" } : { view: tab.view, id, house: true, hash: tab.hash + (id ? "/" + id : "") };
   }
   // both live in Settings; their own old addresses still lead there
-  if ((parts[0] === "backups" || (parts[0] === "settings" && parts[1] === "backups")) && isAdmin()) return { view: "backups" };
+  if ((parts[0] === "backups" || (parts[0] === "settings" && parts[1] === "backups")) && isAdmin()) return areaRoute("backups", parts[0] === "backups" ? parts[1] : parts[2]);
   if ((parts[0] === "users" || (parts[0] === "settings" && parts[1] === "users")) && isAdmin()) return areaRoute("settings", "users", parts[0] === "users" ? parts[1] : parts[2]);
   if (parts[0] === "import" && isAdmin()) return { view: "import" };
   if (parts[0] === "terminal" && isAdmin()) return { view: "terminal" };
@@ -464,7 +464,12 @@ const AREAS = {
     { id: "shares", sections: ["shares"] },
     { id: "places", sections: ["places"] },
   ],
-  backups: [{ id: "overview", hash: "#/backups", view: "backups", admin: true }],
+  backups: [
+    { id: "overview", hash: "#/backups", view: "backups", admin: true },
+    { id: "history", view: "backups", admin: true },
+    { id: "schedule", view: "backups", admin: true },
+    { id: "offsite", view: "backups", admin: true, module: "offsite" },
+  ],
   house: [
     { id: "ha", hash: "#/house/ha", view: "ha", module: "integrations" },
     { id: "cameras", hash: "#/house/cameras", view: "frigate", module: "integrations" },
@@ -497,7 +502,7 @@ const AREAS = {
     { id: "about", sections: ["about"] },
   ],
 };
-const AREA_BASE = { storage: "#/storage", network: "#/network", server: "#/machines/this", settings: "#/settings" };
+const AREA_BASE = { backups: "#/backups", storage: "#/storage", network: "#/network", server: "#/machines/this", settings: "#/settings" };
 const tabHash = (area, tab) => tab.hash ?? `${AREA_BASE[area]}/${tab.id}`;
 /** Whether this person may open the tab at all, and whether it stands among the tabs: one of a module that is off does not */
 const tabAllowed = (tab) => (tab.sections ? SECTIONS.some((item) => item.id === tab.sections[0] && (!item.admin || isAdmin())) : (!tab.admin || isAdmin()) && state.user?.role !== "guest");
@@ -514,7 +519,7 @@ function sectionHash(section) {
 }
 
 function areaRoute(area, id, rest) {
-  const tab = AREAS[area].find((x) => x.id === id && !x.link && tabAllowed(x)) ?? areaTabs(area)[0];
+  const tab = AREAS[area].find((x) => x.id === id && !x.link && (x.sections ? tabAllowed(x) : tabShown(x))) ?? areaTabs(area)[0];
   if (!tab) return { view: "home" };
   // the containers of this server keep their own two parts: the list and what they stand on
   if (tab.view === "containers") return { view: "containers", tab: rest === "settings" ? "settings" : "list", hash: tabHash(area, tab) + (rest === "settings" ? "/settings" : "") };
@@ -9697,21 +9702,43 @@ async function appBackupsTab(app, box) {
 }
 
 function renderBackups() {
-  shell(
-    ...settingsFrame(
-      "backups",
-      h("section", { class: "stats card", id: "backup-stats" }),
-      h("div", { class: "columns" }, h("section", { id: "backup-apps" }), h("aside", { class: "side", id: "backup-side" })),
-    ),
-  );
+  const tab = state.route.tab ?? "overview";
+  shell(...settingsFrame("backups", tab === "overview" && h("section", { class: "stats card", id: "backup-stats" }), h("div", { class: "stack", id: "backup-body" }, h("p", { class: "card pad muted" }, "…"))));
   renderBackupsBody();
+  if (tab === "overview") void loadBackupsMore();
+  if (tab === "history") void loadBackupHistory();
+}
+
+/** What is backed up but not by Hata's own folder: the guests of Proxmox and Home Assistant — a row each in the one table */
+async function loadBackupsMore() {
+  const pve = hasModule("proxmox") ? await api("GET", "/api/proxmox").then((r) => Promise.all((r.hosts ?? []).map((x) => api("GET", `/api/proxmox/${x.id}`).catch(() => x))), () => []) : [];
+  const ha = hasModule("integrations") ? await api("GET", "/api/ha").then((r) => Promise.all((r.servers ?? []).map((x) => api("GET", `/api/ha/${x.id}`).catch(() => x))), () => []) : [];
+  state.backupsMore = { pve, ha };
+  if (state.route.view === "backups") renderBackupsBody();
+}
+
+/** The history of backups is the activity log's lines about them: there is no other record of the runs */
+const backupHistory = { entries: null };
+async function loadBackupHistory() {
+  const found = [];
+  let before = Date.now() + 60_000;
+  for (let i = 0; i < 4; i++) {
+    const page = await api("GET", `/api/activity?before=${before}`).catch(() => null);
+    if (!page) break;
+    found.push(...page.entries.filter((e) => /backup|restor|snapshot/i.test(e.code)));
+    if (!page.more || !page.entries.length) break;
+    before = page.entries[page.entries.length - 1].ts;
+  }
+  backupHistory.entries = found;
+  if (state.route.view === "backups") renderBackupsBody();
 }
 
 function renderBackupsBody() {
   const b = state.backups;
   const s = state.settings?.backup;
-  const box = document.getElementById("backup-apps");
+  const box = document.getElementById("backup-body");
   if (!b || !s || !box) return;
+  const tab = state.route.tab ?? "overview";
 
   document.getElementById("backup-meta").replaceChildren(b.dir, h("span", { class: "dot-sep" }, "·"), s.enabled ? t("backup.daily", { time: s.time, keep: s.keep }) : t("backup.scheduleOff"));
   document.getElementById("backup-actions").replaceChildren(
@@ -9725,14 +9752,20 @@ function renderBackupsBody() {
       },
     }, "play"),
   );
+  if (tab === "history") {
+    const list = backupHistory.entries;
+    return put(box, h("section", { class: "card pad" }, h("h2", null, t("area.backups.history")), h("p", { class: "muted small" }, t("backup.historyLead")), !list ? h("p", { class: "muted" }, "…") : list.length ? list.map((e) => activityItem(e, new Date(e.ts).toLocaleString(state.lang, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }))) : h("p", { class: "muted" }, t("activity.none"))));
+  }
+  if (tab === "offsite") return put(box, offsiteCard(b.offsite)), void (clearTimeout(offsiteTimer), b.offsite.running && (offsiteTimer = setTimeout(() => state.route.view === "backups" && loadBackups(), 3000)));
+  if (tab === "schedule") return box.contains(document.activeElement) ? undefined : put(box, backupScheduleForm(b, s), backupServerHow(b), h("p", { class: "card pad muted small" }, t("backup.how")));
 
-  const stat = (iconName, label, value, unit, hint, cls = "") => h("div", { class: "stat" }, h("div", { class: "stat-label" }, icon(iconName), label), h("div", { class: "stat-row" }, h("div", { class: "stat-value" }, h("strong", { class: cls }, value), h("span", { class: "unit" }, unit))), h("div", { class: "stat-hint" }, hint || " "));
+  const stat = (iconName, label, value, unit, hint, cls = "") => h("div", { class: "stat" }, h("div", { class: "stat-label" }, icon(iconName), label), h("div", { class: "stat-row" }, h("div", { class: "stat-value" }, h("strong", { class: cls }, value), h("span", { class: "unit" }, unit))), h("div", { class: "stat-hint" }, hint || " "));
   const last = b.lastRun;
   const count = b.apps.reduce((n, a) => n + a.snapshots.length, 0);
   const stored = bytesParts(b.stored);
   const free = b.free == null ? null : bytesParts(b.free);
   const installed = b.apps.filter((a) => a.installed);
-  document.getElementById("backup-stats").replaceChildren(
+  document.getElementById("backup-stats")?.replaceChildren(
     stat(last?.failed.length ? "alert" : "check", t("backup.lastRun"), last ? ago(last.at) : "—", "", last ? (last.failed.length ? t("backup.lastFailed", { ok: last.ok, failed: last.failed.join(", ") }) : t("backup.lastOk", { ok: last.ok })) : t("backup.never"), last?.failed.length ? "warn" : ""),
     stat("refresh", t("backup.nextRun"), b.nextRun ? s.time : "—", "", b.nextRun ? `${new Date(b.nextRun).toLocaleDateString(state.lang, { weekday: "long", timeZone: b.timezone })} · ${t("backup.serverTime", { tz: b.timezone })}` : t("backup.scheduleOff")),
     stat("archive", t("backup.stored"), stored.value, stored.unit, t("backup.snapshots", { n: count })),
@@ -9751,97 +9784,156 @@ function renderBackupsBody() {
       toast(errorText(e), "error");
     }
   };
+  const daily = s.enabled ? t("backup.everyDay", { time: s.time }) : t("backup.byHand");
+  const group = (title, lead) => h("tr", { class: "group-row" }, h("td", { colSpan: 6 }, h("strong", null, title), lead && h("span", { class: "muted small" }, " · ", lead)));
+  const when = (at, note) => (at ? h("div", { class: "with-dot" }, h("i", { class: "dot running" }), h("div", null, ago(at), note && h("div", { class: "muted small" }, note))) : h("span", { class: "muted" }, t("backup.noneShort")));
+  const more = (entries) => (e) => menuAt(underButton(e.currentTarget), null, entries);
+  const dots = (entries) => h("button", { type: "button", class: "btn small square", "aria-label": t("app.more"), "aria-haspopup": "menu", onclick: more(entries) }, icon("more"));
   const row = (app) => {
     const newest = app.snapshots[0];
     const size = app.snapshots.reduce((n, x) => n + x.size, 0);
+    const page = app.incus ? `#/containers/i/${app.name.replace(/@incus$/, "")}` : app.machine ? `#/machines/${app.machine.id}/apps` : `#/apps/${app.name}/backups`;
+    const kind = app.incus?.kind ? t(app.incus.kind === "vm" ? "incus.kind.vm" : "incus.kind.container") : app.machine ? app.machine.name : "";
     return h(
       "tr",
       { class: app.installed ? "" : "removed" },
-      h("td", null, h("div", { class: "with-icon" }, appIcon(app, "sm"), h("div", { class: "stack-s backup-name" }, app.installed ? h("a", { class: "strong", href: app.incus ? "#/containers" : app.machine ? `#/machines/${app.machine.id}/apps` : `#/apps/${app.name}/backups` }, app.title) : h("span", { class: "strong" }, app.title), app.machine && h("div", { class: "muted small with-icon" }, icon("server"), app.machine.name), app.incus?.kind && h("div", { class: "muted small with-icon" }, icon(app.incus.kind === "vm" ? "server" : "box"), t(app.incus.kind === "vm" ? "incus.kind.vm" : "incus.kind.container")), !app.installed && h("div", { class: "muted small" }, t("backup.removedApp")), app.otherFolders.length > 0 && h("button", { type: "button", class: "text-btn muted small", title: app.otherFolders.join("\n"), onclick: () => backupFoldersDialog(app, loadBackups) }, t("backup.folders.row", { n: app.otherFolders.length, m: app.extraFolders.length }))))),
-      h("td", null, newest ? h("div", null, ago(newest.at), h("div", { class: "muted small" }, t("backup.reason." + newest.reason))) : h("span", { class: "muted" }, t("backup.noneShort"))),
+      h("td", null, h("div", { class: "with-icon" }, app.incus ? h("span", { class: "app-icon sm plus" }, icon(app.incus.kind === "vm" ? "screen" : "box")) : appIcon(app, "sm"), h("div", { class: "stack-s backup-name" }, app.installed ? h("a", { class: "strong", href: page }, app.title) : h("span", { class: "strong" }, app.title), kind && h("div", { class: "muted small" }, kind), !app.installed && h("div", { class: "muted small" }, t("backup.removedApp")), app.otherFolders.length > 0 && h("button", { type: "button", class: "text-btn muted small", title: app.otherFolders.join("\n"), onclick: () => backupFoldersDialog(app, loadBackups) }, t("backup.folders.row", { n: app.otherFolders.length, m: app.extraFolders.length }))))),
+      h("td", { class: app.installed && !app.included ? "warn-text" : "muted" }, !app.installed ? "—" : app.included ? daily : t("backup.notDaily")),
+      h("td", null, when(newest?.at, newest && t("backup.reason." + newest.reason))),
       h("td", { class: "num" }, size ? bytes(size) : "—"),
-      h("td", { class: "num" }, app.snapshots.length || "—"),
-      h("td", null, app.installed && h("input", { type: "checkbox", checked: app.included, "aria-label": t("backup.include", { title: app.title }), onchange: (e) => toggleInclude(app, e.target.checked) })),
-      h("td", null, h("div", { class: "row-actions" }, app.snapshots.length > 0 && button(t("backup.restore"), { class: "small", onclick: () => snapshotsDialog(app) }, "undo"), app.installed && h("button", { type: "button", class: "icon-btn", title: t("backup.now"), "aria-label": `${t("backup.now")}: ${app.title}`, onclick: () => backupNow(app) }, icon("archive")))),
+      h("td", { class: "muted" }, app.snapshots.length ? t("backup.copies", { n: app.snapshots.length }) : "—"),
+      h(
+        "td",
+        null,
+        h(
+          "div",
+          { class: "row-actions" },
+          app.installed && !app.included && s.enabled ? button(t("backup.turnOn"), { class: "small primary", onclick: () => toggleInclude(app, true) }, "play") : app.snapshots.length > 0 ? button(t("backup.restore"), { class: "small", onclick: () => snapshotsDialog(app) }, "undo") : app.installed && button(t("backup.nowShort"), { class: "small", onclick: () => backupNow(app) }, "archive"),
+          dots([
+            app.installed && { label: t("backup.now"), icon: "archive", run: () => backupNow(app) },
+            app.snapshots.length > 0 && { label: t("backup.restore") + "…", icon: "undo", run: () => snapshotsDialog(app) },
+            app.installed && !app.incus && !app.machine && { label: t("backup.folders.open"), icon: "folder", run: () => backupFoldersDialog(app, loadBackups) },
+            app.installed && { label: t(app.included ? "backup.dailyOff" : "backup.dailyOn"), icon: app.included ? "x" : "check", run: () => toggleInclude(app, !app.included) },
+            app.installed && { label: t("common.open"), icon: "arrow", href: page },
+          ]),
+        ),
+      ),
     );
   };
   const newest = b.server[0];
-  const serverNow = button(t("backup.now"), {
-    class: "small",
-    onclick: async () => {
-      serverNow.disabled = true;
-      try {
-        state.backups = await api("POST", "/api/backups/server", {});
-        toast(t("backup.serverDone"));
-      } catch (e) {
-        toast(errorText(e), "error");
-      }
-      renderBackupsBody();
-    },
-  }, "archive");
-  box.replaceChildren(
-    h("div", { class: "section-head" }, h("h2", null, t("backup.server"))),
+  const serverNow = async () => {
+    try {
+      state.backups = await api("POST", "/api/backups/server", {});
+      toast(t("backup.serverDone"));
+    } catch (e) {
+      toast(errorText(e), "error");
+    }
+    renderBackupsBody();
+  };
+  const serverRow = h(
+    "tr",
+    null,
+    h("td", null, h("div", { class: "with-icon" }, h("span", { class: "app-icon sm plus" }, icon("server")), h("div", { class: "stack-s backup-name" }, h("a", { class: "strong", href: "#/machines/this" }, state.overview?.system?.hostname ?? t("tree.thisServer")), h("div", { class: "muted small" }, t("backup.serverWhat"))))),
+    h("td", { class: "muted" }, t("backup.withEveryRun")),
+    h("td", null, when(newest?.at)),
+    h("td", { class: "num" }, newest ? bytes(newest.size) : "—"),
+    h("td", { class: "muted" }, b.server.length ? t("backup.copies", { n: b.server.length }) : "—"),
+    h("td", null, h("div", { class: "row-actions" }, button(t("backup.nowShort"), { class: "small", onclick: serverNow }, "archive"), dots([{ label: t("backup.now"), icon: "archive", run: serverNow }, { label: t("backup.serverHowOpen"), icon: "info", href: "#/backups/schedule" }]))),
+  );
+  const moreData = state.backupsMore;
+  const pveRow = (x) => {
+    const left = x.unprotected ?? [];
+    const sch = x.schedule;
+    return h(
+      "tr",
+      null,
+      h("td", null, h("div", { class: "with-icon" }, h("span", { class: "app-icon sm plus" }, icon("server")), h("div", { class: "stack-s backup-name" }, h("a", { class: "strong", href: `#/proxmox/${x.id}` }, x.name), h("div", { class: "muted small" }, t("backup.pveWhat", { n: (x.guests ?? []).filter((g) => !g.template).length }))))),
+      h("td", { class: "muted" }, sch?.on ? t("backup.everyDay", { time: sch.time }) : t("backup.pveOwn")),
+      h("td", null, left.length ? h("span", { class: "with-dot warn-text", title: left.map((g) => g.name || g.vmid).join(", ") }, h("i", { class: "dot partial" }), t("backup.pveLeft", { n: left.length })) : h("span", { class: "with-dot" }, h("i", { class: "dot running" }), t("backup.pveAll"))),
+      h("td", { class: "num" }, "—"),
+      h("td", { class: "muted" }, sch?.on ? t("backup.copies", { n: sch.keep }) : "—"),
+      h("td", null, h("div", { class: "row-actions" }, h("a", { class: "btn small", href: `#/proxmox/${x.id}` }, icon("arrow"), h("span", null, t("common.open"))))),
+    );
+  };
+  const haRow = (x) => {
+    const list = x.backups ?? [];
+    return h(
+      "tr",
+      null,
+      h("td", null, h("div", { class: "with-icon" }, h("span", { class: "app-icon sm plus" }, icon("bulb")), h("div", { class: "stack-s backup-name" }, h("a", { class: "strong", href: `#/house/ha/${x.id}` }, x.name), h("div", { class: "muted small" }, t("backup.haWhat"))))),
+      h("td", { class: "muted" }, t("backup.haOwn")),
+      h("td", null, when(list[0] && Date.parse(list[0].date), list[0]?.automatic ? t("backup.haAuto") : "")),
+      h("td", { class: "num" }, list[0]?.size ? bytes(list[0].size) : "—"),
+      h("td", { class: "muted" }, list.length ? t("backup.copies", { n: list.length }) : "—"),
+      h("td", null, h("div", { class: "row-actions" }, h("a", { class: "btn small", href: `#/house/ha/${x.id}` }, icon("arrow"), h("span", null, t("common.open"))))),
+    );
+  };
+  const own = b.apps.filter((a) => !a.incus && !a.machine);
+  const others = b.apps.filter((a) => a.incus || a.machine);
+  put(
+    box,
     h(
       "div",
-      { class: "card pad stack" },
-      h("div", { class: "setting plain" }, h("div", { class: "grow" }, h("strong", null, newest ? t("backup.serverLast", { when: ago(newest.at), size: bytes(newest.size), n: b.server.length }) : t("backup.serverNone")), h("p", { class: "muted small" }, t("backup.serverHint"))), h("div", { class: "row-actions" }, serverNow)),
-      h("p", { class: "muted small" }, t("backup.serverRestore")),
-      h("p", { class: "cmd" }, icon("terminal"), `sudo hata restore ${b.dir}`),
+      { class: "card table-wrap" },
+      h(
+        "table",
+        { class: "backups-table" },
+        h("thead", null, h("tr", null, h("th", null, t("backup.col.what")), h("th", null, t("backup.col.often")), h("th", null, t("backup.col.last")), h("th", { class: "num" }, t("backup.col.size")), h("th", null, t("backup.col.keeps")), h("th"))),
+        h(
+          "tbody",
+          null,
+          group(t("backup.group.server")),
+          serverRow,
+          group(t("nav.apps"), own.length ? "" : t("backup.noApps")),
+          own.map(row),
+          (others.length > 0 || moreData?.pve.length > 0) && group(t("nav.machines"), t("backup.machinesLead")),
+          others.map(row),
+          (moreData?.pve ?? []).map(pveRow),
+          moreData?.ha.length > 0 && group("Home Assistant", t("backup.haLead")),
+          (moreData?.ha ?? []).map(haRow),
+        ),
+      ),
     ),
-    h("div", { class: "section-head" }, h("h2", null, t("home.apps"))),
-    b.apps.some((a) => !a.incus)
-      ? h("div", { class: "card table-wrap" }, h("table", null, h("thead", null, h("tr", null, h("th", null, t("backup.col.app")), h("th", null, t("backup.col.last")), h("th", { class: "num" }, t("backup.col.size")), h("th", { class: "num" }, t("backup.col.count")), h("th", null, t("backup.col.daily")), h("th"))), h("tbody", null, b.apps.filter((a) => !a.incus).map(row))))
-      : h("p", { class: "card pad muted" }, t("backup.noApps")),
-    // the containers and virtual machines of this server, kept whole
-    ...(b.apps.some((a) => a.incus) ? [
-      h("div", { class: "section-head" }, h("div", null, h("h2", null, t("backup.incus.title")), h("p", { class: "muted small" }, t("backup.incus.lead")))),
-      h("div", { class: "card table-wrap" }, h("table", null, h("thead", null, h("tr", null, h("th", null, t("incus.col.name")), h("th", null, t("backup.col.last")), h("th", { class: "num" }, t("backup.col.size")), h("th", { class: "num" }, t("backup.col.count")), h("th", null, t("backup.col.daily")), h("th"))), h("tbody", null, b.apps.filter((a) => a.incus).map(row)))),
-    ] : []),
   );
+}
 
-  // the schedule form is redrawn only when it is not being edited
-  const side = document.getElementById("backup-side");
-  if (side.contains(document.activeElement)) return;
+/** When and where the daily run copies: the form of the tab "Schedule and place" */
+function backupScheduleForm(b, s) {
   const enabled = h("input", { type: "checkbox", checked: s.enabled });
   const time = h("input", { type: "time", value: s.time, class: "short mono", required: true });
   const keep = h("input", { type: "number", min: 1, max: 365, value: s.keep, class: "short mono", required: true });
   const dir = h("input", { value: s.dir, placeholder: b.dir, spellcheck: false, class: "mono" });
   const beforeUpdate = h("input", { type: "checkbox", checked: s.beforeUpdate });
   const error = h("p", { class: "error", role: "alert" });
-  side.replaceChildren(
-    h(
-      "form",
-      {
-        class: "card pad stack",
-        onsubmit: async (e) => {
-          e.preventDefault();
-          error.textContent = "";
-          try {
-            state.settings = await api("PUT", "/api/settings", { backup: { enabled: enabled.checked, time: time.value, keep: Number(keep.value), dir: dir.value.trim(), beforeUpdate: beforeUpdate.checked } });
-            toast(t("settings.saved"));
-            document.activeElement?.blur();
-            await loadBackups();
-          } catch (err) {
-            error.textContent = errorText(err);
-          }
-        },
+  return h(
+    "form",
+    {
+      class: "card pad stack",
+      onsubmit: async (e) => {
+        e.preventDefault();
+        error.textContent = "";
+        try {
+          state.settings = await api("PUT", "/api/settings", { backup: { enabled: enabled.checked, time: time.value, keep: Number(keep.value), dir: dir.value.trim(), beforeUpdate: beforeUpdate.checked } });
+          toast(t("settings.saved"));
+          document.activeElement?.blur();
+          await loadBackups();
+        } catch (err) {
+          error.textContent = errorText(err);
+        }
       },
-      h("h2", null, t("backup.schedule")),
-      h("label", { class: "check" }, enabled, h("span", null, h("strong", null, t("backup.enable")), h("span", { class: "muted small block" }, t("backup.enableHint")))),
-      h("div", { class: "field-row" }, field(`${t("backup.time")} · ${b.timezone}`, time), field(t("backup.keep"), keep)),
-      field(t("backup.dir"), dir, t("backup.dirHint")),
-      h("label", { class: "check" }, beforeUpdate, h("span", null, h("strong", null, t("backup.beforeUpdate")), h("span", { class: "muted small block" }, t("backup.beforeUpdateHint")))),
-      error,
-      h("footer", null, h("button", { class: "btn primary" }, t("settings.save"))),
-    ),
-    // replaceChildren writes a missing one out as the word "false"
-    hasModule("offsite") ? offsiteCard(b.offsite) : "",
-    h("p", { class: "card pad muted small" }, t("backup.how")),
+    },
+    h("h2", null, t("backup.schedule")),
+    h("label", { class: "check" }, enabled, h("span", null, h("strong", null, t("backup.enable")), h("span", { class: "muted small block" }, t("backup.enableHint")))),
+    h("div", { class: "field-row" }, field(`${t("backup.time")} · ${b.timezone}`, time), field(t("backup.keep"), keep)),
+    field(t("backup.dir"), dir, t("backup.dirHint")),
+    h("label", { class: "check" }, beforeUpdate, h("span", null, h("strong", null, t("backup.beforeUpdate")), h("span", { class: "muted small block" }, t("backup.beforeUpdateHint")))),
+    error,
+    h("footer", null, h("button", { class: "btn primary" }, t("settings.save"))),
   );
-  // a run of the copy shows no job: look again until it ends
-  clearTimeout(offsiteTimer);
-  if (b.offsite.running) offsiteTimer = setTimeout(() => state.route.view === "backups" && loadBackups(), 3000);
 }
+
+/** How the server itself is brought back on a new computer */
+const backupServerHow = (b) => h("section", { class: "card pad stack-s" }, h("h2", null, t("backup.server")), h("p", { class: "muted small" }, t("backup.serverHint")), h("p", { class: "muted small" }, t("backup.serverRestore")), h("p", { class: "cmd" }, icon("terminal"), `sudo hata restore ${b.dir}`));
 
 let offsiteTimer = 0;
 
@@ -20376,7 +20468,7 @@ function settingsFind() {
 /** The head of the section a part of the settings lives in, with its tabs, around what that part shows */
 function settingsFrame(section, ...content) {
   const r = state.route;
-  const [area, at] = r.view === "settings" ? [r.area, r.at] : section === "users" ? ["settings", "users"] : ["backups", "overview"];
+  const [area, at] = r.view === "settings" ? [r.area, r.at] : section === "users" ? ["settings", "users"] : ["backups", r.tab ?? "overview"];
   const opts = area === "settings" ? { meta: `${t("area.settings.lead")} · ${state.version}`, actions: settingsFind() } : area === "backups" ? { metaId: "backup-meta", actionsId: "backup-actions" } : {};
   return [h("div", { class: "settings" }, areaHead(area, at, opts), content)];
 }

@@ -2050,3 +2050,5 @@ button.mark:hover { border-color: var(--border-strong); color: var(--text); }
 .matrix.access .check.small { font-size: 12px; color: var(--muted); gap: 6px; margin: 0; }
 .group-row td { background: var(--surface-2); padding-top: 8px; padding-bottom: 8px; text-align: left !important; }
 .table-foot { margin: 0; padding: 12px 20px; border-top: 1px solid var(--border); background: var(--surface-2); border-radius: 0 0 var(--radius-lg) var(--radius-lg); }
+.backups-table td:last-child { width: 1%; white-space: nowrap; }
+.backups-table .row-actions { flex-wrap: nowrap; }
