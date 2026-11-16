@@ -1866,8 +1866,8 @@ setInterval(() => void widgetsTick(), 10_000);
 // --- The grid of Home: every card has a place and a size; they change only while editing the grid ---
 
 const gridUi = { at: null, arranging: false, undo: [], entry: null, drag: null, gone: new Set() };
-/** What "×" takes off Home while arranging; apps, folders and Hata's own two tiles stay (an app is taken off by removing the app) */
-const gridRemovable = (card) => ["block", "widget", "ha", "link"].includes(card.type);
+/** What has a "×" while arranging; a folder of tiles and Hata's own two tiles have none */
+const gridRemovable = (card) => ["block", "widget", "ha", "link", "files", "app"].includes(card.type);
 
 const cardKind = (card) => (card.type === "block" ? (card.id.startsWith("machine:") ? "machine" : card.id) : card.type === "widget" ? card.view : card.type);
 const boxOf = ({ x, y, w, h: tall }) => ({ x, y, w, h: tall });
@@ -1929,6 +1929,39 @@ function gridDone() {
     for (const card of layout.cards) Object.assign(card, at[tileKey(card)]);
   });
 }
+
+/** How a card is called in a question about it */
+function cardName(card) {
+  if (card.type === "block") return blockTitle(card.id);
+  if (card.type === "link") return card.title || linkHost(card.url);
+  if (card.type === "files") return card.path.split("/").filter(Boolean).pop() ?? card.path;
+  const it = tileTarget(card);
+  return it?.title ?? it?.name ?? card.name ?? card.entity ?? "";
+}
+
+/**
+ * Nothing leaves Home without a question that says what it is: an app is removed as an app (its own window,
+ * with its data's fate), a link goes with its address, a pinned folder is only unpinned, the rest is taken off
+ * and can be added back. `take` does it once the person agreed.
+ */
+function askRemoveCard(card, take) {
+  if (card.type === "app") {
+    const it = tileTarget(card);
+    if (!it) return;
+    return card.name.includes("@") ? removeMachineAppDialog(it.machine, it) : removeDialog(it);
+  }
+  const name = cardName(card);
+  const kind = card.type === "link" ? "link" : card.type === "files" ? "files" : "card";
+  confirmAction({
+    title: t(`home.take.${kind}.title`, { name }),
+    lead: t(`home.take.${kind}.lead`, { name, url: card.url ?? "", path: card.path ?? "" }),
+    label: t(`home.take.${kind}.go`),
+    run: async () => void (await take()),
+  });
+}
+
+/** The "×" of a card while arranging: asked first; what is only a matter of Home goes with "Done" */
+const askTake = (card) => askRemoveCard(card, () => (card.type === "files" ? pinFolder(card.path, false) : gridTake(card)));
 
 /** A card taken off while arranging: it goes with "Done", comes back with "Undo" or "Cancel" */
 function gridTake(card) {
@@ -2045,7 +2078,7 @@ function gridCard(card, free) {
   const box = gridUi.at[tileKey(card)];
   const body = gridBody(card, box);
   if (!body) return null;
-  const el = h("div", { class: "pg-card", "data-card": tileKey(card) }, body, gridUi.arranging && ["n", "e", "s", "w", "ne", "se", "sw", "nw"].map((side) => h("span", { class: `pg-side pg-${side}`, "data-side": side })), gridUi.arranging && gridRemovable(card) && h("button", { type: "button", class: "icon-btn pg-remove", title: t("home.removeBlock"), "aria-label": t("home.removeBlock"), onpointerdown: (e) => e.stopPropagation(), onclick: () => gridTake(card) }, icon("x")));
+  const el = h("div", { class: "pg-card", "data-card": tileKey(card) }, body, gridUi.arranging && ["n", "e", "s", "w", "ne", "se", "sw", "nw"].map((side) => h("span", { class: `pg-side pg-${side}`, "data-side": side })), gridUi.arranging && gridRemovable(card) && h("button", { type: "button", class: "icon-btn pg-remove", title: t("home.removeBlock"), "aria-label": t("home.removeBlock"), onpointerdown: (e) => e.stopPropagation(), onclick: () => askTake(card) }, icon("x")));
   gridPosition(el, box, free);
   if (gridUi.arranging) el.addEventListener("pointerdown", (e) => gridStart(e, card, el));
   el.addEventListener("contextmenu", (e) => {
@@ -2054,7 +2087,7 @@ function gridCard(card, free) {
     const picked = getSelection();
     if (picked && !picked.isCollapsed && picked.containsNode(e.target, true)) return;
     e.preventDefault();
-    menuAt({ x: e.clientX, y: e.clientY }, null, [mayArrange() && { label: t("grid.edit"), icon: "grid", run: gridEdit }, { label: t("home.removeBlock"), icon: "trash", danger: true, run: () => removeBlock(card.id) }].filter(Boolean));
+    menuAt({ x: e.clientX, y: e.clientY }, null, [mayArrange() && { label: t("grid.edit"), icon: "grid", run: gridEdit }, { label: t("home.removeBlock"), icon: "trash", danger: true, run: () => askRemoveCard(card, () => removeBlock(card.id)) }].filter(Boolean));
   });
   return el;
 }
@@ -2326,10 +2359,10 @@ function tileMenu(item, point = null) {
       list.splice(index, 1);
       for (const inner of folder.items) addCard(next, inner);
     })),
-    item.type === "link" && entry(t("home.removeLink"), "trash", () => removeLinkDialog(item), "danger"),
-    item.type === "ha" && entry(t("ha.offHome"), "trash", () => changeLayout((next) => void takeTile(next, key)), "danger"),
-    item.type === "widget" && entry(t("ha.offHome"), "trash", () => changeLayout((next) => void takeTile(next, key)), "danger"),
-    item.type === "files" && entry(t("files.unpin"), "home", () => pinFolder(item.path, false)),
+    item.type === "link" && entry(t("home.removeLink"), "trash", () => askRemoveCard(item, () => changeLayout((next) => void takeTile(next, key))), "danger"),
+    item.type === "ha" && entry(t("ha.offHome"), "trash", () => askRemoveCard(item, () => changeLayout((next) => void takeTile(next, key))), "danger"),
+    item.type === "widget" && entry(t("ha.offHome"), "trash", () => askRemoveCard(item, () => changeLayout((next) => void takeTile(next, key))), "danger"),
+    item.type === "files" && entry(t("files.unpin"), "home", () => askRemoveCard(item, () => pinFolder(item.path, false))),
   );
   if (point) placeAt(dialog, point);
 }
@@ -6325,7 +6358,6 @@ async function pveNewDialog(x, kind = "lxc") {
   const [docker, dockerRow] = tick(t("pve.new.docker"), t("pve.new.dockerHint"));
   const [onboot, onbootRow] = tick(t("pve.onboot"), null);
   const [start, startRow] = tick(t("pve.vm.start"), t("pve.vm.startHint"));
-  client.addEventListener("change", () => ((docker.disabled = !client.checked), !client.checked && (docker.checked = false)));
   const error = h("p", { class: "error", role: "alert" });
   const lead = h("p", { class: "muted small" });
   const clientHint = clientRow.querySelector(".block");

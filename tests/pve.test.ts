@@ -176,7 +176,12 @@ test("a new container's answers refused field by field", () => {
   expect(field({ hostname: "-x" })).toBe("hostname");
   expect(field({ template: "local:vztmpl/other.tar.zst" })).toBe("template");
   expect(field({ template: offer.templates.i5[1] })).toBe("templateNoClient");
-  expect(field({ template: offer.templates.i5[1], client: false })).toBe("");
+  // a template without a package manager Hata knows takes neither the client nor Docker
+  expect(field({ template: offer.templates.i5[1], client: false })).toBe("templateNoClient");
+  expect(field({ template: offer.templates.i5[1], client: false, docker: false })).toBe("");
+  // Docker without the client is a choice of its own
+  expect(readNewGuest({ ...answers, client: false }, offer)).toMatchObject({ client: false, docker: true });
+  expect(setupScript({ family: "apt", docker: true, client: false }, "", "ssh-ed25519 AAAAkey hata-setup")).toContain("get.docker.com");
   expect(field({ pool: "" })).toBe("pool");
   expect(field({ pool: "" }, { ...offer, free: true })).toBe("");
   expect(field({ address: "192.168.1.300/24", gateway: "192.168.1.1" })).toBe("address");
