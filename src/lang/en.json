@@ -5877,6 +5877,8 @@
   "rename.old": "The address {address} stops answering: bookmarks and devices that use it need the new one. A whole name with another ending (hata.lan) can be typed too.",
   "rename.save": "Rename",
   "rename.done": "The server is called {name} now",
+  "rename.anyway": "Rename anyway",
+  "error.system.renameCopying": "Files are being copied to the network folders right now ({count}), among them {file}. Renaming restarts the network folders and cuts the copy: such a file stays at its full size with an empty end. Wait for the copy to finish, or rename anyway.",
   "error.system.badName": "A name is Latin letters, digits and hyphens, up to 63: one word (hata) or a whole home-network name (hata.lan).",
   "error.system.renameDenied": "Hata does not run as root here, so it cannot rename the computer.",
   "error.system.renameFailed": "The computer could not be renamed: {message}",

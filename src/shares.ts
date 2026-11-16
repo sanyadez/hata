@@ -20,7 +20,7 @@ import { answersItself, homeLinks, offer, offering, type Service } from "./mdns"
 import { answered } from "./netroom";
 import { installCommand, installPackage, PATH, run } from "./packages";
 import { localDomain } from "./site";
-import { adiskTxt, changedShares, isOurs, nameFor, nameLine, parseUsers, shareName, SMB_CONF, SMB_CONF_BEFORE, smbConf, UNIX_NAME_RE, unixName, USER_MAP, userMap, writablePath, timeMachineOf, type Access, type Share } from "./smbconf";
+import { adiskTxt, changedShares, isOurs, openForWriting, nameFor, nameLine, parseUsers, shareName, SMB_CONF, SMB_CONF_BEFORE, smbConf, UNIX_NAME_RE, unixName, USER_MAP, userMap, writablePath, timeMachineOf, type Access, type Share } from "./smbconf";
 import { refreshWsd, wsdStatus } from "./wsd";
 
 const PACKAGE = "samba";
@@ -231,6 +231,13 @@ export interface SharesReport {
    */
   announced: { name: string; browse: boolean; windows: boolean; error: string };
   shares: ShareReport[];
+}
+
+/** The files being written over the network folders right now: what a restart of Samba would cut */
+export async function writingNow(): Promise<string[]> {
+  if (!Bun.which("smbstatus", { PATH })) return [];
+  const said = await run(["smbstatus", "-j"], 10_000);
+  return said.code === 0 ? openForWriting(said.out) : [];
 }
 
 /** Whether a shared folder is there; one on a network place whose server is silent is not, one not heard of yet is taken as there */

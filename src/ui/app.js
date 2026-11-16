@@ -20974,13 +20974,15 @@ function renameServerDialog(done) {
   const say = () => (will.textContent = typed() ? t("rename.will", { address: address() }) : "");
   name.oninput = say;
   say();
+  // a copy to a network folder is going on: said once, and the next press renames all the same
+  let anyway = false;
   const save = async (e) => {
     e.preventDefault();
     error.textContent = "";
     const go = e.submitter;
     if (go) go.disabled = true;
     try {
-      const said = await api("PUT", "/api/system/name", { name: typed() });
+      const said = await api("PUT", "/api/system/name", { name: typed(), anyway });
       state.settings = said.settings;
       if (state.overview?.system) state.overview.system.hostname = said.host;
       dialog.close();
@@ -20992,6 +20994,10 @@ function renameServerDialog(done) {
     } catch (err) {
       error.textContent = errorText(err);
       if (go) go.disabled = false;
+      if (err instanceof ApiError && err.code === "system.renameCopying") {
+        anyway = true;
+        if (go) go.querySelector("span").textContent = t("rename.anyway");
+      }
     }
   };
   dialog = openDialog(

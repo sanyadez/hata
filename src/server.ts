@@ -8,7 +8,7 @@
  * - a request that changes something must come from this origin (CSRF) and carry JSON.
  */
 import { existsSync, rmSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { homedir, networkInterfaces } from "node:os";
 import type { Server, ServerWebSocket } from "bun";
 import { recent, record, history } from "./activity";
@@ -29,7 +29,7 @@ import { APP_NAME_RE, dumpCompose } from "./appform";
 import { findInTrash, trashSizeOn } from "./trash";
 import { discover as discoverPlaces, installFor as installPlaceTools, listPlaces, placesDown, removePlace, retryPlace, savePlace, shares as placeShares } from "./netplaces";
 import { answers, networkMountOf } from "./netroom";
-import { addShare, changeShare, installSamba, listShares, refreshShares, removeShare, shareTrouble } from "./shares";
+import { addShare, changeShare, installSamba, listShares, refreshShares, removeShare, shareTrouble, writingNow } from "./shares";
 import { checkDisks, diskHealth, installTool, listDisks, startDisks, startSelfTest } from "./disks";
 import { lookAtPools, noteTypes, poolCheck, poolClear, PoolError, poolsReport, poolsTrouble } from "./raid";
 import { fills, measureFills, startFills } from "./fills";
@@ -1263,7 +1263,11 @@ async function api(req: Request, url: URL, server: Server<unknown>): Promise<Res
   }
 
   if (path === "/api/system/name" && method === "PUT") {
-    const name = await renameServer((await body(req)).name, user.name);
+    const asked = await body(req);
+    // Samba takes a new name only at a start, and a start cuts whatever is being copied to the folders
+    const writing = asked.anyway === true ? [] : await writingNow();
+    if (writing.length) return fail(409, "system.renameCopying", { file: basename(writing[0]!), count: writing.length });
+    const name = await renameServer(asked.name, user.name);
     refreshLocalNames();
     // the network folders are announced under the same name
     refreshShares();

@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { changedShares } from "../src/smbconf";
+import { changedShares, openForWriting } from "../src/smbconf";
 
 const conf = (torrent: string, extra = "") => `# Written by Hata
 [global]
@@ -26,4 +26,18 @@ test("the folders whose rights changed are the ones to close for connected devic
   // a change of the computer's own settings closes nothing
   expect(changedShares(before.replace("netbios name = test", "netbios name = hata"), before)).toEqual([]);
   expect(changedShares(null, before)).toEqual([]);
+});
+
+test("files being written over the network folders are told from what smbstatus prints", () => {
+  const open = (write: boolean) => ({ opens: { "1/8": { access_mask: { READ_DATA: true, WRITE_DATA: write, APPEND_DATA: false } } } });
+  const said = JSON.stringify({
+    open_files: {
+      "/mnt/d/Films/.": { filename: ".", ...open(true) },
+      "/mnt/d/Films/new.mkv": { filename: "new.mkv", ...open(true) },
+      "/mnt/d/Films/watched.mkv": { filename: "watched.mkv", ...open(false) },
+    },
+  });
+  expect(openForWriting(said)).toEqual(["/mnt/d/Films/new.mkv"]);
+  expect(openForWriting(JSON.stringify({ sessions: {} }))).toEqual([]);
+  expect(openForWriting("No locked files")).toEqual([]);
 });
