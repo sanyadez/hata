@@ -2799,7 +2799,7 @@ function renderHome() {
   };
   shell(
     h("div", { id: "grid-bar" }),
-    h("div", { class: "page-head home-head", id: "home-head" }, h("div", null, h("h1", null, greeting), h("p", { class: "meta", id: "host" }, " ")), h("div", { class: "home-head-side" }, h("div", { class: "counts", id: "counts" }), h("span", { id: "grid-edit-slot" }))),
+    h("div", { class: "card page-head home-head", id: "home-head" }, h("div", null, h("h1", null, greeting), h("p", { class: "meta", id: "host" }, " ")), h("div", { class: "home-head-side" }, h("div", { class: "counts", id: "counts" }), h("span", { id: "grid-edit-slot" }))),
     h("div", { class: "pg", id: "pg" }),
   );
   Object.assign(gridUi, { arranging: false, undo: [], entry: null, drag: null });
@@ -9792,8 +9792,7 @@ function renderBackupsBody() {
       : h("p", { class: "card pad muted" }, t("backup.noApps")),
     // the containers and virtual machines of this server, kept whole
     ...(b.apps.some((a) => a.incus) ? [
-      h("div", { class: "section-head" }, h("h2", null, t("backup.incus.title"))),
-      h("p", { class: "muted small" }, t("backup.incus.lead")),
+      h("div", { class: "section-head" }, h("div", null, h("h2", null, t("backup.incus.title")), h("p", { class: "muted small" }, t("backup.incus.lead")))),
       h("div", { class: "card table-wrap" }, h("table", null, h("thead", null, h("tr", null, h("th", null, t("incus.col.name")), h("th", null, t("backup.col.last")), h("th", { class: "num" }, t("backup.col.size")), h("th", { class: "num" }, t("backup.col.count")), h("th", null, t("backup.col.daily")), h("th"))), h("tbody", null, b.apps.filter((a) => a.incus).map(row)))),
     ] : []),
   );
@@ -20787,7 +20786,7 @@ function renderUsers() {
         ),
       ),
     ),
-    h("p", { class: "muted small" }, t("users.rolesHint")),
+    h("p", { class: "card pad muted small" }, t("users.rolesHint")),
     requireTwoFactorRow(),
     h("div", { class: "columns" }, h("section", null, accessMatrix()), h("aside", { class: "side" }, invitesCard(), signInLog())),
     ),
@@ -20936,7 +20935,7 @@ function accessMatrix() {
     access.apps.length
       ? h("div", { class: "card table-wrap" }, h("table", { class: "matrix" }, h("thead", null, h("tr", null, h("th", null, t("backup.col.app")), h("th", null, t("access.signIn")), h("th", null, t("access.everyone")), people.map((u) => h("th", null, u.name, u.role === "guest" && h("span", { class: "muted" }, ` · ${t("user.role.guest")}`))))), h("tbody", null, access.apps.map(row))))
       : h("p", { class: "card pad muted" }, t("backup.noApps")),
-    h("p", { class: "muted small" }, t("access.how")),
+    h("p", { class: "card pad muted small" }, t("access.how")),
   ];
 }
 

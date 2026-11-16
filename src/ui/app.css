@@ -1039,7 +1039,6 @@ body.term-page { margin: 0; height: 100dvh; display: flex; flex-direction: colum
 /* --- The look chosen in the settings ----------------------------------------------------------- */
 
 /* the picture lies behind everything, under a veil of the background colour that keeps text readable */
-:root.has-wallpaper #view .home-head { background: none !important; backdrop-filter: none !important; border: 0 !important; padding: 0 !important; text-shadow: 0 0 2px var(--bg), 0 0 6px var(--bg), 0 0 16px var(--bg); }
 :root.has-wallpaper body::before { content: ""; position: fixed; inset: 0; z-index: -1; background: linear-gradient(color-mix(in srgb, var(--bg) var(--wallpaper-dim), transparent), color-mix(in srgb, var(--bg) var(--wallpaper-dim), transparent)), var(--wallpaper) center / cover no-repeat; }
 :root.has-wallpaper :is(.card, .tile) { background: color-mix(in srgb, var(--surface) 88%, transparent); backdrop-filter: blur(16px); }
 .swatches { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
@@ -2034,3 +2033,5 @@ dialog.nav-sheet[open] { display: grid; gap: 14px; padding: 10px 14px calc(14px 
 .ha-filter { flex-wrap: wrap; justify-content: flex-start; }
 .ha-filter input[type="search"] { flex: 1 1 220px; min-width: 0; }
 .ha-filter .check { margin: 0; }
+.home-head.card { align-items: center; padding: 16px 20px; }
+.home-head.card h1 { font-size: 24px; }
