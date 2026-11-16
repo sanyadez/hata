@@ -98,7 +98,7 @@ import { addQbit, addTorrents, changeQbit, qbitFound, qbitOfApps, qbitServer, qb
 import { act as haAct, addServer as addHa, allowProxy as haAllowProxy, changeServer as changeHa, discover as discoverHa, entities as haEntities, forgetUser as haForgetUser, homeAssistantTrouble, installUpdate as haInstallUpdate, makeBackup as haMakeBackup, removeServer as removeHa, renameEntity as haRename, server as haServer, servers as haServers, tileStates as haTileStates, visibleTo as haVisibleTo } from "./homeassistant";
 import { sees as haSees } from "./ha";
 import { dockerInfo, type DockerInfo, listContainers, watchEvents } from "./docker";
-import { abortUpload, copyIn, resumeCopies, locate, validName, archivePlan, dropFavorites, emptyTrash, favoritesOf, setFavorite, extract as extractArchive, find as findFiles, list as listFiles, makeFile, makeFolder, pinFolder, pinnedFolders, readable, readText, remove as removeFiles, rename as renameFile, restore as restoreFiles, setTrashDays, startTrash, summary as filesSummary, transfer, trash, upload, writeText } from "./files";
+import { abortUpload, copyIn, sizeOf, resumeCopies, locate, validName, archivePlan, dropFavorites, emptyTrash, favoritesOf, setFavorite, extract as extractArchive, find as findFiles, list as listFiles, makeFile, makeFolder, pinFolder, pinnedFolders, readable, readText, remove as removeFiles, rename as renameFile, restore as restoreFiles, setTrashDays, startTrash, summary as filesSummary, transfer, trash, upload, writeText } from "./files";
 import { adoptProject, casaosState, containerDraft, importCount, importList, moveInCasaos, projectDraft, rebuildContainer } from "./import";
 import { accessOf, dropAccess, dropUser, gateTarget, guard, guardsOf, mayOpen, otherPorts, MAX_APP_BODY, page, passToApp, setAccess, startGates, tunnelHandlers } from "./gate";
 import { addName, changeName, domainsReport, nameOf as domainName, onNamesChanged, removeName, upstream as domainUpstream } from "./domains";
@@ -2473,6 +2473,7 @@ async function files(req: Request, url: URL, server: Server<unknown>, by: string
   }
   if (path === "/api/files/raw" && method === "GET") return sendFile(req, q.get("path"), q.get("download") === "1");
   if (path === "/api/files/summary" && method === "POST") return json(await filesSummary((await body(req)).paths));
+  if (path === "/api/files/size" && method === "POST") return json(await sizeOf((await body(req)).path));
   if (path === "/api/files/zip" && method === "GET") {
     const plan = await archivePlan(q.getAll("path"));
     server.timeout(req, 0);
@@ -2592,6 +2593,7 @@ async function memberFiles(req: Request, url: URL, server: Server<unknown>, user
     if (path === "/api/files/text" && method === "GET") return !!read(q.get("path"));
     if (path === "/api/files/text" && method === "PUT") return !!write(data.path);
     if (path === "/api/files/summary" && method === "POST") return paths(data.paths).every((p) => rights.need(p, "read", { entry: true }));
+    if (path === "/api/files/size" && method === "POST") return !!rights.need(data.path, "read", { entry: true });
     if (path === "/api/files/zip" && method === "GET") return q.getAll("path").every(read);
     if (path === "/api/files/find" && method === "GET") return !!read(q.get("path"));
     if ((path === "/api/files/folder" || path === "/api/files/file") && method === "POST") return !!write(data.path);

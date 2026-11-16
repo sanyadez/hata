@@ -37,6 +37,8 @@ const LIST_LIMIT = 5000;
 export const MAX_TEXT_BYTES = 1024 * 1024;
 /** Counting what a removal takes with it stops here */
 const SUMMARY_LIMIT = 200_000;
+/** How long counting a folder's size may take */
+const SIZE_LIMIT_MS = 120_000;
 /** A file that is being uploaded, in the folder it will land in; not listed */
 const PART_RE = /^\.hata-upload-[a-z0-9]{8,32}$/;
 const PART_MAX_AGE = 24 * 3600_000;
@@ -449,6 +451,19 @@ export async function summary(paths: unknown): Promise<Summary> {
   };
   for (const path of pathList(paths)) await walk(locate(path));
   return out;
+}
+
+/** How much room a folder or file takes on its disk: `du` in a child, so a folder of a million files does not hold the server */
+export async function sizeOf(path: unknown): Promise<{ size: number }> {
+  const abs = locate(path);
+  if (!lstatOrNull(abs)) throw new AppError("files.notFound", 404);
+  const du = Bun.spawn(["du", "-sk", "--", abs], { stdout: "pipe", stderr: "ignore", signal: AbortSignal.timeout(SIZE_LIMIT_MS) });
+  const said = await new Response(du.stdout).text();
+  await du.exited;
+  // folders it may not read make du fail, yet the number it gives is still what it could count
+  const kb = Number(/^(\d+)\s/.exec(said)?.[1]);
+  if (!Number.isFinite(kb)) throw new AppError("files.sizeTooLong", 504);
+  return { size: kb * 1024 };
 }
 
 export function makeFolder(dir: unknown, name: unknown): string {

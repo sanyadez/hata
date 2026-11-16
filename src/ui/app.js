@@ -11540,6 +11540,7 @@ function folderMenu(at) {
     item(t("files.upload"), "upload", () => document.querySelector("#files-main .page-head input[type=file]")?.click(), listing.readOnly),
     listing.entries.length > 0 && item(t("files.selectAll"), "check", () => ((filesUi.selected = new Set(listing.entries.map((entry) => entry.name))), renderFilesBody())),
     listing.entries.length > 0 && item(t("files.downloadZip"), "download", () => downloadEntries(listing.entries.filter((entry) => entry.type !== "other"))),
+    item(t("files.size"), "disk", () => sizeDialog(path, path.split("/").pop() || "/")),
     item(t("files.copyPath"), "link", () => copyText(path)),
     !listing.machine && item(t(isFavorite(path) ? "files.unfavorite" : "files.favorite"), "star", () => favorite(path, !isFavorite(path))),
     !listing.machine && isAdmin() && item(t(listing.pinned.includes(path) ? "files.unpin" : "files.pin"), "home", () => pinFolder(path, !listing.pinned.includes(path))),
@@ -11573,12 +11574,26 @@ function entryMenu(entry, at) {
     entry.type === "dir" && !filesMachine() && isAdmin() && (state.files.pinned.includes(path) ? item(t("files.unpin"), "home", () => pinFolder(path, false)) : item(t("files.pin"), "home", () => pinFolder(path, true))),
     entry.type === "dir" && !filesMachine() && isAdmin() && item(t(state.files.shared.includes(path) ? "files.shareSettings" : "files.share"), "share", () => shareDialog(path)),
     entry.type === "dir" && machineLet(filesMachine()) && item(t("machines.people.shareHere"), "share", () => machineShareDialog(machineLet(filesMachine()), path)),
+    entry.type === "dir" && item(t("files.size"), "disk", () => sizeDialog(path, entry.name)),
     !state.files.readOnly && item(t("files.rename"), "edit", () => renameDialog(entry)),
     !state.files.readOnly && item(t("files.move"), "arrow", () => transferDialog([entry], false)),
     item(t("files.copy"), "copy", () => transferDialog([entry], true)),
     !state.files.readOnly && item(t("files.delete"), "trash", () => deleteDialog([entry]), "danger"),
   );
   if (at) placeAt(dialog, at);
+}
+
+/** How much room a folder takes: counted when asked for, since a large one takes a while */
+function sizeDialog(path, name) {
+  const body = h("div", { class: "stack" }, h("p", { class: "muted" }, t("files.sizeCounting")), waitMark());
+  let dialog;
+  dialog = openDialog("confirm", h("h2", { class: "wrap" }, name), body, h("footer", null, closeButton(() => dialog)));
+  // a machine's client counts file by file and stops at its limit
+  const asked = filesMachine() ? api("POST", filesApi("/summary"), { paths: [path] }) : api("POST", "/api/files/size", { path });
+  asked.then(
+    (r) => put(body, h("p", null, t(r.truncated ? "files.sizeOver" : "files.sizeIs", { size: bytes(r.size) })), h("p", { class: "muted small mono wrap" }, path)),
+    (e) => put(body, h("p", { class: "error", role: "alert" }, errorText(e))),
+  );
 }
 
 /** Asks for one name: a new folder, a new name */
