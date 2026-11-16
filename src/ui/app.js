@@ -1644,7 +1644,8 @@ function tileContent(item, title, sub, { badges = null, where = null, big = "" }
   return [
     h("span", { class: "tile-head" }, tileIcon(item), big && h("span", { class: "tile-big" }, big), h("span", { class: "tile-badges" }, badges)),
     h("span", { class: "tile-name", title }, title),
-    h("span", { class: "tile-sub" }, sub),
+    // one line under every name: what does not fit is cut, and the whole of a plain text is in its title
+    h("span", { class: "tile-sub", ...(typeof sub === "string" ? { title: sub } : {}) }, sub),
     where,
   ];
 }

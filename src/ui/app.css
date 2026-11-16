@@ -328,7 +328,6 @@ button.tile { padding: 0; font: inherit; color: inherit; text-align: left; curso
 .tile-text { display: grid; gap: 3px; min-width: 0; }
 .tile-top { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .menu-item .tile-name { white-space: normal; }
-.tile.add .tile-sub { white-space: normal; }
 .tile.restarting .tile-sub { color: var(--danger); }
 
 .app-icon { width: 40px; height: 40px; border-radius: 10px; object-fit: contain; flex: none; }
@@ -497,7 +496,6 @@ dialog.tile-folder header { justify-content: space-between; }
 .tile-where { display: flex; align-items: center; gap: 5px; color: var(--faint); font: 12px var(--font-mono); min-width: 0; }
 .tile-where .ico { width: 12px; height: 12px; flex: none; }
 .tile.on .tile-sub, .tile.kind-ha.on .tile-big { color: var(--accent-text); }
-.tile.add .tile-sub { white-space: normal; }
 .tile .tile-room { margin-top: 4px; }
 /* the button of what can be done shows where the pointer is; the marks step aside for it */
 .tile-open { position: absolute; top: 8px; right: 8px; display: grid; place-items: center; width: 28px; height: 28px; border-radius: var(--radius-sm); color: var(--muted); background: var(--surface-2); opacity: 0; }
