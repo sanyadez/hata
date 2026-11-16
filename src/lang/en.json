@@ -566,6 +566,7 @@
   "update.title": "Update {title}",
   "update.guessed": "This app was installed before Hata started keeping the store's original file, so only your ports, folders and variable values are known to be yours. Any other manual edits will be replaced by the store's version — check the list.",
   "update.matched": "This app has no record of the store it came from; the {store} store has an app with the same name. Only its ports, folders and variable values are kept; everything else will be replaced by the store's version — check the list.",
+  "update.why": "What the store says about this change",
   "update.before": "Before you update",
   "update.conflicts": "Your values kept",
   "update.conflictsLead": "You and the store changed the same setting. Your value stays; the store's new value is shown below it.",

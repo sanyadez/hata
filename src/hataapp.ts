@@ -43,6 +43,8 @@ export interface HataMeta {
   tagline: Text;
   description: Text;
   notes?: Text;
+  /** What the last change of the app's files does and why, for those who have the app: said in the update window */
+  changes?: Text;
   login?: Login;
   /** The category's name in the store's languages */
   category: Text;
@@ -299,6 +301,7 @@ export function readIndexApp(entry: unknown, base: string, categories: Record<st
       tagline: cleanText(entry.tagline) ?? "",
       description: cleanText(entry.description) ?? "",
       ...(cleanText(entry.notes) ? { notes: cleanText(entry.notes)! } : {}),
+      ...(cleanText(entry.changes) ? { changes: cleanText(entry.changes)! } : {}),
       ...(login ? { login } : {}),
       category: categories[category] ?? category,
       developer: str(entry.developer),

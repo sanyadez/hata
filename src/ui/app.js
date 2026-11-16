@@ -3254,6 +3254,8 @@ async function storeUpdateDialog(app) {
     h("header", null, h("div", { class: "grow" }, h("h2", null, t("update.title", { title: app.title })), h("p", { class: "muted small" }, t(lead, { store: plan.store, version: plan.staying }))), closeX(() => dialog)),
     !plan.exact && h("p", { class: "banner small" }, t(plan.recorded ? "update.guessed" : "update.matched", { store: plan.store })),
     plan.notes && h("div", { class: "tips prose" }, h("strong", null, t("update.before")), md(plan.notes)),
+    // the store's own words on why it changed the app's files: what the lines below cannot say
+    plan.why && h("div", { class: "tips prose" }, h("strong", null, t("update.why", { store: plan.store })), h("p", null, plan.why)),
     versions.length > 0 && h("div", { class: "update-versions" }, versions.map((w) => h("div", { class: "update-version" }, h("span", { class: "muted" }, versions.length > 1 || w.name.replace(/[-_]/g, "") !== app.name.replace(/[-_]/g, "") ? w.name : t("update.version")), h("span", { class: "mono" }, w.from), icon("arrow"), h("strong", { class: "mono" }, w.to)))),
     others.length > 0 && h("div", { class: "stack" }, h("h3", null, t(versions.length ? "update.also" : "update.what")), h("ul", { class: "update-words" }, others.map(word))),
     words.length === 0 && fromStore.length > 0 && h("p", { class: "muted small" }, t("update.small")),

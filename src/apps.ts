@@ -1139,6 +1139,9 @@ function hataPlan(app: StoreApp, compose: Compose, origin: HataFile | null, reco
   return { store: app.store, hata, recorded, exact: !!origin?.base, changes, merged, current: ours, filesChanged, base: theirs };
 }
 
+/** The store's own words on what its newer files change, when the installed ones do not say the same */
+export const updateChanges = (name: string, plan: StoreUpdate, lang: string): string => (plan.hata ? changedNotes(hataMetaOf(name)?.changes, plan.hata.meta.changes, lang) : "");
+
 /** The store's notes of the newer version, when they say something the installed ones do not */
 export const updateNotes = (name: string, plan: StoreUpdate, lang: string): string => (plan.hata ? changedNotes(hataMetaOf(name)?.notes, plan.hata.meta.notes, lang) : "");
 
