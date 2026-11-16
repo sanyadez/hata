@@ -114,6 +114,9 @@ const ICONS = {
   speaker: "M4 9h4l5-4v14l-5-4H4zM16.5 9.5a3.5 3.5 0 0 1 0 5M19 7a7 7 0 0 1 0 10",
   battery: "M3 8h15v8H3zM21 11v2M6 11v2M9 11v2",
   bluetooth: "M7 7l10 10-5 5V2l5 5L7 17",
+  next: "M5 5l10 7-10 7zM19 5v14",
+  previous: "M19 5L9 12l10 7zM5 5v14",
+  shuffle: "M4 7h3l10 10h3M4 17h3l3-3M14 10l3-3h3M18 4l3 3-3 3M18 14l3 3-3 3",
   keyboard: "M3 6h18v12H3zM7 10h.01M11 10h.01M15 10h.01M7 14h10",
   mouse: "M12 3a5 5 0 0 1 5 5v8a5 5 0 0 1-10 0V8a5 5 0 0 1 5-5zM12 7v3",
   headphones: "M4 14v-2a8 8 0 0 1 16 0v2M4 14h3v6H5a1 1 0 0 1-1-1zM20 14h-3v6h2a1 1 0 0 0 1-1z",
@@ -414,6 +417,7 @@ function parseRoute() {
     const tab = (parts[0] === "house" && areaTabs("house").find((x) => x.id === parts[1])) || areaTabs("house")[0];
     if (!tab) return { view: "ha", id: "", hash: "#/house" };
     const id = parts[0] === "house" ? (parts[2] ?? "") : "";
+    if (tab.view === "music") return { view: "music", hash: "#/house/music" };
     return tab.view === "tv" ? { view: "tv", hash: "#/house/tv" } : { view: tab.view, id, house: true, hash: tab.hash + (id ? "/" + id : "") };
   }
   // both live in Settings; their own old addresses still lead there
@@ -484,6 +488,7 @@ const AREAS = {
     { id: "ha", hash: "#/house/ha", view: "ha", module: "integrations" },
     { id: "cameras", hash: "#/house/cameras", view: "frigate", module: "integrations" },
     { id: "tv", hash: "#/house/tv", view: "tv", module: "tv" },
+    { id: "music", hash: "#/house/music", view: "music", module: "music" },
     { id: "torrents", hash: "#/house/torrents", view: "qbit", module: "integrations", when: () => foreignTorrents() },
   ],
   network: [
@@ -549,7 +554,7 @@ function areaOf(route = state.route) {
   if (["files", "trash", "myhata"].includes(view)) return "files";
   if (["machines", "machine", "server", "proxmox", "containers", "instance", "guest", "terminal"].includes(view)) return "machines";
   if (view === "qbit") return route.house || !torrentsApp(route.id) ? "house" : "apps";
-  if (["integrations", "ha", "frigate", "tv"].includes(view)) return "house";
+  if (["integrations", "ha", "frigate", "tv", "music"].includes(view)) return "house";
   if (view === "backups") return "backups";
   if (view === "users") return "settings";
   return view === "home" || view === "activity" ? "home" : "";
@@ -598,6 +603,7 @@ function onRoute() {
   if (state.route.view === "import") void loadImport();
   if (state.route.view === "welcome") void loadWelcome();
   if (state.route.view === "tv") void loadTv();
+  if (state.route.view === "music") void loadMusic();
   if (state.route.view === "app") void loadApp();
   if (["machines", "machine", "proxmox", "guest", "instance", "containers"].includes(state.route.view)) void loadMachines();
   if (state.route.view === "machines") void loadPve();
@@ -674,6 +680,8 @@ function startEvents() {
       void loadApprovals();
     } else if (event.type === "tailscale") {
       if (state.route.view === "settings" && showsSection("remote")) void loadRemote();
+    } else if (event.type === "music") {
+      if (state.route.view === "music") void loadMusic();
     } else if (event.type === "bluetooth") {
       if (state.route.view === "settings" && showsSection("bluetooth")) void loadBluetooth();
     } else if (event.type === "sysupdates") {
@@ -1047,7 +1055,7 @@ const NAV = [
   { view: "apps", hash: "#/apps", icon: "grid", guest: false },
   { view: "files", hash: "#/files", icon: "folder", files: true },
   { view: "machines", hash: "#/machines", icon: "server", admin: true },
-  { view: "house", hash: "#/house", icon: "bulb", admin: true, modules: ["integrations", "tv"] },
+  { view: "house", hash: "#/house", icon: "bulb", admin: true, modules: ["integrations", "tv", "music"] },
   { view: "storage", hash: "#/storage", icon: "disk", admin: true },
   { view: "backups", hash: "#/backups", icon: "archive", admin: true },
   { view: "network", hash: "#/network", icon: "network", admin: true },
@@ -1060,7 +1068,7 @@ const isAdmin = () => state.user?.role === "admin" && !state.user.mustTwoFactor;
 const hasModule = (id) => !state.modules || state.modules[id] === true;
 /** The sections of Settings and the pages that are a module's */
 const SECTION_MODULE = { bluetooth: "bluetooth", protection: "raid", places: "netplaces", shares: "shares", remote: "remote", ports: "domains", dns: "dns", adblock: "adblock", integrations: "integrations", agents: "assistant", assistant: "assistant" };
-const VIEW_MODULES = { mapp: ["machines"], machine: ["machines"], proxmox: ["proxmox"], guest: ["proxmox"], containers: ["containers"], instance: ["containers"], integrations: ["integrations"], ha: ["integrations"], qbit: ["integrations"], frigate: ["integrations"], assistant: ["assistant"], connect: ["assistant"], tv: ["tv"] };
+const VIEW_MODULES = { mapp: ["machines"], machine: ["machines"], proxmox: ["proxmox"], guest: ["proxmox"], containers: ["containers"], instance: ["containers"], integrations: ["integrations"], ha: ["integrations"], qbit: ["integrations"], frigate: ["integrations"], assistant: ["assistant"], connect: ["assistant"], tv: ["tv"], music: ["music"] };
 /** Files are an administrator's, and theirs with whom a folder is shared — only those folders then */
 const mayFiles = () => isAdmin() || !!state.user?.files;
 /** The folders shared with one who is not an administrator, of this server or of a machine; null for an administrator */
@@ -1320,6 +1328,7 @@ function render() {
   if (view === "import") return renderImport();
   if (view === "terminal") return renderTerminal();
   if (view === "tv") return renderTv();
+  if (view === "music") return renderMusic();
   if (view === "machines") return renderMachines();
   if (view === "machine") return renderMachine();
   if (view === "proxmox") return renderPve();
@@ -11336,6 +11345,8 @@ function entryMenu(entry, at) {
     entry.type !== "other" && item(t(entry.type === "dir" ? "files.downloadZip" : "files.download"), "download", () => downloadEntries([entry])),
     entry.type === "file" && ARCHIVE_RE.test(entry.name) && !state.files.readOnly && !filesMachine() && isAdmin() && item(t("files.extract"), "archive", () => extractArchive(path)),
     entry.type === "file" && TV_PLAYS_RE.test(entry.name) && !filesMachine() && isAdmin() && hasModule("tv") && item(t("tv.play"), "tv", () => playOnTv(path, entry.name)),
+    (entry.type === "dir" || (entry.type === "file" && MUSIC_PLAYS_RE.test(entry.name))) && !filesMachine() && isAdmin() && hasModule("music") && item(t("music.play"), "speaker", () => playMusic({ path }, entry.name)),
+    (entry.type === "dir" || (entry.type === "file" && MUSIC_PLAYS_RE.test(entry.name))) && !filesMachine() && isAdmin() && hasModule("music") && item(t("music.queue"), "list", () => playMusic({ path, add: true }, entry.name)),
     entry.type === "file" && PVE_SEND_RE.test(entry.name) && !filesMachine() && isAdmin() && pveUi.list?.hosts?.length !== 0 && item(t("pve.send.menu"), "upload", () => pveSendDialog({ path })),
     entry.type === "file" && /\.iso$/i.test(entry.name) && !filesMachine() && isAdmin() && item(t("incus.disc.menu"), "disk", () => discAddDialog({ how: "path", path })),
     item(t("files.copyPath"), "link", () => copyText(path)),
@@ -13576,6 +13587,140 @@ async function playOnTv(path, name) {
   }
 }
 
+/* Music: the second player, on the server's own speakers */
+
+const MUSIC_PLAYS_RE = /\.(mp3|flac|m4a|m4b|ogg|oga|opus|wav|aac|wma|ape|wv|aiff?|mka|m3u8?|pls)$/i;
+const musicUi = { timer: null, busy: false };
+
+async function playMusic(what, name) {
+  try {
+    state.music = await api("POST", "/api/music/play", what);
+    toast(t(what.add ? "music.queued" : "music.playing", { name }));
+    if (state.route.view === "music") paintMusic();
+  } catch (e) {
+    toast(errorText(e), "error");
+  }
+}
+
+async function loadMusic() {
+  clearTimeout(musicUi.timer);
+  if (state.route.view !== "music" || !hasModule("music")) return;
+  try {
+    state.music = await api("GET", "/api/music");
+  } catch (e) {
+    if (!state.music) put(document.getElementById("music-body"), h("section", { class: "card pad" }, h("p", { class: "error" }, errorText(e))));
+  }
+  // a slider under the finger or an open list is not redrawn under the person
+  if (state.music && !musicUi.busy && !document.querySelector("dialog[open]") && !document.querySelector("#music-body input[type=range]:active")) paintMusic();
+  musicUi.timer = setTimeout(loadMusic, state.music?.now ? 2000 : 8000);
+}
+
+function musicLinkDialog() {
+  let dialog;
+  const address = h("input", { type: "url", inputMode: "url", autocomplete: "off", spellcheck: false, maxLength: 2000, placeholder: "https://", required: true });
+  const error = h("p", { class: "error", role: "alert" });
+  const play = async (e) => {
+    e.preventDefault();
+    const url = address.value.trim();
+    if (!isLink(url)) return void (error.textContent = t("error.music.badLink"));
+    try {
+      state.music = await api("POST", "/api/music/play", { url });
+    } catch (err) {
+      return void (error.textContent = errorText(err));
+    }
+    dialog.close();
+    paintMusic();
+  };
+  dialog = openDialog("confirm", h("form", { class: "stack", onsubmit: play }, h("h2", null, t("music.link")), h("p", { class: "muted" }, t("music.linkLead")), address, error, h("footer", null, closeButton(() => dialog, t("common.cancel")), h("button", { type: "submit", class: "btn primary" }, icon("play"), h("span", null, t("music.playNow"))))));
+  address.focus();
+}
+
+const musicFolder = () => folderPicker({ title: t("music.folder"), start: state.settings?.dataRoot ?? "/", confirmLabel: t("music.playNow"), action: (path) => playMusic({ path }, path.split("/").pop() || path) });
+
+function renderMusic() {
+  shell(areaHead("house", "music", { actions: h("div", { class: "row-actions" }, button(t("music.link"), { onclick: musicLinkDialog }, "link"), button(t("music.folder"), { class: "primary", onclick: musicFolder }, "folder")) }), h("div", { id: "music-body", class: "stack" }, h("p", { class: "card pad muted" }, "…")));
+  cleanups.push(() => clearTimeout(musicUi.timer));
+  if (state.music) paintMusic();
+}
+
+function paintMusic() {
+  const box = document.getElementById("music-body");
+  const m = state.music;
+  if (!box || !m) return;
+  const error = h("p", { class: "error", role: "alert" });
+  if (m.state === "missing") {
+    const install = async (e) => {
+      const el = e.currentTarget;
+      el.disabled = true;
+      el.lastChild.textContent = t("tools.installing");
+      try {
+        await api("POST", "/api/tools/mpv/install", {});
+        void loadMusic();
+      } catch (err) {
+        error.textContent = errorText(err);
+        el.disabled = false;
+      }
+    };
+    return put(box, h("section", { class: "card pad stack" }, h("h2", null, t("music.title")), h("p", { class: "muted" }, t("music.lead")), h("p", null, t("music.what")), m.install ? h("p", { class: "cmd" }, icon("terminal"), m.install) : h("p", { class: "muted small" }, t("mounting.needs.byHand", { package: "mpv" })), error, m.install && h("footer", null, button(t("mounting.needs.install", { package: "mpv" }), { class: "primary", onclick: install }, "download"))));
+  }
+  const act = async (method, path, data) => {
+    error.textContent = "";
+    musicUi.busy = true;
+    try {
+      state.music = await api(method, path, data);
+    } catch (e) {
+      musicUi.busy = false;
+      // the choice shown goes back to what is true
+      void loadMusic();
+      return toast(errorText(e), "error");
+    }
+    musicUi.busy = false;
+    paintMusic();
+  };
+  const press = (action, value) => act("POST", "/api/music/do", { action, value });
+  const now = m.now;
+  const round = (action, iconName, cls = "") => h("button", { type: "button", class: "tvr-round " + cls, title: t("music.key." + action), "aria-label": t("music.key." + action), disabled: !now, onclick: () => press(action) }, icon(iconName));
+  const seek = now?.duration ? h("input", { type: "range", class: "tvr-slider", min: 0, max: Math.floor(now.duration), value: Math.floor(now.position), "aria-label": t("music.position"), onchange: (e) => press("seek", Number(e.target.value)) }) : null;
+  const volume = h("input", { type: "range", class: "tvr-slider" + (m.muted ? " muted" : ""), min: 0, max: 100, value: m.volume, "aria-label": t("music.volume"), onchange: (e) => press("volume", Number(e.target.value)) });
+  const kind = (o) => t("music.out." + o.kind);
+  const output = m.outputs.length
+    ? h("select", { "aria-label": t("music.output"), onchange: (e) => act("PUT", "/api/music", { output: e.target.value }) }, m.outputs.map((o) => h("option", { value: o.id, selected: o.id === m.output }, `${o.name} — ${kind(o)}`)))
+    : h("span", { class: "muted" }, t("music.noOutput"));
+  const player = h(
+    "section",
+    { class: "card pad stack music-player" },
+    now
+      ? h("div", { class: "music-now" }, h("span", { class: "badge-icon plain" }, icon(now.link ? "globe" : "music")), h("div", { class: "grow" }, h("strong", { class: "wrap" }, now.title), now.by && h("div", { class: "muted small wrap" }, now.by)), now.paused && h("span", { class: "state busy" }, t("tv.paused")))
+      : h("div", { class: "music-now" }, h("span", { class: "badge-icon plain" }, icon("music")), h("div", { class: "grow" }, h("strong", null, t("music.idle")), h("div", { class: "muted small" }, t("music.idleLead")))),
+    seek && h("div", { class: "music-seek" }, h("span", { class: "muted small mono" }, tvClock(now.position)), seek, h("span", { class: "muted small mono" }, tvClock(now.duration))),
+    h("div", { class: "music-keys" }, round("previous", "previous"), h("button", { type: "button", class: "tvr-main", title: t("music.key.playpause"), "aria-label": t("music.key.playpause"), disabled: !now, onclick: () => press("playpause") }, icon(now && !now.paused ? "pause" : "play")), round("next", "next"), round("stop", "stop")),
+    h("div", { class: "tvr-volume" }, h("button", { type: "button", class: "icon-btn", title: t("music.key.mute"), "aria-label": t("music.key.mute"), disabled: !m.running, onclick: () => press("mute", !m.muted) }, icon(m.muted ? "volumeOff" : "volume")), volume, h("span", { class: "muted small mono" }, m.volume)),
+    settingRow(t("music.output"), t("music.outputHint"), output),
+    error,
+  );
+  const queue = h(
+    "section",
+    { class: "card pad stack" },
+    h("div", { class: "section-head" }, h("h2", null, t("music.queueTitle"), h("span", { class: "muted small" }, m.queue.length || "")), m.queue.length > 1 && h("div", { class: "row-actions" }, button(t("music.key.shuffle"), { class: "small", onclick: () => press("shuffle") }, "shuffle"), button(t("music.key.clear"), { class: "small", onclick: () => press("clear") }, "x"))),
+    m.queue.length
+      ? h(
+          "div",
+          { class: "music-queue" },
+          m.queue.slice(0, 300).map((q, i) =>
+            h(
+              "div",
+              { class: "music-row" + (q.current ? " current" : ""), menu: true },
+              h("button", { type: "button", class: "music-pick", title: t("music.key.jump"), onclick: () => press("jump", i) }, icon(q.current ? "play" : q.link ? "globe" : "music"), h("span", { class: "grow" }, h("span", { class: "clip" }, q.title), q.where && h("span", { class: "muted small clip" }, q.where))),
+              h("button", { type: "button", class: "icon-btn", title: t("music.key.remove"), "aria-label": t("music.key.remove"), onclick: () => press("remove", i) }, icon("x")),
+            ),
+          ),
+          m.queue.length > 300 && h("p", { class: "muted small" }, t("music.more", { n: m.queue.length - 300 })),
+        )
+      : h("p", { class: "muted" }, t("music.queueEmpty")),
+  );
+  put(box, h("div", { class: "music-page" }, player, queue));
+}
+
 async function loadTv() {
   clearTimeout(tvUi.timer);
   if (state.route.view !== "tv" || !hasModule("tv")) return;
@@ -13886,10 +14031,10 @@ function tvKeepDialog() {
 
 // --- Modules: the parts of Hata a person turns on -------------------------------------------------
 
-const MODULE_ICONS = { bluetooth: "bluetooth", tv: "tv", raid: "shield", netplaces: "network", shares: "share", offsite: "archive", remote: "globe", dns: "signpost", adblock: "ban", domains: "plug", machines: "server", proxmox: "server", containers: "box", integrations: "link", assistant: "chat" };
+const MODULE_ICONS = { music: "music", bluetooth: "bluetooth", tv: "tv", raid: "shield", netplaces: "network", shares: "share", offsite: "archive", remote: "globe", dns: "signpost", adblock: "ban", domains: "plug", machines: "server", proxmox: "server", containers: "box", integrations: "link", assistant: "chat" };
 const MODULE_GROUPS = ["storage", "network", "servers", "more"];
 /** Where a module's own things are once it is on */
-const MODULE_HOME = { bluetooth: "#/machines/this/bluetooth", tv: "#/house/tv", raid: "#/settings/protection", netplaces: "#/settings/places", shares: "#/settings/shares", offsite: "#/settings/backups", remote: "#/settings/remote", dns: "#/settings/dns", adblock: "#/settings/adblock", domains: "#/settings/ports", machines: "#/machines", proxmox: "#/machines", containers: "#/containers", integrations: "#/settings/integrations", assistant: "#/settings/assistant" };
+const MODULE_HOME = { music: "#/house/music", bluetooth: "#/machines/this/bluetooth", tv: "#/house/tv", raid: "#/settings/protection", netplaces: "#/settings/places", shares: "#/settings/shares", offsite: "#/settings/backups", remote: "#/settings/remote", dns: "#/settings/dns", adblock: "#/settings/adblock", domains: "#/settings/ports", machines: "#/machines", proxmox: "#/machines", containers: "#/containers", integrations: "#/settings/integrations", assistant: "#/settings/assistant" };
 /** Where the thing that holds a module on is taken away */
 const MODULE_USE_AT = { bluetooth: "#/machines/this/bluetooth", tv: "#/tv", array: "#/settings/protection", merged: "#/settings/storage", pools: "#/settings/protection", places: "#/settings/places", shares: "#/settings/shares", offsite: "#/settings/backups", wireguard: "#/settings/remote", tailscale: "#/settings/remote", dnsOn: "#/settings/dns", blocking: "#/settings/adblock", names: "#/settings/https", ports: "#/settings/ports", machines: "#/machines", proxmox: "#/machines", containers: "#/containers", homeAssistant: "#/settings/integrations", qbit: "#/settings/integrations", frigate: "#/settings/integrations", keys: "#/settings/agents" };
 const moduleName = (id) => t(`modules.${id}.name`);
@@ -15329,6 +15474,33 @@ function btPairDialog(device) {
   void start();
 }
 
+/** Speakers and headphones need one more program: what it is, why, the command, the button */
+function btSoundCard(r, error) {
+  if (r.sound === "ready") return h("section", { class: "card pad stack" }, h("div", { class: "section-head" }, h("h2", null, t("bt.sound.title"), h("span", { class: "state running" }, t("bt.sound.ready")))), h("p", { class: "muted" }, t("bt.sound.readyLead")));
+  const install = async (e) => {
+    const el = e.currentTarget;
+    el.disabled = true;
+    el.lastChild.textContent = t("tools.installing");
+    try {
+      await api("POST", "/api/tools/bluez-alsa/install", {});
+      await loadBluetooth();
+      renderSettings();
+    } catch (err) {
+      error.textContent = errorText(err);
+      el.disabled = false;
+    }
+  };
+  return h(
+    "section",
+    { class: "card pad stack" },
+    h("h2", null, t("bt.sound.title")),
+    h("p", { class: "muted" }, t("bt.sound.lead")),
+    h("p", null, t("bt.sound.what")),
+    r.soundInstall ? h("p", { class: "cmd" }, icon("terminal"), r.soundInstall) : h("p", { class: "muted small" }, t("mounting.needs.byHand", { package: "bluez-alsa-utils" })),
+    r.soundInstall && h("footer", null, button(t("mounting.needs.install", { package: "BlueALSA" }), { class: "primary", onclick: install }, "download")),
+  );
+}
+
 function bluetoothSection() {
   const r = state.bluetooth;
   if (!r) return [h("p", { class: "card pad muted" }, "…")];
@@ -15466,6 +15638,7 @@ function bluetoothSection() {
         ),
       !looking && !found.length && h("p", { class: "muted small" }, t("bt.lookHint")),
     ),
+    btSoundCard(r, error),
   ];
 }
 

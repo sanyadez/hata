@@ -22,6 +22,7 @@ import { machines, startMachines } from "./machines";
 import { startMachineUsers } from "./machineusers";
 import { cleanModules, isModule, missingFor, MODULE_IDS, MODULES, neededBy, switchesFor, type ModuleGroup, type ModuleId } from "./modules";
 import { mergedFolders } from "./mounting";
+import { startMusic, stopMusic } from "./music";
 import { placesKept, startNetPlaces } from "./netplaces";
 import { offsiteOn } from "./offsite";
 import { hosts as proxmoxHosts, startProxmox } from "./proxmox";
@@ -42,6 +43,8 @@ export interface Use {
 interface Run {
   /** Its background work; called once, when the server starts with the module on or when it is turned on */
   start?: () => void;
+  /** What it runs is ended: called when it is turned off */
+  stop?: () => void;
   /** What of the person's stands on it right now: the module stays on while there is any */
   uses: () => Use[] | Promise<Use[]>;
   /** Signs that it was worked with on a server from before modules, beyond `uses`: it comes on there */
@@ -96,6 +99,7 @@ const RUNS: Record<ModuleId, Run> = {
   },
   tv: { start: watchTv, uses: () => when("tv", tvEnabled()), was: tvSetUp },
   bluetooth: { start: startBluetooth, uses: () => some("bluetooth", pairedKept()) },
+  music: { start: startMusic, stop: stopMusic, uses: () => [] },
   assistant: { uses: () => some("keys", listKeys().length), was: () => assistantReady(assistantConfig()) },
 };
 
@@ -200,6 +204,9 @@ export async function setModule(id: unknown, on: boolean, by: string, withNeeds 
     const uses = await RUNS[id].uses();
     if (uses.length) throw new AppError("modules.inUse", 409, { module: id, uses: uses.map((use) => (use.count ? `${use.what}:${use.count}` : use.what)).join(",") });
     switches[id] = false;
+    // its work is started anew when it is turned on again
+    started.delete(id);
+    RUNS[id].stop?.();
     record("modules.off", { user: by, detail: id });
   }
   saveSettings();

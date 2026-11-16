@@ -2072,11 +2072,11 @@ button.mark:hover { border-color: var(--border-strong); color: var(--text); }
 .bt-battery { display: inline-flex; align-items: center; gap: 6px; }
 .bt-battery.low { color: var(--warn); }
 .bt-found { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; }
-.bt-found-row { display: flex; align-items: center; gap: 12px; min-width: 0; padding: 8px 0; border-top: 1px solid var(--line); }
+.bt-found-row { display: flex; align-items: center; gap: 12px; min-width: 0; padding: 8px 0; border-top: 1px solid var(--border); }
 .bt-found-row .bt-name { flex: 1; }
 .bt-found-row .btn { flex: none; }
 .bt-signal { display: inline-flex; align-items: flex-end; gap: 2px; height: 14px; flex: none; }
-.bt-signal i { width: 3px; border-radius: 1px; background: var(--line); }
+.bt-signal i { width: 3px; border-radius: 1px; background: var(--border); }
 .bt-signal i:nth-child(1) { height: 4px; }
 .bt-signal i:nth-child(2) { height: 7px; }
 .bt-signal i:nth-child(3) { height: 10px; }
@@ -2087,3 +2087,18 @@ button.mark:hover { border-color: var(--border-strong); color: var(--text); }
 .bt-code span { min-width: 1ch; text-align: center; }
 .bt-code .typed { color: var(--faint); }
 .bt-done { display: flex; align-items: center; gap: 8px; color: var(--ok); }
+
+/* Music */
+.music-page { display: grid; grid-template-columns: minmax(0, 420px) minmax(0, 1fr); gap: 16px; align-items: start; }
+.music-now { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.music-now .grow { min-width: 0; }
+.music-seek { display: flex; align-items: center; gap: 10px; }
+.music-seek .tvr-slider { flex: 1; }
+.music-keys { --main: 60px; display: flex; align-items: center; justify-content: center; gap: 14px; }
+.music-queue { display: grid; grid-template-columns: minmax(0, 1fr); }
+.music-row { display: flex; align-items: center; gap: 8px; min-width: 0; border-top: 1px solid var(--border); }
+.music-pick { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; padding: 8px 4px; border: 0; background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.music-pick .grow { display: grid; min-width: 0; }
+.music-pick:hover { color: var(--accent-text); }
+.music-row.current .music-pick { font-weight: 600; color: var(--accent-text); }
+@media (max-width: 900px) { .music-page { grid-template-columns: minmax(0, 1fr); } }

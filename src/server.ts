@@ -113,6 +113,7 @@ import { instructions as mcpInstructions, tellHttps, TOOLS } from "./mcptools";
 import { moduleOn, modulesOn, modulesReport, setModule, settleModules, startModules } from "./moduleruns";
 import { findForModules } from "./modulefinds";
 import { bluetoothReport, connectDevice as connectBluetooth, disconnectDevice as disconnectBluetooth, endPairing as endBluetoothPairing, forgetDevice as forgetBluetooth, lookAround as lookForBluetooth, pair as pairBluetooth, setPower as setBluetoothPower, startService as startBluetoothService } from "./bluetooth";
+import { musicDo, musicNow, musicReport, playMusic, setMusicOutput } from "./music";
 import { installTv, playOnTv, remote as tvRemote, keepPicture as keepTvPicture, mediaInfo as tvMediaInfo, streamsHere as tvStreamsHere, mediaStream as tvMediaStream, mediaSubs as tvMediaSubs, setLanguage as setTvLanguage, setPref as setTvPref, setAudio as setTvAudio, setFolders as setTvFolders, setPicture as setTvPicture, switchTv, tvNow, tvReport } from "./television";
 import { moduleOfPath, moduleOfTool } from "./modules";
 import { serverTree } from "./servertree";
@@ -1172,6 +1173,7 @@ async function api(req: Request, url: URL, server: Server<unknown>): Promise<Res
       assistant: admin && assistantReady(assistantConfig()),
       // what plays on the server's own screen, for the chip every page shows
       tv: admin && moduleOn("tv") ? tvNow() : null,
+      music: admin && moduleOn("music") ? await musicNow().catch(() => null) : null,
       // ffmpeg is here: videos of this server are played in the browser by Hata's own player, the TV module on or off
       media: admin && tvStreamsHere(),
       attention: admin ? notSnoozed(attention({ system, docker, apps, activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), exposed: exposedNics(), array: arrayTrouble(), shares: shareTrouble(), places: placesDown(), machines: awayMachines(), machineApps: onMachines, unused: unusedDisks(), filling: fillingUp(), pve: proxmoxTrouble(), ha: [...homeAssistantTrouble(), ...qbitTrouble(), ...frigateTrouble()], raid: poolsTrouble(), containers: containersTrouble(), dns: [...dnsTrouble(), ...blockTrouble(), ...wildcardTrouble()] })) : [],
@@ -1517,6 +1519,17 @@ async function api(req: Request, url: URL, server: Server<unknown>): Promise<Res
       return { ...m, instance: instanceOfMachine(macs, m.info?.hostname ?? m.name)?.name ?? "", guest: guest ? { host: guest.host, id: guest.id } : null };
     });
     return json(serverTree({ here: { name: system.hostname, os: systemName(), address: homeLinks()[0]?.address ?? "", cpu: system.cpu, memory: system.memory, uptime: system.uptime }, instances, hosts: moduleOn("proxmox") ? pveHosts().map((x) => pveHost(x.id)) : [], machines, version: VERSION }));
+  }
+  // music on the server's own speakers
+  if (path === "/api/music" && method === "GET") return json(await musicReport());
+  if (path === "/api/music" && method === "PUT") return json(await setMusicOutput((await body(req)).output, user.name));
+  if (path === "/api/music/play" && method === "POST") {
+    server.timeout(req, 0);
+    return json(await playMusic(await body(req), user.name));
+  }
+  if (path === "/api/music/do" && method === "POST") {
+    const data = await body(req);
+    return json(await musicDo(data.action, data.value));
   }
   // Bluetooth devices of this server
   if (path === "/api/bluetooth" && method === "GET") return json(await bluetoothReport());

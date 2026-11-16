@@ -136,6 +136,8 @@ export interface Settings {
   trash: { days: number };
   /** The media player on the server's screen (`tv.ts`): the folders it shows; whether its sound output was chosen */
   tv: { folders: string[]; audioChosen: boolean };
+  /** The music player: where its sound goes (an ALSA device; "" — not chosen) and how loud */
+  music: { output: string; volume: number };
   /** Which modules are on (`modules.ts`); null — not decided yet: a server from before modules, until its first start */
   modules: ModuleSwitches | null;
 }
@@ -261,6 +263,7 @@ const DEFAULTS: Settings = {
   trash: { days: 30 },
   modules: null,
   tv: { folders: [], audioChosen: false },
+  music: { output: "", volume: 60 },
 };
 
 /** A host name with at least two labels: letters, digits and hyphens */
@@ -301,6 +304,10 @@ export const settings: Settings = {
   shares: cleanShares(saved.shares),
   modules: isPlainObject(saved.modules) ? cleanModules(saved.modules) : null,
   tv: { folders: cleanFolders(isPlainObject(saved.tv) ? saved.tv.folders : []), audioChosen: isPlainObject(saved.tv) && saved.tv.audioChosen === true },
+  music: {
+    output: isPlainObject(saved.music) && typeof saved.music.output === "string" && /^[\w:=,.-]{1,120}$/.test(saved.music.output) ? saved.music.output : "",
+    volume: isPlainObject(saved.music) && Number.isInteger(saved.music.volume) && saved.music.volume >= 0 && saved.music.volume <= 100 ? saved.music.volume : 60,
+  },
   names: cleanNames(saved.names),
   forwards: cleanForwards(saved.forwards),
   dns: cleanDns(saved.dns),

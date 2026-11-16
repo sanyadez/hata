@@ -24,7 +24,7 @@ import { afterPackage, networkReport, type Nic } from "./network";
 import { installCommand, installPackage, PATH, removeCommand, removePackages, run } from "./packages";
 import { installSamba } from "./shares";
 import { installTv, tvEnabled } from "./television";
-import { pairedKept, startService as startBluetoothService } from "./bluetooth";
+import { pairedKept, soundAfterInstall, startService as startBluetoothService } from "./bluetooth";
 import { packageUpdates } from "./sysupdates";
 import { inUse as wireguardInUse } from "./wireguard";
 import { INSTALL_COMMAND as TAILSCALE_INSTALL_COMMAND, install as installTailscale, report as tailscaleReport } from "./tailscale";
@@ -75,6 +75,8 @@ const SPECS: Spec[] = [
   { id: "incus-vm", name: "QEMU for Incus", package: "qemu-system-x86", bin: "qemu-system-x86_64", version: ["qemu-system-x86_64", "--version"], page: "#/containers", family: ["incus", "incus-agent", "qemu-system-x86", "qemu-system-modules-spice", "qemu-utils", "ovmf"] },
   { id: "kodi", name: "Kodi", package: "kodi", bin: "kodi", version: ["kodi", "--version"], page: "#/tv" },
   { id: "bluez", name: "BlueZ", package: "bluez", bin: "bluetoothctl", version: ["bluetoothctl", "--version"], page: "#/machines/this/bluetooth" },
+  { id: "bluez-alsa", name: "BlueALSA", package: "bluez-alsa-utils", bin: "bluealsa", version: ["bluealsa", "--version"], page: "#/machines/this/bluetooth", family: ["bluez-alsa-utils", "libasound2-plugin-bluez"] },
+  { id: "mpv", name: "mpv", package: "mpv", bin: "mpv", version: ["mpv", "--version"], page: "#/house/music" },
   { id: "ffmpeg", name: "FFmpeg", package: "ffmpeg", bin: "ffmpeg", version: ["ffmpeg", "-version"], page: "#/files" },
   { id: "openssh-client", name: "OpenSSH client", package: "openssh-client", bin: "sftp", version: ["ssh", "-V"], page: "#/settings/backups", base: true },
 ];
@@ -253,6 +255,7 @@ export async function installOne(id: string, user: string): Promise<{ job: Job }
   if (!error) await afterPackage(spec.package);
   // the package may come with its service not started (a system set not to start services by itself)
   if (!error && spec.id === "bluez") await startBluetoothService().catch(() => {});
+  if (!error && spec.id === "bluez-alsa") await soundAfterInstall().catch(() => {});
   return { error };
 }
 

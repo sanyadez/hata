@@ -205,14 +205,18 @@ export interface BtReport {
   devices: BtDevice[];
   found: BtDevice[];
   pairing: Pairing | null;
+  /** Speakers and headphones: missing — the package that plays to them is not installed; stopped; ready */
+  sound: "missing" | "stopped" | "ready";
+  soundInstall: string;
 }
 
 const adapter = (): BtAdapter | null => adaptersOf(objects)[0] ?? null;
 
 export async function bluetoothReport(): Promise<BtReport> {
-  const base = { install: installCommand("bluez"), hardware: hardware(), hardBlocked: blocked(switches()).hard, adapter: null, devices: [], found: [], pairing: null };
-  if (!bluetoothInstalled()) return { ...base, state: "missing" };
+  const start = { install: installCommand("bluez"), soundInstall: installCommand("bluez-alsa-utils"), hardware: hardware(), hardBlocked: blocked(switches()).hard, adapter: null, devices: [], found: [], pairing: null, sound: "missing" as const };
+  if (!bluetoothInstalled()) return { ...start, state: "missing" };
   await link().catch(() => {});
+  const base = { ...start, sound: !soundInstalled() ? ("missing" as const) : (await hasName("org.bluealsa")) ? ("ready" as const) : ("stopped" as const) };
   if (conn?.open && !running) await load().catch(() => {});
   if (!running) return { ...base, state: "stopped" };
   const one = adapter();
@@ -375,6 +379,31 @@ export async function forgetDevice(raw: unknown, by: string): Promise<void> {
   });
   if (pairing?.address === device.address) pairing = null;
   record("bluetooth.forgotten", { user: by, detail: device.name });
+  changed();
+}
+
+const hasName = async (name: string): Promise<boolean> => !!conn?.open && (await conn.call("org.freedesktop.DBus", "/org/freedesktop/DBus", "org.freedesktop.DBus", "NameHasOwner", "s", [name]).catch(() => [false]))[0] === true;
+
+/** The program that turns a Bluetooth speaker into a sound output of the system is installed and runs */
+export const soundInstalled = (): boolean => !!Bun.which("bluealsa", { PATH });
+
+/** The speakers and headphones that are connected and can be played to right now */
+export async function speakers(): Promise<{ address: string; name: string }[]> {
+  if (!running || !soundInstalled() || !(await hasName("org.bluealsa"))) return [];
+  return devicesOf(objects)
+    .devices.filter((one) => one.connected && one.audio)
+    .map((one) => ({ address: one.address, name: one.name }));
+}
+
+/**
+ * After the package for sound is installed: its service on, and the part that would play a phone's
+ * music on this server's speakers off — nobody asked for that.
+ */
+export async function soundAfterInstall(): Promise<void> {
+  await run(["systemctl", "disable", "--now", "bluealsa-aplay"], 30_000);
+  await run(["systemctl", "enable", "--now", "bluealsa"], 30_000);
+  // BlueZ learns of the new sound profiles when the service registers them; a moment is enough
+  await Bun.sleep(1000);
   changed();
 }
 
