@@ -837,8 +837,10 @@ export function copyIn(paths: unknown, to: unknown, user: string): Job {
   while (!lstatOrNull(there)) there = dirname(there);
   mustBeDir(there);
   mustWrite(target);
-  return startJob("", "copyin", user, async (log) => {
-    const du = Bun.spawn(["du", "-skxc", "--", ...sources], { stdout: "pipe", stderr: "ignore" });
+  // made before the job: the work spawns its first program at once
+  const stopper = new AbortController();
+  const job = startJob("", "copyin", user, async (log) => {
+    const du = Bun.spawn(["du", "-skxc", "--", ...sources], { stdout: "pipe", stderr: "ignore", signal: stopper.signal });
     const total = (Number(/^(\d+)\s+total$/m.exec(await new Response(du.stdout).text())?.[1]) || 0) * 1024;
     makeFolders(target);
     const room = statfsSync(target);
@@ -855,8 +857,15 @@ export function copyIn(paths: unknown, to: unknown, user: string): Job {
         const dest = join(target, freeName(target, basename(from)));
         log(`${from} → ${dest}`);
         const plain = OWNERLESS.test(fstypeAt(from));
-        const cp = Bun.spawn(plain ? ["cp", "-r", "--preserve=timestamps", "--", from, dest] : ["cp", "-a", "--", from, dest], { stdout: "ignore", stderr: "pipe" });
+        if (stopper.signal.aborted) throw new Error("Stopped");
+        const cp = Bun.spawn(plain ? ["cp", "-r", "--preserve=timestamps", "--", from, dest] : ["cp", "-a", "--", from, dest], { stdout: "ignore", stderr: "pipe", signal: stopper.signal });
         const [code, err] = await Promise.all([cp.exited, new Response(cp.stderr).text()]);
+        if (stopper.signal.aborted) {
+          // the one cut half-way goes; what was copied whole before it stays, the disk's own files are untouched
+          await rm(dest, { recursive: true, force: true }).catch(() => {});
+          log(`Removed the unfinished ${dest}`);
+          throw new Error("Stopped");
+        }
         if (code !== 0) throw new Error(/No space left/i.test(err) ? "The disk is full" : err.trim().split("\n").pop() || `cp exited with ${code}`);
         if (plain && process.getuid?.() === 0) {
           await Bun.spawn(["chown", "-R", "-h", `${owner.uid}:${owner.gid}`, "--", dest], { stdout: "ignore", stderr: "ignore" }).exited;
@@ -869,6 +878,8 @@ export function copyIn(paths: unknown, to: unknown, user: string): Job {
     }
     log(`Done: ${sources.length} copied to ${target}`);
   });
+  stoppable(job, stopper);
+  return job;
 }
 
 /**

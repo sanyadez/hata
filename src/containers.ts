@@ -13,7 +13,7 @@
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmdirSync, rmSync, statSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { record } from "./activity";
-import { AppError, isBusy, startJob, type Job } from "./apps";
+import { AppError, isBusy, startJob, stoppable, type Job } from "./apps";
 import { bus } from "./bus";
 import { DATA_DIR, listenAddress, SECRETS_DIR, settings } from "./config";
 import { onContainerPlaces } from "./mounting";
@@ -523,7 +523,7 @@ function discPlace(r: ContainersReport, asked: unknown): Place {
  * A stream of a disc's bytes that tells how far it got every few seconds; Incus reads it to the end and
  * keeps it as a volume of the place (`X-Incus-type: iso`).
  */
-async function importDisc(place: string, name: string, source: ReadableStream<Uint8Array>, size: number, log: (line: string) => void): Promise<void> {
+async function importDisc(place: string, name: string, source: ReadableStream<Uint8Array>, size: number, log: (line: string) => void, stop?: AbortSignal): Promise<void> {
   let got = 0;
   let said = Date.now();
   const mb = (n: number) => `${Math.round(n / 1048576)} MB`;
@@ -541,13 +541,14 @@ async function importDisc(place: string, name: string, source: ReadableStream<Ui
   );
   let r: Response;
   try {
-    r = await fetch(`http://incus/1.0/storage-pools/${encodeURIComponent(place)}/volumes/custom`, { unix: SOCKET, method: "POST", body: counted, duplex: "half", headers: { "content-type": "application/octet-stream", "x-incus-name": name, "x-incus-type": "iso" } } as RequestInit);
+    r = await fetch(`http://incus/1.0/storage-pools/${encodeURIComponent(place)}/volumes/custom`, { unix: SOCKET, method: "POST", body: counted, duplex: "half", signal: stop, headers: { "content-type": "application/octet-stream", "x-incus-name": name, "x-incus-type": "iso" } } as RequestInit);
   } catch (e) {
     throw new AppError("containers.noAnswer", 503, { message: e instanceof Error ? e.message : String(e) });
   }
   const answer = (await r.json().catch(() => null)) as any;
   if (!answer || answer.type === "error") throw new AppError("containers.failed", 409, { message: String(answer?.error ?? `HTTP ${r.status}`) });
   await finished(answer, 3600);
+  if (stop?.aborted) throw new Error("Stopped");
   log(`Kept: ${name}, ${mb(got)}`);
 }
 
@@ -579,11 +580,12 @@ export async function addDisc(input: Record<string, unknown>, by: string): Promi
     size = st.size;
   }
   const name = await freeDiscName(r, place, typeof input.name === "string" && input.name ? input.name : url || path);
+  const stopper = new AbortController();
   const job = startJob(`incus-disc:${place}/${name}`, "disc", by, async (log) => told(log, async () => {
     let source: ReadableStream<Uint8Array>;
     if (url) {
       log(`Downloading ${url}`);
-      const got = await fetch(url, { redirect: "follow" }).catch((e) => {
+      const got = await fetch(url, { redirect: "follow", signal: stopper.signal }).catch((e) => {
         throw new AppError("containers.disc.download", 502, { message: e instanceof Error ? e.message : String(e) });
       });
       if (!got.ok || !got.body) throw new AppError("containers.disc.download", 502, { message: `HTTP ${got.status}` });
@@ -593,10 +595,18 @@ export async function addDisc(input: Record<string, unknown>, by: string): Promi
       log(`Reading ${path}`);
       source = Bun.file(path).stream();
     }
-    await importDisc(place, name, source, size, log);
+    try {
+      await importDisc(place, name, source, size, log, stopper.signal);
+    } catch (e) {
+      if (!stopper.signal.aborted) throw e;
+      // what Incus kept of a half of the image, if anything, goes
+      await incus("DELETE", `/1.0/storage-pools/${encodeURIComponent(place)}/volumes/custom/${encodeURIComponent(name)}`).catch(() => {});
+      throw new Error("Stopped");
+    }
     record("containers.disc.added", { user: by, detail: name });
     bus.publish("containers");
   }), true, { app: name, machine: "" });
+  stoppable(job, stopper);
   return { job: job.id, name };
 }
 
