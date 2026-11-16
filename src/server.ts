@@ -114,6 +114,7 @@ import { moduleOn, modulesOn, modulesReport, setModule, settleModules, startModu
 import { findForModules } from "./modulefinds";
 import { bluetoothReport, connectDevice as connectBluetooth, disconnectDevice as disconnectBluetooth, endPairing as endBluetoothPairing, forgetDevice as forgetBluetooth, lookAround as lookForBluetooth, pair as pairBluetooth, setPower as setBluetoothPower, startService as startBluetoothService } from "./bluetooth";
 import { diskUses, letGo } from "./diskuses";
+import { renameServer } from "./servername";
 import { musicDo, musicNow, musicReport, playMusic, setMusicOutput, setSpeaker } from "./music";
 import { installTv, playOnTv, remote as tvRemote, keepPicture as keepTvPicture, mediaInfo as tvMediaInfo, streamsHere as tvStreamsHere, mediaStream as tvMediaStream, mediaSubs as tvMediaSubs, setLanguage as setTvLanguage, setPref as setTvPref, setAudio as setTvAudio, setOffset as setTvOffset, setHomeAssistant as setTvHa, setFolders as setTvFolders, setPicture as setTvPicture, switchTv, tvNow, tvReport } from "./television";
 import { moduleOfPath, moduleOfTool } from "./modules";
@@ -1259,6 +1260,14 @@ async function api(req: Request, url: URL, server: Server<unknown>): Promise<Res
     saveSettings();
     bus.publish("apps");
     return json({ ok: true });
+  }
+
+  if (path === "/api/system/name" && method === "PUT") {
+    const name = await renameServer((await body(req)).name, user.name);
+    refreshLocalNames();
+    // the network folders are announced under the same name
+    refreshShares();
+    return json({ ...name, settings: publicSettings() });
   }
 
   if (path === "/api/activity" && method === "GET") {

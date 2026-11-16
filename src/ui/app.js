@@ -16640,7 +16640,8 @@ function appearanceSection(error) {
 function localNameCard() {
   const local = state.settings.local;
   const enabled = h("input", { type: "checkbox", checked: local.enabled });
-  const name = h("input", { value: local.name, maxLength: 253, placeholder: "hata.local", spellcheck: false, autocapitalize: "none", class: "mono", required: true, "aria-label": t("local.name") });
+  // the name is the server's own: changed in the one window that renames the server, here it is only shown
+  const name = h("div", { class: "row-actions" }, h("code", null, local.name), button(t("rename.open"), { class: "small", onclick: () => renameServerDialog(renderSettings) }, "edit"));
   const error = h("p", { class: "error", role: "alert" });
   const status = h("div", { class: "stack" });
   let alive = true;
@@ -16676,7 +16677,7 @@ function localNameCard() {
         e.preventDefault();
         error.textContent = "";
         try {
-          state.settings = await api("PUT", "/api/settings", { local: { enabled: enabled.checked, name: name.value } });
+          state.settings = await api("PUT", "/api/settings", { local: { enabled: enabled.checked } });
           toast(t("settings.saved"));
           await refresh();
           // the responder takes a moment to start listening
@@ -20956,8 +20957,54 @@ function serverTabCount(id) {
   const n = id === "apps" ? (state.overview?.apps?.length ?? 0) : id === "containers" ? (incusUi.data?.containers?.length ?? 0) : id === "system" ? (sysUpdates[""]?.list?.length ?? 0) : 0;
   return n > 0 ? h("span", { class: "muted tab-count" }, String(n)) : null;
 }
+/**
+ * The server renamed: one name for the computer itself and for the home network. Opened from the
+ * server's menu and from the card of the name on the home network — one window for both.
+ */
+function renameServerDialog(done) {
+  let dialog;
+  const local = state.settings?.local?.name ?? "";
+  const ending = local.includes(".") ? local.slice(local.indexOf(".")) : ".local";
+  const host = state.overview?.system?.hostname?.split(".")[0] ?? local.split(".")[0] ?? "";
+  const name = h("input", { value: host, maxLength: 253, spellcheck: false, autocapitalize: "none", class: "mono", required: true, "aria-label": t("rename.name") });
+  const will = h("p", { class: "muted small" });
+  const error = h("p", { class: "error", role: "alert" });
+  const typed = () => name.value.trim().toLowerCase();
+  const address = () => (typed().includes(".") ? typed() : typed() + ending);
+  const say = () => (will.textContent = typed() ? t("rename.will", { address: address() }) : "");
+  name.oninput = say;
+  say();
+  const save = async (e) => {
+    e.preventDefault();
+    error.textContent = "";
+    const go = e.submitter;
+    if (go) go.disabled = true;
+    try {
+      const said = await api("PUT", "/api/system/name", { name: typed() });
+      state.settings = said.settings;
+      if (state.overview?.system) state.overview.system.hostname = said.host;
+      dialog.close();
+      toast(t("rename.done", { name: said.host }));
+      // the page was opened by the old name: that address answers no longer
+      if (local && (location.hostname === local || location.hostname.endsWith("." + local)) && said.local !== local) return void setTimeout(() => (location.href = location.href.replace(local, said.local)), 1500);
+      await refresh();
+      done?.();
+    } catch (err) {
+      error.textContent = errorText(err);
+      if (go) go.disabled = false;
+    }
+  };
+  dialog = openDialog(
+    "confirm",
+    h("form", { class: "stack", onsubmit: save }, h("h2", null, t("rename.title")), h("p", { class: "muted" }, t("rename.lead")), name, will, local && h("p", { class: "muted small" }, t("rename.old", { address: local })), error, h("footer", null, closeButton(() => dialog, t("common.cancel")), h("button", { type: "submit", class: "btn primary" }, h("span", null, t("rename.save"))))),
+  );
+  name.focus();
+  name.select();
+}
+
 function serverMenu(at) {
   menuAt(at, menuHeader(state.overview?.system?.hostname ?? t("tree.thisServer"), t("tree.thisServer"), "server"), [
+    { label: t("rename.open"), icon: "edit", run: () => renameServerDialog() },
     { label: t("terminal.title"), icon: "terminal", href: "#/terminal" },
     { label: t("area.network"), icon: "network", href: "#/network" },
     { label: t("power.reboot"), icon: "refresh", run: () => serverPowerDialog("reboot") },

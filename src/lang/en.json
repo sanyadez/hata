@@ -5868,5 +5868,17 @@
   "disks.use.appsNote": "An app that kept a folder here stays stopped. Give it another folder before starting it again — otherwise it makes that folder anew and writes to the system disk.",
   "disks.use.stopDisconnect": "Stop and disconnect",
   "disks.use.stopEject": "Stop and eject",
-  "error.disk.stopFailed": "{app} could not be stopped, so the folder is still in use. Stop it on its page and try again."
+  "error.disk.stopFailed": "{app} could not be stopped, so the folder is still in use. Stop it on its page and try again.",
+  "rename.open": "Rename the server…",
+  "rename.title": "Rename the server",
+  "rename.lead": "One name for the computer itself and for the home network: the system, Hata and the network folders all go by it.",
+  "rename.name": "The server's name",
+  "rename.will": "On the home network: {address}",
+  "rename.old": "The address {address} stops answering: bookmarks and devices that use it need the new one. A whole name with another ending (hata.lan) can be typed too.",
+  "rename.save": "Rename",
+  "rename.done": "The server is called {name} now",
+  "error.system.badName": "A name is Latin letters, digits and hyphens, up to 63: one word (hata) or a whole home-network name (hata.lan).",
+  "error.system.renameDenied": "Hata does not run as root here, so it cannot rename the computer.",
+  "error.system.renameFailed": "The computer could not be renamed: {message}",
+  "activity.system.renamed": "Server renamed: {target}"
 }
