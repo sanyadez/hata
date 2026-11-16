@@ -60,7 +60,7 @@
 
 body { margin: 0; background: var(--bg); color: var(--text); min-height: 100dvh; -webkit-font-smoothing: antialiased; }
 h1, h2, h3 { margin: 0; font-family: var(--font-heading); font-weight: 600; line-height: 1.2; letter-spacing: -0.01em; }
-h1 { font-size: 28px; }
+h1 { font-size: 22px; }
 h2 { font-size: 16px; }
 h3 { font-size: 14px; }
 p { margin: 0; }
@@ -242,7 +242,7 @@ p.small > .chip { height: auto; min-height: 24px; padding-block: 2px; white-spac
 .user:hover { background: var(--surface); }
 .avatar { display: grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; background: var(--accent); color: var(--on-accent); font-weight: 700; flex: none; }
 
-#view { max-width: 1440px; margin: 0 auto; padding: 36px 32px 72px; display: grid; gap: 24px; }
+#view { max-width: 1440px; margin: 0 auto; padding: 36px 32px 72px; display: grid; gap: 16px; }
 .bottom-bar { display: none; }
 .nav-more .menu-item.active { color: var(--accent-text); }
 
@@ -258,7 +258,7 @@ p.small > .chip { height: auto; min-height: 24px; padding-block: 2px; white-spac
 .section-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .section-head h2 .muted { margin-left: 10px; font: 400 12px var(--font-body); letter-spacing: 0; }
 
-.columns { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 24px; align-items: start; }
+.columns { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 16px; align-items: start; }
 .columns > section, .side { display: grid; gap: 16px; min-width: 0; }
 /* a grid item is as wide as its longest line unless told otherwise */
 .columns > *, .side > *, .stack > *, #view > * { min-width: 0; }
@@ -328,7 +328,6 @@ button.tile { padding: 0; font: inherit; color: inherit; text-align: left; curso
 .tile-text { display: grid; gap: 3px; min-width: 0; }
 .tile-top { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .menu-item .tile-name { white-space: normal; }
-.tile.add .tile-sub { white-space: normal; }
 .tile.restarting .tile-sub { color: var(--danger); }
 
 .app-icon { width: 40px; height: 40px; border-radius: 10px; object-fit: contain; flex: none; }
@@ -497,7 +496,6 @@ dialog.tile-folder header { justify-content: space-between; }
 .tile-where { display: flex; align-items: center; gap: 5px; color: var(--faint); font: 12px var(--font-mono); min-width: 0; }
 .tile-where .ico { width: 12px; height: 12px; flex: none; }
 .tile.on .tile-sub, .tile.kind-ha.on .tile-big { color: var(--accent-text); }
-.tile.add .tile-sub { white-space: normal; }
 .tile .tile-room { margin-top: 4px; }
 /* the button of what can be done shows where the pointer is; the marks step aside for it */
 .tile-open { position: absolute; top: 8px; right: 8px; display: grid; place-items: center; width: 28px; height: 28px; border-radius: var(--radius-sm); color: var(--muted); background: var(--surface-2); opacity: 0; }
@@ -520,8 +518,8 @@ dialog.tile-folder header { justify-content: space-between; }
 .crumbs .ico { width: 12px; height: 12px; color: var(--faint); }
 .app-head { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
 .app-title { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
-.tabs { display: flex; gap: 28px; margin-top: 24px; box-shadow: inset 0 -1px var(--border); overflow: auto hidden; scrollbar-width: none; }
-.tab { display: flex; align-items: center; gap: 8px; padding: 10px 2px 12px; color: var(--muted); font: 500 15px var(--font-heading); border-bottom: 2px solid transparent; white-space: nowrap; }
+.tabs { display: flex; gap: 22px; margin-top: 24px; box-shadow: inset 0 -1px var(--border); overflow: auto hidden; scrollbar-width: none; }
+.tab { display: flex; align-items: center; gap: 8px; padding: 11px 0 10px; color: var(--muted); font: 500 14px var(--font-heading); border-bottom: 2px solid transparent; white-space: nowrap; }
 .tab:hover { color: var(--text); }
 .tab.active { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
 .tab.active .ico { color: var(--accent-text); }
@@ -652,7 +650,7 @@ tr.removed .app-icon { opacity: 0.5; }
 
 /* --- Store ------------------------------------------------------------------------------------- */
 
-.store, .settings, .files { display: grid; grid-template-columns: 208px minmax(0, 1fr); gap: 32px; align-items: start; }
+.store, .settings, .files { display: grid; grid-template-columns: 208px minmax(0, 1fr); gap: 16px; align-items: start; }
 .settings { grid-template-columns: minmax(0, 1fr); gap: 16px; }
 #store-list { display: grid; gap: 16px; }
 .cats { display: grid; gap: 2px; position: sticky; top: 88px; }
@@ -950,7 +948,7 @@ dialog.dropdown header { padding: 4px 6px; margin-bottom: 8px; }
   .top { height: 56px; padding: 0 16px; gap: 12px; }
   .top .nav, .top .brand, .top > .top-right > .search, .top-term, .top-gear { display: none; }
   .top-title, .top-find { display: grid; }
-  #view { padding: 20px 16px 96px; gap: 20px; }
+  #view { padding: 20px 16px 96px; gap: 16px; }
   .upload { bottom: 88px; }
   .selection { top: 64px; }
   .bottom-bar { position: fixed; left: 12px; right: 12px; bottom: max(12px, env(safe-area-inset-bottom)); z-index: 6; display: flex; justify-content: space-around; padding: 4px; background: color-mix(in srgb, var(--surface) 92%, transparent); backdrop-filter: blur(12px); border: 1px solid var(--border-strong); border-radius: 26px; }
@@ -1684,6 +1682,8 @@ dialog.add-dialog:not([open]) { display: none; }
 .pg.arranging .pg-card { touch-action: none; cursor: grab; }
 .pg.arranging .pg-card > * { pointer-events: none; }
 .pg.arranging .pg-card > .pg-side { pointer-events: auto; }
+/* the × takes the press itself, above the corner's handle; the rest of the card is grabbed whole */
+.pg.arranging .pg-card > .pg-remove { pointer-events: auto; z-index: 5; }
 .pg-side { position: absolute; z-index: 2; touch-action: none; }
 /* with a mouse the handles show on the card under it; a finger has nothing to hover with */
 @media (hover: hover) {
@@ -2023,7 +2023,7 @@ dialog.nav-sheet[open] { display: grid; gap: 14px; padding: 10px 14px calc(14px 
 
 .filter-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px 16px; flex-wrap: wrap; padding: 10px 14px; }
 .seg-pills { display: flex; flex-wrap: wrap; gap: 2px; padding: 3px; border-radius: 10px; background: var(--surface-2); }
-.seg-pill { height: 30px; padding: 0 12px; border: 0; border-radius: 8px; background: none; color: var(--muted); font: 500 13px var(--font-body); cursor: pointer; white-space: nowrap; }
+.seg-pill { display: inline-flex; align-items: center; height: 30px; padding: 0 12px; text-decoration: none; border: 0; border-radius: 8px; background: none; color: var(--muted); font: 500 13px var(--font-body); cursor: pointer; white-space: nowrap; }
 .seg-pill:hover { color: var(--text); }
 .seg-pill.active { background: var(--surface); color: var(--text); font-weight: 600; box-shadow: 0 1px 2px rgb(0 0 0 / 12%); }
 .with-dot { display: inline-flex; align-items: center; gap: 8px; }
@@ -2061,7 +2061,7 @@ dialog.nav-sheet[open] { display: grid; gap: 14px; padding: 10px 14px calc(14px 
 .ha-filter input[type="search"] { flex: 1 1 220px; min-width: 0; }
 .ha-filter .check { margin: 0; }
 .home-head.card { align-items: center; padding: 16px 20px; }
-.home-head.card h1 { font-size: 24px; }
+.home-head.card h1 { font-size: 22px; }
 
 /* --- The table of access ------------------------------------------------------------------------------ */
 
@@ -2138,3 +2138,55 @@ button.mark:hover { border-color: var(--border-strong); color: var(--text); }
 .disk-uses-item { display: flex; align-items: flex-start; gap: 10px; min-width: 0; }
 .disk-uses-item .grow { display: grid; min-width: 0; }
 .disk-uses-item .ico { flex: none; margin-top: 2px; }
+
+/* Load: what takes what, thing by thing */
+.load-place { display: grid; gap: 10px; padding-bottom: 6px; }
+.load-place > .block-head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; padding: 16px 18px 0; min-width: 0; }
+.load-place > .block-head h2 { font-size: 16px; min-width: 0; }
+.load-place > .pad-x { padding: 0 18px; }
+.load-place > .pad-b { padding: 0 18px 14px; }
+.load-what { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.load-kind { display: grid; place-items: center; width: 28px; height: 28px; flex: none; border-radius: var(--radius-sm); background: var(--surface-2); color: var(--muted); }
+.load-table td:last-child { width: 130px; }
+.load-line { width: 120px; height: 26px; display: block; }
+.load-line path { fill: none; stroke: var(--accent); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+tr.warn-row .load-line path { stroke: var(--warn); }
+.th-sort { all: unset; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; }
+.th-sort.active { color: var(--text); }
+.th-sort .ico { width: 14px; height: 14px; }
+a.kpi { color: inherit; text-decoration: none; border-radius: var(--radius-sm); }
+a.kpi:hover { background: var(--surface-2); }
+.load-head { display: grid; gap: 12px; }
+.load-head .tree-head { padding: 0; }
+.load-head .tree-head p { margin-top: 4px; }
+#load-body { display: grid; gap: 16px; min-width: 0; }
+.load-head .seg-pills { justify-self: start; }
+
+/* A card whose heading stands inside it, above a table or a row of numbers that reaches the card's edges */
+.card.head-in > .card { border: 0; border-radius: 0; box-shadow: none; background: none !important; backdrop-filter: none !important; border-top: 1px solid var(--border); }
+/* Home is a grid of its own: its head stands as far from the cards as they stand from each other */
+#view:has(> .pg), #view:has(.home-head) { gap: 12px; }
+/* Tabs are words everywhere: the same size and no pictures, whichever page they stand on */
+.tabs > .tab > .ico { display: none; }
+/*
+ * The head of a page is a card with or without a picture behind the page: an app's, a computer's, a Proxmox server's,
+ * the one of Files, the trash and the history. It ends in its tabs the way a section's head does: a line across the
+ * card, the tabs under it.
+ */
+:root:not(.has-wallpaper) :is(.page-head, #app-head, #machine-head, #pve-head) { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); }
+:root:not(.has-wallpaper) .page-head:not(.card) { padding: 18px 20px; }
+:root:not(.has-wallpaper) :is(#app-head, #machine-head, #pve-head) { padding: 18px 20px 0; }
+#view :is(#app-head, #machine-head, #pve-head, #instance-head, #guest-head) .tabs { margin: 16px -20px 0; padding: 0 20px; box-shadow: inset 0 1px var(--border); }
+#view :is(#instance-head, #guest-head):has(.tabs) { padding-bottom: 0; }
+
+/* A person's picture: the circle keeps its size, the picture fills it */
+.avatar.has-picture, .top-picture { overflow: hidden; background: var(--surface-2); padding: 0; }
+:is(.avatar, .top-picture) img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.top-btn.top-user.has-picture { padding: 0; overflow: hidden; }
+.top-picture { display: block; width: 100%; height: 100%; }
+.avatar.big { width: 72px; height: 72px; font-size: 28px; }
+.settings .card.avatar-card, .card.avatar-card { display: flex; align-items: center; gap: 18px; flex-wrap: wrap; }
+
+/* the arranging bar's pictures: undo, YAML, lay out anew */
+.pg-tools { display: flex; align-items: center; gap: 2px; }
+.pg-tools .icon-btn.danger:not(:disabled):hover { background: var(--danger); color: #fff; }

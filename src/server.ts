@@ -88,6 +88,10 @@ import {
   sessionCookie,
   sessionUser,
   setupToken,
+  avatarPath,
+  dropAvatar,
+  MAX_AVATAR,
+  setAvatar,
 } from "./auth";
 import { bus, type BusEvent } from "./bus";
 import { DATA_DIR, dropOldSecrets, listenAddress, saveSettings, settings, timezone, updateSettings } from "./config";
@@ -141,6 +145,7 @@ import { machineAccessRows, setMachineAccess } from "./machinegate";
 import { applyMachineCompose, installComposeOnMachine, machineTiles, installOnMachine, machineAppAction, machineAppLogs, machineApps, machineCompose, removeMachineApp, revealMachineLogin, storeAppFor } from "./machineapps";
 import { addStore, ARCH, catalogue, removeStore, scheduleStoreSync, StoreError, syncStore } from "./store";
 import { startSampler, systemStatus } from "./system";
+import { loadReport, loadTrouble, startLoad } from "./load";
 import { addDisc as addContainerDisc, receiveDisc as receiveContainerDisc, removeDisc as removeContainerDisc, ejectDisc as ejectContainerDisc, askScreen as containerAskScreen, openScreen as containerOpenScreen, isContainerScreen, screenOn as containerScreenOn, act as containerAct, cloneInstance as cloneContainer, renameInstance as renameContainer, addPlace as addContainerPlace, moveInstance as moveContainer, removePlace as removeContainerPlace, setStandardPlace, containerOfMachine, vmOfMachine, instanceOfMachine, containersTrouble, create as createContainer, install as installIncus, installVms as installIncusVms, removeContainer, removeSnapshot as removeContainerSnapshot, report as containersReport, restoreSnapshot as restoreContainerSnapshot, setLimits as setContainerLimits, setNetwork as setContainerNetwork, setUpNow as setUpContainers, shellCommand as containerShell, shellReady as containerShellReady, takeSnapshot as takeContainerSnapshot } from "./containers";
 import { askScreen as pveAskScreen, openScreen as pveOpenScreen, storageContent as pveStorageContent, removeVolume as pveRemoveVolume, cloneOptions as pveCloneOptions, cloneGuest as pveCloneGuest, makeTemplate as pveMakeTemplate, load as pveLoad, templates as pveTemplates, downloadTemplate as pveDownloadTemplate, removeTemplate as pveRemoveTemplate, setSchedule as pveSetSchedule, runScheduleNow as pveRunSchedule, restoreBackup as pveRestoreBackup, restoreOptions as pveRestoreOptions, changeGuest as pveChangeGuest, guestSettings as pveGuestSettings, installByConsole as pveInstallByConsole, openConsole as pveOpenConsole, type Console as PveConsole, addBySignIn as addPveBySignIn, removeGuest as pveRemoveGuest, addHost as addPve, createGuest as pveCreateGuest, createVm as pveCreateVm, sendFile as pveSendFile, receiveFile as pveReceiveFile, newOptions as pveNewOptions, backupJobs as pveBackupJobs, backups as pveBackups, changeHost as changePve, guestOfMachine, host as pveHost, hosts as pveHosts, power as pvePower, proxmoxTrouble, refresh as refreshPve, removeHost as removePve, snapshotAction as pveSnapshotAction, snapshots as pveSnapshots, takeBackup as pveTakeBackup, takeSnapshot as pveTakeSnapshot, taskLog as pveTaskLog } from "./proxmox";
 import { call as machineCall, clientBinary, containersOf, installScript, invite as machineInvite, INVITE_MS, linkData, linkHandlers, machine as machineView, MACHINE_ID_RE, machines as machineList, machinesAway, open as machineOpen, remove as removeMachine, rename as renameMachine, updateClient, wake as wakeMachine, power as powerMachine, type LinkSocket } from "./machines";
@@ -406,6 +411,8 @@ export function memberMay(method: string, path: string, role: Role = "member"): 
   // a press on a tile of Home Assistant: whether this one may is `haAllowed`'s to say
   if (method === "POST" && /^\/api\/ha\/[a-f0-9]{8}\/act$/.test(path)) return true;
   if (method !== "GET") return false;
+  // the pictures of the people: the head of every page shows one's own
+  if (/^\/api\/avatars\/[0-9a-f-]{36}$/.test(path)) return true;
   if (["/api/events", "/api/overview", "/api/apps"].includes(path) || /^\/api\/apps\/[a-z0-9_-]+(\/(stats|icon))?$/.test(path)) return true;
   return role === "member" && (path === "/api/store" || /^\/api\/store\/[a-z0-9-]+\/apps\/[a-z0-9_-]+$/.test(path));
 }
@@ -939,6 +946,27 @@ async function api(req: Request, url: URL, server: Server<unknown>): Promise<Res
     record("auth.password", { user: user.name });
     return json({ ok: true });
   }
+  const avatar = /^\/api\/avatars\/([0-9a-f-]{36})$/.exec(path);
+  if (avatar && method === "GET") {
+    const who = findUser(avatar[1]!);
+    const file = who?.avatar ? Bun.file(avatarPath(who.id)) : null;
+    if (!who?.avatar || !file || !(await file.exists())) return fail(404, "request.notFound");
+    return new Response(file, { headers: { ...SECURITY_HEADERS, "content-security-policy": "default-src 'none'; sandbox", "content-type": IMAGE_MIME[who.avatar.kind], "cache-control": "private, max-age=31536000, immutable" } });
+  }
+  // the person's own picture: the page sends a small square it made; the kind is told by the bytes, not the name
+  if (path === "/api/account/avatar" && method === "PUT") {
+    if (!(Number(req.headers.get("content-length")) <= MAX_AVATAR)) return fail(413, "account.avatarTooLarge", { max: MAX_AVATAR / 1024 });
+    const bytes = new Uint8Array(await req.arrayBuffer());
+    if (bytes.length > MAX_AVATAR) return fail(413, "account.avatarTooLarge", { max: MAX_AVATAR / 1024 });
+    const kind = imageType(bytes.subarray(0, 16));
+    if (kind !== "jpg" && kind !== "png" && kind !== "webp") return fail(400, "account.avatarNotImage");
+    await setAvatar(user, kind, bytes);
+    return json({ user: signedIn(user) });
+  }
+  if (path === "/api/account/avatar" && method === "DELETE") {
+    dropAvatar(user);
+    return json({ user: signedIn(user) });
+  }
   if (path === "/api/account/sessions/others" && method === "DELETE") {
     revokeSessions(user, req);
     return json({ ok: true });
@@ -1180,7 +1208,7 @@ async function api(req: Request, url: URL, server: Server<unknown>): Promise<Res
       music: admin && moduleOn("music") ? await musicNow().catch(() => null) : null,
       // ffmpeg is here: videos of this server are played in the browser by Hata's own player, the TV module on or off
       media: admin && tvStreamsHere(),
-      attention: admin ? notSnoozed(attention({ system, docker, apps, activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), exposed: exposedNics(), array: arrayTrouble(), shares: shareTrouble(), places: placesDown(), machines: awayMachines(), machineApps: onMachines, unused: unusedDisks(), filling: fillingUp(), pve: proxmoxTrouble(), ha: [...homeAssistantTrouble(), ...qbitTrouble(), ...frigateTrouble()], raid: poolsTrouble(), containers: containersTrouble(), dns: [...dnsTrouble(), ...blockTrouble(), ...wildcardTrouble()] })) : [],
+      attention: admin ? notSnoozed(attention({ system, docker, apps, activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), exposed: exposedNics(), array: arrayTrouble(), shares: shareTrouble(), places: placesDown(), machines: awayMachines(), machineApps: onMachines, unused: unusedDisks(), filling: fillingUp(), pve: proxmoxTrouble(), ha: [...homeAssistantTrouble(), ...qbitTrouble(), ...frigateTrouble()], raid: poolsTrouble(), containers: containersTrouble(), dns: [...dnsTrouble(), ...blockTrouble(), ...wildcardTrouble()], load: loadTrouble() })) : [],
       // how many items are put off: the list says so and leads to them
       attentionHidden: admin ? hiddenCount() : 0,
       // who signed in from where, and what was installed by whom, is the administrators' business
@@ -1964,6 +1992,7 @@ async function api(req: Request, url: URL, server: Server<unknown>): Promise<Res
     return json(await dockerInfo());
   }
   // the answer goes out first, then the server goes down
+  if (path === "/api/load" && method === "GET") return json(loadReport());
   if (path === "/api/system/power" && method === "POST") {
     const { action } = await body(req);
     if (action !== "reboot" && action !== "poweroff") return fail(404, "request.notFound");
@@ -3396,6 +3425,7 @@ export async function serve(): Promise<void> {
   await settleModules();
   scheduleUpdateChecks();
   startSampler(() => settings.dataRoot);
+  startLoad();
   startDisks();
   startFills();
   startImages({
@@ -3419,7 +3449,7 @@ export async function serve(): Promise<void> {
   void refreshHttps();
   refreshLocalNames();
   startNotifications({
-    attention: async () => notSnoozed(attention({ system: systemStatus(), docker: await dockerInfo(), apps: await listApps("en"), activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), exposed: exposedNics(), array: arrayTrouble(), shares: shareTrouble(), places: placesDown(), machines: awayMachines(), machineApps: await machineTiles(machineList(), "en").catch(() => []), unused: unusedDisks(), filling: fillingUp(), pve: proxmoxTrouble(), ha: [...homeAssistantTrouble(), ...qbitTrouble(), ...frigateTrouble()], raid: poolsTrouble(), containers: containersTrouble(), dns: [...dnsTrouble(), ...blockTrouble(), ...wildcardTrouble()] })),
+    attention: async () => notSnoozed(attention({ system: systemStatus(), docker: await dockerInfo(), apps: await listApps("en"), activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), exposed: exposedNics(), array: arrayTrouble(), shares: shareTrouble(), places: placesDown(), machines: awayMachines(), machineApps: await machineTiles(machineList(), "en").catch(() => []), unused: unusedDisks(), filling: fillingUp(), pve: proxmoxTrouble(), ha: [...homeAssistantTrouble(), ...qbitTrouble(), ...frigateTrouble()], raid: poolsTrouble(), containers: containersTrouble(), dns: [...dnsTrouble(), ...blockTrouble(), ...wildcardTrouble()], load: loadTrouble() })),
     baseUrl: publicUrl,
     isAdmin: (id) => findUser(id)?.role === "admin",
   });

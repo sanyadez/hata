@@ -435,6 +435,7 @@ function parseRoute() {
   if (parts[0] === "frigate" && parts[1] && isAdmin()) return { view: "frigate", id: parts[1], hash: `#/house/cameras/${parts[1]}` };
   if ((parts[0] === "storage" || parts[0] === "network") && isAdmin()) return areaRoute(parts[0], parts[1], parts[2]);
   if (parts[0] === "machines" && parts[1] === "this" && isAdmin()) return areaRoute("server", parts[2], parts[3]);
+  if (parts[0] === "machines" && parts[1] === "load" && isAdmin()) return { view: "load", place: parts[2] ? decodeURIComponent(parts[2]) : "" };
   // a container, a virtual machine or a guest keeps its address when Hata's client is put on it: the client only adds tabs
   if (parts[0] === "guest" && parts[3] && isAdmin()) {
     const base = `#/guest/${parts[1]}/${parts[2]}/${parts[3]}`;
@@ -507,8 +508,8 @@ const AREAS = {
     { id: "apps", view: "server" },
     { id: "docker", sections: ["docker"] },
     { id: "containers", view: "containers", module: "containers" },
-    { id: "files", hash: "#/files/", link: true },
     { id: "system", sections: ["tools"] },
+    { id: "load", hash: "#/machines/load/here", link: true },
   ],
   settings: [
     { id: "account", sections: ["account"] },
@@ -555,7 +556,7 @@ function areaOf(route = state.route) {
   if (view === "settings") return route.area === "server" ? "machines" : route.area;
   if (["apps", "store", "import", "app", "mapp"].includes(view)) return "apps";
   if (["files", "trash", "myhata"].includes(view)) return "files";
-  if (["machines", "machine", "server", "proxmox", "containers", "instance", "guest", "terminal"].includes(view)) return "machines";
+  if (["machines", "machine", "server", "proxmox", "containers", "instance", "guest", "terminal", "load"].includes(view)) return "machines";
   if (view === "qbit") return route.house || !torrentsApp(route.id) ? "house" : "apps";
   if (["integrations", "ha", "frigate", "tv", "music"].includes(view)) return "house";
   if (view === "backups") return "backups";
@@ -1107,7 +1108,7 @@ const navItems = () => NAV.filter((item) => (!item.admin || isAdmin()) && (!item
 
 /** Which section of the page an item of "Needs attention" is about, by its code */
 const ATTENTION_AREAS = [
-  [/^(machine|pve|containers|docker|memory|temperature)\b/, "machines"],
+  [/^(machine|pve|containers|docker|memory|temperature|load)\b/, "machines"],
   [/^(ha|frigate)\b/, "house"],
   [/^(disk|smart|absent|array|raid|share|netplace)\b/, "storage"],
   [/^(offsite|failed\.backup|backup)\b/, "backups"],
@@ -1179,7 +1180,7 @@ function navSheet(search = false) {
       isAdmin() && tile("#/terminal", "terminal", t("terminal.title"), state.route.view === "terminal"),
       tile("#/settings", "gear", t("nav.settings"), current === "settings"),
     ),
-    h("button", { type: "button", class: "sheet-user", onclick: (e) => userMenu(e, true) }, h("span", { class: "avatar" }, state.user.name.slice(0, 1).toUpperCase()), h("span", { class: "grow" }, h("strong", null, state.user.name), h("span", { class: "muted small block" }, t("user.role." + state.user.role))), icon("chevron")),
+    h("button", { type: "button", class: "sheet-user", onclick: (e) => userMenu(e, true) }, avatarOf(state.user), h("span", { class: "grow" }, h("strong", null, state.user.name), h("span", { class: "muted small block" }, t("user.role." + state.user.role))), icon("chevron")),
   );
   pullToClose(dialog);
   if (search) field.querySelector("input").focus();
@@ -1198,12 +1199,22 @@ async function signOut() {
   render();
 }
 
+/** A person's circle: their picture when they put one, else the first letter of their name */
+function avatarOf(user, cls = "avatar") {
+  const letter = (user?.name ?? "?").slice(0, 1).toUpperCase();
+  if (!user?.avatar) return h("span", { class: cls }, letter);
+  const img = h("img", { src: `/api/avatars/${user.id}?v=${user.avatar}`, alt: "", draggable: "false" });
+  // a picture that cannot be had (removed meanwhile) falls back to the letter
+  img.onerror = () => img.replaceWith(letter);
+  return h("span", { class: cls + " has-picture" }, img);
+}
+
 function userMenu(e, above = false) {
   let dialog;
   const anchor = e.currentTarget.getBoundingClientRect();
   dialog = openDialog(
     "menu dropdown",
-    h("header", null, h("span", { class: "avatar" }, state.user.name.slice(0, 1).toUpperCase()), h("div", null, h("h2", null, state.user.name), h("span", { class: "muted small" }, t("user.role." + state.user.role)))),
+    h("header", null, avatarOf(state.user), h("div", null, h("h2", null, state.user.name), h("span", { class: "muted small" }, t("user.role." + state.user.role)))),
     h("a", { class: "menu-item", href: "#/settings/account", onclick: () => (dialog.close(), document.querySelector("dialog.nav-sheet")?.close()) }, icon("user"), t("settings.account")),
     isAdmin() && h("button", { type: "button", class: "menu-item", onclick: () => (dialog.close(), serverPowerDialog("reboot")) }, icon("refresh"), t("power.reboot")),
     isAdmin() && h("button", { type: "button", class: "menu-item", onclick: () => (dialog.close(), serverPowerDialog("poweroff")) }, icon("stop"), t("power.poweroff")),
@@ -1340,7 +1351,7 @@ function shell(...content) {
         h("span", { id: "music-now", class: "tv-now", hidden: true }),
         h("span", { id: "tv-now", class: "tv-now", hidden: true }),
         h("a", { class: "top-btn top-gear" + (areaOf() === "settings" ? " active" : ""), href: "#/settings", title: t("nav.settings"), "aria-label": t("nav.settings") }, icon("gear")),
-        h("button", { type: "button", class: "top-btn top-user", title: state.user.name, "aria-label": state.user.name, "aria-haspopup": "menu", onclick: userMenu }, state.user.name.slice(0, 1).toUpperCase()),
+        h("button", { type: "button", class: "top-btn top-user" + (state.user.avatar ? " has-picture" : ""), title: state.user.name, "aria-label": state.user.name, "aria-haspopup": "menu", onclick: userMenu }, state.user.avatar ? avatarOf(state.user, "top-picture") : state.user.name.slice(0, 1).toUpperCase()),
       ),
     ),
     h("main", { id: "view" }, state.user.mustTwoFactor && h("p", { class: "banner" }, t("twofa.mustLead"), " ", h("a", { class: "link", href: "#/settings/account" }, t("twofa.mustGo"))), content),
@@ -1374,6 +1385,7 @@ function render() {
   if (view === "tv") return renderTv();
   if (view === "music") return renderMusic();
   if (view === "machines") return renderMachines();
+  if (view === "load") return renderLoad();
   if (view === "machine") return renderMachine();
   if (view === "proxmox") return renderPve();
   if (view === "containers") return renderContainers();
@@ -1466,10 +1478,10 @@ function meterBar(percent, cls = level(percent)) {
 }
 
 /** One number of the block of this server: label, the value and its unit, a bar or a little chart, a line under it */
-function kpi(id, iconName, label, key = "") {
+function kpi(id, iconName, label, key = "", href = "") {
   return h(
-    "div",
-    { class: "kpi", id: "kpi-" + id },
+    href ? "a" : "div",
+    { class: "kpi", id: "kpi-" + id, ...(href ? { href, title: t("load.title") } : {}) },
     h("div", { class: "kpi-label" }, key ? h("i", { class: "series-key " + key }) : icon(iconName), h("span", { class: "clip" }, label)),
     h("div", { class: "kpi-value" }, h("strong", null, "—"), h("span", { class: "unit" })),
     h("div", { class: "kpi-gauge" }),
@@ -1496,7 +1508,7 @@ function statsBlock() {
       "section",
       { class: "card numbers" },
       h("div", { class: "block-head" }, h("span", { class: "block-icon" }, icon("server")), h("h2", { class: "clip", id: "own-name" }, state.overview?.system?.hostname ?? "…"), h("span", { class: "muted small grow" }, t("home.thisServer")), h("span", { class: "mono muted small", id: "own-up" })),
-      h("div", { class: "kpis" }, kpi("cpu", "cpu", t("sys.cpu"), "s2"), kpi("memory", "memory", t("sys.memory"), "s1"), kpi("disk", "disk", t("sys.disk")), kpi("network", "network", t("sys.network")), kpi("temp", "temp", t("sys.temperature"))),
+      h("div", { class: "kpis" }, kpi("cpu", "cpu", t("sys.cpu"), "s2", isAdmin() ? "#/machines/load/here" : ""), kpi("memory", "memory", t("sys.memory"), "s1", isAdmin() ? "#/machines/load/here" : ""), kpi("disk", "disk", t("sys.disk")), kpi("network", "network", t("sys.network")), kpi("temp", "temp", t("sys.temperature"))),
       h("div", { class: "trend", id: "own-trend" }),
     ),
   );
@@ -1632,7 +1644,8 @@ function tileContent(item, title, sub, { badges = null, where = null, big = "" }
   return [
     h("span", { class: "tile-head" }, tileIcon(item), big && h("span", { class: "tile-big" }, big), h("span", { class: "tile-badges" }, badges)),
     h("span", { class: "tile-name", title }, title),
-    h("span", { class: "tile-sub" }, sub),
+    // one line under every name: what does not fit is cut, and the whole of a plain text is in its title
+    h("span", { class: "tile-sub", ...(typeof sub === "string" ? { title: sub } : {}) }, sub),
     where,
   ];
 }
@@ -1935,6 +1948,8 @@ function cardName(card) {
   if (card.type === "block") return blockTitle(card.id);
   if (card.type === "link") return card.title || linkHost(card.url);
   if (card.type === "files") return card.path.split("/").filter(Boolean).pop() ?? card.path;
+  // what the card itself says: a Home Assistant device by its name, a widget by its own title
+  if (card.type === "ha" || card.type === "widget" || card.type === "builtin") return tileTitle(card);
   const it = tileTarget(card);
   return it?.title ?? it?.name ?? card.name ?? card.entity ?? "";
 }
@@ -1991,6 +2006,13 @@ const gridReset = () =>
     },
   });
 
+/** Home as YAML from the arranging bar: what was moved and not saved yet would not be in the text, so it is asked about first */
+function gridYaml() {
+  const open = () => (gridCancel(), layoutTextDialog());
+  if (!gridUi.undo.length && !gridUi.gone.size) return open();
+  confirmAction({ title: t("grid.yamlTitle"), lead: t("grid.yamlLead"), label: t("grid.yamlGo"), kind: "primary", iconName: "code", run: async () => open() });
+}
+
 /** Arranging is for a screen as wide as the grid: a narrower one lays Home out by itself */
 const mayArrange = () => isAdmin() && !gridUi.arranging && state.route.view === "home" && !!state.overview && gridColumns() === state.overview.grid.cols;
 
@@ -1998,10 +2020,12 @@ function gridBar() {
   const box = document.getElementById("grid-bar");
   if (!box) return;
   const undo = () => ((gridUi.at = gridUi.undo.pop()), paintGrid());
+  // the bar's rarer actions are pictures with their words on hover, so the two that end arranging stand out
+  const tool = (label, iconName, onclick, disabled = false, kind = "") => h("button", { type: "button", class: "icon-btn " + kind, title: label, "aria-label": label, disabled, onclick }, icon(iconName));
   box.hidden = !gridUi.arranging;
   const head = document.getElementById("home-head");
   if (head) head.hidden = gridUi.arranging;
-  put(box, gridUi.arranging && h("div", { class: "pg-bar" }, h("strong", null, t("grid.arranging")), h("span", { class: "muted small grow" }, t("grid.arrangingHint")), button(t("grid.undo"), { class: "small", disabled: !gridUi.undo.length, onclick: undo }, "refresh"), button(t("grid.reset"), { class: "small danger", onclick: gridReset }, "refresh"), button(t("common.cancel"), { class: "small", onclick: gridCancel }), button(t("grid.done"), { class: "small primary", onclick: gridDone }, "check")));
+  put(box, gridUi.arranging && h("div", { class: "pg-bar" }, h("strong", null, t("grid.arranging")), h("span", { class: "muted small grow" }, t("grid.arrangingHint")), h("div", { class: "pg-tools" }, tool(t("grid.undo"), "undo", undo, !gridUi.undo.length), tool(t("menu.dashboardConfig"), "code", gridYaml), tool(t("grid.reset"), "refresh", gridReset, false, "danger")), button(t("common.cancel"), { class: "small", onclick: gridCancel }), button(t("grid.done"), { class: "small primary", onclick: gridDone }, "check")));
   // the button stays the same element across redraws: one under the pointer keeps its click
   const slot = document.getElementById("grid-edit-slot");
   const offer = mayArrange();
@@ -2094,7 +2118,8 @@ function gridCard(card, free) {
 
 /** Moving a card by any part of it, or pulling one of its edges and corners */
 function gridStart(e, card, el) {
-  if (e.button !== 0) return;
+  // a press on the × is the ×'s own: it asks, it does not move the card
+  if (e.button !== 0 || e.target.closest(".pg-remove")) return;
   const grip = e.target.closest(".pg-side");
   const pg = document.getElementById("pg");
   const rect = pg.getBoundingClientRect();
@@ -2528,6 +2553,9 @@ const ATTENTION_ICONS = { update: "up", docker: "box", restarting: "refresh", pa
 /** The title and the words of an item of the list, sizes said as sizes */
 function attentionWords(item) {
   const detail = { ...item.detail, free: item.detail.free == null ? "" : bytes(item.detail.free), trash: item.detail.trash == null ? "" : bytes(item.detail.trash), size: item.detail.size == null ? "" : bytes(item.detail.size) };
+  if (item.code === "load.cpu" && LOAD_NAMED.includes(item.detail.kind)) detail.name = t("load.kind." + item.detail.kind);
+  if (item.code === "load.cpu" && item.detail.kind === "sessions") detail.name = t("load.sessionsOf", { user: item.detail.name });
+  if (item.code === "load.cpu" && item.detail.kind === "service" && LOAD_UNITS[item.detail.name]) detail.name = t(LOAD_UNITS[item.detail.name]);
   const base = "attention." + item.code;
   return { title: t(base + ".title", detail), text: t(base + ".text", detail).trim() };
 }
@@ -3406,12 +3434,10 @@ function appOverviewTab(app, box) {
       h(
         "div",
         { class: "stack" },
-        h("div", { class: "section-head" }, h("h2", null, t("app.resources"))),
-        statsBox,
-        h("div", { class: "section-head" }, h("h2", null, t("app.containers"))),
+        h("section", { class: "card head-in" }, h("div", { class: "section-head pad-head" }, h("h2", null, t("app.resources"))), statsBox),
         app.containers.length
-          ? h("div", { class: "card table-wrap" }, h("table", null, h("thead", null, h("tr", null, h("th", null, t("app.col.container")), h("th", null, t("app.col.state")), h("th", { class: "num" }, t("sys.cpu")), h("th", { class: "num" }, t("sys.memory")), h("th", null, t("app.col.ports")))), h("tbody", { id: "containers" }, app.containers.map(containerRow))), h("p", { class: "cmd" }, icon("terminal"), `docker compose -p ${app.name} ps`))
-          : h("p", { class: "card pad muted" }, t("app.noContainers")),
+          ? h("div", { class: "card table-wrap" }, h("div", { class: "section-head pad-head" }, h("h2", null, t("app.containers"))), h("table", null, h("thead", null, h("tr", null, h("th", null, t("app.col.container")), h("th", null, t("app.col.state")), h("th", { class: "num" }, t("sys.cpu")), h("th", { class: "num" }, t("sys.memory")), h("th", null, t("app.col.ports")))), h("tbody", { id: "containers" }, app.containers.map(containerRow))), h("p", { class: "cmd" }, icon("terminal"), `docker compose -p ${app.name} ps`))
+          : h("section", { class: "card pad stack-s" }, h("div", { class: "section-head" }, h("h2", null, t("app.containers"))), h("p", { class: "muted" }, t("app.noContainers"))),
       ),
       h(
         "aside",
@@ -3420,7 +3446,7 @@ function appOverviewTab(app, box) {
         appAccessCard(app),
         app.login && h("section", { class: "card pad" }, h("div", { class: "section-head" }, h("h2", null, t("app.login"))), loginBlock(app.login, loginAsker(app.name))),
         app.tips && h("section", { class: "card pad" }, h("div", { class: "section-head" }, h("h2", null, t("app.notes"))), h("div", { class: "tips prose" }, md(app.tips))),
-        h("section", { class: "pad-x" }, h("div", { class: "section-head" }, h("h2", null, t("activity.title"))), app.activity.length ? app.activity.slice(0, 6).map(activityItem) : h("p", { class: "muted small" }, t("activity.none"))),
+        h("section", { class: "card pad" }, h("div", { class: "section-head" }, h("h2", null, t("activity.title"))), app.activity.length ? app.activity.slice(0, 6).map(activityItem) : h("p", { class: "muted small" }, t("activity.none"))),
       ),
     ),
   );
@@ -3755,11 +3781,222 @@ function renderMachinesBody(force = false) {
     h(
       "section",
       { class: "card server-tree" },
-      h("div", { class: "tree-head" }, h("div", null, h("h1", null, t("nav.machines")), h("p", { class: "meta" }, meta)), button(t("machines.addAny"), { class: "primary", onclick: (e) => addToMachinesMenu(e.currentTarget) }, "plus")),
+      h("div", { class: "tree-head" }, h("div", null, h("h1", null, t("nav.machines")), h("p", { class: "meta" }, meta)), h("div", { class: "actions" }, button(t("load.title"), { onclick: () => go("#/machines/load") }, "chart"), button(t("machines.addAny"), { class: "primary", onclick: (e) => addToMachinesMenu(e.currentTarget) }, "plus"))),
       d.outdated.length > 0 && h("div", { class: "tree-banner" }, icon("up", "accent-text"), h("span", { class: "grow" }, h("strong", null, t("tree.outdated", { version: d.version })), " ", h("span", { class: "muted" }, d.outdated.map((m) => m.name).join(", "))), button(t("tree.updateAll"), { class: "small", onclick: (e) => updateClients(d.outdated, e.currentTarget) }, "up")),
       h("div", { class: "tree-row tree-cols small", role: "row" }, h("div", null, t("tree.col.name")), h("div", null, t("tree.col.what")), h("div", null, t("tree.col.state")), h("div", null, t("tree.col.load")), h("div")),
       d.groups.flatMap(treeGroup),
       hasModule("containers") && h("a", { class: "tree-foot small muted", href: "#/machines/this/containers/settings" }, icon("sliders"), h("span", { class: "grow" }, t("tree.foot")), icon("chevron")),
+    ),
+  );
+}
+
+// ---- Load: what takes the processor, the memory, the disk and the network, thing by thing
+
+const loadUi = { data: null, sort: "cpu", all: new Set(), timer: 0 };
+const LOAD_SHOWN = 12;
+/** Units Hata itself puts on the system, and what a person calls them */
+const LOAD_UNITS = { "hata-tv": "load.unit.tv", "hata-music": "load.unit.music", "hata-speaker": "load.unit.speaker", smbd: "load.unit.samba", nmbd: "load.unit.samba", bluetooth: "load.unit.bluetooth" };
+const LOAD_NAMED = ["hata", "engine", "system", "rest"];
+
+/** What a row is called on the page */
+function loadName(row, place) {
+  if (LOAD_NAMED.includes(row.kind)) return t("load.kind." + row.kind);
+  if (row.kind === "sessions") return t("load.sessionsOf", { user: row.name });
+  if (row.kind === "service" && LOAD_UNITS[row.name]) return t(LOAD_UNITS[row.name]);
+  if (row.kind === "app" && place?.kind === "here") return state.overview?.apps?.find((a) => a.name === row.name)?.title ?? row.name;
+  return row.name;
+}
+
+/** Where a row leads: the thing's own page, when it has one */
+function loadHref(row, place) {
+  const machine = place.kind === "machine" ? place.id.slice(8) : "";
+  if (row.kind === "app") return place.kind === "here" ? (state.overview?.apps?.some((a) => a.name === row.name) ? `#/apps/${row.name}` : "") : `#/apps/${row.name}@${machine}`;
+  if (row.kind === "instance" && place.kind === "here") return `#/containers/i/${row.name}`;
+  if (row.kind === "guest") return `#/guest/${place.id.split(":")[1]}/${row.key.slice(6)}`;
+  if (row.kind === "engine" && place.kind === "here") return "#/machines/this/docker";
+  return "";
+}
+
+const rateText = (n) => (n < 1024 ? "0" : bytes(n) + "/s");
+/** Both directions in one cell: "0" when nothing moves, "—" when it is not counted apart (a network shared with the host) */
+const twoWays = (a, b) => (a == null ? "—" : a < 1024 && b < 1024 ? "0" : `↓ ${rateText(a)} · ↑ ${rateText(b)}`);
+const ioOf = (r) => r.read + r.write;
+const netOf = (r) => (r.rx ?? 0) + (r.tx ?? 0);
+const LOAD_SORTS = { cpu: (r) => r.cpu, memory: (r) => r.memory, disk: ioOf, net: netOf };
+
+/** An hour of a row in a line as wide as its cell: the processor */
+function loadLine(values) {
+  const W = 120, H = 26;
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.setAttribute("class", "load-line");
+  svg.setAttribute("aria-hidden", "true");
+  const top = Math.max(10, ...values.filter((v) => v != null));
+  let d = "";
+  let pen = false;
+  values.forEach((v, i) => {
+    if (v == null) return void (pen = false);
+    const x = values.length < 2 ? W : (i / (values.length - 1)) * W;
+    const y = H - 2 - (v / top) * (H - 4);
+    d += (pen ? "L" : "M") + x.toFixed(1) + " " + y.toFixed(1);
+    pen = true;
+  });
+  const path = document.createElementNS(SVG_NS, "path");
+  path.setAttribute("d", d);
+  svg.append(path);
+  return svg;
+}
+
+function renderLoad() {
+  shell(h("div", { id: "load-body" }, waitMark()));
+  if (loadUi.data) paintLoad();
+  void loadLoad();
+  const timer = setInterval(() => void loadLoad(), 5000);
+  cleanups.push(() => clearInterval(timer));
+}
+
+async function loadLoad() {
+  try {
+    loadUi.data = await api("GET", "/api/load");
+  } catch (e) {
+    const box = document.getElementById("load-body");
+    if (box && !loadUi.data) put(box, h("section", { class: "card pad" }, h("p", { class: "error" }, errorText(e))));
+    return;
+  }
+  if (state.route.view === "load") paintLoad();
+}
+
+function paintLoad() {
+  const box = document.getElementById("load-body");
+  const d = loadUi.data;
+  if (!box || !d) return;
+  const at = state.route.place ?? "";
+  const shown = at ? d.places.filter((p) => p.id === at) : d.places;
+  const pill = (id, label) => h("a", { class: "seg-pill" + (at === id ? " active" : ""), href: id ? `#/machines/load/${id}` : "#/machines/load" }, label);
+  const placeLabel = (p) => (p.kind === "here" ? t("load.here", { name: p.name }) : p.kind === "pve" && p.host !== p.name ? `${p.host} · ${p.name}` : p.name);
+  const w = d.warn;
+  put(
+    box,
+    h(
+      "section",
+      { class: "card area-head load-head" },
+      h("div", { class: "tree-head" }, h("div", null, h("h1", null, t("load.title")), h("p", { class: "muted small" }, t("load.lead", { n: d.minutes }))), button(t("load.warn.button"), { class: "small", onclick: loadWarnDialog }, "bell")),
+      h("p", { class: "muted small" }, w.warn ? t("load.warn.on", { cpu: w.cpu, minutes: w.minutes }) : t("load.warn.off")),
+      d.places.length > 1 && h("div", { class: "seg-pills" }, pill("", t("load.all")), d.places.map((p) => pill(p.id, placeLabel(p)))),
+    ),
+    shown.map((p) => loadPlace(p, placeLabel(p))),
+    !shown.length && h("section", { class: "card pad muted" }, t("load.nothing")),
+  );
+}
+
+function loadPlace(p, label) {
+  const sortBy = LOAD_SORTS[loadUi.sort];
+  // what is left over is not somebody: it stays at the end whatever the order
+  const rows = [...p.rows].sort((a, b) => Number(a.kind === "rest") - Number(b.kind === "rest") || sortBy(b) - sortBy(a));
+  const all = loadUi.all.has(p.id);
+  const list = all ? rows : rows.slice(0, LOAD_SHOWN);
+  const memPercent = p.memory.total ? Math.round((p.memory.used / p.memory.total) * 100) : 0;
+  const head = (id, text) => h("th", { class: "num" }, h("button", { type: "button", class: "th-sort" + (loadUi.sort === id ? " active" : ""), "aria-pressed": String(loadUi.sort === id), onclick: () => ((loadUi.sort = id), paintLoad()) }, text, loadUi.sort === id && icon("down")));
+  const old = Date.now() - p.at > 60_000;
+  return h(
+    "section",
+    { class: "card load-place" },
+    h(
+      "div",
+      { class: "block-head" },
+      h("span", { class: "block-icon" }, icon(p.kind === "pve" ? "box" : "server")),
+      h("h2", { class: "clip" }, label),
+      h("span", { class: "muted small grow" }, t("load.cores", { n: p.cores })),
+      h("span", { class: "small" }, t("load.total", { cpu: p.cpu ?? "—", used: bytes(p.memory.used), total: bytes(p.memory.total), percent: memPercent })),
+    ),
+    old && h("p", { class: "muted small pad-x" }, t("load.stale", { time: ago(p.at) })),
+    !rows.length
+      ? h("p", { class: "muted small pad" }, t(p.kind === "machine" ? "load.soonMachine" : "load.soon"))
+      : h(
+          "div",
+          { class: "table-wrap" },
+          h(
+            "table",
+            { class: "load-table" },
+            h("thead", null, h("tr", null, h("th", null, t("load.col.what")), head("cpu", t("load.col.cpu")), head("memory", t("load.col.memory")), head("disk", t("load.col.disk")), head("net", t("load.col.net")), h("th", null, t("load.col.hour")))),
+            h("tbody", null, list.map((r) => loadRow(r, p))),
+          ),
+        ),
+    rows.length > LOAD_SHOWN && h("div", { class: "pad-x pad-b" }, button(all ? t("load.fewer") : t("load.more", { n: rows.length - LOAD_SHOWN }), { class: "small ghost", onclick: () => (all ? loadUi.all.delete(p.id) : loadUi.all.add(p.id), paintLoad()) })),
+  );
+}
+
+function loadRow(r, p) {
+  const name = loadName(r, p);
+  const app = r.kind === "app" && p.kind === "here" ? state.overview?.apps?.find((a) => a.name === r.name) : null;
+  const over = loadUi.data.warn.warn && r.over > 0 && r.cpu >= loadUi.data.warn.cpu;
+  return h(
+    "tr",
+    { class: "clickable" + (over ? " warn-row" : ""), onclick: () => loadRowDialog(r, p) },
+    h("td", null, h("div", { class: "load-what" }, app ? appIcon(app, "small") : h("span", { class: "load-kind" }, icon(LOAD_ICONS[r.kind] ?? "box")), h("div", { class: "clip" }, h("strong", null, name), h("div", { class: "muted small" }, t("load.kindOf." + r.kind), r.parts?.length > 1 && " · " + t("load.parts", { n: r.parts.length }))))),
+    h("td", { class: "num" + (over ? " warn-text" : "") }, `${r.cpu}%`),
+    h("td", { class: "num" }, bytes(r.memory)),
+    h("td", { class: "num small" }, twoWays(r.read, r.write)),
+    h("td", { class: "num small", ...(r.rx == null ? { title: t("load.hostNet") } : {}) }, twoWays(r.rx, r.tx)),
+    h("td", null, loadLine(r.trend.cpu.concat([r.cpu]))),
+  );
+}
+
+const LOAD_ICONS = { hata: "home", app: "grid", container: "box", instance: "box", engine: "box", service: "sliders", sessions: "terminal", system: "server", machine: "box", rest: "cpu", guest: "box" };
+
+/** One thing over the hour: the processor and the memory as lines, its containers, its page */
+function loadRowDialog(r, p) {
+  let dialog;
+  const href = loadHref(r, p);
+  const n = r.trend.cpu.length;
+  const now = Date.now();
+  const points = r.trend.cpu.map((cpu, i) => ({ t: now - (n - i) * MINUTE_MS, cpu, memory: r.trend.memory[i] }));
+  dialog = openDialog(
+    "wide",
+    h("header", null, h("h2", { class: "clip" }, loadName(r, p)), h("p", { class: "muted small" }, t("load.kindOf." + r.kind) + " · " + (p.kind === "here" ? t("load.here", { name: p.name }) : p.name))),
+    n < 2 ? h("p", { class: "muted" }, t("load.soonRow")) : [
+      lineChart(points, [{ cls: "s2", label: t("load.col.cpu"), value: (x) => x.cpu }], { max: null, fmt: (v) => Math.round(v) + "%", label: t("load.col.cpu"), height: 140 }),
+      lineChart(points, [{ cls: "s1", label: t("load.col.memory"), value: (x) => x.memory }], { max: null, fmt: (v) => bytes(v), label: t("load.col.memory"), height: 140 }),
+    ],
+    r.parts?.length > 0 && h("div", { class: "table-wrap" }, h("table", null, h("thead", null, h("tr", null, h("th", null, t("load.col.container")), h("th", { class: "num" }, t("load.col.cpu")), h("th", { class: "num" }, t("load.col.memory")), h("th", { class: "num" }, t("load.col.disk")), h("th", { class: "num" }, t("load.col.net")))), h("tbody", null, r.parts.map((c) => h("tr", null, h("td", null, c.name), h("td", { class: "num" }, `${c.cpu}%`), h("td", { class: "num" }, bytes(c.memory)), h("td", { class: "num small" }, twoWays(c.read, c.write)), h("td", { class: "num small" }, twoWays(c.rx, c.tx))))))),
+    r.kind === "rest" && h("p", { class: "muted small" }, t("load.restHint")),
+    h("footer", null, href && button(t("load.open"), { class: "primary", onclick: () => (dialog.close(), go(href)) }, "chevron"), closeButton(() => dialog)),
+  );
+}
+
+/** When a thing that holds the processor is worth a word in "Needs attention" */
+function loadWarnDialog() {
+  let dialog;
+  const w = loadUi.data?.warn ?? { warn: true, cpu: 80, minutes: 10 };
+  const on = h("input", { type: "checkbox", checked: w.warn });
+  const cpu = h("input", { type: "number", min: 20, max: 100, step: 1, value: w.cpu, class: "short" });
+  const minutes = h("input", { type: "number", min: 2, max: 60, step: 1, value: w.minutes, class: "short" });
+  const error = h("p", { class: "error", role: "alert" });
+  dialog = openDialog(
+    "",
+    h("h2", null, t("load.warn.title")),
+    h("p", { class: "muted" }, t("load.warn.lead")),
+    h("label", { class: "check" }, on, h("span", null, h("strong", null, t("load.warn.tick")))),
+    h("div", { class: "form-row" }, h("label", null, t("load.warn.cpu")), h("div", null, cpu, " %", h("p", { class: "muted small" }, t("load.warn.cpuHint")))),
+    h("div", { class: "form-row" }, h("label", null, t("load.warn.minutes")), h("div", null, minutes, h("p", { class: "muted small" }, t("load.warn.minutesHint")))),
+    error,
+    h(
+      "footer",
+      null,
+      closeButton(() => dialog, t("common.cancel")),
+      button(t("settings.save"), {
+        class: "primary",
+        onclick: async () => {
+          try {
+            await api("PUT", "/api/settings", { load: { warn: on.checked, cpu: Number(cpu.value), minutes: Number(minutes.value) } });
+            dialog.close();
+            void loadLoad();
+            void refresh();
+          } catch (e) {
+            error.textContent = errorText(e);
+          }
+        },
+      }, "check"),
     ),
   );
 }
@@ -12526,7 +12763,6 @@ function renderStoreList() {
   }
   if (!apps.length) return list.replaceChildren(h("p", { class: "empty" }, t("store.nothing")));
   list.replaceChildren(
-    h("div", { class: "section-head" }, h("h2", null, category && category !== "*" && category !== "+" ? category : t(category === "*" ? "store.recommended" : category === "+" ? "store.installed" : "store.allApps"), h("span", { class: "muted small" }, apps.length))),
     h(
       "div",
       { class: "cards" },
@@ -21308,7 +21544,7 @@ function renderServerBody() {
   if (!box.childElementCount) {
     put(
       box,
-      h("section", { class: "card numbers" }, h("div", { class: "kpis" }, kpi("cpu", "cpu", t("sys.cpu"), "s2"), kpi("memory", "memory", t("sys.memory"), "s1"), kpi("disk", "disk", t("sys.disk")), kpi("network", "network", t("sys.network")), kpi("temp", "temp", t("sys.temperature"))), h("div", { class: "trend", id: "own-trend" })),
+      h("section", { class: "card numbers" }, h("div", { class: "kpis" }, kpi("cpu", "cpu", t("sys.cpu"), "s2", "#/machines/load/here"), kpi("memory", "memory", t("sys.memory"), "s1", "#/machines/load/here"), kpi("disk", "disk", t("sys.disk")), kpi("network", "network", t("sys.network")), kpi("temp", "temp", t("sys.temperature"))), h("div", { class: "trend", id: "own-trend" })),
       h("div", { class: "columns" }, h("div", { class: "stack", id: "server-main" }), h("aside", { class: "side stack", id: "server-side" })),
     );
   }
@@ -21528,6 +21764,81 @@ function passwordPrompt(title, lead, confirmLabel, action, extra = null, kind = 
   password.focus();
 }
 
+const AVATAR_SIDE = 256;
+
+/** A picture the person chose, made into a small square: the middle of it, scaled down in the browser itself */
+async function avatarSquare(file) {
+  const picture = await createImageBitmap(file);
+  const side = Math.min(picture.width, picture.height);
+  const canvas = document.createElement("canvas");
+  canvas.width = canvas.height = Math.min(AVATAR_SIDE, side);
+  canvas.getContext("2d").drawImage(picture, (picture.width - side) / 2, (picture.height - side) / 2, side, side, 0, 0, canvas.width, canvas.height);
+  picture.close();
+  const as = (type) => new Promise((done) => canvas.toBlob(done, type, 0.9));
+  // a browser that cannot write WebP gives PNG back for it
+  return (await as("image/webp")) ?? (await as("image/jpeg"));
+}
+
+/** The person's picture in their account: chosen from the device, taken away */
+function avatarCard() {
+  const error = h("p", { class: "error", role: "alert" });
+  const picker = h("input", { type: "file", accept: "image/*", hidden: true });
+  const keep = (user) => {
+    state.user = { ...state.user, ...user };
+    if (state.account) state.account.user = { ...state.account.user, ...user };
+    render();
+  };
+  picker.onchange = async () => {
+    const file = picker.files?.[0];
+    picker.value = "";
+    if (!file) return;
+    error.textContent = "";
+    try {
+      const square = await avatarSquare(file).catch(() => null);
+      if (!square) throw new Error(t("account.avatarUnreadable"));
+      const res = await fetch("/api/account/avatar", { method: "PUT", headers: { "content-type": square.type }, body: square }).catch(() => {
+        throw new ApiError(0, "network");
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new ApiError(res.status, data.error?.code ?? "request.failed", data.error?.detail);
+      keep(data.user);
+      toast(t("account.avatarSaved"));
+    } catch (err) {
+      error.textContent = err instanceof ApiError ? errorText(err) : err.message;
+    }
+  };
+  const has = !!state.user.avatar;
+  return h(
+    "section",
+    { class: "card pad avatar-card" },
+    avatarOf(state.user, "avatar big"),
+    h(
+      "div",
+      { class: "grow stack-s" },
+      h("h2", null, t("account.avatar")),
+      h("p", { class: "muted small" }, t("account.avatarHint")),
+      error,
+      h(
+        "div",
+        { class: "actions" },
+        picker,
+        button(t(has ? "account.avatarChange" : "account.avatarUpload"), { class: "small", onclick: () => picker.click() }, "upload"),
+        has &&
+          button(t("account.avatarRemove"), {
+            class: "small",
+            onclick: async () => {
+              try {
+                keep((await api("DELETE", "/api/account/avatar")).user);
+              } catch (err) {
+                error.textContent = errorText(err);
+              }
+            },
+          }, "trash"),
+      ),
+    ),
+  );
+}
+
 function accountSection() {
   const account = state.account;
   const sessionsCard = h(
@@ -21557,6 +21868,7 @@ function accountSection() {
   const error = h("p", { class: "error", role: "alert" });
   const twoFactor = account.user.twoFactor;
   return [
+    avatarCard(),
     h(
       "form",
       {
@@ -21731,7 +22043,7 @@ function userMenuFor(user, at = null) {
   const item = (label, iconName, action, cls = "") => h("button", { type: "button", class: "menu-item " + cls, onclick: () => (dialog.close(), action()) }, icon(iconName), label);
   dialog = openDialog(
     at ? "menu dropdown" : "menu",
-    h("header", null, h("span", { class: "avatar" }, user.name.slice(0, 1).toUpperCase()), h("div", null, h("h2", null, user.name), h("span", { class: "muted small" }, t("user.role." + user.role)))),
+    h("header", null, avatarOf(user), h("div", null, h("h2", null, user.name), h("span", { class: "muted small" }, t("user.role." + user.role)))),
     user.role !== "member" && item(t("users.makeMember"), "user", () => (user.role === "admin" ? askRole("member", t("users.makeMember")) : change({ role: "member" }))),
     user.role !== "guest" && item(t("users.makeGuest"), "user", () => (user.role === "admin" ? askRole("guest", t("users.makeGuest")) : change({ role: "guest" }))),
     user.role !== "admin" && item(t("users.makeAdmin"), "sliders", () => askRole("admin", t("users.makeAdmin"))),
@@ -21817,7 +22129,7 @@ function renderUsers() {
             h(
               "tr",
               { menu: (at) => userMenuFor(u, at) },
-              h("td", null, h("div", { class: "with-icon" }, h("span", { class: "avatar" }, u.name.slice(0, 1).toUpperCase()), h("div", null, h("span", { class: "strong" }, u.name), u.id === state.user.id && h("span", { class: "muted small" }, " ", t("users.you")), userShares(u)))),
+              h("td", null, h("div", { class: "with-icon" }, avatarOf(u), h("div", null, h("span", { class: "strong" }, u.name), u.id === state.user.id && h("span", { class: "muted small" }, " ", t("users.you")), userShares(u)))),
               h("td", null, h("span", { class: "chip" + (u.role === "admin" ? " accent" : "") }, t("user.role." + u.role))),
               h("td", null, u.twoFactor ? h("span", { class: "chip ok" }, icon("check"), t("twofa.onShort")) : h("span", { class: "muted" }, t("twofa.offShort"))),
               h("td", null, u.lastSignIn ? ago(u.lastSignIn) : h("span", { class: "muted" }, t("users.never"))),

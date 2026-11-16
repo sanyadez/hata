@@ -5,6 +5,7 @@
 import { readdirSync, readFileSync, statfsSync } from "node:fs";
 import { hostname, loadavg } from "node:os";
 import { bus } from "./bus";
+import type { LoadRow } from "./cgload";
 
 const read = (path: string): string => {
   try {
@@ -127,6 +128,8 @@ export interface SystemStatus {
   history: { cpu: number[]; memory: number[]; net: number[] };
   /** The last 40 minutes, one average a minute, oldest first; `at` is when the last one closed */
   trend: Trend;
+  /** What takes it, thing by thing — a machine's client sends it with its status (`cgload.ts`) */
+  usage?: LoadRow[];
 }
 
 export interface Trend {

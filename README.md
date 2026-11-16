@@ -295,6 +295,7 @@ Early development. What works today:
   shared with them, each to look at or to change — the same rights as over the network —, and the folders
   of a computer can be shared with them the same way;
 - users: administrators, members (who see the apps and open them, nothing more) and shared guest accounts;
+  a picture of one's own in the account, shown in the head of the page and the list of users;
   invitations by link; two-factor sign-in with an authenticator app and recovery codes; passkeys (sign in with the
   device's fingerprint, face or PIN) when Hata is reached by a domain over HTTPS; a rule that every
   administrator signs in with a second factor; a list of one's sessions with sign-out per device; a
@@ -318,6 +319,11 @@ Early development. What works today:
   the server to a computer and back, with its data. Their snapshots are kept on the server with the
   others, in the daily run, and put back from there. A computer is restarted or shut down from Hata,
   and woken up again (Wake-on-LAN). Hata keeps the clients at its own version;
+- the load, thing by thing (Computers → Load): what takes the processor, memory, disk and network on this
+  server, on every computer with the client and in every guest of Proxmox — Hata itself, each app with its
+  containers, each container and VM, the Docker engine, the system's services — over the last hour, sorted
+  by any column; a warning in "Needs attention" when one thing holds the processor too long (80% for 10
+  minutes unless set otherwise);
 - Proxmox VE servers, by an API token or by signing in once with a password (Hata then makes a token
   with only the rights chosen): the nodes with their load and versions, the containers and VMs with power, settings,
   snapshots, backups, restores, clones and templates, charts of the load over an hour to a month, what a

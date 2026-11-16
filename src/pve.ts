@@ -60,6 +60,10 @@ export interface Resource {
   disk?: number;
   maxdisk?: number;
   uptime?: number;
+  diskread?: number;
+  diskwrite?: number;
+  netin?: number;
+  netout?: number;
   storage?: string;
   plugintype?: string;
   content?: string;
@@ -95,6 +99,8 @@ export interface Guest {
   /** Containers only: a virtual machine's disk use is not known to Proxmox without the guest agent */
   disk: { used: number; total: number };
   uptime: number;
+  /** What it has read, written, received and sent since it started, bytes (rates are taken between two looks) */
+  counters: { read: number; write: number; rx: number; tx: number };
 }
 
 export interface Storage {
@@ -139,6 +145,7 @@ export function readResources(list: Resource[]): { nodes: Node[]; guests: Guest[
         memory: { used: num(r.mem), total: num(r.maxmem) },
         disk: { used: r.type === "lxc" ? num(r.disk) : 0, total: num(r.maxdisk) },
         uptime: num(r.uptime),
+        counters: { read: num(r.diskread), write: num(r.diskwrite), rx: num(r.netin), tx: num(r.netout) },
       });
     } else if (r.type === "storage") {
       storages.push({ id: `${str(r.node)}/${str(r.storage)}`, name: str(r.storage), node: str(r.node), type: str(r.plugintype), active: r.status === "available", shared: r.shared === 1, content: str(r.content).split(",").filter(Boolean).sort(), used: num(r.disk), total: num(r.maxdisk) });
