@@ -1104,6 +1104,9 @@ input[type="range"] { accent-color: var(--accent); width: 100%; min-height: 0; p
 .edit-row > :is(select, .select-btn) { flex: 0 1 auto; width: auto; min-width: 0; }
 .edit-row .raw { padding: 8px 12px; border: 1px dashed var(--border); border-radius: var(--radius-sm); color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .stack-tight { display: grid; gap: 6px; }
+.memory-pick { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.memory-pick :is(select, .select-btn) { flex: 1; min-width: 0; }
+.memory-pick input { flex: none; width: 90px; }
 .port-pair { align-items: end; }
 .port-pair :is(input, select, .select-btn) { width: 100%; min-width: 0; }
 .port-at { display: flex; align-items: center; gap: 6px; min-width: 0; }

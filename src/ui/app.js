@@ -4417,20 +4417,61 @@ function containerScreen(c) {
 /** The fields of the limits, shared by the new-container and the limits dialogs; a virtual machine always has its memory */
 function limitFields(c, vm = c?.kind === "vm") {
   const opt = (value, label) => h("option", { value }, label);
-  const cores = h("select", null, opt("0", t("incus.allCores")), [1, 2, 3, 4, 6, 8, 12, 16].map((n) => opt(String(n), t("incus.cores", { n }))));
-  cores.value = String(c?.cores ?? 2);
+  // as many as this server has: more cannot be given
+  const has = Number(state.overview?.system?.cores) || 0;
+  const most = Math.max(has || 16, c?.cores ?? 0);
+  const cores = h("select", null, opt("0", has ? t("incus.allCoresOf", { n: has }) : t("incus.allCores")), Array.from({ length: most }, (_, i) => i + 1).filter((n) => most <= 16 || n <= 8 || n % 2 === 0 || n === c?.cores).map((n) => opt(String(n), t("incus.cores", { n }))));
+  cores.value = String(c?.cores ?? Math.min(2, most));
   if (cores.value === "") cores.value = "0";
   const memory = h("select");
+  const sized = (mb) => (mb < 1024 ? `${mb} MB` : `${Math.round((mb / 1024) * 100) / 100} GB`);
+  // the server's own memory, in MB: sizes above it are not offered, a typed one may be anything
+  const whole = Math.floor((Number(state.overview?.system?.memory?.total) || 0) / 1024 / 1024);
+  // an amount of one's own becomes an option like the others, so whoever reads the list's value reads megabytes
+  const own = (mb) => {
+    if (![...memory.options].some((o) => o.value === String(mb))) {
+      const before = [...memory.options].find((o) => o.value === "other" || Number(o.value) > mb);
+      memory.insertBefore(opt(String(mb), sized(mb)), before ?? null);
+    }
+    memory.value = String(mb);
+  };
+  const typed = h("input", { type: "number", min: 0.125, max: 256, step: "any", class: "short mono", placeholder: "1.5", "aria-label": t("incus.memoryOwn"), hidden: true });
+  const unit = h("span", { class: "muted small", hidden: true }, "GB");
+  const asked = (on) => {
+    typed.hidden = unit.hidden = !on;
+    typed.required = on;
+  };
+  typed.addEventListener("change", () => {
+    const mb = Math.round(Number(typed.value) * 1024);
+    if (!(mb >= 128 && mb <= 262144)) return;
+    own(mb);
+    typed.value = "";
+    asked(false);
+  });
+  // Enter in the field takes the amount instead of sending the form with "other" chosen
+  typed.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" || !typed.value) return;
+    e.preventDefault();
+    typed.dispatchEvent(new Event("change"));
+  });
+  memory.addEventListener("change", () => {
+    asked(memory.value === "other");
+    if (memory.value === "other") typed.focus();
+  });
   const fillMemory = (forVm) => {
-    const was = memory.value;
-    memory.replaceChildren(...[!forVm && opt("0", t("incus.allMemory")), ...[256, 512, 1024, 2048, 4096, 8192, 16384].map((mb) => opt(String(mb), mb < 1024 ? `${mb} MB` : `${mb / 1024} GB`))].filter(Boolean));
+    const was = memory.value === "other" ? "" : memory.value;
+    const sizes = [256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536].filter((mb) => !whole || mb <= whole || mb <= 1024);
+    memory.replaceChildren(...[!forVm && opt("0", t("incus.allMemory")), ...sizes.map((mb) => opt(String(mb), sized(mb))), opt("other", t("incus.memoryOther"))].filter(Boolean));
+    asked(false);
     // a container with no limit keeps none: 0 is "all memory"; only a virtual machine always has some
-    memory.value = was || String(c ? c.memory || (forVm ? 1024 : 0) : 1024);
-    if (memory.value === "") memory.value = forVm ? "1024" : "0";
+    const want = Number(was || (c ? c.memory || (forVm ? 1024 : 0) : 1024));
+    if (want) own(want);
+    else memory.value = forVm ? "1024" : "0";
   };
   memory.value = "";
   fillMemory(vm);
-  return { cores, memory, fillMemory };
+  const memoryBox = h("span", { class: "memory-pick" }, memory, typed, unit);
+  return { cores, memory, memoryBox, fillMemory };
 }
 
 /** The drivers whose places can hold a container's disk to a size */
@@ -4448,7 +4489,7 @@ function newContainerDialog(start = "container") {
   let kind = vmsReady ? start : "container";
   const name = h("input", { required: true, placeholder: "docker-1", pattern: "[a-z][a-z0-9\\-]{0,61}[a-z0-9]", autocapitalize: "none", spellcheck: false, class: "mono" });
   const image = h("select", { onchange: () => shape() });
-  const { cores, memory, fillMemory } = limitFields(null, false);
+  const { cores, memory, memoryBox, fillMemory } = limitFields(null, false);
   const disk = h("input", { type: "number", min: 4, max: 4096, value: 10 });
   const diskHint = h("span");
   const diskRow = field(t("incus.vm.disk"), disk, diskHint);
@@ -4570,7 +4611,7 @@ function newContainerDialog(start = "container") {
       vmNote,
       discNote,
       h("div", { class: "form-pair" }, field(t("incus.name"), name, t("incus.nameHint")), field(t("incus.image"), image, imageHint)),
-      h("div", { class: "form-pair" }, field(t("incus.coresLabel"), cores), field(t("incus.memoryLabel"), memory)),
+      h("div", { class: "form-pair" }, field(t("incus.coresLabel"), cores), field(t("incus.memoryLabel"), memoryBox)),
       diskRow,
       placeRow,
       netRow,
@@ -4624,7 +4665,7 @@ function containerNetworkDialog(c) {
 }
 
 function containerLimitsDialog(c) {
-  const { cores, memory } = limitFields(c);
+  const { cores, memory, memoryBox } = limitFields(c);
   const [autostart, autostartRow] = tickRow(t("incus.autostart"), null, c.autostart);
   const [nesting, nestingRow] = tickRow(t("incus.nesting"), t("incus.nestingHint"), c.nesting);
   nestingRow.hidden = c.kind === "vm";
@@ -4656,7 +4697,7 @@ function containerLimitsDialog(c) {
       { class: "stack", onsubmit: send },
       h("header", null, h("h2", { class: "grow clip" }, t("incus.limitsTitle", { name: c.name })), closeX(() => dialog)),
       h("p", { class: "muted small" }, t(c.kind === "vm" ? "incus.vm.limitsLead" : "incus.limitsLead")),
-      h("div", { class: "form-pair" }, field(t("incus.coresLabel"), cores), field(t("incus.memoryLabel"), memory)),
+      h("div", { class: "form-pair" }, field(t("incus.coresLabel"), cores), field(t("incus.memoryLabel"), memoryBox)),
       diskRow,
       autostartRow,
       nestingRow,
