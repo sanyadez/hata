@@ -9716,8 +9716,9 @@ function renderBackupsBody() {
       error,
       h("footer", null, h("button", { class: "btn primary" }, t("settings.save"))),
     ),
-    hasModule("offsite") && offsiteCard(b.offsite),
-    h("p", { class: "muted small pad-x" }, t("backup.how")),
+    // replaceChildren writes a missing one out as the word "false"
+    hasModule("offsite") ? offsiteCard(b.offsite) : "",
+    h("p", { class: "card pad muted small" }, t("backup.how")),
   );
   // a run of the copy shows no job: look again until it ends
   clearTimeout(offsiteTimer);

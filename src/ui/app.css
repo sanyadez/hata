@@ -2012,3 +2012,9 @@ dialog.nav-sheet[open] { display: grid; gap: 14px; padding: 10px 14px calc(14px 
 }
 .card.section-page { padding: 16px 20px; align-items: center; }
 .settings .card.stats { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 0; }
+.apps-table .row-actions { flex-wrap: nowrap; }
+@media (max-width: 760px) {
+  .bottom-link { position: relative; }
+  .bottom-link .nav-count { position: absolute; top: 2px; left: calc(50% + 6px); min-width: 16px; height: 16px; font-size: 10px; }
+}
+.area-head { position: relative; z-index: 2; }
