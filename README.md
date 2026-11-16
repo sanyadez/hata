@@ -130,7 +130,7 @@ Early development. What works today:
 - Home: CPU, memory, disk, network and temperature with history, app tiles with live state, a
   "needs attention" list (an app that keeps restarting, a failed install or update, a disk filling up) and
   recent activity; an item there carries the button that deals with it — update, restart, try again,
-  connect again, wake the computer — and can be put off for three days, coming back at once if it gets worse;
+  connect again, wake the computer — and can be put off for three days or hidden until it happens again, coming back at once if it gets worse;
 - Home is one grid, all of it yours to arrange: every card — an app, a link, a disk, a folder of tiles that
   opens in place like on a phone, the numbers of this server or of a computer, what needs attention, recent
   activity, a camera — has a place and a size of its own. A right click gives "Edit the grid": drag a card to
@@ -287,7 +287,7 @@ Early development. What works today:
   keyboard as in a desktop file manager, tiles that show the first lines of a text file —, folders,
   upload by drag and drop (whole folders too, large files in parts), download of a file or of a folder as a
   ZIP archive, rename, move, copy (a copy and a move to another disk go on in the background: a card with
-  how much of how much, a stop, on every device, and a restart of Hata does not end them), delete — into a trash, from where a thing is put back within 30 days —, copying a path, putting a folder on Home, a menu on the right click (of the file, of everything selected, of the folder), the other disks of the server at the top of the data folder and in every folder picker, pictures, video and sound opened in place, text
+  how much of how much, a stop, on every device, and a restart of Hata does not end them), delete — into a trash, from where a thing is put back within 30 days —, copying a path, how much room a folder takes, putting a folder on Home, a menu on the right click (of the file, of everything selected, of the folder), the other disks of the server at the top of the data folder and in every folder picker, pictures, video and sound opened in place, text
   files made and edited in place, ZIP and tar archives extracted into a folder next to them, files found by
   name under the folder you are in; what is renamed, moved, copied, deleted or extracted is in the
   activity log. What is uploaded into an app's folder belongs to the same user the app runs as;
