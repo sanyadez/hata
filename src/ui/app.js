@@ -18607,16 +18607,14 @@ function labelDialog(disk, volume) {
 function preparedDialog(path) {
   const backups = `${path}/Backups`;
   let dialog;
+  // three things to do next, one under another: side by side they wrapped raggedly in so narrow a window
   dialog = openDialog(
     "confirm",
     h("h2", null, t("mounting.readyTitle")),
     h("p", { class: "muted" }, t("mounting.readyLead", { path })),
     h(
-      "footer",
-      null,
-      closeButton(() => dialog, t("common.close")),
-      h("a", { class: "btn", href: filesHash(path), onclick: () => dialog.close() }, t("disks.fs.browse")),
-      button(t("data.moveHere"), { onclick: () => (dialog.close(), moveDataDialog(`${path}/DATA`)) }),
+      "div",
+      { class: "stack-s" },
       button(t("mounting.useForBackups"), {
         class: "primary",
         onclick: async () => {
@@ -18629,7 +18627,10 @@ function preparedDialog(path) {
           }
         },
       }),
+      button(t("data.moveHere"), { onclick: () => (dialog.close(), moveDataDialog(`${path}/DATA`)) }),
+      h("a", { class: "btn", href: filesHash(path), onclick: () => dialog.close() }, t("disks.fs.browse")),
     ),
+    h("footer", null, closeButton(() => dialog, t("common.close"))),
   );
 }
 
