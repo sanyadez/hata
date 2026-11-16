@@ -113,6 +113,13 @@ const ICONS = {
   door: "M6 21V3h12v18M3 21h18M14.5 12h.01",
   speaker: "M4 9h4l5-4v14l-5-4H4zM16.5 9.5a3.5 3.5 0 0 1 0 5M19 7a7 7 0 0 1 0 10",
   battery: "M3 8h15v8H3zM21 11v2M6 11v2M9 11v2",
+  bluetooth: "M7 7l10 10-5 5V2l5 5L7 17",
+  keyboard: "M3 6h18v12H3zM7 10h.01M11 10h.01M15 10h.01M7 14h10",
+  mouse: "M12 3a5 5 0 0 1 5 5v8a5 5 0 0 1-10 0V8a5 5 0 0 1 5-5zM12 7v3",
+  headphones: "M4 14v-2a8 8 0 0 1 16 0v2M4 14h3v6H5a1 1 0 0 1-1-1zM20 14h-3v6h2a1 1 0 0 0 1-1z",
+  gamepad: "M6 8h12a4 4 0 0 1 4 4v2a3 3 0 0 1-5.2 2L15 14H9l-1.8 2A3 3 0 0 1 2 14v-2a4 4 0 0 1 4-4zM7 11v2M6 12h2M16 12h.01",
+  remote: "M8 2h8v20H8zM12 6h.01M12 10h.01M12 14h.01",
+  phone: "M7 2h10v20H7zM11 18h2",
 };
 
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -492,6 +499,7 @@ const AREAS = {
     { id: "docker", sections: ["docker"] },
     { id: "containers", view: "containers", module: "containers" },
     { id: "files", hash: "#/files/", link: true },
+    { id: "bluetooth", sections: ["bluetooth"] },
     { id: "system", sections: ["tools"] },
   ],
   settings: [
@@ -666,6 +674,8 @@ function startEvents() {
       void loadApprovals();
     } else if (event.type === "tailscale") {
       if (state.route.view === "settings" && showsSection("remote")) void loadRemote();
+    } else if (event.type === "bluetooth") {
+      if (state.route.view === "settings" && showsSection("bluetooth")) void loadBluetooth();
     } else if (event.type === "sysupdates") {
       sysUpdatesEvent(event.at ?? "");
     } else if (event.type === "network") {
@@ -1049,7 +1059,7 @@ const isAdmin = () => state.user?.role === "admin" && !state.user.mustTwoFactor;
 /** Whether a module is on: the page shows only the parts of those that are (`#/settings/modules`) */
 const hasModule = (id) => !state.modules || state.modules[id] === true;
 /** The sections of Settings and the pages that are a module's */
-const SECTION_MODULE = { protection: "raid", places: "netplaces", shares: "shares", remote: "remote", ports: "domains", dns: "dns", adblock: "adblock", integrations: "integrations", agents: "assistant", assistant: "assistant" };
+const SECTION_MODULE = { bluetooth: "bluetooth", protection: "raid", places: "netplaces", shares: "shares", remote: "remote", ports: "domains", dns: "dns", adblock: "adblock", integrations: "integrations", agents: "assistant", assistant: "assistant" };
 const VIEW_MODULES = { mapp: ["machines"], machine: ["machines"], proxmox: ["proxmox"], guest: ["proxmox"], containers: ["containers"], instance: ["containers"], integrations: ["integrations"], ha: ["integrations"], qbit: ["integrations"], frigate: ["integrations"], assistant: ["assistant"], connect: ["assistant"], tv: ["tv"] };
 /** Files are an administrator's, and theirs with whom a folder is shared — only those folders then */
 const mayFiles = () => isAdmin() || !!state.user?.files;
@@ -13045,6 +13055,7 @@ async function loadSettings() {
     if (isAdmin() && showsSection("apps")) state.images = await api("GET", "/api/images").catch(() => null);
     if (isAdmin() && showsSection("network")) state.network = await api("GET", "/api/network").catch(() => null);
     if (isAdmin() && showsSection("remote") && hasModule("remote")) [state.remote, state.wireguard] = await Promise.all([api("GET", "/api/tailscale").catch(() => null), api("GET", "/api/wireguard").catch(() => null)]);
+    if (isAdmin() && showsSection("bluetooth") && hasModule("bluetooth")) state.bluetooth = await api("GET", "/api/bluetooth").catch((e) => ({ error: errorText(e) }));
     if (isAdmin() && showsSection("tools")) [state.tools, sysUpdates[""]] = await Promise.all([api("GET", "/api/tools").catch(() => null), api("GET", "/api/system/updates").catch((e) => ({ error: errorText(e) }))]);
     // counting the volumes takes a while: the page is shown first
     if (isAdmin() && showsSection("docker")) void loadSpace();
@@ -13070,6 +13081,7 @@ const SECTIONS = [
   { id: "appearance", icon: "image", group: "server", admin: true },
   { id: "notifications", icon: "bell", group: "server", admin: true },
   { id: "modules", icon: "modules", group: "server", admin: true },
+  { id: "bluetooth", icon: "bluetooth", group: "server", admin: true },
   { id: "tools", icon: "terminal", group: "server", admin: true },
   { id: "about", icon: "info", group: "server" },
   { id: "users", icon: "users", group: "people", admin: true, label: "nav.users" },
@@ -13105,6 +13117,7 @@ const SECTION_CARDS = {
   appearance: ["appearance.colours", "appearance.picture"],
   apps: ["settings.dataRoot", "settings.timezone", "images.title", "state.title"],
   docker: ["docker.images", "docker.volumes"],
+  bluetooth: ["bt.devices", "bt.add"],
   storage: ["disks.title", "disks.fs.title"],
   shares: ["shares.title", "shares.users.title", "shares.how.title"],
   places: ["netplace.title"],
@@ -13873,12 +13886,12 @@ function tvKeepDialog() {
 
 // --- Modules: the parts of Hata a person turns on -------------------------------------------------
 
-const MODULE_ICONS = { tv: "tv", raid: "shield", netplaces: "network", shares: "share", offsite: "archive", remote: "globe", dns: "signpost", adblock: "ban", domains: "plug", machines: "server", proxmox: "server", containers: "box", integrations: "link", assistant: "chat" };
+const MODULE_ICONS = { bluetooth: "bluetooth", tv: "tv", raid: "shield", netplaces: "network", shares: "share", offsite: "archive", remote: "globe", dns: "signpost", adblock: "ban", domains: "plug", machines: "server", proxmox: "server", containers: "box", integrations: "link", assistant: "chat" };
 const MODULE_GROUPS = ["storage", "network", "servers", "more"];
 /** Where a module's own things are once it is on */
-const MODULE_HOME = { tv: "#/house/tv", raid: "#/settings/protection", netplaces: "#/settings/places", shares: "#/settings/shares", offsite: "#/settings/backups", remote: "#/settings/remote", dns: "#/settings/dns", adblock: "#/settings/adblock", domains: "#/settings/ports", machines: "#/machines", proxmox: "#/machines", containers: "#/containers", integrations: "#/settings/integrations", assistant: "#/settings/assistant" };
+const MODULE_HOME = { bluetooth: "#/machines/this/bluetooth", tv: "#/house/tv", raid: "#/settings/protection", netplaces: "#/settings/places", shares: "#/settings/shares", offsite: "#/settings/backups", remote: "#/settings/remote", dns: "#/settings/dns", adblock: "#/settings/adblock", domains: "#/settings/ports", machines: "#/machines", proxmox: "#/machines", containers: "#/containers", integrations: "#/settings/integrations", assistant: "#/settings/assistant" };
 /** Where the thing that holds a module on is taken away */
-const MODULE_USE_AT = { tv: "#/tv", array: "#/settings/protection", merged: "#/settings/storage", pools: "#/settings/protection", places: "#/settings/places", shares: "#/settings/shares", offsite: "#/settings/backups", wireguard: "#/settings/remote", tailscale: "#/settings/remote", dnsOn: "#/settings/dns", blocking: "#/settings/adblock", names: "#/settings/https", ports: "#/settings/ports", machines: "#/machines", proxmox: "#/machines", containers: "#/containers", homeAssistant: "#/settings/integrations", qbit: "#/settings/integrations", frigate: "#/settings/integrations", keys: "#/settings/agents" };
+const MODULE_USE_AT = { bluetooth: "#/machines/this/bluetooth", tv: "#/tv", array: "#/settings/protection", merged: "#/settings/storage", pools: "#/settings/protection", places: "#/settings/places", shares: "#/settings/shares", offsite: "#/settings/backups", wireguard: "#/settings/remote", tailscale: "#/settings/remote", dnsOn: "#/settings/dns", blocking: "#/settings/adblock", names: "#/settings/https", ports: "#/settings/ports", machines: "#/machines", proxmox: "#/machines", containers: "#/containers", homeAssistant: "#/settings/integrations", qbit: "#/settings/integrations", frigate: "#/settings/integrations", keys: "#/settings/agents" };
 const moduleName = (id) => t(`modules.${id}.name`);
 
 /** Which modules are on, asked again: after a change made here or on another page */
@@ -14444,6 +14457,7 @@ function settingsSection(section) {
   if (section === "tools") return toolsSection();
   if (section === "docker") return dockerSection();
   if (section === "remote") return remoteSection();
+  if (section === "bluetooth") return bluetoothSection();
   if (section === "agents") return agentsSection();
   if (section === "assistant") return assistantSection();
   if (section === "stores") {
@@ -15249,6 +15263,212 @@ async function loadRemote() {
 }
 
 /** Settings → Remote access: Tailscale, then WireGuard in and out */
+/* Bluetooth: the devices of this server */
+
+const BT_ICONS = { keyboard: "keyboard", mouse: "mouse", gamepad: "gamepad", remote: "remote", input: "keyboard", speaker: "speaker", headphones: "headphones", phone: "phone", computer: "server", tv: "tv", other: "bluetooth" };
+const btUi = { dialog: null, paint: null, busy: "" };
+/** How strongly a device is heard, in four steps: the list must not jump with every decibel */
+const btBars = (signal) => (signal === null ? 0 : signal >= -60 ? 4 : signal >= -72 ? 3 : signal >= -84 ? 2 : 1);
+/** What of the report the page draws: it is redrawn only when this differs */
+const btSignature = (r) => JSON.stringify([r.state, r.error, r.hardware, r.hardBlocked, r.adapter, r.devices, (r.found ?? []).map((d) => [d.address, d.name, d.kind, btBars(d.signal)]), btUi.busy]);
+
+async function loadBluetooth() {
+  const before = state.bluetooth ? btSignature(state.bluetooth) : "";
+  state.bluetooth = await api("GET", "/api/bluetooth").catch((e) => ({ error: errorText(e) }));
+  btUi.paint?.();
+  if (state.route.view === "settings" && showsSection("bluetooth") && btSignature(state.bluetooth) !== before) renderSettings();
+}
+
+function btPairDialog(device) {
+  const body = h("div", { class: "stack" });
+  const foot = h("footer");
+  const dialog = openDialog("confirm bt-pair", h("h2", null, t("bt.pair.title", { name: device.name })), body, foot);
+  let timer = null;
+  const start = async () => {
+    try {
+      state.bluetooth = await api("POST", `/api/bluetooth/devices/${device.address}/pair`, {});
+    } catch (e) {
+      state.bluetooth = { ...state.bluetooth, pairing: { address: device.address, name: device.name, step: "failed", code: "", typed: 0, error: e.code ?? "bluetooth.pair.failed" } };
+    }
+    paint();
+  };
+  const code = (p) => h("div", { class: "bt-code", "aria-label": p.code }, [...p.code].map((digit, i) => h("span", { class: i < p.typed ? "typed" : "" }, digit)));
+  const paint = () => {
+    const p = state.bluetooth?.pairing;
+    const mine = p && p.address === device.address ? p : { step: "working", code: "", typed: 0, error: "" };
+    const over = mine.step === "done" || mine.step === "failed";
+    body.replaceChildren(
+      ...[
+        mine.step === "working" && h("p", { class: "muted" }, t("bt.pair.working")),
+        (mine.step === "passkey" || mine.step === "pin") && h("p", null, t("bt.pair.type", { name: device.name })),
+        mine.step === "confirm" && h("p", null, t("bt.pair.compare", { name: device.name })),
+        mine.code && !over && code(mine),
+        mine.step === "done" && h("p", { class: "bt-done" }, icon("check"), t(mine.error ? "bt.pair.donePaired" : "bt.pair.done", { name: device.name })),
+        mine.step === "done" && mine.error && h("p", { class: "muted" }, t("error." + mine.error)),
+        mine.step === "failed" && h("p", { class: "error", role: "alert" }, t("error." + mine.error)),
+        mine.step === "failed" && h("p", { class: "muted small" }, t("bt.pair.failedHint")),
+      ].filter(Boolean),
+    );
+    foot.replaceChildren(
+      ...[
+        mine.step === "failed" && button(t("bt.pair.again"), { onclick: start }, "refresh"),
+        button(t(over ? (mine.step === "done" ? "bt.pair.ok" : "common.close") : "common.cancel"), { class: mine.step === "done" ? "primary" : "", onclick: () => dialog.close() }),
+      ].filter(Boolean),
+    );
+  };
+  btUi.paint = paint;
+  // the bus tells of every step; asked as well, in case the stream is down
+  timer = setInterval(() => void loadBluetooth(), 2000);
+  dialog.addEventListener("close", async () => {
+    clearInterval(timer);
+    btUi.paint = null;
+    await api("DELETE", "/api/bluetooth/pairing").catch(() => {});
+    void loadBluetooth();
+  });
+  paint();
+  void start();
+}
+
+function bluetoothSection() {
+  const r = state.bluetooth;
+  if (!r) return [h("p", { class: "card pad muted" }, "…")];
+  const error = h("p", { class: "error", role: "alert" }, r.error ?? "");
+  const lead = h("p", { class: "muted" }, t("bt.lead"));
+  if (r.error) return [h("section", { class: "card pad stack" }, h("h2", null, "Bluetooth"), error)];
+  const send = (method, path, data, mark = "") => async (e) => {
+    const el = e?.currentTarget;
+    if (el) el.disabled = true;
+    btUi.busy = mark;
+    error.textContent = "";
+    try {
+      state.bluetooth = await api(method, path, data);
+    } catch (err) {
+      toast(errorText(err), "error");
+    }
+    btUi.busy = "";
+    renderSettings();
+  };
+  const noRadio = !r.hardware && h("p", { class: "banner" }, t("bt.noRadio"));
+
+  if (r.state === "missing")
+    return [
+      h(
+        "section",
+        { class: "card pad stack" },
+        h("h2", null, "Bluetooth"),
+        lead,
+        h("p", null, t("bt.what")),
+        noRadio,
+        r.install ? h("p", { class: "cmd" }, icon("terminal"), r.install) : h("p", { class: "muted small" }, t("mounting.needs.byHand", { package: "bluez" })),
+        error,
+        r.install &&
+          h(
+            "footer",
+            null,
+            button(t("mounting.needs.install", { package: "BlueZ" }), {
+              class: "primary",
+              onclick: async (e) => {
+                const el = e.currentTarget;
+                el.disabled = true;
+                el.lastChild.textContent = t("tools.installing");
+                try {
+                  await api("POST", "/api/tools/bluez/install", {});
+                  await loadBluetooth();
+                  renderSettings();
+                } catch (err) {
+                  error.textContent = errorText(err);
+                  el.disabled = false;
+                }
+              },
+            }, "download"),
+          ),
+      ),
+    ];
+  if (r.state === "stopped")
+    return [h("section", { class: "card pad stack" }, h("h2", null, "Bluetooth"), lead, h("p", { class: "banner" }, t("bt.stopped")), h("p", { class: "cmd" }, icon("terminal"), "systemctl enable --now bluetooth"), h("footer", null, button(t("bt.start"), { class: "primary", onclick: send("POST", "/api/bluetooth/start", {}) }, "power")))];
+  if (r.state === "noAdapter") return [h("section", { class: "card pad stack" }, h("h2", null, "Bluetooth"), lead, h("p", { class: "banner" }, t(r.hardware ? "bt.noAdapter" : "bt.noRadio")))];
+  if (r.state === "off")
+    return [
+      h(
+        "section",
+        { class: "card pad stack" },
+        h("div", { class: "section-head" }, h("h2", null, "Bluetooth", h("span", { class: "state stopped" }, t("bt.state.off")))),
+        lead,
+        h("p", { class: "muted small" }, t("bt.adapter", { name: r.adapter.name, address: r.adapter.address })),
+        r.hardBlocked && h("p", { class: "banner" }, t("error.bluetooth.hardBlocked")),
+        h("footer", null, button(t("bt.turnOn"), { class: "primary", disabled: r.hardBlocked, onclick: send("PUT", "/api/bluetooth", { on: true }) }, "power")),
+      ),
+    ];
+
+  const name = (d) => h("div", { class: "bt-name" }, h("span", { class: "badge-icon plain" }, icon(BT_ICONS[d.kind] ?? "bluetooth")), h("div", null, h("div", { class: "strong clip" }, d.name || d.address), h("div", { class: "muted small" }, t("bt.kind." + d.kind))));
+  const row = (d) =>
+    h(
+      "tr",
+      null,
+      h("td", null, name(d)),
+      h("td", null, h("span", { class: "state " + (d.connected ? "running" : "stopped") }, t(d.connected ? "bt.connected" : "bt.away"))),
+      h("td", null, d.battery === null ? h("span", { class: "muted" }, "—") : h("span", { class: "bt-battery" + (d.battery <= 20 ? " low" : "") }, icon("battery"), d.battery + "%")),
+      h(
+        "td",
+        null,
+        h(
+          "div",
+          { class: "row-actions" },
+          d.connected
+            ? button(t("bt.disconnect"), { class: "small", onclick: send("POST", `/api/bluetooth/devices/${d.address}/disconnect`, {}) })
+            : button(t(btUi.busy === d.address ? "bt.connecting" : "bt.connect"), { class: "small", disabled: btUi.busy === d.address, onclick: (e) => ((btUi.busy = d.address), renderSettings(), send("POST", `/api/bluetooth/devices/${d.address}/connect`, {}, d.address)(e)) }),
+          h("button", {
+            type: "button",
+            class: "icon-btn",
+            title: t("bt.forget"),
+            "aria-label": t("bt.forget"),
+            onclick: () => confirmAction({ title: t("bt.forgetTitle", { name: d.name || d.address }), lead: t("bt.forgetLead"), label: t("bt.forget"), run: () => send("DELETE", `/api/bluetooth/devices/${d.address}`)() }),
+          }, icon("trash")),
+        ),
+      ),
+    );
+  const looking = r.adapter.looking;
+  const bars = (d) => h("span", { class: "bt-signal l" + btBars(d.signal), title: d.signal === null ? "" : d.signal + " dBm" }, h("i"), h("i"), h("i"), h("i"));
+  const found = [...r.found].sort((a, b) => btBars(b.signal) - btBars(a.signal) || a.name.localeCompare(b.name));
+  return [
+    h(
+      "section",
+      { class: "card pad stack" },
+      h(
+        "div",
+        { class: "section-head" },
+        h("h2", null, t("bt.devices"), h("span", { class: "state running" }, t("bt.state.on"))),
+        button(t("bt.turnOff"), { class: "small", onclick: (e) => confirmAction({ title: t("bt.offTitle"), lead: t("bt.offLead"), label: t("bt.turnOff"), iconName: "power", run: () => send("PUT", "/api/bluetooth", { on: false })() }) }, "power"),
+      ),
+      lead,
+      r.devices.length
+        ? h("div", { class: "table-wrap" }, h("table", null, h("thead", null, h("tr", null, h("th", null, t("bt.col.device")), h("th", null, t("bt.col.state")), h("th", null, t("bt.col.battery")), h("th"))), h("tbody", null, r.devices.map(row))))
+        : h("p", { class: "muted" }, t("bt.none")),
+      error,
+      h("p", { class: "muted small" }, t("bt.adapter", { name: r.adapter.name, address: r.adapter.address })),
+    ),
+    h(
+      "section",
+      { class: "card pad stack" },
+      h(
+        "div",
+        { class: "section-head" },
+        h("h2", null, t("bt.add")),
+        looking ? button(t("bt.stopLooking"), { class: "small", onclick: send("POST", "/api/bluetooth/look", { on: false }) }, "x") : button(t("bt.look"), { class: "small primary", onclick: send("POST", "/api/bluetooth/look", { on: true }) }, "search"),
+      ),
+      h("p", { class: "muted" }, t("bt.addLead")),
+      looking && h("p", { class: "bt-looking muted small" }, icon("refresh", "spin"), t("bt.looking")),
+      found.length > 0 &&
+        h(
+          "div",
+          { class: "bt-found" },
+          found.map((d) => h("div", { class: "bt-found-row", menu: true }, name(d), bars(d), button(t("bt.pair"), { class: "small", onclick: () => btPairDialog(d) }, "plus"))),
+        ),
+      !looking && !found.length && h("p", { class: "muted small" }, t("bt.lookHint")),
+    ),
+  ];
+}
+
 const remoteSection = () => [...tailscaleCards(), ...wireguardCards()];
 
 /** A device that agreed on keys within the last three minutes is connected: WireGuard renews them every two */

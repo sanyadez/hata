@@ -8,6 +8,7 @@ import { listKeys } from "./agents";
 import { AppError } from "./apps";
 import { assistantConfig, configured as assistantReady } from "./assistant";
 import { needsSetup } from "./auth";
+import { pairedKept, startBluetooth } from "./bluetooth";
 import { bus } from "./bus";
 import { saveSettings, settings } from "./config";
 import { inUse as containersInUse, startContainers } from "./containers";
@@ -94,6 +95,7 @@ const RUNS: Record<ModuleId, Run> = {
     uses: () => [...some("homeAssistant", homeAssistants().length), ...some("qbit", qbitServers().length), ...some("frigate", frigateServers().length)],
   },
   tv: { start: watchTv, uses: () => when("tv", tvEnabled()), was: tvSetUp },
+  bluetooth: { start: startBluetooth, uses: () => some("bluetooth", pairedKept()) },
   assistant: { uses: () => some("keys", listKeys().length), was: () => assistantReady(assistantConfig()) },
 };
 

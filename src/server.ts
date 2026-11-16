@@ -112,6 +112,7 @@ import { mcpResponse } from "./mcp";
 import { instructions as mcpInstructions, tellHttps, TOOLS } from "./mcptools";
 import { moduleOn, modulesOn, modulesReport, setModule, settleModules, startModules } from "./moduleruns";
 import { findForModules } from "./modulefinds";
+import { bluetoothReport, connectDevice as connectBluetooth, disconnectDevice as disconnectBluetooth, endPairing as endBluetoothPairing, forgetDevice as forgetBluetooth, lookAround as lookForBluetooth, pair as pairBluetooth, setPower as setBluetoothPower, startService as startBluetoothService } from "./bluetooth";
 import { installTv, playOnTv, remote as tvRemote, keepPicture as keepTvPicture, mediaInfo as tvMediaInfo, streamsHere as tvStreamsHere, mediaStream as tvMediaStream, mediaSubs as tvMediaSubs, setLanguage as setTvLanguage, setPref as setTvPref, setAudio as setTvAudio, setFolders as setTvFolders, setPicture as setTvPicture, switchTv, tvNow, tvReport } from "./television";
 import { moduleOfPath, moduleOfTool } from "./modules";
 import { serverTree } from "./servertree";
@@ -1516,6 +1517,37 @@ async function api(req: Request, url: URL, server: Server<unknown>): Promise<Res
       return { ...m, instance: instanceOfMachine(macs, m.info?.hostname ?? m.name)?.name ?? "", guest: guest ? { host: guest.host, id: guest.id } : null };
     });
     return json(serverTree({ here: { name: system.hostname, os: systemName(), address: homeLinks()[0]?.address ?? "", cpu: system.cpu, memory: system.memory, uptime: system.uptime }, instances, hosts: moduleOn("proxmox") ? pveHosts().map((x) => pveHost(x.id)) : [], machines, version: VERSION }));
+  }
+  // Bluetooth devices of this server
+  if (path === "/api/bluetooth" && method === "GET") return json(await bluetoothReport());
+  if (path === "/api/bluetooth" && method === "PUT") {
+    await setBluetoothPower((await body(req)).on === true, user.name);
+    return json(await bluetoothReport());
+  }
+  if (path === "/api/bluetooth/start" && method === "POST") {
+    server.timeout(req, 0);
+    await startBluetoothService();
+    return json(await bluetoothReport());
+  }
+  if (path === "/api/bluetooth/look" && method === "POST") {
+    await lookForBluetooth((await body(req)).on !== false);
+    return json(await bluetoothReport());
+  }
+  if (path === "/api/bluetooth/pairing" && method === "DELETE") {
+    endBluetoothPairing();
+    return json(await bluetoothReport());
+  }
+  const bluetoothDevice = /^\/api\/bluetooth\/devices\/([0-9A-Fa-f:]{17})(?:\/(pair|connect|disconnect))?$/.exec(path);
+  if (bluetoothDevice) {
+    const [, address, action] = bluetoothDevice;
+    // a device that sleeps takes its time to answer
+    server.timeout(req, 0);
+    if (action === "pair" && method === "POST") pairBluetooth(address, user.name);
+    else if (action === "connect" && method === "POST") await connectBluetooth(address);
+    else if (action === "disconnect" && method === "POST") await disconnectBluetooth(address);
+    else if (!action && method === "DELETE") await forgetBluetooth(address, user.name);
+    else return fail(405, "request.notFound");
+    return json(await bluetoothReport());
   }
   // the media player on the server's own screen
   if (path === "/api/tv" && method === "GET") return json(await tvReport());
