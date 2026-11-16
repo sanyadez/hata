@@ -17019,8 +17019,8 @@ async function forwardDialog(existing, preset, after) {
     return toast(errorText(e), "error");
   }
   const pick = targetPicker(data.targets, existing?.target ?? preset?.target, existing?.title);
-  const port = h("input", { type: "number", min: 1, max: 65535, value: existing?.port ?? "", required: true, placeholder: "2222", class: "short mono" });
-  const to = h("input", { type: "number", min: 1, max: 65535, value: existing?.to ?? "", required: true, placeholder: "22", class: "short mono" });
+  const port = h("input", { type: "number", min: 1, max: 65535, value: existing?.port ?? "", required: true, placeholder: "2222", class: "mono" });
+  const to = h("input", { type: "number", min: 1, max: 65535, value: existing?.to ?? "", required: true, placeholder: "22", class: "mono" });
   const proto = h("select", null, ["tcp", "udp", "both"].map((p) => h("option", { value: p, selected: (existing?.proto ?? "tcp") === p }, t("ports.proto." + p))));
   const note = h("input", { value: existing?.note ?? "", maxLength: 60, placeholder: "SSH" });
   const [outside, outsideRow] = tickRow(t("ports.outside"), t("ports.outsideHint"), existing?.outside ?? false);
@@ -17059,10 +17059,11 @@ async function forwardDialog(existing, preset, after) {
       { class: "stack", onsubmit: send },
       h("header", null, h("h2", { class: "grow" }, t(existing ? "ports.changeTitle" : "ports.addTitle")), closeX(() => dialog)),
       h("p", { class: "muted small" }, t("ports.dialogLead")),
-      h("div", { class: "form-pair" }, field(t("ports.port"), h("span", { class: "web-address" }, h("span", { class: "muted mono" }, serverHost() + ":"), port), t("ports.portHint")), field(t("ports.proto"), proto)),
+      // the hints stand under the whole row: under one half they pushed its field out of line with the other
+      h("div", { class: "stack-tight" }, h("div", { class: "form-pair port-pair" }, field(t("ports.port"), h("span", { class: "port-at" }, h("span", { class: "muted mono clip" }, serverHost() + ":"), port)), field(t("ports.proto"), proto)), h("span", { class: "hint" }, t("ports.portHint"))),
       field(t("names.to"), pick.select),
       pick.hostRow,
-      h("div", { class: "form-pair" }, field(t("ports.to"), to, t("ports.toHint")), field(t("ports.note"), note)),
+      h("div", { class: "stack-tight" }, h("div", { class: "form-pair port-pair" }, field(t("ports.to"), to), field(t("ports.note"), note)), h("span", { class: "hint" }, t("ports.toHint"))),
       outsideRow,
       error,
       h("footer", null, remove, h("span", { class: "grow" }), closeButton(() => dialog, t("common.cancel")), h("button", { class: "btn primary" }, t(existing ? "settings.save" : "ports.addGo"))),
