@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { addSample, classify, loadWarn, memoryInUse, minutesOver, parseCpuStat, parseIoStat, parseNetDev, rowsOf, type GroupCounters } from "../src/cgload";
+import { addSample, classify, parsePasswd, loadWarn, memoryInUse, minutesOver, parseCpuStat, parseIoStat, parseNetDev, rowsOf, type GroupCounters } from "../src/cgload";
 
 const ID = "a".repeat(64);
 const ID2 = "b".repeat(64);
@@ -8,8 +8,8 @@ describe("reading the kernel's counters", () => {
   test("cpu.stat, memory, io.stat, net/dev", () => {
     expect(parseCpuStat("usage_usec 98309166\nuser_usec 73785600\n")).toBe(98309166);
     expect(parseCpuStat("")).toBeNull();
-    expect(memoryInUse("1000\n", "anon 500\ninactive_file 300\n")).toBe(700);
-    expect(memoryInUse("100", "inactive_file 300")).toBe(0);
+    expect(memoryInUse("anon 500\nfile 9000\nshmem 200\ninactive_file 300\n")).toBe(700);
+    expect(memoryInUse("")).toBe(0);
     expect(parseIoStat("8:16 rbytes=10 wbytes=0 rios=1\n8:0 rbytes=5 wbytes=7 rios=2\n")).toEqual({ read: 15, write: 7 });
     const dev = "Inter-|   Receive\n face |bytes\n    lo: 999 1 0 0 0 0 0 0 999 1 0 0 0 0 0 0\n  eth0: 100 1 0 0 0 0 0 0 50 1 0 0 0 0 0 0\n";
     expect(parseNetDev(dev)).toEqual({ rx: 100, tx: 50 });
@@ -23,7 +23,8 @@ describe("reading the kernel's counters", () => {
     expect(classify("system.slice/containerd.service")?.key).toBe("engine");
     expect(classify("system.slice/smbd.service")).toEqual({ key: "svc:smbd", kind: "service", name: "smbd" });
     expect(classify("lxc.payload.web")).toEqual({ key: "incus:web", kind: "instance", name: "web" });
-    expect(classify("user.slice")?.kind).toBe("sessions");
+    expect(classify("user.slice/user-996.slice")).toEqual({ key: "user:996", kind: "sessions", name: "996" });
+    expect(classify("user.slice")).toBeNull();
     expect(classify("init.scope")?.kind).toBe("system");
     expect(classify("system.slice/boot-efi.mount")).toBeNull();
     expect(classify("dev-hugepages.mount")).toBeNull();
@@ -53,6 +54,12 @@ describe("rows", () => {
     expect(by.rest!.cpu).toBe(25);
     expect(by.rest!.memory).toBe(500);
     expect(rows[0]!.key).toBe("app:memos");
+  });
+
+  test("sessions by their user; the TV's player is the TV", () => {
+    const users = parsePasswd("root:x:0:0:root:/root:/bin/bash\nhata-tv:x:996:996::/var/lib/hata-tv:/usr/sbin/nologin\n");
+    const rows = rowsOf([g("user.slice/user-0.slice", 0), g("user.slice/user-996.slice", 0)], [g("user.slice/user-0.slice", 100), g("user.slice/user-996.slice", 100)], 5000, 1, new Map(), null, users);
+    expect(rows.map((r) => [r.key, r.kind, r.name]).sort()).toEqual([["svc:hata-tv", "service", "hata-tv"], ["user:0", "sessions", "root"]]);
   });
 
   test("a container of no project is a row of its own, named", () => {

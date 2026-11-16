@@ -2532,6 +2532,8 @@ const ATTENTION_ICONS = { update: "up", docker: "box", restarting: "refresh", pa
 function attentionWords(item) {
   const detail = { ...item.detail, free: item.detail.free == null ? "" : bytes(item.detail.free), trash: item.detail.trash == null ? "" : bytes(item.detail.trash), size: item.detail.size == null ? "" : bytes(item.detail.size) };
   if (item.code === "load.cpu" && LOAD_NAMED.includes(item.detail.kind)) detail.name = t("load.kind." + item.detail.kind);
+  if (item.code === "load.cpu" && item.detail.kind === "sessions") detail.name = t("load.sessionsOf", { user: item.detail.name });
+  if (item.code === "load.cpu" && item.detail.kind === "service" && LOAD_UNITS[item.detail.name]) detail.name = t(LOAD_UNITS[item.detail.name]);
   const base = "attention." + item.code;
   return { title: t(base + ".title", detail), text: t(base + ".text", detail).trim() };
 }
@@ -3774,11 +3776,12 @@ const loadUi = { data: null, sort: "cpu", all: new Set(), timer: 0 };
 const LOAD_SHOWN = 12;
 /** Units Hata itself puts on the system, and what a person calls them */
 const LOAD_UNITS = { "hata-tv": "load.unit.tv", "hata-music": "load.unit.music", "hata-speaker": "load.unit.speaker", smbd: "load.unit.samba", nmbd: "load.unit.samba", bluetooth: "load.unit.bluetooth" };
-const LOAD_NAMED = ["hata", "engine", "sessions", "system", "rest"];
+const LOAD_NAMED = ["hata", "engine", "system", "rest"];
 
 /** What a row is called on the page */
 function loadName(row, place) {
   if (LOAD_NAMED.includes(row.kind)) return t("load.kind." + row.kind);
+  if (row.kind === "sessions") return t("load.sessionsOf", { user: row.name });
   if (row.kind === "service" && LOAD_UNITS[row.name]) return t(LOAD_UNITS[row.name]);
   if (row.kind === "app" && place?.kind === "here") return state.overview?.apps?.find((a) => a.name === row.name)?.title ?? row.name;
   return row.name;
@@ -3794,7 +3797,9 @@ function loadHref(row, place) {
   return "";
 }
 
-const rateText = (n) => (n == null ? "—" : n < 1024 ? "0" : bytes(n) + "/s");
+const rateText = (n) => (n < 1024 ? "0" : bytes(n) + "/s");
+/** Both directions in one cell: "0" when nothing moves, "—" when it is not counted apart (a network shared with the host) */
+const twoWays = (a, b) => (a == null ? "—" : a < 1024 && b < 1024 ? "0" : `↓ ${rateText(a)} · ↑ ${rateText(b)}`);
 const ioOf = (r) => r.read + r.write;
 const netOf = (r) => (r.rx ?? 0) + (r.tx ?? 0);
 const LOAD_SORTS = { cpu: (r) => r.cpu, memory: (r) => r.memory, disk: ioOf, net: netOf };
@@ -3866,11 +3871,12 @@ function paintLoad() {
 
 function loadPlace(p, label) {
   const sortBy = LOAD_SORTS[loadUi.sort];
-  const rows = [...p.rows].sort((a, b) => sortBy(b) - sortBy(a));
+  // what is left over is not somebody: it stays at the end whatever the order
+  const rows = [...p.rows].sort((a, b) => Number(a.kind === "rest") - Number(b.kind === "rest") || sortBy(b) - sortBy(a));
   const all = loadUi.all.has(p.id);
   const list = all ? rows : rows.slice(0, LOAD_SHOWN);
   const memPercent = p.memory.total ? Math.round((p.memory.used / p.memory.total) * 100) : 0;
-  const head = (id, text) => h("th", null, h("button", { type: "button", class: "th-sort" + (loadUi.sort === id ? " active" : ""), "aria-pressed": String(loadUi.sort === id), onclick: () => ((loadUi.sort = id), paintLoad()) }, text, loadUi.sort === id && icon("down")));
+  const head = (id, text) => h("th", { class: "num" }, h("button", { type: "button", class: "th-sort" + (loadUi.sort === id ? " active" : ""), "aria-pressed": String(loadUi.sort === id), onclick: () => ((loadUi.sort = id), paintLoad()) }, text, loadUi.sort === id && icon("down")));
   const old = Date.now() - p.at > 60_000;
   return h(
     "section",
@@ -3910,8 +3916,8 @@ function loadRow(r, p) {
     h("td", null, h("div", { class: "load-what" }, app ? appIcon(app, "small") : h("span", { class: "load-kind" }, icon(LOAD_ICONS[r.kind] ?? "box")), h("div", { class: "clip" }, h("strong", null, name), h("div", { class: "muted small" }, t("load.kindOf." + r.kind), r.parts?.length > 1 && " · " + t("load.parts", { n: r.parts.length }))))),
     h("td", { class: "num" + (over ? " warn-text" : "") }, `${r.cpu}%`),
     h("td", { class: "num" }, bytes(r.memory)),
-    h("td", { class: "num small" }, r.kind === "guest" || r.read || r.write ? `↓ ${rateText(r.read)} · ↑ ${rateText(r.write)}` : "—"),
-    h("td", { class: "num small" }, r.rx == null ? "—" : `↓ ${rateText(r.rx)} · ↑ ${rateText(r.tx)}`),
+    h("td", { class: "num small" }, twoWays(r.read, r.write)),
+    h("td", { class: "num small", ...(r.rx == null ? { title: t("load.hostNet") } : {}) }, twoWays(r.rx, r.tx)),
     h("td", null, loadLine(r.trend.cpu.concat([r.cpu]))),
   );
 }
@@ -3932,7 +3938,7 @@ function loadRowDialog(r, p) {
       lineChart(points, [{ cls: "s2", label: t("load.col.cpu"), value: (x) => x.cpu }], { max: null, fmt: (v) => Math.round(v) + "%", label: t("load.col.cpu"), height: 140 }),
       lineChart(points, [{ cls: "s1", label: t("load.col.memory"), value: (x) => x.memory }], { max: null, fmt: (v) => bytes(v), label: t("load.col.memory"), height: 140 }),
     ],
-    r.parts?.length > 0 && h("div", { class: "table-wrap" }, h("table", null, h("thead", null, h("tr", null, h("th", null, t("load.col.container")), h("th", null, t("load.col.cpu")), h("th", null, t("load.col.memory")), h("th", null, t("load.col.disk")), h("th", null, t("load.col.net")))), h("tbody", null, r.parts.map((c) => h("tr", null, h("td", null, c.name), h("td", { class: "num" }, `${c.cpu}%`), h("td", { class: "num" }, bytes(c.memory)), h("td", { class: "num small" }, `↓ ${rateText(c.read)} · ↑ ${rateText(c.write)}`), h("td", { class: "num small" }, c.rx == null ? "—" : `↓ ${rateText(c.rx)} · ↑ ${rateText(c.tx)}`)))))),
+    r.parts?.length > 0 && h("div", { class: "table-wrap" }, h("table", null, h("thead", null, h("tr", null, h("th", null, t("load.col.container")), h("th", { class: "num" }, t("load.col.cpu")), h("th", { class: "num" }, t("load.col.memory")), h("th", { class: "num" }, t("load.col.disk")), h("th", { class: "num" }, t("load.col.net")))), h("tbody", null, r.parts.map((c) => h("tr", null, h("td", null, c.name), h("td", { class: "num" }, `${c.cpu}%`), h("td", { class: "num" }, bytes(c.memory)), h("td", { class: "num small" }, twoWays(c.read, c.write)), h("td", { class: "num small" }, twoWays(c.rx, c.tx))))))),
     r.kind === "rest" && h("p", { class: "muted small" }, t("load.restHint")),
     h("footer", null, href && button(t("load.open"), { class: "primary", onclick: () => (dialog.close(), go(href)) }, "chevron"), closeButton(() => dialog)),
   );

@@ -50,12 +50,13 @@ export function parseCpuStat(text: string): number | null {
   return m ? Number(m[1]) : null;
 }
 
-/** memory.current minus what the kernel can drop at once — the way `docker stats` and `free` count */
-export function memoryInUse(current: string, stat: string): number {
-  const total = Number(current.trim());
-  if (!Number.isFinite(total)) return 0;
-  const inactive = Number(/^inactive_file (\d+)$/m.exec(stat)?.[1] ?? 0);
-  return Math.max(0, total - inactive);
+/**
+ * What the group's programs hold: their own memory and shared memory (tmpfs). The page cache is left out, and so is
+ * what the kernel keeps on the group's account — a slice keeps that of sessions long closed, which is nobody's now.
+ */
+export function memoryInUse(stat: string): number {
+  const of = (name: string) => Number(new RegExp(`^${name} (\\d+)$`, "m").exec(stat)?.[1] ?? 0);
+  return of("anon") + of("shmem");
 }
 
 /** io.stat: bytes read and written, summed over the devices */
@@ -84,19 +85,32 @@ export function parseNetDev(text: string): { rx: number; tx: number } {
 }
 
 const DOCKER_ID = /^[0-9a-f]{64}$/;
+/** The user the TV's player runs as (`television.ts`) */
+const TV_USER = "hata-tv";
+
+/** /etc/passwd: uid → name */
+export function parsePasswd(text: string): Map<string, string> {
+  const out = new Map<string, string>();
+  for (const line of text.split("\n")) {
+    const [name, , uid] = line.split(":");
+    if (name && uid) out.set(uid, name);
+  }
+  return out;
+}
 
 /** What a group is, by its path; null for what is not a thing of its own (mounts, swap, sockets, slices) */
 export function classify(path: string): { key: string; kind: LoadKind; name: string } | null {
   const parts = path.split("/");
   if (parts.length === 1) {
     const top = parts[0]!;
-    if (top === "user.slice") return { key: "sessions", kind: "sessions", name: "user.slice" };
     if (top === "init.scope") return { key: "system", kind: "system", name: "systemd" };
     if (top.startsWith("lxc.payload.")) return { key: `incus:${top.slice(12)}`, kind: "instance", name: top.slice(12) };
     return null;
   }
   const [parent, child] = [parts[0]!, parts[1]!];
   if (parts.length !== 2) return null;
+  const user = parent === "user.slice" ? /^user-(\d+)\.slice$/.exec(child) : null;
+  if (user) return { key: `user:${user[1]}`, kind: "sessions", name: user[1]! };
   if (parent === "docker" && DOCKER_ID.test(child)) return { key: `docker:${child}`, kind: "container", name: child };
   if (parent === "machine.slice") return { key: `machine:${child}`, kind: "machine", name: child.replace(/\.(scope|service)$/, "") };
   if (parent !== "system.slice") return null;
@@ -155,7 +169,7 @@ function readCounters(root: string, path: string, hostNet: string, own: boolean)
     } catch {}
     if (pid && ns && ns !== hostNet) ({ rx, tx } = parseNetDev(read(`/proc/${pid}/net/dev`)));
   }
-  return { path, cpu, memory: memoryInUse(read(`${dir}/memory.current`), read(`${dir}/memory.stat`)), read: io.read, write: io.write, rx, tx };
+  return { path, cpu, memory: memoryInUse(read(`${dir}/memory.stat`)), read: io.read, write: io.write, rx, tx };
 }
 
 /** Every group worth a row, with its counters now */
@@ -166,7 +180,7 @@ export function readGroups(root = "/sys/fs/cgroup"): GroupCounters[] {
   } catch {}
   const paths: string[] = [];
   for (const top of dirsOf(root)) {
-    if (top === "system.slice" || top === "docker" || top === "machine.slice") for (const child of dirsOf(`${root}/${top}`)) paths.push(`${top}/${child}`);
+    if (top === "system.slice" || top === "docker" || top === "machine.slice" || top === "user.slice") for (const child of dirsOf(`${root}/${top}`)) paths.push(`${top}/${child}`);
     else paths.push(top);
   }
   const out: GroupCounters[] = [];
@@ -193,7 +207,7 @@ const round1 = (n: number) => Math.round(n * 10) / 10;
  * next one. `machineCpu` is the whole machine's busy percent over the same time; what the groups do not explain
  * (the kernel's own threads, what runs outside any group) is the row `rest`.
  */
-export function rowsOf(before: GroupCounters[], now: GroupCounters[], ms: number, cores: number, names: Map<string, ContainerName>, machine: { cpu: number | null; memory: number } | null = null): LoadRow[] {
+export function rowsOf(before: GroupCounters[], now: GroupCounters[], ms: number, cores: number, names: Map<string, ContainerName>, machine: { cpu: number | null; memory: number } | null = null, users: Map<string, string> = new Map()): LoadRow[] {
   if (ms <= 0 || cores <= 0) return [];
   const old = new Map(before.map((g) => [g.path, g]));
   const seconds = ms / 1000;
@@ -215,6 +229,11 @@ export function rowsOf(before: GroupCounters[], now: GroupCounters[], ms: number
       rx: g.rx === null || prev.rx === null ? null : rate(g.rx, prev.rx),
       tx: g.tx === null || prev.tx === null ? null : rate(g.tx, prev.tx),
     };
+    if (what.kind === "sessions") {
+      row.name = users.get(what.name) ?? what.name;
+      // the TV's player signs in as its own user: its session is the TV, not somebody's terminal
+      if (row.name === TV_USER) Object.assign(row, { key: `svc:${TV_USER}`, kind: "service" });
+    }
     if (what.kind === "container") {
       const who = names.get(what.name);
       if (who) row.name = who.name;
@@ -266,7 +285,7 @@ export class LoadSampler {
   /** `names` says who the Docker containers are; `machine` is the whole machine over the same few seconds */
   step(names: Map<string, ContainerName>, machine: { cpu: number | null; memory: number } | null, now = Date.now()): LoadRow[] {
     const groups = readGroups(this.root);
-    if (this.prev) this.rows = rowsOf(this.prev.groups, groups, now - this.prev.at, this.cores, names, machine);
+    if (this.prev) this.rows = rowsOf(this.prev.groups, groups, now - this.prev.at, this.cores, names, machine, parsePasswd(read("/etc/passwd")));
     this.prev = { at: now, groups };
     return this.rows;
   }

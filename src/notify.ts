@@ -227,13 +227,14 @@ const SEPARATE = 3;
 
 /** The messages for the items to send, in the words of the home page */
 /** The kinds of load rows whose name is a word, not a unit's or a container's name */
-export const NAMED_LOADS = ["hata", "engine", "sessions", "system", "rest"];
+export const NAMED_LOADS = ["hata", "engine", "system", "rest"];
 
 export function wording(items: AttentionItem[], lang: string): Message[] {
   const one = (item: AttentionItem): Message => {
     const detail: Record<string, string | number> = { ...item.detail, free: typeof item.detail.free === "number" ? bytes(item.detail.free) : "", trash: typeof item.detail.trash === "number" ? bytes(item.detail.trash) : "", size: typeof item.detail.size === "number" ? bytes(item.detail.size) : "" };
     // what Hata, the engine or the kernel are called is a word of the language, not a unit's name
     if (item.code === "load.cpu" && NAMED_LOADS.includes(String(item.detail.kind))) detail.name = tr(lang, `load.kind.${item.detail.kind}`);
+    if (item.code === "load.cpu" && item.detail.kind === "sessions") detail.name = tr(lang, "load.sessionsOf", { user: String(item.detail.name) });
     const tab = item.code === "restarting" || item.code === "partial" ? "/logs" : "";
     return {
       title: tr(lang, `attention.${item.code}.title`, detail),

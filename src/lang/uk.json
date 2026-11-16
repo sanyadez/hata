@@ -6002,5 +6002,7 @@
   "load.warn.minutesHint": "Цілих хвилин поспіль, від 2 до 60.",
   "attention.load.cpu.title": "{name} тримає процесор",
   "attention.load.cpu.text": "{percent}% процесора вже {minutes} хв на {place}.",
-  "error.settings.badLoad": "Введіть цілі числа в межах, указаних під полями."
+  "error.settings.badLoad": "Введіть цілі числа в межах, указаних під полями.",
+  "load.sessionsOf": "Сеанси {user} (SSH, термінали)",
+  "load.hostNet": "Окремо не рахується: користується мережею самого сервера"
 }

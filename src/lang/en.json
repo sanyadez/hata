@@ -6002,5 +6002,7 @@
   "load.warn.minutesHint": "Whole minutes in a row, from 2 to 60.",
   "attention.load.cpu.title": "{name} holds the processor",
   "attention.load.cpu.text": "{percent}% of the processor for {minutes} minutes on {place}.",
-  "error.settings.badLoad": "Enter whole numbers within the ranges shown under the fields."
+  "error.settings.badLoad": "Enter whole numbers within the ranges shown under the fields.",
+  "load.sessionsOf": "Sessions of {user} (SSH, terminals)",
+  "load.hostNet": "Not counted apart: it uses the server's own network"
 }
