@@ -14,6 +14,7 @@ import { cleanModules, type ModuleSwitches } from "./modules";
 import { cleanNames, type DomainName } from "./names";
 import { cleanSpeakerName, cleanSpeakerServer } from "./sound";
 import { cleanFolders } from "./tv";
+import { LOAD_DEFAULTS, loadWarn, type LoadWarn } from "./cgload";
 import { cleanMachineShares, cleanShares, type MachineShare, type Share } from "./smbconf";
 import { changeAppearance, cleanAppearance, DEFAULT_APPEARANCE, type Appearance } from "./wallpapers";
 import { isPlainObject, readJsonFile, writeJsonAtomic } from "./fsutil";
@@ -118,6 +119,8 @@ export interface Settings {
   folders: string[];
   /** User id → the folders and files that user marked as favourites in the file manager, absolute paths */
   favorites: Record<string, Favorite[]>;
+  /** A thing that holds the processor this long is worth a word (`cgload.ts`) */
+  load: LoadWarn;
   /** Folders shared over the network (SMB) */
   shares: Share[];
   /** Machine id → folders of that machine shared with users of Hata (in Files: it has no Samba of Hata's) */
@@ -252,6 +255,7 @@ const DEFAULTS: Settings = {
   snapraid: { parity: "", parity2: "", data: [], appData: false, time: "05:00", scrub: true, deleteLimit: 50 },
   folders: [],
   favorites: {},
+  load: LOAD_DEFAULTS,
   shares: [],
   names: [],
   forwards: [],
@@ -340,6 +344,7 @@ export const settings: Settings = {
   trash: { days: trashDays(isPlainObject(saved.trash) ? saved.trash.days : undefined) ?? DEFAULTS.trash.days },
   network: { outside: cleanOutside(isPlainObject(saved.network) ? saved.network.outside : []) },
   security: { adminTwoFactor: isPlainObject(saved.security) && saved.security.adminTwoFactor === true },
+  load: { ...LOAD_DEFAULTS, ...(loadWarn(saved.load) ?? {}) },
   storage: { automount: isPlainObject(saved.storage) && saved.storage.automount === true, ignored: isPlainObject(saved.storage) && Array.isArray(saved.storage.ignored) ? saved.storage.ignored.filter((id): id is string => typeof id === "string") : [], smart: { ...DEFAULT_SMART, ...(isPlainObject(saved.storage) ? (smartLimits(saved.storage.smart) ?? {}) : {}) } },
 };
 settings.local.name = localName(settings.local.name) ?? DEFAULTS.local.name;
@@ -502,6 +507,11 @@ export function updateSettings(patch: Record<string, unknown>): string | null {
     const smart = "smart" in patch.storage ? smartLimits(patch.storage.smart) : {};
     if (!smart) return "settings.badSmart";
     next.storage = { ...next.storage, ...("automount" in patch.storage ? { automount: patch.storage.automount === true } : {}), smart: { ...next.storage.smart, ...smart } };
+  }
+  if ("load" in patch) {
+    const load = loadWarn(patch.load);
+    if (!load) return "settings.badLoad";
+    next.load = { ...next.load, ...load };
   }
   if ("security" in patch) {
     if (!isPlainObject(patch.security)) return "settings.badSecurity";

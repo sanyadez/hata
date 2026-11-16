@@ -24,6 +24,7 @@ import { join } from "node:path";
 import { record } from "./activity";
 import { AppError } from "./apps";
 import { bus } from "./bus";
+import { forgetMachine, noteMachine } from "./load";
 import type { MachineContainer, MachineInfo } from "./client";
 import { DATA_DIR, SECRETS_DIR } from "./config";
 import { readJsonFile, writeJsonAtomic } from "./fsutil";
@@ -211,6 +212,7 @@ export async function remove(id: string, by: string): Promise<void> {
     live.delete(id);
   }
   state.machines = state.machines.filter((x) => x.id !== id);
+  forgetMachine(id);
   save();
   record("machine.removed", { user: by, detail: m.name });
   bus.publish("machines");
@@ -470,6 +472,7 @@ async function onWelcome(ws: ServerWebSocket<LinkSocket>, plain: Uint8Array): Pr
       if (!link || link.ws !== ws) return;
       if (name === "status") {
         link.status = value as SystemStatus;
+        noteMachine(machine.id, machine.name, link.status);
         bus.publish("machine", { id: machine.id, status: link.status });
       } else if (name === "containers") {
         link.containers = null;

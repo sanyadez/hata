@@ -21,6 +21,7 @@ import { join } from "node:path";
 import { record } from "./activity";
 import { AppError, startJob, type Log } from "./apps";
 import { bus } from "./bus";
+import { forgetPve, notePve } from "./load";
 import { SECRETS_DIR } from "./config";
 import { readJsonFile, writeJsonAtomic } from "./fsutil";
 import { invite, machines } from "./machines";
@@ -195,6 +196,7 @@ async function look(h: Host, all = false): Promise<void> {
     l.storages = read.storages;
     l.error = null;
     l.at = now;
+    notePve(h.id, h.name, l.nodes, l.guests, now);
     const online = read.nodes.filter((n) => n.online).map((n) => n.name);
     if (all || fresh || now - l.asked.tasks > TASKS_MS) {
       l.asked.tasks = now;
@@ -585,6 +587,7 @@ export function removeHost(id: string, by: string): void {
   state.hosts = state.hosts.filter((x) => x.id !== id);
   for (const [m, link] of Object.entries(state.links)) if (link.host === id) delete state.links[m];
   live.delete(id);
+  forgetPve(id);
   save();
   record("pve.removed", { user: by, detail: h.name });
   bus.publish("proxmox", { id });

@@ -141,6 +141,7 @@ import { machineAccessRows, setMachineAccess } from "./machinegate";
 import { applyMachineCompose, installComposeOnMachine, machineTiles, installOnMachine, machineAppAction, machineAppLogs, machineApps, machineCompose, removeMachineApp, revealMachineLogin, storeAppFor } from "./machineapps";
 import { addStore, ARCH, catalogue, removeStore, scheduleStoreSync, StoreError, syncStore } from "./store";
 import { startSampler, systemStatus } from "./system";
+import { loadReport, loadTrouble, startLoad } from "./load";
 import { addDisc as addContainerDisc, receiveDisc as receiveContainerDisc, removeDisc as removeContainerDisc, ejectDisc as ejectContainerDisc, askScreen as containerAskScreen, openScreen as containerOpenScreen, isContainerScreen, screenOn as containerScreenOn, act as containerAct, cloneInstance as cloneContainer, renameInstance as renameContainer, addPlace as addContainerPlace, moveInstance as moveContainer, removePlace as removeContainerPlace, setStandardPlace, containerOfMachine, vmOfMachine, instanceOfMachine, containersTrouble, create as createContainer, install as installIncus, installVms as installIncusVms, removeContainer, removeSnapshot as removeContainerSnapshot, report as containersReport, restoreSnapshot as restoreContainerSnapshot, setLimits as setContainerLimits, setNetwork as setContainerNetwork, setUpNow as setUpContainers, shellCommand as containerShell, shellReady as containerShellReady, takeSnapshot as takeContainerSnapshot } from "./containers";
 import { askScreen as pveAskScreen, openScreen as pveOpenScreen, storageContent as pveStorageContent, removeVolume as pveRemoveVolume, cloneOptions as pveCloneOptions, cloneGuest as pveCloneGuest, makeTemplate as pveMakeTemplate, load as pveLoad, templates as pveTemplates, downloadTemplate as pveDownloadTemplate, removeTemplate as pveRemoveTemplate, setSchedule as pveSetSchedule, runScheduleNow as pveRunSchedule, restoreBackup as pveRestoreBackup, restoreOptions as pveRestoreOptions, changeGuest as pveChangeGuest, guestSettings as pveGuestSettings, installByConsole as pveInstallByConsole, openConsole as pveOpenConsole, type Console as PveConsole, addBySignIn as addPveBySignIn, removeGuest as pveRemoveGuest, addHost as addPve, createGuest as pveCreateGuest, createVm as pveCreateVm, sendFile as pveSendFile, receiveFile as pveReceiveFile, newOptions as pveNewOptions, backupJobs as pveBackupJobs, backups as pveBackups, changeHost as changePve, guestOfMachine, host as pveHost, hosts as pveHosts, power as pvePower, proxmoxTrouble, refresh as refreshPve, removeHost as removePve, snapshotAction as pveSnapshotAction, snapshots as pveSnapshots, takeBackup as pveTakeBackup, takeSnapshot as pveTakeSnapshot, taskLog as pveTaskLog } from "./proxmox";
 import { call as machineCall, clientBinary, containersOf, installScript, invite as machineInvite, INVITE_MS, linkData, linkHandlers, machine as machineView, MACHINE_ID_RE, machines as machineList, machinesAway, open as machineOpen, remove as removeMachine, rename as renameMachine, updateClient, wake as wakeMachine, power as powerMachine, type LinkSocket } from "./machines";
@@ -1180,7 +1181,7 @@ async function api(req: Request, url: URL, server: Server<unknown>): Promise<Res
       music: admin && moduleOn("music") ? await musicNow().catch(() => null) : null,
       // ffmpeg is here: videos of this server are played in the browser by Hata's own player, the TV module on or off
       media: admin && tvStreamsHere(),
-      attention: admin ? notSnoozed(attention({ system, docker, apps, activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), exposed: exposedNics(), array: arrayTrouble(), shares: shareTrouble(), places: placesDown(), machines: awayMachines(), machineApps: onMachines, unused: unusedDisks(), filling: fillingUp(), pve: proxmoxTrouble(), ha: [...homeAssistantTrouble(), ...qbitTrouble(), ...frigateTrouble()], raid: poolsTrouble(), containers: containersTrouble(), dns: [...dnsTrouble(), ...blockTrouble(), ...wildcardTrouble()] })) : [],
+      attention: admin ? notSnoozed(attention({ system, docker, apps, activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), exposed: exposedNics(), array: arrayTrouble(), shares: shareTrouble(), places: placesDown(), machines: awayMachines(), machineApps: onMachines, unused: unusedDisks(), filling: fillingUp(), pve: proxmoxTrouble(), ha: [...homeAssistantTrouble(), ...qbitTrouble(), ...frigateTrouble()], raid: poolsTrouble(), containers: containersTrouble(), dns: [...dnsTrouble(), ...blockTrouble(), ...wildcardTrouble()], load: loadTrouble() })) : [],
       // how many items are put off: the list says so and leads to them
       attentionHidden: admin ? hiddenCount() : 0,
       // who signed in from where, and what was installed by whom, is the administrators' business
@@ -1964,6 +1965,7 @@ async function api(req: Request, url: URL, server: Server<unknown>): Promise<Res
     return json(await dockerInfo());
   }
   // the answer goes out first, then the server goes down
+  if (path === "/api/load" && method === "GET") return json(loadReport());
   if (path === "/api/system/power" && method === "POST") {
     const { action } = await body(req);
     if (action !== "reboot" && action !== "poweroff") return fail(404, "request.notFound");
@@ -3396,6 +3398,7 @@ export async function serve(): Promise<void> {
   await settleModules();
   scheduleUpdateChecks();
   startSampler(() => settings.dataRoot);
+  startLoad();
   startDisks();
   startFills();
   startImages({
@@ -3419,7 +3422,7 @@ export async function serve(): Promise<void> {
   void refreshHttps();
   refreshLocalNames();
   startNotifications({
-    attention: async () => notSnoozed(attention({ system: systemStatus(), docker: await dockerInfo(), apps: await listApps("en"), activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), exposed: exposedNics(), array: arrayTrouble(), shares: shareTrouble(), places: placesDown(), machines: awayMachines(), machineApps: await machineTiles(machineList(), "en").catch(() => []), unused: unusedDisks(), filling: fillingUp(), pve: proxmoxTrouble(), ha: [...homeAssistantTrouble(), ...qbitTrouble(), ...frigateTrouble()], raid: poolsTrouble(), containers: containersTrouble(), dns: [...dnsTrouble(), ...blockTrouble(), ...wildcardTrouble()] })),
+    attention: async () => notSnoozed(attention({ system: systemStatus(), docker: await dockerInfo(), apps: await listApps("en"), activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), exposed: exposedNics(), array: arrayTrouble(), shares: shareTrouble(), places: placesDown(), machines: awayMachines(), machineApps: await machineTiles(machineList(), "en").catch(() => []), unused: unusedDisks(), filling: fillingUp(), pve: proxmoxTrouble(), ha: [...homeAssistantTrouble(), ...qbitTrouble(), ...frigateTrouble()], raid: poolsTrouble(), containers: containersTrouble(), dns: [...dnsTrouble(), ...blockTrouble(), ...wildcardTrouble()], load: loadTrouble() })),
     baseUrl: publicUrl,
     isAdmin: (id) => findUser(id)?.role === "admin",
   });

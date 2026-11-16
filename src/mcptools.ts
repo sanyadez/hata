@@ -36,6 +36,7 @@ import { backupMachineApp, restoreMachineApp } from "./machinebackup";
 import { containersOf, machinesAway, machines as machineList, open as openOnMachine, power as powerMachine, wake as wakeMachine, type MachineView } from "./machines";
 import { moveApp } from "./moveapp";
 import { backups as pveBackups, cloneGuest, load as pveLoad, changeGuest, restoreBackup, createGuest, createVm, sendFile, templates as pveTemplates, guestSettings, guestOfMachine, host as pveHost, hosts as pveHosts, newOptions, power as pvePower, proxmoxTrouble, refresh as refreshPve, removeGuest, snapshotAction, snapshots as pveSnapshots, takeBackup, takeSnapshot, taskLog, taskNow } from "./proxmox";
+import { loadTrouble } from "./load";
 import { MuxError } from "./mux";
 import { act as containerAct, cloneInstance as cloneContainer, create as createContainer, renameInstance as renameContainer, removeContainer, removeSnapshot as removeContainerSnapshot, report as containersReport, restoreSnapshot as restoreContainerSnapshot, setLimits as setContainerLimits, takeSnapshot as takeContainerSnapshot } from "./containers";
 import { LIMITED, NAME_RE as INSTANCE_RE } from "./incus";
@@ -240,7 +241,7 @@ const brief = (app: Omit<InstalledApp, "login">, caller?: Caller) => ({
 });
 
 async function attentionNow(apps: InstalledApp[]) {
-  const items = attention({ system: systemStatus(), docker: await dockerInfo(), apps, activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, machines: machinesAway(), machineApps: await machineTiles(machineList(), "en").catch(() => []), pve: proxmoxTrouble() });
+  const items = attention({ system: systemStatus(), docker: await dockerInfo(), apps, activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, machines: machinesAway(), machineApps: await machineTiles(machineList(), "en").catch(() => []), pve: proxmoxTrouble(), load: loadTrouble() });
   // worded one by one: `wording` folds a long list into a single message, which is right for a phone and wrong here
   return items.map((item) => {
     const [message] = wording([item], "en");

@@ -2138,3 +2138,22 @@ button.mark:hover { border-color: var(--border-strong); color: var(--text); }
 .disk-uses-item { display: flex; align-items: flex-start; gap: 10px; min-width: 0; }
 .disk-uses-item .grow { display: grid; min-width: 0; }
 .disk-uses-item .ico { flex: none; margin-top: 2px; }
+
+/* Load: what takes what, thing by thing */
+.load-place { display: grid; gap: 10px; padding-bottom: 6px; }
+.load-place > .block-head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; padding: 16px 18px 0; min-width: 0; }
+.load-place > .block-head h2 { font-size: 16px; min-width: 0; }
+.load-place > .pad-x { padding: 0 18px; }
+.load-place > .pad-b { padding: 0 18px 14px; }
+.load-what { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.load-kind { display: grid; place-items: center; width: 28px; height: 28px; flex: none; border-radius: var(--radius-sm); background: var(--surface-2); color: var(--muted); }
+.load-table td:last-child { width: 130px; }
+.load-line { width: 120px; height: 26px; display: block; }
+.load-line path { fill: none; stroke: var(--accent); stroke-width: 1.5; vector-effect: non-scaling-stroke; }
+tr.warn-row .load-line path { stroke: var(--warn); }
+.th-sort { all: unset; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; }
+.th-sort.active { color: var(--text); }
+.th-sort .ico { width: 14px; height: 14px; }
+a.kpi { color: inherit; text-decoration: none; border-radius: var(--radius-sm); }
+a.kpi:hover { background: var(--surface-2); }
+.load-head { display: grid; gap: 10px; }

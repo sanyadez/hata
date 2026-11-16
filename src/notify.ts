@@ -226,15 +226,20 @@ function bytes(n: number): string {
 const SEPARATE = 3;
 
 /** The messages for the items to send, in the words of the home page */
+/** The kinds of load rows whose name is a word, not a unit's or a container's name */
+export const NAMED_LOADS = ["hata", "engine", "sessions", "system", "rest"];
+
 export function wording(items: AttentionItem[], lang: string): Message[] {
   const one = (item: AttentionItem): Message => {
-    const detail = { ...item.detail, free: typeof item.detail.free === "number" ? bytes(item.detail.free) : "", trash: typeof item.detail.trash === "number" ? bytes(item.detail.trash) : "", size: typeof item.detail.size === "number" ? bytes(item.detail.size) : "" };
+    const detail: Record<string, string | number> = { ...item.detail, free: typeof item.detail.free === "number" ? bytes(item.detail.free) : "", trash: typeof item.detail.trash === "number" ? bytes(item.detail.trash) : "", size: typeof item.detail.size === "number" ? bytes(item.detail.size) : "" };
+    // what Hata, the engine or the kernel are called is a word of the language, not a unit's name
+    if (item.code === "load.cpu" && NAMED_LOADS.includes(String(item.detail.kind))) detail.name = tr(lang, `load.kind.${item.detail.kind}`);
     const tab = item.code === "restarting" || item.code === "partial" ? "/logs" : "";
     return {
       title: tr(lang, `attention.${item.code}.title`, detail),
       text: tr(lang, `attention.${item.code}.text`, detail).trim(),
       severity: item.severity,
-      route: item.app ? `#/apps/${item.app}${tab}` : item.code === "update" ? "#/settings/about" : item.code === "disk.trash" ? "#/trash" : item.code.startsWith("internet.") || item.code === "network.exposed" ? "#/settings/network" : item.code.startsWith("share.") ? "#/settings/shares" : item.code === "netplace.down" ? "#/settings/storage" : item.code === "machine.away" ? `#/machines/${item.detail.id}` : item.code.startsWith("pve.") ? `#/proxmox/${item.detail.host}` : item.code.startsWith("containers.") ? "#/containers" : item.code.startsWith("machine.") ? `#/machines/${item.detail.id}/apps` : item.code.startsWith("array.") || item.code.startsWith("smart.") || item.code === "disk.new" || item.code === "disk.usb" || item.code === "disk.filling" || item.code.startsWith("absent") ? "#/settings/storage" : "#/",
+      route: item.app ? `#/apps/${item.app}${tab}` : item.code === "update" ? "#/settings/about" : item.code === "disk.trash" ? "#/trash" : item.code.startsWith("internet.") || item.code === "network.exposed" ? "#/settings/network" : item.code.startsWith("share.") ? "#/settings/shares" : item.code === "netplace.down" ? "#/settings/storage" : item.code === "machine.away" ? `#/machines/${item.detail.id}` : item.code.startsWith("pve.") ? `#/proxmox/${item.detail.host}` : item.code.startsWith("containers.") ? "#/containers" : item.code === "load.cpu" ? "#/machines/load" : item.code.startsWith("machine.") ? `#/machines/${item.detail.id}/apps` : item.code.startsWith("array.") || item.code.startsWith("smart.") || item.code === "disk.new" || item.code === "disk.usb" || item.code === "disk.filling" || item.code.startsWith("absent") ? "#/settings/storage" : "#/",
       tag: keyOf(item),
       code: item.code,
       app: item.app,

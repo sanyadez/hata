@@ -435,6 +435,7 @@ function parseRoute() {
   if (parts[0] === "frigate" && parts[1] && isAdmin()) return { view: "frigate", id: parts[1], hash: `#/house/cameras/${parts[1]}` };
   if ((parts[0] === "storage" || parts[0] === "network") && isAdmin()) return areaRoute(parts[0], parts[1], parts[2]);
   if (parts[0] === "machines" && parts[1] === "this" && isAdmin()) return areaRoute("server", parts[2], parts[3]);
+  if (parts[0] === "machines" && parts[1] === "load" && isAdmin()) return { view: "load", place: parts[2] ? decodeURIComponent(parts[2]) : "" };
   // a container, a virtual machine or a guest keeps its address when Hata's client is put on it: the client only adds tabs
   if (parts[0] === "guest" && parts[3] && isAdmin()) {
     const base = `#/guest/${parts[1]}/${parts[2]}/${parts[3]}`;
@@ -509,6 +510,7 @@ const AREAS = {
     { id: "containers", view: "containers", module: "containers" },
     { id: "files", hash: "#/files/", link: true },
     { id: "system", sections: ["tools"] },
+    { id: "load", hash: "#/machines/load/here", link: true },
   ],
   settings: [
     { id: "account", sections: ["account"] },
@@ -555,7 +557,7 @@ function areaOf(route = state.route) {
   if (view === "settings") return route.area === "server" ? "machines" : route.area;
   if (["apps", "store", "import", "app", "mapp"].includes(view)) return "apps";
   if (["files", "trash", "myhata"].includes(view)) return "files";
-  if (["machines", "machine", "server", "proxmox", "containers", "instance", "guest", "terminal"].includes(view)) return "machines";
+  if (["machines", "machine", "server", "proxmox", "containers", "instance", "guest", "terminal", "load"].includes(view)) return "machines";
   if (view === "qbit") return route.house || !torrentsApp(route.id) ? "house" : "apps";
   if (["integrations", "ha", "frigate", "tv", "music"].includes(view)) return "house";
   if (view === "backups") return "backups";
@@ -1107,7 +1109,7 @@ const navItems = () => NAV.filter((item) => (!item.admin || isAdmin()) && (!item
 
 /** Which section of the page an item of "Needs attention" is about, by its code */
 const ATTENTION_AREAS = [
-  [/^(machine|pve|containers|docker|memory|temperature)\b/, "machines"],
+  [/^(machine|pve|containers|docker|memory|temperature|load)\b/, "machines"],
   [/^(ha|frigate)\b/, "house"],
   [/^(disk|smart|absent|array|raid|share|netplace)\b/, "storage"],
   [/^(offsite|failed\.backup|backup)\b/, "backups"],
@@ -1374,6 +1376,7 @@ function render() {
   if (view === "tv") return renderTv();
   if (view === "music") return renderMusic();
   if (view === "machines") return renderMachines();
+  if (view === "load") return renderLoad();
   if (view === "machine") return renderMachine();
   if (view === "proxmox") return renderPve();
   if (view === "containers") return renderContainers();
@@ -1466,10 +1469,10 @@ function meterBar(percent, cls = level(percent)) {
 }
 
 /** One number of the block of this server: label, the value and its unit, a bar or a little chart, a line under it */
-function kpi(id, iconName, label, key = "") {
+function kpi(id, iconName, label, key = "", href = "") {
   return h(
-    "div",
-    { class: "kpi", id: "kpi-" + id },
+    href ? "a" : "div",
+    { class: "kpi", id: "kpi-" + id, ...(href ? { href, title: t("load.title") } : {}) },
     h("div", { class: "kpi-label" }, key ? h("i", { class: "series-key " + key }) : icon(iconName), h("span", { class: "clip" }, label)),
     h("div", { class: "kpi-value" }, h("strong", null, "—"), h("span", { class: "unit" })),
     h("div", { class: "kpi-gauge" }),
@@ -1496,7 +1499,7 @@ function statsBlock() {
       "section",
       { class: "card numbers" },
       h("div", { class: "block-head" }, h("span", { class: "block-icon" }, icon("server")), h("h2", { class: "clip", id: "own-name" }, state.overview?.system?.hostname ?? "…"), h("span", { class: "muted small grow" }, t("home.thisServer")), h("span", { class: "mono muted small", id: "own-up" })),
-      h("div", { class: "kpis" }, kpi("cpu", "cpu", t("sys.cpu"), "s2"), kpi("memory", "memory", t("sys.memory"), "s1"), kpi("disk", "disk", t("sys.disk")), kpi("network", "network", t("sys.network")), kpi("temp", "temp", t("sys.temperature"))),
+      h("div", { class: "kpis" }, kpi("cpu", "cpu", t("sys.cpu"), "s2", isAdmin() ? "#/machines/load/here" : ""), kpi("memory", "memory", t("sys.memory"), "s1", isAdmin() ? "#/machines/load/here" : ""), kpi("disk", "disk", t("sys.disk")), kpi("network", "network", t("sys.network")), kpi("temp", "temp", t("sys.temperature"))),
       h("div", { class: "trend", id: "own-trend" }),
     ),
   );
@@ -2528,6 +2531,7 @@ const ATTENTION_ICONS = { update: "up", docker: "box", restarting: "refresh", pa
 /** The title and the words of an item of the list, sizes said as sizes */
 function attentionWords(item) {
   const detail = { ...item.detail, free: item.detail.free == null ? "" : bytes(item.detail.free), trash: item.detail.trash == null ? "" : bytes(item.detail.trash), size: item.detail.size == null ? "" : bytes(item.detail.size) };
+  if (item.code === "load.cpu" && LOAD_NAMED.includes(item.detail.kind)) detail.name = t("load.kind." + item.detail.kind);
   const base = "attention." + item.code;
   return { title: t(base + ".title", detail), text: t(base + ".text", detail).trim() };
 }
@@ -3755,11 +3759,218 @@ function renderMachinesBody(force = false) {
     h(
       "section",
       { class: "card server-tree" },
-      h("div", { class: "tree-head" }, h("div", null, h("h1", null, t("nav.machines")), h("p", { class: "meta" }, meta)), button(t("machines.addAny"), { class: "primary", onclick: (e) => addToMachinesMenu(e.currentTarget) }, "plus")),
+      h("div", { class: "tree-head" }, h("div", null, h("h1", null, t("nav.machines")), h("p", { class: "meta" }, meta)), h("div", { class: "actions" }, button(t("load.title"), { onclick: () => go("#/machines/load") }, "chart"), button(t("machines.addAny"), { class: "primary", onclick: (e) => addToMachinesMenu(e.currentTarget) }, "plus"))),
       d.outdated.length > 0 && h("div", { class: "tree-banner" }, icon("up", "accent-text"), h("span", { class: "grow" }, h("strong", null, t("tree.outdated", { version: d.version })), " ", h("span", { class: "muted" }, d.outdated.map((m) => m.name).join(", "))), button(t("tree.updateAll"), { class: "small", onclick: (e) => updateClients(d.outdated, e.currentTarget) }, "up")),
       h("div", { class: "tree-row tree-cols small", role: "row" }, h("div", null, t("tree.col.name")), h("div", null, t("tree.col.what")), h("div", null, t("tree.col.state")), h("div", null, t("tree.col.load")), h("div")),
       d.groups.flatMap(treeGroup),
       hasModule("containers") && h("a", { class: "tree-foot small muted", href: "#/machines/this/containers/settings" }, icon("sliders"), h("span", { class: "grow" }, t("tree.foot")), icon("chevron")),
+    ),
+  );
+}
+
+// ---- Load: what takes the processor, the memory, the disk and the network, thing by thing
+
+const loadUi = { data: null, sort: "cpu", all: new Set(), timer: 0 };
+const LOAD_SHOWN = 12;
+/** Units Hata itself puts on the system, and what a person calls them */
+const LOAD_UNITS = { "hata-tv": "load.unit.tv", "hata-music": "load.unit.music", "hata-speaker": "load.unit.speaker", smbd: "load.unit.samba", nmbd: "load.unit.samba", bluetooth: "load.unit.bluetooth" };
+const LOAD_NAMED = ["hata", "engine", "sessions", "system", "rest"];
+
+/** What a row is called on the page */
+function loadName(row, place) {
+  if (LOAD_NAMED.includes(row.kind)) return t("load.kind." + row.kind);
+  if (row.kind === "service" && LOAD_UNITS[row.name]) return t(LOAD_UNITS[row.name]);
+  if (row.kind === "app" && place?.kind === "here") return state.overview?.apps?.find((a) => a.name === row.name)?.title ?? row.name;
+  return row.name;
+}
+
+/** Where a row leads: the thing's own page, when it has one */
+function loadHref(row, place) {
+  const machine = place.kind === "machine" ? place.id.slice(8) : "";
+  if (row.kind === "app") return place.kind === "here" ? (state.overview?.apps?.some((a) => a.name === row.name) ? `#/apps/${row.name}` : "") : `#/apps/${row.name}@${machine}`;
+  if (row.kind === "instance" && place.kind === "here") return `#/containers/i/${row.name}`;
+  if (row.kind === "guest") return `#/guest/${place.id.split(":")[1]}/${row.key.slice(6)}`;
+  if (row.kind === "engine" && place.kind === "here") return "#/machines/this/docker";
+  return "";
+}
+
+const rateText = (n) => (n == null ? "—" : n < 1024 ? "0" : bytes(n) + "/s");
+const ioOf = (r) => r.read + r.write;
+const netOf = (r) => (r.rx ?? 0) + (r.tx ?? 0);
+const LOAD_SORTS = { cpu: (r) => r.cpu, memory: (r) => r.memory, disk: ioOf, net: netOf };
+
+/** An hour of a row in a line as wide as its cell: the processor */
+function loadLine(values) {
+  const W = 120, H = 26;
+  const svg = document.createElementNS(SVG_NS, "svg");
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.setAttribute("class", "load-line");
+  svg.setAttribute("aria-hidden", "true");
+  const top = Math.max(10, ...values.filter((v) => v != null));
+  let d = "";
+  let pen = false;
+  values.forEach((v, i) => {
+    if (v == null) return void (pen = false);
+    const x = values.length < 2 ? W : (i / (values.length - 1)) * W;
+    const y = H - 2 - (v / top) * (H - 4);
+    d += (pen ? "L" : "M") + x.toFixed(1) + " " + y.toFixed(1);
+    pen = true;
+  });
+  const path = document.createElementNS(SVG_NS, "path");
+  path.setAttribute("d", d);
+  svg.append(path);
+  return svg;
+}
+
+function renderLoad() {
+  shell(h("div", { id: "load-body" }, waitMark()));
+  if (loadUi.data) paintLoad();
+  void loadLoad();
+  const timer = setInterval(() => void loadLoad(), 5000);
+  cleanups.push(() => clearInterval(timer));
+}
+
+async function loadLoad() {
+  try {
+    loadUi.data = await api("GET", "/api/load");
+  } catch (e) {
+    const box = document.getElementById("load-body");
+    if (box && !loadUi.data) put(box, h("section", { class: "card pad" }, h("p", { class: "error" }, errorText(e))));
+    return;
+  }
+  if (state.route.view === "load") paintLoad();
+}
+
+function paintLoad() {
+  const box = document.getElementById("load-body");
+  const d = loadUi.data;
+  if (!box || !d) return;
+  const at = state.route.place ?? "";
+  const shown = at ? d.places.filter((p) => p.id === at) : d.places;
+  const pill = (id, label) => h("a", { class: "seg-pill" + (at === id ? " active" : ""), href: id ? `#/machines/load/${id}` : "#/machines/load" }, label);
+  const placeLabel = (p) => (p.kind === "here" ? t("load.here", { name: p.name }) : p.kind === "pve" ? `${p.host} · ${p.name}` : p.name);
+  const w = d.warn;
+  put(
+    box,
+    h(
+      "section",
+      { class: "card area-head load-head" },
+      h("div", { class: "tree-head" }, h("div", null, h("h1", null, t("load.title")), h("p", { class: "muted small" }, t("load.lead", { n: d.minutes }))), button(t("load.warn.button"), { class: "small", onclick: loadWarnDialog }, "bell")),
+      h("p", { class: "muted small" }, w.warn ? t("load.warn.on", { cpu: w.cpu, minutes: w.minutes }) : t("load.warn.off")),
+      d.places.length > 1 && h("div", { class: "seg-pills" }, pill("", t("load.all")), d.places.map((p) => pill(p.id, placeLabel(p)))),
+    ),
+    shown.map((p) => loadPlace(p, placeLabel(p))),
+    !shown.length && h("section", { class: "card pad muted" }, t("load.nothing")),
+  );
+}
+
+function loadPlace(p, label) {
+  const sortBy = LOAD_SORTS[loadUi.sort];
+  const rows = [...p.rows].sort((a, b) => sortBy(b) - sortBy(a));
+  const all = loadUi.all.has(p.id);
+  const list = all ? rows : rows.slice(0, LOAD_SHOWN);
+  const memPercent = p.memory.total ? Math.round((p.memory.used / p.memory.total) * 100) : 0;
+  const head = (id, text) => h("th", null, h("button", { type: "button", class: "th-sort" + (loadUi.sort === id ? " active" : ""), "aria-pressed": String(loadUi.sort === id), onclick: () => ((loadUi.sort = id), paintLoad()) }, text, loadUi.sort === id && icon("down")));
+  const old = Date.now() - p.at > 60_000;
+  return h(
+    "section",
+    { class: "card load-place" },
+    h(
+      "div",
+      { class: "block-head" },
+      h("span", { class: "block-icon" }, icon(p.kind === "pve" ? "box" : "server")),
+      h("h2", { class: "clip" }, label),
+      h("span", { class: "muted small grow" }, t("load.cores", { n: p.cores })),
+      h("span", { class: "small" }, t("load.total", { cpu: p.cpu ?? "—", used: bytes(p.memory.used), total: bytes(p.memory.total), percent: memPercent })),
+    ),
+    old && h("p", { class: "muted small pad-x" }, t("load.stale", { time: ago(p.at) })),
+    !rows.length
+      ? h("p", { class: "muted small pad" }, t(p.kind === "machine" ? "load.soonMachine" : "load.soon"))
+      : h(
+          "div",
+          { class: "table-wrap" },
+          h(
+            "table",
+            { class: "load-table" },
+            h("thead", null, h("tr", null, h("th", null, t("load.col.what")), head("cpu", t("load.col.cpu")), head("memory", t("load.col.memory")), head("disk", t("load.col.disk")), head("net", t("load.col.net")), h("th", null, t("load.col.hour")))),
+            h("tbody", null, list.map((r) => loadRow(r, p))),
+          ),
+        ),
+    rows.length > LOAD_SHOWN && h("div", { class: "pad-x pad-b" }, button(all ? t("load.fewer") : t("load.more", { n: rows.length - LOAD_SHOWN }), { class: "small ghost", onclick: () => (all ? loadUi.all.delete(p.id) : loadUi.all.add(p.id), paintLoad()) })),
+  );
+}
+
+function loadRow(r, p) {
+  const name = loadName(r, p);
+  const app = r.kind === "app" && p.kind === "here" ? state.overview?.apps?.find((a) => a.name === r.name) : null;
+  const over = loadUi.data.warn.warn && r.over > 0 && r.cpu >= loadUi.data.warn.cpu;
+  return h(
+    "tr",
+    { class: "clickable" + (over ? " warn-row" : ""), onclick: () => loadRowDialog(r, p) },
+    h("td", null, h("div", { class: "load-what" }, app ? appIcon(app, "small") : h("span", { class: "load-kind" }, icon(LOAD_ICONS[r.kind] ?? "box")), h("div", { class: "clip" }, h("strong", null, name), h("div", { class: "muted small" }, t("load.kindOf." + r.kind), r.parts?.length > 1 && " · " + t("load.parts", { n: r.parts.length }))))),
+    h("td", { class: "num" + (over ? " warn-text" : "") }, `${r.cpu}%`),
+    h("td", { class: "num" }, bytes(r.memory)),
+    h("td", { class: "num small" }, r.kind === "guest" || r.read || r.write ? `↓ ${rateText(r.read)} · ↑ ${rateText(r.write)}` : "—"),
+    h("td", { class: "num small" }, r.rx == null ? "—" : `↓ ${rateText(r.rx)} · ↑ ${rateText(r.tx)}`),
+    h("td", null, loadLine(r.trend.cpu.concat([r.cpu]))),
+  );
+}
+
+const LOAD_ICONS = { hata: "home", app: "grid", container: "box", instance: "box", engine: "box", service: "sliders", sessions: "terminal", system: "server", machine: "box", rest: "cpu", guest: "box" };
+
+/** One thing over the hour: the processor and the memory as lines, its containers, its page */
+function loadRowDialog(r, p) {
+  let dialog;
+  const href = loadHref(r, p);
+  const n = r.trend.cpu.length;
+  const now = Date.now();
+  const points = r.trend.cpu.map((cpu, i) => ({ t: now - (n - i) * MINUTE_MS, cpu, memory: r.trend.memory[i] }));
+  dialog = openDialog(
+    "wide",
+    h("header", null, h("h2", { class: "clip" }, loadName(r, p)), h("p", { class: "muted small" }, t("load.kindOf." + r.kind) + " · " + (p.kind === "here" ? t("load.here", { name: p.name }) : p.name))),
+    n < 2 ? h("p", { class: "muted" }, t("load.soonRow")) : [
+      lineChart(points, [{ cls: "s2", label: t("load.col.cpu"), value: (x) => x.cpu }], { max: null, fmt: (v) => Math.round(v) + "%", label: t("load.col.cpu"), height: 140 }),
+      lineChart(points, [{ cls: "s1", label: t("load.col.memory"), value: (x) => x.memory }], { max: null, fmt: (v) => bytes(v), label: t("load.col.memory"), height: 140 }),
+    ],
+    r.parts?.length > 0 && h("div", { class: "table-wrap" }, h("table", null, h("thead", null, h("tr", null, h("th", null, t("load.col.container")), h("th", null, t("load.col.cpu")), h("th", null, t("load.col.memory")), h("th", null, t("load.col.disk")), h("th", null, t("load.col.net")))), h("tbody", null, r.parts.map((c) => h("tr", null, h("td", null, c.name), h("td", { class: "num" }, `${c.cpu}%`), h("td", { class: "num" }, bytes(c.memory)), h("td", { class: "num small" }, `↓ ${rateText(c.read)} · ↑ ${rateText(c.write)}`), h("td", { class: "num small" }, c.rx == null ? "—" : `↓ ${rateText(c.rx)} · ↑ ${rateText(c.tx)}`)))))),
+    r.kind === "rest" && h("p", { class: "muted small" }, t("load.restHint")),
+    h("footer", null, href && button(t("load.open"), { class: "primary", onclick: () => (dialog.close(), go(href)) }, "chevron"), closeButton(() => dialog)),
+  );
+}
+
+/** When a thing that holds the processor is worth a word in "Needs attention" */
+function loadWarnDialog() {
+  let dialog;
+  const w = loadUi.data?.warn ?? { warn: true, cpu: 80, minutes: 10 };
+  const on = h("input", { type: "checkbox", checked: w.warn });
+  const cpu = h("input", { type: "number", min: 20, max: 100, step: 1, value: w.cpu, class: "short" });
+  const minutes = h("input", { type: "number", min: 2, max: 60, step: 1, value: w.minutes, class: "short" });
+  const error = h("p", { class: "error", role: "alert" });
+  dialog = openDialog(
+    "",
+    h("h2", null, t("load.warn.title")),
+    h("p", { class: "muted" }, t("load.warn.lead")),
+    h("label", { class: "check" }, on, h("span", null, h("strong", null, t("load.warn.tick")))),
+    h("div", { class: "form-row" }, h("label", null, t("load.warn.cpu")), h("div", null, cpu, " %", h("p", { class: "muted small" }, t("load.warn.cpuHint")))),
+    h("div", { class: "form-row" }, h("label", null, t("load.warn.minutes")), h("div", null, minutes, h("p", { class: "muted small" }, t("load.warn.minutesHint")))),
+    error,
+    h(
+      "footer",
+      null,
+      closeButton(() => dialog, t("common.cancel")),
+      button(t("settings.save"), {
+        class: "primary",
+        onclick: async () => {
+          try {
+            await api("PUT", "/api/settings", { load: { warn: on.checked, cpu: Number(cpu.value), minutes: Number(minutes.value) } });
+            dialog.close();
+            void loadLoad();
+            void refresh();
+          } catch (e) {
+            error.textContent = errorText(e);
+          }
+        },
+      }, "check"),
     ),
   );
 }
@@ -21308,7 +21519,7 @@ function renderServerBody() {
   if (!box.childElementCount) {
     put(
       box,
-      h("section", { class: "card numbers" }, h("div", { class: "kpis" }, kpi("cpu", "cpu", t("sys.cpu"), "s2"), kpi("memory", "memory", t("sys.memory"), "s1"), kpi("disk", "disk", t("sys.disk")), kpi("network", "network", t("sys.network")), kpi("temp", "temp", t("sys.temperature"))), h("div", { class: "trend", id: "own-trend" })),
+      h("section", { class: "card numbers" }, h("div", { class: "kpis" }, kpi("cpu", "cpu", t("sys.cpu"), "s2", "#/machines/load/here"), kpi("memory", "memory", t("sys.memory"), "s1", "#/machines/load/here"), kpi("disk", "disk", t("sys.disk")), kpi("network", "network", t("sys.network")), kpi("temp", "temp", t("sys.temperature"))), h("div", { class: "trend", id: "own-trend" })),
       h("div", { class: "columns" }, h("div", { class: "stack", id: "server-main" }), h("aside", { class: "side stack", id: "server-side" })),
     );
   }

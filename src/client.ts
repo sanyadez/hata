@@ -23,7 +23,8 @@ import { syncUsers } from "./clientusers";
 import { keyPair, linkKeys, Opener, Sealer, splitCode, type KeyPair } from "./link";
 import { MuxError, Peer, type Channel, type Handler } from "./mux";
 import { checkPackages, upgradePackages } from "./pkgupdates";
-import { startSampler, systemStatus } from "./system";
+import { startSampler, systemStatus, type SystemStatus } from "./system";
+import { LoadSampler, type ContainerName } from "./cgload";
 import { VERSION } from "./version";
 
 const STATE_DIR = process.env.HATA_CLIENT_DIR || "/var/lib/hata-client";
@@ -449,6 +450,25 @@ async function watchContainers(tell: () => void): Promise<never> {
   }
 }
 
+/** The status with what takes this machine, thing by thing: sampled at the pace the status is sent */
+function loadOfThisMachine(): () => SystemStatus {
+  const sampler = new LoadSampler(navigator.hardwareConcurrency || 1);
+  let names = new Map<string, ContainerName>();
+  let namesAt = 0;
+  return () => {
+    const status = systemStatus();
+    const usage = sampler.step(names, { cpu: status.cpu, memory: status.memory.used });
+    const now = Date.now();
+    if (now - namesAt > 30_000 || sampler.dockerIds().some((id) => !names.has(id))) {
+      namesAt = now;
+      listContainers()
+        .then((list) => (names = new Map(list.map((c) => [c.Id, { project: c.Labels[PROJECT_LABEL], service: c.Labels[SERVICE_LABEL], name: (c.Names[0] ?? c.Id.slice(0, 12)).replace(/^\//, "") }]))))
+        .catch(() => {});
+    }
+    return { ...status, usage };
+  };
+}
+
 async function serve(): Promise<number> {
   const state = readState();
   if (!state?.machine) {
@@ -459,7 +479,8 @@ async function serve(): Promise<number> {
   const handlers = handlersFor(state);
   let current: Connected | null = null;
   void watchContainers(() => current?.peer.event("containers", null));
-  setInterval(() => current?.peer.event("status", systemStatus()), STATUS_EVERY_MS);
+  const withLoad = loadOfThisMachine();
+  setInterval(() => current?.peer.event("status", withLoad()), STATUS_EVERY_MS);
   let wait = 2000;
   for (;;) {
     try {
