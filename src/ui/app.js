@@ -30,6 +30,7 @@ const ICONS = {
   grid: "M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z",
   modules: "M4 4h6v6H4zM4 14h6v6H4zM14 14h6v6h-6zM17 4v6M14 7h6",
   chart: "M4 4v16h16M7 15l4-5 3 3 5-6",
+  gear: "M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z",
   sliders: "M4 6h9M17 6h3M4 12h3M11 12h9M4 18h11M19 18h1M15 4v4M9 10v4M17 16v4",
   search: "M11 4a7 7 0 1 0 0 14 7 7 0 0 0 0-14zM20 20l-4-4",
   cpu: "M7 7h10v10H7zM10 3v4M14 3v4M10 17v4M14 17v4M3 10h4M3 14h4M17 10h4M17 14h4",
@@ -50,6 +51,7 @@ const ICONS = {
   pause: "M8 5v14M16 5v14",
   stop: "M6 6h12v12H6z",
   play: "M7 5l12 7-12 7z",
+  menu: "M4 6h16M4 12h16M4 18h16",
   more: "M5 12h.01M12 12h.01M19 12h.01",
   logs: "M6 3h9l4 4v14H6zM14 3v5h5M9 13h7M9 17h7",
   code: "M9 8l-4 4 4 4M15 8l4 4-4 4",
@@ -390,6 +392,8 @@ function parseRoute() {
   if (parts[0] === "connect" && parts[1]) return { view: "connect", id: parts[1] };
   if (parts[0] === "welcome" && isAdmin()) return { view: "welcome", step: WELCOME_STEPS.includes(parts[1]) && parts[1] !== "admin" ? parts[1] : "server" };
   if (parts[0] === "store" && state.user?.role !== "guest") return { view: "store" };
+  if (parts[0] === "apps" && !parts[1] && state.user?.role !== "guest") return { view: "apps" };
+  if (parts[0] === "apps-options" && isAdmin()) return areaRoute("apps", "options");
   // "#/files" is the data root, wherever it is; "#/files/" is the root of the server
   // "#/files/@<machine>/<folders>" is a folder of another machine
   if (parts[0] === "files" && mayFiles() && parts[1]?.startsWith("@")) return { view: "files", machine: parts[1].slice(1), path: "/" + parts.slice(2).join("/") };
@@ -407,15 +411,102 @@ function parseRoute() {
   if (parts[0] === "ha" && parts[1] && isAdmin()) return { view: "ha", id: parts[1] };
   if (parts[0] === "qbit" && parts[1] && isAdmin()) return { view: "qbit", id: parts[1] };
   if (parts[0] === "frigate" && parts[1] && isAdmin()) return { view: "frigate", id: parts[1] };
-  if ((parts[0] === "integrations" || parts[0] === "ha") && isAdmin()) return { view: "integrations" };
+  if ((parts[0] === "integrations" || parts[0] === "ha" || parts[0] === "house" || (parts[0] === "settings" && parts[1] === "integrations")) && isAdmin()) return { view: "integrations" };
+  if ((parts[0] === "storage" || parts[0] === "network") && isAdmin()) return areaRoute(parts[0], parts[1], parts[2]);
+  if (parts[0] === "machines" && parts[1] === "this" && isAdmin()) return areaRoute("server", parts[2], parts[3]);
   if (parts[0] === "guest" && parts[3] && isAdmin()) return { view: "guest", host: parts[1], guest: `${parts[2]}/${parts[3]}` };
   if (parts[0] === "containers" && parts[1] === "i" && parts[2] && isAdmin()) return { view: "instance", name: parts[2], tab: parts[3] === "terminal" ? "terminal" : "overview" };
   if (parts[0] === "containers" && isAdmin()) return { view: "containers", tab: parts[1] === "settings" ? "settings" : "list" };
   if (parts[0] === "proxmox" && parts[1] && isAdmin()) return { view: "proxmox", id: parts[1], tab: PVE_TABS.includes(parts[2]) ? parts[2] : "overview" };
   if (parts[0] === "machines" && isAdmin()) return parts[1] ? { view: "machine", id: parts[1], tab: parts[2] === "docker" ? "containers" : MACHINE_TABS.includes(parts[2]) ? parts[2] : "overview" } : { view: "machines" };
   if (parts[0] === "apps" && parts[1]) return { view: "app", name: parts[1], tab: isAdmin() && ["settings", "logs", "compose", "backups", "terminal"].includes(parts[2]) ? parts[2] : "overview" };
-  if (parts[0] === "settings") return { view: "settings", section: sections().some((item) => item.id === parts[1]) ? parts[1] : "account", tab: parts[2] };
+  if (parts[0] === "settings") {
+    // a section that moved out of Settings is found where it lives now: its old address still leads to it
+    const moved = Object.keys(AREAS).find((area) => area !== "settings" && AREAS[area].some((tab) => tab.sections?.includes(parts[1]) && tabAllowed(tab)));
+    if (moved && !AREAS.settings.some((tab) => tab.id === parts[1])) {
+      const tabs = AREAS[moved].filter((tab) => tab.sections?.includes(parts[1]));
+      return areaRoute(moved, (tabs.find((tab) => tab.tab === parts[2]) ?? tabs[0]).id, parts[2]);
+    }
+    return areaRoute("settings", parts[1] === "agents" ? "assistant" : parts[1], parts[2]);
+  }
   return { view: "home" };
+}
+
+/** The sections of the page and the tabs in the head of each. A tab shows sections of the settings (the first names it for the
+ * rest of the page) or is a view of its own; `tab` is the part of a long section it opens */
+const AREAS = {
+  apps: [
+    { id: "installed", hash: "#/apps", view: "apps" },
+    { id: "store", hash: "#/store", view: "store" },
+    { id: "import", hash: "#/import", view: "import", admin: true },
+    { id: "options", hash: "#/apps-options", sections: ["apps", "stores"] },
+  ],
+  storage: [
+    { id: "disks", sections: ["storage"], tab: "disks" },
+    { id: "fs", sections: ["storage"], tab: "fs" },
+    { id: "fills", sections: ["storage"], tab: "fills" },
+    { id: "protection", sections: ["protection"] },
+    { id: "shares", sections: ["shares"] },
+    { id: "places", sections: ["places"] },
+  ],
+  backups: [{ id: "overview", hash: "#/backups", view: "backups", admin: true }],
+  network: [
+    { id: "connections", sections: ["network"] },
+    { id: "remote", sections: ["remote"] },
+    { id: "addresses", sections: ["https", "ports"] },
+    { id: "dns", sections: ["dns"] },
+    { id: "adblock", sections: ["adblock"] },
+  ],
+  server: [
+    { id: "docker", sections: ["docker"] },
+    { id: "system", sections: ["tools"] },
+  ],
+  settings: [
+    { id: "account", sections: ["account"] },
+    { id: "users", hash: "#/settings/users", view: "users", admin: true },
+    { id: "general", sections: ["general"] },
+    { id: "appearance", sections: ["appearance"] },
+    { id: "notifications", sections: ["notifications"] },
+    { id: "modules", sections: ["modules"] },
+    { id: "assistant", sections: ["assistant", "agents"] },
+    { id: "about", sections: ["about"] },
+  ],
+};
+const AREA_BASE = { storage: "#/storage", network: "#/network", server: "#/machines/this", settings: "#/settings" };
+const tabHash = (area, tab) => tab.hash ?? `${AREA_BASE[area]}/${tab.id}`;
+/** Whether this person may open the tab at all, and whether it stands among the tabs: one of a module that is off does not */
+const tabAllowed = (tab) => (tab.sections ? SECTIONS.some((item) => item.id === tab.sections[0] && (!item.admin || isAdmin())) : (!tab.admin || isAdmin()) && state.user?.role !== "guest");
+const tabShown = (tab) => tabAllowed(tab) && (!tab.sections || tab.sections.some((id) => !SECTION_MODULE[id] || hasModule(SECTION_MODULE[id])));
+const areaTabs = (area) => AREAS[area].filter(tabShown);
+/** The tab of a section of the settings, wherever it lives now */
+const sectionArea = (section) => Object.keys(AREAS).find((area) => AREAS[area].some((x) => x.sections?.includes(section))) ?? "settings";
+function sectionHash(section) {
+  for (const area of Object.keys(AREAS)) {
+    const tab = AREAS[area].find((x) => x.sections?.includes(section));
+    if (tab) return tabHash(area, tab);
+  }
+  return "#/settings";
+}
+
+function areaRoute(area, id, rest) {
+  const tab = AREAS[area].find((x) => x.id === id && tabAllowed(x)) ?? areaTabs(area)[0];
+  if (!tab) return { view: "home" };
+  if (tab.view) return { view: tab.view };
+  return { view: "settings", area, at: tab.id, section: tab.sections[0], sections: tab.sections, tab: tab.tab ?? rest, hash: tabHash(area, tab) + (!tab.tab && rest ? "/" + rest : "") };
+}
+/** Whether the page shows this section of the settings: a tab may hold two */
+const showsSection = (id) => state.route.view === "settings" && state.route.sections.includes(id);
+/** The section of the page a view belongs to: what the menu marks */
+function areaOf(route = state.route) {
+  const view = route.view;
+  if (view === "settings") return route.area === "server" ? "machines" : route.area;
+  if (["apps", "store", "import", "app"].includes(view)) return "apps";
+  if (["files", "trash", "myhata"].includes(view)) return "files";
+  if (["machines", "machine", "proxmox", "containers", "instance", "guest", "terminal"].includes(view)) return "machines";
+  if (["integrations", "ha", "qbit", "frigate", "tv"].includes(view)) return "house";
+  if (view === "backups") return "backups";
+  if (view === "users") return "settings";
+  return view === "home" || view === "activity" ? "home" : "";
 }
 
 function go(hash) {
@@ -443,6 +534,8 @@ function onRoute() {
   if (/^#(setup|invite)=/.test(location.hash)) return;
   leaveView();
   state.route = parseRoute();
+  // an older address of a section: the bar shows where it lives now
+  if (state.route.hash && state.user && location.hash !== state.route.hash) history.replaceState(history.state, "", state.route.hash);
   if (state.route.view === "files") stepTrail();
   else filesUi.trail = null;
   // an install onto a machine is offered while the store is on screen
@@ -531,11 +624,11 @@ function startEvents() {
     } else if (event.type === "approvals") {
       void loadApprovals();
     } else if (event.type === "tailscale") {
-      if (state.route.view === "settings" && state.route.section === "remote") void loadRemote();
+      if (state.route.view === "settings" && showsSection("remote")) void loadRemote();
     } else if (event.type === "sysupdates") {
       sysUpdatesEvent(event.at ?? "");
     } else if (event.type === "network") {
-      if (state.route.view === "settings" && state.route.section === "network") void loadNetwork();
+      if (state.route.view === "settings" && showsSection("network")) void loadNetwork();
     } else if (event.type === "store" && state.route.view === "store") {
       void loadStore();
     }
@@ -572,6 +665,7 @@ async function refresh() {
   failedTiles(state.overview);
   if (state.route.view === "home") renderHomeBody();
   if (state.route.view === "store") renderStoreList();
+  if (state.route.view === "apps") renderAppsBody();
   if (state.route.view === "app") void loadApp(true);
   if (state.route.view === "machine" && state.route.tab === "apps") void loadMachineApps();
   if (state.route.view === "backups") void loadBackups();
@@ -898,12 +992,13 @@ new MutationObserver((records) => {
 
 const NAV = [
   { view: "home", hash: "#/", icon: "home" },
-  { view: "store", hash: "#/store", icon: "grid", guest: false },
+  { view: "apps", hash: "#/apps", icon: "grid", guest: false },
   { view: "files", hash: "#/files", icon: "folder", files: true },
   { view: "machines", hash: "#/machines", icon: "server", admin: true },
-  { view: "integrations", hash: "#/integrations", icon: "link", admin: true, integrations: true },
-  { view: "assistant", hash: "#/assistant", icon: "chat", admin: true, assistant: true },
-  { view: "settings", hash: "#/settings", icon: "sliders" },
+  { view: "house", hash: "#/house", icon: "bulb", admin: true, modules: ["integrations"] },
+  { view: "storage", hash: "#/storage", icon: "disk", admin: true },
+  { view: "backups", hash: "#/backups", icon: "archive", admin: true },
+  { view: "network", hash: "#/network", icon: "network", admin: true },
 ];
 
 /** Members look at the apps; everything that changes the server is an administrator's */
@@ -913,7 +1008,7 @@ const isAdmin = () => state.user?.role === "admin" && !state.user.mustTwoFactor;
 const hasModule = (id) => !state.modules || state.modules[id] === true;
 /** The sections of Settings and the pages that are a module's */
 const SECTION_MODULE = { protection: "raid", places: "netplaces", shares: "shares", remote: "remote", ports: "domains", dns: "dns", adblock: "adblock", integrations: "integrations", agents: "assistant", assistant: "assistant" };
-const VIEW_MODULES = { machines: ["machines", "proxmox", "containers"], machine: ["machines"], proxmox: ["proxmox"], guest: ["proxmox"], containers: ["containers"], instance: ["containers"], integrations: ["integrations"], ha: ["integrations"], qbit: ["integrations"], frigate: ["integrations"], assistant: ["assistant"], connect: ["assistant"], tv: ["tv"] };
+const VIEW_MODULES = { machine: ["machines"], proxmox: ["proxmox"], guest: ["proxmox"], containers: ["containers"], instance: ["containers"], integrations: ["integrations"], ha: ["integrations"], qbit: ["integrations"], frigate: ["integrations"], assistant: ["assistant"], connect: ["assistant"], tv: ["tv"] };
 /** Files are an administrator's, and theirs with whom a folder is shared — only those folders then */
 const mayFiles = () => isAdmin() || !!state.user?.files;
 /** The folders shared with one who is not an administrator, of this server or of a machine; null for an administrator */
@@ -932,42 +1027,62 @@ async function loadMine() {
   state.favorites = mine.favorites;
 }
 
-const navCurrent = () => (["ha", "qbit", "frigate"].includes(state.route.view) ? "integrations" : ["machine", "proxmox", "containers", "instance", "guest"].includes(state.route.view) ? "machines" : state.route.view === "backups" || state.route.view === "users" ? "settings" : state.route.view === "app" ? "home" : state.route.view === "import" ? "store" : state.route.view === "trash" || state.route.view === "myhata" ? "files" : state.route.view);
-const navItems = () => NAV.filter((item) => (!item.admin || isAdmin()) && (!VIEW_MODULES[item.view] || VIEW_MODULES[item.view].some(hasModule)) && (!item.integrations || (state.overview?.ha?.servers ?? []).length > 0 || state.overview?.qbit?.count > 0 || state.overview?.frigate?.servers?.length > 0) && (!item.files || mayFiles()) && (!item.assistant || !!(assistantUi.config?.ready ?? state.overview?.assistant)) && (item.guest !== false || state.user.role !== "guest"));
+const navCurrent = () => areaOf();
+const navItems = () => NAV.filter((item) => (!item.admin || isAdmin()) && (!item.modules || item.modules.some(hasModule)) && (!item.files || mayFiles()) && (item.guest !== false || state.user.role !== "guest"));
+
+/** Which section of the page an item of "Needs attention" is about, by its code */
+const ATTENTION_AREAS = [
+  [/^(machine|pve|containers|docker|memory|temperature)\b/, "machines"],
+  [/^(ha|frigate)\b/, "house"],
+  [/^(disk|smart|absent|array|raid|share|netplace)\b/, "storage"],
+  [/^(offsite|failed\.backup|backup)\b/, "backups"],
+  [/^(network|internet|dns|https)\b/, "network"],
+];
+const attentionArea = (item) => ATTENTION_AREAS.find(([re]) => re.test(item.code))?.[1] ?? (item.app || /^(restarting|partial|update|failed|qbit)\b/.test(item.code) ? "apps" : "");
+/** How many things need attention in a section: the number by its name in the menu */
+function navCount(view) {
+  if (!isAdmin() || view === "home") return 0;
+  return (state.overview?.attention ?? []).filter((item) => attentionArea(item) === view).length;
+}
 
 function navLinks(className, items = navItems()) {
   const current = navCurrent();
-  return items.map((item) =>
-    h("a", { class: className + (current === item.view ? " active" : ""), href: item.hash, title: t("nav." + item.view), "aria-current": current === item.view ? "page" : null }, icon(item.icon), h("span", null, t("nav." + item.view))),
-  );
+  return items.map((item) => {
+    const n = navCount(item.view);
+    return h("a", { class: className + (current === item.view ? " active" : ""), href: item.hash, title: t("nav." + item.view), "aria-current": current === item.view ? "page" : null }, icon(item.icon), h("span", null, t("nav." + item.view)), n > 0 && h("b", { class: "nav-count", title: t("nav.needs", { n }) }, String(n)));
+  });
 }
 
-/** The bar at the bottom of a phone holds five: past that, the first four and "More" with the rest */
-const BOTTOM_SLOTS = 5;
-
+/** The bar at the bottom of a phone: the first four sections and "Menu" with everything */
 function bottomLinks() {
   const items = navItems();
-  if (items.length <= BOTTOM_SLOTS) return navLinks("bottom-link", items);
-  const rest = items.slice(BOTTOM_SLOTS - 1);
-  const here = rest.some((item) => item.view === navCurrent());
-  const more = h("button", { type: "button", class: "bottom-link" + (here ? " active" : ""), "aria-haspopup": "menu", onclick: (e) => moreMenu(e.currentTarget, rest) }, icon("more"), h("span", null, t("nav.more")));
-  return [...navLinks("bottom-link", items.slice(0, BOTTOM_SLOTS - 1)), more];
+  const here = !items.slice(0, 4).some((item) => item.view === navCurrent()) && navCurrent() !== "";
+  const more = h("button", { type: "button", class: "bottom-link" + (here ? " active" : ""), "aria-haspopup": "dialog", onclick: () => navSheet() }, icon("menu"), h("span", null, t("nav.menu")));
+  return [...navLinks("bottom-link", items.slice(0, 4)), more];
 }
 
-function moreMenu(anchor, items) {
+/** "Menu" of a phone: the search, every section, the terminal, Settings and the person */
+function navSheet(search = false) {
   let dialog;
   const current = navCurrent();
+  const tile = (hash, iconName, label, active, n = 0) => h("a", { class: "sheet-tile" + (active ? " active" : ""), href: hash, onclick: () => dialog.close() }, icon(iconName), h("span", null, label), n > 0 && h("b", { class: "nav-count" }, String(n)));
+  const field = globalSearch(() => dialog.close());
   dialog = openDialog(
-    "menu dropdown nav-more",
-    items.map((item) => h("a", { class: "menu-item" + (current === item.view ? " active" : ""), href: item.hash, onclick: () => dialog.close() }, icon(item.icon), t("nav." + item.view))),
+    "nav-sheet",
+    h("div", { class: "sheet-bar" }),
+    field,
+    h(
+      "div",
+      { class: "sheet-tiles" },
+      navItems().map((item) => tile(item.hash, item.icon, t("nav." + item.view), current === item.view, navCount(item.view))),
+      isAdmin() && tile("#/terminal", "terminal", t("terminal.title"), state.route.view === "terminal"),
+      tile("#/settings", "gear", t("nav.settings"), current === "settings"),
+    ),
+    h("button", { type: "button", class: "sheet-user", onclick: (e) => userMenu(e, true) }, h("span", { class: "avatar" }, state.user.name.slice(0, 1).toUpperCase()), h("span", { class: "grow" }, h("strong", null, state.user.name), h("span", { class: "muted small block" }, t("user.role." + state.user.role))), icon("chevron")),
   );
-  // it stands over the bar, by the button's right edge
-  const at = anchor.getBoundingClientRect();
-  dialog.style.top = "auto";
-  dialog.style.bottom = document.documentElement.clientHeight - at.top + 8 + "px";
-  dialog.style.right = Math.max(8, document.documentElement.clientWidth - at.right) + "px";
-  // a finger opened it: no item is chosen yet
-  dialog.focus();
+  pullToClose(dialog);
+  if (search) field.querySelector("input").focus();
+  else dialog.focus();
 }
 
 async function signOut() {
@@ -982,23 +1097,25 @@ async function signOut() {
   render();
 }
 
-function userMenu(e) {
+function userMenu(e, above = false) {
   let dialog;
   const anchor = e.currentTarget.getBoundingClientRect();
   dialog = openDialog(
     "menu dropdown",
     h("header", null, h("span", { class: "avatar" }, state.user.name.slice(0, 1).toUpperCase()), h("div", null, h("h2", null, state.user.name), h("span", { class: "muted small" }, t("user.role." + state.user.role)))),
-    h("a", { class: "menu-item", href: "#/settings/account", onclick: () => dialog.close() }, icon("user"), t("settings.account")),
+    h("a", { class: "menu-item", href: "#/settings/account", onclick: () => (dialog.close(), document.querySelector("dialog.nav-sheet")?.close()) }, icon("user"), t("settings.account")),
     isAdmin() && h("button", { type: "button", class: "menu-item", onclick: () => (dialog.close(), serverPowerDialog("reboot")) }, icon("refresh"), t("power.reboot")),
     isAdmin() && h("button", { type: "button", class: "menu-item", onclick: () => (dialog.close(), serverPowerDialog("poweroff")) }, icon("stop"), t("power.poweroff")),
     h("button", { type: "button", class: "menu-item", onclick: () => (dialog.close(), signOut()) }, icon("signout"), t("nav.signOut")),
-  );  // it hangs under the button it was opened from, by its right edge
-  dialog.style.top = anchor.bottom + 8 + "px";
+  );
+  // it hangs under the button it was opened from, by its right edge; over it at the bottom of a phone's menu
+  if (above) dialog.style.bottom = document.documentElement.clientHeight - anchor.top + 8 + "px";
+  dialog.style.top = above ? "auto" : anchor.bottom + 8 + "px";
   dialog.style.right = Math.max(8, document.documentElement.clientWidth - anchor.right) + "px";
 }
 
 /** The search field of the header: installed apps first, then the store; for an administrator the data folder's files too */
-function globalSearch() {
+function globalSearch(after = () => {}) {
   const results = h("div", { class: "search-results", hidden: true });
   const withFiles = isAdmin();
   const input = h("input", { type: "search", placeholder: t(withFiles ? "search.placeholderFiles" : "search.placeholder"), "aria-label": t(withFiles ? "search.placeholderFiles" : "search.placeholder"), autocomplete: "off", spellcheck: false });
@@ -1010,6 +1127,7 @@ function globalSearch() {
     input.value = "";
     results.hidden = true;
     input.blur();
+    after();
   };
   const openHit = (hit) => {
     done();
@@ -1109,9 +1227,19 @@ function shell(...content) {
     h(
       "header",
       { class: "top" },
-      h("a", { class: "brand", href: "#/" }, logo(), "hata"),
+      h("a", { class: "brand", href: "#/" }, logo(), h("span", null, "hata")),
+      h("strong", { class: "top-title" }, areaOf() ? t("nav." + areaOf()) : state.route.view === "terminal" ? t("terminal.title") : "hata"),
       h("nav", { class: "nav" }, navLinks("nav-link")),
-      h("div", { class: "top-right" }, globalSearch(), h("span", { id: "tv-now", class: "tv-now", hidden: true }), isAdmin() && h("a", { class: "icon-btn top-tool" + (state.route.view === "terminal" ? " active" : ""), href: "#/terminal", title: t("terminal.title"), "aria-label": t("terminal.title") }, icon("terminal")), h("button", { type: "button", class: "user", onclick: userMenu }, h("span", { class: "avatar" }, state.user.name.slice(0, 1).toUpperCase()), h("span", { class: "user-name" }, state.user.name))),
+      h(
+        "div",
+        { class: "top-right" },
+        globalSearch(),
+        h("button", { type: "button", class: "top-btn top-find", title: t("search.placeholder"), "aria-label": t("search.placeholder"), onclick: () => navSheet(true) }, icon("search")),
+        isAdmin() && h("a", { class: "top-btn top-term" + (state.route.view === "terminal" ? " active" : ""), href: "#/terminal", title: t("terminal.title"), "aria-label": t("terminal.title") }, icon("terminal")),
+        h("span", { id: "tv-now", class: "tv-now", hidden: true }),
+        h("a", { class: "top-btn top-gear" + (areaOf() === "settings" ? " active" : ""), href: "#/settings", title: t("nav.settings"), "aria-label": t("nav.settings") }, icon("gear")),
+        h("button", { type: "button", class: "top-btn top-user", title: state.user.name, "aria-label": state.user.name, "aria-haspopup": "menu", onclick: userMenu }, state.user.name.slice(0, 1).toUpperCase()),
+      ),
     ),
     h("main", { id: "view" }, state.user.mustTwoFactor && h("p", { class: "banner" }, t("twofa.mustLead"), " ", h("a", { class: "link", href: "#/settings/account" }, t("twofa.mustGo"))), content),
     h("nav", { class: "bottom-bar" }, bottomLinks()),
@@ -1127,6 +1255,7 @@ function render() {
   if (view === "connect") return renderConnect();
   if (view === "welcome") return renderWelcome();
   if (view === "store") return renderStore();
+  if (view === "apps") return renderApps();
   if (view === "settings") return renderSettings();
   if (view === "files") return renderFiles();
   if (view === "trash") return renderTrash();
@@ -4885,7 +5014,7 @@ function renderHaBody() {
 // Services Hata talks to through their own API. What runs on a machine of its own stays in Servers: these are what a service offers.
 
 const integrationsUi = { found: null, address: "", qbit: null, qbitFound: null, frigate: null, frigateFound: null };
-const onIntegrations = () => state.route.view === "integrations" || (state.route.view === "settings" && state.route.section === "integrations");
+const onIntegrations = () => state.route.view === "integrations" || (state.route.view === "settings" && showsSection("integrations"));
 
 async function loadIntegrations() {
   try {
@@ -9452,7 +9581,6 @@ function renderBackups() {
   shell(
     ...settingsFrame(
       "backups",
-      h("div", { class: "page-head section-page" }, h("div", null, h("h2", null, t("nav.backups")), h("p", { class: "meta", id: "backup-meta" }, " ")), h("div", { class: "actions", id: "backup-actions" })),
       h("section", { class: "stats card", id: "backup-stats" }),
       h("div", { class: "columns" }, h("section", { id: "backup-apps" }), h("aside", { class: "side", id: "backup-side" })),
     ),
@@ -11670,6 +11798,94 @@ async function syncStores() {
   if (state.route.view === "settings") renderSettings();
 }
 
+// --- Apps: what is installed, here and on the computers ------------------------------------------------
+
+const appsUi = { show: "all", machine: "" };
+const APP_SHOWS = ["all", "running", "stopped", "trouble", "updates"];
+
+/** Every installed app as one row: this server's and, for an administrator, the computers' */
+function installedApps() {
+  const o = state.overview;
+  const here = (o?.apps ?? []).map((app) => ({ app, machine: null, key: app.name, url: isUp(app) ? appUrl(app) : null, address: appAddress(app), page: `#/apps/${app.name}` }));
+  const there = (isAdmin() ? (o?.machineApps ?? []) : []).map((app) => ({ app, machine: app.machine, key: app.key, url: app.status === "running" || app.status === "partial" ? machineAppUrl(app.machine, app) : null, address: app.guarded ? `${location.hostname}:${app.guarded}` : app.port && app.machine.ip ? `${app.machine.ip}:${app.port}` : "", page: `#/machines/${app.machine.id}/apps` }));
+  return [...here, ...there].sort((a, b) => a.app.title.localeCompare(b.app.title));
+}
+const appTrouble = (app) => appState(app) === "restarting" || app.status === "partial" || app.status === "unknown";
+const appNewer = (app) => !!app.update || app.newer?.length > 0;
+const appShown = {
+  all: () => true,
+  running: ({ app }) => app.status === "running" || app.status === "partial",
+  stopped: ({ app }) => app.status === "stopped",
+  trouble: ({ app }) => appTrouble(app),
+  updates: ({ app }) => appNewer(app),
+};
+
+function renderApps() {
+  shell(areaHead("apps", "installed", { meta: " ", metaId: "apps-meta", actionsId: "apps-actions" }), h("div", { class: "stack", id: "apps-body" }));
+  renderAppsBody();
+}
+
+function renderAppsBody() {
+  const box = document.getElementById("apps-body");
+  if (!box) return;
+  if (!state.overview) return put(box, h("p", { class: "card pad muted" }, "…"));
+  const all = installedApps();
+  const count = (id) => all.filter(appShown[id]).length;
+  // an update from the store asks about every app by itself: only newer images go all at once
+  const newer = all.filter((row) => !row.machine && !row.app.update && row.app.newer?.length > 0 && !row.app.job);
+  put(document.getElementById("apps-meta"), [t("apps.meta.installed", { n: all.length }), t("apps.meta.running", { n: count("running") }), count("updates") > 0 && t("apps.meta.updates", { n: count("updates") })].filter(Boolean).flatMap((part, i) => (i ? [h("span", { class: "dot-sep" }, "·"), part] : [part])));
+  put(document.getElementById("apps-actions"), isAdmin() && newer.length > 0 && button(t("apps.updateAll", { n: newer.length }), { onclick: () => confirmAction({ title: t("apps.updateAll", { n: newer.length }), lead: t("apps.updateAllLead", { names: newer.map((row) => row.app.title).join(", ") }), label: t("app.update"), kind: "primary", iconName: "up", run: () => newer.forEach(({ app }) => void startAction(app, "update")) }) }, "up"));
+  if (!all.length) return put(box, h("section", { class: "card pad empty-state" }, h("h2", null, t("apps.none")), h("p", { class: "muted" }, t("apps.noneLead")), state.user.role !== "guest" && h("a", { class: "btn primary", href: "#/store" }, icon("store"), h("span", null, t("area.apps.store")))));
+  const machines = [...new Map(all.filter((row) => row.machine).map((row) => [row.machine.id, row.machine.name])).entries()];
+  const shown = all.filter(appShown[appsUi.show]).filter((row) => !appsUi.machine || (appsUi.machine === "." ? !row.machine : row.machine?.id === appsUi.machine));
+  const hostname = state.overview.system?.hostname ?? t("tree.thisServer");
+  const where = machines.length > 0 && h("select", { "aria-label": t("apps.col.machine"), onchange: (e) => ((appsUi.machine = e.target.value), renderAppsBody()) }, h("option", { value: "" }, t("apps.allMachines")), h("option", { value: ".", selected: appsUi.machine === "." }, hostname), machines.map(([id, name]) => h("option", { value: id, selected: appsUi.machine === id }, name)));
+  const state_ = ({ app }) => {
+    const st = appState(app);
+    const tone = st === "running" ? "running" : st === "busy" || st === "partial" ? "busy" : st === "restarting" ? "restarting" : "";
+    const words = app.job ? t("status.busy") : appNewer(app) && st === "running" ? t("apps.hasUpdate") : t("status." + st);
+    return h("span", { class: "with-dot" + (st === "restarting" || st === "partial" || (appNewer(app) && st === "running") ? " warn-text" : st === "stopped" || st === "unknown" ? " muted" : "") }, h("i", { class: "dot " + (appNewer(app) && st === "running" ? "partial" : tone) }), words);
+  };
+  const row = (r) => {
+    const { app, machine } = r;
+    const menu = (anchor, at) => (machine ? go(r.page) : isAdmin() ? appTileMenu(app, anchor, at) : null);
+    return h(
+      "tr",
+      { menu: machine || !isAdmin() ? true : (at) => appTileMenu(app, null, at) },
+      h("td", null, h("a", { class: "with-icon strong", href: r.page }, appIcon(app, "sm"), h("span", { class: "clip" }, app.title))),
+      h("td", { class: "muted mono small" }, r.address ? h("span", { class: "clip" }, r.address, app.protected || app.guarded ? ` · ${t("apps.behindSignIn")}` : "") : "—"),
+      machines.length > 0 && h("td", { class: "muted" }, machine ? h("a", { href: `#/machines/${machine.id}` }, machine.name) : hostname),
+      h("td", null, state_(r)),
+      h(
+        "td",
+        null,
+        h(
+          "div",
+          { class: "row-actions end" },
+          r.url ? h("a", { class: "btn small", href: r.url, target: "_blank", rel: "noopener noreferrer" }, icon("external"), h("span", null, t("app.open"))) : !machine && isAdmin() && app.status === "stopped" && !app.job ? button(t("app.start"), { class: "small", onclick: () => startAction(app, "start") }, "play") : null,
+          isAdmin() && h("button", { type: "button", class: "btn small square", "aria-label": t("app.more"), "aria-haspopup": "menu", onclick: (e) => menu(e.currentTarget) }, icon("more")),
+        ),
+      ),
+    );
+  };
+  put(
+    box,
+    h(
+      "div",
+      { class: "card filter-bar" },
+      h("div", { class: "seg-pills" }, APP_SHOWS.filter((id) => id === "all" || id === appsUi.show || count(id) > 0).map((id) => h("button", { type: "button", class: "seg-pill" + (appsUi.show === id ? " active" : ""), "aria-pressed": String(appsUi.show === id), onclick: () => ((appsUi.show = id), renderAppsBody()) }, t("apps.show." + id), " ", h("span", { class: "muted" }, String(count(id)))))),
+      where && h("label", { class: "pair" }, h("span", { class: "muted small" }, t("apps.col.machine")), where),
+    ),
+    h(
+      "div",
+      { class: "card table-wrap" },
+      shown.length
+        ? h("table", { class: "apps-table" }, h("thead", null, h("tr", null, h("th", null, t("apps.col.app")), h("th", null, t("apps.col.address")), machines.length > 0 && h("th", null, t("apps.col.machine")), h("th", null, t("apps.col.state")), h("th"))), h("tbody", null, shown.map(row)))
+        : h("p", { class: "pad muted" }, t("apps.noneShown")),
+    ),
+  );
+}
+
 function renderStore() {
   const search = h("input", {
     type: "search",
@@ -11682,7 +11898,7 @@ function renderStore() {
     },
   });
   shell(
-    h("div", { class: "page-head" }, h("div", null, h("h1", null, t("nav.store")), h("p", { class: "meta", id: "store-meta" }, " ")), isAdmin() && h("div", { class: "actions" }, button(t("store.sync"), { class: "ghost", onclick: syncStores }, "refresh"), h("a", { class: "btn", href: "#/import" }, icon("download"), h("span", null, t("import.open"))), button(t("store.custom"), { onclick: customDialog }, "plus"))),
+    areaHead("apps", "store", { meta: " ", metaId: "store-meta", actions: isAdmin() && [button(t("store.sync"), { class: "ghost", onclick: syncStores }, "refresh"), button(t("store.custom"), { onclick: customDialog }, "plus")] }),
     h("div", { class: "search wide" }, icon("search"), search),
     h("div", { class: "store" }, h("nav", { class: "cats fold", id: "cats", "aria-label": t("store.categories") }), h("div", { id: "store-list" })),
   );
@@ -12031,8 +12247,7 @@ async function loadImport() {
 
 function renderImport() {
   shell(
-    h("nav", { class: "crumbs" }, h("a", { href: "#/store" }, t("nav.store")), icon("chevron"), h("span", null, t("import.title"))),
-    h("div", { class: "page-head" }, h("div", null, h("h1", null, t("import.title")), h("p", { class: "muted" }, t("import.lead")))),
+    areaHead("apps", "import", { meta: t("import.lead") }),
     h("div", { class: "stack import", id: "import-body" }),
   );
   renderImportBody();
@@ -12529,25 +12744,25 @@ async function loadSettings() {
     if (isAdmin()) state.settings = await api("GET", "/api/settings");
     if (isAdmin()) state.update = await api("GET", "/api/update").catch(() => null);
     if (isAdmin()) state.notify = await api("GET", "/api/notify").catch(() => null);
-    if (isAdmin() && state.route.section === "notifications") state.hiddenItems = (await api("GET", "/api/attention/hidden").catch(() => null))?.hidden ?? null;
-    if (isAdmin() && state.route.section === "apps") state.images = await api("GET", "/api/images").catch(() => null);
-    if (isAdmin() && state.route.section === "network") state.network = await api("GET", "/api/network").catch(() => null);
-    if (isAdmin() && state.route.section === "remote" && hasModule("remote")) [state.remote, state.wireguard] = await Promise.all([api("GET", "/api/tailscale").catch(() => null), api("GET", "/api/wireguard").catch(() => null)]);
-    if (isAdmin() && state.route.section === "tools") [state.tools, sysUpdates[""]] = await Promise.all([api("GET", "/api/tools").catch(() => null), api("GET", "/api/system/updates").catch((e) => ({ error: errorText(e) }))]);
+    if (isAdmin() && showsSection("notifications")) state.hiddenItems = (await api("GET", "/api/attention/hidden").catch(() => null))?.hidden ?? null;
+    if (isAdmin() && showsSection("apps")) state.images = await api("GET", "/api/images").catch(() => null);
+    if (isAdmin() && showsSection("network")) state.network = await api("GET", "/api/network").catch(() => null);
+    if (isAdmin() && showsSection("remote") && hasModule("remote")) [state.remote, state.wireguard] = await Promise.all([api("GET", "/api/tailscale").catch(() => null), api("GET", "/api/wireguard").catch(() => null)]);
+    if (isAdmin() && showsSection("tools")) [state.tools, sysUpdates[""]] = await Promise.all([api("GET", "/api/tools").catch(() => null), api("GET", "/api/system/updates").catch((e) => ({ error: errorText(e) }))]);
     // counting the volumes takes a while: the page is shown first
-    if (isAdmin() && state.route.section === "docker") void loadSpace();
+    if (isAdmin() && showsSection("docker")) void loadSpace();
     if (isAdmin() && STORAGE_SECTIONS.includes(state.route.section)) [state.disks, state.places] = await Promise.all([api("GET", "/api/disks").catch(() => null), hasModule("netplaces") ? api("GET", "/api/netplaces").catch(() => null) : null]);
-    if (isAdmin() && state.route.section === "shares" && hasModule("shares")) state.shares = await api("GET", "/api/shares").catch(() => null);
-    if (isAdmin() && state.route.section === "agents" && hasModule("assistant")) state.agents = await api("GET", "/api/agents").catch(() => null);
-    if (isAdmin() && state.route.section === "modules") state.modulesList = (await api("GET", "/api/modules").catch(() => null))?.modules ?? null;
-    if (isAdmin() && state.route.section === "assistant" && hasModule("assistant")) state.assistant = await api("GET", "/api/assistant").catch(() => null);
+    if (isAdmin() && showsSection("shares") && hasModule("shares")) state.shares = await api("GET", "/api/shares").catch(() => null);
+    if (isAdmin() && showsSection("agents") && hasModule("assistant")) state.agents = await api("GET", "/api/agents").catch(() => null);
+    if (isAdmin() && showsSection("modules")) state.modulesList = (await api("GET", "/api/modules").catch(() => null))?.modules ?? null;
+    if (isAdmin() && showsSection("assistant") && hasModule("assistant")) state.assistant = await api("GET", "/api/assistant").catch(() => null);
     if (!state.store && isAdmin()) state.store = await api("GET", `/api/store?lang=${state.lang}`).catch(() => null);
   } catch (e) {
     return toast(errorText(e), "error");
   }
   if (state.route.view === "settings") renderSettings();
   // "N hidden" under the list leads straight to them
-  if (state.route.section === "notifications" && location.hash.endsWith("/hidden")) document.getElementById("hidden")?.scrollIntoView({ block: "start" });
+  if (showsSection("notifications") && location.hash.endsWith("/hidden")) document.getElementById("hidden")?.scrollIntoView({ block: "start" });
 }
 
 const LANGUAGE_NAMES = { en: "English", uk: "Українська" };
@@ -12631,7 +12846,7 @@ function markFound(text, typed) {
 
 /** Opens a section and brings the card asked for into view: the section may draw it a moment later */
 function openSettingsCard(item, card) {
-  go(`#/settings/${item.id}`);
+  go(sectionHash(item.id));
   if (!card) return;
   let tries = 0;
   const look = () => {
@@ -12640,43 +12855,6 @@ function openSettingsCard(item, card) {
     if (++tries < 20) setTimeout(look, 200);
   };
   setTimeout(look, 100);
-}
-
-/** The column of Settings: finding a setting on top, the sections by group, or what was found */
-function settingsNav(section) {
-  const list = h("div", { class: "settings-list" });
-  const paint = () => {
-    const typed = settingsUi.find;
-    clear.hidden = !typed;
-    if (!typed.trim()) {
-      return put(list, SECTION_GROUPS.map((group) => {
-        const items = sections().filter((item) => item.group === group);
-        return items.length > 0 && h("div", { class: "cats" }, h("div", { class: "cat-title" }, t("settings.group." + group)), items.map((item) => h("a", { class: "cat" + (section === item.id ? " active" : ""), href: `#/settings/${item.id}` }, h("span", { class: "with-icon" }, icon(item.icon), sectionTitle(item)), SECTION_MODULE[item.id] && h("span", { class: "module-mark" }, t("modules.mark")))));
-      }));
-    }
-    const found = findSettings(typed);
-    if (!found.length) return put(list, h("div", { class: "settings-found" }, h("strong", null, t("settings.findNone", { text: typed.trim() })), h("p", { class: "muted small" }, t("settings.findNoneHint"))));
-    const count = found.reduce((sum, f) => sum + (f.cards.length || 1), 0);
-    put(
-      list,
-      h("p", { class: "muted small settings-found" }, t("settings.findCount", { n: count, sections: found.length })),
-      found.map(({ item, cards, off }) =>
-        h(
-          "div",
-          { class: "cats found" },
-          off && h("p", { class: "muted small settings-found" }, t("modules.foundOff", { name: t(`modules.${off}.name`) }), " ", h("button", { type: "button", class: "link", onclick: () => turnModuleOn(off, `#/settings/${item.id}`) }, t("modules.turnOn"))),
-          h("a", { class: "cat", href: `#/settings/${item.id}` }, h("span", null, h("strong", null, markFound(sectionTitle(item), typed)), h("span", { class: "muted small" }, " · ", t("settings.group." + item.group)))),
-          cards.map((card) => h("button", { type: "button", class: "cat", onclick: () => openSettingsCard(item, card) }, h("span", null, markFound(card, typed)))),
-        ),
-      ),
-    );
-  };
-  // on a phone the list closes over the section chosen: the words typed go with it
-  list.addEventListener("click", (e) => e.target.closest("a, button") && matchMedia("(max-width: 760px)").matches && (settingsUi.find = ""));
-  const input = h("input", { type: "search", placeholder: t("settings.find"), "aria-label": t("settings.find"), value: settingsUi.find, oninput: () => ((settingsUi.find = input.value), paint()) });
-  const clear = h("button", { type: "button", class: "icon-btn quiet", "aria-label": t("common.clear"), hidden: !settingsUi.find, onclick: () => ((settingsUi.find = input.value = ""), paint(), input.focus()) }, icon("x"));
-  paint();
-  return h("nav", { class: "settings-nav fold" }, h("label", { class: "settings-find" }, icon("search"), input, clear), list);
 }
 
 // --- TV: the media player on the server's own screen ---------------------------------------------
@@ -13501,7 +13679,7 @@ function modulesSection() {
   const list = state.modulesList;
   if (!list) return [h("p", { class: "muted" }, "…")];
   // what is here already shows on the cards of modules that are off; the look takes a few seconds
-  if (!state.moduleFinds) void loadModuleFinds().then(() => state.route.view === "settings" && state.route.section === "modules" && renderSettings());
+  if (!state.moduleFinds) void loadModuleFinds().then(() => state.route.view === "settings" && showsSection("modules") && renderSettings());
   const card = (m) => {
     const held = m.uses.length > 0 || m.neededBy.length > 0;
     const flip = h("button", { type: "button", role: "switch", class: "ha-switch", "aria-checked": String(m.on), "aria-label": t(m.on ? "modules.turnOff" : "modules.turnOn") + ": " + moduleName(m.id), onclick: (e) => (m.on ? void turnModuleOff(m) : ((e.currentTarget.disabled = true), void turnModuleOn(m.id))) }, h("i"));
@@ -14002,7 +14180,7 @@ function settingsSection(section) {
 
 async function loadNetwork() {
   state.network = await api("GET", "/api/network").catch(() => state.network);
-  if (state.route.view === "settings" && state.route.section === "network") renderSettings();
+  if (state.route.view === "settings" && showsSection("network")) renderSettings();
 }
 
 /**
@@ -14763,7 +14941,7 @@ function toolRemoveDialog(tool) {
 
 async function loadRemote() {
   state.remote = await api("GET", "/api/tailscale").catch(() => state.remote);
-  if (state.route.view === "settings" && state.route.section === "remote") renderSettings();
+  if (state.route.view === "settings" && showsSection("remote")) renderSettings();
 }
 
 /** Settings → Remote access: Tailscale, then WireGuard in and out */
@@ -15131,7 +15309,7 @@ function toolsSection() {
   const error = h("p", { class: "error", role: "alert" });
   const again = async () => {
     state.tools = await api("GET", "/api/tools").catch(() => state.tools);
-    if (state.route.view === "settings" && state.route.section === "tools") renderSettings();
+    if (state.route.view === "settings" && showsSection("tools")) renderSettings();
   };
   const install = (tool) =>
     button(t("mounting.needs.install", { package: tool.name }), {
@@ -15202,7 +15380,7 @@ function paintSysUpdates(at) {
 
 /** A check began or ended somewhere: the page that shows that place looks again */
 async function sysUpdatesEvent(at) {
-  if (!at && state.route.view === "settings" && state.route.section === "tools") {
+  if (!at && state.route.view === "settings" && showsSection("tools")) {
     // the rows of the programs carry their newer versions too
     state.tools = await api("GET", "/api/tools").catch(() => state.tools);
     sysUpdates[""] = await api("GET", "/api/system/updates").catch(() => sysUpdates[""]);
@@ -15323,7 +15501,7 @@ async function loadSpace(at = "") {
 
 /** Shows what was counted where it is looked at: Settings → Docker, or the machine's tab */
 function paintSpace(at) {
-  if (!at && state.route.view === "settings" && state.route.section === "docker") renderSettings();
+  if (!at && state.route.view === "settings" && showsSection("docker")) renderSettings();
   const box = document.getElementById("machine-docker");
   if (at && box && state.route.view === "machine" && state.route.id === at) box.replaceChildren(...dockerSection(at).filter(Boolean));
 }
@@ -15510,7 +15688,7 @@ function imagesCard() {
     state.images = await api(method, path, method === "GET" ? undefined : {}).catch(() => state.images);
     // the marks on the apps come with the list of apps
     if (!state.images.running) await refresh();
-    if (state.route.view === "settings" && state.route.section === "apps") renderSettings();
+    if (state.route.view === "settings" && showsSection("apps")) renderSettings();
   };
   clearTimeout(imagesTimer);
   if (st.running) imagesTimer = setTimeout(() => state.route.view === "settings" && again("/api/images"), 3000);
@@ -15664,7 +15842,8 @@ function localNameCard() {
             ? [h("p", { class: "error" }, t("local.failed", { message: s.error || "…" }))]
             : [
               h("div", { class: "activity-item" }, icon("check", "ok"), h("div", { class: "grow" }, h("div", null, address(s.domain)), h("div", { class: "muted small" }, t("local.answers", { addresses: s.addresses.join(", ") || "—" })))),
-                (state.overview?.apps ?? []).some((a) => a.port) && h("p", { class: "muted small" }, t("local.apps", { example: `${(state.overview.apps.find((a) => a.port).name).replace(/_/g, "-")}.${s.domain}${port}` })),
+                // replaceChildren writes a missing one out as the word "false"
+                (state.overview?.apps ?? []).some((a) => a.port) ? h("p", { class: "muted small" }, t("local.apps", { example: `${(state.overview.apps.find((a) => a.port).name).replace(/_/g, "-")}.${s.domain}${port}` })) : "",
               ]),
     );
   };
@@ -18924,7 +19103,7 @@ function fillsCard(fills, busy) {
 function setShares(data) {
   state.shares = data;
   if (state.files) state.files.shared = data.shares.map((share) => share.path);
-  if (state.route.view === "settings" && state.route.section === "shares") renderSettings();
+  if (state.route.view === "settings" && showsSection("shares")) renderSettings();
   if (state.route.view === "files") renderFilesBody();
 }
 
@@ -19710,7 +19889,7 @@ async function loadApprovals() {
   if (askDialog && !state.approvals.some((ask) => ask.id === askDialog.ask)) askDialog.close();
   const next = state.approvals.find((ask) => !asksShown.has(ask.id));
   if (next && !askDialog) approvalDialog(next);
-  if (state.route.view === "settings" && state.route.section === "agents") renderSettings();
+  if (state.route.view === "settings" && showsSection("agents")) renderSettings();
 }
 
 function approvalDialog(ask) {
@@ -19911,55 +20090,72 @@ function agentsSection() {
 }
 
 function renderSettings() {
-  const section = state.route.section;
-  shell(...settingsFrame(section, state.account && (state.settings || !isAdmin()) ? settingsSection(section) : h("p", { class: "muted" }, "…")));
+  const ready = state.account && (state.settings || !isAdmin());
+  // a tab may hold two sections; the second of a module that is off is simply not there
+  const body = ready ? state.route.sections.flatMap((id, i) => (i && SECTION_MODULE[id] && !hasModule(SECTION_MODULE[id]) ? [] : settingsSection(id))) : h("p", { class: "card pad muted" }, "…");
+  shell(...settingsFrame(state.route.section, body));
 }
 
-/** The head and the list of sections of Settings around what one section shows */
-/** The page's head says the section's name: its first card need not say it again */
-function dropTwinHeading() {
-  const stack = document.querySelector(".settings > .stack");
-  const title = stack?.querySelector(".settings-head h1")?.textContent;
-  const first = stack?.querySelector(":scope > :not(.settings-head) h2");
-  if (!first || !title || !first.textContent.trim().startsWith(title)) return;
-  // what stands next to the words (a state, a count) stays
-  if (first.children.length) for (const node of [...first.childNodes]) node.nodeType === Node.TEXT_NODE && node.remove();
-  else first.hidden = true;
-}
-
-function settingsFrame(section, ...content) {
-  // a section of a module that is off keeps its name on top; its body offers to turn the module on
-  const item = sections().find((x) => x.id === section) ?? (isAdmin() ? SECTIONS.find((x) => x.id === section) : undefined);
-  setTimeout(() => {
-    dropTwinHeading();
-    const stack = document.querySelector(".settings > .stack");
-    if (!stack) return;
-    const watch = new MutationObserver(dropTwinHeading);
-    watch.observe(stack, { childList: true, subtree: true });
-    cleanups.push(() => watch.disconnect());
-  });
-  // the open section stays in view in a column longer than the window
-  requestAnimationFrame(() => {
-    const list = document.querySelector(".settings-nav .settings-list");
-    const open = list?.querySelector(".cat.active");
-    if (!open || list.scrollHeight <= list.clientHeight) return;
-    // only the list moves, never the page
-    const at = open.getBoundingClientRect().top - list.getBoundingClientRect().top;
-    if (at < 0 || at > list.clientHeight - 40) list.scrollTop += at - list.clientHeight / 2;
-  });
-  return [
+/**
+ * The head of a section of the page: a card with its name, a line about it, what can be done there, and its tabs.
+ * `metaId` / `actionsId` name the line and the buttons for a page that fills them later.
+ */
+function areaHead(area, at, { meta = null, metaId = null, actions = null, actionsId = null } = {}) {
+  const tabs = areaTabs(area);
+  return h(
+    "header",
+    { class: "card area-head" },
     h(
       "div",
-      { class: "settings" },
-      settingsNav(section),
-      h("div", { class: "stack" }, h("div", { class: "page-head settings-head" }, h("div", null, h("h1", null, item ? sectionTitle(item) : t("nav.settings")), h("p", { class: "meta" }, item ? `${t("settings.group." + item.group)} · Hata ${state.version}` : `Hata ${state.version}`)), STORAGE_TABS[section] && settingsTabs(section)), content),
+      { class: "area-top" },
+      h("div", { class: "area-name" }, area === "server" && h("nav", { class: "crumbs" }, h("a", { href: "#/machines" }, t("nav.machines")), icon("chevron"), h("span", null, t("tree.thisServer"))), h("h1", null, area === "server" ? (state.overview?.system?.hostname ?? t("tree.thisServer")) : t("area." + area)), h("p", { class: "meta", id: metaId }, meta ?? t(`area.${area}.lead`))),
+      (actions || actionsId) && h("div", { class: "actions", id: actionsId }, actions),
     ),
-  ];
+    tabs.length > 1 && h("nav", { class: "tabs" }, tabs.map((tab) => h("a", { class: "tab" + (tab.id === at ? " active" : ""), href: tabHash(area, tab), "aria-current": tab.id === at ? "page" : null }, t(`area.${area}.${tab.id}`)))),
+  );
+}
+
+/** "Find a setting" in the head of Settings: sections and cards by the words typed, wherever they live now */
+function settingsFind() {
+  const results = h("div", { class: "search-results", hidden: true });
+  const input = h("input", { type: "search", placeholder: t("settings.find"), "aria-label": t("settings.find"), autocomplete: "off", spellcheck: false });
+  const open = (action) => (e) => {
+    e.preventDefault();
+    input.value = "";
+    results.hidden = true;
+    action();
+  };
+  const paint = () => {
+    const typed = input.value;
+    if (!typed.trim()) return void (results.hidden = true);
+    const found = findSettings(typed);
+    put(
+      results,
+      !found.length && h("p", { class: "muted small pad" }, t("settings.findNone", { text: typed.trim() })),
+      found.flatMap(({ item, cards, off }) => [
+        h("button", { type: "button", class: "search-hit", onmousedown: open(() => (off ? turnModuleOn(off, sectionHash(item.id)) : openSettingsCard(item))) }, icon(item.icon), h("span", { class: "grow" }, markFound(sectionTitle(item), typed)), h("span", { class: "muted small" }, off ? t("modules.turnOn") : t("area." + sectionArea(item.id)))),
+        ...cards.map((card) => h("button", { type: "button", class: "search-hit sub", onmousedown: open(() => openSettingsCard(item, card)) }, h("span", { class: "grow" }, markFound(card, typed)))),
+      ]),
+    );
+    results.hidden = false;
+  };
+  input.addEventListener("input", paint);
+  input.addEventListener("focus", paint);
+  input.addEventListener("blur", () => (results.hidden = true));
+  input.addEventListener("keydown", (e) => e.key === "Escape" && input.blur());
+  return h("div", { class: "search settings-find" }, icon("search"), input, results);
+}
+
+/** The head of the section a part of the settings lives in, with its tabs, around what that part shows */
+function settingsFrame(section, ...content) {
+  const r = state.route;
+  const [area, at] = r.view === "settings" ? [r.area, r.at] : section === "users" ? ["settings", "users"] : ["backups", "overview"];
+  const opts = area === "settings" ? { meta: `${t("area.settings.lead")} · ${state.version}`, actions: settingsFind() } : area === "backups" ? { metaId: "backup-meta", actionsId: "backup-actions" } : {};
+  return [h("div", { class: "settings" }, areaHead(area, at, opts), content)];
 }
 /** The long sections are cut into tabs: the address says which */
 const STORAGE_TABS = { storage: ["disks", "fs", "fills"] };
 const settingsUi = { find: "" };
-const settingsTabs = (section) => h("div", { class: "tabs" }, STORAGE_TABS[section].map((tab, i) => h("a", { class: "tab" + (settingsTab(section) === tab ? " active" : ""), href: `#/settings/${section}${i ? "/" + tab : ""}` }, t(`settings.tab.${section}.${tab}`))));
 const settingsTab = (section) => (STORAGE_TABS[section].includes(state.route.tab) ? state.route.tab : STORAGE_TABS[section][0]);
 
 // --- Account and users --------------------------------------------------------------------------
@@ -20339,7 +20535,7 @@ function renderUsers() {
   shell(
     ...settingsFrame(
     "users",
-    h("div", { class: "page-head section-page" }, h("div", null, h("h2", null, t("nav.users")), h("p", { class: "meta" }, t("users.meta", { users: users.length, admins }), without > 0 && h("span", { class: "dot-sep" }, "·"), without > 0 && t("users.without2fa", { n: without }))), h("div", { class: "actions" }, button(t("users.add"), { class: "primary", onclick: userDialog }, "plus"))),
+    h("div", { class: "card page-head section-page" }, h("div", null, h("h2", null, t("nav.users")), h("p", { class: "meta" }, t("users.meta", { users: users.length, admins }), without > 0 && h("span", { class: "dot-sep" }, "·"), without > 0 && t("users.without2fa", { n: without }))), h("div", { class: "actions" }, button(t("users.add"), { class: "primary", onclick: userDialog }, "plus"))),
     h(
       "div",
       { class: "card table-wrap" },

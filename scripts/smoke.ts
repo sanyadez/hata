@@ -175,18 +175,26 @@ await until("the page after signing in", () => js<boolean>(`!document.querySelec
 
 // --- The pages --------------------------------------------------------------------------------------
 
-/** The sections of Settings, read from the page's own list so a new one is walked without a word here */
+/** The tabs of every section of the page, read from the page's own list so a new one is walked without a word here */
 const appJs = readFileSync(join(root, "src", "ui", "app.js"), "utf8");
-const sectionList = /const SECTIONS = \[([\s\S]*?)\n\];/.exec(appJs)?.[1] ?? "";
-const sections = [...sectionList.matchAll(/\{ id: "([a-z]+)"/g)].map((m) => m[1]!);
-if (sections.length < 10) giveUp("Could not read the sections of Settings from app.js.");
+const areaList = /const AREAS = \{([\s\S]*?)\n\};/.exec(appJs)?.[1] ?? "";
+const bases = Object.fromEntries([.../(\w+): "(#[^"]+)"/g[Symbol.matchAll](/const AREA_BASE = \{([^}]*)\}/.exec(appJs)?.[1] ?? "")].map((m) => [m[1]!, m[2]!]));
+const tabs: string[] = [];
+let area = "";
+for (const line of areaList.split("\n")) {
+  const opened = /^  (\w+): \[/.exec(line);
+  if (opened) area = opened[1]!;
+  for (const m of line.matchAll(/\{ id: "([a-z]+)"(?:, hash: "([^"]+)")?/g)) tabs.push(m[2] ?? `${bases[area]}/${m[1]}`);
+}
+if (tabs.length < 20 || tabs.some((x) => x.startsWith("undefined"))) giveUp("Could not read the sections of the page from app.js.");
 
 const ROUTES = [
   "#/welcome/server", "#/welcome/existing", "#/welcome/data", "#/welcome/backups", "#/welcome/modules", "#/welcome/apps",
-  "#/", "#/store", "#/files", "#/files/", "#/hata", "#/trash", "#/activity", "#/import",
-  "#/machines", "#/containers", "#/containers/settings", "#/integrations", "#/ha", "#/assistant", "#/tv",
-  ...sections.map((id) => `#/settings/${id}`),
-  "#/settings/storage/fs", "#/settings/storage/fills",
+  "#/", "#/files", "#/files/", "#/hata", "#/trash", "#/activity",
+  "#/machines", "#/containers", "#/containers/settings", "#/house", "#/integrations", "#/assistant", "#/tv", "#/terminal",
+  ...new Set(tabs),
+  // addresses from before the sections moved out of Settings
+  "#/settings/docker", "#/settings/storage/fs", "#/settings/ports",
 ];
 
 /** Whether the page shows something: the view of the usual frame, or the first run's own frame */
