@@ -1584,6 +1584,7 @@ img.broken { visibility: hidden; }
 .pg-remove { position: absolute; top: 8px; right: 8px; z-index: 4; width: 24px; height: 24px; border-radius: 50%; background: var(--surface); color: var(--muted); border: 1px solid var(--border-strong); box-shadow: 0 1px 4px rgb(0 0 0 / 18%); pointer-events: auto; }
 .pg-remove:hover { background: var(--danger); border-color: var(--danger); color: #fff; }
 .pg-remove .ico { width: 12px; height: 12px; }
+.pg.arranging .pg-card > .pg-remove { cursor: pointer; }
 #grid-bar[hidden], #home-head[hidden] { display: none; }
 
 /* the numbers of this server */
