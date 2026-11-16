@@ -5343,7 +5343,7 @@
   "modules.containers.name": "Containers and VMs",
   "modules.containers.what": "Containers and virtual machines on this server, run by Incus.",
   "modules.containers.adds": "the Computers page, containers on the Backups page",
-  "modules.integrations.name": "Home Assistant, cameras, torrents",
+  "modules.integrations.name": "Integrations",
   "modules.integrations.what": "Services Hata connects to: Home Assistant, qBittorrent, Frigate. Their devices, torrents and cameras on Home.",
   "modules.integrations.adds": "the section Services with Home Assistant and the cameras, tiles and widgets for Home",
   "modules.assistant.name": "Assistant and agents",

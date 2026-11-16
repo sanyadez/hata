@@ -5343,7 +5343,7 @@
   "modules.containers.name": "Контейнери й ВМ",
   "modules.containers.what": "Контейнери й віртуальні машини на цьому сервері, на основі Incus.",
   "modules.containers.adds": "сторінка «Комп'ютери», контейнери на сторінці резервних копій",
-  "modules.integrations.name": "Home Assistant, камери, торенти",
+  "modules.integrations.name": "Інтеграції",
   "modules.integrations.what": "Сервіси, до яких під'єднується Hata: Home Assistant, qBittorrent, Frigate. Їхні пристрої, торенти й камери на Головній.",
   "modules.integrations.adds": "розділ «Сервіси» з Home Assistant і камерами, плитки й віджети для Головної",
   "modules.assistant.name": "Помічник і агенти",
