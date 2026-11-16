@@ -411,12 +411,14 @@ in Google Drive or Box.
 | ![Users, who can open what, invitations](screenshots/users.png) Users, who can open what, invitations | ![Inside a snapshot: a file taken out, chosen files and folders put back](screenshots/snapshot-files.png) Inside a snapshot: a file taken out, chosen files and folders put back |
 | ![The whole history: what happened on the server and who did it](screenshots/activity.png) The whole history: what happened on the server and who did it | ![An app from the store installed here or on another computer](screenshots/store-install-on.png) An app from the store installed here or on another computer |
 | ![The assistant looks first and asks before it changes anything](screenshots/assistant.png) The assistant looks first and asks before it changes anything | ![The assistant's answer once the change is made](screenshots/assistant-done.png) The assistant's answer once the change is made |
-| ![My Hata: the data folder, the disks, the network drives, the favourites and the computers](screenshots/my-hata.png) My Hata: the data folder, the disks, the network drives, the favourites and the computers | |
+| ![My Hata: the data folder, the disks, the network drives, the favourites and the computers](screenshots/my-hata.png) My Hata: the data folder, the disks, the network drives, the favourites and the computers | ![Installed apps, here and on the other computers, in one table](screenshots/apps.png) Installed apps, here and on the other computers, in one table |
+| ![Who opens what: apps, network folders, the computers' folders, Home Assistant](screenshots/access.png) Who opens what: apps, network folders, the computers' folders, Home Assistant | ![The phone's menu: every section, the terminal, Settings](screenshots/phone-menu.png) The phone's menu: every section, the terminal, Settings |
 
 ### Computers
 
 | | |
 |---|---|
+| ![This server: a computer like the others, with its apps, Docker, containers and system programs](screenshots/server.png) This server: a computer like the others, with its apps, Docker, containers and system programs | |
 | ![Computers: one tree of what runs where](screenshots/machines.png) Computers: one tree of what runs where | ![A computer: its state at a glance](screenshots/machine.png) A computer: its state at a glance |
 | ![A computer's apps: installed, updated, backed up and moved from here](screenshots/machine-apps.png) A computer's apps: installed, updated, backed up and moved from here | ![A computer's Docker: containers, images, volumes](screenshots/machine-containers.png) A computer's Docker containers |
 | ![A terminal on the computer](screenshots/machine-terminal.png) A terminal on the computer | ![A computer's files in Files](screenshots/machine-files.png) A computer's files in Files |
@@ -440,9 +442,8 @@ in Google Drive or Box.
 
 | | |
 |---|---|
-| ![What Hata is connected to, what it found, and everything else under "Add"](screenshots/integrations.png) What Hata is connected to, what it found, and everything else under "Add" | ![Editing the grid of Home: every edge and corner of a card can be pulled](screenshots/grid-edit.png) Editing the grid of Home: every edge and corner of a card can be pulled |
+| ![The TV: the remote, the screen, the folders the player shows](screenshots/tv.png) The TV: the remote, the screen, the folders the player shows | ![Editing the grid of Home: every edge and corner of a card can be pulled](screenshots/grid-edit.png) Editing the grid of Home: every edge and corner of a card can be pulled |
 | ![Everything that can stand on Home, by sections, with a search](screenshots/add-dialog.png) Everything that can stand on Home, by sections, with a search | |
-| ![The torrents of a qBittorrent](screenshots/qbittorrent.png) The torrents of a qBittorrent | ![The cameras of a Frigate and what they noticed (a test picture here)](screenshots/frigate.png) The cameras of a Frigate and what they noticed (a test picture here) |
 | ![Home Assistant: servers, devices by room, updates, batteries, backups](screenshots/home-assistant.png) Home Assistant: servers, devices by room, updates, batteries, backups | |
 
 ### First run
@@ -451,7 +452,7 @@ in Google Drive or Box.
 |---|---|---|
 | ![First run: the server's name and time zone](screenshots/welcome.png) The server's name and time zone | ![First run: where the data lives](screenshots/welcome-data.png) Where the data lives | ![First run: a few apps to start with](screenshots/welcome-apps.png) A few apps to start with |
 
-### Settings
+### Storage, Network, Settings
 
 | | |
 |---|---|
@@ -463,7 +464,7 @@ in Google Drive or Box.
 | ![About and updates](screenshots/settings-about.png) About and updates | ![Network: interfaces, Wi-Fi, the ways to the internet](screenshots/settings-network.png) Network: interfaces, Wi-Fi, the ways to the internet |
 | ![Protection from a disk failure, arrays and pools](screenshots/settings-protection.png) Protection from a disk failure, arrays and pools | ![Remote access: Tailscale and WireGuard](screenshots/settings-remote.png) Remote access: Tailscale and WireGuard |
 | ![The assistant: which model it talks to and what it may do](screenshots/settings-assistant.png) The assistant: which model it talks to and what it may do | ![System programs: what Hata relies on, and the system's updates](screenshots/settings-tools.png) System programs: what Hata relies on, and the system's updates |
-| ![Docker: images and volumes, who uses them, what can go](screenshots/settings-docker.png) Docker: images and volumes, who uses them, what can go | ![Several disks together: one folder, protection, one confirmation](screenshots/settings-pool.png) Several disks together: one folder, protection, one confirmation |
+| ![Docker: images and volumes, who uses them, what can go](screenshots/settings-docker.png) Docker: images and volumes, who uses them, what can go | ![Setting up RAID: one folder, protection, one confirmation](screenshots/settings-pool.png) Setting up RAID: one folder, protection, one confirmation |
 
 | ![Ad blocking: lists, own rules, what was asked](screenshots/settings-adblock.png) Ad blocking: lists, own rules, what was asked | ![The home's DNS server](screenshots/settings-dns.png) The home's DNS server |
 | ![Ports of the server passed on](screenshots/settings-ports.png) Ports of the server passed on | ![Find a setting: sections and cards by name](screenshots/settings-find.png) Find a setting: sections and cards by name |

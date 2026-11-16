@@ -21139,7 +21139,7 @@ function accessTable() {
       { class: "card table-wrap" },
       h("div", { class: "section-head pad-head" }, h("h2", null, t("users.part.access"), " ", h("span", { class: "muted" }, t("access.people", { n: users.length })))),
       rows.flat(3).length
-        ? h("table", { class: "matrix access" }, h("thead", null, h("tr", null, h("th"), users.map((u) => h("th", null, u.name, h("span", { class: "muted block" }, t("user.role." + u.role)))))), h("tbody", null, rows))
+        ? h("table", { class: "matrix access" }, h("thead", null, h("tr", null, h("th"), users.map((u) => h("th", null, u.name, " ", h("span", { class: "muted block" }, t("user.role." + u.role)))))), h("tbody", null, rows))
         : h("p", { class: "pad-row muted" }, t("access.nothing")),
       h("p", { class: "table-foot muted small" }, t("access.one"), " ", t("access.how")),
     ),
