@@ -76,7 +76,7 @@ let tellTimer: ReturnType<typeof setTimeout> | null = null;
 function changed(): void {
   tellTimer ??= setTimeout(() => {
     tellTimer = null;
-    bus.publish("music");
+    void musicNow().then((playing) => bus.publish("music", { playing }), () => bus.publish("music", { playing: null }));
   }, 500);
 }
 
@@ -263,6 +263,7 @@ async function ensure(): Promise<void> {
   for (let i = 0; i < 25 && !(await link()); i++) await Bun.sleep(200);
   if (!sock) throw new AppError("music.setupFailed", 409, { message: "the player did not come up" });
   const output = outputFor(settings.music.output, await soundOutputs());
+  applied = output;
   if (output) await command(["set_property", "audio-device", "alsa/" + output]).catch(() => {});
   await command(["set_property", "volume", ownVolumeOf(output) ? 100 : settings.music.volume]).catch(() => {});
 }
@@ -335,6 +336,7 @@ export async function setMusicOutput(id: unknown, by: string): Promise<MusicRepo
   const output = outputs.find((one) => one.id === id);
   if (!output) throw new AppError("music.badOutput", 400);
   settings.music.output = output.id;
+  applied = output.id;
   saveSettings();
   if (await link()) {
     await command(["set_property", "audio-device", "alsa/" + output.id]).catch(() => {});
@@ -355,6 +357,31 @@ export async function setMusicOutput(id: unknown, by: string): Promise<MusicRepo
   return musicReport();
 }
 
+let followingOutputs: ReturnType<typeof setTimeout> | null = null;
+/** The output the player was last told to use */
+let applied = "";
+
+/**
+ * The outputs changed (a Bluetooth speaker went or came): what plays moves to the output that is the
+ * choice now — the chosen one while it is there, another meanwhile.
+ */
+function followOutputs(): void {
+  if (followingOutputs) return;
+  followingOutputs = setTimeout(async () => {
+    followingOutputs = null;
+    const output = outputFor(settings.music.output, await soundOutputs());
+    if (!output || output === applied) return;
+    const first = applied === "";
+    applied = output;
+    if (sock) {
+      await command(["set_property", "audio-device", "alsa/" + output]).catch(() => {});
+      await command(["set_property", "volume", ownVolumeOf(output) ? 100 : settings.music.volume]).catch(() => {});
+    }
+    if (!first && settings.music.speaker.on) await applySpeaker().catch(() => {});
+    changed();
+  }, 2500);
+}
+
 /** The module is turned off: the player goes with it */
 export function stopMusic(): void {
   if (existsSync(UNIT_FILE)) void run(["systemctl", "stop", MUSIC_UNIT], 30_000).catch(() => {});
@@ -363,5 +390,9 @@ export function stopMusic(): void {
 /** The module's work: a player that already runs (Hata was restarted under it) is listened to again */
 export function startMusic(): void {
   void link().catch(() => {});
+  followOutputs();
+  bus.subscribe((event) => {
+    if (event.type === "bluetooth") followOutputs();
+  });
   setInterval(() => void link().catch(() => {}), 30_000);
 }

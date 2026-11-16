@@ -684,6 +684,8 @@ function startEvents() {
     } else if (event.type === "tailscale") {
       if (state.route.view === "settings" && showsSection("remote")) void loadRemote();
     } else if (event.type === "music") {
+      state.musicNow = event.playing ?? null;
+      paintMusicNow();
       if (state.route.view === "music") void loadMusic();
     } else if (event.type === "bluetooth") {
       if (state.route.view === "settings" && showsSection("bluetooth")) void loadBluetooth();
@@ -722,6 +724,8 @@ async function refresh() {
     return;
   }
   state.tvNow = state.overview.tv ?? null;
+  state.musicNow = state.overview.music ?? null;
+  paintMusicNow();
   paintTvNow();
   seedJobs(state.overview.jobs ?? []);
   failedTiles(state.overview);
@@ -1299,6 +1303,7 @@ function shell(...content) {
         globalSearch(),
         h("button", { type: "button", class: "top-btn top-find", title: t("search.placeholder"), "aria-label": t("search.placeholder"), onclick: () => navSheet(true) }, icon("search")),
         isAdmin() && h("a", { class: "top-btn top-term" + (state.route.view === "terminal" ? " active" : ""), href: "#/terminal", title: t("terminal.title"), "aria-label": t("terminal.title") }, icon("terminal")),
+        h("span", { id: "music-now", class: "tv-now", hidden: true }),
         h("span", { id: "tv-now", class: "tv-now", hidden: true }),
         h("a", { class: "top-btn top-gear" + (areaOf() === "settings" ? " active" : ""), href: "#/settings", title: t("nav.settings"), "aria-label": t("nav.settings") }, icon("gear")),
         h("button", { type: "button", class: "top-btn top-user", title: state.user.name, "aria-label": state.user.name, "aria-haspopup": "menu", onclick: userMenu }, state.user.name.slice(0, 1).toUpperCase()),
@@ -13618,6 +13623,66 @@ async function loadMusic() {
   musicUi.timer = setTimeout(loadMusic, state.music?.now ? 2000 : 8000);
 }
 
+/** What the second player plays, in the head of every page next to the TV's: pause with one touch, the player under it */
+function paintMusicNow() {
+  const box = document.getElementById("music-now");
+  if (!box) return;
+  const there = isAdmin() && hasModule("music");
+  const now = there ? state.musicNow : null;
+  box.hidden = !there;
+  box.className = "tv-now" + (now ? " playing" : "") + (document.querySelector("dialog.music-drop[open]") ? " open" : "");
+  if (!there) return box.replaceChildren();
+  const label = now ? t("music.playing", { name: now.title }) : t("music.title");
+  const halves = [
+    now && h("button", { type: "button", class: "tv-now-half", title: t("music.key.playpause"), "aria-label": t("music.key.playpause"), onclick: () => api("POST", "/api/music/do", { action: "playpause" }).catch((e) => toast(errorText(e), "error")) }, icon(now.paused ? "play" : "pause")),
+    h("button", { type: "button", class: "tv-now-half tv-now-open", title: label, "aria-label": label, "aria-haspopup": "dialog", onclick: () => musicDropdown(box) }, icon("music")),
+  ];
+  box.replaceChildren(...halves.filter(Boolean));
+}
+
+function musicDropdown(at) {
+  let dialog;
+  let timer = 0;
+  let busy = false;
+  const body = h("div", { class: "stack" }, h("p", { class: "muted pad" }, "…"));
+  const paint = () => {
+    const m = state.music;
+    if (!m || busy || body.querySelector("input[type=range]:active") || document.querySelector("dialog.select-list[open]") || dialog.classList.contains("pulled")) return;
+    put(body, m.state === "missing" ? h("p", { class: "muted pad" }, t("error.music.missing")) : musicPlayerCard(m, act));
+  };
+  const act = async (method, path, data) => {
+    busy = true;
+    try {
+      state.music = await api(method, path, data);
+    } catch (e) {
+      toast(errorText(e), "error");
+    }
+    busy = false;
+    paint();
+  };
+  const load = async () => {
+    clearTimeout(timer);
+    if (!dialog.isConnected) return;
+    try {
+      state.music = await api("GET", "/api/music");
+      paint();
+    } catch (e) {
+      put(body, h("p", { class: "error pad" }, errorText(e)));
+    }
+    timer = setTimeout(load, 2000);
+  };
+  dialog = openDialog("dropdown music-drop", h("div", { class: "tvr-head" }, h("span", { class: "with-icon muted" }, icon("music"), t("music.title")), h("a", { class: "link small with-icon", href: "#/house/music", onclick: () => dialog.close() }, t("music.open"), icon("chevron"))), body);
+  dialog.addEventListener("close", () => {
+    clearTimeout(timer);
+    paintMusicNow();
+  });
+  pullToClose(dialog);
+  at.classList.add("open");
+  const r = at.getBoundingClientRect();
+  placeAt(dialog, { x: r.right - dialog.offsetWidth, y: r.bottom + 6 });
+  void load().then(() => placeAt(dialog, { x: r.right - dialog.offsetWidth, y: r.bottom + 6 }));
+}
+
 function musicLinkDialog() {
   let dialog;
   const address = h("input", { type: "url", inputMode: "url", autocomplete: "off", spellcheck: false, maxLength: 2000, placeholder: "https://", required: true });
@@ -13681,6 +13746,33 @@ function musicSpeakerCard(m, act) {
   );
 }
 
+/** The player itself — what plays, the keys, the volume, where the sound goes: on the Music tab and under the chip in the head */
+function musicPlayerCard(m, act, error = null) {
+  const press = (action, value) => act("POST", "/api/music/do", { action, value });
+  const now = m.now;
+  const round = (action, iconName, cls = "") => h("button", { type: "button", class: "tvr-round " + cls, title: t("music.key." + action), "aria-label": t("music.key." + action), disabled: !now, onclick: () => press(action) }, icon(iconName));
+  const seek = now?.duration ? h("input", { type: "range", class: "tvr-slider", min: 0, max: Math.floor(now.duration), value: Math.floor(now.position), "aria-label": t("music.position"), onchange: (e) => press("seek", Number(e.target.value)) }) : null;
+  const volume = h("input", { type: "range", class: "tvr-slider" + (m.muted ? " muted" : ""), min: 0, max: 100, value: m.volume, "aria-label": t("music.volume"), onchange: (e) => press("volume", Number(e.target.value)) });
+  const kind = (o) => t("music.out." + o.kind);
+  const output = m.outputs.length
+    ? h("select", { "aria-label": t("music.output"), onchange: (e) => act("PUT", "/api/music", { output: e.target.value }) }, m.outputs.map((o) => h("option", { value: o.id, selected: o.id === m.output }, `${o.name} — ${kind(o)}`)))
+    : h("span", { class: "muted" }, t("music.noOutput"));
+  const player = h(
+    "section",
+    { class: "card pad stack music-player" },
+    now
+      ? h("div", { class: "music-now" }, h("span", { class: "badge-icon plain" }, icon(now.link ? "globe" : "music")), h("div", { class: "grow" }, h("strong", { class: "wrap" }, now.title), now.by && h("div", { class: "muted small wrap" }, now.by)), now.paused && h("span", { class: "state busy" }, t("tv.paused")))
+      : h("div", { class: "music-now" }, h("span", { class: "badge-icon plain" }, icon("music")), h("div", { class: "grow" }, h("strong", null, t("music.idle")), h("div", { class: "muted small" }, t("music.idleLead")))),
+    seek && h("div", { class: "music-seek" }, h("span", { class: "muted small mono" }, tvClock(now.position)), seek, h("span", { class: "muted small mono" }, tvClock(now.duration))),
+    h("div", { class: "music-keys" }, round("previous", "previous"), h("button", { type: "button", class: "tvr-main", title: t("music.key.playpause"), "aria-label": t("music.key.playpause"), disabled: !now, onclick: () => press("playpause") }, icon(now && !now.paused ? "pause" : "play")), round("next", "next"), round("stop", "stop")),
+    h("div", { class: "tvr-volume" }, h("button", { type: "button", class: "icon-btn", title: t("music.key.mute"), "aria-label": t("music.key.mute"), disabled: !m.running, onclick: () => press("mute", !m.muted) }, icon(m.muted ? "volumeOff" : "volume")), volume, h("span", { class: "muted small mono" }, m.volume)),
+    m.volumeOf === "speaker" && h("p", { class: "muted small" }, t("music.volumeSpeaker")),
+    settingRow(t("music.output"), t("music.outputHint"), output),
+    error,
+  );
+  return player;
+}
+
 function paintMusic() {
   const box = document.getElementById("music-body");
   const m = state.music;
@@ -13716,27 +13808,7 @@ function paintMusic() {
     paintMusic();
   };
   const press = (action, value) => act("POST", "/api/music/do", { action, value });
-  const now = m.now;
-  const round = (action, iconName, cls = "") => h("button", { type: "button", class: "tvr-round " + cls, title: t("music.key." + action), "aria-label": t("music.key." + action), disabled: !now, onclick: () => press(action) }, icon(iconName));
-  const seek = now?.duration ? h("input", { type: "range", class: "tvr-slider", min: 0, max: Math.floor(now.duration), value: Math.floor(now.position), "aria-label": t("music.position"), onchange: (e) => press("seek", Number(e.target.value)) }) : null;
-  const volume = h("input", { type: "range", class: "tvr-slider" + (m.muted ? " muted" : ""), min: 0, max: 100, value: m.volume, "aria-label": t("music.volume"), onchange: (e) => press("volume", Number(e.target.value)) });
-  const kind = (o) => t("music.out." + o.kind);
-  const output = m.outputs.length
-    ? h("select", { "aria-label": t("music.output"), onchange: (e) => act("PUT", "/api/music", { output: e.target.value }) }, m.outputs.map((o) => h("option", { value: o.id, selected: o.id === m.output }, `${o.name} — ${kind(o)}`)))
-    : h("span", { class: "muted" }, t("music.noOutput"));
-  const player = h(
-    "section",
-    { class: "card pad stack music-player" },
-    now
-      ? h("div", { class: "music-now" }, h("span", { class: "badge-icon plain" }, icon(now.link ? "globe" : "music")), h("div", { class: "grow" }, h("strong", { class: "wrap" }, now.title), now.by && h("div", { class: "muted small wrap" }, now.by)), now.paused && h("span", { class: "state busy" }, t("tv.paused")))
-      : h("div", { class: "music-now" }, h("span", { class: "badge-icon plain" }, icon("music")), h("div", { class: "grow" }, h("strong", null, t("music.idle")), h("div", { class: "muted small" }, t("music.idleLead")))),
-    seek && h("div", { class: "music-seek" }, h("span", { class: "muted small mono" }, tvClock(now.position)), seek, h("span", { class: "muted small mono" }, tvClock(now.duration))),
-    h("div", { class: "music-keys" }, round("previous", "previous"), h("button", { type: "button", class: "tvr-main", title: t("music.key.playpause"), "aria-label": t("music.key.playpause"), disabled: !now, onclick: () => press("playpause") }, icon(now && !now.paused ? "pause" : "play")), round("next", "next"), round("stop", "stop")),
-    h("div", { class: "tvr-volume" }, h("button", { type: "button", class: "icon-btn", title: t("music.key.mute"), "aria-label": t("music.key.mute"), disabled: !m.running, onclick: () => press("mute", !m.muted) }, icon(m.muted ? "volumeOff" : "volume")), volume, h("span", { class: "muted small mono" }, m.volume)),
-    m.volumeOf === "speaker" && h("p", { class: "muted small" }, t("music.volumeSpeaker")),
-    settingRow(t("music.output"), t("music.outputHint"), output),
-    error,
-  );
+  const player = musicPlayerCard(m, act, error);
   const queue = h(
     "section",
     { class: "card pad stack" },
@@ -13960,6 +14032,15 @@ function paintTv() {
     const el = h("button", { type: "button", role: "switch", class: "ha-switch", "aria-checked": String(pref(id).value === true), "aria-label": title, onclick: () => ((el.disabled = true), set(id, pref(id).value !== true)) }, h("i"));
     return settingRow(title, hint, el);
   };
+  const haLine = (label, value) => h("div", { class: "kv-line" }, h("span", { class: "muted" }, label), h("code", { class: "wrap" }, value), h("button", { type: "button", class: "icon-btn", title: t("twofa.copy"), "aria-label": `${t("twofa.copy")}: ${label}`, onclick: () => copyQuietly(String(value)) }, icon("copy")));
+  const haCard = tv.ha && h(
+    "section",
+    { class: "card pad stack" },
+    h("div", { class: "section-head" }, h("h2", null, "Home Assistant", h("span", { class: "state " + (tv.ha.on ? "running" : "stopped") }, t(tv.ha.on ? "bt.state.on" : "bt.state.off"))), button(t(tv.ha.on ? "bt.turnOff" : "music.speaker.turnOn"), { class: "small" + (tv.ha.on ? "" : " primary"), onclick: () => void change({ ha: !tv.ha.on }) })),
+    h("p", { class: "muted" }, t("tv.ha.lead")),
+    tv.ha.on && h("div", { class: "stack" }, haLine(t("tv.ha.host"), tv.ha.address || location.hostname), haLine(t("tv.ha.port"), tv.ha.port), haLine(t("tv.ha.user"), tv.ha.user), haLine(t("tv.ha.password"), tv.ha.password)),
+    tv.ha.on && h("p", { class: "muted small" }, t("tv.ha.how")),
+  );
   const audioCard = tv.audio && tv.audio.options.length > 0 && h(
     "section",
     { class: "card pad stack" },
@@ -14018,7 +14099,7 @@ function paintTv() {
   );
 
   // the remote is the page's main thing; what is set once stands beside it
-  put(box, h("div", { class: "tv-page" }, remoteCard, h("div", { class: "stack" }, playerCard, screenCard, foldersCard, languageCard, audioCard, pictureCard, browserCard)));
+  put(box, h("div", { class: "tv-page" }, remoteCard, h("div", { class: "stack" }, playerCard, screenCard, foldersCard, languageCard, audioCard, pictureCard, haCard, browserCard)));
   tvStick();
   if (tv.asking) tvKeepDialog();
 }

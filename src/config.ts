@@ -137,7 +137,7 @@ export interface Settings {
   trash: { days: number };
   /** The media player on the server's screen (`tv.ts`): the folders it shows; whether its sound output was chosen */
   /** `offsets`: the sound output (Kodi's own name of it) → seconds its sound is moved by against the picture */
-  tv: { folders: string[]; audioChosen: boolean; offsets: Record<string, number>; /** The player's own volume from before a speaker's took over, put back when the sound leaves it; null — no speaker has it */ volume: number | null };
+  tv: { folders: string[]; audioChosen: boolean; offsets: Record<string, number>; /** The player's own volume from before a speaker's took over, put back when the sound leaves it; null — no speaker has it */ volume: number | null; /** The person sent the sound to a Bluetooth speaker: it goes back there when the speaker returns; `before` — the output used until then */ speaker: boolean; before: string };
   /** The music player: where its sound goes (an ALSA device; "" — not chosen) and how loud */
   music: { output: string; volume: number; speaker: { on: boolean; name: string; server: string } };
   /** Which modules are on (`modules.ts`); null — not decided yet: a server from before modules, until its first start */
@@ -264,7 +264,7 @@ const DEFAULTS: Settings = {
   update: { channel: "stable", auto: false, time: "05:00" },
   trash: { days: 30 },
   modules: null,
-  tv: { folders: [], audioChosen: false, offsets: {}, volume: null },
+  tv: { folders: [], audioChosen: false, offsets: {}, volume: null, speaker: false, before: "" },
   music: { output: "", volume: 60, speaker: { on: false, name: "", server: "" } },
 };
 
@@ -309,6 +309,8 @@ export const settings: Settings = {
     folders: cleanFolders(isPlainObject(saved.tv) ? saved.tv.folders : []),
     audioChosen: isPlainObject(saved.tv) && saved.tv.audioChosen === true,
     volume: isPlainObject(saved.tv) && typeof saved.tv.volume === "number" && Number.isInteger(saved.tv.volume) && saved.tv.volume >= 0 && saved.tv.volume <= 100 ? saved.tv.volume : null,
+    speaker: isPlainObject(saved.tv) && saved.tv.speaker === true,
+    before: isPlainObject(saved.tv) && typeof saved.tv.before === "string" && saved.tv.before.length <= 300 ? saved.tv.before : "",
     offsets: Object.fromEntries(Object.entries(isPlainObject(saved.tv) && isPlainObject(saved.tv.offsets) ? saved.tv.offsets : {}).filter(([key, value]) => key.length <= 300 && typeof value === "number" && Math.abs(value) <= 2).slice(0, 50)) as Record<string, number>,
   },
   music: {

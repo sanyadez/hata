@@ -5842,5 +5842,16 @@
   "tv.offsetAfter": "{ms} ms later",
   "tv.offsetNone": "as it is",
   "music.volumeSpeaker": "This is the speaker's own volume — the same its buttons change.",
-  "area.house.bluetooth": "Bluetooth"
+  "area.house.bluetooth": "Bluetooth",
+  "music.open": "Queue and more",
+  "tv.ha.lead": "Home Assistant has its own Kodi integration: the player becomes a media player there — what plays, pause, volume, \"play this\". Turned on, the player answers on a port of its own, behind a name and a password made here.",
+  "tv.ha.host": "Host",
+  "tv.ha.port": "Port",
+  "tv.ha.user": "Username",
+  "tv.ha.password": "Password",
+  "tv.ha.how": "In Home Assistant: Settings → Devices & services → Add integration → Kodi. Enter these four, leave \"Use SSL\" off; when it asks for a WebSocket port, leave it empty.",
+  "error.tv.portTaken": "Port {port} is taken on this server, so the player cannot answer Home Assistant there.",
+  "error.tv.haFailed": "The player did not turn its web server on.",
+  "activity.tv.haOn": "Home Assistant let in to the TV player",
+  "activity.tv.haOff": "Home Assistant's way to the TV player closed"
 }

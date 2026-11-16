@@ -5842,5 +5842,16 @@
   "tv.offsetAfter": "на {ms} мс пізніше",
   "tv.offsetNone": "без зсуву",
   "music.volumeSpeaker": "Це власна гучність колонки — та сама, що її міняють кнопки на ній.",
-  "area.house.bluetooth": "Bluetooth"
+  "area.house.bluetooth": "Bluetooth",
+  "music.open": "Черга й решта",
+  "tv.ha.lead": "У Home Assistant є власна інтеграція Kodi: програвач стає там медіапрогравачем — що грає, пауза, гучність, «зіграй це». Після ввімкнення програвач відповідає на окремому порту, за іменем і паролем, створеними тут.",
+  "tv.ha.host": "Адреса",
+  "tv.ha.port": "Порт",
+  "tv.ha.user": "Ім'я користувача",
+  "tv.ha.password": "Пароль",
+  "tv.ha.how": "У Home Assistant: Налаштування → Пристрої та служби → Додати інтеграцію → Kodi. Введіть ці чотири значення, «Use SSL» лишіть вимкненим; коли спитає порт WebSocket — лишіть порожнім.",
+  "error.tv.portTaken": "Порт {port} на цьому сервері зайнятий, тож програвач не може відповідати Home Assistant на ньому.",
+  "error.tv.haFailed": "Програвач не ввімкнув свій вебсервер.",
+  "activity.tv.haOn": "Home Assistant допущено до програвача телевізора",
+  "activity.tv.haOff": "Доступ Home Assistant до програвача телевізора закрито"
 }

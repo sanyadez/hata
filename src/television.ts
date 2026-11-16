@@ -8,6 +8,7 @@ import { createSocket } from "node:dgram";
 import { connect } from "node:net";
 import { join } from "node:path";
 import { record } from "./activity";
+import { lanAddress } from "./integration";
 import { playingSpeaker, setSpeakerVolume, speakerVolume } from "./bluetooth";
 import { AppError, startJob, type Job } from "./apps";
 import { bus } from "./bus";
@@ -128,6 +129,8 @@ export interface TvReport {
   decodes: boolean;
   on: boolean;
   running: boolean;
+  /** Home Assistant's way to the player; null — the player does not answer */
+  ha: TvHa | null;
   /** Kodi answers Hata */
   answers: boolean;
   folders: string[];
@@ -185,9 +188,12 @@ const tvSpeaker = (): string => {
 };
 
 const setKodiVolume = async (volume: number): Promise<void> => {
-  oursUntil = Date.now() + 1000;
+  // Kodi tells of this change as of any other: that one telling is ours (forgotten after a while, should it never come)
+  ownSets++;
+  oursUntil = Date.now() + 3000;
   await rpc({ method: "Application.SetVolume", params: { volume } });
 };
+let ownSets = 0;
 
 /**
  * With the sound on such a speaker Kodi plays at full and the volume is the speaker's; with the sound
@@ -218,11 +224,51 @@ async function volumeHeard(data: { volume?: unknown; muted?: unknown } | undefin
   const volume = Number(data?.volume);
   if (muted !== lastMuted) return void (lastMuted = muted);
   const address = tvSpeaker();
-  if (!address || Date.now() < oursUntil || !isFinite(volume)) return;
+  if (!isFinite(volume)) return;
+  if (Date.now() > oursUntil) ownSets = 0;
+  // Hata's own putting of Kodi back to full is told as "100" once: that is not a press
+  if (volume >= 100 && ownSets > 0) return void ownSets--;
+  if (!address) return;
   const now = speakerVolume(address) ?? 0;
   // at full, a press up changes nothing in Kodi and is still told; a press down is told by how far it went
   setSpeakerVolume(address, volume >= 100 ? now + VOLUME_STEP : now - VOLUME_STEP * Math.max(1, Math.min(5, Math.round(100 - volume))));
   if (volume < 100) await setKodiVolume(100);
+}
+
+let following: ReturnType<typeof setTimeout> | null = null;
+
+/**
+ * The speaker the film's sound goes to went away (turned off, out of reach, Bluetooth off): the sound
+ * moves to the output used before it, and back when the speaker returns. Looked at a moment after the
+ * change, so a speaker that only blinks moves nothing.
+ */
+function followSpeaker(): void {
+  // told of every change of every device, a look around included: one look a while after the first is enough
+  if (following) return;
+  following = setTimeout(async () => {
+    following = null;
+    if (!heard) return;
+    const choice = await audioChoice().catch(() => null);
+    if (!choice) return;
+    const onSpeaker = choice.value.startsWith("ALSA:bluealsa");
+    const there = playingSpeaker() !== "";
+    // a server that had its sound on a speaker before this was kept track of
+    if (onSpeaker && !settings.tv.speaker) {
+      settings.tv.speaker = true;
+      saveSettings();
+    }
+    if (!settings.tv.speaker || onSpeaker === there) return;
+    const others = choice.options.filter((o) => !o.value.startsWith("ALSA:bluealsa"));
+    const target = there ? choice.options.find((o) => o.value.startsWith("ALSA:bluealsa")) : (others.find((o) => o.value === settings.tv.before) ?? others.find((o) => /hdmi/i.test(o.value)) ?? others[0]);
+    if (!target) return;
+    if (there) settings.tv.before = choice.value;
+    await rpc({ method: "Settings.SetSettingValue", params: { setting: "audiooutput.audiodevice", value: target.value } });
+    kodiAudio = target.value;
+    saveSettings();
+    await alignVolume().catch(() => {});
+    await applyOffset().catch(() => {});
+    bus.publish("tv", tvNow());
+  }, 2500);
 }
 
 async function audioChoice(): Promise<TvReport["audio"]> {
@@ -265,7 +311,7 @@ export async function tvReport(): Promise<TvReport> {
   const installed = has("kodi");
   const running = installed && tvSetUp() && (await unit("is-active")) === "active";
   const app = running ? ((await rpc({ method: "Application.GetProperties", params: { properties: ["volume", "muted", "version"] } }, 2500)) as { volume?: number; muted?: boolean; version?: { major?: number; minor?: number } } | null) : null;
-  const [playing, audio, picture, kept] = app ? await Promise.all([nowPlaying().then((now) => now.playing), audioChoice(), pictureChoice(), prefsChoice()]) : [null, null, null, null];
+  const [playing, audio, picture, kept, ha] = app ? await Promise.all([nowPlaying().then((now) => now.playing), audioChoice(), pictureChoice(), prefsChoice(), haChoice()]) : [null, null, null, null, null];
   const media = join(settings.dataRoot, "Media");
   return (last = {
     displays: displays(),
@@ -285,6 +331,7 @@ export async function tvReport(): Promise<TvReport> {
     volumeOf: tvSpeaker() ? "speaker" : "player",
     muted: app?.muted ?? false,
     audio,
+    ha,
     picture,
     prefs: kept?.prefs ?? {},
     language: { value: kept?.language ?? "", busy: speaking === "busy", failed: speaking === "failed" },
@@ -430,6 +477,76 @@ export async function setFolders(raw: unknown, by: string): Promise<TvReport> {
   return tvReport();
 }
 
+/** The port Kodi's own web server answers Home Assistant on */
+const TV_WEB_PORT = 9392;
+
+export interface TvHa {
+  on: boolean;
+  /** This server's address on the home network */
+  address: string;
+  port: number;
+  user: string;
+  /** Shown only while it is on: the person types it into Home Assistant */
+  password: string;
+}
+
+async function haChoice(): Promise<TvHa | null> {
+  const said = (await rpc({ method: "Settings.GetSettings", params: { level: "expert", filter: { section: "services", category: "control" } } })) as { settings?: { id: string; value: unknown }[] } | null;
+  if (!said?.settings) return null;
+  const value = (id: string) => said.settings!.find((one) => one.id === id)?.value;
+  const on = value("services.webserver") === true;
+  return { on, address: lanAddress(), port: Number(value("services.webserverport")) || 0, user: String(value("services.webserverusername") ?? ""), password: on ? String(value("services.webserverpassword") ?? "") : "" };
+}
+
+const portFree = (port: number): boolean => {
+  try {
+    Bun.listen({ hostname: "0.0.0.0", port, socket: { data() {} } }).stop(true);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/**
+ * Lets Home Assistant's own Kodi integration reach the player: Kodi's web server on a port of its own,
+ * always behind a name and a password made here. The other way in Kodi has (a raw port without any
+ * sign-in) stays closed.
+ */
+export async function setHomeAssistant(on: boolean, by: string): Promise<TvReport> {
+  const now = await haChoice();
+  if (!now) throw new AppError("tv.notRunning", 409);
+  const set = (setting: string, value: unknown) => rpc({ method: "Settings.SetSettingValue", params: { setting, value } });
+  if (on && !now.on) {
+    if (!portFree(TV_WEB_PORT)) throw new AppError("tv.portTaken", 409, { port: TV_WEB_PORT });
+    const password = Buffer.from(crypto.getRandomValues(new Uint8Array(15))).toString("base64url");
+    await set("services.webserverport", TV_WEB_PORT);
+    await set("services.webserverusername", "hata");
+    await set("services.webserverpassword", password);
+    await set("services.webserverauthentication", true);
+    // Kodi answers this with a window of its own on the screen — "anyone who reaches the web interface controls
+    // this device… Continue?" — and the call waits for it, as does everything else on its one port. The person
+    // has just pressed the button here and the password is set above, so "Yes" is pressed for them, through
+    // the port of its remotes. The port is read first: nothing can be asked while the window is up.
+    const port = await eventPort();
+    if (!port) throw new AppError("tv.haFailed", 409);
+    let done = false;
+    const turned = rpc({ method: "Settings.SetSettingValue", params: { setting: "services.webserver", value: true } }, 30_000).finally(() => (done = true));
+    for (let i = 0; i < 20 && !done; i++) {
+      await Bun.sleep(700);
+      if (!done) await toEventPort(port, helloPacket(), clickPacket(KEEP_WINDOW, KEEP_YES)).catch(() => {});
+    }
+    await turned.catch(() => {});
+    let up = false;
+    for (let i = 0; i < 20 && !up; i++) {
+      up = (await haChoice())?.on === true;
+      if (!up) await Bun.sleep(500);
+    }
+    if (!up) throw new AppError("tv.haFailed", 409);
+  } else if (!on && now.on) await rpc({ method: "Settings.SetSettingValue", params: { setting: "services.webserver", value: false } }, 20_000);
+  if (on !== now.on) record(on ? "tv.haOn" : "tv.haOff", { user: by });
+  return tvReport();
+}
+
 /** The sound offset kept for the output in use is given to the film that plays; a film alone has one */
 async function applyOffset(): Promise<void> {
   const choice = await audioChoice();
@@ -460,6 +577,10 @@ export async function setAudio(value: unknown): Promise<TvReport> {
   if (typeof value !== "string" || !choice.options.some((o) => o.value === value)) throw new AppError("tv.badAudio", 400);
   await rpc({ method: "Settings.SetSettingValue", params: { setting: "audiooutput.audiodevice", value } });
   settings.tv.audioChosen = true;
+  // sent to a Bluetooth speaker by hand: the sound returns there whenever the speaker does; sent elsewhere: it stays
+  const toSpeaker = value.startsWith("ALSA:bluealsa");
+  if (toSpeaker && !choice.value.startsWith("ALSA:bluealsa")) settings.tv.before = choice.value;
+  settings.tv.speaker = toSpeaker;
   saveSettings();
   kodiAudio = value;
   await alignVolume().catch(() => {});
@@ -661,6 +782,9 @@ function tell(next: TvNow | null): void {
 export function watchTv(): void {
   if (watching) return;
   watching = true;
+  bus.subscribe((event) => {
+    if (event.type === "bluetooth") followSpeaker();
+  });
   let timer: Timer | null = null;
   const refresh = () => {
     if (timer) clearTimeout(timer);
@@ -676,6 +800,7 @@ export function watchTv(): void {
       bus.publish("tv", tvNow());
       refresh();
       void audioChoice().then(alignVolume).catch(() => {});
+      followSpeaker();
     });
     socket.on("data", (piece) => {
       const taken = takeJson(buffer + piece.toString("utf8"));
