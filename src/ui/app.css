@@ -2030,3 +2030,4 @@ dialog.nav-sheet[open] { display: grid; gap: 14px; padding: 10px 14px calc(14px 
 .filter-bar > p { margin: 0; }
 .filter-bar .seg-pill { display: inline-flex; align-items: center; gap: 6px; }
 @media (max-width: 760px) { .thing-row { flex-wrap: wrap; padding: 10px 14px; } }
+.crumbs.on-card { margin: 0; padding: 10px 16px; }

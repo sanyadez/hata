@@ -401,17 +401,23 @@ function parseRoute() {
   if (parts[0] === "trash" && mayFiles()) return { view: "trash" };
   if (parts[0] === "hata" && mayFiles()) return { view: "myhata" };
   if (parts[0] === "activity" && isAdmin()) return { view: "activity" };
-  if (parts[0] === "tv" && isAdmin()) return { view: "tv" };
+  if (parts[0] === "tv" && isAdmin()) return { view: "tv", hash: "#/house/tv" };
+  // Hata the house: Home Assistant, the cameras, the TV — each a tab; a torrent client that is nobody's app too
+  if ((parts[0] === "house" || parts[0] === "integrations" || (parts[0] === "ha" && !parts[1]) || (parts[0] === "settings" && parts[1] === "integrations")) && isAdmin()) {
+    const tab = (parts[0] === "house" && areaTabs("house").find((x) => x.id === parts[1])) || areaTabs("house")[0];
+    if (!tab) return { view: "ha", id: "", hash: "#/house" };
+    const id = parts[0] === "house" ? (parts[2] ?? "") : "";
+    return tab.view === "tv" ? { view: "tv", hash: "#/house/tv" } : { view: tab.view, id, house: true, hash: tab.hash + (id ? "/" + id : "") };
+  }
   // both live in Settings; their own old addresses still lead there
   if ((parts[0] === "backups" || (parts[0] === "settings" && parts[1] === "backups")) && isAdmin()) return { view: "backups" };
   if ((parts[0] === "users" || (parts[0] === "settings" && parts[1] === "users")) && isAdmin()) return { view: "users" };
   if (parts[0] === "import" && isAdmin()) return { view: "import" };
   if (parts[0] === "terminal" && isAdmin()) return { view: "terminal" };
   if (parts[0] === "assistant" && isAdmin()) return { view: "assistant" };
-  if (parts[0] === "ha" && parts[1] && isAdmin()) return { view: "ha", id: parts[1] };
+  if (parts[0] === "ha" && parts[1] && isAdmin()) return { view: "ha", id: parts[1], hash: `#/house/ha/${parts[1]}` };
   if (parts[0] === "qbit" && parts[1] && isAdmin()) return { view: "qbit", id: parts[1] };
-  if (parts[0] === "frigate" && parts[1] && isAdmin()) return { view: "frigate", id: parts[1] };
-  if ((parts[0] === "integrations" || parts[0] === "ha" || parts[0] === "house" || (parts[0] === "settings" && parts[1] === "integrations")) && isAdmin()) return { view: "integrations" };
+  if (parts[0] === "frigate" && parts[1] && isAdmin()) return { view: "frigate", id: parts[1], hash: `#/house/cameras/${parts[1]}` };
   if ((parts[0] === "storage" || parts[0] === "network") && isAdmin()) return areaRoute(parts[0], parts[1], parts[2]);
   if (parts[0] === "machines" && parts[1] === "this" && isAdmin()) return areaRoute("server", parts[2], parts[3]);
   // a container, a virtual machine or a guest keeps its address when Hata's client is put on it: the client only adds tabs
@@ -459,6 +465,12 @@ const AREAS = {
     { id: "places", sections: ["places"] },
   ],
   backups: [{ id: "overview", hash: "#/backups", view: "backups", admin: true }],
+  house: [
+    { id: "ha", hash: "#/house/ha", view: "ha", module: "integrations" },
+    { id: "cameras", hash: "#/house/cameras", view: "frigate", module: "integrations" },
+    { id: "tv", hash: "#/house/tv", view: "tv", module: "tv" },
+    { id: "torrents", hash: "#/house/torrents", view: "qbit", module: "integrations", when: () => foreignTorrents() },
+  ],
   network: [
     { id: "connections", sections: ["network"] },
     { id: "remote", sections: ["remote"] },
@@ -489,7 +501,7 @@ const AREA_BASE = { storage: "#/storage", network: "#/network", server: "#/machi
 const tabHash = (area, tab) => tab.hash ?? `${AREA_BASE[area]}/${tab.id}`;
 /** Whether this person may open the tab at all, and whether it stands among the tabs: one of a module that is off does not */
 const tabAllowed = (tab) => (tab.sections ? SECTIONS.some((item) => item.id === tab.sections[0] && (!item.admin || isAdmin())) : (!tab.admin || isAdmin()) && state.user?.role !== "guest");
-const tabShown = (tab) => tabAllowed(tab) && (!tab.module || hasModule(tab.module)) && (!tab.sections || tab.sections.some((id) => !SECTION_MODULE[id] || hasModule(SECTION_MODULE[id])));
+const tabShown = (tab) => tabAllowed(tab) && (!tab.module || hasModule(tab.module)) && (!tab.when || tab.when()) && (!tab.sections || tab.sections.some((id) => !SECTION_MODULE[id] || hasModule(SECTION_MODULE[id])));
 const areaTabs = (area) => AREAS[area].filter(tabShown);
 /** The tab of a section of the settings, wherever it lives now */
 const sectionArea = (section) => Object.keys(AREAS).find((area) => AREAS[area].some((x) => x.sections?.includes(section))) ?? "settings";
@@ -518,7 +530,8 @@ function areaOf(route = state.route) {
   if (["apps", "store", "import", "app"].includes(view)) return "apps";
   if (["files", "trash", "myhata"].includes(view)) return "files";
   if (["machines", "machine", "server", "proxmox", "containers", "instance", "guest", "terminal"].includes(view)) return "machines";
-  if (["integrations", "ha", "qbit", "frigate", "tv"].includes(view)) return "house";
+  if (view === "qbit") return route.house || !torrentsApp(route.id) ? "house" : "apps";
+  if (["integrations", "ha", "frigate", "tv"].includes(view)) return "house";
   if (view === "backups") return "backups";
   if (view === "users") return "settings";
   return view === "home" || view === "activity" ? "home" : "";
@@ -1013,7 +1026,7 @@ const NAV = [
   { view: "apps", hash: "#/apps", icon: "grid", guest: false },
   { view: "files", hash: "#/files", icon: "folder", files: true },
   { view: "machines", hash: "#/machines", icon: "server", admin: true },
-  { view: "house", hash: "#/house", icon: "bulb", admin: true, modules: ["integrations"] },
+  { view: "house", hash: "#/house", icon: "bulb", admin: true, modules: ["integrations", "tv"] },
   { view: "storage", hash: "#/storage", icon: "disk", admin: true },
   { view: "backups", hash: "#/backups", icon: "archive", admin: true },
   { view: "network", hash: "#/network", icon: "network", admin: true },
@@ -2305,7 +2318,7 @@ function addDialog() {
     if (!sections.some((one) => one.id === addUi.section)) addUi.section = "machines";
     const entry = (section) => h("button", { type: "button", class: "cat" + (section.id === addUi.section && !addUi.find ? " active" : ""), onclick: () => ((addUi.section = section.id), (addUi.find = ""), (field.value = ""), paint()) }, h("span", { class: "add-cat" }, icon(section.icon), t("add.section." + section.id)), h("span", { class: "muted small" }, counted(section)));
     const titled = (group) => [group && h("div", { class: "cat-title" }, t("add.group." + group)), sections.filter((one) => (one.group ?? "") === group).map(entry)];
-    put(nav, titled(""), titled("state"), titled("integrations"), h("a", { class: "cat", href: "#/integrations", onclick: () => dialog.close() }, h("span", { class: "add-cat" }, icon("plus"), t("add.connect"))));
+    put(nav, titled(""), titled("state"), titled("integrations"), h("a", { class: "cat", href: "#/house", onclick: () => dialog.close() }, h("span", { class: "add-cat" }, icon("plus"), t("add.connect"))));
     const typed = addUi.find.trim().toLowerCase();
     if (typed) {
       const found = sections.flatMap((section) => section.rows.filter((one) => `${one.title} ${one.sub}`.toLowerCase().includes(typed)));
@@ -5000,12 +5013,74 @@ async function loadHa() {
 
 const haChip = (x) => h("span", { class: "state " + (x.online ? "running" : "") }, x.online ? t("ha.online") : x.error ? t("ha.offline") : t("ha.asking"));
 const haError = (x) => (x.error ? (has("error." + x.error.code) ? t("error." + x.error.code, { name: x.name, message: x.error.message ?? "" }) : x.error.code) : "");
-const haCrumbs = (name) => h("nav", { class: "crumbs" }, h("a", { href: "#/integrations" }, t("nav.integrations")), icon("chevron"), h("span", null, name));
+// the house's head and tabs say where this is
+const haCrumbs = () => null;
+
+/** The kinds of things the house holds: where their list is asked, where the page draws, how one is connected */
+const HOUSE = {
+  ha: { tab: "ha", list: "/api/ha", body: "ha-body", icon: "bulb", name: "Home Assistant", found: "found", load: () => void loadHa(), add: (url) => haDialog(null, url) },
+  frigate: { tab: "cameras", list: "/api/frigate", body: "frigate-body", icon: "camera", name: "Frigate", found: "frigateFound", load: () => (paintFrigate(), void loadFrigate()), add: (url) => frigateDialog(null, url) },
+  qbit: { tab: "torrents", list: "/api/qbit", body: "qbit-body", icon: "download", name: "qBittorrent", found: "qbitFound", load: () => (paintQbit(), void loadQbit()), add: (url) => qbitDialog(null, url) },
+};
+/** The app of this server a connected qBittorrent is, by the server's id; a torrent client that is nobody's app lives in the house */
+const torrentsApp = (id) => Object.entries(state.overview?.qbit?.apps ?? {}).find(([, q]) => q.id === id)?.[0] ?? "";
+const foreignTorrents = () => (state.overview?.qbit?.count ?? 0) > Object.keys(state.overview?.qbit?.apps ?? {}).length;
+const houseAdd = () => button(t("house.connect"), { onclick: (e) => integrationsAddMenu(e.currentTarget) }, "plus");
+
+/** A tab of the house: the head, a switch between the servers when there are several, and the page of the one chosen */
+function houseShell(view) {
+  shell(areaHead("house", HOUSE[view].tab, { actions: houseAdd() }), h("div", { id: "house-pick", class: "card filter-bar", hidden: true }), h("div", { id: HOUSE[view].body, class: "stack" }));
+  void houseOpen(view);
+}
+
+async function houseOpen(view) {
+  const k = HOUSE[view];
+  const box = document.getElementById(k.body);
+  let servers;
+  try {
+    servers = (await api("GET", k.list)).servers;
+  } catch (e) {
+    return state.route.view === view && box?.isConnected && put(box, h("p", { class: "card pad muted" }, errorText(e)));
+  }
+  if (state.route.view !== view || !box?.isConnected) return;
+  // the torrents' tab holds only those that are nobody's app: an app's own are on its page
+  if (view === "qbit") servers = servers.filter((x) => !torrentsApp(x.id));
+  if (!servers.length) return houseEmpty(view, box);
+  if (!servers.some((x) => x.id === state.route.id)) state.route.id = servers[0].id;
+  const pick = document.getElementById("house-pick");
+  pick.hidden = servers.length < 2;
+  put(pick, h("div", { class: "seg-pills" }, servers.map((x) => h("a", { class: "seg-pill" + (x.id === state.route.id ? " active" : ""), href: `#/house/${k.tab}/${x.id}` }, x.name))));
+  k.load();
+}
+
+/** Nothing of the kind is connected yet: what it gives, the button, and what was found on this server and around */
+function houseEmpty(view, box) {
+  const k = HOUSE[view];
+  const paint = () => {
+    if (!box.isConnected) return;
+    const found = integrationsFound([]).filter((f) => f.icon === k.icon);
+    put(
+      box,
+      h("section", { class: "card pad empty-state" }, h("span", { class: "app-icon plus" }, icon(k.icon)), h("h2", null, t("house.none", { name: k.name })), h("p", { class: "muted" }, t(`integrations.${view}.what`)), button(t("house.connectOne", { name: k.name }), { class: "primary", onclick: () => k.add() }, "plus")),
+      found.length > 0 &&
+        h(
+          "section",
+          { class: "card pad stack-s" },
+          h("div", null, h("h2", null, t("integrations.available")), h("p", { class: "muted small" }, t("integrations.foundLead"))),
+          found.map((f) => h("div", { class: "tool" }, h("span", { class: "app-icon plus sm" }, icon(f.icon)), h("div", { class: "grow" }, h("strong", null, f.name), h("p", { class: "muted small" }, f.kind, " · ", h("span", { class: "mono" }, f.url.replace(/^https?:\/\//, "")))), button(t("integrations.connect"), { onclick: f.connect }, "plus"))),
+        ),
+    );
+  };
+  paint();
+  api("GET", k.list + "/found").then(
+    (r) => (view === "ha" ? Object.assign(integrationsUi, { found: r.found, address: r.address }) : (integrationsUi[k.found] = r.found), paint()),
+    () => {},
+  );
+}
 
 function renderHa() {
   if (haUi.server?.id !== state.route.id) (haUi.server = null), (haUi.entities = null);
-  shell(h("div", { id: "ha-body", class: "stack" }));
-  void loadHa();
+  houseShell("ha");
 }
 
 function renderHaBody() {
@@ -5070,7 +5145,7 @@ function integrationsBody(titled) {
 }
 
 function renderIntegrations() {
-  shell(integrationsBody(true));
+  go("#/house");
 }
 
 function paintIntegrations() {
@@ -5164,9 +5239,7 @@ const eventWords = (e) => [e.label, e.score !== null && `${e.score}%`].filter(Bo
 
 function renderFrigate() {
   if (frigateUi.server?.id !== state.route.id) Object.assign(frigateUi, { server: null, events: null, camera: "", label: "" });
-  shell(h("div", { id: "frigate-body", class: "stack" }));
-  paintFrigate();
-  void loadFrigate();
+  houseShell("frigate");
 }
 
 async function loadFrigate() {
@@ -5184,7 +5257,7 @@ async function loadFrigate() {
     paintFrigate(whole);
   } catch (e) {
     const box = document.getElementById("frigate-body");
-    if (box) put(box, h("nav", { class: "crumbs" }, h("a", { href: "#/integrations" }, t("nav.integrations"))), h("p", { class: "card pad muted" }, errorText(e)));
+    if (box) put(box, h("p", { class: "card pad muted" }, errorText(e)));
     return;
   }
   frigateUi.timer = setTimeout(loadFrigate, 10_000);
@@ -5279,7 +5352,6 @@ function paintFrigate(whole = true) {
   cameraSelect.value = frigateUi.camera;
   put(
     box,
-    h("nav", { class: "crumbs" }, h("a", { href: "#/integrations" }, t("nav.integrations")), icon("chevron"), h("span", null, x.name)),
     h("section", { class: "card", id: "frigate-head" }, head),
     h("div", { id: "frigate-error" }, problem()),
     h("section", { class: "card pad stack-s" }, h("h2", null, t("frigate.cameras")), x.cameras.length ? h("div", { class: "cameras", id: "frigate-cameras" }, markCameras(cameras(), x.cameras)) : h("p", { class: "muted", id: "frigate-cameras" }, x.online ? t("frigate.noCameras") : "—")),
@@ -5310,7 +5382,7 @@ function frigateDisconnectDialog(x) {
           await api("DELETE", `/api/frigate/${x.id}`);
           dialog.close();
           await refresh();
-          go("#/integrations");
+          go("#/house");
         } catch (e) {
           toast(errorText(e), "error");
         }
@@ -5376,13 +5448,22 @@ const QBIT_FILTERS = ["all", "downloading", "seeding", "paused", "error"];
 const qbitChip = (x) => h("span", { class: "state " + (x.online ? "running" : "") }, t(x.online ? "qbit.online" : x.error ? "qbit.offline" : "qbit.asking"));
 const qbitError = (x) => (x.error ? (has("error." + x.error.code) ? t("error." + x.error.code, { url: x.url, message: x.error.message ?? "" }) : x.error.code) : "");
 const qbitSpeeds = (x) => `↓ ${bytes(x.down)}/s · ↑ ${bytes(x.up)}/s`;
-const qbitCrumbs = (name) => h("nav", { class: "crumbs" }, h("a", { href: "#/integrations" }, t("nav.integrations")), icon("chevron"), h("span", null, name));
+/** An app's own torrents are a page of that app; a client that is nobody's app is a tab of the house */
+function qbitCrumbs(name) {
+  const app = torrentsApp(state.route.id);
+  const title = app && (state.overview?.apps ?? []).find((a) => a.name === app)?.title;
+  return app ? h("nav", { class: "crumbs card on-card" }, h("a", { href: "#/apps" }, t("nav.apps")), icon("chevron"), h("a", { href: `#/apps/${app}` }, title ?? app), icon("chevron"), h("span", null, t("qbit.torrents"))) : null;
+}
 
 function renderQbit() {
   if (qbitUi.server?.id !== state.route.id) Object.assign(qbitUi, { server: null, torrents: null, filter: "all", q: "" });
-  shell(h("div", { id: "qbit-body", class: "stack" }));
-  paintQbit();
-  void loadQbit();
+  // an app's own torrents: the page of that app's torrents; else a tab of the house
+  if (!state.route.house && torrentsApp(state.route.id)) {
+    shell(h("div", { id: "qbit-body", class: "stack" }));
+    paintQbit();
+    return void loadQbit();
+  }
+  houseShell("qbit");
 }
 
 /** Asked again every five seconds while the page is on screen */
@@ -5497,7 +5578,7 @@ function qbitDisconnectDialog(x) {
           await api("DELETE", `/api/qbit/${x.id}`);
           dialog.close();
           await refresh();
-          go("#/integrations");
+          go("#/house");
         } catch (e) {
           toast(errorText(e), "error");
         }
@@ -5789,7 +5870,7 @@ function removeHaDialog(x) {
         try {
           await api("DELETE", `/api/ha/${x.id}`);
           dialog.close();
-          go("#/integrations");
+          go("#/house");
         } catch (e) {
           toast(errorText(e), "error");
         }
@@ -12818,7 +12899,6 @@ const SECTIONS = [
   { id: "apps", icon: "grid", group: "apps", admin: true },
   { id: "stores", icon: "store", group: "apps", admin: true },
   { id: "docker", icon: "box", group: "apps", admin: true },
-  { id: "integrations", icon: "link", group: "apps", admin: true },
   { id: "storage", icon: "disk", group: "storage", admin: true },
   { id: "shares", icon: "share", group: "storage", admin: true },
   { id: "places", icon: "network", group: "storage", admin: true },
@@ -13320,7 +13400,7 @@ function tvStick() {
 }
 
 function renderTv() {
-  shell(h("div", { class: "page-head" }, h("div", null, h("h1", null, t("tv.title")), h("p", { class: "meta" }, t("tv.lead"))), h("div", { class: "actions" }, button(t("tv.link"), { onclick: playLinkDialog }, "link"))), h("div", { id: "tv-body", class: "stack" }, h("p", { class: "muted" }, "…")));
+  shell(areaHead("house", "tv", { actions: button(t("tv.link"), { onclick: playLinkDialog }, "link") }), h("div", { id: "tv-body", class: "stack" }, h("p", { class: "card pad muted" }, "…")));
   window.addEventListener("resize", tvStick);
   cleanups.push(() => (clearTimeout(tvUi.timer), window.removeEventListener("resize", tvStick)));
   if (state.tv) paintTv();
@@ -13609,7 +13689,7 @@ function tvKeepDialog() {
 const MODULE_ICONS = { tv: "tv", raid: "shield", netplaces: "network", shares: "share", offsite: "archive", remote: "globe", dns: "signpost", adblock: "ban", domains: "plug", machines: "server", proxmox: "server", containers: "box", integrations: "link", assistant: "chat" };
 const MODULE_GROUPS = ["storage", "network", "servers", "more"];
 /** Where a module's own things are once it is on */
-const MODULE_HOME = { tv: "#/tv", raid: "#/settings/protection", netplaces: "#/settings/places", shares: "#/settings/shares", offsite: "#/settings/backups", remote: "#/settings/remote", dns: "#/settings/dns", adblock: "#/settings/adblock", domains: "#/settings/ports", machines: "#/machines", proxmox: "#/machines", containers: "#/containers", integrations: "#/settings/integrations", assistant: "#/settings/assistant" };
+const MODULE_HOME = { tv: "#/house/tv", raid: "#/settings/protection", netplaces: "#/settings/places", shares: "#/settings/shares", offsite: "#/settings/backups", remote: "#/settings/remote", dns: "#/settings/dns", adblock: "#/settings/adblock", domains: "#/settings/ports", machines: "#/machines", proxmox: "#/machines", containers: "#/containers", integrations: "#/settings/integrations", assistant: "#/settings/assistant" };
 /** Where the thing that holds a module on is taken away */
 const MODULE_USE_AT = { tv: "#/tv", array: "#/settings/protection", merged: "#/settings/storage", pools: "#/settings/protection", places: "#/settings/places", shares: "#/settings/shares", offsite: "#/settings/backups", wireguard: "#/settings/remote", tailscale: "#/settings/remote", dnsOn: "#/settings/dns", blocking: "#/settings/adblock", names: "#/settings/https", ports: "#/settings/ports", machines: "#/machines", proxmox: "#/machines", containers: "#/containers", homeAssistant: "#/settings/integrations", qbit: "#/settings/integrations", frigate: "#/settings/integrations", keys: "#/settings/agents" };
 const moduleName = (id) => t(`modules.${id}.name`);

@@ -5601,5 +5601,13 @@
   "server.backupLast": "Last",
   "server.backupNever": "not yet",
   "server.backupWhere": "Where",
-  "server.toBackups": "All backups"
+  "server.toBackups": "All backups",
+  "area.house.lead": "Home Assistant, the cameras and the TV",
+  "area.house.ha": "Home Assistant",
+  "area.house.cameras": "Cameras",
+  "area.house.tv": "TV",
+  "area.house.torrents": "Torrents",
+  "house.connect": "Connect",
+  "house.connectOne": "Connect {name}",
+  "house.none": "{name} is not connected yet"
 }
