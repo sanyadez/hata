@@ -13204,12 +13204,8 @@ function paintTvNow() {
   const now = tv?.playing;
   const label = now ? t("tv.playing", { name: now.title }) : t(tv?.on ? "tv.remote" : "tv.title");
   // no words here: grey while nothing plays, the accent colour while something does — the name is in the remote.
-  // The left half pauses with one touch, the right one opens the remote; with nothing playing only that is left
-  const halves = [
-    now && h("button", { type: "button", class: "tv-now-half", title: t("tv.key.playpause"), "aria-label": t("tv.key.playpause"), onclick: () => api("POST", "/api/tv/do", { action: "playpause" }).catch((e) => toast(errorText(e), "error")) }, icon(now.paused ? "play" : "pause")),
-    h("button", { type: "button", class: "tv-now-half tv-now-open", title: label, "aria-label": label, "aria-haspopup": "dialog", onclick: () => tvDropdown(box) }, icon("tv")),
-  ];
-  // replaceChildren writes a missing one out as the word "null"
+  // one button, as the music's next to it: pause is in the remote it opens
+  const halves = [h("button", { type: "button", class: "tv-now-half tv-now-open", title: label, "aria-label": label, "aria-haspopup": "dialog", onclick: () => tvDropdown(box) }, icon("tv"))];
   box.replaceChildren(...halves.filter(Boolean));
   paintTvMini(now);
 }
@@ -13623,7 +13619,7 @@ async function loadMusic() {
   musicUi.timer = setTimeout(loadMusic, state.music?.now ? 2000 : 8000);
 }
 
-/** What the second player plays, in the head of every page next to the TV's: pause with one touch, the player under it */
+/** What the second player plays, in the head of every page next to the TV's: one button, the player under it */
 function paintMusicNow() {
   const box = document.getElementById("music-now");
   if (!box) return;
@@ -13633,10 +13629,7 @@ function paintMusicNow() {
   box.className = "tv-now" + (now ? " playing" : "") + (document.querySelector("dialog.music-drop[open]") ? " open" : "");
   if (!there) return box.replaceChildren();
   const label = now ? t("music.playing", { name: now.title }) : t("music.title");
-  const halves = [
-    now && h("button", { type: "button", class: "tv-now-half", title: t("music.key.playpause"), "aria-label": t("music.key.playpause"), onclick: () => api("POST", "/api/music/do", { action: "playpause" }).catch((e) => toast(errorText(e), "error")) }, icon(now.paused ? "play" : "pause")),
-    h("button", { type: "button", class: "tv-now-half tv-now-open", title: label, "aria-label": label, "aria-haspopup": "dialog", onclick: () => musicDropdown(box) }, icon("music")),
-  ];
+  const halves = [h("button", { type: "button", class: "tv-now-half tv-now-open", title: label, "aria-label": label, "aria-haspopup": "dialog", onclick: () => musicDropdown(box) }, icon("music"))];
   box.replaceChildren(...halves.filter(Boolean));
 }
 
