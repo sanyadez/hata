@@ -9216,6 +9216,22 @@ function stopButton(id) {
 
 /** Follows a running operation without a dialog of its own: every line as it comes, then the job as it ended */
 function followJob(id, onLine) {
+  // the window that follows it tells of it: no card beside while it is open; closed while the work runs, the card takes over
+  const shownIn = [...document.querySelectorAll("dialog[open]")].pop();
+  if (shownIn) {
+    jobsUi.logs.add(id);
+    paintJobs();
+    shownIn.addEventListener(
+      "close",
+      () => {
+        jobsUi.logs.delete(id);
+        const e = jobsUi.list.get(id);
+        if (e && jobEnded(e)) closeJob(id);
+        else paintJobs();
+      },
+      { once: true },
+    );
+  }
   return new Promise((resolve) => {
     let next = -1;
     const pending = [];
@@ -9290,7 +9306,20 @@ function jobShort(job, machine = "") {
 
 function jobName(e) {
   const o = state.overview;
-  return o?.apps?.find((a) => a.name === e.app)?.title ?? o?.machineApps?.find((a) => a.key === e.app)?.title ?? e.title ?? e.app ?? "";
+  return o?.apps?.find((a) => a.name === e.app)?.title ?? o?.machineApps?.find((a) => a.key === e.app)?.title ?? e.title ?? jobKeyName(e);
+}
+
+/** A name for work this page did not start, from the key the server keeps it under: "incus:web" is web, "pve:<server>:243" is 243 */
+function jobKeyName(e) {
+  const key = e.app ?? "";
+  if (!key) return e.target ?? "";
+  if (key === "incus" || key === "incus-vm") return "Incus";
+  if (key === "tv") return "Kodi";
+  if (key.startsWith("incus-disc:")) return key.split("/").pop();
+  if (key.startsWith("incus:")) return key.slice(6);
+  if (key.startsWith("pve:")) return key.endsWith(":schedule") ? "Proxmox" : key.split(":").slice(2).pop();
+  if (key.startsWith("@system")) return "";
+  return key.replace(/@incus$/, "");
 }
 
 function jobHeading(e) {
@@ -9521,14 +9550,18 @@ function paintJobs() {
   patchJobs();
 }
 
-/** Work that takes long and was started by a person: its card shows in every tab and on every device of an administrator */
-const JOBS_EVERYWHERE = ["install", "filecopy", "filemove", "copyin", "transfer", "extract"];
+/**
+ * Work whose card is not shown by itself: over in seconds, and the tile says it meanwhile. Every other kind shows in
+ * every tab and on every device of an administrator — also what a schedule or an agent started: a phone that did not
+ * start the work showed nothing of it.
+ */
+const JOBS_UNSEEN = ["start", "stop", "restart", "apply"];
 
-/** A job as the server tells of it. Tracked: the kinds above wherever they were started, and what somebody sent to the background here */
+/** A job as the server tells of it. Tracked: every kind but those above wherever it was started, and what somebody sent to the background here */
 function takeJob(job, line) {
   if (!isAdmin()) return;
   const known = jobsUi.list.get(job.id);
-  if (!known && !(JOBS_EVERYWHERE.includes(job.kind) || storedIds(sessionStorage, JOB_HIDDEN).includes(job.id))) return;
+  if (!known && JOBS_UNSEEN.includes(job.kind) && !storedIds(sessionStorage, JOB_HIDDEN).includes(job.id)) return;
   if (!known && storedIds(localStorage, JOB_CLOSED).includes(job.id)) return;
   const e = known ?? { id: job.id, left: JOB_LINGER_S };
   const was = e.status;
