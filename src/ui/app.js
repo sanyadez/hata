@@ -10450,7 +10450,11 @@ function filesPlaces(path) {
       ),
     );
   }
-  // the disks are tiles of their own under the places, as on the top of the data folder
+  // the connected disks and network drives are places of their own: a disk just connected is found here at once.
+  // The trash and My Hata have no listing of their own, so the last one known is kept
+  if (state.files?.disks && !filesMachine()) filesUi.volumes = state.files.disks;
+  const volumes = filesUi.volumes ?? [];
+  const onVolume = volumes.some((d) => inside(d.path));
   put(
     places,
     h(
@@ -10459,8 +10463,9 @@ function filesPlaces(path) {
       h("div", { class: "cat-title" }, t("files.places")),
       h("a", { class: "cat" + (path === "#hata" ? " active" : ""), href: "#/hata" }, h("span", { class: "with-icon" }, icon("home"), h("span", { class: "clip" }, t("myhata.title")))),
       home && place(t("files.home"), home, "folder", inHome),
-      place(t("files.root"), "/", "disk", !trash && path !== "#hata" && path !== "" && !inHome),
+      place(t("files.root"), "/", "disk", !trash && path !== "#hata" && path !== "" && !inHome && !onVolume),
       h("a", { class: "cat" + (trash ? " active" : ""), href: "#/trash" }, h("span", { class: "with-icon" }, icon("trash"), h("span", { class: "clip" }, t("trash.title")))),
+      volumes.length > 0 && [h("div", { class: "cat-title" }, t("files.disks")), volumes.map((d) => h("a", { class: "cat" + (inside(d.path) ? " active" : ""), href: filesHash(d.path, ""), title: d.path, menu: (at) => sidebarMenu(at, { label: volumeName(d), path: d.path, volume: d, iconName: d.network ? "globe" : "disk" }) }, h("span", { class: "with-icon" }, icon(d.network ? "globe" : "disk"), h("span", { class: "clip" }, volumeName(d), volumeFolder(d) && h("span", { class: "muted" }, " · " + volumeFolder(d))))))],
       favorites.length > 0 && [h("div", { class: "cat-title" }, t("files.favorites")), favorites.map(favoriteRow)],
       machinesList,
     ),
@@ -10871,6 +10876,8 @@ function diskRoom(volume, short = false) {
 
 /** What a disk is called: its label, or the folder it is mounted at */
 const volumeName = (volume) => volume.label || volume.path.split("/").pop() || volume.path;
+/** The folder a volume is connected at, when its own label says something else: "Data" alone would not tell which disk */
+const volumeFolder = (volume) => ((folder) => (volume.label && folder && folder !== volume.label ? folder : ""))(volume.path.split("/").pop() ?? "");
 /** The disks that are not inside the data folder already, where people look for them */
 const outerVolumes = (listing) => (listing?.disks ?? []).filter((d) => !(d.path + "/").startsWith((listing.home || "\0") + "/"));
 
