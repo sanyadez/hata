@@ -2052,3 +2052,13 @@ button.mark:hover { border-color: var(--border-strong); color: var(--text); }
 .table-foot { margin: 0; padding: 12px 20px; border-top: 1px solid var(--border); background: var(--surface-2); border-radius: 0 0 var(--radius-lg) var(--radius-lg); }
 .backups-table td:last-child { width: 1%; white-space: nowrap; }
 .backups-table .row-actions { flex-wrap: nowrap; }
+
+/* --- Home: what the cards hold fits their size ------------------------------------------------------- */
+
+.trend-head { display: flex; align-items: center; gap: 14px; }
+.adblock-top { display: grid; gap: 2px; margin-top: 4px; min-width: 0; }
+@media (max-width: 760px) {
+  /* the buttons of an item do not fit beside its words: the item is pressed whole */
+  .attention-item:has(.row-actions) { cursor: pointer; }
+  .attention-item > .row-actions { display: none; }
+}

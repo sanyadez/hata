@@ -342,7 +342,7 @@ export function blockReport(clients: { address: string; count: number; last: num
 export function blockSummary() {
   const s = settings.dnsBlock;
   const day = lastDay();
-  return { enabled: s.enabled, serving: settings.dns.enabled, paused: paused(), pausedUntil: s.pausedUntil, questions: day.reduce((sum, h) => sum + h.questions, 0), blocked: day.reduce((sum, h) => sum + h.blocked, 0), names: sources.reduce((sum, x) => sum + x.list.counts.names, 0) };
+  return { enabled: s.enabled, serving: settings.dns.enabled, paused: paused(), pausedUntil: s.pausedUntil, questions: day.reduce((sum, h) => sum + h.questions, 0), blocked: day.reduce((sum, h) => sum + h.blocked, 0), names: sources.reduce((sum, x) => sum + x.list.counts.names, 0), top: [...top.entries()].sort((a, b) => b[1] - a[1]).slice(0, 3).map(([name, count]) => ({ name, count })) };
 }
 
 export function checkName(name: unknown, client: unknown, type: number) {

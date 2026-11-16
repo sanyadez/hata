@@ -1443,6 +1443,8 @@ const MINUTE_MS = 60_000;
 function paintTrend(trend) {
   const box = document.getElementById("own-trend");
   if (!box || !trend || box.dataset.at === String(trend.at)) return;
+  // a card of Home just put on the page has no height yet: the chart is drawn to it a frame later
+  if (box.closest(".pg-card") && box.clientHeight < 60 && !box.dataset.waited) return void ((box.dataset.waited = "1"), requestAnimationFrame(() => paintTrend(trend)));
   box.dataset.at = String(trend.at);
   const n = trend.cpu.length;
   const points = trend.cpu.map((cpu, i) => ({ t: trend.at - (n - 1 - i) * MINUTE_MS, cpu, memory: trend.memory[i] }));
@@ -1452,8 +1454,9 @@ function paintTrend(trend) {
   ];
   put(
     box,
-    n < 2 ? h("p", { class: "muted small" }, t("home.trendSoon")) : h("div", { class: "trend-head muted small" }, t("home.trend", { n })),
-    n >= 2 && lineChart(points, series, { max: 100, fmt: (v) => Math.round(v) + "%", label: t("home.trend", { n }), height: 120, head: false }),
+    n < 2 ? h("p", { class: "muted small" }, t("home.trendSoon")) : h("div", { class: "trend-head muted small" }, h("span", { class: "grow" }, t("home.trend", { n })), series.map((s) => h("span", null, h("i", { class: "series-key " + s.cls }), s.label))),
+    // in a card of Home the chart takes the room the card has; elsewhere its usual height
+    n >= 2 && lineChart(points, series, { max: 100, fmt: (v) => Math.round(v) + "%", label: t("home.trend", { n }), height: box.closest(".pg-card") ? Math.max(90, box.clientHeight - 54) : 120, head: false }),
   );
 }
 
@@ -1879,7 +1882,7 @@ function gridBar() {
   // the button stays the same element across redraws: one under the pointer keeps its click
   const slot = document.getElementById("grid-edit-slot");
   const offer = mayArrange();
-  if (slot && !!slot.firstChild !== offer) put(slot, offer && button(t("grid.edit"), { class: "small", onclick: gridEdit }, "grid"));
+  if (slot && !!slot.firstChild !== offer) put(slot, offer && button(t("grid.editShort"), { class: "small", onclick: gridEdit }, "grid"));
 }
 
 const GRID_WIDE = 1000;
@@ -2514,7 +2517,17 @@ function attentionItem(item) {
   const { buttons, openMore } = splitActions(below, menuHeader(title, null, attentionIcon(item.code)));
   return h(
     "div",
-    { class: "attention-item " + item.severity, menu: openMore },
+    {
+      class: "attention-item " + item.severity,
+      menu: openMore,
+      // on a phone the buttons do not fit beside the words: the item itself is the button
+      onclick: (e) => {
+        if (!phone.matches || e.target.closest("a, button")) return;
+        const first = e.currentTarget.querySelector(".row-actions :is(a, button)");
+        if (first) first.click();
+        else openMore({ x: e.clientX, y: e.clientY });
+      },
+    },
     h("div", { class: "attention-title" }, icon(attentionIcon(item.code)), h("strong", null, title)),
     h("p", { class: "muted small" }, text),
     buttons.length > 0 && h("div", { class: "row-actions" }, buttons),
@@ -17036,6 +17049,7 @@ function adblockBlock(el, b) {
           meterBar(share),
           h("p", { class: "muted small" }, t("adblock.list.total", { n: b.names.toLocaleString(state.lang) })),
           h("div", { class: "actions" }, b.paused ? button(t("adblock.resume"), { class: "small", onclick: () => send("/api/dns/block/pause", { minutes: 0 }) }, "power") : button(t("adblock.pauseFor", { what: pauseWords(30) }), { class: "small", onclick: () => send("/api/dns/block/pause", { minutes: 30 }) }, "clock")),
+          b.top?.length > 0 && h("div", { class: "adblock-top fits" }, h("div", { class: "muted small" }, t("adblock.block.most")), b.top.map((x) => h("div", { class: "mono small clip" }, x.name, " · ", x.count.toLocaleString(state.lang)))),
         ]
       : h("p", { class: "muted small" }, t("adblock.block.off"), " ", h("a", { class: "link", href: "#/settings/adblock" }, t("common.open"))),
   );

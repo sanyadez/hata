@@ -5654,5 +5654,7 @@
   "backup.col.often": "How often",
   "backup.col.keeps": "Kept",
   "backup.group.server": "Server",
-  "backup.machinesLead": "containers and virtual machines are kept whole and stopped meanwhile"
+  "backup.machinesLead": "containers and virtual machines are kept whole and stopped meanwhile",
+  "adblock.block.most": "Blocked most",
+  "grid.editShort": "Arrange"
 }
