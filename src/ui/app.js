@@ -2695,10 +2695,30 @@ function oneAndMore(first, rest, kind = "") {
   const entries = rest.filter(Boolean);
   if (!entries.length) return first;
   const opener = (e) => {
+    // a row that opens something on a click must not take this one for its own
+    e.stopPropagation();
     const r = e.currentTarget.closest(".split").getBoundingClientRect();
     menuAt({ x: r.left, y: r.bottom + 4 }, null, entries);
   };
   return h("span", { class: "split" }, first, button(first ? "" : t("attention.more"), { class: kind + " split-more", title: t("attention.more"), "aria-label": t("attention.more"), "aria-haspopup": "menu", onclick: opener }, "down"));
+}
+
+/**
+ * The buttons of a row or a card as they were written, laid out by the same rule: up to two stay as they are; of
+ * three or more the main one (the primary, else the first) stays and the others go under its arrow, each doing what
+ * its button does. What is not a button (a chip, a note) stays beside.
+ */
+function foldActions(items, kind = "") {
+  const all = items.flat().filter(Boolean);
+  const pressable = (x) => x instanceof Element && x.matches("button.btn, a.btn");
+  const buttons = all.filter(pressable);
+  if (buttons.length < 3) return all;
+  const main = buttons.find((b) => b.classList.contains("primary")) ?? buttons[0];
+  const entries = buttons
+    .filter((b) => b !== main)
+    .map((b) => ({ label: b.textContent.trim() || b.title || b.getAttribute("aria-label") || "", iconEl: b.querySelector("svg")?.cloneNode(true) ?? h("span", { class: "ico" }), danger: b.classList.contains("danger"), off: b.disabled, ...(b.tagName === "A" ? { href: b.getAttribute("href"), newTab: b.target === "_blank" } : { run: () => b.click() }) }));
+  const joined = oneAndMore(main, entries, [kind, main.classList.contains("small") ? "small" : "", main.classList.contains("primary") ? "primary" : ""].join(" "));
+  return [joined, ...all.filter((x) => !pressable(x))];
 }
 
 /**
@@ -7473,7 +7493,7 @@ function pveGuestParts(x, g) {
   const parts = [
     h(
       "div",
-      { class: "row-actions wrap" },
+      { class: "row-actions wrap" }, foldActions([
       !up && act(t("pve.start"), "play", g.status === "paused" ? "resume" : "start", "primary"),
       up && act(t("pve.shutdown"), "stop", "shutdown"),
       up && act(t("pve.reboot"), "refresh", "reboot"),
@@ -7486,7 +7506,7 @@ function pveGuestParts(x, g) {
       g.id === x.self && h("span", { class: "chip accent" }, t("pve.selfChip")),
       g.may.clone && button(t("pve.clone.button"), { class: "small", onclick: () => (pveCloneDialog(x, g)) }, "copy"),
       g.may.remove && g.status === "stopped" && !g.template && g.id !== x.self && button(t("pve.tmpl.button"), { class: "small", onclick: () => (pveTemplateDialog(x, g)) }, "archive"),
-      g.may.remove && g.status === "stopped" && g.id !== x.self && button(t("pve.guestRemove"), { class: "small danger", onclick: () => (pveRemoveDialog(x, g)) }, "trash"),
+      g.may.remove && g.status === "stopped" && g.id !== x.self && button(t("pve.guestRemove"), { class: "small danger", onclick: () => (pveRemoveDialog(x, g)) }, "trash"),])
     ),
     h(
       "section",
@@ -15558,7 +15578,7 @@ function networkSection() {
         h("h2", null, h("span", { class: "with-icon" }, icon("network"), nic.kind === "modem" ? nic.product || t("network.modem") : nic.name), " ", nic.kind === "modem" && h("span", { class: "muted small mono" }, nic.name + " "), h("span", { class: "state " + (nic.up ? "running" : "stopped") }, t(nic.up ? "network.up" : "network.down")), nic.outside && h("span", { class: "state" }, t("outside.chip")), nic.online === false && h("span", { class: "state restarting" }, t("network.offline")), nic.online === true && h("span", { class: "state running" }, t("network.online"))),
         h(
           "div",
-          { class: "actions" },
+          { class: "actions" }, foldActions([
           nic.wifi?.ready && nic.wifi.ap && button(t(nic.wifi.hotspot ? "hotspot.show" : "hotspot.make"), { class: nic.wifi.hotspot ? "accent" : "", onclick: () => hotspotDialog(nic) }, "share"),
           nic.wifi?.ready && button(t("wifi.networks"), { onclick: () => wifiDialog(nic) }, "search"),
           nic.wifi?.ssid &&
@@ -15578,7 +15598,7 @@ function networkSection() {
           (nic.manager === "networkd" || nic.manager === "ifupdown") && data.tool === "ok" && !data.pending && button(t("network.handover"), { onclick: () => handOverDialog(nic) }),
           nic.handed && !data.pending && button(t("network.handback"), { onclick: () => handBackDialog(nic) }, "undo"),
           !bridgeWhy(nic) && !data.nics.some((n) => n.home) && !data.pending && button(t("bridge.make"), { onclick: () => homeBridgeDialog(nic) }, "box"),
-          nic.home && !data.pending && button(t("bridge.apart"), { onclick: () => bridgeApartDialog(nic) }, "undo"),
+          nic.home && !data.pending && button(t("bridge.apart"), { onclick: () => bridgeApartDialog(nic) }, "undo"),])
         ),
       ),
       nic.home && h("p", { class: "muted small" }, t("bridge.is", { ports: (nic.ports ?? []).filter((p) => data.nics.some((n) => n.name === p)).join(", ") || "—" }), " ", t("bridge.guests", { n: (nic.ports ?? []).filter((p) => !data.nics.some((n) => n.name === p)).length })),
@@ -19044,7 +19064,7 @@ function storageSection(section = "storage") {
       h("td", { class: "num" + (hot ? " bad" : "") }, disk.smart?.temperature != null ? disk.smart.temperature + " °C" : "—"),
       h("td", null, total ? usageBar(used, total) : h("span", { class: "muted" }, "—")),
       h("td", null, mounts.length ? disk.volumes.flatMap((v) => v.mounts.map((m) => h("div", { class: "mount-line" }, h("span", { class: "mono clip" }, m), v.fstype && h("span", { class: "muted small" }, FS_NAMES[v.fstype] ?? v.fstype)))) : h("span", { class: "muted" }, [t("disks.notMounted"), ...new Set(disk.volumes.filter((v) => v.fstype && !v.swap).map((v) => FS_NAMES[v.fstype] ?? v.fstype))].join(" · "))),
-      h("td", null, h("div", { class: "row-actions" }, canPrepare(disk) && !mounts.length && !canConnect(disk).length && button(t("mounting.format"), { class: "small", onclick: (e) => (e.stopPropagation(), formatDialog(disk)) }), (disk.removable || disk.transport === "usb") && state.disks.mounting?.possible && disk.volumes.some((v) => v.fstype && v.mounts.length > 0) && button(t("copyin.button"), { class: "small", onclick: (e) => (e.stopPropagation(), copyInDialog(disk)) }, "download"), canConnect(disk).length > 0 && button(t("mounting.connect"), { class: "small primary", onclick: (e) => (e.stopPropagation(), connectDialog(disk, canConnect(disk)[0])) }), ...ourMounts(disk, mounts).map((path) => button(t(disk.removable || disk.transport === "usb" ? "mounting.eject" : "mounting.disconnect") + (ourMounts(disk, mounts).length > 1 ? " " + path : ""), { class: "small", onclick: (e) => (e.stopPropagation(), disconnectDialog({ path, disk: disk.name })) })), button(t("disks.details"), { class: "small", onclick: (e) => (e.stopPropagation(), diskDialog(disk.name)) }))),
+      h("td", null, h("div", { class: "row-actions" }, foldActions([canPrepare(disk) && !mounts.length && !canConnect(disk).length && button(t("mounting.format"), { class: "small", onclick: (e) => (e.stopPropagation(), formatDialog(disk)) }), (disk.removable || disk.transport === "usb") && state.disks.mounting?.possible && disk.volumes.some((v) => v.fstype && v.mounts.length > 0) && button(t("copyin.button"), { class: "small", onclick: (e) => (e.stopPropagation(), copyInDialog(disk)) }, "download"), canConnect(disk).length > 0 && button(t("mounting.connect"), { class: "small primary", onclick: (e) => (e.stopPropagation(), connectDialog(disk, canConnect(disk)[0])) }), ...ourMounts(disk, mounts).map((path) => button(t(disk.removable || disk.transport === "usb" ? "mounting.eject" : "mounting.disconnect") + (ourMounts(disk, mounts).length > 1 ? " " + path : ""), { class: "small", onclick: (e) => (e.stopPropagation(), disconnectDialog({ path, disk: disk.name })) })), button(t("disks.details"), { class: "small", onclick: (e) => (e.stopPropagation(), diskDialog(disk.name)) })]))),
     );
   };
   const checked = Math.max(0, ...data.disks.map((d) => d.checkedAt ?? 0));
@@ -19095,11 +19115,11 @@ function storageSection(section = "storage") {
       h("div", { class: "grow" }, h("strong", null, t("mounting.found", { disk: diskTitle(disk), size: bytes(disk.size) })), h("p", { class: "muted small" }, holds.length ? t("mounting.foundHolds", { what: holds.map((v) => [v.label, v.fstype].filter(Boolean).join(" · ")).join("; ") }) : t("mounting.foundEmpty"))),
       h(
         "div",
-        { class: "row-actions" },
+        { class: "row-actions" }, foldActions([
         button(t("mounting.ignore"), { class: "small quiet", onclick: async () => setDisks(await api("POST", "/api/disks/ignore", { id: disk.serial || disk.name }).catch(() => state.disks)) }),
         connectable.length > 0 && (disk.removable || disk.transport === "usb") && button(t("copyin.button"), { class: "small primary", onclick: () => copyInDialog(disk) }, "download"),
         connectable.length > 0 && button(t("mounting.connect"), { class: "small", onclick: () => connectDialog(disk, connectable[0]) }),
-        button(t("mounting.format"), { class: "small" + (connectable.length ? "" : " primary"), onclick: () => formatDialog(disk) }),
+        button(t("mounting.format"), { class: "small" + (connectable.length ? "" : " primary"), onclick: () => formatDialog(disk) }),])
       ),
     );
   };
@@ -19215,11 +19235,11 @@ function raidCard(data) {
         null,
         h(
           "div",
-          { class: "row-actions" },
+          { class: "row-actions" }, foldActions([
           !busy && pool.state === "ok" && button(t("raid.check"), { class: "small", onclick: call("/api/disks/raid/check", { id: pool.id, action: "check" }) }, "refresh"),
           stoppable && button(t("raid.stop"), { class: "small", onclick: call("/api/disks/raid/check", { id: pool.id, action: "stop" }) }),
           !busy && pool.kind === "md" && pool.state === "ok" && pool.errors > 0 && button(t("raid.repair"), { class: "small primary", onclick: () => askCall({ title: t("raid.repairTitle", { name: pool.name }), lead: t("raid.repairLead"), label: t("raid.repairGo"), iconName: "refresh" }, "/api/disks/raid/check", { id: pool.id, action: "repair" }) }),
-          !busy && counted && button(t(pool.kind === "md" ? "raid.forget" : "raid.clear"), { class: "small quiet", onclick: () => askCall({ title: t(pool.kind === "md" ? "raid.forgetTitle" : "raid.clearTitle", { name: pool.name }), lead: t(pool.kind === "md" ? "raid.forgetLead" : "raid.clearLead"), label: t(pool.kind === "md" ? "raid.forget" : "raid.clear"), iconName: "x" }, "/api/disks/raid/clear", { id: pool.id }) }),
+          !busy && counted && button(t(pool.kind === "md" ? "raid.forget" : "raid.clear"), { class: "small quiet", onclick: () => askCall({ title: t(pool.kind === "md" ? "raid.forgetTitle" : "raid.clearTitle", { name: pool.name }), lead: t(pool.kind === "md" ? "raid.forgetLead" : "raid.clearLead"), label: t(pool.kind === "md" ? "raid.forget" : "raid.clear"), iconName: "x" }, "/api/disks/raid/clear", { id: pool.id }) }),])
         ),
       ),
     );
@@ -19261,7 +19281,7 @@ function placesCard(data) {
         null,
         h(
           "div",
-          { class: "row-actions" },
+          { class: "row-actions" }, foldActions([
           (!p.mounted || p.away) && button(t("netplace.retry"), { class: "small", onclick: async (e) => {
             e.currentTarget.disabled = true;
             try {
@@ -19272,7 +19292,7 @@ function placesCard(data) {
             }
           } }, "refresh"),
           button(t("netplace.change"), { class: "small", onclick: () => placeDialog(p) }),
-          button(t("netplace.remove"), { class: "small quiet", onclick: () => removePlaceDialog(p) }),
+          button(t("netplace.remove"), { class: "small quiet", onclick: () => removePlaceDialog(p) }),])
         ),
       ),
     );
