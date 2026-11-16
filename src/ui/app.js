@@ -508,7 +508,6 @@ const AREAS = {
     { id: "apps", view: "server" },
     { id: "docker", sections: ["docker"] },
     { id: "containers", view: "containers", module: "containers" },
-    { id: "files", hash: "#/files/", link: true },
     { id: "system", sections: ["tools"] },
     { id: "load", hash: "#/machines/load/here", link: true },
   ],

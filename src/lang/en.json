@@ -5649,7 +5649,6 @@
   "area.server.overview": "Overview",
   "area.server.apps": "Apps",
   "area.server.containers": "Containers and VMs",
-  "area.server.files": "Files",
   "power.restart": "Restart",
   "server.new": "New",
   "server.all": "All apps",
