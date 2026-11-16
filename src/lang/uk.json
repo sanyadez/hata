@@ -5853,5 +5853,6 @@
   "error.tv.portTaken": "Порт {port} на цьому сервері зайнятий, тож програвач не може відповідати Home Assistant на ньому.",
   "error.tv.haFailed": "Програвач не ввімкнув свій вебсервер.",
   "activity.tv.haOn": "Home Assistant допущено до програвача телевізора",
-  "activity.tv.haOff": "Доступ Home Assistant до програвача телевізора закрито"
+  "activity.tv.haOff": "Доступ Home Assistant до програвача телевізора закрито",
+  "tv.out": "Куди звук"
 }

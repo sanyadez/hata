@@ -5853,5 +5853,6 @@
   "error.tv.portTaken": "Port {port} is taken on this server, so the player cannot answer Home Assistant there.",
   "error.tv.haFailed": "The player did not turn its web server on.",
   "activity.tv.haOn": "Home Assistant let in to the TV player",
-  "activity.tv.haOff": "Home Assistant's way to the TV player closed"
+  "activity.tv.haOff": "Home Assistant's way to the TV player closed",
+  "tv.out": "Sound goes to"
 }
