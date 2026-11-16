@@ -94,6 +94,54 @@ WantedBy=multi-user.target
 `;
 }
 
+export const SPEAKER_UNIT = "hata-speaker.service";
+
+/** The name the speaker goes by in Music Assistant: letters, digits, spaces and a few signs; "" — not a name */
+export function cleanSpeakerName(raw: unknown): string {
+  const name = typeof raw === "string" ? raw.trim().replace(/\s+/g, " ") : "";
+  return /^[\p{L}\p{N} ._-]{1,40}$/u.test(name) ? name : "";
+}
+
+/** The address of the server a speaker goes to, `host[:port]`; "" — it finds one by itself; null — not an address */
+export function cleanSpeakerServer(raw: unknown): string | null {
+  const server = typeof raw === "string" ? raw.trim() : "";
+  if (!server) return "";
+  const m = /^([A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?)(?::(\d{1,5}))?$/.exec(server);
+  return m && (!m[2] || (Number(m[2]) > 0 && Number(m[2]) < 65536)) ? server : null;
+}
+
+/**
+ * The service that makes this server's speakers a player of Music Assistant (or of a Lyrion server):
+ * Squeezelite on the output chosen for music. It lets the output go a few seconds after it falls
+ * silent, so Hata's own player can have it then.
+ */
+export function speakerUnit(name: string, output: string, server: string): string {
+  const args = ["-n", `"${name}"`, "-o", output, "-C", "5", ...(server ? ["-s", server] : [])];
+  return `# Written by Hata: changes made here are lost
+[Unit]
+Description=Hata speaker for Music Assistant
+After=network-online.target sound.target bluealsa.service
+Wants=network-online.target
+
+[Service]
+User=${MUSIC_USER}
+SupplementaryGroups=audio
+ExecStart=/usr/bin/squeezelite ${args.join(" ")}
+Restart=always
+RestartSec=10
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ProtectKernelTunables=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+
+[Install]
+WantedBy=multi-user.target
+`;
+}
+
 /** Whole lines of what mpv has sent so far, as values, and what is left for the next piece */
 export function takeLines(kept: string): { messages: Record<string, unknown>[]; rest: string } {
   const lines = kept.split("\n");

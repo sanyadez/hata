@@ -12,6 +12,7 @@ import { BLOCK_DEFAULTS, cleanBlock, type BlockSettings } from "./dnsblock";
 import { cleanForwards, type Forward } from "./forward";
 import { cleanModules, type ModuleSwitches } from "./modules";
 import { cleanNames, type DomainName } from "./names";
+import { cleanSpeakerName, cleanSpeakerServer } from "./sound";
 import { cleanFolders } from "./tv";
 import { cleanMachineShares, cleanShares, type MachineShare, type Share } from "./smbconf";
 import { changeAppearance, cleanAppearance, DEFAULT_APPEARANCE, type Appearance } from "./wallpapers";
@@ -137,7 +138,7 @@ export interface Settings {
   /** The media player on the server's screen (`tv.ts`): the folders it shows; whether its sound output was chosen */
   tv: { folders: string[]; audioChosen: boolean };
   /** The music player: where its sound goes (an ALSA device; "" — not chosen) and how loud */
-  music: { output: string; volume: number };
+  music: { output: string; volume: number; speaker: { on: boolean; name: string; server: string } };
   /** Which modules are on (`modules.ts`); null — not decided yet: a server from before modules, until its first start */
   modules: ModuleSwitches | null;
 }
@@ -263,7 +264,7 @@ const DEFAULTS: Settings = {
   trash: { days: 30 },
   modules: null,
   tv: { folders: [], audioChosen: false },
-  music: { output: "", volume: 60 },
+  music: { output: "", volume: 60, speaker: { on: false, name: "", server: "" } },
 };
 
 /** A host name with at least two labels: letters, digits and hyphens */
@@ -307,6 +308,11 @@ export const settings: Settings = {
   music: {
     output: isPlainObject(saved.music) && typeof saved.music.output === "string" && /^[\w:=,.-]{1,120}$/.test(saved.music.output) ? saved.music.output : "",
     volume: isPlainObject(saved.music) && Number.isInteger(saved.music.volume) && saved.music.volume >= 0 && saved.music.volume <= 100 ? saved.music.volume : 60,
+    speaker: {
+      on: isPlainObject(saved.music) && isPlainObject(saved.music.speaker) && saved.music.speaker.on === true,
+      name: isPlainObject(saved.music) && isPlainObject(saved.music.speaker) ? cleanSpeakerName(saved.music.speaker.name) : "",
+      server: (isPlainObject(saved.music) && isPlainObject(saved.music.speaker) ? cleanSpeakerServer(saved.music.speaker.server) : "") ?? "",
+    },
   },
   names: cleanNames(saved.names),
   forwards: cleanForwards(saved.forwards),

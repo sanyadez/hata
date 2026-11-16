@@ -22,7 +22,7 @@ import { machines, startMachines } from "./machines";
 import { startMachineUsers } from "./machineusers";
 import { cleanModules, isModule, missingFor, MODULE_IDS, MODULES, neededBy, switchesFor, type ModuleGroup, type ModuleId } from "./modules";
 import { mergedFolders } from "./mounting";
-import { startMusic, stopMusic } from "./music";
+import { speakerOn, startMusic, stopMusic } from "./music";
 import { placesKept, startNetPlaces } from "./netplaces";
 import { offsiteOn } from "./offsite";
 import { hosts as proxmoxHosts, startProxmox } from "./proxmox";
@@ -99,7 +99,7 @@ const RUNS: Record<ModuleId, Run> = {
   },
   tv: { start: watchTv, uses: () => when("tv", tvEnabled()), was: tvSetUp },
   bluetooth: { start: startBluetooth, uses: () => some("bluetooth", pairedKept()) },
-  music: { start: startMusic, stop: stopMusic, uses: () => [] },
+  music: { start: startMusic, stop: stopMusic, uses: () => when("speaker", speakerOn()) },
   assistant: { uses: () => some("keys", listKeys().length), was: () => assistantReady(assistantConfig()) },
 };
 

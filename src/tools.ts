@@ -24,6 +24,7 @@ import { afterPackage, networkReport, type Nic } from "./network";
 import { installCommand, installPackage, PATH, removeCommand, removePackages, run } from "./packages";
 import { installSamba } from "./shares";
 import { installTv, tvEnabled } from "./television";
+import { afterSpeakerRemoved, beforeSpeakerInstall, speakerOn } from "./music";
 import { pairedKept, soundAfterInstall, startService as startBluetoothService } from "./bluetooth";
 import { packageUpdates } from "./sysupdates";
 import { inUse as wireguardInUse } from "./wireguard";
@@ -77,6 +78,7 @@ const SPECS: Spec[] = [
   { id: "bluez", name: "BlueZ", package: "bluez", bin: "bluetoothctl", version: ["bluetoothctl", "--version"], page: "#/machines/this/bluetooth" },
   { id: "bluez-alsa", name: "BlueALSA", package: "bluez-alsa-utils", bin: "bluealsa", version: ["bluealsa", "--version"], page: "#/machines/this/bluetooth", family: ["bluez-alsa-utils", "libasound2-plugin-bluez"] },
   { id: "mpv", name: "mpv", package: "mpv", bin: "mpv", version: ["mpv", "--version"], page: "#/house/music" },
+  { id: "squeezelite", name: "Squeezelite", package: "squeezelite", bin: "squeezelite", version: ["squeezelite", "-t"], page: "#/house/music" },
   { id: "ffmpeg", name: "FFmpeg", package: "ffmpeg", bin: "ffmpeg", version: ["ffmpeg", "-version"], page: "#/files" },
   { id: "openssh-client", name: "OpenSSH client", package: "openssh-client", bin: "sftp", version: ["ssh", "-V"], page: "#/settings/backups", base: true },
 ];
@@ -164,6 +166,7 @@ function holdsOf(id: string, nics: Nic[], remote: boolean, containers: boolean, 
   if (id === "kodi" && tvEnabled()) return "tv";
   if (id === "incus-vm" && vms) return "vms";
   if (id === "bluez" && pairedKept() > 0) return "bluetooth";
+  if (id === "squeezelite" && speakerOn()) return "speaker";
   if (id === "wireguard-tools" && wireguardInUse()) return "wireguard";
   if (id === "samba" && settings.shares.length > 0) return "shares";
   if (id === "snapraid" && settings.snapraid.parity !== "") return "array";
@@ -251,6 +254,7 @@ export async function installOne(id: string, user: string): Promise<{ job: Job }
       return { error: e instanceof Error ? e.message : String(e) };
     }
   }
+  if (spec.id === "squeezelite") await beforeSpeakerInstall();
   const error = await installPackage(spec.package);
   if (!error) await afterPackage(spec.package);
   // the package may come with its service not started (a system set not to start services by itself)
@@ -282,6 +286,7 @@ export async function removeOne(id: string, user: string): Promise<{ code: strin
   const failed = await removePackages(packages);
   if (failed) return { code: "tools.removeFailed", message: failed };
   if (spec.id === "incus") await afterIncusRemoved().catch(() => {});
+  if (spec.id === "squeezelite") await afterSpeakerRemoved().catch(() => {});
   record("system.tool.removed", { user, detail: spec.name });
   bus.publish("apps");
   bus.publish("disks");

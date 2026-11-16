@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { cleanSpeakerName, cleanSpeakerServer, speakerUnit } from "../src/sound";
 import { cleanLink, musicCommand, musicUnit, nameOf, nowOf, outputFor, outputsOf, parseCards, queueOf, takeLines } from "../src/sound";
 
 const CARDS = ` 0 [PCH            ]: HDA-Intel - HDA Intel PCH
@@ -77,4 +78,18 @@ test("the player's buttons", () => {
   expect(musicCommand("remove", -1, 3)).toBeNull();
   expect(musicCommand("quit", undefined, 3)).toBeNull();
   expect(musicCommand("run", "rm -rf /", 3)).toBeNull();
+});
+
+test("the speaker for Music Assistant", () => {
+  expect(cleanSpeakerName("  Вітальня   hata-1 ")).toBe("Вітальня hata-1");
+  expect(cleanSpeakerName('a"; rm -rf /')).toBe("");
+  expect(cleanSpeakerName("%h $x")).toBe("");
+  expect(cleanSpeakerServer("")).toBe("");
+  expect(cleanSpeakerServer("192.168.1.10:3483")).toBe("192.168.1.10:3483");
+  expect(cleanSpeakerServer("ma.local")).toBe("ma.local");
+  expect(cleanSpeakerServer("-s evil")).toBeNull();
+  expect(cleanSpeakerServer("host:99999")).toBeNull();
+  const unit = speakerUnit("Вітальня", "plughw:CARD=Device_1,DEV=0", "");
+  expect(unit).toContain('ExecStart=/usr/bin/squeezelite -n "Вітальня" -o plughw:CARD=Device_1,DEV=0 -C 5\n');
+  expect(speakerUnit("x", "bluealsa:DEV=11:22:33:44:55:66,PROFILE=a2dp", "10.0.0.2")).toContain("-C 5 -s 10.0.0.2\n");
 });

@@ -113,7 +113,7 @@ import { instructions as mcpInstructions, tellHttps, TOOLS } from "./mcptools";
 import { moduleOn, modulesOn, modulesReport, setModule, settleModules, startModules } from "./moduleruns";
 import { findForModules } from "./modulefinds";
 import { bluetoothReport, connectDevice as connectBluetooth, disconnectDevice as disconnectBluetooth, endPairing as endBluetoothPairing, forgetDevice as forgetBluetooth, lookAround as lookForBluetooth, pair as pairBluetooth, setPower as setBluetoothPower, startService as startBluetoothService } from "./bluetooth";
-import { musicDo, musicNow, musicReport, playMusic, setMusicOutput } from "./music";
+import { musicDo, musicNow, musicReport, playMusic, setMusicOutput, setSpeaker } from "./music";
 import { installTv, playOnTv, remote as tvRemote, keepPicture as keepTvPicture, mediaInfo as tvMediaInfo, streamsHere as tvStreamsHere, mediaStream as tvMediaStream, mediaSubs as tvMediaSubs, setLanguage as setTvLanguage, setPref as setTvPref, setAudio as setTvAudio, setFolders as setTvFolders, setPicture as setTvPicture, switchTv, tvNow, tvReport } from "./television";
 import { moduleOfPath, moduleOfTool } from "./modules";
 import { serverTree } from "./servertree";
@@ -1522,7 +1522,10 @@ async function api(req: Request, url: URL, server: Server<unknown>): Promise<Res
   }
   // music on the server's own speakers
   if (path === "/api/music" && method === "GET") return json(await musicReport());
-  if (path === "/api/music" && method === "PUT") return json(await setMusicOutput((await body(req)).output, user.name));
+  if (path === "/api/music" && method === "PUT") {
+    const data = await body(req);
+    return json("speaker" in data ? await setSpeaker(data.speaker, user.name) : await setMusicOutput(data.output, user.name));
+  }
   if (path === "/api/music/play" && method === "POST") {
     server.timeout(req, 0);
     return json(await playMusic(await body(req), user.name));

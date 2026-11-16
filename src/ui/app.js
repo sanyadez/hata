@@ -13643,6 +13643,41 @@ function renderMusic() {
   if (state.music) paintMusic();
 }
 
+/** The same speakers as a player of Music Assistant: Squeezelite, by its own button */
+function musicSpeakerCard(m, act) {
+  const s = m.speaker;
+  const error = h("p", { class: "error", role: "alert" });
+  if (s.state === "missing") {
+    const install = async (e) => {
+      const el = e.currentTarget;
+      el.disabled = true;
+      el.lastChild.textContent = t("tools.installing");
+      try {
+        await api("POST", "/api/tools/squeezelite/install", {});
+        void loadMusic();
+      } catch (err) {
+        error.textContent = errorText(err);
+        el.disabled = false;
+      }
+    };
+    return h("section", { class: "card pad stack" }, h("h2", null, t("music.speaker.title")), h("p", { class: "muted" }, t("music.speaker.lead")), h("p", null, t("music.speaker.what")), s.install ? h("p", { class: "cmd" }, icon("terminal"), s.install) : h("p", { class: "muted small" }, t("mounting.needs.byHand", { package: "squeezelite" })), error, s.install && h("footer", null, button(t("mounting.needs.install", { package: "Squeezelite" }), { onclick: install }, "download")));
+  }
+  const on = s.state === "on";
+  const name = h("input", { value: s.name, maxLength: 40, required: true, "aria-label": t("music.speaker.name") });
+  const server = h("input", { value: s.server, maxLength: 260, placeholder: t("music.speaker.serverAuto"), spellcheck: false, autocapitalize: "off", class: "mono", "aria-label": t("music.speaker.server") });
+  const typed = () => ({ name: name.value.trim(), server: server.value.trim() });
+  return h(
+    "section",
+    { class: "card pad stack" },
+    h("div", { class: "section-head" }, h("h2", null, t("music.speaker.title"), h("span", { class: "state " + (on ? (s.running ? "running" : "partial") : "stopped") }, t(on ? (s.running ? "bt.state.on" : "music.speaker.starting") : "bt.state.off")))),
+    h("p", { class: "muted" }, t("music.speaker.lead")),
+    settingRow(t("music.speaker.name"), t("music.speaker.nameHint"), name),
+    settingRow(t("music.speaker.server"), t("music.speaker.serverHint"), server),
+    on && h("p", { class: "muted small" }, t("music.speaker.how")),
+    h("footer", null, h("div", { class: "row-actions" }, on && button(t("bt.turnOff"), { onclick: () => act("PUT", "/api/music", { speaker: { on: false } }) }), button(t(on ? "settings.save" : "music.speaker.turnOn"), { class: "primary", onclick: () => act("PUT", "/api/music", { speaker: { ...typed(), on: true } }) }))),
+  );
+}
+
 function paintMusic() {
   const box = document.getElementById("music-body");
   const m = state.music;
@@ -13718,7 +13753,7 @@ function paintMusic() {
         )
       : h("p", { class: "muted" }, t("music.queueEmpty")),
   );
-  put(box, h("div", { class: "music-page" }, player, queue));
+  put(box, h("div", { class: "music-page" }, h("div", { class: "stack" }, player, musicSpeakerCard(m, act)), queue));
 }
 
 async function loadTv() {
@@ -14036,7 +14071,7 @@ const MODULE_GROUPS = ["storage", "network", "servers", "more"];
 /** Where a module's own things are once it is on */
 const MODULE_HOME = { music: "#/house/music", bluetooth: "#/machines/this/bluetooth", tv: "#/house/tv", raid: "#/settings/protection", netplaces: "#/settings/places", shares: "#/settings/shares", offsite: "#/settings/backups", remote: "#/settings/remote", dns: "#/settings/dns", adblock: "#/settings/adblock", domains: "#/settings/ports", machines: "#/machines", proxmox: "#/machines", containers: "#/containers", integrations: "#/settings/integrations", assistant: "#/settings/assistant" };
 /** Where the thing that holds a module on is taken away */
-const MODULE_USE_AT = { bluetooth: "#/machines/this/bluetooth", tv: "#/tv", array: "#/settings/protection", merged: "#/settings/storage", pools: "#/settings/protection", places: "#/settings/places", shares: "#/settings/shares", offsite: "#/settings/backups", wireguard: "#/settings/remote", tailscale: "#/settings/remote", dnsOn: "#/settings/dns", blocking: "#/settings/adblock", names: "#/settings/https", ports: "#/settings/ports", machines: "#/machines", proxmox: "#/machines", containers: "#/containers", homeAssistant: "#/settings/integrations", qbit: "#/settings/integrations", frigate: "#/settings/integrations", keys: "#/settings/agents" };
+const MODULE_USE_AT = { speaker: "#/house/music", bluetooth: "#/machines/this/bluetooth", tv: "#/tv", array: "#/settings/protection", merged: "#/settings/storage", pools: "#/settings/protection", places: "#/settings/places", shares: "#/settings/shares", offsite: "#/settings/backups", wireguard: "#/settings/remote", tailscale: "#/settings/remote", dnsOn: "#/settings/dns", blocking: "#/settings/adblock", names: "#/settings/https", ports: "#/settings/ports", machines: "#/machines", proxmox: "#/machines", containers: "#/containers", homeAssistant: "#/settings/integrations", qbit: "#/settings/integrations", frigate: "#/settings/integrations", keys: "#/settings/agents" };
 const moduleName = (id) => t(`modules.${id}.name`);
 
 /** Which modules are on, asked again: after a change made here or on another page */
