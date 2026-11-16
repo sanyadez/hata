@@ -1746,7 +1746,6 @@ dialog.add-dialog:not([open]) { display: none; }
 .jt-strip .jt-title, .jt-strip .jt-short { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .jt-thin { position: absolute; left: 0; right: 0; bottom: 0; }
 .jt-thin .jt-bar { height: 3px; gap: 2px; }
-body.has-jobs #view:not(.fill) { padding-bottom: calc(var(--jobs-h, 0px) + 48px); }
 
 /* a tile whose app is not there yet: grey, with what is known of the work */
 .tile-bar { position: absolute; left: 12px; right: 12px; bottom: 10px; height: 3px; overflow: hidden; border-radius: 2px; background: var(--bar-track); }

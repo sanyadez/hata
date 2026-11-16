@@ -9224,6 +9224,8 @@ const jobWaits = (e) => e.status === "failed" && !e.stopped;
 function jobShort(job, machine = "") {
   const p = job?.progress;
   const pct = jobPercent(p);
+  // a copy or a move of files has no steps: how much of how much
+  if (job && isFileJob(job)) return p?.total ? t("jobs.copied", { done: bytes(p.bytes ?? 0), total: bytes(p.total), pct }) : t("jobs.counting");
   if (machine) return pct === null ? t("jobs.short.machineBusy", { machine }) : t("jobs.short.machine", { machine, pct });
   if (p?.step === "download" && pct !== null) return t("jobs.short.downloading", { pct });
   return t(p?.step ? `jobs.short.${p.step}` : "jobs.short.check");

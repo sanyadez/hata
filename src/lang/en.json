@@ -701,6 +701,8 @@
   "job.extract": "Extracting {app}",
   "activity.files.rename": "Renamed: {target}",
   "activity.files.move": "Moved: {target}",
+  "activity.files.copyCut": "A copy of files was cut by a restart of Hata; what it had copied was removed: {target}",
+  "activity.files.moveCut": "A move of files was cut by a restart of Hata; the original is where it was: {target}",
   "activity.files.copy": "Copied: {target}",
   "activity.files.delete": "Moved to the trash: {target}",
   "activity.files.deleteForever": "Deleted for good: {target}",

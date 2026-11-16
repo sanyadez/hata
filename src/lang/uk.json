@@ -701,6 +701,8 @@
   "job.extract": "Розпаковування {app}",
   "activity.files.rename": "Перейменовано: {target}",
   "activity.files.move": "Переміщено: {target}",
+  "activity.files.copyCut": "Копіювання файлів обірвав перезапуск Hata; скопійоване прибрано: {target}",
+  "activity.files.moveCut": "Переміщення файлів обірвав перезапуск Hata; оригінал лишився на місці: {target}",
   "activity.files.copy": "Скопійовано: {target}",
   "activity.files.delete": "У кошик: {target}",
   "activity.files.deleteForever": "Видалено назавжди: {target}",

@@ -98,7 +98,7 @@ import { addQbit, addTorrents, changeQbit, qbitFound, qbitOfApps, qbitServer, qb
 import { act as haAct, addServer as addHa, allowProxy as haAllowProxy, changeServer as changeHa, discover as discoverHa, entities as haEntities, forgetUser as haForgetUser, homeAssistantTrouble, installUpdate as haInstallUpdate, makeBackup as haMakeBackup, removeServer as removeHa, renameEntity as haRename, server as haServer, servers as haServers, tileStates as haTileStates, visibleTo as haVisibleTo } from "./homeassistant";
 import { sees as haSees } from "./ha";
 import { dockerInfo, type DockerInfo, listContainers, watchEvents } from "./docker";
-import { abortUpload, copyIn, locate, validName, archivePlan, dropFavorites, emptyTrash, favoritesOf, setFavorite, extract as extractArchive, find as findFiles, list as listFiles, makeFile, makeFolder, pinFolder, pinnedFolders, readable, readText, remove as removeFiles, rename as renameFile, restore as restoreFiles, setTrashDays, startTrash, summary as filesSummary, transfer, trash, upload, writeText } from "./files";
+import { abortUpload, copyIn, endCutCopies, locate, validName, archivePlan, dropFavorites, emptyTrash, favoritesOf, setFavorite, extract as extractArchive, find as findFiles, list as listFiles, makeFile, makeFolder, pinFolder, pinnedFolders, readable, readText, remove as removeFiles, rename as renameFile, restore as restoreFiles, setTrashDays, startTrash, summary as filesSummary, transfer, trash, upload, writeText } from "./files";
 import { adoptProject, casaosState, containerDraft, importCount, importList, moveInCasaos, projectDraft, rebuildContainer } from "./import";
 import { accessOf, dropAccess, dropUser, gateTarget, guard, guardsOf, mayOpen, otherPorts, MAX_APP_BODY, page, passToApp, setAccess, startGates, tunnelHandlers } from "./gate";
 import { addName, changeName, domainsReport, nameOf as domainName, onNamesChanged, removeName, upstream as domainUpstream } from "./domains";
@@ -3408,6 +3408,7 @@ export async function serve(): Promise<void> {
   startMounting();
   startNetwork();
   startTrash();
+  void endCutCopies();
   scheduleStoreSync();
   scheduleBackups();
   void resumeRestore();

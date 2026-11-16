@@ -24,7 +24,7 @@ import { DATA_DIR, saveSettings, SECRETS_DIR, settings, trashDays, type Favorite
 import { movePath } from "./dashboard";
 import { parseMounts } from "./disks";
 import { answered, networkMounts, roomOf } from "./netroom";
-import { readJsonFile } from "./fsutil";
+import { readJsonFile, writeJsonAtomic } from "./fsutil";
 import { writablePath } from "./smbconf";
 import { findInTrash, inTrash, keepDays, listTrash, purgeTrash, putInTrash, sweepTrash, takeFromTrash, TRASH_DIR, type TrashItem } from "./trash";
 import { openZip } from "./unzip";
@@ -511,6 +511,36 @@ export function freeName(dir: string, name: string, taken = (candidate: string) 
 }
 
 /**
+ * The copies going on now, kept on the disk: a restart of Hata (an update of it, a restart of the server)
+ * ends them half-way, and half a file under the right name and of nearly the right size is worse than
+ * none. What a copy was writing when Hata went down is removed at the next start; a move whose copy was
+ * complete keeps the copy. The original is whole in both cases.
+ */
+const COPYING = join(DATA_DIR, "file-jobs.json");
+type Copying = { dest: string; from: string; copy: boolean; whole: boolean; user: string };
+let copying: Copying[] = [];
+const keepCopying = () => {
+  try {
+    writeJsonAtomic(COPYING, copying);
+  } catch {
+    // a state folder that cannot be written: the copy goes on all the same
+  }
+};
+
+/** At the start: what copies an earlier Hata left half-done is taken away, and said in the activity log */
+export async function endCutCopies(): Promise<void> {
+  const left = readJsonFile<Copying[]>(COPYING, []);
+  if (!Array.isArray(left) || !left.length) return;
+  for (const one of left) {
+    if (!one || typeof one.dest !== "string" || !one.dest.startsWith("/")) continue;
+    if (!one.whole) await rm(one.dest, { recursive: true, force: true }).catch(() => {});
+    record(one.copy ? "files.copyCut" : "files.moveCut", { user: one.user, detail: `${basename(one.from)} → ${dirname(one.dest)}` });
+  }
+  copying = [];
+  keepCopying();
+}
+
+/**
  * Moves or copies entries into the folder `to`. Nothing is overwritten: a name taken there is an
  * error — except for a copy into the same folder, which gets the next free name.
  *
@@ -572,19 +602,31 @@ export function transfer(paths: unknown, to: unknown, copy: boolean, user: strin
     try {
       for (const { from, dest } of long) {
         log(`${from} → ${dest}`);
+        const mine: Copying = { dest, from, copy, whole: false, user };
+        copying.push(mine);
+        keepCopying();
+        const forget = () => {
+          copying = copying.filter((one) => one !== mine);
+          keepCopying();
+        };
         const cp = Bun.spawn(["cp", "-a", "--", from, dest], { stdout: "ignore", stderr: "pipe", signal: stopper.signal });
         const [code, err] = await Promise.all([cp.exited, new Response(cp.stderr).text()]);
         if (code !== 0) {
           // half a copy is of no use to anybody; the original is still whole
           await rm(dest, { recursive: true, force: true }).catch(() => {});
+          forget();
           if (stopper.signal.aborted) throw new Error("Stopped: what was copied so far is removed, the original is untouched");
           throw new Error(/No space left/i.test(err) ? "The disk is full" : err.trim().split("\n").pop() || `cp exited with ${code}`);
         }
+        // from here on the copy is whole: a restart must not take it away
+        mine.whole = true;
+        keepCopying();
         if (!copy) {
           await rm(from, { recursive: true, force: false });
           repin(from, dest);
           reshare(from, dest);
         }
+        forget();
       }
     } finally {
       clearInterval(tick);
