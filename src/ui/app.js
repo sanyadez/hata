@@ -3853,7 +3853,7 @@ function paintLoad() {
   const at = state.route.place ?? "";
   const shown = at ? d.places.filter((p) => p.id === at) : d.places;
   const pill = (id, label) => h("a", { class: "seg-pill" + (at === id ? " active" : ""), href: id ? `#/machines/load/${id}` : "#/machines/load" }, label);
-  const placeLabel = (p) => (p.kind === "here" ? t("load.here", { name: p.name }) : p.kind === "pve" ? `${p.host} · ${p.name}` : p.name);
+  const placeLabel = (p) => (p.kind === "here" ? t("load.here", { name: p.name }) : p.kind === "pve" && p.host !== p.name ? `${p.host} · ${p.name}` : p.name);
   const w = d.warn;
   put(
     box,

@@ -2023,7 +2023,7 @@ dialog.nav-sheet[open] { display: grid; gap: 14px; padding: 10px 14px calc(14px 
 
 .filter-bar { display: flex; align-items: center; justify-content: space-between; gap: 10px 16px; flex-wrap: wrap; padding: 10px 14px; }
 .seg-pills { display: flex; flex-wrap: wrap; gap: 2px; padding: 3px; border-radius: 10px; background: var(--surface-2); }
-.seg-pill { height: 30px; padding: 0 12px; border: 0; border-radius: 8px; background: none; color: var(--muted); font: 500 13px var(--font-body); cursor: pointer; white-space: nowrap; }
+.seg-pill { display: inline-flex; align-items: center; height: 30px; padding: 0 12px; text-decoration: none; border: 0; border-radius: 8px; background: none; color: var(--muted); font: 500 13px var(--font-body); cursor: pointer; white-space: nowrap; }
 .seg-pill:hover { color: var(--text); }
 .seg-pill.active { background: var(--surface); color: var(--text); font-weight: 600; box-shadow: 0 1px 2px rgb(0 0 0 / 12%); }
 .with-dot { display: inline-flex; align-items: center; gap: 8px; }
@@ -2157,3 +2157,5 @@ tr.warn-row .load-line path { stroke: var(--warn); }
 a.kpi { color: inherit; text-decoration: none; border-radius: var(--radius-sm); }
 a.kpi:hover { background: var(--surface-2); }
 .load-head { display: grid; gap: 10px; }
+#load-body { display: grid; gap: 24px; min-width: 0; }
+.load-head .seg-pills { justify-self: start; }

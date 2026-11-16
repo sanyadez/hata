@@ -211,7 +211,7 @@ export function loadTrouble(now = Date.now()): AttentionItem[] {
       if (over < warn.minutes) continue;
       const last = h!.cpu.slice(-over) as number[];
       const percent = Math.round(last.reduce((s, v) => s + v, 0) / last.length);
-      items.push({ id: `load:${p.id}:${r.key}`, severity: "warn", code: "load.cpu", detail: { name: r.name, kind: r.kind, place: p.kind === "pve" ? `${p.host} · ${p.name}` : p.name, placeId: p.id, here: p.kind === "here" ? 1 : 0, percent, minutes: over } });
+      items.push({ id: `load:${p.id}:${r.key}`, severity: "warn", code: "load.cpu", detail: { name: r.name, kind: r.kind, place: p.kind === "pve" && p.host !== p.name ? `${p.host} · ${p.name}` : p.name, placeId: p.id, here: p.kind === "here" ? 1 : 0, percent, minutes: over } });
     }
   }
   return items;
