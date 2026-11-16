@@ -2687,6 +2687,20 @@ function splitActions(entries, header) {
 }
 
 /**
+ * A window's or a row's actions: one button for the main thing and the rest (menu entries) under an arrow joined to
+ * it — several buttons side by side wrap into a heap. Without a main thing the arrow's button says "More".
+ */
+function oneAndMore(first, rest, kind = "") {
+  const entries = rest.filter(Boolean);
+  if (!entries.length) return first;
+  const opener = (e) => {
+    const r = e.currentTarget.closest(".split").getBoundingClientRect();
+    menuAt({ x: r.left, y: r.bottom + 4 }, null, entries);
+  };
+  return h("span", { class: "split" }, first, button(first ? "" : t("attention.more"), { class: kind + " split-more", title: t("attention.more"), "aria-label": t("attention.more"), "aria-haspopup": "menu", onclick: opener }, "down"));
+}
+
+/**
  * What puts an end to the thing an item is about rather than mending it: a shared folder that is gone stops being
  * shared, a machine that is gone is removed, a disk that is gone is let go, an app that keeps failing is stopped
  */
@@ -18164,18 +18178,24 @@ function diskDialog(name) {
               h(
                 "span",
                 { class: "with-actions" },
-                v.mounts.length ? h("span", { class: "mono" }, v.mounts[0]) : state.disks.mounting.mountable.includes(v.path) ? button(t("mounting.connect"), { class: "small", onclick: () => (dialog.close(), connectDialog(disk, v)) }) : h("span", { class: "muted" }, t(v.swap ? "mounting.swap" : "disks.notMounted")),
-                canTend(disk, v) && button(t("fsck.go"), { class: "small quiet", onclick: () => (dialog.close(), checkDialog(disk, v)) }),
-                canTend(disk, v) && button(t("mounting.rename"), { class: "small quiet", onclick: () => (dialog.close(), labelDialog(disk, v)) }),
-                v.kind === "part" && disk.volumes.length > 1 && changeable(disk).volumes.includes(v.path) && button(t("mounting.format"), { class: "small quiet", onclick: () => (dialog.close(), formatDialog(disk, v)) }),
-                v.kind === "part" && changeable(disk).volumes.includes(v.path) && RESIZABLE.includes(fsFamily(v.fstype)) && button(t("resize.button"), { class: "small quiet", onclick: () => (dialog.close(), resizeDialog(disk, v)) }),
-                v.kind === "part" && changeable(disk).volumes.includes(v.path) && button(t("partDelete.button"), { class: "small quiet", onclick: () => (dialog.close(), deletePartDialog(disk, v)) }),
+                v.mounts.length ? h("span", { class: "mono" }, v.mounts[0]) : !state.disks.mounting.mountable.includes(v.path) && h("span", { class: "muted" }, t(v.swap ? "mounting.swap" : "disks.notMounted")),
+                oneAndMore(
+                  !v.mounts.length && state.disks.mounting.mountable.includes(v.path) ? button(t("mounting.connect"), { class: "small", onclick: () => (dialog.close(), connectDialog(disk, v)) }) : null,
+                  [
+                    canTend(disk, v) && { label: t("fsck.go"), icon: "check", run: () => (dialog.close(), checkDialog(disk, v)) },
+                    canTend(disk, v) && { label: t("mounting.rename"), icon: "edit", run: () => (dialog.close(), labelDialog(disk, v)) },
+                    v.kind === "part" && changeable(disk).volumes.includes(v.path) && RESIZABLE.includes(fsFamily(v.fstype)) && { label: t("resize.button"), icon: "sliders", run: () => (dialog.close(), resizeDialog(disk, v)) },
+                    v.kind === "part" && disk.volumes.length > 1 && changeable(disk).volumes.includes(v.path) && { label: t("mounting.format"), icon: "disk", run: () => (dialog.close(), formatDialog(disk, v)) },
+                    v.kind === "part" && changeable(disk).volumes.includes(v.path) && { label: t("partDelete.button"), icon: "trash", danger: true, run: () => (dialog.close(), deletePartDialog(disk, v)) },
+                  ],
+                  "small",
+                ),
               ),
             ),
           ),
           (state.disks.mounting.free?.[disk.name] ?? 0) > 0 &&
             h("div", { class: "kv" }, h("div", null, h("span", null, t("mounting.unallocated")), h("div", { class: "muted small" }, bytes(state.disks.mounting.free[disk.name]))), h("span", { class: "with-actions" }, button(t("mounting.newPart"), { class: "small", onclick: () => (dialog.close(), formatDialog(disk, null, state.disks.mounting.free[disk.name])) }))),
-          changeable(disk).whole ? h("footer", null, h("span", { class: "muted small" }, t("mounting.formatHint")), button(t("mounting.wipe"), { class: "quiet", onclick: () => (dialog.close(), wipeDialog(disk)) }), button(t("mounting.formatDisk"), { onclick: () => (dialog.close(), formatDialog(disk)) })) : h("p", { class: "muted small" }, t("mounting.blocked." + (state.disks.mounting.blockers[disk.name]?.[0] ?? "mounted"))),
+          changeable(disk).whole ? h("footer", null, h("span", { class: "muted small" }, t("mounting.formatHint")), oneAndMore(button(t("mounting.formatDisk"), { onclick: () => (dialog.close(), formatDialog(disk)) }), [{ label: t("mounting.wipe"), icon: "trash", danger: true, run: () => (dialog.close(), wipeDialog(disk)) }])) : h("p", { class: "muted small" }, t("mounting.blocked." + (state.disks.mounting.blockers[disk.name]?.[0] ?? "mounted"))),
         ),
     );
   };
@@ -18607,30 +18627,35 @@ function labelDialog(disk, volume) {
 function preparedDialog(path) {
   const backups = `${path}/Backups`;
   let dialog;
-  // three things to do next, one under another: side by side they wrapped raggedly in so narrow a window
+  const keepCopies = button(t("mounting.useForBackups"), {
+    class: "primary",
+    onclick: async () => {
+      try {
+        state.settings = await api("PUT", "/api/settings", { backup: { dir: backups } });
+        dialog.close();
+        toast(t("mounting.backupsThere", { path: backups }));
+      } catch (e) {
+        toast(errorText(e), "error");
+      }
+    },
+  });
   dialog = openDialog(
     "confirm",
     h("h2", null, t("mounting.readyTitle")),
     h("p", { class: "muted" }, t("mounting.readyLead", { path })),
     h(
-      "div",
-      { class: "stack-s" },
-      button(t("mounting.useForBackups"), {
-        class: "primary",
-        onclick: async () => {
-          try {
-            state.settings = await api("PUT", "/api/settings", { backup: { dir: backups } });
-            dialog.close();
-            toast(t("mounting.backupsThere", { path: backups }));
-          } catch (e) {
-            toast(errorText(e), "error");
-          }
-        },
-      }),
-      button(t("data.moveHere"), { onclick: () => (dialog.close(), moveDataDialog(`${path}/DATA`)) }),
-      h("a", { class: "btn", href: filesHash(path), onclick: () => dialog.close() }, t("disks.fs.browse")),
+      "footer",
+      null,
+      oneAndMore(
+        keepCopies,
+        [
+          { label: t("data.moveHere"), icon: "disk", run: () => (dialog.close(), moveDataDialog(`${path}/DATA`)) },
+          { label: t("disks.fs.browse"), icon: "folder", run: () => (dialog.close(), (location.hash = filesHash(path))) },
+        ],
+        "primary",
+      ),
+      closeButton(() => dialog, t("common.close")),
     ),
-    h("footer", null, closeButton(() => dialog, t("common.close"))),
   );
 }
 
