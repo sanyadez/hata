@@ -2107,3 +2107,7 @@ button.mark:hover { border-color: var(--border-strong); color: var(--text); }
 .music-drop .music-player { border: 0; box-shadow: none; background: none; padding: 4px; backdrop-filter: none; }
 #music-now + #tv-now:not([hidden]) { margin-left: -2px; }
 .kv-line { display: grid; grid-template-columns: 9em minmax(0, 1fr) auto; align-items: center; gap: 10px; }
+.disk-uses { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.disk-use { display: flex; align-items: flex-start; gap: 10px; min-width: 0; }
+.disk-use .grow { display: grid; min-width: 0; }
+.disk-use .ico { flex: none; margin-top: 2px; }

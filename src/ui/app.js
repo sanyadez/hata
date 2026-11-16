@@ -18651,18 +18651,43 @@ function copyInDialog(disk) {
 function disconnectDialog(mount) {
   const removable = state.disks.disks.some((d) => d.name === mount.disk && (d.removable || d.transport === "usb"));
   const slot = h("div");
+  const what = h("div", { class: "stack" }, h("p", { class: "muted" }, "…"));
   let dialog;
-  const go = button(t(removable ? "mounting.eject" : "mounting.disconnect"), { class: "primary" });
+  const go = button(t(removable ? "mounting.eject" : "mounting.disconnect"), { class: "primary", disabled: true });
   go.onclick = diskAction(
     () => dialog,
     slot,
-    () => api("POST", "/api/disks/disconnect", { path: mount.path }),
+    () => api("POST", "/api/disks/disconnect", { path: mount.path, stop: true }),
     () => {
       dialog.close();
       toast(t(removable ? "mounting.ejected" : "mounting.disconnected", { path: mount.path }));
     },
   );
-  dialog = openDialog("confirm", h("h2", null, t(removable ? "mounting.ejectTitle" : "mounting.disconnectTitle", { path: mount.path })), h("p", { class: "muted" }, t(removable ? "mounting.ejectLead" : "mounting.disconnectLead")), slot, h("footer", null, closeButton(() => dialog, t("common.cancel")), go));
+  dialog = openDialog("confirm", h("h2", null, t(removable ? "mounting.ejectTitle" : "mounting.disconnectTitle", { path: mount.path })), h("p", { class: "muted" }, t(removable ? "mounting.ejectLead" : "mounting.disconnectLead")), what, slot, h("footer", null, closeButton(() => dialog, t("common.cancel")), go));
+  // what stands on the folder is said before it is taken away; what keeps files open there is stopped first
+  const ICON = { app: "box", tvPlaying: "tv", musicPlaying: "music", tvFolder: "tv", pin: "folder", favorite: "star", share: "share" };
+  const line = (use) => h("li", { class: "disk-use" }, icon(ICON[use.kind]), h("span", { class: "grow" }, h("span", { class: "strong" }, t("disks.use." + use.kind, { name: use.name })), h("span", { class: "muted small mono wrap" }, use.path)));
+  void api("GET", `/api/disks/uses?path=${encodeURIComponent(mount.path)}`).then(
+    ({ holds, uses }) => {
+      if (!dialog.isConnected) return;
+      if (holds) return put(what, h("p", { class: "error", role: "alert" }, t("error." + holds)));
+      const stopped = uses.filter((use) => use.kind === "tvPlaying" || use.kind === "musicPlaying" || (use.kind === "app" && use.running));
+      const left = uses.filter((use) => !stopped.includes(use));
+      put(
+        what,
+        stopped.length > 0 && h("div", { class: "stack" }, h("strong", null, t("disks.use.stopped")), h("ul", { class: "disk-uses" }, stopped.map(line))),
+        left.length > 0 && h("div", { class: "stack" }, h("strong", null, t("disks.use.left")), h("ul", { class: "disk-uses" }, left.map(line))),
+        uses.some((use) => use.kind === "app") && h("p", { class: "banner" }, t("disks.use.appsNote")),
+        !uses.length && h("p", { class: "muted small" }, t("disks.use.none")),
+      );
+      if (stopped.length) go.lastChild.textContent = t(removable ? "disks.use.stopEject" : "disks.use.stopDisconnect");
+      go.disabled = false;
+    },
+    (e) => {
+      put(what, h("p", { class: "error", role: "alert" }, errorText(e)));
+      go.disabled = false;
+    },
+  );
 }
 
 let disksTimer = 0;

@@ -41,7 +41,7 @@ import { checkUpdates, packageUpdates, startSysUpdates, upgrade as upgradeSystem
 import { checkPlan, readPlan, runPlan } from "./diskplan";
 import { ArrayError, arrayReport, arrayTrouble, bringBack, bringBackFile, goneList, lookAgain, rebuild as rebuildParity, repair as repairArray, scrub as scrubArray, setUp as setUpArray, stop as stopArray, sync as syncArray, turnOff as turnOffArray } from "./snapraid";
 import { dockerSpace, dropImage, dropVolume, prune as pruneDocker } from "./dockerspace";
-import { ignoreDisk, unusedDisks, absent, onDiskBack, connectVolume, disconnect, checkVolume, wipeDisk, formatDisk, mergeFolders, mountingReport, relabel, startMounting, partsOf, resizePart, deletePart, type Outcome } from "./mounting";
+import { ignoreDisk, unusedDisks, absent, onDiskBack, connectVolume, disconnect, whyKept, checkVolume, wipeDisk, formatDisk, mergeFolders, mountingReport, relabel, startMounting, partsOf, resizePart, deletePart, type Outcome } from "./mounting";
 import { moveData } from "./movedata";
 import { installPackage } from "./packages";
 import {
@@ -113,6 +113,7 @@ import { instructions as mcpInstructions, tellHttps, TOOLS } from "./mcptools";
 import { moduleOn, modulesOn, modulesReport, setModule, settleModules, startModules } from "./moduleruns";
 import { findForModules } from "./modulefinds";
 import { bluetoothReport, connectDevice as connectBluetooth, disconnectDevice as disconnectBluetooth, endPairing as endBluetoothPairing, forgetDevice as forgetBluetooth, lookAround as lookForBluetooth, pair as pairBluetooth, setPower as setBluetoothPower, startService as startBluetoothService } from "./bluetooth";
+import { diskUses, letGo } from "./diskuses";
 import { musicDo, musicNow, musicReport, playMusic, setMusicOutput, setSpeaker } from "./music";
 import { installTv, playOnTv, remote as tvRemote, keepPicture as keepTvPicture, mediaInfo as tvMediaInfo, streamsHere as tvStreamsHere, mediaStream as tvMediaStream, mediaSubs as tvMediaSubs, setLanguage as setTvLanguage, setPref as setTvPref, setAudio as setTvAudio, setOffset as setTvOffset, setHomeAssistant as setTvHa, setFolders as setTvFolders, setPicture as setTvPicture, switchTv, tvNow, tvReport } from "./television";
 import { moduleOfPath, moduleOfTool } from "./modules";
@@ -1831,9 +1832,17 @@ async function api(req: Request, url: URL, server: Server<unknown>): Promise<Res
     if (may) return refused(may);
     return diskJob("pool", plan.goal, user.name, (log) => runPlan(plan, user.name, log, failureWords));
   }
+  if (path === "/api/disks/uses" && method === "GET") {
+    const folder = url.searchParams.get("path") ?? "";
+    return json({ holds: whyKept(folder), uses: await diskUses(folder) });
+  }
   if (path === "/api/disks/disconnect" && method === "POST") {
     server.timeout(req, 0);
-    return changed(await disconnect(String((await body(req)).path ?? ""), user.name));
+    const data = await body(req);
+    const folder = String(data.path ?? "");
+    // what keeps files open there is stopped first — only once nothing of Hata's own forbids the disconnect
+    if (data.stop === true && !whyKept(folder)) await letGo(folder, user.name);
+    return changed(await disconnect(folder, user.name));
   }
   // every program of the system Hata relies on, in one list
   if (path === "/api/tools" && method === "GET") return json(await toolsReport());
