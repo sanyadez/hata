@@ -3,6 +3,7 @@
  * Proxmox server with its guests, and the other computers. A thing that is several at once (a container with
  * Hata's client is an instance and a machine) is one row. Pure: the server hands in what it knows.
  */
+import type { Hardware } from "./hardware";
 
 export interface TreeRow {
   /** Unique on the page, and what remembers a folded branch */
@@ -50,6 +51,8 @@ export interface TreeGroup {
   counts: { running: number; all: number };
   error: string;
   rows: TreeRow[];
+  /** What this server is made of */
+  hardware?: Hardware;
 }
 
 export interface Tree {
@@ -124,7 +127,7 @@ function machineFacts(m: MachineIn | undefined) {
 }
 
 export function serverTree(input: {
-  here: { name: string; os: string; address: string; cpu: number | null; memory: { used: number; total: number }; uptime: number };
+  here: { name: string; os: string; address: string; cpu: number | null; memory: { used: number; total: number }; uptime: number; hardware?: Hardware };
   instances: InstanceIn[];
   hosts: HostIn[];
   machines: MachineIn[];
@@ -169,7 +172,7 @@ export function serverTree(input: {
     .sort(byName);
 
   const groups: TreeGroup[] = [
-    { key: "here", kind: "here", name: input.here.name, os: input.here.os, online: true, id: "", address: input.here.address, cpu: input.here.cpu, memory: input.here.memory, uptime: input.here.uptime, counts: counted(hereRows), error: "", rows: hereRows },
+    { key: "here", kind: "here", name: input.here.name, os: input.here.os, online: true, id: "", address: input.here.address, cpu: input.here.cpu, memory: input.here.memory, uptime: input.here.uptime, counts: counted(hereRows), error: "", rows: hereRows, hardware: input.here.hardware },
   ];
 
   for (const x of input.hosts) {

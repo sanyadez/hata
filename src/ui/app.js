@@ -7985,7 +7985,7 @@ function renderMachineHead() {
       "div",
       { class: "app-head", menu: (at) => machineMenu(m, at) },
       h("span", { class: "machine-icon" }, icon("server")),
-      h("div", { class: "grow" }, h("div", { class: "app-title" }, h("h1", null, m.name), machineChip(m)), h("p", { class: "meta" }, [machineOs(m), m.ip, m.online ? null : t("machines.seen", { ago: ago(m.seen) })].filter(Boolean).flatMap((part, i) => (i ? [h("span", { class: "dot-sep" }, "·"), part] : [part])))),
+      h("div", { class: "grow" }, h("div", { class: "app-title" }, h("h1", null, m.name), machineChip(m)), h("p", { class: "meta" }, [machineOs(m), m.ip, m.online ? null : t("machines.seen", { ago: ago(m.seen) })].filter(Boolean).flatMap((part, i) => (i ? [h("span", { class: "dot-sep" }, "·"), part] : [part]))), hardwareWords(m.info?.hardware) && h("p", { class: "meta" }, hardwareWords(m.info.hardware))),
       h(
         "div",
         { class: "actions" },
@@ -21181,7 +21181,27 @@ function areaHead(area, at, { meta = null, metaId = null, actions = null, action
 function serverMeta() {
   const here = treeUi.data?.groups.find((g) => g.kind === "here");
   const up = state.overview?.system?.uptime;
-  return [t("tree.thisServer"), here?.os, here?.address || location.hostname, up ? t("sys.uptime", { time: duration(up) }) : null].filter(Boolean).join(" · ");
+  const line = [t("tree.thisServer"), here?.os, here?.address || location.hostname, up ? t("sys.uptime", { time: duration(up) }) : null].filter(Boolean).join(" · ");
+  const made = hardwareWords(here?.hardware);
+  return made ? h("span", null, line, h("span", { class: "block" }, made)) : line;
+}
+
+/** What a computer is made of, in one line: the processor, cores and threads, the memory and its modules */
+function hardwareWords(hw) {
+  if (!hw) return "";
+  // modules come in whole gigabytes: "8 GB", not "8.0 GB"
+  const round = (n) => bytes(n).replace(/\.0(?= )/, "");
+  const cores = hw.threads ? t(hw.cores === hw.threads ? "hw.cores" : "hw.coresThreads", { cores: hw.cores, threads: hw.threads }) : "";
+  // equal modules are said once: "2 × 8 GB DDR3 1600 MHz"
+  const kinds = new Map();
+  for (const m of hw.modules ?? []) {
+    const words = [round(m.size), m.type, m.speed ? t("hw.mhz", { n: m.speed }) : ""].filter(Boolean).join(" ");
+    kinds.set(words, (kinds.get(words) ?? 0) + 1);
+  }
+  const modules = [...kinds].map(([words, n]) => `${n} × ${words}`).join(", ");
+  const total = (hw.modules ?? []).reduce((sum, m) => sum + m.size, 0) || hw.memory;
+  const memory = total ? t("hw.memory", { size: round(total) }) + (modules ? ` (${modules}${hw.slots > hw.modules.length ? ", " + t("hw.slots", { n: hw.modules.length, all: hw.slots }) : ""})` : "") : "";
+  return [hw.cpu, cores, memory].filter(Boolean).join(" · ");
 }
 const paintServerMeta = () => document.getElementById("server-meta")?.replaceChildren(serverMeta());
 /** The numbers by the tabs of this server: apps, containers, packages that wait */

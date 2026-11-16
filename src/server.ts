@@ -132,6 +132,7 @@ import { containerCommand, MAX_BUFFERED_BYTES, shellCommand, TerminalError, Term
 import { MuxError, type Channel } from "./mux";
 import { crossTransfer } from "./machinefiles";
 import { rightsOf } from "./memberfiles";
+import { hardware } from "./hardware";
 import { letMachine, machineRights, machineShares, sharedOnMachines, shareOnMachine } from "./machineusers";
 import { moveApp, moveCheck } from "./moveapp";
 import { backupMachineApp, restoreMachineApp } from "./machinebackup";
@@ -1533,7 +1534,7 @@ async function api(req: Request, url: URL, server: Server<unknown>): Promise<Res
       const guest = guestOfMachine(m.id, macs, m.ip.replace(/^::ffff:/, ""));
       return { ...m, instance: instanceOfMachine(macs, m.info?.hostname ?? m.name)?.name ?? "", guest: guest ? { host: guest.host, id: guest.id } : null };
     });
-    return json(serverTree({ here: { name: system.hostname, os: systemName(), address: homeLinks()[0]?.address ?? "", cpu: system.cpu, memory: system.memory, uptime: system.uptime }, instances, hosts: moduleOn("proxmox") ? pveHosts().map((x) => pveHost(x.id)) : [], machines, version: VERSION }));
+    return json(serverTree({ here: { name: system.hostname, os: systemName(), address: homeLinks()[0]?.address ?? "", cpu: system.cpu, memory: system.memory, uptime: system.uptime, hardware: hardware() }, instances, hosts: moduleOn("proxmox") ? pveHosts().map((x) => pveHost(x.id)) : [], machines, version: VERSION }));
   }
   // music on the server's own speakers
   if (path === "/api/music" && method === "GET") return json(await musicReport());

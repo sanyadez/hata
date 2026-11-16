@@ -11,6 +11,7 @@
  *   hata-client                                            run (what the service does)
  *   hata-client uninstall                                  stop and remove the service
  */
+import { hardware, type Hardware } from "./hardware";
 import { chmodSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { arch, hostname, release, totalmem } from "node:os";
 import { dirname } from "node:path";
@@ -76,6 +77,8 @@ export interface MachineInfo {
   docker: { available: boolean; version?: string; compose?: string; state?: string };
   /** The machine's own network cards, for waking it from Hata (Wake-on-LAN) */
   macs: { iface: string; mac: string }[];
+  /** Processor, cores, threads, memory modules; not said by a client older than 0.32 */
+  hardware?: Hardware;
 }
 
 /** Network cards of the hardware (a `device` in sysfs), not bridges, tunnels or Docker's */
@@ -97,7 +100,7 @@ async function info(): Promise<MachineInfo> {
   const os = /^PRETTY_NAME="?([^"\n]*)"?/m.exec(read("/etc/os-release"))?.[1] ?? "Linux";
   const cpu = /^model name\s*:\s*(.+)$/m.exec(read("/proc/cpuinfo"))?.[1]?.trim() ?? "";
   const docker = await dockerInfo();
-  return { hostname: hostname(), os, kernel: release(), arch: arch(), cpu, cores: navigator.hardwareConcurrency, memory: totalmem(), version: VERSION, docker: { available: docker.available, version: docker.version, compose: docker.compose, state: docker.state }, macs: macs() };
+  return { hostname: hostname(), os, kernel: release(), arch: arch(), cpu, cores: navigator.hardwareConcurrency, memory: totalmem(), hardware: hardware(), version: VERSION, docker: { available: docker.available, version: docker.version, compose: docker.compose, state: docker.state }, macs: macs() };
 }
 
 // --- Containers -------------------------------------------------------------------------------------
