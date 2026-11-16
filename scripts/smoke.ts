@@ -191,7 +191,7 @@ if (tabs.length < 20 || tabs.some((x) => x.startsWith("undefined"))) giveUp("Cou
 const ROUTES = [
   "#/welcome/server", "#/welcome/existing", "#/welcome/data", "#/welcome/backups", "#/welcome/modules", "#/welcome/apps",
   "#/", "#/files", "#/files/", "#/hata", "#/trash", "#/activity",
-  "#/machines", "#/containers", "#/containers/settings", "#/house", "#/integrations", "#/assistant", "#/tv", "#/terminal",
+  "#/machines", "#/containers", "#/containers/settings", "#/machines/this/apps", "#/house", "#/integrations", "#/assistant", "#/tv", "#/terminal",
   ...new Set(tabs),
   // addresses from before the sections moved out of Settings
   "#/settings/docker", "#/settings/storage/fs", "#/settings/ports",

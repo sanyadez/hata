@@ -414,11 +414,20 @@ function parseRoute() {
   if ((parts[0] === "integrations" || parts[0] === "ha" || parts[0] === "house" || (parts[0] === "settings" && parts[1] === "integrations")) && isAdmin()) return { view: "integrations" };
   if ((parts[0] === "storage" || parts[0] === "network") && isAdmin()) return areaRoute(parts[0], parts[1], parts[2]);
   if (parts[0] === "machines" && parts[1] === "this" && isAdmin()) return areaRoute("server", parts[2], parts[3]);
-  if (parts[0] === "guest" && parts[3] && isAdmin()) return { view: "guest", host: parts[1], guest: `${parts[2]}/${parts[3]}` };
-  if (parts[0] === "containers" && parts[1] === "i" && parts[2] && isAdmin()) return { view: "instance", name: parts[2], tab: parts[3] === "terminal" ? "terminal" : "overview" };
-  if (parts[0] === "containers" && isAdmin()) return { view: "containers", tab: parts[1] === "settings" ? "settings" : "list" };
+  // a container, a virtual machine or a guest keeps its address when Hata's client is put on it: the client only adds tabs
+  if (parts[0] === "guest" && parts[3] && isAdmin()) {
+    const base = `#/guest/${parts[1]}/${parts[2]}/${parts[3]}`;
+    const m = machinesUi.list?.machines.find((y) => y.pve?.host === parts[1] && y.pve?.id === `${parts[2]}/${parts[3]}`);
+    return m ? { view: "machine", id: m.id, tab: machineTab(parts[4]), base } : { view: "guest", host: parts[1], guest: `${parts[2]}/${parts[3]}`, tab: parts[4] };
+  }
+  if (parts[0] === "containers" && parts[1] === "i" && parts[2] && isAdmin()) {
+    const base = `#/containers/i/${parts[2]}`;
+    const id = incusUi.data?.containers?.find((c) => c.name === parts[2])?.machine;
+    return id && machinesUi.list?.machines.some((y) => y.id === id) ? { view: "machine", id, tab: machineTab(parts[3]), base } : { view: "instance", name: parts[2], tab: parts[3] === "terminal" ? "terminal" : "overview", asked: parts[3] };
+  }
+  if (parts[0] === "containers" && isAdmin()) return areaRoute("server", "containers", parts[1]);
   if (parts[0] === "proxmox" && parts[1] && isAdmin()) return { view: "proxmox", id: parts[1], tab: PVE_TABS.includes(parts[2]) ? parts[2] : "overview" };
-  if (parts[0] === "machines" && isAdmin()) return parts[1] ? { view: "machine", id: parts[1], tab: parts[2] === "docker" ? "containers" : MACHINE_TABS.includes(parts[2]) ? parts[2] : "overview" } : { view: "machines" };
+  if (parts[0] === "machines" && isAdmin()) return parts[1] ? { view: "machine", id: parts[1], tab: machineTab(parts[2]) } : { view: "machines" };
   if (parts[0] === "apps" && parts[1]) return { view: "app", name: parts[1], tab: isAdmin() && ["settings", "logs", "compose", "backups", "terminal"].includes(parts[2]) ? parts[2] : "overview" };
   if (parts[0] === "settings") {
     // a section that moved out of Settings is found where it lives now: its old address still leads to it
@@ -458,7 +467,11 @@ const AREAS = {
     { id: "adblock", sections: ["adblock"] },
   ],
   server: [
+    { id: "overview", hash: "#/machines/this", view: "server" },
+    { id: "apps", view: "server" },
     { id: "docker", sections: ["docker"] },
+    { id: "containers", view: "containers", module: "containers" },
+    { id: "files", hash: "#/files/", link: true },
     { id: "system", sections: ["tools"] },
   ],
   settings: [
@@ -476,7 +489,7 @@ const AREA_BASE = { storage: "#/storage", network: "#/network", server: "#/machi
 const tabHash = (area, tab) => tab.hash ?? `${AREA_BASE[area]}/${tab.id}`;
 /** Whether this person may open the tab at all, and whether it stands among the tabs: one of a module that is off does not */
 const tabAllowed = (tab) => (tab.sections ? SECTIONS.some((item) => item.id === tab.sections[0] && (!item.admin || isAdmin())) : (!tab.admin || isAdmin()) && state.user?.role !== "guest");
-const tabShown = (tab) => tabAllowed(tab) && (!tab.sections || tab.sections.some((id) => !SECTION_MODULE[id] || hasModule(SECTION_MODULE[id])));
+const tabShown = (tab) => tabAllowed(tab) && (!tab.module || hasModule(tab.module)) && (!tab.sections || tab.sections.some((id) => !SECTION_MODULE[id] || hasModule(SECTION_MODULE[id])));
 const areaTabs = (area) => AREAS[area].filter(tabShown);
 /** The tab of a section of the settings, wherever it lives now */
 const sectionArea = (section) => Object.keys(AREAS).find((area) => AREAS[area].some((x) => x.sections?.includes(section))) ?? "settings";
@@ -489,9 +502,11 @@ function sectionHash(section) {
 }
 
 function areaRoute(area, id, rest) {
-  const tab = AREAS[area].find((x) => x.id === id && tabAllowed(x)) ?? areaTabs(area)[0];
+  const tab = AREAS[area].find((x) => x.id === id && !x.link && tabAllowed(x)) ?? areaTabs(area)[0];
   if (!tab) return { view: "home" };
-  if (tab.view) return { view: tab.view };
+  // the containers of this server keep their own two parts: the list and what they stand on
+  if (tab.view === "containers") return { view: "containers", tab: rest === "settings" ? "settings" : "list", hash: tabHash(area, tab) + (rest === "settings" ? "/settings" : "") };
+  if (tab.view) return { view: tab.view, tab: tab.id, hash: tabHash(area, tab) };
   return { view: "settings", area, at: tab.id, section: tab.sections[0], sections: tab.sections, tab: tab.tab ?? rest, hash: tabHash(area, tab) + (!tab.tab && rest ? "/" + rest : "") };
 }
 /** Whether the page shows this section of the settings: a tab may hold two */
@@ -502,7 +517,7 @@ function areaOf(route = state.route) {
   if (view === "settings") return route.area === "server" ? "machines" : route.area;
   if (["apps", "store", "import", "app"].includes(view)) return "apps";
   if (["files", "trash", "myhata"].includes(view)) return "files";
-  if (["machines", "machine", "proxmox", "containers", "instance", "guest", "terminal"].includes(view)) return "machines";
+  if (["machines", "machine", "server", "proxmox", "containers", "instance", "guest", "terminal"].includes(view)) return "machines";
   if (["integrations", "ha", "qbit", "frigate", "tv"].includes(view)) return "house";
   if (view === "backups") return "backups";
   if (view === "users") return "settings";
@@ -555,7 +570,9 @@ function onRoute() {
   if (state.route.view === "app") void loadApp();
   if (["machines", "machine", "proxmox", "guest", "instance", "containers"].includes(state.route.view)) void loadMachines();
   if (state.route.view === "machines") void loadPve();
-  if (["machines", "containers", "machine", "instance"].includes(state.route.view)) void loadContainers();
+  if (["machines", "containers", "machine", "instance", "server"].includes(state.route.view) || state.route.area === "server") void loadContainers();
+  if (state.route.view === "guest") void loadContainers();
+  if (["server", "containers"].includes(state.route.view) || state.route.area === "server") void loadTree();
   if (state.route.view !== "settings") settingsUi.find = "";
   window.scrollTo(0, 0);
 }
@@ -666,6 +683,7 @@ async function refresh() {
   if (state.route.view === "home") renderHomeBody();
   if (state.route.view === "store") renderStoreList();
   if (state.route.view === "apps") renderAppsBody();
+  if (state.route.view === "server") state.route.tab === "apps" ? renderAppsBody() : renderServerBody();
   if (state.route.view === "app") void loadApp(true);
   if (state.route.view === "machine" && state.route.tab === "apps") void loadMachineApps();
   if (state.route.view === "backups") void loadBackups();
@@ -1256,6 +1274,7 @@ function render() {
   if (view === "welcome") return renderWelcome();
   if (view === "store") return renderStore();
   if (view === "apps") return renderApps();
+  if (view === "server") return renderServer();
   if (view === "settings") return renderSettings();
   if (view === "files") return renderFiles();
   if (view === "trash") return renderTrash();
@@ -1420,7 +1439,9 @@ function paintTrend(trend) {
 
 function renderSystem() {
   const s = state.overview?.system;
-  if (!s || state.route.view !== "home") return;
+  if (!s || (state.route.view !== "home" && state.route.view !== "server")) return;
+  // of this server's page only the overview has the numbers
+  if (state.route.view === "server" && !document.getElementById("kpi-disk")) return void paintServerMeta();
   const meta = document.getElementById("host");
   const own = document.getElementById("own-name");
   if (own) own.textContent = s.hostname;
@@ -3346,6 +3367,7 @@ async function loadTree() {
     return;
   }
   if (state.route.view === "machines") renderMachinesBody();
+  paintServerMeta();
 }
 
 /** A menu opened by a button stands under it */
@@ -3354,7 +3376,7 @@ const underButton = (el) => {
   return { x: r.left, y: r.bottom + 4 };
 };
 
-const rowPage = (r) => (r.machine ? `#/machines/${r.machine}` : r.instance ? `#/containers/i/${r.instance}` : `#/guest/${r.guest.host}/${r.guest.id}`);
+const rowPage = (r) => (r.instance ? `#/containers/i/${r.instance}` : r.guest ? `#/guest/${r.guest.host}/${r.guest.id}` : r.machine ? `#/machines/${r.machine}` : r.instance ? `#/containers/i/${r.instance}` : `#/guest/${r.guest.host}/${r.guest.id}`);
 const guestOfRow = (r) => ({ id: r.guest.id, type: r.guest.type, name: r.name, vmid: Number(r.guest.id.split("/")[1]), status: r.status, may: r.may });
 
 /** How busy it is, in one line of the width of a column */
@@ -3430,7 +3452,7 @@ function treeGroup(g) {
     renderMachinesBody(true);
   };
   const x = g.kind === "pve" && pveUi.list?.hosts?.find((y) => y.id === g.id);
-  const page = g.kind === "here" ? "#/" : g.kind === "pve" ? `#/proxmox/${g.id}` : null;
+  const page = g.kind === "here" ? "#/machines/this" : g.kind === "pve" ? `#/proxmox/${g.id}` : null;
   const head = {
     here: { chip: t("tree.thisServer"), what: [g.os, g.address].filter(Boolean).join(" · "), state: t("tree.up", { time: duration(g.uptime) }) },
     pve: { chip: "Proxmox", what: [g.os, g.online && t("tree.guests", { running: g.counts.running, all: g.counts.all })].filter(Boolean).join(" · "), state: g.online ? t("pve.online") : t("tree.noAnswer") },
@@ -3439,8 +3461,9 @@ function treeGroup(g) {
   const menu =
     g.kind === "here"
       ? (at) => menuAt(at, menuHeader(g.name, g.os, "server"), [
-          { label: t("tree.containers"), icon: "box", href: "#/containers" },
-          { label: t("nav.settings"), icon: "sliders", href: "#/settings/general" },
+          { label: t("common.open"), icon: "arrow", href: "#/machines/this" },
+          { label: t("terminal.title"), icon: "terminal", href: "#/terminal" },
+          hasModule("containers") && { label: t("tree.containers"), icon: "box", href: "#/machines/this/containers" },
           { label: t("power.reboot"), icon: "refresh", run: () => serverPowerDialog("reboot") },
           { label: t("power.poweroff"), icon: "stop", run: () => serverPowerDialog("poweroff") },
         ])
@@ -3492,7 +3515,7 @@ function renderMachinesBody(force = false) {
       d.outdated.length > 0 && h("div", { class: "tree-banner" }, icon("up", "accent-text"), h("span", { class: "grow" }, h("strong", null, t("tree.outdated", { version: d.version })), " ", h("span", { class: "muted" }, d.outdated.map((m) => m.name).join(", "))), button(t("tree.updateAll"), { class: "small", onclick: (e) => updateClients(d.outdated, e.currentTarget) }, "up")),
       h("div", { class: "tree-row tree-cols small", role: "row" }, h("div", null, t("tree.col.name")), h("div", null, t("tree.col.what")), h("div", null, t("tree.col.state")), h("div", null, t("tree.col.load")), h("div")),
       d.groups.flatMap(treeGroup),
-      h("a", { class: "tree-foot small muted", href: "#/containers/settings" }, icon("sliders"), h("span", { class: "grow" }, t("tree.foot")), icon("chevron")),
+      hasModule("containers") && h("a", { class: "tree-foot small muted", href: "#/machines/this/containers/settings" }, icon("sliders"), h("span", { class: "grow" }, t("tree.foot")), icon("chevron")),
     ),
   );
 }
@@ -3586,6 +3609,7 @@ async function loadContainers() {
     incusUi.data = { state: "error", error: errorText(e), containers: [] };
   }
   if (state.route.view === "containers") renderContainersBody();
+  if (state.route.view === "server" && state.route.tab !== "apps") renderServerBody();
   if (state.route.view === "machines") renderMachinesBody();
   if (state.route.view === "instance") renderInstanceBody();
   if (state.route.view === "machine" && state.route.tab === "overview") paintMachineExtra();
@@ -3603,14 +3627,10 @@ function startInstanceOf(m, el) {
 }
 
 function renderContainers() {
-  const tab = (id, label) => h("a", { class: "tab" + (state.route.tab === id ? " active" : ""), href: id === "list" ? "#/containers" : "#/containers/settings" }, label);
+  const part = (id, label) => h("a", { class: "seg-pill" + (state.route.tab === id ? " active" : ""), href: id === "list" ? "#/machines/this/containers" : "#/machines/this/containers/settings" }, label);
   shell(
-    h(
-      "div",
-      { class: "page-head has-tabs" },
-      h("div", { class: "page-head-row" }, h("div", null, h("nav", { class: "crumbs" }, h("a", { href: "#/machines" }, t("nav.machines")), icon("chevron"), h("span", null, t("tree.thisServer"))), h("h1", null, t("incus.title")), h("p", { class: "meta", id: "incus-meta" }, t("incus.lead"))), h("div", { class: "actions", id: "incus-actions" })),
-      h("div", { class: "tabs", id: "incus-tabs", hidden: true }, tab("list", t("incus.tab.list")), tab("settings", t("incus.tab.settings"))),
-    ),
+    areaHead("server", "containers"),
+    h("div", { class: "card filter-bar" }, h("div", { class: "seg-pills", id: "incus-tabs", hidden: true }, part("list", t("incus.tab.list")), part("settings", t("incus.tab.settings"))), h("p", { class: "muted small grow", id: "incus-meta" }, t("incus.lead")), h("div", { class: "actions", id: "incus-actions" })),
     h("div", { id: "incus-body", class: "stack" }),
   );
   if (incusUi.data) renderContainersBody();
@@ -4126,7 +4146,7 @@ function containerRow(c) {
     h(
       "td",
       null,
-      h("a", { class: "strong", href: c.machine ? `#/machines/${c.machine}` : `#/containers/i/${c.name}` }, c.name),
+      h("a", { class: "strong", href: `#/containers/i/${c.name}` }, c.name),
       h("div", { class: "muted small" }, [c.kind === "vm" && t("incus.vm.short"), c.os, c.network === "home" && t("incus.net.homeShort"), c.nesting && "Docker", c.snapshots.length > 0 && t("incus.snapshotsN", { n: c.snapshots.length }), c.disc && t("incus.disc.inDrive", { name: c.disc })].filter(Boolean).join(" · ")),
     ),
     h("td", null, incusStatus(c)),
@@ -4228,11 +4248,11 @@ function renderInstanceBody() {
   const head = document.getElementById("instance-head");
   const box = document.getElementById("instance-body");
   if (!head || !box) return;
-  const crumbs = (name) => h("nav", { class: "crumbs" }, h("a", { href: "#/machines" }, t("nav.machines")), icon("chevron"), h("a", { href: "#/containers" }, t("tree.thisServer")), icon("chevron"), h("span", null, name));
+  const crumbs = (name) => h("nav", { class: "crumbs" }, h("a", { href: "#/machines" }, t("nav.machines")), icon("chevron"), h("a", { href: "#/machines/this" }, t("tree.thisServer")), icon("chevron"), h("span", null, name));
   const c = incusUi.data?.containers?.find((x) => x.name === state.route.name);
   if (!c) return put(head, crumbs(state.route.name)), put(box, h("p", { class: "card pad muted" }, t("instance.gone")));
-  // with Hata's client it is a machine: one thing, one page
-  if (c.machine) return void go(`#/machines/${c.machine}`);
+  // with Hata's client it is a computer: the same address, more tabs
+  if (c.machine && machinesUi.list?.machines.some((m) => m.id === c.machine)) return asMachine(c.machine, `#/containers/i/${c.name}`);
   const running = c.status === "running";
   const tab = (id, iconName, label) => h("a", { class: "tab" + (state.route.tab === id ? " active" : ""), href: `#/containers/i/${c.name}${id === "overview" ? "" : "/" + id}` }, icon(iconName), label);
   put(
@@ -7330,9 +7350,9 @@ async function loadGuest() {
   const g = await paintGuestParts(box, host, guest);
   const x = pveUi.host;
   if (!g || !x) return;
-  // with Hata's client it is a machine: one thing, one page
+  // with Hata's client it is a computer: the same address, more tabs
   const m = machinesUi.list?.machines.find((y) => y.pve?.host === host && y.pve?.id === guest);
-  if (m) return void go(`#/machines/${m.id}`);
+  if (m) return asMachine(m.id, `#/guest/${host}/${guest}`);
   put(
     head,
     h("nav", { class: "crumbs" }, h("a", { href: "#/machines" }, t("nav.machines")), icon("chevron"), h("a", { href: `#/proxmox/${x.id}` }, x.name), icon("chevron"), h("span", null, g.name)),
@@ -7698,6 +7718,17 @@ async function pveTaskDialog(x, task, target) {
 // --- One machine ---
 
 const MACHINE_TABS = ["overview", "apps", "containers", "terminal"];
+const machineTab = (part) => (part === "docker" ? "containers" : MACHINE_TABS.includes(part) ? part : "overview");
+/** The one address of a computer: where it lives — a container of this server, a guest of Proxmox, or by itself */
+const machineBase = (m) => (m.instance ? `#/containers/i/${m.instance}` : m.pve ? `#/guest/${m.pve.host}/${m.pve.id}` : `#/machines/${m.id}`);
+/** The page of a container or a guest turns into the computer's, in place, once Hata's client is on it */
+function asMachine(id, base) {
+  const tab = machineTab(state.route.asked ?? state.route.tab);
+  state.route = { view: "machine", id, tab, base };
+  render();
+  void loadMachines();
+  void loadContainers();
+}
 
 function renderMachine() {
   if (machinesUi.current?.id !== state.route.id) {
@@ -7714,9 +7745,14 @@ function renderMachineHead() {
   const head = document.getElementById("machine-head");
   if (!head) return;
   if (!m) return put(head, h("nav", { class: "crumbs" }, h("a", { href: "#/machines" }, t("nav.machines"))), machinesUi.list && h("p", { class: "card pad muted" }, t("error.machine.notFound")));
-  const tab = (id, iconName) => h("a", { class: "tab" + (state.route.tab === id ? " active" : ""), href: `#/machines/${m.id}${id === "overview" ? "" : "/" + id}` }, icon(iconName), t(id === "containers" ? "machines.tab.docker" : "machines.tab." + id));
+  // the address is where the thing lives: a container's or a guest's computer is shown at theirs
+  const base = machineBase(m);
+  const here = base + (state.route.tab === "overview" ? "" : "/" + (state.route.tab === "containers" ? "docker" : state.route.tab));
+  if (location.hash !== here && location.hash.startsWith("#/machines/")) history.replaceState(history.state, "", here);
+  state.route.base = base;
+  const tab = (id, iconName) => h("a", { class: "tab" + (state.route.tab === id ? " active" : ""), href: `${base}${id === "overview" ? "" : "/" + (id === "containers" ? "docker" : id)}` }, icon(iconName), t(id === "containers" ? "machines.tab.docker" : "machines.tab." + id));
   head.replaceChildren(
-    h("nav", { class: "crumbs" }, h("a", { href: "#/machines" }, t("nav.machines")), icon("chevron"), m.instance && [h("a", { href: "#/containers" }, t("tree.thisServer")), icon("chevron")], m.pve && [h("a", { href: `#/proxmox/${m.pve.host}` }, m.pve.hostName), icon("chevron")], h("span", null, m.name)),
+    h("nav", { class: "crumbs" }, h("a", { href: "#/machines" }, t("nav.machines")), icon("chevron"), m.instance && [h("a", { href: "#/machines/this" }, t("tree.thisServer")), icon("chevron")], m.pve && [h("a", { href: `#/proxmox/${m.pve.host}` }, m.pve.hostName), icon("chevron")], h("span", null, m.name)),
     h(
       "div",
       { class: "app-head", menu: (at) => machineMenu(m, at) },
@@ -11830,14 +11866,16 @@ function renderAppsBody() {
   const box = document.getElementById("apps-body");
   if (!box) return;
   if (!state.overview) return put(box, h("p", { class: "card pad muted" }, "…"));
-  const all = installedApps();
+  // on the page of this server: its own apps alone, and nothing of the section's head
+  const fixed = state.route.view === "server";
+  const all = installedApps().filter((row) => !fixed || !row.machine);
   const count = (id) => all.filter(appShown[id]).length;
   // an update from the store asks about every app by itself: only newer images go all at once
   const newer = all.filter((row) => !row.machine && !row.app.update && row.app.newer?.length > 0 && !row.app.job);
-  put(document.getElementById("apps-meta"), [t("apps.meta.installed", { n: all.length }), t("apps.meta.running", { n: count("running") }), count("updates") > 0 && t("apps.meta.updates", { n: count("updates") })].filter(Boolean).flatMap((part, i) => (i ? [h("span", { class: "dot-sep" }, "·"), part] : [part])));
-  put(document.getElementById("apps-actions"), isAdmin() && newer.length > 0 && button(t("apps.updateAll", { n: newer.length }), { onclick: () => confirmAction({ title: t("apps.updateAll", { n: newer.length }), lead: t("apps.updateAllLead", { names: newer.map((row) => row.app.title).join(", ") }), label: t("app.update"), kind: "primary", iconName: "up", run: () => newer.forEach(({ app }) => void startAction(app, "update")) }) }, "up"));
+  if (!fixed) put(document.getElementById("apps-meta"), [t("apps.meta.installed", { n: all.length }), t("apps.meta.running", { n: count("running") }), count("updates") > 0 && t("apps.meta.updates", { n: count("updates") })].filter(Boolean).flatMap((part, i) => (i ? [h("span", { class: "dot-sep" }, "·"), part] : [part])));
+  if (!fixed) put(document.getElementById("apps-actions"), isAdmin() && newer.length > 0 && button(t("apps.updateAll", { n: newer.length }), { onclick: () => confirmAction({ title: t("apps.updateAll", { n: newer.length }), lead: t("apps.updateAllLead", { names: newer.map((row) => row.app.title).join(", ") }), label: t("app.update"), kind: "primary", iconName: "up", run: () => newer.forEach(({ app }) => void startAction(app, "update")) }) }, "up"));
   if (!all.length) return put(box, h("section", { class: "card pad empty-state" }, h("h2", null, t("apps.none")), h("p", { class: "muted" }, t("apps.noneLead")), state.user.role !== "guest" && h("a", { class: "btn primary", href: "#/store" }, icon("store"), h("span", null, t("area.apps.store")))));
-  const machines = [...new Map(all.filter((row) => row.machine).map((row) => [row.machine.id, row.machine.name])).entries()];
+  const machines = fixed ? [] : [...new Map(all.filter((row) => row.machine).map((row) => [row.machine.id, row.machine.name])).entries()];
   const shown = all.filter(appShown[appsUi.show]).filter((row) => !appsUi.machine || (appsUi.machine === "." ? !row.machine : row.machine?.id === appsUi.machine));
   const hostname = state.overview.system?.hostname ?? t("tree.thisServer");
   const where = machines.length > 0 && h("select", { "aria-label": t("apps.col.machine"), onchange: (e) => ((appsUi.machine = e.target.value), renderAppsBody()) }, h("option", { value: "" }, t("apps.allMachines")), h("option", { value: ".", selected: appsUi.machine === "." }, hostname), machines.map(([id, name]) => h("option", { value: id, selected: appsUi.machine === id }, name)));
@@ -14100,7 +14138,6 @@ function settingsSection(section) {
     const port = h("input", { type: "number", min: 1, max: 65535, class: "short mono", value: s?.port || "", placeholder: String(location.port || 80) });
     return [
       h("section", { class: "card pad" }, h("h2", null, t("settings.general")), settingRow(t("settings.language"), t("settings.languageHint"), language), isAdmin() && settingRow(t("settings.port"), t("settings.portHint"), h("span", { class: "pair" }, port, button(t("settings.save"), { onclick: () => save({ port: Number(port.value) || 0 }) }))), isAdmin() && settingRow(t("welcome.again"), t("welcome.againHint"), h("a", { class: "btn", href: "#/welcome" }, t("common.open"))), error),
-      isAdmin() && h("section", { class: "card pad" }, h("h2", null, t("power.title")), settingRow(t("power.reboot"), t("power.rebootHint"), button(t("power.reboot"), { onclick: () => serverPowerDialog("reboot") }, "refresh")), settingRow(t("power.poweroff"), t("power.poweroffHint"), button(t("power.poweroff"), { onclick: () => serverPowerDialog("poweroff") }, "stop"))),
     ];
   }
   if (section === "apps") {
@@ -20109,12 +20146,120 @@ function areaHead(area, at, { meta = null, metaId = null, actions = null, action
     h(
       "div",
       { class: "area-top" },
-      h("div", { class: "area-name" }, area === "server" && h("nav", { class: "crumbs" }, h("a", { href: "#/machines" }, t("nav.machines")), icon("chevron"), h("span", null, t("tree.thisServer"))), h("h1", null, area === "server" ? (state.overview?.system?.hostname ?? t("tree.thisServer")) : t("area." + area)), h("p", { class: "meta", id: metaId }, meta ?? t(`area.${area}.lead`))),
-      (actions || actionsId) && h("div", { class: "actions", id: actionsId }, actions),
+      area === "server"
+        ? h(
+            "div",
+            { class: "area-name" },
+            h("nav", { class: "crumbs" }, h("a", { href: "#/machines" }, t("nav.machines")), icon("chevron"), h("span", null, t("tree.thisServer"))),
+            h("div", { class: "app-head", menu: serverMenu }, h("span", { class: "machine-icon" }, icon("server")), h("div", { class: "grow" }, h("div", { class: "app-title" }, h("h1", null, state.overview?.system?.hostname ?? t("tree.thisServer")), h("span", { class: "state running" }, t("status.running"))), h("p", { class: "meta", id: "server-meta" }, serverMeta()))),
+          )
+        : h("div", { class: "area-name" }, h("h1", null, t("area." + area)), h("p", { class: "meta", id: metaId }, meta ?? t(`area.${area}.lead`))),
+      area === "server"
+        ? h("div", { class: "actions" }, h("a", { class: "btn", href: "#/terminal" }, icon("terminal"), h("span", null, t("terminal.title"))), button(t("power.restart"), { onclick: () => serverPowerDialog("reboot") }, "refresh"), h("button", { type: "button", class: "btn square", "aria-label": t("app.more"), "aria-haspopup": "menu", onclick: (e) => serverMenu(underButton(e.currentTarget)) }, icon("more")))
+        : (actions || actionsId) && h("div", { class: "actions", id: actionsId }, actions),
     ),
-    tabs.length > 1 && h("nav", { class: "tabs" }, tabs.map((tab) => h("a", { class: "tab" + (tab.id === at ? " active" : ""), href: tabHash(area, tab), "aria-current": tab.id === at ? "page" : null }, t(`area.${area}.${tab.id}`)))),
+    tabs.length > 1 && h("nav", { class: "tabs" }, tabs.map((tab) => h("a", { class: "tab" + (tab.id === at ? " active" : ""), href: tabHash(area, tab), "aria-current": tab.id === at ? "page" : null }, t(`area.${area}.${tab.id}`), area === "server" && serverTabCount(tab.id))),),
   );
 }
+
+/** What stands under this server's name: the system, the address, how long it has been up */
+function serverMeta() {
+  const here = treeUi.data?.groups.find((g) => g.kind === "here");
+  const up = state.overview?.system?.uptime;
+  return [t("tree.thisServer"), here?.os, here?.address || location.hostname, up ? t("sys.uptime", { time: duration(up) }) : null].filter(Boolean).join(" · ");
+}
+const paintServerMeta = () => document.getElementById("server-meta")?.replaceChildren(serverMeta());
+/** The numbers by the tabs of this server: apps, containers, packages that wait */
+function serverTabCount(id) {
+  const n = id === "apps" ? (state.overview?.apps?.length ?? 0) : id === "containers" ? (incusUi.data?.containers?.length ?? 0) : id === "system" ? (sysUpdates[""]?.list?.length ?? 0) : 0;
+  return n > 0 ? h("span", { class: "muted tab-count" }, String(n)) : null;
+}
+function serverMenu(at) {
+  menuAt(at, menuHeader(state.overview?.system?.hostname ?? t("tree.thisServer"), t("tree.thisServer"), "server"), [
+    { label: t("terminal.title"), icon: "terminal", href: "#/terminal" },
+    { label: t("area.network"), icon: "network", href: "#/network" },
+    { label: t("power.reboot"), icon: "refresh", run: () => serverPowerDialog("reboot") },
+    { label: t("power.poweroff"), icon: "stop", run: () => serverPowerDialog("poweroff") },
+  ]);
+}
+
+// --- This server: a computer like the others, with a page of its own ---------------------------------
+
+function renderServer() {
+  const apps = state.route.tab === "apps";
+  shell(areaHead("server", state.route.tab), h("div", { class: "stack", id: apps ? "apps-body" : "server-body" }));
+  if (apps) return renderAppsBody();
+  renderServerBody();
+  if (!sysUpdates[""]) void loadSysUpdates("").then(() => state.route.view === "server" && renderServerBody());
+  if (!state.backups) void api("GET", `/api/backups?lang=${state.lang}`).then((b) => ((state.backups = b), state.route.view === "server" && renderServerBody())).catch(() => {});
+}
+
+function renderServerBody() {
+  const box = document.getElementById("server-body");
+  if (!box) return;
+  if (!box.childElementCount) {
+    put(
+      box,
+      h("section", { class: "card numbers" }, h("div", { class: "kpis" }, kpi("cpu", "cpu", t("sys.cpu"), "s2"), kpi("memory", "memory", t("sys.memory"), "s1"), kpi("disk", "disk", t("sys.disk")), kpi("network", "network", t("sys.network")), kpi("temp", "temp", t("sys.temperature"))), h("div", { class: "trend", id: "own-trend" })),
+      h("div", { class: "columns" }, h("div", { class: "stack", id: "server-main" }), h("aside", { class: "side stack", id: "server-side" })),
+    );
+  }
+  renderSystem();
+  const o = state.overview;
+  const fact = (label, value) => h("div", { class: "kv" }, h("span", { class: "muted" }, label), h("span", null, value));
+  const more = (hash, label) => h("a", { class: "link small", href: hash }, label, " →");
+  const d = hasModule("containers") ? incusUi.data : null;
+  const apps = o?.apps ?? [];
+  const row = (c) =>
+    h(
+      "div",
+      { class: "thing-row", menu: (at) => containerMenu(c, at) },
+      h("i", { class: "dot " + (c.status === "running" ? "running" : c.status === "error" ? "restarting" : "") }),
+      h("div", { class: "grow" }, h("a", { class: "strong", href: `#/containers/i/${c.name}` }, c.name), h("div", { class: "muted small" }, [t("tree.kind." + c.kind), c.os, c.address].filter(Boolean).join(" · "))),
+      c.status !== "running" && h("span", { class: "muted small" }, t("incus.status." + c.status)),
+      c.status !== "running" && button(t("incus.start"), { class: "small", onclick: (e) => containerAct(c, "start", e.currentTarget) }, "play"),
+      h("button", { type: "button", class: "btn small square", "aria-label": t("app.more"), onclick: (e) => containerMenu(c, underButton(e.currentTarget)) }, icon("more")),
+    );
+  put(
+    document.getElementById("server-main"),
+    d?.state === "ready" &&
+      h(
+        "section",
+        { class: "card" },
+        h("div", { class: "section-head pad-head" }, h("h2", null, t("area.server.containers"), " ", h("span", { class: "muted" }, String(d.containers.length))), button(t("server.new"), { class: "small", onclick: () => newContainerDialog() }, "plus")),
+        d.containers.length ? d.containers.map(row) : h("p", { class: "muted small pad-row" }, t("tree.hereNone")),
+      ),
+    h(
+      "section",
+      { class: "card pad stack-s" },
+      h("div", { class: "section-head" }, h("h2", null, t("area.server.apps"), " ", h("span", { class: "muted" }, String(apps.length))), more("#/machines/this/apps", t("server.all"))),
+      apps.length ? h("p", { class: "muted" }, t("server.appsLine", { running: apps.filter(isUp).length, all: apps.length })) : h("p", { class: "muted" }, t("apps.noneLead")),
+    ),
+  );
+  const updates = sysUpdates[""];
+  const b = state.backups;
+  put(
+    document.getElementById("server-side"),
+    h(
+      "section",
+      { class: "card pad stack-s" },
+      h("h2", null, t("area.server.system")),
+      fact(t("server.updates"), !updates ? "…" : updates.error ? "—" : updates.list?.length ? t("server.updatesN", { n: updates.list.length }) : t("server.updatesNone")),
+      fact("Docker", o?.docker?.available ? (o.docker.version ?? "—") : t("server.dockerNo")),
+      fact("Hata", state.version),
+      more("#/machines/this/system", t("server.toSystem")),
+    ),
+    h(
+      "section",
+      { class: "card pad stack-s" },
+      h("h2", null, t("server.backup")),
+      fact(t("server.backupLast"), !b ? "…" : b.lastRun ? ago(b.lastRun.at) : t("server.backupNever")),
+      fact(t("server.backupWhere"), b?.dir ?? "…"),
+      more("#/backups", t("server.toBackups")),
+    ),
+  );
+}
+
 
 /** "Find a setting" in the head of Settings: sections and cards by the words typed, wherever they live now */
 function settingsFind() {

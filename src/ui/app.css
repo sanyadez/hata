@@ -2018,3 +2018,15 @@ dialog.nav-sheet[open] { display: grid; gap: 14px; padding: 10px 14px calc(14px 
   .bottom-link .nav-count { position: absolute; top: 2px; left: calc(50% + 6px); min-width: 16px; height: 16px; font-size: 10px; }
 }
 .area-head { position: relative; z-index: 2; }
+
+/* --- This server's page ------------------------------------------------------------------------------ */
+
+.area-name .app-head { margin: 0; }
+.tab-count { margin-left: 2px; font-size: 12px; font-weight: 500; }
+.pad-head { padding: 16px 20px 12px; }
+.pad-row { padding: 0 20px 16px; margin: 0; }
+.thing-row { display: flex; align-items: center; gap: 12px; padding: 10px 20px; border-top: 1px solid var(--border); min-width: 0; }
+.thing-row .grow { min-width: 0; }
+.filter-bar > p { margin: 0; }
+.filter-bar .seg-pill { display: inline-flex; align-items: center; gap: 6px; }
+@media (max-width: 760px) { .thing-row { flex-wrap: wrap; padding: 10px 14px; } }
