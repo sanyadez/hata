@@ -69,7 +69,7 @@ Apps, yes. Every app is a compose project, and on its page you start, stop and r
 images, watch CPU and memory per container, read live logs, open a shell inside a container and edit the
 compose file — as text or as a form. You can paste any compose file or a `docker run` command to make an
 app, and what already runs on the computer (compose projects started elsewhere, single containers) can be
-taken in as apps. Settings → Docker lists the images and volumes with their size and who uses them, and
+taken in as apps. Computers → This server → Docker lists the images and volumes with their size and who uses them, and
 removes the ones nothing needs — on the server and on every computer connected to it, where the apps,
 containers and compose files are managed the same way. What Hata does not have is the rest of Portainer's
 view of Docker: networks, Swarm, Kubernetes, images built from a Dockerfile. Portainer runs fine next to
@@ -79,7 +79,7 @@ it — as an app from the store.
 Yes. Once a day Hata asks the registries whether the tags your apps use — `latest`, say — point at newer
 images than the ones running; nothing is downloaded for that. An app with a newer image gets a mark on
 its tile, and "Update images" lights up on its page. Updating stays your decision unless you switch on
-"Update the apps by itself" in Settings → Apps: then the running apps with newer images are updated
+"Update the apps by itself" in Apps → Options: then the running apps with newer images are updated
 every day at the time you set, with a snapshot of the app's data taken first, and any app can be left
 out. Hata also notices when the app store has a newer version of an app. Images come from any registry
 the compose file names; a sign-in saved with `docker login` is used, signing in to a private registry
@@ -94,10 +94,26 @@ Early development. What works today:
 - modules (Settings → Modules): a new server starts with the base — apps, files, backups, users, disks,
   the network, HTTPS — and the rest is turned on when wanted: RAID and disk protection, network drives,
   network folders, a copy of the backups on another machine, remote access, the DNS server, ad blocking,
-  domains and ports, computers, Proxmox, containers and VMs, integrations, the assistant and agents. A
+  domains and ports, computers, Proxmox, containers and VMs, Home Assistant with cameras and torrents, the
+  TV, the assistant and agents. A
   module that is off shows no page, no setting and runs nothing; turning one on installs nothing on the
   system. One that is in use cannot be turned off — the page says what uses it. A server updated from a
   version before modules keeps on what it uses;
+- one menu on top of every page — Home, Apps, Files, Computers, Hata, Storage, Backups, Network — and each
+  section's parts as tabs in its head; Settings holds only how Hata itself behaves (the account, users and
+  access, the look, notifications, modules, the assistant, updates), and "Find a setting" finds the rest
+  where it lives. Every thing has one place and one address: this server is a computer like the others,
+  with its apps, Docker, containers and system programs as tabs; a container or a guest keeps its address
+  when Hata's client is put on it; who opens what — apps, network folders, the computers' folders, Home
+  Assistant — is given in one table;
+- the TV (a module): the server's own HDMI screen as a media player — Kodi without a desktop, installed by a
+  button. Any video, music or picture of Files is sent there with "Play on the TV", so is a link; the page
+  has the remote (play, pause, seek, volume, the arrows, sound and subtitle tracks, text), the picture's
+  resolution and refresh rate, the folders Kodi shows, its language and sound settings; a button in the
+  head of every page says what plays and pauses it. A film goes from the TV to the browser and back from
+  the same moment; the browser's own player (FFmpeg, by a button) plays formats a browser cannot, with a
+  choice of sound track and subtitles. Air-mouse remotes, a mouse or a keyboard plugged into the server
+  drive the player, and their power button cannot shut the server down;
 - first run creates the administrator — there are no default credentials, and the setup needs a code
   that only the server's console shows; then it walks through the first choices: the server's name, what
   already runs on the computer, where the data and the backups go, a few apps to start with;
@@ -136,7 +152,7 @@ Early development. What works today:
 - store updates that keep your changes: when the store has a newer version of an app, Hata shows what
   changes in its compose file and merges it in — your ports, folders, variables and edits by hand stay, and
   where you and the store changed the same line, yours wins and the difference is shown;
-- Docker (Settings → Docker): the images and volumes with their size and the apps and containers that
+- Docker (Computers → This server → Docker): the images and volumes with their size and the apps and containers that
   use them, an unused one removed with a click and all of them at once, the build cache cleared — on the
   server and on each computer;
 - system updates: the packages of the system with newer versions (security ones marked) and whether a
@@ -186,7 +202,7 @@ Early development. What works today:
   computer was off is caught up the next time, and a copy that falls behind shows up under "needs
   attention". `hata restore` opens such a copy when given the passphrase, and takes the copy's own
   address — `s3://bucket/folder` or `sftp://user@host/folder` — fetching the latest snapshots by itself;
-- disks and their health (Settings → Disks): every disk with what it says about itself (SMART) in plain
+- disks and their health (Storage → Disks): every disk with what it says about itself (SMART) in plain
   words — healthy, wearing out or failing, and why — its temperature, how full it is and where it is
   mounted; the file systems of the server, network folders included. Health is read every half an hour
   without waking a disk that sleeps, a disk in trouble shows up under "needs attention" and is sent as a
@@ -212,7 +228,7 @@ Early development. What works today:
   larger or smaller (its file system with it) or deleted; a disk that goes to
   somebody else is erased, with every block written over if you ask. Long runs show what the programs
   say and how far they are, and a data disk on its way to full is said a month ahead;
-- the data folder moves to a disk with one button (Settings → Apps, or right after formatting a disk):
+- the data folder moves to a disk with one button (Apps → Options, or right after formatting a disk):
   the apps are stopped, everything is copied, the apps' compose files — comments and all —, the backups,
   the network folders and the folders on Home are pointed at the new place, and the apps start
   again; the old folder is kept until you delete it, and a snapshot taken before the move still restores;
@@ -236,7 +252,7 @@ Early development. What works today:
   trash — with how much each grew over the week, how much of it has not changed for three months, the
   largest files and the apps that use a folder, and, when the disk is filling up, in how long it will be
   full at this pace;
-- folders shared over the network (Settings → Network folders, or a folder's menu in Files): a folder of
+- folders shared over the network (Storage → Network folders, or a folder's menu in Files): a folder of
   the server opens in Explorer, Finder or a phone's file manager like a network disk (SMB). People connect
   with the name and password they sign in to Hata with; for every folder each user may look, change or
   nothing at all, and so may "anyone without a password". What lands there takes the owner of its
@@ -309,8 +325,8 @@ Early development. What works today:
   (Ubuntu with a desktop among the systems), its disk grows when asked. Inside a container that was given
   only part of the user ids (an unprivileged LXC, for one of Proxmox) none of this is offered, and the
   page says why;
-- Integrations, one page of what Hata is connected to, with what it found on the home network offered there and
-  an "Add" button for the rest; nothing is installed in the services themselves. Home Assistant servers, by a sign-in or a token: their devices put on Hata's home page next to the
+- the section "Hata" — Home Assistant, the cameras and the TV as tabs, each offering what it found on the
+  home network and a "Connect" button; nothing is installed in the services themselves. Home Assistant servers, by a sign-in or a token: their devices put on Hata's home page next to the
   apps — a light switched, its brightness, a thermostat, a lock that asks first —, who sees them chosen
   per server, members switching only what is on their home page. A server's updates, its backups and its
   devices with a low battery are on its page and under "needs attention"; one running as an app of this
@@ -361,11 +377,11 @@ Early development. What works today:
   NetworkManager, mergerfs, SnapRAID and the rest — with what it is for, whether it is installed and in
   which version, and the button that installs a missing one or removes one you do not want (not while
   something of Hata's stands on it);
-- a tree of everything on the Servers page: this server with its containers and virtual machines, each
+- a tree of everything on the Computers page: this server with its containers and virtual machines, each
   Proxmox server with its containers and VMs, the other computers — one row and one page per thing, whatever it is;
 - names under the domain for what is not an app of this server — a container, a virtual machine, a Proxmox
   container or VM, another computer or any address of the home network —, with Hata's certificate and, when asked, its
-  sign-in in front (Settings → Domains and HTTPS); ports of the server passed on to the same things (Settings →
+  sign-in in front (Network → Addresses and HTTPS); ports of the server passed on to the same things (Settings →
   Ports), for the home network, and for the outside network only when you say so;
 - containers and virtual machines in the home network, with addresses from the router, through a bridge made on
   trial, or on Hata's own network, each movable between the two; virtual machines installed from a disc image,
@@ -397,11 +413,11 @@ in Google Drive or Box.
 | ![The assistant looks first and asks before it changes anything](screenshots/assistant.png) The assistant looks first and asks before it changes anything | ![The assistant's answer once the change is made](screenshots/assistant-done.png) The assistant's answer once the change is made |
 | ![My Hata: the data folder, the disks, the network drives, the favourites and the computers](screenshots/my-hata.png) My Hata: the data folder, the disks, the network drives, the favourites and the computers | |
 
-### Servers
+### Computers
 
 | | |
 |---|---|
-| ![Servers: one tree of what runs where](screenshots/machines.png) Servers: one tree of what runs where | ![A computer: its state at a glance](screenshots/machine.png) A computer: its state at a glance |
+| ![Computers: one tree of what runs where](screenshots/machines.png) Computers: one tree of what runs where | ![A computer: its state at a glance](screenshots/machine.png) A computer: its state at a glance |
 | ![A computer's apps: installed, updated, backed up and moved from here](screenshots/machine-apps.png) A computer's apps: installed, updated, backed up and moved from here | ![A computer's Docker: containers, images, volumes](screenshots/machine-containers.png) A computer's Docker containers |
 | ![A terminal on the computer](screenshots/machine-terminal.png) A terminal on the computer | ![A computer's files in Files](screenshots/machine-files.png) A computer's files in Files |
 
@@ -420,7 +436,7 @@ in Google Drive or Box.
 | ![Containers and virtual machines of this server, with their limits and where they are stored](screenshots/containers.png) Containers and virtual machines of this server, with their limits and where they are stored | ![A new virtual machine: Ubuntu with a desktop](screenshots/container-new.png) A new virtual machine: Ubuntu with a desktop |
 | ![A virtual machine's page: its screen, limits, snapshots](screenshots/vm-screen.png) A virtual machine's page: its screen, limits, snapshots | ![Their network, places and disc images](screenshots/containers-settings.png) Their network, places and disc images |
 
-### Integrations
+### Hata: Home Assistant, cameras, TV
 
 | | |
 |---|---|
@@ -484,11 +500,11 @@ curl -fsSL https://raw.githubusercontent.com/sanyadez/hata/main/install.sh | sud
 
 The script downloads the binary of the latest release and checks it against the release's checksums,
 installs Docker if it is missing, and starts the `hata` service. It ends by printing the address for
-creating the administrator. To update, use Settings → About in the web UI, or run it again. If port 80 is taken, Hata picks the next free port and
+creating the administrator. To update, use Settings → Updates and about Hata in the web UI, or run it again. If port 80 is taken, Hata picks the next free port and
 says which; `--port <number>` chooses one.
 
 State lives in `/var/lib/hata` — the configuration folder; every app is a plain compose project in
-`/var/lib/hata/apps/<name>/` that keeps working without Hata. The folder can be moved from Settings → Apps
+`/var/lib/hata/apps/<name>/` that keeps working without Hata. The folder can be moved from Apps → Options
 (to another disk, say): everything is copied, Hata restarts there, the apps keep running.
 What must stay private — password hashes, sessions, certificate keys, the notification tokens — is kept
 apart in `/etc/hata` and does not move with it. Next to an app's `compose.yml`, which is yours to edit, `hata.yml` holds what Hata
