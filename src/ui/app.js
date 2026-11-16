@@ -1498,7 +1498,6 @@ function statsBlock() {
       h("div", { class: "block-head" }, h("span", { class: "block-icon" }, icon("server")), h("h2", { class: "clip", id: "own-name" }, state.overview?.system?.hostname ?? "…"), h("span", { class: "muted small grow" }, t("home.thisServer")), h("span", { class: "mono muted small", id: "own-up" })),
       h("div", { class: "kpis" }, kpi("cpu", "cpu", t("sys.cpu"), "s2"), kpi("memory", "memory", t("sys.memory"), "s1"), kpi("disk", "disk", t("sys.disk")), kpi("network", "network", t("sys.network")), kpi("temp", "temp", t("sys.temperature"))),
       h("div", { class: "trend", id: "own-trend" }),
-      blockRemover("stats"),
     ),
   );
 }
@@ -1866,7 +1865,9 @@ setInterval(() => void widgetsTick(), 10_000);
 
 // --- The grid of Home: every card has a place and a size; they change only while editing the grid ---
 
-const gridUi = { at: null, arranging: false, undo: [], entry: null, drag: null };
+const gridUi = { at: null, arranging: false, undo: [], entry: null, drag: null, gone: new Set() };
+/** What "×" takes off Home while arranging; apps, folders and Hata's own two tiles stay (an app is taken off by removing the app) */
+const gridRemovable = (card) => ["block", "widget", "ha", "link"].includes(card.type);
 
 const cardKind = (card) => (card.type === "block" ? (card.id.startsWith("machine:") ? "machine" : card.id) : card.type === "widget" ? card.view : card.type);
 const boxOf = ({ x, y, w, h: tall }) => ({ x, y, w, h: tall });
@@ -1904,23 +1905,37 @@ function gridPlace(base, key, box) {
 function gridLoad() {
   const cards = state.overview.dashboard.cards;
   const at = {};
-  if (gridUi.arranging) for (const card of cards) if (gridUi.at?.[tileKey(card)]) at[tileKey(card)] = gridUi.at[tileKey(card)];
-  for (const card of cards) at[tileKey(card)] ??= gridUi.arranging ? gridFit(Object.values(at), card.w, card.h) : boxOf(card);
+  if (!gridUi.arranging) gridUi.gone.clear();
+  // a card taken off and brought back by "Undo" is no longer gone
+  for (const key of [...gridUi.gone]) if (gridUi.at?.[key]) gridUi.gone.delete(key);
+  const here = cards.filter((card) => !gridUi.gone.has(tileKey(card)));
+  if (gridUi.arranging) for (const card of here) if (gridUi.at?.[tileKey(card)]) at[tileKey(card)] = gridUi.at[tileKey(card)];
+  for (const card of here) at[tileKey(card)] ??= gridUi.arranging ? gridFit(Object.values(at), card.w, card.h) : boxOf(card);
   gridUi.at = at;
 }
 
 const gridEdit = () => {
   gridLoad();
-  Object.assign(gridUi, { entry: structuredClone(gridUi.at), undo: [], arranging: true });
+  Object.assign(gridUi, { entry: structuredClone(gridUi.at), undo: [], arranging: true, gone: new Set() });
   paintGrid();
 };
 
 function gridDone() {
   const at = gridUi.at;
+  const gone = [...gridUi.gone];
   gridUi.arranging = false;
   changeLayout((layout) => {
+    for (const key of gone) takeTile(layout, key);
     for (const card of layout.cards) Object.assign(card, at[tileKey(card)]);
   });
+}
+
+/** A card taken off while arranging: it goes with "Done", comes back with "Undo" or "Cancel" */
+function gridTake(card) {
+  gridUi.undo.push(structuredClone(gridUi.at));
+  gridUi.gone.add(tileKey(card));
+  delete gridUi.at[tileKey(card)];
+  paintGrid();
 }
 
 function gridCancel() {
@@ -2005,7 +2020,8 @@ function paintGrid() {
   pg.className = "pg" + (gridUi.arranging ? " arranging" : "") + (free ? "" : " flowing");
   pg.style.setProperty("--pg-cols", String(cols));
   const cards = state.overview.dashboard.cards;
-  const inOrder = free ? cards : [...cards].sort((a, b) => gridUi.at[tileKey(a)].y - gridUi.at[tileKey(b)].y || gridUi.at[tileKey(a)].x - gridUi.at[tileKey(b)].x);
+  const shown = cards.filter((card) => !gridUi.gone.has(tileKey(card)));
+  const inOrder = free ? shown : [...shown].sort((a, b) => gridUi.at[tileKey(a)].y - gridUi.at[tileKey(b)].y || gridUi.at[tileKey(a)].x - gridUi.at[tileKey(b)].x);
   // room to pull a card further down than anything stands yet
   const rows = Math.max(0, ...Object.values(gridUi.at).map((b) => b.y + b.h)) + 6;
   const cells = gridUi.arranging ? Array.from({ length: rows * cols }, (_, i) => {
@@ -2029,7 +2045,7 @@ function gridCard(card, free) {
   const box = gridUi.at[tileKey(card)];
   const body = gridBody(card, box);
   if (!body) return null;
-  const el = h("div", { class: "pg-card", "data-card": tileKey(card) }, body, gridUi.arranging && ["n", "e", "s", "w", "ne", "se", "sw", "nw"].map((side) => h("span", { class: `pg-side pg-${side}`, "data-side": side })));
+  const el = h("div", { class: "pg-card", "data-card": tileKey(card) }, body, gridUi.arranging && ["n", "e", "s", "w", "ne", "se", "sw", "nw"].map((side) => h("span", { class: `pg-side pg-${side}`, "data-side": side })), gridUi.arranging && gridRemovable(card) && h("button", { type: "button", class: "icon-btn pg-remove", title: t("home.removeBlock"), "aria-label": t("home.removeBlock"), onpointerdown: (e) => e.stopPropagation(), onclick: () => gridTake(card) }, icon("x")));
   gridPosition(el, box, free);
   if (gridUi.arranging) el.addEventListener("pointerdown", (e) => gridStart(e, card, el));
   el.addEventListener("contextmenu", (e) => {
@@ -2038,7 +2054,7 @@ function gridCard(card, free) {
     const picked = getSelection();
     if (picked && !picked.isCollapsed && picked.containsNode(e.target, true)) return;
     e.preventDefault();
-    menuAt({ x: e.clientX, y: e.clientY }, null, [{ label: t("home.removeBlock"), icon: "trash", danger: true, run: () => removeBlock(card.id) }]);
+    menuAt({ x: e.clientX, y: e.clientY }, null, [mayArrange() && { label: t("grid.edit"), icon: "grid", run: gridEdit }, { label: t("home.removeBlock"), icon: "trash", danger: true, run: () => removeBlock(card.id) }].filter(Boolean));
   });
   return el;
 }
@@ -2882,7 +2898,7 @@ function machineBlock(id) {
     body = [h("p", { class: "mrow-away muted small" }, t("machines.offlineLead", { ago: ago(m.seen) })), h("div", { class: "row-actions" }, buttons)];
     if (openMore) el.oncontextmenu = (e) => (e.preventDefault(), openMore({ x: e.clientX, y: e.clientY }));
   } else body = h("div", { class: "meters" + (waiting ? " waiting" : "") }, waiting ? Array.from({ length: 5 }, () => h("div", { class: "meter skeleton" }, h("i"), h("i"), h("i"))) : machineMeters(m.status));
-  put(el, who, body, blockRemover(id));
+  put(el, who, body);
   return el;
 }
 
@@ -2906,7 +2922,7 @@ function renderHome() {
   renderHomeBody();
 }
 
-const activityBody = (o) => [blockRemover("activity"), h("div", { class: "section-head" }, h("h2", null, t("activity.title"))), o.activity.length ? h("div", { class: "timeline fits" }, o.activity.map(activityItem)) : h("p", { class: "muted small" }, t("activity.none")), isAdmin() && o.activity.length > 0 && h("a", { class: "link small all-activity block-foot", href: "#/activity" }, t("activity.all"), icon("chevron"))];
+const activityBody = (o) => [h("div", { class: "section-head" }, h("h2", null, t("activity.title"))), o.activity.length ? h("div", { class: "timeline fits" }, o.activity.map(activityItem)) : h("p", { class: "muted small" }, t("activity.none")), isAdmin() && o.activity.length > 0 && h("a", { class: "link small all-activity block-foot", href: "#/activity" }, t("activity.all"), icon("chevron"))];
 
 function attentionDialog(list) {
   let dialog;
@@ -2915,7 +2931,6 @@ function attentionDialog(list) {
 
 function attentionBlock(list) {
   return [
-    blockRemover("attention"),
     h("div", { class: "section-head" }, h("h2", null, t("attention.title"), list.length > 0 && h("span", { class: "pill" }, list.length))),
     list.length ? h("div", { class: "attention-list fits" }, list.map(attentionItem)) : h("p", { class: "all-good" }, icon("check", "ok"), t("attention.none")),
     h(
@@ -2944,12 +2959,6 @@ function renderHomeBody() {
 const BLOCKS = { stats: "cpu", attention: "alert", activity: "list", adblock: "shield" };
 const blockTitle = (id) => (id.startsWith("machine:") ? t("home.machineBlock", { name: machineOfBlock(id)?.name ?? id.slice(8) }) : t(id === "stats" ? "home.statsBlock" : id + ".title"));
 const removeBlock = (id) => changeLayout((layout) => void takeTile(layout, "block:" + id));
-
-/** The small button that takes one of Hata's own blocks off Home; "Add" brings it back */
-function blockRemover(id) {
-  if (!isAdmin()) return null;
-  return h("button", { type: "button", class: "icon-btn quiet block-remove", title: t("home.removeBlock"), "aria-label": `${t("home.removeBlock")}: ${blockTitle(id)}`, onclick: () => removeBlock(id) }, icon("x"));
-}
 
 function layoutTextDialog() {
   const area = h("textarea", { class: "code", spellcheck: false, wrap: "off", "aria-label": t("home.layoutText"), disabled: true });
@@ -17744,7 +17753,6 @@ function adblockBlock(el, b) {
   };
   put(
     el,
-    blockRemover("adblock"),
     h("div", { class: "section-head" }, h("h2", null, h("a", { href: "#/settings/adblock" }, t("adblock.title"))), b.enabled && h("span", { class: "state " + (b.paused ? "restarting" : b.serving ? "running" : "stopped") }, b.paused ? t("adblock.pausedUntil", { when: blockUntil(b.pausedUntil) }) : t(b.serving ? "adblock.working" : "adblock.notServing"))),
     b.enabled
       ? [
