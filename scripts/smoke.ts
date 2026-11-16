@@ -194,6 +194,7 @@ const ROUTES = [
   "#/", "#/files", "#/files/", "#/hata", "#/trash", "#/activity",
   "#/machines", "#/containers", "#/containers/settings", "#/machines/this/apps", "#/house", "#/integrations", "#/assistant", "#/tv", "#/terminal",
   ...new Set(tabs),
+  "#/settings/users/access", "#/settings/users/invites", "#/settings/users/signins",
   // addresses from before the sections moved out of Settings
   "#/settings/docker", "#/settings/storage/fs", "#/settings/ports",
 ];

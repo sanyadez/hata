@@ -5609,5 +5609,21 @@
   "area.house.torrents": "Torrents",
   "house.connect": "Connect",
   "house.connectOne": "Connect {name}",
-  "house.none": "{name} is not connected yet"
+  "house.none": "{name} is not connected yet",
+  "users.part.people": "People",
+  "users.part.access": "Who opens what",
+  "users.part.invites": "Invitations",
+  "users.part.signins": "Sign-in log",
+  "access.reads": "reads",
+  "access.adminAll": "An administrator opens everything",
+  "access.keptOut": "Kept out of the network folders: the person's menu in People lets them in",
+  "access.guest": "anyone on the network, without a password: {level}",
+  "access.appsLead": "a tick lets the person see and open the app",
+  "access.sharesLead": "a click goes around: nothing, reads, reads and writes",
+  "access.foldersOf": "Folders of {name}",
+  "access.haLead": "who sees its devices on Home",
+  "access.haWhat": "Devices on Home",
+  "access.people": "people: {n}",
+  "access.nothing": "Nothing to give access to yet: no apps, no network folders.",
+  "access.one": "This is the one place where access is given: a tick opens, “reads” is a folder without writing, a dash is no access."
 }

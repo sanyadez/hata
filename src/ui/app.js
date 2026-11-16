@@ -411,7 +411,7 @@ function parseRoute() {
   }
   // both live in Settings; their own old addresses still lead there
   if ((parts[0] === "backups" || (parts[0] === "settings" && parts[1] === "backups")) && isAdmin()) return { view: "backups" };
-  if ((parts[0] === "users" || (parts[0] === "settings" && parts[1] === "users")) && isAdmin()) return { view: "users" };
+  if ((parts[0] === "users" || (parts[0] === "settings" && parts[1] === "users")) && isAdmin()) return areaRoute("settings", "users", parts[0] === "users" ? parts[1] : parts[2]);
   if (parts[0] === "import" && isAdmin()) return { view: "import" };
   if (parts[0] === "terminal" && isAdmin()) return { view: "terminal" };
   if (parts[0] === "assistant" && isAdmin()) return { view: "assistant" };
@@ -518,6 +518,8 @@ function areaRoute(area, id, rest) {
   if (!tab) return { view: "home" };
   // the containers of this server keep their own two parts: the list and what they stand on
   if (tab.view === "containers") return { view: "containers", tab: rest === "settings" ? "settings" : "list", hash: tabHash(area, tab) + (rest === "settings" ? "/settings" : "") };
+  // people and what they may open: four parts under one head
+  if (tab.view === "users") return ((part) => ({ view: "users", tab: tab.id, part, hash: tabHash(area, tab) + (part === "people" ? "" : "/" + part) }))(USER_PARTS.includes(rest) ? rest : "people");
   if (tab.view) return { view: tab.view, tab: tab.id, hash: tabHash(area, tab) };
   return { view: "settings", area, at: tab.id, section: tab.sections[0], sections: tab.sections, tab: tab.tab ?? rest, hash: tabHash(area, tab) + (!tab.tab && rest ? "/" + rest : "") };
 }
@@ -20623,6 +20625,17 @@ async function loadUsers() {
   try {
     const [users, invites, access, signIns] = await Promise.all([api("GET", "/api/users"), api("GET", "/api/invites"), api("GET", `/api/access?lang=${state.lang}`), api("GET", "/api/signins")]);
     Object.assign(state, { users, invites, access, signIns });
+    // the one table of access also holds the folders — this server's and the computers' — and Home Assistant
+    if (state.route.part === "access") {
+      const [shares, machines, ha] = await Promise.all([
+        hasModule("shares") ? api("GET", "/api/shares").catch(() => null) : null,
+        hasModule("machines") ? api("GET", "/api/machines").catch(() => null) : null,
+        hasModule("integrations") ? api("GET", "/api/ha").catch(() => null) : null,
+      ]);
+      const let_ = (machines?.machines ?? []).filter((m) => m.people);
+      const folders = await Promise.all(let_.map((m) => api("GET", `/api/machines/${m.id}/shares`).then((r) => ({ machine: m, shares: r.shares }), () => ({ machine: m, shares: [] }))));
+      state.accessMore = { shares: shares?.shares ?? [], kept: new Set((shares?.users ?? []).filter((u) => !u.allowed).map((u) => u.id)), folders, ha: ha?.servers ?? [] };
+    }
     if (!state.settings) state.settings = await api("GET", "/api/settings");
   } catch (e) {
     return toast(errorText(e), "error");
@@ -20753,17 +20766,19 @@ function userMenuFor(user, at = null) {
   if (at) placeAt(dialog, at);
 }
 
+const USER_PARTS = ["people", "access", "invites", "signins"];
+
 function renderUsers() {
   const users = state.users ?? [];
+  const part = state.route.part ?? "people";
   const admins = users.filter((u) => u.role === "admin").length;
   const without = users.filter((u) => !u.twoFactor).length;
-  shell(
-    ...settingsFrame(
-    "users",
-    h("div", { class: "card page-head section-page" }, h("div", null, h("h2", null, t("nav.users")), h("p", { class: "meta" }, t("users.meta", { users: users.length, admins }), without > 0 && h("span", { class: "dot-sep" }, "·"), without > 0 && t("users.without2fa", { n: without }))), h("div", { class: "actions" }, button(t("users.add"), { class: "primary", onclick: userDialog }, "plus"))),
+  const invites = state.invites?.length ?? 0;
+  const people = () => [
     h(
       "div",
       { class: "card table-wrap" },
+      h("div", { class: "section-head pad-head" }, h("div", null, h("h2", null, t("users.part.people"), " ", h("span", { class: "muted" }, String(users.length))), h("p", { class: "meta" }, t("users.meta", { users: users.length, admins }), without > 0 && h("span", { class: "dot-sep" }, "·"), without > 0 && t("users.without2fa", { n: without })))),
       h(
         "table",
         null,
@@ -20785,13 +20800,25 @@ function renderUsers() {
           ),
         ),
       ),
+      h("p", { class: "table-foot muted small" }, t("users.rolesHint")),
     ),
-    h("p", { class: "card pad muted small" }, t("users.rolesHint")),
     requireTwoFactorRow(),
-    h("div", { class: "columns" }, h("section", null, accessMatrix()), h("aside", { class: "side" }, invitesCard(), signInLog())),
+  ];
+  const body = part === "access" ? accessTable() : part === "invites" ? invitesCard() : part === "signins" ? signInLog() : people();
+  shell(
+    ...settingsFrame(
+      "users",
+      h(
+        "div",
+        { class: "card filter-bar" },
+        h("div", { class: "seg-pills" }, USER_PARTS.map((id) => h("a", { class: "seg-pill" + (part === id ? " active" : ""), href: `#/settings/users${id === "people" ? "" : "/" + id}` }, t("users.part." + id), id === "invites" && invites > 0 && h("span", { class: "muted" }, String(invites))))),
+        h("div", { class: "actions" }, button(t("invite.new"), { onclick: inviteDialog }, "link"), button(t("users.add"), { class: "primary", onclick: userDialog }, "plus")),
+      ),
+      body,
     ),
   );
 }
+
 
 /** The network folders a user may open, and how — under the name in the list of users */
 function userShares(user) {
@@ -20872,15 +20899,103 @@ function invitesCard() {
 }
 
 function signInLog() {
-  const list = (state.signIns ?? []).slice(0, 8);
+  const list = (state.signIns ?? []).slice(0, 60);
   return h(
     "section",
-    { class: "pad-x" },
+    { class: "card pad" },
     h("div", { class: "section-head" }, h("h2", null, t("signins.title"))),
     list.length
       ? list.map((entry) => h("div", { class: "activity-item" }, icon(entry.outcome === "ok" ? "signin" : "x", entry.outcome === "ok" ? "" : "danger"), h("div", { class: "grow" }, h("div", null, t("signins." + entry.outcome, { name: entry.name || "?" })), h("div", { class: "muted small" }, `${ago(entry.ts)} · ${entry.ip}`))))
       : h("p", { class: "muted small" }, t("activity.none")),
   );
+}
+
+/**
+ * The one table of access: a row per thing — apps, network folders, the folders of the computers let to people, Home
+ * Assistant — and a column per person. A tick opens, "reads" is a folder without writing; an administrator opens all but
+ * the network folders, where everybody is named.
+ */
+function accessTable() {
+  const access = state.access;
+  const more = state.accessMore;
+  if (!access || !more) return h("p", { class: "card pad muted" }, "…");
+  const users = access.users;
+  const again = () => void loadUsers();
+  const fail = (e) => (toast(errorText(e), "error"), again());
+  const members = users.filter((u) => u.role === "member").map((u) => u.id);
+  const dash = () => h("span", { class: "muted" }, "—");
+  const fixed = (title) => h("span", { class: "mark on fixed", title }, icon("check"));
+  const tick = (on, label, set) => h("button", { type: "button", class: "mark" + (on ? " on" : ""), "aria-pressed": String(on), "aria-label": label, title: label, onclick: () => set(!on) }, on ? icon("check") : "—");
+  // a folder: none → reads → reads and writes → none
+  const level = (now, label, set) => {
+    const next = now === "read" ? "write" : now === "write" ? "none" : "read";
+    const words = `${label}: ${t("shares.access." + (now ?? "none"))}`;
+    return h("button", { type: "button", class: "mark" + (now === "write" ? " on" : now === "read" ? " reads" : ""), "aria-label": words, title: words, onclick: () => set(next) }, now === "write" ? icon("check") : now === "read" ? t("access.reads") : "—");
+  };
+  const group = (title, lead) => h("tr", { class: "group-row" }, h("td", { colSpan: users.length + 1 }, h("strong", null, title), lead && h("span", { class: "muted small" }, " · ", lead)));
+  const withLevel = (map, id, to) => Object.fromEntries(Object.entries({ ...map, [id]: to }).filter(([, v]) => v !== "none"));
+
+  const setApp = async (app, patch) => {
+    try {
+      const res = await api("PUT", app.machine ? `/api/machines/${app.machine.id}/apps/${app.app}/access` : `/api/apps/${app.name}/access`, { protect: app.protect, allowed: app.allowed, ...patch });
+      if (res.job) jobDialog(res.job, "apply", app.title, again);
+      else again();
+    } catch (e) {
+      fail(e);
+    }
+  };
+  const appRow = (app) => {
+    const everyone = app.allowed === "all";
+    const list = everyone ? members : app.allowed;
+    const signIn = h("label", { class: "check small" }, h("input", { type: "checkbox", checked: app.protect, disabled: !!app.cannotProtect, title: app.cannotProtect ? t("access.cannot." + app.cannotProtect) : "", onchange: (e) => setApp(app, { protect: e.target.checked }) }), h("span", null, t("access.signIn")));
+    return h(
+      "tr",
+      null,
+      h("td", null, h("div", { class: "with-icon" }, appIcon(app, "sm"), h("div", { class: "stack-s backup-name" }, h("a", { class: "strong", href: app.machine ? `#/machines/${app.machine.id}/apps` : `#/apps/${app.name}` }, app.title), app.machine && h("div", { class: "muted small with-icon" }, icon("server"), app.machine.name, app.protect && app.listen ? ` · ${t("access.through", { port: app.listen })}` : ""), signIn, app.cannotProtect === "hostNetwork" && h("div", { class: "muted small" }, t("access.hostOpen")), !everyone && !app.protect && h("div", { class: "muted small" }, t("access.onlyHidden"))))),
+      users.map((u) => h("td", null, u.role === "admin" ? fixed(t("access.adminAll")) : tick(everyone ? u.role === "member" : list.includes(u.id), `${u.name}: ${app.title}`, (on) => setApp(app, { allowed: on ? [...new Set([...list, u.id])] : list.filter((id) => id !== u.id) })))),
+    );
+  };
+  const shareRow = (share) =>
+    h(
+      "tr",
+      null,
+      h("td", null, h("div", { class: "with-icon" }, h("span", { class: "app-icon sm plus" }, icon("folder")), h("div", { class: "stack-s backup-name" }, h("a", { class: "strong", href: "#/storage/shares" }, share.name), h("div", { class: "muted small mono clip" }, share.path), share.guest !== "none" && h("div", { class: "muted small" }, t("access.guest", { level: t("shares.access." + share.guest).toLowerCase() }))))),
+      users.map((u) => h("td", null, more.kept.has(u.id) ? h("span", { class: "muted", title: t("access.keptOut") }, "—") : level(share.users[u.id], `${u.name}: ${share.name}`, (to) => api("PUT", `/api/shares/${encodeURIComponent(share.name)}`, { users: withLevel(share.users, u.id, to) }).then(again, fail)))),
+    );
+  const folderRow = (m, share) =>
+    h(
+      "tr",
+      null,
+      h("td", null, h("div", { class: "with-icon" }, h("span", { class: "app-icon sm plus" }, icon("folder")), h("div", { class: "stack-s backup-name" }, h("a", { class: "strong", href: machineBase(m) }, share.name), h("div", { class: "muted small mono clip" }, share.path)))),
+      users.map((u) => h("td", null, u.role === "admin" ? fixed(t("access.adminAll")) : level(share.users[u.id], `${u.name}: ${share.name}`, (to) => api("PUT", `/api/machines/${m.id}/shares`, { path: share.path, name: share.name, users: withLevel(share.users, u.id, to) }).then(again, fail)))),
+    );
+  const haRow = (x) => {
+    const all = x.people === "all";
+    const list = all ? users.filter((u) => u.role !== "admin").map((u) => u.id) : (x.people ?? []);
+    return h(
+      "tr",
+      null,
+      h("td", null, h("div", { class: "with-icon" }, h("span", { class: "app-icon sm plus" }, icon("bulb")), h("div", { class: "stack-s backup-name" }, h("a", { class: "strong", href: `#/house/ha/${x.id}` }, x.name), h("div", { class: "muted small" }, t("access.haWhat"))))),
+      users.map((u) => h("td", null, u.role === "admin" ? fixed(t("access.adminAll")) : tick(list.includes(u.id), `${u.name}: ${x.name}`, (on) => api("PATCH", `/api/ha/${x.id}`, { people: on ? [...new Set([...list, u.id])] : list.filter((id) => id !== u.id) }).then(again, fail)))),
+    );
+  };
+  const rows = [
+    access.apps.length > 0 && [group(t("nav.apps"), t("access.appsLead")), access.apps.map(appRow)],
+    more.shares.length > 0 && [group(t("area.storage.shares"), t("access.sharesLead")), more.shares.map(shareRow)],
+    more.folders.filter((f) => f.shares.length > 0).map((f) => [group(t("access.foldersOf", { name: f.machine.name })), f.shares.map((share) => folderRow(f.machine, share))]),
+    more.ha.length > 0 && [group("Home Assistant", t("access.haLead")), more.ha.map(haRow)],
+  ].filter(Boolean);
+  return [
+    h(
+      "div",
+      { class: "card table-wrap" },
+      h("div", { class: "section-head pad-head" }, h("h2", null, t("users.part.access"), " ", h("span", { class: "muted" }, t("access.people", { n: users.length })))),
+      rows.flat(3).length
+        ? h("table", { class: "matrix access" }, h("thead", null, h("tr", null, h("th"), users.map((u) => h("th", null, u.name, h("span", { class: "muted block" }, t("user.role." + u.role)))))), h("tbody", null, rows))
+        : h("p", { class: "pad-row muted" }, t("access.nothing")),
+      h("p", { class: "table-foot muted small" }, t("access.one"), " ", t("access.how")),
+    ),
+  ];
 }
 
 /** Who may open what: a row per app, a column per person who is not an administrator */
