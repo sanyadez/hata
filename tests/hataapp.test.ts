@@ -267,3 +267,11 @@ describe("changedNotes", () => {
     expect(changedNotes(old, undefined, "en")).toBe("");
   });
 });
+
+test("the store's words on its last change ride with the app, and are said only when they are news", () => {
+  const app = read({ changes: { en: "A step keeps the page reachable.", uk: "Крок тримає сторінку доступною." } })!;
+  expect(app.meta.changes).toEqual({ en: "A step keeps the page reachable.", uk: "Крок тримає сторінку доступною." });
+  expect(read()!.meta.changes).toBeUndefined();
+  expect(changedNotes(undefined, app.meta.changes, "uk")).toBe("Крок тримає сторінку доступною.");
+  expect(changedNotes(app.meta.changes, app.meta.changes, "uk")).toBe("");
+});

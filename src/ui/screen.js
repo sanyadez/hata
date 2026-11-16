@@ -30,6 +30,29 @@ const incus = params.get("incus");
 
 let rfb = null;
 
+// A machine that changes its resolution (the sign-in screen giving way to the desktop) starts a new picture.
+// A viewer then holds an empty one and gets only the parts that change — a clock, a button under the pointer —
+// unless the whole is asked for again: so it is asked for, at the change and once more when things settled.
+// noVNC has no call for that; these are its own inner names, hence every check.
+let shown = "";
+const askWhole = (of) => {
+  try {
+    if (of !== rfb || !of?._sock || of._rfbConnectionState !== "connected" || typeof RFB.messages?.fbUpdateRequest !== "function") return;
+    RFB.messages.fbUpdateRequest(of._sock, false, 0, 0, of._fbWidth, of._fbHeight);
+  } catch {
+    // an older or newer noVNC: the picture stays as it comes
+  }
+};
+setInterval(() => {
+  const now = rfb?._fbWidth ? `${rfb._fbWidth}x${rfb._fbHeight}` : "";
+  if (now && shown && now !== shown) {
+    const of = rfb;
+    askWhole(of);
+    setTimeout(() => askWhole(of), 1500);
+  }
+  shown = now;
+}, 400);
+
 async function connect() {
   rfb?.disconnect();
   rfb = null;

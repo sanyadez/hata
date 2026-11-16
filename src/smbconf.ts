@@ -209,3 +209,51 @@ export const userMap = (accounts: Account[]): string => "# Written by Hata: its 
 
 /** The names Samba has passwords for, from `pdbedit -L` (`name:uid:full name`) */
 export const parseUsers = (out: string): string[] => out.split("\n").map((line) => line.split(":")[0]!.trim()).filter(Boolean);
+
+/**
+ * The files devices are writing over the network folders right now, from what `smbstatus -j` prints:
+ * a copy in progress, which a restart of Samba would cut — leaving a file of the full size whose end
+ * is empty.
+ */
+export function openForWriting(json: string): string[] {
+  let data: unknown;
+  try {
+    data = JSON.parse(json);
+  } catch {
+    return [];
+  }
+  const files = (data as { open_files?: unknown } | null)?.open_files;
+  if (!files || typeof files !== "object") return [];
+  const out: string[] = [];
+  for (const [path, file] of Object.entries(files as Record<string, { filename?: unknown; opens?: unknown }>)) {
+    // a folder is opened "for writing" by whoever may add a file to it
+    if (!file || file.filename === "." || path.endsWith("/.")) continue;
+    const opens = file.opens && typeof file.opens === "object" ? Object.values(file.opens as Record<string, { access_mask?: Record<string, unknown> }>) : [];
+    if (opens.some((open) => open?.access_mask?.WRITE_DATA === true || open?.access_mask?.APPEND_DATA === true)) out.push(path);
+  }
+  return out;
+}
+
+/**
+ * The folders whose section differs between two files, or is in the first alone. Samba decides who may
+ * read and write when a device opens a folder, so one that had it open keeps the old rights until it
+ * opens it anew — these are the folders to close for everybody after a change.
+ */
+export function changedShares(before: string | null, after: string): string[] {
+  const sections = (text: string): Map<string, string> => {
+    const out = new Map<string, string>();
+    let name = "";
+    for (const line of text.split("\n")) {
+      const head = /^\[(.+)\]\s*$/.exec(line);
+      if (head) {
+        name = head[1]!;
+        out.set(name, "");
+      } else if (name) out.set(name, out.get(name) + line.trim() + "\n");
+    }
+    out.delete("global");
+    return out;
+  };
+  if (before === null) return [];
+  const [was, now] = [sections(before), sections(after)];
+  return [...was.keys()].filter((name) => was.get(name) !== now.get(name));
+}

@@ -20,7 +20,7 @@ import { answersItself, homeLinks, offer, offering, type Service } from "./mdns"
 import { answered } from "./netroom";
 import { installCommand, installPackage, PATH, run } from "./packages";
 import { localDomain } from "./site";
-import { adiskTxt, isOurs, nameFor, nameLine, parseUsers, shareName, SMB_CONF, SMB_CONF_BEFORE, smbConf, UNIX_NAME_RE, unixName, USER_MAP, userMap, writablePath, timeMachineOf, type Access, type Share } from "./smbconf";
+import { adiskTxt, changedShares, isOurs, openForWriting, nameFor, nameLine, parseUsers, shareName, SMB_CONF, SMB_CONF_BEFORE, smbConf, UNIX_NAME_RE, unixName, USER_MAP, userMap, writablePath, timeMachineOf, type Access, type Share } from "./smbconf";
 import { refreshWsd, wsdStatus } from "./wsd";
 
 const PACKAGE = "samba";
@@ -149,7 +149,12 @@ async function sync(): Promise<void> {
   if (await isActive(name)) {
     // a new name of the computer is taken only at a start: of Samba, and of its part that answers to the name
     if (nameLine(conf) !== nameLine(before)) for (const one of [name, name === "smbd" ? "nmbd" : "nmb"]) await run(["systemctl", "try-restart", `${one}.service`], 60_000);
-    else await run(["smbcontrol", "all", "reload-config"], 10_000);
+    else {
+      await run(["smbcontrol", "all", "reload-config"], 10_000);
+      // a device that has a changed folder open keeps the rights it opened it with: the folder is closed for
+      // everybody, and each device opens it again by itself at its next step — with the rights of now
+      for (const share of changedShares(before, conf)) await run(["smbcontrol", "all", "close-share", share], 10_000);
+    }
   }
   // a stopped Samba is started only when there is something to serve
   else if (settings.shares.length) {
@@ -226,6 +231,13 @@ export interface SharesReport {
    */
   announced: { name: string; browse: boolean; windows: boolean; error: string };
   shares: ShareReport[];
+}
+
+/** The files being written over the network folders right now: what a restart of Samba would cut */
+export async function writingNow(): Promise<string[]> {
+  if (!Bun.which("smbstatus", { PATH })) return [];
+  const said = await run(["smbstatus", "-j"], 10_000);
+  return said.code === 0 ? openForWriting(said.out) : [];
 }
 
 /** Whether a shared folder is there; one on a network place whose server is silent is not, one not heard of yet is taken as there */

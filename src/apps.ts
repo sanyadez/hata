@@ -59,7 +59,7 @@ function assertInstalled(name: string): void {
 
 // --- Jobs -------------------------------------------------------------------------------------------
 
-export type JobKind = "install" | "update" | "start" | "stop" | "restart" | "remove" | "apply" | "backup" | "restore" | "import" | "move" | "docker" | "tailscale" | "copyin" | "transfer" | "moveapp" | "extract" | "format" | "fsck" | "wipe" | "pool" | "sysupdate" | "guest" | "client" | "template" | "clone" | "resize" | "incus" | "container" | "disc" | "upload" | "tv";
+export type JobKind = "install" | "update" | "start" | "stop" | "restart" | "remove" | "apply" | "backup" | "restore" | "import" | "move" | "docker" | "tailscale" | "copyin" | "filecopy" | "filemove" | "transfer" | "moveapp" | "extract" | "format" | "fsck" | "wipe" | "pool" | "sysupdate" | "guest" | "client" | "template" | "clone" | "resize" | "incus" | "container" | "disc" | "upload" | "tv";
 
 export interface Job {
   id: string;
@@ -125,9 +125,10 @@ export const jobFinished = (job: Job): Promise<void> => finished.get(job) ?? Pro
  * `label` — for an app of another machine: `app` is then only the key that keeps one operation at a
  * time, the activity log gets the app's own name and the machine's.
  */
-export function startJob(app: string, kind: JobKind, user: string, work: (log: Log) => Promise<void>, quiet = false, label?: { app: string; machine: string }): Job {
+export function startJob(app: string, kind: JobKind, user: string, work: (log: Log) => Promise<void>, quiet = false, label?: { app: string; machine: string; id?: string }): Job {
   if (busy.has(app)) throw new AppError("app.busy", 409);
-  const job: Job = { id: crypto.randomUUID(), app, kind, status: "running", log: [], lineCount: 0, startedAt: Date.now(), title: label?.app, machine: label?.machine };
+  // a job taken up again after a restart of Hata keeps its id: the page that follows it goes on
+  const job: Job = { id: label?.id || crypto.randomUUID(), app, kind, status: "running", log: [], lineCount: 0, startedAt: Date.now(), title: label?.app, machine: label?.machine };
   jobs.set(job.id, job);
   busy.set(app, job.id);
   const summary = () => ({ id: job.id, app, kind, status: job.status, error: job.error, stoppable: job.stoppable, stopped: job.stopped, progress: job.progress, last: job.last, title: job.title, icon: job.icon, machine: job.machine });
@@ -1071,6 +1072,10 @@ export interface StoreUpdate {
   exact: boolean;
   changes: MergeChange[];
   merged: Compose;
+  /** The app's compose file as it is now, read the way `merged` is: what the update is compared with */
+  current: Compose;
+  /** The store's other files of the app differ from the ones it was installed with */
+  filesChanged: boolean;
   /** The store's file as it is today — the next base */
   base: Compose;
 }
@@ -1108,7 +1113,7 @@ export function planStoreUpdate(name: string): StoreUpdate | null {
     const { merged, changes } = merge3(origin?.base ? prepared(origin.base) : guessBase(ours, theirs), ours, theirs);
     // a store that only rewrote a description has no new version of the app
     if (changes.some((change) => !change.path.startsWith("x-casaos"))) {
-      plan = { store: app.store, recorded: store !== "", exact: !!origin?.base, changes, merged, base: structuredClone(app.compose) };
+      plan = { store: app.store, recorded: store !== "", exact: !!origin?.base, changes, merged, current: ours, filesChanged: false, base: structuredClone(app.compose) };
     }
   }
   plans.set(name, { compose, origin, theirs: app.compose, plan });
@@ -1131,8 +1136,11 @@ function hataPlan(app: StoreApp, compose: Compose, origin: HataFile | null, reco
   const { merged, changes } = merge3(origin?.base ? prepared(origin.base) : guessBase(ours, prepared(theirs)), ours, prepared(theirs));
   const filesChanged = !same(origin?.files ?? {}, hata.files);
   if (!changes.length && !filesChanged) return null;
-  return { store: app.store, hata, recorded, exact: !!origin?.base, changes, merged, base: theirs };
+  return { store: app.store, hata, recorded, exact: !!origin?.base, changes, merged, current: ours, filesChanged, base: theirs };
 }
+
+/** The store's own words on what its newer files change, when the installed ones do not say the same */
+export const updateChanges = (name: string, plan: StoreUpdate, lang: string): string => (plan.hata ? changedNotes(hataMetaOf(name)?.changes, plan.hata.meta.changes, lang) : "");
 
 /** The store's notes of the newer version, when they say something the installed ones do not */
 export const updateNotes = (name: string, plan: StoreUpdate, lang: string): string => (plan.hata ? changedNotes(hataMetaOf(name)?.notes, plan.hata.meta.notes, lang) : "");

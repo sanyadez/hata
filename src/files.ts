@@ -15,16 +15,17 @@
  * the owner of the folder it is created in — otherwise an app could not touch a file uploaded into its
  * own folder.
  */
-import { chmodSync, chownSync, existsSync, readdirSync, lchownSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, statfsSync, statSync, unlinkSync, writeFileSync, type Stats } from "node:fs";
+import { chmodSync, chownSync, existsSync, readdirSync, lchownSync, lstatSync, mkdirSync, readFileSync, realpathSync, renameSync, rmSync, statfsSync, statSync, unlinkSync, writeFileSync, type Stats } from "node:fs";
 import { lstat, open, readdir, readFile, rm, stat } from "node:fs/promises";
 import { basename, dirname, extname, join, resolve, sep } from "node:path";
 import { record } from "./activity";
-import { AppError, startJob, type Job } from "./apps";
+import { AppError, startJob, stoppable, type Job } from "./apps";
 import { DATA_DIR, saveSettings, SECRETS_DIR, settings, trashDays, type Favorite } from "./config";
+import { COMPILED } from "./version";
 import { movePath } from "./dashboard";
 import { parseMounts } from "./disks";
 import { answered, networkMounts, roomOf } from "./netroom";
-import { readJsonFile } from "./fsutil";
+import { readJsonFile, writeJsonAtomic } from "./fsutil";
 import { writablePath } from "./smbconf";
 import { findInTrash, inTrash, keepDays, listTrash, purgeTrash, putInTrash, sweepTrash, takeFromTrash, TRASH_DIR, type TrashItem } from "./trash";
 import { openZip } from "./unzip";
@@ -36,6 +37,8 @@ const LIST_LIMIT = 5000;
 export const MAX_TEXT_BYTES = 1024 * 1024;
 /** Counting what a removal takes with it stops here */
 const SUMMARY_LIMIT = 200_000;
+/** How long counting a folder's size may take */
+const SIZE_LIMIT_MS = 120_000;
 /** A file that is being uploaded, in the folder it will land in; not listed */
 const PART_RE = /^\.hata-upload-[a-z0-9]{8,32}$/;
 const PART_MAX_AGE = 24 * 3600_000;
@@ -450,6 +453,19 @@ export async function summary(paths: unknown): Promise<Summary> {
   return out;
 }
 
+/** How much room a folder or file takes on its disk: `du` in a child, so a folder of a million files does not hold the server */
+export async function sizeOf(path: unknown): Promise<{ size: number }> {
+  const abs = locate(path);
+  if (!lstatOrNull(abs)) throw new AppError("files.notFound", 404);
+  const du = Bun.spawn(["du", "-sk", "--", abs], { stdout: "pipe", stderr: "ignore", signal: AbortSignal.timeout(SIZE_LIMIT_MS) });
+  const said = await new Response(du.stdout).text();
+  await du.exited;
+  // folders it may not read make du fail, yet the number it gives is still what it could count
+  const kb = Number(/^(\d+)\s/.exec(said)?.[1]);
+  if (!Number.isFinite(kb)) throw new AppError("files.sizeTooLong", 504);
+  return { size: kb * 1024 };
+}
+
 export function makeFolder(dir: unknown, name: unknown): string {
   const parent = locate(dir);
   mustBeDir(parent);
@@ -511,10 +527,219 @@ export function freeName(dir: string, name: string, taken = (candidate: string) 
 }
 
 /**
+ * A copy of files, or a move to another disk, goes on apart from Hata: `cp` runs in a unit of its own
+ * (systemd), so a restart of Hata — an update of it among them — does not end it. What each such job is
+ * doing is kept on the disk; at the next start Hata takes the job up again under the same id: the card on
+ * the page goes on. Where there is no systemd to ask (or Hata is not root) `cp` is Hata's own child as
+ * before, and what a restart cut is removed at the next start — half a file under the right name and of
+ * nearly the right size is worse than none. The original is whole in every case.
+ */
+const COPYING = join(DATA_DIR, "file-jobs.json");
+interface CopyItem {
+  from: string;
+  dest: string;
+  /** The copy is complete (the mark of its unit was seen, or `cp` ended well) */
+  whole: boolean;
+  /** Everything about it is over: for a move the original is gone too */
+  done: boolean;
+  /** The unit copying it, when it runs apart from Hata */
+  unit?: string;
+}
+interface CopyJob {
+  id: string;
+  key: string;
+  copy: boolean;
+  user: string;
+  target: string;
+  named: string;
+  items: CopyItem[];
+  /** Bytes there are to copy, and the free room of the target when it began: the percent goes on from them */
+  total?: number;
+  before?: number;
+}
+let copying: CopyJob[] = [];
+const keepCopying = () => {
+  try {
+    writeJsonAtomic(COPYING, copying);
+  } catch {
+    // a state folder that cannot be written: the copy goes on all the same
+  }
+};
+
+/** Whether `cp` can run apart from Hata: systemd that leaves the names of files alone (254 and later) */
+let apartKnown: boolean | null = null;
+function canRunApart(): boolean {
+  if (apartKnown !== null) return apartKnown;
+  apartKnown = false;
+  // the installed service only: a run from source and the tests keep `cp` as their own child
+  if (!COMPILED || process.getuid?.() !== 0 || !existsSync("/run/systemd/system") || !Bun.which("systemd-run")) return false;
+  const said = Bun.spawnSync({ cmd: ["systemd-run", "--version"], stdout: "pipe", stderr: "ignore" }).stdout.toString();
+  apartKnown = Number(/^systemd (\d+)/.exec(said)?.[1] ?? 0) >= 254;
+  return apartKnown;
+}
+
+/** The mark a unit leaves when its copy ended well; in /run, so a restart of the whole server takes it away */
+const markOf = (unit: string) => `/run/${unit}.ok`;
+
+/** The state of a copy's unit: still at it, ended well (its mark is there), or not */
+async function unitState(unit: string): Promise<"running" | "ok" | "failed"> {
+  if (existsSync(markOf(unit))) return "ok";
+  const proc = Bun.spawn(["systemctl", "show", `${unit}.service`, "-p", "ActiveState"], { stdout: "pipe", stderr: "ignore" });
+  const state = /ActiveState=(\S+)/.exec(await new Response(proc.stdout).text())?.[1] ?? "";
+  if (state === "active" || state === "activating" || state === "deactivating") return "running";
+  // it may have ended between the two looks
+  return existsSync(markOf(unit)) ? "ok" : "failed";
+}
+
+/** Why a unit's copy failed: the last thing `cp` said */
+async function unitWords(unit: string): Promise<string> {
+  const proc = Bun.spawn(["journalctl", "-u", `${unit}.service`, "-n", "5", "--no-pager", "-o", "cat"], { stdout: "pipe", stderr: "ignore" });
+  const lines = (await new Response(proc.stdout).text()).split("\n").map((l) => l.trim()).filter((l) => l.startsWith("cp:"));
+  return lines.pop() ?? "";
+}
+
+const forgetUnit = (unit: string) => {
+  rmSync(markOf(unit), { force: true });
+  Bun.spawnSync({ cmd: ["systemctl", "reset-failed", `${unit}.service`], stdout: "ignore", stderr: "ignore" });
+};
+
+/** One entry copied, apart from Hata where that can be; an entry already being copied by its unit is waited for */
+async function copyItem(item: CopyItem, stop: AbortSignal): Promise<void> {
+  const failed = async (words: string): Promise<never> => {
+    // half a copy is of no use to anybody; the original is still whole
+    await rm(item.dest, { recursive: true, force: true }).catch(() => {});
+    if (stop.aborted) throw new Error("Stopped: what was copied so far is removed, the original is untouched");
+    throw new Error(/No space left/i.test(words) ? "The disk is full" : words || "The copy did not end well");
+  };
+  if (!item.unit && !canRunApart()) {
+    const cp = Bun.spawn(["cp", "-a", "--", item.from, item.dest], { stdout: "ignore", stderr: "pipe", signal: stop });
+    const [code, err] = await Promise.all([cp.exited, new Response(cp.stderr).text()]);
+    if (code !== 0) await failed(err.trim().split("\n").pop() ?? "");
+    return;
+  }
+  if (!item.unit) {
+    const unit = `hata-copy-${crypto.randomUUID().slice(0, 12)}`;
+    const started = Bun.spawnSync({
+      // the names go as arguments, and systemd is told to leave "$" in them alone
+      cmd: ["systemd-run", "--unit", unit, "--quiet", "--no-block", "--expand-environment=no", "/bin/sh", "-c", 'cp -a -- "$1" "$2" && : > "$3"', "sh", item.from, item.dest, markOf(unit)],
+      stdout: "ignore",
+      stderr: "pipe",
+    });
+    if (started.exitCode !== 0) await failed(started.stderr.toString().trim().split("\n").pop() ?? "");
+    item.unit = unit;
+    keepCopying();
+  }
+  const unit = item.unit!;
+  const onStop = () => void Bun.spawn(["systemctl", "stop", `${unit}.service`], { stdout: "ignore", stderr: "ignore" });
+  stop.addEventListener("abort", onStop);
+  try {
+    for (;;) {
+      const state = await unitState(unit);
+      if (state === "ok") break;
+      if (state === "failed" || stop.aborted) {
+        // a unit asked to stop takes a moment to let the files go
+        if (stop.aborted) await Bun.spawn(["systemctl", "stop", `${unit}.service`], { stdout: "ignore", stderr: "ignore" }).exited;
+        const words = await unitWords(unit);
+        forgetUnit(unit);
+        delete item.unit;
+        await failed(words.replace(/^cp:\s*/, ""));
+      }
+      await Bun.sleep(1000);
+    }
+  } finally {
+    stop.removeEventListener("abort", onStop);
+  }
+  forgetUnit(unit);
+  delete item.unit;
+}
+
+/** A copy job's work, from wherever it stands: also what goes on after a restart of Hata */
+function runCopy(state: CopyJob, taken: boolean): Job {
+  const stopper = new AbortController();
+  const said = () => record(state.copy ? "files.copy" : "files.move", { user: state.user, detail: `${state.named} → ${state.target}` });
+  const job = startJob(state.key, state.copy ? "filecopy" : "filemove", state.user, async (log) => {
+    try {
+      const left = state.items.filter((item) => !item.done);
+      if (taken) log("Hata was restarted meanwhile: the copy went on by itself");
+      if (state.total === undefined) {
+        const du = Bun.spawn(["du", "-skxc", "--", ...left.map((one) => one.from)], { stdout: "pipe", stderr: "ignore", signal: stopper.signal });
+        state.total = (Number(/^(\d+)\s+total$/m.exec(await new Response(du.stdout).text())?.[1]) || 0) * 1024;
+        const room = statfsSync(state.target);
+        if (state.total > room.bavail * room.bsize) throw new AppError("files.noSpace", 507);
+        state.before = room.bfree * room.bsize;
+        keepCopying();
+      }
+      const total = state.total;
+      log(`${state.copy ? "Copying" : "Moving"} ${megabytes(total)} to ${state.target}`);
+      const tick = setInterval(() => {
+        const now = statfsSync(state.target);
+        log(`  ${megabytes(Math.min(total, Math.max(0, (state.before ?? 0) - now.bfree * now.bsize)))} of ${megabytes(total)}`);
+      }, 3000);
+      try {
+        for (const item of left) {
+          if (!item.whole) {
+            log(`${item.from} → ${item.dest}`);
+            await copyItem(item, stopper.signal);
+            // from here on the copy is whole: nothing may take it away
+            item.whole = true;
+            keepCopying();
+          }
+          if (!state.copy) {
+            await rm(item.from, { recursive: true, force: true });
+            repin(item.from, item.dest);
+            reshare(item.from, item.dest);
+          }
+          item.done = true;
+          keepCopying();
+        }
+      } finally {
+        clearInterval(tick);
+      }
+      log(`Done: ${state.items.length} ${state.copy ? "copied" : "moved"} to ${state.target}`);
+      said();
+    } finally {
+      copying = copying.filter((one) => one !== state);
+      keepCopying();
+    }
+  }, true, { app: state.named, machine: "", id: state.id });
+  state.id = job.id;
+  keepCopying();
+  stoppable(job, stopper);
+  return job;
+}
+
+/**
+ * At the start: the copies an earlier Hata left are taken up again where their units still copy or have
+ * ended; what was Hata's own child died with it — that half is removed and said in the activity log.
+ */
+export async function resumeCopies(): Promise<void> {
+  const left = readJsonFile<CopyJob[]>(COPYING, []);
+  copying = [];
+  if (!Array.isArray(left)) return;
+  for (const state of left) {
+    if (!state || !Array.isArray(state.items) || typeof state.target !== "string") continue;
+    const now = state.items.find((item) => !item.done && !item.whole);
+    // nothing of it runs apart from Hata: it was cut
+    if (now && !now.unit) {
+      await rm(now.dest, { recursive: true, force: true }).catch(() => {});
+      record(state.copy ? "files.copyCut" : "files.moveCut", { user: state.user, detail: `${state.named} → ${state.target}` });
+      continue;
+    }
+    copying.push(state);
+    runCopy(state, true);
+  }
+  keepCopying();
+}
+
+/**
  * Moves or copies entries into the folder `to`. Nothing is overwritten: a name taken there is an
  * error — except for a copy into the same folder, which gets the next free name.
+ *
+ * What can be done at once is: a move within one disk is a rename. A copy, and a move to another
+ * disk, take as long as the files are large — those go on as a job the page shows the progress of
+ * and can stop; the answer is that job, or null when everything is done already.
  */
-export async function transfer(paths: unknown, to: unknown, copy: boolean): Promise<void> {
+export function transfer(paths: unknown, to: unknown, copy: boolean, user: string): Job | null {
   const target = locate(to);
   mustBeDir(target);
   mustWrite(target);
@@ -531,25 +756,30 @@ export async function transfer(paths: unknown, to: unknown, copy: boolean): Prom
     if (st.isDirectory() && inside(realish(dest), realish(from))) throw new AppError("files.intoItself");
     return { from, dest };
   });
-  for (const { from, dest } of plan) {
-    if (copy) await copyTree(from, dest);
-    else {
+  const named = plan.length === 1 ? basename(plan[0]!.from) : `${basename(plan[0]?.from ?? "")} +${plan.length - 1}`;
+  let long = plan;
+  if (!copy) {
+    long = [];
+    for (const one of plan) {
       try {
-        renameSync(from, dest);
-        repin(from, dest);
-        reshare(from, dest);
+        renameSync(one.from, one.dest);
+        repin(one.from, one.dest);
+        reshare(one.from, one.dest);
       } catch (e) {
         if ((e as NodeJS.ErrnoException).code !== "EXDEV") throw fsError(e);
         // another disk: a copy, then the original is removed
-        await copyTree(from, dest);
-        await rm(from, { recursive: true, force: false }).catch((e2) => {
-          throw fsError(e2);
-        });
-        repin(from, dest);
-        reshare(from, dest);
+        long.push(one);
       }
     }
   }
+  if (!long.length) {
+    if (plan.length) record(copy ? "files.copy" : "files.move", { user, detail: `${named} → ${target}` });
+    return null;
+  }
+  // every such job has a name of its own: two copies may run side by side
+  const state: CopyJob = { id: "", key: `files:${crypto.randomUUID().slice(0, 8)}`, copy, user, target, named, items: long.map((one) => ({ ...one, whole: false, done: false })) };
+  copying.push(state);
+  return runCopy(state, false);
 }
 
 /** Entries that are to be sent to another machine: they lie in one folder, which tar is run in */
@@ -607,8 +837,10 @@ export function copyIn(paths: unknown, to: unknown, user: string): Job {
   while (!lstatOrNull(there)) there = dirname(there);
   mustBeDir(there);
   mustWrite(target);
-  return startJob("", "copyin", user, async (log) => {
-    const du = Bun.spawn(["du", "-skxc", "--", ...sources], { stdout: "pipe", stderr: "ignore" });
+  // made before the job: the work spawns its first program at once
+  const stopper = new AbortController();
+  const job = startJob("", "copyin", user, async (log) => {
+    const du = Bun.spawn(["du", "-skxc", "--", ...sources], { stdout: "pipe", stderr: "ignore", signal: stopper.signal });
     const total = (Number(/^(\d+)\s+total$/m.exec(await new Response(du.stdout).text())?.[1]) || 0) * 1024;
     makeFolders(target);
     const room = statfsSync(target);
@@ -625,8 +857,15 @@ export function copyIn(paths: unknown, to: unknown, user: string): Job {
         const dest = join(target, freeName(target, basename(from)));
         log(`${from} → ${dest}`);
         const plain = OWNERLESS.test(fstypeAt(from));
-        const cp = Bun.spawn(plain ? ["cp", "-r", "--preserve=timestamps", "--", from, dest] : ["cp", "-a", "--", from, dest], { stdout: "ignore", stderr: "pipe" });
+        if (stopper.signal.aborted) throw new Error("Stopped");
+        const cp = Bun.spawn(plain ? ["cp", "-r", "--preserve=timestamps", "--", from, dest] : ["cp", "-a", "--", from, dest], { stdout: "ignore", stderr: "pipe", signal: stopper.signal });
         const [code, err] = await Promise.all([cp.exited, new Response(cp.stderr).text()]);
+        if (stopper.signal.aborted) {
+          // the one cut half-way goes; what was copied whole before it stays, the disk's own files are untouched
+          await rm(dest, { recursive: true, force: true }).catch(() => {});
+          log(`Removed the unfinished ${dest}`);
+          throw new Error("Stopped");
+        }
         if (code !== 0) throw new Error(/No space left/i.test(err) ? "The disk is full" : err.trim().split("\n").pop() || `cp exited with ${code}`);
         if (plain && process.getuid?.() === 0) {
           await Bun.spawn(["chown", "-R", "-h", `${owner.uid}:${owner.gid}`, "--", dest], { stdout: "ignore", stderr: "ignore" }).exited;
@@ -639,15 +878,8 @@ export function copyIn(paths: unknown, to: unknown, user: string): Job {
     }
     log(`Done: ${sources.length} copied to ${target}`);
   });
-}
-
-/** The system's `cp -a`: owners, permissions, times and links stay as they are, which the apps depend on */
-async function copyTree(from: string, dest: string): Promise<void> {
-  const proc = Bun.spawn(["cp", "-a", "--", from, dest], { stdout: "ignore", stderr: "pipe" });
-  const [code, err] = await Promise.all([proc.exited, new Response(proc.stderr).text()]);
-  if (code === 0) return;
-  if (/No space left/i.test(err)) throw new AppError("files.noSpace", 507);
-  throw new AppError("files.failed", 500, { code: err.trim().split("\n").pop() || `cp exited with ${code}` });
+  stoppable(job, stopper);
+  return job;
 }
 
 /**

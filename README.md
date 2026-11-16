@@ -81,7 +81,9 @@ images than the ones running; nothing is downloaded for that. An app with a newe
 its tile, and "Update images" lights up on its page. Updating stays your decision unless you switch on
 "Update the apps by itself" in Apps → Options: then the running apps with newer images are updated
 every day at the time you set, with a snapshot of the app's data taken first, and any app can be left
-out. Hata also notices when the app store has a newer version of an app. Images come from any registry
+out. Hata also notices when the app store has a newer version of an app, and the window that offers it
+says in words what changes — which version becomes which, what is added, what the store says about the
+change — with the lines of the compose file one click away. Images come from any registry
 the compose file names; a sign-in saved with `docker login` is used, signing in to a private registry
 is not in the UI.
 
@@ -100,7 +102,8 @@ Early development. What works today:
   system. One that is in use cannot be turned off — the page says what uses it. A server updated from a
   version before modules keeps on what it uses;
 - one menu on top of every page — Home, Apps, Files, Computers, Services, Storage, Backups, Network — and each
-  section's parts as tabs in its head; Settings holds only how Hata itself behaves (the account, users and
+  section's parts as tabs in its head, with a number by a section for what needs attention there and those
+  very items on top of the section's page; Settings holds only how Hata itself behaves (the account, users and
   access, the look, notifications, modules, the assistant, updates), and "Find a setting" finds the rest
   where it lives. Every thing has one place and one address: this server is a computer like the others,
   with its apps, Docker, containers and system programs as tabs; a container or a guest keeps its address
@@ -127,12 +130,13 @@ Early development. What works today:
 - Home: CPU, memory, disk, network and temperature with history, app tiles with live state, a
   "needs attention" list (an app that keeps restarting, a failed install or update, a disk filling up) and
   recent activity; an item there carries the button that deals with it — update, restart, try again,
-  connect again, wake the computer — and can be put off for three days, coming back at once if it gets worse;
+  connect again, wake the computer — and can be put off for three days or hidden until it happens again, coming back at once if it gets worse;
 - Home is one grid, all of it yours to arrange: every card — an app, a link, a disk, a folder of tiles that
   opens in place like on a phone, the numbers of this server or of a computer, what needs attention, recent
   activity, a camera — has a place and a size of its own. A right click gives "Edit the grid": drag a card to
   move it, pull any edge or corner to change its size within what suits that card, and a card shows as much
-  as its size lets it, with the rest under "N more". Empty places stay where you left them, a phone lays
+  as its size lets it, with the rest under "N more"; a card is taken off there too, by its "×", and nothing
+  leaves Home without a question that says what goes. Empty places stay where you left them, a phone lays
   the same cards out by itself, a layout made before the grid comes over by itself (the headings of its
   groups do not). "Add" lists everything that can stand on Home, by sections, with a search; the whole
   layout can also be edited as text (YAML); a tile opens the app, its
@@ -140,7 +144,8 @@ Early development. What works today:
   settings, logs, terminal and backups. The right click opens Hata's own menu everywhere — on a tile, a
   file, a row of a table — with what can be done to the thing clicked;
 - a name on the home network: Hata answers to `hata.local` and every app to `<app>.hata.local` over
-  multicast DNS — nothing to set up on phones, computers or the router; the name is yours to change, and
+  multicast DNS — nothing to set up on phones, computers or the router; the server is renamed in one window, the computer's
+  own name and the home-network name together (a copy going to a network folder is said first), and
   one with another ending (`hata.lan`) works too once your router's DNS knows it;
 - terminal in the browser, for administrators: a shell on the server (it keeps running when the page is
   closed and shows the latest output when you come back) and a shell inside a container of an app;
@@ -281,7 +286,8 @@ Early development. What works today:
   address bar with back and forward that turns into a field with folders offered as you type, the
   keyboard as in a desktop file manager, tiles that show the first lines of a text file —, folders,
   upload by drag and drop (whole folders too, large files in parts), download of a file or of a folder as a
-  ZIP archive, rename, move, copy, delete — into a trash, from where a thing is put back within 30 days —, copying a path, putting a folder on Home, a menu on the right click (of the file, of everything selected, of the folder), the other disks of the server at the top of the data folder and in every folder picker, pictures, video and sound opened in place, text
+  ZIP archive, rename, move, copy (a copy and a move to another disk go on in the background: a card with
+  how much of how much, a stop, on every device, and a restart of Hata does not end them), delete — into a trash, from where a thing is put back within 30 days —, copying a path, how much room a folder takes, putting a folder on Home, a menu on the right click (of the file, of everything selected, of the folder), the other disks of the server at the top of the data folder and in every folder picker, pictures, video and sound opened in place, text
   files made and edited in place, ZIP and tar archives extracted into a folder next to them, files found by
   name under the folder you are in; what is renamed, moved, copied, deleted or extracted is in the
   activity log. What is uploaded into an app's folder belongs to the same user the app runs as;
@@ -321,8 +327,8 @@ Early development. What works today:
   from this server or from the browser. Hata keeps a schedule of backups of its own, and says when a
   node is away, a storage fills up, a backup failed or a container or VM that should run does not;
 - containers and virtual machines on the server itself (Incus, installed by a button): a Debian, Ubuntu,
-  Fedora, Rocky Linux or Alpine system of its own in a minute, with Docker and Hata's client in it if
-  you wish — it then shows up as one more computer; its cores, memory and disk held to what you give it,
+  Fedora, Rocky Linux or Alpine system of its own in a minute, with Docker, with Hata's client, or with both in it —
+  with the client it shows up as one more computer; its cores, memory and disk held to what you give it,
   start and stop, renamed or cloned (a clone is a computer of its own),
   snapshots taken and put back, a shell inside, and a whole copy of it in the daily
   backups next to the apps. Where they live is yours to choose — a folder on another disk, Btrfs used

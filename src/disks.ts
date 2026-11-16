@@ -414,12 +414,15 @@ async function check(wake: boolean, only?: (disk: Disk) => boolean): Promise<voi
     return;
   }
   let denied = false;
+  let answered = false;
   for (const disk of known) {
     if (only && !only(disk)) continue;
     const outcome = await readSmart(bin, disk, wake);
     if (outcome === "denied") denied = true;
+    else answered = true;
+    if (outcome === "denied") continue;
     // a sleeping disk keeps what it said when it was last awake
-    else if (outcome !== "asleep") records[idOf(disk)] = remember(records[idOf(disk)], outcome.smart, Date.now());
+    if (outcome !== "asleep") records[idOf(disk)] = remember(records[idOf(disk)], outcome.smart, Date.now());
   }
   for (const [id, record] of Object.entries(records)) if (Date.now() - record.at > FORGET_MS && !known.some((d) => idOf(d) === id)) delete records[id];
   try {
@@ -427,7 +430,9 @@ async function check(wake: boolean, only?: (disk: Disk) => boolean): Promise<voi
   } catch (e) {
     console.error("Could not save the disks' readings:", e instanceof Error ? e.message : e);
   }
-  tool = denied ? "denied" : "ok";
+  // one disk that cannot be opened (a failing one drops off its cable) does not mean the server may open none
+  if (answered || !denied) tool = "ok";
+  else if (!only) tool = "denied";
 }
 
 /** Reads SMART of every disk, one check at a time. `wake` also asks the disks that sleep — only when a person asked for it */

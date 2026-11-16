@@ -22,7 +22,9 @@ test("a new container is read and checked", () => {
   expect(field(() => readNew({ name: "web", image: "debian-13", cores: 1.5 }, []))).toBe("cores");
   // no client without systemd, and Docker only comes with it
   expect(readNew({ name: "tiny", image: "alpine-3.22", docker: true }, [])).toMatchObject({ client: false, docker: false });
-  expect(readNew({ name: "plain", image: "debian-12", client: false, docker: true }, [])).toMatchObject({ client: false, docker: false });
+  // Docker without Hata's client is a choice of its own
+  expect(readNew({ name: "plain", image: "debian-12", client: false, docker: true }, [])).toMatchObject({ client: false, docker: true });
+  expect(setupScript({ docker: true, client: false }, "")).toContain("get.docker.com");
 });
 
 test("a container's settings", () => {

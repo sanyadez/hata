@@ -741,7 +741,7 @@ export async function partsOf(name: string): Promise<{ table: string; parts: Par
     const min = used === null ? null : Math.min(volume.size, Math.ceil((used * 1.1 + 256 * MIB) / MIB) * MIB);
     const max = roomFor(table, entry);
     // a folder something of Hata's stands on (the data, the backups, a share, a pool, the array) stays as it is
-    const kept = volume.mounts.map(keeps).find(Boolean);
+    const kept = volume.mounts.map((one) => keeps(one)).find(Boolean);
     const why = nested(table, entry) ? "disk.nested" : !may.volumes.includes(volume.path) || held(volume.name) ? "disk.inUse" : kept ?? "";
     out.push({ path: volume.path, number: entry.number, size: volume.size, max, min, fs, grow: !why && !!can?.grow && max > volume.size + MIB, shrink: !why && !!can?.shrink, removable: !why || (why === "disk.nested" && entry.number > 4 && may.volumes.includes(volume.path) && !kept), why });
   }
@@ -992,22 +992,27 @@ let containerPlaces: () => string[] = () => [];
 export const onContainerPlaces = (list: () => string[]): void => void (containerPlaces = list);
 
 /** Why a folder cannot be taken away now: what of Hata's stands on it, as an error code; null — nothing */
-function keeps(path: string): string | null {
+function keeps(path: string, leaving = false): string | null {
   if (containerPlaces().some((place) => place === path || place.startsWith(path.replace(/\/$/, "") + "/"))) return "disk.holds.containers";
   if (Object.values(pools(fstab())).some((branches) => branches.includes(path))) return "disk.holds.pool";
   // a disk of the array taken away is a disk that failed, as far as the parity knows
   // (one that is gone already is let go: its replacement takes the same folder)
   if (mountedAt().has(path) && (settings.snapraid.parity === path || (settings.snapraid.parity2 !== "" && settings.snapraid.parity2 === path) || settings.snapraid.data.some((d) => d.path === path))) return "disk.holds.array";
-  const used = holds(path, { dataRoot: settings.dataRoot, backupDir: settings.backup.dir, state: [DATA_DIR, SECRETS_DIR], shares: settings.shares.map((s) => s.path) });
+  // a disk that is only disconnected leaves a network folder leading nowhere, which the page says first; one
+  // that is erased would take the folder's files with it
+  const used = holds(path, { dataRoot: settings.dataRoot, backupDir: settings.backup.dir, state: [DATA_DIR, SECRETS_DIR], shares: leaving ? [] : settings.shares.map((s) => s.path) });
   return used ? `disk.holds.${used}` : null;
 }
 
+/** Why a folder cannot be disconnected now, as an error code; null — it can */
+export const whyKept = (path: string): string | null => keeps(path, true);
+
 /** Unmounts a folder Hata connected and forgets it; `device` — what was mounted there, if anything was */
-async function release(path: string): Promise<{ device: string | undefined } | Failure> {
+async function release(path: string, leaving = false): Promise<{ device: string | undefined } | Failure> {
   const kept = fstab().find((e) => e.ours && e.path === path);
   const index = temporary.findIndex((t) => t.path === path);
   if (!kept && index < 0) return { error: "disk.notOurs" };
-  const why = keeps(path);
+  const why = keeps(path, leaving);
   if (why) return { error: why };
   const device = mountedAt().get(path);
   if (device) {
@@ -1030,7 +1035,7 @@ async function release(path: string): Promise<{ device: string | undefined } | F
 /** Disconnects a folder Hata connected; other mounts of the system are not Hata's to end */
 export function disconnect(path: string, user: string): Promise<Outcome> {
   return oneAtATime(async () => {
-    const gone = await release(path);
+    const gone = await release(path, true);
     if ("error" in gone) return gone;
     if (gone.device) {
       // taken out by hand: not to be connected again by itself while it stays plugged in

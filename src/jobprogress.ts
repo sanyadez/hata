@@ -16,6 +16,8 @@ export interface JobProgress {
   done?: number;
   /** Bytes come so far */
   bytes?: number;
+  /** Bytes there are in all, where the work knows it (a copy of files): then the percent is bytes of total */
+  total?: number;
 }
 
 const STEPS: Record<string, JobStep> = { config: "check", pull: "download", up: "start" };
@@ -29,11 +31,19 @@ export function sizeIn(text: string): number {
   return m ? Math.round(Number(m[1]) * UNITS[m[2]!.toUpperCase()]!) : 0;
 }
 
+/** What a copy of files says every few seconds: `  1.2 GB of 25.0 GB` (sizes by 1024, as it words them) */
+const COPIED = /^\s+(\d+(?:\.\d+)?) (MB|GB) of (\d+(?:\.\d+)?) (MB|GB)$/;
+const BY_1024: Record<string, number> = { MB: 1024 ** 2, GB: 1024 ** 3 };
+
 /** Reads an operation's lines one by one; the answer is what is known after each of them */
 export function progressTracker(): (line: string) => JobProgress {
   let step: JobStep | undefined;
   const layers = new Map<string, { bytes: number; done: boolean }>();
+  let copied: { bytes: number; total: number } | null = null;
   return (line) => {
+    const said = COPIED.exec(line);
+    if (said) copied = { bytes: Number(said[1]) * BY_1024[said[2]!]!, total: Number(said[3]) * BY_1024[said[4]!]! };
+    if (copied && !step) return { ...copied };
     const command = COMMAND.exec(line);
     if (command) step = STEPS[command[1]!];
     else if (step === "download") {
@@ -51,4 +61,4 @@ export function progressTracker(): (line: string) => JobProgress {
 }
 
 /** Whole percents, rounded down: 100 only when every layer is in; null while nothing is known */
-export const percentOf = (p: JobProgress | undefined): number | null => (p?.layers ? Math.floor(((p.done ?? 0) / p.layers) * 100) : null);
+export const percentOf = (p: JobProgress | undefined): number | null => (p?.total ? Math.min(99, Math.floor(((p.bytes ?? 0) / p.total) * 100)) : p?.layers ? Math.floor(((p.done ?? 0) / p.layers) * 100) : null);

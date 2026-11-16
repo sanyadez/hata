@@ -729,6 +729,9 @@ async function refresh() {
   paintTvNow();
   seedJobs(state.overview.jobs ?? []);
   failedTiles(state.overview);
+  // the numbers by the sections follow what needs attention now, and so does the section's own list
+  document.querySelector(".top .nav")?.replaceChildren(...navLinks("nav-link"));
+  paintAttentionHere();
   if (state.route.view === "home") renderHomeBody();
   if (state.route.view === "store") renderStoreList();
   if (state.route.view === "apps") renderAppsBody();
@@ -774,6 +777,11 @@ async function passkeyCreate(password, name) {
   const publicKey = r.getPublicKey?.();
   if (!publicKey) throw new ApiError(400, "passkey.rejected");
   await api("POST", "/api/account/passkeys", { name, clientDataJSON: toB64url(r.clientDataJSON), authenticatorData: toB64url(r.getAuthenticatorData()), publicKey: toB64url(publicKey), alg: r.getPublicKeyAlgorithm() });
+}
+
+/** Something is being asked for: a turning mark, in a card of its own where it stands outside one — never a bare "…" */
+function waitMark() {
+  return h("p", { class: "waiting", role: "status", "aria-label": t("common.loading") }, h("span", { class: "wait-ring" }));
 }
 
 function field(label, input, hint) {
@@ -1106,6 +1114,32 @@ const ATTENTION_AREAS = [
   [/^(network|internet|dns|https)\b/, "network"],
 ];
 const attentionArea = (item) => ATTENTION_AREAS.find(([re]) => re.test(item.code))?.[1] ?? (item.app || /^(restarting|partial|update|failed|qbit)\b/.test(item.code) ? "apps" : "");
+/**
+ * What the number by a section's name counts, said in the section itself: a card under its head with the very
+ * items of Home's list. Kept up from outside the pages (they redraw themselves in many ways): put in when it is
+ * missing, built anew only when the items differ, so a button under the pointer stays.
+ */
+const attentionHere = { sig: "" };
+function paintAttentionHere() {
+  const view = document.getElementById("view");
+  if (!view || !state.user) return;
+  const area = navCurrent();
+  const head = view.querySelector(".area-head");
+  // the top pages of a section: those with its head, and the lists of Computers and Apps
+  const top = head || ["machines", "apps"].includes(state.route.view);
+  const list = isAdmin() && area && area !== "home" && top ? (state.overview?.attention ?? []).filter((item) => attentionArea(item) === area) : [];
+  const was = document.getElementById("area-attention");
+  if (!list.length) return void was?.remove();
+  const sig = area + JSON.stringify(list.map((item) => [item.id, item.code, item.severity, item.at, item.detail]));
+  if (was && was.isConnected && sig === attentionHere.sig) return;
+  attentionHere.sig = sig;
+  const card = h("section", { class: "card pad stack area-attention", id: "area-attention" }, h("div", { class: "section-head" }, h("h2", null, t("attention.title"), h("span", { class: "pill" }, list.length))), h("div", { class: "attention-list" }, list.map(attentionItem)));
+  if (was) return void was.replaceWith(card);
+  if (head) head.after(card);
+  else view.prepend(card);
+}
+setInterval(paintAttentionHere, 1500);
+
 /** How many things need attention in a section: the number by its name in the menu */
 function navCount(view) {
   if (!isAdmin() || view === "home") return 0;
@@ -1314,6 +1348,7 @@ function shell(...content) {
   );
   paintMusicNow();
   paintTvNow();
+  queueMicrotask(paintAttentionHere);
 }
 
 function render() {
@@ -1463,7 +1498,6 @@ function statsBlock() {
       h("div", { class: "block-head" }, h("span", { class: "block-icon" }, icon("server")), h("h2", { class: "clip", id: "own-name" }, state.overview?.system?.hostname ?? "…"), h("span", { class: "muted small grow" }, t("home.thisServer")), h("span", { class: "mono muted small", id: "own-up" })),
       h("div", { class: "kpis" }, kpi("cpu", "cpu", t("sys.cpu"), "s2"), kpi("memory", "memory", t("sys.memory"), "s1"), kpi("disk", "disk", t("sys.disk")), kpi("network", "network", t("sys.network")), kpi("temp", "temp", t("sys.temperature"))),
       h("div", { class: "trend", id: "own-trend" }),
-      blockRemover("stats"),
     ),
   );
 }
@@ -1831,7 +1865,9 @@ setInterval(() => void widgetsTick(), 10_000);
 
 // --- The grid of Home: every card has a place and a size; they change only while editing the grid ---
 
-const gridUi = { at: null, arranging: false, undo: [], entry: null, drag: null };
+const gridUi = { at: null, arranging: false, undo: [], entry: null, drag: null, gone: new Set() };
+/** What has a "×" while arranging; a folder of tiles and Hata's own two tiles have none */
+const gridRemovable = (card) => ["block", "widget", "ha", "link", "files", "app"].includes(card.type);
 
 const cardKind = (card) => (card.type === "block" ? (card.id.startsWith("machine:") ? "machine" : card.id) : card.type === "widget" ? card.view : card.type);
 const boxOf = ({ x, y, w, h: tall }) => ({ x, y, w, h: tall });
@@ -1869,23 +1905,70 @@ function gridPlace(base, key, box) {
 function gridLoad() {
   const cards = state.overview.dashboard.cards;
   const at = {};
-  if (gridUi.arranging) for (const card of cards) if (gridUi.at?.[tileKey(card)]) at[tileKey(card)] = gridUi.at[tileKey(card)];
-  for (const card of cards) at[tileKey(card)] ??= gridUi.arranging ? gridFit(Object.values(at), card.w, card.h) : boxOf(card);
+  if (!gridUi.arranging) gridUi.gone.clear();
+  // a card taken off and brought back by "Undo" is no longer gone
+  for (const key of [...gridUi.gone]) if (gridUi.at?.[key]) gridUi.gone.delete(key);
+  const here = cards.filter((card) => !gridUi.gone.has(tileKey(card)));
+  if (gridUi.arranging) for (const card of here) if (gridUi.at?.[tileKey(card)]) at[tileKey(card)] = gridUi.at[tileKey(card)];
+  for (const card of here) at[tileKey(card)] ??= gridUi.arranging ? gridFit(Object.values(at), card.w, card.h) : boxOf(card);
   gridUi.at = at;
 }
 
 const gridEdit = () => {
   gridLoad();
-  Object.assign(gridUi, { entry: structuredClone(gridUi.at), undo: [], arranging: true });
+  Object.assign(gridUi, { entry: structuredClone(gridUi.at), undo: [], arranging: true, gone: new Set() });
   paintGrid();
 };
 
 function gridDone() {
   const at = gridUi.at;
+  const gone = [...gridUi.gone];
   gridUi.arranging = false;
   changeLayout((layout) => {
+    for (const key of gone) takeTile(layout, key);
     for (const card of layout.cards) Object.assign(card, at[tileKey(card)]);
   });
+}
+
+/** How a card is called in a question about it */
+function cardName(card) {
+  if (card.type === "block") return blockTitle(card.id);
+  if (card.type === "link") return card.title || linkHost(card.url);
+  if (card.type === "files") return card.path.split("/").filter(Boolean).pop() ?? card.path;
+  const it = tileTarget(card);
+  return it?.title ?? it?.name ?? card.name ?? card.entity ?? "";
+}
+
+/**
+ * Nothing leaves Home without a question that says what it is: an app is removed as an app (its own window,
+ * with its data's fate), a link goes with its address, a pinned folder is only unpinned, the rest is taken off
+ * and can be added back. `take` does it once the person agreed.
+ */
+function askRemoveCard(card, take) {
+  if (card.type === "app") {
+    const it = tileTarget(card);
+    if (!it) return;
+    return card.name.includes("@") ? removeMachineAppDialog(it.machine, it) : removeDialog(it);
+  }
+  const name = cardName(card);
+  const kind = card.type === "link" ? "link" : card.type === "files" ? "files" : "card";
+  confirmAction({
+    title: t(`home.take.${kind}.title`, { name }),
+    lead: t(`home.take.${kind}.lead`, { name, url: card.url ?? "", path: card.path ?? "" }),
+    label: t(`home.take.${kind}.go`),
+    run: async () => void (await take()),
+  });
+}
+
+/** The "×" of a card while arranging: asked first; what is only a matter of Home goes with "Done" */
+const askTake = (card) => askRemoveCard(card, () => (card.type === "files" ? pinFolder(card.path, false) : gridTake(card)));
+
+/** A card taken off while arranging: it goes with "Done", comes back with "Undo" or "Cancel" */
+function gridTake(card) {
+  gridUi.undo.push(structuredClone(gridUi.at));
+  gridUi.gone.add(tileKey(card));
+  delete gridUi.at[tileKey(card)];
+  paintGrid();
 }
 
 function gridCancel() {
@@ -1970,7 +2053,8 @@ function paintGrid() {
   pg.className = "pg" + (gridUi.arranging ? " arranging" : "") + (free ? "" : " flowing");
   pg.style.setProperty("--pg-cols", String(cols));
   const cards = state.overview.dashboard.cards;
-  const inOrder = free ? cards : [...cards].sort((a, b) => gridUi.at[tileKey(a)].y - gridUi.at[tileKey(b)].y || gridUi.at[tileKey(a)].x - gridUi.at[tileKey(b)].x);
+  const shown = cards.filter((card) => !gridUi.gone.has(tileKey(card)));
+  const inOrder = free ? shown : [...shown].sort((a, b) => gridUi.at[tileKey(a)].y - gridUi.at[tileKey(b)].y || gridUi.at[tileKey(a)].x - gridUi.at[tileKey(b)].x);
   // room to pull a card further down than anything stands yet
   const rows = Math.max(0, ...Object.values(gridUi.at).map((b) => b.y + b.h)) + 6;
   const cells = gridUi.arranging ? Array.from({ length: rows * cols }, (_, i) => {
@@ -1994,7 +2078,7 @@ function gridCard(card, free) {
   const box = gridUi.at[tileKey(card)];
   const body = gridBody(card, box);
   if (!body) return null;
-  const el = h("div", { class: "pg-card", "data-card": tileKey(card) }, body, gridUi.arranging && ["n", "e", "s", "w", "ne", "se", "sw", "nw"].map((side) => h("span", { class: `pg-side pg-${side}`, "data-side": side })));
+  const el = h("div", { class: "pg-card", "data-card": tileKey(card) }, body, gridUi.arranging && ["n", "e", "s", "w", "ne", "se", "sw", "nw"].map((side) => h("span", { class: `pg-side pg-${side}`, "data-side": side })), gridUi.arranging && gridRemovable(card) && h("button", { type: "button", class: "icon-btn pg-remove", title: t("home.removeBlock"), "aria-label": t("home.removeBlock"), onpointerdown: (e) => e.stopPropagation(), onclick: () => askTake(card) }, icon("x")));
   gridPosition(el, box, free);
   if (gridUi.arranging) el.addEventListener("pointerdown", (e) => gridStart(e, card, el));
   el.addEventListener("contextmenu", (e) => {
@@ -2003,7 +2087,7 @@ function gridCard(card, free) {
     const picked = getSelection();
     if (picked && !picked.isCollapsed && picked.containsNode(e.target, true)) return;
     e.preventDefault();
-    menuAt({ x: e.clientX, y: e.clientY }, null, [{ label: t("home.removeBlock"), icon: "trash", danger: true, run: () => removeBlock(card.id) }]);
+    menuAt({ x: e.clientX, y: e.clientY }, null, [mayArrange() && { label: t("grid.edit"), icon: "grid", run: gridEdit }, { label: t("home.removeBlock"), icon: "trash", danger: true, run: () => askRemoveCard(card, () => removeBlock(card.id)) }].filter(Boolean));
   });
   return el;
 }
@@ -2275,10 +2359,10 @@ function tileMenu(item, point = null) {
       list.splice(index, 1);
       for (const inner of folder.items) addCard(next, inner);
     })),
-    item.type === "link" && entry(t("home.removeLink"), "trash", () => removeLinkDialog(item), "danger"),
-    item.type === "ha" && entry(t("ha.offHome"), "trash", () => changeLayout((next) => void takeTile(next, key)), "danger"),
-    item.type === "widget" && entry(t("ha.offHome"), "trash", () => changeLayout((next) => void takeTile(next, key)), "danger"),
-    item.type === "files" && entry(t("files.unpin"), "home", () => pinFolder(item.path, false)),
+    item.type === "link" && entry(t("home.removeLink"), "trash", () => askRemoveCard(item, () => changeLayout((next) => void takeTile(next, key))), "danger"),
+    item.type === "ha" && entry(t("ha.offHome"), "trash", () => askRemoveCard(item, () => changeLayout((next) => void takeTile(next, key))), "danger"),
+    item.type === "widget" && entry(t("ha.offHome"), "trash", () => askRemoveCard(item, () => changeLayout((next) => void takeTile(next, key))), "danger"),
+    item.type === "files" && entry(t("files.unpin"), "home", () => askRemoveCard(item, () => pinFolder(item.path, false))),
   );
   if (point) placeAt(dialog, point);
 }
@@ -2459,6 +2543,10 @@ function confirmAction({ title, lead, label, run, kind = "danger", iconName = "t
     onclick: async () => {
       go.disabled = true;
       error.textContent = "";
+      // it may take a while: the button turns, so the wait is seen to be one
+      const mark = go.querySelector(".ico");
+      const turning = icon("refresh", "spin");
+      mark?.replaceWith(turning);
       try {
         await run();
         dialog.close();
@@ -2466,6 +2554,7 @@ function confirmAction({ title, lead, label, run, kind = "danger", iconName = "t
       } catch (err) {
         error.textContent = errorText(err);
         go.disabled = false;
+        if (mark) turning.replaceWith(mark);
       }
     },
   }, iconName);
@@ -2551,6 +2640,7 @@ function attentionItem(item) {
     ...(isAdmin() ? attentionEnds(item, app, onMachine) : []),
     isAdmin() && { label: t(item.app ? "assistant.askWhy" : "assistant.ask"), icon: "chat", run: () => openAssistant({ ask: item.app ? t("assistant.whyDown", { title: item.detail.title || item.app, app: item.app }) : t("assistant.whyItem", { title, text }) }) },
     isAdmin() && { label: t("attention.later", { n: SNOOZE_DAYS }), icon: "clock", run: () => snoozeItem(item) },
+    isAdmin() && { label: t("attention.once"), icon: "x", run: () => snoozeItem(item, "once") },
     isAdmin() && { label: t("attention.never"), icon: "bell-off", run: () => snoozeItem(item, true) },
     (item.code === "disk.new" || item.code === "disk.usb") && isAdmin() && { label: t("mounting.ignore"), icon: "x", run: () => void api("POST", "/api/disks/ignore", { id: item.detail.id }).then(refresh, (e) => toast(errorText(e), "error")) },
   ].filter(Boolean);
@@ -2598,6 +2688,40 @@ function splitActions(entries, header) {
 }
 
 /**
+ * A window's or a row's actions: one button for the main thing and the rest (menu entries) under an arrow joined to
+ * it — several buttons side by side wrap into a heap. Without a main thing the arrow's button says "More".
+ */
+function oneAndMore(first, rest, kind = "") {
+  const entries = rest.filter(Boolean);
+  if (!entries.length) return first;
+  const opener = (e) => {
+    // a row that opens something on a click must not take this one for its own
+    e.stopPropagation();
+    const r = e.currentTarget.closest(".split").getBoundingClientRect();
+    menuAt({ x: r.left, y: r.bottom + 4 }, null, entries);
+  };
+  return h("span", { class: "split" }, first, button(first ? "" : t("attention.more"), { class: kind + " split-more", title: t("attention.more"), "aria-label": t("attention.more"), "aria-haspopup": "menu", onclick: opener }, "down"));
+}
+
+/**
+ * The buttons of a row or a card as they were written, laid out by the same rule: up to two stay as they are; of
+ * three or more the main one (the primary, else the first) stays and the others go under its arrow, each doing what
+ * its button does. What is not a button (a chip, a note) stays beside.
+ */
+function foldActions(items, kind = "") {
+  const all = items.flat().filter(Boolean);
+  const pressable = (x) => x instanceof Element && x.matches("button.btn, a.btn");
+  const buttons = all.filter(pressable);
+  if (buttons.length < 3) return all;
+  const main = buttons.find((b) => b.classList.contains("primary")) ?? buttons[0];
+  const entries = buttons
+    .filter((b) => b !== main)
+    .map((b) => ({ label: b.textContent.trim() || b.title || b.getAttribute("aria-label") || "", iconEl: b.querySelector("svg")?.cloneNode(true) ?? h("span", { class: "ico" }), danger: b.classList.contains("danger"), off: b.disabled, ...(b.tagName === "A" ? { href: b.getAttribute("href"), newTab: b.target === "_blank" } : { run: () => b.click() }) }));
+  const joined = oneAndMore(main, entries, [kind, main.classList.contains("small") ? "small" : "", main.classList.contains("primary") ? "primary" : ""].join(" "));
+  return [joined, ...all.filter((x) => !pressable(x))];
+}
+
+/**
  * What puts an end to the thing an item is about rather than mending it: a shared folder that is gone stops being
  * shared, a machine that is gone is removed, a disk that is gone is let go, an app that keeps failing is stopped
  */
@@ -2632,8 +2756,8 @@ const SNOOZE_DAYS = 3;
 /** Puts an item off for some days or for good; it keeps its words, so the list of what is hidden can say it */
 async function snoozeItem(item, forever = false) {
   try {
-    await api("POST", "/api/attention/snooze", { id: item.id, severity: item.severity, ...(item.at ? { at: item.at } : {}), ...(forever ? { forever: true } : { days: SNOOZE_DAYS }), code: item.code, detail: item.detail, ...(item.app ? { app: item.app } : {}) });
-    toast(forever ? t("attention.neverDone") : t("attention.snoozed", { date: shortDate(Date.now() + SNOOZE_DAYS * 86_400_000) }));
+    await api("POST", "/api/attention/snooze", { id: item.id, severity: item.severity, ...(item.at ? { at: item.at } : {}), ...(forever === "once" ? { once: true } : forever ? { forever: true } : { days: SNOOZE_DAYS }), code: item.code, detail: item.detail, ...(item.app ? { app: item.app } : {}) });
+    toast(forever === "once" ? t("attention.onceDone") : forever ? t("attention.neverDone") : t("attention.snoozed", { date: shortDate(Date.now() + SNOOZE_DAYS * 86_400_000) }));
     await refresh();
   } catch (e) {
     toast(errorText(e), "error");
@@ -2747,7 +2871,7 @@ async function loadHistory(older = false) {
 function paintHistory() {
   const box = document.getElementById("history");
   if (!box) return;
-  if (!historyUi.loaded) return box.replaceChildren(h("p", { class: "muted" }, "…"));
+  if (!historyUi.loaded) return box.replaceChildren(waitMark());
   // each entry is worded first: the filter looks at what the person reads, in their language
   const words = historyUi.filter.trim().toLowerCase();
   const days = new Map();
@@ -2842,7 +2966,7 @@ function machineBlock(id) {
     body = [h("p", { class: "mrow-away muted small" }, t("machines.offlineLead", { ago: ago(m.seen) })), h("div", { class: "row-actions" }, buttons)];
     if (openMore) el.oncontextmenu = (e) => (e.preventDefault(), openMore({ x: e.clientX, y: e.clientY }));
   } else body = h("div", { class: "meters" + (waiting ? " waiting" : "") }, waiting ? Array.from({ length: 5 }, () => h("div", { class: "meter skeleton" }, h("i"), h("i"), h("i"))) : machineMeters(m.status));
-  put(el, who, body, blockRemover(id));
+  put(el, who, body);
   return el;
 }
 
@@ -2866,7 +2990,7 @@ function renderHome() {
   renderHomeBody();
 }
 
-const activityBody = (o) => [blockRemover("activity"), h("div", { class: "section-head" }, h("h2", null, t("activity.title"))), o.activity.length ? h("div", { class: "timeline fits" }, o.activity.map(activityItem)) : h("p", { class: "muted small" }, t("activity.none")), isAdmin() && o.activity.length > 0 && h("a", { class: "link small all-activity block-foot", href: "#/activity" }, t("activity.all"), icon("chevron"))];
+const activityBody = (o) => [h("div", { class: "section-head" }, h("h2", null, t("activity.title"))), o.activity.length ? h("div", { class: "timeline fits" }, o.activity.map(activityItem)) : h("p", { class: "muted small" }, t("activity.none")), isAdmin() && o.activity.length > 0 && h("a", { class: "link small all-activity block-foot", href: "#/activity" }, t("activity.all"), icon("chevron"))];
 
 function attentionDialog(list) {
   let dialog;
@@ -2875,7 +2999,6 @@ function attentionDialog(list) {
 
 function attentionBlock(list) {
   return [
-    blockRemover("attention"),
     h("div", { class: "section-head" }, h("h2", null, t("attention.title"), list.length > 0 && h("span", { class: "pill" }, list.length))),
     list.length ? h("div", { class: "attention-list fits" }, list.map(attentionItem)) : h("p", { class: "all-good" }, icon("check", "ok"), t("attention.none")),
     h(
@@ -2904,12 +3027,6 @@ function renderHomeBody() {
 const BLOCKS = { stats: "cpu", attention: "alert", activity: "list", adblock: "shield" };
 const blockTitle = (id) => (id.startsWith("machine:") ? t("home.machineBlock", { name: machineOfBlock(id)?.name ?? id.slice(8) }) : t(id === "stats" ? "home.statsBlock" : id + ".title"));
 const removeBlock = (id) => changeLayout((layout) => void takeTile(layout, "block:" + id));
-
-/** The small button that takes one of Hata's own blocks off Home; "Add" brings it back */
-function blockRemover(id) {
-  if (!isAdmin()) return null;
-  return h("button", { type: "button", class: "icon-btn quiet block-remove", title: t("home.removeBlock"), "aria-label": `${t("home.removeBlock")}: ${blockTitle(id)}`, onclick: () => removeBlock(id) }, icon("x"));
-}
 
 function layoutTextDialog() {
   const area = h("textarea", { class: "code", spellcheck: false, wrap: "off", "aria-label": t("home.layoutText"), disabled: true });
@@ -3159,13 +3276,27 @@ async function storeUpdateDialog(app) {
   const table = (kind) => h("div", { class: "card table-wrap" }, h("table", { class: "changes" }, h("tbody", null, rows(kind))));
   const fromStore = rows("store");
   const conflicts = rows("conflict");
+  // in words first: which version becomes which, what is added; the lines of the file are for whoever asks
+  const words = plan.words ?? [];
+  const versions = words.filter((w) => w.code === "version");
+  const several = new Set(words.map((w) => w.service).filter(Boolean)).size > 1;
+  const WORD_ICONS = { image: "refresh", added: "plus", addedFirst: "plus", removed: "trash", envAdded: "sliders", envChanged: "sliders", envRemoved: "sliders", ports: "network", volumes: "folder", other: "code", files: "file" };
+  const word = (w) => h("li", null, icon(WORD_ICONS[w.code] ?? "code"), h("div", { class: "grow" }, h("div", null, t("update.word." + w.code, w)), several && w.service && !["added", "addedFirst", "removed"].includes(w.code) && h("div", { class: "muted small" }, t("update.word.in", w))));
+  const others = words.filter((w) => w.code !== "version");
+  const lead = versions.length ? "update.leadVersion" : plan.staying ? "update.leadSame" : "update.leadSetup";
   const dialog = openDialog(
     "wide",
-    h("header", null, h("div", { class: "grow" }, h("h2", null, t("update.title", { title: app.title })), h("p", { class: "muted small" }, t("update.lead", { store: plan.store }))), closeX(() => dialog)),
+    h("header", null, h("div", { class: "grow" }, h("h2", null, t("update.title", { title: app.title })), h("p", { class: "muted small" }, t(lead, { store: plan.store, version: plan.staying }))), closeX(() => dialog)),
     !plan.exact && h("p", { class: "banner small" }, t(plan.recorded ? "update.guessed" : "update.matched", { store: plan.store })),
     plan.notes && h("div", { class: "tips prose" }, h("strong", null, t("update.before")), md(plan.notes)),
-    fromStore.length > 0 && h("div", { class: "stack" }, h("h3", null, t("update.changes")), table("store")),
+    // the store's own words on why it changed the app's files: what the lines below cannot say
+    plan.why && h("div", { class: "tips prose" }, h("strong", null, t("update.why", { store: plan.store })), h("p", null, plan.why)),
+    versions.length > 0 && h("div", { class: "update-versions" }, versions.map((w) => h("div", { class: "update-version" }, h("span", { class: "muted" }, versions.length > 1 || w.name.replace(/[-_]/g, "") !== app.name.replace(/[-_]/g, "") ? w.name : t("update.version")), h("span", { class: "mono" }, w.from), icon("arrow"), h("strong", { class: "mono" }, w.to)))),
+    others.length > 0 && h("div", { class: "stack" }, h("h3", null, t(versions.length ? "update.also" : "update.what")), h("ul", { class: "update-words" }, others.map(word))),
+    words.length === 0 && fromStore.length > 0 && h("p", { class: "muted small" }, t("update.small")),
     conflicts.length > 0 && h("div", { class: "stack" }, h("h3", null, t("update.conflicts")), h("p", { class: "muted small" }, t("update.conflictsLead")), table("conflict")),
+    h("p", { class: "muted small" }, t(state.settings?.backup?.beforeUpdate ? "update.safe" : "update.safeNoCopy")),
+    fromStore.length > 0 && h("details", null, h("summary", { class: "muted small" }, t("update.lines")), table("store")),
     h("details", null, h("summary", { class: "muted small" }, t("update.file")), h("textarea", { class: "code", spellcheck: false, wrap: "off", readOnly: true, value: plan.compose, "aria-label": "compose.yml" })),
     h(
       "footer",
@@ -3936,14 +4067,11 @@ function incusPlacesCard(d) {
       title: t("incus.place.addTitle"),
       start: "/mnt",
       confirmLabel: t("incus.place.pickHere"),
+      // a refusal stays in the window, where another folder can be chosen at once
       action: async (path) => {
-        try {
-          await api("POST", "/api/containers/places", { path });
-          toast(t("incus.place.added", { path }));
-          await loadContainers();
-        } catch (e) {
-          toast(errorText(e), "error");
-        }
+        await api("POST", "/api/containers/places", { path });
+        toast(t("incus.place.added", { path }));
+        await loadContainers();
       },
     });
   return h(
@@ -4408,20 +4536,61 @@ function containerScreen(c) {
 /** The fields of the limits, shared by the new-container and the limits dialogs; a virtual machine always has its memory */
 function limitFields(c, vm = c?.kind === "vm") {
   const opt = (value, label) => h("option", { value }, label);
-  const cores = h("select", null, opt("0", t("incus.allCores")), [1, 2, 3, 4, 6, 8, 12, 16].map((n) => opt(String(n), t("incus.cores", { n }))));
-  cores.value = String(c?.cores ?? 2);
+  // as many as this server has: more cannot be given
+  const has = Number(state.overview?.system?.cores) || 0;
+  const most = Math.max(has || 16, c?.cores ?? 0);
+  const cores = h("select", null, opt("0", has ? t("incus.allCoresOf", { n: has }) : t("incus.allCores")), Array.from({ length: most }, (_, i) => i + 1).filter((n) => most <= 16 || n <= 8 || n % 2 === 0 || n === c?.cores).map((n) => opt(String(n), t("incus.cores", { n }))));
+  cores.value = String(c?.cores ?? Math.min(2, most));
   if (cores.value === "") cores.value = "0";
   const memory = h("select");
+  const sized = (mb) => (mb < 1024 ? `${mb} MB` : `${Math.round((mb / 1024) * 100) / 100} GB`);
+  // the server's own memory, in MB: sizes above it are not offered, a typed one may be anything
+  const whole = Math.floor((Number(state.overview?.system?.memory?.total) || 0) / 1024 / 1024);
+  // an amount of one's own becomes an option like the others, so whoever reads the list's value reads megabytes
+  const own = (mb) => {
+    if (![...memory.options].some((o) => o.value === String(mb))) {
+      const before = [...memory.options].find((o) => o.value === "other" || Number(o.value) > mb);
+      memory.insertBefore(opt(String(mb), sized(mb)), before ?? null);
+    }
+    memory.value = String(mb);
+  };
+  const typed = h("input", { type: "number", min: 0.125, max: 256, step: "any", class: "short mono", placeholder: "1.5", "aria-label": t("incus.memoryOwn"), hidden: true });
+  const unit = h("span", { class: "muted small", hidden: true }, "GB");
+  const asked = (on) => {
+    typed.hidden = unit.hidden = !on;
+    typed.required = on;
+  };
+  typed.addEventListener("change", () => {
+    const mb = Math.round(Number(typed.value) * 1024);
+    if (!(mb >= 128 && mb <= 262144)) return;
+    own(mb);
+    typed.value = "";
+    asked(false);
+  });
+  // Enter in the field takes the amount instead of sending the form with "other" chosen
+  typed.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter" || !typed.value) return;
+    e.preventDefault();
+    typed.dispatchEvent(new Event("change"));
+  });
+  memory.addEventListener("change", () => {
+    asked(memory.value === "other");
+    if (memory.value === "other") typed.focus();
+  });
   const fillMemory = (forVm) => {
-    const was = memory.value;
-    memory.replaceChildren(...[!forVm && opt("0", t("incus.allMemory")), ...[256, 512, 1024, 2048, 4096, 8192, 16384].map((mb) => opt(String(mb), mb < 1024 ? `${mb} MB` : `${mb / 1024} GB`))].filter(Boolean));
+    const was = memory.value === "other" ? "" : memory.value;
+    const sizes = [256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536].filter((mb) => !whole || mb <= whole || mb <= 1024);
+    memory.replaceChildren(...[!forVm && opt("0", t("incus.allMemory")), ...sizes.map((mb) => opt(String(mb), sized(mb))), opt("other", t("incus.memoryOther"))].filter(Boolean));
+    asked(false);
     // a container with no limit keeps none: 0 is "all memory"; only a virtual machine always has some
-    memory.value = was || String(c ? c.memory || (forVm ? 1024 : 0) : 1024);
-    if (memory.value === "") memory.value = forVm ? "1024" : "0";
+    const want = Number(was || (c ? c.memory || (forVm ? 1024 : 0) : 1024));
+    if (want) own(want);
+    else memory.value = forVm ? "1024" : "0";
   };
   memory.value = "";
   fillMemory(vm);
-  return { cores, memory, fillMemory };
+  const memoryBox = h("span", { class: "memory-pick" }, memory, typed, unit);
+  return { cores, memory, memoryBox, fillMemory };
 }
 
 /** The drivers whose places can hold a container's disk to a size */
@@ -4439,7 +4608,7 @@ function newContainerDialog(start = "container") {
   let kind = vmsReady ? start : "container";
   const name = h("input", { required: true, placeholder: "docker-1", pattern: "[a-z][a-z0-9\\-]{0,61}[a-z0-9]", autocapitalize: "none", spellcheck: false, class: "mono" });
   const image = h("select", { onchange: () => shape() });
-  const { cores, memory, fillMemory } = limitFields(null, false);
+  const { cores, memory, memoryBox, fillMemory } = limitFields(null, false);
   const disk = h("input", { type: "number", min: 4, max: 4096, value: 10 });
   const diskHint = h("span");
   const diskRow = field(t("incus.vm.disk"), disk, diskHint);
@@ -4514,8 +4683,8 @@ function newContainerDialog(start = "container") {
     client.disabled = !can;
     if (!can) client.checked = false;
     // Docker's own script does not know every system
-    if (!client.checked || chosen?.docker === false) docker.checked = false;
-    docker.disabled = !can || !client.checked || chosen?.docker === false;
+    if (chosen?.docker === false) docker.checked = false;
+    docker.disabled = chosen?.docker === false;
     // a desktop needs room: less is not offered; so does Windows
     const least = win ? { memory: 4096, disk: 64 } : vm ? chosen?.least : null;
     disk.min = String(least?.disk ?? (vm ? 4 : 1));
@@ -4561,7 +4730,7 @@ function newContainerDialog(start = "container") {
       vmNote,
       discNote,
       h("div", { class: "form-pair" }, field(t("incus.name"), name, t("incus.nameHint")), field(t("incus.image"), image, imageHint)),
-      h("div", { class: "form-pair" }, field(t("incus.coresLabel"), cores), field(t("incus.memoryLabel"), memory)),
+      h("div", { class: "form-pair" }, field(t("incus.coresLabel"), cores), field(t("incus.memoryLabel"), memoryBox)),
       diskRow,
       placeRow,
       netRow,
@@ -4615,7 +4784,7 @@ function containerNetworkDialog(c) {
 }
 
 function containerLimitsDialog(c) {
-  const { cores, memory } = limitFields(c);
+  const { cores, memory, memoryBox } = limitFields(c);
   const [autostart, autostartRow] = tickRow(t("incus.autostart"), null, c.autostart);
   const [nesting, nestingRow] = tickRow(t("incus.nesting"), t("incus.nestingHint"), c.nesting);
   nestingRow.hidden = c.kind === "vm";
@@ -4647,7 +4816,7 @@ function containerLimitsDialog(c) {
       { class: "stack", onsubmit: send },
       h("header", null, h("h2", { class: "grow clip" }, t("incus.limitsTitle", { name: c.name })), closeX(() => dialog)),
       h("p", { class: "muted small" }, t(c.kind === "vm" ? "incus.vm.limitsLead" : "incus.limitsLead")),
-      h("div", { class: "form-pair" }, field(t("incus.coresLabel"), cores), field(t("incus.memoryLabel"), memory)),
+      h("div", { class: "form-pair" }, field(t("incus.coresLabel"), cores), field(t("incus.memoryLabel"), memoryBox)),
       diskRow,
       autostartRow,
       nestingRow,
@@ -5318,7 +5487,7 @@ function paintFrigateEvents() {
   const x = frigateUi.server;
   if (!box || !x) return;
   const list = frigateUi.events;
-  put(box, !list ? h("p", { class: "muted pad" }, "…") : list.length ? h("div", { class: "camera-events" }, list.map((e) => frigateEventRow(x, e))) : h("p", { class: "muted pad" }, t(frigateUi.camera || frigateUi.label ? "frigate.noneHere" : "frigate.none")));
+  put(box, !list ? waitMark() : list.length ? h("div", { class: "camera-events" }, list.map((e) => frigateEventRow(x, e))) : h("p", { class: "muted pad" }, t(frigateUi.camera || frigateUi.label ? "frigate.noneHere" : "frigate.none")));
 }
 
 function paintFrigate(whole = true) {
@@ -6226,7 +6395,6 @@ async function pveNewDialog(x, kind = "lxc") {
   const [docker, dockerRow] = tick(t("pve.new.docker"), t("pve.new.dockerHint"));
   const [onboot, onbootRow] = tick(t("pve.onboot"), null);
   const [start, startRow] = tick(t("pve.vm.start"), t("pve.vm.startHint"));
-  client.addEventListener("change", () => ((docker.disabled = !client.checked), !client.checked && (docker.checked = false)));
   const error = h("p", { class: "error", role: "alert" });
   const lead = h("p", { class: "muted small" });
   const clientHint = clientRow.querySelector(".block");
@@ -7325,7 +7493,7 @@ function pveGuestParts(x, g) {
   const parts = [
     h(
       "div",
-      { class: "row-actions wrap" },
+      { class: "row-actions wrap" }, foldActions([
       !up && act(t("pve.start"), "play", g.status === "paused" ? "resume" : "start", "primary"),
       up && act(t("pve.shutdown"), "stop", "shutdown"),
       up && act(t("pve.reboot"), "refresh", "reboot"),
@@ -7338,7 +7506,7 @@ function pveGuestParts(x, g) {
       g.id === x.self && h("span", { class: "chip accent" }, t("pve.selfChip")),
       g.may.clone && button(t("pve.clone.button"), { class: "small", onclick: () => (pveCloneDialog(x, g)) }, "copy"),
       g.may.remove && g.status === "stopped" && !g.template && g.id !== x.self && button(t("pve.tmpl.button"), { class: "small", onclick: () => (pveTemplateDialog(x, g)) }, "archive"),
-      g.may.remove && g.status === "stopped" && g.id !== x.self && button(t("pve.guestRemove"), { class: "small danger", onclick: () => (pveRemoveDialog(x, g)) }, "trash"),
+      g.may.remove && g.status === "stopped" && g.id !== x.self && button(t("pve.guestRemove"), { class: "small danger", onclick: () => (pveRemoveDialog(x, g)) }, "trash"),])
     ),
     h(
       "section",
@@ -7838,7 +8006,7 @@ function renderMachineHead() {
       "div",
       { class: "app-head", menu: (at) => machineMenu(m, at) },
       h("span", { class: "machine-icon" }, icon("server")),
-      h("div", { class: "grow" }, h("div", { class: "app-title" }, h("h1", null, m.name), machineChip(m)), h("p", { class: "meta" }, [machineOs(m), m.ip, m.online ? null : t("machines.seen", { ago: ago(m.seen) })].filter(Boolean).flatMap((part, i) => (i ? [h("span", { class: "dot-sep" }, "·"), part] : [part])))),
+      h("div", { class: "grow" }, h("div", { class: "app-title" }, h("h1", null, m.name), machineChip(m)), h("p", { class: "meta" }, [machineOs(m), m.ip, m.online ? null : t("machines.seen", { ago: ago(m.seen) })].filter(Boolean).flatMap((part, i) => (i ? [h("span", { class: "dot-sep" }, "·"), part] : [part]))), hardwareWords(m.info?.hardware) && h("p", { class: "meta" }, hardwareWords(m.info.hardware))),
       h(
         "div",
         { class: "actions" },
@@ -8301,7 +8469,7 @@ const mappUi = { key: "", machine: null, app: null, error: "", timer: 0 };
 function renderMachineApp() {
   const key = `${state.route.name}@${state.route.machine}`;
   if (mappUi.key !== key) Object.assign(mappUi, { key, machine: null, app: null, error: "" });
-  shell(h("div", { id: "mapp-body", class: "stack" }, h("p", { class: "card pad muted" }, "…")));
+  shell(h("div", { id: "mapp-body", class: "stack" }, waitMark()));
   if (mappUi.app) paintMachineApp();
   void loadMachineApp();
   cleanups.push(() => clearTimeout(mappUi.timer));
@@ -9069,6 +9237,22 @@ function stopButton(id) {
 
 /** Follows a running operation without a dialog of its own: every line as it comes, then the job as it ended */
 function followJob(id, onLine) {
+  // the window that follows it tells of it: no card beside while it is open; closed while the work runs, the card takes over
+  const shownIn = [...document.querySelectorAll("dialog[open]")].pop();
+  if (shownIn) {
+    jobsUi.logs.add(id);
+    paintJobs();
+    shownIn.addEventListener(
+      "close",
+      () => {
+        jobsUi.logs.delete(id);
+        const e = jobsUi.list.get(id);
+        if (e && jobEnded(e)) closeJob(id);
+        else paintJobs();
+      },
+      { once: true },
+    );
+  }
   return new Promise((resolve) => {
     let next = -1;
     const pending = [];
@@ -9124,7 +9308,9 @@ const storedIds = (store, key) => {
 };
 const remember = (store, key, id) => store.setItem(key, JSON.stringify([...storedIds(store, key).filter((one) => one !== id), id].slice(-40)));
 
-const jobPercent = (p) => (p?.layers ? Math.floor(((p.done ?? 0) / p.layers) * 100) : null);
+const jobPercent = (p) => (p?.total ? Math.min(99, Math.floor(((p.bytes ?? 0) / p.total) * 100)) : p?.layers ? Math.floor(((p.done ?? 0) / p.layers) * 100) : null);
+/** A copy or a move of files going on in the background */
+const isFileJob = (e) => e.kind === "filecopy" || e.kind === "filemove";
 const jobEnded = (e) => e.status !== "running";
 const jobWaits = (e) => e.status === "failed" && !e.stopped;
 
@@ -9132,6 +9318,8 @@ const jobWaits = (e) => e.status === "failed" && !e.stopped;
 function jobShort(job, machine = "") {
   const p = job?.progress;
   const pct = jobPercent(p);
+  // a copy or a move of files has no steps: how much of how much
+  if (job && isFileJob(job)) return p?.total ? t("jobs.copied", { done: bytes(p.bytes ?? 0), total: bytes(p.total), pct }) : t("jobs.counting");
   if (machine) return pct === null ? t("jobs.short.machineBusy", { machine }) : t("jobs.short.machine", { machine, pct });
   if (p?.step === "download" && pct !== null) return t("jobs.short.downloading", { pct });
   return t(p?.step ? `jobs.short.${p.step}` : "jobs.short.check");
@@ -9139,7 +9327,20 @@ function jobShort(job, machine = "") {
 
 function jobName(e) {
   const o = state.overview;
-  return o?.apps?.find((a) => a.name === e.app)?.title ?? o?.machineApps?.find((a) => a.key === e.app)?.title ?? e.title ?? e.app ?? "";
+  return o?.apps?.find((a) => a.name === e.app)?.title ?? o?.machineApps?.find((a) => a.key === e.app)?.title ?? e.title ?? jobKeyName(e);
+}
+
+/** A name for work this page did not start, from the key the server keeps it under: "incus:web" is web, "pve:<server>:243" is 243 */
+function jobKeyName(e) {
+  const key = e.app ?? "";
+  if (!key) return e.target ?? "";
+  if (key === "incus" || key === "incus-vm") return "Incus";
+  if (key === "tv") return "Kodi";
+  if (key.startsWith("incus-disc:")) return key.split("/").pop();
+  if (key.startsWith("incus:")) return key.slice(6);
+  if (key.startsWith("pve:")) return key.endsWith(":schedule") ? "Proxmox" : key.split(":").slice(2).pop();
+  if (key.startsWith("@system")) return "";
+  return key.replace(/@incus$/, "");
 }
 
 function jobHeading(e) {
@@ -9197,6 +9398,7 @@ const jobUrl = (e) => {
 function jobSub(e) {
   if (e.status === "running") {
     if (jobsUi.lost) return t("jobs.lost");
+    if (isFileJob(e)) return e.progress?.total ? t("jobs.copied", { done: bytes(e.progress.bytes ?? 0), total: bytes(e.progress.total), pct: jobPercent(e.progress) }) : t("jobs.counting");
     if (e.kind !== "install" || !e.progress?.step) return e.kind === "install" ? t("job.running") : e.last ?? t("job.running");
     const line = `${t("jobs.step." + e.progress.step)} · ${t("jobs.stepOf", { n: JOB_STEPS.indexOf(e.progress.step) + 1, m: JOB_STEPS.length })}`;
     return e.machine ? `${t("jobs.onMachine", { machine: e.machine })} · ${line}` : line;
@@ -9228,7 +9430,10 @@ function jobBars(e) {
 function paintJobBar(bar, e) {
   const { paint } = jobBars(e);
   const parts = [...bar.children];
-  if (e.kind !== "install") return parts[0] && paint(parts[0], jobsUi.lost ? "frozen" : "moving");
+  if (e.kind !== "install") {
+    const pct = jobPercent(e.progress);
+    return parts[0] && paint(parts[0], jobsUi.lost ? "frozen" : pct === null ? "moving" : "known", pct);
+  }
   const at = Math.max(0, JOB_STEPS.indexOf(e.progress?.step ?? "check"));
   parts.forEach((part, i) => {
     if (i < at) return paint(part, "full");
@@ -9273,6 +9478,9 @@ function patchJobs() {
   }
 }
 
+/** A copy or a move ended before its time: what it copied so far goes, the original stays whole */
+const stopFileJob = (e) => api("POST", `/api/jobs/${e.id}/stop`).catch((err) => toast(errorText(err), "error"));
+
 function jobCard(e, row = false) {
   const ended = jobEnded(e);
   const url = e.status === "done" && e.kind === "install" ? jobUrl(e) : null;
@@ -9284,9 +9492,10 @@ function jobCard(e, row = false) {
     { class: `jt-card ${row ? "row" : ""} ${e.status} ${e.stopped ? "stopped" : ""}`, "data-job": e.id },
     h("div", { class: "jt-head" },
       appIcon({ name: e.app, title: jobName(e), icon: e.icon }, row ? "sm" : ""),
-      h("div", { class: "jt-words" }, h("strong", { class: "jt-title" }, jobHeading(e)), h("span", { class: "jt-sub" + (e.kind !== "install" && !ended ? " mono" : "") }, jobSub(e))),
+      h("div", { class: "jt-words" }, h("strong", { class: "jt-title" }, jobHeading(e)), h("span", { class: "jt-sub" + (e.kind !== "install" && !isFileJob(e) && !ended ? " mono" : "") }, jobSub(e))),
       row && (url || page) && h("a", { class: "icon-btn", href: url ?? page, title: t("common.open"), "aria-label": `${t("common.open")}: ${jobName(e)}`, ...(url ? { target: "_blank", rel: "noopener noreferrer" } : {}), onclick: () => closeJob(e.id) }, icon("external")),
       row && signIn && signIn.login.kind !== "none" && h("button", { type: "button", class: "icon-btn", title: t("app.login"), "aria-label": `${t("app.login")}: ${jobName(e)}`, onclick: () => loginDialog(jobName(e), signIn.login, signIn.ask) }, icon("key")),
+      row && !ended && isFileJob(e) && h("button", { type: "button", class: "icon-btn", title: t("jobs.stopFiles"), "aria-label": `${t("jobs.stopFiles")}: ${jobName(e)}`, onclick: () => stopFileJob(e) }, icon("stop")),
       row && h("button", { type: "button", class: "icon-btn", title: t("jobs.showLog"), "aria-label": `${t("jobs.showLog")}: ${jobName(e)}`, onclick: () => jobLog(e) }, icon("logs")),
       ended
         ? h("button", { type: "button", class: "icon-btn", title: t("jobs.dismiss"), "aria-label": `${t("jobs.dismiss")}: ${jobName(e)}`, onclick: () => closeJob(e.id) }, icon("x"))
@@ -9298,6 +9507,7 @@ function jobCard(e, row = false) {
     !row && signIn && h("div", { class: "jt-login" }, signIn.login.kind !== "none" && h("strong", { class: "small" }, t("app.login")), loginBlock(signIn.login, signIn.ask)),
     !row && h("div", { class: "jt-actions" },
       button(t("jobs.showLog"), { class: "small", onclick: () => jobLog(e) }),
+      !ended && isFileJob(e) && button(t("jobs.stopFiles"), { class: "small", onclick: () => stopFileJob(e) }, "stop"),
       notes && button(t("app.notes"), { class: "small", onclick: notes }, "info"),
       (url || page) && h("a", { class: "btn small primary", href: url ?? page, ...(url ? { target: "_blank", rel: "noopener noreferrer" } : {}), onclick: () => closeJob(e.id) }, icon("external"), t("common.open")),
     ),
@@ -9361,11 +9571,18 @@ function paintJobs() {
   patchJobs();
 }
 
-/** A job as the server tells of it. Tracked: every install, and what somebody sent to the background */
+/**
+ * Work whose card is not shown by itself: over in seconds, and the tile says it meanwhile. Every other kind shows in
+ * every tab and on every device of an administrator — also what a schedule or an agent started: a phone that did not
+ * start the work showed nothing of it.
+ */
+const JOBS_UNSEEN = ["start", "stop", "restart", "apply"];
+
+/** A job as the server tells of it. Tracked: every kind but those above wherever it was started, and what somebody sent to the background here */
 function takeJob(job, line) {
   if (!isAdmin()) return;
   const known = jobsUi.list.get(job.id);
-  if (!known && !(job.kind === "install" || storedIds(sessionStorage, JOB_HIDDEN).includes(job.id))) return;
+  if (!known && JOBS_UNSEEN.includes(job.kind) && !storedIds(sessionStorage, JOB_HIDDEN).includes(job.id)) return;
   if (!known && storedIds(localStorage, JOB_CLOSED).includes(job.id)) return;
   const e = known ?? { id: job.id, left: JOB_LINGER_S };
   const was = e.status;
@@ -9797,7 +10014,7 @@ async function appBackupsTab(app, box) {
 
 function renderBackups() {
   const tab = state.route.tab ?? "overview";
-  shell(...settingsFrame("backups", tab === "overview" && h("section", { class: "stats card", id: "backup-stats" }), h("div", { class: "stack", id: "backup-body" }, h("p", { class: "card pad muted" }, "…"))));
+  shell(...settingsFrame("backups", tab === "overview" && h("section", { class: "stats card", id: "backup-stats" }), h("div", { class: "stack", id: "backup-body" }, waitMark())));
   renderBackupsBody();
   if (tab === "overview") void loadBackupsMore();
   if (tab === "history") void loadBackupHistory();
@@ -9848,7 +10065,7 @@ function renderBackupsBody() {
   );
   if (tab === "history") {
     const list = backupHistory.entries;
-    return put(box, h("section", { class: "card pad" }, h("h2", null, t("area.backups.history")), h("p", { class: "muted small" }, t("backup.historyLead")), !list ? h("p", { class: "muted" }, "…") : list.length ? list.map((e) => activityItem(e, new Date(e.ts).toLocaleString(state.lang, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }))) : h("p", { class: "muted" }, t("activity.none"))));
+    return put(box, h("section", { class: "card pad" }, h("h2", null, t("area.backups.history")), h("p", { class: "muted small" }, t("backup.historyLead")), !list ? waitMark() : list.length ? list.map((e) => activityItem(e, new Date(e.ts).toLocaleString(state.lang, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }))) : h("p", { class: "muted" }, t("activity.none"))));
   }
   if (tab === "offsite") return put(box, offsiteCard(b.offsite)), void (clearTimeout(offsiteTimer), b.offsite.running && (offsiteTimer = setTimeout(() => state.route.view === "backups" && loadBackups(), 3000)));
   if (tab === "schedule") return box.contains(document.activeElement) ? undefined : put(box, backupScheduleForm(b, s), backupServerHow(b), h("p", { class: "card pad muted small" }, t("backup.how")));
@@ -10450,7 +10667,11 @@ function filesPlaces(path) {
       ),
     );
   }
-  // the disks are tiles of their own under the places, as on the top of the data folder
+  // the connected disks and network drives are places of their own: a disk just connected is found here at once.
+  // The trash and My Hata have no listing of their own, so the last one known is kept
+  if (state.files?.disks && !filesMachine()) filesUi.volumes = state.files.disks;
+  const volumes = filesUi.volumes ?? [];
+  const onVolume = volumes.some((d) => inside(d.path));
   put(
     places,
     h(
@@ -10459,8 +10680,9 @@ function filesPlaces(path) {
       h("div", { class: "cat-title" }, t("files.places")),
       h("a", { class: "cat" + (path === "#hata" ? " active" : ""), href: "#/hata" }, h("span", { class: "with-icon" }, icon("home"), h("span", { class: "clip" }, t("myhata.title")))),
       home && place(t("files.home"), home, "folder", inHome),
-      place(t("files.root"), "/", "disk", !trash && path !== "#hata" && path !== "" && !inHome),
+      place(t("files.root"), "/", "disk", !trash && path !== "#hata" && path !== "" && !inHome && !onVolume),
       h("a", { class: "cat" + (trash ? " active" : ""), href: "#/trash" }, h("span", { class: "with-icon" }, icon("trash"), h("span", { class: "clip" }, t("trash.title")))),
+      volumes.length > 0 && [h("div", { class: "cat-title" }, t("files.disks")), volumes.map((d) => h("a", { class: "cat" + (inside(d.path) ? " active" : ""), href: filesHash(d.path, ""), title: d.path, menu: (at) => sidebarMenu(at, { label: volumeName(d), path: d.path, volume: d, iconName: d.network ? "globe" : "disk" }) }, h("span", { class: "with-icon" }, icon(d.network ? "globe" : "disk"), h("span", { class: "clip" }, volumeName(d), volumeFolder(d) && h("span", { class: "muted" }, " · " + volumeFolder(d))))))],
       favorites.length > 0 && [h("div", { class: "cat-title" }, t("files.favorites")), favorites.map(favoriteRow)],
       machinesList,
     ),
@@ -10517,6 +10739,13 @@ function renderFilesBody() {
       { class: "files-tools" },
       listing && !listing.error && !machine && findBox(path),
       h("span", { class: "grow" }),
+      // what the folder holds may have changed from elsewhere: over the network, by an app, in a terminal
+      h("button", { type: "button", class: "btn square", title: t("files.reload"), "aria-label": t("files.reload"), onclick: async (e) => {
+        const mark = e.currentTarget.querySelector(".ico");
+        mark?.classList.add("spin");
+        await loadFiles();
+        mark?.classList.remove("spin");
+      } }, icon("refresh")),
       listing && !listing.error && !machine && h("button", { type: "button", class: "btn square" + (isFavorite(path) ? " active" : ""), title: t(isFavorite(path) ? "files.unfavorite" : "files.favorite"), "aria-label": t(isFavorite(path) ? "files.unfavorite" : "files.favorite"), "aria-pressed": String(isFavorite(path)), onclick: () => favorite(path, !isFavorite(path)) }, icon("star")),
       listing && !listing.error && !machine && isAdmin() && h("button", { type: "button", class: "btn square" + (isPinned ? " active" : ""), title: t(isPinned ? "files.unpin" : "files.pin"), "aria-label": t(isPinned ? "files.unpin" : "files.pin"), "aria-pressed": String(isPinned), onclick: () => pinFolder(path, !isPinned) }, icon("home")),
       listing && !listing.error && !machine && isAdmin() && h("button", { type: "button", class: "btn square" + (isShared ? " active" : ""), title: t(isShared ? "files.shareSettings" : "files.share"), "aria-label": t(isShared ? "files.shareSettings" : "files.share"), onclick: () => shareDialog(path) }, icon("share")),
@@ -10871,6 +11100,8 @@ function diskRoom(volume, short = false) {
 
 /** What a disk is called: its label, or the folder it is mounted at */
 const volumeName = (volume) => volume.label || volume.path.split("/").pop() || volume.path;
+/** The folder a volume is connected at, when its own label says something else: "Data" alone would not tell which disk */
+const volumeFolder = (volume) => ((folder) => (volume.label && folder && folder !== volume.label ? folder : ""))(volume.path.split("/").pop() ?? "");
 /** The disks that are not inside the data folder already, where people look for them */
 const outerVolumes = (listing) => (listing?.disks ?? []).filter((d) => !(d.path + "/").startsWith((listing.home || "\0") + "/"));
 
@@ -10940,7 +11171,7 @@ function renderMyHata() {
         { class: "stack", id: "files-main" },
         h("div", { class: "page-head card pad" }, h("div", null, h("h1", null, t("myhata.title")), h("p", { class: "muted" }, t("myhata.lead")))),
         !listing
-          ? h("p", { class: "card pad muted" }, "…")
+          ? waitMark()
           : [
               section(t("myhata.server"), [
                 home && hataTile({ href: filesHash(home, ""), iconName: "folder", title: t("files.home"), sub: home, room: listing.disk }),
@@ -10984,7 +11215,7 @@ function renderMySharedFolders() {
         { class: "stack", id: "files-main" },
         h("div", { class: "page-head card pad" }, h("div", null, h("h1", null, t("myhata.title")), h("p", { class: "muted" }, t("myhata.sharedLead")))),
         !shares
-          ? h("p", { class: "card pad muted" }, "…")
+          ? waitMark()
           : [
               (shares.length > 0 || !(state.myMachines ?? []).length) && section(t("myhata.shared"), shares.length ? shares.map((share) => shareTile(share, "")) : h("p", { class: "muted small" }, t("myhata.nothingShared"))),
               (state.myMachines ?? []).map((m) => section(t("myhata.onMachine", { name: m.name }), m.shares.map((share) => shareTile(share, m)))),
@@ -11330,6 +11561,7 @@ function folderMenu(at) {
     item(t("files.upload"), "upload", () => document.querySelector("#files-main .page-head input[type=file]")?.click(), listing.readOnly),
     listing.entries.length > 0 && item(t("files.selectAll"), "check", () => ((filesUi.selected = new Set(listing.entries.map((entry) => entry.name))), renderFilesBody())),
     listing.entries.length > 0 && item(t("files.downloadZip"), "download", () => downloadEntries(listing.entries.filter((entry) => entry.type !== "other"))),
+    item(t("files.size"), "disk", () => sizeDialog(path, path.split("/").pop() || "/")),
     item(t("files.copyPath"), "link", () => copyText(path)),
     !listing.machine && item(t(isFavorite(path) ? "files.unfavorite" : "files.favorite"), "star", () => favorite(path, !isFavorite(path))),
     !listing.machine && isAdmin() && item(t(listing.pinned.includes(path) ? "files.unpin" : "files.pin"), "home", () => pinFolder(path, !listing.pinned.includes(path))),
@@ -11363,12 +11595,26 @@ function entryMenu(entry, at) {
     entry.type === "dir" && !filesMachine() && isAdmin() && (state.files.pinned.includes(path) ? item(t("files.unpin"), "home", () => pinFolder(path, false)) : item(t("files.pin"), "home", () => pinFolder(path, true))),
     entry.type === "dir" && !filesMachine() && isAdmin() && item(t(state.files.shared.includes(path) ? "files.shareSettings" : "files.share"), "share", () => shareDialog(path)),
     entry.type === "dir" && machineLet(filesMachine()) && item(t("machines.people.shareHere"), "share", () => machineShareDialog(machineLet(filesMachine()), path)),
+    entry.type === "dir" && item(t("files.size"), "disk", () => sizeDialog(path, entry.name)),
     !state.files.readOnly && item(t("files.rename"), "edit", () => renameDialog(entry)),
     !state.files.readOnly && item(t("files.move"), "arrow", () => transferDialog([entry], false)),
     item(t("files.copy"), "copy", () => transferDialog([entry], true)),
     !state.files.readOnly && item(t("files.delete"), "trash", () => deleteDialog([entry]), "danger"),
   );
   if (at) placeAt(dialog, at);
+}
+
+/** How much room a folder takes: counted when asked for, since a large one takes a while */
+function sizeDialog(path, name) {
+  const body = h("div", { class: "stack" }, h("p", { class: "muted" }, t("files.sizeCounting")), waitMark());
+  let dialog;
+  dialog = openDialog("confirm", h("h2", { class: "wrap" }, name), body, h("footer", null, closeButton(() => dialog)));
+  // a machine's client counts file by file and stops at its limit
+  const asked = filesMachine() ? api("POST", filesApi("/summary"), { paths: [path] }) : api("POST", "/api/files/size", { path });
+  asked.then(
+    (r) => put(body, h("p", null, t(r.truncated ? "files.sizeOver" : "files.sizeIs", { size: bytes(r.size) })), h("p", { class: "muted small mono wrap" }, path)),
+    (e) => put(body, h("p", { class: "error", role: "alert" }, errorText(e))),
+  );
 }
 
 /** Asks for one name: a new folder, a new name */
@@ -11774,7 +12020,9 @@ function transferDialog(entries, copy) {
         const res = await api("POST", "/api/files/transfer", { from: { machine: source, paths }, to: { machine: on, dir: to }, copy });
         return jobDialog(res.job, "transfer", what, () => void loadFiles());
       }
-      await api("POST", filesApi(copy ? "/copy" : "/move", source), { paths, to });
+      const res = await api("POST", filesApi(copy ? "/copy" : "/move", source), { paths, to });
+      // large or to another disk: it goes on in the background, the card in the corner says how far it is
+      if (res?.job) return jobInBackground(res.job, copy ? "filecopy" : "filemove", what, () => void loadFiles());
       toast(t(copy ? "files.copied" : "files.moved", { n: entries.length, to: to === "/" ? "/" : to.split("/").pop() }));
       await loadFiles();
     },
@@ -12153,7 +12401,7 @@ function renderApps() {
 function renderAppsBody() {
   const box = document.getElementById("apps-body");
   if (!box) return;
-  if (!state.overview) return put(box, h("p", { class: "card pad muted" }, "…"));
+  if (!state.overview) return put(box, waitMark());
   // on the page of this server: its own apps alone, and nothing of the section's head
   const fixed = state.route.view === "server";
   const all = installedApps().filter((row) => !fixed || !row.machine);
@@ -12878,7 +13126,7 @@ function paintWelcome() {
   const s = state.settings;
   if (!box) return;
   const head = [h("h1", null, t(`welcome.${step}.title`)), h("p", { class: "muted welcome-lead" }, t(`welcome.${step}.lead`))];
-  const waiting = h("p", { class: "muted" }, "…");
+  const waiting = waitMark();
 
   if (step === "server") {
     if (!s) return put(box, ...head, waiting);
@@ -13638,7 +13886,7 @@ function musicDropdown(at) {
   let dialog;
   let timer = 0;
   let busy = false;
-  const body = h("div", { class: "stack" }, h("p", { class: "muted pad" }, "…"));
+  const body = h("div", { class: "stack" }, waitMark());
   const paint = () => {
     const m = state.music;
     if (!m || busy || body.querySelector("input[type=range]:active") || document.querySelector("dialog.select-list[open]") || dialog.classList.contains("pulled")) return;
@@ -13700,7 +13948,7 @@ function musicLinkDialog() {
 const musicFolder = () => folderPicker({ title: t("music.folder"), start: state.settings?.dataRoot ?? "/", confirmLabel: t("music.playNow"), action: (path) => playMusic({ path }, path.split("/").pop() || path) });
 
 function renderMusic() {
-  shell(areaHead("house", "music", { actions: h("div", { class: "row-actions" }, button(t("music.link"), { onclick: musicLinkDialog }, "link"), button(t("music.folder"), { class: "primary", onclick: musicFolder }, "folder")) }), h("div", { id: "music-body", class: "stack" }, h("p", { class: "card pad muted" }, "…")));
+  shell(areaHead("house", "music", { actions: h("div", { class: "row-actions" }, button(t("music.link"), { onclick: musicLinkDialog }, "link"), button(t("music.folder"), { class: "primary", onclick: musicFolder }, "folder")) }), h("div", { id: "music-body", class: "stack" }, waitMark()));
   cleanups.push(() => clearTimeout(musicUi.timer));
   if (state.music) paintMusic();
 }
@@ -13850,7 +14098,7 @@ function tvStick() {
 }
 
 function renderTv() {
-  shell(areaHead("house", "tv", { actions: button(t("tv.link"), { onclick: playLinkDialog }, "link") }), h("div", { id: "tv-body", class: "stack" }, h("p", { class: "card pad muted" }, "…")));
+  shell(areaHead("house", "tv", { actions: button(t("tv.link"), { onclick: playLinkDialog }, "link") }), h("div", { id: "tv-body", class: "stack" }, waitMark()));
   window.addEventListener("resize", tvStick);
   cleanups.push(() => (clearTimeout(tvUi.timer), window.removeEventListener("resize", tvStick)));
   if (state.tv) paintTv();
@@ -13916,7 +14164,7 @@ function tvTextDialog(press) {
 function tvDropdown(at) {
   let dialog;
   let timer = 0;
-  const body = h("div", { class: "tvr" }, h("p", { class: "muted" }, "…"));
+  const body = h("div", { class: "tvr" }, waitMark());
   const press = (action, value) => api("POST", "/api/tv/do", { action, value }).then(() => setTimeout(load, 250), (e) => toast(errorText(e), "error"));
   const turnOn = () => api("PUT", "/api/tv", { on: true }).then(load, (e) => toast(errorText(e), "error"));
   const load = async () => {
@@ -14257,7 +14505,7 @@ const findWords = (f) => t("modules.found." + f.what, { detail: f.detail });
 
 function modulesSection() {
   const list = state.modulesList;
-  if (!list) return [h("p", { class: "muted" }, "…")];
+  if (!list) return [waitMark()];
   // what is here already shows on the cards of modules that are off; the look takes a few seconds
   if (!state.moduleFinds) void loadModuleFinds().then(() => state.route.view === "settings" && showsSection("modules") && renderSettings());
   const card = (m) => {
@@ -15309,7 +15557,7 @@ function hotspotNeeds(detail, error) {
 
 function networkSection() {
   const data = state.network;
-  if (!data) return [h("p", { class: "muted" }, "…")];
+  if (!data) return [waitMark()];
   const error = h("p", { class: "error", role: "alert" });
   const row = (label, value, mono = true) => h("div", { class: "kv" }, h("span", { class: "muted" }, label), h("span", { class: mono ? "mono" : "" }, value || "—"));
   const card = (nic) =>
@@ -15330,7 +15578,7 @@ function networkSection() {
         h("h2", null, h("span", { class: "with-icon" }, icon("network"), nic.kind === "modem" ? nic.product || t("network.modem") : nic.name), " ", nic.kind === "modem" && h("span", { class: "muted small mono" }, nic.name + " "), h("span", { class: "state " + (nic.up ? "running" : "stopped") }, t(nic.up ? "network.up" : "network.down")), nic.outside && h("span", { class: "state" }, t("outside.chip")), nic.online === false && h("span", { class: "state restarting" }, t("network.offline")), nic.online === true && h("span", { class: "state running" }, t("network.online"))),
         h(
           "div",
-          { class: "actions" },
+          { class: "actions" }, foldActions([
           nic.wifi?.ready && nic.wifi.ap && button(t(nic.wifi.hotspot ? "hotspot.show" : "hotspot.make"), { class: nic.wifi.hotspot ? "accent" : "", onclick: () => hotspotDialog(nic) }, "share"),
           nic.wifi?.ready && button(t("wifi.networks"), { onclick: () => wifiDialog(nic) }, "search"),
           nic.wifi?.ssid &&
@@ -15350,7 +15598,7 @@ function networkSection() {
           (nic.manager === "networkd" || nic.manager === "ifupdown") && data.tool === "ok" && !data.pending && button(t("network.handover"), { onclick: () => handOverDialog(nic) }),
           nic.handed && !data.pending && button(t("network.handback"), { onclick: () => handBackDialog(nic) }, "undo"),
           !bridgeWhy(nic) && !data.nics.some((n) => n.home) && !data.pending && button(t("bridge.make"), { onclick: () => homeBridgeDialog(nic) }, "box"),
-          nic.home && !data.pending && button(t("bridge.apart"), { onclick: () => bridgeApartDialog(nic) }, "undo"),
+          nic.home && !data.pending && button(t("bridge.apart"), { onclick: () => bridgeApartDialog(nic) }, "undo"),])
         ),
       ),
       nic.home && h("p", { class: "muted small" }, t("bridge.is", { ports: (nic.ports ?? []).filter((p) => data.nics.some((n) => n.name === p)).join(", ") || "—" }), " ", t("bridge.guests", { n: (nic.ports ?? []).filter((p) => !data.nics.some((n) => n.name === p)).length })),
@@ -15619,7 +15867,7 @@ function btSoundCard(r, error) {
 
 function bluetoothSection() {
   const r = state.bluetooth;
-  if (!r) return [h("p", { class: "card pad muted" }, "…")];
+  if (!r) return [waitMark()];
   const error = h("p", { class: "error", role: "alert" }, r.error ?? "");
   const lead = h("p", { class: "muted" }, t("bt.lead"));
   if (r.error) return [h("section", { class: "card pad stack" }, h("h2", null, "Bluetooth"), error)];
@@ -15982,7 +16230,7 @@ function wireguardCards() {
 
 function tailscaleCards() {
   const r = state.remote;
-  if (!r) return [h("p", { class: "muted" }, "…")];
+  if (!r) return [waitMark()];
   const error = h("p", { class: "error", role: "alert" });
   const act = (what, data = {}, said) => async (e) => {
     const el = e.currentTarget;
@@ -16118,7 +16366,7 @@ function tailscaleCards() {
 /** Settings → System programs: everything of the system Hata relies on, installed or not */
 function toolsSection() {
   const tools = state.tools;
-  if (!tools) return [h("p", { class: "muted" }, "…")];
+  if (!tools) return [waitMark()];
   const error = h("p", { class: "error", role: "alert" });
   const again = async () => {
     state.tools = await api("GET", "/api/tools").catch(() => state.tools);
@@ -16224,7 +16472,7 @@ function sysUpdatesCard(at) {
     },
   }, "refresh");
   const head = h("div", { class: "section-head" }, h("h2", null, t("sysupdates.title")), check);
-  if (!info) return h("section", { class: "card pad stack" }, head, h("p", { class: "muted" }, "…"));
+  if (!info) return h("section", { class: "card pad stack" }, head, waitMark());
   if (info.error && !info.at) return h("section", { class: "card pad stack" }, head, h("p", { class: "error" }, info.error));
   if (info.at && !info.manager) return h("section", { class: "card pad stack" }, head, h("p", { class: "muted small" }, t("sysupdates.noManager")));
   const security = list.filter((p) => p.security).length;
@@ -16633,7 +16881,8 @@ function appearanceSection(error) {
 function localNameCard() {
   const local = state.settings.local;
   const enabled = h("input", { type: "checkbox", checked: local.enabled });
-  const name = h("input", { value: local.name, maxLength: 253, placeholder: "hata.local", spellcheck: false, autocapitalize: "none", class: "mono", required: true, "aria-label": t("local.name") });
+  // the name is the server's own: changed in the one window that renames the server, here it is only shown
+  const name = h("div", { class: "row-actions" }, h("code", null, local.name), button(t("rename.open"), { class: "small", onclick: () => renameServerDialog(renderSettings) }, "edit"));
   const error = h("p", { class: "error", role: "alert" });
   const status = h("div", { class: "stack" });
   let alive = true;
@@ -16669,7 +16918,7 @@ function localNameCard() {
         e.preventDefault();
         error.textContent = "";
         try {
-          state.settings = await api("PUT", "/api/settings", { local: { enabled: enabled.checked, name: name.value } });
+          state.settings = await api("PUT", "/api/settings", { local: { enabled: enabled.checked } });
           toast(t("settings.saved"));
           await refresh();
           // the responder takes a moment to start listening
@@ -16774,7 +17023,7 @@ function httpsSection(save, error) {
 
 /** One certificate for the domain and every name under it: the way its TXT record gets into the DNS */
 function wildcardCard(afterChange) {
-  const body = h("div", { class: "stack" }, h("p", { class: "muted small" }, "…"));
+  const body = h("div", { class: "stack" }, waitMark());
   const paint = async () => {
     const status = await api("GET", "/api/https").catch(() => null);
     if (!status) return;
@@ -16890,7 +17139,7 @@ function nameTargetWords(n) {
  * Proxmox, machines, their apps and any address; Hata passes the request on, its sign-in in front when asked
  */
 function namesCard() {
-  const body = h("div", { class: "stack" }, h("p", { class: "muted small" }, "…"));
+  const body = h("div", { class: "stack" }, waitMark());
   const paint = async () => {
     let data;
     try {
@@ -16944,7 +17193,7 @@ const serverHost = () => (state.settings?.local?.enabled && state.settings.local
 
 /** Ports of this server passed on to a container, a guest, a machine or an address */
 function portsCard() {
-  const body = h("div", { class: "stack" }, h("p", { class: "muted small" }, "…"));
+  const body = h("div", { class: "stack" }, waitMark());
   const paint = async () => {
     let data;
     try {
@@ -16999,8 +17248,8 @@ async function forwardDialog(existing, preset, after) {
     return toast(errorText(e), "error");
   }
   const pick = targetPicker(data.targets, existing?.target ?? preset?.target, existing?.title);
-  const port = h("input", { type: "number", min: 1, max: 65535, value: existing?.port ?? "", required: true, placeholder: "2222", class: "short mono" });
-  const to = h("input", { type: "number", min: 1, max: 65535, value: existing?.to ?? "", required: true, placeholder: "22", class: "short mono" });
+  const port = h("input", { type: "number", min: 1, max: 65535, value: existing?.port ?? "", required: true, placeholder: "2222", class: "mono" });
+  const to = h("input", { type: "number", min: 1, max: 65535, value: existing?.to ?? "", required: true, placeholder: "22", class: "mono" });
   const proto = h("select", null, ["tcp", "udp", "both"].map((p) => h("option", { value: p, selected: (existing?.proto ?? "tcp") === p }, t("ports.proto." + p))));
   const note = h("input", { value: existing?.note ?? "", maxLength: 60, placeholder: "SSH" });
   const [outside, outsideRow] = tickRow(t("ports.outside"), t("ports.outsideHint"), existing?.outside ?? false);
@@ -17039,10 +17288,11 @@ async function forwardDialog(existing, preset, after) {
       { class: "stack", onsubmit: send },
       h("header", null, h("h2", { class: "grow" }, t(existing ? "ports.changeTitle" : "ports.addTitle")), closeX(() => dialog)),
       h("p", { class: "muted small" }, t("ports.dialogLead")),
-      h("div", { class: "form-pair" }, field(t("ports.port"), h("span", { class: "web-address" }, h("span", { class: "muted mono" }, serverHost() + ":"), port), t("ports.portHint")), field(t("ports.proto"), proto)),
+      // the hints stand under the whole row: under one half they pushed its field out of line with the other
+      h("div", { class: "stack-tight" }, h("div", { class: "form-pair port-pair" }, field(t("ports.port"), h("span", { class: "port-at" }, h("span", { class: "muted mono clip" }, serverHost() + ":"), port)), field(t("ports.proto"), proto)), h("span", { class: "hint" }, t("ports.portHint"))),
       field(t("names.to"), pick.select),
       pick.hostRow,
-      h("div", { class: "form-pair" }, field(t("ports.to"), to, t("ports.toHint")), field(t("ports.note"), note)),
+      h("div", { class: "stack-tight" }, h("div", { class: "form-pair port-pair" }, field(t("ports.to"), to), field(t("ports.note"), note)), h("span", { class: "hint" }, t("ports.toHint"))),
       outsideRow,
       error,
       h("footer", null, remove, h("span", { class: "grow" }), closeButton(() => dialog, t("common.cancel")), h("button", { class: "btn primary" }, t(existing ? "settings.save" : "ports.addGo"))),
@@ -17156,7 +17406,7 @@ const DNS_UPSTREAMS = ["system", "quad9", "cloudflare", "google", "adguard", "cu
 
 /** Hata as the home's DNS server: on or off, where it listens, where the rest goes, the names it answers */
 function dnsSection() {
-  const box = h("div", { class: "stack" }, h("section", { class: "card pad" }, h("p", { class: "muted" }, "…")));
+  const box = h("div", { class: "stack" }, h("section", { class: "card pad" }, waitMark()));
   let alive = true;
   cleanups.push(() => (alive = false));
   const load = async () => {
@@ -17284,7 +17534,7 @@ const PAUSES = [5, 30, 60, 240, 1440];
 const blockUntil = (ts) => new Date(ts).toLocaleTimeString(state.lang, { hour: "2-digit", minute: "2-digit" });
 
 function adblockSection() {
-  const box = h("div", { class: "stack" }, h("section", { class: "card pad" }, h("p", { class: "muted" }, "…")));
+  const box = h("div", { class: "stack" }, h("section", { class: "card pad" }, waitMark()));
   let alive = true;
   let timer = 0;
   cleanups.push(() => ((alive = false), clearTimeout(timer)));
@@ -17630,7 +17880,6 @@ function adblockBlock(el, b) {
   };
   put(
     el,
-    blockRemover("adblock"),
     h("div", { class: "section-head" }, h("h2", null, h("a", { href: "#/settings/adblock" }, t("adblock.title"))), b.enabled && h("span", { class: "state " + (b.paused ? "restarting" : b.serving ? "running" : "stopped") }, b.paused ? t("adblock.pausedUntil", { when: blockUntil(b.pausedUntil) }) : t(b.serving ? "adblock.working" : "adblock.notServing"))),
     b.enabled
       ? [
@@ -17820,7 +18069,7 @@ function emailCard() {
 
 function notificationsSection() {
   const n = state.notify;
-  if (!n) return [h("p", { class: "muted" }, "…")];
+  if (!n) return [waitMark()];
   const error = h("p", { class: "error", role: "alert" });
   const toggle = (key) => {
     const box = h("input", {
@@ -17885,7 +18134,7 @@ function hiddenItemsCard() {
       "div",
       { class: "hidden-item " + entry.severity, menu: true },
       icon(entry.code ? attentionIcon(entry.code) : "alert"),
-      h("div", { class: "grow" }, h("strong", null, words.title), words.text && h("p", { class: "muted small" }, words.text), h("p", { class: "small muted" }, entry.until === 0 ? t("attention.hidden.forever") : t("attention.hidden.until", { date: shortDate(entry.until) }))),
+      h("div", { class: "grow" }, h("strong", null, words.title), words.text && h("p", { class: "muted small" }, words.text), h("p", { class: "small muted" }, entry.once ? t("attention.hidden.once") : entry.until === 0 ? t("attention.hidden.forever") : t("attention.hidden.until", { date: shortDate(entry.until) }))),
       button(t("attention.hidden.back"), { class: "small", onclick: (e) => back(entry, e.currentTarget) }, "bell"),
     );
   };
@@ -17998,18 +18247,24 @@ function diskDialog(name) {
               h(
                 "span",
                 { class: "with-actions" },
-                v.mounts.length ? h("span", { class: "mono" }, v.mounts[0]) : state.disks.mounting.mountable.includes(v.path) ? button(t("mounting.connect"), { class: "small", onclick: () => (dialog.close(), connectDialog(disk, v)) }) : h("span", { class: "muted" }, t(v.swap ? "mounting.swap" : "disks.notMounted")),
-                canTend(disk, v) && button(t("fsck.go"), { class: "small quiet", onclick: () => (dialog.close(), checkDialog(disk, v)) }),
-                canTend(disk, v) && button(t("mounting.rename"), { class: "small quiet", onclick: () => (dialog.close(), labelDialog(disk, v)) }),
-                v.kind === "part" && disk.volumes.length > 1 && changeable(disk).volumes.includes(v.path) && button(t("mounting.format"), { class: "small quiet", onclick: () => (dialog.close(), formatDialog(disk, v)) }),
-                v.kind === "part" && changeable(disk).volumes.includes(v.path) && RESIZABLE.includes(fsFamily(v.fstype)) && button(t("resize.button"), { class: "small quiet", onclick: () => (dialog.close(), resizeDialog(disk, v)) }),
-                v.kind === "part" && changeable(disk).volumes.includes(v.path) && button(t("partDelete.button"), { class: "small quiet", onclick: () => (dialog.close(), deletePartDialog(disk, v)) }),
+                v.mounts.length ? h("span", { class: "mono" }, v.mounts[0]) : !state.disks.mounting.mountable.includes(v.path) && h("span", { class: "muted" }, t(v.swap ? "mounting.swap" : "disks.notMounted")),
+                oneAndMore(
+                  !v.mounts.length && state.disks.mounting.mountable.includes(v.path) ? button(t("mounting.connect"), { class: "small", onclick: () => (dialog.close(), connectDialog(disk, v)) }) : null,
+                  [
+                    canTend(disk, v) && { label: t("fsck.go"), icon: "check", run: () => (dialog.close(), checkDialog(disk, v)) },
+                    canTend(disk, v) && { label: t("mounting.rename"), icon: "edit", run: () => (dialog.close(), labelDialog(disk, v)) },
+                    v.kind === "part" && changeable(disk).volumes.includes(v.path) && RESIZABLE.includes(fsFamily(v.fstype)) && { label: t("resize.button"), icon: "sliders", run: () => (dialog.close(), resizeDialog(disk, v)) },
+                    v.kind === "part" && disk.volumes.length > 1 && changeable(disk).volumes.includes(v.path) && { label: t("mounting.format"), icon: "disk", run: () => (dialog.close(), formatDialog(disk, v)) },
+                    v.kind === "part" && changeable(disk).volumes.includes(v.path) && { label: t("partDelete.button"), icon: "trash", danger: true, run: () => (dialog.close(), deletePartDialog(disk, v)) },
+                  ],
+                  "small",
+                ),
               ),
             ),
           ),
           (state.disks.mounting.free?.[disk.name] ?? 0) > 0 &&
             h("div", { class: "kv" }, h("div", null, h("span", null, t("mounting.unallocated")), h("div", { class: "muted small" }, bytes(state.disks.mounting.free[disk.name]))), h("span", { class: "with-actions" }, button(t("mounting.newPart"), { class: "small", onclick: () => (dialog.close(), formatDialog(disk, null, state.disks.mounting.free[disk.name])) }))),
-          changeable(disk).whole ? h("footer", null, h("span", { class: "muted small" }, t("mounting.formatHint")), button(t("mounting.wipe"), { class: "quiet", onclick: () => (dialog.close(), wipeDialog(disk)) }), button(t("mounting.formatDisk"), { onclick: () => (dialog.close(), formatDialog(disk)) })) : h("p", { class: "muted small" }, t("mounting.blocked." + (state.disks.mounting.blockers[disk.name]?.[0] ?? "mounted"))),
+          changeable(disk).whole ? h("footer", null, h("span", { class: "muted small" }, t("mounting.formatHint")), oneAndMore(button(t("mounting.formatDisk"), { onclick: () => (dialog.close(), formatDialog(disk)) }), [{ label: t("mounting.wipe"), icon: "trash", danger: true, run: () => (dialog.close(), wipeDialog(disk)) }])) : h("p", { class: "muted small" }, t("mounting.blocked." + (state.disks.mounting.blockers[disk.name]?.[0] ?? "mounted"))),
         ),
     );
   };
@@ -18254,7 +18509,7 @@ const RESIZABLE = ["ext4", "btrfs", "xfs", "ntfs"];
 /** Makes a partition larger, into the free room after it, or smaller; its files stay */
 async function resizeDialog(disk, volume) {
   let dialog;
-  const body = h("div", { class: "stack" }, h("p", { class: "muted" }, "…"));
+  const body = h("div", { class: "stack" }, waitMark());
   dialog = openDialog("wide", h("header", null, h("div", { class: "grow" }, h("h2", null, t("resize.title", { name: volume.label || volume.name })), h("p", { class: "muted small" }, [volume.name, volume.fstype, bytes(volume.size), diskTitle(disk)].join(" · "))), closeX(() => dialog)), body);
   let info;
   try {
@@ -18441,6 +18696,18 @@ function labelDialog(disk, volume) {
 function preparedDialog(path) {
   const backups = `${path}/Backups`;
   let dialog;
+  const keepCopies = button(t("mounting.useForBackups"), {
+    class: "primary",
+    onclick: async () => {
+      try {
+        state.settings = await api("PUT", "/api/settings", { backup: { dir: backups } });
+        dialog.close();
+        toast(t("mounting.backupsThere", { path: backups }));
+      } catch (e) {
+        toast(errorText(e), "error");
+      }
+    },
+  });
   dialog = openDialog(
     "confirm",
     h("h2", null, t("mounting.readyTitle")),
@@ -18448,21 +18715,15 @@ function preparedDialog(path) {
     h(
       "footer",
       null,
+      oneAndMore(
+        keepCopies,
+        [
+          { label: t("data.moveHere"), icon: "disk", run: () => (dialog.close(), moveDataDialog(`${path}/DATA`)) },
+          { label: t("disks.fs.browse"), icon: "folder", run: () => (dialog.close(), (location.hash = filesHash(path))) },
+        ],
+        "primary",
+      ),
       closeButton(() => dialog, t("common.close")),
-      h("a", { class: "btn", href: filesHash(path), onclick: () => dialog.close() }, t("disks.fs.browse")),
-      button(t("data.moveHere"), { onclick: () => (dialog.close(), moveDataDialog(`${path}/DATA`)) }),
-      button(t("mounting.useForBackups"), {
-        class: "primary",
-        onclick: async () => {
-          try {
-            state.settings = await api("PUT", "/api/settings", { backup: { dir: backups } });
-            dialog.close();
-            toast(t("mounting.backupsThere", { path: backups }));
-          } catch (e) {
-            toast(errorText(e), "error");
-          }
-        },
-      }),
     ),
   );
 }
@@ -18651,18 +18912,43 @@ function copyInDialog(disk) {
 function disconnectDialog(mount) {
   const removable = state.disks.disks.some((d) => d.name === mount.disk && (d.removable || d.transport === "usb"));
   const slot = h("div");
+  const what = h("div", { class: "stack" }, waitMark());
   let dialog;
-  const go = button(t(removable ? "mounting.eject" : "mounting.disconnect"), { class: "primary" });
+  const go = button(t(removable ? "mounting.eject" : "mounting.disconnect"), { class: "primary", disabled: true });
   go.onclick = diskAction(
     () => dialog,
     slot,
-    () => api("POST", "/api/disks/disconnect", { path: mount.path }),
+    () => api("POST", "/api/disks/disconnect", { path: mount.path, stop: true }),
     () => {
       dialog.close();
       toast(t(removable ? "mounting.ejected" : "mounting.disconnected", { path: mount.path }));
     },
   );
-  dialog = openDialog("confirm", h("h2", null, t(removable ? "mounting.ejectTitle" : "mounting.disconnectTitle", { path: mount.path })), h("p", { class: "muted" }, t(removable ? "mounting.ejectLead" : "mounting.disconnectLead")), slot, h("footer", null, closeButton(() => dialog, t("common.cancel")), go));
+  dialog = openDialog("confirm", h("h2", null, t(removable ? "mounting.ejectTitle" : "mounting.disconnectTitle", { path: mount.path })), h("p", { class: "muted" }, t(removable ? "mounting.ejectLead" : "mounting.disconnectLead")), what, slot, h("footer", null, closeButton(() => dialog, t("common.cancel")), go));
+  // what stands on the folder is said before it is taken away; what keeps files open there is stopped first
+  const ICON = { app: "box", tvPlaying: "tv", musicPlaying: "music", tvFolder: "tv", pin: "folder", favorite: "star", share: "share" };
+  const line = (use) => h("li", { class: "disk-uses-item" }, icon(ICON[use.kind]), h("span", { class: "grow" }, h("span", { class: "strong" }, t("disks.use." + use.kind, { name: use.name })), h("span", { class: "muted small mono wrap" }, use.path)));
+  void api("GET", `/api/disks/uses?path=${encodeURIComponent(mount.path)}`).then(
+    ({ holds, uses }) => {
+      if (!dialog.isConnected) return;
+      if (holds) return put(what, h("p", { class: "error", role: "alert" }, t("error." + holds)));
+      const stopped = uses.filter((use) => use.kind === "tvPlaying" || use.kind === "musicPlaying" || (use.kind === "app" && use.running));
+      const left = uses.filter((use) => !stopped.includes(use));
+      put(
+        what,
+        stopped.length > 0 && h("div", { class: "stack" }, h("strong", null, t("disks.use.stopped")), h("ul", { class: "disk-uses" }, stopped.map(line))),
+        left.length > 0 && h("div", { class: "stack" }, h("strong", null, t("disks.use.left")), h("ul", { class: "disk-uses" }, left.map(line))),
+        uses.some((use) => use.kind === "app") && h("p", { class: "banner" }, t("disks.use.appsNote")),
+        !uses.length && h("p", { class: "muted small" }, t("disks.use.none")),
+      );
+      if (stopped.length) go.lastChild.textContent = t(removable ? "disks.use.stopEject" : "disks.use.stopDisconnect");
+      go.disabled = false;
+    },
+    (e) => {
+      put(what, h("p", { class: "error", role: "alert" }, errorText(e)));
+      go.disabled = false;
+    },
+  );
 }
 
 let disksTimer = 0;
@@ -18734,7 +19020,7 @@ function smartLimitsDialog(limits) {
 
 function storageSection(section = "storage") {
   const data = state.disks;
-  if (!data) return [h("p", { class: "muted" }, "…")];
+  if (!data) return [waitMark()];
   const error = h("p", { class: "error", role: "alert" });
   const busy = (label, done) => async (e) => {
     const el = e.currentTarget;
@@ -18762,6 +19048,8 @@ function storageSection(section = "storage") {
     );
   }
 
+  // the folders of a disk that Hata connected itself and that are no branch of a merged folder: those it can disconnect
+  const ourMounts = (disk, mounts) => mounts.filter((path) => state.disks.mounting?.ours[path] && !Object.values(state.disks.mounting?.pools ?? {}).some((folders) => folders.includes(path)));
   const row = (disk) => {
     const mounted = disk.volumes.filter((v) => v.total != null);
     const total = mounted.reduce((n, v) => n + v.total, 0);
@@ -18775,8 +19063,8 @@ function storageSection(section = "storage") {
       h("td", null, healthChip(disk)),
       h("td", { class: "num" + (hot ? " bad" : "") }, disk.smart?.temperature != null ? disk.smart.temperature + " °C" : "—"),
       h("td", null, total ? usageBar(used, total) : h("span", { class: "muted" }, "—")),
-      h("td", { class: "mono" }, mounts.length ? mounts.map((m) => h("div", { class: "clip" }, m)) : h("span", { class: "muted" }, t("disks.notMounted"))),
-      h("td", null, h("div", { class: "row-actions" }, canPrepare(disk) && !mounts.length && !canConnect(disk).length && button(t("mounting.format"), { class: "small", onclick: (e) => (e.stopPropagation(), formatDialog(disk)) }), (disk.removable || disk.transport === "usb") && state.disks.mounting?.possible && disk.volumes.some((v) => v.fstype && v.mounts.length > 0) && button(t("copyin.button"), { class: "small", onclick: (e) => (e.stopPropagation(), copyInDialog(disk)) }, "download"), canConnect(disk).length > 0 && button(t("mounting.connect"), { class: "small primary", onclick: (e) => (e.stopPropagation(), connectDialog(disk, canConnect(disk)[0])) }), button(t("disks.details"), { class: "small", onclick: (e) => (e.stopPropagation(), diskDialog(disk.name)) }))),
+      h("td", null, mounts.length ? disk.volumes.flatMap((v) => v.mounts.map((m) => h("div", { class: "mount-line" }, h("span", { class: "mono clip" }, m), v.fstype && h("span", { class: "muted small" }, FS_NAMES[v.fstype] ?? v.fstype)))) : h("span", { class: "muted" }, [t("disks.notMounted"), ...new Set(disk.volumes.filter((v) => v.fstype && !v.swap).map((v) => FS_NAMES[v.fstype] ?? v.fstype))].join(" · "))),
+      h("td", null, h("div", { class: "row-actions" }, foldActions([canPrepare(disk) && !mounts.length && !canConnect(disk).length && button(t("mounting.format"), { class: "small", onclick: (e) => (e.stopPropagation(), formatDialog(disk)) }), (disk.removable || disk.transport === "usb") && state.disks.mounting?.possible && disk.volumes.some((v) => v.fstype && v.mounts.length > 0) && button(t("copyin.button"), { class: "small", onclick: (e) => (e.stopPropagation(), copyInDialog(disk)) }, "download"), canConnect(disk).length > 0 && button(t("mounting.connect"), { class: "small primary", onclick: (e) => (e.stopPropagation(), connectDialog(disk, canConnect(disk)[0])) }), ...ourMounts(disk, mounts).map((path) => button(t(disk.removable || disk.transport === "usb" ? "mounting.eject" : "mounting.disconnect") + (ourMounts(disk, mounts).length > 1 ? " " + path : ""), { class: "small", onclick: (e) => (e.stopPropagation(), disconnectDialog({ path, disk: disk.name })) })), button(t("disks.details"), { class: "small", onclick: (e) => (e.stopPropagation(), diskDialog(disk.name)) })]))),
     );
   };
   const checked = Math.max(0, ...data.disks.map((d) => d.checkedAt ?? 0));
@@ -18827,15 +19115,15 @@ function storageSection(section = "storage") {
       h("div", { class: "grow" }, h("strong", null, t("mounting.found", { disk: diskTitle(disk), size: bytes(disk.size) })), h("p", { class: "muted small" }, holds.length ? t("mounting.foundHolds", { what: holds.map((v) => [v.label, v.fstype].filter(Boolean).join(" · ")).join("; ") }) : t("mounting.foundEmpty"))),
       h(
         "div",
-        { class: "row-actions" },
+        { class: "row-actions" }, foldActions([
         button(t("mounting.ignore"), { class: "small quiet", onclick: async () => setDisks(await api("POST", "/api/disks/ignore", { id: disk.serial || disk.name }).catch(() => state.disks)) }),
         connectable.length > 0 && (disk.removable || disk.transport === "usb") && button(t("copyin.button"), { class: "small primary", onclick: () => copyInDialog(disk) }, "download"),
         connectable.length > 0 && button(t("mounting.connect"), { class: "small", onclick: () => connectDialog(disk, connectable[0]) }),
-        button(t("mounting.format"), { class: "small" + (connectable.length ? "" : " primary"), onclick: () => formatDialog(disk) }),
+        button(t("mounting.format"), { class: "small" + (connectable.length ? "" : " primary"), onclick: () => formatDialog(disk) }),])
       ),
     );
   };
-  if (section === "places") return [state.places ? placesCard(state.places) : h("p", { class: "muted" }, "…")];
+  if (section === "places") return [state.places ? placesCard(state.places) : waitMark()];
   if (section === "protection") {
     return [
       data.working && diskWorkStrip(data.working),
@@ -18947,11 +19235,11 @@ function raidCard(data) {
         null,
         h(
           "div",
-          { class: "row-actions" },
+          { class: "row-actions" }, foldActions([
           !busy && pool.state === "ok" && button(t("raid.check"), { class: "small", onclick: call("/api/disks/raid/check", { id: pool.id, action: "check" }) }, "refresh"),
           stoppable && button(t("raid.stop"), { class: "small", onclick: call("/api/disks/raid/check", { id: pool.id, action: "stop" }) }),
           !busy && pool.kind === "md" && pool.state === "ok" && pool.errors > 0 && button(t("raid.repair"), { class: "small primary", onclick: () => askCall({ title: t("raid.repairTitle", { name: pool.name }), lead: t("raid.repairLead"), label: t("raid.repairGo"), iconName: "refresh" }, "/api/disks/raid/check", { id: pool.id, action: "repair" }) }),
-          !busy && counted && button(t(pool.kind === "md" ? "raid.forget" : "raid.clear"), { class: "small quiet", onclick: () => askCall({ title: t(pool.kind === "md" ? "raid.forgetTitle" : "raid.clearTitle", { name: pool.name }), lead: t(pool.kind === "md" ? "raid.forgetLead" : "raid.clearLead"), label: t(pool.kind === "md" ? "raid.forget" : "raid.clear"), iconName: "x" }, "/api/disks/raid/clear", { id: pool.id }) }),
+          !busy && counted && button(t(pool.kind === "md" ? "raid.forget" : "raid.clear"), { class: "small quiet", onclick: () => askCall({ title: t(pool.kind === "md" ? "raid.forgetTitle" : "raid.clearTitle", { name: pool.name }), lead: t(pool.kind === "md" ? "raid.forgetLead" : "raid.clearLead"), label: t(pool.kind === "md" ? "raid.forget" : "raid.clear"), iconName: "x" }, "/api/disks/raid/clear", { id: pool.id }) }),])
         ),
       ),
     );
@@ -18993,7 +19281,7 @@ function placesCard(data) {
         null,
         h(
           "div",
-          { class: "row-actions" },
+          { class: "row-actions" }, foldActions([
           (!p.mounted || p.away) && button(t("netplace.retry"), { class: "small", onclick: async (e) => {
             e.currentTarget.disabled = true;
             try {
@@ -19004,7 +19292,7 @@ function placesCard(data) {
             }
           } }, "refresh"),
           button(t("netplace.change"), { class: "small", onclick: () => placeDialog(p) }),
-          button(t("netplace.remove"), { class: "small quiet", onclick: () => removePlaceDialog(p) }),
+          button(t("netplace.remove"), { class: "small quiet", onclick: () => removePlaceDialog(p) }),])
         ),
       ),
     );
@@ -20046,7 +20334,7 @@ function sambaCard(done, cancel) {
 
 function sharesSection() {
   const data = state.shares;
-  if (!data) return [h("p", { class: "muted" }, "…")];
+  if (!data) return [waitMark()];
   const error = h("p", { class: "error", role: "alert" });
   if (data.tool === "missing") return [h("section", { class: "card pad" }, h("h2", null, t("shares.tool.missing")), h("p", { class: "muted" }, t("shares.lead")), sambaCard())];
   const host = data.hosts[0] ?? location.hostname;
@@ -20245,7 +20533,7 @@ async function sendToAssistant(text, fresh = false) {
 
 function assistantBody() {
   const chat = assistantUi.chat;
-  if (!assistantUi.config) return [h("p", { class: "muted" }, "…")];
+  if (!assistantUi.config) return [waitMark()];
   if (!assistantUi.config.ready) {
     // asked before there is a model: what it would do, how to give it one, and the question kept for then
     return [
@@ -20503,7 +20791,7 @@ function assistantEvent(event) {
 
 function assistantSection() {
   const config = state.assistant?.config;
-  if (!config) return h("p", { class: "muted" }, "…");
+  if (!config) return waitMark();
   const provider = h("select", null, ["anthropic", "openai"].map((id) => h("option", { value: id, selected: id === config.provider }, t("assistant.provider." + id))));
   const url = h("input", { type: "url", class: "mono", value: config.url, spellcheck: false });
   const urlHint = h("span", { class: "hint" });
@@ -20590,7 +20878,7 @@ function connectWhere(redirect) {
 
 function renderConnect() {
   const { id } = state.route;
-  const box = h("section", { class: "card pad stack-s connect" }, h("p", { class: "muted" }, "…"));
+  const box = h("section", { class: "card pad stack-s connect" }, waitMark());
   shell(box);
   const say = (text) => put(box, h("p", null, text), h("p", null, h("a", { class: "btn", href: "#/settings/agents" }, t("settings.agents"))));
   if (!isAdmin()) return put(box, h("p", null, t("connect.adminOnly")));
@@ -20798,7 +21086,7 @@ function removeAgentKey(key) {
 
 function agentsSection() {
   const keys = state.agents;
-  if (!keys) return h("p", { class: "muted" }, "…");
+  if (!keys) return waitMark();
   const row = (key) =>
     h(
       "div",
@@ -20878,7 +21166,7 @@ function agentsSection() {
 function renderSettings() {
   const ready = state.account && (state.settings || !isAdmin());
   // a tab may hold two sections; the second of a module that is off is simply not there
-  const body = ready ? state.route.sections.flatMap((id, i) => (i && SECTION_MODULE[id] && !hasModule(SECTION_MODULE[id]) ? [] : settingsSection(id))) : h("p", { class: "card pad muted" }, "…");
+  const body = ready ? state.route.sections.flatMap((id, i) => (i && SECTION_MODULE[id] && !hasModule(SECTION_MODULE[id]) ? [] : settingsSection(id))) : waitMark();
   shell(...settingsFrame(state.route.section, body));
 }
 
@@ -20914,7 +21202,27 @@ function areaHead(area, at, { meta = null, metaId = null, actions = null, action
 function serverMeta() {
   const here = treeUi.data?.groups.find((g) => g.kind === "here");
   const up = state.overview?.system?.uptime;
-  return [t("tree.thisServer"), here?.os, here?.address || location.hostname, up ? t("sys.uptime", { time: duration(up) }) : null].filter(Boolean).join(" · ");
+  const line = [t("tree.thisServer"), here?.os, here?.address || location.hostname, up ? t("sys.uptime", { time: duration(up) }) : null].filter(Boolean).join(" · ");
+  const made = hardwareWords(here?.hardware);
+  return made ? h("span", null, line, h("span", { class: "block" }, made)) : line;
+}
+
+/** What a computer is made of, in one line: the processor, cores and threads, the memory and its modules */
+function hardwareWords(hw) {
+  if (!hw) return "";
+  // modules come in whole gigabytes: "8 GB", not "8.0 GB"
+  const round = (n) => bytes(n).replace(/\.0(?= )/, "");
+  const cores = hw.threads ? t(hw.cores === hw.threads ? "hw.cores" : "hw.coresThreads", { cores: hw.cores, threads: hw.threads }) : "";
+  // equal modules are said once: "2 × 8 GB DDR3 1600 MHz"
+  const kinds = new Map();
+  for (const m of hw.modules ?? []) {
+    const words = [round(m.size), m.type, m.speed ? t("hw.mhz", { n: m.speed }) : ""].filter(Boolean).join(" ");
+    kinds.set(words, (kinds.get(words) ?? 0) + 1);
+  }
+  const modules = [...kinds].map(([words, n]) => `${n} × ${words}`).join(", ");
+  const total = (hw.modules ?? []).reduce((sum, m) => sum + m.size, 0) || hw.memory;
+  const memory = total ? t("hw.memory", { size: round(total) }) + (modules ? ` (${modules}${hw.slots > hw.modules.length ? ", " + t("hw.slots", { n: hw.modules.length, all: hw.slots }) : ""})` : "") : "";
+  return [hw.cpu, cores, memory].filter(Boolean).join(" · ");
 }
 const paintServerMeta = () => document.getElementById("server-meta")?.replaceChildren(serverMeta());
 /** The numbers by the tabs of this server: apps, containers, packages that wait */
@@ -20922,8 +21230,60 @@ function serverTabCount(id) {
   const n = id === "apps" ? (state.overview?.apps?.length ?? 0) : id === "containers" ? (incusUi.data?.containers?.length ?? 0) : id === "system" ? (sysUpdates[""]?.list?.length ?? 0) : 0;
   return n > 0 ? h("span", { class: "muted tab-count" }, String(n)) : null;
 }
+/**
+ * The server renamed: one name for the computer itself and for the home network. Opened from the
+ * server's menu and from the card of the name on the home network — one window for both.
+ */
+function renameServerDialog(done) {
+  let dialog;
+  const local = state.settings?.local?.name ?? "";
+  const ending = local.includes(".") ? local.slice(local.indexOf(".")) : ".local";
+  const host = state.overview?.system?.hostname?.split(".")[0] ?? local.split(".")[0] ?? "";
+  const name = h("input", { value: host, maxLength: 253, spellcheck: false, autocapitalize: "none", class: "mono", required: true, "aria-label": t("rename.name") });
+  const will = h("p", { class: "muted small" });
+  const error = h("p", { class: "error", role: "alert" });
+  const typed = () => name.value.trim().toLowerCase();
+  const address = () => (typed().includes(".") ? typed() : typed() + ending);
+  const say = () => (will.textContent = typed() ? t("rename.will", { address: address() }) : "");
+  name.oninput = say;
+  say();
+  // a copy to a network folder is going on: said once, and the next press renames all the same
+  let anyway = false;
+  const save = async (e) => {
+    e.preventDefault();
+    error.textContent = "";
+    const go = e.submitter;
+    if (go) go.disabled = true;
+    try {
+      const said = await api("PUT", "/api/system/name", { name: typed(), anyway });
+      state.settings = said.settings;
+      if (state.overview?.system) state.overview.system.hostname = said.host;
+      dialog.close();
+      toast(t("rename.done", { name: said.host }));
+      // the page was opened by the old name: that address answers no longer
+      if (local && (location.hostname === local || location.hostname.endsWith("." + local)) && said.local !== local) return void setTimeout(() => (location.href = location.href.replace(local, said.local)), 1500);
+      await refresh();
+      done?.();
+    } catch (err) {
+      error.textContent = errorText(err);
+      if (go) go.disabled = false;
+      if (err instanceof ApiError && err.code === "system.renameCopying") {
+        anyway = true;
+        if (go) go.querySelector("span").textContent = t("rename.anyway");
+      }
+    }
+  };
+  dialog = openDialog(
+    "confirm",
+    h("form", { class: "stack", onsubmit: save }, h("h2", null, t("rename.title")), h("p", { class: "muted" }, t("rename.lead")), name, will, local && h("p", { class: "muted small" }, t("rename.old", { address: local })), error, h("footer", null, closeButton(() => dialog, t("common.cancel")), h("button", { type: "submit", class: "btn primary" }, h("span", null, t("rename.save"))))),
+  );
+  name.focus();
+  name.select();
+}
+
 function serverMenu(at) {
   menuAt(at, menuHeader(state.overview?.system?.hostname ?? t("tree.thisServer"), t("tree.thisServer"), "server"), [
+    { label: t("rename.open"), icon: "edit", run: () => renameServerDialog() },
     { label: t("terminal.title"), icon: "terminal", href: "#/terminal" },
     { label: t("area.network"), icon: "network", href: "#/network" },
     { label: t("power.reboot"), icon: "refresh", run: () => serverPowerDialog("reboot") },
@@ -21585,7 +21945,7 @@ function signInLog() {
 function accessTable() {
   const access = state.access;
   const more = state.accessMore;
-  if (!access || !more) return h("p", { class: "card pad muted" }, "…");
+  if (!access || !more) return waitMark();
   const users = access.users;
   const again = () => void loadUsers();
   const fail = (e) => (toast(errorText(e), "error"), again());

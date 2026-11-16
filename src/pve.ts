@@ -454,15 +454,17 @@ export function readNewGuest(input: Record<string, unknown>, o: NewOptions): New
     net = `name=eth0,bridge=${bridge},ip=${cidr![0]},gw=${gw![0]}`;
   }
   const client = input.client !== false;
+  // Docker is a choice of its own: a plain container with Docker and without Hata's client
+  const docker = input.docker === true;
   const family = familyOf(template);
-  if (client && !family) bad("templateNoClient");
+  if ((client || docker) && !family) bad("templateNoClient");
   return {
     node,
     vmid,
     hostname,
     address,
     family,
-    docker: client && input.docker === true,
+    docker,
     client,
     params: {
       vmid,
@@ -1058,7 +1060,7 @@ export function readNewVm(input: Record<string, unknown>, o: NewVmOptions, passw
     // Proxmox wants the keys encoded once more inside the form
     ...(keys.length ? { sshkeys: encodeURIComponent(keys.join("\n") + "\n") } : {}),
   });
-  return { node, vmid, name, from, address, family: imageFamily(source), docker: client && input.docker === true, client, user, password: own || password, ownPassword: !!own, disk, start: client || input.start !== false, params, later };
+  return { node, vmid, name, from, address, family: imageFamily(source), docker: input.docker === true, client, user, password: own || password, ownPassword: !!own, disk, start: client || input.docker === true || input.start !== false, params, later };
 }
 
 /**

@@ -8,7 +8,7 @@
  * - a request that changes something must come from this origin (CSRF) and carry JSON.
  */
 import { existsSync, rmSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { homedir, networkInterfaces } from "node:os";
 import type { Server, ServerWebSocket } from "bun";
 import { recent, record, history } from "./activity";
@@ -16,7 +16,7 @@ import { agentUser, cannotGrant, cleanName, createKey, grantKey, keyOf, listKeys
 import type { Level } from "./agents";
 import { Desk } from "./approvals";
 import { answerCall, assistantConfig, configured as assistantReady, findChat, listChats, ModelError, modelsFor, removeChat, retry as retryAssistant, say as sayToAssistant, shownChat, shownConfig as shownAssistant, stopChat, updateAssistant } from "./assistant";
-import { AppError, appAction, startAfterDisk, startJob, stoppable, stopJob, jobToTell, type Job, installedNames, jobFinished, appEnv, appDetail, appLogs, appIcon, appSettings, appStats, applyCompose, ICON_MIME, MAX_ICON, removeAppIcon, setAppIcon, applySettings, installFromSettings, applyStoreUpdate, composeText, revealLogin, getJob, installCustom, installFromStore, listApps, listJobs, onAppRemoved, planStoreUpdate, refreshAppUrls, removeApp, storeAppDetail, updateNotes, viewOf } from "./apps";
+import { AppError, appAction, startAfterDisk, startJob, stoppable, stopJob, jobToTell, type Job, installedNames, jobFinished, appEnv, appDetail, appLogs, appIcon, appSettings, appStats, applyCompose, ICON_MIME, MAX_ICON, removeAppIcon, setAppIcon, applySettings, installFromSettings, applyStoreUpdate, composeText, revealLogin, getJob, installCustom, installFromStore, listApps, listJobs, onAppRemoved, planStoreUpdate, refreshAppUrls, removeApp, storeAppDetail, updateChanges, updateNotes, viewOf } from "./apps";
 import { certificateStates, challengeResponse, ensureCertificates, isWildcard, loadCertificates, type StoredCertificate } from "./acme";
 import { manualDone, setWildcard, wildcardReport, wildcardTrouble } from "./wildcard";
 import { attention } from "./attention";
@@ -29,7 +29,8 @@ import { APP_NAME_RE, dumpCompose } from "./appform";
 import { findInTrash, trashSizeOn } from "./trash";
 import { discover as discoverPlaces, installFor as installPlaceTools, listPlaces, placesDown, removePlace, retryPlace, savePlace, shares as placeShares } from "./netplaces";
 import { answers, networkMountOf } from "./netroom";
-import { addShare, changeShare, installSamba, listShares, refreshShares, removeShare, shareTrouble } from "./shares";
+import { stayingVersion, updateWords } from "./updatewords";
+import { addShare, changeShare, installSamba, listShares, refreshShares, removeShare, shareTrouble, writingNow } from "./shares";
 import { checkDisks, diskHealth, installTool, listDisks, startDisks, startSelfTest } from "./disks";
 import { lookAtPools, noteTypes, poolCheck, poolClear, PoolError, poolsReport, poolsTrouble } from "./raid";
 import { fills, measureFills, startFills } from "./fills";
@@ -41,7 +42,7 @@ import { checkUpdates, packageUpdates, startSysUpdates, upgrade as upgradeSystem
 import { checkPlan, readPlan, runPlan } from "./diskplan";
 import { ArrayError, arrayReport, arrayTrouble, bringBack, bringBackFile, goneList, lookAgain, rebuild as rebuildParity, repair as repairArray, scrub as scrubArray, setUp as setUpArray, stop as stopArray, sync as syncArray, turnOff as turnOffArray } from "./snapraid";
 import { dockerSpace, dropImage, dropVolume, prune as pruneDocker } from "./dockerspace";
-import { ignoreDisk, unusedDisks, absent, onDiskBack, connectVolume, disconnect, checkVolume, wipeDisk, formatDisk, mergeFolders, mountingReport, relabel, startMounting, partsOf, resizePart, deletePart, type Outcome } from "./mounting";
+import { ignoreDisk, unusedDisks, absent, onDiskBack, connectVolume, disconnect, whyKept, checkVolume, wipeDisk, formatDisk, mergeFolders, mountingReport, relabel, startMounting, partsOf, resizePart, deletePart, type Outcome } from "./mounting";
 import { moveData } from "./movedata";
 import { installPackage } from "./packages";
 import {
@@ -97,7 +98,7 @@ import { addQbit, addTorrents, changeQbit, qbitFound, qbitOfApps, qbitServer, qb
 import { act as haAct, addServer as addHa, allowProxy as haAllowProxy, changeServer as changeHa, discover as discoverHa, entities as haEntities, forgetUser as haForgetUser, homeAssistantTrouble, installUpdate as haInstallUpdate, makeBackup as haMakeBackup, removeServer as removeHa, renameEntity as haRename, server as haServer, servers as haServers, tileStates as haTileStates, visibleTo as haVisibleTo } from "./homeassistant";
 import { sees as haSees } from "./ha";
 import { dockerInfo, type DockerInfo, listContainers, watchEvents } from "./docker";
-import { abortUpload, copyIn, locate, validName, archivePlan, dropFavorites, emptyTrash, favoritesOf, setFavorite, extract as extractArchive, find as findFiles, list as listFiles, makeFile, makeFolder, pinFolder, pinnedFolders, readable, readText, remove as removeFiles, rename as renameFile, restore as restoreFiles, setTrashDays, startTrash, summary as filesSummary, transfer, trash, upload, writeText } from "./files";
+import { abortUpload, copyIn, sizeOf, resumeCopies, locate, validName, archivePlan, dropFavorites, emptyTrash, favoritesOf, setFavorite, extract as extractArchive, find as findFiles, list as listFiles, makeFile, makeFolder, pinFolder, pinnedFolders, readable, readText, remove as removeFiles, rename as renameFile, restore as restoreFiles, setTrashDays, startTrash, summary as filesSummary, transfer, trash, upload, writeText } from "./files";
 import { adoptProject, casaosState, containerDraft, importCount, importList, moveInCasaos, projectDraft, rebuildContainer } from "./import";
 import { accessOf, dropAccess, dropUser, gateTarget, guard, guardsOf, mayOpen, otherPorts, MAX_APP_BODY, page, passToApp, setAccess, startGates, tunnelHandlers } from "./gate";
 import { addName, changeName, domainsReport, nameOf as domainName, onNamesChanged, removeName, upstream as domainUpstream } from "./domains";
@@ -113,6 +114,8 @@ import { instructions as mcpInstructions, tellHttps, TOOLS } from "./mcptools";
 import { moduleOn, modulesOn, modulesReport, setModule, settleModules, startModules } from "./moduleruns";
 import { findForModules } from "./modulefinds";
 import { bluetoothReport, connectDevice as connectBluetooth, disconnectDevice as disconnectBluetooth, endPairing as endBluetoothPairing, forgetDevice as forgetBluetooth, lookAround as lookForBluetooth, pair as pairBluetooth, setPower as setBluetoothPower, startService as startBluetoothService } from "./bluetooth";
+import { diskUses, letGo } from "./diskuses";
+import { renameServer } from "./servername";
 import { musicDo, musicNow, musicReport, playMusic, setMusicOutput, setSpeaker } from "./music";
 import { installTv, playOnTv, remote as tvRemote, keepPicture as keepTvPicture, mediaInfo as tvMediaInfo, streamsHere as tvStreamsHere, mediaStream as tvMediaStream, mediaSubs as tvMediaSubs, setLanguage as setTvLanguage, setPref as setTvPref, setAudio as setTvAudio, setOffset as setTvOffset, setHomeAssistant as setTvHa, setFolders as setTvFolders, setPicture as setTvPicture, switchTv, tvNow, tvReport } from "./television";
 import { moduleOfPath, moduleOfTool } from "./modules";
@@ -129,6 +132,7 @@ import { containerCommand, MAX_BUFFERED_BYTES, shellCommand, TerminalError, Term
 import { MuxError, type Channel } from "./mux";
 import { crossTransfer } from "./machinefiles";
 import { rightsOf } from "./memberfiles";
+import { hardware } from "./hardware";
 import { letMachine, machineRights, machineShares, sharedOnMachines, shareOnMachine } from "./machineusers";
 import { moveApp, moveCheck } from "./moveapp";
 import { backupMachineApp, restoreMachineApp } from "./machinebackup";
@@ -1260,6 +1264,18 @@ async function api(req: Request, url: URL, server: Server<unknown>): Promise<Res
     return json({ ok: true });
   }
 
+  if (path === "/api/system/name" && method === "PUT") {
+    const asked = await body(req);
+    // Samba takes a new name only at a start, and a start cuts whatever is being copied to the folders
+    const writing = asked.anyway === true ? [] : await writingNow();
+    if (writing.length) return fail(409, "system.renameCopying", { file: basename(writing[0]!), count: writing.length });
+    const name = await renameServer(asked.name, user.name);
+    refreshLocalNames();
+    // the network folders are announced under the same name
+    refreshShares();
+    return json({ ...name, settings: publicSettings() });
+  }
+
   if (path === "/api/activity" && method === "GET") {
     const app = url.searchParams.get("app") ?? undefined;
     // the page of the whole history asks for it in parts
@@ -1518,7 +1534,7 @@ async function api(req: Request, url: URL, server: Server<unknown>): Promise<Res
       const guest = guestOfMachine(m.id, macs, m.ip.replace(/^::ffff:/, ""));
       return { ...m, instance: instanceOfMachine(macs, m.info?.hostname ?? m.name)?.name ?? "", guest: guest ? { host: guest.host, id: guest.id } : null };
     });
-    return json(serverTree({ here: { name: system.hostname, os: systemName(), address: homeLinks()[0]?.address ?? "", cpu: system.cpu, memory: system.memory, uptime: system.uptime }, instances, hosts: moduleOn("proxmox") ? pveHosts().map((x) => pveHost(x.id)) : [], machines, version: VERSION }));
+    return json(serverTree({ here: { name: system.hostname, os: systemName(), address: homeLinks()[0]?.address ?? "", cpu: system.cpu, memory: system.memory, uptime: system.uptime, hardware: hardware() }, instances, hosts: moduleOn("proxmox") ? pveHosts().map((x) => pveHost(x.id)) : [], machines, version: VERSION }));
   }
   // music on the server's own speakers
   if (path === "/api/music" && method === "GET") return json(await musicReport());
@@ -1831,9 +1847,17 @@ async function api(req: Request, url: URL, server: Server<unknown>): Promise<Res
     if (may) return refused(may);
     return diskJob("pool", plan.goal, user.name, (log) => runPlan(plan, user.name, log, failureWords));
   }
+  if (path === "/api/disks/uses" && method === "GET") {
+    const folder = url.searchParams.get("path") ?? "";
+    return json({ holds: whyKept(folder), uses: await diskUses(folder) });
+  }
   if (path === "/api/disks/disconnect" && method === "POST") {
     server.timeout(req, 0);
-    return changed(await disconnect(String((await body(req)).path ?? ""), user.name));
+    const data = await body(req);
+    const folder = String(data.path ?? "");
+    // what keeps files open there is stopped first — only once nothing of Hata's own forbids the disconnect
+    if (data.stop === true && !whyKept(folder)) await letGo(folder, user.name);
+    return changed(await disconnect(folder, user.name));
   }
   // every program of the system Hata relies on, in one list
   if (path === "/api/tools" && method === "GET") return json(await toolsReport());
@@ -2270,7 +2294,8 @@ async function api(req: Request, url: URL, server: Server<unknown>): Promise<Res
     if (sub === "storeupdate" && method === "GET") {
       const plan = planStoreUpdate(name);
       if (!plan) return fail(404, "app.noUpdate");
-      return json({ store: plan.store, recorded: plan.recorded, exact: plan.exact, changes: plan.changes, compose: dumpCompose(plan.merged), notes: updateNotes(name, plan, language(url)) });
+      const words = updateWords(plan.current, plan.merged, plan.filesChanged);
+      return json({ store: plan.store, recorded: plan.recorded, exact: plan.exact, changes: plan.changes, words, staying: stayingVersion(plan.merged, words), compose: dumpCompose(plan.merged), notes: updateNotes(name, plan, language(url)), why: updateChanges(name, plan, language(url)) });
     }
     if (sub === "storeupdate" && method === "POST") return json({ job: applyStoreUpdate(name, user.name).id }, 202);
     if (sub === "icon" && method === "GET") {
@@ -2438,7 +2463,7 @@ function filesNamed(paths: unknown): string {
   return (list.length > 3 ? `${names} +${list.length - 3}` : names).slice(0, 300);
 }
 
-async function files(req: Request, url: URL, server: Server<unknown>, by: string, userId: string): Promise<Response | null> {
+async function files(req: Request, url: URL, server: Server<unknown>, by: string, userId: string, follows = true): Promise<Response | null> {
   const path = url.pathname;
   const method = req.method;
   const q = url.searchParams;
@@ -2449,6 +2474,7 @@ async function files(req: Request, url: URL, server: Server<unknown>, by: string
   }
   if (path === "/api/files/raw" && method === "GET") return sendFile(req, q.get("path"), q.get("download") === "1");
   if (path === "/api/files/summary" && method === "POST") return json(await filesSummary((await body(req)).paths));
+  if (path === "/api/files/size" && method === "POST") return json(await sizeOf((await body(req)).path));
   if (path === "/api/files/zip" && method === "GET") {
     const plan = await archivePlan(q.getAll("path"));
     server.timeout(req, 0);
@@ -2491,10 +2517,13 @@ async function files(req: Request, url: URL, server: Server<unknown>, by: string
   }
   if ((path === "/api/files/move" || path === "/api/files/copy") && method === "POST") {
     const data = await body(req);
-    // a large folder takes its time, and more so across disks
+    const job = transfer(data.paths, data.to, path.endsWith("copy"), by);
+    if (!job) return json({ ok: true });
+    // an administrator's page follows the job; a member's has no jobs, so its request waits as before
+    if (follows) return json({ job: job.id }, 202);
     server.timeout(req, 0);
-    await transfer(data.paths, data.to, path.endsWith("copy"));
-    record(path.endsWith("copy") ? "files.copy" : "files.move", { user: by, detail: `${filesNamed(data.paths)} → ${data.to}` });
+    await jobFinished(job);
+    if (job.status !== "done") throw new AppError("files.failed", 500, { code: job.error ?? "" });
     return json({ ok: true });
   }
   // between Hata and a machine, or two machines: a job
@@ -2565,6 +2594,7 @@ async function memberFiles(req: Request, url: URL, server: Server<unknown>, user
     if (path === "/api/files/text" && method === "GET") return !!read(q.get("path"));
     if (path === "/api/files/text" && method === "PUT") return !!write(data.path);
     if (path === "/api/files/summary" && method === "POST") return paths(data.paths).every((p) => rights.need(p, "read", { entry: true }));
+    if (path === "/api/files/size" && method === "POST") return !!rights.need(data.path, "read", { entry: true });
     if (path === "/api/files/zip" && method === "GET") return q.getAll("path").every(read);
     if (path === "/api/files/find" && method === "GET") return !!read(q.get("path"));
     if ((path === "/api/files/folder" || path === "/api/files/file") && method === "POST") return !!write(data.path);
@@ -2590,7 +2620,7 @@ async function memberFiles(req: Request, url: URL, server: Server<unknown>, user
     return false;
   })();
   if (!checked) return fail(403, "auth.forbidden");
-  return (await files(req, url, server, user.name, user.id)) ?? fail(404, "request.notFound");
+  return (await files(req, url, server, user.name, user.id, false)) ?? fail(404, "request.notFound");
 }
 
 /** A machine's files for one who is not an administrator: its folders shared with them, with the rights given */
@@ -3381,6 +3411,7 @@ export async function serve(): Promise<void> {
   startMounting();
   startNetwork();
   startTrash();
+  void resumeCopies();
   scheduleStoreSync();
   scheduleBackups();
   void resumeRestore();

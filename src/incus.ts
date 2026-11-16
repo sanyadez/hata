@@ -154,8 +154,8 @@ export function readNew(input: Record<string, unknown>, taken: string[]): NewCon
     cores: whole(input.cores, 0, 256, "cores"),
     memory,
     autostart: input.autostart !== false,
-    // Docker is put in by the same script as the client
-    docker: client && image.docker !== false && input.docker === true,
+    // Docker is put in by the same script as the client, and without the client too: a plain system with Docker
+    docker: image.docker !== false && input.docker === true,
     client,
     disk,
     network: readNetwork(input.network),

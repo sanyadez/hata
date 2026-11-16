@@ -1366,7 +1366,7 @@ export async function createGuest(id: string, input: Record<string, unknown>, by
       await followTask(h, g.node, await pve<string>(h, "POST", `/nodes/${g.node}/lxc/${g.vmid}/status/start`), log, 2 * 60_000);
       const config = readConfig(await pve<Record<string, unknown>>(h, "GET", `/nodes/${g.node}/lxc/${g.vmid}/config`));
       void look(h, true);
-      if (!g.client) return;
+      if (!g.client && !g.docker) return;
       const address = g.address ?? (await addressOf(h, g.node, g.vmid, log));
       log(`Address: ${address}`);
       // the container's keys as it shows them, kept only when they are the ones Proxmox just made
@@ -1388,10 +1388,11 @@ export async function createGuest(id: string, input: Record<string, unknown>, by
         await Bun.sleep(5000);
       }
       const ssh = ["ssh", "-i", keyFile, "-o", "BatchMode=yes", "-o", "StrictHostKeyChecking=yes", "-o", `UserKnownHostsFile=${known}`, "-o", "LogLevel=ERROR", "-o", "ConnectTimeout=10", `root@${address}`];
-      const { code } = await invite(by);
-      const line = `curl -fsSL ${hata.replace(/\/$/, "")}/client/${code} | sh`;
+      const line = g.client ? `curl -fsSL ${hata.replace(/\/$/, "")}/client/${(await invite(by)).code} | sh` : "";
       const before = new Set(machines().map((m) => m.id));
       if ((await logged([...ssh, "sh", "-s"], log, setupScript(g, line, key))) !== 0) throw new AppError("pve.setupFailed", 409, { address });
+      // Docker alone: there is no machine to wait for
+      if (!g.client) return;
       log("Waiting for the machine to connect");
       for (let i = 0; i < 60; i++) {
         // the new machine of this line: the client names itself by the container's host name
@@ -1451,7 +1452,7 @@ export async function createVm(id: string, input: Record<string, unknown>, by: s
       if (!g.start) return;
       log("Starting");
       await followTask(h, g.node, await pve<string>(h, "POST", `${path}/status/start`), log, 2 * 60_000);
-      if (!g.client) return;
+      if (!g.client && !g.docker) return;
       const config = readConfig(await pve<Record<string, unknown>>(h, "GET", `${path}/config`));
       // the console from the first moment: the system's start is seen in the log
       const con = await consoleOf(h, { node: g.node, type: "qemu", vmid: g.vmid, name: g.name } as Guest, 160, 40);
@@ -1465,14 +1466,15 @@ export async function createVm(id: string, input: Record<string, unknown>, by: s
           t.type("sudo -i\r");
           if (!(await t.until(/# $/, 30_000, mark))) throw new AppError("pve.noSudo", 409, { name: g.name });
         }
-        const { code } = await invite(by);
+        const line = g.client ? `curl -fsSL ${hata.replace(/\/$/, "")}/client/${(await invite(by)).code} | sh` : "";
         const before = new Set(machines().map((m) => m.id));
         t.speak();
-        if ((await t.run(vmSetupLine(g, `curl -fsSL ${hata.replace(/\/$/, "")}/client/${code} | sh`), 30 * 60_000)) !== 0) throw new AppError("pve.setupFailed", 409, { address: g.name });
+        if ((await t.run(vmSetupLine(g, line), 30 * 60_000)) !== 0) throw new AppError("pve.setupFailed", 409, { address: g.name });
         t.type("exit\r");
         await Bun.sleep(300);
         if (prompt === "$") t.type("exit\r");
         await Bun.sleep(500);
+        if (!g.client) return;
         log("Waiting for the machine to connect");
         for (let i = 0; i < 60; i++) {
           const fresh = machines().find((m) => !before.has(m.id) && (m.info?.hostname === g.name || (m.info?.macs ?? []).some((c) => config.macs.includes(c.mac.toLowerCase()))));

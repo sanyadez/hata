@@ -241,6 +241,13 @@ export async function musicReport(): Promise<MusicReport> {
   return { ...base, running: true, now: nowOf({ idle, path, title, metadata, position, duration, paused }), queue: queueOf(playlist), volume: speaker || typeof volume !== "number" ? base.volume : Math.round(volume), muted: muted === true };
 }
 
+/** The files of this server in the player's queue while it plays; none — it is silent */
+export async function musicPaths(): Promise<string[]> {
+  if (!sock || (await get("idle-active")) !== false) return [];
+  const playlist = await get("playlist");
+  return Array.isArray(playlist) ? playlist.map((one) => String((one as { filename?: unknown })?.filename ?? "")).filter((path) => path.startsWith("/")) : [];
+}
+
 /** What the head of the page shows while music plays; null — nothing does */
 export async function musicNow(): Promise<{ title: string; paused: boolean } | null> {
   if (!sock) return null;
