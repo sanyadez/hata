@@ -2062,3 +2062,6 @@ button.mark:hover { border-color: var(--border-strong); color: var(--text); }
   .attention-item:has(.row-actions) { cursor: pointer; }
   .attention-item > .row-actions { display: none; }
 }
+.sub-row > td:first-child { padding-left: 44px; }
+/* the tabs of a computer, a container, a guest and a Proxmox server say it in words, like every section's */
+:is(#machine-head, #instance-head, #guest-head, #pve-head) .tab > .ico { display: none; }

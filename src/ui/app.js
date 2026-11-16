@@ -414,7 +414,8 @@ function parseRoute() {
   if ((parts[0] === "users" || (parts[0] === "settings" && parts[1] === "users")) && isAdmin()) return areaRoute("settings", "users", parts[0] === "users" ? parts[1] : parts[2]);
   if (parts[0] === "import" && isAdmin()) return { view: "import" };
   if (parts[0] === "terminal" && isAdmin()) return { view: "terminal" };
-  if (parts[0] === "assistant" && isAdmin()) return { view: "assistant" };
+  // the assistant is a window over any page, not a page: its old address opens it over Home
+  if (parts[0] === "assistant" && isAdmin()) return { view: "home", hash: "#/", assistant: true };
   if (parts[0] === "ha" && parts[1] && isAdmin()) return { view: "ha", id: parts[1], hash: `#/house/ha/${parts[1]}` };
   if (parts[0] === "qbit" && parts[1] && isAdmin()) return { view: "qbit", id: parts[1] };
   if (parts[0] === "frigate" && parts[1] && isAdmin()) return { view: "frigate", id: parts[1], hash: `#/house/cameras/${parts[1]}` };
@@ -434,6 +435,8 @@ function parseRoute() {
   if (parts[0] === "containers" && isAdmin()) return areaRoute("server", "containers", parts[1]);
   if (parts[0] === "proxmox" && parts[1] && isAdmin()) return { view: "proxmox", id: parts[1], tab: PVE_TABS.includes(parts[2]) ? parts[2] : "overview" };
   if (parts[0] === "machines" && isAdmin()) return parts[1] ? { view: "machine", id: parts[1], tab: machineTab(parts[2]) } : { view: "machines" };
+  // an app of another computer: its own page, like any app's
+  if (parts[0] === "apps" && parts[1]?.includes("@") && isAdmin()) return { view: "mapp", name: parts[1].split("@")[0], machine: parts[1].split("@")[1] };
   if (parts[0] === "apps" && parts[1]) return { view: "app", name: parts[1], tab: isAdmin() && ["settings", "logs", "compose", "backups", "terminal"].includes(parts[2]) ? parts[2] : "overview" };
   if (parts[0] === "settings") {
     // a section that moved out of Settings is found where it lives now: its old address still leads to it
@@ -534,7 +537,7 @@ const showsSection = (id) => state.route.view === "settings" && state.route.sect
 function areaOf(route = state.route) {
   const view = route.view;
   if (view === "settings") return route.area === "server" ? "machines" : route.area;
-  if (["apps", "store", "import", "app"].includes(view)) return "apps";
+  if (["apps", "store", "import", "app", "mapp"].includes(view)) return "apps";
   if (["files", "trash", "myhata"].includes(view)) return "files";
   if (["machines", "machine", "server", "proxmox", "containers", "instance", "guest", "terminal"].includes(view)) return "machines";
   if (view === "qbit") return route.house || !torrentsApp(route.id) ? "house" : "apps";
@@ -594,6 +597,7 @@ function onRoute() {
   if (state.route.view === "guest") void loadContainers();
   if (["server", "containers"].includes(state.route.view) || state.route.area === "server") void loadTree();
   if (state.route.view !== "settings") settingsUi.find = "";
+  if (state.route.assistant && hasModule("assistant")) openAssistant();
   window.scrollTo(0, 0);
 }
 window.addEventListener("hashchange", onRoute);
@@ -1046,7 +1050,7 @@ const isAdmin = () => state.user?.role === "admin" && !state.user.mustTwoFactor;
 const hasModule = (id) => !state.modules || state.modules[id] === true;
 /** The sections of Settings and the pages that are a module's */
 const SECTION_MODULE = { protection: "raid", places: "netplaces", shares: "shares", remote: "remote", ports: "domains", dns: "dns", adblock: "adblock", integrations: "integrations", agents: "assistant", assistant: "assistant" };
-const VIEW_MODULES = { machine: ["machines"], proxmox: ["proxmox"], guest: ["proxmox"], containers: ["containers"], instance: ["containers"], integrations: ["integrations"], ha: ["integrations"], qbit: ["integrations"], frigate: ["integrations"], assistant: ["assistant"], connect: ["assistant"], tv: ["tv"] };
+const VIEW_MODULES = { mapp: ["machines"], machine: ["machines"], proxmox: ["proxmox"], guest: ["proxmox"], containers: ["containers"], instance: ["containers"], integrations: ["integrations"], ha: ["integrations"], qbit: ["integrations"], frigate: ["integrations"], assistant: ["assistant"], connect: ["assistant"], tv: ["tv"] };
 /** Files are an administrator's, and theirs with whom a folder is shared — only those folders then */
 const mayFiles = () => isAdmin() || !!state.user?.files;
 /** The folders shared with one who is not an administrator, of this server or of a machine; null for an administrator */
@@ -1295,6 +1299,7 @@ function render() {
   if (view === "store") return renderStore();
   if (view === "apps") return renderApps();
   if (view === "server") return renderServer();
+  if (view === "mapp") return renderMachineApp();
   if (view === "settings") return renderSettings();
   if (view === "files") return renderFiles();
   if (view === "trash") return renderTrash();
@@ -1304,14 +1309,12 @@ function render() {
   if (view === "users") return renderUsers();
   if (view === "import") return renderImport();
   if (view === "terminal") return renderTerminal();
-  if (view === "assistant") return renderAssistant();
   if (view === "tv") return renderTv();
   if (view === "machines") return renderMachines();
   if (view === "machine") return renderMachine();
   if (view === "proxmox") return renderPve();
   if (view === "containers") return renderContainers();
   if (view === "ha") return renderHa();
-  if (view === "integrations") return renderIntegrations();
   if (view === "qbit") return renderQbit();
   if (view === "frigate") return renderFrigate();
   if (view === "instance") return renderInstance();
@@ -3181,6 +3184,45 @@ function appTorrentsCard(app) {
   return q && h("section", { class: "card pad section-head" }, h("div", null, h("h2", null, t("qbit.title")), h("p", { class: "muted small" }, q.online ? `${qbitSpeeds(q)} · ${t("qbit.activeOf", { n: q.active, total: q.total })}` : t("qbit.offline"))), h("a", { class: "btn small", href: `#/qbit/${q.id}` }, icon("download"), h("span", null, t("common.open"))));
 }
 
+/** A line that leads to the one table of access, for the places that show or change a part of it */
+const accessLink = () => h("p", { class: "muted small" }, t("access.givenAt"), " ", h("a", { class: "link", href: "#/settings/users/access", onclick: (e) => e.currentTarget.closest("dialog")?.close() }, `${t("area.settings.users")} → ${t("users.part.access")}`));
+
+/** Who opens the app and whether Hata's sign-in stands in front of it: said here, given in the one table of access */
+const appAccess = { name: "", at: 0, data: null };
+function appAccessCard(app) {
+  if (!isAdmin()) return null;
+  const box = h("section", { class: "card pad stack-s" });
+  const paint = () => {
+    const a = appAccess.data;
+    const users = a?.users ?? [];
+    const save = (patch) =>
+      api("PUT", `/api/apps/${app.name}/access`, { protect: a.protect, allowed: a.allowed, ...patch }).then(
+        (res) => ((appAccess.at = 0), res.job ? jobDialog(res.job, "apply", app.title, ask) : ask()),
+        (e) => (toast(errorText(e), "error"), (appAccess.at = 0), ask()),
+      );
+    const who = !a ? "…" : a.allowed === "all" ? t("access.everyone") : users.filter((u) => a.allowed.includes(u.id)).map((u) => u.name).join(", ") || t("app.accessAdmins");
+    put(
+      box,
+      h("div", { class: "section-head" }, h("h2", null, t("app.access")), h("a", { class: "link small", href: "#/settings/users/access" }, t("users.part.access"), " →")),
+      h("div", { class: "kv" }, h("span", { class: "muted" }, t("app.accessWho")), h("span", null, who)),
+      a && h("label", { class: "check" }, h("input", { type: "checkbox", checked: a.protect, disabled: !!a.cannotProtect, onchange: (e) => save({ protect: e.target.checked }) }), h("span", null, h("strong", null, t("access.signIn")), h("span", { class: "muted small block" }, a.cannotProtect ? t("access.cannot." + a.cannotProtect) : a.protect ? t("app.accessGuarded") : t("access.onlyHidden")))),
+      // sign-in stands in front of the web port; the app's other ports are listed so that nobody takes them for closed
+      a?.protect && a.others.length > 0 && h("div", { class: "muted small other-ports" }, t("access.others"), a.others.map((o) => h("label", null, h("input", { type: "checkbox", checked: o.guarded, onchange: (e) => save({ ports: a.others.filter((x) => (x.port === o.port ? e.target.checked : x.guarded)).map((x) => x.port) }) }), String(o.port)))),
+    );
+  };
+  const ask = async () => {
+    const all = await api("GET", `/api/access?lang=${state.lang}`).catch(() => null);
+    const mine = all?.apps.find((x) => x.name === app.name && !x.machine);
+    Object.assign(appAccess, { name: app.name, at: Date.now(), data: mine ? { ...mine, users: all.users } : null });
+    if (box.isConnected) paint();
+  };
+  // the page is redrawn with every tick of the numbers: what was asked a moment ago is shown as it is
+  if (appAccess.name !== app.name) Object.assign(appAccess, { name: app.name, at: 0, data: null });
+  paint();
+  if (Date.now() - appAccess.at > 15_000) void ask();
+  return box;
+}
+
 function appOverviewTab(app, box) {
   const row = (label, value, mono) => h("div", { class: "kv" }, h("span", { class: "muted" }, label), h("span", { class: mono ? "mono" : "" }, value));
   const statsBox = h("div", { class: "stats card three" }, statCell("app-cpu", "cpu", t("sys.cpu")), statCell("app-memory", "memory", t("sys.memory")), h("div", { class: "stat" }, h("div", { class: "stat-label" }, icon("box"), t("app.containers")), h("div", { class: "stat-row" }, h("div", { class: "stat-value" }, h("strong", null, String(app.containers.filter((c) => c.state === "running").length)), h("span", { class: "unit" }, "/ " + app.containers.length))), h("div", { class: "stat-hint" }, t("status." + app.status))));
@@ -3216,6 +3258,7 @@ function appOverviewTab(app, box) {
         "aside",
         { class: "side" },
         h("section", { class: "card pad" }, h("div", { class: "section-head" }, h("h2", null, t("app.glance"))), app.port && row(t("app.address"), appAddress(app), true), row(t("app.composeFile"), app.composeFile, true), app.folders.map((f, i) => row(i ? "" : t("app.folders"), f, true)), row(t("app.source"), app.store ? t("app.fromStore", { store: app.store }) : t("app.custom")), row(t("app.installed"), new Date(app.installedAt).toLocaleDateString(state.lang, { day: "numeric", month: "short", year: "numeric" }))),
+        appAccessCard(app),
         app.login && h("section", { class: "card pad" }, h("div", { class: "section-head" }, h("h2", null, t("app.login"))), loginBlock(app.login, loginAsker(app.name))),
         app.tips && h("section", { class: "card pad" }, h("div", { class: "section-head" }, h("h2", null, t("app.notes"))), h("div", { class: "tips prose" }, md(app.tips))),
         h("section", { class: "pad-x" }, h("div", { class: "section-head" }, h("h2", null, t("activity.title"))), app.activity.length ? app.activity.slice(0, 6).map(activityItem) : h("p", { class: "muted small" }, t("activity.none"))),
@@ -4824,7 +4867,6 @@ function haEvent(event) {
   clearTimeout(haUi.timer);
   haUi.timer = setTimeout(() => {
     if (state.route.view === "home") void refresh();
-    if (onIntegrations()) void loadIntegrations();
     if (state.route.view === "ha" && state.route.id === event.id) void loadHa();
   }, 600);
 }
@@ -5138,102 +5180,6 @@ function renderHaBody() {
 // Services Hata talks to through their own API. What runs on a machine of its own stays in Servers: these are what a service offers.
 
 const integrationsUi = { found: null, address: "", qbit: null, qbitFound: null, frigate: null, frigateFound: null };
-const onIntegrations = () => state.route.view === "integrations" || (state.route.view === "settings" && showsSection("integrations"));
-
-async function loadIntegrations() {
-  try {
-    [haUi.list, integrationsUi.qbit, integrationsUi.frigate] = await Promise.all([api("GET", "/api/ha"), api("GET", "/api/qbit"), api("GET", "/api/frigate")]);
-    paintIntegrations();
-  } catch (e) {
-    const box = document.getElementById("integrations-body");
-    if (box) put(box, h("p", { class: "card pad muted" }, errorText(e)));
-  }
-}
-
-/** The holder both places show, the menu's page and the section of Settings. What answers on the network is asked once per opening: it takes two seconds. */
-function integrationsBody(titled) {
-  const box = h("div", { id: "integrations-body", class: "stack" });
-  box.dataset.titled = titled ? "1" : "";
-  requestAnimationFrame(() => {
-    paintIntegrations();
-    void loadIntegrations();
-    api("GET", "/api/ha/found").then(
-      ({ found, address }) => (Object.assign(integrationsUi, { found, address }), paintIntegrations()),
-      () => {},
-    );
-    api("GET", "/api/qbit/found").then(
-      ({ found }) => ((integrationsUi.qbitFound = found), paintIntegrations()),
-      () => {},
-    );
-    api("GET", "/api/frigate/found").then(
-      ({ found }) => ((integrationsUi.frigateFound = found), paintIntegrations()),
-      () => {},
-    );
-  });
-  return box;
-}
-
-function renderIntegrations() {
-  go("#/house");
-}
-
-function paintIntegrations() {
-  const box = document.getElementById("integrations-body");
-  const list = haUi.list?.servers;
-  const torrents = integrationsUi.qbit?.servers;
-  const frigates = integrationsUi.frigate?.servers;
-  if (!box || !list || !torrents || !frigates) return;
-  const row = (y) =>
-    h(
-      "tr",
-      { class: "clickable", menu: (at) => haMenu(y, at), onclick: (e) => !e.target.closest("a, button") && go(`#/ha/${y.id}`) },
-      h("td", null, h("div", { class: "strong" }, y.name), h("div", { class: "muted small mono" }, ["Home Assistant", y.version, y.url].filter(Boolean).join(" · "))),
-      h("td", null, haChip(y)),
-      h("td", { class: "small" }, t("ha.counts", { n: y.entities, on: y.on })),
-      h("td", null, h("div", { class: "row-actions" }, h("a", { class: "btn small", href: haWebUrl(y), target: "_blank", rel: "noopener noreferrer" }, icon("external"), h("span", null, t("ha.open"))), h("button", { type: "button", class: "btn small square", "aria-label": t("app.more"), onclick: (e) => haMenu(y, underButton(e.currentTarget)) }, icon("more")))),
-    );
-  const torrentRow = (y) =>
-    h(
-      "tr",
-      { class: "clickable", menu: (at) => qbitMenu(y, at), onclick: (e) => !e.target.closest("a, button") && go(`#/qbit/${y.id}`) },
-      h("td", null, h("div", { class: "strong" }, y.name), h("div", { class: "muted small mono" }, ["qBittorrent", y.version, y.url].filter(Boolean).join(" · "))),
-      h("td", null, qbitChip(y)),
-      h("td", { class: "small" }, y.online ? `${t("qbit.activeOf", { n: y.totals.active, total: y.totals.total })} · ${qbitSpeeds(y.totals)}` : "—"),
-      h("td", null, h("div", { class: "row-actions" }, h("a", { class: "btn small", href: y.url, target: "_blank", rel: "noopener noreferrer" }, icon("external"), h("span", null, t("qbit.open"))), h("button", { type: "button", class: "btn small square", "aria-label": t("app.more"), onclick: (e) => qbitMenu(y, underButton(e.currentTarget)) }, icon("more")))),
-    );
-  const frigateRow = (y) =>
-    h(
-      "tr",
-      { class: "clickable", menu: (at) => frigateMenu(y, at), onclick: (e) => !e.target.closest("a, button") && go(`#/frigate/${y.id}`) },
-      h("td", null, h("div", { class: "strong" }, y.name), h("div", { class: "muted small mono" }, ["Frigate", y.version, y.url].filter(Boolean).join(" · "))),
-      h("td", null, frigateChip(y)),
-      h("td", { class: "small" }, y.online ? t("frigate.workingOf", { n: y.cameras.filter((c) => c.online).length, total: y.cameras.length }) : "—"),
-      h("td", null, h("div", { class: "row-actions" }, h("a", { class: "btn small", href: y.url, target: "_blank", rel: "noopener noreferrer" }, icon("external"), h("span", null, t("frigate.open"))), h("button", { type: "button", class: "btn small square", "aria-label": t("app.more"), onclick: (e) => frigateMenu(y, underButton(e.currentTarget)) }, icon("more")))),
-    );
-  const connected = list.length + torrents.length + frigates.length;
-  const found = integrationsFound(list);
-  put(
-    box,
-    h(
-      "section",
-      { class: "card" },
-      h(
-        "div",
-        { class: "tree-head" },
-        h("div", null, box.dataset.titled ? h("h1", null, t("nav.integrations")) : h("h2", null, t("integrations.connected")), h("p", { class: "meta" }, connected ? t("integrations.lead") : t("integrations.none"))),
-        button(t("integrations.add"), { class: "primary", onclick: (e) => integrationsAddMenu(e.currentTarget) }, "plus"),
-      ),
-      connected > 0 && h("div", { class: "table-wrap" }, h("table", null, h("thead", null, h("tr", null, h("th", null, t("integrations.col.name")), h("th", null, t("app.col.state")), h("th", null, t("integrations.col.inside")), h("th"))), h("tbody", null, list.map(row), torrents.map(torrentRow), frigates.map(frigateRow)))),
-    ),
-    found.length > 0 &&
-      h(
-        "section",
-        { class: "card pad stack-s" },
-        h("div", null, h("h2", null, t("integrations.available")), h("p", { class: "muted small" }, t("integrations.foundLead"))),
-        found.map((f) => h("div", { class: "tool" }, h("span", { class: "app-icon plus sm" }, icon(f.icon)), h("div", { class: "grow" }, h("strong", null, f.name), h("p", { class: "muted small" }, f.kind, " · ", h("span", { class: "mono" }, f.url.replace(/^https?:\/\//, "")))), button(t("integrations.connect"), { onclick: f.connect }, "plus"))),
-      ),
-  );
-}
 
 /** What can be connected and was found: apps of this server first, then what answers on the home network. Everything else is under "Add". */
 function integrationsFound(list) {
@@ -5441,7 +5387,6 @@ function frigateDialog(old = null, address = "") {
       void refresh();
       if (!old) go(`#/frigate/${saved.id}`);
       else if (state.route.view === "frigate") void loadFrigate();
-      else void loadIntegrations();
     } catch (err) {
       if (err.code === "frigate.confirmCert") {
         // the server's own certificate: the person compares it with what the server says, then it is kept
@@ -5651,7 +5596,6 @@ function qbitDialog(old = null, address = "") {
       void refresh();
       if (!old) go(`#/qbit/${saved.id}`);
       else if (state.route.view === "qbit") void loadQbit();
-      else void loadIntegrations();
     } catch (err) {
       error.textContent = errorText(err);
     }
@@ -5784,7 +5728,7 @@ function haProxyCard(x) {
 
 /** Who sees the server's tiles on Home: administrators always; everybody, or the users chosen */
 function haPeopleCard(x) {
-  const card = h("div", { class: "card pad stack-s" }, h("div", { class: "section-head" }, h("h2", null, t("ha.people.title"))), h("p", { class: "muted small" }, t("ha.people.lead")));
+  const card = h("div", { class: "card pad stack-s" }, h("div", { class: "section-head" }, h("h2", null, t("ha.people.title"))), h("p", { class: "muted small" }, t("ha.people.lead")), accessLink());
   const paint = (users) => {
     const others = users.filter((u) => u.role !== "admin");
     let mode = x.people === "all" ? "all" : x.people.length ? "some" : "none";
@@ -5950,7 +5894,6 @@ function haDialog(old = null, address = "") {
       toast(t(old ? "ha.changed" : "ha.added", { name: saved.name }));
       if (!old) go(`#/ha/${saved.id}`);
       else if (state.route.view === "ha") void loadHa();
-      else void loadIntegrations();
     } catch (err) {
       if (err.code === "ha.needCode" || err.code === "ha.badCode") {
         flow = err.detail.flow;
@@ -8168,6 +8111,7 @@ function machinePeopleCard(m) {
       { class: "pad card-head stack-s" },
       h("div", { class: "section-head" }, h("h2", null, t("machines.people.title")), m.people ? h("div", { class: "row-actions" }, button(t("machines.people.share"), { class: "small primary", disabled: !m.online, onclick: () => folderPicker({ title: t("machines.people.pick", { name: m.name }), start: "/", machine: m.id, confirmLabel: t("machines.people.pickHere"), allowed: (at) => at !== "/", action: async (at) => machineShareDialog(m, at) }) }, "share"), button(t("machines.people.off"), { class: "small", onclick: () => letMachineDialog(m, false) })) : button(t("machines.people.on"), { class: "small primary", onclick: () => letMachineDialog(m, true) })),
       h("p", { class: "muted small" }, t(m.people ? "machines.people.onLead" : "machines.people.offLead")),
+      m.people && accessLink(),
       m.people && data && !others.length && h("p", { class: "muted small" }, t("machines.people.nobody")),
     ),
     m.people && data?.shares.length > 0 && h("table", null, h("thead", null, h("tr", null, h("th", null, t("machines.people.col.folder")), h("th", null, t("shares.who")), h("th"))), h("tbody", null, data.shares.map(row))),
@@ -8322,6 +8266,106 @@ async function loadMachineApps() {
   paintMachineApps();
 }
 
+// --- An app of another computer: a page of its own ---------------------------------------------------
+
+const mappUi = { key: "", machine: null, app: null, error: "", timer: 0 };
+
+function renderMachineApp() {
+  const key = `${state.route.name}@${state.route.machine}`;
+  if (mappUi.key !== key) Object.assign(mappUi, { key, machine: null, app: null, error: "" });
+  shell(h("div", { id: "mapp-body", class: "stack" }, h("p", { class: "card pad muted" }, "…")));
+  if (mappUi.app) paintMachineApp();
+  void loadMachineApp();
+  cleanups.push(() => clearTimeout(mappUi.timer));
+}
+
+async function loadMachineApp() {
+  clearTimeout(mappUi.timer);
+  const { name, machine } = state.route;
+  if (state.route.view !== "mapp") return;
+  try {
+    const [m, list] = await Promise.all([api("GET", `/api/machines/${machine}`), api("GET", `/api/machines/${machine}/apps?lang=${state.lang}`)]);
+    if (state.route.view !== "mapp" || state.route.machine !== machine || state.route.name !== name) return;
+    Object.assign(mappUi, { machine: m, app: list.find((a) => a.name === name) ?? null, error: "" });
+  } catch (e) {
+    mappUi.error = errorText(e);
+  }
+  paintMachineApp();
+  mappUi.timer = setTimeout(loadMachineApp, 8000);
+}
+
+function paintMachineApp() {
+  const box = document.getElementById("mapp-body");
+  if (!box) return;
+  const { machine: m, app, error } = mappUi;
+  const crumbs = (title) => h("nav", { class: "crumbs" }, h("a", { href: "#/apps" }, t("nav.apps")), icon("chevron"), h("span", null, title));
+  if (!m || !app) return put(box, h("div", { class: "card pad thing-head" }, crumbs(state.route.name), h("p", { class: "muted" }, error || (m ? t("mapp.gone", { name: m.name }) : "…"))));
+  // a window of this page is open: its words are not redrawn under the person
+  if (document.querySelector("dialog[open]:not(.tv-drop)")) return;
+  const again = () => void loadMachineApp();
+  const busy = !!app.job;
+  const url = isUp(app) ? machineAppUrl(m, app) : null;
+  const act = (action) => async () => {
+    try {
+      const res = await api("POST", `/api/machines/${m.id}/apps/${app.name}/${action}`, {});
+      jobDialog(res.job, action, app.title, again);
+    } catch (e) {
+      toast(errorText(e), "error");
+    }
+    again();
+  };
+  const menu = (at) =>
+    menuAt(at, menuHeader(app.title, m.name, "box"), [
+      busy && { label: t("jobs.showLog"), icon: "logs", run: () => jobDialog(app.job.id, app.job.kind, app.title, again) },
+      isUp(app) && { label: t("app.restart"), icon: "refresh", off: busy, run: act("restart") },
+      { label: t("app.update"), icon: "up", off: busy, run: act("update") },
+      { label: t("app.logs"), icon: "logs", run: () => machineAppLogsDialog(m, app) },
+      { label: t("app.tab.compose"), icon: "code", off: busy, run: () => machineComposeDialog(m, app) },
+      { label: t("machines.move"), icon: "server", off: busy, run: () => moveAppDialog(m.id, app) },
+      { label: t("app.remove"), icon: "trash", danger: true, off: busy, run: () => removeMachineAppDialog(m, app) },
+    ]);
+  const row = (label, value, mono) => h("div", { class: "kv" }, h("span", { class: "muted" }, label), h("span", { class: mono ? "mono" : "" }, value));
+  put(
+    box,
+    h(
+      "div",
+      { class: "card pad thing-head" },
+      crumbs(app.title),
+      h(
+        "div",
+        { class: "app-head", menu },
+        appIcon(app),
+        h("div", { class: "grow" }, h("div", { class: "app-title" }, h("h1", null, app.title), stateChip(app)), h("p", { class: "meta" }, h("a", { href: machineBase(m) }, icon("server"), m.name), app.store && h("span", { class: "dot-sep" }, "·"), app.store)),
+        h(
+          "div",
+          { class: "actions" },
+          url && h("a", { class: "btn primary", href: url, target: "_blank", rel: "noopener noreferrer" }, icon("external"), h("span", null, t("app.open"))),
+          isUp(app) ? button(t("app.stop"), { disabled: busy, onclick: act("stop") }, "stop") : button(t("app.start"), { class: url ? "" : "primary", disabled: busy, onclick: act("start") }, "play"),
+          h("button", { type: "button", class: "btn square", "aria-label": t("app.more"), "aria-haspopup": "menu", onclick: (e) => menu(underButton(e.currentTarget)) }, icon("more")),
+        ),
+      ),
+    ),
+    h(
+      "div",
+      { class: "columns" },
+      h(
+        "div",
+        { class: "stack" },
+        app.containers.length
+          ? h("div", { class: "card table-wrap" }, h("div", { class: "section-head pad-head" }, h("h2", null, t("app.containers"), " ", h("span", { class: "muted" }, String(app.containers.length)))), h("table", null, h("thead", null, h("tr", null, h("th", null, t("app.col.container")), h("th", null, t("app.col.state")))), h("tbody", null, app.containers.map((c) => h("tr", null, h("td", null, h("div", { class: "mono" }, c.name), h("div", { class: "muted small mono clip" }, c.image)), h("td", null, h("span", { class: "state " + (c.state === "running" ? "running" : c.state === "restarting" ? "restarting" : "") }, c.status || c.state)))))))
+          : h("p", { class: "card pad muted" }, t("app.noContainers")),
+      ),
+      h(
+        "aside",
+        { class: "side" },
+        h("section", { class: "card pad" }, h("div", { class: "section-head" }, h("h2", null, t("app.glance"))), row(t("apps.col.machine"), h("a", { class: "link", href: machineBase(m) }, m.name)), (url || app.port) && row(t("app.address"), url ? url.replace(/^https?:\/\//, "").replace(/\/$/, "") : `${m.ip}:${app.port}`, true), app.guarded && row(t("access.signIn"), t("access.through", { port: app.guarded })), accessLink()),
+        app.login && app.login.kind !== "none" && h("section", { class: "card pad" }, h("div", { class: "section-head" }, h("h2", null, t("app.login"))), loginBlock(app.login, loginAsker(app.name, m.id))),
+        app.tips && h("section", { class: "card pad" }, h("div", { class: "section-head" }, h("h2", null, t("app.notes"))), h("div", { class: "tips prose" }, md(app.tips))),
+      ),
+    ),
+  );
+}
+
 /** Where a machine's app answers: the machine's address and the app's port */
 function machineAppUrl(m, app) {
   // behind Hata's sign-in it opens through this server, on a port of its own
@@ -8364,7 +8408,7 @@ function paintMachineApps() {
     return h(
       "tr",
       null,
-      h("td", null, h("div", { class: "with-icon machine-app" }, appIcon(app), h("div", { class: "stack-s" }, h("strong", null, app.title), h("span", { class: "muted small mono" }, app.name + (app.store ? ` · ${app.store}` : ""))))),
+      h("td", null, h("div", { class: "with-icon machine-app" }, appIcon(app), h("div", { class: "stack-s" }, h("a", { class: "strong", href: `#/apps/${app.name}@${m.id}` }, app.title), h("span", { class: "muted small mono" }, app.name + (app.store ? ` · ${app.store}` : ""))))),
       h("td", null, stateChip(app)),
       h("td", { class: "mono small" }, app.guarded && h("span", { class: "lock-mark", title: t("access.protected") }, icon("lock")), url ? h("a", { class: "link", href: url, target: "_blank", rel: "noopener noreferrer" }, url.replace(/^https?:\/\//, "").replace(/\/$/, "")) : app.port ? `${m.ip}:${app.port}` : "—"),
       h(
@@ -9863,19 +9907,37 @@ function renderBackupsBody() {
     h("td", null, h("div", { class: "row-actions" }, button(t("backup.nowShort"), { class: "small", onclick: serverNow }, "archive"), dots([{ label: t("backup.now"), icon: "archive", run: serverNow }, { label: t("backup.serverHowOpen"), icon: "info", href: "#/backups/schedule" }]))),
   );
   const moreData = state.backupsMore;
+  // a Proxmox server and, under it, each of its guests: whether something backs it up — the copies themselves are Proxmox's
   const pveRow = (x) => {
     const left = x.unprotected ?? [];
     const sch = x.schedule;
-    return h(
-      "tr",
-      null,
-      h("td", null, h("div", { class: "with-icon" }, h("span", { class: "app-icon sm plus" }, icon("server")), h("div", { class: "stack-s backup-name" }, h("a", { class: "strong", href: `#/proxmox/${x.id}` }, x.name), h("div", { class: "muted small" }, t("backup.pveWhat", { n: (x.guests ?? []).filter((g) => !g.template).length }))))),
-      h("td", { class: "muted" }, sch?.on ? t("backup.everyDay", { time: sch.time }) : t("backup.pveOwn")),
-      h("td", null, left.length ? h("span", { class: "with-dot warn-text", title: left.map((g) => g.name || g.vmid).join(", ") }, h("i", { class: "dot partial" }), t("backup.pveLeft", { n: left.length })) : h("span", { class: "with-dot" }, h("i", { class: "dot running" }), t("backup.pveAll"))),
-      h("td", { class: "num" }, "—"),
-      h("td", { class: "muted" }, sch?.on ? t("backup.copies", { n: sch.keep }) : "—"),
-      h("td", null, h("div", { class: "row-actions" }, h("a", { class: "btn small", href: `#/proxmox/${x.id}` }, icon("arrow"), h("span", null, t("common.open"))))),
-    );
+    const often = sch?.on ? t("backup.everyDay", { time: sch.time }) : t("backup.pveOwn");
+    const guests = (x.guests ?? []).filter((g) => !g.template);
+    return [
+      h(
+        "tr",
+        null,
+        h("td", null, h("div", { class: "with-icon" }, h("span", { class: "app-icon sm plus" }, icon("server")), h("div", { class: "stack-s backup-name" }, h("a", { class: "strong", href: `#/proxmox/${x.id}` }, x.name), h("div", { class: "muted small" }, t("backup.pveWhat", { n: guests.length }))))),
+        h("td", { class: "muted" }, often),
+        h("td", null, x.unprotected == null ? h("span", { class: "muted" }, "—") : left.length ? h("span", { class: "with-dot warn-text" }, h("i", { class: "dot partial" }), t("backup.pveLeft", { n: left.length })) : h("span", { class: "with-dot" }, h("i", { class: "dot running" }), t("backup.pveAll"))),
+        h("td", { class: "num" }, "—"),
+        h("td", { class: "muted" }, sch?.on ? t("backup.copies", { n: sch.keep }) : "—"),
+        h("td", null, h("div", { class: "row-actions" }, h("a", { class: "btn small", href: `#/proxmox/${x.id}` }, icon("arrow"), h("span", null, t("common.open"))))),
+      ),
+      ...guests.map((g) => {
+        const bare = left.some((y) => y.vmid === g.vmid);
+        return h(
+          "tr",
+          { class: "sub-row" },
+          h("td", null, h("div", { class: "with-icon" }, h("span", { class: "app-icon sm plus" }, icon(g.type === "lxc" ? "box" : "screen")), h("div", { class: "stack-s backup-name" }, h("a", { class: "strong", href: `#/guest/${x.id}/${g.id}` }, g.name || String(g.vmid)), h("div", { class: "muted small" }, guestKind(g))))),
+          h("td", { class: bare ? "warn-text" : "muted" }, x.unprotected == null ? "—" : bare ? t("backup.notBacked") : often),
+          h("td", null, x.unprotected == null ? h("span", { class: "muted" }, "—") : bare ? h("span", { class: "with-dot warn-text" }, h("i", { class: "dot partial" }), t("tree.noBackup")) : h("span", { class: "with-dot muted" }, h("i", { class: "dot running" }), t("backup.pveKept"))),
+          h("td", { class: "num" }, "—"),
+          h("td", { class: "muted" }, "—"),
+          h("td", null, h("div", { class: "row-actions" }, h("a", { class: "btn small", href: `#/guest/${x.id}/${g.id}` }, icon("arrow"), h("span", null, t("common.open"))))),
+        );
+      }),
+    ];
   };
   const haRow = (x) => {
     const list = x.backups ?? [];
@@ -12040,7 +12102,7 @@ const APP_SHOWS = ["all", "running", "stopped", "trouble", "updates"];
 function installedApps() {
   const o = state.overview;
   const here = (o?.apps ?? []).map((app) => ({ app, machine: null, key: app.name, url: isUp(app) ? appUrl(app) : null, address: appAddress(app), page: `#/apps/${app.name}` }));
-  const there = (isAdmin() ? (o?.machineApps ?? []) : []).map((app) => ({ app, machine: app.machine, key: app.key, url: app.status === "running" || app.status === "partial" ? machineAppUrl(app.machine, app) : null, address: app.guarded ? `${location.hostname}:${app.guarded}` : app.port && app.machine.ip ? `${app.machine.ip}:${app.port}` : "", page: `#/machines/${app.machine.id}/apps` }));
+  const there = (isAdmin() ? (o?.machineApps ?? []) : []).map((app) => ({ app, machine: app.machine, key: app.key, url: app.status === "running" || app.status === "partial" ? machineAppUrl(app.machine, app) : null, address: app.guarded ? `${location.hostname}:${app.guarded}` : app.port && app.machine.ip ? `${app.machine.ip}:${app.port}` : "", page: `#/apps/${app.name}@${app.machine.id}` }));
   return [...here, ...there].sort((a, b) => a.app.title.localeCompare(b.app.title));
 }
 const appTrouble = (app) => appState(app) === "restarting" || app.status === "partial" || app.status === "unknown";
@@ -14374,7 +14436,6 @@ function settingsSection(section) {
   if (section === "remote") return remoteSection();
   if (section === "agents") return agentsSection();
   if (section === "assistant") return assistantSection();
-  if (section === "integrations") return integrationsBody(false);
   if (section === "stores") {
     const stores = state.store?.stores ?? [];
     return [
@@ -19510,6 +19571,7 @@ function sharesSection() {
       { class: "card pad" },
       h("h2", null, t("shares.users.title")),
       h("p", { class: "muted" }, t("shares.users.lead")),
+      accessLink(),
       h("p", { class: "muted small" }, t("shares.users.note")),
       data.users.map((user) => settingRow(user.name, t("shares.users.folders", { n: data.shares.filter((share) => share.users[user.id]).length }), user.allowed === false ? h("span", { class: "state" }, t("shares.users.denied")) : h("span", { class: user.ready ? "state running" : "state" }, t(user.ready ? "shares.users.ready" : "shares.users.notReady")))),
     ),
@@ -19760,7 +19822,6 @@ function paintAssistant() {
     listed ? h("strong", { class: "grow ellipsis" }, title) : chats.length > 0 ? h("span", { class: "grow pick" }, pick) : h("strong", { class: "grow" }, t("assistant.title")),
     chat && !listed && tool(t("assistant.newChat"), "plus", fresh),
     chat && tool(t("assistant.forget"), "trash", () => confirmAction({ title: t("assistant.forgetTitle"), lead: t("assistant.forgetLead"), label: t("assistant.forget"), run: forgetAssistantChat })),
-    !paged && tool(t("assistant.asPage"), "external", () => go("#/assistant"), "wide-only"),
     !paged && tool(t(wide ? "assistant.narrow" : "assistant.wide"), wide ? "shrink" : "expand", () => (panel.classList.toggle("wide"), rememberAssistant(), paintAssistant()), "wide-only"),
     !paged && tool(t("assistant.hide"), "down", closeAssistant),
   );
@@ -19820,7 +19881,6 @@ function assistantFab() {
     return;
   }
   if (!isAdmin()) return;
-  leaveAssistantPage();
   if (!assistantUi.fab) {
     assistantUi.fab = h("button", { type: "button", class: "assistant-fab", title: t("assistant.title"), "aria-label": t("assistant.title"), onclick: () => (assistantUi.open ? closeAssistant() : openAssistant()) }, icon("chat"), h("span", { class: "fab-dot", hidden: true }));
     document.body.append(assistantUi.fab);
@@ -19897,33 +19957,6 @@ function openAssistant({ ask, draft, restore } = {}) {
   });
   // a window put back after a reload does not take the keyboard from the page
   if (!restore) input.focus();
-}
-
-/** The assistant as a page of its own: the same window, with the chats on the left */
-function renderAssistant() {
-  const holder = h("div", { class: "assistant-page" });
-  shell(holder);
-  document.getElementById("view").classList.add("fill");
-  const panel = assistantPanel();
-  panel.classList.add("paged");
-  holder.append(panel);
-  panel.hidden = false;
-  assistantUi.open = true;
-  markAssistantFab();
-  paintAssistant();
-  void loadAssistant();
-}
-
-/** Leaving the page of the assistant: its window goes back to floating, closed */
-function leaveAssistantPage() {
-  const panel = assistantUi.panel;
-  if (!panel?.classList.contains("paged") || state.route.view === "assistant") return;
-  panel.classList.remove("paged");
-  panel.hidden = true;
-  document.body.append(panel);
-  assistantUi.open = false;
-  rememberAssistant();
-  markAssistantFab();
 }
 
 function closeAssistant() {
@@ -21110,62 +21143,6 @@ function accessTable() {
         : h("p", { class: "pad-row muted" }, t("access.nothing")),
       h("p", { class: "table-foot muted small" }, t("access.one"), " ", t("access.how")),
     ),
-  ];
-}
-
-/** Who may open what: a row per app, a column per person who is not an administrator */
-function accessMatrix() {
-  const access = state.access;
-  if (!access) return null;
-  const people = access.users.filter((u) => u.role !== "admin");
-  const update = async (app, patch) => {
-    try {
-      const res = await api("PUT", app.machine ? `/api/machines/${app.machine.id}/apps/${app.app}/access` : `/api/apps/${app.name}/access`, { protect: app.protect, allowed: app.allowed, ...patch });
-      if (res.job) jobDialog(res.job, "apply", app.title, () => void loadUsers());
-      else void loadUsers();
-    } catch (e) {
-      toast(errorText(e), "error");
-      void loadUsers();
-    }
-  };
-  // sign-in stands in front of the web port; the app's other ports are listed so that nobody takes them for closed
-  const otherPorts = (app) =>
-    h(
-      "div",
-      { class: "muted small other-ports" },
-      t("access.others"),
-      app.others.map((o) =>
-        h(
-          "label",
-          null,
-          h("input", { type: "checkbox", checked: o.guarded, onchange: (e) => update(app, { ports: app.others.filter((x) => (x.port === o.port ? e.target.checked : x.guarded)).map((x) => x.port) }) }),
-          String(o.port),
-        ),
-      ),
-    );
-  const row = (app) => {
-    const everyone = app.allowed === "all";
-    const list = everyone ? [] : app.allowed;
-    const toggle = (user, on) => {
-      // leaving "every member" starts from the people who could open the app until now
-      const base = everyone ? people.filter((u) => u.role === "member").map((u) => u.id) : list;
-      update(app, { allowed: on ? [...new Set([...base, user.id])] : base.filter((id) => id !== user.id) });
-    };
-    return h(
-      "tr",
-      null,
-      h("td", null, h("div", { class: "with-icon" }, appIcon(app, "sm"), h("div", { class: "stack-s backup-name" }, h("a", { class: "strong", href: app.machine ? `#/machines/${app.machine.id}/apps` : `#/apps/${app.name}` }, app.title), app.machine && h("div", { class: "muted small with-icon" }, icon("server"), app.machine.name, app.protect && app.listen ? ` · ${t("access.through", { port: app.listen })}` : ""), app.cannotProtect === "hostNetwork" && h("div", { class: "muted small" }, t("access.hostOpen")), !everyone && !app.protect && h("div", { class: "muted small" }, t("access.onlyHidden")), app.protect && app.others.length > 0 && otherPorts(app)))),
-      h("td", null, h("input", { type: "checkbox", checked: app.protect, disabled: !!app.cannotProtect, title: app.cannotProtect ? t("access.cannot." + app.cannotProtect) : "", "aria-label": t("access.protectApp", { title: app.title }), onchange: (e) => update(app, { protect: e.target.checked }) })),
-      h("td", null, h("input", { type: "checkbox", checked: everyone, "aria-label": t("access.everyone"), onchange: (e) => update(app, { allowed: e.target.checked ? "all" : people.filter((u) => u.role === "member").map((u) => u.id) }) })),
-      people.map((user) => h("td", null, h("input", { type: "checkbox", checked: everyone ? user.role === "member" : list.includes(user.id), "aria-label": `${user.name}: ${app.title}`, onchange: (e) => toggle(user, e.target.checked) }))),
-    );
-  };
-  return [
-    h("div", { class: "section-head" }, h("h2", null, t("access.title"))),
-    access.apps.length
-      ? h("div", { class: "card table-wrap" }, h("table", { class: "matrix" }, h("thead", null, h("tr", null, h("th", null, t("backup.col.app")), h("th", null, t("access.signIn")), h("th", null, t("access.everyone")), people.map((u) => h("th", null, u.name, u.role === "guest" && h("span", { class: "muted" }, ` · ${t("user.role.guest")}`))))), h("tbody", null, access.apps.map(row))))
-      : h("p", { class: "card pad muted" }, t("backup.noApps")),
-    h("p", { class: "card pad muted small" }, t("access.how")),
   ];
 }
 

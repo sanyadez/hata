@@ -5656,5 +5656,13 @@
   "backup.group.server": "Сервер",
   "backup.machinesLead": "контейнери й віртуальні машини зберігаються цілими й на час копіювання зупиняються",
   "adblock.block.most": "Найчастіше блокує",
-  "grid.editShort": "Упорядкувати"
+  "grid.editShort": "Упорядкувати",
+  "app.access": "Доступ",
+  "app.accessWho": "Відкривають",
+  "app.accessAdmins": "лише адміністратори",
+  "app.accessGuarded": "перед сторінкою застосунку стоїть вхід Hata",
+  "access.givenAt": "Доступ видається в одному місці:",
+  "backup.notBacked": "не копіюється",
+  "backup.pveKept": "копії в Proxmox",
+  "mapp.gone": "На комп'ютері {name} такого застосунку зараз немає."
 }

@@ -5656,5 +5656,13 @@
   "backup.group.server": "Server",
   "backup.machinesLead": "containers and virtual machines are kept whole and stopped meanwhile",
   "adblock.block.most": "Blocked most",
-  "grid.editShort": "Arrange"
+  "grid.editShort": "Arrange",
+  "app.access": "Access",
+  "app.accessWho": "Opened by",
+  "app.accessAdmins": "administrators only",
+  "app.accessGuarded": "Hata's sign-in stands in front of the app's page",
+  "access.givenAt": "Access is given in one place:",
+  "backup.notBacked": "nothing backs it up",
+  "backup.pveKept": "kept in Proxmox",
+  "mapp.gone": "{name} has no such app now."
 }
