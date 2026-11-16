@@ -819,6 +819,9 @@ dialog.xwide textarea.code { min-height: 56dvh; }
 .card-head .section-head { flex-wrap: wrap; }
 .card-head .section-head .small { white-space: nowrap; }
 table.disks td:last-child { padding-left: 0; }
+.mount-line { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
+.mount-line .clip { min-width: 0; }
+.mount-line .small { flex: none; }
 .trash-keep { display: flex; align-items: center; gap: 8px 16px; flex-wrap: wrap; }
 .trash-keep > p { margin: 0; min-width: 240px; }
 table.trash th.tick, table.trash td.tick { width: 1%; padding-right: 0; }
