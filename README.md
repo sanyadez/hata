@@ -31,7 +31,7 @@ It turns a Linux computer — an old PC, a mini PC, a Raspberry Pi, a VM — int
 browser instead of a terminal. You pick an app in the store (Jellyfin, Nextcloud, Home Assistant, Pi-hole
 and well over a hundred more), press "Install", and it runs in Docker. Around the apps Hata does the rest of what
 a home server needs: a Home page with the state of the computer, a file manager, folders shared over the
-network, disks, their health and protection from a disk failure, backups with restore of a whole app or of
+network, disks, their health, RAID, backups with restore of a whole app or of
 single files, the server's own network — Wi-Fi, a backup connection to the internet, an access point —, users and
 who may open what, HTTPS, notifications when something breaks. It also looks after the other computers of
 the house through a small client, makes containers and virtual machines on the server itself, looks after
@@ -94,7 +94,7 @@ Early development. What works today:
 - one-line install: one binary that sets itself up as a systemd service;
 - one-line move from CasaOS: its apps are taken over where they are, with an undo;
 - modules (Settings → Modules): a new server starts with the base — apps, files, backups, users, disks,
-  the network, HTTPS — and the rest is turned on when wanted: RAID and disk protection, network drives,
+  the network, HTTPS — and the rest is turned on when wanted: RAID, network drives,
   network folders, a copy of the backups on another machine, remote access, the DNS server, ad blocking,
   domains and ports, computers, Proxmox, containers and VMs, Home Assistant with cameras and torrents, the
   TV, the assistant and agents. A
@@ -250,7 +250,7 @@ Early development. What works today:
   one go — what for, which disks, which of them holds the parity — with a single confirmation for
   everything that is erased; when a disk the apps keep data on comes back after being away, the apps it
   stopped start again by themselves;
-- protection from a disk failure (SnapRAID, installed on request): one disk holds parity for the
+- RAID with parity (SnapRAID, installed on request): one disk holds parity for the
   others — or two, and any two disks may fail at once —, the disks stay plain disks; a sync every night
   and a check every week; when a disk dies, a new one in its place is filled back from the parity; files
   deleted by mistake since the last sync come back the same way, all of them or one found by its name —
@@ -481,9 +481,9 @@ in Google Drive or Box.
 | ![Network folders (SMB)](screenshots/settings-shares.png) Network folders (SMB) | ![Domains and HTTPS: names for everything](screenshots/settings-https.png) Domains and HTTPS: names for everything |
 | ![Notifications](screenshots/settings-notifications.png) Notifications | ![Agents: access keys for the MCP server](screenshots/settings-agents.png) Agents: access keys for the MCP server |
 | ![About and updates](screenshots/settings-about.png) About and updates | ![Network: interfaces, Wi-Fi, the ways to the internet](screenshots/settings-network.png) Network: interfaces, Wi-Fi, the ways to the internet |
-| ![Protection from a disk failure, arrays and pools](screenshots/settings-protection.png) Protection from a disk failure, arrays and pools | ![Remote access: Tailscale and WireGuard](screenshots/settings-remote.png) Remote access: Tailscale and WireGuard |
+| ![RAID: SnapRAID, arrays and pools](screenshots/settings-protection.png) RAID: SnapRAID, arrays and pools | ![Remote access: Tailscale and WireGuard](screenshots/settings-remote.png) Remote access: Tailscale and WireGuard |
 | ![The assistant: which model it talks to and what it may do](screenshots/settings-assistant.png) The assistant: which model it talks to and what it may do | ![System programs: what Hata relies on, and the system's updates](screenshots/settings-tools.png) System programs: what Hata relies on, and the system's updates |
-| ![Docker: images and volumes, who uses them, what can go](screenshots/settings-docker.png) Docker: images and volumes, who uses them, what can go | ![Setting up RAID: one folder, protection, one confirmation](screenshots/settings-pool.png) Setting up RAID: one folder, protection, one confirmation |
+| ![Docker: images and volumes, who uses them, what can go](screenshots/settings-docker.png) Docker: images and volumes, who uses them, what can go | ![Setting up RAID: one folder, parity, one confirmation](screenshots/settings-pool.png) Setting up RAID: one folder, parity, one confirmation |
 
 | ![Ad blocking: lists, own rules, what was asked](screenshots/settings-adblock.png) Ad blocking: lists, own rules, what was asked | ![The home's DNS server](screenshots/settings-dns.png) The home's DNS server |
 | ![Ports of the server passed on](screenshots/settings-ports.png) Ports of the server passed on | ![Find a setting: sections and cards by name](screenshots/settings-find.png) Find a setting: sections and cards by name |

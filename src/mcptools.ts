@@ -1779,7 +1779,7 @@ const homeRead: Omit<Tool, "level" | "effect">[] = [
   },
   {
     name: "disk_arrays",
-    title: "Arrays and protection from a disk failure",
+    title: "RAID and arrays of the disks",
     description: "How the disks are protected. `protection` is Hata's SnapRAID: its disks, the last sync and check, how many files changed and are not protected yet, damage found, why a sync is held. `pools` are the arrays the system already has (md RAID, ZFS, btrfs over several disks): state, each disk's state, a check running, errors. For the health of the disks themselves use `disks`. Disks are formatted and arrays changed only in the web UI.",
     input: {},
     run: () =>
