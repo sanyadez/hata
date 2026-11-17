@@ -60,7 +60,7 @@ const SPECS: Spec[] = [
   { id: "btrfs-progs", name: "btrfs-progs", package: "btrfs-progs", bin: "mkfs.btrfs", version: ["btrfs", "--version"], page: "#/settings/storage" },
   { id: "xfsprogs", name: "xfsprogs", package: "xfsprogs", bin: "mkfs.xfs", version: ["mkfs.xfs", "-V"], page: "#/settings/storage" },
   { id: "mergerfs", name: "mergerfs", package: "mergerfs", bin: "mergerfs", version: ["mergerfs", "--version"], page: "#/settings/storage" },
-  { id: "snapraid", name: "SnapRAID", package: "snapraid", bin: "snapraid", version: ["snapraid", "--version"], page: "#/settings/protection" },
+  { id: "snapraid", name: "SnapRAID", package: "snapraid", bin: "snapraid", version: ["snapraid", "--version"], page: "#/storage/raid" },
   { id: "cifs-utils", name: "cifs-utils", package: "cifs-utils", bin: "mount.cifs", version: ["mount.cifs", "-V"], page: "#/settings/places" },
   { id: "smbclient", name: "smbclient", package: "smbclient", bin: "smbclient", version: ["smbclient", "--version"], page: "#/settings/places" },
   { id: "nfs-common", name: "nfs-common", package: "nfs-common", bin: "mount.nfs", version: ["mount.nfs", "-V"], page: "#/settings/places" },

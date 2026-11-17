@@ -1760,7 +1760,7 @@ const homeRead: Omit<Tool, "level" | "effect">[] = [
   },
   {
     name: "shares",
-    title: "Network folders",
+    title: "Shared folders",
     description: "The folders of this server shared over the network (SMB): each one's path, who may read or write it by the Hata user's name, what a guest may, and whether the folder is there. Also whether Samba runs, why not, the names the server is reached by, and which users cannot connect yet because Samba has not learned their password (it does at their next sign-in to Hata). Sharing is changed in the web UI.",
     input: {},
     run: () =>
@@ -1779,7 +1779,7 @@ const homeRead: Omit<Tool, "level" | "effect">[] = [
   },
   {
     name: "disk_arrays",
-    title: "Arrays and protection from a disk failure",
+    title: "RAID and arrays of the disks",
     description: "How the disks are protected. `protection` is Hata's SnapRAID: its disks, the last sync and check, how many files changed and are not protected yet, damage found, why a sync is held. `pools` are the arrays the system already has (md RAID, ZFS, btrfs over several disks): state, each disk's state, a check running, errors. For the health of the disks themselves use `disks`. Disks are formatted and arrays changed only in the web UI.",
     input: {},
     run: () =>

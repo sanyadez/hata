@@ -58,6 +58,8 @@ test("smbConf: the whole of Samba's configuration, nothing on but what Hata offe
   const conf = smbConf([], [ANNA]);
   expect(isOurs(conf)).toBe(true);
   expect(isOurs("[global]\n   workgroup = HOME\n")).toBe(false);
+  // one written before the folders moved to Storage still counts
+  expect(isOurs("# Written by Hata from its settings (Settings → Network folders).\n[global]\n")).toBe(true);
   expect(section(conf, "global")).toContain("map to guest = Never");
   expect(section(conf, "global")).toContain("username map = /etc/samba/hata-users.map");
   expect(section(conf, "global")).toContain("load printers = no");

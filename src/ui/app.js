@@ -478,7 +478,7 @@ const AREAS = {
     { id: "disks", sections: ["storage"], tab: "disks" },
     { id: "fs", sections: ["storage"], tab: "fs" },
     { id: "fills", sections: ["storage"], tab: "fills" },
-    { id: "protection", sections: ["protection"] },
+    { id: "raid", sections: ["protection"] },
     { id: "shares", sections: ["shares"] },
     { id: "places", sections: ["places"] },
   ],
@@ -539,6 +539,7 @@ function sectionHash(section) {
 }
 
 function areaRoute(area, id, rest) {
+  if (area === "storage" && id === "protection") id = "raid"; // the tab was called Protection until 0.32
   const tab = AREAS[area].find((x) => x.id === id && !x.link && (x.sections ? tabAllowed(x) : tabShown(x))) ?? areaTabs(area)[0];
   if (!tab) return { view: "home" };
   // the containers of this server keep their own two parts: the list and what they stand on
@@ -2647,7 +2648,7 @@ function attentionItem(item) {
     item.code === "update" && open("#/settings/about"),
     item.code === "disk.trash" && open("#/trash", t("trash.title")),
     (item.code === "raid.errors" || item.code === "raid.mismatch") && doIt(t("raid.check"), "refresh", () => api("POST", "/api/disks/raid/check", { id: item.detail.id, action: "check" })),
-    (item.code.startsWith("array.") || item.code.startsWith("raid.")) && open("#/settings/protection"),
+    (item.code.startsWith("array.") || item.code.startsWith("raid.")) && open("#/storage/raid"),
     (item.code.startsWith("smart.") || item.code === "disk.filling") && open("#/settings/storage"),
     (item.code.startsWith("internet.") || item.code === "network.exposed") && open("#/settings/network"),
     item.code.startsWith("share.") && open("#/settings/shares"),
@@ -14634,9 +14635,9 @@ function tvKeepDialog() {
 const MODULE_ICONS = { music: "music", bluetooth: "bluetooth", tv: "tv", raid: "shield", netplaces: "network", shares: "share", offsite: "archive", remote: "globe", dns: "signpost", adblock: "ban", domains: "plug", machines: "server", proxmox: "server", containers: "box", integrations: "link", assistant: "chat" };
 const MODULE_GROUPS = ["storage", "network", "servers", "more"];
 /** Where a module's own things are once it is on */
-const MODULE_HOME = { music: "#/house/music", bluetooth: "#/house/bluetooth", tv: "#/house/tv", raid: "#/settings/protection", netplaces: "#/settings/places", shares: "#/settings/shares", offsite: "#/settings/backups", remote: "#/settings/remote", dns: "#/settings/dns", adblock: "#/settings/adblock", domains: "#/settings/ports", machines: "#/machines", proxmox: "#/machines", containers: "#/containers", integrations: "#/settings/integrations", assistant: "#/settings/assistant" };
+const MODULE_HOME = { music: "#/house/music", bluetooth: "#/house/bluetooth", tv: "#/house/tv", raid: "#/storage/raid", netplaces: "#/settings/places", shares: "#/settings/shares", offsite: "#/settings/backups", remote: "#/settings/remote", dns: "#/settings/dns", adblock: "#/settings/adblock", domains: "#/settings/ports", machines: "#/machines", proxmox: "#/machines", containers: "#/containers", integrations: "#/settings/integrations", assistant: "#/settings/assistant" };
 /** Where the thing that holds a module on is taken away */
-const MODULE_USE_AT = { speaker: "#/house/music", bluetooth: "#/house/bluetooth", tv: "#/tv", array: "#/settings/protection", merged: "#/settings/storage", pools: "#/settings/protection", places: "#/settings/places", shares: "#/settings/shares", offsite: "#/settings/backups", wireguard: "#/settings/remote", tailscale: "#/settings/remote", dnsOn: "#/settings/dns", blocking: "#/settings/adblock", names: "#/settings/https", ports: "#/settings/ports", machines: "#/machines", proxmox: "#/machines", containers: "#/containers", homeAssistant: "#/settings/integrations", qbit: "#/settings/integrations", frigate: "#/settings/integrations", keys: "#/settings/agents" };
+const MODULE_USE_AT = { speaker: "#/house/music", bluetooth: "#/house/bluetooth", tv: "#/tv", array: "#/storage/raid", merged: "#/settings/storage", pools: "#/storage/raid", places: "#/settings/places", shares: "#/settings/shares", offsite: "#/settings/backups", wireguard: "#/settings/remote", tailscale: "#/settings/remote", dnsOn: "#/settings/dns", blocking: "#/settings/adblock", names: "#/settings/https", ports: "#/settings/ports", machines: "#/machines", proxmox: "#/machines", containers: "#/containers", homeAssistant: "#/settings/integrations", qbit: "#/settings/integrations", frigate: "#/settings/integrations", keys: "#/settings/agents" };
 const moduleName = (id) => t(`modules.${id}.name`);
 
 /** Which modules are on, asked again: after a change made here or on another page */

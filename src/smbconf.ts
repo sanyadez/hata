@@ -111,10 +111,11 @@ export function cleanMachineShares(value: unknown): Record<string, MachineShare[
   return out;
 }
 
-const MARK = "# Written by Hata from its settings (Settings → Network folders).";
+const MARK = "# Written by Hata from its settings (Storage → Sharing).";
 
 /** Whether this `smb.conf` is one Hata wrote */
-export const isOurs = (conf: string): boolean => conf.startsWith(MARK);
+// the words in brackets name where the folders are set and have changed over time: only the start counts
+export const isOurs = (conf: string): boolean => conf.startsWith("# Written by Hata from its settings");
 
 /** How the server is called on the network, as Samba is told */
 export interface Server {
