@@ -1109,7 +1109,7 @@ const navItems = () => NAV.filter((item) => (!item.admin || isAdmin()) && (!item
 
 /** Which section of the page an item of "Needs attention" is about, by its code */
 const ATTENTION_AREAS = [
-  [/^(machine|pve|containers|docker|memory|temperature|load)\b/, "machines"],
+  [/^(machine|pve|containers|docker|memory|temperature|load|system)\b/, "machines"],
   [/^(ha|frigate)\b/, "house"],
   [/^(disk|smart|absent|array|raid|share|netplace)\b/, "storage"],
   [/^(offsite|failed\.backup|backup)\b/, "backups"],
@@ -2646,6 +2646,8 @@ function attentionItem(item) {
     item.code === "disk.usb" && isAdmin() && button(t("copyin.button"), { class: "small", onclick: () => ((state.copyInFrom = item.detail.id), go("#/settings/storage")) }, "download"),
     (item.code === "disk.new" || item.code.startsWith("absent")) && isAdmin() && open("#/settings/storage", t("attention.disk.open")),
     item.code === "update" && open("#/settings/about"),
+    item.code === "system.security" && isAdmin() && button(t("attention.system.security.go"), { class: "small", onclick: () => go("#/machines/this/system") }, "up"),
+    item.code === "system.reboot" && isAdmin() && button(t("power.reboot"), { class: "small", onclick: () => serverPowerDialog("reboot") }, "refresh"),
     item.code === "disk.trash" && open("#/trash", t("trash.title")),
     (item.code === "raid.errors" || item.code === "raid.mismatch") && doIt(t("raid.check"), "refresh", () => api("POST", "/api/disks/raid/check", { id: item.detail.id, action: "check" })),
     (item.code.startsWith("array.") || item.code.startsWith("raid.")) && open("#/storage/raid"),
@@ -21589,7 +21591,7 @@ function renderServerBody() {
       "section",
       { class: "card pad stack-s" },
       h("h2", null, t("area.server.system")),
-      fact(t("server.updates"), !updates ? "…" : updates.error ? "—" : updates.list?.length ? t("server.updatesN", { n: updates.list.length }) : t("server.updatesNone")),
+      serverUpdatesLine(updates),
       fact("Docker", o?.docker?.available ? (o.docker.version ?? "—") : t("server.dockerNo")),
       fact("Hata", state.version),
       more("#/machines/this/system", t("server.toSystem")),
@@ -21605,6 +21607,26 @@ function renderServerBody() {
   );
 }
 
+
+/** The line of the System card on this server's overview: how many updates, how many of them for security, a restart */
+function serverUpdatesLine(updates) {
+  const list = updates?.list ?? [];
+  const security = list.filter((p) => p.security).length;
+  const value = !updates
+    ? "…"
+    : updates.error && !updates.at
+      ? "—"
+      : !updates.at
+        ? h("span", { class: "muted" }, t("sysupdates.never"))
+        : list.length
+          ? h("span", { class: "sys-status" }, h("span", { class: "state partial" }, t("server.updatesN", { n: list.length })), security > 0 && h("span", { class: "state restarting" }, t("sysupdates.security", { n: security })))
+          : h("span", { class: "with-icon" }, icon("check"), t("server.updatesNone"));
+  return [
+    h("div", { class: "kv" }, h("span", { class: "muted" }, t("server.updates")), value),
+    updates?.reboot && h("p", { class: "banner small" }, t("sysupdates.reboot")),
+    list.length > 0 && h("div", { class: "actions" }, button(t("server.updatesSee"), { class: "small accent", onclick: () => go("#/machines/this/system") }, "up")),
+  ];
+}
 
 /** "Find a setting" in the head of Settings: sections and cards by the words typed, wherever they live now */
 function settingsFind() {
