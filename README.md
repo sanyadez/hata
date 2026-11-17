@@ -94,8 +94,8 @@ Early development. What works today:
 - one-line install: one binary that sets itself up as a systemd service;
 - one-line move from CasaOS: its apps are taken over where they are, with an undo;
 - modules (Settings → Modules): a new server starts with the base — apps, files, backups, users, disks,
-  the network, HTTPS — and the rest is turned on when wanted: RAID, network drives,
-  network folders, a copy of the backups on another machine, remote access, the DNS server, ad blocking,
+  the network, HTTPS — and the rest is turned on when wanted: RAID, connected drives,
+  shared folders, a copy of the backups on another machine, remote access, the DNS server, ad blocking,
   domains and ports, computers, Proxmox, containers and VMs, Home Assistant with cameras and torrents, the
   TV, the assistant and agents. A
   module that is off shows no page, no setting and runs nothing; turning one on installs nothing on the
@@ -107,7 +107,7 @@ Early development. What works today:
   access, the look, notifications, modules, the assistant, updates), and "Find a setting" finds the rest
   where it lives. Every thing has one place and one address: this server is a computer like the others,
   with its apps, Docker, containers and system programs as tabs; a container or a guest keeps its address
-  when Hata's client is put on it; who opens what — apps, network folders, the computers' folders, Home
+  when Hata's client is put on it; who opens what — apps, shared folders, the computers' folders, Home
   Assistant — is given in one table;
 - the TV (a module): the server's own HDMI screen as a media player — Kodi without a desktop, installed by a
   button. Any video, music or picture of Files is sent there with "Play on the TV", so is a link; the page
@@ -145,7 +145,7 @@ Early development. What works today:
   file, a row of a table — with what can be done to the thing clicked;
 - a name on the home network: Hata answers to `hata.local` and every app to `<app>.hata.local` over
   multicast DNS — nothing to set up on phones, computers or the router; the server is renamed in one window, the computer's
-  own name and the home-network name together (a copy going to a network folder is said first), and
+  own name and the home-network name together (a copy going to a shared folder is said first), and
   one with another ending (`hata.lan`) works too once your router's DNS knows it;
 - terminal in the browser, for administrators: a shell on the server (it keeps running when the page is
   closed and shows the latest output when you come back) and a shell inside a container of an app;
@@ -184,7 +184,7 @@ Early development. What works today:
   on request every way is checked each minute, a spare one takes over while the main has no internet,
   and a way that stops reaching the internet shows up in "needs attention"; an interface the internet
   comes in on (a provider's cable straight in the server) is marked as the outside network, and nothing of
-  the server answers there — the pages, the apps with Docker's ports, the network folders — while an
+  the server answers there — the pages, the apps with Docker's ports, the shared folders — while an
   interface with a public address that is not marked is pointed out;
 - newer images: once a day the registries are asked whether the tags of your apps have moved on, and an
   app with a newer image is marked; on request the running apps are updated by themselves at a set time,
@@ -216,7 +216,7 @@ Early development. What works today:
   address — `s3://bucket/folder` or `sftp://user@host/folder` — fetching the latest snapshots by itself;
 - disks and their health (Storage → Disks): every disk with what it says about itself (SMART) in plain
   words — healthy, wearing out or failing, and why — its temperature, how full it is and where it is
-  mounted; the file systems of the server, network folders included. Health is read every half an hour
+  mounted; the file systems of the server, connected drives included. Health is read every half an hour
   without waking a disk that sleeps, a disk in trouble shows up under "needs attention" and is sent as a
   notification, and a disk can be told to test itself. The counters that matter are remembered: a disk's
   page says "was 0 until 14 Sep", and a counter that grows is sent as a notification again. It needs
@@ -242,7 +242,7 @@ Early development. What works today:
   say and how far they are, and a data disk on its way to full is said a month ahead;
 - the data folder moves to a disk with one button (Apps → Options, or right after formatting a disk):
   the apps are stopped, everything is copied, the apps' compose files — comments and all —, the backups,
-  the network folders and the folders on Home are pointed at the new place, and the apps start
+  the shared folders and the folders on Home are pointed at the new place, and the apps start
   again; the old folder is kept until you delete it, and a snapshot taken before the move still restores;
 - several disks as one folder (mergerfs, installed on request): a new file goes to the disk with the most
   free room, every file stays a plain file on one of the disks. A disk that is plugged in shows up on the
@@ -264,7 +264,7 @@ Early development. What works today:
   trash — with how much each grew over the week, how much of it has not changed for three months, the
   largest files and the apps that use a folder, and, when the disk is filling up, in how long it will be
   full at this pace;
-- folders shared over the network (Storage → Network folders, or a folder's menu in Files): a folder of
+- folders shared over the network (Storage → Sharing, or a folder's menu in Files): a folder of
   the server opens in Explorer, Finder or a phone's file manager like a network disk (SMB). People connect
   with the name and password they sign in to Hata with; for every folder each user may look, change or
   nothing at all, and so may "anyone without a password". What lands there takes the owner of its
@@ -274,15 +274,15 @@ Early development. What works today:
   has to be typed: while something is shared, the server shows up by itself under "Network" in Explorer on
   Windows, in the sidebar of Finder and in the Files app of a phone, under its name on the home network.
   A folder can take a Mac's Time Machine backups, with a limit on its size, and a user can be kept out of
-  the network folders altogether;
-- network drives: a folder of a NAS, another computer or a server elsewhere — over SMB, NFS, SFTP, WebDAV
+  the shared folders altogether;
+- connected drives: a folder of a NAS, another computer or a server elsewhere — over SMB, NFS, SFTP, WebDAV
   or FTP — mounted here as an ordinary folder under `/mnt/net`, so it is in Files, in every folder picker,
   and apps and backups can use it. It is tried before it is kept (a wrong password or a missing folder is
   said in the server's own words), it comes back by itself after a restart or when the server is back, and
   one that stops answering shows up under "needs attention". Servers that announce themselves on the home
   network are listed, and so are a server's shares;
 - files: the server's files in the browser, opened in the data folder and reaching everywhere — "My Hata"
-  with the data folder, the disks, the network drives, the favourites and the computers on one page, an
+  with the data folder, the disks, the connected drives, the favourites and the computers on one page, an
   address bar with back and forward that turns into a field with folders offered as you type, the
   keyboard as in a desktop file manager, tiles that show the first lines of a text file —, folders,
   upload by drag and drop (whole folders too, large files in parts), download of a file or of a folder as a
@@ -430,8 +430,8 @@ in Google Drive or Box.
 | ![Users, who can open what, invitations](screenshots/users.png) Users, who can open what, invitations | ![Inside a snapshot: a file taken out, chosen files and folders put back](screenshots/snapshot-files.png) Inside a snapshot: a file taken out, chosen files and folders put back |
 | ![The whole history: what happened on the server and who did it](screenshots/activity.png) The whole history: what happened on the server and who did it | ![An app from the store installed here or on another computer](screenshots/store-install-on.png) An app from the store installed here or on another computer |
 | ![The assistant looks first and asks before it changes anything](screenshots/assistant.png) The assistant looks first and asks before it changes anything | ![The assistant's answer once the change is made](screenshots/assistant-done.png) The assistant's answer once the change is made |
-| ![My Hata: the data folder, the disks, the network drives, the favourites and the computers](screenshots/my-hata.png) My Hata: the data folder, the disks, the network drives, the favourites and the computers | ![Installed apps, here and on the other computers, in one table](screenshots/apps.png) Installed apps, here and on the other computers, in one table |
-| ![Who opens what: apps, network folders, the computers' folders, Home Assistant](screenshots/access.png) Who opens what: apps, network folders, the computers' folders, Home Assistant | ![The phone's menu: every section, the terminal, Settings](screenshots/phone-menu.png) The phone's menu: every section, the terminal, Settings |
+| ![My Hata: the data folder, the disks, the connected drives, the favourites and the computers](screenshots/my-hata.png) My Hata: the data folder, the disks, the connected drives, the favourites and the computers | ![Installed apps, here and on the other computers, in one table](screenshots/apps.png) Installed apps, here and on the other computers, in one table |
+| ![Who opens what: apps, shared folders, the computers' folders, Home Assistant](screenshots/access.png) Who opens what: apps, shared folders, the computers' folders, Home Assistant | ![The phone's menu: every section, the terminal, Settings](screenshots/phone-menu.png) The phone's menu: every section, the terminal, Settings |
 
 ### Computers
 
@@ -478,7 +478,7 @@ in Google Drive or Box.
 | ![Account: password, two-factor sign-in, passkeys, sessions](screenshots/settings-account.png) Account: password, two-factor sign-in, passkeys, sessions | ![General](screenshots/settings-general.png) General |
 | ![Appearance](screenshots/settings-appearance.png) Appearance | ![Apps: the data and configuration folders](screenshots/settings-apps.png) Apps: the data and configuration folders |
 | ![App stores](screenshots/settings-stores.png) App stores | ![Disks: their health, file systems, what fills the data folder](screenshots/settings-storage.png) Disks: their health, file systems, what fills the data folder |
-| ![Network folders (SMB)](screenshots/settings-shares.png) Network folders (SMB) | ![Domains and HTTPS: names for everything](screenshots/settings-https.png) Domains and HTTPS: names for everything |
+| ![Sharing (SMB)](screenshots/settings-shares.png) Sharing (SMB) | ![Domains and HTTPS: names for everything](screenshots/settings-https.png) Domains and HTTPS: names for everything |
 | ![Notifications](screenshots/settings-notifications.png) Notifications | ![Agents: access keys for the MCP server](screenshots/settings-agents.png) Agents: access keys for the MCP server |
 | ![About and updates](screenshots/settings-about.png) About and updates | ![Network: interfaces, Wi-Fi, the ways to the internet](screenshots/settings-network.png) Network: interfaces, Wi-Fi, the ways to the internet |
 | ![RAID: SnapRAID, arrays and pools](screenshots/settings-protection.png) RAID: SnapRAID, arrays and pools | ![Remote access: Tailscale and WireGuard](screenshots/settings-remote.png) Remote access: Tailscale and WireGuard |
@@ -487,7 +487,7 @@ in Google Drive or Box.
 
 | ![Ad blocking: lists, own rules, what was asked](screenshots/settings-adblock.png) Ad blocking: lists, own rules, what was asked | ![The home's DNS server](screenshots/settings-dns.png) The home's DNS server |
 | ![Ports of the server passed on](screenshots/settings-ports.png) Ports of the server passed on | ![Find a setting: sections and cards by name](screenshots/settings-find.png) Find a setting: sections and cards by name |
-| ![Moving in from Pi-hole or AdGuard Home](screenshots/adblock-import.png) Moving in from Pi-hole or AdGuard Home | ![Network drives: folders of other computers](screenshots/settings-places.png) Network drives: folders of other computers |
+| ![Moving in from Pi-hole or AdGuard Home](screenshots/adblock-import.png) Moving in from Pi-hole or AdGuard Home | ![Connected drives: folders of other computers](screenshots/settings-places.png) Connected drives: folders of other computers |
 
 ### Looks
 

@@ -1760,7 +1760,7 @@ const homeRead: Omit<Tool, "level" | "effect">[] = [
   },
   {
     name: "shares",
-    title: "Network folders",
+    title: "Shared folders",
     description: "The folders of this server shared over the network (SMB): each one's path, who may read or write it by the Hata user's name, what a guest may, and whether the folder is there. Also whether Samba runs, why not, the names the server is reached by, and which users cannot connect yet because Samba has not learned their password (it does at their next sign-in to Hata). Sharing is changed in the web UI.",
     input: {},
     run: () =>
