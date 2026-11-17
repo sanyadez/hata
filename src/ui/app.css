@@ -2190,3 +2190,46 @@ a.kpi:hover { background: var(--surface-2); }
 /* the arranging bar's pictures: undo, YAML, lay out anew */
 .pg-tools { display: flex; align-items: center; gap: 2px; }
 .pg-tools .icon-btn.danger:not(:disabled):hover { background: var(--danger); color: #fff; }
+
+/* === The building blocks ====================================================================================
+   Every page is made of these; a new page takes them as they are. The spacing has four steps and no others:
+     --gap-row   0     rows that draw their own lines or padding (a list of facts, a table, a list of things)
+     --gap-tight 6px   a heading and the line that explains it
+     --gap-small 8px   things side by side, a few short lines that belong together
+     --gap       16px  blocks inside a card, and cards on the page
+   A card's own padding is --pad (20px, 16px on a phone). `scripts/smoke.ts` measures the gaps inside every card
+   and fails on any other number. */
+:root { --gap-tight: 6px; --gap-small: 8px; --gap: 16px; --pad: 20px; }
+@media (max-width: 760px) { :root { --pad: 16px; } }
+
+/* A card with padding is a column of blocks, --gap apart (`stack` and `stack-s` on a card mean the same) */
+.card.pad { padding: var(--pad); }
+.card.pad:where(:not(.section-head, .thing-head, .center-row, .filter-bar, .welcome-fact)) { display: grid; gap: var(--gap); align-content: start; min-width: 0; grid-template-columns: minmax(0, 1fr); }
+/* rows — facts, settings, programs, events: one list, each row draws its own padding and line; the run is
+   flush with what stands around it, and its first row needs no line under a heading */
+/* a block of a card brings no margins of its own: the gap is the card's (a foot pinned to the bottom keeps its auto) */
+.card.pad > :not(.block-foot, .module-card-foot) { margin-block: 0; }
+.card.pad > .cmd { padding-block: 0; }
+.load-head { gap: var(--gap); }
+.module-card { gap: var(--gap-small); }
+.card > :is(.kv, .setting, .tool, .activity-item) + :is(.kv, .setting, .tool, .activity-item) { margin-top: calc(-1 * var(--gap)); }
+.card > :is(.kv, .setting, .tool, .activity-item):first-child, .card > :not(.kv, .setting, .tool, .activity-item) + :is(.kv, .setting, .tool, .activity-item) { padding-top: 0; border-top: 0; }
+.card > :is(.kv, .setting, .tool, .activity-item):has(+ :not(.kv, .setting, .tool, .activity-item)), .card > :is(.kv, .setting, .tool, .activity-item):last-child { padding-bottom: 0; }
+.settings .card.area-head { display: block; }
+/* the line under a heading belongs to it */
+.card > :is(.section-head, h2, h3) + :is(p.muted, p.lead) { margin-top: calc(var(--gap-tight) - var(--gap)); }
+/* the head of a page: from the last line of words to the line of tabs as far as from the top to the first */
+.area-head .tabs { margin-top: var(--gap); }
+.area-name .meta { line-height: 1.35; }
+/* A card whose list or table reaches its edges: the head carries the padding, the list starts --gap-small under it */
+.card:not(.pad) > :is(.pad-head, .section-head.pad) { padding: var(--pad) var(--pad) var(--gap-small); margin: 0; }
+.card:not(.pad) > .section-head.pad + p.muted.pad { padding-top: 0; margin-top: calc(var(--gap-tight) - var(--gap-small)); padding-bottom: var(--gap-small); }
+.card.module-card { gap: var(--gap-small); }
+.card:not(.pad) { gap: 0; }
+.load-place { gap: 0; padding-bottom: 0; }
+.load-place > .block-head { padding: var(--pad) var(--pad) var(--gap-small); }
+.load-place > :is(.pad-x, .pad-b) { padding: 0 var(--pad); }
+.load-place > .pad-b { padding-bottom: var(--pad); }
+/* an empty block (a place an error or a later answer goes into) takes no gap of its own */
+.card.pad > :empty:not(input, img, canvas, svg, textarea, select, iframe, hr, progress, video, button) { display: none; }
+.sys-status.end { justify-content: flex-end; }

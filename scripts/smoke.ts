@@ -251,6 +251,30 @@ const BARE = `(() => {
   return [...out].slice(0, 5);
 })()`;
 
+/**
+ * Gaps between the blocks of a card that are not one of the steps of "The building blocks" (app.css): 0, 6, 8 or
+ * 16 px. A block pinned to the card's foot is left out: its gap is whatever room is left.
+ */
+const STEPS = `(() => {
+  const view = document.querySelector("#view");
+  if (!view) return [];
+  const seen = (e) => { const r = e.getBoundingClientRect(); return r.height > 0 && r.width > 0 && !e.classList.contains("offscreen"); };
+  const name = (e) => e.tagName.toLowerCase() + [...e.classList].slice(0, 2).map((c) => "." + c).join("");
+  const out = [];
+  for (const card of view.querySelectorAll(".card.pad, .card.module-card")) {
+    if (card.closest("dialog") || !seen(card)) continue;
+    const kids = [...card.children].filter(seen);
+    for (let i = 1; i < kids.length; i++) {
+      if (kids[i].matches(".block-foot, .module-card-foot")) continue;
+      const a = kids[i - 1].getBoundingClientRect(), b = kids[i].getBoundingClientRect();
+      if (b.top < a.bottom - 1) continue; // side by side
+      const gap = Math.round(b.top - a.bottom);
+      if (![0, 6, 8, 16].some((step) => Math.abs(step - gap) <= 1)) out.push(gap + " px between " + name(kids[i - 1]) + " and " + name(kids[i]) + " in " + name(card));
+    }
+  }
+  return out.slice(0, 5);
+})()`;
+
 const failures: string[] = [];
 async function walk(label: string, phone: boolean): Promise<void> {
   for (const route of ROUTES) {
@@ -269,6 +293,7 @@ async function walk(label: string, phone: boolean): Promise<void> {
     }
     if (!(await js<boolean>(DRAWN))) found.push("the page is empty");
     if (phone) for (const wide of await js<string[]>(SIDEWAYS)) found.push(`scrolls sideways: ${wide}`);
+    for (const gap of await js<string[]>(STEPS)) found.push(`off the steps: ${gap}`);
     if (!route.startsWith("#/welcome")) for (const words of await js<string[]>(BARE)) found.push(`written outside a card: “${words}”`);
     if (shotsAt) {
       mkdirSync(shotsAt, { recursive: true });
