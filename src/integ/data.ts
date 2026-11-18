@@ -161,7 +161,7 @@ export function value(v: Value, answers: Answers): Scalar {
       return get(answers[source], rest.join("."));
     };
     const got = read(v.from);
-    if (v.over === undefined && v.times === undefined) return typeof got === "string" ? got.trim() : (scalar(got) as Scalar);
+    if (v.over === undefined && v.times === undefined && v.round === undefined) return typeof got === "string" ? got.trim() : (scalar(got) as Scalar);
     if (typeof got !== "number") return null;
     let n = got;
     if (v.over !== undefined) {
