@@ -497,7 +497,8 @@ function parseRoute() {
 const AREAS = {
   apps: [
     { id: "installed", hash: "#/apps", view: "apps" },
-    { id: "store", hash: "#/store", view: "store" },
+    // the store is a button in the head of the section, as in Integrations, not a tab among its tabs
+    { id: "store", hash: "#/store", view: "store", head: true },
     { id: "import", hash: "#/import", view: "import", admin: true },
     { id: "options", hash: "#/apps-options", sections: ["apps", "stores"] },
   ],
@@ -5703,7 +5704,8 @@ const haCrumbs = () => null;
 const HOUSE = {
   ha: { tab: "ha", list: "/api/ha", body: "ha-body", icon: "bulb", name: "Home Assistant", found: "found", load: () => void loadHa(), add: (url) => haDialog(null, url) },
 };
-const houseAdd = () => button(t("house.connect"), { onclick: (e) => integrationsAddMenu(e.currentTarget) }, "plus");
+// services to connect are in the store, as apps are: the same button as in the head of Apps
+const houseAdd = () => (isAdmin() && hasModule("integrations") ? storeButton("@") : button(t("house.connect"), { onclick: (e) => integrationsAddMenu(e.currentTarget) }, "plus"));
 
 /** A tab of the house: the head, a switch between the servers when there are several, and the page of the one chosen */
 function houseShell(view) {
@@ -12858,7 +12860,7 @@ function renderAppsBody() {
   // an update from the store asks about every app by itself: only newer images go all at once
   const newer = all.filter((row) => !row.machine && !row.app.update && row.app.newer?.length > 0 && !row.app.job);
   if (!fixed) put(document.getElementById("apps-meta"), [t("apps.meta.installed", { n: all.length }), t("apps.meta.running", { n: count("running") }), count("updates") > 0 && t("apps.meta.updates", { n: count("updates") })].filter(Boolean).flatMap((part, i) => (i ? [h("span", { class: "dot-sep" }, "·"), part] : [part])));
-  if (!fixed) put(document.getElementById("apps-actions"), isAdmin() && newer.length > 0 && button(t("apps.updateAll", { n: newer.length }), { onclick: () => confirmAction({ title: t("apps.updateAll", { n: newer.length }), lead: t("apps.updateAllLead", { names: newer.map((row) => row.app.title).join(", ") }), label: t("app.update"), kind: "primary", iconName: "up", run: () => newer.forEach(({ app }) => void startAction(app, "update")) }) }, "up"));
+  if (!fixed) put(document.getElementById("apps-actions"), isAdmin() && newer.length > 0 && button(t("apps.updateAll", { n: newer.length }), { onclick: () => confirmAction({ title: t("apps.updateAll", { n: newer.length }), lead: t("apps.updateAllLead", { names: newer.map((row) => row.app.title).join(", ") }), label: t("app.update"), kind: "primary", iconName: "up", run: () => newer.forEach(({ app }) => void startAction(app, "update")) }) }, "up"), state.user.role !== "guest" && storeButton());
   if (!all.length) return put(box, h("section", { class: "card pad empty-state" }, h("h2", null, t("apps.none")), h("p", { class: "muted" }, t("apps.noneLead")), state.user.role !== "guest" && h("a", { class: "btn primary", href: "#/store" }, icon("store"), h("span", null, t("area.apps.store")))));
   const machines = fixed ? [] : [...new Map(all.filter((row) => row.machine).map((row) => [row.machine.id, row.machine.name])).entries()];
   const shown = all.filter(appShown[appsUi.show]).filter((row) => !appsUi.machine || (appsUi.machine === "." ? !row.machine : row.machine?.id === appsUi.machine));
@@ -12962,8 +12964,7 @@ function renderStoreList() {
     ...state.store.categories.map((c) => cat(c, c, all.filter((a) => a.category === c).length)).filter((_, i) => all.some((a) => a.category === state.store.categories[i])),
     h("div", { class: "cat-title" }, t("store.onServer")),
     cat("+", t("store.installed"), all.filter((a) => installed.has(a.name)).length),
-    storeKinds().length > 0 && h("div", { class: "cat-title" }, t("store.connect")),
-    storeKinds().length > 0 && cat("@", t("store.integrations"), storeKinds().length),
+    ...(storeKinds().length > 0 ? [h("div", { class: "cat-title" }, t("store.connect")), cat("@", t("store.integrations"), storeKinds().length)] : []),
   );
   if (category === "@") return list.replaceChildren(storeIntegrationCards(storeKinds(), query));
 
@@ -12980,7 +12981,7 @@ function renderStoreList() {
   const kindsFound = q && category === "" ? storeKinds().filter((k) => `${k.title} ${k.what}`.toLowerCase().includes(q)) : [];
   if (!apps.length && !kindsFound.length) return list.replaceChildren(h("p", { class: "empty" }, t("store.nothing")));
   list.replaceChildren(
-    kindsFound.length > 0 && storeIntegrationCards(kindsFound, ""),
+    ...(kindsFound.length > 0 ? [storeIntegrationCards(kindsFound, "")] : []),
     h(
       "div",
       { class: "cards" },
@@ -21693,8 +21694,14 @@ function renderSettings() {
  * The head of a section of the page: a card with its name, a line about it, what can be done there, and its tabs.
  * `metaId` / `actionsId` name the line and the buttons for a page that fills them later.
  */
+/** The way to the store from the head of a section: the same button wherever it stands; `category` opens one of its parts */
+function storeButton(category = "") {
+  return h("a", { class: "btn", href: "#/store", onclick: () => (state.storeFilter.category = category) }, icon("store"), h("span", null, t("area.apps.store")));
+}
+
 function areaHead(area, at, { meta = null, metaId = null, actions = null, actionsId = null } = {}) {
   const tabs = areaTabs(area);
+  const headTab = tabs.find((tab) => tab.head);
   return h(
     "header",
     { class: "card area-head" },
@@ -21711,9 +21718,9 @@ function areaHead(area, at, { meta = null, metaId = null, actions = null, action
         : h("div", { class: "area-name" }, h("h1", null, t("area." + area)), h("p", { class: "meta", id: metaId }, meta ?? t(`area.${area}.lead`))),
       area === "server"
         ? h("div", { class: "actions" }, h("a", { class: "btn", href: "#/terminal" }, icon("terminal"), h("span", null, t("terminal.title"))), button(t("power.restart"), { onclick: () => serverPowerDialog("reboot") }, "refresh"), h("button", { type: "button", class: "btn square", "aria-label": t("app.more"), "aria-haspopup": "menu", onclick: (e) => serverMenu(underButton(e.currentTarget)) }, icon("more")))
-        : (actions || actionsId) && h("div", { class: "actions", id: actionsId }, actions),
+        : (actions || actionsId || (headTab && at !== headTab.id)) && h("div", { class: "actions", id: actionsId }, actions, headTab && at !== headTab.id && storeButton()),
     ),
-    tabs.length > 1 && h("nav", { class: "tabs" }, tabs.map((tab) => h("a", { class: "tab" + (tab.id === at ? " active" : ""), href: tabHash(area, tab), "aria-current": tab.id === at ? "page" : null }, tab.label ?? t(`area.${area}.${tab.id}`), area === "server" && serverTabCount(tab.id))),),
+    tabs.length > 1 && h("nav", { class: "tabs" }, tabs.filter((tab) => !tab.head).map((tab) => h("a", { class: "tab" + (tab.id === at ? " active" : ""), href: tabHash(area, tab), "aria-current": tab.id === at ? "page" : null }, tab.label ?? t(`area.${area}.${tab.id}`), area === "server" && serverTabCount(tab.id))),),
   );
 }
 
