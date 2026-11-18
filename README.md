@@ -101,7 +101,7 @@ Early development. What works today:
   module that is off shows no page, no setting and runs nothing; turning one on installs nothing on the
   system. One that is in use cannot be turned off — the page says what uses it. A server updated from a
   version before modules keeps on what it uses;
-- one menu on top of every page — Home, Apps, Files, Computers, Services, Storage, Backups, Network — and each
+- one menu on top of every page — Home, Apps, Files, Computers, Integrations, Storage, Backups, Network — and each
   section's parts as tabs in its head, with a number by a section for what needs attention there and those
   very items on top of the section's page; Settings holds only how Hata itself behaves (the account, users and
   access, the look, notifications, modules, the assistant, updates), and "Find a setting" finds the rest
@@ -344,7 +344,7 @@ Early development. What works today:
   (Ubuntu with a desktop among the systems), its disk grows when asked. Inside a container that was given
   only part of the user ids (an unprivileged LXC, for one of Proxmox) none of this is offered, and the
   page says why;
-- the section "Services" — Home Assistant, every kind of connected service, the TV, music and Bluetooth as tabs, with what was found on the
+- the section "Integrations" — Home Assistant, every kind of connected service, the TV, music and Bluetooth as tabs, with what was found on the
   home network and a "Connect" button; nothing is installed in the services themselves. Home Assistant servers, by a sign-in or a token: their devices put on Hata's home page next to the
   apps — a light switched, its brightness, a thermostat, a lock that asks first —, who sees them chosen
   per server, members switching only what is on their home page. A server's updates, its backups and its
@@ -461,7 +461,7 @@ in Google Drive or Box.
 | ![Containers and virtual machines of this server, with their limits and where they are stored](screenshots/containers.png) Containers and virtual machines of this server, with their limits and where they are stored | ![A new virtual machine: Ubuntu with a desktop](screenshots/container-new.png) A new virtual machine: Ubuntu with a desktop |
 | ![A virtual machine's page: its screen, limits, snapshots](screenshots/vm-screen.png) A virtual machine's page: its screen, limits, snapshots | ![Their network, places and disc images](screenshots/containers-settings.png) Their network, places and disc images |
 
-### Services: Home Assistant, cameras, TV
+### Integrations: Home Assistant, cameras, TV
 
 | | |
 |---|---|
