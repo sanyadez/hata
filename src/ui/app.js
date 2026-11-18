@@ -437,13 +437,15 @@ function parseRoute() {
   if (parts[0] === "tv" && isAdmin()) return { view: "tv", hash: "#/house/tv" };
   // Bluetooth lived among this server's tabs at first
   if (parts[0] === "machines" && parts[1] === "this" && parts[2] === "bluetooth" && isAdmin()) return areaRoute("house", "bluetooth");
-  // Hata the house: Home Assistant, the cameras, the TV — each a tab; a torrent client that is nobody's app too
+  // Hata the house: Home Assistant, every kind of connected service, the TV — each a tab
   if ((parts[0] === "house" || parts[0] === "integrations" || (parts[0] === "ha" && !parts[1]) || (parts[0] === "settings" && parts[1] === "integrations")) && isAdmin()) {
-    const tab = (parts[0] === "house" && areaTabs("house").find((x) => x.id === parts[1])) || areaTabs("house")[0];
+    const was = { cameras: "x-frigate", torrents: "x-qbittorrent" }[parts[1]] ?? parts[1];
+    const tab = (parts[0] === "house" && areaTabs("house").find((x) => x.id === was)) || areaTabs("house")[0];
     if (!tab) return { view: "ha", id: "", hash: "#/house" };
     const id = parts[0] === "house" ? (parts[2] ?? "") : "";
     if (tab.view === "music") return { view: "music", hash: "#/house/music" };
     if (tab.sections) return areaRoute("house", tab.id);
+    if (tab.view === "service") return { view: "service", kind: tab.kind, id, house: true, hash: tab.hash + (id ? "/" + id : "") };
     return tab.view === "tv" ? { view: "tv", hash: "#/house/tv" } : { view: tab.view, id, house: true, hash: tab.hash + (id ? "/" + id : "") };
   }
   // both live in Settings; their own old addresses still lead there
@@ -454,8 +456,8 @@ function parseRoute() {
   // the assistant is a window over any page, not a page: its old address opens it over Home
   if (parts[0] === "assistant" && isAdmin()) return { view: "home", hash: "#/", assistant: true };
   if (parts[0] === "ha" && parts[1] && isAdmin()) return { view: "ha", id: parts[1], hash: `#/house/ha/${parts[1]}` };
-  if (parts[0] === "qbit" && parts[1] && isAdmin()) return { view: "qbit", id: parts[1] };
-  if (parts[0] === "frigate" && parts[1] && isAdmin()) return { view: "frigate", id: parts[1], hash: `#/house/cameras/${parts[1]}` };
+  // a connected service's page; qBittorrent and Frigate had pages of their own before descriptions
+  if ((parts[0] === "service" || parts[0] === "qbit" || parts[0] === "frigate") && parts[1] && isAdmin()) return { view: "service", id: parts[1], hash: `#/service/${parts[1]}` };
   if ((parts[0] === "storage" || parts[0] === "network") && isAdmin()) return areaRoute(parts[0], parts[1], parts[2]);
   if (parts[0] === "machines" && parts[1] === "this" && isAdmin()) return areaRoute("server", parts[2], parts[3]);
   if (parts[0] === "machines" && parts[1] === "load" && isAdmin()) return { view: "load", place: parts[2] ? decodeURIComponent(parts[2]) : "" };
@@ -513,11 +515,9 @@ const AREAS = {
   ],
   house: [
     { id: "ha", hash: "#/house/ha", view: "ha", module: "integrations" },
-    { id: "cameras", hash: "#/house/cameras", view: "frigate", module: "integrations" },
     { id: "tv", hash: "#/house/tv", view: "tv", module: "tv" },
     { id: "music", hash: "#/house/music", view: "music", module: "music" },
     { id: "bluetooth", sections: ["bluetooth"] },
-    { id: "torrents", hash: "#/house/torrents", view: "qbit", module: "integrations", when: () => foreignTorrents() },
   ],
   network: [
     { id: "connections", sections: ["network"] },
@@ -550,7 +550,12 @@ const tabHash = (area, tab) => tab.hash ?? `${AREA_BASE[area]}/${tab.id}`;
 /** Whether this person may open the tab at all, and whether it stands among the tabs: one of a module that is off does not */
 const tabAllowed = (tab) => (tab.sections ? SECTIONS.some((item) => item.id === tab.sections[0] && (!item.admin || isAdmin())) : (!tab.admin || isAdmin()) && state.user?.role !== "guest");
 const tabShown = (tab) => tabAllowed(tab) && (!tab.module || hasModule(tab.module)) && (!tab.when || tab.when()) && (!tab.sections || tab.sections.some((id) => !SECTION_MODULE[id] || hasModule(SECTION_MODULE[id])));
-const areaTabs = (area) => AREAS[area].filter(tabShown);
+const areaTabs = (area) => {
+  const tabs = AREAS[area].filter(tabShown);
+  // a connected service's kind is a tab of Services, after Home Assistant
+  if (area === "house" && hasModule("integrations") && isAdmin()) tabs.splice(tabs.findIndex((x) => x.id === "ha") + 1, 0, ...serviceTabs());
+  return tabs;
+};
 /** The tab of a section of the settings, wherever it lives now */
 const sectionArea = (section) => Object.keys(AREAS).find((area) => AREAS[area].some((x) => x.sections?.includes(section))) ?? "settings";
 function sectionHash(section) {
@@ -581,8 +586,8 @@ function areaOf(route = state.route) {
   if (["apps", "store", "import", "app", "mapp"].includes(view)) return "apps";
   if (["files", "trash", "myhata"].includes(view)) return "files";
   if (["machines", "machine", "server", "proxmox", "containers", "instance", "guest", "terminal", "load"].includes(view)) return "machines";
-  if (view === "qbit") return route.house || !torrentsApp(route.id) ? "house" : "apps";
-  if (["integrations", "ha", "frigate", "tv", "music"].includes(view)) return "house";
+  if (view === "service") return route.house || !serviceApp(route.id) ? "house" : "apps";
+  if (["integrations", "ha", "tv", "music"].includes(view)) return "house";
   if (view === "backups") return "backups";
   if (view === "users") return "settings";
   return view === "home" || view === "activity" ? "home" : "";
@@ -1108,7 +1113,7 @@ const isAdmin = () => state.user?.role === "admin" && !state.user.mustTwoFactor;
 const hasModule = (id) => !state.modules || state.modules[id] === true;
 /** The sections of Settings and the pages that are a module's */
 const SECTION_MODULE = { bluetooth: "bluetooth", protection: "raid", places: "netplaces", shares: "shares", remote: "remote", ports: "domains", dns: "dns", adblock: "adblock", integrations: "integrations", agents: "assistant", assistant: "assistant" };
-const VIEW_MODULES = { mapp: ["machines"], machine: ["machines"], proxmox: ["proxmox"], guest: ["proxmox"], containers: ["containers"], instance: ["containers"], integrations: ["integrations"], ha: ["integrations"], qbit: ["integrations"], frigate: ["integrations"], assistant: ["assistant"], connect: ["assistant"], tv: ["tv"], music: ["music"] };
+const VIEW_MODULES = { mapp: ["machines"], machine: ["machines"], proxmox: ["proxmox"], guest: ["proxmox"], containers: ["containers"], instance: ["containers"], integrations: ["integrations"], ha: ["integrations"], service: ["integrations"], assistant: ["assistant"], connect: ["assistant"], tv: ["tv"], music: ["music"] };
 /** Files are an administrator's, and theirs with whom a folder is shared — only those folders then */
 const mayFiles = () => isAdmin() || !!state.user?.files;
 /** The folders shared with one who is not an administrator, of this server or of a machine; null for an administrator */
@@ -1133,12 +1138,12 @@ const navItems = () => NAV.filter((item) => (!item.admin || isAdmin()) && (!item
 /** Which section of the page an item of "Needs attention" is about, by its code */
 const ATTENTION_AREAS = [
   [/^(machine|pve|containers|docker|memory|temperature|load|system)\b/, "machines"],
-  [/^(ha|frigate)\b/, "house"],
+  [/^(ha|integration)\b/, "house"],
   [/^(disk|smart|absent|array|raid|share|netplace)\b/, "storage"],
   [/^(offsite|failed\.backup|backup)\b/, "backups"],
   [/^(network|internet|dns|https)\b/, "network"],
 ];
-const attentionArea = (item) => ATTENTION_AREAS.find(([re]) => re.test(item.code))?.[1] ?? (item.app || /^(restarting|partial|update|failed|qbit)\b/.test(item.code) ? "apps" : "");
+const attentionArea = (item) => ATTENTION_AREAS.find(([re]) => re.test(item.code))?.[1] ?? (item.app || /^(restarting|partial|update|failed)\b/.test(item.code) ? "apps" : "");
 /**
  * What the number by a section's name counts, said in the section itself: a card under its head with the very
  * items of Home's list. Kept up from outside the pages (they redraw themselves in many ways): put in when it is
@@ -1414,8 +1419,7 @@ function render() {
   if (view === "proxmox") return renderPve();
   if (view === "containers") return renderContainers();
   if (view === "ha") return renderHa();
-  if (view === "qbit") return renderQbit();
-  if (view === "frigate") return renderFrigate();
+  if (view === "service") return renderService();
   if (view === "instance") return renderInstance();
   if (view === "guest") return renderGuest();
   if (view === "app") return renderApp();
@@ -1659,7 +1663,7 @@ function tileIcon(item, size = "") {
   if (item.type === "files") return h("span", { class: `app-icon plus ${size}` }, icon(tileTarget(item)?.disk ? (tileTarget(item).disk.network ? "globe" : "disk") : "folder"));
   if (item.type === "builtin") return h("span", { class: `app-icon plus ${size}` }, icon(item.id === "store" ? "store" : "plus"));
   if (item.type === "ha") return h("span", { class: `app-icon plus ${size}` }, icon(haIcon(target?.state ?? { domain: item.entity.split(".")[0] })));
-  if (item.type === "widget") return h("span", { class: `app-icon plus ${size}` }, icon(item.source === "qbit" ? "download" : "camera"));
+  if (item.type === "widget") return h("span", { class: `app-icon plus ${size}` }, icon(svcConnections().find((c) => c.id === item.server)?.icon ?? "plug"));
   return h("span", { class: "app-icon stack" }, item.items.filter(tileTarget).slice(0, 4).map((inner) => tileIcon(inner, "mini")));
 }
 
@@ -1742,8 +1746,8 @@ function tile(item) {
       : installing
         ? [h("i", { class: "dot" }), h("span", { class: "jt-short clip", "data-job-short": app.job.id }, jobShort(app.job))]
         : [h("i", { class: "dot " + st }), st === "running" && appAddress(app) ? appAddress(app) : t("status." + st)];
-    const torrents = st === "running" && state.overview?.qbit?.apps?.[app.name];
-    if (torrents?.online) where = h("span", { class: "tile-where" }, h("span", { class: "clip" }, qbitSpeeds(torrents)));
+    const line = st === "running" && appServiceLine(app);
+    if (line) where = h("span", { class: "tile-where" }, h("span", { class: "clip" }, line));
     badges = [app.protected && h("span", { class: "lock", title: t("access.protected") }, icon("lock")), (app.update || app.newer?.length > 0) && isAdmin() && h("span", { class: "lock", title: t(app.update ? "app.storeUpdate" : "app.newer") }, icon("up"))];
     // an administrator gets what can be done to the app right there; a member, the app's page
     side = admin
@@ -1794,8 +1798,16 @@ function tile(item) {
 
 // --- Widgets: what an integration shows right on the page, as much as its cells let it -------------
 
-const widgetServer = (item) => (state.overview?.[item.source]?.servers ?? []).find((s) => s.id === item.server) ?? null;
-const widgetTitle = (item, x) => (item.view === "camera" ? item.camera : item.view === "events" ? t("frigate.events") : (x?.name ?? "qBittorrent"));
+const widgetServer = (item) => svcConnections().find((s) => s.id === item.server) ?? null;
+/** The widget of the description a card on Home is */
+const widgetSpec = (item) => {
+  const x = widgetServer(item);
+  return (x && svcSpecNow(x.kind)?.widgets?.[item.view]) ?? null;
+};
+const widgetTitle = (item, x) => {
+  const w = widgetSpec(item);
+  return item.row ?? (w?.kind === "summary" ? (x?.name ?? "") : svcText(w?.label) || (x?.name ?? ""));
+};
 /** A picture of a widget stays the same element across redraws and takes the next one only once it has come: no blinking */
 const widgetPictures = new Map();
 
@@ -1810,7 +1822,6 @@ function widgetPicture(key, src, alt) {
  * leaves the page or the tab is hidden, and after a break it is asked for again in a few seconds.
  */
 const LIVE_FPS = 5;
-const liveSrc = (serverId, name, height) => `/api/frigate/${serverId}/cameras/${encodeURIComponent(name)}/live?h=${height}&fps=${LIVE_FPS}`;
 const liveShown = new Set();
 
 function livePicture(src, alt, cls) {
@@ -1851,59 +1862,68 @@ function renewPicture(img, src) {
   next.addEventListener("load", () => (img.src = next.src));
 }
 
-function torrentsWidget(item, x) {
-  const { w = 1, h: tall = 1 } = item;
+/** A widget of numbers and the first rows of a list: what is moving, what is left */
+function summaryWidget(item, x, w) {
+  const { w: wide = 1, h: tall = 1 } = item;
+  const spec = svcSpecNow(x.kind);
   // what does not fit goes under "N more": a card has no scroll of its own
-  const rows = tall === 1 ? (w > 1 ? 1 : 0) : Math.max(1, Math.floor((tall * 140 - 148) / 38));
-  const totals = x.totals;
-  const left = totals.total - Math.min(rows, x.top.length);
+  const room = tall === 1 ? (wide > 1 ? 1 : 0) : Math.max(1, Math.floor((tall * 140 - 148) / 38));
+  const rows = w.list ? (x.lists[w.list.of] ?? []) : [];
+  const shown = rows.slice(0, room);
   return h(
     "a",
-    { class: "tile-main widget-body", href: `#/qbit/${x.id}`, draggable: false },
+    { class: "tile-main widget-body", href: `#/service/${x.id}`, draggable: false },
     h("span", { class: "widget-head" }, tileIcon(item), h("span", { class: "widget-title clip" }, x.name)),
     x.online
       ? [
-          h("span", { class: "widget-speeds" }, h("span", null, `↓ ${bytes(totals.down)}/s`), h("span", null, `↑ ${bytes(totals.up)}/s`)),
-          !(tall === 1 && rows > 0) && h("span", { class: "muted small" }, t("qbit.activeOf", { n: totals.active, total: totals.total })),
-          rows > 0 && x.top.length > 0 && h("span", { class: "widget-torrents" }, x.top.slice(0, rows).map((one) => h("span", { class: "widget-torrent" }, h("span", { class: "small clip" }, one.name), meterBar(one.percent, "")))),
-          rows > 0 && left > 0 && h("span", { class: "muted small" }, t("attention.moreItems", { n: left })),
+          h("span", { class: "widget-speeds" }, w.numbers.map((n) => h("span", null, svcFormat(x.values[n.value], n.as) || "—"))),
+          !(tall === 1 && room > 0) && spec && h("span", { class: "muted small clip" }, svcNumbers(spec, x.values)),
+          shown.length > 0 && h("span", { class: "widget-torrents" }, shown.map((row) => h("span", { class: "widget-torrent" }, h("span", { class: "small clip" }, String(row[w.list.title] ?? "")), w.list.bar && meterBar(Number(row[w.list.bar]) || 0, "")))),
+          room > 0 && rows.length > shown.length && h("span", { class: "muted small" }, t("attention.moreItems", { n: rows.length - shown.length })),
         ]
-      : h("span", { class: "muted small" }, t("qbit.offline")),
+      : h("span", { class: "muted small" }, t("service.offline")),
   );
 }
 
-/** How tall a picture a camera's card asks for */
+/** How tall a picture a picture's card asks for */
 const cameraHeight = (item) => Math.min(1080, (item.h ?? 1) * 240);
 
-function cameraWidget(item, x) {
-  const c = x.cameras.find((one) => one.name === item.camera);
-  const key = `camera:${item.id}`;
+/** One row's picture: renewed every 10 s, or live when the person chose that */
+function pictureWidget(item, x, w) {
+  const spec = svcSpecNow(x.kind);
+  const row = (x.lists[w.of] ?? []).find((r) => spec && svcKey(spec, w.of, r) === item.row);
   const height = cameraHeight(item);
-  const open = () => c && cameraDialog(x, c);
+  const open = () => row && svcPictureDialog(x, w.picture, w.live, item.row, String(row[w.caption] ?? item.row));
+  const on = x.online && row && row.enabled !== false;
   let shown = null;
-  if (c?.enabled && x.online && item.live) {
+  if (on && item.live && w.live) {
     // a stream per size: a card made larger asks for a larger picture
     const liveKey = `live:${item.id}:${height}`;
     shown = widgetPictures.get(liveKey);
-    if (!shown || !liveShown.has(shown)) widgetPictures.set(liveKey, (shown = livePicture(liveSrc(x.id, c.name, height), item.camera)));
-  } else if (c?.enabled && x.online) shown = widgetPicture(key, cameraPicture(x.id, c.name, height, Date.now()), item.camera);
+    if (!shown || !liveShown.has(shown)) widgetPictures.set(liveKey, (shown = livePicture(svcLive(x.id, w.live, item.row, height), item.row)));
+  } else if (on) shown = widgetPicture(`still:${item.id}`, svcPicture(x.id, w.picture, item.row, height, Date.now()), item.row);
   return h(
     "button",
     { type: "button", class: "tile-main widget-picture", onclick: open },
-    shown ?? h("span", { class: "camera-off" }, icon("camera")),
-    h("span", { class: "widget-caption" }, h("i", { class: "dot " + (c?.online && x.online ? "running" : "stopped") }), h("span", { class: "clip" }, item.camera)),
+    shown ?? h("span", { class: "camera-off" }, icon(x.icon)),
+    h("span", { class: "widget-caption" }, h("i", { class: "dot " + (on && row.online !== false ? "running" : "stopped") }), h("span", { class: "clip" }, item.row ?? "")),
   );
 }
 
-function eventsWidget(item, x) {
+/** The newest rows' pictures, as many as the card holds */
+function picturesWidget(item, x, w) {
+  const spec = svcSpecNow(x.kind);
   const cols = item.w ?? 1;
-  const latest = x.latest.slice(0, cols * (item.h ?? 1));
+  const latest = (x.lists[w.of] ?? []).slice(0, cols * (item.h ?? 1));
   const el = h(
     "a",
-    { class: "tile-main widget-events", href: `#/frigate/${x.id}`, draggable: false },
-    latest.length
-      ? latest.map((e) => h("span", { class: "widget-picture", title: `${eventWords(e)} · ${e.camera} · ${new Date(e.start).toLocaleString(state.lang)}` }, widgetPicture(`event:${e.id}`, eventPicture(x.id, e, "thumbnail"), e.label), h("span", { class: "widget-caption" }, h("span", { class: "clip" }, e.label), h("span", { class: "muted" }, ago(e.start)))))
-      : h("span", { class: "widget-body" }, h("span", { class: "widget-head" }, tileIcon(item), h("span", { class: "widget-title clip" }, t("frigate.events"))), h("span", { class: "muted small" }, t("frigate.none"))),
+    { class: "tile-main widget-events", href: `#/service/${x.id}`, draggable: false },
+    latest.length && spec
+      ? latest.map((row) => {
+          const key = svcKey(spec, w.of, row);
+          return h("span", { class: "widget-picture" }, widgetPicture(`row:${x.id}:${key}`, svcPicture(x.id, w.picture, key, 240), String(row[w.caption] ?? "")), h("span", { class: "widget-caption" }, h("span", { class: "clip" }, String(row[w.caption] ?? "")), w.note && h("span", { class: "muted" }, svcFill(w.note, row))));
+        })
+      : h("span", { class: "widget-body" }, h("span", { class: "widget-head" }, tileIcon(item), h("span", { class: "widget-title clip" }, svcText(w.label))), h("span", { class: "muted small" }, t("service.nothing"))),
   );
   if (latest.length) {
     el.style.gridTemplateColumns = `repeat(${Math.min(cols, latest.length)}, minmax(0, 1fr))`;
@@ -1913,7 +1933,8 @@ function eventsWidget(item, x) {
 }
 
 function widgetTile(item, x) {
-  const body = item.view === "torrents" ? torrentsWidget(item, x) : item.view === "camera" ? cameraWidget(item, x) : eventsWidget(item, x);
+  const w = widgetSpec(item);
+  const body = !w ? h("span", { class: "tile-main widget-body muted small" }, t("service.widgetGone")) : w.kind === "summary" ? summaryWidget(item, x, w) : w.kind === "picture" ? pictureWidget(item, x, w) : picturesWidget(item, x, w);
   const title = tileTitle(item);
   return h(
     "div",
@@ -1934,16 +1955,15 @@ async function widgetsTick() {
   if (!items.length) return;
   const fresh = await api("GET", "/api/widgets").catch(() => null);
   if (!fresh || state.route.view !== "home" || gridUi.drag) return;
-  state.overview.qbit.servers = fresh.qbit;
-  state.overview.frigate.servers = fresh.frigate;
+  if (state.overview.integrations) state.overview.integrations.connections = fresh.x;
   for (const item of items) {
     const sized = { ...item, ...gridUi.at?.[tileKey(item)] };
     const old = document.querySelector(`.tile[data-key="widget:${item.id}"]`);
     const made = old && tile(sized);
     if (made) old.replaceWith(made);
     const x = widgetServer(item);
-    const c = item.view === "camera" && x?.cameras.find((one) => one.name === item.camera);
-    if (c?.enabled && x.online && widgetPictures.has(`camera:${item.id}`)) renewPicture(widgetPictures.get(`camera:${item.id}`), cameraPicture(x.id, c.name, cameraHeight(sized), Date.now()));
+    const w = widgetSpec(item);
+    if (w?.kind === "picture" && x?.online && widgetPictures.has(`still:${item.id}`)) renewPicture(widgetPictures.get(`still:${item.id}`), svcPicture(x.id, w.picture, item.row, cameraHeight(sized), Date.now()));
   }
 }
 setInterval(() => void widgetsTick(), 10_000);
@@ -2458,7 +2478,7 @@ function tileMenu(item, point = null) {
     })),
     item.type === "link" && entry(t("home.removeLink"), "trash", () => askRemoveCard(item, () => changeLayout((next) => void takeTile(next, key))), "danger"),
     item.type === "ha" && entry(t("ha.offHome"), "trash", () => askRemoveCard(item, () => changeLayout((next) => void takeTile(next, key))), "danger"),
-    item.type === "widget" && item.view === "camera" && entry(t(item.live ? "frigate.showPicture" : "frigate.showLive"), item.live ? "image" : "play", () => changeLayout((next) => {
+    item.type === "widget" && widgetSpec(item)?.live && entry(t(item.live ? "service.showPicture" : "service.showLive"), item.live ? "image" : "play", () => changeLayout((next) => {
       const found = locate(next, key);
       if (!found) return false;
       if (item.live) delete found.item.live;
@@ -2489,7 +2509,7 @@ function addSections() {
   const action = (title, sub, lead, label, run) => ({ title, sub, lead, label, run });
   const block = (id, sub) => card(blockTitle(id), sub, icon(BLOCKS[id]), { type: "block", id });
   const widgetRow = (title, sub, lead, item) => card(title, sub, lead, { ...item, id: newId() }, () => {
-    const there = layout().cards.find((c) => c.type === "widget" && c.source === item.source && c.server === item.server && c.view === item.view && c.camera === item.camera);
+    const there = layout().cards.find((c) => c.type === "widget" && c.source === item.source && c.server === item.server && c.view === item.view && c.row === item.row);
     return there ? tileKey(there) : null;
   });
   const pinned = () => (o.folders ?? []).map((folder) => folder.path);
@@ -2517,16 +2537,16 @@ function addSections() {
     },
     { id: "overview", icon: "list", group: "state", rows: [block("attention", t("add.attentionHint")), block("activity", t("add.activityHint")), o.adblock && block("adblock", t("add.adblockHint"))].filter(Boolean) },
     (o.ha?.servers ?? []).length > 0 && { id: "ha", icon: "home", group: "integrations", rows: [action(t("ha.pick.item"), t("ha.pick.hint"), icon("bulb"), t("add.choose"), () => haPickDialog())] },
-    (o.frigate?.servers ?? []).length > 0 && {
-      id: "frigate",
-      icon: "camera",
-      group: "integrations",
-      rows: o.frigate.servers.flatMap((x) => [
-        widgetRow(t("frigate.events"), x.name, icon("camera"), { type: "widget", source: "frigate", server: x.id, view: "events" }),
-        ...x.cameras.map((c) => widgetRow(c.name, `${x.name} · ${t("add.camera")}`, icon("camera"), { type: "widget", source: "frigate", server: x.id, view: "camera", camera: c.name })),
-      ]),
-    },
-    (o.qbit?.servers ?? []).length > 0 && { id: "qbit", icon: "download", group: "integrations", rows: o.qbit.servers.map((x) => widgetRow(x.name, t("qbit.torrents"), icon("download"), { type: "widget", source: "qbit", server: x.id, view: "torrents" })) },
+    // every connected service, with the widgets its description has: one card for the whole, or one per row
+    ...svcConnections().map((x) => {
+      const spec = svcSpecNow(x.kind);
+      const rows = Object.entries(spec?.widgets ?? {}).flatMap(([view, w]) =>
+        w.kind === "picture"
+          ? (x.lists[w.of] ?? []).map((row) => widgetRow(String(row[w.caption] ?? ""), `${x.name} · ${svcText(w.label)}`, icon(x.icon), { type: "widget", source: "x", server: x.id, view, row: svcKey(spec, w.of, row) }))
+          : [widgetRow(w.kind === "summary" ? x.name : svcText(w.label), w.kind === "summary" ? svcText(w.label) : x.name, icon(x.icon), { type: "widget", source: "x", server: x.id, view })],
+      );
+      return rows.length > 0 && { id: `x-${x.id}`, label: x.name, icon: x.icon, group: "integrations", rows };
+    }),
   ].filter(Boolean);
 }
 
@@ -2553,7 +2573,7 @@ function addDialog() {
   const paint = () => {
     const sections = addSections();
     if (!sections.some((one) => one.id === addUi.section)) addUi.section = "machines";
-    const entry = (section) => h("button", { type: "button", class: "cat" + (section.id === addUi.section && !addUi.find ? " active" : ""), onclick: () => ((addUi.section = section.id), (addUi.find = ""), (field.value = ""), paint()) }, h("span", { class: "add-cat" }, icon(section.icon), t("add.section." + section.id)), h("span", { class: "muted small" }, counted(section)));
+    const entry = (section) => h("button", { type: "button", class: "cat" + (section.id === addUi.section && !addUi.find ? " active" : ""), onclick: () => ((addUi.section = section.id), (addUi.find = ""), (field.value = ""), paint()) }, h("span", { class: "add-cat" }, icon(section.icon), section.label ?? t("add.section." + section.id)), h("span", { class: "muted small" }, counted(section)));
     const titled = (group) => [group && h("div", { class: "cat-title" }, t("add.group." + group)), sections.filter((one) => (one.group ?? "") === group).map(entry)];
     put(nav, titled(""), titled("state"), titled("integrations"), h("a", { class: "cat", href: "#/house", onclick: () => dialog.close() }, h("span", { class: "add-cat" }, icon("plus"), t("add.connect"))));
     const typed = addUi.find.trim().toLowerCase();
@@ -2562,7 +2582,7 @@ function addDialog() {
       return put(main, found.length ? found.map(row) : h("p", { class: "muted add-none" }, t("add.none", { text: addUi.find.trim() })));
     }
     const section = sections.find((one) => one.id === addUi.section);
-    put(main, h("div", { class: "add-head" }, h("h3", null, t("add.section." + section.id)), h("p", { class: "muted small" }, t("add.lead." + section.id))), section.rows.map(row));
+    put(main, h("div", { class: "add-head" }, h("h3", null, section.label ?? t("add.section." + section.id)), h("p", { class: "muted small" }, section.label ? t("add.lead.service") : t("add.lead." + section.id))), section.rows.map(row));
   };
   const field = h("input", { type: "search", placeholder: t("add.find"), "aria-label": t("add.find"), value: addUi.find, autocomplete: "off", oninput: () => ((addUi.find = field.value), paint()) });
   dialog = openDialog("xwide add-dialog", h("header", null, h("h2", { class: "grow" }, t("home.addTitle")), closeX(() => dialog)), h("label", { class: "add-find" }, icon("search"), field), h("div", { class: "add-body" }, nav, main));
@@ -2738,8 +2758,7 @@ function attentionItem(item) {
     item.code === "machine.away" && open(`#/machines/${item.detail.id}`),
     item.code.startsWith("containers.") && state.route.view !== "containers" && open("#/containers"),
     item.code.startsWith("ha.") && !(state.route.view === "ha" && state.route.id === item.detail.host) && open(`#/ha/${item.detail.host}`),
-    item.code.startsWith("frigate.") && !(state.route.view === "frigate" && state.route.id === item.detail.host) && open(`#/frigate/${item.detail.host}`),
-    item.code.startsWith("qbit.") && !(state.route.view === "qbit" && state.route.id === item.detail.host) && open(`#/qbit/${item.detail.host}`),
+    item.code.startsWith("integration.") && !(state.route.view === "service" && state.route.id === item.detail.host) && open(`#/service/${item.detail.host}`),
     item.code.startsWith("pve.") && state.route.view !== "proxmox" && open(`#/proxmox/${item.detail.host}${item.code === "pve.guestDown" ? "/guests" : item.code === "pve.backupFailed" ? "/tasks" : ""}`),
     (item.code === "machine.restarting" || item.code === "machine.partial") && open(`#/machines/${item.detail.id}/apps`),
     item.app && open(`#/apps/${item.app}${item.code === "restarting" || item.code === "partial" ? "/logs" : ""}`, t(item.code === "restarting" || item.code === "partial" ? "app.logs" : "common.open")),
@@ -3439,18 +3458,6 @@ function renderAppTab() {
   appOverviewTab(app, box);
 }
 
-/** The app runs a Frigate that is connected: its cameras, and the way to them */
-function appCamerasCard(app) {
-  const f = state.overview?.frigate?.apps?.[app.name];
-  return f && h("section", { class: "card pad section-head" }, h("div", null, h("h2", null, t("frigate.cameras")), h("p", { class: "muted small" }, f.online ? t("frigate.workingOf", { n: f.working, total: f.cameras }) : t("frigate.offline"))), h("a", { class: "btn small", href: `#/frigate/${f.id}` }, icon("camera"), h("span", null, t("common.open"))));
-}
-
-/** The app runs a qBittorrent that is connected: what it is doing, and the way to its torrents */
-function appTorrentsCard(app) {
-  const q = state.overview?.qbit?.apps?.[app.name];
-  return q && h("section", { class: "card pad section-head" }, h("div", null, h("h2", null, t("qbit.title")), h("p", { class: "muted small" }, q.online ? `${qbitSpeeds(q)} · ${t("qbit.activeOf", { n: q.active, total: q.total })}` : t("qbit.offline"))), h("a", { class: "btn small", href: `#/qbit/${q.id}` }, icon("download"), h("span", null, t("common.open"))));
-}
-
 /** A line that leads to the one table of access, for the places that show or change a part of it */
 const accessLink = () => h("p", { class: "muted small" }, t("access.givenAt"), " ", h("a", { class: "link", href: "#/settings/users/access", onclick: (e) => e.currentTarget.closest("dialog")?.close() }, `${t("area.settings.users")} → ${t("users.part.access")}`));
 
@@ -3507,7 +3514,7 @@ function appOverviewTab(app, box) {
   };
 
   box.replaceChildren(
-    ...[appTorrentsCard(app), appCamerasCard(app)].filter(Boolean),
+    appServiceCard(app),
     h(
       "div",
       { class: "columns" },
@@ -5604,12 +5611,7 @@ const haCrumbs = () => null;
 /** The kinds of things the house holds: where their list is asked, where the page draws, how one is connected */
 const HOUSE = {
   ha: { tab: "ha", list: "/api/ha", body: "ha-body", icon: "bulb", name: "Home Assistant", found: "found", load: () => void loadHa(), add: (url) => haDialog(null, url) },
-  frigate: { tab: "cameras", list: "/api/frigate", body: "frigate-body", icon: "camera", name: "Frigate", found: "frigateFound", load: () => (paintFrigate(), void loadFrigate()), add: (url) => frigateDialog(null, url) },
-  qbit: { tab: "torrents", list: "/api/qbit", body: "qbit-body", icon: "download", name: "qBittorrent", found: "qbitFound", load: () => (paintQbit(), void loadQbit()), add: (url) => qbitDialog(null, url) },
 };
-/** The app of this server a connected qBittorrent is, by the server's id; a torrent client that is nobody's app lives in the house */
-const torrentsApp = (id) => Object.entries(state.overview?.qbit?.apps ?? {}).find(([, q]) => q.id === id)?.[0] ?? "";
-const foreignTorrents = () => (state.overview?.qbit?.count ?? 0) > Object.keys(state.overview?.qbit?.apps ?? {}).length;
 const houseAdd = () => button(t("house.connect"), { onclick: (e) => integrationsAddMenu(e.currentTarget) }, "plus");
 
 /** A tab of the house: the head, a switch between the servers when there are several, and the page of the one chosen */
@@ -5628,8 +5630,6 @@ async function houseOpen(view) {
     return state.route.view === view && box?.isConnected && put(box, h("p", { class: "card pad muted" }, errorText(e)));
   }
   if (state.route.view !== view || !box?.isConnected) return;
-  // the torrents' tab holds only those that are nobody's app: an app's own are on its page
-  if (view === "qbit") servers = servers.filter((x) => !torrentsApp(x.id));
   if (!servers.length) return houseEmpty(view, box);
   if (!servers.some((x) => x.id === state.route.id)) state.route.id = servers[0].id;
   const pick = document.getElementById("house-pick");
@@ -5638,12 +5638,23 @@ async function houseOpen(view) {
   k.load();
 }
 
+const haFoundUi = { found: null, address: "" };
+/** Home Assistants that can be connected: the store's app of this server first, then what answers on the home network */
+function haFound() {
+  const { found, address } = haFoundUi;
+  const out = [];
+  const here = (state.overview?.apps ?? []).some((a) => a.name === "home-assistant") && `http://${address || location.hostname}:8123`;
+  if (here) out.push({ name: "Home Assistant", kind: t("ha.foundHere"), icon: "bulb", url: here, connect: () => haDialog(null, here) });
+  for (const f of found ?? []) if (!f.known && f.url !== here) out.push({ name: f.name, kind: "Home Assistant", icon: "bulb", url: f.url, connect: () => haDialog(null, f.url) });
+  return out;
+}
+
 /** Nothing of the kind is connected yet: what it gives, the button, and what was found on this server and around */
 function houseEmpty(view, box) {
   const k = HOUSE[view];
   const paint = () => {
     if (!box.isConnected) return;
-    const found = integrationsFound([]).filter((f) => f.icon === k.icon);
+    const found = haFound();
     put(
       box,
       h("section", { class: "card pad empty-state" }, h("span", { class: "app-icon plus" }, icon(k.icon)), h("h2", null, t("house.none", { name: k.name })), h("p", { class: "muted" }, t(`integrations.${view}.what`)), button(t("house.connectOne", { name: k.name }), { class: "primary", onclick: () => k.add() }, "plus")),
@@ -5658,7 +5669,7 @@ function houseEmpty(view, box) {
   };
   paint();
   api("GET", k.list + "/found").then(
-    (r) => (view === "ha" ? Object.assign(integrationsUi, { found: r.found, address: r.address }) : (integrationsUi[k.found] = r.found), paint()),
+    (r) => (Object.assign(haFoundUi, { found: r.found, address: r.address }), paint()),
     () => {},
   );
 }
@@ -5690,200 +5701,416 @@ function renderHaBody() {
   );
 }
 
-// --- Integrations ---
-// Services Hata talks to through their own API. What runs on a machine of its own stays in Servers: these are what a service offers.
+// --- Services: a store's description of a service, drawn with Hata's own blocks ---
+// Nothing of a description runs here: it names fields, formats and blocks, and these functions draw them.
 
-const integrationsUi = { found: null, address: "", qbit: null, qbitFound: null, frigate: null, frigateFound: null };
-
-/** What can be connected and was found: apps of this server first, then what answers on the home network. Everything else is under "Add". */
-function integrationsFound(list) {
-  const { found, address, qbitFound, frigateFound } = integrationsUi;
+const svcUi = { conn: null, spec: null, rows: {}, params: {}, tab: "all", q: "", timer: 0, tick: 0, found: null };
+const svcConnections = () => state.overview?.integrations?.connections ?? [];
+const svcKinds = () => state.overview?.integrations?.kinds ?? [];
+/** The descriptions in use, as the overview carries them; one not there is asked for */
+const svcSpecNow = (kind) => state.overview?.integrations?.specs?.[kind] ?? null;
+const svcSpecsAsked = new Map();
+async function svcSpec(kind) {
+  const there = svcSpecNow(kind);
+  if (there) return there;
+  if (!svcSpecsAsked.has(kind)) svcSpecsAsked.set(kind, api("GET", `/api/integrations/kinds/${kind}`).catch((e) => (svcSpecsAsked.delete(kind), Promise.reject(e))));
+  return svcSpecsAsked.get(kind);
+}
+/** The app of this server a connection is, by its id: its page then lives with the app */
+const serviceApp = (id) => Object.entries(state.overview?.integrations?.apps ?? {}).find(([, x]) => x.id === id)?.[0] ?? "";
+/** Each kind with a connection that is nobody's app here has a tab of its own in Services */
+const serviceTabs = () => {
   const out = [];
-  const here = (state.overview?.apps ?? []).some((a) => a.name === "home-assistant") && !list.some((y) => y.here) && `http://${address || location.hostname}:8123`;
-  if (here) out.push({ name: "Home Assistant", kind: t("ha.foundHere"), icon: "bulb", url: here, connect: () => haDialog(null, here) });
-  for (const f of qbitFound ?? []) out.push({ name: f.title, kind: t("ha.foundHere"), icon: "download", url: f.url, connect: () => qbitDialog(null, f.url) });
-  for (const f of frigateFound ?? []) out.push({ name: f.title, kind: t("ha.foundHere"), icon: "camera", url: f.url, connect: () => frigateDialog(null, f.url) });
-  for (const f of found ?? []) if (!f.known && f.url !== here) out.push({ name: f.name, kind: "Home Assistant", icon: "bulb", url: f.url, connect: () => haDialog(null, f.url) });
+  for (const c of svcConnections()) if (!serviceApp(c.id) && !out.some((x) => x.kind === c.kind)) out.push({ id: `x-${c.kind}`, kind: c.kind, hash: `#/house/x-${c.kind}`, view: "service", module: "integrations", label: c.title });
   return out;
+};
+/** A text of a description in the page's language */
+const svcText = (text) => (text ? (text[state.lang] ?? text.en ?? "") : "");
+
+function svcFormat(v, as) {
+  if (v === null || v === undefined || v === "") return "";
+  if (Array.isArray(v)) return v.join(", ");
+  switch (as) {
+    case "bytes":
+      return bytes(v);
+    case "rate":
+      return `${bytes(v)}/s`;
+    case "percent":
+    case "progress":
+      return `${v}%`;
+    case "duration":
+      return duration(Math.max(60, v));
+    case "time":
+      return new Date(v).toLocaleString(state.lang);
+    case "ago":
+      return ago(v);
+    case "number":
+      return Number(v).toLocaleString(state.lang);
+    case "bool":
+      return v ? "✓" : "—";
+    default:
+      return String(v);
+  }
 }
 
-function integrationsAddMenu(at) {
-  let dialog;
-  const entry = (label, hint, iconName, action) => h("button", { type: "button", class: "menu-item", onclick: () => (dialog.close(), action()) }, h("span", { class: "app-icon plus" }, icon(iconName)), h("span", { class: "tile-text" }, h("span", { class: "tile-name" }, label), h("span", { class: "muted small" }, hint)));
-  dialog = openDialog("menu dropdown", h("header", null, h("h2", null, t("integrations.addWhat"))), entry("Home Assistant", t("integrations.ha.what"), "bulb", () => haDialog()), entry("qBittorrent", t("integrations.qbit.what"), "download", () => qbitDialog()), entry("Frigate", t("integrations.frigate.what"), "camera", () => frigateDialog()));
-  const r = at.getBoundingClientRect();
-  placeAt(dialog, { x: r.right - dialog.offsetWidth, y: r.bottom + 4 });
-  dialog.tabIndex = -1;
-  dialog.focus();
+/** A template of a description, its places filled from a row or the values; an empty place stays empty */
+const svcFill = (template, vars) => template.replace(/\{([A-Za-z_$@][A-Za-z0-9_.$@]*)(?:\|([a-z]+))?\}/g, (_, name, how) => svcFormat(vars[name], how));
+
+function svcTest(c, row) {
+  if (!c) return true;
+  if (c.any) return c.any.some((x) => svcTest(x, row));
+  if (c.all) return c.all.every((x) => svcTest(x, row));
+  if (c.not) return !svcTest(c.not, row);
+  const v = row[c.field];
+  if (c.in && !c.in.some((x) => x === v)) return false;
+  if (c.is !== undefined && (c.is === null ? v !== null && v !== undefined : v !== c.is)) return false;
+  if (c.gt !== undefined && !(typeof v === "number" && v > c.gt)) return false;
+  if (c.lt !== undefined && !(typeof v === "number" && v < c.lt)) return false;
+  return true;
 }
 
-// --- Frigate ---
+const svcSort = (rows, sort = []) =>
+  [...rows].sort((a, b) => {
+    for (const s of sort) {
+      const x = a[s.field];
+      const y = b[s.field];
+      const d = typeof x === "number" && typeof y === "number" ? x - y : String(x ?? "").localeCompare(String(y ?? ""));
+      if (d) return s.desc ? -d : d;
+    }
+    return 0;
+  });
 
-const frigateUi = { server: null, events: null, camera: "", label: "", timer: 0, tick: 0 };
-const frigateChip = (x) => h("span", { class: "state " + (x.online ? "running" : "") }, t(x.online ? "frigate.online" : x.error ? "frigate.offline" : "frigate.asking"));
-const frigateError = (x) => (x.error ? (has("error." + x.error.code) ? t("error." + x.error.code, { url: x.url, message: x.error.message ?? "" }) : x.error.code) : "");
-const eventPicture = (serverId, e, kind) => `/api/frigate/${serverId}/events/${encodeURIComponent(e.id)}/${kind}.jpg`;
-const cameraPicture = (serverId, name, height, tick) => `/api/frigate/${serverId}/cameras/${encodeURIComponent(name)}/latest.jpg?h=${height}&t=${tick}`;
-const eventWords = (e) => [e.label, e.score !== null && `${e.score}%`].filter(Boolean).join(" · ");
+const svcKey = (spec, list, row) => String(row[spec.lists[list]?.key ?? "id"]);
+const svcPicture = (id, name, key, height, tick = "") => `/api/integrations/${id}/pictures/${name}/${encodeURIComponent(key)}?h=${height}${tick !== "" ? `&t=${tick}` : ""}`;
+const svcLive = (id, name, key, height) => `/api/integrations/${id}/live/${name}/${encodeURIComponent(key)}?h=${height}&fps=${LIVE_FPS}`;
+const svcChip = (x) => h("span", { class: "state " + (x.online ? "running" : "") }, t(x.online ? "service.online" : x.error ? "service.offline" : "service.asking"));
+const svcError = (x) => (x.error ? (has("error." + x.error.code) ? t("error." + x.error.code, { url: x.url, name: x.name, message: x.error.message ?? "" }) : x.error.code) : "");
+/** The numbers a description puts in the head of its page, in a line */
+const svcNumbers = (spec, values) =>
+  spec.page
+    .flatMap((b) => b.numbers ?? [])
+    .map((n) => `${svcText(n.label)}: ${svcFormat(values[n.value], n.as) || "—"}`)
+    .join(" · ");
 
-function renderFrigate() {
-  if (frigateUi.server?.id !== state.route.id) Object.assign(frigateUi, { server: null, events: null, camera: "", label: "" });
-  houseShell("frigate");
+function svcCrumbs(x) {
+  const app = serviceApp(x.id);
+  const title = app && (state.overview?.apps ?? []).find((a) => a.name === app)?.title;
+  return app && !state.route.house ? h("nav", { class: "crumbs card on-card" }, h("a", { href: "#/apps" }, t("nav.apps")), icon("chevron"), h("a", { href: `#/apps/${app}` }, title ?? app), icon("chevron"), h("span", null, x.title)) : null;
 }
 
-async function loadFrigate() {
-  clearTimeout(frigateUi.timer);
+function renderService() {
+  const route = state.route;
+  if (svcUi.conn?.id !== route.id) Object.assign(svcUi, { conn: null, spec: null, rows: {}, params: {}, tab: "all", q: "" });
+  // a connection that is an app of this server: a page of that app
+  if (!route.house && route.id && serviceApp(route.id)) {
+    shell(h("div", { id: "svc-body", class: "stack" }));
+    return void loadService();
+  }
+  const conn = svcConnections().find((c) => c.id === route.id);
+  const kind = route.kind || conn?.kind || "";
+  shell(areaHead("house", `x-${kind}`, { actions: houseAdd() }), h("div", { id: "house-pick", class: "card filter-bar", hidden: true }), h("div", { id: "svc-body", class: "stack" }));
+  const list = svcConnections().filter((c) => c.kind === kind && !serviceApp(c.id));
+  if (!list.length) return put(document.getElementById("svc-body"), h("p", { class: "card pad muted" }, t("service.none")));
+  if (!list.some((c) => c.id === route.id)) state.route.id = list[0].id;
+  const pick = document.getElementById("house-pick");
+  pick.hidden = list.length < 2;
+  put(pick, h("div", { class: "seg-pills" }, list.map((c) => h("a", { class: "seg-pill" + (c.id === state.route.id ? " active" : ""), href: `#/house/x-${kind}/${c.id}` }, c.name))));
+  void loadService();
+}
+
+/** Asked again every five seconds while the page is on screen */
+async function loadService() {
+  clearTimeout(svcUi.timer);
   const id = state.route.id;
-  if (state.route.view !== "frigate") return;
+  if (state.route.view !== "service" || !id) return;
   try {
-    const query = new URLSearchParams({ limit: "40", ...(frigateUi.camera ? { camera: frigateUi.camera } : {}), ...(frigateUi.label ? { label: frigateUi.label } : {}) });
-    const [server, events] = await Promise.all([api("GET", `/api/frigate/${id}`), api("GET", `/api/frigate/${id}/events?${query}`).catch(() => null)]);
-    if (state.route.view !== "frigate" || state.route.id !== id) return;
-    const whole = !frigateUi.server;
-    frigateUi.server = server;
-    if (events) frigateUi.events = events.events;
-    frigateUi.tick++;
-    paintFrigate(whole);
+    const conn = await api("GET", `/api/integrations/${id}`);
+    const spec = await svcSpec(conn.kind);
+    // a list of events is read with the page's own filter and a longer reach
+    for (const b of spec.page) {
+      if (!b.events) continue;
+      const asked = { limit: "40", ...(svcUi.params[b.events.of] ?? {}) };
+      const got = await api("GET", `/api/integrations/${id}/rows/${b.events.of}?${new URLSearchParams(asked)}`).catch(() => null);
+      if (got) conn.lists[b.events.of] = got.rows;
+    }
+    if (state.route.view !== "service" || state.route.id !== id) return;
+    const whole = !svcUi.conn;
+    svcUi.conn = conn;
+    svcUi.spec = spec;
+    svcUi.tick++;
+    paintService(whole);
   } catch (e) {
-    const box = document.getElementById("frigate-body");
+    const box = document.getElementById("svc-body");
     if (box) put(box, h("p", { class: "card pad muted" }, errorText(e)));
     return;
   }
-  frigateUi.timer = setTimeout(loadFrigate, 10_000);
+  svcUi.timer = setTimeout(loadService, 5000);
 }
 
-/** A picture that failed says so instead of a broken image */
-function picture(src, alt, cls) {
-  const img = h("img", { src, alt, loading: "lazy", class: cls });
-  img.addEventListener("error", () => img.classList.add("broken"));
-  return img;
-}
-
-function frigateCamera(x, c) {
+function svcHead(x, spec) {
+  const kinds = svcKinds().find((k) => k.id === x.kind);
+  const general = Object.entries(spec.actions).filter(([, a]) => !a.on);
   return h(
-    "button",
-    { type: "button", class: "camera", onclick: () => cameraDialog(x, c) },
-    c.enabled ? picture(cameraPicture(x.id, c.name, 360, frigateUi.tick), c.name) : h("span", { class: "camera-off" }, icon("camera")),
-    h("span", { class: "camera-name" }, h("i", { class: "dot " + (c.online ? "running" : "stopped") }), h("span", { class: "clip" }, c.name), c.online && c.fps !== null && h("span", { class: "muted small mono" }, `${Math.round(c.fps)} fps`), !c.enabled && h("span", { class: "muted small" }, t("frigate.switchedOff")), c.enabled && !c.online && h("span", { class: "muted small" }, t("frigate.noFrames"))),
+    "div",
+    { class: "tree-head" },
+    h("div", null, h("h1", null, x.name, " ", svcChip(x)), h("p", { class: "meta" }, [x.title, x.values.version, x.url].filter(Boolean).join(" · ")), x.online && h("p", { class: "meta" }, svcNumbers(spec, x.values))),
+    h(
+      "div",
+      { class: "row-actions" },
+      h("a", { class: "btn", href: x.url, target: "_blank", rel: "noopener noreferrer" }, icon("external"), h("span", null, t("service.open", { kind: x.title }))),
+      general.map(([name, a], i) => button(svcText(a.label), { class: i === 0 ? "primary" : "", disabled: !x.online, onclick: () => svcActionDialog(x, spec, name, []) }, a.icon)),
+      h("button", { type: "button", class: "btn square", "aria-label": t("app.more"), onclick: (e) => svcMenu(x, underButton(e.currentTarget)) }, icon("more")),
+    ),
+    kinds?.newer && h("p", { class: "card pad warn-box" }, t("service.newer", { kind: x.title, version: kinds.newer }), " ", button(t("service.takeNewer"), { class: "small", onclick: () => svcTakeNewer(x.kind) })),
   );
 }
 
-/** One camera, larger and live while the dialog is open; the whole screen by the button or a double click */
-function cameraDialog(x, c) {
-  const img = livePicture(liveSrc(x.id, c.name, 1080), c.name, "camera-big");
+async function svcTakeNewer(kind) {
+  try {
+    await api("POST", `/api/integrations/kinds/${kind}/update`);
+    svcSpecsAsked.delete(kind);
+    await refresh();
+    svcUi.conn = null;
+    void loadService();
+  } catch (e) {
+    toast(errorText(e), "error");
+  }
+}
+
+function paintService(whole = true) {
+  const box = document.getElementById("svc-body");
+  const x = svcUi.conn;
+  const spec = svcUi.spec;
+  if (!box || !x || !spec) return;
+  const head = svcHead(x, spec);
+  const errorBox = x.error && h("p", { class: "card pad warn-box" }, svcError(x), " ", t("pve.since", { ago: ago(x.error.since) }));
+  // the field keeps its focus and the page its place: what changed is drawn again, the rest stays
+  if (!whole && document.getElementById("svc-head")) {
+    put(document.getElementById("svc-head"), head);
+    put(document.getElementById("svc-error"), errorBox);
+    spec.page.forEach((b, i) => svcBlockBody(b, i, x, spec));
+    return;
+  }
+  put(
+    box,
+    svcCrumbs(x),
+    h("section", { class: "card", id: "svc-head" }, head),
+    h("div", { id: "svc-error" }, errorBox),
+    spec.page.map((b, i) => svcBlock(b, i, x, spec)),
+  );
+  spec.page.forEach((b, i) => svcBlockBody(b, i, x, spec));
+}
+
+/** The standing part of a block: its title and its tools; `svcBlockBody` fills the rest */
+function svcBlock(b, i, x, spec) {
+  if (b.numbers) return null;
+  if (b.table) {
+    const tb = b.table;
+    const search = tb.search.length > 0 && h("input", { type: "search", placeholder: t("service.search"), value: svcUi.q, oninput: (e) => ((svcUi.q = e.target.value), svcBlockBody(b, i, svcUi.conn, spec)) });
+    const tabs = tb.tabs && h("div", { class: "seg" }, tb.tabs.values.map((v) => h("button", { type: "button", class: "btn small", "data-tab": v, onclick: () => ((svcUi.tab = v), svcBlockBody(b, i, svcUi.conn, spec)) }, svcText(spec.words[tb.tabs.words]?.[v]?.label) || v)));
+    return h("section", { class: "card" }, tb.title && h("div", { class: "pad-head" }, h("h2", null, svcText(tb.title))), (tabs || search) && h("div", { class: "qbit-tools" }, tabs, search), h("div", { id: `svc-b${i}` }));
+  }
+  if (b.pictures) return h("section", { class: "card pad stack-s" }, b.pictures.title && h("h2", null, svcText(b.pictures.title)), h("div", { id: `svc-b${i}` }));
+  if (b.events) {
+    const ev = b.events;
+    const filters = ev.filters.map((f) => {
+      const [list, fieldName] = (f.options ?? "").split(".");
+      const options = list ? [...new Set((x.lists[list] ?? []).map((r) => r[fieldName]).filter((v) => typeof v === "string"))] : [];
+      return h("select", { onchange: (e) => ((svcUi.params[ev.of] = { ...(svcUi.params[ev.of] ?? {}), [f.param]: e.target.value }), void loadService()) }, h("option", { value: "" }, svcText(f.label)), options.map((o) => h("option", { value: o, selected: svcUi.params[ev.of]?.[f.param] === o }, o)));
+    });
+    return h("section", { class: "card" }, h("div", { class: "section-head pad-head" }, h("h2", null, svcText(ev.title) || t("service.events")), filters), h("div", { id: `svc-b${i}` }));
+  }
+  return null;
+}
+
+function svcBlockBody(b, i, x, spec) {
+  const box = document.getElementById(`svc-b${i}`);
+  if (!box) return;
+  if (b.table) return put(box, svcTable(b.table, x, spec, box));
+  if (b.pictures) {
+    const p = b.pictures;
+    const rows = x.lists[p.of] ?? [];
+    return put(box, rows.length ? h("div", { class: "cameras" }, rows.map((row) => svcPictureTile(x, spec, p, row))) : h("p", { class: "muted" }, x.online ? t("service.nothing") : "—"));
+  }
+  if (b.events) {
+    const ev = b.events;
+    const rows = x.lists[ev.of] ?? [];
+    return put(box, rows.length ? h("div", { class: "camera-events" }, rows.map((row) => svcEventRow(x, spec, ev, row))) : h("p", { class: "muted pad" }, svcText(ev.empty) || t("service.nothing")));
+  }
+}
+
+function svcTable(tb, x, spec, box) {
+  const all = x.lists[tb.of] ?? [];
+  const inTab = (row, v) => !tb.tabs || v === "all" || row[tb.tabs.field] === v;
+  const q = svcUi.q.trim().toLowerCase();
+  const shown = all.filter((row) => inTab(row, svcUi.tab) && (!q || tb.search.some((f) => String(row[f] ?? "").toLowerCase().includes(q))));
+  box.closest(".card")?.querySelectorAll("[data-tab]").forEach((el) => {
+    const v = el.dataset.tab;
+    el.classList.toggle("active", v === svcUi.tab);
+    el.textContent = `${svcText(spec.words[tb.tabs.words]?.[v]?.label) || v} · ${all.filter((row) => inTab(row, v)).length}`;
+  });
+  if (!shown.length) return h("p", { class: "muted pad" }, all.length ? t("service.noneHere") : svcText(tb.empty) || t("service.nothing"));
+  const cell = (c, row) => {
+    const v = row[c.field];
+    const said = c.words ? spec.words[c.words]?.[String(v)] : null;
+    return h(
+      "td",
+      { class: c.as === "progress" ? "qbit-progress" : c.as === "rate" ? "small nowrap" : "" },
+      said
+        ? h("span", { class: "state " + (said.tone ?? "") }, svcText(said.label))
+        : c.as === "progress"
+          ? [h("div", { class: "small" }, c.note ? svcFill(c.note, row) : svcFormat(v, "percent")), meterBar(Number(v) || 0, "")]
+          : [h("div", { class: c.field === tb.columns[0].field ? "strong" : "" }, svcFormat(v, c.as) || "—"), c.note && c.as !== "progress" && h("div", { class: "muted small" }, svcFill(c.note, row))],
+      c.under && row[c.under.field] !== null && row[c.under.field] !== undefined && row[c.under.field] !== "" && h("div", { class: "muted small" + (c.under.as === "mono" ? " mono" : "") }, svcFormat(row[c.under.field], c.under.as)),
+    );
+  };
+  const tools = (row) =>
+    h(
+      "div",
+      { class: "row-actions" },
+      tb.actions.filter((n) => svcTest(spec.actions[n]?.when, row)).map((n) => {
+        const a = spec.actions[n];
+        const name = String(row.name ?? svcKey(spec, tb.of, row));
+        return h("button", { type: "button", class: "icon-btn", title: svcText(a.label), "aria-label": `${svcText(a.label)}: ${name}`, onclick: () => svcActionDialog(x, spec, n, [row], tb.of) }, icon(a.icon));
+      }),
+    );
+  return [
+    h("div", { class: "table-wrap" }, h("table", null, h("thead", null, h("tr", null, tb.columns.map((c) => h("th", null, svcText(c.label))), tb.actions.length > 0 && h("th"))), h("tbody", null, shown.slice(0, tb.limit).map((row) => h("tr", null, tb.columns.map((c) => cell(c, row)), tb.actions.length > 0 && h("td", null, tools(row))))))),
+    shown.length > tb.limit && h("p", { class: "muted small pad" }, t("service.firstOnly", { n: shown.length, limit: tb.limit })),
+  ];
+}
+
+function svcPictureTile(x, spec, p, row) {
+  const key = svcKey(spec, p.of, row);
+  const off = p.off && svcTest(p.off, row);
+  return h(
+    "button",
+    { type: "button", class: "camera", onclick: () => svcPictureDialog(x, p.picture, p.live, key, String(row[p.caption] ?? key)) },
+    off ? h("span", { class: "camera-off" }, icon(x.icon)) : picture(svcPicture(x.id, p.picture, key, 360, svcUi.tick), String(row[p.caption] ?? "")),
+    h("span", { class: "camera-name" }, h("i", { class: "dot " + (row.online === false || off ? "stopped" : "running") }), h("span", { class: "clip" }, String(row[p.caption] ?? key)), !off && p.note && h("span", { class: "muted small mono" }, svcFill(p.note, row).trim() === "fps" ? "" : svcFill(p.note, row))),
+  );
+}
+
+/** One picture, larger: live while the dialog is open when the description has a stream, else renewed every two seconds */
+function svcPictureDialog(x, still, live, key, title) {
+  const img = live ? livePicture(svcLive(x.id, live, key, 1080), title, "camera-big") : picture(svcPicture(x.id, still, key, 720, "d0"), title, "camera-big");
   const frame = h("div", { class: "camera-frame" }, img);
   const whole = () => (document.fullscreenElement ? void document.exitFullscreen() : void frame.requestFullscreen?.().catch(() => {}));
   img.addEventListener("dblclick", whole);
   frame.append(h("button", { type: "button", class: "icon-btn camera-full", title: t("tv.fullScreen"), "aria-label": t("tv.fullScreen"), onclick: whole }, icon("expand")));
   let dialog;
-  dialog = openDialog("xwide", h("header", null, h("h2", { class: "clip grow" }, c.name), closeX(() => dialog)), frame, h("p", { class: "muted small" }, t("frigate.liveNote", { fps: LIVE_FPS })));
-  dialog.addEventListener("close", () => letLiveGo(img));
+  dialog = openDialog("xwide", h("header", null, h("h2", { class: "clip grow" }, title), closeX(() => dialog)), frame, h("p", { class: "muted small" }, live ? t("service.liveNote", { fps: LIVE_FPS }) : t("service.stillNote")));
+  let tick = 0;
+  const every = !live && setInterval(() => (dialog.open ? (img.src = svcPicture(x.id, still, key, 720, `d${++tick}`)) : clearInterval(every)), 2000);
+  dialog.addEventListener("close", () => live && letLiveGo(img));
 }
 
-function eventDialog(x, e) {
-  let dialog;
-  dialog = openDialog(
-    "xwide",
-    h("header", null, h("h2", { class: "clip grow" }, `${eventWords(e)} · ${e.camera}`), closeX(() => dialog)),
-    e.snapshot ? picture(eventPicture(x.id, e, "snapshot"), e.label, "camera-big") : picture(eventPicture(x.id, e, "thumbnail"), e.label, "camera-big"),
-    h("p", { class: "muted small" }, new Date(e.start).toLocaleString(state.lang), e.end ? "" : ` · ${t("frigate.goingOn")}`, e.zones.length ? ` · ${e.zones.join(", ")}` : ""),
-  );
-}
-
-function frigateEventRow(x, e) {
+function svcEventRow(x, spec, ev, row) {
+  const key = svcKey(spec, ev.of, row);
+  const open = ev.open && spec.pictures[ev.open] && svcTest(spec.pictures[ev.open].when, row) ? ev.open : ev.picture;
   return h(
     "button",
-    { type: "button", class: "camera-event", onclick: () => eventDialog(x, e) },
-    picture(eventPicture(x.id, e, "thumbnail"), e.label),
-    h("span", { class: "grow" }, h("strong", null, eventWords(e)), h("span", { class: "muted small" }, ` ${e.camera}`), h("span", { class: "muted small", title: new Date(e.start).toLocaleString(state.lang) }, ` · ${ago(e.start)}`), !e.end && h("span", { class: "state running small" }, t("frigate.goingOn"))),
+    { type: "button", class: "camera-event", onclick: () => svcEventDialog(x, open, key, svcFill(ev.name, row), ev.note ? svcFill(ev.note, row) : "") },
+    picture(svcPicture(x.id, ev.picture, key, 180), ""),
+    h("span", { class: "grow" }, h("strong", null, svcFill(ev.name, row)), ev.note && h("span", { class: "muted small" }, ` ${svcFill(ev.note, row)}`), row.going === true && h("span", { class: "state running small" }, t("service.goingOn"))),
   );
 }
 
-function paintFrigateEvents() {
-  const box = document.getElementById("frigate-events");
-  const x = frigateUi.server;
-  if (!box || !x) return;
-  const list = frigateUi.events;
-  put(box, !list ? waitMark() : list.length ? h("div", { class: "camera-events" }, list.map((e) => frigateEventRow(x, e))) : h("p", { class: "muted pad" }, t(frigateUi.camera || frigateUi.label ? "frigate.noneHere" : "frigate.none")));
+function svcEventDialog(x, name, key, title, note) {
+  let dialog;
+  dialog = openDialog("xwide", h("header", null, h("h2", { class: "clip grow" }, title), closeX(() => dialog)), picture(svcPicture(x.id, name, key, 1080), title, "camera-big"), note && h("p", { class: "muted small" }, note));
 }
 
-function paintFrigate(whole = true) {
-  const box = document.getElementById("frigate-body");
-  const x = frigateUi.server;
-  if (!box || !x) return;
-  const working = x.cameras.filter((c) => c.online).length;
-  const head = h(
-    "div",
-    { class: "tree-head" },
-    h("div", null, h("h1", null, x.name, " ", frigateChip(x)), h("p", { class: "meta" }, ["Frigate", x.version, x.url].filter(Boolean).join(" · ")), x.online && h("p", { class: "meta" }, t("frigate.workingOf", { n: working, total: x.cameras.length }))),
-    h("div", { class: "row-actions" }, h("a", { class: "btn", href: x.url, target: "_blank", rel: "noopener noreferrer" }, icon("external"), h("span", null, t("frigate.open"))), h("button", { type: "button", class: "btn square", "aria-label": t("app.more"), onclick: (e) => frigateMenu(x, underButton(e.currentTarget)) }, icon("more"))),
+/** An action as its description says: what it asks first, and a question before what destroys */
+function svcActionDialog(x, spec, name, rows, list) {
+  const a = spec.actions[name];
+  const target = rows.map((r) => String(r.name ?? svcKey(spec, list, r)));
+  const ids = rows.map((r) => svcKey(spec, list, r));
+  const run = async (input = {}) => {
+    await api("POST", `/api/integrations/${x.id}/actions/${name}`, { ids, input });
+    if (a.done) toast(svcText(a.done));
+    setTimeout(loadService, 600);
+  };
+  if (!a.ask.length && !a.confirm) return void run().catch((e) => toast(errorText(e), "error"));
+  const inputs = a.ask.map((q) => {
+    const el = q.kind === "check" ? h("input", { type: "checkbox" }) : q.kind === "lines" ? h("textarea", { rows: 4, class: "mono small", spellcheck: false }) : q.kind === "file" ? h("input", { type: "file", accept: q.check === "torrent" ? ".torrent,application/x-bittorrent" : "" }) : h("input", { autocomplete: "off" });
+    return { q, el };
+  });
+  const values = async () => {
+    const out = {};
+    for (const { q, el } of inputs) {
+      if (q.kind === "check") out[q.name] = el.checked;
+      else if (q.kind === "file") {
+        const f = el.files?.[0];
+        if (f) out[q.name] = btoa(Array.from(new Uint8Array(await f.arrayBuffer()), (b) => String.fromCharCode(b)).join(""));
+      } else out[q.name] = el.value;
+    }
+    return out;
+  };
+  const vars = { ...(rows[0] ?? {}), name: target.length > 1 ? `${target[0]} +${target.length - 1}` : (target[0] ?? x.name) };
+  const title = a.confirm ? svcFill(svcText(a.confirm.title), vars) : svcText(a.label);
+  const error = h("p", { class: "error", role: "alert" });
+  let dialog;
+  const send = async (e) => {
+    e.preventDefault();
+    error.textContent = "";
+    const submit = dialog.querySelector("button[type=submit]");
+    submit.disabled = true;
+    try {
+      await run(await values());
+      dialog.close();
+    } catch (err) {
+      error.textContent = errorText(err);
+    }
+    submit.disabled = false;
+  };
+  dialog = openDialog(
+    a.confirm ? "confirm" : "wide",
+    h(
+      "form",
+      { class: "stack", onsubmit: send },
+      h("header", null, h("h2", { class: "grow wrap" }, title), closeX(() => dialog)),
+      a.confirm?.lead && h("p", { class: "muted" }, svcFill(svcText(a.confirm.lead), vars)),
+      inputs.map(({ q, el }) => (q.kind === "check" ? [h("label", { class: "check" }, el, h("span", null, svcText(q.label))), q.hint && h("p", { class: "muted small" }, svcText(q.hint))] : field(svcText(q.label), el, svcText(q.hint)))),
+      error,
+      h("footer", null, closeButton(() => dialog, t("common.cancel")), h("button", { type: "submit", class: "btn " + (a.effect === "destroy" ? "danger" : "primary") }, icon(a.icon), h("span", null, svcText(a.label)))),
+    ),
   );
-  const problem = () => x.error && h("p", { class: "card pad warn-box" }, frigateError(x), " ", t("pve.since", { ago: ago(x.error.since) }));
-  const cameras = () => x.cameras.map((c) => frigateCamera(x, c));
-  const standing = document.getElementById("frigate-head");
-  if (standing && !whole) {
-    put(standing, head);
-    put(document.getElementById("frigate-error"), problem());
-    // a picture stays until the next has come: no blinking every ten seconds
-    const grid = document.getElementById("frigate-cameras");
-    if (grid.children.length === x.cameras.length && x.cameras.every((c, i) => grid.children[i].dataset.name === c.name && grid.children[i].dataset.state === `${c.enabled}${c.online}`)) {
-      x.cameras.forEach((c, i) => {
-        const img = grid.children[i].querySelector("img");
-        if (img) {
-          const next = h("img", { src: cameraPicture(x.id, c.name, 360, frigateUi.tick) });
-          next.addEventListener("load", () => (img.src = next.src));
-        }
-      });
-    } else put(grid, markCameras(cameras(), x.cameras));
-    return paintFrigateEvents();
-  }
-  const cameraSelect = h("select", { onchange: (e) => ((frigateUi.camera = e.target.value), void loadFrigate()) }, h("option", { value: "" }, t("frigate.allCameras")), x.cameras.map((c) => h("option", { value: c.name }, c.name)));
-  cameraSelect.value = frigateUi.camera;
-  put(
-    box,
-    h("section", { class: "card", id: "frigate-head" }, head),
-    h("div", { id: "frigate-error" }, problem()),
-    h("section", { class: "card pad stack-s" }, h("h2", null, t("frigate.cameras")), x.cameras.length ? h("div", { class: "cameras", id: "frigate-cameras" }, markCameras(cameras(), x.cameras)) : h("p", { class: "muted", id: "frigate-cameras" }, x.online ? t("frigate.noCameras") : "—")),
-    h("section", { class: "card" }, h("div", { class: "qbit-tools" }, h("h2", null, t("frigate.events")), cameraSelect), h("div", { id: "frigate-events" })),
-  );
-  paintFrigateEvents();
 }
 
-const markCameras = (els, cameras) => els.map((el, i) => ((el.dataset.name = cameras[i].name), (el.dataset.state = `${cameras[i].enabled}${cameras[i].online}`), el));
-
-function frigateMenu(x, at) {
-  menuAt(at, menuHeader(x.name, x.url, "camera"), [
-    { label: t("frigate.cameras"), icon: "camera", href: `#/frigate/${x.id}` },
-    { label: t("frigate.open"), icon: "external", run: () => window.open(x.url, "_blank", "noopener") },
-    { label: t("frigate.change"), icon: "edit", run: () => frigateDialog(x) },
-    { label: t("frigate.disconnect") + "…", icon: "trash", danger: true, run: () => frigateDisconnectDialog(x) },
+function svcMenu(x, at) {
+  menuAt(at, menuHeader(x.name, x.url, x.icon), [
+    { label: t("service.open", { kind: x.title }), icon: "external", run: () => window.open(x.url, "_blank", "noopener") },
+    { label: t("service.change"), icon: "edit", run: () => svcConnectDialog(x.kind, x) },
+    { label: t("service.disconnect") + "…", icon: "trash", danger: true, run: () => svcDisconnectDialog(x) },
   ]);
 }
 
-function frigateDisconnectDialog(x) {
-  let dialog;
-  dialog = openDialog(
-    "confirm",
-    h("h2", { class: "wrap" }, t("frigate.disconnectTitle", { name: x.name })),
-    h("p", { class: "muted" }, t("frigate.disconnectLead")),
-    h("footer", null, closeButton(() => dialog, t("common.cancel")), button(t("frigate.disconnect"), { class: "danger", onclick: async () => {
-        try {
-          await api("DELETE", `/api/frigate/${x.id}`);
-          dialog.close();
-          await refresh();
-          go("#/house");
-        } catch (e) {
-          toast(errorText(e), "error");
-        }
-      } }, "trash")),
-  );
+function svcDisconnectDialog(x) {
+  confirmAction({
+    title: t("service.disconnectTitle", { name: x.name }),
+    lead: t("service.disconnectLead", { kind: x.title }),
+    label: t("service.disconnect"),
+    run: async () => {
+      await api("DELETE", `/api/integrations/${x.id}`);
+      go("#/house");
+    },
+  });
 }
 
-function frigateDialog(old = null, address = "") {
-  const name = h("input", { value: old?.name ?? "", placeholder: "Frigate", maxLength: 40 });
-  const url = h("input", { value: old?.url ?? address, placeholder: "192.168.1.5:8971", required: true, autocapitalize: "none", spellcheck: false, class: "mono" });
-  const user = h("input", { value: old?.user ?? "admin", autocapitalize: "none", spellcheck: false, autocomplete: "off", name: "frigate-user" });
-  const password = h("input", { type: "password", autocomplete: "new-password", name: "frigate-password", placeholder: old ? t("qbit.passwordKept") : "" });
+/** Connecting a service, or changing how it is reached: the address, and what its description asks for */
+async function svcConnectDialog(kind, old = null, address = "") {
+  let spec;
+  try {
+    spec = await svcSpec(kind);
+  } catch (e) {
+    return toast(errorText(e), "error");
+  }
+  const name = h("input", { value: old?.name ?? "", placeholder: spec.title, maxLength: 40 });
+  const url = h("input", { value: old?.url ?? address, placeholder: `192.168.1.5:${spec.address.port}`, required: true, autocapitalize: "none", spellcheck: false, class: "mono" });
+  const user = spec.ask.includes("user") && h("input", { value: old?.user ?? spec.defaults.user ?? "", autocapitalize: "none", spellcheck: false, autocomplete: "off", name: `${kind}-user` });
+  const password = spec.ask.includes("password") && h("input", { type: "password", autocomplete: "new-password", name: `${kind}-password`, placeholder: old ? t("service.kept") : "" });
+  const token = spec.ask.includes("token") && h("input", { type: "password", autocomplete: "off", name: `${kind}-token`, class: "mono", placeholder: old ? t("service.kept") : "" });
   const cert = h("div");
   const error = h("p", { class: "error", role: "alert" });
   let fingerprint = null;
@@ -5894,19 +6121,19 @@ function frigateDialog(old = null, address = "") {
     const submit = dialog.querySelector("button[type=submit]");
     submit.disabled = true;
     try {
-      const data = { name: name.value, url: url.value, user: user.value, password: password.value, ...(fingerprint ? { fingerprint } : {}) };
-      const saved = old ? await api("PATCH", `/api/frigate/${old.id}`, data) : await api("POST", "/api/frigate", data);
+      const data = { kind, name: name.value, url: url.value, ...(user ? { user: user.value } : {}), ...(password ? { password: password.value } : {}), ...(token ? { token: token.value } : {}), ...(fingerprint ? { fingerprint } : {}) };
+      const saved = old ? await api("PATCH", `/api/integrations/${old.id}`, data) : await api("POST", "/api/integrations", data);
       dialog.close();
-      toast(t(old ? "frigate.changed" : "frigate.added", { name: saved.name }));
-      void refresh();
-      if (!old) go(`#/frigate/${saved.id}`);
-      else if (state.route.view === "frigate") void loadFrigate();
+      toast(t(old ? "service.changed" : "service.added", { name: saved.name }));
+      await refresh();
+      if (!old) go(`#/service/${saved.id}`);
+      else if (state.route.view === "service") void loadService();
     } catch (err) {
-      if (err.code === "frigate.confirmCert") {
-        // the server's own certificate: the person compares it with what the server says, then it is kept
-        put(cert, h("div", { class: "card pad stack-s warn-box" }, h("strong", null, t("frigate.certTitle")), h("p", { class: "small" }, t("frigate.certLead", { subject: err.detail.subject || "—", issuer: err.detail.issuer || "—" })), h("p", { class: "mono small wrap" }, err.detail.fingerprint)));
+      if (err.code === "integration.confirmCert") {
+        // the service's own certificate: the person compares it with what the service says, then it is kept
+        put(cert, h("div", { class: "card pad stack-s warn-box" }, h("strong", null, t("service.certTitle")), h("p", { class: "small" }, t("service.certLead", { subject: err.detail.subject || "—", issuer: err.detail.issuer || "—" })), h("p", { class: "mono small wrap" }, err.detail.fingerprint)));
         fingerprint = err.detail.fingerprint;
-        submit.querySelector("span").textContent = t("frigate.certTrust");
+        submit.querySelector("span").textContent = t("service.certTrust");
       } else error.textContent = errorText(err);
     }
     submit.disabled = false;
@@ -5916,12 +6143,13 @@ function frigateDialog(old = null, address = "") {
     h(
       "form",
       { class: "stack", onsubmit: send },
-      h("header", null, h("h2", { class: "grow" }, old ? t("frigate.changeTitle", { name: old.name }) : t("frigate.addTitle")), closeX(() => dialog)),
-      !old && h("p", null, t("frigate.addLead")),
-      field(t("frigate.url"), url, t("frigate.urlHint")),
-      h("div", { class: "form-pair" }, field(t("frigate.user"), user), field(t("frigate.password"), password)),
-      h("p", { class: "muted small" }, t("frigate.passwordHint")),
-      field(t("frigate.name"), name),
+      h("header", null, h("h2", { class: "grow" }, old ? t("service.changeTitle", { name: old.name }) : t("service.addTitle", { kind: spec.title })), closeX(() => dialog)),
+      !old && h("p", null, svcText(spec.what)),
+      field(t("service.url"), url, t("service.urlHint", { port: spec.address.port, scheme: spec.address.scheme })),
+      (user || password) && h("div", { class: "form-pair" }, user && field(t("service.user"), user), password && field(t("service.password"), password)),
+      token && field(t("service.token"), token),
+      (password || token) && h("p", { class: "muted small" }, t("service.secretHint")),
+      field(t("service.name"), name),
       cert,
       error,
       h("footer", null, closeButton(() => dialog, t("common.cancel")), h("button", { type: "submit", class: "btn primary" }, h("span", null, t(old ? "ha.save" : "integrations.connectIt")))),
@@ -5929,240 +6157,46 @@ function frigateDialog(old = null, address = "") {
   );
 }
 
-// --- qBittorrent ---
-
-const qbitUi = { server: null, torrents: null, filter: "all", q: "", timer: 0 };
-const QBIT_FILTERS = ["all", "downloading", "seeding", "paused", "error"];
-const qbitChip = (x) => h("span", { class: "state " + (x.online ? "running" : "") }, t(x.online ? "qbit.online" : x.error ? "qbit.offline" : "qbit.asking"));
-const qbitError = (x) => (x.error ? (has("error." + x.error.code) ? t("error." + x.error.code, { url: x.url, message: x.error.message ?? "" }) : x.error.code) : "");
-const qbitSpeeds = (x) => `↓ ${bytes(x.down)}/s · ↑ ${bytes(x.up)}/s`;
-/** An app's own torrents are a page of that app; a client that is nobody's app is a tab of the house */
-function qbitCrumbs(name) {
-  const app = torrentsApp(state.route.id);
-  const title = app && (state.overview?.apps ?? []).find((a) => a.name === app)?.title;
-  return app ? h("nav", { class: "crumbs card on-card" }, h("a", { href: "#/apps" }, t("nav.apps")), icon("chevron"), h("a", { href: `#/apps/${app}` }, title ?? app), icon("chevron"), h("span", null, t("qbit.torrents"))) : null;
-}
-
-function renderQbit() {
-  if (qbitUi.server?.id !== state.route.id) Object.assign(qbitUi, { server: null, torrents: null, filter: "all", q: "" });
-  // an app's own torrents: the page of that app's torrents; else a tab of the house
-  if (!state.route.house && torrentsApp(state.route.id)) {
-    shell(h("div", { id: "qbit-body", class: "stack" }));
-    paintQbit();
-    return void loadQbit();
-  }
-  houseShell("qbit");
-}
-
-/** Asked again every five seconds while the page is on screen */
-async function loadQbit() {
-  clearTimeout(qbitUi.timer);
-  const id = state.route.id;
-  if (state.route.view !== "qbit") return;
-  try {
-    // the torrents first: asking for them is what brings the server's numbers up to date
-    const torrents = await api("GET", `/api/qbit/${id}/torrents`).catch(() => null);
-    const server = await api("GET", `/api/qbit/${id}`);
-    if (state.route.view !== "qbit" || state.route.id !== id) return;
-    const whole = !qbitUi.server;
-    qbitUi.server = server;
-    if (torrents) qbitUi.torrents = torrents.torrents;
-    paintQbit(whole);
-  } catch (e) {
-    const box = document.getElementById("qbit-body");
-    if (box) put(box, qbitCrumbs(id), h("p", { class: "card pad muted" }, errorText(e)));
-    return;
-  }
-  qbitUi.timer = setTimeout(loadQbit, 5000);
-}
-
-function qbitAct(path, data) {
-  return api("POST", `/api/qbit/${qbitUi.server.id}/torrents${path}`, data).then(loadQbit, (e) => toast(errorText(e), "error"));
-}
-
-function qbitRow(x) {
-  const paused = x.group === "paused" || x.group === "finished";
-  const word = x.group === "downloading" && x.waiting ? "waiting" : x.group;
-  const act = paused ? (x.group === "finished" ? "qbit.seed" : "qbit.resume") : x.group === "seeding" ? "qbit.stopSeeding" : "qbit.pause";
-  const tool = (label, name, onclick) => h("button", { type: "button", class: "icon-btn", title: label, "aria-label": `${label}: ${x.name}`, onclick }, icon(name));
-  return h(
-    "tr",
-    null,
-    h("td", { class: "qbit-name" }, h("div", { class: "strong" }, x.name), h("div", { class: "muted small mono" }, x.path)),
-    h("td", { class: "qbit-progress" }, h("div", { class: "small" }, `${x.percent}% · ${bytes(x.size)}`), meterBar(x.percent, x.group === "error" ? "danger" : "")),
-    h("td", null, h("span", { class: "state " + (x.group === "error" ? "restarting" : paused ? "" : x.group === "downloading" && x.waiting ? "" : "running") }, t("qbit.group." + word))),
-    h("td", { class: "small nowrap" }, x.down || x.up ? qbitSpeeds(x) : "—", x.eta !== null && x.group === "downloading" && h("div", { class: "muted" }, t("qbit.left", { time: duration(Math.max(60, x.eta)) }))),
-    h("td", null, h("div", { class: "row-actions" }, tool(t(act), paused ? "play" : "pause", () => qbitAct(paused ? "/resume" : "/pause", { hashes: [x.hash] })), tool(t("qbit.remove"), "trash", () => qbitRemoveDialog(x)))),
-  );
-}
-
-function paintQbitList() {
-  const box = document.getElementById("qbit-list");
-  if (!box) return;
-  const all = qbitUi.torrents;
-  if (!all) return put(box, h("p", { class: "muted pad" }, qbitUi.server?.error ? "—" : "…"));
-  const inGroup = (x, f) => f === "all" || x.group === f || (f === "paused" && x.group === "finished");
-  const q = qbitUi.q.trim().toLowerCase();
-  const shown = all.filter((x) => inGroup(x, qbitUi.filter) && (!q || x.name.toLowerCase().includes(q)));
-  document.querySelectorAll("#qbit-body [data-filter]").forEach((b) => {
-    const f = b.dataset.filter;
-    b.classList.toggle("active", f === qbitUi.filter);
-    b.textContent = `${t("qbit.filter." + f)} · ${all.filter((x) => inGroup(x, f)).length}`;
-  });
-  if (!shown.length) return put(box, h("p", { class: "muted pad" }, t(all.length ? "qbit.noneHere" : "qbit.none")));
-  put(box, h("div", { class: "table-wrap" }, h("table", null, h("thead", null, h("tr", null, h("th", null, t("qbit.col.name")), h("th", null, t("qbit.col.progress")), h("th", null, t("app.col.state")), h("th", null, t("qbit.col.speed")), h("th"))), h("tbody", null, shown.slice(0, 300).map(qbitRow)))), shown.length > 300 && h("p", { class: "muted small pad" }, t("qbit.firstOnly", { n: shown.length })));
-}
-
-function paintQbit(whole = true) {
-  const box = document.getElementById("qbit-body");
-  const x = qbitUi.server;
-  if (!box || !x) return;
-  const head = h(
-    "div",
-    { class: "tree-head" },
-    h("div", null, h("h1", null, x.name, " ", qbitChip(x)), h("p", { class: "meta" }, ["qBittorrent", x.version, x.url].filter(Boolean).join(" · ")), x.online && h("p", { class: "meta" }, `${qbitSpeeds(x.totals)} · ${t("qbit.activeOf", { n: x.totals.active, total: x.totals.total })}`)),
-    h("div", { class: "row-actions" }, h("a", { class: "btn", href: x.url, target: "_blank", rel: "noopener noreferrer" }, icon("external"), h("span", null, t("qbit.open"))), button(t("qbit.add"), { class: "primary", disabled: !x.online, onclick: () => qbitAddDialog() }, "plus"), h("button", { type: "button", class: "btn square", "aria-label": t("app.more"), onclick: (e) => qbitMenu(x, underButton(e.currentTarget)) }, icon("more"))),
-  );
-  // the field keeps its focus and the page its place: only what changed is drawn again
-  const standing = document.getElementById("qbit-head");
-  if (standing && !whole) {
-    put(standing, head);
-    put(document.getElementById("qbit-error"), x.error && h("p", { class: "card pad warn-box" }, qbitError(x), " ", t("pve.since", { ago: ago(x.error.since) })));
-    return paintQbitList();
-  }
-  const search = h("input", { type: "search", placeholder: t("qbit.search"), value: qbitUi.q, oninput: (e) => ((qbitUi.q = e.target.value), paintQbitList()) });
-  put(
-    box,
-    qbitCrumbs(x.name),
-    h("section", { class: "card", id: "qbit-head" }, head),
-    h("div", { id: "qbit-error" }, x.error && h("p", { class: "card pad warn-box" }, qbitError(x), " ", t("pve.since", { ago: ago(x.error.since) }))),
-    h(
-      "section",
-      { class: "card" },
-      h("div", { class: "qbit-tools" }, h("div", { class: "seg" }, QBIT_FILTERS.map((f) => h("button", { type: "button", class: "btn small", "data-filter": f, onclick: () => ((qbitUi.filter = f), paintQbitList()) }, t("qbit.filter." + f)))), search),
-      h("div", { id: "qbit-list" }),
-    ),
-  );
-  paintQbitList();
-}
-
-function qbitMenu(x, at) {
-  menuAt(at, menuHeader(x.name, x.url, "download"), [
-    { label: t("qbit.torrents"), icon: "download", href: `#/qbit/${x.id}` },
-    { label: t("qbit.open"), icon: "external", run: () => window.open(x.url, "_blank", "noopener") },
-    { label: t("qbit.change"), icon: "edit", run: () => qbitDialog(x) },
-    { label: t("qbit.disconnect") + "…", icon: "trash", danger: true, run: () => qbitDisconnectDialog(x) },
-  ]);
-}
-
-function qbitDisconnectDialog(x) {
+/** What can be connected: every kind the stores describe, and what runs on this server already */
+function integrationsAddMenu(at) {
   let dialog;
+  const entry = (label, hint, iconName, action) => h("button", { type: "button", class: "menu-item", onclick: () => (dialog.close(), action()) }, h("span", { class: "app-icon plus" }, icon(iconName)), h("span", { class: "tile-text" }, h("span", { class: "tile-name" }, label), h("span", { class: "muted small" }, hint)));
+  const found = svcUi.found ?? [];
   dialog = openDialog(
-    "confirm",
-    h("h2", { class: "wrap" }, t("qbit.disconnectTitle", { name: x.name })),
-    h("p", { class: "muted" }, t("qbit.disconnectLead")),
-    h("footer", null, closeButton(() => dialog, t("common.cancel")), button(t("qbit.disconnect"), { class: "danger", onclick: async () => {
-        try {
-          await api("DELETE", `/api/qbit/${x.id}`);
-          dialog.close();
-          await refresh();
-          go("#/house");
-        } catch (e) {
-          toast(errorText(e), "error");
-        }
-      } }, "trash")),
+    "menu dropdown",
+    h("header", null, h("h2", null, t("integrations.addWhat"))),
+    found.map((f) => entry(`${f.kindTitle}: ${f.title}`, t("ha.foundHere") + " · " + f.url.replace(/^https?:\/\//, ""), f.icon, () => svcConnectDialog(f.kind, null, f.url))),
+    entry("Home Assistant", t("integrations.ha.what"), "bulb", () => haDialog()),
+    svcKinds().map((k) => entry(k.title, k.what, k.icon, () => svcConnectDialog(k.id))),
+    !svcKinds().length && h("p", { class: "muted small pad" }, t("service.noKinds")),
   );
+  const r = at.getBoundingClientRect();
+  placeAt(dialog, { x: r.right - dialog.offsetWidth, y: r.bottom + 4 });
+  dialog.tabIndex = -1;
+  dialog.focus();
+  if (!svcUi.found) api("GET", "/api/integrations/found").then((r) => (svcUi.found = r.found), () => {});
 }
 
-function qbitRemoveDialog(x) {
-  const withData = h("input", { type: "checkbox" });
-  let dialog;
-  dialog = openDialog(
-    "confirm",
-    h("h2", { class: "wrap" }, t("qbit.removeTitle", { name: x.name })),
-    h("p", { class: "muted" }, t("qbit.removeLead")),
-    h("label", { class: "check" }, withData, h("span", null, t("qbit.removeData"))),
-    h("p", { class: "muted small" }, t("qbit.removeDataHint")),
-    h("footer", null, closeButton(() => dialog, t("common.cancel")), button(t("qbit.remove"), { class: "danger", onclick: async () => {
-        dialog.close();
-        await qbitAct("/remove", { hashes: [x.hash], withData: withData.checked });
-      } }, "trash")),
-  );
+/** The app runs a service that is connected: its widget's numbers, and the way to its page */
+function appServiceCard(app) {
+  const s = state.overview?.integrations?.apps?.[app.name];
+  const x = s && svcConnections().find((c) => c.id === s.id);
+  const spec = x && svcSpecNow(x.kind);
+  return x && spec && h("section", { class: "card pad section-head" }, h("div", null, h("h2", null, x.title), h("p", { class: "muted small" }, x.online ? svcNumbers(spec, x.values) : t("service.offline"))), h("a", { class: "btn small", href: `#/service/${x.id}` }, icon(x.icon), h("span", null, t("common.open"))));
 }
 
-function qbitDialog(old = null, address = "") {
-  const name = h("input", { value: old?.name ?? "", placeholder: "qBittorrent", maxLength: 40 });
-  const url = h("input", { value: old?.url ?? address, placeholder: "192.168.1.5:8080", required: true, autocapitalize: "none", spellcheck: false, class: "mono" });
-  const user = h("input", { value: old?.user ?? "admin", autocapitalize: "none", spellcheck: false, autocomplete: "off", name: "qbit-user" });
-  const password = h("input", { type: "password", autocomplete: "new-password", name: "qbit-password", placeholder: old ? t("qbit.passwordKept") : "" });
-  const error = h("p", { class: "error", role: "alert" });
-  let dialog;
-  const send = async (e) => {
-    e.preventDefault();
-    error.textContent = "";
-    const submit = dialog.querySelector("button[type=submit]");
-    submit.disabled = true;
-    try {
-      const data = { name: name.value, url: url.value, user: user.value, password: password.value };
-      const saved = old ? await api("PATCH", `/api/qbit/${old.id}`, data) : await api("POST", "/api/qbit", data);
-      dialog.close();
-      toast(t(old ? "qbit.changed" : "qbit.added", { name: saved.name }));
-      void refresh();
-      if (!old) go(`#/qbit/${saved.id}`);
-      else if (state.route.view === "qbit") void loadQbit();
-    } catch (err) {
-      error.textContent = errorText(err);
-    }
-    submit.disabled = false;
-  };
-  dialog = openDialog(
-    "wide",
-    h(
-      "form",
-      { class: "stack", onsubmit: send },
-      h("header", null, h("h2", { class: "grow" }, old ? t("qbit.changeTitle", { name: old.name }) : t("qbit.addTitle")), closeX(() => dialog)),
-      !old && h("p", null, t("qbit.addLead")),
-      field(t("qbit.url"), url, t("qbit.urlHint")),
-      h("div", { class: "form-pair" }, field(t("qbit.user"), user), field(t("qbit.password"), password)),
-      h("p", { class: "muted small" }, t("qbit.passwordHint")),
-      field(t("qbit.name"), name),
-      error,
-      h("footer", null, closeButton(() => dialog, t("common.cancel")), h("button", { type: "submit", class: "btn primary" }, h("span", null, t(old ? "ha.save" : "integrations.connectIt")))),
-    ),
-  );
+/** What the tile of such an app says under its name, as the description's `tile` words it */
+function appServiceLine(app) {
+  const s = state.overview?.integrations?.apps?.[app.name];
+  const spec = s && svcSpecNow(s.kind);
+  return s?.online && spec?.tile ? svcFill(spec.tile, s.values) : "";
 }
 
-function qbitAddDialog() {
-  const links = h("textarea", { rows: 4, class: "mono small", spellcheck: false, placeholder: "magnet:?xt=urn:btih:…" });
-  const file = h("input", { type: "file", accept: ".torrent,application/x-bittorrent" });
-  const error = h("p", { class: "error", role: "alert" });
-  let dialog;
-  const send = async (e) => {
-    e.preventDefault();
-    error.textContent = "";
-    const picked = file.files?.[0];
-    try {
-      const data = picked ? { file: btoa(Array.from(new Uint8Array(await picked.arrayBuffer()), (b) => String.fromCharCode(b)).join("")) } : { links: links.value };
-      await api("POST", `/api/qbit/${qbitUi.server.id}/torrents`, data);
-      dialog.close();
-      toast(t("qbit.addedTorrent"));
-      setTimeout(loadQbit, 800);
-    } catch (err) {
-      error.textContent = errorText(err);
-    }
-  };
-  dialog = openDialog(
-    "wide",
-    h(
-      "form",
-      { class: "stack", onsubmit: send },
-      h("header", null, h("h2", { class: "grow" }, t("qbit.add")), closeX(() => dialog)),
-      field(t("qbit.links"), links, t("qbit.linksHint")),
-      field(t("qbit.file"), file),
-      error,
-      h("footer", null, closeButton(() => dialog, t("common.cancel")), h("button", { type: "submit", class: "btn primary" }, h("span", null, t("qbit.addIt")))),
-    ),
-  );
+/** A picture that failed says so instead of a broken image */
+function picture(src, alt, cls) {
+  const img = h("img", { src, alt, loading: "lazy", class: cls });
+  img.addEventListener("error", () => img.classList.add("broken"));
+  return img;
 }
 
 function haOverview(x) {
@@ -14716,7 +14750,7 @@ const MODULE_GROUPS = ["storage", "network", "servers", "more"];
 /** Where a module's own things are once it is on */
 const MODULE_HOME = { music: "#/house/music", bluetooth: "#/house/bluetooth", tv: "#/house/tv", raid: "#/storage/raid", netplaces: "#/settings/places", shares: "#/settings/shares", offsite: "#/settings/backups", remote: "#/settings/remote", dns: "#/settings/dns", adblock: "#/settings/adblock", domains: "#/settings/ports", machines: "#/machines", proxmox: "#/machines", containers: "#/containers", integrations: "#/settings/integrations", assistant: "#/settings/assistant" };
 /** Where the thing that holds a module on is taken away */
-const MODULE_USE_AT = { speaker: "#/house/music", bluetooth: "#/house/bluetooth", tv: "#/tv", array: "#/storage/raid", merged: "#/settings/storage", pools: "#/storage/raid", places: "#/settings/places", shares: "#/settings/shares", offsite: "#/settings/backups", wireguard: "#/settings/remote", tailscale: "#/settings/remote", dnsOn: "#/settings/dns", blocking: "#/settings/adblock", names: "#/settings/https", ports: "#/settings/ports", machines: "#/machines", proxmox: "#/machines", containers: "#/containers", homeAssistant: "#/settings/integrations", qbit: "#/settings/integrations", frigate: "#/settings/integrations", keys: "#/settings/agents" };
+const MODULE_USE_AT = { speaker: "#/house/music", bluetooth: "#/house/bluetooth", tv: "#/tv", array: "#/storage/raid", merged: "#/settings/storage", pools: "#/storage/raid", places: "#/settings/places", shares: "#/settings/shares", offsite: "#/settings/backups", wireguard: "#/settings/remote", tailscale: "#/settings/remote", dnsOn: "#/settings/dns", blocking: "#/settings/adblock", names: "#/settings/https", ports: "#/settings/ports", machines: "#/machines", proxmox: "#/machines", containers: "#/containers", homeAssistant: "#/settings/integrations", services: "#/house", keys: "#/settings/agents" };
 const moduleName = (id) => t(`modules.${id}.name`);
 
 /** Which modules are on, asked again: after a change made here or on another page */
@@ -20804,8 +20838,7 @@ function assistantStarts() {
   const here =
     v === "machines" || v === "machine" || v === "proxmox" ? ["servers.room", "servers.backups", "servers.away"]
     : v === "containers" ? ["containers.use", "containers.backups"]
-    : v === "qbit" ? ["qbit.stuck", "qbit.room"]
-    : v === "frigate" ? ["frigate.working", "frigate.night"]
+    : v === "service" ? ["service.state", "service.problem"]
     : v === "ha" || v === "integrations" ? ["ha.batteries", "ha.updates"]
     : v === "app" ? ["app.slow", "app.update"]
     : v === "store" ? ["store.photos", "store.similar"]
@@ -21510,7 +21543,7 @@ function areaHead(area, at, { meta = null, metaId = null, actions = null, action
         ? h("div", { class: "actions" }, h("a", { class: "btn", href: "#/terminal" }, icon("terminal"), h("span", null, t("terminal.title"))), button(t("power.restart"), { onclick: () => serverPowerDialog("reboot") }, "refresh"), h("button", { type: "button", class: "btn square", "aria-label": t("app.more"), "aria-haspopup": "menu", onclick: (e) => serverMenu(underButton(e.currentTarget)) }, icon("more")))
         : (actions || actionsId) && h("div", { class: "actions", id: actionsId }, actions),
     ),
-    tabs.length > 1 && h("nav", { class: "tabs" }, tabs.map((tab) => h("a", { class: "tab" + (tab.id === at ? " active" : ""), href: tabHash(area, tab), "aria-current": tab.id === at ? "page" : null }, t(`area.${area}.${tab.id}`), area === "server" && serverTabCount(tab.id))),),
+    tabs.length > 1 && h("nav", { class: "tabs" }, tabs.map((tab) => h("a", { class: "tab" + (tab.id === at ? " active" : ""), href: tabHash(area, tab), "aria-current": tab.id === at ? "page" : null }, tab.label ?? t(`area.${area}.${tab.id}`), area === "server" && serverTabCount(tab.id))),),
   );
 }
 

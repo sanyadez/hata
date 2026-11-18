@@ -57,6 +57,8 @@ interface LoadedStore {
   recommended: string[];
   /** The store's own name, for one of Hata's format */
   name: Text;
+  /** Descriptions of services to connect, as YAML: the integrations engine reads them itself */
+  integrations: string[];
 }
 
 const stores = new Map<string, LoadedStore>();
@@ -128,6 +130,8 @@ export async function addStore(value: unknown, user: string): Promise<SyncResult
   if (!result.ok || result.apps === 0) {
     settings.stores = settings.stores.filter((s) => s.id !== id);
     stores.delete(id);
+  offered = null;
+    offered = null;
     rmSync(storeDir(id), { recursive: true, force: true });
     throw new StoreError(result.ok ? "store.noApps" : "store.syncFailed", { message: result.error ?? "" });
   }
@@ -183,8 +187,10 @@ function readHataIndex(source: StoreSource, index: StoreIndex, doc: unknown): Lo
     categories: Object.values(categories),
     recommended: Array.isArray(store.recommended) ? store.recommended.filter((n: unknown): n is string => typeof n === "string") : [],
     name: typeof store.name === "string" || isPlainObject(store.name) ? (store.name as Text) : "",
+    integrations: (Array.isArray(top.integrations) ? top.integrations : []).flatMap((x: unknown) => (isPlainObject(x) && typeof x.text === "string" && x.text.length < 200_000 ? [x.text] : [])),
   };
   stores.set(source.id, loaded);
+  offered = null;
   return loaded;
 }
 
@@ -212,6 +218,7 @@ function load(source: StoreSource): LoadedStore {
     categories: readList(join(dir, "category-list.json"), (c) => (isPlainObject(c) ? (c.name as string) : undefined)),
     recommended: readList(join(dir, "recommend-list.json"), (c) => (isPlainObject(c) ? (c.appid as string) : undefined)),
     name: "",
+    integrations: [],
   };
   stores.set(source.id, loaded);
   return loaded;
@@ -421,4 +428,12 @@ export function findStoreApp(name: string): StoreApp | null {
     if (app) return app;
   }
   return null;
+}
+
+let offered: { store: string; text: string }[] | null = null;
+/** The descriptions of services the stores offer, the default store first; the same list until a store changes */
+export function storeIntegrations(): { store: string; text: string }[] {
+  if (offered) return offered;
+  offered = [...stores.values()].flatMap((s) => s.integrations.map((text) => ({ store: s.source.id, text })));
+  return offered;
 }

@@ -97,7 +97,7 @@ import { bus, type BusEvent } from "./bus";
 import { DATA_DIR, dropOldSecrets, listenAddress, saveSettings, settings, timezone, updateSettings } from "./config";
 import { arrange, cleanLayout, dropBlock, dropServer, GRID, haTiles, layoutText, parseLayoutText } from "./dashboard";
 import { lanAddress } from "./integration";
-import { act, changeConnection, connect as connectService, connectionView, connections, disconnect as disconnectService, integrationKinds, integrationsFound, integrationsOfApps, integrationTrouble, kindView, pictureOf, rowsNow, streamOf, takeNewerSpec, widgetData } from "./integrations";
+import { act, changeConnection, connect as connectService, connectionView, connections, disconnect as disconnectService, integrationKinds, integrationsFound, integrationsOfApps, integrationTrouble, kindView, pictureOf, offerSpecs, rowsNow, specsInUse, streamOf, takeNewerSpec, widgetData } from "./integrations";
 import { act as haAct, addServer as addHa, allowProxy as haAllowProxy, changeServer as changeHa, discover as discoverHa, entities as haEntities, forgetUser as haForgetUser, homeAssistantTrouble, installUpdate as haInstallUpdate, makeBackup as haMakeBackup, removeServer as removeHa, renameEntity as haRename, server as haServer, servers as haServers, tileStates as haTileStates, visibleTo as haVisibleTo } from "./homeassistant";
 import { sees as haSees } from "./ha";
 import { dockerInfo, type DockerInfo, listContainers, watchEvents } from "./docker";
@@ -142,7 +142,7 @@ import { backupMachineApp, restoreMachineApp } from "./machinebackup";
 import { backupInstance, restoreInstance } from "./incusbackup";
 import { machineAccessRows, setMachineAccess } from "./machinegate";
 import { applyMachineCompose, installComposeOnMachine, machineTiles, installOnMachine, machineAppAction, machineAppLogs, machineApps, machineCompose, removeMachineApp, revealMachineLogin, storeAppFor } from "./machineapps";
-import { addStore, ARCH, catalogue, removeStore, scheduleStoreSync, StoreError, syncStore } from "./store";
+import { addStore, ARCH, catalogue, removeStore, scheduleStoreSync, StoreError, storeIntegrations, syncStore } from "./store";
 import { startSampler, systemStatus } from "./system";
 import { loadReport, loadTrouble, startLoad } from "./load";
 import { addDisc as addContainerDisc, receiveDisc as receiveContainerDisc, removeDisc as removeContainerDisc, ejectDisc as ejectContainerDisc, askScreen as containerAskScreen, openScreen as containerOpenScreen, isContainerScreen, screenOn as containerScreenOn, act as containerAct, cloneInstance as cloneContainer, renameInstance as renameContainer, addPlace as addContainerPlace, moveInstance as moveContainer, removePlace as removeContainerPlace, setStandardPlace, containerOfMachine, vmOfMachine, instanceOfMachine, containersTrouble, create as createContainer, install as installIncus, installVms as installIncusVms, removeContainer, removeSnapshot as removeContainerSnapshot, report as containersReport, restoreSnapshot as restoreContainerSnapshot, setLimits as setContainerLimits, setNetwork as setContainerNetwork, setUpNow as setUpContainers, shellCommand as containerShell, shellReady as containerShellReady, takeSnapshot as takeContainerSnapshot } from "./containers";
@@ -1231,7 +1231,7 @@ async function api(req: Request, url: URL, server: Server<unknown>): Promise<Res
       ha: { servers: haSeen, states: haTileStates(haTiles(dashboard)) },
       // qBittorrent: how many are connected, and what the tiles of the apps that run it say
       // integrations: each connection with its values and its widgets' rows, the app each one is, the kinds there are
-      integrations: admin ? { connections: widgetData(), apps: integrationsOfApps(apps), kinds: integrationKinds(language(url)) } : null,
+      integrations: admin ? { connections: widgetData(), apps: integrationsOfApps(apps), kinds: integrationKinds(language(url)), specs: specsInUse() } : null,
       jobs: admin ? listJobs().filter(jobToTell).map(({ log: _, ...job }) => job) : [],
     });
   }
@@ -3413,6 +3413,7 @@ export async function serve(): Promise<void> {
   startTrash();
   void resumeCopies();
   scheduleStoreSync();
+  offerSpecs(storeIntegrations);
   scheduleBackups();
   void resumeRestore();
   startGates();

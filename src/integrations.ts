@@ -127,9 +127,13 @@ type Offer = { store: string; text: string };
 let offered: () => Offer[] = () => [];
 export const offerSpecs = (from: () => Offer[]) => void (offered = from);
 
+let parsed: { from: Offer[]; specs: { spec: Spec; store: string; text: string }[] } | null = null;
 function storeSpecs(): { spec: Spec; store: string; text: string }[] {
+  const now = offered();
+  // read again only when the stores' list is another one
+  if (parsed?.from === now) return parsed.specs;
   const out: { spec: Spec; store: string; text: string }[] = [];
-  for (const o of offered()) {
+  for (const o of now) {
     try {
       const spec = readSpec(Bun.YAML.parse(o.text));
       if (atLeast(VERSION, spec.requires) && !out.some((x) => x.spec.id === spec.id)) out.push({ spec, store: o.store, text: o.text });
@@ -137,6 +141,7 @@ function storeSpecs(): { spec: Spec; store: string; text: string }[] {
       // a description this Hata cannot read is not offered
     }
   }
+  parsed = { from: now, specs: out };
   return out;
 }
 
@@ -186,6 +191,9 @@ export function kindView(kind: string) {
     lists: Object.fromEntries(Object.entries(read).filter(([, s]) => s.list !== undefined).map(([name, s]) => [name, { key: s.key, params: s.params, private: s.private }])),
   };
 }
+
+/** The descriptions of the kinds connected, for the page to draw their widgets and pages by */
+export const specsInUse = () => Object.fromEntries([...new Set(state.connections.map((c) => c.kind))].filter((k) => specs.has(k)).map((k) => [k, kindView(k)]));
 
 // --- Talking ----------------------------------------------------------------------------------------
 
