@@ -2230,6 +2230,9 @@ a.kpi:hover { background: var(--surface-2); }
 .card:not(.pad) > .section-head.pad + p.muted.pad { padding-top: 0; margin-top: calc(var(--gap-tight) - var(--gap-small)); padding-bottom: var(--gap-small); }
 .card.module-card { gap: var(--gap-small); }
 .card:not(.pad) { gap: 0; }
+/* the sign-in and setup forms are a card of their own padding: blocks --gap apart, a field's label --gap-tight over it */
+.card.auth { gap: var(--gap); }
+.card.auth > .error:empty { display: none; }
 .load-place { gap: 0; padding-bottom: 0; }
 .load-place > .block-head { padding: var(--pad) var(--pad) var(--gap-small); }
 .load-place > :is(.pad-x, .pad-b) { padding: 0 var(--pad); }
