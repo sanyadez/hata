@@ -107,8 +107,9 @@ test("a member has the numbers and their own tiles, closed up", () => {
 
 test("a tile of Home Assistant and a widget stay while their server is seen", () => {
   const layout = cleanLayout({ cards: [{ type: "ha", server: "bbbbbbbb", entity: "light.x", ...at(0, 0) }, { type: "widget", id: "w", source: "frigate", server: "cccccccc", view: "camera", camera: "yard", ...at(1, 0, 2, 2) }, { type: "widget", source: "frigate", server: "cccccccc", view: "camera", ...at(3, 0) }] });
-  expect(layout.cards).toHaveLength(2);
-  expect(arrange(layout, { apps: [], servers: ["bbbbbbbb"], widgetServers: ["cccccccc"], admin: true }).cards).toHaveLength(2);
+  expect(layout.cards).toHaveLength(3);
+  expect(layout.cards[1]).toMatchObject({ source: "x", view: "camera", row: "yard" });
+  expect(arrange(layout, { apps: [], servers: ["bbbbbbbb"], widgetServers: ["cccccccc"], admin: true }).cards).toHaveLength(3);
   expect(arrange(layout, { apps: [], admin: true }).cards).toHaveLength(0);
   expect(haTiles(layout)).toEqual(["bbbbbbbb/light.x"]);
 });
@@ -136,4 +137,9 @@ test("the layout as text comes back the same; text of the old format is taken to
   expect(parseLayoutText("groups:\n  - id: a\n    items:\n      - type: app\n        name: memos\n").cards.some((c) => c.type === "app")).toBe(true);
   expect(() => parseLayoutText("just words")).toThrow();
   expect(() => parseLayoutText("a: 1")).toThrow();
+});
+
+test("a camera's card keeps whether it shows live video, and only as a yes", () => {
+  const layout = cleanLayout({ cards: [{ type: "widget", id: "w", source: "frigate", server: "cccccccc", view: "camera", camera: "yard", live: true, ...at(0, 0) }, { type: "widget", id: "v", source: "frigate", server: "cccccccc", view: "camera", camera: "gate", live: "yes", ...at(1, 0) }, { type: "widget", id: "e", source: "frigate", server: "cccccccc", view: "events", live: true, ...at(2, 0) }] });
+  expect(layout.cards.map((c) => (c as { live?: boolean }).live)).toEqual([true, undefined, undefined]);
 });

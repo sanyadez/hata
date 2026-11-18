@@ -35,8 +35,8 @@ network, disks, their health, RAID, backups with restore of a whole app or of
 single files, the server's own network — Wi-Fi, a backup connection to the internet, an access point —, users and
 who may open what, HTTPS, notifications when something breaks. It also looks after the other computers of
 the house through a small client, makes containers and virtual machines on the server itself, looks after
-those of a Proxmox VE server, connects to services you already run — the devices of Home Assistant, the torrents of qBittorrent, the cameras of
-Frigate — and shows them right on its home page, and can be the home's DNS server with ad blocking. The full
+those of a Proxmox VE server, connects to services you already run — the devices of Home Assistant and a dozen
+services the store describes, torrents and cameras among them — and shows them right on its home page, and can be the home's DNS server with ad blocking. The full
 list is under [Status](#status).
 
 **What is it an alternative to?**
@@ -101,7 +101,7 @@ Early development. What works today:
   module that is off shows no page, no setting and runs nothing; turning one on installs nothing on the
   system. One that is in use cannot be turned off — the page says what uses it. A server updated from a
   version before modules keeps on what it uses;
-- one menu on top of every page — Home, Apps, Files, Computers, Services, Storage, Backups, Network — and each
+- one menu on top of every page — Home, Apps, Files, Computers, Integrations, Storage, Backups, Network — and each
   section's parts as tabs in its head, with a number by a section for what needs attention there and those
   very items on top of the section's page; Settings holds only how Hata itself behaves (the account, users and
   access, the look, notifications, modules, the assistant, updates), and "Find a setting" finds the rest
@@ -344,20 +344,24 @@ Early development. What works today:
   (Ubuntu with a desktop among the systems), its disk grows when asked. Inside a container that was given
   only part of the user ids (an unprivileged LXC, for one of Proxmox) none of this is offered, and the
   page says why;
-- the section "Services" — Home Assistant, the cameras, the TV, music and Bluetooth as tabs, each offering what it found on the
+- the section "Integrations" — Home Assistant, every kind of connected service, the TV, music and Bluetooth as tabs, with what was found on the
   home network and a "Connect" button; nothing is installed in the services themselves. Home Assistant servers, by a sign-in or a token: their devices put on Hata's home page next to the
   apps — a light switched, its brightness, a thermostat, a lock that asks first —, who sees them chosen
   per server, members switching only what is on their home page. A server's updates, its backups and its
   devices with a low battery are on its page and under "needs attention"; one running as an app of this
   server is opened by Hata's domain once it is told to trust Hata, which a button does;
-- qBittorrent: its torrents on a page of their own, searched and filtered, paused and resumed, added by a
-  link or a file, removed with or without their files; what it is doing on the app's tile and page; a word
-  when a torrent fails or the password stops being accepted;
-- Frigate: its cameras and what they noticed, with pictures that pass through and are not kept, for
-  administrators only; a word when a camera stops. A certificate of its own is confirmed once, and the
-  password goes only to that certificate. The moving video stays in Frigate;
-- widgets on Home, of any size the grid allows: torrents, a camera, what the cameras noticed; tiles of Home
-  Assistant are sized the same way;
+- services described by the store: how Hata signs in to a service, what it reads and shows, what may be done
+  there, written as data in Hata Store — Hata itself makes the requests, only to the address you gave, so a
+  description runs nothing. A new one needs no new Hata. Described now: qBittorrent and Transmission (torrents
+  searched and filtered, paused and resumed, added by a link or a file, removed with or without their files),
+  Frigate (cameras with live video and the whole screen, what they noticed; pictures pass through and are
+  not kept), Jellyfin (what is watched now and by whom, libraries), Sonarr and Radarr (the queue, what is
+  missing, what they say is wrong), Immich, Paperless-ngx, Syncthing, Uptime Kuma, AdGuard Home and Pi-hole.
+  A service of this server's apps is found and offered; what it does is on its app's tile and page; a word
+  under "needs attention" when the description says so, or when the password stops being accepted. A
+  certificate of the service's own is confirmed once, and the password goes only to that certificate;
+- widgets on Home, of any size the grid allows: a service's numbers and rows, a camera live or as a picture
+  renewed every 10 seconds, the newest pictures; tiles of Home Assistant are sized the same way;
 - HTTPS, your choice of three: none (address and ports, for a home network); behind your own proxy (nginx,
   Caddy, Traefik) with a check that the proxy is set up right; or by Hata itself with certificates from
   Let's Encrypt — one certificate per name, or one for the domain and every name under it, confirmed by a DNS
@@ -457,7 +461,7 @@ in Google Drive or Box.
 | ![Containers and virtual machines of this server, with their limits and where they are stored](screenshots/containers.png) Containers and virtual machines of this server, with their limits and where they are stored | ![A new virtual machine: Ubuntu with a desktop](screenshots/container-new.png) A new virtual machine: Ubuntu with a desktop |
 | ![A virtual machine's page: its screen, limits, snapshots](screenshots/vm-screen.png) A virtual machine's page: its screen, limits, snapshots | ![Their network, places and disc images](screenshots/containers-settings.png) Their network, places and disc images |
 
-### Services: Home Assistant, cameras, TV
+### Integrations: Home Assistant, cameras, TV
 
 | | |
 |---|---|

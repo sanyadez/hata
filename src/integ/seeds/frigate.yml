@@ -1,0 +1,139 @@
+format: 1
+id: frigate
+version: 2
+requires: 0.33.0
+title: Frigate
+icon: camera
+what:
+  en: Cameras and what they saw, with pictures and live video.
+  uk: Камери та їхні події, зі знімками й живим відео.
+apps: [frigate]
+images: [frigate]
+# the port with a sign-in speaks HTTPS with a certificate of its own; 5000 is plain HTTP without one
+address: { scheme: https, port: 8971 }
+
+signIn:
+  ask: [user, password]
+  defaults: { user: admin }
+  check:
+    request: { path: /api/version }
+    is: version
+  login:
+    request:
+      method: POST
+      path: /api/login
+      json: { user: "{user}", password: "{password}" }
+    cookie: [frigate_token]
+    refused: { status: [400, 401, 403] }
+
+read:
+  config:
+    request: { path: /api/config }
+    every: 600
+  stats:
+    request: { path: /api/stats }
+    every: 20
+  cameras:
+    from: config
+    list: cameras
+    key: name
+    fields:
+      name: $key
+      enabled: { from: enabled, type: bool, else: true }
+      detect: { from: detect.enabled, type: bool, else: true }
+      fps: { from: "@stats.cameras.{name}.camera_fps", type: number }
+      online: { test: { all: [{ field: enabled, is: true }, { field: fps, gt: 0 }] } }
+  events:
+    request:
+      path: /api/events
+      query: { limit: "{limit}", cameras: "{camera}", labels: "{label}", before: "{before}" }
+    every: 20
+    params:
+      camera: { kind: name }
+      label: { kind: name }
+      before: { kind: number }
+      limit: { kind: number, max: 100, default: 12 }
+    # who was where: an agent reads it only with a full key, asking each time
+    private: true
+    list: ""
+    fields:
+      id: id
+      camera: camera
+      label: { first: [sub_label, label], type: text }
+      score: { first: [data.top_score, data.score, top_score], type: number, times: 100, round: 0 }
+      start: { from: start_time, type: number, times: 1000 }
+      end: { from: end_time, type: number, times: 1000 }
+      zones: { from: zones, type: list }
+      snapshot: { from: has_snapshot, type: bool, else: false }
+      going: { test: { field: end, is: null } }
+
+values:
+  version: { from: "@check" }
+  cameras: { count: cameras }
+  working: { count: cameras, where: { field: online, is: true } }
+
+pictures:
+  still:
+    of: cameras
+    request: { path: "/api/{name}/latest.jpg", query: { h: "{height}" } }
+  live:
+    of: cameras
+    stream: true
+    request: { path: "/api/{name}", query: { fps: "{fps}", height: "{height}" } }
+    webrtc: { method: POST, path: /api/go2rtc/webrtc, query: { src: "{name}" } }
+  thumb:
+    of: events
+    request: { path: "/api/events/{id}/thumbnail.jpg" }
+  snapshot:
+    of: events
+    when: { field: snapshot, is: true }
+    request: { path: "/api/events/{id}/snapshot.jpg", query: { bbox: "1" } }
+
+page:
+  - numbers:
+      - { label: { en: Cameras, uk: Камер }, value: cameras, as: number }
+      - { label: { en: Working, uk: Працюють }, value: working, as: number }
+  - pictures:
+      of: cameras
+      title: { en: Cameras, uk: Камери }
+      picture: still
+      live: live
+      caption: name
+      note: "{fps} fps"
+      off: { field: enabled, is: false }
+  - events:
+      of: events
+      title: { en: Events, uk: Події }
+      picture: thumb
+      open: snapshot
+      name: "{label} · {score}%"
+      note: "{camera} · {start|ago}"
+      filters:
+        - { param: camera, label: { en: All cameras, uk: Усі камери }, options: cameras.name }
+      empty: { en: Nothing seen yet., uk: Подій немає. }
+
+widgets:
+  camera:
+    kind: picture
+    label: { en: Camera, uk: Камера }
+    of: cameras
+    picture: still
+    live: live
+    caption: name
+  events:
+    kind: pictures
+    label: { en: Events, uk: Події }
+    of: events
+    picture: thumb
+    caption: label
+    note: "{start|ago}"
+
+attention:
+  - id: camera
+    each: cameras
+    where: { all: [{ field: enabled, is: true }, { field: fps, is: 0 }] }
+    severity: warn
+    title: { en: "Camera {name}: no picture", uk: "Камера {name}: немає зображення" }
+    text:
+      en: "{server} gets no frames from it: it is off, out of the network, or its address changed."
+      uk: "{server} не отримує від неї кадрів: вона вимкнена, недоступна в мережі або її адреса змінилась."

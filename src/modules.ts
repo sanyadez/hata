@@ -36,7 +36,7 @@ export const MODULES: ModuleSpec[] = [
   { id: "machines", group: "servers", needs: [], paths: [/^\/api\/(machines|moveapp)(\/|$)/, /^\/client\//], tools: /^(machines$|machine_|app_move$)/, sections: [], views: ["machines"] },
   { id: "proxmox", group: "servers", needs: [], paths: [/^\/api\/proxmox(\/|$)/], tools: /^proxmox/, sections: [], views: ["machines", "proxmox", "guest"] },
   { id: "containers", group: "servers", needs: [], paths: [/^\/api\/containers(\/|$)/], tools: /^(containers?$|container_|disc_images$)/, sections: [], views: ["machines", "containers"] },
-  { id: "integrations", group: "more", needs: [], paths: [/^\/api\/(ha|qbit|frigate)(\/|$)/], tools: /^(cameras$|camera_|torrents$|torrent_|home_assistant)/, sections: ["integrations"], views: ["integrations", "ha", "qbit", "frigate"] },
+  { id: "integrations", group: "more", needs: [], paths: [/^\/api\/(ha|integrations)(\/|$)/], tools: /^(service|home_assistant)/, sections: ["integrations"], views: ["integrations", "ha", "service"] },
   { id: "tv", group: "more", needs: [], paths: [/^\/api\/tv(\/|$)/], sections: [], views: ["tv"] },
   { id: "bluetooth", group: "more", needs: [], paths: [/^\/api\/bluetooth(\/|$)/], sections: ["bluetooth"], views: [] },
   { id: "music", group: "more", needs: [], paths: [/^\/api\/music(\/|$)/], sections: [], views: ["music"] },
