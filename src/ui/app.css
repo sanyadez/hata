@@ -1871,7 +1871,7 @@ dialog.add-dialog:not([open]) { display: none; }
 .tvr-round:hover:not(:disabled), .tvr-arrow:hover:not(:disabled) { background: var(--surface-2); }
 .tvr :is(button):disabled { opacity: 0.4; cursor: default; }
 .tvr-transport { display: flex; justify-content: center; align-items: center; gap: 16px; }
-.tvr-main { display: grid; place-items: center; width: var(--main); height: var(--main); padding: 0; border: 0; border-radius: 50%; background: var(--accent); color: var(--on-accent); cursor: pointer; }
+.tvr-main { display: grid; place-items: center; flex: none; width: var(--main); height: var(--main); padding: 0; border: 0; border-radius: 50%; background: var(--accent); color: var(--on-accent); cursor: pointer; }
 .tvr-main .ico { width: 28px; height: 28px; }
 .tvr-main:disabled { background: var(--surface); border: 1px solid var(--border-strong); color: var(--text); }
 .tvr-volume { display: flex; align-items: center; gap: 12px; }
