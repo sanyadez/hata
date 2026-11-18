@@ -4,12 +4,11 @@
  * and nothing is signed in to — a thing found is only named.
  */
 import { connect } from "node:net";
-import { frigateFound } from "./frigates";
 import { discover as findHomeAssistants } from "./homeassistant";
 import { homeLinks, type Link } from "./mdns";
 import type { ModuleId } from "./modules";
 import { discover as findShares } from "./netplaces";
-import { qbitFound } from "./qbittorrent";
+import { integrationsFound } from "./integrations";
 import { lookAtPools, poolsReport } from "./raid";
 
 /** One thing found: the page words it as `modules.found.<what>` */
@@ -90,7 +89,7 @@ let looking: Promise<Find[]> | null = null;
 async function look(): Promise<Find[]> {
   // HATA_NO_LOOK: nothing is sent to the network (a run on somebody else's network, a test)
   const around = !process.env.HATA_NO_LOOK;
-  const [proxmox, assistants, shares, torrents, cameras] = await Promise.all([around ? quiet(findProxmox(), []) : [], around ? quiet(findHomeAssistants(), []) : [], around ? quiet(findShares(), []) : [], quiet(qbitFound("en"), []), quiet(frigateFound("en"), []), quiet(lookAtPools(), undefined)]);
+  const [proxmox, assistants, shares, services] = await Promise.all([around ? quiet(findProxmox(), []) : [], around ? quiet(findHomeAssistants(), []) : [], around ? quiet(findShares(), []) : [], quiet(integrationsFound("en"), []), quiet(lookAtPools(), undefined)]);
   const finds: Find[] = [];
   const pools = poolsReport().pools;
   if (pools.length) finds.push({ module: "raid", what: "arrays", detail: pools.map((pool) => pool.name).join(", ") });
@@ -101,8 +100,7 @@ async function look(): Promise<Find[]> {
   for (const host of proxmox) finds.push({ module: "proxmox", what: "proxmox", detail: host });
   if (Bun.which("incus")) finds.push({ module: "containers", what: "incus", detail: "" });
   for (const one of assistants.filter((a) => !a.known)) finds.push({ module: "integrations", what: "homeAssistant", detail: one.name || one.url });
-  for (const one of torrents) finds.push({ module: "integrations", what: "qbit", detail: one.title });
-  for (const one of cameras) finds.push({ module: "integrations", what: "frigate", detail: one.title });
+  for (const one of services) finds.push({ module: "integrations", what: "service", detail: `${one.kindTitle} (${one.title})` });
   return finds;
 }
 

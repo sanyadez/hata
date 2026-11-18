@@ -14,13 +14,14 @@ export type Entry =
   /** An entity of a Home Assistant server Hata is connected to: a light, a switch, a sensor */
   | { type: "ha"; server: string; entity: string }
   /** What an integration shows right on the page: its numbers, a camera, what the cameras noticed */
-  | { type: "widget"; id: string; source: "qbit" | "frigate"; server: string; view: "torrents" | "camera" | "events"; camera?: string; /** a camera's card shows live video instead of a picture renewed every 10 s */ live?: boolean }
+  | { type: "widget"; id: string; source: "x"; server: string; view: string; /** the row it shows, for a widget of one (a camera) */ row?: string; /** a camera's card shows live video instead of a picture renewed every 10 s */ live?: boolean }
   /** A tile of Hata's own, which can be moved but not taken off: the store, the "Add" tile */
   | { type: "builtin"; id: string };
 
 export const BUILTINS = ["store", "add"] as const;
-const WIDGET_VIEWS: Record<string, string[]> = { qbit: ["torrents"], frigate: ["camera", "events"] };
-const CAMERA_RE = /^[A-Za-z0-9_-]{1,64}$/;
+/** A widget of an integration's description: its id there, and the row it shows */
+const VIEW_RE = /^[a-z][a-z0-9-]{0,31}$/;
+const ROW_RE = /^[A-Za-z0-9_.:-]{1,128}$/;
 export type Item = Entry | { type: "folder"; id: string; title: string; items: Entry[] };
 
 /** A block of Hata's own: the numbers of this server or of a machine, what needs attention, the activity */
@@ -55,13 +56,13 @@ export const GRID = {
   limits: {
     stats: [2, 2, 8, 6], attention: [2, 2, 8, 8], activity: [2, 2, 8, 8], adblock: [2, 1, 4, 4], machine: [2, 1, 8, 4],
     app: [1, 1, 4, 4], link: [1, 1, 4, 4], files: [1, 1, 4, 4], builtin: [1, 1, 4, 4], folder: [1, 1, 4, 4], ha: [1, 1, 4, 4],
-    torrents: [1, 1, 8, 6], camera: [1, 1, 8, 6], events: [1, 1, 8, 6],
+    widget: [1, 1, 8, 6],
   } as Record<string, [number, number, number, number]>,
-  first: { stats: [5, 3], attention: [3, 3], activity: [3, 2], adblock: [2, 2], machine: [3, 1], torrents: [2, 1], camera: [2, 1], events: [2, 2] } as Record<string, [number, number]>,
+  first: { stats: [5, 3], attention: [3, 3], activity: [3, 2], adblock: [2, 2], machine: [3, 1], widget: [2, 1] } as Record<string, [number, number]>,
 };
 const MAX_ROW = 500;
 
-export const cardKind = (card: Item | Block): string => (card.type === "block" ? (card.id.startsWith("machine:") ? "machine" : card.id) : card.type === "widget" ? card.view : card.type);
+export const cardKind = (card: Item | Block): string => (card.type === "block" ? (card.id.startsWith("machine:") ? "machine" : card.id) : card.type);
 
 const overlap = (a: Box, b: Box) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
 
@@ -166,8 +167,10 @@ export function cleanLayout(input: unknown): Layout {
     if (raw.type === "app" && typeof raw.name === "string" && APP_RE.test(raw.name) && once("app " + raw.name)) made = { type: "app", name: raw.name };
     if (raw.type === "ha" && typeof raw.server === "string" && SERVER_RE.test(raw.server) && typeof raw.entity === "string" && ENTITY_RE.test(raw.entity) && once(`ha ${raw.server}/${raw.entity}`)) made = { type: "ha", server: raw.server, entity: raw.entity };
     // a widget is as large as the page lets it be: it does not go into a folder
-    if (!inFolder && raw.type === "widget" && typeof raw.source === "string" && WIDGET_VIEWS[raw.source]?.includes(String(raw.view)) && typeof raw.server === "string" && SERVER_RE.test(raw.server) && (raw.view !== "camera" || (typeof raw.camera === "string" && CAMERA_RE.test(raw.camera)))) {
-      made = { type: "widget", id: id(raw.id), source: raw.source as "qbit" | "frigate", server: raw.server, view: raw.view as "torrents" | "camera" | "events", ...(raw.view === "camera" ? { camera: raw.camera as string, ...(raw.live === true ? { live: true } : {}) } : {}) };
+    // qBittorrent's and Frigate's widgets of before descriptions name their row `camera`
+    const row = raw.row ?? raw.camera;
+    if (!inFolder && raw.type === "widget" && ["x", "qbit", "frigate"].includes(String(raw.source)) && typeof raw.view === "string" && VIEW_RE.test(raw.view) && typeof raw.server === "string" && SERVER_RE.test(raw.server) && (row === undefined || (typeof row === "string" && ROW_RE.test(row)))) {
+      made = { type: "widget", id: id(raw.id), source: "x", server: raw.server, view: raw.view, ...(typeof row === "string" ? { row } : {}), ...(raw.live === true && typeof row === "string" ? { live: true } : {}) };
     }
     if (raw.type === "files" && typeof raw.path === "string" && raw.path.startsWith("/") && raw.path.length <= 4096 && once("files " + raw.path)) made = { type: "files", path: raw.path };
     if (raw.type === "link") {

@@ -1,0 +1,227 @@
+format: 1
+id: qbittorrent
+version: 1
+requires: 0.33.0
+title: qBittorrent
+icon: download
+what:
+  en: "Torrents: speeds, progress, pause and resume, adding by a link or a file."
+  uk: "Торенти: швидкості, прогрес, пауза й продовження, додавання за посиланням або файлом."
+apps: [qbittorrent]
+images: [qbittorrent]
+address: { scheme: http, port: 8080 }
+
+signIn:
+  ask: [user, password]
+  defaults: { user: admin }
+  check:
+    request: { path: /api/v2/app/webapiVersion }
+    is: version
+  login:
+    request:
+      method: POST
+      path: /api/v2/auth/login
+      form: { username: "{user}", password: "{password}" }
+    # SID up to 5.1, QBT_SID_<port> since
+    cookie: [SID, QBT_SID_]
+    refused: { status: [401], text: Fails. }
+    banned: [403]
+  # a few wrong passwords and qBittorrent bans the address: a refused sign-in waits for the person
+  once: true
+  # 5.3 answers 401 to a Host whose port is not its own inside the container, and compares Origin and Referer with it
+  host: bare
+
+read:
+  version:
+    request: { path: /api/v2/app/version }
+    text: true
+    every: 3600
+  torrents:
+    request: { path: /api/v2/torrents/info, query: { sort: added_on, reverse: "true" } }
+    every: 15
+    list: ""
+    key: hash
+    fields:
+      hash: hash
+      name: name
+      state: state
+      group:
+        from: state
+        map:
+          downloading: downloading
+          metaDL: downloading
+          forcedMetaDL: downloading
+          forcedDL: downloading
+          stalledDL: downloading
+          queuedDL: downloading
+          allocating: downloading
+          moving: downloading
+          uploading: seeding
+          stalledUP: seeding
+          forcedUP: seeding
+          queuedUP: seeding
+          # named "paused" up to qBittorrent 4, "stopped" since 5
+          stoppedDL: paused
+          pausedDL: paused
+          stoppedUP: finished
+          pausedUP: finished
+          checkingDL: checking
+          checkingUP: checking
+          checkingResumeData: checking
+          error: error
+          missingFiles: error
+        else: downloading
+      status:
+        from: state
+        map: { stalledDL: waiting, queuedDL: waiting }
+        else: ""
+      tab:
+        # this row's own group
+        from: $group
+        map: { downloading: downloading, checking: downloading, seeding: seeding, paused: paused, finished: paused, error: error }
+        else: downloading
+      percent: { from: progress, type: number, times: 100, round: 1 }
+      size: size
+      down: dlspeed
+      up: upspeed
+      # qBittorrent's word for "no idea" is 100 days
+      eta: { from: eta, type: number, between: [0, 8639999] }
+      ratio: { from: ratio, type: number, round: 2 }
+      added: { from: added_on, type: number, times: 1000 }
+      path: save_path
+      moving: { test: { any: [{ field: down, gt: 0 }, { field: up, gt: 0 }] } }
+
+values:
+  webApi: { from: "@check" }
+  version: { from: "@version" }
+  down: { sum: torrents.down }
+  up: { sum: torrents.up }
+  total: { count: torrents }
+  active: { count: torrents, where: { field: moving, is: true } }
+  failed: { count: torrents, where: { field: group, is: error } }
+  firstFailed: { first: torrents, field: name, where: { field: group, is: error } }
+
+words:
+  group:
+    downloading: { label: { en: downloading, uk: завантажується }, tone: running }
+    seeding: { label: { en: seeding, uk: роздається }, tone: running }
+    paused: { label: { en: paused, uk: на паузі } }
+    finished: { label: { en: finished, uk: завершено } }
+    checking: { label: { en: checking, uk: перевіряється }, tone: running }
+    error: { label: { en: error, uk: помилка }, tone: restarting }
+  tab:
+    all: { label: { en: All, uk: Усі } }
+    downloading: { label: { en: Downloading, uk: Завантажуються } }
+    seeding: { label: { en: Seeding, uk: Роздаються } }
+    paused: { label: { en: Paused, uk: На паузі } }
+    error: { label: { en: Errors, uk: Помилки } }
+
+actions:
+  add:
+    label: { en: Add torrents, uk: Додати торенти }
+    icon: plus
+    effect: change
+    level: full
+    ask:
+      - name: links
+        kind: lines
+        check: links
+        group: what
+        label: { en: Links, uk: Посилання }
+        hint:
+          en: Magnet links, addresses of .torrent files or hashes, one a line. They download to the folder set in qBittorrent.
+          uk: Magnet-посилання, URL файлів .torrent або хеші, по одному в рядку. Файли зберігаються в теку, задану в qBittorrent.
+      - name: file
+        kind: file
+        check: torrent
+        group: what
+        label: { en: Or a .torrent file, uk: Або файл .torrent }
+    request:
+      method: POST
+      path: /api/v2/torrents/add
+      multipart: { urls: "{links|lines}", torrents: "{file}" }
+    fails: Fails.
+    done: { en: Added to qBittorrent, uk: Додано в qBittorrent }
+  pause:
+    label: { en: Pause, uk: Пауза }
+    icon: pause
+    on: torrents
+    when: { field: group, in: [downloading, seeding, checking, error] }
+    effect: change
+    requests:
+      # pause and resume are stop and start since Web API 2.11 (qBittorrent 5)
+      - { method: POST, path: /api/v2/torrents/stop, form: { hashes: "{ids|pipe}" }, when: { field: webApi, atLeast: "2.11" } }
+      - { method: POST, path: /api/v2/torrents/pause, form: { hashes: "{ids|pipe}" } }
+  resume:
+    label: { en: Resume, uk: Продовжити }
+    icon: play
+    on: torrents
+    when: { field: group, in: [paused, finished] }
+    effect: change
+    requests:
+      - { method: POST, path: /api/v2/torrents/start, form: { hashes: "{ids|pipe}" }, when: { field: webApi, atLeast: "2.11" } }
+      - { method: POST, path: /api/v2/torrents/resume, form: { hashes: "{ids|pipe}" } }
+  remove:
+    label: { en: Remove, uk: Видалити }
+    icon: trash
+    on: torrents
+    effect: destroy
+    confirm:
+      title: { en: "Remove {name}?", uk: "Видалити торент {name}?" }
+      lead: { en: The torrent goes off qBittorrent's list and stops seeding., uk: "Торент буде видалено з qBittorrent, роздача припиниться." }
+    ask:
+      - name: withData
+        kind: check
+        label: { en: Its downloaded files too, uk: Також видалити завантажені файли }
+        hint:
+          en: qBittorrent deletes them itself. They do not go to Hata's trash and cannot be brought back.
+          uk: Файли видаляє сам qBittorrent. Вони не потрапляють у кошик Hata, і відновити їх не вийде.
+    request:
+      method: POST
+      path: /api/v2/torrents/delete
+      form: { hashes: "{ids|pipe}", deleteFiles: "{withData}" }
+
+page:
+  - numbers:
+      - { label: { en: Download, uk: Завантаження }, value: down, as: rate }
+      - { label: { en: Upload, uk: Віддача }, value: up, as: rate }
+      - { label: { en: Active, uk: Активні }, value: active, as: number }
+      - { label: { en: Torrents, uk: Торентів }, value: total, as: number }
+  - table:
+      of: torrents
+      columns:
+        - { label: { en: Torrent, uk: Торент }, field: name, under: { field: path, as: mono } }
+        - { label: { en: Progress, uk: Прогрес }, field: percent, as: progress, note: "{percent}% · {size|bytes}" }
+        - { label: { en: State, uk: Стан }, field: group, words: group }
+        - { label: { en: Speed, uk: Швидкість }, field: down, as: rate, note: "↑ {up|rate}", under: { field: eta, as: duration } }
+      search: [name]
+      tabs: { field: tab, values: [all, downloading, seeding, paused, error], words: tab }
+      actions: [pause, resume, remove]
+      empty: { en: No torrents., uk: Торентів немає. }
+
+widgets:
+  torrents:
+    kind: summary
+    label: { en: Torrents, uk: Торенти }
+    numbers:
+      - { value: down, as: rate }
+      - { value: up, as: rate }
+    list:
+      of: torrents
+      where: { any: [{ field: group, is: downloading }, { field: moving, is: true }] }
+      sort: [{ field: down, desc: true }, { field: up, desc: true }, { field: percent }]
+      title: name
+      bar: percent
+      limit: 6
+
+tile: "↓ {down|rate} · ↑ {up|rate}"
+appCard: torrents
+
+attention:
+  - id: errors
+    when: { field: failed, gt: 0 }
+    severity: warn
+    title: { en: "{server}: torrents with an error: {failed}", uk: "{server}: торентів із помилками: {failed}" }
+    text:
+      en: "For example: {firstFailed}. Usually the files were moved, or the disk is missing or full."
+      uk: "Наприклад: {firstFailed}. Зазвичай файли перемістили, диск відсутній або заповнений."

@@ -19,7 +19,11 @@ export interface Answer {
   status: number;
   cookies: string[];
   bytes: Buffer;
+  /** Every header, lowercased names */
+  headers: Record<string, string>;
 }
+
+const flatHeaders = (raw: Record<string, string | string[] | undefined>) => Object.fromEntries(Object.entries(raw).flatMap(([k, v]) => (v === undefined || k === "set-cookie" ? [] : [[k.toLowerCase(), Array.isArray(v) ? v.join(", ") : v]])));
 
 function reach(url: string, timeout: number): Promise<{ socket: TLSSocket; shown: Shown }> {
   const u = new URL(url);
@@ -43,7 +47,7 @@ export async function showCertificate(url: string, timeout = 10_000): Promise<Sh
 
 export class CertificateChanged extends Error {}
 
-export async function pinnedRequest(url: string, fingerprint: string, path: string, init: { method?: string; headers?: Record<string, string>; body?: string } = {}, timeout = 10_000): Promise<Answer> {
+export async function pinnedRequest(url: string, fingerprint: string, path: string, init: { method?: string; headers?: Record<string, string>; body?: string | Uint8Array } = {}, timeout = 10_000): Promise<Answer> {
   const { socket, shown } = await reach(url, timeout);
   if (fingerprint ? shown.fingerprint !== fingerprint : !shown.trusted) {
     socket.destroy();
@@ -56,7 +60,7 @@ export async function pinnedRequest(url: string, fingerprint: string, path: stri
       (res) => {
         const chunks: Buffer[] = [];
         res.on("data", (c: Buffer) => chunks.push(c));
-        res.on("end", () => resolve({ status: res.statusCode ?? 0, cookies: res.headers["set-cookie"] ?? [], bytes: Buffer.concat(chunks) }));
+        res.on("end", () => resolve({ status: res.statusCode ?? 0, cookies: res.headers["set-cookie"] ?? [], bytes: Buffer.concat(chunks), headers: flatHeaders(res.headers) }));
         res.on("error", reject);
       },
     );

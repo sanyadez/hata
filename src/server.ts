@@ -96,9 +96,8 @@ import {
 import { bus, type BusEvent } from "./bus";
 import { DATA_DIR, dropOldSecrets, listenAddress, saveSettings, settings, timezone, updateSettings } from "./config";
 import { arrange, cleanLayout, dropBlock, dropServer, GRID, haTiles, layoutText, parseLayoutText } from "./dashboard";
-import { addFrigate, cameraLive, cameraPicture, changeFrigate, eventPicture, frigateEvents, frigateFound, frigateOfApps, frigateServer, frigateServers, frigateTrouble, removeFrigate } from "./frigates";
 import { lanAddress } from "./integration";
-import { addQbit, addTorrents, changeQbit, qbitFound, qbitOfApps, qbitServer, qbitServers, qbitTorrents, qbitTrouble, qbitWidgets, removeQbit, removeTorrents, torrentsPower } from "./qbittorrent";
+import { act, changeConnection, connect as connectService, connectionView, connections, disconnect as disconnectService, integrationKinds, integrationsFound, integrationsOfApps, integrationTrouble, kindView, pictureOf, rowsNow, streamOf, takeNewerSpec, widgetData } from "./integrations";
 import { act as haAct, addServer as addHa, allowProxy as haAllowProxy, changeServer as changeHa, discover as discoverHa, entities as haEntities, forgetUser as haForgetUser, homeAssistantTrouble, installUpdate as haInstallUpdate, makeBackup as haMakeBackup, removeServer as removeHa, renameEntity as haRename, server as haServer, servers as haServers, tileStates as haTileStates, visibleTo as haVisibleTo } from "./homeassistant";
 import { sees as haSees } from "./ha";
 import { dockerInfo, type DockerInfo, listContainers, watchEvents } from "./docker";
@@ -1208,7 +1207,7 @@ async function api(req: Request, url: URL, server: Server<unknown>): Promise<Res
       music: admin && moduleOn("music") ? await musicNow().catch(() => null) : null,
       // ffmpeg is here: videos of this server are played in the browser by Hata's own player, the TV module on or off
       media: admin && tvStreamsHere(),
-      attention: admin ? notSnoozed(attention({ system, docker, apps, activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), exposed: exposedNics(), array: arrayTrouble(), shares: shareTrouble(), places: placesDown(), machines: awayMachines(), machineApps: onMachines, unused: unusedDisks(), filling: fillingUp(), pve: proxmoxTrouble(), ha: [...homeAssistantTrouble(), ...qbitTrouble(), ...frigateTrouble()], raid: poolsTrouble(), containers: containersTrouble(), dns: [...dnsTrouble(), ...blockTrouble(), ...wildcardTrouble()], load: loadTrouble(), sysupdates: sysUpdatesTrouble() })) : [],
+      attention: admin ? notSnoozed(attention({ system, docker, apps, activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), exposed: exposedNics(), array: arrayTrouble(), shares: shareTrouble(), places: placesDown(), machines: awayMachines(), machineApps: onMachines, unused: unusedDisks(), filling: fillingUp(), pve: proxmoxTrouble(), ha: [...homeAssistantTrouble(), ...integrationTrouble(language(url))], raid: poolsTrouble(), containers: containersTrouble(), dns: [...dnsTrouble(), ...blockTrouble(), ...wildcardTrouble()], load: loadTrouble(), sysupdates: sysUpdatesTrouble() })) : [],
       // how many items are put off: the list says so and leads to them
       attentionHidden: admin ? hiddenCount() : 0,
       // who signed in from where, and what was installed by whom, is the administrators' business
@@ -1231,9 +1230,8 @@ async function api(req: Request, url: URL, server: Server<unknown>): Promise<Res
       // Home Assistant: the servers this user sees, and the states of the tiles on the page
       ha: { servers: haSeen, states: haTileStates(haTiles(dashboard)) },
       // qBittorrent: how many are connected, and what the tiles of the apps that run it say
-      qbit: admin ? { count: qbitServers().length, apps: qbitOfApps(apps), servers: qbitWidgets() } : null,
-      // Frigate: the servers with their cameras and latest events (the widgets on Home), and the apps that run it
-      frigate: admin ? { servers: frigateServers(), apps: frigateOfApps(apps) } : null,
+      // integrations: each connection with its values and its widgets' rows, the app each one is, the kinds there are
+      integrations: admin ? { connections: widgetData(), apps: integrationsOfApps(apps), kinds: integrationKinds(language(url)) } : null,
       jobs: admin ? listJobs().filter(jobToTell).map(({ log: _, ...job }) => job) : [],
     });
   }
@@ -2170,13 +2168,9 @@ async function api(req: Request, url: URL, server: Server<unknown>): Promise<Res
   }
 
   // ---- Home Assistant: a press on a tile (members too), the rest for administrators ----
-  if (path === "/api/widgets" && method === "GET") return json({ qbit: qbitWidgets(), frigate: frigateServers() });
-  if (path.startsWith("/api/frigate")) {
-    const response = await frigateApi(req, url, user);
-    if (response) return response;
-  }
-  if (path.startsWith("/api/qbit")) {
-    const response = await qbittorrentApi(req, url, user);
+  if (path === "/api/widgets" && method === "GET") return json({ x: widgetData() });
+  if (path.startsWith("/api/integrations")) {
+    const response = await integrationsApi(req, url, user);
     if (response) return response;
   }
   if (path.startsWith("/api/ha")) {
@@ -2789,74 +2783,45 @@ async function machineFiles(req: Request, url: URL, server: Server<unknown>, id:
 }
 
 /** The servers a widget on Home may stand on: an administrator's, as their pages are */
-const widgetServers = () => [...qbitServers(), ...frigateServers()].map((s) => s.id);
+const widgetServers = () => connections().map((s) => s.id);
 
-async function frigateApi(req: Request, url: URL, user: User): Promise<Response | null> {
+async function integrationsApi(req: Request, url: URL, user: User): Promise<Response | null> {
   const path = url.pathname;
   const method = req.method;
   const by = user.name;
-  const jpeg = (bytes: Buffer) => new Response(bytes as BufferSource, { headers: { "content-type": "image/jpeg", "cache-control": "no-store", "x-content-type-options": "nosniff" } });
-  if (path === "/api/frigate" && method === "GET") return json({ servers: frigateServers() });
-  if (path === "/api/frigate" && method === "POST") return json(await addFrigate(await body(req), by), 201);
-  if (path === "/api/frigate/found" && method === "GET") return json({ found: await frigateFound(language(url)) });
-  const m = /^\/api\/frigate\/([a-f0-9]{8})(\/.*)?$/.exec(path);
+  const lang = language(url);
+  const passed = (headers: Record<string, string>) => ({ ...headers, "cache-control": "no-store", "x-content-type-options": "nosniff" });
+  if (path === "/api/integrations" && method === "GET") return json({ connections: connections(), kinds: integrationKinds(lang) });
+  if (path === "/api/integrations" && method === "POST") return json(await connectService(await body(req), by), 201);
+  if (path === "/api/integrations/found" && method === "GET") return json({ found: await integrationsFound(lang) });
+  const kind = /^\/api\/integrations\/kinds\/([a-z0-9-]{1,40})(\/update)?$/.exec(path);
+  if (kind && !kind[2] && method === "GET") return json(kindView(kind[1]!));
+  if (kind && kind[2] && method === "POST") return json(takeNewerSpec(kind[1]!, by));
+  const m = /^\/api\/integrations\/([a-f0-9]{8})(\/.*)?$/.exec(path);
   if (!m) return null;
   const id = m[1]!;
   const rest = m[2] ?? "";
-  if (rest === "" && method === "GET") return json(frigateServer(id));
-  if (rest === "" && method === "PATCH") return json(await changeFrigate(id, await body(req), by));
+  if (rest === "" && method === "GET") return json(connectionView(id));
+  if (rest === "" && method === "PATCH") return json(await changeConnection(id, await body(req), by));
   if (rest === "" && method === "DELETE") {
-    removeFrigate(id, by);
+    disconnectService(id, by);
     settings.dashboard = dropServer(settings.dashboard, id);
     saveSettings();
     return json({ ok: true });
   }
-  if (rest === "/events" && method === "GET") return json(await frigateEvents(id, { camera: url.searchParams.get("camera") ?? undefined, label: url.searchParams.get("label") ?? undefined, before: url.searchParams.get("before") ?? undefined, limit: url.searchParams.get("limit") ?? undefined }));
-  const camera = /^\/cameras\/([^/]+)\/latest\.jpg$/.exec(rest);
-  if (camera && method === "GET") return jpeg(await cameraPicture(id, decodeURIComponent(camera[1]!), Number(url.searchParams.get("h"))));
-  const live = /^\/cameras\/([^/]+)\/live$/.exec(rest);
-  if (live && method === "GET") {
-    const stream = await cameraLive(id, decodeURIComponent(live[1]!), Number(url.searchParams.get("h")), Number(url.searchParams.get("fps")), req.signal);
-    return new Response(stream.body, { headers: { "content-type": stream.type, "cache-control": "no-store", "x-content-type-options": "nosniff" } });
+  const rows = /^\/rows\/([A-Za-z0-9_]{1,32})$/.exec(rest);
+  if (rows && method === "GET") return json(await rowsNow(id, rows[1]!, Object.fromEntries(url.searchParams)));
+  const pic = /^\/(pictures|live)\/([A-Za-z0-9_]{1,32})\/([^/]{1,256})$/.exec(rest);
+  if (pic && method === "GET" && pic[1] === "pictures") {
+    const got = await pictureOf(id, pic[2]!, decodeURIComponent(pic[3]!), Number(url.searchParams.get("h")));
+    return new Response(got.bytes as BufferSource, { headers: passed({ "content-type": got.type }) });
   }
-  const event = /^\/events\/([^/]+)\/(thumbnail|snapshot)\.jpg$/.exec(rest);
-  if (event && method === "GET") return jpeg(await eventPicture(id, decodeURIComponent(event[1]!), event[2] as "thumbnail" | "snapshot"));
-  return null;
-}
-
-async function qbittorrentApi(req: Request, url: URL, user: User): Promise<Response | null> {
-  const path = url.pathname;
-  const method = req.method;
-  const by = user.name;
-  if (path === "/api/qbit" && method === "GET") return json({ servers: qbitServers() });
-  if (path === "/api/qbit" && method === "POST") return json(await addQbit(await body(req), by), 201);
-  if (path === "/api/qbit/found" && method === "GET") return json({ found: await qbitFound(language(url)) });
-  const m = /^\/api\/qbit\/([a-f0-9]{8})(\/.*)?$/.exec(path);
-  if (!m) return null;
-  const id = m[1]!;
-  const rest = m[2] ?? "";
-  if (rest === "" && method === "GET") return json(qbitServer(id));
-  if (rest === "" && method === "PATCH") return json(await changeQbit(id, await body(req), by));
-  if (rest === "" && method === "DELETE") {
-    removeQbit(id, by);
-    settings.dashboard = dropServer(settings.dashboard, id);
-    saveSettings();
-    return json({ ok: true });
+  if (pic && method === "GET") {
+    const stream = await streamOf(id, pic[2]!, decodeURIComponent(pic[3]!), Number(url.searchParams.get("h")), Number(url.searchParams.get("fps")), req.signal);
+    return new Response(stream.body, { headers: passed({ "content-type": stream.type }) });
   }
-  if (rest === "/torrents" && method === "GET") return json(await qbitTorrents(id));
-  if (rest === "/torrents" && method === "POST") {
-    await addTorrents(id, await body(req), by);
-    return json({ ok: true });
-  }
-  if ((rest === "/torrents/pause" || rest === "/torrents/resume") && method === "POST") {
-    await torrentsPower(id, (await body(req)).hashes, rest.endsWith("pause") ? "pause" : "resume", by);
-    return json({ ok: true });
-  }
-  if (rest === "/torrents/remove" && method === "POST") {
-    const data = await body(req);
-    await removeTorrents(id, data.hashes, data.withData === true, by);
-    return json({ ok: true });
-  }
+  const action = /^\/actions\/([A-Za-z0-9_]{1,32})$/.exec(rest);
+  if (action && method === "POST") return json(await act(id, action[1]!, await body(req), by));
   return null;
 }
 
@@ -3454,7 +3419,7 @@ export async function serve(): Promise<void> {
   void refreshHttps();
   refreshLocalNames();
   startNotifications({
-    attention: async () => notSnoozed(attention({ system: systemStatus(), docker: await dockerInfo(), apps: await listApps("en"), activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), exposed: exposedNics(), array: arrayTrouble(), shares: shareTrouble(), places: placesDown(), machines: awayMachines(), machineApps: await machineTiles(machineList(), "en").catch(() => []), unused: unusedDisks(), filling: fillingUp(), pve: proxmoxTrouble(), ha: [...homeAssistantTrouble(), ...qbitTrouble(), ...frigateTrouble()], raid: poolsTrouble(), containers: containersTrouble(), dns: [...dnsTrouble(), ...blockTrouble(), ...wildcardTrouble()], load: loadTrouble(), sysupdates: sysUpdatesTrouble() })),
+    attention: async () => notSnoozed(attention({ system: systemStatus(), docker: await dockerInfo(), apps: await listApps("en"), activity: recent(100), update: availableUpdate(), offsite: offsiteFailure(), disks: diskHealth(), trash: trashSizeOn, absent: absent(), internet: internetTrouble(), exposed: exposedNics(), array: arrayTrouble(), shares: shareTrouble(), places: placesDown(), machines: awayMachines(), machineApps: await machineTiles(machineList(), "en").catch(() => []), unused: unusedDisks(), filling: fillingUp(), pve: proxmoxTrouble(), ha: [...homeAssistantTrouble(), ...integrationTrouble()], raid: poolsTrouble(), containers: containersTrouble(), dns: [...dnsTrouble(), ...blockTrouble(), ...wildcardTrouble()], load: loadTrouble(), sysupdates: sysUpdatesTrouble() })),
     baseUrl: publicUrl,
     isAdmin: (id) => findUser(id)?.role === "admin",
   });

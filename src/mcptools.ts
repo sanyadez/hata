@@ -58,8 +58,7 @@ import { checkUpdates, packageUpdates, upgrade as upgradeSystem } from "./sysupd
 import { report as tailscaleReport } from "./tailscale";
 import { report as wireguardReport } from "./wireguard";
 import { act as haAct, entities as haEntities, servers as haServers } from "./homeassistant";
-import { frigateEvents, frigateServers } from "./frigates";
-import { addTorrents, qbitServers, qbitTorrents, removeTorrents, torrentsPower } from "./qbittorrent";
+import { act as serviceAct, connections as serviceConnections, kindView, rowsNow } from "./integrations";
 import { VERSION } from "./version";
 import en from "./lang/en.json";
 
@@ -1604,49 +1603,94 @@ const HA_BY_HAND = (e: { domain: string; kind: string }, action: string): boolea
 let httpsLook: () => Promise<{ listening: boolean; error: string; names: string[] }> = async () => ({ listening: false, error: "", names: [] });
 export const tellHttps = (look: typeof httpsLook): void => void (httpsLook = look);
 
-const QBIT_SERVER = { server: { type: "string", description: "The qBittorrent's name or id, as `torrents` gives it; may be left out when there is one" } };
-const ONE_TORRENT = { ...QBIT_SERVER, torrent: { type: "string", description: "The torrent's hash or its exact name, as `torrents` gives them" } };
+const SERVICE = { service: { type: "string", description: "The service's name or id, as `services` gives it; may be left out when there is one" } };
+const SERVICE_DO = {
+  ...SERVICE,
+  action: { type: "string", description: "The action's name, as `services` lists it for the service" },
+  rows: { type: "array", items: { type: "string" }, description: "For an action on rows: their keys or exact names, as `service_rows` gives them" },
+  input: { type: "object", description: "What the action asks, by name, as `services` lists it: true / false for a tick, text for the rest. Files cannot be given here" },
+};
 
-function qbitServerOf(args: Record<string, unknown>) {
-  const list = qbitServers();
-  const asked = typeof args.server === "string" ? args.server.trim().toLowerCase() : "";
-  if (!list.length) throw new ToolError("No qBittorrent is connected. The person connects one at #/integrations.");
+function serviceOf(args: Record<string, unknown>) {
+  const list = serviceConnections();
+  const asked = typeof args.service === "string" ? args.service.trim().toLowerCase() : "";
+  if (!list.length) throw new ToolError("No service is connected. The person connects one in Services.");
   const s = asked ? list.find((x) => x.id === asked || x.name.toLowerCase() === asked) : list.length === 1 ? list[0] : undefined;
-  if (!s) throw new ToolError(`Say which qBittorrent. They are: ${list.map((x) => x.name).join(", ")}.`);
+  if (!s) throw new ToolError(`Say which service. They are: ${list.map((x) => `${x.name} (${x.title})`).join(", ")}.`);
   return s;
 }
 
-async function torrentOf(args: Record<string, unknown>) {
-  const s = qbitServerOf(args);
-  const asked = text(args, "torrent");
-  const { torrents } = await qbitTorrents(s.id);
-  const found = torrents.filter((x) => x.hash === asked.toLowerCase() || x.name === asked);
-  if (found.length !== 1) throw new ToolError(found.length ? `Several torrents are called "${asked}": name it by its hash.` : `There is no torrent "${asked}" in ${s.name}.`);
-  return { server: s, torrent: found[0]! };
+/** A service as an agent sees it: what it is, its numbers, its lists and what may be done to it */
+function serviceWords(s: ReturnType<typeof serviceConnections>[number]) {
+  const k = kindView(s.kind);
+  return {
+    id: s.id,
+    name: s.name,
+    kind: s.title,
+    online: s.online,
+    problem: s.error?.code ?? null,
+    values: s.values,
+    lists: Object.entries(k.lists).map(([name, l]) => ({ name, key: l.key, filters: Object.keys(l.params), ...(l.private ? { private: true } : {}) })),
+    actions: Object.entries(k.actions).map(([name, a]) => ({ name, what: a.label.en, ...(a.on ? { on: a.on } : {}), effect: a.effect, level: a.level, ...(a.ask.length ? { asks: a.ask.filter((q) => q.kind !== "file").map((q) => ({ name: q.name, kind: q.kind, what: q.label.en })) } : {}) })),
+  };
+}
+
+async function serviceRows(args: Record<string, unknown>, privateToo: boolean) {
+  const s = serviceOf(args);
+  const k = kindView(s.kind);
+  const list = text(args, "list");
+  const l = k.lists[list];
+  if (!l) throw new ToolError(`${s.name} has no list "${list}". It has: ${Object.keys(k.lists).join(", ")}.`);
+  if (l.private && !privateToo) throw new ToolError(`"${list}" says who was where: read it with \`service_private_rows\`, only when the person asks about it.`);
+  if (!l.private && privateToo) throw new ToolError(`"${list}" is not private: read it with \`service_rows\`.`);
+  const params: Record<string, string> = {};
+  for (const [name, v] of Object.entries((args.filters as Record<string, unknown>) ?? {})) if (name in l.params) params[name] = String(v);
+  const { rows } = await rowsNow(s.id, list, params);
+  const find = typeof args.find === "string" ? args.find.toLowerCase() : "";
+  const found = find ? rows.filter((r) => Object.values(r).some((v) => typeof v === "string" && v.toLowerCase().includes(find))) : rows;
+  return { service: s.name, total: found.length, rows: found.slice(0, Math.min(500, Math.max(1, Number(args.limit) || 100))) };
+}
+
+async function serviceDo(args: Record<string, unknown>, caller: Caller, effect: "change" | "destroy", level: "operate" | "full") {
+  const s = serviceOf(args);
+  const k = kindView(s.kind);
+  const name = text(args, "action");
+  const a = k.actions[name];
+  if (!a) throw new ToolError(`${s.name} has no action "${name}". It has: ${Object.keys(k.actions).join(", ")}.`);
+  const tool = effect === "destroy" ? "service_destroy" : a.level === "full" ? "service_change" : "service_do";
+  if (a.effect !== effect || (effect === "change" && a.level !== level)) throw new ToolError(`"${name}" is done with \`${tool}\`.`);
+  let ids: string[] | undefined;
+  if (a.on) {
+    const asked = Array.isArray(args.rows) ? args.rows.map(String) : [];
+    if (!asked.length) throw new ToolError(`"${name}" is done to rows of ${a.on}: name them in "rows".`);
+    const { rows } = await rowsNow(s.id, a.on, {});
+    const key = k.lists[a.on]!.key;
+    ids = asked.map((x) => {
+      const found = rows.filter((r) => String(r[key]) === x || r.name === x);
+      if (found.length !== 1) throw new ToolError(found.length ? `Several rows are called "${x}": name it by its ${key}.` : `There is no "${x}" in ${a.on} of ${s.name}.`);
+      return String(found[0]![key]);
+    });
+  }
+  const input = Object.fromEntries(Object.entries((args.input as Record<string, unknown>) ?? {}).filter(([n]) => a.ask.some((q) => q.name === n && q.kind !== "file")));
+  const done = await serviceAct(s.id, name, { ids, input }, caller.user, level);
+  return { ok: true, service: s.name, done: a.label.en, rows: done.done };
 }
 
 const homeRead: Omit<Tool, "level" | "effect">[] = [
   {
-    name: "cameras",
-    title: "Cameras of Frigate",
-    description: "The Frigate servers Hata is connected to and their cameras: whether each is switched on, whether frames arrive, how many a second, whether it detects. Nothing of what the cameras saw: that is `camera_events`. For \"is every camera working\".",
+    name: "services",
+    title: "Connected services",
+    description: "The services Hata is connected to through their API (a torrent client, cameras, …): what each is, whether it answers, its numbers now, the lists it has (read with `service_rows`; a private one, about people, with `service_private_rows`) and the actions that can be done to it, with what each asks. For \"what is downloading\", \"are the cameras working\".",
     input: {},
-    run: () => frigateServers().map((s) => ({ id: s.id, name: s.name, version: s.version, online: s.online, problem: s.error?.code ?? null, cameras: s.cameras })),
+    run: () => wrap(() => serviceConnections().map(serviceWords)),
   },
   {
-    name: "torrents",
-    title: "Torrents in qBittorrent",
-    description: "The qBittorrent servers Hata is connected to, with what each is doing now and, for one server, its torrents: name, hash, how much is done, size, speeds, time left, the folder it downloads to and its `group`: downloading, seeding, paused, finished, checking or error. `waiting` means nothing is passing at the moment. For \"what is downloading\", \"why is it stuck\" and \"how much room do they take\".",
-    input: { ...QBIT_SERVER, find: { type: "string", description: "A piece of the torrent's name" }, group: { type: "string", description: "Only this group: downloading, seeding, paused, finished, checking or error" }, limit: { type: "number", description: "How many to give, 100 by default, 500 at most" } },
-    run: (args) =>
-      wrap(async () => {
-        const servers = qbitServers().map(({ url: _url, user: _user, ...s }) => s);
-        if (!servers.length || (servers.length > 1 && !args.server)) return { servers };
-        const s = qbitServerOf(args);
-        const find = typeof args.find === "string" ? args.find.toLowerCase() : "";
-        const found = (await qbitTorrents(s.id)).torrents.filter((x) => (!args.group || x.group === args.group) && (!find || x.name.toLowerCase().includes(find)));
-        return { servers, total: found.length, torrents: found.slice(0, Math.min(500, Math.max(1, Number(args.limit) || 100))) };
-      }),
+    name: "service_rows",
+    title: "A list of a service",
+    description: "The rows of one list of a connected service as it is now: every field the description reads (for torrents: name, hash, progress, speeds, state…; for cameras: name, whether frames arrive…). Not for a private list.",
+    input: { ...SERVICE, list: { type: "string", description: "The list's name, as `services` gives it" }, find: { type: "string", description: "Only rows with this piece of text in a field" }, filters: { type: "object", description: "What the list can be narrowed by, as `services` names them" }, limit: { type: "number", description: "How many to give, 100 by default, 500 at most" } },
+    required: ["list"],
+    run: (args) => wrap(() => serviceRows(args, false)),
   },
   {
     name: "network",
@@ -1847,30 +1891,12 @@ const homeRead: Omit<Tool, "level" | "effect">[] = [
 
 const homeOperate: Omit<Tool, "level" | "effect">[] = [
   {
-    name: "torrent_pause",
-    title: "Pause a torrent",
-    description: "Pauses one torrent: it stops downloading and seeding until it is resumed. Its files stay.",
-    input: ONE_TORRENT,
-    required: ["torrent"],
-    run: (args, caller) =>
-      wrap(async () => {
-        const { server, torrent } = await torrentOf(args);
-        await torrentsPower(server.id, [torrent.hash], "pause", caller.user);
-        return { ok: true, name: torrent.name };
-      }),
-  },
-  {
-    name: "torrent_resume",
-    title: "Resume a torrent",
-    description: "Lets a paused torrent go on: it downloads what is left, or seeds again if it is complete.",
-    input: ONE_TORRENT,
-    required: ["torrent"],
-    run: (args, caller) =>
-      wrap(async () => {
-        const { server, torrent } = await torrentOf(args);
-        await torrentsPower(server.id, [torrent.hash], "resume", caller.user);
-        return { ok: true, name: torrent.name };
-      }),
+    name: "service_do",
+    title: "Do something in a service",
+    description: "Does one of a connected service's actions that change something and can be undone (pause and resume a torrent, …), as `services` lists them with level operate. Only what the person asked for.",
+    input: SERVICE_DO,
+    required: ["action"],
+    run: (args, caller) => wrap(() => serviceDo(args, caller, "change", "operate")),
   },
   {
     name: "ad_blocking_pause",
@@ -1921,48 +1947,31 @@ const homeOperate: Omit<Tool, "level" | "effect">[] = [
 
 const homeFull: (Omit<Tool, "level" | "effect"> & { effect?: Tool["effect"] })[] = [
   {
-    name: "camera_events",
-    title: "What the cameras saw",
+    name: "service_private_rows",
+    title: "A private list of a service",
     // it changes nothing, but it says who was at home and when: asked for each time, never read in passing
     effect: "change",
-    description: "What Frigate noticed, newest first: which camera, what (person, car…), how sure it was, when it began and ended, in which zones. Words only, no pictures. It says who was where and when, so it is read only when the person asks about it.",
-    input: { server: { type: "string", description: "The Frigate server's name or id, as `cameras` gives it; may be left out when there is one" }, camera: { type: "string", description: "Only this camera" }, label: { type: "string", description: "Only this, like person or car" }, limit: { type: "number", description: "How many to give, 40 by default, 100 at most" } },
-    run: (args) =>
-      wrap(async () => {
-        const list = frigateServers();
-        if (!list.length) throw new ToolError("No Frigate is connected. The person connects one at #/integrations.");
-        const asked = typeof args.server === "string" ? args.server.trim().toLowerCase() : "";
-        const s = asked ? list.find((x) => x.id === asked || x.name.toLowerCase() === asked) : list.length === 1 ? list[0] : undefined;
-        if (!s) throw new ToolError(`Say which Frigate. They are: ${list.map((x) => x.name).join(", ")}.`);
-        const { events } = await frigateEvents(s.id, { camera: args.camera, label: args.label, limit: args.limit });
-        return events.map(({ id: _id, snapshot: _s, clip: _c, ...e }) => ({ ...e, start: new Date(e.start).toISOString(), end: e.end ? new Date(e.end).toISOString() : null }));
-      }),
+    description: "The rows of a list the description marks private: about people (what the cameras saw, who was where and when). Read it only when the person asks about it, and say no more than the question needs.",
+    input: { ...SERVICE, list: { type: "string", description: "The list's name, as `services` gives it" }, find: { type: "string", description: "Only rows with this piece of text in a field" }, filters: { type: "object", description: "What the list can be narrowed by, as `services` names them (a camera, a label…)" }, limit: { type: "number", description: "How many to give, 100 by default, 500 at most" } },
+    required: ["list"],
+    run: (args) => wrap(() => serviceRows(args, true)),
   },
   {
-    name: "torrent_add",
-    title: "Add a torrent",
+    name: "service_change",
+    title: "Change something in a service",
     effect: "change",
-    description: "Gives qBittorrent a magnet link, a web address of a .torrent or a hash: it starts downloading to the folder set there, taking room and sharing with others. It is the person's to want what is downloaded; add only what they named.",
-    input: { ...QBIT_SERVER, link: { type: "string", description: "A magnet link, a web address of a .torrent or a hash" } },
-    required: ["link"],
-    run: (args, caller) =>
-      wrap(async () => {
-        await addTorrents(qbitServerOf(args).id, { links: text(args, "link") }, caller.user);
-        return { ok: true };
-      }),
+    description: "Does one of a connected service's actions that need a full key and destroy nothing (add a torrent, …), as `services` lists them with level full and effect change. It is the person's to want it: do only what they named.",
+    input: SERVICE_DO,
+    required: ["action"],
+    run: (args, caller) => wrap(() => serviceDo(args, caller, "change", "full")),
   },
   {
-    name: "torrent_remove",
-    title: "Remove a torrent",
-    description: "Takes a torrent off qBittorrent's list. With `with_data` its downloaded files are deleted too, for good: they do not go to Hata's trash.",
-    input: { ...ONE_TORRENT, with_data: { type: "boolean", description: "Also delete the downloaded files. Only when the person said so" } },
-    required: ["torrent"],
-    run: (args, caller) =>
-      wrap(async () => {
-        const { server, torrent } = await torrentOf(args);
-        await removeTorrents(server.id, [torrent.hash], args.with_data === true, caller.user);
-        return { ok: true, name: torrent.name, filesDeleted: args.with_data === true };
-      }),
+    name: "service_destroy",
+    title: "Remove something in a service",
+    description: "Does one of a connected service's actions that destroy (remove a torrent, perhaps with its files), as `services` lists them with effect destroy. What it removes may not come back: only when the person said so, and an option like deleting files only when they said that too.",
+    input: SERVICE_DO,
+    required: ["action"],
+    run: (args, caller) => wrap(() => serviceDo(args, caller, "destroy", "full")),
   },
   {
     name: "dns_queries",

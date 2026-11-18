@@ -15,7 +15,6 @@ import { inUse as containersInUse, startContainers } from "./containers";
 import { startBlocker } from "./dnsblocker";
 import { startDns } from "./dnsserver";
 import { startForwards } from "./forwards";
-import { frigateServers, startFrigate } from "./frigates";
 import { servers as homeAssistants, startHomeAssistant } from "./homeassistant";
 import { startMachineGates } from "./machinegate";
 import { machines, startMachines } from "./machines";
@@ -26,7 +25,7 @@ import { speakerOn, startMusic, stopMusic } from "./music";
 import { placesKept, startNetPlaces } from "./netplaces";
 import { offsiteOn } from "./offsite";
 import { hosts as proxmoxHosts, startProxmox } from "./proxmox";
-import { qbitServers, startQbittorrent } from "./qbittorrent";
+import { connections, startIntegrations } from "./integrations";
 import { lookAtPools, poolsReport, startPools } from "./raid";
 import { startShares } from "./shares";
 import { startSnapraid } from "./snapraid";
@@ -92,10 +91,9 @@ const RUNS: Record<ModuleId, Run> = {
   integrations: {
     start: () => {
       startHomeAssistant();
-      startQbittorrent();
-      startFrigate();
+      startIntegrations();
     },
-    uses: () => [...some("homeAssistant", homeAssistants().length), ...some("qbit", qbitServers().length), ...some("frigate", frigateServers().length)],
+    uses: () => [...some("homeAssistant", homeAssistants().length), ...some("services", connections().length)],
   },
   tv: { start: watchTv, uses: () => when("tv", tvEnabled()), was: tvSetUp },
   bluetooth: { start: startBluetooth, uses: () => some("bluetooth", pairedKept()) },
