@@ -15,6 +15,7 @@ import { DATA_DIR } from "./config";
 import { isPlainObject, readJsonFile, writeJsonAtomic } from "./fsutil";
 import { call, machine, machines, open } from "./machines";
 import { MuxError } from "./mux";
+import type { AttentionItem } from "./attention";
 import { checkPackages, upgradePackages, type PackageUpdates } from "./pkgupdates";
 
 const STATE_FILE = join(DATA_DIR, "sysupdates.json");
@@ -30,6 +31,21 @@ export interface UpdatesView extends Partial<PackageUpdates> {
 
 /** What the last check found */
 export const packageUpdates = (at = ""): UpdatesView => ({ ...(state[at] ?? {}), checking: checking.has(at) });
+
+/**
+ * What of this server's updates is worth a line in "Needs attention": security updates and a restart the
+ * system asks for. Plain updates come nearly every day and would fill the list, so they are only counted
+ * on the server's page. Not sent as notifications (the person's choice): see `QUIET_CODES` in notify.ts.
+ */
+export function sysUpdatesTrouble(): AttentionItem[] {
+  const now = state[""];
+  if (!now) return [];
+  const items: AttentionItem[] = [];
+  const security = now.list.filter((p) => p.security).length;
+  if (security) items.push({ id: "sysupdates:security", severity: "warn", code: "system.security", detail: { n: security, all: now.list.length } });
+  if (now.reboot) items.push({ id: "sysupdates:reboot", severity: "warn", code: "system.reboot", detail: {} });
+  return items;
+}
 
 /** A client older than these calls does not know them: it is to be brought to Hata's version */
 function onMachine<T>(id: string, op: string, args: unknown = {}): Promise<T> {

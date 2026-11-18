@@ -315,6 +315,29 @@ function pullToClose(dialog) {
 const put = (el, ...children) => el.replaceChildren(...h("div", null, children).childNodes);
 
 const button = (label, attrs = {}, iconName) => h("button", { type: "button", ...attrs, class: "btn " + (attrs.class ?? "") }, iconName && icon(iconName), label && h("span", null, label));
+
+/*
+ * The building blocks of a page (their spacing is "The building blocks" at the end of app.css). A new page is made
+ * of these and nothing of its own: a card with a head, the line that explains it and its blocks; facts in rows.
+ */
+/**
+ * A card: `title` (with `count` and `marks` beside it, `actions` on the right), the line `lead` under it, then the
+ * blocks in `body`, 16 px apart. `flush` — the body (a table, a list of rows) reaches the card's edges.
+ */
+function uiCard({ title = null, count = null, marks = null, actions = null, lead = null, id = null, cls = "", flush = false, menu = undefined } = {}, ...body) {
+  const head =
+    title != null &&
+    h(
+      "div",
+      { class: "section-head" + (flush ? " pad" : "") },
+      h("h2", null, title, count != null && h("span", { class: "muted" }, String(count)), marks),
+      actions && h("div", { class: "actions" }, actions),
+    );
+  const explain = lead && h("p", { class: "muted small" + (flush ? " pad" : "") }, lead);
+  return h("section", { class: `card${flush ? "" : " pad"}${cls ? " " + cls : ""}`, id, menu }, head, explain, ...body);
+}
+/** Facts in rows, a label on the left and its value on the right: `[label, value]` pairs, empty ones left out */
+const uiFacts = (rows) => rows.filter(Boolean).map(([label, value]) => h("div", { class: "kv" }, h("span", { class: "muted" }, label), h("span", null, value)));
 const closeButton = (dialog, label = t("common.close")) => button(label, { onclick: () => dialog().close() });
 const closeX = (dialog) => h("button", { type: "button", class: "icon-btn", "aria-label": t("common.close"), onclick: () => dialog().close() }, icon("x"));
 
@@ -1109,7 +1132,7 @@ const navItems = () => NAV.filter((item) => (!item.admin || isAdmin()) && (!item
 
 /** Which section of the page an item of "Needs attention" is about, by its code */
 const ATTENTION_AREAS = [
-  [/^(machine|pve|containers|docker|memory|temperature|load)\b/, "machines"],
+  [/^(machine|pve|containers|docker|memory|temperature|load|system)\b/, "machines"],
   [/^(ha|frigate)\b/, "house"],
   [/^(disk|smart|absent|array|raid|share|netplace)\b/, "storage"],
   [/^(offsite|failed\.backup|backup)\b/, "backups"],
@@ -2646,6 +2669,8 @@ function attentionItem(item) {
     item.code === "disk.usb" && isAdmin() && button(t("copyin.button"), { class: "small", onclick: () => ((state.copyInFrom = item.detail.id), go("#/settings/storage")) }, "download"),
     (item.code === "disk.new" || item.code.startsWith("absent")) && isAdmin() && open("#/settings/storage", t("attention.disk.open")),
     item.code === "update" && open("#/settings/about"),
+    item.code === "system.security" && isAdmin() && button(t("attention.system.security.go"), { class: "small", onclick: () => go("#/machines/this/system") }, "up"),
+    item.code === "system.reboot" && isAdmin() && button(t("power.reboot"), { class: "small", onclick: () => serverPowerDialog("reboot") }, "refresh"),
     item.code === "disk.trash" && open("#/trash", t("trash.title")),
     (item.code === "raid.errors" || item.code === "raid.mismatch") && doIt(t("raid.check"), "refresh", () => api("POST", "/api/disks/raid/check", { id: item.detail.id, action: "check" })),
     (item.code.startsWith("array.") || item.code.startsWith("raid.")) && open("#/storage/raid"),
@@ -21551,7 +21576,6 @@ function renderServerBody() {
   }
   renderSystem();
   const o = state.overview;
-  const fact = (label, value) => h("div", { class: "kv" }, h("span", { class: "muted" }, label), h("span", null, value));
   const more = (hash, label) => h("a", { class: "link small", href: hash }, label, " →");
   const d = hasModule("containers") ? incusUi.data : null;
   const apps = o?.apps ?? [];
@@ -21568,43 +21592,44 @@ function renderServerBody() {
   put(
     document.getElementById("server-main"),
     d?.state === "ready" &&
-      h(
-        "section",
-        { class: "card" },
-        h("div", { class: "section-head pad-head" }, h("h2", null, t("area.server.containers"), " ", h("span", { class: "muted" }, String(d.containers.length))), button(t("server.new"), { class: "small", onclick: () => newContainerDialog() }, "plus")),
+      uiCard(
+        { title: t("area.server.containers"), count: d.containers.length, actions: button(t("server.new"), { class: "small", onclick: () => newContainerDialog() }, "plus"), flush: true },
         d.containers.length ? d.containers.map(row) : h("p", { class: "muted small pad-row" }, t("tree.hereNone")),
       ),
-    h(
-      "section",
-      { class: "card pad stack-s" },
-      h("div", { class: "section-head" }, h("h2", null, t("area.server.apps"), " ", h("span", { class: "muted" }, String(apps.length))), more("#/machines/this/apps", t("server.all"))),
-      apps.length ? h("p", { class: "muted" }, t("server.appsLine", { running: apps.filter(isUp).length, all: apps.length })) : h("p", { class: "muted" }, t("apps.noneLead")),
+    uiCard(
+      { title: t("area.server.apps"), count: apps.length, actions: more("#/machines/this/apps", t("server.all")) },
+      h("p", { class: "muted" }, apps.length ? t("server.appsLine", { running: apps.filter(isUp).length, all: apps.length }) : t("apps.noneLead")),
     ),
   );
   const updates = sysUpdates[""];
   const b = state.backups;
+  const waiting = updates?.list?.length > 0;
   put(
     document.getElementById("server-side"),
-    h(
-      "section",
-      { class: "card pad stack-s" },
-      h("h2", null, t("area.server.system")),
-      fact(t("server.updates"), !updates ? "…" : updates.error ? "—" : updates.list?.length ? t("server.updatesN", { n: updates.list.length }) : t("server.updatesNone")),
-      fact("Docker", o?.docker?.available ? (o.docker.version ?? "—") : t("server.dockerNo")),
-      fact("Hata", state.version),
-      more("#/machines/this/system", t("server.toSystem")),
+    uiCard(
+      { title: t("area.server.system") },
+      uiFacts([[t("server.updates"), serverUpdatesValue(updates)], ["Docker", o?.docker?.available ? (o.docker.version ?? "—") : t("server.dockerNo")], ["Hata", state.version]]),
+      updates?.reboot && h("p", { class: "banner small" }, t("sysupdates.reboot")),
+      h("div", { class: "actions" }, waiting && button(t("server.updatesSee"), { class: "small accent", onclick: () => go("#/machines/this/system") }, "up"), more("#/machines/this/system", t("server.toSystem"))),
     ),
-    h(
-      "section",
-      { class: "card pad stack-s" },
-      h("h2", null, t("server.backup")),
-      fact(t("server.backupLast"), !b ? "…" : b.lastRun ? ago(b.lastRun.at) : t("server.backupNever")),
-      fact(t("server.backupWhere"), b?.dir ?? "…"),
+    uiCard(
+      { title: t("server.backup") },
+      uiFacts([[t("server.backupLast"), !b ? "…" : b.lastRun ? ago(b.lastRun.at) : t("server.backupNever")], [t("server.backupWhere"), b?.dir ?? "…"]]),
       more("#/backups", t("server.toBackups")),
     ),
   );
 }
 
+/** How many updates this server has: marks for all of them and for the security ones */
+function serverUpdatesValue(updates) {
+  const list = updates?.list ?? [];
+  const security = list.filter((p) => p.security).length;
+  if (!updates) return "…";
+  if (updates.error && !updates.at) return "—";
+  if (!updates.at) return h("span", { class: "muted" }, t("sysupdates.never"));
+  if (!list.length) return h("span", { class: "with-icon" }, icon("check"), t("server.updatesNone"));
+  return h("span", { class: "sys-status end" }, h("span", { class: "state partial" }, t("server.updatesN", { n: list.length })), security > 0 && h("span", { class: "state restarting" }, t("sysupdates.security", { n: security })));
+}
 
 /** "Find a setting" in the head of Settings: sections and cards by the words typed, wherever they live now */
 function settingsFind() {

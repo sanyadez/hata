@@ -593,6 +593,8 @@ export async function telegramChats(token: unknown): Promise<{ id: string; title
 }
 
 const CHECK_EVERY_MS = 30_000;
+/** Items shown in "Needs attention" but never sent: the person looks at them on the page */
+export const QUIET_CODES = new Set(["system.security", "system.reboot"]);
 let checking = false;
 
 async function check(): Promise<void> {
@@ -602,7 +604,7 @@ async function check(): Promise<void> {
   if (channels.length === 0) return;
   checking = true;
   try {
-    const result = due(await host.attention(), state.seen, Date.now());
+    const result = due((await host.attention()).filter((item) => !QUIET_CODES.has(item.code)), state.seen, Date.now());
     const changed = JSON.stringify(result.seen) !== JSON.stringify(state.seen);
     state.seen = result.seen;
     if (changed) save();

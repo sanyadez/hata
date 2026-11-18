@@ -392,7 +392,7 @@ Early development. What works today:
   from a shell; an app's update can be undone from the activity log, from the snapshot taken right before it;
 - the whole history of what happened on the server and who did it, by day, with a search;
 - Docker itself is installed by a button where it is missing, and started where it is not running;
-- system programs (Settings): every program of the system Hata relies on in one list — Docker, Samba,
+- software and updates (Computers → This server → Software and updates): every program of the system Hata relies on in one list — Docker, Samba,
   NetworkManager, mergerfs, SnapRAID and the rest — with what it is for, whether it is installed and in
   which version, and the button that installs a missing one or removes one you do not want (not while
   something of Hata's stands on it);
