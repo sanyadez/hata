@@ -97,7 +97,7 @@ import { bus, type BusEvent } from "./bus";
 import { DATA_DIR, dropOldSecrets, listenAddress, saveSettings, settings, timezone, updateSettings } from "./config";
 import { arrange, cleanLayout, dropBlock, dropServer, GRID, haTiles, layoutText, parseLayoutText } from "./dashboard";
 import { lanAddress } from "./integration";
-import { act, changeConnection, connect as connectService, connectionView, connections, disconnect as disconnectService, integrationKinds, integrationsFound, integrationsOfApps, integrationTrouble, kindView, pictureOf, offerSpecs, rowsNow, specsInUse, streamOf, takeNewerSpec, widgetData } from "./integrations";
+import { act, changeConnection, connect as connectService, connectionView, connections, disconnect as disconnectService, integrationKinds, integrationsFound, integrationsOfApps, integrationTrouble, kindView, pictureOf, offerSpecs, rowsNow, specsInUse, streamOf, takeNewerSpec, webrtcAnswer, widgetData } from "./integrations";
 import { act as haAct, addServer as addHa, allowProxy as haAllowProxy, changeServer as changeHa, discover as discoverHa, entities as haEntities, forgetUser as haForgetUser, homeAssistantTrouble, installUpdate as haInstallUpdate, makeBackup as haMakeBackup, removeServer as removeHa, renameEntity as haRename, server as haServer, servers as haServers, tileStates as haTileStates, visibleTo as haVisibleTo } from "./homeassistant";
 import { sees as haSees } from "./ha";
 import { dockerInfo, type DockerInfo, listContainers, watchEvents } from "./docker";
@@ -2820,6 +2820,8 @@ async function integrationsApi(req: Request, url: URL, user: User): Promise<Resp
     const stream = await streamOf(id, pic[2]!, decodeURIComponent(pic[3]!), Number(url.searchParams.get("h")), Number(url.searchParams.get("fps")), req.signal);
     return new Response(stream.body, { headers: passed({ "content-type": stream.type }) });
   }
+  const rtc = /^\/webrtc\/([A-Za-z0-9_]{1,32})\/([^/]{1,256})$/.exec(rest);
+  if (rtc && method === "POST") return json(await webrtcAnswer(id, rtc[1]!, decodeURIComponent(rtc[2]!), (await body(req)).sdp));
   const action = /^\/actions\/([A-Za-z0-9_]{1,32})$/.exec(rest);
   if (action && method === "POST") return json(await act(id, action[1]!, await body(req), by));
   return null;

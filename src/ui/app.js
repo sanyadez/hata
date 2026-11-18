@@ -1830,32 +1830,121 @@ function livePicture(src, alt, cls) {
   const img = picture(src, alt, cls);
   img.removeAttribute("loading");
   img.dataset.live = src;
+  img.liveStart = () => (img.src = `${img.dataset.live}&r=${Date.now()}`);
+  img.liveStop = () => img.removeAttribute("src");
   liveShown.add(img);
   img.addEventListener("error", () =>
     setTimeout(() => {
       if (!img.isConnected || !img.dataset.live || document.hidden) return;
       img.classList.remove("broken");
-      img.src = `${img.dataset.live}&r=${Date.now()}`;
+      img.liveStart();
     }, 5000),
   );
   return img;
 }
 
-function letLiveGo(img) {
-  delete img.dataset.live;
-  img.removeAttribute("src");
-  liveShown.delete(img);
+/** Where WebRTC did not reach the camera: frames through Hata for a while instead of trying again at every redraw */
+const rtcRefused = new Map();
+const RTC_WAIT = 8000;
+
+/** Live video of a service's stream: by WebRTC when its description has it (the video goes straight from the service, which
+ *  plays in real time and does not break), else — or when that cannot connect — the frames through Hata */
+function liveView(x, name, key, height, alt, cls) {
+  const frames = () => livePicture(svcLive(x.id, name, key, height), alt, cls);
+  const p = svcSpecNow(x.kind)?.pictures?.[name];
+  const refused = `${x.id}/${name}/${key}`;
+  if (!p?.webrtc || typeof RTCPeerConnection !== "function" || (rtcRefused.get(refused) ?? 0) > Date.now()) return frames();
+  const video = h("video", { class: cls ? `live-video ${cls}` : "live-video", "aria-label": alt });
+  video.muted = true;
+  video.autoplay = true;
+  video.playsInline = true;
+  video.dataset.live = refused;
+  let pc = null;
+  let wait = 0;
+  let again = 0;
+  let seen = false;
+  const stop = () => {
+    clearTimeout(wait);
+    clearTimeout(again);
+    if (pc) pc.close();
+    pc = null;
+    video.srcObject = null;
+  };
+  const giveUp = () => {
+    stop();
+    rtcRefused.set(refused, Date.now() + 10 * 60_000);
+    liveShown.delete(video);
+    if (!video.isConnected || !video.dataset.live) return;
+    const img = frames();
+    for (const [k, v] of widgetPictures) if (v === video) widgetPictures.set(k, img);
+    video.replaceWith(img);
+  };
+  // a stream that played and broke is asked for once more; one that does not play gives way to the frames
+  const lost = () => {
+    if (!seen) return giveUp();
+    stop();
+    again = setTimeout(() => video.isConnected && video.dataset.live && !document.hidden && start(), 2000);
+  };
+  const start = async () => {
+    stop();
+    seen = false;
+    const mine = (pc = new RTCPeerConnection());
+    const tracks = new MediaStream();
+    mine.addTransceiver("video", { direction: "recvonly" });
+    mine.addTransceiver("audio", { direction: "recvonly" });
+    mine.ontrack = (e) => {
+      tracks.addTrack(e.track);
+      video.srcObject = tracks;
+      void video.play().catch(() => {});
+    };
+    mine.onconnectionstatechange = () => {
+      if (pc !== mine) return;
+      const now = mine.connectionState;
+      if (now === "connected") {
+        seen = true;
+        clearTimeout(wait);
+      } else if (now === "failed") lost();
+      else if (now === "disconnected") wait = setTimeout(() => pc === mine && mine.connectionState !== "connected" && lost(), 4000);
+    };
+    wait = setTimeout(() => pc === mine && mine.connectionState !== "connected" && lost(), RTC_WAIT);
+    try {
+      await mine.setLocalDescription(await mine.createOffer());
+      // the whole offer at once: the service answers one request, so the browser's addresses go in it
+      await new Promise((done) => {
+        if (mine.iceGatheringState === "complete") return done();
+        const enough = setTimeout(done, 2000);
+        mine.addEventListener("icegatheringstatechange", () => mine.iceGatheringState === "complete" && (clearTimeout(enough), done()));
+      });
+      if (pc !== mine) return;
+      const answer = await api("POST", `/api/integrations/${x.id}/webrtc/${name}/${encodeURIComponent(key)}`, { sdp: mine.localDescription.sdp });
+      if (pc !== mine) return;
+      await mine.setRemoteDescription({ type: "answer", sdp: answer.sdp });
+    } catch {
+      if (pc === mine) lost();
+    }
+  };
+  video.liveStart = start;
+  video.liveStop = stop;
+  liveShown.add(video);
+  start();
+  return video;
+}
+
+function letLiveGo(el) {
+  delete el.dataset.live;
+  el.liveStop?.();
+  liveShown.delete(el);
 }
 
 setInterval(() => {
-  for (const img of liveShown) if (!img.isConnected) letLiveGo(img);
-  for (const [key, img] of widgetPictures) if (!img.isConnected && !liveShown.has(img) && key.startsWith("live:")) widgetPictures.delete(key);
+  for (const el of liveShown) if (!el.isConnected) letLiveGo(el);
+  for (const [key, el] of widgetPictures) if (!el.isConnected && !liveShown.has(el) && key.startsWith("live:")) widgetPictures.delete(key);
 }, 3000);
 
 document.addEventListener("visibilitychange", () => {
-  for (const img of liveShown) {
-    if (document.hidden) img.removeAttribute("src");
-    else if (img.isConnected) img.src = `${img.dataset.live}&r=${Date.now()}`;
+  for (const el of liveShown) {
+    if (document.hidden) el.liveStop?.();
+    else if (el.isConnected) el.liveStart?.();
   }
 });
 
@@ -1902,7 +1991,7 @@ function pictureWidget(item, x, w) {
     // a stream per size: a card made larger asks for a larger picture
     const liveKey = `live:${item.id}:${height}`;
     shown = widgetPictures.get(liveKey);
-    if (!shown || !liveShown.has(shown)) widgetPictures.set(liveKey, (shown = livePicture(svcLive(x.id, w.live, item.row, height), item.row)));
+    if (!shown || !liveShown.has(shown)) widgetPictures.set(liveKey, (shown = liveView(x, w.live, item.row, height, item.row)));
   } else if (on) shown = widgetPicture(`still:${item.id}`, svcPicture(x.id, w.picture, item.row, height, Date.now()), item.row);
   return h(
     "button",
@@ -6001,16 +6090,16 @@ function svcPictureTile(x, spec, p, row) {
 
 /** One picture, larger: live while the dialog is open when the description has a stream, else renewed every two seconds */
 function svcPictureDialog(x, still, live, key, title) {
-  const img = live ? livePicture(svcLive(x.id, live, key, 1080), title, "camera-big") : picture(svcPicture(x.id, still, key, 720, "d0"), title, "camera-big");
+  const img = live ? liveView(x, live, key, 1080, title, "camera-big") : picture(svcPicture(x.id, still, key, 720, "d0"), title, "camera-big");
   const frame = h("div", { class: "camera-frame" }, img);
   const whole = () => (document.fullscreenElement ? void document.exitFullscreen() : void frame.requestFullscreen?.().catch(() => {}));
-  img.addEventListener("dblclick", whole);
+  frame.addEventListener("dblclick", whole);
   frame.append(h("button", { type: "button", class: "icon-btn camera-full", title: t("tv.fullScreen"), "aria-label": t("tv.fullScreen"), onclick: whole }, icon("expand")));
   let dialog;
-  dialog = openDialog("xwide", h("header", null, h("h2", { class: "clip grow" }, title), closeX(() => dialog)), frame, h("p", { class: "muted small" }, live ? t("service.liveNote", { fps: LIVE_FPS }) : t("service.stillNote")));
+  dialog = openDialog("xwide", h("header", null, h("h2", { class: "clip grow" }, title), closeX(() => dialog)), frame, h("p", { class: "muted small" }, live ? t(img.tagName === "VIDEO" ? "service.liveNoteRtc" : "service.liveNote", { fps: LIVE_FPS }) : t("service.stillNote")));
   let tick = 0;
   const every = !live && setInterval(() => (dialog.open ? (img.src = svcPicture(x.id, still, key, 720, `d${++tick}`)) : clearInterval(every)), 2000);
-  dialog.addEventListener("close", () => live && letLiveGo(img));
+  dialog.addEventListener("close", () => live && frame.querySelectorAll("img, video").forEach(letLiveGo));
 }
 
 function svcEventRow(x, spec, ev, row) {

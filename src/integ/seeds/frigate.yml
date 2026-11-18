@@ -1,6 +1,6 @@
 format: 1
 id: frigate
-version: 1
+version: 2
 requires: 0.33.0
 title: Frigate
 icon: camera
@@ -80,6 +80,7 @@ pictures:
     of: cameras
     stream: true
     request: { path: "/api/{name}", query: { fps: "{fps}", height: "{height}" } }
+    webrtc: { method: POST, path: /api/go2rtc/webrtc, query: { src: "{name}" } }
   thumb:
     of: events
     request: { path: "/api/events/{id}/thumbnail.jpg" }

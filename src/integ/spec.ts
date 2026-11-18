@@ -99,6 +99,9 @@ export interface Picture {
   request: Req;
   /** Frames as they come (MJPEG); `{height}` and `{fps}` are Hata's */
   stream: boolean;
+  /** Live video by WebRTC, tried before the frames: the browser's offer goes to this request as `{ type: "offer", sdp }`
+   *  and its JSON answer (`{ type: "answer", sdp }`, as go2rtc gives) back; the video itself goes straight between them */
+  webrtc?: Req;
   when?: Cond;
 }
 
@@ -593,6 +596,12 @@ export function readSpec(raw: unknown): Spec {
     const known = (n: string) => fieldsOf(of)(n) || n === "height" || (stream && n === "fps");
     pictures[name] = { of, request: readReq(r, p.request, `${at}.request`, known), stream, ...(p.when !== undefined ? { when: readCond(r, p.when, `${at}.when`, fieldsOf(of)) } : {}) };
     if (pictures[name]!.request.method !== "GET") r.bad(`${at}.request.method`, "a picture is a GET");
+    if (p.webrtc !== undefined) {
+      if (!stream) r.bad(`${at}.webrtc`, "belongs to a stream");
+      const offer = readReq(r, p.webrtc, `${at}.webrtc`, fieldsOf(of));
+      if (offer.method !== "POST" || offer.form || offer.json !== undefined || offer.multipart) r.bad(`${at}.webrtc`, "is a POST without a body: the offer is its body");
+      pictures[name]!.webrtc = offer;
+    }
   }
   const pictureOf = (v: unknown, at: string, of: string, stream: boolean) => {
     const n = r.str(v, at, NAME);

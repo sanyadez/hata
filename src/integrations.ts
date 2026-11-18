@@ -611,6 +611,24 @@ export async function streamOf(id: string, name: string, key: string, height: nu
   return res;
 }
 
+/** The browser's WebRTC offer passed to the service and its answer back; Hata only carries the two texts */
+export async function webrtcAnswer(id: string, name: string, key: string, offer: unknown): Promise<{ type: "answer"; sdp: string }> {
+  const c = connectionOf(id);
+  const spec = specOf(c.kind);
+  const p = spec.pictures[name];
+  if (!p?.webrtc) throw new AppError("integration.noPicture", 404);
+  if (typeof offer !== "string" || !offer.startsWith("v=0") || offer.length > 64_000) throw new AppError("integration.badOffer", 400);
+  const row = rowFor(c, p.of, key);
+  const got = await call(c, spec, { method: "POST", path: target(p.webrtc, row), body: JSON.stringify({ type: "offer", sdp: offer }), type: "application/json" });
+  let answer: unknown = null;
+  try {
+    answer = JSON.parse(got.bytes.toString("utf8"));
+  } catch {}
+  const sdp = answer && typeof answer === "object" && typeof (answer as { sdp?: unknown }).sdp === "string" ? (answer as { sdp: string }).sdp : "";
+  if (got.status !== 200 || !sdp.startsWith("v=0")) throw new AppError("integration.noPicture", got.status === 404 ? 404 : 502);
+  return { type: "answer", sdp };
+}
+
 // --- Actions ----------------------------------------------------------------------------------------
 
 /** Links, one a line: a magnet, a web address of a .torrent, or a bare hash */
