@@ -336,6 +336,7 @@ button.tile { padding: 0; font: inherit; color: inherit; text-align: left; curso
 .app-icon.letter { display: grid; place-items: center; color: #fff; font: 700 18px var(--font-heading); }
 .app-icon.plus { display: grid; place-items: center; background: var(--accent-soft); color: var(--accent-text); }
 .app-icon.plus .ico { width: 18px; height: 18px; }
+.app-icon.plus.lg .ico { width: 30px; height: 30px; }
 .app-icon.mini { width: 15px; height: 15px; border-radius: 4px; font-size: 9px; }
 .app-icon.plus.mini .ico { width: 10px; height: 10px; }
 /* a folder of tiles shows what is inside, four at most */

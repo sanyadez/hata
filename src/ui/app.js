@@ -12962,7 +12962,10 @@ function renderStoreList() {
     ...state.store.categories.map((c) => cat(c, c, all.filter((a) => a.category === c).length)).filter((_, i) => all.some((a) => a.category === state.store.categories[i])),
     h("div", { class: "cat-title" }, t("store.onServer")),
     cat("+", t("store.installed"), all.filter((a) => installed.has(a.name)).length),
+    storeKinds().length > 0 && h("div", { class: "cat-title" }, t("store.connect")),
+    storeKinds().length > 0 && cat("@", t("store.integrations"), storeKinds().length),
   );
+  if (category === "@") return list.replaceChildren(storeIntegrationCards(storeKinds(), query));
 
   // the same app in two stores: each card says whose it is
   const twice = new Set(all.filter((a, i) => all.findIndex((b) => b.name === a.name) !== i).map((a) => a.name));
@@ -12973,8 +12976,11 @@ function renderStoreList() {
     const busy = state.store.stores.some((s) => s.syncing);
     return list.replaceChildren(h("div", { class: "empty" }, h("p", null, t(busy ? "store.syncing" : "store.empty")), !busy && button(t("store.sync"), { class: "primary", onclick: syncStores }, "refresh")));
   }
-  if (!apps.length) return list.replaceChildren(h("p", { class: "empty" }, t("store.nothing")));
+  // a search over everything finds the services to connect too
+  const kindsFound = q && category === "" ? storeKinds().filter((k) => `${k.title} ${k.what}`.toLowerCase().includes(q)) : [];
+  if (!apps.length && !kindsFound.length) return list.replaceChildren(h("p", { class: "empty" }, t("store.nothing")));
   list.replaceChildren(
+    kindsFound.length > 0 && storeIntegrationCards(kindsFound, ""),
     h(
       "div",
       { class: "cards" },
@@ -12988,6 +12994,72 @@ function renderStoreList() {
       ),
     ),
   );
+}
+
+/** The services an administrator can connect, as the stores describe them, and Home Assistant, which is Hata's own */
+function storeKinds() {
+  if (!isAdmin() || !hasModule("integrations")) return [];
+  return [{ id: "", title: "Home Assistant", icon: "bulb", what: t("integrations.ha.what"), apps: ["home-assistant"], screenshots: [] }, ...svcKinds()];
+}
+
+const kindConnected = (k) => (k.id ? svcConnections().filter((c) => c.kind === k.id) : (state.overview?.ha?.servers ?? []));
+
+function storeIntegrationCards(kinds, query) {
+  const q = query.trim().toLowerCase();
+  const shown = kinds.filter((k) => !q || `${k.title} ${k.what}`.toLowerCase().includes(q));
+  if (!shown.length) return h("p", { class: "empty" }, t("store.nothing"));
+  return h(
+    "div",
+    { class: "cards" },
+    shown.map((k) => {
+      const on = kindConnected(k).length > 0;
+      return h(
+        "button",
+        { type: "button", class: "store-card", onclick: () => storeIntegrationDialog(k) },
+        h("span", { class: "store-card-head" }, h("span", { class: "app-icon plus" }, icon(k.icon)), h("span", { class: "grow" }, h("span", { class: "tile-name" }, k.title), h("span", { class: "muted small" }, t("store.integration"))), on ? h("span", { class: "chip ok" }, icon("check"), t("store.connected")) : h("span", { class: "chip" }, t("store.connectIt"))),
+        h("span", { class: "tagline" }, k.what),
+      );
+    }),
+  );
+}
+
+/** A service to connect: what Hata shows of it, how it looks, the app that runs it, and the button */
+function storeIntegrationDialog(k) {
+  const there = kindConnected(k);
+  const apps = (k.apps ?? []).map((name) => state.store?.apps.find((a) => a.name === name)).filter(Boolean);
+  const installed = new Set((state.overview?.apps ?? []).map((a) => a.name));
+  let dialog;
+  const connect = button(t(there.length ? "store.connectAnother" : "store.connectIt"), { class: "primary", onclick: () => (dialog.close(), k.id ? svcConnectDialog(k.id) : haDialog()) }, "plus");
+  dialog = openDialog(
+    "xwide store-app",
+    h("header", null, h("span", { class: "app-icon plus lg" }, icon(k.icon)), h("div", { class: "grow" }, h("h2", null, k.title), h("p", { class: "muted" }, k.what), h("p", { class: "muted small" }, [t("store.integration"), k.version && t("store.descVersion", { version: k.version })].filter(Boolean).join(" · "))), closeX(() => dialog)),
+    k.screenshots?.length > 0 && shotsView(k.screenshots),
+    h(
+      "div",
+      { class: "store-app-body" },
+      h("p", null, t("store.integrationLead")),
+      there.length > 0 &&
+        h(
+          "div",
+          { class: "tips" },
+          h("strong", null, t("store.connectedHere")),
+          h("ul", null, there.map((c) => h("li", null, h("a", { class: "link", href: k.id ? `#/service/${c.id}` : `#/house/ha/${c.id}`, onclick: () => dialog.close() }, c.name ?? c.title ?? k.title)))),
+        ),
+      apps.length > 0 &&
+        h(
+          "div",
+          { class: "tips" },
+          h("strong", null, t("store.integrationApps")),
+          h(
+            "ul",
+            null,
+            apps.map((a) => h("li", null, h("button", { type: "button", class: "link", onclick: () => (dialog.close(), installed.has(a.name) ? go(`#/apps/${a.name}`) : storeDialog(a)) }, a.title), " — ", installed.has(a.name) ? t("store.installed") : t("store.integrationAppHint"))),
+          ),
+        ),
+    ),
+    h("footer", null, h("span", { class: "grow" }), closeButton(() => dialog, t("common.cancel")), connect),
+  );
+  connect.focus();
 }
 
 function formSection(title, hint, rows) {

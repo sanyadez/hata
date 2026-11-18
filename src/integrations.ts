@@ -123,20 +123,20 @@ export function keepSpec(text: string, store: string): Spec {
 }
 
 /** What a store offers: given by the store's index (`store.ts` hands it in), read by the same reader */
-type Offer = { store: string; text: string };
+type Offer = { store: string; text: string; screenshots?: string[] };
 let offered: () => Offer[] = () => [];
 export const offerSpecs = (from: () => Offer[]) => void (offered = from);
 
-let parsed: { from: Offer[]; specs: { spec: Spec; store: string; text: string }[] } | null = null;
-function storeSpecs(): { spec: Spec; store: string; text: string }[] {
+let parsed: { from: Offer[]; specs: { spec: Spec; store: string; text: string; screenshots: string[] }[] } | null = null;
+function storeSpecs(): { spec: Spec; store: string; text: string; screenshots: string[] }[] {
   const now = offered();
   // read again only when the stores' list is another one
   if (parsed?.from === now) return parsed.specs;
-  const out: { spec: Spec; store: string; text: string }[] = [];
+  const out: { spec: Spec; store: string; text: string; screenshots: string[] }[] = [];
   for (const o of now) {
     try {
       const spec = readSpec(Bun.YAML.parse(o.text));
-      if (atLeast(VERSION, spec.requires) && !out.some((x) => x.spec.id === spec.id)) out.push({ spec, store: o.store, text: o.text });
+      if (atLeast(VERSION, spec.requires) && !out.some((x) => x.spec.id === spec.id)) out.push({ spec, store: o.store, text: o.text, screenshots: o.screenshots ?? [] });
     } catch {
       // a description this Hata cannot read is not offered
     }
@@ -153,13 +153,13 @@ function specOf(kind: string): Spec {
 
 /** Every kind that can be connected: those in use, and what the stores offer */
 export function integrationKinds(lang: string) {
-  const out = new Map<string, { id: string; title: string; icon: string; what: string; version: number; kept: boolean; newer: number | null; store: string; apps: string[] }>();
+  const out = new Map<string, { id: string; title: string; icon: string; what: string; version: number; kept: boolean; newer: number | null; store: string; apps: string[]; screenshots: string[] }>();
   const store = storeSpecs();
   for (const [id, s] of specs) {
     const there = store.find((x) => x.spec.id === id);
-    out.set(id, { id, title: s.spec.title, icon: s.spec.icon, what: say(s.spec.what, lang), version: s.spec.version, kept: true, newer: there && there.spec.version > s.spec.version ? there.spec.version : null, store: s.store, apps: s.spec.apps });
+    out.set(id, { id, title: s.spec.title, icon: s.spec.icon, what: say(s.spec.what, lang), version: s.spec.version, kept: true, newer: there && there.spec.version > s.spec.version ? there.spec.version : null, store: s.store, apps: s.spec.apps, screenshots: there?.screenshots ?? [] });
   }
-  for (const x of store) if (!out.has(x.spec.id)) out.set(x.spec.id, { id: x.spec.id, title: x.spec.title, icon: x.spec.icon, what: say(x.spec.what, lang), version: x.spec.version, kept: false, newer: null, store: x.store, apps: x.spec.apps });
+  for (const x of store) if (!out.has(x.spec.id)) out.set(x.spec.id, { id: x.spec.id, title: x.spec.title, icon: x.spec.icon, what: say(x.spec.what, lang), version: x.spec.version, kept: false, newer: null, store: x.store, apps: x.spec.apps, screenshots: x.screenshots });
   return [...out.values()].sort((a, b) => a.title.localeCompare(b.title));
 }
 

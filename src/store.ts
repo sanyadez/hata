@@ -57,8 +57,8 @@ interface LoadedStore {
   recommended: string[];
   /** The store's own name, for one of Hata's format */
   name: Text;
-  /** Descriptions of services to connect, as YAML: the integrations engine reads them itself */
-  integrations: string[];
+  /** Descriptions of services to connect, as YAML: the integrations engine reads them itself; their pictures by address */
+  integrations: { text: string; screenshots: string[] }[];
 }
 
 const stores = new Map<string, LoadedStore>();
@@ -187,7 +187,11 @@ function readHataIndex(source: StoreSource, index: StoreIndex, doc: unknown): Lo
     categories: Object.values(categories),
     recommended: Array.isArray(store.recommended) ? store.recommended.filter((n: unknown): n is string => typeof n === "string") : [],
     name: typeof store.name === "string" || isPlainObject(store.name) ? (store.name as Text) : "",
-    integrations: (Array.isArray(top.integrations) ? top.integrations : []).flatMap((x: unknown) => (isPlainObject(x) && typeof x.text === "string" && x.text.length < 200_000 ? [x.text] : [])),
+    integrations: (Array.isArray(top.integrations) ? top.integrations : []).flatMap((x: unknown) =>
+      isPlainObject(x) && typeof x.text === "string" && x.text.length < 200_000
+        ? [{ text: x.text, screenshots: (Array.isArray(x.screenshots) ? x.screenshots : []).filter((p: unknown): p is string => typeof p === "string" && /^integrations\/[a-z0-9-]+\/screenshots\/[\w.-]+\.(png|jpe?g|webp)$/.test(p)).slice(0, 8).map((p: string) => base + p) }]
+        : [],
+    ),
   };
   stores.set(source.id, loaded);
   offered = null;
@@ -430,10 +434,10 @@ export function findStoreApp(name: string): StoreApp | null {
   return null;
 }
 
-let offered: { store: string; text: string }[] | null = null;
+let offered: { store: string; text: string; screenshots: string[] }[] | null = null;
 /** The descriptions of services the stores offer, the default store first; the same list until a store changes */
-export function storeIntegrations(): { store: string; text: string }[] {
+export function storeIntegrations(): { store: string; text: string; screenshots: string[] }[] {
   if (offered) return offered;
-  offered = [...stores.values()].flatMap((s) => s.integrations.map((text) => ({ store: s.source.id, text })));
+  offered = [...stores.values()].flatMap((s) => s.integrations.map((x) => ({ store: s.source.id, ...x })));
   return offered;
 }
