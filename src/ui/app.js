@@ -440,6 +440,8 @@ function parseRoute() {
   // Hata the house: Home Assistant, every kind of connected service, the TV — each a tab
   if ((parts[0] === "house" || parts[0] === "integrations" || (parts[0] === "ha" && !parts[1]) || (parts[0] === "settings" && parts[1] === "integrations")) && isAdmin()) {
     const was = { cameras: "x-frigate", torrents: "x-qbittorrent" }[parts[1]] ?? parts[1];
+    // a service's tab is known once the overview is: until then the address says which
+    if (parts[0] === "house" && /^x-[a-z0-9-]+$/.test(was ?? "") && !areaTabs("house").some((x) => x.id === was)) return { view: "service", kind: was.slice(2), id: parts[2] ?? "", house: true, hash: `#/house/${was}${parts[2] ? "/" + parts[2] : ""}` };
     const tab = (parts[0] === "house" && areaTabs("house").find((x) => x.id === was)) || areaTabs("house")[0];
     if (!tab) return { view: "ha", id: "", hash: "#/house" };
     const id = parts[0] === "house" ? (parts[2] ?? "") : "";
@@ -5806,6 +5808,8 @@ function renderService() {
     shell(h("div", { id: "svc-body", class: "stack" }));
     return void loadService();
   }
+  // the tabs and the list come with the overview: drawn again once it is there
+  if (!state.overview?.integrations) return void refresh().then(() => state.route.view === "service" && state.overview?.integrations && renderService());
   const conn = svcConnections().find((c) => c.id === route.id);
   const kind = route.kind || conn?.kind || "";
   shell(areaHead("house", `x-${kind}`, { actions: houseAdd() }), h("div", { id: "house-pick", class: "card filter-bar", hidden: true }), h("div", { id: "svc-body", class: "stack" }));

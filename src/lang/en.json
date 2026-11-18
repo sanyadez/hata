@@ -5945,11 +5945,12 @@
   "error.integration.refused": "The service refused the request ({status}).",
   "error.integration.noPicture": "The service has no picture for this.",
   "error.integration.badInput": "This is not what the service can take: {field}.",
+  "error.integration.noRow": "It is not there any more: the list was read again.",
   "error.integration.notNow": "This cannot be done to it now.",
   "error.integration.level": "This needs a key of the level full.",
   "activity.integration.added": "Service connected: {target}",
   "activity.integration.changed": "Service changed: {target}",
   "activity.integration.removed": "Service disconnected: {target}",
-  "activity.integration.did": "Done in a service: {target}",
+  "activity.integration.did": "{target}",
   "activity.integration.specUpdated": "A service's description taken from the store: {target}"
 }

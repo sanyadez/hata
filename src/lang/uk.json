@@ -5945,11 +5945,12 @@
   "error.integration.refused": "Сервіс відхилив запит ({status}).",
   "error.integration.noPicture": "У сервісу немає знімка для цього.",
   "error.integration.badInput": "Сервіс такого не прийме: {field}.",
+  "error.integration.noRow": "Цього там уже немає: список перечитано.",
   "error.integration.notNow": "Зараз цього з ним зробити не можна.",
   "error.integration.level": "Для цього потрібен ключ рівня full.",
   "activity.integration.added": "Підключено сервіс: {target}",
   "activity.integration.changed": "Змінено сервіс: {target}",
   "activity.integration.removed": "Відключено сервіс: {target}",
-  "activity.integration.did": "Зроблено в сервісі: {target}",
+  "activity.integration.did": "{target}",
   "activity.integration.specUpdated": "Взято з магазину опис сервісу: {target}"
 }

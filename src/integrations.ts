@@ -259,7 +259,7 @@ async function send(c: Connection, spec: Spec, sent: Sent, again = true): Promis
   return got;
 }
 
-function sentOf(req: Req, vars: Record<string, unknown>, files: Record<string, Uint8Array> = {}): Promise<Sent> | Sent {
+function sentOf(req: Req, vars: Record<string, unknown>, files: Record<string, Uint8Array> = {}): Sent {
   const path = target(req, vars);
   if (req.form) {
     const form = new URLSearchParams();
@@ -268,19 +268,22 @@ function sentOf(req: Req, vars: Record<string, unknown>, files: Record<string, U
   }
   if (req.json !== undefined) return { method: req.method, path, body: JSON.stringify(fillJson(req.json, vars)), type: "application/json" };
   if (req.multipart) {
-    const form = new FormData();
+    // written by hand: Bun's own FormData body comes without its Content-Type, and the boundary is in it
+    const boundary = `----hata${crypto.randomUUID().replace(/-/g, "")}`;
+    const parts: Uint8Array[] = [];
+    const enc = new TextEncoder();
     for (const [k, v] of Object.entries(req.multipart)) {
       const whole = /^\{([A-Za-z_][A-Za-z0-9_]*)\}$/.exec(v);
       const file = whole && files[whole[1]!];
-      if (file) form.append(k, new Blob([file as BufferSource], { type: "application/octet-stream" }), `${whole![1]}.torrent`);
-      else {
-        const s = fill(v, vars);
-        if (s) form.append(k, s);
+      if (file) {
+        parts.push(enc.encode(`--${boundary}\r\nContent-Disposition: form-data; name="${k}"; filename="${whole![1]}.torrent"\r\nContent-Type: application/octet-stream\r\n\r\n`), file, enc.encode("\r\n"));
+        continue;
       }
+      const text = fill(v, vars);
+      if (text) parts.push(enc.encode(`--${boundary}\r\nContent-Disposition: form-data; name="${k}"\r\n\r\n${text}\r\n`));
     }
-    // the body made the way a browser makes it, with its boundary
-    const res = new Response(form);
-    return res.arrayBuffer().then((b) => ({ method: req.method, path, body: new Uint8Array(b), type: res.headers.get("content-type") ?? "" }));
+    parts.push(enc.encode(`--${boundary}--\r\n`));
+    return { method: req.method, path, body: Buffer.concat(parts), type: `multipart/form-data; boundary=${boundary}` };
   }
   return { method: req.method, path };
 }
@@ -311,7 +314,7 @@ async function signIn(c: Connection, spec: Spec): Promise<void> {
   const who = { user: c.user, password: c.password, token: c.token };
   l.cookie = "";
   l.session = null;
-  const check = () => send(c, spec, sentOf(spec.signIn.check.request, {}) as Sent);
+  const check = () => send(c, spec, sentOf(spec.signIn.check.request, {}));
   let got = await check();
   const refusedNow = (code: "integration.badLogin" | "integration.banned") => {
     if (spec.signIn.once) l.refused = true;
@@ -320,7 +323,7 @@ async function signIn(c: Connection, spec: Spec): Promise<void> {
   };
   const login = spec.signIn.login;
   if ((got.status === 401 || got.status === 403) && login) {
-    const res = await send(c, spec, await sentOf(login.request, who));
+    const res = await send(c, spec, sentOf(login.request, who));
     if (login.banned.includes(res.status)) throw refusedNow("integration.banned");
     if (login.refused.status.includes(res.status) || (login.refused.text !== undefined && text(res).trim() === login.refused.text)) throw refusedNow("integration.badLogin");
     if (res.status >= 300) throw new AppError("integration.notIt", 502, { url: c.url });
@@ -352,10 +355,9 @@ async function signIn(c: Connection, spec: Spec): Promise<void> {
 }
 
 /** A request with the session; signed in again once when it ran out */
-async function call(c: Connection, spec: Spec, sent: Sent | Promise<Sent>): Promise<Got> {
+async function call(c: Connection, spec: Spec, s: Sent): Promise<Got> {
   const l = liveOf(c);
   if (!l.ready) await signIn(c, spec);
-  const s = await sent;
   let got = await send(c, spec, s);
   if (got.status === 401 || got.status === 403) {
     l.ready = false;
@@ -554,10 +556,10 @@ export async function integrationsFound(lang: string) {
 
 // --- Pictures ---------------------------------------------------------------------------------------
 
-function rowFor(c: Connection, list: string, key: string): Row {
+function rowFor(c: Connection, list: string, key: string, missing = "integration.noPicture"): Row {
   const l = liveOf(c);
   const row = l.seen[list]?.get(key) ?? ((l.answers[list] as Row[] | undefined) ?? []).find((r) => String(r[specOf(c.kind).read[list]!.key]) === key);
-  if (!row) throw new AppError("integration.noPicture", 404);
+  if (!row) throw new AppError(missing, 404);
   return row;
 }
 
@@ -568,7 +570,7 @@ export async function pictureOf(id: string, name: string, key: string, height: n
   if (!p || p.stream) throw new AppError("integration.noPicture", 404);
   const row = rowFor(c, p.of, key);
   if (p.when && !test(p.when, (f) => row[f])) throw new AppError("integration.noPicture", 404);
-  const got = await call(c, spec, sentOf(p.request, { ...row, height: Math.min(1080, Math.max(90, Math.round(height) || 360)) }) as Sent);
+  const got = await call(c, spec, sentOf(p.request, { ...row, height: Math.min(1080, Math.max(90, Math.round(height) || 360)) }));
   if (got.status !== 200 || !/^image\/(jpeg|png|webp|gif|avif)/.test(got.type)) throw new AppError("integration.noPicture", got.status === 404 ? 404 : 502);
   return { bytes: got.bytes, type: got.type.split(";")[0]! };
 }
@@ -643,7 +645,7 @@ export async function act(id: string, name: string, doing: Doing, by: string, le
     const list = spec.read[a.on]!;
     const asked = Array.isArray(doing.ids) ? doing.ids.map(String) : [];
     if (!asked.length || asked.length > MAX_IDS) throw new AppError("integration.badInput", 400, { field: "ids" });
-    const rows = asked.map((k) => rowFor(c, a.on!, k));
+    const rows = asked.map((k) => rowFor(c, a.on!, k, "integration.noRow"));
     if (a.when && !rows.every((r) => test(a.when!, (f) => r[f]))) throw new AppError("integration.notNow", 409);
     vars.ids = rows.map((r) => r[list.key]);
     vars.id = vars.ids && (vars.ids as Scalar[])[0];
@@ -679,7 +681,7 @@ export async function act(id: string, name: string, doing: Doing, by: string, le
   if (!req) throw new AppError("integration.notNow", 409);
   const got = await call(c, spec, sentOf(req, vars, files));
   if (got.status < 200 || got.status >= 300 || (a.fails !== undefined && text(got).trim() === a.fails)) throw new AppError("integration.refused", 502, { status: got.status });
-  record("integration.did", { user: by, detail: `${c.name}: ${say(a.label, "en")}${names.length ? `: ${names[0]}${names.length > 1 ? ` +${names.length - 1}` : ""}` : ""}` });
+  record("integration.did", { user: by, detail: `${c.name} — ${say(a.label, settings.language || "en")}${names.length ? `: ${names[0]}${names.length > 1 ? ` +${names.length - 1}` : ""}` : ""}` });
   void look(c, true);
   return { ok: true, done: names };
 }
