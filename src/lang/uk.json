@@ -5946,6 +5946,7 @@
   "error.integration.noPicture": "У сервісу немає знімка для цього.",
   "error.integration.badInput": "Сервіс такого не прийме: {field}.",
   "error.integration.noRow": "Цього там уже немає: список перечитано.",
+  "error.integration.said": "Сервіс відмовив: {message}",
   "error.integration.notNow": "Зараз цього з ним зробити не можна.",
   "error.integration.level": "Для цього потрібен ключ рівня full.",
   "activity.integration.added": "Підключено сервіс: {target}",

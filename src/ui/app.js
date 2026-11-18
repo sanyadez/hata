@@ -5732,6 +5732,9 @@ const svcText = (text) => (text ? (text[state.lang] ?? text.en ?? "") : "");
 function svcFormat(v, as) {
   if (v === null || v === undefined || v === "") return "";
   if (Array.isArray(v)) return v.join(", ");
+  // a time may come as words of ISO 8601
+  if ((as === "time" || as === "ago") && typeof v === "string") v = Date.parse(v);
+  if ((as === "time" || as === "ago") && !Number.isFinite(v)) return "";
   switch (as) {
     case "bytes":
       return bytes(v);
@@ -5853,7 +5856,8 @@ async function loadService() {
 
 function svcHead(x, spec) {
   const kinds = svcKinds().find((k) => k.id === x.kind);
-  const general = Object.entries(spec.actions).filter(([, a]) => !a.on);
+  // what is done to the whole is offered when its condition of the values holds
+  const general = Object.entries(spec.actions).filter(([, a]) => !a.on && svcTest(a.when, x.values));
   return h(
     "div",
     { class: "tree-head" },
@@ -6152,6 +6156,7 @@ async function svcConnectDialog(kind, old = null, address = "") {
       field(t("service.url"), url, t("service.urlHint", { port: spec.address.port, scheme: spec.address.scheme })),
       (user || password) && h("div", { class: "form-pair" }, user && field(t("service.user"), user), password && field(t("service.password"), password)),
       token && field(t("service.token"), token),
+      spec.hint && h("p", { class: "small" }, svcText(spec.hint)),
       (password || token) && h("p", { class: "muted small" }, t("service.secretHint")),
       field(t("service.name"), name),
       cert,

@@ -5946,6 +5946,7 @@
   "error.integration.noPicture": "The service has no picture for this.",
   "error.integration.badInput": "This is not what the service can take: {field}.",
   "error.integration.noRow": "It is not there any more: the list was read again.",
+  "error.integration.said": "The service said no: {message}",
   "error.integration.notNow": "This cannot be done to it now.",
   "error.integration.level": "This needs a key of the level full.",
   "activity.integration.added": "Service connected: {target}",

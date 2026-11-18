@@ -67,12 +67,26 @@ export function field(f: Field, item: unknown, key: string, answers: Answers, ro
     v = typed(at(path, item, key, answers, row), f.type);
     if (v !== null) break;
   }
+  if (f.equals !== undefined) {
+    const other = at(f.equals, item, key, answers, row);
+    return v !== null && v !== undefined && v === other;
+  }
   if (f.map) {
     const k = String(v);
     v = Object.hasOwn(f.map, k) ? f.map[k] : (f.else ?? null);
   } else if (v === null && f.else !== undefined) v = f.else;
   if (typeof v === "number") {
     if (f.between && (v < f.between[0] || v > f.between[1])) return null;
+    if (f.minus !== undefined) {
+      const m = at(f.minus, item, key, answers, row);
+      v = typeof m === "number" ? v - m : null;
+    }
+    if (f.over !== undefined && typeof v === "number") {
+      const d = at(f.over, item, key, answers, row);
+      v = typeof d === "number" && d > 0 ? v / d : null;
+    }
+  }
+  if (typeof v === "number") {
     if (f.times !== undefined) v = v * f.times;
     if (f.round !== undefined) v = Math.round((v as number) * 10 ** f.round) / 10 ** f.round;
   }
@@ -91,6 +105,7 @@ export function rowsOf(source: Source, answer: unknown, answers: Answers): Row[]
     for (const [name, f] of Object.entries(source.fields)) row[name] = field(f, item, key, answers, row);
     const id = row[source.key];
     if (id === null || id === undefined || id === "" || Array.isArray(id)) continue;
+    if (source.where && !test(source.where, (n) => row[n])) continue;
     rows.push(row);
   }
   return rows;
@@ -141,9 +156,21 @@ export const where = (rows: Row[], c?: Cond) => (c ? rows.filter((row) => test(c
 
 export function value(v: Value, answers: Answers): Scalar {
   if ("from" in v) {
-    const [source = "", ...rest] = v.from.slice(1).split(".");
-    const got = get(answers[source], rest.join("."));
-    return typeof got === "string" ? got.trim() : (scalar(got) as Scalar);
+    const read = (path: string) => {
+      const [source = "", ...rest] = path.slice(1).split(".");
+      return get(answers[source], rest.join("."));
+    };
+    const got = read(v.from);
+    if (v.over === undefined && v.times === undefined) return typeof got === "string" ? got.trim() : (scalar(got) as Scalar);
+    if (typeof got !== "number") return null;
+    let n = got;
+    if (v.over !== undefined) {
+      const d = read(v.over);
+      if (typeof d !== "number" || d <= 0) return null;
+      n /= d;
+    }
+    if (v.times !== undefined) n *= v.times;
+    return v.round !== undefined ? Math.round(n * 10 ** v.round) / 10 ** v.round : n;
   }
   if ("sum" in v) {
     const [list = "", f = ""] = v.sum.split(".");
@@ -173,6 +200,9 @@ function formatted(v: unknown, how?: string): string {
       return joined(v, ",");
     case "lower":
       return joined(v, ",").toLowerCase();
+    case "basic":
+      // HTTP basic sign-in with a key alone: no user, the key as the password
+      return Buffer.from(`:${joined(v, ",")}`).toString("base64");
     default:
       return joined(v, ",");
   }
@@ -216,3 +246,18 @@ export const chosen = (reqs: Req[], values: Record<string, unknown>) => reqs.fin
 
 /** Words of a text in a language, English when there are none */
 export const say = (text: Record<string, string> | undefined, lang: string) => (text ? (text[lang] ?? text.en ?? "") : "");
+
+/** Prometheus' text format, read as samples: `name{label="value",…} 1.5`; comments and what cannot be read are left out */
+export function prometheusSamples(text: string): { name: string; labels: Record<string, string>; value: number }[] {
+  const out: { name: string; labels: Record<string, string>; value: number }[] = [];
+  for (const line of text.split("\n")) {
+    const m = /^([A-Za-z_:][A-Za-z0-9_:]*)(?:\{(.*)\})?\s+(\S+)/.exec(line.trim());
+    if (!m) continue;
+    const value = Number(m[3]);
+    if (!Number.isFinite(value) && m[3] !== "NaN") continue;
+    const labels: Record<string, string> = {};
+    for (const l of (m[2] ?? "").matchAll(/([A-Za-z_][A-Za-z0-9_]*)="((?:[^"\\]|\\.)*)"/g)) labels[l[1]!] = l[2]!.replace(/\\(.)/g, (_, c: string) => (c === "n" ? "\n" : c));
+    out.push({ name: m[1]!, labels, value });
+  }
+  return out;
+}

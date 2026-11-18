@@ -30,6 +30,9 @@ export type Field =
       /** The first of these that has a value of the type */
       first?: string[];
       type?: ValueType;
+      /** What is taken away and what it is divided by, before `times`: a part done out of a whole */
+      minus?: string;
+      over?: string;
       times?: number;
       round?: number;
       map?: Record<string, string | number | boolean>;
@@ -38,6 +41,8 @@ export type Field =
       between?: [number, number];
       /** A yes or no */
       test?: Cond;
+      /** Yes when the value is the same as this other one (a path, often `@source.path`) */
+      equals?: string;
     };
 
 export type Cond =
@@ -48,7 +53,7 @@ export type Cond =
 
 /** A request to the service. `{name}` puts a value in; in a path and a query it is encoded */
 export interface Req {
-  method: "GET" | "POST" | "PUT" | "DELETE";
+  method: "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
   path: string;
   query?: Record<string, string>;
   form?: Record<string, string>;
@@ -66,6 +71,10 @@ export interface Source {
   every: number;
   /** The answer is text, kept as it is */
   text: boolean;
+  /** The answer is Prometheus' text format: samples `{ name, labels, value }` */
+  prometheus: boolean;
+  /** Only the rows that meet it are kept */
+  where?: Cond;
   /** Where the list is in the answer; "" — the answer itself. An object's entries become rows, its keys `$key` */
   list?: string;
   /** The field that tells rows apart */
@@ -79,7 +88,7 @@ export interface Source {
   keep: number;
 }
 
-export type Value = { from: string } | { sum: string; where?: Cond } | { count: string; where?: Cond } | { first: string; field: string; where?: Cond; sort?: Sort[] };
+export type Value = { from: string; over?: string; times?: number; round?: number } | { sum: string; where?: Cond } | { count: string; where?: Cond } | { first: string; field: string; where?: Cond; sort?: Sort[] };
 export interface Sort {
   field: string;
   desc?: boolean;
@@ -121,6 +130,8 @@ export interface Action {
   done?: Text;
   /** An answer of 200 with these words is a refusal all the same */
   fails?: string;
+  /** What a JSON answer says when it went well; anything else there is a refusal, worded with it */
+  ok?: { json: string; is: string };
 }
 
 export interface Column {
@@ -158,6 +169,8 @@ export interface Rule {
 
 export interface SignIn {
   ask: ("user" | "password" | "token")[];
+  /** Where the person finds what is asked: an API key's place in the service's settings */
+  hint?: Text;
   defaults: { user?: string };
   /** What tells this service from whatever else answers there; kept as the source `check` */
   check: { request: Req; is: "version" | "ok" | { json: string } };
@@ -217,7 +230,7 @@ const COOKIE = /^[A-Za-z0-9_.-]{1,64}$/;
 /** A path inside the service: no other host, no way up, nothing a URL would read twice */
 const PATH = /^\/(?!\/)[A-Za-z0-9._~!$&'()*+,;=:@%/{}|-]*$/;
 const PLACE = /\{([A-Za-z_$@][A-Za-z0-9_.$@]*)(\|[a-z]+)?\}/g;
-const TEMPLATE_FORMATS = new Set(["pipe", "lines", "comma", "lower", "bytes", "rate", "percent", "number", "duration", "time", "ago"]);
+const TEMPLATE_FORMATS = new Set(["pipe", "lines", "comma", "lower", "basic", "bytes", "rate", "percent", "number", "duration", "time", "ago"]);
 
 type Raw = Record<string, unknown>;
 const isObject = (v: unknown): v is Raw => typeof v === "object" && v !== null && !Array.isArray(v);
@@ -316,7 +329,7 @@ function readCond(r: Reader, v: unknown, at: string, known: (field: string) => b
 function readReq(r: Reader, v: unknown, at: string, known: (name: string) => boolean, allowCond = false, valueNames: (n: string) => boolean = () => false): Req {
   const o = r.obj(v, at);
   const method = (o.method ?? "GET") as Req["method"];
-  if (!["GET", "POST", "PUT", "DELETE"].includes(method)) r.bad(`${at}.method`, "is GET, POST, PUT or DELETE");
+  if (!["GET", "POST", "PUT", "PATCH", "DELETE"].includes(method)) r.bad(`${at}.method`, "is GET, POST, PUT, PATCH or DELETE");
   const path = r.template(o.path, `${at}.path`, known);
   if (path && (!PATH.test(path) || path.includes("..") || path.includes("\\"))) r.bad(`${at}.path`, "must be a path inside the service, starting with /");
   const out: Req = { method, path };
@@ -359,6 +372,8 @@ function readField(r: Reader, v: unknown, at: string): Field {
     if (!["text", "number", "bool", "list"].includes(String(o.type))) r.bad(`${at}.type`, "is text, number, bool or list");
     out.type = o.type as ValueType;
   }
+  if (o.minus !== undefined) out.minus = r.str(o.minus, `${at}.minus`);
+  if (o.over !== undefined) out.over = r.str(o.over, `${at}.over`);
   if (o.times !== undefined) out.times = r.num(o.times, `${at}.times`, -1e9, 1e9);
   if (o.round !== undefined) out.round = r.num(o.round, `${at}.round`, 0, 6);
   if (o.map !== undefined) out.map = r.obj(o.map, `${at}.map`) as Record<string, string>;
@@ -369,8 +384,9 @@ function readField(r: Reader, v: unknown, at: string): Field {
     out.between = b as [number, number];
   }
   if (o.test !== undefined) out.test = readCond(r, o.test, `${at}.test`, () => true);
+  if (o.equals !== undefined) out.equals = r.str(o.equals, `${at}.equals`);
   if (!out.from && !out.first && !out.test) r.bad(at, "says where the value is: from, first or test");
-  for (const k of Object.keys(o)) if (!["from", "first", "type", "times", "round", "map", "else", "between", "test"].includes(k)) r.bad(`${at}.${k}`, "is not a part of a field");
+  for (const k of Object.keys(o)) if (!["from", "first", "type", "minus", "over", "times", "round", "map", "else", "between", "test", "equals"].includes(k)) r.bad(`${at}.${k}`, "is not a part of a field");
   return out;
 }
 
@@ -444,6 +460,7 @@ export function readSpec(raw: unknown): Spec {
   const defaults = r.obj(si.defaults, "signIn.defaults");
   const signIn: SignIn = {
     ask,
+    ...(si.hint !== undefined ? { hint: r.text(si.hint, "signIn.hint") } : {}),
     defaults: defaults.user !== undefined ? { user: r.str(defaults.user, "signIn.defaults.user", undefined, 64) } : {},
     check: { request: readReq(r, chk.request, "signIn.check.request", () => false), is },
     headers,
@@ -476,6 +493,8 @@ export function readSpec(raw: unknown): Spec {
       fields[f] = readField(r, fv, `${at}.fields.${f}`);
     }
     const text = r.bool(s.text, `${at}.text`);
+    const prometheus = r.bool(s.prometheus, `${at}.prometheus`);
+    if (text && prometheus) r.bad(at, "is text or prometheus, not both");
     const list = s.list === undefined ? undefined : s.list === "" ? "" : r.str(s.list, `${at}.list`);
     if (list !== undefined && !Object.keys(fields).length) r.bad(at, "a list needs fields");
     const key = s.key === undefined ? "id" : r.str(s.key, `${at}.key`, NAME);
@@ -493,6 +512,7 @@ export function readSpec(raw: unknown): Spec {
       ...(from ? { from } : { request: readReq(r, s.request, `${at}.request`, (n) => n in params) }),
       every,
       text,
+      prometheus,
       ...(list !== undefined ? { list } : {}),
       key,
       fields,
@@ -500,6 +520,10 @@ export function readSpec(raw: unknown): Spec {
       private: r.bool(s.private, `${at}.private`),
       keep: r.num(s.keep, `${at}.keep`, 0, 5000, list !== undefined ? 500 : 0),
     };
+    if (s.where !== undefined) {
+      if (list === undefined) r.bad(`${at}.where`, "keeps rows of a list");
+      else read[name]!.where = readCond(r, s.where, `${at}.where`, (f) => f in fields);
+    }
   }
   const isList = (n: string) => read[n]?.list !== undefined;
   const fieldsOf = (n: string) => (f: string) => f in (read[n]?.fields ?? {});
@@ -518,6 +542,14 @@ export function readSpec(raw: unknown): Spec {
       const from = r.str(x.from, `${at}.from`);
       if (!from.startsWith("@") || !sourceNames.includes(from.slice(1).split(".")[0]!)) r.bad(`${at}.from`, "is @<source>[.path]");
       values[name] = { from };
+      // a share of a whole: blocked out of all the questions
+      if (x.over !== undefined) {
+        const over = r.str(x.over, `${at}.over`);
+        if (!over.startsWith("@") || !sourceNames.includes(over.slice(1).split(".")[0]!)) r.bad(`${at}.over`, "is @<source>[.path]");
+        (values[name] as { over?: string }).over = over;
+      }
+      if (x.times !== undefined) (values[name] as { times?: number }).times = r.num(x.times, `${at}.times`, -1e9, 1e9);
+      if (x.round !== undefined) (values[name] as { round?: number }).round = r.num(x.round, `${at}.round`, 0, 6);
     } else if (x.sum !== undefined) {
       const [list = "", field = ""] = r.str(x.sum, `${at}.sum`).split(".");
       if (!isList(list) || !fieldsOf(list)(field)) r.bad(`${at}.sum`, "is <list>.<field>");
@@ -590,7 +622,8 @@ export function readSpec(raw: unknown): Spec {
       } satisfies Input;
     });
     const known = (n: string) => ask.some((q) => q.name === n) || valueNames(n) || (on !== undefined && (n === "ids" || n === "id"));
-    const reqs = a.requests !== undefined ? r.list(a.requests, `${at}.requests`).map((x, i) => readReq(r, x, `${at}.requests[${i}]`, known, true, valueNames)) : [readReq(r, a.request, `${at}.request`, known)];
+    // which of several requests is made may hang on the values and on what was given
+    const reqs = a.requests !== undefined ? r.list(a.requests, `${at}.requests`).map((x, i) => readReq(r, x, `${at}.requests[${i}]`, known, true, (n) => valueNames(n) || ask.some((q) => q.name === n))) : [readReq(r, a.request, `${at}.request`, known)];
     if (!reqs.length) r.bad(at, "makes a request");
     const effect = a.effect === "destroy" ? "destroy" : (a.effect !== "change" && r.bad(`${at}.effect`, "is change or destroy"), "change");
     const level = a.level === undefined ? (effect === "destroy" ? "full" : "operate") : a.level === "full" ? "full" : (a.level !== "operate" && r.bad(`${at}.level`, "is operate or full"), "operate");
@@ -608,6 +641,7 @@ export function readSpec(raw: unknown): Spec {
       requests: reqs,
       ...(a.done !== undefined ? { done: r.text(a.done, `${at}.done`, 120) } : {}),
       ...(a.fails !== undefined ? { fails: r.str(a.fails, `${at}.fails`, undefined, 100) } : {}),
+      ...(a.ok !== undefined ? { ok: { json: r.str(r.obj(a.ok, `${at}.ok`).json, `${at}.ok.json`), is: r.str(r.obj(a.ok, `${at}.ok`).is, `${at}.ok.is`, undefined, 100) } } : {}),
     };
     if (effect === "destroy" && !conf) r.bad(`${at}.confirm`, "what destroys asks first");
   }

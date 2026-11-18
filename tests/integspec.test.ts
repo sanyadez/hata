@@ -76,3 +76,19 @@ test("places are encoded in a path and a query; an empty one leaves its paramete
   expect(atLeast("v2.11.4", "2.11")).toBe(true);
   expect(atLeast("2.9", "2.11")).toBe(false);
 });
+
+test("a part done out of a whole, rows kept by a condition, Prometheus' text, a key as basic sign-in", async () => {
+  const { prometheusSamples } = await import("../src/integ/data");
+  const spec = readSpec({
+    format: 1, id: "demo", title: "Demo", what: "x", address: { port: 1 },
+    signIn: { ask: ["token"], headers: { Authorization: "Basic {token|basic}" }, check: { request: { path: "/v" }, is: "ok" } },
+    read: {
+      queue: { request: { path: "/q" }, list: "records", fields: { id: "id", percent: { from: "size", minus: "sizeleft", over: "size", times: 100, round: 0 } } },
+      metrics: { request: { path: "/metrics" }, prometheus: true, list: "", key: "name", where: { field: "kind", is: "monitor_status" }, fields: { kind: "name", name: "labels.monitor_name", status: { from: "value", map: { "1": "up", "0": "down" } } } },
+    },
+  });
+  expect(rowsOf(spec.read.queue!, { records: [{ id: 1, size: 200, sizeleft: 50 }, { id: 2, size: 0, sizeleft: 0 }] }, {}).map((r) => r.percent)).toEqual([75, null]);
+  const samples = prometheusSamples('# HELP x\nmonitor_status{monitor_name="web \\"one\\"",monitor_type="http"} 1\nmonitor_status{monitor_name="db"} 0\nmonitor_response_time{monitor_name="db"} 12\n');
+  expect(rowsOf(spec.read.metrics!, samples, {}).map((r) => [r.name, r.status])).toEqual([['web "one"', "up"], ["db", "down"]]);
+  expect(fill(spec.signIn.headers.Authorization!, { token: "k" })).toBe(`Basic ${btoa(":k")}`);
+});

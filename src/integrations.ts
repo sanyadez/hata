@@ -18,7 +18,7 @@ import { AppError, listApps } from "./apps";
 import type { AttentionItem } from "./attention";
 import { DATA_DIR, SECRETS_DIR, settings } from "./config";
 import { readJsonFile, writeJsonAtomic, writeTextAtomic } from "./fsutil";
-import { type Answers, atLeast, chosen, fill, fillJson, get, rowsOf, type Row, type Scalar, say, sortRows, target, test, valuesOf, where } from "./integ/data";
+import { type Answers, atLeast, chosen, fill, fillJson, get, prometheusSamples, rowsOf, type Row, type Scalar, say, sortRows, target, test, valuesOf, where } from "./integ/data";
 import { readSpec, type Req, type Spec, SPEC_ID, SpecError } from "./integ/spec";
 import { appOfServer, cleanName, isHere, lanAddress, newId, portOf } from "./integration";
 import { CertificateChanged, pinnedRequest, pinnedStream, showCertificate, type Stream } from "./pinned";
@@ -188,6 +188,7 @@ export function kindView(kind: string) {
     ...rest,
     ask: signIn.ask,
     defaults: signIn.defaults,
+    ...(signIn.hint ? { hint: signIn.hint } : {}),
     lists: Object.fromEntries(Object.entries(read).filter(([, s]) => s.list !== undefined).map(([name, s]) => [name, { key: s.key, params: s.params, private: s.private }])),
   };
 }
@@ -385,7 +386,7 @@ async function readSource(c: Connection, spec: Spec, name: string, params: Recor
   const got = await call(c, spec, sentOf(s.request!, { ...defaultsOf(spec, name), ...params }));
   if (got.status === 404) throw new AppError("integration.refused", 502, { status: 404, path: s.request!.path });
   if (got.status < 200 || got.status >= 300) throw new AppError("integration.refused", 502, { status: got.status });
-  const answer = s.text ? text(got).trim() : jsonOf(got, c);
+  const answer = s.text ? text(got).trim() : s.prometheus ? prometheusSamples(text(got)) : jsonOf(got, c);
   if (s.list === undefined) {
     l.answers[name] = answer;
     return answer;
@@ -657,13 +658,14 @@ export async function act(id: string, name: string, doing: Doing, by: string, le
   for (const q of a.ask) {
     const v = input[q.name];
     let given = false;
-    if (q.kind === "check") vars[q.name] = v === true ? "true" : "false";
+    if (q.kind === "check") vars[q.name] = v === true;
     else if (q.kind === "file") {
       if (typeof v === "string" && v) {
         const bytes = Buffer.from(v, "base64");
         if (q.check === "torrent" && !isTorrentFile(bytes)) throw new AppError("integration.badInput", 400, { field: q.name });
         files[q.name] = bytes;
-        vars[q.name] = "";
+        // a JSON body carries a file as base64 (Transmission's metainfo); a multipart one as a part
+        vars[q.name] = bytes.toString("base64");
         given = true;
       }
     } else if (typeof v === "string" && v.trim()) {
@@ -681,6 +683,15 @@ export async function act(id: string, name: string, doing: Doing, by: string, le
   if (!req) throw new AppError("integration.notNow", 409);
   const got = await call(c, spec, sentOf(req, vars, files));
   if (got.status < 200 || got.status >= 300 || (a.fails !== undefined && text(got).trim() === a.fails)) throw new AppError("integration.refused", 502, { status: got.status });
+  if (a.ok) {
+    let said: unknown;
+    try {
+      said = get(JSON.parse(text(got)), a.ok.json);
+    } catch {
+      said = undefined;
+    }
+    if (said !== a.ok.is) throw new AppError("integration.said", 502, { message: typeof said === "string" ? said.slice(0, 200) : "" });
+  }
   record("integration.did", { user: by, detail: `${c.name} — ${say(a.label, settings.language || "en")}${names.length ? `: ${names[0]}${names.length > 1 ? ` +${names.length - 1}` : ""}` : ""}` });
   void look(c, true);
   return { ok: true, done: names };
