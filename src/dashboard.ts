@@ -14,7 +14,7 @@ export type Entry =
   /** An entity of a Home Assistant server Hata is connected to: a light, a switch, a sensor */
   | { type: "ha"; server: string; entity: string }
   /** What an integration shows right on the page: its numbers, a camera, what the cameras noticed */
-  | { type: "widget"; id: string; source: "qbit" | "frigate"; server: string; view: "torrents" | "camera" | "events"; camera?: string }
+  | { type: "widget"; id: string; source: "qbit" | "frigate"; server: string; view: "torrents" | "camera" | "events"; camera?: string; /** a camera's card shows live video instead of a picture renewed every 10 s */ live?: boolean }
   /** A tile of Hata's own, which can be moved but not taken off: the store, the "Add" tile */
   | { type: "builtin"; id: string };
 
@@ -167,7 +167,7 @@ export function cleanLayout(input: unknown): Layout {
     if (raw.type === "ha" && typeof raw.server === "string" && SERVER_RE.test(raw.server) && typeof raw.entity === "string" && ENTITY_RE.test(raw.entity) && once(`ha ${raw.server}/${raw.entity}`)) made = { type: "ha", server: raw.server, entity: raw.entity };
     // a widget is as large as the page lets it be: it does not go into a folder
     if (!inFolder && raw.type === "widget" && typeof raw.source === "string" && WIDGET_VIEWS[raw.source]?.includes(String(raw.view)) && typeof raw.server === "string" && SERVER_RE.test(raw.server) && (raw.view !== "camera" || (typeof raw.camera === "string" && CAMERA_RE.test(raw.camera)))) {
-      made = { type: "widget", id: id(raw.id), source: raw.source as "qbit" | "frigate", server: raw.server, view: raw.view as "torrents" | "camera" | "events", ...(raw.view === "camera" ? { camera: raw.camera as string } : {}) };
+      made = { type: "widget", id: id(raw.id), source: raw.source as "qbit" | "frigate", server: raw.server, view: raw.view as "torrents" | "camera" | "events", ...(raw.view === "camera" ? { camera: raw.camera as string, ...(raw.live === true ? { live: true } : {}) } : {}) };
     }
     if (raw.type === "files" && typeof raw.path === "string" && raw.path.startsWith("/") && raw.path.length <= 4096 && once("files " + raw.path)) made = { type: "files", path: raw.path };
     if (raw.type === "link") {

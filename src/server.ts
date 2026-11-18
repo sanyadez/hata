@@ -96,7 +96,7 @@ import {
 import { bus, type BusEvent } from "./bus";
 import { DATA_DIR, dropOldSecrets, listenAddress, saveSettings, settings, timezone, updateSettings } from "./config";
 import { arrange, cleanLayout, dropBlock, dropServer, GRID, haTiles, layoutText, parseLayoutText } from "./dashboard";
-import { addFrigate, cameraPicture, changeFrigate, eventPicture, frigateEvents, frigateFound, frigateOfApps, frigateServer, frigateServers, frigateTrouble, removeFrigate } from "./frigates";
+import { addFrigate, cameraLive, cameraPicture, changeFrigate, eventPicture, frigateEvents, frigateFound, frigateOfApps, frigateServer, frigateServers, frigateTrouble, removeFrigate } from "./frigates";
 import { lanAddress } from "./integration";
 import { addQbit, addTorrents, changeQbit, qbitFound, qbitOfApps, qbitServer, qbitServers, qbitTorrents, qbitTrouble, qbitWidgets, removeQbit, removeTorrents, torrentsPower } from "./qbittorrent";
 import { act as haAct, addServer as addHa, allowProxy as haAllowProxy, changeServer as changeHa, discover as discoverHa, entities as haEntities, forgetUser as haForgetUser, homeAssistantTrouble, installUpdate as haInstallUpdate, makeBackup as haMakeBackup, removeServer as removeHa, renameEntity as haRename, server as haServer, servers as haServers, tileStates as haTileStates, visibleTo as haVisibleTo } from "./homeassistant";
@@ -2814,6 +2814,11 @@ async function frigateApi(req: Request, url: URL, user: User): Promise<Response 
   if (rest === "/events" && method === "GET") return json(await frigateEvents(id, { camera: url.searchParams.get("camera") ?? undefined, label: url.searchParams.get("label") ?? undefined, before: url.searchParams.get("before") ?? undefined, limit: url.searchParams.get("limit") ?? undefined }));
   const camera = /^\/cameras\/([^/]+)\/latest\.jpg$/.exec(rest);
   if (camera && method === "GET") return jpeg(await cameraPicture(id, decodeURIComponent(camera[1]!), Number(url.searchParams.get("h"))));
+  const live = /^\/cameras\/([^/]+)\/live$/.exec(rest);
+  if (live && method === "GET") {
+    const stream = await cameraLive(id, decodeURIComponent(live[1]!), Number(url.searchParams.get("h")), Number(url.searchParams.get("fps")), req.signal);
+    return new Response(stream.body, { headers: { "content-type": stream.type, "cache-control": "no-store", "x-content-type-options": "nosniff" } });
+  }
   const event = /^\/events\/([^/]+)\/(thumbnail|snapshot)\.jpg$/.exec(rest);
   if (event && method === "GET") return jpeg(await eventPicture(id, decodeURIComponent(event[1]!), event[2] as "thumbnail" | "snapshot"));
   return null;

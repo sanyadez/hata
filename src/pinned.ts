@@ -66,3 +66,57 @@ export async function pinnedRequest(url: string, fingerprint: string, path: stri
     req.end();
   });
 }
+
+export interface Stream {
+  status: number;
+  type: string;
+  body: ReadableStream<Uint8Array>;
+}
+
+/** The same judged connection, its answer passed on as it comes (a camera's live picture); ends with `signal` */
+export async function pinnedStream(url: string, fingerprint: string, path: string, headers: Record<string, string>, signal: AbortSignal, timeout = 10_000): Promise<Stream> {
+  const { socket, shown } = await reach(url, timeout);
+  if (fingerprint ? shown.fingerprint !== fingerprint : !shown.trusted) {
+    socket.destroy();
+    throw new CertificateChanged(shown.fingerprint);
+  }
+  const u = new URL(url);
+  return new Promise((resolve, reject) => {
+    const req = request({ host: u.hostname, port: Number(u.port || 443), method: "GET", path, createConnection: () => socket, headers: { Connection: "close", ...headers }, timeout } as unknown as Parameters<typeof request>[0], (res) => {
+      // the first answer came: from now on silence is the camera's, not a reason to give up
+      socket.setTimeout(0);
+      req.setTimeout(0);
+      const end = () => void (res.destroy(), socket.destroy());
+      signal.addEventListener("abort", end, { once: true });
+      const body = new ReadableStream<Uint8Array>({
+        start(controller) {
+          res.on("data", (c: Buffer) => {
+            controller.enqueue(new Uint8Array(c));
+            if ((controller.desiredSize ?? 1) <= 0) res.pause();
+          });
+          res.on("end", () => {
+            try {
+              controller.close();
+            } catch {}
+          });
+          res.on("error", (e) => {
+            try {
+              controller.error(e);
+            } catch {}
+          });
+          res.on("close", () => {
+            try {
+              controller.close();
+            } catch {}
+          });
+        },
+        pull: () => void res.resume(),
+        cancel: end,
+      });
+      resolve({ status: res.statusCode ?? 0, type: String(res.headers["content-type"] ?? ""), body });
+    });
+    req.on("timeout", () => req.destroy(new Error("timeout")));
+    req.on("error", reject);
+    req.end();
+  });
+}

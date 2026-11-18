@@ -14,7 +14,7 @@ import { readJsonFile, writeJsonAtomic } from "./fsutil";
 import { type Camera, EVENT_RE, eventsQuery, type FrigateEvent, NAME_RE, readCameras, readEvent, tokenCookie, trouble } from "./frigate";
 import { cleanUrl } from "./ha";
 import { appOfServer, cleanName, isHere, lanAddress, newId, portOf } from "./integration";
-import { CertificateChanged, type Answer, pinnedRequest, showCertificate } from "./pinned";
+import { CertificateChanged, type Answer, pinnedRequest, pinnedStream, type Stream, showCertificate } from "./pinned";
 import { cleanFingerprint } from "./pve";
 
 const FILE = join(SECRETS_DIR, "frigate.json");
@@ -194,6 +194,47 @@ export async function cameraPicture(id: string, camera: string, height: number):
   if (!NAME_RE.test(camera)) throw new AppError("frigate.noPicture", 404);
   const h = Math.min(1080, Math.max(90, Math.round(height) || 360));
   return picture(await call(serverOf(id), `/api/${camera}/latest.jpg?h=${h}`));
+}
+
+/** Frames a second and the height of the live picture: the page asks for what its card needs, never more than this */
+const LIVE_FPS = [1, 10] as const;
+
+async function openLive(s: Server, path: string, signal: AbortSignal): Promise<Stream> {
+  const l = liveOf(s);
+  try {
+    if (s.url.startsWith("https:")) return await pinnedStream(s.url, s.fingerprint, path, l.cookie ? { Cookie: l.cookie } : {}, signal, CALL_MS);
+    const res = await fetch(s.url + path, { headers: l.cookie ? { Cookie: l.cookie } : {}, redirect: "manual", signal });
+    return { status: res.status, type: res.headers.get("content-type") ?? "", body: res.body ?? new ReadableStream() };
+  } catch (e) {
+    if (e instanceof CertificateChanged) throw new AppError("frigate.certChanged", 409, { url: s.url, fingerprint: e.message });
+    throw new AppError("frigate.noAnswer", 502, { url: s.url, message: e instanceof Error ? e.message : String(e) });
+  }
+}
+
+/**
+ * What a camera sees, as it happens: Frigate's MJPEG stream (`/api/<camera>`), passed on frame by frame. Nothing is
+ * kept; the stream to Frigate ends when the page stops reading.
+ */
+export async function cameraLive(id: string, camera: string, height: number, fps: number, signal: AbortSignal): Promise<Stream> {
+  if (!NAME_RE.test(camera)) throw new AppError("frigate.noPicture", 404);
+  const s = serverOf(id);
+  const h = Math.min(1080, Math.max(90, Math.round(height) || 360));
+  const rate = Math.min(LIVE_FPS[1], Math.max(LIVE_FPS[0], Math.round(fps) || 5));
+  const path = `/api/${camera}?fps=${rate}&height=${h}`;
+  // signed in first (the same way every other call is), and again once when the session has run out
+  if (!liveOf(s).version) await call(s, "/api/version");
+  let res = await openLive(s, path, signal);
+  if (res.status === 401 || res.status === 403) {
+    void res.body.cancel().catch(() => {});
+    liveOf(s).version = "";
+    await call(s, "/api/version");
+    res = await openLive(s, path, signal);
+  }
+  if (res.status !== 200 || !res.type.startsWith("multipart/")) {
+    void res.body.cancel().catch(() => {});
+    throw new AppError("frigate.noPicture", res.status === 404 ? 404 : 502);
+  }
+  return res;
 }
 
 export async function eventPicture(id: string, event: string, kind: "thumbnail" | "snapshot"): Promise<Buffer> {

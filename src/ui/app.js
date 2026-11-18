@@ -1805,6 +1805,47 @@ function widgetPicture(key, src, alt) {
   return img;
 }
 
+/**
+ * A camera's live video (Frigate's MJPEG stream through Hata): one stream per picture. It is let go when the picture
+ * leaves the page or the tab is hidden, and after a break it is asked for again in a few seconds.
+ */
+const LIVE_FPS = 5;
+const liveSrc = (serverId, name, height) => `/api/frigate/${serverId}/cameras/${encodeURIComponent(name)}/live?h=${height}&fps=${LIVE_FPS}`;
+const liveShown = new Set();
+
+function livePicture(src, alt, cls) {
+  const img = picture(src, alt, cls);
+  img.removeAttribute("loading");
+  img.dataset.live = src;
+  liveShown.add(img);
+  img.addEventListener("error", () =>
+    setTimeout(() => {
+      if (!img.isConnected || !img.dataset.live || document.hidden) return;
+      img.classList.remove("broken");
+      img.src = `${img.dataset.live}&r=${Date.now()}`;
+    }, 5000),
+  );
+  return img;
+}
+
+function letLiveGo(img) {
+  delete img.dataset.live;
+  img.removeAttribute("src");
+  liveShown.delete(img);
+}
+
+setInterval(() => {
+  for (const img of liveShown) if (!img.isConnected) letLiveGo(img);
+  for (const [key, img] of widgetPictures) if (!img.isConnected && !liveShown.has(img) && key.startsWith("live:")) widgetPictures.delete(key);
+}, 3000);
+
+document.addEventListener("visibilitychange", () => {
+  for (const img of liveShown) {
+    if (document.hidden) img.removeAttribute("src");
+    else if (img.isConnected) img.src = `${img.dataset.live}&r=${Date.now()}`;
+  }
+});
+
 function renewPicture(img, src) {
   const next = h("img", { src });
   next.addEventListener("load", () => (img.src = next.src));
@@ -1839,10 +1880,17 @@ function cameraWidget(item, x) {
   const key = `camera:${item.id}`;
   const height = cameraHeight(item);
   const open = () => c && cameraDialog(x, c);
+  let shown = null;
+  if (c?.enabled && x.online && item.live) {
+    // a stream per size: a card made larger asks for a larger picture
+    const liveKey = `live:${item.id}:${height}`;
+    shown = widgetPictures.get(liveKey);
+    if (!shown || !liveShown.has(shown)) widgetPictures.set(liveKey, (shown = livePicture(liveSrc(x.id, c.name, height), item.camera)));
+  } else if (c?.enabled && x.online) shown = widgetPicture(key, cameraPicture(x.id, c.name, height, Date.now()), item.camera);
   return h(
     "button",
     { type: "button", class: "tile-main widget-picture", onclick: open },
-    c?.enabled && x.online ? widgetPicture(key, cameraPicture(x.id, c.name, height, Date.now()), item.camera) : h("span", { class: "camera-off" }, icon("camera")),
+    shown ?? h("span", { class: "camera-off" }, icon("camera")),
     h("span", { class: "widget-caption" }, h("i", { class: "dot " + (c?.online && x.online ? "running" : "stopped") }), h("span", { class: "clip" }, item.camera)),
   );
 }
@@ -2410,6 +2458,12 @@ function tileMenu(item, point = null) {
     })),
     item.type === "link" && entry(t("home.removeLink"), "trash", () => askRemoveCard(item, () => changeLayout((next) => void takeTile(next, key))), "danger"),
     item.type === "ha" && entry(t("ha.offHome"), "trash", () => askRemoveCard(item, () => changeLayout((next) => void takeTile(next, key))), "danger"),
+    item.type === "widget" && item.view === "camera" && entry(t(item.live ? "frigate.showPicture" : "frigate.showLive"), item.live ? "image" : "play", () => changeLayout((next) => {
+      const found = locate(next, key);
+      if (!found) return false;
+      if (item.live) delete found.item.live;
+      else found.item.live = true;
+    })),
     item.type === "widget" && entry(t("ha.offHome"), "trash", () => askRemoveCard(item, () => changeLayout((next) => void takeTile(next, key))), "danger"),
     item.type === "files" && entry(t("files.unpin"), "home", () => askRemoveCard(item, () => pinFolder(item.path, false))),
   );
@@ -5714,16 +5768,16 @@ function frigateCamera(x, c) {
   );
 }
 
-/** One camera, larger, the picture asked for again every two seconds while the dialog is open */
+/** One camera, larger and live while the dialog is open; the whole screen by the button or a double click */
 function cameraDialog(x, c) {
-  let tick = 0;
-  const img = picture(cameraPicture(x.id, c.name, 720, `d${tick}`), c.name, "camera-big");
+  const img = livePicture(liveSrc(x.id, c.name, 1080), c.name, "camera-big");
+  const frame = h("div", { class: "camera-frame" }, img);
+  const whole = () => (document.fullscreenElement ? void document.exitFullscreen() : void frame.requestFullscreen?.().catch(() => {}));
+  img.addEventListener("dblclick", whole);
+  frame.append(h("button", { type: "button", class: "icon-btn camera-full", title: t("tv.fullScreen"), "aria-label": t("tv.fullScreen"), onclick: whole }, icon("expand")));
   let dialog;
-  dialog = openDialog("xwide", h("header", null, h("h2", { class: "clip grow" }, c.name), closeX(() => dialog)), img, h("p", { class: "muted small" }, t("frigate.notLive")));
-  const every = setInterval(() => {
-    if (!dialog.open) return clearInterval(every);
-    img.src = cameraPicture(x.id, c.name, 720, `d${++tick}`);
-  }, 2000);
+  dialog = openDialog("xwide", h("header", null, h("h2", { class: "clip grow" }, c.name), closeX(() => dialog)), frame, h("p", { class: "muted small" }, t("frigate.liveNote", { fps: LIVE_FPS })));
+  dialog.addEventListener("close", () => letLiveGo(img));
 }
 
 function eventDialog(x, e) {

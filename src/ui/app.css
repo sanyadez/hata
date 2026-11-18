@@ -1546,6 +1546,10 @@ i.dot.danger { background: var(--danger); }
 .camera-name { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .camera-name .clip { flex: 1; min-width: 0; font-weight: 500; }
 .camera-big { display: block; width: 100%; max-height: 72dvh; object-fit: contain; border-radius: var(--radius-md); background: #000; }
+.camera-frame { position: relative; }
+.camera-frame .camera-full { position: absolute; right: 8px; bottom: 8px; background: rgb(0 0 0 / 0.55); color: #fff; }
+.camera-frame:fullscreen { display: flex; align-items: center; justify-content: center; background: #000; }
+.camera-frame:fullscreen .camera-big { width: 100%; height: 100%; max-height: none; border-radius: 0; }
 img.broken { visibility: hidden; }
 .camera-events { display: grid; }
 .camera-event { display: flex; align-items: center; gap: 12px; width: 100%; padding: 10px 20px; border: 0; border-top: 1px solid var(--border); background: none; color: inherit; font: inherit; text-align: left; cursor: pointer; }
