@@ -155,7 +155,14 @@ export type Block =
   | { events: { of: string; title?: Text; picture: string; open?: string; name: string; note?: string; filters: { param: string; label: Text; options?: string }[]; empty?: Text } };
 
 export type Widget =
-  | { kind: "summary"; label: Text; numbers: { value: string; as: Format }[]; list?: { of: string; where?: Cond; sort: Sort[]; title: string; bar?: string; limit: number } }
+  | {
+      kind: "summary";
+      label: Text;
+      /** A number's own words under it, when the number alone says nothing ("5 up") */
+      numbers: { value: string; as: Format; label?: Text }[];
+      /** `state` is a row's field told by a group of words (a coloured mark), `note` a template said at the right */
+      list?: { of: string; where?: Cond; sort: Sort[]; title: string; bar?: string; state?: { field: string; words: string }; note?: string; limit: number };
+    }
   | { kind: "picture"; label: Text; of: string; picture: string; live?: string; caption: string }
   | { kind: "pictures"; label: Text; of: string; picture: string; caption: string; note?: string };
 
@@ -778,7 +785,7 @@ export function readSpec(raw: unknown): Spec {
           const no = r.obj(n, `${at}.numbers[${j}]`);
           const value = r.str(no.value, `${at}.numbers[${j}].value`);
           if (value && !valueNames(value)) r.bad(`${at}.numbers[${j}].value`, `"${value}" is no value`);
-          return { value, as: readFormat(r, no.as, `${at}.numbers[${j}].as`) };
+          return { value, as: readFormat(r, no.as, `${at}.numbers[${j}].as`), ...(no.label !== undefined ? { label: r.text(no.label, `${at}.numbers[${j}].label`, 30) } : {}) };
         }),
         ...(l
           ? {
@@ -792,6 +799,17 @@ export function readSpec(raw: unknown): Spec {
                   return t;
                 })(),
                 ...(l.bar !== undefined ? { bar: r.str(l.bar, `${at}.list.bar`) } : {}),
+                ...(l.state !== undefined
+                  ? {
+                      state: (() => {
+                        const st = r.obj(l.state, `${at}.list.state`);
+                        const field = r.str(st.field, `${at}.list.state.field`);
+                        if (field && !fieldsOf(of)(field)) r.bad(`${at}.list.state.field`, "is no field of the list");
+                        return { field, words: wordGroup(st.words, `${at}.list.state.words`) };
+                      })(),
+                    }
+                  : {}),
+                ...(l.note !== undefined ? { note: r.template(l.note, `${at}.list.note`, fieldsOf(of), 80) } : {}),
                 limit: r.num(l.limit, `${at}.list.limit`, 1, 50, 6),
               },
             }
