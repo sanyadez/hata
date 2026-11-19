@@ -1,6 +1,6 @@
 format: 1
 id: qbittorrent
-version: 1
+version: 2
 requires: 0.33.0
 title: qBittorrent
 icon: download
@@ -204,8 +204,8 @@ widgets:
     kind: summary
     label: { en: Torrents, uk: Торенти }
     numbers:
-      - { value: down, as: rate }
-      - { value: up, as: rate }
+      - { value: down, as: rate, label: { en: down, uk: завантаження } }
+      - { value: up, as: rate, label: { en: up, uk: віддача } }
     list:
       of: torrents
       where: { any: [{ field: group, is: downloading }, { field: moving, is: true }] }

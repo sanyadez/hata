@@ -92,3 +92,25 @@ test("a part done out of a whole, rows kept by a condition, Prometheus' text, a 
   expect(rowsOf(spec.read.metrics!, samples, {}).map((r) => [r.name, r.status])).toEqual([['web "one"', "up"], ["db", "down"]]);
   expect(fill(spec.signIn.headers.Authorization!, { token: "k" })).toBe(`Basic ${btoa(":k")}`);
 });
+
+test("a summary's numbers may be named and its rows say their state or a note", () => {
+  const base = Bun.YAML.parse(readFileSync(join(import.meta.dir, "../src/integ/seeds/qbittorrent.yml"), "utf8")) as any;
+  const good = structuredClone(base);
+  good.widgets.torrents.numbers[0].label = { en: "down", uk: "вниз" };
+  good.widgets.torrents.list.state = { field: "group", words: "group" };
+  good.widgets.torrents.list.note = "{size|bytes}";
+  const w = readSpec(good).widgets.torrents as any;
+  expect(w.numbers[0].label.en).toBe("down");
+  expect(w.list.state).toEqual({ field: "group", words: "group" });
+  expect(w.list.note).toBe("{size|bytes}");
+  const bad = structuredClone(base);
+  bad.widgets.torrents.list.state = { field: "nope", words: "nowords" };
+  try {
+    readSpec(bad);
+    throw new Error("read");
+  } catch (e) {
+    const said = (e as SpecError).problems.join("\n");
+    expect(said).toContain("list.state.field");
+    expect(said).toContain("list.state.words");
+  }
+});

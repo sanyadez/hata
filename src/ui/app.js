@@ -1959,8 +1959,12 @@ function summaryWidget(item, x, w) {
   const { w: wide = 1, h: tall = 1 } = item;
   const spec = svcSpecNow(x.kind);
   // what does not fit goes under "N more": a card has no scroll of its own
-  const room = tall === 1 ? (wide > 1 ? 1 : 0) : Math.max(1, Math.floor((tall * 140 - 148) / 38));
+  // a row with a bar is two lines; named numbers stand a line taller; one line goes to "N more"
+  const labelled = w.numbers.some((n) => n.label);
+  const line = w.list?.bar ? 38 : 25;
+  const space = tall * 140 - (labelled ? 141 : 120);
   const rows = w.list ? (x.lists[w.list.of] ?? []) : [];
+  const room = tall === 1 ? (wide > 1 && !labelled ? 1 : 0) : Math.max(1, Math.floor((rows.length * line > space ? space - 20 : space) / line));
   const shown = rows.slice(0, room);
   return h(
     "a",
@@ -1968,13 +1972,22 @@ function summaryWidget(item, x, w) {
     h("span", { class: "widget-head" }, tileIcon(item), h("span", { class: "widget-title clip" }, x.name)),
     x.online
       ? [
-          h("span", { class: "widget-speeds" }, w.numbers.map((n) => h("span", null, svcFormat(x.values[n.value], n.as) || "—"))),
-          !(tall === 1 && room > 0) && spec && h("span", { class: "muted small clip" }, svcNumbers(spec, x.values)),
-          shown.length > 0 && h("span", { class: "widget-torrents" }, shown.map((row) => h("span", { class: "widget-torrent" }, h("span", { class: "small clip" }, String(row[w.list.title] ?? "")), w.list.bar && meterBar(Number(row[w.list.bar]) || 0, "")))),
+          // a number with its words says what it counts; the line of all numbers then says nothing new
+          h("span", { class: "widget-speeds" + (labelled ? " labelled" : "") }, w.numbers.map((n) => h("span", null, h("b", null, svcFormat(x.values[n.value], n.as) || "—"), n.label && h("small", null, svcText(n.label))))),
+          !labelled && !(tall === 1 && room > 0) && spec && h("span", { class: "muted small clip" }, svcNumbers(spec, x.values)),
+          shown.length > 0 && h("span", { class: "widget-torrents" }, shown.map((row) => widgetRow(spec, w.list, row))),
           room > 0 && rows.length > shown.length && h("span", { class: "muted small" }, t("attention.moreItems", { n: rows.length - shown.length })),
+          room > 0 && w.list && !rows.length && h("span", { class: "muted small" }, t("service.nothing")),
         ]
       : h("span", { class: "muted small" }, t("service.offline")),
   );
+}
+
+/** A row of a summary's list: its name, then its state as a coloured word or a note, and its bar */
+function widgetRow(spec, list, row) {
+  const said = list.state ? spec?.words[list.state.words]?.[String(row[list.state.field])] : null;
+  const side = said ? h("span", { class: "with-dot small" }, h("i", { class: "dot " + (said.tone || "stopped") }), svcText(said.label)) : list.note ? h("span", { class: "muted small" }, svcFill(list.note, row)) : null;
+  return h("span", { class: "widget-torrent" }, side ? h("span", { class: "widget-row" }, h("span", { class: "small clip" }, String(row[list.title] ?? "")), side) : h("span", { class: "small clip" }, String(row[list.title] ?? "")), list.bar && meterBar(Number(row[list.bar]) || 0, ""));
 }
 
 /** How tall a picture a picture's card asks for */
@@ -2013,7 +2026,7 @@ function picturesWidget(item, x, w) {
     latest.length && spec
       ? latest.map((row) => {
           const key = svcKey(spec, w.of, row);
-          return h("span", { class: "widget-picture" }, widgetPicture(`row:${x.id}:${key}`, svcPicture(x.id, w.picture, key, 240), String(row[w.caption] ?? "")), h("span", { class: "widget-caption" }, h("span", { class: "clip" }, String(row[w.caption] ?? "")), w.note && h("span", { class: "muted" }, svcFill(w.note, row))));
+          return h("span", { class: "widget-picture" }, widgetPicture(`row:${item.id}:${key}:${item.h ?? 1}`, svcPicture(x.id, w.picture, key, Math.min(720, (item.h ?? 1) * 280)), String(row[w.caption] ?? "")), h("span", { class: "widget-caption" }, h("span", { class: "clip" }, String(row[w.caption] ?? "")), w.note && h("span", { class: "muted" }, svcFill(w.note, row))));
         })
       : h("span", { class: "widget-body" }, h("span", { class: "widget-head" }, tileIcon(item), h("span", { class: "widget-title clip" }, svcText(w.label))), h("span", { class: "muted small" }, t("service.nothing"))),
   );
