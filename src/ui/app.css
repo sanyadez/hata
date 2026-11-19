@@ -336,6 +336,7 @@ button.tile { padding: 0; font: inherit; color: inherit; text-align: left; curso
 .app-icon.letter { display: grid; place-items: center; color: #fff; font: 700 18px var(--font-heading); }
 .app-icon.plus { display: grid; place-items: center; background: var(--accent-soft); color: var(--accent-text); }
 .app-icon.plus .ico { width: 18px; height: 18px; }
+.app-icon.plus.lg .ico { width: 30px; height: 30px; }
 .app-icon.mini { width: 15px; height: 15px; border-radius: 4px; font-size: 9px; }
 .app-icon.plus.mini .ico { width: 10px; height: 10px; }
 /* a folder of tiles shows what is inside, four at most */
@@ -1389,8 +1390,6 @@ body:has(.assistant.paged) > .assistant-fab { display: none; }
 .pve-row .chip { margin-left: 8px; }
 .form-pair { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; align-items: start; }
 @media (max-width: 640px) { .form-pair { grid-template-columns: 1fr; } }
-.pve-trouble { padding: 2px 20px; }
-.pve-trouble .attention-item:first-child { border-top: 0; }
 .pve-note { margin: 0; padding: 12px 20px; border-top: 1px solid var(--border); }
 .pve-note.first { border-top: 0; }
 .pve-pick { padding-left: 28px; }
@@ -1870,7 +1869,7 @@ dialog.add-dialog:not([open]) { display: none; }
 .tvr-round:hover:not(:disabled), .tvr-arrow:hover:not(:disabled) { background: var(--surface-2); }
 .tvr :is(button):disabled { opacity: 0.4; cursor: default; }
 .tvr-transport { display: flex; justify-content: center; align-items: center; gap: 16px; }
-.tvr-main { display: grid; place-items: center; width: var(--main); height: var(--main); padding: 0; border: 0; border-radius: 50%; background: var(--accent); color: var(--on-accent); cursor: pointer; }
+.tvr-main { display: grid; place-items: center; flex: none; width: var(--main); height: var(--main); padding: 0; border: 0; border-radius: 50%; background: var(--accent); color: var(--on-accent); cursor: pointer; }
 .tvr-main .ico { width: 28px; height: 28px; }
 .tvr-main:disabled { background: var(--surface); border: 1px solid var(--border-strong); color: var(--text); }
 .tvr-volume { display: flex; align-items: center; gap: 12px; }

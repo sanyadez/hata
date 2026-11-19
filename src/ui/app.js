@@ -497,7 +497,8 @@ function parseRoute() {
 const AREAS = {
   apps: [
     { id: "installed", hash: "#/apps", view: "apps" },
-    { id: "store", hash: "#/store", view: "store" },
+    // the store is a button in the head of the section, as in Integrations, not a tab among its tabs
+    { id: "store", hash: "#/store", view: "store", head: true },
     { id: "import", hash: "#/import", view: "import", admin: true },
     { id: "options", hash: "#/apps-options", sections: ["apps", "stores"] },
   ],
@@ -5703,7 +5704,8 @@ const haCrumbs = () => null;
 const HOUSE = {
   ha: { tab: "ha", list: "/api/ha", body: "ha-body", icon: "bulb", name: "Home Assistant", found: "found", load: () => void loadHa(), add: (url) => haDialog(null, url) },
 };
-const houseAdd = () => button(t("house.connect"), { onclick: (e) => integrationsAddMenu(e.currentTarget) }, "plus");
+// services to connect are in the store, as apps are: the same button as in the head of Apps
+const houseAdd = () => (isAdmin() && hasModule("integrations") ? storeButton("@") : button(t("house.connect"), { onclick: (e) => integrationsAddMenu(e.currentTarget) }, "plus"));
 
 /** A tab of the house: the head, a switch between the servers when there are several, and the page of the one chosen */
 function houseShell(view) {
@@ -7570,7 +7572,7 @@ function pveOverview(x) {
     "div",
     { class: "stack" },
     self && h("p", { class: "card pve-self" }, icon("home"), h("span", null, t("pve.selfHere", { guest: `${guestKind(self)} ${self.name}`, node: self.node }))),
-    x.trouble.length > 0 && h("section", { class: "card pve-trouble" }, x.trouble.map(attentionItem)),
+    x.trouble.length > 0 && h("section", { class: "card pad stack area-attention" }, h("div", { class: "section-head" }, h("h2", null, t("attention.title"), h("span", { class: "pill" }, x.trouble.length))), h("div", { class: "attention-list" }, x.trouble.map(attentionItem))),
     pveSection(
       t("pve.nodesTitle"),
       h(
@@ -12858,7 +12860,7 @@ function renderAppsBody() {
   // an update from the store asks about every app by itself: only newer images go all at once
   const newer = all.filter((row) => !row.machine && !row.app.update && row.app.newer?.length > 0 && !row.app.job);
   if (!fixed) put(document.getElementById("apps-meta"), [t("apps.meta.installed", { n: all.length }), t("apps.meta.running", { n: count("running") }), count("updates") > 0 && t("apps.meta.updates", { n: count("updates") })].filter(Boolean).flatMap((part, i) => (i ? [h("span", { class: "dot-sep" }, "·"), part] : [part])));
-  if (!fixed) put(document.getElementById("apps-actions"), isAdmin() && newer.length > 0 && button(t("apps.updateAll", { n: newer.length }), { onclick: () => confirmAction({ title: t("apps.updateAll", { n: newer.length }), lead: t("apps.updateAllLead", { names: newer.map((row) => row.app.title).join(", ") }), label: t("app.update"), kind: "primary", iconName: "up", run: () => newer.forEach(({ app }) => void startAction(app, "update")) }) }, "up"));
+  if (!fixed) put(document.getElementById("apps-actions"), isAdmin() && newer.length > 0 && button(t("apps.updateAll", { n: newer.length }), { onclick: () => confirmAction({ title: t("apps.updateAll", { n: newer.length }), lead: t("apps.updateAllLead", { names: newer.map((row) => row.app.title).join(", ") }), label: t("app.update"), kind: "primary", iconName: "up", run: () => newer.forEach(({ app }) => void startAction(app, "update")) }) }, "up"), state.user.role !== "guest" && storeButton());
   if (!all.length) return put(box, h("section", { class: "card pad empty-state" }, h("h2", null, t("apps.none")), h("p", { class: "muted" }, t("apps.noneLead")), state.user.role !== "guest" && h("a", { class: "btn primary", href: "#/store" }, icon("store"), h("span", null, t("area.apps.store")))));
   const machines = fixed ? [] : [...new Map(all.filter((row) => row.machine).map((row) => [row.machine.id, row.machine.name])).entries()];
   const shown = all.filter(appShown[appsUi.show]).filter((row) => !appsUi.machine || (appsUi.machine === "." ? !row.machine : row.machine?.id === appsUi.machine));
@@ -12962,7 +12964,9 @@ function renderStoreList() {
     ...state.store.categories.map((c) => cat(c, c, all.filter((a) => a.category === c).length)).filter((_, i) => all.some((a) => a.category === state.store.categories[i])),
     h("div", { class: "cat-title" }, t("store.onServer")),
     cat("+", t("store.installed"), all.filter((a) => installed.has(a.name)).length),
+    ...(storeKinds().length > 0 ? [h("div", { class: "cat-title" }, t("store.connect")), cat("@", t("store.allIntegrations"), storeKinds().length)] : []),
   );
+  if (category === "@") return list.replaceChildren(storeIntegrationCards(storeKinds(), query));
 
   // the same app in two stores: each card says whose it is
   const twice = new Set(all.filter((a, i) => all.findIndex((b) => b.name === a.name) !== i).map((a) => a.name));
@@ -12973,8 +12977,11 @@ function renderStoreList() {
     const busy = state.store.stores.some((s) => s.syncing);
     return list.replaceChildren(h("div", { class: "empty" }, h("p", null, t(busy ? "store.syncing" : "store.empty")), !busy && button(t("store.sync"), { class: "primary", onclick: syncStores }, "refresh")));
   }
-  if (!apps.length) return list.replaceChildren(h("p", { class: "empty" }, t("store.nothing")));
+  // a search over everything finds the services to connect too
+  const kindsFound = q && category === "" ? storeKinds().filter((k) => `${k.title} ${k.what}`.toLowerCase().includes(q)) : [];
+  if (!apps.length && !kindsFound.length) return list.replaceChildren(h("p", { class: "empty" }, t("store.nothing")));
   list.replaceChildren(
+    ...(kindsFound.length > 0 ? [storeIntegrationCards(kindsFound, "")] : []),
     h(
       "div",
       { class: "cards" },
@@ -12988,6 +12995,72 @@ function renderStoreList() {
       ),
     ),
   );
+}
+
+/** The services an administrator can connect, as the stores describe them, and Home Assistant, which is Hata's own */
+function storeKinds() {
+  if (!isAdmin() || !hasModule("integrations")) return [];
+  return [{ id: "", title: "Home Assistant", icon: "bulb", what: t("integrations.ha.what"), apps: ["home-assistant"], screenshots: [] }, ...svcKinds()];
+}
+
+const kindConnected = (k) => (k.id ? svcConnections().filter((c) => c.kind === k.id) : (state.overview?.ha?.servers ?? []));
+
+function storeIntegrationCards(kinds, query) {
+  const q = query.trim().toLowerCase();
+  const shown = kinds.filter((k) => !q || `${k.title} ${k.what}`.toLowerCase().includes(q));
+  if (!shown.length) return h("p", { class: "empty" }, t("store.nothing"));
+  return h(
+    "div",
+    { class: "cards" },
+    shown.map((k) => {
+      const on = kindConnected(k).length > 0;
+      return h(
+        "button",
+        { type: "button", class: "store-card", onclick: () => storeIntegrationDialog(k) },
+        h("span", { class: "store-card-head" }, h("span", { class: "app-icon plus" }, icon(k.icon)), h("span", { class: "grow" }, h("span", { class: "tile-name" }, k.title), h("span", { class: "muted small" }, t("store.integration"))), on ? h("span", { class: "chip ok" }, icon("check"), t("store.connected")) : h("span", { class: "chip" }, t("store.connectIt"))),
+        h("span", { class: "tagline" }, k.what),
+      );
+    }),
+  );
+}
+
+/** A service to connect: what Hata shows of it, how it looks, the app that runs it, and the button */
+function storeIntegrationDialog(k) {
+  const there = kindConnected(k);
+  const apps = (k.apps ?? []).map((name) => state.store?.apps.find((a) => a.name === name)).filter(Boolean);
+  const installed = new Set((state.overview?.apps ?? []).map((a) => a.name));
+  let dialog;
+  const connect = button(t(there.length ? "store.connectAnother" : "store.connectIt"), { class: "primary", onclick: () => (dialog.close(), k.id ? svcConnectDialog(k.id) : haDialog()) }, "plus");
+  dialog = openDialog(
+    "xwide store-app",
+    h("header", null, h("span", { class: "app-icon plus lg" }, icon(k.icon)), h("div", { class: "grow" }, h("h2", null, k.title), h("p", { class: "muted" }, k.what), h("p", { class: "muted small" }, [t("store.integration"), k.version && t("store.descVersion", { version: k.version })].filter(Boolean).join(" · "))), closeX(() => dialog)),
+    k.screenshots?.length > 0 && shotsView(k.screenshots),
+    h(
+      "div",
+      { class: "store-app-body" },
+      h("p", null, t("store.integrationLead")),
+      there.length > 0 &&
+        h(
+          "div",
+          { class: "tips" },
+          h("strong", null, t("store.connectedHere")),
+          h("ul", null, there.map((c) => h("li", null, h("a", { class: "link", href: k.id ? `#/service/${c.id}` : `#/house/ha/${c.id}`, onclick: () => dialog.close() }, c.name ?? c.title ?? k.title)))),
+        ),
+      apps.length > 0 &&
+        h(
+          "div",
+          { class: "tips" },
+          h("strong", null, t("store.integrationApps")),
+          h(
+            "ul",
+            null,
+            apps.map((a) => h("li", null, h("button", { type: "button", class: "link", onclick: () => (dialog.close(), installed.has(a.name) ? go(`#/apps/${a.name}`) : storeDialog(a)) }, a.title), " — ", installed.has(a.name) ? t("store.installed") : t("store.integrationAppHint"))),
+          ),
+        ),
+    ),
+    h("footer", null, h("span", { class: "grow" }), closeButton(() => dialog, t("common.cancel")), connect),
+  );
+  connect.focus();
 }
 
 function formSection(title, hint, rows) {
@@ -21621,8 +21694,14 @@ function renderSettings() {
  * The head of a section of the page: a card with its name, a line about it, what can be done there, and its tabs.
  * `metaId` / `actionsId` name the line and the buttons for a page that fills them later.
  */
+/** The way to the store from the head of a section: the same button wherever it stands; `category` opens one of its parts */
+function storeButton(category = "") {
+  return h("a", { class: "btn", href: "#/store", onclick: () => (state.storeFilter.category = category) }, icon("store"), h("span", null, t("area.apps.store")));
+}
+
 function areaHead(area, at, { meta = null, metaId = null, actions = null, actionsId = null } = {}) {
   const tabs = areaTabs(area);
+  const headTab = tabs.find((tab) => tab.head);
   return h(
     "header",
     { class: "card area-head" },
@@ -21639,9 +21718,9 @@ function areaHead(area, at, { meta = null, metaId = null, actions = null, action
         : h("div", { class: "area-name" }, h("h1", null, t("area." + area)), h("p", { class: "meta", id: metaId }, meta ?? t(`area.${area}.lead`))),
       area === "server"
         ? h("div", { class: "actions" }, h("a", { class: "btn", href: "#/terminal" }, icon("terminal"), h("span", null, t("terminal.title"))), button(t("power.restart"), { onclick: () => serverPowerDialog("reboot") }, "refresh"), h("button", { type: "button", class: "btn square", "aria-label": t("app.more"), "aria-haspopup": "menu", onclick: (e) => serverMenu(underButton(e.currentTarget)) }, icon("more")))
-        : (actions || actionsId) && h("div", { class: "actions", id: actionsId }, actions),
+        : (actions || actionsId || (headTab && at !== headTab.id)) && h("div", { class: "actions", id: actionsId }, actions, headTab && at !== headTab.id && storeButton()),
     ),
-    tabs.length > 1 && h("nav", { class: "tabs" }, tabs.map((tab) => h("a", { class: "tab" + (tab.id === at ? " active" : ""), href: tabHash(area, tab), "aria-current": tab.id === at ? "page" : null }, tab.label ?? t(`area.${area}.${tab.id}`), area === "server" && serverTabCount(tab.id))),),
+    tabs.length > 1 && h("nav", { class: "tabs" }, tabs.filter((tab) => !tab.head).map((tab) => h("a", { class: "tab" + (tab.id === at ? " active" : ""), href: tabHash(area, tab), "aria-current": tab.id === at ? "page" : null }, tab.label ?? t(`area.${area}.${tab.id}`), area === "server" && serverTabCount(tab.id))),),
   );
 }
 
