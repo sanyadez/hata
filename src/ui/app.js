@@ -12964,7 +12964,7 @@ function renderStoreList() {
     ...state.store.categories.map((c) => cat(c, c, all.filter((a) => a.category === c).length)).filter((_, i) => all.some((a) => a.category === state.store.categories[i])),
     h("div", { class: "cat-title" }, t("store.onServer")),
     cat("+", t("store.installed"), all.filter((a) => installed.has(a.name)).length),
-    ...(storeKinds().length > 0 ? [h("div", { class: "cat-title" }, t("store.connect")), cat("@", t("store.integrations"), storeKinds().length)] : []),
+    ...(storeKinds().length > 0 ? [h("div", { class: "cat-title" }, t("store.connect")), cat("@", t("store.allIntegrations"), storeKinds().length)] : []),
   );
   if (category === "@") return list.replaceChildren(storeIntegrationCards(storeKinds(), query));
 
