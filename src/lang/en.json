@@ -6065,5 +6065,6 @@
   "linkpage.error.files.denied": "The server may not write there.",
   "linkpage.error.files.readOnlyDisk": "The server's disk is read-only.",
   "linkpage.error.request.failed": "Something went wrong. Try again.",
-  "linkpage.error.request.internal": "Something went wrong. Try again."
+  "linkpage.error.request.internal": "Something went wrong. Try again.",
+  "links.side": "Links"
 }

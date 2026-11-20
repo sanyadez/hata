@@ -6065,5 +6065,6 @@
   "linkpage.error.files.denied": "Сервер не може писати туди.",
   "linkpage.error.files.readOnlyDisk": "Диск сервера лише для читання.",
   "linkpage.error.request.failed": "Щось пішло не так. Спробуйте ще раз.",
-  "linkpage.error.request.internal": "Щось пішло не так. Спробуйте ще раз."
+  "linkpage.error.request.internal": "Щось пішло не так. Спробуйте ще раз.",
+  "links.side": "Посилання"
 }

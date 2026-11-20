@@ -297,7 +297,7 @@ Early development. What works today:
   anybody without an account — to look at and download (a folder as a ZIP too), or a folder to send files
   into, with a limit of how much it takes —, for a day, a week, a month or until removed, with a
   password if you like; a link of a member stops working once the folder is no longer theirs, and every
-  link is listed under "Links for anyone" in Files;
+  link is listed under "Links" in Files;
 - users: administrators, members (who see the apps and open them, nothing more) and shared guest accounts;
   a picture of one's own in the account, shown in the head of the page and the list of users;
   invitations by link; two-factor sign-in with an authenticator app and recovery codes; passkeys (sign in with the
