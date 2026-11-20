@@ -168,6 +168,25 @@ export function mustBeSharable(abs: string): void {
   if (real === "/" || SYSTEM_DIRS.has(real) || isVirtual(abs) || CLOSED.some((dir) => inside(real, dir)) || state.some((dir) => inside(dir, real) || inside(real, dir))) throw new AppError("shares.protected", 403);
 }
 
+/**
+ * What a link for somebody without an account may give or take files into: a file or a folder that is
+ * not the system's, not Hata's state and not in a trash. Says whether it is a folder.
+ */
+export function mustBeLinkable(abs: string): boolean {
+  let st: Stats;
+  try {
+    st = statSync(abs);
+  } catch (e) {
+    throw fsError(e);
+  }
+  const real = realish(abs);
+  const state = [DATA_DIR, SECRETS_DIR].map(realish);
+  const closed = real === "/" || isVirtual(abs) || CLOSED.some((dir) => inside(real, dir)) || state.some((dir) => inside(dir, real) || inside(real, dir)) || real.split(sep).includes(TRASH_DIR) || (st.isDirectory() && SYSTEM_DIRS.has(real));
+  if (closed) throw new AppError("links.protected", 403);
+  if (!st.isDirectory() && !st.isFile()) throw new AppError("files.notFile");
+  return st.isDirectory();
+}
+
 /** A name for a new file or folder: one path segment */
 export function validName(name: unknown): string {
   const text = typeof name === "string" ? name.trim() : "";
@@ -384,6 +403,7 @@ export function dropFavorites(userId: string): void {
 
 /** A pinned folder that was moved or renamed (or one inside what was) stays pinned; a removed one is dropped */
 function repin(from: string, to: string | null): void {
+  for (const listener of pathListeners) listener(from, to);
   const moved = (path: string) => (!inside(path, from) ? [path] : to === null ? [] : [to + path.slice(from.length)]);
   const follow = (paths: string[]) => [...new Set(paths.flatMap(moved))];
   const favorites = Object.fromEntries(Object.entries(settings.favorites).map(([id, list]) => [id, list.flatMap((one) => moved(one.path).map((path) => ({ ...one, path })))]));
@@ -399,6 +419,13 @@ function repin(from: string, to: string | null): void {
 export function folderMoved(from: string, to: string): void {
   repin(from, to);
   reshare(from, to);
+}
+
+const pathListeners: ((from: string, to: string | null) => void)[] = [];
+
+/** Told of every path the file manager moved, renamed or removed (`to` null), and of a moved data folder */
+export function onPathMoved(listener: (from: string, to: string | null) => void): void {
+  pathListeners.push(listener);
 }
 
 let sharesMoved: () => void = () => {};
@@ -1003,6 +1030,8 @@ export interface UploadPart {
   offset: number;
   last: boolean;
   overwrite: boolean;
+  /** A name taken already gets "(2)" when the file is put in place, instead of a refusal */
+  rename?: boolean;
 }
 
 function uploadFolder(dir: unknown, sub: string): string {
@@ -1036,8 +1065,10 @@ function uploadFolder(dir: unknown, sub: string): string {
 export async function upload(part: UploadPart, body: ReadableStream<Uint8Array> | null): Promise<{ received: number; path: string | null }> {
   if (!/^[a-z0-9]{8,32}$/.test(part.id) || !Number.isSafeInteger(part.offset) || part.offset < 0) throw new AppError("files.badUpload");
   const into = uploadFolder(part.dir, part.sub);
-  const target = join(into, validName(part.name));
-  const existing = lstatOrNull(target);
+  const asked = validName(part.name);
+  if (part.rename && PART_RE.test(asked)) throw new AppError("files.badName");
+  const target = join(into, part.rename ? freeName(into, asked) : asked);
+  const existing = part.rename ? null : lstatOrNull(target);
   if (existing && (!part.overwrite || !existing.isFile())) throw new AppError("files.exists", 409, { name: basename(target) });
 
   const tmp = join(into, `.hata-upload-${part.id}`);

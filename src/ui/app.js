@@ -432,6 +432,7 @@ function parseRoute() {
   if (parts[0] === "files" && mayFiles() && parts[1]?.startsWith("@")) return { view: "files", machine: parts[1].slice(1), path: "/" + parts.slice(2).join("/") };
   if (parts[0] === "files" && mayFiles()) return { view: "files", machine: "", path: /^#\/?files$/.test(location.hash) ? "" : "/" + parts.slice(1).join("/") };
   if (parts[0] === "trash" && mayFiles()) return { view: "trash" };
+  if (parts[0] === "links" && mayLink()) return { view: "links" };
   if (parts[0] === "hata" && mayFiles()) return { view: "myhata" };
   if (parts[0] === "activity" && isAdmin()) return { view: "activity" };
   if (parts[0] === "tv" && isAdmin()) return { view: "tv", hash: "#/house/tv" };
@@ -587,7 +588,7 @@ function areaOf(route = state.route) {
   const view = route.view;
   if (view === "settings") return route.area === "server" ? "machines" : route.area;
   if (["apps", "store", "import", "app", "mapp"].includes(view)) return "apps";
-  if (["files", "trash", "myhata"].includes(view)) return "files";
+  if (["files", "trash", "myhata", "links"].includes(view)) return "files";
   if (["machines", "machine", "server", "proxmox", "containers", "instance", "guest", "terminal", "load"].includes(view)) return "machines";
   if (view === "service") return route.house || !serviceApp(route.id) ? "house" : "apps";
   if (["integrations", "ha", "tv", "music"].includes(view)) return "house";
@@ -633,6 +634,7 @@ function onRoute() {
   if (state.route.view === "settings") void loadSettings();
   if (state.route.view === "files") void loadFiles();
   if (state.route.view === "trash") void loadTrash();
+  if (state.route.view === "links") void loadLinksPage();
   if (state.route.view === "myhata") void loadMyHata();
   if (state.route.view === "backups") void loadBackups();
   if (state.route.view === "users") void loadUsers();
@@ -1112,6 +1114,8 @@ const NAV = [
 /** Members look at the apps; everything that changes the server is an administrator's */
 // an administrator the rules ask for two-factor sign-in is a member until it is on — the server says so too
 const isAdmin = () => state.user?.role === "admin" && !state.user.mustTwoFactor;
+/** Links for somebody without an account: anybody with an account of their own (a guest's is shared) */
+const mayLink = () => !!state.user && state.user.role !== "guest";
 /** Whether a module is on: the page shows only the parts of those that are (`#/settings/modules`) */
 const hasModule = (id) => !state.modules || state.modules[id] === true;
 /** The sections of Settings and the pages that are a module's */
@@ -1408,6 +1412,7 @@ function render() {
   if (view === "settings") return renderSettings();
   if (view === "files") return renderFiles();
   if (view === "trash") return renderTrash();
+  if (view === "links") return renderLinks();
   if (view === "myhata") return renderMyHata();
   if (view === "activity") return renderActivity();
   if (view === "backups") return renderBackups();
@@ -11107,6 +11112,7 @@ function filesPlaces(path) {
         h("div", { class: "cat-title" }, t("files.places")),
         h("a", { class: "cat" + (path === "#hata" ? " active" : ""), href: "#/hata" }, h("span", { class: "with-icon" }, icon("home"), h("span", { class: "clip" }, t("myhata.title")))),
         h("a", { class: "cat" + (trash ? " active" : ""), href: "#/trash" }, h("span", { class: "with-icon" }, icon("trash"), h("span", { class: "clip" }, t("trash.title")))),
+        h("a", { class: "cat" + (path === "#links" ? " active" : ""), href: "#/links" }, h("span", { class: "with-icon" }, icon("link"), h("span", { class: "clip" }, t("links.cardTitle")))),
         (state.myShares ?? []).length > 0 && [h("div", { class: "cat-title" }, t("myhata.shared")), state.myShares.map((share) => place(share.name, share.path, "share", !machine && inside(share.path), ""))],
         (state.myMachines ?? []).map((m) => [h("div", { class: "cat-title" }, m.name), m.shares.map((share) => place(share.name, share.path, "share", machine === m.id && inside(share.path), m.id))]),
         favorites.length > 0 && [h("div", { class: "cat-title" }, t("files.favorites")), favorites.map(favoriteRow)],
@@ -11144,8 +11150,9 @@ function filesPlaces(path) {
       h("div", { class: "cat-title" }, t("files.places")),
       h("a", { class: "cat" + (path === "#hata" ? " active" : ""), href: "#/hata" }, h("span", { class: "with-icon" }, icon("home"), h("span", { class: "clip" }, t("myhata.title")))),
       home && place(t("files.home"), home, "folder", inHome),
-      place(t("files.root"), "/", "disk", !trash && path !== "#hata" && path !== "" && !inHome && !onVolume),
+      place(t("files.root"), "/", "disk", !trash && path !== "#hata" && path !== "#links" && path !== "" && !inHome && !onVolume),
       h("a", { class: "cat" + (trash ? " active" : ""), href: "#/trash" }, h("span", { class: "with-icon" }, icon("trash"), h("span", { class: "clip" }, t("trash.title")))),
+      h("a", { class: "cat" + (path === "#links" ? " active" : ""), href: "#/links" }, h("span", { class: "with-icon" }, icon("link"), h("span", { class: "clip" }, t("links.cardTitle")))),
       volumes.length > 0 && [h("div", { class: "cat-title" }, t("files.disks")), volumes.map((d) => h("a", { class: "cat" + (inside(d.path) ? " active" : ""), href: filesHash(d.path, ""), title: d.path, menu: (at) => sidebarMenu(at, { label: volumeName(d), path: d.path, volume: d, iconName: d.network ? "globe" : "disk" }) }, h("span", { class: "with-icon" }, icon(d.network ? "globe" : "disk"), h("span", { class: "clip" }, volumeName(d), volumeFolder(d) && h("span", { class: "muted" }, " · " + volumeFolder(d))))))],
       favorites.length > 0 && [h("div", { class: "cat-title" }, t("files.favorites")), favorites.map(favoriteRow)],
       machinesList,
@@ -12030,6 +12037,8 @@ function folderMenu(at) {
     !listing.machine && item(t(isFavorite(path) ? "files.unfavorite" : "files.favorite"), "star", () => favorite(path, !isFavorite(path))),
     !listing.machine && isAdmin() && item(t(listing.pinned.includes(path) ? "files.unpin" : "files.pin"), "home", () => pinFolder(path, !listing.pinned.includes(path))),
     !listing.machine && isAdmin() && item(t(listing.shared.includes(path) ? "files.shareSettings" : "files.share"), "share", () => shareDialog(path)),
+    !listing.machine && mayLink() && path !== "/" && item(t("links.menu"), "link", () => shareLinkDialog(path, path.split("/").pop() || "/", true)),
+    !listing.machine && mayLink() && path !== "/" && !listing.readOnly && item(t("links.menuDrop"), "upload", () => shareLinkDialog(path, path.split("/").pop() || "/", true, "drop")),
     machineLet(listing.machine) && path !== "/" && item(t("machines.people.shareHere"), "share", () => machineShareDialog(machineLet(listing.machine), path)),
   );
   placeAt(dialog, at);
@@ -12059,6 +12068,7 @@ function entryMenu(entry, at) {
     entry.type === "dir" && !filesMachine() && isAdmin() && (state.files.pinned.includes(path) ? item(t("files.unpin"), "home", () => pinFolder(path, false)) : item(t("files.pin"), "home", () => pinFolder(path, true))),
     entry.type === "dir" && !filesMachine() && isAdmin() && item(t(state.files.shared.includes(path) ? "files.shareSettings" : "files.share"), "share", () => shareDialog(path)),
     entry.type === "dir" && machineLet(filesMachine()) && item(t("machines.people.shareHere"), "share", () => machineShareDialog(machineLet(filesMachine()), path)),
+    entry.type !== "other" && !filesMachine() && mayLink() && item(t("links.menu"), "link", () => shareLinkDialog(path, entry.name, entry.type === "dir")),
     entry.type === "dir" && item(t("files.size"), "disk", () => sizeDialog(path, entry.name)),
     !state.files.readOnly && item(t("files.rename"), "edit", () => renameDialog(entry)),
     !state.files.readOnly && item(t("files.move"), "arrow", () => transferDialog([entry], false)),
@@ -20918,6 +20928,152 @@ function sharesSection() {
     ),
     h("section", { class: "card pad stack-s" }, h("h2", null, t("shares.how.title")), found && h("p", null, t("shares.found." + found, { name: data.announced.name })), data.announced.error && data.shares.length > 0 && h("p", { class: "muted small" }, t("shares.found.error", { message: data.announced.error })), h("p", { class: "muted" }, t("shares.how.windows", { address: all.windows })), h("p", { class: "muted" }, t("shares.how.mac", { address: all.url })), h("p", { class: "muted" }, t("shares.how.phone"))),
   ];
+}
+
+// --- Links for somebody without an account ----------------------------------------------------------
+
+const LINK_HOURS = [24, 168, 720, 0];
+const LINK_LIMITS = [1, 10, 50, 0].map((gb) => gb * 1024 ** 3);
+
+/** The address of a link: at the HTTPS domain when Hata has one, else at the address of this page */
+const linkUrl = (link, base) => `${base ?? location.origin}/s/${link.token}`;
+
+/** What a link is, in a few words: what it does, until when, how often it was used */
+function linkWords(link) {
+  const until = !link.alive ? t("links.ended") : link.expires ? t("links.until", { when: new Date(link.expires).toLocaleString(state.lang, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) }) : t("links.forever");
+  const used = link.kind === "drop" ? t("links.received", { n: link.files, size: bytes(link.received) }) : t("links.opened", { n: link.opened });
+  return [t(link.kind === "drop" ? "links.kind.drop" : "links.kind.get"), until, link.locked ? t("links.withPassword") : null, used].filter(Boolean).join(" · ");
+}
+
+/** Without an HTTPS domain the address works only where this page is opened */
+const linkHomeOnly = (base) => !base && h("p", { class: "banner warn small" }, t("links.homeOnly"), " ", h("a", { href: "#/network/addresses", class: "link" }, t("links.homeOnlyHow")));
+
+/** One link with its address to copy and what may be done with it */
+function linkRow(link, base, done) {
+  const remove = () => confirmAction({ title: t("links.removeTitle"), lead: t("links.removeLead"), label: t("links.remove"), run: async () => (await api("DELETE", `/api/files/links/${link.id}`), done()) });
+  const longer = async () => {
+    try {
+      await api("PATCH", `/api/files/links/${link.id}`, { hours: 168 });
+      done();
+    } catch (e) {
+      toast(errorText(e), "error");
+    }
+  };
+  return h(
+    "div",
+    { class: "link-made stack-s" },
+    link.note && h("div", { class: "strong wrap" }, link.note),
+    h("div", { class: "muted small" }, linkWords(link)),
+    link.alive ? copyBox(linkUrl(link, base)) : null,
+    h("div", { class: "row-actions" }, button(t(link.alive ? "links.week" : "links.again"), { class: "small", onclick: longer }), button(t("links.remove"), { class: "small", onclick: remove }, "trash")),
+  );
+}
+
+/**
+ * Making a link for a file or a folder: to look at and download, or (a folder) to send files into.
+ * The links already made for it are listed above.
+ */
+async function shareLinkDialog(path, name, dir, kind = "get") {
+  let dialog;
+  const made = h("div", { class: "stack-s" });
+  const error = h("p", { class: "error", role: "alert" });
+  let base = null;
+  const load = async () => {
+    try {
+      const r = await api("GET", `/api/files/links?path=${encodeURIComponent(path)}`);
+      base = r.base;
+      made.replaceChildren(...(r.links.length ? [h("h3", null, t("links.madeHere")), ...r.links.map((link) => linkRow(link, base, load))] : []));
+      homeOnly.replaceChildren(...[linkHomeOnly(base)].filter(Boolean));
+    } catch (e) {
+      made.replaceChildren(h("p", { class: "error" }, errorText(e)));
+    }
+  };
+  const homeOnly = h("div");
+  const hours = h("select", null, LINK_HOURS.map((n) => h("option", { value: n, selected: n === 168 }, t("links.hours." + n))));
+  const limit = h("select", null, LINK_LIMITS.map((n) => h("option", { value: n, selected: n === 10 * 1024 ** 3 }, n ? t("links.limitOf", { size: bytes(n) }) : t("links.noLimit"))));
+  const password = h("input", { type: "text", autocomplete: "off", spellcheck: false, minLength: 4, maxLength: 200, placeholder: t("links.passwordNone") });
+  const note = h("input", { maxLength: 100, placeholder: t("links.notePlaceholder") });
+  const limitRow = field(t("links.limit"), limit, t("links.limitHint"));
+  const lead = h("p", { class: "muted small" });
+  const seg = h("div", { class: "seg" }, ["get", "drop"].map((k) => h("button", { type: "button", class: "btn", "data-kind": k, onclick: () => ((kind = k), shape()) }, t("links.kind." + k))));
+  const shape = () => {
+    for (const b of seg.children) b.classList.toggle("active", b.dataset.kind === kind);
+    limitRow.hidden = kind !== "drop";
+    lead.textContent = t(kind === "drop" ? "links.dropLead" : dir ? "links.folderLead" : "links.fileLead");
+  };
+  const make = button(t("links.make"), {
+    class: "primary",
+    onclick: async () => {
+      error.textContent = "";
+      make.disabled = true;
+      try {
+        const r = await api("POST", "/api/files/links", { path, kind, hours: Number(hours.value), password: password.value, note: note.value, limit: Number(limit.value) });
+        password.value = "";
+        note.value = "";
+        await load();
+        copyLink(linkUrl(r.link, r.base));
+      } catch (e) {
+        error.textContent = errorText(e);
+      }
+      make.disabled = false;
+    },
+  }, "link");
+  dialog = openDialog(
+    "wide",
+    h("header", null, h("div", { class: "grow" }, h("h2", { class: "wrap" }, t("links.title", { name })), h("p", { class: "muted small" }, t("links.lead"))), closeX(() => dialog)),
+    dir && seg,
+    lead,
+    field(t("links.time"), hours),
+    field(t("links.password"), password, t("links.passwordHint")),
+    field(t("links.note"), note, t(kind === "drop" ? "links.noteDropHint" : "links.noteHint")),
+    limitRow,
+    homeOnly,
+    error,
+    h("div", { class: "row-actions" }, make),
+    made,
+    h("footer", null, closeButton(() => dialog)),
+  );
+  shape();
+  await load();
+}
+
+/** A new link's address goes to the clipboard at once */
+function copyLink(url) {
+  try {
+    void navigator.clipboard.writeText(url);
+    toast(t("links.copied"));
+  } catch {
+    toast(t("links.madeToast"));
+  }
+}
+
+/** Every link one may see: the page Links of Files (`#/links`) */
+async function loadLinksPage() {
+  // the places on the left come with a listing of Files
+  if (!state.files && isAdmin()) state.files = await api("GET", "/api/files?path=").catch(() => null);
+  if (!isAdmin() && !state.myShares) await loadMine();
+  if (state.route.view === "links") renderLinks();
+}
+
+function renderLinks() {
+  const box = h("div", { class: "stack" }, waitMark());
+  const load = async () => {
+    try {
+      const { links, base } = await api("GET", "/api/files/links");
+      if (state.route.view !== "links") return;
+      const folderOf = (link) => (link.dir ? link.path : link.path.slice(0, link.path.lastIndexOf("/")) || "/");
+      box.replaceChildren(
+        ...(links.length ? [] : [h("p", { class: "muted" }, t("links.noneYet"))]),
+        ...links.map((link) => h("div", { class: "stack-s link-of" }, h("div", { class: "with-icon strong" }, icon(link.dir ? "folder" : "file"), h("a", { class: "clip", href: filesHash(folderOf(link)) }, link.path.split("/").pop() || "/")), h("span", { class: "muted small mono wrap" }, link.path + (isAdmin() && link.by.name ? ` · ${t("links.by", { name: link.by.name })}` : "")), linkRow(link, base, load))),
+        ...[links.length > 0 && linkHomeOnly(base)].filter(Boolean),
+      );
+    } catch (e) {
+      box.replaceChildren(h("p", { class: "error" }, errorText(e)));
+    }
+  };
+  shell(h("div", { class: "files" }, h("aside", { class: "files-side fold", id: "files-places" }), h("section", { class: "stack" }, h("div", { class: "page-head" }, h("div", null, h("h1", null, t("links.cardTitle")), h("p", { class: "meta" }, h("a", { href: "#/files" }, t("nav.files"))))), uiCard({ lead: t("links.cardLead") }, box))));
+  filesPlaces("#links");
+  void load();
 }
 
 // --- Access keys of agents (the MCP server) ---------------------------------------------------------

@@ -6,7 +6,7 @@ import { expect, test } from "bun:test";
  * declarations at the start of a line, so the names are read from there.
  */
 test("no top-level name of the page's scripts is declared twice", async () => {
-  for (const file of ["app.js", "terminal.js", "screen.js", "sw.js"]) {
+  for (const file of ["app.js", "terminal.js", "screen.js", "sw.js", "link.js"]) {
     const text = await Bun.file(`${import.meta.dir}/../src/ui/${file}`).text();
     const names = [...text.matchAll(/^(?:export\s+)?(?:async\s+)?(?:function\*?|const|let|var|class)\s+([A-Za-z_$][\w$]*)/gm)].map((m) => m[1]!);
     const twice = names.filter((name, i) => names.indexOf(name) !== i);
@@ -17,7 +17,7 @@ test("no top-level name of the page's scripts is declared twice", async () => {
 /** The scripts are served as text, so neither a run nor a build ever parses them: a slip shows only as a blank page */
 test("the page's scripts parse", async () => {
   const transpiler = new Bun.Transpiler({ loader: "js" });
-  for (const file of ["app.js", "terminal.js", "screen.js", "sw.js"]) {
+  for (const file of ["app.js", "terminal.js", "screen.js", "sw.js", "link.js"]) {
     const text = await Bun.file(`${import.meta.dir}/../src/ui/${file}`).text();
     expect(() => transpiler.transformSync(text)).not.toThrow();
   }

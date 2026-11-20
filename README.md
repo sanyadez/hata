@@ -293,7 +293,11 @@ Early development. What works today:
   activity log. What is uploaded into an app's folder belongs to the same user the app runs as;
   the system's own folders cannot be deleted by a slip of the hand. Members see in Files the folders
   shared with them, each to look at or to change — the same rights as over the network —, and the folders
-  of a computer can be shared with them the same way;
+  of a computer can be shared with them the same way; a file or a folder can be given by a link to
+  anybody without an account — to look at and download (a folder as a ZIP too), or a folder to send files
+  into, with a limit of how much it takes —, for a day, a week, a month or until removed, with a
+  password if you like; a link of a member stops working once the folder is no longer theirs, and every
+  link is listed under "Links for anyone" in Files;
 - users: administrators, members (who see the apps and open them, nothing more) and shared guest accounts;
   a picture of one's own in the account, shown in the head of the page and the list of users;
   invitations by link; two-factor sign-in with an authenticator app and recovery codes; passkeys (sign in with the

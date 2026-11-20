@@ -191,7 +191,7 @@ if (tabs.length < 20 || tabs.some((x) => x.startsWith("undefined"))) giveUp("Cou
 
 const ROUTES = [
   "#/welcome/server", "#/welcome/existing", "#/welcome/data", "#/welcome/backups", "#/welcome/modules", "#/welcome/apps",
-  "#/", "#/files", "#/files/", "#/hata", "#/trash", "#/activity",
+  "#/", "#/files", "#/files/", "#/hata", "#/trash", "#/links", "#/activity",
   "#/machines", "#/machines/load", "#/containers", "#/containers/settings", "#/machines/this/apps", "#/house", "#/integrations", "#/assistant", "#/tv", "#/terminal",
   ...new Set(tabs),
   "#/settings/users/access", "#/settings/users/invites", "#/settings/users/signins",
