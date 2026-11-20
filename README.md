@@ -221,6 +221,12 @@ Early development. What works today:
   notification, and a disk can be told to test itself. The counters that matter are remembered: a disk's
   page says "was 0 until 14 Sep", and a counter that grows is sent as a notification again. It needs
   `smartmontools`, which Hata offers to install; nothing on a disk is changed;
+- a hard disk can be told to stop spinning after 10 minutes to 4 hours idle (in its window under
+  Disks, with `hdparm`, which Hata offers to install), and the window says whether it spins or sleeps
+  now; the server can shut down at night and switch itself on in the morning by its own clock, on the
+  days you choose — it first waits for running work, sets the alarm and checks it took, and can be tried
+  once with "off now, on in 3 minutes"; what the processor and the memory draw is on the Load page, in
+  watts, with the last hour, where the processor counts it (RAPL);
 - putting a disk to use (same page): a disk is formatted in one dialog — one partition, ext4, a folder
   under `/mnt`, a line in `/etc/fstab` that does not hold up the start when the disk is absent (Docker waits for the
   disk, and without it the apps that keep data there stay stopped instead of starting empty on the
@@ -293,7 +299,11 @@ Early development. What works today:
   activity log. What is uploaded into an app's folder belongs to the same user the app runs as;
   the system's own folders cannot be deleted by a slip of the hand. Members see in Files the folders
   shared with them, each to look at or to change — the same rights as over the network —, and the folders
-  of a computer can be shared with them the same way;
+  of a computer can be shared with them the same way; a file or a folder can be given by a link to
+  anybody without an account — to look at and download (a folder as a ZIP too), or a folder to send files
+  into, with a limit of how much it takes —, for a day, a week, a month or until removed, with a
+  password if you like; a link of a member stops working once the folder is no longer theirs, and every
+  link is listed under "Links" in Files;
 - users: administrators, members (who see the apps and open them, nothing more) and shared guest accounts;
   a picture of one's own in the account, shown in the head of the page and the list of users;
   invitations by link; two-factor sign-in with an authenticator app and recovery codes; passkeys (sign in with the
@@ -395,6 +405,10 @@ Early development. What works today:
   The version that ran before can be gone back to with a button, and `sudo hata update` does the same
   from a shell; an app's update can be undone from the activity log, from the snapshot taken right before it;
 - the whole history of what happened on the server and who did it, by day, with a search;
+- one page of what Hata starts by itself and when (Settings → Schedule): the backups, the updates of Hata
+  and of the images, SnapRAID, the backups of a Proxmox server — work that starts while other work it gets
+  in the way of may still be running is marked, with a free time to move it to in one press —, and the
+  looks that come round on their own;
 - Docker itself is installed by a button where it is missing, and started where it is not running;
 - software and updates (Computers → This server → Software and updates): every program of the system Hata relies on in one list — Docker, Samba,
   NetworkManager, mergerfs, SnapRAID and the rest — with what it is for, whether it is installed and in

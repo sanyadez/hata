@@ -151,13 +151,35 @@ import { call as machineCall, clientBinary, containersOf, installScript, invite 
 import { availableUpdate, cancelUpdate, checkForUpdate, confirmUpdate, scheduleUpdateChecks, startRollback, startUpdate, updateStatus } from "./update";
 import { VERSION } from "./version";
 import { zipStream } from "./zip";
+import { moveTime, scheduleView } from "./schedule";
+import { powerReport, setPowerSchedule, setSleep, sleepReport, startPower, tryWake } from "./powering";
+import { aboutLink, changeLink, dropLinksOf, entriesOf, grantCookie, inside as insideLink, linkOf, listLinks, makeLink, mayTake, opened as linkOpened, removeLink, took, unlock as unlockLink, unlocked } from "./sharelinks";
+import { GRANT_MS } from "./sharelink";
 
 import appCss from "./ui/app.css" with { type: "text" };
-import appJs from "./ui/app.js" with { type: "text" };
+import app01 from "./ui/app/01-core.js" with { type: "text" };
+import app02 from "./ui/app/02-home.js" with { type: "text" };
+import app03 from "./ui/app/03-app.js" with { type: "text" };
+import app04 from "./ui/app/04-machines.js" with { type: "text" };
+import app05 from "./ui/app/05-house.js" with { type: "text" };
+import app06 from "./ui/app/06-proxmox.js" with { type: "text" };
+import app07 from "./ui/app/07-machine.js" with { type: "text" };
+import app08 from "./ui/app/08-work.js" with { type: "text" };
+import app09 from "./ui/app/09-backups.js" with { type: "text" };
+import app10 from "./ui/app/10-files.js" with { type: "text" };
+import app11 from "./ui/app/11-settings.js" with { type: "text" };
+import app12 from "./ui/app/12-tv.js" with { type: "text" };
+import app13 from "./ui/app/13-network.js" with { type: "text" };
+import app14 from "./ui/app/14-domains.js" with { type: "text" };
+import app15 from "./ui/app/15-storage.js" with { type: "text" };
+import app16 from "./ui/app/16-people.js" with { type: "text" };
+import app17 from "./ui/app/17-start.js" with { type: "text" };
 import indexHtml from "./ui/index.html" with { type: "text" };
 import terminalHtml from "./ui/terminal.html" with { type: "text" };
 import screenHtml from "./ui/screen.html" with { type: "text" };
 import screenJs from "./ui/screen.js" with { type: "text" };
+import linkHtml from "./ui/link.html" with { type: "text" };
+import linkJs from "./ui/link.js" with { type: "text" };
 import novncJs from "./ui/vendor/novnc.js" with { type: "text" };
 import terminalJs from "./ui/terminal.js" with { type: "text" };
 import xtermFit from "./ui/vendor/xterm-addon-fit.js" with { type: "text" };
@@ -230,7 +252,24 @@ const MANIFEST = JSON.stringify({
 const STATIC: Record<string, { body: string; type: string; headers?: Record<string, string> }> = {
   "/": { body: indexHtml as unknown as string, type: "text/html; charset=utf-8" },
   "/app.css": { body: appCss, type: "text/css; charset=utf-8" },
-  "/app.js": { body: appJs, type: "text/javascript; charset=utf-8" },
+  // the page's script, in parts loaded in order by index.html
+  "/app/01-core.js": { body: app01, type: "text/javascript; charset=utf-8" },
+  "/app/02-home.js": { body: app02, type: "text/javascript; charset=utf-8" },
+  "/app/03-app.js": { body: app03, type: "text/javascript; charset=utf-8" },
+  "/app/04-machines.js": { body: app04, type: "text/javascript; charset=utf-8" },
+  "/app/05-house.js": { body: app05, type: "text/javascript; charset=utf-8" },
+  "/app/06-proxmox.js": { body: app06, type: "text/javascript; charset=utf-8" },
+  "/app/07-machine.js": { body: app07, type: "text/javascript; charset=utf-8" },
+  "/app/08-work.js": { body: app08, type: "text/javascript; charset=utf-8" },
+  "/app/09-backups.js": { body: app09, type: "text/javascript; charset=utf-8" },
+  "/app/10-files.js": { body: app10, type: "text/javascript; charset=utf-8" },
+  "/app/11-settings.js": { body: app11, type: "text/javascript; charset=utf-8" },
+  "/app/12-tv.js": { body: app12, type: "text/javascript; charset=utf-8" },
+  "/app/13-network.js": { body: app13, type: "text/javascript; charset=utf-8" },
+  "/app/14-domains.js": { body: app14, type: "text/javascript; charset=utf-8" },
+  "/app/15-storage.js": { body: app15, type: "text/javascript; charset=utf-8" },
+  "/app/16-people.js": { body: app16, type: "text/javascript; charset=utf-8" },
+  "/app/17-start.js": { body: app17, type: "text/javascript; charset=utf-8" },
   // the terminal is a page of its own, shown in a frame: its emulator writes styles into the page, which
   // the UI's policy forbids — here it is allowed, and nothing but the emulator lives there
   "/terminal.html": {
@@ -253,6 +292,9 @@ const STATIC: Record<string, { body: string; type: string; headers?: Record<stri
     },
   },
   "/screen.js": { body: screenJs, type: "text/javascript; charset=utf-8" },
+  // the page a link opens for somebody without an account (`/s/<token>`)
+  "/link.html": { body: linkHtml as unknown as string, type: "text/html; charset=utf-8" },
+  "/link.js": { body: linkJs, type: "text/javascript; charset=utf-8" },
   "/vendor/novnc.js": { body: novncJs, type: "text/javascript; charset=utf-8" },
   "/vendor/xterm.js": { body: xtermJs, type: "text/javascript; charset=utf-8" },
   "/vendor/xterm-addon-fit.js": { body: xtermFit, type: "text/javascript; charset=utf-8" },
@@ -1038,6 +1080,7 @@ async function api(req: Request, url: URL, server: Server<unknown>): Promise<Res
     if (error) return fail(error === "users.notFound" ? 404 : 400, error);
     dropUser(target[1]!);
     dropFavorites(target[1]!);
+    dropLinksOf(target[1]!);
     haForgetUser(target[1]!);
     record("users.remove", { user: user.name, detail: name });
     return json({ ok: true });
@@ -1309,6 +1352,20 @@ async function api(req: Request, url: URL, server: Server<unknown>): Promise<Res
     return json(recent(app ? 20 : 100, app));
   }
 
+  if (path === "/api/schedule" && method === "GET") return json(await scheduleView());
+  if (path === "/api/power" && method === "GET") return json({ ...powerReport(), sleep: await sleepReport() });
+  if (path === "/api/power/schedule" && method === "PUT") return json(setPowerSchedule(await body(req), user.name));
+  if (path === "/api/power/try" && method === "POST") return json(await tryWake((await body(req)).minutes, user.name));
+  if (path === "/api/power/sleep" && method === "PUT") {
+    const asked = await body(req);
+    await setSleep(asked.serial, asked.minutes, user.name);
+    return json({ sleep: await sleepReport() });
+  }
+  const scheduled = /^\/api\/schedule\/(backups|update|images|snapraid|pve:[a-f0-9]{8})$/.exec(path);
+  if (scheduled && method === "PUT") {
+    moveTime(scheduled[1]!, (await body(req)).time, user.name);
+    return json(await scheduleView());
+  }
   if (path === "/api/settings") {
     if (method === "GET") return json(publicSettings());
     if (method === "PUT") {
@@ -1765,7 +1822,7 @@ async function api(req: Request, url: URL, server: Server<unknown>): Promise<Res
   // what a disk action said it lacks, installed by the button next to the reason and the command
   if (path === "/api/disks/package" && method === "POST") {
     const name = (await body(req)).package;
-    if (typeof name !== "string" || !["ntfs-3g", "fdisk", "sfdisk", "util-linux", "e2fsprogs", "dosfstools", "exfatprogs", "mergerfs", "snapraid", "btrfs-progs", "xfsprogs"].includes(name)) return fail(400, "disk.packageFailed", { message: "not a package Hata installs" });
+    if (typeof name !== "string" || !["ntfs-3g", "fdisk", "sfdisk", "util-linux", "e2fsprogs", "dosfstools", "exfatprogs", "mergerfs", "snapraid", "btrfs-progs", "xfsprogs", "hdparm"].includes(name)) return fail(400, "disk.packageFailed", { message: "not a package Hata installs" });
     server.timeout(req, 0);
     const message = await installPackage(name);
     if (message) return fail(500, "disk.packageFailed", { message });
@@ -2478,6 +2535,75 @@ function sendBytes(req: Request, file: { name: string; size: number; modified: n
   return new Response(file.size ? bytes(0, file.size - 1) : "", { headers: { ...headers, "content-length": String(file.size) } });
 }
 
+/** Where the address of a link starts: the HTTPS domain when there is one; null — the page's own address (the home network only) */
+function linkBase(): string | null {
+  const domain = siteDomain();
+  return domain ? `https://${domain}` : null;
+}
+
+const LINK_ROUTE = /^\/s\/([A-Za-z0-9_-]{22})(?:\/(info|unlock|list|raw|zip|upload))?\/?$/;
+
+/**
+ * What a link opens for somebody without an account. The page is the same for every link and asks
+ * `info`; a password typed rightly gives this browser a cookie for the link's own path. Everything
+ * else answers only while the link works and is open in this browser.
+ */
+async function linkRoutes(req: Request, url: URL, server: Server<unknown>): Promise<Response> {
+  const match = LINK_ROUTE.exec(url.pathname);
+  if (!match) return fail(404, "links.gone");
+  const [, token, what] = match as unknown as [string, string, string | undefined];
+  const method = req.method;
+  const q = url.searchParams;
+  if (!what) {
+    if (method !== "GET" && method !== "HEAD") return fail(405, "request.notFound");
+    // never told to anybody else: the address is the key
+    const page = serveStatic(req, "/link.html")!;
+    page.headers.set("cache-control", "no-store");
+    return page;
+  }
+  const link = linkOf(token);
+  if (!link) return fail(404, "links.gone");
+  const cookie = new RegExp(`(?:^|;\\s*)${grantCookie(link)}=([A-Za-z0-9_-]{32})(?:;|$)`).exec(req.headers.get("cookie") ?? "")?.[1];
+  const open = unlocked(link, cookie);
+  if (what === "info" && method === "GET") {
+    if (open) linkOpened(link);
+    return json(aboutLink(link, open));
+  }
+  if (what === "unlock" && method === "POST") {
+    const grant = await unlockLink(link, (await body(req)).password);
+    const secure = requestProto(req) === "https" ? "; Secure" : "";
+    return json(aboutLink(link, true), 200, { "set-cookie": `${grantCookie(link)}=${grant}; HttpOnly; Path=/s/${token}; SameSite=Strict; Max-Age=${GRANT_MS / 1000}${secure}` });
+  }
+  if (!open) return fail(403, "links.locked");
+  if (link.kind === "get") {
+    if (what === "list" && method === "GET" && link.dir) return json(entriesOf(link, q.get("path")));
+    if (what === "raw" && method === "GET") return sendFile(req, insideLink(link, q.get("path")), q.get("download") === "1");
+    if (what === "zip" && method === "GET") {
+      const plan = await archivePlan([insideLink(link, q.get("path"))]);
+      server.timeout(req, 0);
+      return new Response(zipStream(plan.sources), { headers: { "x-content-type-options": "nosniff", "content-type": "application/zip", "content-disposition": disposition("attachment", plan.name), "cache-control": "no-store" } });
+    }
+  }
+  if (link.kind === "drop" && what === "upload") {
+    const id = q.get("id") ?? "";
+    if (method === "DELETE") {
+      abortUpload(link.path, "", id);
+      return json({ ok: true });
+    }
+    if (method === "PUT") {
+      const length = Number(req.headers.get("content-length") ?? NaN);
+      const offset = Number(q.get("offset") ?? 0);
+      if (!Number.isSafeInteger(length) || length < 0) return fail(411, "links.noLength");
+      mayTake(link, q.get("name"), offset + length);
+      server.timeout(req, 0);
+      const got = await upload({ dir: link.path, name: q.get("name"), sub: "", id, offset, last: q.get("last") === "1", overwrite: false, rename: true }, req.body);
+      if (got.path) took(link, got.path, got.received);
+      return json({ received: got.received, name: got.path ? got.path.split("/").pop() : null });
+    }
+  }
+  return fail(404, "request.notFound");
+}
+
 /** The paths of a file action as the activity log keeps them: the full path of one, or the first names and a count */
 function filesNamed(paths: unknown): string {
   const list = Array.isArray(paths) ? paths.filter((p): p is string => typeof p === "string") : [];
@@ -2575,6 +2701,15 @@ async function files(req: Request, url: URL, server: Server<unknown>, by: string
     if (removed) record("files.purge", { user: by, detail: String(removed) });
     return json({ removed });
   }
+  const user = findUser(userId)!;
+  if (path === "/api/files/links" && method === "GET") return json({ links: listLinks(user, q.get("path") ?? undefined), base: linkBase() });
+  if (path === "/api/files/links" && method === "POST") return json({ link: await makeLink(user, await body(req)), base: linkBase() }, 201);
+  const oneLink = /^\/api\/files\/links\/([a-f0-9]{8})$/.exec(path);
+  if (oneLink && method === "PATCH") return json({ link: await changeLink(user, oneLink[1]!, await body(req)) });
+  if (oneLink && method === "DELETE") {
+    removeLink(user, oneLink[1]!);
+    return json({ ok: true });
+  }
   if (path === "/api/files/upload" && method === "PUT") {
     server.timeout(req, 0);
     const part = { dir: q.get("dir"), name: q.get("name"), sub: q.get("sub") ?? "", id: q.get("id") ?? "", offset: Number(q.get("offset") ?? 0), last: q.get("last") === "1", overwrite: q.get("overwrite") === "1" };
@@ -2613,6 +2748,8 @@ async function memberFiles(req: Request, url: URL, server: Server<unknown>, user
   }
   const checked = ((): boolean => {
     if (path === "/api/files/favorite" && method === "POST") return !!read(data.path);
+    // a link is made with the rights of its maker and changed only by them: `sharelinks.ts` says what they may
+    if (path === "/api/files/links" || path.startsWith("/api/files/links/")) return true;
     if (path === "/api/files/raw" && method === "GET") return !!read(q.get("path"));
     if (path === "/api/files/text" && method === "GET") return !!read(q.get("path"));
     if (path === "/api/files/text" && method === "PUT") return !!write(data.path);
@@ -3323,6 +3460,16 @@ async function handle(req: Request, server: Server<unknown>): Promise<Response> 
       throw e;
     }
   }
+  // a link for somebody without an account: no session here, the address (and its password) is the key
+  if (url.pathname.startsWith("/s/")) {
+    try {
+      return await linkRoutes(req, url, server);
+    } catch (e) {
+      if (e instanceof AppError) return fail(e.status, e.code, e.detail);
+      console.error(`${req.method} ${url.pathname.slice(0, 26)}…:`, e);
+      return fail(500, "request.internal");
+    }
+  }
   if (!url.pathname.startsWith("/api/")) {
     if (req.method !== "GET" && req.method !== "HEAD") return fail(405, "request.notFound");
     return serveStatic(req, url.pathname) ?? new Response("Not found", { status: 404, headers: SECURITY_HEADERS });
@@ -3399,6 +3546,7 @@ export async function serve(): Promise<void> {
   startSampler(() => settings.dataRoot);
   startLoad();
   startDisks();
+  startPower();
   startFills();
   startImages({
     apps: installedNames,

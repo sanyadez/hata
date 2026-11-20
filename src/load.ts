@@ -12,6 +12,7 @@ import { settings } from "./config";
 import { listContainers, PROJECT_LABEL, SERVICE_LABEL } from "./docker";
 import type { Guest, Node } from "./pve";
 import { parseCpu, parseMemory, type CpuTimes } from "./system";
+import { powerNow, samplePower, type PowerNow } from "./powering";
 
 const EVERY_MS = 5000;
 
@@ -80,6 +81,7 @@ export function startLoad(): void {
     here.cpu = cpu === null ? null : Math.round(cpu);
     here.memory = { used: memory.used, total: memory.total };
     if (rows.length) here.history.record(rows);
+    samplePower();
   };
   step();
   setInterval(step, EVERY_MS);
@@ -171,6 +173,8 @@ export interface LoadPlace {
   /** When the rows were sampled; a machine that stopped sending keeps its last ones */
   at: number;
   rows: LoadRowView[];
+  /** This server: what its processor draws, where the kernel counts it */
+  power?: PowerNow;
 }
 
 /** Every place, this server first */
@@ -189,6 +193,7 @@ export function loadReport(): { places: LoadPlace[]; warn: typeof settings.load;
       cpu: p.cpu,
       memory: p.memory,
       at: p.history.at,
+      ...(p.kind === "here" && powerNow() ? { power: powerNow()! } : {}),
       rows: p.history.latest.map((r) => {
         const h = p.history.of(r.key);
         return { ...r, trend: { cpu: h?.cpu ?? [], memory: h?.memory ?? [] }, over: minutesOver(h, settings.load.cpu) };

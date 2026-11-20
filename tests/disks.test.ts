@@ -170,10 +170,10 @@ test("verdict: what counts against a disk", () => {
 });
 
 test("attention: one line per disk in trouble, about the worst it reports", () => {
-  const system: SystemStatus = { hostname: "h", uptime: 1, cores: 4, load: [0, 0, 0], cpu: 5, memory: { total: 16 * GB, used: 4 * GB, swapTotal: 0, swapUsed: 0 }, disks: [], net: null, temperature: 45, history: { cpu: [], memory: [], net: [] } };
+  const system: SystemStatus = { hostname: "h", uptime: 1, cores: 4, load: [0, 0, 0], cpu: 5, memory: { total: 16 * GB, used: 4 * GB, swapTotal: 0, swapUsed: 0 }, disks: [], net: null, temperature: 45, history: { cpu: [], memory: [], net: [] }, trend: { at: 0, cpu: [], memory: [] } };
   const disk = (name: string, model: string, smart: Smart | null): DiskReport => {
     const findings = smart ? verdict(smart, true) : null;
-    return { name, path: "/dev/" + name, model, serial: model && "S-" + name, size: GB, transport: "sata", rotational: true, removable: false, volumes: [], smart, health: healthOf(findings), findings: findings ?? [], checkedAt: 1 };
+    return { name, path: "/dev/" + name, model, serial: model && "S-" + name, size: GB, transport: "sata", rotational: true, removable: false, volumes: [], smart, health: healthOf(findings), findings: findings ?? [], checkedAt: 1, readOnly: false, log: {}, grew: null, hottest: null };
   };
   const items = attention({
     system,

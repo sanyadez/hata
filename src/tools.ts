@@ -52,6 +52,7 @@ const SPECS: Spec[] = [
   { id: "docker", name: "Docker Engine", package: "docker-ce", bin: "docker", version: ["docker", "--version"], page: "#/store", family: ["docker-ce", "docker-ce-cli", "containerd.io", "docker-buildx-plugin", "docker-compose-plugin", "docker-ce-rootless-extras", "docker-model-plugin", "docker.io", "docker-compose-v2"] },
   { id: "samba", name: "Samba", package: "samba", bin: "smbd", version: ["smbd", "--version"], page: "#/settings/shares" },
   { id: "smartmontools", name: "smartmontools", package: "smartmontools", bin: "smartctl", version: ["smartctl", "--version"], page: "#/settings/storage" },
+  { id: "hdparm", name: "hdparm", package: "hdparm", bin: "hdparm", version: ["hdparm", "-V"], page: "#/storage" },
   { id: "fdisk", name: "fdisk", package: "fdisk", bin: "sfdisk", version: ["sfdisk", "--version"], page: "#/settings/storage", base: true },
   { id: "e2fsprogs", name: "e2fsprogs", package: "e2fsprogs", bin: "mkfs.ext4", version: ["mkfs.ext4", "-V"], page: "#/settings/storage", base: true },
   { id: "dosfstools", name: "dosfstools", package: "dosfstools", bin: "mkfs.fat", version: ["mkfs.fat", "--help"], page: "#/settings/storage" },
@@ -170,6 +171,7 @@ function holdsOf(id: string, nics: Nic[], remote: boolean, containers: boolean, 
   if (id === "wireguard-tools" && wireguardInUse()) return "wireguard";
   if (id === "samba" && settings.shares.length > 0) return "shares";
   if (id === "snapraid" && settings.snapraid.parity !== "") return "array";
+  if (id === "hdparm" && Object.keys(settings.storage.sleep).length > 0) return "sleep";
   if (id === "mergerfs" && usedNow("mergerfs", false)) return "merged";
   // an interface NetworkManager gave its address to goes down with it — and may be the way to this page
   if (id === "network-manager" && nics.some((nic) => nic.manager === "nm" && nic.addresses.length > 0)) return "network";

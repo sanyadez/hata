@@ -158,7 +158,7 @@ test("names", () => {
 });
 
 test("what is not an app yet: projects started elsewhere and containers on their own", () => {
-  const c = (name: string, labels: Record<string, string> = {}): ContainerSummary => ({ Id: name, Names: ["/" + name], Image: "i", State: "running", Status: "Up", Labels: labels, Ports: [] });
+  const c = (name: string, labels: Record<string, string> = {}): ContainerSummary => ({ Id: name, Names: ["/" + name], Image: "i", State: "running", Status: "Up", Labels: labels, Ports: [], ImageID: "sha256:i" });
   const of = (project: string, files = "") => ({ "com.docker.compose.project": project, "com.docker.compose.project.config_files": files, "com.docker.compose.project.working_dir": "/srv/" + project });
   const found = foreign([c("memos-1", of("memos")), c("b-web", of("blog", "/srv/blog/a.yml,/srv/blog/b.yml")), c("b-db", of("blog", "/srv/blog/a.yml,/srv/blog/b.yml")), c("lonely"), c("a-1", of("alpha"))], ["memos"]);
   expect(found.projects.map((p) => [p.name, p.containers.length, p.files, p.workingDir])).toEqual([
@@ -169,7 +169,7 @@ test("what is not an app yet: projects started elsewhere and containers on their
 });
 
 test("the apps a machine's client runs on this same Docker are not offered to take over", () => {
-  const c = (name: string, labels: Record<string, string>): ContainerSummary => ({ Id: name, Names: ["/" + name], Image: "i", State: "running", Status: "Up", Labels: labels, Ports: [] });
+  const c = (name: string, labels: Record<string, string>): ContainerSummary => ({ Id: name, Names: ["/" + name], Image: "i", State: "running", Status: "Up", Labels: labels, Ports: [], ImageID: "sha256:i" });
   const found = foreign(
     [
       c("radicale-1", { "com.docker.compose.project": "radicale", "com.docker.compose.project.working_dir": "/var/lib/hata-client/apps/radicale", "com.docker.compose.project.config_files": "/var/lib/hata-client/apps/radicale/compose.yml" }),

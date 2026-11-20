@@ -11,7 +11,7 @@ const code = (f: () => unknown): string => {
   }
   return "";
 };
-const target = { kind: "container", name: "web" };
+const target = { kind: "container" as const, name: "web" };
 
 test("readForward: a port of this server, a protocol, a target and its port", () => {
   expect(readForward({ port: 2222, target, to: 22, note: " SSH\n" }, [])).toEqual({ port: 2222, proto: "tcp", target, to: 22, outside: false, note: "SSH" });

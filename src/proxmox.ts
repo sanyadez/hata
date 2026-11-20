@@ -307,6 +307,9 @@ function scheduleStorages(h: Host): string[] {
   return [...new Set(l.storages.filter((s) => s.content.includes("backup") && mayPath(l.perms, `/storage/${s.name}`, "Datastore.AllocateSpace")).map((s) => s.name))].sort();
 }
 
+/** Every server with Hata's own schedule of backups: for the page of what runs when */
+export const scheduledHosts = () => state.hosts.filter((h) => h.schedule).map((h) => ({ id: h.id, name: h.name, schedule: h.schedule!, last: h.last ? { at: h.last.at, ok: h.last.ok } : null }));
+
 export function setSchedule(id: string, input: Record<string, unknown>, by: string) {
   const h = hostOf(id);
   let schedule: Schedule;

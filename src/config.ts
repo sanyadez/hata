@@ -20,6 +20,7 @@ import { changeAppearance, cleanAppearance, DEFAULT_APPEARANCE, type Appearance 
 import { isPlainObject, readJsonFile, writeJsonAtomic } from "./fsutil";
 import { POINTER_FILE, serviceStateDir, stateIsMissing, SYSTEM_SECRETS_DIR } from "./statedir";
 import { COMPILED } from "./version";
+import { cleanSleep, POWER_DEFAULTS, readPowerSchedule, type PowerSchedule } from "./power";
 
 /**
  * State directory. A run from source keeps it in the working copy; the binary uses the system location
@@ -38,7 +39,7 @@ if (stateIsMissing(DATA_DIR)) {
 mkdirSync(DATA_DIR, { recursive: true, mode: 0o700 });
 
 /** What must not be read by anyone but Hata: password hashes, sessions, keys, tokens */
-export const SECRET_NAMES = ["users.json", "sessions.json", "setup-token", "invites.json", "notify.json", "certs", "backup-remote.json", "backup-key", "backup-key.pub", "backup-known-hosts", "agents.json", "oauth.json", "assistant.json", "assistant-chats.json", "wireguard.json", "netplaces.json", "net-known-hosts", "proxmox.json", "homeassistant.json", "qbittorrent.json", "frigate.json", "dns-api.json"];
+export const SECRET_NAMES = ["users.json", "sessions.json", "setup-token", "invites.json", "notify.json", "certs", "backup-remote.json", "backup-key", "backup-key.pub", "backup-known-hosts", "agents.json", "oauth.json", "assistant.json", "assistant-chats.json", "wireguard.json", "netplaces.json", "net-known-hosts", "proxmox.json", "links.json", "homeassistant.json", "qbittorrent.json", "frigate.json", "dns-api.json"];
 
 /**
  * Where the secrets lie. For the installed service that is `/etc/hata`, whatever the configuration
@@ -108,7 +109,9 @@ export interface Settings {
   images: ImageSettings;
   /** Disks: whether a USB disk that is plugged in is mounted by itself */
   /** `ignored` — disks nothing uses that the person said not to mention again, by serial number */
-  storage: { automount: boolean; ignored: string[]; smart: SmartLimits };
+  storage: { automount: boolean; ignored: string[]; smart: SmartLimits; /** How long a hard disk waits idle before it stops spinning, minutes, by serial */ sleep: Record<string, number> };
+  /** The server shuts down and wakes by its clock (`powering.ts`) */
+  power: PowerSchedule;
   /** Sign-in rules: `adminTwoFactor` — an administrator without two-factor sign-in acts as a member until it is on */
   security: { adminTwoFactor: boolean };
   /** `outside` — the interfaces the internet comes in on: nothing of the server answers there (`outside.ts`) */
@@ -249,7 +252,8 @@ const DEFAULTS: Settings = {
   images: { check: true, auto: false, time: "04:30", exclude: [] },
   https: { mode: "off", domain: "", email: "", wildcard: "off" },
   local: { enabled: true, name: "hata.local" },
-  storage: { automount: false, ignored: [], smart: DEFAULT_SMART },
+  storage: { automount: false, ignored: [], smart: DEFAULT_SMART, sleep: {} },
+  power: POWER_DEFAULTS,
   security: { adminTwoFactor: false },
   network: { outside: [] },
   snapraid: { parity: "", parity2: "", data: [], appData: false, time: "05:00", scrub: true, deleteLimit: 50 },
@@ -345,7 +349,8 @@ export const settings: Settings = {
   network: { outside: cleanOutside(isPlainObject(saved.network) ? saved.network.outside : []) },
   security: { adminTwoFactor: isPlainObject(saved.security) && saved.security.adminTwoFactor === true },
   load: { ...LOAD_DEFAULTS, ...(loadWarn(saved.load) ?? {}) },
-  storage: { automount: isPlainObject(saved.storage) && saved.storage.automount === true, ignored: isPlainObject(saved.storage) && Array.isArray(saved.storage.ignored) ? saved.storage.ignored.filter((id): id is string => typeof id === "string") : [], smart: { ...DEFAULT_SMART, ...(isPlainObject(saved.storage) ? (smartLimits(saved.storage.smart) ?? {}) : {}) } },
+  storage: { automount: isPlainObject(saved.storage) && saved.storage.automount === true, ignored: isPlainObject(saved.storage) && Array.isArray(saved.storage.ignored) ? saved.storage.ignored.filter((id): id is string => typeof id === "string") : [], smart: { ...DEFAULT_SMART, ...(isPlainObject(saved.storage) ? (smartLimits(saved.storage.smart) ?? {}) : {}) }, sleep: cleanSleep(isPlainObject(saved.storage) ? saved.storage.sleep : {}) },
+  power: ((read) => (typeof read === "string" ? POWER_DEFAULTS : read))(saved.power === undefined ? POWER_DEFAULTS : readPowerSchedule(saved.power)),
 };
 settings.local.name = localName(settings.local.name) ?? DEFAULTS.local.name;
 

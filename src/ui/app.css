@@ -2089,6 +2089,8 @@ button.mark:hover { border-color: var(--border-strong); color: var(--text); }
 .table-foot { margin: 0; padding: 12px 20px; border-top: 1px solid var(--border); background: var(--surface-2); border-radius: 0 0 var(--radius-lg) var(--radius-lg); }
 .backups-table td:last-child { width: 1%; white-space: nowrap; }
 .backups-table .row-actions { flex-wrap: nowrap; }
+/* a group's heading is the only cell of its row, and so its last one: it wraps like any words */
+.backups-table .group-row td { width: auto; white-space: normal; }
 
 /* --- Home: what the cards hold fits their size ------------------------------------------------------- */
 
@@ -2246,3 +2248,43 @@ a.kpi:hover { background: var(--surface-2); }
 /* an empty block (a place an error or a later answer goes into) takes no gap of its own */
 .card.pad > :empty:not(input, img, canvas, svg, textarea, select, iframe, hr, progress, video, button) { display: none; }
 .sys-status.end { justify-content: flex-end; }
+
+/* --- The page of a link for somebody without an account (`/s/<token>`, link.js) ------------------- */
+body.link-page { margin: 0; min-height: 100vh; background: var(--bg); color: var(--text); display: grid; grid-template-rows: 1fr auto; justify-items: center; padding: 32px 16px 16px; }
+.link-box { width: 100%; max-width: 720px; }
+.link-box h1 { font-family: var(--font-heading); font-size: 22px; margin: 0; }
+.link-box p { margin: 0; }
+.link-note { white-space: pre-wrap; overflow-wrap: anywhere; }
+.link-preview { max-width: 100%; max-height: 60vh; border-radius: var(--radius-md); justify-self: start; }
+.link-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; }
+.link-crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 2px; min-width: 0; }
+.link-list { display: grid; }
+.link-row { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto auto; gap: 10px; align-items: center; min-height: 40px; padding: 4px 6px; border-top: 1px solid var(--border); background: none; border-left: 0; border-right: 0; border-bottom: 0; color: inherit; font: inherit; text-align: left; }
+button.link-row { cursor: pointer; }
+button.link-row:hover { background: var(--surface-2); }
+.link-row.sending { grid-template-columns: minmax(0, 1fr) auto; }
+.link-row .bar { margin: 6px 0 0; }
+.link-name { overflow-wrap: anywhere; color: inherit; }
+a.link-name { text-decoration: underline; text-decoration-color: var(--border-strong); }
+.link-kind { color: var(--muted); text-align: center; }
+.link-kind.dir { color: var(--accent-text); }
+.link-drop { display: grid; gap: 4px; place-items: center; text-align: center; padding: 36px 16px; border: 2px dashed var(--border-strong); border-radius: var(--radius-lg); cursor: pointer; }
+.link-drop:hover, .link-drop.over { border-color: var(--accent); background: var(--accent-soft); }
+.link-foot { display: flex; gap: 6px; align-items: center; margin: 24px 0 0; }
+.link-page .ok { color: var(--ok); }
+.link-of + .link-of { border-top: 1px solid var(--border); padding-top: 16px; }
+.link-made .copy-box { max-width: 640px; }
+.link-made + .link-made { border-top: 1px solid var(--border); padding-top: 12px; }
+
+/* --- Settings → Schedule ------------------------------------------------------------------------- */
+.schedule-list > .setting:first-child { border-top: 0; padding-top: 0; }
+.schedule-list > .setting.off strong { color: var(--muted); }
+.schedule-row { align-items: flex-start; }
+.schedule-time { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.schedule-time input[type="time"] { width: 110px; }
+.schedule-clash { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 6px; }
+.section-head h2 .chip { margin-left: 8px; vertical-align: middle; }
+.power-times { display: flex; gap: 16px; flex-wrap: wrap; }
+.power-times .field { width: 140px; }
+.power-days { display: flex; gap: 6px; flex-wrap: wrap; }
+.day-tick { display: inline-flex; gap: 6px; align-items: center; padding: 4px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); }
