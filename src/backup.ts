@@ -592,6 +592,9 @@ export async function runBackups(user: string, reason: SnapshotReason = "schedul
   return true;
 }
 
+/** How the last daily run (or one started by hand) went; null — none yet */
+export const lastBackupRun = (): BackupOverview["lastRun"] => state.lastRun;
+
 /** Starts the daily run when its minute comes */
 export function scheduleBackups(): void {
   let lastDay = "";

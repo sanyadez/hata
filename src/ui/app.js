@@ -542,6 +542,7 @@ const AREAS = {
     { id: "account", sections: ["account"] },
     { id: "users", hash: "#/settings/users", view: "users", admin: true },
     { id: "general", sections: ["general"] },
+    { id: "schedule", sections: ["schedule"] },
     { id: "appearance", sections: ["appearance"] },
     { id: "notifications", sections: ["notifications"] },
     { id: "modules", sections: ["modules"] },
@@ -13868,6 +13869,7 @@ async function loadSettings() {
     if (isAdmin() && showsSection("network")) state.network = await api("GET", "/api/network").catch(() => null);
     if (isAdmin() && showsSection("remote") && hasModule("remote")) [state.remote, state.wireguard] = await Promise.all([api("GET", "/api/tailscale").catch(() => null), api("GET", "/api/wireguard").catch(() => null)]);
     if (isAdmin() && showsSection("bluetooth") && hasModule("bluetooth")) state.bluetooth = await api("GET", "/api/bluetooth").catch((e) => ({ error: errorText(e) }));
+    if (isAdmin() && showsSection("schedule")) state.schedule = await api("GET", "/api/schedule").catch((e) => ({ error: errorText(e) }));
     if (isAdmin() && showsSection("tools")) [state.tools, sysUpdates[""]] = await Promise.all([api("GET", "/api/tools").catch(() => null), api("GET", "/api/system/updates").catch((e) => ({ error: errorText(e) }))]);
     // counting the volumes takes a while: the page is shown first
     if (isAdmin() && showsSection("docker")) void loadSpace();
@@ -13890,6 +13892,7 @@ const LANGUAGE_NAMES = { en: "English", uk: "Українська" };
 const SECTIONS = [
   { id: "account", icon: "user", group: "you" },
   { id: "general", icon: "sliders", group: "server" },
+  { id: "schedule", icon: "clock", group: "server", admin: true },
   { id: "appearance", icon: "image", group: "server", admin: true },
   { id: "notifications", icon: "bell", group: "server", admin: true },
   { id: "modules", icon: "modules", group: "server", admin: true },
@@ -15091,6 +15094,86 @@ function settingRow(title, hint, control) {
   return h("div", { class: "setting" }, h("div", { class: "grow" }, h("strong", null, title), hint && h("p", { class: "muted small" }, hint)), h("div", { class: "setting-control" }, control));
 }
 
+// --- What runs when ---------------------------------------------------------------------------------
+
+/** How often, in words: every 30 min, every 6 h, once a day */
+const everyWords = (ms) => (ms >= 86_400_000 ? t("schedule.daily") : ms >= 3_600_000 ? t("schedule.everyHours", { n: Math.round(ms / 3_600_000) }) : t("schedule.everyMinutes", { n: Math.round(ms / 60_000) }));
+
+/** A moment ahead, in words: today at 05:00, tomorrow at 03:00, Sunday at 05:00 */
+function aheadWords(at) {
+  const when = new Date(at);
+  const time = when.toLocaleTimeString(state.lang, { hour: "2-digit", minute: "2-digit" });
+  const days = Math.round((new Date(when).setHours(0, 0, 0, 0) - new Date().setHours(0, 0, 0, 0)) / 86_400_000);
+  if (days === 0) return t("schedule.today", { time });
+  if (days === 1) return t("schedule.tomorrow", { time });
+  return t("schedule.onDay", { day: when.toLocaleDateString(state.lang, { weekday: "long" }), time });
+}
+
+const scheduleName = (one) => (one.kind === "proxmox" ? t("schedule.kind.proxmox", { name: one.name }) : t("schedule.kind." + one.kind));
+
+async function moveScheduled(id, time) {
+  try {
+    state.schedule = await api("PUT", `/api/schedule/${encodeURIComponent(id)}`, { time });
+    toast(t("schedule.moved", { time }));
+  } catch (e) {
+    toast(errorText(e), "error");
+  }
+  renderSettings();
+}
+
+/** Settings → Schedule: one list of what Hata starts by itself, and when */
+function scheduleSection() {
+  const data = state.schedule;
+  if (!data) return [waitMark()];
+  if (data.error) return [uiCard({}, h("p", { class: "error" }, data.error))];
+  const byId = new Map(data.timed.map((one) => [one.id, one]));
+  const row = (one) => {
+    const mine = data.clashes.filter((c) => c.id === one.id);
+    const input = h("input", { type: "time", value: one.time, class: "short", "aria-label": t("schedule.time"), required: true });
+    const save = button(t("settings.save"), { class: "small", hidden: true, onclick: () => input.value && moveScheduled(one.id, input.value) });
+    input.addEventListener("input", () => (save.hidden = !input.value || input.value === one.time));
+    const facts = [
+      one.on ? (one.next ? t("schedule.next", { when: aheadWords(one.next) }) : "") : t("schedule.off"),
+      one.last ? t(one.last.ok ? "schedule.lastOk" : "schedule.lastFailed", { when: ago(one.last.at) }) : one.last === null && one.on ? t("schedule.never") : "",
+      one.scrub ? t("schedule.scrub") : "",
+    ].filter(Boolean);
+    return h(
+      "div",
+      { class: "setting schedule-row" + (one.on ? "" : " off") },
+      h(
+        "div",
+        { class: "grow stack-tight" },
+        h("strong", null, scheduleName(one)),
+        h("p", { class: "muted small" }, t("schedule.what." + one.kind)),
+        h("p", { class: "small" }, facts.join(" · ")),
+        ...mine.map((c) =>
+          h(
+            "div",
+            { class: "banner warn small schedule-clash" },
+            h("span", { class: "grow" }, t(c.minutes === 0 ? "schedule.clashSame" : "schedule.clash", { other: scheduleName(byId.get(c.with)), time: byId.get(c.with).time, minutes: c.minutes }), " ", t(one.kind === "update" || byId.get(c.with).kind === "update" ? "schedule.why.update" : "schedule.why." + (one.touches.includes("disks") && byId.get(c.with).touches.includes("disks") ? "disks" : "apps"))),
+            one.free && button(t("schedule.moveTo", { time: one.free }), { class: "small", onclick: () => moveScheduled(one.id, one.free) }),
+          ),
+        ),
+      ),
+      h("div", { class: "setting-control schedule-time" }, input, save, h("a", { class: "btn small ghost", href: one.href }, t("schedule.open"))),
+    );
+  };
+  const repeating = (one) =>
+    h(
+      "div",
+      { class: "setting" + (one.on ? "" : " off") },
+      h("div", { class: "grow stack-tight" }, h("strong", null, t("schedule.repeat." + one.id)), h("p", { class: "muted small" }, [one.on ? everyWords(one.every) : t("schedule.off"), one.last ? t("schedule.lastAt", { when: ago(one.last) }) : ""].filter(Boolean).join(" · "))),
+      h("div", { class: "setting-control" }, h("a", { class: "btn small ghost", href: one.href }, t("schedule.open"))),
+    );
+  return [
+    uiCard(
+      { title: t("schedule.timedTitle"), lead: t("schedule.timedLead", { zone: data.timezone }), marks: data.clashes.length > 0 && h("span", { class: "chip warn" }, t("schedule.clashes", { n: data.clashes.length })) },
+      h("div", { class: "schedule-list" }, data.timed.map(row)),
+    ),
+    uiCard({ title: t("schedule.repeatTitle"), lead: t("schedule.repeatLead") }, h("div", { class: "schedule-list" }, data.repeating.map(repeating))),
+  ];
+}
+
 /** The steps an update goes through as the page sees them; going back skips the download */
 const UPDATE_STEPS = ["download", "verify", "restart", "start"];
 let updateFollow = null;
@@ -15508,6 +15591,7 @@ function settingsSection(section) {
   if (section === "shares") return sharesSection();
   if (section === "network") return networkSection();
   if (section === "tools") return toolsSection();
+  if (section === "schedule") return scheduleSection();
   if (section === "docker") return dockerSection();
   if (section === "remote") return remoteSection();
   if (section === "bluetooth") return bluetoothSection();

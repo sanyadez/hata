@@ -496,6 +496,14 @@ export function setUp(input: Record<string, unknown>, user: string): void {
   void refreshDiff().then(save, () => {});
 }
 
+/** Only another time of the nightly run */
+export function setArrayTime(time: string, user: string): void {
+  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) throw new ArrayError("array.badTime");
+  settings.snapraid = { ...settings.snapraid, time };
+  saveSettings();
+  record("array.changed", { user, detail: String(settings.snapraid.data.length) });
+}
+
 /** Turns the protection off; `wipe` also removes the parity and the lists, which only take room without it */
 export function turnOff(wipe: boolean, user: string): void {
   idle();

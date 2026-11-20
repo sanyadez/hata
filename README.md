@@ -399,6 +399,10 @@ Early development. What works today:
   The version that ran before can be gone back to with a button, and `sudo hata update` does the same
   from a shell; an app's update can be undone from the activity log, from the snapshot taken right before it;
 - the whole history of what happened on the server and who did it, by day, with a search;
+- one page of what Hata starts by itself and when (Settings → Schedule): the backups, the updates of Hata
+  and of the images, SnapRAID, the backups of a Proxmox server — work that starts while other work it gets
+  in the way of may still be running is marked, with a free time to move it to in one press —, and the
+  looks that come round on their own;
 - Docker itself is installed by a button where it is missing, and started where it is not running;
 - software and updates (Computers → This server → Software and updates): every program of the system Hata relies on in one list — Docker, Samba,
   NetworkManager, mergerfs, SnapRAID and the rest — with what it is for, whether it is installed and in

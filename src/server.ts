@@ -151,6 +151,7 @@ import { call as machineCall, clientBinary, containersOf, installScript, invite 
 import { availableUpdate, cancelUpdate, checkForUpdate, confirmUpdate, scheduleUpdateChecks, startRollback, startUpdate, updateStatus } from "./update";
 import { VERSION } from "./version";
 import { zipStream } from "./zip";
+import { moveTime, scheduleView } from "./schedule";
 import { aboutLink, changeLink, dropLinksOf, entriesOf, grantCookie, inside as insideLink, linkOf, listLinks, makeLink, mayTake, opened as linkOpened, removeLink, took, unlock as unlockLink, unlocked } from "./sharelinks";
 import { GRANT_MS } from "./sharelink";
 
@@ -1317,6 +1318,12 @@ async function api(req: Request, url: URL, server: Server<unknown>): Promise<Res
     return json(recent(app ? 20 : 100, app));
   }
 
+  if (path === "/api/schedule" && method === "GET") return json(await scheduleView());
+  const scheduled = /^\/api\/schedule\/(backups|update|images|snapraid|pve:[a-f0-9]{8})$/.exec(path);
+  if (scheduled && method === "PUT") {
+    moveTime(scheduled[1]!, (await body(req)).time, user.name);
+    return json(await scheduleView());
+  }
   if (path === "/api/settings") {
     if (method === "GET") return json(publicSettings());
     if (method === "PUT") {

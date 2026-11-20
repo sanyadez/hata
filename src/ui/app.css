@@ -2273,3 +2273,12 @@ a.link-name { text-decoration: underline; text-decoration-color: var(--border-st
 .link-of + .link-of { border-top: 1px solid var(--border); padding-top: 16px; }
 .link-made .copy-box { max-width: 640px; }
 .link-made + .link-made { border-top: 1px solid var(--border); padding-top: 12px; }
+
+/* --- Settings → Schedule ------------------------------------------------------------------------- */
+.schedule-list > .setting:first-child { border-top: 0; padding-top: 0; }
+.schedule-list > .setting.off strong { color: var(--muted); }
+.schedule-row { align-items: flex-start; }
+.schedule-time { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.schedule-time input[type="time"] { width: 110px; }
+.schedule-clash { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 6px; }
+.section-head h2 .chip { margin-left: 8px; vertical-align: middle; }
