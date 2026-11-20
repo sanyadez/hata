@@ -1,4 +1,5 @@
 import { expect, test } from "bun:test";
+import { appText } from "./uiparts";
 import { readdirSync } from "node:fs";
 import { join } from "node:path";
 import en from "../src/lang/en.json";
@@ -15,7 +16,7 @@ for (const file of readdirSync(dir).filter((f) => f.endsWith(".json") && f !== "
 }
 
 test("every string the UI asks for exists", async () => {
-  const js = await Bun.file(join(import.meta.dir, "../src/ui/app.js")).text();
+  const js = appText();
   const used = [...js.matchAll(/\bt\("([a-zA-Z.]+)"/g)].map((m) => m[1]!);
   // a key ending with a dot is a prefix completed at run time: at least one such string must exist
   const missing = used.filter((key) => (key.endsWith(".") ? !Object.keys(en).some((k) => k.startsWith(key)) : !(key in en)));

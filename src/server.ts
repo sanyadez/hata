@@ -157,7 +157,23 @@ import { aboutLink, changeLink, dropLinksOf, entriesOf, grantCookie, inside as i
 import { GRANT_MS } from "./sharelink";
 
 import appCss from "./ui/app.css" with { type: "text" };
-import appJs from "./ui/app.js" with { type: "text" };
+import app01 from "./ui/app/01-core.js" with { type: "text" };
+import app02 from "./ui/app/02-home.js" with { type: "text" };
+import app03 from "./ui/app/03-app.js" with { type: "text" };
+import app04 from "./ui/app/04-machines.js" with { type: "text" };
+import app05 from "./ui/app/05-house.js" with { type: "text" };
+import app06 from "./ui/app/06-proxmox.js" with { type: "text" };
+import app07 from "./ui/app/07-machine.js" with { type: "text" };
+import app08 from "./ui/app/08-work.js" with { type: "text" };
+import app09 from "./ui/app/09-backups.js" with { type: "text" };
+import app10 from "./ui/app/10-files.js" with { type: "text" };
+import app11 from "./ui/app/11-settings.js" with { type: "text" };
+import app12 from "./ui/app/12-tv.js" with { type: "text" };
+import app13 from "./ui/app/13-network.js" with { type: "text" };
+import app14 from "./ui/app/14-domains.js" with { type: "text" };
+import app15 from "./ui/app/15-storage.js" with { type: "text" };
+import app16 from "./ui/app/16-people.js" with { type: "text" };
+import app17 from "./ui/app/17-start.js" with { type: "text" };
 import indexHtml from "./ui/index.html" with { type: "text" };
 import terminalHtml from "./ui/terminal.html" with { type: "text" };
 import screenHtml from "./ui/screen.html" with { type: "text" };
@@ -236,7 +252,24 @@ const MANIFEST = JSON.stringify({
 const STATIC: Record<string, { body: string; type: string; headers?: Record<string, string> }> = {
   "/": { body: indexHtml as unknown as string, type: "text/html; charset=utf-8" },
   "/app.css": { body: appCss, type: "text/css; charset=utf-8" },
-  "/app.js": { body: appJs, type: "text/javascript; charset=utf-8" },
+  // the page's script, in parts loaded in order by index.html
+  "/app/01-core.js": { body: app01, type: "text/javascript; charset=utf-8" },
+  "/app/02-home.js": { body: app02, type: "text/javascript; charset=utf-8" },
+  "/app/03-app.js": { body: app03, type: "text/javascript; charset=utf-8" },
+  "/app/04-machines.js": { body: app04, type: "text/javascript; charset=utf-8" },
+  "/app/05-house.js": { body: app05, type: "text/javascript; charset=utf-8" },
+  "/app/06-proxmox.js": { body: app06, type: "text/javascript; charset=utf-8" },
+  "/app/07-machine.js": { body: app07, type: "text/javascript; charset=utf-8" },
+  "/app/08-work.js": { body: app08, type: "text/javascript; charset=utf-8" },
+  "/app/09-backups.js": { body: app09, type: "text/javascript; charset=utf-8" },
+  "/app/10-files.js": { body: app10, type: "text/javascript; charset=utf-8" },
+  "/app/11-settings.js": { body: app11, type: "text/javascript; charset=utf-8" },
+  "/app/12-tv.js": { body: app12, type: "text/javascript; charset=utf-8" },
+  "/app/13-network.js": { body: app13, type: "text/javascript; charset=utf-8" },
+  "/app/14-domains.js": { body: app14, type: "text/javascript; charset=utf-8" },
+  "/app/15-storage.js": { body: app15, type: "text/javascript; charset=utf-8" },
+  "/app/16-people.js": { body: app16, type: "text/javascript; charset=utf-8" },
+  "/app/17-start.js": { body: app17, type: "text/javascript; charset=utf-8" },
   // the terminal is a page of its own, shown in a frame: its emulator writes styles into the page, which
   // the UI's policy forbids — here it is allowed, and nothing but the emulator lives there
   "/terminal.html": {

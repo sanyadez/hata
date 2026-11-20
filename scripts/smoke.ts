@@ -11,7 +11,7 @@
  * Words written straight on the background fail it too: everything stands on a card.
  * `bun run smoke --shots <folder>` also keeps a picture of every page.
  */
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -178,7 +178,8 @@ await until("the page after signing in", () => js<boolean>(`!document.querySelec
 // --- The pages --------------------------------------------------------------------------------------
 
 /** The tabs of every section of the page, read from the page's own list so a new one is walked without a word here */
-const appJs = readFileSync(join(root, "src", "ui", "app.js"), "utf8");
+const appDir = join(root, "src", "ui", "app");
+const appJs = readdirSync(appDir).filter((name) => name.endsWith(".js")).sort().map((name) => readFileSync(join(appDir, name), "utf8")).join("\n");
 const areaList = /const AREAS = \{([\s\S]*?)\n\};/.exec(appJs)?.[1] ?? "";
 const bases = Object.fromEntries([.../(\w+): "(#[^"]+)"/g[Symbol.matchAll](/const AREA_BASE = \{([^}]*)\}/.exec(appJs)?.[1] ?? "")].map((m) => [m[1]!, m[2]!]));
 const tabs: string[] = [];
@@ -188,7 +189,7 @@ for (const line of areaList.split("\n")) {
   if (opened) area = opened[1]!;
   for (const m of line.matchAll(/\{ id: "([a-z]+)"(?:, hash: "([^"]+)")?/g)) tabs.push(m[2] ?? `${bases[area]}/${m[1]}`);
 }
-if (tabs.length < 20 || tabs.some((x) => x.startsWith("undefined"))) giveUp("Could not read the sections of the page from app.js.");
+if (tabs.length < 20 || tabs.some((x) => x.startsWith("undefined"))) giveUp("Could not read the sections of the page from src/ui/app/.");
 
 const ROUTES = [
   "#/welcome/server", "#/welcome/existing", "#/welcome/data", "#/welcome/backups", "#/welcome/modules", "#/welcome/apps",
@@ -338,6 +339,82 @@ async function walk(label: string, phone: boolean): Promise<void> {
   }
 }
 
+/**
+ * Windows opened as a person would open them, on the page they belong to: each only shows — nothing is
+ * pressed in it. The page's functions are globals (its script is plain scripts sharing one scope), so the
+ * window is opened by its own function, not by hunting for a button.
+ */
+const DIALOGS: [string, string][] = [
+  ["#/", "addDialog()"],
+  ["#/", "layoutTextDialog()"],
+  ["#/", "linkDialog()"],
+  ["#/files", "shareLinkDialog(state.files.path, 'data', true)"],
+  ["#/files", "shareLinkDialog(state.files.path, 'data', true, 'drop')"],
+  ["#/files", "sizeDialog(state.files.path, 'data')"],
+  ["#/apps", "customDialog()"],
+  ["#/machines", "addMachineDialog()"],
+  ["#/machines/load", "loadWarnDialog()"],
+  ["#/machines", "pveDialog()"],
+  ["#/house", "haDialog()"],
+  ["#/house/tv", "playLinkDialog()"],
+  ["#/settings/users", "userDialog()"],
+  ["#/settings/users", "inviteDialog()"],
+  ["#/settings/assistant", "agentDialog()"],
+  ["#/settings/general", "renameServerDialog(() => {})"],
+  ["#/settings/general", "serverPowerDialog('reboot')"],
+  ["#/storage", "mergeDialog()"],
+  ["#/storage", "poolDialog()"],
+  ["#/storage/places", "placeDialog()"],
+  ["#/network/addresses", "domainNameDialog(null, null, () => {})"],
+  ["#/network/addresses", "forwardDialog(null, null, () => {})"],
+  ["#/network/remote", "wgAddDialog()"],
+  ["#/machines/this/system", "moveDataDialog()"],
+];
+
+/** A window wider than the page, or one that scrolls sideways inside */
+const DIALOG_WIDE = `(() => {
+  const out = [];
+  for (const d of document.querySelectorAll("dialog[open]")) {
+    if (d.getBoundingClientRect().right > document.documentElement.clientWidth + 1) out.push("the window reaches past the page");
+    for (const el of [d, ...d.querySelectorAll("*")]) {
+      const style = getComputedStyle(el);
+      if (["auto", "scroll"].includes(style.overflowX) && el.scrollWidth > el.clientWidth + 1) out.push(el.tagName.toLowerCase() + "." + [...el.classList].join(".") + " " + el.clientWidth + "/" + el.scrollWidth);
+    }
+  }
+  return out.slice(0, 5);
+})()`;
+
+async function dialogs(label: string, phone: boolean): Promise<void> {
+  for (const [route, opener] of DIALOGS) {
+    trouble = [];
+    failed = [];
+    await send("Page.navigate", { url: `${base}/${route}` });
+    await settled();
+    // a page drawn after its data came may still be on its way: the window needs what it reads
+    await Bun.sleep(300);
+    await js(`(async () => { await (${opener}); })()`);
+    await settled();
+    const found = [...trouble];
+    for (const { id, line } of failed) {
+      const said = await send("Network.getResponseBody", { requestId: id });
+      found.push(`${line} ${typeof said.body === "string" ? said.body.slice(0, 300) : ""}`.trim());
+    }
+    if (!(await js<boolean>(`!!document.querySelector("dialog[open]")`))) found.push("no window opened");
+    for (const key of await js<string[]>(KEYS)) found.push(`a string shown as its key: ${key}`);
+    if (phone) for (const wide of await js<string[]>(DIALOG_WIDE)) found.push(`too wide: ${wide}`);
+    if (shotsAt) {
+      const picture = await send("Page.captureScreenshot", { format: "png" });
+      await Bun.write(join(shotsAt, `${label}-dialog-${opener.replace(/\W+/g, "-").slice(0, 40)}.png`), Buffer.from(picture.data, "base64"));
+    }
+    await js(`document.querySelectorAll("dialog[open]").forEach((d) => d.close())`);
+    console.log(`${found.length ? "✗" : "✓"} ${label} ${route} ${opener}`);
+    for (const line of new Set(found)) {
+      console.log(`    ${line}`);
+      failures.push(`${label} ${route} ${opener}: ${line}`);
+    }
+  }
+}
+
 // a new server as a person gets it: the base alone, the pages of modules saying they are off
 await walk("base ", false);
 // then with every module on, so their pages are walked too
@@ -357,10 +434,12 @@ await until("the page after a reload", () => js<boolean>(DRAWN));
 // what the page before the reload was still waiting for is gone with it
 underWay.clear();
 await walk("wide ", false);
+await dialogs("wide ", false);
 await width(390, 844, true);
 await send("Page.reload");
 await until("the page after a reload", () => js<boolean>(DRAWN));
 await walk("phone", true);
+await dialogs("phone", true);
 
 // in Ukrainian: every string there, none shown as its key, nothing longer than the page
 await width(1440, 900, false);
@@ -374,6 +453,7 @@ await send("Page.reload");
 await until("the page after a reload", () => js<boolean>(DRAWN));
 underWay.clear();
 await walk("ukph ", true);
+await dialogs("ukph ", true);
 await js(`localStorage.removeItem("hata.lang")`);
 
 // a member: the pages of the administrators send them away or say so, and nothing asks for what is not theirs
@@ -400,5 +480,5 @@ if (failures.length) {
   console.error(`\n${failures.length} problem${failures.length === 1 ? "" : "s"} on ${ROUTES.length} pages.`);
   process.exit(1);
 }
-console.log(`\n${ROUTES.length} pages — the base alone, every module on, a phone's width, in Ukrainian, and as a member: nothing wrong.`);
+console.log(`\n${ROUTES.length} pages — the base alone, every module on, a phone's width, in Ukrainian, and as a member, with ${DIALOGS.length} windows opened: nothing wrong.`);
 process.exit(0);
