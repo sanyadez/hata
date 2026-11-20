@@ -2089,6 +2089,8 @@ button.mark:hover { border-color: var(--border-strong); color: var(--text); }
 .table-foot { margin: 0; padding: 12px 20px; border-top: 1px solid var(--border); background: var(--surface-2); border-radius: 0 0 var(--radius-lg) var(--radius-lg); }
 .backups-table td:last-child { width: 1%; white-space: nowrap; }
 .backups-table .row-actions { flex-wrap: nowrap; }
+/* a group's heading is the only cell of its row, and so its last one: it wraps like any words */
+.backups-table .group-row td { width: auto; white-space: normal; }
 
 /* --- Home: what the cards hold fits their size ------------------------------------------------------- */
 

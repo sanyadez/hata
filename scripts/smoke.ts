@@ -144,6 +144,7 @@ socket.onmessage = (event) => {
   if (m.method === "Network.loadingFinished" || m.method === "Network.loadingFailed") underWay.delete(p.requestId);
   // a page that asks a module that is off for something shows a part it should not have
   if (m.method === "Network.responseReceived" && p.response.status === 404 && new URL(p.response.url).pathname.startsWith("/api/")) missing.push({ id: p.requestId, line: `${requests.get(p.requestId) ?? p.response.url}` });
+  if (watchForbidden && m.method === "Network.responseReceived" && p.response.status === 403 && new URL(p.response.url).pathname.startsWith("/api/")) forbidden.push(requests.get(p.requestId) ?? p.response.url);
   if (m.method === "Network.responseReceived" && p.response.status >= 500) failed.push({ id: p.requestId, line: `${p.response.status}: ${requests.get(p.requestId) ?? p.response.url}` });
 };
 const send = (method: string, params: object = {}) =>
@@ -275,11 +276,38 @@ const STEPS = `(() => {
   return out.slice(0, 5);
 })()`;
 
+/**
+ * A string of the page shown as its key ("area.settings.schedule"): the words of the view and of an open
+ * window that look like a key whose first part is one the language files have. Names of files and hosts
+ * ("app.js", "hata.local") end in what keys never do.
+ */
+const PREFIXES = [...new Set(Object.keys(JSON.parse(readFileSync(join(root, "src", "lang", "en.json"), "utf8"))).map((k) => k.split(".")[0]))];
+const KEYS = `(() => {
+  const prefixes = new Set(${JSON.stringify(PREFIXES)});
+  const out = new Set();
+  for (const scope of [document.querySelector("#view"), ...document.querySelectorAll("dialog[open]")]) {
+    if (!scope) continue;
+    const walker = document.createTreeWalker(scope, NodeFilter.SHOW_TEXT);
+    for (let node = walker.nextNode(); node; node = walker.nextNode()) {
+      const text = node.textContent.trim();
+      if (!/^[a-z][A-Za-z0-9]*(\\.[A-Za-z0-9-]+)+$/.test(text) || !prefixes.has(text.split(".")[0])) continue;
+      if (/\\.(js|json|css|ya?ml|local|lan|home|io|com|org|net|ua|txt|conf|sh|png|jpe?g|svg|log|md)$/i.test(text)) continue;
+      out.add(text);
+    }
+  }
+  return [...out].slice(0, 5);
+})()`;
+
+/** Requests a member's page made that the server refused them: the page asked for what is not theirs */
+let forbidden: string[] = [];
+let watchForbidden = false;
+
 const failures: string[] = [];
 async function walk(label: string, phone: boolean): Promise<void> {
   for (const route of ROUTES) {
     trouble = [];
     failed = [];
+    forbidden = [];
     await send("Page.navigate", { url: `${base}/${route}` });
     await settled();
     const found = [...trouble];
@@ -295,6 +323,8 @@ async function walk(label: string, phone: boolean): Promise<void> {
     if (phone) for (const wide of await js<string[]>(SIDEWAYS)) found.push(`scrolls sideways: ${wide}`);
     for (const gap of await js<string[]>(STEPS)) found.push(`off the steps: ${gap}`);
     if (!route.startsWith("#/welcome")) for (const words of await js<string[]>(BARE)) found.push(`written outside a card: “${words}”`);
+    for (const key of await js<string[]>(KEYS)) found.push(`a string shown as its key: ${key}`);
+    for (const line of new Set(forbidden)) found.push(`asked for what is not theirs (403): ${line}`);
     if (shotsAt) {
       mkdirSync(shotsAt, { recursive: true });
       const picture = await send("Page.captureScreenshot", { format: "png" });
@@ -332,10 +362,43 @@ await send("Page.reload");
 await until("the page after a reload", () => js<boolean>(DRAWN));
 await walk("phone", true);
 
+// in Ukrainian: every string there, none shown as its key, nothing longer than the page
+await width(1440, 900, false);
+await js(`localStorage.setItem("hata.lang", "uk")`);
+await send("Page.reload");
+await until("the page after a reload", () => js<boolean>(DRAWN));
+underWay.clear();
+await walk("uk   ", false);
+await width(390, 844, true);
+await send("Page.reload");
+await until("the page after a reload", () => js<boolean>(DRAWN));
+underWay.clear();
+await walk("ukph ", true);
+await js(`localStorage.removeItem("hata.lang")`);
+
+// a member: the pages of the administrators send them away or say so, and nothing asks for what is not theirs
+await width(1440, 900, false);
+const MEMBER = { name: "smoke-member", password: "smoke member 1" };
+const madeMember = await js<string>(`fetch("/api/users", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(${JSON.stringify({ ...MEMBER, role: "member" })}) }).then((r) => r.ok ? "" : r.status + " " + r.statusText)`);
+if (madeMember) giveUp(`Could not make a member: ${madeMember}`);
+await js(`fetch("/api/logout", { method: "POST" })`);
+await send("Page.navigate", { url: base });
+await until("the sign-in form", () => js<boolean>(`!!document.querySelector("form [name=password]")`));
+await js(`document.querySelector("form [name=name]").focus()`);
+await send("Input.insertText", { text: MEMBER.name });
+await js(`document.querySelector("form [name=password]").focus()`);
+await send("Input.insertText", { text: MEMBER.password });
+await js(`document.querySelector("form").requestSubmit()`);
+await until("the page after a member signed in", () => js<boolean>(`!document.querySelector("form [name=password]") && !!document.querySelector("#view")`));
+underWay.clear();
+watchForbidden = true;
+await walk("member", false);
+watchForbidden = false;
+
 cleanUp();
 if (failures.length) {
   console.error(`\n${failures.length} problem${failures.length === 1 ? "" : "s"} on ${ROUTES.length} pages.`);
   process.exit(1);
 }
-console.log(`\n${ROUTES.length} pages — the base alone, every module on, and at a phone's width: nothing wrong.`);
+console.log(`\n${ROUTES.length} pages — the base alone, every module on, a phone's width, in Ukrainian, and as a member: nothing wrong.`);
 process.exit(0);
