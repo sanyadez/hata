@@ -4106,6 +4106,7 @@ function loadPlace(p, label) {
       h("h2", { class: "clip" }, label),
       h("span", { class: "muted small grow" }, t("load.cores", { n: p.cores })),
       h("span", { class: "small" }, t("load.total", { cpu: p.cpu ?? "—", used: bytes(p.memory.used), total: bytes(p.memory.total), percent: memPercent })),
+      p.power && p.power.total !== null && button(t("power.draw", { watts: p.power.total }), { class: "small ghost", title: t("power.drawTitle"), onclick: () => drawDialog(p) }, "power"),
     ),
     old && h("p", { class: "muted small pad-x" }, t("load.stale", { time: ago(p.at) })),
     !rows.length
@@ -4121,6 +4122,21 @@ function loadPlace(p, label) {
           ),
         ),
     rows.length > LOAD_SHOWN && h("div", { class: "pad-x pad-b" }, button(all ? t("load.fewer") : t("load.more", { n: rows.length - LOAD_SHOWN }), { class: "small ghost", onclick: () => (all ? loadUi.all.delete(p.id) : loadUi.all.add(p.id), paintLoad()) })),
+  );
+}
+
+/** What the processor draws, over the hour: the kernel's counters, not the wall socket */
+function drawDialog(place) {
+  const p = place.power;
+  let dialog;
+  const now = Date.now();
+  const points = p.hour.map((w, i) => ({ t: now - (60 - i) * 60_000, w }));
+  dialog = openDialog(
+    "wide",
+    h("header", null, h("div", { class: "grow" }, h("h2", null, t("power.drawTitle")), h("p", { class: "muted small" }, t("power.drawLead"))), closeX(() => dialog)),
+    h("div", { class: "kv-list" }, p.zones.map((z) => h("div", { class: "kv" + (z.top ? "" : " sub") }, h("span", null, has("power.zone." + z.name.replace(/-\d+$/, "")) ? t("power.zone." + z.name.replace(/-\d+$/, ""), { n: z.name.replace(/^\D+-?/, "") }) : z.name), h("strong", null, z.watts === null ? "—" : t("power.draw", { watts: z.watts }))))),
+    p.hour.some((w) => w !== null) ? lineChart(points, [{ cls: "s2", label: t("power.drawTitle"), value: (x) => x.w }], { max: null, fmt: (v) => t("power.draw", { watts: Math.round(v * 10) / 10 }), label: t("power.drawTitle"), height: 140 }) : h("p", { class: "muted small" }, t("load.soonRow")),
+    h("footer", null, closeButton(() => dialog)),
   );
 }
 
@@ -13869,7 +13885,7 @@ async function loadSettings() {
     if (isAdmin() && showsSection("network")) state.network = await api("GET", "/api/network").catch(() => null);
     if (isAdmin() && showsSection("remote") && hasModule("remote")) [state.remote, state.wireguard] = await Promise.all([api("GET", "/api/tailscale").catch(() => null), api("GET", "/api/wireguard").catch(() => null)]);
     if (isAdmin() && showsSection("bluetooth") && hasModule("bluetooth")) state.bluetooth = await api("GET", "/api/bluetooth").catch((e) => ({ error: errorText(e) }));
-    if (isAdmin() && showsSection("schedule")) state.schedule = await api("GET", "/api/schedule").catch((e) => ({ error: errorText(e) }));
+    if (isAdmin() && showsSection("schedule")) [state.schedule, state.power] = await Promise.all([api("GET", "/api/schedule").catch((e) => ({ error: errorText(e) })), api("GET", "/api/power").catch(() => null)]);
     if (isAdmin() && showsSection("tools")) [state.tools, sysUpdates[""]] = await Promise.all([api("GET", "/api/tools").catch(() => null), api("GET", "/api/system/updates").catch((e) => ({ error: errorText(e) }))]);
     // counting the volumes takes a while: the page is shown first
     if (isAdmin() && showsSection("docker")) void loadSpace();
@@ -15121,6 +15137,60 @@ async function moveScheduled(id, time) {
   renderSettings();
 }
 
+const WEEKDAYS = [1, 2, 3, 4, 5, 6, 0];
+const weekdayName = (n) => new Date(2026, 10, 15 + n).toLocaleDateString(state.lang, { weekday: "short" });
+
+/** Settings → Schedule: the server shut down at night and woken by its clock */
+function powerCard() {
+  const p = state.power;
+  if (!p) return null;
+  const s = p.schedule;
+  const can = p.can === "ok";
+  const on = h("input", { type: "checkbox", checked: s.on, disabled: !can && !s.on });
+  const off = h("input", { type: "time", value: s.off, class: "short", "aria-label": t("power.off") });
+  const wake = h("input", { type: "time", value: s.wake, class: "short", "aria-label": t("power.wake") });
+  const days = WEEKDAYS.map((n) => h("label", { class: "day-tick" }, h("input", { type: "checkbox", value: n, checked: s.days.includes(n) }), weekdayName(n)));
+  const error = h("p", { class: "error", role: "alert" });
+  const save = button(t("settings.save"), {
+    class: "primary small",
+    onclick: async () => {
+      error.textContent = "";
+      try {
+        state.power = { ...state.power, ...(await api("PUT", "/api/power/schedule", { on: on.checked, off: off.value, wake: wake.value, days: days.map((d) => d.firstChild).filter((x) => x.checked).map((x) => Number(x.value)) })) };
+        state.schedule = await api("GET", "/api/schedule").catch(() => state.schedule);
+        toast(t("power.saved"));
+        renderSettings();
+      } catch (e) {
+        error.textContent = errorText(e);
+      }
+    },
+  });
+  const when = (ms) => new Date(ms).toLocaleString(state.lang, { weekday: "short", hour: "2-digit", minute: "2-digit" });
+  const test = () =>
+    confirmAction({
+      title: t("power.test.title"),
+      lead: t("power.test.lead"),
+      label: t("power.test.go"),
+      iconName: "power",
+      run: async () => {
+        await api("POST", "/api/power/try", { minutes: 3 });
+        toast(t("power.test.gone"));
+      },
+    });
+  return uiCard(
+    { title: t("power.night.title"), lead: t("power.lead") },
+    !can && h("p", { class: "banner warn small" }, t("power.cannot." + p.can)),
+    h("label", { class: "with-icon" }, on, h("span", null, t("power.on"))),
+    h("div", { class: "power-times" }, field(t("power.off"), off), field(t("power.wake"), wake)),
+    h("div", { class: "power-days" }, days),
+    p.next && h("p", { class: "small" }, t("power.next", { off: when(p.next.off), wake: when(p.next.wake) })),
+    p.waiting && h("p", { class: "banner small" }, t("power.waiting", { what: has("power.what." + p.waiting.what) ? t("power.what." + p.waiting.what) : p.waiting.what })),
+    h("p", { class: "muted small" }, t("power.hint")),
+    error,
+    h("div", { class: "row-actions" }, save, can && button(t("power.test.button"), { class: "small", onclick: test }, "power")),
+  );
+}
+
 /** Settings → Schedule: one list of what Hata starts by itself, and when */
 function scheduleSection() {
   const data = state.schedule;
@@ -15129,6 +15199,7 @@ function scheduleSection() {
   const byId = new Map(data.timed.map((one) => [one.id, one]));
   const row = (one) => {
     const mine = data.clashes.filter((c) => c.id === one.id);
+    const own = one.kind !== "power";
     const input = h("input", { type: "time", value: one.time, class: "short", "aria-label": t("schedule.time"), required: true });
     const save = button(t("settings.save"), { class: "small", hidden: true, onclick: () => input.value && moveScheduled(one.id, input.value) });
     input.addEventListener("input", () => (save.hidden = !input.value || input.value === one.time));
@@ -15151,11 +15222,12 @@ function scheduleSection() {
             "div",
             { class: "banner warn small schedule-clash" },
             h("span", { class: "grow" }, t(c.minutes === 0 ? "schedule.clashSame" : "schedule.clash", { other: scheduleName(byId.get(c.with)), time: byId.get(c.with).time, minutes: c.minutes }), " ", t(one.kind === "update" || byId.get(c.with).kind === "update" ? "schedule.why.update" : "schedule.why." + (one.touches.includes("disks") && byId.get(c.with).touches.includes("disks") ? "disks" : "apps"))),
-            one.free && button(t("schedule.moveTo", { time: one.free }), { class: "small", onclick: () => moveScheduled(one.id, one.free) }),
+            own && one.free && button(t("schedule.moveTo", { time: one.free }), { class: "small", onclick: () => moveScheduled(one.id, one.free) }),
           ),
         ),
+        one.skipped && h("div", { class: "banner warn small schedule-clash" }, h("span", { class: "grow" }, t("schedule.whileOff", { off: state.power?.schedule.off ?? "", wake: state.power?.schedule.wake ?? "" }))),
       ),
-      h("div", { class: "setting-control schedule-time" }, input, save, h("a", { class: "btn small ghost", href: one.href }, t("schedule.open"))),
+      own ? h("div", { class: "setting-control schedule-time" }, input, save, h("a", { class: "btn small ghost", href: one.href }, t("schedule.open"))) : h("div", { class: "setting-control schedule-time" }, h("strong", null, one.time)),
     );
   };
   const repeating = (one) =>
@@ -15166,6 +15238,7 @@ function scheduleSection() {
       h("div", { class: "setting-control" }, h("a", { class: "btn small ghost", href: one.href }, t("schedule.open"))),
     );
   return [
+    powerCard(),
     uiCard(
       { title: t("schedule.timedTitle"), lead: t("schedule.timedLead", { zone: data.timezone }), marks: data.clashes.length > 0 && h("span", { class: "chip warn" }, t("schedule.clashes", { n: data.clashes.length })) },
       h("div", { class: "schedule-list" }, data.timed.map(row)),
@@ -15176,6 +15249,8 @@ function scheduleSection() {
 
 /** The steps an update goes through as the page sees them; going back skips the download */
 const UPDATE_STEPS = ["download", "verify", "restart", "start"];
+/** The waits of a hard disk before it stops spinning, minutes: as `SLEEP_MINUTES` in power.ts */
+const SLEEP_MINUTES = [0, 10, 20, 30, 60, 120, 240];
 let updateFollow = null;
 
 /**
@@ -18814,6 +18889,34 @@ function diskDialog(name) {
   const body = h("div", { class: "stack" });
   const error = h("p", { class: "error", role: "alert" });
   let dialog;
+  // a hard disk may stop spinning when idle: its wait and whether it spins now
+  const sleepBox = h("div", { class: "disk-sleep stack-s" });
+  const paintSleep = (disk, report) => {
+    const mine = report?.disks?.[disk.serial];
+    if (!report) return put(sleepBox, h("h3", null, t("power.sleep.title")), waitMark());
+    if (!report.tool) return put(sleepBox, h("h3", null, t("power.sleep.title")), h("p", { class: "muted small" }, t("power.sleep.lead")), packageCard({ package: "hdparm", install: report.install }, () => loadSleep(disk)));
+    const select = h("select", { "aria-label": t("power.sleep.title"), onchange: async () => {
+      select.disabled = true;
+      try {
+        paintSleep(disk, (await api("PUT", "/api/power/sleep", { serial: disk.serial, minutes: Number(select.value) })).sleep);
+        toast(t("power.sleep.saved"));
+      } catch (e) {
+        toast(errorText(e), "error");
+        select.disabled = false;
+      }
+    } }, SLEEP_MINUTES.map((n) => h("option", { value: n, selected: n === (mine?.minutes ?? 0) }, n ? t("power.sleep.after", { time: n >= 60 ? t("time.hours", { n: n / 60 }) : t("time.minutes", { n }) }) : t("power.sleep.never"))));
+    put(
+      sleepBox,
+      h("h3", null, t("power.sleep.title")),
+      h("p", { class: "muted small" }, t("power.sleep.lead")),
+      h("div", { class: "kv" }, h("div", null, t("power.sleep.wait"), mine?.state && h("div", { class: "muted small" }, t("power.sleep.now." + mine.state))), select),
+      mine?.error && h("p", { class: "error small" }, t("power.sleep.failed", { message: mine.error })),
+    );
+  };
+  const loadSleep = async (disk) => {
+    paintSleep(disk, null);
+    paintSleep(disk, (await api("GET", "/api/power").catch(() => null))?.sleep ?? { tool: true, disks: {} });
+  };
   const test = (type) => async (e) => {
     error.textContent = "";
     e.currentTarget.disabled = true;
@@ -18860,6 +18963,7 @@ function diskDialog(name) {
           value(t("disks.value.lastTest"), last ? t("disks.value.testWhen", { type: has("disks.test." + last.type) ? t("disks.test." + last.type) : last.type, hours: Math.max(0, (s.powerOnHours ?? 0) - (last.hours ?? 0)) }) : "", last ? t(last.passed ? "disks.value.testPassed" : "disks.value.testFailed") : t("disks.value.testNever"), last && !last.passed),
         ),
       s && h("p", { class: "muted small" }, t("disks.test.hint")),
+      disk.rotational && disk.serial && sleepBox,
       error,
       s && h("footer", null, h("span", { class: "muted small" }, disk.checkedAt ? t("disks.checked", { when: ago(disk.checkedAt) }) : ""), button(t("disks.test.runShort"), { disabled: s.testing != null, onclick: test("short") }), button(t("disks.test.runLong"), { disabled: s.testing != null, onclick: test("long") })),
       state.disks.mounting?.possible &&
@@ -18900,6 +19004,8 @@ function diskDialog(name) {
   diskDialogPaint = paint;
   dialog.addEventListener("close", () => (diskDialogPaint = null));
   paint();
+  const disk = state.disks?.disks.find((d) => d.name === name);
+  if (disk?.rotational && disk.serial) void loadSleep(disk);
 }
 
 // --- Putting a disk to use ---------------------------------------------------------------------------

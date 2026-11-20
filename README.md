@@ -221,6 +221,12 @@ Early development. What works today:
   notification, and a disk can be told to test itself. The counters that matter are remembered: a disk's
   page says "was 0 until 14 Sep", and a counter that grows is sent as a notification again. It needs
   `smartmontools`, which Hata offers to install; nothing on a disk is changed;
+- a hard disk can be told to stop spinning after 10 minutes to 4 hours idle (in its window under
+  Disks, with `hdparm`, which Hata offers to install), and the window says whether it spins or sleeps
+  now; the server can shut down at night and switch itself on in the morning by its own clock, on the
+  days you choose — it first waits for running work, sets the alarm and checks it took, and can be tried
+  once with "off now, on in 3 minutes"; what the processor and the memory draw is on the Load page, in
+  watts, with the last hour, where the processor counts it (RAPL);
 - putting a disk to use (same page): a disk is formatted in one dialog — one partition, ext4, a folder
   under `/mnt`, a line in `/etc/fstab` that does not hold up the start when the disk is absent (Docker waits for the
   disk, and without it the apps that keep data there stay stopped instead of starting empty on the

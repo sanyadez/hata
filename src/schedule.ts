@@ -12,13 +12,14 @@ import { moduleOn } from "./moduleruns";
 import { scheduledHosts, setSchedule } from "./proxmox";
 import { packageUpdates } from "./sysupdates";
 import { arrayReport, ArrayError, setArrayTime } from "./snapraid";
-import { byClock, clashes, freeTime, nextAt, TIME_RE, type Clash, type Repeating, type Timed } from "./timetable";
+import { byClock, clashes, freeTime, nextAt, TIME_RE, whileOff, type Clash, type Repeating, type Timed } from "./timetable";
+import { canWake, powerReport } from "./powering";
 import { updateStatus } from "./update";
 
 const H = 3600_000;
 
 export interface ScheduleView {
-  timed: (Timed & { next: number | null; free: string | null })[];
+  timed: (Timed & { next: number | null; free: string | null; skipped: boolean })[];
   repeating: Repeating[];
   clashes: Clash[];
   timezone: string;
@@ -35,6 +36,8 @@ function timedNow(): Timed[] {
     const sync = arrayReport().lastSync;
     list.push({ id: "snapraid", kind: "snapraid", time: settings.snapraid.time, on: true, scrub: settings.snapraid.scrub, last: sync ? { at: sync.at, ok: sync.ok } : null, href: "#/storage/raid", touches: ["disks"] });
   }
+  // the shutdown at night ends whatever runs then, like an update of Hata
+  if (settings.power.on || canWake() === "ok") list.push({ id: "power", kind: "power", time: settings.power.off, on: settings.power.on, href: "#/settings/schedule", touches: ["hata"] });
   if (moduleOn("proxmox")) for (const h of scheduledHosts()) list.push({ id: `pve:${h.id}`, kind: "proxmox", name: h.name, time: h.schedule.time, on: h.schedule.on, last: h.last, href: `#/proxmox/${h.id}`, touches: ["elsewhere"] });
   return list;
 }
@@ -43,6 +46,7 @@ export async function scheduleView(): Promise<ScheduleView> {
   const timed = timedNow();
   const now = new Date();
   const images = await imagesStatus().catch(() => null);
+  const off = settings.power.on ? whileOff(timed, settings.power.off, settings.power.wake) : [];
   const repeating: Repeating[] = [
     { id: "hataCheck", every: 12 * H, on: true, last: updateStatus().checkedAt || null, href: "#/settings/about" },
     { id: "imagesCheck", every: 24 * H, on: settings.images.check, last: images?.at ?? null, href: "#/apps-options" },
@@ -55,9 +59,11 @@ export async function scheduleView(): Promise<ScheduleView> {
     ...(settings.https.mode === "acme" ? [{ id: "certificates", every: H / 6, on: true, href: "#/network/addresses" }] : []),
   ];
   return {
-    timed: byClock(timed).map((one) => ({ ...one, next: one.on ? nextAt(one, now) : null, free: null })).map((one, _, all) => ({ ...one, free: clashes(all).some((c) => c.id === one.id) ? freeTime(all, one.id) : null })),
+    // the shutdown keeps to its days of the week
+    timed: byClock(timed).map((one) => ({ ...one, next: !one.on ? null : one.kind === "power" ? (powerReport(now).next?.off ?? null) : nextAt(one, now), free: null, skipped: off.includes(one.id) })).map((one, _, all) => ({ ...one, free: !one.skipped && clashes(all).some((c) => c.id === one.id && c.with !== "power") ? freeTime(all, one.id) : null })),
     repeating,
-    clashes: clashes(timed),
+    // work that does not run at all because the server is off then needs no word about the shutdown before it
+    clashes: clashes(timed).filter((c) => !(off.includes(c.id) && c.with === "power")),
     timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
   };
 }
@@ -67,6 +73,7 @@ export function moveTime(id: string, time: unknown, by: string): void {
   if (typeof time !== "string" || !TIME_RE.test(time)) throw new AppError("settings.badTime");
   const entry = timedNow().find((one) => one.id === id);
   if (!entry) throw new AppError("schedule.notFound", 404);
+  if (entry.kind === "power") throw new AppError("schedule.notFound", 404);
   if (entry.kind === "proxmox") {
     const host = scheduledHosts().find((h) => `pve:${h.id}` === id)!;
     setSchedule(host.id, { ...host.schedule, time }, by);

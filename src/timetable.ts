@@ -11,7 +11,7 @@ export type Touches = "hata" | "apps" | "disks" | "elsewhere";
 export interface Timed {
   /** `backups`, `update`, `images`, `snapraid`, `pve:<id>` */
   id: string;
-  kind: "backups" | "update" | "images" | "snapraid" | "proxmox";
+  kind: "backups" | "update" | "images" | "snapraid" | "proxmox" | "power";
   /** HH:MM, local */
   time: string;
   on: boolean;
@@ -96,6 +96,16 @@ export function clashes(list: Timed[], window = WINDOW_MIN): Clash[] {
     }
   }
   return found;
+}
+
+/**
+ * The work switched on whose time falls while the server is off (from `off`, until `wake`): it does not
+ * run on those days. What runs on another server is not counted.
+ */
+export function whileOff(list: Timed[], off: string, wake: string): string[] {
+  const [from, to] = [minutesOf(off), minutesOf(wake)];
+  const length = (to - from + 1440) % 1440;
+  return list.filter((one) => one.on && one.kind !== "power" && !(one.touches.length === 1 && one.touches[0] === "elsewhere") && TIME_RE.test(one.time) && (minutesOf(one.time) - from + 1440) % 1440 < length).map((one) => one.id);
 }
 
 /** The work at chosen times in the order of the clock, from midnight; what is off goes last */

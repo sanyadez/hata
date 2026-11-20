@@ -496,6 +496,9 @@ export function setUp(input: Record<string, unknown>, user: string): void {
   void refreshDiff().then(save, () => {});
 }
 
+/** Whether SnapRAID is at work now (a sync, a check, a repair) */
+export const arrayBusy = (): boolean => current !== null;
+
 /** Only another time of the nightly run */
 export function setArrayTime(time: string, user: string): void {
   if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) throw new ArrayError("array.badTime");

@@ -152,6 +152,7 @@ import { availableUpdate, cancelUpdate, checkForUpdate, confirmUpdate, scheduleU
 import { VERSION } from "./version";
 import { zipStream } from "./zip";
 import { moveTime, scheduleView } from "./schedule";
+import { powerReport, setPowerSchedule, setSleep, sleepReport, startPower, tryWake } from "./powering";
 import { aboutLink, changeLink, dropLinksOf, entriesOf, grantCookie, inside as insideLink, linkOf, listLinks, makeLink, mayTake, opened as linkOpened, removeLink, took, unlock as unlockLink, unlocked } from "./sharelinks";
 import { GRANT_MS } from "./sharelink";
 
@@ -1319,6 +1320,14 @@ async function api(req: Request, url: URL, server: Server<unknown>): Promise<Res
   }
 
   if (path === "/api/schedule" && method === "GET") return json(await scheduleView());
+  if (path === "/api/power" && method === "GET") return json({ ...powerReport(), sleep: await sleepReport() });
+  if (path === "/api/power/schedule" && method === "PUT") return json(setPowerSchedule(await body(req), user.name));
+  if (path === "/api/power/try" && method === "POST") return json(await tryWake((await body(req)).minutes, user.name));
+  if (path === "/api/power/sleep" && method === "PUT") {
+    const asked = await body(req);
+    await setSleep(asked.serial, asked.minutes, user.name);
+    return json({ sleep: await sleepReport() });
+  }
   const scheduled = /^\/api\/schedule\/(backups|update|images|snapraid|pve:[a-f0-9]{8})$/.exec(path);
   if (scheduled && method === "PUT") {
     moveTime(scheduled[1]!, (await body(req)).time, user.name);
@@ -1780,7 +1789,7 @@ async function api(req: Request, url: URL, server: Server<unknown>): Promise<Res
   // what a disk action said it lacks, installed by the button next to the reason and the command
   if (path === "/api/disks/package" && method === "POST") {
     const name = (await body(req)).package;
-    if (typeof name !== "string" || !["ntfs-3g", "fdisk", "sfdisk", "util-linux", "e2fsprogs", "dosfstools", "exfatprogs", "mergerfs", "snapraid", "btrfs-progs", "xfsprogs"].includes(name)) return fail(400, "disk.packageFailed", { message: "not a package Hata installs" });
+    if (typeof name !== "string" || !["ntfs-3g", "fdisk", "sfdisk", "util-linux", "e2fsprogs", "dosfstools", "exfatprogs", "mergerfs", "snapraid", "btrfs-progs", "xfsprogs", "hdparm"].includes(name)) return fail(400, "disk.packageFailed", { message: "not a package Hata installs" });
     server.timeout(req, 0);
     const message = await installPackage(name);
     if (message) return fail(500, "disk.packageFailed", { message });
@@ -3504,6 +3513,7 @@ export async function serve(): Promise<void> {
   startSampler(() => settings.dataRoot);
   startLoad();
   startDisks();
+  startPower();
   startFills();
   startImages({
     apps: installedNames,

@@ -2282,3 +2282,7 @@ a.link-name { text-decoration: underline; text-decoration-color: var(--border-st
 .schedule-time input[type="time"] { width: 110px; }
 .schedule-clash { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-top: 6px; }
 .section-head h2 .chip { margin-left: 8px; vertical-align: middle; }
+.power-times { display: flex; gap: 16px; flex-wrap: wrap; }
+.power-times .field { width: 140px; }
+.power-days { display: flex; gap: 6px; flex-wrap: wrap; }
+.day-tick { display: inline-flex; gap: 6px; align-items: center; padding: 4px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); }
