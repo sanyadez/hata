@@ -3,7 +3,7 @@ import { b64url, derToRaw, newChallenge, parseAuthData, spendChallenge, verifyAs
 
 const RP = "home.example.org";
 const enc = new TextEncoder();
-const sha = async (data: Uint8Array) => new Uint8Array(await crypto.subtle.digest("SHA-256", data));
+const sha = async (data: Uint8Array) => new Uint8Array(await crypto.subtle.digest("SHA-256", data as BufferSource));
 
 /** An authenticator made of WebCrypto: builds what a browser would send back */
 async function authenticator(alg: -7 | -8 | -257) {

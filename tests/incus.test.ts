@@ -175,7 +175,7 @@ test("a disk's size: a container's limit set or taken away, a virtual machine's 
 });
 
 test("what of the containers needs attention", () => {
-  const c = (name: string, status: string, autostart = true) => ({ name, kind: "container" as const, status: status as "running", autostart });
+  const c = (name: string, status: string, autostart = true) => ({ name, kind: "container" as const, status: status as "running", autostart, place: "default" });
   const base = { installed: true, silentSince: null, stoppedByHand: [] as string[], now: 1_000_000 };
   expect(trouble({ ...base, installed: false, instances: [c("a", "stopped")] })).toEqual([]);
   expect(trouble({ ...base, instances: [c("a", "running"), c("b", "stopped", false)] })).toEqual([]);
@@ -224,7 +224,7 @@ test("Docker on Rocky Linux comes from Docker's RHEL packages: its script does n
 
 test("a container whose place is gone waits for its disk instead of being said to be down", () => {
   const base = { installed: true, silentSince: null, stoppedByHand: [], now: 0 };
-  const instances = [{ name: "c1", kind: "container" as const, status: "stopped", autostart: true, place: "big" }];
+  const instances = [{ name: "c1", kind: "container" as const, status: "stopped" as const, autostart: true, place: "big" }];
   expect(trouble({ ...base, instances, placesAway: [{ name: "big", path: "/mnt/big/incus" }] })).toEqual([{ id: "incus:c1", severity: "warn", code: "containers.placeAway", detail: { name: "c1", kind: "container", place: "big", path: "/mnt/big/incus" } }]);
   expect(trouble({ ...base, instances, placesAway: [] })[0]!.code).toBe("containers.down");
 });

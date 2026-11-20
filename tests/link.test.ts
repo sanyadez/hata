@@ -93,11 +93,11 @@ describe("mux", () => {
       },
     });
     expect(await hata.call("add", { a: 2, b: 3 })).toBe(5);
-    const e = await hata.call("fail").catch((e) => e);
+    const e = await hata.call<never>("fail").catch((e: MuxError) => e);
     expect(e).toBeInstanceOf(MuxError);
     expect([e.code, e.message, e.detail.path]).toEqual(["files.notFound", "gone", "/x"]);
-    expect((await hata.call("crash").catch((e) => e)).code).toBe("request.failed");
-    expect((await hata.call("nothing").catch((e) => e)).code).toBe("machine.unknownOperation");
+    expect((await hata.call<never>("crash").catch((e: MuxError) => e)).code).toBe("request.failed");
+    expect((await hata.call<never>("nothing").catch((e: MuxError) => e)).code).toBe("machine.unknownOperation");
   });
 
   test("a stream carries bytes both ways and controls", async () => {
@@ -171,7 +171,7 @@ describe("mux", () => {
     const pending = hata.call("wait");
     hata.close();
     client.close();
-    expect((await pending.catch((e) => e)).code).toBe("link.lost");
+    expect((await (pending as Promise<never>).catch((e: MuxError) => e)).code).toBe("link.lost");
     expect(() => hata.open("wait")).toThrow();
   });
 

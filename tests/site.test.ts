@@ -4,12 +4,12 @@ import { appHost, appLabel, classifyHost, cookieDomain, domainOf, localDomain, r
 
 const req = (headers: Record<string, string> = {}) => new Request("http://10.0.0.5/", { headers });
 afterAll(() => {
-  settings.https = { mode: "off", domain: "", email: "" };
+  settings.https = { mode: "off", domain: "", email: "", wildcard: "off" };
   settings.local = { enabled: true, name: "hata.local" };
 });
 
 test("without a domain everything is Hata and cookies are host-only", () => {
-  settings.https = { mode: "off", domain: "home.example.com", email: "" };
+  settings.https = { mode: "off", domain: "home.example.com", email: "", wildcard: "off" };
   expect(siteDomain()).toBe("");
   expect(classifyHost("memos.home.example.com")).toEqual({ kind: "hata" });
   expect(cookieDomain("home.example.com")).toBeUndefined();
@@ -18,7 +18,7 @@ test("without a domain everything is Hata and cookies are host-only", () => {
 });
 
 test("with a domain, one label under it is an app", () => {
-  settings.https = { mode: "proxy", domain: "home.example.com", email: "" };
+  settings.https = { mode: "proxy", domain: "home.example.com", email: "", wildcard: "off" };
   expect(classifyHost("home.example.com")).toEqual({ kind: "hata" });
   expect(classifyHost("memos.home.example.com")).toEqual({ kind: "app", label: "memos" });
   expect(classifyHost("a.b.home.example.com")).toEqual({ kind: "hata" });
@@ -36,7 +36,7 @@ test("with a domain, one label under it is an app", () => {
 });
 
 test("the name on the home network is a domain too, next to the one that is set", () => {
-  settings.https = { mode: "acme", domain: "home.example.com", email: "" };
+  settings.https = { mode: "acme", domain: "home.example.com", email: "", wildcard: "off" };
   settings.local = { enabled: true, name: "attic.local" };
   expect(localDomain()).toBe("attic.local");
   expect(classifyHost("attic.local")).toEqual({ kind: "hata" });
