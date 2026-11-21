@@ -1719,7 +1719,10 @@ dialog.add-dialog:not([open]) { display: none; }
 .pg-se::after { bottom: 4px; right: 4px; border-width: 0 3px 3px 0; border-bottom-right-radius: var(--radius-lg); }
 .pg-nw::after { top: 4px; left: 4px; border-width: 3px 0 0 3px; border-top-left-radius: var(--radius-lg); }
 .pg-card.pg-moving { z-index: 3; outline: 2px solid var(--accent); outline-offset: 1px; border-radius: var(--radius-lg); cursor: grabbing; }
-.pg-cell { border: 1px dashed var(--border-strong); border-radius: var(--radius-lg); opacity: 0.6; z-index: 0; }
+.pg-cell { display: grid; place-items: center; padding: 0; border: 1px dashed var(--border-strong); border-radius: var(--radius-lg); background: transparent; color: var(--accent); opacity: 0.6; z-index: 0; cursor: pointer; font: inherit; }
+.pg-cell .ico { width: 20px; height: 20px; opacity: 0; transition: opacity 0.15s; }
+.pg-cell:hover, .pg-cell:focus-visible { opacity: 1; border-color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.pg-cell:hover .ico, .pg-cell:focus-visible .ico { opacity: 1; }
 .pg-hint { position: absolute; right: 18px; bottom: 10px; z-index: 2; padding: 4px 10px; border-radius: var(--radius-sm); background: var(--text); color: var(--surface); font: 500 12px var(--font-mono); white-space: nowrap; }
 .pg-bar { position: sticky; top: 64px; z-index: 4; display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 12px; padding: 10px 14px; border: 1px solid var(--accent); border-radius: var(--radius-md); background: var(--surface); }
 

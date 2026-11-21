@@ -4935,6 +4935,7 @@
   "grid.done": "Done",
   "grid.reset": "Reset the layout…",
   "grid.hint": "{size} · from {min} to {max}",
+  "grid.addHere": "Add here",
   "integrations.add": "Add",
   "integrations.addWhat": "What to connect",
   "integrations.foundLead": "Services Hata found here and on the home network. Connect the ones you use.",

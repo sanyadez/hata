@@ -4935,6 +4935,7 @@
   "grid.done": "Готово",
   "grid.reset": "Скинути розташування…",
   "grid.hint": "{size} · від {min} до {max}",
+  "grid.addHere": "Додати сюди",
   "integrations.add": "Додати",
   "integrations.addWhat": "Що під'єднати",
   "integrations.foundLead": "Сервіси, які Hata знайшла тут і в домашній мережі. Під'єднайте ті, якими користуєтесь.",
