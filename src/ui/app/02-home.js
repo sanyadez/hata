@@ -813,7 +813,7 @@ function gridBar() {
   box.hidden = !gridUi.arranging;
   const head = document.getElementById("home-head");
   if (head) head.hidden = gridUi.arranging;
-  put(box, gridUi.arranging && h("div", { class: "pg-bar" }, h("strong", null, t("grid.arranging")), h("span", { class: "muted small grow" }, t("grid.arrangingHint")), h("div", { class: "pg-tools" }, tool(t("grid.undo"), "undo", undo, !gridUi.undo.length), tool(t("menu.dashboardConfig"), "code", gridYaml), tool(t("grid.reset"), "refresh", gridReset, false, "danger")), button(t("common.cancel"), { class: "small", onclick: gridCancel }), button(t("grid.done"), { class: "small primary", onclick: gridDone }, "check")));
+  put(box, gridUi.arranging && h("div", { class: "pg-bar" }, h("strong", null, t("grid.arranging")), h("span", { class: "grow" }), h("div", { class: "pg-tools" }, tool(t("grid.undo"), "undo", undo, !gridUi.undo.length), tool(t("menu.dashboardConfig"), "code", gridYaml), tool(t("grid.reset"), "refresh", gridReset, false, "danger")), button(t("common.cancel"), { class: "small", onclick: gridCancel }), button(t("grid.done"), { class: "small primary", onclick: gridDone }, "check")));
   // the button stays the same element across redraws: one under the pointer keeps its click
   const slot = document.getElementById("grid-edit-slot");
   const offer = mayArrange();

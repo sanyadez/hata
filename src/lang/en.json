@@ -4929,7 +4929,6 @@
   "integrations.available": "Found on this server and the network",
   "integrations.connect": "Connect…",
   "grid.edit": "Arrange Home",
-  "grid.arrangingHint": "Drag a card to move it, a corner or an edge to resize it; × takes it off Home. Nothing changes until “Done”.",
   "grid.arranging": "Arranging Home",
   "grid.undo": "Undo",
   "grid.done": "Done",
