@@ -472,11 +472,27 @@ export async function screenShot(big = false): Promise<Uint8Array> {
 
 /** One script run in the page that sends the screen to watchers, over a connection of its own; null — it did not answer */
 async function inCastPage(expression: string): Promise<string | null> {
+  // the page as this build writes it: a browser started by an older build has an older one open, which is closed and made anew
+  let fresh = false;
+  try {
+    fresh = readFileSync(TV_CAST_PAGE, "utf8") !== castHtml();
+  } catch {
+    fresh = true;
+  }
+  if (fresh) {
+    writeFileSync(TV_CAST_PAGE, castHtml());
+    await run(["chown", `${TV_USER}:${TV_USER}`, TV_CAST_PAGE], 10_000);
+  }
   let all: Target[] = [];
   try {
     all = (await (await fetch(`http://127.0.0.1:${TV_BROWSER_PORT}/json`, { signal: AbortSignal.timeout(2000) })).json()) as Target[];
   } catch {}
   let found = all.find((one) => one.type === "page" && one.url.endsWith("/cast.html"));
+  if (found && fresh) {
+    await ask({ method: "Target.closeTarget", params: { targetId: (found as Target & { id: string }).id } });
+    await Bun.sleep(300);
+    found = undefined;
+  }
   if (!found) {
     // made in the background: the tab on the screen stays the one shown
     if (!(await ask({ method: "Target.createTarget", params: { url: "file://" + TV_CAST_PAGE, background: true } }))) return null;

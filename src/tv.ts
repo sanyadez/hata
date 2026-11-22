@@ -604,12 +604,21 @@ const tidy = () => {
 window.hataCast = async (offer) => {
   try {
     if (!stream || !stream.getVideoTracks().some((track) => track.readyState === "live")) {
-      stream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30, width: { max: 1280 }, height: { max: 720 } }, audio: true });
+      stream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 }, audio: true });
+      // sent smaller than it is captured: a capture asked for at a smaller size makes the browser lay the page itself out at that size on the screen
+      window.scaleDown = Math.max(1, (stream.getVideoTracks()[0].getSettings().width || 1280) / 1280);
     }
     const pc = new RTCPeerConnection();
     peers.add(pc);
     pc.onconnectionstatechange = tidy;
-    for (const track of stream.getTracks()) pc.addTrack(track, stream);
+    for (const track of stream.getTracks()) {
+      const sender = pc.addTrack(track, stream);
+      if (track.kind === "video") {
+        const params = sender.getParameters();
+        params.encodings = [{ ...(params.encodings && params.encodings[0]), scaleResolutionDownBy: window.scaleDown || 1, maxBitrate: 3500000 }];
+        try { await sender.setParameters(params); } catch {}
+      }
+    }
     await pc.setRemoteDescription({ type: "offer", sdp: offer });
     await pc.setLocalDescription(await pc.createAnswer());
     await new Promise((done) => {
