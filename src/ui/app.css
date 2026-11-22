@@ -2348,3 +2348,82 @@ dialog.framed footer .btn:disabled { opacity: 1; background: var(--surface-2); c
 /* a window that draws its steps inside one block keeps its foot there: it still stays in sight */
 dialog.framed .dlg-body footer { position: sticky; bottom: -20px; margin: 0 -20px -20px; background: var(--surface); z-index: 1; }
 @media (max-width: 639px) { dialog.framed .dlg-body footer { bottom: -16px; margin: 0 -16px -16px; } }
+
+/* --- TV: one composition for every mode ------------------------------------------------------------
+   A row that says who has the screen, a large card on the left whose content alone changes with the
+   mode, and on the right the bookmarks, the screen and what is set once. */
+.tvx { display: grid; gap: 16px; }
+.tv-switch { display: flex; gap: 16px; align-items: center; justify-content: space-between; flex-wrap: wrap; position: relative; overflow: hidden; }
+.tv-switch-words { display: grid; gap: 6px; min-width: 0; flex: 1 1 280px; }
+.tv-switch .seg-pill { display: inline-flex; align-items: center; gap: 6px; }
+.tv-switch .seg-pill .ico { width: 15px; height: 15px; }
+.tv-switch .seg-pill.going { outline: 1.5px solid var(--accent); }
+.tv-switching .tv-switch::after { content: ""; position: absolute; left: 0; bottom: 0; height: 2px; width: 40%; background: var(--accent); animation: tv-going 1.4s ease-in-out infinite; }
+@keyframes tv-going { from { transform: translateX(-100%); } to { transform: translateX(250%); } }
+.tv-switching .tvx-left > * { opacity: 0.45; pointer-events: none; }
+.tvx-main { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 400px); gap: 16px; align-items: start; }
+.tvx-left { display: flex; flex-direction: column; gap: 14px; min-height: 742px; }
+.tvx-left > .tv-preview { flex: none; }
+.tvx-left > .tv-left-foot { margin-top: auto; }
+.tv-left-foot { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.tv-left-foot .to-right { margin-left: auto; }
+.tv-now-line { display: flex; gap: 10px; align-items: center; min-width: 0; }
+.tv-now-line strong { font: 600 17px var(--font-head, var(--font-body)); min-width: 0; }
+.tv-media { display: flex; gap: 10px; align-items: center; --main: 56px; }
+.tv-media .tvr-main { width: 56px; height: 56px; flex: none; }
+.tv-media-pos { flex: 1; min-width: 80px; display: grid; gap: 2px; }
+.tv-media-vol { width: 110px; flex: none; }
+.tv-kodi { background: var(--surface-2); border-radius: var(--radius-md); padding: 20px; display: grid; justify-items: center; flex: 1; align-content: center; }
+.tv-kodi > .tvr { width: min(100%, 460px); }
+.tv-still { aspect-ratio: 16 / 7; border-radius: 10px; background: #0b0a09; color: #7d746b; display: grid; place-content: center; justify-items: center; gap: 10px; font: 13px var(--font-mono, monospace); }
+.tv-still .ico { width: 34px; height: 34px; }
+.tv-left-note { display: grid; gap: 12px; justify-items: center; text-align: center; margin: auto; max-width: 620px; }
+.tv-marks { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+.tv-mark-tile { position: relative; display: flex; align-items: center; gap: 8px; border: 1px solid var(--border); border-radius: 12px; background: var(--surface); min-width: 0; }
+.tv-mark-tile.on { border-color: var(--ok, #2f9a67); box-shadow: 0 0 0 1px var(--ok, #2f9a67); }
+.tv-mark-main { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; padding: 9px 10px; background: none; border: 0; color: inherit; font: inherit; text-align: left; cursor: pointer; border-radius: 12px; }
+.tv-mark-main:hover { background: var(--surface-2); }
+.tv-mark-icon { display: grid; place-items: center; width: 34px; height: 34px; flex: none; border-radius: 9px; color: #fff; font: 700 15px var(--font-body); }
+.tv-mark-words { display: grid; min-width: 0; line-height: 1.25; }
+.tv-mark-words strong { font-size: 13.5px; }
+.tv-mark-words .mono { font-size: 11px; }
+.tv-mark-more { position: absolute; right: 4px; top: 50%; translate: 0 -50%; opacity: 0; background: var(--surface); }
+.tv-mark-tile:hover .tv-mark-more, .tv-mark-more:focus-visible { opacity: 1; }
+@media (hover: none) { .tv-mark-more { opacity: 1; } .tv-mark-main { padding-right: 36px; } }
+.tv-mark-tile.editing { padding: 9px 6px 9px 10px; flex-wrap: wrap; }
+.tv-mark-tools { display: flex; margin-left: auto; }
+.tv-mark-tile.add { justify-content: center; gap: 8px; min-height: 54px; border-style: dashed; color: inherit; font: 600 13.5px var(--font-body); cursor: pointer; }
+.tv-mark-tile.add:hover { background: var(--surface-2); }
+.tv-mark-tile.add .ico { width: 16px; height: 16px; color: var(--accent-text); }
+.tv-folds { padding: 0; overflow: hidden; }
+.tv-folds > .pad-head { padding: 16px 20px 12px; }
+.tv-fold { border-top: 1px solid var(--border); }
+.tv-folds > .tv-fold:first-child { border-top: 0; }
+.tv-fold > summary { display: flex; align-items: center; gap: 12px; padding: 12px 20px; cursor: pointer; list-style: none; }
+.tv-fold > summary::-webkit-details-marker { display: none; }
+.tv-fold > summary > .ico { width: 17px; height: 17px; flex: none; color: var(--muted); }
+.tv-fold[open] > summary { background: var(--surface-2); }
+.tv-fold[open] > summary > .ico:first-child { color: var(--accent-text); }
+.tv-fold-words { display: grid; min-width: 0; flex: 1; line-height: 1.3; }
+.tv-fold-words strong { font-size: 14px; }
+.tv-fold-turn { transform: rotate(90deg); transition: transform 0.15s; }
+.tv-fold[open] .tv-fold-turn { transform: rotate(-90deg); }
+.tv-fold-body { padding: 14px 20px 18px; }
+@media (max-width: 1100px) {
+  .tvx-main { grid-template-columns: minmax(0, 1fr); }
+  .tvx-left { min-height: 0; }
+  .tv-marks { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 640px) {
+  .tv-switch .seg-pills { width: 100%; }
+  .tv-switch .seg-pill { flex: 1; justify-content: center; padding-inline: 6px; }
+  .tv-media { flex-wrap: wrap; justify-content: center; }
+  .tv-media-pos { order: -1; flex: 1 1 100%; }
+  .tv-media-vol { flex: 1; }
+  .tv-marks { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .tv-left-foot .to-right { margin-left: 0; flex: 1 1 100%; justify-content: center; }
+}
+.tv-switch > .seg-pills { flex: none; width: auto; }
+.tv-media > .tv-media-vol { width: 110px; flex: 0 0 110px; }
+.tv-media > .tv-media-pos { flex: 1 1 200px; }
+@media (max-width: 640px) { .tv-switch > .seg-pills { width: 100%; } .tv-media > .tv-media-vol { flex: 1 1 110px; } }

@@ -5,7 +5,7 @@
 
 /** What the player plays, by the file's name: the same list the server goes by */
 const TV_PLAYS_RE = /\.(mkv|mp4|m4v|avi|mov|webm|ts|m2ts|mpg|mpeg|wmv|flv|ogv|3gp|iso|mp3|flac|m4a|ogg|opus|wav|aac|wma|jpe?g|png|gif|webp|bmp|heic)$/i;
-const tvUi = { timer: 0, busy: false, tick: 0 };
+const tvUi = { timer: 0, busy: false, tick: 0, fold: "", editMarks: false };
 
 /** What plays on the server's screen, in the head of every page: pause from anywhere, a click leads to the remote */
 function paintTvNow() {
@@ -723,7 +723,8 @@ function tvWorking(text) {
   if (!line) return;
   line.hidden = false;
   line.replaceChildren(h("span", { class: "wait-ring" }), h("span", null, text));
-  for (const el of document.querySelectorAll("#tv-body .seg-pill, #tv-body .tv-address button, #tv-body .tv-leave")) el.disabled = true;
+  document.getElementById("tv-body")?.classList.add("tv-switching");
+  for (const el of document.querySelectorAll("#tv-body .seg-pill, #tv-body .tv-address button, #tv-body .tv-leave, #tv-body .tvx-left button")) el.disabled = true;
 }
 
 /**
@@ -968,10 +969,75 @@ function tvDropdown(at) {
   void load();
 }
 
+/** A site's tile has the first letter of its name on one of a few colours, the same every time for the same site */
+const TV_MARK_TINTS = ["#3b74c9", "#c9463b", "#2f9a67", "#b88a14", "#7a5bc0", "#c0672b"];
+function tvMarkIcon(mark) {
+  let sum = 0;
+  for (const ch of mark.url.replace(/^https?:\/\/(www\.)?/, "").split("/")[0]) sum += ch.charCodeAt(0);
+  const el = h("span", { class: "tv-mark-icon", "aria-hidden": "true" }, (mark.name.trim()[0] ?? "?").toUpperCase());
+  el.style.background = TV_MARK_TINTS[sum % TV_MARK_TINTS.length];
+  return el;
+}
+const tvHost = (url) => url.replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, "").split("/")[0];
+
+/**
+ * The bookmarks of the screen as tiles, in every mode: a press shows the site on the TV (the screen
+ * goes to the browser), the rest is under "⋯"; "Change" turns the tiles into ones that are moved and removed.
+ */
+function tvMarksCard(tv, keep) {
+  const b = tv.browser;
+  const marks = b.bookmarks ?? [];
+  const editing = !!tvUi.editMarks && marks.length > 0;
+  const add = () => tvMarkDialog(marks, -1, b.url && !marks.some((one) => one.url === b.url) ? { name: b.title || "", url: b.url } : {}, keep);
+  const menu = (one, i, at) =>
+    menuAt(at, menuHeader(one.name, tvHost(one.url)), [
+      { label: t("home.linkOnTv"), icon: "tv", run: () => void showOnTv(one.url) },
+      { label: t("home.linkNewTab"), icon: "external", href: one.url, newTab: true },
+      { label: t("tv.marks.toHome"), icon: "home", run: () => void tvMarkToHome(one) },
+      { label: t("tv.marks.edit"), icon: "edit", run: () => tvMarkDialog(marks, i, one, keep) },
+      { label: t("tv.marks.copy"), icon: "copy", run: () => copyQuietly(one.url) },
+      { label: t("tv.folderRemove"), icon: "trash", danger: true, run: () => keep(marks.filter((x) => x.url !== one.url)) },
+    ]);
+  const moved = (i, by) => {
+    const list = [...marks];
+    const [one] = list.splice(i, 1);
+    list.splice(i + by, 0, one);
+    keep(list);
+  };
+  const tile = (one, i) => {
+    const on = tv.screen === "browser" && b.url === one.url;
+    const words = h("span", { class: "tv-mark-words" }, h("strong", { class: "clip" }, one.name), h("span", { class: "muted mono clip" }, tvHost(one.url)));
+    if (editing)
+      return h(
+        "div",
+        { class: "tv-mark-tile editing" },
+        tvMarkIcon(one),
+        words,
+        h("span", { class: "tv-mark-tools" }, h("button", { type: "button", class: "icon-btn", title: t("tv.marks.earlier"), "aria-label": `${t("tv.marks.earlier")}: ${one.name}`, disabled: i === 0, onclick: () => moved(i, -1) }, icon("previous")), h("button", { type: "button", class: "icon-btn", title: t("tv.marks.later"), "aria-label": `${t("tv.marks.later")}: ${one.name}`, disabled: i === marks.length - 1, onclick: () => moved(i, 1) }, icon("next")), h("button", { type: "button", class: "icon-btn danger-text", title: t("tv.folderRemove"), "aria-label": `${t("tv.folderRemove")}: ${one.name}`, onclick: () => keep(marks.filter((x) => x.url !== one.url)) }, icon("x"))),
+      );
+    return h(
+      "div",
+      { class: "tv-mark-tile" + (on ? " on" : ""), menu: (at) => menu(one, i, at) },
+      h("button", { type: "button", class: "tv-mark-main", title: one.url, onclick: () => void showOnTv(one.url) }, tvMarkIcon(one), words),
+      h("button", { type: "button", class: "icon-btn tv-mark-more", title: t("home.tileActions"), "aria-label": `${t("home.tileActions")}: ${one.name}`, onclick: (e) => { const r = e.currentTarget.getBoundingClientRect(); menu(one, i, { x: r.left, y: r.bottom + 4 }); } }, icon("more")),
+    );
+  };
+  return uiCard(
+    {
+      title: t("tv.marks"),
+      count: marks.length || null,
+      lead: !b.installed ? null : tv.screen === "browser" ? null : t("tv.marks.switches"),
+      actions: marks.length > 0 && button(t(editing ? "tv.marks.done" : "tv.marks.change"), { class: "small" + (editing ? " primary" : ""), onclick: () => ((tvUi.editMarks = !editing), paintTv()) }, editing ? "check" : "edit"),
+    },
+    h("div", { class: "tv-marks" }, marks.map(tile), !editing && h("button", { type: "button", class: "tv-mark-tile add", onclick: add }, icon("plus"), h("span", null, t("tv.marks.new")))),
+  );
+}
+
 function paintTv() {
   const box = document.getElementById("tv-body");
   const tv = state.tv;
   if (!box || !tv) return;
+  box.classList.remove("tv-switching");
   const error = h("p", { class: "error", role: "alert" });
   const change = async (data) => {
     error.textContent = "";
@@ -1017,40 +1083,39 @@ function paintTv() {
       }
     },
   }, "download");
-  const marks = b.bookmarks ?? [];
-  const marked = !!b.url && marks.some((one) => one.url === b.url);
   const keep = (list) => void change({ bookmarks: list });
-  const marksBlock = b.installed && tv.screen === "browser" && h(
-    "div",
-    { class: "stack-s" },
-    h("div", { class: "section-head" }, h("strong", null, t("tv.marks")), h("div", { class: "actions" }, button(t("tv.marks.new"), { class: "small", onclick: () => tvMarkDialog(marks, -1, marked ? {} : { name: b.title || "", url: b.url || "" }, keep) }, "plus"))),
-    marks.length
-      ? marks.map((one, i) =>
-          h(
-            "div",
-            { class: "kv" },
-            h("button", { type: "button", class: "link with-icon wrap tv-mark", title: one.url, onclick: () => void showOnTv(one.url) }, icon(one.url === b.url ? "star" : "link"), one.name),
-            h("div", { class: "row-actions" }, button("", { class: "small ghost", title: t("tv.marks.toHome"), "aria-label": `${t("tv.marks.toHome")}: ${one.name}`, onclick: () => void tvMarkToHome(one) }, "home"), button("", { class: "small ghost", title: t("tv.marks.edit"), "aria-label": `${t("tv.marks.edit")}: ${one.name}`, onclick: () => tvMarkDialog(marks, i, one, keep) }, "edit"), button(t("tv.folderRemove"), { class: "small ghost", "aria-label": `${t("tv.folderRemove")}: ${one.name}`, onclick: () => keep(marks.filter((x) => x.url !== one.url)) })),
-          ),
-        )
-      : h("p", { class: "muted small" }, t("tv.marks.none")),
-    h("p", { class: "muted small" }, t("tv.marks.onScreen")),
-  );
   const pageCard = uiCard(
     { title: t("tv.page.title"), marks: b.running && h("span", { class: "state running" }, t("tv.page.on")), lead: t(b.installed ? "tv.page.lead" : "tv.page.needs") },
-    b.installed ? [tvAddressRow(b.url || b.last || "", t("tv.page.show"), "card"), tv.screen === "browser" && tvPreview(), marksBlock] : [h("p", { class: "cmd" }, icon("terminal"), b.install), h("div", { class: "row-actions" }, bringBrowser)],
+    b.installed ? [] : [h("p", { class: "cmd" }, icon("terminal"), b.install), h("div", { class: "row-actions" }, bringBrowser)],
   );
   // other programs show things on the screen with an access key: what to send, ready to paste
   const origin = location.origin;
   const yaml = `rest_command:\n  hata_tv_open:\n    url: "${origin}/api/tv/open"\n    method: post\n    headers:\n      authorization: "Bearer ${t("tv.api.keyHere")}"\n    content_type: "application/json"\n    payload: '{"url": "{{ url }}", "for": {{ seconds | default(0) }}}'\n  hata_tv_back:\n    url: "${origin}/api/tv/back"\n    method: post\n    headers:\n      authorization: "Bearer ${t("tv.api.keyHere")}"`;
-  const apiCard = uiCard(
-    { title: t("tv.api.title"), lead: t("tv.api.lead"), actions: hasModule("assistant") ? h("a", { class: "btn small", href: "#/settings/agents" }, h("span", null, t("tv.api.keys"))) : null },
+  const apiBody = h(
+    "div",
+    { class: "stack" },
+    h("p", { class: "muted small" }, t("tv.api.lead")),
+    hasModule("assistant") && h("div", { class: "row-actions" }, h("a", { class: "btn small", href: "#/settings/agents" }, h("span", null, t("tv.api.keys")))),
     !hasModule("assistant") && h("p", { class: "muted small" }, t("tv.api.needsKeys")),
     h("div", { class: "kv-line" }, h("span", { class: "muted" }, "Home Assistant"), h("button", { type: "button", class: "icon-btn", title: t("twofa.copy"), "aria-label": t("twofa.copy"), onclick: () => copyQuietly(yaml) }, icon("copy"))),
     h("pre", { class: "code wrap small" }, yaml),
     h("p", { class: "muted small" }, t("tv.api.more", { now: `${origin}/api/tv/now`, play: `${origin}/api/tv/play`, remote: `${origin}/api/tv/do` })),
   );
+  // one of the page's folded parts: its name, what it holds now in a line, and — open — the part itself; only one is open
+  const fold = (id, iconName, title, summary, body) => {
+    if (!body) return null;
+    const el = h("details", { class: "tv-fold", open: tvUi.fold === id }, h("summary", null, icon(iconName), h("span", { class: "tv-fold-words" }, h("strong", null, title), summary && h("span", { class: "muted small clip" }, summary)), icon("chevron", "tv-fold-turn")), h("div", { class: "tv-fold-body stack" }, body));
+    el.addEventListener("toggle", () => {
+      if (el.open) tvUi.fold = id;
+      else if (tvUi.fold === id) tvUi.fold = "";
+      if (el.open) for (const other of el.parentElement?.querySelectorAll("details.tv-fold[open]") ?? []) if (other !== el) other.open = false;
+    });
+    return el;
+  };
+  const inner = (card) => (card ? [...card.children].filter((node) => !node.classList.contains("section-head")) : null);
+  const apiCard = h("section", { class: "card tv-folds" }, fold("api", "code", t("tv.api.title"), t("tv.api.short"), apiBody));
 
+  let installPart = null;
   if (!tv.installed) {
     const install = button(t("mounting.needs.install", { package: "Kodi" }), {
       class: "primary",
@@ -1066,25 +1131,17 @@ function paintTv() {
         }
       },
     }, "download");
-    install.classList.add("wide");
-    const installCard = h("section", { class: "card pad stack" }, h("span", { class: "app-icon plus" }, icon("tv")), h("h2", null, t("tv.needsTitle")), h("p", { class: "muted" }, t("tv.needsLead")), install, tv.cannot ? h("p", { class: "muted small" }, t("tv.cannot." + tv.cannot)) : h("p", { class: "cmd" }, icon("terminal"), tv.install), error);
-    const first = tv.screen === "browser" ? h("section", { class: "card pad tv-remote" }, h("div", { class: "tvr-head" }, h("span", { class: "with-icon muted" }, icon("tv"), t("tv.page.title"))), h("div", { class: "tvr big" }, tvPageParts(tv, false))) : installCard;
-    return put(box, h("div", { class: "tv-page" }, first, h("div", { class: "stack" }, screenCard, tv.screen === "browser" && installCard, pageCard, b.installed && apiCard, h("section", { class: "card pad tv-after" }, h("strong", { class: "block" }, t("tv.afterTitle")), h("span", { class: "muted small" }, t("tv.afterList"))))));
+    installPart = h("div", { class: "tv-left-note" }, h("span", { class: "app-icon plus" }, icon("film")), h("h2", null, t("tv.needsTitle")), h("p", { class: "muted" }, t("tv.needsLead")), tv.cannot ? h("p", { class: "muted small" }, t("tv.cannot." + tv.cannot)) : h("p", { class: "cmd" }, icon("terminal"), tv.install), h("div", { class: "row-actions" }, install), error);
   }
 
-  // who has the screen: the player, a web page, or neither of Hata's
-  const pill = (id, label, off = false) => h("button", { type: "button", class: "seg-pill" + (tv.screen === id ? " active" : ""), "aria-pressed": String(tv.screen === id), disabled: off, onclick: (e) => (tv.screen === id ? null : ((e.currentTarget.disabled = true), void change({ screen: id }))) }, label);
-  const playerCard = uiCard(
-    { title: t("tv.onScreen"), lead: t(tv.screen === "browser" ? "tv.onScreen.browser" : tv.screen === "kodi" ? "tv.onScreen.kodi" : tv.screen === "dark" ? "tv.onScreen.dark" : "tv.onScreen.off") },
-    h("div", { class: "seg-pills" }, pill("kodi", "Kodi"), pill("browser", t("tv.page.browser"), !b.installed), pill("off", t("tv.onScreen.none")), pill("dark", t("tv.onScreen.sleep"))),
-    h("p", { class: "tv-working muted", id: "tv-working", role: "status", hidden: true }),
-    !tv.decodes && h("p", { class: "muted small" }, t("tv.noDecode")),
-    error,
+  // who has the screen: one row over the page, the same in every mode
+  const pill = (id, iconName, label, off = false) => h("button", { type: "button", class: "seg-pill" + (tv.screen === id ? " active" : ""), "aria-pressed": String(tv.screen === id), disabled: off, onclick: (e) => (tv.screen === id ? null : ((e.currentTarget.classList.add("going")), void change({ screen: id }))) }, icon(iconName), label);
+  const screenRow = h(
+    "section",
+    { class: "card pad tv-switch" },
+    h("div", { class: "tv-switch-words" }, h("h2", null, t("tv.onScreen")), h("p", { class: "muted small" }, t(tv.screen === "browser" ? "tv.onScreen.browser" : tv.screen === "kodi" ? "tv.onScreen.kodi" : tv.screen === "dark" ? "tv.onScreen.dark" : "tv.onScreen.off")), h("p", { class: "tv-working muted", id: "tv-working", role: "status", hidden: true })),
+    h("div", { class: "seg-pills" }, pill("kodi", "film", "Kodi", !tv.installed), pill("browser", "globe", t("tv.page.browser"), !b.installed), pill("off", "terminal", t("tv.onScreen.none")), pill("dark", "power", t("tv.onScreen.sleep"))),
   );
-  // the web page's card: there while the browser has the screen, or to say what the browser needs; the player has no use for it
-  const pageShown = !b.installed || tv.screen === "browser";
-
-  const remoteCard = h("section", { class: "card pad tv-remote" }, h("div", { class: "tvr-head" }, h("span", { class: "with-icon muted" }, icon("tv"), t(tv.screen === "browser" ? "tv.page.title" : "tv.remote"))), h("div", { class: "tvr big" }, tv.screen === "browser" ? tvPageParts(tv, false) : tvRemoteParts(tv, press, () => void change({ on: true }))));
 
   const addFolder = () => folderPicker({ title: t("tv.folderPick"), start: state.settings?.dataRoot ?? "/", confirmLabel: t("tv.folderAdd"), action: async (path) => void (await change({ folders: [...tv.folders, path] })) });
   const foldersCard = h(
@@ -1173,8 +1230,62 @@ function paintTv() {
     saver,
   );
 
-  // the remote is the page's main thing; what is set once stands beside it — the player's own settings only while the player has the screen
-  put(box, h("div", { class: "tv-page" }, remoteCard, h("div", { class: "stack" }, playerCard, pageShown && pageCard, screenCard, ...(tv.screen === "kodi" ? [foldersCard, languageCard, audioCard, pictureCard, haCard] : []), b.installed && apiCard, tv.screen === "kodi" && browserCard)));
+  // the large card on the left: what the screen shows now and what drives it — its content alone changes with the mode
+  const m = b.media;
+  const act = (action, value) => api("POST", "/api/tv/browser", { action, value }).then(() => setTimeout(loadTv, 400), (e) => toast(errorText(e), "error"));
+  const key = (action, iconName, label, cls = "") => button(label, { class: "small " + cls, onclick: () => (action === "text" ? tvTextDialog(act, true) : act(action)) }, iconName);
+  const leave = () => api("POST", "/api/tv/back", {}).then(loadTv, (e) => toast(errorText(e), "error"));
+  const head = (iconName, words, side) => h("div", { class: "tvr-head" }, h("span", { class: "with-icon muted" }, icon(iconName), words), side);
+  const skip = (seconds, iconName, label) => h("button", { type: "button", class: "tvr-round skip", title: label, "aria-label": label, onclick: () => act("skip", seconds) }, icon(iconName), h("span", null, "30"));
+  const big = (iconName, title, text, ...buttons) => [h("div", { class: "tv-still" }, icon(iconName), h("span", null, text[0])), h("div", { class: "stack-s" }, h("h2", null, title), h("p", { class: "muted" }, text[1])), h("div", { class: "tv-left-foot" }, buttons)];
+  const toKodi = tv.installed && button(t("tv.turnOnKodi"), { class: "primary", onclick: () => void change({ screen: "kodi" }) }, "film");
+  const toBrowser = b.installed && button(t("tv.openBrowser"), { class: tv.installed ? "" : "primary", onclick: () => void change({ screen: "browser" }) }, "globe");
+  const left =
+    tv.screen === "browser"
+      ? [
+          tvAddressRow(b.url || b.last || "", t("tv.page.show"), "card"),
+          tvPreview(),
+          h("div", { class: "tv-now-line" }, h("strong", { class: "clip" }, b.title || t(b.url ? "tv.page.blank" : "tv.page.home")), m?.paused && h("span", { class: "state busy" }, t("tv.paused")), b.left > 0 && h("span", { class: "state busy" }, t("tv.page.left", { time: tvClock(b.left) }))),
+          m &&
+            h(
+              "div",
+              { class: "tv-media" },
+              skip(-30, "back30", t("tv.key.rewind")),
+              h("button", { type: "button", class: "tvr-main", title: t("tv.key.playpause"), "aria-label": t("tv.key.playpause"), onclick: () => act("play") }, icon(m.paused ? "play" : "pause")),
+              skip(30, "fwd30", t("tv.key.forward")),
+              h("div", { class: "tv-media-pos" }, m.total > 0 && h("input", { type: "range", class: "tvr-slider", min: 0, max: 100, step: 0.1, value: (m.time / m.total) * 100, "aria-label": t("tv.position"), onchange: (e) => act("seek", Number(e.target.value)) }), h("div", { class: "tvr-times muted" }, h("span", null, tvClock(m.time)), h("span", null, m.total > 0 ? tvClock(m.total) : ""))),
+              h("button", { type: "button", class: "tvr-round" + (m.muted ? " on" : ""), title: t(m.muted ? "tv.unmute" : "tv.mute"), "aria-label": t(m.muted ? "tv.unmute" : "tv.mute"), onclick: () => act("mute") }, icon(m.muted ? "volumeOff" : "volume")),
+              h("input", { type: "range", class: "tvr-slider tv-media-vol" + (m.muted ? " muted" : ""), min: 0, max: 100, step: 1, value: m.volume, "aria-label": t("tv.volume"), onchange: (e) => act("volume", Number(e.target.value)) }),
+              h("button", { type: "button", class: "tvr-round" + (m.full ? " on" : ""), title: t(m.full ? "tv.page.fullOff" : "tv.page.full"), "aria-label": t(m.full ? "tv.page.fullOff" : "tv.page.full"), onclick: () => act("full") }, icon("expand")),
+            ),
+          h("div", { class: "tv-left-foot" }, key("back", "undo", t("tv.key.back")), key("start", "home", t("tv.page.start")), key("reload", "refresh", t("tv.page.reload")), key("up", "up", t("tv.page.up")), key("down", "down", t("tv.page.down")), key("text", "keys", t("tv.key.text")), button(t(b.back ? "tv.page.toPlayer" : "tv.page.close"), { class: "small to-right tv-leave", onclick: (e) => ((e.currentTarget.disabled = true), tvWorking(t(b.back ? "tv.switching.kodi" : "tv.switching.off")), leave()) }, b.back ? "film" : "x")),
+        ]
+      : tv.screen === "kodi"
+        ? [head("film", tv.playing ? t("tv.kodiPlays") : t("tv.kodiIdle")), h("div", { class: "tv-kodi" }, h("div", { class: "tvr big" }, tvRemoteParts(tv, press, () => void change({ on: true })))), !tv.decodes && h("p", { class: "muted small" }, t("tv.noDecode")), error]
+        : installPart && !b.installed
+          ? [installPart]
+          : tv.screen === "dark"
+            ? [head("power", t("tv.darkTitle")), ...big("power", t("tv.darkHead"), [t("tv.darkStill"), t("tv.onScreen.dark")], toKodi, toBrowser, button(t("tv.showConsole"), { class: "to-right", onclick: () => void change({ screen: "off" }) }, "terminal")), installPart, error]
+            : [head("terminal", t("tv.consoleTitle")), ...big("terminal", t("tv.consoleHead"), [t("tv.consoleStill"), t("tv.consoleLead")], toKodi, toBrowser, button(t("tv.screenOff"), { class: "to-right", onclick: () => void change({ screen: "dark" }) }, "power")), installPart, error];
+
+  // on the right, the same in every mode: the bookmarks, the screen itself, the player's settings folded, the automations
+  const pick = (id) => {
+    const p = pref(id);
+    return p ? (p.options?.find((o) => o.value === p.value)?.label ?? "") : "";
+  };
+  const settings = tv.screen === "kodi" && tv.installed && h(
+    "section",
+    { class: "card tv-folds" },
+    h("div", { class: "pad-head" }, h("h2", null, t("tv.kodiSettings"))),
+    fold("folders", "folder", t("tv.folders"), tv.folders.length ? `${tv.folders.length} · ${tv.folders.join(", ")}` : t("tv.noFolders"), inner(foldersCard)),
+    fold("language", "globe", t("tv.language"), speaks ? (LANGUAGE_NAMES[speaks.value] ?? t("tv.languageOther")) : "", inner(languageCard)),
+    fold("sound", "volume", t("tv.sound"), tv.audio ? (tv.audio.options.find((o) => o.value === tv.audio.value)?.label ?? "") : "", inner(audioCard)),
+    fold("picture", "screen", t("tv.picture"), picture ? [picture.resolution.options.find((o) => o.value === picture.resolution.value)?.label, picture.match && t("tv.match")].filter(Boolean).join(" · ") : "", inner(pictureCard)),
+    fold("ha", "home", "Home Assistant", tv.ha ? t(tv.ha.on ? "bt.state.on" : "bt.state.off") : "", inner(haCard)),
+    fold("streams", "play", t("tv.inBrowser"), t(tv.streams ? "tv.inBrowserOn" : "tv.inBrowserOff"), inner(browserCard)),
+  );
+  void pick;
+  put(box, h("div", { class: "tvx" + (tv.screen === "browser" ? " browsing" : "") }, screenRow, h("div", { class: "tvx-main" }, h("section", { class: "card pad tvx-left" }, left), h("div", { class: "stack tvx-right" }, b.installed ? tvMarksCard(tv, keep) : pageCard, screenCard, settings, b.installed && apiCard))));
   tvStick();
   if (tv.asking) tvKeepDialog();
 }
