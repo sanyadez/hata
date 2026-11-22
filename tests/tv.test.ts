@@ -330,3 +330,11 @@ test("bookmarks of the screen and the script that drives a page's video", () => 
   // the script is one expression that runs
   expect(() => new Function("document", "return " + mediaScript("play"))({ querySelectorAll: () => [] })).not.toThrow();
 });
+
+test("the mouse made for a moment to put the pointer away", async () => {
+  const { inputEvent, uinputDevice } = await import("../src/pointer");
+  expect(uinputDevice("x").length).toBe(1116);
+  const move = inputEvent(2, 1, -5);
+  expect(move.length).toBe(24);
+  expect([...move.subarray(16)]).toEqual([2, 0, 1, 0, 0xfb, 0xff, 0xff, 0xff]);
+});

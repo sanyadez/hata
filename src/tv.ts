@@ -813,23 +813,25 @@ export const BROWSER_HOME_SCRIPT = `addEventListener("keydown", (e) => { if (e.k
 export const BROWSER_POINTER_SCRIPT = `(() => {
   if (window.hataPointer) return;
   window.hataPointer = true;
+  // a sheet of its own switched on and off by its "media": a class on the page would be the page's to wipe (a film site was seen to)
   const style = document.createElement("style");
-  style.textContent = "html.hata-still, html.hata-still * { cursor: none !important; }";
-  const root = document.documentElement;
-  const put = () => (document.head || root).appendChild(style);
-  put();
-  root.classList.add("hata-still");
+  style.textContent = "* { cursor: none !important; }";
+  const hide = (on) => {
+    if (!style.isConnected) (document.head || document.documentElement).appendChild(style);
+    style.media = on ? "all" : "not all";
+  };
+  hide(true);
+  addEventListener("DOMContentLoaded", () => hide(style.media === "all"));
   let last = 0;
   let timer = 0;
-  addEventListener("mousemove", (e) => {
+  addEventListener("mousemove", () => {
     const now = Date.now();
     const real = now - last < 400;
     last = now;
     if (!real) return;
-    if (!style.isConnected) put();
-    root.classList.remove("hata-still");
+    hide(false);
     clearTimeout(timer);
-    timer = setTimeout(() => root.classList.add("hata-still"), 3000);
+    timer = setTimeout(() => hide(true), 3000);
   }, true);
 })()`;
 

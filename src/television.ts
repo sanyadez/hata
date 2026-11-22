@@ -15,6 +15,7 @@ import { bus } from "./bus";
 import { saveSettings, settings } from "./config";
 import { awaitKodi, kodiRuns, screenDark, sleepScreen, playOnTv, screenShares, setUp, switchTv, tvEnabled, tvNow, tvReport, type TvPage, type TvReport } from "./kodi";
 import { installCommand, packageManager, PATH, run, runLogged } from "./packages";
+import { parkPointer } from "./pointer";
 import { BROWSER_HOME_SCRIPT, BROWSER_POINTER_SCRIPT, BROWSER_PACKAGES, browserCalls, cleanBookmarks, MEDIA_ACTIONS, mediaScript, pointerCalls, PREVIEW_WIDTH, browserHomeHtml, TV_BROWSER_HOME, TV_USER, browserSound, browserUnitText, cleanLink, cleanShowTime, linkName, TV_BROWSER_PORT, TV_BROWSER_UNIT, TV_UNIT, type BrowserReport, type PageCall, type PageMedia, type Screen } from "./tv";
 
 const UNIT_FILE = "/etc/systemd/system/" + TV_BROWSER_UNIT;
@@ -113,6 +114,8 @@ async function connected(): Promise<NonNullable<typeof link> | null> {
   await ask({ method: "Page.addScriptToEvaluateOnNewDocument", params: { source: BROWSER_POINTER_SCRIPT } });
   await ask({ method: "Runtime.evaluate", params: { expression: BROWSER_POINTER_SCRIPT } });
   await ask({ method: "Target.setAutoAttach", params: { autoAttach: true, waitForDebuggerOnStart: false, flatten: true } });
+  // the pointer stands in the middle of the screen from the browser's start: put away into a corner, in the background
+  void parkPointer();
   return mine;
 }
 
