@@ -651,7 +651,8 @@ async function loadTv() {
   }
   // a slider under the finger or a list that is open is not redrawn under the person
   // nor the picture of the screen while it has this device's whole screen: taken out of the page for a moment, it would fall back
-  if (state.tv && !tvUi.busy && !document.fullscreenElement && !document.querySelector("dialog[open]:not(.tv-drop)") && !document.querySelector("#tv-body input[type=range]:active")) paintTv();
+  // nor a field somebody is typing an address into
+  if (state.tv && !tvUi.busy && !document.fullscreenElement && !document.activeElement?.closest?.("#tv-body .tv-address") && !document.querySelector("dialog[open]:not(.tv-drop)") && !document.querySelector("#tv-body input[type=range]:active")) paintTv();
   // while the player runs the page keeps up with what plays
   tvUi.timer = setTimeout(loadTv, state.tv?.running || state.tv?.browser?.running ? 2000 : 8000);
 }
@@ -796,18 +797,55 @@ async function showOnTv(url, seconds = 0) {
 }
 
 /** The address field of the browser on the screen: a bare name gets https:// in front */
-function tvAddressRow(start, label) {
+function tvAddressRow(start, label, key = "") {
+  // the field lives on between the page's redraws: what is typed or pasted stays until a page is really shown,
+  // and the address in it follows the screen only when the page there changes
+  const kept = key && (tvUi.fields ??= {})[key];
+  if (kept) {
+    if (start !== kept.last) {
+      if (document.activeElement !== kept.field) kept.field.value = start ?? "";
+      kept.last = start;
+    }
+    return kept.row;
+  }
   const field = h("input", { type: "url", inputMode: "url", autocomplete: "off", spellcheck: false, maxLength: 2000, placeholder: "https://", value: start ?? "", "aria-label": t("tv.page.address") });
   const go = button(label, { class: "primary", onclick: () => void send() }, "tv");
   const send = async () => {
     const typed = field.value.trim();
     if (!typed) return field.focus();
     go.disabled = true;
+    field.blur();
     await showOnTv(/^https?:\/\//i.test(typed) ? typed : "https://" + typed);
     go.disabled = false;
   };
   field.addEventListener("keydown", (e) => e.key === "Enter" && void send());
-  return h("div", { class: "tv-address" }, field, go);
+  const row = h("div", { class: "tv-address" }, field, go);
+  if (key) tvUi.fields[key] = { field, row, last: start };
+  return row;
+}
+
+/** A bookmark of the screen made or changed: a name and an address, whatever is on the screen now */
+function tvMarkDialog(marks, at, start, keep) {
+  let dialog;
+  const name = h("input", { type: "text", autocomplete: "off", maxLength: 60, value: start.name ?? "" });
+  const url = h("input", { type: "url", inputMode: "url", autocomplete: "off", spellcheck: false, maxLength: 2000, placeholder: "https://", value: start.url ?? "" });
+  const error = h("p", { class: "error", role: "alert" });
+  const save = () => {
+    const typed = url.value.trim();
+    const address = typed && !/^https?:\/\//i.test(typed) ? "https://" + typed : typed;
+    let whole = "";
+    try {
+      whole = new URL(address).href;
+    } catch {}
+    if (!whole) return void ((error.textContent = t("error.tv.badLink")), url.focus());
+    if (marks.some((one, i) => i !== at && one.url === whole)) return void (error.textContent = t("tv.marks.twice"));
+    const one = { name: name.value.trim(), url: whole };
+    keep(at < 0 ? [...marks, one] : marks.map((was, i) => (i === at ? one : was)));
+    dialog.close();
+  };
+  for (const el of [name, url]) el.addEventListener("keydown", (e) => e.key === "Enter" && save());
+  dialog = openDialog("confirm", h("h2", null, t(at < 0 ? "tv.marks.new" : "tv.marks.edit")), field(t("tv.marks.name"), name, t("tv.marks.nameHint")), field(t("tv.page.address"), url), error, h("footer", null, closeButton(() => dialog, t("common.cancel")), button(t("settings.save"), { class: "primary", onclick: save }, "check")));
+  (start.url ? name : url).focus();
 }
 
 /** What stands in the remote's place while a web page has the screen */
@@ -831,7 +869,7 @@ function tvPageParts(tv, address = true) {
   return [
     h("div", { class: "tvr-now" }, h("div", { class: "tvr-title" }, h("div", { class: "grow" }, h("strong", { class: "wrap" }, b.title || t(b.url ? "tv.page.blank" : "tv.page.home")), b.left > 0 && h("span", { class: "state busy" }, t("tv.page.left", { time: tvClock(b.left) })))), b.url && h("p", { class: "tvr-file muted wrap" }, b.url)),
     player,
-    address && tvAddressRow("", t("tv.page.show")),
+    address && tvAddressRow("", t("tv.page.show"), "drop"),
     address && h("hr", { class: "tvr-rule" }),
     h("div", { class: "tvr-keys" }, keyed("back", "undo", t("tv.key.back")), keyed("reload", "refresh", t("tv.page.reload")), keyed("up", "chevron", t("tv.page.up"), "turn-up"), keyed("down", "chevron", t("tv.page.down"), "turn-down"), keyed("text", "keys", t("tv.key.text"))),
     h("p", { class: "muted small" }, t("tv.page.hint")),
@@ -866,7 +904,7 @@ function tvDropdown(at) {
     try {
       const tv = (state.tv = await api("GET", "/api/tv"));
       // a slider under the finger is not redrawn under it, nor the window while it is pulled down
-      if (!body.querySelector("input[type=range]:active") && !document.querySelector("dialog.select-list[open]") && !dialog.classList.contains("pulled")) put(body, tvRemoteParts(tv, press, turnOn));
+      if (!body.querySelector("input[type=range]:active") && !document.activeElement?.closest?.(".tv-drop .tv-address") && !document.querySelector("dialog.select-list[open]") && !dialog.classList.contains("pulled")) put(body, tvRemoteParts(tv, press, turnOn));
     } catch (e) {
       put(body, h("p", { class: "error" }, errorText(e)));
     }
@@ -939,14 +977,22 @@ function paintTv() {
   const marksBlock = b.installed && tv.screen === "browser" && h(
     "div",
     { class: "stack-s" },
-    h("div", { class: "section-head" }, h("strong", null, t("tv.marks")), b.url && !marked && h("div", { class: "actions" }, button(t("tv.marks.add"), { class: "small", onclick: () => keep([...marks, { name: b.title || "", url: b.url }]) }, "star"))),
+    h("div", { class: "section-head" }, h("strong", null, t("tv.marks")), h("div", { class: "actions" }, button(t("tv.marks.new"), { class: "small", onclick: () => tvMarkDialog(marks, -1, marked ? {} : { name: b.title || "", url: b.url || "" }, keep) }, "plus"))),
     marks.length
-      ? marks.map((one) => h("div", { class: "kv" }, h("button", { type: "button", class: "link with-icon wrap tv-mark", title: one.url, onclick: () => void showOnTv(one.url) }, icon(one.url === b.url ? "star" : "link"), one.name), button(t("tv.folderRemove"), { class: "small ghost", "aria-label": `${t("tv.folderRemove")}: ${one.name}`, onclick: () => keep(marks.filter((x) => x.url !== one.url)) })))
+      ? marks.map((one, i) =>
+          h(
+            "div",
+            { class: "kv" },
+            h("button", { type: "button", class: "link with-icon wrap tv-mark", title: one.url, onclick: () => void showOnTv(one.url) }, icon(one.url === b.url ? "star" : "link"), one.name),
+            h("div", { class: "row-actions" }, button("", { class: "small ghost", title: t("tv.marks.edit"), "aria-label": `${t("tv.marks.edit")}: ${one.name}`, onclick: () => tvMarkDialog(marks, i, one, keep) }, "edit"), button(t("tv.folderRemove"), { class: "small ghost", "aria-label": `${t("tv.folderRemove")}: ${one.name}`, onclick: () => keep(marks.filter((x) => x.url !== one.url)) })),
+          ),
+        )
       : h("p", { class: "muted small" }, t("tv.marks.none")),
+    h("p", { class: "muted small" }, t("tv.marks.onScreen")),
   );
   const pageCard = uiCard(
     { title: t("tv.page.title"), marks: b.running && h("span", { class: "state running" }, t("tv.page.on")), lead: t(b.installed ? "tv.page.lead" : "tv.page.needs") },
-    b.installed ? [tvAddressRow(b.url || b.last || "", t("tv.page.show")), tv.screen === "browser" && tvPreview(), marksBlock] : [h("p", { class: "cmd" }, icon("terminal"), b.install), h("div", { class: "row-actions" }, bringBrowser)],
+    b.installed ? [tvAddressRow(b.url || b.last || "", t("tv.page.show"), "card"), tv.screen === "browser" && tvPreview(), marksBlock] : [h("p", { class: "cmd" }, icon("terminal"), b.install), h("div", { class: "row-actions" }, bringBrowser)],
   );
   // other programs show things on the screen with an access key: what to send, ready to paste
   const origin = location.origin;
