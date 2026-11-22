@@ -5,7 +5,7 @@
  * over its local debugging port. A page may be shown for a while, and then what was on the screen
  * before comes back: the film goes on from where it stopped.
  */
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { hostname } from "node:os";
 import { record } from "./activity";
 import en from "./lang/en.json";
@@ -16,7 +16,7 @@ import { saveSettings, settings } from "./config";
 import { awaitKodi, kodiRuns, screenDark, sleepScreen, playOnTv, screenShares, setUp, switchTv, tvEnabled, tvNow, tvReport, type TvPage, type TvReport } from "./kodi";
 import { installCommand, packageManager, PATH, run, runLogged } from "./packages";
 import { parkPointer } from "./pointer";
-import { BROWSER_HOME_SCRIPT, BROWSER_POINTER_SCRIPT, BROWSER_PACKAGES, browserCalls, cleanBookmarks, MEDIA_ACTIONS, mediaScript, pointerCalls, PREVIEW_WIDTH, browserHomeHtml, TV_BROWSER_HOME, TV_USER, browserSound, browserUnitText, cleanLink, cleanShowTime, linkName, TV_BROWSER_PORT, TV_BROWSER_UNIT, TV_UNIT, type BrowserReport, type PageCall, type PageMedia, type Screen } from "./tv";
+import { BROWSER_HOME_SCRIPT, BROWSER_POINTER_SCRIPT, BROWSER_PACKAGES, browserCalls, cleanBookmarks, MEDIA_ACTIONS, mediaScript, pointerCalls, PREVIEW_WIDTH, browserHomeHtml, TV_BROWSER_HOME, TV_USER, browserSound, browserUnitText, withoutTranslate, TV_HOME, cleanLink, cleanShowTime, linkName, TV_BROWSER_PORT, TV_BROWSER_UNIT, TV_UNIT, type BrowserReport, type PageCall, type PageMedia, type Screen } from "./tv";
 
 const UNIT_FILE = "/etc/systemd/system/" + TV_BROWSER_UNIT;
 const has = (bin: string): boolean => !!Bun.which(bin, { PATH });
@@ -275,6 +275,23 @@ export async function setBookmarks(raw: unknown, by: string): Promise<TvReport> 
   return tvReport();
 }
 
+/** Before the browser starts: its settings say not to offer a translation (it reads them only at its start) */
+async function quietTranslate(): Promise<void> {
+  const dir = `${TV_HOME}/.browser/Default`;
+  const file = `${dir}/Preferences`;
+  try {
+    let had = "";
+    try {
+      had = readFileSync(file, "utf8");
+    } catch {}
+    const text = withoutTranslate(had);
+    if (text === had) return;
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(file, text);
+    await run(["chown", "-R", `${TV_USER}:${TV_USER}`, `${TV_HOME}/.browser`], 10_000);
+  } catch {}
+}
+
 /** The browser takes the screen (the player, when it runs, is stopped by that) and answers Hata */
 async function startBrowser(by: string): Promise<void> {
   if (!browserInstalled()) throw new AppError("tv.browserMissing", 409);
@@ -285,12 +302,28 @@ async function startBrowser(by: string): Promise<void> {
   await setUp();
   await writeUnit();
   sleepScreen(false);
-  const done = await run(["systemctl", "start", TV_BROWSER_UNIT], 60_000);
-  if (done.code !== 0) throw new AppError("tv.browserFailed", 409, { message: (done.err || done.out).trim().split("\n").slice(-2).join("\n") });
-  showing = { by, back, resume, until: 0, timer: null };
-  for (let i = 0; i < 40; i++) {
-    if (await connected()) return;
-    await Bun.sleep(500);
+  if (!(await browserRuns())) await quietTranslate();
+  // The player lets the screen go a moment AFTER its service has stopped (its session is still being
+  // closed), and a browser started in that moment finds the screen busy and stands there with nothing
+  // shown: so the player is stopped first and given that moment, and a start that came to nothing is
+  // made once more.
+  if (back) {
+    await run(["systemctl", "stop", TV_UNIT], 30_000);
+    await Bun.sleep(1500);
+  }
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const done = await run(["systemctl", "start", TV_BROWSER_UNIT], 60_000);
+    if (done.code !== 0) throw new AppError("tv.browserFailed", 409, { message: (done.err || done.out).trim().split("\n").slice(-2).join("\n") });
+    showing = { by, back, resume, until: 0, timer: null };
+    for (let i = 0; i < (attempt ? 40 : 16); i++) {
+      if (await connected()) return;
+      await Bun.sleep(500);
+    }
+    if (!attempt) {
+      await run(["systemctl", "kill", "--signal=SIGKILL", TV_BROWSER_UNIT], 10_000);
+      await run(["systemctl", "reset-failed", TV_BROWSER_UNIT], 10_000);
+      await Bun.sleep(1000);
+    }
   }
   await run(["systemctl", "stop", TV_BROWSER_UNIT], 30_000);
   showing = null;

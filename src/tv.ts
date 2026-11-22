@@ -625,14 +625,12 @@ html,body{min-height:100%;margin:0;background:#14110f;color:#f3ede6;font-family:
 body{display:grid;place-content:center;justify-items:center;gap:2vh;min-height:100vh;padding:12vh 6vw;box-sizing:border-box}
 #time{font-size:${bookmarks.length ? 11 : 18}vh;font-weight:600;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
 #day{font-size:${bookmarks.length ? 3 : 4}vh;color:#b8ada1}
-#name{position:fixed;left:4vw;top:5vh;font-size:3.2vh;font-weight:600;color:#f2a41c}
 #hint{position:fixed;left:0;right:0;bottom:4vh;text-align:center;font-size:2.2vh;color:#8d8278}
 #marks{display:flex;flex-wrap:wrap;justify-content:center;gap:2vh;margin-top:4vh;max-width:88vw}
 #marks a{display:grid;gap:.6vh;min-width:22vh;max-width:36vh;padding:2.4vh 3vh;border-radius:2vh;background:#231e1a;border:.3vh solid #3a322b;color:inherit;text-decoration:none;font-size:2.8vh;font-weight:600}
 #marks a:hover,#marks a:focus{border-color:#f2a41c;outline:none}
 #marks span{font-size:1.8vh;font-weight:400;color:#8d8278;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 </style>
-<div id="name">${escaped(name)}</div>
 <div id="time"></div>
 <div id="day"></div>
 ${bookmarks.length ? `<div id="marks">${bookmarks.map((b) => `<a href="${escaped(b.url)}">${escaped(b.name)}<span>${escaped(linkName(b.url))}</span></a>`).join("")}</div>` : ""}
@@ -658,6 +656,21 @@ export function browserSound(kodi: string): string {
   return /^[A-Za-z0-9:=,_.-]{1,120}$/.test(name) && name !== "default" ? name : "";
 }
 
+/**
+ * The browser's own settings file with the offer to translate a page turned off: the switch on the
+ * command line alone still left "Translate this page?" over a page in another language. What else the
+ * file holds stays; a file that cannot be read is begun anew.
+ */
+export function withoutTranslate(text: string): string {
+  let prefs: Record<string, unknown> = {};
+  try {
+    const read: unknown = JSON.parse(text);
+    if (read && typeof read === "object" && !Array.isArray(read)) prefs = read as Record<string, unknown>;
+  } catch {}
+  const translate = prefs.translate && typeof prefs.translate === "object" && !Array.isArray(prefs.translate) ? (prefs.translate as Record<string, unknown>) : {};
+  return JSON.stringify({ ...prefs, translate: { ...translate, enabled: false } });
+}
+
 /** The browser's command line: one page on the whole screen, nothing of a desktop browser's own windows */
 export const browserArgs = (sound: string): string[] => [
   "/usr/bin/chromium",
@@ -666,7 +679,7 @@ export const browserArgs = (sound: string): string[] => [
   "--noerrdialogs",
   "--disable-infobars",
   "--hide-crash-restore-bubble",
-  "--disable-features=Translate,MediaRouter",
+  "--disable-features=Translate,TranslateUI,MediaRouter",
   "--password-store=basic",
   "--autoplay-policy=no-user-gesture-required",
   "--ozone-platform=wayland",

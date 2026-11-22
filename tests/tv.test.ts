@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { cleanOffset, browserCalls, browserSound, browserUnitText, browserHomeHtml, cleanShowTime, pointerCalls, cleanBookmarks, mediaScript } from "../src/tv";
+import { cleanOffset, browserCalls, browserSound, browserUnitText, browserHomeHtml, withoutTranslate, cleanShowTime, pointerCalls, cleanBookmarks, mediaScript } from "../src/tv";
 import { cleanLink, isLink, linkName, probeArgs, sourceArgs, streamZero, cleanStart, keyframeArgs, mediaOf, prefsOf, prefValue, streamArgs, subsArgs, tracksOf, clickPacket, helloPacket, KEEP_WINDOW, KEEP_YES, pictureOf, advancedXml, cleanFolders, shortTitle, hwdbText, keymapXml, polkitRule, decodePackages, isOurs, monitorAudio, monitorName, playable, portIn, readDisplay, remoteCall, seconds, sourcesXml, takeJson, unitText } from "../src/tv";
 
 function edid(name: string, audio: boolean): Uint8Array {
@@ -279,6 +279,11 @@ test("the browser on the screen: its sound, its service, what a page may ask of 
   expect(unitText()).not.toContain("chvt 1");
   expect(browserHomeHtml("uk", "a<b", 'x"y')).toContain("a&lt;b");
   expect(browserHomeHtml("uk", "a", 'x"y')).toContain("x&quot;y");
+  // the server's name is not written on the screen's own page
+  expect(browserHomeHtml("uk", "hata.local", "")).not.toContain('id="name"');
+  // the offer to translate a page is off in the browser's own settings, the rest of them kept
+  expect(JSON.parse(withoutTranslate('{"a":1,"translate":{"x":2,"enabled":true}}'))).toEqual({ a: 1, translate: { x: 2, enabled: false } });
+  expect(JSON.parse(withoutTranslate("not json"))).toEqual({ translate: { enabled: false } });
   expect(unit).toContain("--remote-debugging-port=9393");
   // never started with the server: after a restart the screen is the player's
   expect(unit).not.toContain("[Install]");
