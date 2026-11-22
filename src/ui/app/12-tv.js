@@ -864,7 +864,7 @@ function tvPageParts(tv, address = true) {
   const b = tv.browser;
   const again = () => setTimeout(() => (document.querySelector("dialog.tv-drop[open]") ? null : void loadTv()), 400);
   const act = (action, value) => api("POST", "/api/tv/browser", { action, value }).then(again, (e) => toast(errorText(e), "error"));
-  const keyed = (action, iconName, label, cls = "") => h("div", { class: "tvr-key" }, h("button", { type: "button", class: "tvr-round " + cls, title: label, "aria-label": label, onclick: () => (action === "text" ? tvTextDialog(act) : act(action)) }, icon(iconName)), h("span", { class: "muted" }, label));
+  const keyed = (action, iconName, label, cls = "") => h("div", { class: "tvr-key" }, h("button", { type: "button", class: "tvr-round " + cls, title: label, "aria-label": label, onclick: () => (action === "text" ? tvTextDialog(act, true) : act(action)) }, icon(iconName)), h("span", { class: "muted" }, label));
   const leave = button(t(b.back ? "tv.page.toPlayer" : "tv.page.close"), { class: "wide tv-leave", onclick: () => ((leave.disabled = true), tvWorking(t(b.back ? "tv.switching.kodi" : "tv.switching.off")), api("POST", "/api/tv/back", {}).then(async () => ((state.tv = await api("GET", "/api/tv")), state.route.view === "tv" && paintTv()), (e) => toast(errorText(e), "error"))) }, b.back ? "play" : "x");
   // the video the page plays, driven as a player: found in the page and its frames, whatever the site's own buttons are
   const m = b.media;
@@ -882,14 +882,14 @@ function tvPageParts(tv, address = true) {
     player,
     address && tvAddressRow("", t("tv.page.show"), "drop"),
     address && h("hr", { class: "tvr-rule" }),
-    h("div", { class: "tvr-keys" }, keyed("back", "undo", t("tv.key.back")), keyed("reload", "refresh", t("tv.page.reload")), keyed("up", "chevron", t("tv.page.up"), "turn-up"), keyed("down", "chevron", t("tv.page.down"), "turn-down"), keyed("text", "keys", t("tv.key.text"))),
+    h("div", { class: "tvr-keys" }, keyed("back", "undo", t("tv.key.back")), keyed("start", "home", t("tv.page.start")), keyed("reload", "refresh", t("tv.page.reload")), keyed("up", "chevron", t("tv.page.up"), "turn-up"), keyed("down", "chevron", t("tv.page.down"), "turn-down"), keyed("text", "keys", t("tv.key.text"))),
     h("p", { class: "muted small" }, t("tv.page.hint")),
     leave,
   ];
 }
 
 /** Text typed here goes into the field the player has open on the screen: a search, a name, a password */
-function tvTextDialog(press) {
+function tvTextDialog(press, page = false) {
   let dialog;
   const field = h("input", { type: "text", autocomplete: "off", maxLength: 500, "aria-label": t("tv.key.text") });
   const send = async () => {
@@ -898,7 +898,7 @@ function tvTextDialog(press) {
     dialog.close();
   };
   field.addEventListener("keydown", (e) => e.key === "Enter" && void send());
-  dialog = openDialog("confirm", h("h2", null, t("tv.textTitle")), h("p", { class: "muted" }, t("tv.textLead")), field, h("footer", null, closeButton(() => dialog, t("common.cancel")), button(t("tv.textSend"), { class: "primary", onclick: () => void send() }, "check")));
+  dialog = openDialog("confirm", h("h2", null, t("tv.textTitle")), h("p", { class: "muted" }, t(page ? "tv.textLead.page" : "tv.textLead")), field, h("footer", null, closeButton(() => dialog, t("common.cancel")), button(t("tv.textSend"), { class: "primary", onclick: () => void send() }, "check")));
   field.focus();
 }
 

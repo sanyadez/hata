@@ -725,6 +725,8 @@ export function browserCalls(action: unknown, value: unknown): PageCall[] | null
   if (action === "back") return [{ method: "Runtime.evaluate", params: { expression: "history.back()" } }];
   if (action === "forward") return [{ method: "Runtime.evaluate", params: { expression: "history.forward()" } }];
   if (action === "reload") return [{ method: "Page.reload" }];
+  // the screen's own page, with the bookmarks: where the browser starts
+  if (action === "start") return [{ method: "Page.navigate", params: { url: "file://" + TV_BROWSER_HOME } }];
   if (action === "enter") return [{ method: "Input.dispatchKeyEvent", params: { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, text: "\r" } }, { method: "Input.dispatchKeyEvent", params: { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 } }];
   if (action === "up") return keyPress("PageUp", "PageUp", 33);
   if (action === "down") return keyPress("PageDown", "PageDown", 34);

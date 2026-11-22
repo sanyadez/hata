@@ -5428,6 +5428,8 @@
   "tv.key.textHint": "Type into the text field open on the screen",
   "tv.textTitle": "Type on the screen",
   "tv.textLead": "The text goes into the field currently open in the player on the screen: a search, a name, a password.",
+  "tv.textLead.page": "First click the field on the page (in the picture of the screen, or with the remote), then type here: the text goes where the cursor stands there — a search, a sign-in, a password.",
+  "tv.page.start": "Home",
   "tv.textSend": "Send",
   "tv.fullScreen": "Full screen",
   "tv.browserFrom": "Continued from the TV at the same position, with the same audio track and subtitles.",

@@ -291,6 +291,7 @@ test("the browser on the screen: its sound, its service, what a page may ask of 
   expect(cleanShowTime("30")).toBeNull();
   expect(cleanShowTime(86401)).toBeNull();
   expect(browserCalls("reload", undefined)).toEqual([{ method: "Page.reload" }]);
+  expect(browserCalls("start", "https://evil.example")).toEqual([{ method: "Page.navigate", params: { url: "file:///var/lib/hata-tv/screen.html" } }]);
   expect(browserCalls("text", "привіт")).toEqual([{ method: "Input.insertText", params: { text: "привіт" } }]);
   expect(browserCalls("text", "")).toBeNull();
   expect(browserCalls("text", "a\x00b")).toBeNull();
