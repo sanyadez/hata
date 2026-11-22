@@ -1212,7 +1212,8 @@ function paintAttentionHere() {
   const area = navCurrent();
   const head = view.querySelector(".area-head");
   // the top pages of a section: those with its head, and the lists of Computers and Apps
-  const top = head || ["machines", "apps"].includes(state.route.view);
+  // the overview of Integrations has a card of its own for what needs attention
+  const top = (head || ["machines", "apps"].includes(state.route.view)) && state.route.view !== "house";
   const list = isAdmin() && area && area !== "home" && top ? (state.overview?.attention ?? []).filter((item) => attentionArea(item) === area) : [];
   const was = document.getElementById("area-attention");
   if (!list.length) return void was?.remove();

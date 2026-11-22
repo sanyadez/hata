@@ -2679,10 +2679,39 @@ button.tv-stage-chip:hover { background: rgb(0 0 0 / 0.8); }
 /* the card says "Hide the screen" once: under the stage when there is room for it there */
 .tv-card:has(.tv-card-foot > .btn) .tv-stage.live > button.tv-stage-chip { display: none; }
 
-/* The overview of Integrations: a card for everything connected */
-.house-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; align-items: start; }
-.house-cards > .house-empty { grid-column: 1 / -1; }
-.house-card { display: flex; flex-direction: column; gap: 6px; color: inherit; text-decoration: none; }
-.house-card:hover { border-color: var(--accent); }
-.house-card-head { display: flex; align-items: center; gap: 12px; }
-.house-card-head strong { display: block; }
+/* The overview of Integrations: tiles of one height, the troubled ones first */
+.house-group { gap: 16px; }
+.house-group.trouble { border-color: var(--warn); }
+.house-group-head { display: flex; align-items: center; gap: 10px; }
+.house-group-head h2 { margin: 0; font-size: 15px; }
+.house-group-head > .ico { color: var(--muted); }
+.house-group.trouble .house-group-head > .ico { color: var(--warn); }
+.house-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
+.house-tile { height: 122px; box-sizing: border-box; padding: 14px; border: 1px solid var(--border); border-radius: 12px; display: grid; grid-template-rows: auto 1fr auto auto; gap: 6px; color: inherit; text-decoration: none; min-width: 0; }
+.house-tile:hover { border-color: var(--accent); }
+.house-tile.bad { border: 1.5px solid var(--danger); }
+.house-tile.warn { border: 1.5px solid var(--warn); }
+.house-tile-top { display: flex; align-items: center; gap: 10px; min-width: 0; grid-row: 1; }
+.house-tile-top > .state { flex: none; }
+.house-tile-icon { flex: none; width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center; background: var(--surface-2); }
+.house-tile-icon.builtin { background: var(--accent-soft); color: var(--accent); }
+.house-tile-name { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.house-tile-name strong, .house-tile-name span, .house-tile-line, .house-tile-warn { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.house-tile-name strong { font-size: 14px; }
+.house-tile-name span { font-size: 11.5px; color: var(--muted); }
+.house-tile-line { grid-row: 3; margin: 0; font-size: 12.5px; line-height: 1.4; }
+.house-tile-warn { grid-row: 4; margin: 0; font-size: 12px; line-height: 1.4; min-height: 1.4em; display: flex; align-items: center; gap: 6px; color: var(--warn); }
+.house-tile.bad .house-tile-warn { color: var(--danger); }
+.house-tile-warn > .ico { flex: none; width: 13px; height: 13px; }
+.house-tile-warn > span { overflow: hidden; text-overflow: ellipsis; }
+.card.pad.house-tools { display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
+.house-tools .seg-pill .muted { margin-left: 6px; }
+.house-search { display: flex; align-items: center; gap: 8px; flex: 0 1 300px; min-width: 200px; padding: 0 10px; border: 1px solid var(--border); border-radius: 10px; background: var(--surface); }
+.house-search input { border: 0; background: none; padding: 8px 0; flex: 1; min-width: 0; outline: none; }
+.house-found-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 8px; }
+.house-found-item { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 12px; background: var(--surface-2); min-width: 0; }
+.house-found-item .house-tile-icon { width: 32px; height: 32px; background: var(--surface); }
+.house-found-item .house-tile-name strong { font-size: 13.5px; }
+@media (max-width: 640px) {
+  .house-tiles { grid-template-columns: 1fr; gap: 8px; }
+}

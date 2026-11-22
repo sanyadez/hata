@@ -6353,5 +6353,21 @@
   "house.bt.on": "on",
   "house.bt.offChip": "off",
   "house.nothing": "Nothing is connected yet",
-  "house.nothingLead": "Home Assistant, cameras, torrents and other services of the home: connect them here and each gets a card and a tab of its own."
+  "house.nothingLead": "Home Assistant, cameras, torrents and other services of the home: connect them here and each gets a card and a tab of its own.",
+  "house.builtin": "built in",
+  "house.group.all": "All",
+  "house.group.trouble": "Needs attention",
+  "house.group.home": "Home",
+  "house.group.media": "Media",
+  "house.group.downloads": "Downloads",
+  "house.group.network": "Network",
+  "house.group.other": "Other",
+  "house.ofTotal": "{n} of {total}",
+  "house.search": "Find an integration",
+  "house.noMatch": "Nothing found",
+  "house.found.title": "Found nearby",
+  "house.found.lead": "{n} · Hata sees them but has not connected them",
+  "house.found.hide": "Hide",
+  "house.found.here": "an app of this server",
+  "house.found.around": "{address} · on the network"
 }

@@ -411,12 +411,18 @@ function houseEmpty(view, box) {
   );
 }
 
-// --- The overview of the section: everything connected, each a card leading to its own page ---
+// --- The overview of the section: everything connected, a tile each, the troubled ones first ---
 
-const houseUi = { ha: null, bt: null };
+const houseUi = { ha: null, bt: null, found: null, haFound: null, q: "", group: "all" };
+/** The group a kind of service stands in; the store's descriptions say none yet */
+const HOUSE_GROUPS = ["home", "media", "downloads", "network", "other"];
+const KIND_GROUP = { frigate: "home", qbittorrent: "downloads", transmission: "downloads", sonarr: "downloads", radarr: "downloads", lidarr: "downloads", prowlarr: "downloads", bazarr: "downloads", jellyfin: "media", immich: "media", plex: "media", navidrome: "media", audiobookshelf: "media", syncthing: "network", "adguard-home": "network", pihole: "network", "uptime-kuma": "network" };
+const GROUP_ICONS = { home: "home", media: "film", downloads: "download", network: "network", other: "grid" };
+const HOUSE_GROUPS_FROM = 10;
+const HOUSE_TOOLS_FROM = 13;
 
 function renderHouse() {
-  shell(areaHead("house", "overview", { actions: houseAdd() }), h("div", { id: "house-body", class: "house-cards" }, waitMark()));
+  shell(areaHead("house", "overview", { actions: houseAdd() }), h("div", { id: "house-body", class: "stack" }, waitMark()));
   void loadHouse();
 }
 
@@ -424,60 +430,131 @@ async function loadHouse() {
   const [ha, bt] = await Promise.all([hasModule("integrations") ? api("GET", "/api/ha").then((r) => r.servers, () => houseUi.ha ?? []) : [], hasModule("bluetooth") ? api("GET", "/api/bluetooth").catch(() => houseUi.bt) : null]);
   Object.assign(houseUi, { ha, bt });
   paintHouse();
+  // what could be connected: asked once a visit, it may take a few seconds
+  if (hasModule("integrations") && houseUi.found === null) {
+    houseUi.found = [];
+    const [found, haFound] = await Promise.all([api("GET", "/api/integrations/found").then((r) => r.found, () => []), api("GET", "/api/ha/found").catch(() => null)]);
+    Object.assign(houseUi, { found, haFound });
+    paintHouse();
+  }
 }
 
-/** One card of the overview: what it is, its state, a line of what it holds; the whole card opens its page */
-const houseCard = ({ href, icon: ic, name, kind, chip, line, warn }) =>
-  h(
-    "a",
-    { class: "card pad house-card", href },
-    h("div", { class: "house-card-head" }, h("span", { class: "app-icon sm" }, icon(ic)), h("div", { class: "grow" }, h("strong", null, name), kind && h("p", { class: "muted small" }, kind)), chip),
-    line && h("p", { class: "small" }, line),
-    warn && h("p", { class: "small warn-text" }, warn),
-  );
-
-function paintHouse() {
-  const box = document.getElementById("house-body");
-  if (!box || state.route.view !== "house") return;
-  const cards = [];
-  for (const x of houseUi.ha ?? [])
-    cards.push(
-      houseCard({
-        href: `#/house/ha/${x.id}`,
-        icon: "bulb",
-        name: x.name,
-        kind: ["Home Assistant", x.version].filter(Boolean).join(" · "),
-        chip: haChip(x),
-        line: x.online ? t("house.ha.line", { entities: x.entities, on: x.on }) : haError(x),
-        warn: [x.updates && t("house.ha.updates", { n: x.updates }), x.low && t("house.ha.low", { n: x.low })].filter(Boolean).join(" · "),
-      }),
-    );
+/** Everything the section holds, as the tiles show it: level bad / warn / ok, its group, a line and a warning */
+function houseItems() {
+  const items = [];
+  const trouble = (pred) => (state.overview?.attention ?? []).filter(pred);
+  const worst = (list) => (list.some((x) => x.severity === "danger") ? "bad" : list.length ? "warn" : "ok");
+  for (const x of houseUi.ha ?? []) {
+    const own = trouble((item) => item.code.startsWith("ha.") && item.detail?.host === x.id);
+    const warn = [x.updates && t("house.ha.updates", { n: x.updates }), x.low && t("house.ha.low", { n: x.low })].filter(Boolean).join(" · ");
+    items.push({ key: "ha:" + x.id, group: "home", href: `#/house/ha/${x.id}`, icon: "home", name: x.name, sub: ["Home Assistant", x.version].filter(Boolean).join(" · "), chip: haChip(x), line: x.online ? t("house.ha.line", { entities: x.entities, on: x.on }) : haError(x) || t("ha.offline"), warn: !x.online ? "" : own.length ? attentionWords(own[0]).title : warn, level: !x.online && x.error ? "bad" : own.length ? worst(own) : warn ? "warn" : "ok" });
+  }
   if (hasModule("integrations"))
     for (const c of svcConnections()) {
       const spec = svcSpecNow(c.kind);
-      cards.push(houseCard({ href: `#/house/x-${c.kind}/${c.id}`, icon: c.icon, name: c.name, kind: c.title !== c.name && c.title, chip: svcChip(c), line: c.online && spec ? svcNumbers(spec, c.values) : c.error ? t("service.offline") : "" }));
+      const own = trouble((item) => item.code.startsWith("integration.") && item.detail?.host === c.id);
+      let address = "";
+      try {
+        address = new URL(c.url).host;
+      } catch {}
+      items.push({ key: "x:" + c.id, group: KIND_GROUP[c.kind] ?? "other", href: `#/house/x-${c.kind}/${c.id}`, icon: c.icon, name: c.name, sub: c.title !== c.name ? c.title : address, chip: svcChip(c), line: c.online && spec ? svcNumbers(spec, c.values) : c.error ? t("service.offline") : "", warn: own.length ? attentionWords(own[0]).title : "", level: c.error ? "bad" : worst(own) });
     }
-  const connected = cards.length;
   if (hasModule("tv")) {
     const tv = state.tvNow;
     const line = tv?.page ? t("tv.page.showing", { name: tv.page.title || tv.page.url }) : tv?.playing ? t("tv.playing", { name: tv.playing.title }) : t(tv?.on ? "tv.nothingTitle" : "house.tv.off");
-    cards.push(houseCard({ href: "#/house/tv", icon: "tv", name: t("area.house.tv"), chip: h("span", { class: "state " + (tv?.on || tv?.page ? "running" : "") }, t(tv?.page ? "house.tv.browser" : tv?.on ? "house.tv.kodi" : "house.tv.offChip")), line }));
+    items.push({ key: "tv", builtin: true, group: "media", href: "#/house/tv", icon: "tv", name: t("area.house.tv"), sub: t("house.builtin"), chip: h("span", { class: "state " + (tv?.on || tv?.page ? "running" : "") }, t(tv?.page ? "house.tv.browser" : tv?.on ? "house.tv.kodi" : "house.tv.offChip")), line, level: "ok" });
   }
   if (hasModule("music")) {
     const now = state.musicNow;
-    cards.push(houseCard({ href: "#/house/music", icon: "music", name: t("area.house.music"), chip: now && h("span", { class: "state " + (now.paused ? "" : "running") }, t(now.paused ? "house.music.paused" : "house.music.playing")), line: now ? now.title : t("music.idle") }));
+    items.push({ key: "music", builtin: true, group: "media", href: "#/house/music", icon: "music", name: t("area.house.music"), sub: t("house.builtin"), chip: now && h("span", { class: "state " + (now.paused ? "" : "running") }, t(now.paused ? "house.music.paused" : "house.music.playing")), line: now ? now.title : t("music.idle"), level: "ok" });
   }
   if (hasModule("bluetooth")) {
     const bt = houseUi.bt;
     const paired = (bt?.devices ?? []).filter((d) => d.paired);
     const line = !bt ? "" : bt.state === "ready" ? t("house.bt.line", { paired: paired.length, connected: paired.filter((d) => d.connected).length }) : t("house.bt." + bt.state);
-    cards.push(houseCard({ href: "#/house/bluetooth", icon: "bluetooth", name: t("area.house.bluetooth"), chip: bt && h("span", { class: "state " + (bt.state === "ready" ? "running" : "") }, t(bt.state === "ready" ? "house.bt.on" : "house.bt.offChip")), line }));
+    items.push({ key: "bt", builtin: true, group: "home", href: "#/house/bluetooth", icon: "bluetooth", name: t("area.house.bluetooth"), sub: t("house.builtin"), chip: bt && h("span", { class: "state " + (bt.state === "ready" ? "running" : "") }, t(bt.state === "ready" ? "house.bt.on" : "house.bt.offChip")), line, level: "ok" });
   }
-  put(
-    box,
-    !connected && hasModule("integrations") && h("section", { class: "card pad empty-state house-empty" }, h("span", { class: "app-icon plus" }, icon("plug")), h("h2", null, t("house.nothing")), h("p", { class: "muted" }, t("house.nothingLead")), houseAdd()),
-    ...cards,
+  return items;
+}
+
+/** One tile: always the same height — every line one line, the warning's place kept when there is none */
+const houseTile = (x) =>
+  h(
+    "a",
+    { class: `house-tile ${x.level}`, href: x.href },
+    h("div", { class: "house-tile-top" }, h("span", { class: "house-tile-icon" + (x.builtin ? " builtin" : "") }, icon(x.icon)), h("div", { class: "house-tile-name" }, h("strong", null, x.name), h("span", null, x.sub)), x.chip),
+    h("p", { class: "house-tile-line" }, x.line || " "),
+    h("p", { class: "house-tile-warn" }, x.warn ? [icon(x.level === "bad" ? "alert" : "alert"), h("span", null, x.warn)] : " "),
   );
+
+/** Things that could be connected and are not: this server's apps of a known kind, Home Assistants around */
+function houseFound() {
+  const out = [];
+  for (const f of houseUi.found ?? []) out.push({ name: f.title, where: t("house.found.here"), icon: f.icon, connect: () => svcConnectDialog(f.kind, null, f.url) });
+  if (houseUi.haFound) {
+    Object.assign(haFoundUi, { found: houseUi.haFound.found, address: houseUi.haFound.address });
+    // the store's Home Assistant of this server is offered only while none of this server is connected
+    const hereOn = (houseUi.ha ?? []).some((x) => x.here);
+    for (const f of haFound()) if (!(hereOn && f.kind === t("ha.foundHere"))) out.push({ name: f.name, where: f.kind === "Home Assistant" ? t("house.found.around", { address: f.url.replace(/^https?:\/\//, "") }) : f.kind, icon: "home", connect: f.connect });
+  }
+  return out;
+}
+
+function paintHouse() {
+  const box = document.getElementById("house-body");
+  if (!box || state.route.view !== "house") return;
+  // the search keeps its focus and its place while the tiles under it change
+  const typing = document.activeElement?.id === "house-q";
+  const all = houseItems();
+  const q = houseUi.q.trim().toLowerCase();
+  const matches = (x) => !q || `${x.name} ${x.sub} ${x.line}`.toLowerCase().includes(q);
+  const troubled = all.filter((x) => x.level !== "ok");
+  const grouped = all.length >= HOUSE_GROUPS_FROM;
+  const tools = all.length >= HOUSE_TOOLS_FROM;
+  const pick = tools ? houseUi.group : "all";
+  const shownIn = (x) => matches(x) && (pick === "all" || (pick === "trouble" ? x.level !== "ok" : x.group === pick));
+  const tiles = (list) => h("div", { class: "house-tiles" }, list.map(houseTile));
+  const groupCard = (id, list, total) =>
+    list.length > 0 &&
+    h(
+      "section",
+      { class: "card pad house-group" + (id === "trouble" ? " trouble" : "") },
+      h("div", { class: "house-group-head" }, icon(id === "trouble" ? "alert" : GROUP_ICONS[id] ?? "grid"), h("h2", null, t("house.group." + id)), h("span", { class: "muted small" }, total > list.length ? t("house.ofTotal", { n: list.length, total }) : list.length)),
+      tiles(list),
+    );
+  const parts = [];
+  if (tools) {
+    const counts = { all: all.length, trouble: troubled.length };
+    for (const g of HOUSE_GROUPS) counts[g] = all.filter((x) => x.group === g).length;
+    const segs = ["all", "trouble", ...HOUSE_GROUPS].filter((g) => g === "all" || counts[g] > 0);
+    const field = h("input", { type: "search", id: "house-q", placeholder: t("house.search"), value: houseUi.q, oninput: (e) => ((houseUi.q = e.target.value), paintHouse()) });
+    parts.push(h("section", { class: "card pad house-tools" }, h("label", { class: "search-field house-search" }, icon("search"), field), h("div", { class: "seg-pills" }, segs.map((g) => h("button", { type: "button", class: "seg-pill" + (pick === g ? " active" : ""), onclick: () => ((houseUi.group = g), paintHouse()) }, t("house.group." + g), " ", h("span", { class: "muted" }, counts[g]))))));
+  }
+  const shownTrouble = troubled.filter(shownIn);
+  if (pick === "all" || pick === "trouble") parts.push(groupCard("trouble", shownTrouble, shownTrouble.length));
+  if (pick !== "trouble") {
+    const rest = all.filter((x) => x.level === "ok" && shownIn(x));
+    if (grouped) for (const g of HOUSE_GROUPS) parts.push(groupCard(g, rest.filter((x) => x.group === g), all.filter((x) => x.group === g).length));
+    else if (rest.length) parts.push(h("section", { class: "card pad house-group" }, tiles(rest)));
+  }
+  if (!all.length && hasModule("integrations")) parts.push(h("section", { class: "card pad empty-state" }, h("span", { class: "app-icon plus" }, icon("plug")), h("h2", null, t("house.nothing")), h("p", { class: "muted" }, t("house.nothingLead")), houseAdd()));
+  else if (all.length && !parts.some(Boolean)) parts.push(h("p", { class: "card pad muted" }, t("house.noMatch")));
+  const found = houseFound();
+  if (found.length && localStorage.getItem("hata.house.foundHidden") !== String(found.length))
+    parts.push(
+      h(
+        "section",
+        { class: "card pad house-found" },
+        h("div", { class: "house-group-head" }, icon("search"), h("h2", null, t("house.found.title")), h("span", { class: "muted small grow" }, t("house.found.lead", { n: found.length })), h("button", { type: "button", class: "link small", onclick: () => (localStorage.setItem("hata.house.foundHidden", String(found.length)), paintHouse()) }, t("house.found.hide"))),
+        h("div", { class: "house-found-list" }, found.map((f) => h("div", { class: "house-found-item" }, h("span", { class: "house-tile-icon" }, icon(f.icon)), h("div", { class: "house-tile-name" }, h("strong", null, f.name), h("span", null, f.where)), button(t("integrations.connect"), { class: "small", onclick: f.connect }, "plus")))),
+      ),
+    );
+  put(box, ...parts.filter(Boolean));
+  if (typing) {
+    const field = document.getElementById("house-q");
+    field?.focus();
+    field?.setSelectionRange(field.value.length, field.value.length);
+  }
 }
 
 function renderHa() {

@@ -6353,5 +6353,21 @@
   "house.bt.on": "увімкнено",
   "house.bt.offChip": "вимкнено",
   "house.nothing": "Ще нічого не підключено",
-  "house.nothingLead": "Home Assistant, камери, торенти та інші сервіси дому: підключіть їх тут, і кожен матиме свою картку й вкладку."
+  "house.nothingLead": "Home Assistant, камери, торенти та інші сервіси дому: підключіть їх тут, і кожен матиме свою картку й вкладку.",
+  "house.builtin": "вбудований",
+  "house.group.all": "Усі",
+  "house.group.trouble": "Потребує уваги",
+  "house.group.home": "Дім",
+  "house.group.media": "Медіа",
+  "house.group.downloads": "Завантаження",
+  "house.group.network": "Мережа",
+  "house.group.other": "Інше",
+  "house.ofTotal": "{n} з {total}",
+  "house.search": "Знайти інтеграцію",
+  "house.noMatch": "Нічого не знайдено",
+  "house.found.title": "Знайдено поруч",
+  "house.found.lead": "{n} · Hata бачить, але ще не підключила",
+  "house.found.hide": "Сховати",
+  "house.found.here": "застосунок цього сервера",
+  "house.found.around": "{address} · у мережі"
 }

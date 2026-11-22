@@ -1125,6 +1125,8 @@ function storeButton(category = "") {
   return h("a", { class: "btn", href: "#/store", onclick: () => (state.storeFilter.category = category) }, icon("store"), h("span", null, t("area.apps.store")));
 }
 
+/** The name of a page of Integrations: its tab's, or a connected service's kind */
+const houseLabel = (tabs, at) => tabs.find((tab) => tab.id === at)?.label ?? (at.startsWith("x-") ? (svcConnections().find((c) => c.kind === at.slice(2))?.title ?? at.slice(2)) : t(`area.house.${at}`));
 function areaHead(area, at, { meta = null, metaId = null, actions = null, actionsId = null } = {}) {
   const tabs = areaTabs(area);
   const headTab = tabs.find((tab) => tab.head);
@@ -1141,12 +1143,15 @@ function areaHead(area, at, { meta = null, metaId = null, actions = null, action
             h("nav", { class: "crumbs" }, h("a", { href: "#/machines" }, t("nav.machines")), icon("chevron"), h("span", null, t("tree.thisServer"))),
             h("div", { class: "app-head", menu: serverMenu }, h("span", { class: "machine-icon" }, icon("server")), h("div", { class: "grow" }, h("div", { class: "app-title" }, h("h1", null, state.overview?.system?.hostname ?? t("tree.thisServer")), h("span", { class: "state running" }, t("status.running"))), h("p", { class: "meta", id: "server-meta" }, serverMeta()))),
           )
-        : h("div", { class: "area-name" }, h("h1", null, t("area." + area)), h("p", { class: "meta", id: metaId }, meta ?? t(`area.${area}.lead`))),
+        : area === "house" && at !== "overview"
+          ? // Integrations has no tabs: its overview lists everything, a page of one leads back to it
+            h("div", { class: "area-name" }, h("nav", { class: "crumbs" }, h("a", { href: "#/house" }, t("area.house")), icon("chevron"), h("span", null, houseLabel(tabs, at))), h("h1", null, houseLabel(tabs, at)))
+          : h("div", { class: "area-name" }, h("h1", null, t("area." + area)), h("p", { class: "meta", id: metaId }, meta ?? t(`area.${area}.lead`))),
       area === "server"
         ? h("div", { class: "actions" }, h("a", { class: "btn", href: "#/terminal" }, icon("terminal"), h("span", null, t("terminal.title"))), button(t("power.restart"), { onclick: () => serverPowerDialog("reboot") }, "refresh"), h("button", { type: "button", class: "btn square", "aria-label": t("app.more"), "aria-haspopup": "menu", onclick: (e) => serverMenu(underButton(e.currentTarget)) }, icon("more")))
         : (actions || actionsId || (headTab && at !== headTab.id)) && h("div", { class: "actions", id: actionsId }, actions, headTab && at !== headTab.id && storeButton()),
     ),
-    tabs.length > 1 && h("nav", { class: "tabs" }, tabs.filter((tab) => !tab.head).map((tab) => h("a", { class: "tab" + (tab.id === at ? " active" : ""), href: tabHash(area, tab), "aria-current": tab.id === at ? "page" : null }, tab.label ?? t(`area.${area}.${tab.id}`), area === "server" && serverTabCount(tab.id))),),
+    tabs.length > 1 && area !== "house" && h("nav", { class: "tabs" }, tabs.filter((tab) => !tab.head).map((tab) => h("a", { class: "tab" + (tab.id === at ? " active" : ""), href: tabHash(area, tab), "aria-current": tab.id === at ? "page" : null }, tab.label ?? t(`area.${area}.${tab.id}`), area === "server" && serverTabCount(tab.id))),),
   );
 }
 
