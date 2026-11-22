@@ -76,8 +76,10 @@ async function connected(): Promise<NonNullable<typeof link> | null> {
       return;
     }
     if (typeof said.id === "number") {
-      mine.calls.get(said.id)?.(said.error ? null : (said.result ?? {}));
+      // only an answer to a question that was asked here is taken: the number comes from the browser
+      const waiting = mine.calls.get(said.id);
       mine.calls.delete(said.id);
+      if (typeof waiting === "function") waiting(said.error ? null : (said.result ?? {}));
       // the remote's "home" button, heard by the script every page gets
     } else if (said.method === "Runtime.bindingCalled" && said.params?.name === "hataScreen" && said.params.payload === "home") void leaveBrowser().catch(() => {});
     else if (said.method === "Page.frameNavigated" && !said.params?.frame?.parentId) void refreshPage();
