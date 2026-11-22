@@ -2426,7 +2426,7 @@ dialog.framed .dlg-body footer { position: sticky; bottom: -20px; margin: 0 -20p
 .tv-switch > .seg-pills { flex: none; width: auto; }
 .tv-media > .tv-media-vol { width: 110px; flex: 0 0 110px; }
 .tv-media > .tv-media-pos { flex: 1 1 200px; }
-.card.pad.tv-switch { flex-direction: row; }
+.card.pad.tv-switch { display: flex; flex-direction: row; }
 .card.pad.tv-switch > * { margin: 0; }
 @media (max-width: 640px) {
   .tv-switch > .seg-pills { width: 100%; flex-wrap: nowrap; }

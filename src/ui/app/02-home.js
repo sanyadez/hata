@@ -860,7 +860,8 @@ function fitBlock(block) {
 
 function paintGrid() {
   const pg = document.getElementById("pg");
-  if (!pg || !state.overview || gridUi.drag) return;
+  // a card's picture has this device's whole screen: taken out of the page for a redraw, it would fall back
+  if (!pg || !state.overview || gridUi.drag || pg.contains(document.fullscreenElement)) return;
   const cols = gridColumns();
   const free = cols === state.overview.grid.cols;
   if (!free) gridUi.arranging = false;

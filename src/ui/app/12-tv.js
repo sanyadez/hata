@@ -879,17 +879,29 @@ function tvPreview() {
   // the stream of pictures: one <img> the browser keeps renewing by itself
   let stream = null;
   let streamAfter = 0;
+  let streamAt = 0;
+  let renewing = false;
   const load = () => {
     // off the page, or the tab not looked at: nothing is asked of the screen
     if (!box.isConnected) return void delete box.dataset.on;
     const whole = document.fullscreenElement === box;
     if (!whole && Date.now() >= streamAfter) {
-      if (!stream || !stream.isConnected) {
+      // a stream ends without a word when the server restarts or the network blinks: a new one is asked for now and then,
+      // and takes the old one's place only once its first picture is there
+      if (!stream || !stream.isConnected || (Date.now() - streamAt > 20_000 && !renewing)) {
         const img = h("img", { alt: "", draggable: false });
-        img.onerror = () => ((stream = null), (streamAfter = Date.now() + 30_000), next(0));
+        const first = !stream || !stream.isConnected;
+        renewing = !first;
+        img.onerror = () => ((renewing = false), stream === img || first ? ((stream = null), (streamAfter = Date.now() + 30_000), next(0)) : null);
+        img.onload = () => {
+          renewing = false;
+          streamAt = Date.now();
+          if (stream && stream !== img) stream.src = "";
+          stream = img;
+          if (box.isConnected && document.fullscreenElement !== box) box.replaceChildren(img, grow);
+        };
         img.src = `/api/tv/stream?n=${++n}`;
-        stream = img;
-        box.replaceChildren(img, grow);
+        if (first) ((stream = img), (streamAt = Date.now()), box.replaceChildren(img, grow));
       }
       return next(2000);
     }
@@ -1105,6 +1117,21 @@ function tvMarkIcon(mark) {
 }
 const tvHost = (url) => url.replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, "").split("/")[0];
 
+/** The screen's own page (the time, the day, the bookmarks as large tiles): shown from any mode */
+async function tvStartPage(tv) {
+  tvWorking(t(tv.screen === "browser" ? "tv.switching.page" : "tv.switching.browser"));
+  tvUi.busy = true;
+  try {
+    if (tv.screen === "browser") await api("POST", "/api/tv/browser", { action: "start" });
+    else await api("PUT", "/api/tv", { screen: "browser" });
+    state.tv = await api("GET", "/api/tv");
+  } catch (e) {
+    toast(errorText(e), "error");
+  }
+  tvUi.busy = false;
+  if (state.route.view === "tv" && state.tv) paintTv();
+}
+
 /**
  * The bookmarks of the screen as tiles, in every mode: a press shows the site on the TV (the screen
  * goes to the browser), the rest is under "⋯"; "Change" turns the tiles into ones that are moved and removed.
@@ -1154,7 +1181,7 @@ function tvMarksCard(tv, keep) {
       lead: !b.installed ? null : tv.screen === "browser" ? null : t("tv.marks.switches"),
       actions: marks.length > 0 && button(t(editing ? "tv.marks.done" : "tv.marks.change"), { class: "small" + (editing ? " primary" : ""), onclick: () => ((tvUi.editMarks = !editing), paintTv()) }, editing ? "check" : "edit"),
     },
-    h("div", { class: "tv-marks" }, marks.map(tile), !editing && h("button", { type: "button", class: "tv-mark-tile add", onclick: add }, icon("plus"), h("span", null, t("tv.marks.new")))),
+    h("div", { class: "tv-marks" }, !editing && b.installed && h("div", { class: "tv-mark-tile" + (tv.screen === "browser" && !b.url ? " on" : "") }, h("button", { type: "button", class: "tv-mark-main", onclick: () => void tvStartPage(tv) }, h("span", { class: "tv-mark-icon kodi", "aria-hidden": "true" }, icon("home")), h("span", { class: "tv-mark-words" }, h("strong", { class: "clip" }, t("tv.marks.start")), h("span", { class: "muted clip" }, t("tv.marks.startHint"))))), marks.map(tile), !editing && h("button", { type: "button", class: "tv-mark-tile add", onclick: add }, icon("plus"), h("span", null, t("tv.marks.new")))),
   );
 }
 
