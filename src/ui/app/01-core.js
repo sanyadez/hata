@@ -263,8 +263,48 @@ function openDialog(className, ...content) {
     if (pressedOutside && outside(e)) dialog.close();
   });
   document.body.append(dialog);
+  frameDialog(dialog);
   dialog.showModal();
   return dialog;
+}
+
+/** Windows that keep a layout of their own: menus, the lists of a select, sheets, the viewer of files */
+const UNFRAMED_RE = /(^|\s)(menu|dropdown|nav-sheet|add-dialog|viewer)(\s|$)/;
+
+/**
+ * Every window is built the same way, whatever its maker handed over: a head (the title, a line of
+ * explanation under it, the cross — always), a body that alone scrolls, and the foot with the buttons,
+ * which stays in sight. The makers go on writing `h2, …, footer`; this puts the parts where they
+ * belong, and again when a window's content is replaced or added to.
+ */
+function frameDialog(dialog) {
+  if (UNFRAMED_RE.test(dialog.className)) return;
+  dialog.classList.add("framed");
+  const only = dialog.children.length === 1 && dialog.firstElementChild.tagName === "FORM" ? dialog.firstElementChild : null;
+  const root = only ?? dialog;
+  const frame = () => {
+    const kids = [...root.childNodes].filter((node) => node.nodeType === 1 || node.textContent.trim());
+    const framed = (cls) => kids.find((node) => node.classList?.contains(cls));
+    let body = framed("dlg-body");
+    if (framed("dlg-head") && body) {
+      // something was added to a window that stands: it belongs to the body, a footer to the foot's place
+      for (const node of kids) if (!node.classList?.contains("dlg-head") && node !== body && node.tagName !== "FOOTER") body.append(node);
+      return;
+    }
+    const title = kids.find((node) => node.tagName === "HEADER") ?? kids.find((node) => node.tagName === "H2");
+    const after = title?.tagName === "H2" ? kids[kids.indexOf(title) + 1] : null;
+    const lead = after?.tagName === "P" && after.classList.contains("muted") && !after.classList.contains("error") ? after : null;
+    const foot = kids.findLast((node) => node.tagName === "FOOTER");
+    const cross = title?.querySelector?.(`.icon-btn[aria-label="${CSS.escape(t("common.close"))}"]`) ? null : h("button", { type: "button", class: "icon-btn dlg-x", "aria-label": t("common.close"), onclick: () => dialog.close() }, icon("x"));
+    const head = h("div", { class: "dlg-head" }, h("div", { class: "dlg-title" }, title, lead), cross);
+    body = h("div", { class: "dlg-body" }, kids.filter((node) => node !== title && node !== lead && node !== foot));
+    root.replaceChildren(head, body, ...(foot ? [foot] : []));
+  };
+  frame();
+  new MutationObserver(() => {
+    const stray = [...root.children].some((node) => !node.classList.contains("dlg-head") && !node.classList.contains("dlg-body") && node.tagName !== "FOOTER");
+    if (stray || !root.querySelector(":scope > .dlg-head")) frame();
+  }).observe(root, { childList: true });
 }
 
 /**

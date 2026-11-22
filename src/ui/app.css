@@ -2307,3 +2307,42 @@ a.link-name { text-decoration: underline; text-decoration-color: var(--border-st
 .power-times .field { width: 140px; }
 .power-days { display: flex; gap: 6px; flex-wrap: wrap; }
 .day-tick { display: inline-flex; gap: 6px; align-items: center; padding: 4px 10px; border: 1px solid var(--border); border-radius: var(--radius-sm); }
+
+/* --- Windows: one frame for all ------------------------------------------------------------------
+   A head (title, a line under it, the cross), a body that alone scrolls, a foot that stays in sight.
+   Three widths: a question (confirm), a form (the plain window and `wide`), two columns or wide text
+   (`xwide` and the windows named below). Under 640 px every window is a sheet from the bottom. */
+dialog.framed { width: min(560px, calc(100vw - 32px)); max-height: calc(100dvh - 80px); border-radius: 16px; box-shadow: 0 18px 48px rgb(0 0 0 / 40%); }
+dialog.framed.confirm { width: min(420px, calc(100vw - 32px)); }
+dialog.framed:is(.xwide, .disk, .snapshots, .tile-folder, .update-dialog) { width: min(880px, calc(100vw - 32px)); }
+dialog.framed::backdrop { background: rgb(0 0 0 / 45%); }
+dialog.framed[open] { display: flex; flex-direction: column; gap: 0; padding: 0; overflow: hidden; }
+dialog.framed > form { display: flex; flex-direction: column; gap: 0; min-height: 0; flex: 1; }
+.dlg-head { display: flex; gap: 12px; align-items: flex-start; padding: 18px 20px 16px; flex: none; }
+.dlg-title { display: grid; gap: 4px; flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.dlg-title h2 { font-size: 19px; font-weight: 600; line-height: 32px; }
+.dlg-title header h2 { line-height: 1.3; }
+.dlg-title > p { font-size: 13px; margin: 0; }
+.dlg-x { flex: none; width: 32px; height: 32px; }
+.dlg-x .ico { width: 18px; height: 18px; }
+.dlg-body { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; align-content: start; padding: 0 20px 20px; overflow-y: auto; overflow-x: hidden; min-height: 0; flex: 1; }
+.dlg-title > header { align-items: flex-start; width: 100%; }
+.dlg-title > header > :first-child { flex: 1; min-width: 0; }
+.dlg-body > form { display: grid; gap: 16px; }
+dialog.framed footer { flex: none; flex-wrap: nowrap; gap: 8px; padding: 14px 20px; border-top: 1px solid var(--border); }
+dialog.framed footer > :first-child { margin-right: 0; }
+dialog.framed footer > :is(.danger-text, .to-left) { margin-right: auto; order: -1; }
+dialog.framed footer .btn { white-space: nowrap; }
+dialog.framed footer .btn:disabled { opacity: 1; background: var(--surface-2); color: var(--text-faint, var(--muted)); border-color: transparent; }
+@media (max-width: 639px) {
+  dialog.framed, dialog.framed:is(.confirm, .xwide, .disk, .snapshots, .tile-folder, .update-dialog) { width: 100vw; max-width: none; max-height: calc(100dvh - 24px); margin: auto 0 0; border-radius: 20px 20px 0 0; border-bottom: 0; }
+  .dlg-head { padding: 16px 16px 14px; }
+  .dlg-body { padding: 0 16px 16px; }
+  dialog.framed footer { flex-direction: column; align-items: stretch; padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); }
+  dialog.framed footer > * { width: 100%; justify-content: center; min-height: 44px; margin: 0; }
+  dialog.framed footer > .primary { order: -2; }
+  dialog.framed footer > :is(.danger-text, .to-left) { order: 9; margin: 0; }
+}
+/* a window that draws its steps inside one block keeps its foot there: it still stays in sight */
+dialog.framed .dlg-body footer { position: sticky; bottom: -20px; margin: 0 -20px -20px; background: var(--surface); z-index: 1; }
+@media (max-width: 639px) { dialog.framed .dlg-body footer { bottom: -16px; margin: 0 -16px -16px; } }
