@@ -650,7 +650,8 @@ async function loadTv() {
     if (!state.tv) put(document.getElementById("tv-body"), h("section", { class: "card pad" }, h("p", { class: "error" }, errorText(e))));
   }
   // a slider under the finger or a list that is open is not redrawn under the person
-  if (state.tv && !tvUi.busy && !document.querySelector("dialog[open]:not(.tv-drop)") && !document.querySelector("#tv-body input[type=range]:active")) paintTv();
+  // nor the picture of the screen while it has this device's whole screen: taken out of the page for a moment, it would fall back
+  if (state.tv && !tvUi.busy && !document.fullscreenElement && !document.querySelector("dialog[open]:not(.tv-drop)") && !document.querySelector("#tv-body input[type=range]:active")) paintTv();
   // while the player runs the page keeps up with what plays
   tvUi.timer = setTimeout(loadTv, state.tv?.running || state.tv?.browser?.running ? 2000 : 8000);
 }
