@@ -2449,3 +2449,9 @@ dialog.framed .dlg-body footer { position: sticky; bottom: -20px; margin: 0 -20p
 .tv-block-keys .tvr-round { width: 36px; height: 36px; }
 .tv-block-body > .tv-frame { width: 100%; height: 100%; min-height: 0; object-fit: contain; background: #0b0a09; border-radius: 10px; }
 .tv-console { margin: 0; padding: 12px 14px; border-radius: 10px; background: #0b0a09; color: #cfc8bf; font: 11.5px/1.45 var(--font-mono, monospace); overflow: hidden; white-space: pre; min-height: 0; display: flex; flex-direction: column; justify-content: flex-end; }
+.tv-preview video { display: block; width: 100%; height: 100%; object-fit: contain; background: #000; }
+.tv-preview:fullscreen video { width: 100vw; height: 100vh; }
+.tv-preview-sound { position: absolute; right: 48px; top: 8px; display: grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 8px; background: rgb(0 0 0 / 0.55); color: #fff; cursor: pointer; opacity: 0; transition: opacity 0.15s; }
+.tv-preview:hover .tv-preview-sound, .tv-preview-sound:focus-visible { opacity: 1; }
+@media (hover: none) { .tv-preview-sound { opacity: 1; } }
+.tv-preview-sound .ico { width: 18px; height: 18px; }

@@ -800,10 +800,11 @@ function tvPreview() {
   const act = (action, value) => api("POST", "/api/tv/browser", { action, value }).then(() => ((quick = 6), next(150)), (e) => toast(errorText(e), "error"));
   const at = (e) => {
     // the picture itself: on the whole screen of this device it may stand inside bars
-    const img = box.querySelector("img");
+    const img = box.querySelector("video, img");
     const r = (img ?? box).getBoundingClientRect();
     // on a screen of another shape the picture keeps its own and stands between bars: the place is counted on the picture, not on its frame
-    const shape = img?.naturalWidth ? img.naturalWidth / img.naturalHeight : r.width / r.height;
+    const [nw, nh] = [img?.videoWidth || img?.naturalWidth, img?.videoHeight || img?.naturalHeight];
+    const shape = nw ? nw / nh : r.width / r.height;
     const w = Math.min(r.width, r.height * shape);
     const hgt = w / shape;
     const [left, top] = [r.left + (r.width - w) / 2, r.top + (r.height - hgt) / 2];
@@ -857,9 +858,53 @@ function tvPreview() {
   }, { passive: false });
   let timer = 0;
   const next = (ms) => (clearTimeout(timer), (timer = setTimeout(load, ms)));
+  // live video, when the browser on the screen can send it: asked for once, and again a while after it failed or broke;
+  // the frames go on until the video really plays and take over again when it stops
+  let live = null;
+  let liveAfter = 0;
+  const sound = h("button", { type: "button", class: "tv-preview-sound", title: t("tv.page.liveSound"), "aria-label": t("tv.page.liveSound"), onclick: (e) => { e.stopPropagation(); const v = box.querySelector("video"); if (v) ((v.muted = !v.muted), sound.replaceChildren(icon(v.muted ? "volumeOff" : "volume"))); } }, icon("volumeOff"));
+  const endLive = (wait) => {
+    live?.pc.close();
+    live = null;
+    liveAfter = Date.now() + wait;
+    box.classList.remove("live");
+    next(0);
+  };
+  const tryLive = async () => {
+    if (live || Date.now() < liveAfter || typeof RTCPeerConnection !== "function") return;
+    const pc = new RTCPeerConnection();
+    const mine = (live = { pc, playing: false });
+    try {
+      pc.addTransceiver("video", { direction: "recvonly" });
+      pc.addTransceiver("audio", { direction: "recvonly" });
+      const video = h("video", { autoplay: true, playsInline: true, muted: true });
+      pc.ontrack = (e) => (video.srcObject = e.streams[0]);
+      video.addEventListener("playing", () => {
+        if (live !== mine || !box.isConnected) return;
+        mine.playing = true;
+        box.classList.add("live");
+        box.replaceChildren(video, grow, sound);
+      });
+      pc.onconnectionstatechange = () => ["failed", "closed", "disconnected"].includes(pc.connectionState) && live === mine && endLive(20_000);
+      await pc.setLocalDescription(await pc.createOffer());
+      await new Promise((done) => {
+        pc.onicegatheringstatechange = () => pc.iceGatheringState === "complete" && done();
+        setTimeout(done, 2000);
+      });
+      const answer = await api("POST", "/api/tv/live", { sdp: pc.localDescription.sdp });
+      if (live !== mine) return;
+      await pc.setRemoteDescription({ type: "answer", sdp: answer.sdp });
+      // connected yet nothing plays: the frames stay, and it is tried again much later
+      setTimeout(() => live === mine && !mine.playing && endLive(10 * 60_000), 10_000);
+    } catch {
+      if (live === mine) endLive(10 * 60_000);
+    }
+  };
   const load = () => {
     // off the page, or the tab not looked at: nothing is asked of the screen
-    if (!box.isConnected) return void delete box.dataset.on;
+    if (!box.isConnected) return void (live?.pc.close(), (live = null), box.classList.remove("live"), delete box.dataset.on);
+    void tryLive();
+    if (live?.playing) return next(2000);
     if (document.hidden) return next(2000);
     const img = document.createElement("img");
     img.alt = "";
