@@ -833,7 +833,6 @@ function tvBlock(el) {
       b.installed && { label: t("tv.card.site"), icon: "link", run: () => tvSiteDialog((url) => void go("url", url)) },
       { label: t("tv.link") + "…", icon: "play", run: playLinkDialog },
       { label: t("tv.card.file"), icon: "folder", href: filesHash(tv.folders?.[0] ?? state.settings?.dataRoot ?? "/") },
-      tv.screen === "kodi" && tv.answers && { label: t("tv.remote"), icon: "remote", run: () => tvDropdown(at) },
       { label: t("tv.openPage"), icon: "arrow", href: "#/house/tv" },
     ]);
   };
@@ -871,7 +870,7 @@ function tvBlock(el) {
       : tv.screen === "browser"
         ? line(t("tv.noVideoShort"), button(t("tv.stage.show"), { class: "small", onclick: toPage }, "eye"))
         : tv.screen === "kodi" && tv.answers
-          ? line(t("tv.padHint"), button(t("tv.remote"), { class: "small", onclick: (e) => tvDropdown(e.currentTarget) }, "remote"))
+          ? h("div", { class: "tv-card-foot keys" }, [["back", "undo", t("tv.key.back"), ""], ["left", "chevron", t("tv.key.left"), "turn-left"], ["up", "chevron", t("tv.key.up"), "turn-up"], ["select", "", "OK", "ok"], ["down", "chevron", t("tv.key.down"), "turn-down"], ["right", "chevron", t("tv.key.right"), ""]].map(([action, iconName, label, cls]) => h("button", { type: "button", class: "tvr-round " + cls, title: label, "aria-label": label, onclick: () => api("POST", "/api/tv/do", { action }).catch((e) => toast(errorText(e), "error")) }, iconName ? icon(iconName) : "OK")))
           : null;
     put(body, tvStage(tv, { card: true, go, media: m }), h("div", { class: "tv-card-side" }, h("strong", { class: "tv-card-title" }, title), sub && h("span", { class: "tv-card-sub muted mono clip" }, sub), foot));
   };
@@ -1171,6 +1170,8 @@ function tvDropdown(at) {
   at.classList.add("open");
   const r = at.getBoundingClientRect();
   placeAt(dialog, { x: r.right - dialog.offsetWidth, y: r.bottom + 6 });
+  // it grows once the player has answered: never past the window's lower edge, it scrolls inside instead
+  if (window.innerWidth > 760) dialog.style.maxHeight = `${Math.max(240, window.innerHeight - dialog.getBoundingClientRect().top - 8)}px`;
   void load();
 }
 

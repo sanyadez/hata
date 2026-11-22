@@ -2671,3 +2671,8 @@ button.tv-stage-chip:hover { background: rgb(0 0 0 / 0.8); }
 .tv-card-more .ico, .tv-head-more .ico { stroke-width: 2.6; }
 .menu-item .tv-mark-icon { width: 20px; height: 20px; border-radius: 6px; font-size: 11px; }
 @container pg-card (max-width: 380px) { .tv-card-foot .tv-vol { display: none; } }
+.tv-card-foot.keys { justify-content: center; }
+.tv-card-foot.keys .tvr-round.ok { font: 700 12px var(--font-body); background: var(--accent-soft); border-color: var(--accent); }
+.tv-card-foot .turn-left .ico { transform: rotate(180deg); }
+.tv-card-foot .turn-up .ico { transform: rotate(-90deg); }
+.tv-card-foot .turn-down .ico { transform: rotate(90deg); }
