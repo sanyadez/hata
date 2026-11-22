@@ -484,7 +484,7 @@ export async function liveAnswer(offer: unknown): Promise<string> {
 }
 
 /** What is on the screen, for a card that keeps looking: the player's "now" and, while a page shows, how its video stands */
-export async function screenNow(): Promise<ReturnType<typeof tvNow> & { kind: Screen; media: PageMedia | null; console: string; picture: boolean }> {
+export async function screenNow(): Promise<ReturnType<typeof tvNow> & { kind: Screen; media: PageMedia | null; console: string; picture: boolean; bookmarks: typeof settings.tv.bookmarks; can: { kodi: boolean; browser: boolean } }> {
   const browsing = await browserRuns();
   const kind: Screen = browsing ? "browser" : (await kodiRuns()) ? "kodi" : screenDark() ? "dark" : "off";
   let text = "";
@@ -495,7 +495,7 @@ export async function screenNow(): Promise<ReturnType<typeof tvNow> & { kind: Sc
   }
   const playing = tvNow().playing;
   // a picture can be had: the page's own, or a frame of the film the player has, taken from its file
-  return { ...tvNow(), kind, media: browsing ? await media().catch(() => null) : null, console: text, picture: browsing || (kind === "kodi" && !!playing && playing.file.startsWith("/") && has("ffmpeg")) };
+  return { ...tvNow(), kind, media: browsing ? await media().catch(() => null) : null, console: text, bookmarks: settings.tv.bookmarks, can: { kodi: has("kodi"), browser: browserInstalled() }, picture: browsing || (kind === "kodi" && !!playing && playing.file.startsWith("/") && has("ffmpeg")) };
 }
 
 /** The frame of the film last taken: one per ten seconds of the film is enough to see what plays */

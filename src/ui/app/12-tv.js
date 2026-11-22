@@ -758,8 +758,23 @@ function tvBlock(el) {
         img.onload = () => el.isConnected && body.dataset.frame === stamp && put(body, img);
         img.src = `/api/tv/shot?f=${encodeURIComponent(stamp)}`;
       }
-    } else if (kind === "off" && now.console) {
-      if (body.dataset.kind !== "console" + now.console) put(body, h("pre", { class: "tv-console" }, now.console));
+    } else if (kind === "off" || kind === "dark") {
+      // nothing of Hata's on the screen: what can be put there by one press — the player first, then the bookmarks
+      const stamp = `pick|${kind}|${now.console ?? ""}|${JSON.stringify(now.bookmarks ?? [])}|${now.can?.kodi}|${now.can?.browser}`;
+      if (body.dataset.pick !== stamp) {
+        body.dataset.pick = stamp;
+        const go = (work) => (e) => {
+          for (const one of body.querySelectorAll("button")) one.disabled = true;
+          e.currentTarget.classList.add("going");
+          void work().then(() => setTimeout(load, 500), (err) => (toast(errorText(err), "error"), delete body.dataset.pick, void load()));
+        };
+        const tiles = [
+          now.can?.kodi && h("button", { type: "button", class: "tv-pick main", onclick: go(() => api("PUT", "/api/tv", { screen: "kodi" })) }, h("span", { class: "tv-mark-icon kodi" }, icon("film")), h("span", { class: "tv-mark-words" }, h("strong", { class: "clip" }, t("tv.turnOnKodi")), h("span", { class: "muted clip" }, t("tv.pick.kodi")))),
+          ...(now.can?.browser ? (now.bookmarks ?? []).map((one) => h("button", { type: "button", class: "tv-pick", title: one.url, onclick: go(() => api("POST", "/api/tv/open", { url: one.url })) }, tvMarkIcon(one), h("span", { class: "tv-mark-words" }, h("strong", { class: "clip" }, one.name), h("span", { class: "muted mono clip" }, tvHost(one.url))))) : []),
+          now.can?.browser && h("button", { type: "button", class: "tv-pick", onclick: go(() => api("PUT", "/api/tv", { screen: "browser" })) }, h("span", { class: "tv-mark-icon kodi" }, icon("globe")), h("span", { class: "tv-mark-words" }, h("strong", { class: "clip" }, t("tv.openBrowser")), h("span", { class: "muted clip" }, t("tv.pick.browser")))),
+        ].filter(Boolean);
+        put(body, h("div", { class: "tv-pick-box" }, kind === "off" && now.console && h("pre", { class: "tv-console" }, now.console), h("p", { class: "muted small with-icon" }, icon(kind === "dark" ? "power" : "terminal"), t(kind === "dark" ? "tv.pick.dark" : "tv.pick.console")), tiles.length ? h("div", { class: "tv-picks" }, tiles) : h("p", { class: "muted small" }, h("a", { class: "link", href: "#/house/tv" }, t("tv.openPage")))));
+      }
     } else if (body.dataset.kind !== kind + title) put(body, h("div", { class: "tv-still" }, icon(kind === "kodi" ? "film" : kind === "dark" ? "power" : "terminal"), h("span", { class: "clip" }, kind === "kodi" && playing ? title : state0.textContent)));
     const act = (action, value) => api("POST", kind === "browser" ? "/api/tv/browser" : "/api/tv/do", kind === "browser" ? { action, value } : { action: action === "play" ? "playpause" : value < 0 ? "rewind" : "forward" }).then(() => setTimeout(load, 300), (e) => toast(errorText(e), "error"));
     const key = `${kind}|${title}|${paused}|${!!(media || playing)}`;
@@ -771,6 +786,8 @@ function tvBlock(el) {
     }
     body.dataset.kind = kind === "browser" || (kind === "kodi" && now.picture) ? "" : kind === "off" && now.console ? "console" + now.console : kind + title;
     if (!(kind === "kodi" && now.picture)) delete body.dataset.frame;
+    if (kind !== "off" && kind !== "dark") delete body.dataset.pick;
+    line.hidden = kind === "off" || kind === "dark";
     setTimeout(load, kind === "off" || kind === "dark" ? 8000 : 3000);
   };
   void load();

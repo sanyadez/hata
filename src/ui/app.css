@@ -2455,3 +2455,17 @@ dialog.framed .dlg-body footer { position: sticky; bottom: -20px; margin: 0 -20p
 .tv-preview:hover .tv-preview-sound, .tv-preview-sound:focus-visible { opacity: 1; }
 @media (hover: none) { .tv-preview-sound { opacity: 1; } }
 .tv-preview-sound .ico { width: 18px; height: 18px; }
+
+/* nothing on the screen: the card offers what to put there */
+.tv-pick-box { display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow: hidden; }
+.tv-pick-box > .tv-console { flex: 0 1 auto; max-height: 34%; }
+.tv-pick-box > p { margin: 0; flex: none; }
+.tv-picks { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px; align-content: start; overflow: hidden; min-height: 0; flex: 1; }
+.tv-pick { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 9px 10px; border: 1px solid transparent; border-radius: 12px; background: var(--surface-2); color: inherit; font: inherit; text-align: left; cursor: pointer; }
+.tv-pick:hover { border-color: var(--border-strong); }
+.tv-pick.main { background: var(--accent-soft); border-color: var(--accent); }
+.tv-pick.going { outline: 2px solid var(--accent); }
+.tv-pick:disabled { cursor: default; opacity: 0.7; }
+.tv-mark-icon.kodi { background: var(--accent); color: #1c1407; }
+.tv-mark-icon.kodi .ico { width: 17px; height: 17px; }
+.tv-block-line[hidden] { display: none; }
