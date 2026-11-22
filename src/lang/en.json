@@ -6328,5 +6328,11 @@
   "tv.more": "More",
   "tv.card.site": "Show a site…",
   "tv.card.siteTitle": "Show a site on the TV",
-  "tv.card.file": "Choose a file in Files"
+  "tv.card.file": "Choose a file in Files",
+  "tv.panel.back": "Back",
+  "tv.panel.forward": "Forward",
+  "tv.panel.reload": "Reload",
+  "tv.panel.start": "Home",
+  "tv.panel.full": "Exit full screen",
+  "tv.panel.home": "Close the browser"
 }

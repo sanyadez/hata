@@ -6328,5 +6328,11 @@
   "tv.more": "Ще",
   "tv.card.site": "Показати сайт…",
   "tv.card.siteTitle": "Показати сайт на телевізорі",
-  "tv.card.file": "Вибрати файл у Файлах"
+  "tv.card.file": "Вибрати файл у Файлах",
+  "tv.panel.back": "Назад",
+  "tv.panel.forward": "Вперед",
+  "tv.panel.reload": "Оновити",
+  "tv.panel.start": "Головна",
+  "tv.panel.full": "Вийти з повного екрана",
+  "tv.panel.home": "Закрити браузер"
 }

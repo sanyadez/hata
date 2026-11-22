@@ -873,6 +873,113 @@ export const BROWSER_POINTER_SCRIPT = `(() => {
   }, true);
 })()`;
 
+/**
+ * How a finger pulled down from the top edge of the screen is told: the start within 30 px of the
+ * top, then 60 px down. A frame of another site counts only while it has the whole screen (a film's
+ * player put on it) — elsewhere its top is not the screen's; the page itself always does.
+ */
+const swipeDown = (open: string): string => `let from = -1;
+  const edge = () => window.top === window || !!document.fullscreenElement || innerHeight >= screen.height - 2;
+  addEventListener("touchstart", (e) => { const t = e.touches[0]; from = e.touches.length === 1 && t && t.clientY < 30 && edge() ? t.clientY : -1; }, { capture: true, passive: true });
+  addEventListener("touchmove", (e) => { const t = e.touches[0]; if (from >= 0 && t && t.clientY - from > 60) { from = -1; ${open} } }, { capture: true, passive: true });
+  addEventListener("touchend", () => { from = -1; }, { capture: true, passive: true });`;
+
+/** Put into every frame of another site: a pull down there asks the page on top to open its panel */
+export const BROWSER_SWIPE_SCRIPT = `(() => {
+  if (window.hataSwipe || window.top === window) return;
+  window.hataSwipe = true;
+  ${swipeDown(`top.postMessage({ hataPanel: true }, "*");`)}
+})()`;
+
+/** The buttons of the panel, in the order they stand; each but `full` is sent to Hata by the page's binding */
+export const PANEL_BUTTONS = [
+  ["back", "←"],
+  ["forward", "→"],
+  ["reload", "⟳"],
+  ["start", "⌂"],
+  ["full", "⤡"],
+  ["home", "✕"],
+] as const;
+
+/**
+ * The panel a finger pulls down from the top edge of the touchscreen, as Android's: back, forward,
+ * reload, the screen's own page, out of the whole screen (only while something has it) and away from
+ * the browser. Built in a closed shadow root and shown in the top layer, so it stands over a film on
+ * the whole screen; its look is a constructed sheet (a site's CSP may refuse a style element). Goes
+ * by itself after 8 s, or by a touch outside it. `words` are the buttons' labels by id.
+ */
+export function browserPanelScript(words: Record<string, string>): string {
+  const buttons = JSON.stringify(PANEL_BUTTONS.map(([id, icon]) => [id, icon, words[id] ?? id]));
+  return `(() => {
+  if (window.hataPanel || window.top !== window) return;
+  const buttons = ${buttons};
+  let host = null, box = null, timer = 0;
+  const hide = () => { clearTimeout(timer); try { if (box && box.matches(":popover-open")) box.hidePopover(); } catch {} };
+  const make = () => {
+    host = document.createElement("hata-panel");
+    const root = host.attachShadow({ mode: "closed" });
+    const sheet = new CSSStyleSheet();
+    sheet.replaceSync(\`
+      .box { position: fixed; inset: 0 0 auto 0; margin: 0; width: 100%; box-sizing: border-box; border: 0; padding: 18px 24px 22px;
+        background: rgba(20, 17, 15, 0.92); color: #f4efe9; font: 500 20px/1.2 system-ui, sans-serif; box-shadow: 0 8px 32px rgba(0,0,0,.5);
+        display: none; justify-content: center; gap: 14px; flex-wrap: wrap; }
+      .box:popover-open { display: flex; animation: down .18s ease-out; }
+      @keyframes down { from { transform: translateY(-100%); } }
+      button { all: unset; box-sizing: border-box; min-width: 128px; padding: 14px 18px; border-radius: 16px; background: rgba(255,255,255,.1);
+        display: flex; flex-direction: column; align-items: center; gap: 8px; cursor: pointer; text-align: center; }
+      button:active { background: rgba(255,255,255,.25); }
+      button[hidden] { display: none; }
+      .icon { font-size: 34px; line-height: 1; }
+      .grip { flex-basis: 100%; height: 5px; margin-top: 4px; display: flex; justify-content: center; }
+      .grip::after { content: ""; width: 56px; border-radius: 3px; background: rgba(255,255,255,.35); }
+    \`);
+    root.adoptedStyleSheets = [sheet];
+    box = document.createElement("div");
+    box.className = "box";
+    box.popover = "manual";
+    for (const [id, icon, label] of buttons) {
+      const b = document.createElement("button");
+      b.dataset.id = id;
+      const i = document.createElement("span");
+      i.className = "icon";
+      i.textContent = icon;
+      const l = document.createElement("span");
+      l.textContent = label;
+      b.append(i, l);
+      b.addEventListener("click", (e) => {
+        e.stopPropagation();
+        hide();
+        if (id === "full") { if (document.fullscreenElement) document.exitFullscreen().catch(() => {}); }
+        else if (typeof hataScreen === "function") hataScreen(id);
+      });
+      box.append(b);
+    }
+    const grip = document.createElement("div");
+    grip.className = "grip";
+    box.append(grip);
+    // a pull up on the panel puts it away
+    let from = -1;
+    box.addEventListener("touchstart", (e) => { from = e.touches[0] ? e.touches[0].clientY : -1; }, { passive: true });
+    box.addEventListener("touchmove", (e) => { const t = e.touches[0]; if (from >= 0 && t && from - t.clientY > 40) { from = -1; hide(); } }, { passive: true });
+    root.append(box);
+  };
+  const open = () => {
+    if (!document.documentElement) return;
+    if (!host) make();
+    if (!host.isConnected) document.documentElement.append(host);
+    box.querySelector('[data-id="full"]').hidden = !document.fullscreenElement;
+    // shown again so it stands over whatever took the whole screen since
+    hide();
+    try { box.showPopover(); } catch { return; }
+    timer = setTimeout(hide, 8000);
+  };
+  window.hataPanel = open;
+  addEventListener("pointerdown", (e) => { if (box && box.matches(":popover-open") && !e.composedPath().includes(host)) hide(); }, true);
+  addEventListener("message", (e) => { if (e.data && e.data.hataPanel === true) open(); });
+  ${swipeDown("open();")}
+})()`;
+}
+
 /** What is on the server's screen: the player, a web page, the system's console (`off`: nothing of Hata's), or nothing at all — the screen put to sleep (`dark`) */
 export type Screen = "kodi" | "browser" | "off" | "dark";
 

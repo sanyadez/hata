@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { cleanOffset, browserCalls, browserSound, browserUnitText, browserHomeHtml, withoutTranslate, cleanShowTime, pointerCalls, cleanBookmarks, mediaScript } from "../src/tv";
+import { cleanOffset, browserCalls, browserSound, browserUnitText, browserHomeHtml, withoutTranslate, cleanShowTime, pointerCalls, cleanBookmarks, mediaScript, browserPanelScript, BROWSER_SWIPE_SCRIPT } from "../src/tv";
 import { cleanLink, isLink, linkName, probeArgs, sourceArgs, streamZero, cleanStart, keyframeArgs, mediaOf, prefsOf, prefValue, streamArgs, subsArgs, tracksOf, clickPacket, helloPacket, KEEP_WINDOW, KEEP_YES, pictureOf, advancedXml, cleanFolders, shortTitle, hwdbText, keymapXml, polkitRule, decodePackages, isOurs, monitorAudio, monitorName, playable, portIn, readDisplay, remoteCall, seconds, sourcesXml, takeJson, unitText } from "../src/tv";
 
 function edid(name: string, audio: boolean): Uint8Array {
@@ -347,4 +347,12 @@ test("the mouse made for a moment to put the pointer away", async () => {
   const move = inputEvent(2, 1, -5);
   expect(move.length).toBe(24);
   expect([...move.subarray(16)]).toEqual([2, 0, 1, 0, 0xfb, 0xff, 0xff, 0xff]);
+});
+
+test("the panel pulled down on the screen: scripts that parse, labels as text only", () => {
+  const script = browserPanelScript({ back: "Назад", home: '"); alert(1); ("' });
+  expect(() => new Function(script)).not.toThrow();
+  expect(() => new Function(BROWSER_SWIPE_SCRIPT)).not.toThrow();
+  expect(script).toContain('"Назад"');
+  expect(script).not.toContain('"); alert(1); ("');
 });
