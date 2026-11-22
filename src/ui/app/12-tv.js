@@ -731,7 +731,7 @@ function tvWorking(text) {
  * blinks. A click on it is a click there, the wheel scrolls there.
  */
 function tvPreview() {
-  const box = tvUi.preview ?? (tvUi.preview = h("div", { class: "tv-preview", title: t("tv.page.previewHint") }));
+  const box = tvUi.preview ?? (tvUi.preview = h("div", { class: "tv-preview", role: "img", "aria-label": t("tv.page.previewHint") }));
   if (box.dataset.on) return box;
   box.dataset.on = "1";
   let quick = 0;
