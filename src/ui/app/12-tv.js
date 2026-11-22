@@ -739,8 +739,14 @@ function tvPreview() {
   const act = (action, value) => api("POST", "/api/tv/browser", { action, value }).then(() => ((quick = 6), next(150)), (e) => toast(errorText(e), "error"));
   const at = (e) => {
     // the picture itself: on the whole screen of this device it may stand inside bars
-    const r = (box.querySelector("img") ?? box).getBoundingClientRect();
-    return { x: Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)), y: Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)) };
+    const img = box.querySelector("img");
+    const r = (img ?? box).getBoundingClientRect();
+    // on a screen of another shape the picture keeps its own and stands between bars: the place is counted on the picture, not on its frame
+    const shape = img?.naturalWidth && document.fullscreenElement === box ? img.naturalWidth / img.naturalHeight : r.width / r.height;
+    const w = Math.min(r.width, r.height * shape);
+    const hgt = w / shape;
+    const [left, top] = [r.left + (r.width - w) / 2, r.top + (r.height - hgt) / 2];
+    return { x: Math.min(1, Math.max(0, (e.clientX - left) / w)), y: Math.min(1, Math.max(0, (e.clientY - top) / hgt)) };
   };
   const grow = h("button", { type: "button", class: "tv-preview-grow", title: t("tv.page.previewFull"), "aria-label": t("tv.page.previewFull"), onclick: (e) => (e.stopPropagation(), document.fullscreenElement ? document.exitFullscreen() : box.requestFullscreen?.()) }, icon("expand"));
   box.addEventListener("click", (e) => void act("click", at(e)));

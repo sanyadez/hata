@@ -804,6 +804,35 @@ export const PREVIEW_WIDTH = 960;
  */
 export const BROWSER_HOME_SCRIPT = `addEventListener("keydown", (e) => { if (e.key === "BrowserHome" && typeof hataScreen === "function") { e.preventDefault(); hataScreen("home"); } }, true);`;
 
+/**
+ * Put into every frame of every page: the pointer is not drawn while the mouse lies still. Driven from
+ * Hata's page nobody holds a mouse at the screen, and the pointer would stand in the middle of the
+ * film. It shows once the mouse really moves (two moves close in time — a press sent by Hata is one)
+ * and goes again after three seconds of rest.
+ */
+export const BROWSER_POINTER_SCRIPT = `(() => {
+  if (window.hataPointer) return;
+  window.hataPointer = true;
+  const style = document.createElement("style");
+  style.textContent = "html.hata-still, html.hata-still * { cursor: none !important; }";
+  const root = document.documentElement;
+  const put = () => (document.head || root).appendChild(style);
+  put();
+  root.classList.add("hata-still");
+  let last = 0;
+  let timer = 0;
+  addEventListener("mousemove", (e) => {
+    const now = Date.now();
+    const real = now - last < 400;
+    last = now;
+    if (!real) return;
+    if (!style.isConnected) put();
+    root.classList.remove("hata-still");
+    clearTimeout(timer);
+    timer = setTimeout(() => root.classList.add("hata-still"), 3000);
+  }, true);
+})()`;
+
 /** What is on the server's screen: the player, a web page, the system's console (`off`: nothing of Hata's), or nothing at all — the screen put to sleep (`dark`) */
 export type Screen = "kodi" | "browser" | "off" | "dark";
 

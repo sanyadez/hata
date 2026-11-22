@@ -15,7 +15,7 @@ import { bus } from "./bus";
 import { saveSettings, settings } from "./config";
 import { awaitKodi, kodiRuns, screenDark, sleepScreen, playOnTv, screenShares, setUp, switchTv, tvEnabled, tvNow, tvReport, type TvPage, type TvReport } from "./kodi";
 import { installCommand, packageManager, PATH, run, runLogged } from "./packages";
-import { BROWSER_HOME_SCRIPT, BROWSER_PACKAGES, browserCalls, cleanBookmarks, MEDIA_ACTIONS, mediaScript, pointerCalls, PREVIEW_WIDTH, browserHomeHtml, TV_BROWSER_HOME, TV_USER, browserSound, browserUnitText, cleanLink, cleanShowTime, linkName, TV_BROWSER_PORT, TV_BROWSER_UNIT, TV_UNIT, type BrowserReport, type PageCall, type PageMedia, type Screen } from "./tv";
+import { BROWSER_HOME_SCRIPT, BROWSER_POINTER_SCRIPT, BROWSER_PACKAGES, browserCalls, cleanBookmarks, MEDIA_ACTIONS, mediaScript, pointerCalls, PREVIEW_WIDTH, browserHomeHtml, TV_BROWSER_HOME, TV_USER, browserSound, browserUnitText, cleanLink, cleanShowTime, linkName, TV_BROWSER_PORT, TV_BROWSER_UNIT, TV_UNIT, type BrowserReport, type PageCall, type PageMedia, type Screen } from "./tv";
 
 const UNIT_FILE = "/etc/systemd/system/" + TV_BROWSER_UNIT;
 const has = (bin: string): boolean => !!Bun.which(bin, { PATH });
@@ -83,7 +83,11 @@ async function connected(): Promise<NonNullable<typeof link> | null> {
     else if (said.method === "Page.loadEventFired") void refreshPage();
     else if (said.method === "Target.attachedToTarget") {
       const told = said.params as unknown as { sessionId?: string; targetInfo?: { type?: string } };
-      if (told.sessionId && told.targetInfo?.type === "iframe") inner.add(told.sessionId);
+      if (told.sessionId && told.targetInfo?.type === "iframe") {
+        inner.add(told.sessionId);
+        // a frame of another site is a page of its own to the browser: it gets the script too
+        for (const call of [{ method: "Page.addScriptToEvaluateOnNewDocument", params: { source: BROWSER_POINTER_SCRIPT } }, { method: "Runtime.evaluate", params: { expression: BROWSER_POINTER_SCRIPT } }]) socket.send(JSON.stringify({ id: ++mine.asked, ...call, sessionId: told.sessionId }));
+      }
     } else if (said.method === "Target.detachedFromTarget") inner.delete(String((said.params as unknown as { sessionId?: string }).sessionId));
         else if (said.method === "Page.screencastFrame") {
       const frame = said.params as unknown as { data?: string; sessionId?: number };
@@ -106,6 +110,8 @@ async function connected(): Promise<NonNullable<typeof link> | null> {
   await ask({ method: "Runtime.addBinding", params: { name: "hataScreen" } });
   await ask({ method: "Page.addScriptToEvaluateOnNewDocument", params: { source: BROWSER_HOME_SCRIPT } });
   await ask({ method: "Runtime.evaluate", params: { expression: BROWSER_HOME_SCRIPT } });
+  await ask({ method: "Page.addScriptToEvaluateOnNewDocument", params: { source: BROWSER_POINTER_SCRIPT } });
+  await ask({ method: "Runtime.evaluate", params: { expression: BROWSER_POINTER_SCRIPT } });
   await ask({ method: "Target.setAutoAttach", params: { autoAttach: true, waitForDebuggerOnStart: false, flatten: true } });
   return mine;
 }
