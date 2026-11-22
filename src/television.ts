@@ -93,7 +93,10 @@ async function connected(): Promise<NonNullable<typeof link> | null> {
     } else if (said.method === "Target.detachedFromTarget") inner.delete(String((said.params as unknown as { sessionId?: string }).sessionId));
         else if (said.method === "Page.screencastFrame") {
       const frame = said.params as unknown as { data?: string; sessionId?: number };
-      if (frame.data) cast.frame = new Uint8Array(Buffer.from(frame.data, "base64"));
+      if (frame.data) {
+        cast.frame = new Uint8Array(Buffer.from(frame.data, "base64"));
+        for (const tell of watchers) tell(cast.frame);
+      }
       socket.send(JSON.stringify({ id: ++mine.asked, method: "Page.screencastFrameAck", params: { sessionId: frame.sessionId } }));
     }
   });
@@ -369,6 +372,66 @@ async function pageSize(): Promise<{ width: number; height: number }> {
  * was seen to resize the page on the real screen. Sent only while a page of Hata's keeps asking.
  */
 const cast: { on: boolean; big: boolean; frame: Uint8Array | null; asked: number; timer: Timer | null } = { on: false, big: false, frame: null, asked: 0, timer: null };
+
+/** Those who get every frame as it comes: the streams of pictures open in pages of Hata's */
+const watchers = new Set<(frame: Uint8Array) => void>();
+
+/**
+ * The screen as a stream of pictures (each replaces the last in an `<img>`): the browser's own frames
+ * as they come, at most a dozen a second, for as long as the page that asked stays. No program is
+ * added and nothing shows on the screen itself — live enough to aim and to follow a film, without sound.
+ */
+export async function screenStream(signal: AbortSignal): Promise<Response> {
+  const first = await screenShot();
+  const encoder = new TextEncoder();
+  const part = (frame: Uint8Array) => [encoder.encode(`--frame\r\nContent-Type: image/jpeg\r\nContent-Length: ${frame.length}\r\n\r\n`), frame, encoder.encode("\r\n")];
+  let tell: ((frame: Uint8Array) => void) | null = null;
+  let keep: Timer | null = null;
+  const end = () => {
+    if (tell) watchers.delete(tell);
+    if (keep) clearInterval(keep);
+  };
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      let last = 0;
+      let latest = first;
+      const send = (frame: Uint8Array) => {
+        try {
+          for (const piece of part(frame)) controller.enqueue(piece);
+        } catch {
+          end();
+        }
+      };
+      send(first);
+      tell = (frame) => {
+        latest = frame;
+        if (Date.now() - last < 80) return;
+        last = Date.now();
+        send(frame);
+      };
+      watchers.add(tell);
+      // the screencast goes on while somebody watches; a page that stands still sends its last picture again, so the connection lives
+      keep = setInterval(() => {
+        cast.asked = Date.now();
+        if (Date.now() - last > 4000) ((last = Date.now()), send(latest));
+        if (!cast.on) void screenShot().catch(() => {});
+      }, 2000);
+      signal.addEventListener("abort", () => {
+        end();
+        try {
+          controller.close();
+        } catch {}
+      });
+    },
+    cancel: end,
+  });
+  return new Response(body, { headers: { "content-type": "multipart/x-mixed-replace; boundary=frame", "cache-control": "no-store" } });
+}
+
+/** The live sending by the browser itself is ended: its bar leaves the screen */
+export async function liveEnd(): Promise<void> {
+  if (await browserRuns()) await inCastPage("hataCastEnd()");
+}
 
 /** What the screen shows right now, as a small picture for Hata's page: only while the browser has it */
 export async function screenShot(big = false): Promise<Uint8Array> {

@@ -879,23 +879,31 @@ function tvPreview() {
   // the frames go on until the video really plays and take over again when it stops
   let live = null;
   let liveAfter = 0;
-  const sound = h("button", { type: "button", class: "tv-preview-sound", title: t("tv.page.liveSound"), "aria-label": t("tv.page.liveSound"), onclick: (e) => { e.stopPropagation(); const v = box.querySelector("video"); if (v) ((v.muted = !v.muted), sound.replaceChildren(icon(v.muted ? "volumeOff" : "volume"))); } }, icon("volumeOff"));
+  // with sound: the browser on the screen sends its own tab — and shows a bar of its own on the screen meanwhile, so only when asked
+  const sound = h("button", { type: "button", class: "tv-preview-sound", title: t("tv.page.liveSound"), "aria-label": t("tv.page.liveSound"), onclick: (e) => {
+    e.stopPropagation();
+    if (live) return void (endLive(0), api("DELETE", "/api/tv/live").catch(() => {}));
+    sound.classList.add("on");
+    void tryLive();
+  } }, icon("volume"));
   const endLive = (wait) => {
     live?.pc.close();
     live = null;
     liveAfter = Date.now() + wait;
     box.classList.remove("live");
+    sound.classList.remove("on");
+    stream = null;
     next(0);
   };
   const tryLive = async () => {
-    if (live || Date.now() < liveAfter || typeof RTCPeerConnection !== "function") return;
+    if (live || typeof RTCPeerConnection !== "function") return;
     const pc = new RTCPeerConnection();
     const mine = (live = { pc, playing: false });
     try {
       pc.addTransceiver("video", { direction: "recvonly" });
       pc.addTransceiver("audio", { direction: "recvonly" });
-      const video = h("video", { autoplay: true, playsInline: true, muted: true });
-      pc.ontrack = (e) => (video.srcObject = e.streams[0]);
+      const video = h("video", { autoplay: true, playsInline: true });
+      pc.ontrack = (e) => ((video.srcObject = e.streams[0]), void video.play().catch(() => ((video.muted = true), video.play().catch(() => {}))));
       video.addEventListener("playing", () => {
         if (live !== mine || !box.isConnected) return;
         mine.playing = true;
@@ -913,21 +921,36 @@ function tvPreview() {
       await pc.setRemoteDescription({ type: "answer", sdp: answer.sdp });
       // connected yet nothing plays: the frames stay, and it is tried again much later
       setTimeout(() => live === mine && !mine.playing && endLive(10 * 60_000), 10_000);
-    } catch {
-      if (live === mine) endLive(10 * 60_000);
+    } catch (e) {
+      if (live === mine) endLive(0);
+      toast(errorText(e), "error");
     }
   };
+  // the stream of pictures: one <img> the browser keeps renewing by itself
+  let stream = null;
+  let streamAfter = 0;
   const load = () => {
     // off the page, or the tab not looked at: nothing is asked of the screen
     if (!box.isConnected) return void (live?.pc.close(), (live = null), box.classList.remove("live"), delete box.dataset.on);
-    void tryLive();
-    if (live?.playing) return next(2000);
+    if (live) return next(2000);
+    const whole = document.fullscreenElement === box;
+    if (!whole && Date.now() >= streamAfter) {
+      if (!stream || !stream.isConnected) {
+        const img = h("img", { alt: "", draggable: false });
+        img.onerror = () => ((stream = null), (streamAfter = Date.now() + 30_000), next(0));
+        img.src = `/api/tv/stream?n=${++n}`;
+        stream = img;
+        box.replaceChildren(img, grow, sound);
+      }
+      return next(2000);
+    }
+    // on this device's whole screen the pictures are asked one by one, at the screen's own size
+    if (stream) ((stream.src = ""), (stream = null));
     if (document.hidden) return next(2000);
     const img = document.createElement("img");
     img.alt = "";
     img.draggable = false;
-    const whole = document.fullscreenElement === box;
-    img.onload = () => (box.replaceChildren(img, grow), next(whole || quick-- > 0 ? 300 : 1000));
+    img.onload = () => (box.replaceChildren(img, grow, sound), next(whole || quick-- > 0 ? 300 : 1000));
     img.onerror = () => next(3000);
     img.src = `/api/tv/shot?n=${++n}${whole ? "&big=1" : ""}`;
   };

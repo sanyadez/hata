@@ -623,6 +623,8 @@ window.hataCast = async (offer) => {
     return JSON.stringify({ error: String(e && e.name) + ": " + String(e && e.message) });
   }
 };
+setInterval(tidy, 5000);
+window.hataCastEnd = () => { for (const pc of peers) pc.close(); peers.clear(); clearTimeout(idle); if (stream) { for (const track of stream.getTracks()) track.stop(); stream = null; } return "ended"; };
 window.hataCastState = () => JSON.stringify({ peers: peers.size, live: !!stream });
 </script>
 `;
