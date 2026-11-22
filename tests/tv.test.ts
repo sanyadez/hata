@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { cleanOffset, browserCalls, browserSound, browserUnitText, browserHomeHtml, cleanShowTime } from "../src/tv";
+import { cleanOffset, browserCalls, browserSound, browserUnitText, browserHomeHtml, cleanShowTime, pointerCalls } from "../src/tv";
 import { cleanLink, isLink, linkName, probeArgs, sourceArgs, streamZero, cleanStart, keyframeArgs, mediaOf, prefsOf, prefValue, streamArgs, subsArgs, tracksOf, clickPacket, helloPacket, KEEP_WINDOW, KEEP_YES, pictureOf, advancedXml, cleanFolders, shortTitle, hwdbText, keymapXml, polkitRule, decodePackages, isOurs, monitorAudio, monitorName, playable, portIn, readDisplay, remoteCall, seconds, sourcesXml, takeJson, unitText } from "../src/tv";
 
 function edid(name: string, audio: boolean): Uint8Array {
@@ -297,4 +297,18 @@ test("the browser on the screen: its sound, its service, what a page may ask of 
   // a page of Hata's cannot make the browser run a script of its choosing
   expect(browserCalls("Runtime.evaluate", "alert(1)")).toBeNull();
   expect(browserCalls("navigate", "file:///etc/passwd")).toBeNull();
+});
+
+test("a press on the picture of the screen lands at that place of the page", () => {
+  const size = { width: 1920, height: 1080 };
+  const calls = pointerCalls("click", { x: 0.5, y: 0.25 }, size)!;
+  expect(calls.map((c) => c.params!.type)).toEqual(["mouseMoved", "mousePressed", "mouseReleased"]);
+  expect(calls[1]!.params).toMatchObject({ x: 960, y: 270, button: "left" });
+  expect(pointerCalls("wheel", { x: 0.1, y: 0.9, dy: -300 }, size)).toEqual([{ method: "Input.dispatchMouseEvent", params: { type: "mouseWheel", x: 192, y: 972, deltaX: 0, deltaY: -300 } }]);
+  // outside the picture, without a place, a page not known yet
+  expect(pointerCalls("click", { x: 1.2, y: 0 }, size)).toBeNull();
+  expect(pointerCalls("click", null, size)).toBeNull();
+  expect(pointerCalls("click", { x: 0.5, y: 0.5 }, { width: 0, height: 0 })).toBeNull();
+  expect(pointerCalls("wheel", { x: 0.5, y: 0.5, dy: "x" }, size)).toBeNull();
+  expect(pointerCalls("drag", { x: 0.5, y: 0.5 }, size)).toBeNull();
 });

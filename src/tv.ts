@@ -704,6 +704,35 @@ export function browserCalls(action: unknown, value: unknown): PageCall[] | null
   return null;
 }
 
+/** A place of the screen as the page's picture of it gives it: both from 0 to 1; null — not one */
+const place = (value: unknown): { x: number; y: number } | null => {
+  const at = value as { x?: unknown; y?: unknown } | null;
+  return at && typeof at.x === "number" && typeof at.y === "number" && at.x >= 0 && at.x <= 1 && at.y >= 0 && at.y <= 1 ? { x: at.x, y: at.y } : null;
+};
+
+/**
+ * A press or a turn of the wheel made on the picture of the screen in Hata's page, as the browser's
+ * calls: `click` at a place, `wheel` there by `dy` (below zero — up). `size` is the page's own, in its
+ * pixels. null — not one of these.
+ */
+export function pointerCalls(action: unknown, value: unknown, size: { width: number; height: number }): PageCall[] | null {
+  const at = place(value);
+  if (!at || !(size.width > 0) || !(size.height > 0)) return null;
+  const [x, y] = [Math.round(at.x * size.width), Math.round(at.y * size.height)];
+  if (action === "click")
+    return [
+      { method: "Input.dispatchMouseEvent", params: { type: "mouseMoved", x, y } },
+      { method: "Input.dispatchMouseEvent", params: { type: "mousePressed", x, y, button: "left", clickCount: 1 } },
+      { method: "Input.dispatchMouseEvent", params: { type: "mouseReleased", x, y, button: "left", clickCount: 1 } },
+    ];
+  const dy = (value as { dy?: unknown }).dy;
+  if (action === "wheel" && typeof dy === "number" && Number.isFinite(dy) && Math.abs(dy) <= 5000) return [{ method: "Input.dispatchMouseEvent", params: { type: "mouseWheel", x, y, deltaX: 0, deltaY: Math.round(dy) } }];
+  return null;
+}
+
+/** How wide the picture of the screen is sent to Hata's page, pixels: enough to see and aim by */
+export const PREVIEW_WIDTH = 960;
+
 /**
  * Put into every page the browser opens: the remote's "home" button (and a keyboard's) tells Hata,
  * which gives the screen back to what was on it. `hataScreen` is a binding Hata makes in the page.

@@ -5316,6 +5316,7 @@
   "tv.page.toPlayer": "Back to the player",
   "tv.page.close": "Close the page",
   "tv.page.showing": "On the screen: {name}",
+  "tv.page.previewHint": "The screen as it is now. A click here is a click there; the wheel scrolls the page.",
   "tv.onScreen.sleep": "Off",
   "tv.onScreen.dark": "The screen is off: the server sends it no picture, a TV goes to standby. Choose Kodi or the browser to turn it on again.",
   "tv.switching.dark": "Turning the screen off…",

@@ -724,6 +724,48 @@ function tvWorking(text) {
   for (const el of document.querySelectorAll("#tv-body .seg-pill, #tv-body .tv-address button, #tv-body .tv-leave")) el.disabled = true;
 }
 
+/**
+ * The screen as a picture in Hata's page, while a web page has it: asked again every second (sooner
+ * right after a press), the next one put in the place of the last only once it has loaded, so nothing
+ * blinks. A click on it is a click there, the wheel scrolls there.
+ */
+function tvPreview() {
+  const box = tvUi.preview ?? (tvUi.preview = h("div", { class: "tv-preview", title: t("tv.page.previewHint") }));
+  if (box.dataset.on) return box;
+  box.dataset.on = "1";
+  let quick = 0;
+  let n = 0;
+  const act = (action, value) => api("POST", "/api/tv/browser", { action, value }).then(() => ((quick = 6), next(150)), (e) => toast(errorText(e), "error"));
+  const at = (e) => {
+    const r = box.getBoundingClientRect();
+    return { x: Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)), y: Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)) };
+  };
+  box.addEventListener("click", (e) => void act("click", at(e)));
+  let turned = 0;
+  box.addEventListener("wheel", (e) => {
+    e.preventDefault();
+    // one call for a run of the wheel: every notch on its own would queue up behind the screen
+    turned += e.deltaY;
+    clearTimeout(box.wheel);
+    box.wheel = setTimeout(() => (void act("wheel", { ...at(e), dy: Math.max(-5000, Math.min(5000, turned)) }), (turned = 0)), 120);
+  }, { passive: false });
+  let timer = 0;
+  const next = (ms) => (clearTimeout(timer), (timer = setTimeout(load, ms)));
+  const load = () => {
+    // off the page, or the tab not looked at: nothing is asked of the screen
+    if (!box.isConnected) return void delete box.dataset.on;
+    if (document.hidden) return next(2000);
+    const img = document.createElement("img");
+    img.alt = "";
+    img.draggable = false;
+    img.onload = () => (box.replaceChildren(img), next(quick-- > 0 ? 350 : 1000));
+    img.onerror = () => next(3000);
+    img.src = `/api/tv/shot?n=${++n}`;
+  };
+  next(0);
+  return box;
+}
+
 /** Shows a web page on the server's screen, from any page of Hata's; what the server answers becomes the page's state */
 async function showOnTv(url, seconds = 0) {
   tvWorking(t("tv.switching.page"));
@@ -870,7 +912,7 @@ function paintTv() {
   }, "download");
   const pageCard = uiCard(
     { title: t("tv.page.title"), marks: b.running && h("span", { class: "state running" }, t("tv.page.on")), lead: t(b.installed ? "tv.page.lead" : "tv.page.needs") },
-    b.installed ? tvAddressRow(b.url || b.last || "", t("tv.page.show")) : [h("p", { class: "cmd" }, icon("terminal"), b.install), h("div", { class: "row-actions" }, bringBrowser)],
+    b.installed ? [tvAddressRow(b.url || b.last || "", t("tv.page.show")), tv.screen === "browser" && tvPreview()] : [h("p", { class: "cmd" }, icon("terminal"), b.install), h("div", { class: "row-actions" }, bringBrowser)],
   );
   // other programs show things on the screen with an access key: what to send, ready to paste
   const origin = location.origin;

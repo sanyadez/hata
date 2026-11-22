@@ -15,7 +15,7 @@ import { bus } from "./bus";
 import { saveSettings, settings } from "./config";
 import { awaitKodi, kodiRuns, screenDark, sleepScreen, playOnTv, screenShares, setUp, switchTv, tvEnabled, tvNow, tvReport, type TvPage, type TvReport } from "./kodi";
 import { installCommand, packageManager, PATH, run, runLogged } from "./packages";
-import { BROWSER_HOME_SCRIPT, BROWSER_PACKAGES, browserCalls, browserHomeHtml, TV_BROWSER_HOME, TV_USER, browserSound, browserUnitText, cleanLink, cleanShowTime, linkName, TV_BROWSER_PORT, TV_BROWSER_UNIT, TV_UNIT, type BrowserReport, type PageCall, type Screen } from "./tv";
+import { BROWSER_HOME_SCRIPT, BROWSER_PACKAGES, browserCalls, pointerCalls, PREVIEW_WIDTH, browserHomeHtml, TV_BROWSER_HOME, TV_USER, browserSound, browserUnitText, cleanLink, cleanShowTime, linkName, TV_BROWSER_PORT, TV_BROWSER_UNIT, TV_UNIT, type BrowserReport, type PageCall, type Screen } from "./tv";
 
 const UNIT_FILE = "/etc/systemd/system/" + TV_BROWSER_UNIT;
 const has = (bin: string): boolean => !!Bun.which(bin, { PATH });
@@ -81,10 +81,17 @@ async function connected(): Promise<NonNullable<typeof link> | null> {
     } else if (said.method === "Runtime.bindingCalled" && said.params?.name === "hataScreen" && said.params.payload === "home") void leaveBrowser().catch(() => {});
     else if (said.method === "Page.frameNavigated" && !said.params?.frame?.parentId) void refreshPage();
     else if (said.method === "Page.loadEventFired") void refreshPage();
+    else if (said.method === "Page.screencastFrame") {
+      const frame = said.params as unknown as { data?: string; sessionId?: number };
+      if (frame.data) cast.frame = new Uint8Array(Buffer.from(frame.data, "base64"));
+      socket.send(JSON.stringify({ id: ++mine.asked, method: "Page.screencastFrameAck", params: { sessionId: frame.sessionId } }));
+    }
   });
   socket.addEventListener("close", () => {
     for (const answer of mine.calls.values()) answer(null);
     if (link === mine) link = null;
+    cast.on = false;
+    cast.frame = null;
   });
   link = mine;
   await ask({ method: "Page.enable" });
@@ -258,10 +265,47 @@ export async function leaveBrowser(who = ""): Promise<TvReport> {
   return tvReport();
 }
 
+/** The size of the page the browser shows, in the page's own pixels */
+async function pageSize(): Promise<{ width: number; height: number }> {
+  const said = (await ask({ method: "Page.getLayoutMetrics" })) as { cssVisualViewport?: { clientWidth?: number; clientHeight?: number } } | null;
+  return { width: said?.cssVisualViewport?.clientWidth ?? 0, height: said?.cssVisualViewport?.clientHeight ?? 0 };
+}
+
+/**
+ * The picture of the screen for Hata's page. The browser sends its own frames, made small, whenever
+ * what it shows changes (its "screencast"): asking it for a screenshot of another size each second
+ * was seen to resize the page on the real screen. Sent only while a page of Hata's keeps asking.
+ */
+const cast: { on: boolean; frame: Uint8Array | null; asked: number; timer: Timer | null } = { on: false, frame: null, asked: 0, timer: null };
+
+/** What the screen shows right now, as a small picture for Hata's page: only while the browser has it */
+export async function screenShot(): Promise<Uint8Array> {
+  if (!(await browserRuns())) throw new AppError("tv.browserOff", 409);
+  cast.asked = Date.now();
+  if (!cast.on || !link) {
+    if ((await ask({ method: "Page.startScreencast", params: { format: "jpeg", quality: 55, maxWidth: PREVIEW_WIDTH, maxHeight: PREVIEW_WIDTH, everyNthFrame: 2 } })) === null) throw new AppError("tv.browserFailed", 409, { message: "" });
+    cast.on = true;
+    // nobody looks any more: the browser is told to stop making frames
+    cast.timer ??= setInterval(() => {
+      if (Date.now() - cast.asked < 15_000) return;
+      clearInterval(cast.timer!);
+      cast.timer = null;
+      cast.on = false;
+      cast.frame = null;
+      if (link) void ask({ method: "Page.stopScreencast" });
+    }, 5000);
+  }
+  for (let i = 0; i < 30 && !cast.frame; i++) await Bun.sleep(100);
+  if (!cast.frame) throw new AppError("tv.browserFailed", 409, { message: "" });
+  return cast.frame;
+}
+
 /** A button of the page's remote for the browser */
 export async function browserDo(action: unknown, value: unknown, by: string): Promise<void> {
   if (action === "home") return void (await leaveBrowser(by));
-  const calls = browserCalls(action, value);
+  const pointed = action === "click" || action === "wheel";
+  if (pointed && !(await browserRuns())) throw new AppError("tv.browserOff", 409);
+  const calls = pointed ? pointerCalls(action, value, await pageSize()) : browserCalls(action, value);
   if (!calls) throw new AppError("tv.badAction", 400);
   if (!(await browserRuns())) throw new AppError("tv.browserOff", 409);
   for (const call of calls) if ((await ask(call)) === null) throw new AppError("tv.browserFailed", 409, { message: "" });
