@@ -6325,5 +6325,8 @@
   "tv.set.how": "How remotes work",
   "tv.set.howShort": "OK and Menu of Android remotes, CEC, power keys",
   "tv.set.noRemotes": "Nothing is plugged in",
-  "tv.more": "More"
+  "tv.more": "More",
+  "tv.card.site": "Show a site…",
+  "tv.card.siteTitle": "Show a site on the TV",
+  "tv.card.file": "Choose a file in Files"
 }

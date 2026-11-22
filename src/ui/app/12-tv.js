@@ -754,15 +754,20 @@ function tvTransport(m) {
  * screen shows — a site's name (the screen itself, live, only when asked for), what the player plays,
  * or, while nothing of Hata's is on the screen, what to put there by one press.
  */
-function tvStage(tv, { card = false, go, show, hide }) {
+function tvStage(tv, { card = false, go, show, hide, media = null }) {
   const b = tv.browser;
   const badge = (iconName, cls = "kodi") => h("span", { class: "tv-mark-icon " + cls, "aria-hidden": "true" }, icon(iconName));
   const words = (mark, title, sub, ...more) => h("div", { class: "tv-stage-words" }, mark, h("strong", { class: "tv-stage-title" }, title), sub && h("span", { class: "tv-stage-sub clip" }, sub), more);
+  // where what plays is, along the stage's lower edge; with `media` it is also pulled to another place
   const bar = (time, total) => {
     if (!(total > 0)) return null;
+    const at = Math.min(100, (time / total) * 100);
     const fill = h("b");
-    fill.style.width = `${Math.min(100, (time / total) * 100)}%`;
-    return h("i", { class: "tv-stage-bar" }, fill);
+    fill.style.width = `${at}%`;
+    if (!media) return h("i", { class: "tv-stage-bar" }, fill);
+    const pull = h("input", { type: "range", min: 0, max: 100, step: 0.1, value: at, "aria-label": t("tv.position"), onchange: (e) => media.seek(Number(e.target.value)) });
+    pull.addEventListener("input", () => (fill.style.width = `${pull.value}%`));
+    return h("span", { class: "tv-stage-bar seek" }, fill, pull);
   };
   const stage = (cls, ...kids) => h("div", { class: "tv-stage" + (cls ? " " + cls : "") }, kids);
   if (tv.screen === "browser") {
@@ -797,9 +802,42 @@ function tvBlock(el) {
   el.dataset.on = "1";
   const chip = h("span", { class: "state" });
   const body = h("div", { class: "tv-card" });
-  put(el, h("div", { class: "section-head" }, h("h2", null, h("a", { class: "with-icon", href: "#/house/tv" }, icon("tv"), t("tv.title"))), chip), body);
   let busy = false;
   let timer = 0;
+  let last = null;
+  const go = async (what, url) => {
+    busy = true;
+    tvWorking(t("tv.switching." + (what === "url" ? "page" : what === "back" ? "kodi" : what)), el);
+    try {
+      await (what === "url" ? api("POST", "/api/tv/open", { url }) : what === "back" ? api("POST", "/api/tv/back", {}) : api("PUT", "/api/tv", { screen: what }));
+    } catch (e) {
+      toast(errorText(e), "error");
+    }
+    busy = false;
+    void load();
+  };
+  // everything else one reaches for, without going to the TV's page: who has the screen, a site, a link, a file
+  const menu = (at) => {
+    const tv = last;
+    if (!tv) return;
+    const b = tv.browser;
+    const mode = (id, iconName, label, can = true) => ({ label, icon: iconName, on: tv.screen === id, off: !can, run: () => (tv.screen === id ? null : void go(id)) });
+    const r = at.getBoundingClientRect();
+    menuAt({ x: r.right - 250, y: r.bottom + 4 }, menuHeader(t("tv.onScreen"), tvChip(tv)[1]), [
+      mode("kodi", "film", "Kodi", tv.installed),
+      mode("browser", "globe", t("tv.page.browser"), b.installed),
+      mode("off", "terminal", t("tv.onScreen.none")),
+      mode("dark", "power", t("tv.onScreen.sleep")),
+      tv.screen === "browser" && b.back && { label: t("tv.page.toPlayer"), icon: "undo", run: () => void go("back") },
+      ...(b.installed ? (b.bookmarks ?? []).slice(0, 6) : []).map((one) => ({ label: one.name || tvHost(one.url), iconEl: tvMarkIcon(one), on: tv.screen === "browser" && b.url === one.url, run: () => void go("url", one.url) })),
+      b.installed && { label: t("tv.card.site"), icon: "link", run: () => tvSiteDialog((url) => void go("url", url)) },
+      { label: t("tv.link") + "…", icon: "play", run: playLinkDialog },
+      { label: t("tv.card.file"), icon: "folder", href: filesHash(tv.folders?.[0] ?? state.settings?.dataRoot ?? "/") },
+      tv.screen === "kodi" && tv.answers && { label: t("tv.remote"), icon: "remote", run: () => tvDropdown(at) },
+      { label: t("tv.openPage"), icon: "arrow", href: "#/house/tv" },
+    ]);
+  };
+  put(el, h("div", { class: "section-head" }, h("h2", null, h("a", { class: "with-icon", href: "#/house/tv" }, icon("tv"), t("tv.title"))), h("span", { class: "row-actions" }, chip, h("button", { type: "button", class: "icon-btn tv-card-more", title: t("tv.more"), "aria-label": t("tv.more"), onclick: (e) => menu(e.currentTarget) }, icon("more")))), body);
   const load = async () => {
     clearTimeout(timer);
     if (!el.isConnected) return void delete el.dataset.on;
@@ -809,7 +847,9 @@ function tvBlock(el) {
         tv = state.tv = await api("GET", "/api/tv");
       } catch {}
       if (!el.isConnected) return void delete el.dataset.on;
-      if (tv && !busy && !document.querySelector("dialog[open]") && !document.fullscreenElement) paint(tv);
+      if (tv) last = tv;
+      // not redrawn under a slider that is being pulled
+      if (tv && !busy && !document.querySelector("dialog[open]") && !document.fullscreenElement && !body.querySelector("input[type=range]:active")) paint(tv);
     }
     clearTimeout(timer);
     timer = setTimeout(load, tv && (tv.running || tv.browser.running) ? 3000 : 8000);
@@ -820,17 +860,6 @@ function tvBlock(el) {
     chip.className = "state " + cls;
     chip.textContent = word;
     const b = tv.browser;
-    const go = async (what, url) => {
-      busy = true;
-      tvWorking(t("tv.switching." + (what === "url" ? "page" : what)), el);
-      try {
-        await (what === "url" ? api("POST", "/api/tv/open", { url }) : api("PUT", "/api/tv", { screen: what }));
-      } catch (e) {
-        toast(errorText(e), "error");
-      }
-      busy = false;
-      void load();
-    };
     const toPage = () => ((tvUi.control = true), (location.hash = "#/house/tv"));
     const m = tvMediaOf(tv, load);
     const now = tv.screen === "kodi" && tv.answers ? tv.playing : null;
@@ -838,15 +867,30 @@ function tvBlock(el) {
     const sub = tv.screen === "browser" ? tvHost(b.url) : now && !isLink(now.file) ? now.file.split("/").pop() : "";
     const line = (text, action) => h("div", { class: "tv-card-foot" }, h("span", { class: "tv-card-quiet clip" }, text), action);
     const foot = m
-      ? h("div", { class: "tv-card-foot" }, tvTransport(m), h("button", { type: "button", class: "tvr-round to-right" + (m.muted ? " on" : ""), title: t(m.muted ? "tv.unmute" : "tv.mute"), "aria-label": t(m.muted ? "tv.unmute" : "tv.mute"), onclick: m.mute }, icon(m.muted ? "volumeOff" : "volume")))
+      ? h("div", { class: "tv-card-foot" }, tvTransport(m), h("button", { type: "button", class: "tvr-round to-right" + (m.muted ? " on" : ""), title: t(m.muted ? "tv.unmute" : "tv.mute"), "aria-label": t(m.muted ? "tv.unmute" : "tv.mute"), onclick: m.mute }, icon(m.muted ? "volumeOff" : "volume")), h("input", { type: "range", class: "tvr-slider tv-vol" + (m.muted ? " muted" : ""), min: 0, max: 100, step: 1, value: m.volume, title: `${t("tv.volume")}: ${Math.round(m.volume)}%`, "aria-label": t("tv.volume"), onchange: (e) => m.loud(Number(e.target.value)) }))
       : tv.screen === "browser"
         ? line(t("tv.noVideoShort"), button(t("tv.stage.show"), { class: "small", onclick: toPage }, "eye"))
         : tv.screen === "kodi" && tv.answers
           ? line(t("tv.padHint"), button(t("tv.remote"), { class: "small", onclick: (e) => tvDropdown(e.currentTarget) }, "remote"))
           : null;
-    put(body, tvStage(tv, { card: true, go }), h("div", { class: "tv-card-side" }, h("strong", { class: "tv-card-title" }, title), sub && h("span", { class: "tv-card-sub muted mono clip" }, sub), foot));
+    put(body, tvStage(tv, { card: true, go, media: m }), h("div", { class: "tv-card-side" }, h("strong", { class: "tv-card-title" }, title), sub && h("span", { class: "tv-card-sub muted mono clip" }, sub), foot));
   };
   void load();
+}
+
+/** An address typed for the screen, from the card of Home: a bare name gets https:// in front */
+function tvSiteDialog(show) {
+  let dialog;
+  const field = h("input", { type: "url", inputMode: "url", autocomplete: "off", spellcheck: false, maxLength: 2000, placeholder: t("tv.show.placeholder"), "aria-label": t("tv.page.address") });
+  const send = () => {
+    const typed = field.value.trim();
+    if (!typed) return field.focus();
+    dialog.close();
+    show(/^https?:\/\//i.test(typed) ? typed : "https://" + typed);
+  };
+  field.addEventListener("keydown", (e) => e.key === "Enter" && send());
+  dialog = openDialog("confirm", h("h2", null, t("tv.card.siteTitle")), field, h("footer", null, closeButton(() => dialog, t("common.cancel")), button(t("tv.page.show"), { class: "primary", onclick: send }, "tv")));
+  field.focus();
 }
 
 /** Says, where the stage is, that the screen is changing hands: it takes some seconds, and the person is at the page, not at the screen */
@@ -1407,7 +1451,7 @@ function paintTv() {
     h("div", { class: "seg-pills" }, pill("kodi", "film", "Kodi", !tv.installed), pill("browser", "globe", t("tv.page.browser"), !b.installed), pill("off", "terminal", t("tv.onScreen.none")), pill("dark", "power", t("tv.onScreen.sleep"))),
     h("button", { type: "button", class: "icon-btn tv-head-more", title: t("tv.more"), "aria-label": t("tv.more"), onclick: (e) => { const r = e.currentTarget.getBoundingClientRect(); more({ x: r.right - 220, y: r.bottom + 4 }); } }, icon("more")),
   );
-  const stage = tvStage(tv, { go: (what, url) => (what === "url" ? void showOnTv(url) : void change({ screen: what })), show: () => ((tvUi.control = true), paintTv()), hide: () => ((tvUi.control = false), paintTv()) });
+  const stage = tvStage(tv, { media: m, go: (what, url) => (what === "url" ? void showOnTv(url) : void change({ screen: what })), show: () => ((tvUi.control = true), paintTv()), hide: () => ((tvUi.control = false), paintTv()) });
 
   const source =
     tv.screen === "browser" ? ["globe", [t("tv.page.browser"), b.url && tvHost(b.url)]]

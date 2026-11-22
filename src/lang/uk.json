@@ -6325,5 +6325,8 @@
   "tv.set.how": "Як працюють пульти",
   "tv.set.howShort": "OK і «Меню» Android-пультів, CEC, кнопки живлення",
   "tv.set.noRemotes": "Нічого не підключено",
-  "tv.more": "Ще"
+  "tv.more": "Ще",
+  "tv.card.site": "Показати сайт…",
+  "tv.card.siteTitle": "Показати сайт на телевізорі",
+  "tv.card.file": "Вибрати файл у Файлах"
 }

@@ -2659,3 +2659,15 @@ button.tv-stage-chip:hover { background: rgb(0 0 0 / 0.8); }
   .tv-card-sub { display: block; font-size: 11px; }
   .tv-card-foot { margin-top: auto; flex-wrap: wrap; }
 }
+
+/* the card of Home is enough by itself: the bar along the stage is pulled to another place, the volume stands by its button, the rest is under "⋯" */
+.tv-stage-bar.seek { height: 18px; background: none; cursor: pointer; }
+.tv-stage-bar.seek::before { content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 4px; background: rgb(255 255 255 / 0.16); transition: height 0.12s; }
+.tv-stage-bar.seek b { position: absolute; left: 0; bottom: 0; height: 4px; transition: height 0.12s; }
+.tv-stage-bar.seek:hover::before, .tv-stage-bar.seek:hover b, .tv-stage-bar.seek:focus-within b { height: 8px; }
+.tv-stage-bar.seek input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+.tv-card-foot .tv-vol { flex: 0 1 110px; width: 110px; min-width: 40px; }
+.tv-card-more { width: 30px; height: 30px; border: 1px solid var(--border-strong); border-radius: 9px; color: var(--text); }
+.tv-card-more .ico, .tv-head-more .ico { stroke-width: 2.6; }
+.menu-item .tv-mark-icon { width: 20px; height: 20px; border-radius: 6px; font-size: 11px; }
+@container pg-card (max-width: 380px) { .tv-card-foot .tv-vol { display: none; } }
