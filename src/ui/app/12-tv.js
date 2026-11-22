@@ -749,6 +749,17 @@ function tvBlock(el) {
     if (kind === "browser") {
       const picture = tvPreview();
       if (picture.parentElement !== body) put(body, picture);
+    } else if (kind === "kodi" && now.picture) {
+      // the player gives no picture of its screen: a frame of the film at this moment, renewed as the film goes on
+      const stamp = `${playing.file}|${playing.paused ? Math.floor(playing.time) : Math.floor(Date.now() / 10_000)}`;
+      if (body.dataset.frame !== stamp) {
+        body.dataset.frame = stamp;
+        const img = h("img", { class: "tv-frame", alt: "", draggable: false });
+        img.onload = () => el.isConnected && body.dataset.frame === stamp && put(body, img);
+        img.src = `/api/tv/shot?f=${encodeURIComponent(stamp)}`;
+      }
+    } else if (kind === "off" && now.console) {
+      if (body.dataset.kind !== "console" + now.console) put(body, h("pre", { class: "tv-console" }, now.console));
     } else if (body.dataset.kind !== kind + title) put(body, h("div", { class: "tv-still" }, icon(kind === "kodi" ? "film" : kind === "dark" ? "power" : "terminal"), h("span", { class: "clip" }, kind === "kodi" && playing ? title : state0.textContent)));
     const act = (action, value) => api("POST", kind === "browser" ? "/api/tv/browser" : "/api/tv/do", kind === "browser" ? { action, value } : { action: action === "play" ? "playpause" : value < 0 ? "rewind" : "forward" }).then(() => setTimeout(load, 300), (e) => toast(errorText(e), "error"));
     const key = `${kind}|${title}|${paused}|${!!(media || playing)}`;
@@ -758,7 +769,8 @@ function tvBlock(el) {
       put(line, h("strong", { class: "clip grow", title }, title), h("div", { class: "tv-block-keys" }, round("back30", t("tv.key.rewind"), () => act("skip", -30), "skip"), h("button", { type: "button", class: "tvr-main", title: t("tv.key.playpause"), "aria-label": t("tv.key.playpause"), disabled: !can, onclick: () => act("play") }, icon(paused ? "play" : "pause")), round("fwd30", t("tv.key.forward"), () => act("skip", 30), "skip")));
       shown = key;
     }
-    body.dataset.kind = kind === "browser" ? "" : kind + title;
+    body.dataset.kind = kind === "browser" || (kind === "kodi" && now.picture) ? "" : kind === "off" && now.console ? "console" + now.console : kind + title;
+    if (!(kind === "kodi" && now.picture)) delete body.dataset.frame;
     setTimeout(load, kind === "off" || kind === "dark" ? 8000 : 3000);
   };
   void load();

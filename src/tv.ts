@@ -881,3 +881,27 @@ export interface BrowserReport {
   /** The player gets the screen back when the page goes: it was on before */
   back: boolean;
 }
+
+/**
+ * The text console as the kernel keeps it (`/dev/vcsa1`: rows, columns, the cursor's place, then a
+ * character and its colours per cell): the lines that say something, as text, the last `most` of them.
+ */
+export function consoleText(raw: Uint8Array, most = 14, wide = 100): string {
+  const [rows, cols] = [raw[0] ?? 0, raw[1] ?? 0];
+  if (!rows || !cols || raw.length < 4 + rows * cols * 2) return "";
+  const lines: string[] = [];
+  for (let row = 0; row < rows; row++) {
+    let line = "";
+    for (let col = 0; col < cols; col++) {
+      const code = raw[4 + (row * cols + col) * 2]!;
+      line += code >= 32 && code < 127 ? String.fromCharCode(code) : " ";
+    }
+    lines.push(line.trimEnd().slice(0, wide));
+  }
+  while (lines.length && !lines.at(-1)) lines.pop();
+  while (lines.length && !lines[0]) lines.shift();
+  return lines.slice(-most).join("\n");
+}
+
+/** One frame of a film at a moment, small, as a picture on standard output: what the player shows about now */
+export const frameArgs = (path: string, at: number): string[] => ["ffmpeg", "-v", "error", "-nostdin", "-ss", String(Math.max(0, Math.floor(at))), "-i", path, "-frames:v", "1", "-an", "-sn", "-vf", "scale=640:-2", "-q:v", "6", "-f", "mjpeg", "pipe:1"];
