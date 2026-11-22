@@ -13,7 +13,7 @@ import { cleanForwards, type Forward } from "./forward";
 import { cleanModules, type ModuleSwitches } from "./modules";
 import { cleanNames, type DomainName } from "./names";
 import { cleanSpeakerName, cleanSpeakerServer } from "./sound";
-import { cleanFolders } from "./tv";
+import { cleanBookmarks, cleanFolders, type Bookmark } from "./tv";
 import { LOAD_DEFAULTS, loadWarn, type LoadWarn } from "./cgload";
 import { cleanMachineShares, cleanShares, type MachineShare, type Share } from "./smbconf";
 import { changeAppearance, cleanAppearance, DEFAULT_APPEARANCE, type Appearance } from "./wallpapers";
@@ -143,7 +143,7 @@ export interface Settings {
   trash: { days: number };
   /** The media player on the server's screen (`tv.ts`): the folders it shows; whether its sound output was chosen */
   /** `offsets`: the sound output (Kodi's own name of it) → seconds its sound is moved by against the picture */
-  tv: { folders: string[]; audioChosen: boolean; offsets: Record<string, number>; /** The player's own volume from before a speaker's took over, put back when the sound leaves it; null — no speaker has it */ volume: number | null; /** The person sent the sound to a Bluetooth speaker: it goes back there when the speaker returns; `before` — the output used until then */ speaker: boolean; before: string; /** Kodi's sound output as last heard: the browser on the screen plays there too */ sound: string; /** The page the browser on the screen showed last */ page: string };
+  tv: { folders: string[]; audioChosen: boolean; offsets: Record<string, number>; /** The player's own volume from before a speaker's took over, put back when the sound leaves it; null — no speaker has it */ volume: number | null; /** The person sent the sound to a Bluetooth speaker: it goes back there when the speaker returns; `before` — the output used until then */ speaker: boolean; before: string; /** Kodi's sound output as last heard: the browser on the screen plays there too */ sound: string; /** The page the browser on the screen showed last */ page: string; /** Pages kept to be opened on the screen again */ bookmarks: Bookmark[] };
   /** The music player: where its sound goes (an ALSA device; "" — not chosen) and how loud */
   music: { output: string; volume: number; speaker: { on: boolean; name: string; server: string } };
   /** Which modules are on (`modules.ts`); null — not decided yet: a server from before modules, until its first start */
@@ -272,7 +272,7 @@ const DEFAULTS: Settings = {
   update: { channel: "stable", auto: false, time: "05:00" },
   trash: { days: 30 },
   modules: null,
-  tv: { folders: [], audioChosen: false, offsets: {}, volume: null, speaker: false, before: "", sound: "", page: "" },
+  tv: { folders: [], audioChosen: false, offsets: {}, volume: null, speaker: false, before: "", sound: "", page: "", bookmarks: [] },
   music: { output: "", volume: 60, speaker: { on: false, name: "", server: "" } },
 };
 
@@ -321,6 +321,7 @@ export const settings: Settings = {
     before: isPlainObject(saved.tv) && typeof saved.tv.before === "string" && saved.tv.before.length <= 300 ? saved.tv.before : "",
     sound: isPlainObject(saved.tv) && typeof saved.tv.sound === "string" && saved.tv.sound.length <= 300 ? saved.tv.sound : "",
     page: isPlainObject(saved.tv) && typeof saved.tv.page === "string" && saved.tv.page.length <= 2000 ? saved.tv.page : "",
+    bookmarks: cleanBookmarks(isPlainObject(saved.tv) ? saved.tv.bookmarks : []),
     offsets: Object.fromEntries(Object.entries(isPlainObject(saved.tv) && isPlainObject(saved.tv.offsets) ? saved.tv.offsets : {}).filter(([key, value]) => key.length <= 300 && typeof value === "number" && Math.abs(value) <= 2).slice(0, 50)) as Record<string, number>,
   },
   music: {

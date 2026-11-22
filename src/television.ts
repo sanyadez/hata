@@ -15,7 +15,7 @@ import { bus } from "./bus";
 import { saveSettings, settings } from "./config";
 import { awaitKodi, kodiRuns, screenDark, sleepScreen, playOnTv, screenShares, setUp, switchTv, tvEnabled, tvNow, tvReport, type TvPage, type TvReport } from "./kodi";
 import { installCommand, packageManager, PATH, run, runLogged } from "./packages";
-import { BROWSER_HOME_SCRIPT, BROWSER_PACKAGES, browserCalls, pointerCalls, PREVIEW_WIDTH, browserHomeHtml, TV_BROWSER_HOME, TV_USER, browserSound, browserUnitText, cleanLink, cleanShowTime, linkName, TV_BROWSER_PORT, TV_BROWSER_UNIT, TV_UNIT, type BrowserReport, type PageCall, type Screen } from "./tv";
+import { BROWSER_HOME_SCRIPT, BROWSER_PACKAGES, browserCalls, cleanBookmarks, MEDIA_ACTIONS, mediaScript, pointerCalls, PREVIEW_WIDTH, browserHomeHtml, TV_BROWSER_HOME, TV_USER, browserSound, browserUnitText, cleanLink, cleanShowTime, linkName, TV_BROWSER_PORT, TV_BROWSER_UNIT, TV_UNIT, type BrowserReport, type PageCall, type PageMedia, type Screen } from "./tv";
 
 const UNIT_FILE = "/etc/systemd/system/" + TV_BROWSER_UNIT;
 const has = (bin: string): boolean => !!Bun.which(bin, { PATH });
@@ -81,7 +81,11 @@ async function connected(): Promise<NonNullable<typeof link> | null> {
     } else if (said.method === "Runtime.bindingCalled" && said.params?.name === "hataScreen" && said.params.payload === "home") void leaveBrowser().catch(() => {});
     else if (said.method === "Page.frameNavigated" && !said.params?.frame?.parentId) void refreshPage();
     else if (said.method === "Page.loadEventFired") void refreshPage();
-    else if (said.method === "Page.screencastFrame") {
+    else if (said.method === "Target.attachedToTarget") {
+      const told = said.params as unknown as { sessionId?: string; targetInfo?: { type?: string } };
+      if (told.sessionId && told.targetInfo?.type === "iframe") inner.add(told.sessionId);
+    } else if (said.method === "Target.detachedFromTarget") inner.delete(String((said.params as unknown as { sessionId?: string }).sessionId));
+        else if (said.method === "Page.screencastFrame") {
       const frame = said.params as unknown as { data?: string; sessionId?: number };
       if (frame.data) cast.frame = new Uint8Array(Buffer.from(frame.data, "base64"));
       socket.send(JSON.stringify({ id: ++mine.asked, method: "Page.screencastFrameAck", params: { sessionId: frame.sessionId } }));
@@ -92,6 +96,9 @@ async function connected(): Promise<NonNullable<typeof link> | null> {
     if (link === mine) link = null;
     cast.on = false;
     cast.frame = null;
+    inner.clear();
+    worlds.clear();
+    mediaAt = null;
   });
   link = mine;
   await ask({ method: "Page.enable" });
@@ -99,11 +106,12 @@ async function connected(): Promise<NonNullable<typeof link> | null> {
   await ask({ method: "Runtime.addBinding", params: { name: "hataScreen" } });
   await ask({ method: "Page.addScriptToEvaluateOnNewDocument", params: { source: BROWSER_HOME_SCRIPT } });
   await ask({ method: "Runtime.evaluate", params: { expression: BROWSER_HOME_SCRIPT } });
+  await ask({ method: "Target.setAutoAttach", params: { autoAttach: true, waitForDebuggerOnStart: false, flatten: true } });
   return mine;
 }
 
 /** One call of the browser's protocol; null when it did not answer or refused */
-async function ask(call: PageCall, wait = 8000): Promise<unknown> {
+async function ask(call: PageCall, wait = 8000, session = ""): Promise<unknown> {
   const to = link && link.socket.readyState === WebSocket.OPEN ? link : await connected();
   if (!to) return null;
   return new Promise((resolve) => {
@@ -116,8 +124,60 @@ async function ask(call: PageCall, wait = 8000): Promise<unknown> {
       clearTimeout(timer);
       resolve(value);
     });
-    to.socket.send(JSON.stringify({ id, method: call.method, ...(call.params ? { params: call.params } : {}) }));
+    to.socket.send(JSON.stringify({ id, method: call.method, ...(call.params ? { params: call.params } : {}), ...(session ? { sessionId: session } : {}) }));
   });
+}
+
+/** The frames of other sites inside the page (a film site's player is one): each is the browser's own target, attached to as it appears */
+const inner = new Set<string>();
+/** The place Hata's script runs in, per frame: made once, made again when the frame went elsewhere */
+const worlds = new Map<string, number>();
+/** Where the video was found last: buttons go there */
+let mediaAt: { session: string; frame: string } | null = null;
+
+interface FrameTree {
+  frame: { id: string };
+  childFrames?: FrameTree[];
+}
+
+const framesOf = (tree: FrameTree | undefined): string[] => (tree ? [tree.frame.id, ...(tree.childFrames ?? []).flatMap(framesOf)] : []);
+
+/** Runs a script in one frame, in a world of Hata's own (the page's code does not see it); undefined — the frame is gone */
+async function inFrame(session: string, frame: string, expression: string): Promise<unknown> {
+  const key = session + "|" + frame;
+  for (let tries = 0; tries < 2; tries++) {
+    let world = worlds.get(key);
+    if (world === undefined) {
+      world = ((await ask({ method: "Page.createIsolatedWorld", params: { frameId: frame, worldName: "hata" } }, 3000, session)) as { executionContextId?: number } | null)?.executionContextId;
+      if (world === undefined) return undefined;
+      worlds.set(key, world);
+    }
+    const said = (await ask({ method: "Runtime.evaluate", params: { expression, contextId: world, returnByValue: true, userGesture: true } }, 3000, session)) as { result?: { value?: unknown }; exceptionDetails?: unknown } | null;
+    if (said && !said.exceptionDetails) return said.result?.value ?? null;
+    worlds.delete(key);
+  }
+  return undefined;
+}
+
+type Found = PageMedia & { area: number };
+
+/** The video the page plays, looked for in every frame; with an action, that is done to it where it was found last */
+async function media(action = "", value: unknown = null): Promise<PageMedia | null> {
+  if (action && mediaAt) {
+    const done = (await inFrame(mediaAt.session, mediaAt.frame, mediaScript(action, value))) as Found | null | undefined;
+    if (done) return done;
+  }
+  let best: { found: Found; session: string; frame: string } | null = null;
+  for (const session of ["", ...inner]) {
+    const tree = (await ask({ method: "Page.getFrameTree" }, 3000, session)) as { frameTree?: FrameTree } | null;
+    for (const frame of framesOf(tree?.frameTree)) {
+      const found = (await inFrame(session, frame, mediaScript())) as Found | null | undefined;
+      if (found && (!best || (!found.paused && best.found.paused) || (found.paused === best.found.paused && found.area > best.found.area))) best = { found, session, frame };
+    }
+  }
+  mediaAt = best && { session: best.session, frame: best.frame };
+  if (best && action) return ((await inFrame(best.session, best.frame, mediaScript(action, value))) as Found | null | undefined) ?? best.found;
+  return best?.found ?? null;
 }
 
 async function refreshPage(): Promise<void> {
@@ -140,6 +200,8 @@ async function report(): Promise<{ screen: Screen; browser: BrowserReport }> {
       url: running ? (page?.url ?? "") : settings.tv.page,
       title: running ? (page?.title ?? "") : "",
       last: settings.tv.page,
+      media: running ? await media().catch(() => null) : null,
+      bookmarks: settings.tv.bookmarks,
       left: running ? secondsLeft() : 0,
       back: running ? (showing?.back ?? tvEnabled()) : false,
     },
@@ -166,7 +228,7 @@ export function installBrowser(by: string): Job {
 }
 
 /** The browser's service as it should be now: its sound goes where the player's went */
-async function writeUnit(): Promise<void> {
+async function writeUnit(): Promise<boolean> {
   const text = browserUnitText(browserSound(settings.tv.sound));
   let was = "";
   try {
@@ -178,7 +240,7 @@ async function writeUnit(): Promise<void> {
   }
   // Hata's own page, in the server's language: what the browser starts with
   const words = (settings.language === "uk" ? uk : en) as Record<string, string>;
-  const home = browserHomeHtml(settings.language, settings.local.name || hostname(), words["tv.page.homeHint"] ?? "");
+  const home = browserHomeHtml(settings.language, settings.local.name || hostname(), words["tv.page.homeHint"] ?? "", settings.tv.bookmarks);
   let had = "";
   try {
     had = readFileSync(TV_BROWSER_HOME, "utf8");
@@ -187,6 +249,18 @@ async function writeUnit(): Promise<void> {
     writeFileSync(TV_BROWSER_HOME, home);
     await run(["chown", `${TV_USER}:${TV_USER}`, TV_BROWSER_HOME], 10_000);
   }
+  return had !== home;
+}
+
+/** The pages kept for the screen: the list as the person made it; Hata's page on the screen shows them as tiles */
+export async function setBookmarks(raw: unknown, by: string): Promise<TvReport> {
+  settings.tv.bookmarks = cleanBookmarks(raw);
+  saveSettings();
+  const running = await browserRuns();
+  // the screen's own page is a file: written anew, and shown anew when it is the one on the screen
+  if (existsSync(UNIT_FILE) && (await writeUnit()) && running && page && !page.url) await ask({ method: "Page.reload" });
+  record("tv.bookmarks", { user: by });
+  return tvReport();
 }
 
 /** The browser takes the screen (the player, when it runs, is stopped by that) and answers Hata */
@@ -303,6 +377,11 @@ export async function screenShot(): Promise<Uint8Array> {
 /** A button of the page's remote for the browser */
 export async function browserDo(action: unknown, value: unknown, by: string): Promise<void> {
   if (action === "home") return void (await leaveBrowser(by));
+  if (typeof action === "string" && MEDIA_ACTIONS.includes(action)) {
+    if (!(await browserRuns())) throw new AppError("tv.browserOff", 409);
+    if (!(await media(action, value))) throw new AppError("tv.noVideo", 409);
+    return;
+  }
   const pointed = action === "click" || action === "wheel";
   if (pointed && !(await browserRuns())) throw new AppError("tv.browserOff", 409);
   const calls = pointed ? pointerCalls(action, value, await pageSize()) : browserCalls(action, value);

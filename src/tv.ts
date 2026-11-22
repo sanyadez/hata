@@ -589,25 +589,53 @@ export const TV_BROWSER_HOME = `${TV_HOME}/screen.html`;
 
 const escaped = (text: string): string => text.replace(/[&<>"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[ch]!);
 
+/** A page kept to be opened on the screen again: on Hata's page as a row, on the screen's own page as a tile */
+export interface Bookmark {
+  name: string;
+  url: string;
+}
+
+export const BOOKMARKS_MOST = 40;
+
+/** The bookmarks as they may be kept: whole http(s) addresses, a name each (the address's host when none), no address twice */
+export function cleanBookmarks(raw: unknown): Bookmark[] {
+  const kept: Bookmark[] = [];
+  for (const one of Array.isArray(raw) ? raw : []) {
+    const url = cleanLink((one as { url?: unknown } | null)?.url);
+    if (!url || kept.some((b) => b.url === url)) continue;
+    const said = (one as { name?: unknown }).name;
+    const name = (typeof said === "string" ? said.replace(/[\x00-\x1f\x7f]/g, " ").replace(/\s+/g, " ").trim().slice(0, 60) : "") || new URL(url).host;
+    kept.push({ name, url });
+    if (kept.length >= BOOKMARKS_MOST) break;
+  }
+  return kept;
+}
+
 /**
- * Hata's own page on the screen: dark, the time and the day, a line saying where pages are sent
- * from. Dark from its first frame, so that the change from the player is not a white flash.
+ * Hata's own page on the screen: dark, the time and the day, the bookmarks as tiles large enough to
+ * hit from the sofa, a line saying where pages are sent from. Dark from its first frame, so that the
+ * change from the player is not a white flash.
  */
-export const browserHomeHtml = (lang: string, name: string, hint: string): string => `<!doctype html>
+export const browserHomeHtml = (lang: string, name: string, hint: string, bookmarks: Bookmark[] = []): string => `<!doctype html>
 <html lang="${escaped(lang)}" style="background:#14110f">
 <meta charset="utf-8">
 <title>${escaped(name)}</title>
 <style>
-html,body{height:100%;margin:0;background:#14110f;color:#f3ede6;font-family:system-ui,sans-serif;cursor:default}
-body{display:grid;place-content:center;justify-items:center;gap:2vh}
-#time{font-size:18vh;font-weight:600;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
-#day{font-size:4vh;color:#b8ada1}
+html,body{min-height:100%;margin:0;background:#14110f;color:#f3ede6;font-family:system-ui,sans-serif}
+body{display:grid;place-content:center;justify-items:center;gap:2vh;min-height:100vh;padding:12vh 6vw;box-sizing:border-box}
+#time{font-size:${bookmarks.length ? 11 : 18}vh;font-weight:600;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+#day{font-size:${bookmarks.length ? 3 : 4}vh;color:#b8ada1}
 #name{position:fixed;left:4vw;top:5vh;font-size:3.2vh;font-weight:600;color:#f2a41c}
-#hint{position:fixed;left:0;right:0;bottom:6vh;text-align:center;font-size:2.4vh;color:#8d8278}
+#hint{position:fixed;left:0;right:0;bottom:4vh;text-align:center;font-size:2.2vh;color:#8d8278}
+#marks{display:flex;flex-wrap:wrap;justify-content:center;gap:2vh;margin-top:4vh;max-width:88vw}
+#marks a{display:grid;gap:.6vh;min-width:22vh;max-width:36vh;padding:2.4vh 3vh;border-radius:2vh;background:#231e1a;border:.3vh solid #3a322b;color:inherit;text-decoration:none;font-size:2.8vh;font-weight:600}
+#marks a:hover,#marks a:focus{border-color:#f2a41c;outline:none}
+#marks span{font-size:1.8vh;font-weight:400;color:#8d8278;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 </style>
 <div id="name">${escaped(name)}</div>
 <div id="time"></div>
 <div id="day"></div>
+${bookmarks.length ? `<div id="marks">${bookmarks.map((b) => `<a href="${escaped(b.url)}">${escaped(b.name)}<span>${escaped(linkName(b.url))}</span></a>`).join("")}</div>` : ""}
 <div id="hint">${escaped(hint)}</div>
 <script>
 const lang = document.documentElement.lang;
@@ -730,6 +758,43 @@ export function pointerCalls(action: unknown, value: unknown, size: { width: num
   return null;
 }
 
+/** The video a page plays, as Hata's page shows it under the picture of the screen */
+export interface PageMedia {
+  paused: boolean;
+  time: number;
+  total: number;
+  muted: boolean;
+  volume: number;
+  /** It has the whole screen */
+  full: boolean;
+}
+
+/**
+ * Run in every frame of the page (a site's player usually lives in a frame of another site): finds
+ * the video that matters — one that plays, else the largest — optionally does one thing with it, and
+ * says how it stands. `area` picks among frames. Nothing of the page's own code is called.
+ */
+export function mediaScript(action = "", value: unknown = null): string {
+  const act: Record<string, string> = {
+    play: "v.paused ? v.play() : v.pause();",
+    skip: `v.currentTime = Math.max(0, Math.min(isFinite(v.duration) ? v.duration - 1 : 1e9, v.currentTime + ${typeof value === "number" && Number.isFinite(value) ? Math.max(-3600, Math.min(3600, Math.round(value))) : 0}));`,
+    seek: `if (isFinite(v.duration)) v.currentTime = v.duration * ${typeof value === "number" && value >= 0 && value <= 100 ? value / 100 : "v.currentTime / v.duration"};`,
+    mute: "v.muted = !v.muted;",
+    volume: `v.muted = false; v.volume = ${typeof value === "number" && value >= 0 && value <= 100 ? value / 100 : "v.volume"};`,
+    full: "document.fullscreenElement ? document.exitFullscreen() : v.requestFullscreen();",
+  };
+  return `(() => {
+  const all = [...document.querySelectorAll("video")].filter((one) => one.currentSrc || one.readyState > 0);
+  if (!all.length) return null;
+  const size = (one) => one.clientWidth * one.clientHeight;
+  const v = all.filter((one) => !one.paused).sort((a, b) => size(b) - size(a))[0] || all.sort((a, b) => size(b) - size(a))[0];
+  try { ${act[action] ?? ""} } catch {}
+  return { paused: v.paused, time: Math.floor(v.currentTime || 0), total: isFinite(v.duration) ? Math.floor(v.duration) : 0, muted: v.muted, volume: Math.round(v.volume * 100), full: !!document.fullscreenElement, area: size(v) };
+})()`;
+}
+
+export const MEDIA_ACTIONS = ["play", "skip", "seek", "mute", "volume", "full"];
+
 /** How wide the picture of the screen is sent to Hata's page, pixels: enough to see and aim by */
 export const PREVIEW_WIDTH = 960;
 
@@ -752,6 +817,9 @@ export interface BrowserReport {
   title: string;
   /** The page last sent to the screen to stay: offered in the address field */
   last: string;
+  /** The video the page plays; null — none found */
+  media: PageMedia | null;
+  bookmarks: Bookmark[];
   /** Seconds until what was on the screen before comes back; 0 — the page stays */
   left: number;
   /** The player gets the screen back when the page goes: it was on before */

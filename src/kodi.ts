@@ -191,7 +191,7 @@ export interface TvPage {
 
 /** What `television.ts`, which owns the screen, adds to what is said of the player */
 let shares: { report: () => Promise<{ screen: Screen; browser: BrowserReport }>; page: () => TvPage | null } = {
-  report: async () => ({ screen: "off", browser: { installed: false, install: "", running: false, url: "", title: "", last: "", left: 0, back: false } }),
+  report: async () => ({ screen: "off", browser: { installed: false, install: "", running: false, url: "", title: "", last: "", media: null, bookmarks: [], left: 0, back: false } }),
   page: () => null,
 };
 export const screenShares = (told: typeof shares): void => {

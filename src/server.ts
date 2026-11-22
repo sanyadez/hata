@@ -121,7 +121,7 @@ import { diskUses, letGo } from "./diskuses";
 import { renameServer } from "./servername";
 import { musicDo, musicNow, musicReport, playMusic, setMusicOutput, setSpeaker } from "./music";
 import { installTv, playOnTv, remote as tvRemote, keepPicture as keepTvPicture, mediaInfo as tvMediaInfo, streamsHere as tvStreamsHere, mediaStream as tvMediaStream, mediaSubs as tvMediaSubs, setLanguage as setTvLanguage, setPref as setTvPref, setAudio as setTvAudio, setOffset as setTvOffset, setHomeAssistant as setTvHa, setFolders as setTvFolders, setPicture as setTvPicture, switchTv, tvNow, tvReport } from "./kodi";
-import { browserDo, installBrowser, leaveBrowser, openPage, screenShot, setScreen } from "./television";
+import { browserDo, installBrowser, leaveBrowser, openPage, screenShot, setBookmarks, setScreen } from "./television";
 import { moduleOfPath, moduleOfTool } from "./modules";
 import { serverTree } from "./servertree";
 import { homeLinks, localNamesStatus, refreshLocalNames } from "./mdns";
@@ -1672,6 +1672,7 @@ async function api(req: Request, url: URL, server: Server<unknown>): Promise<Res
     const data = await body(req);
     if ("on" in data) return json(await switchTv(data.on === true, user.name));
     if ("screen" in data) return json(await setScreen(data.screen, user.name));
+    if ("bookmarks" in data) return json(await setBookmarks(data.bookmarks, user.name));
     if ("folders" in data) return json(await setTvFolders(data.folders, user.name));
     if ("audio" in data) return json(await setTvAudio(data.audio));
     if ("offset" in data) return json(await setTvOffset(data.offset));

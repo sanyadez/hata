@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { cleanOffset, browserCalls, browserSound, browserUnitText, browserHomeHtml, cleanShowTime, pointerCalls } from "../src/tv";
+import { cleanOffset, browserCalls, browserSound, browserUnitText, browserHomeHtml, cleanShowTime, pointerCalls, cleanBookmarks, mediaScript } from "../src/tv";
 import { cleanLink, isLink, linkName, probeArgs, sourceArgs, streamZero, cleanStart, keyframeArgs, mediaOf, prefsOf, prefValue, streamArgs, subsArgs, tracksOf, clickPacket, helloPacket, KEEP_WINDOW, KEEP_YES, pictureOf, advancedXml, cleanFolders, shortTitle, hwdbText, keymapXml, polkitRule, decodePackages, isOurs, monitorAudio, monitorName, playable, portIn, readDisplay, remoteCall, seconds, sourcesXml, takeJson, unitText } from "../src/tv";
 
 function edid(name: string, audio: boolean): Uint8Array {
@@ -311,4 +311,22 @@ test("a press on the picture of the screen lands at that place of the page", () 
   expect(pointerCalls("click", { x: 0.5, y: 0.5 }, { width: 0, height: 0 })).toBeNull();
   expect(pointerCalls("wheel", { x: 0.5, y: 0.5, dy: "x" }, size)).toBeNull();
   expect(pointerCalls("drag", { x: 0.5, y: 0.5 }, size)).toBeNull();
+});
+
+test("bookmarks of the screen and the script that drives a page's video", () => {
+  expect(cleanBookmarks([{ name: " Films\n here ", url: "https://a.example/x" }, { url: "https://a.example/x" }, { name: "", url: "http://b.example" }, { name: "bad", url: "javascript:alert(1)" }, null, 5])).toEqual([
+    { name: "Films here", url: "https://a.example/x" },
+    { name: "b.example", url: "http://b.example/" },
+  ]);
+  expect(cleanBookmarks("x")).toEqual([]);
+  // on the screen's own page a name cannot become markup
+  expect(browserHomeHtml("en", "hata", "", [{ name: "<b>x", url: "https://a.example/?a=1&b=2" }])).toContain('<a href="https://a.example/?a=1&amp;b=2">&lt;b&gt;x<span>');
+  // what comes from a request goes into the script only as a number
+  expect(mediaScript("skip", 30)).toContain("v.currentTime + 30)");
+  expect(mediaScript("skip", "1); alert(1")).toContain("v.currentTime + 0)");
+  expect(mediaScript("seek", 50)).toContain("v.duration * 0.5");
+  expect(mediaScript("volume", 400)).toContain("v.volume = v.volume");
+  expect(mediaScript("nonsense")).toContain("try {  } catch");
+  // the script is one expression that runs
+  expect(() => new Function("document", "return " + mediaScript("play"))({ querySelectorAll: () => [] })).not.toThrow();
 });

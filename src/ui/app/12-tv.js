@@ -737,9 +737,11 @@ function tvPreview() {
   let n = 0;
   const act = (action, value) => api("POST", "/api/tv/browser", { action, value }).then(() => ((quick = 6), next(150)), (e) => toast(errorText(e), "error"));
   const at = (e) => {
-    const r = box.getBoundingClientRect();
+    // the picture itself: on the whole screen of this device it may stand inside bars
+    const r = (box.querySelector("img") ?? box).getBoundingClientRect();
     return { x: Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)), y: Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)) };
   };
+  const grow = h("button", { type: "button", class: "tv-preview-grow", title: t("tv.page.previewFull"), "aria-label": t("tv.page.previewFull"), onclick: (e) => (e.stopPropagation(), document.fullscreenElement ? document.exitFullscreen() : box.requestFullscreen?.()) }, icon("expand"));
   box.addEventListener("click", (e) => void act("click", at(e)));
   let turned = 0;
   box.addEventListener("wheel", (e) => {
@@ -758,7 +760,7 @@ function tvPreview() {
     const img = document.createElement("img");
     img.alt = "";
     img.draggable = false;
-    img.onload = () => (box.replaceChildren(img), next(quick-- > 0 ? 350 : 1000));
+    img.onload = () => (box.replaceChildren(img, grow), next(quick-- > 0 ? 350 : 1000));
     img.onerror = () => next(3000);
     img.src = `/api/tv/shot?n=${++n}`;
   };
@@ -806,8 +808,20 @@ function tvPageParts(tv, address = true) {
   const act = (action, value) => api("POST", "/api/tv/browser", { action, value }).then(again, (e) => toast(errorText(e), "error"));
   const keyed = (action, iconName, label, cls = "") => h("div", { class: "tvr-key" }, h("button", { type: "button", class: "tvr-round " + cls, title: label, "aria-label": label, onclick: () => (action === "text" ? tvTextDialog(act) : act(action)) }, icon(iconName)), h("span", { class: "muted" }, label));
   const leave = button(t(b.back ? "tv.page.toPlayer" : "tv.page.close"), { class: "wide tv-leave", onclick: () => ((leave.disabled = true), tvWorking(t(b.back ? "tv.switching.kodi" : "tv.switching.off")), api("POST", "/api/tv/back", {}).then(async () => ((state.tv = await api("GET", "/api/tv")), state.route.view === "tv" && paintTv()), (e) => toast(errorText(e), "error"))) }, b.back ? "play" : "x");
+  // the video the page plays, driven as a player: found in the page and its frames, whatever the site's own buttons are
+  const m = b.media;
+  const round = (action, iconName, label, cls = "", value) => h("button", { type: "button", class: "tvr-round " + cls, title: label, "aria-label": label, onclick: () => act(action, value) }, icon(iconName));
+  const skip = (seconds, iconName, label) => h("button", { type: "button", class: "tvr-round skip", title: label, "aria-label": label, onclick: () => act("skip", seconds) }, icon(iconName), h("span", null, "30"));
+  const player = m && [
+    m.total > 0 && h("input", { type: "range", class: "tvr-slider", min: 0, max: 100, step: 0.1, value: (m.time / m.total) * 100, "aria-label": t("tv.position"), onchange: (e) => act("seek", Number(e.target.value)) }),
+    h("div", { class: "tvr-times muted" }, h("span", null, tvClock(m.time)), m.paused && h("span", { class: "state busy" }, t("tv.paused")), h("span", null, m.total > 0 ? tvClock(m.total) : "")),
+    h("div", { class: "tvr-transport" }, skip(-30, "back30", t("tv.key.rewind")), h("button", { type: "button", class: "tvr-main", title: t("tv.key.playpause"), "aria-label": t("tv.key.playpause"), onclick: () => act("play") }, icon(m.paused ? "play" : "pause")), skip(30, "fwd30", t("tv.key.forward"))),
+    h("div", { class: "tvr-volume" }, round("mute", m.muted ? "volumeOff" : "volume", t(m.muted ? "tv.unmute" : "tv.mute"), m.muted ? "on" : ""), h("input", { type: "range", class: "tvr-slider" + (m.muted ? " muted" : ""), min: 0, max: 100, step: 1, value: m.volume, "aria-label": t("tv.volume"), onchange: (e) => act("volume", Number(e.target.value)) }), round("full", "expand", t(m.full ? "tv.page.fullOff" : "tv.page.full"), m.full ? "on" : "")),
+    h("hr", { class: "tvr-rule" }),
+  ];
   return [
     h("div", { class: "tvr-now" }, h("div", { class: "tvr-title" }, h("div", { class: "grow" }, h("strong", { class: "wrap" }, b.title || t(b.url ? "tv.page.blank" : "tv.page.home")), b.left > 0 && h("span", { class: "state busy" }, t("tv.page.left", { time: tvClock(b.left) })))), b.url && h("p", { class: "tvr-file muted wrap" }, b.url)),
+    player,
     address && tvAddressRow("", t("tv.page.show")),
     address && h("hr", { class: "tvr-rule" }),
     h("div", { class: "tvr-keys" }, keyed("back", "undo", t("tv.key.back")), keyed("reload", "refresh", t("tv.page.reload")), keyed("up", "chevron", t("tv.page.up"), "turn-up"), keyed("down", "chevron", t("tv.page.down"), "turn-down"), keyed("text", "keys", t("tv.key.text"))),
@@ -910,9 +924,20 @@ function paintTv() {
       }
     },
   }, "download");
+  const marks = b.bookmarks ?? [];
+  const marked = !!b.url && marks.some((one) => one.url === b.url);
+  const keep = (list) => void change({ bookmarks: list });
+  const marksBlock = b.installed && tv.screen === "browser" && h(
+    "div",
+    { class: "stack-s" },
+    h("div", { class: "section-head" }, h("strong", null, t("tv.marks")), b.url && !marked && h("div", { class: "actions" }, button(t("tv.marks.add"), { class: "small", onclick: () => keep([...marks, { name: b.title || "", url: b.url }]) }, "star"))),
+    marks.length
+      ? marks.map((one) => h("div", { class: "kv" }, h("button", { type: "button", class: "link with-icon wrap tv-mark", title: one.url, onclick: () => void showOnTv(one.url) }, icon(one.url === b.url ? "star" : "link"), one.name), button(t("tv.folderRemove"), { class: "small ghost", "aria-label": `${t("tv.folderRemove")}: ${one.name}`, onclick: () => keep(marks.filter((x) => x.url !== one.url)) })))
+      : h("p", { class: "muted small" }, t("tv.marks.none")),
+  );
   const pageCard = uiCard(
     { title: t("tv.page.title"), marks: b.running && h("span", { class: "state running" }, t("tv.page.on")), lead: t(b.installed ? "tv.page.lead" : "tv.page.needs") },
-    b.installed ? [tvAddressRow(b.url || b.last || "", t("tv.page.show")), tv.screen === "browser" && tvPreview()] : [h("p", { class: "cmd" }, icon("terminal"), b.install), h("div", { class: "row-actions" }, bringBrowser)],
+    b.installed ? [tvAddressRow(b.url || b.last || "", t("tv.page.show")), tv.screen === "browser" && tvPreview(), marksBlock] : [h("p", { class: "cmd" }, icon("terminal"), b.install), h("div", { class: "row-actions" }, bringBrowser)],
   );
   // other programs show things on the screen with an access key: what to send, ready to paste
   const origin = location.origin;
