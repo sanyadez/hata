@@ -121,7 +121,7 @@ import { diskUses, letGo } from "./diskuses";
 import { renameServer } from "./servername";
 import { musicDo, musicNow, musicReport, playMusic, setMusicOutput, setSpeaker } from "./music";
 import { installTv, playOnTv, remote as tvRemote, keepPicture as keepTvPicture, mediaInfo as tvMediaInfo, streamsHere as tvStreamsHere, mediaStream as tvMediaStream, mediaSubs as tvMediaSubs, setLanguage as setTvLanguage, setPref as setTvPref, setAudio as setTvAudio, setOffset as setTvOffset, setHomeAssistant as setTvHa, setFolders as setTvFolders, setPicture as setTvPicture, switchTv, tvNow, tvReport } from "./kodi";
-import { browserDo, installBrowser, leaveBrowser, liveAnswer, liveEnd, openPage, screenNow, screenStream, screenShot, setBookmarks, setScreen } from "./television";
+import { browserDo, installBrowser, leaveBrowser, openPage, screenNow, screenStream, screenShot, setBookmarks, setScreen } from "./television";
 import { moduleOfPath, moduleOfTool } from "./modules";
 import { serverTree } from "./servertree";
 import { homeLinks, localNamesStatus, refreshLocalNames } from "./mdns";
@@ -1695,11 +1695,6 @@ async function api(req: Request, url: URL, server: Server<unknown>): Promise<Res
     server.timeout(req, 0);
     return screenStream(req.signal);
   }
-  if (path === "/api/tv/live" && method === "DELETE") {
-    await liveEnd();
-    return json({ ok: true });
-  }
-  if (path === "/api/tv/live" && method === "POST") return json({ sdp: await liveAnswer((await body(req)).sdp) });
   if (path === "/api/tv/shot" && method === "GET") return new Response((await screenShot(url.searchParams.get("big") === "1")) as BufferSource as BodyInit, { headers: { "content-type": "image/jpeg", "cache-control": "no-store" } });
   if (path === "/api/tv/browser/install" && method === "POST") return json({ job: installBrowser(user.name).id }, 202);
   if (path === "/api/tv/browser" && method === "POST") {

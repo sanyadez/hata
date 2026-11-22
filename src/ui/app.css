@@ -2449,13 +2449,25 @@ dialog.framed .dlg-body footer { position: sticky; bottom: -20px; margin: 0 -20p
 .tv-block-keys .tvr-round { width: 36px; height: 36px; }
 .tv-block-body > .tv-frame { width: 100%; height: 100%; min-height: 0; object-fit: contain; background: #0b0a09; border-radius: 10px; }
 .tv-console { margin: 0; padding: 12px 14px; border-radius: 10px; background: #0b0a09; color: #cfc8bf; font: 11.5px/1.45 var(--font-mono, monospace); overflow: hidden; white-space: pre; min-height: 0; display: flex; flex-direction: column; justify-content: flex-end; }
-.tv-preview video { display: block; width: 100%; height: 100%; object-fit: contain; background: #000; }
-.tv-preview:fullscreen video { width: 100vw; height: 100vh; }
-.tv-preview-sound { position: absolute; right: 48px; top: 8px; display: grid; place-items: center; width: 32px; height: 32px; padding: 0; border: 0; border-radius: 8px; background: rgb(0 0 0 / 0.55); color: #fff; cursor: pointer; opacity: 0; transition: opacity 0.15s; }
-.tv-preview:hover .tv-preview-sound, .tv-preview-sound:focus-visible { opacity: 1; }
-@media (hover: none) { .tv-preview-sound { opacity: 1; } }
-.tv-preview-sound .ico { width: 18px; height: 18px; }
 
+/* the TV's card of Home holds the same view as the TV page; what does not fit a small card is left out, largest things last */
+.tv-view { display: flex; flex-direction: column; gap: 10px; min-height: 0; height: 100%; }
+.tv-view > .tv-preview { flex: 1 1 0; min-height: 0; aspect-ratio: auto; width: 100%; }
+.tv-view > .tv-preview img { object-fit: contain; }
+.tv-view > :not(.tv-preview) { flex: none; }
+.tv-view .tv-now-line strong { font-size: 14px; }
+.tv-view .tv-media { --main: 44px; gap: 8px; }
+.tv-view .tv-media .tvr-main { width: 44px; height: 44px; }
+.tv-view .tv-media .tvr-round { width: 36px; height: 36px; }
+.tv-view .tv-left-foot .btn.small { padding-inline: 8px; }
+.tv-block-time { flex: none; }
+@container pg-card (max-height: 560px) { .tv-view > .tv-address { display: none; } }
+@container pg-card (max-height: 430px) { .tv-view > .tv-now-line { display: none; } }
+@container pg-card (max-height: 300px) { .tv-view > .tv-left-foot { display: none; } }
+.tv-view .tv-left-foot { flex-wrap: nowrap; overflow: hidden; }
+.tv-view .tv-left-foot .to-right { flex: none; }
+@container pg-card (max-width: 520px) { .tv-view .tv-media > .tv-media-vol, .tv-view .tv-left-foot .btn.small > span { display: none; } }
+@container pg-card (max-width: 380px) { .tv-view .tv-media > .tv-media-pos { display: none; } .tv-view .tv-media { justify-content: center; } }
 /* nothing on the screen: the card offers what to put there */
 .tv-pick-box { display: flex; flex-direction: column; gap: 8px; min-height: 0; overflow: hidden; }
 .tv-pick-box > .tv-console { flex: 0 1 auto; max-height: 34%; }
@@ -2469,4 +2481,3 @@ dialog.framed .dlg-body footer { position: sticky; bottom: -20px; margin: 0 -20p
 .tv-mark-icon.kodi { background: var(--accent); color: #1c1407; }
 .tv-mark-icon.kodi .ico { width: 17px; height: 17px; }
 .tv-block-line[hidden] { display: none; }
-.tv-preview-sound.on { background: var(--accent); color: #1c1407; opacity: 1; }

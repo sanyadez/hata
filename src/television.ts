@@ -16,7 +16,7 @@ import { saveSettings, settings } from "./config";
 import { awaitKodi, kodiRuns, screenDark, sleepScreen, playOnTv, screenShares, setUp, switchTv, tvEnabled, tvNow, tvReport, type TvPage, type TvReport } from "./kodi";
 import { installCommand, packageManager, PATH, run, runLogged } from "./packages";
 import { parkPointer } from "./pointer";
-import { BROWSER_HOME_SCRIPT, BROWSER_POINTER_SCRIPT, BROWSER_PACKAGES, browserCalls, castHtml, TV_CAST_MARK, TV_CAST_PAGE, cleanBookmarks, consoleText, frameArgs, MEDIA_ACTIONS, mediaScript, pointerCalls, PREVIEW_WIDTH, browserHomeHtml, TV_BROWSER_HOME, TV_USER, browserSound, browserUnitText, cleanLink, cleanShowTime, linkName, TV_BROWSER_PORT, TV_BROWSER_UNIT, TV_UNIT, type BrowserReport, type PageCall, type PageMedia, type Screen } from "./tv";
+import { BROWSER_HOME_SCRIPT, BROWSER_POINTER_SCRIPT, BROWSER_PACKAGES, browserCalls, cleanBookmarks, consoleText, frameArgs, MEDIA_ACTIONS, mediaScript, pointerCalls, PREVIEW_WIDTH, browserHomeHtml, TV_BROWSER_HOME, TV_USER, browserSound, browserUnitText, cleanLink, cleanShowTime, linkName, TV_BROWSER_PORT, TV_BROWSER_UNIT, TV_UNIT, type BrowserReport, type PageCall, type PageMedia, type Screen } from "./tv";
 
 const UNIT_FILE = "/etc/systemd/system/" + TV_BROWSER_UNIT;
 const has = (bin: string): boolean => !!Bun.which(bin, { PATH });
@@ -43,8 +43,7 @@ interface Target {
 async function target(): Promise<Target | null> {
   try {
     const all = (await (await fetch(`http://127.0.0.1:${TV_BROWSER_PORT}/json`, { signal: AbortSignal.timeout(2000) })).json()) as Target[];
-    // the page that sends the screen to watchers is the browser's too, and never the one on the screen
-    return all.find((one) => one.type === "page" && !one.url.endsWith("/cast.html")) ?? null;
+    return all.find((one) => one.type === "page") ?? null;
   } catch {
     return null;
   }
@@ -262,14 +261,6 @@ async function writeUnit(): Promise<boolean> {
     writeFileSync(TV_BROWSER_HOME, home);
     await run(["chown", `${TV_USER}:${TV_USER}`, TV_BROWSER_HOME], 10_000);
   }
-  let cast = "";
-  try {
-    cast = readFileSync(TV_CAST_PAGE, "utf8");
-  } catch {}
-  if (cast !== castHtml()) {
-    writeFileSync(TV_CAST_PAGE, castHtml());
-    await run(["chown", `${TV_USER}:${TV_USER}`, TV_CAST_PAGE], 10_000);
-  }
   return had !== home;
 }
 
@@ -428,11 +419,6 @@ export async function screenStream(signal: AbortSignal): Promise<Response> {
   return new Response(body, { headers: { "content-type": "multipart/x-mixed-replace; boundary=frame", "cache-control": "no-store" } });
 }
 
-/** The live sending by the browser itself is ended: its bar leaves the screen */
-export async function liveEnd(): Promise<void> {
-  if (await browserRuns()) await inCastPage("hataCastEnd()");
-}
-
 /** What the screen shows right now, as a small picture for Hata's page: only while the browser has it */
 export async function screenShot(big = false): Promise<Uint8Array> {
   if (!(await browserRuns())) {
@@ -470,100 +456,8 @@ export async function screenShot(big = false): Promise<Uint8Array> {
   return cast.frame;
 }
 
-/** One script run in the page that sends the screen to watchers, over a connection of its own; null — it did not answer */
-async function inCastPage(expression: string): Promise<string | null> {
-  // the page as this build writes it: a browser started by an older build has an older one open, which is closed and made anew
-  let fresh = false;
-  try {
-    fresh = readFileSync(TV_CAST_PAGE, "utf8") !== castHtml();
-  } catch {
-    fresh = true;
-  }
-  if (fresh) {
-    writeFileSync(TV_CAST_PAGE, castHtml());
-    await run(["chown", `${TV_USER}:${TV_USER}`, TV_CAST_PAGE], 10_000);
-  }
-  let all: Target[] = [];
-  try {
-    all = (await (await fetch(`http://127.0.0.1:${TV_BROWSER_PORT}/json`, { signal: AbortSignal.timeout(2000) })).json()) as Target[];
-  } catch {}
-  let found = all.find((one) => one.type === "page" && one.url.endsWith("/cast.html"));
-  if (found && fresh) {
-    await ask({ method: "Target.closeTarget", params: { targetId: (found as Target & { id: string }).id } });
-    await Bun.sleep(300);
-    found = undefined;
-  }
-  if (!found) {
-    // made in the background: the tab on the screen stays the one shown
-    if (!(await ask({ method: "Target.createTarget", params: { url: "file://" + TV_CAST_PAGE, background: true } }))) return null;
-    for (let i = 0; i < 20 && !found; i++) {
-      await Bun.sleep(150);
-      try {
-        all = (await (await fetch(`http://127.0.0.1:${TV_BROWSER_PORT}/json`, { signal: AbortSignal.timeout(2000) })).json()) as Target[];
-      } catch {}
-      found = all.find((one) => one.type === "page" && one.url.endsWith("/cast.html"));
-    }
-  }
-  if (!found) return null;
-  const socket = new WebSocket(found.webSocketDebuggerUrl);
-  try {
-    const opened = await new Promise<boolean>((resolve) => {
-      socket.addEventListener("open", () => resolve(true), { once: true });
-      socket.addEventListener("error", () => resolve(false), { once: true });
-      setTimeout(() => resolve(false), 3000);
-    });
-    if (!opened) return null;
-    return await new Promise<string | null>((resolve) => {
-      socket.addEventListener("message", (event) => {
-        const said = JSON.parse(String(event.data)) as { id?: number; result?: { result?: { value?: unknown } } };
-        if (said.id === 1) resolve(typeof said.result?.result?.value === "string" ? said.result.result.value : null);
-      });
-      setTimeout(() => resolve(null), 12_000);
-      socket.send(JSON.stringify({ id: 1, method: "Runtime.evaluate", params: { expression, awaitPromise: true, userGesture: true, returnByValue: true } }));
-    });
-  } finally {
-    socket.close();
-  }
-}
-
-/** The browser on the screen was started able to capture its own tab without asking on the screen (one started by an older Hata was not) */
-async function canCast(): Promise<boolean> {
-  return (await run(["pgrep", "-af", `remote-debugging-port=${TV_BROWSER_PORT}`], 5000)).out.includes(TV_CAST_MARK);
-}
-
-let casting: Promise<string> | null = null;
-
-/**
- * The screen live, for a page of Hata's: the watcher's offer goes to the browser on the screen, which
- * captures its own tab (picture and sound) and answers; the video then goes from the server straight
- * to the watcher. Hata carries only these two texts.
- */
-export async function liveAnswer(offer: unknown): Promise<string> {
-  if (typeof offer !== "string" || offer.length > 30_000 || !offer.startsWith("v=0")) throw new AppError("tv.badAction", 400);
-  if (!(await browserRuns())) throw new AppError("tv.browserOff", 409);
-  if (!(await canCast())) throw new AppError("tv.liveNeedsRestart", 409);
-  // one at a time: the tab bears the title the browser picks it by only for that moment
-  while (casting) await casting.catch(() => {});
-  casting = (async () => {
-    await ask({ method: "Runtime.evaluate", params: { expression: `window.__hataTitle = document.title; document.title = ${JSON.stringify(TV_CAST_MARK)}; 1` } });
-    try {
-      const said = await inCastPage(`hataCast(${JSON.stringify(offer)})`);
-      const answer = said ? (JSON.parse(said) as { sdp?: string; error?: string }) : null;
-      if (!answer?.sdp) throw new AppError("tv.liveFailed", 409, { message: answer?.error ?? "" });
-      return answer.sdp;
-    } finally {
-      await ask({ method: "Runtime.evaluate", params: { expression: `if (document.title === ${JSON.stringify(TV_CAST_MARK)}) document.title = window.__hataTitle ?? ""; 1` } });
-    }
-  })();
-  try {
-    return await casting;
-  } finally {
-    casting = null;
-  }
-}
-
 /** What is on the screen, for a card that keeps looking: the player's "now" and, while a page shows, how its video stands */
-export async function screenNow(): Promise<ReturnType<typeof tvNow> & { kind: Screen; media: PageMedia | null; console: string; picture: boolean; bookmarks: typeof settings.tv.bookmarks; can: { kodi: boolean; browser: boolean } }> {
+export async function screenNow(): Promise<ReturnType<typeof tvNow> & { kind: Screen; media: PageMedia | null; console: string; picture: boolean; left: number; back: boolean; bookmarks: typeof settings.tv.bookmarks; can: { kodi: boolean; browser: boolean } }> {
   const browsing = await browserRuns();
   const kind: Screen = browsing ? "browser" : (await kodiRuns()) ? "kodi" : screenDark() ? "dark" : "off";
   let text = "";
@@ -574,7 +468,7 @@ export async function screenNow(): Promise<ReturnType<typeof tvNow> & { kind: Sc
   }
   const playing = tvNow().playing;
   // a picture can be had: the page's own, or a frame of the film the player has, taken from its file
-  return { ...tvNow(), kind, media: browsing ? await media().catch(() => null) : null, console: text, bookmarks: settings.tv.bookmarks, can: { kodi: has("kodi"), browser: browserInstalled() }, picture: browsing || (kind === "kodi" && !!playing && playing.file.startsWith("/") && has("ffmpeg")) };
+  return { ...tvNow(), kind, media: browsing ? await media().catch(() => null) : null, console: text, left: browsing ? secondsLeft() : 0, back: browsing ? (showing?.back ?? tvEnabled()) : false, bookmarks: settings.tv.bookmarks, can: { kodi: has("kodi"), browser: browserInstalled() }, picture: browsing || (kind === "kodi" && !!playing && playing.file.startsWith("/") && has("ffmpeg")) };
 }
 
 /** The frame of the film last taken: one per ten seconds of the film is enough to see what plays */

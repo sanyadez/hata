@@ -579,65 +579,6 @@ export const cleanStart = (raw: unknown): string | null => (typeof raw === "stri
 export const TV_BROWSER_UNIT = "hata-tv-browser.service";
 /** The local port the browser is driven over (its debugging protocol): pages opened, text typed, what is shown asked */
 export const TV_BROWSER_PORT = 9393;
-/** The title the tab on the screen bears for the moment its capture is asked for: the browser picks the tab by it, without a question on the screen */
-export const TV_CAST_MARK = "hata-screen-cast";
-/** The page, never shown, that captures the tab on the screen and sends it to whoever watches from Hata */
-export const TV_CAST_PAGE = `${TV_HOME}/cast.html`;
-
-/**
- * That page. `hataCast(offer)` takes a watcher's offer and gives the answer: the tab's picture and
- * sound are captured once and shared by every watcher; with nobody watching for a while the capture
- * ends, so the screen's computer does the work of sending only while somebody looks.
- */
-export const castHtml = (): string => `<!doctype html>
-<meta charset="utf-8">
-<title>Hata</title>
-<script>
-let stream = null;
-let idle = 0;
-const peers = new Set();
-const tidy = () => {
-  for (const pc of peers) if (["failed", "closed", "disconnected"].includes(pc.connectionState)) { pc.close(); peers.delete(pc); }
-  clearTimeout(idle);
-  if (!peers.size && stream) idle = setTimeout(() => { if (!peers.size && stream) { for (const track of stream.getTracks()) track.stop(); stream = null; } }, 15000);
-};
-window.hataCast = async (offer) => {
-  try {
-    if (!stream || !stream.getVideoTracks().some((track) => track.readyState === "live")) {
-      stream = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 }, audio: true });
-      // sent smaller than it is captured: a capture asked for at a smaller size makes the browser lay the page itself out at that size on the screen
-      window.scaleDown = Math.max(1, (stream.getVideoTracks()[0].getSettings().width || 1280) / 1280);
-    }
-    const pc = new RTCPeerConnection();
-    peers.add(pc);
-    pc.onconnectionstatechange = tidy;
-    for (const track of stream.getTracks()) {
-      const sender = pc.addTrack(track, stream);
-      if (track.kind === "video") {
-        const params = sender.getParameters();
-        params.encodings = [{ ...(params.encodings && params.encodings[0]), scaleResolutionDownBy: window.scaleDown || 1, maxBitrate: 3500000 }];
-        try { await sender.setParameters(params); } catch {}
-      }
-    }
-    await pc.setRemoteDescription({ type: "offer", sdp: offer });
-    await pc.setLocalDescription(await pc.createAnswer());
-    await new Promise((done) => {
-      if (pc.iceGatheringState === "complete") return done();
-      pc.onicegatheringstatechange = () => pc.iceGatheringState === "complete" && done();
-      setTimeout(done, 2500);
-    });
-    setTimeout(tidy, 20000);
-    return JSON.stringify({ sdp: pc.localDescription.sdp });
-  } catch (e) {
-    return JSON.stringify({ error: String(e && e.name) + ": " + String(e && e.message) });
-  }
-};
-setInterval(tidy, 5000);
-window.hataCastEnd = () => { for (const pc of peers) pc.close(); peers.clear(); clearTimeout(idle); if (stream) { for (const track of stream.getTracks()) track.stop(); stream = null; } return "ended"; };
-window.hataCastState = () => JSON.stringify({ peers: peers.size, live: !!stream });
-</script>
-`;
-
 /** The packages of the browser on the screen: a compositor that shows one program and nothing else, and the browser */
 export const BROWSER_PACKAGES = ["cage", "chromium"];
 /** The longest a page is shown before what was on the screen comes back, when a time is asked for */
@@ -730,9 +671,6 @@ export const browserArgs = (sound: string): string[] => [
   "--autoplay-policy=no-user-gesture-required",
   "--ozone-platform=wayland",
   `--remote-debugging-port=${TV_BROWSER_PORT}`,
-  // the page on the screen sent live to a page of Hata's: the browser captures its own tab, picked by a title Hata gives it for that moment
-  `--auto-select-tab-capture-source-by-title=${TV_CAST_MARK}`,
-  "--disable-features=WebRtcHideLocalIpsWithMdns",
   `--user-data-dir=${TV_HOME}/.browser`,
   ...(sound ? [`--alsa-output-device=${sound}`] : []),
   "file://" + TV_BROWSER_HOME,

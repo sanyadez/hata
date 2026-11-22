@@ -280,7 +280,6 @@ test("the browser on the screen: its sound, its service, what a page may ask of 
   expect(browserHomeHtml("uk", "a<b", 'x"y')).toContain("a&lt;b");
   expect(browserHomeHtml("uk", "a", 'x"y')).toContain("x&quot;y");
   expect(unit).toContain("--remote-debugging-port=9393");
-  expect(unit).toContain("--auto-select-tab-capture-source-by-title=hata-screen-cast");
   // never started with the server: after a restart the screen is the player's
   expect(unit).not.toContain("[Install]");
   expect(browserUnitText("")).not.toContain("alsa-output-device");
