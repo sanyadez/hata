@@ -874,6 +874,8 @@
   "home.manage": "App page",
   "home.addLink": "Add a link",
   "home.editLink": "Edit the link",
+  "home.linkOnTv": "Open on the TV",
+  "home.linkNewTab": "Open in a new tab",
   "home.saveLink": "Save",
   "home.add": "Add",
   "home.removeLink": "Remove the link",

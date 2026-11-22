@@ -1166,6 +1166,8 @@ function tileMenu(item, point = null) {
   dialog = openDialog(
     point ? "menu dropdown" : "menu",
     h("header", null, tileIcon(item), h("div", null, h("h2", { class: "clip" }, tileTitle(item)), at.folder && h("span", { class: "muted small" }, at.folder.title || t("home.folder")))),
+    item.type === "link" && isAdmin() && hasModule("tv") && entry(t("home.linkOnTv"), "tv", () => void showOnTv(item.url).then((shown) => shown && toast(t("tv.page.sent", { name: tileTitle(item) })))),
+    item.type === "link" && entry(t("home.linkNewTab"), "external", () => window.open(item.url, "_blank", "noopener,noreferrer")),
     item.type === "link" && entry(t("home.editLink"), "edit", () => linkDialog(item)),
     item.type === "ha" && entry(t("ha.tile.more"), "sliders", () => haEntityDialog(item.server, tileTarget(item)?.state ?? { id: item.entity, name: item.entity, domain: item.entity.split(".")[0] }, item)),
     item.type === "ha" && tileTarget(item) && entry(t("ha.openThere"), "external", () => window.open(haEntityUrl(tileTarget(item).server, item.entity), "_blank", "noopener")),

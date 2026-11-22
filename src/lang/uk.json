@@ -874,6 +874,8 @@
   "home.manage": "Сторінка застосунку",
   "home.addLink": "Додати посилання",
   "home.editLink": "Змінити посилання",
+  "home.linkOnTv": "Відкрити на телевізорі",
+  "home.linkNewTab": "Відкрити в новій вкладці",
   "home.saveLink": "Зберегти",
   "home.add": "Додати",
   "home.removeLink": "Прибрати посилання",
