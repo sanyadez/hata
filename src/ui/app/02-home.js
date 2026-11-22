@@ -1280,7 +1280,7 @@ function addDialog(closed) {
     if (!sections.some((one) => one.id === addUi.section)) addUi.section = "machines";
     const entry = (section) => h("button", { type: "button", class: "cat" + (section.id === addUi.section && !addUi.find ? " active" : ""), onclick: () => ((addUi.section = section.id), (addUi.find = ""), (field.value = ""), paint()) }, h("span", { class: "add-cat" }, icon(section.icon), section.label ?? t("add.section." + section.id)), h("span", { class: "muted small" }, counted(section)));
     const titled = (group) => [group && h("div", { class: "cat-title" }, t("add.group." + group)), sections.filter((one) => (one.group ?? "") === group).map(entry)];
-    put(nav, titled(""), titled("state"), titled("integrations"), h("a", { class: "cat", href: "#/house", onclick: () => dialog.close() }, h("span", { class: "add-cat" }, icon("plus"), t("add.connect"))));
+    put(nav, titled(""), titled("state"), titled("integrations"), h("a", { class: "cat", href: storeKinds().length > 0 ? "#/store" : "#/house", onclick: () => ((state.storeFilter = { query: "", category: storeKinds().length > 0 ? "@" : "" }), dialog.close()) }, h("span", { class: "add-cat" }, icon("plus"), t("add.connect"))));
     const typed = addUi.find.trim().toLowerCase();
     if (typed) {
       const found = sections.flatMap((section) => section.rows.filter((one) => `${one.title} ${one.sub}`.toLowerCase().includes(typed)));
