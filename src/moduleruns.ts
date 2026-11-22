@@ -29,7 +29,7 @@ import { connections, startIntegrations } from "./integrations";
 import { lookAtPools, poolsReport, startPools } from "./raid";
 import { startShares } from "./shares";
 import { startSnapraid } from "./snapraid";
-import { tvEnabled, tvSetUp, watchTv } from "./television";
+import { tvEnabled, tvSetUp, watchTv } from "./kodi";
 import { installed as tailscaleInstalled, report as tailscaleReport } from "./tailscale";
 import { inUse as wireguardInUse } from "./wireguard";
 

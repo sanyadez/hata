@@ -124,7 +124,6 @@ StandardError=journal
 Environment=HOME=${TV_HOME}
 ExecStartPre=+/usr/bin/chvt ${TV_CONSOLE}
 ExecStart=/usr/bin/kodi --standalone --windowing=gbm
-ExecStopPost=+/usr/bin/chvt 1
 Restart=always
 RestartSec=3
 
@@ -575,3 +574,323 @@ export const subsArgs = (path: string, start: string, index: number): string[] =
 
 /** A moment of a file as the programs take it: seconds with a fraction, nothing else */
 export const cleanStart = (raw: unknown): string | null => (typeof raw === "string" && /^\d{1,6}(\.\d{1,6})?$/.test(raw) ? raw : null);
+
+/** The browser that takes the screen instead of the player: a service of its own, never both at once */
+export const TV_BROWSER_UNIT = "hata-tv-browser.service";
+/** The local port the browser is driven over (its debugging protocol): pages opened, text typed, what is shown asked */
+export const TV_BROWSER_PORT = 9393;
+/** The packages of the browser on the screen: a compositor that shows one program and nothing else, and the browser */
+export const BROWSER_PACKAGES = ["cage", "chromium"];
+/** The longest a page is shown before what was on the screen comes back, when a time is asked for */
+export const SHOW_MOST = 24 * 3600;
+
+/** The page of Hata's own the browser starts with and stands on while no other is asked for: a file, so it is there at once */
+export const TV_BROWSER_HOME = `${TV_HOME}/screen.html`;
+
+const escaped = (text: string): string => text.replace(/[&<>"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[ch]!);
+
+/** A page kept to be opened on the screen again: on Hata's page as a row, on the screen's own page as a tile */
+export interface Bookmark {
+  name: string;
+  url: string;
+}
+
+export const BOOKMARKS_MOST = 40;
+
+/** The bookmarks as they may be kept: whole http(s) addresses, a name each (the address's host when none), no address twice */
+export function cleanBookmarks(raw: unknown): Bookmark[] {
+  const kept: Bookmark[] = [];
+  for (const one of Array.isArray(raw) ? raw : []) {
+    const url = cleanLink((one as { url?: unknown } | null)?.url);
+    if (!url || kept.some((b) => b.url === url)) continue;
+    const said = (one as { name?: unknown }).name;
+    const name = (typeof said === "string" ? said.replace(/[\x00-\x1f\x7f]/g, " ").replace(/\s+/g, " ").trim().slice(0, 60) : "") || new URL(url).host;
+    kept.push({ name, url });
+    if (kept.length >= BOOKMARKS_MOST) break;
+  }
+  return kept;
+}
+
+/**
+ * Hata's own page on the screen: dark, the time and the day, the bookmarks as tiles large enough to
+ * hit from the sofa, a line saying where pages are sent from. Dark from its first frame, so that the
+ * change from the player is not a white flash.
+ */
+export const browserHomeHtml = (lang: string, name: string, hint: string, bookmarks: Bookmark[] = []): string => `<!doctype html>
+<html lang="${escaped(lang)}" style="background:#14110f">
+<meta charset="utf-8">
+<title>${escaped(name)}</title>
+<style>
+html,body{min-height:100%;margin:0;background:#14110f;color:#f3ede6;font-family:system-ui,sans-serif}
+body{display:grid;place-content:center;justify-items:center;gap:2vh;min-height:100vh;padding:12vh 6vw;box-sizing:border-box}
+#time{font-size:${bookmarks.length ? 11 : 18}vh;font-weight:600;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+#day{font-size:${bookmarks.length ? 3 : 4}vh;color:#b8ada1}
+#hint{position:fixed;left:0;right:0;bottom:4vh;text-align:center;font-size:2.2vh;color:#8d8278}
+#marks{display:flex;flex-wrap:wrap;justify-content:center;gap:2vh;margin-top:4vh;max-width:88vw}
+#marks a{display:grid;gap:.6vh;min-width:22vh;max-width:36vh;padding:2.4vh 3vh;border-radius:2vh;background:#231e1a;border:.3vh solid #3a322b;color:inherit;text-decoration:none;font-size:2.8vh;font-weight:600}
+#marks a:hover,#marks a:focus{border-color:#f2a41c;outline:none}
+#marks span{font-size:1.8vh;font-weight:400;color:#8d8278;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+</style>
+<div id="time"></div>
+<div id="day"></div>
+${bookmarks.length ? `<div id="marks">${bookmarks.map((b) => `<a href="${escaped(b.url)}">${escaped(b.name)}<span>${escaped(linkName(b.url))}</span></a>`).join("")}</div>` : ""}
+<div id="hint">${escaped(hint)}</div>
+<script>
+const lang = document.documentElement.lang;
+const tick = () => {
+  const now = new Date();
+  document.getElementById("time").textContent = now.toLocaleTimeString(lang, { hour: "2-digit", minute: "2-digit" });
+  document.getElementById("day").textContent = now.toLocaleDateString(lang, { weekday: "long", day: "numeric", month: "long" });
+};
+tick();
+setInterval(tick, 5000);
+</script>
+`;
+
+/**
+ * Kodi's name of a sound output as the browser takes it: Kodi says `ALSA:hdmi:CARD=HDMI,DEV=0|HDA Intel`,
+ * and what stands between is ALSA's own name of the device. "" — nothing the browser could be told.
+ */
+export function browserSound(kodi: string): string {
+  const name = /^ALSA:([^|]+)/.exec(kodi)?.[1] ?? "";
+  return /^[A-Za-z0-9:=,_.-]{1,120}$/.test(name) && name !== "default" ? name : "";
+}
+
+/**
+ * The browser's own settings file with the offer to translate a page turned off: the switch on the
+ * command line alone still left "Translate this page?" over a page in another language. What else the
+ * file holds stays; a file that cannot be read is begun anew.
+ */
+export function withoutTranslate(text: string): string {
+  let prefs: Record<string, unknown> = {};
+  try {
+    const read: unknown = JSON.parse(text);
+    if (read && typeof read === "object" && !Array.isArray(read)) prefs = read as Record<string, unknown>;
+  } catch {}
+  const translate = prefs.translate && typeof prefs.translate === "object" && !Array.isArray(prefs.translate) ? (prefs.translate as Record<string, unknown>) : {};
+  return JSON.stringify({ ...prefs, translate: { ...translate, enabled: false } });
+}
+
+/** The browser's command line: one page on the whole screen, nothing of a desktop browser's own windows */
+export const browserArgs = (sound: string): string[] => [
+  "/usr/bin/chromium",
+  "--kiosk",
+  "--no-first-run",
+  "--noerrdialogs",
+  "--disable-infobars",
+  "--hide-crash-restore-bubble",
+  "--disable-features=Translate,TranslateUI,MediaRouter",
+  "--password-store=basic",
+  "--autoplay-policy=no-user-gesture-required",
+  "--ozone-platform=wayland",
+  `--remote-debugging-port=${TV_BROWSER_PORT}`,
+  `--user-data-dir=${TV_HOME}/.browser`,
+  ...(sound ? [`--alsa-output-device=${sound}`] : []),
+  "file://" + TV_BROWSER_HOME,
+];
+
+/**
+ * The browser's service. It and the player exclude each other (`Conflicts`), and `After` makes the
+ * one that leaves the screen stop before the other starts, whichever way the change goes. It is never
+ * set to start with the server: after a restart the screen is the player's again.
+ */
+export const browserUnitText = (sound: string): string => `# Written by Hata: changes made here are lost
+[Unit]
+Description=Hata: a web page on this server's screen
+After=systemd-user-sessions.service network-online.target sound.target ${TV_UNIT}
+Conflicts=getty@tty${TV_CONSOLE}.service ${TV_UNIT}
+
+[Service]
+User=${TV_USER}
+Group=${TV_USER}
+SupplementaryGroups=video audio input render
+PAMName=login
+TTYPath=/dev/tty${TV_CONSOLE}
+StandardInput=tty
+StandardOutput=journal
+StandardError=journal
+Environment=HOME=${TV_HOME}
+ExecStartPre=+/usr/bin/chvt ${TV_CONSOLE}
+ExecStart=/usr/bin/cage -- ${browserArgs(sound).join(" ")}
+TimeoutStopSec=10
+`;
+
+/** For how long a page is asked to stay on the screen, seconds: 0 — until somebody changes it; null — not a time */
+export function cleanShowTime(raw: unknown): number | null {
+  if (raw === undefined || raw === null || raw === 0 || raw === "") return 0;
+  return typeof raw === "number" && Number.isInteger(raw) && raw >= 5 && raw <= SHOW_MOST ? raw : null;
+}
+
+
+/** A call of the browser's own protocol */
+export interface PageCall {
+  method: string;
+  params?: Record<string, unknown>;
+}
+
+const keyPress = (key: string, code: string, vk: number): PageCall[] => [
+  { method: "Input.dispatchKeyEvent", params: { type: "rawKeyDown", key, code, windowsVirtualKeyCode: vk } },
+  { method: "Input.dispatchKeyEvent", params: { type: "keyUp", key, code, windowsVirtualKeyCode: vk } },
+];
+
+const PAGE_KEYS: Record<string, { vk: number; code?: string; text?: string }> = {
+  Enter: { vk: 13, text: "\r" },
+  Backspace: { vk: 8 },
+  Tab: { vk: 9, text: "\t" },
+  Escape: { vk: 27 },
+  Delete: { vk: 46 },
+  ArrowLeft: { vk: 37 },
+  ArrowUp: { vk: 38 },
+  ArrowRight: { vk: 39 },
+  ArrowDown: { vk: 40 },
+  Home: { vk: 36 },
+  End: { vk: 35 },
+  PageUp: { vk: 33 },
+  PageDown: { vk: 34 },
+};
+
+/** The calls a button makes: the only things a page of Hata's can ask of the browser; null — not one of them */
+export function browserCalls(action: unknown, value: unknown): PageCall[] | null {
+  if (action === "back") return [{ method: "Runtime.evaluate", params: { expression: "history.back()" } }];
+  if (action === "forward") return [{ method: "Runtime.evaluate", params: { expression: "history.forward()" } }];
+  if (action === "reload") return [{ method: "Page.reload" }];
+  // the screen's own page, with the bookmarks: where the browser starts
+  if (action === "start") return [{ method: "Page.navigate", params: { url: "file://" + TV_BROWSER_HOME } }];
+  if (action === "enter") return [{ method: "Input.dispatchKeyEvent", params: { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, text: "\r" } }, { method: "Input.dispatchKeyEvent", params: { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 } }];
+  if (action === "up") return keyPress("PageUp", "PageUp", 33);
+  if (action === "down") return keyPress("PageDown", "PageDown", 34);
+  // a key pressed over the picture of the screen: only the keys that move about or mend what was typed
+  if (action === "key") {
+    const known = typeof value === "string" && Object.hasOwn(PAGE_KEYS, value) ? PAGE_KEYS[value] : undefined;
+    if (!known) return null;
+    const params = { key: value as string, code: known.code ?? (value as string), windowsVirtualKeyCode: known.vk };
+    return [{ method: "Input.dispatchKeyEvent", params: { type: known.text ? "keyDown" : "rawKeyDown", ...params, ...(known.text ? { text: known.text } : {}) } }, { method: "Input.dispatchKeyEvent", params: { type: "keyUp", ...params } }];
+  }
+  if (action === "text") return typeof value === "string" && value.length > 0 && value.length <= 2000 && !/[\x00-\x08\x0b-\x1f\x7f]/.test(value) ? [{ method: "Input.insertText", params: { text: value } }] : null;
+  return null;
+}
+
+/** A place of the screen as the page's picture of it gives it: both from 0 to 1; null — not one */
+const place = (value: unknown): { x: number; y: number } | null => {
+  const at = value as { x?: unknown; y?: unknown } | null;
+  return at && typeof at.x === "number" && typeof at.y === "number" && at.x >= 0 && at.x <= 1 && at.y >= 0 && at.y <= 1 ? { x: at.x, y: at.y } : null;
+};
+
+/**
+ * A press or a turn of the wheel made on the picture of the screen in Hata's page, as the browser's
+ * calls: `click` at a place, `wheel` there by `dy` (below zero — up). `size` is the page's own, in its
+ * pixels. null — not one of these.
+ */
+export function pointerCalls(action: unknown, value: unknown, size: { width: number; height: number }): PageCall[] | null {
+  const at = place(value);
+  if (!at || !(size.width > 0) || !(size.height > 0)) return null;
+  const [x, y] = [Math.round(at.x * size.width), Math.round(at.y * size.height)];
+  if (action === "click")
+    return [
+      { method: "Input.dispatchMouseEvent", params: { type: "mouseMoved", x, y } },
+      { method: "Input.dispatchMouseEvent", params: { type: "mousePressed", x, y, button: "left", clickCount: 1 } },
+      { method: "Input.dispatchMouseEvent", params: { type: "mouseReleased", x, y, button: "left", clickCount: 1 } },
+    ];
+  const dy = (value as { dy?: unknown }).dy;
+  if (action === "wheel" && typeof dy === "number" && Number.isFinite(dy) && Math.abs(dy) <= 5000) return [{ method: "Input.dispatchMouseEvent", params: { type: "mouseWheel", x, y, deltaX: 0, deltaY: Math.round(dy) } }];
+  return null;
+}
+
+/** The video a page plays, as Hata's page shows it under the picture of the screen */
+export interface PageMedia {
+  paused: boolean;
+  time: number;
+  total: number;
+  muted: boolean;
+  volume: number;
+  /** It has the whole screen */
+  full: boolean;
+}
+
+/**
+ * Run in every frame of the page (a site's player usually lives in a frame of another site): finds
+ * the video that matters — one that plays, else the largest — optionally does one thing with it, and
+ * says how it stands. `area` picks among frames. Nothing of the page's own code is called.
+ */
+export function mediaScript(action = "", value: unknown = null): string {
+  const act: Record<string, string> = {
+    play: "v.paused ? v.play() : v.pause();",
+    skip: `v.currentTime = Math.max(0, Math.min(isFinite(v.duration) ? v.duration - 1 : 1e9, v.currentTime + ${typeof value === "number" && Number.isFinite(value) ? Math.max(-3600, Math.min(3600, Math.round(value))) : 0}));`,
+    seek: `if (isFinite(v.duration)) v.currentTime = v.duration * ${typeof value === "number" && value >= 0 && value <= 100 ? value / 100 : "v.currentTime / v.duration"};`,
+    mute: "v.muted = !v.muted;",
+    volume: `v.muted = false; v.volume = ${typeof value === "number" && value >= 0 && value <= 100 ? value / 100 : "v.volume"};`,
+    full: "document.fullscreenElement ? document.exitFullscreen() : v.requestFullscreen();",
+  };
+  return `(() => {
+  const all = [...document.querySelectorAll("video")].filter((one) => one.currentSrc || one.readyState > 0);
+  if (!all.length) return null;
+  const size = (one) => one.clientWidth * one.clientHeight;
+  const v = all.filter((one) => !one.paused).sort((a, b) => size(b) - size(a))[0] || all.sort((a, b) => size(b) - size(a))[0];
+  try { ${act[action] ?? ""} } catch {}
+  return { paused: v.paused, time: Math.floor(v.currentTime || 0), total: isFinite(v.duration) ? Math.floor(v.duration) : 0, muted: v.muted, volume: Math.round(v.volume * 100), full: !!document.fullscreenElement, area: size(v) };
+})()`;
+}
+
+export const MEDIA_ACTIONS = ["play", "skip", "seek", "mute", "volume", "full"];
+
+/** How wide the picture of the screen is sent to Hata's page, pixels: enough to see and aim by */
+export const PREVIEW_WIDTH = 960;
+
+/**
+ * Put into every page the browser opens: the remote's "home" button (and a keyboard's) tells Hata,
+ * which gives the screen back to what was on it. `hataScreen` is a binding Hata makes in the page.
+ */
+export const BROWSER_HOME_SCRIPT = `addEventListener("keydown", (e) => { if (e.key === "BrowserHome" && typeof hataScreen === "function") { e.preventDefault(); hataScreen("home"); } }, true);`;
+
+/**
+ * Put into every frame of every page: the pointer is not drawn while the mouse lies still. Driven from
+ * Hata's page nobody holds a mouse at the screen, and the pointer would stand in the middle of the
+ * film. It shows once the mouse really moves (two moves close in time — a press sent by Hata is one)
+ * and goes again after three seconds of rest.
+ */
+export const BROWSER_POINTER_SCRIPT = `(() => {
+  if (window.hataPointer) return;
+  window.hataPointer = true;
+  // a sheet of its own switched on and off by its "media": a class on the page would be the page's to wipe (a film site was seen to)
+  const style = document.createElement("style");
+  style.textContent = "* { cursor: none !important; }";
+  const hide = (on) => {
+    if (!style.isConnected) (document.head || document.documentElement).appendChild(style);
+    style.media = on ? "all" : "not all";
+  };
+  hide(true);
+  addEventListener("DOMContentLoaded", () => hide(style.media === "all"));
+  let last = 0;
+  let timer = 0;
+  addEventListener("mousemove", () => {
+    const now = Date.now();
+    const real = now - last < 400;
+    last = now;
+    if (!real) return;
+    hide(false);
+    clearTimeout(timer);
+    timer = setTimeout(() => hide(true), 3000);
+  }, true);
+})()`;
+
+/** What is on the server's screen: the player, a web page, the system's console (`off`: nothing of Hata's), or nothing at all — the screen put to sleep (`dark`) */
+export type Screen = "kodi" | "browser" | "off" | "dark";
+
+export interface BrowserReport {
+  installed: boolean;
+  /** The command that brings it, shown by its button */
+  install: string;
+  running: boolean;
+  /** The page shown, as the browser names it; "" — Hata's own page. While the browser is off: the page shown last */
+  url: string;
+  title: string;
+  /** The page last sent to the screen to stay: offered in the address field */
+  last: string;
+  /** The video the page plays; null — none found */
+  media: PageMedia | null;
+  bookmarks: Bookmark[];
+  /** Seconds until what was on the screen before comes back; 0 — the page stays */
+  left: number;
+  /** The player gets the screen back when the page goes: it was on before */
+  back: boolean;
+}

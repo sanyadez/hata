@@ -37,7 +37,7 @@ export const MODULES: ModuleSpec[] = [
   { id: "proxmox", group: "servers", needs: [], paths: [/^\/api\/proxmox(\/|$)/], tools: /^proxmox/, sections: [], views: ["machines", "proxmox", "guest"] },
   { id: "containers", group: "servers", needs: [], paths: [/^\/api\/containers(\/|$)/], tools: /^(containers?$|container_|disc_images$)/, sections: [], views: ["machines", "containers"] },
   { id: "integrations", group: "more", needs: [], paths: [/^\/api\/(ha|integrations)(\/|$)/], tools: /^(service|home_assistant)/, sections: ["integrations"], views: ["integrations", "ha", "service"] },
-  { id: "tv", group: "more", needs: [], paths: [/^\/api\/tv(\/|$)/], sections: [], views: ["tv"] },
+  { id: "tv", group: "more", needs: [], paths: [/^\/api\/tv(\/|$)/], tools: /^tv(_|$)/, sections: [], views: ["tv"] },
   { id: "bluetooth", group: "more", needs: [], paths: [/^\/api\/bluetooth(\/|$)/], sections: ["bluetooth"], views: [] },
   { id: "music", group: "more", needs: [], paths: [/^\/api\/music(\/|$)/], sections: [], views: ["music"] },
   { id: "assistant", group: "more", needs: [], paths: [/^\/api\/(assistant|agents|approvals|oauth)(\/|$)/, /^\/mcp$/, /^\/oauth\//, /^\/\.well-known\/oauth-/], sections: ["agents", "assistant"], views: ["assistant", "connect"] },

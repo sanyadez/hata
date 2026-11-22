@@ -130,6 +130,7 @@ function renderHome() {
     attention: isAdmin() ? widget("attention", h("section", { class: "card pad attention-block" })) : null,
     activity: isAdmin() ? widget("activity", h("section", { class: "card pad activity-block" })) : null,
     adblock: isAdmin() ? widget("adblock", h("section", { class: "card pad adblock-block" })) : null,
+    tv: isAdmin() && hasModule("tv") ? widget("tv", h("section", { class: "card pad tv-block" })) : null,
   };
   shell(
     h("div", { id: "grid-bar" }),
@@ -174,7 +175,7 @@ function renderHomeBody() {
 }
 
 /** The picture of each of Hata's own blocks */
-const BLOCKS = { stats: "cpu", attention: "alert", activity: "list", adblock: "shield" };
+const BLOCKS = { stats: "cpu", attention: "alert", activity: "list", adblock: "shield", tv: "tv" };
 const blockTitle = (id) => (id.startsWith("machine:") ? t("home.machineBlock", { name: machineOfBlock(id)?.name ?? id.slice(8) }) : t(id === "stats" ? "home.statsBlock" : id + ".title"));
 const removeBlock = (id) => changeLayout((layout) => void takeTile(layout, "block:" + id));
 

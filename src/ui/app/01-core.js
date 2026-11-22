@@ -125,6 +125,8 @@ const ICONS = {
   shuffle: "M4 7h3l10 10h3M4 17h3l3-3M14 10l3-3h3M18 4l3 3-3 3M18 14l3 3-3 3",
   keyboard: "M3 6h18v12H3zM7 10h.01M11 10h.01M15 10h.01M7 14h10",
   mouse: "M12 3a5 5 0 0 1 5 5v8a5 5 0 0 1-10 0V8a5 5 0 0 1 5-5zM12 7v3",
+  eye: "M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12zM12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z",
+  eyeOff: "M3 3l18 18M10.6 5.1A10.6 10.6 0 0 1 12 5c6.4 0 10 7 10 7a17.6 17.6 0 0 1-3.2 4.2M6.6 6.6C3.8 8.4 2 12 2 12s3.6 7 10 7c1.9 0 3.5-.5 4.9-1.3M9.9 9.9a3 3 0 0 0 4.2 4.2",
   headphones: "M4 14v-2a8 8 0 0 1 16 0v2M4 14h3v6H5a1 1 0 0 1-1-1zM20 14h-3v6h2a1 1 0 0 0 1-1z",
   gamepad: "M6 8h12a4 4 0 0 1 4 4v2a3 3 0 0 1-5.2 2L15 14H9l-1.8 2A3 3 0 0 1 2 14v-2a4 4 0 0 1 4-4zM7 11v2M6 12h2M16 12h.01",
   remote: "M8 2h8v20H8zM12 6h.01M12 10h.01M12 14h.01",
@@ -263,8 +265,48 @@ function openDialog(className, ...content) {
     if (pressedOutside && outside(e)) dialog.close();
   });
   document.body.append(dialog);
+  frameDialog(dialog);
   dialog.showModal();
   return dialog;
+}
+
+/** Windows that keep a layout of their own: menus, the lists of a select, sheets, the viewer of files */
+const UNFRAMED_RE = /(^|\s)(menu|dropdown|nav-sheet|add-dialog|viewer)(\s|$)/;
+
+/**
+ * Every window is built the same way, whatever its maker handed over: a head (the title, a line of
+ * explanation under it, the cross — always), a body that alone scrolls, and the foot with the buttons,
+ * which stays in sight. The makers go on writing `h2, …, footer`; this puts the parts where they
+ * belong, and again when a window's content is replaced or added to.
+ */
+function frameDialog(dialog) {
+  if (UNFRAMED_RE.test(dialog.className)) return;
+  dialog.classList.add("framed");
+  const only = dialog.children.length === 1 && dialog.firstElementChild.tagName === "FORM" ? dialog.firstElementChild : null;
+  const root = only ?? dialog;
+  const frame = () => {
+    const kids = [...root.childNodes].filter((node) => node.nodeType === 1 || node.textContent.trim());
+    const framed = (cls) => kids.find((node) => node.classList?.contains(cls));
+    let body = framed("dlg-body");
+    if (framed("dlg-head") && body) {
+      // something was added to a window that stands: it belongs to the body, a footer to the foot's place
+      for (const node of kids) if (!node.classList?.contains("dlg-head") && node !== body && node.tagName !== "FOOTER") body.append(node);
+      return;
+    }
+    const title = kids.find((node) => node.tagName === "HEADER") ?? kids.find((node) => node.tagName === "H2");
+    const after = title?.tagName === "H2" ? kids[kids.indexOf(title) + 1] : null;
+    const lead = after?.tagName === "P" && after.classList.contains("muted") && !after.classList.contains("error") ? after : null;
+    const foot = kids.findLast((node) => node.tagName === "FOOTER");
+    const cross = title?.querySelector?.(`.icon-btn[aria-label="${CSS.escape(t("common.close"))}"]`) ? null : h("button", { type: "button", class: "icon-btn dlg-x", "aria-label": t("common.close"), onclick: () => dialog.close() }, icon("x"));
+    const head = h("div", { class: "dlg-head" }, h("div", { class: "dlg-title" }, title, lead), cross);
+    body = h("div", { class: "dlg-body" }, kids.filter((node) => node !== title && node !== lead && node !== foot));
+    root.replaceChildren(head, body, ...(foot ? [foot] : []));
+  };
+  frame();
+  new MutationObserver(() => {
+    const stray = [...root.children].some((node) => !node.classList.contains("dlg-head") && !node.classList.contains("dlg-body") && node.tagName !== "FOOTER");
+    if (stray || !root.querySelector(":scope > .dlg-head")) frame();
+  }).observe(root, { childList: true });
 }
 
 /**

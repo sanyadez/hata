@@ -7,7 +7,7 @@ import { AppError, appAction, getJob, listApps } from "./apps";
 import { appFolders } from "./backup";
 import { settings } from "./config";
 import { musicDo, musicPaths } from "./music";
-import { remote as tvRemote, tvNow } from "./television";
+import { remote as tvRemote, tvNow } from "./kodi";
 
 export interface DiskUse {
   /**

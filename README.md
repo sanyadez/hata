@@ -118,7 +118,11 @@ Early development. What works today:
   choice of sound track and subtitles. Air-mouse remotes, a mouse or a keyboard plugged into the server
   drive the player, and their power button cannot shut the server down. Its sound goes to any output of
   the server — HDMI, the jack, a USB or a Bluetooth speaker, with the sound moved against the picture where
-  a speaker plays late — and Home Assistant's own Kodi integration can be let in by a switch;
+  a speaker plays late — and Home Assistant's own Kodi integration can be let in by a switch. The same
+  screen shows a web page instead: a browser on the whole screen (a site, a camera, a dashboard), with
+  bookmarks, the page's video driven as a player, the screen itself live in Hata's page — a click there is
+  a click on the TV — and a touchscreen plugged into the server working as it is. Home Assistant and other
+  programs open a page there by an access key. A card of Home does all of it without the TV's page;
 - music (a module): a second player without a screen — a folder, a file or a radio link on the server's
   own speakers, with a queue and an output of its own, so the TV plays a film by HDMI while music plays on
   a speaker. The same speakers can be a player of Music Assistant (Squeezelite, by a button);

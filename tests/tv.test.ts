@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { cleanOffset } from "../src/tv";
+import { cleanOffset, browserCalls, browserSound, browserUnitText, browserHomeHtml, withoutTranslate, cleanShowTime, pointerCalls, cleanBookmarks, mediaScript } from "../src/tv";
 import { cleanLink, isLink, linkName, probeArgs, sourceArgs, streamZero, cleanStart, keyframeArgs, mediaOf, prefsOf, prefValue, streamArgs, subsArgs, tracksOf, clickPacket, helloPacket, KEEP_WINDOW, KEEP_YES, pictureOf, advancedXml, cleanFolders, shortTitle, hwdbText, keymapXml, polkitRule, decodePackages, isOurs, monitorAudio, monitorName, playable, portIn, readDisplay, remoteCall, seconds, sourcesXml, takeJson, unitText } from "../src/tv";
 
 function edid(name: string, audio: boolean): Uint8Array {
@@ -257,4 +257,94 @@ test("the sound offset: steps of 25 ms, two seconds either way", () => {
   expect(cleanOffset(2000)).toBe(2);
   expect(cleanOffset(2500)).toBeNull();
   expect(cleanOffset("100")).toBeNull();
+});
+
+test("the browser on the screen: its sound, its service, what a page may ask of it", () => {
+  // Kodi's name of an output is ALSA's own between "ALSA:" and the bar
+  expect(browserSound("ALSA:hdmi:CARD=HDMI,DEV=0|HDA Intel")).toBe("hdmi:CARD=HDMI,DEV=0");
+  expect(browserSound("ALSA:bluealsa|Bluetooth Audio")).toBe("bluealsa");
+  expect(browserSound("ALSA:default")).toBe("");
+  expect(browserSound("PIPEWIRE:x")).toBe("");
+  // nothing that would be read as another word of the service's command line
+  expect(browserSound("ALSA:hdmi; rm -rf /|x")).toBe("");
+  expect(browserSound("ALSA:a b")).toBe("");
+  const unit = browserUnitText("hdmi:CARD=HDMI,DEV=0");
+  // it and the player never have the screen together, and the one that leaves stops first
+  expect(unit).toContain("Conflicts=getty@tty7.service hata-tv.service");
+  expect(unit).toMatch(/^After=.* hata-tv\.service$/m);
+  expect(unit).toContain("ExecStart=/usr/bin/cage -- /usr/bin/chromium --kiosk");
+  expect(unit).toContain("--alsa-output-device=hdmi:CARD=HDMI,DEV=0 file:///var/lib/hata-tv/screen.html");
+  // the console is not shown between the player and the browser: neither service switches to it when it stops
+  expect(unit).not.toContain("chvt 1");
+  expect(unitText()).not.toContain("chvt 1");
+  expect(browserHomeHtml("uk", "a<b", 'x"y')).toContain("a&lt;b");
+  expect(browserHomeHtml("uk", "a", 'x"y')).toContain("x&quot;y");
+  // the server's name is not written on the screen's own page
+  expect(browserHomeHtml("uk", "hata.local", "")).not.toContain('id="name"');
+  // the offer to translate a page is off in the browser's own settings, the rest of them kept
+  expect(JSON.parse(withoutTranslate('{"a":1,"translate":{"x":2,"enabled":true}}'))).toEqual({ a: 1, translate: { x: 2, enabled: false } });
+  expect(JSON.parse(withoutTranslate("not json"))).toEqual({ translate: { enabled: false } });
+  expect(unit).toContain("--remote-debugging-port=9393");
+  // never started with the server: after a restart the screen is the player's
+  expect(unit).not.toContain("[Install]");
+  expect(browserUnitText("")).not.toContain("alsa-output-device");
+  expect(cleanShowTime(undefined)).toBe(0);
+  expect(cleanShowTime(0)).toBe(0);
+  expect(cleanShowTime(30)).toBe(30);
+  expect(cleanShowTime(4)).toBeNull();
+  expect(cleanShowTime(1.5)).toBeNull();
+  expect(cleanShowTime("30")).toBeNull();
+  expect(cleanShowTime(86401)).toBeNull();
+  expect(browserCalls("reload", undefined)).toEqual([{ method: "Page.reload" }]);
+  expect(browserCalls("start", "https://evil.example")).toEqual([{ method: "Page.navigate", params: { url: "file:///var/lib/hata-tv/screen.html" } }]);
+  expect(browserCalls("text", "привіт")).toEqual([{ method: "Input.insertText", params: { text: "привіт" } }]);
+  expect(browserCalls("text", "")).toBeNull();
+  expect(browserCalls("key", "Backspace")!.map((c) => c.params!.type)).toEqual(["rawKeyDown", "keyUp"]);
+  expect(browserCalls("key", "Enter")![0]!.params).toMatchObject({ type: "keyDown", text: "\r", windowsVirtualKeyCode: 13 });
+  expect(browserCalls("key", "F12")).toBeNull();
+  expect(browserCalls("key", "constructor")).toBeNull();
+  expect(browserCalls("text", "a\x00b")).toBeNull();
+  // a page of Hata's cannot make the browser run a script of its choosing
+  expect(browserCalls("Runtime.evaluate", "alert(1)")).toBeNull();
+  expect(browserCalls("navigate", "file:///etc/passwd")).toBeNull();
+});
+
+test("a press on the picture of the screen lands at that place of the page", () => {
+  const size = { width: 1920, height: 1080 };
+  const calls = pointerCalls("click", { x: 0.5, y: 0.25 }, size)!;
+  expect(calls.map((c) => c.params!.type)).toEqual(["mouseMoved", "mousePressed", "mouseReleased"]);
+  expect(calls[1]!.params).toMatchObject({ x: 960, y: 270, button: "left" });
+  expect(pointerCalls("wheel", { x: 0.1, y: 0.9, dy: -300 }, size)).toEqual([{ method: "Input.dispatchMouseEvent", params: { type: "mouseWheel", x: 192, y: 972, deltaX: 0, deltaY: -300 } }]);
+  // outside the picture, without a place, a page not known yet
+  expect(pointerCalls("click", { x: 1.2, y: 0 }, size)).toBeNull();
+  expect(pointerCalls("click", null, size)).toBeNull();
+  expect(pointerCalls("click", { x: 0.5, y: 0.5 }, { width: 0, height: 0 })).toBeNull();
+  expect(pointerCalls("wheel", { x: 0.5, y: 0.5, dy: "x" }, size)).toBeNull();
+  expect(pointerCalls("drag", { x: 0.5, y: 0.5 }, size)).toBeNull();
+});
+
+test("bookmarks of the screen and the script that drives a page's video", () => {
+  expect(cleanBookmarks([{ name: " Films\n here ", url: "https://a.example/x" }, { url: "https://a.example/x" }, { name: "", url: "http://b.example" }, { name: "bad", url: "javascript:alert(1)" }, null, 5])).toEqual([
+    { name: "Films here", url: "https://a.example/x" },
+    { name: "b.example", url: "http://b.example/" },
+  ]);
+  expect(cleanBookmarks("x")).toEqual([]);
+  // on the screen's own page a name cannot become markup
+  expect(browserHomeHtml("en", "hata", "", [{ name: "<b>x", url: "https://a.example/?a=1&b=2" }])).toContain('<a href="https://a.example/?a=1&amp;b=2">&lt;b&gt;x<span>');
+  // what comes from a request goes into the script only as a number
+  expect(mediaScript("skip", 30)).toContain("v.currentTime + 30)");
+  expect(mediaScript("skip", "1); alert(1")).toContain("v.currentTime + 0)");
+  expect(mediaScript("seek", 50)).toContain("v.duration * 0.5");
+  expect(mediaScript("volume", 400)).toContain("v.volume = v.volume");
+  expect(mediaScript("nonsense")).toContain("try {  } catch");
+  // the script is one expression that runs
+  expect(() => new Function("document", "return " + mediaScript("play"))({ querySelectorAll: () => [] })).not.toThrow();
+});
+
+test("the mouse made for a moment to put the pointer away", async () => {
+  const { inputEvent, uinputDevice } = await import("../src/pointer");
+  expect(uinputDevice("x").length).toBe(1116);
+  const move = inputEvent(2, 1, -5);
+  expect(move.length).toBe(24);
+  expect([...move.subarray(16)]).toEqual([2, 0, 1, 0, 0xfb, 0xff, 0xff, 0xff]);
 });

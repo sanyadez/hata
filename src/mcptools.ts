@@ -57,6 +57,8 @@ import { dockerSpace } from "./dockerspace";
 import { checkUpdates, packageUpdates, upgrade as upgradeSystem } from "./sysupdates";
 import { report as tailscaleReport } from "./tailscale";
 import { report as wireguardReport } from "./wireguard";
+import { playOnTv, remote as tvRemote, tvNow } from "./kodi";
+import { leaveBrowser, openPage, setScreen } from "./television";
 import { act as haAct, entities as haEntities, servers as haServers } from "./homeassistant";
 import { act as serviceAct, connections as serviceConnections, kindView, rowsNow } from "./integrations";
 import { VERSION } from "./version";
@@ -1887,6 +1889,13 @@ const homeRead: Omit<Tool, "level" | "effect">[] = [
         return { total: found.length, devices: found.slice(0, limit).map((e) => ({ id: e.id, name: e.name, room: e.area, kind: e.kind, state: e.state, unit: e.unit, actions: e.actions, ...(e.brightness === undefined ? {} : { brightness: e.brightness }), ...(e.target === undefined ? {} : { target: e.target }), ...(e.current === undefined ? {} : { current: e.current }) })) };
       }),
   },
+  {
+    name: "tv",
+    title: "The server's screen",
+    description: "What is on the TV or monitor plugged into this server: whether the player (Kodi) runs and what it plays (title, paused, the moment), or the web page a browser shows there instead, and whether a screen is connected at all.",
+    input: {},
+    run: () => wrap(() => tvNow()),
+  },
 ];
 
 const homeOperate: Omit<Tool, "level" | "effect">[] = [
@@ -1942,6 +1951,54 @@ const homeOperate: Omit<Tool, "level" | "effect">[] = [
     description: "Asks the package manager what is newer now (`apt-get update` or `dnf check-update`: nothing is installed) and answers as `system_updates` does. May take a minute. On this server, or on a machine.",
     input: OPTIONAL_MACHINE,
     run: (args) => wrap(() => checkUpdates(placeOf(args))),
+  },
+  {
+    name: "tv_open",
+    title: "Show a web page on the screen",
+    description: "Opens a web page (http or https) in a browser on the TV or monitor plugged into this server; the player there is put aside meanwhile. With `seconds` the page stays that long and then what was on the screen comes back (a film goes on from where it stopped) — for a camera, a doorbell, a dashboard shown for a moment. Without it the page stays until `tv_back` or the person's remote.",
+    input: { url: { type: "string", description: "The page's address, http:// or https://" }, seconds: { type: "number", description: "For how long to show it, 5 seconds to a day; left out — until changed" } },
+    required: ["url"],
+    run: (args, caller) =>
+      wrap(async () => {
+        await openPage(args.url, args.seconds, caller.user);
+        return tvNow();
+      }),
+  },
+  {
+    name: "tv_back",
+    title: "Take the web page off the screen",
+    description: "Closes the web page shown on the server's screen and gives the screen back to what had it before: the player, with its film going on from where it stopped, or nothing. Does nothing when no page is shown.",
+    input: {},
+    run: (_, caller) =>
+      wrap(async () => {
+        await leaveBrowser(caller.user);
+        return tvNow();
+      }),
+  },
+  {
+    name: "tv_play",
+    title: "Play on the screen",
+    description: "Plays a film or music in the player on the server's screen: an http(s) address of a video or a stream, or the full path of a media file on this server. A web page shown there gives the screen back to the player first. For a web page use `tv_open`.",
+    input: { media: { type: "string", description: "An http(s) address of a video or stream, or the full path of a media file on this server" } },
+    required: ["media"],
+    run: (args, caller) =>
+      wrap(async () => {
+        if (tvNow().page) await setScreen("kodi", caller.user);
+        await playOnTv(args.media, caller.user);
+        return tvNow();
+      }),
+  },
+  {
+    name: "tv_remote",
+    title: "Press a button of the player's remote",
+    description: "One button of the remote of the player on the server's screen: `playpause`, `stop`, `forward`, `rewind`, `seek` (value — seconds from the start), `volume` (value 0–100), `mute`, `up`, `down`, `left`, `right`, `select`, `back`, `home`, `menu`. Look with `tv` at what plays first.",
+    input: { action: { type: "string", description: "The button, one of those listed" }, value: { type: "number", description: "For `seek` and `volume`" } },
+    required: ["action"],
+    run: (args) =>
+      wrap(async () => {
+        await tvRemote(args.action, args.value);
+        return tvNow();
+      }),
   },
 ];
 

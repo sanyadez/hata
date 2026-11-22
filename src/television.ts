@@ -1,953 +1,537 @@
 /**
- * The module "TV": Kodi on the screen plugged into this server, installed by its button, run as a
- * service of its own user, and driven from Hata's page over Kodi's local control port. Remotes,
- * keyboards and mice plugged into the server are Kodi's own business — it reads them itself.
+ * The screen plugged into this server, and who has it: the player (`kodi.ts`) or a browser showing one
+ * web page — never both, the screen is one. The browser is `cage` (a compositor that shows a single
+ * program) with Chromium in it, a service of the player's own user on the same console; Hata drives it
+ * over its local debugging port. A page may be shown for a while, and then what was on the screen
+ * before comes back: the film goes on from where it stopped.
  */
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { createSocket } from "node:dgram";
-import { connect } from "node:net";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { hostname } from "node:os";
 import { record } from "./activity";
-import { lanAddress } from "./integration";
-import { playingSpeaker, setSpeakerVolume, speakerVolume } from "./bluetooth";
+import en from "./lang/en.json";
+import uk from "./lang/uk.json";
 import { AppError, startJob, type Job } from "./apps";
 import { bus } from "./bus";
 import { saveSettings, settings } from "./config";
+import { awaitKodi, kodiRuns, screenDark, sleepScreen, playOnTv, screenShares, setUp, switchTv, tvEnabled, tvNow, tvReport, type TvPage, type TvReport } from "./kodi";
 import { installCommand, packageManager, PATH, run, runLogged } from "./packages";
-import { advancedXml, builtinPacket, cleanFolders, cleanOffset, cleanLink, cleanStart, clickPacket, isLink, keyframeArgs, linkName, mediaOf, OUTSIDE_SUB, probeArgs, prefsOf, prefValue, streamArgs, subsArgs, tracksOf, streamZero, TV_LANGUAGES, type Media, type Pref, type Tracks, helloPacket, KEEP_NO, KEEP_SECONDS, KEEP_WINDOW, KEEP_YES, MATCH_OFF, MATCH_ON, pictureOf, decodePackages, isOurs, playable, portIn, readDisplay, hwdbText, keymapXml, polkitRule, remoteCall, seconds, shortTitle, sourcesXml, takeJson, TV_HOME, TV_HWDB, TV_POLKIT, TV_PORT, TV_UNIT, TV_USER, unitText, type Call, type Display, type Picture } from "./tv";
+import { parkPointer } from "./pointer";
+import { BROWSER_HOME_SCRIPT, BROWSER_POINTER_SCRIPT, BROWSER_PACKAGES, browserCalls, cleanBookmarks, MEDIA_ACTIONS, mediaScript, pointerCalls, PREVIEW_WIDTH, browserHomeHtml, TV_BROWSER_HOME, TV_USER, browserSound, browserUnitText, withoutTranslate, TV_HOME, cleanLink, cleanShowTime, linkName, TV_BROWSER_PORT, TV_BROWSER_UNIT, TV_UNIT, type BrowserReport, type PageCall, type PageMedia, type Screen } from "./tv";
 
-const USERDATA = join(TV_HOME, ".kodi", "userdata");
-const UNIT_FILE = "/etc/systemd/system/" + TV_UNIT;
-const DRM = "/sys/class/drm";
-
+const UNIT_FILE = "/etc/systemd/system/" + TV_BROWSER_UNIT;
 const has = (bin: string): boolean => !!Bun.which(bin, { PATH });
-const text = (path: string): string => {
-  try {
-    return readFileSync(path, "utf8");
-  } catch {
-    return "";
-  }
-};
 
-/** The screens the server has connectors for, as the kernel sees them: nothing is installed to know */
-export function displays(): Display[] {
-  let dirs: string[] = [];
-  try {
-    dirs = readdirSync(DRM).filter((name) => /^card\d+-/.test(name));
-  } catch {}
-  return dirs.sort().map((dir) => {
-    let edid = new Uint8Array(0);
-    try {
-      edid = new Uint8Array(readFileSync(join(DRM, dir, "edid")));
-    } catch {}
-    return readDisplay(dir, text(join(DRM, dir, "status")), text(join(DRM, dir, "modes")), edid);
-  });
-}
+export const browserInstalled = (): boolean => has("cage") && has("chromium");
 
-/** Who made the graphics card: decides the driver that decodes video */
-const cardVendor = (): string => text(join(DRM, "card0", "device", "vendor")).trim() || text(join(DRM, "card1", "device", "vendor")).trim();
+const browserRuns = async (): Promise<boolean> => existsSync(UNIT_FILE) && (await run(["systemctl", "is-active", TV_BROWSER_UNIT], 15_000)).out.trim() === "active";
 
-const decodeDriver = (): boolean => ["/usr/lib/x86_64-linux-gnu/dri", "/usr/lib/aarch64-linux-gnu/dri", "/usr/lib64/dri", "/usr/lib/dri"].some((dir) => {
-  try {
-    return readdirSync(dir).some((name) => name.endsWith("_drv_video.so"));
-  } catch {
-    return false;
-  }
-});
+/** What was on the screen when the browser took it, and when it is to come back */
+let showing: { /** Who put the page there: the page going by itself is logged as theirs */ by: string; back: boolean; resume: { file: string; at: number; subtitle: string } | null; until: number; timer: Timer | null } | null = null;
+/** The page the browser shows, as last heard from it */
+let page: TvPage | null = null;
 
-/** Keyboards, mice and remotes plugged in over USB or Bluetooth: what the player can be driven with from the sofa */
-function remotes(): string[] {
-  const names: string[] = [];
-  for (const block of text("/proc/bus/input/devices").split("\n\n")) {
-    if (!/^I: Bus=000[35] /m.test(block) || !/^H: Handlers=.*\b(kbd|mouse\d*)\b/m.test(block)) continue;
-    const name = /^N: Name="(.*)"$/m.exec(block)?.[1]?.replace(/\s+(Keyboard|Mouse|Consumer Control|System Control)$/i, "").trim();
-    if (name && !names.includes(name)) names.push(name);
-  }
-  return names;
-}
+/** The connection to the page in the browser: calls go over it, and what the page tells comes back */
+let link: { socket: WebSocket; calls: Map<number, (value: unknown) => void>; asked: number } | null = null;
 
-/** The port Kodi listens on for Hata: ours unless the person keeps an advancedsettings.xml of their own */
-function controlPort(): number {
-  const file = text(join(USERDATA, "advancedsettings.xml"));
-  return isOurs(file) ? TV_PORT : (portIn(file) ?? 9090);
-}
-
-/** Kodi's windows by number: a film on the whole screen, and the player's menu over it */
-const WINDOW_FULLSCREEN = 12005;
-const WINDOW_OSD = 12901;
-
-let asked = 0;
-
-/** One call of Kodi's JSON-RPC over its local port; null when Kodi does not answer */
-function rpc(call: Call, wait = 4000): Promise<unknown> {
-  return new Promise((resolve) => {
-    const id = ++asked;
-    let buffer = "";
-    const socket = connect({ host: "127.0.0.1", port: controlPort() });
-    const done = (value: unknown) => {
-      socket.destroy();
-      resolve(value);
-    };
-    socket.setTimeout(wait, () => done(null));
-    socket.once("error", () => done(null));
-    socket.once("connect", () => socket.write(JSON.stringify({ jsonrpc: "2.0", id, method: call.method, ...(call.params ? { params: call.params } : {}) })));
-    socket.on("data", (piece) => {
-      const taken = takeJson(buffer + piece.toString("utf8"));
-      buffer = taken.rest;
-      // Kodi tells every listener what happens (a film started): only the answer to this call counts
-      for (const value of taken.values as { id?: unknown; result?: unknown }[]) if (value?.id === id) return done(value.result ?? null);
-    });
-  });
-}
-
-const unit = async (verb: string): Promise<string> => (await run(["systemctl", verb, TV_UNIT], 15_000)).out.trim();
-
-/** The player is set to start with the server: what holds the module on */
-export const tvEnabled = (): boolean => existsSync("/etc/systemd/system/multi-user.target.wants/" + TV_UNIT);
-/** Hata has set the player up here before */
-export const tvSetUp = (): boolean => existsSync(UNIT_FILE);
-
-interface Playing extends Tracks {
+interface Target {
+  type: string;
+  url: string;
   title: string;
-  file: string;
-  /** An address played with subtitles of an address of their own: kept so that a browser taking the film over has them too */
-  outside?: string;
-  paused: boolean;
-  time: number;
-  total: number;
+  webSocketDebuggerUrl: string;
 }
 
-export interface TvReport {
-  displays: Display[];
-  /** Kodi is installed */
-  installed: boolean;
-  version: string;
-  /** Why it cannot be installed from here: "" — it can */
-  cannot: string;
-  install: string;
-  /** The graphics card decodes video itself */
-  decodes: boolean;
-  on: boolean;
-  running: boolean;
-  /** Home Assistant's way to the player; null — the player does not answer */
-  ha: TvHa | null;
-  /** Kodi answers Hata */
-  answers: boolean;
-  folders: string[];
-  /** A folder of the data folder that looks like the place of films and music, offered when none is chosen */
-  suggested: string[];
-  remotes: string[];
-  playing: Playing | null;
-  volume: number;
-  /** Whose volume that is: a Bluetooth speaker's own, or the player's */
-  volumeOf: "speaker" | "player";
-  muted: boolean;
-  /** `offset`: milliseconds the sound of a film is moved by on this output (below zero — earlier) */
-  audio: { value: string; options: { label: string; value: string }[]; offset: number } | null;
-  /** The resolution, the refresh rate and whether the rate follows the film; null while Kodi does not answer */
-  picture: Picture | null;
-  /** Kodi's own settings the page shows (`PREFS`), by their names there */
-  prefs: Record<string, Pref>;
-  /** The language Kodi speaks: one of Hata's ("en", "uk"), "" — another; `busy` while a language is fetched and set */
-  language: { value: string; busy: boolean; failed: boolean };
-  /** ffmpeg is here: the browser's player chooses sound and subtitles and plays what a browser alone cannot */
-  streams: boolean;
-  /** The command that brings ffmpeg, shown by its button */
-  streamsInstall: string;
-  /** A new screen mode is on trial: seconds left to keep it before Kodi puts the old one back; 0 — none is */
-  asking: number;
-}
-
-const packages = (): string[] => ["kodi", ...(decodeDriver() ? [] : decodePackages(cardVendor()))];
-
-async function nowPlaying(): Promise<{ player: number | null; playing: Playing | null }> {
-  const players = (await rpc({ method: "Player.GetActivePlayers" })) as { playerid: number }[] | null;
-  const player = players?.[0]?.playerid ?? null;
-  if (player === null) return { player, playing: null };
-  const [props, item] = (await Promise.all([rpc({ method: "Player.GetProperties", params: { playerid: player, properties: ["time", "totaltime", "speed", "audiostreams", "currentaudiostream", "subtitles", "currentsubtitle", "subtitleenabled"] } }), rpc({ method: "Player.GetItem", params: { playerid: player, properties: ["title", "file"] } })])) as [Record<string, unknown> | null, { item?: Record<string, unknown> } | null];
-  if (!props) return { player, playing: null };
-  const file = String(item?.item?.file ?? "");
-  const link = isLink(file);
-  // an address says little as a title, and may carry a key: where it leads is shown
-  const title = link ? String(item?.item?.title || "") || linkName(file) : shortTitle(String(item?.item?.title || item?.item?.label || file.split("/").pop() || ""));
-  return { player, playing: { title, file, ...(link && sent?.link === file && sent.subtitle ? { outside: sent.subtitle } : {}), paused: props.speed === 0, time: seconds(props.time), total: seconds(props.totaltime), ...tracksOf(props) } };
-}
-
-/** The sound output Kodi was last heard to use */
-let kodiAudio = "";
-/** Until when a change of Kodi's volume is Hata's own doing and not a press of the remote */
-let oursUntil = 0;
-let lastMuted = false;
-/** How much one press of the remote's volume key moves a speaker's own volume, percent */
-const VOLUME_STEP = 4;
-
-/** The Bluetooth speaker Kodi's sound goes to, when its own volume can be set; "" — none */
-const tvSpeaker = (): string => {
-  const address = kodiAudio.startsWith("ALSA:bluealsa") ? playingSpeaker() : "";
-  return address && speakerVolume(address) !== null ? address : "";
-};
-
-const setKodiVolume = async (volume: number): Promise<void> => {
-  // Kodi tells of this change as of any other: that one telling is ours (forgotten after a while, should it never come)
-  ownSets++;
-  oursUntil = Date.now() + 3000;
-  await rpc({ method: "Application.SetVolume", params: { volume } });
-};
-let ownSets = 0;
-
-/**
- * With the sound on such a speaker Kodi plays at full and the volume is the speaker's; with the sound
- * elsewhere Kodi's own volume comes back.
- */
-async function alignVolume(): Promise<void> {
-  const app = (await rpc({ method: "Application.GetProperties", params: { properties: ["volume", "muted"] } }, 2500)) as { volume?: number; muted?: boolean } | null;
-  if (typeof app?.volume !== "number") return;
-  lastMuted = app.muted === true;
-  if (tvSpeaker()) {
-    if (settings.tv.volume === null) {
-      settings.tv.volume = Math.round(app.volume);
-      saveSettings();
-    }
-    if (app.volume !== 100) await setKodiVolume(100);
-  } else if (settings.tv.volume !== null) {
-    // only once the sound has really left the speaker for another output: a speaker that is merely off keeps its place
-    if (kodiAudio.startsWith("ALSA:bluealsa")) return;
-    await setKodiVolume(settings.tv.volume);
-    settings.tv.volume = null;
-    saveSettings();
+async function target(): Promise<Target | null> {
+  try {
+    const all = (await (await fetch(`http://127.0.0.1:${TV_BROWSER_PORT}/json`, { signal: AbortSignal.timeout(2000) })).json()) as Target[];
+    return all.find((one) => one.type === "page") ?? null;
+  } catch {
+    return null;
   }
 }
 
-/** A volume key of the hand remote: Kodi says its own volume changed — the speaker's is moved instead */
-async function volumeHeard(data: { volume?: unknown; muted?: unknown } | undefined): Promise<void> {
-  const muted = data?.muted === true;
-  const volume = Number(data?.volume);
-  if (muted !== lastMuted) return void (lastMuted = muted);
-  const address = tvSpeaker();
-  if (!isFinite(volume)) return;
-  if (Date.now() > oursUntil) ownSets = 0;
-  // Hata's own putting of Kodi back to full is told as "100" once: that is not a press
-  if (volume >= 100 && ownSets > 0) return void ownSets--;
-  if (!address) return;
-  const now = speakerVolume(address) ?? 0;
-  // at full, a press up changes nothing in Kodi and is still told; a press down is told by how far it went
-  setSpeakerVolume(address, volume >= 100 ? now + VOLUME_STEP : now - VOLUME_STEP * Math.max(1, Math.min(5, Math.round(100 - volume))));
-  if (volume < 100) await setKodiVolume(100);
+function tellPage(next: TvPage | null): void {
+  if (JSON.stringify(next) === JSON.stringify(page)) return;
+  page = next;
+  bus.publish("tv", tvNow());
 }
 
-let following: ReturnType<typeof setTimeout> | null = null;
-
-/**
- * The speaker the film's sound goes to went away (turned off, out of reach, Bluetooth off): the sound
- * moves to the output used before it, and back when the speaker returns. Looked at a moment after the
- * change, so a speaker that only blinks moves nothing.
- */
-function followSpeaker(): void {
-  // told of every change of every device, a look around included: one look a while after the first is enough
-  if (following) return;
-  following = setTimeout(async () => {
-    following = null;
-    if (!heard) return;
-    const choice = await audioChoice().catch(() => null);
-    if (!choice) return;
-    const onSpeaker = choice.value.startsWith("ALSA:bluealsa");
-    const there = playingSpeaker() !== "";
-    // a server that had its sound on a speaker before this was kept track of
-    if (onSpeaker && !settings.tv.speaker) {
-      settings.tv.speaker = true;
-      saveSettings();
+/** Connects to the page the browser shows; null when the browser does not answer */
+async function connected(): Promise<NonNullable<typeof link> | null> {
+  if (link && link.socket.readyState === WebSocket.OPEN) return link;
+  const found = await target();
+  if (!found) return null;
+  const socket = new WebSocket(found.webSocketDebuggerUrl);
+  const mine = { socket, calls: new Map<number, (value: unknown) => void>(), asked: 0 };
+  const opened = await new Promise<boolean>((resolve) => {
+    socket.addEventListener("open", () => resolve(true), { once: true });
+    socket.addEventListener("error", () => resolve(false), { once: true });
+    setTimeout(() => resolve(false), 3000);
+  });
+  if (!opened) return null;
+  socket.addEventListener("message", (event) => {
+    let said: { id?: number; result?: unknown; error?: unknown; method?: string; params?: { name?: string; payload?: string; frame?: { parentId?: string; url?: string } } };
+    try {
+      said = JSON.parse(String(event.data));
+    } catch {
+      return;
     }
-    if (!settings.tv.speaker || onSpeaker === there) return;
-    const others = choice.options.filter((o) => !o.value.startsWith("ALSA:bluealsa"));
-    const target = there ? choice.options.find((o) => o.value.startsWith("ALSA:bluealsa")) : (others.find((o) => o.value === settings.tv.before) ?? others.find((o) => /hdmi/i.test(o.value)) ?? others[0]);
-    if (!target) return;
-    if (there) settings.tv.before = choice.value;
-    await rpc({ method: "Settings.SetSettingValue", params: { setting: "audiooutput.audiodevice", value: target.value } });
-    kodiAudio = target.value;
-    saveSettings();
-    await alignVolume().catch(() => {});
-    await applyOffset().catch(() => {});
-    bus.publish("tv", tvNow());
-  }, 2500);
+    if (typeof said.id === "number") {
+      mine.calls.get(said.id)?.(said.error ? null : (said.result ?? {}));
+      mine.calls.delete(said.id);
+      // the remote's "home" button, heard by the script every page gets
+    } else if (said.method === "Runtime.bindingCalled" && said.params?.name === "hataScreen" && said.params.payload === "home") void leaveBrowser().catch(() => {});
+    else if (said.method === "Page.frameNavigated" && !said.params?.frame?.parentId) void refreshPage();
+    else if (said.method === "Page.loadEventFired") void refreshPage();
+    else if (said.method === "Target.attachedToTarget") {
+      const told = said.params as unknown as { sessionId?: string; targetInfo?: { type?: string } };
+      if (told.sessionId && told.targetInfo?.type === "iframe") {
+        inner.add(told.sessionId);
+        // a frame of another site is a page of its own to the browser: it gets the script too
+        for (const call of [{ method: "Page.addScriptToEvaluateOnNewDocument", params: { source: BROWSER_POINTER_SCRIPT } }, { method: "Runtime.evaluate", params: { expression: BROWSER_POINTER_SCRIPT } }]) socket.send(JSON.stringify({ id: ++mine.asked, ...call, sessionId: told.sessionId }));
+      }
+    } else if (said.method === "Target.detachedFromTarget") inner.delete(String((said.params as unknown as { sessionId?: string }).sessionId));
+        else if (said.method === "Page.screencastFrame") {
+      const frame = said.params as unknown as { data?: string; sessionId?: number };
+      if (frame.data) {
+        cast.frame = new Uint8Array(Buffer.from(frame.data, "base64"));
+        for (const tell of watchers) tell(cast.frame);
+      }
+      socket.send(JSON.stringify({ id: ++mine.asked, method: "Page.screencastFrameAck", params: { sessionId: frame.sessionId } }));
+    }
+  });
+  socket.addEventListener("close", () => {
+    for (const answer of mine.calls.values()) answer(null);
+    if (link === mine) link = null;
+    cast.on = false;
+    cast.frame = null;
+    inner.clear();
+    worlds.clear();
+    mediaAt = null;
+  });
+  link = mine;
+  await ask({ method: "Page.enable" });
+  await ask({ method: "Runtime.enable" });
+  await ask({ method: "Runtime.addBinding", params: { name: "hataScreen" } });
+  await ask({ method: "Page.addScriptToEvaluateOnNewDocument", params: { source: BROWSER_HOME_SCRIPT } });
+  await ask({ method: "Runtime.evaluate", params: { expression: BROWSER_HOME_SCRIPT } });
+  await ask({ method: "Page.addScriptToEvaluateOnNewDocument", params: { source: BROWSER_POINTER_SCRIPT } });
+  await ask({ method: "Runtime.evaluate", params: { expression: BROWSER_POINTER_SCRIPT } });
+  await ask({ method: "Target.setAutoAttach", params: { autoAttach: true, waitForDebuggerOnStart: false, flatten: true } });
+  // the pointer stands in the middle of the screen from the browser's start: put away into a corner, in the background
+  void parkPointer();
+  return mine;
 }
 
-async function audioChoice(): Promise<TvReport["audio"]> {
-  const said = (await rpc({ method: "Settings.GetSettings", params: { level: "expert", filter: { section: "system", category: "audio" } } })) as { settings?: { id: string; value: unknown; options?: { label: string; value: string }[] }[] } | null;
-  const device = said?.settings?.find((one) => one.id === "audiooutput.audiodevice");
-  if (device) kodiAudio = String(device.value);
-  return device ? { offset: Math.round((settings.tv.offsets[String(device.value)] ?? 0) * 1000), value: String(device.value), options: (device.options ?? []).map((o) => ({ label: String(o.label).replace(/[\x00-\x1f]/g, "").replace(/\s+/g, " ").trim(), value: String(o.value) })) } : null;
-}
-
-async function pictureChoice(): Promise<Picture | null> {
-  const [said, adjust] = (await Promise.all([rpc({ method: "Settings.GetSettings", params: { level: "expert", filter: { section: "system", category: "display" } } }), rpc({ method: "Settings.GetSettingValue", params: { setting: "videoplayer.adjustrefreshrate" } })])) as [{ settings?: unknown } | null, { value?: unknown } | null];
-  return pictureOf(said?.settings, adjust?.value);
-}
-
-let prefsKept: { at: number; prefs: Record<string, Pref>; language: string } | null = null;
-
-/** The settings shown on the page: asked at most twice a minute — Kodi's port answers one caller at a time */
-async function prefsChoice(): Promise<{ prefs: Record<string, Pref>; language: string }> {
-  if (prefsKept && Date.now() - prefsKept.at < 30_000) return prefsKept;
-  const lists = (await Promise.all([["player", "language"], ["system", "audio"], ["interface", "screensaver"], ["system", "powermanagement"]].map(([section, category]) => rpc({ method: "Settings.GetSettings", params: { level: "expert", filter: { section, category } } })))) as ({ settings?: unknown[] } | null)[];
-  const spoken = ((await rpc({ method: "Settings.GetSettingValue", params: { setting: "locale.language" } })) as { value?: unknown } | null)?.value;
-  const language = Object.entries(TV_LANGUAGES).find(([, addon]) => addon === spoken)?.[0] ?? "";
-  if (lists.some((one) => !one)) return { prefs: {}, language };
-  prefsKept = { at: Date.now(), prefs: prefsOf(lists.flatMap((one) => one?.settings ?? [])), language };
-  return prefsKept;
-}
-
-/** The programs the browser's player stands on */
-export const streamsHere = (): boolean => has("ffmpeg") && has("ffprobe");
-
-/** A screen mode on trial: Kodi's control port is silent until it is answered or its time is out */
-let trial: { until: number; done: Promise<unknown>; port: number } | null = null;
-let last: TvReport | null = null;
-
-const secondsLeft = (): number => (trial ? Math.max(1, Math.ceil((trial.until - Date.now()) / 1000)) : 0);
-
-export async function tvReport(): Promise<TvReport> {
-  // Kodi answers nothing while it asks about the new mode: the page keeps what it had
-  if (trial && last) return { ...last, asking: secondsLeft() };
-  const installed = has("kodi");
-  const running = installed && tvSetUp() && (await unit("is-active")) === "active";
-  const app = running ? ((await rpc({ method: "Application.GetProperties", params: { properties: ["volume", "muted", "version"] } }, 2500)) as { volume?: number; muted?: boolean; version?: { major?: number; minor?: number } } | null) : null;
-  const [playing, audio, picture, kept, ha] = app ? await Promise.all([nowPlaying().then((now) => now.playing), audioChoice(), pictureChoice(), prefsChoice(), haChoice()]) : [null, null, null, null, null];
-  const media = join(settings.dataRoot, "Media");
-  return (last = {
-    displays: displays(),
-    installed,
-    version: app?.version ? `${app.version.major}.${app.version.minor}` : "",
-    cannot: installed || packageManager() === "apt-get" ? "" : "noInstaller",
-    install: installCommand(packages().join(" ")),
-    decodes: decodeDriver(),
-    on: tvEnabled(),
-    running,
-    answers: !!app,
-    folders: settings.tv.folders,
-    suggested: settings.tv.folders.length === 0 && existsSync(media) ? [media] : [],
-    remotes: remotes(),
-    playing,
-    volume: tvSpeaker() ? speakerVolume(tvSpeaker())! : (app?.volume ?? 0),
-    volumeOf: tvSpeaker() ? "speaker" : "player",
-    muted: app?.muted ?? false,
-    audio,
-    ha,
-    picture,
-    prefs: kept?.prefs ?? {},
-    language: { value: kept?.language ?? "", busy: speaking === "busy", failed: speaking === "failed" },
-    streams: streamsHere(),
-    streamsInstall: installCommand("ffmpeg"),
-    asking: secondsLeft(),
+/** One call of the browser's protocol; null when it did not answer or refused */
+async function ask(call: PageCall, wait = 8000, session = ""): Promise<unknown> {
+  const to = link && link.socket.readyState === WebSocket.OPEN ? link : await connected();
+  if (!to) return null;
+  return new Promise((resolve) => {
+    const id = ++to.asked;
+    const timer = setTimeout(() => {
+      to.calls.delete(id);
+      resolve(null);
+    }, wait);
+    to.calls.set(id, (value) => {
+      clearTimeout(timer);
+      resolve(value);
+    });
+    to.socket.send(JSON.stringify({ id, method: call.method, ...(call.params ? { params: call.params } : {}), ...(session ? { sessionId: session } : {}) }));
   });
 }
 
-/** A file of Kodi's that Hata keeps, written unless the person keeps one of their own there */
-function writeOurs(name: string, body: string): boolean {
-  const path = join(USERDATA, name);
-  const was = text(path);
-  if (!isOurs(was) || was === body) return false;
-  mkdirSync(join(path, ".."), { recursive: true });
-  writeFileSync(path, body);
-  return true;
+/** The frames of other sites inside the page (a film site's player is one): each is the browser's own target, attached to as it appears */
+const inner = new Set<string>();
+/** The place Hata's script runs in, per frame: made once, made again when the frame went elsewhere */
+const worlds = new Map<string, number>();
+/** Where the video was found last: buttons go there */
+let mediaAt: { session: string; frame: string } | null = null;
+
+interface FrameTree {
+  frame: { id: string };
+  childFrames?: FrameTree[];
 }
 
-/** The player's user, its files and its service: everything but the program itself */
-async function setUp(): Promise<void> {
-  if ((await run(["id", TV_USER], 10_000)).code !== 0) {
-    const made = await run(["useradd", "--system", "--create-home", "--home-dir", TV_HOME, "--shell", "/usr/sbin/nologin", "--groups", "video,audio,input,render", TV_USER], 30_000);
-    if (made.code !== 0) throw new AppError("tv.setupFailed", 409, { message: (made.err || made.out).trim() });
+const framesOf = (tree: FrameTree | undefined): string[] => (tree ? [tree.frame.id, ...(tree.childFrames ?? []).flatMap(framesOf)] : []);
+
+/** Runs a script in one frame, in a world of Hata's own (the page's code does not see it); undefined — the frame is gone */
+async function inFrame(session: string, frame: string, expression: string): Promise<unknown> {
+  const key = session + "|" + frame;
+  for (let tries = 0; tries < 2; tries++) {
+    let world = worlds.get(key);
+    if (world === undefined) {
+      world = ((await ask({ method: "Page.createIsolatedWorld", params: { frameId: frame, worldName: "hata" } }, 3000, session)) as { executionContextId?: number } | null)?.executionContextId;
+      if (world === undefined) return undefined;
+      worlds.set(key, world);
+    }
+    const said = (await ask({ method: "Runtime.evaluate", params: { expression, contextId: world, returnByValue: true, userGesture: true } }, 3000, session)) as { result?: { value?: unknown }; exceptionDetails?: unknown } | null;
+    if (said && !said.exceptionDetails) return said.result?.value ?? null;
+    worlds.delete(key);
   }
-  mkdirSync(USERDATA, { recursive: true });
-  // Kodi reads these when it starts: a running one is started again when one of them changed
-  const changed = [writeOurs("advancedsettings.xml", advancedXml(TV_PORT)), writeOurs("keymaps/hata.xml", keymapXml()), writeOurs("sources.xml", sourcesXml(settings.tv.folders))].some(Boolean);
-  if (existsSync("/usr/share/polkit-1") && text(TV_POLKIT) !== polkitRule()) {
-    mkdirSync("/etc/polkit-1/rules.d", { recursive: true });
-    writeFileSync(TV_POLKIT, polkitRule());
-  }
-  await run(["chown", "-R", `${TV_USER}:${TV_USER}`, join(TV_HOME, ".kodi")], 60_000);
-  writeFileSync(UNIT_FILE, unitText());
-  await run(["systemctl", "daemon-reload"], 30_000);
-  // the buttons of Android remotes: read anew by devices already plugged in, no restart of anything
-  if (text(TV_HWDB) !== hwdbText()) {
-    mkdirSync("/etc/udev/hwdb.d", { recursive: true });
-    writeFileSync(TV_HWDB, hwdbText());
-    await run(["systemd-hwdb", "update"], 60_000);
-    // udev is told to read the new table: a trigger right after the update was seen to go by the old one
-    await run(["udevadm", "control", "--reload"], 30_000);
-    await run(["udevadm", "trigger", "--subsystem-match=input", "--action=change"], 30_000);
-    await run(["udevadm", "settle", "--timeout=10"], 15_000);
-  }
-  if (changed && (await unit("is-active")) === "active") await run(["systemctl", "restart", TV_UNIT], 60_000);
+  return undefined;
 }
 
-/** Installs Kodi and the driver that decodes video (a quiet job of kind `tv`), then sets the player up; it is not started by that */
-export function installTv(by: string): Job {
+type Found = PageMedia & { area: number };
+
+/** The video the page plays, looked for in every frame; with an action, that is done to it where it was found last */
+async function media(action = "", value: unknown = null): Promise<PageMedia | null> {
+  if (action && mediaAt) {
+    const done = (await inFrame(mediaAt.session, mediaAt.frame, mediaScript(action, value))) as Found | null | undefined;
+    if (done) return done;
+  }
+  let best: { found: Found; session: string; frame: string } | null = null;
+  for (const session of ["", ...inner]) {
+    const tree = (await ask({ method: "Page.getFrameTree" }, 3000, session)) as { frameTree?: FrameTree } | null;
+    for (const frame of framesOf(tree?.frameTree)) {
+      const found = (await inFrame(session, frame, mediaScript())) as Found | null | undefined;
+      if (found && (!best || (!found.paused && best.found.paused) || (found.paused === best.found.paused && found.area > best.found.area))) best = { found, session, frame };
+    }
+  }
+  mediaAt = best && { session: best.session, frame: best.frame };
+  if (best && action) return ((await inFrame(best.session, best.frame, mediaScript(action, value))) as Found | null | undefined) ?? best.found;
+  return best?.found ?? null;
+}
+
+async function refreshPage(): Promise<void> {
+  const found = await target();
+  tellPage(found && found.url && found.url !== "about:blank" && !found.url.startsWith("file:") ? { url: found.url.slice(0, 2000), title: found.title.replace(/[\x00-\x1f]/g, "").slice(0, 200) } : found ? { url: "", title: "" } : null);
+}
+
+const secondsLeft = (): number => (showing?.until ? Math.max(1, Math.ceil((showing.until - Date.now()) / 1000)) : 0);
+
+async function report(): Promise<{ screen: Screen; browser: BrowserReport }> {
+  const running = await browserRuns();
+  if (running) await refreshPage();
+  else if (page) tellPage(null);
+  return {
+    screen: running ? "browser" : (await kodiRuns()) ? "kodi" : screenDark() ? "dark" : "off",
+    browser: {
+      installed: browserInstalled(),
+      install: installCommand(BROWSER_PACKAGES.join(" ")),
+      running,
+      url: running ? (page?.url ?? "") : settings.tv.page,
+      title: running ? (page?.title ?? "") : "",
+      last: settings.tv.page,
+      media: running ? await media().catch(() => null) : null,
+      bookmarks: settings.tv.bookmarks,
+      left: running ? secondsLeft() : 0,
+      back: running ? (showing?.back ?? tvEnabled()) : false,
+    },
+  };
+}
+
+/** Called once at import: the player's report and its "now" carry the browser's part from here on */
+screenShares({ report, page: () => page });
+
+/** Installs the browser of the screen (a quiet job of kind `tv`); nothing is started by that */
+export function installBrowser(by: string): Job {
   if (packageManager() !== "apt-get") throw new AppError("tv.noInstaller", 409);
   return startJob("tv", "tv", by, async (log) => {
     const env = { DEBIAN_FRONTEND: "noninteractive" };
-    const wanted = packages();
-    if (!has("kodi") || wanted.length > 1) {
-      let done = await runLogged(["apt-get", "install", "-y", "--no-install-recommends", ...wanted], log, 15 * 60_000, env);
-      if (done.code !== 0) {
-        await runLogged(["apt-get", "update"], log, 5 * 60_000, env);
-        done = await runLogged(["apt-get", "install", "-y", "--no-install-recommends", ...wanted], log, 15 * 60_000, env);
-      }
-      if (done.code !== 0) throw new AppError("tv.installFailed", 409, { message: (done.err || done.out).trim().split("\n").slice(-3).join("\n") });
+    let done = await runLogged(["apt-get", "install", "-y", "--no-install-recommends", ...BROWSER_PACKAGES], log, 20 * 60_000, env);
+    if (done.code !== 0) {
+      await runLogged(["apt-get", "update"], log, 5 * 60_000, env);
+      done = await runLogged(["apt-get", "install", "-y", "--no-install-recommends", ...BROWSER_PACKAGES], log, 20 * 60_000, env);
     }
-    await setUp();
-    record("tv.installed", { user: by });
+    if (done.code !== 0) throw new AppError("tv.installFailed", 409, { message: (done.err || done.out).trim().split("\n").slice(-3).join("\n") });
+    record("tv.browserInstalled", { user: by });
     bus.publish("tv");
   }, true);
 }
 
-/** Kodi answers: waited for after a start, it takes a few seconds to come up */
-async function awaitKodi(): Promise<boolean> {
-  for (let i = 0; i < 30; i++) {
-    if ((await rpc({ method: "JSONRPC.Ping" }, 1500)) === "pong") return true;
-    await Bun.sleep(1000);
+/** The browser's service as it should be now: its sound goes where the player's went */
+async function writeUnit(): Promise<boolean> {
+  const text = browserUnitText(browserSound(settings.tv.sound));
+  let was = "";
+  try {
+    was = readFileSync(UNIT_FILE, "utf8");
+  } catch {}
+  if (was !== text) {
+    writeFileSync(UNIT_FILE, text);
+    await run(["systemctl", "daemon-reload"], 30_000);
   }
-  return false;
+  // Hata's own page, in the server's language: what the browser starts with
+  const words = (settings.language === "uk" ? uk : en) as Record<string, string>;
+  const home = browserHomeHtml(settings.language, settings.local.name || hostname(), words["tv.page.homeHint"] ?? "", settings.tv.bookmarks);
+  let had = "";
+  try {
+    had = readFileSync(TV_BROWSER_HOME, "utf8");
+  } catch {}
+  if (had !== home) {
+    writeFileSync(TV_BROWSER_HOME, home);
+    await run(["chown", `${TV_USER}:${TV_USER}`, TV_BROWSER_HOME], 10_000);
+  }
+  return had !== home;
+}
+
+/** The pages kept for the screen: the list as the person made it; Hata's page on the screen shows them as tiles */
+export async function setBookmarks(raw: unknown, by: string): Promise<TvReport> {
+  settings.tv.bookmarks = cleanBookmarks(raw);
+  saveSettings();
+  const running = await browserRuns();
+  // the screen's own page is a file: written anew, and shown anew when it is the one on the screen
+  if (existsSync(UNIT_FILE) && (await writeUnit()) && running && page && !page.url) await ask({ method: "Page.reload" });
+  record("tv.bookmarks", { user: by });
+  return tvReport();
+}
+
+/** Before the browser starts: its settings say not to offer a translation (it reads them only at its start) */
+async function quietTranslate(): Promise<void> {
+  const dir = `${TV_HOME}/.browser/Default`;
+  const file = `${dir}/Preferences`;
+  try {
+    let had = "";
+    try {
+      had = readFileSync(file, "utf8");
+    } catch {}
+    const text = withoutTranslate(had);
+    if (text === had) return;
+    mkdirSync(dir, { recursive: true });
+    writeFileSync(file, text);
+    await run(["chown", "-R", `${TV_USER}:${TV_USER}`, `${TV_HOME}/.browser`], 10_000);
+  } catch {}
+}
+
+/** The browser takes the screen (the player, when it runs, is stopped by that) and answers Hata */
+async function startBrowser(by: string): Promise<void> {
+  if (!browserInstalled()) throw new AppError("tv.browserMissing", 409);
+  const playing = tvNow().playing;
+  const back = await kodiRuns();
+  // the film on the screen goes on from here when the page leaves
+  const resume = back && playing ? { file: playing.file, at: Math.floor(playing.time + (playing.paused ? 0 : (Date.now() - playing.at) / 1000)), subtitle: playing.outside ?? "" } : null;
+  await setUp();
+  await writeUnit();
+  sleepScreen(false);
+  if (!(await browserRuns())) await quietTranslate();
+  // The player lets the screen go a moment AFTER its service has stopped (its session is still being
+  // closed), and a browser started in that moment finds the screen busy and stands there with nothing
+  // shown: so the player is stopped first and given that moment, and a start that came to nothing is
+  // made once more.
+  if (back) {
+    await run(["systemctl", "stop", TV_UNIT], 30_000);
+    await Bun.sleep(1500);
+  }
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const done = await run(["systemctl", "start", TV_BROWSER_UNIT], 60_000);
+    if (done.code !== 0) throw new AppError("tv.browserFailed", 409, { message: (done.err || done.out).trim().split("\n").slice(-2).join("\n") });
+    showing = { by, back, resume, until: 0, timer: null };
+    for (let i = 0; i < (attempt ? 40 : 16); i++) {
+      if (await connected()) return;
+      await Bun.sleep(500);
+    }
+    if (!attempt) {
+      await run(["systemctl", "kill", "--signal=SIGKILL", TV_BROWSER_UNIT], 10_000);
+      await run(["systemctl", "reset-failed", TV_BROWSER_UNIT], 10_000);
+      await Bun.sleep(1000);
+    }
+  }
+  await run(["systemctl", "stop", TV_BROWSER_UNIT], 30_000);
+  showing = null;
+  if (back) await run(["systemctl", "start", TV_UNIT], 60_000);
+  throw new AppError("tv.browserFailed", 409, { message: (await run(["journalctl", "-u", TV_BROWSER_UNIT, "-n", "3", "--no-pager", "-o", "cat"], 10_000)).out.trim() });
 }
 
 /**
- * The first time the player runs, its sound goes where the picture goes: the HDMI output whose monitor
- * says it plays sound. After that the choice is the person's and is not touched.
+ * Shows a web page on the screen. With `seconds` it stays that long and then what was there comes
+ * back; without, it stays until somebody changes it. No address: the browser alone, with the page it
+ * showed last.
  */
-async function chooseAudioOnce(): Promise<void> {
-  if (settings.tv.audioChosen) return;
-  const choice = await audioChoice();
-  if (!choice) return;
-  let cards: string[] = [];
-  try {
-    cards = readdirSync("/proc/asound").filter((name) => /^card\d+$/.test(name));
-  } catch {}
-  for (const card of cards) {
-    const id = text(`/proc/asound/${card}/id`).trim();
-    let elds: string[] = [];
-    try {
-      elds = readdirSync(`/proc/asound/${card}`).filter((name) => name.startsWith("eld#"));
-    } catch {}
-    for (const eld of elds.sort()) {
-      if (!/monitor_present\s+1/.test(text(`/proc/asound/${card}/${eld}`))) continue;
-      // Kodi's own value carries the card's name after a bar: `ALSA:hdmi:CARD=HDMI,DEV=0|HDA Intel`
-      const device = `ALSA:hdmi:CARD=${id},DEV=${eld.split(".")[1]}`;
-      const value = choice.options.find((o) => o.value === device || o.value.startsWith(device + "|"))?.value;
-      if (!value) continue;
-      await rpc({ method: "Settings.SetSettingValue", params: { setting: "audiooutput.audiodevice", value } });
-      settings.tv.audioChosen = true;
-      saveSettings();
-      return;
-    }
+export async function openPage(raw: unknown, seconds: unknown, by: string): Promise<TvReport> {
+  const address = raw === undefined || raw === null || raw === "" ? "" : cleanLink(raw);
+  if (address === null) throw new AppError("tv.badLink", 400);
+  const time = cleanShowTime(seconds);
+  if (time === null) throw new AppError("tv.badTime", 400);
+  if (!(await browserRuns())) await startBrowser(by);
+  // a restart of Hata forgets what was there before: the player comes back when it is set to run
+  showing ??= { by, back: tvEnabled(), resume: null, until: 0, timer: null };
+  // no address: Hata's own page, which the browser starts with
+  const url = address;
+  if (url) {
+    const went = (await ask({ method: "Page.navigate", params: { url } }, 15_000)) as { errorText?: string } | null;
+    if (!went) throw new AppError("tv.browserFailed", 409, { message: "" });
+    // said at once: the browser itself names the page only when it has begun to load
+    tellPage({ url, title: "" });
   }
-}
-
-/** On: the player starts now and with the server. Off: it stops and the screen goes back to the console */
-export async function switchTv(on: boolean, by: string): Promise<TvReport> {
-  if (!has("kodi")) throw new AppError("tv.notInstalled", 409);
-  if (on) await setUp();
-  const done = await run(["systemctl", on ? "enable" : "disable", "--now", TV_UNIT], 60_000);
-  if (done.code !== 0) throw new AppError("tv.switchFailed", 409, { message: (done.err || done.out).trim().split("\n").slice(-2).join("\n") });
-  if (on && (await awaitKodi())) await chooseAudioOnce();
-  record(on ? "tv.on" : "tv.off", { user: by });
+  if (showing.timer) clearTimeout(showing.timer);
+  showing.timer = time ? setTimeout(() => void leaveBrowser().catch(() => {}), time * 1000) : null;
+  showing.until = time ? Date.now() + time * 1000 : 0;
+  if (address && !time && settings.tv.page !== address) {
+    settings.tv.page = address;
+    saveSettings();
+  }
+  if (address) record("tv.page", { user: by, detail: linkName(address) });
   bus.publish("tv");
   return tvReport();
 }
 
-/** The folders the player shows. Kodi reads its places when it starts, so a running one is started again */
-export async function setFolders(raw: unknown, by: string): Promise<TvReport> {
-  const folders = cleanFolders(raw);
-  for (const path of folders) {
-    let dir = false;
-    try {
-      dir = statSync(path).isDirectory();
-    } catch {}
-    if (!dir) throw new AppError("tv.noFolder", 400, { path });
-  }
-  settings.tv.folders = folders;
-  saveSettings();
-  if (tvSetUp()) {
-    writeOurs("sources.xml", sourcesXml(folders));
-    await run(["chown", `${TV_USER}:${TV_USER}`, join(USERDATA, "sources.xml")], 10_000);
-    if ((await unit("is-active")) === "active") {
-      await run(["systemctl", "restart", TV_UNIT], 60_000);
-      await awaitKodi();
-    }
-  }
-  record("tv.folders", { user: by, detail: String(folders.length) });
+/** The page leaves the screen: the player comes back when it had it (and the film goes on), else the console */
+export async function leaveBrowser(who = ""): Promise<TvReport> {
+  const was = showing;
+  // gone by its time or by the remote's button: whoever put it there
+  const by = who || was?.by || "schedule";
+  if (was?.timer) clearTimeout(was.timer);
+  showing = null;
+  if (!(await browserRuns())) return tvReport();
+  link?.socket.close();
+  const back = was?.back ?? tvEnabled();
+  // starting the player stops the browser: the two services exclude each other
+  await run(back ? ["systemctl", "start", TV_UNIT] : ["systemctl", "stop", TV_BROWSER_UNIT], 60_000);
+  if (!back) await run(["chvt", "1"], 10_000);
+  tellPage(null);
+  if (back && was?.resume && (await awaitKodi())) await playOnTv(was.resume.file, by, was.resume.at, was.resume.subtitle || undefined).catch(() => {});
+  record("tv.pageGone", { user: by });
+  bus.publish("tv");
   return tvReport();
 }
 
-/** The port Kodi's own web server answers Home Assistant on */
-const TV_WEB_PORT = 9392;
-
-export interface TvHa {
-  on: boolean;
-  /** This server's address on the home network */
-  address: string;
-  port: number;
-  user: string;
-  /** Shown only while it is on: the person types it into Home Assistant */
-  password: string;
-}
-
-async function haChoice(): Promise<TvHa | null> {
-  const said = (await rpc({ method: "Settings.GetSettings", params: { level: "expert", filter: { section: "services", category: "control" } } })) as { settings?: { id: string; value: unknown }[] } | null;
-  if (!said?.settings) return null;
-  const value = (id: string) => said.settings!.find((one) => one.id === id)?.value;
-  const on = value("services.webserver") === true;
-  return { on, address: lanAddress(), port: Number(value("services.webserverport")) || 0, user: String(value("services.webserverusername") ?? ""), password: on ? String(value("services.webserverpassword") ?? "") : "" };
-}
-
-const portFree = (port: number): boolean => {
-  try {
-    Bun.listen({ hostname: "0.0.0.0", port, socket: { data() {} } }).stop(true);
-    return true;
-  } catch {
-    return false;
-  }
-};
-
-/**
- * Lets Home Assistant's own Kodi integration reach the player: Kodi's web server on a port of its own,
- * always behind a name and a password made here. The other way in Kodi has (a raw port without any
- * sign-in) stays closed.
- */
-export async function setHomeAssistant(on: boolean, by: string): Promise<TvReport> {
-  const now = await haChoice();
-  if (!now) throw new AppError("tv.notRunning", 409);
-  const set = (setting: string, value: unknown) => rpc({ method: "Settings.SetSettingValue", params: { setting, value } });
-  if (on && !now.on) {
-    if (!portFree(TV_WEB_PORT)) throw new AppError("tv.portTaken", 409, { port: TV_WEB_PORT });
-    const password = Buffer.from(crypto.getRandomValues(new Uint8Array(15))).toString("base64url");
-    await set("services.webserverport", TV_WEB_PORT);
-    await set("services.webserverusername", "hata");
-    await set("services.webserverpassword", password);
-    await set("services.webserverauthentication", true);
-    // Kodi answers this with a window of its own on the screen — "anyone who reaches the web interface controls
-    // this device… Continue?" — and the call waits for it, as does everything else on its one port. The person
-    // has just pressed the button here and the password is set above, so "Yes" is pressed for them, through
-    // the port of its remotes. The port is read first: nothing can be asked while the window is up.
-    const port = await eventPort();
-    if (!port) throw new AppError("tv.haFailed", 409);
-    let done = false;
-    const turned = rpc({ method: "Settings.SetSettingValue", params: { setting: "services.webserver", value: true } }, 30_000).finally(() => (done = true));
-    for (let i = 0; i < 20 && !done; i++) {
-      await Bun.sleep(700);
-      if (!done) await toEventPort(port, helloPacket(), clickPacket(KEEP_WINDOW, KEEP_YES)).catch(() => {});
-    }
-    await turned.catch(() => {});
-    let up = false;
-    for (let i = 0; i < 20 && !up; i++) {
-      up = (await haChoice())?.on === true;
-      if (!up) await Bun.sleep(500);
-    }
-    if (!up) throw new AppError("tv.haFailed", 409);
-  } else if (!on && now.on) await rpc({ method: "Settings.SetSettingValue", params: { setting: "services.webserver", value: false } }, 20_000);
-  if (on !== now.on) record(on ? "tv.haOn" : "tv.haOff", { user: by });
-  return tvReport();
-}
-
-/** The sound offset kept for the output in use is given to the film that plays; a film alone has one */
-async function applyOffset(): Promise<void> {
-  const choice = await audioChoice();
-  const offset = choice ? settings.tv.offsets[choice.value] : undefined;
-  if (offset === undefined) return;
-  const { player } = await nowPlaying();
-  if (player === 1) await rpc({ method: "Player.SetAudioDelay", params: { playerid: 1, offset } });
+/** The size of the page the browser shows, in the page's own pixels */
+async function pageSize(): Promise<{ width: number; height: number }> {
+  const said = (await ask({ method: "Page.getLayoutMetrics" })) as { cssVisualViewport?: { clientWidth?: number; clientHeight?: number } } | null;
+  return { width: said?.cssVisualViewport?.clientWidth ?? 0, height: said?.cssVisualViewport?.clientHeight ?? 0 };
 }
 
 /**
- * Moves the sound of films against the picture on the output in use — a Bluetooth speaker plays a
- * little late. Kept per output, given to every film as it starts.
+ * The picture of the screen for Hata's page. The browser sends its own frames, made small, whenever
+ * what it shows changes (its "screencast"): asking it for a screenshot of another size each second
+ * was seen to resize the page on the real screen. Sent only while a page of Hata's keeps asking.
  */
-export async function setOffset(raw: unknown): Promise<TvReport> {
-  const offset = cleanOffset(raw);
-  const choice = await audioChoice();
-  if (!choice) throw new AppError("tv.notRunning", 409);
-  if (offset === null) throw new AppError("tv.badSetting", 400);
-  settings.tv.offsets[choice.value] = offset;
-  saveSettings();
-  await applyOffset().catch(() => {});
-  return tvReport();
-}
+const cast: { on: boolean; big: boolean; frame: Uint8Array | null; asked: number; timer: Timer | null } = { on: false, big: false, frame: null, asked: 0, timer: null };
 
-export async function setAudio(value: unknown): Promise<TvReport> {
-  const choice = await audioChoice();
-  if (!choice) throw new AppError("tv.notRunning", 409);
-  if (typeof value !== "string" || !choice.options.some((o) => o.value === value)) throw new AppError("tv.badAudio", 400);
-  await rpc({ method: "Settings.SetSettingValue", params: { setting: "audiooutput.audiodevice", value } });
-  settings.tv.audioChosen = true;
-  // sent to a Bluetooth speaker by hand: the sound returns there whenever the speaker does; sent elsewhere: it stays
-  const toSpeaker = value.startsWith("ALSA:bluealsa");
-  if (toSpeaker && !choice.value.startsWith("ALSA:bluealsa")) settings.tv.before = choice.value;
-  settings.tv.speaker = toSpeaker;
-  saveSettings();
-  kodiAudio = value;
-  await alignVolume().catch(() => {});
-  await applyOffset().catch(() => {});
-  return tvReport();
-}
+/** Those who get every frame as it comes: the streams of pictures open in pages of Hata's */
+const watchers = new Set<(frame: Uint8Array) => void>();
 
 /**
- * The picture: the resolution, the refresh rate, whether the rate follows the film. A new mode is on
- * trial first — Kodi shows its own "keep it?" for a quarter of a minute and puts the old mode back
- * unless somebody says yes, on the screen or from the page (`keepPicture`), so a mode the TV cannot
- * show never stays. While it asks, its control port answers nobody.
+ * The screen as a stream of pictures (each replaces the last in an `<img>`): the browser's own frames
+ * as they come, at most a dozen a second, for as long as the page that asked stays. No program is
+ * added and nothing shows on the screen itself — live enough to aim and to follow a film, without sound.
  */
-export async function setPicture(data: Record<string, unknown>, by: string): Promise<TvReport> {
-  if (trial) throw new AppError("tv.asking", 409);
-  const picture = await pictureChoice();
-  if (!picture) throw new AppError("tv.notRunning", 409);
-  if ("match" in data) {
-    await rpc({ method: "Settings.SetSettingValue", params: { setting: "videoplayer.adjustrefreshrate", value: data.match === true ? MATCH_ON : MATCH_OFF } });
-    record(data.match === true ? "tv.matchOn" : "tv.matchOff", { user: by });
-    return tvReport();
-  }
-  const which = "resolution" in data ? "resolution" : "rate";
-  const chosen = (picture[which].options as { label: string; value: unknown }[]).find((o) => o.value === data[which]);
-  if (!chosen) throw new AppError("tv.badPicture", 400);
-  if (chosen.value === picture[which].value) return tvReport();
-  // the screen goes dark for a moment and a window covers it: not over a film somebody watches
-  if ((await nowPlaying()).player !== null) throw new AppError("tv.picturePlaying", 409);
-  const port = await eventPort();
-  await tvReport();
-  const label = which === "rate" ? chosen.label + " Hz" : chosen.label;
-  const mine = { until: Date.now() + KEEP_SECONDS * 1000, port, done: rpc({ method: "Settings.SetSettingValue", params: { setting: which === "resolution" ? "videoscreen.resolution" : "videoscreen.screenmode", value: chosen.value } }, (KEEP_SECONDS + 10) * 1000) };
-  trial = mine;
-  void mine.done.then((kept) => {
-    if (trial === mine) trial = null;
-    if (kept === true) record("tv.picture", { user: by, detail: label });
-    bus.publish("tv");
-  });
-  // a mode that needs no trial (Kodi did not ask) is done at once
-  await Promise.race([mine.done, Bun.sleep(1200)]);
-  return tvReport();
-}
-
-/** One of Kodi's settings of the page (`PREFS`) */
-export async function setPref(id: unknown, value: unknown, by: string): Promise<TvReport> {
-  if (trial) throw new AppError("tv.asking", 409);
-  prefsKept = null;
-  const { prefs } = await prefsChoice();
-  if (Object.keys(prefs).length === 0) throw new AppError("tv.notRunning", 409);
-  const next = typeof id === "string" ? prefValue(id, value, prefs) : undefined;
-  if (next === undefined) throw new AppError("tv.badSetting", 400);
-  await rpc({ method: "Settings.SetSettingValue", params: { setting: id as string, value: next } });
-  prefsKept = null;
-  record("tv.setting", { user: by, detail: id as string });
-  return tvReport();
-}
-
-/** A packet for Kodi's event port: its own commands and presses, which the control port has no call for */
-async function toEventPort(port: number, ...packets: Uint8Array[]): Promise<void> {
-  const socket = createSocket("udp4");
-  try {
-    for (const packet of packets) await new Promise<void>((resolve) => socket.send(packet, port, "127.0.0.1", () => resolve()));
-  } finally {
-    socket.close();
-  }
-}
-
-/** Kodi's event port, 0 when it is turned off there */
-async function eventPort(): Promise<number> {
-  const value = async (setting: string) => ((await rpc({ method: "Settings.GetSettingValue", params: { setting } })) as { value?: unknown } | null)?.value;
-  return (await value("services.esenabled")) === true ? Number(await value("services.esport")) || 0 : 0;
-}
-
-let speaking: "" | "busy" | "failed" = "";
-
-/**
- * The language Kodi speaks. Debian's package has English alone: another one is a pack Kodi fetches from
- * its own repository — asked for through the event port, its "install?" answered for the person — and
- * only then the setting is changed. Goes on in the background; the page sees `language.busy`.
- */
-export async function setLanguage(lang: unknown, by: string): Promise<TvReport> {
-  const addon = typeof lang === "string" ? TV_LANGUAGES[lang] : undefined;
-  if (!addon) throw new AppError("tv.badSetting", 400);
-  if (trial || speaking === "busy") throw new AppError("tv.asking", 409);
-  if ((await rpc({ method: "JSONRPC.Ping" }, 2000)) !== "pong") throw new AppError("tv.notRunning", 409);
-  // the whole screen is drawn anew in the other language: not over a film somebody watches
-  if ((await nowPlaying()).player !== null) throw new AppError("tv.languagePlaying", 409);
-  const there = async () => !!((await rpc({ method: "Addons.GetAddonDetails", params: { addonid: addon, properties: ["enabled"] } })) as { addon?: unknown } | null)?.addon;
-  speaking = "busy";
-  void (async () => {
-    try {
-      if (!(await there())) {
-        const port = await eventPort();
-        if (!port) throw new Error("no event port");
-        await toEventPort(port, helloPacket(), builtinPacket(`InstallAddon(${addon})`));
-        for (let i = 0; i < 60 && !(await there()); i++) {
-          await Bun.sleep(1500);
-          const shown = ((await rpc({ method: "GUI.GetProperties", params: { properties: ["currentwindow"] } })) as { currentwindow?: { id?: number } } | null)?.currentwindow?.id;
-          if (shown === KEEP_WINDOW) await toEventPort(port, clickPacket(KEEP_WINDOW, KEEP_YES));
+export async function screenStream(signal: AbortSignal): Promise<Response> {
+  const first = await screenShot();
+  const encoder = new TextEncoder();
+  const part = (frame: Uint8Array) => [encoder.encode(`--frame\r\nContent-Type: image/jpeg\r\nContent-Length: ${frame.length}\r\n\r\n`), frame, encoder.encode("\r\n")];
+  let tell: ((frame: Uint8Array) => void) | null = null;
+  let keep: Timer | null = null;
+  const end = () => {
+    if (tell) watchers.delete(tell);
+    if (keep) clearInterval(keep);
+  };
+  const body = new ReadableStream<Uint8Array>({
+    start(controller) {
+      let last = 0;
+      let latest = first;
+      const send = (frame: Uint8Array) => {
+        try {
+          for (const piece of part(frame)) controller.enqueue(piece);
+        } catch {
+          end();
         }
-        if (!(await there())) throw new Error("not installed");
-      }
-      await rpc({ method: "Settings.SetSettingValue", params: { setting: "locale.language", value: addon } }, 30_000);
-      speaking = "";
-      record("tv.language", { user: by, detail: lang as string });
-    } catch {
-      speaking = "failed";
-    }
-    prefsKept = null;
-    bus.publish("tv");
-  })();
-  return tvReport();
+      };
+      send(first);
+      tell = (frame) => {
+        latest = frame;
+        if (Date.now() - last < 80) return;
+        last = Date.now();
+        send(frame);
+      };
+      watchers.add(tell);
+      // the screencast goes on while somebody watches; a page that stands still sends its last picture again, so the connection lives
+      keep = setInterval(() => {
+        cast.asked = Date.now();
+        if (Date.now() - last > 4000) ((last = Date.now()), send(latest));
+        if (!cast.on) void screenShot().catch(() => {});
+      }, 2000);
+      signal.addEventListener("abort", () => {
+        end();
+        try {
+          controller.close();
+        } catch {}
+      });
+    },
+    cancel: end,
+  });
+  return new Response(body, { headers: { "content-type": "multipart/x-mixed-replace; boundary=frame", "cache-control": "no-store" } });
 }
 
-/** The answer to Kodi's "keep it?", pressed for the person: its control port is deaf meanwhile, its event port is not */
-export async function keepPicture(keep: boolean): Promise<TvReport> {
-  const mine = trial;
-  if (!mine) return tvReport();
-  if (!mine.port) throw new AppError("tv.answerOnScreen", 409);
-  await toEventPort(mine.port, helloPacket(), clickPacket(KEEP_WINDOW, keep ? KEEP_YES : KEEP_NO));
-  const kept = await Promise.race([mine.done, Bun.sleep(5000).then(() => "late")]);
-  if (kept === "late") throw new AppError("tv.answerOnScreen", 409);
-  if (keep && kept !== true) throw new AppError("tv.notKept", 409);
-  return tvReport();
+/** What the screen shows right now, as a small picture for Hata's page: only while the browser has it */
+export async function screenShot(big = false): Promise<Uint8Array> {
+  if (!(await browserRuns())) throw new AppError("tv.browserOff", 409);
+  cast.asked = Date.now();
+  // looked at on a whole screen, the picture is sent as large as the screen itself
+  if (cast.on && link && cast.big !== big) {
+    await ask({ method: "Page.stopScreencast" });
+    cast.on = false;
+    cast.frame = null;
+  }
+  if (!cast.on || !link) {
+    cast.big = big;
+    if ((await ask({ method: "Page.startScreencast", params: { format: "jpeg", quality: big ? 75 : 55, maxWidth: big ? 3840 : PREVIEW_WIDTH, maxHeight: big ? 2160 : PREVIEW_WIDTH, everyNthFrame: 2 } })) === null) throw new AppError("tv.browserFailed", 409, { message: "" });
+    cast.on = true;
+    // nobody looks any more: the browser is told to stop making frames
+    cast.timer ??= setInterval(() => {
+      if (Date.now() - cast.asked < 15_000) return;
+      clearInterval(cast.timer!);
+      cast.timer = null;
+      cast.on = false;
+      cast.frame = null;
+      if (link) void ask({ method: "Page.stopScreencast" });
+    }, 5000);
+  }
+  for (let i = 0; i < 8 && !cast.frame; i++) await Bun.sleep(100);
+  // a page that stands still sends no frame: one picture of it as it is (whole, never resized — that was seen to resize the page itself)
+  if (!cast.frame) {
+    const still = (await ask({ method: "Page.captureScreenshot", params: { format: "jpeg", quality: 60 } }, 6000)) as { data?: string } | null;
+    if (still?.data && !cast.frame) cast.frame = new Uint8Array(Buffer.from(still.data, "base64"));
+  }
+  if (!cast.frame) throw new AppError("tv.browserFailed", 409, { message: "" });
+  return cast.frame;
 }
 
-/** The address last sent to the screen, with the subtitles given for it */
-let sent: { link: string; subtitle: string } | null = null;
+/** What is on the screen, for a card that keeps looking: the player's "now" and, while a page shows, how its video stands */
+export async function screenNow(): Promise<ReturnType<typeof tvNow> & { kind: Screen; media: PageMedia | null; left: number; back: boolean; bookmarks: typeof settings.tv.bookmarks; can: { kodi: boolean; browser: boolean } }> {
+  const browsing = await browserRuns();
+  const kind: Screen = browsing ? "browser" : (await kodiRuns()) ? "kodi" : screenDark() ? "dark" : "off";
+  return { ...tvNow(), kind, media: browsing ? await media().catch(() => null) : null, left: browsing ? secondsLeft() : 0, back: browsing ? (showing?.back ?? tvEnabled()) : false, bookmarks: settings.tv.bookmarks, can: { kodi: has("kodi"), browser: browserInstalled() } };
+}
 
-/** Gives the film that starts on the screen subtitles from an address of their own, once the player has it */
-async function addSubtitle(link: string, subtitle: string): Promise<void> {
-  for (let tries = 0; tries < 20; tries++) {
-    await Bun.sleep(1000);
-    if (sent?.link !== link) return;
-    const { player, playing } = await nowPlaying();
-    if (player === null || playing?.file !== link) continue;
-    await rpc({ method: "Player.AddSubtitle", params: { playerid: player, subtitle } }, 8000);
+/** A button of the page's remote for the browser */
+export async function browserDo(action: unknown, value: unknown, by: string): Promise<void> {
+  if (action === "home") return void (await leaveBrowser(by));
+  if (typeof action === "string" && MEDIA_ACTIONS.includes(action)) {
+    if (!(await browserRuns())) throw new AppError("tv.browserOff", 409);
+    if (!(await media(action, value))) throw new AppError("tv.noVideo", 409);
     return;
   }
+  const pointed = action === "click" || action === "wheel";
+  if (pointed && !(await browserRuns())) throw new AppError("tv.browserOff", 409);
+  const calls = pointed ? pointerCalls(action, value, await pageSize()) : browserCalls(action, value);
+  if (!calls) throw new AppError("tv.badAction", 400);
+  if (!(await browserRuns())) throw new AppError("tv.browserOff", 409);
+  for (const call of calls) if ((await ask(call)) === null) throw new AppError("tv.browserFailed", 409, { message: "" });
 }
 
-/** Plays a file of this server, or an address on the network, on the screen */
-export async function playOnTv(raw: unknown, by: string, from?: unknown, subs?: unknown): Promise<void> {
-  const link = typeof raw === "string" && !raw.startsWith("/");
-  const path = link ? cleanLink(raw) : raw;
-  if (link && !path) throw new AppError("tv.badLink", 400);
-  const subtitle = link && subs ? cleanLink(subs) : "";
-  if (subtitle === null) throw new AppError("tv.badLink", 400);
-  if (typeof path !== "string" || (!link && !playable(path))) throw new AppError("tv.notPlayable", 400);
-  let file = link;
-  try {
-    file ||= statSync(path).isFile();
-  } catch {}
-  if (!file) throw new AppError("tv.noFile", 404);
-  if ((await rpc({ method: "JSONRPC.Ping" }, 2000)) !== "pong") throw new AppError("tv.notRunning", 409);
-  // carried over from a browser: it goes on from where it was watched to
-  const at = typeof from === "number" && Number.isFinite(from) && from >= 1 ? Math.floor(from) : 0;
-  const resume = at ? { options: { resume: { hours: Math.floor(at / 3600), minutes: Math.floor((at % 3600) / 60), seconds: at % 60, milliseconds: 0 } } } : {};
-  if ((await rpc({ method: "Player.Open", params: { item: { file: path }, ...resume } }, link ? 25_000 : 8000)) !== "OK") throw new AppError(link ? "tv.linkFailed" : "tv.playFailed", 409);
-  sent = link ? { link: path, subtitle: subtitle ?? "" } : null;
-  if (link && subtitle) void addSubtitle(path, subtitle).catch(() => {});
-  record("tv.play", { user: by, detail: link ? linkName(path) : path });
-  bus.publish("tv");
-}
-
-export interface TvNow extends Playing {
-  /** When this was read: the page counts the seconds on from here while it plays */
-  at: number;
-}
-
-let now: TvNow | null = null;
-let watching = false;
-/** Kodi is there and listened to */
-let heard = false;
-
-/** The player as every page shows it: whether it runs, and what plays (null — nothing) */
-export const tvNow = (): { on: boolean; screen: boolean; streams: boolean; playing: TvNow | null } => ({ on: heard, screen: screenThere(), streams: streamsHere(), playing: now });
-
-let screen = { at: 0, there: false };
-/** A TV or monitor is plugged in and seen: looked at anew every ten seconds at most */
-function screenThere(): boolean {
-  if (Date.now() - screen.at > 10_000) screen = { at: Date.now(), there: displays().some((d) => d.connected) };
-  return screen.there;
-}
-
-function tell(next: TvNow | null): void {
-  const same = JSON.stringify(next && { ...next, at: 0, time: 0 }) === JSON.stringify(now && { ...now, at: 0, time: 0 });
-  // the same film a little further on is news only when it jumped: the page counts the seconds itself
-  const jumped = !!next && !!now && Math.abs(next.time - (now.time + (now.paused ? 0 : (next.at - now.at) / 1000))) > 3;
-  now = next;
-  if (!same || jumped) bus.publish("tv", tvNow());
-}
-
-/**
- * Listens to Kodi for as long as Hata runs: Kodi tells every program connected to its port what
- * happens (started, paused, sought, stopped — also when the remote in the person's hand did it), so
- * every page can show what is on the screen without asking again and again.
- */
-export function watchTv(): void {
-  if (watching) return;
-  watching = true;
-  bus.subscribe((event) => {
-    if (event.type === "bluetooth") followSpeaker();
-  });
-  let timer: Timer | null = null;
-  const refresh = () => {
-    if (timer) clearTimeout(timer);
-    timer = setTimeout(() => void nowPlaying().then(({ playing }) => tell(playing ? { ...playing, at: Date.now() } : null), () => {}), 300);
-  };
-  const listen = () => {
-    // not set up here: nothing to listen to, looked at again later
-    if (!tvSetUp()) return void setTimeout(listen, 30_000);
-    let buffer = "";
-    const socket = connect({ host: "127.0.0.1", port: controlPort() });
-    socket.once("connect", () => {
-      heard = true;
-      bus.publish("tv", tvNow());
-      refresh();
-      void audioChoice().then(alignVolume).catch(() => {});
-      followSpeaker();
-    });
-    socket.on("data", (piece) => {
-      const taken = takeJson(buffer + piece.toString("utf8"));
-      buffer = taken.rest.slice(-65536);
-      if ((taken.values as { method?: unknown }[]).some((value) => typeof value?.method === "string" && value.method.startsWith("Player."))) refresh();
-      for (const value of taken.values as { method?: unknown; params?: { data?: { volume?: unknown; muted?: unknown } } }[]) if (value?.method === "Application.OnVolumeChanged") void volumeHeard(value.params?.data).catch(() => {});
-      if ((taken.values as { method?: unknown }[]).some((value) => value?.method === "Player.OnAVStart")) void alignVolume().catch(() => {});
-      // a film has begun: its sound is moved as the output in use needs
-      if ((taken.values as { method?: unknown }[]).some((value) => value?.method === "Player.OnAVStart")) void applyOffset().catch(() => {});
-    });
-    socket.once("error", () => {});
-    socket.once("close", () => {
-      const was = heard;
-      heard = false;
-      now = null;
-      if (was) bus.publish("tv", tvNow());
-      setTimeout(listen, was ? 3_000 : 10_000);
-    });
-  };
-  listen();
-}
-
-/** A button of the page's remote */
-export async function remote(action: unknown, value: unknown): Promise<void> {
-  const { player } = typeof action === "string" && /^(playpause|stop|forward|rewind|seek|audio|subtitle)$/.test(action) ? await nowPlaying() : { player: null };
-  let call = typeof action === "string" ? remoteCall(action, value, player) : null;
-  if (!call) throw new AppError("tv.badAction", 400);
-  // the sound is on a speaker with a volume of its own: that is what the slider moves
-  if (action === "volume" && tvSpeaker() && typeof value === "number") {
-    setSpeakerVolume(tvSpeaker(), value);
-    return void (await alignVolume().catch(() => {}));
+/** Who has the screen, as the person chooses it: the player, the browser, the system's console, or nobody — the screen asleep */
+export async function setScreen(screen: unknown, by: string): Promise<TvReport> {
+  if (screen === "browser") return openPage("", 0, by);
+  if (screen === "kodi") {
+    if (await browserRuns()) {
+      if (showing) showing.back = true;
+      else showing = { by, back: true, resume: null, until: 0, timer: null };
+      await leaveBrowser(by);
+    }
+    return switchTv(true, by);
   }
-  // "Menu" is the menu of what is on the screen: over a film that is the player's own (sound, subtitles,
-  // settings) — Kodi's context menu does nothing there — and a second press closes it
-  if (action === "menu") {
-    const shown = ((await rpc({ method: "GUI.GetProperties", params: { properties: ["currentwindow"] } })) as { currentwindow?: { id?: number } } | null)?.currentwindow?.id;
-    if (shown === WINDOW_FULLSCREEN) call = { method: "Input.ShowOSD" };
-    else if (shown === WINDOW_OSD) call = { method: "Input.Back" };
+  if (screen === "off" || screen === "dark") {
+    if (await browserRuns()) {
+      if (showing) showing.back = false;
+      else showing = { by, back: false, resume: null, until: 0, timer: null };
+      await leaveBrowser(by);
+    }
+    if (tvEnabled() || (await kodiRuns())) await switchTv(false, by);
+    // the console has the screen now: left there, or put to sleep with it
+    sleepScreen(screen === "dark");
+    if (screen === "dark") await Bun.sleep(600);
+    bus.publish("tv");
+    return tvReport();
   }
-  if ((await rpc(call)) === null && (await rpc({ method: "JSONRPC.Ping" }, 1500)) !== "pong") throw new AppError("tv.notRunning", 409);
-}
-
-// --- The browser's player: a file of this server made into what a browser plays, by ffmpeg ---------
-
-const probed = new Map<string, Media>();
-
-async function fileFor(path: unknown): Promise<string> {
-  if (!streamsHere()) throw new AppError("tv.noStreams", 409);
-  if (typeof path === "string" && !path.startsWith("/")) {
-    const link = cleanLink(path);
-    if (!link) throw new AppError("tv.badLink", 400);
-    return link;
-  }
-  if (typeof path !== "string" || /[\0\n]/.test(path)) throw new AppError("tv.noFile", 404);
-  let file = false;
-  try {
-    file = statSync(path).isFile();
-  } catch {}
-  if (!file) throw new AppError("tv.noFile", 404);
-  return path;
-}
-
-/**
- * What a file holds — its length, sound tracks and subtitles — and, for a moment asked, where the
- * picture can really start (`start`, a keyframe) and where the clock of the stream from there begins (`zero`).
- */
-async function held(path: string): Promise<Media> {
-  const key = isLink(path) ? path : `${path}\n${statSync(path).mtimeMs}`;
-  let media = probed.get(key);
-  if (!media) {
-    const said = await run(probeArgs(path), 30_000);
-    if (said.code !== 0) throw new AppError(isLink(path) ? "tv.linkNotMedia" : "tv.notMedia", 409);
-    media = mediaOf(JSON.parse(said.out || "{}"));
-    if (isLink(path) && !media.video && !media.audio.length) throw new AppError("tv.linkNotMedia", 409);
-    if (probed.size > 50) probed.clear();
-    probed.set(key, media);
-  }
-  return media;
-}
-
-export async function mediaInfo(raw: unknown, at: number, subs?: unknown): Promise<Media & { start: string; zero: number }> {
-  const path = await fileFor(raw);
-  let media = await held(path);
-  if (subs) {
-    if (!cleanLink(subs)) throw new AppError("tv.badLink", 400);
-    media = { ...media, subs: [...media.subs, { index: OUTSIDE_SUB, language: "", name: "", codec: "", text: true }] };
-  }
-  let start = "0";
-  // a broadcast has no length and no earlier moment to go to
-  if (at > 0.5 && media.video && media.duration > 0) {
-    const found = (await run(keyframeArgs(path, at, media.video.n), 20_000)).out.split("\n").map((line) => line.trim().replace(/,+$/, "")).find((line) => cleanStart(line));
-    start = found ?? at.toFixed(3);
-  }
-  // `zero` — the moment of the file the stream's own clock starts at
-  return { ...media, start, zero: streamZero(start) };
-}
-
-/**
- * A program whose output is the answer: ended when the browser stops listening. A browser that went
- * away while nothing was being read was seen to leave the program waiting for ever on its full pipe,
- * so one nobody has read from for a minute is ended too — a player paused that long asks again.
- */
-function piped(argv: string[], type: string, signal: AbortSignal): Response {
-  const proc = Bun.spawn(argv, { stdout: "pipe", stderr: "ignore", stdin: "ignore", env: { PATH } });
-  const end = () => proc.kill();
-  signal.addEventListener("abort", end, { once: true });
-  const reader = proc.stdout.getReader();
-  let read = Date.now();
-  let reading = false;
-  const watch = setInterval(() => !reading && Date.now() - read > STREAM_IDLE_MS && end(), 10_000);
-  void proc.exited.then(() => clearInterval(watch));
-  return new Response(
-    new ReadableStream<Uint8Array>({
-      async pull(controller) {
-        reading = true;
-        const { done, value } = await reader.read();
-        reading = false;
-        read = Date.now();
-        if (done) controller.close();
-        else controller.enqueue(value);
-      },
-      cancel: end,
-    }),
-    { headers: { "content-type": type, "cache-control": "no-store" } },
-  );
-}
-
-const STREAM_IDLE_MS = 60_000;
-
-/** The file from `start` on with one of its sound tracks, as a browser plays it */
-export async function mediaStream(raw: unknown, start: unknown, audio: number, signal: AbortSignal): Promise<Response> {
-  const path = await fileFor(raw);
-  const from = cleanStart(start);
-  if (from === null || !Number.isInteger(audio) || audio < 0 || audio > 99) throw new AppError("tv.badSetting", 400);
-  return piped(streamArgs(path, from, audio, (await held(path)).video?.n ?? 0), "video/mp4", signal);
-}
-
-/** One of the file's subtitles from the same moment on */
-export async function mediaSubs(raw: unknown, start: unknown, index: number, signal: AbortSignal, subs?: unknown): Promise<Response> {
-  const path = await fileFor(raw);
-  const from = cleanStart(start);
-  if (index === OUTSIDE_SUB) {
-    // subtitles of an address of their own: a whole small file, read from its start
-    const link = cleanLink(subs);
-    if (from === null || !link) throw new AppError("tv.badLink", 400);
-    return piped(subsArgs(link, "0", 0), "text/vtt; charset=utf-8", signal);
-  }
-  if (from === null || !Number.isInteger(index) || index < 0 || index > 199) throw new AppError("tv.badSetting", 400);
-  return piped(subsArgs(path, from, index), "text/vtt; charset=utf-8", signal);
+  throw new AppError("tv.badAction", 400);
 }

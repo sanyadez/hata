@@ -143,3 +143,8 @@ test("a camera's card keeps whether it shows live video, and only as a yes", () 
   const layout = cleanLayout({ cards: [{ type: "widget", id: "w", source: "frigate", server: "cccccccc", view: "camera", camera: "yard", live: true, ...at(0, 0) }, { type: "widget", id: "v", source: "frigate", server: "cccccccc", view: "camera", camera: "gate", live: "yes", ...at(1, 0) }, { type: "widget", id: "e", source: "frigate", server: "cccccccc", view: "events", live: true, ...at(2, 0) }] });
   expect(layout.cards.map((c) => (c as { live?: boolean }).live)).toEqual([true, undefined, undefined]);
 });
+
+test("a link may be one for the server's screen", () => {
+  const cleaned = cleanLayout({ cards: [{ type: "link", id: "a", title: "Films", url: "https://films.example/", icon: "", screen: true, x: 0, y: 0, w: 1, h: 1 }, { type: "link", id: "b", title: "B", url: "https://b.example/", icon: "", screen: "yes", x: 1, y: 0, w: 1, h: 1 }] });
+  expect(cleaned.cards.map((c) => (c as { screen?: boolean }).screen)).toEqual([true, undefined]);
+});
