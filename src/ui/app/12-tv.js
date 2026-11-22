@@ -750,15 +750,15 @@ function tvBlock(el) {
       // the same view as on the TV page; not redrawn under a slider being pulled or an address being typed
       if (!body.querySelector("input[type=range]:active") && !document.activeElement?.closest?.(".tv-block .tv-address") && !document.fullscreenElement && !document.querySelector("dialog[open]"))
         put(body, h("div", { class: "tv-view" }, tvBrowserView({ url: now.page?.url ?? "", title: now.page?.title ?? "", last: "", media: now.media, left: now.left ?? 0, back: !!now.back }, () => void load(), "home")));
-    } else if (kind === "kodi" && now.picture) {
-      // the player gives no picture of its screen: a frame of the film at this moment, renewed as the film goes on
-      const stamp = `${playing.file}|${playing.paused ? Math.floor(playing.time) : Math.floor(Date.now() / 10_000)}`;
-      if (body.dataset.frame !== stamp) {
-        body.dataset.frame = stamp;
-        const img = h("img", { class: "tv-frame", alt: "", draggable: false });
-        img.onload = () => el.isConnected && body.dataset.frame === stamp && put(body, img);
-        img.src = `/api/tv/shot?f=${encodeURIComponent(stamp)}`;
-      }
+    } else if (kind === "kodi") {
+      // the same view as on the TV page: it needs the whole of what the player says
+      let tv = null;
+      try {
+        tv = state.tv = await api("GET", "/api/tv");
+      } catch {}
+      if (!el.isConnected) return void delete el.dataset.on;
+      const press = (action, value) => api("POST", "/api/tv/do", { action, value }).then(() => setTimeout(load, 250), (e) => toast(errorText(e), "error"));
+      if (tv && !body.querySelector("input[type=range]:active") && !document.querySelector("dialog[open]")) put(body, h("div", { class: "tv-view" }, tvKodiView(tv, press, null)));
     } else if (kind === "off" || kind === "dark") {
       // nothing of Hata's on the screen: what can be put there by one press — the player first, then the bookmarks
       const stamp = `pick|${kind}|${now.console ?? ""}|${JSON.stringify(now.bookmarks ?? [])}|${now.can?.kodi}|${now.can?.browser}`;
@@ -785,10 +785,9 @@ function tvBlock(el) {
       put(line, h("strong", { class: "clip grow", title }, title), playing?.total > 0 && h("span", { class: "muted mono small tv-block-time" }, `${tvClock(playing.time)} / ${tvClock(playing.total)}`), h("div", { class: "tv-block-keys" }, round("back30", t("tv.key.rewind"), () => act("skip", -30), "skip"), h("button", { type: "button", class: "tvr-main", title: t("tv.key.playpause"), "aria-label": t("tv.key.playpause"), disabled: !can, onclick: () => act("play") }, icon(paused ? "play" : "pause")), round("fwd30", t("tv.key.forward"), () => act("skip", 30), "skip")));
       shown = key;
     }
-    body.dataset.kind = kind === "browser" || (kind === "kodi" && now.picture) ? "" : kind === "off" && now.console ? "console" + now.console : kind + title;
-    if (!(kind === "kodi" && now.picture)) delete body.dataset.frame;
+    body.dataset.kind = kind === "browser" || kind === "kodi" ? "" : kind === "off" && now.console ? "console" + now.console : kind + title;
     if (kind !== "off" && kind !== "dark") delete body.dataset.pick;
-    line.hidden = kind === "off" || kind === "dark" || kind === "browser";
+    line.hidden = true;
     setTimeout(load, kind === "off" || kind === "dark" ? 8000 : 3000);
   };
   void load();
@@ -1073,6 +1072,28 @@ function tvDropdown(at) {
   placeAt(dialog, { x: r.right - dialog.offsetWidth, y: r.bottom + 6 });
   void load();
 }
+
+/**
+ * A frame of the film the player has on the screen (Kodi gives no picture of its screen: the frame is
+ * taken from the file at the moment it is at), one element kept and renewed as the film goes on.
+ * null — nothing to take it from (a menu, a link, no ffmpeg).
+ */
+function tvKodiFrame(tv) {
+  const now = tv.playing;
+  if (!now || !now.file?.startsWith("/") || !tv.streams) return null;
+  const box = tvUi.frame ?? (tvUi.frame = h("div", { class: "tv-kodi-frame" }));
+  const stamp = `${now.file}|${now.paused ? Math.floor(now.time) : Math.floor(Date.now() / 10_000)}`;
+  if (box.dataset.stamp !== stamp) {
+    box.dataset.stamp = stamp;
+    const img = h("img", { alt: "", draggable: false });
+    img.onload = () => box.dataset.stamp === stamp && box.replaceChildren(img);
+    img.src = `/api/tv/shot?f=${encodeURIComponent(stamp)}`;
+  }
+  return box;
+}
+
+/** What a page of Hata's shows of the player on the screen, the same on the TV page and in the TV's card of Home: the film's frame and the remote */
+const tvKodiView = (tv, press, turnOn) => h("div", { class: "tv-kodi" }, tvKodiFrame(tv), h("div", { class: "tvr big" }, tvRemoteParts(tv, press, turnOn)));
 
 /**
  * What a page of Hata's shows of a web page on the screen, the same on the TV page and in the TV's card
@@ -1391,7 +1412,7 @@ function paintTv() {
     tv.screen === "browser"
       ? tvBrowserView(b, loadTv, "card")
       : tv.screen === "kodi"
-        ? [head("film", tv.playing ? t("tv.kodiPlays") : t("tv.kodiIdle")), h("div", { class: "tv-kodi" }, h("div", { class: "tvr big" }, tvRemoteParts(tv, press, () => void change({ on: true })))), !tv.decodes && h("p", { class: "muted small" }, t("tv.noDecode")), error]
+        ? [head("film", tv.playing ? t("tv.kodiPlays") : t("tv.kodiIdle")), tvKodiView(tv, press, () => void change({ on: true })), !tv.decodes && h("p", { class: "muted small" }, t("tv.noDecode")), error]
         : installPart && !b.installed
           ? [installPart]
           : tv.screen === "dark"
