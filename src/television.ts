@@ -385,9 +385,20 @@ export async function screenShot(big = false): Promise<Uint8Array> {
       if (link) void ask({ method: "Page.stopScreencast" });
     }, 5000);
   }
-  for (let i = 0; i < 30 && !cast.frame; i++) await Bun.sleep(100);
+  for (let i = 0; i < 8 && !cast.frame; i++) await Bun.sleep(100);
+  // a page that stands still sends no frame: one picture of it as it is (whole, never resized — that was seen to resize the page itself)
+  if (!cast.frame) {
+    const still = (await ask({ method: "Page.captureScreenshot", params: { format: "jpeg", quality: 60 } }, 6000)) as { data?: string } | null;
+    if (still?.data && !cast.frame) cast.frame = new Uint8Array(Buffer.from(still.data, "base64"));
+  }
   if (!cast.frame) throw new AppError("tv.browserFailed", 409, { message: "" });
   return cast.frame;
+}
+
+/** What is on the screen, for a card that keeps looking: the player's "now" and, while a page shows, how its video stands */
+export async function screenNow(): Promise<ReturnType<typeof tvNow> & { kind: Screen; media: PageMedia | null }> {
+  const browsing = await browserRuns();
+  return { ...tvNow(), kind: browsing ? "browser" : (await kodiRuns()) ? "kodi" : screenDark() ? "dark" : "off", media: browsing ? await media().catch(() => null) : null };
 }
 
 /** A button of the page's remote for the browser */

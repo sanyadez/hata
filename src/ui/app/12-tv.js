@@ -717,6 +717,53 @@ function tvRemoteParts(tv, press, turnOn) {
   ];
 }
 
+/**
+ * The TV as a card of Home: what the screen shows — live while a web page has it — its name, and the
+ * few buttons one reaches for: 30 seconds back, pause, 30 on. It asks the server by itself every few
+ * seconds while it is on the page, and only the parts that changed are redrawn.
+ */
+function tvBlock(el) {
+  if (el.dataset.on) return;
+  el.dataset.on = "1";
+  const state0 = h("span", { class: "state" });
+  const body = h("div", { class: "tv-block-body" });
+  const line = h("div", { class: "tv-block-line" });
+  put(el, h("div", { class: "section-head" }, h("h2", null, h("a", { href: "#/house/tv" }, t("tv.title"))), state0), body, line);
+  let shown = "";
+  const load = async () => {
+    if (!el.isConnected) return void delete el.dataset.on;
+    if (document.hidden) return void setTimeout(load, 4000);
+    let now = null;
+    try {
+      now = await api("GET", "/api/tv/now");
+    } catch {}
+    if (!el.isConnected) return void delete el.dataset.on;
+    const kind = now?.kind ?? "off";
+    const media = kind === "browser" ? now.media : null;
+    const playing = kind === "kodi" ? now.playing : null;
+    const paused = media ? media.paused : playing ? playing.paused : true;
+    const title = kind === "browser" ? now.page?.title || tvHost(now.page?.url ?? "") || t("tv.page.home") : playing ? playing.title : t(kind === "kodi" ? "tv.nothingTitle" : kind === "dark" ? "tv.darkTitle" : "tv.onScreen.none");
+    state0.className = "state " + (kind === "browser" || kind === "kodi" ? "running" : "stopped");
+    state0.textContent = kind === "browser" ? t("tv.page.browser") : kind === "kodi" ? "Kodi" : t(kind === "dark" ? "tv.onScreen.sleep" : "tv.onScreen.none");
+    // the picture stays the same element while a page shows: it renews itself
+    if (kind === "browser") {
+      const picture = tvPreview();
+      if (picture.parentElement !== body) put(body, picture);
+    } else if (body.dataset.kind !== kind + title) put(body, h("div", { class: "tv-still" }, icon(kind === "kodi" ? "film" : kind === "dark" ? "power" : "terminal"), h("span", { class: "clip" }, kind === "kodi" && playing ? title : state0.textContent)));
+    const act = (action, value) => api("POST", kind === "browser" ? "/api/tv/browser" : "/api/tv/do", kind === "browser" ? { action, value } : { action: action === "play" ? "playpause" : value < 0 ? "rewind" : "forward" }).then(() => setTimeout(load, 300), (e) => toast(errorText(e), "error"));
+    const key = `${kind}|${title}|${paused}|${!!(media || playing)}`;
+    if (key !== shown) {
+      const can = !!(media || playing);
+      const round = (iconName, label, run, cls = "") => h("button", { type: "button", class: "tvr-round " + cls, title: label, "aria-label": label, disabled: !can, onclick: run }, icon(iconName), cls === "skip" && h("span", null, "30"));
+      put(line, h("strong", { class: "clip grow", title }, title), h("div", { class: "tv-block-keys" }, round("back30", t("tv.key.rewind"), () => act("skip", -30), "skip"), h("button", { type: "button", class: "tvr-main", title: t("tv.key.playpause"), "aria-label": t("tv.key.playpause"), disabled: !can, onclick: () => act("play") }, icon(paused ? "play" : "pause")), round("fwd30", t("tv.key.forward"), () => act("skip", 30), "skip")));
+      shown = key;
+    }
+    body.dataset.kind = kind === "browser" ? "" : kind + title;
+    setTimeout(load, kind === "off" || kind === "dark" ? 8000 : 3000);
+  };
+  void load();
+}
+
 /** Says on the TV page that the screen is changing hands: it takes some seconds, and the person is at the page, not at the screen */
 function tvWorking(text) {
   const line = document.getElementById("tv-working");
@@ -744,7 +791,7 @@ function tvPreview() {
     const img = box.querySelector("img");
     const r = (img ?? box).getBoundingClientRect();
     // on a screen of another shape the picture keeps its own and stands between bars: the place is counted on the picture, not on its frame
-    const shape = img?.naturalWidth && document.fullscreenElement === box ? img.naturalWidth / img.naturalHeight : r.width / r.height;
+    const shape = img?.naturalWidth ? img.naturalWidth / img.naturalHeight : r.width / r.height;
     const w = Math.min(r.width, r.height * shape);
     const hgt = w / shape;
     const [left, top] = [r.left + (r.width - w) / 2, r.top + (r.height - hgt) / 2];

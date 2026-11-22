@@ -838,6 +838,7 @@ function gridBody(card, box) {
   if (id === "attention" && el) put(el, attentionBlock(o.attention));
   if (id === "activity" && el) put(el, ...activityBody(o));
   if (id === "adblock" && el) adblockBlock(el, o.adblock);
+  if (id === "tv" && el) tvBlock(el);
   return el;
 }
 
@@ -1240,7 +1241,7 @@ function addSections() {
         ...(o.machines ?? []).map((m) => card(m.name, [m.os, m.online ? t("machines.online") : t("machines.offline")].filter(Boolean).join(" · "), dot(m.online ? "running" : "stopped"), { type: "block", id: "machine:" + m.id })),
       ],
     },
-    { id: "overview", icon: "list", group: "state", rows: [block("attention", t("add.attentionHint")), block("activity", t("add.activityHint")), o.adblock && block("adblock", t("add.adblockHint"))].filter(Boolean) },
+    { id: "overview", icon: "list", group: "state", rows: [block("attention", t("add.attentionHint")), block("activity", t("add.activityHint")), o.adblock && block("adblock", t("add.adblockHint")), isAdmin() && hasModule("tv") && block("tv", t("add.tvHint"))].filter(Boolean) },
     (o.ha?.servers ?? []).length > 0 && { id: "ha", icon: "home", group: "integrations", rows: [action(t("ha.pick.item"), t("ha.pick.hint"), icon("bulb"), t("add.choose"), () => haPickDialog())] },
     // every connected service, with the widgets its description has: one card for the whole, or one per row
     ...svcConnections().map((x) => {

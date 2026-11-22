@@ -5012,6 +5012,7 @@
   "add.attentionHint": "The list of what needs attention",
   "add.activityHint": "Recent activity: what happened and who did it",
   "add.adblockHint": "Blocked requests and a pause button",
+  "add.tvHint": "What is on the server's screen, live, with pause and 30 seconds back and forth",
   "add.group.state": "State",
   "add.group.integrations": "Integrations",
   "add.section.apps": "Apps",

@@ -42,9 +42,9 @@ export interface Layout {
   cards: Card[];
 }
 
-export const WIDGETS = ["stats", "attention", "activity", "adblock"] as const;
+export const WIDGETS = ["stats", "attention", "activity", "adblock", "tv"] as const;
 /** Not on the page until somebody adds it: it says nothing while nothing is being blocked */
-const OFFERED_ONLY = ["adblock"];
+const OFFERED_ONLY = ["adblock", "tv"];
 /** The numbers of another machine Hata looks after, by the machine's id: put on the page by hand, any number of them */
 export const MACHINE_BLOCK_RE = /^machine:[a-f0-9]{8}$/;
 const knownBlock = (id: string) => (WIDGETS as readonly string[]).includes(id) || MACHINE_BLOCK_RE.test(id);
@@ -54,11 +54,11 @@ export const GRID = {
   cols: 8,
   /** [least width, least height, most width, most height] */
   limits: {
-    stats: [2, 2, 8, 6], attention: [2, 2, 8, 8], activity: [2, 2, 8, 8], adblock: [2, 1, 4, 4], machine: [2, 1, 8, 4],
+    stats: [2, 2, 8, 6], attention: [2, 2, 8, 8], activity: [2, 2, 8, 8], adblock: [2, 1, 4, 4], tv: [2, 2, 8, 6], machine: [2, 1, 8, 4],
     app: [1, 1, 4, 4], link: [1, 1, 4, 4], files: [1, 1, 4, 4], builtin: [1, 1, 4, 4], folder: [1, 1, 4, 4], ha: [1, 1, 4, 4],
     widget: [1, 1, 8, 6],
   } as Record<string, [number, number, number, number]>,
-  first: { stats: [5, 3], attention: [3, 3], activity: [3, 2], adblock: [2, 2], machine: [3, 1], widget: [2, 1] } as Record<string, [number, number]>,
+  first: { stats: [5, 3], attention: [3, 3], activity: [3, 2], adblock: [2, 2], tv: [3, 3], machine: [3, 1], widget: [2, 1] } as Record<string, [number, number]>,
 };
 const MAX_ROW = 500;
 
