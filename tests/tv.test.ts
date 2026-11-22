@@ -294,6 +294,10 @@ test("the browser on the screen: its sound, its service, what a page may ask of 
   expect(browserCalls("start", "https://evil.example")).toEqual([{ method: "Page.navigate", params: { url: "file:///var/lib/hata-tv/screen.html" } }]);
   expect(browserCalls("text", "привіт")).toEqual([{ method: "Input.insertText", params: { text: "привіт" } }]);
   expect(browserCalls("text", "")).toBeNull();
+  expect(browserCalls("key", "Backspace")!.map((c) => c.params!.type)).toEqual(["rawKeyDown", "keyUp"]);
+  expect(browserCalls("key", "Enter")![0]!.params).toMatchObject({ type: "keyDown", text: "\r", windowsVirtualKeyCode: 13 });
+  expect(browserCalls("key", "F12")).toBeNull();
+  expect(browserCalls("key", "constructor")).toBeNull();
   expect(browserCalls("text", "a\x00b")).toBeNull();
   // a page of Hata's cannot make the browser run a script of its choosing
   expect(browserCalls("Runtime.evaluate", "alert(1)")).toBeNull();

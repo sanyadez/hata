@@ -5338,7 +5338,7 @@
   "tv.marks.onScreen": "The bookmarks are also tiles on the screen's own page — the one the Browser button opens — so the remote reaches them.",
   "activity.tv.bookmarks": "The screen's bookmarks changed",
   "error.tv.noVideo": "No video was found on the page on the screen.",
-  "tv.page.previewHint": "The screen as it is now. A click here is a click there; the wheel scrolls the page.",
+  "tv.page.previewHint": "The screen as it is now. A click here is a click there, the wheel scrolls the page; once clicked, your keyboard types there too.",
   "tv.onScreen.sleep": "Off",
   "tv.onScreen.dark": "The screen is off: the server sends it no picture, a TV goes to standby. Choose Kodi or the browser to turn it on again.",
   "tv.switching.dark": "Turning the screen off…",

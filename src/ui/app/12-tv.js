@@ -752,6 +752,41 @@ function tvPreview() {
   const grow = h("button", { type: "button", class: "tv-preview-grow", title: t("tv.page.previewFull"), "aria-label": t("tv.page.previewFull"), onclick: (e) => (e.stopPropagation(), document.fullscreenElement ? document.exitFullscreen() : box.requestFullscreen?.()) }, icon("expand"));
   box.addEventListener("click", (e) => void act("click", at(e)));
   box.addEventListener("fullscreenchange", () => next(0));
+  // the keyboard of whoever looks at the picture is the screen's while the picture has the focus: letters go as text
+  // (gathered for a moment, so a word is one request), the keys that move about or mend go as keys, all in their order
+  box.tabIndex = 0;
+  box.addEventListener("click", () => box.focus());
+  let typed = "";
+  let sending = Promise.resolve();
+  let pause = 0;
+  const send = (action, value) => (sending = sending.then(() => api("POST", "/api/tv/browser", { action, value })).then(() => ((quick = 6), next(150)), () => {}));
+  const flush = () => {
+    clearTimeout(pause);
+    if (typed) send("text", typed);
+    typed = "";
+  };
+  const KEYS = ["Enter", "Backspace", "Tab", "Escape", "Delete", "ArrowLeft", "ArrowUp", "ArrowRight", "ArrowDown", "Home", "End", "PageUp", "PageDown"];
+  box.addEventListener("keydown", (e) => {
+    if (e.ctrlKey || e.metaKey || e.altKey) return;
+    // on this device's whole screen Escape is the way out of it
+    if (e.key === "Escape" && document.fullscreenElement) return;
+    if (e.key.length === 1) {
+      typed += e.key;
+      clearTimeout(pause);
+      pause = setTimeout(flush, 180);
+    } else if (KEYS.includes(e.key)) {
+      flush();
+      send("key", e.key);
+    } else return;
+    e.preventDefault();
+  });
+  box.addEventListener("paste", (e) => {
+    const text = e.clipboardData?.getData("text") ?? "";
+    if (!text) return;
+    e.preventDefault();
+    flush();
+    send("text", text.slice(0, 2000));
+  });
   let turned = 0;
   box.addEventListener("wheel", (e) => {
     e.preventDefault();

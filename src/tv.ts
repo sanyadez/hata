@@ -720,6 +720,22 @@ const keyPress = (key: string, code: string, vk: number): PageCall[] => [
   { method: "Input.dispatchKeyEvent", params: { type: "keyUp", key, code, windowsVirtualKeyCode: vk } },
 ];
 
+const PAGE_KEYS: Record<string, { vk: number; code?: string; text?: string }> = {
+  Enter: { vk: 13, text: "\r" },
+  Backspace: { vk: 8 },
+  Tab: { vk: 9, text: "\t" },
+  Escape: { vk: 27 },
+  Delete: { vk: 46 },
+  ArrowLeft: { vk: 37 },
+  ArrowUp: { vk: 38 },
+  ArrowRight: { vk: 39 },
+  ArrowDown: { vk: 40 },
+  Home: { vk: 36 },
+  End: { vk: 35 },
+  PageUp: { vk: 33 },
+  PageDown: { vk: 34 },
+};
+
 /** The calls a button makes: the only things a page of Hata's can ask of the browser; null — not one of them */
 export function browserCalls(action: unknown, value: unknown): PageCall[] | null {
   if (action === "back") return [{ method: "Runtime.evaluate", params: { expression: "history.back()" } }];
@@ -730,6 +746,13 @@ export function browserCalls(action: unknown, value: unknown): PageCall[] | null
   if (action === "enter") return [{ method: "Input.dispatchKeyEvent", params: { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, text: "\r" } }, { method: "Input.dispatchKeyEvent", params: { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 } }];
   if (action === "up") return keyPress("PageUp", "PageUp", 33);
   if (action === "down") return keyPress("PageDown", "PageDown", 34);
+  // a key pressed over the picture of the screen: only the keys that move about or mend what was typed
+  if (action === "key") {
+    const known = typeof value === "string" && Object.hasOwn(PAGE_KEYS, value) ? PAGE_KEYS[value] : undefined;
+    if (!known) return null;
+    const params = { key: value as string, code: known.code ?? (value as string), windowsVirtualKeyCode: known.vk };
+    return [{ method: "Input.dispatchKeyEvent", params: { type: known.text ? "keyDown" : "rawKeyDown", ...params, ...(known.text ? { text: known.text } : {}) } }, { method: "Input.dispatchKeyEvent", params: { type: "keyUp", ...params } }];
+  }
   if (action === "text") return typeof value === "string" && value.length > 0 && value.length <= 2000 && !/[\x00-\x08\x0b-\x1f\x7f]/.test(value) ? [{ method: "Input.insertText", params: { text: value } }] : null;
   return null;
 }
