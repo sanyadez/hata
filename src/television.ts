@@ -6,13 +6,16 @@
  * before comes back: the film goes on from where it stopped.
  */
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { hostname } from "node:os";
 import { record } from "./activity";
+import en from "./lang/en.json";
+import uk from "./lang/uk.json";
 import { AppError, startJob, type Job } from "./apps";
 import { bus } from "./bus";
 import { saveSettings, settings } from "./config";
 import { awaitKodi, kodiRuns, playOnTv, screenShares, setUp, switchTv, tvEnabled, tvNow, tvReport, type TvPage, type TvReport } from "./kodi";
 import { installCommand, packageManager, PATH, run, runLogged } from "./packages";
-import { BROWSER_HOME_SCRIPT, BROWSER_PACKAGES, browserCalls, browserSound, browserUnitText, cleanLink, cleanShowTime, linkName, TV_BROWSER_PORT, TV_BROWSER_UNIT, TV_UNIT, type BrowserReport, type PageCall, type Screen } from "./tv";
+import { BROWSER_HOME_SCRIPT, BROWSER_PACKAGES, browserCalls, browserHomeHtml, TV_BROWSER_HOME, TV_USER, browserSound, browserUnitText, cleanLink, cleanShowTime, linkName, TV_BROWSER_PORT, TV_BROWSER_UNIT, TV_UNIT, type BrowserReport, type PageCall, type Screen } from "./tv";
 
 const UNIT_FILE = "/etc/systemd/system/" + TV_BROWSER_UNIT;
 const has = (bin: string): boolean => !!Bun.which(bin, { PATH });
@@ -112,7 +115,7 @@ async function ask(call: PageCall, wait = 8000): Promise<unknown> {
 
 async function refreshPage(): Promise<void> {
   const found = await target();
-  tellPage(found && found.url && found.url !== "about:blank" ? { url: found.url.slice(0, 2000), title: found.title.replace(/[\x00-\x1f]/g, "").slice(0, 200) } : found ? { url: "", title: "" } : null);
+  tellPage(found && found.url && found.url !== "about:blank" && !found.url.startsWith("file:") ? { url: found.url.slice(0, 2000), title: found.title.replace(/[\x00-\x1f]/g, "").slice(0, 200) } : found ? { url: "", title: "" } : null);
 }
 
 const secondsLeft = (): number => (showing?.until ? Math.max(1, Math.ceil((showing.until - Date.now()) / 1000)) : 0);
@@ -129,6 +132,7 @@ async function report(): Promise<{ screen: Screen; browser: BrowserReport }> {
       running,
       url: running ? (page?.url ?? "") : settings.tv.page,
       title: running ? (page?.title ?? "") : "",
+      last: settings.tv.page,
       left: running ? secondsLeft() : 0,
       back: running ? (showing?.back ?? tvEnabled()) : false,
     },
@@ -161,9 +165,21 @@ async function writeUnit(): Promise<void> {
   try {
     was = readFileSync(UNIT_FILE, "utf8");
   } catch {}
-  if (was === text) return;
-  writeFileSync(UNIT_FILE, text);
-  await run(["systemctl", "daemon-reload"], 30_000);
+  if (was !== text) {
+    writeFileSync(UNIT_FILE, text);
+    await run(["systemctl", "daemon-reload"], 30_000);
+  }
+  // Hata's own page, in the server's language: what the browser starts with
+  const words = (settings.language === "uk" ? uk : en) as Record<string, string>;
+  const home = browserHomeHtml(settings.language, settings.local.name || hostname(), words["tv.page.homeHint"] ?? "");
+  let had = "";
+  try {
+    had = readFileSync(TV_BROWSER_HOME, "utf8");
+  } catch {}
+  if (had !== home) {
+    writeFileSync(TV_BROWSER_HOME, home);
+    await run(["chown", `${TV_USER}:${TV_USER}`, TV_BROWSER_HOME], 10_000);
+  }
 }
 
 /** The browser takes the screen (the player, when it runs, is stopped by that) and answers Hata */
@@ -201,7 +217,8 @@ export async function openPage(raw: unknown, seconds: unknown, by: string): Prom
   if (!(await browserRuns())) await startBrowser(by);
   // a restart of Hata forgets what was there before: the player comes back when it is set to run
   showing ??= { by, back: tvEnabled(), resume: null, until: 0, timer: null };
-  const url = address || settings.tv.page;
+  // no address: Hata's own page, which the browser starts with
+  const url = address;
   if (url) {
     const went = (await ask({ method: "Page.navigate", params: { url } }, 15_000)) as { errorText?: string } | null;
     if (!went) throw new AppError("tv.browserFailed", 409, { message: "" });
@@ -232,6 +249,7 @@ export async function leaveBrowser(who = ""): Promise<TvReport> {
   const back = was?.back ?? tvEnabled();
   // starting the player stops the browser: the two services exclude each other
   await run(back ? ["systemctl", "start", TV_UNIT] : ["systemctl", "stop", TV_BROWSER_UNIT], 60_000);
+  if (!back) await run(["chvt", "1"], 10_000);
   tellPage(null);
   if (back && was?.resume && (await awaitKodi())) await playOnTv(was.resume.file, by, was.resume.at, was.resume.subtitle || undefined).catch(() => {});
   record("tv.pageGone", { user: by });

@@ -124,7 +124,6 @@ StandardError=journal
 Environment=HOME=${TV_HOME}
 ExecStartPre=+/usr/bin/chvt ${TV_CONSOLE}
 ExecStart=/usr/bin/kodi --standalone --windowing=gbm
-ExecStopPost=+/usr/bin/chvt 1
 Restart=always
 RestartSec=3
 
@@ -585,6 +584,43 @@ export const BROWSER_PACKAGES = ["cage", "chromium"];
 /** The longest a page is shown before what was on the screen comes back, when a time is asked for */
 export const SHOW_MOST = 24 * 3600;
 
+/** The page of Hata's own the browser starts with and stands on while no other is asked for: a file, so it is there at once */
+export const TV_BROWSER_HOME = `${TV_HOME}/screen.html`;
+
+const escaped = (text: string): string => text.replace(/[&<>"]/g, (ch) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[ch]!);
+
+/**
+ * Hata's own page on the screen: dark, the time and the day, a line saying where pages are sent
+ * from. Dark from its first frame, so that the change from the player is not a white flash.
+ */
+export const browserHomeHtml = (lang: string, name: string, hint: string): string => `<!doctype html>
+<html lang="${escaped(lang)}" style="background:#14110f">
+<meta charset="utf-8">
+<title>${escaped(name)}</title>
+<style>
+html,body{height:100%;margin:0;background:#14110f;color:#f3ede6;font-family:system-ui,sans-serif;cursor:default}
+body{display:grid;place-content:center;justify-items:center;gap:2vh}
+#time{font-size:18vh;font-weight:600;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+#day{font-size:4vh;color:#b8ada1}
+#name{position:fixed;left:4vw;top:5vh;font-size:3.2vh;font-weight:600;color:#f2a41c}
+#hint{position:fixed;left:0;right:0;bottom:6vh;text-align:center;font-size:2.4vh;color:#8d8278}
+</style>
+<div id="name">${escaped(name)}</div>
+<div id="time"></div>
+<div id="day"></div>
+<div id="hint">${escaped(hint)}</div>
+<script>
+const lang = document.documentElement.lang;
+const tick = () => {
+  const now = new Date();
+  document.getElementById("time").textContent = now.toLocaleTimeString(lang, { hour: "2-digit", minute: "2-digit" });
+  document.getElementById("day").textContent = now.toLocaleDateString(lang, { weekday: "long", day: "numeric", month: "long" });
+};
+tick();
+setInterval(tick, 5000);
+</script>
+`;
+
 /**
  * Kodi's name of a sound output as the browser takes it: Kodi says `ALSA:hdmi:CARD=HDMI,DEV=0|HDA Intel`,
  * and what stands between is ALSA's own name of the device. "" — nothing the browser could be told.
@@ -609,7 +645,7 @@ export const browserArgs = (sound: string): string[] => [
   `--remote-debugging-port=${TV_BROWSER_PORT}`,
   `--user-data-dir=${TV_HOME}/.browser`,
   ...(sound ? [`--alsa-output-device=${sound}`] : []),
-  "about:blank",
+  "file://" + TV_BROWSER_HOME,
 ];
 
 /**
@@ -635,7 +671,6 @@ StandardError=journal
 Environment=HOME=${TV_HOME}
 ExecStartPre=+/usr/bin/chvt ${TV_CONSOLE}
 ExecStart=/usr/bin/cage -- ${browserArgs(sound).join(" ")}
-ExecStopPost=+/usr/bin/chvt 1
 TimeoutStopSec=10
 `;
 
@@ -683,9 +718,11 @@ export interface BrowserReport {
   /** The command that brings it, shown by its button */
   install: string;
   running: boolean;
-  /** The page shown, as the browser names it */
+  /** The page shown, as the browser names it; "" — Hata's own page. While the browser is off: the page shown last */
   url: string;
   title: string;
+  /** The page last sent to the screen to stay: offered in the address field */
+  last: string;
   /** Seconds until what was on the screen before comes back; 0 — the page stays */
   left: number;
   /** The player gets the screen back when the page goes: it was on before */

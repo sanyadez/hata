@@ -2142,6 +2142,8 @@ button.mark:hover { border-color: var(--border-strong); color: var(--text); }
 .music-row.current .music-pick { font-weight: 600; color: var(--accent-text); }
 @media (max-width: 900px) { .music-page { grid-template-columns: minmax(0, 1fr); } }
 .tv-offset { min-width: 12ch; text-align: center; }
+.tv-working { display: flex; align-items: center; gap: 8px; }
+.tv-working[hidden] { display: none; }
 .tv-address { display: flex; gap: 8px; align-items: center; }
 .tv-address input { flex: 1; min-width: 0; }
 .tvr-round.turn-up .ico { transform: rotate(-90deg); }

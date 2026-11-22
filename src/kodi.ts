@@ -172,7 +172,7 @@ export interface TvPage {
 
 /** What `television.ts`, which owns the screen, adds to what is said of the player */
 let shares: { report: () => Promise<{ screen: Screen; browser: BrowserReport }>; page: () => TvPage | null } = {
-  report: async () => ({ screen: "off", browser: { installed: false, install: "", running: false, url: "", title: "", left: 0, back: false } }),
+  report: async () => ({ screen: "off", browser: { installed: false, install: "", running: false, url: "", title: "", last: "", left: 0, back: false } }),
   page: () => null,
 };
 export const screenShares = (told: typeof shares): void => {
@@ -475,6 +475,8 @@ export async function switchTv(on: boolean, by: string): Promise<TvReport> {
   const done = await run(["systemctl", on ? "enable" : "disable", "--now", TV_UNIT], 60_000);
   if (done.code !== 0) throw new AppError("tv.switchFailed", 409, { message: (done.err || done.out).trim().split("\n").slice(-2).join("\n") });
   if (on && (await awaitKodi())) await chooseAudioOnce();
+  // the services themselves leave the console alone, so a change between the player and the browser shows no console in between
+  if (!on) await run(["chvt", "1"], 10_000);
   record(on ? "tv.on" : "tv.off", { user: by });
   bus.publish("tv");
   return tvReport();

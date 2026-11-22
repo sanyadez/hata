@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { cleanOffset, browserCalls, browserSound, browserUnitText, cleanShowTime } from "../src/tv";
+import { cleanOffset, browserCalls, browserSound, browserUnitText, browserHomeHtml, cleanShowTime } from "../src/tv";
 import { cleanLink, isLink, linkName, probeArgs, sourceArgs, streamZero, cleanStart, keyframeArgs, mediaOf, prefsOf, prefValue, streamArgs, subsArgs, tracksOf, clickPacket, helloPacket, KEEP_WINDOW, KEEP_YES, pictureOf, advancedXml, cleanFolders, shortTitle, hwdbText, keymapXml, polkitRule, decodePackages, isOurs, monitorAudio, monitorName, playable, portIn, readDisplay, remoteCall, seconds, sourcesXml, takeJson, unitText } from "../src/tv";
 
 function edid(name: string, audio: boolean): Uint8Array {
@@ -273,7 +273,12 @@ test("the browser on the screen: its sound, its service, what a page may ask of 
   expect(unit).toContain("Conflicts=getty@tty7.service hata-tv.service");
   expect(unit).toMatch(/^After=.* hata-tv\.service$/m);
   expect(unit).toContain("ExecStart=/usr/bin/cage -- /usr/bin/chromium --kiosk");
-  expect(unit).toContain("--alsa-output-device=hdmi:CARD=HDMI,DEV=0 about:blank");
+  expect(unit).toContain("--alsa-output-device=hdmi:CARD=HDMI,DEV=0 file:///var/lib/hata-tv/screen.html");
+  // the console is not shown between the player and the browser: neither service switches to it when it stops
+  expect(unit).not.toContain("chvt 1");
+  expect(unitText()).not.toContain("chvt 1");
+  expect(browserHomeHtml("uk", "a<b", 'x"y')).toContain("a&lt;b");
+  expect(browserHomeHtml("uk", "a", 'x"y')).toContain("x&quot;y");
   expect(unit).toContain("--remote-debugging-port=9393");
   // never started with the server: after a restart the screen is the player's
   expect(unit).not.toContain("[Install]");
