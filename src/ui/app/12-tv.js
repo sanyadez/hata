@@ -824,6 +824,17 @@ function tvAddressRow(start, label, key = "") {
   return row;
 }
 
+/** A bookmark put on Home as a tile that shows it on the screen by one press */
+async function tvMarkToHome(mark) {
+  if (state.overview?.dashboard?.cards?.some((card) => card.type === "link" && card.screen && card.url === mark.url)) return toast(t("tv.marks.onHome", { name: mark.name }));
+  try {
+    await changeLayout((layout) => void addCard(layout, { type: "link", id: newId(), title: mark.name, url: mark.url, icon: "", screen: true }));
+    toast(t("tv.marks.homeDone", { name: mark.name }));
+  } catch (e) {
+    toast(errorText(e), "error");
+  }
+}
+
 /** A bookmark of the screen made or changed: a name and an address, whatever is on the screen now */
 function tvMarkDialog(marks, at, start, keep) {
   let dialog;
@@ -984,7 +995,7 @@ function paintTv() {
             "div",
             { class: "kv" },
             h("button", { type: "button", class: "link with-icon wrap tv-mark", title: one.url, onclick: () => void showOnTv(one.url) }, icon(one.url === b.url ? "star" : "link"), one.name),
-            h("div", { class: "row-actions" }, button("", { class: "small ghost", title: t("tv.marks.edit"), "aria-label": `${t("tv.marks.edit")}: ${one.name}`, onclick: () => tvMarkDialog(marks, i, one, keep) }, "edit"), button(t("tv.folderRemove"), { class: "small ghost", "aria-label": `${t("tv.folderRemove")}: ${one.name}`, onclick: () => keep(marks.filter((x) => x.url !== one.url)) })),
+            h("div", { class: "row-actions" }, button("", { class: "small ghost", title: t("tv.marks.toHome"), "aria-label": `${t("tv.marks.toHome")}: ${one.name}`, onclick: () => void tvMarkToHome(one) }, "home"), button("", { class: "small ghost", title: t("tv.marks.edit"), "aria-label": `${t("tv.marks.edit")}: ${one.name}`, onclick: () => tvMarkDialog(marks, i, one, keep) }, "edit"), button(t("tv.folderRemove"), { class: "small ghost", "aria-label": `${t("tv.folderRemove")}: ${one.name}`, onclick: () => keep(marks.filter((x) => x.url !== one.url)) })),
           ),
         )
       : h("p", { class: "muted small" }, t("tv.marks.none")),

@@ -334,7 +334,10 @@ function tile(item) {
     href = item.url;
     external = true;
     sub = linkHost(item.url);
-    badges = h("span", { class: "lock" }, icon("external"));
+    // a link for the TV: one press shows it on the server's screen (for whoever may; for the rest it is a usual link)
+    const toScreen = item.screen && isAdmin() && hasModule("tv");
+    if (toScreen) onMain = () => void showOnTv(item.url).then((shown) => shown && toast(t("tv.page.sent", { name: title })));
+    badges = h("span", { class: "lock", title: toScreen ? t("home.linkScreen") : null }, icon(toScreen ? "tv" : "external"));
     side = isAdmin() && h("button", { type: "button", class: "tile-open", title: t("home.editLink"), "aria-label": `${t("home.editLink")}: ${title}`, onclick: () => linkDialog(item) }, icon("sliders"));
   } else if (item.type === "builtin") {
     // Hata's own tiles: the store opens like an app, "Add" asks what to add
@@ -1071,6 +1074,7 @@ function linkDialog(link) {
   const url = h("input", { type: "url", value: link?.url ?? "", required: true, maxLength: 2000, placeholder: "https://", spellcheck: false, autocomplete: "off" });
   const picture = h("input", { type: "url", value: link?.icon ?? "", maxLength: 2000, placeholder: "https://", spellcheck: false, autocomplete: "off" });
   const error = h("p", { class: "error", role: "alert" });
+  const screen = isAdmin() && hasModule("tv") ? h("input", { type: "checkbox", checked: link?.screen === true }) : null;
   const web = (value) => {
     const address = new URL(value.trim());
     if (!["http:", "https:"].includes(address.protocol)) throw new Error("not web");
@@ -1086,7 +1090,7 @@ function linkDialog(link) {
           e.preventDefault();
           let made;
           try {
-            made = { type: "link", id: link?.id ?? newId(), title: title.value.trim(), url: web(url.value), icon: picture.value.trim() ? web(picture.value) : "" };
+            made = { type: "link", id: link?.id ?? newId(), title: title.value.trim(), url: web(url.value), icon: picture.value.trim() ? web(picture.value) : "", ...((screen ? screen.checked : link?.screen) ? { screen: true } : {}) };
           } catch {
             error.textContent = t("home.badLink");
             return;
@@ -1103,6 +1107,7 @@ function linkDialog(link) {
       field(t("home.linkUrl"), url),
       field(t("home.linkTitle"), title, t("home.linkTitleHint")),
       field(t("home.linkIcon"), picture, t("home.linkIconHint")),
+      screen && h("label", { class: "check" }, screen, h("span", null, h("strong", null, t("home.linkScreen")), h("span", { class: "muted small block" }, t("home.linkScreenHint")))),
       error,
       h(
         "footer",

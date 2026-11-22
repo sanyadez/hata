@@ -9,7 +9,7 @@
 
 export type Entry =
   | { type: "app"; name: string }
-  | { type: "link"; id: string; title: string; url: string; icon: string }
+  | { type: "link"; id: string; title: string; url: string; icon: string; /** Opened on the server's own screen (the TV), not in the browser that presses it */ screen?: true }
   | { type: "files"; path: string }
   /** An entity of a Home Assistant server Hata is connected to: a light, a switch, a sensor */
   | { type: "ha"; server: string; entity: string }
@@ -175,7 +175,7 @@ export function cleanLayout(input: unknown): Layout {
     if (raw.type === "files" && typeof raw.path === "string" && raw.path.startsWith("/") && raw.path.length <= 4096 && once("files " + raw.path)) made = { type: "files", path: raw.path };
     if (raw.type === "link") {
       const url = webUrl(raw.url);
-      if (url) made = { type: "link", id: id(raw.id), title: text(raw.title, MAX_TITLE) || new URL(url).host, url, icon: webUrl(raw.icon) };
+      if (url) made = { type: "link", id: id(raw.id), title: text(raw.title, MAX_TITLE) || new URL(url).host, url, icon: webUrl(raw.icon), ...(raw.screen === true ? { screen: true as const } : {}) };
     }
     if (made) tiles++;
     return made;
