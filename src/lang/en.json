@@ -6369,5 +6369,6 @@
   "house.found.lead": "{n} · Hata sees them but has not connected them",
   "house.found.hide": "Hide",
   "house.found.here": "an app of this server",
-  "house.found.around": "{address} · on the network"
+  "house.found.around": "{address} · on the network",
+  "house.back": "Back to Integrations"
 }

@@ -411,7 +411,7 @@ function houseEmpty(view, box) {
   );
 }
 
-// --- The overview of the section: everything connected, a tile each, the troubled ones first ---
+// --- The overview of the section: everything connected, a tile each ---
 
 const houseUi = { ha: null, bt: null, found: null, haFound: null, q: "", group: "all" };
 /** The group a kind of service stands in; the store's descriptions say none yet */
@@ -446,8 +446,7 @@ function houseItems() {
   const worst = (list) => (list.some((x) => x.severity === "danger") ? "bad" : list.length ? "warn" : "ok");
   for (const x of houseUi.ha ?? []) {
     const own = trouble((item) => item.code.startsWith("ha.") && item.detail?.host === x.id);
-    const warn = [x.updates && t("house.ha.updates", { n: x.updates }), x.low && t("house.ha.low", { n: x.low })].filter(Boolean).join(" · ");
-    items.push({ key: "ha:" + x.id, group: "home", href: `#/house/ha/${x.id}`, icon: "home", name: x.name, sub: ["Home Assistant", x.version].filter(Boolean).join(" · "), chip: haChip(x), line: x.online ? t("house.ha.line", { entities: x.entities, on: x.on }) : haError(x) || t("ha.offline"), warn: !x.online ? "" : own.length ? attentionWords(own[0]).title : warn, level: !x.online && x.error ? "bad" : own.length ? worst(own) : warn ? "warn" : "ok" });
+    items.push({ key: "ha:" + x.id, group: "home", href: `#/house/ha/${x.id}`, icon: "home", name: x.name, sub: ["Home Assistant", x.version].filter(Boolean).join(" · "), chip: haChip(x), line: x.online ? t("house.ha.line", { entities: x.entities, on: x.on }) : haError(x) || t("ha.offline"), warn: x.online && own.length ? attentionWords(own[0]).title : "", level: !x.online && x.error ? "bad" : worst(own) });
   }
   if (hasModule("integrations"))
     for (const c of svcConnections()) {
@@ -518,8 +517,8 @@ function paintHouse() {
     list.length > 0 &&
     h(
       "section",
-      { class: "card pad house-group" + (id === "trouble" ? " trouble" : "") },
-      h("div", { class: "house-group-head" }, icon(id === "trouble" ? "alert" : GROUP_ICONS[id] ?? "grid"), h("h2", null, t("house.group." + id)), h("span", { class: "muted small" }, total > list.length ? t("house.ofTotal", { n: list.length, total }) : list.length)),
+      { class: "card pad house-group" },
+      h("div", { class: "house-group-head" }, icon(GROUP_ICONS[id] ?? "grid"), h("h2", null, t("house.group." + id)), h("span", { class: "muted small" }, total > list.length ? t("house.ofTotal", { n: list.length, total }) : list.length)),
       tiles(list),
     );
   const parts = [];
@@ -530,13 +529,10 @@ function paintHouse() {
     const field = h("input", { type: "search", id: "house-q", placeholder: t("house.search"), value: houseUi.q, oninput: (e) => ((houseUi.q = e.target.value), paintHouse()) });
     parts.push(h("section", { class: "card pad house-tools" }, h("label", { class: "search-field house-search" }, icon("search"), field), h("div", { class: "seg-pills" }, segs.map((g) => h("button", { type: "button", class: "seg-pill" + (pick === g ? " active" : ""), onclick: () => ((houseUi.group = g), paintHouse()) }, t("house.group." + g), " ", h("span", { class: "muted" }, counts[g]))))));
   }
-  const shownTrouble = troubled.filter(shownIn);
-  if (pick === "all" || pick === "trouble") parts.push(groupCard("trouble", shownTrouble, shownTrouble.length));
-  if (pick !== "trouble") {
-    const rest = all.filter((x) => x.level === "ok" && shownIn(x));
-    if (grouped) for (const g of HOUSE_GROUPS) parts.push(groupCard(g, rest.filter((x) => x.group === g), all.filter((x) => x.group === g).length));
-    else if (rest.length) parts.push(h("section", { class: "card pad house-group" }, tiles(rest)));
-  }
+  // what needs attention is the section's usual list above (with its menu); the tiles keep their places and colours
+  const rest = all.filter(shownIn);
+  if (grouped) for (const g of HOUSE_GROUPS) parts.push(groupCard(g, rest.filter((x) => x.group === g), all.filter((x) => x.group === g).length));
+  else if (rest.length) parts.push(h("section", { class: "card pad house-group" }, tiles(rest)));
   if (!all.length && hasModule("integrations")) parts.push(h("section", { class: "card pad empty-state" }, h("span", { class: "app-icon plus" }, icon("plug")), h("h2", null, t("house.nothing")), h("p", { class: "muted" }, t("house.nothingLead")), houseAdd()));
   else if (all.length && !parts.some(Boolean)) parts.push(h("p", { class: "card pad muted" }, t("house.noMatch")));
   const found = houseFound();
@@ -697,8 +693,9 @@ function renderService() {
   const conn = svcConnections().find((c) => c.id === route.id);
   const kind = route.kind || conn?.kind || "";
   shell(areaHead("house", `x-${kind}`, { actions: houseAdd() }), h("div", { id: "house-pick", class: "card filter-bar", hidden: true }), h("div", { id: "svc-body", class: "stack" }));
-  const list = svcConnections().filter((c) => c.kind === kind && !serviceApp(c.id));
-  if (!list.length) return put(document.getElementById("svc-body"), h("p", { class: "card pad muted" }, t("service.none")));
+  // in Integrations every connection of the kind is here, also one that is an app of this server
+  const list = svcConnections().filter((c) => c.kind === kind);
+  if (!list.length) return put(document.getElementById("svc-body"), h("section", { class: "card pad empty-state" }, h("h2", null, t("service.none")), h("a", { class: "btn", href: "#/house" }, t("house.back"))));
   if (!list.some((c) => c.id === route.id)) state.route.id = list[0].id;
   const pick = document.getElementById("house-pick");
   pick.hidden = list.length < 2;

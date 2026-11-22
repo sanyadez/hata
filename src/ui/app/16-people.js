@@ -1145,7 +1145,7 @@ function areaHead(area, at, { meta = null, metaId = null, actions = null, action
           )
         : area === "house" && at !== "overview"
           ? // Integrations has no tabs: its overview lists everything, a page of one leads back to it
-            h("div", { class: "area-name" }, h("nav", { class: "crumbs" }, h("a", { href: "#/house" }, t("area.house")), icon("chevron"), h("span", null, houseLabel(tabs, at))), h("h1", null, houseLabel(tabs, at)))
+            h("div", { class: "area-name" }, h("nav", { class: "crumbs house-crumbs" }, h("a", { href: "#/house" }, t("area.house")), icon("chevron"), h("span", null, houseLabel(tabs, at))))
           : h("div", { class: "area-name" }, h("h1", null, t("area." + area)), h("p", { class: "meta", id: metaId }, meta ?? t(`area.${area}.lead`))),
       area === "server"
         ? h("div", { class: "actions" }, h("a", { class: "btn", href: "#/terminal" }, icon("terminal"), h("span", null, t("terminal.title"))), button(t("power.restart"), { onclick: () => serverPowerDialog("reboot") }, "refresh"), h("button", { type: "button", class: "btn square", "aria-label": t("app.more"), "aria-haspopup": "menu", onclick: (e) => serverMenu(underButton(e.currentTarget)) }, icon("more")))
