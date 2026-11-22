@@ -575,3 +575,119 @@ export const subsArgs = (path: string, start: string, index: number): string[] =
 
 /** A moment of a file as the programs take it: seconds with a fraction, nothing else */
 export const cleanStart = (raw: unknown): string | null => (typeof raw === "string" && /^\d{1,6}(\.\d{1,6})?$/.test(raw) ? raw : null);
+
+/** The browser that takes the screen instead of the player: a service of its own, never both at once */
+export const TV_BROWSER_UNIT = "hata-tv-browser.service";
+/** The local port the browser is driven over (its debugging protocol): pages opened, text typed, what is shown asked */
+export const TV_BROWSER_PORT = 9393;
+/** The packages of the browser on the screen: a compositor that shows one program and nothing else, and the browser */
+export const BROWSER_PACKAGES = ["cage", "chromium"];
+/** The longest a page is shown before what was on the screen comes back, when a time is asked for */
+export const SHOW_MOST = 24 * 3600;
+
+/**
+ * Kodi's name of a sound output as the browser takes it: Kodi says `ALSA:hdmi:CARD=HDMI,DEV=0|HDA Intel`,
+ * and what stands between is ALSA's own name of the device. "" — nothing the browser could be told.
+ */
+export function browserSound(kodi: string): string {
+  const name = /^ALSA:([^|]+)/.exec(kodi)?.[1] ?? "";
+  return /^[A-Za-z0-9:=,_.-]{1,120}$/.test(name) && name !== "default" ? name : "";
+}
+
+/** The browser's command line: one page on the whole screen, nothing of a desktop browser's own windows */
+export const browserArgs = (sound: string): string[] => [
+  "/usr/bin/chromium",
+  "--kiosk",
+  "--no-first-run",
+  "--noerrdialogs",
+  "--disable-infobars",
+  "--hide-crash-restore-bubble",
+  "--disable-features=Translate,MediaRouter",
+  "--password-store=basic",
+  "--autoplay-policy=no-user-gesture-required",
+  "--ozone-platform=wayland",
+  `--remote-debugging-port=${TV_BROWSER_PORT}`,
+  `--user-data-dir=${TV_HOME}/.browser`,
+  ...(sound ? [`--alsa-output-device=${sound}`] : []),
+  "about:blank",
+];
+
+/**
+ * The browser's service. It and the player exclude each other (`Conflicts`), and `After` makes the
+ * one that leaves the screen stop before the other starts, whichever way the change goes. It is never
+ * set to start with the server: after a restart the screen is the player's again.
+ */
+export const browserUnitText = (sound: string): string => `# Written by Hata: changes made here are lost
+[Unit]
+Description=Hata: a web page on this server's screen
+After=systemd-user-sessions.service network-online.target sound.target ${TV_UNIT}
+Conflicts=getty@tty${TV_CONSOLE}.service ${TV_UNIT}
+
+[Service]
+User=${TV_USER}
+Group=${TV_USER}
+SupplementaryGroups=video audio input render
+PAMName=login
+TTYPath=/dev/tty${TV_CONSOLE}
+StandardInput=tty
+StandardOutput=journal
+StandardError=journal
+Environment=HOME=${TV_HOME}
+ExecStartPre=+/usr/bin/chvt ${TV_CONSOLE}
+ExecStart=/usr/bin/cage -- ${browserArgs(sound).join(" ")}
+ExecStopPost=+/usr/bin/chvt 1
+TimeoutStopSec=10
+`;
+
+/** For how long a page is asked to stay on the screen, seconds: 0 — until somebody changes it; null — not a time */
+export function cleanShowTime(raw: unknown): number | null {
+  if (raw === undefined || raw === null || raw === 0 || raw === "") return 0;
+  return typeof raw === "number" && Number.isInteger(raw) && raw >= 5 && raw <= SHOW_MOST ? raw : null;
+}
+
+
+/** A call of the browser's own protocol */
+export interface PageCall {
+  method: string;
+  params?: Record<string, unknown>;
+}
+
+const keyPress = (key: string, code: string, vk: number): PageCall[] => [
+  { method: "Input.dispatchKeyEvent", params: { type: "rawKeyDown", key, code, windowsVirtualKeyCode: vk } },
+  { method: "Input.dispatchKeyEvent", params: { type: "keyUp", key, code, windowsVirtualKeyCode: vk } },
+];
+
+/** The calls a button makes: the only things a page of Hata's can ask of the browser; null — not one of them */
+export function browserCalls(action: unknown, value: unknown): PageCall[] | null {
+  if (action === "back") return [{ method: "Runtime.evaluate", params: { expression: "history.back()" } }];
+  if (action === "forward") return [{ method: "Runtime.evaluate", params: { expression: "history.forward()" } }];
+  if (action === "reload") return [{ method: "Page.reload" }];
+  if (action === "enter") return [{ method: "Input.dispatchKeyEvent", params: { type: "keyDown", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13, text: "\r" } }, { method: "Input.dispatchKeyEvent", params: { type: "keyUp", key: "Enter", code: "Enter", windowsVirtualKeyCode: 13 } }];
+  if (action === "up") return keyPress("PageUp", "PageUp", 33);
+  if (action === "down") return keyPress("PageDown", "PageDown", 34);
+  if (action === "text") return typeof value === "string" && value.length > 0 && value.length <= 2000 && !/[\x00-\x08\x0b-\x1f\x7f]/.test(value) ? [{ method: "Input.insertText", params: { text: value } }] : null;
+  return null;
+}
+
+/**
+ * Put into every page the browser opens: the remote's "home" button (and a keyboard's) tells Hata,
+ * which gives the screen back to what was on it. `hataScreen` is a binding Hata makes in the page.
+ */
+export const BROWSER_HOME_SCRIPT = `addEventListener("keydown", (e) => { if (e.key === "BrowserHome" && typeof hataScreen === "function") { e.preventDefault(); hataScreen("home"); } }, true);`;
+
+/** What is on the server's screen: the player, a web page, or neither of Hata's */
+export type Screen = "kodi" | "browser" | "off";
+
+export interface BrowserReport {
+  installed: boolean;
+  /** The command that brings it, shown by its button */
+  install: string;
+  running: boolean;
+  /** The page shown, as the browser names it */
+  url: string;
+  title: string;
+  /** Seconds until what was on the screen before comes back; 0 — the page stays */
+  left: number;
+  /** The player gets the screen back when the page goes: it was on before */
+  back: boolean;
+}

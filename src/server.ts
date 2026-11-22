@@ -12,7 +12,7 @@ import { basename, join } from "node:path";
 import { homedir, networkInterfaces } from "node:os";
 import type { Server, ServerWebSocket } from "bun";
 import { recent, record, history } from "./activity";
-import { agentUser, cannotGrant, cleanName, createKey, grantKey, keyOf, listKeys, removeKey, renameKey, renewTokens, setConfirm } from "./agents";
+import { agentUser, allows, cannotGrant, cleanName, createKey, grantKey, keyOf, listKeys, removeKey, renameKey, renewTokens, setConfirm } from "./agents";
 import type { Level } from "./agents";
 import { Desk } from "./approvals";
 import { answerCall, assistantConfig, configured as assistantReady, findChat, listChats, ModelError, modelsFor, removeChat, retry as retryAssistant, say as sayToAssistant, shownChat, shownConfig as shownAssistant, stopChat, updateAssistant } from "./assistant";
@@ -120,7 +120,8 @@ import { bluetoothReport, connectDevice as connectBluetooth, disconnectDevice as
 import { diskUses, letGo } from "./diskuses";
 import { renameServer } from "./servername";
 import { musicDo, musicNow, musicReport, playMusic, setMusicOutput, setSpeaker } from "./music";
-import { installTv, playOnTv, remote as tvRemote, keepPicture as keepTvPicture, mediaInfo as tvMediaInfo, streamsHere as tvStreamsHere, mediaStream as tvMediaStream, mediaSubs as tvMediaSubs, setLanguage as setTvLanguage, setPref as setTvPref, setAudio as setTvAudio, setOffset as setTvOffset, setHomeAssistant as setTvHa, setFolders as setTvFolders, setPicture as setTvPicture, switchTv, tvNow, tvReport } from "./television";
+import { installTv, playOnTv, remote as tvRemote, keepPicture as keepTvPicture, mediaInfo as tvMediaInfo, streamsHere as tvStreamsHere, mediaStream as tvMediaStream, mediaSubs as tvMediaSubs, setLanguage as setTvLanguage, setPref as setTvPref, setAudio as setTvAudio, setOffset as setTvOffset, setHomeAssistant as setTvHa, setFolders as setTvFolders, setPicture as setTvPicture, switchTv, tvNow, tvReport } from "./kodi";
+import { browserDo, installBrowser, leaveBrowser, openPage, setScreen } from "./television";
 import { moduleOfPath, moduleOfTool } from "./modules";
 import { serverTree } from "./servertree";
 import { homeLinks, localNamesStatus, refreshLocalNames } from "./mdns";
@@ -1670,6 +1671,7 @@ async function api(req: Request, url: URL, server: Server<unknown>): Promise<Res
   if (path === "/api/tv" && method === "PUT") {
     const data = await body(req);
     if ("on" in data) return json(await switchTv(data.on === true, user.name));
+    if ("screen" in data) return json(await setScreen(data.screen, user.name));
     if ("folders" in data) return json(await setTvFolders(data.folders, user.name));
     if ("audio" in data) return json(await setTvAudio(data.audio));
     if ("offset" in data) return json(await setTvOffset(data.offset));
@@ -1687,16 +1689,14 @@ async function api(req: Request, url: URL, server: Server<unknown>): Promise<Res
     return path.endsWith("stream") ? await tvMediaStream(file, start, n, req.signal) : await tvMediaSubs(file, start, n, req.signal, url.searchParams.get("subs"));
   }
   if (path === "/api/tv/keep" && method === "POST") return json(await keepTvPicture((await body(req)).keep === true));
-  if (path === "/api/tv/play" && method === "POST") {
+  if (path === "/api/tv/browser/install" && method === "POST") return json({ job: installBrowser(user.name).id }, 202);
+  if (path === "/api/tv/browser" && method === "POST") {
     const data = await body(req);
-    await playOnTv(data.path, user.name, data.at, data.subtitle);
+    await browserDo(data.action, data.value, user.name);
     return json({ ok: true });
   }
-  if (path === "/api/tv/do" && method === "POST") {
-    const data = await body(req);
-    await tvRemote(data.action, data.value);
-    return json({ ok: true });
-  }
+  const shown = method === "POST" ? await tvAct(path, () => body(req), user.name) : null;
+  if (shown) return json(shown);
   if (path === "/api/domains" && method === "GET") return json(await domainsReport(language(url), await forwardsReport()));
   if (path === "/api/ports" && method === "POST") return json(await addForward(await body(req), user.name));
   const forwarded = /^\/api\/ports\/(\d{1,5})$/.exec(path);
@@ -2492,6 +2492,52 @@ async function mcp(req: Request, server: Server<unknown>): Promise<Response> {
   // a tool waits for an operation for half a minute; the default idle timeout would cut the answer
   server.timeout(req, 120);
   return mcpResponse(req, toolsNow(), { name: key.name, level: key.level, user: agentUser(key), confirm: key.confirm, origin: `${requestProto(req)}://${req.headers.get("host") ?? new URL(req.url).host}` }, { version: VERSION, instructions: mcpInstructions, approve: (tool, args, caller) => desk.ask(caller.name, tool, args) });
+}
+
+/**
+ * What a page of Hata's and the holder of an access key alike may ask of the screen: a web page shown,
+ * something played, a button of the remote, the screen given back. null — not one of these.
+ */
+async function tvAct(path: string, read: () => Promise<Record<string, unknown>>, by: string): Promise<object | null> {
+  if (path === "/api/tv/open") {
+    const data = await read();
+    await openPage(data.url, data.for, by);
+  } else if (path === "/api/tv/back") await leaveBrowser(by);
+  else if (path === "/api/tv/play") {
+    const data = await read();
+    // a film is the player's: a page on the screen gives it back first
+    if (tvNow().page) await setScreen("kodi", by);
+    await playOnTv(data.path ?? data.url, by, data.at, data.subtitle);
+  } else if (path === "/api/tv/do") {
+    const data = await read();
+    await tvRemote(data.action, data.value);
+  } else return null;
+  return { ok: true, ...tvNow() };
+}
+
+/**
+ * The screen for programs that are not a person's browser (a home automation showing a camera when
+ * the doorbell rings): the same few requests, by an access key instead of a session. Nothing else of
+ * `/api/` takes a key.
+ */
+async function tvByKey(req: Request, url: URL, server: Server<unknown>): Promise<Response> {
+  if (!moduleOn("tv")) return fail(404, "modules.off", { module: "tv" });
+  const key = moduleOn("assistant") ? keyOf(req, clientIp(req, server)) : null;
+  if (!key) return fail(401, "agents.badKey");
+  try {
+    if (req.method === "GET" && url.pathname === "/api/tv/now") return json(tvNow());
+    if (req.method !== "POST") return fail(405, "request.notFound");
+    if (!allows(key.level, "operate")) return fail(403, "agents.levelTooLow");
+    if (Number(req.headers.get("content-length") ?? 0) > 65536) return new Response(null, { status: 413 });
+    const done = await tvAct(url.pathname, async () => {
+      const data: unknown = await req.json().catch(() => ({}));
+      return isPlainObject(data) ? data : {};
+    }, agentUser(key));
+    return done ? json(done) : fail(404, "request.notFound");
+  } catch (error) {
+    if (error instanceof AppError) return fail(error.status, error.code, error.detail);
+    throw error;
+  }
 }
 
 /** A file name for the Content-Disposition header, whatever letters it has */
@@ -3444,6 +3490,7 @@ async function handle(req: Request, server: Server<unknown>): Promise<Response> 
   const part = url.pathname.startsWith("/api/") ? null : moduleOfPath(url.pathname);
   if (part && !moduleOn(part)) return fail(404, "modules.off", { module: part });
   if (url.pathname === "/mcp") return mcp(req, server);
+  if (/^\/api\/tv\/(now|open|back|play|do)$/.test(url.pathname) && /^Bearer\s/i.test(req.headers.get("authorization") ?? "")) return tvByKey(req, url, server);
   const signIn = await oauth(req, url);
   if (signIn) return signIn;
   // a network change on trial is kept by opening this at the server's new address, where no session reaches

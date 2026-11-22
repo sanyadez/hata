@@ -2142,6 +2142,10 @@ button.mark:hover { border-color: var(--border-strong); color: var(--text); }
 .music-row.current .music-pick { font-weight: 600; color: var(--accent-text); }
 @media (max-width: 900px) { .music-page { grid-template-columns: minmax(0, 1fr); } }
 .tv-offset { min-width: 12ch; text-align: center; }
+.tv-address { display: flex; gap: 8px; align-items: center; }
+.tv-address input { flex: 1; min-width: 0; }
+.tvr-round.turn-up .ico { transform: rotate(-90deg); }
+.tvr-round.turn-down .ico { transform: rotate(90deg); }
 .music-drop { width: min(400px, calc(100vw - 16px)); padding: 12px; }
 .music-drop .music-player { border: 0; box-shadow: none; background: none; padding: 4px; backdrop-filter: none; }
 #music-now + #tv-now:not([hidden]) { margin-left: -2px; }

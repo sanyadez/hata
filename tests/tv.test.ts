@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { cleanOffset } from "../src/tv";
+import { cleanOffset, browserCalls, browserSound, browserUnitText, cleanShowTime } from "../src/tv";
 import { cleanLink, isLink, linkName, probeArgs, sourceArgs, streamZero, cleanStart, keyframeArgs, mediaOf, prefsOf, prefValue, streamArgs, subsArgs, tracksOf, clickPacket, helloPacket, KEEP_WINDOW, KEEP_YES, pictureOf, advancedXml, cleanFolders, shortTitle, hwdbText, keymapXml, polkitRule, decodePackages, isOurs, monitorAudio, monitorName, playable, portIn, readDisplay, remoteCall, seconds, sourcesXml, takeJson, unitText } from "../src/tv";
 
 function edid(name: string, audio: boolean): Uint8Array {
@@ -257,4 +257,39 @@ test("the sound offset: steps of 25 ms, two seconds either way", () => {
   expect(cleanOffset(2000)).toBe(2);
   expect(cleanOffset(2500)).toBeNull();
   expect(cleanOffset("100")).toBeNull();
+});
+
+test("the browser on the screen: its sound, its service, what a page may ask of it", () => {
+  // Kodi's name of an output is ALSA's own between "ALSA:" and the bar
+  expect(browserSound("ALSA:hdmi:CARD=HDMI,DEV=0|HDA Intel")).toBe("hdmi:CARD=HDMI,DEV=0");
+  expect(browserSound("ALSA:bluealsa|Bluetooth Audio")).toBe("bluealsa");
+  expect(browserSound("ALSA:default")).toBe("");
+  expect(browserSound("PIPEWIRE:x")).toBe("");
+  // nothing that would be read as another word of the service's command line
+  expect(browserSound("ALSA:hdmi; rm -rf /|x")).toBe("");
+  expect(browserSound("ALSA:a b")).toBe("");
+  const unit = browserUnitText("hdmi:CARD=HDMI,DEV=0");
+  // it and the player never have the screen together, and the one that leaves stops first
+  expect(unit).toContain("Conflicts=getty@tty7.service hata-tv.service");
+  expect(unit).toMatch(/^After=.* hata-tv\.service$/m);
+  expect(unit).toContain("ExecStart=/usr/bin/cage -- /usr/bin/chromium --kiosk");
+  expect(unit).toContain("--alsa-output-device=hdmi:CARD=HDMI,DEV=0 about:blank");
+  expect(unit).toContain("--remote-debugging-port=9393");
+  // never started with the server: after a restart the screen is the player's
+  expect(unit).not.toContain("[Install]");
+  expect(browserUnitText("")).not.toContain("alsa-output-device");
+  expect(cleanShowTime(undefined)).toBe(0);
+  expect(cleanShowTime(0)).toBe(0);
+  expect(cleanShowTime(30)).toBe(30);
+  expect(cleanShowTime(4)).toBeNull();
+  expect(cleanShowTime(1.5)).toBeNull();
+  expect(cleanShowTime("30")).toBeNull();
+  expect(cleanShowTime(86401)).toBeNull();
+  expect(browserCalls("reload", undefined)).toEqual([{ method: "Page.reload" }]);
+  expect(browserCalls("text", "привіт")).toEqual([{ method: "Input.insertText", params: { text: "привіт" } }]);
+  expect(browserCalls("text", "")).toBeNull();
+  expect(browserCalls("text", "a\x00b")).toBeNull();
+  // a page of Hata's cannot make the browser run a script of its choosing
+  expect(browserCalls("Runtime.evaluate", "alert(1)")).toBeNull();
+  expect(browserCalls("navigate", "file:///etc/passwd")).toBeNull();
 });

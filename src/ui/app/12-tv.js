@@ -15,10 +15,10 @@ function paintTvNow() {
   // the chip is the one way to the TV: there while the module is on, also with the player off or not installed yet
   const there = isAdmin() && hasModule("tv");
   box.hidden = !there;
-  box.className = "tv-now" + (tv?.playing && !tv.playing.paused ? " playing" : "") + (document.querySelector("dialog.tv-drop[open]") ? " open" : "");
+  box.className = "tv-now" + ((tv?.playing && !tv.playing.paused) || tv?.page ? " playing" : "") + (document.querySelector("dialog.tv-drop[open]") ? " open" : "");
   if (!there) return box.replaceChildren();
   const now = tv?.playing;
-  const label = now ? t("tv.playing", { name: now.title }) : t(tv?.on ? "tv.remote" : "tv.title");
+  const label = tv?.page ? t("tv.page.showing", { name: tv.page.title || tv.page.url }) : now ? t("tv.playing", { name: now.title }) : t(tv?.on ? "tv.remote" : "tv.title");
   // no words here: grey while nothing plays, the accent colour while something does — the name is in the remote.
   // one button, as the music's next to it: pause is in the remote it opens
   const halves = [h("button", { type: "button", class: "tv-now-half tv-now-open", title: label, "aria-label": label, "aria-haspopup": "dialog", onclick: () => tvDropdown(box) }, icon("tv"))];
@@ -652,7 +652,7 @@ async function loadTv() {
   // a slider under the finger or a list that is open is not redrawn under the person
   if (state.tv && !tvUi.busy && !document.querySelector("dialog[open]:not(.tv-drop)") && !document.querySelector("#tv-body input[type=range]:active")) paintTv();
   // while the player runs the page keeps up with what plays
-  tvUi.timer = setTimeout(loadTv, state.tv?.running ? 2000 : 8000);
+  tvUi.timer = setTimeout(loadTv, state.tv?.running || state.tv?.browser?.running ? 2000 : 8000);
 }
 
 /**
@@ -679,6 +679,8 @@ const tvClock = (s) => `${Math.floor(s / 3600) ? Math.floor(s / 3600) + ":" : ""
  */
 function tvRemoteParts(tv, press, turnOn) {
   const note = (iconName, title, text, action) => h("div", { class: "tvr-note" }, h("strong", { class: "with-icon" }, icon(iconName), title), h("p", { class: "muted small" }, text), action);
+  // a web page has the screen: its own few buttons instead of the player's
+  if (tv.screen === "browser") return tvPageParts(tv);
   if (!tv.installed) return [note("tv", t("tv.needsTitle"), t("tv.needsShort"), h("a", { class: "btn primary wide", href: "#/tv", onclick: (e) => e.currentTarget.closest("dialog")?.close() }, h("span", null, t("tv.openPage"))))];
   if (!tv.running) return [note("power", t("tv.offTitle"), t("tv.offLead"), turnOn && button(t("tv.turnOn"), { class: "primary wide", onclick: (e) => ((e.currentTarget.disabled = true), turnOn()) }, "power"))];
   const idle = !tv.answers;
@@ -710,6 +712,51 @@ function tvRemoteParts(tv, press, turnOn) {
     h("hr", { class: "tvr-rule" }),
     h("div", { class: "tvr-pad" }, arrow("up", "up", t("tv.key.up")), arrow("left", "left", t("tv.key.left")), h("button", { type: "button", class: "tvr-ok", disabled: idle, onclick: () => press("select") }, "OK"), arrow("right", "right", t("tv.key.right")), arrow("down", "down", t("tv.key.down"))),
     h("div", { class: "tvr-keys" }, keyed("back", "undo", t("tv.key.back")), keyed("home", "home", t("tv.key.home")), keyed("menu", "lines", t("tv.key.menu")), keyed("info", "info", t("tv.key.info")), typed),
+  ];
+}
+
+/** Shows a web page on the server's screen, from any page of Hata's; what the server answers becomes the page's state */
+async function showOnTv(url, seconds = 0) {
+  try {
+    await api("POST", "/api/tv/open", { url, ...(seconds ? { for: seconds } : {}) });
+    state.tv = await api("GET", "/api/tv");
+    if (state.route.view === "tv") paintTv();
+    return true;
+  } catch (e) {
+    toast(errorText(e), "error");
+    return false;
+  }
+}
+
+/** The address field of the browser on the screen: a bare name gets https:// in front */
+function tvAddressRow(start, label) {
+  const field = h("input", { type: "url", inputMode: "url", autocomplete: "off", spellcheck: false, maxLength: 2000, placeholder: "https://", value: start ?? "", "aria-label": t("tv.page.address") });
+  const go = button(label, { class: "primary", onclick: () => void send() }, "tv");
+  const send = async () => {
+    const typed = field.value.trim();
+    if (!typed) return field.focus();
+    go.disabled = true;
+    await showOnTv(/^https?:\/\//i.test(typed) ? typed : "https://" + typed);
+    go.disabled = false;
+  };
+  field.addEventListener("keydown", (e) => e.key === "Enter" && void send());
+  return h("div", { class: "tv-address" }, field, go);
+}
+
+/** What stands in the remote's place while a web page has the screen */
+function tvPageParts(tv) {
+  const b = tv.browser;
+  const again = () => setTimeout(() => (document.querySelector("dialog.tv-drop[open]") ? null : void loadTv()), 400);
+  const act = (action, value) => api("POST", "/api/tv/browser", { action, value }).then(again, (e) => toast(errorText(e), "error"));
+  const keyed = (action, iconName, label, cls = "") => h("div", { class: "tvr-key" }, h("button", { type: "button", class: "tvr-round " + cls, title: label, "aria-label": label, onclick: () => (action === "text" ? tvTextDialog(act) : act(action)) }, icon(iconName)), h("span", { class: "muted" }, label));
+  const leave = button(t(b.back ? "tv.page.toPlayer" : "tv.page.close"), { class: "wide", onclick: () => ((leave.disabled = true), api("POST", "/api/tv/back", {}).then(async () => ((state.tv = await api("GET", "/api/tv")), state.route.view === "tv" && paintTv()), (e) => toast(errorText(e), "error"))) }, b.back ? "play" : "x");
+  return [
+    h("div", { class: "tvr-now" }, h("div", { class: "tvr-title" }, h("div", { class: "grow" }, h("strong", { class: "wrap" }, b.title || t("tv.page.blank")), b.left > 0 && h("span", { class: "state busy" }, t("tv.page.left", { time: tvClock(b.left) })))), b.url && h("p", { class: "tvr-file muted wrap" }, b.url)),
+    tvAddressRow("", t("tv.page.show")),
+    h("hr", { class: "tvr-rule" }),
+    h("div", { class: "tvr-keys" }, keyed("back", "undo", t("tv.key.back")), keyed("reload", "refresh", t("tv.page.reload")), keyed("up", "chevron", t("tv.page.up"), "turn-up"), keyed("down", "chevron", t("tv.page.down"), "turn-down"), keyed("text", "keys", t("tv.key.text"))),
+    h("p", { class: "muted small" }, t("tv.page.hint")),
+    leave,
   ];
 }
 
@@ -790,6 +837,37 @@ function paintTv() {
     h("p", { class: "muted small" }, t("tv.remotesHint")),
   );
 
+  // a web page on the screen: the browser's own packages by their button, then an address and "Show"
+  const b = tv.browser;
+  const bringBrowser = button(t("mounting.needs.install", { package: t("tv.page.browser") }), {
+    class: "small",
+    disabled: !!tv.cannot && !b.installed,
+    onclick: async () => {
+      bringBrowser.disabled = true;
+      try {
+        const res = await api("POST", "/api/tv/browser/install", {});
+        jobDialog(res.job, "tv", t("tv.page.browser"), loadTv);
+      } catch (e) {
+        error.textContent = errorText(e);
+        bringBrowser.disabled = false;
+      }
+    },
+  }, "download");
+  const pageCard = uiCard(
+    { title: t("tv.page.title"), marks: b.running && h("span", { class: "state running" }, t("tv.page.on")), lead: t(b.installed ? "tv.page.lead" : "tv.page.needs") },
+    b.installed ? tv.screen !== "browser" && tvAddressRow(b.url, t("tv.page.show")) : [h("p", { class: "cmd" }, icon("terminal"), b.install), h("div", { class: "row-actions" }, bringBrowser)],
+  );
+  // other programs show things on the screen with an access key: what to send, ready to paste
+  const origin = location.origin;
+  const yaml = `rest_command:\n  hata_tv_open:\n    url: "${origin}/api/tv/open"\n    method: post\n    headers:\n      authorization: "Bearer ${t("tv.api.keyHere")}"\n    content_type: "application/json"\n    payload: '{"url": "{{ url }}", "for": {{ seconds | default(0) }}}'\n  hata_tv_back:\n    url: "${origin}/api/tv/back"\n    method: post\n    headers:\n      authorization: "Bearer ${t("tv.api.keyHere")}"`;
+  const apiCard = uiCard(
+    { title: t("tv.api.title"), lead: t("tv.api.lead"), actions: hasModule("assistant") ? h("a", { class: "btn small", href: "#/settings/agents" }, h("span", null, t("tv.api.keys"))) : null },
+    !hasModule("assistant") && h("p", { class: "muted small" }, t("tv.api.needsKeys")),
+    h("div", { class: "kv-line" }, h("span", { class: "muted" }, "Home Assistant"), h("button", { type: "button", class: "icon-btn", title: t("twofa.copy"), "aria-label": t("twofa.copy"), onclick: () => copyQuietly(yaml) }, icon("copy"))),
+    h("pre", { class: "code wrap small" }, yaml),
+    h("p", { class: "muted small" }, t("tv.api.more", { now: `${origin}/api/tv/now`, play: `${origin}/api/tv/play`, remote: `${origin}/api/tv/do` })),
+  );
+
   if (!tv.installed) {
     const install = button(t("mounting.needs.install", { package: "Kodi" }), {
       class: "primary",
@@ -807,19 +885,20 @@ function paintTv() {
     }, "download");
     install.classList.add("wide");
     const installCard = h("section", { class: "card pad stack" }, h("span", { class: "app-icon plus" }, icon("tv")), h("h2", null, t("tv.needsTitle")), h("p", { class: "muted" }, t("tv.needsLead")), install, tv.cannot ? h("p", { class: "muted small" }, t("tv.cannot." + tv.cannot)) : h("p", { class: "cmd" }, icon("terminal"), tv.install), error);
-    return put(box, h("div", { class: "tv-page" }, installCard, h("div", { class: "stack" }, screenCard, h("section", { class: "card pad tv-after" }, h("strong", { class: "block" }, t("tv.afterTitle")), h("span", { class: "muted small" }, t("tv.afterList"))))));
+    const first = tv.screen === "browser" ? h("section", { class: "card pad tv-remote" }, h("div", { class: "tvr-head" }, h("span", { class: "with-icon muted" }, icon("tv"), t("tv.page.title"))), h("div", { class: "tvr big" }, tvPageParts(tv))) : installCard;
+    return put(box, h("div", { class: "tv-page" }, first, h("div", { class: "stack" }, screenCard, tv.screen === "browser" && installCard, tv.screen !== "browser" && pageCard, b.installed && apiCard, h("section", { class: "card pad tv-after" }, h("strong", { class: "block" }, t("tv.afterTitle")), h("span", { class: "muted small" }, t("tv.afterList"))))));
   }
 
-  const flip = h("button", { type: "button", role: "switch", class: "ha-switch", "aria-checked": String(tv.on), "aria-label": t("tv.switch"), onclick: () => ((flip.disabled = true), void change({ on: !tv.on })) }, h("i"));
-  const playerCard = h(
-    "section",
-    { class: "card pad stack" },
-    h("div", { class: "setting" }, h("div", { class: "grow" }, h("strong", null, t("tv.switch"), " ", h("span", { class: "state " + (tv.running ? "running" : "stopped") }, t(tv.running ? "tv.running" : "tv.stopped"))), h("p", { class: "muted small" }, t("tv.switchHint"))), h("div", { class: "setting-control" }, flip)),
+  // who has the screen: the player, a web page, or neither of Hata's
+  const pill = (id, label, off = false) => h("button", { type: "button", class: "seg-pill" + (tv.screen === id ? " active" : ""), "aria-pressed": String(tv.screen === id), disabled: off, onclick: (e) => (tv.screen === id ? null : ((e.currentTarget.disabled = true), void change({ screen: id }))) }, label);
+  const playerCard = uiCard(
+    { title: t("tv.onScreen"), lead: t(tv.screen === "browser" ? "tv.onScreen.browser" : tv.screen === "kodi" ? "tv.onScreen.kodi" : "tv.onScreen.off") },
+    h("div", { class: "seg-pills" }, pill("kodi", "Kodi"), pill("browser", t("tv.page.browser"), !b.installed), pill("off", t("tv.onScreen.none"))),
     !tv.decodes && h("p", { class: "muted small" }, t("tv.noDecode")),
     error,
   );
 
-  const remoteCard = h("section", { class: "card pad tv-remote" }, h("div", { class: "tvr-head" }, h("span", { class: "with-icon muted" }, icon("tv"), t("tv.remote"))), h("div", { class: "tvr big" }, tvRemoteParts(tv, press, () => void change({ on: true }))));
+  const remoteCard = h("section", { class: "card pad tv-remote" }, h("div", { class: "tvr-head" }, h("span", { class: "with-icon muted" }, icon("tv"), t(tv.screen === "browser" ? "tv.page.title" : "tv.remote"))), h("div", { class: "tvr big" }, tvRemoteParts(tv, press, () => void change({ on: true }))));
 
   const addFolder = () => folderPicker({ title: t("tv.folderPick"), start: state.settings?.dataRoot ?? "/", confirmLabel: t("tv.folderAdd"), action: async (path) => void (await change({ folders: [...tv.folders, path] })) });
   const foldersCard = h(
@@ -909,7 +988,7 @@ function paintTv() {
   );
 
   // the remote is the page's main thing; what is set once stands beside it
-  put(box, h("div", { class: "tv-page" }, remoteCard, h("div", { class: "stack" }, playerCard, screenCard, foldersCard, languageCard, audioCard, pictureCard, haCard, browserCard)));
+  put(box, h("div", { class: "tv-page" }, remoteCard, h("div", { class: "stack" }, playerCard, tv.screen !== "browser" && pageCard, screenCard, foldersCard, languageCard, audioCard, pictureCard, haCard, b.installed && apiCard, browserCard)));
   tvStick();
   if (tv.asking) tvKeepDialog();
 }

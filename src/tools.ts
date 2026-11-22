@@ -23,7 +23,7 @@ import { bus } from "./bus";
 import { afterPackage, networkReport, type Nic } from "./network";
 import { installCommand, installPackage, PATH, removeCommand, removePackages, run } from "./packages";
 import { installSamba } from "./shares";
-import { installTv, tvEnabled } from "./television";
+import { installTv, tvEnabled } from "./kodi";
 import { afterSpeakerRemoved, beforeSpeakerInstall, speakerOn } from "./music";
 import { pairedKept, soundAfterInstall, startService as startBluetoothService } from "./bluetooth";
 import { packageUpdates } from "./sysupdates";
@@ -76,6 +76,8 @@ const SPECS: Spec[] = [
   { id: "incus", name: "Incus", package: "incus-base", bin: "incus", version: ["incus", "--version"], page: "#/containers", family: ["incus-base", "incus-client", "incus"] },
   { id: "incus-vm", name: "QEMU for Incus", package: "qemu-system-x86", bin: "qemu-system-x86_64", version: ["qemu-system-x86_64", "--version"], page: "#/containers", family: ["incus", "incus-agent", "qemu-system-x86", "qemu-system-modules-spice", "qemu-utils", "ovmf"] },
   { id: "kodi", name: "Kodi", package: "kodi", bin: "kodi", version: ["kodi", "--version"], page: "#/tv" },
+  { id: "cage", name: "Cage", package: "cage", bin: "cage", version: ["cage", "-v"], page: "#/tv" },
+  { id: "chromium", name: "Chromium", package: "chromium", bin: "chromium", version: ["chromium", "--version"], page: "#/tv", family: ["chromium", "chromium-common", "chromium-sandbox"] },
   { id: "bluez", name: "BlueZ", package: "bluez", bin: "bluetoothctl", version: ["bluetoothctl", "--version"], page: "#/house/bluetooth" },
   { id: "bluez-alsa", name: "BlueALSA", package: "bluez-alsa-utils", bin: "bluealsa", version: ["bluealsa", "--version"], page: "#/house/bluetooth", family: ["bluez-alsa-utils", "libasound2-plugin-bluez"] },
   { id: "mpv", name: "mpv", package: "mpv", bin: "mpv", version: ["mpv", "--version"], page: "#/house/music" },
