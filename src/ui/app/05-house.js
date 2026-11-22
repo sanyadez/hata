@@ -124,6 +124,7 @@ function haEvent(event) {
   haUi.timer = setTimeout(() => {
     if (state.route.view === "home") void refresh();
     if (state.route.view === "ha" && state.route.id === event.id) void loadHa();
+    if (state.route.view === "house") void loadHouse();
   }, 600);
 }
 
@@ -407,6 +408,75 @@ function houseEmpty(view, box) {
   api("GET", k.list + "/found").then(
     (r) => (Object.assign(haFoundUi, { found: r.found, address: r.address }), paint()),
     () => {},
+  );
+}
+
+// --- The overview of the section: everything connected, each a card leading to its own page ---
+
+const houseUi = { ha: null, bt: null };
+
+function renderHouse() {
+  shell(areaHead("house", "overview", { actions: houseAdd() }), h("div", { id: "house-body", class: "house-cards" }, waitMark()));
+  void loadHouse();
+}
+
+async function loadHouse() {
+  const [ha, bt] = await Promise.all([hasModule("integrations") ? api("GET", "/api/ha").then((r) => r.servers, () => houseUi.ha ?? []) : [], hasModule("bluetooth") ? api("GET", "/api/bluetooth").catch(() => houseUi.bt) : null]);
+  Object.assign(houseUi, { ha, bt });
+  paintHouse();
+}
+
+/** One card of the overview: what it is, its state, a line of what it holds; the whole card opens its page */
+const houseCard = ({ href, icon: ic, name, kind, chip, line, warn }) =>
+  h(
+    "a",
+    { class: "card pad house-card", href },
+    h("div", { class: "house-card-head" }, h("span", { class: "app-icon sm" }, icon(ic)), h("div", { class: "grow" }, h("strong", null, name), kind && h("p", { class: "muted small" }, kind)), chip),
+    line && h("p", { class: "small" }, line),
+    warn && h("p", { class: "small warn-text" }, warn),
+  );
+
+function paintHouse() {
+  const box = document.getElementById("house-body");
+  if (!box || state.route.view !== "house") return;
+  const cards = [];
+  for (const x of houseUi.ha ?? [])
+    cards.push(
+      houseCard({
+        href: `#/house/ha/${x.id}`,
+        icon: "bulb",
+        name: x.name,
+        kind: ["Home Assistant", x.version].filter(Boolean).join(" · "),
+        chip: haChip(x),
+        line: x.online ? t("house.ha.line", { entities: x.entities, on: x.on }) : haError(x),
+        warn: [x.updates && t("house.ha.updates", { n: x.updates }), x.low && t("house.ha.low", { n: x.low })].filter(Boolean).join(" · "),
+      }),
+    );
+  if (hasModule("integrations"))
+    for (const c of svcConnections()) {
+      const spec = svcSpecNow(c.kind);
+      cards.push(houseCard({ href: `#/house/x-${c.kind}/${c.id}`, icon: c.icon, name: c.name, kind: c.title !== c.name && c.title, chip: svcChip(c), line: c.online && spec ? svcNumbers(spec, c.values) : c.error ? t("service.offline") : "" }));
+    }
+  const connected = cards.length;
+  if (hasModule("tv")) {
+    const tv = state.tvNow;
+    const line = tv?.page ? t("tv.page.showing", { name: tv.page.title || tv.page.url }) : tv?.playing ? t("tv.playing", { name: tv.playing.title }) : t(tv?.on ? "tv.nothingTitle" : "house.tv.off");
+    cards.push(houseCard({ href: "#/house/tv", icon: "tv", name: t("area.house.tv"), chip: h("span", { class: "state " + (tv?.on || tv?.page ? "running" : "") }, t(tv?.page ? "house.tv.browser" : tv?.on ? "house.tv.kodi" : "house.tv.offChip")), line }));
+  }
+  if (hasModule("music")) {
+    const now = state.musicNow;
+    cards.push(houseCard({ href: "#/house/music", icon: "music", name: t("area.house.music"), chip: now && h("span", { class: "state " + (now.paused ? "" : "running") }, t(now.paused ? "house.music.paused" : "house.music.playing")), line: now ? now.title : t("music.idle") }));
+  }
+  if (hasModule("bluetooth")) {
+    const bt = houseUi.bt;
+    const paired = (bt?.devices ?? []).filter((d) => d.paired);
+    const line = !bt ? "" : bt.state === "ready" ? t("house.bt.line", { paired: paired.length, connected: paired.filter((d) => d.connected).length }) : t("house.bt." + bt.state);
+    cards.push(houseCard({ href: "#/house/bluetooth", icon: "bluetooth", name: t("area.house.bluetooth"), chip: bt && h("span", { class: "state " + (bt.state === "ready" ? "running" : "") }, t(bt.state === "ready" ? "house.bt.on" : "house.bt.offChip")), line }));
+  }
+  put(
+    box,
+    !connected && hasModule("integrations") && h("section", { class: "card pad empty-state house-empty" }, h("span", { class: "app-icon plus" }, icon("plug")), h("h2", null, t("house.nothing")), h("p", { class: "muted" }, t("house.nothingLead")), houseAdd()),
+    ...cards,
   );
 }
 

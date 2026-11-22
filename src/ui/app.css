@@ -2678,3 +2678,11 @@ button.tv-stage-chip:hover { background: rgb(0 0 0 / 0.8); }
 .tv-card-foot .turn-down .ico { transform: rotate(90deg); }
 /* the card says "Hide the screen" once: under the stage when there is room for it there */
 .tv-card:has(.tv-card-foot > .btn) .tv-stage.live > button.tv-stage-chip { display: none; }
+
+/* The overview of Integrations: a card for everything connected */
+.house-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; align-items: start; }
+.house-cards > .house-empty { grid-column: 1 / -1; }
+.house-card { display: flex; flex-direction: column; gap: 6px; color: inherit; text-decoration: none; }
+.house-card:hover { border-color: var(--accent); }
+.house-card-head { display: flex; align-items: center; gap: 12px; }
+.house-card-head strong { display: block; }

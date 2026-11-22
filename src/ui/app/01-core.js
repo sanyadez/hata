@@ -566,6 +566,7 @@ const AREAS = {
     { id: "offsite", view: "backups", admin: true, module: "offsite" },
   ],
   house: [
+    { id: "overview", hash: "#/house", view: "house" },
     { id: "ha", hash: "#/house/ha", view: "ha", module: "integrations" },
     { id: "tv", hash: "#/house/tv", view: "tv", module: "tv" },
     { id: "music", hash: "#/house/music", view: "music", module: "music" },
@@ -640,7 +641,7 @@ function areaOf(route = state.route) {
   if (["files", "trash", "myhata", "links"].includes(view)) return "files";
   if (["machines", "machine", "server", "proxmox", "containers", "instance", "guest", "terminal", "load"].includes(view)) return "machines";
   if (view === "service") return route.house || !serviceApp(route.id) ? "house" : "apps";
-  if (["integrations", "ha", "tv", "music"].includes(view)) return "house";
+  if (["house", "integrations", "ha", "tv", "music"].includes(view)) return "house";
   if (view === "backups") return "backups";
   if (view === "users") return "settings";
   return view === "home" || view === "activity" ? "home" : "";
@@ -1475,6 +1476,7 @@ function render() {
   if (view === "proxmox") return renderPve();
   if (view === "containers") return renderContainers();
   if (view === "ha") return renderHa();
+  if (view === "house") return renderHouse();
   if (view === "service") return renderService();
   if (view === "instance") return renderInstance();
   if (view === "guest") return renderGuest();
