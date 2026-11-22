@@ -2714,3 +2714,5 @@ button.tv-stage-chip:hover { background: rgb(0 0 0 / 0.8); }
   .house-tiles { grid-template-columns: 1fr; gap: 8px; }
 }
 .crumbs.house-crumbs { margin: 0; font-size: 15px; min-height: 36px; }
+/* a bar of filters is a card without padding of its own: it keeps its gap */
+.card.filter-bar { gap: 10px 16px; }
