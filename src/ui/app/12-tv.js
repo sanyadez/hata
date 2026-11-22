@@ -754,7 +754,7 @@ function tvTransport(m) {
  * screen shows — a site's name (the screen itself, live, only when asked for), what the player plays,
  * or, while nothing of Hata's is on the screen, what to put there by one press.
  */
-function tvStage(tv, { card = false, go, show, hide, media = null }) {
+function tvStage(tv, { live = false, go, show, hide, media = null }) {
   const b = tv.browser;
   const badge = (iconName, cls = "kodi") => h("span", { class: "tv-mark-icon " + cls, "aria-hidden": "true" }, icon(iconName));
   const words = (mark, title, sub, ...more) => h("div", { class: "tv-stage-words" }, mark, h("strong", { class: "tv-stage-title" }, title), sub && h("span", { class: "tv-stage-sub clip" }, sub), more);
@@ -771,9 +771,9 @@ function tvStage(tv, { card = false, go, show, hide, media = null }) {
   };
   const stage = (cls, ...kids) => h("div", { class: "tv-stage" + (cls ? " " + cls : "") }, kids);
   if (tv.screen === "browser") {
-    if (!card && tvUi.control) return stage("live", tvPreview(), h("button", { type: "button", class: "tv-stage-chip", onclick: hide }, icon("eyeOff"), t("tv.page.controlOff")));
+    if (live) return stage("live", tvPreview(), h("button", { type: "button", class: "tv-stage-chip", onclick: hide }, icon("eyeOff"), t("tv.page.controlOff")));
     const m = b.media;
-    return stage("", words(b.url ? tvMarkIcon({ name: b.title || tvHost(b.url), url: b.url }) : badge("home"), b.title || t(b.url ? "tv.page.blank" : "tv.page.home"), b.url ? tvHost(b.url) : "", !card && h("button", { type: "button", class: "tv-stage-btn", title: t("tv.page.controlHint"), onclick: show }, icon("eye"), t("tv.stage.show"))), m && bar(m.time, m.total));
+    return stage("", words(b.url ? tvMarkIcon({ name: b.title || tvHost(b.url), url: b.url }) : badge("home"), b.title || t(b.url ? "tv.page.blank" : "tv.page.home"), b.url ? tvHost(b.url) : "", h("button", { type: "button", class: "tv-stage-btn", title: t("tv.page.controlHint"), onclick: show }, icon("eye"), t("tv.stage.show"))), m && bar(m.time, m.total));
   }
   if (tv.screen === "kodi") {
     if (!tv.answers) return stage("", words(h("span", { class: "wait-ring" }), t("tv.starting"), t("tv.startingLead")));
@@ -805,6 +805,7 @@ function tvBlock(el) {
   let busy = false;
   let timer = 0;
   let last = null;
+  let live = false;
   const go = async (what, url) => {
     busy = true;
     tvWorking(t("tv.switching." + (what === "url" ? "page" : what === "back" ? "kodi" : what)), el);
@@ -859,7 +860,9 @@ function tvBlock(el) {
     chip.className = "state " + cls;
     chip.textContent = word;
     const b = tv.browser;
-    const toPage = () => ((tvUi.control = true), (location.hash = "#/house/tv"));
+    // the screen itself, live, in the card's own stage: only while asked for, and only while a page has the screen
+    if (tv.screen !== "browser") live = false;
+    const turn = (on) => ((live = on), paint(tv));
     const m = tvMediaOf(tv, load);
     const now = tv.screen === "kodi" && tv.answers ? tv.playing : null;
     const title = tv.screen === "browser" ? b.title || t(b.url ? "tv.page.blank" : "tv.page.home") : tv.screen === "kodi" ? (now ? now.title : t(tv.answers ? "tv.nothingTitle" : "tv.starting")) : t(tv.screen === "dark" ? "tv.darkTitle" : "tv.consoleHead");
@@ -868,11 +871,11 @@ function tvBlock(el) {
     const foot = m
       ? h("div", { class: "tv-card-foot" }, tvTransport(m), h("button", { type: "button", class: "tvr-round to-right" + (m.muted ? " on" : ""), title: t(m.muted ? "tv.unmute" : "tv.mute"), "aria-label": t(m.muted ? "tv.unmute" : "tv.mute"), onclick: m.mute }, icon(m.muted ? "volumeOff" : "volume")), h("input", { type: "range", class: "tvr-slider tv-vol" + (m.muted ? " muted" : ""), min: 0, max: 100, step: 1, value: m.volume, title: `${t("tv.volume")}: ${Math.round(m.volume)}%`, "aria-label": t("tv.volume"), onchange: (e) => m.loud(Number(e.target.value)) }))
       : tv.screen === "browser"
-        ? line(t("tv.noVideoShort"), button(t("tv.stage.show"), { class: "small", onclick: toPage }, "eye"))
+        ? line(t("tv.noVideoShort"), button(t(live ? "tv.page.controlOff" : "tv.stage.show"), { class: "small", onclick: () => turn(!live) }, live ? "eyeOff" : "eye"))
         : tv.screen === "kodi" && tv.answers
           ? h("div", { class: "tv-card-foot keys" }, [["back", "undo", t("tv.key.back"), ""], ["left", "chevron", t("tv.key.left"), "turn-left"], ["up", "chevron", t("tv.key.up"), "turn-up"], ["select", "", "OK", "ok"], ["down", "chevron", t("tv.key.down"), "turn-down"], ["right", "chevron", t("tv.key.right"), ""]].map(([action, iconName, label, cls]) => h("button", { type: "button", class: "tvr-round " + cls, title: label, "aria-label": label, onclick: () => api("POST", "/api/tv/do", { action }).catch((e) => toast(errorText(e), "error")) }, iconName ? icon(iconName) : "OK")))
           : null;
-    put(body, tvStage(tv, { card: true, go, media: m }), h("div", { class: "tv-card-side" }, h("strong", { class: "tv-card-title" }, title), sub && h("span", { class: "tv-card-sub muted mono clip" }, sub), foot));
+    put(body, tvStage(tv, { live, go, media: m, show: () => turn(true), hide: () => turn(false) }), h("div", { class: "tv-card-side" }, h("strong", { class: "tv-card-title" }, title), sub && h("span", { class: "tv-card-sub muted mono clip" }, sub), foot));
   };
   void load();
 }
@@ -1452,7 +1455,7 @@ function paintTv() {
     h("div", { class: "seg-pills" }, pill("kodi", "film", "Kodi", !tv.installed), pill("browser", "globe", t("tv.page.browser"), !b.installed), pill("off", "terminal", t("tv.onScreen.none")), pill("dark", "power", t("tv.onScreen.sleep"))),
     h("button", { type: "button", class: "icon-btn tv-head-more", title: t("tv.more"), "aria-label": t("tv.more"), onclick: (e) => { const r = e.currentTarget.getBoundingClientRect(); more({ x: r.right - 220, y: r.bottom + 4 }); } }, icon("more")),
   );
-  const stage = tvStage(tv, { media: m, go: (what, url) => (what === "url" ? void showOnTv(url) : void change({ screen: what })), show: () => ((tvUi.control = true), paintTv()), hide: () => ((tvUi.control = false), paintTv()) });
+  const stage = tvStage(tv, { live: !!tvUi.control, media: m, go: (what, url) => (what === "url" ? void showOnTv(url) : void change({ screen: what })), show: () => ((tvUi.control = true), paintTv()), hide: () => ((tvUi.control = false), paintTv()) });
 
   const source =
     tv.screen === "browser" ? ["globe", [t("tv.page.browser"), b.url && tvHost(b.url)]]

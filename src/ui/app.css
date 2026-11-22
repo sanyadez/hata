@@ -2676,3 +2676,5 @@ button.tv-stage-chip:hover { background: rgb(0 0 0 / 0.8); }
 .tv-card-foot .turn-left .ico { transform: rotate(180deg); }
 .tv-card-foot .turn-up .ico { transform: rotate(-90deg); }
 .tv-card-foot .turn-down .ico { transform: rotate(90deg); }
+/* the card says "Hide the screen" once: under the stage when there is room for it there */
+.tv-card:has(.tv-card-foot > .btn) .tv-stage.live > button.tv-stage-chip { display: none; }
