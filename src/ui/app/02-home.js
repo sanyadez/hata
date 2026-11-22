@@ -650,11 +650,14 @@ setInterval(() => void widgetsTick(), 10_000);
 
 // --- The grid of Home: every card has a place and a size; they change only while editing the grid ---
 
-const gridUi = { at: null, arranging: false, undo: [], entry: null, drag: null, gone: new Set() };
+const gridUi = { at: null, arranging: false, undo: [], entry: null, drag: null, gone: new Set(), wanted: null };
 /** What has a "×" while arranging; a folder of tiles and Hata's own two tiles have none */
 const gridRemovable = (card) => ["block", "widget", "ha", "link", "files", "app"].includes(card.type);
 
-const cardKind = (card) => (card.type === "block" ? (card.id.startsWith("machine:") ? "machine" : card.id) : card.type === "widget" ? card.view : card.type);
+/** The kind whose limits a card's size keeps — the server's own: every widget is one kind, whatever its description calls its view */
+const cardKind = (card) => (card.type === "block" ? (card.id.startsWith("machine:") ? "machine" : card.id) : card.type);
+/** A card that shows a picture: it is never made a strip */
+const cardPicture = (card) => card.type === "widget" && (card.view === "camera" || widgetSpec(card)?.kind === "picture");
 const boxOf = ({ x, y, w, h: tall }) => ({ x, y, w, h: tall });
 const gridOverlaps = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
 
@@ -666,7 +669,7 @@ function gridFit(taken, w, tall) {
 
 /** A new card on a copy of the layout, of the size its kind first takes */
 function addCard(layout, item) {
-  const [w, tall] = state.overview.grid.first[cardKind(item)] ?? [1, 1];
+  const [w, tall] = cardPicture(item) ? [1, 1] : (state.overview.grid.first[cardKind(item)] ?? [1, 1]);
   layout.cards.push({ ...item, ...gridFit(layout.cards, w, tall) });
 }
 
@@ -695,13 +698,29 @@ function gridLoad() {
   for (const key of [...gridUi.gone]) if (gridUi.at?.[key]) gridUi.gone.delete(key);
   const here = cards.filter((card) => !gridUi.gone.has(tileKey(card)));
   if (gridUi.arranging) for (const card of here) if (gridUi.at?.[tileKey(card)]) at[tileKey(card)] = gridUi.at[tileKey(card)];
-  for (const card of here) at[tileKey(card)] ??= gridUi.arranging ? gridFit(Object.values(at), card.w, card.h) : boxOf(card);
+  for (const card of here) at[tileKey(card)] ??= gridUi.arranging ? gridWanted(Object.values(at), card) ?? gridFit(Object.values(at), card.w, card.h) : boxOf(card);
   gridUi.at = at;
+}
+
+/** The empty place the person clicked while arranging, for the first card added after it — when the card fits there */
+function gridWanted(taken, card) {
+  const wish = gridUi.wanted;
+  if (!wish) return null;
+  gridUi.wanted = null;
+  const box = { x: Math.min(wish.x, state.overview.grid.cols - card.w), y: wish.y, w: card.w, h: card.h };
+  return box.x >= 0 && !taken.some((other) => gridOverlaps(box, other)) ? box : null;
+}
+
+/** A click on an empty place while arranging asks what to put there */
+function gridAddAt(x, y) {
+  gridUi.wanted = { x, y };
+  // closed with nothing added, the place is forgotten; a row that opens a window of its own keeps it for what that window adds
+  addDialog((ran) => !ran && (gridUi.wanted = null));
 }
 
 const gridEdit = () => {
   gridLoad();
-  Object.assign(gridUi, { entry: structuredClone(gridUi.at), undo: [], arranging: true, gone: new Set() });
+  Object.assign(gridUi, { entry: structuredClone(gridUi.at), undo: [], arranging: true, gone: new Set(), wanted: null });
   paintGrid();
 };
 
@@ -797,7 +816,7 @@ function gridBar() {
   box.hidden = !gridUi.arranging;
   const head = document.getElementById("home-head");
   if (head) head.hidden = gridUi.arranging;
-  put(box, gridUi.arranging && h("div", { class: "pg-bar" }, h("strong", null, t("grid.arranging")), h("span", { class: "muted small grow" }, t("grid.arrangingHint")), h("div", { class: "pg-tools" }, tool(t("grid.undo"), "undo", undo, !gridUi.undo.length), tool(t("menu.dashboardConfig"), "code", gridYaml), tool(t("grid.reset"), "refresh", gridReset, false, "danger")), button(t("common.cancel"), { class: "small", onclick: gridCancel }), button(t("grid.done"), { class: "small primary", onclick: gridDone }, "check")));
+  put(box, gridUi.arranging && h("div", { class: "pg-bar" }, h("strong", null, t("grid.arranging")), h("span", { class: "grow" }), h("div", { class: "pg-tools" }, tool(t("grid.undo"), "undo", undo, !gridUi.undo.length), tool(t("menu.dashboardConfig"), "code", gridYaml), tool(t("grid.reset"), "refresh", gridReset, false, "danger")), button(t("common.cancel"), { class: "small", onclick: gridCancel }), button(t("grid.done"), { class: "small primary", onclick: gridDone }, "check")));
   // the button stays the same element across redraws: one under the pointer keeps its click
   const slot = document.getElementById("grid-edit-slot");
   const offer = mayArrange();
@@ -854,7 +873,9 @@ function paintGrid() {
   // room to pull a card further down than anything stands yet
   const rows = Math.max(0, ...Object.values(gridUi.at).map((b) => b.y + b.h)) + 6;
   const cells = gridUi.arranging ? Array.from({ length: rows * cols }, (_, i) => {
-    const cell = h("div", { class: "pg-cell" });
+    const x = i % cols;
+    const y = Math.floor(i / cols);
+    const cell = h("button", { type: "button", class: "pg-cell", title: t("grid.addHere"), "aria-label": t("grid.addHere"), onclick: () => gridAddAt(x, y) }, icon("plus"));
     cell.style.gridArea = `${Math.floor(i / cols) + 1} / ${(i % cols) + 1}`;
     return cell;
   }) : [];
@@ -900,7 +921,7 @@ function gridStart(e, card, el) {
   const cell = { w: (rect.width - gap * (cols - 1)) / cols + gap, h: 128 + gap };
   const key = tileKey(card);
   const box = gridUi.at[key];
-  const drag = { key, el, kind: cardKind(card), side: grip?.dataset.side ?? "", sx: e.clientX, sy: e.clientY, base: structuredClone(gridUi.at), moved: false, rect, cell, grabX: Math.floor((e.clientX - rect.left) / cell.w) - box.x, grabY: Math.floor((e.clientY - rect.top) / cell.h) - box.y };
+  const drag = { key, el, kind: cardKind(card), picture: cardPicture(card), side: grip?.dataset.side ?? "", sx: e.clientX, sy: e.clientY, base: structuredClone(gridUi.at), moved: false, rect, cell, grabX: Math.floor((e.clientX - rect.left) / cell.w) - box.x, grabY: Math.floor((e.clientY - rect.top) / cell.h) - box.y };
   gridUi.drag = drag;
   const move = (ev) => ((drag.last = ev), gridMove(ev, drag));
   // near the window's edge the page follows the pointer: a card can be pulled past what is on the screen
@@ -936,7 +957,7 @@ function gridMove(e, drag) {
   }
   const old = drag.base[drag.key];
   const { cols, limits } = state.overview.grid;
-  const [minW, minH, maxW, maxH] = limits[drag.kind];
+  const [minW, minH, maxW, maxH] = limits[drag.kind] ?? [1, 1, cols, 6];
   let box;
   // the scroll of the page counts: the grid's place is read again
   const top = document.getElementById("pg").getBoundingClientRect().top;
@@ -958,7 +979,7 @@ function gridMove(e, drag) {
       y = bottom - tall;
     }
     // a camera is never a strip
-    if (drag.kind === "camera" && tall < Math.ceil(w / 3)) {
+    if (drag.picture && tall < Math.ceil(w / 3)) {
       const need = Math.ceil(w / 3);
       if (drag.side.includes("n")) y = Math.max(0, y - (need - tall));
       tall = need;
@@ -973,7 +994,7 @@ function gridMove(e, drag) {
 }
 
 function gridHint(drag, box) {
-  const [minW, minH, maxW, maxH] = state.overview.grid.limits[drag.kind];
+  const [minW, minH, maxW, maxH] = state.overview.grid.limits[drag.kind] ?? [1, 1, state.overview.grid.cols, 6];
   let hint = drag.el.querySelector(".pg-hint");
   if (!hint) drag.el.append((hint = h("span", { class: "pg-hint" })));
   hint.textContent = t("grid.hint", { size: `${box.w}×${box.h}`, min: `${minW}×${minH}`, max: `${maxW}×${maxH}` });
@@ -1232,8 +1253,10 @@ function addSections() {
   ].filter(Boolean);
 }
 
-function addDialog() {
+/** `closed(ran)` is told when the window goes: `ran` — a row that opens a window of its own was pressed */
+function addDialog(closed) {
   let dialog;
+  let ran = false;
   const nav = h("nav", { class: "cats fold add-nav" });
   const main = h("div", { class: "add-main" });
   const row = (one) => {
@@ -1245,7 +1268,7 @@ function addDialog() {
       h("span", { class: "add-text" }, h("strong", { class: "clip" }, one.title), h("span", { class: "muted small clip" }, one.sub)),
       one.placed
         ? h("span", { class: "add-do" }, there && h("span", { class: "muted small add-on" }, icon("check", "ok"), t("add.onHome")), button(t(there ? "add.remove" : "home.add"), { class: "small", onclick: async () => (await (there ? one.remove() : one.add()), paint()) }, there ? null : "plus"))
-        : h("span", { class: "add-do" }, button(one.label, { class: "small", onclick: () => (dialog.close(), one.run()) })),
+        : h("span", { class: "add-do" }, button(one.label, { class: "small", onclick: () => ((ran = true), dialog.close(), one.run()) })),
     );
   };
   const counted = (section) => {
@@ -1268,6 +1291,7 @@ function addDialog() {
   };
   const field = h("input", { type: "search", placeholder: t("add.find"), "aria-label": t("add.find"), value: addUi.find, autocomplete: "off", oninput: () => ((addUi.find = field.value), paint()) });
   dialog = openDialog("xwide add-dialog", h("header", null, h("h2", { class: "grow" }, t("home.addTitle")), closeX(() => dialog)), h("label", { class: "add-find" }, icon("search"), field), h("div", { class: "add-body" }, nav, main));
+  if (closed) dialog.addEventListener("close", () => closed(ran));
   paint();
   field.focus();
 }
