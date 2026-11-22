@@ -2152,7 +2152,7 @@ button.mark:hover { border-color: var(--border-strong); color: var(--text); }
 @media (hover: none) { .tv-preview-grow { opacity: 1; } }
 .tv-preview-grow .ico { width: 18px; height: 18px; }
 .tv-preview:fullscreen { border: 0; border-radius: 0; display: grid; place-items: center; background: #000; aspect-ratio: auto; }
-.tv-preview:fullscreen img { width: auto; height: auto; max-width: 100vw; max-height: 100vh; object-fit: contain; }
+.tv-preview:fullscreen img { width: 100vw; height: 100vh; object-fit: contain; }
 button.tv-mark { background: none; border: 0; padding: 0; font: inherit; text-align: left; cursor: pointer; }
 .tv-address { display: flex; gap: 8px; align-items: center; }
 .tv-address input { flex: 1; min-width: 0; }

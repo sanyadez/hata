@@ -350,14 +350,21 @@ async function pageSize(): Promise<{ width: number; height: number }> {
  * what it shows changes (its "screencast"): asking it for a screenshot of another size each second
  * was seen to resize the page on the real screen. Sent only while a page of Hata's keeps asking.
  */
-const cast: { on: boolean; frame: Uint8Array | null; asked: number; timer: Timer | null } = { on: false, frame: null, asked: 0, timer: null };
+const cast: { on: boolean; big: boolean; frame: Uint8Array | null; asked: number; timer: Timer | null } = { on: false, big: false, frame: null, asked: 0, timer: null };
 
 /** What the screen shows right now, as a small picture for Hata's page: only while the browser has it */
-export async function screenShot(): Promise<Uint8Array> {
+export async function screenShot(big = false): Promise<Uint8Array> {
   if (!(await browserRuns())) throw new AppError("tv.browserOff", 409);
   cast.asked = Date.now();
+  // looked at on a whole screen, the picture is sent as large as the screen itself
+  if (cast.on && link && cast.big !== big) {
+    await ask({ method: "Page.stopScreencast" });
+    cast.on = false;
+    cast.frame = null;
+  }
   if (!cast.on || !link) {
-    if ((await ask({ method: "Page.startScreencast", params: { format: "jpeg", quality: 55, maxWidth: PREVIEW_WIDTH, maxHeight: PREVIEW_WIDTH, everyNthFrame: 2 } })) === null) throw new AppError("tv.browserFailed", 409, { message: "" });
+    cast.big = big;
+    if ((await ask({ method: "Page.startScreencast", params: { format: "jpeg", quality: big ? 75 : 55, maxWidth: big ? 3840 : PREVIEW_WIDTH, maxHeight: big ? 2160 : PREVIEW_WIDTH, everyNthFrame: 2 } })) === null) throw new AppError("tv.browserFailed", 409, { message: "" });
     cast.on = true;
     // nobody looks any more: the browser is told to stop making frames
     cast.timer ??= setInterval(() => {

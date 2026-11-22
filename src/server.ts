@@ -1690,7 +1690,7 @@ async function api(req: Request, url: URL, server: Server<unknown>): Promise<Res
     return path.endsWith("stream") ? await tvMediaStream(file, start, n, req.signal) : await tvMediaSubs(file, start, n, req.signal, url.searchParams.get("subs"));
   }
   if (path === "/api/tv/keep" && method === "POST") return json(await keepTvPicture((await body(req)).keep === true));
-  if (path === "/api/tv/shot" && method === "GET") return new Response((await screenShot()) as BufferSource as BodyInit, { headers: { "content-type": "image/jpeg", "cache-control": "no-store" } });
+  if (path === "/api/tv/shot" && method === "GET") return new Response((await screenShot(url.searchParams.get("big") === "1")) as BufferSource as BodyInit, { headers: { "content-type": "image/jpeg", "cache-control": "no-store" } });
   if (path === "/api/tv/browser/install" && method === "POST") return json({ job: installBrowser(user.name).id }, 202);
   if (path === "/api/tv/browser" && method === "POST") {
     const data = await body(req);

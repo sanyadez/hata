@@ -744,6 +744,7 @@ function tvPreview() {
   };
   const grow = h("button", { type: "button", class: "tv-preview-grow", title: t("tv.page.previewFull"), "aria-label": t("tv.page.previewFull"), onclick: (e) => (e.stopPropagation(), document.fullscreenElement ? document.exitFullscreen() : box.requestFullscreen?.()) }, icon("expand"));
   box.addEventListener("click", (e) => void act("click", at(e)));
+  box.addEventListener("fullscreenchange", () => next(0));
   let turned = 0;
   box.addEventListener("wheel", (e) => {
     e.preventDefault();
@@ -761,9 +762,10 @@ function tvPreview() {
     const img = document.createElement("img");
     img.alt = "";
     img.draggable = false;
-    img.onload = () => (box.replaceChildren(img, grow), next(quick-- > 0 ? 350 : 1000));
+    const whole = document.fullscreenElement === box;
+    img.onload = () => (box.replaceChildren(img, grow), next(whole || quick-- > 0 ? 300 : 1000));
     img.onerror = () => next(3000);
-    img.src = `/api/tv/shot?n=${++n}`;
+    img.src = `/api/tv/shot?n=${++n}${whole ? "&big=1" : ""}`;
   };
   next(0);
   return box;
