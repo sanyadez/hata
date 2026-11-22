@@ -100,6 +100,25 @@ function rpc(call: Call, wait = 4000): Promise<unknown> {
   });
 }
 
+/**
+ * The screen put to sleep or woken, while the console has it (nobody else does then): the kernel's
+ * own switch of the console's picture, which turns the output off — a TV goes to standby.
+ */
+export function sleepScreen(dark: boolean): void {
+  try {
+    writeFileSync("/sys/class/graphics/fb0/blank", dark ? "4" : "0");
+  } catch {}
+}
+
+/** The screen was put to sleep: every connected one is off */
+export function screenDark(): boolean {
+  let dirs: string[] = [];
+  try {
+    dirs = readdirSync(DRM).filter((name) => /^card\d+-/.test(name) && text(join(DRM, name, "status")).trim() === "connected");
+  } catch {}
+  return dirs.length > 0 && dirs.every((name) => text(join(DRM, name, "dpms")).trim() === "Off");
+}
+
 /** The player's service runs */
 export const kodiRuns = async (): Promise<boolean> => tvSetUp() && (await unit("is-active")) === "active";
 
@@ -472,6 +491,7 @@ async function chooseAudioOnce(): Promise<void> {
 export async function switchTv(on: boolean, by: string): Promise<TvReport> {
   if (!has("kodi")) throw new AppError("tv.notInstalled", 409);
   if (on) await setUp();
+  if (on) sleepScreen(false);
   const done = await run(["systemctl", on ? "enable" : "disable", "--now", TV_UNIT], 60_000);
   if (done.code !== 0) throw new AppError("tv.switchFailed", 409, { message: (done.err || done.out).trim().split("\n").slice(-2).join("\n") });
   if (on && (await awaitKodi())) await chooseAudioOnce();

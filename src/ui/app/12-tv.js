@@ -682,7 +682,7 @@ function tvRemoteParts(tv, press, turnOn) {
   // a web page has the screen: its own few buttons instead of the player's
   if (tv.screen === "browser") return tvPageParts(tv);
   if (!tv.installed) return [note("tv", t("tv.needsTitle"), t("tv.needsShort"), h("a", { class: "btn primary wide", href: "#/tv", onclick: (e) => e.currentTarget.closest("dialog")?.close() }, h("span", null, t("tv.openPage"))))];
-  if (!tv.running) return [note("power", t("tv.offTitle"), t("tv.offLead"), turnOn && button(t("tv.turnOn"), { class: "primary wide", onclick: (e) => ((e.currentTarget.disabled = true), turnOn()) }, "power"))];
+  if (!tv.running) return [note("power", t(tv.screen === "dark" ? "tv.darkTitle" : "tv.offTitle"), t(tv.screen === "dark" ? "tv.darkLead" : "tv.offLead"), turnOn && button(t("tv.turnOn"), { class: "primary wide", onclick: (e) => ((e.currentTarget.disabled = true), turnOn()) }, "power"))];
   const idle = !tv.answers;
   const now = tv.playing;
   const round = (action, iconName, label, cls = "", off = false) => h("button", { type: "button", class: "tvr-round " + cls, title: label, "aria-label": label, disabled: idle || off, onclick: () => press(action) }, icon(iconName));
@@ -907,8 +907,8 @@ function paintTv() {
   // who has the screen: the player, a web page, or neither of Hata's
   const pill = (id, label, off = false) => h("button", { type: "button", class: "seg-pill" + (tv.screen === id ? " active" : ""), "aria-pressed": String(tv.screen === id), disabled: off, onclick: (e) => (tv.screen === id ? null : ((e.currentTarget.disabled = true), void change({ screen: id }))) }, label);
   const playerCard = uiCard(
-    { title: t("tv.onScreen"), lead: t(tv.screen === "browser" ? "tv.onScreen.browser" : tv.screen === "kodi" ? "tv.onScreen.kodi" : "tv.onScreen.off") },
-    h("div", { class: "seg-pills" }, pill("kodi", "Kodi"), pill("browser", t("tv.page.browser"), !b.installed), pill("off", t("tv.onScreen.none"))),
+    { title: t("tv.onScreen"), lead: t(tv.screen === "browser" ? "tv.onScreen.browser" : tv.screen === "kodi" ? "tv.onScreen.kodi" : tv.screen === "dark" ? "tv.onScreen.dark" : "tv.onScreen.off") },
+    h("div", { class: "seg-pills" }, pill("kodi", "Kodi"), pill("browser", t("tv.page.browser"), !b.installed), pill("off", t("tv.onScreen.none")), pill("dark", t("tv.onScreen.sleep"))),
     h("p", { class: "tv-working muted", id: "tv-working", role: "status", hidden: true }),
     !tv.decodes && h("p", { class: "muted small" }, t("tv.noDecode")),
     error,

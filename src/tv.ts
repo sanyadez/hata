@@ -710,8 +710,8 @@ export function browserCalls(action: unknown, value: unknown): PageCall[] | null
  */
 export const BROWSER_HOME_SCRIPT = `addEventListener("keydown", (e) => { if (e.key === "BrowserHome" && typeof hataScreen === "function") { e.preventDefault(); hataScreen("home"); } }, true);`;
 
-/** What is on the server's screen: the player, a web page, or neither of Hata's */
-export type Screen = "kodi" | "browser" | "off";
+/** What is on the server's screen: the player, a web page, the system's console (`off`: nothing of Hata's), or nothing at all — the screen put to sleep (`dark`) */
+export type Screen = "kodi" | "browser" | "off" | "dark";
 
 export interface BrowserReport {
   installed: boolean;

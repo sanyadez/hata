@@ -13,7 +13,7 @@ import uk from "./lang/uk.json";
 import { AppError, startJob, type Job } from "./apps";
 import { bus } from "./bus";
 import { saveSettings, settings } from "./config";
-import { awaitKodi, kodiRuns, playOnTv, screenShares, setUp, switchTv, tvEnabled, tvNow, tvReport, type TvPage, type TvReport } from "./kodi";
+import { awaitKodi, kodiRuns, screenDark, sleepScreen, playOnTv, screenShares, setUp, switchTv, tvEnabled, tvNow, tvReport, type TvPage, type TvReport } from "./kodi";
 import { installCommand, packageManager, PATH, run, runLogged } from "./packages";
 import { BROWSER_HOME_SCRIPT, BROWSER_PACKAGES, browserCalls, browserHomeHtml, TV_BROWSER_HOME, TV_USER, browserSound, browserUnitText, cleanLink, cleanShowTime, linkName, TV_BROWSER_PORT, TV_BROWSER_UNIT, TV_UNIT, type BrowserReport, type PageCall, type Screen } from "./tv";
 
@@ -125,7 +125,7 @@ async function report(): Promise<{ screen: Screen; browser: BrowserReport }> {
   if (running) await refreshPage();
   else if (page) tellPage(null);
   return {
-    screen: running ? "browser" : (await kodiRuns()) ? "kodi" : "off",
+    screen: running ? "browser" : (await kodiRuns()) ? "kodi" : screenDark() ? "dark" : "off",
     browser: {
       installed: browserInstalled(),
       install: installCommand(BROWSER_PACKAGES.join(" ")),
@@ -191,6 +191,7 @@ async function startBrowser(by: string): Promise<void> {
   const resume = back && playing ? { file: playing.file, at: Math.floor(playing.time + (playing.paused ? 0 : (Date.now() - playing.at) / 1000)), subtitle: playing.outside ?? "" } : null;
   await setUp();
   await writeUnit();
+  sleepScreen(false);
   const done = await run(["systemctl", "start", TV_BROWSER_UNIT], 60_000);
   if (done.code !== 0) throw new AppError("tv.browserFailed", 409, { message: (done.err || done.out).trim().split("\n").slice(-2).join("\n") });
   showing = { by, back, resume, until: 0, timer: null };
@@ -266,7 +267,7 @@ export async function browserDo(action: unknown, value: unknown, by: string): Pr
   for (const call of calls) if ((await ask(call)) === null) throw new AppError("tv.browserFailed", 409, { message: "" });
 }
 
-/** Who has the screen, as the person chooses it: the player, the browser, or neither */
+/** Who has the screen, as the person chooses it: the player, the browser, the system's console, or nobody — the screen asleep */
 export async function setScreen(screen: unknown, by: string): Promise<TvReport> {
   if (screen === "browser") return openPage("", 0, by);
   if (screen === "kodi") {
@@ -277,13 +278,18 @@ export async function setScreen(screen: unknown, by: string): Promise<TvReport> 
     }
     return switchTv(true, by);
   }
-  if (screen === "off") {
+  if (screen === "off" || screen === "dark") {
     if (await browserRuns()) {
       if (showing) showing.back = false;
       else showing = { by, back: false, resume: null, until: 0, timer: null };
       await leaveBrowser(by);
     }
-    return tvEnabled() || (await kodiRuns()) ? switchTv(false, by) : tvReport();
+    if (tvEnabled() || (await kodiRuns())) await switchTv(false, by);
+    // the console has the screen now: left there, or put to sleep with it
+    sleepScreen(screen === "dark");
+    if (screen === "dark") await Bun.sleep(600);
+    bus.publish("tv");
+    return tvReport();
   }
   throw new AppError("tv.badAction", 400);
 }
