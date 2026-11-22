@@ -2501,3 +2501,10 @@ dialog.framed .dlg-body footer { position: sticky; bottom: -20px; margin: 0 -20p
 @container pg-card (max-height: 330px) { .tv-view .tv-kodi-frame, .tv-view .tvr-volume { display: none; } .tv-view > .tv-kodi { grid-template-rows: auto; } }
 .tv-view .tvr-now > .row-actions, .tv-view .tvr-now > div:has(> .btn) { display: none; }
 @container pg-card (min-height: 560px) { .tv-view .tvr-now > .row-actions, .tv-view .tvr-now > div:has(> .btn) { display: flex; } }
+
+/* without the screen's picture the left card is as tall as what it holds */
+.tvx-left { min-height: 0; }
+.tvx-left > .tv-left-foot { margin-top: 0; }
+.tv-view:not(:has(.tv-preview)) { justify-content: center; }
+.pg-card .tv-view:not(:has(.tv-preview)) > .tv-now-line { display: flex; }
+.pg-card .tv-view:not(:has(.tv-preview)) > .tv-now-line strong { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }

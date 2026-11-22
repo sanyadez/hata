@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { cleanOffset, browserCalls, browserSound, browserUnitText, browserHomeHtml, cleanShowTime, pointerCalls, cleanBookmarks, mediaScript, consoleText, frameArgs } from "../src/tv";
+import { cleanOffset, browserCalls, browserSound, browserUnitText, browserHomeHtml, cleanShowTime, pointerCalls, cleanBookmarks, mediaScript } from "../src/tv";
 import { cleanLink, isLink, linkName, probeArgs, sourceArgs, streamZero, cleanStart, keyframeArgs, mediaOf, prefsOf, prefValue, streamArgs, subsArgs, tracksOf, clickPacket, helloPacket, KEEP_WINDOW, KEEP_YES, pictureOf, advancedXml, cleanFolders, shortTitle, hwdbText, keymapXml, polkitRule, decodePackages, isOurs, monitorAudio, monitorName, playable, portIn, readDisplay, remoteCall, seconds, sourcesXml, takeJson, unitText } from "../src/tv";
 
 function edid(name: string, audio: boolean): Uint8Array {
@@ -342,13 +342,4 @@ test("the mouse made for a moment to put the pointer away", async () => {
   const move = inputEvent(2, 1, -5);
   expect(move.length).toBe(24);
   expect([...move.subarray(16)]).toEqual([2, 0, 1, 0, 0xfb, 0xff, 0xff, 0xff]);
-});
-
-test("the text console as lines, and the frame of a film", () => {
-  const cell = (text: string, cols: number) => [...text.padEnd(cols, " ")].flatMap((ch) => [ch.charCodeAt(0), 7]);
-  const raw = new Uint8Array([3, 10, 0, 0, ...cell("", 10), ...cell("login: _", 10), ...cell("", 10)]);
-  expect(consoleText(raw)).toBe("login: _");
-  expect(consoleText(new Uint8Array([3, 10, 0, 0, 1, 2]))).toBe("");
-  expect(frameArgs("/a b.mkv", 125.7)).toContain("125");
-  expect(frameArgs("/a b.mkv", -4)[frameArgs("/a b.mkv", -4).indexOf("-ss") + 1]).toBe("0");
 });

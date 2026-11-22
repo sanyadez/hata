@@ -16,7 +16,7 @@ import { saveSettings, settings } from "./config";
 import { awaitKodi, kodiRuns, screenDark, sleepScreen, playOnTv, screenShares, setUp, switchTv, tvEnabled, tvNow, tvReport, type TvPage, type TvReport } from "./kodi";
 import { installCommand, packageManager, PATH, run, runLogged } from "./packages";
 import { parkPointer } from "./pointer";
-import { BROWSER_HOME_SCRIPT, BROWSER_POINTER_SCRIPT, BROWSER_PACKAGES, browserCalls, cleanBookmarks, consoleText, frameArgs, MEDIA_ACTIONS, mediaScript, pointerCalls, PREVIEW_WIDTH, browserHomeHtml, TV_BROWSER_HOME, TV_USER, browserSound, browserUnitText, cleanLink, cleanShowTime, linkName, TV_BROWSER_PORT, TV_BROWSER_UNIT, TV_UNIT, type BrowserReport, type PageCall, type PageMedia, type Screen } from "./tv";
+import { BROWSER_HOME_SCRIPT, BROWSER_POINTER_SCRIPT, BROWSER_PACKAGES, browserCalls, cleanBookmarks, MEDIA_ACTIONS, mediaScript, pointerCalls, PREVIEW_WIDTH, browserHomeHtml, TV_BROWSER_HOME, TV_USER, browserSound, browserUnitText, cleanLink, cleanShowTime, linkName, TV_BROWSER_PORT, TV_BROWSER_UNIT, TV_UNIT, type BrowserReport, type PageCall, type PageMedia, type Screen } from "./tv";
 
 const UNIT_FILE = "/etc/systemd/system/" + TV_BROWSER_UNIT;
 const has = (bin: string): boolean => !!Bun.which(bin, { PATH });
@@ -421,10 +421,7 @@ export async function screenStream(signal: AbortSignal): Promise<Response> {
 
 /** What the screen shows right now, as a small picture for Hata's page: only while the browser has it */
 export async function screenShot(big = false): Promise<Uint8Array> {
-  if (!(await browserRuns())) {
-    if (await kodiRuns()) return kodiFrame();
-    throw new AppError("tv.browserOff", 409);
-  }
+  if (!(await browserRuns())) throw new AppError("tv.browserOff", 409);
   cast.asked = Date.now();
   // looked at on a whole screen, the picture is sent as large as the screen itself
   if (cast.on && link && cast.big !== big) {
@@ -457,46 +454,10 @@ export async function screenShot(big = false): Promise<Uint8Array> {
 }
 
 /** What is on the screen, for a card that keeps looking: the player's "now" and, while a page shows, how its video stands */
-export async function screenNow(): Promise<ReturnType<typeof tvNow> & { kind: Screen; media: PageMedia | null; console: string; picture: boolean; left: number; back: boolean; bookmarks: typeof settings.tv.bookmarks; can: { kodi: boolean; browser: boolean } }> {
+export async function screenNow(): Promise<ReturnType<typeof tvNow> & { kind: Screen; media: PageMedia | null; left: number; back: boolean; bookmarks: typeof settings.tv.bookmarks; can: { kodi: boolean; browser: boolean } }> {
   const browsing = await browserRuns();
   const kind: Screen = browsing ? "browser" : (await kodiRuns()) ? "kodi" : screenDark() ? "dark" : "off";
-  let text = "";
-  if (kind === "off") {
-    try {
-      text = consoleText(new Uint8Array(readFileSync("/dev/vcsa1")));
-    } catch {}
-  }
-  const playing = tvNow().playing;
-  // a picture can be had: the page's own, or a frame of the film the player has, taken from its file
-  return { ...tvNow(), kind, media: browsing ? await media().catch(() => null) : null, console: text, left: browsing ? secondsLeft() : 0, back: browsing ? (showing?.back ?? tvEnabled()) : false, bookmarks: settings.tv.bookmarks, can: { kodi: has("kodi"), browser: browserInstalled() }, picture: browsing || (kind === "kodi" && !!playing && playing.file.startsWith("/") && has("ffmpeg")) };
-}
-
-/** The frame of the film last taken: one per ten seconds of the film is enough to see what plays */
-let framed: { key: string; data: Uint8Array } | null = null;
-let framing: Promise<Uint8Array | null> | null = null;
-
-/** What the player shows about now: a frame of the film it plays, read from the file at that moment (Kodi gives no picture of its screen) */
-async function kodiFrame(): Promise<Uint8Array> {
-  const playing = tvNow().playing;
-  if (!playing || !playing.file.startsWith("/") || !has("ffmpeg")) throw new AppError("tv.noPicture", 409);
-  const at = playing.time + (playing.paused ? 0 : (Date.now() - playing.at) / 1000);
-  const key = `${playing.file}|${playing.paused ? Math.floor(at) : Math.floor(at / 10)}`;
-  if (framed?.key === key) return framed.data;
-  framing ??= (async () => {
-    try {
-      const child = Bun.spawn(frameArgs(playing.file, at), { stdout: "pipe", stderr: "ignore", env: { PATH }, signal: AbortSignal.timeout(10_000) });
-      const data = new Uint8Array(await new Response(child.stdout).arrayBuffer());
-      return (await child.exited) === 0 && data.length > 500 ? data : null;
-    } catch {
-      return null;
-    } finally {
-      framing = null;
-    }
-  })();
-  const data = await framing;
-  if (data) framed = { key, data };
-  if (!framed) throw new AppError("tv.noPicture", 409);
-  return framed.data;
+  return { ...tvNow(), kind, media: browsing ? await media().catch(() => null) : null, left: browsing ? secondsLeft() : 0, back: browsing ? (showing?.back ?? tvEnabled()) : false, bookmarks: settings.tv.bookmarks, can: { kodi: has("kodi"), browser: browserInstalled() } };
 }
 
 /** A button of the page's remote for the browser */
