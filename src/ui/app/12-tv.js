@@ -906,7 +906,7 @@ function paintTv() {
       ? screens.map((d) => h("div", { class: "kv" }, h("span", { class: "with-icon" }, icon("tv"), [d.monitor, d.name].filter(Boolean).join(" · ")), h("span", { class: "muted" }, [d.mode.replace("x", "×"), t(d.audio ? "tv.screenSound" : "tv.screenSilent")].filter(Boolean).join(" · "))))
       : h("div", { class: "tvr-note warn" }, h("strong", { class: "with-icon" }, icon("tv"), t("tv.noScreenTitle")), h("p", { class: "muted small" }, t(tv.displays.length ? "tv.noScreen" : "tv.noOutput")), tv.displays.length > 0 && h("div", { class: "row-actions" }, button(t("tv.lookAgain"), { class: "small", onclick: () => void loadTv() }, "refresh"))),
     tv.remotes.length > 0 && h("div", { class: "kv" }, h("span", { class: "muted" }, t("tv.remotes")), h("span", null, tv.remotes.join(", "))),
-    h("p", { class: "muted small" }, t("tv.remotesHint")),
+    h("p", { class: "muted small" }, t(tv.screen === "browser" ? "tv.remotesHint.browser" : "tv.remotesHint")),
   );
 
   // a web page on the screen: the browser's own packages by their button, then an address and "Show"
@@ -1073,8 +1073,8 @@ function paintTv() {
     saver,
   );
 
-  // the remote is the page's main thing; what is set once stands beside it
-  put(box, h("div", { class: "tv-page" }, remoteCard, h("div", { class: "stack" }, playerCard, pageShown && pageCard, screenCard, foldersCard, languageCard, audioCard, pictureCard, haCard, b.installed && apiCard, browserCard)));
+  // the remote is the page's main thing; what is set once stands beside it — the player's own settings only while the player has the screen
+  put(box, h("div", { class: "tv-page" }, remoteCard, h("div", { class: "stack" }, playerCard, pageShown && pageCard, screenCard, ...(tv.screen === "kodi" ? [foldersCard, languageCard, audioCard, pictureCard, haCard] : []), b.installed && apiCard, tv.screen === "kodi" && browserCard)));
   tvStick();
   if (tv.asking) tvKeepDialog();
 }

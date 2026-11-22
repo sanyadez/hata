@@ -5287,6 +5287,7 @@
   "tv.noOutput": "This server has no video output (virtual machines and containers often have none).",
   "tv.remotes": "Input devices",
   "tv.remotesHint": "A keyboard, mouse or remote connected to the server controls the player directly. On remotes for Android boxes the OK and Menu buttons are remapped so that Kodi understands them. Power and sleep buttons on connected keyboards and remotes are disabled: otherwise they would shut the whole server down. The TV's own remote works only if the server's HDMI port supports CEC; most mini PCs do not.",
+  "tv.remotesHint.browser": "A mouse or an air-mouse remote plugged into the server moves the pointer on the page and clicks; a keyboard types into it. The remote's “back” goes a page back, “home” gives the screen back. The power and sleep buttons of plugged-in keyboards and remotes are turned off: they would shut the whole server down.",
   "tv.needsTitle": "Kodi is required",
   "tv.needsShort": "The player is Kodi, a free media centre. Install it from the TV page.",
   "tv.needsLead": "The player is Kodi, a free media centre. With its graphics and video decoding libraries it takes about 350 MB. Installing it does not start it.",
