@@ -384,8 +384,6 @@ dialog.tile-folder header { justify-content: space-between; }
 
 /* every block of the page is a card of the same look; a block decides its own inner layout by its width */
 .widget.card { border-radius: var(--radius-lg); container-type: inline-size; }
-.block-icon { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 8px; background: var(--surface-2); color: var(--muted); flex: none; }
-.block-icon .ico { width: 16px; height: 16px; }
 
 /* this server: its numbers, then CPU and memory of the last 40 minutes */
 .kpi[hidden] { display: none; }
@@ -779,9 +777,9 @@ pre.said { margin: 0; padding: 10px 12px; max-height: 240px; overflow: auto; bor
 .fills .c4 { background: var(--accent); }
 .fills .c5 { background: var(--ok); }
 .fills .c-rest { background: var(--faint); }
-.setting { display: flex; align-items: center; gap: 24px; padding: 14px 0; border-top: 1px solid var(--border); flex-wrap: wrap; }
-.setting strong { font-weight: 600; }
-.setting .muted { margin-top: 3px; overflow-wrap: anywhere; }
+.setting { display: flex; align-items: center; gap: 8px 16px; padding: 12px 0; border-top: 1px solid var(--border); flex-wrap: wrap; }
+.setting strong { font-size: 14px; font-weight: 600; }
+.setting .muted { margin-top: 2px; font-size: 12px; overflow-wrap: anywhere; }
 .setting-control { width: 280px; max-width: 100%; display: flex; justify-content: flex-end; }
 /* a row of buttons takes the room it needs instead of spilling over the text */
 .setting-control:has(.row-actions, .swatches) { width: auto; flex: none; }
@@ -1383,28 +1381,8 @@ body:has(.assistant.paged) > .assistant-fab { display: none; }
 h1, h2, h3 { word-spacing: 0.08em; }
 
 /* Servers: one tree of what runs where */
-.server-tree { overflow: hidden; }
-.tree-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 20px; flex-wrap: wrap; }
-.tree-banner { display: flex; align-items: center; gap: 10px; padding: 10px 20px; background: color-mix(in srgb, var(--accent) 16%, transparent); border-top: 1px solid var(--border); }
-.tree-row { display: grid; grid-template-columns: minmax(0, 1.5fr) minmax(0, 1.5fr) minmax(0, 1fr) minmax(0, 1.2fr) minmax(190px, auto); align-items: center; gap: 12px; padding: 7px 20px; border-top: 1px solid var(--border); min-height: 44px; }
-.tree-row.child { cursor: pointer; }
-@media (hover: hover) { .tree-row.child:hover { background: var(--surface-2); } }
-.tree-row.group { background: var(--surface-2); cursor: pointer; }
-.tree-row.empty { display: block; cursor: default; padding-left: 54px; }
-.tree-cols { min-height: 0; color: var(--muted); font-size: 11px; letter-spacing: 0.08em; text-transform: uppercase; }
-.tree-name { display: flex; align-items: center; gap: 8px; min-width: 0; }
-.tree-row.child .tree-name { padding-left: 34px; }
-.tree-name .chip { flex: none; }
-.tree-name a { color: inherit; text-decoration: none; }
-.tree-fold { width: 26px; height: 26px; flex: none; }
-.tree-what, .tree-state, .tree-busy { min-width: 0; overflow-wrap: anywhere; }
 .tree-load { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.tree-bar { width: 44px; height: 4px; flex: none; border-radius: 2px; background: var(--border); overflow: hidden; display: block; }
-.tree-bar i { display: block; height: 100%; background: var(--ok, #2e9e6b); }
-.tree-bar i.warn { background: var(--accent); }
-.tree-bar i.danger { background: var(--danger); }
-.tree-actions { justify-content: flex-end; flex-wrap: nowrap; }
-.tree-foot { display: flex; align-items: center; gap: 8px; padding: 12px 20px; border-top: 1px solid var(--border); text-decoration: none; }
+.tree-bar { width: 44px; flex: none; display: block; }
 i.dot.stopped { background: var(--faint); }
 i.dot.danger { background: var(--danger); }
 .ha-page { display: grid; grid-template-columns: minmax(0, 1.8fr) minmax(280px, 1fr); gap: 16px; align-items: start; }
@@ -1417,20 +1395,9 @@ i.dot.danger { background: var(--danger); }
   .ha-page { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 760px) {
-  .tree-cols { display: none; }
-  .tree-row { grid-template-columns: minmax(0, 1fr) auto; gap: 2px 10px; padding: 10px 14px; }
-  .tree-row > .tree-name { grid-column: 1; }
-  .tree-row > .tree-what, .tree-row > .tree-state, .tree-row > .tree-busy { grid-column: 1; }
-  .tree-row > .tree-actions { grid-column: 2; grid-row: 1 / span 4; }
-  /* a name keeps its line: what stands next to it goes under it, not the name's letters one by one */
-  .tree-name { flex-wrap: wrap; }
-  .tree-row.child .tree-name { padding-left: 0; }
-  .tree-row.child { padding-left: 24px; }
-  .tree-busy:empty { display: none; }
 }
 .thing-head { display: grid; gap: 10px; }
 .thing-head .app-head { padding: 0; margin: 0; background: none; border: 0; }
-.tree-name a { overflow-wrap: break-word; min-width: 0; }
 .tree-load span { white-space: nowrap; }
 @media (max-width: 760px) {
   .tree-bar { display: none; }
@@ -1442,7 +1409,6 @@ i.dot.danger { background: var(--danger); }
 
 /* what was found for an integration: under its words, on their left */
 .integration-found { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
-.tree-head .meta { margin-top: 4px; }
 
 /* the torrents of a qBittorrent */
 .qbit-tools { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; padding: 16px 20px; }
@@ -2064,10 +2030,6 @@ button.tv-mark { background: none; border: 0; padding: 0; font: inherit; text-al
 
 /* Load: what takes what, thing by thing */
 .load-place { display: grid; gap: 10px; padding-bottom: 6px; }
-.load-place > .block-head { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; padding: 16px 18px 0; min-width: 0; }
-.load-place > .block-head h2 { font-size: 16px; min-width: 0; }
-.load-place > .pad-x { padding: 0 18px; }
-.load-place > .pad-b { padding: 0 18px 14px; }
 .load-what { display: flex; align-items: center; gap: 10px; min-width: 0; }
 .load-kind { display: grid; place-items: center; width: 28px; height: 28px; flex: none; border-radius: var(--radius-sm); background: var(--surface-2); color: var(--muted); }
 .load-table td:last-child { width: 130px; }
@@ -2077,11 +2039,7 @@ tr.warn-row .load-line path { stroke: var(--warn); }
 .th-sort { all: unset; cursor: pointer; display: inline-flex; align-items: center; gap: 4px; }
 .th-sort.active { color: var(--text); }
 .th-sort .ico { width: 14px; height: 14px; }
-.load-head { display: grid; gap: 12px; }
-.load-head .tree-head { padding: 0; }
-.load-head .tree-head p { margin-top: 4px; }
 #load-body { display: grid; gap: 16px; min-width: 0; }
-.load-head .seg-pills { justify-self: start; }
 
 /* A card whose heading stands inside it, above a table or a row of numbers that reaches the card's edges */
 .card.head-in > .card { border: 0; border-radius: 0; box-shadow: none; background: none !important; backdrop-filter: none !important; border-top: 1px solid var(--border); }
@@ -2131,7 +2089,6 @@ tr.warn-row .load-line path { stroke: var(--warn); }
 /* a block of a card brings no margins of its own: the gap is the card's (a foot pinned to the bottom keeps its auto) */
 .card.pad > :not(.block-foot, .module-card-foot) { margin-block: 0; }
 .card.pad > .cmd { padding-block: 0; }
-.load-head { gap: var(--gap); }
 .module-card { gap: var(--gap-small); }
 .card > :is(.kv, .setting, .tool, .activity-item) + :is(.kv, .setting, .tool, .activity-item) { margin-top: calc(-1 * var(--gap)); }
 .card > :is(.kv, .setting, .tool, .activity-item):first-child, .card > :not(.kv, .setting, .tool, .activity-item) + :is(.kv, .setting, .tool, .activity-item) { padding-top: 0; border-top: 0; }
@@ -2149,9 +2106,7 @@ tr.warn-row .load-line path { stroke: var(--warn); }
 .card.auth { gap: var(--gap); }
 .card.auth > .error:empty { display: none; }
 .load-place { gap: 0; padding-bottom: 0; }
-.load-place > .block-head { padding: var(--pad) var(--pad) var(--gap-small); }
 .load-place > :is(.pad-x, .pad-b) { padding: 0 var(--pad); }
-.load-place > .pad-b { padding-bottom: var(--pad); }
 /* an empty block (a place an error or a later answer goes into) takes no gap of its own */
 .card.pad > :empty:not(input, img, canvas, svg, textarea, select, iframe, hr, progress, video, button) { display: none; }
 .sys-status.end { justify-content: flex-end; }
@@ -2623,7 +2578,7 @@ dialog:focus { outline: none; }
    :active. tests/ui.test.ts holds the rules (no :hover outside, no opacity on :disabled, no accent in a hover). */
 :root { -webkit-tap-highlight-color: transparent; }
 :focus-visible { outline-color: var(--focus); }
-:is(tr.clickable, .tree-row, .seg-pill, .tab-row > *):focus-visible { outline-offset: -2px; }
+:is(tr.clickable, .seg-pill, .tab-row > *):focus-visible { outline-offset: -2px; }
 :is(.menu-item, [role="option"]):focus-visible { outline: none; background: var(--surface-2); }
 .tv-stage :focus-visible { outline-color: var(--accent); }
 :is(input, textarea):not([type="checkbox"], [type="radio"], [type="range"]), .select-btn { border-color: var(--border-strong); }
@@ -2983,3 +2938,13 @@ button.tv-stage-chip:active { background: rgb(0 0 0 / 0.9); }
 .app-notices { display: grid; gap: 8px; }
 .ui-tile.off .ui-tile-name { color: var(--muted); }
 .ui-tile-icon > .app-icon { width: 100%; height: 100%; border-radius: 10px; }
+.card.pad > .stores-rows > .ui-row { padding-inline: 0; }
+/* a field and its button in a setting stay on one line: the field gives way */
+.setting-control > .pair { flex-wrap: nowrap; gap: 8px; width: 100%; justify-content: flex-end; }
+.setting-control > .pair > input:not(.short) { flex: 1; min-width: 0; }
+.setting-control > .pair > .btn { flex: none; }
+/* the marks beside a card's title stand apart from it: a tag, a state, a count */
+.section-head > h2:has(> :is(.ui-tag, .ui-state, .ui-count)) { display: flex; align-items: center; flex-wrap: wrap; gap: 4px 8px; }
+.tree-name { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+.ui-notice.off { background: var(--surface-2); } .ui-notice.off > .ico { color: var(--faint); }
+.load-place .ui-empty.small > .btn { margin-left: 0; }

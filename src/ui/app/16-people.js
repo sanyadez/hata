@@ -1151,7 +1151,7 @@ function renderSettings() {
  */
 /** The way to the store from the head of a section: the same button wherever it stands; `category` opens one of its parts */
 function storeButton(category = "") {
-  return h("a", { class: "btn", href: "#/store", onclick: () => (state.storeFilter.category = category) }, icon("store"), h("span", null, t("area.apps.store")));
+  return h("a", { class: "btn primary", href: "#/store", onclick: () => (state.storeFilter.category = category) }, icon("store"), h("span", null, t("area.apps.store")));
 }
 
 /** The name of a page of Integrations: its tab's, or a connected service's kind */

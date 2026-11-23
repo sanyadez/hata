@@ -113,9 +113,7 @@ const guestOfRow = (r) => ({ id: r.guest.id, type: r.guest.type, name: r.name, v
 function treeLoad(cpu, memory) {
   if (cpu == null && !memory) return h("span", { class: "muted" }, "—");
   const percent = cpu != null ? Math.round(cpu) : memory?.total ? Math.round((memory.used / memory.total) * 100) : 0;
-  const fill = h("i", { class: level(percent) });
-  fill.style.width = percent + "%";
-  return h("span", { class: "tree-load" }, h("span", { class: "tree-bar" }, fill), cpu != null && h("span", { class: "mono" }, `${Math.round(cpu)}%`), memory && h("span", { class: "mono muted" }, memory.total ? `${bytes(memory.used)} / ${bytes(memory.total)}` : bytes(memory.used)));
+  return h("span", { class: "tree-load" }, h("span", { class: "tree-bar" }, uiMeter(percent, { kind: "load" })), cpu != null && h("span", { class: "mono" }, `${Math.round(cpu)}%`), memory && h("span", { class: "mono muted" }, memory.total ? `${bytes(memory.used)} / ${bytes(memory.total)}` : bytes(memory.used)));
 }
 
 /** The one thing a row offers: what is first wanted of it in the state it is in */
@@ -158,35 +156,34 @@ function treeMenu(r, at) {
   if (m) return machineMenu(m, at);
 }
 
+/** A row of a host's table: a computer, a container, a guest */
 function treeRow(r) {
   const what = [t("tree.kind." + r.kind), r.os].filter(Boolean).join(" · ");
   const word = r.status === "away" ? t("machines.seen", { ago: ago(r.seen) }) : r.kind === "machine" ? t("machines.online") : t("pve.status." + r.status);
-  return h(
-    "div",
-    { class: "tree-row child", role: "row", menu: (at) => treeMenu(r, at), onclick: (e) => !e.target.closest("a, button") && go(rowPage(r)) },
-    h("div", { class: "tree-name" }, h("i", { class: "dot " + (r.status === "running" ? "running" : r.status === "paused" ? "restarting" : "stopped") }), h("a", { class: "strong", href: rowPage(r) }, r.name), r.self && h("span", { class: "chip accent" }, t("pve.selfChip"))),
-    h("div", { class: "tree-what muted small" }, what),
-    h("div", { class: "tree-state small" }, word, r.noBackup && h("span", { class: "accent-text" }, " · ", t("tree.noBackup"))),
-    h("div", { class: "tree-busy small" }, treeLoad(r.cpu, r.memory)),
-    h("div", { class: "row-actions tree-actions" }, treeAction(r), h("button", { type: "button", class: "btn small square", "aria-label": t("app.more"), onclick: (e) => (e.stopPropagation(), treeMenu(r, underButton(e.currentTarget))) }, icon("more"))),
-  );
+  const tone = r.status === "running" ? "ok" : r.status === "paused" ? "warn" : r.status === "away" ? "bad" : "off";
+  const memory = r.memory && (r.memory.total ? `${bytes(r.memory.used)} / ${bytes(r.memory.total)}` : bytes(r.memory.used));
+  return {
+    href: rowPage(r),
+    menu: (at) => treeMenu(r, at),
+    cells: [
+      h("span", { class: "tree-name" }, h("strong", null, r.name), r.self && uiTag(t("pve.selfChip")), r.noBackup && uiTag(t("tree.noBackup"))),
+      h("span", { class: "muted small" }, what),
+      uiState(tone, word),
+      treeLoad(r.cpu, r.memory),
+      h("div", { class: "row-actions end", onclick: (e) => e.stopPropagation() }, treeAction(r), h("button", { type: "button", class: "btn small square ui-more", "aria-label": t("app.more"), onclick: (e) => treeMenu(r, underButton(e.currentTarget)) }, icon("more"))),
+    ],
+    sub: [what, memory].filter(Boolean).join(" · "),
+  };
 }
 
+/** A host — this server, a Proxmox server, the other computers — as a card with the table of what runs there */
 function treeGroup(g) {
-  const closed = treeUi.closed.has(g.key);
-  const toggle = (e) => {
-    e.stopPropagation();
-    if (closed) treeUi.closed.delete(g.key);
-    else treeUi.closed.add(g.key);
-    localStorage.setItem("hata.tree", JSON.stringify([...treeUi.closed]));
-    renderMachinesBody(true);
-  };
   const x = g.kind === "pve" && pveUi.list?.hosts?.find((y) => y.id === g.id);
   const page = g.kind === "here" ? "#/machines/this" : g.kind === "pve" ? `#/proxmox/${g.id}` : null;
   const head = {
-    here: { chip: t("tree.thisServer"), what: [g.os, g.address].filter(Boolean).join(" · "), state: t("tree.up", { time: duration(g.uptime) }) },
-    pve: { chip: "Proxmox", what: [g.os, g.online && t("tree.guests", { running: g.counts.running, all: g.counts.all })].filter(Boolean).join(" · "), state: g.online ? t("pve.online") : t("tree.noAnswer") },
-    others: { chip: "", what: t("tree.othersLead"), state: t("tree.connected", { running: g.counts.running, all: g.counts.all }) },
+    here: { chip: t("tree.thisServer"), what: [g.os, g.address, t("tree.up", { time: duration(g.uptime) })].filter(Boolean).join(" · "), state: uiState("ok", t("status.running")) },
+    pve: { chip: "Proxmox", what: [g.os, g.online && t("tree.guests", { running: g.counts.running, all: g.counts.all })].filter(Boolean).join(" · "), state: uiState(g.online ? "ok" : "bad", g.online ? t("pve.online") : t("tree.noAnswer")) },
+    others: { chip: "", what: t("tree.othersLead"), state: null },
   }[g.kind];
   const menu =
     g.kind === "here"
@@ -195,30 +192,34 @@ function treeGroup(g) {
           { label: t("terminal.title"), icon: "terminal", href: "#/terminal" },
           hasModule("containers") && { label: t("tree.containers"), icon: "box", href: "#/machines/this/containers" },
           { label: t("power.reboot"), icon: "refresh", run: () => serverPowerDialog("reboot") },
-          { label: t("power.poweroff"), icon: "stop", run: () => serverPowerDialog("poweroff") },
+          { label: t("power.poweroff"), icon: "stop", danger: true, run: () => serverPowerDialog("poweroff") },
         ])
       : x
         ? (at) => pveMenu(x, at)
         : null;
-  return [
-    h(
-      "div",
-      { class: "tree-row group", role: "row", ...(menu ? { menu } : {}), onclick: (e) => page && !e.target.closest("a, button") && go(page) },
-      h("div", { class: "tree-name" }, h("button", { type: "button", class: "icon-btn tree-fold", "aria-expanded": !closed, "aria-label": g.name || t("tree.others"), onclick: toggle }, icon(closed ? "chevron" : "down")), g.kind !== "others" && h("i", { class: "dot " + (g.online ? "running" : "danger") }), page ? h("a", { class: "strong", href: page }, g.name) : h("strong", null, t("tree.others")), head.chip && h("span", { class: "chip" }, head.chip)),
-      h("div", { class: "tree-what muted small" }, head.what),
-      h("div", { class: "tree-state small" + (g.online ? "" : " error") }, head.state),
-      h("div", { class: "tree-busy small" }, g.kind === "others" ? null : treeLoad(g.cpu, g.memory)),
-      h(
-        "div",
-        { class: "row-actions tree-actions" },
-        g.kind === "here" && h("a", { class: "btn small", href: "#/terminal" }, icon("terminal"), h("span", null, t("machines.tab.terminal"))),
-        g.kind === "pve" && (g.online ? x?.url && h("a", { class: "btn small", href: x.url, target: "_blank", rel: "noopener noreferrer" }, icon("external"), h("span", null, t("tree.openProxmox"))) : button(t("tree.askAgain"), { class: "small", onclick: () => void loadPve().then(loadTree) }, "refresh")),
-        menu && h("button", { type: "button", class: "btn small square", "aria-label": t("app.more"), onclick: (e) => menu(underButton(e.currentTarget)) }, icon("more")),
-      ),
-    ),
-    !closed && g.rows.map(treeRow),
-    !closed && g.kind === "here" && !g.rows.length && h("div", { class: "tree-row child empty" }, h("p", { class: "muted small" }, t("tree.hereNone"))),
-  ];
+  const load = g.kind !== "others" && (g.cpu != null || g.memory) && h("span", { class: "ui-row-time" }, [g.cpu != null && t("tree.loadCpu", { n: Math.round(g.cpu) }), g.memory?.total && t("tree.loadMemory", { used: bytes(g.memory.used), total: bytes(g.memory.total) })].filter(Boolean).join(" · "));
+  const action =
+    g.kind === "here"
+      ? h("a", { class: "btn small", href: "#/terminal" }, icon("terminal"), h("span", null, t("machines.tab.terminal")))
+      : g.kind === "pve"
+        ? g.online
+          ? x?.url && h("a", { class: "btn small", href: x.url, target: "_blank", rel: "noopener noreferrer" }, icon("external"), h("span", null, t("tree.openProxmox")))
+          : button(t("tree.askAgain"), { class: "small", onclick: () => void loadPve().then(loadTree) }, "refresh")
+        : null;
+  const title = page ? h("a", { href: page }, g.name) : t("tree.others");
+  const columns = [{ label: t("tree.col.name") }, { label: t("tree.col.what") }, { label: t("tree.col.state") }, { label: t("tree.col.load") }, { label: "" }];
+  return uiCard(
+    {
+      title,
+      marks: [head.chip && uiTag(head.chip), head.state],
+      lead: head.what,
+      flush: true,
+      cls: "tree-host",
+      menu,
+      actions: [load, action, menu && h("button", { type: "button", class: "btn small square ui-more", "aria-label": t("app.more"), onclick: (e) => menu(underButton(e.currentTarget)) }, icon("more")), g.kind === "here" && hasModule("containers") && h("a", { class: "ui-link", href: "#/machines/this/containers/settings" }, t("tree.containersSettings"), icon("chevron"))].filter(Boolean),
+    },
+    g.rows.length ? uiTable(columns, g.rows.map(treeRow), { height: 44 }) : uiEmpty({ text: t(g.kind === "here" ? "tree.hereNone" : "tree.none"), action: g.kind === "here" && button(t("machines.addAny"), { class: "quiet small", onclick: (e) => addToMachinesMenu(e.currentTarget) }, "plus") }),
+  );
 }
 
 async function updateClients(list, el) {
@@ -239,13 +240,11 @@ function renderMachinesBody(force = false) {
   put(
     box,
     h(
-      "section",
-      { class: "card server-tree" },
-      h("div", { class: "tree-head" }, h("div", null, h("h1", null, t("nav.machines")), h("p", { class: "meta" }, meta)), h("div", { class: "actions" }, button(t("load.title"), { onclick: () => go("#/machines/load") }, "chart"), button(t("machines.addAny"), { class: "primary", onclick: (e) => addToMachinesMenu(e.currentTarget) }, "plus"))),
-      d.outdated.length > 0 && h("div", { class: "tree-banner" }, icon("up", "accent-text"), h("span", { class: "grow" }, h("strong", null, t("tree.outdated", { version: d.version })), " ", h("span", { class: "muted" }, d.outdated.map((m) => m.name).join(", "))), button(t("tree.updateAll"), { class: "small", onclick: (e) => updateClients(d.outdated, e.currentTarget) }, "up")),
-      h("div", { class: "tree-row tree-cols small", role: "row" }, h("div", null, t("tree.col.name")), h("div", null, t("tree.col.what")), h("div", null, t("tree.col.state")), h("div", null, t("tree.col.load")), h("div")),
-      d.groups.flatMap(treeGroup),
-      hasModule("containers") && h("a", { class: "tree-foot small muted", href: "#/machines/this/containers/settings" }, icon("sliders"), h("span", { class: "grow" }, t("tree.foot")), icon("chevron")),
+      "div",
+      { class: "stack server-tree" },
+      pageHead({ title: t("nav.machines"), facts: [meta], actions: [{ label: t("machines.addAny"), icon: "plus", primary: true, run: () => addToMachinesMenu(document.querySelector(".server-tree .ui-head .ui-main")) }, { label: t("load.title"), icon: "chart", href: "#/machines/load" }] }),
+      d.outdated.length > 0 && uiCard({}, uiNotice({ tone: "info", icon: "up", title: t("tree.outdated", { version: d.version }), text: d.outdated.map((m) => m.name).join(", "), action: button(t("tree.updateAll"), { class: "small", onclick: (e) => updateClients(d.outdated, e.currentTarget) }, "up") })),
+      d.groups.map(treeGroup),
     ),
   );
 }
@@ -335,17 +334,13 @@ function paintLoad() {
   const pill = (id, label) => h("a", { class: "seg-pill" + (at === id ? " active" : ""), href: id ? `#/machines/load/${id}` : "#/machines/load" }, label);
   const placeLabel = (p) => (p.kind === "here" ? t("load.here", { name: p.name }) : p.kind === "pve" && p.host !== p.name ? `${p.host} · ${p.name}` : p.name);
   const w = d.warn;
+  const places = [{ value: "", label: t("load.all"), href: "#/machines/load" }, ...d.places.map((p) => ({ value: p.id, label: placeLabel(p), href: `#/machines/load/${p.id}` }))];
   put(
     box,
-    h(
-      "section",
-      { class: "card area-head load-head" },
-      h("div", { class: "tree-head" }, h("div", null, h("h1", null, t("load.title")), h("p", { class: "muted small" }, t("load.lead", { n: d.minutes }))), button(t("load.warn.button"), { class: "small", onclick: loadWarnDialog }, "bell")),
-      h("p", { class: "muted small" }, w.warn ? t("load.warn.on", { cpu: w.cpu, minutes: w.minutes }) : t("load.warn.off")),
-      d.places.length > 1 && h("div", { class: "seg-pills" }, pill("", t("load.all")), d.places.map((p) => pill(p.id, placeLabel(p)))),
-    ),
+    pageHead({ crumbs: [{ label: t("nav.machines"), href: "#/machines" }, { label: t("load.title") }], title: t("load.title"), facts: [t("load.lead", { n: d.minutes })], actions: [{ label: t("load.warn.button"), icon: "bell", run: loadWarnDialog }] }),
+    uiCard({}, uiNotice({ tone: w.warn ? "info" : "off", icon: "bell", text: w.warn ? t("load.warn.on", { cpu: w.cpu, minutes: w.minutes }) : t("load.warn.off") }), d.places.length > 1 && uiSegment(places, at, (v) => go(v ? `#/machines/load/${v}` : "#/machines/load"), { label: t("load.title") })),
     shown.map((p) => loadPlace(p, placeLabel(p))),
-    !shown.length && h("section", { class: "card pad muted" }, t("load.nothing")),
+    !shown.length && uiCard({}, uiEmpty({ size: "big", icon: "chart", title: t("load.nothing") })),
   );
 }
 
@@ -358,21 +353,17 @@ function loadPlace(p, label) {
   const memPercent = p.memory.total ? Math.round((p.memory.used / p.memory.total) * 100) : 0;
   const head = (id, text) => h("th", { class: "num" }, h("button", { type: "button", class: "th-sort" + (loadUi.sort === id ? " active" : ""), "aria-pressed": String(loadUi.sort === id), onclick: () => ((loadUi.sort = id), paintLoad()) }, text, loadUi.sort === id && icon("down")));
   const old = Date.now() - p.at > 60_000;
-  return h(
-    "section",
-    { class: "card load-place" },
-    h(
-      "div",
-      { class: "block-head" },
-      h("span", { class: "block-icon" }, icon(p.kind === "pve" ? "box" : "server")),
-      h("h2", { class: "clip" }, label),
-      h("span", { class: "muted small grow" }, t("load.cores", { n: p.cores })),
-      h("span", { class: "small" }, t("load.total", { cpu: p.cpu ?? "—", used: bytes(p.memory.used), total: bytes(p.memory.total), percent: memPercent })),
-      p.power && p.power.total !== null && button(t("power.draw", { watts: p.power.total }), { class: "small ghost", title: t("power.drawTitle"), onclick: () => drawDialog(p) }, "power"),
-    ),
-    old && h("p", { class: "muted small pad-x" }, t("load.stale", { time: ago(p.at) })),
+  return uiCard(
+    {
+      title: label,
+      count: t("load.cores", { n: p.cores }),
+      flush: true,
+      cls: "load-place",
+      actions: [h("span", { class: "ui-row-time" }, t("load.total", { cpu: p.cpu ?? "—", used: bytes(p.memory.used), total: bytes(p.memory.total), percent: memPercent })), p.power && p.power.total !== null && button(t("power.draw", { watts: p.power.total }), { class: "small", title: t("power.drawTitle"), onclick: () => drawDialog(p) }, "power")].filter(Boolean),
+    },
+    old && h("div", { class: "ui-inset" }, uiNotice({ tone: "warn", text: t("load.stale", { time: ago(p.at) }) })),
     !rows.length
-      ? h("p", { class: "muted small pad" }, t(p.kind === "machine" ? "load.soonMachine" : "load.soon"))
+      ? uiEmpty({ text: t(p.kind === "machine" ? "load.soonMachine" : "load.soon") })
       : h(
           "div",
           { class: "table-wrap" },
@@ -383,7 +374,7 @@ function loadPlace(p, label) {
             h("tbody", null, list.map((r) => loadRow(r, p))),
           ),
         ),
-    rows.length > LOAD_SHOWN && h("div", { class: "pad-x pad-b" }, button(all ? t("load.fewer") : t("load.more", { n: rows.length - LOAD_SHOWN }), { class: "small ghost", onclick: () => (all ? loadUi.all.delete(p.id) : loadUi.all.add(p.id), paintLoad()) })),
+    rows.length > LOAD_SHOWN && uiEmpty({ text: " ", action: button(all ? t("load.fewer") : t("load.more", { n: rows.length - LOAD_SHOWN }), { class: "quiet small", onclick: () => (all ? loadUi.all.delete(p.id) : loadUi.all.add(p.id), paintLoad()) }) }),
   );
 }
 

@@ -6393,5 +6393,9 @@
   "links.noneLead": "Дайте посилання з меню файлу чи теки у Файлах.",
   "files.cannotRead": "Не вдалося прочитати теку",
   "files.view": "Вигляд",
-  "attention.showAll": "Показати всі"
+  "attention.showAll": "Показати всі",
+  "tree.loadCpu": "процесор {n}%",
+  "tree.loadMemory": "пам'ять {used} із {total}",
+  "tree.containersSettings": "Налаштування",
+  "tree.none": "Тут ще нічого немає."
 }

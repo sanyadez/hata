@@ -1770,9 +1770,8 @@ function imagesCard() {
         }
       },
     },
-    h("h2", null, t("images.title")),
+    h("div", { class: "section-head" }, h("h2", null, t("images.title")), s.check && h("div", { class: "actions" }, h("span", { class: "ui-row-time" }, status), button(t("images.checkNow"), { class: "small", disabled: st.running, onclick: () => again("/api/images/check", "POST") }, "refresh"))),
     h("label", { class: "check" }, check, h("span", null, h("strong", null, t("images.check")), h("span", { class: "muted small block" }, t("images.checkHint")))),
-    s.check && settingRow(status, "", button(t("images.checkNow"), { disabled: st.running, onclick: () => again("/api/images/check", "POST") }, "refresh")),
     s.check && st.failed.length > 0 && !st.running && h("details", null, h("summary", { class: "muted small" }, t("images.failed", { n: st.failed.length })), st.failed.map((f) => h("p", { class: "small" }, h("span", { class: "mono" }, f.image), " — ", h("span", { class: "muted" }, f.message)))),
     h("label", { class: "check" }, auto, h("span", null, h("strong", null, t("images.auto")), h("span", { class: "muted small block" }, t("images.autoHint")))),
     whenAuto,

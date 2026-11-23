@@ -2330,13 +2330,11 @@ function settingsSection(section) {
       h(
         "section",
         { class: "card pad" },
-        h("div", { class: "section-head" }, h("h2", null, t("settings.stores")), button(t("store.sync"), { onclick: syncStores }, "refresh")),
-        stores.map((store) =>
-          settingRow(
-            store.id,
-            store.url,
-            h("span", { class: "store-meta" }, h("span", { class: "muted small" }, t("settings.storeApps", { n: store.apps }) + (store.syncedAt ? " · " + ago(store.syncedAt) : "")), h("button", { type: "button", class: "icon-btn", title: t("store.remove"), "aria-label": `${t("store.remove")}: ${store.id}`, onclick: () => removeStoreDialog(store) }, icon("trash"))),
-          ),
+        h("div", { class: "section-head" }, h("h2", null, t("settings.stores"), stores.length > 0 && h("span", { class: "muted" }, String(stores.length))), h("div", { class: "actions" }, button(t("store.sync"), { class: "small", onclick: syncStores }, "refresh"))),
+        h(
+          "div",
+          { class: "ui-rows stores-rows" },
+          stores.map((store) => uiRow({ lead: { icon: "store" }, name: store.id, sub: store.url, value: t("settings.storeApps", { n: store.apps }) + (store.syncedAt ? " · " + ago(store.syncedAt) : ""), more: [{ label: t("store.remove") + "…", icon: "trash", danger: true, run: () => removeStoreDialog(store) }] })),
         ),
         addStoreForm(),
         h("p", { class: "muted small" }, t("settings.storesHint")),

@@ -620,13 +620,9 @@ function casaosCard(casaos) {
       }
     },
   }, "arrow");
-  return h(
-    "section",
-    { class: "card pad stack" },
-    h("div", { class: "section-head" }, h("h2", null, t("import.casaos.title", { n: ready.length }))),
-    h("p", { class: "muted" }, t("import.casaos.lead")),
-    casaos.apps.length > 0 &&
-      h("div", { class: "table-wrap" }, h("table", null, h("tbody", null, casaos.apps.map((app) => h("tr", null, h("td", null, h("div", { class: "strong" }, app.title), h("div", { class: "muted small mono" }, app.source)), h("td", { class: "num" }, h("span", { class: "chip" + (app.status === "ready" ? " ok" : " warn") }, app.status === "ready" && icon("check"), t("import.casaos.status." + app.status)))))))),
+  return uiCard(
+    { title: t("import.casaos.title", { n: ready.length }), lead: t("import.casaos.lead") },
+    casaos.apps.length > 0 && h("div", { class: "ui-rows stores-rows" }, casaos.apps.map((app) => uiRow({ lead: { icon: "box" }, name: app.title, sub: h("span", { class: "mono" }, app.source), state: uiState(app.status === "ready" ? "ok" : "warn", t("import.casaos.status." + app.status)) }))),
     h("label", { class: "check" }, stop, h("span", null, h("strong", null, t("import.casaos.stop")), h("span", { class: "muted small block" }, casaos.units.length ? t("import.casaos.stopHint", { units: casaos.units.join(", ") }) : t("import.casaos.stopped")))),
     error,
     h("footer", { class: "section-head" }, h("p", { class: "cmd" }, icon("terminal"), "sudo hata migrate casaos --undo"), move),
@@ -636,49 +632,25 @@ function casaosCard(casaos) {
 function renderImportBody() {
   const box = document.getElementById("import-body");
   if (!box || !state.import) return;
-  box.replaceChildren(...importParts(state.import, h("div", { class: "card empty" }, icon("check", "ok"), h("p", null, t("import.nothing")))));
+  box.replaceChildren(...importParts(state.import, uiCard({}, uiEmpty({ size: "big", icon: "check", title: t("import.nothing") }))));
 }
 
 /** What runs on this machine and is not an app here yet; `nothing` stands in when there is none */
 function importParts(data, nothing) {
-  const problem = (item) => item.problem && h("span", { class: "chip warn", title: t("import.problem." + item.problem) }, t("import.problem." + item.problem));
-  const table = (rows) => h("div", { class: "card table-wrap" }, h("table", null, h("tbody", null, rows)));
-
+  // a thing that cannot be taken over says why where its button would be
+  const problem = (item) => item.problem && uiState("warn", t("import.problem." + item.problem), { title: t("import.problem." + item.problem) });
+  const tone = (running, all) => (running === 0 ? "off" : running === all ? "ok" : "warn");
   const parts = [
     data.casaos && casaosCard(data.casaos),
     data.projects.length > 0 &&
-      h(
-        "section",
-        { class: "stack" },
-        h("div", { class: "section-head" }, h("h2", null, t("import.projects"), h("span", { class: "muted small" }, t("import.projectsHint")))),
-        table(
-          data.projects.map((p) =>
-            h(
-              "tr",
-              null,
-              h("td", null, h("div", { class: "strong" }, p.name), h("div", { class: "muted small mono clip" }, p.files.length ? p.files.join(", ") : p.images.join(", "))),
-              h("td", null, h("span", { class: "state " + (p.running === 0 ? "stopped" : p.running === p.containers ? "running" : "partial") }, t("import.running", { running: p.running, n: p.containers }))),
-              h("td", null, h("div", { class: "row-actions" }, problem(p) || button(t("import.take"), { class: "small", onclick: () => importProject(p) }))),
-            ),
-          ),
-        ),
+      uiCard(
+        { title: t("import.projects"), count: data.projects.length, lead: t("import.projectsHint"), flush: true },
+        data.projects.map((p) => uiRow({ lead: { icon: "box" }, name: p.name, sub: h("span", { class: "mono" }, p.files.length ? p.files.join(", ") : p.images.join(", ")), state: problem(p) || uiState(tone(p.running, p.containers), t("import.running", { running: p.running, n: p.containers })), action: !p.problem && button(t("import.take") + "…", { class: "small", onclick: () => importProject(p) }) })),
       ),
     data.containers.length > 0 &&
-      h(
-        "section",
-        { class: "stack" },
-        h("div", { class: "section-head" }, h("h2", null, t("import.containers"), h("span", { class: "muted small" }, t("import.containersHint")))),
-        table(
-          data.containers.map((c) =>
-            h(
-              "tr",
-              null,
-              h("td", null, h("div", { class: "strong" }, c.name), h("div", { class: "muted small mono clip" }, c.image)),
-              h("td", null, h("span", { class: "state " + (c.state === "running" ? "running" : c.state === "restarting" ? "restarting" : "stopped"), title: c.status }, c.status)),
-              h("td", null, h("div", { class: "row-actions" }, problem(c) || button(t("import.rebuild"), { class: "small", onclick: () => importContainer(c) }))),
-            ),
-          ),
-        ),
+      uiCard(
+        { title: t("import.containers"), count: data.containers.length, lead: t("import.containersHint"), flush: true },
+        data.containers.map((c) => uiRow({ lead: { icon: "box" }, name: c.name, sub: h("span", { class: "mono" }, c.image), state: problem(c) || uiState(c.state === "running" ? "ok" : c.state === "restarting" ? "warn" : "off", c.status, { title: c.status }), action: !c.problem && button(t("import.rebuild") + "…", { class: "small", onclick: () => importContainer(c) }) })),
       ),
     !data.casaos && !data.projects.length && !data.containers.length && nothing,
   ];
@@ -890,7 +862,7 @@ function paintWelcome() {
 
   if (step === "existing") {
     const found = state.import;
-    return put(box, ...head, welcomeDocker() ?? waiting, ...(found ? importParts(found, h("section", { class: "card pad welcome-fact" }, h("span", { class: "badge-icon ok" }, icon("check")), h("div", { class: "grow" }, h("strong", null, t("welcome.existing.nothing")), h("p", { class: "muted small" }, t("welcome.existing.nothingHint"))))) : []), ...welcomeFoot(step));
+    return put(box, ...head, welcomeDocker() ?? waiting, ...(found ? importParts(found, uiCard({}, uiEmpty({ size: "big", icon: "check", title: t("welcome.existing.nothing"), text: t("welcome.existing.nothingHint") }))) : []), ...welcomeFoot(step));
   }
 
   if (step === "data") {

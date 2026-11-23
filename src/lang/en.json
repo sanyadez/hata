@@ -6393,5 +6393,9 @@
   "links.noneLead": "Give one from the menu of a file or a folder in Files.",
   "files.cannotRead": "The folder could not be read",
   "files.view": "View",
-  "attention.showAll": "Show all"
+  "attention.showAll": "Show all",
+  "tree.loadCpu": "CPU {n}%",
+  "tree.loadMemory": "memory {used} of {total}",
+  "tree.containersSettings": "Settings",
+  "tree.none": "Nothing here yet."
 }

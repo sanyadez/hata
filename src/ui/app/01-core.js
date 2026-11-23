@@ -909,8 +909,7 @@ function parseRoute() {
 const AREAS = {
   apps: [
     { id: "installed", hash: "#/apps", view: "apps" },
-    // the store is a button in the head of the section, as in Integrations, not a tab among its tabs
-    { id: "store", hash: "#/store", view: "store", head: true },
+    { id: "store", hash: "#/store", view: "store" },
     { id: "import", hash: "#/import", view: "import", admin: true },
     { id: "options", hash: "#/apps-options", sections: ["apps", "stores"] },
   ],
