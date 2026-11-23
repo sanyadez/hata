@@ -13,7 +13,7 @@ import uk from "./lang/uk.json";
 import { AppError, startJob, type Job } from "./apps";
 import { bus } from "./bus";
 import { saveSettings, settings } from "./config";
-import { awaitKodi, kodiRuns, screenDark, sleepScreen, playOnTv, screenShares, setUp, switchTv, tvEnabled, tvNow, tvReport, type TvPage, type TvReport } from "./kodi";
+import { awaitKodi, chooseConsole, kodiRuns, restScreen, screenDark, sleepScreen, playOnTv, screenShares, setUp, switchTv, tvEnabled, tvNow, tvReport, type TvPage, type TvReport } from "./kodi";
 import { installCommand, packageManager, PATH, run, runLogged } from "./packages";
 import { parkPointer } from "./pointer";
 import { BROWSER_HOME_SCRIPT, BROWSER_POINTER_SCRIPT, BROWSER_SWIPE_SCRIPT, browserPanelScript, PANEL_BUTTONS, BROWSER_PACKAGES, browserCalls, cleanBookmarks, MEDIA_ACTIONS, mediaScript, pointerCalls, PREVIEW_WIDTH, browserHomeHtml, TV_BROWSER_HOME, TV_USER, browserSound, browserUnitText, withoutTranslate, TV_HOME, cleanLink, cleanShowTime, linkName, TV_BROWSER_PORT, TV_BROWSER_UNIT, TV_UNIT, type BrowserReport, type PageCall, type PageMedia, type Screen } from "./tv";
@@ -324,6 +324,7 @@ async function startBrowser(by: string): Promise<void> {
   const resume = back && playing ? { file: playing.file, at: Math.floor(playing.time + (playing.paused ? 0 : (Date.now() - playing.at) / 1000)), subtitle: playing.outside ?? "" } : null;
   await setUp();
   await writeUnit();
+  chooseConsole(false);
   sleepScreen(false);
   if (!(await browserRuns())) await quietTranslate();
   // The player lets the screen go a moment AFTER its service has stopped (its session is still being
@@ -387,7 +388,7 @@ export async function openPage(raw: unknown, seconds: unknown, by: string): Prom
   return tvReport();
 }
 
-/** The page leaves the screen: the player comes back when it had it (and the film goes on), else the console */
+/** The page leaves the screen: the player comes back when it had it (and the film goes on), else the screen sleeps (the console only when chosen) */
 export async function leaveBrowser(who = ""): Promise<TvReport> {
   const was = showing;
   // gone by its time or by the remote's button: whoever put it there
@@ -399,7 +400,7 @@ export async function leaveBrowser(who = ""): Promise<TvReport> {
   const back = was?.back ?? tvEnabled();
   // starting the player stops the browser: the two services exclude each other
   await run(back ? ["systemctl", "start", TV_UNIT] : ["systemctl", "stop", TV_BROWSER_UNIT], 60_000);
-  if (!back) await run(["chvt", "1"], 10_000);
+  if (!back) await restScreen();
   tellPage(null);
   if (back && was?.resume && (await awaitKodi())) await playOnTv(was.resume.file, by, was.resume.at, was.resume.subtitle || undefined).catch(() => {});
   record("tv.pageGone", { user: by });
@@ -544,6 +545,8 @@ export async function setScreen(screen: unknown, by: string): Promise<TvReport> 
     return switchTv(true, by);
   }
   if (screen === "off" || screen === "dark") {
+    // the console stays on the screen only when chosen as such; every other way off ends in sleep
+    chooseConsole(screen === "off");
     if (await browserRuns()) {
       if (showing) showing.back = false;
       else showing = { by, back: false, resume: null, until: 0, timer: null };

@@ -840,7 +840,7 @@ export const PREVIEW_WIDTH = 960;
  * Put into every page the browser opens: the remote's "home" button (and a keyboard's) tells Hata,
  * which gives the screen back to what was on it. `hataScreen` is a binding Hata makes in the page.
  */
-export const BROWSER_HOME_SCRIPT = `addEventListener("keydown", (e) => { if (e.key === "BrowserHome" && typeof hataScreen === "function") { e.preventDefault(); hataScreen("home"); } }, true);`;
+export const BROWSER_HOME_SCRIPT = `if (!window.hataHome) { window.hataHome = true; addEventListener("keydown", (e) => { if (e.key === "BrowserHome" && typeof hataScreen === "function") { e.preventDefault(); hataScreen("home"); } }, true); }`;
 
 /**
  * Put into every frame of every page: the pointer is not drawn while the mouse lies still. Driven from
