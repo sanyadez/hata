@@ -289,7 +289,6 @@ p.small > .chip { height: auto; min-height: 24px; padding-block: 2px; white-spac
 
 /* --- Tiles ------------------------------------------------------------------------------------- */
 
-.tile:hover { border-color: var(--border-strong); }
 .tile.stopped .app-icon { opacity: 0.45; }
 .tile.stopped .tile-name { color: var(--muted); }
 .tile.add { border-style: dashed; }
@@ -676,7 +675,6 @@ tr.removed .app-icon { opacity: 0.5; }
 .files-side .cats { position: static; }
 .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
 .store-card { display: grid; gap: 14px; align-content: start; padding: 16px; text-align: left; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); }
-.store-card:hover { border-color: var(--border-strong); }
 .store-card.unsupported { opacity: 0.5; }
 .store-card-head { display: flex; align-items: center; gap: 12px; }
 .store-card-head .grow { display: grid; gap: 2px; }
@@ -693,12 +691,10 @@ a.cat .with-icon { min-width: 0; }
 /* the other disks at the top of the data folder */
 .disk-strip { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 12px; }
 .disk-tile { display: flex; gap: 12px; align-items: flex-start; padding: 14px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); color: var(--text); min-width: 0; }
-.disk-tile:hover { border-color: var(--border-strong); background: var(--surface-2); }
 .disk-text { display: grid; gap: 4px; min-width: 0; flex: 1; }
 .disk-text .bar { margin: 4px 0 0; }
 /* My Hata: the tiles sit inside their section's card */
 .my-hata .disk-tile { background: color-mix(in srgb, var(--bg) 40%, transparent); }
-.my-hata .disk-tile:hover { background: var(--surface-2); }
 .my-hata .disk-tile.add { border-style: dashed; color: var(--muted); }
 .my-hata .disk-tile.add:hover { color: var(--text); }
 .my-hata .disk-tile.away { opacity: 0.6; }
@@ -751,7 +747,6 @@ button.tile-open { border: 0; background: transparent; }
 
 .file-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
 .file-tile { position: relative; display: flex; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); min-width: 0; }
-.file-tile:hover { border-color: var(--border-strong); }
 .file-tile.selected { border-color: var(--accent); background: var(--accent-soft); }
 .file-open { flex: 1; display: grid; gap: 10px; min-width: 0; padding: 8px 8px 12px; border: 0; background: transparent; text-align: left; border-radius: var(--radius-md); }
 .file-tile.dir .file-open { display: flex; align-items: center; padding: 14px 40px 14px 40px; }
@@ -1340,7 +1335,6 @@ body:has(.assistant.paged) > .assistant-fab { display: none; }
 
 /* Machines */
 .machine-card { display: grid; gap: 8px; color: inherit; text-decoration: none; transition: border-color 0.15s; }
-.machine-card:hover { border-color: var(--accent); }
 .machine-title { display: flex; align-items: center; gap: 10px; }
 .machine-title .ico { width: 20px; height: 20px; flex: none; color: var(--muted); }
 .machine-meter .kv { padding: 2px 0 4px; }
@@ -2488,7 +2482,6 @@ dialog.framed .dlg-body footer { position: sticky; bottom: -20px; margin: 0 -20p
 .tv-pick-box > p { margin: 0; flex: none; }
 .tv-picks { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 8px; align-content: start; overflow: hidden; min-height: 0; flex: 1; }
 .tv-pick { display: flex; align-items: center; gap: 10px; min-width: 0; padding: 9px 10px; border: 1px solid transparent; border-radius: 12px; background: var(--surface-2); color: inherit; font: inherit; text-align: left; cursor: pointer; }
-.tv-pick:hover { border-color: var(--border-strong); }
 .tv-pick.main { background: var(--accent-soft); border-color: var(--accent); }
 .tv-pick.going { outline: 2px solid var(--accent); }
 .tv-pick:disabled { cursor: default; opacity: 0.7; }
@@ -2700,7 +2693,6 @@ button.tv-stage-chip:hover { background: rgb(0 0 0 / 0.8); }
 .house-group-head > .ico { color: var(--muted); }
 .house-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 16px; }
 .house-tile { height: 122px; box-sizing: border-box; padding: 14px; border: 1px solid var(--border); border-radius: 12px; display: grid; grid-template-rows: auto 1fr auto auto; gap: 6px; color: inherit; text-decoration: none; min-width: 0; }
-.house-tile:hover { border-color: var(--accent); }
 .house-tile.bad { border: 1.5px solid var(--danger); }
 .house-tile.warn { border: 1.5px solid var(--warn); }
 .house-tile-top { display: flex; align-items: center; gap: 10px; min-width: 0; grid-row: 1; }
@@ -2743,3 +2735,9 @@ dialog:focus { outline: none; }
 /* a card's heading stands at the same height whether buttons sit beside it (28 px) or not */
 .section-head { min-height: 28px; }
 .card-head > h2 { min-height: 28px; display: flex; align-items: center; }
+
+/* States: one hover for every card a press opens as a whole — Home's tiles, the store, disks, files, integrations,
+   computers, the TV's bookmarks and picks. Only the border goes a shade stronger; a card that needs attention keeps
+   its colour. Focus is the one ring of :focus-visible for all. */
+:is(.tile, .store-card, .disk-tile, .file-tile, .house-tile, .machine-card, .tv-mark-tile, .tv-pick) { transition: border-color 0.15s; }
+:is(.tile, .store-card, .disk-tile, .file-tile, .house-tile:not(.bad, .warn), .machine-card, .tv-mark-tile, .tv-pick):hover { border-color: var(--border-strong); }
