@@ -657,12 +657,17 @@ tr.removed .app-icon { opacity: 0.5; }
 .store, .settings, .files { display: grid; grid-template-columns: 208px minmax(0, 1fr); gap: 16px; align-items: start; }
 .settings { grid-template-columns: minmax(0, 1fr); gap: 16px; }
 #store-list { display: grid; gap: 16px; }
-.cats { display: grid; gap: 2px; position: sticky; top: 88px; }
+.cats { display: grid; grid-template-columns: minmax(0, 1fr); gap: 2px; position: sticky; top: 88px; min-width: 0; }
 .cat-title { font-size: 11px; letter-spacing: 0.1em; text-transform: uppercase; color: var(--faint); padding: 8px 10px; }
 .cat-title:not(:first-child) { margin-top: 14px; }
 .cat { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; padding: 8px 10px; border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--muted); text-align: left; }
 .cat:hover { color: var(--text); }
 .cat.active { background: var(--surface-2); color: var(--text); font-weight: 600; }
+/* a long name is cut with "…" inside the side column: it never widens the column or runs under the page beside it */
+.cat { min-width: 0; }
+.cat > .with-icon { min-width: 0; max-width: 100%; }
+.cat > .with-icon > .clip { min-width: 0; }
+.cat > .with-icon > :not(.clip) { flex: none; }
 /* a disk is a tile of its own: next to each other the bars and numbers ran together */
 .tile-room { display: grid; gap: 5px; min-width: 0; }
 .tile-room .bar { height: 4px; margin: 0; }
