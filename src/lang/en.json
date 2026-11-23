@@ -6370,5 +6370,15 @@
   "house.found.hide": "Hide",
   "house.found.here": "an app of this server",
   "house.found.around": "{address} · on the network",
-  "house.back": "Back to Integrations"
+  "house.back": "Back to Integrations",
+  "ui.stepOf": "Step {n} of {of}",
+  "ui.install": "Install",
+  "ui.installing": "Installing…",
+  "ui.needProgram": "A program is needed: {name}",
+  "ui.needOptional": "Optional: {name}",
+  "ui.copy": "Copy",
+  "ui.copied": "Copied",
+  "ui.show": "Show",
+  "ui.hide": "Hide",
+  "ui.crumbs": "Where you are"
 }

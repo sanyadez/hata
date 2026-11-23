@@ -397,6 +397,349 @@ function uiCard({ title = null, count = null, marks = null, actions = null, lead
 }
 /** Facts in rows, a label on the left and its value on the right: `[label, value]` pairs, empty ones left out */
 const uiFacts = (rows) => rows.filter(Boolean).map(([label, value]) => h("div", { class: "kv" }, h("span", { class: "muted" }, label), h("span", null, value)));
+
+/*
+ * The blocks of the design system (its SYSTEM.md: 21 blocks, a closed set). A page is made of these, never of
+ * markup of its own: a head, cards, rows, settings, facts, tables, tiles, states, numbers, meters, notices,
+ * empties, commands, steps. Their look is the block "Blocks" at the end of app.css (classes `ui-…`). The sheet
+ * `#/blocks` shows every block in every form; `tests/blocks.test.ts` keeps pages from making their own.
+ */
+
+/** The rest of the actions: one "⋯" of the size given, opening a menu of `entries` (or of what `entries()` gives) */
+function uiMore(entries, { size = "m", header = null, label = t("app.more") } = {}) {
+  const b = h("button", { type: "button", class: `btn ui-more ${size === "s" ? "small square" : "square"}`, "aria-label": label, title: label }, icon("more"));
+  b.onclick = (e) => {
+    e.stopPropagation();
+    const list = typeof entries === "function" ? entries() : entries;
+    menuAt(b, typeof header === "function" ? header() : header, list);
+  };
+  return b;
+}
+
+/** A state: a pill with a dot, in one of five tones — ok, warn, bad, info, off */
+const uiState = (tone, text, attrs = {}) => h("span", { class: `ui-state ${tone}`, ...attrs }, text);
+/** A tag: a small grey label without a frame */
+const uiTag = (text) => h("span", { class: "ui-tag" }, text);
+/** The count of what needs attention, by a section's name or on a tile of the menu */
+const uiCount = (n) => (n > 0 ? h("b", { class: "ui-count" }, String(n)) : null);
+
+/**
+ * A meter: a bar of 4 px. `kind` — capacity (ok < 80, warn to 94, bad from 95), progress (the accent) or load
+ * (faint); `label` above it. `parts` instead of a value draws a bar of several colours.
+ */
+function uiMeter(value, { kind = "capacity", label = null, parts = null } = {}) {
+  const v = Math.max(0, Math.min(100, Number(value) || 0));
+  const tone = kind === "progress" ? "progress" : kind === "load" ? "load" : v >= 95 ? "bad" : v >= 80 ? "warn" : "ok";
+  const bar = parts
+    ? h("div", { class: "ui-meter multi" }, parts.map((p) => h("i", { class: "c-" + (p.colour ?? "1"), style: null, "data-w": p.value })))
+    : h("div", { class: `ui-meter ${tone}`, role: "meter", "aria-valuenow": Math.round(v), "aria-valuemin": 0, "aria-valuemax": 100 }, h("i"));
+  if (parts) bar.querySelectorAll("i").forEach((i) => i.style.setProperty("width", i.dataset.w + "%"));
+  else bar.firstChild.style.setProperty("width", v + "%");
+  return label ? h("div", { class: "ui-meter-wrap" }, h("span", { class: "ui-meter-label" }, label), bar) : bar;
+}
+
+/** A meter of steps: what is done in the accent, the current one moving */
+function uiSteps(done, total, { running = true } = {}) {
+  return h("div", { class: "ui-steps", "aria-label": t("ui.stepOf", { n: Math.min(done + 1, total), of: total }) }, Array.from({ length: total }, (_, i) => h("i", { class: i < done ? "done" : i === done && running ? "now" : "" })));
+}
+
+/** A switch that acts at once: 36 × 20, on the right of what it switches */
+function uiSwitch({ on = false, label, onchange = null, disabled = false, busy = false } = {}) {
+  const b = h("button", { type: "button", class: "ui-switch" + (busy ? " busy" : ""), role: "switch", "aria-checked": String(on), "aria-label": label, disabled, "aria-busy": busy ? "true" : null }, h("i"));
+  b.onclick = async () => {
+    const next = b.getAttribute("aria-checked") !== "true";
+    b.setAttribute("aria-checked", String(next));
+    if (!onchange) return;
+    b.setAttribute("aria-busy", "true");
+    try {
+      await onchange(next);
+    } catch (e) {
+      b.setAttribute("aria-checked", String(!next));
+      toast(errorText(e), "error");
+    } finally {
+      b.removeAttribute("aria-busy");
+    }
+  };
+  return b;
+}
+
+/** A segment of up to four choices; more than four become a choice from a list */
+function uiSegment(items, value, onchange, { wide = false, label = null } = {}) {
+  if (items.length > 4) {
+    const sel = h("select", { "aria-label": label, onchange: () => onchange(sel.value) }, items.map((x) => h("option", { value: x.value, selected: x.value === value }, x.count != null ? `${x.label} · ${x.count}` : x.label)));
+    return sel;
+  }
+  return h(
+    "div",
+    { class: "ui-segment" + (wide ? " wide" : ""), role: "tablist", "aria-label": label },
+    items.map((x) =>
+      h(
+        x.href ? "a" : "button",
+        { type: x.href ? null : "button", href: x.href, class: "ui-seg" + (x.value === value ? " active" : ""), role: "tab", "aria-selected": String(x.value === value), disabled: x.off, title: x.why, onclick: x.href ? null : () => onchange?.(x.value) },
+        x.icon && icon(x.icon),
+        x.label,
+        x.count != null && h("span", { class: "ui-seg-count" }, String(x.count)),
+      ),
+    ),
+  );
+}
+
+/** A leading part of a row: an icon in a frame, an icon in a tone, a picture, a person, a tick, a colour */
+function uiLead(lead) {
+  if (!lead) return null;
+  if (lead instanceof Node) return lead;
+  if (lead.check) return lead.check;
+  if (lead.avatar) return lead.avatar;
+  if (lead.colour) return h("span", { class: "ui-lead colour" }, h("i", { class: "c-" + lead.colour }));
+  if (lead.img) return h("span", { class: "ui-lead thumb" }, lead.img);
+  if (lead.logo) return h("span", { class: "ui-lead" }, lead.logo);
+  return h("span", { class: "ui-lead" + (lead.tone ? " tone " + lead.tone : "") }, icon(lead.icon ?? "box"));
+}
+
+/**
+ * A row: `[lead] — [name + sub] — [tail]`. Tail from the left: `value` (or `time`), `state`, one `action` (a small
+ * button), `more` (entries of "⋯"). `href` / `onclick` make the whole row a way somewhere (then a chevron, no "⋯").
+ * `mode` — "event" (time in mono on the right), "group" (a grey band), "task" (a meter under the text).
+ */
+function uiRow({ lead = null, name, sub = null, value = null, time = null, state = null, action = null, more = null, href = null, onclick = null, mode = "thing", meter = null, title = null, cls = "", menu = undefined, id = null } = {}) {
+  const goes = !!(href || onclick);
+  const text = h("div", { class: "ui-row-text" }, h("div", { class: "ui-row-name", title: title ?? (typeof name === "string" ? name : null) }, name), sub && h("div", { class: "ui-row-sub", title: typeof sub === "string" ? sub : null }, sub), meter);
+  const tail = h(
+    "div",
+    { class: "ui-row-tail" },
+    value != null && h("span", { class: "ui-row-value" }, value),
+    time != null && h("span", { class: "ui-row-time mono" }, time),
+    state,
+    action,
+    more && uiMore(more, { size: "s" }),
+    goes && !more && !action && icon("chevron", "ui-row-go"),
+  );
+  return h(href ? "a" : "div", { class: `ui-row ${mode}${goes ? " goes" : ""}${cls ? " " + cls : ""}`, href, onclick, id, menu, role: onclick && !href ? "button" : null, tabindex: onclick && !href ? 0 : null }, uiLead(lead), text, tail);
+}
+
+/** A group of rows: a grey band with a chevron, a name, a count and its own tail; rows under it */
+function uiGroup({ name, count = null, state = null, action = null, more = null, open = true, onToggle = null }, ...rows) {
+  const band = h(
+    "div",
+    { class: "ui-row group" + (open ? " open" : "") },
+    h("button", { type: "button", class: "ui-group-fold", "aria-expanded": String(open), onclick: () => onToggle?.(!open) }, icon("chevron"), h("span", null, name), count != null && h("span", { class: "ui-row-count" }, String(count))),
+    h("div", { class: "ui-row-tail" }, state, action, more && uiMore(more, { size: "s" })),
+  );
+  return h("div", { class: "ui-group" }, band, open && rows);
+}
+
+/** A setting: its name and what it does on the left, the control on the right (under it on a phone) */
+const uiSetting = ({ name, explain = null, control, wide = false, id = null }) =>
+  h("div", { class: "ui-setting" + (wide ? " wide" : ""), id }, h("div", { class: "ui-setting-text" }, h("div", { class: "ui-setting-name" }, name), explain && h("div", { class: "ui-setting-explain" }, explain)), h("div", { class: "ui-setting-control" }, control));
+
+/** Facts with a meter: an icon, a label, the meter (or a sparkline) and the value — one metric to a row */
+const uiMeterFacts = (rows) =>
+  rows.filter(Boolean).map((r) => h("div", { class: "ui-mfact" }, h("span", { class: "ui-mfact-label" }, r.icon && icon(r.icon), r.label), h("span", { class: "ui-mfact-bar" }, r.spark ?? uiMeter(r.value, { kind: r.kind ?? "load" })), h("span", { class: "ui-mfact-value mono" }, r.text)));
+
+/** A number of the strip: a label, the value with its unit, room for a meter, a hint — always the same height */
+const uiStat = ({ icon: iconName = null, label, value, unit = null, tone = null, meter = null, hint = null, href = null }) =>
+  h(href ? "a" : "div", { class: "ui-stat", href }, h("span", { class: "ui-stat-label" }, iconName && icon(iconName), label), h("span", { class: "ui-stat-value" }, h("strong", { class: tone }, value), unit && h("span", null, unit)), h("span", { class: "ui-stat-chart" }, meter), h("span", { class: "ui-stat-hint" }, hint ?? ""));
+
+/**
+ * A table: `columns` [{ label, num, sort }], `rows` [{ cells, sub, menu, onclick, href, group }]. The first cell is
+ * the name. On a phone (its own width under 640) each row becomes a row of the list: the name and its `sub`.
+ */
+function uiTable(columns, rows, { cls = "", height = 56 } = {}) {
+  const head = h("thead", null, h("tr", null, columns.map((c) => h("th", { class: c.num ? "num" : null, "aria-sort": c.sorted ?? null }, c.sort ? h("button", { type: "button", class: "ui-th-sort", onclick: c.sort }, c.label, c.sorted && icon(c.sorted === "ascending" ? "up" : "down")) : c.label))));
+  const body = h(
+    "tbody",
+    null,
+    rows.map((r) =>
+      r.group != null
+        ? h("tr", { class: "ui-tr-group" }, h("td", { colspan: columns.length }, r.group))
+        : h(
+            "tr",
+            { class: r.onclick || r.href ? "goes" : null, onclick: r.onclick ?? (r.href ? () => (location.hash = r.href.replace(/^#/, "")) : null), menu: r.menu },
+            r.cells.map((cell, i) => h("td", { class: columns[i]?.num ? "num" : null }, i === 0 && r.sub ? [cell, h("div", { class: "ui-td-sub" }, r.sub)] : cell)),
+          ),
+    ),
+  );
+  return h("div", { class: `ui-table-wrap h${height}${cls ? " " + cls : ""}` }, h("table", { class: "ui-table" }, head, body));
+}
+
+/**
+ * A tile: an icon, a name, a sub line and a state above; one line below — a value, a meter or a warning (which
+ * takes the value's place). `tone` warn / bad gives the frame of a thing that needs attention. `desc` makes the
+ * tile of 128 with two lines of description (the store, the modules). `kind` small / media / add.
+ */
+function uiTile({ icon: iconName = "box", logo = null, name, sub = null, state = null, foot = null, warn = null, tone = null, desc = null, href = null, onclick = null, more = null, kind = "", tail = null, menu = undefined, selected = false, id = null, picture = null } = {}) {
+  const head = h(
+    "div",
+    { class: "ui-tile-top" },
+    kind === "media" ? null : logo ? h("span", { class: "ui-tile-icon" }, logo) : h("span", { class: "ui-tile-icon" }, icon(iconName)),
+    h("div", { class: "ui-tile-names" }, h("div", { class: "ui-tile-name", title: typeof name === "string" ? name : null }, name), sub && h("div", { class: "ui-tile-sub", title: typeof sub === "string" ? sub : null }, sub)),
+    state,
+    tail,
+    more && uiMore(more, { size: "s" }),
+  );
+  const low = warn ? h("div", { class: `ui-tile-foot warn ${tone ?? "warn"}` }, icon("alert"), h("span", null, warn)) : foot && h("div", { class: "ui-tile-foot" }, foot);
+  const description = desc && h("div", { class: "ui-tile-desc" }, desc);
+  const media = kind === "media" && h("div", { class: "ui-tile-picture" }, picture ?? icon(iconName));
+  return h(
+    href ? "a" : onclick ? "button" : "div",
+    { class: `ui-tile${kind ? " " + kind : ""}${desc ? " described" : ""}${tone ? " " + tone : ""}${selected ? " selected" : ""}`, href, type: onclick && !href ? "button" : null, onclick, menu, id },
+    media,
+    head,
+    description,
+    low,
+  );
+}
+/** The tile that adds: a dashed frame with a plus */
+const uiAddTile = (label, onclick) => h("button", { type: "button", class: "ui-tile add", onclick }, icon("plus"), h("span", null, label));
+
+/** A notice: a box in a soft tone with an icon, a title, a text, an optional command and up to two buttons */
+const uiNotice = ({ tone = "info", icon: iconName = null, title = null, text = null, command = null, action = null, second = null, foot = null }) =>
+  h(
+    "div",
+    { class: `ui-notice ${tone}`, role: tone === "bad" ? "alert" : "status" },
+    icon(iconName ?? { info: "info", ok: "check", warn: "alert", bad: "alert" }[tone] ?? "info"),
+    h("div", { class: "ui-notice-text" }, title && h("strong", null, title), text && h("div", null, text), command, foot),
+    (action || second) && h("div", { class: "ui-notice-actions" }, second, action),
+  );
+
+/**
+ * "A program is needed": what it is, why, the exact command and the button — nothing is installed until it is
+ * pressed (the rule of Hata). `optional` softens it; `run` absent means it has to be installed by hand.
+ */
+function uiNeedProgram({ name, why, command, run = null, optional = false, busy = false, why2 = null }) {
+  const press = run && button(t(busy ? "ui.installing" : "ui.install"), { class: "primary small", disabled: busy, "aria-busy": busy ? "true" : null, onclick: run });
+  return uiNotice({ tone: "info", icon: "package", title: t(optional ? "ui.needOptional" : "ui.needProgram", { name }), text: why, command: command && uiCommand(command), action: press, foot: why2 });
+}
+
+/**
+ * An empty place: `big` (an icon, a title, a text, one button), `small` (a line, perhaps a quiet button),
+ * `loading` (the ring, in a room of three rows) or `error` (big, in the bad tone, with "Try again").
+ */
+function uiEmpty({ size = "small", icon: iconName = null, title = null, text = null, action = null, tone = null } = {}) {
+  if (size === "loading") return h("div", { class: "ui-empty loading", role: "status", "aria-label": t("common.loading") }, h("span", { class: "wait-ring" }), text && h("span", null, text));
+  if (size === "small") return h("div", { class: "ui-empty small" + (tone ? " " + tone : "") }, iconName && icon(iconName), h("span", null, text ?? title), action);
+  return h("div", { class: "ui-empty big" + (size === "error" ? " bad" : "") }, h("span", { class: "ui-empty-icon" }, icon(iconName ?? (size === "error" ? "alert" : "box"))), title && h("strong", null, title), text && h("p", null, text), action);
+}
+
+/** A command, a key, an address to copy: one line (or a `block`), copied whole; a `secret` is dotted until shown */
+function uiCommand(text, { block = false, secret = false, label = null } = {}) {
+  let shown = !secret;
+  const words = h(block ? "pre" : "span", { class: "ui-command-text" }, shown ? text : "••••••••••••");
+  const copy = h("button", { type: "button", class: "icon-btn ui-command-copy", "aria-label": t("ui.copy"), title: t("ui.copy") }, icon("copy"));
+  copy.onclick = () => {
+    copyQuietly(text);
+    copy.replaceChildren(icon("check"));
+    toast(t("ui.copied"));
+    setTimeout(() => copy.replaceChildren(icon("copy")), 2000);
+  };
+  const eye = secret && h("button", { type: "button", class: "icon-btn ui-command-copy", "aria-label": t("ui.show"), title: t("ui.show") }, icon("eye"));
+  if (eye) eye.onclick = () => ((shown = !shown), (words.textContent = shown ? text : "••••••••••••"), eye.setAttribute("aria-label", t(shown ? "ui.hide" : "ui.show")));
+  return h("div", { class: "ui-command" + (block ? " block" : ""), "aria-label": label }, words, h("span", { class: "ui-command-tools" }, eye, copy));
+}
+
+/**
+ * The head of a page: crumbs, the thing's icon, the title with its state, the facts under it (joined by " · "), on
+ * the right up to two buttons (`actions`: { label, icon, run | href, primary }) and a "⋯" of `more` (or a `search`),
+ * the tabs under all. On a phone the main button stands under the title across; the other one goes into the "⋯".
+ */
+function pageHead({ crumbs = null, icon: iconName = null, logo = null, title, state = null, facts = null, actions = [], more = null, search = null, tabs = null, id = null } = {}) {
+  const trail = crumbs && h("nav", { class: "ui-crumbs", "aria-label": t("ui.crumbs") }, crumbs.map((c, i) => [i > 0 && icon("chevron", "ui-crumb-sep"), c.href && i < crumbs.length - 1 ? h("a", { href: c.href }, c.label) : h("span", { "aria-current": i === crumbs.length - 1 ? "page" : null }, c.label)]));
+  const shown = (facts ?? []).filter(Boolean);
+  const line = shown.length > 0 && h("div", { class: "ui-head-facts" }, shown.flatMap((f, i) => (i ? [h("span", { class: "ui-dot-sep" }, " · "), f] : [f])));
+  const list = (actions ?? []).filter(Boolean).slice(0, 2);
+  const main = list.find((a) => a.primary) ?? list[0];
+  const make = (a) => (a.href ? h("a", { class: "btn" + (a.primary ? " primary" : "") + (a === main ? " ui-main" : ""), href: a.href, target: a.newTab ? "_blank" : null, rel: a.newTab ? "noopener noreferrer" : null }, a.icon && icon(a.icon), h("span", null, a.label)) : button(a.label, { class: (a.primary ? "primary" : "") + (a === main ? " ui-main" : ""), onclick: a.run }, a.icon));
+  const phone = () => matchMedia("(max-width: 640px)").matches;
+  const entries = () => [...(phone() ? list.filter((a) => a !== main).map((a) => ({ label: a.label, icon: a.icon ?? "next", run: a.run, href: a.href })) : []), ...((typeof more === "function" ? more() : more) ?? [])];
+  const hasMore = !!more || list.length > 1;
+  const right = (list.length || hasMore || search) && h("div", { class: "ui-head-actions" + (more ? "" : " only-phone-more") }, search, list.map(make), hasMore && uiMore(entries));
+  return h(
+    "section",
+    { class: "card ui-head", id },
+    trail,
+    h("div", { class: "ui-head-main" }, (iconName || logo) && h("span", { class: "ui-tile-icon" }, logo ?? icon(iconName)), h("div", { class: "ui-head-names" }, h("div", { class: "ui-head-title" }, h("h1", null, title), state), line), right),
+    tabs,
+  );
+}
+
+/** The sheet of the blocks (`#/blocks`): every block in its forms, with made-up words, as the drawings have them */
+function renderBlocks() {
+  const say = (x) => () => toast(x);
+  const items = [{ label: "Open", icon: "external", run: say("open") }, { label: "Restart", icon: "refresh", run: say("restart") }, { label: "Remove…", icon: "trash", danger: true, run: say("remove") }];
+  const sec = (title, ...body) => uiCard({ title }, ...body);
+  shell(
+    pageHead({ crumbs: [{ label: "Integrations", href: "#/house" }, { label: "qBittorrent" }], icon: "download", title: "qBittorrent", state: uiState("ok", "Online"), facts: [h("span", { class: "mono" }, "192.168.1.128:8181"), "↓ 2.1 MB/s", "active 3"], actions: [{ label: "Open", icon: "external", href: "#/blocks" }, { label: "Add torrents…", icon: "plus", primary: true, run: say("add") }], more: items }),
+    sec(
+      "States, tags, counts",
+      h("div", { class: "ui-line" }, uiState("ok", "Running"), uiState("warn", "May update"), uiState("bad", "Failed"), uiState("info", "In use"), uiState("off", "Stopped"), uiTag("+2"), uiCount(3)),
+    ),
+    sec(
+      "Buttons",
+      h("div", { class: "ui-line" }, button("Save", { class: "primary" }), button("Open"), button("Show 23 more", { class: "quiet" }), button("Delete", { class: "danger" }), button("Disabled", { disabled: true }), uiMore(items), button("Small", { class: "small" }), uiMore(items, { size: "s" })),
+    ),
+    sec(
+      "Switches and segments",
+      h("div", { class: "ui-line" }, uiSwitch({ on: true, label: "On" }), uiSwitch({ on: false, label: "Off" }), uiSwitch({ on: true, label: "Disabled", disabled: true }), uiSegment([{ value: "all", label: "All", count: 12 }, { value: "run", label: "Running", count: 9 }, { value: "off", label: "Stopped", count: 3 }], "all", say("seg"))),
+      uiSegment([{ value: "a", label: "Container" }, { value: "b", label: "Virtual machine" }], "a", say("seg"), { wide: true }),
+    ),
+    sec(
+      "Meters and steps",
+      uiMeter(42, { label: "Capacity 42 %" }),
+      uiMeter(86, { label: "Capacity 86 %" }),
+      uiMeter(97, { label: "Capacity 97 %" }),
+      uiMeter(60, { kind: "progress", label: "Progress" }),
+      uiMeter(30, { kind: "load", label: "Load" }),
+      uiMeter(0, { parts: [{ value: 40, colour: 1 }, { value: 20, colour: 2 }, { value: 10, colour: 3 }] }),
+      uiSteps(2, 5),
+    ),
+    h("section", { class: "card ui-stats" }, uiStat({ icon: "cpu", label: "Processor", value: "12", unit: "%", meter: uiMeter(12, { kind: "load" }), hint: "2 cores" }), uiStat({ icon: "memory", label: "Memory", value: "3.1", unit: "GB", meter: uiMeter(41, { kind: "load" }), hint: "of 7.6 GB" }), uiStat({ icon: "disk", label: "Disk", value: "81", unit: "%", tone: "warn", meter: uiMeter(81), hint: "5.4 GB free" }), uiStat({ icon: "temp", label: "Temperature", value: "42", unit: "°C" })),
+    uiCard(
+      { title: "Rows", count: 4, flush: true, actions: button("Add…", { class: "small" }, "plus") },
+      uiRow({ lead: { icon: "app" }, name: "Adminer", sub: "adminer:latest · 8080", state: uiState("ok", "Running"), action: button("Open", { class: "small" }), more: items }),
+      uiRow({ lead: { icon: "alert", tone: "warn" }, name: "Security updates for this server: 8", sub: "There are security fixes for system packages", action: button("Look", { class: "small primary" }), more: items }),
+      uiRow({ lead: { icon: "signin" }, name: "tester: signed in", sub: "192.168.1.196", time: "20:41", mode: "event" }),
+      uiRow({ lead: { icon: "folder" }, name: "A whole row is a way somewhere", sub: "with a chevron and nothing else", href: "#/blocks" }),
+      uiGroup({ name: "i5 — Proxmox", count: 3, state: uiState("ok", "Online"), more: items }, uiRow({ lead: { icon: "server" }, name: "Gitea", sub: "CT 212 · 192.168.1.212", state: uiState("ok", "Running"), more: items })),
+      uiRow({ lead: { icon: "download", tone: "info" }, name: "Installing Immich", sub: "Pulling images · step 2 of 3", meter: uiSteps(1, 3), mode: "task", action: button("Log", { class: "small" }) }),
+    ),
+    uiCard(
+      { title: "Settings" },
+      uiSetting({ name: "Install new versions by itself", explain: "Once a day at the time below. A version you went back from is skipped.", control: uiSwitch({ on: true, label: "Install by itself" }) }),
+      uiSetting({ name: "Time", explain: "Local time of the server.", control: h("input", { type: "time", class: "short", value: "05:00" }) }),
+      uiSetting({ name: "Versions offered", explain: "Betas come before a release.", control: h("select", null, h("option", null, "Stable"), h("option", null, "Beta")) }),
+    ),
+    uiCard({ title: "Facts" }, ...uiFacts([["Version", h("span", { class: "mono" }, "0.34.0")], ["Address", h("span", { class: "mono" }, "192.168.1.128")], ["State", uiState("ok", "Healthy")]])),
+    uiCard({ title: "This server" }, ...uiMeterFacts([{ icon: "cpu", label: "Processor", value: 12, text: "12 %" }, { icon: "memory", label: "Memory", value: 41, text: "3.1 GB" }, { icon: "disk", label: "Disk", value: 81, kind: "capacity", text: "81 %" }, { icon: "temp", label: "Temperature", value: 42, text: "42 °C" }])),
+    uiCard(
+      { title: "Table", flush: true },
+      uiTable(
+        [{ label: "Name" }, { label: "Image" }, { label: "Size", num: true }, { label: "" }],
+        [
+          { group: "This server" },
+          { cells: [h("strong", null, "Home Assistant"), h("span", { class: "mono" }, "ghcr.io/home-…:2026.11"), "1.6 GB", uiMore(items, { size: "s" })], sub: "1.6 GB · running", href: "#/blocks" },
+          { cells: [h("strong", null, "Adminer"), h("span", { class: "mono" }, "adminer:latest"), "118 MB", uiMore(items, { size: "s" })], sub: "118 MB · running" },
+        ],
+      ),
+    ),
+    uiCard(
+      { title: "Tiles" },
+      h("div", { class: "ui-tiles" }, uiTile({ icon: "download", name: "qBittorrent", sub: "192.168.1.128:8181", state: uiState("ok", "Online"), foot: "↓ 2.1 MB/s · ↑ 340 KB/s", href: "#/blocks" }), uiTile({ icon: "camera", name: "Frigate", sub: "192.168.1.240:8971", state: uiState("bad", "Silent"), warn: "Not answering for 7 min", tone: "bad", href: "#/blocks" }), uiTile({ icon: "disk", name: "Data · 500", sub: "ext4 · /mnt/500", foot: uiMeter(86), tone: null, href: "#/blocks" }), uiAddTile("Connect…", say("add"))),
+      h("div", { class: "ui-tiles described" }, uiTile({ icon: "app", name: "Uptime Kuma", sub: "Monitoring", state: uiState("ok", "Installed"), desc: "A self-hosted monitoring tool: watch sites, ports and services and be told when they go down.", href: "#/blocks" }), uiTile({ icon: "modules", name: "Network folders", sub: "Sharing", tail: uiSwitch({ on: true, label: "Network folders" }), desc: "Folders of this server for Windows, macOS and phones over SMB, with the users of Hata." })),
+      h("div", { class: "ui-tiles small" }, uiTile({ kind: "small", icon: "globe", name: "UAKino", sub: "uakino.best", more: items }), uiTile({ kind: "small", icon: "globe", name: "YouTube", sub: "youtube.com", more: items, selected: true })),
+      h("div", { class: "ui-tiles" }, uiTile({ kind: "media", icon: "camera", name: "outdoor", sub: "5.1 fps", href: "#/blocks" })),
+    ),
+    uiCard(
+      { title: "Notices" },
+      uiNotice({ tone: "info", title: "Kept until you change it", text: "What is said here is a state that lasts." }),
+      uiNotice({ tone: "warn", title: "Little room left", text: "The disk is 86 % full.", action: button("Look", { class: "small" }) }),
+      uiNotice({ tone: "bad", title: "Could not reach the server", text: "connect ECONNREFUSED 192.168.1.240:8971" }),
+      uiNeedProgram({ name: "smartmontools", why: "Reads the health of the disks (SMART) and runs their self-tests.", command: "apt-get install -y smartmontools", run: say("install") }),
+    ),
+    uiCard({ title: "Empty places" }, uiEmpty({ size: "big", icon: "download", title: "Nothing connected yet", text: "Connect a service and its state will be here.", action: button("Connect…", { class: "primary" }) }), uiEmpty({ text: "The queue is empty" }), uiEmpty({ icon: "check", tone: "ok", text: "All good" }), uiEmpty({ text: "46 more", action: button("Show", { class: "small quiet" }) }), uiEmpty({ size: "loading", text: "Loading" }), uiEmpty({ size: "error", title: "Could not load", text: "The server did not answer.", action: button("Try again") })),
+    uiCard({ title: "Commands" }, uiCommand("curl -fsSL http://192.168.1.128/client/abc123 | sudo sh"), uiCommand("hata_9f2c4e1b7a0d", { secret: true }), uiCommand("[Interface]\nPrivateKey = …\nAddress = 10.77.0.2/32\n\n[Peer]\nPublicKey = …\nEndpoint = example.org:51820\nAllowedIPs = 10.77.0.1/32", { block: true })),
+  );
+}
+
 const closeButton = (dialog, label = t("common.close")) => button(label, { onclick: () => dialog().close() });
 const closeX = (dialog) => h("button", { type: "button", class: "icon-btn", "aria-label": t("common.close"), onclick: () => dialog().close() }, icon("x"));
 
@@ -494,6 +837,8 @@ function parseRoute() {
   if (parts[0] === "links" && mayLink()) return { view: "links" };
   if (parts[0] === "hata" && mayFiles()) return { view: "myhata" };
   if (parts[0] === "activity" && isAdmin()) return { view: "activity" };
+  // the sheet of the design system's blocks, every one in every form: to compare with the drawings
+  if (parts[0] === "blocks" && isAdmin()) return { view: "blocks" };
   if (parts[0] === "tv" && isAdmin()) return { view: "tv", hash: "#/house/tv" };
   // Bluetooth lived among this server's tabs at first
   if (parts[0] === "machines" && parts[1] === "this" && parts[2] === "bluetooth" && isAdmin()) return areaRoute("house", "bluetooth");
@@ -1475,6 +1820,7 @@ function render() {
   if (view === "links") return renderLinks();
   if (view === "myhata") return renderMyHata();
   if (view === "activity") return renderActivity();
+  if (view === "blocks") return renderBlocks();
   if (view === "backups") return renderBackups();
   if (view === "users") return renderUsers();
   if (view === "import") return renderImport();

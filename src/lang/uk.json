@@ -6370,5 +6370,15 @@
   "house.found.hide": "Сховати",
   "house.found.here": "застосунок цього сервера",
   "house.found.around": "{address} · у мережі",
-  "house.back": "До інтеграцій"
+  "house.back": "До інтеграцій",
+  "ui.stepOf": "Крок {n} з {of}",
+  "ui.install": "Встановити",
+  "ui.installing": "Встановлюється…",
+  "ui.needProgram": "Потрібна програма: {name}",
+  "ui.needOptional": "Необов'язково: {name}",
+  "ui.copy": "Скопіювати",
+  "ui.copied": "Скопійовано",
+  "ui.show": "Показати",
+  "ui.hide": "Сховати",
+  "ui.crumbs": "Де ви"
 }

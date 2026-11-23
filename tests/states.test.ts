@@ -64,6 +64,6 @@ test("the ring of focus is taken away only where something else shows focus", ()
 });
 
 test("the current place is never marked with the colour of a hover", () => {
-  const current = all.filter((r) => /\.(active|selected|current)\b|\[aria-(selected|current)/.test(r.selector) && !/:hover\b/.test(r.selector) && !/\.seg-pill|\.tab\b|\.file-table|tr\./.test(r.selector));
+  const current = all.filter((r) => /\.(active|selected|current)\b|\[aria-(selected|current)/.test(r.selector.replace(/:not\([^)]*\)/g, "")) && !/:hover\b/.test(r.selector) && !/\.seg-pill|\.tab\b|\.file-table|tr\./.test(r.selector));
   expect(current.filter((r) => /background(-color)?\s*:\s*var\(--surface-2\)/.test(r.body)).map((r) => r.selector)).toEqual([]);
 });
