@@ -6380,5 +6380,17 @@
   "ui.copied": "Copied",
   "ui.show": "Show",
   "ui.hide": "Hide",
-  "ui.crumbs": "Where you are"
+  "ui.crumbs": "Where you are",
+  "ui.retry": "Try again",
+  "activity.all2": "Everything",
+  "activity.events": "Events",
+  "activity.failed": "The history could not be read",
+  "activity.olderLead": "Older events are not loaded yet",
+  "links.active": "Works",
+  "links.ended2": "Ended",
+  "links.copy": "Copy",
+  "links.openFolder": "Open the folder",
+  "links.noneLead": "Give one from the menu of a file or a folder in Files.",
+  "files.cannotRead": "The folder could not be read",
+  "files.view": "View"
 }

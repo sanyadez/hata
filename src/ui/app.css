@@ -263,7 +263,6 @@ p.small > .chip { height: auto; min-height: 24px; padding-block: 2px; white-spac
 @media (hover: hover) { .meta a:hover { text-decoration: underline; } }
 .meta a .ico { width: 13px; height: 13px; color: var(--muted); }
 .actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.counts { display: flex; gap: 20px; flex-wrap: wrap; color: var(--muted); }
 .count { display: inline-flex; align-items: center; gap: 8px; }
 .section-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .section-head h2 .muted { margin-left: 10px; font: 400 12px var(--font-body); letter-spacing: 0; }
@@ -384,11 +383,6 @@ dialog.tile-folder header { justify-content: space-between; }
 
 /* --- Home: the head, the numbers, the machines, the lists, the tiles ------------------------------ */
 
-.home-head { align-items: flex-start; }
-.home-head-side { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
-.status-pill { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; padding: 7px 14px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); color: var(--muted); font-size: 13px; }
-.status-pill .count { gap: 7px; }
-.status-pill .dot-sep { color: var(--faint); }
 
 /* every block of the page is a card of the same look; a block decides its own inner layout by its width */
 .widget.card { border-radius: var(--radius-lg); container-type: inline-size; }
@@ -458,7 +452,7 @@ dialog.tile-folder header { justify-content: space-between; }
 }
 
 /* the lists: what needs attention and what happened */
-.attention-block > .section-head, .activity-block > .section-head { margin-bottom: 14px; }
+.attention-block > .section-head { margin-bottom: 14px; }
 .attention-block, .activity-block { position: relative; }
 .attention-block > .block-remove, .activity-block > .block-remove { position: absolute; top: 10px; right: 10px; }
 .attention-list { display: grid; gap: 10px; }
@@ -490,7 +484,6 @@ dialog.tile-folder header { justify-content: space-between; }
 .timeline .activity-item > .ico { position: relative; z-index: 1; width: 26px; height: 26px; padding: 6px; margin: 0; border-radius: 50%; background: var(--surface-2); flex: none; }
 .timeline .activity-item:not(:last-child)::before { content: ""; position: absolute; left: 12.5px; top: 26px; bottom: 0; width: 1px; background: var(--border); }
 .timeline .activity-item .grow { padding-top: 3px; min-width: 0; }
-.activity-block .all-activity { margin-top: 2px; }
 
 /* --- Tiles: a card with the picture on top, the name in two lines at most, how it is in one ---------- */
 
@@ -556,9 +549,6 @@ textarea.code, pre { white-space: pre-wrap; overflow-wrap: anywhere; overflow-x:
   table:not(.file-table) > tbody > tr > td:last-child { width: auto !important; white-space: normal; }
   table:not(.file-table) .row-actions { flex-wrap: wrap; }
   table:not(.file-table) .row-actions > .btn { flex: none; }
-  table.trash > tbody > tr > td.tick { width: auto; }
-  table.trash > tbody > tr.chosen { background: var(--accent-soft); }
-  table.trash > tbody > tr.chosen > td { background: none; }
 }
 
 /* between a phone and a wide screen the sections are icons, their names in the tooltip */
@@ -709,10 +699,6 @@ a.cat .with-icon { min-width: 0; }
 .disk-text { display: grid; gap: 4px; min-width: 0; flex: 1; }
 .disk-text .bar { margin: 4px 0 0; }
 /* My Hata: the tiles sit inside their section's card */
-.my-hata .disk-tile { background: color-mix(in srgb, var(--bg) 40%, transparent); }
-.my-hata .disk-tile.add { border-style: dashed; color: var(--muted); }
-@media (hover: hover) { .my-hata .disk-tile.add:hover { color: var(--text); } }
-.my-hata .disk-tile.away { opacity: 0.6; }
 /* the data folder and the disks above the folders of a picker */
 .store-meta { display: flex; align-items: center; gap: 8px; white-space: nowrap; }
 .picker-quick { display: flex; flex-wrap: wrap; gap: 6px; }
@@ -790,13 +776,8 @@ button.tile-open { border: 0; background: transparent; }
 /* on a touch screen the box to tick is always there: the text starts under it */
 @media (hover: none) { .peek { padding-top: 36px; } }
 /* an empty folder: a strip that takes files dropped on it, with the two things to do */
-.empty-folder { display: flex; align-items: center; gap: 16px; padding: 18px 20px; border: 2px dashed color-mix(in srgb, var(--accent) 45%, var(--border)); background: color-mix(in srgb, var(--accent) 4%, var(--surface)); }
-.empty-folder > .ico { flex: none; width: 32px; height: 32px; color: var(--accent-text); stroke-width: 1.4; }
-.empty-folder p { margin: 0; }
-.empty-folder .strong { font-size: 16px; font-weight: 600; }
+.empty-folder { border: 2px dashed color-mix(in srgb, var(--accent) 45%, var(--border)); background: color-mix(in srgb, var(--accent) 4%, var(--surface)); }
 .empty-folder.read-only { border-style: solid; border-color: var(--border); background: var(--surface); }
-.empty-folder.read-only > .ico { color: var(--faint); }
-@media (max-width: 760px) { .empty-folder { flex-wrap: wrap; } .empty-folder .row-actions { width: 100%; } }
 .file-tick { position: absolute; top: 14px; left: 14px; display: grid; }
 .file-more { position: absolute; top: 10px; right: 8px; }
 .file-tile.dir .file-tick { top: 50%; left: 14px; transform: translateY(-50%); }
@@ -841,10 +822,6 @@ table.disks td:last-child { padding-left: 0; }
 .mount-line { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
 .mount-line .clip { min-width: 0; }
 .mount-line .small { flex: none; }
-.trash-keep { display: flex; align-items: center; gap: 8px 16px; flex-wrap: wrap; }
-.trash-keep > p { margin: 0; min-width: 240px; }
-table.trash th.tick, table.trash td.tick { width: 1%; padding-right: 0; }
-table.trash tr.chosen td { background: var(--accent-soft); }
 tr.clickable { cursor: pointer; }
 @media (hover: hover) { tr.clickable:hover td { background: var(--surface-2); } }
 .usage { min-width: 150px; display: grid; gap: 6px; }
@@ -1662,7 +1639,7 @@ img.broken { visibility: hidden; }
 
 /* lists: what fits, and the way to the rest at the foot */
 .pg-card > :is(.attention-block, .activity-block) { display: flex; flex-direction: column; }
-.pg-card > .attention-block .attention-list, .pg-card > .activity-block .timeline { min-height: 0; }
+.pg-card > .attention-block .attention-list, .pg-card > .activity-block .fits { min-height: 0; overflow: hidden; }
 .pg-card > .attention-block .attention-list { overflow: hidden; flex: 0 1 auto; }
 .attention-list.squeezed .attention-item p { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .attention-list.bare .attention-item p { display: none; }
@@ -2099,8 +2076,6 @@ dialog.nav-sheet[open] { display: grid; gap: 14px; padding: 10px 14px calc(14px 
 .ha-filter { flex-wrap: wrap; justify-content: flex-start; }
 .ha-filter input[type="search"] { flex: 1 1 220px; min-width: 0; }
 .ha-filter .check { margin: 0; }
-.home-head.card { align-items: center; padding: 16px 20px; }
-.home-head.card h1 { font-size: 22px; }
 
 /* --- The table of access ------------------------------------------------------------------------------ */
 
@@ -2225,7 +2200,7 @@ a.kpi { color: inherit; text-decoration: none; border-radius: var(--radius-sm); 
 /* A card whose heading stands inside it, above a table or a row of numbers that reaches the card's edges */
 .card.head-in > .card { border: 0; border-radius: 0; box-shadow: none; background: none !important; backdrop-filter: none !important; border-top: 1px solid var(--border); }
 /* Home is a grid of its own: its head stands as far from the cards as they stand from each other */
-#view:has(> .pg), #view:has(.home-head) { gap: 12px; }
+#view:has(> .pg) { gap: 12px; }
 /* Tabs are words everywhere: the same size and no pictures, whichever page they stand on */
 .tabs > .tab > .ico { display: none; }
 /*
@@ -2321,7 +2296,6 @@ a.link-name { text-decoration: underline; text-decoration-color: var(--border-st
 .link-drop.over { border-color: var(--accent); background: var(--accent-soft); }
 .link-foot { display: flex; gap: 6px; align-items: center; margin: 24px 0 0; }
 .link-page .ok { color: var(--ok); }
-.link-of + .link-of { border-top: 1px solid var(--border); padding-top: 16px; }
 .link-made .copy-box { max-width: 640px; }
 .link-made + .link-made { border-top: 1px solid var(--border); padding-top: 12px; }
 
@@ -3075,3 +3049,33 @@ button.tv-stage-chip:active { background: rgb(0 0 0 / 0.9); }
   .ui-tile:not(.media, .add, .small) :is(.ui-tile-foot, .ui-tile-desc) { padding-left: 44px; }
   .ui-tile.add { height: 56px; }
 }
+.ui-head-actions > input[type=search] { width: 260px; }
+@media (max-width: 640px) { .ui-head-actions > input[type=search] { width: 100%; flex: 1; } }
+/* a flush card's head over rows or a table has a line under it; a link that leads somewhere */
+.card:not(.pad) > .section-head.pad:has(+ :is(.ui-row, .ui-rows, .ui-group, .ui-table-wrap, .ui-empty)) { border-bottom: 1px solid var(--border); }
+.ui-rows { display: grid; }
+.ui-link { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 600; color: var(--accent-text); text-decoration: none; }
+.ui-link .ico { width: 14px; height: 14px; }
+@media (hover: hover) { .ui-link:hover { text-decoration: underline; } }
+.card:not(.pad) > .ui-empty.small { padding-inline: var(--pad); }
+.card:not(.pad) > .section-head.pad + p.muted.pad:has(+ :is(.ui-row, .ui-rows, .ui-group, .ui-table-wrap, .ui-empty)) { border-bottom: 1px solid var(--border); }
+.card:not(.pad) > .section-head.pad:has(+ p.muted.pad) { border-bottom: 0; }
+.ui-cell { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.ui-cell > input[type=checkbox] { flex: none; margin: 0; }
+.ui-cell-text { min-width: 0; display: grid; gap: 2px; }
+.ui-cell-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ui-cell-sub { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ui-table td:has(> .ui-cell) .ui-td-sub { margin-left: 44px; }
+.ui-select-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px var(--pad); background: var(--accent-soft); border-bottom: 1px solid var(--border); font-size: 13px; font-weight: 600; }
+.ui-select-bar > span { margin-right: auto; }
+.card:not(.pad) > .ui-setting { padding-inline: var(--pad); border-bottom: 1px solid var(--border); }
+.card:not(.pad) > .ui-inset { padding: 12px var(--pad); border-bottom: 1px solid var(--border); }
+.ui-tile.adds { border: 1.5px dashed var(--border-strong); background: none; }
+.ui-tile.away .ui-tile-icon { color: var(--faint); }
+.ui-tile-free { flex: none; }
+.ui-tiles > .ui-empty { grid-column: 1 / -1; }
+@media (max-width: 640px) { .ui-tile-foot > .ui-meter { display: none; } }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.files-tools .ui-segment .ui-seg { padding-inline: 8px; }
+@media (max-width: 760px) { .files-tools .files-new { display: none; } }
+@media (max-width: 640px) { #grid-edit-slot { display: none; } }

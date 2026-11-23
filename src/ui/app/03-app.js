@@ -3,7 +3,7 @@
 
 // --- The whole history ----------------------------------------------------------------------------
 
-const historyUi = { entries: [], more: false, loaded: false, filter: "", quiet: false };
+const historyUi = { entries: [], more: false, loaded: false, filter: "", quiet: false, error: null, folded: new Set() };
 
 async function loadHistory(older = false) {
   const before = older && historyUi.entries.length ? historyUi.entries[historyUi.entries.length - 1].ts : Date.now() + 60_000;
@@ -12,8 +12,10 @@ async function loadHistory(older = false) {
     historyUi.entries = older ? [...historyUi.entries, ...page.entries] : page.entries;
     historyUi.more = page.more;
     historyUi.loaded = true;
+    historyUi.error = null;
   } catch (e) {
-    toast(errorText(e), "error");
+    if (historyUi.loaded) toast(errorText(e), "error");
+    else historyUi.error = errorText(e);
   }
   if (state.route.view === "activity") paintHistory();
 }
@@ -21,7 +23,10 @@ async function loadHistory(older = false) {
 function paintHistory() {
   const box = document.getElementById("history");
   if (!box) return;
-  if (!historyUi.loaded) return box.replaceChildren(waitMark());
+  const segment = uiSegment([{ value: "all", label: t("activity.all2") }, { value: "quiet", label: t("activity.noSignins") }], historyUi.quiet ? "quiet" : "all", (v) => ((historyUi.quiet = v === "quiet"), paintHistory()), { label: t("activity.history") });
+  const card = (...body) => put(box, uiCard({ flush: true, cls: "history", actions: segment, title: t("activity.events") }, ...body));
+  if (historyUi.error && !historyUi.loaded) return card(uiEmpty({ size: "error", title: t("activity.failed"), text: historyUi.error, action: button(t("ui.retry"), { onclick: () => ((historyUi.error = null), paintHistory(), loadHistory()) }) }));
+  if (!historyUi.loaded) return card(uiEmpty({ size: "loading" }));
   // each entry is worded first: the filter looks at what the person reads, in their language
   const words = historyUi.filter.trim().toLowerCase();
   const days = new Map();
@@ -33,18 +38,16 @@ function paintHistory() {
     if (!days.has(day)) days.set(day, []);
     days.get(day).push(row);
   }
-  put(
-    box,
-    days.size ? [...days].map(([day, rows]) => h("section", { class: "card pad history-day" }, h("h3", null, day), rows)) : h("p", { class: "card pad muted" }, t(words ? "activity.noMatch" : "activity.none")),
-    historyUi.more && h("div", { class: "center-row" }, button(t("activity.older"), { onclick: (e) => ((e.currentTarget.disabled = true), loadHistory(true)) })),
-    !historyUi.more && days.size > 0 && h("p", { class: "card pad muted small center-row" }, t("activity.start")),
+  if (!days.size) return card(words ? uiEmpty({ text: t("activity.noMatch") }) : uiEmpty({ size: "big", icon: "clock", title: t("activity.none") }));
+  card(
+    [...days].map(([day, rows]) => uiGroup({ name: day, count: rows.length, open: !historyUi.folded.has(day), onToggle: (open) => (open ? historyUi.folded.delete(day) : historyUi.folded.add(day), paintHistory()) }, ...rows)),
+    historyUi.more ? uiEmpty({ text: t("activity.olderLead"), action: button(t("activity.older"), { class: "quiet small", onclick: (e) => ((e.currentTarget.disabled = true), loadHistory(true)) }) }) : uiEmpty({ text: t("activity.start") }),
   );
 }
 
 function renderActivity() {
-  const search = h("input", { type: "search", placeholder: t("activity.search"), value: historyUi.filter, oninput: () => ((historyUi.filter = search.value), paintHistory()) });
-  const quiet = h("input", { type: "checkbox", checked: historyUi.quiet, onchange: () => ((historyUi.quiet = quiet.checked), paintHistory()) });
-  shell(h("div", { class: "page-head" }, h("div", null, h("h1", null, t("activity.history")), h("p", { class: "meta" }, t("activity.historyLead"))), h("div", { class: "actions" }, h("label", { class: "check inline" }, quiet, h("span", null, t("activity.noSignins"))), search)), h("div", { id: "history", class: "stack" }));
+  const search = h("input", { type: "search", class: "ui-search", placeholder: t("activity.search"), "aria-label": t("activity.search"), value: historyUi.filter, oninput: () => ((historyUi.filter = search.value), paintHistory()) });
+  shell(pageHead({ title: t("activity.history"), facts: [t("activity.historyLead")], search }), h("div", { id: "history" }));
   paintHistory();
   void loadHistory();
 }
@@ -128,20 +131,23 @@ function renderHome() {
   homeUi.widgets = {
     stats: statsBlock(),
     attention: isAdmin() ? widget("attention", h("section", { class: "card pad attention-block" })) : null,
-    activity: isAdmin() ? widget("activity", h("section", { class: "card pad activity-block" })) : null,
+    activity: isAdmin() ? widget("activity", h("section", { class: "card activity-block" })) : null,
     adblock: isAdmin() ? widget("adblock", h("section", { class: "card pad adblock-block" })) : null,
     tv: isAdmin() && hasModule("tv") ? widget("tv", h("section", { class: "card pad tv-block" })) : null,
   };
   shell(
     h("div", { id: "grid-bar" }),
-    h("div", { class: "card page-head home-head", id: "home-head" }, h("div", null, h("h1", null, greeting), h("p", { class: "meta", id: "host" }, " ")), h("div", { class: "home-head-side" }, h("div", { class: "counts", id: "counts" }), h("span", { id: "grid-edit-slot" }))),
+    pageHead({ id: "home-head", title: greeting, state: h("span", { id: "counts" }), facts: [h("span", { id: "host" }, " "), h("span", { id: "counts-rest" })], search: h("span", { id: "grid-edit-slot" }) }),
     h("div", { class: "pg", id: "pg" }),
   );
   Object.assign(gridUi, { arranging: false, undo: [], entry: null, drag: null });
   renderHomeBody();
 }
 
-const activityBody = (o) => [h("div", { class: "section-head" }, h("h2", null, t("activity.title"))), o.activity.length ? h("div", { class: "timeline fits" }, o.activity.map(activityItem)) : h("p", { class: "muted small" }, t("activity.none")), isAdmin() && o.activity.length > 0 && h("a", { class: "link small all-activity block-foot", href: "#/activity" }, t("activity.all"), icon("chevron"))];
+const activityBody = (o) => [
+  h("div", { class: "section-head pad" }, h("h2", null, t("activity.title")), isAdmin() && o.activity.length > 0 && h("div", { class: "actions" }, h("a", { class: "ui-link", href: "#/activity" }, t("activity.all"), icon("chevron")))),
+  o.activity.length ? h("div", { class: "ui-rows fits" }, o.activity.map((e) => activityItem(e))) : uiEmpty({ text: t("activity.none") }),
+];
 
 function attentionDialog(list) {
   let dialog;
@@ -168,7 +174,18 @@ function renderHomeBody() {
 
   const count = (st) => apps.filter((a) => appState(a) === st).length;
   const counts = [["running", count("running")], ["restarting", count("restarting")], ["partial", count("partial")], ["stopped", count("stopped")]].filter(([, n]) => n > 0);
-  document.getElementById("counts")?.replaceChildren(...(counts.length ? [h("span", { class: "status-pill" }, counts.flatMap(([st, n], i) => [i > 0 && h("span", { class: "dot-sep" }, "·"), h("span", { class: "count" }, h("i", { class: "dot " + st }), t("home.count." + st, { n }))]))] : []));
+  // the worst of them is the state by the greeting; the others are said in words in the line under it
+  const worst = counts.find(([st]) => st === "restarting") ?? counts.find(([st]) => st === "partial") ?? counts.find(([st]) => st === "running") ?? counts[0];
+  const tone = { running: "ok", restarting: "bad", partial: "warn", stopped: "off" };
+  document.getElementById("counts")?.replaceChildren(...(worst ? [uiState(tone[worst[0]], t("home.count." + worst[0], { n: worst[1] }))] : []));
+  const rest = counts.filter((c) => c !== worst).map(([st, n]) => t("home.count." + st, { n })).join(" · ");
+  const restBox = document.getElementById("counts-rest");
+  if (restBox) {
+    restBox.textContent = rest;
+    restBox.hidden = !rest;
+    const sep = restBox.previousElementSibling;
+    if (sep?.classList.contains("ui-dot-sep")) sep.hidden = !rest;
+  }
 
   paintGrid();
   renderFolder();
@@ -557,7 +574,7 @@ function appOverviewTab(app, box) {
         appAccessCard(app),
         app.login && h("section", { class: "card pad" }, h("div", { class: "section-head" }, h("h2", null, t("app.login"))), loginBlock(app.login, loginAsker(app.name))),
         app.tips && h("section", { class: "card pad" }, h("div", { class: "section-head" }, h("h2", null, t("app.notes"))), h("div", { class: "tips prose" }, md(app.tips))),
-        h("section", { class: "card pad" }, h("div", { class: "section-head" }, h("h2", null, t("activity.title"))), app.activity.length ? app.activity.slice(0, 6).map(activityItem) : h("p", { class: "muted small" }, t("activity.none"))),
+        uiCard({ title: t("activity.title"), flush: true }, app.activity.length ? app.activity.slice(0, 6).map((e) => activityItem(e)) : uiEmpty({ text: t("activity.none") })),
       ),
     ),
   );

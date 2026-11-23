@@ -6380,5 +6380,17 @@
   "ui.copied": "Скопійовано",
   "ui.show": "Показати",
   "ui.hide": "Сховати",
-  "ui.crumbs": "Де ви"
+  "ui.crumbs": "Де ви",
+  "ui.retry": "Спробувати ще",
+  "activity.all2": "Усе",
+  "activity.events": "Події",
+  "activity.failed": "Не вдалося прочитати історію",
+  "activity.olderLead": "Давніші події ще не завантажено",
+  "links.active": "Діє",
+  "links.ended2": "Скінчилося",
+  "links.copy": "Копіювати",
+  "links.openFolder": "Відкрити теку",
+  "links.noneLead": "Дайте посилання з меню файлу чи теки у Файлах.",
+  "files.cannotRead": "Не вдалося прочитати теку",
+  "files.view": "Вигляд"
 }

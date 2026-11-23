@@ -306,7 +306,6 @@ function renderFilesBody() {
     localStorage.setItem("hata.files.mode", mode);
     renderFilesBody();
   };
-  const modeButton = (mode, iconName) => h("button", { type: "button", class: "btn square" + (filesUi.mode === mode ? " active" : ""), title: t("files.view." + mode), "aria-label": t("files.view." + mode), "aria-pressed": String(filesUi.mode === mode), onclick: () => setMode(mode) }, icon(iconName));
   const sort = h(
     "select",
     { class: "sort", "aria-label": t("files.sort"), onchange: () => ((filesUi.sort = sort.value), localStorage.setItem("hata.files.sort", sort.value), renderFilesBody()) },
@@ -316,6 +315,15 @@ function renderFilesBody() {
   const isPinned = (listing?.pinned ?? []).includes(path);
   const isShared = (listing?.shared ?? []).includes(listing?.path);
   const trail = filesUi.trail;
+  const here = listing && !listing.error && !machine;
+  // what the folder holds may have changed from elsewhere: over the network, by an app, in a terminal
+  const folderMore = () => [
+    { label: t("files.reload"), icon: "refresh", run: () => loadFiles() },
+    phone.matches && !(!listing || listing.error || listing.readOnly) && { label: t("files.new"), icon: "plus", run: () => newMenu(path, document.querySelector(".files-tools .ui-more")) },
+    here && { label: t(isFavorite(path) ? "files.unfavorite" : "files.favorite"), icon: "star", on: isFavorite(path), run: () => favorite(path, !isFavorite(path)) },
+    here && isAdmin() && { label: t(isPinned ? "files.unpin" : "files.pin"), icon: "home", on: isPinned, run: () => pinFolder(path, !isPinned) },
+    here && isAdmin() && { label: t(isShared ? "files.shareSettings" : "files.share") + "…", icon: "share", run: () => shareDialog(path) },
+  ].filter(Boolean);
   const navButton = (label, iconName, off, run, cls = "") => h("button", { type: "button", class: "btn square", title: label, "aria-label": label, disabled: off, onclick: run }, icon(iconName, cls));
   const head = h(
     "div",
@@ -337,20 +345,11 @@ function renderFilesBody() {
       { class: "files-tools" },
       listing && !listing.error && !machine && findBox(path),
       h("span", { class: "grow" }),
-      // what the folder holds may have changed from elsewhere: over the network, by an app, in a terminal
-      h("button", { type: "button", class: "btn square", title: t("files.reload"), "aria-label": t("files.reload"), onclick: async (e) => {
-        const mark = e.currentTarget.querySelector(".ico");
-        mark?.classList.add("spin");
-        await loadFiles();
-        mark?.classList.remove("spin");
-      } }, icon("refresh")),
-      listing && !listing.error && !machine && h("button", { type: "button", class: "btn square" + (isFavorite(path) ? " active" : ""), title: t(isFavorite(path) ? "files.unfavorite" : "files.favorite"), "aria-label": t(isFavorite(path) ? "files.unfavorite" : "files.favorite"), "aria-pressed": String(isFavorite(path)), onclick: () => favorite(path, !isFavorite(path)) }, icon("star")),
-      listing && !listing.error && !machine && isAdmin() && h("button", { type: "button", class: "btn square" + (isPinned ? " active" : ""), title: t(isPinned ? "files.unpin" : "files.pin"), "aria-label": t(isPinned ? "files.unpin" : "files.pin"), "aria-pressed": String(isPinned), onclick: () => pinFolder(path, !isPinned) }, icon("home")),
-      listing && !listing.error && !machine && isAdmin() && h("button", { type: "button", class: "btn square" + (isShared ? " active" : ""), title: t(isShared ? "files.shareSettings" : "files.share"), "aria-label": t(isShared ? "files.shareSettings" : "files.share"), onclick: () => shareDialog(path) }, icon("share")),
       sort,
-      h("div", { class: "seg" }, modeButton("list", "list"), modeButton("grid", "grid")),
-      button(t("files.new"), { disabled: !listing || !!listing.error || listing.readOnly, onclick: (e) => newMenu(path, e.currentTarget) }, "plus"),
+      uiSegment([{ value: "list", icon: "list", label: h("span", { class: "sr-only" }, t("files.view.list")) }, { value: "grid", icon: "grid", label: h("span", { class: "sr-only" }, t("files.view.grid")) }], filesUi.mode, setMode, { label: t("files.view") }),
+      button(t("files.new"), { class: "files-new", disabled: !listing || !!listing.error || listing.readOnly, onclick: (e) => newMenu(path, e.currentTarget) }, "plus"),
       button(t("files.upload"), { class: "primary", disabled: !listing || !!listing.error || listing.readOnly, onclick: () => picker.click() }, "upload"),
+      uiMore(folderMore),
       picker,
     ),
   );
@@ -361,21 +360,19 @@ function renderFilesBody() {
     h(
       "div",
       { class: "files-status" },
-      h("span", null, listing.readOnly && h("span", { class: "chip warn" }, t("files.readOnly")), t("files.count", { dirs: dirs.length, files: rest.length }), rest.length > 0 && h("span", { class: "dot-sep" }, "·"), rest.length > 0 && bytes(rest.reduce((n, entry) => n + entry.size, 0))),
+      h("span", null, listing.readOnly && uiState("warn", t("files.readOnly")), t("files.count", { dirs: dirs.length, files: rest.length }), rest.length > 0 && h("span", { class: "dot-sep" }, "·"), rest.length > 0 && bytes(rest.reduce((n, entry) => n + entry.size, 0))),
       listing.disk && h("span", null, t("files.free", { free: bytes(listing.disk.free), total: bytes(listing.disk.total) })),
     );
 
   const selection = h("div", { class: "card selection", id: "files-selection", hidden: true });
   let body;
   if (!listing) body = h("p", { class: "muted" }, " ");
-  else if (listing.error) body = h("p", { class: "card pad error" }, listing.error);
+  else if (listing.error) body = uiCard({}, uiEmpty({ size: "error", title: t("files.cannotRead"), text: listing.error, action: button(t("ui.retry"), { onclick: () => loadFiles() }) }));
   else if (!entries.length)
     body = h(
       "div",
       { class: "card empty-folder" + (listing.readOnly ? " read-only" : "") },
-      icon("folder"),
-      h("div", { class: "grow" }, h("p", { class: "strong" }, t("files.empty")), !listing.readOnly && h("p", { class: "muted small" }, t("files.dropHint"))),
-      !listing.readOnly && h("div", { class: "row-actions" }, button(t("files.uploadFiles"), { class: "primary", onclick: () => picker.click() }, "upload"), button(t("files.newFolder"), { onclick: () => newFolderDialog(path, loadFiles) }, "plus")),
+      uiEmpty({ size: "big", icon: "folder", title: t("files.empty"), text: listing.readOnly ? null : t("files.dropHint"), action: !listing.readOnly && button(t("files.uploadFiles"), { class: "primary", onclick: () => picker.click() }, "upload") }),
     );
   else body = filesUi.mode === "grid" ? filesGrid(dirs, rest) : filesTable(entries);
   const finding = filesUi.find && filesUi.find.under === path;
@@ -384,7 +381,7 @@ function renderFilesBody() {
   const inCard = !finding && status && body.classList.contains("table-wrap");
   if (inCard) body.append(status);
 
-  put(main, head, selection, body, listing?.truncated && h("p", { class: "muted small" }, t("files.truncated")), !finding && !inCard && status && h("div", { class: "card" }, status), uploadBox);
+  put(main, head, selection, body, listing?.truncated && uiCard({}, uiEmpty({ text: t("files.truncated") })), !finding && !inCard && status && h("div", { class: "card" }, status), uploadBox);
   renderSelection();
   if (filesUi.edit) {
     const input = main.querySelector(".address-input");
@@ -727,19 +724,21 @@ const myHataUi = { root: null };
 
 /** A tile of My Hata: what it is, where, and how full when it is a file system */
 function hataTile({ href, onclick, iconName, title, sub, room, menu, cls = "", words = false }) {
-  let bar = null;
+  let foot = null;
   if (room?.total) {
     const used = Math.round(((room.total - room.free) / room.total) * 100);
-    const fill = h("i", { class: level(used) });
-    fill.style.width = used + "%";
-    bar = [h("span", { class: "bar" }, fill), h("span", { class: "muted small" }, t("files.free", { free: bytes(room.free), total: bytes(room.total) }))];
+    foot = [uiMeter(used), h("span", { class: "ui-tile-free" }, t("files.free", { free: bytes(room.free), total: bytes(room.total) }))];
   }
-  return h(
-    "a",
-    { class: "disk-tile " + cls, href: href ?? "#", onclick, menu },
-    h("span", { class: "badge-icon plain" }, icon(iconName)),
-    h("span", { class: "disk-text" }, h("span", { class: "clip strong" }, title), sub && h("span", { class: "muted small clip" + (words ? "" : " mono") }, sub), bar),
-  );
+  return uiTile({
+    href: href ?? (onclick ? null : "#"),
+    onclick: onclick ? (e) => (e.preventDefault?.(), onclick(e)) : null,
+    icon: iconName,
+    name: title,
+    sub: sub && (words || !String(sub).startsWith("/") ? sub : h("span", { class: "mono" }, sub)),
+    foot,
+    menu,
+    kind: [cls === "add" ? "adds" : "", cls === "away" ? "away" : ""].filter(Boolean).join(" "),
+  });
 }
 
 function renderMyHata() {
@@ -754,7 +753,7 @@ function renderMyHata() {
     return hataTile({ href: filesHash(one.dir ? one.path : parent, ""), onclick: one.dir ? null : () => (filesUi.pick = name), iconName: one.dir ? "folder" : "file", title: name, sub: one.path, menu: (at) => menuAt(at, menuHeader(name, one.path, one.dir ? "folder" : "file"), [{ label: t("files.copyPath"), icon: "copy", run: () => copyText(one.path) }, { label: t("files.unfavorite"), icon: "star", run: () => favorite(one.path, false, name) }]) });
   };
   const machineTile = (m) => hataTile({ href: m.online ? filesHash("/", m.id) : `#/machines/${m.id}`, iconName: "server", title: m.name, sub: m.online ? machineOs(m) : t("machines.offline"), cls: m.online ? "" : "away" });
-  const section = (title, tiles, extra) => h("section", { class: "card pad stack my-hata" }, h("div", { class: "section-head" }, h("h2", null, title), extra), h("div", { class: "disk-strip hata-grid" }, tiles));
+  const section = (title, tiles, extra) => uiCard({ title, actions: extra, cls: "my-hata" }, h("div", { class: "ui-tiles" }, tiles));
   const local = disks.filter((d) => !d.network);
   const network = disks.filter((d) => d.network);
   const machines = machinesUi.list?.machines ?? [];
@@ -767,23 +766,23 @@ function renderMyHata() {
       h(
         "section",
         { class: "stack", id: "files-main" },
-        h("div", { class: "page-head card pad" }, h("div", null, h("h1", null, t("myhata.title")), h("p", { class: "muted" }, t("myhata.lead")))),
+        pageHead({ title: t("myhata.title"), facts: [t("myhata.lead")] }),
         !listing
-          ? waitMark()
+          ? uiCard({}, uiEmpty({ size: "loading" }))
           : [
               section(t("myhata.server"), [
                 home && hataTile({ href: filesHash(home, ""), iconName: "folder", title: t("files.home"), sub: home, room: listing.disk }),
                 hataTile({ href: filesHash("/", ""), iconName: "disk", title: t("files.root"), sub: "/", room: myHataUi.root }),
                 hataTile({ href: "#/trash", iconName: "trash", title: t("trash.title"), sub: t("myhata.trash") }),
               ]),
-              section(t("files.disks"), local.length ? local.map(volumeTile) : h("p", { class: "muted small" }, t("myhata.noDisks")), h("a", { class: "link small", href: "#/settings/storage" }, t("myhata.storage"))),
+              section(t("files.disks"), local.length ? local.map(volumeTile) : uiEmpty({ text: t("myhata.noDisks") }), h("a", { class: "ui-link", href: "#/storage/disks" }, t("myhata.storage"), icon("chevron"))),
               section(t("myhata.network"), [
                 ...network.map(volumeTile),
                 hataTile({ onclick: (e) => (e.preventDefault(), findPlacesDialog()), iconName: "search", title: t("myhata.browse"), sub: t("myhata.browseLead"), cls: "add" }),
                 hataTile({ onclick: addPlaceHere, iconName: "plus", title: t("netplace.sidebar"), sub: t("myhata.addPlace"), cls: "add" }),
               ]),
               favorites.length > 0 && section(t("files.favorites"), favorites.map(favoriteTile)),
-              section(t("nav.machines"), machines.length ? machines.map(machineTile) : hataTile({ href: "#/machines", iconName: "plus", title: t("myhata.addMachine"), sub: t("myhata.addMachineLead"), cls: "add" }), machines.length > 0 && h("a", { class: "link small", href: "#/machines" }, t("myhata.allMachines"))),
+              section(t("nav.machines"), machines.length ? machines.map(machineTile) : hataTile({ href: "#/machines", iconName: "plus", title: t("myhata.addMachine"), sub: t("myhata.addMachineLead"), cls: "add" }), machines.length > 0 && h("a", { class: "ui-link", href: "#/machines" }, t("myhata.allMachines"), icon("chevron"))),
             ],
       ),
     ),
@@ -795,7 +794,7 @@ function renderMyHata() {
 function renderMySharedFolders() {
   const shares = state.myShares;
   const favorites = state.favorites ?? [];
-  const section = (title, tiles) => h("section", { class: "card pad stack my-hata" }, h("div", { class: "section-head" }, h("h2", null, title)), h("div", { class: "disk-strip hata-grid" }, tiles));
+  const section = (title, tiles) => uiCard({ title, cls: "my-hata" }, h("div", { class: "ui-tiles" }, tiles));
   // a machine that is away keeps its tiles, greyed: its folders open once it is back
   const shareTile = (share, m) => hataTile({ href: filesHash(share.path, m ? m.id : ""), iconName: "share", title: share.name, sub: m && !m.online ? t("machines.offline") : t(share.access === "write" ? "myhata.mayWrite" : "myhata.mayRead"), words: true, cls: m && !m.online ? "away" : "", menu: (at) => sidebarMenu(at, { label: share.name, path: share.path, machine: m ? m.id : "", iconName: "share" }) });
   const favoriteTile = (one) => {
@@ -811,11 +810,11 @@ function renderMySharedFolders() {
       h(
         "section",
         { class: "stack", id: "files-main" },
-        h("div", { class: "page-head card pad" }, h("div", null, h("h1", null, t("myhata.title")), h("p", { class: "muted" }, t("myhata.sharedLead")))),
+        pageHead({ title: t("myhata.title"), facts: [t("myhata.sharedLead")] }),
         !shares
-          ? waitMark()
+          ? uiCard({}, uiEmpty({ size: "loading" }))
           : [
-              (shares.length > 0 || !(state.myMachines ?? []).length) && section(t("myhata.shared"), shares.length ? shares.map((share) => shareTile(share, "")) : h("p", { class: "muted small" }, t("myhata.nothingShared"))),
+              (shares.length > 0 || !(state.myMachines ?? []).length) && section(t("myhata.shared"), shares.length ? shares.map((share) => shareTile(share, "")) : uiEmpty({ text: t("myhata.nothingShared") })),
               (state.myMachines ?? []).map((m) => section(t("myhata.onMachine", { name: m.name }), m.shares.map((share) => shareTile(share, m)))),
               favorites.length > 0 && section(t("files.favorites"), favorites.map(favoriteTile)),
             ],
@@ -1487,17 +1486,18 @@ function renderTrash() {
     onchange: (e) => (items.forEach((item) => (e.target.checked ? trashChosen.add(item.id) : trashChosen.delete(item.id))), renderTrash()),
   });
   all.indeterminate = chosen.length > 0 && chosen.length < items.length;
-  const row = (item) =>
-    h(
-      "tr",
-      { class: trashChosen.has(item.id) ? "chosen" : "" },
-      h("td", { class: "tick" }, tick(item)),
-      h("td", null, h("div", { class: "with-icon strong" }, icon(item.type === "dir" ? "folder" : "file"), h("span", { class: "clip" }, item.name))),
-      h("td", null, h("a", { class: "muted small mono clip block", href: filesHash(folderOf(item.from)) }, folderOf(item.from))),
-      h("td", null, h("div", null, ago(item.at)), item.by && h("div", { class: "muted small" }, item.by)),
-      h("td", { class: "num" }, bytes(item.size), item.type === "dir" && h("div", { class: "muted small" }, t("trash.files", { n: item.files }))),
-      h("td", null, h("div", { class: "row-actions" }, button(t("trash.restore"), { class: "small", onclick: back([item]) }, "undo"), isAdmin() && button("", { class: "small icon-btn", title: t("files.deleteForever"), "aria-label": t("files.deleteForever"), onclick: () => forever([item.id], t("trash.deleteTitle", { name: item.name }), t("trash.deleteLead")) }, "trash"))),
-    );
+  const remove = (item) => forever([item.id], t("trash.deleteTitle", { name: item.name }), t("trash.deleteLead"));
+  const row = (item) => ({
+    cells: [
+      uiCell({ tick: tick(item), lead: { icon: item.type === "dir" ? "folder" : "file" }, name: item.name, sub: item.type === "dir" ? t("trash.files", { n: item.files }) : null }),
+      h("a", { class: "mono small", href: filesHash(folderOf(item.from)), title: folderOf(item.from) }, folderOf(item.from)),
+      uiCell({ name: h("span", { class: "plain" }, ago(item.at)), sub: item.by }),
+      bytes(item.size),
+      h("div", { class: "row-actions" }, button(t("trash.restore"), { class: "small", onclick: back([item]) }, "undo"), isAdmin() && uiMore([{ label: t("files.deleteForever") + "…", icon: "trash", danger: true, run: () => remove(item) }], { size: "s" })),
+    ],
+    sub: [folderOf(item.from), ago(item.at), bytes(item.size)].join(" · "),
+    menu: (at) => menuAt(at, null, [{ label: t("trash.restore"), icon: "undo", run: () => back([item])({ currentTarget: {} }) }, isAdmin() && { label: t("files.deleteForever") + "…", icon: "trash", danger: true, run: () => remove(item) }].filter(Boolean)),
+  });
   const keep = data?.keepDays ?? 30;
   const days = h(
     "select",
@@ -1505,28 +1505,30 @@ function renderTrash() {
     [...new Set([...TRASH_DAYS, keep])].sort((a, b) => a - b).map((n) => h("option", { value: String(n), selected: n === keep }, trashDaysText(n))),
   );
   const chosenSize = chosen.reduce((sum, item) => sum + item.size, 0);
+  const emptyAll = () => forever(null, t("trash.emptyTitle"), t("trash.emptyLead", { n: items.length, size: bytes(data.size) }));
   shell(h("div", { class: "files" }, h("aside", { class: "files-side fold", id: "files-places" }), h("section", { class: "stack" },
-    h(
-      "div",
-      { class: "page-head" },
-      h("div", null, h("h1", null, t("trash.title")), h("p", { class: "meta" }, h("a", { href: "#/files" }, t("nav.files")), h("span", { class: "dot-sep" }, "·"), t("trash.meta", { n: items.length, size: bytes(data?.size ?? 0) }))),
-      h(
-        "div",
-        { class: "actions" },
-        chosen.length > 0 && button(t("trash.restoreChosen", { n: chosen.length }), { onclick: back(chosen) }, "undo"),
-        chosen.length > 0 && isAdmin() && button(t("trash.deleteChosen", { n: chosen.length }), { class: "danger", onclick: () => forever(chosen.map((item) => item.id), t("trash.deleteChosenTitle", { n: chosen.length }), t("trash.emptyLead", { n: chosen.length, size: bytes(chosenSize) })) }, "trash"),
-        chosen.length === 0 && items.length > 0 && isAdmin() && button(t("trash.empty"), { class: "danger", onclick: () => forever(null, t("trash.emptyTitle"), t("trash.emptyLead", { n: items.length, size: bytes(data.size) })) }, "trash"),
-      ),
-    ),
-    h(
-      "div",
-      { class: "card table-wrap" },
-      h("div", { class: "pad trash-keep" }, h("p", { class: "muted small grow" }, t("trash.lead", { days: trashDaysText(keep) })), data && isAdmin() && h("label", { class: "with-icon small" }, h("span", null, t("trash.keep")), days)),
+    pageHead({
+      crumbs: [{ label: t("nav.files"), href: "#/files" }, { label: t("trash.title") }],
+      title: t("trash.title"),
+      facts: data ? [t("trash.meta", { n: items.length, size: bytes(data.size ?? 0) })] : null,
+      actions: [items.length > 0 && isAdmin() && { label: t("trash.empty") + "…", icon: "trash", danger: true, run: emptyAll }],
+    }),
+    uiCard(
+      { flush: true },
+      data && isAdmin() && uiSetting({ name: t("trash.keep"), explain: t("trash.lead", { days: trashDaysText(keep) }), control: days }),
+      chosen.length > 0 &&
+        h(
+          "div",
+          { class: "ui-select-bar" },
+          h("span", null, t("files.selected", { n: chosen.length })),
+          button(t("trash.restore"), { class: "small", onclick: back(chosen) }, "undo"),
+          isAdmin() && button(t("files.deleteForever") + "…", { class: "small danger-text", onclick: () => forever(chosen.map((item) => item.id), t("trash.deleteChosenTitle", { n: chosen.length }), t("trash.emptyLead", { n: chosen.length, size: bytes(chosenSize) })) }, "trash"),
+        ),
       !data
-        ? null
+        ? uiEmpty({ size: "loading" })
         : items.length === 0
-          ? h("p", { class: "empty" }, t("trash.nothing"))
-          : h("table", { class: "disks trash" }, h("thead", null, h("tr", null, h("th", { class: "tick" }, all), h("th", null, t("files.col.name")), h("th", null, t("trash.col.from")), h("th", null, t("trash.col.deleted")), h("th", { class: "num" }, t("files.col.size")), h("th"))), h("tbody", null, items.map(row))),
+          ? uiEmpty({ size: "big", icon: "trash", title: t("trash.nothing") })
+          : uiTable([{ label: h("span", { class: "ui-cell" }, all, t("files.col.name")) }, { label: t("trash.col.from") }, { label: t("trash.col.deleted") }, { label: t("files.col.size"), num: true }, { label: "" }], items.map(row)),
     ),
   )));
   filesPlaces(null);

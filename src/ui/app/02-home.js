@@ -159,7 +159,7 @@ function renderSystem() {
   if (own) own.textContent = s.hostname;
   const up = document.getElementById("own-up");
   if (up) up.textContent = t("sys.uptime", { time: duration(s.uptime) });
-  if (meta) meta.replaceChildren(...[s.hostname, location.host, "Hata " + state.version].flatMap((part, i) => (i ? [h("span", { class: "dot-sep" }, "·"), part] : [part])));
+  if (meta) meta.textContent = [s.hostname, location.host, "Hata " + state.version].join(" · ");
 
   setKpi("cpu", s.cpu == null ? "—" : String(s.cpu), "%", t("sys.cores", { n: s.cores }) + " · " + t("sys.load", { load: s.load[0] }), meterBar(s.cpu ?? 0, ""));
   const mem = s.memory;
@@ -820,7 +820,7 @@ function gridBar() {
   // the button stays the same element across redraws: one under the pointer keeps its click
   const slot = document.getElementById("grid-edit-slot");
   const offer = mayArrange();
-  if (slot && !!slot.firstChild !== offer) put(slot, offer && button(t("grid.editShort"), { class: "small", onclick: gridEdit }, "grid"));
+  if (slot && !!slot.firstChild !== offer) put(slot, offer && button(t("grid.editShort"), { onclick: gridEdit }, "grid"));
 }
 
 const GRID_WIDE = 1000;
@@ -1670,14 +1670,16 @@ function activityItem(entry, when) {
   const failed = outcome === "failed";
   const key = "activity." + entry.code;
   const title = state.overview?.apps.find((a) => a.name === entry.app)?.title ?? entry.app ?? "";
-  const meta = [typeof when === "string" ? when : ago(entry.ts), entry.machine && t("activity.onMachine", { name: entry.machine }), entry.user && group !== "auth" ? (entry.user === "schedule" ? t("activity.bySchedule") : entry.user === "restore" ? t("activity.byRestore") : entry.user === "console" ? t("activity.byConsole") : entry.user === "disk" ? t("activity.byDisk") : entry.user.startsWith("agent:") ? t("activity.byAgent", { name: entry.user.slice(6) }) : entry.user.startsWith("assistant:") ? t("activity.byAssistant", { user: entry.user.slice(10) }) : t("activity.by", { user: entry.user })) : null, group === "auth" ? entry.detail : null].filter(Boolean).join(" · ");
-  return h(
-    "div",
-    { class: "activity-item" },
-    icon(group === "auth" ? "signin" : group === "users" ? "user" : failed ? "x" : (ACTIVITY_ICONS[kind] ?? "check"), failed ? "danger" : ""),
-    h("div", { class: "grow" }, h("div", null, has(key) ? t(key, { app: title, user: entry.user ?? "", target: group === "modules" && entry.detail ? moduleName(entry.detail) : (entry.detail ?? "") }) : entry.code), h("div", { class: "muted small" }, meta), failed && entry.detail && h("div", { class: "muted small clip" }, entry.detail)),
-    entry.code === "app.update.done" && !entry.machine && isAdmin() && Date.now() - entry.ts < UNDO_DAYS * 86400_000 && button(t("activity.undo"), { class: "small ghost", onclick: () => undoUpdate(entry) }, "undo"),
-  );
+  const by = entry.user && group !== "auth" ? (entry.user === "schedule" ? t("activity.bySchedule") : entry.user === "restore" ? t("activity.byRestore") : entry.user === "console" ? t("activity.byConsole") : entry.user === "disk" ? t("activity.byDisk") : entry.user.startsWith("agent:") ? t("activity.byAgent", { name: entry.user.slice(6) }) : entry.user.startsWith("assistant:") ? t("activity.byAssistant", { user: entry.user.slice(10) }) : t("activity.by", { user: entry.user })) : null;
+  const sub = [entry.machine && t("activity.onMachine", { name: entry.machine }), by, group === "auth" ? entry.detail : null, failed ? entry.detail : null].filter(Boolean).join(" · ");
+  return uiRow({
+    mode: "event",
+    lead: { icon: group === "auth" ? "signin" : group === "users" ? "user" : failed ? "x" : (ACTIVITY_ICONS[kind] ?? "check"), tone: failed ? "bad" : null },
+    name: has(key) ? t(key, { app: title, user: entry.user ?? "", target: group === "modules" && entry.detail ? moduleName(entry.detail) : (entry.detail ?? "") }) : entry.code,
+    sub: sub || null,
+    time: typeof when === "string" ? when : ago(entry.ts),
+    action: entry.code === "app.update.done" && !entry.machine && isAdmin() && Date.now() - entry.ts < UNDO_DAYS * 86400_000 ? button(t("activity.undo"), { class: "small", onclick: () => undoUpdate(entry) }, "undo") : null,
+  });
 }
 
 /** How long after an update its "Undo" is offered: pre-update snapshots are few and get replaced */

@@ -302,7 +302,7 @@ function renderBackupsBody() {
   );
   if (tab === "history") {
     const list = backupHistory.entries;
-    return put(box, h("section", { class: "card pad" }, h("h2", null, t("area.backups.history")), h("p", { class: "muted small" }, t("backup.historyLead")), !list ? waitMark() : list.length ? list.map((e) => activityItem(e, new Date(e.ts).toLocaleString(state.lang, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }))) : h("p", { class: "muted" }, t("activity.none"))));
+    return put(box, uiCard({ title: t("area.backups.history"), lead: t("backup.historyLead"), flush: true }, !list ? uiEmpty({ size: "loading" }) : list.length ? list.map((e) => activityItem(e, new Date(e.ts).toLocaleString(state.lang, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }))) : uiEmpty({ text: t("activity.none") })));
   }
   if (tab === "offsite") return put(box, offsiteCard(b.offsite)), void (clearTimeout(offsiteTimer), b.offsite.running && (offsiteTimer = setTimeout(() => state.route.view === "backups" && loadBackups(), 3000)));
   if (tab === "schedule") return box.contains(document.activeElement) ? undefined : put(box, backupScheduleForm(b, s), backupServerHow(b), h("p", { class: "card pad muted small" }, t("backup.how")));

@@ -562,6 +562,10 @@ function uiTable(columns, rows, { cls = "", height = 56 } = {}) {
   return h("div", { class: `ui-table-wrap h${height}${cls ? " " + cls : ""}` }, h("table", { class: "ui-table" }, head, body));
 }
 
+/** The name cell of a table: a lead (an icon in its frame, a tick), the name and a line under it */
+const uiCell = ({ lead = null, tick = null, name, sub = null }) =>
+  h("div", { class: "ui-cell" }, tick, uiLead(lead), h("div", { class: "ui-cell-text" }, h("div", { class: "ui-cell-name", title: typeof name === "string" ? name : null }, name), sub && h("div", { class: "ui-cell-sub" }, sub)));
+
 /**
  * A tile: an icon, a name, a sub line and a state above; one line below — a value, a meter or a warning (which
  * takes the value's place). `tone` warn / bad gives the frame of a thing that needs attention. `desc` makes the
@@ -648,9 +652,9 @@ function pageHead({ crumbs = null, icon: iconName = null, logo = null, title, st
   const line = shown.length > 0 && h("div", { class: "ui-head-facts" }, shown.flatMap((f, i) => (i ? [h("span", { class: "ui-dot-sep" }, " · "), f] : [f])));
   const list = (actions ?? []).filter(Boolean).slice(0, 2);
   const main = list.find((a) => a.primary) ?? list[0];
-  const make = (a) => (a.href ? h("a", { class: "btn" + (a.primary ? " primary" : "") + (a === main ? " ui-main" : ""), href: a.href, target: a.newTab ? "_blank" : null, rel: a.newTab ? "noopener noreferrer" : null }, a.icon && icon(a.icon), h("span", null, a.label)) : button(a.label, { class: (a.primary ? "primary" : "") + (a === main ? " ui-main" : ""), onclick: a.run }, a.icon));
+  const make = (a) => (a.href ? h("a", { class: "btn" + (a.primary ? " primary" : "") + (a === main ? " ui-main" : ""), href: a.href, target: a.newTab ? "_blank" : null, rel: a.newTab ? "noopener noreferrer" : null }, a.icon && icon(a.icon), h("span", null, a.label)) : button(a.label, { class: (a.primary ? "primary" : a.danger ? "danger-text" : "") + (a === main ? " ui-main" : ""), onclick: a.run }, a.icon));
   const phone = () => matchMedia("(max-width: 640px)").matches;
-  const entries = () => [...(phone() ? list.filter((a) => a !== main).map((a) => ({ label: a.label, icon: a.icon ?? "next", run: a.run, href: a.href })) : []), ...((typeof more === "function" ? more() : more) ?? [])];
+  const entries = () => [...(phone() ? list.filter((a) => a !== main).map((a) => ({ label: a.label, icon: a.icon ?? "next", run: a.run, href: a.href, danger: a.danger })) : []), ...((typeof more === "function" ? more() : more) ?? [])];
   const hasMore = !!more || list.length > 1;
   const right = (list.length || hasMore || search) && h("div", { class: "ui-head-actions" + (more ? "" : " only-phone-more") }, search, list.map(make), hasMore && uiMore(entries));
   return h(

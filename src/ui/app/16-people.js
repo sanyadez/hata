@@ -312,22 +312,52 @@ async function loadLinksPage() {
 }
 
 function renderLinks() {
-  const box = h("div", { class: "stack" }, waitMark());
+  const box = h("div", { id: "links-list" }, uiCard({ title: t("links.side"), lead: t("links.cardLead"), flush: true }, uiEmpty({ size: "loading" })));
   const load = async () => {
     try {
       const { links, base } = await api("GET", "/api/files/links");
       if (state.route.view !== "links") return;
       const folderOf = (link) => (link.dir ? link.path : link.path.slice(0, link.path.lastIndexOf("/")) || "/");
-      box.replaceChildren(
-        ...(links.length ? [] : [h("p", { class: "muted" }, t("links.noneYet"))]),
-        ...links.map((link) => h("div", { class: "stack-s link-of" }, h("div", { class: "with-icon strong" }, icon(link.dir ? "folder" : "file"), h("a", { class: "clip", href: filesHash(folderOf(link)) }, link.path.split("/").pop() || "/")), h("span", { class: "muted small mono wrap" }, link.path + (isAdmin() && link.by.name ? ` · ${t("links.by", { name: link.by.name })}` : "")), linkRow(link, base, load))),
-        ...[links.length > 0 && linkHomeOnly(base)].filter(Boolean),
+      const row = (link) => {
+        const url = linkUrl(link, base);
+        const remove = () => confirmAction({ title: t("links.removeTitle"), lead: t("links.removeLead"), label: t("links.remove"), run: async () => (await api("DELETE", `/api/files/links/${link.id}`), load()) });
+        const longer = async () => {
+          try {
+            await api("PATCH", `/api/files/links/${link.id}`, { hours: 168 });
+            load();
+          } catch (e) {
+            toast(errorText(e), "error");
+          }
+        };
+        const more = [
+          link.alive && { label: t("links.copy"), icon: "copy", run: () => copyLink(url) },
+          { label: t(link.alive ? "links.week" : "links.again"), icon: "clock", run: longer },
+          { label: t("links.openFolder"), icon: "folder", href: filesHash(folderOf(link)) },
+          { label: t("links.remove") + "…", icon: "trash", danger: true, run: remove },
+        ];
+        return uiRow({
+          lead: { icon: link.dir ? "folder" : "file" },
+          name: link.note || link.path.split("/").pop() || "/",
+          sub: [link.path, linkWords(link), isAdmin() && link.by.name ? t("links.by", { name: link.by.name }) : null].filter(Boolean).join(" · "),
+          state: uiState(link.alive ? "ok" : "off", t(link.alive ? "links.active" : "links.ended2")),
+          action: link.alive ? button(t("links.copy"), { class: "small", onclick: () => copyLink(url) }, "copy") : button(t("links.again"), { class: "small", onclick: longer }),
+          more: more.filter(Boolean),
+          menu: (at) => menuAt(at, null, more.filter(Boolean)),
+        });
+      };
+      put(
+        box,
+        uiCard(
+          { title: t("links.side"), count: links.length || null, lead: t("links.cardLead"), flush: true },
+          links.length > 0 && !base && h("div", { class: "ui-inset" }, uiNotice({ tone: "info", text: t("links.homeOnly"), action: h("a", { class: "btn small", href: "#/network/addresses" }, t("links.homeOnlyHow")) })),
+          links.length ? links.map(row) : uiEmpty({ size: "big", icon: "link", title: t("links.noneYet"), text: t("links.noneLead") }),
+        ),
       );
     } catch (e) {
-      box.replaceChildren(h("p", { class: "error" }, errorText(e)));
+      put(box, uiCard({ title: t("links.side"), flush: true }, uiEmpty({ size: "error", title: errorText(e), action: button(t("ui.retry"), { onclick: load }) })));
     }
   };
-  shell(h("div", { class: "files" }, h("aside", { class: "files-side fold", id: "files-places" }), h("section", { class: "stack" }, h("div", { class: "page-head" }, h("div", null, h("h1", null, t("links.cardTitle")), h("p", { class: "meta" }, h("a", { href: "#/files" }, t("nav.files"))))), uiCard({ lead: t("links.cardLead") }, box))));
+  shell(h("div", { class: "files" }, h("aside", { class: "files-side fold", id: "files-places" }), h("section", { class: "stack" }, pageHead({ crumbs: [{ label: t("nav.files"), href: "#/files" }, { label: t("links.side") }], title: t("links.cardTitle") }), box)));
   filesPlaces("#links");
   void load();
 }
