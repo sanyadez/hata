@@ -331,6 +331,8 @@ async function walk(label: string, phone: boolean): Promise<void> {
       const picture = await send("Page.captureScreenshot", { format: "png" });
       await Bun.write(join(shotsAt, `${label}${route.replace(/[#/]+/g, "-")}.png`), Buffer.from(picture.data, "base64"));
     }
+    // the assistant's window stays open over every page after it: closed, so the pictures show the pages
+    if (route === "#/assistant") await js<unknown>("(typeof closeAssistant === 'function' && closeAssistant(), true)");
     console.log(`${found.length ? "✗" : "✓"} ${label} ${route}`);
     for (const line of new Set(found)) {
       console.log(`    ${line}`);

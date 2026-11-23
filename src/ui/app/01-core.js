@@ -1579,7 +1579,7 @@ function paintAttentionHere() {
   const sig = area + JSON.stringify(list.map((item) => [item.id, item.code, item.severity, item.at, item.detail]));
   if (was && was.isConnected && sig === attentionHere.sig) return;
   attentionHere.sig = sig;
-  const card = h("section", { class: "card pad stack area-attention", id: "area-attention" }, h("div", { class: "section-head" }, h("h2", null, t("attention.title"), h("span", { class: "pill" }, list.length))), h("div", { class: "attention-list" }, list.map(attentionItem)));
+  const card = uiCard({ title: t("attention.title"), marks: uiCount(list.length), flush: true, id: "area-attention", cls: "area-attention" }, h("div", { class: "ui-rows attention-list" }, list.map((item) => attentionItem(item))));
   if (was) return void was.replaceWith(card);
   if (head) head.after(card);
   else view.prepend(card);

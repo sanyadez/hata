@@ -988,7 +988,7 @@ function pveOverview(x) {
     "div",
     { class: "stack" },
     self && h("p", { class: "card pve-self" }, icon("home"), h("span", null, t("pve.selfHere", { guest: `${guestKind(self)} ${self.name}`, node: self.node }))),
-    x.trouble.length > 0 && h("section", { class: "card pad stack area-attention" }, h("div", { class: "section-head" }, h("h2", null, t("attention.title"), h("span", { class: "pill" }, x.trouble.length))), h("div", { class: "attention-list" }, x.trouble.map(attentionItem))),
+    x.trouble.length > 0 && uiCard({ title: t("attention.title"), marks: uiCount(x.trouble.length), flush: true, cls: "area-attention" }, h("div", { class: "ui-rows attention-list" }, x.trouble.map((item) => attentionItem(item)))),
     pveSection(
       t("pve.nodesTitle"),
       h(

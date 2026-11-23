@@ -60,25 +60,19 @@ function widget(id, el) {
 
 const machineOfBlock = (id) => (state.overview?.machines ?? []).find((m) => "machine:" + m.id === id);
 
-/** One number of a machine's row: label and value on a line, a bar or a little chart, a line under it; empty when not known */
-function meter(label, value, gauge, hint, cls = "") {
-  if (value == null) return h("div", { class: "meter empty" });
-  return h("div", { class: "meter" }, h("div", { class: "meter-top" }, h("span", { class: "clip" }, label), h("strong", { class: cls }, value)), gauge, h("span", { class: "meter-hint" }, hint || " "));
-}
-
-/** The numbers of a machine as one row of cells, so the rows of several machines line up */
+/** The numbers of a machine as rows of the block: a meter or a little chart and the value, one metric to a row */
 function machineMeters(s) {
   const mem = s.memory;
   const memPercent = mem.total ? Math.round((mem.used / mem.total) * 100) : 0;
   const disk = s.disks[0];
   const diskPercent = disk ? Math.round((disk.used / disk.total) * 100) : 0;
-  return [
-    meter(t("sys.cpu"), s.cpu == null ? null : s.cpu + "%", meterBar(s.cpu ?? 0), t("sys.cores", { n: s.cores }), level(s.cpu ?? 0)),
-    meter(t("sys.memory"), bytes(mem.used), meterBar(memPercent), t("sys.ofPercent", { total: bytes(mem.total), percent: memPercent }), level(memPercent)),
-    meter(t("sys.disk"), disk ? diskPercent + "%" : null, meterBar(diskPercent), disk && t("sys.free", { free: bytes(disk.total - disk.used), total: bytes(disk.total) }), level(diskPercent)),
-    meter(t("sys.network"), s.net ? bytes(s.net.rx + s.net.tx) + "/s" : null, sparkline(s.history.net), s.net && `↓ ${bytes(s.net.rx)}/s · ↑ ${bytes(s.net.tx)}/s`),
-    meter(t("sys.temperature"), s.temperature == null ? null : s.temperature + " °C", meterBar(s.temperature ?? 0, s.temperature >= 85 ? "warn" : ""), t("sys.cpu"), s.temperature >= 85 ? "warn" : ""),
-  ];
+  return uiMeterFacts([
+    s.cpu != null && { icon: "cpu", label: t("sys.cpu"), value: s.cpu, text: s.cpu + "%" },
+    { icon: "memory", label: t("sys.memory"), value: memPercent, text: bytes(mem.used) },
+    disk && { icon: "disk", label: t("sys.disk"), value: diskPercent, kind: "capacity", text: diskPercent + "%" },
+    s.net && { icon: "network", label: t("sys.network"), spark: sparkline(s.history.net), text: bytes(s.net.rx + s.net.tx) + "/s" },
+    s.temperature != null && { icon: "temp", label: t("sys.temperature"), value: s.temperature, text: s.temperature + " °C" },
+  ]);
 }
 
 /** What brings a machine that is away back, as the buttons of its row */
@@ -94,32 +88,26 @@ function machineBack(m) {
   );
 }
 
-/** The block of another machine's numbers: one row — who it is, then its numbers or why there are none */
+/** The block of another machine's numbers: who it is and its state, then its numbers or why there are none */
 function machineBlock(id) {
   const m = machineOfBlock(id);
   if (!m) return null;
   let el = homeUi.widgets[id];
   if (!el) {
-    el = widget(id, h("section", { class: "card machine-row" }));
+    el = widget(id, h("section", { class: "card pad machine-row" }));
     homeUi.widgets[id] = el;
   }
   const waiting = m.online && !m.status;
-  const who = h(
-    "div",
-    { class: "mrow-who" },
-    h("a", { class: "mrow-name", href: `#/machines/${m.id}` }, h("i", { class: "dot " + (m.online ? "running" : "stopped") }), h("span", { class: "clamp2" }, m.name)),
-    h("span", { class: "muted small" }, !m.online ? t("home.machineAway", { ago: ago(m.seen) }) : waiting ? t("home.machineWaiting") : t("machines.online")),
-    m.os && h("span", { class: "muted small clip" }, m.os),
-  );
-  let body;
   el.classList.toggle("away", !m.online);
   el.oncontextmenu = null;
+  const head = h("div", { class: "section-head" }, h("h2", null, h("a", { href: `#/machines/${m.id}`, class: "clip" }, m.name), uiState(m.online ? "ok" : "off", t(m.online ? "machines.online" : "machines.offline"))), m.os && h("span", { class: "ui-row-time" }, m.os));
+  let body;
   if (!m.online) {
     const { buttons, openMore } = machineBack(m);
-    body = [h("p", { class: "mrow-away muted small" }, t("machines.offlineLead", { ago: ago(m.seen) })), h("div", { class: "row-actions" }, buttons)];
+    body = uiEmpty({ text: t("machines.offlineLead", { ago: ago(m.seen) }), action: h("span", { class: "row-actions" }, buttons) });
     if (openMore) el.oncontextmenu = (e) => (e.preventDefault(), openMore({ x: e.clientX, y: e.clientY }));
-  } else body = h("div", { class: "meters" + (waiting ? " waiting" : "") }, waiting ? Array.from({ length: 5 }, () => h("div", { class: "meter skeleton" }, h("i"), h("i"), h("i"))) : machineMeters(m.status));
-  put(el, who, body);
+  } else body = waiting ? uiEmpty({ size: "loading", text: t("home.machineWaiting") }) : h("div", { class: "ui-mfacts" }, machineMeters(m.status));
+  put(el, head, body);
   return el;
 }
 
@@ -130,7 +118,7 @@ function renderHome() {
   // what needs attention and what happened are the administrators': a member's page has no such blocks
   homeUi.widgets = {
     stats: statsBlock(),
-    attention: isAdmin() ? widget("attention", h("section", { class: "card pad attention-block" })) : null,
+    attention: isAdmin() ? widget("attention", h("section", { class: "card attention-block" })) : null,
     activity: isAdmin() ? widget("activity", h("section", { class: "card activity-block" })) : null,
     adblock: isAdmin() ? widget("adblock", h("section", { class: "card pad adblock-block" })) : null,
     tv: isAdmin() && hasModule("tv") ? widget("tv", h("section", { class: "card pad tv-block" })) : null,
@@ -150,20 +138,18 @@ const activityBody = (o) => [
 ];
 
 function attentionDialog(list) {
-  let dialog;
-  dialog = openDialog("wide", h("header", null, h("h2", { class: "grow" }, t("attention.title")), closeX(() => dialog)), h("div", { class: "attention-list" }, list.map(attentionItem)));
+  openDialog("wide", h("h2", null, t("attention.title")), h("div", { class: "ui-rows attention-list" }, list.map((item) => attentionItem(item))));
 }
 
 function attentionBlock(list) {
+  const hidden = state.overview?.attentionHidden > 0 && h("a", { class: "ui-link", href: "#/settings/notifications/hidden" }, t("attention.hiddenLink", { n: state.overview.attentionHidden }), icon("chevron"));
+  const more = uiEmpty({ text: " ", action: button(t("attention.showAll"), { class: "quiet small", onclick: () => attentionDialog(state.overview.attention) }) });
+  more.classList.add("fits-more");
+  more.hidden = true;
   return [
-    h("div", { class: "section-head" }, h("h2", null, t("attention.title"), list.length > 0 && h("span", { class: "pill" }, list.length))),
-    list.length ? h("div", { class: "attention-list fits" }, list.map(attentionItem)) : h("p", { class: "all-good" }, icon("check", "ok"), t("attention.none")),
-    h(
-      "div",
-      { class: "block-foot" },
-      h("button", { type: "button", class: "link small more-items fits-more", hidden: true, onclick: () => attentionDialog(state.overview.attention) }, h("span"), icon("chevron")),
-      state.overview?.attentionHidden > 0 && h("a", { class: "link small more-items", href: "#/settings/notifications/hidden" }, t("attention.hiddenLink", { n: state.overview.attentionHidden }), icon("chevron")),
-    ),
+    h("div", { class: "section-head pad" }, h("h2", null, t("attention.title"), uiCount(list.length)), hidden && h("div", { class: "actions" }, hidden)),
+    list.length ? h("div", { class: "ui-rows attention-list fits" }, list.map((item) => attentionItem(item))) : uiEmpty({ icon: "check", tone: "ok", text: t("attention.none") }),
+    more,
   ];
 }
 

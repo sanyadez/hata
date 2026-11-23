@@ -6392,5 +6392,6 @@
   "links.openFolder": "Open the folder",
   "links.noneLead": "Give one from the menu of a file or a folder in Files.",
   "files.cannotRead": "The folder could not be read",
-  "files.view": "View"
+  "files.view": "View",
+  "attention.showAll": "Show all"
 }

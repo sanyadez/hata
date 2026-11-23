@@ -80,38 +80,47 @@ function meterBar(percent, cls = level(percent)) {
   return h("div", { class: "bar" }, fill);
 }
 
-/** One number of the block of this server: label, the value and its unit, a bar or a little chart, a line under it */
-function kpi(id, iconName, label, key = "", href = "") {
-  return h(
-    href ? "a" : "div",
-    { class: "kpi", id: "kpi-" + id, ...(href ? { href, title: t("load.title") } : {}) },
-    h("div", { class: "kpi-label" }, key ? h("i", { class: "series-key " + key }) : icon(iconName), h("span", { class: "clip" }, label)),
-    h("div", { class: "kpi-value" }, h("strong", null, "—"), h("span", { class: "unit" })),
-    h("div", { class: "kpi-gauge" }),
-    h("div", { class: "kpi-hint" }, " "),
-  );
+/**
+ * One number of this server: on Home a row of the block (`fact`: icon, label, meter, value), on the server's page a
+ * number of the strip (`stat`). Made once with its id, refilled by `setKpi` as the numbers come.
+ */
+function kpi(id, iconName, label, href = "", form = "stat") {
+  const attrs = { id: "kpi-" + id, ...(href ? { href, title: t("load.title") } : {}) };
+  if (form === "fact")
+    return h(href ? "a" : "div", { class: "ui-mfact kpi", ...attrs }, h("span", { class: "ui-mfact-label" }, icon(iconName), h("span", { class: "clip" }, label)), h("span", { class: "ui-mfact-bar" }), h("span", { class: "ui-mfact-value mono" }, "—"));
+  return h(href ? "a" : "div", { class: "ui-stat kpi", ...attrs }, h("span", { class: "ui-stat-label" }, icon(iconName), h("span", { class: "clip" }, label)), h("span", { class: "ui-stat-value" }, h("strong", null, "—"), h("span")), h("span", { class: "ui-stat-chart" }), h("span", { class: "ui-stat-hint" }, " "));
 }
 
 function setKpi(id, value, unit, hint, gauge, cls = "") {
   const el = document.getElementById("kpi-" + id);
   if (!el) return;
-  const strong = el.querySelector("strong");
+  const tone = cls === "danger" ? "bad" : cls;
+  if (el.classList.contains("ui-mfact")) {
+    const v = el.querySelector(".ui-mfact-value");
+    v.textContent = value + (unit && unit !== "%" ? " " : "") + unit;
+    v.className = "ui-mfact-value mono" + (tone ? " " + tone : "");
+    el.querySelector(".ui-mfact-bar").replaceChildren(gauge ?? "");
+    if (hint) el.title = hint;
+    return;
+  }
+  const strong = el.querySelector(".ui-stat-value strong");
   strong.textContent = value;
-  strong.className = cls;
-  el.querySelector(".unit").textContent = unit;
-  el.querySelector(".kpi-hint").textContent = hint || " ";
-  el.querySelector(".kpi-gauge").replaceChildren(gauge ?? "");
+  strong.className = tone;
+  el.querySelector(".ui-stat-value span").textContent = unit;
+  el.querySelector(".ui-stat-hint").textContent = hint || " ";
+  el.querySelector(".ui-stat-chart").replaceChildren(gauge ?? "");
 }
 
-/** The block of this server's numbers: made once, refilled as the numbers come */
+/** The numbers of this server, one to a row: CPU, memory, disk, network, temperature */
+const ownKpis = (form) => [kpi("cpu", "cpu", t("sys.cpu"), isAdmin() ? "#/machines/load/here" : "", form), kpi("memory", "memory", t("sys.memory"), isAdmin() ? "#/machines/load/here" : "", form), kpi("disk", "disk", t("sys.disk"), "", form), kpi("network", "network", t("sys.network"), "", form), kpi("temp", "temp", t("sys.temperature"), "", form)];
+
+/** The block of this server's numbers on Home: made once, refilled as the numbers come */
 function statsBlock() {
   return widget(
     "stats",
-    h(
-      "section",
-      { class: "card numbers" },
-      h("div", { class: "block-head" }, h("span", { class: "block-icon" }, icon("server")), h("h2", { class: "clip", id: "own-name" }, state.overview?.system?.hostname ?? "…"), h("span", { class: "muted small grow" }, t("home.thisServer")), h("span", { class: "mono muted small", id: "own-up" })),
-      h("div", { class: "kpis" }, kpi("cpu", "cpu", t("sys.cpu"), "s2", isAdmin() ? "#/machines/load/here" : ""), kpi("memory", "memory", t("sys.memory"), "s1", isAdmin() ? "#/machines/load/here" : ""), kpi("disk", "disk", t("sys.disk")), kpi("network", "network", t("sys.network")), kpi("temp", "temp", t("sys.temperature"))),
+    uiCard(
+      { title: h("span", { id: "own-name" }, state.overview?.system?.hostname ?? "…"), count: t("home.thisServer"), actions: h("span", { class: "ui-row-time", id: "own-up" }), cls: "numbers" },
+      h("div", { class: "ui-mfacts" }, ownKpis("fact")),
       h("div", { class: "trend", id: "own-trend" }),
     ),
   );
@@ -145,7 +154,7 @@ function paintTrend(trend) {
     box,
     n < 2 ? h("p", { class: "muted small" }, t("home.trendSoon")) : h("div", { class: "trend-head muted small" }, h("span", { class: "grow" }, t("home.trend", { n })), series.map((s) => h("span", null, h("i", { class: "series-key " + s.cls }), s.label))),
     // in a card of Home the chart takes the room the card has; elsewhere its usual height
-    n >= 2 && lineChart(points, series, { max: 100, fmt: (v) => Math.round(v) + "%", label: t("home.trend", { n }), height: box.closest(".pg-card") ? Math.max(90, box.clientHeight - 54) : 120, head: false }),
+    n >= 2 && lineChart(points, series, { max: 100, fmt: (v) => Math.round(v) + "%", label: t("home.trend", { n }), height: box.closest(".pg-card") ? Math.max(90, box.clientHeight - 54) : 160, head: false }),
   );
 }
 
@@ -161,25 +170,25 @@ function renderSystem() {
   if (up) up.textContent = t("sys.uptime", { time: duration(s.uptime) });
   if (meta) meta.textContent = [s.hostname, location.host, "Hata " + state.version].join(" · ");
 
-  setKpi("cpu", s.cpu == null ? "—" : String(s.cpu), "%", t("sys.cores", { n: s.cores }) + " · " + t("sys.load", { load: s.load[0] }), meterBar(s.cpu ?? 0, ""));
+  setKpi("cpu", s.cpu == null ? "—" : String(s.cpu), "%", t("sys.cores", { n: s.cores }) + " · " + t("sys.load", { load: s.load[0] }), uiMeter(s.cpu ?? 0, { kind: "load" }));
   const mem = s.memory;
   const memPercent = mem.total ? Math.round((mem.used / mem.total) * 100) : 0;
   const used = bytesParts(mem.used);
-  setKpi("memory", used.value, used.unit, t("sys.ofPercent", { total: bytes(mem.total), percent: memPercent }), meterBar(memPercent, level(memPercent) || "info"), level(memPercent));
+  setKpi("memory", used.value, used.unit, t("sys.ofPercent", { total: bytes(mem.total), percent: memPercent }), uiMeter(memPercent, { kind: "load" }), level(memPercent));
   const disk = s.disks[s.disks.length - 1];
   const diskCell = document.getElementById("kpi-disk");
   if (diskCell) diskCell.hidden = !disk;
   if (disk) {
     const percent = Math.round((disk.used / disk.total) * 100);
-    setKpi("disk", String(percent), "%", t("sys.free", { free: bytes(disk.total - disk.used), total: bytes(disk.total) }), meterBar(percent, level(percent) || "ok"), level(percent));
-    const label = diskCell.querySelector(".kpi-label .clip");
+    setKpi("disk", String(percent), "%", t("sys.free", { free: bytes(disk.total - disk.used), total: bytes(disk.total) }), uiMeter(percent), level(percent));
+    const label = diskCell.querySelector(".clip");
     if (label) label.textContent = `${t("sys.disk")} ${disk.path}`;
   }
   const net = s.net ? bytesParts(s.net.rx + s.net.tx) : null;
   setKpi("network", net ? net.value : "—", net ? net.unit + "/s" : "", s.net ? `↓ ${bytes(s.net.rx)}/s · ↑ ${bytes(s.net.tx)}/s` : "", sparkline(s.history.net));
   const temp = document.getElementById("kpi-temp");
   if (temp) temp.hidden = s.temperature == null;
-  if (s.temperature != null) setKpi("temp", String(s.temperature), "°C", t("sys.cpu"), meterBar(s.temperature, s.temperature >= 85 ? "warn" : ""), s.temperature >= 85 ? "warn" : "");
+  if (s.temperature != null) setKpi("temp", String(s.temperature), "°C", t("sys.cpu"), uiMeter(s.temperature, { kind: "load" }), s.temperature >= 85 ? "warn" : "");
   paintTrend(s.trend);
 }
 
@@ -1491,24 +1500,22 @@ function attentionItem(item) {
     isAdmin() && { label: t("attention.never"), icon: "bell-off", run: () => snoozeItem(item, true) },
     (item.code === "disk.new" || item.code === "disk.usb") && isAdmin() && { label: t("mounting.ignore"), icon: "x", run: () => void api("POST", "/api/disks/ignore", { id: item.detail.id }).then(refresh, (e) => toast(errorText(e), "error")) },
   ].filter(Boolean);
-  const { buttons, openMore } = splitActions(below, menuHeader(title, null, attentionIcon(item.code)));
-  return h(
-    "div",
-    {
-      class: "attention-item " + item.severity,
-      menu: openMore,
-      // on a phone the buttons do not fit beside the words: the item itself is the button
-      onclick: (e) => {
-        if (!phone.matches || e.target.closest("a, button")) return;
-        const first = e.currentTarget.querySelector(".row-actions :is(a, button)");
-        if (first) first.click();
-        else openMore({ x: e.clientX, y: e.clientY });
-      },
-    },
-    h("div", { class: "attention-title" }, icon(attentionIcon(item.code)), h("strong", null, title)),
-    h("p", { class: "muted small" }, text),
-    buttons.length > 0 && h("div", { class: "row-actions" }, buttons),
-  );
+  // one action at hand — what does the thing, else the first way to it; the rest in "⋯" (the design system's rule)
+  const header = menuHeader(title, null, attentionIcon(item.code));
+  const nodes = below.filter((x) => x instanceof Node);
+  const entries = below.filter((x) => !(x instanceof Node));
+  const way = !nodes.length && entries.find((x) => x.href);
+  const action = nodes[0] ?? (way ? h("a", { class: "btn small", href: way.href }, icon(way.icon ?? "external"), h("span", null, way.label)) : null);
+  const rest = [...nodes.slice(1).map((b) => ({ label: b.textContent, icon: "next", run: () => b.click() })), ...entries.filter((x) => x !== way)];
+  const openMore = rest.length ? (at) => menuAt(at, header, rest) : undefined;
+  const row = uiRow({ lead: { icon: attentionIcon(item.code), tone: { warn: "warn", danger: "bad", info: "info" }[item.severity] ?? null }, name: title, sub: text, action, more: rest.length ? rest : null, menu: openMore, cls: "attention-item " + item.severity });
+  // on a phone the button does not fit beside the words: the row itself is pressed
+  row.addEventListener("click", (e) => {
+    if (!phone.matches || e.target.closest("a, button")) return;
+    if (action) action.click();
+    else openMore?.({ x: e.clientX, y: e.clientY });
+  });
+  return row;
 }
 
 /**

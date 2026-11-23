@@ -1302,7 +1302,7 @@ function renderServerBody() {
   if (!box.childElementCount) {
     put(
       box,
-      h("section", { class: "card numbers" }, h("div", { class: "kpis" }, kpi("cpu", "cpu", t("sys.cpu"), "s2", "#/machines/load/here"), kpi("memory", "memory", t("sys.memory"), "s1", "#/machines/load/here"), kpi("disk", "disk", t("sys.disk")), kpi("network", "network", t("sys.network")), kpi("temp", "temp", t("sys.temperature"))), h("div", { class: "trend", id: "own-trend" })),
+      h("section", { class: "card numbers server-numbers" }, h("div", { class: "ui-stats" }, ownKpis("stat")), h("div", { class: "trend", id: "own-trend" })),
       h("div", { class: "columns" }, h("div", { class: "stack", id: "server-main" }), h("aside", { class: "side stack", id: "server-side" })),
     );
   }

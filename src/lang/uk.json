@@ -6392,5 +6392,6 @@
   "links.openFolder": "Відкрити теку",
   "links.noneLead": "Дайте посилання з меню файлу чи теки у Файлах.",
   "files.cannotRead": "Не вдалося прочитати теку",
-  "files.view": "Вигляд"
+  "files.view": "Вигляд",
+  "attention.showAll": "Показати всі"
 }

@@ -364,7 +364,8 @@ function renderFilesBody() {
       listing.disk && h("span", null, t("files.free", { free: bytes(listing.disk.free), total: bytes(listing.disk.total) })),
     );
 
-  const selection = h("div", { class: "card selection", id: "files-selection", hidden: true });
+  // the bar of the selected stays in sight while a long folder is scrolled
+  const selection = h("div", { class: "ui-select-bar files-select", id: "files-selection", hidden: true });
   let body;
   if (!listing) body = h("p", { class: "muted" }, " ");
   else if (listing.error) body = uiCard({}, uiEmpty({ size: "error", title: t("files.cannotRead"), text: listing.error, action: button(t("ui.retry"), { onclick: () => loadFiles() }) }));
@@ -849,17 +850,17 @@ function renderSelection() {
   }
   if (!chosen.length) return;
   put(box,
-    h("strong", { class: "grow" }, t("files.selected", { n: chosen.length }), h("span", { class: "muted small" }, " · " + bytes(chosen.reduce((n, entry) => n + entry.size, 0)))),
+    h("span", null, t("files.selected", { n: chosen.length }), h("span", { class: "muted" }, " · " + bytes(chosen.reduce((n, entry) => n + entry.size, 0)))),
     button(t("files.download"), { class: "small", onclick: () => downloadEntries(chosen) }, "download"),
     !state.files.readOnly && button(t("files.move"), { class: "small", onclick: () => transferDialog(chosen, false) }, "arrow"),
     button(t("files.copy"), { class: "small", onclick: () => transferDialog(chosen, true) }, "copy"),
-    !state.files.readOnly && button(t("files.delete"), { class: "small", onclick: () => deleteDialog(chosen) }, "trash"),
-    h("button", { type: "button", class: "icon-btn", "aria-label": t("files.clearSelection"), title: t("files.clearSelection"), onclick: () => ((filesUi.selected = new Set()), renderFilesBody()) }, icon("x")),
+    !state.files.readOnly && button(t("files.delete") + "…", { class: "small danger-text", onclick: () => deleteDialog(chosen) }, "trash"),
+    button("", { class: "small square", "aria-label": t("files.clearSelection"), title: t("files.clearSelection"), onclick: () => ((filesUi.selected = new Set()), renderFilesBody()) }, "x"),
   );
 }
 
 const entryCheckbox = (entry) => h("input", { type: "checkbox", checked: filesUi.selected.has(entry.name), "aria-label": entry.name, onclick: (e) => e.stopPropagation(), onchange: (e) => toggleSelected(entry, e.target.checked) });
-const entryMore = (entry) => h("button", { type: "button", class: "icon-btn", "aria-label": `${t("files.actions")}: ${entry.name}`, title: t("files.actions"), onclick: (e) => (e.preventDefault(), e.stopPropagation(), entryMenu(entry)) }, icon("more"));
+const entryMore = (entry) => h("button", { type: "button", class: "btn small square ui-more", "aria-label": `${t("files.actions")}: ${entry.name}`, title: t("files.actions"), onclick: (e) => (e.preventDefault(), e.stopPropagation(), entryMenu(entry)) }, icon("more"));
 /** A folder is a link (so it opens in a new tab too); a file opens in place */
 const entryOpener = (entry, className, ...content) =>
   entry.type === "dir"

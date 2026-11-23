@@ -766,18 +766,16 @@ function adblockBlock(el, b) {
       await refresh();
     } catch {}
   };
+  const pause = b.enabled && (b.paused ? button(t("adblock.resume"), { class: "small", onclick: () => send("/api/dns/block/pause", { minutes: 0 }) }, "power") : button(t("adblock.pauseFor", { what: pauseWords(30) }), { class: "small", onclick: () => send("/api/dns/block/pause", { minutes: 30 }) }, "clock"));
   put(
     el,
-    h("div", { class: "section-head" }, h("h2", null, h("a", { href: "#/settings/adblock" }, t("adblock.title"))), b.enabled && h("span", { class: "state " + (b.paused ? "restarting" : b.serving ? "running" : "stopped") }, b.paused ? t("adblock.pausedUntil", { when: blockUntil(b.pausedUntil) }) : t(b.serving ? "adblock.working" : "adblock.notServing"))),
+    h("div", { class: "section-head" }, h("h2", null, h("a", { href: "#/network/adblock" }, t("adblock.title")), b.enabled && uiState(b.paused ? "warn" : b.serving ? "ok" : "off", b.paused ? t("adblock.pausedUntil", { when: blockUntil(b.pausedUntil) }) : t(b.serving ? "adblock.working" : "adblock.notServing"))), pause && h("div", { class: "actions" }, pause)),
     b.enabled
       ? [
-          h("p", { class: "adblock-numbers" }, h("strong", null, b.blocked.toLocaleString(state.lang)), " ", h("span", { class: "muted small" }, t("adblock.block.ofDay", { questions: b.questions.toLocaleString(state.lang), share }))),
-          meterBar(share),
-          h("p", { class: "muted small" }, t("adblock.list.total", { n: b.names.toLocaleString(state.lang) })),
-          h("div", { class: "actions" }, b.paused ? button(t("adblock.resume"), { class: "small", onclick: () => send("/api/dns/block/pause", { minutes: 0 }) }, "power") : button(t("adblock.pauseFor", { what: pauseWords(30) }), { class: "small", onclick: () => send("/api/dns/block/pause", { minutes: 30 }) }, "clock")),
-          b.top?.length > 0 && h("div", { class: "adblock-top fits" }, h("div", { class: "muted small" }, t("adblock.block.most")), b.top.map((x) => h("div", { class: "mono small clip" }, x.name, " · ", x.count.toLocaleString(state.lang)))),
+          h("div", { class: "ui-number" }, h("span", { class: "ui-stat-value" }, h("strong", null, b.blocked.toLocaleString(state.lang)), h("span", null, t("adblock.block.ofDay", { questions: b.questions.toLocaleString(state.lang), share }))), uiMeter(share, { kind: "load" }), h("span", { class: "ui-stat-hint" }, t("adblock.list.total", { n: b.names.toLocaleString(state.lang) }))),
+          b.top?.length > 0 && h("div", { class: "adblock-top fits" }, h("div", { class: "ui-mfact-label" }, t("adblock.block.most")), b.top.map((x) => h("div", { class: "mono small clip" }, x.name, " · ", x.count.toLocaleString(state.lang)))),
         ]
-      : h("p", { class: "muted small" }, t("adblock.block.off"), " ", h("a", { class: "link", href: "#/settings/adblock" }, t("common.open"))),
+      : uiEmpty({ text: t("adblock.block.off"), action: h("a", { class: "btn small", href: "#/network/adblock" }, t("common.open")) }),
   );
 }
 
