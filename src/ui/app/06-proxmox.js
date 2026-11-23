@@ -43,8 +43,8 @@ function pveEvent(event) {
   }, 800);
 }
 
-const pveChip = (x) => h("span", { class: "state " + (x.online ? "running" : "") }, x.online ? t("pve.online") : t("pve.offline"));
-const guestChip = (g) => h("span", { class: "state " + (g.status === "running" ? "running" : g.status === "paused" ? "restarting" : "") }, t("pve.status." + (["running", "stopped", "paused"].includes(g.status) ? g.status : "unknown")));
+const pveChip = (x) => uiState(x.online ? "ok" : "bad", x.online ? t("pve.online") : t("pve.offline"));
+const guestChip = (g) => uiState(g.status === "running" ? "ok" : g.status === "paused" ? "warn" : "off", t("pve.status." + (["running", "stopped", "paused"].includes(g.status) ? g.status : "unknown")));
 const guestKind = (g) => (g.type === "lxc" ? "CT" : "VM") + " " + g.vmid;
 /** Why a server does not answer, in the words of its error */
 const pveError = (x) => (has("error." + x.error.code) ? t("error." + x.error.code, { name: x.name, message: "" }).replace(/[:\s]+$/, "") : x.error.code);
@@ -378,25 +378,22 @@ function renderPveBody() {
   const box = document.getElementById("pve-body");
   const x = pveUi.host;
   if (!box || !x) return;
-  const tab = (id, iconName) => h("a", { class: "tab" + (state.route.tab === id ? " active" : ""), href: `#/proxmox/${x.id}${id === "overview" ? "" : "/" + id}` }, icon(iconName), t("pve.tab." + id));
+  const tab = (id) => h("a", { class: "tab" + (state.route.tab === id ? " active" : ""), href: `#/proxmox/${x.id}${id === "overview" ? "" : "/" + id}` }, t("pve.tab." + id));
   const body = state.route.tab === "guests" ? pveGuests(x) : state.route.tab === "tasks" ? pveTasks(x) : state.route.tab === "templates" ? pveTemplates(x) : pveOverview(x);
   put(
     box,
-    // the head as the machine's: on a wallpaper it gets a panel of its own, or its words are lost
-    h(
-      "div",
-      { id: "pve-head" },
-      h("nav", { class: "crumbs" }, h("a", { href: "#/machines" }, t("nav.machines")), icon("chevron"), h("span", null, x.name)),
-      h(
-      "div",
-      { class: "app-head", menu: (at) => pveMenu(x, at) },
-      h("span", { class: "machine-icon" }, icon("server")),
-      h("div", { class: "grow" }, h("div", { class: "app-title" }, h("h1", null, x.name), pveChip(x)), h("p", { class: "meta" }, ["Proxmox VE " + (x.version || ""), x.url, x.at ? t("pve.askedAgo", { ago: ago(x.at) }) : null].filter(Boolean).flatMap((part, i) => (i ? [h("span", { class: "dot-sep" }, "·"), part] : [part])))),
-      h("div", { class: "actions" }, x.online && button(t("pve.new.button"), { class: "primary", onclick: async (e) => { const b = e.currentTarget; b.disabled = true; await pveNewDialog(x); b.disabled = false; } }, "plus"), button(t("pve.refresh"), { onclick: (e) => refreshPve(x, e.currentTarget) }, "refresh"), h("button", { type: "button", class: "btn square", "aria-label": t("app.more"), onclick: () => pveMenu(x) }, icon("more"))),
-    ),
-      h("div", { class: "tabs" }, tab("overview", "grid"), tab("guests", "box"), tab("templates", "archive"), tab("tasks", "logs")),
-    ),
-    x.error && h("p", { class: "card pad warn-box" }, pveError(x), " ", t("pve.since", { ago: ago(x.error.since) })),
+    pageHead({
+      id: "pve-head",
+      crumbs: [{ label: t("nav.machines"), href: "#/machines" }, { label: x.name }],
+      icon: "server",
+      title: x.name,
+      state: pveChip(x),
+      facts: ["Proxmox VE " + (x.version || ""), x.url && h("span", { class: "mono" }, x.url), x.at ? t("pve.askedAgo", { ago: ago(x.at) }) : null],
+      actions: [x.online && { label: t("pve.new.button"), icon: "plus", primary: true, run: () => void pveNewDialog(x) }, { label: t("pve.refresh"), icon: "refresh", run: () => refreshPve(x) }, h("button", { type: "button", class: "btn square", "aria-label": t("app.more"), onclick: (e) => pveMenu(x, underButton(e.currentTarget)) }, icon("more"))],
+      menu: (at) => pveMenu(x, at),
+      tabs: h("nav", { class: "tabs" }, tab("overview"), tab("guests"), tab("templates"), tab("tasks")),
+    }),
+    x.error && uiCard({}, uiNotice({ tone: "bad", text: [pveError(x), t("pve.since", { ago: ago(x.error.since) })].join(" ") })),
     body,
   );
 }
@@ -1454,7 +1451,7 @@ async function paintGuestParts(box, hostId, guestId) {
 }
 
 function renderGuest() {
-  shell(h("div", { id: "guest-head", class: "card pad thing-head" }), h("div", { id: "guest-body", class: "stack" }));
+  shell(h("div", { id: "guest-head" }), h("div", { id: "guest-body", class: "stack" }));
   void loadGuest();
 }
 
@@ -1471,8 +1468,7 @@ async function loadGuest() {
   if (m) return asMachine(m.id, `#/guest/${host}/${guest}`);
   put(
     head,
-    h("nav", { class: "crumbs" }, h("a", { href: "#/machines" }, t("nav.machines")), icon("chevron"), h("a", { href: `#/proxmox/${x.id}` }, x.name), icon("chevron"), h("span", null, g.name)),
-    h("div", { class: "app-head" }, h("span", { class: "machine-icon" }, icon(g.type === "lxc" ? "box" : "screen")), h("div", { class: "grow" }, h("div", { class: "app-title" }, h("h1", null, g.name), guestChip(g)), h("p", { class: "meta" }, [guestKind(g), g.config?.os, g.config?.addresses?.[0]].filter(Boolean).join(" · ")))),
+    pageHead({ crumbs: [{ label: t("nav.machines"), href: "#/machines" }, { label: x.name, href: `#/proxmox/${x.id}` }, { label: g.name }], icon: g.type === "lxc" ? "box" : "screen", title: g.name, state: guestChip(g), facts: [guestKind(g), g.config?.os, g.config?.addresses?.[0] && h("span", { class: "mono" }, g.config.addresses[0])] }),
   );
 }
 

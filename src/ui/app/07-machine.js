@@ -30,35 +30,38 @@ function renderMachineHead() {
   const m = machinesUi.current;
   const head = document.getElementById("machine-head");
   if (!head) return;
-  if (!m) return put(head, h("nav", { class: "crumbs" }, h("a", { href: "#/machines" }, t("nav.machines"))), machinesUi.list && h("p", { class: "card pad muted" }, t("error.machine.notFound")));
+  if (!m) return put(head, pageHead({ crumbs: [{ label: t("nav.machines"), href: "#/machines" }] }), machinesUi.list && uiCard({}, uiEmpty({ size: "big", icon: "server", title: t("error.machine.notFound") })));
   // the address is where the thing lives: a container's or a guest's computer is shown at theirs
   const base = machineBase(m);
   const here = base + (state.route.tab === "overview" ? "" : "/" + (state.route.tab === "containers" ? "docker" : state.route.tab));
   if (location.hash !== here && location.hash.startsWith("#/machines/")) history.replaceState(history.state, "", here);
   state.route.base = base;
-  const tab = (id, iconName) => h("a", { class: "tab" + (state.route.tab === id ? " active" : ""), href: `${base}${id === "overview" ? "" : "/" + (id === "containers" ? "docker" : id)}` }, icon(iconName), t(id === "containers" ? "machines.tab.docker" : "machines.tab." + id));
+  const tab = (id) => h("a", { class: "tab" + (state.route.tab === id ? " active" : ""), href: `${base}${id === "overview" ? "" : "/" + (id === "containers" ? "docker" : id)}` }, t(id === "containers" ? "machines.tab.docker" : "machines.tab." + id));
+  // the one thing at hand: bring it back when it is off, its screen when it is a running VM, else its terminal
+  const main = !m.online
+    ? m.pve?.power && m.pve.status !== "running"
+      ? { label: t("pve.startHere", { host: m.pve.hostName }), icon: "play", primary: true, run: () => startGuestOf(m) }
+      : m.instance
+        ? { label: t("incus.start"), icon: "play", primary: true, run: () => startInstanceOf(m) }
+        : m.info?.macs?.length > 0 && { label: t("machines.wake"), icon: "play", primary: true, run: () => wakeMachine(m) }
+    : m.incusVm
+      ? { label: t("incus.screen"), icon: "screen", run: () => containerScreen({ name: m.incusVm }) }
+      : m.pve?.type === "qemu" && m.pve.status === "running"
+        ? { label: t("pve.screen"), icon: "screen", run: () => pveConsoleDialog({ id: m.pve.host }, m.pve) }
+        : { label: t("machines.tab.terminal"), icon: "terminal", href: `${base}/terminal` };
+  const crumbs = [{ label: t("nav.machines"), href: "#/machines" }, m.instance && { label: t("tree.thisServer"), href: "#/machines/this" }, m.pve && { label: m.pve.hostName, href: `#/proxmox/${m.pve.host}` }, { label: m.name }].filter(Boolean);
   head.replaceChildren(
-    h("nav", { class: "crumbs" }, h("a", { href: "#/machines" }, t("nav.machines")), icon("chevron"), m.instance && [h("a", { href: "#/machines/this" }, t("tree.thisServer")), icon("chevron")], m.pve && [h("a", { href: `#/proxmox/${m.pve.host}` }, m.pve.hostName), icon("chevron")], h("span", null, m.name)),
-    h(
-      "div",
-      { class: "app-head", menu: (at) => machineMenu(m, at) },
-      h("span", { class: "machine-icon" }, icon("server")),
-      h("div", { class: "grow" }, h("div", { class: "app-title" }, h("h1", null, m.name), machineChip(m)), h("p", { class: "meta" }, [machineOs(m), m.ip, m.online ? null : t("machines.seen", { ago: ago(m.seen) })].filter(Boolean).flatMap((part, i) => (i ? [h("span", { class: "dot-sep" }, "·"), part] : [part]))), hardwareWords(m.info?.hardware) && h("p", { class: "meta" }, hardwareWords(m.info.hardware))),
-      h(
-        "div",
-        { class: "actions" },
-        m.outdated && m.online && button(t("machines.update", { version: machinesUi.list.version }), { class: "accent", onclick: (e) => updateMachine(m, e.currentTarget) }, "up"),
-        // a virtual machine of this server or of Proxmox: what is on its screen, a desktop too
-        m.incusVm && m.online && button(t("incus.screen"), { onclick: () => containerScreen({ name: m.incusVm }) }, "screen"),
-        m.pve?.type === "qemu" && m.pve.status === "running" && button(t("pve.screen"), { onclick: () => pveConsoleDialog({ id: m.pve.host }, m.pve) }, "screen"),
-        !m.online && m.pve?.power && m.pve.status !== "running" && button(t("pve.startHere", { host: m.pve.hostName }), { class: "primary", onclick: (e) => startGuestOf(m, e.currentTarget) }, "play"),
-        !m.online && m.instance && button(t("incus.start"), { class: "primary", onclick: (e) => startInstanceOf(m, e.currentTarget) }, "play"),
-        !m.online && !m.instance && !(m.pve?.power && m.pve.status !== "running") && m.info?.macs?.length > 0 && button(t("machines.wake"), { class: "primary", onclick: (e) => wakeMachine(m, e.currentTarget) }, "play"),
-        m.pve && h("a", { class: "btn", href: `#/proxmox/${m.pve.host}/guests` }, icon("server"), h("span", null, guestKind(m.pve) + " · " + m.pve.hostName)),
-        h("button", { type: "button", class: "btn square", "aria-label": t("app.more"), onclick: () => machineMenu(m) }, icon("more")),
-      ),
-    ),
-    h("div", { class: "tabs" }, tab("overview", "grid"), tab("apps", "store"), tab("containers", "box"), m.online && h("a", { class: "tab", href: filesHash("/", m.id) }, icon("folder"), t("machines.files")), tab("terminal", "terminal")),
+    pageHead({
+      crumbs,
+      icon: "server",
+      title: m.name,
+      state: machineChip(m),
+      facts: [machineOs(m), m.ip && h("span", { class: "mono" }, m.ip), !m.online && t("machines.seen", { ago: ago(m.seen) }), hardwareWords(m.info?.hardware)],
+      actions: [main, m.pve && { label: guestKind(m.pve) + " · " + m.pve.hostName, icon: "server", href: `#/proxmox/${m.pve.host}/guests` }, h("button", { type: "button", class: "btn square", "aria-label": t("app.more"), onclick: (e) => machineMenu(m, underButton(e.currentTarget)) }, icon("more"))],
+      menu: (at) => machineMenu(m, at),
+      tabs: h("nav", { class: "tabs" }, tab("overview"), tab("apps"), tab("containers"), m.online && h("a", { class: "tab", href: filesHash("/", m.id) }, t("machines.files")), tab("terminal")),
+    }),
+    m.outdated && m.online && uiCard({}, uiNotice({ tone: "info", icon: "up", title: t("machines.update", { version: machinesUi.list.version }), action: button(t("app.update"), { class: "small", onclick: (e) => updateMachine(m, e.currentTarget) }, "up") })),
   );
 }
 
@@ -531,8 +534,8 @@ function paintMachineApp() {
   const box = document.getElementById("mapp-body");
   if (!box) return;
   const { machine: m, app, error } = mappUi;
-  const crumbs = (title) => h("nav", { class: "crumbs" }, h("a", { href: "#/apps" }, t("nav.apps")), icon("chevron"), h("span", null, title));
-  if (!m || !app) return put(box, h("div", { class: "card pad thing-head" }, crumbs(state.route.name), h("p", { class: "muted" }, error || (m ? t("mapp.gone", { name: m.name }) : "…"))));
+  const crumbs = (title) => [{ label: t("nav.apps"), href: "#/apps" }, { label: title }];
+  if (!m || !app) return put(box, pageHead({ crumbs: crumbs(state.route.name) }), uiCard({}, error || m ? uiEmpty({ size: error ? "error" : "big", icon: "box", title: error || t("mapp.gone", { name: m.name }) }) : uiEmpty({ size: "loading" })));
   // a window of this page is open: its words are not redrawn under the person
   if (document.querySelector("dialog[open]:not(.tv-drop)")) return;
   const again = () => void loadMachineApp();
@@ -555,45 +558,39 @@ function paintMachineApp() {
       { label: t("app.logs"), icon: "logs", run: () => machineAppLogsDialog(m, app) },
       { label: t("app.tab.compose"), icon: "code", off: busy, run: () => machineComposeDialog(m, app) },
       { label: t("machines.move"), icon: "server", off: busy, run: () => moveAppDialog(m.id, app) },
-      { label: t("app.remove"), icon: "trash", danger: true, off: busy, run: () => removeMachineAppDialog(m, app) },
+      { label: t("app.remove") + "…", icon: "trash", danger: true, off: busy, run: () => removeMachineAppDialog(m, app) },
     ]);
-  const row = (label, value, mono) => h("div", { class: "kv" }, h("span", { class: "muted" }, label), h("span", { class: mono ? "mono" : "" }, value));
   put(
     box,
-    h(
-      "div",
-      { class: "card pad thing-head" },
-      crumbs(app.title),
-      h(
-        "div",
-        { class: "app-head", menu },
-        appIcon(app),
-        h("div", { class: "grow" }, h("div", { class: "app-title" }, h("h1", null, app.title), stateChip(app)), h("p", { class: "meta" }, h("a", { href: machineBase(m) }, icon("server"), m.name), app.store && h("span", { class: "dot-sep" }, "·"), app.store)),
-        h(
-          "div",
-          { class: "actions" },
-          url && h("a", { class: "btn primary", href: url, target: "_blank", rel: "noopener noreferrer" }, icon("external"), h("span", null, t("app.open"))),
-          isUp(app) ? button(t("app.stop"), { disabled: busy, onclick: act("stop") }, "stop") : button(t("app.start"), { class: url ? "" : "primary", disabled: busy, onclick: act("start") }, "play"),
-          h("button", { type: "button", class: "btn square", "aria-label": t("app.more"), "aria-haspopup": "menu", onclick: (e) => menu(underButton(e.currentTarget)) }, icon("more")),
-        ),
-      ),
-    ),
+    pageHead({
+      crumbs: crumbs(app.title),
+      logo: appIcon(app, "row"),
+      title: app.title,
+      state: appStateBadge(app),
+      facts: [h("a", { href: machineBase(m) }, m.name), app.store],
+      actions: [url && { label: t("app.open"), icon: "external", href: url, newTab: true, primary: true }, isUp(app) ? { label: t("app.stop"), icon: "stop", run: () => !busy && act("stop")() } : { label: t("app.start"), icon: "play", primary: !url, run: () => !busy && act("start")() }, h("button", { type: "button", class: "btn square", "aria-label": t("app.more"), "aria-haspopup": "menu", onclick: (e) => menu(underButton(e.currentTarget)) }, icon("more"))],
+      menu,
+    }),
+    busy && uiCard({}, uiNotice({ tone: "info", title: t("status.busy"), action: button(t("jobs.showLog"), { class: "small", onclick: () => jobDialog(app.job.id, app.job.kind, app.title, again) }, "logs") })),
     h(
       "div",
       { class: "columns" },
       h(
         "div",
         { class: "stack" },
-        app.containers.length
-          ? h("div", { class: "card table-wrap" }, h("div", { class: "section-head pad-head" }, h("h2", null, t("app.containers"), " ", h("span", { class: "muted" }, String(app.containers.length)))), h("table", null, h("thead", null, h("tr", null, h("th", null, t("app.col.container")), h("th", null, t("app.col.state")))), h("tbody", null, app.containers.map((c) => h("tr", null, h("td", null, h("div", { class: "mono" }, c.name), h("div", { class: "muted small mono clip" }, c.image)), h("td", null, h("span", { class: "state " + (c.state === "running" ? "running" : c.state === "restarting" ? "restarting" : "") }, c.status || c.state)))))))
-          : h("p", { class: "card pad muted" }, t("app.noContainers")),
+        uiCard(
+          { title: t("app.containers"), count: app.containers.length || null, flush: true },
+          app.containers.length
+            ? uiTable([{ label: t("app.col.container") }, { label: t("app.col.state") }], app.containers.map((c) => ({ cells: [uiCell({ name: h("span", { class: "mono" }, c.name), sub: h("span", { class: "mono" }, c.image) }), uiState(c.state === "running" ? "ok" : c.state === "restarting" ? "warn" : "off", c.status || c.state)], sub: c.image })))
+            : uiEmpty({ text: t("app.noContainers") }),
+        ),
       ),
       h(
         "aside",
         { class: "side" },
-        h("section", { class: "card pad" }, h("div", { class: "section-head" }, h("h2", null, t("app.glance"))), row(t("apps.col.machine"), h("a", { class: "link", href: machineBase(m) }, m.name)), (url || app.port) && row(t("app.address"), url ? url.replace(/^https?:\/\//, "").replace(/\/$/, "") : `${m.ip}:${app.port}`, true), app.guarded && row(t("access.signIn"), t("access.through", { port: app.guarded })), accessLink()),
-        app.login && app.login.kind !== "none" && h("section", { class: "card pad" }, h("div", { class: "section-head" }, h("h2", null, t("app.login"))), loginBlock(app.login, loginAsker(app.name, m.id))),
-        app.tips && h("section", { class: "card pad" }, h("div", { class: "section-head" }, h("h2", null, t("app.notes"))), h("div", { class: "tips prose" }, md(app.tips))),
+        uiCard({ title: t("app.glance") }, ...uiFacts([[t("apps.col.machine"), h("a", { href: machineBase(m) }, m.name)], (url || app.port) && [t("app.address"), h("span", { class: "mono" }, url ? url.replace(/^https?:\/\//, "").replace(/\/$/, "") : `${m.ip}:${app.port}`)], app.guarded && [t("access.signIn"), t("access.through", { port: app.guarded })]]), accessLink()),
+        app.login && app.login.kind !== "none" && uiCard({ title: t("app.login") }, loginBlock(app.login, loginAsker(app.name, m.id))),
+        app.tips && uiCard({ title: t("app.notes") }, h("div", { class: "tips prose" }, md(app.tips))),
       ),
     ),
   );

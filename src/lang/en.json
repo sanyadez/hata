@@ -6397,5 +6397,7 @@
   "tree.loadCpu": "CPU {n}%",
   "tree.loadMemory": "memory {used} of {total}",
   "tree.containersSettings": "Settings",
-  "tree.none": "Nothing here yet."
+  "tree.none": "Nothing here yet.",
+  "server.appsRunning": "Running",
+  "server.appsOf": "{running} of {all}"
 }

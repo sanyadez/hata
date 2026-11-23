@@ -1314,29 +1314,28 @@ function renderServerBody() {
   }
   renderSystem();
   const o = state.overview;
-  const more = (hash, label) => h("a", { class: "link small", href: hash }, label, " →");
+  const more = (hash, label) => h("a", { class: "ui-link", href: hash }, label, icon("chevron"));
   const d = hasModule("containers") ? incusUi.data : null;
   const apps = o?.apps ?? [];
   const row = (c) =>
-    h(
-      "div",
-      { class: "thing-row", menu: (at) => containerMenu(c, at) },
-      h("i", { class: "dot " + (c.status === "running" ? "running" : c.status === "error" ? "restarting" : "") }),
-      h("div", { class: "grow" }, h("a", { class: "strong", href: `#/containers/i/${c.name}` }, c.name), h("div", { class: "muted small" }, [t("tree.kind." + c.kind), c.os, c.address].filter(Boolean).join(" · "))),
-      c.status !== "running" && h("span", { class: "muted small" }, t("incus.status." + c.status)),
-      c.status !== "running" && button(t("incus.start"), { class: "small", onclick: (e) => containerAct(c, "start", e.currentTarget) }, "play"),
-      h("button", { type: "button", class: "btn small square", "aria-label": t("app.more"), onclick: (e) => containerMenu(c, underButton(e.currentTarget)) }, icon("more")),
-    );
+    uiRow({
+      name: c.name,
+      sub: [t("tree.kind." + c.kind), c.os, c.address].filter(Boolean).join(" · "),
+      state: uiState(c.status === "running" ? "ok" : c.status === "error" ? "bad" : "off", t("incus.status." + c.status)),
+      action: c.status !== "running" && button(t("incus.start"), { class: "small", onclick: (e) => containerAct(c, "start", e.currentTarget) }, "play"),
+      href: `#/containers/i/${c.name}`,
+      menu: (at) => containerMenu(c, at),
+    });
   put(
     document.getElementById("server-main"),
     d?.state === "ready" &&
       uiCard(
-        { title: t("area.server.containers"), count: d.containers.length, actions: button(t("server.new"), { class: "small", onclick: () => newContainerDialog() }, "plus"), flush: true },
-        d.containers.length ? d.containers.map(row) : h("p", { class: "muted small pad-row" }, t("tree.hereNone")),
+        { title: t("area.server.containers"), count: d.containers.length, actions: [button(t("server.new"), { class: "small", onclick: () => newContainerDialog() }, "plus"), more("#/machines/this/containers", t("server.all"))], flush: true },
+        d.containers.length ? d.containers.map(row) : uiEmpty({ text: t("tree.hereNone") }),
       ),
     uiCard(
       { title: t("area.server.apps"), count: apps.length, actions: more("#/machines/this/apps", t("server.all")) },
-      h("p", { class: "muted" }, apps.length ? t("server.appsLine", { running: apps.filter(isUp).length, all: apps.length }) : t("apps.noneLead")),
+      apps.length ? uiFacts([[t("server.appsRunning"), t("server.appsOf", { running: apps.filter(isUp).length, all: apps.length })]]) : uiEmpty({ text: t("apps.noneLead") }),
     ),
   );
   const updates = sysUpdates[""];
@@ -1345,15 +1344,13 @@ function renderServerBody() {
   put(
     document.getElementById("server-side"),
     uiCard(
-      { title: t("area.server.system") },
-      uiFacts([[t("server.updates"), serverUpdatesValue(updates)], ["Docker", o?.docker?.available ? (o.docker.version ?? "—") : t("server.dockerNo")], ["Hata", state.version]]),
-      updates?.reboot && h("p", { class: "banner small" }, t("sysupdates.reboot")),
-      h("div", { class: "actions" }, waiting && button(t("server.updatesSee"), { class: "small accent", onclick: () => go("#/machines/this/system") }, "up"), more("#/machines/this/system", t("server.toSystem"))),
+      { title: t("area.server.system"), actions: [waiting && button(t("server.updatesSee"), { class: "small", onclick: () => go("#/machines/this/system") }, "up"), more("#/machines/this/system", t("server.toSystem"))].filter(Boolean) },
+      updates?.reboot && uiNotice({ tone: "warn", text: t("sysupdates.reboot"), action: button(t("power.reboot") + "…", { class: "small", onclick: () => serverPowerDialog("reboot") }, "refresh") }),
+      ...uiFacts([[t("server.updates"), serverUpdatesValue(updates)], ["Docker", o?.docker?.available ? h("span", { class: "mono" }, o.docker.version ?? "—") : t("server.dockerNo")], ["Hata", h("span", { class: "mono" }, state.version)]]),
     ),
     uiCard(
-      { title: t("server.backup") },
-      uiFacts([[t("server.backupLast"), !b ? "…" : b.lastRun ? ago(b.lastRun.at) : t("server.backupNever")], [t("server.backupWhere"), b?.dir ?? "…"]]),
-      more("#/backups", t("server.toBackups")),
+      { title: t("server.backup"), actions: more("#/backups", t("server.toBackups")) },
+      ...uiFacts([[t("server.backupLast"), !b ? "…" : b.lastRun ? ago(b.lastRun.at) : t("server.backupNever")], [t("server.backupWhere"), h("span", { class: "mono" }, b?.dir ?? "…")]]),
     ),
   );
 }

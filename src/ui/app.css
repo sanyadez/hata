@@ -988,15 +988,13 @@ input[type="range"] { accent-color: var(--accent); width: 100%; min-height: 0; p
 /* Text that lies on the picture itself: what stands alone gets a pane of its own, the rest a halo of the
    background colour — the picture may be of any brightness */
 :root.has-wallpaper #view { text-shadow: 0 0 2px var(--bg), 0 0 6px var(--bg), 0 0 16px var(--bg); }
-:root.has-wallpaper #view :is(.card, .tile, .btn, .page-head, :is(.side > .pad-x, .loose), .section-head, :is(#machine-head, #pve-head), input, select, .select-btn, textarea, table, pre, .cats, .tabs) { text-shadow: none; }
-:root.has-wallpaper :is(.page-head, :is(.side > .pad-x, .loose), .cats, :is(#machine-head, #pve-head), #view .section-head:not(:is(.card, :is(.side > .pad-x, .loose), :is(#machine-head, #pve-head)) *)) { background: color-mix(in srgb, var(--surface) 88%, transparent); backdrop-filter: blur(16px); border: 1px solid var(--border); border-radius: var(--radius-lg); }
+:root.has-wallpaper #view :is(.card, .tile, .btn, .page-head, :is(.side > .pad-x, .loose), .section-head, input, select, .select-btn, textarea, table, pre, .cats, .tabs) { text-shadow: none; }
+:root.has-wallpaper :is(.page-head, :is(.side > .pad-x, .loose), .cats, #view .section-head:not(:is(.card, :is(.side > .pad-x, .loose)) *)) { background: color-mix(in srgb, var(--surface) 88%, transparent); backdrop-filter: blur(16px); border: 1px solid var(--border); border-radius: var(--radius-lg); }
 :root.has-wallpaper :is(.page-head, :is(.side > .pad-x, .loose)) { padding: 18px 20px; }
 /* (the rule above reaches into #view through :is, so only !important is stronger) */
-:root.has-wallpaper :is(#machine-head, #pve-head) { padding: 18px 20px 0; }
-:root.has-wallpaper :is(#machine-head, #pve-head) .tabs { box-shadow: none; }
-:root.has-wallpaper #view .section-head:not(:is(.card, :is(.side > .pad-x, .loose), :is(#machine-head, #pve-head)) *) { padding: 8px 14px; border-radius: var(--radius-md); }
+:root.has-wallpaper #view .section-head:not(:is(.card, :is(.side > .pad-x, .loose)) *) { padding: 8px 14px; border-radius: var(--radius-md); }
 :root.has-wallpaper #view .ico { filter: drop-shadow(0 0 3px var(--bg)); }
-:root.has-wallpaper #view :is(.card, .tile, .btn, .page-head, :is(.side > .pad-x, .loose), .section-head, .cats, :is(#machine-head, #pve-head)) .ico { filter: none; }
+:root.has-wallpaper #view :is(.card, .tile, .btn, .page-head, :is(.side > .pad-x, .loose), .section-head, .cats) .ico { filter: none; }
 :root.has-wallpaper .cats.cats { padding: 8px; }
 
 /* --- Moving groups and blocks of the dashboard -------------------------------------------------- */
@@ -1396,8 +1394,6 @@ i.dot.danger { background: var(--danger); }
 }
 @media (max-width: 760px) {
 }
-.thing-head { display: grid; gap: 10px; }
-.thing-head .app-head { padding: 0; margin: 0; background: none; border: 0; }
 .tree-load span { white-space: nowrap; }
 @media (max-width: 760px) {
   .tree-bar { display: none; }
@@ -1961,7 +1957,6 @@ dialog.nav-sheet[open] { display: grid; gap: 14px; padding: 10px 14px calc(14px 
 }
 .sub-row > td:first-child { padding-left: 44px; }
 /* the tabs of a computer, a container, a guest and a Proxmox server say it in words, like every section's */
-:is(#machine-head, #instance-head, #guest-head, #pve-head) .tab > .ico { display: none; }
 
 /* Bluetooth */
 .bt-name { display: flex; align-items: center; gap: 10px; min-width: 0; }
@@ -2052,11 +2047,8 @@ tr.warn-row .load-line path { stroke: var(--warn); }
  * the one of Files, the trash and the history. It ends in its tabs the way a section's head does: a line across the
  * card, the tabs under it.
  */
-:root:not(.has-wallpaper) :is(.page-head, #machine-head, #pve-head) { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); }
+:root:not(.has-wallpaper) .page-head { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); }
 :root:not(.has-wallpaper) .page-head:not(.card) { padding: 18px 20px; }
-:root:not(.has-wallpaper) :is(#machine-head, #pve-head) { padding: 18px 20px 0; }
-#view :is(#machine-head, #pve-head, #instance-head, #guest-head) .tabs { margin: 16px -20px 0; padding: 0 20px; box-shadow: inset 0 1px var(--border); }
-#view :is(#instance-head, #guest-head):has(.tabs) { padding-bottom: 0; }
 
 /* A person's picture: the circle keeps its size, the picture fills it */
 .avatar.has-picture, .top-picture { overflow: hidden; background: var(--surface-2); padding: 0; }

@@ -6397,5 +6397,7 @@
   "tree.loadCpu": "процесор {n}%",
   "tree.loadMemory": "пам'ять {used} із {total}",
   "tree.containersSettings": "Налаштування",
-  "tree.none": "Тут ще нічого немає."
+  "tree.none": "Тут ще нічого немає.",
+  "server.appsRunning": "Працює",
+  "server.appsOf": "{running} із {all}"
 }
