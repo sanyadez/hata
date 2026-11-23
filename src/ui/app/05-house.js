@@ -443,10 +443,12 @@ async function loadHouse() {
 function houseItems() {
   const items = [];
   const trouble = (pred) => (state.overview?.attention ?? []).filter(pred);
+  // a tile is coloured only by what Needs attention holds for it, so its colour and the number by the section agree:
+  // a service silent for a moment says so in its chip, and turns a colour once it is an item (after 5 min)
   const worst = (list) => (list.some((x) => x.severity === "danger") ? "bad" : list.length ? "warn" : "ok");
   for (const x of houseUi.ha ?? []) {
     const own = trouble((item) => item.code.startsWith("ha.") && item.detail?.host === x.id);
-    items.push({ key: "ha:" + x.id, group: "home", href: `#/house/ha/${x.id}`, icon: "home", name: x.name, sub: ["Home Assistant", x.version].filter(Boolean).join(" · "), chip: haChip(x), line: x.online ? t("house.ha.line", { entities: x.entities, on: x.on }) : haError(x) || t("ha.offline"), warn: x.online && own.length ? attentionWords(own[0]).title : "", level: !x.online && x.error ? "bad" : worst(own) });
+    items.push({ key: "ha:" + x.id, group: "home", href: `#/house/ha/${x.id}`, icon: "home", name: x.name, sub: ["Home Assistant", x.version].filter(Boolean).join(" · "), chip: haChip(x), line: x.online ? t("house.ha.line", { entities: x.entities, on: x.on }) : haError(x) || t("ha.offline"), warn: x.online && own.length ? attentionWords(own[0]).title : "", level: worst(own) });
   }
   if (hasModule("integrations"))
     for (const c of svcConnections()) {
@@ -456,7 +458,7 @@ function houseItems() {
       try {
         address = new URL(c.url).host;
       } catch {}
-      items.push({ key: "x:" + c.id, group: KIND_GROUP[c.kind] ?? "other", href: `#/house/x-${c.kind}/${c.id}`, icon: c.icon, name: c.name, sub: c.title !== c.name ? c.title : address, chip: svcChip(c), line: c.online && spec ? svcNumbers(spec, c.values) : c.error ? t("service.offline") : "", warn: own.length ? attentionWords(own[0]).title : "", level: c.error ? "bad" : worst(own) });
+      items.push({ key: "x:" + c.id, group: KIND_GROUP[c.kind] ?? "other", href: `#/house/x-${c.kind}/${c.id}`, icon: c.icon, name: c.name, sub: c.title !== c.name ? c.title : address, chip: svcChip(c), line: c.online && spec ? svcNumbers(spec, c.values) : c.error ? t("service.offline") : "", warn: own.length ? attentionWords(own[0]).title : "", level: worst(own) });
     }
   if (hasModule("tv")) {
     const tv = state.tvNow;
