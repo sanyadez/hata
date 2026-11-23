@@ -167,7 +167,7 @@
   "store.settingsHint": "Зберігаються у файлі .env застосунку; compose-файл лишається таким, як у магазині",
   "store.settingKept": "Лишіть порожнім, щоб зберегти поточне значення",
   "store.portMoved": "{port} зайнятий",
-  "store.more": "Більше",
+  "store.more": "Ще {n} у цьому переліку",
   "store.version": "версія {version}",
   "store.permissions": "Який доступ до сервера йому потрібен",
   "store.permission.host-network": "Мережа хоста",

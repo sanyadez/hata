@@ -1156,32 +1156,37 @@ function storeButton(category = "") {
 
 /** The name of a page of Integrations: its tab's, or a connected service's kind */
 const houseLabel = (tabs, at) => tabs.find((tab) => tab.id === at)?.label ?? (at.startsWith("x-") ? (svcConnections().find((c) => c.kind === at.slice(2))?.title ?? at.slice(2)) : t(`area.house.${at}`));
-function areaHead(area, at, { meta = null, metaId = null, actions = null, actionsId = null } = {}) {
+function areaHead(area, at, { meta = null, metaId = null, actions = null, actionsId = null, search = null, more = null } = {}) {
   const tabs = areaTabs(area);
   const headTab = tabs.find((tab) => tab.head);
-  return h(
-    "header",
-    { class: "card area-head" },
-    h(
-      "div",
-      { class: "area-top" },
-      area === "server"
-        ? h(
-            "div",
-            { class: "area-name" },
-            h("nav", { class: "crumbs" }, h("a", { href: "#/machines" }, t("nav.machines")), icon("chevron"), h("span", null, t("tree.thisServer"))),
-            h("div", { class: "app-head", menu: serverMenu }, h("span", { class: "machine-icon" }, icon("server")), h("div", { class: "grow" }, h("div", { class: "app-title" }, h("h1", null, state.overview?.system?.hostname ?? t("tree.thisServer")), h("span", { class: "state running" }, t("status.running"))), h("p", { class: "meta", id: "server-meta" }, serverMeta()))),
-          )
-        : area === "house" && at !== "overview"
-          ? // Integrations has no tabs: its overview lists everything, a page of one leads back to it
-            h("div", { class: "area-name" }, h("nav", { class: "crumbs house-crumbs" }, h("a", { href: "#/house" }, t("area.house")), icon("chevron"), h("span", null, houseLabel(tabs, at))))
-          : h("div", { class: "area-name" }, h("h1", null, t("area." + area)), h("p", { class: "meta", id: metaId }, meta ?? t(`area.${area}.lead`))),
-      area === "server"
-        ? h("div", { class: "actions" }, h("a", { class: "btn", href: "#/terminal" }, icon("terminal"), h("span", null, t("terminal.title"))), button(t("power.restart"), { onclick: () => serverPowerDialog("reboot") }, "refresh"), h("button", { type: "button", class: "btn square", "aria-label": t("app.more"), "aria-haspopup": "menu", onclick: (e) => serverMenu(underButton(e.currentTarget)) }, icon("more")))
-        : (actions || actionsId || (headTab && at !== headTab.id)) && h("div", { class: "actions", id: actionsId }, actions, headTab && at !== headTab.id && storeButton()),
-    ),
-    tabs.length > 1 && area !== "house" && h("nav", { class: "tabs" }, tabs.filter((tab) => !tab.head).map((tab) => h("a", { class: "tab" + (tab.id === at ? " active" : ""), href: tabHash(area, tab), "aria-current": tab.id === at ? "page" : null, "data-tab": tab.id }, tab.label ?? t(`area.${area}.${tab.id}`), area === "server" && serverTabCount(tab.id))),),
-  );
+  const tabsNav = tabs.length > 1 && area !== "house" && h("nav", { class: "tabs" }, tabs.filter((tab) => !tab.head).map((tab) => h("a", { class: "tab" + (tab.id === at ? " active" : ""), href: tabHash(area, tab), "aria-current": tab.id === at ? "page" : null, "data-tab": tab.id }, tab.label ?? t(`area.${area}.${tab.id}`), area === "server" && serverTabCount(tab.id))));
+  if (area === "server")
+    return pageHead({
+      cls: "area-head",
+      crumbs: [{ label: t("nav.machines"), href: "#/machines" }, { label: t("tree.thisServer") }],
+      icon: "server",
+      title: state.overview?.system?.hostname ?? t("tree.thisServer"),
+      state: uiState("ok", t("status.running")),
+      facts: [h("span", { id: "server-meta" }, serverMeta())],
+      actions: [{ label: t("terminal.title"), icon: "terminal", href: "#/terminal" }, { label: t("power.restart") + "…", icon: "refresh", run: () => serverPowerDialog("reboot") }],
+      more: serverMenuEntries,
+      menu: serverMenu,
+      tabs: tabsNav,
+    });
+  // Integrations has no tabs: its overview lists everything, a page of one leads back to it
+  if (area === "house" && at !== "overview") return pageHead({ cls: "area-head", crumbs: [{ label: t("area.house"), href: "#/house" }, { label: houseLabel(tabs, at) }] });
+  const own = [].concat(actions ?? []).filter(Boolean);
+  return pageHead({
+    cls: "area-head",
+    title: t("area." + area),
+    facts: [meta ?? t(`area.${area}.lead`)],
+    factsId: metaId,
+    actions: [...own, headTab && at !== headTab.id && storeButton()],
+    actionsId,
+    search,
+    more: more || null,
+    tabs: tabsNav,
+  });
 }
 
 /** What stands under this server's name: the system, the address, how long it has been up */
@@ -1275,14 +1280,15 @@ function renameServerDialog(done) {
   name.select();
 }
 
+const serverMenuEntries = () => [
+  { label: t("rename.open"), icon: "edit", run: () => renameServerDialog() },
+  { label: t("terminal.title"), icon: "terminal", href: "#/terminal" },
+  { label: t("area.network"), icon: "network", href: "#/network" },
+  { label: t("power.reboot"), icon: "refresh", run: () => serverPowerDialog("reboot") },
+  { label: t("power.poweroff"), icon: "stop", danger: true, run: () => serverPowerDialog("poweroff") },
+];
 function serverMenu(at) {
-  menuAt(at, menuHeader(state.overview?.system?.hostname ?? t("tree.thisServer"), t("tree.thisServer"), "server"), [
-    { label: t("rename.open"), icon: "edit", run: () => renameServerDialog() },
-    { label: t("terminal.title"), icon: "terminal", href: "#/terminal" },
-    { label: t("area.network"), icon: "network", href: "#/network" },
-    { label: t("power.reboot"), icon: "refresh", run: () => serverPowerDialog("reboot") },
-    { label: t("power.poweroff"), icon: "stop", run: () => serverPowerDialog("poweroff") },
-  ]);
+  menuAt(at, menuHeader(state.overview?.system?.hostname ?? t("tree.thisServer"), t("tree.thisServer"), "server"), serverMenuEntries());
 }
 
 // --- This server: a computer like the others, with a page of its own ---------------------------------

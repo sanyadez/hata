@@ -40,53 +40,38 @@ function renderAppsBody() {
   const newer = all.filter((row) => !row.machine && !row.app.update && row.app.newer?.length > 0 && !row.app.job);
   if (!fixed) put(document.getElementById("apps-meta"), [t("apps.meta.installed", { n: all.length }), t("apps.meta.running", { n: count("running") }), count("updates") > 0 && t("apps.meta.updates", { n: count("updates") })].filter(Boolean).flatMap((part, i) => (i ? [h("span", { class: "dot-sep" }, "·"), part] : [part])));
   if (!fixed) put(document.getElementById("apps-actions"), isAdmin() && newer.length > 0 && button(t("apps.updateAll", { n: newer.length }), { onclick: () => confirmAction({ title: t("apps.updateAll", { n: newer.length }), lead: t("apps.updateAllLead", { names: newer.map((row) => row.app.title).join(", ") }), label: t("app.update"), kind: "primary", iconName: "up", run: () => newer.forEach(({ app }) => void startAction(app, "update")) }) }, "up"), state.user.role !== "guest" && storeButton());
-  if (!all.length) return put(box, h("section", { class: "card pad empty-state" }, h("h2", null, t("apps.none")), h("p", { class: "muted" }, t("apps.noneLead")), state.user.role !== "guest" && h("a", { class: "btn primary", href: "#/store" }, icon("store"), h("span", null, t("area.apps.store")))));
+  if (!all.length) return put(box, uiCard({}, uiEmpty({ size: "big", icon: "store", title: t("apps.none"), text: t("apps.noneLead"), action: state.user.role !== "guest" && h("a", { class: "btn primary", href: "#/store" }, icon("store"), h("span", null, t("area.apps.store"))) })));
   const machines = fixed ? [] : [...new Map(all.filter((row) => row.machine).map((row) => [row.machine.id, row.machine.name])).entries()];
   const shown = all.filter(appShown[appsUi.show]).filter((row) => !appsUi.machine || (appsUi.machine === "." ? !row.machine : row.machine?.id === appsUi.machine));
   const hostname = state.overview.system?.hostname ?? t("tree.thisServer");
   const where = machines.length > 0 && h("select", { "aria-label": t("apps.col.machine"), onchange: (e) => ((appsUi.machine = e.target.value), renderAppsBody()) }, h("option", { value: "" }, t("apps.allMachines")), h("option", { value: ".", selected: appsUi.machine === "." }, hostname), machines.map(([id, name]) => h("option", { value: id, selected: appsUi.machine === id }, name)));
-  const state_ = ({ app }) => {
-    const st = appState(app);
-    const tone = st === "running" ? "running" : st === "busy" || st === "partial" ? "busy" : st === "restarting" ? "restarting" : "";
-    const words = app.job ? t("status.busy") : appNewer(app) && st === "running" ? t("apps.hasUpdate") : t("status." + st);
-    return h("span", { class: "with-dot" + (st === "restarting" || st === "partial" || (appNewer(app) && st === "running") ? " warn-text" : st === "stopped" || st === "unknown" ? " muted" : "") }, h("i", { class: "dot " + (appNewer(app) && st === "running" ? "partial" : tone) }), words);
-  };
+  const stateOf = ({ app }) => appStateBadge(app);
   const row = (r) => {
     const { app, machine } = r;
-    const menu = (anchor, at) => (machine ? go(r.page) : isAdmin() ? appTileMenu(app, anchor, at) : null);
-    return h(
-      "tr",
-      { menu: machine || !isAdmin() ? true : (at) => appTileMenu(app, null, at) },
-      h("td", null, h("a", { class: "with-icon strong", href: r.page }, appIcon(app, "sm"), h("span", { class: "clip" }, app.title))),
-      h("td", { class: "muted mono small" }, r.address ? h("span", { class: "clip" }, r.address, app.protected || app.guarded ? ` · ${t("apps.behindSignIn")}` : "") : "—"),
-      machines.length > 0 && h("td", { class: "muted" }, machine ? h("a", { href: `#/machines/${machine.id}` }, machine.name) : hostname),
-      h("td", null, state_(r)),
-      h(
-        "td",
-        null,
-        h(
-          "div",
-          { class: "row-actions end" },
-          r.url ? h("a", { class: "btn small", href: r.url, target: "_blank", rel: "noopener noreferrer" }, icon("external"), h("span", null, t("app.open"))) : !machine && isAdmin() && app.status === "stopped" && !app.job ? button(t("app.start"), { class: "small", onclick: () => startAction(app, "start") }, "play") : null,
-          isAdmin() && h("button", { type: "button", class: "btn small square", "aria-label": t("app.more"), "aria-haspopup": "menu", onclick: (e) => menu(e.currentTarget) }, icon("more")),
-        ),
-      ),
-    );
+    const more = isAdmin() && (machine ? () => go(r.page) : (e) => appTileMenu(app, e.currentTarget));
+    const open = r.url ? h("a", { class: "btn small", href: r.url, target: "_blank", rel: "noopener noreferrer" }, icon("external"), h("span", null, t("app.open"))) : !machine && isAdmin() && app.status === "stopped" && !app.job ? button(t("app.start"), { class: "small", onclick: () => startAction(app, "start") }, "play") : null;
+    const address = r.address ? r.address + (app.protected || app.guarded ? ` · ${t("apps.behindSignIn")}` : "") : "";
+    return {
+      href: r.page,
+      menu: machine || !isAdmin() ? true : (at) => appTileMenu(app, null, at),
+      cells: [
+        uiCell({ lead: { logo: appIcon(app, "row") }, name: app.title }),
+        address ? h("span", { class: "mono small", title: address }, address) : "—",
+        machines.length > 0 && (machine ? machine.name : hostname),
+        stateOf(r),
+        h("div", { class: "row-actions end", onclick: (e) => e.stopPropagation() }, open, more && h("button", { type: "button", class: "btn small square ui-more", "aria-label": t("app.more"), "aria-haspopup": "menu", onclick: more }, icon("more"))),
+      ].filter((c) => c !== false),
+      sub: [address, machines.length > 0 && (machine ? machine.name : hostname)].filter(Boolean).join(" · "),
+    };
   };
+  const filters = uiSegment(APP_SHOWS.filter((id) => id === "all" || id === appsUi.show || count(id) > 0).map((id) => ({ value: id, label: t("apps.show." + id), count: count(id) })), appsUi.show, (v) => ((appsUi.show = v), renderAppsBody()), { label: t("apps.col.state") });
+  const columns = [{ label: t("apps.col.app") }, { label: t("apps.col.address") }, machines.length > 0 && { label: t("apps.col.machine") }, { label: t("apps.col.state") }, { label: "" }].filter(Boolean);
   put(
     box,
-    h(
-      "div",
-      { class: "card filter-bar" },
-      h("div", { class: "seg-pills" }, APP_SHOWS.filter((id) => id === "all" || id === appsUi.show || count(id) > 0).map((id) => h("button", { type: "button", class: "seg-pill" + (appsUi.show === id ? " active" : ""), "aria-pressed": String(appsUi.show === id), onclick: () => ((appsUi.show = id), renderAppsBody()) }, t("apps.show." + id), " ", h("span", { class: "muted" }, String(count(id)))))),
-      where && h("label", { class: "pair" }, h("span", { class: "muted small" }, t("apps.col.machine")), where),
-    ),
-    h(
-      "div",
-      { class: "card table-wrap" },
-      shown.length
-        ? h("table", { class: "apps-table" }, h("thead", null, h("tr", null, h("th", null, t("apps.col.app")), h("th", null, t("apps.col.address")), machines.length > 0 && h("th", null, t("apps.col.machine")), h("th", null, t("apps.col.state")), h("th"))), h("tbody", null, shown.map(row)))
-        : h("p", { class: "pad muted" }, t("apps.noneShown")),
+    uiCard(
+      { flush: true, cls: "apps-list" },
+      h("div", { class: "ui-filters" }, filters, where),
+      shown.length ? uiTable(columns, shown.map(row)) : uiEmpty({ text: t("apps.noneShown") }),
     ),
   );
 }
@@ -102,9 +87,9 @@ function renderStore() {
       renderStoreList();
     },
   });
+  search.classList.add("ui-search");
   shell(
-    areaHead("apps", "store", { meta: " ", metaId: "store-meta", actions: isAdmin() && [button(t("store.sync"), { class: "ghost", onclick: syncStores }, "refresh"), button(t("store.custom"), { onclick: customDialog }, "plus")] }),
-    h("div", { class: "search wide" }, icon("search"), search),
+    areaHead("apps", "store", { meta: " ", metaId: "store-meta", search, more: isAdmin() && [{ label: t("store.sync"), icon: "refresh", run: syncStores }, { label: t("store.custom"), icon: "plus", run: customDialog }] }),
     h("div", { class: "store" }, h("nav", { class: "cats fold", id: "cats", "aria-label": t("store.categories") }), h("div", { id: "store-list" })),
   );
   renderStoreList();
@@ -119,7 +104,7 @@ function renderStoreList() {
   const installed = new Set((state.overview?.apps ?? []).map((a) => a.name));
 
   const synced = Math.max(0, ...state.store.stores.map((s) => s.syncedAt));
-  document.getElementById("store-meta")?.replaceChildren(t("store.meta", { stores: state.store.stores.length, apps: all.length }), synced ? h("span", { class: "dot-sep" }, "·") : "", synced ? t("store.syncedAgo", { time: ago(synced) }) : "");
+  document.getElementById("store-meta")?.replaceChildren([t("store.meta", { stores: state.store.stores.length, apps: all.length }), synced ? t("store.syncedAgo", { time: ago(synced) }) : ""].filter(Boolean).join(" · "));
 
   const cat = (value, label, n) =>
     h(
@@ -154,30 +139,38 @@ function renderStoreList() {
   const apps = all.filter((a) => (!q || `${a.title} ${a.name} ${a.tagline}`.toLowerCase().includes(q)) && inCategory(a));
   if (!all.length) {
     const busy = state.store.stores.some((s) => s.syncing);
-    return list.replaceChildren(h("div", { class: "empty" }, h("p", null, t(busy ? "store.syncing" : "store.empty")), !busy && button(t("store.sync"), { class: "primary", onclick: syncStores }, "refresh")));
+    return list.replaceChildren(uiCard({}, busy ? uiEmpty({ size: "loading", text: t("store.syncing") }) : uiEmpty({ size: "big", icon: "store", title: t("store.empty"), action: button(t("store.sync"), { class: "primary", onclick: syncStores }, "refresh") })));
   }
   // a search over everything finds the services to connect too
   const kindsFound = q && category === "" ? storeKinds().filter((k) => `${k.title} ${k.what}`.toLowerCase().includes(q)) : [];
-  if (!apps.length && !kindsFound.length) return list.replaceChildren(h("p", { class: "empty" }, t("store.nothing")));
+  if (!apps.length && !kindsFound.length) return list.replaceChildren(uiCard({}, uiEmpty({ text: t("store.nothing") })));
   // a long list comes in pieces: 213 cards on a phone were 30 000 px of scrolling
   const key = `${category}|${q}`;
   if (storeShown.key !== key) Object.assign(storeShown, { key, n: STORE_PIECE });
   const left = apps.length - storeShown.n;
+  const stateOf = (a) => {
+    if (!installed.has(a.name)) return null;
+    return state.overview?.apps?.find((one) => one.name === a.name)?.job?.kind === "install" ? uiState("info", t("store.installing")) : uiState("ok", t("store.installed"));
+  };
   list.replaceChildren(
     ...(kindsFound.length > 0 ? [storeIntegrationCards(kindsFound, "")] : []),
     h(
       "div",
-      { class: "cards" },
+      { class: "ui-tiles described store-tiles" },
       apps.slice(0, storeShown.n).map((a) =>
-        h(
-          "button",
-          { type: "button", class: "store-card" + (a.supported ? "" : " unsupported"), onclick: () => (installed.has(a.name) ? go(`#/apps/${a.name}`) : storeDialog(a)), menu: (at) => storeCardMenu(a, installed.has(a.name), at) },
-          h("span", { class: "store-card-head" }, appIcon(a), h("span", { class: "grow" }, h("span", { class: "tile-name" }, a.title), h("span", { class: "muted small" }, twice.has(a.name) ? `${a.category} · ${a.storeName}` : a.category)), installed.has(a.name) ? (state.overview?.apps?.find((one) => one.name === a.name)?.job?.kind === "install" ? h("span", { class: "chip" }, t("store.installing")) : h("span", { class: "chip ok" }, icon("check"), t("store.installed"))) : h("span", { class: "chip" }, t("store.install"))),
-          h("span", { class: "tagline" }, a.tagline),
-        ),
+        uiTile({
+          logo: appIcon(a),
+          name: a.title,
+          sub: twice.has(a.name) ? `${a.category} · ${a.storeName}` : a.category,
+          state: stateOf(a),
+          desc: a.tagline,
+          onclick: () => (installed.has(a.name) ? go(`#/apps/${a.name}`) : storeDialog(a)),
+          menu: (at) => storeCardMenu(a, installed.has(a.name), at),
+          tone: a.supported ? null : "off",
+        }),
       ),
     ),
-    ...(left > 0 ? [h("div", { class: "store-more" }, button(t("load.more", { n: Math.min(left, STORE_PIECE) }), { onclick: () => ((storeShown.n += STORE_PIECE), renderStoreList()) }))] : []),
+    ...(left > 0 ? [uiCard({}, uiEmpty({ text: t("store.more", { n: left }), action: button(t("load.more", { n: Math.min(left, STORE_PIECE) }), { class: "quiet small", onclick: () => ((storeShown.n += STORE_PIECE), renderStoreList()) }) }))] : []),
   );
 }
 const STORE_PIECE = 48;
@@ -194,19 +187,11 @@ const kindConnected = (k) => (k.id ? svcConnections().filter((c) => c.kind === k
 function storeIntegrationCards(kinds, query) {
   const q = query.trim().toLowerCase();
   const shown = kinds.filter((k) => !q || `${k.title} ${k.what}`.toLowerCase().includes(q));
-  if (!shown.length) return h("p", { class: "empty" }, t("store.nothing"));
+  if (!shown.length) return uiCard({}, uiEmpty({ text: t("store.nothing") }));
   return h(
     "div",
-    { class: "cards" },
-    shown.map((k) => {
-      const on = kindConnected(k).length > 0;
-      return h(
-        "button",
-        { type: "button", class: "store-card", onclick: () => storeIntegrationDialog(k) },
-        h("span", { class: "store-card-head" }, h("span", { class: "app-icon plus" }, icon(k.icon)), h("span", { class: "grow" }, h("span", { class: "tile-name" }, k.title), h("span", { class: "muted small" }, t("store.integration"))), on ? h("span", { class: "chip ok" }, icon("check"), t("store.connected")) : h("span", { class: "chip" }, t("store.connectIt"))),
-        h("span", { class: "tagline" }, k.what),
-      );
-    }),
+    { class: "ui-tiles described" },
+    shown.map((k) => uiTile({ icon: k.icon, name: k.title, sub: t("store.integration"), state: kindConnected(k).length > 0 ? uiState("ok", t("store.connected")) : null, desc: k.what, onclick: () => storeIntegrationDialog(k) })),
   );
 }
 
@@ -1002,17 +987,15 @@ function paintWelcome() {
       : offered.length
         ? h(
             "div",
-            { class: "cards" },
-            offered.map((a) =>
-              h(
-                "button",
-                { type: "button", class: "store-card", onclick: () => (installed.has(a.name) ? go(`#/apps/${a.name}`) : storeDialog(a)), menu: (at) => storeCardMenu(a, installed.has(a.name), at) },
-                h("span", { class: "store-card-head" }, appIcon(a), h("span", { class: "grow" }, h("span", { class: "tile-name" }, a.title), h("span", { class: "muted small" }, twice.has(a.name) ? `${a.category} · ${a.storeName}` : a.category)), installed.has(a.name) ? (state.overview?.apps?.find((one) => one.name === a.name)?.job?.kind === "install" ? h("span", { class: "chip" }, t("store.installing")) : h("span", { class: "chip ok" }, icon("check"), t("store.installed"))) : h("span", { class: "chip" }, t("store.install"))),
-                h("span", { class: "tagline" }, a.tagline),
-              ),
-            ),
+            { class: "ui-tiles described" },
+            offered.map((a) => {
+              const isIn = installed.has(a.name);
+              const busyNow = isIn && state.overview?.apps?.find((one) => one.name === a.name)?.job?.kind === "install";
+              // the one place a tile has a button: there is no window behind it in the walk
+              return uiTile({ logo: appIcon(a), name: a.title, sub: twice.has(a.name) ? `${a.category} · ${a.storeName}` : a.category, desc: a.tagline, menu: (at) => storeCardMenu(a, isIn, at), state: isIn ? uiState(busyNow ? "info" : "ok", t(busyNow ? "store.installing" : "store.installed")) : null, tail: !isIn && button(t("store.install"), { class: "small", onclick: () => storeDialog(a) }, "download"), href: isIn ? `#/apps/${a.name}` : null });
+            }),
           )
-        : h("div", { class: "card empty" }, h("p", null, t(busy ? "store.syncing" : "store.empty")), !busy && button(t("store.sync"), { class: "primary", onclick: async () => (await syncStores(), loadWelcome()) }, "refresh")),
+        : uiCard({}, busy ? uiEmpty({ size: "loading", text: t("store.syncing") }) : uiEmpty({ size: "big", icon: "store", title: t("store.empty"), action: button(t("store.sync"), { class: "primary", onclick: async () => (await syncStores(), loadWelcome()) }, "refresh") })),
     h("p", { class: "muted small" }, t("welcome.apps.more"), " ", h("a", { class: "link", href: "#/store" }, t("nav.store"))),
     ...welcomeFoot(step),
   );

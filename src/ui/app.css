@@ -607,11 +607,6 @@ tr.removed .app-icon { opacity: 0.5; }
 .files-side { display: grid; gap: 12px; position: sticky; top: 88px; min-width: 0; }
 .files-side .cats { position: static; }
 .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 12px; }
-.store-card { display: grid; gap: 14px; align-content: start; padding: 16px; text-align: left; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-md); }
-.store-card.unsupported { opacity: 0.5; }
-.store-card-head { display: flex; align-items: center; gap: 12px; }
-.store-card-head .grow { display: grid; gap: 2px; }
-.store-card .tagline { color: var(--muted); display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; min-height: 2.9em; }
 
 /* --- Files ------------------------------------------------------------------------------------- */
 
@@ -995,15 +990,15 @@ input[type="range"] { accent-color: var(--accent); width: 100%; min-height: 0; p
 /* Text that lies on the picture itself: what stands alone gets a pane of its own, the rest a halo of the
    background colour — the picture may be of any brightness */
 :root.has-wallpaper #view { text-shadow: 0 0 2px var(--bg), 0 0 6px var(--bg), 0 0 16px var(--bg); }
-:root.has-wallpaper #view :is(.card, .tile, .btn, .page-head, :is(.side > .pad-x, .loose), .section-head, :is(#app-head, #machine-head, #pve-head), input, select, .select-btn, textarea, table, pre, .cats, .tabs) { text-shadow: none; }
-:root.has-wallpaper :is(.page-head, :is(.side > .pad-x, .loose), .cats, :is(#app-head, #machine-head, #pve-head), #view .section-head:not(:is(.card, :is(.side > .pad-x, .loose), :is(#app-head, #machine-head, #pve-head)) *)) { background: color-mix(in srgb, var(--surface) 88%, transparent); backdrop-filter: blur(16px); border: 1px solid var(--border); border-radius: var(--radius-lg); }
+:root.has-wallpaper #view :is(.card, .tile, .btn, .page-head, :is(.side > .pad-x, .loose), .section-head, :is(#machine-head, #pve-head), input, select, .select-btn, textarea, table, pre, .cats, .tabs) { text-shadow: none; }
+:root.has-wallpaper :is(.page-head, :is(.side > .pad-x, .loose), .cats, :is(#machine-head, #pve-head), #view .section-head:not(:is(.card, :is(.side > .pad-x, .loose), :is(#machine-head, #pve-head)) *)) { background: color-mix(in srgb, var(--surface) 88%, transparent); backdrop-filter: blur(16px); border: 1px solid var(--border); border-radius: var(--radius-lg); }
 :root.has-wallpaper :is(.page-head, :is(.side > .pad-x, .loose)) { padding: 18px 20px; }
 /* (the rule above reaches into #view through :is, so only !important is stronger) */
-:root.has-wallpaper :is(#app-head, #machine-head, #pve-head) { padding: 18px 20px 0; }
-:root.has-wallpaper :is(#app-head, #machine-head, #pve-head) .tabs { box-shadow: none; }
-:root.has-wallpaper #view .section-head:not(:is(.card, :is(.side > .pad-x, .loose), :is(#app-head, #machine-head, #pve-head)) *) { padding: 8px 14px; border-radius: var(--radius-md); }
+:root.has-wallpaper :is(#machine-head, #pve-head) { padding: 18px 20px 0; }
+:root.has-wallpaper :is(#machine-head, #pve-head) .tabs { box-shadow: none; }
+:root.has-wallpaper #view .section-head:not(:is(.card, :is(.side > .pad-x, .loose), :is(#machine-head, #pve-head)) *) { padding: 8px 14px; border-radius: var(--radius-md); }
 :root.has-wallpaper #view .ico { filter: drop-shadow(0 0 3px var(--bg)); }
-:root.has-wallpaper #view :is(.card, .tile, .btn, .page-head, :is(.side > .pad-x, .loose), .section-head, .cats, :is(#app-head, #machine-head, #pve-head)) .ico { filter: none; }
+:root.has-wallpaper #view :is(.card, .tile, .btn, .page-head, :is(.side > .pad-x, .loose), .section-head, .cats, :is(#machine-head, #pve-head)) .ico { filter: none; }
 :root.has-wallpaper .cats.cats { padding: 8px; }
 
 /* --- Moving groups and blocks of the dashboard -------------------------------------------------- */
@@ -1530,10 +1525,11 @@ a.ui-mfact { color: inherit; text-decoration: none; border-radius: var(--radius-
 .machine-row.away { background: color-mix(in srgb, var(--surface) 55%, transparent); }
 .machine-row .section-head h2 a { color: inherit; text-decoration: none; min-width: 0; }
 @media (hover: hover) { .machine-row .section-head h2 a:hover { text-decoration: underline; } }
-.server-numbers > .ui-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
-.server-numbers > .ui-stats > .ui-stat + .ui-stat { border-left: 1px solid var(--border); }
+.card > .ui-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); }
+.card > .ui-stats > .ui-stat + .ui-stat { border-left: 1px solid var(--border); }
+.card > .section-head.pad + .ui-stats { border-top: 1px solid var(--border); }
 .card.server-numbers > .trend { padding: 16px var(--pad); }
-@media (max-width: 640px) { .server-numbers > .ui-stats { grid-template-columns: 1fr 1fr; } .server-numbers > .ui-stats > .ui-stat:nth-child(odd) { border-left: 0; } .server-numbers > .ui-stats > .ui-stat:last-child:nth-child(odd) { grid-column: 1 / -1; } }
+@media (max-width: 640px) { .card > .ui-stats { grid-template-columns: 1fr 1fr; } .card > .ui-stats > .ui-stat:nth-child(odd) { border-left: 0; } .card > .ui-stats > .ui-stat:last-child:nth-child(odd) { grid-column: 1 / -1; } }
 
 /* lists: what fits, and the way to the rest at the foot */
 .pg-card > :is(.attention-block, .activity-block) { display: flex; flex-direction: column; }
@@ -1912,24 +1908,20 @@ dialog.nav-sheet[open] { display: grid; gap: 14px; padding: 10px 14px calc(14px 
 
 /* --- A section of the page: a card on top with its name, what can be done, and its tabs ------------ */
 
-.area-head { padding: 18px 20px 0; min-width: 0; }
-.area-head:not(:has(.tabs)) { padding-bottom: 18px; }
 .area-top { display: flex; align-items: center; justify-content: space-between; gap: 12px 16px; flex-wrap: wrap; }
 .area-name { display: grid; gap: 6px; min-width: 0; }
 .area-name h1 { font-size: 22px; }
 .area-name .crumbs { margin-bottom: 2px; }
-.area-head .tabs { margin: 16px -20px 0; padding: 0 20px; gap: 22px; box-shadow: inset 0 1px var(--border); flex-wrap: wrap; overflow: visible; }
+.area-head .tabs { gap: 22px; flex-wrap: wrap; overflow: visible; }
 .area-head .tab { padding: 11px 0 10px; font-size: 14px; }
 .area-head .search { width: 260px; height: 36px; }
 .search-hit.sub { padding-left: 36px; color: var(--muted); }
 .search-results mark { background: color-mix(in srgb, var(--accent) 30%, transparent); color: inherit; border-radius: 2px; }
 .settings > .muted { margin: 0; }
 @media (max-width: 760px) {
-  .area-head { padding: 14px 14px 0; }
-  .area-head:not(:has(.tabs)) { padding-bottom: 14px; }
   /* the section's own name is in the phone's top bar; a thing's name (this server) stays */
   .area-name > h1 { display: none; }
-  .area-head .tabs { margin: 12px -14px 0; padding: 0 14px; gap: 4px 18px; }
+  .area-head .tabs { gap: 4px 18px; }
   .area-head .search, .area-head .actions { width: 100%; }
 }
 
@@ -2102,10 +2094,10 @@ tr.warn-row .load-line path { stroke: var(--warn); }
  * the one of Files, the trash and the history. It ends in its tabs the way a section's head does: a line across the
  * card, the tabs under it.
  */
-:root:not(.has-wallpaper) :is(.page-head, #app-head, #machine-head, #pve-head) { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); }
+:root:not(.has-wallpaper) :is(.page-head, #machine-head, #pve-head) { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); }
 :root:not(.has-wallpaper) .page-head:not(.card) { padding: 18px 20px; }
-:root:not(.has-wallpaper) :is(#app-head, #machine-head, #pve-head) { padding: 18px 20px 0; }
-#view :is(#app-head, #machine-head, #pve-head, #instance-head, #guest-head) .tabs { margin: 16px -20px 0; padding: 0 20px; box-shadow: inset 0 1px var(--border); }
+:root:not(.has-wallpaper) :is(#machine-head, #pve-head) { padding: 18px 20px 0; }
+#view :is(#machine-head, #pve-head, #instance-head, #guest-head) .tabs { margin: 16px -20px 0; padding: 0 20px; box-shadow: inset 0 1px var(--border); }
 #view :is(#instance-head, #guest-head):has(.tabs) { padding-bottom: 0; }
 
 /* A person's picture: the circle keeps its size, the picture fills it */
@@ -2144,11 +2136,9 @@ tr.warn-row .load-line path { stroke: var(--warn); }
 .card > :is(.kv, .setting, .tool, .activity-item) + :is(.kv, .setting, .tool, .activity-item) { margin-top: calc(-1 * var(--gap)); }
 .card > :is(.kv, .setting, .tool, .activity-item):first-child, .card > :not(.kv, .setting, .tool, .activity-item) + :is(.kv, .setting, .tool, .activity-item) { padding-top: 0; border-top: 0; }
 .card > :is(.kv, .setting, .tool, .activity-item):has(+ :not(.kv, .setting, .tool, .activity-item)), .card > :is(.kv, .setting, .tool, .activity-item):last-child { padding-bottom: 0; }
-.settings .card.area-head { display: block; }
 /* the line under a heading belongs to it */
 .card > :is(.section-head, h2, h3) + :is(p.muted, p.lead) { margin-top: calc(var(--gap-tight) - var(--gap)); }
 /* the head of a page: from the last line of words to the line of tabs as far as from the top to the first */
-.area-head .tabs { margin-top: var(--gap); }
 .area-name .meta { line-height: 1.35; }
 /* A card whose list or table reaches its edges: the head carries the padding, the list starts --gap-small under it */
 .card:not(.pad) > :is(.pad-head, .section-head.pad) { padding: var(--pad) var(--pad) var(--gap-small); margin: 0; }
@@ -2623,8 +2613,6 @@ input[type="time"].short { width: auto; min-width: 136px; }
 dialog:focus { outline: none; }
 .cmd > .icon-btn { flex: none; }
 /* every card of the store the same height: a long name is cut, not a second line */
-.store-card-head .tile-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.store-more { display: flex; justify-content: center; margin-top: 16px; }
 /* a card's heading stands at the same height whether buttons sit beside it (28 px) or not */
 .section-head { min-height: 28px; }
 .card-head > h2 { min-height: 28px; display: flex; align-items: center; }
@@ -2648,13 +2636,13 @@ dialog:focus { outline: none; }
 :is(.search, .add-find, .house-search):focus-within { border-color: var(--focus); box-shadow: 0 0 0 3px var(--accent-soft); }
 
 /* a card a press opens whole */
-:is(.tile, .store-card, .disk-tile, .file-tile, .house-tile, .machine-card, .tv-mark-tile, .tv-pick) { transition: background-color var(--t-state), border-color var(--t-state); }
+:is(.tile, .disk-tile, .file-tile, .house-tile, .machine-card, .tv-mark-tile, .tv-pick) { transition: background-color var(--t-state), border-color var(--t-state); }
 @media (hover: hover) {
-  :is(.tile, .store-card, .disk-tile, .file-tile, .house-tile:not(.bad, .warn), .machine-card, .tv-mark-tile, .tv-pick):hover { border-color: var(--border-strong); }
+  :is(.tile, .disk-tile, .file-tile, .house-tile:not(.bad, .warn), .machine-card, .tv-mark-tile, .tv-pick):hover { border-color: var(--border-strong); }
   .house-tile.warn:hover { background: linear-gradient(var(--warn-soft), var(--warn-soft)), var(--surface); }
   .house-tile.bad:hover { background: linear-gradient(var(--danger-soft), var(--danger-soft)), var(--surface); }
 }
-:is(.tile, .store-card, .disk-tile, .file-tile, .house-tile:not(.bad, .warn), .machine-card, .tv-mark-tile, .tv-pick:not(:disabled)):active { border-color: var(--border-strong); background: var(--surface-2); }
+:is(.tile, .disk-tile, .file-tile, .house-tile:not(.bad, .warn), .machine-card, .tv-mark-tile, .tv-pick:not(:disabled)):active { border-color: var(--border-strong); background: var(--surface-2); }
 .house-tile.warn:active { background: linear-gradient(var(--warn-soft), var(--warn-soft)), var(--surface); }
 .house-tile.bad:active { background: linear-gradient(var(--danger-soft), var(--danger-soft)), var(--surface); }
 
@@ -2921,7 +2909,8 @@ button.tv-stage-chip:active { background: rgb(0 0 0 / 0.9); }
 @media (max-width: 640px) {
   .ui-head-main { flex-wrap: wrap; }
   .ui-head-actions { width: 100%; }
-  .ui-head-actions > .btn:not(.ui-more, .ui-main) { display: none; }
+  .ui-head-actions { flex-wrap: wrap; }
+  .ui-head-actions > .btn.ui-spec:not(.ui-main) { display: none; }
   .ui-head-actions > .btn.ui-main { flex: 1; }
   .ui-head-facts { white-space: normal; }
 }
@@ -2984,3 +2973,13 @@ button.tv-stage-chip:active { background: rgb(0 0 0 / 0.9); }
 .files-select { position: sticky; top: 76px; z-index: 4; border: 1px solid var(--accent); border-radius: var(--radius-lg); }
 @media (max-width: 760px) { .files-select { top: 64px; } }
 .ui-select-bar[hidden] { display: none; }
+/* the filters of a list card: a segment on the left, a choice or a search on the right */
+.ui-filters { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding: var(--pad) var(--pad) 12px; border-bottom: 1px solid var(--border); }
+.ui-filters > :is(select, .select-btn, input[type=search]) { margin-left: auto; }
+@media (max-width: 640px) { .ui-filters > * { width: 100%; } }
+.app-icon.row { width: 32px; height: 32px; border-radius: 8px; font-size: 14px; }
+.ui-lead > .app-icon.row { width: 100%; height: 100%; }
+.app-head-box { display: grid; gap: var(--gap); }
+.app-notices { display: grid; gap: 8px; }
+.ui-tile.off .ui-tile-name { color: var(--muted); }
+.ui-tile-icon > .app-icon { width: 100%; height: 100%; border-radius: 10px; }

@@ -274,7 +274,7 @@ function machineOverview(m, box) {
         "div",
         { class: "stack" },
         m.online
-          ? h("section", { class: "stats card" }, statCells("m"))
+          ? h("section", { class: "card ui-stats" }, statCells("m"))
           : h("p", { class: "card pad muted" }, t("machines.offlineLead", { ago: ago(m.seen) })),
         h("div", { id: "m-disks" }),
         m.online && h("div", { id: "machine-sysupdates" }, sysUpdatesCard(m.id)),
@@ -460,7 +460,7 @@ const statCells = (prefix) => [
   statCell(prefix + "-memory", "memory", t("sys.memory")),
   statCell(prefix + "-disk", "disk", t("sys.disk")),
   statCell(prefix + "-network", "network", t("sys.network")),
-  h("div", { class: "stat", id: `stat-${prefix}-temp`, hidden: true }, h("div", { class: "stat-label" }, icon("temp"), t("sys.temperature")), h("div", { class: "stat-row" }, h("div", { class: "stat-value" }, h("strong", null, "—"), h("span", { class: "unit" })), h("div", { class: "stat-chart" })), h("div", { class: "stat-hint" }, " ")),
+  Object.assign(statCell(prefix + "-temp", "temp", t("sys.temperature")), { hidden: true }),
 ];
 
 /** A machine's numbers into the cells of `statCells(prefix)` */

@@ -234,7 +234,7 @@ async function loadApp(quiet = false) {
 
 function renderApp() {
   if (state.app?.name !== state.route.name) state.app = null;
-  shell(h("div", { id: "app-head" }), h("div", { id: "app-tab" }));
+  shell(h("div", { id: "app-head-box" }, h("div", { id: "app-head" })), h("div", { id: "app-tab" }));
   if (state.app) {
     renderAppHead();
     renderAppTab();
@@ -366,18 +366,17 @@ function appTileMenu(app, anchor, at) {
   placeAt(dialog, { x: box.right - dialog.offsetWidth, y: below || box.top - 6 - dialog.offsetHeight < 8 ? box.bottom + 6 : box.top - 6 - dialog.offsetHeight });
 }
 
+/** What the head of an app's page keeps in its "⋯" */
+const appMoreEntries = (app) =>
+  [
+    isAdmin() && { label: t("assistant.ask"), icon: "chat", run: () => openAssistant({ draft: t("assistant.aboutApp", { title: app.title, app: app.name }) }) },
+    isUp(app) && { label: t("app.restart"), icon: "refresh", off: !!app.job, run: () => startAction(app, "restart") },
+    { label: t("app.update"), icon: "up", off: !!app.job, run: () => startAction(app, "update") },
+    { label: t("machines.move"), icon: "server", off: !!app.job, run: () => moveAppDialog("", app) },
+    { label: t("app.remove") + "…", icon: "trash", danger: true, off: !!app.job, run: () => removeDialog(app) },
+  ].filter(Boolean);
 function appMoreMenu(app, at = null) {
-  let dialog;
-  const item = (label, iconName, action, cls = "") => h("button", { type: "button", class: "menu-item " + cls, disabled: !!app.job, onclick: () => (dialog.close(), action()) }, icon(iconName), label);
-  dialog = openDialog(
-    at ? "menu dropdown" : "menu",
-    h("header", null, appIcon(app), h("div", null, h("h2", null, app.title), stateChip(app))),
-    isAdmin() && h("button", { type: "button", class: "menu-item", onclick: () => (dialog.close(), openAssistant({ draft: t("assistant.aboutApp", { title: app.title, app: app.name }) })) }, icon("chat"), t("assistant.ask")),
-    item(t("app.update"), "up", () => startAction(app, "update")),
-    item(t("machines.move"), "server", () => moveAppDialog("", app)),
-    item(t("app.remove"), "trash", () => removeDialog(app), "danger"),
-  );
-  if (at) placeAt(dialog, at);
+  menuAt(at ?? { x: innerWidth / 2, y: 120 }, menuHeader(app.title, t("status." + appState(app)), "box"), appMoreEntries(app));
 }
 
 function renderAppHead() {
@@ -385,37 +384,31 @@ function renderAppHead() {
   const head = document.getElementById("app-head");
   if (!app || !head) return;
   const url = isUp(app) ? appUrl(app) : null;
-  const tab = (id, iconName) => h("a", { class: "tab" + (state.route.tab === id ? " active" : ""), href: `#/apps/${app.name}${id === "overview" ? "" : "/" + id}` }, icon(iconName), t("app.tab." + id));
-  put(head,
-    h("nav", { class: "crumbs" }, h("a", { href: "#/apps" }, t("home.apps")), icon("chevron"), h("span", null, app.title)),
-    h(
-      "div",
-      { class: "app-head", menu: isAdmin() && ((at) => appTileMenu(app, null, at)) },
-      appIcon(app, "lg"),
-      h(
-        "div",
-        { class: "grow" },
-        h("div", { class: "app-title" }, h("h1", null, app.title), stateChip(app)),
-        h("p", { class: "meta" }, url ? h("a", { href: url, target: "_blank", rel: "noopener noreferrer" }, url.replace(/\/$/, ""), icon("external")) : null, url && h("span", { class: "dot-sep" }, "·"), t("app.containersCount", { n: app.containers.length }), app.store && h("span", { class: "dot-sep" }, "·"), app.store && t("app.fromStore", { store: app.store })),
-      ),
-      h(
-        "div",
-        { class: "actions" },
-        !isAdmin() && url && h("a", { class: "btn primary", href: url, target: "_blank", rel: "noopener noreferrer" }, icon("external"), h("span", null, t("app.open"))),
-        ...(!isAdmin() ? [] : [
-        app.job && button(t("jobs.showLog"), { onclick: () => jobDialog(app.job.id, app.job.kind, app.title) }, "logs"),
-        app.update && !app.job && button(t("app.storeUpdateGo"), { class: "accent", onclick: () => storeUpdateDialog(app) }, "up"),
-        !app.update && app.newer?.length > 0 && !app.job && button(t("app.update"), { class: "accent", title: `${t("app.newer")}: ${app.newer.join(", ")}`, onclick: () => startAction(app, "update") }, "up"),
-        (app.status === "partial" || app.status === "restarting") && isAdmin() && button(t("assistant.askWhy"), { onclick: () => openAssistant({ ask: t("assistant.whyDown", { title: app.title, app: app.name }) }) }, "chat"),
-        isUp(app) && button(t("app.restart"), { disabled: !!app.job, onclick: () => startAction(app, "restart") }, "refresh"),
-        isUp(app) ? button(t("app.stop"), { disabled: !!app.job, onclick: () => startAction(app, "stop") }, "stop") : button(t("app.start"), { class: url ? "" : "primary", disabled: !!app.job, onclick: () => startAction(app, "start") }, "play"),
-        url && h("a", { class: "btn primary", href: url, target: "_blank", rel: "noopener noreferrer" }, icon("external"), h("span", null, t("app.open"))),
-        h("button", { type: "button", class: "btn square", "aria-label": t("app.more"), "aria-haspopup": "menu", onclick: (e) => appMoreMenu(app, underButton(e.currentTarget)) }, icon("more")),
-        ]),
-      ),
-    ),
-    isAdmin() && h("div", { class: "tabs" }, tab("overview", "grid"), tab("settings", "sliders"), tab("logs", "logs"), tab("compose", "code"), tab("backups", "archive"), tab("terminal", "terminal")),
-  );
+  const tab = (id) => h("a", { class: "tab" + (state.route.tab === id ? " active" : ""), href: `#/apps/${app.name}${id === "overview" ? "" : "/" + id}` }, t("app.tab." + id));
+  const admin = isAdmin();
+  const open = url && { label: t("app.open"), icon: "external", href: url, newTab: true, primary: true };
+  const power = admin && (isUp(app) ? { label: t("app.stop"), icon: "stop", run: () => !app.job && startAction(app, "stop") } : { label: t("app.start"), icon: "play", primary: !url, run: () => !app.job && startAction(app, "start") });
+  const made = pageHead({
+    id: "app-head",
+    crumbs: [{ label: t("home.apps"), href: "#/apps" }, { label: app.title }],
+    logo: appIcon(app, "row"),
+    title: app.title,
+    state: appStateBadge(app),
+    facts: [url && h("a", { href: url, target: "_blank", rel: "noopener noreferrer" }, url.replace(/\/$/, ""), icon("external")), t("app.containersCount", { n: app.containers.length }), app.store && t("app.fromStore", { store: app.store })],
+    actions: [open, power],
+    more: admin ? () => appMoreEntries(app) : null,
+    menu: admin && ((at) => appTileMenu(app, null, at)),
+    tabs: admin && h("nav", { class: "tabs" }, ["overview", "settings", "logs", "compose", "backups", "terminal"].map(tab)),
+  });
+  // what waits for the person stands under the head: work going on, a newer version, a part that does not run
+  const notices = admin && [
+    app.job && uiNotice({ tone: "info", title: t("status.busy"), action: button(t("jobs.showLog"), { class: "small", onclick: () => jobDialog(app.job.id, app.job.kind, app.title) }, "logs") }),
+    !app.job && app.update && uiNotice({ tone: "info", title: t("app.storeUpdateGo"), action: button(t("app.update") + "…", { class: "small", onclick: () => storeUpdateDialog(app) }, "up") }),
+    !app.job && !app.update && app.newer?.length > 0 && uiNotice({ tone: "info", title: t("app.newer"), text: app.newer.join(", "), action: button(t("app.update"), { class: "small", onclick: () => startAction(app, "update") }, "up") }),
+    (app.status === "partial" || app.status === "restarting") && uiNotice({ tone: "warn", title: t("status." + appState(app)), action: button(t("assistant.askWhy"), { class: "small", onclick: () => openAssistant({ ask: t("assistant.whyDown", { title: app.title, app: app.name }) }) }, "chat") }),
+  ].filter(Boolean);
+  const box = h("div", { class: "app-head-box", id: "app-head-box" }, made, notices?.length > 0 && h("div", { class: "card pad app-notices" }, notices));
+  (document.getElementById("app-head-box") ?? head).replaceWith(box);
 }
 
 /** What the store's newer version changes in the app's compose file, before anything happens */
@@ -492,7 +485,7 @@ const accessLink = () => h("p", { class: "muted small" }, t("access.givenAt"), "
 const appAccess = { name: "", at: 0, data: null };
 function appAccessCard(app) {
   if (!isAdmin()) return null;
-  const box = h("section", { class: "card pad stack-s" });
+  const box = h("div", { class: "app-access" });
   const paint = () => {
     const a = appAccess.data;
     const users = a?.users ?? [];
@@ -504,11 +497,13 @@ function appAccessCard(app) {
     const who = !a ? "…" : a.allowed === "all" ? t("access.everyone") : users.filter((u) => a.allowed.includes(u.id)).map((u) => u.name).join(", ") || t("app.accessAdmins");
     put(
       box,
-      h("div", { class: "section-head" }, h("h2", null, t("app.access")), h("a", { class: "link small", href: "#/settings/users/access" }, t("users.part.access"), " →")),
-      h("div", { class: "kv" }, h("span", { class: "muted" }, t("app.accessWho")), h("span", null, who)),
-      a && h("label", { class: "check" }, h("input", { type: "checkbox", checked: a.protect, disabled: !!a.cannotProtect, onchange: (e) => save({ protect: e.target.checked }) }), h("span", null, h("strong", null, t("access.signIn")), h("span", { class: "muted small block" }, a.cannotProtect ? t("access.cannot." + a.cannotProtect) : a.protect ? t("app.accessGuarded") : t("access.onlyHidden")))),
-      // sign-in stands in front of the web port; the app's other ports are listed so that nobody takes them for closed
-      a?.protect && a.others.length > 0 && h("div", { class: "muted small other-ports" }, t("access.others"), a.others.map((o) => h("label", null, h("input", { type: "checkbox", checked: o.guarded, onchange: (e) => save({ ports: a.others.filter((x) => (x.port === o.port ? e.target.checked : x.guarded)).map((x) => x.port) }) }), String(o.port)))),
+      uiCard(
+        { title: t("app.access"), actions: h("a", { class: "ui-link", href: "#/settings/users/access" }, t("users.part.access"), icon("chevron")) },
+        ...uiFacts([[t("app.accessWho"), who]]),
+        a && uiSetting({ name: t("access.signIn"), explain: a.cannotProtect ? t("access.cannot." + a.cannotProtect) : a.protect ? t("app.accessGuarded") : t("access.onlyHidden"), control: uiSwitch({ on: a.protect, label: t("access.signIn"), disabled: !!a.cannotProtect, onchange: (on) => save({ protect: on }) }) }),
+        // sign-in stands in front of the web port; the app's other ports are listed so that nobody takes them for closed
+        a?.protect && a.others.length > 0 && h("div", { class: "muted small other-ports" }, t("access.others"), a.others.map((o) => h("label", null, h("input", { type: "checkbox", checked: o.guarded, onchange: (e) => save({ ports: a.others.filter((x) => (x.port === o.port ? e.target.checked : x.guarded)).map((x) => x.port) }) }), String(o.port)))),
+      ),
     );
   };
   const ask = async () => {
@@ -525,21 +520,34 @@ function appAccessCard(app) {
 }
 
 function appOverviewTab(app, box) {
-  const row = (label, value, mono) => h("div", { class: "kv" }, h("span", { class: "muted" }, label), h("span", { class: mono ? "mono" : "" }, value));
-  const statsBox = h("div", { class: "stats card three" }, statCell("app-cpu", "cpu", t("sys.cpu")), statCell("app-memory", "memory", t("sys.memory")), h("div", { class: "stat" }, h("div", { class: "stat-label" }, icon("box"), t("app.containers")), h("div", { class: "stat-row" }, h("div", { class: "stat-value" }, h("strong", null, String(app.containers.filter((c) => c.state === "running").length)), h("span", { class: "unit" }, "/ " + app.containers.length))), h("div", { class: "stat-hint" }, t("status." + app.status))));
+  const running = app.containers.filter((c) => c.state === "running").length;
+  const statsBox = h("div", { class: "ui-stats" }, statCell("app-cpu", "cpu", t("sys.cpu")), statCell("app-memory", "memory", t("sys.memory")), uiStat({ icon: "box", label: t("app.containers"), value: String(running), unit: "/ " + app.containers.length, hint: t("status." + app.status) }));
 
   const containerRow = (c) => {
     const s = app.stats?.[c.name];
-    const menu = (at) =>
-      menuAt(at, menuHeader(c.name, c.image, "box"), [
-        { label: t("app.logs"), icon: "logs", href: `#/apps/${app.name}/logs` },
-        isAdmin() && { label: t("app.tab.terminal"), icon: "terminal", href: `#/apps/${app.name}/terminal` },
-        { label: t("menu.copyName"), icon: "copy", run: () => copyText(c.name) },
-        { label: t("menu.copyImage"), icon: "copy", run: () => copyText(c.image) },
-      ]);
-    return h("tr", { menu }, h("td", null, h("div", { class: "mono" }, c.name), h("div", { class: "muted small mono clip" }, c.image), app.newer?.includes(c.image) && h("div", { class: "small accent-text" }, t("app.newerImage"))), h("td", null, h("span", { class: "state " + (c.state === "running" ? "running" : c.state === "restarting" ? "restarting" : "stopped") }, c.status)), h("td", { class: "num" }, s ? s.cpu.toFixed(1) + " %" : "—"), h("td", { class: "num" }, s ? bytes(s.memory) : "—"), h("td", { class: "mono small" }, c.ports.join(", ") || "—"));
+    const menuEntries = [
+      { label: t("app.logs"), icon: "logs", href: `#/apps/${app.name}/logs` },
+      isAdmin() && { label: t("app.tab.terminal"), icon: "terminal", href: `#/apps/${app.name}/terminal` },
+      { label: t("menu.copyName"), icon: "copy", run: () => copyText(c.name) },
+      { label: t("menu.copyImage"), icon: "copy", run: () => copyText(c.image) },
+    ].filter(Boolean);
+    const menu = (at) => menuAt(at, menuHeader(c.name, c.image, "box"), menuEntries);
+    const tone = c.state === "running" ? (app.newer?.includes(c.image) ? "warn" : "ok") : c.state === "restarting" ? "warn" : "off";
+    return {
+      menu,
+      cells: [
+        uiCell({ name: h("span", { class: "mono" }, c.name), sub: h("span", { class: "mono", title: c.image }, c.image) }),
+        uiState(tone, app.newer?.includes(c.image) ? t("app.newerImage") : c.status),
+        s ? s.cpu.toFixed(1) + " %" : "—",
+        s ? bytes(s.memory) : "—",
+        h("span", { class: "mono small" }, c.ports.join(", ") || "—"),
+        uiMore(() => menuEntries, { size: "s" }),
+      ],
+      sub: c.image + (s ? ` · ${s.cpu.toFixed(1)} % · ${bytes(s.memory)}` : ""),
+    };
   };
 
+  const containersTable = () => uiTable([{ label: t("app.col.container") }, { label: t("app.col.state") }, { label: t("sys.cpu"), num: true }, { label: t("sys.memory"), num: true }, { label: t("app.col.ports") }, { label: "" }], app.containers.map(containerRow));
   put(box,
     appServiceCard(app),
     h(
@@ -548,18 +556,20 @@ function appOverviewTab(app, box) {
       h(
         "div",
         { class: "stack" },
-        h("section", { class: "card head-in" }, h("div", { class: "section-head pad-head" }, h("h2", null, t("app.resources"))), statsBox),
-        app.containers.length
-          ? h("div", { class: "card table-wrap" }, h("div", { class: "section-head pad-head" }, h("h2", null, t("app.containers"))), h("table", null, h("thead", null, h("tr", null, h("th", null, t("app.col.container")), h("th", null, t("app.col.state")), h("th", { class: "num" }, t("sys.cpu")), h("th", { class: "num" }, t("sys.memory")), h("th", null, t("app.col.ports")))), h("tbody", { id: "containers" }, app.containers.map(containerRow))), h("p", { class: "cmd" }, icon("terminal"), `docker compose -p ${app.name} ps`))
-          : h("section", { class: "card pad stack-s" }, h("div", { class: "section-head" }, h("h2", null, t("app.containers"))), h("p", { class: "muted" }, t("app.noContainers"))),
+        uiCard({ title: t("app.resources"), flush: true, cls: "app-resources" }, statsBox),
+        uiCard(
+          { title: t("app.containers"), count: app.containers.length || null, flush: true },
+          app.containers.length ? h("div", { id: "containers" }, containersTable()) : uiEmpty({ text: t("app.noContainers") }),
+          app.containers.length > 0 && h("p", { class: "cmd" }, icon("terminal"), `docker compose -p ${app.name} ps`),
+        ),
       ),
       h(
         "aside",
         { class: "side" },
-        h("section", { class: "card pad" }, h("div", { class: "section-head" }, h("h2", null, t("app.glance"))), app.port && row(t("app.address"), appAddress(app), true), row(t("app.composeFile"), app.composeFile, true), app.folders.map((f, i) => row(i ? "" : t("app.folders"), f, true)), row(t("app.source"), app.store ? t("app.fromStore", { store: app.store }) : t("app.custom")), row(t("app.installed"), new Date(app.installedAt).toLocaleDateString(state.lang, { day: "numeric", month: "short", year: "numeric" }))),
+        uiCard({ title: t("app.glance") }, ...uiFacts([app.port && [t("app.address"), h("span", { class: "mono" }, appAddress(app))], [t("app.composeFile"), h("span", { class: "mono", title: app.composeFile }, app.composeFile)], ...app.folders.map((f, i) => [i ? "" : t("app.folders"), h("span", { class: "mono" }, f)]), [t("app.source"), app.store ? t("app.fromStore", { store: app.store }) : t("app.custom")], [t("app.installed"), new Date(app.installedAt).toLocaleDateString(state.lang, { day: "numeric", month: "short", year: "numeric" })]])),
         appAccessCard(app),
-        app.login && h("section", { class: "card pad" }, h("div", { class: "section-head" }, h("h2", null, t("app.login"))), loginBlock(app.login, loginAsker(app.name))),
-        app.tips && h("section", { class: "card pad" }, h("div", { class: "section-head" }, h("h2", null, t("app.notes"))), h("div", { class: "tips prose" }, md(app.tips))),
+        app.login && uiCard({ title: t("app.login") }, loginBlock(app.login, loginAsker(app.name))),
+        app.tips && uiCard({ title: t("app.notes") }, h("div", { class: "tips prose" }, md(app.tips))),
         uiCard({ title: t("activity.title"), flush: true }, app.activity.length ? app.activity.slice(0, 6).map((e) => activityItem(e)) : uiEmpty({ text: t("activity.none") })),
       ),
     ),
@@ -575,7 +585,7 @@ function appOverviewTab(app, box) {
     const parts = bytesParts(memory);
     setStat("app-cpu", list.length ? cpu.toFixed(1) : "—", "%", t("app.cpuHint", { n: state.overview?.system.cores ?? "" }), sparkline(history.cpu));
     setStat("app-memory", list.length ? parts.value : "—", list.length ? parts.unit : "", state.overview ? t("app.memoryHint", { total: bytes(state.overview.system.memory.total) }) : "", sparkline(history.memory));
-    document.getElementById("containers")?.replaceChildren(...app.containers.map(containerRow));
+    document.getElementById("containers")?.replaceChildren(containersTable());
   };
   const poll = async () => {
     while (!stopped) {

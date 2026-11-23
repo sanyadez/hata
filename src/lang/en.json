@@ -167,7 +167,7 @@
   "store.settingsHint": "Saved to the app's .env file; the compose file stays as in the store",
   "store.settingKept": "Leave empty to keep the current value",
   "store.portMoved": "{port} is in use",
-  "store.more": "More",
+  "store.more": "{n} more in this list",
   "store.version": "version {version}",
   "store.permissions": "Access it needs on the server",
   "store.permission.host-network": "Host network",

@@ -37,6 +37,13 @@ function appAddress(app) {
 const isUp = (app) => app.status === "running" || app.status === "partial";
 const appState = (app) => (app.job ? "busy" : app.containers?.some((c) => c.state === "restarting") ? "restarting" : app.status);
 const stateChip = (app) => h("span", { class: "state " + appState(app) }, t("status." + appState(app)));
+/** An app's state as the state of the design system: busy, may update, running, in trouble, stopped */
+function appStateBadge(app) {
+  const st = appState(app);
+  if (app.job) return uiState("info", t("status.busy"));
+  if ((!!app.update || app.newer?.length > 0) && st === "running") return uiState("warn", t("apps.hasUpdate"));
+  return uiState({ running: "ok", partial: "warn", restarting: "warn", busy: "info" }[st] ?? "off", t("status." + st));
+}
 
 // --- Home ---------------------------------------------------------------------------------------
 
@@ -50,25 +57,20 @@ function sparkline(values, max) {
   return h("div", { class: "spark", "aria-hidden": "true" }, bars);
 }
 
-function statCell(id, iconName, label) {
-  return h(
-    "div",
-    { class: "stat", id: "stat-" + id },
-    h("div", { class: "stat-label" }, icon(iconName), label),
-    h("div", { class: "stat-row" }, h("div", { class: "stat-value" }, h("strong", null, "—"), h("span", { class: "unit" })), h("div", { class: "stat-chart" })),
-    h("div", { class: "stat-hint" }, " "),
-  );
-}
+/** A number of a strip (the system's `uiStat`), made once with its id and refilled by `setStat` */
+const statCell = (id, iconName, label) => h("div", { class: "ui-stat", id: "stat-" + id }, h("span", { class: "ui-stat-label" }, icon(iconName), label), h("span", { class: "ui-stat-value" }, h("strong", null, "—"), h("span")), h("span", { class: "ui-stat-chart" }), h("span", { class: "ui-stat-hint" }, " "));
 
 function setStat(id, value, unit, hint, chart, level = "") {
   const el = document.getElementById("stat-" + id);
   if (!el) return;
-  const strong = el.querySelector("strong");
+  const strong = el.querySelector(".ui-stat-value strong");
   strong.textContent = value;
-  strong.className = level;
-  el.querySelector(".unit").textContent = unit;
-  el.querySelector(".stat-hint").textContent = hint || " ";
-  el.querySelector(".stat-chart").replaceChildren(chart ?? "");
+  strong.className = level === "danger" ? "bad" : level;
+  el.querySelector(".ui-stat-value span").textContent = unit;
+  el.querySelector(".ui-stat-hint").textContent = hint || " ";
+  // a little chart of fewer than three points says nothing
+  const few = chart?.classList?.contains("spark") && chart.children.length < 3;
+  el.querySelector(".ui-stat-chart").replaceChildren(few ? "" : (chart ?? ""));
 }
 
 const level = (percent) => (percent >= 95 ? "danger" : percent >= 85 ? "warn" : "");

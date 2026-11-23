@@ -646,22 +646,25 @@ function uiCommand(text, { block = false, secret = false, label = null } = {}) {
  * the right up to two buttons (`actions`: { label, icon, run | href, primary }) and a "⋯" of `more` (or a `search`),
  * the tabs under all. On a phone the main button stands under the title across; the other one goes into the "⋯".
  */
-function pageHead({ crumbs = null, icon: iconName = null, logo = null, title, state = null, facts = null, actions = [], more = null, search = null, tabs = null, id = null } = {}) {
+function pageHead({ crumbs = null, icon: iconName = null, logo = null, title = null, state = null, facts = null, factsId = null, actions = [], actionsId = null, more = null, search = null, tabs = null, id = null, cls = "", menu = undefined } = {}) {
   const trail = crumbs && h("nav", { class: "ui-crumbs", "aria-label": t("ui.crumbs") }, crumbs.map((c, i) => [i > 0 && icon("chevron", "ui-crumb-sep"), c.href && i < crumbs.length - 1 ? h("a", { href: c.href }, c.label) : h("span", { "aria-current": i === crumbs.length - 1 ? "page" : null }, c.label)]));
   const shown = (facts ?? []).filter(Boolean);
-  const line = shown.length > 0 && h("div", { class: "ui-head-facts" }, shown.flatMap((f, i) => (i ? [h("span", { class: "ui-dot-sep" }, " · "), f] : [f])));
-  const list = (actions ?? []).filter(Boolean).slice(0, 2);
+  const line = (shown.length > 0 || factsId) && h("div", { class: "ui-head-facts", id: factsId }, shown.flatMap((f, i) => (i ? [h("span", { class: "ui-dot-sep" }, " · "), f] : [f])));
+  // an action is a spec ({ label, icon, run | href, primary, danger }) or a node of the page's own (a link, a menu button)
+  const all = (actions ?? []).filter(Boolean);
+  const nodes = all.filter((a) => a instanceof Node);
+  const list = all.filter((a) => !(a instanceof Node)).slice(0, 2);
   const main = list.find((a) => a.primary) ?? list[0];
-  const make = (a) => (a.href ? h("a", { class: "btn" + (a.primary ? " primary" : "") + (a === main ? " ui-main" : ""), href: a.href, target: a.newTab ? "_blank" : null, rel: a.newTab ? "noopener noreferrer" : null }, a.icon && icon(a.icon), h("span", null, a.label)) : button(a.label, { class: (a.primary ? "primary" : a.danger ? "danger-text" : "") + (a === main ? " ui-main" : ""), onclick: a.run }, a.icon));
+  const make = (a) => (a.href ? h("a", { class: "btn ui-spec" + (a.primary ? " primary" : "") + (a === main ? " ui-main" : ""), href: a.href, target: a.newTab ? "_blank" : null, rel: a.newTab ? "noopener noreferrer" : null }, a.icon && icon(a.icon), h("span", null, a.label)) : button(a.label, { class: "ui-spec " + (a.primary ? "primary" : a.danger ? "danger-text" : "") + (a === main ? " ui-main" : ""), onclick: a.run }, a.icon));
   const phone = () => matchMedia("(max-width: 640px)").matches;
   const entries = () => [...(phone() ? list.filter((a) => a !== main).map((a) => ({ label: a.label, icon: a.icon ?? "next", run: a.run, href: a.href, danger: a.danger })) : []), ...((typeof more === "function" ? more() : more) ?? [])];
   const hasMore = !!more || list.length > 1;
-  const right = (list.length || hasMore || search) && h("div", { class: "ui-head-actions" + (more ? "" : " only-phone-more") }, search, list.map(make), hasMore && uiMore(entries));
+  const right = (list.length || nodes.length || hasMore || search || actionsId) && h("div", { class: "ui-head-actions" + (more ? "" : " only-phone-more"), id: actionsId }, search, nodes, list.map(make), hasMore && uiMore(entries));
   return h(
     "section",
-    { class: "card ui-head", id },
+    { class: "card ui-head" + (cls ? " " + cls : ""), id },
     trail,
-    h("div", { class: "ui-head-main" }, (iconName || logo) && h("span", { class: "ui-tile-icon" }, logo ?? icon(iconName)), h("div", { class: "ui-head-names" }, h("div", { class: "ui-head-title" }, h("h1", null, title), state), line), right),
+    (title != null || line || right) && h("div", { class: "ui-head-main", menu }, (iconName || logo) && h("span", { class: "ui-tile-icon" }, logo ?? icon(iconName)), h("div", { class: "ui-head-names" }, title != null && h("div", { class: "ui-head-title" }, h("h1", null, title), state), line), right),
     tabs,
   );
 }
