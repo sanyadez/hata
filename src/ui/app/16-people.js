@@ -286,9 +286,8 @@ async function shareLinkDialog(path, name, dir, kind = "get") {
     limitRow,
     homeOnly,
     error,
-    h("div", { class: "row-actions" }, make),
     made,
-    h("footer", null, closeButton(() => dialog)),
+    h("footer", null, closeButton(() => dialog), make),
   );
   shape();
   await load();
@@ -1151,7 +1150,7 @@ function areaHead(area, at, { meta = null, metaId = null, actions = null, action
         ? h("div", { class: "actions" }, h("a", { class: "btn", href: "#/terminal" }, icon("terminal"), h("span", null, t("terminal.title"))), button(t("power.restart"), { onclick: () => serverPowerDialog("reboot") }, "refresh"), h("button", { type: "button", class: "btn square", "aria-label": t("app.more"), "aria-haspopup": "menu", onclick: (e) => serverMenu(underButton(e.currentTarget)) }, icon("more")))
         : (actions || actionsId || (headTab && at !== headTab.id)) && h("div", { class: "actions", id: actionsId }, actions, headTab && at !== headTab.id && storeButton()),
     ),
-    tabs.length > 1 && area !== "house" && h("nav", { class: "tabs" }, tabs.filter((tab) => !tab.head).map((tab) => h("a", { class: "tab" + (tab.id === at ? " active" : ""), href: tabHash(area, tab), "aria-current": tab.id === at ? "page" : null }, tab.label ?? t(`area.${area}.${tab.id}`), area === "server" && serverTabCount(tab.id))),),
+    tabs.length > 1 && area !== "house" && h("nav", { class: "tabs" }, tabs.filter((tab) => !tab.head).map((tab) => h("a", { class: "tab" + (tab.id === at ? " active" : ""), href: tabHash(area, tab), "aria-current": tab.id === at ? "page" : null, "data-tab": tab.id }, tab.label ?? t(`area.${area}.${tab.id}`), area === "server" && serverTabCount(tab.id))),),
   );
 }
 
@@ -1183,6 +1182,14 @@ function hardwareWords(hw) {
 }
 const paintServerMeta = () => document.getElementById("server-meta")?.replaceChildren(serverMeta());
 /** The numbers by the tabs of this server: apps, containers, packages that wait */
+/** The numbers by this server's tabs again: what they count may come after the head was drawn */
+function paintServerTabCounts() {
+  for (const a of document.querySelectorAll(".area-head .tabs a[data-tab]")) {
+    a.querySelector(".tab-count")?.remove();
+    const n = serverTabCount(a.dataset.tab);
+    if (n) a.append(n);
+  }
+}
 function serverTabCount(id) {
   const n = id === "apps" ? (state.overview?.apps?.length ?? 0) : id === "containers" ? (incusUi.data?.containers?.length ?? 0) : id === "system" ? (sysUpdates[""]?.list?.length ?? 0) : 0;
   return n > 0 ? h("span", { class: "muted tab-count" }, String(n)) : null;
@@ -1560,13 +1567,16 @@ function avatarCard() {
   );
 }
 
+const SESSIONS_SHOWN = 8;
+const accountUi = { allSessions: false };
 function accountSection() {
   const account = state.account;
   const sessionsCard = h(
     "section",
     { class: "card pad" },
     h("div", { class: "section-head" }, h("h2", null, t("account.sessions")), account.sessions.length > 1 && state.user.role !== "guest" && button(t("account.signOutOthers"), { class: "small", onclick: async () => (await api("DELETE", "/api/account/sessions/others").catch((e) => toast(errorText(e), "error")), loadSettings()) })),
-    account.sessions.map((session) =>
+    // the device in hand first, then the latest; a long list is cut and "More" shows the rest
+    [...account.sessions].sort((a, b) => Number(!!b.current) - Number(!!a.current) || (b.lastSeen ?? 0) - (a.lastSeen ?? 0)).slice(0, accountUi.allSessions ? undefined : SESSIONS_SHOWN).map((session) =>
       settingRow(
         h("span", null, deviceName(session.userAgent), session.current && h("span", { class: "chip ok" }, t("account.thisDevice"))),
         [session.ip, t("account.lastSeen", { time: ago(session.lastSeen) })].filter(Boolean).join(" · "),
@@ -1581,6 +1591,7 @@ function accountSection() {
           }),
       ),
     ),
+    !accountUi.allSessions && account.sessions.length > SESSIONS_SHOWN && h("div", null, button(t("load.more", { n: account.sessions.length - SESSIONS_SHOWN }), { class: "small ghost", onclick: () => ((accountUi.allSessions = true), void loadSettings()) })),
   );
   // a guest account is shared: the people using it do not manage it
   if (state.user.role === "guest") return [h("section", { class: "card pad" }, h("h2", null, state.user.name), h("p", { class: "muted" }, t("account.guest"))), sessionsCard];

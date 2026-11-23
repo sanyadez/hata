@@ -1365,6 +1365,8 @@ function attentionWords(item) {
   if (item.code === "load.cpu" && item.detail.kind === "sessions") detail.name = t("load.sessionsOf", { user: item.detail.name });
   if (item.code === "load.cpu" && item.detail.kind === "service" && LOAD_UNITS[item.detail.name]) detail.name = t(LOAD_UNITS[item.detail.name]);
   const base = "attention." + item.code;
+  // an item of a kind this version no longer has (kept hidden from an older one): its own words, never a key
+  if (!has(base + ".title")) return { title: String(detail.title || detail.name || detail.kind || item.code), text: String(detail.text ?? "") };
   return { title: t(base + ".title", detail), text: t(base + ".text", detail).trim() };
 }
 

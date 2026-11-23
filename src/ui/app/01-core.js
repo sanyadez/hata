@@ -267,6 +267,16 @@ function openDialog(className, ...content) {
   document.body.append(dialog);
   frameDialog(dialog);
   dialog.showModal();
+  // the browser gives the focus to the first button there is — the cross — and draws its ring: a window starts
+  // on its first field instead (not on a touch screen, where that brings the keyboard up), else on itself
+  if (document.activeElement?.classList?.contains("dlg-x") || document.activeElement?.closest?.(".dlg-head")) {
+    const field = !matchMedia("(pointer: coarse)").matches && dialog.querySelector(".dlg-body :is(input:not([type=hidden]):not([type=checkbox]):not([type=radio]), textarea):not(:disabled)");
+    if (field) field.focus();
+    else {
+      dialog.tabIndex = -1;
+      dialog.focus({ preventScroll: true });
+    }
+  }
   return dialog;
 }
 
@@ -297,7 +307,8 @@ function frameDialog(dialog) {
     const after = title?.tagName === "H2" ? kids[kids.indexOf(title) + 1] : null;
     const lead = after?.tagName === "P" && after.classList.contains("muted") && !after.classList.contains("error") ? after : null;
     const foot = kids.findLast((node) => node.tagName === "FOOTER");
-    const cross = title?.querySelector?.(`.icon-btn[aria-label="${CSS.escape(t("common.close"))}"]`) ? null : h("button", { type: "button", class: "icon-btn dlg-x", "aria-label": t("common.close"), onclick: () => dialog.close() }, icon("x"));
+    // a window that draws its own head inside its body (the disk's) brings its own cross: never a second one
+    const cross = root.querySelector(`.icon-btn[aria-label="${CSS.escape(t("common.close"))}"]`) ? null : h("button", { type: "button", class: "icon-btn dlg-x", "aria-label": t("common.close"), onclick: () => dialog.close() }, icon("x"));
     const head = h("div", { class: "dlg-head" }, h("div", { class: "dlg-title" }, title, lead), cross);
     body = h("div", { class: "dlg-body" }, kids.filter((node) => node !== title && node !== lead && node !== foot));
     root.replaceChildren(head, body, ...(foot ? [foot] : []));

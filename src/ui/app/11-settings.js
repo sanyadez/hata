@@ -159,12 +159,16 @@ function renderStoreList() {
   // a search over everything finds the services to connect too
   const kindsFound = q && category === "" ? storeKinds().filter((k) => `${k.title} ${k.what}`.toLowerCase().includes(q)) : [];
   if (!apps.length && !kindsFound.length) return list.replaceChildren(h("p", { class: "empty" }, t("store.nothing")));
+  // a long list comes in pieces: 213 cards on a phone were 30 000 px of scrolling
+  const key = `${category}|${q}`;
+  if (storeShown.key !== key) Object.assign(storeShown, { key, n: STORE_PIECE });
+  const left = apps.length - storeShown.n;
   list.replaceChildren(
     ...(kindsFound.length > 0 ? [storeIntegrationCards(kindsFound, "")] : []),
     h(
       "div",
       { class: "cards" },
-      apps.map((a) =>
+      apps.slice(0, storeShown.n).map((a) =>
         h(
           "button",
           { type: "button", class: "store-card" + (a.supported ? "" : " unsupported"), onclick: () => (installed.has(a.name) ? go(`#/apps/${a.name}`) : storeDialog(a)), menu: (at) => storeCardMenu(a, installed.has(a.name), at) },
@@ -173,8 +177,11 @@ function renderStoreList() {
         ),
       ),
     ),
+    ...(left > 0 ? [h("div", { class: "store-more" }, button(t("load.more", { n: Math.min(left, STORE_PIECE) }), { onclick: () => ((storeShown.n += STORE_PIECE), renderStoreList()) }))] : []),
   );
 }
+const STORE_PIECE = 48;
+const storeShown = { key: "", n: STORE_PIECE };
 
 /** The services an administrator can connect, as the stores describe them, and Home Assistant, which is Hata's own */
 function storeKinds() {

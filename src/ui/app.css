@@ -114,8 +114,8 @@ button { cursor: pointer; }
 .btn.primary:hover:not(:disabled) { background: color-mix(in srgb, var(--accent), #fff 16%); }
 .btn.danger { background: var(--danger); border-color: var(--danger); color: #fff; }
 .btn.danger:hover:not(:disabled) { background: var(--danger); filter: brightness(1.08); }
-.btn.ghost { background: transparent; border-color: transparent; color: var(--muted); }
-.btn.ghost:hover:not(:disabled) { color: var(--text); background: var(--surface); }
+.btn:is(.ghost, .quiet) { background: transparent; border-color: transparent; color: var(--muted); }
+.btn:is(.ghost, .quiet):hover:not(:disabled) { color: var(--text); background: var(--surface); }
 .btn.small { height: 28px; padding: 0 10px; font-size: 12px; }
 .btn.square { width: 36px; padding: 0; }
 .btn.wide { width: 100%; height: 40px; }
@@ -267,7 +267,7 @@ p.small > .chip { height: auto; min-height: 24px; padding-block: 2px; white-spac
 
 .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); overflow: hidden; }
 .stats.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
-.stat { padding: 18px 20px; display: grid; gap: 6px; border-right: 1px solid var(--border); min-width: 0; }
+.stat { padding: 18px 20px; display: grid; gap: 6px; align-content: start; border-right: 1px solid var(--border); min-width: 0; }
 .stat:last-child { border-right: 0; }
 .stat-label { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; }
 .stat-label .ico { width: 14px; height: 14px; color: var(--faint); }
@@ -277,7 +277,7 @@ p.small > .chip { height: auto; min-height: 24px; padding-block: 2px; white-spac
 .stat-value strong.warn { color: var(--warn); }
 .stat-value strong.danger { color: var(--danger); }
 .stat-value .unit { color: var(--muted); font-size: 12px; }
-.stat-hint { color: var(--faint); font-size: 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
+.stat-hint { color: var(--faint); font-size: 12px; min-height: 1.4em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-variant-numeric: tabular-nums; }
 .stat-chart { flex: 1; max-width: 96px; min-width: 0; display: flex; justify-content: flex-end; overflow: hidden; }
 .spark { display: flex; align-items: flex-end; gap: 1.5px; height: 24px; }
 .spark i { width: 2px; min-height: 2px; background: var(--border-strong); border-radius: 1px; }
@@ -373,7 +373,6 @@ dialog.tile-folder header { justify-content: space-between; }
 /* --- Home: the head, the numbers, the machines, the lists, the tiles ------------------------------ */
 
 .home-head { align-items: flex-start; }
-.home-head h1 { font-size: 30px; }
 .home-head-side { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
 .status-pill { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 4px 10px; padding: 7px 14px; border: 1px solid var(--border); border-radius: 999px; background: var(--surface); color: var(--muted); font-size: 13px; }
 .status-pill .count { gap: 7px; }
@@ -522,7 +521,7 @@ dialog.tile-folder header { justify-content: space-between; }
 .tabs { display: flex; gap: 22px; margin-top: 24px; box-shadow: inset 0 -1px var(--border); overflow: auto hidden; scrollbar-width: none; }
 .tab { display: flex; align-items: center; gap: 8px; padding: 11px 0 10px; color: var(--muted); font: 500 14px var(--font-heading); border-bottom: 2px solid transparent; white-space: nowrap; }
 .tab:hover { color: var(--text); }
-.tab.active { color: var(--text); border-bottom-color: var(--accent); font-weight: 600; }
+.tab.active { color: var(--text); border-bottom-color: var(--accent); }
 .tab.active .ico { color: var(--accent-text); }
 
 .table-wrap { overflow-x: auto; container: tablebox / inline-size; }
@@ -541,6 +540,10 @@ textarea.code, pre { white-space: pre-wrap; overflow-wrap: anywhere; overflow-x:
   table:not(.file-table) > tbody > tr > td:not([data-label=""])[data-label]::before { content: attr(data-label); display: block; margin-top: 4px; font-size: 11px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--faint); }
   table:not(.file-table) td .clip { max-width: 100%; }
   table:not(.file-table) .row-actions { justify-content: flex-start; margin-top: 6px; }
+  /* a table's own narrow last column (width 1%, nowrap) must not squeeze a card's buttons */
+  table:not(.file-table) > tbody > tr > td:last-child { width: auto !important; white-space: normal; }
+  table:not(.file-table) .row-actions { flex-wrap: wrap; }
+  table:not(.file-table) .row-actions > .btn { flex: none; }
   table.trash > tbody > tr > td.tick { width: auto; }
   table.trash > tbody > tr.chosen { background: var(--accent-soft); }
   table.trash > tbody > tr.chosen > td { background: none; }
@@ -557,7 +560,7 @@ textarea.code, pre { white-space: pre-wrap; overflow-wrap: anywhere; overflow-x:
 table { width: 100%; border-collapse: collapse; }
 th { text-align: left; font-size: 11px; font-weight: 500; letter-spacing: 0.08em; text-transform: uppercase; color: var(--faint); padding: 16px 20px 10px; white-space: nowrap; }
 td { padding: 12px 20px; border-top: 1px solid var(--border); vertical-align: middle; }
-td .clip { max-width: 320px; }
+td .clip { max-width: max(320px, 34vw); }
 .num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
 .kv { display: flex; justify-content: space-between; gap: 16px; padding: 7px 0; }
 .kv > :first-child { flex: none; }
@@ -626,7 +629,7 @@ details > summary { cursor: pointer; margin-bottom: 8px; }
 .row-actions .link { white-space: nowrap; }
 .row { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .row.wrap { flex-wrap: wrap; }
-.row-actions { display: flex; align-items: center; justify-content: flex-end; gap: 6px; }
+.row-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 6px; }
 /* a split button: an action and the arrow of its menu, one shape */
 .split { display: inline-flex; }
 .split > .btn:not(:last-child) { border-top-right-radius: 0; border-bottom-right-radius: 0; }
@@ -811,7 +814,7 @@ dialog.xwide textarea.code { min-height: 56dvh; }
 /* --- Settings ---------------------------------------------------------------------------------- */
 
 /* the one column is never wider than the card: a line that does not wrap is cut inside it */
-.settings .card { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; }
+.settings .card:where(:not(.module-card)) { display: grid; grid-template-columns: minmax(0, 1fr); gap: 4px; }
 .settings .card > h2, .settings .card > .section-head { margin-bottom: 10px; }
 .settings .card.table-wrap { display: block; }
 .settings .card > .cmd { padding: 8px 0 14px; color: var(--muted); }
@@ -962,7 +965,6 @@ dialog.dropdown header { padding: 4px 6px; margin-bottom: 8px; }
   .stat:nth-child(odd) { border-right: 1px solid var(--border); }
   .stat:last-child { border-bottom: 0; }
   .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
-  .home-head h1 { font-size: 24px; }
   /* on a phone what needs attention comes before the tiles, the rest of the side column after them */
   .tile { min-height: 112px; }
   .store, .settings, .files { grid-template-columns: minmax(0, 1fr); gap: 16px; }
@@ -2027,7 +2029,8 @@ dialog.nav-sheet[open] { display: grid; gap: 14px; padding: 10px 14px calc(14px 
 @media (max-width: 760px) {
   .area-head { padding: 14px 14px 0; }
   .area-head:not(:has(.tabs)) { padding-bottom: 14px; }
-  .area-name h1 { display: none; }
+  /* the section's own name is in the phone's top bar; a thing's name (this server) stays */
+  .area-name > h1 { display: none; }
   .area-head .tabs { margin: 12px -14px 0; padding: 0 14px; gap: 4px 18px; }
   .area-head .search, .area-head .actions { width: 100%; }
 }
@@ -2258,7 +2261,7 @@ a.kpi:hover { background: var(--surface-2); }
 .card:not(.pad) > :is(.pad-head, .section-head.pad) { padding: var(--pad) var(--pad) var(--gap-small); margin: 0; }
 .card:not(.pad) > .section-head.pad + p.muted.pad { padding-top: 0; margin-top: calc(var(--gap-tight) - var(--gap-small)); padding-bottom: var(--gap-small); }
 .card.module-card { gap: var(--gap-small); }
-.card:not(.pad) { gap: 0; }
+:where(.card:not(.pad)) { gap: 0; }
 /* the sign-in and setup forms are a card of their own padding: blocks --gap apart, a field's label --gap-tight over it */
 .card.auth { gap: var(--gap); }
 .card.auth > .error:empty { display: none; }
@@ -2342,7 +2345,10 @@ dialog.framed footer .btn:disabled { opacity: 1; background: var(--surface-2); c
   .dlg-body { padding: 0 16px 16px; }
   dialog.framed footer { flex-direction: column; align-items: stretch; padding: 12px 16px calc(12px + env(safe-area-inset-bottom)); }
   dialog.framed footer > * { width: 100%; justify-content: center; min-height: 44px; margin: 0; }
-  dialog.framed footer > .primary { order: -2; }
+  /* the main action first: the accent one, or the red one that IS the action of a confirmation */
+  dialog.framed footer > :is(.primary, .danger:last-child:not(.danger-text)) { order: -2; }
+  /* a spacer of the wide foot is nothing in a column */
+  dialog.framed footer > .grow:empty { display: none; }
   dialog.framed footer > :is(.danger-text, .to-left) { order: 9; margin: 0; }
 }
 /* a window that draws its steps inside one block keeps its foot there: it still stays in sight */
@@ -2716,3 +2722,16 @@ button.tv-stage-chip:hover { background: rgb(0 0 0 / 0.8); }
 .crumbs.house-crumbs { margin: 0; font-size: 15px; min-height: 36px; }
 /* a bar of filters is a card without padding of its own: it keeps its gap */
 .card.filter-bar { gap: 10px 16px; }
+.grow > strong.clip { display: block; }
+/* a place kept for something that may come (an error, a list being asked) takes no room while empty */
+.stack > div:empty { display: none; }
+/* a browser of a 12-hour locale adds AM / PM to a time field: it must fit */
+input[type="time"].short { width: auto; min-width: 136px; }
+dialog:focus { outline: none; }
+.cmd > .icon-btn { flex: none; }
+/* every card of the store the same height: a long name is cut, not a second line */
+.store-card-head .tile-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.store-more { display: flex; justify-content: center; margin-top: 16px; }
+/* a card's heading stands at the same height whether buttons sit beside it (28 px) or not */
+.section-head { min-height: 28px; }
+.card-head > h2 { min-height: 28px; display: flex; align-items: center; }

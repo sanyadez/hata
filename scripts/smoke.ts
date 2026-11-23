@@ -123,6 +123,9 @@ let trouble: string[] = [];
 const requests = new Map<string, string>();
 /** Requests sent and not answered yet */
 const underWay = new Set<string>();
+/** Requests a member's page made that the server refused them: the page asked for what is not theirs */
+let forbidden: string[] = [];
+let watchForbidden = false;
 const missing: { id: string; line: string }[] = [];
 /** Requests the server answered with 5xx; what it said is asked for when the page has settled */
 let failed: { id: string; line: string }[] = [];
@@ -299,9 +302,6 @@ const KEYS = `(() => {
   return [...out].slice(0, 5);
 })()`;
 
-/** Requests a member's page made that the server refused them: the page asked for what is not theirs */
-let forbidden: string[] = [];
-let watchForbidden = false;
 
 const failures: string[] = [];
 async function walk(label: string, phone: boolean): Promise<void> {

@@ -530,7 +530,7 @@ async function addMachineDialog() {
     h("header", null, h("h2", { class: "grow" }, t("machines.addTitle")), closeX(() => dialog)),
     h("p", null, t("machines.addLead")),
     pick,
-    h("p", { class: "cmd" }, cmd, h("button", { type: "button", class: "icon-btn", title: t("twofa.copy"), "aria-label": t("twofa.copy"), onclick: () => copyText(line()) }, icon("copy"))),
+    h("p", { class: "cmd whole" }, cmd, h("button", { type: "button", class: "icon-btn", title: t("twofa.copy"), "aria-label": t("twofa.copy"), onclick: () => copyText(line()) }, icon("copy"))),
     h("p", { class: "muted small" }, t("machines.addHint", { minutes: Math.round(invite.valid / 60000) })),
     h("p", { class: "muted small" }, t("machines.addNeeds")),
     h("label", { class: "check" }, people, h("span", null, h("strong", null, t("machines.people.tick")), h("span", { class: "muted small block" }, t("machines.people.tickHint")))),

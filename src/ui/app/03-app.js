@@ -384,7 +384,7 @@ function renderAppHead() {
   const url = isUp(app) ? appUrl(app) : null;
   const tab = (id, iconName) => h("a", { class: "tab" + (state.route.tab === id ? " active" : ""), href: `#/apps/${app.name}${id === "overview" ? "" : "/" + id}` }, icon(iconName), t("app.tab." + id));
   put(head,
-    h("nav", { class: "crumbs" }, h("a", { href: "#/" }, t("home.apps")), icon("chevron"), h("span", null, app.title)),
+    h("nav", { class: "crumbs" }, h("a", { href: "#/apps" }, t("home.apps")), icon("chevron"), h("span", null, app.title)),
     h(
       "div",
       { class: "app-head", menu: isAdmin() && ((at) => appTileMenu(app, null, at)) },
@@ -407,7 +407,7 @@ function renderAppHead() {
         isUp(app) && button(t("app.restart"), { disabled: !!app.job, onclick: () => startAction(app, "restart") }, "refresh"),
         isUp(app) ? button(t("app.stop"), { disabled: !!app.job, onclick: () => startAction(app, "stop") }, "stop") : button(t("app.start"), { class: url ? "" : "primary", disabled: !!app.job, onclick: () => startAction(app, "start") }, "play"),
         url && h("a", { class: "btn primary", href: url, target: "_blank", rel: "noopener noreferrer" }, icon("external"), h("span", null, t("app.open"))),
-        h("button", { type: "button", class: "btn square", "aria-label": t("app.more"), onclick: () => appMoreMenu(app) }, icon("more")),
+        h("button", { type: "button", class: "btn square", "aria-label": t("app.more"), "aria-haspopup": "menu", onclick: (e) => appMoreMenu(app, underButton(e.currentTarget)) }, icon("more")),
         ]),
       ),
     ),
@@ -537,7 +537,7 @@ function appOverviewTab(app, box) {
     return h("tr", { menu }, h("td", null, h("div", { class: "mono" }, c.name), h("div", { class: "muted small mono clip" }, c.image), app.newer?.includes(c.image) && h("div", { class: "small accent-text" }, t("app.newerImage"))), h("td", null, h("span", { class: "state " + (c.state === "running" ? "running" : c.state === "restarting" ? "restarting" : "stopped") }, c.status)), h("td", { class: "num" }, s ? s.cpu.toFixed(1) + " %" : "—"), h("td", { class: "num" }, s ? bytes(s.memory) : "—"), h("td", { class: "mono small" }, c.ports.join(", ") || "—"));
   };
 
-  box.replaceChildren(
+  put(box,
     appServiceCard(app),
     h(
       "div",

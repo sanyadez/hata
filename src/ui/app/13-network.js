@@ -1430,6 +1430,7 @@ async function loadSysUpdates(at = "") {
     sysUpdates[at] = { error: errorText(e) };
   }
   paintSysUpdates(at);
+  if (state.route.area === "server" || state.route.view === "server") paintServerTabCounts();
 }
 
 function paintSysUpdates(at) {

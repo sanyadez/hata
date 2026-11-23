@@ -157,7 +157,7 @@ async function forwardDialog(existing, preset, after) {
     }
   };
   const remove = existing && button(t("names.remove"), {
-    class: "danger",
+    class: "danger-text",
     onclick: async () => {
       try {
         await api("DELETE", `/api/ports/${existing.port}`);
@@ -183,7 +183,7 @@ async function forwardDialog(existing, preset, after) {
       h("div", { class: "stack-tight" }, h("div", { class: "form-pair port-pair" }, field(t("ports.to"), to), field(t("ports.note"), note)), h("span", { class: "hint" }, t("ports.toHint"))),
       outsideRow,
       error,
-      h("footer", null, remove, h("span", { class: "grow" }), closeButton(() => dialog, t("common.cancel")), h("button", { class: "btn primary" }, t(existing ? "settings.save" : "ports.addGo"))),
+      h("footer", null, remove, closeButton(() => dialog, t("common.cancel")), h("button", { class: "btn primary" }, t(existing ? "settings.save" : "ports.addGo"))),
     ),
   );
   port.focus();
@@ -256,7 +256,7 @@ async function domainNameDialog(existing, preset, after) {
     }
   };
   const remove = existing && button(t("names.remove"), {
-    class: "danger",
+    class: "danger-text",
     onclick: async () => {
       try {
         await api("DELETE", `/api/domains/${existing.label}`);
@@ -282,7 +282,7 @@ async function domainNameDialog(existing, preset, after) {
       httpsRow,
       protectRow,
       error,
-      h("footer", null, remove, h("span", { class: "grow" }), closeButton(() => dialog, t("common.cancel")), h("button", { class: "btn primary" }, t(existing ? "settings.save" : "names.addGo"))),
+      h("footer", null, remove, closeButton(() => dialog, t("common.cancel")), h("button", { class: "btn primary" }, t(existing ? "settings.save" : "names.addGo"))),
     ),
   );
   label.focus();
