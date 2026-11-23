@@ -848,13 +848,21 @@ function fitBlock(block) {
   if (!list) return;
   let left = 0;
   const more = block.querySelector(".fits-more");
-  while (list.children.length > 1 && block.scrollHeight > block.clientHeight + 1) {
+  // the list itself may be cut by its card (it gives way to the link under it), so both are measured
+  const over = () => block.scrollHeight > block.clientHeight + 1 || list.scrollHeight > list.clientHeight + 1;
+  while (list.children.length > 1 && over()) {
     list.lastElementChild.remove();
     left++;
     if (more) {
       more.hidden = false;
       more.querySelector("span").textContent = t("attention.moreItems", { n: left });
     }
+  }
+  // the one item left is still higher than the card: its words are cut short, then left out, so the link
+  // under the list never stands over it
+  for (const step of ["squeezed", "bare"]) {
+    if (!over()) break;
+    list.classList.add(step);
   }
 }
 

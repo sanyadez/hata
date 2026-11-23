@@ -1650,6 +1650,9 @@ img.broken { visibility: hidden; }
 /* lists: what fits, and the way to the rest at the foot */
 .pg-card > :is(.attention-block, .activity-block) { display: flex; flex-direction: column; }
 .pg-card > .attention-block .attention-list, .pg-card > .activity-block .timeline { min-height: 0; }
+.pg-card > .attention-block .attention-list { overflow: hidden; flex: 0 1 auto; }
+.attention-list.squeezed .attention-item p { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.attention-list.bare .attention-item p { display: none; }
 .block-foot { display: flex; flex-wrap: wrap; gap: 0 14px; margin-top: auto; }
 .block-foot .more-items { margin-top: 8px; }
 .block-foot:empty { display: none; }
