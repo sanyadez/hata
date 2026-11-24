@@ -541,7 +541,7 @@ const uiStat = ({ icon: iconName = null, label, value, unit = null, tone = null,
   h(href ? "a" : "div", { class: "ui-stat", href }, h("span", { class: "ui-stat-label" }, iconName && icon(iconName), label), h("span", { class: "ui-stat-value" }, h("strong", { class: tone }, value), unit && h("span", null, unit)), h("span", { class: "ui-stat-chart" }, meter), h("span", { class: "ui-stat-hint" }, hint ?? ""));
 
 /**
- * A table: `columns` [{ label, num, sort }], `rows` [{ cells, sub, menu, onclick, href, group }]. The first cell is
+ * A table: `columns` [{ label, num, sort }], `rows` [{ cells, sub, menu, onclick, href, group, whole, cls }] — `whole` is one cell across. The first cell is
  * the name. On a phone (its own width under 640) each row becomes a row of the list: the name and its `sub`.
  */
 function uiTable(columns, rows, { cls = "", height = 56 } = {}) {
@@ -552,9 +552,11 @@ function uiTable(columns, rows, { cls = "", height = 56 } = {}) {
     rows.map((r) =>
       r.group != null
         ? h("tr", { class: "ui-tr-group" }, h("td", { colspan: columns.length }, r.group))
+        : r.whole != null
+          ? h("tr", { class: "ui-tr-whole" + (r.cls ? " " + r.cls : "") }, h("td", { colspan: columns.length }, r.whole))
         : h(
             "tr",
-            { class: r.onclick || r.href ? "goes" : null, onclick: r.onclick ?? (r.href ? () => (location.hash = r.href.replace(/^#/, "")) : null), menu: r.menu },
+            { class: [r.onclick || r.href ? "goes" : "", r.cls ?? ""].join(" ").trim() || null, onclick: r.onclick ?? (r.href ? () => (location.hash = r.href.replace(/^#/, "")) : null), menu: r.menu },
             r.cells.map((cell, i) => h("td", { class: columns[i]?.num ? "num" : null }, i === 0 && r.sub ? [cell, h("div", { class: "ui-td-sub" }, r.sub)] : cell)),
           ),
     ),
