@@ -1392,6 +1392,7 @@ i.dot.danger { background: var(--danger); }
 .pve-guest-page .section-head { margin-top: 10px; }
 @media (max-width: 900px) {
   .ha-page { grid-template-columns: minmax(0, 1fr); }
+  .ha-page > :last-child { order: -1; }
 }
 @media (max-width: 760px) {
 }
@@ -2992,3 +2993,16 @@ button.tv-stage-chip:active { background: rgb(0 0 0 / 0.9); }
 .ui-notice-text > strong + div { margin-top: 2px; }
 .card.pad > .ui-row { padding-inline: 0; }
 @container ui-table (min-width: 641px) { .shares-table td:first-child { width: 30%; } }
+/* a setting in a narrow card (a side column, a phone) puts its field under its words, across */
+.ui-setting { container: ui-setting / inline-size; flex-wrap: wrap; row-gap: 8px; }
+@container ui-setting (max-width: 520px) {
+  .ui-setting-text:has(+ .ui-setting-control > :is(input:not([type="checkbox"]), select, .select-btn, textarea)) { width: 100%; flex: none; }
+  .ui-setting-control:has(> :is(input:not([type="checkbox"]), select, .select-btn, textarea)) { width: 100%; flex: none; }
+  .ui-setting-control > :is(input:not([type="checkbox"]), select, .select-btn, textarea) { width: 100%; flex: 1 1 auto; }
+}
+.ui-group > .ui-empty.small { padding-inline: var(--pad); }
+.ui-lead.tone.accent { background: var(--accent-soft); color: var(--accent-text); }
+/* a wide setting (a key, a command) keeps to the card: its control takes the width, the command wraps inside */
+.ui-setting { min-width: 0; }
+.ui-setting.wide > .ui-setting-control { flex: 1 1 auto; width: 100%; min-width: 0; }
+.ui-setting.wide > .ui-setting-control > .ui-command { flex: 1 1 auto; min-width: 0; }

@@ -6,7 +6,7 @@
 
 /** A house has hundreds of things: a room shows this many until asked */
 const HA_ROOM_ROWS = 8;
-const haUi = { opened: new Set(), list: null, server: null, entities: null, search: "", extra: false, timer: null, users: null };
+const haUi = { opened: new Set(), folded: new Set(), list: null, server: null, entities: null, search: "", extra: false, timer: null, users: null };
 
 const HA_ICONS = { light: "bulb", switch: "power", input_boolean: "power", fan: "fan", cover: "blinds", valve: "droplet", lock: "lock", climate: "temp", water_heater: "temp", media_player: "speaker", vacuum: "home", scene: "play", script: "play", button: "play", input_button: "play", automation: "refresh", siren: "bell", humidifier: "droplet", camera: "image", weather: "sun", sun: "sun", person: "user", device_tracker: "user", update: "up", alarm_control_panel: "lock", remote: "network" };
 const HA_KIND_ICONS = { temperature: "temp", humidity: "droplet", moisture: "droplet", battery: "battery", power: "bolt", energy: "bolt", voltage: "bolt", current: "bolt", door: "door", window: "door", opening: "door", garage_door: "door", garage: "door", motion: "user", occupancy: "user", presence: "user", illuminance: "sun", light: "sun", smoke: "alert", gas: "alert", problem: "alert", safety: "alert", connectivity: "network", plug: "power", outlet: "power", timestamp: "clock" };
@@ -335,14 +335,12 @@ async function loadHa() {
   } catch (e) {
     if (state.route.view !== "ha") return toast(errorText(e), "error");
     const box = document.getElementById("ha-body");
-    if (box) put(box, haCrumbs(state.route.id), h("p", { class: "card pad muted" }, errorText(e)));
+    if (box) put(box, uiCard({}, uiEmpty({ size: "error", title: errorText(e), action: button(t("attention.retry"), { onclick: () => void loadHa() }, "refresh") })));
   }
 }
 
 const haChip = (x) => h("span", { class: "state " + (x.online ? "running" : "") }, x.online ? t("ha.online") : x.error ? t("ha.offline") : t("ha.asking"));
 const haError = (x) => (x.error ? (has("error." + x.error.code) ? t("error." + x.error.code, { name: x.name, message: x.error.message ?? "" }) : x.error.code) : "");
-// the house's head and tabs say where this is
-const haCrumbs = () => null;
 
 /** The kinds of things the house holds: where their list is asked, where the page draws, how one is connected */
 const HOUSE = {
@@ -352,8 +350,23 @@ const HOUSE = {
 const houseAdd = () => (isAdmin() && hasModule("integrations") ? storeButton("@") : button(t("house.connect"), { onclick: (e) => integrationsAddMenu(e.currentTarget) }, "plus"));
 
 /** A tab of the house: the head, a switch between the servers when there are several, and the page of the one chosen */
+/**
+ * The head of a page of Integrations: the one head of the thing — its crumb back to Integrations, its icon, name and
+ * state, its line, its actions; with several servers of a kind, they are its tabs
+ */
+/** The servers of the kind the page is about, for the tabs of its head */
+const houseServers = { now: null };
+function houseHead({ title, ...opts }) {
+  const sv = houseServers.now;
+  const tabs = sv && state.route.view === sv.view && sv.list.length > 1 && h("nav", { class: "tabs" }, sv.list.map((x) => h("a", { class: "tab" + (x.id === state.route.id ? " active" : ""), href: `${sv.base}/${x.id}` }, x.name)));
+  const head = pageHead({ cls: "area-head", crumbs: [{ label: t("area.house"), href: "#/house" }, { label: title }], title, tabs: tabs || null, ...opts });
+  const old = document.querySelector("#view .area-head");
+  if (old) old.replaceWith(head);
+  return head;
+}
+
 function houseShell(view) {
-  shell(areaHead("house", HOUSE[view].tab, { actions: houseAdd() }), h("div", { id: "house-pick", class: "card filter-bar", hidden: true }), h("div", { id: HOUSE[view].body, class: "stack" }));
+  shell(areaHead("house", HOUSE[view].tab, { actions: houseAdd() }), h("div", { id: HOUSE[view].body, class: "stack" }));
   void houseOpen(view);
 }
 
@@ -369,9 +382,7 @@ async function houseOpen(view) {
   if (state.route.view !== view || !box?.isConnected) return;
   if (!servers.length) return houseEmpty(view, box);
   if (!servers.some((x) => x.id === state.route.id)) state.route.id = servers[0].id;
-  const pick = document.getElementById("house-pick");
-  pick.hidden = servers.length < 2;
-  put(pick, h("div", { class: "seg-pills" }, servers.map((x) => h("a", { class: "seg-pill" + (x.id === state.route.id ? " active" : ""), href: `#/house/${k.tab}/${x.id}` }, x.name))));
+  houseServers.now = { view, list: servers, base: `#/house/${k.tab}` };
   k.load();
 }
 
@@ -564,20 +575,18 @@ function renderHaBody() {
   const box = document.getElementById("ha-body");
   const x = haUi.server;
   if (!box || !x) return;
+  houseHead({
+    icon: "bulb",
+    title: x.name,
+    state: haChip(x),
+    facts: ["Home Assistant", x.version, x.url].filter(Boolean),
+    actions: [{ label: t("ha.open"), icon: "external", href: haWebUrl(x), newTab: true }],
+    more: [{ label: t("ha.change"), icon: "edit", run: () => haDialog(x) }, { label: t("ha.remove") + "…", icon: "trash", danger: true, run: () => removeHaDialog(x) }],
+    menu: (at) => haMenu(x, at),
+  });
   put(
     box,
-    haCrumbs(x.name),
-    h(
-      "section",
-      { class: "card" },
-      h(
-        "div",
-        { class: "tree-head" },
-        h("div", null, h("h1", null, x.name, " ", haChip(x)), h("p", { class: "meta" }, ["Home Assistant", x.version, x.url].filter(Boolean).join(" · "))),
-        h("div", { class: "row-actions" }, h("a", { class: "btn", href: haWebUrl(x), target: "_blank", rel: "noopener noreferrer" }, icon("external"), h("span", null, t("ha.open"))), h("button", { type: "button", class: "btn square", "aria-label": t("app.more"), onclick: (e) => haMenu(x, underButton(e.currentTarget)) }, icon("more"))),
-      ),
-    ),
-    x.error && h("p", { class: "card pad warn-box" }, haError(x), " ", t("pve.since", { ago: ago(x.error.since) })),
+    x.error && uiCard({}, uiNotice({ tone: "bad", text: [haError(x), t("pve.since", { ago: ago(x.error.since) })].join(" ") })),
     h("div", { class: "ha-page" }, h("div", { class: "stack" }, haDevices(x)), haOverview(x)),
   );
 }
@@ -676,10 +685,11 @@ const svcNumbers = (spec, values) =>
     .map((n) => `${svcText(n.label)}: ${svcFormat(values[n.value], n.as) || "—"}`)
     .join(" · ");
 
+/** The crumbs of a service that is an app of this server: Apps › the app › the service */
 function svcCrumbs(x) {
   const app = serviceApp(x.id);
   const title = app && (state.overview?.apps ?? []).find((a) => a.name === app)?.title;
-  return app && !state.route.house ? h("nav", { class: "crumbs card on-card" }, h("a", { href: "#/apps" }, t("nav.apps")), icon("chevron"), h("a", { href: `#/apps/${app}` }, title ?? app), icon("chevron"), h("span", null, x.title)) : null;
+  return app ? [{ label: t("nav.apps"), href: "#/apps" }, { label: title ?? app, href: `#/apps/${app}` }, { label: x.title }] : null;
 }
 
 function renderService() {
@@ -694,14 +704,12 @@ function renderService() {
   if (!state.overview?.integrations) return void refresh().then(() => state.route.view === "service" && state.overview?.integrations && renderService());
   const conn = svcConnections().find((c) => c.id === route.id);
   const kind = route.kind || conn?.kind || "";
-  shell(areaHead("house", `x-${kind}`, { actions: houseAdd() }), h("div", { id: "house-pick", class: "card filter-bar", hidden: true }), h("div", { id: "svc-body", class: "stack" }));
+  shell(areaHead("house", `x-${kind}`, { actions: houseAdd() }), h("div", { id: "svc-body", class: "stack" }));
   // in Integrations every connection of the kind is here, also one that is an app of this server
   const list = svcConnections().filter((c) => c.kind === kind);
   if (!list.length) return put(document.getElementById("svc-body"), h("section", { class: "card pad empty-state" }, h("h2", null, t("service.none")), h("a", { class: "btn", href: "#/house" }, t("house.back"))));
   if (!list.some((c) => c.id === route.id)) state.route.id = list[0].id;
-  const pick = document.getElementById("house-pick");
-  pick.hidden = list.length < 2;
-  put(pick, h("div", { class: "seg-pills" }, list.map((c) => h("a", { class: "seg-pill" + (c.id === state.route.id ? " active" : ""), href: `#/house/x-${kind}/${c.id}` }, c.name))));
+  houseServers.now = { view: "service", list, base: `#/house/x-${kind}` };
   void loadService();
 }
 
@@ -734,23 +742,30 @@ async function loadService() {
   svcUi.timer = setTimeout(loadService, 5000);
 }
 
+/** The head of a service's page: in Integrations it is the head of the page, on an app's page a card of its own */
 function svcHead(x, spec) {
   const kinds = svcKinds().find((k) => k.id === x.kind);
   // what is done to the whole is offered when its condition of the values holds
   const general = Object.entries(spec.actions).filter(([, a]) => !a.on && svcTest(a.when, x.values));
-  return h(
-    "div",
-    { class: "tree-head" },
-    h("div", null, h("h1", null, x.name, " ", svcChip(x)), h("p", { class: "meta" }, [x.title, x.values.version, x.url].filter(Boolean).join(" · ")), x.online && h("p", { class: "meta" }, svcNumbers(spec, x.values))),
-    h(
-      "div",
-      { class: "row-actions" },
-      h("a", { class: "btn", href: x.url, target: "_blank", rel: "noopener noreferrer" }, icon("external"), h("span", null, t("service.open", { kind: x.title }))),
-      general.map(([name, a], i) => button(svcText(a.label), { class: i === 0 ? "primary" : "", disabled: !x.online, onclick: () => svcActionDialog(x, spec, name, []) }, a.icon)),
-      h("button", { type: "button", class: "btn square", "aria-label": t("app.more"), onclick: (e) => svcMenu(x, underButton(e.currentTarget)) }, icon("more")),
-    ),
-    kinds?.newer && h("p", { class: "card pad warn-box" }, t("service.newer", { kind: x.title, version: kinds.newer }), " ", button(t("service.takeNewer"), { class: "small", onclick: () => svcTakeNewer(x.kind) })),
-  );
+  const opts = {
+    logo: null,
+    icon: x.icon || "plug",
+    title: x.name,
+    state: svcChip(x),
+    facts: [x.title, x.values.version, x.url, x.online && svcNumbers(spec, x.values)].filter(Boolean),
+    actions: [
+      general[0] ? { label: svcText(general[0][1].label), icon: general[0][1].icon, primary: true, run: () => x.online && svcActionDialog(x, spec, general[0][0], []) } : { label: t("service.open", { kind: x.title }), icon: "external", href: x.url, newTab: true },
+    ],
+    more: () => [
+      general[0] && { label: t("service.open", { kind: x.title }), icon: "external", run: () => window.open(x.url, "_blank", "noopener") },
+      ...general.slice(1).map(([name, a]) => ({ label: svcText(a.label), icon: a.icon, off: !x.online, run: () => svcActionDialog(x, spec, name, []) })),
+      { label: t("service.change"), icon: "edit", run: () => svcConnectDialog(x.kind, x) },
+      { label: t("service.disconnect") + "…", icon: "trash", danger: true, run: () => svcDisconnectDialog(x) },
+    ].filter(Boolean),
+    menu: (at) => svcMenu(x, at),
+  };
+  const newer = kinds?.newer && uiCard({}, uiNotice({ tone: "info", icon: "up", text: t("service.newer", { kind: x.title, version: kinds.newer }), action: button(t("service.takeNewer"), { class: "small", onclick: () => svcTakeNewer(x.kind) }, "up") }));
+  return { opts, newer };
 }
 
 async function svcTakeNewer(kind) {
@@ -770,20 +785,23 @@ function paintService(whole = true) {
   const x = svcUi.conn;
   const spec = svcUi.spec;
   if (!box || !x || !spec) return;
-  const head = svcHead(x, spec);
-  const errorBox = x.error && h("p", { class: "card pad warn-box" }, svcError(x), " ", t("pve.since", { ago: ago(x.error.since) }));
+  const { opts, newer } = svcHead(x, spec);
+  const errorBox = [x.error && uiCard({}, uiNotice({ tone: "bad", text: [svcError(x), t("pve.since", { ago: ago(x.error.since) })].join(" ") })), newer].filter(Boolean);
+  // in Integrations the service's head is the page's; on an app's page it is a card under the app's crumbs
+  const inHouse = state.route.house || !serviceApp(x.id);
+  const own = () => (inHouse ? (houseHead(opts), null) : pageHead({ ...opts, id: "svc-head", crumbs: svcCrumbs(x) }));
   // the field keeps its focus and the page its place: what changed is drawn again, the rest stays
-  if (!whole && document.getElementById("svc-head")) {
-    put(document.getElementById("svc-head"), head);
-    put(document.getElementById("svc-error"), errorBox);
+  if (!whole && document.getElementById("svc-error")) {
+    const head = own();
+    if (head) document.getElementById("svc-head")?.replaceWith(head);
+    put(document.getElementById("svc-error"), ...errorBox);
     spec.page.forEach((b, i) => svcBlockBody(b, i, x, spec));
     return;
   }
   put(
     box,
-    svcCrumbs(x),
-    h("section", { class: "card", id: "svc-head" }, head),
-    h("div", { id: "svc-error" }, errorBox),
+    own(),
+    h("div", { id: "svc-error", class: "stack" }, ...errorBox),
     spec.page.map((b, i) => svcBlock(b, i, x, spec)),
   );
   spec.page.forEach((b, i) => svcBlockBody(b, i, x, spec));
@@ -1089,53 +1107,53 @@ function picture(src, alt, cls) {
 }
 
 function haOverview(x) {
-  const update = (u) => {
+  const install = (u) => {
     const backup = u.backup && h("input", { type: "checkbox", checked: true });
-    return h(
-      "div",
-      { class: "tool" },
-      h("span", { class: "app-icon plus sm" }, icon("up")),
-      h("div", { class: "grow" }, h("strong", null, u.title && !u.name.includes(u.title) ? `${u.name} · ${u.title}` : u.name), h("p", { class: "muted small" }, `${u.installed || "—"} → ${u.latest}`, u.summary && " · " + u.summary), u.url && h("a", { class: "small", href: u.url, target: "_blank", rel: "noopener noreferrer" }, t("ha.notes"))),
-      u.running
-        ? h("span", { class: "state restarting" }, u.percent != null ? t("ha.installingPct", { n: Math.round(u.percent) }) : t("ha.installing"))
-        : u.install
-          ? h("div", { class: "row-actions" }, backup && h("label", { class: "check small" }, backup, h("span", null, t("ha.withBackup"))), button(t("ha.install"), { class: "small primary", disabled: !x.online, onclick: async (e) => {
-                const b = e.currentTarget;
-                b.disabled = true;
-                try {
-                  await api("POST", `/api/ha/${x.id}/updates`, { entity: u.entity, backup: backup ? backup.checked : false });
-                  toast(t("ha.installStarted", { name: u.title || u.name }));
-                  void loadHa();
-                } catch (err) {
-                  toast(errorText(err), "error");
-                  b.disabled = false;
-                }
-              } }, "download"))
-          : h("span", { class: "muted small" }, t("ha.notInstallable")),
-    );
+    confirmAction({
+      title: t("ha.installTitle", { name: u.title || u.name }),
+      lead: `${u.installed || "—"} → ${u.latest}`,
+      extra: backup && h("label", { class: "check" }, backup, h("span", null, t("ha.withBackup"))),
+      label: t("ha.install"),
+      kind: "primary",
+      iconName: "download",
+      run: async () => {
+        await api("POST", `/api/ha/${x.id}/updates`, { entity: u.entity, backup: backup ? backup.checked : false });
+        toast(t("ha.installStarted", { name: u.title || u.name }));
+        void loadHa();
+      },
+    });
   };
+  const update = (u) =>
+    uiRow({
+      lead: { icon: "up" },
+      name: u.title && !u.name.includes(u.title) ? `${u.name} · ${u.title}` : u.name,
+      sub: [`${u.installed || "—"} → ${u.latest}`, u.summary].filter(Boolean).join(" · "),
+      state: u.running ? uiState("info", u.percent != null ? t("ha.installingPct", { n: Math.round(u.percent) }) : t("ha.installing")) : null,
+      value: !u.running && !u.install ? t("ha.notInstallable") : null,
+      action: !u.running && u.install && button(t("ha.install") + "…", { class: "small primary", disabled: !x.online, onclick: () => install(u) }, "download"),
+      more: u.url ? [{ label: t("ha.notes"), icon: "external", href: u.url, newTab: true }] : null,
+    });
+  const busy = x.backupState && x.backupState !== "idle";
+  const backupNow = x.canBackup && button(t("ha.backupNow"), { class: "small", disabled: !x.online || busy, onclick: async (e) => {
+      const b = e.currentTarget;
+      b.disabled = true;
+      try {
+        await api("POST", `/api/ha/${x.id}/backups`, {});
+        toast(t("ha.backupStarted"));
+      } catch (err) {
+        toast(errorText(err), "error");
+        b.disabled = false;
+      }
+    } }, "archive");
   return h(
     "div",
     { class: "stack" },
     x.proxy === "missing" && haProxyCard(x),
-    h("div", { class: "card pad stack-s" }, h("div", { class: "section-head" }, h("h2", null, t("ha.updates"))), x.updates.length ? x.updates.map(update) : h("p", { class: "muted small" }, x.online ? t("ha.noUpdates") : "—")),
-    x.low.length > 0 && h("div", { class: "card pad stack-s" }, h("div", { class: "section-head" }, h("h2", null, t("ha.batteries"))), x.low.map((b) => h("div", { class: "tool" }, h("span", { class: "app-icon plus sm" }, icon("battery")), h("div", { class: "grow" }, h("strong", null, b.name)), h("span", { class: "state restarting" }, b.level == null ? t("ha.batteryLowWord") : `${b.level}%`)))),
-    h(
-      "div",
-      { class: "card pad stack-s" },
-      h("div", { class: "section-head" }, h("h2", null, t("ha.backups")), x.canBackup && button(t("ha.backupNow"), { class: "small", disabled: !x.online || (x.backupState && x.backupState !== "idle"), onclick: async (e) => {
-          const b = e.currentTarget;
-          b.disabled = true;
-          try {
-            await api("POST", `/api/ha/${x.id}/backups`, {});
-            toast(t("ha.backupStarted"));
-          } catch (err) {
-            toast(errorText(err), "error");
-            b.disabled = false;
-          }
-        } }, "archive")),
-      x.backupState && x.backupState !== "idle" && h("p", { class: "small accent-text" }, t("ha.backupRunning")),
-      x.backups.length ? h("div", { class: "table-wrap" }, h("table", null, h("thead", null, h("tr", null, h("th", null, t("ha.backup.name")), h("th", null, t("ha.backup.when")), h("th", null, t("ha.backup.size")))), h("tbody", null, x.backups.map((b) => h("tr", null, h("td", null, b.name, b.automatic && h("span", { class: "muted small" }, " · " + t("ha.backup.auto"))), h("td", null, new Date(b.date).toLocaleString(state.lang)), h("td", null, b.size ? bytes(b.size) : "—")))))) : h("p", { class: "muted small" }, x.online ? t("ha.noBackups") : "—"),
+    uiCard({ title: t("ha.updates"), count: x.updates.length || null, flush: true }, x.updates.length ? x.updates.map(update) : uiEmpty({ icon: x.online ? "check" : null, tone: x.online ? "ok" : null, text: x.online ? t("ha.noUpdates") : "—" })),
+    x.low.length > 0 && uiCard({ title: t("ha.batteries"), flush: true }, x.low.map((b) => uiRow({ lead: { icon: "battery", tone: "warn" }, name: b.name, state: uiState("warn", b.level == null ? t("ha.batteryLowWord") : `${b.level}%`) }))),
+    uiCard(
+      { title: t("ha.backups"), marks: busy && uiState("info", t("ha.backupRunning")), flush: true, actions: backupNow },
+      x.backups.length ? x.backups.map((b) => uiRow({ mode: "event", lead: { icon: "archive" }, name: b.name, sub: [b.size ? bytes(b.size) : null, b.automatic ? t("ha.backup.auto") : null].filter(Boolean).join(" · ") || null, time: new Date(b.date).toLocaleString(state.lang, { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) })) : uiEmpty({ text: x.online ? t("ha.noBackups") : "—" }),
     ),
     haPeopleCard(x),
   );
@@ -1144,12 +1162,7 @@ function haOverview(x) {
 /** Home Assistant on this server does not take Hata as its proxy: opened by Hata's address it answers 400 */
 function haProxyCard(x) {
   const app = (state.overview?.apps ?? []).find((a) => Number(a.port) === x.port && appUrl(a));
-  return h(
-    "div",
-    { class: "card pad stack-s warn-box" },
-    h("strong", null, t("ha.proxy.title")),
-    h("p", { class: "small" }, t("ha.proxy.lead", { address: app ? appAddress(app) : location.host })),
-    h("div", { class: "row-actions" }, button(t("ha.proxy.allow"), { class: "small primary", disabled: !x.online, onclick: async (e) => {
+  return uiCard({}, uiNotice({ tone: "warn", title: t("ha.proxy.title"), text: t("ha.proxy.lead", { address: app ? appAddress(app) : location.host }), action: button(t("ha.proxy.allow"), { class: "small primary", disabled: !x.online, onclick: async (e) => {
         const b = e.currentTarget;
         b.disabled = true;
         try {
@@ -1159,13 +1172,12 @@ function haProxyCard(x) {
           toast(errorText(err), "error");
           b.disabled = false;
         }
-      } }, "check")),
-  );
+      } }, "check") }));
 }
 
 /** Who sees the server's tiles on Home: administrators always; everybody, or the users chosen */
 function haPeopleCard(x) {
-  const card = h("div", { class: "card pad stack-s" }, h("div", { class: "section-head" }, h("h2", null, t("ha.people.title"))), h("p", { class: "muted small" }, t("ha.people.lead")), accessLink());
+  const card = uiCard({ title: t("ha.people.title"), lead: t("ha.people.lead"), actions: h("a", { class: "ui-link", href: "#/settings/users/access" }, t("access.givenShort"), icon("chevron")) });
   const paint = (users) => {
     const others = users.filter((u) => u.role !== "admin");
     let mode = x.people === "all" ? "all" : x.people.length ? "some" : "none";
@@ -1180,33 +1192,31 @@ function haPeopleCard(x) {
         toast(errorText(e), "error");
       }
     };
-    const list = h("div", { class: "stack-s ha-people", hidden: mode !== "some" }, others.map((u) => h("label", { class: "check" }, h("input", { type: "checkbox", checked: picked.has(u.id), onchange: (e) => (e.target.checked ? picked.add(u.id) : picked.delete(u.id), save()) }), h("span", null, u.name, h("span", { class: "muted small" }, " · " + t("user.role." + u.role))))));
-    const radio = (value) => h("label", { class: "check" }, h("input", { type: "radio", name: "ha-people", value, checked: mode === value, onchange: () => ((mode = value), (list.hidden = value !== "some"), save()) }), h("span", null, t("ha.people." + value)));
-    card.append(others.length ? h("div", { class: "stack-s" }, radio("none"), radio("all"), radio("some"), list) : h("p", { class: "muted small" }, t("ha.people.nobody")));
+    const list = h("div", { class: "ha-people", hidden: mode !== "some" }, others.map((u) => uiRow({ lead: { check: h("input", { type: "checkbox", checked: picked.has(u.id), "aria-label": u.name, onchange: (e) => (e.target.checked ? picked.add(u.id) : picked.delete(u.id), save()) }) }, name: u.name, sub: t("user.role." + u.role) })));
+    const who = h("select", { "aria-label": t("ha.people.title"), onchange: (e) => ((mode = e.target.value), (list.hidden = mode !== "some"), save()) }, ["none", "all", "some"].map((v) => h("option", { value: v, selected: mode === v }, t("ha.people." + v))));
+    card.append(...(others.length ? [uiSetting({ name: t("ha.people.who"), control: who }), list] : [uiEmpty({ text: t("ha.people.nobody") })]));
   };
   if (haUi.users) paint(haUi.users);
-  else api("GET", "/api/users").then((users) => paint((haUi.users = users)), (e) => card.append(h("p", { class: "error" }, errorText(e))));
+  else api("GET", "/api/users").then((users) => paint((haUi.users = users)), (e) => card.append(uiNotice({ tone: "bad", text: errorText(e) })));
   return card;
 }
 
 function haRow(server, s) {
   const primary = haPrimary(s);
-  return h(
-    "div",
-    { class: "tool ha-row" + (haLit(s) ? " on" : ""), id: "ha-row-" + s.id },
-    h("span", { class: "app-icon plus sm" }, icon(haIcon(s))),
-    h("div", { class: "grow" }, h("strong", { class: "clip" }, s.name), h("p", { class: "muted small clip mono" }, s.id)),
-    h("span", { class: "small ha-state" }, haStateText(s)),
-    h(
-      "div",
-      { class: "row-actions" },
-      primary && button(t("ha.action." + primary.action), { class: "small", onclick: (e) => haPressAsked(server, s, primary, e.currentTarget) }),
-      button(null, { class: "small square", title: t("ha.tile.more"), "aria-label": `${t("ha.tile.more")}: ${s.name}`, onclick: () => haEntityDialog(server, s) }, "more"),
-      haOnHome(server, s.id)
-        ? button(null, { class: "small square active", title: t("ha.offHome"), "aria-pressed": "true", "aria-label": `${t("ha.offHome")}: ${s.name}`, onclick: () => haHome(server, s.id, false) }, "star")
-        : button(null, { class: "small square", title: t("ha.onHome"), "aria-pressed": "false", "aria-label": `${t("ha.onHome")}: ${s.name}`, onclick: () => haHome(server, s.id, true) }, "star"),
-    ),
-  );
+  const home = haOnHome(server, s.id);
+  return uiRow({
+    id: "ha-row-" + s.id,
+    cls: "ha-row" + (haLit(s) ? " on" : ""),
+    lead: { icon: haIcon(s), tone: haLit(s) ? "accent" : null },
+    name: s.name,
+    sub: h("span", { class: "mono" }, s.id),
+    value: haStateText(s),
+    action: primary && button(t("ha.action." + primary.action), { class: "small", onclick: (e) => haPressAsked(server, s, primary, e.currentTarget) }),
+    more: [
+      { label: t("ha.tile.more"), icon: "sliders", run: () => haEntityDialog(server, s) },
+      { label: t(home ? "ha.offHome" : "ha.onHome"), icon: "star", on: home, run: () => haHome(server, s.id, !home) },
+    ],
+  });
 }
 
 const haOnHome = (server, entity) => !!state.overview && !!locate(state.overview.dashboard, `ha:${server}/${entity}`);
@@ -1226,33 +1236,40 @@ async function haHome(server, entity, on) {
 
 function haDevices(x) {
   const list = haUi.entities;
-  if (!list) return h("p", { class: "card pad muted" }, t("ha.loading"));
+  if (!list) return uiCard({ flush: true }, uiEmpty({ size: "loading", text: t("ha.loading") }));
   const q = haUi.search.trim().toLowerCase();
   const shown = list.filter((s) => (haUi.extra || !s.extra) && (!q || `${s.name} ${s.id} ${s.area}`.toLowerCase().includes(q)));
   const rooms = new Map();
   for (const s of shown) rooms.set(s.area, [...(rooms.get(s.area) ?? []), s]);
   const body = h("div", { class: "stack" });
   const paint = () => renderHaBody();
+  const find = h("input", { type: "search", placeholder: t("ha.search"), "aria-label": t("ha.search"), value: haUi.search, oninput: (e) => {
+      haUi.search = e.target.value;
+      clearTimeout(haUi.searchTimer);
+      haUi.searchTimer = setTimeout(() => {
+        paint();
+        const field = document.querySelector("#ha-body input[type=search]");
+        field?.focus();
+        field?.setSelectionRange(field.value.length, field.value.length);
+      }, 250);
+    } });
+  const which = uiSegment([{ value: "main", label: t("ha.mainOnes") }, { value: "all", label: t("ha.allOnes") }], haUi.extra ? "all" : "main", (v) => ((haUi.extra = v === "all"), paint()));
+  const room = ([name, items]) => {
+    const open = q || haUi.opened.has(name);
+    return uiGroup(
+      { name: name || t("ha.noRoom"), count: items.length, open: !haUi.folded.has(name), onToggle: (on) => (on ? haUi.folded.delete(name) : haUi.folded.add(name), paint()) },
+      ...(open ? items : items.slice(0, HA_ROOM_ROWS)).map((s) => haRow(x.id, s)),
+      !open && items.length > HA_ROOM_ROWS && uiEmpty({ text: t("ha.moreInRoom", { n: items.length - HA_ROOM_ROWS }), action: button(t("ui.showMore"), { class: "small quiet", onclick: () => (haUi.opened.add(name), paint()) }, "down") }),
+    );
+  };
   put(
     body,
-    h(
-      "div",
-      { class: "card filter-bar ha-filter" },
-      h("input", { type: "search", class: "grow", placeholder: t("ha.search"), value: haUi.search, oninput: (e) => {
-          haUi.search = e.target.value;
-          clearTimeout(haUi.searchTimer);
-          haUi.searchTimer = setTimeout(() => {
-            paint();
-            const field = document.querySelector("#ha-body input[type=search]");
-            field?.focus();
-            field?.setSelectionRange(field.value.length, field.value.length);
-          }, 250);
-        } }),
-      h("label", { class: "check" }, h("input", { type: "checkbox", checked: haUi.extra, onchange: (e) => ((haUi.extra = e.target.checked), paint()) }), h("span", null, t("ha.showExtra"))),
+    uiCard(
+      { title: t("ha.devices"), count: shown.length, flush: true },
+      h("div", { class: "ui-filters" }, which, find),
+      !x.online && h("div", { class: "ui-inset" }, uiNotice({ tone: "warn", text: t("ha.lastKnown") })),
+      shown.length ? [...rooms].map(room) : uiEmpty({ text: t("ha.pick.none") }),
     ),
-    !x.online && h("p", { class: "muted small" }, t("ha.lastKnown")),
-    !shown.length && h("p", { class: "card pad muted" }, t("ha.pick.none")),
-    [...rooms].map(([room, items]) => h("div", { class: "card pad stack-s" }, h("div", { class: "section-head" }, h("h2", null, room || t("ha.noRoom")), h("span", { class: "muted small" }, String(items.length))), (q || haUi.opened.has(room) ? items : items.slice(0, HA_ROOM_ROWS)).map((s) => haRow(x.id, s)), !q && !haUi.opened.has(room) && items.length > HA_ROOM_ROWS && button(t("ha.moreInRoom", { n: items.length - HA_ROOM_ROWS }), { class: "small ghost", onclick: () => (haUi.opened.add(room), paint()) }, "down"))),
   );
   return body;
 }

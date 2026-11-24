@@ -410,7 +410,9 @@ async function playOnTv(path, name) {
 /* Music: the second player, on the server's own speakers */
 
 const MUSIC_PLAYS_RE = /\.(mp3|flac|m4a|m4b|ogg|oga|opus|wav|aac|wma|ape|wv|aiff?|mka|m3u8?|pls)$/i;
-const musicUi = { timer: null, busy: false };
+const musicUi = { timer: null, busy: false, all: false };
+/** How many of the queue are shown before "show more" */
+const MUSIC_SHOWN = 20;
 
 async function playMusic(what, name) {
   try {
@@ -537,21 +539,18 @@ function musicSpeakerCard(m, act) {
         el.disabled = false;
       }
     };
-    return h("section", { class: "card pad stack" }, h("h2", null, t("music.speaker.title")), h("p", { class: "muted" }, t("music.speaker.lead")), h("p", null, t("music.speaker.what")), s.install ? h("p", { class: "cmd" }, icon("terminal"), s.install) : h("p", { class: "muted small" }, t("mounting.needs.byHand", { package: "squeezelite" })), error, s.install && h("footer", null, button(t("mounting.needs.install", { package: "Squeezelite" }), { onclick: install }, "download")));
+    return uiCard({ title: t("music.speaker.title"), lead: t("music.speaker.lead") }, uiNeedProgram({ name: "Squeezelite", why: t("music.speaker.what"), command: s.install || null, run: s.install ? install : null, optional: true, why2: s.install ? null : t("mounting.needs.byHand", { package: "squeezelite" }) }), error);
   }
   const on = s.state === "on";
   const name = h("input", { value: s.name, maxLength: 40, required: true, "aria-label": t("music.speaker.name") });
   const server = h("input", { value: s.server, maxLength: 260, placeholder: t("music.speaker.serverAuto"), spellcheck: false, autocapitalize: "off", class: "mono", "aria-label": t("music.speaker.server") });
   const typed = () => ({ name: name.value.trim(), server: server.value.trim() });
-  return h(
-    "section",
-    { class: "card pad stack" },
-    h("div", { class: "section-head" }, h("h2", null, t("music.speaker.title"), h("span", { class: "state " + (on ? (s.running ? "running" : "partial") : "stopped") }, t(on ? (s.running ? "bt.state.on" : "music.speaker.starting") : "bt.state.off")))),
-    h("p", { class: "muted" }, t("music.speaker.lead")),
-    settingRow(t("music.speaker.name"), t("music.speaker.nameHint"), name),
-    settingRow(t("music.speaker.server"), t("music.speaker.serverHint"), server),
-    on && h("p", { class: "muted small" }, t("music.speaker.how")),
-    h("footer", null, h("div", { class: "row-actions" }, on && button(t("bt.turnOff"), { onclick: () => act("PUT", "/api/music", { speaker: { on: false } }) }), button(t(on ? "settings.save" : "music.speaker.turnOn"), { class: "primary", onclick: () => act("PUT", "/api/music", { speaker: { ...typed(), on: true } }) }))),
+  return uiCard(
+    { title: t("music.speaker.title"), marks: uiState(on ? (s.running ? "ok" : "warn") : "off", t(on ? (s.running ? "bt.stateOn" : "music.speaker.starting") : "bt.stateOff")), lead: t("music.speaker.lead") },
+    uiSetting({ name: t("music.speaker.name"), explain: t("music.speaker.nameHint"), control: name }),
+    uiSetting({ name: t("music.speaker.server"), explain: t("music.speaker.serverHint"), control: server }),
+    on && uiNotice({ tone: "info", text: t("music.speaker.how") }),
+    h("footer", { class: "block-foot" }, h("div", { class: "row-actions" }, on && button(t("bt.turnOff"), { onclick: () => act("PUT", "/api/music", { speaker: { on: false } }) }), button(t(on ? "settings.save" : "music.speaker.turnOn"), { class: "primary", onclick: () => act("PUT", "/api/music", { speaker: { ...typed(), on: true } }) }))),
   );
 }
 
@@ -570,13 +569,13 @@ function musicPlayerCard(m, act, error = null) {
     "section",
     { class: "card pad stack music-player" },
     now
-      ? h("div", { class: "music-now" }, h("span", { class: "badge-icon plain" }, icon(now.link ? "globe" : "music")), h("div", { class: "grow" }, h("strong", { class: "wrap" }, now.title), now.by && h("div", { class: "muted small wrap" }, now.by)), now.paused && h("span", { class: "state busy" }, t("tv.paused")))
+      ? h("div", { class: "music-now" }, h("span", { class: "badge-icon plain" }, icon(now.link ? "globe" : "music")), h("div", { class: "grow" }, h("strong", { class: "wrap" }, now.title), now.by && h("div", { class: "muted small wrap" }, now.by)), now.paused && uiState("off", t("tv.paused")))
       : h("div", { class: "music-now" }, h("span", { class: "badge-icon plain" }, icon("music")), h("div", { class: "grow" }, h("strong", null, t("music.idle")), h("div", { class: "muted small" }, t("music.idleLead")))),
     seek && h("div", { class: "music-seek" }, h("span", { class: "muted small mono" }, tvClock(now.position)), seek, h("span", { class: "muted small mono" }, tvClock(now.duration))),
     h("div", { class: "music-keys" }, round("previous", "previous"), h("button", { type: "button", class: "tvr-main", title: t("music.key.playpause"), "aria-label": t("music.key.playpause"), disabled: !now, onclick: () => press("playpause") }, icon(now && !now.paused ? "pause" : "play")), round("next", "next"), round("stop", "stop")),
-    h("div", { class: "tvr-volume" }, h("button", { type: "button", class: "icon-btn", title: t("music.key.mute"), "aria-label": t("music.key.mute"), disabled: !m.running, onclick: () => press("mute", !m.muted) }, icon(m.muted ? "volumeOff" : "volume")), volume, h("span", { class: "muted small mono" }, m.volume)),
+    h("div", { class: "tvr-volume" }, h("button", { type: "button", class: "icon-btn", title: t("music.key.mute"), "aria-label": t("music.key.mute"), disabled: !m.running, onclick: () => press("mute", !m.muted) }, icon(m.muted ? "volumeOff" : "volume")), volume, h("span", { class: "muted small mono" }, m.volume + " %")),
     m.volumeOf === "speaker" && h("p", { class: "muted small" }, t("music.volumeSpeaker")),
-    settingRow(t("music.output"), t("music.outputHint"), output),
+    uiSetting({ name: t("music.output"), explain: t("music.outputHint"), control: output }),
     error,
   );
   return player;
@@ -600,7 +599,7 @@ function paintMusic() {
         el.disabled = false;
       }
     };
-    return put(box, h("section", { class: "card pad stack" }, h("h2", null, t("music.title")), h("p", { class: "muted" }, t("music.lead")), h("p", null, t("music.what")), m.install ? h("p", { class: "cmd" }, icon("terminal"), m.install) : h("p", { class: "muted small" }, t("mounting.needs.byHand", { package: "mpv" })), error, m.install && h("footer", null, button(t("mounting.needs.install", { package: "mpv" }), { class: "primary", onclick: install }, "download"))));
+    return put(box, uiCard({ lead: t("music.lead") }, uiNeedProgram({ name: "mpv", why: t("music.what"), command: m.install || null, run: m.install ? install : null, why2: m.install ? null : t("mounting.needs.byHand", { package: "mpv" }) }), error));
   }
   const act = async (method, path, data) => {
     error.textContent = "";
@@ -618,26 +617,29 @@ function paintMusic() {
   };
   const press = (action, value) => act("POST", "/api/music/do", { action, value });
   const player = musicPlayerCard(m, act, error);
-  const queue = h(
-    "section",
-    { class: "card pad stack" },
-    h("div", { class: "section-head" }, h("h2", null, t("music.queueTitle"), h("span", { class: "muted small" }, m.queue.length || "")), m.queue.length > 1 && h("div", { class: "row-actions" }, button(t("music.key.shuffle"), { class: "small", onclick: () => press("shuffle") }, "shuffle"), button(t("music.key.clear"), { class: "small", onclick: () => press("clear") }, "x"))),
+  const shown = musicUi.all ? m.queue : m.queue.slice(0, MUSIC_SHOWN);
+  const queue = uiCard(
+    { title: t("music.queueTitle"), count: m.queue.length || null, flush: true, actions: m.queue.length > 1 && [button(t("music.key.shuffle"), { class: "small", onclick: () => press("shuffle") }, "shuffle"), button(t("music.key.clear"), { class: "small", onclick: () => press("clear") }, "x")] },
     m.queue.length
       ? h(
           "div",
-          { class: "music-queue" },
-          m.queue.slice(0, 300).map((q, i) =>
-            h(
-              "div",
-              { class: "music-row" + (q.current ? " current" : ""), menu: true },
-              h("button", { type: "button", class: "music-pick", title: t("music.key.jump"), onclick: () => press("jump", i) }, icon(q.current ? "play" : q.link ? "globe" : "music"), h("span", { class: "grow" }, h("span", { class: "clip" }, q.title), q.where && h("span", { class: "muted small clip" }, q.where))),
-              h("button", { type: "button", class: "icon-btn", title: t("music.key.remove"), "aria-label": t("music.key.remove"), onclick: () => press("remove", i) }, icon("x")),
-            ),
+          { class: "ui-rows" },
+          shown.map((q, i) =>
+            uiRow({
+              lead: q.current ? { icon: "play", tone: "info" } : { icon: q.link ? "globe" : "music" },
+              name: q.title,
+              sub: q.where || null,
+              state: q.current ? uiState("info", t("music.statePlaying")) : null,
+              onclick: () => press("jump", i),
+              more: [{ label: t("music.key.jump"), icon: "play", run: () => press("jump", i) }, { label: t("music.key.remove"), icon: "x", run: () => press("remove", i) }],
+            }),
           ),
-          m.queue.length > 300 && h("p", { class: "muted small" }, t("music.more", { n: m.queue.length - 300 })),
+          m.queue.length > shown.length && uiEmpty({ text: t("music.more", { n: m.queue.length - shown.length }), action: button(t("ui.showMore"), { class: "small quiet", onclick: () => ((musicUi.all = true), paintMusic()) }, "down") }),
         )
-      : h("p", { class: "muted" }, t("music.queueEmpty")),
+      : uiEmpty({ text: t("music.queueEmpty") }),
   );
+  const nowState = m.now ? (m.now.paused ? uiState("off", t("tv.paused")) : uiState("ok", t("music.statePlaying"))) : uiState("off", t("music.silent"));
+  houseHead({ icon: "music", title: t("music.title"), state: nowState, actions: [{ label: t("music.link"), icon: "link", run: musicLinkDialog }, { label: t("music.folder"), icon: "folder", primary: true, run: musicFolder }] });
   put(box, h("div", { class: "music-page" }, h("div", { class: "stack" }, player, musicSpeakerCard(m, act)), queue));
 }
 
@@ -696,7 +698,7 @@ function tvRemoteParts(tv, press, turnOn) {
     idle
       ? note("refresh", t("tv.starting"), t("tv.startingLead"))
       : now
-        ? h("div", { class: "tvr-now" }, h("div", { class: "tvr-title" }, h("div", { class: "grow" }, h("strong", { class: "wrap" }, now.title), now.paused && h("span", { class: "state busy" }, t("tv.paused"))), round("stop", "stop", t("tv.key.stop"))), file && file !== now.title && h("p", { class: "tvr-file muted" }, file), position, h("div", { class: "tvr-times muted" }, h("span", null, tvClock(now.time)), h("span", null, tvClock(now.total))), tracks, (isLink(now.file) ? tvStreams() : now.file.startsWith("/") && (tvStreams() ? TV_PLAYS_RE.test(now.file) && fileKind({ type: "file", name: now.file }) !== "image" : TV_BROWSER_RE.test(now.file))) && h("div", { class: "row-actions" }, button(t("tv.toBrowser"), { class: "small", onclick: () => moveToBrowser(now) }, "external")))
+        ? h("div", { class: "tvr-now" }, h("div", { class: "tvr-title" }, h("div", { class: "grow" }, h("strong", { class: "wrap" }, now.title), now.paused && uiState("off", t("tv.paused"))), round("stop", "stop", t("tv.key.stop"))), file && file !== now.title && h("p", { class: "tvr-file muted" }, file), position, h("div", { class: "tvr-times muted" }, h("span", null, tvClock(now.time)), h("span", null, tvClock(now.total))), tracks, (isLink(now.file) ? tvStreams() : now.file.startsWith("/") && (tvStreams() ? TV_PLAYS_RE.test(now.file) && fileKind({ type: "file", name: now.file }) !== "image" : TV_BROWSER_RE.test(now.file))) && h("div", { class: "row-actions" }, button(t("tv.toBrowser"), { class: "small", onclick: () => moveToBrowser(now) }, "external")))
         : note("tv", t("tv.nothingTitle"), t("tv.nothing")),
     h("div", { class: "tvr-transport" }, skip("rewind", "back30", t("tv.key.rewind")), h("button", { type: "button", class: "tvr-main", title: t("tv.key.playpause"), "aria-label": t("tv.key.playpause"), disabled: idle || !now, onclick: () => press("playpause") }, icon(now && !now.paused ? "pause" : "play")), skip("forward", "fwd30", t("tv.key.forward"))),
     h("div", { class: "tvr-volume" }, round("mute", tv.muted ? "volumeOff" : "volume", t(tv.muted ? "tv.unmute" : "tv.mute"), tv.muted ? "on" : ""), volume, h("span", { class: "tvr-value" + (tv.muted ? " muted" : "") }, tv.muted ? t("tv.muted") : `${tv.volume}%`)),
@@ -1265,6 +1267,9 @@ function paintTv() {
   const tv = state.tv;
   if (!box || !tv) return;
   box.classList.remove("tv-switching");
+  // the head of the page names the TV and what it is doing; choosing what is on the screen stays in its own card
+  const [chipCls, chipWords] = tvChip(tv);
+  houseHead({ icon: "tv", title: t("tv.title"), state: uiState({ running: "ok", busy: "warn", stopped: "off" }[chipCls] ?? "off", chipWords) });
   const error = h("p", { class: "error", role: "alert" });
   const change = async (data) => {
     error.textContent = "";

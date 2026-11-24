@@ -1392,7 +1392,8 @@ function attentionWords(item) {
 const attentionIcon = (code) => ATTENTION_ICONS[code.split(".")[0]] ?? "alert";
 
 /** Asks before something that cannot be taken back by a click, does it, says a refusal in the window and looks again */
-function confirmAction({ title, lead, label, run, kind = "danger", iconName = "trash" }) {
+/** Asks before something is done: `extra` — a part of the question (a tick that goes with it) */
+function confirmAction({ title, lead, label, run, kind = "danger", iconName = "trash", extra = null }) {
   let dialog;
   const error = h("p", { class: "error", role: "alert" });
   const go = button(label, {
@@ -1415,7 +1416,7 @@ function confirmAction({ title, lead, label, run, kind = "danger", iconName = "t
       }
     },
   }, iconName);
-  dialog = openDialog("confirm", h("h2", { class: "wrap" }, title), lead && h("p", { class: "muted" }, lead), error, h("footer", null, closeButton(() => dialog, t("common.cancel")), go));
+  dialog = openDialog("confirm", h("h2", { class: "wrap" }, title), lead && h("p", { class: "muted" }, lead), extra, error, h("footer", null, closeButton(() => dialog, t("common.cancel")), go));
 }
 
 function attentionItem(item) {

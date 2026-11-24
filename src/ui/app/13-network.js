@@ -838,11 +838,10 @@ function btPairDialog(device) {
 
 /** Speakers and headphones need one more program: what it is, why, the command, the button */
 function btSoundCard(r, error) {
-  if (r.sound === "ready") return h("section", { class: "card pad stack" }, h("div", { class: "section-head" }, h("h2", null, t("bt.sound.title"), h("span", { class: "state running" }, t("bt.sound.ready")))), h("p", { class: "muted" }, t("bt.sound.readyLead")));
+  if (r.sound === "ready") return uiCard({ title: t("bt.sound.title"), marks: uiState("ok", t("bt.sound.ready")), lead: t("bt.sound.readyLead") });
   const install = async (e) => {
     const el = e.currentTarget;
     el.disabled = true;
-    el.lastChild.textContent = t("tools.installing");
     try {
       await api("POST", "/api/tools/bluez-alsa/install", {});
       await loadBluetooth();
@@ -852,23 +851,13 @@ function btSoundCard(r, error) {
       el.disabled = false;
     }
   };
-  return h(
-    "section",
-    { class: "card pad stack" },
-    h("h2", null, t("bt.sound.title")),
-    h("p", { class: "muted" }, t("bt.sound.lead")),
-    h("p", null, t("bt.sound.what")),
-    r.soundInstall ? h("p", { class: "cmd" }, icon("terminal"), r.soundInstall) : h("p", { class: "muted small" }, t("mounting.needs.byHand", { package: "bluez-alsa-utils" })),
-    r.soundInstall && h("footer", null, button(t("mounting.needs.install", { package: "BlueALSA" }), { class: "primary", onclick: install }, "download")),
-  );
+  return uiCard({ title: t("bt.sound.title"), lead: t("bt.sound.lead") }, uiNeedProgram({ name: "BlueALSA", why: t("bt.sound.what"), command: r.soundInstall || null, run: r.soundInstall ? install : null, why2: r.soundInstall ? null : t("mounting.needs.byHand", { package: "bluez-alsa-utils" }) }));
 }
 
 function bluetoothSection() {
   const r = state.bluetooth;
-  if (!r) return [waitMark()];
+  if (!r) return [uiCard({ flush: true }, uiEmpty({ size: "loading" }))];
   const error = h("p", { class: "error", role: "alert" }, r.error ?? "");
-  const lead = h("p", { class: "muted" }, t("bt.lead"));
-  if (r.error) return [h("section", { class: "card pad stack" }, h("h2", null, "Bluetooth"), error)];
   const send = (method, path, data, mark = "") => async (e) => {
     const el = e?.currentTarget;
     if (el) el.disabled = true;
@@ -882,123 +871,67 @@ function bluetoothSection() {
     btUi.busy = "";
     renderSettings();
   };
-  const noRadio = !r.hardware && h("p", { class: "banner" }, t("bt.noRadio"));
+  const turnOff = () => confirmAction({ title: t("bt.offTitle"), lead: t("bt.offLead"), label: t("bt.turnOff"), iconName: "power", run: () => send("PUT", "/api/bluetooth", { on: false })() });
+  const stateOf = r.error ? uiState("bad", t("bt.state.error")) : r.state === "ready" ? uiState("ok", t("bt.stateOn")) : r.state === "off" ? uiState("off", t("bt.stateOff")) : uiState("off", t("bt.state.notReady"));
+  // the page's head is Bluetooth's own: its state, its adapter, and turning it off
+  queueMicrotask(() =>
+    houseHead({
+      icon: "bluetooth",
+      title: "Bluetooth",
+      state: stateOf,
+      facts: [r.adapter && t("bt.adapter", { name: r.adapter.name, address: r.adapter.address })].filter(Boolean),
+      actions: r.state === "ready" ? [{ label: t("bt.turnOff") + "…", icon: "power", run: turnOff }] : [],
+    }),
+  );
+  if (r.error) return [uiCard({}, uiEmpty({ size: "error", title: r.error, action: button(t("attention.retry"), { onclick: () => void loadBluetooth().then(renderSettings) }, "refresh") }))];
+  const noRadio = !r.hardware && uiNotice({ tone: "warn", text: t("bt.noRadio") });
 
-  if (r.state === "missing")
-    return [
-      h(
-        "section",
-        { class: "card pad stack" },
-        h("h2", null, "Bluetooth"),
-        lead,
-        h("p", null, t("bt.what")),
-        noRadio,
-        r.install ? h("p", { class: "cmd" }, icon("terminal"), r.install) : h("p", { class: "muted small" }, t("mounting.needs.byHand", { package: "bluez" })),
-        error,
-        r.install &&
-          h(
-            "footer",
-            null,
-            button(t("mounting.needs.install", { package: "BlueZ" }), {
-              class: "primary",
-              onclick: async (e) => {
-                const el = e.currentTarget;
-                el.disabled = true;
-                el.lastChild.textContent = t("tools.installing");
-                try {
-                  await api("POST", "/api/tools/bluez/install", {});
-                  await loadBluetooth();
-                  renderSettings();
-                } catch (err) {
-                  error.textContent = errorText(err);
-                  el.disabled = false;
-                }
-              },
-            }, "download"),
-          ),
-      ),
-    ];
-  if (r.state === "stopped")
-    return [h("section", { class: "card pad stack" }, h("h2", null, "Bluetooth"), lead, h("p", { class: "banner" }, t("bt.stopped")), h("p", { class: "cmd" }, icon("terminal"), "systemctl enable --now bluetooth"), h("footer", null, button(t("bt.start"), { class: "primary", onclick: send("POST", "/api/bluetooth/start", {}) }, "power")))];
-  if (r.state === "noAdapter") return [h("section", { class: "card pad stack" }, h("h2", null, "Bluetooth"), lead, h("p", { class: "banner" }, t(r.hardware ? "bt.noAdapter" : "bt.noRadio")))];
-  if (r.state === "off")
-    return [
-      h(
-        "section",
-        { class: "card pad stack" },
-        h("div", { class: "section-head" }, h("h2", null, "Bluetooth", h("span", { class: "state stopped" }, t("bt.state.off")))),
-        lead,
-        h("p", { class: "muted small" }, t("bt.adapter", { name: r.adapter.name, address: r.adapter.address })),
-        r.hardBlocked && h("p", { class: "banner" }, t("error.bluetooth.hardBlocked")),
-        h("footer", null, button(t("bt.turnOn"), { class: "primary", disabled: r.hardBlocked, onclick: send("PUT", "/api/bluetooth", { on: true }) }, "power")),
-      ),
-    ];
+  if (r.state === "missing") {
+    const install = async (e) => {
+      const el = e.currentTarget;
+      el.disabled = true;
+      try {
+        await api("POST", "/api/tools/bluez/install", {});
+        await loadBluetooth();
+        renderSettings();
+      } catch (err) {
+        error.textContent = errorText(err);
+        el.disabled = false;
+      }
+    };
+    return [uiCard({ lead: t("bt.lead") }, noRadio, uiNeedProgram({ name: "BlueZ", why: t("bt.what"), command: r.install || null, run: r.install ? install : null, why2: r.install ? null : t("mounting.needs.byHand", { package: "bluez" }) }), error)];
+  }
+  if (r.state === "stopped") return [uiCard({}, uiEmpty({ size: "big", icon: "bluetooth", title: t("bt.stoppedTitle"), text: t("bt.stopped"), action: button(t("bt.start"), { class: "primary", onclick: send("POST", "/api/bluetooth/start", {}) }, "power") }), uiCommand("systemctl enable --now bluetooth"))];
+  if (r.state === "noAdapter") return [uiCard({}, uiEmpty({ size: "big", icon: "bluetooth", title: t("bt.noAdapterTitle"), text: t(r.hardware ? "bt.noAdapter" : "bt.noRadio") }))];
+  if (r.state === "off") return [uiCard({}, r.hardBlocked && uiNotice({ tone: "warn", text: t("error.bluetooth.hardBlocked") }), uiEmpty({ size: "big", icon: "bluetooth", title: t("bt.offTitleState"), text: t("bt.lead"), action: button(t("bt.turnOn"), { class: "primary", disabled: r.hardBlocked, onclick: send("PUT", "/api/bluetooth", { on: true }) }, "power") }))];
 
-  const name = (d) => h("div", { class: "bt-name" }, h("span", { class: "badge-icon plain" }, icon(BT_ICONS[d.kind] ?? "bluetooth")), h("div", null, h("div", { class: "strong clip" }, d.name || d.address), h("div", { class: "muted small" }, t("bt.kind." + d.kind))));
-  const row = (d) =>
-    h(
-      "tr",
-      null,
-      h("td", null, name(d)),
-      h("td", null, h("span", { class: "state " + (d.connected ? "running" : "stopped") }, t(d.connected ? "bt.connected" : "bt.away"))),
-      h("td", null, d.battery === null ? h("span", { class: "muted" }, "—") : h("span", { class: "bt-battery" + (d.battery <= 20 ? " low" : "") }, icon("battery"), d.battery + "%")),
-      h(
-        "td",
-        null,
-        h(
-          "div",
-          { class: "row-actions" },
-          d.connected
-            ? button(t("bt.disconnect"), { class: "small", onclick: send("POST", `/api/bluetooth/devices/${d.address}/disconnect`, {}) })
-            : button(t(btUi.busy === d.address ? "bt.connecting" : "bt.connect"), { class: "small", disabled: btUi.busy === d.address, onclick: (e) => ((btUi.busy = d.address), renderSettings(), send("POST", `/api/bluetooth/devices/${d.address}/connect`, {}, d.address)(e)) }),
-          h("button", {
-            type: "button",
-            class: "icon-btn",
-            title: t("bt.forget"),
-            "aria-label": t("bt.forget"),
-            onclick: () => confirmAction({ title: t("bt.forgetTitle", { name: d.name || d.address }), lead: t("bt.forgetLead"), label: t("bt.forget"), run: () => send("DELETE", `/api/bluetooth/devices/${d.address}`)() }),
-          }, icon("trash")),
-        ),
-      ),
-    );
+  const kindIcon = (d) => ({ icon: BT_ICONS[d.kind] ?? "bluetooth" });
+  const row = (d) => {
+    const busy = btUi.busy === d.address;
+    const connect = d.connected
+      ? button(t("bt.disconnect"), { class: "small", onclick: send("POST", `/api/bluetooth/devices/${d.address}/disconnect`, {}) })
+      : button(t(busy ? "bt.connecting" : "bt.connect"), { class: "small", disabled: busy, "aria-busy": busy ? "true" : null, onclick: (e) => ((btUi.busy = d.address), renderSettings(), send("POST", `/api/bluetooth/devices/${d.address}/connect`, {}, d.address)(e)) });
+    const forget = { label: t("bt.forget") + "…", icon: "trash", danger: true, run: () => confirmAction({ title: t("bt.forgetTitle", { name: d.name || d.address }), lead: t("bt.forgetLead"), label: t("bt.forget"), run: () => send("DELETE", `/api/bluetooth/devices/${d.address}`)() }) };
+    const battery = d.battery === null ? "—" : d.battery <= 20 ? uiState("warn", t("bt.batteryLow", { n: d.battery })) : d.battery + "%";
+    return {
+      cells: [uiCell({ lead: kindIcon(d), name: d.name || d.address, sub: t("bt.kind." + d.kind) }), uiState(d.connected ? "ok" : "off", t(d.connected ? "bt.connected" : "bt.away")), battery, h("div", { class: "row-actions end" }, connect, uiMore([forget], { size: "s" }))],
+      sub: [t("bt.kind." + d.kind), d.battery !== null && d.battery + "%"].filter(Boolean).join(" · "),
+    };
+  };
   const looking = r.adapter.looking;
   const bars = (d) => h("span", { class: "bt-signal l" + btBars(d.signal), title: d.signal === null ? "" : d.signal + " dBm" }, h("i"), h("i"), h("i"), h("i"));
   const found = [...r.found].sort((a, b) => btBars(b.signal) - btBars(a.signal) || a.name.localeCompare(b.name));
   return [
-    h(
-      "section",
-      { class: "card pad stack" },
-      h(
-        "div",
-        { class: "section-head" },
-        h("h2", null, t("bt.devices"), h("span", { class: "state running" }, t("bt.state.on"))),
-        button(t("bt.turnOff"), { class: "small", onclick: (e) => confirmAction({ title: t("bt.offTitle"), lead: t("bt.offLead"), label: t("bt.turnOff"), iconName: "power", run: () => send("PUT", "/api/bluetooth", { on: false })() }) }, "power"),
-      ),
-      lead,
-      r.devices.length
-        ? h("div", { class: "table-wrap" }, h("table", null, h("thead", null, h("tr", null, h("th", null, t("bt.col.device")), h("th", null, t("bt.col.state")), h("th", null, t("bt.col.battery")), h("th"))), h("tbody", null, r.devices.map(row))))
-        : h("p", { class: "muted" }, t("bt.none")),
-      error,
-      h("p", { class: "muted small" }, t("bt.adapter", { name: r.adapter.name, address: r.adapter.address })),
+    uiCard(
+      { title: t("bt.devices"), count: r.devices.length || null, lead: t("bt.lead"), flush: true },
+      h("div", { class: "ui-inset" }, error),
+      r.devices.length ? uiTable([{ label: t("bt.col.device") }, { label: t("bt.col.state") }, { label: t("bt.col.battery"), num: true }, { label: "" }], r.devices.map(row)) : uiEmpty({ text: t("bt.none") }),
     ),
-    h(
-      "section",
-      { class: "card pad stack" },
-      h(
-        "div",
-        { class: "section-head" },
-        h("h2", null, t("bt.add")),
-        looking ? button(t("bt.stopLooking"), { class: "small", onclick: send("POST", "/api/bluetooth/look", { on: false }) }, "x") : button(t("bt.look"), { class: "small primary", onclick: send("POST", "/api/bluetooth/look", { on: true }) }, "search"),
-      ),
-      h("p", { class: "muted" }, t("bt.addLead")),
-      looking && h("p", { class: "bt-looking muted small" }, icon("refresh", "spin"), t("bt.looking")),
-      found.length > 0 &&
-        h(
-          "div",
-          { class: "bt-found" },
-          found.map((d) => h("div", { class: "bt-found-row", menu: true }, name(d), bars(d), button(t("bt.pair"), { class: "small", onclick: () => btPairDialog(d) }, "plus"))),
-        ),
-      !looking && !found.length && h("p", { class: "muted small" }, t("bt.lookHint")),
+    uiCard(
+      { title: t("bt.add"), lead: t("bt.addLead"), flush: true, actions: looking ? button(t("bt.stopLooking"), { class: "small", onclick: send("POST", "/api/bluetooth/look", { on: false }) }, "x") : button(t("bt.look"), { class: "small primary", onclick: send("POST", "/api/bluetooth/look", { on: true }) }, "search") },
+      looking && h("div", { class: "ui-empty small" }, h("span", { class: "wait-ring" }), h("span", null, t("bt.looking"))),
+      found.map((d) => uiRow({ lead: kindIcon(d), name: d.name || d.address, sub: t("bt.kind." + d.kind), value: bars(d), action: button(t("bt.pair"), { class: "small", onclick: () => btPairDialog(d) }, "plus"), menu: true })),
+      !looking && !found.length && uiEmpty({ text: t("bt.lookHint") }),
     ),
     btSoundCard(r, error),
   ];
