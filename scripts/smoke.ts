@@ -270,7 +270,7 @@ const STEPS = `(() => {
     if (card.closest("dialog") || !seen(card)) continue;
     const kids = [...card.children].filter(seen);
     for (let i = 1; i < kids.length; i++) {
-      if (kids[i].matches(".block-foot, .module-card-foot")) continue;
+      if (kids[i].matches(".block-foot, .module-card-foot, .ui-foot")) continue;
       const a = kids[i - 1].getBoundingClientRect(), b = kids[i].getBoundingClientRect();
       if (b.top < a.bottom - 1) continue; // side by side
       const gap = Math.round(b.top - a.bottom);

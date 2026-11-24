@@ -6456,5 +6456,6 @@
   "tree.containersSettings": "Settings",
   "tree.none": "Nothing here yet.",
   "server.appsRunning": "Running",
-  "server.appsOf": "{running} of {all}"
+  "server.appsOf": "{running} of {all}",
+  "ui.optional": "optional"
 }

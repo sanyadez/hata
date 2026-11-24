@@ -1763,9 +1763,8 @@ function modulesSection() {
 
 const sections = () => SECTIONS.filter((item) => (!item.admin || isAdmin()) && (!SECTION_MODULE[item.id] || hasModule(SECTION_MODULE[item.id])));
 
-function settingRow(title, hint, control) {
-  return h("div", { class: "setting" }, h("div", { class: "grow" }, h("strong", null, title), hint && h("p", { class: "muted small" }, hint)), h("div", { class: "setting-control" }, control));
-}
+/** The old name of a setting's row */
+const settingRow = (title, hint, control) => uiSetting({ name: title, explain: hint || null, control });
 
 // --- What runs when ---------------------------------------------------------------------------------
 

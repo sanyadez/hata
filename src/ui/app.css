@@ -3051,3 +3051,30 @@ dialog .modes:not(:has(.mode-x)) { width: 100%; box-sizing: border-box; }
 .ui-setting:has(+ .error:empty + .block-foot) { border-bottom: 0; }
 /* a fact whose value is a sentence reads from the left */
 .kv > .level-hint { text-align: left; max-width: 70%; }
+
+/* --- More blocks: the field of a form, fields side by side, a tick with its words, a line of things, the foot of
+   a form card, a second head inside a card, text to read, a slider (uiField, uiFields, uiCheck, uiLine, uiFoot,
+   uiSubhead, uiProse, uiRange in 01-core.js) ------------------------------------------------------------------ */
+.ui-field { display: grid; gap: 6px; min-width: 0; }
+.ui-field-label { color: var(--muted); font-size: 12px; font-weight: 600; display: flex; gap: 6px; align-items: baseline; }
+.ui-field-opt { color: var(--faint); font-weight: 400; }
+.ui-field-hint { color: var(--faint); font-size: 12px; overflow-wrap: anywhere; }
+.ui-field > :is(input:not([type="checkbox"], [type="radio"], [type="range"]), select, textarea, .select-btn) { width: 100%; }
+.ui-fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: start; }
+@media (max-width: 640px) { .ui-fields { grid-template-columns: minmax(0, 1fr); } }
+.ui-check { display: flex; gap: 10px; align-items: flex-start; overflow-wrap: anywhere; min-width: 0; cursor: pointer; }
+.ui-check-text { display: grid; gap: 2px; min-width: 0; }
+.ui-check-hint { color: var(--muted); font-size: 12px; }
+.ui-line.end { justify-content: flex-end; }
+.ui-foot { display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; gap: 8px; margin-top: auto; }
+.ui-subhead { display: grid; gap: 6px; min-width: 0; }
+.ui-subhead-main { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; min-height: 28px; }
+.ui-subhead h3 { font-size: 14px; font-weight: 600; margin: 0; }
+.ui-prose { display: grid; gap: 8px; min-width: 0; overflow-wrap: anywhere; }
+.ui-prose p { margin: 0; }
+.ui-prose ul, .ui-prose ol { margin: 0; padding-left: 20px; display: grid; gap: 4px; }
+.ui-prose.soft { background: var(--surface-2); border-radius: var(--radius-md); padding: 12px 16px; gap: 6px; }
+.ui-prose.soft :is(p, li) { color: var(--muted); }
+.ui-range { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.ui-range > input { flex: 1 1 auto; min-width: 0; }
+.ui-range-value { flex: none; min-width: 3ch; text-align: right; font-size: 12px; color: var(--muted); }

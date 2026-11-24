@@ -644,6 +644,35 @@ function uiCommand(text, { block = false, secret = false, label = null } = {}) {
 }
 
 /**
+ * A field of a form: the label above, the control, a hint under it. `group` — the control is several things (a
+ * pair of inputs, a list of ticks), so the field is not one `<label>`. `optional` says so beside the label.
+ */
+function uiField(label, control, hint = null, { group = false, optional = false, id = null, cls = "" } = {}) {
+  return h(group ? "div" : "label", { class: "ui-field" + (cls ? " " + cls : ""), id }, label != null && h("span", { class: "ui-field-label" }, label, optional && h("span", { class: "ui-field-opt" }, t("ui.optional"))), control, hint && h("span", { class: "ui-field-hint" }, hint));
+}
+/** Fields side by side (two to a line, one under another on a phone) */
+const uiFields = (...fields) => h("div", { class: "ui-fields" }, fields);
+/** A tick with its words (and a line under them): a choice in a form, not a switch that acts at once */
+function uiCheck(label, input, hint = null, { cls = "" } = {}) {
+  return h("label", { class: "ui-check" + (cls ? " " + cls : "") }, input, h("span", { class: "ui-check-text" }, h("span", null, label), hint && h("span", { class: "ui-check-hint" }, hint)));
+}
+/** Things in a line — buttons, states, a field and its button — wrapping when there is no room; `end` puts them right */
+const uiLine = (items, { end = false, cls = "" } = {}) => h("div", { class: "ui-line" + (end ? " end" : "") + (cls ? " " + cls : "") }, items);
+/** The foot of a card that is a form: its buttons on the right, under a line */
+const uiFoot = (...buttons) => h("footer", { class: "ui-foot" }, buttons);
+/** A second head inside a card: a smaller title, its line, things on its right */
+const uiSubhead = ({ title, lead = null, actions = null, count = null }) =>
+  h("div", { class: "ui-subhead" }, h("div", { class: "ui-subhead-main" }, h("h3", null, title, count != null && h("span", { class: "muted" }, " " + count)), actions && h("div", { class: "ui-line end" }, actions)), lead && h("p", { class: "muted small" }, lead));
+/** Text to read: paragraphs and lists as they come; `soft` puts it in a grey box (notes of an app, what to know) */
+const uiProse = (body, { title = null, soft = false } = {}) => h("div", { class: "ui-prose" + (soft ? " soft" : "") }, title && h("strong", null, title), body);
+/** A slider with its value beside it */
+function uiRange({ value = 0, min = 0, max = 100, step = 1, label = null, text = null, oninput = null, onchange = null, disabled = false } = {}) {
+  const shown = h("span", { class: "ui-range-value mono" }, text ? text(value) : String(value));
+  const input = h("input", { type: "range", min, max, step, value, disabled, "aria-label": label, oninput: (e) => ((shown.textContent = text ? text(Number(e.target.value)) : e.target.value), oninput?.(Number(e.target.value), e)), onchange: (e) => onchange?.(Number(e.target.value), e) });
+  return h("div", { class: "ui-range" }, input, shown);
+}
+
+/**
  * The head of a page: crumbs, the thing's icon, the title with its state, the facts under it (joined by " · "), on
  * the right up to two buttons (`actions`: { label, icon, run | href, primary }) and a "⋯" of `more` (or a `search`),
  * the tabs under all. On a phone the main button stands under the title across; the other one goes into the "⋯".
@@ -1232,9 +1261,8 @@ function waitMark() {
   return h("p", { class: "waiting", role: "status", "aria-label": t("common.loading") }, h("span", { class: "wait-ring" }));
 }
 
-function field(label, input, hint) {
-  return h("label", { class: "field" }, h("span", { class: "label" }, label), input, hint && h("span", { class: "hint" }, hint));
-}
+/** The old name of a field of a form */
+const field = (label, input, hint) => uiField(label, input, hint);
 
 async function inviteScreen(token) {
   let invite = null;

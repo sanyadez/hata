@@ -6456,5 +6456,6 @@
   "tree.containersSettings": "Налаштування",
   "tree.none": "Тут ще нічого немає.",
   "server.appsRunning": "Працює",
-  "server.appsOf": "{running} із {all}"
+  "server.appsOf": "{running} із {all}",
+  "ui.optional": "необов'язково"
 }
