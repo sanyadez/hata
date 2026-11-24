@@ -2116,7 +2116,7 @@ function autoUpdateRow() {
     }
     renderSettings();
   };
-  const auto = h("input", { type: "checkbox", checked: u.auto, "aria-label": t("update.auto"), onchange: () => save({ auto: auto.checked }) });
+  const auto = h("input", { type: "checkbox", class: "switch", role: "switch", checked: u.auto, "aria-label": t("update.auto"), onchange: () => save({ auto: auto.checked }) });
   const time = h("input", { type: "time", value: u.time, class: "short mono", required: true, "aria-label": t("update.autoTime"), hidden: !u.auto, onchange: () => time.value && save({ time: time.value }) });
   return settingRow(t("update.auto"), t(u.auto ? "update.autoOnHint" : "update.autoHint", { zone: state.settings.systemTimezone }), h("div", { class: "row-actions" }, time, auto));
 }

@@ -1534,35 +1534,23 @@ function splitActions(entries, header) {
   const rest = more.filter((x) => x !== way);
   if (!rest.length) return { buttons: main, openMore: undefined };
   const openMore = (at) => menuAt(at, header, rest);
-  const opener = (e) => {
-    const r = e.currentTarget.closest(".split").getBoundingClientRect();
-    openMore({ x: r.left, y: r.bottom + 4 });
-  };
-  const first = main[0];
-  if (first) main[0] = h("span", { class: "split" }, first, button("", { class: "small split-more", title: t("attention.more"), "aria-label": t("attention.more"), "aria-haspopup": "menu", onclick: opener }, "down"));
-  else main.push(h("span", { class: "split" }, button(t("attention.more"), { class: "small split-more", "aria-haspopup": "menu", onclick: opener }, "down")));
-  return { buttons: main, openMore };
+  // the rest is a "⋯" of its own beside the main button (the design system's rule), never an arrow joined to it
+  return { buttons: [...main, uiMore(rest, { size: "s", header })], openMore };
 }
 
 /**
- * A window's or a row's actions: one button for the main thing and the rest (menu entries) under an arrow joined to
- * it — several buttons side by side wrap into a heap. Without a main thing the arrow's button says "More".
+ * A window's or a row's actions: one button for the main thing and the rest (menu entries) in a "⋯" beside it —
+ * several buttons side by side wrap into a heap. Without a main thing only the "⋯" stays.
  */
 function oneAndMore(first, rest, kind = "") {
   const entries = rest.filter(Boolean);
   if (!entries.length) return first;
-  const opener = (e) => {
-    // a row that opens something on a click must not take this one for its own
-    e.stopPropagation();
-    const r = e.currentTarget.closest(".split").getBoundingClientRect();
-    menuAt({ x: r.left, y: r.bottom + 4 }, null, entries);
-  };
-  return h("span", { class: "split" }, first, button(first ? "" : t("attention.more"), { class: kind + " split-more", title: t("attention.more"), "aria-label": t("attention.more"), "aria-haspopup": "menu", onclick: opener }, "down"));
+  return h("span", { class: "one-more" }, first, uiMore(entries, { size: String(kind).includes("small") || first?.classList?.contains("small") ? "s" : "m" }));
 }
 
 /**
  * The buttons of a row or a card as they were written, laid out by the same rule: up to two stay as they are; of
- * three or more the main one (the primary, else the first) stays and the others go under its arrow, each doing what
+ * three or more the main one (the primary, else the first) stays and the others go into a "⋯" beside it, each doing what
  * its button does. What is not a button (a chip, a note) stays beside.
  */
 function foldActions(items, kind = "") {

@@ -27,50 +27,33 @@ function nameTargetWords(n) {
  * Proxmox, machines, their apps and any address; Hata passes the request on, its sign-in in front when asked
  */
 function namesCard() {
-  const body = h("div", { class: "stack" }, waitMark());
+  const body = h("div", null, uiEmpty({ size: "loading" }));
   const paint = async () => {
     let data;
     try {
       data = await api("GET", "/api/domains");
     } catch (e) {
-      return put(body, h("p", { class: "error" }, errorText(e)));
+      return put(body, h("div", { class: "ui-inset" }, uiNotice({ tone: "bad", text: errorText(e) })));
     }
-    if (!data.names.length) return put(body, h("p", { class: "muted small" }, t("names.none")));
-    put(
-      body,
-      h(
-        "div",
-        { class: "table-wrap" },
-        h(
-          "table",
-          null,
-          h("thead", null, h("tr", null, h("th", null, t("names.col.name")), h("th", null, t("names.col.to")), h("th", null, t("names.col.access")), h("th"))),
-          h(
-            "tbody",
-            null,
-            data.names.map((n) =>
-              h(
-                "tr",
-                null,
-                h("td", null, nameUrl(n.label) ? h("a", { class: "link mono", href: nameUrl(n.label), target: "_blank", rel: "noopener noreferrer" }, nameUrl(n.label).replace(/^https?:\/\/|\/$/g, "")) : h("span", { class: "mono" }, n.label)),
-                h("td", null, h("div", null, nameTargetWords(n)), h("div", { class: "muted small mono" }, n.away ? t("error." + n.away) : `${n.https ? "https" : "http"}://${n.at}`)),
-                h("td", { class: "small" }, t(n.inherits ? "names.signedInApp" : n.protect ? "names.signedIn" : "names.open")),
-                h("td", null, h("div", { class: "row-actions" }, button(t("names.change"), { class: "small", onclick: () => domainNameDialog(n, null, paint) }, "edit"))),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
+    if (!data.names.length) return put(body, uiEmpty({ text: t("names.none") }));
+    const row = (n) => {
+      const url = nameUrl(n.label);
+      const access = t(n.inherits ? "names.signedInApp" : n.protect ? "names.signedIn" : "names.open");
+      return {
+        onclick: () => domainNameDialog(n, null, paint),
+        cells: [
+          url ? h("a", { class: "link mono", href: url, target: "_blank", rel: "noopener noreferrer", onclick: (e) => e.stopPropagation() }, url.replace(/^https?:\/\/|\/$/g, "")) : h("span", { class: "mono" }, n.label),
+          uiCell({ name: nameTargetWords(n), sub: n.away ? null : h("span", { class: "mono" }, `${n.https ? "https" : "http"}://${n.at}`) }),
+          n.away ? uiState("bad", t("error." + n.away)) : h("span", { class: "small" }, access),
+          button(t("names.change"), { class: "small", onclick: (e) => (e.stopPropagation(), domainNameDialog(n, null, paint)) }, "edit"),
+        ],
+        sub: [nameTargetWords(n), access].join(" · "),
+      };
+    };
+    put(body, uiTable([{ label: t("names.col.name") }, { label: t("names.col.to") }, { label: t("names.col.access") }, { label: "" }], data.names.map(row)));
   };
   void paint();
-  return h(
-    "section",
-    { class: "card pad stack" },
-    h("div", { class: "section-head" }, h("h2", null, t("names.title")), h("div", { class: "actions" }, button(t("names.add"), { class: "small", onclick: () => domainNameDialog(null, null, paint) }, "plus"))),
-    h("p", { class: "muted small" }, t(namesDomain() ? "names.lead" : "names.noDomain")),
-    body,
-  );
+  return uiCard({ title: t("names.title"), lead: t(namesDomain() ? "names.lead" : "names.noDomain"), flush: true, actions: button(t("names.add"), { class: "small", onclick: () => domainNameDialog(null, null, paint) }, "plus") }, body);
 }
 
 /**
@@ -81,50 +64,32 @@ const serverHost = () => (state.settings?.local?.enabled && state.settings.local
 
 /** Ports of this server passed on to a container, a guest, a machine or an address */
 function portsCard() {
-  const body = h("div", { class: "stack" }, waitMark());
+  const body = h("div", null, uiEmpty({ size: "loading" }));
   const paint = async () => {
     let data;
     try {
       data = await api("GET", "/api/domains");
     } catch (e) {
-      return put(body, h("p", { class: "error" }, errorText(e)));
+      return put(body, h("div", { class: "ui-inset" }, uiNotice({ tone: "bad", text: errorText(e) })));
     }
-    if (!data.forwards.length) return put(body, h("p", { class: "muted small" }, t("ports.none")));
-    put(
-      body,
-      h(
-        "div",
-        { class: "table-wrap" },
-        h(
-          "table",
-          null,
-          h("thead", null, h("tr", null, h("th", null, t("ports.col.port")), h("th", null, t("names.col.to")), h("th", null, t("ports.col.how")), h("th"))),
-          h(
-            "tbody",
-            null,
-            data.forwards.map((f) =>
-              h(
-                "tr",
-                null,
-                h("td", null, h("div", { class: "mono strong" }, `${serverHost()}:${f.port}`), h("div", { class: "muted small" }, [t("ports.proto." + f.proto), f.note].filter(Boolean).join(" · "))),
-                h("td", null, h("div", null, t("names.kind." + f.kind, { name: f.title }) + " : " + f.to), h("div", { class: f.error || f.away ? "error small" : "muted small mono" }, f.error ? f.error : f.away ? t("error." + f.away) : f.by === "incus" ? t("ports.byIncus") : f.at)),
-                h("td", { class: "small" }, t(f.outside ? "ports.outsideToo" : "ports.homeOnly")),
-                h("td", null, h("div", { class: "row-actions" }, button(t("names.change"), { class: "small", onclick: () => forwardDialog(f, null, paint) }, "edit"))),
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
+    if (!data.forwards.length) return put(body, uiEmpty({ text: t("ports.none") }));
+    const row = (f) => {
+      const to = t("names.kind." + f.kind, { name: f.title }) + " : " + f.to;
+      return {
+        onclick: () => forwardDialog(f, null, paint),
+        cells: [
+          uiCell({ name: h("span", { class: "mono" }, `${serverHost()}:${f.port}`), sub: [t("ports.proto." + f.proto), f.note].filter(Boolean).join(" · ") }),
+          uiCell({ name: to, sub: f.error || f.away ? null : h("span", { class: "mono" }, f.by === "incus" ? t("ports.byIncus") : f.at) }),
+          f.error ? uiState("bad", f.error) : f.away ? uiState("bad", t("error." + f.away)) : h("span", { class: "small" }, t(f.outside ? "ports.outsideToo" : "ports.homeOnly")),
+          button(t("names.change"), { class: "small", onclick: (e) => (e.stopPropagation(), forwardDialog(f, null, paint)) }, "edit"),
+        ],
+        sub: to,
+      };
+    };
+    put(body, uiTable([{ label: t("ports.col.port") }, { label: t("names.col.to") }, { label: t("ports.col.how") }, { label: "" }], data.forwards.map(row)));
   };
   void paint();
-  return h(
-    "section",
-    { class: "card pad stack" },
-    h("div", { class: "section-head" }, h("h2", null, t("ports.title")), h("div", { class: "actions" }, button(t("ports.add"), { class: "small", onclick: () => forwardDialog(null, null, paint) }, "plus"))),
-    h("p", { class: "muted small" }, t("ports.lead")),
-    body,
-  );
+  return uiCard({ title: t("ports.title"), lead: t("ports.lead"), flush: true, actions: button(t("ports.add"), { class: "small", onclick: () => forwardDialog(null, null, paint) }, "plus") }, body);
 }
 
 /** Opens a port of this server towards a target (or changes one) */
@@ -505,7 +470,7 @@ function paintAdblock(box, d, load) {
       button("", { class: "small ghost", disabled: l.busy, title: t("adblock.list.refresh"), "aria-label": t("adblock.list.refresh"), onclick: (e) => act("POST", `/api/dns/block/lists/${l.id}/refresh`, undefined, e.currentTarget) }, "refresh"),
       button("", { class: "small ghost", title: t("names.remove"), "aria-label": t("names.remove"), onclick: () => confirmAction({ title: t("adblock.list.removeTitle", { name: l.name }), lead: t("adblock.list.removeLead"), label: t("names.remove"), run: () => act("DELETE", `/api/dns/block/lists/${l.id}`) }) }, "trash"),
     );
-  const [auto, autoRow] = tickRow(t("adblock.update"), t("adblock.updateHint"), s.update);
+  const [auto, autoRow] = switchRow(t("adblock.update"), t("adblock.updateHint"), s.update);
   auto.addEventListener("change", () => act("PUT", "/api/dns/block", { update: auto.checked }));
   const lists = h(
     "section",
@@ -541,7 +506,7 @@ function paintAdblock(box, d, load) {
   const search = h("input", { type: "search", placeholder: t("adblock.log.search"), value: adblockUi.q, oninput: () => ((adblockUi.q = search.value), void paintLog()) });
   const outcome = h("select", { onchange: () => ((adblockUi.outcome = outcome.value), void paintLog()) }, ["", "blocked", "allowed", "rewritten", "passed", "own", "failed"].map((o) => h("option", { value: o, selected: adblockUi.outcome === o }, t("adblock.log.only." + (o || "all")))));
   const device = h("select", { onchange: () => ((adblockUi.client = device.value), void paintLog()) }, h("option", { value: "" }, t("adblock.log.allDevices")), d.devices.map((x) => h("option", { value: x.address, selected: adblockUi.client === x.address }, x.name ? `${x.name} (${x.address})` : x.address)));
-  const [keep, keepRow] = tickRow(t("adblock.log.keep"), t("adblock.log.keepHint"), s.log);
+  const [keep, keepRow] = switchRow(t("adblock.log.keep"), t("adblock.log.keepHint"), s.log);
   keep.addEventListener("change", () => act("PUT", "/api/dns/block", { log: keep.checked }));
   const checkName = h("input", { class: "mono", placeholder: "ads.example.com", spellcheck: false, autocapitalize: "none" });
   const checkOut = h("div");
@@ -960,6 +925,8 @@ function notificationsSection() {
   const toggle = (key) => {
     const box = h("input", {
       type: "checkbox",
+      class: "switch",
+      role: "switch",
       checked: n.config[key],
       onchange: async () => {
         error.textContent = "";
@@ -1016,19 +983,15 @@ function hiddenItemsCard() {
   const row = (entry) => {
     // put off by an older version, which kept no words: said by its key
     const words = entry.code ? attentionWords(entry) : { title: t("attention.hidden.old"), text: entry.id };
-    return h(
-      "div",
-      { class: "hidden-item " + entry.severity, menu: true },
-      icon(entry.code ? attentionIcon(entry.code) : "alert"),
-      h("div", { class: "grow" }, h("strong", null, words.title), words.text && h("p", { class: "muted small" }, words.text), h("p", { class: "small muted" }, entry.once ? t("attention.hidden.once") : entry.until === 0 ? t("attention.hidden.forever") : t("attention.hidden.until", { date: shortDate(entry.until) }))),
-      button(t("attention.hidden.back"), { class: "small", onclick: (e) => back(entry, e.currentTarget) }, "bell"),
-    );
+    const when = entry.once ? t("attention.hidden.once") : entry.until === 0 ? t("attention.hidden.forever") : t("attention.hidden.until", { date: shortDate(entry.until) });
+    return uiRow({
+      lead: { icon: entry.code ? attentionIcon(entry.code) : "alert", tone: entry.severity === "danger" ? "bad" : "warn" },
+      name: words.title,
+      sub: [words.text, when].filter(Boolean).join(" · "),
+      title: [words.title, words.text, when].filter(Boolean).join("\n"),
+      action: button(t("attention.hidden.back"), { class: "small", onclick: (e) => back(entry, e.currentTarget) }, "bell"),
+      menu: true,
+    });
   };
-  return h(
-    "section",
-    { class: "card pad", id: "hidden" },
-    h("h2", null, t("attention.hidden.title")),
-    h("p", { class: "muted small" }, t("attention.hidden.lead")),
-    list.length ? h("div", { class: "hidden-items" }, list.map(row)) : h("p", { class: "muted" }, t("attention.hidden.none")),
-  );
+  return uiCard({ title: t("attention.hidden.title"), count: list.length || null, lead: t("attention.hidden.lead"), flush: true, id: "hidden" }, list.length ? list.map(row) : uiEmpty({ text: t("attention.hidden.none") }));
 }

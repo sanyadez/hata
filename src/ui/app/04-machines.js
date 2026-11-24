@@ -1222,6 +1222,15 @@ function limitFields(c, vm = c?.kind === "vm") {
 const LIMITED_PLACES = ["btrfs", "zfs", "lvm"];
 const placeLimits = (name) => LIMITED_PLACES.includes((incusUi.data?.places ?? []).find((p) => p.name === name)?.driver);
 
+/**
+ * The same, for what acts at once (no "Save" after it): a setting with a switch on the right. The switch is a
+ * checkbox drawn as one, so the code that reads `checked` and listens to `change` stays as it is.
+ */
+const switchRow = (label, hint, checked, disabled = false) => {
+  const box = h("input", { type: "checkbox", class: "switch", role: "switch", checked, disabled, "aria-label": label });
+  return [box, uiSetting({ name: label, explain: hint, control: box })];
+};
+
 const tickRow = (label, hint, checked) => {
   const box = h("input", { type: "checkbox", checked });
   return [box, h("label", { class: "check" }, box, h("span", null, h("strong", null, label), hint && h("span", { class: "muted small block" }, hint)))];
