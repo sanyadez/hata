@@ -8,27 +8,47 @@ import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { APP_DIR, appParts } from "./uiparts";
 
-/** The utilities of the system: words (small, muted, mono, error, strong, num), a line cut or kept whole, a column, the kinds of a button */
-export const UTILITIES = new Set(
-  "small muted mono clip grow stack stack-s wrap error strong num center sr-only btn primary danger ghost quiet icon-btn with-icon square link danger-text short wide whole".split(" "),
-);
+import { UTILITIES } from "./uiclasses";
+
+export { UTILITIES };
 
 /** The classes of a part that are neither a block's nor a utility */
 export function ownClasses(text: string): string[] {
   const found: string[] = [];
   for (const m of text.matchAll(/(?:class|cls): "([^"]*)"/g)) found.push(...m[1].split(/\s+/));
   for (const m of text.matchAll(/(?:class|cls): `([^`]*)`/g)) found.push(...m[1].replace(/\$\{[^}]*\}/g, " ").split(/\s+/));
+  // classes put on or asked of an element while the page runs, and the variants of an icon
+  for (const m of text.matchAll(/classList\.(?:add|toggle|remove|replace|contains)\(\s*"([^"]*)"/g)) found.push(m[1]);
+  for (const m of text.matchAll(/\.className\s*=\s*"([^"]*)"/g)) found.push(...m[1].split(/\s+/));
+  for (const m of text.matchAll(/\bicon\(\s*[^,()]+,\s*"([^"]*)"/g)) found.push(...m[1].split(/\s+/));
   return found.filter((c) => c && !c.startsWith("ui-") && !UTILITIES.has(c));
 }
-
 
 test("no part draws anything of its own", () => {
   const over: string[] = [];
   for (const part of appParts()) {
-    // 01-core.js is the system itself: the blocks and the frame of the page (the top bar, windows, menus, toasts)
-    if (part === "01-core.js") continue;
     const own = ownClasses(readFileSync(`${APP_DIR}/${part}`, "utf8"));
     if (own.length) over.push(`${part}: ${[...new Set(own)].join(", ")} — make it with the blocks of 01-core.js`);
   }
   expect(over).toEqual([]);
+});
+
+test("the style sheet names only the blocks' classes", () => {
+  // the pages of their own (the terminal, a machine's screen, a link for anyone) keep their classes: they are not parts
+  const own = new Set<string>();
+  for (const f of ["terminal.js", "screen.js", "link.js", "terminal.html", "screen.html", "link.html"]) {
+    const text = readFileSync(`${APP_DIR}/../${f}`, "utf8");
+    for (const m of text.matchAll(/["'`]([a-z][\w-]*)["'` ]/g)) own.add(m[1]);
+    for (const m of text.matchAll(/class(?:Name)?\s*[:=]\s*["'`]([^"'`]*)/g)) for (const c of m[1].split(/\s+/)) own.add(c);
+  }
+  const css = readFileSync(`${APP_DIR}/../app.css`, "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  const strange = new Set<string>();
+  for (const m of css.matchAll(/([^{}]+)\{/g)) {
+    if (m[1].trim().startsWith("@")) continue;
+    for (const c of m[1].matchAll(/\.([a-zA-Z][\w-]*)/g)) {
+      const name = c[1];
+      if (!name.startsWith("ui-") && !UTILITIES.has(name) && !own.has(name) && !/^xterm/.test(name)) strange.add(name);
+    }
+  }
+  expect([...strange]).toEqual([]);
 });

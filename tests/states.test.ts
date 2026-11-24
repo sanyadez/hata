@@ -59,7 +59,7 @@ test("a hover takes no accent, moves nothing, lifts nothing", () => {
 
 test("the ring of focus is taken away only where something else shows focus", () => {
   // fields (a border and a halo), menu items (a fill), the search boxes whose frame shows it, windows and frames
-  const allowed = /input|select|textarea|\.select-btn|menu-item|role="option"|dialog|\.search\b|\.add-find|\.house-search|\.ui-shot|\.ui-find|\.ui-search-box/;
+  const allowed = /input|select|textarea|\.ui-select-btn|menu-item|role="option"|dialog|\.search\b|\.ui-top-search|\.add-find|\.house-search|\.ui-shot|\.ui-find|\.ui-search-box/;
   expect(all.filter((r) => /outline\s*:\s*(none|0)\b/.test(r.body) && !allowed.test(r.selector)).map((r) => r.selector)).toEqual([]);
 });
 

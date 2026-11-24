@@ -44,7 +44,7 @@ function restoreDialog(app, snapshot) {
         class: "primary",
         onclick: async () => {
           dialog.close();
-          document.querySelector("dialog.snapshots")?.close();
+          document.querySelector("dialog.ui-dlg-snapshots")?.close();
           try {
             const res = await api("POST", `/api/backups/${app.name}/${snapshot.id}/restore`, {});
             jobDialog(res.job, "restore", app.title, () => void refresh());
@@ -60,10 +60,7 @@ function restoreDialog(app, snapshot) {
 /** The snapshots of one app, newest first, each with what can be done to it */
 function snapshotList(app, snapshots, reload) {
   if (!snapshots.length) return uiEmpty({ text: t("backup.none") });
-  return h(
-    "div",
-    { class: "ui-rows" },
-    snapshots.map((s) => {
+  return uiRows(snapshots.map((s) => {
       const entries = [
         !app.incus && { label: t("backup.files"), icon: "folder", run: () => snapshotFilesDialog(app, s) },
         {
@@ -90,8 +87,7 @@ function snapshotList(app, snapshots, reload) {
         more: entries,
         menu: (at) => menuAt(at, null, entries),
       });
-    }),
-  );
+    }));
 }
 
 /** What a snapshot holds: its folders walked like a disk, a file taken out, chosen ones put back */
@@ -138,7 +134,7 @@ function snapshotFilesDialog(app, snapshot) {
           onclick: async () => {
             sure.close();
             dialog.close();
-            document.querySelector("dialog.snapshots")?.close();
+            document.querySelector("dialog.ui-dlg-snapshots")?.close();
             try {
               const res = await api("POST", `${base}/restore-files`, { paths });
               jobDialog(res.job, "restore", app.title, () => void refresh());
@@ -241,7 +237,7 @@ async function appBackupsTab(app, box) {
 
 function renderBackups() {
   const tab = state.route.tab ?? "overview";
-  shell(...settingsFrame("backups", tab === "overview" && uiStats({ id: "backup-stats" }), h("div", { class: "stack", id: "backup-body" }, uiCard({ flush: true }, uiEmpty({ size: "loading" })))));
+  shell(...settingsFrame("backups", tab === "overview" && uiCard({ flush: true }, uiStats([], { id: "backup-stats" })), h("div", { class: "stack", id: "backup-body" }, uiCard({ flush: true }, uiEmpty({ size: "loading" })))));
   renderBackupsBody();
   if (tab === "overview") void loadBackupsMore();
   if (tab === "history") void loadBackupHistory();

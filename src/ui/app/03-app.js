@@ -100,7 +100,7 @@ function machineBlock(id) {
   const waiting = m.online && !m.status;
   el.classList.toggle("ui-away", !m.online);
   el.oncontextmenu = null;
-  const head = uiBlockHead({ title: [h("a", { href: `#/machines/${m.id}`, class: "clip" }, m.name), uiState(m.online ? "ok" : "off", t(m.online ? "machines.online" : "machines.offline"))], actions: m.os && h("span", { class: "ui-row-time" }, m.os) });
+  const head = uiCardHead({ title: [h("a", { href: `#/machines/${m.id}`, class: "clip" }, m.name), uiState(m.online ? "ok" : "off", t(m.online ? "machines.online" : "machines.offline"))], actions: m.os && h("span", { class: "ui-row-time" }, m.os) });
   let body;
   if (!m.online) {
     const { buttons, openMore } = machineBack(m);
@@ -134,12 +134,12 @@ function renderHome() {
 }
 
 const activityBody = (o) => [
-  uiBlockHead({ title: t("activity.title"), pad: true, actions: isAdmin() && o.activity.length > 0 && h("a", { class: "ui-link", href: "#/activity" }, t("activity.all"), icon("chevron")) }),
-  o.activity.length ? h("div", { class: "ui-rows ui-fits" }, o.activity.map((e) => activityItem(e))) : uiEmpty({ text: t("activity.none") }),
+  uiCardHead({ title: t("activity.title"), pad: true, actions: isAdmin() && o.activity.length > 0 && h("a", { class: "ui-link", href: "#/activity" }, t("activity.all"), icon("chevron")) }),
+  o.activity.length ? uiRows(o.activity.map((e) => activityItem(e)), { cls: "ui-fits" }) : uiEmpty({ text: t("activity.none") }),
 ];
 
 function attentionDialog(list) {
-  openDialog("wide", h("h2", null, t("attention.title")), h("div", { class: "ui-rows ui-attention-list" }, list.map((item) => attentionItem(item))));
+  openDialog("wide", h("h2", null, t("attention.title")), uiRows(list.map((item) => attentionItem(item)), { cls: "ui-attention-list" }));
 }
 
 function attentionBlock(list) {
@@ -148,8 +148,8 @@ function attentionBlock(list) {
   more.classList.add("ui-fits-more");
   more.hidden = true;
   return [
-    uiBlockHead({ title: [t("attention.title"), uiCount(list.length)], pad: true, actions: hidden }),
-    list.length ? h("div", { class: "ui-rows ui-attention-list ui-fits" }, list.map((item) => attentionItem(item))) : uiEmpty({ icon: "check", tone: "ok", text: t("attention.none") }),
+    uiCardHead({ title: [t("attention.title"), uiCount(list.length)], pad: true, actions: hidden }),
+    list.length ? uiRows(list.map((item) => attentionItem(item)), { cls: "ui-attention-list ui-fits" }) : uiEmpty({ icon: "check", tone: "ok", text: t("attention.none") }),
     more,
   ];
 }
@@ -432,7 +432,7 @@ async function storeUpdateDialog(app) {
     // the store's own words on why it changed the app's files: what the lines below cannot say
     plan.why && uiProse(h("p", null, plan.why), { soft: true, title: t("update.why", { store: plan.store }) }),
     versions.length > 0 && h("div", { class: "stack-s" }, versions.map((w) => uiVersionChange({ name: versions.length > 1 || w.name.replace(/[-_]/g, "") !== app.name.replace(/[-_]/g, "") ? w.name : t("update.version"), from: w.from, to: w.to }))),
-    others.length > 0 && h("div", { class: "stack" }, uiSubhead({ title: t(versions.length ? "update.also" : "update.what") }), h("div", { class: "ui-rows" }, others.map(word))),
+    others.length > 0 && h("div", { class: "stack" }, uiSubhead({ title: t(versions.length ? "update.also" : "update.what") }), uiRows(others.map(word))),
     words.length === 0 && fromStore.length > 0 && h("p", { class: "muted small" }, t("update.small")),
     conflicts.length > 0 && h("div", { class: "stack" }, uiSubhead({ title: t("update.conflicts"), lead: t("update.conflictsLead") }), table("conflict")),
     h("p", { class: "muted small" }, t(state.settings?.backup?.beforeUpdate ? "update.safe" : "update.safeNoCopy")),
@@ -514,7 +514,7 @@ function appAccessCard(app) {
 
 function appOverviewTab(app, box) {
   const running = app.containers.filter((c) => c.state === "running").length;
-  const statsBox = h("div", { class: "ui-stats" }, statCell("app-cpu", "cpu", t("sys.cpu")), statCell("app-memory", "memory", t("sys.memory")), uiStat({ icon: "box", label: t("app.containers"), value: String(running), unit: "/ " + app.containers.length, hint: t("status." + app.status) }));
+  const statsBox = uiStats([statCell("app-cpu", "cpu", t("sys.cpu")), statCell("app-memory", "memory", t("sys.memory")), uiStat({ icon: "box", label: t("app.containers"), value: String(running), unit: "/ " + app.containers.length, hint: t("status." + app.status) })]);
 
   const containerRow = (c) => {
     const s = app.stats?.[c.name];
@@ -621,10 +621,10 @@ function followText(url, log, signal) {
 }
 
 function appLogsTab(app, box) {
-  const log = uiConsole({ page: true });
+  const log = uiOutput("", { size: "page" });
   const abort = new AbortController();
   cleanups.push(() => abort.abort());
-  box.replaceChildren(uiConsoleFrame(`docker compose -p ${app.name} logs --follow --tail 200`, log));
+  box.replaceChildren(uiOutputFrame(`docker compose -p ${app.name} logs --follow --tail 200`, log));
   void streamLogs(app, log, abort.signal);
 }
 
@@ -638,7 +638,7 @@ function terminalFrame(query = {}) {
 
 function renderTerminal() {
   shell(pageHead({ title: t("terminal.title"), facts: [t("terminal.hostHint")] }), terminalFrame());
-  document.getElementById("view").classList.add("fill");
+  document.getElementById("view").classList.add("ui-fill");
 }
 
 function appTerminalTab(app, box) {
@@ -647,8 +647,8 @@ function appTerminalTab(app, box) {
   const frame = h("div", { class: "ui-term-holder" });
   const open = (name) => frame.replaceChildren(terminalFrame({ app: app.name, container: name }));
   const pick = running.length > 1 && h("select", { "aria-label": t("terminal.container"), onchange: (e) => open(e.target.value) }, running.map((c) => h("option", { value: c.name }, c.service || c.name)));
-  const line = uiConsoleFrame(`docker exec -it ${running[0].name} sh`, frame, pick);
+  const line = uiOutputFrame(`docker exec -it ${running[0].name} sh`, frame, pick);
   box.replaceChildren(line);
-  if (pick) pick.addEventListener("change", () => (line.querySelector(".ui-console-cmd").lastChild.textContent = `docker exec -it ${pick.value} sh`));
+  if (pick) pick.addEventListener("change", () => (line.querySelector(".ui-output-cmd").lastChild.textContent = `docker exec -it ${pick.value} sh`));
   open(running[0].name);
 }

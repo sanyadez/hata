@@ -301,7 +301,7 @@ function tile(item) {
     href = url ?? `#/machines/${target.machine.id}/apps`;
     external = !!url;
     sub = [uiDot(st), target.machine.online ? (st === "running" && (app.guarded || app.port) ? (app.guarded ? `${location.hostname}:${app.guarded}` : `${target.machine.ip}:${app.port}`) : t("status." + st)) : t("machines.offline")];
-    badges = [app.guarded && uiTileMark("lock", t("access.protected"))];
+    badges = [app.guarded && uiNameMark("lock", t("access.protected"))];
     if (installing) {
       cls = "installing";
       sub = [uiDot(), h("span", { class: "clip" }, jobShort(app.job, target.machine.name))];
@@ -330,7 +330,7 @@ function tile(item) {
         : [uiDot(st), st === "running" && appAddress(app) ? appAddress(app) : t("status." + st)];
     const line = st === "running" && appServiceLine(app);
     if (line) where = h("span", { class: "ui-home-tile-where" }, h("span", { class: "clip" }, line));
-    badges = [app.protected && uiTileMark("lock", t("access.protected")), (app.update || app.newer?.length > 0) && isAdmin() && uiTileMark("up", t(app.update ? "app.storeUpdate" : "app.newer"))];
+    badges = [app.protected && uiNameMark("lock", t("access.protected")), (app.update || app.newer?.length > 0) && isAdmin() && uiNameMark("up", t(app.update ? "app.storeUpdate" : "app.newer"))];
     // an administrator gets what can be done to the app right there; a member, the app's page
     side = admin
       ? h("button", { type: "button", class: "ui-home-tile-open", title: t("home.tileActions"), "aria-label": `${t("home.tileActions")}: ${title}`, onclick: (e) => appTileMenu(app, e.currentTarget) }, icon("more"))
@@ -344,7 +344,7 @@ function tile(item) {
     // a link for the TV: one press shows it on the server's screen (for whoever may; for the rest it is a usual link)
     const toScreen = item.screen && isAdmin() && hasModule("tv");
     if (toScreen) onMain = () => void showOnTv(item.url).then((shown) => shown && toast(t("tv.page.sent", { name: title })));
-    badges = uiTileMark(toScreen ? "tv" : "external", toScreen ? t("home.linkScreen") : null);
+    badges = uiNameMark(toScreen ? "tv" : "external", toScreen ? t("home.linkScreen") : null);
     side = isAdmin() && h("button", { type: "button", class: "ui-home-tile-open", title: t("home.editLink"), "aria-label": `${t("home.editLink")}: ${title}`, onclick: () => linkDialog(item) }, icon("sliders"));
   } else if (item.type === "builtin") {
     // Hata's own tiles: the store opens like an app, "Add" asks what to add
@@ -420,7 +420,7 @@ function livePicture(src, alt, cls) {
   img.addEventListener("error", () =>
     setTimeout(() => {
       if (!img.isConnected || !img.dataset.live || document.hidden) return;
-      img.classList.remove("broken");
+      img.classList.remove("ui-broken");
       img.liveStart();
     }, 5000),
   );
@@ -438,7 +438,7 @@ function liveView(x, name, key, height, alt, cls) {
   const p = svcSpecNow(x.kind)?.pictures?.[name];
   const refused = `${x.id}/${name}/${key}`;
   if (!p?.webrtc || typeof RTCPeerConnection !== "function" || (rtcRefused.get(refused) ?? 0) > Date.now()) return frames();
-  const video = h("video", { class: cls ? `live-video ${cls}` : "live-video", "aria-label": alt });
+  const video = h("video", { class: cls ? `ui-live-video ${cls}` : "ui-live-video", "aria-label": alt });
   video.muted = true;
   video.autoplay = true;
   video.playsInline = true;
@@ -1306,19 +1306,21 @@ function addDialog(closed) {
     const entry = (section) => ({ label: section.label ?? t("add.section." + section.id), icon: section.icon, sub: counted(section), active: section.id === addUi.section && !addUi.find, run: () => ((addUi.section = section.id), (addUi.find = ""), (field.value = ""), paint()) });
     const titled = (group) => ({ title: group ? t("add.group." + group) : null, items: sections.filter((one) => (one.group ?? "") === group).map(entry) });
     const connect = { label: t("add.connect"), icon: "plus", href: storeKinds().length > 0 ? "#/store" : "#/house", run: () => ((state.storeFilter = { query: "", category: storeKinds().length > 0 ? "@" : "" }), dialog.close()) };
-    const fresh = uiSideNav([titled(""), titled("state"), { ...titled("integrations"), items: [...titled("integrations").items, connect] }], { cls: "ui-panes-nav" });
+    const item = (x) => uiSideItem({ label: x.label, icon: x.icon, href: x.href ?? null, onclick: x.run, active: !!x.active, count: x.sub || null });
+    const groups = [titled(""), titled("state"), { ...titled("integrations"), items: [...titled("integrations").items, connect] }];
+    const fresh = uiSide(groups.filter((g) => g.items.length).flatMap((g) => [g.title && uiSideTitle(g.title), ...g.items.map(item)]).filter(Boolean), { cls: "ui-panes-nav" });
     nav.replaceWith(fresh);
     nav = fresh;
     const typed = addUi.find.trim().toLowerCase();
     if (typed) {
       const found = sections.flatMap((section) => section.rows.filter((one) => `${one.title} ${one.sub}`.toLowerCase().includes(typed)));
-      return put(main, found.length ? h("div", { class: "ui-rows" }, found.map(row)) : uiEmpty({ text: t("add.none", { text: addUi.find.trim() }) }));
+      return put(main, found.length ? uiRows(found.map(row)) : uiEmpty({ text: t("add.none", { text: addUi.find.trim() }) }));
     }
     const section = sections.find((one) => one.id === addUi.section);
-    put(main, h("div", { class: "ui-panes-head" }, uiSubhead({ title: section.label ?? t("add.section." + section.id), lead: section.label ? t("add.lead.service") : t("add.lead." + section.id) })), h("div", { class: "ui-rows" }, section.rows.map(row)));
+    put(main, h("div", { class: "ui-panes-head" }, uiSubhead({ title: section.label ?? t("add.section." + section.id), lead: section.label ? t("add.lead.service") : t("add.lead." + section.id) })), uiRows(section.rows.map(row)));
   };
   const field = h("input", { type: "search", placeholder: t("add.find"), "aria-label": t("add.find"), value: addUi.find, autocomplete: "off", oninput: () => ((addUi.find = field.value), paint()) });
-  dialog = openDialog("xwide add-dialog", h("header", null, h("h2", { class: "grow" }, t("home.addTitle")), closeX(() => dialog)), uiSearchBox(field), h("div", { class: "ui-panes" }, nav, main));
+  dialog = openDialog("xwide add-dialog", h("header", null, h("h2", { class: "grow" }, t("home.addTitle")), closeX(() => dialog)), uiSearch(field, { wide: true }), h("div", { class: "ui-panes" }, nav, main));
   if (closed) dialog.addEventListener("close", () => closed(ran));
   paint();
   field.focus();
@@ -1350,7 +1352,7 @@ async function diskPickDialog(pinned) {
   dialog = openDialog(
     "menu",
     h("header", null, h("h2", null, t("home.addDiskTitle"))),
-    disks.length ? h("div", { class: "ui-rows" }, disks.map(row)) : uiEmpty({ text: t("home.noDisks") }),
+    disks.length ? uiRows(disks.map(row)) : uiEmpty({ text: t("home.noDisks") }),
     h("footer", null, closeButton(() => dialog)),
   );
 }
@@ -1406,20 +1408,14 @@ function confirmAction({ title, lead, label, run, kind = "danger", iconName = "t
   const go = button(label, {
     class: kind,
     onclick: async () => {
-      go.disabled = true;
       error.textContent = "";
-      // it may take a while: the button turns, so the wait is seen to be one
-      const mark = go.querySelector(".ico");
-      const turning = icon("refresh", "spin");
-      mark?.replaceWith(turning);
+      // it may take a while: the button is at work, so the wait is seen to be one
       try {
-        await run();
+        await busyWhile(go, run);
         dialog.close();
         void refresh();
       } catch (err) {
         error.textContent = errorText(err);
-        go.disabled = false;
-        if (mark) turning.replaceWith(mark);
       }
     },
   }, iconName);

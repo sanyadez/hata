@@ -91,7 +91,7 @@ function fileKind(entry) {
   return KIND_BY_EXT[dot >= 0 ? entry.name.slice(dot + 1).toLowerCase() : ""] ?? "file";
 }
 
-const fileIcon = (entry) => icon(KIND_ICONS[fileKind(entry)] ?? "file", entry.type === "dir" ? "folder-ico" : "");
+const fileIcon = (entry) => icon(KIND_ICONS[fileKind(entry)] ?? "file", entry.type === "dir" ? "ui-folder-ico" : "");
 const fileTime = (ts) => (new Date(ts).getFullYear() === new Date().getFullYear() ? dateTime(ts) : new Date(ts).toLocaleDateString(state.lang, { day: "numeric", month: "short", year: "numeric" }));
 
 function sortedEntries(entries) {
@@ -315,7 +315,7 @@ function renderFilesBody() {
   const navButton = (label, iconName, off, run, cls = "") => h("button", { type: "button", class: "btn square", title: label, "aria-label": label, disabled: off, onclick: run }, icon(iconName, cls));
   const head = uiToolbar({
     group: [
-      navButton(t("files.back"), "arrow", !(trail && trail.at > trail.first), () => history.back(), "flip"),
+      navButton(t("files.back"), "arrow", !(trail && trail.at > trail.first), () => history.back(), "ui-flip"),
       navButton(t("files.forward"), "arrow", !(trail && trail.at < trail.last), () => history.forward()),
       navButton(t("files.up"), "up", !!filesMachine() && path === "/", goUp),
     ],
@@ -725,7 +725,7 @@ function renderMyHata() {
     return hataTile({ href: filesHash(one.dir ? one.path : parent, ""), onclick: one.dir ? null : () => (filesUi.pick = name), iconName: one.dir ? "folder" : "file", title: name, sub: one.path, menu: (at) => menuAt(at, menuHeader(name, one.path, one.dir ? "folder" : "file"), [{ label: t("files.copyPath"), icon: "copy", run: () => copyText(one.path) }, { label: t("files.unfavorite"), icon: "star", run: () => favorite(one.path, false, name) }]) });
   };
   const machineTile = (m) => hataTile({ href: m.online ? filesHash("/", m.id) : `#/machines/${m.id}`, iconName: "server", title: m.name, sub: m.online ? machineOs(m) : t("machines.offline"), away: !m.online });
-  const section = (title, tiles, extra) => uiCard({ title, actions: extra }, h("div", { class: "ui-tiles" }, tiles));
+  const section = (title, tiles, extra) => uiCard({ title, actions: extra }, uiTiles(tiles));
   const local = disks.filter((d) => !d.network);
   const network = disks.filter((d) => d.network);
   const machines = machinesUi.list?.machines ?? [];
@@ -763,7 +763,7 @@ function renderMyHata() {
 function renderMySharedFolders() {
   const shares = state.myShares;
   const favorites = state.favorites ?? [];
-  const section = (title, tiles) => uiCard({ title }, h("div", { class: "ui-tiles" }, tiles));
+  const section = (title, tiles) => uiCard({ title }, uiTiles(tiles));
   // a machine that is away keeps its tiles, greyed: its folders open once it is back
   const shareTile = (share, m) => hataTile({ href: filesHash(share.path, m ? m.id : ""), iconName: "share", title: share.name, sub: m && !m.online ? t("machines.offline") : t(share.access === "write" ? "myhata.mayWrite" : "myhata.mayRead"), words: true, away: !!m && !m.online, menu: (at) => sidebarMenu(at, { label: share.name, path: share.path, machine: m ? m.id : "", iconName: "share" }) });
   const favoriteTile = (one) => {
@@ -856,12 +856,12 @@ function filesTable(entries) {
       "tr",
       { class: (filesUi.selected.has(entry.name) ? "ui-selected" : "") + (filesUi.cursor === entry.name ? " ui-cursor" : ""), "data-name": entry.name },
       h("td", { class: "ui-files-tick" }, entryCheckbox(entry)),
-      h("td", { class: "ui-files-name" }, entryOpener(entry, "ui-files-open", fileIcon(entry), h("span", { class: "clip" }, entry.name), entry.link && icon("link", "faint"), entryMarks(entry))),
+      h("td", { class: "ui-files-name" }, entryOpener(entry, "ui-files-open", fileIcon(entry), h("span", { class: "clip" }, entry.name), entry.link && icon("link", "ui-faint"), entryMarks(entry))),
       h("td", { class: "num muted" }, entry.type === "file" ? bytes(entry.size) : "—"),
       h("td", { class: "muted ui-files-when" }, fileTime(entry.modified)),
       h("td", { class: "ui-files-tick" }, entryMore(entry)),
     );
-  return uiFilesList([h("th", { class: "ui-files-tick" }, all), h("th", null, t("files.col.name")), h("th", { class: "num" }, t("files.col.size")), h("th", { class: "ui-files-when" }, t("files.col.modified")), h("th")], entries.map(row));
+  return uiFileTable([h("th", { class: "ui-files-tick" }, all), h("th", null, t("files.col.name")), h("th", { class: "num" }, t("files.col.size")), h("th", { class: "ui-files-when" }, t("files.col.modified")), h("th")], entries.map(row));
 }
 
 /** A file without a picture: its extension and what it is, on the colour of its kind */
@@ -982,7 +982,7 @@ function menuAt(at, header, entries) {
     e.href
       ? h("a", { class: "ui-menu-item", href: e.href, ...(e.newTab ? { target: "_blank", rel: "noopener noreferrer" } : {}), onclick: () => dialog.close() }, e.iconEl ?? icon(e.icon), e.label)
       : h("button", { type: "button", class: "ui-menu-item" + (e.danger ? " danger" : ""), disabled: !!e.off, onclick: () => (dialog.close(), e.run()) }, e.iconEl ?? icon(e.icon), e.label);
-  const marked = (e, el) => (e.on && el.append(icon("check", "on-mark")), el);
+  const marked = (e, el) => (e.on && el.append(icon("check", "ui-on-mark")), el);
   dialog = openDialog("menu dropdown", header, entries.filter(Boolean).map((e) => marked(e, one(e))));
   placeAt(dialog, at);
   // opened by the pointer: the first entry is not chosen by itself (the dialog takes the focus instead)
@@ -1008,12 +1008,12 @@ const hasOwnMenu = (el) => {
 };
 
 /** The rows a right click finds the actions of by themselves: what their buttons and their link do */
-const MENU_ROWS = "tr, .snapshot, .machine-card, .attention-item, .ui-attention, .tool";
+const MENU_ROWS = "tr, .ui-row, .ui-attention";
 
 /** The menu of a row made of its own buttons — the same actions, where the pointer is; false — it has none */
 function rowMenu(row, at) {
   const shown = (el) => el.getClientRects().length > 0 && !el.closest("dialog:not([open])");
-  const buttons = [...row.querySelectorAll("button, a.btn")].filter((b) => shown(b) && !b.closest(".menu-item, .ui-menu-item") && !b.classList.contains("select-btn") && b.type !== "submit");
+  const buttons = [...row.querySelectorAll("button, a.btn")].filter((b) => shown(b) && !b.closest(".ui-menu-item") && !b.classList.contains("ui-select-btn") && b.type !== "submit");
   // the name, without the chips that sit inside it ("test" of "test · Everything")
   const named = row.querySelector("h2 .with-icon") ?? row.querySelector("strong, h2, h3, .strong, .name");
   const title = (named && ([...named.childNodes].filter((n) => n.nodeType === Node.TEXT_NODE).map((n) => n.textContent).join("").trim() || named.textContent.trim())) || "";
@@ -1051,7 +1051,7 @@ function rowMenu(row, at) {
 function contextMenus() {
   document.addEventListener("contextmenu", (e) => {
     if (e.defaultPrevented || e.shiftKey || !(e.target instanceof Element)) return;
-    if (e.target.closest("input, textarea, select, .select-btn, [contenteditable], iframe, dialog.menu")) return;
+    if (e.target.closest("input, textarea, select, .ui-select-btn, [contenteditable], iframe, dialog.ui-dlg-menu")) return;
     const picked = getSelection();
     if (picked && !picked.isCollapsed && picked.containsNode(e.target, true)) return;
     const at = { x: e.clientX, y: e.clientY };
@@ -1251,12 +1251,12 @@ const newFileDialog = (dir) =>
 
 /** The search field of the folder on screen: names under it, found by the server */
 function findBox(path) {
-  const input = h("input", { type: "search", class: "ui-findbox-input", placeholder: t("files.find"), "aria-label": t("files.find"), value: filesUi.find?.under === path ? filesUi.find.query : "", spellcheck: false });
+  const input = h("input", { type: "search", placeholder: t("files.find"), "aria-label": t("files.find"), value: filesUi.find?.under === path ? filesUi.find.query : "", spellcheck: false });
   let timer;
   const run = async () => {
     const query = input.value.trim();
     if (query.length < 2) {
-      if (filesUi.find) (filesUi.find = null), renderFilesBody(), document.querySelector("#files-main input.ui-findbox-input")?.focus();
+      if (filesUi.find) (filesUi.find = null), renderFilesBody(), document.querySelector("#files-main .ui-find input")?.focus();
       return;
     }
     filesUi.find = { under: path, query, found: null, more: false };
@@ -1270,7 +1270,7 @@ function findBox(path) {
     }
     const caret = input.selectionStart;
     renderFilesBody();
-    const again = document.querySelector("#files-main input.ui-findbox-input");
+    const again = document.querySelector("#files-main .ui-find input");
     if (again) (again.focus(), again.setSelectionRange(caret, caret));
   };
   input.addEventListener("input", () => (clearTimeout(timer), (timer = setTimeout(run, 400))));
@@ -1279,7 +1279,7 @@ function findBox(path) {
     if (e.key === "Escape") ((input.value = ""), clearTimeout(timer), void run());
   });
   // it searches by itself as one types; the button is for whoever does not know that
-  return uiFindBox(input, { label: t("files.findGo"), onclick: () => (clearTimeout(timer), void run(), input.focus()) });
+  return uiSearch(input, { go: { label: t("files.findGo"), onclick: () => (clearTimeout(timer), void run(), input.focus()) } });
 }
 
 /** What a search found: each with the folder it lies in; a folder opens, a file opens its folder with it chosen */
@@ -1309,7 +1309,7 @@ function foundList(find) {
     "div",
     { class: "stack" },
     h("p", { class: "muted small" }, t(find.more ? "files.foundMore" : "files.found", { n: find.found.length, query: find.query })),
-    uiFilesList([h("th", null, t("files.col.name")), h("th", { class: "num" }, t("files.col.size")), h("th", { class: "ui-files-when" }, t("files.col.modified"))], find.found.map(row)),
+    uiFileTable([h("th", null, t("files.col.name")), h("th", { class: "num" }, t("files.col.size")), h("th", { class: "ui-files-when" }, t("files.col.modified"))], find.found.map(row)),
   );
 }
 
@@ -1464,6 +1464,7 @@ function renderTrash() {
       uiLine([button(t("trash.restore"), { class: "small", onclick: back([item]) }, "undo"), isAdmin() && uiMore([{ label: t("files.deleteForever") + "…", icon: "trash", danger: true, run: () => remove(item) }], { size: "s" })], { end: true }),
     ],
     sub: [folderOf(item.from), ago(item.at), bytes(item.size)].join(" · "),
+    selected: trashChosen.has(item.id),
     menu: (at) => menuAt(at, null, [{ label: t("trash.restore"), icon: "undo", run: () => back([item])({ currentTarget: {} }) }, isAdmin() && { label: t("files.deleteForever") + "…", icon: "trash", danger: true, run: () => remove(item) }].filter(Boolean)),
   });
   const keep = data?.keepDays ?? 30;
@@ -1515,7 +1516,7 @@ function folderPicker({ title, start, confirmLabel, action, allowed = () => true
   let dialog;
   const crumbs = h("div", { class: "ui-path-crumbs wrap" });
   const quick = uiLine([]);
-  const folders = h("div", { class: "ui-rows ui-picker" });
+  const folders = uiRows([], { cls: "ui-picker" });
   const error = h("p", { class: "error", role: "alert" });
   const confirm = button(confirmLabel, {
     class: "primary",
@@ -1555,11 +1556,11 @@ function folderPicker({ title, start, confirmLabel, action, allowed = () => true
     const other = on && machinesUi.list?.machines.find((m) => m.id === on);
     put(crumbs, other && h("span", { class: "with-icon strong" }, icon("server"), other.name), crumb(share ? share.name : "/", base), parts.map((part, i) => [(i > 0 || share) && icon("chevron"), crumb(part, (base === "/" ? "" : base) + "/" + parts.slice(0, i + 1).join("/"))]));
     // the data folder and the disks, one press away wherever the picker is; with `machines` the other machines too
-    const jump = (label, to, iconName, target = on) => uiJump({ label, icon: iconName, active: target === on && (at === to || at.startsWith(to + "/")), onclick: () => show(to, target) });
+    const jump = (label, to, iconName, target = on) => uiChip({ label, icon: iconName, active: target === on && (at === to || at.startsWith(to + "/")), onclick: () => show(to, target) });
     const volumes = on ? [] : outerVolumes(listing);
     const others = machines ? (machinesUi.list?.machines ?? []).filter((m) => m.online) : [];
     if (mine) put(quick, mine.map((one) => jump(one.name, one.path, "share")));
-    else put(quick, (on ? home : listing.home) && jump(t("files.home"), on ? home : listing.home, "home", ""), volumes.map((d) => jump(volumeName(d), d.path, d.network ? "globe" : "disk")), others.map((m) => uiJump({ label: m.name, icon: "server", active: on === m.id, onclick: () => show("/", m.id) })));
+    else put(quick, (on ? home : listing.home) && jump(t("files.home"), on ? home : listing.home, "home", ""), volumes.map((d) => jump(volumeName(d), d.path, d.network ? "globe" : "disk")), others.map((m) => uiChip({ label: m.name, icon: "server", active: on === m.id, onclick: () => show("/", m.id) })));
     quick.hidden = mine ? mine.length < 2 : !volumes.length && !others.length && !on;
     const inner = sortedEntries(listing.entries).filter((entry) => entry.type === "dir" && shown(joinPath(at, entry.name), on));
     put(folders, inner.length ? inner.map((entry) => uiRow({ lead: { icon: "folder" }, name: entry.name, onclick: () => show(joinPath(at, entry.name)) })) : uiEmpty({ text: t("files.noFolders") }));
@@ -1613,7 +1614,7 @@ function mediaDialog(entry) {
     const next = list[list.findIndex((item) => item.name === current.name) + by];
     if (next) show(next);
   };
-  const prev = h("button", { type: "button", class: "icon-btn", "aria-label": t("files.previous"), title: t("files.previous"), onclick: () => step(-1) }, icon("chevron", "flip"));
+  const prev = h("button", { type: "button", class: "icon-btn", "aria-label": t("files.previous"), title: t("files.previous"), onclick: () => step(-1) }, icon("chevron", "ui-flip"));
   const next = h("button", { type: "button", class: "icon-btn", "aria-label": t("files.next"), title: t("files.next"), onclick: () => step(1) }, icon("chevron"));
   // a video is played by Hata's own player where ffmpeg is: sound tracks, subtitles, formats a browser alone cannot
   let player = null;

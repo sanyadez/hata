@@ -332,7 +332,7 @@ function paintDns(box, d, load) {
     serversRow,
     uiFoot(button(t("settings.save"), { class: "primary", onclick: (e) => send({ upstream: choice.value, doh: doh.checked, servers: servers.value.split(/[\s,]+/).filter(Boolean) }, e.currentTarget) })),
     s.enabled && d.upstreams.length > 0 && h("div", { class: "ui-band-plain" }, t("dns.upNow")),
-    s.enabled && d.upstreams.length > 0 && uiRowsIn(d.upstreams.map(upRow)),
+    s.enabled && d.upstreams.length > 0 && uiRows(d.upstreams.map(upRow), { inCard: true }),
   );
   // the names answered here
   const name = h("input", { class: "mono", placeholder: "printer.lan", spellcheck: false, autocapitalize: "none", "aria-label": t("names.col.name") });
@@ -581,7 +581,7 @@ function paintAdblock(box, d, load) {
       }));
     },
   });
-  const appsBox = uiRowsIn();
+  const appsBox = uiRows([], { inCard: true });
   moveIn.append(uiLine([button(t("adblock.importFile"), { onclick: () => picked.click() }, "upload"), picked]), appsBox, planError);
   void api("GET", "/api/dns/block/import/apps").then((apps) => {
     put(appsBox, ...apps.map((a) => uiRow({ lead: { icon: "box" }, name: a.title || a.name, sub: t(a.found ? "adblock.importApp" : "adblock.importAppNoFile", { kind: a.kind === "pihole" ? "Pi-hole" : "AdGuard Home" }), action: a.found && button(t("adblock.importTake"), { class: "small", onclick: () => planFrom(api("POST", "/api/dns/block/import/app", { name: a.name })) }, "download") })));
@@ -807,8 +807,7 @@ function devicesCard() {
     const here = sub && info.devices.some((d) => d.endpoint === sub.endpoint);
     put(
       box,
-      uiRowsIn(
-        info.devices.map((device) => {
+      uiRows(info.devices.map((device) => {
           const own = sub?.endpoint === device.endpoint;
           return uiRow({
             lead: { icon: "bell" },
@@ -817,8 +816,7 @@ function devicesCard() {
             action: button(t("notify.test"), { class: "small", onclick: () => attempt(async () => (await api("POST", "/api/notify/test", { channel: "push", device: device.id }), toast(t("notify.testSent")))) }),
             more: [{ label: t("app.remove"), icon: "trash", danger: true, run: () => attempt(async () => (own && (await sub.unsubscribe().catch(() => {}), localStorage.removeItem("hata.push")), await api("DELETE", `/api/notify/push?id=${device.id}`))) }],
           });
-        }),
-      ),
+        }), { inCard: true }),
       !here && uiLine([button(t("notify.pushHere"), { class: "primary", onclick: () => attempt(() => pushSubscribe(info.key)) }, "bell")]),
     );
   };

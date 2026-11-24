@@ -74,14 +74,7 @@ function addToMachinesMenu(at = null) {
   dialog = openDialog(
     at ? "menu dropdown" : "menu",
     h("header", null, h("h2", null, t("machines.addWhat"))),
-    h(
-      "div",
-      { class: "ui-rows" },
-      hasModule("machines") && entry(t("machines.addExisting"), t("machines.addExistingHint"), "server", addMachineDialog),
-      hasModule("containers") && entry(t("machines.addContainer"), hint("container"), "box", here("container")),
-      hasModule("containers") && entry(t("machines.addVm"), hint("vm"), "box", here("vm")),
-      hasModule("proxmox") && entry(t("machines.addPve"), t("machines.addPveHint"), "server", () => pveDialog()),
-    ),
+    uiRows([hasModule("machines") && entry(t("machines.addExisting"), t("machines.addExistingHint"), "server", addMachineDialog), hasModule("containers") && entry(t("machines.addContainer"), hint("container"), "box", here("container")), hasModule("containers") && entry(t("machines.addVm"), hint("vm"), "box", here("vm")), hasModule("proxmox") && entry(t("machines.addPve"), t("machines.addPveHint"), "server", () => pveDialog())]),
   );
   if (at) {
     // under the button, its right edge on the button's
@@ -587,7 +580,7 @@ function renderContainersBody() {
       box,
       uiCard(
         { title: t("incus.missing.title"), lead: t("incus.missing.lead") },
-        uiGives(["system", "docker", "machine", "snapshots"].map((k) => t("incus.gives." + k))),
+        uiList(["system", "docker", "machine", "snapshots"].map((k) => t("incus.gives." + k)), { mono: false }),
         uiNeedProgram({ name: "Incus", why: t("incus.missing.what"), command: d.install, run: d.install ? install : null }),
         !d.install && uiNotice({ tone: "warn", text: t("incus.missing.byHand") }),
         d.install && installPlaceRow(),
@@ -633,7 +626,7 @@ function vmCard(d) {
   if (vms.state !== "missing") return uiCard({ ...head, lead: t("incus.vm." + vms.state) });
   return uiCard(
     { ...head, lead: t("incus.vm.lead") },
-    uiGives(["limits", "images", "screen", "space"].map((k) => t("incus.vm.limit." + k))),
+    uiList(["limits", "images", "screen", "space"].map((k) => t("incus.vm.limit." + k)), { mono: false }),
     vms.install ? uiCommand(vms.install) : uiNotice({ tone: "warn", text: t("incus.missing.byHand") }),
     vms.install &&
       uiLine([
@@ -701,10 +694,7 @@ function incusPlacesCard(d) {
     });
   return uiCard(
     { title: t("incus.place.title"), lead: t("incus.place.lead"), flush: true, actions: button(t("incus.place.add"), { class: "small", onclick: add }, "plus") },
-    h(
-      "div",
-      { class: "ui-rows" },
-      list.map((p) => {
+    uiRows(list.map((p) => {
         const percent = p.total ? Math.round((p.used / p.total) * 100) : 0;
         const room = [p.total ? t("sys.free", { free: bytes(p.total - p.used), total: bytes(p.total) }) : null, t("incus.place.instancesN", { n: p.instances })].filter(Boolean).join(" · ");
         return uiRow({
@@ -716,8 +706,7 @@ function incusPlacesCard(d) {
           action: !p.standard && button(t("incus.place.makeStandard"), { class: "small", onclick: (e) => act(e.currentTarget, "PUT", `/api/containers/places/${p.name}`) }, "check"),
           more: !p.standard && !p.profile && !p.instances ? [{ label: t("incus.place.remove"), icon: "trash", danger: true, run: () => act(null, "DELETE", `/api/containers/places/${p.name}`) }] : null,
         });
-      }),
-    ),
+      })),
   );
 }
 
@@ -737,10 +726,7 @@ function discsCard(d) {
     },
     list.length === 0
       ? uiEmpty({ text: t("incus.disc.none") })
-      : h(
-          "div",
-          { class: "ui-rows" },
-          list.map((x) =>
+      : uiRows(list.map((x) =>
             uiRow({
               lead: { icon: "disk" },
               name: x.name,
@@ -748,8 +734,7 @@ function discsCard(d) {
               action: button(t("incus.disc.makeVm"), { class: "small", onclick: () => newDiscVm(x) }, "plus"),
               more: [{ label: t("incus.disc.remove"), icon: "trash", danger: true, off: x.usedBy.length > 0, run: () => removeDiscDialog(x) }],
             }),
-          ),
-        ),
+          )),
   );
 }
 
@@ -949,7 +934,10 @@ async function instanceJob(path, data, error, dialog, button) {
       void loadMachines();
     });
   } catch (err) {
-    error.textContent = err.code === "containers.badField" ? t("incus.bad." + err.detail.field) : errorText(err);
+    const said = err.code === "containers.badField" ? t("incus.bad." + err.detail.field) : errorText(err);
+    // the field the server names is said under it: the name of a rename or a copy, the place of a copy
+    const at = { name: dialog.querySelector("input"), taken: dialog.querySelector("input"), place: dialog.querySelector("select") };
+    if (!(err.code === "containers.badField" && refuseAt(err, at, said))) error.textContent = said;
     button.disabled = false;
   }
 }
@@ -1324,7 +1312,9 @@ function newContainerDialog(start = "container") {
         void loadMachines();
       });
     } catch (err) {
-      error.textContent = err.code === "containers.badField" ? t("incus.bad." + err.detail.field) : errorText(err);
+      const said = err.code === "containers.badField" ? t("incus.bad." + err.detail.field) : errorText(err);
+      const at = { name, taken: name, image, memory, disk, network: netSelect, place: placeSelect };
+      if (!(err.code === "containers.badField" && refuseAt(err, at, said))) error.textContent = said;
       submit.disabled = false;
     }
   };
@@ -1414,7 +1404,8 @@ function containerLimitsDialog(c) {
       toast(t("incus.saved", { name: c.name }));
       void loadContainers();
     } catch (err) {
-      error.textContent = err.code === "containers.badField" ? t("incus.bad." + err.detail.field) : errorText(err);
+      const said = err.code === "containers.badField" ? t("incus.bad." + err.detail.field) : errorText(err);
+      if (!(err.code === "containers.badField" && refuseAt(err, { memory, disk, diskShrink: disk }, said))) error.textContent = said;
       submit.disabled = false;
     }
   };

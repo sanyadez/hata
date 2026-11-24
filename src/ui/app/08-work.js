@@ -21,14 +21,14 @@ function rowList(title, hint, items, cells) {
     const row = {};
     const remove = h("button", { type: "button", class: "icon-btn", "aria-label": t("app.remove"), title: t("app.remove"), onclick: () => (rows.splice(rows.indexOf(row), 1), row.el.remove()) }, icon("trash"));
     if (item.raw !== undefined) {
-      row.el = uiInputs([uiReadOnly(item.raw, t("edit.rawHint")), remove]);
+      row.el = uiAffix(...[uiReadOnly(item.raw, t("edit.rawHint")), remove]);
       row.value = () => item;
     } else {
       const inputs = cells.map((c) => (c.options ? choice(item[c.key], c.options, c.label) : h("input", { value: item[c.key] ?? "", placeholder: c.label, "aria-label": c.label, class: "mono " + (c.class ?? ""), spellcheck: false, autocapitalize: "none", autocomplete: "off" })));
       // a folder of the server can be chosen instead of typed: the disks are offered there too
       const cellsOf = inputs.map((input, i) =>
         cells[i].pick
-          ? uiInputs([
+          ? uiAffix(...[
               input,
               h("button", {
                 type: "button",
@@ -40,7 +40,7 @@ function rowList(title, hint, items, cells) {
             ], { tight: true })
           : input,
       );
-      row.el = uiInputs([...cellsOf, remove]);
+      row.el = uiAffix(...[...cellsOf, remove]);
       row.value = () => ({ ...(item.from === undefined ? {} : { from: item.from }), ...Object.fromEntries(cells.map((c, i) => [c.key, inputs[i].value])) });
       // a row added and left empty was not meant
       row.empty = () => item.from === undefined && inputs.every((input) => input.tagName === "SELECT" || input.value.trim() === "");
@@ -83,7 +83,7 @@ function serviceForm(service, memoryTotal) {
 
   const max = Math.max(memoryTotal, service.memory);
   const memory = h("input", { type: "number", min: 0, max, step: 1, value: service.memory || "", placeholder: "0", class: "short mono", "aria-label": t("edit.memory") });
-  const slider = h("input", { type: "range", min: 0, max, step: 64, value: service.memory, "aria-label": t("edit.memory"), oninput: () => (memory.value = Number(slider.value) || "") });
+  const slider = uiSlider({ min: 0, max, step: 64, value: service.memory, label: t("edit.memory"), oninput: () => (memory.value = Number(slider.value) || "") });
   memory.addEventListener("input", () => (slider.value = Number(memory.value) || 0));
 
   const cpu = choice(String(service.cpuShares), [["0", t("edit.notSet")], ["10", t("edit.cpuLow")], ["50", t("edit.cpuMedium")], ["90", t("edit.cpuHigh")]], t("edit.cpuShares"));
@@ -101,7 +101,7 @@ function serviceForm(service, memoryTotal) {
       devices.el,
       command.el,
       formRow(t("edit.privileged"), h("span", null, privileged), t("edit.privilegedHint")),
-      formRow(t("edit.memory"), uiInputs([slider, memory, h("span", { class: "muted small" }, "MB")]), t("edit.memoryHint", { total: bytes(memoryTotal * 1024 * 1024) })),
+      formRow(t("edit.memory"), uiAffix(...[slider, memory, h("span", { class: "muted small" }, "MB")]), t("edit.memoryHint", { total: bytes(memoryTotal * 1024 * 1024) })),
       formRow(t("edit.cpuShares"), cpu),
       formRow(t("edit.restart"), restart),
       formRow(t("edit.capAdd"), caps, t("edit.capAddHint")),
@@ -194,7 +194,7 @@ function iconField(model, app) {
     }
   });
   paint();
-  field.el = uiFormRow(t("edit.icon"), [uiInputs([preview, url, actions, file]), note], null, { group: true });
+  field.el = uiFormRow(t("edit.icon"), [uiAffix(...[preview, url, actions, file]), note], null, { group: true });
   return field;
 }
 
@@ -231,7 +231,7 @@ function appSettingsForm(model, memoryTotal, app, installed) {
         services.map((service, i) => {
           const label = service.name || t("edit.mainService");
           // the last service stays: an app without one is removed as a whole
-          return { label, active: i === shown, onclick: () => ((shown = i), paint()), remove: services.length > 1 && { label: `${t("edit.removeService")}: ${label}`, run: () => confirmRemove(i, label) } };
+          return uiChip({ label, active: i === shown, onclick: () => ((shown = i), paint()), remove: services.length > 1 && { label: `${t("edit.removeService")}: ${label}`, run: () => confirmRemove(i, label) } });
         }),
         button(t("edit.addService"), { class: "small ghost", onclick: addService }, "plus"),
       ),
@@ -266,8 +266,8 @@ function appSettingsForm(model, memoryTotal, app, installed) {
       h("datalist", { id: "capabilities" }, CAPABILITIES.map((cap) => h("option", { value: cap }))),
       formRow(t("edit.title"), title),
       iconField_.el,
-      formRow(t("edit.webUi"), uiInputs([scheme, host, h("span", { class: "muted" }, ":"), port, path]), t("edit.webUiHint")),
-      domains.length > 0 && formRow(t("edit.webDomain"), [uiInputs([domain, h("span", { class: "muted mono" }, "." + domains[0])]), domainHint]),
+      formRow(t("edit.webUi"), uiAffix(...[scheme, host, h("span", { class: "muted" }, ":"), port, path]), t("edit.webUiHint")),
+      domains.length > 0 && formRow(t("edit.webDomain"), [uiAffix(...[domain, h("span", { class: "muted mono" }, "." + domains[0])]), domainHint]),
       uiFormRow(t("edit.services"), tabs, null, { group: true }),
       body,
     ),
@@ -323,7 +323,7 @@ async function appComposeTab(app, box) {
   } catch (e) {
     return box.replaceChildren(h("p", { class: "error" }, errorText(e)));
   }
-  const area = uiCodeEditor({ value: text, wrap: "off", "aria-label": "compose.yml" }, { page: true });
+  const area = uiCodeArea({ value: text, label: "compose.yml", page: true });
   const error = h("p", { class: "error", role: "alert" });
   const save = button(t("app.saveApply"), {
     class: "primary",
@@ -587,7 +587,7 @@ function patchJobs() {
       const sub = root.querySelector(".ui-work-sub");
       if (sub) sub.textContent = jobSub(e);
       const detail = root.querySelector(".ui-work-detail");
-      if (detail) detail.textContent = jobDetail(e, root.classList.contains("row"));
+      if (detail) detail.textContent = jobDetail(e, root.classList.contains("ui-work-row"));
       const short = root.querySelector(".ui-work-short");
       if (short) short.textContent = e.status === "running" ? jobShort(e) : jobSub(e) || t("job.failed");
       const bar = root.querySelector(".ui-work-bar");
@@ -660,7 +660,7 @@ function jobStrip(shown) {
 function paintJobs() {
   let tray = document.getElementById("job-tray");
   const shown = !state.user || !isAdmin() ? [] : [...jobsUi.list.values()].filter((e) => !jobsUi.logs.has(e.id)).sort((a, b) => jobWaits(b) - jobWaits(a) || jobEnded(a) - jobEnded(b));
-  document.body.classList.toggle("has-jobs", shown.length > 0);
+  document.body.classList.toggle("ui-has-jobs", shown.length > 0);
   if (!shown.length) {
     tray?.remove();
     jobsUi.sig = "";
@@ -675,7 +675,7 @@ function paintJobs() {
   const sig = JSON.stringify([jobsUi.min, jobsUi.all, jobsUi.lost, state.lang, shown.map((e) => [e.id, e.status, e.stopped, jobHeading(e), e.icon, e.status === "done" && jobUrl(e), !!jobNotes(e), jobLogin(e)?.login.kind ?? ""])]);
   if (sig !== jobsUi.sig) {
     jobsUi.sig = sig;
-    tray.className = jobsUi.min ? "min" : "";
+    tray.className = jobsUi.min ? "ui-min" : "";
     if (jobsUi.min) tray.replaceChildren(jobStrip(shown));
     else if (shown.length === 1) tray.replaceChildren(jobCard(shown[0]));
     else {
@@ -789,7 +789,7 @@ setInterval(() => {
 
 /** Shows a running operation: its console output and how it ended */
 async function jobDialog(id, kind, title, onDone) {
-  const log = uiLog();
+  const log = uiOutput();
   const status = h("span", null, uiState("info", t("job.running")));
   let running = true;
   let dialog;

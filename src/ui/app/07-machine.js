@@ -282,7 +282,7 @@ function machineOverview(m, box) {
   box.replaceChildren(
     uiColumns(
       [
-        m.online ? uiCard({ flush: true, cls: "ui-stats" }, statCells("m")) : uiCard({}, uiEmpty({ text: t("machines.offlineLead", { ago: ago(m.seen) }) })),
+        m.online ? uiCard({ flush: true }, uiStats(statCells("m"))) : uiCard({}, uiEmpty({ text: t("machines.offlineLead", { ago: ago(m.seen) }) })),
         h("div", { id: "m-disks" }),
         m.online && h("div", { id: "machine-sysupdates" }, sysUpdatesCard(m.id)),
         h("div", { id: "machine-extra", class: "stack" }),
@@ -618,7 +618,7 @@ function paintMachineApps() {
       cells: [
         uiCell({ lead: appIcon(app, "row"), name: app.title, sub: h("span", { class: "mono" }, app.name + (app.store ? ` · ${app.store}` : "")) }),
         stateChip(app),
-        h("span", { class: "mono small" }, app.guarded && uiTileMark("lock", t("access.protected")), address),
+        h("span", { class: "mono small" }, app.guarded && uiNameMark("lock", t("access.protected")), address),
         keepClick(uiLine([main, uiMore(more, { size: "s", header: menuHeader(app.title, m.name, "box") })], { end: true })),
       ],
       sub: app.port ? `${m.ip}:${app.port}` : app.name,
@@ -633,9 +633,9 @@ function paintMachineApps() {
 
 function machineAppLogsDialog(m, app) {
   let dialog;
-  const log = uiConsole({ page: true });
+  const log = uiOutput("", { size: "page" });
   const abort = new AbortController();
-  dialog = openDialog("xwide", h("header", null, h("h2", { class: "clip grow" }, `${m.name}: ${app.title}`), closeX(() => dialog)), uiConsoleFrame(`docker compose -p ${app.name} logs --follow --tail 200`, log));
+  dialog = openDialog("xwide", h("header", null, h("h2", { class: "clip grow" }, `${m.name}: ${app.title}`), closeX(() => dialog)), uiOutputFrame(`docker compose -p ${app.name} logs --follow --tail 200`, log));
   dialog.addEventListener("close", () => abort.abort());
   void followText(`/api/machines/${m.id}/apps/${app.name}/logs`, log, abort.signal);
 }
@@ -838,14 +838,14 @@ function paintMachineContainers() {
 
 function machineLogsDialog(m, c) {
   let dialog;
-  const log = uiConsole({ page: true });
+  const log = uiOutput("", { size: "page" });
   const abort = new AbortController();
-  dialog = openDialog("xwide", h("header", null, h("h2", { class: "clip grow" }, `${m.name}: ${c.name}`), closeX(() => dialog)), uiConsoleFrame(`docker logs --follow --tail 200 ${c.name}`, log));
+  dialog = openDialog("xwide", h("header", null, h("h2", { class: "clip grow" }, `${m.name}: ${c.name}`), closeX(() => dialog)), uiOutputFrame(`docker logs --follow --tail 200 ${c.name}`, log));
   dialog.addEventListener("close", () => abort.abort());
   void followText(`/api/machines/${m.id}/logs?container=${c.id}`, log, abort.signal);
 }
 
 function machineTerminalDialog(m, c) {
   let dialog;
-  dialog = openDialog("xwide", h("header", null, h("h2", { class: "clip grow" }, `${m.name}: ${c.name}`), closeX(() => dialog)), uiConsoleFrame(`docker exec -it ${c.name} sh`, uiEmbed(terminalFrame({ machine: m.id, container: c.id }))));
+  dialog = openDialog("xwide", h("header", null, h("h2", { class: "clip grow" }, `${m.name}: ${c.name}`), closeX(() => dialog)), uiOutputFrame(`docker exec -it ${c.name} sh`, uiEmbed(terminalFrame({ machine: m.id, container: c.id }))));
 }
