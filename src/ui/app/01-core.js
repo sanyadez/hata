@@ -514,7 +514,7 @@ function uiRow({ lead = null, name, sub = null, value = null, time = null, state
     more && uiMore(more, { size: "s" }),
     goes && !more && !action && icon("chevron", "ui-row-go"),
   );
-  return h(href ? "a" : "div", { class: `ui-row ${mode}${goes ? " goes" : ""}${action ? " acts" : ""}${cls ? " " + cls : ""}`, href, onclick, id, menu, role: onclick && !href ? "button" : null, tabindex: onclick && !href ? 0 : null }, uiLead(lead), text, tail);
+  return h(href ? "a" : "div", { class: `ui-row ${mode}${goes ? " goes" : ""}${action ? " acts" : ""}${action && (state || value != null) ? " full" : ""}${cls ? " " + cls : ""}`, href, onclick, id, menu, role: onclick && !href ? "button" : null, tabindex: onclick && !href ? 0 : null }, uiLead(lead), text, tail);
 }
 
 /** A group of rows: a grey band with a chevron, a name, a count and its own tail; rows under it */

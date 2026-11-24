@@ -2902,7 +2902,7 @@ button.tv-stage-chip:active { background: rgb(0 0 0 / 0.9); }
 .ui-cell-text { min-width: 0; display: grid; gap: 2px; }
 .ui-cell-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ui-cell-sub { font-size: 12px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.ui-table td:has(> .ui-cell) .ui-td-sub { margin-left: 44px; }
+.ui-table td:has(> .ui-cell > .ui-lead) .ui-td-sub { margin-left: 44px; }
 .ui-select-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px var(--pad); background: var(--accent-soft); border-bottom: 1px solid var(--border); font-size: 13px; font-weight: 600; }
 .ui-select-bar > span { margin-right: auto; }
 .card:not(.pad) > .ui-setting { padding-inline: var(--pad); border-bottom: 1px solid var(--border); }
@@ -2965,3 +2965,10 @@ button.tv-stage-chip:active { background: rgb(0 0 0 / 0.9); }
   .ui-filters > input[type=search] { flex: 0 1 320px; width: auto; margin-left: 0; }
   .ui-filters > :is(select, .select-btn) { width: 280px; flex: none; }
 }
+/* a state in a table is never cut: its column takes what it needs */
+.ui-table td:has(> .ui-state) { overflow: visible; max-width: none; width: 1%; }
+/* Docker's images and volumes: their names are what is read first */
+@container ui-table (min-width: 641px) { .docker-table td:first-child { width: 36%; } }
+/* a narrow row with a state and a button: its tail goes to a line of its own under the name */
+@container ui-row (max-width: 480px) { .ui-row.full .ui-row-tail { flex-basis: 100%; justify-content: flex-end; } }
+.ui-row.full { flex-wrap: wrap; row-gap: 8px; }

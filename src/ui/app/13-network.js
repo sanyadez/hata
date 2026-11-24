@@ -1389,39 +1389,44 @@ function toolsSection() {
         renderSettings();
       },
     }, "download");
-  const row = (tool) =>
-    h(
-      "div",
-      { class: "tool" },
-      h(
-        "div",
-        { class: "grow" },
-        h("div", { class: "tool-head" }, h("strong", null, tool.name), h("span", { class: "state " + (tool.state === "installed" ? "running" : "stopped") }, t("tools.state." + tool.state)), tool.used && h("span", { class: "state running" }, t("tools.used")), tool.version && h("span", { class: "muted small mono" }, tool.version), tool.newer && h("span", { class: "state partial" }, t("tools.newer", { version: tool.newer }))),
-        h("p", { class: "muted small" }, t(`tools.${tool.id}.what`), " ", h("a", { class: "link", href: tool.page }, t(`tools.${tool.id}.where`))),
-        tool.builtIn && h("p", { class: "muted small" }, t(`tools.${tool.id}.builtIn`)),
-        tool.state === "installed" && tool.holds && h("p", { class: "muted small" }, t("tools.holds." + tool.holds)),
-        tool.cannot && h("p", { class: "muted small" }, t("tools.cannot." + tool.cannot)),
-        tool.state !== "installed" && !tool.cannot && (tool.install ? h("p", { class: "cmd" }, icon("terminal"), tool.install) : h("p", { class: "muted small" }, t("mounting.needs.byHand", { package: tool.package }))),
-      ),
-      tool.state !== "installed" && !tool.cannot && tool.install && install(tool),
-      tool.state === "installed" && tool.upgrade?.length > 0 && button(t("tools.update"), { class: "small accent", onclick: () => sysUpgradeDialog("", tool.upgrade, tool.name) }, "up"),
-      tool.state === "installed" && !tool.holds && tool.remove && button(t("tools.remove"), { class: "small", onclick: () => toolRemoveDialog(tool) }, "trash"),
-    );
+  // how a program comes to be installed: the very command, in a window of its own
+  const how = (tool) => {
+    let dialog;
+    dialog = openDialog("confirm", h("header", null, h("h2", { class: "grow" }, t("tools.howTitle", { name: tool.name })), closeX(() => dialog)), h("p", { class: "muted small" }, t(`tools.${tool.id}.what`)), tool.install ? uiCommand(tool.install, { block: true }) : h("p", null, t("mounting.needs.byHand", { package: tool.package })), h("footer", null, closeButton(() => dialog)));
+  };
+  const where = (tool) => h("a", { class: "link", href: tool.page, onclick: (e) => e.stopPropagation() }, t(`tools.${tool.id}.where`));
+  const absentRow = (tool) =>
+    uiRow({
+      name: tool.name,
+      sub: tool.cannot ? t("tools.cannot." + tool.cannot) : h("span", null, t(`tools.${tool.id}.what`), " · ", where(tool)),
+      state: tool.cannot && uiState("off", t("tools.state." + tool.state)),
+      action: !tool.cannot && tool.install && install(tool),
+      more: !tool.cannot && [{ label: t("tools.how"), icon: "terminal", run: () => how(tool) }],
+    });
+  const presentRow = (tool) =>
+    uiRow({
+      name: tool.name,
+      sub: h("span", null, tool.version && h("span", { class: "mono" }, tool.version), tool.version && " · ", t(`tools.${tool.id}.what`), " · ", where(tool), tool.builtIn ? " · " + t(`tools.${tool.id}.builtIn`) : "", tool.holds ? " · " + t("tools.holds." + tool.holds) : ""),
+      state: tool.newer ? uiState("warn", t("tools.newer", { version: tool.newer })) : tool.used ? uiState("info", t("tools.used")) : null,
+      action: tool.upgrade?.length > 0 && button(t("tools.update") + "…", { class: "small", onclick: () => sysUpgradeDialog("", tool.upgrade, tool.name) }, "up"),
+      more: tool.remove ? [{ label: t("tools.remove"), icon: "trash", danger: true, off: !!tool.holds, run: () => toolRemoveDialog(tool) }] : null,
+    });
   const here = tools.filter((tool) => tool.state === "installed");
   const absent = tools.filter((tool) => tool.state !== "installed");
   return [
-    h("section", { class: "card pad stack" }, h("h2", null, t("settings.tools")), h("p", { class: "muted small" }, t("tools.lead")), error),
+    uiCard({}, uiNotice({ tone: "info", text: t("tools.lead") }), error),
     h("div", { id: "sysupdates" }, sysUpdatesCard("")),
-    absent.length > 0 && h("section", { class: "card pad" }, h("h2", null, t("tools.absent"), h("span", { class: "muted" }, " " + absent.length)), absent.map(row)),
-    here.length > 0 && h("section", { class: "card pad" }, h("h2", null, t("tools.present"), h("span", { class: "muted" }, " " + here.length)), here.map(row)),
+    absent.length > 0 && uiCard({ title: t("tools.absent"), count: absent.length, flush: true }, absent.map(absentRow)),
+    here.length > 0 && uiCard({ title: t("tools.present"), count: here.length, flush: true }, here.map(presentRow)),
   ];
 }
 
 /** Newer versions of the system's packages as last checked: "" — this server, else a machine's id */
 const sysUpdates = {};
 const sysUpdatesApi = (at) => (at ? `/api/machines/${at}/system/updates` : "/api/system/updates");
-/** The packages ticked in the list, per place */
+/** The packages ticked in the list, per place, and whether the list is open */
 const sysChosen = {};
+const sysShown = {};
 
 async function loadSysUpdates(at = "") {
   try {
@@ -1470,42 +1475,52 @@ function sysUpdatesCard(at) {
       if (!at) void sysUpdatesEvent("");
     },
   }, "refresh");
-  const head = h("div", { class: "section-head" }, h("h2", null, t("sysupdates.title")), check);
-  if (!info) return h("section", { class: "card pad stack" }, head, waitMark());
-  if (info.error && !info.at) return h("section", { class: "card pad stack" }, head, h("p", { class: "error" }, info.error));
-  if (info.at && !info.manager) return h("section", { class: "card pad stack" }, head, h("p", { class: "muted small" }, t("sysupdates.noManager")));
+  const card = (opts, ...body) => uiCard({ title: t("sysupdates.title"), ...opts }, ...body);
+  if (!info) return card({ actions: check, flush: true }, uiEmpty({ size: "loading" }));
+  if (info.error && !info.at) return card({ actions: check }, uiNotice({ tone: "bad", text: info.error }));
+  if (info.at && !info.manager) return card({}, uiEmpty({ text: t("sysupdates.noManager") }));
   const security = list.filter((p) => p.security).length;
   const when = info.at ? t("sysupdates.checked", { ago: ago(info.at) }) : "";
-  const status = !info.at
-    ? h("p", { class: "muted" }, t("sysupdates.never"))
-    : list.length
-      ? h("p", { class: "sys-status" }, h("span", { class: "state partial" }, t("sysupdates.count", { n: list.length })), security > 0 && h("span", { class: "state restarting" }, t("sysupdates.security", { n: security })), h("span", { class: "muted small" }, when))
-      : h("p", { class: "with-icon" }, icon("check"), t("sysupdates.none"), h("span", { class: "muted small" }, " · " + when));
-  const chooseButton = button(t("sysupdates.updateChosen", { n: chosen.size }), { class: "small", onclick: () => sysUpgradeDialog(at, [...chosen]) }, "up");
-  chooseButton.hidden = !chosen.size;
+  const shown = (sysShown[at] ??= chosen.size > 0);
+  const bar = h("div", { class: "ui-select-bar", hidden: !chosen.size });
+  const paintBar = () => {
+    bar.hidden = !chosen.size;
+    put(bar, h("span", null, t("ui.chosen", { n: chosen.size })), button(t("sysupdates.updateChosen", { n: chosen.size }), { class: "small primary", onclick: () => sysUpgradeDialog(at, [...chosen]) }, "up"));
+  };
+  paintBar();
   const row = (p) => {
-    const box = h("input", { type: "checkbox", checked: chosen.has(p.name) });
+    const box = h("input", { type: "checkbox", checked: chosen.has(p.name), "aria-label": p.name });
     box.addEventListener("change", () => {
       if (box.checked) chosen.add(p.name);
       else chosen.delete(p.name);
-      chooseButton.hidden = !chosen.size;
-      chooseButton.lastChild.textContent = t("sysupdates.updateChosen", { n: chosen.size });
+      paintBar();
     });
-    return h("label", { class: "check sys-package" }, box, h("span", { class: "mono grow clip" }, p.name), h("span", { class: "muted small mono" }, p.from ? `${p.from} → ${p.to}` : t("sysupdates.new", { version: p.to })), p.security && h("span", { class: "state restarting" }, t("sysupdates.securityOne")));
+    return uiRow({ lead: { check: box }, name: h("span", { class: "mono" }, p.name, p.security && " ", p.security && uiTag(t("sysupdates.securityOne"))), value: h("span", { class: "mono" }, p.from ? `${p.from} → ${p.to}` : t("sysupdates.new", { version: p.to })), cls: "sys-package" });
   };
   // security updates first, then by name
   const sorted = [...list].sort((a, b) => Number(b.security) - Number(a.security) || a.name.localeCompare(b.name));
-  return h(
-    "section",
-    { class: "card pad stack" },
-    head,
-    h("p", { class: "muted small" }, t("sysupdates.lead")),
-    status,
-    info.error && h("p", { class: "error small" }, t("sysupdates.lastError", { message: info.error })),
-    info.reboot && h("p", { class: "banner" }, t(at ? "sysupdates.rebootMachine" : "sysupdates.reboot")),
-    list.length > 0 && h("p", { class: "cmd" }, icon("terminal"), info.command),
-    list.length > 0 && h("div", { class: "actions" }, button(t("sysupdates.updateAll"), { class: "accent", onclick: () => sysUpgradeDialog(at, []) }, "up"), chooseButton),
-    list.length > 0 && h("details", { open: chosen.size > 0 }, h("summary", null, t("sysupdates.show", { n: list.length })), h("div", { class: "sys-packages" }, sorted.map(row))),
+  const packages = h("div", { class: "ui-rows", hidden: !shown }, bar, sorted.map(row));
+  const toggle = button(t(shown ? "sysupdates.hide" : "sysupdates.show", { n: list.length }), {
+    class: "small quiet",
+    onclick: () => {
+      sysShown[at] = packages.hidden;
+      packages.hidden = !packages.hidden;
+      toggle.lastChild.textContent = t(packages.hidden ? "sysupdates.show" : "sysupdates.hide", { n: list.length });
+    },
+  }, "list");
+  return card(
+    {
+      marks: [list.length > 0 && uiState("warn", t("sysupdates.countShort", { n: list.length })), security > 0 && uiState("bad", t("sysupdates.security", { n: security }))].filter(Boolean),
+      lead: info.at ? [t("sysupdates.lead"), when].join(" · ") : t("sysupdates.lead"),
+      flush: true,
+      actions: [check, list.length > 0 && button(t("sysupdates.updateAll") + "…", { class: "small primary", onclick: () => sysUpgradeDialog(at, []) }, "up")].filter(Boolean),
+    },
+    info.error && h("div", { class: "ui-inset" }, uiNotice({ tone: "bad", text: t("sysupdates.lastError", { message: info.error }) })),
+    info.reboot && h("div", { class: "ui-inset" }, uiNotice({ tone: "warn", text: t(at ? "sysupdates.rebootMachine" : "sysupdates.reboot") })),
+    !info.at ? uiEmpty({ text: t("sysupdates.never") }) : !list.length ? uiEmpty({ icon: "check", tone: "ok", text: t("sysupdates.none") + " · " + when }) : null,
+    list.length > 0 && h("div", { class: "ui-inset" }, uiCommand(info.command)),
+    list.length > 0 && uiEmpty({ text: t("sysupdates.count", { n: list.length }), action: toggle }),
+    list.length > 0 && packages,
   );
 }
 
@@ -1610,16 +1625,15 @@ function dockerDropDialog({ at, title, lead, warn, command, password: ask, go: l
 function dockerSection(at = "") {
   const space = spaces[at];
   const base = spaceApi(at);
-  if (!space) return [h("section", { class: "card pad" }, h("p", { class: "with-icon muted" }, icon("refresh"), t("docker.counting")))];
-  if (space.error) return [h("section", { class: "card pad" }, h("p", { class: "error" }, space.error))];
+  if (!space) return [uiCard({ flush: true }, uiEmpty({ size: "loading", text: t("docker.counting") }))];
+  if (space.error) return [uiCard({}, uiEmpty({ size: "error", title: space.error, action: button(t("docker.recount"), { onclick: () => (delete spaces[at], paintSpace(at), loadSpace(at)) }, "refresh") }))];
   const sum = (list) => list.reduce((n, one) => n + Math.max(0, one.size), 0);
   // an app of this server opens its page; a machine's apps are on the machine's tab
   const appLink = (name) => (at ? h("a", { class: "link", href: `#/machines/${at}/apps` }, name) : (state.overview?.apps ?? []).some((a) => a.name === name) ? h("a", { class: "link", href: `#/apps/${name}` }, name) : h("span", null, name));
   // who uses it: the app when it is one, else the container
-  const users = (one) =>
-    one.used.length
-      ? one.used.map((u) => h("div", { class: "small" }, u.app ? appLink(u.app) : h("span", { class: "mono" }, u.container), !u.running && h("span", { class: "muted" }, " · " + t("docker.stopped"))))
-      : h("span", { class: "state stopped" }, t("docker.unused"));
+  const users = (one) => (one.used.length ? one.used.map((u) => h("div", { class: "small" }, u.app ? appLink(u.app) : h("span", { class: "mono" }, u.container), !u.running && h("span", { class: "muted" }, " · " + t("docker.stopped")))) : "—");
+  const usersWords = (one) => one.used.map((u) => (u.app || u.container) + (u.running ? "" : " · " + t("docker.stopped"))).join(", ");
+  const stateOf = (one) => (one.used.length ? uiState("ok", t("docker.inUse")) : one.wanted?.length ? uiState("info", t("docker.neededBy", { apps: one.wanted.join(", ") })) : uiState("off", t("docker.unused")));
 
   const images = space.images;
   const idle = images.filter((i) => !i.used.length);
@@ -1635,16 +1649,18 @@ function dockerSection(at = "") {
       go: t("docker.drop"),
       run: async () => (await api("DELETE", `${base}/images/${i.id}`), t("docker.image.dropped")),
     });
-  const imageRow = (i) =>
-    h(
-      "tr",
-      null,
-      h("td", null, imageName(i), i.more.length > 0 && h("div", { class: "muted small mono clip" }, i.more.join(", "))),
-      h("td", { class: "num" }, bytes(i.size)),
-      h("td", { class: "muted" }, shortDate(i.created * 1000)),
-      h("td", null, users(i), i.wanted.length > 0 && h("div", { class: "muted small" }, t("docker.image.wantedShort", { apps: i.wanted.join(", ") }))),
-      h("td", null, !i.used.length && h("div", { class: "row-actions" }, button(t("docker.drop"), { class: "small", onclick: () => dropImage(i) }, "trash"))),
-    );
+  const imageRow = (i) => ({
+    menu: (at2) => menuAt(at2, null, [{ label: t("docker.drop") + "…", icon: "trash", danger: true, off: i.used.length > 0, run: () => dropImage(i) }]),
+    cells: [
+      uiCell({ name: i.name ? h("span", { class: "mono", title: i.name }, i.name) : h("span", null, t("docker.noName"), " ", h("span", { class: "muted mono" }, i.id.slice(7, 19))), sub: i.more.length ? h("span", { class: "mono" }, i.more.join(", ")) : null }),
+      bytes(i.size),
+      h("span", { class: "muted" }, shortDate(i.created * 1000)),
+      h("div", null, users(i)),
+      stateOf(i),
+      i.used.length ? "" : uiMore([{ label: t("docker.drop") + "…", icon: "trash", danger: true, run: () => dropImage(i) }], { size: "s" }),
+    ],
+    sub: [bytes(i.size), shortDate(i.created * 1000), usersWords(i)].filter(Boolean).join(" · "),
+  });
   const pruneImages = () =>
     dockerDropDialog({
       at,
@@ -1658,7 +1674,7 @@ function dockerSection(at = "") {
 
   const volumes = space.volumes;
   const spare = volumes.filter((v) => !v.used.length);
-  const volumeName = (v) => h("div", null, h("div", { class: "strong mono clip" }, v.anonymous ? v.name.slice(0, 12) + "…" : v.name), h("div", { class: "muted small" }, v.anonymous ? t("docker.volume.anonymous") : v.project ? t("docker.volume.of", { app: v.project }) : t("docker.volume.byHand")));
+  const volumeName = (v) => uiCell({ name: h("span", { class: "mono", title: v.name }, v.anonymous ? v.name.slice(0, 12) + "…" : v.name), sub: v.anonymous ? t("docker.volume.anonymous") : v.project ? t("docker.volume.of", { app: v.project }) : t("docker.volume.byHand") });
   const dropVolume = (v) =>
     dockerDropDialog({
       at,
@@ -1669,16 +1685,10 @@ function dockerSection(at = "") {
       go: t("docker.drop"),
       run: async () => (await api("DELETE", `${base}/volumes/${encodeURIComponent(v.name)}`), t("docker.volume.dropped")),
     });
-  const volumeRow = (v) =>
-    h(
-      "tr",
-      null,
-      h("td", null, volumeName(v)),
-      h("td", { class: "num" }, v.size >= 0 ? bytes(v.size) : "—"),
-      h("td", { class: "muted" }, v.created ? shortDate(Date.parse(v.created)) : "—"),
-      h("td", null, users(v)),
-      h("td", null, !v.used.length && h("div", { class: "row-actions" }, button(t("docker.drop"), { class: "small", onclick: () => dropVolume(v) }, "trash"))),
-    );
+  const volumeRow = (v) => ({
+    cells: [volumeName(v), v.size >= 0 ? bytes(v.size) : "—", h("span", { class: "muted" }, v.created ? shortDate(Date.parse(v.created)) : "—"), h("div", null, users(v)), stateOf(v), v.used.length ? "" : uiMore([{ label: t("docker.drop") + "…", icon: "trash", danger: true, run: () => dropVolume(v) }], { size: "s" })],
+    sub: [v.size >= 0 ? bytes(v.size) : null, usersWords(v)].filter(Boolean).join(" · "),
+  });
   const pruneVolumes = () =>
     dockerDropDialog({
       at,
@@ -1703,25 +1713,16 @@ function dockerSection(at = "") {
       run: async () => t("docker.freed", { size: bytes((await api("POST", `${base}/cache/prune`, {})).freed) }),
     });
 
-  const head = (title, list, unused, prune) =>
-    h(
-      "div",
-      { class: "section-head pad" },
-      h("div", { class: "grow" }, h("h2", null, title, h("span", { class: "muted" }, " " + list.length)), h("p", { class: "muted small" }, unused.length ? t("docker.unusedSum", { n: unused.length, size: bytes(sum(unused)) }) : t("docker.allUsed"))),
-      unused.length > 0 && button(t("docker.prune"), { class: "small", onclick: prune }, "trash"),
+  const card = (title, list, unused, prune, first, rows, none) =>
+    uiCard(
+      { title, count: list.length, lead: unused.length ? t("docker.unusedSum", { n: unused.length, size: bytes(sum(unused)) }) : t("docker.allUsed"), flush: true, actions: unused.length > 0 && button(t("docker.pruneShort"), { class: "small danger-text", onclick: prune }, "trash") },
+      list.length ? uiTable([{ label: first }, { label: t("docker.size"), num: true }, { label: t("docker.created") }, { label: t("docker.usedBy") }, { label: t("app.col.state") }, { label: "" }], rows, { cls: "docker-table" }) : uiEmpty({ text: none }),
     );
-  const table = (columns, rows) => h("div", { class: "table-wrap" }, h("table", null, h("thead", null, h("tr", null, columns.map((c) => h("th", null, c)))), h("tbody", null, rows)));
-  const columns = (first) => [first, t("docker.size"), t("docker.created"), t("docker.usedBy"), ""];
+  const recount = button(t("docker.recount"), { class: "small", onclick: () => (delete spaces[at], paintSpace(at), loadSpace(at)) }, "refresh");
   return [
-    h(
-      "section",
-      { class: "card pad stack" },
-      h("div", { class: "section-head" }, h("h2", { class: "grow" }, at ? t("docker.onMachine") : t("settings.docker")), button(t("docker.recount"), { class: "small", onclick: () => (delete spaces[at], paintSpace(at), loadSpace(at)) }, "refresh")),
-      h("p", { class: "muted small" }, t(at ? "docker.leadMachine" : "docker.lead")),
-      space.cache > 0 && h("div", { class: "section-head" }, h("p", { class: "muted small grow" }, t("docker.cache.line", { size: bytes(space.cache) })), button(t("docker.cache.clear"), { class: "small", onclick: pruneCache })),
-    ),
-    h("section", { class: "card" }, head(t("docker.images"), images, idle, pruneImages), images.length ? table(columns(t("docker.image")), images.map(imageRow)) : h("p", { class: "muted pad" }, t("docker.none"))),
-    h("section", { class: "card" }, head(t("docker.volumes"), volumes, spare, pruneVolumes), volumes.length ? table(columns(t("docker.volume")), volumes.map(volumeRow)) : h("p", { class: "muted pad" }, t("docker.noVolumes"))),
+    uiCard({}, uiNotice({ tone: "info", text: [t(at ? "docker.leadMachine" : "docker.lead"), space.cache > 0 ? " " + t("docker.cache.line", { size: bytes(space.cache) }) : ""].join(""), action: recount, second: space.cache > 0 && button(t("docker.cache.clear"), { class: "small", onclick: pruneCache }) })),
+    card(t("docker.images"), images, idle, pruneImages, t("docker.image"), images.map(imageRow), t("docker.none")),
+    card(t("docker.volumes"), volumes, spare, pruneVolumes, t("docker.volume"), volumes.map(volumeRow), t("docker.noVolumes")),
   ];
 }
 
