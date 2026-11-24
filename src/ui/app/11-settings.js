@@ -38,7 +38,7 @@ function renderAppsBody() {
   const count = (id) => all.filter(appShown[id]).length;
   // an update from the store asks about every app by itself: only newer images go all at once
   const newer = all.filter((row) => !row.machine && !row.app.update && row.app.newer?.length > 0 && !row.app.job);
-  if (!fixed) put(document.getElementById("apps-meta"), [t("apps.meta.installed", { n: all.length }), t("apps.meta.running", { n: count("running") }), count("updates") > 0 && t("apps.meta.updates", { n: count("updates") })].filter(Boolean).flatMap((part, i) => (i ? [h("span", { class: "dot-sep" }, "·"), part] : [part])));
+  if (!fixed) put(document.getElementById("apps-meta"), [t("apps.meta.installed", { n: all.length }), t("apps.meta.running", { n: count("running") }), count("updates") > 0 && t("apps.meta.updates", { n: count("updates") })].filter(Boolean).flatMap((part, i) => (i ? [h("span", { class: "ui-dot-sep" }, "·"), part] : [part])));
   if (!fixed) put(document.getElementById("apps-actions"), isAdmin() && newer.length > 0 && button(t("apps.updateAll", { n: newer.length }), { onclick: () => confirmAction({ title: t("apps.updateAll", { n: newer.length }), lead: t("apps.updateAllLead", { names: newer.map((row) => row.app.title).join(", ") }), label: t("app.update"), kind: "primary", iconName: "up", run: () => newer.forEach(({ app }) => void startAction(app, "update")) }) }, "up"), state.user.role !== "guest" && storeButton());
   if (!all.length) return put(box, uiCard({}, uiEmpty({ size: "big", icon: "store", title: t("apps.none"), text: t("apps.noneLead"), action: state.user.role !== "guest" && h("a", { class: "btn primary", href: "#/store" }, icon("store"), h("span", null, t("area.apps.store"))) })));
   const machines = fixed ? [] : [...new Map(all.filter((row) => row.machine).map((row) => [row.machine.id, row.machine.name])).entries()];
@@ -59,7 +59,11 @@ function renderAppsBody() {
         address ? h("span", { class: "mono small", title: address }, address) : "—",
         machines.length > 0 && (machine ? machine.name : hostname),
         stateOf(r),
-        h("div", { class: "row-actions end", onclick: (e) => e.stopPropagation() }, open, more && h("button", { type: "button", class: "btn small square ui-more", "aria-label": t("app.more"), "aria-haspopup": "menu", onclick: more }, icon("more"))),
+        (() => {
+          const tail = uiLine([open, more && h("button", { type: "button", class: "btn small square ui-more", "aria-label": t("app.more"), "aria-haspopup": "menu", onclick: more }, icon("more"))], { end: true });
+          tail.onclick = (e) => e.stopPropagation();
+          return tail;
+        })(),
       ].filter((c) => c !== false),
       sub: [address, machines.length > 0 && (machine ? machine.name : hostname)].filter(Boolean).join(" · "),
     };
@@ -69,7 +73,7 @@ function renderAppsBody() {
   put(
     box,
     uiCard(
-      { flush: true, cls: "apps-list" },
+      { flush: true },
       h("div", { class: "ui-filters" }, filters, where),
       shown.length ? uiTable(columns, shown.map(row)) : uiEmpty({ text: t("apps.noneShown") }),
     ),
@@ -90,7 +94,11 @@ function renderStore() {
   search.classList.add("ui-search");
   shell(
     areaHead("apps", "store", { meta: " ", metaId: "store-meta", search, more: isAdmin() && [{ label: t("store.sync"), icon: "refresh", run: syncStores }, { label: t("store.custom"), icon: "plus", run: customDialog }] }),
-    h("div", { class: "store" }, h("nav", { class: "cats fold", id: "cats", "aria-label": t("store.categories") }), h("div", { id: "store-list" })),
+    (() => {
+      const page = uiWithSide({ mainId: "store-list" });
+      page.firstChild.append(uiSide([], { id: "cats", label: t("store.categories") }));
+      return page;
+    })(),
   );
   renderStoreList();
 }
@@ -107,28 +115,23 @@ function renderStoreList() {
   document.getElementById("store-meta")?.replaceChildren([t("store.meta", { stores: state.store.stores.length, apps: all.length }), synced ? t("store.syncedAgo", { time: ago(synced) }) : ""].filter(Boolean).join(" · "));
 
   const cat = (value, label, n) =>
-    h(
-      "button",
-      {
-        type: "button",
-        class: "cat" + (category === value ? " active" : ""),
-        "aria-pressed": String(category === value),
-        onclick: () => {
-          state.storeFilter.category = value;
-          renderStoreList();
-        },
+    uiSideItem({
+      label,
+      count: n,
+      active: category === value,
+      onclick: () => {
+        state.storeFilter.category = value;
+        renderStoreList();
       },
-      h("span", null, label),
-      h("span", { class: "muted small" }, n),
-    );
+    });
   cats.replaceChildren(
-    h("div", { class: "cat-title" }, t("store.categories")),
+    uiSideTitle(t("store.categories")),
     cat("", t("store.all"), all.length),
     cat("*", t("store.recommended"), all.filter((a) => a.recommended).length),
     ...state.store.categories.map((c) => cat(c, c, all.filter((a) => a.category === c).length)).filter((_, i) => all.some((a) => a.category === state.store.categories[i])),
-    h("div", { class: "cat-title" }, t("store.onServer")),
+    uiSideTitle(t("store.onServer")),
     cat("+", t("store.installed"), all.filter((a) => installed.has(a.name)).length),
-    ...(storeKinds().length > 0 ? [h("div", { class: "cat-title" }, t("store.connect")), cat("@", t("store.allIntegrations"), storeKinds().length)] : []),
+    ...(storeKinds().length > 0 ? [uiSideTitle(t("store.connect")), cat("@", t("store.allIntegrations"), storeKinds().length)] : []),
   );
   if (category === "@") return list.replaceChildren(storeIntegrationCards(storeKinds(), query));
 
@@ -154,9 +157,7 @@ function renderStoreList() {
   };
   list.replaceChildren(
     ...(kindsFound.length > 0 ? [storeIntegrationCards(kindsFound, "")] : []),
-    h(
-      "div",
-      { class: "ui-tiles described store-tiles" },
+    uiTiles(
       apps.slice(0, storeShown.n).map((a) =>
         uiTile({
           logo: appIcon(a),
@@ -169,6 +170,7 @@ function renderStoreList() {
           tone: a.supported ? null : "off",
         }),
       ),
+      { kind: "described" },
     ),
     ...(left > 0 ? [uiCard({}, uiEmpty({ text: t("store.more", { n: left }), action: button(t("load.more", { n: Math.min(left, STORE_PIECE) }), { class: "quiet small", onclick: () => ((storeShown.n += STORE_PIECE), renderStoreList()) }) }))] : []),
   );
@@ -188,10 +190,9 @@ function storeIntegrationCards(kinds, query) {
   const q = query.trim().toLowerCase();
   const shown = kinds.filter((k) => !q || `${k.title} ${k.what}`.toLowerCase().includes(q));
   if (!shown.length) return uiCard({}, uiEmpty({ text: t("store.nothing") }));
-  return h(
-    "div",
-    { class: "ui-tiles described" },
+  return uiTiles(
     shown.map((k) => uiTile({ icon: k.icon, name: k.title, sub: t("store.integration"), state: kindConnected(k).length > 0 ? uiState("ok", t("store.connected")) : null, desc: k.what, onclick: () => storeIntegrationDialog(k) })),
+    { kind: "described" },
   );
 }
 
@@ -204,29 +205,25 @@ function storeIntegrationDialog(k) {
   const connect = button(t(there.length ? "store.connectAnother" : "store.connectIt"), { class: "primary", onclick: () => (dialog.close(), k.id ? svcConnectDialog(k.id) : haDialog()) }, "plus");
   dialog = openDialog(
     "xwide store-app",
-    h("header", null, h("span", { class: "app-icon plus lg" }, icon(k.icon)), h("div", { class: "grow" }, h("h2", null, k.title), h("p", { class: "muted" }, k.what), h("p", { class: "muted small" }, [t("store.integration"), k.version && t("store.descVersion", { version: k.version })].filter(Boolean).join(" · "))), closeX(() => dialog)),
+    h("header", null, uiLead({ icon: k.icon }), h("div", { class: "grow" }, h("h2", null, k.title), h("p", { class: "muted" }, k.what), h("p", { class: "muted small" }, [t("store.integration"), k.version && t("store.descVersion", { version: k.version })].filter(Boolean).join(" · "))), closeX(() => dialog)),
     k.screenshots?.length > 0 && shotsView(k.screenshots),
     h(
       "div",
-      { class: "store-app-body" },
+      { class: "stack" },
       h("p", null, t("store.integrationLead")),
       there.length > 0 &&
-        h(
-          "div",
-          { class: "tips" },
-          h("strong", null, t("store.connectedHere")),
+        uiProse(
           h("ul", null, there.map((c) => h("li", null, h("a", { class: "link", href: k.id ? `#/service/${c.id}` : `#/house/ha/${c.id}`, onclick: () => dialog.close() }, c.name ?? c.title ?? k.title)))),
+          { title: t("store.connectedHere"), soft: true },
         ),
       apps.length > 0 &&
-        h(
-          "div",
-          { class: "tips" },
-          h("strong", null, t("store.integrationApps")),
+        uiProse(
           h(
             "ul",
             null,
             apps.map((a) => h("li", null, h("button", { type: "button", class: "link", onclick: () => (dialog.close(), installed.has(a.name) ? go(`#/apps/${a.name}`) : storeDialog(a)) }, a.title), " — ", installed.has(a.name) ? t("store.installed") : t("store.integrationAppHint"))),
           ),
+          { title: t("store.integrationApps"), soft: true },
         ),
     ),
     h("footer", null, h("span", { class: "grow" }), closeButton(() => dialog, t("common.cancel")), connect),
@@ -235,7 +232,7 @@ function storeIntegrationDialog(k) {
 }
 
 function formSection(title, hint, rows) {
-  return rows.length > 0 && h("section", { class: "form-section" }, h("div", { class: "form-head" }, h("h3", null, title), hint && h("span", { class: "muted small" }, hint)), rows);
+  return rows.length > 0 && h("section", { class: "stack-s" }, uiSubhead({ title, lead: hint }), rows);
 }
 
 /**
@@ -267,9 +264,9 @@ function settingFields(settings, installing) {
     inputs.push({ name: s.name, type: s.type, input });
     const control =
       s.type === "folder"
-        ? h("span", { class: "with-pick" }, input, h("button", { type: "button", class: "icon-btn", title: t("edit.pickFolder"), "aria-label": t("edit.pickFolder"), onclick: () => folderPicker({ title: t("edit.pickFolder"), start: input.value.startsWith("/") ? input.value : "", confirmLabel: t("edit.pickHere"), action: (path) => void (input.value = path) }) }, icon("folder")))
+        ? uiAffix(input, h("button", { type: "button", class: "icon-btn", title: t("edit.pickFolder"), "aria-label": t("edit.pickFolder"), onclick: () => folderPicker({ title: t("edit.pickFolder"), start: input.value.startsWith("/") ? input.value : "", confirmLabel: t("edit.pickHere"), action: (path) => void (input.value = path) }) }, icon("folder")))
         : s.type === "port"
-          ? h("span", { class: "pair" }, input, s.busy && h("span", { class: "chip warn" }, t("store.portMoved", { port: s.busy })))
+          ? uiAffix(input, s.busy && uiState("warn", t("store.portMoved", { port: s.busy })))
           : input;
     return formRow(s.label, control, s.hint);
   };
@@ -277,7 +274,7 @@ function settingFields(settings, installing) {
   const more = settings.filter((s) => s.advanced).map(rowOf).filter(Boolean);
   return {
     rows,
-    more: more.length > 0 && h("details", { class: "form-more" }, h("summary", null, t("store.more")), more),
+    more: more.length > 0 && uiDetails(t("store.more"), more),
     value: () => Object.fromEntries(inputs.map(({ name, type, input }) => [name, type === "switch" ? input.checked : input.value])),
   };
 }
@@ -301,7 +298,7 @@ async function storeDialog(entry, target = state.installTarget ?? "") {
   const ports = app.form.ports.map((p) => {
     const input = h("input", { value: p.published, inputMode: "numeric", pattern: "[0-9]*", class: "short mono" });
     inputs.ports.push({ service: p.service, target: p.target, protocol: p.protocol, input });
-    return formRow(p.description || t("store.port"), h("span", { class: "pair" }, input, h("span", { class: "muted small mono" }, `→ ${p.target}/${p.protocol}`), p.busy && h("span", { class: "chip warn" }, t("store.portBusy"))));
+    return formRow(p.description || t("store.port"), uiAffix(input, `→ ${p.target}/${p.protocol}`, p.busy && uiState("warn", t("store.portBusy"))));
   });
   const volumes = app.form.volumes.map((v) => {
     const input = h("input", { value: v.source, spellcheck: false, class: "mono" });
@@ -346,35 +343,36 @@ async function storeDialog(entry, target = state.installTarget ?? "") {
   const here = t("store.whereHere", { name: state.overview?.system.hostname ?? "Hata" });
   const where =
     isAdmin() &&
-    h(
-      "div",
-      { class: "store-where grow" },
-      h("label", { for: "store-target" }, t("store.where")),
-      targets.length > 0
-        ? h("select", { id: "store-target", onchange: (e) => (dialog.close(), void storeDialog(entry, e.target.value)) }, h("option", { value: "", selected: !target }, here), targets.map((m) => h("option", { value: m.id, selected: m.id === target }, t("store.whereMachine", { name: m.name }))))
-        : h("span", null, here),
-      targets.length === 0 && h("a", { class: "link small", href: "#/machines", title: t(machinesUi.list?.machines?.length ? "store.whereNoneReady" : "store.whereNone"), onclick: () => dialog.close() }, t("store.whereOther")),
+    uiLine(
+      [
+        h("label", { for: "store-target", class: "strong" }, t("store.where")),
+        targets.length > 0
+          ? h("select", { id: "store-target", onchange: (e) => (dialog.close(), void storeDialog(entry, e.target.value)) }, h("option", { value: "", selected: !target }, here), targets.map((m) => h("option", { value: m.id, selected: m.id === target }, t("store.whereMachine", { name: m.name }))))
+          : h("span", null, here),
+        targets.length === 0 && h("a", { class: "link small", href: "#/machines", title: t(machinesUi.list?.machines?.length ? "store.whereNoneReady" : "store.whereNone"), onclick: () => dialog.close() }, t("store.whereOther")),
+      ],
+      { cls: "grow" },
     );
   const hasForm = isAdmin() && (settingsForm ? settingsForm.rows.length > 0 || settingsForm.more : ports.length + volumes.length + envs.length > 0);
   // what the app asks of the server beyond its folders and ports, said before it is installed
-  const permissions = app.permissions.length > 0 && h("div", { class: "tips prose" }, h("strong", null, t("store.permissions")), h("ul", null, app.permissions.map((p) => h("li", null, h("strong", null, t(`store.permission.${p.id}`)), " — ", p.why))));
+  const permissions = app.permissions.length > 0 && uiProse(h("ul", null, app.permissions.map((p) => h("li", null, h("strong", null, t(`store.permission.${p.id}`)), " — ", p.why))), { title: t("store.permissions"), soft: true });
   dialog = openDialog(
     "xwide store-app",
     h("header", null, appIcon(app, "lg"), h("div", { class: "grow" }, h("h2", null, app.title), h("p", { class: "muted" }, app.tagline), h("p", { class: "muted small" }, [app.category, app.developer && t("store.by", { developer: app.developer }), app.version && t("store.version", { version: app.version })].filter(Boolean).join(" · "))), closeX(() => dialog)),
-    !supported && h("p", { class: "banner" }, t("store.unsupported", { arch: arch ?? "" })),
+    !supported && uiNotice({ tone: "warn", text: t("store.unsupported", { arch: arch ?? "" }) }),
     app.screenshots.length > 0 && shotsView(app.screenshots),
     // one column, the description across the whole width and what is asked under it (the user's wish, 2026-10-18):
     // two columns squeezed long descriptions with commands into a narrow strip
     h(
       "div",
-      { class: "store-app-body" },
-      h("div", { class: "description prose" }, md(app.description)),
-      app.tips && h("div", { class: "tips prose" }, h("strong", null, t("store.tips")), md(app.tips)),
-      hasForm && settingsForm && h("div", { class: "stack install-form" }, formSection(t("store.settings"), t("store.settingsHint"), settingsForm.rows), settingsForm.more),
-      hasForm && !settingsForm && h("div", { class: "stack install-form" }, formSection(t("store.ports"), target ? t("store.portsOn", { name: targets.find((m) => m.id === target)?.name ?? "" }) : t("store.portsHint"), ports), formSection(t("store.volumes"), target ? t("store.volumesHint", { path: app.form.volumes[0]?.source.split("/AppData/")[0] || "/DATA" }) : state.settings ? t("store.volumesHint", { path: state.settings.dataRoot }) : "", volumes), formSection(t("store.envs"), t("store.envsHint"), envs)),
+      { class: "stack" },
+      uiProse(md(app.description)),
+      app.tips && uiProse(md(app.tips), { title: t("store.tips"), soft: true }),
+      hasForm && settingsForm && uiBox(formSection(t("store.settings"), t("store.settingsHint"), settingsForm.rows), settingsForm.more),
+      hasForm && !settingsForm && uiBox(formSection(t("store.ports"), target ? t("store.portsOn", { name: targets.find((m) => m.id === target)?.name ?? "" }) : t("store.portsHint"), ports), formSection(t("store.volumes"), target ? t("store.volumesHint", { path: app.form.volumes[0]?.source.split("/AppData/")[0] || "/DATA" }) : state.settings ? t("store.volumesHint", { path: state.settings.dataRoot }) : "", volumes), formSection(t("store.envs"), t("store.envsHint"), envs)),
       permissions,
       app.website && h("a", { class: "link", href: app.website, target: "_blank", rel: "noopener noreferrer" }, app.website.replace(/^https?:\/\//, "").replace(/\/$/, ""), icon("external")),
-      h("p", { class: "cmd small" }, icon("terminal"), `docker compose -p ${app.name} up -d`),
+      uiCommand(`docker compose -p ${app.name} up -d`),
     ),
     error,
     h("footer", null, where, closeButton(() => dialog, t("common.cancel")), install),
@@ -385,14 +383,10 @@ async function storeDialog(entry, target = state.installTarget ?? "") {
 
 /** An app's screenshots one at a time across the whole width: arrows, a swipe, the arrow keys */
 function shotsView(list) {
+  const { view, stage, count, prev, next } = uiShots({ prev: () => step(-1), next: () => step(1) });
   let shots = list.map((src) => h("a", { href: src, target: "_blank", rel: "noopener noreferrer", draggable: "false" }, h("img", { src, alt: "", referrerPolicy: "no-referrer", draggable: "false" })));
   let at = 0;
-  const stage = h("div", { class: "shot-stage", tabindex: "0", "aria-roledescription": "carousel" });
-  const count = h("span", { class: "shot-count" });
   const step = (by) => show(at + by);
-  const prev = h("button", { type: "button", class: "icon-btn shot-prev", "aria-label": t("store.shotPrev"), onclick: () => step(-1) }, icon("chevron", "flip"));
-  const next = h("button", { type: "button", class: "icon-btn shot-next", "aria-label": t("store.shotNext"), onclick: () => step(1) }, icon("chevron"));
-  const view = h("div", { class: "shot-view" }, stage, prev, next, count);
   const show = (i) => {
     if (!shots.length) return view.remove();
     at = (i + shots.length) % shots.length;
@@ -419,18 +413,18 @@ function shotsView(list) {
 
 function customDialog() {
   const name = h("input", { required: true, pattern: "[a-z0-9][a-z0-9_\\-]*", autocapitalize: "none", spellcheck: false, class: "mono" });
-  const area = h("textarea", { class: "code", spellcheck: false, wrap: "off", required: true, placeholder: "services:\n  web:\n    image: nginx:alpine\n    ports:\n      - 8088:80\n" });
+  const area = uiCode({ wrap: "off", required: true, placeholder: "services:\n  web:\n    image: nginx:alpine\n    ports:\n      - 8088:80\n" });
   const memoryTotal = Math.round((state.overview?.system.memory.total ?? 0) / 1024 / 1024);
   // the first service of a new app has no name of its own: it takes the app's
   let form = appSettingsForm({ title: "", icon: "", web: { scheme: "http", host: "", port: "", path: "/" }, services: [blankService("")] }, memoryTotal);
   const holder = h("div", null, form.el);
   const error = h("p", { class: "error", role: "alert" });
   const lead = h("p", { class: "muted small" });
-  const modes = h("div", { class: "modes" });
-  const notice = h("div", { class: "banner stack", hidden: true });
+  const modes = h("div");
+  const notice = h("div", { hidden: true });
   const file = field(t("store.customCompose"), area);
   // the third way in: a command from an app's instructions, read into the form
-  const command = h("textarea", { class: "code", spellcheck: false, placeholder: "docker run -d --name whoami -p 8088:80 traefik/whoami" });
+  const command = uiCode({ placeholder: "docker run -d --name whoami -p 8088:80 traefik/whoami" });
   const run = h("div", { class: "stack" }, field(t("run.command"), command));
   const submit = h("button", { class: "btn primary" }, t("store.install"));
   /** form | file | run */
@@ -439,11 +433,11 @@ function customDialog() {
     form = appSettingsForm({ ...read.edit, services: read.edit.services.map((service) => ({ ...service, name: "" })) }, memoryTotal);
     holder.replaceChildren(form.el);
     if (!name.value.trim()) name.value = read.name;
-    put(notice, read.ignored.length > 0 && [h("p", { class: "small" }, t("run.ignored")), read.ignored.map((option) => h("p", { class: "mono small" }, option))]);
+    put(notice, read.ignored.length > 0 && uiNotice({ tone: "warn", text: [h("p", { class: "small" }, t("run.ignored")), read.ignored.map((option) => h("p", { class: "mono small" }, option))] }));
   };
   const mode = (next) => {
     current = next;
-    put(modes, ["form", "file", "run"].map((value) => h("button", { type: "button", class: "mode" + (value === next ? " active" : ""), onclick: () => mode(value) }, t(`store.custom.${value}`))));
+    put(modes, uiSegment(["form", "file", "run"].map((value) => ({ value, label: t(`store.custom.${value}`) })), next, mode, { wide: true }));
     lead.textContent = t(`store.custom.${next}Lead`);
     holder.hidden = next !== "form";
     notice.hidden = next !== "form" || !notice.hasChildNodes();
@@ -515,17 +509,17 @@ async function loadImport() {
 function renderImport() {
   shell(
     areaHead("apps", "import", { meta: t("import.lead") }),
-    h("div", { class: "stack import", id: "import-body" }),
+    h("div", { class: "stack", id: "import-body" }),
   );
   renderImportBody();
 }
 
-const importWarnings = (warnings) => warnings.length > 0 && h("div", { class: "banner stack" }, warnings.map((code) => h("p", { class: "small" }, t("import.warn." + code))));
+const importWarnings = (warnings) => warnings.length > 0 && uiNotice({ tone: "warn", text: warnings.map((code) => h("p", { class: "small" }, t("import.warn." + code))) });
 
 /** Shows the compose file an import would write; `confirm` gets the (possibly edited) text and the name */
 function importDialog({ title, lead, name, compose, warnings, editable, action, steps, confirm }) {
   const nameInput = name != null && h("input", { required: true, pattern: "[a-z0-9][a-z0-9_\\-]*", autocapitalize: "none", spellcheck: false, class: "mono", value: name });
-  const area = h("textarea", { class: "code", spellcheck: false, wrap: "off", required: true, readOnly: !editable, value: compose, "aria-label": "compose.yml" });
+  const area = uiCode({ wrap: "off", required: true, readOnly: !editable, value: compose, "aria-label": "compose.yml" });
   const error = h("p", { class: "error", role: "alert" });
   const dialog = openDialog(
     "wide",
@@ -546,7 +540,7 @@ function importDialog({ title, lead, name, compose, warnings, editable, action, 
       importWarnings(warnings),
       nameInput && field(t("store.customName"), nameInput, t("store.customNameHint")),
       field(t("store.customCompose"), area),
-      steps && h("ol", { class: "steps muted small" }, steps.map((step) => h("li", null, step))),
+      steps && uiProse(h("ol", { class: "muted small" }, steps.map((step) => h("li", null, step)))),
       error,
       h("footer", null, closeButton(() => dialog, t("common.cancel")), h("button", { class: "btn primary" }, action)),
     ),
@@ -622,10 +616,10 @@ function casaosCard(casaos) {
   }, "arrow");
   return uiCard(
     { title: t("import.casaos.title", { n: ready.length }), lead: t("import.casaos.lead") },
-    casaos.apps.length > 0 && h("div", { class: "ui-rows stores-rows" }, casaos.apps.map((app) => uiRow({ lead: { icon: "box" }, name: app.title, sub: h("span", { class: "mono" }, app.source), state: uiState(app.status === "ready" ? "ok" : "warn", t("import.casaos.status." + app.status)) }))),
-    h("label", { class: "check" }, stop, h("span", null, h("strong", null, t("import.casaos.stop")), h("span", { class: "muted small block" }, casaos.units.length ? t("import.casaos.stopHint", { units: casaos.units.join(", ") }) : t("import.casaos.stopped")))),
+    casaos.apps.length > 0 && uiRowsIn(casaos.apps.map((app) => uiRow({ lead: { icon: "box" }, name: app.title, sub: h("span", { class: "mono" }, app.source), state: uiState(app.status === "ready" ? "ok" : "warn", t("import.casaos.status." + app.status)) }))),
+    uiCheck(h("strong", null, t("import.casaos.stop")), stop, casaos.units.length ? t("import.casaos.stopHint", { units: casaos.units.join(", ") }) : t("import.casaos.stopped")),
     error,
-    h("footer", { class: "section-head" }, h("p", { class: "cmd" }, icon("terminal"), "sudo hata migrate casaos --undo"), move),
+    uiFoot(uiCommand("sudo hata migrate casaos --undo"), move),
   );
 }
 
@@ -691,20 +685,12 @@ async function endWelcome() {
 
 function welcomeFrame(step, ...content) {
   const at = WELCOME_STEPS.indexOf(step);
-  const item = (id, i) => {
-    const inner = [h("span", { class: "welcome-num" }, i < at ? icon("check") : String(i + 1)), h("span", { class: "grow" }, h("strong", null, t(`welcome.step.${id}`)), h("span", { class: "muted small block" }, id === "admin" && state.user ? state.user.name : t(`welcome.step.${id}.hint`)))];
-    // the administrator is made once; the other steps can be visited in any order
-    return h("li", { class: i === at ? "current" : i < at ? "done" : "" }, state.user && id !== "admin" ? h("a", { href: `#/welcome/${id}`, "aria-current": i === at ? "step" : null }, inner) : h("span", null, inner));
-  };
+  // the administrator is made once; the other steps can be visited in any order
+  const steps = WELCOME_STEPS.map((id, i) => ({ name: t(`welcome.step.${id}`), hint: id === "admin" && state.user ? state.user.name : t(`welcome.step.${id}.hint`), href: state.user && id !== "admin" ? `#/welcome/${id}` : null, current: i === at, done: i < at }));
   $app.replaceChildren(
-    h(
-      "header",
-      { class: "top" },
-      h("span", { class: "brand" }, logo(), "hata"),
-      h("span", { class: "muted welcome-label" }, t("welcome.title")),
-      h(
-        "div",
-        { class: "top-right" },
+    ...uiWizard({
+      title: t("welcome.title"),
+      right: [
         languageSelect(() => state.user && void loadWelcome()),
         state.user &&
           button(t("welcome.leave"), {
@@ -714,9 +700,11 @@ function welcomeFrame(step, ...content) {
               go("#/");
             },
           }),
-      ),
-    ),
-    h("div", { class: "welcome" }, h("ol", { class: "welcome-steps" }, WELCOME_STEPS.map(item)), h("main", { class: "welcome-main stack" }, h("p", { class: "eyebrow" }, t("welcome.stepOf", { n: at + 1, of: WELCOME_STEPS.length })), content)),
+      ],
+      steps,
+      eyebrow: t("welcome.stepOf", { n: at + 1, of: WELCOME_STEPS.length }),
+      body: content,
+    }),
   );
 }
 
@@ -766,21 +754,23 @@ function welcomeFoot(step, save) {
       }
     },
   });
-  return [error, h("footer", { class: "welcome-foot" }, at > 1 ? h("a", { class: "btn", href: `#/welcome/${WELCOME_STEPS[at - 1]}` }, t("welcome.back")) : h("span"), next)];
+  return [error, uiWizardFoot(at > 1 && h("a", { class: "btn", href: `#/welcome/${WELCOME_STEPS[at - 1]}` }, t("welcome.back")), next)];
 }
 
 /** Docker in one card: there and running, or what is missing with the button that brings it */
 function welcomeDocker() {
   const d = state.overview?.docker;
   if (!d) return null;
-  if (d.available) return h("section", { class: "card pad welcome-fact" }, h("span", { class: "badge-icon ok" }, icon("check")), h("div", { class: "grow" }, h("strong", null, t("welcome.docker.ok")), h("p", { class: "muted small" }, [d.version && `Docker ${d.version}`, d.compose && `Compose ${d.compose}`].filter(Boolean).join(" · "))));
+  if (d.available) return uiCard({ flush: true }, uiRow({ lead: { icon: "check", tone: "ok" }, name: t("welcome.docker.ok"), sub: [d.version && `Docker ${d.version}`, d.compose && `Compose ${d.compose}`].filter(Boolean).join(" · ") }));
   const stopped = d.state === "stopped";
-  return h(
-    "section",
-    { class: "card pad welcome-fact" },
-    h("span", { class: "badge-icon warn" }, icon("alert")),
-    h("div", { class: "grow" }, h("strong", null, t(stopped ? "attention.docker.stopped.title" : "attention.docker.missing.title")), h("p", { class: "muted small" }, t(stopped ? "welcome.docker.stopped" : "docker.why"))),
-    stopped ? dockerStartButton() : button(t("docker.install"), { class: "small primary", onclick: dockerDialog }, "download"),
+  return uiCard(
+    { flush: true },
+    uiRow({
+      lead: { icon: "alert", tone: "warn" },
+      name: t(stopped ? "attention.docker.stopped.title" : "attention.docker.missing.title"),
+      sub: t(stopped ? "welcome.docker.stopped" : "docker.why"),
+      action: stopped ? dockerStartButton() : button(t("docker.install"), { class: "small primary", onclick: dockerDialog }, "download"),
+    }),
   );
 }
 
@@ -789,7 +779,7 @@ function paintWelcome() {
   const step = state.route.step;
   const s = state.settings;
   if (!box) return;
-  const head = [h("h1", null, t(`welcome.${step}.title`)), h("p", { class: "muted welcome-lead" }, t(`welcome.${step}.lead`))];
+  const head = [h("h1", null, t(`welcome.${step}.title`)), h("p", { class: "muted" }, t(`welcome.${step}.lead`))];
   const waiting = waitMark();
 
   if (step === "server") {
@@ -800,9 +790,8 @@ function paintWelcome() {
     return put(
       box,
       ...head,
-      h(
-        "section",
-        { class: "card pad" },
+      uiCard(
+        {},
         settingRow(t("welcome.server.name"), t("local.nameHint"), name),
         settingRow(t("settings.timezone"), t("settings.timezoneHint", { tz: s.systemTimezone }), tz),
         state.local?.addresses.length > 0 && settingRow(t("welcome.server.address"), t("welcome.server.addressHint"), h("span", { class: "mono" }, state.local.addresses.map((a) => `http://${a}${port}`).join(", "))),
@@ -825,16 +814,15 @@ function paintWelcome() {
     const ticks = new Map();
     const pick = (m) => {
       const found = m.on ? [] : findsFor(m.id);
-      const tick = h("input", { type: "checkbox", checked: wanted(m), onchange: () => ((picks[m.id] = tick.checked), label.classList.toggle("picked", tick.checked)) });
+      const tick = h("input", { type: "checkbox", checked: wanted(m), onchange: () => (picks[m.id] = tick.checked) });
       ticks.set(m.id, tick);
-      const label = h(
-        "label",
-        { class: "card module-pick" + (tick.checked ? " picked" : "") },
-        tick,
-        icon(MODULE_ICONS[m.id]),
-        h("span", { class: "grow" }, h("strong", { class: "block" }, moduleName(m.id)), h("span", { class: "muted small block" }, t(`modules.${m.id}.what`)), m.needs.length > 0 && h("span", { class: "muted small block" }, "↳ ", t("modules.needsModule", { needs: m.needs.map(moduleName).join(", ") })), found.map((f) => h("span", { class: "small block module-found" }, findWords(f)))),
-      );
-      return label;
+      return uiOption({
+        input: tick,
+        icon: MODULE_ICONS[m.id],
+        name: moduleName(m.id),
+        lines: [t(`modules.${m.id}.what`), m.needs.length > 0 && "↳ " + t("modules.needsModule", { needs: m.needs.map(moduleName).join(", ") })],
+        found: found.map(findWords),
+      });
     };
     const foundNames = finds ? list.filter((m) => !m.on && findsFor(m.id).length > 0).map((m) => moduleName(m.id)) : [];
     return put(
@@ -842,9 +830,9 @@ function paintWelcome() {
       ...head,
       MODULE_GROUPS.map((group) => {
         const mine = list.filter((m) => m.group === group);
-        return mine.length > 0 && h("div", { class: "stack" }, h("div", { class: "cat-title" }, t("modules.group." + group)), h("div", { class: "module-picks" }, mine.map(pick)));
+        return mine.length > 0 && h("div", { class: "stack" }, uiSubhead({ title: t("modules.group." + group) }), uiFields(...mine.map(pick)));
       }),
-      h("p", { class: "banner quiet" }, !finds ? t("welcome.modules.looking") : foundNames.length ? t("welcome.modules.found", { n: foundNames.length, names: foundNames.join(", ") }) : t("welcome.modules.nothing")),
+      uiNotice({ tone: "info", text: !finds ? t("welcome.modules.looking") : foundNames.length ? t("welcome.modules.found", { n: foundNames.length, names: foundNames.join(", ") }) : t("welcome.modules.nothing") }),
       h("p", { class: "muted small" }, t("welcome.modules.more"), " ", h("a", { class: "link", href: "#/settings/modules" }, t("modules.title"))),
       ...welcomeFoot(step, async () => {
         let now = list;
@@ -874,31 +862,29 @@ function paintWelcome() {
     const diskRow = (disk) => {
       const holds = disk.volumes.filter((v) => v.fstype);
       const connectable = canConnect(disk);
-      return h(
-        "section",
-        { class: "card pad welcome-fact" },
-        h("span", { class: "badge-icon" }, icon("disk")),
-        h("div", { class: "grow" }, h("strong", null, diskTitle(disk)), h("p", { class: "muted small" }, diskMeta(disk)), h("p", { class: "muted small" }, holds.length ? t("mounting.foundHolds", { what: holds.map((v) => [v.label, v.fstype].filter(Boolean).join(" · ")).join("; ") }) : t("mounting.foundEmpty"))),
-        h("div", { class: "row-actions" }, connectable.length > 0 && button(t("mounting.connect"), { class: "small", onclick: () => connectDialog(disk, connectable[0]) }), canPrepare(disk) && button(t("mounting.format"), { class: "small", onclick: () => formatDialog(disk) })),
+      return uiCard(
+        { flush: true },
+        uiRow({
+          lead: { icon: "disk" },
+          name: diskTitle(disk),
+          sub: [h("div", null, diskMeta(disk)), h("div", null, holds.length ? t("mounting.foundHolds", { what: holds.map((v) => [v.label, v.fstype].filter(Boolean).join(" · ")).join("; ") }) : t("mounting.foundEmpty"))],
+          action: uiLine([connectable.length > 0 && button(t("mounting.connect"), { class: "small", onclick: () => connectDialog(disk, connectable[0]) }), canPrepare(disk) && button(t("mounting.format"), { class: "small", onclick: () => formatDialog(disk) })]),
+        }),
       );
     };
     return put(
       box,
       ...head,
-      h(
-        "section",
-        { class: "card pad welcome-fact" },
-        h("span", { class: "badge-icon" }, icon("folder")),
-        h(
-          "div",
-          { class: "grow" },
-          h("strong", { class: "mono" }, s.dataRoot),
-          h("p", { class: "muted small" }, place ? t("welcome.data.on", { device: place.device, path: place.path, free: bytes(Math.max(0, place.total - place.used)), total: bytes(place.total) }) : t("welcome.data.unknown")),
-          place?.path === "/" && h("p", { class: "muted small" }, t("welcome.data.system")),
-        ),
-        h("div", { class: "row-actions" }, button(t("data.choose"), { class: "small", onclick: () => pickDataRoot() }, "folder")),
+      uiCard(
+        { flush: true },
+        uiRow({
+          lead: { icon: "folder" },
+          name: h("span", { class: "mono" }, s.dataRoot),
+          sub: [h("div", null, place ? t("welcome.data.on", { device: place.device, path: place.path, free: bytes(Math.max(0, place.total - place.used)), total: bytes(place.total) }) : t("welcome.data.unknown")), place?.path === "/" && h("div", null, t("welcome.data.system"))],
+          action: button(t("data.choose"), { class: "small", onclick: () => pickDataRoot() }, "folder"),
+        }),
       ),
-      h("div", { class: "section-head" }, h("h2", null, t("welcome.data.disks")), h("a", { class: "link small", href: "#/settings/storage" }, t("welcome.data.all"))),
+      uiSubhead({ title: t("welcome.data.disks"), actions: h("a", { class: "link small", href: "#/settings/storage" }, t("welcome.data.all")) }),
       !disks ? waiting : fresh.length ? fresh.map(diskRow) : h("p", { class: "muted" }, t("welcome.data.noDisks")),
       fresh.length > 0 && h("p", { class: "muted small" }, t("welcome.data.how")),
       ...welcomeFoot(step),
@@ -914,7 +900,7 @@ function paintWelcome() {
     const time = h("input", { type: "time", value: b.time, required: true });
     const keep = h("input", { type: "number", min: 1, max: 365, value: b.keep, required: true, class: "short" });
     const dir = h("input", { value: b.dir, spellcheck: false, placeholder: `${s.dataRoot}/Backups`, class: "mono" });
-    const same = h("p", { class: "banner" }, t("welcome.backups.sameDisk"));
+    const same = uiNotice({ tone: "warn", text: t("welcome.backups.sameDisk") });
     const check = () => {
       const [data, copy] = [placeOf(s.dataRoot, mounts), placeOf(dir.value.trim() || `${s.dataRoot}/Backups`, mounts)];
       same.hidden = !data || !copy || data.path !== copy.path;
@@ -925,13 +911,12 @@ function paintWelcome() {
     return put(
       box,
       ...head,
-      h(
-        "section",
-        { class: "card pad stack" },
-        h("label", { class: "check" }, enabled, h("span", null, h("strong", null, t("backup.enable")), h("span", { class: "muted small block" }, t("backup.enableHint")))),
-        h("div", { class: "field-row" }, field(`${t("backup.time")} · ${s.timezone || s.systemTimezone}`, time), field(t("backup.keep"), keep)),
+      uiCard(
+        {},
+        uiCheck(h("strong", null, t("backup.enable")), enabled, t("backup.enableHint")),
+        uiFields(field(`${t("backup.time")} · ${s.timezone || s.systemTimezone}`, time), field(t("backup.keep"), keep)),
         field(t("backup.dir"), dir, t("backup.dirHint")),
-        places.length > 0 && h("div", { class: "row-actions wrap" }, places.map((path) => button(`${path}/Backups`, { class: "small mono", onclick: () => ((dir.value = `${path}/Backups`), check()) }))),
+        places.length > 0 && uiLine(places.map((path) => button(`${path}/Backups`, { class: "small mono", onclick: () => ((dir.value = `${path}/Backups`), check()) }))),
         same,
       ),
       h("p", { class: "muted small" }, t("welcome.backups.more"), " ", h("a", { class: "link", href: "#/settings/backups" }, t("nav.backups"))),
@@ -957,15 +942,14 @@ function paintWelcome() {
     !store
       ? waiting
       : offered.length
-        ? h(
-            "div",
-            { class: "ui-tiles described" },
+        ? uiTiles(
             offered.map((a) => {
               const isIn = installed.has(a.name);
               const busyNow = isIn && state.overview?.apps?.find((one) => one.name === a.name)?.job?.kind === "install";
               // the one place a tile has a button: there is no window behind it in the walk
               return uiTile({ logo: appIcon(a), name: a.title, sub: twice.has(a.name) ? `${a.category} · ${a.storeName}` : a.category, desc: a.tagline, menu: (at) => storeCardMenu(a, isIn, at), state: isIn ? uiState(busyNow ? "info" : "ok", t(busyNow ? "store.installing" : "store.installed")) : null, tail: !isIn && button(t("store.install"), { class: "small", onclick: () => storeDialog(a) }, "download"), href: isIn ? `#/apps/${a.name}` : null });
             }),
+            { kind: "described" },
           )
         : uiCard({}, busy ? uiEmpty({ size: "loading", text: t("store.syncing") }) : uiEmpty({ size: "big", icon: "store", title: t("store.empty"), action: button(t("store.sync"), { class: "primary", onclick: async () => (await syncStores(), loadWelcome()) }, "refresh") })),
     h("p", { class: "muted small" }, t("welcome.apps.more"), " ", h("a", { class: "link", href: "#/store" }, t("nav.store"))),
@@ -1091,7 +1075,7 @@ function openSettingsCard(item, card) {
   if (!card) return;
   let tries = 0;
   const look = () => {
-    const found = [...document.querySelectorAll(".settings :is(h2, h3, strong)")].find((el) => el.textContent.trim().startsWith(card));
+    const found = [...document.querySelectorAll(".ui-settings-frame :is(h2, h3, strong)")].find((el) => el.textContent.trim().startsWith(card));
     if (found) return found.scrollIntoView({ block: "center" });
     if (++tries < 20) setTimeout(look, 200);
   };

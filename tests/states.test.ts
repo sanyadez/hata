@@ -53,13 +53,13 @@ test("nothing disabled is faded with opacity", () => {
 });
 
 test("a hover takes no accent, moves nothing, lifts nothing", () => {
-  const bad = all.filter((r) => /:hover\b/.test(r.selector) && !/\.tv-stage\b/.test(r.selector) && (/var\(--accent\)/.test(r.body) || /(^|[;\s])(transform|filter|scale|translate)\s*:(?!\s*none)/.test(r.body) || /box-shadow\s*:(?!\s*none)/.test(r.body)));
+  const bad = all.filter((r) => /:hover\b/.test(r.selector) && !/\.(tv-stage|ui-screen)\b/.test(r.selector) && (/var\(--accent\)/.test(r.body) || /(^|[;\s])(transform|filter|scale|translate)\s*:(?!\s*none)/.test(r.body) || /box-shadow\s*:(?!\s*none)/.test(r.body)));
   expect(bad.map((r) => r.selector)).toEqual([]);
 });
 
 test("the ring of focus is taken away only where something else shows focus", () => {
   // fields (a border and a halo), menu items (a fill), the search boxes whose frame shows it, windows and frames
-  const allowed = /input|select|textarea|\.select-btn|menu-item|role="option"|dialog|\.search\b|\.add-find|\.house-search|\.tv-preview/;
+  const allowed = /input|select|textarea|\.select-btn|menu-item|role="option"|dialog|\.search\b|\.add-find|\.house-search|\.ui-shot|\.ui-find|\.ui-search-box/;
   expect(all.filter((r) => /outline\s*:\s*(none|0)\b/.test(r.body) && !allowed.test(r.selector)).map((r) => r.selector)).toEqual([]);
 });
 

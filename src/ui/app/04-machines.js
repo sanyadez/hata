@@ -44,7 +44,7 @@ const machineChip = (m) => uiState(m.online ? "ok" : "off", m.online ? t("machin
 const machineOs = (m) => [m.info?.os, m.info?.arch].filter(Boolean).join(" · ");
 
 function renderMachines() {
-  shell(h("div", { id: "machines-body" }, h("section", { class: "card pad" }, h("p", { class: "muted" }, t("machines.loading")))));
+  shell(h("div", { id: "machines-body" }, uiCard({}, uiEmpty({ size: "loading", text: t("machines.loading") }))));
   if (treeUi.data) renderMachinesBody();
   void loadTree();
   const timer = setInterval(() => void loadTree(), 10_000);
@@ -54,7 +54,8 @@ function renderMachines() {
 /** Everything the Machines page can gain, in one menu: a computer that is there, a container or a virtual machine made here, a Proxmox server, Home Assistant */
 function addToMachinesMenu(at = null) {
   let dialog;
-  const entry = (label, hint, iconName, action) => h("button", { type: "button", class: "menu-item", disabled: !action, onclick: () => (dialog.close(), action()) }, h("span", { class: "app-icon plus" }, icon(iconName)), h("span", { class: "tile-text" }, h("span", { class: "tile-name" }, label), h("span", { class: "muted small" }, hint)));
+  // a row of the menu: what it adds and what it needs; one that cannot be done yet only says why
+  const entry = (label, hint, iconName, action) => uiRow({ lead: { icon: iconName }, name: label, sub: hint, onclick: action ? () => (dialog.close(), action()) : null });
   const d = incusUi.data;
   // not ready yet — the page of containers says what is needed and has the button
   const here = (kind) => {
@@ -73,10 +74,14 @@ function addToMachinesMenu(at = null) {
   dialog = openDialog(
     at ? "menu dropdown" : "menu",
     h("header", null, h("h2", null, t("machines.addWhat"))),
-    hasModule("machines") && entry(t("machines.addExisting"), t("machines.addExistingHint"), "server", addMachineDialog),
-    hasModule("containers") && entry(t("machines.addContainer"), hint("container"), "box", here("container")),
-    hasModule("containers") && entry(t("machines.addVm"), hint("vm"), "box", here("vm")),
-    hasModule("proxmox") && entry(t("machines.addPve"), t("machines.addPveHint"), "server", () => pveDialog()),
+    h(
+      "div",
+      { class: "ui-rows" },
+      hasModule("machines") && entry(t("machines.addExisting"), t("machines.addExistingHint"), "server", addMachineDialog),
+      hasModule("containers") && entry(t("machines.addContainer"), hint("container"), "box", here("container")),
+      hasModule("containers") && entry(t("machines.addVm"), hint("vm"), "box", here("vm")),
+      hasModule("proxmox") && entry(t("machines.addPve"), t("machines.addPveHint"), "server", () => pveDialog()),
+    ),
   );
   if (at) {
     // under the button, its right edge on the button's
@@ -93,7 +98,7 @@ async function loadTree() {
   try {
     treeUi.data = await api("GET", "/api/servers");
   } catch (e) {
-    if (!treeUi.data) put(document.getElementById("machines-body"), h("section", { class: "card pad" }, h("p", { class: "error" }, errorText(e))));
+    if (!treeUi.data) put(document.getElementById("machines-body"), uiCard({}, uiEmpty({ size: "error", text: errorText(e) })));
     return;
   }
   if (state.route.view === "machines") renderMachinesBody();
@@ -111,7 +116,7 @@ const guestOfRow = (r) => ({ id: r.guest.id, type: r.guest.type, name: r.name, v
 function treeLoad(cpu, memory) {
   if (cpu == null && !memory) return h("span", { class: "muted" }, "—");
   const percent = cpu != null ? Math.round(cpu) : memory?.total ? Math.round((memory.used / memory.total) * 100) : 0;
-  return h("span", { class: "tree-load" }, h("span", { class: "tree-bar" }, uiMeter(percent, { kind: "load" })), cpu != null && h("span", { class: "mono" }, `${Math.round(cpu)}%`), memory && h("span", { class: "mono muted" }, memory.total ? `${bytes(memory.used)} / ${bytes(memory.total)}` : bytes(memory.used)));
+  return h("span", { class: "ui-tree-load" }, h("span", { class: "ui-tree-bar" }, uiMeter(percent, { kind: "load" })), cpu != null && h("span", { class: "mono" }, `${Math.round(cpu)}%`), memory && h("span", { class: "mono muted" }, memory.total ? `${bytes(memory.used)} / ${bytes(memory.total)}` : bytes(memory.used)));
 }
 
 /** A button of a row only where something is to be done: a stopped one is started, a sleeping one woken; the rest is in its "⋯" and on its page */
@@ -157,11 +162,11 @@ function treeRow(r) {
     href: rowPage(r),
     menu: (at) => treeMenu(r, at),
     cells: [
-      h("span", { class: "tree-name" }, h("strong", null, r.name), r.self && uiTag(t("pve.selfChip")), r.noBackup && uiTag(t("tree.noBackup"))),
+      h("span", { class: "ui-tree-name" }, h("strong", null, r.name), r.self && uiTag(t("pve.selfChip")), r.noBackup && uiTag(t("tree.noBackup"))),
       h("span", { class: "muted small" }, what),
       uiState(tone, word),
       treeLoad(r.cpu, r.memory),
-      h("div", { class: "row-actions end", onclick: (e) => e.stopPropagation() }, treeAction(r), h("button", { type: "button", class: "btn small square ui-more", "aria-label": t("app.more"), onclick: (e) => treeMenu(r, underButton(e.currentTarget)) }, icon("more"))),
+      keepClick(uiLine([treeAction(r), h("button", { type: "button", class: "btn small square ui-more", "aria-label": t("app.more"), onclick: (e) => treeMenu(r, underButton(e.currentTarget)) }, icon("more"))], { end: true })),
     ],
     sub: [what, memory].filter(Boolean).join(" · "),
   };
@@ -200,7 +205,7 @@ function treeGroup(g) {
       marks: [head.chip && uiTag(head.chip), head.state],
       lead: [head.what, load].filter(Boolean).join(" · "),
       flush: true,
-      cls: "tree-host",
+      cls: "ui-tree-host",
       menu,
       actions: [action, menu && h("button", { type: "button", class: "btn small square ui-more", "aria-label": t("app.more"), onclick: (e) => menu(underButton(e.currentTarget)) }, icon("more"))].filter(Boolean),
     },
@@ -220,15 +225,15 @@ function renderMachinesBody(force = false) {
   const d = treeUi.data;
   if (!box || !d) return;
   const shown = JSON.stringify(d) + (pveUi.list ? "p" : "") + (machinesUi.list ? "m" : "") + (incusUi.data ? "c" : "");
-  if (!force && shown === treeUi.shown && box.querySelector(".server-tree")) return;
+  if (!force && shown === treeUi.shown && box.querySelector(".ui-tree")) return;
   treeUi.shown = shown;
   const meta = [t("tree.total", { total: d.total, running: d.running }), d.notAnswering > 0 && t("tree.metaNoAnswer", { n: d.notAnswering }), d.notConnected > 0 && t("tree.metaAway", { n: d.notConnected })].filter(Boolean).join(" · ");
   put(
     box,
     h(
       "div",
-      { class: "stack server-tree" },
-      pageHead({ title: t("nav.machines"), facts: [meta], actions: [{ label: t("machines.addAny"), icon: "plus", primary: true, run: () => addToMachinesMenu(document.querySelector(".server-tree .ui-head .ui-main")) }, { label: t("load.title"), icon: "chart", href: "#/machines/load" }] }),
+      { class: "stack ui-tree" },
+      pageHead({ title: t("nav.machines"), facts: [meta], actions: [{ label: t("machines.addAny"), icon: "plus", primary: true, run: () => addToMachinesMenu(document.querySelector(".ui-tree .ui-head .ui-main")) }, { label: t("load.title"), icon: "chart", href: "#/machines/load" }] }),
       d.outdated.length > 0 && uiCard({}, uiNotice({ tone: "info", icon: "up", title: t("tree.outdated", { version: d.version }), text: d.outdated.map((m) => m.name).join(", "), action: button(t("tree.updateAll"), { class: "small", onclick: (e) => updateClients(d.outdated, e.currentTarget) }, "up") })),
       d.groups.map(treeGroup),
     ),
@@ -274,7 +279,7 @@ function loadLine(values) {
   const W = 120, H = 26;
   const svg = document.createElementNS(SVG_NS, "svg");
   svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
-  svg.setAttribute("class", "load-line");
+  svg.setAttribute("class", "ui-load-line");
   svg.setAttribute("aria-hidden", "true");
   const top = Math.max(10, ...values.filter((v) => v != null));
   let d = "";
@@ -305,7 +310,7 @@ async function loadLoad() {
     loadUi.data = await api("GET", "/api/load");
   } catch (e) {
     const box = document.getElementById("load-body");
-    if (box && !loadUi.data) put(box, h("section", { class: "card pad" }, h("p", { class: "error" }, errorText(e))));
+    if (box && !loadUi.data) put(box, uiCard({}, uiEmpty({ size: "error", text: errorText(e) })));
     return;
   }
   if (state.route.view === "load") paintLoad();
@@ -317,7 +322,6 @@ function paintLoad() {
   if (!box || !d) return;
   const at = state.route.place ?? "";
   const shown = at ? d.places.filter((p) => p.id === at) : d.places;
-  const pill = (id, label) => h("a", { class: "seg-pill" + (at === id ? " active" : ""), href: id ? `#/machines/load/${id}` : "#/machines/load" }, label);
   const placeLabel = (p) => (p.kind === "here" ? t("load.here", { name: p.name }) : p.kind === "pve" && p.host !== p.name ? `${p.host} · ${p.name}` : p.name);
   const w = d.warn;
   const places = [{ value: "", label: t("load.all"), href: "#/machines/load" }, ...d.places.map((p) => ({ value: p.id, label: placeLabel(p), href: `#/machines/load/${p.id}` }))];
@@ -337,29 +341,20 @@ function loadPlace(p, label) {
   const all = loadUi.all.has(p.id);
   const list = all ? rows : rows.slice(0, LOAD_SHOWN);
   const memPercent = p.memory.total ? Math.round((p.memory.used / p.memory.total) * 100) : 0;
-  const head = (id, text) => h("th", { class: "num" }, h("button", { type: "button", class: "th-sort" + (loadUi.sort === id ? " active" : ""), "aria-pressed": String(loadUi.sort === id), onclick: () => ((loadUi.sort = id), paintLoad()) }, text, loadUi.sort === id && icon("down")));
+  const head = (id, text) => ({ label: text, num: true, sorted: loadUi.sort === id ? "descending" : null, sort: () => ((loadUi.sort = id), paintLoad()) });
   const old = Date.now() - p.at > 60_000;
   return uiCard(
     {
       title: label,
       count: t("load.cores", { n: p.cores }),
       flush: true,
-      cls: "load-place",
+      cls: "ui-load-place",
       actions: [h("span", { class: "ui-row-time" }, t("load.total", { cpu: p.cpu ?? "—", used: bytes(p.memory.used), total: bytes(p.memory.total), percent: memPercent })), p.power && p.power.total !== null && button(t("power.draw", { watts: p.power.total }), { class: "small", title: t("power.drawTitle"), onclick: () => drawDialog(p) }, "power")].filter(Boolean),
     },
     old && h("div", { class: "ui-inset" }, uiNotice({ tone: "warn", text: t("load.stale", { time: ago(p.at) }) })),
     !rows.length
       ? uiEmpty({ text: t(p.kind === "machine" ? "load.soonMachine" : "load.soon") })
-      : h(
-          "div",
-          { class: "table-wrap" },
-          h(
-            "table",
-            { class: "load-table" },
-            h("thead", null, h("tr", null, h("th", null, t("load.col.what")), head("cpu", t("load.col.cpu")), head("memory", t("load.col.memory")), head("disk", t("load.col.disk")), head("net", t("load.col.net")), h("th", null, t("load.col.hour")))),
-            h("tbody", null, list.map((r) => loadRow(r, p))),
-          ),
-        ),
+      : uiTable([{ label: t("load.col.what") }, head("cpu", t("load.col.cpu")), head("memory", t("load.col.memory")), head("disk", t("load.col.disk")), head("net", t("load.col.net")), { label: t("load.col.hour") }], list.map((r) => loadRow(r, p)), { cls: "ui-load-table" }),
     rows.length > LOAD_SHOWN && uiEmpty({ text: " ", action: button(all ? t("load.fewer") : t("load.more", { n: rows.length - LOAD_SHOWN }), { class: "quiet small", onclick: () => (all ? loadUi.all.delete(p.id) : loadUi.all.add(p.id), paintLoad()) }) }),
   );
 }
@@ -373,8 +368,8 @@ function drawDialog(place) {
   dialog = openDialog(
     "wide",
     h("header", null, h("div", { class: "grow" }, h("h2", null, t("power.drawTitle")), h("p", { class: "muted small" }, t("power.drawLead"))), closeX(() => dialog)),
-    h("div", { class: "kv-list" }, p.zones.map((z) => h("div", { class: "kv" + (z.top ? "" : " sub") }, h("span", null, has("power.zone." + z.name.replace(/-\d+$/, "")) ? t("power.zone." + z.name.replace(/-\d+$/, ""), { n: z.name.replace(/^\D+-?/, "") }) : z.name), h("strong", null, z.watts === null ? "—" : t("power.draw", { watts: z.watts }))))),
-    p.hour.some((w) => w !== null) ? lineChart(points, [{ cls: "s2", label: t("power.drawTitle"), value: (x) => x.w }], { max: null, fmt: (v) => t("power.draw", { watts: Math.round(v * 10) / 10 }), label: t("power.drawTitle"), height: 140 }) : h("p", { class: "muted small" }, t("load.soonRow")),
+    h("div", null, uiFacts(p.zones.map((z) => [(z.top ? "" : "↳ ") + (has("power.zone." + z.name.replace(/-\d+$/, "")) ? t("power.zone." + z.name.replace(/-\d+$/, ""), { n: z.name.replace(/^\D+-?/, "") }) : z.name), h("strong", null, z.watts === null ? "—" : t("power.draw", { watts: z.watts }))]))),
+    p.hour.some((w) => w !== null) ? lineChart(points, [{ cls: "ui-chart-s2", label: t("power.drawTitle"), value: (x) => x.w }], { max: null, fmt: (v) => t("power.draw", { watts: Math.round(v * 10) / 10 }), label: t("power.drawTitle"), height: 140 }) : h("p", { class: "muted small" }, t("load.soonRow")),
     h("footer", null, closeButton(() => dialog)),
   );
 }
@@ -383,16 +378,20 @@ function loadRow(r, p) {
   const name = loadName(r, p);
   const app = r.kind === "app" && p.kind === "here" ? state.overview?.apps?.find((a) => a.name === r.name) : null;
   const over = loadUi.data.warn.warn && r.over > 0 && r.cpu >= loadUi.data.warn.cpu;
-  return h(
-    "tr",
-    { class: "clickable" + (over ? " warn-row" : ""), onclick: () => loadRowDialog(r, p) },
-    h("td", null, h("div", { class: "load-what" }, app ? appIcon(app, "small") : h("span", { class: "load-kind" }, icon(LOAD_ICONS[r.kind] ?? "box")), h("div", { class: "clip" }, h("strong", null, name), h("div", { class: "muted small" }, t("load.kindOf." + r.kind), r.parts?.length > 1 && " · " + t("load.parts", { n: r.parts.length }))))),
-    h("td", { class: "num" + (over ? " warn-text" : "") }, `${r.cpu}%`),
-    h("td", { class: "num" }, bytes(r.memory)),
-    h("td", { class: "num small" }, twoWays(r.read, r.write)),
-    h("td", { class: "num small", ...(r.rx == null ? { title: t("load.hostNet") } : {}) }, twoWays(r.rx, r.tx)),
-    h("td", null, loadLine(r.trend.cpu.concat([r.cpu]))),
-  );
+  const kind = [t("load.kindOf." + r.kind), r.parts?.length > 1 && t("load.parts", { n: r.parts.length })].filter(Boolean).join(" · ");
+  return {
+    onclick: () => loadRowDialog(r, p),
+    cls: over ? "ui-tr-warn" : null,
+    cells: [
+      uiCell({ lead: app ? appIcon(app, "row") : { icon: LOAD_ICONS[r.kind] ?? "box" }, name, sub: kind }),
+      over ? uiState("warn", `${r.cpu}%`) : `${r.cpu}%`,
+      bytes(r.memory),
+      h("span", { class: "small" }, twoWays(r.read, r.write)),
+      h("span", { class: "small", title: r.rx == null ? t("load.hostNet") : null }, twoWays(r.rx, r.tx)),
+      loadLine(r.trend.cpu.concat([r.cpu])),
+    ],
+    sub: [`${r.cpu}%`, bytes(r.memory)].join(" · "),
+  };
 }
 
 const LOAD_ICONS = { hata: "home", app: "grid", container: "box", instance: "box", engine: "box", service: "sliders", sessions: "terminal", system: "server", machine: "box", rest: "cpu", guest: "box" };
@@ -408,10 +407,10 @@ function loadRowDialog(r, p) {
     "wide",
     h("header", null, h("h2", { class: "clip" }, loadName(r, p)), h("p", { class: "muted small" }, t("load.kindOf." + r.kind) + " · " + (p.kind === "here" ? t("load.here", { name: p.name }) : p.name))),
     n < 2 ? h("p", { class: "muted" }, t("load.soonRow")) : [
-      lineChart(points, [{ cls: "s2", label: t("load.col.cpu"), value: (x) => x.cpu }], { max: null, fmt: (v) => Math.round(v) + "%", label: t("load.col.cpu"), height: 140 }),
-      lineChart(points, [{ cls: "s1", label: t("load.col.memory"), value: (x) => x.memory }], { max: null, fmt: (v) => bytes(v), label: t("load.col.memory"), height: 140 }),
+      lineChart(points, [{ cls: "ui-chart-s2", label: t("load.col.cpu"), value: (x) => x.cpu }], { max: null, fmt: (v) => Math.round(v) + "%", label: t("load.col.cpu"), height: 140 }),
+      lineChart(points, [{ cls: "ui-chart-s1", label: t("load.col.memory"), value: (x) => x.memory }], { max: null, fmt: (v) => bytes(v), label: t("load.col.memory"), height: 140 }),
     ],
-    r.parts?.length > 0 && h("div", { class: "table-wrap" }, h("table", null, h("thead", null, h("tr", null, h("th", null, t("load.col.container")), h("th", { class: "num" }, t("load.col.cpu")), h("th", { class: "num" }, t("load.col.memory")), h("th", { class: "num" }, t("load.col.disk")), h("th", { class: "num" }, t("load.col.net")))), h("tbody", null, r.parts.map((c) => h("tr", null, h("td", null, c.name), h("td", { class: "num" }, `${c.cpu}%`), h("td", { class: "num" }, bytes(c.memory)), h("td", { class: "num small" }, twoWays(c.read, c.write)), h("td", { class: "num small" }, twoWays(c.rx, c.tx))))))),
+    r.parts?.length > 0 && uiTable([{ label: t("load.col.container") }, { label: t("load.col.cpu"), num: true }, { label: t("load.col.memory"), num: true }, { label: t("load.col.disk"), num: true }, { label: t("load.col.net"), num: true }], r.parts.map((c) => ({ cells: [c.name, `${c.cpu}%`, bytes(c.memory), twoWays(c.read, c.write), twoWays(c.rx, c.tx)], sub: `${c.cpu}% · ${bytes(c.memory)}` })), { height: 44 }),
     r.kind === "rest" && h("p", { class: "muted small" }, t("load.restHint")),
     h("footer", null, href && button(t("load.open"), { class: "primary", onclick: () => (dialog.close(), go(href)) }, "chevron"), closeButton(() => dialog)),
   );
@@ -429,9 +428,9 @@ function loadWarnDialog() {
     "",
     h("h2", null, t("load.warn.title")),
     h("p", { class: "muted" }, t("load.warn.lead")),
-    h("label", { class: "check" }, on, h("span", null, h("strong", null, t("load.warn.tick")))),
-    h("div", { class: "form-row" }, h("label", null, t("load.warn.cpu")), h("div", null, cpu, " %", h("p", { class: "muted small" }, t("load.warn.cpuHint")))),
-    h("div", { class: "form-row" }, h("label", null, t("load.warn.minutes")), h("div", null, minutes, h("p", { class: "muted small" }, t("load.warn.minutesHint")))),
+    uiCheck(t("load.warn.tick"), on),
+    uiField(t("load.warn.cpu"), uiLine([cpu, h("span", { class: "muted" }, "%")]), t("load.warn.cpuHint")),
+    uiField(t("load.warn.minutes"), minutes, t("load.warn.minutesHint")),
     error,
     h(
       "footer",
@@ -469,7 +468,7 @@ async function addMachineDialog() {
       people.disabled = true;
       try {
         invite = { ...invite, ...(await api("POST", "/api/machines/invite", { people: people.checked })) };
-        cmd.textContent = line();
+        paintCmd();
       } catch (e) {
         people.checked = !people.checked;
         toast(errorText(e), "error");
@@ -489,28 +488,25 @@ async function addMachineDialog() {
   const about = h("p", { class: "muted small" });
   const explain = () => (about.textContent = t("machines.addVia." + kindOf(address) + "Hint"));
   const line = () => `curl -fsSL ${address}/client/${invite.code} | sudo sh`;
-  const cmd = h("span", { class: "grow mono machine-line" }, line());
-  const waiting = h("p", { class: "machine-wait" }, h("span", { class: "machine-pulse" }), t("machines.addWaiting"));
+  // the line to type, copied whole; made again when the address or the code changes
+  const cmd = h("div");
+  const paintCmd = () => put(cmd, uiCommand(line(), { block: true }));
+  paintCmd();
+  const waiting = h("div", null, uiEmpty({ size: "loading", text: t("machines.addWaiting") }));
   let dialog;
   const pick =
     addresses.length > 1 &&
-    h(
-      "div",
-      { class: "stack-s" },
-      h("label", { for: "machine-address", class: "strong" }, t("machines.addAddress")),
-      h("select", { id: "machine-address", onchange: (e) => ((address = e.target.value), (cmd.textContent = line()), explain()) }, addresses.map((a) => h("option", { value: a }, t("machines.addVia." + kindOf(a), { address: a })))),
-      about,
-    );
+    uiField(t("machines.addAddress"), h("select", { onchange: (e) => ((address = e.target.value), paintCmd(), explain()) }, addresses.map((a) => h("option", { value: a }, t("machines.addVia." + kindOf(a), { address: a })))), about);
   explain();
   dialog = openDialog(
     "wide",
     h("header", null, h("h2", { class: "grow" }, t("machines.addTitle")), closeX(() => dialog)),
     h("p", null, t("machines.addLead")),
     pick,
-    h("p", { class: "cmd whole" }, cmd, h("button", { type: "button", class: "icon-btn", title: t("twofa.copy"), "aria-label": t("twofa.copy"), onclick: () => copyText(line()) }, icon("copy"))),
+    cmd,
     h("p", { class: "muted small" }, t("machines.addHint", { minutes: Math.round(invite.valid / 60000) })),
     h("p", { class: "muted small" }, t("machines.addNeeds")),
-    h("label", { class: "check" }, people, h("span", null, h("strong", null, t("machines.people.tick")), h("span", { class: "muted small block" }, t("machines.people.tickHint")))),
+    uiCheck(t("machines.people.tick"), people, t("machines.people.tickHint")),
     waiting,
     h("footer", null, closeButton(() => dialog)),
   );
@@ -521,8 +517,7 @@ async function addMachineDialog() {
     if (!fresh) return;
     machinesUi.list = list;
     if (state.route.view === "machines") renderMachinesBody();
-    waiting.replaceChildren(icon("check"), h("span", null, t("machines.addDone", { name: fresh.name })), h("a", { class: "btn small primary", href: `#/machines/${fresh.id}`, onclick: () => dialog.close() }, t("common.open")));
-    waiting.classList.add("done");
+    put(waiting, uiNotice({ tone: "ok", text: t("machines.addDone", { name: fresh.name }), action: h("a", { class: "btn small primary", href: `#/machines/${fresh.id}`, onclick: () => dialog.close() }, t("common.open")) }));
     stop();
   };
   const timer = setInterval(look, 3000);
@@ -563,7 +558,7 @@ function startInstanceOf(m, el) {
 function renderContainers() {
   shell(
     areaHead("server", "containers"),
-    h("section", { class: "card ui-filters incus-bar" }, h("span", { id: "incus-tabs", hidden: true }, uiSegment([{ value: "list", label: t("incus.tab.list"), href: "#/machines/this/containers" }, { value: "settings", label: t("incus.tab.settings"), href: "#/machines/this/containers/settings" }], state.route.tab === "settings" ? "settings" : "list")), h("span", { class: "muted small grow", id: "incus-meta" }, t("incus.lead")), h("div", { class: "actions", id: "incus-actions" })),
+    uiCard({ flush: true, cls: "ui-filters ui-incus-bar" }, h("span", { id: "incus-tabs", hidden: true }, uiSegment([{ value: "list", label: t("incus.tab.list"), href: "#/machines/this/containers" }, { value: "settings", label: t("incus.tab.settings"), href: "#/machines/this/containers/settings" }], state.route.tab === "settings" ? "settings" : "list")), h("span", { class: "muted small grow", id: "incus-meta" }, t("incus.lead")), h("div", { class: "ui-line", id: "incus-actions" })),
     h("div", { id: "incus-body", class: "stack" }),
   );
   if (incusUi.data) renderContainersBody();
@@ -592,7 +587,7 @@ function renderContainersBody() {
       box,
       uiCard(
         { title: t("incus.missing.title"), lead: t("incus.missing.lead") },
-        h("ul", { class: "stack-s small pve-gives" }, ["system", "docker", "machine", "snapshots"].map((k) => h("li", null, t("incus.gives." + k)))),
+        uiGives(["system", "docker", "machine", "snapshots"].map((k) => t("incus.gives." + k))),
         uiNeedProgram({ name: "Incus", why: t("incus.missing.what"), command: d.install, run: d.install ? install : null }),
         !d.install && uiNotice({ tone: "warn", text: t("incus.missing.byHand") }),
         d.install && installPlaceRow(),
@@ -623,31 +618,25 @@ function renderContainersBody() {
 /** Where new ones sit: the home network once its bridge is there, or the way to make it */
 function homeNetCard(d) {
   const home = d.home;
-  return h(
-    "section",
-    { class: "card pad stack" },
-    h("div", { class: "section-head" }, h("h2", null, t("incus.net.title")), h("div", { class: "actions" }, home ? h("a", { class: "btn small", href: "#/settings/network" }, t("incus.net.settings")) : button(t("incus.net.make"), { class: "small", onclick: () => homeBridgeDialog(null, () => void loadContainers()) }, "box"))),
-    h("p", { class: "muted small" }, home ? t("incus.net.on", { bridge: home.name, address: home.address || "—" }) : t("incus.net.off", { network: d.network?.name ?? "" })),
-  );
+  return uiCard({
+    title: t("incus.net.title"),
+    actions: home ? h("a", { class: "btn small", href: "#/settings/network" }, t("incus.net.settings")) : button(t("incus.net.make"), { class: "small", onclick: () => homeBridgeDialog(null, () => void loadContainers()) }, "box"),
+    lead: home ? t("incus.net.on", { bridge: home.name, address: home.address || "—" }) : t("incus.net.off", { network: d.network?.name ?? "" }),
+  });
 }
 
 /** Virtual machines: a test feature of their own, with what it needs and what it cannot do yet */
 function vmCard(d) {
   const vms = d.vms;
   if (!vms || vms.state === "ready") return null;
-  const head = h("h2", null, t("incus.vm.title"), " ", h("span", { class: "chip" }, t("incus.vm.test")));
-  if (vms.state !== "missing") return h("section", { class: "card pad stack" }, head, h("p", null, t("incus.vm." + vms.state)));
-  return h(
-    "section",
-    { class: "card pad stack" },
-    head,
-    h("p", null, t("incus.vm.lead")),
-    h("ul", { class: "stack-s small pve-gives" }, ["limits", "images", "screen", "space"].map((k) => h("li", null, t("incus.vm.limit." + k)))),
-    vms.install ? h("p", { class: "cmd" }, icon("terminal"), vms.install) : h("p", { class: "banner small" }, t("incus.missing.byHand")),
+  const head = { title: t("incus.vm.title"), marks: uiTag(t("incus.vm.test")) };
+  if (vms.state !== "missing") return uiCard({ ...head, lead: t("incus.vm." + vms.state) });
+  return uiCard(
+    { ...head, lead: t("incus.vm.lead") },
+    uiGives(["limits", "images", "screen", "space"].map((k) => t("incus.vm.limit." + k))),
+    vms.install ? uiCommand(vms.install) : uiNotice({ tone: "warn", text: t("incus.missing.byHand") }),
     vms.install &&
-      h(
-        "div",
-        { class: "actions" },
+      uiLine([
         button(
           t("incus.vm.install"),
           {
@@ -664,39 +653,38 @@ function vmCard(d) {
           },
           "download",
         ),
-      ),
+      ]),
   );
 }
 
 /** Where Incus is to keep the containers, chosen before it is installed: the system disk unless another folder is picked */
 function installPlaceRow() {
-  const shown = h("span", { class: "grow mono small" });
+  const shown = h("span", { class: "grow mono small clip" });
   const reset = button(t("incus.place.system"), { class: "small ghost", onclick: () => ((incusUi.place = ""), paint()) });
   const paint = () => {
     shown.textContent = incusUi.place || t("incus.place.systemPath");
     reset.hidden = !incusUi.place;
   };
   paint();
-  return h(
-    "div",
-    { class: "stack-s" },
-    h("strong", null, t("incus.place.where")),
-    h("p", { class: "muted small" }, t("incus.place.whereHint")),
-    h("div", { class: "row-actions" }, icon("folder"), shown, reset, button(t("incus.place.choose"), { class: "small", onclick: () => folderPicker({ title: t("incus.place.pickTitle"), start: "/mnt", confirmLabel: t("incus.place.pickHere"), action: (path) => ((incusUi.place = path), paint()) }) }, "folder")),
-  );
+  return uiSetting({
+    name: t("incus.place.where"),
+    explain: t("incus.place.whereHint"),
+    wide: true,
+    control: uiLine([icon("folder"), shown, reset, button(t("incus.place.choose"), { class: "small", onclick: () => folderPicker({ title: t("incus.place.pickTitle"), start: "/mnt", confirmLabel: t("incus.place.pickHere"), action: (path) => ((incusUi.place = path), paint()) }) }, "folder")]),
+  });
 }
 
 /** The places containers live in: room, which one new ones go to, another one added */
 function incusPlacesCard(d) {
   const list = d.places ?? [];
   const act = async (el, method, path, body) => {
-    el.disabled = true;
+    if (el) el.disabled = true;
     try {
       await api(method, path, body);
       await loadContainers();
     } catch (e) {
       toast(errorText(e), "error");
-      el.disabled = false;
+      if (el) el.disabled = false;
     }
   };
   const add = () =>
@@ -711,66 +699,55 @@ function incusPlacesCard(d) {
         await loadContainers();
       },
     });
-  return h(
-    "section",
-    { class: "card pad stack" },
-    h("div", { class: "row" }, h("h2", { class: "grow" }, t("incus.place.title")), button(t("incus.place.add"), { class: "small", onclick: add }, "plus")),
-    h("p", { class: "muted small" }, t("incus.place.lead")),
-    list.map((p) => {
-      const percent = p.total ? Math.round((p.used / p.total) * 100) : 0;
-      const fill = h("i", { class: level(percent) });
-      fill.style.width = percent + "%";
-      return h(
-        "div",
-        { class: "stack-s", menu: true },
-        h(
-          "div",
-          { class: "row" },
-          h("div", { class: "grow" }, h("strong", null, p.name), " ", p.standard && h("span", { class: "chip" }, t("incus.place.standard")), " ", p.away && h("span", { class: "state restarting" }, t("incus.place.away")), h("div", { class: "muted small mono" }, (p.path || t("incus.place.systemPath")) + " · " + p.driver)),
-          h(
-            "div",
-            { class: "row-actions" },
-            !p.standard && button(t("incus.place.makeStandard"), { class: "small", onclick: (e) => act(e.currentTarget, "PUT", `/api/containers/places/${p.name}`) }, "check"),
-            !p.standard && !p.profile && !p.instances && button("", { class: "small ghost", title: t("incus.place.remove"), "aria-label": t("incus.place.remove"), onclick: (e) => act(e.currentTarget, "DELETE", `/api/containers/places/${p.name}`) }, "trash"),
-          ),
-        ),
-        p.total > 0 && h("div", { class: "bar" }, fill),
-        h("p", { class: "muted small" }, [p.total ? t("sys.free", { free: bytes(p.total - p.used), total: bytes(p.total) }) : null, t("incus.place.instancesN", { n: p.instances })].filter(Boolean).join(" · ")),
-        p.away && h("p", { class: "small" }, t("incus.place.awayHint")),
-      );
-    }),
+  return uiCard(
+    { title: t("incus.place.title"), lead: t("incus.place.lead"), flush: true, actions: button(t("incus.place.add"), { class: "small", onclick: add }, "plus") },
+    h(
+      "div",
+      { class: "ui-rows" },
+      list.map((p) => {
+        const percent = p.total ? Math.round((p.used / p.total) * 100) : 0;
+        const room = [p.total ? t("sys.free", { free: bytes(p.total - p.used), total: bytes(p.total) }) : null, t("incus.place.instancesN", { n: p.instances })].filter(Boolean).join(" · ");
+        return uiRow({
+          lead: { icon: "disk", tone: p.away ? "bad" : null },
+          name: [p.name, p.standard && " ", p.standard && uiTag(t("incus.place.standard"))],
+          sub: [h("span", { class: "mono" }, (p.path || t("incus.place.systemPath")) + " · " + p.driver), " · ", room, p.away && h("div", null, t("incus.place.awayHint"))],
+          meter: p.total > 0 && uiMeter(percent),
+          state: p.away && uiState("bad", t("incus.place.away")),
+          action: !p.standard && button(t("incus.place.makeStandard"), { class: "small", onclick: (e) => act(e.currentTarget, "PUT", `/api/containers/places/${p.name}`) }, "check"),
+          more: !p.standard && !p.profile && !p.instances ? [{ label: t("incus.place.remove"), icon: "trash", danger: true, run: () => act(null, "DELETE", `/api/containers/places/${p.name}`) }] : null,
+        });
+      }),
+    ),
   );
 }
 
 /** Disc images (ISO) for virtual machines installed from them: what is kept, and the ways to add one */
 function discsCard(d) {
   const list = d.discs ?? [];
-  return h(
-    "section",
-    { class: "card pad stack" },
-    h(
-      "div",
-      { class: "row wrap" },
-      h("h2", { class: "grow" }, t("incus.disc.title")),
-      button(t("incus.disc.fromLink"), { class: "small", onclick: () => discAddDialog({ how: "url" }) }, "link"),
-      button(t("incus.disc.fromHere"), { class: "small", onclick: () => discAddDialog({ how: "local" }) }, "upload"),
-      !list.some((x) => /^virtio-win/i.test(x.name)) && button(t("incus.win.drivers"), { class: "small", title: t("incus.win.driversHint"), onclick: (e) => addDrivers(e.currentTarget) }, "download"),
-    ),
-    h("p", { class: "muted small" }, t("incus.disc.lead")),
+  return uiCard(
+    {
+      title: t("incus.disc.title"),
+      lead: t("incus.disc.lead"),
+      flush: true,
+      actions: [
+        button(t("incus.disc.fromLink"), { class: "small", onclick: () => discAddDialog({ how: "url" }) }, "link"),
+        button(t("incus.disc.fromHere"), { class: "small", onclick: () => discAddDialog({ how: "local" }) }, "upload"),
+        !list.some((x) => /^virtio-win/i.test(x.name)) && button(t("incus.win.drivers"), { class: "small", title: t("incus.win.driversHint"), onclick: (e) => addDrivers(e.currentTarget) }, "download"),
+      ].filter(Boolean),
+    },
     list.length === 0
-      ? h("p", { class: "muted small" }, t("incus.disc.none"))
-      : list.map((x) =>
-          h(
-            "div",
-            { class: "row", menu: true },
-            h("span", { class: "app-icon plus small" }, icon("disk")),
-            h("div", { class: "grow" }, h("div", { class: "strong clip" }, x.name), h("div", { class: "muted small" }, [x.size ? bytes(x.size) : null, (d.places ?? []).length > 1 && x.place, x.usedBy.length ? t("incus.disc.usedBy", { names: x.usedBy.join(", ") }) : null].filter(Boolean).join(" · "))),
-            h(
-              "div",
-              { class: "row-actions" },
-              button(t("incus.disc.makeVm"), { class: "small", onclick: () => newDiscVm(x) }, "plus"),
-              button("", { class: "small ghost", title: t("incus.disc.remove"), "aria-label": `${t("incus.disc.remove")}: ${x.name}`, disabled: x.usedBy.length > 0, onclick: () => removeDiscDialog(x) }, "trash"),
-            ),
+      ? uiEmpty({ text: t("incus.disc.none") })
+      : h(
+          "div",
+          { class: "ui-rows" },
+          list.map((x) =>
+            uiRow({
+              lead: { icon: "disk" },
+              name: x.name,
+              sub: [x.size ? bytes(x.size) : null, (d.places ?? []).length > 1 && x.place, x.usedBy.length ? t("incus.disc.usedBy", { names: x.usedBy.join(", ") }) : null].filter(Boolean).join(" · "),
+              action: button(t("incus.disc.makeVm"), { class: "small", onclick: () => newDiscVm(x) }, "plus"),
+              more: [{ label: t("incus.disc.remove"), icon: "trash", danger: true, off: x.usedBy.length > 0, run: () => removeDiscDialog(x) }],
+            }),
           ),
         ),
   );
@@ -815,8 +792,8 @@ async function discAddDialog({ how, path = "" }) {
   const place = h("select", null, places.map((p) => h("option", { value: p.name, selected: p.standard }, `${p.name} — ${p.path || t("incus.place.systemPath")}${p.total ? " · " + t("incus.place.freeShort", { free: bytes(p.total - p.used) }) : ""}`)));
   const url = h("input", { type: "url", required: how === "url", placeholder: "https://…/debian-13-amd64-netinst.iso", class: "mono", spellcheck: false });
   const picked = h("input", { type: "file", required: how === "local", accept: ".iso" });
-  const fill = h("i");
-  const progress = h("div", { class: "stack-s", hidden: true }, h("div", { class: "bar" }, fill), h("p", { class: "muted small" }));
+  const meter = h("div", null, uiMeter(0, { kind: "progress" }));
+  const progress = h("div", { class: "stack-s", hidden: true }, meter, h("p", { class: "muted small" }));
   const error = h("p", { class: "error", role: "alert" });
   const stay = (e) => e.preventDefault();
   let dialog;
@@ -835,7 +812,7 @@ async function discAddDialog({ how, path = "" }) {
     xhr.open("POST", `/api/containers/discs/upload?${new URLSearchParams({ place: place.value, name: f.name })}`);
     xhr.upload.onprogress = (e) => {
       const percent = e.total ? Math.floor((e.loaded / e.total) * 100) : 0;
-      fill.style.width = percent + "%";
+      put(meter, uiMeter(percent, { kind: "progress" }));
       said.textContent = percent < 100 ? t("pve.send.sending", { done: bytes(e.loaded), size: bytes(f.size) }) : t("incus.disc.placing");
     };
     const failed = (text) => ((error.textContent = text), (progress.hidden = true), (go.disabled = false), dialog.removeEventListener("cancel", stay));
@@ -1027,13 +1004,11 @@ function containerRow(c) {
       uiCell({ name: c.name, sub: what }),
       incusStatus(c),
       h("span", { class: "mono small" }, c.address || "—"),
-      uiCell({ name: h("span", { class: "plain" }, use), sub: limits }),
-      h(
-        "div",
-        { class: "row-actions end", onclick: (e) => e.stopPropagation() },
+      uiCell({ name: use, sub: limits }),
+      keepClick(uiLine([
         running ? (c.kind === "vm" ? button(t("incus.screen"), { class: "small", onclick: () => containerScreen(c) }, "screen") : button(t("incus.console"), { class: "small", onclick: () => containerConsole(c) }, "terminal")) : button(t("incus.start"), { class: "small", onclick: (e) => containerAct(c, "start", e.currentTarget) }, "play"),
         h("button", { type: "button", class: "btn small square ui-more", "aria-label": t("incus.more"), onclick: (e) => containerMenu(c, underButton(e.currentTarget)) }, icon("more")),
-      ),
+      ], { end: true })),
     ],
     sub: [what, c.address, use !== "—" && use].filter(Boolean).join(" · "),
   };
@@ -1084,7 +1059,7 @@ function containerMenu(c, at) {
 /** What only an instance of this server has, on its own page and on its machine's: its screen, disc, limits and snapshots */
 function instanceCards(c) {
   const running = c.status === "running";
-  const screen = c.kind === "vm" && running && uiCard({ title: t("incus.screen") }, h("div", { class: "term-holder instance-screen" }, h("iframe", { class: "term-frame", src: "/screen.html?" + new URLSearchParams({ incus: c.name, lang: state.lang }), title: t("incus.screen") })));
+  const screen = c.kind === "vm" && running && uiCard({ title: t("incus.screen") }, uiEmbed(h("iframe", { src: "/screen.html?" + new URLSearchParams({ incus: c.name, lang: state.lang }), title: t("incus.screen") })));
   const disc = c.disc && uiCard({ title: t("instance.disc"), actions: button(t("incus.disc.eject"), { class: "small", onclick: () => ejectDisc(c) }, "up") }, ...uiFacts([[t("instance.disc"), h("span", { class: "mono" }, c.disc)]]));
   const limits = uiCard(
     { title: t("instance.limits"), actions: button(t("instance.change") + "…", { class: "small", onclick: () => containerLimitsDialog(c) }, "sliders") },
@@ -1119,7 +1094,7 @@ function renderInstanceBody() {
   // with Hata's client it is a computer: the same address, more tabs
   if (c.machine && machinesUi.list?.machines.some((m) => m.id === c.machine)) return asMachine(c.machine, `#/containers/i/${c.name}`);
   const running = c.status === "running";
-  const tab = (id, label) => h("a", { class: "tab" + (state.route.tab === id ? " active" : ""), href: `#/containers/i/${c.name}${id === "overview" ? "" : "/" + id}` }, label);
+  const tab = (id, label) => ({ label, active: state.route.tab === id, href: `#/containers/i/${c.name}${id === "overview" ? "" : "/" + id}` });
   put(
     head,
     pageHead({
@@ -1130,12 +1105,12 @@ function renderInstanceBody() {
       facts: [t("tree.kind." + c.kind), c.os, c.address && h("span", { class: "mono" }, c.address)],
       actions: [running ? { label: t("incus.stop"), icon: "stop", run: () => containerAct(c, "stop") } : { label: t("incus.start"), icon: "play", primary: true, run: () => containerAct(c, "start") }, h("button", { type: "button", class: "btn square", "aria-label": t("app.more"), onclick: (e) => containerMenu(c, underButton(e.currentTarget)) }, icon("more"))],
       menu: (at) => containerMenu(c, at),
-      tabs: h("nav", { class: "tabs" }, tab("overview", t("machines.tab.overview")), running && tab("terminal", t("machines.tab.terminal"))),
+      tabs: uiTabs([tab("overview", t("machines.tab.overview")), running && tab("terminal", t("machines.tab.terminal"))]),
     }),
   );
   if (state.route.tab === "terminal" && running) {
     // drawn once: redrawing would cut the shell off
-    if (!box.querySelector(".term-holder")) put(box, h("div", { class: "term-holder" }, terminalFrame({ incus: c.name })));
+    if (!box.querySelector(".ui-embed")) put(box, uiEmbed(terminalFrame({ incus: c.name })));
     return;
   }
   // a redraw must not reconnect the screen for news that does not concern it
@@ -1143,19 +1118,19 @@ function renderInstanceBody() {
   if (box.dataset.shown !== key) {
     box.dataset.shown = key;
     const { main, side } = instanceCards(c);
-    put(box, h("div", { class: "columns" }, h("div", { class: "stack" }, main), h("aside", { class: "side stack" }, side)));
+    put(box, uiColumns(main, side));
   }
 }
 
 function containerConsole(c) {
   let dialog;
-  dialog = openDialog("xwide", h("header", null, h("h2", { class: "clip grow" }, c.name), closeX(() => dialog)), h("p", { class: "muted small" }, t("incus.consoleHint")), h("div", { class: "term-holder" }, terminalFrame({ incus: c.name })));
+  dialog = openDialog("xwide", h("header", null, h("h2", { class: "clip grow" }, c.name), closeX(() => dialog)), h("p", { class: "muted small" }, t("incus.consoleHint")), uiEmbed(terminalFrame({ incus: c.name })));
 }
 
 /** A virtual machine's screen: the page of Proxmox's screens, on QEMU's own VNC socket */
 function containerScreen(c) {
   let dialog;
-  dialog = openDialog("xwide", h("header", null, h("h2", { class: "clip grow" }, c.name), closeX(() => dialog)), h("p", { class: "muted small" }, t("incus.screenHint")), h("div", { class: "term-holder" }, h("iframe", { class: "term-frame", src: "/screen.html?" + new URLSearchParams({ incus: c.name, lang: state.lang }), title: t("incus.screen") })));
+  dialog = openDialog("xwide", h("header", null, h("h2", { class: "clip grow" }, c.name), closeX(() => dialog)), h("p", { class: "muted small" }, t("incus.screenHint")), uiEmbed(h("iframe", { src: "/screen.html?" + new URLSearchParams({ incus: c.name, lang: state.lang }), title: t("incus.screen") })));
 }
 
 /** The fields of the limits, shared by the new-container and the limits dialogs; a virtual machine always has its memory */
@@ -1214,7 +1189,7 @@ function limitFields(c, vm = c?.kind === "vm") {
   };
   memory.value = "";
   fillMemory(vm);
-  const memoryBox = h("span", { class: "memory-pick" }, memory, typed, unit);
+  const memoryBox = uiLine([memory, typed, unit]);
   return { cores, memory, memoryBox, fillMemory };
 }
 
@@ -1227,13 +1202,14 @@ const placeLimits = (name) => LIMITED_PLACES.includes((incusUi.data?.places ?? [
  * checkbox drawn as one, so the code that reads `checked` and listens to `change` stays as it is.
  */
 const switchRow = (label, hint, checked, disabled = false) => {
-  const box = h("input", { type: "checkbox", class: "switch", role: "switch", checked, disabled, "aria-label": label });
+  const box = h("input", { type: "checkbox", class: "ui-toggle", role: "switch", checked, disabled, "aria-label": label });
   return [box, uiSetting({ name: label, explain: hint, control: box })];
 };
 
 const tickRow = (label, hint, checked) => {
   const box = h("input", { type: "checkbox", checked });
-  return [box, h("label", { class: "check" }, box, h("span", null, h("strong", null, label), hint && h("span", { class: "muted small block" }, hint)))];
+  const row = uiCheck(label, box, hint);
+  return [box, row];
 };
 
 function newContainerDialog(start = "container") {
@@ -1250,8 +1226,9 @@ function newContainerDialog(start = "container") {
   const [client, clientRow] = tickRow(t("incus.client"), t("incus.clientHint"), true);
   const [docker, dockerRow] = tickRow(t("incus.docker"), t("incus.dockerHint"), true);
   const [autostart, autostartRow] = tickRow(t("incus.autostart"), null, true);
-  const vmNote = h("p", { class: "banner small" }, t("incus.vm.note"));
-  const discNote = h("p", { class: "banner small", hidden: true }, t("incus.disc.note"));
+  const vmNote = uiNotice({ tone: "warn", text: t("incus.vm.note") });
+  const discNote = uiNotice({ tone: "warn", text: t("incus.disc.note") });
+  discNote.hidden = true;
   const imageHint = h("span");
   const [windows, windowsRow] = tickRow(t("incus.win.tick"), t("incus.win.hint"), false);
   windows.addEventListener("change", () => ((windows.dataset.touched = "1"), shape()));
@@ -1264,11 +1241,9 @@ function newContainerDialog(start = "container") {
   placeSelect.addEventListener("change", () => shape());
   const lead = h("p", { class: "muted small" });
   const title = h("h2", { class: "grow" });
-  const seg = h(
-    "div",
-    { class: "seg" },
-    ["container", "vm"].map((k) => h("button", { type: "button", class: "btn", "data-kind": k, onclick: () => ((kind = k), fillImages(), shape()) }, t(k === "vm" ? "incus.kind.vm" : "incus.kind.container"))),
-  );
+  // the kinds as the system's segment, drawn again with the one chosen
+  const seg = h("div");
+  const paintSeg = () => put(seg, uiSegment(["container", "vm"].map((k) => ({ value: k, label: t(k === "vm" ? "incus.kind.vm" : "incus.kind.container") })), kind, (k) => ((kind = k), fillImages(), shape()), { wide: true }));
   const fillImages = () => {
     const was = image.value;
     const systems = d.images.filter((i) => (kind === "vm" ? i.vm : i.container !== false)).map((i) => h("option", { value: i.id }, i.client ? i.name : `${i.name} — ${t("incus.noClient")}`));
@@ -1282,8 +1257,8 @@ function newContainerDialog(start = "container") {
     const vm = kind === "vm";
     title.textContent = t(vm ? "incus.vm.new" : "incus.new");
     lead.textContent = t(vm ? "incus.vm.newLead" : "incus.newLead");
-    dockerRow.querySelector(".block").textContent = t(vm ? "incus.vm.dockerHint" : "incus.dockerHint");
-    clientRow.querySelector(".block").textContent = t(vm ? "incus.vm.clientHint" : "incus.clientHint");
+    dockerRow.querySelector(".ui-check-hint").textContent = t(vm ? "incus.vm.dockerHint" : "incus.dockerHint");
+    clientRow.querySelector(".ui-check-hint").textContent = t(vm ? "incus.vm.clientHint" : "incus.clientHint");
     // a container's disk is held to a size only in a place that can do it; empty — no limit
     const limited = vm || placeLimits(placeSelect.value);
     diskRow.hidden = !limited;
@@ -1295,7 +1270,7 @@ function newContainerDialog(start = "container") {
     diskLabel.textContent = t(vm ? "incus.vm.disk" : "incus.diskLimit");
     diskHint.textContent = t(vm ? "incus.vm.diskHint" : "incus.diskLimitHint");
     vmNote.hidden = !vm;
-    for (const b of seg.children) b.classList.toggle("active", b.dataset.kind === kind);
+    paintSeg();
     const chosen = d.images.find((i) => i.id === image.value);
     const fromDisc = vm && image.value.startsWith("disc:");
     discNote.hidden = !fromDisc;
@@ -1307,7 +1282,7 @@ function newContainerDialog(start = "container") {
     windowsRow.hidden = !fromDisc;
     const win = fromDisc && windows.checked;
     const drivers = (d.discs ?? []).some((x) => /^virtio-win/i.test(x.name));
-    windowsRow.querySelector(".block").textContent = t(drivers ? "incus.win.hint" : "incus.win.hintNoDrivers");
+    windowsRow.querySelector(".ui-check-hint").textContent = t(drivers ? "incus.win.hint" : "incus.win.hintNoDrivers");
     vmNote.hidden = !vm || fromDisc;
     clientRow.hidden = dockerRow.hidden = fromDisc;
     // a system installed from a disc wants room: most installers ask for 10–20 GB
@@ -1363,8 +1338,8 @@ function newContainerDialog(start = "container") {
       lead,
       vmNote,
       discNote,
-      h("div", { class: "form-pair" }, field(t("incus.name"), name, t("incus.nameHint")), field(t("incus.image"), image, imageHint)),
-      h("div", { class: "form-pair" }, field(t("incus.coresLabel"), cores), field(t("incus.memoryLabel"), memoryBox)),
+      uiFields(field(t("incus.name"), name, t("incus.nameHint")), field(t("incus.image"), image, imageHint)),
+      uiFields(field(t("incus.coresLabel"), cores), uiField(t("incus.memoryLabel"), memoryBox, null, { group: true })),
       diskRow,
       placeRow,
       netRow,
@@ -1391,7 +1366,7 @@ function containerNetworkDialog(c) {
     h("header", null, h("h2", { class: "grow" }, t("incus.net.moveTitle", { name: c.name })), closeX(() => dialog)),
     h("p", null, t("incus.net.now." + (c.network || "other")), " ", t("incus.net.to." + to)),
     h("ul", { class: "muted small" }, [c.status === "running" && t("incus.net.restarts"), t("incus.net.address"), c.machine && t("incus.net.client"), to === "home" && t("incus.net.open")].filter(Boolean).map((line) => h("li", null, line))),
-    to === "home" && !d.home?.address && h("p", { class: "banner small" }, t("incus.net.none")),
+    to === "home" && !d.home?.address && uiNotice({ tone: "warn", text: t("incus.net.none") }),
     error,
     h(
       "footer",
@@ -1450,7 +1425,7 @@ function containerLimitsDialog(c) {
       { class: "stack", onsubmit: send },
       h("header", null, h("h2", { class: "grow clip" }, t("incus.limitsTitle", { name: c.name })), closeX(() => dialog)),
       h("p", { class: "muted small" }, t(c.kind === "vm" ? "incus.vm.limitsLead" : "incus.limitsLead")),
-      h("div", { class: "form-pair" }, field(t("incus.coresLabel"), cores), field(t("incus.memoryLabel"), memoryBox)),
+      uiFields(field(t("incus.coresLabel"), cores), uiField(t("incus.memoryLabel"), memoryBox, null, { group: true })),
       diskRow,
       autostartRow,
       nestingRow,
@@ -1467,38 +1442,25 @@ function containerSnapshotsDialog(c) {
     put(
       list,
       snaps.length
-        ? h(
-            "div",
-            { class: "table-wrap" },
-            h(
-              "table",
-              null,
-              h("thead", null, h("tr", null, h("th", null, t("incus.snap.name")), h("th", null, t("incus.snap.when")), h("th"))),
-              h(
-                "tbody",
-                null,
-                snaps.map((s) =>
-                  h(
-                    "tr",
-                    null,
-                    h("td", { class: "mono small" }, s.name),
-                    h("td", { class: "small" }, new Date(s.created).toLocaleString(state.lang)),
-                    h(
-                      "td",
-                      null,
-                      h(
-                        "div",
-                        { class: "row-actions" },
-                        button(t("incus.snap.restore"), { class: "small", onclick: () => snapAction("POST", `/api/containers/${c.name}/snapshots/${encodeURIComponent(s.name)}/restore`, { title: t("incus.snap.restoreTitle", { name: s.name, instance: c.name }), lead: t("incus.snap.restoreLead", { instance: c.name }), label: t("incus.snap.restoreGo"), iconName: "undo" }, "incus.snap.restored") }, "undo"),
-                        button("", { class: "small ghost", title: t("incus.snap.remove"), "aria-label": t("incus.snap.remove"), onclick: () => snapAction("DELETE", `/api/containers/${c.name}/snapshots/${encodeURIComponent(s.name)}`, { title: t("incus.snap.removeTitle", { name: s.name }), lead: t("incus.snap.removeLead", { instance: c.name }), label: t("incus.snap.remove") }, "incus.snap.removed") }, "trash"),
-                      ),
-                    ),
-                  ),
+        ? uiTable(
+            [{ label: t("incus.snap.name") }, { label: t("incus.snap.when") }, { label: "" }],
+            snaps.map((s) => ({
+              cells: [
+                h("span", { class: "mono small" }, s.name),
+                h("span", { class: "small" }, new Date(s.created).toLocaleString(state.lang)),
+                uiLine(
+                  [
+                    button(t("incus.snap.restore"), { class: "small", onclick: () => snapAction("POST", `/api/containers/${c.name}/snapshots/${encodeURIComponent(s.name)}/restore`, { title: t("incus.snap.restoreTitle", { name: s.name, instance: c.name }), lead: t("incus.snap.restoreLead", { instance: c.name }), label: t("incus.snap.restoreGo"), iconName: "undo" }, "incus.snap.restored") }, "undo"),
+                    button("", { class: "small ghost", title: t("incus.snap.remove"), "aria-label": t("incus.snap.remove"), onclick: () => snapAction("DELETE", `/api/containers/${c.name}/snapshots/${encodeURIComponent(s.name)}`, { title: t("incus.snap.removeTitle", { name: s.name }), lead: t("incus.snap.removeLead", { instance: c.name }), label: t("incus.snap.remove") }, "incus.snap.removed") }, "trash"),
+                  ],
+                  { end: true },
                 ),
-              ),
-            ),
+              ],
+              sub: new Date(s.created).toLocaleString(state.lang),
+            })),
+            { height: 44 },
           )
-        : h("p", { class: "muted small" }, t("incus.snap.none")),
+        : uiEmpty({ text: t("incus.snap.none") }),
     );
   const again = async () => {
     await loadContainers();
@@ -1534,7 +1496,7 @@ function containerSnapshotsDialog(c) {
     },
     "plus",
   );
-  dialog = openDialog("wide", h("header", null, h("h2", { class: "grow clip" }, t("incus.snapTitle", { name: c.name })), closeX(() => dialog)), h("p", { class: "muted small" }, t("incus.snapLead")), h("div", { class: "actions" }, name, take), list, h("footer", null, closeButton(() => dialog)));
+  dialog = openDialog("wide", h("header", null, h("h2", { class: "grow clip" }, t("incus.snapTitle", { name: c.name })), closeX(() => dialog)), h("p", { class: "muted small" }, t("incus.snapLead")), uiLine([name, take]), list, h("footer", null, closeButton(() => dialog)));
   paint(c.snapshots);
 }
 

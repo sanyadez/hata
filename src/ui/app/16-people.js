@@ -13,8 +13,6 @@ function setShares(data) {
 /** The two ways a shared folder is written: for Explorer, and for everything else */
 const shareAddresses = (host, name = "") => ({ windows: `\\\\${host}${name && "\\" + name}`, url: `smb://${host}${name && "/" + name.replaceAll(" ", "%20")}` });
 
-const copyLine = (text) => h("div", { class: "copy-line" }, h("span", { class: "mono clip" }, text), h("button", { type: "button", class: "icon-btn", title: t("files.copyPath"), "aria-label": t("files.copyPath"), onclick: () => copyText(text) }, icon("copy")));
-
 /** Sharing of one folder: turning it on, how it is shared, turning it off */
 async function shareDialog(path) {
   let data;
@@ -83,21 +81,21 @@ async function shareDialog(path) {
           return send("POST", "/api/shares", { path, ...settings() }, t("shares.sharedDone", { name: folder }));
         },
       },
-      h("header", null, h("span", { class: "badge-icon plain" }, icon("share")), h("div", null, h("h2", null, t(share ? "shares.dialog.edit" : "shares.dialog.new", { name: folder })), h("span", { class: "muted small mono clip" }, path))),
-      address && h("div", { class: "stack-s" }, copyLine(address.windows), copyLine(address.url)),
+      h("header", null, uiLead({ icon: "share" }), h("div", null, h("h2", null, t(share ? "shares.dialog.edit" : "shares.dialog.new", { name: folder })), h("span", { class: "muted small mono clip" }, path))),
+      address && h("div", { class: "stack-s" }, uiCommand(address.windows), uiCommand(address.url)),
       field(t("shares.name"), name, t("shares.nameHint")),
-      h(
-        "div",
-        { class: "field" },
-        h("span", { class: "label" }, t("shares.who")),
+      uiField(
+        t("shares.who"),
         h(
           "div",
-          { class: "share-access" },
-          users.map(({ user, select }) => h("label", null, h("span", { class: "grow" }, h("strong", null, user.name), user.allowed === false ? h("span", { class: "muted small block" }, t("shares.deniedHint")) : !user.ready && h("span", { class: "muted small block" }, t("shares.notReadyHint"))), select)),
-          h("label", null, h("span", { class: "grow" }, h("strong", null, t("shares.guest")), h("span", { class: "muted small block" }, t("shares.guestHint"))), guest),
+          null,
+          users.map(({ user, select }) => uiSetting({ name: user.name, explain: user.allowed === false ? t("shares.deniedHint") : !user.ready ? t("shares.notReadyHint") : null, control: select })),
+          uiSetting({ name: t("shares.guest"), explain: t("shares.guestHint"), control: guest }),
         ),
+        null,
+        { group: true },
       ),
-      h("label", { class: "check" }, tm, h("span", null, h("strong", null, t("shares.tm.title")), h("span", { class: "muted small block" }, t("shares.tm.hint")))),
+      uiCheck(t("shares.tm.title"), tm, t("shares.tm.hint")),
       limitField,
       error,
       h("footer", null, share ? button(t("shares.stop"), { class: "danger", onclick: () => confirmAction({ title: t("attention.end.share", { name: share.name }), lead: t("attention.end.shareLead", { path: share.path }), label: t("shares.stop"), iconName: "x", run: () => send("DELETE", `/api/shares/${encodeURIComponent(share.name)}`, undefined, t("shares.stoppedDone", { name: share.name })) }) }) : h("span"), closeButton(() => dialog, t("common.cancel")), h("button", { class: "btn primary" }, t(share ? "shares.save" : "shares.share"))),
@@ -127,7 +125,7 @@ function sambaCard(done, cancel) {
   return [
     h("p", { class: "muted" }, t("shares.tool.what")),
     h("p", { class: "muted" }, t("shares.tool.why")),
-    data.install ? [h("p", { class: "muted" }, t("shares.tool.how")), h("p", { class: "cmd whole" }, icon("terminal"), data.install)] : h("p", { class: "muted" }, t("shares.tool.byHand")),
+    data.install ? [h("p", { class: "muted" }, t("shares.tool.how")), uiCommand(data.install, { block: true })] : h("p", { class: "muted" }, t("shares.tool.byHand")),
     error,
     (cancel || data.install) && h("footer", null, cancel, data.install && button(t("shares.tool.install"), { class: "primary", onclick: install }, "download")),
   ];
@@ -156,7 +154,7 @@ function sharesSection() {
         uiCell({ lead: { icon: "share" }, name: h("span", null, share.name, share.timeMachine && " ", share.timeMachine && uiTag(share.timeMachine.limit ? t("shares.tm.tagLimit", { limit: share.timeMachine.limit }) : t("shares.tm.tag"))), sub: share.missing ? null : h("span", { class: "mono" }, share.path) }),
         share.missing ? uiState("bad", t("shares.missing")) : who(share),
         h("div", { onclick: (e) => e.stopPropagation() }, uiCommand(address.url)),
-        h("div", { class: "row-actions end", onclick: (e) => e.stopPropagation() }, button(t("shares.settings"), { class: "small", onclick: () => shareDialog(share.path) }, "sliders")),
+        h("div", { onclick: (e) => e.stopPropagation() }, uiLine([button(t("shares.settings"), { class: "small", onclick: () => shareDialog(share.path) }, "sliders")], { end: true })),
       ],
       sub: share.missing ? t("shares.missing") : whoList(share)[0] ?? t("shares.nobody"),
     };
@@ -183,7 +181,7 @@ function sharesSection() {
       },
       data.error && h("div", { class: "ui-inset" }, uiNotice({ tone: "bad", text: t("shares.error", { message: data.error }) })),
       data.shares.length > 0
-        ? uiTable([{ label: t("shares.col.name") }, { label: t("shares.col.access") }, { label: t("shares.col.address") }, { label: "" }], data.shares.map(row), { cls: "shares-table" })
+        ? uiTable([{ label: t("shares.col.name") }, { label: t("shares.col.access") }, { label: t("shares.col.address") }, { label: "" }], data.shares.map(row))
         : uiEmpty({ size: "big", icon: "share", title: t("shares.noneTitle"), text: t("shares.none"), action: button(t("shares.add"), { class: "primary", onclick: add }, "plus") }),
     ),
     uiCard(
@@ -219,7 +217,7 @@ function linkWords(link) {
 }
 
 /** Without an HTTPS domain the address works only where this page is opened */
-const linkHomeOnly = (base) => !base && h("p", { class: "banner warn small" }, t("links.homeOnly"), " ", h("a", { href: "#/network/addresses", class: "link" }, t("links.homeOnlyHow")));
+const linkHomeOnly = (base) => !base && uiNotice({ tone: "info", text: t("links.homeOnly"), action: h("a", { class: "btn small", href: "#/network/addresses" }, t("links.homeOnlyHow")) });
 
 /** One link with its address to copy and what may be done with it */
 function linkRow(link, base, done) {
@@ -234,11 +232,16 @@ function linkRow(link, base, done) {
   };
   return h(
     "div",
-    { class: "link-made stack-s" },
-    link.note && h("div", { class: "strong wrap" }, link.note),
-    h("div", { class: "muted small" }, linkWords(link)),
-    link.alive ? copyBox(linkUrl(link, base)) : null,
-    h("div", { class: "row-actions" }, button(t(link.alive ? "links.week" : "links.again"), { class: "small", onclick: longer }), button(t("links.remove"), { class: "small", onclick: remove }, "trash")),
+    { class: "stack-s" },
+    uiRow({
+      lead: { icon: link.dir ? "folder" : "file" },
+      name: link.note || t(link.kind === "drop" ? "links.kind.drop" : "links.kind.get"),
+      sub: linkWords(link),
+      state: uiState(link.alive ? "ok" : "off", t(link.alive ? "links.active" : "links.ended2")),
+      action: button(t(link.alive ? "links.week" : "links.again"), { class: "small", onclick: longer }),
+      more: [{ label: t("links.remove") + "…", icon: "trash", danger: true, run: remove }],
+    }),
+    link.alive ? uiCommand(linkUrl(link, base)) : null,
   );
 }
 
@@ -268,9 +271,9 @@ async function shareLinkDialog(path, name, dir, kind = "get") {
   const note = h("input", { maxLength: 100, placeholder: t("links.notePlaceholder") });
   const limitRow = field(t("links.limit"), limit, t("links.limitHint"));
   const lead = h("p", { class: "muted small" });
-  const seg = h("div", { class: "seg" }, ["get", "drop"].map((k) => h("button", { type: "button", class: "btn", "data-kind": k, onclick: () => ((kind = k), shape()) }, t("links.kind." + k))));
+  const seg = h("div");
   const shape = () => {
-    for (const b of seg.children) b.classList.toggle("active", b.dataset.kind === kind);
+    put(seg, uiSegment(["get", "drop"].map((k) => ({ value: k, label: t("links.kind." + k) })), kind, (k) => ((kind = k), shape()), { wide: true }));
     limitRow.hidden = kind !== "drop";
     lead.textContent = t(kind === "drop" ? "links.dropLead" : dir ? "links.folderLead" : "links.fileLead");
   };
@@ -373,7 +376,7 @@ function renderLinks() {
       put(box, uiCard({ title: t("links.side"), flush: true }, uiEmpty({ size: "error", title: errorText(e), action: button(t("ui.retry"), { onclick: load }) })));
     }
   };
-  shell(h("div", { class: "files" }, h("aside", { class: "files-side fold", id: "files-places" }), h("section", { class: "stack" }, pageHead({ crumbs: [{ label: t("nav.files"), href: "#/files" }, { label: t("links.side") }], title: t("links.cardTitle") }), box)));
+  shell(uiWithSide({ sideId: "files-places", main: [pageHead({ crumbs: [{ label: t("nav.files"), href: "#/files" }, { label: t("links.side") }], title: t("links.cardTitle") }), box] }));
   filesPlaces("#links");
   void load();
 }
@@ -384,21 +387,7 @@ const AGENT_LEVELS = ["read", "operate", "full"];
 const mcpAddress = () => `${location.origin}/mcp`;
 
 /** A line of text to take away: shown whole, with a button that copies it */
-function copyBox(text, rows = 1) {
-  const box = rows > 1 ? h("textarea", { readOnly: true, rows, class: "mono", value: text }) : h("input", { readOnly: true, class: "mono", value: text });
-  box.addEventListener("focus", () => box.select());
-  const copy = () => {
-    try {
-      void navigator.clipboard.writeText(text);
-    } catch {
-      // plain HTTP has no clipboard API
-      box.select();
-      document.execCommand("copy");
-    }
-    toast(t("twofa.copied"));
-  };
-  return h("div", { class: "copy-box" }, box, h("button", { type: "button", class: "icon-btn", "aria-label": t("twofa.copy"), title: t("twofa.copy"), onclick: copy }, icon("copy")));
-}
+const copyBox = (text, rows = 1) => uiCommand(text, { block: rows > 1 });
 
 /** The key, shown the only time it can be, with what to paste into the agent */
 function agentKeyDialog(made) {
@@ -444,7 +433,7 @@ function md(text) {
   const out = [];
   String(text).split(/```/).forEach((part, i) => {
     // every second part lies between code fences; its first line names the language
-    if (i % 2) return out.push(h("pre", { class: "md-code" }, part.replace(/^[\w-]*\n/, "").replace(/\n$/, "")));
+    if (i % 2) return out.push(uiCode(part.replace(/^[\w-]*\n/, "").replace(/\n$/, "")));
     let list = null;
     let para = [];
     const flush = () => {
@@ -528,49 +517,47 @@ function assistantBody() {
   if (!assistantUi.config.ready) {
     // asked before there is a model: what it would do, how to give it one, and the question kept for then
     return [
-      h(
-        "div",
-        { class: "assistant-empty" },
+      uiProse([
         h("p", null, t("assistant.notSet")),
         h("p", { class: "muted small" }, t("assistant.notSetHint")),
         h("p", { class: "small" }, t("assistant.canDo")),
-        h("ul", { class: "small assistant-can" }, ["apps", "machines", "network", "backups", "changes"].map((k) => h("li", null, t("assistant.can." + k)))),
-        assistantUi.waiting && h("div", { class: "msg user" }, assistantUi.waiting),
+        h("ul", { class: "small muted" }, ["apps", "machines", "network", "backups", "changes"].map((k) => h("li", null, t("assistant.can." + k)))),
+        assistantUi.waiting && uiMessage("user", assistantUi.waiting),
         assistantUi.waiting && h("p", { class: "muted small" }, t("assistant.waitingQuestion")),
         h("a", { class: "btn primary", href: "#/settings/assistant", onclick: () => innerWidth < 900 && closeAssistant() }, t("assistant.setUp")),
-      ),
+      ]),
     ];
   }
   if (!chat) {
     const ask = (key) => button(t(key), { class: "small", onclick: () => sendToAssistant(t(key), true) });
-    return [h("div", { class: "assistant-empty" }, h("p", null, t("assistant.hello")), h("p", { class: "muted small" }, t("assistant.helloHint")), h("div", { class: "assistant-starts" }, ...assistantStarts().map(ask)))];
+    return [uiProse([h("p", null, t("assistant.hello")), h("p", { class: "muted small" }, t("assistant.helloHint")), uiLine(assistantStarts().map(ask))])];
   }
   const results = new Map(chat.turns.filter((turn) => turn.role === "tool").map((turn) => [turn.id, turn]));
   const callRow = (call) => {
     const result = results.get(call.id);
     if (call.state === "asking") {
       const detail = typeof call.args.compose === "string" ? call.args.compose : Object.keys(call.args).some((k) => !["app", "name", "deleteData", "snapshot"].includes(k)) ? JSON.stringify(call.args, null, 1) : "";
-      return h(
-        "div",
-        { class: "assistant-ask" },
-        h("strong", null, t("assistant.wants", { what: toolWords(call) })),
-        detail && h("pre", { class: "md-code" }, detail),
-        h("div", { class: "row-actions" }, button(t("approvals.decline"), { class: "small", onclick: () => assistantCall(`/api/assistant/chats/${chat.id}/calls/${call.id}`, { run: false }) }), button(t("assistant.run"), { class: "small primary", onclick: () => assistantCall(`/api/assistant/chats/${chat.id}/calls/${call.id}`, { run: true }) }, "play")),
-      );
+      return uiNotice({
+        tone: "info",
+        icon: "chat",
+        title: t("assistant.wants", { what: toolWords(call) }),
+        text: detail && uiCode(detail),
+        foot: uiLine([button(t("approvals.decline"), { class: "small", onclick: () => assistantCall(`/api/assistant/chats/${chat.id}/calls/${call.id}`, { run: false }) }), button(t("assistant.run"), { class: "small primary", onclick: () => assistantCall(`/api/assistant/chats/${chat.id}/calls/${call.id}`, { run: true }) }, "play")]),
+      });
     }
     const mark = !result ? icon("refresh", "spin") : icon(result.error ? "x" : "check", result.error ? "danger" : "");
     // what the tool answered is there to look at: nothing the assistant saw is hidden from the person
-    return h("details", { class: "assistant-call" }, h("summary", null, mark, h("span", null, result?.declined || call.state === "declined" ? t("assistant.declined", { what: toolWords(call) }) : toolWords(call))), result && !result.declined && h("pre", { class: "md-code" }, result.text));
+    return uiDetails([mark, h("span", null, result?.declined || call.state === "declined" ? t("assistant.declined", { what: toolWords(call) }) : toolWords(call))], result && !result.declined && uiCode(result.text));
   };
   const rows = chat.turns.flatMap((turn) => {
-    if (turn.role === "user") return [h("div", { class: "msg user" }, turn.text)];
-    if (turn.role === "assistant") return [turn.text && h("div", { class: "msg bot" }, md(turn.text)), ...turn.calls.map(callRow)];
+    if (turn.role === "user") return [uiMessage("user", turn.text)];
+    if (turn.role === "assistant") return [turn.text && uiMessage("bot", md(turn.text)), ...turn.calls.map(callRow)];
     return [];
   });
-  if (chat.status === "thinking") rows.push(h("div", { class: "assistant-status" }, icon("refresh", "spin"), h("span", { class: "grow muted" }, t("assistant.thinking")), button(t("assistant.stop"), { class: "small", onclick: () => assistantCall(`/api/assistant/chats/${chat.id}/stop`) })));
+  if (chat.status === "thinking") rows.push(uiLine([icon("refresh", "spin"), h("span", { class: "grow muted" }, t("assistant.thinking")), button(t("assistant.stop"), { class: "small", onclick: () => assistantCall(`/api/assistant/chats/${chat.id}/stop`) })]));
   if (chat.status === "error") {
     const key = "error.assistant." + chat.error?.code;
-    rows.push(h("div", { class: "banner danger stack" }, h("div", null, has(key) ? t(key) : "", h("span", { class: "block muted small" }, chat.error?.message ?? "")), button(t("assistant.retry"), { class: "small", onclick: () => assistantCall(`/api/assistant/chats/${chat.id}`, { retry: true }) }, "refresh")));
+    rows.push(uiNotice({ tone: "bad", title: has(key) ? t(key) : null, text: chat.error?.message ?? "", action: button(t("assistant.retry"), { class: "small", onclick: () => assistantCall(`/api/assistant/chats/${chat.id}`, { retry: true }) }, "refresh") }));
   }
   return rows;
 }
@@ -590,53 +577,42 @@ function paintAssistant() {
   else localStorage.removeItem(ASSISTANT_KEY + ".chat");
   const wide = panel.classList.contains("wide");
   const tool = (label, name, onclick, cls = "") => h("button", { type: "button", class: "icon-btn " + cls, title: label, "aria-label": label, onclick }, icon(name));
+  const parts = assistantUi.parts;
   const fresh = () => ((assistantUi.chat = null), paintAssistant(), panel.querySelector("textarea").focus());
   // wide, the chats are a column on the left; narrow, a list in the head
-  const paged = panel.classList.contains("paged");
-  const listed = !phone.matches && (paged || chats.length > 0);
-  panel.classList.toggle("listed", listed);
+  const listed = !phone.matches && chats.length > 0;
+  panel.classList.toggle("ui-chat-listed", listed);
   put(
-    panel.querySelector(".assistant-list"),
+    parts.list,
     listed && [
       button(t("assistant.newChat"), { class: "small" + (chat ? "" : " primary"), onclick: fresh }, "plus"),
-      h(
-        "div",
-        { class: "assistant-chats" },
-        chats.map((c) =>
-          h(
-            "button",
-            { type: "button", class: "assistant-chat" + (c.id === chat?.id ? " active" : ""), "aria-current": c.id === chat?.id ? "true" : null, onclick: () => void loadAssistantChat(c.id) },
-            h("span", { class: "title" }, c.title),
-            h("span", { class: "muted small" }, c.status === "asking" ? h("span", { class: "dot partial" }) : null, ago(c.updatedAt)),
-          ),
-        ),
-      ),
+      uiNavList(chats.map((c) => ({ name: c.title, sub: ago(c.updatedAt), dot: c.status === "asking", current: c.id === chat?.id, onclick: () => void loadAssistantChat(c.id) }))),
     ],
   );
   const title = chats.find((c) => c.id === chat?.id)?.title ?? (chat ? "" : t("assistant.newChat"));
   put(
-    panel.querySelector(".assistant-head"),
+    parts.head,
     // with chats to choose from the list names the one on the screen; otherwise the window says what it is
-    listed ? h("strong", { class: "grow ellipsis" }, title) : chats.length > 0 ? h("span", { class: "grow pick" }, pick) : h("strong", { class: "grow" }, t("assistant.title")),
+    listed ? h("strong", { class: "grow clip" }, title) : chats.length > 0 ? h("span", { class: "grow" }, pick) : h("strong", { class: "grow" }, t("assistant.title")),
     chat && !listed && tool(t("assistant.newChat"), "plus", fresh),
     chat && tool(t("assistant.forget"), "trash", () => confirmAction({ title: t("assistant.forgetTitle"), lead: t("assistant.forgetLead"), label: t("assistant.forget"), run: forgetAssistantChat })),
-    !paged && tool(t(wide ? "assistant.narrow" : "assistant.wide"), wide ? "shrink" : "expand", () => (panel.classList.toggle("wide"), rememberAssistant(), paintAssistant()), "wide-only"),
-    !paged && tool(t("assistant.hide"), "down", closeAssistant),
+    tool(t(wide ? "assistant.narrow" : "assistant.wide"), wide ? "shrink" : "expand", () => (panel.classList.toggle("wide"), rememberAssistant(), paintAssistant()), "ui-chat-wide-only"),
+    tool(t("assistant.hide"), "down", closeAssistant),
   );
-  const body = panel.querySelector(".assistant-body");
+  const body = parts.body;
   // new words are followed down the panel unless the person has scrolled up to read
   const follow = body.scrollHeight - body.scrollTop - body.clientHeight < 80;
   put(body, assistantBody());
   if (follow) body.scrollTop = body.scrollHeight;
   const busy = chat?.status === "thinking" || chat?.status === "asking";
-  panel.querySelector(".assistant-form").hidden = !assistantUi.config?.ready;
+  parts.form.hidden = !assistantUi.config?.ready;
   // a question asked before the assistant was set up waits in the field once it is
   if (assistantUi.config?.ready && assistantUi.waiting) {
     const input = panel.querySelector("textarea");
     if (!input.value.trim()) input.value = assistantUi.waiting;
     keepWaiting("");
   }
-  panel.querySelector(".assistant-form button").disabled = busy;
+  parts.form.querySelector("button").disabled = busy;
 }
 
 async function loadAssistantChat(id) {
@@ -680,7 +656,7 @@ function assistantFab() {
   }
   if (!isAdmin()) return;
   if (!assistantUi.fab) {
-    assistantUi.fab = h("button", { type: "button", class: "assistant-fab", title: t("assistant.title"), "aria-label": t("assistant.title"), onclick: () => (assistantUi.open ? closeAssistant() : openAssistant()) }, icon("chat"), h("span", { class: "fab-dot", hidden: true }));
+    assistantUi.fab = uiFab({ icon: "chat", label: t("assistant.title"), onclick: () => (assistantUi.open ? closeAssistant() : openAssistant()) });
     document.body.append(assistantUi.fab);
     // a window left open stays open after a reload; otherwise only the list of chats is asked for, for the dot
     if (localStorage.getItem(ASSISTANT_KEY) && state.route.view !== "assistant") {
@@ -694,10 +670,10 @@ function assistantFab() {
 
 /** The dot on the button: some chat of this person waits for a yes or no */
 function markAssistantFab() {
-  const dot = assistantUi.fab?.querySelector(".fab-dot");
+  const dot = assistantUi.fab?.lastChild;
   if (!dot) return;
   dot.hidden = !assistantUi.chats.some((c) => c.status === "asking");
-  assistantUi.fab.classList.toggle("open", assistantUi.open);
+  assistantUi.fab.classList.toggle("ui-fab-open", assistantUi.open);
 }
 
 function keepWaiting(text) {
@@ -706,7 +682,7 @@ function keepWaiting(text) {
   else localStorage.removeItem("hata.assistant.waiting");
 }
 
-const rememberAssistant = () => assistantUi.panel?.classList.contains("paged") || (assistantUi.open ? localStorage.setItem(ASSISTANT_KEY, assistantUi.panel?.classList.contains("wide") ? "wide" : "open") : localStorage.removeItem(ASSISTANT_KEY));
+const rememberAssistant = () => (assistantUi.open ? localStorage.setItem(ASSISTANT_KEY, assistantUi.panel?.classList.contains("wide") ? "wide" : "open") : localStorage.removeItem(ASSISTANT_KEY));
 
 /** The window of the assistant, made once: floating over the pages, or the whole page #/assistant */
 function assistantPanel() {
@@ -724,8 +700,10 @@ function assistantPanel() {
         submit();
       }
     });
-    const form = h("form", { class: "assistant-form", onsubmit: (e) => (e.preventDefault(), submit()) }, input, h("button", { class: "btn primary square", "aria-label": t("assistant.send"), title: t("assistant.send") }, icon("arrow")));
-    assistantUi.panel = h("aside", { class: "assistant" + (localStorage.getItem(ASSISTANT_KEY) === "wide" ? " wide" : ""), "aria-label": t("assistant.title") }, h("nav", { class: "assistant-list", "aria-label": t("assistant.chats") }), h("div", { class: "assistant-head" }), h("div", { class: "assistant-body" }), form);
+    const form = h("form", { onsubmit: (e) => (e.preventDefault(), submit()) }, input, h("button", { class: "btn primary square", "aria-label": t("assistant.send"), title: t("assistant.send") }, icon("arrow")));
+    assistantUi.parts = uiChat({ label: t("assistant.title"), wide: localStorage.getItem(ASSISTANT_KEY) === "wide", form });
+    assistantUi.parts.list.setAttribute("aria-label", t("assistant.chats"));
+    assistantUi.panel = assistantUi.parts.el;
   }
   return assistantUi.panel;
 }
@@ -734,10 +712,7 @@ function assistantPanel() {
 function openAssistant({ ask, draft, restore } = {}) {
   const panel = assistantPanel();
   // on its own page the window is the page; elsewhere it floats
-  if (state.route.view !== "assistant" && (panel.classList.contains("paged") || panel.parentElement !== document.body)) {
-    panel.classList.remove("paged");
-    document.body.append(panel);
-  }
+  if (state.route.view !== "assistant" && panel.parentElement !== document.body) document.body.append(panel);
   assistantUi.open = true;
   assistantUi.panel.hidden = false;
   rememberAssistant();
@@ -785,13 +760,13 @@ function assistantSection() {
   if (!config) return waitMark();
   const provider = h("select", null, ["anthropic", "openai"].map((id) => h("option", { value: id, selected: id === config.provider }, t("assistant.provider." + id))));
   const url = h("input", { type: "url", class: "mono", value: config.url, spellcheck: false });
-  const urlHint = h("span", { class: "hint" });
+  const urlHint = h("span");
   const key = h("input", { type: "password", autocomplete: "off", class: "mono", placeholder: config.saved ? t("assistant.keySaved") : "" });
   const models = h("datalist", { id: "assistant-models" });
   const model = h("input", { class: "mono", value: config.model, spellcheck: false, required: true });
   model.setAttribute("list", "assistant-models");
   const level = h("select", null, AGENT_LEVELS.map((id) => h("option", { value: id, selected: id === config.level }, t("agents.level." + id))));
-  const levelHint = h("span", { class: "hint" });
+  const levelHint = h("span");
   const error = h("p", { class: "error", role: "alert" });
   const paint = () => {
     url.placeholder = config.defaults[provider.value];
@@ -820,35 +795,31 @@ function assistantSection() {
   });
   return [
     h(
-      "section",
-      { class: "card pad" },
-      h(
-        "form",
-        {
-          class: "stack",
-          onsubmit: async (e) => {
-            e.preventDefault();
-            try {
-              state.assistant = { ...state.assistant, ...(await api("PUT", "/api/assistant/config", draft())) };
-              if (state.overview) state.overview.assistant = state.assistant.config.ready;
-              assistantUi.config = state.assistant.config;
-              toast(t("settings.saved"));
-              renderSettings();
-            } catch (err) {
-              error.textContent = errorText(err);
-            }
-          },
+      "form",
+      {
+        onsubmit: async (e) => {
+          e.preventDefault();
+          try {
+            state.assistant = { ...state.assistant, ...(await api("PUT", "/api/assistant/config", draft())) };
+            if (state.overview) state.overview.assistant = state.assistant.config.ready;
+            assistantUi.config = state.assistant.config;
+            toast(t("settings.saved"));
+            renderSettings();
+          } catch (err) {
+            error.textContent = errorText(err);
+          }
         },
-        h("div", { class: "section-head" }, h("h2", null, t("assistant.title")), config.ready && button(t("assistant.open"), { class: "small", onclick: () => openAssistant() }, "chat")),
-        h("p", { class: "muted" }, t("assistant.lead")),
-        h("label", { class: "field" }, h("span", { class: "label" }, t("assistant.provider")), provider),
-        h("label", { class: "field" }, h("span", { class: "label" }, t("assistant.url")), url, urlHint),
-        field(t("assistant.key"), key, t("assistant.keyHint")),
-        h("label", { class: "field" }, h("span", { class: "label" }, t("assistant.model")), h("div", { class: "pair" }, model, find), models, h("span", { class: "hint" }, t("assistant.modelHint"))),
-        h("label", { class: "field" }, h("span", { class: "label" }, t("agents.new.level")), level, levelHint),
+      },
+      uiCard(
+        { title: t("assistant.title"), lead: t("assistant.lead"), actions: config.ready && button(t("assistant.open"), { class: "small", onclick: () => openAssistant() }, "chat") },
+        uiField(t("assistant.provider"), provider),
+        uiField(t("assistant.url"), url, urlHint),
+        uiField(t("assistant.key"), key, t("assistant.keyHint")),
+        uiField(t("assistant.model"), [uiAffix(model, find), models], t("assistant.modelHint"), { group: true }),
+        uiField(t("agents.new.level"), level, levelHint),
         error,
         h("p", { class: "muted small" }, t("assistant.privacy")),
-        h("div", { class: "row-actions" }, h("button", { class: "btn primary" }, t("settings.save"))),
+        uiFoot(h("button", { class: "btn primary" }, t("settings.save"))),
       ),
     ),
   ];
@@ -869,8 +840,8 @@ function connectWhere(redirect) {
 
 function renderConnect() {
   const { id } = state.route;
-  const box = h("section", { class: "card pad stack-s connect" }, waitMark());
-  shell(box);
+  const box = uiCard({}, waitMark());
+  shell(uiNarrow(box));
   const say = (text) => put(box, h("p", null, text), h("p", null, h("a", { class: "btn", href: "#/settings/agents" }, t("settings.agents"))));
   if (!isAdmin()) return put(box, h("p", null, t("connect.adminOnly")));
   const leave = async (answer, error) => {
@@ -886,9 +857,9 @@ function renderConnect() {
   api("GET", `/api/oauth/requests/${id}`).then(
     (q) => {
       const level = h("select", null, AGENT_LEVELS.map((value) => h("option", { value, selected: value === (q.level || "read") }, t("agents.level." + value))));
-      const hint = h("span", { class: "hint" });
+      const hint = h("span");
       const confirm = h("input", { type: "checkbox", checked: true });
-      const asks = h("label", { class: "check" }, confirm, h("span", null, t("agents.confirm")));
+      const asks = uiCheck(t("agents.confirm"), confirm);
       const paint = () => {
         hint.textContent = t(`agents.level.${level.value}.hint`);
         asks.hidden = level.value !== "full";
@@ -911,14 +882,14 @@ function renderConnect() {
           },
           h("h2", null, t("connect.asks", { name: q.name })),
           h("p", null, t("connect.lead")),
-          field(t("connect.where"), h("div", { class: "connect-where" }, connectWhere(q.redirect)), t("connect.whereHint")),
+          uiField(t("connect.where"), h("strong", { class: "mono wrap" }, connectWhere(q.redirect)), t("connect.whereHint"), { group: true }),
           h("p", { class: "muted small" }, t("connect.warn")),
           field(t("connect.name"), name, t("connect.nameHint")),
-          h("label", { class: "field" }, h("span", { class: "label" }, t("agents.new.level")), level, hint),
+          uiField(t("agents.new.level"), level, hint),
           asks,
           field(t("connect.password"), password, t("connect.passwordHint")),
           error,
-          h("footer", null, button(t("approvals.decline"), { onclick: () => leave({ allow: false }, error) }), h("button", { class: "btn primary" }, t("connect.allow"))),
+          uiFoot(button(t("approvals.decline"), { onclick: () => leave({ allow: false }, error) }), h("button", { class: "btn primary" }, t("connect.allow"))),
         ),
       );
     },
@@ -971,7 +942,7 @@ function approvalDialog(ask) {
     "confirm",
     h("h2", null, t("approvals.title", { agent: ask.agent })),
     h("p", null, t("approvals.text", { what: askedWhat(ask) })),
-    typeof ask.args.compose === "string" && h("pre", { class: "ask-file" }, ask.args.compose),
+    typeof ask.args.compose === "string" && uiCode(ask.args.compose),
     h("p", { class: "muted small" }, t("approvals.hint")),
     h("footer", null, closeButton(() => dialog, t("approvals.later")), answer(false), answer(true)),
   );
@@ -987,9 +958,10 @@ function approvalDialog(ask) {
 function agentDialog() {
   const name = h("input", { maxLength: 40, required: true, placeholder: t("agents.new.namePlaceholder") });
   const level = h("select", null, AGENT_LEVELS.map((id) => h("option", { value: id }, t("agents.level." + id))));
-  const hint = h("span", { class: "hint" }, t("agents.level.read.hint"));
+  const hint = h("span", null, t("agents.level.read.hint"));
   const confirm = h("input", { type: "checkbox", checked: true });
-  const asks = h("label", { class: "check", hidden: true }, confirm, h("span", null, t("agents.confirm")));
+  const asks = uiCheck(t("agents.confirm"), confirm);
+  asks.hidden = true;
   level.addEventListener("change", () => {
     hint.textContent = t(`agents.level.${level.value}.hint`);
     asks.hidden = level.value !== "full";
@@ -1014,7 +986,7 @@ function agentDialog() {
       },
       h("header", null, h("div", { class: "grow" }, h("h2", null, t("agents.new")), h("p", { class: "muted small" }, t("agents.new.lead"))), closeX(() => dialog)),
       field(t("agents.new.name"), name, t("agents.new.nameHint")),
-      h("label", { class: "field" }, h("span", { class: "label" }, t("agents.new.level")), level, hint),
+      uiField(t("agents.new.level"), level, hint),
       asks,
       error,
       h("footer", null, closeButton(() => dialog, t("common.cancel")), h("button", { class: "btn primary" }, t("agents.new.create"))),
@@ -1081,15 +1053,11 @@ function agentsSection() {
   const row = (key) => {
     const confirm =
       key.level === "full" &&
-      h("input", {
-        type: "checkbox",
-        class: "switch",
-        role: "switch",
-        checked: key.confirm,
-        "aria-label": t("agents.confirm"),
-        title: t("agents.confirm"),
-        onchange: async (e) => {
-          await api("PATCH", `/api/agents/${key.id}`, { confirm: e.target.checked }).catch((err) => toast(errorText(err), "error"));
+      uiSwitch({
+        on: key.confirm,
+        label: t("agents.confirm"),
+        onchange: async (on) => {
+          await api("PATCH", `/api/agents/${key.id}`, { confirm: on }).catch((err) => toast(errorText(err), "error"));
           void loadSettings();
         },
       });
@@ -1097,7 +1065,7 @@ function agentsSection() {
       lead: { icon: "key" },
       name: h("span", null, key.name, " ", uiTag(t("agents.level." + key.level))),
       sub: [key.via ? t("agents.via", { client: key.via }) : `hata_…${key.hint}`, t("agents.createdBy", { user: key.createdBy, when: ago(key.createdAt) }), key.lastUsed ? t("agents.lastUsed", { when: ago(key.lastUsed), ip: key.lastIp }) : t("agents.neverUsed")].join(" · "),
-      value: confirm && h("label", { class: "with-state" }, h("span", { class: "small muted" }, t("agents.confirm.short")), confirm),
+      value: confirm && uiLine([h("span", { class: "small muted" }, t("agents.confirm.short")), confirm]),
       more: [{ label: t("agents.rename"), icon: "edit", run: () => renameAgentKey(key) }, { label: t("agents.remove") + "…", icon: "trash", danger: true, run: () => removeAgentKey(key) }],
     });
   };
@@ -1105,13 +1073,13 @@ function agentsSection() {
   return [
     waiting.length > 0 &&
       uiCard(
-        { title: t("approvals.waiting"), count: waiting.length, lead: t("approvals.hint"), flush: true, cls: "area-attention" },
+        { title: t("approvals.waiting"), count: waiting.length, lead: t("approvals.hint"), flush: true },
         waiting.map((ask) =>
           uiRow({
             lead: { icon: "alert", tone: "warn" },
             name: ask.agent,
             sub: [t("approvals.text", { what: askedWhat(ask) }), ago(ask.at)].join(" · "),
-            action: h("span", { class: "row-actions" }, typeof ask.args.compose === "string" && button(t("approvals.look"), { class: "small", onclick: () => approvalDialog(ask) }, "eye"), button(t("approvals.decline"), { class: "small", onclick: () => answerAsk(ask, false) }), button(t("approvals.allow"), { class: "small danger", onclick: () => answerAsk(ask, true) })),
+            action: uiLine([typeof ask.args.compose === "string" && button(t("approvals.look"), { class: "small", onclick: () => approvalDialog(ask) }, "eye"), button(t("approvals.decline"), { class: "small", onclick: () => answerAsk(ask, false) }), button(t("approvals.allow"), { class: "small danger", onclick: () => answerAsk(ask, true) })]),
           }),
         ),
       ),
@@ -1122,7 +1090,7 @@ function agentsSection() {
       location.protocol === "http:" && uiNotice({ tone: "info", text: t("agents.how.plain") }),
       h("p", { class: "muted small" }, t("agents.how.signin")),
     ),
-    uiCard({ title: t("agents.levels.title") }, ...uiFacts(AGENT_LEVELS.map((id) => [t("agents.level." + id), h("span", { class: "muted small level-hint" }, t(`agents.level.${id}.hint`))])), uiNotice({ tone: "warn", text: t("agents.never") })),
+    uiCard({ title: t("agents.levels.title") }, ...AGENT_LEVELS.map((id) => uiSetting({ name: t("agents.level." + id), explain: t(`agents.level.${id}.hint`), control: null })), uiNotice({ tone: "warn", text: t("agents.never") })),
   ];
 }
 
@@ -1147,10 +1115,13 @@ const houseLabel = (tabs, at) => tabs.find((tab) => tab.id === at)?.label ?? (at
 function areaHead(area, at, { meta = null, metaId = null, actions = null, actionsId = null, search = null, more = null } = {}) {
   const tabs = areaTabs(area);
   const headTab = tabs.find((tab) => tab.head);
-  const tabsNav = tabs.length > 1 && area !== "house" && h("nav", { class: "tabs" }, tabs.filter((tab) => !tab.head).map((tab) => h("a", { class: "tab" + (tab.id === at ? " active" : ""), href: tabHash(area, tab), "aria-current": tab.id === at ? "page" : null, "data-tab": tab.id }, tab.label ?? t(`area.${area}.${tab.id}`), area === "server" && serverTabCount(tab.id))));
+  const shown = tabs.filter((tab) => !tab.head);
+  const tabsNav = tabs.length > 1 && area !== "house" && uiTabs(shown.map((tab) => ({ label: tab.label ?? t(`area.${area}.${tab.id}`), href: tabHash(area, tab), active: tab.id === at, count: area === "server" ? serverTabNumber(tab.id) || null : null })));
+  // this server's numbers may come after the head was drawn: its tabs are kept to be counted again
+  if (area === "server" && tabsNav) serverTabs = new Map(shown.map((tab, i) => [tab.id, tabsNav.children[i]]));
   if (area === "server")
     return pageHead({
-      cls: "area-head",
+      cls: "ui-area-head",
       crumbs: [{ label: t("nav.machines"), href: "#/machines" }, { label: t("tree.thisServer") }],
       icon: "server",
       title: state.overview?.system?.hostname ?? t("tree.thisServer"),
@@ -1162,10 +1133,10 @@ function areaHead(area, at, { meta = null, metaId = null, actions = null, action
       tabs: tabsNav,
     });
   // Integrations has no tabs: its overview lists everything, a page of one leads back to it
-  if (area === "house" && at !== "overview") return pageHead({ cls: "area-head", crumbs: [{ label: t("area.house"), href: "#/house" }, { label: houseLabel(tabs, at) }] });
+  if (area === "house" && at !== "overview") return pageHead({ cls: "ui-area-head", crumbs: [{ label: t("area.house"), href: "#/house" }, { label: houseLabel(tabs, at) }] });
   const own = [].concat(actions ?? []).filter(Boolean);
   return pageHead({
-    cls: "area-head",
+    cls: "ui-area-head",
     title: t("area." + area),
     facts: [meta ?? t(`area.${area}.lead`)],
     factsId: metaId,
@@ -1183,7 +1154,7 @@ function serverMeta() {
   const up = state.overview?.system?.uptime;
   const line = [t("tree.thisServer"), here?.os, here?.address || location.hostname, up ? t("sys.uptime", { time: duration(up) }) : null].filter(Boolean).join(" · ");
   const made = hardwareWords(here?.hardware);
-  return made ? h("span", null, line, h("span", { class: "block" }, made)) : line;
+  return made ? h("span", { class: "stack-s" }, h("span", null, line), h("span", null, made)) : line;
 }
 
 /** What a computer is made of, in one line: the processor, cores and threads, the memory and its modules */
@@ -1206,17 +1177,16 @@ function hardwareWords(hw) {
 const paintServerMeta = () => document.getElementById("server-meta")?.replaceChildren(serverMeta());
 /** The numbers by the tabs of this server: apps, containers, packages that wait */
 /** The numbers by this server's tabs again: what they count may come after the head was drawn */
+let serverTabs = new Map();
 function paintServerTabCounts() {
-  for (const a of document.querySelectorAll(".area-head .tabs a[data-tab]")) {
-    a.querySelector(".tab-count")?.remove();
-    const n = serverTabCount(a.dataset.tab);
-    if (n) a.append(n);
+  for (const [id, a] of serverTabs) {
+    if (!a.isConnected) continue;
+    a.querySelector(".ui-tab-count")?.remove();
+    const n = serverTabNumber(id);
+    if (n) a.append(h("span", { class: "ui-tab-count" }, String(n)));
   }
 }
-function serverTabCount(id) {
-  const n = id === "apps" ? (state.overview?.apps?.length ?? 0) : id === "containers" ? (incusUi.data?.containers?.length ?? 0) : id === "system" ? (sysUpdates[""]?.list?.length ?? 0) : 0;
-  return n > 0 ? h("span", { class: "muted tab-count" }, String(n)) : null;
-}
+const serverTabNumber = (id) => (id === "apps" ? (state.overview?.apps?.length ?? 0) : id === "containers" ? (incusUi.data?.containers?.length ?? 0) : id === "system" ? (sysUpdates[""]?.list?.length ?? 0) : 0);
 /**
  * The server renamed: one name for the computer itself and for the home network. Opened from the
  * server's menu and from the card of the name on the home network — one window for both.
@@ -1296,8 +1266,8 @@ function renderServerBody() {
   if (!box.childElementCount) {
     put(
       box,
-      h("section", { class: "card numbers server-numbers" }, h("div", { class: "ui-stats" }, ownKpis("stat")), h("div", { class: "trend", id: "own-trend" })),
-      h("div", { class: "columns" }, h("div", { class: "stack", id: "server-main" }), h("aside", { class: "side stack", id: "server-side" })),
+      uiCard({ flush: true }, h("div", { class: "ui-stats" }, ownKpis("stat")), h("div", { class: "ui-trend", id: "own-trend" })),
+      uiColumns(h("div", { class: "stack", id: "server-main" }), h("div", { class: "stack", id: "server-side" })),
     );
   }
   renderSystem();
@@ -1350,12 +1320,12 @@ function serverUpdatesValue(updates) {
   if (updates.error && !updates.at) return "—";
   if (!updates.at) return h("span", { class: "muted" }, t("sysupdates.never"));
   if (!list.length) return h("span", { class: "with-icon" }, icon("check"), t("server.updatesNone"));
-  return h("span", { class: "sys-status end" }, h("span", { class: "state partial" }, t("server.updatesN", { n: list.length })), security > 0 && h("span", { class: "state restarting" }, t("sysupdates.security", { n: security })));
+  return uiLine([uiState("warn", t("server.updatesN", { n: list.length })), security > 0 && uiState("bad", t("sysupdates.security", { n: security }))], { end: true });
 }
 
 /** "Find a setting" in the head of Settings: sections and cards by the words typed, wherever they live now */
 function settingsFind() {
-  const results = h("div", { class: "search-results", hidden: true });
+  const results = uiFindResults();
   const input = h("input", { type: "search", placeholder: t("settings.find"), "aria-label": t("settings.find"), autocomplete: "off", spellcheck: false });
   const open = (action) => (e) => {
     e.preventDefault();
@@ -1369,10 +1339,10 @@ function settingsFind() {
     const found = findSettings(typed);
     put(
       results,
-      !found.length && h("p", { class: "muted small pad" }, t("settings.findNone", { text: typed.trim() })),
+      !found.length && h("p", { class: "muted small" }, t("settings.findNone", { text: typed.trim() })),
       found.flatMap(({ item, cards, off }) => [
-        h("button", { type: "button", class: "search-hit", onmousedown: open(() => (off ? turnModuleOn(off, sectionHash(item.id)) : openSettingsCard(item))) }, icon(item.icon), h("span", { class: "grow" }, markFound(sectionTitle(item), typed)), h("span", { class: "muted small" }, off ? t("modules.turnOn") : t("area." + sectionArea(item.id)))),
-        ...cards.map((card) => h("button", { type: "button", class: "search-hit sub", onmousedown: open(() => openSettingsCard(item, card)) }, h("span", { class: "grow" }, markFound(card, typed)))),
+        uiFindHit({ icon: item.icon, name: markFound(sectionTitle(item), typed), note: off ? t("modules.turnOn") : t("area." + sectionArea(item.id)), onpick: open(() => (off ? turnModuleOn(off, sectionHash(item.id)) : openSettingsCard(item))) }),
+        ...cards.map((card) => uiFindHit({ name: markFound(card, typed), under: true, onpick: open(() => openSettingsCard(item, card)) })),
       ]),
     );
     results.hidden = false;
@@ -1381,7 +1351,7 @@ function settingsFind() {
   input.addEventListener("focus", paint);
   input.addEventListener("blur", () => (results.hidden = true));
   input.addEventListener("keydown", (e) => e.key === "Escape" && input.blur());
-  return h("div", { class: "search settings-find" }, icon("search"), input, results);
+  return uiFind(input, results);
 }
 
 /** The head of the section a part of the settings lives in, with its tabs, around what that part shows */
@@ -1389,7 +1359,7 @@ function settingsFrame(section, ...content) {
   const r = state.route;
   const [area, at] = r.view === "settings" ? [r.area, r.at] : section === "users" ? ["settings", "users"] : ["backups", r.tab ?? "overview"];
   const opts = area === "settings" ? { meta: `${t("area.settings.lead")} · ${state.version}`, actions: settingsFind() } : area === "backups" ? { metaId: "backup-meta", actionsId: "backup-actions" } : {};
-  return [h("div", { class: "settings" }, areaHead(area, at, opts), content)];
+  return [h("div", { class: "ui-settings-frame" }, areaHead(area, at, opts), content)];
 }
 /** The long sections are cut into tabs: the address says which */
 const STORAGE_TABS = { storage: ["disks", "fs", "fills"] };
@@ -1462,7 +1432,7 @@ async function twoFactorSetup() {
         },
       },
       h("header", null, h("div", { class: "grow" }, h("h2", null, t("twofa.setupTitle")), h("p", { class: "muted small" }, t("twofa.setupLead"))), closeX(() => dialog)),
-      h("div", { class: "qr-box" }, qrSvg(setup.qr)),
+      uiQr(qrSvg(setup.qr)),
       field(t("twofa.secret"), h("input", { readOnly: true, value: setup.secret.replace(/(.{4})/g, "$1 ").trim(), class: "mono", onfocus: (e) => e.target.select() }), t("twofa.secretHint")),
       field(t("twofa.code"), code),
       error,
@@ -1477,7 +1447,7 @@ function recoveryDialog(codes, done = () => {}) {
     "",
     h("h2", null, t("twofa.recoveryTitle")),
     h("p", { class: "muted" }, t("twofa.recoveryLead")),
-    h("pre", { class: "codes" }, codes.join("\n")),
+    uiCommand(codes.join("\n"), { block: true }),
     h("footer", null, button(t("twofa.copy"), { onclick: () => navigator.clipboard?.writeText(codes.join("\n")).then(() => toast(t("twofa.copied"))) }), button(t("twofa.saved"), { class: "primary", onclick: () => (dialog.close(), done()) })),
   );
 }
@@ -1556,34 +1526,25 @@ function avatarCard() {
     }
   };
   const has = !!state.user.avatar;
-  return h(
-    "section",
-    { class: "card pad avatar-card" },
-    avatarOf(state.user, "avatar big"),
-    h(
-      "div",
-      { class: "grow stack-s" },
-      h("h2", null, t("account.avatar")),
-      h("p", { class: "muted small" }, t("account.avatarHint")),
-      error,
-      h(
-        "div",
-        { class: "actions" },
-        picker,
-        button(t(has ? "account.avatarChange" : "account.avatarUpload"), { class: "small", onclick: () => picker.click() }, "upload"),
-        has &&
-          button(t("account.avatarRemove"), {
-            class: "small",
-            onclick: async () => {
-              try {
-                keep((await api("DELETE", "/api/account/avatar")).user);
-              } catch (err) {
-                error.textContent = errorText(err);
-              }
-            },
-          }, "trash"),
-      ),
-    ),
+  return uiCard(
+    { title: t("account.avatar"), lead: t("account.avatarHint") },
+    uiLine([
+      avatarOf(state.user, "avatar big"),
+      picker,
+      button(t(has ? "account.avatarChange" : "account.avatarUpload"), { class: "small", onclick: () => picker.click() }, "upload"),
+      has &&
+        button(t("account.avatarRemove"), {
+          class: "small",
+          onclick: async () => {
+            try {
+              keep((await api("DELETE", "/api/account/avatar")).user);
+            } catch (err) {
+              error.textContent = errorText(err);
+            }
+          },
+        }, "trash"),
+    ]),
+    error,
   );
 }
 
@@ -1639,7 +1600,7 @@ function accountSection() {
         uiSetting({ name: t("account.current"), control: current }),
         uiSetting({ name: t("account.new"), explain: t("account.newHint"), control: next }),
         error,
-        h("footer", { class: "block-foot" }, h("button", { class: "btn primary" }, t("account.change"))),
+        uiFoot(h("button", { class: "btn primary" }, t("account.change"))),
       ),
     ),
     uiCard({
@@ -1751,8 +1712,12 @@ function userDialog() {
   name.focus();
 }
 
-function userMenuFor(user, at = null) {
-  let dialog;
+function userMenuFor(user, at) {
+  return menuAt(at, menuHeader(user.name, t("user.role." + user.role), avatarOf(user)), userEntries(user));
+}
+
+/** What may be done with a user: their role, the network folders, the password, the second factor, removal */
+function userEntries(user) {
   const self = user.id === state.user.id;
   const change = async (patch, done) => {
     try {
@@ -1776,10 +1741,8 @@ function userMenuFor(user, at = null) {
         void loadUsers();
       },
     });
-  const item = (label, iconName, action, cls = "") => h("button", { type: "button", class: "menu-item " + cls, onclick: () => (dialog.close(), action()) }, icon(iconName), label);
-  dialog = openDialog(
-    at ? "menu dropdown" : "menu",
-    h("header", null, avatarOf(user), h("div", null, h("h2", null, user.name), h("span", { class: "muted small" }, t("user.role." + user.role)))),
+  const item = (label, iconName, run, cls = "") => ({ label, icon: iconName, run, danger: cls === "danger" });
+  return [
     user.role !== "member" && item(t("users.makeMember"), "user", () => (user.role === "admin" ? askRole("member", t("users.makeMember")) : change({ role: "member" }))),
     user.role !== "guest" && item(t("users.makeGuest"), "user", () => (user.role === "admin" ? askRole("guest", t("users.makeGuest")) : change({ role: "guest" }))),
     user.role !== "admin" && item(t("users.makeAdmin"), "sliders", () => askRole("admin", t("users.makeAdmin"))),
@@ -1837,8 +1800,7 @@ function userMenuFor(user, at = null) {
             void loadUsers();
           },
         }), "danger"),
-  );
-  if (at) placeAt(dialog, at);
+  ];
 }
 
 const USER_PARTS = ["people", "access", "invites", "signins"];
@@ -1850,32 +1812,24 @@ function renderUsers() {
   const without = users.filter((u) => !u.twoFactor).length;
   const invites = state.invites?.length ?? 0;
   const people = () => [
-    h(
-      "div",
-      { class: "card table-wrap" },
-      h("div", { class: "section-head pad-head" }, h("div", null, h("h2", null, t("users.part.people"), " ", h("span", { class: "muted" }, String(users.length))), h("p", { class: "meta" }, t("users.meta", { users: users.length, admins }), without > 0 && h("span", { class: "dot-sep" }, "·"), without > 0 && t("users.without2fa", { n: without })))),
-      h(
-        "table",
-        null,
-        h("thead", null, h("tr", null, h("th", null, t("users.col.user")), h("th", null, t("users.role")), h("th", null, t("twofa.short")), h("th", null, t("users.col.lastSignIn")), h("th", { class: "num" }, t("account.sessions")), h("th"))),
-        h(
-          "tbody",
-          null,
-          users.map((u) =>
-            h(
-              "tr",
-              { menu: (at) => userMenuFor(u, at) },
-              h("td", null, h("div", { class: "with-icon" }, avatarOf(u), h("div", null, h("span", { class: "strong" }, u.name), u.id === state.user.id && h("span", { class: "muted small" }, " ", t("users.you")), userShares(u)))),
-              h("td", null, h("span", { class: "chip" + (u.role === "admin" ? " accent" : "") }, t("user.role." + u.role))),
-              h("td", null, u.twoFactor ? h("span", { class: "chip ok" }, icon("check"), t("twofa.onShort")) : h("span", { class: "muted" }, t("twofa.offShort"))),
-              h("td", null, u.lastSignIn ? ago(u.lastSignIn) : h("span", { class: "muted" }, t("users.never"))),
-              h("td", { class: "num" }, u.sessions || "—"),
-              h("td", null, h("div", { class: "row-actions" }, h("button", { type: "button", class: "icon-btn", "aria-label": t("users.actions", { name: u.name }), onclick: () => userMenuFor(u) }, icon("more")))),
-            ),
-          ),
-        ),
+    uiCard(
+      { title: t("users.part.people"), count: users.length, lead: [t("users.meta", { users: users.length, admins }), without > 0 && t("users.without2fa", { n: without })].filter(Boolean).join(" · "), flush: true },
+      uiTable(
+        [{ label: t("users.col.user") }, { label: t("users.role") }, { label: t("twofa.short") }, { label: t("users.col.lastSignIn") }, { label: t("account.sessions"), num: true }, { label: "" }],
+        users.map((u) => ({
+          menu: (at) => userMenuFor(u, at),
+          cells: [
+            uiCell({ lead: { avatar: avatarOf(u, "avatar ui-lead") }, name: [u.name, u.id === state.user.id && h("span", { class: "muted small" }, " ", t("users.you"))], sub: userShares(u) }),
+            u.role === "admin" ? uiState("info", t("user.role." + u.role)) : uiTag(t("user.role." + u.role)),
+            u.twoFactor ? uiState("ok", t("twofa.onShort")) : h("span", { class: "muted" }, t("twofa.offShort")),
+            u.lastSignIn ? ago(u.lastSignIn) : h("span", { class: "muted" }, t("users.never")),
+            u.sessions || "—",
+            uiMore(() => userEntries(u), { size: "s", header: () => menuHeader(u.name, t("user.role." + u.role), avatarOf(u)), label: t("users.actions", { name: u.name }) }),
+          ],
+          sub: [t("user.role." + u.role), u.lastSignIn ? ago(u.lastSignIn) : t("users.never")].join(" · "),
+        })),
       ),
-      h("p", { class: "table-foot muted small" }, t("users.rolesHint")),
+      h("div", { class: "ui-inset" }, h("p", { class: "muted small" }, t("users.rolesHint"))),
     ),
     requireTwoFactorRow(),
   ];
@@ -1883,11 +1837,10 @@ function renderUsers() {
   shell(
     ...settingsFrame(
       "users",
-      h(
-        "div",
-        { class: "card filter-bar" },
-        h("div", { class: "seg-pills" }, USER_PARTS.map((id) => h("a", { class: "seg-pill" + (part === id ? " active" : ""), href: `#/settings/users${id === "people" ? "" : "/" + id}` }, t("users.part." + id), id === "invites" && invites > 0 && h("span", { class: "muted" }, String(invites))))),
-        h("div", { class: "actions" }, button(t("invite.new"), { onclick: inviteDialog }, "link"), button(t("users.add"), { class: "primary", onclick: userDialog }, "plus")),
+      uiCard(
+        { flush: true, cls: "ui-filters" },
+        uiSegment(USER_PARTS.map((id) => ({ value: id, label: t("users.part." + id), href: `#/settings/users${id === "people" ? "" : "/" + id}`, count: id === "invites" && invites > 0 ? invites : null })), part, null, { label: t("area.settings.users") }),
+        uiLine([button(t("invite.new"), { onclick: inviteDialog }, "link"), button(t("users.add"), { class: "primary", onclick: userDialog }, "plus")], { end: true }),
       ),
       body,
     ),
@@ -1906,19 +1859,11 @@ function userShares(user) {
 /** The rule that every administrator signs in with a second factor */
 function requireTwoFactorRow() {
   const on = !!state.settings?.security?.adminTwoFactor;
-  const box = h("input", {
-    type: "checkbox",
-    class: "switch",
-    role: "switch",
-    "aria-label": t("users.require2fa"),
-    checked: on,
-    onchange: async () => {
-      try {
-        state.settings = await api("PUT", "/api/settings", { security: { adminTwoFactor: box.checked } });
-      } catch (e) {
-        box.checked = on;
-        toast(errorText(e), "error");
-      }
+  const box = uiSwitch({
+    on,
+    label: t("users.require2fa"),
+    onchange: async (next) => {
+      state.settings = await api("PUT", "/api/settings", { security: { adminTwoFactor: next } });
     },
   });
   return uiCard({}, uiSetting({ name: t("users.require2fa"), explain: t("users.require2faHint"), control: box }));
@@ -2007,15 +1952,15 @@ function accessTable() {
   const fail = (e) => (toast(errorText(e), "error"), again());
   const members = users.filter((u) => u.role === "member").map((u) => u.id);
   const dash = () => h("span", { class: "muted" }, "—");
-  const fixed = (title) => h("span", { class: "mark on fixed", title }, icon("check"));
-  const tick = (on, label, set) => h("button", { type: "button", class: "mark" + (on ? " on" : ""), "aria-pressed": String(on), "aria-label": label, title: label, onclick: () => set(!on) }, on ? icon("check") : "—");
+  const fixed = (title) => uiGrant({ state: "fixed", label: title });
+  const tick = (on, label, set) => uiGrant({ state: on ? "on" : "off", label, onclick: () => set(!on) });
   // a folder: none → reads → reads and writes → none
   const level = (now, label, set) => {
     const next = now === "read" ? "write" : now === "write" ? "none" : "read";
     const words = `${label}: ${t("shares.access." + (now ?? "none"))}`;
-    return h("button", { type: "button", class: "mark" + (now === "write" ? " on" : now === "read" ? " reads" : ""), "aria-label": words, title: words, onclick: () => set(next) }, now === "write" ? icon("check") : now === "read" ? t("access.reads") : "—");
+    return uiGrant({ state: now === "write" ? "on" : now === "read" ? "reads" : "off", label: words, text: now === "read" ? t("access.reads") : null, onclick: () => set(next) });
   };
-  const group = (title, lead) => h("tr", { class: "group-row" }, h("td", { colSpan: users.length + 1 }, h("strong", null, title), lead && h("span", { class: "muted small" }, " · ", lead)));
+  const group = (title, lead) => ({ group: title, lead });
   const withLevel = (map, id, to) => Object.fromEntries(Object.entries({ ...map, [id]: to }).filter(([, v]) => v !== "none"));
 
   const setApp = async (app, patch) => {
@@ -2030,37 +1975,31 @@ function accessTable() {
   const appRow = (app) => {
     const everyone = app.allowed === "all";
     const list = everyone ? members : app.allowed;
-    const signIn = h("label", { class: "check small" }, h("input", { type: "checkbox", checked: app.protect, disabled: !!app.cannotProtect, title: app.cannotProtect ? t("access.cannot." + app.cannotProtect) : "", onchange: (e) => setApp(app, { protect: e.target.checked }) }), h("span", null, t("access.signIn")));
-    return h(
-      "tr",
-      null,
-      h("td", null, h("div", { class: "with-icon" }, appIcon(app, "sm"), h("div", { class: "stack-s backup-name" }, h("a", { class: "strong", href: app.machine ? `#/machines/${app.machine.id}/apps` : `#/apps/${app.name}` }, app.title), app.machine && h("div", { class: "muted small with-icon" }, icon("server"), app.machine.name, app.protect && app.listen ? ` · ${t("access.through", { port: app.listen })}` : ""), signIn, app.cannotProtect === "hostNetwork" && h("div", { class: "muted small" }, t("access.hostOpen")), !everyone && !app.protect && h("div", { class: "muted small" }, t("access.onlyHidden"))))),
-      users.map((u) => h("td", null, u.role === "admin" ? fixed(t("access.adminAll")) : tick(everyone ? u.role === "member" : list.includes(u.id), `${u.name}: ${app.title}`, (on) => setApp(app, { allowed: on ? [...new Set([...list, u.id])] : list.filter((id) => id !== u.id) })))),
-    );
+    const signIn = uiCheck(t("access.signIn"), h("input", { type: "checkbox", checked: app.protect, disabled: !!app.cannotProtect, title: app.cannotProtect ? t("access.cannot." + app.cannotProtect) : "", onchange: (e) => setApp(app, { protect: e.target.checked }) }));
+    return {
+      thing: uiCell({
+        lead: appIcon(app, "row"),
+        name: h("a", { href: app.machine ? `#/machines/${app.machine.id}/apps` : `#/apps/${app.name}` }, app.title),
+        sub: [app.machine && h("span", { class: "with-icon" }, icon("server"), app.machine.name, app.protect && app.listen ? ` · ${t("access.through", { port: app.listen })}` : ""), signIn, app.cannotProtect === "hostNetwork" && h("span", null, t("access.hostOpen")), !everyone && !app.protect && h("span", null, t("access.onlyHidden"))],
+      }),
+      cells: users.map((u) => (u.role === "admin" ? fixed(t("access.adminAll")) : tick(everyone ? u.role === "member" : list.includes(u.id), `${u.name}: ${app.title}`, (on) => setApp(app, { allowed: on ? [...new Set([...list, u.id])] : list.filter((id) => id !== u.id) })))),
+    };
   };
-  const shareRow = (share) =>
-    h(
-      "tr",
-      null,
-      h("td", null, h("div", { class: "with-icon" }, h("span", { class: "app-icon sm plus" }, icon("folder")), h("div", { class: "stack-s backup-name" }, h("a", { class: "strong", href: "#/storage/shares" }, share.name), h("div", { class: "muted small mono clip" }, share.path), share.guest !== "none" && h("div", { class: "muted small" }, t("access.guest", { level: t("shares.access." + share.guest).toLowerCase() }))))),
-      users.map((u) => h("td", null, more.kept.has(u.id) ? h("span", { class: "muted", title: t("access.keptOut") }, "—") : level(share.users[u.id], `${u.name}: ${share.name}`, (to) => api("PUT", `/api/shares/${encodeURIComponent(share.name)}`, { users: withLevel(share.users, u.id, to) }).then(again, fail)))),
-    );
-  const folderRow = (m, share) =>
-    h(
-      "tr",
-      null,
-      h("td", null, h("div", { class: "with-icon" }, h("span", { class: "app-icon sm plus" }, icon("folder")), h("div", { class: "stack-s backup-name" }, h("a", { class: "strong", href: machineBase(m) }, share.name), h("div", { class: "muted small mono clip" }, share.path)))),
-      users.map((u) => h("td", null, u.role === "admin" ? fixed(t("access.adminAll")) : level(share.users[u.id], `${u.name}: ${share.name}`, (to) => api("PUT", `/api/machines/${m.id}/shares`, { path: share.path, name: share.name, users: withLevel(share.users, u.id, to) }).then(again, fail)))),
-    );
+  const shareRow = (share) => ({
+    thing: uiCell({ lead: { icon: "folder" }, name: h("a", { href: "#/storage/shares" }, share.name), sub: [h("span", { class: "mono clip" }, share.path), share.guest !== "none" && h("span", null, t("access.guest", { level: t("shares.access." + share.guest).toLowerCase() }))] }),
+    cells: users.map((u) => (more.kept.has(u.id) ? h("span", { class: "muted", title: t("access.keptOut") }, "—") : level(share.users[u.id], `${u.name}: ${share.name}`, (to) => api("PUT", `/api/shares/${encodeURIComponent(share.name)}`, { users: withLevel(share.users, u.id, to) }).then(again, fail)))),
+  });
+  const folderRow = (m, share) => ({
+    thing: uiCell({ lead: { icon: "folder" }, name: h("a", { href: machineBase(m) }, share.name), sub: h("span", { class: "mono" }, share.path) }),
+    cells: users.map((u) => (u.role === "admin" ? fixed(t("access.adminAll")) : level(share.users[u.id], `${u.name}: ${share.name}`, (to) => api("PUT", `/api/machines/${m.id}/shares`, { path: share.path, name: share.name, users: withLevel(share.users, u.id, to) }).then(again, fail)))),
+  });
   const haRow = (x) => {
     const all = x.people === "all";
     const list = all ? users.filter((u) => u.role !== "admin").map((u) => u.id) : (x.people ?? []);
-    return h(
-      "tr",
-      null,
-      h("td", null, h("div", { class: "with-icon" }, h("span", { class: "app-icon sm plus" }, icon("bulb")), h("div", { class: "stack-s backup-name" }, h("a", { class: "strong", href: `#/house/ha/${x.id}` }, x.name), h("div", { class: "muted small" }, t("access.haWhat"))))),
-      users.map((u) => h("td", null, u.role === "admin" ? fixed(t("access.adminAll")) : tick(list.includes(u.id), `${u.name}: ${x.name}`, (on) => api("PATCH", `/api/ha/${x.id}`, { people: on ? [...new Set([...list, u.id])] : list.filter((id) => id !== u.id) }).then(again, fail)))),
-    );
+    return {
+      thing: uiCell({ lead: { icon: "bulb" }, name: h("a", { href: `#/house/ha/${x.id}` }, x.name), sub: t("access.haWhat") }),
+      cells: users.map((u) => (u.role === "admin" ? fixed(t("access.adminAll")) : tick(list.includes(u.id), `${u.name}: ${x.name}`, (on) => api("PATCH", `/api/ha/${x.id}`, { people: on ? [...new Set([...list, u.id])] : list.filter((id) => id !== u.id) }).then(again, fail)))),
+    };
   };
   const rows = [
     access.apps.length > 0 && [group(t("nav.apps"), t("access.appsLead")), access.apps.map(appRow)],
@@ -2069,14 +2008,10 @@ function accessTable() {
     more.ha.length > 0 && [group("Home Assistant", t("access.haLead")), more.ha.map(haRow)],
   ].filter(Boolean);
   return [
-    h(
-      "div",
-      { class: "card table-wrap" },
-      h("div", { class: "section-head pad-head" }, h("h2", null, t("users.part.access"), " ", h("span", { class: "muted" }, t("access.people", { n: users.length })))),
-      rows.flat(3).length
-        ? h("table", { class: "matrix access" }, h("thead", null, h("tr", null, h("th"), users.map((u) => h("th", null, u.name, " ", h("span", { class: "muted block" }, t("user.role." + u.role)))))), h("tbody", null, rows))
-        : h("p", { class: "pad-row muted" }, t("access.nothing")),
-      h("p", { class: "table-foot muted small" }, t("access.one"), " ", t("access.how")),
+    uiCard(
+      { title: t("users.part.access"), count: t("access.people", { n: users.length }), flush: true },
+      rows.flat(3).length ? uiMatrix(users.map((u) => ({ name: u.name, sub: t("user.role." + u.role) })), rows.flat(3)) : uiEmpty({ text: t("access.nothing") }),
+      h("div", { class: "ui-inset" }, h("p", { class: "muted small" }, t("access.one"), " ", t("access.how"))),
     ),
   ];
 }

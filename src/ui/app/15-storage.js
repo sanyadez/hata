@@ -39,11 +39,11 @@ function diskDialog(name) {
   const error = h("p", { class: "error", role: "alert" });
   let dialog;
   // a hard disk may stop spinning when idle: its wait and whether it spins now
-  const sleepBox = h("div", { class: "disk-sleep stack-s" });
+  const sleepBox = h("div", { class: "stack-s" });
   const paintSleep = (disk, report) => {
     const mine = report?.disks?.[disk.serial];
-    if (!report) return put(sleepBox, h("h3", null, t("power.sleep.title")), waitMark());
-    if (!report.tool) return put(sleepBox, h("h3", null, t("power.sleep.title")), h("p", { class: "muted small" }, t("power.sleep.lead")), packageCard({ package: "hdparm", install: report.install }, () => loadSleep(disk)));
+    if (!report) return put(sleepBox, uiSubhead({ title: t("power.sleep.title") }), uiEmpty({ size: "loading" }));
+    if (!report.tool) return put(sleepBox, uiSubhead({ title: t("power.sleep.title"), lead: t("power.sleep.lead") }), packageCard({ package: "hdparm", install: report.install }, () => loadSleep(disk)));
     const select = h("select", { "aria-label": t("power.sleep.title"), onchange: async () => {
       select.disabled = true;
       try {
@@ -56,9 +56,8 @@ function diskDialog(name) {
     } }, SLEEP_MINUTES.map((n) => h("option", { value: n, selected: n === (mine?.minutes ?? 0) }, n ? t("power.sleep.after", { time: n >= 60 ? t("time.hours", { n: n / 60 }) : t("time.minutes", { n }) }) : t("power.sleep.never"))));
     put(
       sleepBox,
-      h("h3", null, t("power.sleep.title")),
-      h("p", { class: "muted small" }, t("power.sleep.lead")),
-      h("div", { class: "kv" }, h("div", null, t("power.sleep.wait"), mine?.state && h("div", { class: "muted small" }, t("power.sleep.now." + mine.state))), select),
+      uiSubhead({ title: t("power.sleep.title"), lead: t("power.sleep.lead") }),
+      uiSetting({ name: t("power.sleep.wait"), explain: mine?.state ? t("power.sleep.now." + mine.state) : null, control: select }),
       mine?.error && h("p", { class: "error small" }, t("power.sleep.failed", { message: mine.error })),
     );
   };
@@ -81,7 +80,7 @@ function diskDialog(name) {
     const disk = state.disks?.disks.find((d) => d.name === name);
     if (!disk) return dialog?.close();
     const s = disk.smart;
-    const value = (label, hint, shown, bad = false) => h("div", { class: "kv" }, h("div", null, label, hint && h("div", { class: "muted small" }, hint)), h("strong", { class: bad ? "bad" : "" }, shown));
+    const value = (label, hint, shown, bad = false) => [h("span", null, label, hint && h("div", { class: "muted small" }, hint)), h("strong", { class: bad ? "error" : null }, shown)];
     // a counter Hata saw at another value says so: "was 0 until 14 Sep"
     const moved = (key) => {
       const log = disk.log?.[key === "media" ? "mediaErrors" : key] ?? [];
@@ -91,14 +90,12 @@ function diskDialog(name) {
     const last = s?.lastTest;
     put(
       body,
-      h("header", null, h("span", { class: "badge-icon " + (disk.health === "ok" || disk.health === "unknown" ? "plain" : disk.health) }, icon("disk")), h("div", { class: "grow" }, h("h2", null, diskTitle(disk)), h("p", { class: "muted small" }, diskMeta(disk))), healthChip(disk), closeX(() => dialog)),
+      h("header", null, uiLead({ icon: "disk", tone: disk.health === "danger" ? "bad" : disk.health === "warn" ? "warn" : null }), h("div", { class: "grow" }, h("h2", null, diskTitle(disk)), h("p", { class: "muted small" }, diskMeta(disk))), healthChip(disk), closeX(() => dialog)),
       !s && h("p", { class: "muted" }, t(state.disks.tool === "ok" ? "disks.noSmart" : `disks.tool.${state.disks.tool}Hint`)),
-      s && (disk.findings.length ? disk.findings.map((f) => h("p", { class: "banner" + (f.severity === "danger" ? " danger" : "") }, t("disks.finding." + f.code, { n: f.n ?? 0 }))) : h("p", { class: "muted" }, t("disks.fine"))),
+      s && (disk.findings.length ? disk.findings.map((f) => uiNotice({ tone: f.severity === "danger" ? "bad" : "warn", text: t("disks.finding." + f.code, { n: f.n ?? 0 }) })) : h("p", { class: "muted" }, t("disks.fine"))),
       s?.testing != null && h("p", { class: "with-icon" }, icon("refresh"), t("disks.test.running", { n: s.testing })),
       s &&
-        h(
-          "div",
-          { class: "kv-list" },
+        uiFacts([
           s.passed != null && value(t("disks.value.passed"), "", t(s.passed ? "disks.value.passedYes" : "disks.value.passedNo"), !s.passed),
           count("reallocated", s.reallocated),
           count("pending", s.pending),
@@ -110,7 +107,7 @@ function diskDialog(name) {
           s.temperature != null && value(t("disks.value.temperature"), disk.hottest && disk.hottest.value > s.temperature ? t("disks.value.hottest", { n: disk.hottest.value, date: shortDate(disk.hottest.at) }) : "", s.temperature + " °C", disk.findings.some((f) => f.code === "hot")),
           s.powerOnHours != null && value(t("disks.value.powerOn"), t("disks.value.powerOnHint", { hours: s.powerOnHours, cycles: s.powerCycles ?? "—" }), powerOnTime(s.powerOnHours)),
           value(t("disks.value.lastTest"), last ? t("disks.value.testWhen", { type: has("disks.test." + last.type) ? t("disks.test." + last.type) : last.type, hours: Math.max(0, (s.powerOnHours ?? 0) - (last.hours ?? 0)) }) : "", last ? t(last.passed ? "disks.value.testPassed" : "disks.value.testFailed") : t("disks.value.testNever"), last && !last.passed),
-        ),
+        ]),
       s && h("p", { class: "muted small" }, t("disks.test.hint")),
       disk.rotational && disk.serial && sleepBox,
       error,
@@ -118,16 +115,11 @@ function diskDialog(name) {
       state.disks.mounting?.possible &&
         h(
           "div",
-          { class: "disk-use" },
-          h("h3", null, t("mounting.title")),
-          disk.volumes.map((v) =>
-            h(
-              "div",
-              { class: "kv" },
-              h("div", null, h("span", { class: "mono" }, v.name), h("div", { class: "muted small" }, [bytes(v.size), v.fstype || t("mounting.noFs"), v.label].filter(Boolean).join(" · "))),
-              h(
-                "span",
-                { class: "with-actions" },
+          { class: "stack-s" },
+          uiSubhead({ title: t("mounting.title") }),
+          ...uiFacts(disk.volumes.map((v) => [
+              h("span", null, h("span", { class: "mono" }, v.name), h("div", { class: "muted small" }, [bytes(v.size), v.fstype || t("mounting.noFs"), v.label].filter(Boolean).join(" · "))),
+              uiLine([
                 v.mounts.length ? h("span", { class: "mono" }, v.mounts[0]) : !state.disks.mounting.mountable.includes(v.path) && h("span", { class: "muted" }, t(v.swap ? "mounting.swap" : "disks.notMounted")),
                 oneAndMore(
                   !v.mounts.length && state.disks.mounting.mountable.includes(v.path) ? button(t("mounting.connect"), { class: "small", onclick: () => (dialog.close(), connectDialog(disk, v)) }) : null,
@@ -140,11 +132,11 @@ function diskDialog(name) {
                   ],
                   "small",
                 ),
-              ),
-            ),
-          ),
+              ], { end: true }),
+            ])).concat(uiFacts([
           (state.disks.mounting.free?.[disk.name] ?? 0) > 0 &&
-            h("div", { class: "kv" }, h("div", null, h("span", null, t("mounting.unallocated")), h("div", { class: "muted small" }, bytes(state.disks.mounting.free[disk.name]))), h("span", { class: "with-actions" }, button(t("mounting.newPart"), { class: "small", onclick: () => (dialog.close(), formatDialog(disk, null, state.disks.mounting.free[disk.name])) }))),
+            [h("span", null, h("span", null, t("mounting.unallocated")), h("div", { class: "muted small" }, bytes(state.disks.mounting.free[disk.name]))), uiLine([button(t("mounting.newPart"), { class: "small", onclick: () => (dialog.close(), formatDialog(disk, null, state.disks.mounting.free[disk.name])) })], { end: true })],
+          ])),
           changeable(disk).whole ? h("footer", null, h("span", { class: "muted small" }, t("mounting.formatHint")), oneAndMore(button(t("mounting.formatDisk"), { onclick: () => (dialog.close(), formatDialog(disk)) }), [{ label: t("mounting.wipe"), icon: "trash", danger: true, run: () => (dialog.close(), wipeDialog(disk)) }])) : h("p", { class: "muted small" }, t("mounting.blocked." + (state.disks.mounting.blockers[disk.name]?.[0] ?? "mounted"))),
         ),
     );
@@ -193,14 +185,15 @@ const mountName = (text) => text.normalize("NFKD").replace(/[^A-Za-z0-9._-]+/g, 
 /** The reason, the command and the button for a package an action turned out to need */
 function packageCard(detail, retry) {
   const error = h("p", { class: "error", role: "alert" });
-  return h(
-    "div",
-    { class: "banner stack" },
-    h("strong", null, t(`mounting.needs.${detail.package}.what`)),
-    h("p", { class: "muted small" }, t(`mounting.needs.${detail.package}.why`)),
-    detail.install ? h("p", { class: "cmd" }, icon("terminal"), detail.install) : h("p", { class: "muted small" }, t("mounting.needs.byHand", { package: detail.package })),
-    error,
-    detail.install &&
+  return uiNotice({
+    tone: "info",
+    icon: "package",
+    title: t(`mounting.needs.${detail.package}.what`),
+    text: t(`mounting.needs.${detail.package}.why`),
+    command: detail.install ? uiCommand(detail.install) : h("p", { class: "muted small" }, t("mounting.needs.byHand", { package: detail.package })),
+    foot: error,
+    action:
+      detail.install &&
       button(
         t("mounting.needs.install", { package: detail.package }),
         {
@@ -218,7 +211,7 @@ function packageCard(detail, retry) {
         },
         "download",
       ),
-  );
+  });
 }
 
 /** Runs a disk action from a dialog: the button waits, an error stays in the dialog, a missing package is offered */
@@ -250,7 +243,7 @@ function formatDialog(disk, part, free = 0) {
   const GB = 1e9;
   const room = free || disk.size;
   const size = h("input", { type: "text", inputMode: "decimal", class: "short", placeholder: (room / GB).toFixed(room < 10 * GB ? 1 : 0), "aria-label": t("mounting.size") });
-  const sizeHint = h("span", { class: "hint" });
+  const sizeHint = h("span");
   const asked = () => Math.round(Number(size.value.trim().replace(",", ".")) * GB);
   const holds = targets.filter((v) => v.fstype);
   const leaving = targets.flatMap((v) => v.mounts);
@@ -261,13 +254,14 @@ function formatDialog(disk, part, free = 0) {
   const name = h("input", { type: "text", maxlength: 32, spellcheck: false });
   const typed = h("input", { type: "text", autocomplete: "off", spellcheck: false, placeholder: (part ?? disk).name });
   const password = h("input", { type: "password", autocomplete: "current-password" });
-  const fsHint = h("span", { class: "hint" });
-  const labelHint = h("span", { class: "hint" });
-  const afterHint = h("span", { class: "hint" });
-  const where = h("span", { class: "hint mono" });
-  const folder = h("label", { class: "field" }, h("span", { class: "label" }, t("mounting.folder")), name, where, h("span", { class: "hint" }, t("mounting.nameHint")));
-  const open = h("p", { class: "banner" });
-  const cmd = h("span");
+  const fsHint = h("span");
+  const labelHint = h("span");
+  const afterHint = h("span");
+  const where = h("span", { class: "mono" });
+  const folder = uiField(t("mounting.folder"), name, h("span", { class: "stack-s" }, where, h("span", null, t("mounting.nameHint"))));
+  const openText = h("span");
+  const open = uiNotice({ tone: "warn", text: openText });
+  const cmd = h("div");
   const slot = h("div");
   let dialog;
   let named = false;
@@ -282,11 +276,11 @@ function formatDialog(disk, part, free = 0) {
     where.textContent = "/mnt/" + name.value;
     folder.hidden = !connects;
     open.hidden = !connects || POSIX_FS.includes(fs.value);
-    open.textContent = t("mounting.noOwners", { fs: FS_NAMES[fs.value] });
+    openText.textContent = t("mounting.noOwners", { fs: FS_NAMES[fs.value] });
     const sized = size.value.trim() !== "";
     const fits = !sized || (asked() >= 64 * 1024 * 1024 && asked() <= room);
     sizeHint.textContent = !fits ? t("mounting.sizeBad", { max: bytes(room) }) : t(free ? "mounting.sizeHintFree" : sized ? "mounting.sizeHintRest" : "mounting.sizeHint", { rest: bytes(Math.max(0, room - asked())), max: bytes(room) });
-    cmd.textContent = [!part && `sfdisk ${free ? "--append " : ""}${disk.path}`, `mkfs.${fs.value === "vfat" ? "fat" : fs.value} ${part ? part.path : free ? "…" : disk.path + (/\d$/.test(disk.path) ? "p1" : "1")}`, after.value === "keep" && "/etc/fstab"].filter(Boolean).join("; ");
+    put(cmd, uiCommand([!part && `sfdisk ${free ? "--append " : ""}${disk.path}`, `mkfs.${fs.value === "vfat" ? "fat" : fs.value} ${part ? part.path : free ? "…" : disk.path + (/\d$/.test(disk.path) ? "p1" : "1")}`, after.value === "keep" && "/etc/fstab"].filter(Boolean).join("; ")));
     go.disabled = (connects && !MOUNT_NAME.test(name.value)) || !fits || (!free && (typed.value.trim() !== (part ?? disk).name || !password.value));
   };
   name.addEventListener("input", () => ((named = true), check()));
@@ -314,27 +308,32 @@ function formatDialog(disk, part, free = 0) {
     h("h2", null, free ? t("mounting.newPartTitle", { disk: diskTitle(disk) }) : t("mounting.formatTitle", { disk: part ? `${part.name} · ${diskTitle(disk)}` : diskTitle(disk) })),
     h("p", { class: "muted small" }, part ? [part.name, bytes(part.size)].join(" · ") : diskMeta(disk)),
     free > 0 && h("p", { class: "muted" }, t("mounting.newPartLead", { free: bytes(free) })),
-    !free && h(
-      "p",
-      { class: "banner danger" },
-      t(part ? "mounting.formatPartErases" : holds.length ? "mounting.formatErases" : "mounting.formatEmpty"),
-      holds.length > 0 && h("span", { class: "block mono small" }, holds.map((v) => [v.name, v.fstype, v.label, bytes(v.size)].filter(Boolean).join(" · ")).join("; ")),
-      leaving.length > 0 && h("span", { class: "block" }, t("mounting.formatLeaves", { paths: leaving.join(", ") })),
-    ),
-    h("label", { class: "field" }, h("span", { class: "label" }, t("mounting.fs")), fs, fsHint),
-    h("label", { class: "field" }, h("span", { class: "label" }, t("mounting.label")), label, labelHint),
-    !part && h("label", { class: "field" }, h("span", { class: "label" }, t("mounting.size")), size, sizeHint),
-    h("label", { class: "field" }, h("span", { class: "label" }, t("mounting.after")), after, afterHint),
+    !free && erasesNotice(t(part ? "mounting.formatPartErases" : holds.length ? "mounting.formatErases" : "mounting.formatEmpty"), holds, leaving),
+    uiField(t("mounting.fs"), fs, fsHint),
+    uiField(t("mounting.label"), label, labelHint),
+    !part && uiField(t("mounting.size"), size, sizeHint),
+    uiField(t("mounting.after"), after, afterHint),
     folder,
     open,
     !free && field(t("mounting.typeName", { name: (part ?? disk).name }), typed),
     !free && field(t("account.password"), password, t("mounting.passwordHint")),
-    h("p", { class: "cmd" }, icon("terminal"), cmd),
+    cmd,
     slot,
     h("footer", null, closeButton(() => dialog, t("common.cancel")), go),
   );
   check();
 }
+
+/** What erasing takes away: the file systems there and the folders it leaves */
+const erasesNotice = (lead, holds, leaving) =>
+  uiNotice({
+    tone: "bad",
+    text: [
+      h("div", null, lead),
+      holds.length > 0 && h("div", { class: "mono small" }, holds.map((v) => [v.name, v.fstype, v.label, bytes(v.size)].filter(Boolean).join(" · ")).join("; ")),
+      leaving.length > 0 && h("div", null, t("mounting.formatLeaves", { paths: leaving.join(", ") })),
+    ],
+  });
 
 /** Erases a disk and leaves it empty: quickly, or with every block written over — for a disk that goes to somebody else */
 function wipeDialog(disk) {
@@ -343,12 +342,12 @@ function wipeDialog(disk) {
   const thorough = h("input", { type: "checkbox" });
   const typed = h("input", { type: "text", autocomplete: "off", spellcheck: false, placeholder: disk.name });
   const password = h("input", { type: "password", autocomplete: "current-password" });
-  const cmd = h("span");
+  const cmd = h("div");
   const slot = h("div");
   let dialog;
   const go = button(t("mounting.wipeGo"), { class: "danger", disabled: true });
   const check = () => {
-    cmd.textContent = thorough.checked ? `dd if=/dev/zero of=${disk.path} bs=4M` : `wipefs -a ${disk.path}`;
+    put(cmd, uiCommand(thorough.checked ? `dd if=/dev/zero of=${disk.path} bs=4M` : `wipefs -a ${disk.path}`));
     go.disabled = typed.value.trim() !== disk.name || !password.value;
   };
   for (const input of [thorough, typed, password]) input.addEventListener("input", check);
@@ -368,18 +367,12 @@ function wipeDialog(disk) {
     "wide",
     h("h2", null, t("mounting.wipeTitle", { disk: diskTitle(disk) })),
     h("p", { class: "muted small" }, diskMeta(disk)),
-    h(
-      "p",
-      { class: "banner danger" },
-      t(holds.length ? "mounting.formatErases" : "mounting.formatEmpty"),
-      holds.length > 0 && h("span", { class: "block mono small" }, holds.map((v) => [v.name, v.fstype, v.label, bytes(v.size)].filter(Boolean).join(" · ")).join("; ")),
-      leaving.length > 0 && h("span", { class: "block" }, t("mounting.formatLeaves", { paths: leaving.join(", ") })),
-    ),
+    erasesNotice(t(holds.length ? "mounting.formatErases" : "mounting.formatEmpty"), holds, leaving),
     h("p", { class: "muted" }, t("mounting.wipeLead")),
-    h("label", { class: "check" }, thorough, h("span", null, h("strong", null, t("mounting.wipeThorough")), h("span", { class: "muted small block" }, t(disk.rotational ? "mounting.wipeThoroughHint" : "mounting.wipeThoroughFlash")))),
+    uiCheck(h("strong", null, t("mounting.wipeThorough")), thorough, t(disk.rotational ? "mounting.wipeThoroughHint" : "mounting.wipeThoroughFlash")),
     field(t("mounting.typeName", { name: disk.name }), typed),
     field(t("account.password"), password, t("mounting.passwordHint")),
-    h("p", { class: "cmd" }, icon("terminal"), cmd),
+    cmd,
     slot,
     h("footer", null, closeButton(() => dialog, t("common.cancel")), go),
   );
@@ -401,7 +394,7 @@ async function resizeDialog(disk, volume) {
     return put(body, h("p", { class: "error" }, errorText(err)));
   }
   if (!info) return put(body, h("p", { class: "error" }, t("error.disk.unknown")));
-  if (info.why || (!info.grow && !info.shrink)) return put(body, h("p", { class: "banner" }, info.why ? t("error." + info.why) : t("resize.cannot", { fs: FS_NAMES[info.fs] ?? volume.fstype })), h("footer", null, closeButton(() => dialog, t("common.close"))));
+  if (info.why || (!info.grow && !info.shrink)) return put(body, uiNotice({ tone: "warn", text: info.why ? t("error." + info.why) : t("resize.cannot", { fs: FS_NAMES[info.fs] ?? volume.fstype }) }), h("footer", null, closeButton(() => dialog, t("common.close"))));
   // the same gigabytes as every size on the page (bytes() counts by 1024)
   const GB = 1024 ** 3;
   const low = info.shrink ? Math.max(64 * 1024 * 1024, info.min ?? 64 * 1024 * 1024) : info.size;
@@ -409,9 +402,9 @@ async function resizeDialog(disk, volume) {
   const start = info.grow ? high : info.size;
   const shown = (start / GB).toFixed(start % GB ? 2 : 1);
   const size = h("input", { type: "text", inputMode: "decimal", class: "short", value: shown, "aria-label": t("mounting.size") });
-  const hint = h("span", { class: "hint" });
+  const hint = h("span");
   const password = h("input", { type: "password", autocomplete: "current-password" });
-  const cmd = h("span");
+  const cmd = h("div");
   const slot = h("div");
   const go = button(t("resize.go"), { class: "primary", disabled: true });
   // the number as first shown stands for the exact size it was rounded from
@@ -424,7 +417,7 @@ async function resizeDialog(disk, volume) {
     hint.textContent = t("resize.range", { min: bytes(low), max: bytes(high) }) + (Number.isFinite(n) && fits ? " " + t(grow ? "resize.grows" : "resize.shrinks", { by: bytes(Math.abs(n - info.size)) }) : "");
     const part = `sfdisk -N ${info.number} ${disk.path}`;
     const own = { ext4: "resize2fs", btrfs: "btrfs filesystem resize", xfs: "xfs_growfs", ntfs: "ntfsresize" }[fs];
-    cmd.textContent = (grow ? [part, own] : [own, part]).join("; ");
+    put(cmd, uiCommand((grow ? [part, own] : [own, part]).join("; ")));
     go.disabled = !fits || !password.value;
   };
   for (const input of [size, password]) input.addEventListener("input", check);
@@ -446,11 +439,11 @@ async function resizeDialog(disk, volume) {
     h("p", { class: "muted" }, t(info.grow && info.shrink ? "resize.lead" : info.grow ? "resize.leadGrow" : "resize.leadShrink")),
     info.grow && !info.shrink && fs === "xfs" && h("p", { class: "muted small" }, t("resize.xfs")),
     !info.grow && info.max <= info.size + 1024 * 1024 && h("p", { class: "muted small" }, t("resize.noRoomAfter")),
-    slow && volume.mounts.length > 0 && h("p", { class: "banner" }, t("resize.offline", { path: volume.mounts[0] })),
-    h("p", { class: "banner" }, t("resize.backup")),
-    h("label", { class: "field" }, h("span", { class: "label" }, t("resize.size")), size, hint),
+    slow && volume.mounts.length > 0 && uiNotice({ tone: "warn", text: t("resize.offline", { path: volume.mounts[0] }) }),
+    uiNotice({ tone: "warn", text: t("resize.backup") }),
+    uiField(t("resize.size"), size, hint),
     field(t("account.password"), password, t("resize.passwordHint")),
-    h("p", { class: "cmd" }, icon("terminal"), cmd),
+    cmd,
     slot,
     h("footer", null, closeButton(() => dialog, t("common.cancel")), go),
   );
@@ -480,10 +473,10 @@ function deletePartDialog(disk, volume) {
     "wide",
     h("h2", null, t("partDelete.title", { name: volume.label ? `${volume.name} “${volume.label}”` : volume.name })),
     h("p", { class: "muted small" }, [volume.fstype, bytes(volume.size), diskTitle(disk)].filter(Boolean).join(" · ")),
-    h("p", { class: "banner danger" }, t("partDelete.lead"), volume.mounts.length > 0 && h("span", { class: "block" }, t("mounting.formatLeaves", { paths: volume.mounts.join(", ") }))),
+    uiNotice({ tone: "bad", text: [h("div", null, t("partDelete.lead")), volume.mounts.length > 0 && h("div", null, t("mounting.formatLeaves", { paths: volume.mounts.join(", ") }))] }),
     field(t("mounting.typeName", { name: volume.name }), typed),
     field(t("account.password"), password, t("mounting.passwordHint")),
-    h("p", { class: "cmd" }, icon("terminal"), `wipefs -a ${volume.path}; sfdisk --delete ${disk.path} ${/(\d+)$/.exec(volume.name)?.[1] ?? ""}`),
+    uiCommand(`wipefs -a ${volume.path}; sfdisk --delete ${disk.path} ${/(\d+)$/.exec(volume.name)?.[1] ?? ""}`),
     slot,
     h("footer", null, closeButton(() => dialog, t("common.cancel")), go),
   );
@@ -504,26 +497,26 @@ function checkDialog(disk, volume) {
       slot,
       () => api("POST", "/api/disks/fsck", { device: volume.path, repair }),
       async (started) => {
-        const lines = h("pre", { class: "said" });
+        const lines = uiLog("", { kind: "said" });
         // a look can be ended; a repair goes to its end
-        put(result, h("div", { class: "section-head" }, h("p", { class: "with-icon muted" }, icon("refresh"), t(repair ? "fsck.repairing" : "fsck.running")), !repair && stopButton(started.job)), lines);
+        put(result, uiLine([h("p", { class: "with-icon muted grow" }, icon("refresh"), t(repair ? "fsck.repairing" : "fsck.running")), !repair && stopButton(started.job)]), lines);
         const job = await followJob(started.job, (line) => {
           lines.append(line + "\n");
           lines.scrollTop = lines.scrollHeight;
         });
         go.disabled = false;
         setDisks(await api("GET", "/api/disks").catch(() => state.disks));
-        if (job.stopped) return put(result, h("p", { class: "banner" }, t("fsck.stopped")), job.error && job.error !== "Stopped." && h("p", { class: "error" }, job.error));
-        if (job.status !== "done" || !job.result) return put(result, h("p", { class: "banner danger" }, t("fsck.verdict.failed")), h("pre", { class: "said" }, job.error || lines.textContent));
+        if (job.stopped) return put(result, uiNotice({ tone: "warn", text: t("fsck.stopped") }), job.error && job.error !== "Stopped." && h("p", { class: "error" }, job.error));
+        if (job.status !== "done" || !job.result) return put(result, uiNotice({ tone: "bad", text: t("fsck.verdict.failed") }), uiLog(job.error || lines.textContent, { kind: "said" }));
         const { verdict, output, back } = job.result;
         // btrfs is mended by a scrub while mounted, never offline
         const mend = verdict === "errors" && !repair && volume.fstype !== "btrfs";
         put(
           result,
-          h("p", { class: "banner " + (verdict === "errors" || verdict === "failed" ? "danger" : "ok") }, t("fsck.verdict." + verdict)),
+          uiNotice({ tone: verdict === "errors" || verdict === "failed" ? "bad" : "ok", text: t("fsck.verdict." + verdict) }),
           back && h("p", { class: "error", role: "alert" }, t("fsck.back", { message: back })),
-          output && h("details", { open: verdict !== "clean" }, h("summary", { class: "muted small" }, t("fsck.said")), h("pre", { class: "said" }, output)),
-          mend && h("div", { class: "row-actions" }, button(t("fsck.repair"), { class: "primary", onclick: start(true) })),
+          output && h("details", { open: verdict !== "clean" }, h("summary", { class: "muted small" }, t("fsck.said")), uiLog(output, { kind: "said" })),
+          mend && uiLine([button(t("fsck.repair"), { class: "primary", onclick: start(true) })]),
         );
       },
     )(e).then(() => slot.firstChild && put(result));
@@ -533,7 +526,7 @@ function checkDialog(disk, volume) {
     "wide",
     h("header", null, h("div", { class: "grow" }, h("h2", null, t("fsck.title", { name: title })), h("p", { class: "muted small" }, [volume.name, volume.fstype, bytes(volume.size)].join(" · "))), closeX(() => dialog)),
     h("p", { class: "muted" }, t("fsck.lead")),
-    volume.mounts.length > 0 && h("p", { class: "banner" }, t("fsck.leadMounted", { path: volume.mounts[0] })),
+    volume.mounts.length > 0 && uiNotice({ tone: "warn", text: t("fsck.leadMounted", { path: volume.mounts[0] }) }),
     (volume.fstype === "ntfs" || volume.fstype === "btrfs" || volume.fstype === "xfs") && h("p", { class: "muted small" }, t("fsck." + volume.fstype)),
     result,
     slot,
@@ -545,7 +538,7 @@ function checkDialog(disk, volume) {
 function labelDialog(disk, volume) {
   const fs = fsFamily(volume.fstype);
   const label = h("input", { type: "text", value: volume.label, maxlength: 40, spellcheck: false });
-  const hint = h("span", { class: "hint" });
+  const hint = h("span");
   const slot = h("div");
   let dialog;
   const go = button(t("mounting.rename"), { class: "primary" });
@@ -568,8 +561,8 @@ function labelDialog(disk, volume) {
     "confirm",
     h("h2", null, t("relabel.title", { name: volume.label || volume.name })),
     h("p", { class: "muted" }, t("relabel.lead")),
-    volume.mounts.length > 0 && fs !== "ext4" && fs !== "btrfs" && h("p", { class: "banner" }, t("relabel.leadMounted", { path: volume.mounts[0] })),
-    h("label", { class: "field" }, h("span", { class: "label" }, t("mounting.label")), label, hint),
+    volume.mounts.length > 0 && fs !== "ext4" && fs !== "btrfs" && uiNotice({ tone: "warn", text: t("relabel.leadMounted", { path: volume.mounts[0] }) }),
+    uiField(t("mounting.label"), label, hint),
     slot,
     h("footer", null, closeButton(() => dialog, t("common.cancel")), go),
   );
@@ -615,7 +608,7 @@ function connectDialog(disk, volume) {
   const removable = disk.removable || disk.transport === "usb";
   const name = h("input", { type: "text", value: mountName(volume.label || disk.model || "disk"), maxlength: 32, spellcheck: false });
   const keep = h("input", { type: "checkbox", checked: !removable });
-  const where = h("span", { class: "hint mono" });
+  const where = h("span", { class: "mono" });
   const slot = h("div");
   let dialog;
   const go = button(t("mounting.connect"), { class: "primary" });
@@ -638,9 +631,9 @@ function connectDialog(disk, volume) {
     h("h2", null, t("mounting.connectTitle", { disk: volume.label || diskTitle(disk) })),
     h("p", { class: "muted small" }, [volume.name, volume.fstype, bytes(volume.size)].join(" · ")),
     h("p", { class: "muted" }, t("mounting.connectLead")),
-    /^(vfat|exfat|ntfs)$/.test(volume.fstype) && h("p", { class: "banner" }, t("mounting.noOwners", { fs: volume.fstype })),
-    h("label", { class: "field" }, h("span", { class: "label" }, t("mounting.name")), name, where, h("span", { class: "hint" }, t("mounting.nameHint"))),
-    h("label", { class: "check" }, keep, h("span", null, h("strong", null, t("mounting.keep")), h("span", { class: "muted small block" }, t("mounting.keepHint")))),
+    /^(vfat|exfat|ntfs)$/.test(volume.fstype) && uiNotice({ tone: "warn", text: t("mounting.noOwners", { fs: volume.fstype }) }),
+    uiField(t("mounting.name"), name, h("span", { class: "stack-s" }, where, h("span", null, t("mounting.nameHint")))),
+    uiCheck(h("strong", null, t("mounting.keep")), keep, t("mounting.keepHint")),
     slot,
     h("footer", null, closeButton(() => dialog, t("common.cancel")), go),
   );
@@ -651,7 +644,7 @@ function mergeDialog() {
   const folders = state.disks.mounting.mergeable;
   const boxes = folders.map((path) => h("input", { type: "checkbox", checked: true, value: path }));
   const name = h("input", { type: "text", value: "storage", maxlength: 32, spellcheck: false });
-  const where = h("span", { class: "hint mono" });
+  const where = h("span", { class: "mono" });
   const slot = h("div");
   let dialog;
   const go = button(t("mounting.mergeGo"), { class: "primary" });
@@ -673,9 +666,9 @@ function mergeDialog() {
     "wide",
     h("h2", null, t("mounting.mergeTitle")),
     h("p", { class: "muted" }, t("mounting.mergeLead")),
-    boxes.map((box) => h("label", { class: "check" }, box, h("span", { class: "mono" }, box.value))),
-    h("label", { class: "field" }, h("span", { class: "label" }, t("mounting.name")), name, where, h("span", { class: "hint" }, t("mounting.nameHint"))),
-    h("p", { class: "banner" }, t("mounting.mergeWarn")),
+    boxes.map((box) => uiCheck(h("span", { class: "mono" }, box.value), box)),
+    uiField(t("mounting.name"), name, h("span", { class: "stack-s" }, where, h("span", null, t("mounting.nameHint")))),
+    uiNotice({ tone: "warn", text: t("mounting.mergeWarn") }),
     slot,
     h("footer", null, closeButton(() => dialog, t("common.cancel")), go),
   );
@@ -693,8 +686,8 @@ function copyInDialog(disk) {
   const error = h("p", { class: "error", role: "alert" });
   const which = h("select", { onchange: () => open() }, volumes.map((v, i) => h("option", { value: String(i) }, [v.label || v.name, v.fstype, bytes(v.size)].join(" · "))));
   const all = h("input", { type: "checkbox", checked: true, onchange: () => paint() });
-  const crumbs = h("div", { class: "crumbs wrap small" });
-  const list = h("div", { class: "snapshot-files" });
+  const crumbs = h("div");
+  const list = h("div");
   const sub = h("input", { type: "text", maxlength: 80, spellcheck: false, value: `${(volumes[0].label || disk.model || "USB").trim()} ${new Date().toISOString().slice(0, 10)}`, oninput: () => where() });
   const target = h("span", { class: "mono" });
   const go = button(t("copyin.go"), { class: "primary" }, "download");
@@ -713,16 +706,19 @@ function copyInDialog(disk) {
   };
   const paint = () => {
     const steps = at === mount ? [] : at.slice(mount.length).split("/").filter(Boolean);
-    crumbs.replaceChildren(h("button", { type: "button", class: "text-btn", onclick: () => show(mount) }, volumes[Number(which.value)].label || diskTitle(disk)), ...steps.flatMap((step, i) => [icon("chevron"), h("button", { type: "button", class: "text-btn", onclick: () => show(full(steps.slice(0, i + 1).join("/"), mount)) }, step)]));
-    list.replaceChildren(
-      ...(entries.length
-        ? entries.map((entry) => {
-            const path = full(entry.name);
-            const tick = h("input", { type: "checkbox", checked: all.checked || chosen.has(path), disabled: all.checked, "aria-label": entry.name, onchange: () => ((tick.checked ? chosen.add(path) : chosen.delete(path)), where()) });
-            const dir = entry.type === "dir";
-            return h("div", { class: "snapshot-file" }, tick, icon(dir ? "folder" : "file"), dir ? h("button", { type: "button", class: "text-btn grow name", onclick: () => show(path) }, entry.name) : h("span", { class: "grow name" }, entry.name), h("span", { class: "muted small" }, dir ? "" : bytes(entry.size)), h("span", { class: "muted small when" }, dateTime(entry.modified)));
-          })
-        : [h("p", { class: "muted" }, t("backup.files.empty"))]),
+    put(crumbs, uiCrumbs([{ label: volumes[Number(which.value)].label || diskTitle(disk), onclick: () => show(mount) }, ...steps.map((step, i) => ({ label: step, onclick: () => show(full(steps.slice(0, i + 1).join("/"), mount)) }))]));
+    put(
+      list,
+      entries.length
+        ? uiFileList(
+            entries.map((entry) => {
+              const path = full(entry.name);
+              const tick = h("input", { type: "checkbox", checked: all.checked || chosen.has(path), disabled: all.checked, "aria-label": entry.name, onchange: () => ((tick.checked ? chosen.add(path) : chosen.delete(path)), where()) });
+              const dir = entry.type === "dir";
+              return { name: entry.name, dir, size: dir ? null : entry.size, at: entry.modified, tick, open: () => show(path) };
+            }),
+          )
+        : uiEmpty({ text: t("backup.files.empty") }),
     );
     where();
   };
@@ -742,7 +738,7 @@ function copyInDialog(disk) {
     const volume = volumes[Number(which.value)];
     chosen.clear();
     mount = "";
-    list.replaceChildren(h("p", { class: "muted" }, t("copyin.opening")));
+    put(list, uiEmpty({ size: "loading", text: t("copyin.opening") }));
     where();
     try {
       // not connected yet: it is, until it is unplugged or ejected
@@ -779,11 +775,11 @@ function copyInDialog(disk) {
     "wide",
     h("header", null, h("div", { class: "grow" }, h("h2", null, t("copyin.title", { disk: diskTitle(disk) })), h("p", { class: "muted small" }, t("copyin.lead"))), closeX(() => dialog)),
     volumes.length > 1 && field(t("copyin.which"), which),
-    h("label", { class: "check" }, all, h("span", null, h("strong", null, t("copyin.all")), h("span", { class: "muted small block" }, t("copyin.allHint")))),
+    uiCheck(h("strong", null, t("copyin.all")), all, t("copyin.allHint")),
     crumbs,
     list,
-    h("h3", null, t("copyin.where")),
-    h("div", { class: "kv" }, target, button(t("copyin.choose"), { class: "small", onclick: () => folderPicker({ title: t("copyin.where"), start: into, confirmLabel: t("copyin.here"), action: async (path) => ((into = path), where()), allowed: (path) => !mount || !(path === mount || path.startsWith(mount + "/")) }) }, "folder")),
+    uiSubhead({ title: t("copyin.where") }),
+    uiLine([target, button(t("copyin.choose"), { class: "small", onclick: () => folderPicker({ title: t("copyin.where"), start: into, confirmLabel: t("copyin.here"), action: async (path) => ((into = path), where()), allowed: (path) => !mount || !(path === mount || path.startsWith(mount + "/")) }) }, "folder")]),
     field(t("copyin.sub"), sub, t("copyin.subHint")),
     error,
     h("footer", null, closeButton(() => dialog, t("common.cancel")), go),
@@ -810,7 +806,7 @@ function disconnectDialog(mount) {
   dialog = openDialog("confirm", h("h2", null, t(removable ? "mounting.ejectTitle" : "mounting.disconnectTitle", { path: mount.path })), h("p", { class: "muted" }, t(removable ? "mounting.ejectLead" : "mounting.disconnectLead")), what, slot, h("footer", null, closeButton(() => dialog, t("common.cancel")), go));
   // what stands on the folder is said before it is taken away; what keeps files open there is stopped first
   const ICON = { app: "box", tvPlaying: "tv", musicPlaying: "music", tvFolder: "tv", pin: "folder", favorite: "star", share: "share" };
-  const line = (use) => h("li", { class: "disk-uses-item" }, icon(ICON[use.kind]), h("span", { class: "grow" }, h("span", { class: "strong" }, t("disks.use." + use.kind, { name: use.name })), h("span", { class: "muted small mono wrap" }, use.path)));
+  const line = (use) => uiRow({ lead: { icon: ICON[use.kind] }, name: t("disks.use." + use.kind, { name: use.name }), sub: h("span", { class: "mono" }, use.path), title: use.path });
   void api("GET", `/api/disks/uses?path=${encodeURIComponent(mount.path)}`).then(
     ({ holds, uses }) => {
       if (!dialog.isConnected) return;
@@ -819,9 +815,9 @@ function disconnectDialog(mount) {
       const left = uses.filter((use) => !stopped.includes(use));
       put(
         what,
-        stopped.length > 0 && h("div", { class: "stack" }, h("strong", null, t("disks.use.stopped")), h("ul", { class: "disk-uses" }, stopped.map(line))),
-        left.length > 0 && h("div", { class: "stack" }, h("strong", null, t("disks.use.left")), h("ul", { class: "disk-uses" }, left.map(line))),
-        uses.some((use) => use.kind === "app") && h("p", { class: "banner" }, t("disks.use.appsNote")),
+        stopped.length > 0 && h("div", { class: "stack-s" }, uiSubhead({ title: t("disks.use.stopped") }), h("div", { class: "ui-rows" }, stopped.map(line))),
+        left.length > 0 && h("div", { class: "stack-s" }, uiSubhead({ title: t("disks.use.left") }), h("div", { class: "ui-rows" }, left.map(line))),
+        uses.some((use) => use.kind === "app") && uiNotice({ tone: "warn", text: t("disks.use.appsNote") }),
         !uses.length && h("p", { class: "muted small" }, t("disks.use.none")),
       );
       if (stopped.length) go.lastChild.textContent = t(removable ? "disks.use.stopEject" : "disks.use.stopDisconnect");
@@ -855,15 +851,15 @@ function diskWorkStrip(work) {
     }
   };
   jobListeners.add(diskWorkListener);
-  return h(
-    "section",
-    { class: "card pad" },
-    h(
-      "div",
-      { class: "section-head" },
-      h("div", { class: "with-icon grow" }, icon("refresh"), h("div", { class: "grow" }, h("div", { class: "strong" }, t("mounting.working." + work.kind), title && h("span", { class: "muted" }, " · " + title)), line)),
-      h("div", { class: "row-actions" }, button(t("mounting.working.show"), { class: "small", onclick: () => jobDialog(work.id, work.kind, title, () => void api("GET", "/api/disks").then(setDisks, () => {})) }), stop && (stop.classList.add("small"), stop)),
-    ),
+  return uiCard(
+    { flush: true },
+    uiRow({
+      lead: { icon: "refresh", tone: "info" },
+      name: [t("mounting.working." + work.kind), title && h("span", { class: "muted" }, " · " + title)],
+      sub: line,
+      mode: "task",
+      action: uiLine([button(t("mounting.working.show"), { class: "small", onclick: () => jobDialog(work.id, work.kind, title, () => void api("GET", "/api/disks").then(setDisks, () => {})) }), stop && (stop.classList.add("small"), stop)]),
+    }),
   );
 }
 
@@ -958,7 +954,7 @@ function storageSection(section = "storage") {
         h("span", { class: hot ? "danger-text" : "" }, disk.smart?.temperature != null ? disk.smart.temperature + " °C" : "—"),
         total ? usageBar(used, total) : h("span", { class: "muted" }, "—"),
         mounts.length ? uiCell({ name: h("span", { class: "mono small" }, mounts[0]), sub: [mounts.length > 1 && t("disks.moreMounts", { n: mounts.length - 1 }), ...new Set(disk.volumes.filter((v) => v.mounts.length).map((v) => FS_NAMES[v.fstype] ?? v.fstype))].filter(Boolean).join(" · ") }) : h("span", { class: "muted small" }, [t("disks.notMounted"), ...new Set(disk.volumes.filter((v) => v.fstype && !v.swap).map((v) => FS_NAMES[v.fstype] ?? v.fstype))].join(" · ")),
-        h("div", { class: "row-actions end", onclick: (e) => e.stopPropagation() }, main && button(main.label, { class: "small" + (main.primary ? " primary" : ""), onclick: main.run }, main.icon), uiMore(entries, { size: "s" })),
+        h("div", { onclick: (e) => e.stopPropagation() }, uiLine([main && button(main.label, { class: "small" + (main.primary ? " primary" : ""), onclick: main.run }, main.icon), uiMore(entries, { size: "s" })], { end: true })),
       ],
       sub: [percent != null && `${percent}%`, mounts[0]].filter(Boolean).join(" · ") || null,
     };
@@ -1011,7 +1007,7 @@ function storageSection(section = "storage") {
     const format = { label: t("mounting.format") + "…", icon: "disk", run: () => formatDialog(disk) };
     const main = copy || connect || format;
     return uiCard(
-      { flush: true, cls: "area-attention" },
+      { flush: true },
       uiRow({
         lead: { icon: "disk", tone: "warn" },
         name: t("mounting.found", { disk: diskTitle(disk), size: bytes(disk.size) }),
@@ -1032,10 +1028,10 @@ function storageSection(section = "storage") {
     ].filter(Boolean);
   }
   const tab = settingsTab("storage");
-  if (tab === "fills") return [data.fills ? fillsCard(data.fills, busy) : h("section", { class: "card pad" }, h("p", { class: "muted" }, t("protection.noFills")))];
+  if (tab === "fills") return [data.fills ? fillsCard(data.fills, busy) : uiCard({}, uiEmpty({ text: t("protection.noFills") }))];
   if (tab === "fs") {
     const rows = [...data.mounts.map(fsRow), ...absent.map(absentRow)];
-    return [uiCard({ title: t("disks.fs.title"), count: rows.length, lead: t("disks.fs.lead"), flush: true }, rows.length ? uiTable([{ label: t("disks.fs.col.path") }, { label: t("disks.fs.col.source") }, { label: t("disks.col.usage") }, { label: "" }], rows, { cls: "fs-table" }) : uiEmpty({ text: t("disks.fs.none") }))];
+    return [uiCard({ title: t("disks.fs.title"), count: rows.length, lead: t("disks.fs.lead"), flush: true }, rows.length ? uiTable([{ label: t("disks.fs.col.path") }, { label: t("disks.fs.col.source") }, { label: t("disks.col.usage") }, { label: "" }], rows) : uiEmpty({ text: t("disks.fs.none") }))];
   }
   return [
     data.working && diskWorkStrip(data.working),
@@ -1054,7 +1050,7 @@ function storageSection(section = "storage") {
         ],
       },
       h("div", { class: "ui-inset" }, error),
-      data.disks.length > 0 ? uiTable([{ label: t("disks.col.disk") }, { label: t("disks.col.health") }, { label: t("disks.col.temp"), num: true }, { label: t("disks.col.usage") }, { label: t("disks.col.mounted") }, { label: "" }], data.disks.map(row), { cls: "disks-table" }) : uiEmpty({ size: "big", icon: "disk", title: t("disks.noneTitle"), text: t("disks.none") }),
+      data.disks.length > 0 ? uiTable([{ label: t("disks.col.disk") }, { label: t("disks.col.health") }, { label: t("disks.col.temp"), num: true }, { label: t("disks.col.usage") }, { label: t("disks.col.mounted") }, { label: "" }], data.disks.map(row)) : uiEmpty({ size: "big", icon: "disk", title: t("disks.noneTitle"), text: t("disks.none") }),
     ),
     data.mounting?.possible && uiCard({}, uiSetting({ name: t("mounting.automount"), explain: t("mounting.automountHint"), control: automount })),
   ].filter(Boolean);
@@ -1108,7 +1104,7 @@ function raidCard(data) {
         h("div", { title: [work, !busy && pool.state === "ok" && lastLine(pool).textContent, pool.dataErrors > 0 && t("raid.dataErrors", { n: pool.dataErrors })].filter(Boolean).join("\n") || null }, chip(pool), work && h("div", { class: "muted small" }, work)),
         h("span", { class: "small" }, pool.members.map((m, i) => [i > 0 && ", ", h("span", { class: bad(m) ? "danger-text" : "" }, memberWords(m))])),
         pool.used != null && pool.size ? usageBar(pool.used, pool.size) : h("span", { class: "muted" }, pool.size ? bytes(pool.size) : "—"),
-        h("div", { class: "row-actions end" }, main && button(main.label, { class: "small" + (main.primary ? " primary" : ""), onclick: main.run }, main.icon), rest.length > 0 && uiMore(rest, { size: "s" })),
+        uiLine([main && button(main.label, { class: "small" + (main.primary ? " primary" : ""), onclick: main.run }, main.icon), rest.length > 0 && uiMore(rest, { size: "s" })], { end: true }),
       ],
       sub: kind,
     };
@@ -1154,9 +1150,9 @@ function placesCard(data) {
       menu: (at) => menuAt(at, menuHeader(p.name, placeAddress(p), "globe"), entries),
       cells: [
         uiCell({ lead: { icon: "globe" }, name: h("a", { href: filesHash(p.folder) }, p.name), sub: h("span", { class: "mono" }, placeAddress(p)) }),
-        h("span", { class: "with-state" }, state, p.readOnly && uiTag(t("netplace.readOnly"))),
+        uiLine([state, p.readOnly && uiTag(t("netplace.readOnly"))]),
         p.mounted && p.total ? usageBar(p.total - p.free, p.total) : h("span", { class: "muted mono small" }, p.folder),
-        h("div", { class: "row-actions end" }, on ? button(t("netplace.change"), { class: "small", onclick: () => placeDialog(p) }) : button(t("netplace.retry"), { class: "small", onclick: retry(p) }, "refresh"), uiMore(entries, { size: "s" })),
+        uiLine([on ? button(t("netplace.change"), { class: "small", onclick: () => placeDialog(p) }) : button(t("netplace.retry"), { class: "small", onclick: retry(p) }, "refresh"), uiMore(entries, { size: "s" })], { end: true }),
       ],
       sub: [placeAddress(p), p.mounted && p.total ? `${Math.round(((p.total - p.free) / p.total) * 100)}%` : null].filter(Boolean).join(" · "),
     };
@@ -1227,7 +1223,7 @@ function placeDialog(place = null, seed = {}, after = null) {
   const value = (key, fallback = "") => place?.[key] ?? seed[key] ?? fallback;
   const name = h("input", { value: value("name"), maxLength: 40, required: true });
   const host = h("input", { value: value("host"), spellcheck: false, class: "mono", placeholder: "nas.local" });
-  const port = h("input", { type: "number", min: 0, max: 65535, value: value("port", 0) || "", class: "mono port" });
+  const port = h("input", { type: "number", min: 0, max: 65535, value: value("port", 0) || "", class: "mono short" });
   const url = h("input", { type: "url", value: value("url"), spellcheck: false, class: "mono", placeholder: "https://cloud.example.org/remote.php/dav/files/me" });
   const share = h("input", { value: value("path"), spellcheck: false, class: "mono" });
   const user = h("input", { value: value("user"), spellcheck: false, autocomplete: "off", class: "mono" });
@@ -1235,11 +1231,11 @@ function placeDialog(place = null, seed = {}, after = null) {
   const domain = h("input", { value: value("domain"), spellcheck: false, class: "mono", placeholder: "WORKGROUP" });
   const tls = h("input", { type: "checkbox", checked: !!value("tls", false) });
   const readOnly = h("input", { type: "checkbox", checked: !!value("readOnly", false) });
-  const found = h("div", { class: "row-actions wrap" });
+  const found = uiLine([]);
   const error = h("p", { class: "error", role: "alert" });
-  const trust = h("div", { class: "banner stack", hidden: true });
+  const trust = h("div", { hidden: true });
   const needs = h("div");
-  const modes = h("div", { class: "modes" });
+  const modes = h("div");
   const fields = h("div", { class: "stack" });
   const submit = h("button", { class: "btn primary" }, t(place ? "settings.save" : "netplace.connectGo"));
   let trusted = "";
@@ -1262,13 +1258,13 @@ function placeDialog(place = null, seed = {}, after = null) {
     put(
       needs,
       tool.missing.length > 0 &&
-        h(
-          "div",
-          { class: "banner stack" },
-          h("strong", null, t(`netplace.needs.${forKind}`, { package: tool.missing.join(", ") })),
-          h("p", { class: "muted small" }, t(`netplace.needs.${forKind}Why`)),
-          tool.install ? h("p", { class: "cmd" }, icon("terminal"), tool.install) : h("p", { class: "muted small" }, t("mounting.needs.byHand", { package: tool.missing.join(" ") })),
-          tool.install && button(t("mounting.needs.install", { package: tool.missing.join(", ") }), { class: "small", onclick: async (e) => {
+        uiNotice({
+          tone: "info",
+          icon: "package",
+          title: t(`netplace.needs.${forKind}`, { package: tool.missing.join(", ") }),
+          text: t(`netplace.needs.${forKind}Why`),
+          command: tool.install ? uiCommand(tool.install) : h("p", { class: "muted small" }, t("mounting.needs.byHand", { package: tool.missing.join(" ") })),
+          action: tool.install && button(t("mounting.needs.install", { package: tool.missing.join(", ") }), { class: "small", onclick: async (e) => {
             const b = e.currentTarget;
             b.disabled = true;
             error.textContent = "";
@@ -1280,10 +1276,12 @@ function placeDialog(place = null, seed = {}, after = null) {
               b.disabled = false;
             }
           } }, "download"),
-        ),
+        }),
     );
   const paint = () => {
-    put(modes, PLACE_KINDS.map((k) => h("button", { type: "button", class: "mode" + (k === kind ? " active" : ""), disabled: !!place && k !== kind, onclick: () => ((kind = k), (trusted = ""), (trust.hidden = true), put(found), paint()) }, t(`netplace.kind.${k}`))));
+    // a place that is there keeps its kind: a select of more than four kinds cannot grey the others out
+    const pick = (k) => (place && k !== kind ? paint() : ((kind = k), (trusted = ""), (trust.hidden = true), put(found), paint()));
+    put(modes, uiSegment(PLACE_KINDS.map((k) => ({ value: k, label: t(`netplace.kind.${k}`), off: !!place && k !== kind })), kind, pick, { wide: true }));
     list.lastChild.textContent = t(kind === "nfs" ? "netplace.showExports" : "netplace.showShares");
     port.placeholder = { smb: "445", nfs: "2049", sftp: "22", ftp: "21", webdav: "" }[kind];
     share.placeholder = kind === "smb" ? "photos" : kind === "nfs" ? "/srv/media" : "/";
@@ -1293,15 +1291,15 @@ function placeDialog(place = null, seed = {}, after = null) {
       fields,
       h("p", { class: "muted small" }, t(`netplace.kind.${kind}Lead`)),
       field(t("netplace.name"), name, t("netplace.nameHint")),
-      kind === "webdav" ? field(t("netplace.url"), url) : field(t("netplace.host"), h("span", { class: "pair" }, host, port), t("netplace.hostHint")),
-      kind === "smb" || kind === "nfs" ? field(t(kind === "smb" ? "netplace.share" : "netplace.export"), h("span", { class: "pair" }, share, list), t(kind === "smb" ? "netplace.shareHint" : "netplace.exportHint")) : field(t("netplace.folder"), share, t("netplace.folderHint")),
+      kind === "webdav" ? field(t("netplace.url"), url) : field(t("netplace.host"), uiInputs([host, port]), t("netplace.hostHint")),
+      kind === "smb" || kind === "nfs" ? field(t(kind === "smb" ? "netplace.share" : "netplace.export"), uiInputs([share, list]), t(kind === "smb" ? "netplace.shareHint" : "netplace.exportHint")) : field(t("netplace.folder"), share, t("netplace.folderHint")),
       found,
       kind !== "nfs" && field(t("netplace.user"), user, t(kind === "smb" ? "netplace.userHintSmb" : "netplace.userHint")),
       kind !== "nfs" && field(t("netplace.password"), password),
       kind === "smb" && field(t("netplace.domain"), domain, t("netplace.domainHint")),
       kind === "nfs" && h("p", { class: "muted small" }, t("netplace.nfsOwners", { puid: `${state.settings?.puid ?? 1000}:${state.settings?.pgid ?? 1000}` })),
-      kind === "ftp" && h("label", { class: "check" }, tls, h("span", null, h("strong", null, t("netplace.tls")), h("span", { class: "muted small block" }, t("netplace.tlsHint")))),
-      h("label", { class: "check" }, readOnly, h("span", null, h("strong", null, t("netplace.readOnly")), h("span", { class: "muted small block" }, t("netplace.readOnlyHint")))),
+      kind === "ftp" && uiCheck(h("strong", null, t("netplace.tls")), tls, t("netplace.tlsHint")),
+      uiCheck(h("strong", null, t("netplace.readOnly")), readOnly, t("netplace.readOnlyHint")),
     );
     paintNeeds(tools());
   };
@@ -1316,7 +1314,7 @@ function placeDialog(place = null, seed = {}, after = null) {
       if (res.unknownHost) {
         trusted = res.unknownHost;
         trust.hidden = false;
-        put(trust, h("strong", null, t("netplace.hostKey", { host: host.value })), h("p", { class: "mono small" }, res.unknownHost), h("p", { class: "muted small" }, t("netplace.hostKeyHint")));
+        put(trust, uiNotice({ tone: "warn", icon: "lock", title: t("netplace.hostKey", { host: host.value }), text: t("netplace.hostKeyHint"), command: uiCommand(res.unknownHost, { block: true }) }));
         submit.textContent = t("netplace.trustGo");
         submit.disabled = false;
         return;
@@ -1380,7 +1378,7 @@ async function findPlacesDialog() {
   put(
     body,
     found.length
-      ? found.map((f) => h("div", { class: "snapshot" }, h("span", { class: "badge-icon plain" }, icon("globe")), h("div", { class: "grow" }, h("strong", null, f.name), h("div", { class: "muted small mono" }, `${t("netplace.kind." + f.kind)} · ${f.host}${f.address ? " · " + f.address : ""}${f.port ? ":" + f.port : ""}`)), button(t("netplace.connect"), { class: "small primary", onclick: () => (dialog.close(), placeDialog(null, { kind: f.kind, host: f.address || f.host, name: f.name, port: [445, 2049, 22, 21, 80, 443].includes(f.port) ? 0 : f.port, url: f.kind === "webdav" ? `${f.port === 443 ? "https" : "http"}://${f.address || f.host}${[80, 443].includes(f.port) ? "" : ":" + f.port}/` : "" })) }, "plus")))
+      ? h("div", { class: "ui-rows" }, found.map((f) => uiRow({ lead: { icon: "globe" }, name: f.name, sub: h("span", { class: "mono" }, `${t("netplace.kind." + f.kind)} · ${f.host}${f.address ? " · " + f.address : ""}${f.port ? ":" + f.port : ""}`), action: button(t("netplace.connect"), { class: "small primary", onclick: () => (dialog.close(), placeDialog(null, { kind: f.kind, host: f.address || f.host, name: f.name, port: [445, 2049, 22, 21, 80, 443].includes(f.port) ? 0 : f.port, url: f.kind === "webdav" ? `${f.port === 443 ? "https" : "http"}://${f.address || f.host}${[80, 443].includes(f.port) ? "" : ":" + f.port}/` : "" })) }, "plus") })))
       : h("p", { class: "muted" }, t("netplace.foundNone")),
     h("p", { class: "muted small" }, t("netplace.findHint")),
   );
@@ -1442,7 +1440,7 @@ function arrayCard(data, array) {
   ].filter(Boolean);
   const running = array.running && uiRow({ lead: { icon: "refresh", tone: "info" }, name: t("array.running." + array.running.what) + (array.running.percent != null ? ` · ${array.running.percent}%` : ""), sub: t("array.runningHint"), meter: array.running.percent != null ? uiMeter(array.running.percent, { kind: "progress" }) : null, action: button(t("array.stop"), { class: "small", onclick: () => arrayCall("POST", "/stop", {}) }, "stop"), mode: "task" });
   const health = array.running ? uiState("info", t("array.state.running")) : banners.some((b) => b.classList.contains("bad")) ? uiState("bad", t("array.state.trouble")) : uiState("ok", t("array.state.ok"));
-  const logBox = array.log.length > 0 && h("pre", { class: "console small-console", hidden: !arrayUi.log }, array.log.join("\n"));
+  const logBox = array.log.length > 0 && uiLog(array.log.join("\n"), { size: "s", hidden: !arrayUi.log });
   return uiCard(
     {
       title: t("array.title"),
@@ -1455,9 +1453,9 @@ function arrayCard(data, array) {
     ...uiFacts([
       [t("array.parity"), h("span", null, h("span", { class: "mono" }, array.settings.parity), array.paritySize > 0 && h("span", { class: "muted small" }, ` · ${bytes(array.paritySize)}`))],
       array.settings.parity2 && [t("array.parity2"), h("span", null, h("span", { class: "mono" }, array.settings.parity2), array.parity2Size > 0 ? h("span", { class: "muted small" }, ` · ${bytes(array.parity2Size)}`) : h("span", { class: "muted small" }, ` · ${t("array.parity2Pending")}`))],
-      ...array.settings.data.map((disk, i) => [i === 0 ? t("array.data") : "", h("span", { class: "with-actions" }, h("span", { class: "mono" }, disk.path), button(t("array.recover"), { class: "small quiet", disabled: busy, onclick: () => recoverDialog(disk) }))]),
+      ...array.settings.data.map((disk, i) => [i === 0 ? t("array.data") : "", uiLine([h("span", { class: "mono" }, disk.path), button(t("array.recover"), { class: "small quiet", disabled: busy, onclick: () => recoverDialog(disk) })], { end: true })]),
       [t("array.lastSync"), array.lastSync?.ok ? ago(array.lastSync.at) : array.lastSync ? t("array.lastFailed", { when: ago(array.lastSync.at) }) : t("array.never")],
-      [t("array.waiting"), h("span", { class: "with-actions" }, !array.lastSync?.ok && !d ? "—" : waiting || d?.removed ? [waiting > 0 && t("array.waitingNew", { n: waiting }), d.removed > 0 && t("array.waitingGone", { n: d.removed })].filter(Boolean).join(" · ") : t("array.waitingNone"), array.lastSync?.ok && button(t("array.goneOne"), { class: "small quiet", disabled: busy, onclick: () => goneDialog() }))],
+      [t("array.waiting"), uiLine([!array.lastSync?.ok && !d ? "—" : waiting || d?.removed ? [waiting > 0 && t("array.waitingNew", { n: waiting }), d.removed > 0 && t("array.waitingGone", { n: d.removed })].filter(Boolean).join(" · ") : t("array.waitingNone"), array.lastSync?.ok && button(t("array.goneOne"), { class: "small quiet", disabled: busy, onclick: () => goneDialog() })], { end: true })],
       [t("array.lastScrub"), array.lastScrub ? `${ago(array.lastScrub.at)} · ${t(array.lastScrub.ok ? "array.scrubOk" : "array.scrubBad")}` : t("array.never")],
       [t("array.schedule"), t(array.settings.scrub ? "array.scheduleScrub" : "array.scheduleSync", { time: array.settings.time })],
       array.appDataRule !== null && ["AppData", t(array.settings.appData ? "array.appDataIn" : "array.appDataOut")],
@@ -1547,7 +1545,7 @@ function poolDialog() {
   let tools = null;
   let dialog;
   const body = h("div", { class: "stack" });
-  const steps = h("ol", { class: "pool-steps" });
+  const steps = h("div");
   const merge = () => plan.goal !== "protect";
   const protect = () => plan.goal !== "merge";
   // a branch of a merged folder can hold data of the array, but not go into another merged folder
@@ -1580,7 +1578,7 @@ function poolDialog() {
   };
   const doing = (r) => (r.step === "format" ? t("pool.do.format") : r.step === "connect" ? t("pool.do.connect") : r.step === "keep" ? t("pool.do.keep") : t("pool.do.ready"));
   const paint = () => {
-    put(steps, ["goal", "disks", "setup", "go"].map((id, i) => h("li", { class: i + 1 === step ? "current" : i + 1 < step ? "done" : "" }, h("span", { class: "welcome-num" }, i + 1 < step ? icon("check") : String(i + 1)), t("pool.step." + id))));
+    put(steps, uiStepper(["goal", "disks", "setup", "go"].map((id) => t("pool.step." + id)), step));
     put(body, [null, goalStep, disksStep, setupStep, goStep][step]());
   };
   const nav = (ok, next = () => ((step += 1), paint())) =>
@@ -1591,7 +1589,7 @@ function poolDialog() {
       const off = arrayOn && id !== "merge";
       const input = h("input", { type: "radio", name: "pool-goal", value: id, checked: plan.goal === id, disabled: off });
       input.addEventListener("change", () => ((plan.goal = id), (plan.parity = "")));
-      return h("label", { class: "check pool-goal" + (off ? " muted" : "") }, input, h("span", null, h("strong", null, t("pool.goal." + id)), h("span", { class: "muted small block" }, t("pool.goal." + id + ".what")), off && h("span", { class: "small block" }, t("pool.arrayOn"))));
+      return uiCheck(h("strong", { class: off ? "muted" : null }, t("pool.goal." + id)), input, [h("span", null, t("pool.goal." + id + ".what")), off && h("div", null, t("pool.arrayOn"))]);
     };
     return [h("p", { class: "muted" }, t("pool.lead")), option("both"), option("merge"), option("protect"), nav(true)];
   };
@@ -1624,7 +1622,7 @@ function poolDialog() {
       const tag = h("span", { class: "small" });
       const mark = () => {
         tag.textContent = box.checked && r.step !== "ready" ? doing(r) : "";
-        tag.className = "small " + (r.step === "format" ? "pool-erase" : "muted");
+        tag.className = "small " + (r.step === "format" ? "error" : "muted");
       };
       box.addEventListener("change", () => {
         if (box.checked) plan.chosen.add(r.key);
@@ -1636,12 +1634,13 @@ function poolDialog() {
       mark();
       // what the wizard does about it is said beside, so the fact alone here
       const why = r.parity ? { ...r, why: "pool.isParity" } : r.pooled && merge() ? { ...r, why: "pool.inPool" } : r.step && r.step !== "ready" ? { ...r, why: "pool.fact." + r.why.split(".").pop() } : r;
-      return h("label", { class: "kv pool-disk" + (usable(r) ? "" : " muted") }, h("div", { class: "fit" }, h("span", { class: "with-icon" }, box, h("span", { class: r.title.startsWith("/") ? "strong mono" : "strong" }, r.title)), h("div", { class: "muted small" }, r.sub), h("div", { class: "small fit-why" + (r.step === "ready" && usable(r) ? " ok" : "") }, icon(r.step === "ready" && usable(r) ? "check" : "x"), fitWhy(why))), tag);
+      const fits = r.step === "ready" && usable(r);
+      return uiCheck(h("span", null, h("strong", { class: usable(r) ? (r.title.startsWith("/") ? "mono" : null) : r.title.startsWith("/") ? "mono muted" : "muted" }, r.title), " ", tag), box, [h("div", null, r.sub), h("div", { class: "with-icon" }, uiState(fits ? "ok" : "off", fitWhy(why)))]);
     });
     next.onclick = () => ((step += 1), named(), paint());
     parityPick();
     check();
-    return [h("p", { class: "muted" }, t("pool.disksLead." + plan.goal)), h("div", { class: "kv-list" }, list), paritySlot, trouble, h("footer", null, button(t("pool.back"), { onclick: () => ((step -= 1), paint()) }), next)];
+    return [h("p", { class: "muted" }, t("pool.disksLead." + plan.goal)), h("div", { class: "stack" }, list), paritySlot, trouble, h("footer", null, button(t("pool.back"), { onclick: () => ((step -= 1), paint()) }), next)];
   };
 
   const setupStep = () => {
@@ -1657,13 +1656,11 @@ function poolDialog() {
       input.addEventListener("input", () => (set(input.value), check()));
       return input;
     };
-    const disks = chosen().map((r) =>
-      h(
-        "div",
-        { class: "kv" },
-        h("div", { class: "fit" }, h("span", { class: "strong" }, r.title), h("div", { class: "muted small" }, r.sub), h("div", { class: "small " + (r.step === "format" ? "pool-erase" : "muted") }, r === parityRow() ? t("pool.forParity") : t("pool.forData"), " · ", doing(r))),
-        r.step === "format" || r.step === "connect" ? h("label", { class: "pool-name" }, h("span", { class: "muted mono" }, "/mnt/"), nameInput(() => plan.names[r.key], (v) => (plan.names[r.key] = v))) : h("span", { class: "mono" }, r.path),
-      ),
+    const disks = uiFacts(
+      chosen().map((r) => [
+        h("span", null, h("strong", null, r.title), h("div", { class: "muted small" }, r.sub), h("div", { class: "small " + (r.step === "format" ? "error" : "muted") }, r === parityRow() ? t("pool.forParity") : t("pool.forData"), " · ", doing(r))),
+        r.step === "format" || r.step === "connect" ? uiInputs([h("span", { class: "muted mono" }, "/mnt/"), nameInput(() => plan.names[r.key], (v) => (plan.names[r.key] = v))], { tight: true }) : h("span", { class: "mono" }, r.path),
+      ]),
     );
     const time = h("input", { type: "time", value: plan.time, required: true });
     time.addEventListener("input", () => (plan.time = time.value || plan.time));
@@ -1681,10 +1678,10 @@ function poolDialog() {
     return [
       cards,
       h("strong", { class: "small" }, t("pool.disksTitle")),
-      h("div", { class: "kv-list" }, disks),
-      merge() && field(t("pool.merged"), h("span", { class: "pool-name" }, h("span", { class: "muted mono" }, "/mnt/"), nameInput(() => plan.name, (v) => (plan.name = v))), t("pool.mergedHint")),
+      h("div", null, disks),
+      merge() && field(t("pool.merged"), uiInputs([h("span", { class: "muted mono" }, "/mnt/"), nameInput(() => plan.name, (v) => (plan.name = v))], { tight: true }), t("pool.mergedHint")),
       protect() && field(t("array.time"), time),
-      protect() && h("label", { class: "check" }, scrub, h("span", null, h("strong", null, t("array.scrub")), h("span", { class: "muted small block" }, t("array.scrubHint")))),
+      protect() && uiCheck(h("strong", null, t("array.scrub")), scrub, t("array.scrubHint")),
       trouble,
       h("footer", null, button(t("pool.back"), { onclick: () => ((step -= 1), paint()) }), next),
     ];
@@ -1721,8 +1718,8 @@ function poolDialog() {
     check();
     return [
       h("p", { class: "muted" }, t("pool.goLead")),
-      h("ol", { class: "steps" }, todo.map((line) => h("li", null, line))),
-      erased.length > 0 && h("p", { class: "banner danger" }, t("pool.erases", { disks: erased.map((r) => r.title).join(", ") })),
+      uiList(todo, { mono: false, numbered: true }),
+      erased.length > 0 && uiNotice({ tone: "bad", text: t("pool.erases", { disks: erased.map((r) => r.title).join(", ") }) }),
       typed.map((x) => field(t("mounting.typeName", { name: x.r.device ? x.r.volume.name : x.r.disk.name }), x.input)),
       erased.length > 0 && field(t("account.password"), password, t("mounting.passwordHint")),
       slot,
@@ -1732,8 +1729,8 @@ function poolDialog() {
 
   // the work itself: its log here, then what to do next
   const run = async (id) => {
-    const log = h("pre", { class: "console" });
-    const status = h("p", { class: "job-status running" }, t("job.running"));
+    const log = uiLog();
+    const status = uiState("info", t("job.running"));
     put(body, status, log, h("footer", null, button(t("job.hide"), { onclick: () => dialog.close() })));
     const job = await followJob(id, (line) => {
       log.append(line + "\n");
@@ -1741,15 +1738,15 @@ function poolDialog() {
     });
     setDisks(await api("GET", "/api/disks").catch(() => state.disks));
     if (job.status !== "done") {
-      put(body, h("p", { class: "banner danger" }, t("pool.failed")), h("pre", { class: "said" }, job.error || ""), log, h("footer", null, closeButton(() => dialog, t("common.close"))));
+      put(body, uiNotice({ tone: "bad", text: t("pool.failed") }), uiLog(job.error || "", { kind: "said" }), log, h("footer", null, closeButton(() => dialog, t("common.close"))));
       return;
     }
     step = 5;
-    put(steps, ["goal", "disks", "setup", "go"].map((id) => h("li", { class: "done" }, h("span", { class: "welcome-num" }, icon("check")), t("pool.step." + id))));
+    put(steps, uiStepper(["goal", "disks", "setup", "go"].map((id) => t("pool.step." + id)), 5));
     const where = merge() ? "/mnt/" + plan.name : folder(dataRows()[0]);
     put(
       body,
-      h("p", { class: "banner ok" }, t("pool.done." + plan.goal, { path: where })),
+      uiNotice({ tone: "ok", text: t("pool.done." + plan.goal, { path: where }) }),
       protect() && h("p", { class: "muted" }, t("pool.syncHint")),
       h("details", null, h("summary", { class: "muted small" }, t("array.log")), log),
       h(
@@ -1791,7 +1788,8 @@ function arrayDialog(array) {
   const time = h("input", { type: "time", value: cfg.time, required: true });
   const scrub = h("input", { type: "checkbox", checked: cfg.scrub });
   const limit = h("input", { type: "number", min: 0, max: 1000000, value: cfg.deleteLimit, required: true });
-  const anew = h("p", { class: "banner small", hidden: true }, t("array.anew"));
+  const anew = uiNotice({ tone: "warn", text: t("array.anew") });
+  anew.hidden = true;
   const go = h("button", { class: "btn primary" }, t(array.on ? "settings.save" : "array.turnOn"));
   const check = () => {
     const chosen = parity.find((p) => p.input.checked)?.c.path ?? "";
@@ -1833,16 +1831,16 @@ function arrayDialog(array) {
       h("p", { class: "muted small" }, t("array.how")),
       h("h3", null, t("array.parityDisk")),
       h("p", { class: "muted small" }, t("array.parityDiskHint")),
-      parity.map(({ c, input }) => h("label", { class: "check" }, input, h("span", null, h("strong", { class: "mono" }, c.path), h("span", { class: "muted small block" }, c.merged ? t("array.cannot.merged") : c.holds ? t("array.cannot.holds") : size(c))))),
+      parity.map(({ c, input }) => uiCheck(h("strong", { class: "mono" }, c.path), input, c.merged ? t("array.cannot.merged") : c.holds ? t("array.cannot.holds") : size(c))),
       h("h3", null, t("array.parity2Disk")),
       h("p", { class: "muted small" }, t("array.parity2Hint")),
-      h("label", { class: "check" }, none, h("span", null, h("strong", null, t("array.parity2None")))),
-      parity2.map(({ c, input }) => h("label", { class: "check" }, input, h("span", null, h("strong", { class: "mono" }, c.path), h("span", { class: "muted small block" }, c.merged ? t("array.cannot.merged") : c.holds ? t("array.cannot.holds") : size(c))))),
+      uiCheck(h("strong", null, t("array.parity2None")), none),
+      parity2.map(({ c, input }) => uiCheck(h("strong", { class: "mono" }, c.path), input, c.merged ? t("array.cannot.merged") : c.holds ? t("array.cannot.holds") : size(c))),
       h("h3", null, t("array.dataDisks")),
-      data.map(({ c, input }) => h("label", { class: "check" }, input, h("span", null, h("strong", { class: "mono" }, c.path), h("span", { class: "muted small block" }, size(c))))),
-      h("label", { class: "check" }, appData, h("span", null, h("strong", null, t("array.appData")), h("span", { class: "muted small block" }, t("array.appDataHint")))),
-      h("div", { class: "field-row" }, field(t("array.time"), time), field(t("array.limit"), limit, t("array.limitHint"))),
-      h("label", { class: "check" }, scrub, h("span", null, h("strong", null, t("array.scrub")), h("span", { class: "muted small block" }, t("array.scrubHint")))),
+      data.map(({ c, input }) => uiCheck(h("strong", { class: "mono" }, c.path), input, size(c))),
+      uiCheck(h("strong", null, t("array.appData")), appData, t("array.appDataHint")),
+      uiFields(field(t("array.time"), time), field(t("array.limit"), limit, t("array.limitHint"))),
+      uiCheck(h("strong", null, t("array.scrub")), scrub, t("array.scrubHint")),
       anew,
       error,
       h("footer", null, array.on && button(t("array.turnOff"), { class: "danger", onclick: () => (dialog.close(), arrayOffDialog()) }), closeButton(() => dialog, t("common.cancel")), go),
@@ -1864,13 +1862,12 @@ function goneDialog() {
       put(
         list,
         files.length
-          ? files.map((f) =>
-              h(
-                "div",
-                { class: "snapshot" },
-                h("span", { class: "badge-icon plain" }, icon("file")),
-                h("div", { class: "grow" }, h("strong", { class: "mono clip" }, f.path.split("/").pop()), h("div", { class: "muted small mono clip" }, `${f.folder}/${f.path}`)),
-                button(t("array.goneBack"), {
+          ? h("div", { class: "ui-rows" }, files.map((f) =>
+              uiRow({
+                lead: { icon: "file" },
+                name: h("span", { class: "mono" }, f.path.split("/").pop()),
+                sub: h("span", { class: "mono" }, `${f.folder}/${f.path}`),
+                action: button(t("array.goneBack"), {
                   class: "small primary",
                   onclick: async (e) => {
                     e.currentTarget.disabled = true;
@@ -1885,8 +1882,8 @@ function goneDialog() {
                     }
                   },
                 }),
-              ),
-            )
+              }),
+            ))
           : h("p", { class: "muted" }, t(q.value ? "array.goneNoMatch" : "array.goneNone")),
       );
     } catch (err) {
@@ -1906,7 +1903,7 @@ function arrayOffDialog() {
     "confirm",
     h("h2", null, t("array.offTitle")),
     h("p", { class: "muted" }, t("array.offLead")),
-    h("label", { class: "check" }, wipe, h("span", null, h("strong", null, t("array.offWipe")), h("span", { class: "muted small block" }, t("array.offWipeHint")))),
+    uiCheck(h("strong", null, t("array.offWipe")), wipe, t("array.offWipeHint")),
     h("footer", null, closeButton(() => dialog, t("common.cancel")), button(t("array.turnOff"), { class: "danger", onclick: () => arrayCall("DELETE", wipe.checked ? "?wipe=1" : "", undefined, () => dialog.close()) })),
   );
 }
@@ -1919,7 +1916,7 @@ function recoverDialog(disk) {
     h("h2", null, t("array.recoverTitle", { disk: disk.path })),
     h("p", { class: "muted" }, t("array.recoverLead")),
     h("p", { class: "muted small" }, t("array.recoverHow", { disk: disk.path })),
-    h("p", { class: "banner small" }, t("array.recoverOwners")),
+    uiNotice({ tone: "warn", text: t("array.recoverOwners") }),
     h("footer", null, closeButton(() => dialog, t("common.cancel")), button(t("array.recoverGo"), { class: "primary", onclick: () => arrayCall("POST", "/fix", { disk: disk.name }, () => dialog.close()) }, "undo")),
   );
 }
@@ -1949,18 +1946,10 @@ function fillsCard(fills, busy) {
   if (outside) parts.push({ kind: "outside", path: "", name: "", size: outside, week: null });
   parts.push(...fills.parts.filter((part) => part.kind === "mount"));
 
-  const colour = (i, part) => (part.kind === "outside" || part.kind === "small" || part.kind === "rest" || i >= FILLS_COLOURS ? "c-rest" : "c" + i);
+  // the colours of a meter of parts: 1…6, and "rest" for what is not one folder
+  const colour = (i, part) => (part.kind === "outside" || part.kind === "small" || part.kind === "rest" || i >= FILLS_COLOURS ? "rest" : String(i + 1));
   const share = (size) => (size / fills.total) * 100;
-  const bar = h(
-    "div",
-    { class: "fills-bar" },
-    parts.map((part, i) => {
-      if (part.kind === "mount") return null;
-      const seg = h("i", { class: colour(i, part), title: `${partName(part)} · ${bytes(part.size)}` });
-      seg.style.width = share(part.size) + "%";
-      return seg;
-    }),
-  );
+  const bar = uiMeter(0, { parts: parts.map((part, i) => part.kind !== "mount" && { value: share(part.size), colour: colour(i, part) }).filter(Boolean) });
   function partName(part) {
     if (part.kind === "app") return apps.get(part.name)?.title ?? part.name;
     if (part.kind === "trash") return t("trash.title");
@@ -1982,7 +1971,7 @@ function fillsCard(fills, busy) {
     const percent = (part.size / used) * 100;
     // how much of it has not changed for long, and which apps keep files there: said when pointed at
     const more = [part.old > 0 && part.old >= part.size * 0.05 && t("fills.oldHere", { size: bytes(part.old), days: fills.oldDays }), part.apps?.length > 0 && `${t("fills.usedBy")} ${part.apps.map((app) => apps.get(app)?.title ?? app).join(", ")}`].filter(Boolean).join("\n");
-    const key = h("span", { class: "ui-lead fills-key" }, h("i", { class: "dot " + (part.kind === "mount" ? "c-rest" : colour(i, part)) }));
+    const key = { colour: part.kind === "mount" ? "rest" : colour(i, part) };
     const share = part.kind === "mount" ? "" : percent < 1 ? "<1%" : Math.round(percent) + "%";
     return {
       href: href || null,
@@ -2026,10 +2015,9 @@ function fillsCard(fills, busy) {
       marks: fills.fullIn != null && uiState("warn", t("fills.fullIn", { time: aboutDays(fills.fullIn) })),
       lead: [t(fills.at ? "fills.lead" : "fills.never"), fills.at && !fills.running && t("fills.measured", { when: ago(fills.at) })].filter(Boolean).join(" · "),
       flush: true,
-      cls: "fills",
       actions: button(t(fills.running ? "fills.measuring" : fills.at ? "fills.again" : "fills.measure"), { class: "small", disabled: fills.running, "aria-busy": fills.running ? "true" : null, onclick: measure }, "refresh"),
     },
-    fills.at && h("div", { class: "ui-inset fills-strip" }, bar),
+    fills.at && h("div", { class: "ui-inset" }, bar),
     advice,
     fills.at ? uiTable([{ label: t("fills.col.folder") }, { label: t("fills.col.size"), num: true }, { label: t("fills.col.share"), num: true }, { label: t("fills.col.week") }], parts.map(row)) : uiEmpty({ size: "big", icon: "chart", title: t("fills.notYet"), text: t("fills.never"), action: button(t("fills.measure"), { class: "primary", onclick: measure }, "refresh") }),
     largeToggle,

@@ -33,8 +33,8 @@ function restoreDialog(app, snapshot) {
       ? h("p", { class: "muted" }, t("backup.incus.restoreLead", { time: dateTime(snapshot.at), name: app.title }))
       : [
           h("p", { class: "muted" }, t("backup.restoreLead", { time: dateTime(snapshot.at) })),
-          h("ul", { class: "paths mono small" }, snapshot.paths.map((path) => h("li", null, path))),
-          h("p", { class: "cmd" }, icon("terminal"), `tar -xzf ${snapshot.id}.tar.gz -C /`),
+          uiList(snapshot.paths),
+          uiCommand(`tar -xzf ${snapshot.id}.tar.gz -C /`),
         ],
     h(
       "footer",
@@ -59,39 +59,38 @@ function restoreDialog(app, snapshot) {
 
 /** The snapshots of one app, newest first, each with what can be done to it */
 function snapshotList(app, snapshots, reload) {
-  if (!snapshots.length) return h("p", { class: "muted" }, t("backup.none"));
+  if (!snapshots.length) return uiEmpty({ text: t("backup.none") });
   return h(
     "div",
-    { class: "snapshot-list" },
-    snapshots.map((s) =>
-      h(
-        "div",
-        { class: "snapshot" },
-        h("div", { class: "grow" }, h("strong", null, dateTime(s.at)), h("div", { class: "muted small" }, [t("backup.reason." + s.reason), bytes(s.size), s.images[0]].filter(Boolean).join(" · "))),
-        !app.incus && button(t("backup.files"), { class: "small", onclick: () => snapshotFilesDialog(app, s) }, "folder"),
-        button(t("backup.restore"), { class: "small", onclick: () => restoreDialog(app, s) }, "undo"),
-        h(
-          "button",
-          {
-            type: "button",
-            class: "icon-btn",
-            "aria-label": t("backup.delete"),
-            title: t("backup.delete"),
-            onclick: () =>
-              confirmAction({
-                title: t("backup.deleteTitle", { time: dateTime(s.at) }),
-                lead: t("backup.deleteLead"),
-                label: t("backup.delete"),
-                run: async () => {
-                  await api("DELETE", `/api/backups/${app.name}/${s.id}`);
-                  reload();
-                },
-              }),
-          },
-          icon("trash"),
-        ),
-      ),
-    ),
+    { class: "ui-rows" },
+    snapshots.map((s) => {
+      const entries = [
+        !app.incus && { label: t("backup.files"), icon: "folder", run: () => snapshotFilesDialog(app, s) },
+        {
+          label: t("backup.delete") + "…",
+          icon: "trash",
+          danger: true,
+          run: () =>
+            confirmAction({
+              title: t("backup.deleteTitle", { time: dateTime(s.at) }),
+              lead: t("backup.deleteLead"),
+              label: t("backup.delete"),
+              run: async () => {
+                await api("DELETE", `/api/backups/${app.name}/${s.id}`);
+                reload();
+              },
+            }),
+        },
+      ].filter(Boolean);
+      return uiRow({
+        lead: { icon: "archive" },
+        name: dateTime(s.at),
+        sub: [t("backup.reason." + s.reason), bytes(s.size), s.images[0]].filter(Boolean).join(" · "),
+        action: button(t("backup.restore"), { class: "small", onclick: () => restoreDialog(app, s) }, "undo"),
+        more: entries,
+        menu: (at) => menuAt(at, null, entries),
+      });
+    }),
   );
 }
 
@@ -99,8 +98,8 @@ function snapshotList(app, snapshots, reload) {
 function snapshotFilesDialog(app, snapshot) {
   const base = `/api/backups/${app.name}/${snapshot.id}`;
   const chosen = new Set();
-  const crumbs = h("div", { class: "crumbs wrap small" });
-  const list = h("div", { class: "snapshot-files" }, h("p", { class: "muted" }, t("backup.files.reading")));
+  const crumbs = h("div");
+  const list = h("div", null, uiEmpty({ size: "loading", text: t("backup.files.reading") }));
   const error = h("p", { class: "error", role: "alert" });
   const restore = button(t("backup.files.restore", { n: 0 }), { class: "primary", disabled: true, onclick: () => confirmRestore() }, "undo");
   const count = () => {
@@ -120,31 +119,8 @@ function snapshotFilesDialog(app, snapshot) {
     // inside a folder the way back is shown from the snapshot's own folder it lies in
     const root = data.roots.find((r) => path === r || path.startsWith(r + "/"));
     const steps = root ? path.slice(root.length).split("/").filter(Boolean) : [];
-    put(crumbs,
-      h("button", { type: "button", class: "text-btn", onclick: () => open("") }, t("backup.files.top")),
-      root && icon("chevron"),
-      root && h("button", { type: "button", class: "text-btn mono", onclick: () => open(root) }, root),
-      ...steps.flatMap((step, i) => [icon("chevron"), h("button", { type: "button", class: "text-btn mono", onclick: () => open(root + "/" + steps.slice(0, i + 1).join("/")) }, step)]),
-    );
-    list.replaceChildren(
-      ...(data.entries.length
-        ? data.entries.map((entry) => {
-            const name = path ? entry.path.slice(entry.path.lastIndexOf("/") + 1) : entry.path;
-            const tick = h("input", { type: "checkbox", checked: chosen.has(entry.path), "aria-label": name, onchange: () => ((tick.checked ? chosen.add(entry.path) : chosen.delete(entry.path)), count()) });
-            return h(
-              "div",
-              { class: "snapshot-file" },
-              // single files are put back on this server only
-              !app.machine && tick,
-              icon(entry.dir ? "folder" : "file"),
-              entry.dir ? h("button", { type: "button", class: "text-btn grow name" + (path ? "" : " mono"), onclick: () => open(entry.path) }, name) : h("span", { class: "grow name" }, name, entry.link && h("span", { class: "muted small" }, " → " + entry.link)),
-              h("span", { class: "muted small" }, entry.dir || entry.link ? "" : bytes(entry.size)),
-              h("span", { class: "muted small when" }, dateTime(entry.at)),
-              entry.dir || entry.link ? h("span", { class: "icon-btn ghost" }) : h("a", { class: "icon-btn", href: `${base}/file?path=${encodeURIComponent(entry.path)}`, download: name, title: t("files.download"), "aria-label": `${t("files.download")}: ${name}` }, icon("download")),
-            );
-          })
-        : [h("p", { class: "muted" }, t("backup.files.empty"))]),
-    );
+    put(crumbs, uiCrumbs([{ label: t("backup.files.top"), onclick: () => open("") }, root && { label: root, mono: true, onclick: () => open(root) }, ...steps.map((step, i) => ({ label: step, mono: true, onclick: () => open(root + "/" + steps.slice(0, i + 1).join("/")) }))]));
+    put(list, data.entries.length ? snapshotEntries(data.entries, { base, path, chosen, count, open, ticks: !app.machine }) : uiEmpty({ text: t("backup.files.empty") }));
   };
   const confirmRestore = () => {
     const paths = [...chosen].sort();
@@ -152,7 +128,7 @@ function snapshotFilesDialog(app, snapshot) {
       "confirm",
       h("h2", null, t("backup.files.sureTitle", { n: paths.length })),
       h("p", { class: "muted" }, t("backup.files.sureLead", { time: dateTime(snapshot.at), title: app.title })),
-      h("ul", { class: "paths mono small" }, paths.slice(0, 12).map((path) => h("li", null, path)), paths.length > 12 && h("li", null, "…")),
+      uiList([...paths.slice(0, 12), paths.length > 12 && "…"]),
       h(
         "footer",
         null,
@@ -176,6 +152,17 @@ function snapshotFilesDialog(app, snapshot) {
   };
   const dialog = openDialog("wide", h("header", null, h("div", { class: "grow" }, h("h2", null, t("backup.files.title", { title: app.title })), h("p", { class: "muted small" }, `${dateTime(snapshot.at)} · ${bytes(snapshot.size)}`)), closeX(() => dialog)), crumbs, list, error, h("footer", null, closeButton(() => dialog), !app.machine && restore));
   void open("");
+}
+
+/** The entries of a folder of a snapshot, to walk, tick and take out one by one */
+function snapshotEntries(entries, { base, path, chosen, count, open, ticks }) {
+  return uiFileList(
+    entries.map((entry) => {
+      const name = path ? entry.path.slice(entry.path.lastIndexOf("/") + 1) : entry.path;
+      const tick = ticks && h("input", { type: "checkbox", checked: chosen.has(entry.path), "aria-label": name, onchange: () => ((tick.checked ? chosen.add(entry.path) : chosen.delete(entry.path)), count()) });
+      return { name, dir: entry.dir, mono: !path, note: entry.link ? "→ " + entry.link : null, size: entry.dir || entry.link ? null : entry.size, at: entry.at, tick, open: () => open(entry.path), download: entry.dir || entry.link ? null : `${base}/file?path=${encodeURIComponent(entry.path)}` };
+    }),
+  );
 }
 
 /** Which folders of an app go into its snapshots: those in AppData always, the rest by choice */
@@ -210,12 +197,12 @@ async function backupFoldersDialog(app, done) {
       h("header", null, h("h2", { class: "grow" }, t("backup.folders.title", { title: app.title })), closeX(() => dialog)),
       h("h3", null, t("backup.folders.always")),
       h("p", { class: "muted small" }, t("backup.folders.alwaysHint")),
-      data.always.length > 0 && h("ul", { class: "paths mono small" }, data.always.map((path) => h("li", null, path))),
+      data.always.length > 0 && uiList(data.always),
       h("h3", null, t("backup.folders.other")),
       ticks.length
         ? [
             h("p", { class: "muted small" }, t("backup.folders.otherHint")),
-            ...ticks.map(({ folder, input }) => h("label", { class: "check" }, input, h("span", null, h("strong", { class: "mono" }, folder.path), h("span", { class: "muted small block" }, folder.allowed ? (folder.size === null ? t("backup.folders.unknown") : bytes(folder.size)) : t("backup.folders.never"))))),
+            ...ticks.map(({ folder, input }) => uiCheck(h("strong", { class: "mono" }, folder.path), input, folder.allowed ? (folder.size === null ? t("backup.folders.unknown") : bytes(folder.size)) : t("backup.folders.never"))),
           ]
         : h("p", { class: "muted small" }, t("backup.folders.none")),
       error,
@@ -243,15 +230,18 @@ async function appBackupsTab(app, box) {
   } catch (e) {
     return box.replaceChildren(h("p", { class: "error" }, errorText(e)));
   }
-  box.replaceChildren(
-    h("div", { class: "editor-head" }, h("div", { class: "grow" }, h("p", null, t("backup.appLead")), h("p", { class: "muted small" }, app.folders.join(" · "))), button(t("backup.folders.button"), { onclick: () => backupFoldersDialog(app) }, "folder"), button(t("backup.now"), { class: "primary", disabled: !!app.job, onclick: () => backupNow(app) }, "archive")),
-    h("div", { class: "card pad" }, snapshotList(app, snapshots, () => renderAppTab())),
+  put(
+    box,
+    uiCard(
+      { title: t("backup.appLead"), lead: app.folders.join(" · "), flush: true, actions: [button(t("backup.folders.button"), { onclick: () => backupFoldersDialog(app) }, "folder"), button(t("backup.now"), { class: "primary", disabled: !!app.job, onclick: () => backupNow(app) }, "archive")] },
+      snapshotList(app, snapshots, () => renderAppTab()),
+    ),
   );
 }
 
 function renderBackups() {
   const tab = state.route.tab ?? "overview";
-  shell(...settingsFrame("backups", tab === "overview" && h("section", { class: "card numbers" }, h("div", { class: "ui-stats", id: "backup-stats" })), h("div", { class: "stack", id: "backup-body" }, uiCard({ flush: true }, uiEmpty({ size: "loading" })))));
+  shell(...settingsFrame("backups", tab === "overview" && uiStats({ id: "backup-stats" }), h("div", { class: "stack", id: "backup-body" }, uiCard({ flush: true }, uiEmpty({ size: "loading" })))));
   renderBackupsBody();
   if (tab === "overview") void loadBackupsMore();
   if (tab === "history") void loadBackupHistory();
@@ -290,7 +280,7 @@ function renderBackupsBody() {
   if (!b || !s || !box) return;
   const tab = state.route.tab ?? "overview";
 
-  document.getElementById("backup-meta").replaceChildren(b.dir, h("span", { class: "dot-sep" }, "·"), s.enabled ? t("backup.daily", { time: s.time, keep: s.keep }) : t("backup.scheduleOff"));
+  document.getElementById("backup-meta").replaceChildren(b.dir, h("span", { class: "ui-dot-sep" }, " · "), s.enabled ? t("backup.daily", { time: s.time, keep: s.keep }) : t("backup.scheduleOff"));
   document.getElementById("backup-actions").replaceChildren(
     button(t(b.running ? "backup.running" : "backup.allNow"), {
       class: "primary",
@@ -352,8 +342,7 @@ function renderBackupsBody() {
     ].filter(Boolean);
     const action = off && s.enabled ? button(t("backup.turnOn"), { class: "small primary", onclick: () => toggleInclude(app, true) }, "play") : app.snapshots.length > 0 ? button(t("backup.restore") + "…", { class: "small", onclick: () => snapshotsDialog(app) }, "undo") : app.installed ? button(t("backup.nowShort"), { class: "small", onclick: () => backupNow(app) }, "archive") : null;
     const subs = [kind, !app.installed && t("backup.removedApp"), app.otherFolders.length > 0 && t("backup.folders.row", { n: app.otherFolders.length, m: app.extraFolders.length })].filter(Boolean).join(" · ");
-    return {
-      cls: app.installed ? "" : "removed",
+    return uiTableRow({
       menu: (at) => menuAt(at, null, entries),
       cells: [
         uiCell({ lead: app.incus ? lead(app.incus.kind === "vm" ? "screen" : "box") : { logo: appIcon(app, "row") }, name: app.installed ? h("a", { href: page }, app.title) : app.title, sub: subs || null }),
@@ -361,10 +350,10 @@ function renderBackupsBody() {
         when(newest?.at, newest && t("backup.reason." + newest.reason)),
         size ? bytes(size) : "—",
         h("span", { class: "muted" }, app.snapshots.length ? t("backup.copies", { n: app.snapshots.length }) : "—"),
-        h("div", { class: "row-actions end" }, action, uiMore(entries, { size: "s" })),
+        uiLine([action, uiMore(entries, { size: "s" })], { end: true }),
       ],
       sub: [off ? null : app.installed ? daily : null, newest ? ago(newest.at) : null, size ? bytes(size) : null].filter(Boolean).join(" · "),
-    };
+    }, { gone: !app.installed });
   };
   const newest = b.server[0];
   const serverNow = async () => {
@@ -385,7 +374,7 @@ function renderBackupsBody() {
       when(newest?.at),
       newest ? bytes(newest.size) : "—",
       h("span", { class: "muted" }, b.server.length ? t("backup.copies", { n: b.server.length }) : "—"),
-      h("div", { class: "row-actions end" }, button(t("backup.nowShort"), { class: "small", onclick: serverNow }, "archive"), uiMore(serverEntries, { size: "s" })),
+      uiLine([button(t("backup.nowShort"), { class: "small", onclick: serverNow }, "archive"), uiMore(serverEntries, { size: "s" })], { end: true }),
     ],
     sub: [t("backup.withEveryRun"), newest ? ago(newest.at) : null].filter(Boolean).join(" · "),
   };
@@ -407,8 +396,7 @@ function renderBackupsBody() {
         cells: [uiCell({ lead: lead("server"), name: h("a", { href: `#/proxmox/${x.id}` }, x.name), sub: t("backup.pveWhat", { n: guests.length }) }), h("span", { class: "muted" }, often), state2, "—", h("span", { class: "muted" }, sch?.on ? t("backup.copies", { n: sch.keep }) : "—"), open(`#/proxmox/${x.id}`)],
         sub: often,
       },
-      ...shown.map((g) => ({
-        cls: "sub-row",
+      ...shown.map((g) => uiTableRow({
         href: `#/guest/${x.id}/${g.id}`,
         cells: [
           uiCell({ lead: lead(g.type === "lxc" ? "box" : "screen"), name: g.name || String(g.vmid), sub: guestKind(g) }),
@@ -419,11 +407,10 @@ function renderBackupsBody() {
           "",
         ],
         sub: x.unprotected != null && bare(g) ? t("tree.noBackup") : null,
-      })),
-      kept > 0 && x.unprotected != null && {
-        cls: "sub-row",
+      }, { under: true })),
+      kept > 0 && x.unprotected != null && uiTableRow({
         whole: uiEmpty({ text: all ? t("backup.guestsLess") : t("backup.guestsMore", { n: kept }), action: button(all ? t("backup.guestsLess") : t("ui.showMore"), { class: "small quiet", onclick: () => (all ? backupUi.pveAll.delete(x.id) : backupUi.pveAll.add(x.id), renderBackupsBody()) }, all ? "up" : "down") }),
-      },
+      }, { under: true }),
     ].filter(Boolean);
   };
   const haRow = (x) => {
@@ -457,7 +444,7 @@ function renderBackupsBody() {
     box,
     uiCard(
       { flush: true },
-      uiTable([{ label: t("backup.col.what") }, { label: t("backup.col.often") }, { label: t("backup.col.last") }, { label: t("backup.col.size"), num: true }, { label: t("backup.col.keeps") }, { label: "" }], rows, { cls: "backups-table" }),
+      uiTable([{ label: t("backup.col.what") }, { label: t("backup.col.often") }, { label: t("backup.col.last") }, { label: t("backup.col.size"), num: true }, { label: t("backup.col.keeps") }, { label: "" }], rows),
       !moreData && uiEmpty({ size: "loading" }),
     ),
   );
@@ -471,10 +458,12 @@ function backupScheduleForm(b, s) {
   const dir = h("input", { value: s.dir, placeholder: b.dir, spellcheck: false, class: "mono" });
   const beforeUpdate = h("input", { type: "checkbox", checked: s.beforeUpdate });
   const error = h("p", { class: "error", role: "alert" });
-  return h(
+  return uiCard(
+    { title: t("backup.schedule") },
+    h(
     "form",
     {
-      class: "card pad stack",
+      class: "stack",
       onsubmit: async (e) => {
         e.preventDefault();
         error.textContent = "";
@@ -488,14 +477,14 @@ function backupScheduleForm(b, s) {
         }
       },
     },
-    h("h2", null, t("backup.schedule")),
     uiSetting({ name: t("backup.enable"), explain: t("backup.enableHint"), control: enabled }),
     uiSetting({ name: t("backup.time"), explain: b.timezone, control: time }),
     uiSetting({ name: t("backup.keep"), control: keep }),
     uiSetting({ name: t("backup.dir"), explain: t("backup.dirHint"), control: dir }),
     uiSetting({ name: t("backup.beforeUpdate"), explain: t("backup.beforeUpdateHint"), control: beforeUpdate }),
     error,
-    h("footer", { class: "block-foot" }, h("button", { class: "btn primary" }, t("settings.save"))),
+    uiFoot(h("button", { class: "btn primary" }, t("settings.save"))),
+    ),
   );
 }
 
@@ -514,9 +503,9 @@ async function offsiteCheck(trust) {
       "confirm",
       h("h2", null, t("offsite.hostTitle")),
       h("p", { class: "muted" }, t("offsite.hostLead")),
-      h("p", { class: "cmd whole" }, icon("lock"), `${result.keyType} ${result.fingerprint}`),
+      uiCommand(`${result.keyType} ${result.fingerprint}`, { block: true }),
       h("p", { class: "muted small" }, t("offsite.hostHint")),
-      h("p", { class: "cmd whole" }, icon("terminal"), "for f in /etc/ssh/ssh_host_*_key.pub; do ssh-keygen -lf $f; done"),
+      uiCommand("for f in /etc/ssh/ssh_host_*_key.pub; do ssh-keygen -lf $f; done"),
       h(
         "footer",
         null,
@@ -605,10 +594,11 @@ function offsiteCard(o) {
       error.textContent = errorText(err);
     }
   };
-  return h(
+  return uiCard(
+    { title: t("offsite.title"), marks: mark, id: "offsite-form" },
+    h(
     "form",
-    { class: "card pad stack", id: "offsite-form", onsubmit: save },
-    h("div", { class: "section-head" }, h("h2", null, t("offsite.title"), " ", mark)),
+    { class: "stack", onsubmit: save },
     status,
     uiSetting({ name: t("offsite.enable"), explain: t("offsite.enableHint"), control: enabled }),
     uiSetting({ name: t("offsite.kind"), explain: t("offsite.kindHint." + shown), control: kind }),
@@ -633,6 +623,7 @@ function offsiteCard(o) {
     uiSetting({ name: t("offsite.passphrase"), explain: t("offsite.passphraseHint"), control: passphrase }),
     sftp && o.fingerprint && h("p", { class: "muted small" }, t("offsite.hostKnown", { fingerprint: o.fingerprint })),
     error,
-    h("footer", { class: "block-foot" }, h("button", { class: "btn primary", disabled: (!o.available && sftp) || (inPlace && !o.places.length) }, t("offsite.save"))),
+    uiFoot(h("button", { class: "btn primary", disabled: (!o.available && sftp) || (inPlace && !o.places.length) }, t("offsite.save"))),
+    ),
   );
 }

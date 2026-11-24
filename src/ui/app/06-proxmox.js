@@ -19,7 +19,7 @@ async function loadPve() {
     if (state.route.view === "proxmox") {
       pveUi.host = null;
       const box = document.getElementById("pve-body");
-      if (box) put(box, h("nav", { class: "crumbs" }, h("a", { href: "#/machines" }, t("nav.machines"))), h("p", { class: "card pad muted" }, errorText(e)));
+      if (box) put(box, pageHead({ crumbs: [{ label: t("nav.machines"), href: "#/machines" }, { label: "Proxmox" }] }), uiCard({}, uiEmpty({ size: "error", title: errorText(e), action: button(t("attention.retry"), { onclick: () => void loadPve() }, "refresh") })));
       return;
     }
     return toast(errorText(e), "error");
@@ -50,12 +50,6 @@ const guestKind = (g) => (g.type === "lxc" ? "CT" : "VM") + " " + g.vmid;
 const pveError = (x) => (has("error." + x.error.code) ? t("error." + x.error.code, { name: x.name, message: "" }).replace(/[:\s]+$/, "") : x.error.code);
 const pct = (used, total) => (total ? Math.round((used / total) * 100) : null);
 
-function meterRow(label, percent, hint) {
-  const fill = h("i", { class: level(percent ?? 0) });
-  fill.style.width = (percent ?? 0) + "%";
-  return h("div", { class: "machine-meter" }, h("div", { class: "kv" }, h("span", { class: "muted small" }, label), h("span", { class: "small" }, percent == null ? "—" : `${percent}%`, hint && h("span", { class: "muted" }, " · " + hint))), h("div", { class: "bar" }, fill));
-}
-
 /** Adding a server, or changing its token: the certificate is shown to be confirmed the first time */
 function pveDialog(old = null) {
   const name = h("input", { value: old?.name ?? "", placeholder: t("pve.namePlaceholder"), maxLength: 40 });
@@ -71,9 +65,9 @@ function pveDialog(old = null) {
   const otpRow = field(t("pve.otp"), otp, t("pve.otpHint"));
   otpRow.hidden = true;
   const level = h("select", null, ["manage", "pool", "read"].map((l) => h("option", { value: l }, t("pve.level." + l))));
-  const levelHint = h("span", { class: "hint" }, t("pve.levelHint.manage"));
+  const levelHint = h("span", null, t("pve.levelHint.manage"));
   level.addEventListener("change", () => (levelHint.textContent = t("pve.levelHint." + level.value)));
-  const loginPart = h("div", { class: "stack" }, h("div", { class: "form-pair" }, field(t("pve.user"), user), field(t("pve.password"), password)), otpRow, h("label", { class: "field" }, h("span", { class: "label" }, t("pve.level")), level, levelHint), h("p", { class: "muted small" }, t("pve.loginLead")));
+  const loginPart = h("div", { class: "stack" }, uiFields(field(t("pve.user"), user), field(t("pve.password"), password)), otpRow, uiField(t("pve.level"), level, levelHint), h("p", { class: "muted small" }, t("pve.loginLead")));
   const idsFrom = h("input", { type: "number", min: 100, value: old?.ids?.from ?? "", placeholder: "100" });
   const idsTo = h("input", { type: "number", min: 100, value: old?.ids?.to ?? "", placeholder: "999" });
   const cert = h("div");
@@ -86,7 +80,7 @@ function pveDialog(old = null) {
     field(t("pve.secret"), secret, old ? t("pve.secretKeepHint") : null),
     !old && h("details", { class: "small" }, h("summary", null, t("pve.howTitle")), h("ol", { class: "stack-s" }, ["1", "2", "3", "4"].map((n) => h("li", null, t("pve.how." + n)))), h("p", { class: "muted" }, t("pve.howRights"))),
   );
-  const modeTab = (m) => h("button", { type: "button", class: "btn" + (mode === m ? " active" : ""), "data-mode": m, onclick: () => setMode(m) }, t("pve.mode." + m));
+  const modes = h("div");
   const setMode = (m) => {
     mode = m;
     loginPart.hidden = m !== "login";
@@ -94,7 +88,7 @@ function pveDialog(old = null) {
     user.required = password.required = m === "login";
     token.required = m === "token";
     secret.required = m === "token" && !old;
-    dialog?.querySelectorAll("[data-mode]").forEach((b) => b.classList.toggle("active", b.dataset.mode === m));
+    put(modes, uiSegment(["login", "token"].map((v) => ({ value: v, label: t("pve.mode." + v) })), m, setMode, { wide: true }));
     error.textContent = "";
   };
   setMode(mode);
@@ -120,14 +114,12 @@ function pveDialog(old = null) {
         // the server's own certificate: the person compares it with what Proxmox shows, then it is kept
         put(
           cert,
-          h(
-            "div",
-            { class: "card pad stack-s warn-box" },
-            h("strong", null, t("pve.certTitle")),
-            h("p", { class: "small" }, t("pve.certLead", { subject: err.detail.subject || "—", issuer: err.detail.issuer || "—" })),
-            h("p", { class: "mono small wrap" }, err.detail.fingerprint),
-            h("p", { class: "muted small" }, t("pve.certWhere")),
-          ),
+          uiNotice({
+            tone: "warn",
+            title: t("pve.certTitle"),
+            text: t("pve.certLead", { subject: err.detail.subject || "—", issuer: err.detail.issuer || "—" }),
+            foot: [h("p", { class: "mono small wrap" }, err.detail.fingerprint), h("p", { class: "muted small" }, t("pve.certWhere"))],
+          }),
         );
         fingerprint = err.detail.fingerprint;
         submit.querySelector("span").textContent = t("pve.certTrust");
@@ -145,12 +137,12 @@ function pveDialog(old = null) {
       { class: "stack", onsubmit: send },
       h("header", null, h("h2", { class: "grow" }, old ? t("pve.changeTitle", { name: old.name }) : t("pve.addTitle")), closeX(() => dialog)),
       !old && h("p", null, t("pve.addLead")),
-      !old && h("div", { class: "seg" }, modeTab("login"), modeTab("token")),
+      !old && modes,
       field(t("pve.url"), url, t("pve.urlHint")),
       loginPart,
       tokenPart,
       field(t("pve.name"), name, t("pve.nameHint")),
-      h("div", { class: "field" }, h("span", { class: "label" }, t("pve.ids")), h("div", { class: "form-pair" }, idsFrom, idsTo), h("span", { class: "hint" }, t("pve.idsHint"))),
+      uiField(t("pve.ids"), uiFields(idsFrom, idsTo), t("pve.idsHint"), { group: true }),
       cert,
       error,
       h("footer", null, closeButton(() => dialog, t("common.cancel")), h("button", { type: "submit", class: "btn primary" }, h("span", null, old ? t("pve.save") : t("pve.add")))),
@@ -158,18 +150,13 @@ function pveDialog(old = null) {
   );
 }
 
-function pveMenu(x, at = null) {
-  let dialog;
-  const item = (label, iconName, action, cls = "") => h("button", { type: "button", class: "menu-item " + cls, onclick: () => (dialog.close(), action()) }, icon(iconName), label);
-  dialog = openDialog(
-    at ? "menu dropdown" : "menu",
-    h("header", null, h("span", { class: "machine-icon" }, icon("server")), h("div", null, h("h2", null, x.name), pveChip(x))),
-    item(t("pve.refresh"), "refresh", () => refreshPve(x)),
-    item(t("pve.openWeb"), "external", () => window.open(x.url, "_blank", "noopener")),
-    item(t("pve.change"), "edit", () => pveDialog(x)),
-    item(t("pve.remove") + "…", "trash", () => removePveDialog(x), "danger"),
-  );
-  if (at) placeAt(dialog, at);
+function pveMenu(x, at) {
+  menuAt(at, h("header", null, uiLead({ icon: "server" }), h("div", null, h("h2", null, x.name), pveChip(x))), [
+    { label: t("pve.refresh"), icon: "refresh", run: () => refreshPve(x) },
+    { label: t("pve.openWeb"), icon: "external", run: () => window.open(x.url, "_blank", "noopener") },
+    { label: t("pve.change"), icon: "edit", run: () => pveDialog(x) },
+    { label: t("pve.remove") + "…", icon: "trash", danger: true, run: () => removePveDialog(x) },
+  ]);
 }
 
 async function refreshPve(x, el) {
@@ -256,21 +243,22 @@ async function pveNewDialog(x, kind = "lxc") {
   const pool = h("select", null, o.free && opt("", t("pve.new.noPool")), o.pools.map((p) => opt(p)));
   const tick = (label, hint, checked = true) => {
     const box = h("input", { type: "checkbox", checked });
-    return [box, h("label", { class: "check" }, box, h("span", null, h("strong", null, label), hint && h("span", { class: "muted small block" }, hint)))];
+    const row = uiCheck(h("strong", null, label), box, hint);
+    return [box, row, row.querySelector(".ui-check-hint")];
   };
-  const [client, clientRow] = tick(t("pve.new.client"), t("pve.new.clientHint"));
+  const [client, clientRow, clientHint] = tick(t("pve.new.client"), t("pve.new.clientHint"));
   const [docker, dockerRow] = tick(t("pve.new.docker"), t("pve.new.dockerHint"));
   const [onboot, onbootRow] = tick(t("pve.onboot"), null);
   const [start, startRow] = tick(t("pve.vm.start"), t("pve.vm.startHint"));
   const error = h("p", { class: "error", role: "alert" });
   const lead = h("p", { class: "muted small" });
-  const clientHint = clientRow.querySelector(".block");
-  const pair = (...items) => h("div", { class: "form-pair" }, ...items);
+  const pair = uiFields;
   const templateRow = field(t("pve.new.template"), template, (o.templates[node.value] ?? []).length ? null : t("pve.new.noTemplates"));
   const sourceRow = field(t("pve.vm.source"), source, (o.images[node.value] ?? []).length + (o.isos[node.value] ?? []).length ? null : t("pve.vm.noSource"));
   const signRow = h("div", { class: "stack-s" }, pair(field(t("pve.vm.user"), user, t("pve.vm.userHint")), field(t("pve.vm.password"), password, t("pve.vm.passwordHint"))), field(t("pve.vm.keys"), keys, t("pve.vm.keysHint")));
-  const netRow = pair(field(t("pve.new.bridge"), bridge), field(t("pve.new.how"), how));
-  const discNote = h("p", { class: "banner small" }, t("pve.vm.discNote"));
+  const howRow = field(t("pve.new.how"), how);
+  const netRow = pair(field(t("pve.new.bridge"), bridge), howRow);
+  const discNote = uiNotice({ tone: "info", text: t("pve.vm.discNote") });
   const isDisc = () => kind === "qemu" && (o.isos[node.value] ?? []).includes(source.value);
   /** What the dialog shows for the kind and the source chosen */
   const shape = () => {
@@ -281,20 +269,16 @@ async function pveNewDialog(x, kind = "lxc") {
     templateRow.hidden = kind !== "lxc";
     sourceRow.hidden = kind === "lxc";
     signRow.hidden = kind === "lxc" || disc;
-    how.closest(".field").hidden = disc;
+    howRow.hidden = disc;
     if (disc) fixed.hidden = true;
     else fixed.hidden = how.value !== "fixed";
     clientRow.hidden = dockerRow.hidden = disc;
     startRow.hidden = !disc;
     discNote.hidden = !disc;
-    for (const b of seg.children) b.classList.toggle("active", b.dataset.kind === kind);
+    put(seg, uiSegment(["lxc", "qemu"].map((k) => ({ value: k, label: t(k === "lxc" ? "pve.new.kindLxc" : "pve.new.kindVm") })), kind, (k) => ((kind = k), fill()), { wide: true }));
   };
   const title = h("h2", { class: "grow" });
-  const seg = h(
-    "div",
-    { class: "seg" },
-    ["lxc", "qemu"].map((k) => h("button", { type: "button", class: "btn", "data-kind": k, onclick: () => ((kind = k), fill()) }, t(k === "lxc" ? "pve.new.kindLxc" : "pve.new.kindVm"))),
-  );
+  const seg = h("div");
   let dialog;
   const send = async (e) => {
     e.preventDefault();
@@ -378,7 +362,6 @@ function renderPveBody() {
   const box = document.getElementById("pve-body");
   const x = pveUi.host;
   if (!box || !x) return;
-  const tab = (id) => h("a", { class: "tab" + (state.route.tab === id ? " active" : ""), href: `#/proxmox/${x.id}${id === "overview" ? "" : "/" + id}` }, t("pve.tab." + id));
   const body = state.route.tab === "guests" ? pveGuests(x) : state.route.tab === "tasks" ? pveTasks(x) : state.route.tab === "templates" ? pveTemplates(x) : pveOverview(x);
   put(
     box,
@@ -392,7 +375,7 @@ function renderPveBody() {
       actions: [x.online && { label: t("pve.new.button"), icon: "plus", primary: true, run: () => void pveNewDialog(x) }, { label: t("pve.refresh"), icon: "refresh", run: () => refreshPve(x) }],
       more: () => [{ label: t("pve.openWeb"), icon: "external", run: () => window.open(x.url, "_blank", "noopener") }, { label: t("pve.change"), icon: "edit", run: () => pveDialog(x) }, { label: t("pve.remove") + "…", icon: "trash", danger: true, run: () => removePveDialog(x) }],
       menu: (at) => pveMenu(x, at),
-      tabs: h("nav", { class: "tabs" }, tab("overview"), tab("guests"), tab("templates"), tab("tasks")),
+      tabs: uiTabs(["overview", "guests", "templates", "tasks"].map((id) => ({ label: t("pve.tab." + id), href: `#/proxmox/${x.id}${id === "overview" ? "" : "/" + id}`, active: (state.route.tab || "overview") === id }))),
     }),
     x.error && uiCard({}, uiNotice({ tone: "bad", text: [pveError(x), t("pve.since", { ago: ago(x.error.since) })].join(" ") })),
     body,
@@ -401,101 +384,8 @@ function renderPveBody() {
 
 // --- Load over time ---
 
-/**
- * A line chart of points over time: thin lines, one shared y-axis from zero, a crosshair that snaps to the
- * nearest point with every series in its readout. Series carry `cls` (s1, s2 — the colours) and `value`.
- */
-function lineChart(points, series, { max = null, fmt, label, height = 150, head = true }) {
-  const box = h("div", { class: "chart" });
-  const tip = h("div", { class: "chart-tip", hidden: true });
-  const draw = () => {
-    const W = Math.max(280, box.clientWidth || 600);
-    const H = height;
-    const L = 52, R = 10, T = 10, B = 22;
-    const values = points.flatMap((p) => series.map((s) => s.value(p))).filter((v) => v != null);
-    const top = max ?? niceTop(Math.max(0, ...values));
-    const t0 = points[0]?.t ?? 0;
-    const t1 = points.at(-1)?.t ?? 1;
-    const x = (t) => L + ((t - t0) / Math.max(1, t1 - t0)) * (W - L - R);
-    const y = (v) => T + (1 - Math.min(1, v / (top || 1))) * (H - T - B);
-    const el = (name, attrs, text) => {
-      const e = document.createElementNS(SVG_NS, name);
-      for (const [k, v] of Object.entries(attrs)) e.setAttribute(k, String(v));
-      if (text != null) e.textContent = text;
-      return e;
-    };
-    const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, width: W, height: H, role: "img", "aria-label": label });
-    for (const f of [0, 0.5, 1]) {
-      svg.append(el("line", { class: "grid", x1: L, x2: W - R, y1: y(top * f), y2: y(top * f) }));
-      svg.append(el("text", { class: "axis", x: L - 6, y: y(top * f) + 3, "text-anchor": "end" }, fmt(top * f)));
-    }
-    const span = t1 - t0;
-    for (let i = 0; i <= 3; i++) {
-      const t = t0 + (span * i) / 3;
-      const d = new Date(t);
-      svg.append(el("text", { class: "axis", x: x(t), y: H - 6, "text-anchor": i === 0 ? "start" : i === 3 ? "end" : "middle" }, span > 2 * 86400_000 ? d.toLocaleDateString(state.lang, { day: "numeric", month: "short" }) : d.toLocaleTimeString(state.lang, { hour: "2-digit", minute: "2-digit" })));
-    }
-    for (const s of series) {
-      let d = "";
-      let pen = false;
-      for (const p of points) {
-        const v = s.value(p);
-        if (v == null) {
-          pen = false;
-          continue;
-        }
-        d += `${pen ? "L" : "M"}${x(p.t).toFixed(1)} ${y(v).toFixed(1)}`;
-        pen = true;
-      }
-      svg.append(el("path", { class: "line " + s.cls, d }));
-    }
-    const cross = el("line", { class: "cross", y1: T, y2: H - B, visibility: "hidden" });
-    const dots = series.map((s) => el("circle", { class: "dot " + s.cls, r: 4, visibility: "hidden" }));
-    svg.append(cross, ...dots);
-    const hit = el("rect", { class: "hit", x: L, y: 0, width: W - L - R, height: H });
-    svg.append(hit);
-    const show = (e) => {
-      const r = svg.getBoundingClientRect();
-      const px = ((e.clientX - r.left) / r.width) * W;
-      let best = 0;
-      for (let i = 1; i < points.length; i++) if (Math.abs(x(points[i].t) - px) < Math.abs(x(points[best].t) - px)) best = i;
-      const p = points[best];
-      if (!p) return;
-      cross.setAttribute("x1", x(p.t));
-      cross.setAttribute("x2", x(p.t));
-      cross.setAttribute("visibility", "visible");
-      series.forEach((s, i) => {
-        const v = s.value(p);
-        dots[i].setAttribute("visibility", v == null ? "hidden" : "visible");
-        if (v != null) (dots[i].setAttribute("cx", x(p.t)), dots[i].setAttribute("cy", y(v)));
-      });
-      put(tip, h("div", { class: "muted small" }, dateTime(p.t)), series.map((s) => h("div", { class: "small" }, h("i", { class: "series-key " + s.cls }), s.label, ": ", h("strong", null, s.value(p) == null ? "—" : (s.show ?? fmt)(s.value(p), p)))));
-      tip.hidden = false;
-      const left = (x(p.t) / W) * r.width;
-      tip.style.left = Math.min(Math.max(0, left + 12), r.width - tip.offsetWidth) + "px";
-    };
-    const hide = () => {
-      cross.setAttribute("visibility", "hidden");
-      dots.forEach((d) => d.setAttribute("visibility", "hidden"));
-      tip.hidden = true;
-    };
-    hit.addEventListener("pointermove", show);
-    hit.addEventListener("pointerdown", show);
-    hit.addEventListener("pointerleave", hide);
-    box.replaceChildren(svg, tip);
-  };
-  // drawn at the width it has: the text of an SVG scaled down would shrink with it
-  let drawn = 0;
-  new ResizeObserver(() => {
-    if (box.isConnected && Math.abs(box.clientWidth - drawn) > 16) ((drawn = box.clientWidth), draw());
-  }).observe(box);
-  return h(
-    "div",
-    { class: "chart-wrap" },
-    head && h("div", { class: "chart-head" }, h("strong", null, label), series.length > 1 && h("span", { class: "chart-legend" }, series.map((s) => h("span", { class: "small muted" }, h("i", { class: "series-key " + s.cls }), s.label)))),
-    points.some((p) => series.some((s) => s.value(p) != null)) ? box : h("p", { class: "muted small" }, t("pve.load.empty")),
-  );
-}
+/** The old name of the line chart (uiLineChart) */
+const lineChart = (points, series, opts) => uiLineChart(points, series, opts);
 
 /** A round top for an axis: 1, 2 or 5 times a power of ten */
 function niceTop(v) {
@@ -512,19 +402,19 @@ const rate = (v) => {
 /** The load of a node (`{ node }`) or a guest (`{ guest }`) over an hour, a day, a week or a month */
 function pveLoadDialog(x, target, title) {
   let timeframe = "hour";
-  const body = h("div", { class: "stack" }, h("p", { class: "muted" }, t("machines.loading")));
-  const seg = h("div", { class: "seg" });
+  const body = h("div", { class: "stack" }, uiEmpty({ size: "loading", text: t("machines.loading") }));
+  const seg = h("div");
   const load = async () => {
-    put(seg, ["hour", "day", "week", "month"].map((tf) => button(t("pve.load." + tf), { class: "small" + (tf === timeframe ? " on" : ""), "aria-pressed": String(tf === timeframe), onclick: () => ((timeframe = tf), load()) })));
+    put(seg, uiSegment(["hour", "day", "week", "month"].map((tf) => ({ value: tf, label: t("pve.load." + tf) })), timeframe, (tf) => ((timeframe = tf), load()), { wide: true }));
     try {
       const q = new URLSearchParams({ timeframe, ...target });
       const { points } = await api("GET", `/api/proxmox/${x.id}/load?${q}`);
       const pctOf = (p) => (p.mem != null && p.maxmem ? (p.mem / p.maxmem) * 100 : null);
       put(
         body,
-        lineChart(points, [{ cls: "s1", label: t("sys.cpu"), value: (p) => (p.cpu == null ? null : p.cpu * 100) }], { max: 100, fmt: (v) => Math.round(v) + "%", label: t("sys.cpu") }),
-        lineChart(points, [{ cls: "s1", label: t("sys.memory"), value: pctOf, show: (v, p) => `${Math.round(v)}% · ${bytes(p.mem)} / ${bytes(p.maxmem)}` }], { max: 100, fmt: (v) => Math.round(v) + "%", label: t("sys.memory") }),
-        lineChart(points, [{ cls: "s1", label: t("pve.load.in"), value: (p) => p.netin }, { cls: "s2", label: t("pve.load.out"), value: (p) => p.netout }], { fmt: rate, label: t("sys.network") }),
+        uiLineChart(points, [{ colour: 1, label: t("sys.cpu"), value: (p) => (p.cpu == null ? null : p.cpu * 100) }], { max: 100, fmt: (v) => Math.round(v) + "%", label: t("sys.cpu") }),
+        uiLineChart(points, [{ colour: 1, label: t("sys.memory"), value: pctOf, show: (v, p) => `${Math.round(v)}% · ${bytes(p.mem)} / ${bytes(p.maxmem)}` }], { max: 100, fmt: (v) => Math.round(v) + "%", label: t("sys.memory") }),
+        uiLineChart(points, [{ colour: 1, label: t("pve.load.in"), value: (p) => p.netin }, { colour: 2, label: t("pve.load.out"), value: (p) => p.netout }], { fmt: rate, label: t("sys.network") }),
       );
     } catch (e) {
       put(body, h("p", { class: "error" }, errorText(e)));
@@ -701,8 +591,9 @@ async function pveSendDialog({ host = null, kind = "import", image = null, path 
     if (f) what.value = /\.iso$/i.test(f.name) ? "iso" : /\.(qcow2|raw|vmdk)$/i.test(f.name) ? "import" : what.value;
     void places();
   } });
-  const fill = h("i");
-  const progress = h("div", { class: "stack-s", hidden: true }, h("div", { class: "bar" }, fill), h("p", { class: "muted small" }));
+  const meter = h("div", null, uiMeter(0, { kind: "progress" }));
+  const said = h("p", { class: "muted small" });
+  const progress = h("div", { class: "stack-s", hidden: true }, meter, said);
   const error = h("p", { class: "error", role: "alert" });
   const lists = new Map();
   const places = async () => {
@@ -749,12 +640,11 @@ async function pveSendDialog({ host = null, kind = "import", image = null, path 
     const f = picked.files[0];
     if (!f) return void (go.disabled = false);
     progress.hidden = false;
-    const said = progress.querySelector("p");
     const xhr = new XMLHttpRequest();
     xhr.open("POST", `/api/proxmox/${server.value}/files/upload?${new URLSearchParams({ kind: what.value, node, storage, name: f.name })}`);
     xhr.upload.onprogress = (e) => {
       const percent = e.total ? Math.floor((e.loaded / e.total) * 100) : 0;
-      fill.style.width = percent + "%";
+      put(meter, uiMeter(percent, { kind: "progress" }));
       said.textContent = percent < 100 ? t("pve.send.sending", { done: bytes(e.loaded), size: bytes(f.size) }) : t("pve.send.placing");
     };
     const failed = (text) => ((error.textContent = text), (progress.hidden = true), (go.disabled = false), dialog.removeEventListener("cancel", stay));
@@ -816,33 +706,23 @@ async function pveStorageDialog(x, s) {
       body,
       h("p", { class: "muted small" }, t("sys.free", { free: bytes(d.total - d.used), total: bytes(d.total) }), " · ", Object.entries(kinds).sort((a, b) => b[1] - a[1]).map(([k, n]) => `${t("pve.content." + k)} ${bytes(n)}`).join(" · ")),
       h("p", { class: "muted small" }, t("pve.content.scope")),
-      left.length > 0 && h("p", { class: "banner small" }, t("pve.content.orphans", { n: left.length, size: bytes(left.reduce((a, v) => a + v.size, 0)) })),
+      left.length > 0 && uiNotice({ tone: "warn", text: t("pve.content.orphans", { n: left.length, size: bytes(left.reduce((a, v) => a + v.size, 0)) }) }),
       d.items.length
-        ? h(
-            "div",
-            { class: "table-wrap" },
-            h(
-              "table",
-              null,
-              h("thead", null, h("tr", null, h("th", null, t("pve.content.col.name")), h("th", null, t("pve.col.content")), h("th", null, t("pve.content.col.whose")), h("th", null, t("pve.tpl.col.size")), h("th"))),
-              h(
-                "tbody",
-                null,
-                d.items.map((v) =>
-                  h(
-                    "tr",
-                    null,
-                    h("td", null, h("div", { class: "mono small wrap" }, v.volid.replace(/^[^:]+:/, "")), (v.at > 0 || v.notes) && h("div", { class: "muted small" }, [v.at ? dateTime(v.at) : "", v.notes].filter(Boolean).join(" · "))),
-                    h("td", { class: "small" }, t("pve.content." + v.content)),
-                    h("td", { class: "small" }, v.orphan ? h("span", { class: "chip warn" }, t("pve.content.gone", { vmid: v.vmid })) : v.guest ? `${v.guest} (${v.vmid})` : "—", v.protected && h("span", { class: "chip" }, t("pve.protected"))),
-                    h("td", { class: "small" }, bytes(v.size)),
-                    h("td", null, v.deletable && button("", { class: "small ghost", title: t("pve.content.remove"), "aria-label": t("pve.content.remove"), onclick: () => pveVolumeRemove(x, s, v, paint) }, "trash")),
-                  ),
-                ),
-              ),
-            ),
+        ? uiTable(
+            [{ label: t("pve.content.col.name") }, { label: t("pve.col.content") }, { label: t("pve.content.col.whose") }, { label: t("pve.tpl.col.size"), num: true }, { label: "" }],
+            d.items.map((v) => ({
+              sub: (v.at > 0 || v.notes) && [v.at ? dateTime(v.at) : "", v.notes].filter(Boolean).join(" · "),
+              cells: [
+                h("span", { class: "mono small wrap" }, v.volid.replace(/^[^:]+:/, "")),
+                h("span", { class: "small" }, t("pve.content." + v.content)),
+                uiLine([v.orphan ? uiState("warn", t("pve.content.gone", { vmid: v.vmid })) : h("span", { class: "small" }, v.guest ? `${v.guest} (${v.vmid})` : "—"), v.protected && uiTag(t("pve.protected"))]),
+                h("span", { class: "small" }, bytes(v.size)),
+                v.deletable && button("", { class: "small ghost", title: t("pve.content.remove"), "aria-label": t("pve.content.remove"), onclick: () => pveVolumeRemove(x, s, v, paint) }, "trash"),
+              ],
+            })),
+            { height: 44 },
           )
-        : h("p", { class: "muted" }, t("pve.content.empty")),
+        : uiEmpty({ text: t("pve.content.empty") }),
     );
   };
   void paint();
@@ -883,7 +763,7 @@ function pveUpdatesDialog(x, node, v) {
     "wide",
     h("header", null, h("h2", { class: "grow" }, t("pve.ver.title", { node })), closeX(() => dialog)),
     h("p", { class: "muted small" }, t(v.all === null ? "pve.ver.leadProxmox" : "pve.ver.leadAll", { n: v.all ?? 0 })),
-    v.newer.length > 0 && h("div", { class: "table-wrap" }, h("table", null, h("thead", null, h("tr", null, h("th", null, t("pve.ver.col.package")), h("th", null, t("pve.ver.col.now")), h("th", null, t("pve.ver.col.new")))), h("tbody", null, v.newer.map((p) => h("tr", null, h("td", { class: "mono small" }, p.name), h("td", { class: "mono small muted" }, p.from), h("td", { class: "mono small" }, p.to)))))),
+    v.newer.length > 0 && uiTable([{ label: t("pve.ver.col.package") }, { label: t("pve.ver.col.now") }, { label: t("pve.ver.col.new") }], v.newer.map((p) => ({ cells: [h("span", { class: "mono small" }, p.name), h("span", { class: "mono small muted" }, p.from), h("span", { class: "mono small" }, p.to)] })), { height: 44 }),
     h("p", { class: "muted small" }, t("pve.ver.how"), " ", h("a", { class: "link", href: x.url, target: "_blank", rel: "noopener noreferrer" }, x.url)),
     h("footer", null, closeButton(() => dialog)),
   );
@@ -937,8 +817,8 @@ function pveOverview(x) {
     "div",
     { class: "stack" },
     self && uiCard({}, uiNotice({ tone: "info", icon: "home", text: t("pve.selfHere", { guest: `${guestKind(self)} ${self.name}`, node: self.node }) })),
-    x.trouble.length > 0 && uiCard({ title: t("attention.title"), marks: uiCount(x.trouble.length), flush: true, cls: "area-attention" }, h("div", { class: "ui-rows attention-list" }, x.trouble.map((item) => attentionItem(item)))),
-    uiCard({ title: t("pve.nodesTitle"), count: x.nodes.length > 1 ? x.nodes.length : null, flush: true, cls: "pve-nodes" }, ...x.nodes.flatMap(node)),
+    x.trouble.length > 0 && uiCard({ title: t("attention.title"), marks: uiCount(x.trouble.length), flush: true }, h("div", { class: "ui-rows" }, x.trouble.map((item) => attentionItem(item)))),
+    uiCard({ title: t("pve.nodesTitle"), count: x.nodes.length > 1 ? x.nodes.length : null, flush: true }, ...x.nodes.flatMap(node)),
     uiCard(
       { title: t("pve.storagesTitle"), flush: true },
       uiTable([{ label: t("pve.col.storage") }, { label: t("pve.col.type") }, { label: t("pve.col.content") }, { label: t("pve.col.use") }], x.storages.map(storage)),
@@ -972,7 +852,7 @@ function pveScheduleCard(x) {
       el.disabled = false;
     },
   }, "play");
-  const last = x.last && h("span", { class: "with-state" }, dateTime(x.last.at), " ", x.last.ok ? uiState("ok", t("pve.sched.lastOk", { n: x.last.guests, pruned: x.last.pruned })) : uiState("bad", t("pve.sched.lastFailed", { message: x.last.message })));
+  const last = x.last && uiLine([dateTime(x.last.at), x.last.ok ? uiState("ok", t("pve.sched.lastOk", { n: x.last.guests, pruned: x.last.pruned })) : uiState("bad", t("pve.sched.lastFailed", { message: x.last.message }))], { end: true });
   return uiCard(
     { title: t("pve.sched.title"), lead: t("pve.sched.lead"), actions: [button(t("pve.sched.edit"), { class: "small", onclick: () => pveScheduleDialog(x) }, "sliders"), run].filter(Boolean) },
     ...uiFacts([
@@ -998,7 +878,7 @@ function pveScheduleDialog(x) {
   const chosen = radio("chosen", s.guests !== "all");
   const mine = x.guests.filter((g) => !g.template && g.may.backup);
   const boxes = mine.map((g) => ({ g, box: h("input", { type: "checkbox", checked: s.guests !== "all" && s.guests.includes(g.vmid) }) }));
-  const list = h("div", { class: "stack-s pve-pick", hidden: s.guests === "all" }, boxes.map(({ g, box }) => h("label", { class: "check" }, box, h("span", null, `${g.name} (${g.vmid})`))));
+  const list = h("div", { class: "stack-s", hidden: s.guests === "all" }, boxes.map(({ g, box }) => uiCheck(`${g.name} (${g.vmid})`, box)));
   const error = h("p", { class: "error", role: "alert" });
   let dialog;
   const send = async (e) => {
@@ -1020,11 +900,11 @@ function pveScheduleDialog(x) {
       { class: "stack", onsubmit: send },
       h("header", null, h("h2", { class: "grow" }, t("pve.sched.dialog", { name: x.name })), closeX(() => dialog)),
       h("p", { class: "muted small" }, t("pve.sched.lead")),
-      !x.scheduleStorages.length && h("p", { class: "banner small" }, t("pve.sched.noStorage")),
-      h("label", { class: "check" }, on, h("span", null, h("strong", null, t("pve.sched.enable")))),
-      h("div", { class: "form-pair" }, field(t("pve.sched.time"), time), field(t("pve.sched.storage"), storage)),
+      !x.scheduleStorages.length && uiNotice({ tone: "warn", text: t("pve.sched.noStorage") }),
+      uiCheck(h("strong", null, t("pve.sched.enable")), on),
+      uiFields(field(t("pve.sched.time"), time), field(t("pve.sched.storage"), storage)),
       field(t("pve.sched.keep"), keep),
-      h("div", { class: "stack-s" }, h("span", { class: "label" }, t("pve.sched.guests")), h("label", { class: "check" }, all, h("span", null, t("pve.sched.guestsAll"))), h("label", { class: "check" }, chosen, h("span", null, t("pve.sched.guestsChosen"))), list),
+      uiField(t("pve.sched.guests"), h("div", { class: "stack-s" }, uiCheck(t("pve.sched.guestsAll"), all), uiCheck(t("pve.sched.guestsChosen"), chosen), list), null, { group: true }),
       error,
       h("footer", null, closeButton(() => dialog, t("common.cancel")), h("button", { type: "submit", class: "btn primary" }, icon("check"), h("span", null, t("settings.save")))),
     ),
@@ -1093,7 +973,7 @@ function pveGuests(x) {
         guestChip(g),
         h("span", { class: "small" }, load),
         h("span", { class: "muted small" }, up ? duration(g.uptime) : "—"),
-        h("div", { class: "row-actions end", onclick: (e) => e.stopPropagation() }, action, uiMore(more, { size: "s" })),
+        h("div", { onclick: (e) => e.stopPropagation() }, uiLine([action, uiMore(more, { size: "s" })], { end: true })),
       ],
       sub: [guestKind(g), load].join(" · "),
     };
@@ -1102,7 +982,7 @@ function pveGuests(x) {
     { flush: true },
     note,
     guests.length
-      ? uiTable([{ label: t("pve.col.name") }, { label: "ID" }, { label: t("app.col.state") }, { label: t("pve.col.load") }, { label: t("pve.col.uptime") }, { label: "" }], guests.map(row), { cls: "pve-guests" })
+      ? uiTable([{ label: t("pve.col.name") }, { label: "ID" }, { label: t("app.col.state") }, { label: t("pve.col.load") }, { label: t("pve.col.uptime") }, { label: "" }], guests.map(row))
       : uiEmpty({ size: "big", icon: "box", title: t("pve.noGuests"), action: x.online && button(t("pve.new.button"), { class: "primary", onclick: () => void pveNewDialog(x) }, "plus") }),
   );
 }
@@ -1127,7 +1007,7 @@ function pvePowerDialog(x, g, action, then) {
     h("h2", { class: "wrap" }, t(`pve.${action}Title`, { name: g.name })),
     h("p", { class: "muted" }, t(`pve.${action}Lead`)),
     // the guest Hata itself runs in: the page goes with it
-    g.id === x.self && h("p", { class: "card pad warn-box" }, t(action === "reboot" ? "pve.selfReboot" : "pve.selfDown")),
+    g.id === x.self && uiNotice({ tone: "warn", text: t(action === "reboot" ? "pve.selfReboot" : "pve.selfDown") }),
     h(
       "footer",
       null,
@@ -1159,10 +1039,10 @@ function clientLineFor(os, address, code) {
 function pveConsoleDialog(x, g) {
   let dialog;
   if (g.type === "qemu") {
-    dialog = openDialog("xwide", h("header", null, h("h2", { class: "clip grow" }, `${g.name} · ${guestKind(g)}`), closeX(() => dialog)), h("p", { class: "muted small" }, t("pve.screenHint")), h("div", { class: "term-holder" }, h("iframe", { class: "term-frame", src: "/screen.html?" + new URLSearchParams({ pve: x.id, guest: g.id, lang: state.lang }), title: t("pve.screen") })));
+    dialog = openDialog("xwide", h("header", null, h("h2", { class: "clip grow" }, `${g.name} · ${guestKind(g)}`), closeX(() => dialog)), h("p", { class: "muted small" }, t("pve.screenHint")), uiEmbed(h("iframe", { src: "/screen.html?" + new URLSearchParams({ pve: x.id, guest: g.id, lang: state.lang }), title: t("pve.screen") })));
     return;
   }
-  dialog = openDialog("xwide", h("header", null, h("h2", { class: "clip grow" }, `${g.name} · ${guestKind(g)}`), closeX(() => dialog)), h("p", { class: "muted small" }, t("pve.consoleHint")), h("div", { class: "term-holder" }, terminalFrame({ pve: x.id, guest: g.id })));
+  dialog = openDialog("xwide", h("header", null, h("h2", { class: "clip grow" }, `${g.name} · ${guestKind(g)}`), closeX(() => dialog)), h("p", { class: "muted small" }, t("pve.consoleHint")), uiEmbed(terminalFrame({ pve: x.id, guest: g.id })));
 }
 
 /**
@@ -1185,24 +1065,26 @@ async function pveClientDialog(x, g) {
   const addresses = [...new Set([invite.lan, location.origin, invite.local].filter(Boolean).map((a) => a.replace(/\/$/, "")))];
   let address = addresses[0];
   const line = () => clientLineFor(os, address, invite.code);
-  const cmd = h("span", { class: "grow mono machine-line" }, line() ?? "");
-  const waiting = h("p", { class: "machine-wait" }, h("span", { class: "machine-pulse" }), t("pve.client.waiting"));
+  const cmd = h("div", null, uiCommand(line() ?? "", { block: true }));
+  const waiting = h("div", null, uiEmpty({ size: "loading", text: t("pve.client.waiting") }));
   const consoleUrl = `${x.url}/?console=${g.type === "lxc" ? "lxc" : "kvm"}&${g.type === "lxc" ? "xtermjs=1&" : "novnc=1&"}vmid=${g.vmid}&vmname=${encodeURIComponent(g.name)}&node=${encodeURIComponent(g.node)}`;
   let dialog;
   dialog = openDialog(
     "wide",
     h("header", null, h("h2", { class: "grow" }, t("pve.client.title", { name: g.name })), closeX(() => dialog)),
     h("p", null, t("pve.client.lead")),
-    h("ul", { class: "stack-s small pve-gives" }, ["apps", "files", "terminal", "backups", "power"].map((k) => h("li", null, t("pve.client.gives." + k)))),
+    uiProse(h("ul", { class: "small" }, ["apps", "files", "terminal", "backups", "power"].map((k) => h("li", null, t("pve.client.gives." + k))))),
     line() === null
-      ? h("p", { class: "card pad warn-box" }, t("pve.client.unsupported", { os }))
+      ? uiNotice({ tone: "warn", text: t("pve.client.unsupported", { os }) })
       : [
           auto &&
-            h(
-              "div",
-              { class: "card pad pve-offer" },
-              h("div", { class: "grow stack-s" }, h("strong", null, t("pve.client.auto")), h("p", { class: "muted small" }, t("pve.client.autoLead")), rootPassword),
-              button(t("pve.client.autoButton"), {
+            uiNotice({
+              tone: "info",
+              icon: "download",
+              title: t("pve.client.auto"),
+              text: t("pve.client.autoLead"),
+              foot: rootPassword,
+              action: button(t("pve.client.autoButton"), {
                 class: "primary",
                 onclick: async (e) => {
                   if (!rootPassword.value) return rootPassword.focus();
@@ -1222,11 +1104,11 @@ async function pveClientDialog(x, g) {
                   }
                 },
               }, "download"),
-            ),
+            }),
           h("p", { class: "strong" }, t(auto ? "pve.client.howHand" : "pve.client.how")),
-          h("ol", { class: "stack-s small" }, h("li", null, t("pve.client.step1"), " ", h("a", { class: "link", href: consoleUrl, target: "_blank", rel: "noopener noreferrer" }, t("pve.client.openConsole"))), h("li", null, t("pve.client.step2")), h("li", null, t(g.status === "running" ? "pve.client.step3" : "pve.client.step3stopped"))),
-          addresses.length > 1 && h("select", { onchange: (e) => ((address = e.target.value), (cmd.textContent = line())) }, addresses.map((a) => h("option", { value: a }, a))),
-          h("p", { class: "cmd whole" }, cmd, h("button", { type: "button", class: "icon-btn", title: t("twofa.copy"), "aria-label": t("twofa.copy"), onclick: () => copyText(line()) }, icon("copy"))),
+          uiProse(h("ol", { class: "small" }, h("li", null, t("pve.client.step1"), " ", h("a", { class: "link", href: consoleUrl, target: "_blank", rel: "noopener noreferrer" }, t("pve.client.openConsole"))), h("li", null, t("pve.client.step2")), h("li", null, t(g.status === "running" ? "pve.client.step3" : "pve.client.step3stopped")))),
+          addresses.length > 1 && h("select", { onchange: (e) => ((address = e.target.value), put(cmd, uiCommand(line(), { block: true }))) }, addresses.map((a) => h("option", { value: a }, a))),
+          cmd,
           h("p", { class: "muted small" }, t("machines.addHint", { minutes: Math.round(invite.valid / 60000) })),
           waiting,
         ],
@@ -1237,8 +1119,7 @@ async function pveClientDialog(x, g) {
     const fresh = list?.machines.find((m) => !known.has(m.id));
     if (!fresh) return;
     machinesUi.list = list;
-    waiting.replaceChildren(icon("check"), h("span", null, t("machines.addDone", { name: fresh.name })), h("a", { class: "btn small primary", href: `#/machines/${fresh.id}`, onclick: () => dialog.close() }, t("common.open")));
-    waiting.classList.add("done");
+    put(waiting, uiNotice({ tone: "ok", text: t("machines.addDone", { name: fresh.name }), action: h("a", { class: "btn small primary", href: `#/machines/${fresh.id}`, onclick: () => dialog.close() }, t("common.open")) }));
     clearInterval(timer);
     void loadPve();
   };
@@ -1361,7 +1242,7 @@ async function paintGuestParts(box, hostId, guestId, withHead = true) {
   // on a computer's page its own head stays; what Proxmox does with the guest is a card of its own on top
   const proxmox = withHead && uiCard({ title: `${guestKind(g)} · ${pveUi.host.name}`, marks: guestChip(g), actions: [...actions.map((a) => button(a.label, { class: "small", onclick: a.run }, a.icon)), more.length > 0 && uiMore(more, { size: "s" })].filter(Boolean) });
   // its own page lays the cards out in two columns; inside a computer's page they stand one under another
-  put(box, proxmox, ...parts, ...(withHead ? [cards.snapshots, cards.backups, cards.facts] : [h("div", { class: "columns" }, h("div", { class: "stack" }, cards.snapshots, cards.backups), h("aside", { class: "side stack" }, cards.facts))]));
+  put(box, proxmox, ...parts, ...(withHead ? [cards.snapshots, cards.backups, cards.facts] : [uiColumns([cards.snapshots, cards.backups], cards.facts)]));
   void load();
   return { g, actions, more };
 }
@@ -1433,19 +1314,19 @@ async function pveEditDialog(x, g) {
       submit.disabled = false;
     }
   };
-  const pair = (...items) => h("div", { class: "form-pair" }, ...items);
+  const pair = uiFields;
   dialog = openDialog(
     "wide",
     h(
       "form",
       { class: "stack", onsubmit: send },
       h("header", null, h("h2", { class: "grow" }, t("pve.edit.title", { name: g.name })), closeX(() => dialog)),
-      r.pending.length > 0 && h("p", { class: "banner small" }, t("pve.edit.waiting", { list: r.pending.join(", ") })),
+      r.pending.length > 0 && uiNotice({ tone: "warn", text: t("pve.edit.waiting", { list: r.pending.join(", ") }) }),
       field(t(lxc ? "pve.new.hostname" : "pve.edit.name"), name),
       pair(field(t("pve.new.cores"), cores), field(t("pve.edit.memory"), memory, r.running && !lxc ? t("pve.edit.vmRestart") : null)),
       lxc && field(t("pve.edit.swap"), swap),
       disks.map(({ d, input }) => field(t("pve.edit.disk", { disk: d.key, storage: d.storage }), input, t("pve.edit.diskHint"))),
-      h("label", { class: "check" }, onboot, h("span", null, h("strong", null, t("pve.onboot")))),
+      uiCheck(h("strong", null, t("pve.onboot")), onboot),
       field(t("pve.tags"), tags, t("pve.edit.tagsHint")),
       field(t("pve.edit.notes"), notes),
       !(r.may.configure && r.may.cpu && r.may.memory && r.may.disk) && h("p", { class: "muted small" }, t("pve.edit.someRefused")),
@@ -1500,11 +1381,11 @@ async function pveCloneDialog(x, g) {
       { class: "stack", onsubmit: send },
       h("header", null, h("h2", { class: "grow" }, t("pve.clone.title", { name: g.name })), closeX(() => dialog)),
       h("p", { class: "muted small" }, t(g.template ? "pve.clone.leadTemplate" : "pve.clone.lead")),
-      blocked && h("p", { class: "banner small" }, t("pve.clone.stopFirst", { name: g.name })),
-      h("div", { class: "form-pair" }, field(t(g.type === "lxc" ? "pve.new.hostname" : "pve.edit.name"), name), field("ID", vmid, o.ids ? t("pve.new.idsHint", o.ids) : null)),
-      g.template && h("label", { class: "check" }, linked, h("span", null, h("strong", null, t("pve.clone.linked")), h("span", { class: "muted small block" }, t("pve.clone.linkedHint")))),
-      h("div", { class: "form-pair" }, field(t("pve.restore.storage"), storage), (o.pools.length > 0 || !o.free) && field(t("pve.pool"), pool)),
-      h("label", { class: "check" }, start, h("span", null, h("strong", null, t("pve.clone.start")))),
+      blocked && uiNotice({ tone: "warn", text: t("pve.clone.stopFirst", { name: g.name }) }),
+      uiFields(field(t(g.type === "lxc" ? "pve.new.hostname" : "pve.edit.name"), name), field("ID", vmid, o.ids ? t("pve.new.idsHint", o.ids) : null)),
+      g.template && uiCheck(h("strong", null, t("pve.clone.linked")), linked, t("pve.clone.linkedHint")),
+      uiFields(field(t("pve.restore.storage"), storage), (o.pools.length > 0 || !o.free) && field(t("pve.pool"), pool)),
+      uiCheck(h("strong", null, t("pve.clone.start")), start),
       error,
       h("footer", null, closeButton(() => dialog, t("common.cancel")), h("button", { type: "submit", class: "btn primary", disabled: blocked }, icon("copy"), h("span", null, t("pve.clone.go")))),
     ),
@@ -1554,7 +1435,7 @@ async function pveRestoreDialog(x, g, b) {
   pool.value = o.pools.includes(o.pool) ? o.pool : (pool.options[0]?.value ?? "");
   const start = h("input", { type: "checkbox" });
   const typed = h("input", { autocomplete: "off", spellcheck: false, class: "mono", oninput: () => paint() });
-  const newPart = h("div", { class: "stack-s" }, h("div", { class: "form-pair" }, field("ID", vmid, o.ids ? t("pve.new.idsHint", o.ids) : null), (o.pools.length > 0 || !o.free) && field(t("pve.pool"), pool)));
+  const newPart = h("div", { class: "stack-s" }, uiFields(field("ID", vmid, o.ids ? t("pve.new.idsHint", o.ids) : null), (o.pools.length > 0 || !o.free) && field(t("pve.pool"), pool)));
   const replacePart = h("div", { class: "stack-s", hidden: true }, field(t("pve.typeName", { name: g.name }), typed));
   const error = h("p", { class: "error", role: "alert" });
   const go = h("button", { type: "submit", class: "btn primary" }, icon("undo"), h("span", null, t("pve.restore.go")));
@@ -1581,7 +1462,7 @@ async function pveRestoreDialog(x, g, b) {
       go.disabled = false;
     }
   };
-  const choice = (input, title, hint) => h("label", { class: "check" }, input, h("span", null, h("strong", null, title), h("span", { class: "muted small block" }, hint)));
+  const choice = (input, title, hint) => uiCheck(h("strong", null, title), input, hint);
   dialog = openDialog(
     "wide",
     h(
@@ -1594,7 +1475,7 @@ async function pveRestoreDialog(x, g, b) {
       choice(instead, t("pve.restore.replace", { name: g.name }), o.self ? t("pve.restore.selfNo") : !stopped ? t("pve.restore.stopFirst", { name: g.name }) : t("pve.restore.replaceHint", { name: g.name })),
       replacePart,
       field(t("pve.restore.storage"), storage),
-      h("label", { class: "check" }, start, h("span", null, h("strong", null, t("pve.restore.start")))),
+      uiCheck(h("strong", null, t("pve.restore.start")), start),
       error,
       h("footer", null, closeButton(() => (dialog.close(), pveGuestDialog(x, g), dialog), t("common.cancel")), go),
     ),
@@ -1723,13 +1604,13 @@ function pveTasks(x) {
 }
 
 async function pveTaskDialog(x, task, target) {
-  const log = h("pre", { class: "log" }, t("machines.loading"));
+  const log = h("div", null, uiEmpty({ size: "loading", text: t("machines.loading") }));
   let dialog;
   dialog = openDialog("wide", h("header", null, h("h2", { class: "grow" }, (has("pve.task." + task.type) ? t("pve.task." + task.type) : task.type) + (target ? " · " + target : "")), closeX(() => dialog)), h("p", { class: "muted small" }, dateTime(task.start * 1000), " · ", task.user, " · ", task.end === null ? t("pve.taskRunning") : task.status), log, h("footer", null, closeButton(() => dialog)));
   try {
     const { lines } = await api("GET", `/api/proxmox/${x.id}/tasks/log?upid=${encodeURIComponent(task.upid)}`);
-    log.textContent = lines.join("\n") || "—";
+    put(log, uiCommand(lines.join("\n") || "—", { block: true }));
   } catch (e) {
-    log.textContent = errorText(e);
+    put(log, uiNotice({ tone: "bad", text: errorText(e) }));
   }
 }

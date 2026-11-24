@@ -6457,5 +6457,7 @@
   "tree.none": "Nothing here yet.",
   "server.appsRunning": "Running",
   "server.appsOf": "{running} of {all}",
-  "ui.optional": "optional"
+  "ui.optional": "optional",
+  "update.col.line": "Line",
+  "update.col.change": "Change"
 }

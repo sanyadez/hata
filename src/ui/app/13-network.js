@@ -30,7 +30,7 @@ function trialDialog(pending, after) {
     h("header", null, h("h2", null, t("network.trial.title", { nic: pending.nic }))),
     h("p", null, t("network.trial.lead"), " ", left),
     note,
-    link && h("div", { class: "banner stack" }, h("p", null, t("network.trial.moved", { address: pending.address })), h("a", { class: "link", href: link }, link.replace(/\?.*/, ""), icon("external"))),
+    link && uiNotice({ tone: "warn", text: t("network.trial.moved", { address: pending.address }), foot: h("a", { class: "link", href: link }, link.replace(/\?.*/, ""), icon("external")) }),
     h(
       "footer",
       null,
@@ -120,15 +120,15 @@ function nicDialog(nic) {
         },
       },
       h("header", null, h("h2", { class: "grow" }, t("network.change.title", { nic: nic.name })), closeX(() => dialog)),
-      h("label", { class: "check" }, auto, h("span", null, h("strong", null, t("network.auto")), h("span", { class: "muted small block" }, t("network.autoHint")))),
-      h("label", { class: "check" }, manual, h("span", null, h("strong", null, t("network.manual")), h("span", { class: "muted small block" }, t("network.manualHint")))),
+      uiCheck(h("strong", null, t("network.auto")), auto, t("network.autoHint")),
+      uiCheck(h("strong", null, t("network.manual")), manual, t("network.manualHint")),
       fixed,
-      canShare && h("label", { class: "check" }, shared, h("span", null, h("strong", null, t("network.share")), h("span", { class: "muted small block" }, t("network.shareHint")))),
+      canShare && uiCheck(h("strong", null, t("network.share")), shared, t("network.shareHint")),
       ownField,
       dnsField,
       six,
       needs,
-      h("p", { class: "banner small" }, t("network.trial.promise", { n: state.network.trial })),
+      uiNotice({ tone: "warn", text: t("network.trial.promise", { n: state.network.trial }) }),
       error,
       h("footer", null, closeButton(() => dialog, t("common.cancel")), h("button", { class: "btn primary" }, t("network.apply"))),
     ),
@@ -142,7 +142,7 @@ function handOverDialog(nic) {
     h("header", null, h("h2", { class: "grow" }, t("network.handover.title", { nic: nic.name })), closeX(() => dialog)),
     h("p", null, t("network.handover.lead")),
     h("p", { class: "muted small" }, t(nic.manager === "ifupdown" ? "network.handover.howIfupdown" : "network.handover.how", { nic: nic.name })),
-    h("p", { class: "banner small" }, t("network.trial.promise", { n: state.network.trial })),
+    uiNotice({ tone: "warn", text: t("network.trial.promise", { n: state.network.trial }) }),
     error,
     h(
       "footer",
@@ -205,11 +205,11 @@ async function homeBridgeDialog(nic, after) {
     h("header", null, h("h2", { class: "grow" }, t("bridge.title")), closeX(() => dialog)),
     h("p", null, t("bridge.lead")),
     h("ul", { class: "muted small" }, ["router", "card", "nat", "wifi"].map((k) => h("li", null, t("bridge.what." + k)))),
-    state.network.tool !== "ok" && h("p", { class: "banner small" }, t("bridge.needsNm")),
-    fit.length ? field(t("bridge.card"), pick, t("bridge.cardHint")) : h("p", { class: "banner small" }, t("bridge.noCard")),
+    state.network.tool !== "ok" && uiNotice({ tone: "warn", text: t("bridge.needsNm") }),
+    fit.length ? field(t("bridge.card"), pick, t("bridge.cardHint")) : uiNotice({ tone: "warn", text: t("bridge.noCard") }),
     cards.filter((n) => bridgeWhy(n)).length > 0 && h("ul", { class: "muted small" }, cards.filter((n) => bridgeWhy(n)).map((n) => h("li", null, `${n.name}: ${t("error.network.bridge." + bridgeWhy(n))}`))),
     h("p", { class: "muted small" }, t("bridge.how", { bridge: "hatalan0" })),
-    h("p", { class: "banner small" }, t("network.trial.promise", { n: state.network.trial })),
+    uiNotice({ tone: "warn", text: t("network.trial.promise", { n: state.network.trial }) }),
     error,
     h("footer", null, closeButton(() => dialog, t("common.cancel")), go),
   );
@@ -222,7 +222,7 @@ function bridgeApartDialog(nic) {
     "",
     h("header", null, h("h2", { class: "grow" }, t("bridge.apartTitle")), closeX(() => dialog)),
     h("p", null, t("bridge.apartLead", { card: (nic.ports ?? [])[0] ?? "" })),
-    h("p", { class: "banner small" }, t("network.trial.promise", { n: state.network.trial })),
+    uiNotice({ tone: "warn", text: t("network.trial.promise", { n: state.network.trial }) }),
     error,
     h(
       "footer",
@@ -274,13 +274,14 @@ function outsideDialog(nic) {
     h("ul", { class: "muted small" }, ["pages", "folders", "announce", "remote"].map((key) => h("li", null, t("outside.what." + key)))),
     h("p", { class: "muted small" }, t("outside.still")),
     needs &&
-      h(
-        "div",
-        { class: "banner stack" },
-        h("strong", null, t("outside.needs.what")),
-        h("p", { class: "muted small" }, t("outside.needs.why")),
-        needs.install ? h("p", { class: "cmd" }, icon("terminal"), needs.install) : h("p", { class: "muted small" }, t("mounting.needs.byHand", { package: needs.package })),
-        needs.install &&
+      uiNotice({
+        tone: "info",
+        icon: "package",
+        title: t("outside.needs.what"),
+        text: t("outside.needs.why"),
+        command: needs.install ? uiCommand(needs.install) : h("p", { class: "muted small" }, t("mounting.needs.byHand", { package: needs.package })),
+        action:
+          needs.install &&
           button(t("mounting.needs.install", { package: needs.package }), {
             class: "small",
             onclick: async (e) => {
@@ -296,7 +297,7 @@ function outsideDialog(nic) {
               }
             },
           }),
-      ),
+      }),
     error,
     h("footer", null, closeButton(() => dialog, t("common.cancel")), go),
   );
@@ -310,7 +311,7 @@ function handBackDialog(nic) {
     h("header", null, h("h2", { class: "grow" }, t("network.handback.title", { nic: nic.name })), closeX(() => dialog)),
     h("p", null, t("network.handback.lead", { service: t("network.by." + nic.handed) })),
     h("p", { class: "muted small" }, t(nic.handed === "ifupdown" ? "network.handback.howIfupdown" : "network.handback.how", { nic: nic.name })),
-    h("p", { class: "banner small" }, t("network.trial.promise", { n: state.network.trial })),
+    uiNotice({ tone: "warn", text: t("network.trial.promise", { n: state.network.trial }) }),
     error,
     h(
       "footer",
@@ -337,7 +338,7 @@ function handBackDialog(nic) {
 
 /** The Wi-Fi networks in reach of an interface: pick one, type its password */
 function wifiDialog(nic) {
-  const list = h("div", { class: "stack" }, h("p", { class: "muted" }, t("wifi.looking")));
+  const list = h("div", { class: "ui-rows" }, h("p", { class: "muted" }, t("wifi.looking")));
   const error = h("p", { class: "error", role: "alert" });
   const bars = (signal) => h("span", { class: "muted small mono" }, `${signal}%`);
   const join = (net, row) => {
@@ -347,7 +348,6 @@ function wifiDialog(nic) {
     const form = h(
       "form",
       {
-        class: "pair",
         onsubmit: async (e) => {
           e.preventDefault();
           error.textContent = "";
@@ -365,8 +365,7 @@ function wifiDialog(nic) {
           }
         },
       },
-      needs && password,
-      go,
+      uiLine([needs && password, go]),
     );
     row.after(form);
     if (needs) password.focus();
@@ -375,14 +374,14 @@ function wifiDialog(nic) {
     list.replaceChildren(
       ...(networks.length
         ? networks.map((net) => {
-            const row = h(
-              "button",
-              { type: "button", class: "menu-item", disabled: net.active, onclick: () => (list.querySelector("form")?.remove(), join(net, row)) },
-              icon(net.secure ? "lock" : "network"),
-              h("span", { class: "grow" }, net.ssid, net.active && h("span", { class: "muted small" }, " · " + t("wifi.active")), !net.active && net.known && h("span", { class: "muted small" }, " · " + t("wifi.known"))),
-              h("span", { class: "muted small" }, `${net.band} GHz`),
-              bars(net.signal),
-            );
+            const row = uiRow({
+              lead: { icon: net.secure ? "lock" : "network" },
+              name: net.ssid,
+              sub: net.active ? t("wifi.active") : net.known ? t("wifi.known") : null,
+              value: `${net.band} GHz`,
+              state: bars(net.signal),
+              onclick: net.active ? null : () => (list.querySelector("form")?.remove(), join(net, row)),
+            });
             return row;
           })
         : [h("p", { class: "muted" }, t("wifi.none"))]),
@@ -431,7 +430,7 @@ function wifiDialog(nic) {
       error.textContent = errorText(err);
     }
   };
-  const dialog = openDialog("", h("header", null, h("h2", { class: "grow" }, t("wifi.title", { nic: nic.name })), closeX(() => dialog)), nic.wifi.hotspot && h("p", { class: "banner small" }, t("wifi.endsHotspot", { ssid: nic.wifi.hotspot.ssid })), list, error, h("footer", null, button(t("wifi.again"), { onclick: () => (list.replaceChildren(h("p", { class: "muted" }, t("wifi.looking"))), look()) }, "refresh"), button(t("wifi.other"), { onclick: other }), closeButton(() => dialog)));
+  const dialog = openDialog("", h("header", null, h("h2", { class: "grow" }, t("wifi.title", { nic: nic.name })), closeX(() => dialog)), nic.wifi.hotspot && uiNotice({ tone: "warn", text: t("wifi.endsHotspot", { ssid: nic.wifi.hotspot.ssid }) }), list, error, h("footer", null, button(t("wifi.again"), { onclick: () => (list.replaceChildren(h("p", { class: "muted" }, t("wifi.looking"))), look()) }, "refresh"), button(t("wifi.other"), { onclick: other }), closeButton(() => dialog)));
   void look();
 }
 
@@ -448,18 +447,18 @@ function hotspotDialog(nic, settings = false) {
   };
   let dialog;
   if (spot) {
-    const code = h("div", { class: "qr-box" });
+    const code = uiQr();
     void api("GET", `/api/network/${nic.name}/hotspot`).then((res) => code.replaceChildren(qrSvg(res.qr)), () => {});
     dialog = openDialog(
       "",
       h("header", null, h("h2", { class: "grow" }, t("hotspot.title")), closeX(() => dialog)),
       code,
       h("p", { class: "muted small" }, t("hotspot.scan")),
-      h("div", { class: "kv" }, h("span", { class: "muted" }, t("hotspot.name")), h("span", null, spot.ssid)),
-      h("div", { class: "kv" }, h("span", { class: "muted" }, t("wifi.password")), h("span", { class: "mono" }, spot.password)),
-      h("div", { class: "kv" }, h("span", { class: "muted" }, t("hotspot.address")), h("span", { class: "mono" }, `http://${(nic.addresses[0] ?? "").split("/")[0]}${location.port ? ":" + location.port : ""}`)),
+      uiFacts([[t("hotspot.name"), spot.ssid]]),
+      uiFacts([[t("wifi.password"), h("span", { class: "mono" }, spot.password)]]),
+      uiFacts([[t("hotspot.address"), h("span", { class: "mono" }, `http://${(nic.addresses[0] ?? "").split("/")[0]}${location.port ? ":" + location.port : ""}`)]]),
       h("h3", null, t("hotspot.clients", { n: spot.clients.length })),
-      spot.clients.length ? spot.clients.map((c) => h("div", { class: "kv" }, h("span", null, c.name || c.mac), h("span", { class: "mono muted small" }, c.ip))) : h("p", { class: "muted small" }, t("hotspot.nobody")),
+      spot.clients.length ? spot.clients.map((c) => uiFacts([[c.name || c.mac, h("span", { class: "mono muted small" }, c.ip)]])) : h("p", { class: "muted small" }, t("hotspot.nobody")),
       error,
       h(
         "footer",
@@ -513,8 +512,8 @@ function hotspotDialog(nic, settings = false) {
       },
       h("header", null, h("h2", { class: "grow" }, t("hotspot.title")), closeX(() => dialog)),
       !on && h("p", { class: "muted small" }, t("hotspot.lead")),
-      on && h("p", { class: "banner small" }, t("hotspot.restarts")),
-      nic.wifi.ssid && h("p", { class: "banner small" }, t("hotspot.leaves", { ssid: nic.wifi.ssid })),
+      on && uiNotice({ tone: "warn", text: t("hotspot.restarts") }),
+      nic.wifi.ssid && uiNotice({ tone: "warn", text: t("hotspot.leaves", { ssid: nic.wifi.ssid }) }),
       field(t("hotspot.name"), ssid),
       field(t("wifi.password"), password, t("hotspot.passwordHint")),
       field(t("hotspot.band"), band, t("hotspot.bandHint")),
@@ -529,13 +528,14 @@ function hotspotDialog(nic, settings = false) {
 
 /** What the access point lacks, with the button that installs it */
 function hotspotNeeds(detail, error) {
-  return h(
-    "div",
-    { class: "banner stack" },
-    h("strong", null, t("hotspot.needs.what")),
-    h("p", { class: "muted small" }, t("hotspot.needs.why")),
-    detail.install ? h("p", { class: "cmd" }, icon("terminal"), detail.install) : h("p", { class: "muted small" }, t("mounting.needs.byHand", { package: detail.package })),
-    detail.install &&
+  const box = uiNotice({
+    tone: "info",
+    icon: "package",
+    title: t("hotspot.needs.what"),
+    text: t("hotspot.needs.why"),
+    command: detail.install ? uiCommand(detail.install) : h("p", { class: "muted small" }, t("mounting.needs.byHand", { package: detail.package })),
+    action:
+      detail.install &&
       button(t("mounting.needs.install", { package: detail.package }), {
         class: "small",
         onclick: async (e) => {
@@ -543,14 +543,15 @@ function hotspotNeeds(detail, error) {
           el.disabled = true;
           try {
             state.network = await api("POST", "/api/network/package", { package: detail.package });
-            el.closest(".banner").replaceChildren(h("p", null, t("hotspot.needs.done")));
+            box.replaceWith(uiNotice({ tone: "ok", text: t("hotspot.needs.done") }));
           } catch (err) {
             error.textContent = errorText(err);
             el.disabled = false;
           }
         },
       }),
-  );
+  });
+  return box;
 }
 
 function networkSection() {
@@ -671,17 +672,13 @@ function networkSection() {
     );
     return select;
   };
-  const checkBox = h("input", {
-    type: "checkbox",
-    class: "switch",
-    role: "switch",
-    "aria-label": t("network.check"),
-    checked: data.check.on,
-    onchange: async () => {
+  const checkBox = uiSwitch({
+    on: data.check.on,
+    label: t("network.check"),
+    onchange: async (on) => {
       error.textContent = "";
-      checkBox.disabled = true;
       try {
-        state.network = await api("PUT", "/api/network/check", { on: checkBox.checked });
+        state.network = await api("PUT", "/api/network/check", { on });
       } catch (err) {
         error.textContent = errorText(err);
       }
@@ -755,8 +752,8 @@ function toolRemoveDialog(tool) {
       },
       h("header", null, h("h2", { class: "grow" }, t("tools.removeTitle", { name: tool.name })), closeX(() => dialog)),
       h("p", null, t(tool.id === "incus" ? "tools.removeLeadIncus" : "tools.removeLead")),
-      tool.id === "docker" && h("p", { class: "banner" }, t("tools.removeDocker")),
-      h("p", { class: "cmd whole" }, icon("terminal"), tool.remove),
+      tool.id === "docker" && uiNotice({ tone: "warn", text: t("tools.removeDocker") }),
+      uiCommand(tool.remove),
       password && field(t("auth.password"), password),
       error,
       h("footer", null, closeButton(() => dialog, t("common.cancel")), go),
@@ -799,7 +796,7 @@ function btPairDialog(device) {
     }
     paint();
   };
-  const code = (p) => h("div", { class: "bt-code", "aria-label": p.code }, [...p.code].map((digit, i) => h("span", { class: i < p.typed ? "typed" : "" }, digit)));
+  const code = (p) => uiDigits(p.code, p.typed);
   const paint = () => {
     const p = state.bluetooth?.pairing;
     const mine = p && p.address === device.address ? p : { step: "working", code: "", typed: 0, error: "" };
@@ -810,7 +807,7 @@ function btPairDialog(device) {
         (mine.step === "passkey" || mine.step === "pin") && h("p", null, t("bt.pair.type", { name: device.name })),
         mine.step === "confirm" && h("p", null, t("bt.pair.compare", { name: device.name })),
         mine.code && !over && code(mine),
-        mine.step === "done" && h("p", { class: "bt-done" }, icon("check"), t(mine.error ? "bt.pair.donePaired" : "bt.pair.done", { name: device.name })),
+        mine.step === "done" && uiNotice({ tone: "ok", text: t(mine.error ? "bt.pair.donePaired" : "bt.pair.done", { name: device.name }) }),
         mine.step === "done" && mine.error && h("p", { class: "muted" }, t("error." + mine.error)),
         mine.step === "failed" && h("p", { class: "error", role: "alert" }, t("error." + mine.error)),
         mine.step === "failed" && h("p", { class: "muted small" }, t("bt.pair.failedHint")),
@@ -914,12 +911,12 @@ function bluetoothSection() {
     const forget = { label: t("bt.forget") + "…", icon: "trash", danger: true, run: () => confirmAction({ title: t("bt.forgetTitle", { name: d.name || d.address }), lead: t("bt.forgetLead"), label: t("bt.forget"), run: () => send("DELETE", `/api/bluetooth/devices/${d.address}`)() }) };
     const battery = d.battery === null ? "—" : d.battery <= 20 ? uiState("warn", t("bt.batteryLow", { n: d.battery })) : d.battery + "%";
     return {
-      cells: [uiCell({ lead: kindIcon(d), name: d.name || d.address, sub: t("bt.kind." + d.kind) }), uiState(d.connected ? "ok" : "off", t(d.connected ? "bt.connected" : "bt.away")), battery, h("div", { class: "row-actions end" }, connect, uiMore([forget], { size: "s" }))],
+      cells: [uiCell({ lead: kindIcon(d), name: d.name || d.address, sub: t("bt.kind." + d.kind) }), uiState(d.connected ? "ok" : "off", t(d.connected ? "bt.connected" : "bt.away")), battery, uiLine([connect, uiMore([forget], { size: "s" })], { end: true })],
       sub: [t("bt.kind." + d.kind), d.battery !== null && d.battery + "%"].filter(Boolean).join(" · "),
     };
   };
   const looking = r.adapter.looking;
-  const bars = (d) => h("span", { class: "bt-signal l" + btBars(d.signal), title: d.signal === null ? "" : d.signal + " dBm" }, h("i"), h("i"), h("i"), h("i"));
+  const bars = (d) => uiSignal(btBars(d.signal), d.signal === null ? "" : d.signal + " dBm");
   const found = [...r.found].sort((a, b) => btBars(b.signal) - btBars(a.signal) || a.name.localeCompare(b.name));
   return [
     uiCard(
@@ -929,7 +926,7 @@ function bluetoothSection() {
     ),
     uiCard(
       { title: t("bt.add"), lead: t("bt.addLead"), flush: true, actions: looking ? button(t("bt.stopLooking"), { class: "small", onclick: send("POST", "/api/bluetooth/look", { on: false }) }, "x") : button(t("bt.look"), { class: "small primary", onclick: send("POST", "/api/bluetooth/look", { on: true }) }, "search") },
-      looking && h("div", { class: "ui-empty small" }, h("span", { class: "wait-ring" }), h("span", null, t("bt.looking"))),
+      looking && uiEmpty({ size: "loading", text: t("bt.looking") }),
       found.map((d) => uiRow({ lead: kindIcon(d), name: d.name || d.address, sub: t("bt.kind." + d.kind), value: bars(d), action: button(t("bt.pair"), { class: "small", onclick: () => btPairDialog(d) }, "plus"), menu: true })),
       !looking && !found.length && uiEmpty({ text: t("bt.lookHint") }),
     ),
@@ -955,11 +952,11 @@ async function wgDeviceDialog(id) {
     "wide",
     h("header", null, h("h2", { class: "grow" }, t("wg.deviceTitle", { name: file.name })), closeX(() => dialog)),
     h("p", { class: "muted" }, t("wg.deviceLead")),
-    h("div", { class: "qr-box" }, qrSvg(file.qr)),
+    uiQr(qrSvg(file.qr)),
     h("p", { class: "muted small" }, t("wg.devicePhone")),
-    h("pre", { class: "cmd whole wg-conf" }, file.conf),
+    uiCommand(file.conf, { block: true }),
     h("p", { class: "muted small" }, t("wg.deviceComputer")),
-    h("p", { class: "banner" }, t("wg.deviceSecret")),
+    uiNotice({ tone: "warn", text: t("wg.deviceSecret") }),
     h("p", { class: "muted small" }, t("wg.deviceThen", { address: web })),
     h("footer", null, h("a", { class: "btn", href: `/api/wireguard/devices/${id}?download=1`, download: "" }, icon("download"), h("span", null, t("wg.deviceFile"))), closeButton(() => dialog)),
   );
@@ -975,7 +972,7 @@ function wgAddDialog() {
     "",
     h("h2", null, t("wg.add")),
     field(t("wg.name"), name),
-    h("label", { class: "check" }, lan, h("span", null, h("strong", null, t("wg.lan")), h("span", { class: "muted small block" }, !w.server.firewall ? t("wg.lanNoFirewall") : w.server.networks.length ? t("wg.lanHint", { networks: w.server.networks.join(", ") }) : t("remote.networksNone")))),
+    uiCheck(h("strong", null, t("wg.lan")), lan, !w.server.firewall ? t("wg.lanNoFirewall") : w.server.networks.length ? t("wg.lanHint", { networks: w.server.networks.join(", ") }) : t("remote.networksNone")),
     error,
     h(
       "footer",
@@ -1043,15 +1040,16 @@ function wireguardCards() {
   const up = s.enabled && s.running;
   const removeDevice = (d) => confirmAction({ title: t("wg.removeTitle", { name: d.name }), lead: t("wg.removeLead"), label: t("wg.remove"), run: () => send("DELETE", `devices/${d.id}`) });
   const deviceRow = (d) => {
-    const lan = h("input", { type: "checkbox", class: "switch", role: "switch", checked: d.lan, disabled: !s.firewall, "aria-label": t("wg.lanShort"), onchange: (e) => send("PUT", `devices/${d.id}`, { lan: e.target.checked }, e.target) });
+    const lan = uiSwitch({ on: d.lan, disabled: !s.firewall, label: t("wg.lanShort"), onchange: async (on) => (await send("PUT", `devices/${d.id}`, { lan: on })) || renderSettings() });
+    const stay = (el) => ((el.onclick = (e) => e.stopPropagation()), el);
     const seen = wgConnected(d.handshake) ? t("wg.connected") : d.handshake ? t("remote.seen", { when: ago(d.handshake) }) : t("wg.never");
     return {
       onclick: () => wgDeviceDialog(d.id),
       cells: [
         uiCell({ name: d.name, sub: h("span", { class: "mono" }, d.address) }),
-        h("label", { class: "with-state", onclick: (e) => e.stopPropagation() }, lan, h("span", { class: "small" }, t("wg.lanShort"))),
+        stay(uiLine([lan, h("span", { class: "small" }, t("wg.lanShort"))])),
         uiState(wgConnected(d.handshake) ? "ok" : "off", seen),
-        h("div", { class: "row-actions end", onclick: (e) => e.stopPropagation() }, button(t("wg.show"), { class: "small", onclick: () => wgDeviceDialog(d.id) }, "eye"), uiMore([{ label: t("wg.remove") + "…", icon: "trash", danger: true, run: () => removeDevice(d) }], { size: "s" })),
+        stay(uiLine([button(t("wg.show"), { class: "small", onclick: () => wgDeviceDialog(d.id) }, "eye"), uiMore([{ label: t("wg.remove") + "…", icon: "trash", danger: true, run: () => removeDevice(d) }], { size: "s" })], { end: true })),
       ],
       sub: [d.address, seen].join(" · "),
     };
@@ -1062,10 +1060,10 @@ function wireguardCards() {
     uiSetting({ name: t("wg.endpoint"), explain: t("wg.endpointHint"), control: endpoint }),
     uiSetting({ name: t("wg.port"), explain: t("wg.portHint", { port: s.port }), control: port }),
     error,
-    h("footer", { class: "block-foot" }, h("div", { class: "row-actions" }, s.enabled && button(t("remote.turnOff") + "…", { onclick: (e) => {
+    uiFoot(s.enabled && button(t("remote.turnOff") + "…", { onclick: (e) => {
       const el = e.currentTarget;
       confirmAction({ title: t("wg.offTitle"), lead: t("wg.offLead"), label: t("remote.turnOff"), iconName: "x", run: () => send("PUT", "server", { enabled: false }, el) });
-    } }), button(t(s.enabled ? "settings.save" : "remote.turnOn"), { class: "primary", onclick: (e) => send("PUT", "server", { ...typed(), enabled: true }, e.currentTarget) }))),
+    } }), button(t(s.enabled ? "settings.save" : "remote.turnOn"), { class: "primary", onclick: (e) => send("PUT", "server", { ...typed(), enabled: true }, e.currentTarget) })),
   );
   const devices =
     s.address &&
@@ -1077,7 +1075,7 @@ function wireguardCards() {
   const c = w.client;
   const outError = h("p", { class: "error", role: "alert" });
   const conf = h("textarea", { rows: 8, spellcheck: false, class: "mono", placeholder: "[Interface]\nPrivateKey = …\nAddress = …\n\n[Peer]\nPublicKey = …\nEndpoint = …\nAllowedIPs = …" });
-  const pick = h("input", { type: "file", accept: ".conf,text/plain", class: "offscreen", onchange: async () => pick.files[0] && (conf.value = await pick.files[0].text()) });
+  const pick = h("input", { type: "file", accept: ".conf,text/plain", hidden: true, onchange: async () => pick.files[0] && (conf.value = await pick.files[0].text()) });
   const join = async (e) => {
     const done = await send("PUT", "client", { conf: conf.value, enabled: true }, e.currentTarget, outError);
     if (done?.dropped?.length) toast(t("wg.out.dropped", { lines: done.dropped.join(", ") }));
@@ -1099,7 +1097,7 @@ function wireguardCards() {
         ])
       : [field(t("wg.out.conf"), conf, t("wg.out.confHint")), pick],
     outError,
-    !c.set && h("footer", { class: "block-foot" }, h("div", { class: "row-actions" }, button(t("wg.out.file"), { onclick: () => pick.click() }, "upload"), button(t("wg.out.join"), { class: "primary", onclick: join }, "plug"))),
+    !c.set && uiFoot(button(t("wg.out.file"), { onclick: () => pick.click() }, "upload"), button(t("wg.out.join"), { class: "primary", onclick: join }, "plug")),
   );
   return [inCard, devices, outCard].filter(Boolean);
 }
@@ -1137,7 +1135,7 @@ function tailscaleCards() {
 
   // the card's head: the name, its state, the version on the right
   const card = (tone, words, opts, ...body) => uiCard({ title, marks: uiState(tone, words), actions: h("span", { class: "muted small mono" }, r.version), ...opts }, ...body);
-  if (r.state === "stopped") return [card("off", t("remote.state.stopped"), { lead: t("remote.stopped") }, error, h("footer", { class: "block-foot" }, button(t("remote.start"), { class: "primary", onclick: act("start") }, "play")))];
+  if (r.state === "stopped") return [card("off", t("remote.state.stopped"), { lead: t("remote.stopped") }, error, uiFoot(button(t("remote.start"), { class: "primary", onclick: act("start") }, "play")))];
 
   // waiting for the person to let the server in: the page looks again by itself until it is done
   if (r.state === "starting") {
@@ -1156,7 +1154,7 @@ function tailscaleCards() {
         { lead: t("remote.lead") },
         r.authUrl ? uiNotice({ tone: "info", title: t("remote.openLink"), text: t("remote.openLinkHint"), command: uiCommand(r.authUrl) }) : uiSetting({ name: t("remote.ownServerAddress"), explain: [t("remote.signInHint"), t("remote.ownServerHint")].join(" "), control: own }),
         error,
-        h("footer", { class: "block-foot" }, r.authUrl ? button(t("common.cancel"), { onclick: act("disconnect") }) : button(t("remote.signIn"), { class: "primary", onclick: (e) => act("connect", { server: own.value.trim() })(e) }, "arrow")),
+        uiFoot(r.authUrl ? button(t("common.cancel"), { onclick: act("disconnect") }) : button(t("remote.signIn"), { class: "primary", onclick: (e) => act("connect", { server: own.value.trim() })(e) }, "arrow")),
       ),
     ];
   }
@@ -1166,7 +1164,7 @@ function tailscaleCards() {
   // a network a router of the private network already carries is reached through it: nothing waits there
   const carried = r.offered.filter((net) => !r.approved.includes(net) && r.carried?.[net]);
   const waiting = r.offered.filter((net) => !r.approved.includes(net) && !r.carried?.[net]);
-  const share = h("input", { type: "checkbox", class: "switch", role: "switch", "aria-label": t("remote.networksOn"), checked: offered, disabled: !on || (!offered && !r.networks.length), onchange: (e) => act("networks", { on: e.target.checked })(e) });
+  const share = uiSwitch({ on: offered, label: t("remote.networksOn"), disabled: !on || (!offered && !r.networks.length), onchange: (next) => act("networks", { on: next })({ currentTarget: share, target: share }) });
   const signOut = {
     label: t("remote.signOut") + "…",
     icon: "signout",
@@ -1188,7 +1186,7 @@ function tailscaleCards() {
       { title, marks: uiState(on ? "ok" : "off", t(on ? "remote.state.on" : "remote.state.off")), lead: t("remote.lead"), actions: [h("span", { class: "muted small mono" }, r.version), toggle, uiMore([signOut], { size: "s" })] },
       r.health.length > 0 && uiNotice({ tone: "warn", text: r.health.join(" ") }),
       ...uiFacts([
-        [t("remote.name"), h("span", { class: "stack-s end" }, r.name && address(r.name), r.addresses.filter((a) => !a.includes(":")).map(address))],
+        [t("remote.name"), h("span", { class: "stack-s" }, r.name && address(r.name), r.addresses.filter((a) => !a.includes(":")).map(address))],
         [t("remote.account"), h("span", { title: r.server ? t("remote.accountOwn", { server: r.server }) : r.expires ? t("remote.expires", { date: shortDate(r.expires) }) : null }, r.tailnet || "—")],
       ]),
       error,
@@ -1340,7 +1338,7 @@ function sysUpdatesCard(at) {
       else chosen.delete(p.name);
       paintBar();
     });
-    return uiRow({ lead: { check: box }, name: h("span", { class: "mono" }, p.name, p.security && " ", p.security && uiTag(t("sysupdates.securityOne"))), value: h("span", { class: "mono" }, p.from ? `${p.from} → ${p.to}` : t("sysupdates.new", { version: p.to })), cls: "sys-package" });
+    return uiRow({ lead: { check: box }, name: h("span", { class: "mono" }, p.name, p.security && " ", p.security && uiTag(t("sysupdates.securityOne"))), value: h("span", { class: "mono" }, p.from ? `${p.from} → ${p.to}` : t("sysupdates.new", { version: p.to })) });
   };
   // security updates first, then by name
   const sorted = [...list].sort((a, b) => Number(b.security) - Number(a.security) || a.name.localeCompare(b.name));
@@ -1381,8 +1379,8 @@ function sysUpgradeDialog(at, packages, name = "") {
     "confirm",
     h("header", null, h("h2", { class: "grow" }, name ? t("sysupdates.updateTitle", { name }) : t("sysupdates.updateMany", { n: count })), closeX(() => dialog)),
     h("p", null, t(at ? "sysupdates.updateLeadMachine" : "sysupdates.updateLead")),
-    docker && h("p", { class: "banner" }, t("sysupdates.docker")),
-    command && h("p", { class: "cmd whole" }, icon("terminal"), command),
+    docker && uiNotice({ tone: "warn", text: t("sysupdates.docker") }),
+    command && uiCommand(command),
     h(
       "footer",
       null,
@@ -1454,8 +1452,8 @@ function dockerDropDialog({ at, title, lead, warn, command, password: ask, go: l
       },
       h("header", null, h("h2", { class: "grow" }, title), closeX(() => dialog)),
       h("p", null, lead),
-      warn && h("p", { class: "banner danger" }, warn),
-      h("p", { class: "cmd whole" }, icon("terminal"), command),
+      warn && uiNotice({ tone: "bad", text: warn }),
+      uiCommand(command),
       password && field(t("account.password"), password, t("docker.passwordHint")),
       error,
       h("footer", null, closeButton(() => dialog, t("common.cancel")), go),
@@ -1561,7 +1559,7 @@ function dockerSection(at = "") {
   const card = (title, list, unused, prune, first, rows, none) =>
     uiCard(
       { title, count: list.length, lead: unused.length ? t("docker.unusedSum", { n: unused.length, size: bytes(sum(unused)) }) : t("docker.allUsed"), flush: true, actions: unused.length > 0 && button(t("docker.pruneShort"), { class: "small danger-text", onclick: prune }, "trash") },
-      list.length ? uiTable([{ label: first }, { label: t("docker.size"), num: true }, { label: t("docker.created") }, { label: t("docker.usedBy") }, { label: t("app.col.state") }, { label: "" }], rows, { cls: "docker-table" }) : uiEmpty({ text: none }),
+      list.length ? uiTable([{ label: first }, { label: t("docker.size"), num: true }, { label: t("docker.created") }, { label: t("docker.usedBy") }, { label: t("app.col.state") }, { label: "" }], rows) : uiEmpty({ text: none }),
     );
   const recount = button(t("docker.recount"), { class: "small", onclick: () => (delete spaces[at], paintSpace(at), loadSpace(at)) }, "refresh");
   return [
@@ -1582,7 +1580,7 @@ function imagesCard() {
   const auto = h("input", { type: "checkbox", checked: s.auto, disabled: !s.check });
   const time = h("input", { type: "time", value: s.time, class: "short mono", required: true });
   const included = apps.map((app) => ({ name: app.name, box: h("input", { type: "checkbox", checked: !s.exclude.includes(app.name) }), title: app.title }));
-  const whenAuto = h("div", { class: "stack", hidden: !s.auto }, field(`${t("images.time")} · ${state.settings.systemTimezone}`, time), included.length > 0 && h("div", { class: "stack" }, h("strong", null, t("images.apps")), included.map((a) => h("label", { class: "check" }, a.box, h("span", null, a.title)))));
+  const whenAuto = h("div", { class: "stack", hidden: !s.auto }, field(`${t("images.time")} · ${state.settings.systemTimezone}`, time), included.length > 0 && h("div", { class: "stack" }, h("strong", null, t("images.apps")), included.map((a) => uiCheck(a.title, a.box))));
   check.onchange = () => {
     auto.disabled = !check.checked;
     if (!check.checked) auto.checked = false;
@@ -1599,10 +1597,12 @@ function imagesCard() {
   clearTimeout(imagesTimer);
   if (st.running) imagesTimer = setTimeout(() => state.route.view === "settings" && again("/api/images"), 3000);
   const status = st.running ? t("images.running") : st.at ? t("images.status", { when: ago(st.at), asked: st.asked, newer: st.newer }) : t("images.never");
-  return h(
+  return uiCard(
+    { title: t("images.title"), actions: s.check && [h("span", { class: "ui-row-time" }, status), button(t("images.checkNow"), { class: "small", disabled: st.running, onclick: () => again("/api/images/check", "POST") }, "refresh")] },
+    h(
     "form",
     {
-      class: "card pad stack",
+      class: "stack",
       onsubmit: async (e) => {
         e.preventDefault();
         error.textContent = "";
@@ -1616,13 +1616,13 @@ function imagesCard() {
         }
       },
     },
-    h("div", { class: "section-head" }, h("h2", null, t("images.title")), s.check && h("div", { class: "actions" }, h("span", { class: "ui-row-time" }, status), button(t("images.checkNow"), { class: "small", disabled: st.running, onclick: () => again("/api/images/check", "POST") }, "refresh"))),
-    h("label", { class: "check" }, check, h("span", null, h("strong", null, t("images.check")), h("span", { class: "muted small block" }, t("images.checkHint")))),
+    uiCheck(h("strong", null, t("images.check")), check, t("images.checkHint")),
     s.check && st.failed.length > 0 && !st.running && h("details", null, h("summary", { class: "muted small" }, t("images.failed", { n: st.failed.length })), st.failed.map((f) => h("p", { class: "small" }, h("span", { class: "mono" }, f.image), " — ", h("span", { class: "muted" }, f.message)))),
-    h("label", { class: "check" }, auto, h("span", null, h("strong", null, t("images.auto")), h("span", { class: "muted small block" }, t("images.autoHint")))),
+    uiCheck(h("strong", null, t("images.auto")), auto, t("images.autoHint")),
     whenAuto,
     error,
-    h("footer", null, h("button", { class: "btn primary" }, t("settings.save"))),
+    uiFoot(h("button", { class: "btn primary" }, t("settings.save"))),
+    ),
   );
 }
 
@@ -1652,21 +1652,13 @@ function appearanceSection(error) {
   const colours = (key, presets, fallback) => {
     const current = look[key];
     const custom = h("input", { type: "color", value: current || fallback, title: t("appearance.custom"), "aria-label": t("appearance.custom"), oninput: () => applyAppearance({ ...state.appearance, [key]: custom.value }), onchange: () => change({ [key]: custom.value }) });
-    return h(
-      "div",
-      { class: "swatches" },
-      presets.map((colour, i) => {
-        // the first one is Hata's own: choosing it means "no colour of mine"
-        const on = i === 0 ? !current : current === colour;
-        const swatch = h("button", { type: "button", class: "swatch" + (on ? " on" : ""), title: i === 0 ? t("appearance.default") : colour, "aria-label": i === 0 ? t("appearance.default") : colour, "aria-pressed": String(on), onclick: () => change({ [key]: i === 0 ? "" : colour }) });
-        swatch.style.background = colour;
-        return swatch;
-      }),
+    return uiSwatches(
+      // the first one is Hata's own: choosing it means "no colour of mine"
+      presets.map((colour, i) => ({ colour, on: i === 0 ? !current : current === colour, label: i === 0 ? t("appearance.default") : colour, onclick: () => change({ [key]: i === 0 ? "" : colour }) })),
       custom,
     );
   };
-  const wall = (name, label) =>
-    h("button", { type: "button", class: "wall" + (look.wallpaper === name ? " on" : ""), "aria-pressed": String(look.wallpaper === name), onclick: () => change({ wallpaper: name }) }, name && h("img", { src: wallpaperUrl(look, name), alt: "", loading: "lazy" }), h("span", null, label));
+  const wall = (name, label, remove = null) => uiPicture({ src: name && wallpaperUrl(look, name), label, on: look.wallpaper === name, onclick: () => change({ wallpaper: name }), remove });
   const file = h("input", {
     type: "file",
     accept: "image/jpeg,image/png,image/webp,image/avif",
@@ -1689,32 +1681,28 @@ function appearanceSection(error) {
   });
   const dim = h("input", { type: "range", min: 0, max: 90, step: 5, value: look.dim, "aria-label": t("appearance.dim"), oninput: () => applyAppearance({ ...state.appearance, dim: Number(dim.value) }), onchange: () => change({ dim: Number(dim.value) }, false) });
   return [
-    h("section", { class: "card pad" }, h("h2", null, t("appearance.colours")), settingRow(t("appearance.accent"), t("appearance.accentHint"), colours("accent", ACCENTS, ACCENTS[0])), settingRow(t("appearance.background"), t("appearance.backgroundHint"), colours("background", BACKGROUNDS, BACKGROUNDS[0]))),
-    h(
-      "section",
-      { class: "card pad" },
-      h("h2", null, t("appearance.picture")),
-      h("div", { class: "walls" }, wall("", t("appearance.none")), state.wallpapers.map((name) => wall(name, t("appearance.wall." + name))), look.custom &&
-          h(
-            "div",
-            { class: "wall-own" },
-            wall("custom", t("appearance.yours")),
-            h("button", {
-              type: "button",
-              class: "icon-btn wall-remove",
-              title: t("appearance.remove"),
-              "aria-label": t("appearance.remove"),
-              onclick: async () => {
-                try {
-                  state.settings = await api("DELETE", "/api/appearance/wallpaper");
-                  applyAppearance((state.appearance = state.settings.appearance));
-                  renderSettings();
-                } catch (e) {
-                  toast(errorText(e), "error");
-                }
-              },
-            }, icon("trash")),
-          ), h("button", { type: "button", class: "wall add", onclick: () => file.click() }, h("span", null, icon("upload"), " ", t(look.custom ? "appearance.replace" : "appearance.upload"))), file),
+    uiCard({ title: t("appearance.colours") }, settingRow(t("appearance.accent"), t("appearance.accentHint"), colours("accent", ACCENTS, ACCENTS[0])), settingRow(t("appearance.background"), t("appearance.backgroundHint"), colours("background", BACKGROUNDS, BACKGROUNDS[0]))),
+    uiCard(
+      { title: t("appearance.picture") },
+      uiPictures(
+        wall("", t("appearance.none")),
+        state.wallpapers.map((name) => wall(name, t("appearance.wall." + name))),
+        look.custom &&
+          wall("custom", t("appearance.yours"), {
+            label: t("appearance.remove"),
+            run: async () => {
+              try {
+                state.settings = await api("DELETE", "/api/appearance/wallpaper");
+                applyAppearance((state.appearance = state.settings.appearance));
+                renderSettings();
+              } catch (e) {
+                toast(errorText(e), "error");
+              }
+            },
+          }),
+        uiPicture({ add: true, label: t(look.custom ? "appearance.replace" : "appearance.upload"), onclick: () => file.click() }),
+      ),
+      file,
       look.wallpaper && settingRow(t("appearance.dim"), t("appearance.dimHint"), dim),
       error,
     ),
@@ -1726,7 +1714,7 @@ function localNameCard() {
   const local = state.settings.local;
   const enabled = h("input", { type: "checkbox", checked: local.enabled });
   // the name is the server's own: changed in the one window that renames the server, here it is only shown
-  const name = h("div", { class: "row-actions" }, h("code", null, local.name), button(t("rename.open"), { class: "small", onclick: () => renameServerDialog(renderSettings) }, "edit"));
+  const name = uiLine([h("code", null, local.name), button(t("rename.open"), { class: "small", onclick: () => renameServerDialog(renderSettings) }, "edit")]);
   const error = h("p", { class: "error", role: "alert" });
   const status = h("div", { class: "stack" });
   let alive = true;
@@ -1742,22 +1730,24 @@ function localNameCard() {
         : !s.own
           ? [
               h("p", { class: "muted small" }, t("local.otherLead", { domain: s.domain, address: s.addresses[0] ?? "—" })),
-              ...s.checks.map((c) => h("div", { class: "activity-item" }, icon(c.ok ? "check" : "x", c.ok ? "ok" : "danger"), h("div", { class: "grow" }, h("div", null, c.ok ? address(c.host) : h("span", { class: "mono" }, c.host)), h("div", { class: "muted small" }, c.ok ? t("local.leadsHere") : c.found.length ? t("local.leadsElsewhere", { addresses: c.found.join(", ") }) : t("local.unknown"))))),
+              h("div", { class: "ui-rows" }, s.checks.map((c) => uiRow({ lead: { icon: c.ok ? "check" : "x", tone: c.ok ? "ok" : "bad" }, name: c.ok ? address(c.host) : h("span", { class: "mono" }, c.host), sub: c.ok ? t("local.leadsHere") : c.found.length ? t("local.leadsElsewhere", { addresses: c.found.join(", ") }) : t("local.unknown") }))),
             ]
           : !s.listening
             ? [h("p", { class: "error" }, t("local.failed", { message: s.error || "…" }))]
             : [
-              h("div", { class: "activity-item" }, icon("check", "ok"), h("div", { class: "grow" }, h("div", null, address(s.domain)), h("div", { class: "muted small" }, t("local.answers", { addresses: s.addresses.join(", ") || "—" })))),
+              uiRow({ lead: { icon: "check", tone: "ok" }, name: address(s.domain), sub: t("local.answers", { addresses: s.addresses.join(", ") || "—" }) }),
                 // replaceChildren writes a missing one out as the word "false"
                 (state.overview?.apps ?? []).some((a) => a.port) ? h("p", { class: "muted small" }, t("local.apps", { example: `${(state.overview.apps.find((a) => a.port).name).replace(/_/g, "-")}.${s.domain}${port}` })) : "",
               ]),
     );
   };
   void paint();
-  return h(
+  return uiCard(
+    { title: t("local.title"), lead: t("local.lead") },
+    h(
     "form",
     {
-      class: "card pad",
+      class: "stack",
       onsubmit: async (e) => {
         e.preventDefault();
         error.textContent = "";
@@ -1772,13 +1762,12 @@ function localNameCard() {
         }
       },
     },
-    h("h2", null, t("local.title")),
-    h("p", { class: "muted small" }, t("local.lead")),
     settingRow(t("local.enabled"), t("local.enabledHint"), enabled),
     settingRow(t("local.name"), t("local.nameHint"), name),
     status,
     error,
-    h("footer", null, h("button", { class: "btn primary" }, t("settings.save"))),
+    uiFoot(h("button", { class: "btn primary" }, t("settings.save"))),
+    ),
   );
 }
 
@@ -1804,7 +1793,7 @@ function httpsSection(save, error) {
       results.replaceChildren(h("p", { class: "muted small" }, t("https.checking")));
       try {
         const list = await api("POST", "/api/https/check", {});
-        results.replaceChildren(...list.map((r) => h("div", { class: "activity-item" }, icon(r.ok ? "check" : "x", r.ok ? "ok" : "danger"), h("div", { class: "grow" }, h("div", { class: "mono" }, r.host), !r.ok && h("div", { class: "muted small" }, r.problem)))));
+        results.replaceChildren(h("div", { class: "ui-rows" }, list.map((r) => uiRow({ lead: { icon: r.ok ? "check" : "x", tone: r.ok ? "ok" : "bad" }, name: h("span", { class: "mono" }, r.host), sub: !r.ok && r.problem }))));
       } catch (e) {
         results.replaceChildren(h("p", { class: "error" }, errorText(e)));
       }
@@ -1820,16 +1809,20 @@ function httpsSection(save, error) {
     const status = await api("GET", "/api/https").catch(() => null);
     if (!alive || !status) return;
     put(certs,
-      status.httpPort !== 80 && h("p", { class: "banner" }, t("https.needPort80", { port: status.httpPort })),
+      status.httpPort !== 80 && uiNotice({ tone: "warn", text: t("https.needPort80", { port: status.httpPort }) }),
       status.error && h("p", { class: "error" }, status.error),
-      ...status.certificates.map((c) =>
+      status.certificates.length > 0 &&
         h(
           "div",
-          { class: "activity-item" },
-          icon(c.working ? "refresh" : c.notAfter ? "check" : "x", c.working ? "" : c.notAfter ? "ok" : "danger"),
-          h("div", { class: "grow" }, h("div", { class: "mono" }, c.name), h("div", { class: "muted small" }, c.working ? t("https.cert.working") : c.notAfter ? t("https.cert.valid", { date: new Date(c.notAfter).toLocaleDateString(state.lang, { day: "numeric", month: "long", year: "numeric" }), issuer: c.issuer }) : t("https.cert.none")), c.error && h("div", { class: "error small" }, c.error)),
+          { class: "ui-rows" },
+          status.certificates.map((c) =>
+            uiRow({
+              lead: { icon: c.working ? "refresh" : c.notAfter ? "check" : "x", tone: c.working ? null : c.notAfter ? "ok" : "bad" },
+              name: h("span", { class: "mono" }, c.name),
+              sub: [c.working ? t("https.cert.working") : c.notAfter ? t("https.cert.valid", { date: new Date(c.notAfter).toLocaleDateString(state.lang, { day: "numeric", month: "long", year: "numeric" }), issuer: c.issuer }) : t("https.cert.none"), c.error && h("div", { class: "error small" }, c.error)],
+            }),
+          ),
         ),
-      ),
     );
     if (status.certificates.some((c) => c.working)) setTimeout(paintCerts, 2000);
   };
@@ -1837,31 +1830,33 @@ function httpsSection(save, error) {
   const retry = button(t("https.retry"), { onclick: async () => (await api("POST", "/api/https/retry", {}).catch((e) => toast(errorText(e), "error")), setTimeout(paintCerts, 800)) }, "refresh");
   return [
     localNameCard(),
-    h(
-      "form",
-      {
-        class: "card pad",
-        onsubmit: async (e) => {
-          e.preventDefault();
-          await save({ https: { mode: mode.value, domain: domain.value.trim(), email: email.value.trim() } });
-          await refresh();
-          render();
-          void loadSettings();
+    uiCard(
+      { title: t("settings.https") },
+      h(
+        "form",
+        {
+          class: "stack",
+          onsubmit: async (e) => {
+            e.preventDefault();
+            await save({ https: { mode: mode.value, domain: domain.value.trim(), email: email.value.trim() } });
+            await refresh();
+            render();
+            void loadSettings();
+          },
         },
-      },
-      h("h2", null, t("settings.https")),
-      settingRow(t("https.mode"), "", mode),
-      explain,
-      domainRow,
-      emailRow,
-      error,
-      h("footer", null, h("button", { class: "btn primary" }, t("settings.save"))),
+        settingRow(t("https.mode"), "", mode),
+        explain,
+        domainRow,
+        emailRow,
+        error,
+        uiFoot(h("button", { class: "btn primary" }, t("settings.save"))),
+      ),
     ),
     hasModule("domains") && namesCard(),
     https.mode === "acme" && https.domain && wildcardCard(paintCerts),
-    https.mode === "acme" && h("section", { class: "card pad" }, h("div", { class: "section-head" }, h("h2", null, t("https.certificates")), retry), h("p", { class: "muted small" }, t(https.wildcard && https.wildcard !== "off" ? "wildcard.certificatesLead" : "https.certificatesLead")), certs),
-    here && h("section", { class: "card pad" }, h("div", { class: "section-head" }, h("h2", null, t("https.checkTitle")), check), h("p", { class: "muted small" }, t("https.checkLead", { domain: here })), results),
-    here && h("section", { class: "card pad" }, h("h2", null, t("https.addresses")), h("p", { class: "muted small" }, t("https.addressesLead")), settingRow("Hata", "", h("a", { class: "link mono", href: `https://${here}/` }, here)), (state.overview?.apps ?? []).filter((a) => a.port).map((a) => settingRow(a.title, a.protected ? t("access.protected") : "", h("a", { class: "link mono", href: `https://${a.name.replace(/_/g, "-")}.${here}/`, target: "_blank", rel: "noopener noreferrer" }, `${a.name.replace(/_/g, "-")}.${here}`)))),
+    https.mode === "acme" && uiCard({ title: t("https.certificates"), actions: retry, lead: t(https.wildcard && https.wildcard !== "off" ? "wildcard.certificatesLead" : "https.certificatesLead") }, certs),
+    here && uiCard({ title: t("https.checkTitle"), actions: check, lead: t("https.checkLead", { domain: here }) }, results),
+    here && uiCard({ title: t("https.addresses"), lead: t("https.addressesLead") }, settingRow("Hata", "", h("a", { class: "link mono", href: `https://${here}/` }, here)), (state.overview?.apps ?? []).filter((a) => a.port).map((a) => settingRow(a.title, a.protected ? t("access.protected") : "", h("a", { class: "link mono", href: `https://${a.name.replace(/_/g, "-")}.${here}/`, target: "_blank", rel: "noopener noreferrer" }, `${a.name.replace(/_/g, "-")}.${here}`)))),
   ];
 }
 
@@ -1882,8 +1877,8 @@ function wildcardCard(afterChange) {
     const tokenWhy = h("p", { class: "muted small" }, hint);
     const keyRow = field(t("wildcard.accessKey"), accessKey);
     const secretRow = field(t("wildcard.secret"), secret);
-    const record = (name, type, value) => h("div", { class: "kv" }, h("span", { class: "mono small" }, `${name} ${type}`), h("span", { class: "mono small" }, value));
-    const delegate = h("div", { class: "stack-s" }, h("p", { class: "muted small" }, t("wildcard.delegateLead")), record(w.name, "NS", w.server), record(w.server, "A", t("wildcard.outsideAddress")), h("p", { class: "muted small" }, t("wildcard.delegatePort")), !w.dns && h("p", { class: "banner small" }, h("a", { class: "link", href: "#/settings/dns" }, t("wildcard.dnsNeeded"))));
+    const record = (name, type, value) => uiFacts([[h("span", { class: "mono small" }, `${name} ${type}`), h("span", { class: "mono small" }, value)]]);
+    const delegate = h("div", { class: "stack-s" }, h("p", { class: "muted small" }, t("wildcard.delegateLead")), record(w.name, "NS", w.server), record(w.server, "A", t("wildcard.outsideAddress")), h("p", { class: "muted small" }, t("wildcard.delegatePort")), !w.dns && uiNotice({ tone: "warn", text: h("a", { class: "link", href: "#/settings/dns" }, t("wildcard.dnsNeeded")) }));
     const manualHint = h("p", { class: "muted small" }, t("wildcard.manualLead"));
     const shape = () => {
       const api = via.value === "api";
@@ -1919,13 +1914,11 @@ function wildcardCard(afterChange) {
     put(
       body,
       w.manual &&
-        h(
-          "div",
-          { class: "banner stack-s" },
-          h("strong", null, t("wildcard.manualWaits")),
-          ...w.manual.values.map((value) => record(w.manual.name, "TXT", value)),
-          h("p", { class: "muted small" }, t("wildcard.manualAll")),
-          h("div", { class: "actions" }, button(t("wildcard.manualDone"), {
+        uiNotice({
+          tone: "warn",
+          title: t("wildcard.manualWaits"),
+          text: [...w.manual.values.map((value) => record(w.manual.name, "TXT", value)), h("p", { class: "muted small" }, t("wildcard.manualAll"))],
+          action: button(t("wildcard.manualDone"), {
             class: "primary small",
             onclick: async (e) => {
               e.currentTarget.disabled = true;
@@ -1937,8 +1930,8 @@ function wildcardCard(afterChange) {
               }
               setTimeout(paint, 3000);
             },
-          })),
-        ),
+          }),
+        }),
       field(t("wildcard.way"), via),
       field(t("wildcard.providerLabel"), provider),
       tokenRow,
@@ -1948,11 +1941,11 @@ function wildcardCard(afterChange) {
       delegate,
       manualHint,
       error,
-      h("div", { class: "actions" }, save),
+      uiFoot(save),
     );
     shape();
     if (via.value === "manual" && !w.manual) setTimeout(() => void (body.isConnected && paint()), 8000);
   };
   void paint();
-  return h("section", { class: "card pad stack" }, h("h2", null, t("wildcard.title")), h("p", { class: "muted small" }, t("wildcard.lead")), body);
+  return uiCard({ title: t("wildcard.title"), lead: t("wildcard.lead") }, body);
 }

@@ -21,8 +21,7 @@ function paintTvNow() {
   const label = tv?.page ? t("tv.page.showing", { name: tv.page.title || tv.page.url }) : now ? t("tv.playing", { name: now.title }) : t(tv?.on ? "tv.remote" : "tv.title");
   // no words here: grey while nothing plays, the accent colour while something does — the name is in the remote.
   // one button, as the music's next to it: pause is in the remote it opens
-  const halves = [h("button", { type: "button", class: "tv-now-half tv-now-open", title: label, "aria-label": label, "aria-haspopup": "dialog", onclick: () => tvDropdown(box) }, icon("tv"))];
-  box.replaceChildren(...halves.filter(Boolean));
+  box.replaceChildren(uiBarKey({ icon: "tv", label, onclick: () => tvDropdown(box) }));
   paintTvMini(now);
 }
 
@@ -43,7 +42,7 @@ function paintTvMini(now) {
   if (!mini) document.body.append((mini = h("aside", { id: "tv-mini" })));
   document.body.classList.add("tv-mini-on");
   const bar = h("i");
-  const times = h("span", { class: "tv-mini-time muted" });
+  const times = uiStripSub();
   const tick = () => {
     const at = tvTimeNow(now);
     times.textContent = `${tvClock(at)} / ${tvClock(now.total)}`;
@@ -51,10 +50,9 @@ function paintTvMini(now) {
   };
   const press = (action) => (e) => (e.stopPropagation(), api("POST", "/api/tv/do", { action }).catch((err) => toast(errorText(err), "error")));
   mini.replaceChildren(
-    h("div", { class: "tv-mini-bar" }, bar),
-    h("button", { type: "button", class: "tv-mini-open", "aria-label": t("tv.remote"), "aria-haspopup": "dialog", onclick: () => tvDropdown(mini) }, icon("tv"), h("span", { class: "grow" }, h("strong", { class: "clip" }, now.title), times)),
-    h("button", { type: "button", class: "tvr-round skip", title: t("tv.key.forward"), "aria-label": t("tv.key.forward"), onclick: press("forward") }, icon("fwd30"), h("span", null, "30")),
-    h("button", { type: "button", class: "tvr-main", title: t("tv.key.playpause"), "aria-label": t("tv.key.playpause"), onclick: press("playpause") }, icon(now.paused ? "play" : "pause")),
+    ...uiStrip({ bar, icon: "tv", title: now.title, sub: times, label: t("tv.remote"), onopen: () => tvDropdown(mini) }),
+    uiKey({ icon: "fwd30", text: "30", kind: "skip", label: t("tv.key.forward"), run: press("forward") }),
+    uiKey({ icon: now.paused ? "play" : "pause", kind: "main", label: t("tv.key.playpause"), run: press("playpause") }),
   );
   tick();
   tvUi.tick = setInterval(tick, 1000);
@@ -110,7 +108,7 @@ function moveToBrowser(now) {
     media.addEventListener("error", failed);
   }
   const back = button(t("tv.toTv"), { class: "small", onclick: () => void moveToTv(now.file, now.title, media, () => ((taken = true), dialog.close()), now.outside ?? "") }, "tv");
-  dialog = openDialog("xwide viewer", h("header", null, h("div", { class: "grow" }, h("h2", { class: "clip" }, now.title), h("p", { class: "muted small" }, t(player ? "tv.browserFrom" : "tv.browserHint"))), back, closeX(() => dialog)), h("div", { class: "stage" }, player ? player.el : media));
+  dialog = openDialog("xwide viewer", h("header", null, h("div", { class: "grow" }, h("h2", { class: "clip" }, now.title), h("p", { class: "muted small" }, t(player ? "tv.browserFrom" : "tv.browserHint"))), back, closeX(() => dialog)), uiViewerStage(player ? player.el : media));
   dialog.addEventListener("close", () => {
     if (player) player.stop();
     else (media.pause(), media.removeAttribute("src"));
@@ -149,15 +147,14 @@ function streamPlayer(path, { at = 0, audio = 0, sub = -1, outside = "", played,
   const where = `path=${encodeURIComponent(path)}${outside ? `&subs=${encodeURIComponent(outside)}` : ""}`;
   const from = (kind, n) => `/api/media/${kind}?${where}&start=${p.startText}&n=${n}`;
   const position = () => p.start + (video.currentTime || 0);
-  const note = h("p", { class: "sp-note", hidden: true });
-  const clock = h("span", { class: "sp-clock" }, "0:00");
-  const bar = h("input", { type: "range", class: "tvr-slider", min: 0, max: 0, step: 1, value: 0, "aria-label": t("tv.position") });
+  const bar = uiSlider({ min: 0, max: 0, step: 1, value: 0, label: t("tv.position") });
   const play = h("button", { type: "button", class: "icon-btn", "aria-label": t("tv.key.playpause"), title: t("tv.key.playpause"), onclick: () => (video.paused ? void video.play().catch(() => {}) : video.pause()) }, icon("pause"));
   const mute = h("button", { type: "button", class: "icon-btn", "aria-label": t("tv.mute"), title: t("tv.mute"), onclick: () => ((video.muted = !video.muted), mute.replaceChildren(icon(video.muted ? "volumeOff" : "volume"))) }, icon("volume"));
   const sounds = h("select", { "aria-label": t("tv.track.audio"), title: t("tv.track.audio"), hidden: true, onchange: () => ((p.audio = Number(sounds.value)), void load(position())) });
   const subs = h("select", { "aria-label": t("tv.track.subs"), title: t("tv.track.subs"), hidden: true, onchange: () => ((p.sub = Number(subs.value)), void words()) });
-  const spoken = h("div", { class: "sp-words", "aria-live": "off" });
-  const el = h("div", { class: "sp" }, h("div", { class: "sp-view" }, video, spoken), note, h("div", { class: "sp-bar" }, play, clock, bar, sounds, subs, mute, h("button", { type: "button", class: "icon-btn", "aria-label": t("tv.fullScreen"), title: t("tv.fullScreen"), onclick: () => (document.fullscreenElement ? void document.exitFullscreen() : void el.requestFullscreen?.().catch(() => {})) }, icon("expand"))));
+  const frame = uiPlayerFrame(video);
+  const { el, note, clock, words: spoken, panel } = frame;
+  panel.append(play, clock, bar, sounds, subs, mute, h("button", { type: "button", class: "icon-btn", "aria-label": t("tv.fullScreen"), title: t("tv.fullScreen"), onclick: () => (document.fullscreenElement ? void document.exitFullscreen() : void el.requestFullscreen?.().catch(() => {})) }, icon("expand")));
   const shown = () => {
     const total = p.info?.duration ?? 0;
     const now = p.dragging ? Number(bar.value) : position();
@@ -289,14 +286,13 @@ function streamPlayer(path, { at = 0, audio = 0, sub = -1, outside = "", played,
   });
   // on the whole screen the bar lies over the picture and goes away after a few quiet seconds of playing;
   // a move of the pointer, a touch or a key brings it back, and it stays while paused or while a list is open
-  const panel = el.querySelector(".sp-bar");
   const wake = () => {
-    el.classList.remove("idle");
+    el.classList.remove("ui-idle");
     clearTimeout(p.quiet);
     p.quiet = setTimeout(() => {
       if (p.gone) return;
       if (video.paused || panel.matches(":hover") || document.querySelector("dialog.select-list[open]")) return wake();
-      el.classList.add("idle");
+      el.classList.add("ui-idle");
     }, 3000);
   };
   for (const name of ["pointermove", "pointerdown", "keydown", "touchstart"]) el.addEventListener(name, wake, { passive: true });
@@ -346,7 +342,7 @@ function playLinkHere(link, subtitle, at = 0) {
   const title = linkTitle(link);
   const player = streamPlayer(link, { at, sub: subtitle ? OUTSIDE_SUB : -1, outside: subtitle });
   const toTv = tvReady() && button(t("tv.toTv"), { class: "small", onclick: () => void moveToTv(link, title, player, () => dialog.close(), subtitle) }, "tv");
-  dialog = openDialog("xwide viewer", h("header", null, h("div", { class: "grow" }, h("h2", { class: "clip" }, title)), toTv, closeX(() => dialog)), h("div", { class: "stage" }, player.el));
+  dialog = openDialog("xwide viewer", h("header", null, h("div", { class: "grow" }, h("h2", { class: "clip" }, title)), toTv, closeX(() => dialog)), uiViewerStage(player.el));
   dialog.addEventListener("close", () => player.stop());
 }
 
@@ -430,7 +426,7 @@ async function loadMusic() {
   try {
     state.music = await api("GET", "/api/music");
   } catch (e) {
-    if (!state.music) put(document.getElementById("music-body"), h("section", { class: "card pad" }, h("p", { class: "error" }, errorText(e))));
+    if (!state.music) put(document.getElementById("music-body"), uiCard({}, uiEmpty({ size: "error", text: errorText(e) })));
   }
   // a slider under the finger or an open list is not redrawn under the person
   if (state.music && !musicUi.busy && !document.querySelector("dialog[open]") && !document.querySelector("#music-body input[type=range]:active")) paintMusic();
@@ -447,8 +443,7 @@ function paintMusicNow() {
   box.className = "tv-now" + (now && !now.paused ? " playing" : "") + (document.querySelector("dialog.music-drop[open]") ? " open" : "");
   if (!there) return box.replaceChildren();
   const label = now ? t("music.playing", { name: now.title }) : t("music.title");
-  const halves = [h("button", { type: "button", class: "tv-now-half tv-now-open", title: label, "aria-label": label, "aria-haspopup": "dialog", onclick: () => musicDropdown(box) }, icon("music"))];
-  box.replaceChildren(...halves.filter(Boolean));
+  box.replaceChildren(uiBarKey({ icon: "music", label, onclick: () => musicDropdown(box) }));
 }
 
 function musicDropdown(at) {
@@ -459,7 +454,7 @@ function musicDropdown(at) {
   const paint = () => {
     const m = state.music;
     if (!m || busy || body.querySelector("input[type=range]:active") || document.querySelector("dialog.select-list[open]") || dialog.classList.contains("pulled")) return;
-    put(body, m.state === "missing" ? h("p", { class: "muted pad" }, t("error.music.missing")) : musicPlayerCard(m, act));
+    put(body, m.state === "missing" ? uiEmpty({ text: t("error.music.missing") }) : musicPlayerCard(m, act));
   };
   const act = async (method, path, data) => {
     busy = true;
@@ -478,11 +473,11 @@ function musicDropdown(at) {
       state.music = await api("GET", "/api/music");
       paint();
     } catch (e) {
-      put(body, h("p", { class: "error pad" }, errorText(e)));
+      put(body, uiEmpty({ tone: "bad", text: errorText(e) }));
     }
     timer = setTimeout(load, 2000);
   };
-  dialog = openDialog("dropdown music-drop", h("div", { class: "tvr-head" }, h("span", { class: "with-icon muted" }, icon("music"), t("music.title")), h("a", { class: "link small with-icon", href: "#/house/music", onclick: () => dialog.close() }, t("music.open"), icon("chevron"))), body);
+  dialog = openDialog("dropdown music-drop", uiDropHead({ icon: "music", title: t("music.title"), href: "#/house/music", link: t("music.open"), linkIcon: "chevron", onclick: () => dialog.close() }), body);
   dialog.addEventListener("close", () => {
     clearTimeout(timer);
     paintMusicNow();
@@ -517,7 +512,7 @@ function musicLinkDialog() {
 const musicFolder = () => folderPicker({ title: t("music.folder"), start: state.settings?.dataRoot ?? "/", confirmLabel: t("music.playNow"), action: (path) => playMusic({ path }, path.split("/").pop() || path) });
 
 function renderMusic() {
-  shell(areaHead("house", "music", { actions: h("div", { class: "row-actions" }, button(t("music.link"), { onclick: musicLinkDialog }, "link"), button(t("music.folder"), { class: "primary", onclick: musicFolder }, "folder")) }), h("div", { id: "music-body", class: "stack" }, waitMark()));
+  shell(areaHead("house", "music", { actions: uiLine([button(t("music.link"), { onclick: musicLinkDialog }, "link"), button(t("music.folder"), { class: "primary", onclick: musicFolder }, "folder")]) }), h("div", { id: "music-body", class: "stack" }, waitMark()));
   cleanups.push(() => clearTimeout(musicUi.timer));
   if (state.music) paintMusic();
 }
@@ -550,7 +545,7 @@ function musicSpeakerCard(m, act) {
     uiSetting({ name: t("music.speaker.name"), explain: t("music.speaker.nameHint"), control: name }),
     uiSetting({ name: t("music.speaker.server"), explain: t("music.speaker.serverHint"), control: server }),
     on && uiNotice({ tone: "info", text: t("music.speaker.how") }),
-    h("footer", { class: "block-foot" }, h("div", { class: "row-actions" }, on && button(t("bt.turnOff"), { onclick: () => act("PUT", "/api/music", { speaker: { on: false } }) }), button(t(on ? "settings.save" : "music.speaker.turnOn"), { class: "primary", onclick: () => act("PUT", "/api/music", { speaker: { ...typed(), on: true } }) }))),
+    uiFoot(on && button(t("bt.turnOff"), { onclick: () => act("PUT", "/api/music", { speaker: { on: false } }) }), button(t(on ? "settings.save" : "music.speaker.turnOn"), { class: "primary", onclick: () => act("PUT", "/api/music", { speaker: { ...typed(), on: true } }) })),
   );
 }
 
@@ -558,22 +553,21 @@ function musicSpeakerCard(m, act) {
 function musicPlayerCard(m, act, error = null) {
   const press = (action, value) => act("POST", "/api/music/do", { action, value });
   const now = m.now;
-  const round = (action, iconName, cls = "") => h("button", { type: "button", class: "tvr-round " + cls, title: t("music.key." + action), "aria-label": t("music.key." + action), disabled: !now, onclick: () => press(action) }, icon(iconName));
-  const seek = now?.duration ? h("input", { type: "range", class: "tvr-slider", min: 0, max: Math.floor(now.duration), value: Math.floor(now.position), "aria-label": t("music.position"), onchange: (e) => press("seek", Number(e.target.value)) }) : null;
-  const volume = h("input", { type: "range", class: "tvr-slider" + (m.muted ? " muted" : ""), min: 0, max: 100, value: m.volume, "aria-label": t("music.volume"), onchange: (e) => press("volume", Number(e.target.value)) });
+  const round = (action, iconName) => uiKey({ icon: iconName, label: t("music.key." + action), disabled: !now, run: () => press(action) });
+  const seek = now?.duration ? uiSlider({ min: 0, max: Math.floor(now.duration), value: Math.floor(now.position), label: t("music.position"), onchange: (e) => press("seek", Number(e.target.value)) }) : null;
+  const volume = uiSlider({ muted: m.muted, min: 0, max: 100, value: m.volume, label: t("music.volume"), onchange: (e) => press("volume", Number(e.target.value)) });
   const kind = (o) => t("music.out." + o.kind);
   const output = m.outputs.length
     ? h("select", { "aria-label": t("music.output"), onchange: (e) => act("PUT", "/api/music", { output: e.target.value }) }, m.outputs.map((o) => h("option", { value: o.id, selected: o.id === m.output }, `${o.name} — ${kind(o)}`)))
     : h("span", { class: "muted" }, t("music.noOutput"));
-  const player = h(
-    "section",
-    { class: "card pad stack music-player" },
+  const player = uiCard(
+    { cls: "ui-media-player" },
     now
-      ? h("div", { class: "music-now" }, h("span", { class: "badge-icon plain" }, icon(now.link ? "globe" : "music")), h("div", { class: "grow" }, h("strong", { class: "wrap" }, now.title), now.by && h("div", { class: "muted small wrap" }, now.by)), now.paused && uiState("off", t("tv.paused")))
-      : h("div", { class: "music-now" }, h("span", { class: "badge-icon plain" }, icon("music")), h("div", { class: "grow" }, h("strong", null, t("music.idle")), h("div", { class: "muted small" }, t("music.idleLead")))),
-    seek && h("div", { class: "music-seek" }, h("span", { class: "muted small mono" }, tvClock(now.position)), seek, h("span", { class: "muted small mono" }, tvClock(now.duration))),
-    h("div", { class: "music-keys" }, round("previous", "previous"), h("button", { type: "button", class: "tvr-main", title: t("music.key.playpause"), "aria-label": t("music.key.playpause"), disabled: !now, onclick: () => press("playpause") }, icon(now && !now.paused ? "pause" : "play")), round("next", "next"), round("stop", "stop")),
-    h("div", { class: "tvr-volume" }, h("button", { type: "button", class: "icon-btn", title: t("music.key.mute"), "aria-label": t("music.key.mute"), disabled: !m.running, onclick: () => press("mute", !m.muted) }, icon(m.muted ? "volumeOff" : "volume")), volume, h("span", { class: "muted small mono" }, m.volume + " %")),
+      ? uiRow({ lead: { icon: now.link ? "globe" : "music" }, name: h("span", { class: "wrap" }, now.title), sub: now.by || null, state: now.paused ? uiState("off", t("tv.paused")) : null, cls: "ui-row-plain" })
+      : uiRow({ lead: { icon: "music" }, name: t("music.idle"), sub: t("music.idleLead"), cls: "ui-row-plain" }),
+    seek && uiSeek(tvClock(now.position), seek, tvClock(now.duration)),
+    uiKeys([round("previous", "previous"), uiKey({ icon: now && !now.paused ? "pause" : "play", kind: "main", label: t("music.key.playpause"), disabled: !now, run: () => press("playpause") }), round("next", "next"), round("stop", "stop")], "row"),
+    uiVolume(h("button", { type: "button", class: "icon-btn", title: t("music.key.mute"), "aria-label": t("music.key.mute"), disabled: !m.running, onclick: () => press("mute", !m.muted) }, icon(m.muted ? "volumeOff" : "volume")), volume, h("span", { class: "muted small mono" }, m.volume + " %")),
     m.volumeOf === "speaker" && h("p", { class: "muted small" }, t("music.volumeSpeaker")),
     uiSetting({ name: t("music.output"), explain: t("music.outputHint"), control: output }),
     error,
@@ -640,7 +634,7 @@ function paintMusic() {
   );
   const nowState = m.now ? (m.now.paused ? uiState("off", t("tv.paused")) : uiState("ok", t("music.statePlaying"))) : uiState("off", t("music.silent"));
   houseHead({ icon: "music", title: t("music.title"), state: nowState, actions: [{ label: t("music.link"), icon: "link", run: musicLinkDialog }, { label: t("music.folder"), icon: "folder", primary: true, run: musicFolder }] });
-  put(box, h("div", { class: "music-page" }, h("div", { class: "stack" }, player, musicSpeakerCard(m, act)), queue));
+  put(box, uiSplit(h("div", { class: "stack" }, player, musicSpeakerCard(m, act)), queue));
 }
 
 async function loadTv() {
@@ -649,12 +643,12 @@ async function loadTv() {
   try {
     state.tv = await api("GET", "/api/tv");
   } catch (e) {
-    if (!state.tv) put(document.getElementById("tv-body"), h("section", { class: "card pad" }, h("p", { class: "error" }, errorText(e))));
+    if (!state.tv) put(document.getElementById("tv-body"), uiCard({}, uiEmpty({ size: "error", text: errorText(e) })));
   }
   // a slider under the finger or a list that is open is not redrawn under the person
   // nor the picture of the screen while it has this device's whole screen: taken out of the page for a moment, it would fall back
   // nor a field somebody is typing an address into
-  if (state.tv && !tvUi.busy && !document.fullscreenElement && !document.activeElement?.closest?.("#tv-body .tv-address") && !document.querySelector("dialog[open]:not(.tv-drop)") && !document.querySelector("#tv-body input[type=range]:active")) paintTv();
+  if (state.tv && !tvUi.busy && !document.fullscreenElement && !document.activeElement?.closest?.("#tv-body .ui-input-line") && !document.querySelector("dialog[open]:not(.tv-drop)") && !document.querySelector("#tv-body input[type=range]:active")) paintTv();
   // while the player runs the page keeps up with what plays
   tvUi.timer = setTimeout(loadTv, state.tv?.running || state.tv?.browser?.running ? 2000 : 8000);
 }
@@ -672,41 +666,46 @@ const tvClock = (s) => `${Math.floor(s / 3600) ? Math.floor(s / 3600) + ":" : ""
  * with pause as the one loud button, the volume, a round pad with OK in the middle, four keys below.
  */
 function tvRemoteParts(tv, press, turnOn) {
-  const note = (iconName, title, text, action) => h("div", { class: "tvr-note" }, h("strong", { class: "with-icon" }, icon(iconName), title), h("p", { class: "muted small" }, text), action);
+  const note = (iconName, title, text, action) => uiNotice({ tone: "off", icon: iconName, title, text, foot: action && uiLine([action]) });
   // a web page has the screen: its own few buttons instead of the player's
   if (tv.screen === "browser") return tvPageParts(tv);
   if (!tv.installed) return [note("tv", t("tv.needsTitle"), t("tv.needsShort"), h("a", { class: "btn primary wide", href: "#/tv", onclick: (e) => e.currentTarget.closest("dialog")?.close() }, h("span", null, t("tv.openPage"))))];
   if (!tv.running) return [note("power", t(tv.screen === "dark" ? "tv.darkTitle" : "tv.offTitle"), t(tv.screen === "dark" ? "tv.darkLead" : "tv.offLead"), turnOn && button(t("tv.turnOn"), { class: "primary wide", onclick: (e) => ((e.currentTarget.disabled = true), turnOn()) }, "power"))];
   const idle = !tv.answers;
   const now = tv.playing;
-  const round = (action, iconName, label, cls = "", off = false) => h("button", { type: "button", class: "tvr-round " + cls, title: label, "aria-label": label, disabled: idle || off, onclick: () => press(action) }, icon(iconName));
-  const position = now && now.total > 0 && h("input", { type: "range", class: "tvr-slider", min: 0, max: 100, step: 0.1, value: (now.time / now.total) * 100, "aria-label": t("tv.position"), onchange: (e) => press("seek", Number(e.target.value)) });
+  const round = (action, iconName, label, on = false) => uiKey({ icon: iconName, label, on, disabled: idle, run: () => press(action) });
+  const position = now && now.total > 0 && uiSlider({ min: 0, max: 100, step: 0.1, value: (now.time / now.total) * 100, label: t("tv.position"), onchange: (e) => press("seek", Number(e.target.value)) });
   const file = now && !isLink(now.file) ? now.file.split("/").pop() : "";
-  const volume = h("input", { type: "range", class: "tvr-slider" + (tv.muted ? " muted" : ""), min: 0, max: 100, step: 1, value: tv.volume, disabled: idle, "aria-label": t("tv.volume"), onchange: (e) => press("volume", Number(e.target.value)) });
-  const skip = (action, iconName, label) => h("button", { type: "button", class: "tvr-round skip", title: label, "aria-label": label, disabled: idle || !now, onclick: () => press(action) }, icon(iconName), h("span", null, "30"));
-  const arrow = (action, cls, label) => h("button", { type: "button", class: "tvr-arrow " + cls, title: label, "aria-label": label, disabled: idle, onclick: () => press(action) }, icon("chevron"));
-  const keyed = (action, iconName, label) => h("div", { class: "tvr-key" }, round(action, iconName, label), h("span", { class: "muted" }, label));
-  // the sound and the subtitles of what plays, chosen here instead of in the player's menu on the screen
-  const tracks = now && (now.audio?.length > 1 || now.subs?.length > 0) && h(
-    "div",
-    { class: "tvr-tracks" },
-    now.audio.length > 1 && h("label", null, h("span", { class: "muted" }, t("tv.track.audio")), h("select", { onchange: (e) => press("audio", Number(e.target.value)) }, now.audio.map((one) => h("option", { value: String(one.index), selected: one.index === now.audioNow }, trackLabel(one))))),
-    now.subs.length > 0 && h("label", null, h("span", { class: "muted" }, t("tv.track.subs")), h("select", { onchange: (e) => press("subtitle", e.target.value === "off" ? "off" : Number(e.target.value)) }, h("option", { value: "off", selected: now.subNow < 0 }, t("tv.track.noSubs")), now.subs.map((one) => h("option", { value: String(one.index), selected: one.index === now.subNow }, trackLabel(one))))),
-  );
-  const typed = h("div", { class: "tvr-key" }, h("button", { type: "button", class: "tvr-round", title: t("tv.key.textHint"), "aria-label": t("tv.key.text"), disabled: idle, onclick: () => tvTextDialog(press) }, icon("keys")), h("span", { class: "muted" }, t("tv.key.text")));
+  const volume = uiSlider({ muted: tv.muted, min: 0, max: 100, step: 1, value: tv.volume, disabled: idle, label: t("tv.volume"), onchange: (e) => press("volume", Number(e.target.value)) });
+  const skip = (action, iconName, label) => uiKey({ icon: iconName, text: "30", kind: "skip", label, disabled: idle || !now, run: () => press(action) });
+  const keyed = (action, iconName, label) => uiKeyCap(round(action, iconName, label), label);
+  const tracks = tvTracks(now, press);
+  const typed = uiKeyCap(uiKey({ icon: "keys", label: t("tv.key.text"), hint: t("tv.key.textHint"), disabled: idle, run: () => tvTextDialog(press) }), t("tv.key.text"));
   return [
     idle
       ? note("refresh", t("tv.starting"), t("tv.startingLead"))
       : now
-        ? h("div", { class: "tvr-now" }, h("div", { class: "tvr-title" }, h("div", { class: "grow" }, h("strong", { class: "wrap" }, now.title), now.paused && uiState("off", t("tv.paused"))), round("stop", "stop", t("tv.key.stop"))), file && file !== now.title && h("p", { class: "tvr-file muted" }, file), position, h("div", { class: "tvr-times muted" }, h("span", null, tvClock(now.time)), h("span", null, tvClock(now.total))), tracks, (isLink(now.file) ? tvStreams() : now.file.startsWith("/") && (tvStreams() ? TV_PLAYS_RE.test(now.file) && fileKind({ type: "file", name: now.file }) !== "image" : TV_BROWSER_RE.test(now.file))) && h("div", { class: "row-actions" }, button(t("tv.toBrowser"), { class: "small", onclick: () => moveToBrowser(now) }, "external")))
+        ? uiNow({ title: now.title, state: now.paused && uiState("off", t("tv.paused")), action: round("stop", "stop", t("tv.key.stop")), sub: file && file !== now.title ? file : null }, position, uiTimes(tvClock(now.time), tvClock(now.total)), tracks, (isLink(now.file) ? tvStreams() : now.file.startsWith("/") && (tvStreams() ? TV_PLAYS_RE.test(now.file) && fileKind({ type: "file", name: now.file }) !== "image" : TV_BROWSER_RE.test(now.file))) && uiLine([button(t("tv.toBrowser"), { class: "small", onclick: () => moveToBrowser(now) }, "external")]))
         : note("tv", t("tv.nothingTitle"), t("tv.nothing")),
-    h("div", { class: "tvr-transport" }, skip("rewind", "back30", t("tv.key.rewind")), h("button", { type: "button", class: "tvr-main", title: t("tv.key.playpause"), "aria-label": t("tv.key.playpause"), disabled: idle || !now, onclick: () => press("playpause") }, icon(now && !now.paused ? "pause" : "play")), skip("forward", "fwd30", t("tv.key.forward"))),
-    h("div", { class: "tvr-volume" }, round("mute", tv.muted ? "volumeOff" : "volume", t(tv.muted ? "tv.unmute" : "tv.mute"), tv.muted ? "on" : ""), volume, h("span", { class: "tvr-value" + (tv.muted ? " muted" : "") }, tv.muted ? t("tv.muted") : `${tv.volume}%`)),
-    tv.audio && tv.audio.options.length > 1 && h("div", { class: "tvr-tracks" }, h("label", null, h("span", { class: "muted" }, t("tv.out")), h("select", { "aria-label": t("tv.audio"), onchange: (e) => api("PUT", "/api/tv", { audio: e.target.value }).then((said) => ((state.tv = said), state.route.view === "tv" && paintTv()), (err) => toast(errorText(err), "error")) }, tv.audio.options.map((o) => h("option", { value: o.value, selected: o.value === tv.audio.value }, o.label))))),
-    h("hr", { class: "tvr-rule" }),
-    h("div", { class: "tvr-pad" }, arrow("up", "up", t("tv.key.up")), arrow("left", "left", t("tv.key.left")), h("button", { type: "button", class: "tvr-ok", disabled: idle, onclick: () => press("select") }, "OK"), arrow("right", "right", t("tv.key.right")), arrow("down", "down", t("tv.key.down"))),
-    h("div", { class: "tvr-keys" }, keyed("back", "undo", t("tv.key.back")), keyed("home", "home", t("tv.key.home")), keyed("menu", "lines", t("tv.key.menu")), keyed("info", "info", t("tv.key.info")), typed),
+    uiKeys([skip("rewind", "back30", t("tv.key.rewind")), uiKey({ icon: now && !now.paused ? "pause" : "play", kind: "main", label: t("tv.key.playpause"), disabled: idle || !now, run: () => press("playpause") }), skip("forward", "fwd30", t("tv.key.forward"))], "transport"),
+    uiVolume(round("mute", tv.muted ? "volumeOff" : "volume", t(tv.muted ? "tv.unmute" : "tv.mute"), tv.muted), volume, uiVolumeValue(tv.muted ? t("tv.muted") : `${tv.volume}%`, tv.muted)),
+    tv.audio && tv.audio.options.length > 1 && uiField(t("tv.out"), h("select", { "aria-label": t("tv.audio"), onchange: (e) => api("PUT", "/api/tv", { audio: e.target.value }).then((said) => ((state.tv = said), state.route.view === "tv" && paintTv()), (err) => toast(errorText(err), "error")) }, tv.audio.options.map((o) => h("option", { value: o.value, selected: o.value === tv.audio.value }, o.label)))),
+    uiRule(),
+    uiPad(press, { disabled: idle, labels: tvPadLabels() }),
+    uiKeys([keyed("back", "undo", t("tv.key.back")), keyed("home", "home", t("tv.key.home")), keyed("menu", "lines", t("tv.key.menu")), keyed("info", "info", t("tv.key.info")), typed]),
   ];
+}
+
+/** The names of a pad's arrows, for whoever cannot see them */
+const tvPadLabels = () => ({ up: t("tv.key.up"), down: t("tv.key.down"), left: t("tv.key.left"), right: t("tv.key.right") });
+
+/** The sound and the subtitles of what plays, chosen here instead of in the player's menu on the screen */
+function tvTracks(now, press) {
+  if (!now || !(now.audio?.length > 1 || now.subs?.length > 0)) return null;
+  return uiFields(
+    now.audio.length > 1 && uiField(t("tv.track.audio"), h("select", { onchange: (e) => press("audio", Number(e.target.value)) }, now.audio.map((one) => h("option", { value: String(one.index), selected: one.index === now.audioNow }, trackLabel(one))))),
+    now.subs.length > 0 && uiField(t("tv.track.subs"), h("select", { onchange: (e) => press("subtitle", e.target.value === "off" ? "off" : Number(e.target.value)) }, h("option", { value: "off", selected: now.subNow < 0 }, t("tv.track.noSubs")), now.subs.map((one) => h("option", { value: String(one.index), selected: one.index === now.subNow }, trackLabel(one))))),
+  );
 }
 
 /** The word and the colour of the chip that says what the screen does now: `[state class, word]` */
@@ -742,14 +741,19 @@ function tvMediaOf(tv, again) {
 
 /** The buttons of what plays: 30 seconds back, pause as the one loud button, 30 on, and a fourth (stop, or the whole screen) */
 function tvTransport(m) {
-  const round = (iconName, label, run, cls = "") => h("button", { type: "button", class: "tvr-round " + cls, title: label, "aria-label": label, onclick: run }, icon(iconName), cls === "skip" && h("span", null, "30"));
   return [
-    round("back30", t("tv.key.rewind"), () => m.skip(-30), "skip"),
-    h("button", { type: "button", class: "tvr-main", title: t("tv.key.playpause"), "aria-label": t("tv.key.playpause"), onclick: m.play }, icon(m.paused ? "play" : "pause")),
-    round("fwd30", t("tv.key.forward"), () => m.skip(30), "skip"),
-    round(m.fourth.icon, m.fourth.label, m.fourth.run, "tv-fourth" + (m.fourth.on ? " on" : "")),
+    uiKey({ icon: "back30", text: "30", kind: "skip", label: t("tv.key.rewind"), run: () => m.skip(-30) }),
+    uiKey({ icon: m.paused ? "play" : "pause", kind: "main", label: t("tv.key.playpause"), run: m.play }),
+    uiKey({ icon: "fwd30", text: "30", kind: "skip", label: t("tv.key.forward"), run: () => m.skip(30) }),
+    uiKey({ icon: m.fourth.icon, label: m.fourth.label, run: m.fourth.run, on: m.fourth.on, fourth: true }),
   ];
 }
+
+/** The chip that says what the screen does now, as the system's state */
+const tvChipState = (tv) => {
+  const [cls, word] = tvChip(tv);
+  return uiState({ running: "ok", busy: "warn", stopped: "off" }[cls] ?? "off", word);
+};
 
 /**
  * The stage: a dark rectangle of the screen's shape that is there in every mode and says what the
@@ -758,41 +762,31 @@ function tvTransport(m) {
  */
 function tvStage(tv, { live = false, go, show, hide, media = null }) {
   const b = tv.browser;
-  const badge = (iconName, cls = "kodi") => h("span", { class: "tv-mark-icon " + cls, "aria-hidden": "true" }, icon(iconName));
-  const words = (mark, title, sub, ...more) => h("div", { class: "tv-stage-words" }, mark, h("strong", { class: "tv-stage-title" }, title), sub && h("span", { class: "tv-stage-sub clip" }, sub), more);
+  const badge = (iconName, plain = false) => uiMark({ icon: iconName, tone: plain ? "plain" : "accent" });
+  const words = (mark, title, sub, ...more) => uiScreenWords({ mark, title, sub }, ...more);
   // where what plays is, along the stage's lower edge; with `media` it is also pulled to another place
-  const bar = (time, total) => {
-    if (!(total > 0)) return null;
-    const at = Math.min(100, (time / total) * 100);
-    const fill = h("b");
-    fill.style.width = `${at}%`;
-    if (!media) return h("i", { class: "tv-stage-bar" }, fill);
-    const pull = h("input", { type: "range", min: 0, max: 100, step: 0.1, value: at, "aria-label": t("tv.position"), onchange: (e) => media.seek(Number(e.target.value)) });
-    pull.addEventListener("input", () => (fill.style.width = `${pull.value}%`));
-    return h("span", { class: "tv-stage-bar seek" }, fill, pull);
-  };
-  const stage = (cls, ...kids) => h("div", { class: "tv-stage" + (cls ? " " + cls : "") }, kids);
+  const bar = (time, total) => total > 0 && uiScreenBar(Math.min(100, (time / total) * 100), media && { label: t("tv.position"), seek: (v) => media.seek(v) });
   if (tv.screen === "browser") {
-    if (live) return stage("live", tvPreview(), h("button", { type: "button", class: "tv-stage-chip", onclick: hide }, icon("eyeOff"), t("tv.page.controlOff")));
+    if (live) return uiScreen("live", tvPreview(), uiScreenChip(t("tv.page.controlOff"), { icon: "eyeOff", run: hide }));
     const m = b.media;
-    return stage("", words(b.url ? tvMarkIcon({ name: b.title || tvHost(b.url), url: b.url }) : badge("home"), b.title || t(b.url ? "tv.page.blank" : "tv.page.home"), b.url ? tvHost(b.url) : "", h("button", { type: "button", class: "tv-stage-btn", title: t("tv.page.controlHint"), onclick: show }, icon("eye"), t("tv.stage.show"))), m && bar(m.time, m.total));
+    return uiScreen("", words(b.url ? tvMarkIcon({ name: b.title || tvHost(b.url), url: b.url }) : badge("home"), b.title || t(b.url ? "tv.page.blank" : "tv.page.home"), b.url ? tvHost(b.url) : "", uiScreenButton({ icon: "eye", label: t("tv.stage.show"), hint: t("tv.page.controlHint"), run: show })), m && bar(m.time, m.total));
   }
   if (tv.screen === "kodi") {
-    if (!tv.answers) return stage("", words(h("span", { class: "wait-ring" }), t("tv.starting"), t("tv.startingLead")));
+    if (!tv.answers) return uiScreen("", words(uiRing(), t("tv.starting"), t("tv.startingLead")));
     const now = tv.playing;
-    if (!now) return stage("", words(badge("film"), t("tv.stage.menu"), t("tv.stage.menuHint")));
+    if (!now) return uiScreen("", words(badge("film"), t("tv.stage.menu"), t("tv.stage.menuHint")));
     const file = isLink(now.file) ? tvHost(now.file) : now.file.split("/").pop();
-    return stage("", now.total > 0 && h("span", { class: "tv-stage-chip" }, `${tvClock(now.time)} / ${tvClock(now.total)}`), words(badge("film"), now.title, file !== now.title ? file : ""), bar(now.time, now.total));
+    return uiScreen("", now.total > 0 && uiScreenChip(`${tvClock(now.time)} / ${tvClock(now.total)}`), words(badge("film"), now.title, file !== now.title ? file : ""), bar(now.time, now.total));
   }
   // nothing of Hata's on the screen: what can be put there, the player first
-  const tile = (cls, mark, title, sub, run) => h("button", { type: "button", class: "tv-pick" + (cls ? " " + cls : ""), onclick: (e) => (e.currentTarget.classList.add("going"), run()) }, mark, h("span", { class: "tv-mark-words" }, h("strong", { class: "clip" }, title), h("span", { class: "tv-pick-sub clip" }, sub)));
+  const tile = (main, mark, title, sub, run) => uiScreenTile({ main, mark, title, sub, run });
   const tiles = [
-    tv.installed && tile("main", badge("film"), t("tv.turnOnKodi"), t("tv.pick.kodi"), () => go("kodi")),
-    b.installed && tile("", badge("globe", "plain"), t("tv.openBrowser"), t("tv.pick.browser"), () => go("browser")),
-    ...(b.installed ? (b.bookmarks ?? []).slice(0, 4) : []).map((one) => tile("", tvMarkIcon(one), one.name || tvHost(one.url), tvHost(one.url), () => go("url", one.url))),
+    tv.installed && tile(true, badge("film"), t("tv.turnOnKodi"), t("tv.pick.kodi"), () => go("kodi")),
+    b.installed && tile(false, badge("globe", true), t("tv.openBrowser"), t("tv.pick.browser"), () => go("browser")),
+    ...(b.installed ? (b.bookmarks ?? []).slice(0, 4) : []).map((one) => tile(false, tvMarkIcon(one), one.name || tvHost(one.url), tvHost(one.url), () => go("url", one.url))),
   ].filter(Boolean);
-  if (!tiles.length) return stage("", words(badge("film"), t("tv.needsTitle"), t("tv.stage.needs")));
-  return stage("pick", h("div", { class: "tv-stage-pick" }, h("p", { class: "with-icon" }, icon(tv.screen === "dark" ? "power" : "terminal"), t(tv.screen === "dark" ? "tv.pick.dark" : "tv.pick.console")), h("div", { class: "tv-picks" }, tiles)));
+  if (!tiles.length) return uiScreen("", words(badge("film"), t("tv.needsTitle"), t("tv.stage.needs")));
+  return uiScreen("pick", uiScreenPick({ icon: tv.screen === "dark" ? "power" : "terminal", text: t(tv.screen === "dark" ? "tv.pick.dark" : "tv.pick.console") }, tiles));
 }
 
 /**
@@ -802,8 +796,8 @@ function tvStage(tv, { live = false, go, show, hide, media = null }) {
 function tvBlock(el) {
   if (el.dataset.on) return;
   el.dataset.on = "1";
-  const chip = h("span", { class: "state" });
-  const body = h("div", { class: "tv-card" });
+  const chip = h("span");
+  const body = uiMediaCard();
   let busy = false;
   let timer = 0;
   let last = null;
@@ -839,7 +833,7 @@ function tvBlock(el) {
       { label: t("tv.openPage"), icon: "arrow", href: "#/house/tv" },
     ]);
   };
-  put(el, h("div", { class: "section-head" }, h("h2", null, h("a", { class: "with-icon", href: "#/house/tv" }, icon("tv"), t("tv.title"))), h("span", { class: "row-actions" }, chip, h("button", { type: "button", class: "icon-btn tv-card-more", title: t("tv.more"), "aria-label": t("tv.more"), onclick: (e) => menu(e.currentTarget) }, icon("more")))), body);
+  put(el, uiSubhead({ title: h("a", { class: "with-icon", href: "#/house/tv" }, icon("tv"), t("tv.title")), actions: [chip, h("button", { type: "button", class: "icon-btn ui-more square small", title: t("tv.more"), "aria-label": t("tv.more"), onclick: (e) => menu(e.currentTarget) }, icon("more"))] }), body);
   const load = async () => {
     clearTimeout(timer);
     if (!el.isConnected) return void delete el.dataset.on;
@@ -857,10 +851,8 @@ function tvBlock(el) {
     timer = setTimeout(load, tv && (tv.running || tv.browser.running) ? 3000 : 8000);
   };
   const paint = (tv) => {
-    el.classList.remove("tv-switching");
-    const [cls, word] = tvChip(tv);
-    chip.className = "state " + cls;
-    chip.textContent = word;
+    el.classList.remove("ui-switching");
+    put(chip, tvChipState(tv));
     const b = tv.browser;
     // the screen itself, live, in the card's own stage: only while asked for, and only while a page has the screen
     if (tv.screen !== "browser") live = false;
@@ -869,15 +861,15 @@ function tvBlock(el) {
     const now = tv.screen === "kodi" && tv.answers ? tv.playing : null;
     const title = tv.screen === "browser" ? b.title || t(b.url ? "tv.page.blank" : "tv.page.home") : tv.screen === "kodi" ? (now ? now.title : t(tv.answers ? "tv.nothingTitle" : "tv.starting")) : t(tv.screen === "dark" ? "tv.darkTitle" : "tv.consoleHead");
     const sub = tv.screen === "browser" ? tvHost(b.url) : now && !isLink(now.file) ? now.file.split("/").pop() : "";
-    const line = (text, action) => h("div", { class: "tv-card-foot" }, h("span", { class: "tv-card-quiet clip" }, text), action);
+    const line = (text, action) => uiMediaFoot([uiMediaQuiet(text), action]);
     const foot = m
-      ? h("div", { class: "tv-card-foot" }, tvTransport(m), h("button", { type: "button", class: "tvr-round to-right" + (m.muted ? " on" : ""), title: t(m.muted ? "tv.unmute" : "tv.mute"), "aria-label": t(m.muted ? "tv.unmute" : "tv.mute"), onclick: m.mute }, icon(m.muted ? "volumeOff" : "volume")), h("input", { type: "range", class: "tvr-slider tv-vol" + (m.muted ? " muted" : ""), min: 0, max: 100, step: 1, value: m.volume, title: `${t("tv.volume")}: ${Math.round(m.volume)}%`, "aria-label": t("tv.volume"), onchange: (e) => m.loud(Number(e.target.value)) }))
+      ? uiMediaFoot([tvTransport(m), uiKey({ icon: m.muted ? "volumeOff" : "volume", label: t(m.muted ? "tv.unmute" : "tv.mute"), on: m.muted, push: true, run: m.mute }), uiSlider({ vol: true, muted: m.muted, min: 0, max: 100, step: 1, value: m.volume, title: `${t("tv.volume")}: ${Math.round(m.volume)}%`, label: t("tv.volume"), onchange: (e) => m.loud(Number(e.target.value)) })])
       : tv.screen === "browser"
         ? line(t("tv.noVideoShort"), button(t(live ? "tv.page.controlOff" : "tv.stage.show"), { class: "small", onclick: () => turn(!live) }, live ? "eyeOff" : "eye"))
         : tv.screen === "kodi" && tv.answers
-          ? h("div", { class: "tv-card-foot keys" }, [["back", "undo", t("tv.key.back"), ""], ["left", "chevron", t("tv.key.left"), "turn-left"], ["up", "chevron", t("tv.key.up"), "turn-up"], ["select", "", "OK", "ok"], ["down", "chevron", t("tv.key.down"), "turn-down"], ["right", "chevron", t("tv.key.right"), ""]].map(([action, iconName, label, cls]) => h("button", { type: "button", class: "tvr-round " + cls, title: label, "aria-label": label, onclick: () => api("POST", "/api/tv/do", { action }).catch((e) => toast(errorText(e), "error")) }, iconName ? icon(iconName) : "OK")))
+          ? uiMediaFoot([["back", "undo", t("tv.key.back"), ""], ["left", "chevron", t("tv.key.left"), "left"], ["up", "chevron", t("tv.key.up"), "up"], ["select", "", "OK", ""], ["down", "chevron", t("tv.key.down"), "down"], ["right", "chevron", t("tv.key.right"), ""]].map(([action, iconName, label, turn]) => uiKey({ icon: iconName || null, text: iconName ? null : "OK", label, turn, ok: !iconName, run: () => api("POST", "/api/tv/do", { action }).catch((e) => toast(errorText(e), "error")) })), { keys: true })
           : null;
-    put(body, tvStage(tv, { live, go, media: m, show: () => turn(true), hide: () => turn(false) }), h("div", { class: "tv-card-side" }, h("strong", { class: "tv-card-title" }, title), sub && h("span", { class: "tv-card-sub muted mono clip" }, sub), foot));
+    put(body, tvStage(tv, { live, go, media: m, show: () => turn(true), hide: () => turn(false) }), uiMediaSide({ title, sub, foot }));
   };
   void load();
 }
@@ -900,12 +892,13 @@ function tvSiteDialog(show) {
 /** Says, where the stage is, that the screen is changing hands: it takes some seconds, and the person is at the page, not at the screen */
 function tvWorking(text, root = document.getElementById("tv-body")) {
   if (!root) return;
-  root.classList.add("tv-switching");
-  for (const stage of root.querySelectorAll(".tv-stage")) {
-    stage.className = "tv-stage switching";
-    stage.replaceChildren(h("div", { class: "tv-stage-words", role: "status" }, h("span", { class: "wait-ring" }), h("strong", { class: "tv-stage-title" }, text), h("span", { class: "tv-stage-sub" }, t("tv.stage.black"))));
+  root.classList.add("ui-switching");
+  for (const stage of root.querySelectorAll(".ui-screen")) {
+    stage.classList.remove("ui-live", "ui-pick");
+    stage.classList.add("ui-switching");
+    stage.replaceChildren(uiScreenWords({ mark: uiRing(), title: text, sub: t("tv.stage.black"), status: true }));
   }
-  for (const el of root.querySelectorAll(".tv-main button, .tv-show button, .tv-card-foot button")) el.disabled = true;
+  for (const el of root.querySelectorAll("#tv-main button, #tv-show button, .ui-media-foot button")) el.disabled = true;
 }
 
 /**
@@ -914,7 +907,7 @@ function tvWorking(text, root = document.getElementById("tv-body")) {
  * blinks. A click on it is a click there, the wheel scrolls there.
  */
 function tvPreview() {
-  const box = tvUi.preview ?? (tvUi.preview = h("div", { class: "tv-preview", role: "img", "aria-label": t("tv.page.previewHint") }));
+  const box = tvUi.preview ?? (tvUi.preview = uiShot(t("tv.page.previewHint")));
   if (box.dataset.on) return box;
   box.dataset.on = "1";
   let quick = 0;
@@ -932,7 +925,7 @@ function tvPreview() {
     const [left, top] = [r.left + (r.width - w) / 2, r.top + (r.height - hgt) / 2];
     return { x: Math.min(1, Math.max(0, (e.clientX - left) / w)), y: Math.min(1, Math.max(0, (e.clientY - top) / hgt)) };
   };
-  const grow = h("button", { type: "button", class: "tv-preview-grow", title: t("tv.page.previewFull"), "aria-label": t("tv.page.previewFull"), onclick: (e) => (e.stopPropagation(), document.fullscreenElement ? document.exitFullscreen() : box.requestFullscreen?.()) }, icon("expand"));
+  const grow = uiShotGrow(t("tv.page.previewFull"), (e) => (e.stopPropagation(), document.fullscreenElement ? document.exitFullscreen() : box.requestFullscreen?.()));
   box.addEventListener("click", (e) => void act("click", at(e)));
   box.addEventListener("fullscreenchange", () => next(0));
   // the keyboard of whoever looks at the picture is the screen's while the picture has the focus: letters go as text
@@ -1064,7 +1057,7 @@ function tvAddressRow(start, label, key = "", placeholder = "https://") {
     go.disabled = false;
   };
   field.addEventListener("keydown", (e) => e.key === "Enter" && void send());
-  const row = h("div", { class: "tv-address" }, field, go);
+  const row = uiInputLine(field, go);
   if (key) tvUi.fields[key] = { field, row, last: start };
   return row;
 }
@@ -1109,25 +1102,25 @@ function tvPageParts(tv, address = true) {
   const b = tv.browser;
   const again = () => setTimeout(() => (document.querySelector("dialog.tv-drop[open]") ? null : void loadTv()), 400);
   const act = (action, value) => api("POST", "/api/tv/browser", { action, value }).then(again, (e) => toast(errorText(e), "error"));
-  const keyed = (action, iconName, label, cls = "") => h("div", { class: "tvr-key" }, h("button", { type: "button", class: "tvr-round " + cls, title: label, "aria-label": label, onclick: () => (action === "text" ? tvTextDialog(act, true) : act(action)) }, icon(iconName)), h("span", { class: "muted" }, label));
-  const leave = button(t(b.back ? "tv.page.toPlayer" : "tv.page.close"), { class: "wide tv-leave", onclick: () => ((leave.disabled = true), tvWorking(t(b.back ? "tv.switching.kodi" : "tv.switching.off")), api("POST", "/api/tv/back", {}).then(async () => ((state.tv = await api("GET", "/api/tv")), state.route.view === "tv" && paintTv()), (e) => toast(errorText(e), "error"))) }, b.back ? "play" : "x");
+  const keyed = (action, iconName, label, turn = "") => uiKeyCap(uiKey({ icon: iconName, label, turn, run: () => (action === "text" ? tvTextDialog(act, true) : act(action)) }), label);
+  const leave = button(t(b.back ? "tv.page.toPlayer" : "tv.page.close"), { class: "wide", onclick: () => ((leave.disabled = true), tvWorking(t(b.back ? "tv.switching.kodi" : "tv.switching.off")), api("POST", "/api/tv/back", {}).then(async () => ((state.tv = await api("GET", "/api/tv")), state.route.view === "tv" && paintTv()), (e) => toast(errorText(e), "error"))) }, b.back ? "play" : "x");
   // the video the page plays, driven as a player: found in the page and its frames, whatever the site's own buttons are
   const m = b.media;
-  const round = (action, iconName, label, cls = "", value) => h("button", { type: "button", class: "tvr-round " + cls, title: label, "aria-label": label, onclick: () => act(action, value) }, icon(iconName));
-  const skip = (seconds, iconName, label) => h("button", { type: "button", class: "tvr-round skip", title: label, "aria-label": label, onclick: () => act("skip", seconds) }, icon(iconName), h("span", null, "30"));
+  const round = (action, iconName, label, on = false, value) => uiKey({ icon: iconName, label, on, run: () => act(action, value) });
+  const skip = (seconds, iconName, label) => uiKey({ icon: iconName, text: "30", kind: "skip", label, run: () => act("skip", seconds) });
   const player = m && [
-    m.total > 0 && h("input", { type: "range", class: "tvr-slider", min: 0, max: 100, step: 0.1, value: (m.time / m.total) * 100, "aria-label": t("tv.position"), onchange: (e) => act("seek", Number(e.target.value)) }),
-    h("div", { class: "tvr-times muted" }, h("span", null, tvClock(m.time)), m.paused && h("span", { class: "state busy" }, t("tv.paused")), h("span", null, m.total > 0 ? tvClock(m.total) : "")),
-    h("div", { class: "tvr-transport" }, skip(-30, "back30", t("tv.key.rewind")), h("button", { type: "button", class: "tvr-main", title: t("tv.key.playpause"), "aria-label": t("tv.key.playpause"), onclick: () => act("play") }, icon(m.paused ? "play" : "pause")), skip(30, "fwd30", t("tv.key.forward"))),
-    h("div", { class: "tvr-volume" }, round("mute", m.muted ? "volumeOff" : "volume", t(m.muted ? "tv.unmute" : "tv.mute"), m.muted ? "on" : ""), h("input", { type: "range", class: "tvr-slider" + (m.muted ? " muted" : ""), min: 0, max: 100, step: 1, value: m.volume, "aria-label": t("tv.volume"), onchange: (e) => act("volume", Number(e.target.value)) }), round("full", "expand", t(m.full ? "tv.page.fullOff" : "tv.page.full"), m.full ? "on" : "")),
-    h("hr", { class: "tvr-rule" }),
+    m.total > 0 && uiSlider({ min: 0, max: 100, step: 0.1, value: (m.time / m.total) * 100, label: t("tv.position"), onchange: (e) => act("seek", Number(e.target.value)) }),
+    uiTimes(tvClock(m.time), m.total > 0 ? tvClock(m.total) : "", m.paused && uiState("warn", t("tv.paused"))),
+    uiKeys([skip(-30, "back30", t("tv.key.rewind")), uiKey({ icon: m.paused ? "play" : "pause", kind: "main", label: t("tv.key.playpause"), run: () => act("play") }), skip(30, "fwd30", t("tv.key.forward"))], "transport"),
+    uiVolume(round("mute", m.muted ? "volumeOff" : "volume", t(m.muted ? "tv.unmute" : "tv.mute"), m.muted), uiSlider({ muted: m.muted, min: 0, max: 100, step: 1, value: m.volume, label: t("tv.volume"), onchange: (e) => act("volume", Number(e.target.value)) }), round("full", "expand", t(m.full ? "tv.page.fullOff" : "tv.page.full"), m.full)),
+    uiRule(),
   ];
   return [
-    h("div", { class: "tvr-now" }, h("div", { class: "tvr-title" }, h("div", { class: "grow" }, h("strong", { class: "wrap" }, b.title || t(b.url ? "tv.page.blank" : "tv.page.home")), b.left > 0 && h("span", { class: "state busy" }, t("tv.page.left", { time: tvClock(b.left) })))), b.url && h("p", { class: "tvr-file muted wrap" }, b.url)),
+    uiNow({ title: b.title || t(b.url ? "tv.page.blank" : "tv.page.home"), state: b.left > 0 && uiState("warn", t("tv.page.left", { time: tvClock(b.left) })), sub: b.url || null }),
     player,
     address && tvAddressRow("", t("tv.page.show"), "drop"),
-    address && h("hr", { class: "tvr-rule" }),
-    h("div", { class: "tvr-keys" }, keyed("back", "undo", t("tv.key.back")), keyed("start", "home", t("tv.page.start")), keyed("reload", "refresh", t("tv.page.reload")), keyed("up", "chevron", t("tv.page.up"), "turn-up"), keyed("down", "chevron", t("tv.page.down"), "turn-down"), keyed("text", "keys", t("tv.key.text"))),
+    address && uiRule(),
+    uiKeys([keyed("back", "undo", t("tv.key.back")), keyed("start", "home", t("tv.page.start")), keyed("reload", "refresh", t("tv.page.reload")), keyed("up", "chevron", t("tv.page.up"), "up"), keyed("down", "chevron", t("tv.page.down"), "down"), keyed("text", "keys", t("tv.key.text"))]),
     h("p", { class: "muted small" }, t("tv.page.hint")),
     leave,
   ];
@@ -1151,7 +1144,7 @@ function tvTextDialog(press, page = false) {
 function tvDropdown(at) {
   let dialog;
   let timer = 0;
-  const body = h("div", { class: "tvr" }, waitMark());
+  const body = uiRemote(waitMark());
   const press = (action, value) => api("POST", "/api/tv/do", { action, value }).then(() => setTimeout(load, 250), (e) => toast(errorText(e), "error"));
   const turnOn = () => api("PUT", "/api/tv", { on: true }).then(load, (e) => toast(errorText(e), "error"));
   const load = async () => {
@@ -1160,13 +1153,13 @@ function tvDropdown(at) {
     try {
       const tv = (state.tv = await api("GET", "/api/tv"));
       // a slider under the finger is not redrawn under it, nor the window while it is pulled down
-      if (!body.querySelector("input[type=range]:active") && !document.activeElement?.closest?.(".tv-drop .tv-address") && !document.querySelector("dialog.select-list[open]") && !dialog.classList.contains("pulled")) put(body, tvRemoteParts(tv, press, turnOn));
+      if (!body.querySelector("input[type=range]:active") && !document.activeElement?.closest?.(".tv-drop .ui-input-line") && !document.querySelector("dialog.select-list[open]") && !dialog.classList.contains("pulled")) put(body, tvRemoteParts(tv, press, turnOn));
     } catch (e) {
-      put(body, h("p", { class: "error" }, errorText(e)));
+      put(body, uiEmpty({ tone: "bad", text: errorText(e) }));
     }
     timer = setTimeout(load, 2000);
   };
-  dialog = openDialog("dropdown tv-drop", h("div", { class: "tvr-head" }, h("span", { class: "with-icon muted" }, icon("tv"), t("tv.title")), h("a", { class: "link small with-icon", href: "#/tv", onclick: () => dialog.close() }, t("tv.openPage"), icon("arrow"))), body);
+  dialog = openDialog("dropdown tv-drop", uiDropHead({ icon: "tv", title: t("tv.title"), href: "#/tv", link: t("tv.openPage"), linkIcon: "arrow", onclick: () => dialog.close() }), body);
   dialog.addEventListener("close", () => {
     clearTimeout(timer);
     paintTvNow();
@@ -1185,9 +1178,7 @@ const TV_MARK_TINTS = ["#3b74c9", "#c9463b", "#2f9a67", "#b88a14", "#7a5bc0", "#
 function tvMarkIcon(mark) {
   let sum = 0;
   for (const ch of mark.url.replace(/^https?:\/\/(www\.)?/, "").split("/")[0]) sum += ch.charCodeAt(0);
-  const el = h("span", { class: "tv-mark-icon", "aria-hidden": "true" }, (mark.name.trim()[0] ?? "?").toUpperCase());
-  el.style.background = TV_MARK_TINTS[sum % TV_MARK_TINTS.length];
-  return el;
+  return uiMark({ letter: (mark.name.trim()[0] ?? "?").toUpperCase(), colour: TV_MARK_TINTS[sum % TV_MARK_TINTS.length] });
 }
 const tvHost = (url) => url.replace(/^https?:\/\/(www\.)?/, "").replace(/\/$/, "").split("/")[0];
 
@@ -1233,32 +1224,40 @@ function tvShowCard(tv, keep, missing) {
   };
   const tile = (one, i) => {
     const on = tv.screen === "browser" && b.url === one.url;
-    const words = h("span", { class: "tv-mark-words" }, h("strong", { class: "clip" }, one.name), h("span", { class: "muted mono clip" }, tvHost(one.url)));
     if (editing)
-      return h(
-        "div",
-        { class: "tv-mark-tile editing" },
-        tvMarkIcon(one),
-        words,
-        h("span", { class: "tv-mark-tools" }, h("button", { type: "button", class: "icon-btn", title: t("tv.marks.earlier"), "aria-label": `${t("tv.marks.earlier")}: ${one.name}`, disabled: i === 0, onclick: () => moved(i, -1) }, icon("previous")), h("button", { type: "button", class: "icon-btn", title: t("tv.marks.later"), "aria-label": `${t("tv.marks.later")}: ${one.name}`, disabled: i === marks.length - 1, onclick: () => moved(i, 1) }, icon("next")), h("button", { type: "button", class: "icon-btn danger-text", title: t("tv.folderRemove"), "aria-label": `${t("tv.folderRemove")}: ${one.name}`, onclick: () => keep(marks.filter((x) => x.url !== one.url)) }, icon("x"))),
-      );
-    return h(
-      "div",
-      { class: "tv-mark-tile" + (on ? " on" : ""), menu: (at) => menu(one, i, at) },
-      h("button", { type: "button", class: "tv-mark-main", title: one.url, onclick: () => void showOnTv(one.url) }, tvMarkIcon(one), words),
-      h("button", { type: "button", class: "icon-btn tv-mark-more", title: t("home.tileActions"), "aria-label": `${t("home.tileActions")}: ${one.name}`, onclick: (e) => { const r = e.currentTarget.getBoundingClientRect(); menu(one, i, { x: r.left, y: r.bottom + 4 }); } }, icon("more")),
-    );
+      return uiMarkTile({
+        mark: tvMarkIcon(one),
+        name: one.name,
+        sub: tvHost(one.url),
+        mono: true,
+        tools: [
+          h("button", { type: "button", class: "icon-btn", title: t("tv.marks.earlier"), "aria-label": `${t("tv.marks.earlier")}: ${one.name}`, disabled: i === 0, onclick: () => moved(i, -1) }, icon("previous")),
+          h("button", { type: "button", class: "icon-btn", title: t("tv.marks.later"), "aria-label": `${t("tv.marks.later")}: ${one.name}`, disabled: i === marks.length - 1, onclick: () => moved(i, 1) }, icon("next")),
+          h("button", { type: "button", class: "icon-btn danger-text", title: t("tv.folderRemove"), "aria-label": `${t("tv.folderRemove")}: ${one.name}`, onclick: () => keep(marks.filter((x) => x.url !== one.url)) }, icon("x")),
+        ],
+      });
+    return uiMarkTile({
+      mark: tvMarkIcon(one),
+      name: one.name,
+      sub: tvHost(one.url),
+      mono: true,
+      on,
+      title: one.url,
+      run: () => void showOnTv(one.url),
+      menu: (at) => menu(one, i, at),
+      more: { label: `${t("home.tileActions")}: ${one.name}`, hint: t("home.tileActions"), run: (e) => { const r = e.currentTarget.getBoundingClientRect(); menu(one, i, { x: r.left, y: r.bottom + 4 }); } },
+    });
   };
-  if (!b.installed) return uiCard({ title: t("tv.show.title"), lead: t("tv.page.needs"), cls: "tv-show" }, missing);
+  if (!b.installed) return uiCard({ title: t("tv.show.title"), lead: t("tv.page.needs"), id: "tv-show" }, missing);
   return uiCard(
     {
       title: t("tv.show.title"),
       lead: t(tv.screen === "browser" ? "tv.show.lead" : "tv.marks.switches"),
-      cls: "tv-show",
+      id: "tv-show",
       actions: marks.length > 0 && button(t(editing ? "tv.marks.done" : "tv.marks.change"), { class: "small" + (editing ? " primary" : ""), onclick: () => ((tvUi.editMarks = !editing), paintTv()) }, editing ? "check" : "edit"),
     },
     tvAddressRow("", t("tv.page.show"), "show", t("tv.show.placeholder")),
-    h("div", { class: "tv-marks" }, !editing && h("div", { class: "tv-mark-tile" + (tv.screen === "browser" && !b.url ? " on" : "") }, h("button", { type: "button", class: "tv-mark-main", onclick: () => void tvStartPage(tv) }, h("span", { class: "tv-mark-icon kodi", "aria-hidden": "true" }, icon("home")), h("span", { class: "tv-mark-words" }, h("strong", { class: "clip" }, t("tv.marks.start")), h("span", { class: "muted clip" }, t("tv.marks.startHint"))))), marks.map(tile), !editing && h("button", { type: "button", class: "tv-mark-tile add", onclick: add }, icon("plus"), h("span", null, t("tv.marks.new")))),
+    uiMarks(!editing && uiMarkTile({ mark: uiMark({ icon: "home", tone: "accent" }), name: t("tv.marks.start"), sub: t("tv.marks.startHint"), on: tv.screen === "browser" && !b.url, run: () => void tvStartPage(tv) }), marks.map(tile), !editing && uiMarkAdd(t("tv.marks.new"), add)),
   );
 }
 
@@ -1266,10 +1265,9 @@ function paintTv() {
   const box = document.getElementById("tv-body");
   const tv = state.tv;
   if (!box || !tv) return;
-  box.classList.remove("tv-switching");
+  box.classList.remove("ui-switching");
   // the head of the page names the TV and what it is doing; choosing what is on the screen stays in its own card
-  const [chipCls, chipWords] = tvChip(tv);
-  houseHead({ icon: "tv", title: t("tv.title"), state: uiState({ running: "ok", busy: "warn", stopped: "off" }[chipCls] ?? "off", chipWords) });
+  houseHead({ icon: "tv", title: t("tv.title"), state: tvChipState(tv) });
   const error = h("p", { class: "error", role: "alert" });
   const change = async (data) => {
     error.textContent = "";
@@ -1292,8 +1290,8 @@ function paintTv() {
   const parts = {};
   const screenFacts = [
     screens.length
-      ? screens.map((d) => h("div", { class: "kv" }, h("span", { class: "with-icon" }, icon("tv"), [d.monitor, d.name].filter(Boolean).join(" · ")), h("span", { class: "muted" }, [d.mode.replace("x", "×"), t(d.audio ? "tv.screenSound" : "tv.screenSilent")].filter(Boolean).join(" · "))))
-      : h("div", { class: "tvr-note warn" }, h("strong", { class: "with-icon" }, icon("tv"), t("tv.noScreenTitle")), h("p", { class: "muted small" }, t(tv.displays.length ? "tv.noScreen" : "tv.noOutput")), tv.displays.length > 0 && h("div", { class: "row-actions" }, button(t("tv.lookAgain"), { class: "small", onclick: () => void loadTv() }, "refresh"))),
+      ? uiFacts(screens.map((d) => [h("span", { class: "with-icon" }, icon("tv"), [d.monitor, d.name].filter(Boolean).join(" · ")), h("span", { class: "muted" }, [d.mode.replace("x", "×"), t(d.audio ? "tv.screenSound" : "tv.screenSilent")].filter(Boolean).join(" · "))]))
+      : uiNotice({ tone: "warn", icon: "tv", title: t("tv.noScreenTitle"), text: t(tv.displays.length ? "tv.noScreen" : "tv.noOutput"), action: tv.displays.length > 0 && button(t("tv.lookAgain"), { class: "small", onclick: () => void loadTv() }, "refresh") }),
   ];
 
   // a web page on the screen: the browser's own packages by their button, then an address and "Show"
@@ -1316,17 +1314,15 @@ function paintTv() {
   // other programs show things on the screen with an access key: what to send, ready to paste
   const origin = location.origin;
   const yaml = `rest_command:\n  hata_tv_open:\n    url: "${origin}/api/tv/open"\n    method: post\n    headers:\n      authorization: "Bearer ${t("tv.api.keyHere")}"\n    content_type: "application/json"\n    payload: '{"url": "{{ url }}", "for": {{ seconds | default(0) }}}'\n  hata_tv_back:\n    url: "${origin}/api/tv/back"\n    method: post\n    headers:\n      authorization: "Bearer ${t("tv.api.keyHere")}"`;
-  const apiBody = h(
-    "div",
-    { class: "stack" },
+  const apiBody = [
     h("p", { class: "muted small" }, t("tv.api.lead")),
-    hasModule("assistant") && h("div", { class: "row-actions" }, h("a", { class: "btn small", href: "#/settings/agents" }, h("span", null, t("tv.api.keys")))),
+    hasModule("assistant") && uiLine([h("a", { class: "btn small", href: "#/settings/agents" }, h("span", null, t("tv.api.keys")))]),
     !hasModule("assistant") && h("p", { class: "muted small" }, t("tv.api.needsKeys")),
-    h("div", { class: "kv-line" }, h("span", { class: "muted" }, "Home Assistant"), h("button", { type: "button", class: "icon-btn", title: t("twofa.copy"), "aria-label": t("twofa.copy"), onclick: () => copyQuietly(yaml) }, icon("copy"))),
-    h("pre", { class: "code wrap small" }, yaml),
+    uiField("Home Assistant", uiCommand(yaml, { block: true, label: "Home Assistant" }), null, { group: true }),
     h("p", { class: "muted small" }, t("tv.api.more", { now: `${origin}/api/tv/now`, play: `${origin}/api/tv/play`, remote: `${origin}/api/tv/do` })),
-  );
-  const inner = (card) => (card ? [...card.children].filter((node) => !node.classList.contains("section-head")) : null);
+  ];
+  // the parts of a settings window, made as cards' bodies: what is shown there whole
+  const inner = (body) => body || null;
 
   let installPart = null;
   if (!tv.installed) {
@@ -1344,20 +1340,20 @@ function paintTv() {
         }
       },
     }, "download");
-    installPart = h("div", { class: "tv-off" }, h("strong", null, t("tv.needsTitle")), h("p", { class: "muted small" }, t("tv.needsLead")), tv.cannot ? h("p", { class: "muted small" }, t("tv.cannot." + tv.cannot)) : h("p", { class: "cmd" }, icon("terminal"), tv.install), h("div", { class: "row-actions" }, install));
+    installPart = tv.cannot ? uiNotice({ tone: "info", icon: "package", title: t("tv.needsTitle"), text: t("tv.needsLead"), foot: h("p", { class: "muted small" }, t("tv.cannot." + tv.cannot)) }) : uiNotice({ tone: "info", icon: "package", title: t("tv.needsTitle"), text: t("tv.needsLead"), command: uiCommand(tv.install), action: install });
   }
 
   const addFolder = () => folderPicker({ title: t("tv.folderPick"), start: state.settings?.dataRoot ?? "/", confirmLabel: t("tv.folderAdd"), action: async (path) => void (await change({ folders: [...tv.folders, path] })) });
-  const foldersCard = h(
-    "section",
-    { class: "card pad stack" },
-    h("div", { class: "section-head" }, h("h2", null, t("tv.folders")), h("div", { class: "row-actions" }, button(t("tv.folderAdd"), { class: "small", onclick: addFolder }, "plus"))),
+  const foldersCard = [
+    uiLine([button(t("tv.folderAdd"), { class: "small", onclick: addFolder }, "plus")], { end: true }),
     h("p", { class: "muted small" }, t("tv.foldersLead")),
-    tv.folders.length
-      ? tv.folders.map((path) => h("div", { class: "kv" }, h("a", { class: "link with-icon wrap", href: filesHash(path) }, icon("folder"), path), button(t("tv.folderRemove"), { class: "small ghost", onclick: () => void change({ folders: tv.folders.filter((x) => x !== path) }) })))
-      : h("p", { class: "muted" }, t("tv.noFolders")),
-    tv.suggested.map((path) => h("div", { class: "kv" }, h("span", { class: "muted with-icon wrap" }, icon("folder"), path), button(t("tv.folderUse"), { class: "small", onclick: () => void change({ folders: [...tv.folders, path] }) }))),
-  );
+    h(
+      "div",
+      { class: "ui-rows" },
+      tv.folders.length ? tv.folders.map((path) => uiRow({ lead: { icon: "folder" }, name: h("a", { class: "link wrap", href: filesHash(path) }, path), action: button(t("tv.folderRemove"), { class: "small ghost", onclick: () => void change({ folders: tv.folders.filter((x) => x !== path) }) }) })) : uiEmpty({ text: t("tv.noFolders") }),
+      tv.suggested.map((path) => uiRow({ lead: { icon: "folder" }, name: h("span", { class: "muted wrap" }, path), action: button(t("tv.folderUse"), { class: "small", onclick: () => void change({ folders: [...tv.folders, path] }) }) })),
+    ),
+  ];
 
   // one of Kodi's own settings as a row: a list of Kodi's values or of ours, or a switch
   const pref = (id) => tv.prefs?.[id];
@@ -1365,33 +1361,23 @@ function paintTv() {
   const listed = (id, title, hint, options) => pref(id) && settingRow(title, hint, h("select", { onchange: (e) => set(id, typeof pref(id).value === "number" ? Number(e.target.value) : e.target.value) }, (options ?? pref(id).options ?? []).map((o) => h("option", { value: String(o.value), selected: o.value === pref(id).value }, o.label))));
   const flag = (id, title, hint) => {
     if (!pref(id)) return null;
-    const el = h("button", { type: "button", role: "switch", class: "ha-switch", "aria-checked": String(pref(id).value === true), "aria-label": title, onclick: () => ((el.disabled = true), set(id, pref(id).value !== true)) }, h("i"));
-    return settingRow(title, hint, el);
+    return settingRow(title, hint, uiSwitch({ on: pref(id).value === true, label: title, onchange: (on) => set(id, on) }));
   };
-  const haLine = (label, value) => h("div", { class: "kv-line" }, h("span", { class: "muted" }, label), h("code", { class: "wrap" }, value), h("button", { type: "button", class: "icon-btn", title: t("twofa.copy"), "aria-label": `${t("twofa.copy")}: ${label}`, onclick: () => copyQuietly(String(value)) }, icon("copy")));
-  const haCard = tv.ha && h(
-    "section",
-    { class: "card pad stack" },
-    h("div", { class: "section-head" }, h("h2", null, "Home Assistant", h("span", { class: "state " + (tv.ha.on ? "running" : "stopped") }, t(tv.ha.on ? "bt.state.on" : "bt.state.off"))), button(t(tv.ha.on ? "bt.turnOff" : "music.speaker.turnOn"), { class: "small" + (tv.ha.on ? "" : " primary"), onclick: () => void change({ ha: !tv.ha.on }) })),
-    h("p", { class: "muted" }, t("tv.ha.lead")),
-    tv.ha.on && h("div", { class: "stack" }, haLine(t("tv.ha.host"), tv.ha.address || location.hostname), haLine(t("tv.ha.port"), tv.ha.port), haLine(t("tv.ha.user"), tv.ha.user), haLine(t("tv.ha.password"), tv.ha.password)),
+  const haLine = (label, value) => [label, uiCommand(String(value), { label })];
+  const haCard = tv.ha && [
+    uiSetting({ name: "Home Assistant", explain: t("tv.ha.lead"), control: uiLine([uiState(tv.ha.on ? "ok" : "off", t(tv.ha.on ? "bt.state.on" : "bt.state.off")), button(t(tv.ha.on ? "bt.turnOff" : "music.speaker.turnOn"), { class: "small" + (tv.ha.on ? "" : " primary"), onclick: () => void change({ ha: !tv.ha.on }) })]) }),
+    tv.ha.on && uiFacts([haLine(t("tv.ha.host"), tv.ha.address || location.hostname), haLine(t("tv.ha.port"), tv.ha.port), haLine(t("tv.ha.user"), tv.ha.user), haLine(t("tv.ha.password"), tv.ha.password)]),
     tv.ha.on && h("p", { class: "muted small" }, t("tv.ha.how")),
-  );
-  const audioCard = tv.audio && tv.audio.options.length > 0 && h(
-    "section",
-    { class: "card pad stack" },
-    h("div", { class: "section-head" }, h("h2", null, t("tv.sound"))),
+  ];
+  const audioCard = tv.audio && tv.audio.options.length > 0 && [
     settingRow(t("tv.audio"), t("tv.audioHint"), h("select", { onchange: (e) => void change({ audio: e.target.value }) }, tv.audio.options.map((o) => h("option", { value: o.value, selected: o.value === tv.audio.value }, o.label)))),
-    settingRow(t("tv.offset"), t("tv.offsetHint"), h("div", { class: "row-actions" }, button("", { class: "small", title: t("tv.offsetEarlier"), "aria-label": t("tv.offsetEarlier"), disabled: tv.audio.offset <= -2000, onclick: () => void change({ offset: tv.audio.offset - 25 }) }, "previous"), h("span", { class: "mono tv-offset" }, t(tv.audio.offset < 0 ? "tv.offsetBefore" : tv.audio.offset > 0 ? "tv.offsetAfter" : "tv.offsetNone", { ms: Math.abs(tv.audio.offset) })), button("", { class: "small", title: t("tv.offsetLater"), "aria-label": t("tv.offsetLater"), disabled: tv.audio.offset >= 2000, onclick: () => void change({ offset: tv.audio.offset + 25 }) }, "next"))),
+    settingRow(t("tv.offset"), t("tv.offsetHint"), uiLine([button("", { class: "small", title: t("tv.offsetEarlier"), "aria-label": t("tv.offsetEarlier"), disabled: tv.audio.offset <= -2000, onclick: () => void change({ offset: tv.audio.offset - 25 }) }, "previous"), uiStepValue(t(tv.audio.offset < 0 ? "tv.offsetBefore" : tv.audio.offset > 0 ? "tv.offsetAfter" : "tv.offsetNone", { ms: Math.abs(tv.audio.offset) })), button("", { class: "small", title: t("tv.offsetLater"), "aria-label": t("tv.offsetLater"), disabled: tv.audio.offset >= 2000, onclick: () => void change({ offset: tv.audio.offset + 25 }) }, "next")])),
     listed("audiooutput.channels", t("tv.channels"), t("tv.channelsHint")),
     flag("audiooutput.passthrough", t("tv.passthrough"), t("tv.passthroughHint")),
     flag("audiooutput.guisoundmode", t("tv.menuSounds"), null),
-  );
+  ];
   const speaks = tv.language;
-  const languageCard = tv.answers && speaks && h(
-    "section",
-    { class: "card pad stack" },
-    h("div", { class: "section-head" }, h("h2", null, t("tv.language"))),
+  const languageCard = tv.answers && speaks && [
     settingRow(
       t("tv.languageOwn"),
       speaks.busy ? t("tv.languageBusy") : speaks.failed ? t("tv.languageFailed") : t("tv.languageHint"),
@@ -1399,7 +1385,7 @@ function paintTv() {
     ),
     listed("locale.audiolanguage", t("tv.audioLanguage"), t("tv.audioLanguageHint")),
     listed("locale.subtitlelanguage", t("tv.subsLanguage"), null),
-  );
+  ];
   const saver = pref("screensaver.mode") && [
     listed("screensaver.mode", t("tv.saver"), t("tv.saverHint"), [{ value: "", label: t("tv.saver.off") }, { value: "screensaver.xbmc.builtin.dim", label: t("tv.saver.dim") }, { value: "screensaver.xbmc.builtin.black", label: t("tv.saver.black") }, ...(["", "screensaver.xbmc.builtin.dim", "screensaver.xbmc.builtin.black"].includes(pref("screensaver.mode").value) ? [] : [{ value: pref("screensaver.mode").value, label: pref("screensaver.mode").value }])]),
     pref("screensaver.mode").value !== "" && listed("screensaver.time", t("tv.saverAfter"), null, [...new Set([1, 2, 3, 5, 10, 15, 30, 60, pref("screensaver.time")?.value])].filter(Number.isFinite).sort((a, b) => a - b).map((n) => ({ value: n, label: t("time.minutes", { n }) }))),
@@ -1420,25 +1406,25 @@ function paintTv() {
       }
     },
   }, "download");
-  const browserCard = h("section", { class: "card pad stack" }, h("div", { class: "section-head" }, h("h2", null, t("tv.inBrowser")), tv.streams && h("span", { class: "state running" }, t("tv.inBrowserOn"))), h("p", { class: "muted small" }, t(tv.streams ? "tv.inBrowserLead" : "tv.inBrowserNeeds")), !tv.streams && [h("p", { class: "cmd" }, icon("terminal"), tv.streamsInstall), bring]);
+  const browserCard = [
+    tv.streams && uiLine([uiState("ok", t("tv.inBrowserOn"))]),
+    h("p", { class: "muted small" }, t(tv.streams ? "tv.inBrowserLead" : "tv.inBrowserNeeds")),
+    !tv.streams && uiNotice({ tone: "info", icon: "package", text: t("tv.inBrowserOff"), command: uiCommand(tv.streamsInstall), action: bring }),
+  ];
 
   const picture = tv.picture;
-  const follow = picture && h("button", { type: "button", role: "switch", class: "ha-switch", "aria-checked": String(picture.match), "aria-label": t("tv.match"), onclick: () => ((follow.disabled = true), void change({ match: !picture.match })) }, h("i"));
-  const pictureCard = picture && h(
-    "section",
-    { class: "card pad stack" },
-    h("div", { class: "section-head" }, h("h2", null, t("tv.picture"))),
+  const follow = picture && uiSwitch({ on: picture.match, label: t("tv.match"), onchange: (on) => change({ match: on }) });
+  const pictureCard = picture && [
     settingRow(t("tv.resolution"), t("tv.resolutionHint", { n: TV_KEEP_SECONDS }), h("select", { onchange: (e) => void change({ resolution: Number(e.target.value) }) }, picture.resolution.options.map((o) => h("option", { value: String(o.value), selected: o.value === picture.resolution.value }, o.label)))),
     picture.rate.options.length > 1 && settingRow(t("tv.rate"), null, h("select", { onchange: (e) => void change({ rate: e.target.value }) }, picture.rate.options.map((o) => h("option", { value: o.value, selected: o.value === picture.rate.value }, t("tv.hz", { n: o.label }))))),
     settingRow(t("tv.match"), t("tv.matchHint"), follow),
     saver,
-  );
+  ];
 
   // --- the main card: who has the screen, the stage, and beside it the same zones in every mode ---
-  const pill = (id, iconName, label, off = false) => h("button", { type: "button", class: "seg-pill" + (tv.screen === id ? " active" : ""), "aria-pressed": String(tv.screen === id), disabled: off, onclick: (e) => (tv.screen === id ? null : ((e.currentTarget.classList.add("going")), void change({ screen: id }))) }, icon(iconName), label);
   const now = tv.screen === "kodi" && tv.answers ? tv.playing : null;
   const m = tvMediaOf(tv, loadTv);
-  const [chipClass, chipWord] = tvChip(tv);
+  const chipWord = tvChip(tv)[1];
   const actPage = (action, value) => api("POST", "/api/tv/browser", { action, value }).then(() => setTimeout(loadTv, 400), (e) => toast(errorText(e), "error"));
   const leave = () => (tvWorking(t(b.back ? "tv.switching.kodi" : "tv.switching.off")), api("POST", "/api/tv/back", {}).then(async () => ((state.tv = await api("GET", "/api/tv")), state.route.view === "tv" && paintTv()), (e) => (toast(errorText(e), "error"), void loadTv())));
   const mayMove = now && (isLink(now.file) ? tvStreams() : now.file.startsWith("/") && (tvStreams() ? TV_PLAYS_RE.test(now.file) && fileKind({ type: "file", name: now.file }) !== "image" : TV_BROWSER_RE.test(now.file)));
@@ -1452,14 +1438,18 @@ function paintTv() {
       tv.screen === "kodi" && parts.sound && { label: t("tv.out") + "…", icon: "volume", run: () => openSet("sound") },
       { label: t("tv.link"), icon: "link", run: playLinkDialog },
     ].filter(Boolean));
-  const head = h(
-    "div",
-    { class: "tv-main-head" },
-    h("span", { class: "tv-head-icon", "aria-hidden": "true" }, icon("tv")),
-    h("div", { class: "tv-head-words" }, h("h2", null, t("tv.onScreen")), h("p", { class: "muted small" }, t("tv.mode." + (tv.screen === "browser" || tv.screen === "kodi" || tv.screen === "dark" ? tv.screen : "off")))),
-    h("div", { class: "seg-pills" }, pill("kodi", "film", "Kodi", !tv.installed), pill("browser", "globe", t("tv.page.browser"), !b.installed), pill("off", "terminal", t("tv.onScreen.none")), pill("dark", "power", t("tv.onScreen.sleep"))),
-    h("button", { type: "button", class: "icon-btn tv-head-more", title: t("tv.more"), "aria-label": t("tv.more"), onclick: (e) => { const r = e.currentTarget.getBoundingClientRect(); more({ x: r.right - 220, y: r.bottom + 4 }); } }, icon("more")),
+  const modes = uiSegment(
+    [
+      { value: "kodi", label: "Kodi", icon: "film", off: !tv.installed },
+      { value: "browser", label: t("tv.page.browser"), icon: "globe", off: !b.installed },
+      { value: "off", label: t("tv.onScreen.none"), icon: "terminal" },
+      { value: "dark", label: t("tv.onScreen.sleep"), icon: "power" },
+    ],
+    tv.screen,
+    (id) => (tv.screen === id ? null : void change({ screen: id })),
+    { label: t("tv.onScreen") },
   );
+  const moreButton = h("button", { type: "button", class: "btn ui-more square", title: t("tv.more"), "aria-label": t("tv.more"), onclick: (e) => { const r = e.currentTarget.getBoundingClientRect(); more({ x: r.right - 220, y: r.bottom + 4 }); } }, icon("more"));
   const stage = tvStage(tv, { live: !!tvUi.control, media: m, go: (what, url) => (what === "url" ? void showOnTv(url) : void change({ screen: what })), show: () => ((tvUi.control = true), paintTv()), hide: () => ((tvUi.control = false), paintTv()) });
 
   const source =
@@ -1472,51 +1462,37 @@ function paintTv() {
   const under = tv.screen === "browser" ? b.url : tv.screen === "kodi" ? (now ? (fileName !== now.title ? fileName : "") : t(tv.answers ? "tv.stage.menuHint" : "tv.startingLead")) : "";
   const mediaZone = m
     ? [
-        m.total > 0 && h("div", { class: "tv-pos" }, h("input", { type: "range", class: "tvr-slider", min: 0, max: 100, step: 0.1, value: (m.time / m.total) * 100, "aria-label": t("tv.position"), onchange: (e) => m.seek(Number(e.target.value)) }), h("div", { class: "tvr-times muted" }, h("span", null, tvClock(m.time)), h("span", null, tvClock(m.total)))),
-        h(
-          "div",
-          { class: "tv-transport" },
-          tvTransport(m),
-          h("span", { class: "grow" }),
-          h("button", { type: "button", class: "tvr-round" + (m.muted ? " on" : ""), title: t(m.muted ? "tv.unmute" : "tv.mute"), "aria-label": t(m.muted ? "tv.unmute" : "tv.mute"), onclick: m.mute }, icon(m.muted ? "volumeOff" : "volume")),
-          h("input", { type: "range", class: "tvr-slider tv-vol" + (m.muted ? " muted" : ""), min: 0, max: 100, step: 1, value: m.volume, "aria-label": t("tv.volume"), onchange: (e) => m.loud(Number(e.target.value)) }),
-          h("span", { class: "tvr-value" + (m.muted ? " muted" : "") }, m.muted ? t("tv.muted") : `${Math.round(m.volume)}%`),
+        m.total > 0 && uiSeekCol(uiSlider({ min: 0, max: 100, step: 0.1, value: (m.time / m.total) * 100, label: t("tv.position"), onchange: (e) => m.seek(Number(e.target.value)) }), uiTimes(tvClock(m.time), tvClock(m.total))),
+        uiKeys(
+          [
+            tvTransport(m),
+            h("span", { class: "grow" }),
+            uiKey({ icon: m.muted ? "volumeOff" : "volume", label: t(m.muted ? "tv.unmute" : "tv.mute"), on: m.muted, run: m.mute }),
+            uiSlider({ vol: true, muted: m.muted, min: 0, max: 100, step: 1, value: m.volume, label: t("tv.volume"), onchange: (e) => m.loud(Number(e.target.value)) }),
+            uiVolumeValue(m.muted ? t("tv.muted") : `${Math.round(m.volume)}%`, m.muted),
+          ],
+          "bar",
         ),
       ]
     : tv.screen === "browser"
-      ? h("p", { class: "tv-quiet with-icon" }, icon("film"), t("tv.noVideo"))
+      ? uiNotice({ tone: "off", icon: "film", text: t("tv.noVideo") })
       : null;
-  const tracks = now && (now.audio?.length > 1 || now.subs?.length > 0) && h(
-    "div",
-    { class: "tv-tracks" },
-    now.audio.length > 1 && h("label", null, h("span", null, t("tv.track.audio")), h("select", { onchange: (e) => press("audio", Number(e.target.value)) }, now.audio.map((one) => h("option", { value: String(one.index), selected: one.index === now.audioNow }, trackLabel(one))))),
-    now.subs.length > 0 && h("label", null, h("span", null, t("tv.track.subs")), h("select", { onchange: (e) => press("subtitle", e.target.value === "off" ? "off" : Number(e.target.value)) }, h("option", { value: "off", selected: now.subNow < 0 }, t("tv.track.noSubs")), now.subs.map((one) => h("option", { value: String(one.index), selected: one.index === now.subNow }, trackLabel(one))))),
-  );
-  const key = (iconName, label, run, hint = label) => h("div", { class: "tv-key" }, h("button", { type: "button", class: "tv-key-btn", title: hint, "aria-label": label, onclick: run }, icon(iconName)), h("span", null, label));
-  const arrow = (action, cls, label) => h("button", { type: "button", class: "tvr-arrow " + cls, title: label, "aria-label": label, onclick: () => press(action) }, icon("chevron"));
+  const tracks = tvTracks(now, press);
+  const key = (iconName, label, run, hint = label) => uiKeyCap(uiKey({ icon: iconName, label, hint, kind: "square", run }), label, { square: true });
   const controls =
     tv.screen === "browser"
-      ? h("div", { class: "tv-ctrl" }, h("div", { class: "tv-keys" }, key("undo", t("tv.key.back"), () => actPage("back")), key("home", t("tv.page.start"), () => actPage("start")), key("refresh", t("tv.page.reload"), () => actPage("reload")), key("up", t("tv.page.up"), () => actPage("up")), key("down", t("tv.page.down"), () => actPage("down")), key("keys", t("tv.key.text"), () => tvTextDialog(actPage, true), t("tv.key.textHint"))))
+      ? uiControls(null, [key("undo", t("tv.key.back"), () => actPage("back")), key("home", t("tv.page.start"), () => actPage("start")), key("refresh", t("tv.page.reload"), () => actPage("reload")), key("up", t("tv.page.up"), () => actPage("up")), key("down", t("tv.page.down"), () => actPage("down")), key("keys", t("tv.key.text"), () => tvTextDialog(actPage, true), t("tv.key.textHint"))])
       : tv.screen === "kodi" && tv.answers
-        ? h(
-            "div",
-            { class: "tv-ctrl kodi" },
-            h("div", { class: "tvr-pad" }, arrow("up", "up", t("tv.key.up")), arrow("left", "left", t("tv.key.left")), h("button", { type: "button", class: "tvr-ok", onclick: () => press("select") }, "OK"), arrow("right", "right", t("tv.key.right")), arrow("down", "down", t("tv.key.down"))),
-            h("div", { class: "tv-keys" }, key("undo", t("tv.key.back"), () => press("back")), key("home", t("tv.key.home"), () => press("home")), key("lines", t("tv.key.menu"), () => press("menu")), key("info", t("tv.key.info"), () => press("info")), key("keys", t("tv.key.text"), () => tvTextDialog(press), t("tv.key.textHint"))),
-          )
+        ? uiControls(uiPad(press, { labels: tvPadLabels() }), [key("undo", t("tv.key.back"), () => press("back")), key("home", t("tv.key.home"), () => press("home")), key("lines", t("tv.key.menu"), () => press("menu")), key("info", t("tv.key.info"), () => press("info")), key("keys", t("tv.key.text"), () => tvTextDialog(press), t("tv.key.textHint"))])
         : null;
   // nothing of Hata's on the screen: what it means and the one other thing to do; the choice itself is on the stage
-  const idle = (tv.screen === "off" || tv.screen === "dark") && h(
-    "div",
-    { class: "tv-off" },
+  const idle = (tv.screen === "off" || tv.screen === "dark") && [
     h("p", { class: "muted" }, t(tv.screen === "dark" ? "tv.onScreen.dark" : "tv.consoleLead")),
-    tv.screen === "dark" ? button(t("tv.showConsole"), { class: "small", onclick: () => void change({ screen: "off" }) }, "terminal") : button(t("tv.screenOff"), { class: "small", onclick: () => void change({ screen: "dark" }) }, "power"),
-  );
-  const zones = h(
-    "div",
-    { class: "tv-zones" },
-    h("div", { class: "tv-src" }, h("span", { class: "with-icon muted" }, icon(source[0]), source[1].filter(Boolean).join(" · ")), h("span", { class: "row-actions" }, b.left > 0 && tv.screen === "browser" && h("span", { class: "state busy" }, t("tv.page.left", { time: tvClock(b.left) })), h("span", { class: "state " + chipClass }, chipWord))),
-    h("div", { class: "tv-name" }, h("h3", null, title), under && h("p", { class: "muted", title: under }, under)),
+    uiLine([tv.screen === "dark" ? button(t("tv.showConsole"), { class: "small", onclick: () => void change({ screen: "off" }) }, "terminal") : button(t("tv.screenOff"), { class: "small", onclick: () => void change({ screen: "dark" }) }, "power")]),
+  ];
+  const zones = uiZones(
+    uiZoneHead(h("span", { class: "with-icon muted" }, icon(source[0]), source[1].filter(Boolean).join(" · ")), uiLine([b.left > 0 && tv.screen === "browser" && uiState("warn", t("tv.page.left", { time: tvClock(b.left) })), tvChipState(tv)])),
+    uiZoneName(title, under),
     mediaZone,
     tracks,
     idle,
@@ -1533,12 +1509,12 @@ function paintTv() {
     const kids = (Array.isArray(body) ? body : [body]).flat().filter(Boolean);
     if (!kids.length) return null;
     parts[id] = { title: name, body: kids };
-    return h("button", { type: "button", class: "tv-set", onclick: () => openSet(id) }, icon(iconName), h("span", { class: "tv-set-words" }, h("strong", { class: "clip" }, name), h("span", { class: "muted small clip" }, summary)), icon("chevron"));
+    return uiRow({ lead: { icon: iconName }, name, sub: summary || null, onclick: () => openSet(id) });
   };
   const openSet = (id) => {
     if (!parts[id]) return;
     let dialog;
-    const body = h("div", { class: "stack tv-set-body" }, parts[id].body);
+    const body = h("div", { class: "stack" }, parts[id].body);
     dialog = openDialog("", h("h2", null, parts[id].title), body, h("footer", null, closeButton(() => dialog)));
     tvUi.sheet = { id, body, dialog };
   };
@@ -1552,16 +1528,17 @@ function paintTv() {
   ];
   const screenRows = [
     row("display", "screen", screens.length ? screens.map((d) => [d.monitor, d.name].filter(Boolean).join(" · ")).join(", ") : t("tv.noScreenTitle"), screens.length ? [screens[0].mode.replace("x", "×"), t(screens[0].audio ? "tv.screenSound" : "tv.screenSilent")].filter(Boolean).join(" · ") : t(tv.displays.length ? "tv.noScreen" : "tv.noOutput"), screenFacts),
-    row("remotes", "remote", t("tv.remotes"), tv.remotes.length ? tv.remotes.join(", ") : t("tv.set.noRemotes"), tv.remotes.length ? tv.remotes.map((name) => h("div", { class: "kv" }, h("span", { class: "with-icon" }, icon("remote"), name))) : h("p", { class: "muted" }, t("tv.set.noRemotes"))),
+    row("remotes", "remote", t("tv.remotes"), tv.remotes.length ? tv.remotes.join(", ") : t("tv.set.noRemotes"), tv.remotes.length ? h("div", { class: "ui-rows" }, tv.remotes.map((name) => uiRow({ lead: { icon: "remote" }, name }))) : h("p", { class: "muted" }, t("tv.set.noRemotes"))),
     row("how", "info", t("tv.set.how"), t("tv.set.howShort"), [h("p", { class: "muted" }, t("tv.remotesHint")), h("p", { class: "muted" }, t("tv.remotesHint.browser"))]),
   ];
   const apiRows = [row("api", "code", "Home Assistant", t("tv.api.short"), apiBody)];
   const setCard = uiCard(
-    { title: t("tv.settings"), cls: "tv-settings", actions: tabs.length > 1 && h("div", { class: "seg-pills" }, tabs.map(([id, label]) => h("button", { type: "button", class: "seg-pill" + (id === tab ? " active" : ""), "aria-pressed": String(id === tab), onclick: () => ((tvUi.tab = id), paintTv()) }, label))) },
-    h("div", { class: "tv-sets" }, tab === "kodi" ? kodiRows : tab === "api" ? apiRows : screenRows),
+    { title: t("tv.settings"), flush: true, actions: tabs.length > 1 && uiSegment(tabs.map(([id, label]) => ({ value: id, label })), tab, (id) => ((tvUi.tab = id), paintTv()), { label: t("tv.settings") }) },
+    h("div", { class: "ui-rows" }, tab === "kodi" ? kodiRows : tab === "api" ? apiRows : screenRows),
   );
 
-  put(box, h("div", { class: "tvx" }, h("section", { class: "card pad tv-main" }, head, h("div", { class: "tv-main-body" }, stage, zones)), tvShowCard(tv, keep, [h("p", { class: "cmd" }, icon("terminal"), b.install), h("div", { class: "row-actions" }, bringBrowser)]), setCard));
+  const main = uiCard({ id: "tv-main", title: t("tv.onScreen"), lead: t("tv.mode." + (tv.screen === "browser" || tv.screen === "kodi" || tv.screen === "dark" ? tv.screen : "off")), actions: [modes, moreButton] }, uiScreenSplit(stage, zones));
+  put(box, h("div", { class: "stack" }, main, tvShowCard(tv, keep, [uiCommand(b.install), uiLine([bringBrowser])]), setCard));
   // a window of settings that is open shows what the server says now
   if (tvUi.sheet?.dialog.isConnected && parts[tvUi.sheet.id]) put(tvUi.sheet.body, parts[tvUi.sheet.id].body);
   if (tv.asking) tvKeepDialog();
@@ -1643,8 +1620,7 @@ async function turnModuleOn(id, then = "") {
     // what went on just now, the asked one first: "Undo" turns those off again
     const turned = res.modules.filter((m) => m.on && !before[m.id]).map((m) => m.id).sort((a, b) => (a === id ? -1 : b === id ? 1 : 0));
     modulesChanged(res.modules);
-    const note = h("div", { class: "toast" }, h("span", null, t("modules.nowOn", { name: moduleName(id) })), h("button", { type: "button", class: "toast-action", onclick: async () => {
-      note.remove();
+    uiToastWith(t("modules.nowOn", { name: moduleName(id) }), t("modules.undo"), async () => {
       for (const one of turned) {
         try {
           modulesChanged((await api("PUT", `/api/modules/${one}`, { on: false })).modules);
@@ -1652,9 +1628,7 @@ async function turnModuleOn(id, then = "") {
           return toast(errorText(e), "error");
         }
       }
-    } }, t("modules.undo")));
-    $toasts.append(note);
-    setTimeout(() => note.remove(), 8000);
+    });
     if (then) go(then);
   };
   try {
@@ -1664,7 +1638,7 @@ async function turnModuleOn(id, then = "") {
     const needs = String(e.detail.needs).split(",");
     let dialog;
     const error = h("p", { class: "error", role: "alert" });
-    const one = (m) => h("div", { class: "module-held" }, icon(MODULE_ICONS[m]), h("span", { class: "grow" }, h("strong", null, moduleName(m)), h("span", { class: "muted small block" }, t(`modules.${m}.adds`))));
+    const one = (m) => uiRow({ lead: { icon: MODULE_ICONS[m] }, name: moduleName(m), sub: t(`modules.${m}.adds`) });
     const both = button(t(needs.length > 1 ? "modules.turnOnAll" : "modules.turnOnBoth"), {
       class: "primary",
       onclick: async () => {
@@ -1679,19 +1653,19 @@ async function turnModuleOn(id, then = "") {
         }
       },
     }, "check");
-    dialog = openDialog("confirm", h("h2", { class: "wrap" }, t("modules.needsTitle", { name: moduleName(id), needs: needs.map(moduleName).join(", ") })), h("p", { class: "muted" }, t("modules.needsLead", { name: moduleName(id), needs: needs.map(moduleName).join(", ") })), h("div", { class: "stack" }, [...needs, id].map(one)), error, h("footer", null, closeButton(() => dialog, t("common.cancel")), both));
+    dialog = openDialog("confirm", h("h2", { class: "wrap" }, t("modules.needsTitle", { name: moduleName(id), needs: needs.map(moduleName).join(", ") })), h("p", { class: "muted" }, t("modules.needsLead", { name: moduleName(id), needs: needs.map(moduleName).join(", ") })), h("div", { class: "ui-rows" }, [...needs, id].map(one)), error, h("footer", null, closeButton(() => dialog, t("common.cancel")), both));
   }
 }
 
 /** Why a module cannot be turned off now, and where to take away what holds it */
 function moduleHeldDialog(m) {
   let dialog;
-  const line = (iconName, text, href) => h("div", { class: "module-held" }, icon(iconName), h("strong", { class: "grow" }, text), h("a", { class: "link with-icon", href, onclick: () => dialog.close() }, t("common.open"), icon("chevron")));
+  const line = (iconName, text, href) => uiRow({ lead: { icon: iconName }, name: text, action: h("a", { class: "btn small", href, onclick: () => dialog.close() }, h("span", null, t("common.open"))) });
   // the module that stands on it first, then what of the person's uses it
   // the module that stands on it can be turned off right from here — if nothing holds that one in its turn
-  const offToo = (other) => h("div", { class: "module-held" }, icon(MODULE_ICONS[other]), h("strong", { class: "grow" }, t("modules.heldBy", { name: moduleName(other) })), h("button", { type: "button", class: "link", onclick: () => { dialog.close(); const that = (state.modulesList ?? []).find((x) => x.id === other); if (that) void turnModuleOff(that); } }, t("modules.turnItOff")));
+  const offToo = (other) => uiRow({ lead: { icon: MODULE_ICONS[other] }, name: t("modules.heldBy", { name: moduleName(other) }), action: button(t("modules.turnItOff"), { class: "small", onclick: () => { dialog.close(); const that = (state.modulesList ?? []).find((x) => x.id === other); if (that) void turnModuleOff(that); } }) });
   const rows = [...m.neededBy.map(offToo), ...m.uses.map((use) => line(MODULE_ICONS[m.id], t("modules.use." + use.what, { n: use.count ?? "" }), MODULE_USE_AT[use.what] ?? "#/settings/modules"))];
-  dialog = openDialog("confirm", h("h2", { class: "wrap" }, t("modules.heldTitle")), h("p", { class: "muted" }, t(m.neededBy.length ? "modules.neededLead" : "modules.heldLead", { name: moduleName(m.id), by: m.neededBy.map(moduleName).join(", ") })), h("div", { class: "stack" }, rows), h("footer", null, button(t("modules.understood"), { class: "primary", onclick: () => dialog.close() })));
+  dialog = openDialog("confirm", h("h2", { class: "wrap" }, t("modules.heldTitle")), h("p", { class: "muted" }, t(m.neededBy.length ? "modules.neededLead" : "modules.heldLead", { name: moduleName(m.id), by: m.neededBy.map(moduleName).join(", ") })), h("div", { class: "ui-rows" }, rows), h("footer", null, button(t("modules.understood"), { class: "primary", onclick: () => dialog.close() })));
 }
 
 async function turnModuleOff(m) {
@@ -1712,7 +1686,7 @@ async function turnModuleOff(m) {
 /** In place of a page or a section of a module that is off: what it is, and the button */
 function moduleOffCard(id) {
   const turn = isAdmin() && button(t("modules.turnOn"), { class: "primary", onclick: (e) => ((e.currentTarget.disabled = true), void turnModuleOn(id)) }, "check");
-  return h("section", { class: "card pad stack" }, h("div", { class: "tool" }, h("span", { class: "app-icon plus" }, icon(MODULE_ICONS[id])), h("div", { class: "grow" }, h("div", { class: "tool-head" }, h("strong", null, moduleName(id)), h("span", { class: "state stopped" }, t("modules.off"))), h("p", { class: "muted small" }, t(`modules.${id}.what`)), h("p", { class: "muted small" }, t("modules.offLead"))), turn));
+  return uiCard({}, uiRow({ lead: { icon: MODULE_ICONS[id] }, name: moduleName(id), sub: [t(`modules.${id}.what`), " ", t("modules.offLead")], state: uiState("off", t("modules.off")), action: turn || null, cls: "ui-row-plain" }));
 }
 
 /** What was found here that a module is for, by module; asked once a page and kept */
@@ -1730,33 +1704,30 @@ function modulesSection() {
   if (!state.moduleFinds) void loadModuleFinds().then(() => state.route.view === "settings" && showsSection("modules") && renderSettings());
   const card = (m) => {
     const held = m.uses.length > 0 || m.neededBy.length > 0;
-    const flip = h("button", { type: "button", role: "switch", class: "ha-switch", "aria-checked": String(m.on), "aria-label": t(m.on ? "modules.turnOff" : "modules.turnOn") + ": " + moduleName(m.id), onclick: (e) => (m.on ? void turnModuleOff(m) : ((e.currentTarget.disabled = true), void turnModuleOn(m.id))) }, h("i"));
-    return h(
-      "section",
-      { class: "card module-card" + (m.on ? " on" : "") },
-      h("div", { class: "module-card-head" }, h("span", { class: "app-icon plus" }, icon(MODULE_ICONS[m.id])), h("div", { class: "grow" }, h("strong", { class: "block" }, moduleName(m.id)), h("span", { class: "state " + (held ? "info" : m.on ? "running" : "stopped") }, t(held ? "modules.inUse" : m.on ? "modules.on" : "modules.off"))), flip),
-      h("p", { class: "muted small" }, t(`modules.${m.id}.what`)),
-      m.uses.map((use) => h("a", { class: "module-chip", href: MODULE_USE_AT[use.what] ?? MODULE_HOME[m.id] }, icon("link"), t("modules.use." + use.what, { n: use.count ?? "" }))),
-      m.neededBy.map((other) => h("span", { class: "module-chip" }, icon("link"), t("modules.neededFor", { name: moduleName(other) }))),
+    // a module in use is not turned off: the switch then opens what holds it (as its press always did)
+    const flip = uiSwitch({ on: m.on, label: t(m.on ? "modules.turnOff" : "modules.turnOn") + ": " + moduleName(m.id), onchange: (on) => (on ? turnModuleOn(m.id) : turnModuleOff(m)).finally(() => state.route.view === "settings" && renderSettings()) });
+    return uiFeature(
+      { icon: MODULE_ICONS[m.id], name: moduleName(m.id), state: uiState(held ? "info" : m.on ? "ok" : "off", t(held ? "modules.inUse" : m.on ? "modules.on" : "modules.off")), control: flip, on: m.on, what: t(`modules.${m.id}.what`) },
+      m.uses.map((use) => uiFeatureChip({ href: MODULE_USE_AT[use.what] ?? MODULE_HOME[m.id], icon: "link", text: t("modules.use." + use.what, { n: use.count ?? "" }) })),
+      m.neededBy.map((other) => uiFeatureChip({ icon: "link", text: t("modules.neededFor", { name: moduleName(other) }) })),
       m.needs.length > 0 && h("p", { class: "muted small" }, "↳ ", t("modules.needsModule", { needs: m.needs.map(moduleName).join(", ") })),
-      !m.on && findsFor(m.id).map((f) => h("span", { class: "module-chip found" }, icon("search"), findWords(f))),
-      h("p", { class: "module-card-foot muted small" }, icon(m.on ? "check" : "plus"), h("span", { class: "grow" }, t(m.on ? "modules.added" : "modules.willAdd"), " ", t(`modules.${m.id}.adds`)), m.on && h("a", { class: "link", href: MODULE_HOME[m.id] }, t("common.open"))),
+      !m.on && findsFor(m.id).map((f) => uiFeatureChip({ icon: "search", text: findWords(f), found: true })),
+      uiFeatureFoot({ icon: m.on ? "check" : "plus", text: [t(m.on ? "modules.added" : "modules.willAdd"), " ", t(`modules.${m.id}.adds`)], link: m.on && h("a", { class: "link", href: MODULE_HOME[m.id] }, t("common.open")) }),
     );
   };
   const phone = matchMedia("(max-width: 760px)").matches;
   return [
     // nothing is written straight on the page's background: over a wallpaper it could not be read
-    h(
-      "section",
-      { class: "card pad stack" },
-      h("div", { class: "module-top" }, h("p", { class: "muted grow" }, t("modules.lead")), h("div", { class: "module-count" }, h("strong", null, t("modules.count", { on: list.filter((m) => m.on).length, of: list.length })), h("span", { class: "muted small" }, t("modules.on")))),
-      h("div", { class: "module-base" }, icon("home"), h("span", null, h("strong", { class: "block" }, t("modules.base")), h("span", { class: "muted small" }, t("modules.baseList")))),
+    uiCard(
+      { lead: t("modules.lead") },
+      ...uiFacts([[t("modules.on"), h("strong", null, t("modules.count", { on: list.filter((m) => m.on).length, of: list.length }))]]),
+      uiBandNote({ icon: "home", title: t("modules.base"), text: t("modules.baseList") }),
+      // on a phone the groups are chosen one at a time
+      phone && uiSegment(["", ...MODULE_GROUPS].map((group) => ({ value: group, label: group ? t("modules.group." + group) : t("modules.all") })), settingsUi.moduleGroup ?? "", (group) => ((settingsUi.moduleGroup = group), renderSettings()), { label: t("modules.all") }),
     ),
-    // on a phone the groups are chosen one at a time
-    h("div", { class: "module-filter" }, ["", ...MODULE_GROUPS].map((group) => h("button", { type: "button", class: "chip" + ((settingsUi.moduleGroup ?? "") === group ? " accent" : ""), onclick: () => ((settingsUi.moduleGroup = group), renderSettings()) }, group ? t("modules.group." + group) : t("modules.all")))),
     MODULE_GROUPS.filter((group) => !phone || !settingsUi.moduleGroup || settingsUi.moduleGroup === group).map((group) => {
       const mine = list.filter((m) => m.group === group);
-      return mine.length > 0 && h("section", { class: "card pad stack" }, h("h2", { class: "module-group" }, t("modules.group." + group), h("span", { class: "muted" }, t("modules.groupCount", { on: mine.filter((m) => m.on).length, of: mine.length }))), h("div", { class: "module-cards" }, mine.map(card)));
+      return mine.length > 0 && uiCard({ title: t("modules.group." + group), count: t("modules.groupCount", { on: mine.filter((m) => m.on).length, of: mine.length }) }, uiFeatures(mine.map(card)));
     }),
   ];
 }
@@ -1805,7 +1776,7 @@ function powerCard() {
   const on = h("input", { type: "checkbox", checked: s.on, disabled: !can && !s.on });
   const off = h("input", { type: "time", value: s.off, class: "short", "aria-label": t("power.off") });
   const wake = h("input", { type: "time", value: s.wake, class: "short", "aria-label": t("power.wake") });
-  const days = WEEKDAYS.map((n) => h("label", { class: "day-tick" }, h("input", { type: "checkbox", value: n, checked: s.days.includes(n) }), weekdayName(n)));
+  const days = WEEKDAYS.map((n) => uiCheck(weekdayName(n), h("input", { type: "checkbox", value: n, checked: s.days.includes(n) })));
   const error = h("p", { class: "error", role: "alert" });
   const save = button(t("settings.save"), {
     class: "primary small",
@@ -1835,15 +1806,15 @@ function powerCard() {
     });
   return uiCard(
     { title: t("power.night.title"), lead: t("power.lead") },
-    !can && h("p", { class: "banner warn small" }, t("power.cannot." + p.can)),
-    h("label", { class: "with-icon" }, on, h("span", null, t("power.on"))),
-    h("div", { class: "power-times" }, field(t("power.off"), off), field(t("power.wake"), wake)),
-    h("div", { class: "power-days" }, days),
+    !can && uiNotice({ tone: "warn", text: t("power.cannot." + p.can) }),
+    uiCheck(t("power.on"), on),
+    uiFields(uiField(t("power.off"), off), uiField(t("power.wake"), wake)),
+    uiLine(days),
     p.next && h("p", { class: "small" }, t("power.next", { off: when(p.next.off), wake: when(p.next.wake) })),
-    p.waiting && h("p", { class: "banner small" }, t("power.waiting", { what: has("power.what." + p.waiting.what) ? t("power.what." + p.waiting.what) : p.waiting.what })),
+    p.waiting && uiNotice({ tone: "warn", text: t("power.waiting", { what: has("power.what." + p.waiting.what) ? t("power.what." + p.waiting.what) : p.waiting.what }) }),
     h("p", { class: "muted small" }, t("power.hint")),
     error,
-    h("div", { class: "row-actions" }, save, can && button(t("power.test.button"), { class: "small", onclick: test }, "power")),
+    uiLine([save, can && button(t("power.test.button"), { class: "small", onclick: test }, "power")]),
   );
 }
 
@@ -1864,42 +1835,35 @@ function scheduleSection() {
       one.last ? t(one.last.ok ? "schedule.lastOk" : "schedule.lastFailed", { when: ago(one.last.at) }) : one.last === null && one.on ? t("schedule.never") : "",
       one.scrub ? t("schedule.scrub") : "",
     ].filter(Boolean);
-    return h(
-      "div",
-      { class: "setting schedule-row" + (one.on ? "" : " off") },
-      h(
-        "div",
-        { class: "grow stack-tight" },
-        h("strong", null, scheduleName(one)),
-        h("p", { class: "muted small" }, t("schedule.what." + one.kind)),
-        h("p", { class: "small" }, facts.join(" · ")),
-        ...mine.map((c) =>
-          h(
-            "div",
-            { class: "banner warn small schedule-clash" },
-            h("span", { class: "grow" }, t(c.minutes === 0 ? "schedule.clashSame" : "schedule.clash", { other: scheduleName(byId.get(c.with)), time: byId.get(c.with).time, minutes: c.minutes }), " ", t(one.kind === "update" || byId.get(c.with).kind === "update" ? "schedule.why.update" : "schedule.why." + (one.touches.includes("disks") && byId.get(c.with).touches.includes("disks") ? "disks" : "apps"))),
-            own && one.free && button(t("schedule.moveTo", { time: one.free }), { class: "small", onclick: () => moveScheduled(one.id, one.free) }),
-          ),
-        ),
-        one.skipped && h("div", { class: "banner warn small schedule-clash" }, h("span", { class: "grow" }, t("schedule.whileOff", { off: state.power?.schedule.off ?? "", wake: state.power?.schedule.wake ?? "" }))),
+    return [
+      uiSetting({
+        name: one.on ? scheduleName(one) : h("span", { class: "muted" }, scheduleName(one)),
+        explain: [t("schedule.what." + one.kind), facts.length > 0 && h("br"), facts.join(" · ")],
+        control: own ? uiLine([input, save, h("a", { class: "btn small ghost", href: one.href }, t("schedule.open"))]) : h("strong", null, one.time),
+      }),
+      ...mine.map((c) =>
+        uiNotice({
+          tone: "warn",
+          text: [t(c.minutes === 0 ? "schedule.clashSame" : "schedule.clash", { other: scheduleName(byId.get(c.with)), time: byId.get(c.with).time, minutes: c.minutes }), " ", t(one.kind === "update" || byId.get(c.with).kind === "update" ? "schedule.why.update" : "schedule.why." + (one.touches.includes("disks") && byId.get(c.with).touches.includes("disks") ? "disks" : "apps"))],
+          action: own && one.free && button(t("schedule.moveTo", { time: one.free }), { class: "small", onclick: () => moveScheduled(one.id, one.free) }),
+        }),
       ),
-      own ? h("div", { class: "setting-control schedule-time" }, input, save, h("a", { class: "btn small ghost", href: one.href }, t("schedule.open"))) : h("div", { class: "setting-control schedule-time" }, h("strong", null, one.time)),
-    );
+      one.skipped && uiNotice({ tone: "warn", text: t("schedule.whileOff", { off: state.power?.schedule.off ?? "", wake: state.power?.schedule.wake ?? "" }) }),
+    ];
   };
   const repeating = (one) =>
-    h(
-      "div",
-      { class: "setting" + (one.on ? "" : " off") },
-      h("div", { class: "grow stack-tight" }, h("strong", null, t("schedule.repeat." + one.id)), h("p", { class: "muted small" }, [one.on ? everyWords(one.every) : t("schedule.off"), one.last ? t("schedule.lastAt", { when: ago(one.last) }) : ""].filter(Boolean).join(" · "))),
-      h("div", { class: "setting-control" }, h("a", { class: "btn small ghost", href: one.href }, t("schedule.open"))),
-    );
+    uiSetting({
+      name: one.on ? t("schedule.repeat." + one.id) : h("span", { class: "muted" }, t("schedule.repeat." + one.id)),
+      explain: [one.on ? everyWords(one.every) : t("schedule.off"), one.last ? t("schedule.lastAt", { when: ago(one.last) }) : ""].filter(Boolean).join(" · "),
+      control: h("a", { class: "btn small ghost", href: one.href }, t("schedule.open")),
+    });
   return [
     powerCard(),
     uiCard(
-      { title: t("schedule.timedTitle"), lead: t("schedule.timedLead", { zone: data.timezone }), marks: data.clashes.length > 0 && h("span", { class: "chip warn" }, t("schedule.clashes", { n: data.clashes.length })) },
-      h("div", { class: "schedule-list" }, data.timed.map(row)),
+      { title: t("schedule.timedTitle"), lead: t("schedule.timedLead", { zone: data.timezone }), marks: data.clashes.length > 0 && uiState("warn", t("schedule.clashes", { n: data.clashes.length })) },
+      ...data.timed.flatMap(row),
     ),
-    uiCard({ title: t("schedule.repeatTitle"), lead: t("schedule.repeatLead") }, h("div", { class: "schedule-list" }, data.repeating.map(repeating))),
+    uiCard({ title: t("schedule.repeatTitle"), lead: t("schedule.repeatLead") }, ...data.repeating.map(repeating)),
   ];
 }
 
@@ -1916,9 +1880,10 @@ let updateFollow = null;
 async function followUpdate(target, back = false) {
   if (updateFollow) return updateFollow.show();
   const steps = back ? UPDATE_STEPS.slice(2) : UPDATE_STEPS;
-  const rows = new Map(steps.map((step) => [step, h("li", null, h("span", { class: "step-mark" }), h("div", { class: "grow" }, h("span", null, t("update.step." + step, { version: target })), h("small", { class: "muted" })))]));
-  const fill = h("i");
-  rows.get("download")?.querySelector(".grow").append(h("div", { class: "bar" }, fill));
+  const rows = new Map(steps.map((step) => [step, uiStepItem(t("update.step." + step, { version: target }))]));
+  const meter = uiMeter(0, { kind: "progress" });
+  const fill = meter.firstChild;
+  rows.get("download")?.querySelector(".grow").append(meter);
   const said = h("p", { class: "muted small" }, t(back ? "update.stepsLeadBack" : "update.stepsLead"));
   const error = h("p", { class: "error", role: "alert" });
   const close = closeButton(() => dialog, t("update.hide"));
@@ -1942,7 +1907,7 @@ async function followUpdate(target, back = false) {
   let stopped = false;
   const show = () => {
     if (dialog?.open) return;
-    dialog = openDialog("update-dialog", h("h2", null, t(back ? "update.goingBack" : "update.going", { version: target })), said, h("ol", { class: "update-steps" }, [...rows.values()]), error, h("footer", null, cancel || h("span"), close));
+    dialog = openDialog("update-dialog", h("h2", null, t(back ? "update.goingBack" : "update.going", { version: target })), said, uiStepList([...rows.values()]), error, h("footer", null, cancel || h("span"), close));
   };
   // the steps before `at` are done, `at` goes on (or failed), the rest wait; past the last — all done
   const mark = (at, failed = false) => {
@@ -1950,7 +1915,7 @@ async function followUpdate(target, back = false) {
     steps.forEach((step, i) => {
       const row = rows.get(step);
       row.className = i < index ? "done" : i === index ? (failed ? "failed" : "now") : "";
-      put(row.querySelector(".step-mark"), i < index ? icon("check") : i === index ? icon(failed ? "x" : "refresh", failed ? "" : "spin") : null);
+      put(row.querySelector(".ui-step-mark"), i < index ? icon("check") : i === index ? icon(failed ? "x" : "refresh", failed ? "" : "spin") : null);
     });
   };
   updateFollow = { show };
@@ -2068,12 +2033,12 @@ function updateRow() {
     u.available ? t("update.available", { version: u.latest.version }) : t("update.title2"),
     hint,
     busy
-      ? h("div", { class: "row-actions" }, button(t("update.showSteps"), { class: "small primary", onclick: () => followUpdate(u.latest?.version ?? u.previous) }, "refresh"))
-      : h("div", { class: "row-actions" }, u.available && u.latest.url && h("a", { class: "link small", href: u.latest.url, target: "_blank", rel: "noopener noreferrer" }, t("update.notes"), icon("external")), back, check, install),
+      ? uiLine([button(t("update.showSteps"), { class: "small primary", onclick: () => followUpdate(u.latest?.version ?? u.previous) }, "refresh")])
+      : uiLine([u.available && u.latest.url && h("a", { class: "link small", href: u.latest.url, target: "_blank", rel: "noopener noreferrer" }, t("update.notes"), icon("external")), back, check, install]),
   );
   if (fx) {
-    row.classList.add("checked", "checked-" + fx);
-    if (fx === "latest") row.querySelector("p")?.prepend(icon("check", "fresh-check"));
+    row.classList.add("ui-checked", "ui-checked-" + fx);
+    if (fx === "latest") row.querySelector(".ui-setting-explain")?.prepend(icon("check", "fresh-check"));
     if (fx === "found" && install) install.classList.add("arrive");
   }
   return row;
@@ -2115,9 +2080,9 @@ function autoUpdateRow() {
     }
     renderSettings();
   };
-  const auto = h("input", { type: "checkbox", class: "switch", role: "switch", checked: u.auto, "aria-label": t("update.auto"), onchange: () => save({ auto: auto.checked }) });
+  const auto = uiSwitch({ on: u.auto, label: t("update.auto"), onchange: (on) => save({ auto: on }) });
   const time = h("input", { type: "time", value: u.time, class: "short mono", required: true, "aria-label": t("update.autoTime"), hidden: !u.auto, onchange: () => time.value && save({ time: time.value }) });
-  return settingRow(t("update.auto"), t(u.auto ? "update.autoOnHint" : "update.autoHint", { zone: state.settings.systemTimezone }), h("div", { class: "row-actions" }, time, auto));
+  return settingRow(t("update.auto"), t(u.auto ? "update.autoOnHint" : "update.autoHint", { zone: state.settings.systemTimezone }), uiLine([time, auto]));
 }
 
 /** Going back to the version that ran before: the same watched restart as an update */
@@ -2199,9 +2164,9 @@ async function moveDataDialog(suggested = "") {
     "wide",
     h("h2", null, t("data.moveTitle")),
     h("p", { class: "muted" }, t("data.moveLead", { from: s.dataRoot })),
-    field(t("data.target"), h("span", { class: "pair" }, target, button(t("data.choose"), { onclick: () => folderPicker({ title: t("data.chooseTitle"), start: target.value.startsWith("/") ? target.value : "", confirmLabel: t("edit.pickHere"), action: (path) => void ((target.value = path), (go.disabled = false)) }) }, "folder")), t("data.targetHint")),
-    places.length > 0 && h("div", { class: "row-actions wrap" }, places.map((path) => button(`${path}/DATA`, { class: "small mono", onclick: () => ((target.value = `${path}/DATA`), (go.disabled = false)) }))),
-    h("p", { class: "banner" }, t("data.moveWarn")),
+    uiField(t("data.target"), uiInputLine(target, button(t("data.choose"), { onclick: () => folderPicker({ title: t("data.chooseTitle"), start: target.value.startsWith("/") ? target.value : "", confirmLabel: t("edit.pickHere"), action: (path) => void ((target.value = path), (go.disabled = false)) }) }, "folder")), t("data.targetHint"), { group: true }),
+    places.length > 0 && uiLine(places.map((path) => button(`${path}/DATA`, { class: "small mono", onclick: () => ((target.value = `${path}/DATA`), (go.disabled = false)) }))),
+    uiNotice({ tone: "warn", text: t("data.moveWarn") }),
     error,
     h("footer", null, closeButton(() => dialog, t("common.cancel")), go),
   );
@@ -2220,7 +2185,7 @@ function stateDirCard() {
       "confirm",
       h("h2", null, t("state.moveTitle")),
       h("p", { class: "muted" }, t("state.moveLead", { from: s.stateDir, to: target })),
-      inData && h("p", { class: "banner" }, t("state.inDataRoot", { path: s.dataRoot })),
+      inData && uiNotice({ tone: "warn", text: t("state.inDataRoot", { path: s.dataRoot }) }),
       h(
         "footer",
         null,
@@ -2252,14 +2217,7 @@ function stateDirCard() {
       ),
     );
   };
-  return h(
-    "section",
-    { class: "card pad" },
-    h("h2", null, t("state.title")),
-    h("p", { class: "muted small" }, t("state.lead")),
-    settingRow(t("state.folder"), t(s.stateMovable ? "state.folderHint" : "state.notMovable"), h("span", { class: "pair" }, path, move)),
-    error,
-  );
+  return uiCard({ title: t("state.title"), lead: t("state.lead") }, settingRow(t("state.folder"), t(s.stateMovable ? "state.folderHint" : "state.notMovable"), uiLine([path, move])), error);
 }
 
 function settingsSection(section) {
@@ -2284,7 +2242,7 @@ function settingsSection(section) {
     const language = languageSelect(() => void loadSettings());
     const port = h("input", { type: "number", min: 1, max: 65535, class: "short mono", value: s?.port || "", placeholder: String(location.port || 80) });
     return [
-      h("section", { class: "card pad" }, h("h2", null, t("settings.general")), settingRow(t("settings.language"), t("settings.languageHint"), language), isAdmin() && settingRow(t("settings.port"), t("settings.portHint"), h("span", { class: "pair" }, port, button(t("settings.save"), { onclick: () => save({ port: Number(port.value) || 0 }) }))), isAdmin() && settingRow(t("welcome.again"), t("welcome.againHint"), h("a", { class: "btn", href: "#/welcome" }, t("common.open"))), error),
+      uiCard({ title: t("settings.general") }, settingRow(t("settings.language"), t("settings.languageHint"), language), isAdmin() && settingRow(t("settings.port"), t("settings.portHint"), uiLine([port, button(t("settings.save"), { onclick: () => save({ port: Number(port.value) || 0 }) })])), isAdmin() && settingRow(t("welcome.again"), t("welcome.againHint"), h("a", { class: "btn", href: "#/welcome" }, t("common.open"))), error),
     ];
   }
   if (section === "apps") {
@@ -2296,18 +2254,19 @@ function settingsSection(section) {
       h(
         "form",
         {
-          class: "card pad",
           onsubmit: (e) => {
             e.preventDefault();
             void save({ dataRoot: dataRoot.value.trim(), puid: Number(puid.value), pgid: Number(pgid.value), timezone: tz.value.trim() });
           },
         },
-        h("h2", null, t("settings.apps")),
-        settingRow(t("settings.dataRoot"), t("settings.dataRootHint"), h("span", { class: "pair" }, dataRoot, button(t("data.move"), { onclick: () => moveDataDialog() }))),
-        settingRow(t("settings.ids"), t("settings.idsHint"), h("span", { class: "pair" }, puid, pgid)),
-        settingRow(t("settings.timezone"), t("settings.timezoneHint", { tz: s.systemTimezone }), tz),
-        error,
-        h("footer", null, h("button", { class: "btn primary" }, t("settings.save"))),
+        uiCard(
+          { title: t("settings.apps") },
+          settingRow(t("settings.dataRoot"), t("settings.dataRootHint"), uiLine([dataRoot, button(t("data.move"), { onclick: () => moveDataDialog() })])),
+          settingRow(t("settings.ids"), t("settings.idsHint"), uiLine([puid, pgid])),
+          settingRow(t("settings.timezone"), t("settings.timezoneHint", { tz: s.systemTimezone }), tz),
+          error,
+          uiFoot(h("button", { class: "btn primary" }, t("settings.save"))),
+        ),
       ),
       imagesCard(),
       stateDirCard(),
@@ -2331,13 +2290,11 @@ function settingsSection(section) {
   if (section === "stores") {
     const stores = state.store?.stores ?? [];
     return [
-      h(
-        "section",
-        { class: "card pad" },
-        h("div", { class: "section-head" }, h("h2", null, t("settings.stores"), stores.length > 0 && h("span", { class: "muted" }, String(stores.length))), h("div", { class: "actions" }, button(t("store.sync"), { class: "small", onclick: syncStores }, "refresh"))),
+      uiCard(
+        { title: t("settings.stores"), count: stores.length || null, actions: button(t("store.sync"), { class: "small", onclick: syncStores }, "refresh") },
         h(
           "div",
-          { class: "ui-rows stores-rows" },
+          { class: "ui-rows ui-rows-flush" },
           stores.map((store) => uiRow({ lead: { icon: "store" }, name: store.id, sub: store.url, value: t("settings.storeApps", { n: store.apps }) + (store.syncedAt ? " · " + ago(store.syncedAt) : ""), more: [{ label: t("store.remove") + "…", icon: "trash", danger: true, run: () => removeStoreDialog(store) }] })),
         ),
         addStoreForm(),
@@ -2346,10 +2303,8 @@ function settingsSection(section) {
     ];
   }
   return [
-    h(
-      "section",
-      { class: "card pad" },
-      h("h2", null, t("settings.about")),
+    uiCard(
+      { title: t("settings.about") },
       settingRow("Hata", t("settings.aboutHint"), h("span", { class: "mono" }, state.version)),
       updateRow(),
       channelRow(),

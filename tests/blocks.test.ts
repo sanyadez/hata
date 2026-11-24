@@ -1,8 +1,8 @@
 /**
  * The page is made of the design system's blocks (01-core.js: pageHead, uiCard, uiRow, uiTable, uiField, uiNotice …),
  * not of markup of its own. Every class a part writes must be a block's (`ui-…`) or one of the few utilities of the
- * system below (type, tone, layout of a column, the kinds of a button). What is left of the hand-made is counted
- * part by part and may only go down — to nothing: a new piece that no block fits is a new block in 01-core.js.
+ * system below (type, tone, layout of a column, the kinds of a button). None is left (2026-11-24): a new piece that no
+ * block fits is a new block in 01-core.js, made general and named for what it is.
  */
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
@@ -21,33 +21,14 @@ export function ownClasses(text: string): string[] {
   return found.filter((c) => c && !c.startsWith("ui-") && !UTILITIES.has(c));
 }
 
-/** What is left of the hand-made, part by part (2026-11-24). Only ever lowered, to 0. */
-const LEFT: Record<string, number> = {
-  "01-core.js": 84,
-  "02-home.js": 122,
-  "03-app.js": 81,
-  "04-machines.js": 104,
-  "05-house.js": 137,
-  "06-proxmox.js": 101,
-  "07-machine.js": 81,
-  "08-work.js": 66,
-  "09-backups.js": 40,
-  "10-files.js": 147,
-  "11-settings.js": 114,
-  "12-tv.js": 340,
-  "13-network.js": 109,
-  "14-domains.js": 54,
-  "15-storage.js": 181,
-  "16-people.js": 172,
-  "17-start.js": 1,
-};
 
-test("no part draws more of its own than it did", () => {
+test("no part draws anything of its own", () => {
   const over: string[] = [];
   for (const part of appParts()) {
+    // 01-core.js is the system itself: the blocks and the frame of the page (the top bar, windows, menus, toasts)
+    if (part === "01-core.js") continue;
     const own = ownClasses(readFileSync(`${APP_DIR}/${part}`, "utf8"));
-    const left = LEFT[part] ?? 0;
-    if (own.length > left) over.push(`${part}: ${own.length} classes of its own, ${left} allowed — make it with the blocks of 01-core.js`);
+    if (own.length) over.push(`${part}: ${[...new Set(own)].join(", ")} — make it with the blocks of 01-core.js`);
   }
   expect(over).toEqual([]);
 });
