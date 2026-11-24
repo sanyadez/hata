@@ -186,7 +186,60 @@ function errorText(e) {
   return has(key) ? t(key, e.detail).trim() : e.detail.message || e.code;
 }
 
+/*
+ * A button at work (STATES): while what it started is answered, the button shows the ring in place of its icon (before
+ * its words when it has none), keeps its width and look, takes no second press and says `aria-busy`. `busyWhile(button, work)` does it for
+ * any work; a press that asks the server to change something (a click, or a form's submit, before its handler first
+ * waits) gets it by itself through `api`. A switch has its own way of being at work.
+ */
+let pressedNow = null;
+const atWork = new WeakMap();
+async function busyWhile(btn, work) {
+  const run = () => (typeof work === "function" ? work() : work);
+  if (!(btn instanceof HTMLElement) || !btn.isConnected || !btn.matches(".btn, .icon-btn")) return run();
+  const n = (atWork.get(btn) ?? 0) + 1;
+  atWork.set(btn, n);
+  if (n === 1) {
+    btn.style.setProperty("min-width", btn.offsetWidth + "px");
+    btn.setAttribute("aria-busy", "true");
+    const ring = uiRing();
+    const mark = btn.querySelector(":scope > .ui-ico");
+    if (mark) mark.before(ring);
+    else btn.prepend(ring);
+  }
+  try {
+    return await run();
+  } finally {
+    const left = (atWork.get(btn) ?? 1) - 1;
+    atWork.set(btn, left);
+    if (left === 0) {
+      btn.querySelector(":scope > .ui-ring")?.remove();
+      btn.removeAttribute("aria-busy");
+      btn.style.removeProperty("min-width");
+    }
+  }
+}
+// the button pressed just now, for as long as the handlers of that press run without waiting
+for (const type of ["click", "submit"])
+  document.addEventListener(
+    type,
+    (e) => {
+      const b = type === "submit" ? e.submitter : e.target.closest?.("button, a.btn");
+      if (!b) return;
+      // a button at work keeps its look but takes no second press, by the pointer, Enter or Space
+      if (b.getAttribute("aria-busy") === "true") return (e.preventDefault(), e.stopImmediatePropagation());
+      pressedNow = b;
+      setTimeout(() => pressedNow === b && (pressedNow = null));
+    },
+    true,
+  );
+
 async function api(method, path, data) {
+  const by = method !== "GET" && pressedNow?.isConnected ? pressedNow : null;
+  return by ? busyWhile(by, () => askServer(method, path, data)) : askServer(method, path, data);
+}
+
+async function askServer(method, path, data) {
   let res;
   try {
     res = await fetch(path, {
@@ -411,7 +464,7 @@ function pageHead({ crumbs = null, icon: iconName = null, logo = null, title = n
   const nodes = all.filter((a) => a instanceof Node);
   const list = all.filter((a) => !(a instanceof Node)).slice(0, 2);
   const main = list.find((a) => a.primary) ?? list[0];
-  const make = (a) => (a.href ? h("a", { class: "btn ui-spec" + (a.primary ? " primary" : "") + (a === main ? " ui-main" : ""), href: a.href, target: a.newTab ? "_blank" : null, rel: a.newTab ? "noopener noreferrer" : null }, a.icon && icon(a.icon), h("span", null, a.label)) : button(a.label, { class: "ui-spec " + (a.primary ? "primary" : a.danger ? "danger-text" : "") + (a === main ? " ui-main" : ""), onclick: a.run }, a.icon));
+  const make = (a) => (a.href ? h("a", { class: "btn ui-spec" + (a.primary ? " primary" : "") + (a === main ? " ui-main" : ""), href: a.href, target: a.newTab ? "_blank" : null, rel: a.newTab ? "noopener noreferrer" : null }, a.icon && icon(a.icon), h("span", null, a.label)) : button(a.label, { class: "ui-spec " + (a.primary ? "primary" : a.danger ? "danger-text" : "") + (a === main ? " ui-main" : ""), onclick: (e) => busyWhile(e.currentTarget, () => a.run?.(e)) }, a.icon));
   const phone = () => matchMedia("(max-width: 640px)").matches;
   const entries = () => [...(phone() ? list.filter((a) => a !== main).map((a) => ({ label: a.label, icon: a.icon ?? "next", run: a.run, href: a.href, danger: a.danger })) : []), ...((typeof more === "function" ? more() : more) ?? [])];
   const hasMore = !!more || list.length > 1;
@@ -510,7 +563,7 @@ const uiEmbed = (frame) => h("div", { class: "ui-embed" }, frame);
  * button), `more` (entries of "⋯"). `href` / `onclick` make the whole row a way somewhere (then a chevron, no "⋯").
  * `mode` — "event" (time in mono on the right), "group" (a grey band), "task" (a meter under the text).
  */
-function uiRow({ lead = null, name, sub = null, value = null, time = null, state = null, action = null, more = null, href = null, onclick = null, mode = "thing", meter = null, title = null, cls = "", menu = undefined, id = null } = {}) {
+function uiRow({ lead = null, name, sub = null, value = null, time = null, state = null, action = null, more = null, href = null, onclick = null, mode = "thing", meter = null, title = null, cls = "", menu = undefined, id = null, selected = false } = {}) {
   const goes = !!(href || onclick);
   const text = h("div", { class: "ui-row-text" }, h("div", { class: "ui-row-name", title: title ?? (typeof name === "string" ? name : null) }, name), sub && h("div", { class: "ui-row-sub", title: typeof sub === "string" ? sub : null }, sub), action && time != null && h("div", { class: "ui-row-when mono" }, time), meter);
   const tail = h(
@@ -523,7 +576,7 @@ function uiRow({ lead = null, name, sub = null, value = null, time = null, state
     more && uiMore(more, { size: "s" }),
     goes && !more && !action && icon("chevron", "ui-row-go"),
   );
-  return h(href ? "a" : "div", { class: `ui-row ui-${mode}${goes ? " ui-goes" : ""}${action ? " ui-acts" : ""}${action && (state || value != null) ? " ui-full" : ""}${cls ? " " + cls : ""}`, href, onclick, id, menu, role: onclick && !href ? "button" : null, tabindex: onclick && !href ? 0 : null }, uiLead(lead), text, tail);
+  return h(href ? "a" : "div", { class: `ui-row ui-${mode}${goes ? " ui-goes" : ""}${action ? " ui-acts" : ""}${action && (state || value != null) ? " ui-full" : ""}${selected ? " selected" : ""}${cls ? " " + cls : ""}`, href, onclick, id, menu, role: onclick && !href ? "button" : null, tabindex: onclick && !href ? 0 : null }, uiLead(lead), text, tail);
 }
 
 /** Rows one under another (uiRow); `inCard` — among the other blocks of a padded card: its padding is theirs, no line under the last */
@@ -567,7 +620,7 @@ function uiTable(columns, rows, { cls = "", height = 56 } = {}) {
           ? h("tr", { class: "ui-tr-whole" + (r.cls ? " " + r.cls : "") }, h("td", { colspan: columns.length }, r.whole))
         : h(
             "tr",
-            { class: [r.onclick || r.href ? "ui-goes" : "", r.cls ?? ""].join(" ").trim() || null, onclick: r.onclick ?? (r.href ? () => (location.hash = r.href.replace(/^#/, "")) : null), menu: r.menu },
+            { class: [r.onclick || r.href ? "ui-goes" : "", r.selected ? "selected" : "", r.cls ?? ""].join(" ").trim() || null, "aria-selected": r.selected ? "true" : null, onclick: r.onclick ?? (r.href ? () => (location.hash = r.href.replace(/^#/, "")) : null), menu: r.menu },
             r.cells.map((cell, i) => h("td", { class: columns[i]?.num ? "num" : null }, i === 0 && r.sub ? [cell, h("div", { class: "ui-td-sub" }, r.sub)] : cell)),
           ),
     ),
@@ -910,8 +963,49 @@ const uiSignal = (level, title = "") => h("span", { class: `ui-signal ui-signal-
  * A field of a form: the label above, the control, a hint under it. `group` — the control is several things (a
  * pair of inputs, a list of ticks), so the field is not one `<label>`. `optional` says so beside the label.
  */
-function uiField(label, control, hint = null, { group = false, optional = false, id = null, cls = "" } = {}) {
-  return h(group ? "div" : "label", { class: "ui-field" + (cls ? " " + cls : ""), id }, label != null && h("span", { class: "ui-field-label" }, label, optional && h("span", { class: "ui-field-opt" }, t("ui.optional"))), control, hint && h("span", { class: "ui-field-hint" }, hint));
+function uiField(label, control, hint = null, { group = false, optional = false, id = null, cls = "", error = null } = {}) {
+  const field = h(group ? "div" : "label", { class: "ui-field" + (cls ? " " + cls : ""), id }, label != null && h("span", { class: "ui-field-label" }, label, optional && h("span", { class: "ui-field-opt" }, t("ui.optional"))), control, hint && h("span", { class: "ui-field-hint" }, hint));
+  if (error) fieldError(field, error);
+  return field;
+}
+/**
+ * A field's error under it (STATES): a line in the bad tone in place of its hint, the control marked `aria-invalid` and
+ * described by the line. `fieldError(field, null)` takes it away; the control's next input takes it away too.
+ */
+function fieldError(field, text) {
+  const box = field?.closest?.(".ui-field");
+  if (!box) return;
+  const control = box.querySelector("input, select, textarea, .ui-select-btn");
+  let line = box.querySelector(":scope > .ui-field-error");
+  if (!text) {
+    line?.remove();
+    control?.removeAttribute("aria-invalid");
+    if (control?.getAttribute("aria-describedby")?.startsWith("err-")) control.removeAttribute("aria-describedby");
+    return;
+  }
+  if (!line) {
+    line = h("span", { class: "ui-field-error", id: "err-" + Math.random().toString(36).slice(2, 9), role: "alert" }, icon("alert"), h("span"));
+    box.append(line);
+  }
+  line.lastChild.textContent = text;
+  if (control) {
+    control.setAttribute("aria-invalid", "true");
+    control.setAttribute("aria-describedby", line.id);
+    control.addEventListener("input", () => fieldError(box, null), { once: true });
+    control.addEventListener("change", () => fieldError(box, null), { once: true });
+  }
+}
+/**
+ * A refusal of the server that names its field (`detail.field`) is said under that field: `controls` maps the field's
+ * names to their controls (or fields). True when it was; otherwise the caller says it at the top as before.
+ */
+function refuseAt(err, controls, text) {
+  const name = err?.detail?.field;
+  const control = name && controls[name];
+  if (!control?.closest?.(".ui-field")) return false;
+  fieldError(control, text);
+  control.focus?.();
+  return true;
 }
 
 /** Fields side by side (two to a line, one under another on a phone) */
@@ -1471,6 +1565,12 @@ function uiChat({ label, wide = false, form }) {
 /** What one side of a conversation said: `user` (the person, on the right) or `bot` */
 const uiMessage = (from, ...body) => h("div", { class: "ui-msg " + (from === "user" ? "user" : "bot") }, body);
 
+/** A button shown at work for good: the sheet's example of the state */
+function atWorkForEver(b) {
+  requestAnimationFrame(() => void busyWhile(b, new Promise(() => {})));
+  return b;
+}
+
 /** The sheet of the blocks (`#/blocks`): every block in its forms, with made-up words, as the drawings have them */
 function renderBlocks() {
   const say = (x) => () => toast(x);
@@ -1484,7 +1584,7 @@ function renderBlocks() {
     ),
     sec(
       "Buttons",
-      h("div", { class: "ui-line" }, button("Save", { class: "primary" }), button("Open"), button("Show 23 more", { class: "quiet" }), button("Delete", { class: "danger" }), button("Disabled", { disabled: true }), uiMore(items), button("Small", { class: "small" }), uiMore(items, { size: "s" })),
+      h("div", { class: "ui-line" }, button("Save", { class: "primary" }), button("Open"), button("Show 23 more", { class: "quiet" }), button("Delete", { class: "danger" }), button("Disabled", { disabled: true }), uiMore(items), button("Small", { class: "small" }), uiMore(items, { size: "s" }), atWorkForEver(button("Saving at work", { class: "primary" }, "check")), atWorkForEver(button("At work", { class: "small" }))),
     ),
     sec(
       "Switches and segments",
@@ -1508,6 +1608,7 @@ function renderBlocks() {
       uiRow({ lead: { icon: "alert", tone: "warn" }, name: "Security updates for this server: 8", sub: "There are security fixes for system packages", action: button("Look", { class: "small primary" }), more: items }),
       uiRow({ lead: { icon: "signin" }, name: "tester: signed in", sub: "192.168.1.196", time: "20:41", mode: "event" }),
       uiRow({ lead: { icon: "folder" }, name: "A whole row is a way somewhere", sub: "with a chevron and nothing else", href: "#/blocks" }),
+      uiRow({ lead: { icon: "file" }, name: "A chosen row", sub: "ticked or open beside", selected: true, more: items }),
       uiGroup({ name: "i5 — Proxmox", count: 3, state: uiState("ok", "Online"), more: items }, uiRow({ lead: { icon: "server" }, name: "Gitea", sub: "CT 212 · 192.168.1.212", state: uiState("ok", "Running"), more: items })),
       uiRow({ lead: { icon: "download", tone: "info" }, name: "Installing Immich", sub: "Pulling images · step 2 of 3", meter: uiSteps(1, 3), mode: "task", action: button("Log", { class: "small" }) }),
     ),
@@ -1578,6 +1679,7 @@ function renderBlocks() {
     ),
     uiCard(
       { title: "Fields and forms" },
+      uiField("A field the server refused", h("input", { value: "my server!" }), "Latin letters, digits and dashes", { error: "Only Latin letters, digits and dashes" }),
       uiFields(uiField("Name", h("input", { value: "Adminer" }), "Shown on its tile"), uiField("Port", h("input", { class: "short", value: "8080" }), null, { optional: true })),
       uiCheck("Start with the server", h("input", { type: "checkbox", checked: true }), "It starts after a reboot"),
       uiAffix(h("input", { value: "db" }), ".hata.example.org"),

@@ -1464,6 +1464,7 @@ function renderTrash() {
       uiLine([button(t("trash.restore"), { class: "small", onclick: back([item]) }, "undo"), isAdmin() && uiMore([{ label: t("files.deleteForever") + "…", icon: "trash", danger: true, run: () => remove(item) }], { size: "s" })], { end: true }),
     ],
     sub: [folderOf(item.from), ago(item.at), bytes(item.size)].join(" · "),
+    selected: trashChosen.has(item.id),
     menu: (at) => menuAt(at, null, [{ label: t("trash.restore"), icon: "undo", run: () => back([item])({ currentTarget: {} }) }, isAdmin() && { label: t("files.deleteForever") + "…", icon: "trash", danger: true, run: () => remove(item) }].filter(Boolean)),
   });
   const keep = data?.keepDays ?? 30;

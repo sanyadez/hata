@@ -1994,11 +1994,8 @@ function updateRow() {
     class: "small ghost",
     disabled: busy,
     onclick: async () => {
-      check.disabled = true;
-      check.querySelector(".ui-ico").classList.add("ui-spin");
-      check.lastChild.textContent = t("update.checking");
-      // a quick answer would only blink: the turn lasts long enough to be seen
-      const [res] = await Promise.all([api("POST", "/api/update/check", {}).catch((e) => ({ ...state.update, error: errorText(e) })), new Promise((r) => setTimeout(r, 700))]);
+      // a quick answer would only blink: the button is at work long enough to be seen
+      const [res] = await busyWhile(check, () => Promise.all([api("POST", "/api/update/check", {}).catch((e) => ({ ...state.update, error: errorText(e) })), new Promise((r) => setTimeout(r, 700))]));
       state.update = res;
       updateFx = res.error ? "error" : res.available ? "found" : "latest";
       renderSettings();

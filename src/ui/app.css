@@ -2512,3 +2512,34 @@ input[type="checkbox"].ui-toggle:disabled::before { background: var(--border-str
 .ui-trend .ui-chart .ui-chart-axis { font-size: 10px; }
 /* what the copy cannot say by itself: a child's own mark under a renamed block */
 .ui-spark i.ui-spark-last { background: var(--accent); }
+
+/* --- States, the rest (STATES.md): a button at work, a field's error, a press of 44 px, what is chosen, links in text */
+/* a button at work (busyWhile): the ring in place of its icon, the same width, no press */
+:is(.btn, .icon-btn)[aria-busy="true"] { pointer-events: none; cursor: default; }
+:is(.btn, .icon-btn)[aria-busy="true"] > .ui-ico { display: none; }
+:is(.btn, .icon-btn) > .ui-ring { flex: none; width: 14px; height: 14px; border-width: 2px; border-color: color-mix(in srgb, currentColor 25%, transparent); border-top-color: currentColor; }
+/* a switch at work: its knob turns into the ring */
+.ui-switch[aria-busy="true"] > i { box-shadow: none; background: var(--surface); border: 2px solid var(--border); border-top-color: var(--accent); box-sizing: border-box; animation: spin 0.8s linear infinite; }
+.ui-switch[aria-busy="true"][aria-checked="true"] > i { transform: translateX(16px); animation-name: spin-right; }
+@keyframes spin-right { from { transform: translateX(16px) rotate(0); } to { transform: translateX(16px) rotate(360deg); } }
+/* a field the server refused: its line in the bad tone in place of the hint, the control framed in it */
+.ui-field-error { display: flex; align-items: flex-start; gap: 6px; color: var(--danger); font-size: 12px; overflow-wrap: anywhere; }
+.ui-field-error > .ui-ico { flex: none; width: 12px; height: 12px; margin-top: 2px; }
+.ui-field:has(> .ui-field-error) > .ui-field-hint { display: none; }
+.ui-field:has(> .ui-field-error) :is(input, textarea, .ui-select-btn) { border-color: var(--danger); }
+.ui-field:has(> .ui-field-error) :is(input, textarea, .ui-select-btn):focus { border-color: var(--danger); box-shadow: 0 0 0 3px var(--danger-soft); }
+/* what is chosen: rows of lists and tables by accent-soft; a hover does not change it */
+.ui-row.selected, .ui-table tr.selected > td { background: var(--accent-soft); }
+@media (hover: hover) { .ui-row.selected.ui-goes:hover, .ui-table tr.selected.ui-goes:hover > td { background: var(--accent-soft); } }
+/* links inside running text are underlined always, thicker under the pointer */
+:is(.ui-prose, .ui-notice-text, .ui-setting-explain, .ui-field-hint, .ui-card > p, .ui-card p.muted, .ui-check-hint) a:not(.btn, .ui-link) { color: var(--accent-text); text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 2px; }
+@media (hover: hover) { :is(.ui-prose, .ui-notice-text, .ui-setting-explain, .ui-field-hint, .ui-card > p, .ui-card p.muted, .ui-check-hint) a:not(.btn, .ui-link):hover { text-decoration-thickness: 2px; } }
+/* a finger's press: at least 44 × 44 around everything that is pressed, the look as it is (an invisible field around it) */
+@media (pointer: coarse) {
+  /* :where — no weight, so a control placed absolutely keeps its place */
+  :where(.btn, .icon-btn, .ui-seg, .ui-switch, .ui-tab, .ui-chip, .ui-chip-name, .ui-chip-x, .ui-select-btn, .ui-top-btn, .ui-crumbs a, .ui-link) { position: relative; }
+  :where(.btn, .icon-btn, .ui-seg, .ui-switch, .ui-tab, .ui-chip, .ui-chip-name, .ui-chip-x, .ui-select-btn, .ui-top-btn, .ui-crumbs a, .ui-link)::after { content: ""; position: absolute; left: 50%; top: 50%; width: max(100%, 44px); height: max(100%, 44px); transform: translate(-50%, -50%); }
+  .ui-menu-item, .ui-side-item { min-height: 44px; }
+  .ui-check { min-height: 44px; align-items: center; }
+  .ui-check > input { margin: 0; }
+}

@@ -315,7 +315,10 @@ async function pveNewDialog(x, kind = "lxc") {
         void loadMachines();
       });
     } catch (err) {
-      error.textContent = err.code === "pve.badField" ? t("pve.new.bad." + err.detail.field) : errorText(err);
+      const said = err.code === "pve.badField" ? t("pve.new.bad." + err.detail.field) : errorText(err);
+      // a field that is not right is said under it; the rest at the top
+      const at = { node, template, source, storage, bridge, hostname, vmid, vmidRange: vmid, vmidTaken: vmid, disk, cores, memory, address, gateway, user, password, sshKeys: keys, pool, templateNoClient: template };
+      if (!(err.code === "pve.badField" && refuseAt(err, at, said))) error.textContent = said;
       submit.disabled = false;
     }
   };

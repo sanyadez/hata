@@ -1408,20 +1408,14 @@ function confirmAction({ title, lead, label, run, kind = "danger", iconName = "t
   const go = button(label, {
     class: kind,
     onclick: async () => {
-      go.disabled = true;
       error.textContent = "";
-      // it may take a while: the button turns, so the wait is seen to be one
-      const mark = go.querySelector(".ui-ico");
-      const turning = icon("refresh", "ui-spin");
-      mark?.replaceWith(turning);
+      // it may take a while: the button is at work, so the wait is seen to be one
       try {
-        await run();
+        await busyWhile(go, run);
         dialog.close();
         void refresh();
       } catch (err) {
         error.textContent = errorText(err);
-        go.disabled = false;
-        if (mark) turning.replaceWith(mark);
       }
     },
   }, iconName);

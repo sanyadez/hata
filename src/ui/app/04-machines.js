@@ -934,7 +934,10 @@ async function instanceJob(path, data, error, dialog, button) {
       void loadMachines();
     });
   } catch (err) {
-    error.textContent = err.code === "containers.badField" ? t("incus.bad." + err.detail.field) : errorText(err);
+    const said = err.code === "containers.badField" ? t("incus.bad." + err.detail.field) : errorText(err);
+    // the field the server names is said under it: the name of a rename or a copy, the place of a copy
+    const at = { name: dialog.querySelector("input"), taken: dialog.querySelector("input"), place: dialog.querySelector("select") };
+    if (!(err.code === "containers.badField" && refuseAt(err, at, said))) error.textContent = said;
     button.disabled = false;
   }
 }
@@ -1309,7 +1312,9 @@ function newContainerDialog(start = "container") {
         void loadMachines();
       });
     } catch (err) {
-      error.textContent = err.code === "containers.badField" ? t("incus.bad." + err.detail.field) : errorText(err);
+      const said = err.code === "containers.badField" ? t("incus.bad." + err.detail.field) : errorText(err);
+      const at = { name, taken: name, image, memory, disk, network: netSelect, place: placeSelect };
+      if (!(err.code === "containers.badField" && refuseAt(err, at, said))) error.textContent = said;
       submit.disabled = false;
     }
   };
@@ -1399,7 +1404,8 @@ function containerLimitsDialog(c) {
       toast(t("incus.saved", { name: c.name }));
       void loadContainers();
     } catch (err) {
-      error.textContent = err.code === "containers.badField" ? t("incus.bad." + err.detail.field) : errorText(err);
+      const said = err.code === "containers.badField" ? t("incus.bad." + err.detail.field) : errorText(err);
+      if (!(err.code === "containers.badField" && refuseAt(err, { memory, disk, diskShrink: disk }, said))) error.textContent = said;
       submit.disabled = false;
     }
   };
