@@ -32,3 +32,23 @@ test("no part draws anything of its own", () => {
   }
   expect(over).toEqual([]);
 });
+
+test("the style sheet names only the blocks' classes", () => {
+  // the pages of their own (the terminal, a machine's screen, a link for anyone) keep their classes: they are not parts
+  const own = new Set<string>();
+  for (const f of ["terminal.js", "screen.js", "link.js", "terminal.html", "screen.html", "link.html"]) {
+    const text = readFileSync(`${APP_DIR}/../${f}`, "utf8");
+    for (const m of text.matchAll(/["'`]([a-z][\w-]*)["'` ]/g)) own.add(m[1]);
+    for (const m of text.matchAll(/class(?:Name)?\s*[:=]\s*["'`]([^"'`]*)/g)) for (const c of m[1].split(/\s+/)) own.add(c);
+  }
+  const css = readFileSync(`${APP_DIR}/../app.css`, "utf8").replace(/\/\*[\s\S]*?\*\//g, "");
+  const strange = new Set<string>();
+  for (const m of css.matchAll(/([^{}]+)\{/g)) {
+    if (m[1].trim().startsWith("@")) continue;
+    for (const c of m[1].matchAll(/\.([a-zA-Z][\w-]*)/g)) {
+      const name = c[1];
+      if (!name.startsWith("ui-") && !UTILITIES.has(name) && !own.has(name) && !/^xterm/.test(name)) strange.add(name);
+    }
+  }
+  expect([...strange]).toEqual([]);
+});
