@@ -1555,6 +1555,10 @@ dialog:focus { outline: none; }
 /* Docker's images and volumes: their names are what is read first */
 /* a narrow row with a state and a button: its tail goes to a line of its own under the name */
 @container ui-row (max-width: 480px) { .ui-row.full .ui-row-tail { flex-basis: 100%; justify-content: flex-end; } }
+/* a row with a button: when its words would get narrower than that, the tail goes to a line of its own under them */
+.ui-row.acts { flex-wrap: wrap; row-gap: 8px; }
+.ui-row.acts > .ui-row-text { flex: 1 1 160px; }
+.ui-row.acts > .ui-row-tail { margin-left: auto; }
 .ui-row.full { flex-wrap: wrap; row-gap: 8px; }
 /* a row of a table that is one cell across (a fold, "show more") */
 .ui-table tr.ui-tr-whole td { max-width: none; white-space: normal; }
