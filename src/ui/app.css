@@ -1113,6 +1113,10 @@ dialog.framed::backdrop { background: rgb(0 0 0 / 45%); }
 dialog.framed[open] { display: flex; flex-direction: column; gap: 0; padding: 0; overflow: hidden; }
 dialog.framed > form { display: flex; flex-direction: column; gap: 0; min-height: 0; flex: 1; }
 .dlg-head { display: flex; gap: 12px; align-items: flex-start; padding: 18px 20px 16px; flex: none; }
+/* a window that draws its own head in its body (the disk's, filled when its data comes) brings its own cross: the frame's goes, and its head too when it has no title */
+dialog.framed:has(.dlg-body .dlg-x) .dlg-head > .dlg-x { display: none; }
+dialog.framed:has(.dlg-body .dlg-x) .dlg-head:has(> .dlg-title:empty) { display: none; }
+dialog.framed:has(.dlg-body .dlg-x):has(.dlg-head > .dlg-title:empty) .dlg-body { padding-top: 18px; }
 .dlg-title { display: grid; gap: 4px; flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .dlg-title h2 { font-size: 19px; font-weight: 600; line-height: 32px; }
 .dlg-title header h2 { line-height: 1.3; }

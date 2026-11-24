@@ -269,14 +269,22 @@ function openDialog(className, ...content) {
   dialog.showModal();
   // the browser gives the focus to the first button there is — the cross — and draws its ring: a window starts
   // on its first field instead (not on a touch screen, where that brings the keyboard up), else on itself
-  if (document.activeElement?.classList?.contains("dlg-x") || document.activeElement?.closest?.(".dlg-head")) {
-    const field = !matchMedia("(pointer: coarse)").matches && dialog.querySelector(".dlg-body :is(input:not([type=hidden]):not([type=checkbox]):not([type=radio]), textarea):not(:disabled)");
-    if (field) field.focus();
-    else {
-      dialog.tabIndex = -1;
-      dialog.focus({ preventScroll: true });
+  const settleFocus = () => {
+    if (document.activeElement?.classList?.contains("dlg-x") || document.activeElement?.closest?.(".dlg-head")) {
+      // the first field that is seen: one in a part hidden for now cannot take the focus
+      const field = !matchMedia("(pointer: coarse)").matches && [...dialog.querySelectorAll(".dlg-body :is(input:not([type=hidden]):not([type=checkbox]):not([type=radio]), textarea):not(:disabled)")].find((x) => x.checkVisibility());
+      if (field) field.focus();
+      else {
+        dialog.tabIndex = -1;
+        dialog.focus({ preventScroll: true });
+        // a window that cannot take the focus itself leaves it nowhere rather than on the cross
+        if (document.activeElement?.closest?.(".dlg-head")) document.activeElement.blur();
+      }
     }
-  }
+  };
+  settleFocus();
+  // a window filled right after it opens may move the focus once more
+  requestAnimationFrame(settleFocus);
   return dialog;
 }
 
@@ -1530,7 +1538,7 @@ function renderBlocks() {
 }
 
 const closeButton = (dialog, label = t("common.close")) => button(label, { onclick: () => dialog().close() });
-const closeX = (dialog) => h("button", { type: "button", class: "icon-btn", "aria-label": t("common.close"), onclick: () => dialog().close() }, icon("x"));
+const closeX = (dialog) => h("button", { type: "button", class: "icon-btn dlg-x", "aria-label": t("common.close"), onclick: () => dialog().close() }, icon("x"));
 
 // --- The look: colours and the background picture chosen in the settings -------------------------
 
