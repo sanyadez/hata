@@ -2894,7 +2894,7 @@ button.tv-stage-chip:active { background: rgb(0 0 0 / 0.9); }
 .ui-link { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 600; color: var(--accent-text); text-decoration: none; }
 .ui-link .ico { width: 14px; height: 14px; }
 @media (hover: hover) { .ui-link:hover { text-decoration: underline; } }
-.card:not(.pad) > .ui-empty.small { padding-inline: var(--pad); }
+.card:not(.pad) > .ui-empty.small, .card:not(.pad) > :is(#pve-jobs, .ui-rows, #containers) > .ui-empty.small { padding-inline: var(--pad); }
 .card:not(.pad) > .section-head.pad + p.muted.pad:has(+ :is(.ui-row, .ui-rows, .ui-group, .ui-table-wrap, .ui-empty)) { border-bottom: 1px solid var(--border); }
 .card:not(.pad) > .section-head.pad:has(+ p.muted.pad) { border-bottom: 0; }
 .ui-cell { display: flex; align-items: center; gap: 12px; min-width: 0; }
@@ -2947,3 +2947,21 @@ button.tv-stage-chip:active { background: rgb(0 0 0 / 0.9); }
 .tree-name { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
 .ui-notice.off { background: var(--surface-2); } .ui-notice.off > .ico { color: var(--faint); }
 .load-place .ui-empty.small > .btn { margin-left: 0; }
+/* a meter with its words in a cell of a table (the room of a storage) */
+.ui-cell-meter { display: grid; gap: 6px; }
+.card:not(.pad) > .ui-inset.ui-mfacts { padding-top: 4px; }
+.with-state { display: inline-flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 8px; }
+.card:not(.pad) > .ui-inset:last-child { border-bottom: 0; }
+/* a node of Proxmox: its row and its meters under it are one */
+.pve-nodes > .ui-row { border-bottom: 0; }
+/* a state among the facts of a narrow card may take two lines rather than widen the page */
+.kv .ui-state { height: auto; min-height: 22px; white-space: normal; flex: 0 1 auto; text-align: left; }
+/* a list filled after the card is drawn keeps the card's insets */
+.card:not(.pad) > :is(#pve-jobs, .ui-rows) > .ui-inset { padding: 12px var(--pad); border-bottom: 1px solid var(--border); }
+/* the meters of a node side by side where there is room */
+.pve-nodes { container: pve-nodes / inline-size; }
+@container pve-nodes (min-width: 900px) { .pve-nodes > .ui-mfacts { grid-template-columns: repeat(3, minmax(0, 1fr)); column-gap: 32px; } }
+@media (min-width: 641px) {
+  .ui-filters > input[type=search] { flex: 0 1 320px; width: auto; margin-left: 0; }
+  .ui-filters > :is(select, .select-btn) { width: 280px; flex: none; }
+}
