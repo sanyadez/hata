@@ -2980,7 +2980,7 @@ button.tv-stage-chip:active { background: rgb(0 0 0 / 0.9); }
 @container ui-table (max-width: 640px) { .ui-table tr.sub-row > td:first-child { padding-left: calc(var(--pad) + 16px); } }
 /* how often a thing is copied is a phrase: it may take two lines */
 .backups-table td:nth-child(2) { white-space: normal; }
-.ui-inset:has(> .error:empty) { display: none; }
+.ui-inset:has(> .error:empty:only-child) { display: none; }
 .card.pad > .ui-setting:first-child { padding-top: 0; }
 .card.pad > .ui-setting:last-child { padding-bottom: 0; }
 @container ui-table (min-width: 641px) { .disks-table td:first-child { width: 28%; } }
@@ -3044,3 +3044,7 @@ dialog .modes:not(:has(.mode-x)) { width: 100%; box-sizing: border-box; }
 .modes:not(:has(.mode-x)) > .mode.active { background: var(--surface); color: var(--text); font-weight: 600; box-shadow: 0 1px 2px rgb(0 0 0 / 12%); }
 .modes:not(:has(.mode-x)) > .mode:disabled { color: var(--faint); }
 @media (hover: hover) { .modes:not(:has(.mode-x)) > .mode:not(.active, :disabled):hover { background: var(--border); } }
+/* a small heading inside a padded card over a few rows of it */
+.ui-band-plain { font-size: 12px; font-weight: 600; color: var(--muted); }
+.card.pad > .ui-rows.bare > .ui-row { padding-inline: 0; }
+.card.pad > .ui-rows.bare > .ui-row:last-child { border-bottom: 0; }

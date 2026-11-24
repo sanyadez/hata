@@ -557,64 +557,56 @@ function networkSection() {
   const data = state.network;
   if (!data) return [waitMark()];
   const error = h("p", { class: "error", role: "alert" });
-  const row = (label, value, mono = true) => h("div", { class: "kv" }, h("span", { class: "muted" }, label), h("span", { class: mono ? "mono" : "" }, value || "—"));
-  const card = (nic) =>
-    nic.port
-      ? h(
-          "section",
-          { class: "card pad" },
-          h("div", { class: "section-head" }, h("h2", null, h("span", { class: "with-icon" }, icon("network"), nic.name), " ", h("span", { class: "state " + (nic.up ? "running" : "stopped") }, t(nic.up ? "network.up" : "network.down")))),
-          h("p", { class: "muted small" }, t("bridge.portOf", { bridge: nic.port })),
-          row(t("network.mac"), nic.mac + (nic.speed ? ` · ${nic.speed >= 1000 ? nic.speed / 1000 + " Gbit/s" : nic.speed + " Mbit/s"}` : "")),
-        )
-      : h(
-      "section",
-      { class: "card pad", menu: true },
-      h(
-        "div",
-        { class: "section-head" },
-        h("h2", null, h("span", { class: "with-icon" }, icon("network"), nic.kind === "modem" ? nic.product || t("network.modem") : nic.name), " ", nic.kind === "modem" && h("span", { class: "muted small mono" }, nic.name + " "), h("span", { class: "state " + (nic.up ? "running" : "stopped") }, t(nic.up ? "network.up" : "network.down")), nic.outside && h("span", { class: "state" }, t("outside.chip")), nic.online === false && h("span", { class: "state restarting" }, t("network.offline")), nic.online === true && h("span", { class: "state running" }, t("network.online"))),
-        h(
-          "div",
-          { class: "actions" }, foldActions([
-          nic.wifi?.ready && nic.wifi.ap && button(t(nic.wifi.hotspot ? "hotspot.show" : "hotspot.make"), { class: nic.wifi.hotspot ? "accent" : "", onclick: () => hotspotDialog(nic) }, "share"),
-          nic.wifi?.ready && button(t("wifi.networks"), { onclick: () => wifiDialog(nic) }, "search"),
-          nic.wifi?.ssid &&
-            button(t("wifi.forget"), {
-              onclick: () =>
-                confirmAction({
-                  title: t("wifi.forgetTitle", { ssid: nic.wifi.ssid }),
-                  lead: t("wifi.forgetLead"),
-                  label: t("wifi.forgetGo"),
-                  run: async () => {
-                    state.network = await api("DELETE", `/api/network/${nic.name}/wifi`);
-                    renderSettings();
-                  },
-                }),
-            }),
-          nic.manager === "nm" && !data.pending && (!nic.wifi || nic.wifi.ssid) && !nic.wifi?.hotspot && button(t("network.change"), { onclick: () => nicDialog(nic) }, "sliders"),
-          (nic.manager === "networkd" || nic.manager === "ifupdown") && data.tool === "ok" && !data.pending && button(t("network.handover"), { onclick: () => handOverDialog(nic) }),
-          nic.handed && !data.pending && button(t("network.handback"), { onclick: () => handBackDialog(nic) }, "undo"),
-          !bridgeWhy(nic) && !data.nics.some((n) => n.home) && !data.pending && button(t("bridge.make"), { onclick: () => homeBridgeDialog(nic) }, "box"),
-          nic.home && !data.pending && button(t("bridge.apart"), { onclick: () => bridgeApartDialog(nic) }, "undo"),])
-        ),
-      ),
-      nic.home && h("p", { class: "muted small" }, t("bridge.is", { ports: (nic.ports ?? []).filter((p) => data.nics.some((n) => n.name === p)).join(", ") || "—" }), " ", t("bridge.guests", { n: (nic.ports ?? []).filter((p) => !data.nics.some((n) => n.name === p)).length })),
-      nic.wifi && row("Wi-Fi", nic.wifi.hotspot ? t("hotspot.state", { ssid: nic.wifi.hotspot.ssid, n: nic.wifi.hotspot.clients.length }) : nic.wifi.ssid ? `${nic.wifi.ssid} · ${nic.wifi.signal}%` : t(nic.wifi.ready ? "wifi.notConnected" : "wifi.notReady"), false),
+  const speed = (nic) => (nic.speed ? ` · ${nic.speed >= 1000 ? nic.speed / 1000 + " Gbit/s" : nic.speed + " Mbit/s"}` : "");
+  const mono = (value) => h("span", { class: "mono" }, value || "—");
+  const card = (nic) => {
+    const up = uiState(nic.up ? "ok" : "off", t(nic.up ? "network.up" : "network.down"));
+    if (nic.port) return uiCard({ title: h("span", { class: "with-icon" }, icon("network"), nic.name), marks: up, lead: t("bridge.portOf", { bridge: nic.port }) }, ...uiFacts([[t("network.mac"), mono(nic.mac + speed(nic))]]));
+    const forgetWifi = nic.wifi?.ssid && {
+      label: t("wifi.forget") + "…",
+      icon: "x",
+      danger: true,
+      run: () => confirmAction({ title: t("wifi.forgetTitle", { ssid: nic.wifi.ssid }), lead: t("wifi.forgetLead"), label: t("wifi.forgetGo"), run: async () => ((state.network = await api("DELETE", `/api/network/${nic.name}/wifi`)), renderSettings()) }),
+    };
+    // what can be done to it: the first that applies is the button, the rest go into "⋯"
+    const acts = [
+      nic.manager === "nm" && !data.pending && (!nic.wifi || nic.wifi.ssid) && !nic.wifi?.hotspot && { label: t("network.change"), icon: "sliders", run: () => nicDialog(nic) },
+      nic.wifi?.ready && nic.wifi.ap && { label: t(nic.wifi.hotspot ? "hotspot.show" : "hotspot.make"), icon: "share", run: () => hotspotDialog(nic) },
+      nic.wifi?.ready && { label: t("wifi.networks"), icon: "search", run: () => wifiDialog(nic) },
+      (nic.manager === "networkd" || nic.manager === "ifupdown") && data.tool === "ok" && !data.pending && { label: t("network.handover"), icon: "sliders", run: () => handOverDialog(nic) },
+      nic.handed && !data.pending && { label: t("network.handback"), icon: "undo", run: () => handBackDialog(nic) },
+      !bridgeWhy(nic) && !data.nics.some((n) => n.home) && !data.pending && { label: t("bridge.make"), icon: "box", run: () => homeBridgeDialog(nic) },
+      nic.home && !data.pending && { label: t("bridge.apart"), icon: "undo", run: () => bridgeApartDialog(nic) },
+      forgetWifi,
+    ].filter(Boolean);
+    const [main, ...rest] = acts;
+    const title = nic.kind === "modem" ? nic.product || t("network.modem") : nic.name;
+    return uiCard(
+      {
+        title: h("span", { class: "with-icon" }, icon("network"), title),
+        marks: [nic.kind === "modem" && uiTag(nic.name), up, nic.outside && uiState("off", t("outside.chip")), nic.online === false && uiState("bad", t("network.offline")), nic.online === true && uiState("ok", t("network.online"))].filter(Boolean),
+        lead: nic.home ? [t("bridge.is", { ports: (nic.ports ?? []).filter((p) => data.nics.some((n) => n.name === p)).join(", ") || "—" }), t("bridge.guests", { n: (nic.ports ?? []).filter((p) => !data.nics.some((n) => n.name === p)).length })].join(" ") : null,
+        actions: [main && button(main.label, { class: "small", onclick: main.run }, main.icon), rest.length > 0 && uiMore(rest, { size: "s" })].filter(Boolean),
+        menu: acts.length ? (at) => menuAt(at, null, acts) : undefined,
+      },
+      nic.public && !nic.outside && uiNotice({ tone: "warn", text: t("outside.exposed", { address: nic.public }) }),
       nic.wifi?.needs && data.tool === "ok" && needsCard(nic.wifi.needs, "wifi.needs"),
-      row(t("network.address"), nic.addresses.join(", ") + (nic.addresses.length ? ` · ${t(nic.dynamic ? "network.byRouter" : "network.fixed")}` : "")),
-      !nic.wifi?.hotspot && row(t("network.gateway"), nic.gateway),
-      nic.shares && row(t("network.internet"), t("network.sharing", { n: nic.shares.length }), false),
-      !nic.shares && !nic.wifi?.hotspot && (nic.internet !== "none" || (several && nic.addresses.length > 0)) && h("div", { class: "kv" }, h("span", { class: "muted" }, t("network.internet")), nic.manager === "nm" && several ? roleSelect(nic) : h("span", null, t("network.role." + (nic.internet === "none" ? "off" : nic.internet)))),
-      !nic.wifi?.hotspot && row(t("network.dns"), nic.dns.join(", ")),
-      !nic.wifi?.hotspot && (nic.addresses6.length > 0 || nic.v6.method === "off") && row("IPv6", nic.v6.method === "off" ? t("network.v6.off") : nic.addresses6.join(", ") + (nic.v6.method ? ` · ${t(nic.v6.method === "manual" ? "network.fixed" : "network.byRouter")}` : ""), nic.v6.method !== "off"),
-      row(t("network.mac"), nic.mac + (nic.speed ? ` · ${nic.speed >= 1000 ? nic.speed / 1000 + " Gbit/s" : nic.speed + " Mbit/s"}` : "")),
-      row(t("network.manager"), t("network.by." + (nic.manager || "none")), false),
-      h("div", { class: "kv" }, h("span", { class: "muted" }, t("outside.side")), sideSelect(nic)),
-      nic.public && !nic.outside && h("p", { class: "banner small" }, t("outside.exposed", { address: nic.public })),
+      ...uiFacts([
+        nic.wifi && ["Wi-Fi", nic.wifi.hotspot ? t("hotspot.state", { ssid: nic.wifi.hotspot.ssid, n: nic.wifi.hotspot.clients.length }) : nic.wifi.ssid ? `${nic.wifi.ssid} · ${nic.wifi.signal}%` : t(nic.wifi.ready ? "wifi.notConnected" : "wifi.notReady")],
+        [t("network.address"), mono(nic.addresses.join(", ") + (nic.addresses.length ? ` · ${t(nic.dynamic ? "network.byRouter" : "network.fixed")}` : ""))],
+        !nic.wifi?.hotspot && [t("network.gateway"), mono(nic.gateway)],
+        nic.shares && [t("network.internet"), t("network.sharing", { n: nic.shares.length })],
+        !nic.shares && !nic.wifi?.hotspot && (nic.internet !== "none" || (several && nic.addresses.length > 0)) && [t("network.internet"), nic.manager === "nm" && several ? roleSelect(nic) : t("network.role." + (nic.internet === "none" ? "off" : nic.internet))],
+        !nic.wifi?.hotspot && [t("network.dns"), mono(nic.dns.join(", "))],
+        !nic.wifi?.hotspot && (nic.addresses6.length > 0 || nic.v6.method === "off") && ["IPv6", nic.v6.method === "off" ? t("network.v6.off") : mono(nic.addresses6.join(", ") + (nic.v6.method ? ` · ${t(nic.v6.method === "manual" ? "network.fixed" : "network.byRouter")}` : ""))],
+        [t("network.mac"), mono(nic.mac + speed(nic))],
+        [t("network.manager"), t("network.by." + (nic.manager || "none"))],
+        [t("outside.side"), sideSelect(nic)],
+      ]),
       nic.kind === "modem" && h("p", { class: "muted small" }, t("network.modemHint", { gateway: nic.gateway || "192.168.0.1" })),
       nic.manager !== "nm" && h("p", { class: "muted small" }, t(nic.manager === "networkd" || nic.manager === "ifupdown" ? (data.tool === "ok" ? "network.handoverHint" : "network.needsTool") : "network.readOnly")),
     );
+  };
   const several = data.nics.filter((n) => n.internet !== "none").length > 1 || data.nics.some((n) => n.kind === "modem");
   const rank = (nic) => (nic.home ? 0 : nic.port ? 1 : 2);
   const roleSelect = (nic) => {
@@ -697,34 +689,39 @@ function networkSection() {
     },
   });
   const needsCard = (needs, key) =>
-    h(
-      "div",
-      { class: "banner stack" },
-      h("strong", null, t(key + ".what")),
-      h("p", { class: "muted small" }, t(key + ".why")),
-      needs.install ? h("p", { class: "cmd" }, icon("terminal"), needs.install) : h("p", { class: "muted small" }, t("mounting.needs.byHand", { package: needs.package })),
-      needs.install &&
-        button(t("mounting.needs.install", { package: needs.package }), {
-          class: "small",
-          onclick: async (e) => {
-            e.currentTarget.disabled = true;
+    uiNeedProgram({
+      name: needs.package,
+      why: [t(key + ".what"), t(key + ".why")].join(" "),
+      command: needs.install || null,
+      why2: needs.install ? null : t("mounting.needs.byHand", { package: needs.package }),
+      run: needs.install
+        ? async (e) => {
+            const el = e.currentTarget;
+            el.disabled = true;
             error.textContent = "";
             try {
               state.network = await api("POST", "/api/network/package", { package: needs.package });
               renderSettings();
             } catch (err) {
               error.textContent = errorText(err);
-              e.target.closest("button").disabled = false;
+              el.disabled = false;
             }
-          },
-        }),
-    );
+          }
+        : null,
+    });
   const needs = data.needs && needsCard(data.needs, "network.needs");
   return [
-    h("section", { class: "card pad stack" }, h("h2", null, t("settings.network")), h("p", { class: "muted small" }, t("network.lead")), data.tool === "stopped" && h("p", { class: "banner small" }, t("network.stopped")), needs, data.tool === "ok" && uiSetting({ name: t("network.check"), explain: t("network.checkHint", { url: data.check.url.replace(/^https?:\/\//, "").replace(/\/.*/, "") }), control: checkBox }), error, data.pending && h("div", { class: "banner" }, t("network.trial.title", { nic: data.pending.nic }), " ", button(t("network.trial.show"), { class: "small", onclick: () => trialDialog(data.pending) }))),
+    uiCard(
+      { title: t("settings.network"), lead: t("network.lead") },
+      data.tool === "stopped" && uiNotice({ tone: "warn", text: t("network.stopped") }),
+      data.pending && uiNotice({ tone: "warn", text: t("network.trial.title", { nic: data.pending.nic }), action: button(t("network.trial.show"), { class: "small primary", onclick: () => trialDialog(data.pending) }) }),
+      needs,
+      data.tool === "ok" && uiSetting({ name: t("network.check"), explain: t("network.checkHint", { url: data.check.url.replace(/^https?:\/\//, "").replace(/\/.*/, "") }), control: checkBox }),
+      error,
+    ),
     // the home bridge stands right before the card in it
     ...[...data.nics].sort((a, b) => rank(a) - rank(b) || data.nics.indexOf(a) - data.nics.indexOf(b)).map(card),
-    !data.nics.length && h("p", { class: "card pad muted" }, t("network.none")),
+    !data.nics.length && uiCard({}, uiEmpty({ size: "big", icon: "network", title: t("network.none") })),
   ];
 }
 
@@ -1023,94 +1020,58 @@ function wireguardCards() {
     }
   };
 
-  if (w.tool === "missing")
-    return [
-      h(
-        "section",
-        { class: "card pad stack" },
-        h("h2", null, "WireGuard"),
-        h("p", { class: "muted" }, t("wg.lead")),
-        h("p", null, t("wg.what")),
-        h("p", { class: "muted small" }, t("wg.why")),
-        w.install ? h("p", { class: "cmd" }, icon("terminal"), w.install) : h("p", { class: "muted small" }, t("mounting.needs.byHand", { package: w.package })),
-        error,
-        w.install &&
-          h(
-            "footer",
-            null,
-            button(t("mounting.needs.install", { package: "WireGuard" }), {
-              class: "primary",
-              onclick: async (e) => {
-                const el = e.currentTarget;
-                el.disabled = true;
-                el.lastChild.textContent = t("tools.installing");
-                try {
-                  await api("POST", "/api/tools/wireguard-tools/install", {});
-                  state.wireguard = await api("GET", "/api/wireguard");
-                  renderSettings();
-                } catch (err) {
-                  error.textContent = errorText(err);
-                  el.disabled = false;
-                }
-              },
-            }, "download"),
-          ),
-      ),
-    ];
+  if (w.tool === "missing") {
+    const install = async (e) => {
+      const el = e.currentTarget;
+      el.disabled = true;
+      try {
+        await api("POST", "/api/tools/wireguard-tools/install", {});
+        state.wireguard = await api("GET", "/api/wireguard");
+        renderSettings();
+      } catch (err) {
+        error.textContent = errorText(err);
+        el.disabled = false;
+      }
+    };
+    return [uiCard({ title: "WireGuard", lead: t("wg.lead") }, uiNeedProgram({ name: "WireGuard", why: [t("wg.what"), t("wg.why")].join(" "), command: w.install || null, run: w.install ? install : null, why2: w.install ? null : t("mounting.needs.byHand", { package: w.package }) }), error)];
+  }
 
   const s = w.server;
   const endpoint = h("input", { value: s.endpoint || s.suggested, placeholder: "home.example.com", spellcheck: false, autocapitalize: "off", class: "mono", required: true });
   const port = h("input", { type: "number", min: 1, max: 65535, value: s.port, class: "short mono", required: true });
   const typed = () => ({ endpoint: endpoint.value.trim(), port: Number(port.value) });
   const up = s.enabled && s.running;
-  const deviceRow = (d) =>
-    h(
-      "tr",
-      null,
-      h("td", null, h("div", { class: "strong" }, d.name), h("div", { class: "muted small mono" }, d.address)),
-      h("td", null, h("label", { class: "check small" }, h("input", { type: "checkbox", checked: d.lan, disabled: !s.firewall, onchange: (e) => send("PUT", `devices/${d.id}`, { lan: e.target.checked }, e.target) }), h("span", null, t("wg.lanShort")))),
-      h("td", null, h("span", { class: "state " + (wgConnected(d.handshake) ? "running" : "stopped") }, wgConnected(d.handshake) ? t("wg.connected") : d.handshake ? t("remote.seen", { when: ago(d.handshake) }) : t("wg.never"))),
-      h(
-        "td",
-        null,
-        h(
-          "div",
-          { class: "row-actions" },
-          button(t("wg.show"), { class: "small", onclick: () => wgDeviceDialog(d.id) }),
-          h("button", {
-            type: "button",
-            class: "icon-btn",
-            title: t("wg.remove"),
-            "aria-label": t("wg.remove"),
-            onclick: () => {
-              const dialog = openDialog("confirm", h("h2", null, t("wg.removeTitle", { name: d.name })), h("p", { class: "muted" }, t("wg.removeLead")), h("footer", null, closeButton(() => dialog, t("common.cancel")), button(t("wg.remove"), { class: "danger", onclick: (e) => (dialog.close(), send("DELETE", `devices/${d.id}`, undefined, e.currentTarget)) })));
-            },
-          }, icon("trash")),
-        ),
-      ),
-    );
-  const inCard = h(
-    "section",
-    { class: "card pad stack" },
-    h("div", { class: "section-head" }, h("h2", null, t("wg.in.title"), h("span", { class: "state " + (up ? "running" : s.enabled ? "partial" : "stopped") }, t(up ? "wg.state.on" : s.enabled ? "remote.state.stopped" : "remote.state.off"))), h("span", { class: "muted small" }, "WireGuard")),
-    h("p", { class: "muted" }, t("wg.in.lead")),
-    settingRow(t("wg.endpoint"), t("wg.endpointHint"), endpoint),
-    settingRow(t("wg.port"), t("wg.portHint", { port: s.port }), port),
-    !s.firewall && h("p", { class: "banner" }, t("wg.noFirewall")),
+  const removeDevice = (d) => confirmAction({ title: t("wg.removeTitle", { name: d.name }), lead: t("wg.removeLead"), label: t("wg.remove"), run: () => send("DELETE", `devices/${d.id}`) });
+  const deviceRow = (d) => {
+    const lan = h("input", { type: "checkbox", class: "switch", role: "switch", checked: d.lan, disabled: !s.firewall, "aria-label": t("wg.lanShort"), onchange: (e) => send("PUT", `devices/${d.id}`, { lan: e.target.checked }, e.target) });
+    const seen = wgConnected(d.handshake) ? t("wg.connected") : d.handshake ? t("remote.seen", { when: ago(d.handshake) }) : t("wg.never");
+    return {
+      onclick: () => wgDeviceDialog(d.id),
+      cells: [
+        uiCell({ name: d.name, sub: h("span", { class: "mono" }, d.address) }),
+        h("label", { class: "with-state", onclick: (e) => e.stopPropagation() }, lan, h("span", { class: "small" }, t("wg.lanShort"))),
+        uiState(wgConnected(d.handshake) ? "ok" : "off", seen),
+        h("div", { class: "row-actions end", onclick: (e) => e.stopPropagation() }, button(t("wg.show"), { class: "small", onclick: () => wgDeviceDialog(d.id) }, "eye"), uiMore([{ label: t("wg.remove") + "…", icon: "trash", danger: true, run: () => removeDevice(d) }], { size: "s" })),
+      ],
+      sub: [d.address, seen].join(" · "),
+    };
+  };
+  const inCard = uiCard(
+    { title: t("wg.in.title"), marks: uiState(up ? "ok" : s.enabled ? "warn" : "off", t(up ? "wg.state.on" : s.enabled ? "remote.state.stopped" : "remote.state.off")), lead: t("wg.in.lead"), actions: h("span", { class: "muted small" }, "WireGuard") },
+    !s.firewall && uiNotice({ tone: "warn", text: t("wg.noFirewall") }),
+    uiSetting({ name: t("wg.endpoint"), explain: t("wg.endpointHint"), control: endpoint }),
+    uiSetting({ name: t("wg.port"), explain: t("wg.portHint", { port: s.port }), control: port }),
     error,
-    h("footer", null, h("div", { class: "row-actions" }, s.enabled && button(t("remote.turnOff"), { onclick: (e) => {
+    h("footer", { class: "block-foot" }, h("div", { class: "row-actions" }, s.enabled && button(t("remote.turnOff") + "…", { onclick: (e) => {
       const el = e.currentTarget;
       confirmAction({ title: t("wg.offTitle"), lead: t("wg.offLead"), label: t("remote.turnOff"), iconName: "x", run: () => send("PUT", "server", { enabled: false }, el) });
     } }), button(t(s.enabled ? "settings.save" : "remote.turnOn"), { class: "primary", onclick: (e) => send("PUT", "server", { ...typed(), enabled: true }, e.currentTarget) }))),
   );
   const devices =
     s.address &&
-    h(
-      "section",
-      { class: "card pad stack" },
-      h("div", { class: "section-head" }, h("h2", null, t("wg.devices"), h("span", { class: "muted small" }, s.devices.length)), button(t("wg.add"), { class: "small primary", disabled: !s.endpoint, onclick: wgAddDialog }, "plus")),
-      s.devices.length ? h("div", { class: "table-wrap" }, h("table", null, h("tbody", null, s.devices.map(deviceRow)))) : h("p", { class: "muted" }, t("wg.devicesNone")),
-      h("p", { class: "muted small" }, t("wg.devicesHint", { address: s.address })),
+    uiCard(
+      { title: t("wg.devices"), count: s.devices.length || null, lead: t("wg.devicesHint", { address: s.address }), flush: true, actions: button(t("wg.add"), { class: "small primary", disabled: !s.endpoint, onclick: wgAddDialog }, "plus") },
+      s.devices.length ? uiTable([{ label: t("bt.col.device") }, { label: t("wg.lanShort") }, { label: t("app.col.state") }, { label: "" }], s.devices.map(deviceRow)) : uiEmpty({ text: t("wg.devicesNone") }),
     );
 
   const c = w.client;
@@ -1122,42 +1083,23 @@ function wireguardCards() {
     if (done?.dropped?.length) toast(t("wg.out.dropped", { lines: done.dropped.join(", ") }));
   };
   const outUp = c.enabled && c.running;
-  const outCard = h(
-    "section",
-    { class: "card pad stack" },
-    h("div", { class: "section-head" }, h("h2", null, t("wg.out.title"), c.set && h("span", { class: "state " + (outUp ? "running" : c.enabled ? "partial" : "stopped") }, t(outUp ? (wgConnected(c.handshake) ? "wg.connected" : "wg.out.waiting") : c.enabled ? "remote.state.stopped" : "remote.state.off"))), h("span", { class: "muted small" }, "WireGuard")),
-    h("p", { class: "muted" }, t("wg.out.lead")),
+  const forget = { label: t("wg.out.forget") + "…", icon: "trash", danger: true, run: () => confirmAction({ title: t("wg.out.forgetTitle"), lead: t("wg.out.forgetLead"), label: t("wg.out.forgetGo"), run: async () => ((state.wireguard = await api("DELETE", "/api/wireguard/client")), renderSettings()) }) };
+  const outCard = uiCard(
+    {
+      title: t("wg.out.title"),
+      marks: c.set && uiState(outUp ? (wgConnected(c.handshake) ? "ok" : "warn") : c.enabled ? "warn" : "off", t(outUp ? (wgConnected(c.handshake) ? "wg.connected" : "wg.out.waiting") : c.enabled ? "remote.state.stopped" : "remote.state.off")),
+      lead: t("wg.out.lead"),
+      actions: c.set ? [c.enabled ? button(t("remote.turnOff"), { class: "small", onclick: (e) => send("PUT", "client", { enabled: false }, e.currentTarget, outError) }, "power") : button(t("remote.turnOn"), { class: "small primary", onclick: (e) => send("PUT", "client", { enabled: true }, e.currentTarget, outError) }, "power"), uiMore([forget], { size: "s" })] : h("span", { class: "muted small" }, "WireGuard"),
+    },
     c.set
-      ? [
-          settingRow(t("wg.out.server"), c.handshake ? t("wg.out.spoke", { when: ago(c.handshake) }) : "", h("span", { class: "mono" }, c.endpoint)),
-          settingRow(t("wg.out.address"), "", h("span", { class: "mono" }, c.address)),
-          settingRow(t("wg.out.through"), t(c.everything ? "wg.out.everything" : "wg.out.some"), h("span", { class: "mono" }, c.allowed.join(", "))),
-        ]
+      ? uiFacts([
+          [t("wg.out.server"), h("span", { class: "mono", title: c.handshake ? t("wg.out.spoke", { when: ago(c.handshake) }) : null }, c.endpoint)],
+          [t("wg.out.address"), h("span", { class: "mono" }, c.address)],
+          [t("wg.out.through"), h("span", { class: "mono", title: t(c.everything ? "wg.out.everything" : "wg.out.some") }, c.allowed.join(", "))],
+        ])
       : [field(t("wg.out.conf"), conf, t("wg.out.confHint")), pick],
     outError,
-    h(
-      "footer",
-      null,
-      h(
-        "div",
-        { class: "row-actions" },
-        c.set
-          ? [button(t("wg.out.forget"), {
-            class: "quiet",
-            onclick: () =>
-              confirmAction({
-                title: t("wg.out.forgetTitle"),
-                lead: t("wg.out.forgetLead"),
-                label: t("wg.out.forgetGo"),
-                run: async () => {
-                  state.wireguard = await api("DELETE", "/api/wireguard/client");
-                  renderSettings();
-                },
-              }),
-          }), c.enabled ? button(t("remote.turnOff"), { onclick: (e) => send("PUT", "client", { enabled: false }, e.currentTarget, outError) }) : button(t("remote.turnOn"), { class: "primary", onclick: (e) => send("PUT", "client", { enabled: true }, e.currentTarget, outError) })]
-          : [button(t("wg.out.file"), { onclick: () => pick.click() }), button(t("wg.out.join"), { class: "primary", onclick: join })],
-      ),
-    ),
+    !c.set && h("footer", { class: "block-foot" }, h("div", { class: "row-actions" }, button(t("wg.out.file"), { onclick: () => pick.click() }, "upload"), button(t("wg.out.join"), { class: "primary", onclick: join }, "plug"))),
   );
   return [inCard, devices, outCard].filter(Boolean);
 }
@@ -1179,44 +1121,23 @@ function tailscaleCards() {
       el.disabled = false;
     }
   };
-  const lead = h("p", { class: "muted" }, t("remote.lead"));
   const title = "Tailscale";
+  const install = async (e) => {
+    const el = e.currentTarget;
+    el.disabled = true;
+    try {
+      const res = await api("POST", "/api/tailscale/install", {});
+      jobDialog(res.job, "tailscale", "", loadRemote);
+    } catch (err) {
+      error.textContent = errorText(err);
+      el.disabled = false;
+    }
+  };
+  if (r.state === "missing") return [uiCard({ title, lead: t("remote.lead") }, uiNeedProgram({ name: "Tailscale", why: [t("remote.what"), t("remote.why")].join(" "), command: r.install, run: install, why2: t("remote.how") }), error)];
 
-  if (r.state === "missing")
-    return [
-      h(
-        "section",
-        { class: "card pad stack" },
-        h("h2", null, title),
-        lead,
-        h("p", null, t("remote.what")),
-        h("p", { class: "muted small" }, t("remote.why")),
-        h("p", { class: "cmd" }, icon("terminal"), r.install),
-        h("p", { class: "muted small" }, t("remote.how")),
-        error,
-        h(
-          "footer",
-          null,
-          button(t("mounting.needs.install", { package: "Tailscale" }), {
-            class: "primary",
-            onclick: async (e) => {
-              const el = e.currentTarget;
-              el.disabled = true;
-              try {
-                const res = await api("POST", "/api/tailscale/install", {});
-                jobDialog(res.job, "tailscale", "", loadRemote);
-              } catch (err) {
-                error.textContent = errorText(err);
-                el.disabled = false;
-              }
-            },
-          }, "download"),
-        ),
-      ),
-    ];
-
-  const head = (chip, cls) => h("div", { class: "section-head" }, h("h2", null, title, h("span", { class: "state " + cls }, chip)), h("span", { class: "muted small mono" }, r.version));
-  if (r.state === "stopped") return [h("section", { class: "card pad stack" }, head(t("remote.state.stopped"), "stopped"), h("p", { class: "muted" }, t("remote.stopped")), error, h("footer", null, button(t("remote.start"), { class: "primary", onclick: act("start") }))) ];
+  // the card's head: the name, its state, the version on the right
+  const card = (tone, words, opts, ...body) => uiCard({ title, marks: uiState(tone, words), actions: h("span", { class: "muted small mono" }, r.version), ...opts }, ...body);
+  if (r.state === "stopped") return [card("off", t("remote.state.stopped"), { lead: t("remote.stopped") }, error, h("footer", { class: "block-foot" }, button(t("remote.start"), { class: "primary", onclick: act("start") }, "play")))];
 
   // waiting for the person to let the server in: the page looks again by itself until it is done
   if (r.state === "starting") {
@@ -1229,16 +1150,13 @@ function tailscaleCards() {
   if (r.state === "needsLogin" || r.state === "starting") {
     const own = h("input", { value: r.server ?? "", placeholder: "https://headscale.example.com", spellcheck: false, autocapitalize: "off", class: "mono" });
     return [
-      h(
-        "section",
-        { class: "card pad stack" },
-        head(t(r.authUrl ? "remote.state.waiting" : "remote.state.signedOut"), r.authUrl ? "partial" : "stopped"),
-        lead,
-        r.authUrl
-          ? [h("p", null, t("remote.openLink")), h("p", { class: "cmd" }, h("a", { class: "link grow clip", href: r.authUrl, target: "_blank", rel: "noopener noreferrer" }, r.authUrl), h("button", { type: "button", class: "icon-btn", title: t("twofa.copy"), "aria-label": t("twofa.copy"), onclick: () => copyText(r.authUrl) }, icon("copy"))), h("p", { class: "muted small" }, t("remote.openLinkHint"))]
-          : [h("p", { class: "muted small" }, t("remote.signInHint")), h("details", null, h("summary", { class: "muted small" }, t("remote.ownServer")), field(t("remote.ownServerAddress"), own, t("remote.ownServerHint")))],
+      card(
+        r.authUrl ? "warn" : "off",
+        t(r.authUrl ? "remote.state.waiting" : "remote.state.signedOut"),
+        { lead: t("remote.lead") },
+        r.authUrl ? uiNotice({ tone: "info", title: t("remote.openLink"), text: t("remote.openLinkHint"), command: uiCommand(r.authUrl) }) : uiSetting({ name: t("remote.ownServerAddress"), explain: [t("remote.signInHint"), t("remote.ownServerHint")].join(" "), control: own }),
         error,
-        h("footer", null, r.authUrl ? button(t("common.cancel"), { onclick: act("disconnect") }) : button(t("remote.signIn"), { class: "primary", onclick: (e) => act("connect", { server: own.value.trim() })(e) }, "arrow")),
+        h("footer", { class: "block-foot" }, r.authUrl ? button(t("common.cancel"), { onclick: act("disconnect") }) : button(t("remote.signIn"), { class: "primary", onclick: (e) => act("connect", { server: own.value.trim() })(e) }, "arrow")),
       ),
     ];
   }
@@ -1249,50 +1167,41 @@ function tailscaleCards() {
   const carried = r.offered.filter((net) => !r.approved.includes(net) && r.carried?.[net]);
   const waiting = r.offered.filter((net) => !r.approved.includes(net) && !r.carried?.[net]);
   const share = h("input", { type: "checkbox", class: "switch", role: "switch", "aria-label": t("remote.networksOn"), checked: offered, disabled: !on || (!offered && !r.networks.length), onchange: (e) => act("networks", { on: e.target.checked })(e) });
-  return [
-    h(
-      "section",
-      { class: "card pad stack" },
-      head(t(on ? "remote.state.on" : "remote.state.off"), on ? "running" : "stopped"),
-      lead,
-      settingRow(t("remote.name"), t("remote.nameHint"), h("span", { class: "stack-s end" }, r.name && address(r.name), r.addresses.filter((a) => !a.includes(":")).map(address))),
-      settingRow(t("remote.account"), r.server ? t("remote.accountOwn", { server: r.server }) : r.expires ? t("remote.expires", { date: shortDate(r.expires) }) : "", h("span", null, r.tailnet || "—")),
-      r.health.length > 0 && h("div", { class: "banner stack" }, r.health.map((line) => h("p", { class: "small" }, line))),
-      error,
-      h("footer", null, h("div", { class: "row-actions" }, button(t("remote.signOut"), {
-        class: "quiet",
-        onclick: () =>
-          confirmAction({
-            title: t("remote.signOutTitle"),
-            lead: t("remote.signOutLead"),
-            label: t("remote.signOutGo"),
-            iconName: "signout",
-            run: async () => {
-              state.remote = await api("POST", "/api/tailscale/signout", {});
-              renderSettings();
-            },
-          }),
-      }), on ? button(t("remote.turnOff"), { onclick: (e) => {
+  const signOut = {
+    label: t("remote.signOut") + "…",
+    icon: "signout",
+    danger: true,
+    run: () => confirmAction({ title: t("remote.signOutTitle"), lead: t("remote.signOutLead"), label: t("remote.signOutGo"), iconName: "signout", run: async () => ((state.remote = await api("POST", "/api/tailscale/signout", {})), renderSettings()) }),
+  };
+  const toggle = on
+    ? button(t("remote.turnOff") + "…", { class: "small", onclick: (e) => {
         const el = e.currentTarget;
         confirmAction({ title: t("remote.offTitle"), lead: t("remote.offLead"), label: t("remote.turnOff"), iconName: "x", run: () => act("disconnect")({ currentTarget: el, target: el }) });
-      } }) : button(t("remote.turnOn"), { class: "primary", onclick: act("connect") }))),
+      } }, "power")
+    : button(t("remote.turnOn"), { class: "small primary", onclick: act("connect") }, "power");
+  const device = (d) => ({
+    cells: [uiCell({ name: d.name, sub: d.os }), h("span", { class: "mono small" }, d.addresses.filter((a) => !a.includes(":")).join(", ")), uiState(d.online ? "ok" : "off", d.online ? t("remote.online") : d.lastSeen ? t("remote.seen", { when: ago(d.lastSeen) }) : t("remote.offline"))],
+    sub: d.addresses.filter((a) => !a.includes(":")).join(", "),
+  });
+  return [
+    uiCard(
+      { title, marks: uiState(on ? "ok" : "off", t(on ? "remote.state.on" : "remote.state.off")), lead: t("remote.lead"), actions: [h("span", { class: "muted small mono" }, r.version), toggle, uiMore([signOut], { size: "s" })] },
+      r.health.length > 0 && uiNotice({ tone: "warn", text: r.health.join(" ") }),
+      ...uiFacts([
+        [t("remote.name"), h("span", { class: "stack-s end" }, r.name && address(r.name), r.addresses.filter((a) => !a.includes(":")).map(address))],
+        [t("remote.account"), h("span", { title: r.server ? t("remote.accountOwn", { server: r.server }) : r.expires ? t("remote.expires", { date: shortDate(r.expires) }) : null }, r.tailnet || "—")],
+      ]),
+      error,
     ),
-    h(
-      "section",
-      { class: "card pad stack" },
-      h("h2", null, t("remote.networks")),
+    uiCard(
+      { title: t("remote.networks") },
       uiSetting({ name: t("remote.networksOn"), explain: r.networks.length || offered ? t("remote.networksHint", { networks: (offered ? r.offered : r.networks).join(", ") }) : t("remote.networksNone"), control: share }),
-      carried.length > 0 && h("p", { class: "muted small" }, carried.map((net) => t("remote.networksCarried", { network: net, device: r.carried[net] })).join(" ")),
-      waiting.length > 0 && h("p", { class: "banner" }, t(r.server ? "remote.networksApproveOwn" : "remote.networksApprove", { networks: waiting.join(", ") }), !r.server && [" ", h("a", { class: "link", href: r.admin, target: "_blank", rel: "noopener noreferrer" }, "login.tailscale.com")]),
+      carried.length > 0 && uiNotice({ tone: "info", text: carried.map((net) => t("remote.networksCarried", { network: net, device: r.carried[net] })).join(" ") }),
+      waiting.length > 0 && uiNotice({ tone: "warn", text: t(r.server ? "remote.networksApproveOwn" : "remote.networksApprove", { networks: waiting.join(", ") }), action: !r.server && h("a", { class: "btn small", href: r.admin, target: "_blank", rel: "noopener noreferrer" }, icon("external"), h("span", null, "login.tailscale.com")) }),
     ),
-    h(
-      "section",
-      { class: "card pad stack" },
-      h("div", { class: "section-head" }, h("h2", null, t("remote.devices"), h("span", { class: "muted small" }, r.devices.length))),
-      r.devices.length
-        ? h("div", { class: "table-wrap" }, h("table", null, h("tbody", null, r.devices.map((d) => h("tr", null, h("td", null, h("div", { class: "strong" }, d.name), h("div", { class: "muted small" }, d.os)), h("td", { class: "mono small" }, d.addresses.filter((a) => !a.includes(":")).join(", ")), h("td", { class: "num" }, h("span", { class: "state " + (d.online ? "running" : "stopped") }, d.online ? t("remote.online") : d.lastSeen ? t("remote.seen", { when: ago(d.lastSeen) }) : t("remote.offline"))))))))
-        : h("p", { class: "muted" }, t("remote.devicesNone")),
-      h("p", { class: "muted small" }, t("remote.devicesHint")),
+    uiCard(
+      { title: t("remote.devices"), count: r.devices.length || null, lead: t("remote.devicesHint"), flush: true },
+      r.devices.length ? uiTable([{ label: t("bt.col.device") }, { label: t("machines.address") }, { label: t("app.col.state") }], r.devices.map(device)) : uiEmpty({ text: t("remote.devicesNone") }),
     ),
   ];
 }
