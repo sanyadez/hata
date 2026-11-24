@@ -593,7 +593,7 @@ const uiMatrix = (columns, rows) =>
     h(
       "table",
       null,
-      h("thead", null, h("tr", null, h("th"), columns.map((c) => h("th", null, c.name, c.sub && h("span", { class: "muted" }, c.sub))))),
+      h("thead", null, h("tr", null, h("th"), columns.map((c) => h("th", { "data-label": c.sub ? `${c.name} · ${c.sub}` : null }, c.name, c.sub && h("span", { class: "muted" }, c.sub))))),
       h(
         "tbody",
         null,
@@ -1179,7 +1179,7 @@ const uiWorkBar = (count) => h("span", { class: "ui-work-bar" }, Array.from({ le
 
 /** A part of the bar: full, moving, frozen, known (its `pct`) or empty */
 function uiWorkSeg(one, kind, pct = null) {
-  one.className = "ui-work-seg " + kind;
+  one.className = "ui-work-seg" + (kind ? " ui-" + kind : "");
   one.firstChild.style.width = pct === null ? "" : pct + "%";
   one.setAttribute("aria-hidden", "true");
 }
@@ -2262,7 +2262,7 @@ document.addEventListener(
 /** Every cell of a table knows its column's name: a phone shows a row as a card of "name: value" lines */
 function labelTables() {
   for (const table of document.querySelectorAll("table")) {
-    const names = [...(table.tHead?.rows[0]?.cells ?? [])].map((cell) => cell.textContent.trim());
+    const names = [...(table.tHead?.rows[0]?.cells ?? [])].map((cell) => cell.dataset.label ?? cell.textContent.trim());
     if (!names.length) continue;
     for (const row of table.tBodies[0]?.rows ?? []) {
       let column = 0;
