@@ -3019,3 +3019,28 @@ input[type="checkbox"].switch:checked::before { transform: translateX(16px); }
 input[type="checkbox"].switch:disabled { background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--border); cursor: default; }
 input[type="checkbox"].switch:disabled::before { background: var(--border-strong); box-shadow: none; }
 .ui-setting:has(+ .error:empty:last-child) { border-bottom: 0; }
+
+/* ---- Windows: what every window's body shares (the design system's П2–П6), said once for all of them ---- */
+/* a field: its label 12/600 over it, its hint under it */
+.field .label { font-weight: 600; }
+/* an answer of the server that refused: a bad notice at the top of the body, not a red line at its bottom */
+dialog.framed .dlg-body > p.error:not(:empty),
+dialog.framed .dlg-body > form > p.error:not(:empty) { order: -1; margin: 0; padding: 12px 16px; border-radius: 10px; background: var(--danger-soft); color: var(--text); font-size: 13px; }
+dialog.framed .dlg-body > p.error:empty,
+dialog.framed .dlg-body > form > p.error:empty { display: none; }
+/* kinds to choose from: the segment of the system, across the window */
+.seg { display: flex; flex-wrap: wrap; gap: 2px; padding: 3px; border-radius: 8px; background: var(--surface-2); width: fit-content; max-width: 100%; }
+dialog .seg { width: 100%; box-sizing: border-box; }
+.seg > .btn { flex: 1 1 auto; justify-content: center; height: 30px; min-height: 30px; margin: 0; padding: 0 12px; border: 0; border-radius: 6px; background: none; color: var(--muted); font: 500 13px var(--font-body); box-shadow: none; }
+.seg > .btn:first-child, .seg > .btn:last-child { border-radius: 6px; margin-left: 0; }
+.seg > .btn:is(.active, .on) { background: var(--surface); border-color: transparent; color: var(--text); font-weight: 600; box-shadow: 0 1px 2px rgb(0 0 0 / 12%); }
+@media (hover: hover) { .seg > .btn:not(.active, .on):hover { background: var(--border); } }
+/* a command in a window: a block of its own, as the system's */
+dialog .cmd { min-height: 36px; padding: 8px 10px; box-sizing: border-box; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); }
+/* kinds as plain buttons (the custom app's way, a drive's kind): the same segment; the services' tabs with a cross stay chips */
+.modes:not(:has(.mode-x)) { display: flex; flex-wrap: wrap; gap: 2px; padding: 3px; border-radius: 8px; background: var(--surface-2); }
+dialog .modes:not(:has(.mode-x)) { width: 100%; box-sizing: border-box; }
+.modes:not(:has(.mode-x)) > .mode { flex: 1 1 auto; height: 30px; padding: 0 12px; border: 0; border-radius: 6px; background: none; color: var(--muted); font: 500 13px var(--font-body); }
+.modes:not(:has(.mode-x)) > .mode.active { background: var(--surface); color: var(--text); font-weight: 600; box-shadow: 0 1px 2px rgb(0 0 0 / 12%); }
+.modes:not(:has(.mode-x)) > .mode:disabled { color: var(--faint); }
+@media (hover: hover) { .modes:not(:has(.mode-x)) > .mode:not(.active, :disabled):hover { background: var(--border); } }
