@@ -184,6 +184,7 @@ p.small > .chip { height: auto; min-height: 24px; padding-block: 2px; white-spac
 .empty { text-align: center; color: var(--muted); padding: 56px 16px; display: grid; gap: 16px; justify-items: center; }
 .cmd { display: flex; align-items: center; gap: 8px; color: var(--faint); font-family: var(--font-mono); font-size: 12px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; min-width: 0; }
 /* a line that has to be read whole: a key's fingerprint, a command to type */
+.card > .cmd.card-cmd { padding: 12px var(--pad); border-top: 1px solid var(--border); margin: 0; }
 .cmd.whole { white-space: normal; overflow-wrap: anywhere; align-items: flex-start; }
 .cmd.whole svg { flex: none; margin-top: 2px; }
 
@@ -2703,7 +2704,12 @@ button.tv-stage-chip:active { background: rgb(0 0 0 / 0.9); }
 .ui-group-fold .ico { width: 14px; height: 14px; transition: transform var(--t-state); }
 .ui-row.group.open .ui-group-fold .ico { transform: rotate(90deg); }
 .ui-row-count { color: var(--faint); font-weight: 500; }
-@media (max-width: 640px) { .ui-row-name { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; } }
+/* a narrow row (a phone, a side column) lets its name take two lines */
+.ui-row:not(.group) { container: ui-row / inline-size; }
+.ui-row-when { display: none; font-size: 12px; color: var(--faint); }
+/* a narrow row with a button: its time goes under the name, so the name keeps its room */
+@container ui-row (max-width: 480px) { .ui-row.acts .ui-row-tail > .ui-row-time { display: none; } .ui-row.acts .ui-row-when { display: block; } }
+@container ui-row (max-width: 480px) { .ui-row-name { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; } }
 
 /* a setting */
 .ui-setting { display: flex; align-items: center; gap: 16px; padding: 12px 0; border-bottom: 1px solid var(--border); }
@@ -2757,7 +2763,7 @@ button.tv-stage-chip:active { background: rgb(0 0 0 / 0.9); }
 @container ui-table (max-width: 640px) {
   .ui-table thead { display: none; }
   .ui-table tr:not(.ui-tr-group) td:not(:first-child, :last-child) { display: none; }
-  .ui-table td:first-child { max-width: none; width: 100%; white-space: normal; }
+  .ui-table td:first-child { max-width: 0; width: 100%; white-space: normal; overflow-wrap: anywhere; }
   .ui-table td:last-child:not(:first-child) { width: 1%; }
   .ui-td-sub { display: block; }
 }
@@ -2870,6 +2876,7 @@ button.tv-stage-chip:active { background: rgb(0 0 0 / 0.9); }
 /* the column of actions is as wide as what it holds and never cut */
 .ui-table td:last-child:not(:first-child) { max-width: none; width: 1%; overflow: visible; }
 .ui-table td .btn { flex: none; }
+.ui-table td:last-child .row-actions { flex-wrap: nowrap; }
 /* a phone: tiles become rows (Home's, media and the adding one stay as they are) */
 @media (max-width: 640px) {
   .ui-tiles, .ui-tiles.described, .ui-tiles.small { grid-template-columns: minmax(0, 1fr); gap: 8px; }

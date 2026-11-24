@@ -543,7 +543,7 @@ function appOverviewTab(app, box) {
         h("span", { class: "mono small" }, c.ports.join(", ") || "—"),
         uiMore(() => menuEntries, { size: "s" }),
       ],
-      sub: c.image + (s ? ` · ${s.cpu.toFixed(1)} % · ${bytes(s.memory)}` : ""),
+      sub: [c.status, s && `${s.cpu.toFixed(1)} %`, s && bytes(s.memory)].filter(Boolean).join(" · "),
     };
   };
 
@@ -560,7 +560,7 @@ function appOverviewTab(app, box) {
         uiCard(
           { title: t("app.containers"), count: app.containers.length || null, flush: true },
           app.containers.length ? h("div", { id: "containers" }, containersTable()) : uiEmpty({ text: t("app.noContainers") }),
-          app.containers.length > 0 && h("p", { class: "cmd" }, icon("terminal"), `docker compose -p ${app.name} ps`),
+          app.containers.length > 0 && h("p", { class: "cmd card-cmd" }, icon("terminal"), `docker compose -p ${app.name} ps`),
         ),
       ),
       h(

@@ -389,7 +389,8 @@ function renderPveBody() {
       title: x.name,
       state: pveChip(x),
       facts: ["Proxmox VE " + (x.version || ""), x.url && h("span", { class: "mono" }, x.url), x.at ? t("pve.askedAgo", { ago: ago(x.at) }) : null],
-      actions: [x.online && { label: t("pve.new.button"), icon: "plus", primary: true, run: () => void pveNewDialog(x) }, { label: t("pve.refresh"), icon: "refresh", run: () => refreshPve(x) }, h("button", { type: "button", class: "btn square", "aria-label": t("app.more"), onclick: (e) => pveMenu(x, underButton(e.currentTarget)) }, icon("more"))],
+      actions: [x.online && { label: t("pve.new.button"), icon: "plus", primary: true, run: () => void pveNewDialog(x) }, { label: t("pve.refresh"), icon: "refresh", run: () => refreshPve(x) }],
+      more: () => [{ label: t("pve.openWeb"), icon: "external", run: () => window.open(x.url, "_blank", "noopener") }, { label: t("pve.change"), icon: "edit", run: () => pveDialog(x) }, { label: t("pve.remove") + "…", icon: "trash", danger: true, run: () => removePveDialog(x) }],
       menu: (at) => pveMenu(x, at),
       tabs: h("nav", { class: "tabs" }, tab("overview"), tab("guests"), tab("templates"), tab("tasks")),
     }),
@@ -959,7 +960,7 @@ function pveVersionsLine(x, node, v) {
     { class: "stack-s" },
     h("p", { class: "muted small" }, t("pve.ver.line", { manager: v.manager, kernel: v.running })),
     v.reboot && h("p", { class: "small" }, h("span", { class: "chip warn" }, t("pve.ver.reboot", { kernel: v.newest }))),
-    (v.newer.length > 0 || v.all) && h("a", { class: "link small", href: "#", onclick: (e) => (e.preventDefault(), pveUpdatesDialog(x, node, v)) }, v.all ? t("pve.ver.all", { n: v.all }) : t("pve.ver.newer", { n: v.newer.length })),
+    (v.newer.length > 0 || v.all > 0) && h("a", { class: "link small", href: "#", onclick: (e) => (e.preventDefault(), pveUpdatesDialog(x, node, v)) }, v.all ? t("pve.ver.all", { n: v.all }) : t("pve.ver.newer", { n: v.newer.length })),
   );
 }
 

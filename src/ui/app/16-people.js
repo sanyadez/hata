@@ -1330,8 +1330,8 @@ function renderServerBody() {
     document.getElementById("server-main"),
     d?.state === "ready" &&
       uiCard(
-        { title: t("area.server.containers"), count: d.containers.length, actions: [button(t("server.new"), { class: "small", onclick: () => newContainerDialog() }, "plus"), more("#/machines/this/containers", t("server.all"))], flush: true },
-        d.containers.length ? d.containers.map(row) : uiEmpty({ text: t("tree.hereNone") }),
+        { title: t("area.server.containers"), count: d.containers.length, actions: [button(t("server.new"), { class: "small", onclick: () => newContainerDialog() }, "plus"), more("#/machines/this/containers", t("server.allContainers"))], flush: true },
+        d.containers.length ? d.containers.map(row) : uiEmpty({ text: t("server.containersNone") }),
       ),
     uiCard(
       { title: t("area.server.apps"), count: apps.length, actions: more("#/machines/this/apps", t("server.all")) },
@@ -1340,11 +1340,10 @@ function renderServerBody() {
   );
   const updates = sysUpdates[""];
   const b = state.backups;
-  const waiting = updates?.list?.length > 0;
   put(
     document.getElementById("server-side"),
     uiCard(
-      { title: t("area.server.system"), actions: [waiting && button(t("server.updatesSee"), { class: "small", onclick: () => go("#/machines/this/system") }, "up"), more("#/machines/this/system", t("server.toSystem"))].filter(Boolean) },
+      { title: t("area.server.system"), actions: more("#/machines/this/system", t("common.open")) },
       updates?.reboot && uiNotice({ tone: "warn", text: t("sysupdates.reboot"), action: button(t("power.reboot") + "…", { class: "small", onclick: () => serverPowerDialog("reboot") }, "refresh") }),
       ...uiFacts([[t("server.updates"), serverUpdatesValue(updates)], ["Docker", o?.docker?.available ? h("span", { class: "mono" }, o.docker.version ?? "—") : t("server.dockerNo")], ["Hata", h("span", { class: "mono" }, state.version)]]),
     ),

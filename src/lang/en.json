@@ -5631,6 +5631,8 @@
   "power.restart": "Restart",
   "server.new": "New",
   "server.all": "All apps",
+  "server.allContainers": "All containers",
+  "server.containersNone": "No containers or virtual machines here yet.",
   "server.appsLine": "{running} of {all} running",
   "server.updates": "Updates",
   "server.updatesN": "available: {n}",

@@ -5631,6 +5631,8 @@
   "power.restart": "Перезавантажити",
   "server.new": "Новий",
   "server.all": "Усі застосунки",
+  "server.allContainers": "Усі контейнери й ВМ",
+  "server.containersNone": "Контейнерів і віртуальних машин тут ще немає.",
   "server.appsLine": "працює {running} із {all}",
   "server.updates": "Оновлення",
   "server.updatesN": "доступно: {n}",

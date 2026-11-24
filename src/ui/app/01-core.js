@@ -503,7 +503,7 @@ function uiLead(lead) {
  */
 function uiRow({ lead = null, name, sub = null, value = null, time = null, state = null, action = null, more = null, href = null, onclick = null, mode = "thing", meter = null, title = null, cls = "", menu = undefined, id = null } = {}) {
   const goes = !!(href || onclick);
-  const text = h("div", { class: "ui-row-text" }, h("div", { class: "ui-row-name", title: title ?? (typeof name === "string" ? name : null) }, name), sub && h("div", { class: "ui-row-sub", title: typeof sub === "string" ? sub : null }, sub), meter);
+  const text = h("div", { class: "ui-row-text" }, h("div", { class: "ui-row-name", title: title ?? (typeof name === "string" ? name : null) }, name), sub && h("div", { class: "ui-row-sub", title: typeof sub === "string" ? sub : null }, sub), action && time != null && h("div", { class: "ui-row-when mono" }, time), meter);
   const tail = h(
     "div",
     { class: "ui-row-tail" },
@@ -514,7 +514,7 @@ function uiRow({ lead = null, name, sub = null, value = null, time = null, state
     more && uiMore(more, { size: "s" }),
     goes && !more && !action && icon("chevron", "ui-row-go"),
   );
-  return h(href ? "a" : "div", { class: `ui-row ${mode}${goes ? " goes" : ""}${cls ? " " + cls : ""}`, href, onclick, id, menu, role: onclick && !href ? "button" : null, tabindex: onclick && !href ? 0 : null }, uiLead(lead), text, tail);
+  return h(href ? "a" : "div", { class: `ui-row ${mode}${goes ? " goes" : ""}${action ? " acts" : ""}${cls ? " " + cls : ""}`, href, onclick, id, menu, role: onclick && !href ? "button" : null, tabindex: onclick && !href ? 0 : null }, uiLead(lead), text, tail);
 }
 
 /** A group of rows: a grey band with a chevron, a name, a count and its own tail; rows under it */
