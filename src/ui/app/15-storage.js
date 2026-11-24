@@ -3,17 +3,15 @@
 
 // --- Disks --------------------------------------------------------------------------------------
 
-// the colours of an app's state say the same three things about a disk
-const HEALTH_STATE = { ok: "running", warn: "partial", danger: "restarting", unknown: "" };
-const healthChip = (disk) => h("span", { class: "state " + HEALTH_STATE[disk.health] }, t("disks.health." + disk.health));
+// the tones of a state say the same three things about a disk
+const HEALTH_TONE = { ok: "ok", warn: "warn", danger: "bad", unknown: "off" };
+const healthChip = (disk) => uiState(HEALTH_TONE[disk.health] ?? "off", t("disks.health." + disk.health));
 const diskTitle = (disk) => disk.model || disk.name;
 const diskMeta = (disk) => [bytes(disk.size), disk.name, disk.transport === "nvme" ? "NVMe" : disk.transport.toUpperCase(), disk.transport !== "nvme" && t(disk.rotational ? "disks.kind.hdd" : "disks.kind.ssd"), disk.removable && t("disks.removable")].filter(Boolean).join(" · ");
 
 function usageBar(used, total) {
   const percent = Math.round((used / total) * 100);
-  const fill = h("i", { class: level(percent) });
-  fill.style.width = percent + "%";
-  return h("div", { class: "usage" }, h("div", { class: "usage-text" }, h("span", null, t("disks.usedOf", { used: bytes(used), total: bytes(total) })), h("span", { class: "muted" }, percent + "%")), h("div", { class: "bar" }, fill));
+  return h("div", { class: "ui-cell-meter" }, h("span", { class: "small" }, t("disks.usedOf", { used: bytes(used), total: bytes(total) }), h("span", { class: "muted" }, ` · ${percent}%`)), uiMeter(percent));
 }
 
 /** How long a disk has been switched on, from its count of hours */
@@ -941,43 +939,57 @@ function storageSection(section = "storage") {
     const used = mounted.reduce((n, v) => n + v.used, 0);
     const mounts = disk.volumes.flatMap((v) => v.mounts);
     const hot = disk.findings.some((f) => f.code === "hot");
-    return h(
-      "tr",
-      { class: "clickable", onclick: () => diskDialog(disk.name) },
-      h("td", null, h("div", { class: "with-icon" }, h("span", { class: "badge-icon " + (disk.health === "ok" || disk.health === "unknown" ? "plain" : disk.health) }, icon("disk")), h("div", null, h("div", { class: "strong" }, diskTitle(disk)), h("div", { class: "muted small mono" }, diskMeta(disk))))),
-      h("td", null, healthChip(disk)),
-      h("td", { class: "num" + (hot ? " bad" : "") }, disk.smart?.temperature != null ? disk.smart.temperature + " °C" : "—"),
-      h("td", null, total ? usageBar(used, total) : h("span", { class: "muted" }, "—")),
-      h("td", null, mounts.length ? disk.volumes.flatMap((v) => v.mounts.map((m) => h("div", { class: "mount-line" }, h("span", { class: "mono clip" }, m), v.fstype && h("span", { class: "muted small" }, FS_NAMES[v.fstype] ?? v.fstype)))) : h("span", { class: "muted" }, [t("disks.notMounted"), ...new Set(disk.volumes.filter((v) => v.fstype && !v.swap).map((v) => FS_NAMES[v.fstype] ?? v.fstype))].join(" · "))),
-      h("td", null, h("div", { class: "row-actions" }, foldActions([canPrepare(disk) && !mounts.length && !canConnect(disk).length && button(t("mounting.format"), { class: "small", onclick: (e) => (e.stopPropagation(), formatDialog(disk)) }), (disk.removable || disk.transport === "usb") && state.disks.mounting?.possible && disk.volumes.some((v) => v.fstype && v.mounts.length > 0) && button(t("copyin.button"), { class: "small", onclick: (e) => (e.stopPropagation(), copyInDialog(disk)) }, "download"), canConnect(disk).length > 0 && button(t("mounting.connect"), { class: "small primary", onclick: (e) => (e.stopPropagation(), connectDialog(disk, canConnect(disk)[0])) }), ...ourMounts(disk, mounts).map((path) => button(t(disk.removable || disk.transport === "usb" ? "mounting.eject" : "mounting.disconnect") + (ourMounts(disk, mounts).length > 1 ? " " + path : ""), { class: "small", onclick: (e) => (e.stopPropagation(), disconnectDialog({ path, disk: disk.name })) })), button(t("disks.details"), { class: "small", onclick: (e) => (e.stopPropagation(), diskDialog(disk.name)) })]))),
-    );
+    const usb = disk.removable || disk.transport === "usb";
+    const ours = ourMounts(disk, mounts);
+    const connectable = canConnect(disk);
+    const formattable = canPrepare(disk) && !mounts.length && !connectable.length;
+    const leave = (path) => ({ label: t(usb ? "mounting.eject" : "mounting.disconnect") + (ours.length > 1 ? " " + path : ""), icon: "plug", run: () => disconnectDialog({ path, disk: disk.name }) });
+    const copyIn = usb && state.disks.mounting?.possible && disk.volumes.some((v) => v.fstype && v.mounts.length > 0) && { label: t("copyin.button"), icon: "download", run: () => copyInDialog(disk) };
+    // one button: what is first wanted of the disk as it is; the rest in "⋯"
+    const main = connectable.length > 0 ? { label: t("mounting.connect"), icon: "plus", primary: true, run: () => connectDialog(disk, connectable[0]) } : formattable ? { label: t("mounting.format") + "…", icon: "disk", run: () => formatDialog(disk) } : ours.length ? leave(ours[0]) : null;
+    const entries = [copyIn, ...ours.map(leave).filter((e) => e.label !== main?.label), formattable && main?.label !== t("mounting.format") + "…" && { label: t("mounting.format") + "…", icon: "disk", run: () => formatDialog(disk) }, { label: t("disks.details"), icon: "info", run: () => diskDialog(disk.name) }].filter(Boolean);
+    const percent = total ? Math.round((used / total) * 100) : null;
+    return {
+      onclick: () => diskDialog(disk.name),
+      menu: (at) => menuAt(at, menuHeader(diskTitle(disk), diskMeta(disk), "disk"), [main, ...entries].filter(Boolean)),
+      cells: [
+        uiCell({ lead: { icon: "disk", tone: disk.health === "warn" ? "warn" : disk.health === "danger" ? "bad" : null }, name: diskTitle(disk), sub: diskMeta(disk) }),
+        healthChip(disk),
+        h("span", { class: hot ? "danger-text" : "" }, disk.smart?.temperature != null ? disk.smart.temperature + " °C" : "—"),
+        total ? usageBar(used, total) : h("span", { class: "muted" }, "—"),
+        mounts.length ? uiCell({ name: h("span", { class: "mono small" }, mounts[0]), sub: [mounts.length > 1 && t("disks.moreMounts", { n: mounts.length - 1 }), ...new Set(disk.volumes.filter((v) => v.mounts.length).map((v) => FS_NAMES[v.fstype] ?? v.fstype))].filter(Boolean).join(" · ") }) : h("span", { class: "muted small" }, [t("disks.notMounted"), ...new Set(disk.volumes.filter((v) => v.fstype && !v.swap).map((v) => FS_NAMES[v.fstype] ?? v.fstype))].join(" · ")),
+        h("div", { class: "row-actions end", onclick: (e) => e.stopPropagation() }, main && button(main.label, { class: "small" + (main.primary ? " primary" : ""), onclick: main.run }, main.icon), uiMore(entries, { size: "s" })),
+      ],
+      sub: [percent != null && `${percent}%`, mounts[0]].filter(Boolean).join(" · ") || null,
+    };
   };
   const checked = Math.max(0, ...data.disks.map((d) => d.checkedAt ?? 0));
-  const fsRow = (m) =>
-    h(
-      "tr",
-      null,
-      h("td", null, h("a", { class: "strong mono", href: filesHash(m.path), title: t("disks.fs.browse") }, m.path)),
-      h("td", null, h("div", { class: "mono clip" }, data.mounting?.pools[m.path]?.join(" + ") ?? m.device), h("div", { class: "muted small" }, [data.mounting?.pools[m.path] ? t("mounting.merged") : m.fstype, m.network && t("disks.fs.network"), m.readOnly && t("disks.fs.readOnly")].filter(Boolean).join(" · "))),
-      h("td", null, usageBar(m.used, m.total)),
-      h("td", null, data.mounting?.ours[m.path] && !inPool(m.path) && h("div", { class: "row-actions" }, button(t(ejectable(m) ? "mounting.eject" : "mounting.disconnect"), { class: "small", onclick: () => disconnectDialog(m) }))),
-    );
+  const fsRow = (m) => {
+    const source = data.mounting?.pools[m.path]?.join(" + ") ?? m.device;
+    const kind = [data.mounting?.pools[m.path] ? t("mounting.merged") : m.fstype, m.network && t("disks.fs.network"), m.readOnly && t("disks.fs.readOnly")].filter(Boolean).join(" · ");
+    const leave = data.mounting?.ours[m.path] && !inPool(m.path) && button(t(ejectable(m) ? "mounting.eject" : "mounting.disconnect"), { class: "small", onclick: (e) => (e.stopPropagation(), disconnectDialog(m)) });
+    return {
+      href: filesHash(m.path),
+      cells: [uiCell({ lead: { icon: "folder" }, name: h("span", { class: "mono" }, m.path), sub: kind }), h("span", { class: "mono small" }, source), usageBar(m.used, m.total), leave || ""],
+      sub: [source, `${Math.round((m.used / m.total) * 100)}%`].join(" · "),
+    };
+  };
   // a folder kept in /etc/fstab whose disk is not there now: still Hata's to forget
   const absent = Object.keys(data.mounting?.ours ?? {}).filter((path) => !data.mounts.some((m) => m.path === path));
-  const absentRow = (path) => h("tr", null, h("td", null, h("span", { class: "strong mono" }, path)), h("td", { class: "muted" }, t("mounting.absent")), h("td"), h("td", null, h("div", { class: "row-actions" }, button(t("mounting.disconnect"), { class: "small", onclick: () => disconnectDialog({ path, disk: "" }) }))));
+  const absentRow = (path) => ({ cells: [uiCell({ lead: { icon: "folder" }, name: h("span", { class: "mono" }, path) }), uiState("off", t("mounting.absent")), "", button(t("mounting.disconnect"), { class: "small", onclick: () => disconnectDialog({ path, disk: "" }) })], sub: t("mounting.absent") });
   // a disk of a merged folder is taken out through the merged folder
   const inPool = (path) => Object.values(data.mounting?.pools ?? {}).some((folders) => folders.includes(path));
   const ejectable = (m) => data.disks.some((d) => d.name === m.disk && (d.removable || d.transport === "usb"));
-  const automount = h("input", {
-    type: "checkbox",
-    checked: data.mounting?.automount,
-    onchange: async (e) => {
+  const automount = uiSwitch({
+    on: !!data.mounting?.automount,
+    label: t("mounting.automount"),
+    onchange: async (on) => {
       try {
-        state.settings = await api("PUT", "/api/settings", { storage: { automount: e.target.checked } });
+        state.settings = await api("PUT", "/api/settings", { storage: { automount: on } });
         setDisks(await api("GET", "/api/disks"));
       } catch (err) {
-        e.target.checked = !e.target.checked;
         toast(errorText(err), "error");
+        throw err;
       }
     },
   });
@@ -993,71 +1005,58 @@ function storageSection(section = "storage") {
   const freshCard = (disk) => {
     const holds = disk.volumes.filter((v) => v.fstype);
     const connectable = canConnect(disk);
-    return h(
-      "section",
-      { class: "card pad new-disk" },
-      h("span", { class: "badge-icon warn" }, icon("disk")),
-      h("div", { class: "grow" }, h("strong", null, t("mounting.found", { disk: diskTitle(disk), size: bytes(disk.size) })), h("p", { class: "muted small" }, holds.length ? t("mounting.foundHolds", { what: holds.map((v) => [v.label, v.fstype].filter(Boolean).join(" · ")).join("; ") }) : t("mounting.foundEmpty"))),
-      h(
-        "div",
-        { class: "row-actions" }, foldActions([
-        button(t("mounting.ignore"), { class: "small quiet", onclick: async () => setDisks(await api("POST", "/api/disks/ignore", { id: disk.serial || disk.name }).catch(() => state.disks)) }),
-        connectable.length > 0 && (disk.removable || disk.transport === "usb") && button(t("copyin.button"), { class: "small primary", onclick: () => copyInDialog(disk) }, "download"),
-        connectable.length > 0 && button(t("mounting.connect"), { class: "small", onclick: () => connectDialog(disk, connectable[0]) }),
-        button(t("mounting.format"), { class: "small" + (connectable.length ? "" : " primary"), onclick: () => formatDialog(disk) }),])
-      ),
+    const usb = disk.removable || disk.transport === "usb";
+    const copy = connectable.length > 0 && usb && { label: t("copyin.button"), icon: "download", run: () => copyInDialog(disk) };
+    const connect = connectable.length > 0 && { label: t("mounting.connect"), icon: "plus", run: () => connectDialog(disk, connectable[0]) };
+    const format = { label: t("mounting.format") + "…", icon: "disk", run: () => formatDialog(disk) };
+    const main = copy || connect || format;
+    return uiCard(
+      { flush: true, cls: "area-attention" },
+      uiRow({
+        lead: { icon: "disk", tone: "warn" },
+        name: t("mounting.found", { disk: diskTitle(disk), size: bytes(disk.size) }),
+        sub: holds.length ? t("mounting.foundHolds", { what: holds.map((v) => [v.label, v.fstype].filter(Boolean).join(" · ")).join("; ") }) : t("mounting.foundEmpty"),
+        action: button(main.label, { class: "small primary", onclick: main.run }, main.icon),
+        more: [copy, connect, format].filter((e) => e && e !== main).concat([{ label: t("mounting.ignore"), icon: "x", run: async () => setDisks(await api("POST", "/api/disks/ignore", { id: disk.serial || disk.name }).catch(() => state.disks)) }]),
+      }),
     );
   };
-  if (section === "places") return [state.places ? placesCard(state.places) : waitMark()];
+  if (section === "places") return [state.places ? placesCard(state.places) : uiCard({ flush: true }, uiEmpty({ size: "loading" }))];
   if (section === "protection") {
     return [
       data.working && diskWorkStrip(data.working),
-      data.array?.on && data.mounting?.possible && data.disks.length > 1 && h("section", { class: "card pad" }, h("div", { class: "section-head" }, h("h2", null, t("pool.open").replace(/…$/, "")), button(t("pool.open"), { class: "small", onclick: () => poolDialog() })), h("p", { class: "muted small" }, t("protection.poolLead"))),
+      data.array?.on && data.mounting?.possible && data.disks.length > 1 && uiCard({ title: t("pool.open").replace(/…$/, ""), lead: t("protection.poolLead"), actions: button(t("pool.open"), { class: "small", onclick: () => poolDialog() }) }),
       data.array && data.mounting?.possible && arrayCard(data, data.array),
       data.raids && (data.raids.pools.length > 0 || data.raids.lacking.length > 0) && raidCard(data),
-      !data.mounting?.possible && !(data.raids?.pools.length > 0) && h("section", { class: "card pad" }, h("p", { class: "muted" }, t("protection.notHere"))),
+      !data.mounting?.possible && !(data.raids?.pools.length > 0) && uiCard({}, uiEmpty({ size: "big", icon: "shield", title: t("protection.notHereTitle"), text: t("protection.notHere") })),
     ].filter(Boolean);
   }
   const tab = settingsTab("storage");
   if (tab === "fills") return [data.fills ? fillsCard(data.fills, busy) : h("section", { class: "card pad" }, h("p", { class: "muted" }, t("protection.noFills")))];
   if (tab === "fs") {
-    return [
-      h(
-        "section",
-        { class: "card table-wrap" },
-        h("div", { class: "pad card-head" }, h("h2", null, t("disks.fs.title")), h("p", { class: "muted small" }, t("disks.fs.lead"))),
-        (data.mounts.length > 0 || absent.length > 0) && h("table", { class: "disks" }, h("thead", null, h("tr", null, h("th", null, t("disks.fs.col.path")), h("th", null, t("disks.fs.col.source")), h("th", null, t("disks.col.usage")), h("th"))), h("tbody", null, data.mounts.map(fsRow), absent.map(absentRow))),
-      ),
-    ];
+    const rows = [...data.mounts.map(fsRow), ...absent.map(absentRow)];
+    return [uiCard({ title: t("disks.fs.title"), count: rows.length, lead: t("disks.fs.lead"), flush: true }, rows.length ? uiTable([{ label: t("disks.fs.col.path") }, { label: t("disks.fs.col.source") }, { label: t("disks.col.usage") }, { label: "" }], rows, { cls: "fs-table" }) : uiEmpty({ text: t("disks.fs.none") }))];
   }
   return [
     data.working && diskWorkStrip(data.working),
     fresh.map(freshCard),
-    data.tool === "missing" &&
-      data.disks.length > 0 &&
-      h(
-        "section",
-        { class: "card pad" },
-        h("h2", null, t("disks.tool.missing")),
-        h("p", { class: "muted" }, t("disks.tool.what")),
-        h("p", { class: "muted" }, t("disks.tool.why")),
-        data.install ? [h("p", { class: "muted" }, t("disks.tool.how")), h("p", { class: "cmd" }, icon("terminal"), data.install)] : h("p", { class: "muted" }, t("disks.tool.byHand")),
-        data.install && h("footer", null, button(t("disks.tool.install"), { class: "primary", onclick: busy(t("disks.tool.installing"), { path: "/api/disks/tool", toast: t("disks.tool.installed") }) }, "download")),
-      ),
-    data.tool === "denied" && data.disks.length > 0 && h("section", { class: "card pad" }, h("strong", null, t("disks.tool.denied")), h("p", { class: "muted small" }, t("disks.tool.deniedHint"))),
-    h(
-      "section",
-      { class: "card table-wrap" },
-      h(
-        "div",
-        { class: "pad card-head" },
-        h("div", { class: "section-head" }, h("h2", null, t("disks.title"), h("span", { class: "muted" }, t("disks.connected", { n: data.disks.length }))), h("div", { class: "row-actions" }, hasModule("raid") && (data.mounting?.mergeable.length ?? 0) > 1 && button(t("mounting.merge"), { class: "small", onclick: () => mergeDialog() }), data.tool === "ok" && data.disks.length > 0 && checked > 0 && h("span", { class: "muted small" }, t("disks.checked", { when: ago(checked) })), data.tool === "ok" && data.disks.length > 0 && data.limits && button(t("disks.limits"), { class: "small", onclick: () => smartLimitsDialog(data.limits) }), data.tool === "ok" && data.disks.length > 0 && button(t("disks.checkNow"), { class: "small", onclick: busy("…", { path: "/api/disks/check" }) }, "refresh"))),
-        h("p", { class: "muted small" }, t(data.disks.length ? "disks.lead" : "disks.none")),
-        error,
-      ),
-      data.disks.length > 0 && h("table", { class: "disks" }, h("thead", null, h("tr", null, h("th", null, t("disks.col.disk")), h("th", null, t("disks.col.health")), h("th", { class: "num" }, t("disks.col.temp")), h("th", null, t("disks.col.usage")), h("th", null, t("disks.col.mounted")), h("th"))), h("tbody", null, data.disks.map(row))),
+    data.tool === "missing" && data.disks.length > 0 && uiCard({}, uiNeedProgram({ name: "smartmontools", why: [t("disks.tool.what"), t("disks.tool.why")].join(" "), command: data.install || null, run: data.install ? busy(t("disks.tool.installing"), { path: "/api/disks/tool", toast: t("disks.tool.installed") }) : null, why2: data.install ? null : t("disks.tool.byHand") })),
+    data.tool === "denied" && data.disks.length > 0 && uiCard({}, uiNotice({ tone: "warn", title: t("disks.tool.denied"), text: t("disks.tool.deniedHint") })),
+    uiCard(
+      {
+        title: t("disks.title"),
+        count: data.disks.length || null,
+        lead: [t(data.disks.length ? "disks.lead" : "disks.none"), data.tool === "ok" && data.disks.length > 0 && checked > 0 && t("disks.checked", { when: ago(checked) })].filter(Boolean).join(" · "),
+        flush: true,
+        actions: data.tool === "ok" && data.disks.length > 0 && [
+          button(t("disks.checkNow"), { class: "small", onclick: busy("…", { path: "/api/disks/check" }) }, "refresh"),
+          uiMore([data.limits && { label: t("disks.limits"), icon: "sliders", run: () => smartLimitsDialog(data.limits) }, hasModule("raid") && (data.mounting?.mergeable.length ?? 0) > 1 && { label: t("mounting.merge"), icon: "grid", run: () => mergeDialog() }].filter(Boolean), { size: "s" }),
+        ],
+      },
+      h("div", { class: "ui-inset" }, error),
+      data.disks.length > 0 ? uiTable([{ label: t("disks.col.disk") }, { label: t("disks.col.health") }, { label: t("disks.col.temp"), num: true }, { label: t("disks.col.usage") }, { label: t("disks.col.mounted") }, { label: "" }], data.disks.map(row), { cls: "disks-table" }) : uiEmpty({ size: "big", icon: "disk", title: t("disks.noneTitle"), text: t("disks.none") }),
     ),
-    data.mounting?.possible && h("section", { class: "card pad" }, h("label", { class: "check" }, automount, h("span", null, h("strong", null, t("mounting.automount")), h("span", { class: "muted small block" }, t("mounting.automountHint"))))),
+    data.mounting?.possible && uiCard({}, uiSetting({ name: t("mounting.automount"), explain: t("mounting.automountHint"), control: automount })),
   ].filter(Boolean);
 }
 
@@ -1069,23 +1068,19 @@ const RAID_KINDS = { md: "Linux RAID", zfs: "ZFS", btrfs: "btrfs" };
 function raidCard(data) {
   const error = h("p", { class: "error", role: "alert" });
   const askCall = (ask, path, body) => confirmAction({ ...ask, run: async () => setDisks(await api("POST", path, body)) });
+  // pressed as a button or chosen in a menu (no button then)
   const call = (path, body) => async (e) => {
-    const el = e.currentTarget;
-    el.disabled = true;
+    const el = e?.currentTarget;
+    if (el) el.disabled = true;
     error.textContent = "";
     try {
       setDisks(await api("POST", path, body));
     } catch (err) {
       error.textContent = errorText(err);
-      el.disabled = false;
+      if (el) el.disabled = false;
     }
   };
-  const diskOf = (path) => data.disks.find((d) => d.path === path || d.volumes.some((v) => v.path === path));
-  const chip = (pool) => {
-    const cls = { ok: "running", degraded: "partial", failed: "restarting", inactive: "restarting" }[pool.state];
-    return h("span", { class: "state " + cls }, t("raid.state." + pool.state));
-  };
-  const workLine = (w) => h("div", { class: "muted small with-icon" }, icon("refresh"), [t("raid.work." + w.what), w.percent != null ? `${Math.floor(w.percent)}%` : t("raid.waiting"), w.left != null && t("raid.left", { n: w.left })].filter(Boolean).join(" · "));
+  const chip = (pool) => uiState(pool.work ? "info" : { ok: "ok", degraded: "warn", failed: "bad", inactive: "bad" }[pool.state] ?? "off", t("raid.state." + pool.state));
   const lastLine = (pool) => {
     const c = pool.lastCheck;
     if (!c) return h("div", { class: "muted small" }, t(pool.kind === "md" ? "raid.neverSeen" : "raid.never"));
@@ -1093,52 +1088,41 @@ function raidCard(data) {
     const found = pool.kind === "md" ? (c.errors ? t("raid.lastMismatch", { n: c.errors }) : t("raid.lastClean")) : left ? t("raid.lastUnmended", { n: left }) : c.mended ? t("raid.lastMendedSize", { size: c.mended }) : c.errors ? t("raid.lastMended", { n: c.errors }) : t("raid.lastClean");
     return h("div", { class: "muted small" + (left ? " bad" : "") }, t("raid.last", { when: ago(c.at), what: found }));
   };
-  const member = (m) => {
-    const disk = m.path && diskOf(m.path);
-    return h(
-      "div",
-      { class: "raid-member" },
-      h("span", { class: "mono" }, m.path || t("raid.gone")),
-      disk && h("span", { class: "muted small" }, diskTitle(disk)),
-      m.state !== "ok" && h("span", { class: "chip" + (m.state === "missing" || m.state === "faulty" ? " bad" : "") }, t("raid.member." + m.state)),
-      m.errors > 0 && h("span", { class: "chip bad" }, t("raid.memberErrors", { n: m.errors })),
-    );
-  };
+  const memberWords = (m) => [m.path || t("raid.gone"), m.state !== "ok" && t("raid.member." + m.state), m.errors > 0 && t("raid.memberErrors", { n: m.errors })].filter(Boolean).join(" · ");
   const row = (pool) => {
     const busy = !!pool.work;
     const stoppable = busy && ["check", "repair", "scrub"].includes(pool.work.what);
     const counted = pool.errors > 0 || pool.dataErrors > 0;
-    return h(
-      "tr",
-      null,
-      h("td", null, h("div", { class: "with-icon" }, h("span", { class: "badge-icon " + (pool.state === "ok" ? (counted ? "warn" : "plain") : "danger") }, icon("disk")), h("div", null, h("div", { class: "strong" }, pool.name), h("div", { class: "muted small" }, [RAID_KINDS[pool.kind], pool.level].filter(Boolean).join(" · ")), pool.mount && h("a", { class: "mono small", href: filesHash(pool.mount) }, pool.mount)))),
-      h("td", null, chip(pool), busy && workLine(pool.work), !busy && pool.state === "ok" && lastLine(pool), pool.dataErrors > 0 && h("div", { class: "small bad" }, t("raid.dataErrors", { n: pool.dataErrors }))),
-      h("td", null, pool.members.map(member)),
-      h("td", null, pool.used != null && pool.size ? usageBar(pool.used, pool.size) : pool.size ? h("span", { class: "muted" }, bytes(pool.size)) : h("span", { class: "muted" }, "—")),
-      h(
-        "td",
-        null,
-        h(
-          "div",
-          { class: "row-actions" }, foldActions([
-          !busy && pool.state === "ok" && button(t("raid.check"), { class: "small", onclick: call("/api/disks/raid/check", { id: pool.id, action: "check" }) }, "refresh"),
-          stoppable && button(t("raid.stop"), { class: "small", onclick: call("/api/disks/raid/check", { id: pool.id, action: "stop" }) }),
-          !busy && pool.kind === "md" && pool.state === "ok" && pool.errors > 0 && button(t("raid.repair"), { class: "small primary", onclick: () => askCall({ title: t("raid.repairTitle", { name: pool.name }), lead: t("raid.repairLead"), label: t("raid.repairGo"), iconName: "refresh" }, "/api/disks/raid/check", { id: pool.id, action: "repair" }) }),
-          !busy && counted && button(t(pool.kind === "md" ? "raid.forget" : "raid.clear"), { class: "small quiet", onclick: () => askCall({ title: t(pool.kind === "md" ? "raid.forgetTitle" : "raid.clearTitle", { name: pool.name }), lead: t(pool.kind === "md" ? "raid.forgetLead" : "raid.clearLead"), label: t(pool.kind === "md" ? "raid.forget" : "raid.clear"), iconName: "x" }, "/api/disks/raid/clear", { id: pool.id }) }),])
-        ),
-      ),
-    );
+    const bad = (m) => m.state === "missing" || m.state === "faulty" || m.errors > 0;
+    const check = !busy && pool.state === "ok" && { label: t("raid.check"), icon: "refresh", run: call("/api/disks/raid/check", { id: pool.id, action: "check" }) };
+    const stop = stoppable && { label: t("raid.stop"), icon: "stop", run: call("/api/disks/raid/check", { id: pool.id, action: "stop" }) };
+    const repair = !busy && pool.kind === "md" && pool.state === "ok" && pool.errors > 0 && { label: t("raid.repair") + "…", icon: "refresh", primary: true, run: () => askCall({ title: t("raid.repairTitle", { name: pool.name }), lead: t("raid.repairLead"), label: t("raid.repairGo"), iconName: "refresh" }, "/api/disks/raid/check", { id: pool.id, action: "repair" }) };
+    const forget = !busy && counted && { label: t(pool.kind === "md" ? "raid.forget" : "raid.clear") + "…", icon: "x", run: () => askCall({ title: t(pool.kind === "md" ? "raid.forgetTitle" : "raid.clearTitle", { name: pool.name }), lead: t(pool.kind === "md" ? "raid.forgetLead" : "raid.clearLead"), label: t(pool.kind === "md" ? "raid.forget" : "raid.clear"), iconName: "x" }, "/api/disks/raid/clear", { id: pool.id }) };
+    const main = repair || stop || check;
+    const rest = [check, forget].filter((e) => e && e !== main);
+    const work = busy ? [t("raid.work." + pool.work.what), pool.work.percent != null ? `${Math.floor(pool.work.percent)}%` : t("raid.waiting"), pool.work.left != null && t("raid.left", { n: pool.work.left })].filter(Boolean).join(" · ") : null;
+    const kind = [RAID_KINDS[pool.kind], pool.level, pool.mount].filter(Boolean).join(" · ");
+    return {
+      cells: [
+        uiCell({ lead: { icon: "disk", tone: pool.state === "ok" ? (counted ? "warn" : null) : "bad" }, name: pool.name, sub: kind }),
+        h("div", { title: [work, !busy && pool.state === "ok" && lastLine(pool).textContent, pool.dataErrors > 0 && t("raid.dataErrors", { n: pool.dataErrors })].filter(Boolean).join("\n") || null }, chip(pool), work && h("div", { class: "muted small" }, work)),
+        h("span", { class: "small" }, pool.members.map((m, i) => [i > 0 && ", ", h("span", { class: bad(m) ? "danger-text" : "" }, memberWords(m))])),
+        pool.used != null && pool.size ? usageBar(pool.used, pool.size) : h("span", { class: "muted" }, pool.size ? bytes(pool.size) : "—"),
+        h("div", { class: "row-actions end" }, main && button(main.label, { class: "small" + (main.primary ? " primary" : ""), onclick: main.run }, main.icon), rest.length > 0 && uiMore(rest, { size: "s" })),
+      ],
+      sub: kind,
+    };
   };
   const lacking = (need) =>
     need.kind === "btrfs"
       ? packageCard({ package: need.package, install: need.install }, () => setDisks(state.disks))
-      : h("div", { class: "banner stack" }, h("strong", null, t("raid.needs.zfs")), h("p", { class: "muted small" }, t("raid.needs.zfsWhy")), need.install && h("p", { class: "cmd" }, icon("terminal"), need.install));
+      : uiNotice({ tone: "info", icon: "package", title: t("raid.needs.zfs"), text: t("raid.needs.zfsWhy"), command: need.install ? uiCommand(need.install) : null });
   const pools = data.raids.pools;
-  return h(
-    "section",
-    { class: "card table-wrap" },
-    h("div", { class: "pad card-head" }, h("h2", null, t("raid.title")), h("p", { class: "muted small" }, t("raid.lead")), data.raids.lacking.map(lacking), error),
-    pools.length > 0 && h("table", { class: "disks" }, h("thead", null, h("tr", null, h("th", null, t("raid.col.pool")), h("th", null, t("raid.col.state")), h("th", null, t("raid.col.disks")), h("th", null, t("disks.col.usage")), h("th"))), h("tbody", null, pools.map(row))),
+  return uiCard(
+    { title: t("raid.title"), lead: t("raid.lead"), flush: true },
+    data.raids.lacking.map((need) => h("div", { class: "ui-inset" }, lacking(need))),
+    h("div", { class: "ui-inset" }, error),
+    pools.length > 0 && uiTable([{ label: t("raid.col.pool") }, { label: t("raid.col.state") }, { label: t("raid.col.disks") }, { label: t("disks.col.usage") }, { label: "" }], pools.map(row)),
   );
 }
 
@@ -1153,45 +1137,35 @@ async function reloadPlaces(list) {
 }
 
 function placesCard(data) {
-  const row = (p) => {
-    const chip = p.mounted && !p.away ? h("span", { class: "state running" }, t("netplace.on")) : p.state === "activating" ? h("span", { class: "state partial" }, t("netplace.connecting")) : h("span", { class: "state restarting" }, t("netplace.off"));
-    return h(
-      "tr",
-      null,
-      h("td", null, h("div", { class: "with-icon" }, h("span", { class: "badge-icon plain" }, icon("globe")), h("div", null, h("a", { class: "strong", href: filesHash(p.folder) }, p.name), h("div", { class: "muted small mono clip" }, placeAddress(p))))),
-      h("td", null, chip, p.readOnly && h("span", { class: "chip" }, t("netplace.readOnly"))),
-      h("td", null, p.mounted && p.total ? usageBar(p.total - p.free, p.total) : h("span", { class: "muted mono small" }, p.folder)),
-      h(
-        "td",
-        null,
-        h(
-          "div",
-          { class: "row-actions" }, foldActions([
-          (!p.mounted || p.away) && button(t("netplace.retry"), { class: "small", onclick: async (e) => {
-            e.currentTarget.disabled = true;
-            try {
-              await reloadPlaces((await api("POST", `/api/netplaces/${p.id}/retry`, {})).places);
-            } catch (err) {
-              toast(errorText(err), "error");
-              void reloadPlaces();
-            }
-          } }, "refresh"),
-          button(t("netplace.change"), { class: "small", onclick: () => placeDialog(p) }),
-          button(t("netplace.remove"), { class: "small quiet", onclick: () => removePlaceDialog(p) }),])
-        ),
-      ),
-    );
+  const retry = (p) => async (e) => {
+    e.currentTarget.disabled = true;
+    try {
+      await reloadPlaces((await api("POST", `/api/netplaces/${p.id}/retry`, {})).places);
+    } catch (err) {
+      toast(errorText(err), "error");
+      void reloadPlaces();
+    }
   };
-  return h(
-    "section",
-    { class: "card table-wrap" },
-    h(
-      "div",
-      { class: "pad card-head" },
-      h("div", { class: "section-head" }, h("h2", null, t("netplace.title")), h("div", { class: "row-actions" }, button(t("netplace.find"), { class: "small", onclick: () => findPlacesDialog() }, "search"), button(t("netplace.connect"), { class: "small primary", onclick: () => placeDialog() }, "plus"))),
-      h("p", { class: "muted small" }, t(data.places.length ? "netplace.lead" : "netplace.none")),
-    ),
-    data.places.length > 0 && h("table", { class: "disks" }, h("thead", null, h("tr", null, h("th", null, t("netplace.col.place")), h("th", null, t("netplace.col.state")), h("th", null, t("disks.col.usage")), h("th"))), h("tbody", null, data.places.map(row))),
+  const row = (p) => {
+    const on = p.mounted && !p.away;
+    const state = on ? uiState("ok", t("netplace.on")) : p.state === "activating" ? uiState("warn", t("netplace.connecting")) : uiState("bad", t("netplace.off"));
+    const entries = [{ label: t("netplace.change"), icon: "edit", run: () => placeDialog(p) }, { label: t("netplace.remove") + "…", icon: "trash", danger: true, run: () => removePlaceDialog(p) }];
+    return {
+      menu: (at) => menuAt(at, menuHeader(p.name, placeAddress(p), "globe"), entries),
+      cells: [
+        uiCell({ lead: { icon: "globe" }, name: h("a", { href: filesHash(p.folder) }, p.name), sub: h("span", { class: "mono" }, placeAddress(p)) }),
+        h("span", { class: "with-state" }, state, p.readOnly && uiTag(t("netplace.readOnly"))),
+        p.mounted && p.total ? usageBar(p.total - p.free, p.total) : h("span", { class: "muted mono small" }, p.folder),
+        h("div", { class: "row-actions end" }, on ? button(t("netplace.change"), { class: "small", onclick: () => placeDialog(p) }) : button(t("netplace.retry"), { class: "small", onclick: retry(p) }, "refresh"), uiMore(entries, { size: "s" })),
+      ],
+      sub: [placeAddress(p), p.mounted && p.total ? `${Math.round(((p.total - p.free) / p.total) * 100)}%` : null].filter(Boolean).join(" · "),
+    };
+  };
+  return uiCard(
+    { title: t("netplace.title"), count: data.places.length || null, lead: data.places.length ? t("netplace.lead") : null, flush: true, actions: [button(t("netplace.find"), { class: "small", onclick: () => findPlacesDialog() }, "search"), button(t("netplace.connect"), { class: "small primary", onclick: () => placeDialog() }, "plus")] },
+    data.places.length
+      ? uiTable([{ label: t("netplace.col.place") }, { label: t("netplace.col.state") }, { label: t("disks.col.usage") }, { label: "" }], data.places.map(row))
+      : uiEmpty({ size: "big", icon: "globe", title: t("netplace.noneTitle"), text: t("netplace.none"), action: button(t("netplace.connect"), { class: "primary", onclick: () => placeDialog() }, "plus") }),
   );
 }
 
@@ -1425,80 +1399,71 @@ async function arrayCall(method, path, data, done) {
   }
 }
 
+/** Whether the log of SnapRAID is open */
+const arrayUi = { log: false };
+
 function arrayCard(data, array) {
   clearTimeout(arrayTimer);
   // a run moves without telling: the page looks again while one goes
   if (array.running) arrayTimer = setTimeout(async () => onStorageSection() && setDisks(await api("GET", "/api/disks").catch(() => state.disks)), 3000);
-  const row = (label, value) => h("div", { class: "kv" }, h("span", { class: "muted" }, label), h("span", null, value));
-  const head = (...actions) => h("div", { class: "section-head" }, h("h2", null, t("array.title")), h("div", { class: "row-actions" }, actions));
-  const lead = h("p", { class: "muted small" }, t("array.lead"));
+  const lead = t("array.lead");
   if (array.tool === "missing") {
-    return h(
-      "section",
-      { class: "card pad stack" },
-      head(),
-      lead,
-      h(
-        "div",
-        { class: "banner stack" },
-        h("strong", null, t("array.needs.what")),
-        h("p", { class: "muted small" }, t("array.needs.why")),
-        array.needs.install ? h("p", { class: "cmd" }, icon("terminal"), array.needs.install) : h("p", { class: "muted small" }, t("mounting.needs.byHand", { package: array.needs.package })),
-        array.needs.install &&
-          button(t("mounting.needs.install", { package: array.needs.package }), {
-            class: "small",
-            onclick: async (e) => {
-              const el = e.currentTarget;
-              el.disabled = true;
-              try {
-                setDisks(await api("POST", "/api/disks/package", { package: array.needs.package }));
-              } catch (err) {
-                el.disabled = false;
-                toast(errorText(err), "error");
-              }
-            },
-          }),
-      ),
-    );
+    const install = array.needs.install && (async (e) => {
+      const el = e.currentTarget;
+      el.disabled = true;
+      try {
+        setDisks(await api("POST", "/api/disks/package", { package: array.needs.package }));
+      } catch (err) {
+        el.disabled = false;
+        toast(errorText(err), "error");
+      }
+    });
+    return uiCard({ title: t("array.title"), lead }, uiNeedProgram({ name: "SnapRAID", why: [t("array.needs.what"), t("array.needs.why")].join(" "), command: array.needs.install || null, run: install || null, why2: array.needs.install ? null : t("mounting.needs.byHand", { package: array.needs.package }) }));
   }
-  if (!array.on) return h("section", { class: "card pad stack" }, head(button(t("pool.open"), { class: "small" + (array.candidates.length > 1 ? "" : " primary"), onclick: () => poolDialog() }), array.candidates.length > 1 && button(t("array.setUp"), { class: "small primary", onclick: () => arrayDialog(array) })), lead, array.candidates.length < 2 && h("p", { class: "muted small" }, t("array.needsDisks")), arrayFit(data));
+  if (!array.on)
+    return uiCard(
+      { title: t("array.title"), lead, flush: true, actions: [button(t("pool.open"), { class: "small" + (array.candidates.length > 1 ? "" : " primary"), onclick: () => poolDialog() }), array.candidates.length > 1 && button(t("array.setUp"), { class: "small primary", onclick: () => arrayDialog(array) })].filter(Boolean) },
+      array.candidates.length < 2 && h("div", { class: "ui-inset" }, uiNotice({ tone: "info", text: t("array.needsDisks") })),
+      arrayFit(data),
+    );
 
   const busy = !!array.running;
   const d = array.diff;
   const waiting = d ? d.added + d.updated : 0;
   const act = (label, path, data, cls = "small") => button(label, { class: cls, disabled: busy, onclick: () => arrayCall("POST", path, data ?? {}) });
+  const notice = (tone, title, text, ...buttons) => uiNotice({ tone, title, text, action: buttons[0] ?? null, second: buttons[1] ?? null });
   const banners = [
-    array.missing.length > 0 && h("div", { class: "banner danger stack" }, h("strong", null, t("array.missing", { disks: array.missing.join(", ") })), h("p", { class: "small" }, t("array.missingHint"))),
-    array.trouble?.code === "diskEmpty" &&
-      h("div", { class: "banner danger stack" }, h("strong", null, t("array.diskEmpty", { disk: array.settings.data.find((x) => x.name === array.trouble.disk)?.path ?? array.trouble.disk })), h("p", { class: "small" }, t("array.diskEmptyHint")), h("div", { class: "row-actions" }, button(t("array.recover"), { class: "small primary", disabled: busy, onclick: () => recoverDialog(array.settings.data.find((x) => x.name === array.trouble.disk)) }), act(t("array.emptyOnPurpose"), "/sync", { force: true, empty: true }))),
-    array.trouble?.code === "parityLost" && h("div", { class: "banner danger stack" }, h("strong", null, t("array.parityLost", { disk: array.settings.parity })), h("p", { class: "small" }, t("array.parityLostHint")), h("div", { class: "row-actions" }, act(t("array.rebuild"), "/rebuild", {}, "small primary"))),
-    array.errors > 0 && h("div", { class: "banner danger stack" }, h("strong", null, t("array.errors", { n: array.errors })), h("p", { class: "small" }, t("array.errorsHint")), h("div", { class: "row-actions" }, act(t("array.repair"), "/repair", {}, "small primary"))),
-    array.held && h("div", { class: "banner stack" }, h("strong", null, t("array.held", { n: array.held.removed })), h("p", { class: "small" }, t("array.heldHint")), h("div", { class: "row-actions" }, act(t("array.bringBack"), "/fix", {}, "small primary"), button(t("array.syncAnyway"), { class: "small", disabled: busy, onclick: () => confirmAction({ title: t("array.syncTitle", { n: array.held.removed }), lead: t("array.syncLead"), label: t("array.syncGo"), iconName: "refresh", run: () => arrayCall("POST", "/sync", { force: true }) }) }))),
-    !array.trouble && !array.held && array.lastSync && !array.lastSync.ok && h("p", { class: "banner small" }, t("array.failed", { message: array.lastSync.message })),
-  ];
-  const running =
-    array.running &&
-    h("div", { class: "banner stack" }, h("div", { class: "section-head" }, h("strong", null, t("array.running." + array.running.what), array.running.percent != null && ` · ${array.running.percent}%`), button(t("array.stop"), { class: "small", onclick: () => arrayCall("POST", "/stop", {}) })), h("p", { class: "muted small" }, t("array.runningHint")));
-  return h(
-    "section",
-    { class: "card pad stack" },
-    head(act(t("array.syncNow"), "/sync", {}), act(t("array.checkNow"), "/scrub", {}), button(t("array.settings"), { class: "small", disabled: busy, onclick: () => arrayDialog(array) }, "sliders")),
-    lead,
+    array.missing.length > 0 && notice("bad", t("array.missing", { disks: array.missing.join(", ") }), t("array.missingHint")),
+    array.trouble?.code === "diskEmpty" && notice("bad", t("array.diskEmpty", { disk: array.settings.data.find((x) => x.name === array.trouble.disk)?.path ?? array.trouble.disk }), t("array.diskEmptyHint"), button(t("array.recover"), { class: "small primary", disabled: busy, onclick: () => recoverDialog(array.settings.data.find((x) => x.name === array.trouble.disk)) }), act(t("array.emptyOnPurpose"), "/sync", { force: true, empty: true })),
+    array.trouble?.code === "parityLost" && notice("bad", t("array.parityLost", { disk: array.settings.parity }), t("array.parityLostHint"), act(t("array.rebuild"), "/rebuild", {}, "small primary")),
+    array.errors > 0 && notice("bad", t("array.errors", { n: array.errors }), t("array.errorsHint"), act(t("array.repair"), "/repair", {}, "small primary")),
+    array.held && notice("warn", t("array.held", { n: array.held.removed }), t("array.heldHint"), act(t("array.bringBack"), "/fix", {}, "small primary"), button(t("array.syncAnyway"), { class: "small", disabled: busy, onclick: () => confirmAction({ title: t("array.syncTitle", { n: array.held.removed }), lead: t("array.syncLead"), label: t("array.syncGo"), iconName: "refresh", run: () => arrayCall("POST", "/sync", { force: true }) }) })),
+    !array.trouble && !array.held && array.lastSync && !array.lastSync.ok && notice("warn", null, t("array.failed", { message: array.lastSync.message })),
+  ].filter(Boolean);
+  const running = array.running && uiRow({ lead: { icon: "refresh", tone: "info" }, name: t("array.running." + array.running.what) + (array.running.percent != null ? ` · ${array.running.percent}%` : ""), sub: t("array.runningHint"), meter: array.running.percent != null ? uiMeter(array.running.percent, { kind: "progress" }) : null, action: button(t("array.stop"), { class: "small", onclick: () => arrayCall("POST", "/stop", {}) }, "stop"), mode: "task" });
+  const health = array.running ? uiState("info", t("array.state.running")) : banners.some((b) => b.classList.contains("bad")) ? uiState("bad", t("array.state.trouble")) : uiState("ok", t("array.state.ok"));
+  const logBox = array.log.length > 0 && h("pre", { class: "console small-console", hidden: !arrayUi.log }, array.log.join("\n"));
+  return uiCard(
+    {
+      title: t("array.title"),
+      marks: health,
+      lead,
+      actions: [act(t("array.syncNow"), "/sync", {}), act(t("array.checkNow"), "/scrub", {}), uiMore([{ label: t("array.settings"), icon: "sliders", off: busy, run: () => arrayDialog(array) }], { size: "s" })],
+    },
     running,
-    banners,
-    h(
-      "div",
-      { class: "kv-list" },
-      row(t("array.parity"), h("span", null, h("span", { class: "mono" }, array.settings.parity), array.paritySize > 0 && h("span", { class: "muted small" }, ` · ${bytes(array.paritySize)}`))),
-      array.settings.parity2 && row(t("array.parity2"), h("span", null, h("span", { class: "mono" }, array.settings.parity2), array.parity2Size > 0 ? h("span", { class: "muted small" }, ` · ${bytes(array.parity2Size)}`) : h("span", { class: "muted small" }, ` · ${t("array.parity2Pending")}`))),
-      array.settings.data.map((disk, i) => row(i === 0 ? t("array.data") : "", h("span", { class: "with-actions" }, h("span", { class: "mono" }, disk.path), " ", button(t("array.recover"), { class: "small quiet", disabled: busy, onclick: () => recoverDialog(disk) })))),
-      row(t("array.lastSync"), array.lastSync?.ok ? ago(array.lastSync.at) : array.lastSync ? t("array.lastFailed", { when: ago(array.lastSync.at) }) : t("array.never")),
-      row(t("array.waiting"), h("span", { class: "with-actions" }, !array.lastSync?.ok && !d ? "—" : waiting || d?.removed ? [waiting > 0 && t("array.waitingNew", { n: waiting }), d.removed > 0 && t("array.waitingGone", { n: d.removed })].filter(Boolean).join(" · ") : t("array.waitingNone"), array.lastSync?.ok && button(t("array.goneOne"), { class: "small quiet", disabled: busy, onclick: () => goneDialog() }))),
-      row(t("array.lastScrub"), array.lastScrub ? `${ago(array.lastScrub.at)} · ${t(array.lastScrub.ok ? "array.scrubOk" : "array.scrubBad")}` : t("array.never")),
-      row(t("array.schedule"), t(array.settings.scrub ? "array.scheduleScrub" : "array.scheduleSync", { time: array.settings.time })),
-      array.appDataRule !== null && row("AppData", t(array.settings.appData ? "array.appDataIn" : "array.appDataOut")),
-    ),
-    array.log.length > 0 && h("details", null, h("summary", { class: "muted small" }, t("array.log")), h("pre", { class: "console small-console" }, array.log.join("\n"))),
+    ...banners,
+    ...uiFacts([
+      [t("array.parity"), h("span", null, h("span", { class: "mono" }, array.settings.parity), array.paritySize > 0 && h("span", { class: "muted small" }, ` · ${bytes(array.paritySize)}`))],
+      array.settings.parity2 && [t("array.parity2"), h("span", null, h("span", { class: "mono" }, array.settings.parity2), array.parity2Size > 0 ? h("span", { class: "muted small" }, ` · ${bytes(array.parity2Size)}`) : h("span", { class: "muted small" }, ` · ${t("array.parity2Pending")}`))],
+      ...array.settings.data.map((disk, i) => [i === 0 ? t("array.data") : "", h("span", { class: "with-actions" }, h("span", { class: "mono" }, disk.path), button(t("array.recover"), { class: "small quiet", disabled: busy, onclick: () => recoverDialog(disk) }))]),
+      [t("array.lastSync"), array.lastSync?.ok ? ago(array.lastSync.at) : array.lastSync ? t("array.lastFailed", { when: ago(array.lastSync.at) }) : t("array.never")],
+      [t("array.waiting"), h("span", { class: "with-actions" }, !array.lastSync?.ok && !d ? "—" : waiting || d?.removed ? [waiting > 0 && t("array.waitingNew", { n: waiting }), d.removed > 0 && t("array.waitingGone", { n: d.removed })].filter(Boolean).join(" · ") : t("array.waitingNone"), array.lastSync?.ok && button(t("array.goneOne"), { class: "small quiet", disabled: busy, onclick: () => goneDialog() }))],
+      [t("array.lastScrub"), array.lastScrub ? `${ago(array.lastScrub.at)} · ${t(array.lastScrub.ok ? "array.scrubOk" : "array.scrubBad")}` : t("array.never")],
+      [t("array.schedule"), t(array.settings.scrub ? "array.scheduleScrub" : "array.scheduleSync", { time: array.settings.time })],
+      array.appDataRule !== null && ["AppData", t(array.settings.appData ? "array.appDataIn" : "array.appDataOut")],
+    ]),
+    logBox && uiEmpty({ text: t("array.log"), action: button(arrayUi.log ? t("fills.largestHide") : t("ui.showMore"), { class: "small quiet", onclick: (e) => ((arrayUi.log = !arrayUi.log), (logBox.hidden = !arrayUi.log), (e.currentTarget.lastChild.textContent = arrayUi.log ? t("fills.largestHide") : t("ui.showMore"))) }, "logs") }),
+    logBox,
   );
 }
 
@@ -1556,16 +1521,18 @@ function arrayFit(data) {
     if (r.step === "keep") return button(t("mounting.disconnect"), { class: "small", onclick: () => disconnectDialog({ path: r.path, disk: r.disk.name }) });
     return null;
   };
-  return h("div", { class: "stack" }, h("strong", { class: "small" }, t("array.fit.title")), h("div", { class: "kv-list" }, rows.map((r) => fitRow(r, r.step === "ready", action(r)))));
+  return [h("div", { class: "ui-band" }, t("array.fit.title")), ...rows.map((r) => fitRow(r, r.step === "ready", action(r)))];
 }
 
 const fitRow = (r, fits, ...after) =>
-  h(
-    "div",
-    { class: "kv" },
-    h("div", { class: "fit" }, h("span", { class: r.title.startsWith("/") ? "strong mono" : "strong" }, r.title), h("div", { class: "muted small" }, r.sub), h("div", { class: "small fit-why" + (fits ? " ok" : "") }, icon(fits ? "check" : "x"), fitWhy(r))),
-    after.some(Boolean) ? h("div", { class: "row-actions" }, after) : h("span"),
-  );
+  uiRow({
+    lead: { icon: "disk" },
+    name: r.title.startsWith("/") ? h("span", { class: "mono" }, r.title) : r.title,
+    sub: [r.sub, fitWhy(r)].filter(Boolean).join(" · "),
+    title: [r.sub, fitWhy(r)].filter(Boolean).join("\n"),
+    state: uiState(fits ? "ok" : "off", t(fits ? "array.fit.stateYes" : "array.fit.no")),
+    action: after.find(Boolean) ?? null,
+  });
 
 /**
  * Several disks together, step by step: what for (one large folder, protection from a disk failure,
@@ -1965,6 +1932,9 @@ const FILLS_ALWAYS = 6;
 /** "in about 3 wk": days as days, weeks or months */
 const aboutDays = (days) => (days < 14 ? t("time.days", { n: Math.max(days, 1) }) : days < 70 ? t("time.weeks", { n: Math.round(days / 7) }) : t("time.months", { n: Math.round(days / 30.44) }));
 
+/** Whether the largest files are shown under the folders */
+const fillsUi = { largest: false };
+
 function fillsCard(fills, busy) {
   const used = fills.used;
   const apps = new Map((state.overview?.apps ?? []).map((app) => [app.name, app]));
@@ -2010,77 +1980,59 @@ function fillsCard(fills, busy) {
     const href = part.kind === "app" && apps.has(part.name) ? `#/apps/${part.name}` : part.kind === "trash" ? "#/trash" : part.path ? filesHash(part.path) : "";
     const name = partName(part);
     const percent = (part.size / used) * 100;
-    return h(
-      "tr",
-      null,
-      h(
-        "td",
-        null,
-        h(
-          "div",
-          { class: "with-icon" },
-          h("i", { class: "dot " + (part.kind === "mount" ? "c-rest" : colour(i, part)) }),
-          h(
-            "div",
-            null,
-            href ? h("a", { class: "strong", href }, name) : h("div", { class: "strong" }, name),
-            part.kind === "outside" ? h("div", { class: "muted small" }, t("fills.outsideHint")) : part.path && h("div", { class: "muted small mono clip" }, part.path),
-            // how much of it has not changed for long, and which apps keep files there
-            part.old > 0 && part.old >= part.size * 0.05 && h("div", { class: "muted small" }, t("fills.oldHere", { size: bytes(part.old), days: fills.oldDays })),
-            part.apps?.length > 0 && h("div", { class: "muted small fills-apps" }, t("fills.usedBy"), " ", part.apps.map((app, n) => [n > 0 && ", ", h("a", { href: `#/apps/${app}` }, apps.get(app)?.title ?? app)])),
-          ),
-        ),
-      ),
-      h("td", { class: "num" }, part.kind === "mount" ? "" : bytes(part.size)),
-      h("td", { class: "num muted" }, part.kind === "mount" ? "" : percent < 1 ? "<1%" : Math.round(percent) + "%"),
-      h("td", null, trend(part)),
-    );
+    // how much of it has not changed for long, and which apps keep files there: said when pointed at
+    const more = [part.old > 0 && part.old >= part.size * 0.05 && t("fills.oldHere", { size: bytes(part.old), days: fills.oldDays }), part.apps?.length > 0 && `${t("fills.usedBy")} ${part.apps.map((app) => apps.get(app)?.title ?? app).join(", ")}`].filter(Boolean).join("\n");
+    const key = h("span", { class: "ui-lead fills-key" }, h("i", { class: "dot " + (part.kind === "mount" ? "c-rest" : colour(i, part)) }));
+    const share = part.kind === "mount" ? "" : percent < 1 ? "<1%" : Math.round(percent) + "%";
+    return {
+      href: href || null,
+      cells: [
+        h("div", { title: more || null }, uiCell({ lead: key, name, sub: part.kind === "outside" ? t("fills.outsideHint") : part.path ? h("span", { class: "mono" }, part.path) : null })),
+        part.kind === "mount" ? "" : bytes(part.size),
+        h("span", { class: "muted" }, share),
+        trend(part),
+      ],
+      sub: [part.kind === "mount" ? null : bytes(part.size), share || null].filter(Boolean).join(" · ") || null,
+    };
   };
   const measure = busy(t("fills.measuring"), { path: "/api/disks/fills" });
   // where the files nobody touched for long lie: a hint for when the disk fills
   const oldest = fills.parts.filter((part) => part.old > 0).sort((a, b) => b.old - a.old)[0];
-  const advice = fills.at && fills.oldTotal >= Math.max(1024 ** 3, fills.size * 0.1) && h("p", { class: "banner small" }, t(oldest ? "fills.oldAll" : "fills.oldAllNowhere", { size: bytes(fills.oldTotal), days: fills.oldDays, folder: oldest ? partName(oldest) : "" }));
+  const advice = fills.at && fills.oldTotal >= Math.max(1024 ** 3, fills.size * 0.1) && h("div", { class: "ui-inset" }, uiNotice({ tone: "info", text: t(oldest ? "fills.oldAll" : "fills.oldAllNowhere", { size: bytes(fills.oldTotal), days: fills.oldDays, folder: oldest ? partName(oldest) : "" }) }));
   const ageOf = (at) => Math.max(0, Math.floor((Date.now() - at) / 86_400_000));
-  const largest =
-    fills.at &&
-    fills.largest?.length > 0 &&
-    h(
-      "details",
-      { class: "pad fills-largest" },
-      h("summary", { class: "muted small" }, t("fills.largest")),
-      h(
-        "div",
-        { class: "stack" },
-        fills.largest.map((file) => {
-          const name = file.path.split("/").pop();
-          const folder = file.path.slice(0, file.path.length - name.length - 1) || "/";
-          return h(
-            "div",
-            { class: "snapshot" },
-            h("span", { class: "badge-icon plain" }, icon("file")),
-            h("div", { class: "grow" }, h("a", { class: "strong clip", href: filesHash(folder), onclick: () => (filesUi.pick = name) }, name), h("div", { class: "muted small mono clip" }, folder)),
-            h("div", { class: "num" }, h("div", { class: "strong" }, bytes(file.size)), h("div", { class: "muted small" }, ageOf(file.at) ? t("fills.changedAgo", { n: ageOf(file.at) }) : t("fills.changedToday"))),
-          );
-        }),
-      ),
-    );
-  return h(
-    "section",
-    { class: "card table-wrap fills" },
-    h(
-      "div",
-      { class: "pad card-head" },
-      h(
-        "div",
-        { class: "section-head" },
-        h("h2", null, t("fills.title", { path: fills.root }), h("span", { class: "muted" }, t("disks.usedOf", { used: bytes(used), total: bytes(fills.total) }))),
-        h("div", { class: "row-actions" }, fills.fullIn != null && h("span", { class: "chip warn" }, t("fills.fullIn", { time: aboutDays(fills.fullIn) })), fills.at && !fills.running && h("span", { class: "muted small" }, t("fills.measured", { when: ago(fills.at) })), button(t(fills.running ? "fills.measuring" : fills.at ? "fills.again" : "fills.measure"), { class: "small", disabled: fills.running, onclick: measure }, "refresh")),
-      ),
-      h("p", { class: "muted small" }, t(fills.at ? "fills.lead" : "fills.never")),
-      fills.at && bar,
-      advice,
-    ),
-    fills.at && h("table", { class: "disks" }, h("thead", null, h("tr", null, h("th", null, t("fills.col.folder")), h("th", { class: "num" }, t("fills.col.size")), h("th", { class: "num" }, t("fills.col.share")), h("th", null, t("fills.col.week")))), h("tbody", null, parts.map(row))),
-    largest,
+  const files = fills.at && fills.largest?.length > 0 && fills.largest.map((file) => {
+    const name = file.path.split("/").pop();
+    const folder = file.path.slice(0, file.path.length - name.length - 1) || "/";
+    return uiRow({ lead: { icon: "file" }, name, sub: h("span", { class: "mono" }, folder), value: `${bytes(file.size)} · ${ageOf(file.at) ? t("fills.changedAgo", { n: ageOf(file.at) }) : t("fills.changedToday")}`, href: filesHash(folder), onclick: () => (filesUi.pick = name) });
+  });
+  const largeBox = files && h("div", { class: "ui-rows", hidden: !fillsUi.largest }, files);
+  const largeToggle =
+    files &&
+    uiEmpty({
+      text: t("fills.largest"),
+      action: button(fillsUi.largest ? t("fills.largestHide") : t("ui.showMore"), {
+        class: "small quiet",
+        onclick: (e) => {
+          fillsUi.largest = !fillsUi.largest;
+          largeBox.hidden = !fillsUi.largest;
+          e.currentTarget.lastChild.textContent = fillsUi.largest ? t("fills.largestHide") : t("ui.showMore");
+        },
+      }, "file"),
+    });
+  return uiCard(
+    {
+      title: t("fills.title", { path: fills.root }),
+      count: t("disks.usedOf", { used: bytes(used), total: bytes(fills.total) }),
+      marks: fills.fullIn != null && uiState("warn", t("fills.fullIn", { time: aboutDays(fills.fullIn) })),
+      lead: [t(fills.at ? "fills.lead" : "fills.never"), fills.at && !fills.running && t("fills.measured", { when: ago(fills.at) })].filter(Boolean).join(" · "),
+      flush: true,
+      cls: "fills",
+      actions: button(t(fills.running ? "fills.measuring" : fills.at ? "fills.again" : "fills.measure"), { class: "small", disabled: fills.running, "aria-busy": fills.running ? "true" : null, onclick: measure }, "refresh"),
+    },
+    fills.at && h("div", { class: "ui-inset fills-strip" }, bar),
+    advice,
+    fills.at ? uiTable([{ label: t("fills.col.folder") }, { label: t("fills.col.size"), num: true }, { label: t("fills.col.share"), num: true }, { label: t("fills.col.week") }], parts.map(row)) : uiEmpty({ size: "big", icon: "chart", title: t("fills.notYet"), text: t("fills.never"), action: button(t("fills.measure"), { class: "primary", onclick: measure }, "refresh") }),
+    largeToggle,
+    largeBox,
   );
 }

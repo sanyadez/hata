@@ -137,53 +137,69 @@ function sharesSection() {
   const data = state.shares;
   if (!data) return [waitMark()];
   const error = h("p", { class: "error", role: "alert" });
-  if (data.tool === "missing") return [h("section", { class: "card pad" }, h("h2", null, t("shares.tool.missing")), h("p", { class: "muted" }, t("shares.lead")), sambaCard())];
+  if (data.tool === "missing") return [uiCard({ title: t("shares.tool.missing"), lead: t("shares.lead") }, sambaCard())];
   const host = data.hosts[0] ?? location.hostname;
   const taken = data.shares.map((share) => share.path);
   const add = () => folderPicker({ title: t("shares.addTitle"), start: "", confirmLabel: t("shares.addHere"), allowed: (at) => !taken.includes(at), action: (at) => void setTimeout(() => shareDialog(at)) });
-  const line = (label, access) => h("div", null, label, h("span", { class: "muted small" }, " · " + t("shares.access." + access)));
+  // who may open a folder: the first one in words, the rest counted
+  const whoList = (share) => [...data.users.filter((user) => share.users[user.id]).map((user) => `${user.name} · ${t("shares.access." + share.users[user.id])}`), ...(share.guest !== "none" ? [`${t("shares.guest")} · ${t("shares.access." + share.guest)}`] : [])];
   const who = (share) => {
-    const named = data.users.filter((user) => share.users[user.id]).map((user) => line(user.name, share.users[user.id]));
-    if (share.guest !== "none") named.push(line(t("shares.guest"), share.guest));
-    return named.length ? named : h("span", { class: "muted" }, t("shares.nobody"));
+    const list = whoList(share);
+    if (!list.length) return h("span", { class: "muted" }, t("shares.nobody"));
+    return h("span", { title: list.join("\n") }, list[0], list.length > 1 && h("span", { class: "muted" }, " " + t("shares.moreWho", { n: list.length - 1 })));
   };
   const row = (share) => {
     const address = shareAddresses(host, share.name);
-    return h(
-      "tr",
-      null,
-      h("td", null, h("div", { class: "strong" }, share.name), share.timeMachine && h("div", { class: "muted small" }, share.timeMachine.limit ? t("shares.tm.tagLimit", { limit: share.timeMachine.limit }) : t("shares.tm.tag")), share.missing ? h("div", { class: "small danger-text" }, t("shares.missing")) : h("a", { class: "muted small mono clip block", href: filesHash(share.path) }, share.path)),
-      h("td", null, who(share)),
-      h("td", null, copyLine(address.windows), copyLine(address.url)),
-      h("td", null, h("div", { class: "row-actions" }, button(t("shares.settings"), { class: "small", onclick: () => shareDialog(share.path) }))),
-    );
+    return {
+      onclick: () => shareDialog(share.path),
+      cells: [
+        uiCell({ lead: { icon: "share" }, name: h("span", null, share.name, share.timeMachine && " ", share.timeMachine && uiTag(share.timeMachine.limit ? t("shares.tm.tagLimit", { limit: share.timeMachine.limit }) : t("shares.tm.tag"))), sub: share.missing ? null : h("span", { class: "mono" }, share.path) }),
+        share.missing ? uiState("bad", t("shares.missing")) : who(share),
+        h("div", { onclick: (e) => e.stopPropagation() }, uiCommand(address.url)),
+        h("div", { class: "row-actions end", onclick: (e) => e.stopPropagation() }, button(t("shares.settings"), { class: "small", onclick: () => shareDialog(share.path) }, "sliders")),
+      ],
+      sub: share.missing ? t("shares.missing") : whoList(share)[0] ?? t("shares.nobody"),
+    };
   };
   const all = shareAddresses(host);
   // where the server shows up by itself, so that no address has to be typed
   const found = data.announced.browse && data.announced.windows ? "both" : data.announced.windows ? "windows" : data.announced.browse ? "browse" : "";
+  const userRow = (user) =>
+    uiRow({
+      lead: { avatar: avatarOf(user, "avatar ui-lead") },
+      name: user.name,
+      sub: t("shares.users.folders", { n: data.shares.filter((share) => share.users[user.id]).length }),
+      state: user.allowed === false ? uiState("off", t("shares.users.denied")) : user.ready ? uiState("ok", t("shares.users.ready")) : uiState("off", t("shares.users.notReady")),
+    });
   return [
-    h(
-      "section",
-      { class: "card table-wrap" },
-      h(
-        "div",
-        { class: "pad card-head" },
-        h("div", { class: "section-head" }, h("h2", null, t("shares.title"), data.shares.length > 0 && h("span", { class: "state " + (data.running ? "running" : "restarting") }, t(data.running ? "shares.running" : "shares.stopped"))), button(t("shares.add"), { class: "small primary", onclick: add }, "plus")),
-        h("p", { class: "muted small" }, t(data.shares.length ? "shares.lead" : "shares.none")),
-        data.error && h("p", { class: "banner danger" }, t("shares.error", { message: data.error })),
-      ),
-      data.shares.length > 0 && h("table", { class: "disks shares" }, h("thead", null, h("tr", null, h("th", null, t("shares.col.name")), h("th", null, t("shares.col.access")), h("th", null, t("shares.col.address")), h("th"))), h("tbody", null, data.shares.map(row))),
+    uiCard(
+      {
+        title: t("shares.title"),
+        count: data.shares.length || null,
+        marks: data.shares.length > 0 && uiState(data.running ? "ok" : "bad", t(data.running ? "shares.running" : "shares.stopped")),
+        lead: data.shares.length ? t("shares.lead") : null,
+        flush: true,
+        actions: button(t("shares.add"), { class: "small primary", onclick: add }, "plus"),
+      },
+      data.error && h("div", { class: "ui-inset" }, uiNotice({ tone: "bad", text: t("shares.error", { message: data.error }) })),
+      data.shares.length > 0
+        ? uiTable([{ label: t("shares.col.name") }, { label: t("shares.col.access") }, { label: t("shares.col.address") }, { label: "" }], data.shares.map(row), { cls: "shares-table" })
+        : uiEmpty({ size: "big", icon: "share", title: t("shares.noneTitle"), text: t("shares.none"), action: button(t("shares.add"), { class: "primary", onclick: add }, "plus") }),
     ),
-    h(
-      "section",
-      { class: "card pad" },
-      h("h2", null, t("shares.users.title")),
-      h("p", { class: "muted" }, t("shares.users.lead")),
-      accessLink(),
-      h("p", { class: "muted small" }, t("shares.users.note")),
-      data.users.map((user) => settingRow(user.name, t("shares.users.folders", { n: data.shares.filter((share) => share.users[user.id]).length }), user.allowed === false ? h("span", { class: "state" }, t("shares.users.denied")) : h("span", { class: user.ready ? "state running" : "state" }, t(user.ready ? "shares.users.ready" : "shares.users.notReady")))),
+    uiCard(
+      { title: t("shares.users.title"), lead: [t("shares.users.lead"), t("shares.users.note")].join(" "), flush: true, actions: h("a", { class: "ui-link", href: "#/settings/users/access" }, t("access.givenShort"), icon("chevron")) },
+      data.users.map(userRow),
     ),
-    h("section", { class: "card pad stack-s" }, h("h2", null, t("shares.how.title")), found && h("p", null, t("shares.found." + found, { name: data.announced.name })), data.announced.error && data.shares.length > 0 && h("p", { class: "muted small" }, t("shares.found.error", { message: data.announced.error })), h("p", { class: "muted" }, t("shares.how.windows", { address: all.windows })), h("p", { class: "muted" }, t("shares.how.mac", { address: all.url })), h("p", { class: "muted" }, t("shares.how.phone"))),
+    uiCard(
+      { title: t("shares.how.title") },
+      found && uiNotice({ tone: "ok", text: t("shares.found." + found, { name: data.announced.name }) }),
+      data.announced.error && data.shares.length > 0 && uiNotice({ tone: "warn", text: t("shares.found.error", { message: data.announced.error }) }),
+      ...uiFacts([
+        [t("shares.how.windowsKey"), uiCommand(all.windows)],
+        [t("shares.how.macKey"), uiCommand(all.url)],
+        [t("shares.how.phoneKey"), h("span", { class: "muted small" }, t("shares.how.phoneValue"))],
+      ]),
+    ),
   ];
 }
 

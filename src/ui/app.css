@@ -2979,3 +2979,16 @@ button.tv-stage-chip:active { background: rgb(0 0 0 / 0.9); }
 @container ui-table (max-width: 640px) { .ui-table tr.sub-row > td:first-child { padding-left: calc(var(--pad) + 16px); } }
 /* how often a thing is copied is a phrase: it may take two lines */
 .backups-table td:nth-child(2) { white-space: normal; }
+.ui-inset:has(> .error:empty) { display: none; }
+.card.pad > .ui-setting:first-child { padding-top: 0; }
+.card.pad > .ui-setting:last-child { padding-bottom: 0; }
+@container ui-table (min-width: 641px) { .disks-table td:first-child { width: 28%; } }
+@container ui-table (min-width: 641px) { .fs-table td:nth-child(3) { width: 240px; } }
+/* the parts of the data folder: a strip of colours, each folder keyed by its own */
+.fills-strip .fills-bar { height: 4px; margin: 0; }
+.ui-lead.fills-key { background: none; width: 16px; }
+/* a heading over a few rows inside a card: a grey band, as a group of a table */
+.ui-band { display: flex; align-items: center; min-height: 36px; padding: 0 var(--pad); background: var(--surface-2); font-size: 12px; font-weight: 600; color: var(--muted); border-bottom: 1px solid var(--border); }
+.ui-notice-text > strong + div { margin-top: 2px; }
+.card.pad > .ui-row { padding-inline: 0; }
+@container ui-table (min-width: 641px) { .shares-table td:first-child { width: 30%; } }
