@@ -817,7 +817,7 @@ function pveOverview(x) {
     "div",
     { class: "stack" },
     self && uiCard({}, uiNotice({ tone: "info", icon: "home", text: t("pve.selfHere", { guest: `${guestKind(self)} ${self.name}`, node: self.node }) })),
-    x.trouble.length > 0 && uiCard({ title: t("attention.title"), marks: uiCount(x.trouble.length), flush: true }, h("div", { class: "ui-rows" }, x.trouble.map((item) => attentionItem(item)))),
+    x.trouble.length > 0 && uiCard({ title: t("attention.title"), marks: uiCount(x.trouble.length), flush: true }, uiRows(x.trouble.map((item) => attentionItem(item)))),
     uiCard({ title: t("pve.nodesTitle"), count: x.nodes.length > 1 ? x.nodes.length : null, flush: true }, ...x.nodes.flatMap(node)),
     uiCard(
       { title: t("pve.storagesTitle"), flush: true },
@@ -1133,8 +1133,8 @@ function pveGuestParts(x, g) {
   const up = g.status === "running";
   const c = g.config;
   const m = machinesUi.list?.machines.find((mm) => mm.pve?.host === x.id && mm.pve?.id === g.id);
-  const snaps = h("div", { class: "ui-rows" }, uiEmpty({ size: "loading" }));
-  const backs = h("div", { class: "ui-rows" }, uiEmpty({ size: "loading" }));
+  const snaps = uiRows(uiEmpty({ size: "loading" }));
+  const backs = uiRows(uiEmpty({ size: "loading" }));
   const again = () => pveGuestDialog(x, pveUi.host?.guests.find((y) => y.id === g.id) ?? g);
   const power = (action) => (action === "start" || action === "resume" ? pvePower(x, g, action).then(again) : pvePowerDialog(x, g, action));
   const self = g.id === x.self;

@@ -338,7 +338,7 @@ function handBackDialog(nic) {
 
 /** The Wi-Fi networks in reach of an interface: pick one, type its password */
 function wifiDialog(nic) {
-  const list = h("div", { class: "ui-rows" }, h("p", { class: "muted" }, t("wifi.looking")));
+  const list = uiRows(h("p", { class: "muted" }, t("wifi.looking")));
   const error = h("p", { class: "error", role: "alert" });
   const bars = (signal) => h("span", { class: "muted small mono" }, `${signal}%`);
   const join = (net, row) => {
@@ -1342,7 +1342,7 @@ function sysUpdatesCard(at) {
   };
   // security updates first, then by name
   const sorted = [...list].sort((a, b) => Number(b.security) - Number(a.security) || a.name.localeCompare(b.name));
-  const packages = h("div", { class: "ui-rows", hidden: !shown }, bar, sorted.map(row));
+  const packages = uiRows([bar, sorted.map(row)], { hidden: !shown });
   const toggle = button(t(shown ? "sysupdates.hide" : "sysupdates.show", { n: list.length }), {
     class: "small quiet",
     onclick: () => {
@@ -1679,12 +1679,13 @@ function appearanceSection(error) {
       }
     },
   });
-  const dim = h("input", { type: "range", min: 0, max: 90, step: 5, value: look.dim, "aria-label": t("appearance.dim"), oninput: () => applyAppearance({ ...state.appearance, dim: Number(dim.value) }), onchange: () => change({ dim: Number(dim.value) }, false) });
+  const dim = uiSlider({ min: 0, max: 90, step: 5, value: look.dim, label: t("appearance.dim"), oninput: () => applyAppearance({ ...state.appearance, dim: Number(dim.value) }), onchange: () => change({ dim: Number(dim.value) }, false) });
   return [
     uiCard({ title: t("appearance.colours") }, settingRow(t("appearance.accent"), t("appearance.accentHint"), colours("accent", ACCENTS, ACCENTS[0])), settingRow(t("appearance.background"), t("appearance.backgroundHint"), colours("background", BACKGROUNDS, BACKGROUNDS[0]))),
     uiCard(
       { title: t("appearance.picture") },
-      uiPictures(
+      uiTiles(
+        [
         wall("", t("appearance.none")),
         state.wallpapers.map((name) => wall(name, t("appearance.wall." + name))),
         look.custom &&
@@ -1701,6 +1702,8 @@ function appearanceSection(error) {
             },
           }),
         uiPicture({ add: true, label: t(look.custom ? "appearance.replace" : "appearance.upload"), onclick: () => file.click() }),
+        ],
+        { kind: "pictures" },
       ),
       file,
       look.wallpaper && settingRow(t("appearance.dim"), t("appearance.dimHint"), dim),
@@ -1730,7 +1733,7 @@ function localNameCard() {
         : !s.own
           ? [
               h("p", { class: "muted small" }, t("local.otherLead", { domain: s.domain, address: s.addresses[0] ?? "—" })),
-              h("div", { class: "ui-rows" }, s.checks.map((c) => uiRow({ lead: { icon: c.ok ? "check" : "x", tone: c.ok ? "ok" : "bad" }, name: c.ok ? address(c.host) : h("span", { class: "mono" }, c.host), sub: c.ok ? t("local.leadsHere") : c.found.length ? t("local.leadsElsewhere", { addresses: c.found.join(", ") }) : t("local.unknown") }))),
+              uiRows(s.checks.map((c) => uiRow({ lead: { icon: c.ok ? "check" : "x", tone: c.ok ? "ok" : "bad" }, name: c.ok ? address(c.host) : h("span", { class: "mono" }, c.host), sub: c.ok ? t("local.leadsHere") : c.found.length ? t("local.leadsElsewhere", { addresses: c.found.join(", ") }) : t("local.unknown") }))),
             ]
           : !s.listening
             ? [h("p", { class: "error" }, t("local.failed", { message: s.error || "…" }))]
@@ -1793,7 +1796,7 @@ function httpsSection(save, error) {
       results.replaceChildren(h("p", { class: "muted small" }, t("https.checking")));
       try {
         const list = await api("POST", "/api/https/check", {});
-        results.replaceChildren(h("div", { class: "ui-rows" }, list.map((r) => uiRow({ lead: { icon: r.ok ? "check" : "x", tone: r.ok ? "ok" : "bad" }, name: h("span", { class: "mono" }, r.host), sub: !r.ok && r.problem }))));
+        results.replaceChildren(uiRows(list.map((r) => uiRow({ lead: { icon: r.ok ? "check" : "x", tone: r.ok ? "ok" : "bad" }, name: h("span", { class: "mono" }, r.host), sub: !r.ok && r.problem }))));
       } catch (e) {
         results.replaceChildren(h("p", { class: "error" }, errorText(e)));
       }
@@ -1812,17 +1815,13 @@ function httpsSection(save, error) {
       status.httpPort !== 80 && uiNotice({ tone: "warn", text: t("https.needPort80", { port: status.httpPort }) }),
       status.error && h("p", { class: "error" }, status.error),
       status.certificates.length > 0 &&
-        h(
-          "div",
-          { class: "ui-rows" },
-          status.certificates.map((c) =>
+        uiRows(status.certificates.map((c) =>
             uiRow({
               lead: { icon: c.working ? "refresh" : c.notAfter ? "check" : "x", tone: c.working ? null : c.notAfter ? "ok" : "bad" },
               name: h("span", { class: "mono" }, c.name),
               sub: [c.working ? t("https.cert.working") : c.notAfter ? t("https.cert.valid", { date: new Date(c.notAfter).toLocaleDateString(state.lang, { day: "numeric", month: "long", year: "numeric" }), issuer: c.issuer }) : t("https.cert.none"), c.error && h("div", { class: "error small" }, c.error)],
             }),
-          ),
-        ),
+          )),
     );
     if (status.certificates.some((c) => c.working)) setTimeout(paintCerts, 2000);
   };

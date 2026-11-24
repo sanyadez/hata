@@ -176,7 +176,7 @@ function haEntityDialog(server, s, item = null) {
       uiReadout(x?.online === false ? t("ha.tile.away", { name: x.name }) : a.includes("temperature") ? [now.current != null && `${haNumber(now.current)}°`, haWord(now.state)].filter(Boolean).join(" · ") : haStateText(now), toggle),
       bright && uiField(t("ha.brightness"), bright),
       a.includes("temperature") && uiValueStepper({ value: now.target != null ? `${haNumber(now.target)}°` : "—", label: t("ha.asked"), disabled: gone, less: { label: t("ha.colder"), run: temp(-step) }, more: { label: t("ha.warmer"), run: temp(step) } }),
-      others.length > 0 && uiButtonGrid(others.map((one) => button(t("ha.action." + one), { class: one === main ? "primary" : "", disabled: gone, onclick: (e) => (one === "unlock" ? haPressAsked(server, now, { action: one, ask: true }) : haPress(server, now, one, undefined, e.currentTarget)) }, HA_BUTTON_ICONS[one]))),
+      others.length > 0 && uiTiles(others.map((one) => button(t("ha.action." + one), { class: one === main ? "primary" : "", disabled: gone, onclick: (e) => (one === "unlock" ? haPressAsked(server, now, { action: one, ask: true }) : haPress(server, now, one, undefined, e.currentTarget)) }, HA_BUTTON_ICONS[one])), { kind: "buttons" }),
     );
   };
   const listener = (id, next, entity) => {
@@ -401,7 +401,7 @@ function houseEmpty(view, box) {
       found.length > 0 &&
         uiCard(
           { title: t("integrations.available"), lead: t("integrations.foundLead"), flush: true },
-          h("div", { class: "ui-rows" }, found.map((f) => uiRow({ lead: { icon: f.icon }, name: f.name, sub: [f.kind, " · ", h("span", { class: "mono" }, f.url.replace(/^https?:\/\//, ""))], action: button(t("integrations.connect"), { class: "small", onclick: f.connect }, "plus") }))),
+          uiRows(found.map((f) => uiRow({ lead: { icon: f.icon }, name: f.name, sub: [f.kind, " · ", h("span", { class: "mono" }, f.url.replace(/^https?:\/\//, ""))], action: button(t("integrations.connect"), { class: "small", onclick: f.connect }, "plus") }))),
         ),
     );
   };
@@ -507,7 +507,7 @@ function paintHouse() {
   const tools = all.length >= HOUSE_TOOLS_FROM;
   const pick = tools ? houseUi.group : "all";
   const shownIn = (x) => matches(x) && (pick === "all" || (pick === "trouble" ? x.level !== "ok" : x.group === pick));
-  const tiles = (list) => h("div", { class: "ui-tiles" }, list.map(houseTile));
+  const tiles = (list) => uiTiles(list.map(houseTile));
   const groupCard = (id, list, total) => list.length > 0 && uiCard({ title: t("house.group." + id), count: total > list.length ? t("house.ofTotal", { n: list.length, total }) : list.length }, tiles(list));
   const parts = [];
   if (tools) {
@@ -528,7 +528,7 @@ function paintHouse() {
     parts.push(
       uiCard(
         { title: t("house.found.title"), lead: t("house.found.lead", { n: found.length }), flush: true, actions: button(t("house.found.hide"), { class: "small quiet", onclick: () => (localStorage.setItem("hata.house.foundHidden", String(found.length)), paintHouse()) }) },
-        h("div", { class: "ui-rows" }, found.map((f) => uiRow({ lead: { icon: f.icon }, name: f.name, sub: f.where, action: button(t("integrations.connect"), { class: "small", onclick: f.connect }, "plus") }))),
+        uiRows(found.map((f) => uiRow({ lead: { icon: f.icon }, name: f.name, sub: f.where, action: button(t("integrations.connect"), { class: "small", onclick: f.connect }, "plus") }))),
       ),
     );
   put(box, ...parts.filter(Boolean));
@@ -791,7 +791,7 @@ function svcBlock(b, i, x, spec) {
     if (search) search.classList.add("ui-search");
     // the segment of the tabs is drawn with their counts by svcTable
     const tabs = tb.tabs && h("span", { id: `svc-b${i}-tabs` });
-    return uiCard({ title: tb.title ? svcText(tb.title) : null, flush: true }, (tabs || search) && h("div", { class: "ui-filters" }, tabs, search), h("div", { id: `svc-b${i}`, class: "ui-rows" }));
+    return uiCard({ title: tb.title ? svcText(tb.title) : null, flush: true }, (tabs || search) && h("div", { class: "ui-filters" }, tabs, search), uiRows([], { id: `svc-b${i}` }));
   }
   if (b.pictures) return uiCard({ title: b.pictures.title ? svcText(b.pictures.title) : null }, h("div", { id: `svc-b${i}` }));
   if (b.events) {
@@ -801,7 +801,7 @@ function svcBlock(b, i, x, spec) {
       const options = list ? [...new Set((x.lists[list] ?? []).map((r) => r[fieldName]).filter((v) => typeof v === "string"))] : [];
       return h("select", { onchange: (e) => ((svcUi.params[ev.of] = { ...(svcUi.params[ev.of] ?? {}), [f.param]: e.target.value }), void loadService()) }, h("option", { value: "" }, svcText(f.label)), options.map((o) => h("option", { value: o, selected: svcUi.params[ev.of]?.[f.param] === o }, o)));
     });
-    return uiCard({ title: svcText(ev.title) || t("service.events"), actions: filters, flush: true }, h("div", { id: `svc-b${i}`, class: "ui-rows" }));
+    return uiCard({ title: svcText(ev.title) || t("service.events"), actions: filters, flush: true }, uiRows([], { id: `svc-b${i}` }));
   }
   return null;
 }
@@ -813,7 +813,7 @@ function svcBlockBody(b, i, x, spec) {
   if (b.pictures) {
     const p = b.pictures;
     const rows = x.lists[p.of] ?? [];
-    return put(box, rows.length ? h("div", { class: "ui-tiles" }, rows.map((row) => svcPictureTile(x, spec, p, row))) : uiEmpty({ text: x.online ? t("service.nothing") : "—" }));
+    return put(box, rows.length ? uiTiles(rows.map((row) => svcPictureTile(x, spec, p, row))) : uiEmpty({ text: x.online ? t("service.nothing") : "—" }));
   }
   if (b.events) {
     const ev = b.events;
@@ -1161,7 +1161,7 @@ function haPeopleCard(x) {
         toast(errorText(e), "error");
       }
     };
-    const list = h("div", { class: "ui-rows", hidden: mode !== "some" }, others.map((u) => uiRow({ lead: { check: h("input", { type: "checkbox", checked: picked.has(u.id), "aria-label": u.name, onchange: (e) => (e.target.checked ? picked.add(u.id) : picked.delete(u.id), save()) }) }, name: u.name, sub: t("user.role." + u.role) })));
+    const list = uiRows(others.map((u) => uiRow({ lead: { check: h("input", { type: "checkbox", checked: picked.has(u.id), "aria-label": u.name, onchange: (e) => (e.target.checked ? picked.add(u.id) : picked.delete(u.id), save()) }) }, name: u.name, sub: t("user.role." + u.role) })), { hidden: mode !== "some" });
     const who = h("select", { "aria-label": t("ha.people.title"), onchange: (e) => ((mode = e.target.value), (list.hidden = mode !== "some"), save()) }, ["none", "all", "some"].map((v) => h("option", { value: v, selected: mode === v }, t("ha.people." + v))));
     card.append(...(others.length ? [uiSetting({ name: t("ha.people.who"), control: who }), list] : [uiEmpty({ text: t("ha.people.nobody") })]));
   };

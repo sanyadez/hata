@@ -413,7 +413,7 @@ function shotsView(list) {
 
 function customDialog() {
   const name = h("input", { required: true, pattern: "[a-z0-9][a-z0-9_\\-]*", autocapitalize: "none", spellcheck: false, class: "mono" });
-  const area = uiCode({ wrap: "off", required: true, placeholder: "services:\n  web:\n    image: nginx:alpine\n    ports:\n      - 8088:80\n" });
+  const area = uiCodeArea({ wrap: "off", required: true, placeholder: "services:\n  web:\n    image: nginx:alpine\n    ports:\n      - 8088:80\n" });
   const memoryTotal = Math.round((state.overview?.system.memory.total ?? 0) / 1024 / 1024);
   // the first service of a new app has no name of its own: it takes the app's
   let form = appSettingsForm({ title: "", icon: "", web: { scheme: "http", host: "", port: "", path: "/" }, services: [blankService("")] }, memoryTotal);
@@ -424,7 +424,7 @@ function customDialog() {
   const notice = h("div", { hidden: true });
   const file = field(t("store.customCompose"), area);
   // the third way in: a command from an app's instructions, read into the form
-  const command = uiCode({ placeholder: "docker run -d --name whoami -p 8088:80 traefik/whoami" });
+  const command = uiCodeArea({ placeholder: "docker run -d --name whoami -p 8088:80 traefik/whoami" });
   const run = h("div", { class: "stack" }, field(t("run.command"), command));
   const submit = h("button", { class: "btn primary" }, t("store.install"));
   /** form | file | run */
@@ -519,7 +519,7 @@ const importWarnings = (warnings) => warnings.length > 0 && uiNotice({ tone: "wa
 /** Shows the compose file an import would write; `confirm` gets the (possibly edited) text and the name */
 function importDialog({ title, lead, name, compose, warnings, editable, action, steps, confirm }) {
   const nameInput = name != null && h("input", { required: true, pattern: "[a-z0-9][a-z0-9_\\-]*", autocapitalize: "none", spellcheck: false, class: "mono", value: name });
-  const area = uiCode({ wrap: "off", required: true, readOnly: !editable, value: compose, "aria-label": "compose.yml" });
+  const area = uiCodeArea({ wrap: "off", required: true, readOnly: !editable, value: compose, "aria-label": "compose.yml" });
   const error = h("p", { class: "error", role: "alert" });
   const dialog = openDialog(
     "wide",
@@ -616,7 +616,7 @@ function casaosCard(casaos) {
   }, "arrow");
   return uiCard(
     { title: t("import.casaos.title", { n: ready.length }), lead: t("import.casaos.lead") },
-    casaos.apps.length > 0 && uiRowsIn(casaos.apps.map((app) => uiRow({ lead: { icon: "box" }, name: app.title, sub: h("span", { class: "mono" }, app.source), state: uiState(app.status === "ready" ? "ok" : "warn", t("import.casaos.status." + app.status)) }))),
+    casaos.apps.length > 0 && uiRows(casaos.apps.map((app) => uiRow({ lead: { icon: "box" }, name: app.title, sub: h("span", { class: "mono" }, app.source), state: uiState(app.status === "ready" ? "ok" : "warn", t("import.casaos.status." + app.status)) })), { inCard: true }),
     uiCheck(h("strong", null, t("import.casaos.stop")), stop, casaos.units.length ? t("import.casaos.stopHint", { units: casaos.units.join(", ") }) : t("import.casaos.stopped")),
     error,
     uiFoot(uiCommand("sudo hata migrate casaos --undo"), move),

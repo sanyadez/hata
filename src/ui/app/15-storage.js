@@ -497,7 +497,7 @@ function checkDialog(disk, volume) {
       slot,
       () => api("POST", "/api/disks/fsck", { device: volume.path, repair }),
       async (started) => {
-        const lines = uiLog("", { kind: "said" });
+        const lines = uiOutput("", { tone: "light" });
         // a look can be ended; a repair goes to its end
         put(result, uiLine([h("p", { class: "with-icon muted grow" }, icon("refresh"), t(repair ? "fsck.repairing" : "fsck.running")), !repair && stopButton(started.job)]), lines);
         const job = await followJob(started.job, (line) => {
@@ -507,7 +507,7 @@ function checkDialog(disk, volume) {
         go.disabled = false;
         setDisks(await api("GET", "/api/disks").catch(() => state.disks));
         if (job.stopped) return put(result, uiNotice({ tone: "warn", text: t("fsck.stopped") }), job.error && job.error !== "Stopped." && h("p", { class: "error" }, job.error));
-        if (job.status !== "done" || !job.result) return put(result, uiNotice({ tone: "bad", text: t("fsck.verdict.failed") }), uiLog(job.error || lines.textContent, { kind: "said" }));
+        if (job.status !== "done" || !job.result) return put(result, uiNotice({ tone: "bad", text: t("fsck.verdict.failed") }), uiOutput(job.error || lines.textContent, { tone: "light" }));
         const { verdict, output, back } = job.result;
         // btrfs is mended by a scrub while mounted, never offline
         const mend = verdict === "errors" && !repair && volume.fstype !== "btrfs";
@@ -515,7 +515,7 @@ function checkDialog(disk, volume) {
           result,
           uiNotice({ tone: verdict === "errors" || verdict === "failed" ? "bad" : "ok", text: t("fsck.verdict." + verdict) }),
           back && h("p", { class: "error", role: "alert" }, t("fsck.back", { message: back })),
-          output && h("details", { open: verdict !== "clean" }, h("summary", { class: "muted small" }, t("fsck.said")), uiLog(output, { kind: "said" })),
+          output && h("details", { open: verdict !== "clean" }, h("summary", { class: "muted small" }, t("fsck.said")), uiOutput(output, { tone: "light" })),
           mend && uiLine([button(t("fsck.repair"), { class: "primary", onclick: start(true) })]),
         );
       },
@@ -815,8 +815,8 @@ function disconnectDialog(mount) {
       const left = uses.filter((use) => !stopped.includes(use));
       put(
         what,
-        stopped.length > 0 && h("div", { class: "stack-s" }, uiSubhead({ title: t("disks.use.stopped") }), h("div", { class: "ui-rows" }, stopped.map(line))),
-        left.length > 0 && h("div", { class: "stack-s" }, uiSubhead({ title: t("disks.use.left") }), h("div", { class: "ui-rows" }, left.map(line))),
+        stopped.length > 0 && h("div", { class: "stack-s" }, uiSubhead({ title: t("disks.use.stopped") }), uiRows(stopped.map(line))),
+        left.length > 0 && h("div", { class: "stack-s" }, uiSubhead({ title: t("disks.use.left") }), uiRows(left.map(line))),
         uses.some((use) => use.kind === "app") && uiNotice({ tone: "warn", text: t("disks.use.appsNote") }),
         !uses.length && h("p", { class: "muted small" }, t("disks.use.none")),
       );
@@ -1291,8 +1291,8 @@ function placeDialog(place = null, seed = {}, after = null) {
       fields,
       h("p", { class: "muted small" }, t(`netplace.kind.${kind}Lead`)),
       field(t("netplace.name"), name, t("netplace.nameHint")),
-      kind === "webdav" ? field(t("netplace.url"), url) : field(t("netplace.host"), uiInputs([host, port]), t("netplace.hostHint")),
-      kind === "smb" || kind === "nfs" ? field(t(kind === "smb" ? "netplace.share" : "netplace.export"), uiInputs([share, list]), t(kind === "smb" ? "netplace.shareHint" : "netplace.exportHint")) : field(t("netplace.folder"), share, t("netplace.folderHint")),
+      kind === "webdav" ? field(t("netplace.url"), url) : field(t("netplace.host"), uiAffix(...[host, port]), t("netplace.hostHint")),
+      kind === "smb" || kind === "nfs" ? field(t(kind === "smb" ? "netplace.share" : "netplace.export"), uiAffix(...[share, list]), t(kind === "smb" ? "netplace.shareHint" : "netplace.exportHint")) : field(t("netplace.folder"), share, t("netplace.folderHint")),
       found,
       kind !== "nfs" && field(t("netplace.user"), user, t(kind === "smb" ? "netplace.userHintSmb" : "netplace.userHint")),
       kind !== "nfs" && field(t("netplace.password"), password),
@@ -1378,7 +1378,7 @@ async function findPlacesDialog() {
   put(
     body,
     found.length
-      ? h("div", { class: "ui-rows" }, found.map((f) => uiRow({ lead: { icon: "globe" }, name: f.name, sub: h("span", { class: "mono" }, `${t("netplace.kind." + f.kind)} · ${f.host}${f.address ? " · " + f.address : ""}${f.port ? ":" + f.port : ""}`), action: button(t("netplace.connect"), { class: "small primary", onclick: () => (dialog.close(), placeDialog(null, { kind: f.kind, host: f.address || f.host, name: f.name, port: [445, 2049, 22, 21, 80, 443].includes(f.port) ? 0 : f.port, url: f.kind === "webdav" ? `${f.port === 443 ? "https" : "http"}://${f.address || f.host}${[80, 443].includes(f.port) ? "" : ":" + f.port}/` : "" })) }, "plus") })))
+      ? uiRows(found.map((f) => uiRow({ lead: { icon: "globe" }, name: f.name, sub: h("span", { class: "mono" }, `${t("netplace.kind." + f.kind)} · ${f.host}${f.address ? " · " + f.address : ""}${f.port ? ":" + f.port : ""}`), action: button(t("netplace.connect"), { class: "small primary", onclick: () => (dialog.close(), placeDialog(null, { kind: f.kind, host: f.address || f.host, name: f.name, port: [445, 2049, 22, 21, 80, 443].includes(f.port) ? 0 : f.port, url: f.kind === "webdav" ? `${f.port === 443 ? "https" : "http"}://${f.address || f.host}${[80, 443].includes(f.port) ? "" : ":" + f.port}/` : "" })) }, "plus") })))
       : h("p", { class: "muted" }, t("netplace.foundNone")),
     h("p", { class: "muted small" }, t("netplace.findHint")),
   );
@@ -1440,7 +1440,7 @@ function arrayCard(data, array) {
   ].filter(Boolean);
   const running = array.running && uiRow({ lead: { icon: "refresh", tone: "info" }, name: t("array.running." + array.running.what) + (array.running.percent != null ? ` · ${array.running.percent}%` : ""), sub: t("array.runningHint"), meter: array.running.percent != null ? uiMeter(array.running.percent, { kind: "progress" }) : null, action: button(t("array.stop"), { class: "small", onclick: () => arrayCall("POST", "/stop", {}) }, "stop"), mode: "task" });
   const health = array.running ? uiState("info", t("array.state.running")) : banners.some((b) => b.classList.contains("bad")) ? uiState("bad", t("array.state.trouble")) : uiState("ok", t("array.state.ok"));
-  const logBox = array.log.length > 0 && uiLog(array.log.join("\n"), { size: "s", hidden: !arrayUi.log });
+  const logBox = array.log.length > 0 && uiOutput(array.log.join("\n"), { size: "s", hidden: !arrayUi.log });
   return uiCard(
     {
       title: t("array.title"),
@@ -1578,7 +1578,7 @@ function poolDialog() {
   };
   const doing = (r) => (r.step === "format" ? t("pool.do.format") : r.step === "connect" ? t("pool.do.connect") : r.step === "keep" ? t("pool.do.keep") : t("pool.do.ready"));
   const paint = () => {
-    put(steps, uiStepper(["goal", "disks", "setup", "go"].map((id) => t("pool.step." + id)), step));
+    put(steps, uiStepList(["goal", "disks", "setup", "go"].map((id) => t("pool.step." + id)).map((label, i) => uiStepItem(label, { n: i + 1, state: i + 1 === step ? "now" : i + 1 < step ? "done" : "" })), { across: true }));
     put(body, [null, goalStep, disksStep, setupStep, goStep][step]());
   };
   const nav = (ok, next = () => ((step += 1), paint())) =>
@@ -1659,7 +1659,7 @@ function poolDialog() {
     const disks = uiFacts(
       chosen().map((r) => [
         h("span", null, h("strong", null, r.title), h("div", { class: "muted small" }, r.sub), h("div", { class: "small " + (r.step === "format" ? "error" : "muted") }, r === parityRow() ? t("pool.forParity") : t("pool.forData"), " · ", doing(r))),
-        r.step === "format" || r.step === "connect" ? uiInputs([h("span", { class: "muted mono" }, "/mnt/"), nameInput(() => plan.names[r.key], (v) => (plan.names[r.key] = v))], { tight: true }) : h("span", { class: "mono" }, r.path),
+        r.step === "format" || r.step === "connect" ? uiAffix(h("span", { class: "muted mono" }, "/mnt/"), nameInput(() => plan.names[r.key], (v) => (plan.names[r.key] = v))) : h("span", { class: "mono" }, r.path),
       ]),
     );
     const time = h("input", { type: "time", value: plan.time, required: true });
@@ -1679,7 +1679,7 @@ function poolDialog() {
       cards,
       h("strong", { class: "small" }, t("pool.disksTitle")),
       h("div", null, disks),
-      merge() && field(t("pool.merged"), uiInputs([h("span", { class: "muted mono" }, "/mnt/"), nameInput(() => plan.name, (v) => (plan.name = v))], { tight: true }), t("pool.mergedHint")),
+      merge() && field(t("pool.merged"), uiAffix(h("span", { class: "muted mono" }, "/mnt/"), nameInput(() => plan.name, (v) => (plan.name = v))), t("pool.mergedHint")),
       protect() && field(t("array.time"), time),
       protect() && uiCheck(h("strong", null, t("array.scrub")), scrub, t("array.scrubHint")),
       trouble,
@@ -1729,7 +1729,7 @@ function poolDialog() {
 
   // the work itself: its log here, then what to do next
   const run = async (id) => {
-    const log = uiLog();
+    const log = uiOutput();
     const status = uiState("info", t("job.running"));
     put(body, status, log, h("footer", null, button(t("job.hide"), { onclick: () => dialog.close() })));
     const job = await followJob(id, (line) => {
@@ -1738,11 +1738,11 @@ function poolDialog() {
     });
     setDisks(await api("GET", "/api/disks").catch(() => state.disks));
     if (job.status !== "done") {
-      put(body, uiNotice({ tone: "bad", text: t("pool.failed") }), uiLog(job.error || "", { kind: "said" }), log, h("footer", null, closeButton(() => dialog, t("common.close"))));
+      put(body, uiNotice({ tone: "bad", text: t("pool.failed") }), uiOutput(job.error || "", { tone: "light" }), log, h("footer", null, closeButton(() => dialog, t("common.close"))));
       return;
     }
     step = 5;
-    put(steps, uiStepper(["goal", "disks", "setup", "go"].map((id) => t("pool.step." + id)), 5));
+    put(steps, uiStepList(["goal", "disks", "setup", "go"].map((id) => t("pool.step." + id)).map((label, i) => uiStepItem(label, { n: i + 1, state: i + 1 === 5 ? "now" : i + 1 < 5 ? "done" : "" })), { across: true }));
     const where = merge() ? "/mnt/" + plan.name : folder(dataRows()[0]);
     put(
       body,
@@ -1862,7 +1862,7 @@ function goneDialog() {
       put(
         list,
         files.length
-          ? h("div", { class: "ui-rows" }, files.map((f) =>
+          ? uiRows(files.map((f) =>
               uiRow({
                 lead: { icon: "file" },
                 name: h("span", { class: "mono" }, f.path.split("/").pop()),
@@ -1994,7 +1994,7 @@ function fillsCard(fills, busy) {
     const folder = file.path.slice(0, file.path.length - name.length - 1) || "/";
     return uiRow({ lead: { icon: "file" }, name, sub: h("span", { class: "mono" }, folder), value: `${bytes(file.size)} · ${ageOf(file.at) ? t("fills.changedAgo", { n: ageOf(file.at) }) : t("fills.changedToday")}`, href: filesHash(folder), onclick: () => (filesUi.pick = name) });
   });
-  const largeBox = files && h("div", { class: "ui-rows", hidden: !fillsUi.largest }, files);
+  const largeBox = files && uiRows(files, { hidden: !fillsUi.largest });
   const largeToggle =
     files &&
     uiEmpty({

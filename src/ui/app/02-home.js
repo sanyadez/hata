@@ -1306,19 +1306,21 @@ function addDialog(closed) {
     const entry = (section) => ({ label: section.label ?? t("add.section." + section.id), icon: section.icon, sub: counted(section), active: section.id === addUi.section && !addUi.find, run: () => ((addUi.section = section.id), (addUi.find = ""), (field.value = ""), paint()) });
     const titled = (group) => ({ title: group ? t("add.group." + group) : null, items: sections.filter((one) => (one.group ?? "") === group).map(entry) });
     const connect = { label: t("add.connect"), icon: "plus", href: storeKinds().length > 0 ? "#/store" : "#/house", run: () => ((state.storeFilter = { query: "", category: storeKinds().length > 0 ? "@" : "" }), dialog.close()) };
-    const fresh = uiSideNav([titled(""), titled("state"), { ...titled("integrations"), items: [...titled("integrations").items, connect] }], { cls: "ui-panes-nav" });
+    const item = (x) => uiSideItem({ label: x.label, icon: x.icon, href: x.href ?? null, onclick: x.run, active: !!x.active, count: x.sub || null });
+    const groups = [titled(""), titled("state"), { ...titled("integrations"), items: [...titled("integrations").items, connect] }];
+    const fresh = uiSide(groups.filter((g) => g.items.length).flatMap((g) => [g.title && uiSideTitle(g.title), ...g.items.map(item)]).filter(Boolean), { cls: "ui-panes-nav" });
     nav.replaceWith(fresh);
     nav = fresh;
     const typed = addUi.find.trim().toLowerCase();
     if (typed) {
       const found = sections.flatMap((section) => section.rows.filter((one) => `${one.title} ${one.sub}`.toLowerCase().includes(typed)));
-      return put(main, found.length ? h("div", { class: "ui-rows" }, found.map(row)) : uiEmpty({ text: t("add.none", { text: addUi.find.trim() }) }));
+      return put(main, found.length ? uiRows(found.map(row)) : uiEmpty({ text: t("add.none", { text: addUi.find.trim() }) }));
     }
     const section = sections.find((one) => one.id === addUi.section);
-    put(main, h("div", { class: "ui-panes-head" }, uiSubhead({ title: section.label ?? t("add.section." + section.id), lead: section.label ? t("add.lead.service") : t("add.lead." + section.id) })), h("div", { class: "ui-rows" }, section.rows.map(row)));
+    put(main, h("div", { class: "ui-panes-head" }, uiSubhead({ title: section.label ?? t("add.section." + section.id), lead: section.label ? t("add.lead.service") : t("add.lead." + section.id) })), uiRows(section.rows.map(row)));
   };
   const field = h("input", { type: "search", placeholder: t("add.find"), "aria-label": t("add.find"), value: addUi.find, autocomplete: "off", oninput: () => ((addUi.find = field.value), paint()) });
-  dialog = openDialog("xwide add-dialog", h("header", null, h("h2", { class: "grow" }, t("home.addTitle")), closeX(() => dialog)), uiSearchBox(field), h("div", { class: "ui-panes" }, nav, main));
+  dialog = openDialog("xwide add-dialog", h("header", null, h("h2", { class: "grow" }, t("home.addTitle")), closeX(() => dialog)), uiSearch(field, { wide: true }), h("div", { class: "ui-panes" }, nav, main));
   if (closed) dialog.addEventListener("close", () => closed(ran));
   paint();
   field.focus();
@@ -1350,7 +1352,7 @@ async function diskPickDialog(pinned) {
   dialog = openDialog(
     "menu",
     h("header", null, h("h2", null, t("home.addDiskTitle"))),
-    disks.length ? h("div", { class: "ui-rows" }, disks.map(row)) : uiEmpty({ text: t("home.noDisks") }),
+    disks.length ? uiRows(disks.map(row)) : uiEmpty({ text: t("home.noDisks") }),
     h("footer", null, closeButton(() => dialog)),
   );
 }

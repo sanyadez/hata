@@ -725,7 +725,7 @@ function renderMyHata() {
     return hataTile({ href: filesHash(one.dir ? one.path : parent, ""), onclick: one.dir ? null : () => (filesUi.pick = name), iconName: one.dir ? "folder" : "file", title: name, sub: one.path, menu: (at) => menuAt(at, menuHeader(name, one.path, one.dir ? "folder" : "file"), [{ label: t("files.copyPath"), icon: "copy", run: () => copyText(one.path) }, { label: t("files.unfavorite"), icon: "star", run: () => favorite(one.path, false, name) }]) });
   };
   const machineTile = (m) => hataTile({ href: m.online ? filesHash("/", m.id) : `#/machines/${m.id}`, iconName: "server", title: m.name, sub: m.online ? machineOs(m) : t("machines.offline"), away: !m.online });
-  const section = (title, tiles, extra) => uiCard({ title, actions: extra }, h("div", { class: "ui-tiles" }, tiles));
+  const section = (title, tiles, extra) => uiCard({ title, actions: extra }, uiTiles(tiles));
   const local = disks.filter((d) => !d.network);
   const network = disks.filter((d) => d.network);
   const machines = machinesUi.list?.machines ?? [];
@@ -763,7 +763,7 @@ function renderMyHata() {
 function renderMySharedFolders() {
   const shares = state.myShares;
   const favorites = state.favorites ?? [];
-  const section = (title, tiles) => uiCard({ title }, h("div", { class: "ui-tiles" }, tiles));
+  const section = (title, tiles) => uiCard({ title }, uiTiles(tiles));
   // a machine that is away keeps its tiles, greyed: its folders open once it is back
   const shareTile = (share, m) => hataTile({ href: filesHash(share.path, m ? m.id : ""), iconName: "share", title: share.name, sub: m && !m.online ? t("machines.offline") : t(share.access === "write" ? "myhata.mayWrite" : "myhata.mayRead"), words: true, away: !!m && !m.online, menu: (at) => sidebarMenu(at, { label: share.name, path: share.path, machine: m ? m.id : "", iconName: "share" }) });
   const favoriteTile = (one) => {
@@ -861,7 +861,7 @@ function filesTable(entries) {
       h("td", { class: "muted ui-files-when" }, fileTime(entry.modified)),
       h("td", { class: "ui-files-tick" }, entryMore(entry)),
     );
-  return uiFilesList([h("th", { class: "ui-files-tick" }, all), h("th", null, t("files.col.name")), h("th", { class: "num" }, t("files.col.size")), h("th", { class: "ui-files-when" }, t("files.col.modified")), h("th")], entries.map(row));
+  return uiFileTable([h("th", { class: "ui-files-tick" }, all), h("th", null, t("files.col.name")), h("th", { class: "num" }, t("files.col.size")), h("th", { class: "ui-files-when" }, t("files.col.modified")), h("th")], entries.map(row));
 }
 
 /** A file without a picture: its extension and what it is, on the colour of its kind */
@@ -1251,12 +1251,12 @@ const newFileDialog = (dir) =>
 
 /** The search field of the folder on screen: names under it, found by the server */
 function findBox(path) {
-  const input = h("input", { type: "search", class: "ui-findbox-input", placeholder: t("files.find"), "aria-label": t("files.find"), value: filesUi.find?.under === path ? filesUi.find.query : "", spellcheck: false });
+  const input = h("input", { type: "search", placeholder: t("files.find"), "aria-label": t("files.find"), value: filesUi.find?.under === path ? filesUi.find.query : "", spellcheck: false });
   let timer;
   const run = async () => {
     const query = input.value.trim();
     if (query.length < 2) {
-      if (filesUi.find) (filesUi.find = null), renderFilesBody(), document.querySelector("#files-main input.ui-findbox-input")?.focus();
+      if (filesUi.find) (filesUi.find = null), renderFilesBody(), document.querySelector("#files-main .ui-find input")?.focus();
       return;
     }
     filesUi.find = { under: path, query, found: null, more: false };
@@ -1270,7 +1270,7 @@ function findBox(path) {
     }
     const caret = input.selectionStart;
     renderFilesBody();
-    const again = document.querySelector("#files-main input.ui-findbox-input");
+    const again = document.querySelector("#files-main .ui-find input");
     if (again) (again.focus(), again.setSelectionRange(caret, caret));
   };
   input.addEventListener("input", () => (clearTimeout(timer), (timer = setTimeout(run, 400))));
@@ -1279,7 +1279,7 @@ function findBox(path) {
     if (e.key === "Escape") ((input.value = ""), clearTimeout(timer), void run());
   });
   // it searches by itself as one types; the button is for whoever does not know that
-  return uiFindBox(input, { label: t("files.findGo"), onclick: () => (clearTimeout(timer), void run(), input.focus()) });
+  return uiSearch(input, { go: { label: t("files.findGo"), onclick: () => (clearTimeout(timer), void run(), input.focus()) } });
 }
 
 /** What a search found: each with the folder it lies in; a folder opens, a file opens its folder with it chosen */
@@ -1309,7 +1309,7 @@ function foundList(find) {
     "div",
     { class: "stack" },
     h("p", { class: "muted small" }, t(find.more ? "files.foundMore" : "files.found", { n: find.found.length, query: find.query })),
-    uiFilesList([h("th", null, t("files.col.name")), h("th", { class: "num" }, t("files.col.size")), h("th", { class: "ui-files-when" }, t("files.col.modified"))], find.found.map(row)),
+    uiFileTable([h("th", null, t("files.col.name")), h("th", { class: "num" }, t("files.col.size")), h("th", { class: "ui-files-when" }, t("files.col.modified"))], find.found.map(row)),
   );
 }
 
@@ -1515,7 +1515,7 @@ function folderPicker({ title, start, confirmLabel, action, allowed = () => true
   let dialog;
   const crumbs = h("div", { class: "ui-path-crumbs wrap" });
   const quick = uiLine([]);
-  const folders = h("div", { class: "ui-rows ui-picker" });
+  const folders = uiRows([], { cls: "ui-picker" });
   const error = h("p", { class: "error", role: "alert" });
   const confirm = button(confirmLabel, {
     class: "primary",
@@ -1555,11 +1555,11 @@ function folderPicker({ title, start, confirmLabel, action, allowed = () => true
     const other = on && machinesUi.list?.machines.find((m) => m.id === on);
     put(crumbs, other && h("span", { class: "with-icon strong" }, icon("server"), other.name), crumb(share ? share.name : "/", base), parts.map((part, i) => [(i > 0 || share) && icon("chevron"), crumb(part, (base === "/" ? "" : base) + "/" + parts.slice(0, i + 1).join("/"))]));
     // the data folder and the disks, one press away wherever the picker is; with `machines` the other machines too
-    const jump = (label, to, iconName, target = on) => uiJump({ label, icon: iconName, active: target === on && (at === to || at.startsWith(to + "/")), onclick: () => show(to, target) });
+    const jump = (label, to, iconName, target = on) => uiChip({ label, icon: iconName, active: target === on && (at === to || at.startsWith(to + "/")), onclick: () => show(to, target) });
     const volumes = on ? [] : outerVolumes(listing);
     const others = machines ? (machinesUi.list?.machines ?? []).filter((m) => m.online) : [];
     if (mine) put(quick, mine.map((one) => jump(one.name, one.path, "share")));
-    else put(quick, (on ? home : listing.home) && jump(t("files.home"), on ? home : listing.home, "home", ""), volumes.map((d) => jump(volumeName(d), d.path, d.network ? "globe" : "disk")), others.map((m) => uiJump({ label: m.name, icon: "server", active: on === m.id, onclick: () => show("/", m.id) })));
+    else put(quick, (on ? home : listing.home) && jump(t("files.home"), on ? home : listing.home, "home", ""), volumes.map((d) => jump(volumeName(d), d.path, d.network ? "globe" : "disk")), others.map((m) => uiChip({ label: m.name, icon: "server", active: on === m.id, onclick: () => show("/", m.id) })));
     quick.hidden = mine ? mine.length < 2 : !volumes.length && !others.length && !on;
     const inner = sortedEntries(listing.entries).filter((entry) => entry.type === "dir" && shown(joinPath(at, entry.name), on));
     put(folders, inner.length ? inner.map((entry) => uiRow({ lead: { icon: "folder" }, name: entry.name, onclick: () => show(joinPath(at, entry.name)) })) : uiEmpty({ text: t("files.noFolders") }));

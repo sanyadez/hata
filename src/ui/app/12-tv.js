@@ -563,8 +563,8 @@ function musicPlayerCard(m, act, error = null) {
   const player = uiCard(
     { cls: "ui-media-player" },
     now
-      ? uiRow({ lead: { icon: now.link ? "globe" : "music" }, name: h("span", { class: "wrap" }, now.title), sub: now.by || null, state: now.paused ? uiState("off", t("tv.paused")) : null, cls: "ui-row-plain" })
-      : uiRow({ lead: { icon: "music" }, name: t("music.idle"), sub: t("music.idleLead"), cls: "ui-row-plain" }),
+      ? uiRows(uiRow({ lead: { icon: now.link ? "globe" : "music" }, name: h("span", { class: "wrap" }, now.title), sub: now.by || null, state: now.paused ? uiState("off", t("tv.paused")) : null }), { inCard: true })
+      : uiRows(uiRow({ lead: { icon: "music" }, name: t("music.idle"), sub: t("music.idleLead") }), { inCard: true }),
     seek && uiSeek(tvClock(now.position), seek, tvClock(now.duration)),
     uiKeys([round("previous", "previous"), uiKey({ icon: now && !now.paused ? "pause" : "play", kind: "main", label: t("music.key.playpause"), disabled: !now, run: () => press("playpause") }), round("next", "next"), round("stop", "stop")], "row"),
     uiVolume(h("button", { type: "button", class: "icon-btn", title: t("music.key.mute"), "aria-label": t("music.key.mute"), disabled: !m.running, onclick: () => press("mute", !m.muted) }, icon(m.muted ? "volumeOff" : "volume")), volume, h("span", { class: "muted small mono" }, m.volume + " %")),
@@ -615,10 +615,7 @@ function paintMusic() {
   const queue = uiCard(
     { title: t("music.queueTitle"), count: m.queue.length || null, flush: true, actions: m.queue.length > 1 && [button(t("music.key.shuffle"), { class: "small", onclick: () => press("shuffle") }, "shuffle"), button(t("music.key.clear"), { class: "small", onclick: () => press("clear") }, "x")] },
     m.queue.length
-      ? h(
-          "div",
-          { class: "ui-rows" },
-          shown.map((q, i) =>
+      ? uiRows([shown.map((q, i) =>
             uiRow({
               lead: q.current ? { icon: "play", tone: "info" } : { icon: q.link ? "globe" : "music" },
               name: q.title,
@@ -627,14 +624,12 @@ function paintMusic() {
               onclick: () => press("jump", i),
               more: [{ label: t("music.key.jump"), icon: "play", run: () => press("jump", i) }, { label: t("music.key.remove"), icon: "x", run: () => press("remove", i) }],
             }),
-          ),
-          m.queue.length > shown.length && uiEmpty({ text: t("music.more", { n: m.queue.length - shown.length }), action: button(t("ui.showMore"), { class: "small quiet", onclick: () => ((musicUi.all = true), paintMusic()) }, "down") }),
-        )
+          ), m.queue.length > shown.length && uiEmpty({ text: t("music.more", { n: m.queue.length - shown.length }), action: button(t("ui.showMore"), { class: "small quiet", onclick: () => ((musicUi.all = true), paintMusic()) }, "down") })])
       : uiEmpty({ text: t("music.queueEmpty") }),
   );
   const nowState = m.now ? (m.now.paused ? uiState("off", t("tv.paused")) : uiState("ok", t("music.statePlaying"))) : uiState("off", t("music.silent"));
   houseHead({ icon: "music", title: t("music.title"), state: nowState, actions: [{ label: t("music.link"), icon: "link", run: musicLinkDialog }, { label: t("music.folder"), icon: "folder", primary: true, run: musicFolder }] });
-  put(box, uiSplit(h("div", { class: "stack" }, player, musicSpeakerCard(m, act)), queue));
+  put(box, uiColumns(queue, [player, musicSpeakerCard(m, act)], { sideLeft: true }));
 }
 
 async function loadTv() {
@@ -648,7 +643,7 @@ async function loadTv() {
   // a slider under the finger or a list that is open is not redrawn under the person
   // nor the picture of the screen while it has this device's whole screen: taken out of the page for a moment, it would fall back
   // nor a field somebody is typing an address into
-  if (state.tv && !tvUi.busy && !document.fullscreenElement && !document.activeElement?.closest?.("#tv-body .ui-input-line") && !document.querySelector("dialog[open]:not(.tv-drop)") && !document.querySelector("#tv-body input[type=range]:active")) paintTv();
+  if (state.tv && !tvUi.busy && !document.fullscreenElement && !document.activeElement?.closest?.("#tv-body .ui-affix") && !document.querySelector("dialog[open]:not(.tv-drop)") && !document.querySelector("#tv-body input[type=range]:active")) paintTv();
   // while the player runs the page keeps up with what plays
   tvUi.timer = setTimeout(loadTv, state.tv?.running || state.tv?.browser?.running ? 2000 : 8000);
 }
@@ -685,7 +680,7 @@ function tvRemoteParts(tv, press, turnOn) {
     idle
       ? note("refresh", t("tv.starting"), t("tv.startingLead"))
       : now
-        ? uiNow({ title: now.title, state: now.paused && uiState("off", t("tv.paused")), action: round("stop", "stop", t("tv.key.stop")), sub: file && file !== now.title ? file : null }, position, uiTimes(tvClock(now.time), tvClock(now.total)), tracks, (isLink(now.file) ? tvStreams() : now.file.startsWith("/") && (tvStreams() ? TV_PLAYS_RE.test(now.file) && fileKind({ type: "file", name: now.file }) !== "image" : TV_BROWSER_RE.test(now.file))) && uiLine([button(t("tv.toBrowser"), { class: "small", onclick: () => moveToBrowser(now) }, "external")]))
+        ? uiNowPlaying({ title: now.title, state: now.paused && uiState("off", t("tv.paused")), action: round("stop", "stop", t("tv.key.stop")), sub: file && file !== now.title ? file : null }, position, uiTimes(tvClock(now.time), tvClock(now.total)), tracks, (isLink(now.file) ? tvStreams() : now.file.startsWith("/") && (tvStreams() ? TV_PLAYS_RE.test(now.file) && fileKind({ type: "file", name: now.file }) !== "image" : TV_BROWSER_RE.test(now.file))) && uiLine([button(t("tv.toBrowser"), { class: "small", onclick: () => moveToBrowser(now) }, "external")]))
         : note("tv", t("tv.nothingTitle"), t("tv.nothing")),
     uiKeys([skip("rewind", "back30", t("tv.key.rewind")), uiKey({ icon: now && !now.paused ? "pause" : "play", kind: "main", label: t("tv.key.playpause"), disabled: idle || !now, run: () => press("playpause") }), skip("forward", "fwd30", t("tv.key.forward"))], "transport"),
     uiVolume(round("mute", tv.muted ? "volumeOff" : "volume", t(tv.muted ? "tv.unmute" : "tv.mute"), tv.muted), volume, uiVolumeValue(tv.muted ? t("tv.muted") : `${tv.volume}%`, tv.muted)),
@@ -1057,7 +1052,7 @@ function tvAddressRow(start, label, key = "", placeholder = "https://") {
     go.disabled = false;
   };
   field.addEventListener("keydown", (e) => e.key === "Enter" && void send());
-  const row = uiInputLine(field, go);
+  const row = uiAffix(field, go);
   if (key) tvUi.fields[key] = { field, row, last: start };
   return row;
 }
@@ -1116,7 +1111,7 @@ function tvPageParts(tv, address = true) {
     uiRule(),
   ];
   return [
-    uiNow({ title: b.title || t(b.url ? "tv.page.blank" : "tv.page.home"), state: b.left > 0 && uiState("warn", t("tv.page.left", { time: tvClock(b.left) })), sub: b.url || null }),
+    uiNowPlaying({ title: b.title || t(b.url ? "tv.page.blank" : "tv.page.home"), state: b.left > 0 && uiState("warn", t("tv.page.left", { time: tvClock(b.left) })), sub: b.url || null }),
     player,
     address && tvAddressRow("", t("tv.page.show"), "drop"),
     address && uiRule(),
@@ -1153,7 +1148,7 @@ function tvDropdown(at) {
     try {
       const tv = (state.tv = await api("GET", "/api/tv"));
       // a slider under the finger is not redrawn under it, nor the window while it is pulled down
-      if (!body.querySelector("input[type=range]:active") && !document.activeElement?.closest?.(".tv-drop .ui-input-line") && !document.querySelector("dialog.select-list[open]") && !dialog.classList.contains("pulled")) put(body, tvRemoteParts(tv, press, turnOn));
+      if (!body.querySelector("input[type=range]:active") && !document.activeElement?.closest?.(".tv-drop .ui-affix") && !document.querySelector("dialog.select-list[open]") && !dialog.classList.contains("pulled")) put(body, tvRemoteParts(tv, press, turnOn));
     } catch (e) {
       put(body, uiEmpty({ tone: "bad", text: errorText(e) }));
     }
@@ -1257,7 +1252,7 @@ function tvShowCard(tv, keep, missing) {
       actions: marks.length > 0 && button(t(editing ? "tv.marks.done" : "tv.marks.change"), { class: "small" + (editing ? " primary" : ""), onclick: () => ((tvUi.editMarks = !editing), paintTv()) }, editing ? "check" : "edit"),
     },
     tvAddressRow("", t("tv.page.show"), "show", t("tv.show.placeholder")),
-    uiMarks(!editing && uiMarkTile({ mark: uiMark({ icon: "home", tone: "accent" }), name: t("tv.marks.start"), sub: t("tv.marks.startHint"), on: tv.screen === "browser" && !b.url, run: () => void tvStartPage(tv) }), marks.map(tile), !editing && uiMarkAdd(t("tv.marks.new"), add)),
+    uiTiles([!editing && uiMarkTile({ mark: uiMark({ icon: "home", tone: "accent" }), name: t("tv.marks.start"), sub: t("tv.marks.startHint"), on: tv.screen === "browser" && !b.url, run: () => void tvStartPage(tv) }), marks.map(tile), !editing && uiMarkAdd(t("tv.marks.new"), add)], { kind: "sites" }),
   );
 }
 
@@ -1347,12 +1342,7 @@ function paintTv() {
   const foldersCard = [
     uiLine([button(t("tv.folderAdd"), { class: "small", onclick: addFolder }, "plus")], { end: true }),
     h("p", { class: "muted small" }, t("tv.foldersLead")),
-    h(
-      "div",
-      { class: "ui-rows" },
-      tv.folders.length ? tv.folders.map((path) => uiRow({ lead: { icon: "folder" }, name: h("a", { class: "link wrap", href: filesHash(path) }, path), action: button(t("tv.folderRemove"), { class: "small ghost", onclick: () => void change({ folders: tv.folders.filter((x) => x !== path) }) }) })) : uiEmpty({ text: t("tv.noFolders") }),
-      tv.suggested.map((path) => uiRow({ lead: { icon: "folder" }, name: h("span", { class: "muted wrap" }, path), action: button(t("tv.folderUse"), { class: "small", onclick: () => void change({ folders: [...tv.folders, path] }) }) })),
-    ),
+    uiRows([tv.folders.length ? tv.folders.map((path) => uiRow({ lead: { icon: "folder" }, name: h("a", { class: "link wrap", href: filesHash(path) }, path), action: button(t("tv.folderRemove"), { class: "small ghost", onclick: () => void change({ folders: tv.folders.filter((x) => x !== path) }) }) })) : uiEmpty({ text: t("tv.noFolders") }), tv.suggested.map((path) => uiRow({ lead: { icon: "folder" }, name: h("span", { class: "muted wrap" }, path), action: button(t("tv.folderUse"), { class: "small", onclick: () => void change({ folders: [...tv.folders, path] }) }) }))]),
   ];
 
   // one of Kodi's own settings as a row: a list of Kodi's values or of ours, or a switch
@@ -1371,7 +1361,7 @@ function paintTv() {
   ];
   const audioCard = tv.audio && tv.audio.options.length > 0 && [
     settingRow(t("tv.audio"), t("tv.audioHint"), h("select", { onchange: (e) => void change({ audio: e.target.value }) }, tv.audio.options.map((o) => h("option", { value: o.value, selected: o.value === tv.audio.value }, o.label)))),
-    settingRow(t("tv.offset"), t("tv.offsetHint"), uiLine([button("", { class: "small", title: t("tv.offsetEarlier"), "aria-label": t("tv.offsetEarlier"), disabled: tv.audio.offset <= -2000, onclick: () => void change({ offset: tv.audio.offset - 25 }) }, "previous"), uiStepValue(t(tv.audio.offset < 0 ? "tv.offsetBefore" : tv.audio.offset > 0 ? "tv.offsetAfter" : "tv.offsetNone", { ms: Math.abs(tv.audio.offset) })), button("", { class: "small", title: t("tv.offsetLater"), "aria-label": t("tv.offsetLater"), disabled: tv.audio.offset >= 2000, onclick: () => void change({ offset: tv.audio.offset + 25 }) }, "next")])),
+    settingRow(t("tv.offset"), t("tv.offsetHint"), uiValueStepper({ small: true, value: t(tv.audio.offset < 0 ? "tv.offsetBefore" : tv.audio.offset > 0 ? "tv.offsetAfter" : "tv.offsetNone", { ms: Math.abs(tv.audio.offset) }), less: { label: t("tv.offsetEarlier"), icon: "previous", disabled: tv.audio.offset <= -2000, run: () => void change({ offset: tv.audio.offset - 25 }) }, more: { label: t("tv.offsetLater"), icon: "next", disabled: tv.audio.offset >= 2000, run: () => void change({ offset: tv.audio.offset + 25 }) } })),
     listed("audiooutput.channels", t("tv.channels"), t("tv.channelsHint")),
     flag("audiooutput.passthrough", t("tv.passthrough"), t("tv.passthroughHint")),
     flag("audiooutput.guisoundmode", t("tv.menuSounds"), null),
@@ -1528,13 +1518,13 @@ function paintTv() {
   ];
   const screenRows = [
     row("display", "screen", screens.length ? screens.map((d) => [d.monitor, d.name].filter(Boolean).join(" · ")).join(", ") : t("tv.noScreenTitle"), screens.length ? [screens[0].mode.replace("x", "×"), t(screens[0].audio ? "tv.screenSound" : "tv.screenSilent")].filter(Boolean).join(" · ") : t(tv.displays.length ? "tv.noScreen" : "tv.noOutput"), screenFacts),
-    row("remotes", "remote", t("tv.remotes"), tv.remotes.length ? tv.remotes.join(", ") : t("tv.set.noRemotes"), tv.remotes.length ? h("div", { class: "ui-rows" }, tv.remotes.map((name) => uiRow({ lead: { icon: "remote" }, name }))) : h("p", { class: "muted" }, t("tv.set.noRemotes"))),
+    row("remotes", "remote", t("tv.remotes"), tv.remotes.length ? tv.remotes.join(", ") : t("tv.set.noRemotes"), tv.remotes.length ? uiRows(tv.remotes.map((name) => uiRow({ lead: { icon: "remote" }, name }))) : h("p", { class: "muted" }, t("tv.set.noRemotes"))),
     row("how", "info", t("tv.set.how"), t("tv.set.howShort"), [h("p", { class: "muted" }, t("tv.remotesHint")), h("p", { class: "muted" }, t("tv.remotesHint.browser"))]),
   ];
   const apiRows = [row("api", "code", "Home Assistant", t("tv.api.short"), apiBody)];
   const setCard = uiCard(
     { title: t("tv.settings"), flush: true, actions: tabs.length > 1 && uiSegment(tabs.map(([id, label]) => ({ value: id, label })), tab, (id) => ((tvUi.tab = id), paintTv()), { label: t("tv.settings") }) },
-    h("div", { class: "ui-rows" }, tab === "kodi" ? kodiRows : tab === "api" ? apiRows : screenRows),
+    uiRows(tab === "kodi" ? kodiRows : tab === "api" ? apiRows : screenRows),
   );
 
   const main = uiCard({ id: "tv-main", title: t("tv.onScreen"), lead: t("tv.mode." + (tv.screen === "browser" || tv.screen === "kodi" || tv.screen === "dark" ? tv.screen : "off")), actions: [modes, moreButton] }, uiScreenSplit(stage, zones));
@@ -1620,7 +1610,7 @@ async function turnModuleOn(id, then = "") {
     // what went on just now, the asked one first: "Undo" turns those off again
     const turned = res.modules.filter((m) => m.on && !before[m.id]).map((m) => m.id).sort((a, b) => (a === id ? -1 : b === id ? 1 : 0));
     modulesChanged(res.modules);
-    uiToastWith(t("modules.nowOn", { name: moduleName(id) }), t("modules.undo"), async () => {
+    toast(t("modules.nowOn", { name: moduleName(id) }), "info", { action: { label: t("modules.undo"), run: async () => {
       for (const one of turned) {
         try {
           modulesChanged((await api("PUT", `/api/modules/${one}`, { on: false })).modules);
@@ -1628,7 +1618,7 @@ async function turnModuleOn(id, then = "") {
           return toast(errorText(e), "error");
         }
       }
-    });
+    } } });
     if (then) go(then);
   };
   try {
@@ -1653,7 +1643,7 @@ async function turnModuleOn(id, then = "") {
         }
       },
     }, "check");
-    dialog = openDialog("confirm", h("h2", { class: "wrap" }, t("modules.needsTitle", { name: moduleName(id), needs: needs.map(moduleName).join(", ") })), h("p", { class: "muted" }, t("modules.needsLead", { name: moduleName(id), needs: needs.map(moduleName).join(", ") })), h("div", { class: "ui-rows" }, [...needs, id].map(one)), error, h("footer", null, closeButton(() => dialog, t("common.cancel")), both));
+    dialog = openDialog("confirm", h("h2", { class: "wrap" }, t("modules.needsTitle", { name: moduleName(id), needs: needs.map(moduleName).join(", ") })), h("p", { class: "muted" }, t("modules.needsLead", { name: moduleName(id), needs: needs.map(moduleName).join(", ") })), uiRows([...needs, id].map(one)), error, h("footer", null, closeButton(() => dialog, t("common.cancel")), both));
   }
 }
 
@@ -1665,7 +1655,7 @@ function moduleHeldDialog(m) {
   // the module that stands on it can be turned off right from here — if nothing holds that one in its turn
   const offToo = (other) => uiRow({ lead: { icon: MODULE_ICONS[other] }, name: t("modules.heldBy", { name: moduleName(other) }), action: button(t("modules.turnItOff"), { class: "small", onclick: () => { dialog.close(); const that = (state.modulesList ?? []).find((x) => x.id === other); if (that) void turnModuleOff(that); } }) });
   const rows = [...m.neededBy.map(offToo), ...m.uses.map((use) => line(MODULE_ICONS[m.id], t("modules.use." + use.what, { n: use.count ?? "" }), MODULE_USE_AT[use.what] ?? "#/settings/modules"))];
-  dialog = openDialog("confirm", h("h2", { class: "wrap" }, t("modules.heldTitle")), h("p", { class: "muted" }, t(m.neededBy.length ? "modules.neededLead" : "modules.heldLead", { name: moduleName(m.id), by: m.neededBy.map(moduleName).join(", ") })), h("div", { class: "ui-rows" }, rows), h("footer", null, button(t("modules.understood"), { class: "primary", onclick: () => dialog.close() })));
+  dialog = openDialog("confirm", h("h2", { class: "wrap" }, t("modules.heldTitle")), h("p", { class: "muted" }, t(m.neededBy.length ? "modules.neededLead" : "modules.heldLead", { name: moduleName(m.id), by: m.neededBy.map(moduleName).join(", ") })), uiRows(rows), h("footer", null, button(t("modules.understood"), { class: "primary", onclick: () => dialog.close() })));
 }
 
 async function turnModuleOff(m) {
@@ -1686,7 +1676,7 @@ async function turnModuleOff(m) {
 /** In place of a page or a section of a module that is off: what it is, and the button */
 function moduleOffCard(id) {
   const turn = isAdmin() && button(t("modules.turnOn"), { class: "primary", onclick: (e) => ((e.currentTarget.disabled = true), void turnModuleOn(id)) }, "check");
-  return uiCard({}, uiRow({ lead: { icon: MODULE_ICONS[id] }, name: moduleName(id), sub: [t(`modules.${id}.what`), " ", t("modules.offLead")], state: uiState("off", t("modules.off")), action: turn || null, cls: "ui-row-plain" }));
+  return uiCard({}, uiRows(uiRow({ lead: { icon: MODULE_ICONS[id] }, name: moduleName(id), sub: [t(`modules.${id}.what`), " ", t("modules.offLead")], state: uiState("off", t("modules.off")), action: turn || null }), { inCard: true }));
 }
 
 /** What was found here that a module is for, by module; asked once a page and kept */
@@ -1708,10 +1698,10 @@ function modulesSection() {
     const flip = uiSwitch({ on: m.on, label: t(m.on ? "modules.turnOff" : "modules.turnOn") + ": " + moduleName(m.id), onchange: (on) => (on ? turnModuleOn(m.id) : turnModuleOff(m)).finally(() => state.route.view === "settings" && renderSettings()) });
     return uiFeature(
       { icon: MODULE_ICONS[m.id], name: moduleName(m.id), state: uiState(held ? "info" : m.on ? "ok" : "off", t(held ? "modules.inUse" : m.on ? "modules.on" : "modules.off")), control: flip, on: m.on, what: t(`modules.${m.id}.what`) },
-      m.uses.map((use) => uiFeatureChip({ href: MODULE_USE_AT[use.what] ?? MODULE_HOME[m.id], icon: "link", text: t("modules.use." + use.what, { n: use.count ?? "" }) })),
-      m.neededBy.map((other) => uiFeatureChip({ icon: "link", text: t("modules.neededFor", { name: moduleName(other) }) })),
+      m.uses.map((use) => uiChip({ tone: "info", href: MODULE_USE_AT[use.what] ?? MODULE_HOME[m.id], icon: "link", label: t("modules.use." + use.what, { n: use.count ?? "" }) })),
+      m.neededBy.map((other) => uiChip({ tone: "info", icon: "link", label: t("modules.neededFor", { name: moduleName(other) }) })),
       m.needs.length > 0 && h("p", { class: "muted small" }, "↳ ", t("modules.needsModule", { needs: m.needs.map(moduleName).join(", ") })),
-      !m.on && findsFor(m.id).map((f) => uiFeatureChip({ icon: "search", text: findWords(f), found: true })),
+      !m.on && findsFor(m.id).map((f) => uiChip({ icon: "search", label: findWords(f), tone: "found" })),
       uiFeatureFoot({ icon: m.on ? "check" : "plus", text: [t(m.on ? "modules.added" : "modules.willAdd"), " ", t(`modules.${m.id}.adds`)], link: m.on && h("a", { class: "link", href: MODULE_HOME[m.id] }, t("common.open")) }),
     );
   };
@@ -1721,13 +1711,13 @@ function modulesSection() {
     uiCard(
       { lead: t("modules.lead") },
       ...uiFacts([[t("modules.on"), h("strong", null, t("modules.count", { on: list.filter((m) => m.on).length, of: list.length }))]]),
-      uiBandNote({ icon: "home", title: t("modules.base"), text: t("modules.baseList") }),
+      uiNotice({ tone: "accent", icon: "home", title: t("modules.base"), text: t("modules.baseList") }),
       // on a phone the groups are chosen one at a time
       phone && uiSegment(["", ...MODULE_GROUPS].map((group) => ({ value: group, label: group ? t("modules.group." + group) : t("modules.all") })), settingsUi.moduleGroup ?? "", (group) => ((settingsUi.moduleGroup = group), renderSettings()), { label: t("modules.all") }),
     ),
     MODULE_GROUPS.filter((group) => !phone || !settingsUi.moduleGroup || settingsUi.moduleGroup === group).map((group) => {
       const mine = list.filter((m) => m.group === group);
-      return mine.length > 0 && uiCard({ title: t("modules.group." + group), count: t("modules.groupCount", { on: mine.filter((m) => m.on).length, of: mine.length }) }, uiFeatures(mine.map(card)));
+      return mine.length > 0 && uiCard({ title: t("modules.group." + group), count: t("modules.groupCount", { on: mine.filter((m) => m.on).length, of: mine.length }) }, uiTiles(mine.map(card), { kind: "features" }));
     }),
   ];
 }
@@ -2164,7 +2154,7 @@ async function moveDataDialog(suggested = "") {
     "wide",
     h("h2", null, t("data.moveTitle")),
     h("p", { class: "muted" }, t("data.moveLead", { from: s.dataRoot })),
-    uiField(t("data.target"), uiInputLine(target, button(t("data.choose"), { onclick: () => folderPicker({ title: t("data.chooseTitle"), start: target.value.startsWith("/") ? target.value : "", confirmLabel: t("edit.pickHere"), action: (path) => void ((target.value = path), (go.disabled = false)) }) }, "folder")), t("data.targetHint"), { group: true }),
+    uiField(t("data.target"), uiAffix(target, button(t("data.choose"), { onclick: () => folderPicker({ title: t("data.chooseTitle"), start: target.value.startsWith("/") ? target.value : "", confirmLabel: t("edit.pickHere"), action: (path) => void ((target.value = path), (go.disabled = false)) }) }, "folder")), t("data.targetHint"), { group: true }),
     places.length > 0 && uiLine(places.map((path) => button(`${path}/DATA`, { class: "small mono", onclick: () => ((target.value = `${path}/DATA`), (go.disabled = false)) }))),
     uiNotice({ tone: "warn", text: t("data.moveWarn") }),
     error,
@@ -2292,11 +2282,7 @@ function settingsSection(section) {
     return [
       uiCard(
         { title: t("settings.stores"), count: stores.length || null, actions: button(t("store.sync"), { class: "small", onclick: syncStores }, "refresh") },
-        h(
-          "div",
-          { class: "ui-rows ui-rows-flush" },
-          stores.map((store) => uiRow({ lead: { icon: "store" }, name: store.id, sub: store.url, value: t("settings.storeApps", { n: store.apps }) + (store.syncedAt ? " · " + ago(store.syncedAt) : ""), more: [{ label: t("store.remove") + "…", icon: "trash", danger: true, run: () => removeStoreDialog(store) }] })),
-        ),
+        uiRows(stores.map((store) => uiRow({ lead: { icon: "store" }, name: store.id, sub: store.url, value: t("settings.storeApps", { n: store.apps }) + (store.syncedAt ? " · " + ago(store.syncedAt) : ""), more: [{ label: t("store.remove") + "…", icon: "trash", danger: true, run: () => removeStoreDialog(store) }] })), { inCard: true }),
         addStoreForm(),
         h("p", { class: "muted small" }, t("settings.storesHint")),
       ),
