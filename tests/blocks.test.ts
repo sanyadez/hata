@@ -33,7 +33,7 @@ const LEFT: Record<string, Record<string, number>> = {
   "13-network.js": { card: 9, row: 5, mark: 20 },
   "14-domains.js": { card: 7, row: 0, mark: 1 },
   "15-storage.js": { card: 2, row: 8, mark: 27 },
-  "16-people.js": { card: 20, row: 3, mark: 9 },
+  "16-people.js": { card: 7, row: 0, mark: 7 },
   "17-start.js": { card: 0, row: 0, mark: 1 },
 };
 

@@ -3048,3 +3048,6 @@ dialog .modes:not(:has(.mode-x)) { width: 100%; box-sizing: border-box; }
 .ui-band-plain { font-size: 12px; font-weight: 600; color: var(--muted); }
 .card.pad > .ui-rows.bare > .ui-row { padding-inline: 0; }
 .card.pad > .ui-rows.bare > .ui-row:last-child { border-bottom: 0; }
+.ui-setting:has(+ .error:empty + .block-foot) { border-bottom: 0; }
+/* a fact whose value is a sentence reads from the left */
+.kv > .level-hint { text-align: left; max-width: 70%; }

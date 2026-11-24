@@ -1078,79 +1078,51 @@ function removeAgentKey(key) {
 function agentsSection() {
   const keys = state.agents;
   if (!keys) return waitMark();
-  const row = (key) =>
-    h(
-      "div",
-      { class: "snapshot" },
-      h(
-        "div",
-        { class: "grow" },
-        h("strong", null, key.name, h("span", { class: "state agent-level " + key.level }, t("agents.level." + key.level))),
-        h("div", { class: "muted small" }, [key.via ? t("agents.via", { client: key.via }) : `hata_…${key.hint}`, t("agents.createdBy", { user: key.createdBy, when: ago(key.createdAt) }), key.lastUsed ? t("agents.lastUsed", { when: ago(key.lastUsed), ip: key.lastIp }) : t("agents.neverUsed")].join(" · ")),
-      ),
+  const row = (key) => {
+    const confirm =
       key.level === "full" &&
-        h(
-          "label",
-          { class: "check small", title: t("agents.confirm") },
-          h("input", {
-            type: "checkbox",
-            checked: key.confirm,
-            onchange: async (e) => {
-              await api("PATCH", `/api/agents/${key.id}`, { confirm: e.target.checked }).catch((err) => toast(errorText(err), "error"));
-              void loadSettings();
-            },
-          }),
-          h("span", null, t("agents.confirm.short")),
-        ),
-      h("button", { type: "button", class: "icon-btn", "aria-label": t("agents.rename"), title: t("agents.rename"), onclick: () => renameAgentKey(key) }, icon("edit")),
-      h("button", { type: "button", class: "icon-btn", "aria-label": t("agents.remove"), title: t("agents.remove"), onclick: () => removeAgentKey(key) }, icon("trash")),
-    );
+      h("input", {
+        type: "checkbox",
+        class: "switch",
+        role: "switch",
+        checked: key.confirm,
+        "aria-label": t("agents.confirm"),
+        title: t("agents.confirm"),
+        onchange: async (e) => {
+          await api("PATCH", `/api/agents/${key.id}`, { confirm: e.target.checked }).catch((err) => toast(errorText(err), "error"));
+          void loadSettings();
+        },
+      });
+    return uiRow({
+      lead: { icon: "key" },
+      name: h("span", null, key.name, " ", uiTag(t("agents.level." + key.level))),
+      sub: [key.via ? t("agents.via", { client: key.via }) : `hata_…${key.hint}`, t("agents.createdBy", { user: key.createdBy, when: ago(key.createdAt) }), key.lastUsed ? t("agents.lastUsed", { when: ago(key.lastUsed), ip: key.lastIp }) : t("agents.neverUsed")].join(" · "),
+      value: confirm && h("label", { class: "with-state" }, h("span", { class: "small muted" }, t("agents.confirm.short")), confirm),
+      more: [{ label: t("agents.rename"), icon: "edit", run: () => renameAgentKey(key) }, { label: t("agents.remove") + "…", icon: "trash", danger: true, run: () => removeAgentKey(key) }],
+    });
+  };
   const waiting = state.approvals ?? [];
   return [
     waiting.length > 0 &&
-      h(
-        "section",
-        { class: "card pad" },
-        h("h2", null, t("approvals.waiting")),
-        h("p", { class: "muted" }, t("approvals.hint")),
-        h(
-          "div",
-          { class: "snapshot-list agent-keys" },
-          waiting.map((ask) =>
-            h(
-              "div",
-              { class: "snapshot" },
-              h("div", { class: "grow" }, h("strong", null, ask.agent), h("div", { class: "muted small" }, [t("approvals.text", { what: askedWhat(ask) }), ago(ask.at)].join(" · "))),
-              typeof ask.args.compose === "string" && button(t("approvals.look"), { class: "small", onclick: () => approvalDialog(ask) }),
-              button(t("approvals.decline"), { class: "small", onclick: () => answerAsk(ask, false) }),
-              button(t("approvals.allow"), { class: "small danger", onclick: () => answerAsk(ask, true) }),
-            ),
-          ),
+      uiCard(
+        { title: t("approvals.waiting"), count: waiting.length, lead: t("approvals.hint"), flush: true, cls: "area-attention" },
+        waiting.map((ask) =>
+          uiRow({
+            lead: { icon: "alert", tone: "warn" },
+            name: ask.agent,
+            sub: [t("approvals.text", { what: askedWhat(ask) }), ago(ask.at)].join(" · "),
+            action: h("span", { class: "row-actions" }, typeof ask.args.compose === "string" && button(t("approvals.look"), { class: "small", onclick: () => approvalDialog(ask) }, "eye"), button(t("approvals.decline"), { class: "small", onclick: () => answerAsk(ask, false) }), button(t("approvals.allow"), { class: "small danger", onclick: () => answerAsk(ask, true) })),
+          }),
         ),
       ),
-    h(
-      "section",
-      { class: "card pad" },
-      h("div", { class: "section-head" }, h("h2", null, t("agents.title")), button(t("agents.new"), { class: "small primary", onclick: agentDialog }, "plus")),
-      h("p", { class: "muted" }, t("agents.lead")),
-      keys.length ? h("div", { class: "snapshot-list agent-keys" }, keys.map(row)) : h("p", { class: "muted small" }, t("agents.none")),
+    uiCard({ title: t("agents.title"), count: keys.length || null, lead: t("agents.lead"), flush: true, actions: button(t("agents.new"), { class: "small primary", onclick: agentDialog }, "plus") }, keys.length ? keys.map(row) : uiEmpty({ text: t("agents.none") })),
+    uiCard(
+      { title: t("agents.how.title"), lead: t("agents.how.address") },
+      uiCommand(mcpAddress()),
+      location.protocol === "http:" && uiNotice({ tone: "info", text: t("agents.how.plain") }),
+      h("p", { class: "muted small" }, t("agents.how.signin")),
     ),
-    h(
-      "section",
-      { class: "card pad stack-s" },
-      h("h2", null, t("agents.how.title")),
-      h("p", { class: "muted" }, t("agents.how.address")),
-      copyBox(mcpAddress()),
-      location.protocol === "http:" && h("p", { class: "muted small" }, t("agents.how.plain")),
-      h("p", { class: "muted" }, t("agents.how.signin")),
-    ),
-    h(
-      "section",
-      { class: "card pad" },
-      h("h2", null, t("agents.levels.title")),
-      AGENT_LEVELS.map((id) => h("div", { class: "setting" }, h("div", { class: "grow" }, h("strong", null, t("agents.level." + id)), h("p", { class: "muted small" }, t(`agents.level.${id}.hint`))))),
-      h("p", { class: "muted small agent-never" }, t("agents.never")),
-    ),
+    uiCard({ title: t("agents.levels.title") }, ...uiFacts(AGENT_LEVELS.map((id) => [t("agents.level." + id), h("span", { class: "muted small level-hint" }, t(`agents.level.${id}.hint`))])), uiNotice({ tone: "warn", text: t("agents.never") })),
   ];
 }
 
@@ -1619,79 +1591,74 @@ const SESSIONS_SHOWN = 8;
 const accountUi = { allSessions: false };
 function accountSection() {
   const account = state.account;
-  const sessionsCard = h(
-    "section",
-    { class: "card pad" },
-    h("div", { class: "section-head" }, h("h2", null, t("account.sessions")), account.sessions.length > 1 && state.user.role !== "guest" && button(t("account.signOutOthers"), { class: "small", onclick: async () => (await api("DELETE", "/api/account/sessions/others").catch((e) => toast(errorText(e), "error")), loadSettings()) })),
-    // the device in hand first, then the latest; a long list is cut and "More" shows the rest
-    [...account.sessions].sort((a, b) => Number(!!b.current) - Number(!!a.current) || (b.lastSeen ?? 0) - (a.lastSeen ?? 0)).slice(0, accountUi.allSessions ? undefined : SESSIONS_SHOWN).map((session) =>
-      settingRow(
-        h("span", null, deviceName(session.userAgent), session.current && h("span", { class: "chip ok" }, t("account.thisDevice"))),
-        [session.ip, t("account.lastSeen", { time: ago(session.lastSeen) })].filter(Boolean).join(" · "),
-        !session.current &&
-          state.user.role !== "guest" &&
-          button(t("account.signOutDevice"), {
-            class: "small",
-            onclick: async () => {
-              await api("DELETE", `/api/account/sessions/${session.id}`).catch((e) => toast(errorText(e), "error"));
-              void loadSettings();
-            },
-          }),
-      ),
-    ),
-    !accountUi.allSessions && account.sessions.length > SESSIONS_SHOWN && h("div", null, button(t("load.more", { n: account.sessions.length - SESSIONS_SHOWN }), { class: "small ghost", onclick: () => ((accountUi.allSessions = true), void loadSettings()) })),
+  const signOut = async (session) => {
+    await api("DELETE", `/api/account/sessions/${session.id}`).catch((e) => toast(errorText(e), "error"));
+    void loadSettings();
+  };
+  const sessionRow = (session) =>
+    uiRow({
+      lead: { icon: "screen" },
+      name: h("span", null, deviceName(session.userAgent), session.current && " ", session.current && uiTag(t("account.thisDevice"))),
+      sub: [session.ip, t("account.lastSeen", { time: ago(session.lastSeen) })].filter(Boolean).join(" · "),
+      action: !session.current && state.user.role !== "guest" && button(t("account.signOutDevice"), { class: "small", onclick: () => signOut(session) }),
+    });
+  // the device in hand first, then the latest; a long list is cut and "More" shows the rest
+  const sessions = [...account.sessions].sort((a, b) => Number(!!b.current) - Number(!!a.current) || (b.lastSeen ?? 0) - (a.lastSeen ?? 0));
+  const sessionsCard = uiCard(
+    { title: t("account.sessions"), count: sessions.length, flush: true, actions: account.sessions.length > 1 && state.user.role !== "guest" && button(t("account.signOutOthers"), { class: "small", onclick: async () => (await api("DELETE", "/api/account/sessions/others").catch((e) => toast(errorText(e), "error")), loadSettings()) }, "signout") },
+    sessions.slice(0, accountUi.allSessions ? undefined : SESSIONS_SHOWN).map(sessionRow),
+    !accountUi.allSessions && sessions.length > SESSIONS_SHOWN && uiEmpty({ text: t("load.more", { n: sessions.length - SESSIONS_SHOWN }), action: button(t("ui.showMore"), { class: "small quiet", onclick: () => ((accountUi.allSessions = true), void loadSettings()) }, "down") }),
   );
   // a guest account is shared: the people using it do not manage it
-  if (state.user.role === "guest") return [h("section", { class: "card pad" }, h("h2", null, state.user.name), h("p", { class: "muted" }, t("account.guest"))), sessionsCard];
+  if (state.user.role === "guest") return [uiCard({ title: state.user.name, lead: t("account.guest") }), sessionsCard];
   const current = passwordInput("current-password");
   const next = passwordInput("new-password");
   const error = h("p", { class: "error", role: "alert" });
   const twoFactor = account.user.twoFactor;
   return [
     avatarCard(),
-    h(
-      "form",
-      {
-        class: "card pad",
-        onsubmit: async (e) => {
-          e.preventDefault();
-          error.textContent = "";
-          try {
-            await api("POST", "/api/account/password", { current: current.value, password: next.value });
-            current.value = next.value = "";
-            toast(t("account.passwordChanged"));
-            void loadSettings();
-          } catch (err) {
-            error.textContent = errorText(err);
-          }
+    uiCard(
+      { title: t("account.password") },
+      h(
+        "form",
+        {
+          class: "stack",
+          onsubmit: async (e) => {
+            e.preventDefault();
+            error.textContent = "";
+            try {
+              await api("POST", "/api/account/password", { current: current.value, password: next.value });
+              current.value = next.value = "";
+              toast(t("account.passwordChanged"));
+              void loadSettings();
+            } catch (err) {
+              error.textContent = errorText(err);
+            }
+          },
         },
-      },
-      h("h2", null, t("account.password")),
-      settingRow(t("account.current"), "", current),
-      settingRow(t("account.new"), t("account.newHint"), next),
-      error,
-      h("footer", null, h("button", { class: "btn primary" }, t("account.change"))),
-    ),
-    h(
-      "section",
-      { class: "card pad" },
-      h("h2", null, t("twofa.title")),
-      settingRow(
-        twoFactor ? t("twofa.on") : t("twofa.off"),
-        twoFactor ? t("twofa.onHint", { n: account.recoveryCodes }) : t("twofa.offHint"),
-        twoFactor
-          ? button(t("twofa.turnOff"), {
-              onclick: () =>
-                passwordPrompt(t("twofa.turnOffTitle"), t("twofa.turnOffLead"), t("twofa.turnOff"), async (password) => {
-                  await api("POST", "/api/account/totp/disable", { password });
-                  state.user.twoFactor = false;
-                  toast(t("settings.saved"));
-                  void loadSettings();
-                }),
-            })
-          : button(t("twofa.setUp"), { class: "primary", onclick: twoFactorSetup }),
+        uiSetting({ name: t("account.current"), control: current }),
+        uiSetting({ name: t("account.new"), explain: t("account.newHint"), control: next }),
+        error,
+        h("footer", { class: "block-foot" }, h("button", { class: "btn primary" }, t("account.change"))),
       ),
     ),
+    uiCard({
+      title: t("twofa.title"),
+      marks: uiState(twoFactor ? "ok" : "off", twoFactor ? t("twofa.on") : t("twofa.off")),
+      lead: twoFactor ? t("twofa.onHint", { n: account.recoveryCodes }) : t("twofa.offHint"),
+      actions: twoFactor
+        ? button(t("twofa.turnOff") + "…", {
+            class: "small",
+            onclick: () =>
+              passwordPrompt(t("twofa.turnOffTitle"), t("twofa.turnOffLead"), t("twofa.turnOff"), async (password) => {
+                await api("POST", "/api/account/totp/disable", { password });
+                state.user.twoFactor = false;
+                toast(t("settings.saved"));
+                void loadSettings();
+              }),
+          })
+        : button(t("twofa.setUp"), { class: "small primary", onclick: twoFactorSetup }, "lock"),
+    }),
     passkeysCard(account),
     sessionsCard,
   ];
@@ -1699,7 +1666,7 @@ function accountSection() {
 
 function passkeysCard(account) {
   const here = account.passkeysHere && !!window.PublicKeyCredential;
-  if (!here && !account.passkeys.length) return h("section", { class: "card pad" }, h("h2", null, t("passkey.title")), h("p", { class: "muted" }, t("passkey.needDomain")));
+  if (!here && !account.passkeys.length) return uiCard({ title: t("passkey.title") }, uiNotice({ tone: "info", text: t("passkey.needDomain") }));
   const add = () => {
     const name = h("input", { maxLength: 40, placeholder: deviceName(navigator.userAgent) });
     passwordPrompt(t("passkey.addTitle"), t("passkey.addLead"), t("passkey.add"), async (password) => {
@@ -1713,30 +1680,19 @@ function passkeysCard(account) {
       void loadSettings();
     }, field(t("passkey.name"), name, t("passkey.nameHint")), "primary");
   };
-  return h(
-    "section",
-    { class: "card pad" },
-    h("div", { class: "section-head" }, h("h2", null, t("passkey.title")), here && button(t("passkey.add"), { class: "small primary", onclick: add }, "plus")),
-    h("p", { class: "muted small" }, t(here ? "passkey.lead" : "passkey.needDomain")),
-    account.passkeys.map((key) =>
-      settingRow(
-        key.name || t("passkey.unnamed"),
-        [t("passkey.created", { date: new Date(key.createdAt).toLocaleDateString(state.lang, { day: "numeric", month: "short", year: "numeric" }) }), key.lastUsed && t("passkey.used", { time: ago(key.lastUsed) })].filter(Boolean).join(" · "),
-        button(t("passkey.remove"), {
-          class: "small",
-          onclick: () =>
-            confirmAction({
-              title: t("passkey.removeTitle", { name: key.name || t("passkey.unnamed") }),
-              lead: t("passkey.removeLead"),
-              label: t("passkey.removeGo"),
-              run: async () => {
-                await api("DELETE", `/api/account/passkeys/${key.id}`);
-                void loadSettings();
-              },
-            }),
-        }),
-      ),
-    ),
+  const remove = (key) => confirmAction({ title: t("passkey.removeTitle", { name: key.name || t("passkey.unnamed") }), lead: t("passkey.removeLead"), label: t("passkey.removeGo"), run: async () => (await api("DELETE", `/api/account/passkeys/${key.id}`), void loadSettings()) });
+  return uiCard(
+    { title: t("passkey.title"), count: account.passkeys.length || null, lead: t(here ? "passkey.lead" : "passkey.needDomain"), flush: true, actions: here && button(t("passkey.add"), { class: "small primary", onclick: add }, "plus") },
+    account.passkeys.length
+      ? account.passkeys.map((key) =>
+          uiRow({
+            lead: { icon: "key" },
+            name: key.name || t("passkey.unnamed"),
+            sub: [t("passkey.created", { date: new Date(key.createdAt).toLocaleDateString(state.lang, { day: "numeric", month: "short", year: "numeric" }) }), key.lastUsed && t("passkey.used", { time: ago(key.lastUsed) })].filter(Boolean).join(" · "),
+            more: [{ label: t("passkey.remove") + "…", icon: "trash", danger: true, run: () => remove(key) }],
+          }),
+        )
+      : uiEmpty({ text: t("passkey.none") }),
   );
 }
 
@@ -1952,6 +1908,9 @@ function requireTwoFactorRow() {
   const on = !!state.settings?.security?.adminTwoFactor;
   const box = h("input", {
     type: "checkbox",
+    class: "switch",
+    role: "switch",
+    "aria-label": t("users.require2fa"),
     checked: on,
     onchange: async () => {
       try {
@@ -1962,7 +1921,7 @@ function requireTwoFactorRow() {
       }
     },
   });
-  return h("section", { class: "card pad" }, h("label", { class: "check" }, box, h("span", null, h("strong", null, t("users.require2fa")), h("span", { class: "muted small block" }, t("users.require2faHint")))));
+  return uiCard({}, uiSetting({ name: t("users.require2fa"), explain: t("users.require2faHint"), control: box }));
 }
 
 function inviteDialog() {
@@ -2000,32 +1959,37 @@ function inviteDialog() {
 
 function invitesCard() {
   const invites = state.invites ?? [];
-  return h(
-    "section",
-    { class: "card pad" },
-    h("div", { class: "section-head" }, h("h2", null, t("invite.title2"), invites.length > 0 && h("span", { class: "pill" }, invites.length)), button(t("invite.new"), { class: "small", onclick: inviteDialog }, "link")),
+  const revoke = async (invite) => (await api("DELETE", `/api/invites/${invite.id}`).catch((e) => toast(errorText(e), "error")), loadUsers());
+  return uiCard(
+    { title: t("invite.title2"), count: invites.length || null, flush: true },
     invites.length
       ? invites.map((invite) =>
-          h(
-            "div",
-            { class: "snapshot" },
-            h("div", { class: "grow" }, h("strong", null, invite.note || t("user.role." + invite.role)), h("div", { class: "muted small" }, `${t("user.role." + invite.role)} · ${t("invite.expires", { time: new Date(invite.exp).toLocaleDateString(state.lang, { day: "numeric", month: "short" }) })}`)),
-            h("button", { type: "button", class: "icon-btn", "aria-label": t("invite.revoke"), title: t("invite.revoke"), onclick: async () => (await api("DELETE", `/api/invites/${invite.id}`).catch((e) => toast(errorText(e), "error")), loadUsers()) }, icon("trash")),
-          ),
+          uiRow({
+            lead: { icon: "link" },
+            name: invite.note || t("user.role." + invite.role),
+            sub: `${t("user.role." + invite.role)} · ${t("invite.expires", { time: new Date(invite.exp).toLocaleDateString(state.lang, { day: "numeric", month: "short" }) })}`,
+            more: [{ label: t("invite.revoke"), icon: "trash", danger: true, run: () => revoke(invite) }],
+          }),
         )
-      : h("p", { class: "muted small" }, t("invite.none")),
+      : uiEmpty({ text: t("invite.none") }),
   );
 }
 
 function signInLog() {
   const list = (state.signIns ?? []).slice(0, 60);
-  return h(
-    "section",
-    { class: "card pad" },
-    h("div", { class: "section-head" }, h("h2", null, t("signins.title"))),
+  return uiCard(
+    { title: t("signins.title"), flush: true },
     list.length
-      ? list.map((entry) => h("div", { class: "activity-item" }, icon(entry.outcome === "ok" ? "signin" : "x", entry.outcome === "ok" ? "" : "danger"), h("div", { class: "grow" }, h("div", null, t("signins." + entry.outcome, { name: entry.name || "?" })), h("div", { class: "muted small" }, `${ago(entry.ts)} · ${entry.ip}`))))
-      : h("p", { class: "muted small" }, t("activity.none")),
+      ? list.map((entry) =>
+          uiRow({
+            mode: "event",
+            lead: { icon: entry.outcome === "ok" ? "signin" : "x", tone: entry.outcome === "ok" ? null : "bad" },
+            name: t("signins." + entry.outcome, { name: entry.name || "?" }),
+            sub: entry.ip,
+            time: ago(entry.ts),
+          }),
+        )
+      : uiEmpty({ text: t("activity.none") }),
   );
 }
 

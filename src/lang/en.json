@@ -672,6 +672,7 @@
   "error.update.none": "There is no newer version.",
   "passkey.signIn": "Sign in with a passkey",
   "passkey.title": "Passkeys",
+  "passkey.none": "No passkeys yet.",
   "passkey.lead": "Sign in with this device's fingerprint, face or PIN instead of the password. A passkey replaces both the password and the two-factor code.",
   "passkey.needDomain": "Passkeys work only when Hata is opened by its domain name over HTTPS: browsers do not offer them on a plain address. Set a domain in Network → Addresses and HTTPS, then open Hata by that name.",
   "passkey.add": "Add a passkey",
