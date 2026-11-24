@@ -238,7 +238,7 @@ const BARE = `(() => {
   const view = document.querySelector("#view");
   if (!view) return [];
   // as with a picture behind the page: what the page backs for that case counts as covered
-  document.documentElement.classList.add("has-wallpaper");
+  document.documentElement.classList.add("ui-has-wallpaper");
   const out = new Set();
   const walker = document.createTreeWalker(view, NodeFilter.SHOW_TEXT);
   for (let node = walker.nextNode(); node; node = walker.nextNode()) {
@@ -266,7 +266,7 @@ const STEPS = `(() => {
   const seen = (e) => { const r = e.getBoundingClientRect(); return r.height > 0 && r.width > 0 && !e.classList.contains("offscreen"); };
   const name = (e) => e.tagName.toLowerCase() + [...e.classList].slice(0, 2).map((c) => "." + c).join("");
   const out = [];
-  for (const card of view.querySelectorAll(".card.pad, .card.module-card")) {
+  for (const card of view.querySelectorAll(".ui-card.ui-pad")) {
     if (card.closest("dialog") || !seen(card)) continue;
     const kids = [...card.children].filter(seen);
     for (let i = 1; i < kids.length; i++) {

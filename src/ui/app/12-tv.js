@@ -15,7 +15,7 @@ function paintTvNow() {
   // the chip is the one way to the TV: there while the module is on, also with the player off or not installed yet
   const there = isAdmin() && hasModule("tv");
   box.hidden = !there;
-  box.className = "tv-now" + ((tv?.playing && !tv.playing.paused) || tv?.page ? " playing" : "") + (document.querySelector("dialog.tv-drop[open]") ? " open" : "");
+  box.className = "ui-top-now" + ((tv?.playing && !tv.playing.paused) || tv?.page ? " playing" : "") + (document.querySelector("dialog.ui-dlg-tv-drop[open]") ? " open" : "");
   if (!there) return box.replaceChildren();
   const now = tv?.playing;
   const label = tv?.page ? t("tv.page.showing", { name: tv.page.title || tv.page.url }) : now ? t("tv.playing", { name: now.title }) : t(tv?.on ? "tv.remote" : "tv.title");
@@ -37,10 +37,10 @@ function paintTvMini(now) {
   clearInterval(tvUi.tick);
   if (!now) {
     mini?.remove();
-    return document.body.classList.remove("tv-mini-on");
+    return document.body.classList.remove("ui-tv-mini-on");
   }
   if (!mini) document.body.append((mini = h("aside", { id: "tv-mini" })));
-  document.body.classList.add("tv-mini-on");
+  document.body.classList.add("ui-tv-mini-on");
   const bar = h("i");
   const times = uiStripSub();
   const tick = () => {
@@ -81,7 +81,7 @@ async function moveToTv(path, name, media, done, subtitle = "") {
  * cannot play stays on the TV and plays on.
  */
 function moveToBrowser(now) {
-  document.querySelector("dialog.tv-drop")?.close();
+  document.querySelector("dialog.ui-dlg-tv-drop")?.close();
   const link = isLink(now.file);
   const name = link ? "" : now.file.split("/").pop();
   const tell = (action) => api("POST", "/api/tv/do", { action }).catch(() => {});
@@ -291,7 +291,7 @@ function streamPlayer(path, { at = 0, audio = 0, sub = -1, outside = "", played,
     clearTimeout(p.quiet);
     p.quiet = setTimeout(() => {
       if (p.gone) return;
-      if (video.paused || panel.matches(":hover") || document.querySelector("dialog.select-list[open]")) return wake();
+      if (video.paused || panel.matches(":hover") || document.querySelector("dialog.ui-dlg-select-list[open]")) return wake();
       el.classList.add("ui-idle");
     }, 3000);
   };
@@ -440,7 +440,7 @@ function paintMusicNow() {
   const there = isAdmin() && hasModule("music");
   const now = there ? state.musicNow : null;
   box.hidden = !there;
-  box.className = "tv-now" + (now && !now.paused ? " playing" : "") + (document.querySelector("dialog.music-drop[open]") ? " open" : "");
+  box.className = "ui-top-now" + (now && !now.paused ? " playing" : "") + (document.querySelector("dialog.ui-dlg-music-drop[open]") ? " open" : "");
   if (!there) return box.replaceChildren();
   const label = now ? t("music.playing", { name: now.title }) : t("music.title");
   box.replaceChildren(uiBarKey({ icon: "music", label, onclick: () => musicDropdown(box) }));
@@ -453,7 +453,7 @@ function musicDropdown(at) {
   const body = h("div", { class: "stack" }, waitMark());
   const paint = () => {
     const m = state.music;
-    if (!m || busy || body.querySelector("input[type=range]:active") || document.querySelector("dialog.select-list[open]") || dialog.classList.contains("pulled")) return;
+    if (!m || busy || body.querySelector("input[type=range]:active") || document.querySelector("dialog.ui-dlg-select-list[open]") || dialog.classList.contains("ui-pulled")) return;
     put(body, m.state === "missing" ? uiEmpty({ text: t("error.music.missing") }) : musicPlayerCard(m, act));
   };
   const act = async (method, path, data) => {
@@ -1095,7 +1095,7 @@ function tvMarkDialog(marks, at, start, keep) {
 /** What stands in the remote's place while a web page has the screen */
 function tvPageParts(tv, address = true) {
   const b = tv.browser;
-  const again = () => setTimeout(() => (document.querySelector("dialog.tv-drop[open]") ? null : void loadTv()), 400);
+  const again = () => setTimeout(() => (document.querySelector("dialog.ui-dlg-tv-drop[open]") ? null : void loadTv()), 400);
   const act = (action, value) => api("POST", "/api/tv/browser", { action, value }).then(again, (e) => toast(errorText(e), "error"));
   const keyed = (action, iconName, label, turn = "") => uiKeyCap(uiKey({ icon: iconName, label, turn, run: () => (action === "text" ? tvTextDialog(act, true) : act(action)) }), label);
   const leave = button(t(b.back ? "tv.page.toPlayer" : "tv.page.close"), { class: "wide", onclick: () => ((leave.disabled = true), tvWorking(t(b.back ? "tv.switching.kodi" : "tv.switching.off")), api("POST", "/api/tv/back", {}).then(async () => ((state.tv = await api("GET", "/api/tv")), state.route.view === "tv" && paintTv()), (e) => toast(errorText(e), "error"))) }, b.back ? "play" : "x");
@@ -1148,7 +1148,7 @@ function tvDropdown(at) {
     try {
       const tv = (state.tv = await api("GET", "/api/tv"));
       // a slider under the finger is not redrawn under it, nor the window while it is pulled down
-      if (!body.querySelector("input[type=range]:active") && !document.activeElement?.closest?.(".tv-drop .ui-affix") && !document.querySelector("dialog.select-list[open]") && !dialog.classList.contains("pulled")) put(body, tvRemoteParts(tv, press, turnOn));
+      if (!body.querySelector("input[type=range]:active") && !document.activeElement?.closest?.(".tv-drop .ui-affix") && !document.querySelector("dialog.ui-dlg-select-list[open]") && !dialog.classList.contains("ui-pulled")) put(body, tvRemoteParts(tv, press, turnOn));
     } catch (e) {
       put(body, uiEmpty({ tone: "bad", text: errorText(e) }));
     }
@@ -1905,7 +1905,7 @@ async function followUpdate(target, back = false) {
     steps.forEach((step, i) => {
       const row = rows.get(step);
       row.className = i < index ? "done" : i === index ? (failed ? "failed" : "now") : "";
-      put(row.querySelector(".ui-step-mark"), i < index ? icon("check") : i === index ? icon(failed ? "x" : "refresh", failed ? "" : "spin") : null);
+      put(row.querySelector(".ui-step-mark"), i < index ? icon("check") : i === index ? icon(failed ? "x" : "refresh", failed ? "" : "ui-spin") : null);
     });
   };
   updateFollow = { show };
@@ -1995,7 +1995,7 @@ function updateRow() {
     disabled: busy,
     onclick: async () => {
       check.disabled = true;
-      check.querySelector(".ico").classList.add("spin");
+      check.querySelector(".ico").classList.add("ui-spin");
       check.lastChild.textContent = t("update.checking");
       // a quick answer would only blink: the turn lasts long enough to be seen
       const [res] = await Promise.all([api("POST", "/api/update/check", {}).catch((e) => ({ ...state.update, error: errorText(e) })), new Promise((r) => setTimeout(r, 700))]);
@@ -2028,8 +2028,8 @@ function updateRow() {
   );
   if (fx) {
     row.classList.add("ui-checked", "ui-checked-" + fx);
-    if (fx === "latest") row.querySelector(".ui-setting-explain")?.prepend(icon("check", "fresh-check"));
-    if (fx === "found" && install) install.classList.add("arrive");
+    if (fx === "latest") row.querySelector(".ui-setting-explain")?.prepend(icon("check", "ui-fresh-check"));
+    if (fx === "found" && install) install.classList.add("ui-arrive");
   }
   return row;
 }

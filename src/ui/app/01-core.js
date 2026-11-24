@@ -251,8 +251,11 @@ function ago(ts) {
 }
 
 /** Opens a modal dialog; it is removed from the page when closed */
+/** The kinds of a window ("wide", "confirm", "menu dropdown" …) as the classes of the system */
+const dialogKinds = (kinds) => (kinds ?? "").split(/\s+/).filter(Boolean).map((k) => (k.startsWith("ui-") ? k : "ui-dlg-" + k)).join(" ");
+
 function openDialog(className, ...content) {
-  const dialog = h("dialog", { class: className }, ...content);
+  const dialog = h("dialog", { class: dialogKinds(className) }, ...content);
   dialog.addEventListener("close", () => dialog.remove());
   // a click on the backdrop (the dialog element itself, outside its content box) closes it — a press
   // that began inside and was let go outside (selecting text, a slip of the hand) is not such a click
@@ -272,15 +275,15 @@ function openDialog(className, ...content) {
   // the browser gives the focus to the first button there is — the cross — and draws its ring: a window starts
   // on its first field instead (not on a touch screen, where that brings the keyboard up), else on itself
   const settleFocus = () => {
-    if (document.activeElement?.classList?.contains("dlg-x") || document.activeElement?.closest?.(".dlg-head")) {
+    if (document.activeElement?.classList?.contains("ui-dlg-x") || document.activeElement?.closest?.(".ui-dlg-head")) {
       // the first field that is seen: one in a part hidden for now cannot take the focus
-      const field = !matchMedia("(pointer: coarse)").matches && [...dialog.querySelectorAll(".dlg-body :is(input:not([type=hidden]):not([type=checkbox]):not([type=radio]), textarea):not(:disabled)")].find((x) => x.checkVisibility());
+      const field = !matchMedia("(pointer: coarse)").matches && [...dialog.querySelectorAll(".ui-dlg-body :is(input:not([type=hidden]):not([type=checkbox]):not([type=radio]), textarea):not(:disabled)")].find((x) => x.checkVisibility());
       if (field) field.focus();
       else {
         dialog.tabIndex = -1;
         dialog.focus({ preventScroll: true });
         // a window that cannot take the focus itself leaves it nowhere rather than on the cross
-        if (document.activeElement?.closest?.(".dlg-head")) document.activeElement.blur();
+        if (document.activeElement?.closest?.(".ui-dlg-head")) document.activeElement.blur();
       }
     }
   };
@@ -291,7 +294,7 @@ function openDialog(className, ...content) {
 }
 
 /** Windows that keep a layout of their own: menus, the lists of a select, sheets, the viewer of files */
-const UNFRAMED_RE = /(^|\s)(menu|dropdown|nav-sheet|add-dialog|viewer)(\s|$)/;
+const UNFRAMED_RE = /(^|\s)ui-dlg-(menu|dropdown|nav-sheet|add-dialog|viewer)(\s|$)/;
 
 /**
  * Every window is built the same way, whatever its maker handed over: a head (the title, a line of
@@ -301,7 +304,7 @@ const UNFRAMED_RE = /(^|\s)(menu|dropdown|nav-sheet|add-dialog|viewer)(\s|$)/;
  */
 function frameDialog(dialog) {
   if (UNFRAMED_RE.test(dialog.className)) return;
-  dialog.classList.add("framed");
+  dialog.classList.add("ui-dlg-framed");
   const only = dialog.children.length === 1 && dialog.firstElementChild.tagName === "FORM" ? dialog.firstElementChild : null;
   const root = only ?? dialog;
   const frame = () => {
@@ -318,15 +321,15 @@ function frameDialog(dialog) {
     const lead = after?.tagName === "P" && after.classList.contains("muted") && !after.classList.contains("error") ? after : null;
     const foot = kids.findLast((node) => node.tagName === "FOOTER");
     // a window that draws its own head inside its body (the disk's) brings its own cross: never a second one
-    const cross = root.querySelector(`.icon-btn[aria-label="${CSS.escape(t("common.close"))}"]`) ? null : h("button", { type: "button", class: "icon-btn dlg-x", "aria-label": t("common.close"), onclick: () => dialog.close() }, icon("x"));
-    const head = h("div", { class: "dlg-head" }, h("div", { class: "dlg-title" }, title, lead), cross);
-    body = h("div", { class: "dlg-body" }, kids.filter((node) => node !== title && node !== lead && node !== foot));
+    const cross = root.querySelector(`.icon-btn[aria-label="${CSS.escape(t("common.close"))}"]`) ? null : h("button", { type: "button", class: "icon-btn ui-dlg-x", "aria-label": t("common.close"), onclick: () => dialog.close() }, icon("x"));
+    const head = h("div", { class: "ui-dlg-head" }, h("div", { class: "ui-dlg-title" }, title, lead), cross);
+    body = h("div", { class: "ui-dlg-body" }, kids.filter((node) => node !== title && node !== lead && node !== foot));
     root.replaceChildren(head, body, ...(foot ? [foot] : []));
   };
   frame();
   new MutationObserver(() => {
-    const stray = [...root.children].some((node) => !node.classList.contains("dlg-head") && !node.classList.contains("dlg-body") && node.tagName !== "FOOTER");
-    if (stray || !root.querySelector(":scope > .dlg-head")) frame();
+    const stray = [...root.children].some((node) => !node.classList.contains("ui-dlg-head") && !node.classList.contains("ui-dlg-body") && node.tagName !== "FOOTER");
+    if (stray || !root.querySelector(":scope > .ui-dlg-head")) frame();
   }).observe(root, { childList: true });
 }
 
@@ -358,7 +361,7 @@ function pullToClose(dialog) {
       if (Math.abs(dx) > 10 || dy < -6) return void (pull = null);
       if (dy < 10) return;
       pull.on = true;
-      dialog.classList.add("pulled");
+      dialog.classList.add("ui-pulled");
     }
     if (e.cancelable) e.preventDefault();
     pull.by = Math.max(0, dy);
@@ -371,7 +374,7 @@ function pullToClose(dialog) {
     // the finger let go over a button: that is not a press of it
     const swallow = (click) => (click.stopPropagation(), click.preventDefault());
     dialog.addEventListener("click", swallow, { capture: true, once: true });
-    setTimeout(() => (dialog.removeEventListener("click", swallow, { capture: true }), dialog.classList.remove("pulled")), 400);
+    setTimeout(() => (dialog.removeEventListener("click", swallow, { capture: true }), dialog.classList.remove("ui-pulled")), 400);
     const fast = was.by / Math.max(1, performance.now() - was.at) > 0.6 && was.by > 40;
     if (e.type === "touchend" && (fast || was.by > Math.min(160, dialog.offsetHeight / 3))) settle("translateY(100%)", () => dialog.close());
     else settle("");
@@ -415,7 +418,7 @@ function pageHead({ crumbs = null, icon: iconName = null, logo = null, title = n
   const right = (list.length || nodes.length || hasMore || search || actionsId) && h("div", { class: "ui-head-actions" + (more ? "" : " only-phone-more"), id: actionsId }, search, nodes, list.map(make), hasMore && uiMore(entries));
   return h(
     "section",
-    { class: "card ui-head" + (cls ? " " + cls : ""), id },
+    { class: "ui-card ui-head" + (cls ? " " + cls : ""), id },
     trail,
     (title != null || line || right) && h("div", { class: "ui-head-main", menu }, (iconName || logo) && h("span", { class: "ui-tile-icon" }, logo ?? icon(iconName)), h("div", { class: "ui-head-names" }, title != null && h("div", { class: "ui-head-title" }, h("h1", null, title), state), line), right),
     tabs,
@@ -427,24 +430,18 @@ function pageHead({ crumbs = null, icon: iconName = null, logo = null, title = n
  * blocks in `body`, 16 px apart. `flush` — the body (a table, a list of rows) reaches the card's edges.
  */
 function uiCard({ title = null, count = null, marks = null, actions = null, lead = null, id = null, cls = "", flush = false, menu = undefined } = {}, ...body) {
-  const head =
-    title != null &&
-    h(
-      "div",
-      { class: "section-head" + (flush ? " pad" : "") },
-      h("h2", null, title, count != null && h("span", { class: "muted" }, String(count)), marks),
-      actions && h("div", { class: "actions" }, actions),
-    );
-  const explain = lead && h("p", { class: "muted small" + (flush ? " pad" : "") }, lead);
-  return h("section", { class: `card${flush ? "" : " pad"}${cls ? " " + cls : ""}`, id, menu }, head, explain, ...body);
+  const head = title != null && uiCardHead({ title, count, marks, actions, pad: flush });
+  const explain = lead && h("p", { class: "muted small" + (flush ? " ui-pad" : "") }, lead);
+  return h("section", { class: `ui-card${flush ? "" : " ui-pad"}${cls ? " " + cls : ""}`, id, menu }, head, explain, ...body);
 }
 
 /** A second head inside a card: a smaller title, its line, things on its right */
 const uiSubhead = ({ title, lead = null, actions = null, count = null }) =>
-  h("div", { class: "ui-subhead" }, h("div", { class: "ui-subhead-main" }, h("h3", null, title, count != null && h("span", { class: "muted" }, " " + count)), actions && h("div", { class: "ui-line end" }, actions)), lead && h("p", { class: "muted small" }, lead));
+  h("div", { class: "ui-subhead" }, h("div", { class: "ui-subhead-main" }, h("h3", null, title, count != null && h("span", { class: "muted" }, " " + count)), actions && h("div", { class: "ui-line ui-end" }, actions)), lead && h("p", { class: "muted small" }, lead));
 
 /** The head of a block that is filled again and again (the blocks of Home): its title (with marks), things on its right */
-const uiBlockHead = ({ title, actions = null, pad = false }) => h("div", { class: "ui-block-head" + (pad ? " ui-block-head-pad" : "") }, h("h2", null, title), actions && uiLine(actions, { end: true }));
+const uiCardHead = ({ title, count = null, marks = null, actions = null, pad = false }) =>
+  h("div", { class: "ui-card-head" + (pad ? " ui-pad" : "") }, h("h2", null, title, count != null && h("span", { class: "muted" }, String(count)), marks), actions && h("div", { class: "ui-card-actions" }, actions));
 
 /**
  * Two columns: the main one and a side one of a third on its right (one under another under 900 px; the side on
@@ -452,7 +449,7 @@ const uiBlockHead = ({ title, actions = null, pad = false }) => h("div", { class
  */
 const uiColumns = (main, side, { sideFirst = false, sideLeft = false } = {}) =>
   sideLeft
-    ? h("div", { class: "ui-columns side-left" }, h("div", { class: "stack" }, side), h("div", { class: "stack" }, main))
+    ? h("div", { class: "ui-columns ui-side-left" }, h("div", { class: "stack" }, side), h("div", { class: "stack" }, main))
     : h("div", { class: "ui-columns" + (sideFirst ? " side-first" : "") }, h("div", { class: "stack" }, main), h("div", { class: "stack" }, side));
 
 /**
@@ -470,7 +467,7 @@ const uiNarrow = (...body) => h("div", { class: "ui-narrow" }, body);
 const uiBox = (...body) => h("div", { class: "ui-box" }, body);
 
 /** Things in a line — buttons, states, a field and its button — wrapping when there is no room; `end` puts them right */
-const uiLine = (items, { end = false, cls = "" } = {}) => h("div", { class: "ui-line" + (end ? " end" : "") + (cls ? " " + cls : "") }, items);
+const uiLine = (items, { end = false, cls = "" } = {}) => h("div", { class: "ui-line" + (end ? " ui-end" : "") + (cls ? " " + cls : "") }, items);
 
 /** The foot of a card that is a form: its buttons on the right, under a line */
 const uiFoot = (...buttons) => h("footer", { class: "ui-foot" }, buttons);
@@ -536,7 +533,7 @@ const uiRows = (rows, { inCard = false, id = null, hidden = false, cls = "" } = 
 function uiGroup({ name, count = null, state = null, action = null, more = null, open = true, onToggle = null }, ...rows) {
   const band = h(
     "div",
-    { class: "ui-row group" + (open ? " open" : "") },
+    { class: "ui-row ui-row-group" + (open ? " open" : "") },
     h("button", { type: "button", class: "ui-group-fold", "aria-expanded": String(open), onclick: () => onToggle?.(!open) }, icon("chevron"), h("span", null, name), count != null && h("span", { class: "ui-row-count" }, String(count))),
     h("div", { class: "ui-row-tail" }, state, action, more && uiMore(more, { size: "s" })),
   );
@@ -548,7 +545,7 @@ const uiSetting = ({ name, explain = null, control, wide = false, id = null }) =
   h("div", { class: "ui-setting" + (wide ? " wide" : ""), id }, h("div", { class: "ui-setting-text" }, h("div", { class: "ui-setting-name" }, name), explain && h("div", { class: "ui-setting-explain" }, explain)), h("div", { class: "ui-setting-control" }, control));
 
 /** Facts in rows, a label on the left and its value on the right: `[label, value]` pairs, empty ones left out */
-const uiFacts = (rows) => rows.filter(Boolean).map(([label, value]) => h("div", { class: "kv" }, h("span", { class: "muted" }, label), h("span", null, value)));
+const uiFacts = (rows) => rows.filter(Boolean).map(([label, value]) => h("div", { class: "ui-fact" }, h("span", { class: "muted" }, label), h("span", null, value)));
 
 /** Facts with a meter: an icon, a label, the meter (or a sparkline) and the value — one metric to a row */
 const uiMeterFacts = (rows) =>
@@ -575,7 +572,7 @@ function uiTable(columns, rows, { cls = "", height = 56 } = {}) {
           ),
     ),
   );
-  return h("div", { class: `ui-table-wrap h${height}${cls ? " " + cls : ""}` }, h("table", { class: "ui-table" }, head, body));
+  return h("div", { class: `ui-table-wrap${cls ? " " + cls : ""}` }, h("table", { class: "ui-table" }, head, body));
 }
 
 /** A row of uiTable as it stands among the others: `under` — a part of the row above it, `gone` — of a thing that is no longer there */
@@ -673,7 +670,7 @@ function uiTile({ icon: iconName = "box", logo = null, name, sub = null, state =
     tail,
     more && uiMore(more, { size: "s" }),
   );
-  const low = warn ? h("div", { class: `ui-tile-foot warn ${tone ?? "warn"}` }, icon("alert"), h("span", null, warn)) : foot && h("div", { class: "ui-tile-foot" }, foot);
+  const low = warn ? h("div", { class: `ui-tile-foot ui-warn ${tone ?? "warn"}` }, icon("alert"), h("span", null, warn)) : foot && h("div", { class: "ui-tile-foot" }, foot);
   const description = desc && h("div", { class: "ui-tile-desc" }, desc);
   const media = kind === "media" && h("div", { class: "ui-tile-picture" }, picture ?? icon(iconName));
   return h(
@@ -687,7 +684,7 @@ function uiTile({ icon: iconName = "box", logo = null, name, sub = null, state =
 }
 
 /** The tile that adds: a dashed frame with a plus */
-const uiAddTile = (label, onclick) => h("button", { type: "button", class: "ui-tile add", onclick }, icon("plus"), h("span", null, label));
+const uiAddTile = (label, onclick) => h("button", { type: "button", class: "ui-tile ui-add", onclick }, icon("plus"), h("span", null, label));
 
 /** A tile of a file or a folder: what opens it, the box to tick and its "⋯"; `data-name` is the file's */
 function uiFileTile({ name, dir = false, selected = false, cursor = false, open, tick, more }) {
@@ -735,7 +732,7 @@ const uiMarkAdd = (label, onclick) => h("button", { type: "button", class: "ui-m
 function uiPicture({ src = null, label, on = false, onclick = null, remove = null, add = false } = {}) {
   const tile = h(
     "button",
-    { type: "button", class: "ui-picture" + (on ? " on" : "") + (add ? " add" : ""), "aria-pressed": add ? null : String(on), onclick },
+    { type: "button", class: "ui-picture" + (on ? " on" : "") + (add ? " ui-add" : ""), "aria-pressed": add ? null : String(on), onclick },
     src && h("img", { src, alt: "", loading: "lazy" }),
     h("span", null, add && icon("upload"), add && " ", label),
   );
@@ -770,7 +767,6 @@ const uiHomeTileMain = (attrs, ...content) => h(attrs.href ? "a" : "button", { t
 const uiHomeTileOpen = (attrs, iconName = "more") => h(attrs.href ? "a" : "button", { type: attrs.href ? null : "button", ...attrs, class: "ui-home-tile-open" }, icon(iconName));
 
 /** A small mark beside a tile's picture: a lock, an arrow of an update, where a link leads */
-const uiTileMark = (iconName, title = null) => h("span", { class: "ui-home-tile-mark", title }, icon(iconName));
 
 // --- Numbers, meters and charts ---
 
@@ -789,7 +785,7 @@ function uiMeter(value, { kind = "capacity", label = null, parts = null } = {}) 
   const v = Math.max(0, Math.min(100, Number(value) || 0));
   const tone = kind === "progress" ? "progress" : kind === "load" ? "load" : v >= 95 ? "bad" : v >= 80 ? "warn" : "ok";
   const bar = parts
-    ? h("div", { class: "ui-meter multi" }, parts.map((p) => h("i", { class: "c-" + (p.colour ?? "1"), style: null, "data-w": p.value })))
+    ? h("div", { class: "ui-meter ui-multi" }, parts.map((p) => h("i", { class: "ui-c-" + (p.colour ?? "1"), style: null, "data-w": p.value })))
     : h("div", { class: `ui-meter ${tone}`, role: "meter", "aria-valuenow": Math.round(v), "aria-valuemin": 0, "aria-valuemax": 100 }, h("i"));
   if (parts) bar.querySelectorAll("i").forEach((i) => i.style.setProperty("width", i.dataset.w + "%"));
   else bar.firstChild.style.setProperty("width", v + "%");
@@ -1080,8 +1076,8 @@ function uiLead(lead) {
   if (lead instanceof Node) return lead;
   if (lead.check) return lead.check;
   if (lead.avatar) return lead.avatar;
-  if (lead.colour) return h("span", { class: "ui-lead colour" }, h("i", { class: "c-" + lead.colour }));
-  if (lead.img) return h("span", { class: "ui-lead thumb" }, lead.img);
+  if (lead.colour) return h("span", { class: "ui-lead ui-colour" }, h("i", { class: "ui-c-" + lead.colour }));
+  if (lead.img) return h("span", { class: "ui-lead ui-thumb" }, lead.img);
   if (lead.logo) return h("span", { class: "ui-lead" }, lead.logo);
   return h("span", { class: "ui-lead" + (lead.tone ? " tone " + lead.tone : "") }, icon(lead.icon ?? "box"));
 }
@@ -1139,9 +1135,9 @@ function uiNeedProgram({ name, why, command, run = null, optional = false, busy 
  * `loading` (the ring, in a room of three rows) or `error` (big, in the bad tone, with "Try again").
  */
 function uiEmpty({ size = "small", icon: iconName = null, title = null, text = null, action = null, tone = null } = {}) {
-  if (size === "loading") return h("div", { class: "ui-empty loading", role: "status", "aria-label": t("common.loading") }, uiRing(), text && h("span", null, text));
+  if (size === "loading") return h("div", { class: "ui-empty ui-loading", role: "status", "aria-label": t("common.loading") }, uiRing(), text && h("span", null, text));
   if (size === "small") return h("div", { class: "ui-empty small" + (tone ? " " + tone : "") }, iconName && icon(iconName), h("span", null, text ?? title), action);
-  return h("div", { class: "ui-empty big" + (size === "error" ? " bad" : "") }, h("span", { class: "ui-empty-icon" }, icon(iconName ?? (size === "error" ? "alert" : "box"))), title && h("strong", null, title), text && h("p", null, text), action);
+  return h("div", { class: "ui-empty ui-big" + (size === "error" ? " bad" : "") }, h("span", { class: "ui-empty-icon" }, icon(iconName ?? (size === "error" ? "alert" : "box"))), title && h("strong", null, title), text && h("p", null, text), action);
 }
 
 /** Text to read: paragraphs and lists as they come; `soft` puts it in a grey box (notes of an app, what to know) */
@@ -1169,7 +1165,7 @@ const uiStepItem = (text, { state = "", n = null } = {}) => h("li", { class: sta
 function uiWork({ lead, title, sub = "", subMono = false, tools = null, bar = null, detail = true, why = false, extra = null, actions = null, row = false, status = "", stopped = false, id = null }) {
   return h(
     "div",
-    { class: `ui-work${row ? " row" : ""} ${status}${stopped ? " stopped" : ""}`, "data-job": id },
+    { class: `ui-work${row ? " ui-work-row" : ""} ${status}${stopped ? " stopped" : ""}`, "data-job": id },
     h("div", { class: "ui-work-head" }, lead, h("div", { class: "ui-work-words" }, h("strong", { class: "ui-work-title" }, title), h("span", { class: "ui-work-sub" + (subMono ? " mono" : "") }, sub)), tools),
     bar,
     detail && h("p", { class: "ui-work-detail" + (why ? " why" : "") }),
@@ -1323,7 +1319,7 @@ const uiKeys = (keys, kind = "keys") => h("div", { class: { transport: "ui-trans
 /** A round pad of four arrows with OK in the middle: `press("up" | "down" | "left" | "right" | "select")` */
 function uiPad(press, { disabled = false, labels }) {
   const arrow = (side) => h("button", { type: "button", class: `ui-pad-arrow ui-${side}`, title: labels[side], "aria-label": labels[side], disabled, onclick: () => press(side) }, icon("chevron"));
-  return h("div", { class: "ui-pad" }, arrow("up"), arrow("left"), h("button", { type: "button", class: "ui-pad-ok", disabled, onclick: () => press("select") }, "OK"), arrow("right"), arrow("down"));
+  return h("div", { class: "ui-dpad" }, arrow("up"), arrow("left"), h("button", { type: "button", class: "ui-pad-ok", disabled, onclick: () => press("select") }, "OK"), arrow("right"), arrow("down"));
 }
 
 /** The pad and a grid of square keys of a remote, side by side (under each other on a phone) */
@@ -1395,7 +1391,7 @@ function uiPictureFrame(picture, { whole = false } = {}) {
 function uiShots({ prev, next }) {
   const stage = h("div", { class: "ui-shots-stage", tabindex: "0", "aria-roledescription": "carousel" });
   const count = h("span", { class: "ui-shots-count" });
-  const back = h("button", { type: "button", class: "icon-btn ui-shots-prev", "aria-label": t("store.shotPrev"), onclick: prev }, icon("chevron", "flip"));
+  const back = h("button", { type: "button", class: "icon-btn ui-shots-prev", "aria-label": t("store.shotPrev"), onclick: prev }, icon("chevron", "ui-flip"));
   const on = h("button", { type: "button", class: "icon-btn ui-shots-next", "aria-label": t("store.shotNext"), onclick: next }, icon("chevron"));
   return { view: h("div", { class: "ui-shots" }, stage, back, on, count), stage, count, prev: back, next: on };
 }
@@ -1629,7 +1625,7 @@ function renderBlocks() {
 }
 
 const closeButton = (dialog, label = t("common.close")) => button(label, { onclick: () => dialog().close() });
-const closeX = (dialog) => h("button", { type: "button", class: "icon-btn dlg-x", "aria-label": t("common.close"), onclick: () => dialog().close() }, icon("x"));
+const closeX = (dialog) => h("button", { type: "button", class: "icon-btn ui-dlg-x", "aria-label": t("common.close"), onclick: () => dialog().close() }, icon("x"));
 
 // --- The look: colours and the background picture chosen in the settings -------------------------
 
@@ -1655,7 +1651,7 @@ function applyAppearance(look) {
   const picture = look ? wallpaperUrl(look) : "";
   set("--wallpaper", picture && `url("${picture}")`);
   set("--wallpaper-dim", picture && look.dim + "%");
-  root.classList.toggle("has-wallpaper", !!picture);
+  root.classList.toggle("ui-has-wallpaper", !!picture);
   // the icon of the tab is the same mark in the same colour
   const mark = look?.accent ? `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><rect width="64" height="64" rx="15" fill="${look.accent}"/><path d="M32 13 11 31h6v19h11V38h8v12h11V31h6z" fill="${lightness(look.accent) > 0.4 ? "#1a1206" : "#ffffff"}"/></svg>`)}` : "/logo.svg";
   document.querySelector('link[rel="icon"]')?.setAttribute("href", mark);
@@ -2057,7 +2053,7 @@ async function refresh() {
   seedJobs(state.overview.jobs ?? []);
   failedTiles(state.overview);
   // the numbers by the sections follow what needs attention now, and so does the section's own list
-  document.querySelector(".top .nav")?.replaceChildren(...navLinks("nav-link"));
+  document.querySelector(".ui-top .ui-nav")?.replaceChildren(...navLinks("ui-nav-link"));
   paintAttentionHere();
   if (state.route.view === "home") renderHomeBody();
   if (state.route.view === "store") renderStoreList();
@@ -2108,7 +2104,7 @@ async function passkeyCreate(password, name) {
 
 /** Something is being asked for: a turning mark, in a card of its own where it stands outside one — never a bare "…" */
 function waitMark() {
-  return h("p", { class: "waiting", role: "status", "aria-label": t("common.loading") }, uiRing());
+  return h("p", { class: "ui-waiting", role: "status", "aria-label": t("common.loading") }, uiRing());
 }
 
 /** The old name of a field of a form */
@@ -2120,7 +2116,7 @@ async function inviteScreen(token) {
     invite = await api("GET", `/api/invite?token=${token}`);
   } catch {}
   if (!invite) {
-    return $app.replaceChildren(h("main", { class: "center" }, h("div", { class: "auth card" }, h("div", { class: "brand big" }, logo(), "hata"), h("h1", null, t("invite.invalidTitle")), h("p", { class: "muted" }, t("invite.invalid")), h("a", { class: "btn wide", href: "/" }, t("auth.signIn")))));
+    return $app.replaceChildren(h("main", { class: "center" }, h("div", { class: "ui-auth ui-card" }, h("div", { class: "ui-brand ui-big" }, logo(), "hata"), h("h1", null, t("invite.invalidTitle")), h("p", { class: "muted" }, t("invite.invalid")), h("a", { class: "btn wide", href: "/" }, t("auth.signIn")))));
   }
   const name = h("input", { name: "name", autocomplete: "username", required: true, autocapitalize: "none", spellcheck: false });
   const password = h("input", { name: "password", type: "password", autocomplete: "new-password", required: true, minLength: 8 });
@@ -2133,7 +2129,7 @@ async function inviteScreen(token) {
       h(
         "form",
         {
-          class: "auth card",
+          class: "ui-auth ui-card",
           onsubmit: async (e) => {
             e.preventDefault();
             submit.disabled = true;
@@ -2149,7 +2145,7 @@ async function inviteScreen(token) {
             }
           },
         },
-        h("div", { class: "brand big" }, logo(), "hata"),
+        h("div", { class: "ui-brand ui-big" }, logo(), "hata"),
         h("h1", null, t("invite.title")),
         h("p", { class: "muted" }, t("invite.lead", { role: t("user.role." + invite.role) })),
         field(t("auth.name"), name),
@@ -2179,7 +2175,7 @@ function authScreen() {
   const form = h(
     "form",
     {
-      class: "auth card",
+      class: "ui-auth ui-card",
       onsubmit: async (e) => {
         e.preventDefault();
         submit.disabled = true;
@@ -2205,7 +2201,7 @@ function authScreen() {
         }
       },
     },
-    !setup && h("div", { class: "brand big" }, logo(), "hata"),
+    !setup && h("div", { class: "ui-brand ui-big" }, logo(), "hata"),
     h("h1", null, t(setup ? "setup.title" : "auth.title")),
     setup && h("p", { class: "muted" }, t("setup.lead")),
     !setup && NEXT && h("p", { class: "muted" }, t("auth.nextLead", { address: new URL(NEXT).host })),
@@ -2294,11 +2290,11 @@ const NATIVE_VALUE = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype
 const NATIVE_INDEX = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "selectedIndex");
 
 function dressSelect(select) {
-  const label = h("span", { class: "select-label" });
+  const label = h("span", { class: "ui-select-label" });
   const keys = (e) => {
     if (e.key === "ArrowDown" || e.key === "ArrowUp") e.preventDefault(), openPick(select);
   };
-  const pick = h("button", { type: "button", "aria-haspopup": "listbox", onclick: () => openPick(select), onkeydown: keys }, label, icon("down", "select-arrow"));
+  const pick = h("button", { type: "button", "aria-haspopup": "listbox", onclick: () => openPick(select), onkeydown: keys }, label, icon("down", "ui-select-arrow"));
   select.hataPick = pick;
   // a label that names the select by its id names the button: the id goes over
   if (select.id) (pick.id = select.id), select.removeAttribute("id");
@@ -2306,7 +2302,7 @@ function dressSelect(select) {
     const index = NATIVE_INDEX.get.call(select);
     // every option lies in the same cell and only the chosen one is seen: the button is as wide as the widest, like a native select
     label.replaceChildren(...[...select.options].map((o, i) => h("span", { class: i === index ? "" : "unseen" }, o.textContent)));
-    pick.className = ["select-btn", ...select.classList].filter((c) => c !== "dressed").join(" ");
+    pick.className = ["ui-select-btn", ...select.classList].filter((c) => c !== "ui-dressed").join(" ");
     pick.disabled = select.disabled;
     const name = select.getAttribute("aria-label");
     const text = select.options[index]?.textContent ?? "";
@@ -2319,7 +2315,7 @@ function dressSelect(select) {
     Object.defineProperty(select, key, { configurable: true, get: () => native.get.call(select), set: (v) => (native.set.call(select, v), show()) });
   select.focus = (options) => pick.focus(options);
   new MutationObserver(show).observe(select, { childList: true, subtree: true, attributes: true, characterData: true });
-  select.classList.add("dressed");
+  select.classList.add("ui-dressed");
   show();
   select.before(pick);
 }
@@ -2339,12 +2335,12 @@ function openPick(select) {
     select.dispatchEvent(new Event("change", { bubbles: true }));
   };
   const items = [...select.options].map((o, i) =>
-    h("button", { type: "button", class: "menu-item", role: "option", "aria-selected": String(i === current), disabled: o.disabled, onclick: () => choose(i) }, h("span", { class: "grow" }, o.textContent), i === current && icon("check", "on-mark")),
+    h("button", { type: "button", class: "ui-menu-item", role: "option", "aria-selected": String(i === current), disabled: o.disabled, onclick: () => choose(i) }, h("span", { class: "grow" }, o.textContent), i === current && icon("check", "ui-on-mark")),
   );
   // the options of a group follow its name
   const shown = items.flatMap((b, i) => {
     const group = select.options[i].parentElement;
-    return group?.tagName === "OPTGROUP" && group.firstElementChild === select.options[i] ? [h("div", { class: "select-group muted small", role: "presentation" }, group.label), b] : [b];
+    return group?.tagName === "OPTGROUP" && group.firstElementChild === select.options[i] ? [h("div", { class: "ui-select-group muted small", role: "presentation" }, group.label), b] : [b];
   });
   dialog = openDialog("menu dropdown select-list", h("div", { role: "listbox", "aria-label": select.getAttribute("aria-label") ?? "" }, shown));
   pick.setAttribute("aria-expanded", "true");
@@ -2461,7 +2457,7 @@ function paintAttentionHere() {
   const sig = area + JSON.stringify(list.map((item) => [item.id, item.code, item.severity, item.at, item.detail]));
   if (was && was.isConnected && sig === attentionHere.sig) return;
   attentionHere.sig = sig;
-  const card = uiCard({ title: t("attention.title"), marks: uiCount(list.length), flush: true, id: "area-attention", cls: "area-attention" }, uiRows(list.map((item) => attentionItem(item)), { cls: "attention-list" }));
+  const card = uiCard({ title: t("attention.title"), marks: uiCount(list.length), flush: true, id: "area-attention", cls: "ui-area-attention" }, uiRows(list.map((item) => attentionItem(item)), { cls: "ui-attention-list" }));
   if (was) return void was.replaceWith(card);
   if (head) head.after(card);
   else view.prepend(card);
@@ -2478,7 +2474,7 @@ function navLinks(className, items = navItems()) {
   const current = navCurrent();
   return items.map((item) => {
     const n = navCount(item.view);
-    return h("a", { class: className + (current === item.view ? " active" : ""), href: item.hash, title: t("nav." + item.view), "aria-current": current === item.view ? "page" : null }, icon(item.icon), h("span", null, t("nav." + item.view)), n > 0 && h("b", { class: "nav-count", title: t("nav.needs", { n }) }, String(n)));
+    return h("a", { class: className + (current === item.view ? " active" : ""), href: item.hash, title: t("nav." + item.view), "aria-current": current === item.view ? "page" : null }, icon(item.icon), h("span", null, t("nav." + item.view)), n > 0 && h("b", { class: "ui-nav-count", title: t("nav.needs", { n }) }, String(n)));
   });
 }
 
@@ -2486,28 +2482,28 @@ function navLinks(className, items = navItems()) {
 function bottomLinks() {
   const items = navItems();
   const here = !items.slice(0, 4).some((item) => item.view === navCurrent()) && navCurrent() !== "";
-  const more = h("button", { type: "button", class: "bottom-link" + (here ? " active" : ""), "aria-haspopup": "dialog", onclick: () => navSheet() }, icon("menu"), h("span", null, t("nav.menu")));
-  return [...navLinks("bottom-link", items.slice(0, 4)), more];
+  const more = h("button", { type: "button", class: "ui-bottom-link" + (here ? " active" : ""), "aria-haspopup": "dialog", onclick: () => navSheet() }, icon("menu"), h("span", null, t("nav.menu")));
+  return [...navLinks("ui-bottom-link", items.slice(0, 4)), more];
 }
 
 /** "Menu" of a phone: the search, every section, the terminal, Settings and the person */
 function navSheet(search = false) {
   let dialog;
   const current = navCurrent();
-  const tile = (hash, iconName, label, active, n = 0) => h("a", { class: "sheet-tile" + (active ? " active" : ""), href: hash, onclick: () => dialog.close() }, icon(iconName), h("span", null, label), n > 0 && h("b", { class: "nav-count" }, String(n)));
+  const tile = (hash, iconName, label, active, n = 0) => h("a", { class: "ui-sheet-tile" + (active ? " active" : ""), href: hash, onclick: () => dialog.close() }, icon(iconName), h("span", null, label), n > 0 && h("b", { class: "ui-nav-count" }, String(n)));
   const field = globalSearch(() => dialog.close());
   dialog = openDialog(
     "nav-sheet",
-    h("div", { class: "sheet-bar" }),
+    h("div", { class: "ui-sheet-bar" }),
     field,
     h(
       "div",
-      { class: "sheet-tiles" },
+      { class: "ui-sheet-tiles" },
       navItems().map((item) => tile(item.hash, item.icon, t("nav." + item.view), current === item.view, navCount(item.view))),
       isAdmin() && tile("#/terminal", "terminal", t("terminal.title"), state.route.view === "terminal"),
       tile("#/settings", "gear", t("nav.settings"), current === "settings"),
     ),
-    h("button", { type: "button", class: "sheet-user", onclick: (e) => userMenu(e, true) }, avatarOf(state.user), h("span", { class: "grow" }, h("strong", null, state.user.name), h("span", { class: "muted small block" }, t("user.role." + state.user.role))), icon("chevron")),
+    h("button", { type: "button", class: "ui-sheet-user", onclick: (e) => userMenu(e, true) }, avatarOf(state.user), h("span", { class: "grow" }, h("strong", null, state.user.name), h("span", { class: "muted small block" }, t("user.role." + state.user.role))), icon("chevron")),
   );
   pullToClose(dialog);
   if (search) field.querySelector("input").focus();
@@ -2527,13 +2523,13 @@ async function signOut() {
 }
 
 /** A person's circle: their picture when they put one, else the first letter of their name */
-function avatarOf(user, cls = "avatar") {
+function avatarOf(user, cls = "ui-avatar") {
   const letter = (user?.name ?? "?").slice(0, 1).toUpperCase();
   if (!user?.avatar) return h("span", { class: cls }, letter);
   const img = h("img", { src: `/api/avatars/${user.id}?v=${user.avatar}`, alt: "", draggable: "false" });
   // a picture that cannot be had (removed meanwhile) falls back to the letter
   img.onerror = () => img.replaceWith(letter);
-  return h("span", { class: cls + " has-picture" }, img);
+  return h("span", { class: cls + " ui-has-picture" }, img);
 }
 
 function userMenu(e, above = false) {
@@ -2542,10 +2538,10 @@ function userMenu(e, above = false) {
   dialog = openDialog(
     "menu dropdown",
     h("header", null, avatarOf(state.user), h("div", null, h("h2", null, state.user.name), h("span", { class: "muted small" }, t("user.role." + state.user.role)))),
-    h("a", { class: "menu-item", href: "#/settings/account", onclick: () => (dialog.close(), document.querySelector("dialog.nav-sheet")?.close()) }, icon("user"), t("settings.account")),
-    isAdmin() && h("button", { type: "button", class: "menu-item", onclick: () => (dialog.close(), serverPowerDialog("reboot")) }, icon("refresh"), t("power.reboot")),
-    isAdmin() && h("button", { type: "button", class: "menu-item", onclick: () => (dialog.close(), serverPowerDialog("poweroff")) }, icon("stop"), t("power.poweroff")),
-    h("button", { type: "button", class: "menu-item", onclick: () => (dialog.close(), signOut()) }, icon("signout"), t("nav.signOut")),
+    h("a", { class: "ui-menu-item", href: "#/settings/account", onclick: () => (dialog.close(), document.querySelector("dialog.ui-dlg-nav-sheet")?.close()) }, icon("user"), t("settings.account")),
+    isAdmin() && h("button", { type: "button", class: "ui-menu-item", onclick: () => (dialog.close(), serverPowerDialog("reboot")) }, icon("refresh"), t("power.reboot")),
+    isAdmin() && h("button", { type: "button", class: "ui-menu-item", onclick: () => (dialog.close(), serverPowerDialog("poweroff")) }, icon("stop"), t("power.poweroff")),
+    h("button", { type: "button", class: "ui-menu-item", onclick: () => (dialog.close(), signOut()) }, icon("signout"), t("nav.signOut")),
   );
   // it hangs under the button it was opened from, by its right edge; over it at the bottom of a phone's menu
   if (above) dialog.style.bottom = document.documentElement.clientHeight - anchor.top + 8 + "px";
@@ -2555,7 +2551,7 @@ function userMenu(e, above = false) {
 
 /** The search field of the header: installed apps first, then the store; for an administrator the data folder's files too */
 function globalSearch(after = () => {}) {
-  const results = h("div", { class: "search-results", hidden: true });
+  const results = h("div", { class: "ui-top-search-results", hidden: true });
   const withFiles = isAdmin();
   const input = h("input", { type: "search", placeholder: t(withFiles ? "search.placeholderFiles" : "search.placeholder"), "aria-label": t(withFiles ? "search.placeholderFiles" : "search.placeholder"), autocomplete: "off", spellcheck: false });
   let hits = [];
@@ -2597,19 +2593,19 @@ function globalSearch(after = () => {}) {
     const all = [...hits, ...fileHits];
     const fileRow = (hit) => {
       const name = hit.path.split("/").pop();
-      return h("button", { type: "button", class: "search-hit", onmousedown: (e) => (e.preventDefault(), openHit(hit)) }, fileIcon({ name, type: hit.type }), h("span", { class: "grow clip" }, name, h("span", { class: "muted small block clip mono" }, hit.path.slice(0, hit.path.lastIndexOf("/")) || "/")));
+      return h("button", { type: "button", class: "ui-top-search-hit", onmousedown: (e) => (e.preventDefault(), openHit(hit)) }, fileIcon({ name, type: hit.type }), h("span", { class: "grow clip" }, name, h("span", { class: "muted small block clip mono" }, hit.path.slice(0, hit.path.lastIndexOf("/")) || "/")));
     };
     put(
       results,
-      ...(hits.length ? hits.map((hit) => h("button", { type: "button", class: "search-hit", onmousedown: (e) => (e.preventDefault(), openHit(hit)) }, appIcon(hit, "sm"), h("span", { class: "grow" }, hit.title), h("span", { class: "muted small" }, t(hit.installed ? "search.installed" : "search.store")))) : []),
+      ...(hits.length ? hits.map((hit) => h("button", { type: "button", class: "ui-top-search-hit", onmousedown: (e) => (e.preventDefault(), openHit(hit)) }, appIcon(hit, "sm"), h("span", { class: "grow" }, hit.title), h("span", { class: "muted small" }, t(hit.installed ? "search.installed" : "search.store")))) : []),
       ...(withFiles && q.length >= 2
         ? [
-            h("div", { class: "search-head muted small" }, t("search.files")),
-            ...(!shown || !shown.found ? [h("p", { class: "muted small pad-s" }, t("files.finding"))] : fileHits.length ? fileHits.map(fileRow) : [h("p", { class: "muted small pad-s" }, t("search.noFiles"))]),
-            shown?.found && shown.found.length > fileHits.length && h("button", { type: "button", class: "search-hit more", onmousedown: (e) => (e.preventDefault(), allFiles()) }, icon("search"), h("span", { class: "grow" }, t("search.allFiles", { n: shown.found.length + (shown.more ? "+" : "") }))),
+            h("div", { class: "ui-top-search-head muted small" }, t("search.files")),
+            ...(!shown || !shown.found ? [h("p", { class: "muted small ui-pad-s" }, t("files.finding"))] : fileHits.length ? fileHits.map(fileRow) : [h("p", { class: "muted small ui-pad-s" }, t("search.noFiles"))]),
+            shown?.found && shown.found.length > fileHits.length && h("button", { type: "button", class: "ui-top-search-hit ui-search-all", onmousedown: (e) => (e.preventDefault(), allFiles()) }, icon("search"), h("span", { class: "grow" }, t("search.allFiles", { n: shown.found.length + (shown.more ? "+" : "") }))),
           ]
         : []),
-      ...(!all.length && !(withFiles && q.length >= 2) ? [h("p", { class: "muted small pad" }, t("store.nothing"))] : []),
+      ...(!all.length && !(withFiles && q.length >= 2) ? [h("p", { class: "muted small ui-pad" }, t("store.nothing"))] : []),
     );
     results.hidden = false;
   };
@@ -2647,13 +2643,13 @@ function globalSearch(after = () => {}) {
     if (e.key === "Escape") input.blur();
   });
   // in Files "/" starts a path
-  return h("div", { class: "search" }, icon("search"), input, state.route.view !== "files" && h("kbd", null, "/"), results);
+  return h("div", { class: "ui-top-search" }, icon("search"), input, state.route.view !== "files" && h("kbd", null, "/"), results);
 }
 
 document.addEventListener("keydown", (e) => {
   if (e.key !== "/" || e.ctrlKey || e.metaKey || e.altKey || state.route.view === "files") return;
   if (/^(INPUT|TEXTAREA|SELECT)$/.test(document.activeElement?.tagName ?? "") || document.querySelector("dialog[open]")) return;
-  const input = document.querySelector(".top .search input");
+  const input = document.querySelector(".ui-top .ui-top-search input");
   if (input) {
     e.preventDefault();
     input.focus();
@@ -2665,24 +2661,24 @@ function shell(...content) {
   $app.replaceChildren(
     h(
       "header",
-      { class: "top" },
-      h("a", { class: "brand", href: "#/" }, logo(), h("span", null, "hata")),
-      h("strong", { class: "top-title" }, areaOf() ? t("nav." + areaOf()) : state.route.view === "terminal" ? t("terminal.title") : "hata"),
-      h("nav", { class: "nav" }, navLinks("nav-link")),
+      { class: "ui-top" },
+      h("a", { class: "ui-brand", href: "#/" }, logo(), h("span", null, "hata")),
+      h("strong", { class: "ui-top-title" }, areaOf() ? t("nav." + areaOf()) : state.route.view === "terminal" ? t("terminal.title") : "hata"),
+      h("nav", { class: "ui-nav" }, navLinks("ui-nav-link")),
       h(
         "div",
-        { class: "top-right" },
+        { class: "ui-top-right" },
         globalSearch(),
-        h("button", { type: "button", class: "top-btn top-find", title: t("search.placeholder"), "aria-label": t("search.placeholder"), onclick: () => navSheet(true) }, icon("search")),
-        isAdmin() && h("a", { class: "top-btn top-term" + (state.route.view === "terminal" ? " active" : ""), href: "#/terminal", title: t("terminal.title"), "aria-label": t("terminal.title") }, icon("terminal")),
-        h("span", { id: "music-now", class: "tv-now", hidden: true }),
-        h("span", { id: "tv-now", class: "tv-now", hidden: true }),
-        h("a", { class: "top-btn top-gear" + (areaOf() === "settings" ? " active" : ""), href: "#/settings", title: t("nav.settings"), "aria-label": t("nav.settings") }, icon("gear")),
-        h("button", { type: "button", class: "top-btn top-user" + (state.user.avatar ? " has-picture" : ""), title: state.user.name, "aria-label": state.user.name, "aria-haspopup": "menu", onclick: userMenu }, state.user.avatar ? avatarOf(state.user, "top-picture") : state.user.name.slice(0, 1).toUpperCase()),
+        h("button", { type: "button", class: "ui-top-btn ui-top-find", title: t("search.placeholder"), "aria-label": t("search.placeholder"), onclick: () => navSheet(true) }, icon("search")),
+        isAdmin() && h("a", { class: "ui-top-btn ui-top-term" + (state.route.view === "terminal" ? " active" : ""), href: "#/terminal", title: t("terminal.title"), "aria-label": t("terminal.title") }, icon("terminal")),
+        h("span", { id: "music-now", class: "ui-top-now", hidden: true }),
+        h("span", { id: "tv-now", class: "ui-top-now", hidden: true }),
+        h("a", { class: "ui-top-btn ui-top-gear" + (areaOf() === "settings" ? " active" : ""), href: "#/settings", title: t("nav.settings"), "aria-label": t("nav.settings") }, icon("gear")),
+        h("button", { type: "button", class: "ui-top-btn ui-top-user" + (state.user.avatar ? " ui-has-picture" : ""), title: state.user.name, "aria-label": state.user.name, "aria-haspopup": "menu", onclick: userMenu }, state.user.avatar ? avatarOf(state.user, "ui-top-picture") : state.user.name.slice(0, 1).toUpperCase()),
       ),
     ),
-    h("main", { id: "view" }, state.user.mustTwoFactor && h("p", { class: "banner" }, t("twofa.mustLead"), " ", h("a", { class: "link", href: "#/settings/account" }, t("twofa.mustGo"))), content),
-    h("nav", { class: "bottom-bar" }, bottomLinks()),
+    h("main", { id: "view" }, state.user.mustTwoFactor && uiNotice({ tone: "warn", text: [t("twofa.mustLead"), " ", h("a", { class: "link", href: "#/settings/account" }, t("twofa.mustGo"))] }), content),
+    h("nav", { class: "ui-bottom-bar" }, bottomLinks()),
   );
   paintMusicNow();
   paintTvNow();

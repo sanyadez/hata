@@ -82,7 +82,7 @@ function locked() {
     h(
       "form",
       {
-        class: "card pad stack",
+        class: "ui-card ui-pad stack",
         onsubmit: async (e) => {
           e.preventDefault();
           error.textContent = "";
@@ -111,7 +111,7 @@ function locked() {
 function oneFile(info) {
   const url = fileUrl("", false);
   const preview = IMAGE_RE.test(info.name) ? h("img", { class: "link-preview", src: url, alt: "" }) : VIDEO_RE.test(info.name) ? h("video", { class: "link-preview", src: url, controls: true, preload: "metadata" }) : AUDIO_RE.test(info.name) ? h("audio", { src: url, controls: true, preload: "metadata" }) : null;
-  show(h("section", { class: "card pad stack" }, ...head(info, info.name), h("p", { class: "muted" }, bytes(info.size)), preview, h("a", { class: "btn primary", href: fileUrl("", true) }, t("linkpage.download"))));
+  show(h("section", { class: "ui-card ui-pad stack" }, ...head(info, info.name), h("p", { class: "muted" }, bytes(info.size)), preview, h("a", { class: "btn primary", href: fileUrl("", true) }, t("linkpage.download"))));
 }
 
 // --- A folder ---------------------------------------------------------------------------------------
@@ -128,7 +128,7 @@ async function oneFolder(info, path = "") {
   show(
     h(
       "section",
-      { class: "card pad stack" },
+      { class: "ui-card ui-pad stack" },
       ...head(info, info.name),
       h("div", { class: "link-bar" }, crumbs, h("a", { class: "btn primary small", href: zipUrl(path) }, t("linkpage.downloadAll"))),
       list,
@@ -181,7 +181,7 @@ function drop(info) {
     h("strong", null, t("linkpage.dropHere")),
     h("span", { class: "muted small" }, t("linkpage.dropOr")),
   );
-  show(h("section", { class: "card pad stack" }, ...head(info, t("linkpage.dropTitle", { name: info.name })), zone, picker, room, sent));
+  show(h("section", { class: "ui-card ui-pad stack" }, ...head(info, t("linkpage.dropTitle", { name: info.name })), zone, picker, room, sent));
 
   let queue = Promise.resolve();
   const send = (files) => {
@@ -240,7 +240,7 @@ async function start() {
   try {
     opened(await ask("GET", "/info"));
   } catch (e) {
-    show(h("section", { class: "card pad stack" }, h("h1", null, t("linkpage.goneTitle")), h("p", { class: "muted" }, e instanceof Failure && e.status === 404 ? t("linkpage.goneLead") : said(e))));
+    show(h("section", { class: "ui-card ui-pad stack" }, h("h1", null, t("linkpage.goneTitle")), h("p", { class: "muted" }, e instanceof Failure && e.status === 404 ? t("linkpage.goneLead") : said(e))));
   }
 }
 

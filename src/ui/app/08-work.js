@@ -587,7 +587,7 @@ function patchJobs() {
       const sub = root.querySelector(".ui-work-sub");
       if (sub) sub.textContent = jobSub(e);
       const detail = root.querySelector(".ui-work-detail");
-      if (detail) detail.textContent = jobDetail(e, root.classList.contains("row"));
+      if (detail) detail.textContent = jobDetail(e, root.classList.contains("ui-work-row"));
       const short = root.querySelector(".ui-work-short");
       if (short) short.textContent = e.status === "running" ? jobShort(e) : jobSub(e) || t("job.failed");
       const bar = root.querySelector(".ui-work-bar");
@@ -660,7 +660,7 @@ function jobStrip(shown) {
 function paintJobs() {
   let tray = document.getElementById("job-tray");
   const shown = !state.user || !isAdmin() ? [] : [...jobsUi.list.values()].filter((e) => !jobsUi.logs.has(e.id)).sort((a, b) => jobWaits(b) - jobWaits(a) || jobEnded(a) - jobEnded(b));
-  document.body.classList.toggle("has-jobs", shown.length > 0);
+  document.body.classList.toggle("ui-has-jobs", shown.length > 0);
   if (!shown.length) {
     tray?.remove();
     jobsUi.sig = "";
@@ -675,7 +675,7 @@ function paintJobs() {
   const sig = JSON.stringify([jobsUi.min, jobsUi.all, jobsUi.lost, state.lang, shown.map((e) => [e.id, e.status, e.stopped, jobHeading(e), e.icon, e.status === "done" && jobUrl(e), !!jobNotes(e), jobLogin(e)?.login.kind ?? ""])]);
   if (sig !== jobsUi.sig) {
     jobsUi.sig = sig;
-    tray.className = jobsUi.min ? "min" : "";
+    tray.className = jobsUi.min ? "ui-min" : "";
     if (jobsUi.min) tray.replaceChildren(jobStrip(shown));
     else if (shown.length === 1) tray.replaceChildren(jobCard(shown[0]));
     else {

@@ -100,7 +100,7 @@ function machineBlock(id) {
   const waiting = m.online && !m.status;
   el.classList.toggle("ui-away", !m.online);
   el.oncontextmenu = null;
-  const head = uiBlockHead({ title: [h("a", { href: `#/machines/${m.id}`, class: "clip" }, m.name), uiState(m.online ? "ok" : "off", t(m.online ? "machines.online" : "machines.offline"))], actions: m.os && h("span", { class: "ui-row-time" }, m.os) });
+  const head = uiCardHead({ title: [h("a", { href: `#/machines/${m.id}`, class: "clip" }, m.name), uiState(m.online ? "ok" : "off", t(m.online ? "machines.online" : "machines.offline"))], actions: m.os && h("span", { class: "ui-row-time" }, m.os) });
   let body;
   if (!m.online) {
     const { buttons, openMore } = machineBack(m);
@@ -134,7 +134,7 @@ function renderHome() {
 }
 
 const activityBody = (o) => [
-  uiBlockHead({ title: t("activity.title"), pad: true, actions: isAdmin() && o.activity.length > 0 && h("a", { class: "ui-link", href: "#/activity" }, t("activity.all"), icon("chevron")) }),
+  uiCardHead({ title: t("activity.title"), pad: true, actions: isAdmin() && o.activity.length > 0 && h("a", { class: "ui-link", href: "#/activity" }, t("activity.all"), icon("chevron")) }),
   o.activity.length ? uiRows(o.activity.map((e) => activityItem(e)), { cls: "ui-fits" }) : uiEmpty({ text: t("activity.none") }),
 ];
 
@@ -148,7 +148,7 @@ function attentionBlock(list) {
   more.classList.add("ui-fits-more");
   more.hidden = true;
   return [
-    uiBlockHead({ title: [t("attention.title"), uiCount(list.length)], pad: true, actions: hidden }),
+    uiCardHead({ title: [t("attention.title"), uiCount(list.length)], pad: true, actions: hidden }),
     list.length ? uiRows(list.map((item) => attentionItem(item)), { cls: "ui-attention-list ui-fits" }) : uiEmpty({ icon: "check", tone: "ok", text: t("attention.none") }),
     more,
   ];
@@ -638,7 +638,7 @@ function terminalFrame(query = {}) {
 
 function renderTerminal() {
   shell(pageHead({ title: t("terminal.title"), facts: [t("terminal.hostHint")] }), terminalFrame());
-  document.getElementById("view").classList.add("fill");
+  document.getElementById("view").classList.add("ui-fill");
 }
 
 function appTerminalTab(app, box) {

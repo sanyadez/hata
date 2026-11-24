@@ -164,7 +164,7 @@ function sharesSection() {
   const found = data.announced.browse && data.announced.windows ? "both" : data.announced.windows ? "windows" : data.announced.browse ? "browse" : "";
   const userRow = (user) =>
     uiRow({
-      lead: { avatar: avatarOf(user, "avatar ui-lead") },
+      lead: { avatar: avatarOf(user, "ui-avatar ui-lead") },
       name: user.name,
       sub: t("shares.users.folders", { n: data.shares.filter((share) => share.users[user.id]).length }),
       state: user.allowed === false ? uiState("off", t("shares.users.denied")) : user.ready ? uiState("ok", t("shares.users.ready")) : uiState("off", t("shares.users.notReady")),
@@ -545,7 +545,7 @@ function assistantBody() {
         foot: uiLine([button(t("approvals.decline"), { class: "small", onclick: () => assistantCall(`/api/assistant/chats/${chat.id}/calls/${call.id}`, { run: false }) }), button(t("assistant.run"), { class: "small primary", onclick: () => assistantCall(`/api/assistant/chats/${chat.id}/calls/${call.id}`, { run: true }) }, "play")]),
       });
     }
-    const mark = !result ? icon("refresh", "spin") : icon(result.error ? "x" : "check", result.error ? "danger" : "");
+    const mark = !result ? icon("refresh", "ui-spin") : icon(result.error ? "x" : "check", result.error ? "danger" : "");
     // what the tool answered is there to look at: nothing the assistant saw is hidden from the person
     return uiDetails([mark, h("span", null, result?.declined || call.state === "declined" ? t("assistant.declined", { what: toolWords(call) }) : toolWords(call))], result && !result.declined && uiOutput(result.text, { size: "fit" }));
   };
@@ -554,7 +554,7 @@ function assistantBody() {
     if (turn.role === "assistant") return [turn.text && uiMessage("bot", md(turn.text)), ...turn.calls.map(callRow)];
     return [];
   });
-  if (chat.status === "thinking") rows.push(uiLine([icon("refresh", "spin"), h("span", { class: "grow muted" }, t("assistant.thinking")), button(t("assistant.stop"), { class: "small", onclick: () => assistantCall(`/api/assistant/chats/${chat.id}/stop`) })]));
+  if (chat.status === "thinking") rows.push(uiLine([icon("refresh", "ui-spin"), h("span", { class: "grow muted" }, t("assistant.thinking")), button(t("assistant.stop"), { class: "small", onclick: () => assistantCall(`/api/assistant/chats/${chat.id}/stop`) })]));
   if (chat.status === "error") {
     const key = "error.assistant." + chat.error?.code;
     rows.push(uiNotice({ tone: "bad", title: has(key) ? t(key) : null, text: chat.error?.message ?? "", action: button(t("assistant.retry"), { class: "small", onclick: () => assistantCall(`/api/assistant/chats/${chat.id}`, { retry: true }) }, "refresh") }));
@@ -1529,7 +1529,7 @@ function avatarCard() {
   return uiCard(
     { title: t("account.avatar"), lead: t("account.avatarHint") },
     uiLine([
-      avatarOf(state.user, "avatar big"),
+      avatarOf(state.user, "ui-avatar ui-avatar-big"),
       picker,
       button(t(has ? "account.avatarChange" : "account.avatarUpload"), { class: "small", onclick: () => picker.click() }, "upload"),
       has &&
@@ -1819,7 +1819,7 @@ function renderUsers() {
         users.map((u) => ({
           menu: (at) => userMenuFor(u, at),
           cells: [
-            uiCell({ lead: { avatar: avatarOf(u, "avatar ui-lead") }, name: [u.name, u.id === state.user.id && h("span", { class: "muted small" }, " ", t("users.you"))], sub: userShares(u) }),
+            uiCell({ lead: { avatar: avatarOf(u, "ui-avatar ui-lead") }, name: [u.name, u.id === state.user.id && h("span", { class: "muted small" }, " ", t("users.you"))], sub: userShares(u) }),
             u.role === "admin" ? uiState("info", t("user.role." + u.role)) : uiTag(t("user.role." + u.role)),
             u.twoFactor ? uiState("ok", t("twofa.onShort")) : h("span", { class: "muted" }, t("twofa.offShort")),
             u.lastSignIn ? ago(u.lastSignIn) : h("span", { class: "muted" }, t("users.never")),

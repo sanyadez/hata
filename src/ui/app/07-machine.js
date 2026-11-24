@@ -618,7 +618,7 @@ function paintMachineApps() {
       cells: [
         uiCell({ lead: appIcon(app, "row"), name: app.title, sub: h("span", { class: "mono" }, app.name + (app.store ? ` · ${app.store}` : "")) }),
         stateChip(app),
-        h("span", { class: "mono small" }, app.guarded && uiTileMark("lock", t("access.protected")), address),
+        h("span", { class: "mono small" }, app.guarded && uiNameMark("lock", t("access.protected")), address),
         keepClick(uiLine([main, uiMore(more, { size: "s", header: menuHeader(app.title, m.name, "box") })], { end: true })),
       ],
       sub: app.port ? `${m.ip}:${app.port}` : app.name,

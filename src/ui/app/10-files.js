@@ -315,7 +315,7 @@ function renderFilesBody() {
   const navButton = (label, iconName, off, run, cls = "") => h("button", { type: "button", class: "btn square", title: label, "aria-label": label, disabled: off, onclick: run }, icon(iconName, cls));
   const head = uiToolbar({
     group: [
-      navButton(t("files.back"), "arrow", !(trail && trail.at > trail.first), () => history.back(), "flip"),
+      navButton(t("files.back"), "arrow", !(trail && trail.at > trail.first), () => history.back(), "ui-flip"),
       navButton(t("files.forward"), "arrow", !(trail && trail.at < trail.last), () => history.forward()),
       navButton(t("files.up"), "up", !!filesMachine() && path === "/", goUp),
     ],
@@ -856,7 +856,7 @@ function filesTable(entries) {
       "tr",
       { class: (filesUi.selected.has(entry.name) ? "ui-selected" : "") + (filesUi.cursor === entry.name ? " ui-cursor" : ""), "data-name": entry.name },
       h("td", { class: "ui-files-tick" }, entryCheckbox(entry)),
-      h("td", { class: "ui-files-name" }, entryOpener(entry, "ui-files-open", fileIcon(entry), h("span", { class: "clip" }, entry.name), entry.link && icon("link", "faint"), entryMarks(entry))),
+      h("td", { class: "ui-files-name" }, entryOpener(entry, "ui-files-open", fileIcon(entry), h("span", { class: "clip" }, entry.name), entry.link && icon("link", "ui-faint"), entryMarks(entry))),
       h("td", { class: "num muted" }, entry.type === "file" ? bytes(entry.size) : "—"),
       h("td", { class: "muted ui-files-when" }, fileTime(entry.modified)),
       h("td", { class: "ui-files-tick" }, entryMore(entry)),
@@ -982,7 +982,7 @@ function menuAt(at, header, entries) {
     e.href
       ? h("a", { class: "ui-menu-item", href: e.href, ...(e.newTab ? { target: "_blank", rel: "noopener noreferrer" } : {}), onclick: () => dialog.close() }, e.iconEl ?? icon(e.icon), e.label)
       : h("button", { type: "button", class: "ui-menu-item" + (e.danger ? " danger" : ""), disabled: !!e.off, onclick: () => (dialog.close(), e.run()) }, e.iconEl ?? icon(e.icon), e.label);
-  const marked = (e, el) => (e.on && el.append(icon("check", "on-mark")), el);
+  const marked = (e, el) => (e.on && el.append(icon("check", "ui-on-mark")), el);
   dialog = openDialog("menu dropdown", header, entries.filter(Boolean).map((e) => marked(e, one(e))));
   placeAt(dialog, at);
   // opened by the pointer: the first entry is not chosen by itself (the dialog takes the focus instead)
@@ -1008,12 +1008,12 @@ const hasOwnMenu = (el) => {
 };
 
 /** The rows a right click finds the actions of by themselves: what their buttons and their link do */
-const MENU_ROWS = "tr, .snapshot, .machine-card, .attention-item, .ui-attention, .tool";
+const MENU_ROWS = "tr, .ui-row, .ui-attention";
 
 /** The menu of a row made of its own buttons — the same actions, where the pointer is; false — it has none */
 function rowMenu(row, at) {
   const shown = (el) => el.getClientRects().length > 0 && !el.closest("dialog:not([open])");
-  const buttons = [...row.querySelectorAll("button, a.btn")].filter((b) => shown(b) && !b.closest(".menu-item, .ui-menu-item") && !b.classList.contains("select-btn") && b.type !== "submit");
+  const buttons = [...row.querySelectorAll("button, a.btn")].filter((b) => shown(b) && !b.closest(".ui-menu-item") && !b.classList.contains("ui-select-btn") && b.type !== "submit");
   // the name, without the chips that sit inside it ("test" of "test · Everything")
   const named = row.querySelector("h2 .with-icon") ?? row.querySelector("strong, h2, h3, .strong, .name");
   const title = (named && ([...named.childNodes].filter((n) => n.nodeType === Node.TEXT_NODE).map((n) => n.textContent).join("").trim() || named.textContent.trim())) || "";
@@ -1051,7 +1051,7 @@ function rowMenu(row, at) {
 function contextMenus() {
   document.addEventListener("contextmenu", (e) => {
     if (e.defaultPrevented || e.shiftKey || !(e.target instanceof Element)) return;
-    if (e.target.closest("input, textarea, select, .select-btn, [contenteditable], iframe, dialog.menu")) return;
+    if (e.target.closest("input, textarea, select, .ui-select-btn, [contenteditable], iframe, dialog.ui-dlg-menu")) return;
     const picked = getSelection();
     if (picked && !picked.isCollapsed && picked.containsNode(e.target, true)) return;
     const at = { x: e.clientX, y: e.clientY };
@@ -1613,7 +1613,7 @@ function mediaDialog(entry) {
     const next = list[list.findIndex((item) => item.name === current.name) + by];
     if (next) show(next);
   };
-  const prev = h("button", { type: "button", class: "icon-btn", "aria-label": t("files.previous"), title: t("files.previous"), onclick: () => step(-1) }, icon("chevron", "flip"));
+  const prev = h("button", { type: "button", class: "icon-btn", "aria-label": t("files.previous"), title: t("files.previous"), onclick: () => step(-1) }, icon("chevron", "ui-flip"));
   const next = h("button", { type: "button", class: "icon-btn", "aria-label": t("files.next"), title: t("files.next"), onclick: () => step(1) }, icon("chevron"));
   // a video is played by Hata's own player where ffmpeg is: sound tracks, subtitles, formats a browser alone cannot
   let player = null;

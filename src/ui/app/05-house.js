@@ -1071,7 +1071,7 @@ function appServiceLine(app) {
 /** A picture that failed says so instead of a broken image */
 function picture(src, alt, cls) {
   const img = h("img", { src, alt, loading: "lazy", class: cls });
-  img.addEventListener("error", () => img.classList.add("broken"));
+  img.addEventListener("error", () => img.classList.add("ui-broken"));
   return img;
 }
 

@@ -44,7 +44,7 @@ function restoreDialog(app, snapshot) {
         class: "primary",
         onclick: async () => {
           dialog.close();
-          document.querySelector("dialog.snapshots")?.close();
+          document.querySelector("dialog.ui-dlg-snapshots")?.close();
           try {
             const res = await api("POST", `/api/backups/${app.name}/${snapshot.id}/restore`, {});
             jobDialog(res.job, "restore", app.title, () => void refresh());
@@ -134,7 +134,7 @@ function snapshotFilesDialog(app, snapshot) {
           onclick: async () => {
             sure.close();
             dialog.close();
-            document.querySelector("dialog.snapshots")?.close();
+            document.querySelector("dialog.ui-dlg-snapshots")?.close();
             try {
               const res = await api("POST", `${base}/restore-files`, { paths });
               jobDialog(res.job, "restore", app.title, () => void refresh());

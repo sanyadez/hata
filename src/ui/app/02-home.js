@@ -301,7 +301,7 @@ function tile(item) {
     href = url ?? `#/machines/${target.machine.id}/apps`;
     external = !!url;
     sub = [uiDot(st), target.machine.online ? (st === "running" && (app.guarded || app.port) ? (app.guarded ? `${location.hostname}:${app.guarded}` : `${target.machine.ip}:${app.port}`) : t("status." + st)) : t("machines.offline")];
-    badges = [app.guarded && uiTileMark("lock", t("access.protected"))];
+    badges = [app.guarded && uiNameMark("lock", t("access.protected"))];
     if (installing) {
       cls = "installing";
       sub = [uiDot(), h("span", { class: "clip" }, jobShort(app.job, target.machine.name))];
@@ -330,7 +330,7 @@ function tile(item) {
         : [uiDot(st), st === "running" && appAddress(app) ? appAddress(app) : t("status." + st)];
     const line = st === "running" && appServiceLine(app);
     if (line) where = h("span", { class: "ui-home-tile-where" }, h("span", { class: "clip" }, line));
-    badges = [app.protected && uiTileMark("lock", t("access.protected")), (app.update || app.newer?.length > 0) && isAdmin() && uiTileMark("up", t(app.update ? "app.storeUpdate" : "app.newer"))];
+    badges = [app.protected && uiNameMark("lock", t("access.protected")), (app.update || app.newer?.length > 0) && isAdmin() && uiNameMark("up", t(app.update ? "app.storeUpdate" : "app.newer"))];
     // an administrator gets what can be done to the app right there; a member, the app's page
     side = admin
       ? h("button", { type: "button", class: "ui-home-tile-open", title: t("home.tileActions"), "aria-label": `${t("home.tileActions")}: ${title}`, onclick: (e) => appTileMenu(app, e.currentTarget) }, icon("more"))
@@ -344,7 +344,7 @@ function tile(item) {
     // a link for the TV: one press shows it on the server's screen (for whoever may; for the rest it is a usual link)
     const toScreen = item.screen && isAdmin() && hasModule("tv");
     if (toScreen) onMain = () => void showOnTv(item.url).then((shown) => shown && toast(t("tv.page.sent", { name: title })));
-    badges = uiTileMark(toScreen ? "tv" : "external", toScreen ? t("home.linkScreen") : null);
+    badges = uiNameMark(toScreen ? "tv" : "external", toScreen ? t("home.linkScreen") : null);
     side = isAdmin() && h("button", { type: "button", class: "ui-home-tile-open", title: t("home.editLink"), "aria-label": `${t("home.editLink")}: ${title}`, onclick: () => linkDialog(item) }, icon("sliders"));
   } else if (item.type === "builtin") {
     // Hata's own tiles: the store opens like an app, "Add" asks what to add
@@ -420,7 +420,7 @@ function livePicture(src, alt, cls) {
   img.addEventListener("error", () =>
     setTimeout(() => {
       if (!img.isConnected || !img.dataset.live || document.hidden) return;
-      img.classList.remove("broken");
+      img.classList.remove("ui-broken");
       img.liveStart();
     }, 5000),
   );
@@ -1412,7 +1412,7 @@ function confirmAction({ title, lead, label, run, kind = "danger", iconName = "t
       error.textContent = "";
       // it may take a while: the button turns, so the wait is seen to be one
       const mark = go.querySelector(".ico");
-      const turning = icon("refresh", "spin");
+      const turning = icon("refresh", "ui-spin");
       mark?.replaceWith(turning);
       try {
         await run();

@@ -8,25 +8,33 @@ import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { APP_DIR, appParts } from "./uiparts";
 
-/** The utilities of the system: words (small, muted, mono, error, strong, num), a line cut or kept whole, a column, the kinds of a button */
-export const UTILITIES = new Set(
-  "small muted mono clip grow stack stack-s wrap error strong num center sr-only btn primary danger ghost quiet icon-btn with-icon square link danger-text short wide whole".split(" "),
-);
+/** The utilities of the system: words, a column, the kinds of a button, and the states a block takes while the page runs */
+export const UTILITIES = new Set([
+  // words: size, tone and type of text; a line cut or kept whole; shown as a block
+  ..."small muted mono clip strong num error wrap whole block center sr-only".split(" "),
+  // layout: a column of blocks, a part that takes the room left
+  ..."stack stack-s grow".split(" "),
+  // the kinds of a button
+  ..."btn primary danger ghost quiet icon-btn with-icon square link danger-text short wide".split(" "),
+  // states a block takes while the page runs (toggled, not drawn): open, chosen, on, at work, a tone of what is said
+  ..."open active on off busy done now stopped playing failed selected hidden ok warn bad info".split(" "),
+]);
 
 /** The classes of a part that are neither a block's nor a utility */
 export function ownClasses(text: string): string[] {
   const found: string[] = [];
   for (const m of text.matchAll(/(?:class|cls): "([^"]*)"/g)) found.push(...m[1].split(/\s+/));
   for (const m of text.matchAll(/(?:class|cls): `([^`]*)`/g)) found.push(...m[1].replace(/\$\{[^}]*\}/g, " ").split(/\s+/));
+  // classes put on or asked of an element while the page runs, and the variants of an icon
+  for (const m of text.matchAll(/classList\.(?:add|toggle|remove|replace|contains)\(\s*"([^"]*)"/g)) found.push(m[1]);
+  for (const m of text.matchAll(/\.className\s*=\s*"([^"]*)"/g)) found.push(...m[1].split(/\s+/));
+  for (const m of text.matchAll(/\bicon\(\s*[^,()]+,\s*"([^"]*)"/g)) found.push(...m[1].split(/\s+/));
   return found.filter((c) => c && !c.startsWith("ui-") && !UTILITIES.has(c));
 }
-
 
 test("no part draws anything of its own", () => {
   const over: string[] = [];
   for (const part of appParts()) {
-    // 01-core.js is the system itself: the blocks and the frame of the page (the top bar, windows, menus, toasts)
-    if (part === "01-core.js") continue;
     const own = ownClasses(readFileSync(`${APP_DIR}/${part}`, "utf8"));
     if (own.length) over.push(`${part}: ${[...new Set(own)].join(", ")} — make it with the blocks of 01-core.js`);
   }
