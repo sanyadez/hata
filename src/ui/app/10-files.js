@@ -993,6 +993,12 @@ async function downloadEntries(entries) {
 /** Puts a menu where the pointer is, inside the window; a right click beside it moves it there */
 function placeAt(dialog, at) {
   const page = document.documentElement;
+  // opened by a button: under it, its right edge at the button's; above it when there is no room below
+  if (at instanceof Element) {
+    const r = at.getBoundingClientRect();
+    const below = r.bottom + 4 + dialog.offsetHeight <= page.clientHeight - 8;
+    at = { x: r.right - dialog.offsetWidth, y: below ? r.bottom + 4 : r.top - 4 - dialog.offsetHeight };
+  }
   dialog.style.right = "auto";
   dialog.style.left = Math.max(8, Math.min(at.x, page.clientWidth - dialog.offsetWidth - 8)) + "px";
   dialog.style.top = Math.max(8, Math.min(at.y, page.clientHeight - dialog.offsetHeight - 8)) + "px";

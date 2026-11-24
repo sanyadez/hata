@@ -101,10 +101,8 @@ async function loadTree() {
 }
 
 /** A menu opened by a button stands under it */
-const underButton = (el) => {
-  const r = el.getBoundingClientRect();
-  return { x: r.left, y: r.bottom + 4 };
-};
+/** Where a menu opened by a button goes: the button itself — `placeAt` puts the menu under it, by its right edge */
+const underButton = (el) => el;
 
 const rowPage = (r) => (r.instance ? `#/containers/i/${r.instance}` : r.guest ? `#/guest/${r.guest.host}/${r.guest.id}` : r.machine ? `#/machines/${r.machine}` : r.instance ? `#/containers/i/${r.instance}` : `#/guest/${r.guest.host}/${r.guest.id}`);
 const guestOfRow = (r) => ({ id: r.guest.id, type: r.guest.type, name: r.name, vmid: Number(r.guest.id.split("/")[1]), status: r.status, may: r.may });
