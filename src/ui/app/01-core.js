@@ -450,7 +450,7 @@ const uiCardHead = ({ title, count = null, marks = null, actions = null, pad = f
 const uiColumns = (main, side, { sideFirst = false, sideLeft = false } = {}) =>
   sideLeft
     ? h("div", { class: "ui-columns ui-side-left" }, h("div", { class: "stack" }, side), h("div", { class: "stack" }, main))
-    : h("div", { class: "ui-columns" + (sideFirst ? " side-first" : "") }, h("div", { class: "stack" }, main), h("div", { class: "stack" }, side));
+    : h("div", { class: "ui-columns" + (sideFirst ? " ui-side-first" : "") }, h("div", { class: "stack" }, main), h("div", { class: "stack" }, side));
 
 /**
  * A page with a column of places on its left (Files, the trash, My Hata, the links): the column `sideId` is filled
@@ -1079,7 +1079,7 @@ function uiLead(lead) {
   if (lead.colour) return h("span", { class: "ui-lead ui-colour" }, h("i", { class: "ui-c-" + lead.colour }));
   if (lead.img) return h("span", { class: "ui-lead ui-thumb" }, lead.img);
   if (lead.logo) return h("span", { class: "ui-lead" }, lead.logo);
-  return h("span", { class: "ui-lead" + (lead.tone ? " ui-tone " + lead.tone : "") }, icon(lead.icon ?? "box"));
+  return h("span", { class: "ui-lead" + (lead.tone ? " ui-tone ui-" + lead.tone : "") }, icon(lead.icon ?? "box"));
 }
 
 /** A picture of a thing that is not an app: an icon in the frame of an app's picture (`size` row, sm, lg, mini) */

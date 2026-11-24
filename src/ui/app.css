@@ -1270,7 +1270,7 @@ dialog:focus { outline: none; }
 .ui-lead { flex: none; display: grid; place-items: center; width: 32px; height: 32px; border-radius: 8px; background: var(--surface-2); color: var(--muted); overflow: hidden; }
 .ui-lead .ui-ico { width: 16px; height: 16px; }
 .ui-lead > img { width: 100%; height: 100%; object-fit: contain; }
-.ui-lead.ui-tone.ok { background: var(--ok-soft); color: var(--ok); } .ui-lead.ui-tone.warn { background: var(--warn-soft); color: var(--warn); } .ui-lead.ui-tone.bad { background: var(--danger-soft); color: var(--danger); } .ui-lead.ui-tone.info { background: var(--info-soft); color: var(--info); }
+.ui-lead.ui-tone.ui-ok { background: var(--ok-soft); color: var(--ok); } .ui-lead.ui-tone.ui-warn { background: var(--warn-soft); color: var(--warn); } .ui-lead.ui-tone.ui-bad { background: var(--danger-soft); color: var(--danger); } .ui-lead.ui-tone.ui-info { background: var(--info-soft); color: var(--info); }
 .ui-lead.ui-thumb { width: 56px; border-radius: 6px; }
 .ui-lead.ui-thumb > img { object-fit: cover; }
 .ui-lead.ui-colour > i { width: 8px; height: 8px; border-radius: 2px; background: var(--faint); }
@@ -2483,7 +2483,7 @@ dialog.ui-dlg-xwide textarea.ui-codearea { min-height: 56dvh; }
 .trend .ui-chart .ui-chart-axis { font-size: 10px; }
 .ui-columns { display: grid; grid-template-columns: minmax(0, 1.8fr) minmax(280px, 1fr); gap: 16px; align-items: start; }
 .ui-columns.ui-side-left { grid-template-columns: minmax(0, 420px) minmax(0, 1fr); }
-@media (max-width: 900px) { .ui-columns, .ui-columns.ui-side-left { grid-template-columns: minmax(0, 1fr); } .ui-columns.side-first > :last-child { order: -1; } }
+@media (max-width: 900px) { .ui-columns, .ui-columns.ui-side-left { grid-template-columns: minmax(0, 1fr); } .ui-columns.ui-side-first > :last-child { order: -1; } }
 .ui-readout { display: flex; align-items: center; gap: 16px; min-height: 34px; }
 .ui-readout-value { flex: 1; min-width: 0; margin: 0; font: 600 22px/1.25 var(--font-heading); }
 .ui-value-stepper { display: flex; align-items: center; justify-content: center; gap: 24px; }

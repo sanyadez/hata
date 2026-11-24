@@ -438,7 +438,7 @@ function liveView(x, name, key, height, alt, cls) {
   const p = svcSpecNow(x.kind)?.pictures?.[name];
   const refused = `${x.id}/${name}/${key}`;
   if (!p?.webrtc || typeof RTCPeerConnection !== "function" || (rtcRefused.get(refused) ?? 0) > Date.now()) return frames();
-  const video = h("video", { class: cls ? `live-video ${cls}` : "live-video", "aria-label": alt });
+  const video = h("video", { class: cls ? `ui-live-video ${cls}` : "ui-live-video", "aria-label": alt });
   video.muted = true;
   video.autoplay = true;
   video.playsInline = true;
