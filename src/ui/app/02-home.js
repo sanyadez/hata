@@ -1411,7 +1411,7 @@ function confirmAction({ title, lead, label, run, kind = "danger", iconName = "t
       go.disabled = true;
       error.textContent = "";
       // it may take a while: the button turns, so the wait is seen to be one
-      const mark = go.querySelector(".ico");
+      const mark = go.querySelector(".ui-ico");
       const turning = icon("refresh", "ui-spin");
       mark?.replaceWith(turning);
       try {

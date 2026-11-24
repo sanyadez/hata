@@ -137,7 +137,7 @@ const SVG_NS = "http://www.w3.org/2000/svg";
 function icon(name, className = "") {
   const svg = document.createElementNS(SVG_NS, "svg");
   svg.setAttribute("viewBox", "0 0 24 24");
-  svg.setAttribute("class", "ico " + className);
+  svg.setAttribute("class", "ui-ico " + className);
   svg.setAttribute("aria-hidden", "true");
   const path = document.createElementNS(SVG_NS, "path");
   path.setAttribute("d", ICONS[name] ?? ICONS.box);
@@ -149,7 +149,7 @@ function icon(name, className = "") {
 function logo() {
   const svg = document.createElementNS(SVG_NS, "svg");
   svg.setAttribute("viewBox", "0 0 64 64");
-  svg.setAttribute("class", "logo");
+  svg.setAttribute("class", "ui-logo");
   svg.setAttribute("aria-hidden", "true");
   const plate = document.createElementNS(SVG_NS, "rect");
   for (const [name, value] of Object.entries({ width: 64, height: 64, rx: 15 })) plate.setAttribute(name, value);
@@ -415,7 +415,7 @@ function pageHead({ crumbs = null, icon: iconName = null, logo = null, title = n
   const phone = () => matchMedia("(max-width: 640px)").matches;
   const entries = () => [...(phone() ? list.filter((a) => a !== main).map((a) => ({ label: a.label, icon: a.icon ?? "next", run: a.run, href: a.href, danger: a.danger })) : []), ...((typeof more === "function" ? more() : more) ?? [])];
   const hasMore = !!more || list.length > 1;
-  const right = (list.length || nodes.length || hasMore || search || actionsId) && h("div", { class: "ui-head-actions" + (more ? "" : " only-phone-more"), id: actionsId }, search, nodes, list.map(make), hasMore && uiMore(entries));
+  const right = (list.length || nodes.length || hasMore || search || actionsId) && h("div", { class: "ui-head-actions" + (more ? "" : " ui-only-phone-more"), id: actionsId }, search, nodes, list.map(make), hasMore && uiMore(entries));
   return h(
     "section",
     { class: "ui-card ui-head" + (cls ? " " + cls : ""), id },
@@ -523,11 +523,11 @@ function uiRow({ lead = null, name, sub = null, value = null, time = null, state
     more && uiMore(more, { size: "s" }),
     goes && !more && !action && icon("chevron", "ui-row-go"),
   );
-  return h(href ? "a" : "div", { class: `ui-row ${mode}${goes ? " goes" : ""}${action ? " acts" : ""}${action && (state || value != null) ? " full" : ""}${cls ? " " + cls : ""}`, href, onclick, id, menu, role: onclick && !href ? "button" : null, tabindex: onclick && !href ? 0 : null }, uiLead(lead), text, tail);
+  return h(href ? "a" : "div", { class: `ui-row ui-${mode}${goes ? " ui-goes" : ""}${action ? " ui-acts" : ""}${action && (state || value != null) ? " ui-full" : ""}${cls ? " " + cls : ""}`, href, onclick, id, menu, role: onclick && !href ? "button" : null, tabindex: onclick && !href ? 0 : null }, uiLead(lead), text, tail);
 }
 
 /** Rows one under another (uiRow); `inCard` — among the other blocks of a padded card: its padding is theirs, no line under the last */
-const uiRows = (rows, { inCard = false, id = null, hidden = false, cls = "" } = {}) => h("div", { class: "ui-rows" + (inCard ? " in-card" : "") + (cls ? " " + cls : ""), id, hidden }, rows);
+const uiRows = (rows, { inCard = false, id = null, hidden = false, cls = "" } = {}) => h("div", { class: "ui-rows" + (inCard ? " ui-in-card" : "") + (cls ? " " + cls : ""), id, hidden }, rows);
 
 /** A group of rows: a grey band with a chevron, a name, a count and its own tail; rows under it */
 function uiGroup({ name, count = null, state = null, action = null, more = null, open = true, onToggle = null }, ...rows) {
@@ -567,7 +567,7 @@ function uiTable(columns, rows, { cls = "", height = 56 } = {}) {
           ? h("tr", { class: "ui-tr-whole" + (r.cls ? " " + r.cls : "") }, h("td", { colspan: columns.length }, r.whole))
         : h(
             "tr",
-            { class: [r.onclick || r.href ? "goes" : "", r.cls ?? ""].join(" ").trim() || null, onclick: r.onclick ?? (r.href ? () => (location.hash = r.href.replace(/^#/, "")) : null), menu: r.menu },
+            { class: [r.onclick || r.href ? "ui-goes" : "", r.cls ?? ""].join(" ").trim() || null, onclick: r.onclick ?? (r.href ? () => (location.hash = r.href.replace(/^#/, "")) : null), menu: r.menu },
             r.cells.map((cell, i) => h("td", { class: columns[i]?.num ? "num" : null }, i === 0 && r.sub ? [cell, h("div", { class: "ui-td-sub" }, r.sub)] : cell)),
           ),
     ),
@@ -604,7 +604,7 @@ const uiMatrix = (columns, rows) =>
 
 /** A grant of a matrix: `on` (given), `reads` (read only), `off` (not), `fixed` (always, cannot be changed); a button when it has `onclick` */
 const uiGrant = ({ state = "off", label, text = null, onclick = null }) =>
-  h(onclick ? "button" : "span", { type: onclick ? "button" : null, class: "ui-grant" + (state === "off" ? "" : " " + state), "aria-pressed": onclick && state !== "reads" ? String(state === "on") : null, "aria-label": label, title: label, onclick }, text ?? (state === "on" || state === "fixed" ? icon("check") : "—"));
+  h(onclick ? "button" : "span", { type: onclick ? "button" : null, class: "ui-grant" + (state === "off" ? "" : " ui-" + state), "aria-pressed": onclick && state !== "reads" ? String(state === "on") : null, "aria-label": label, title: label, onclick }, text ?? (state === "on" || state === "fixed" ? icon("check") : "—"));
 
 /**
  * Files and folders to walk and pick from: `items` [{ name, dir, note, size, at, tick, open, download: href, mono }].
@@ -653,7 +653,7 @@ const keepClick = (el) => (el.addEventListener("click", (e) => e.stopPropagation
  * small — small tiles; features — the cards of features one turns on; sites — tiles of sites, two or more to a line;
  * pictures — pictures to choose from; buttons — buttons of equal width
  */
-const uiTiles = (tiles, { kind = "" } = {}) => h("div", { class: "ui-tiles" + (kind ? " " + kind : "") }, tiles);
+const uiTiles = (tiles, { kind = "" } = {}) => h("div", { class: "ui-tiles" + (kind ? " ui-" + kind : "") }, tiles);
 
 /**
  * A tile: an icon, a name, a sub line and a state above; one line below — a value, a meter or a warning (which
@@ -675,7 +675,7 @@ function uiTile({ icon: iconName = "box", logo = null, name, sub = null, state =
   const media = kind === "media" && h("div", { class: "ui-tile-picture" }, picture ?? icon(iconName));
   return h(
     href ? "a" : onclick ? "button" : "div",
-    { class: `ui-tile${kind ? " " + kind : ""}${desc ? " described" : ""}${tone ? " " + tone : ""}${selected ? " selected" : ""}`, href, type: onclick && !href ? "button" : null, onclick, menu, id },
+    { class: `ui-tile${kind ? " " + kind.split(" ").filter(Boolean).map((k) => (k.startsWith("ui-") ? k : "ui-" + k)).join(" ") : ""}${desc ? " ui-described" : ""}${tone ? " " + tone : ""}${selected ? " selected" : ""}`, href, type: onclick && !href ? "button" : null, onclick, menu, id },
     media,
     head,
     description,
@@ -786,7 +786,7 @@ function uiMeter(value, { kind = "capacity", label = null, parts = null } = {}) 
   const tone = kind === "progress" ? "progress" : kind === "load" ? "load" : v >= 95 ? "bad" : v >= 80 ? "warn" : "ok";
   const bar = parts
     ? h("div", { class: "ui-meter ui-multi" }, parts.map((p) => h("i", { class: "ui-c-" + (p.colour ?? "1"), style: null, "data-w": p.value })))
-    : h("div", { class: `ui-meter ${tone}`, role: "meter", "aria-valuenow": Math.round(v), "aria-valuemin": 0, "aria-valuemax": 100 }, h("i"));
+    : h("div", { class: `ui-meter ui-${tone}`, role: "meter", "aria-valuenow": Math.round(v), "aria-valuemin": 0, "aria-valuemax": 100 }, h("i"));
   if (parts) bar.querySelectorAll("i").forEach((i) => i.style.setProperty("width", i.dataset.w + "%"));
   else bar.firstChild.style.setProperty("width", v + "%");
   return label ? h("div", { class: "ui-meter-wrap" }, h("span", { class: "ui-meter-label" }, label), bar) : bar;
@@ -933,7 +933,7 @@ const uiAffix = (...parts) => h("span", { class: "ui-affix" }, parts.flat().filt
  * under it; `go` ({ label, onclick }) puts the search button at its right end instead; `wide` takes the whole width
  */
 const uiSearch = (input, { results = null, go = null, wide = false } = {}) =>
-  h("div", { class: "ui-find" + (go ? " with-go" : "") + (wide ? " wide" : "") }, !go && icon("search"), input, go && h("button", { type: "button", class: "ui-find-go", title: go.label, "aria-label": go.label, onclick: go.onclick }, icon("search")), results);
+  h("div", { class: "ui-find" + (go ? " ui-with-go" : "") + (wide ? " wide" : "") }, !go && icon("search"), input, go && h("button", { type: "button", class: "ui-find-go", title: go.label, "aria-label": go.label, onclick: go.onclick }, icon("search")), results);
 
 const uiFindResults = () => h("div", { class: "ui-find-results", hidden: true });
 
@@ -1022,9 +1022,9 @@ function uiSegment(items, value, onchange, { wide = false, label = null } = {}) 
  * was found for it), which wraps instead of being cut.
  */
 function uiChip({ label, icon: iconName = null, active = false, onclick = null, href = null, tone = "", remove = null } = {}) {
-  const cls = "ui-chip" + (active ? " active" : "") + (tone ? " " + tone : "");
+  const cls = "ui-chip" + (active ? " active" : "") + (tone ? " ui-" + tone : "");
   const inner = [iconName && icon(iconName), h("span", { class: tone ? null : "clip" }, label)];
-  if (remove) return h("span", { class: cls + " removable" }, h("button", { type: "button", class: "ui-chip-name", onclick }, inner), h("button", { type: "button", class: "ui-chip-x", title: remove.label, "aria-label": remove.label, onclick: remove.run }, icon("x")));
+  if (remove) return h("span", { class: cls + " ui-removable" }, h("button", { type: "button", class: "ui-chip-name", onclick }, inner), h("button", { type: "button", class: "ui-chip-x", title: remove.label, "aria-label": remove.label, onclick: remove.run }, icon("x")));
   return h(href ? "a" : onclick ? "button" : "span", { class: cls, href, type: !href && onclick ? "button" : null, onclick }, inner);
 }
 
@@ -1048,7 +1048,7 @@ const uiSwatches = (choices, extra = null) =>
   );
 
 /** Digits to read or to type, large; the first `typed` of them dimmed as they are typed */
-const uiDigits = (code, typed = 0) => h("div", { class: "ui-digits", "aria-label": code }, [...code].map((digit, i) => h("span", { class: i < typed ? "ui-digit typed" : "ui-digit" }, digit)));
+const uiDigits = (code, typed = 0) => h("div", { class: "ui-digits", "aria-label": code }, [...code].map((digit, i) => h("span", { class: i < typed ? "ui-digit ui-typed" : "ui-digit" }, digit)));
 
 /** A code to scan (the SVG of `qrSvg`), in the middle of its place; empty until the code is put in */
 const uiQr = (svg = null) => h("div", { class: "ui-qr" }, svg);
@@ -1079,7 +1079,7 @@ function uiLead(lead) {
   if (lead.colour) return h("span", { class: "ui-lead ui-colour" }, h("i", { class: "ui-c-" + lead.colour }));
   if (lead.img) return h("span", { class: "ui-lead ui-thumb" }, lead.img);
   if (lead.logo) return h("span", { class: "ui-lead" }, lead.logo);
-  return h("span", { class: "ui-lead" + (lead.tone ? " tone " + lead.tone : "") }, icon(lead.icon ?? "box"));
+  return h("span", { class: "ui-lead" + (lead.tone ? " ui-tone " + lead.tone : "") }, icon(lead.icon ?? "box"));
 }
 
 /** A picture of a thing that is not an app: an icon in the frame of an app's picture (`size` row, sm, lg, mini) */
@@ -1115,7 +1115,7 @@ const uiRing = () => h("span", { class: "ui-ring" });
 const uiNotice = ({ tone = "info", icon: iconName = null, title = null, text = null, command = null, action = null, second = null, foot = null }) =>
   h(
     "div",
-    { class: `ui-notice ${tone}`, role: tone === "bad" ? "alert" : "status" },
+    { class: `ui-notice ui-${tone}`, role: tone === "bad" ? "alert" : "status" },
     icon(iconName ?? { info: "info", ok: "check", warn: "alert", bad: "alert", accent: "info" }[tone] ?? "info"),
     h("div", { class: "ui-notice-text" }, title && h("strong", null, title), text && h("div", null, text), command, foot),
     (action || second) && h("div", { class: "ui-notice-actions" }, second, action),
@@ -1141,7 +1141,7 @@ function uiEmpty({ size = "small", icon: iconName = null, title = null, text = n
 }
 
 /** Text to read: paragraphs and lists as they come; `soft` puts it in a grey box (notes of an app, what to know) */
-const uiProse = (body, { title = null, soft = false } = {}) => h("div", { class: "ui-prose" + (soft ? " soft" : "") }, title && h("strong", null, title), body);
+const uiProse = (body, { title = null, soft = false } = {}) => h("div", { class: "ui-prose" + (soft ? " ui-soft" : "") }, title && h("strong", null, title), body);
 
 /** A version becoming another: what, the old one, an arrow, the new one */
 const uiVersionChange = ({ name, from, to }) => h("div", { class: "ui-version" }, h("span", { class: "muted" }, name), h("span", { class: "mono" }, from), icon("arrow"), h("strong", { class: "mono" }, to));
@@ -1152,7 +1152,7 @@ const uiVersionChange = ({ name, from, to }) => h("div", { class: "ui-version" }
  * Steps one after another (of a wizard, of a long piece of work): `items` are uiStepItem; `across` lays them in a
  * line (a wizard's steps over its body), else one under another with a line under each
  */
-const uiStepList = (items, { across = false } = {}) => h("ol", { class: "ui-step-list" + (across ? " across" : "") }, items);
+const uiStepList = (items, { across = false } = {}) => h("ol", { class: "ui-step-list" + (across ? " ui-across" : "") }, items);
 
 /** One step: its mark (its number, a tick when done), its words and a line under them; `state` done / now / failed */
 const uiStepItem = (text, { state = "", n = null } = {}) => h("li", { class: state || null }, h("span", { class: "ui-step-mark" }, state === "done" ? icon("check") : n != null ? String(n) : null), h("div", { class: "grow" }, h("span", null, text), h("small", { class: "muted" })));
@@ -1231,7 +1231,7 @@ function uiCommand(text, { block = false, secret = false, label = null } = {}) {
  * What a program prints, or a piece of code to read: `tone` dark (the console's, a running log) or light (what a
  * check answered); `size` m (320 px), s (180), page (most of the window) or fit (as long as it is, up to 260)
  */
-const uiOutput = (text = "", { tone = "dark", size = tone === "light" ? "fit" : "m", hidden = false } = {}) => h("pre", { class: `ui-output ${tone} ${size}`, hidden }, text);
+const uiOutput = (text = "", { tone = "dark", size = tone === "light" ? "fit" : "m", hidden = false } = {}) => h("pre", { class: `ui-output ui-${tone} ui-${size}`, hidden }, text);
 
 /** An output (or a terminal) with the command that fills it on top, and a choice beside it */
 const uiOutputFrame = (command, body, aside = null) => h("div", { class: "ui-output-frame" }, h("div", { class: "ui-output-head" }, h("p", { class: "ui-output-cmd grow" }, icon("terminal"), command), aside), body);
@@ -2301,7 +2301,7 @@ function dressSelect(select) {
   const show = () => {
     const index = NATIVE_INDEX.get.call(select);
     // every option lies in the same cell and only the chosen one is seen: the button is as wide as the widest, like a native select
-    label.replaceChildren(...[...select.options].map((o, i) => h("span", { class: i === index ? "" : "unseen" }, o.textContent)));
+    label.replaceChildren(...[...select.options].map((o, i) => h("span", { class: i === index ? "" : "ui-unseen" }, o.textContent)));
     pick.className = ["ui-select-btn", ...select.classList].filter((c) => c !== "ui-dressed").join(" ");
     pick.disabled = select.disabled;
     const name = select.getAttribute("aria-label");

@@ -1995,7 +1995,7 @@ function updateRow() {
     disabled: busy,
     onclick: async () => {
       check.disabled = true;
-      check.querySelector(".ico").classList.add("ui-spin");
+      check.querySelector(".ui-ico").classList.add("ui-spin");
       check.lastChild.textContent = t("update.checking");
       // a quick answer would only blink: the turn lasts long enough to be seen
       const [res] = await Promise.all([api("POST", "/api/update/check", {}).catch((e) => ({ ...state.update, error: errorText(e) })), new Promise((r) => setTimeout(r, 700))]);

@@ -14,6 +14,7 @@
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
+import { UTILITIES } from "../tests/uiclasses";
 
 const root = join(import.meta.dir, "..");
 const shotsAt = process.argv.includes("--shots") ? process.argv[process.argv.indexOf("--shots") + 1] : "";
@@ -234,6 +235,14 @@ const SIDEWAYS = `(() => {
 })()`;
 
 /** Words of the page that lie straight on the background: everything is written on a card */
+/** Classes on the page that are neither a block's (`ui-…`) nor a utility: what a part would have drawn of its own */
+const FOREIGN = `(() => {
+  const ok = new Set(${JSON.stringify([...UTILITIES])});
+  const seen = new Set();
+  for (const el of document.querySelectorAll("body *")) for (const c of el.classList) if (!c.startsWith("ui-") && !ok.has(c)) seen.add(c + " <" + el.tagName.toLowerCase() + ">");
+  return [...seen].slice(0, 12);
+})()`;
+
 const BARE = `(() => {
   const view = document.querySelector("#view");
   if (!view) return [];
@@ -323,6 +332,7 @@ async function walk(label: string, phone: boolean): Promise<void> {
     if (!(await js<boolean>(DRAWN))) found.push("the page is empty");
     if (phone) for (const wide of await js<string[]>(SIDEWAYS)) found.push(`scrolls sideways: ${wide}`);
     for (const gap of await js<string[]>(STEPS)) found.push(`off the steps: ${gap}`);
+    for (const own of await js<string[]>(FOREIGN)) found.push(`a class of its own: ${own}`);
     if (!route.startsWith("#/welcome")) for (const words of await js<string[]>(BARE)) found.push(`written outside a card: “${words}”`);
     for (const key of await js<string[]>(KEYS)) found.push(`a string shown as its key: ${key}`);
     for (const line of new Set(forbidden)) found.push(`asked for what is not theirs (403): ${line}`);
@@ -403,6 +413,7 @@ async function dialogs(label: string, phone: boolean): Promise<void> {
     }
     if (!(await js<boolean>(`!!document.querySelector("dialog[open]")`))) found.push("no window opened");
     for (const key of await js<string[]>(KEYS)) found.push(`a string shown as its key: ${key}`);
+    for (const own of await js<string[]>(FOREIGN)) found.push(`a class of its own: ${own}`);
     if (phone) for (const wide of await js<string[]>(DIALOG_WIDE)) found.push(`too wide: ${wide}`);
     if (shotsAt) {
       const picture = await send("Page.captureScreenshot", { format: "png" });
