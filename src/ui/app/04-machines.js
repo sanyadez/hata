@@ -116,24 +116,17 @@ function treeLoad(cpu, memory) {
   return h("span", { class: "tree-load" }, h("span", { class: "tree-bar" }, uiMeter(percent, { kind: "load" })), cpu != null && h("span", { class: "mono" }, `${Math.round(cpu)}%`), memory && h("span", { class: "mono muted" }, memory.total ? `${bytes(memory.used)} / ${bytes(memory.total)}` : bytes(memory.used)));
 }
 
-/** The one thing a row offers: what is first wanted of it in the state it is in */
+/** A button of a row only where something is to be done: a stopped one is started, a sleeping one woken; the rest is in its "⋯" and on its page */
 function treeAction(r) {
   const up = r.status === "running";
   const start = (run) => button(t("incus.start"), { class: "small", onclick: (e) => (e.stopPropagation(), run(e.currentTarget)) }, "play");
-  const on = (label, iconName, run) => button(label, { class: "small", onclick: (e) => (e.stopPropagation(), run()) }, iconName);
-  const open = () => h("a", { class: "btn small", href: rowPage(r), onclick: (e) => e.stopPropagation() }, icon("arrow"), h("span", null, t("common.open")));
   if (!up) {
     if (r.instance) return start((el) => containerAct({ name: r.instance }, "start", el).then(() => loadTree()));
     if (r.guest && r.may.power) return start((el) => pvePower({ id: r.guest.host }, guestOfRow(r), r.status === "paused" ? "resume" : "start", el).then(() => loadTree()));
     if (r.machine && r.wakes && !r.guest) return button(t("machines.wake"), { class: "small", onclick: (e) => (e.stopPropagation(), wakeMachine({ id: r.machine, name: r.name }, e.currentTarget)) }, "power");
-    return open();
+    return null;
   }
-  if (r.kind === "vm" && r.instance) return on(t("incus.screen"), "screen", () => containerScreen({ name: r.instance }));
-  if (r.kind === "vm" && r.guest && r.may.console) return on(t("pve.screen"), "screen", () => pveConsoleDialog({ id: r.guest.host }, guestOfRow(r)));
-  if (r.machine && r.connected) return h("a", { class: "btn small", href: `#/machines/${r.machine}/terminal`, onclick: (e) => e.stopPropagation() }, icon("terminal"), h("span", null, t("machines.tab.terminal")));
-  if (r.instance) return on(t("machines.tab.terminal"), "terminal", () => containerConsole({ name: r.instance }));
-  if (r.guest && r.may.console) return on(t("machines.tab.terminal"), "terminal", () => pveConsoleDialog({ id: r.guest.host }, guestOfRow(r)));
-  return open();
+  return null;
 }
 
 /** Everything else a row can do: the menu of what it is */
@@ -191,34 +184,29 @@ function treeGroup(g) {
           { label: t("common.open"), icon: "arrow", href: "#/machines/this" },
           { label: t("terminal.title"), icon: "terminal", href: "#/terminal" },
           hasModule("containers") && { label: t("tree.containers"), icon: "box", href: "#/machines/this/containers" },
+          hasModule("containers") && { label: t("tree.containersSettings"), icon: "settings", href: "#/machines/this/containers/settings" },
           { label: t("power.reboot"), icon: "refresh", run: () => serverPowerDialog("reboot") },
           { label: t("power.poweroff"), icon: "stop", danger: true, run: () => serverPowerDialog("poweroff") },
         ])
       : x
         ? (at) => pveMenu(x, at)
         : null;
-  const load = g.kind !== "others" && (g.cpu != null || g.memory) && h("span", { class: "ui-row-time" }, [g.cpu != null && t("tree.loadCpu", { n: Math.round(g.cpu) }), g.memory?.total && t("tree.loadMemory", { used: bytes(g.memory.used), total: bytes(g.memory.total) })].filter(Boolean).join(" · "));
-  const action =
-    g.kind === "here"
-      ? h("a", { class: "btn small", href: "#/terminal" }, icon("terminal"), h("span", null, t("machines.tab.terminal")))
-      : g.kind === "pve"
-        ? g.online
-          ? x?.url && h("a", { class: "btn small", href: x.url, target: "_blank", rel: "noopener noreferrer" }, icon("external"), h("span", null, t("tree.openProxmox")))
-          : button(t("tree.askAgain"), { class: "small", onclick: () => void loadPve().then(loadTree) }, "refresh")
-        : null;
+  const load = g.kind !== "others" && (g.cpu != null || g.memory) && [g.cpu != null && t("tree.loadCpu", { n: Math.round(g.cpu) }), g.memory?.total && t("tree.loadMemory", { used: bytes(g.memory.used), total: bytes(g.memory.total) })].filter(Boolean).join(" · ");
+  // a Proxmox server that does not answer keeps its one button: ask again
+  const action = g.kind === "pve" && !g.online && button(t("tree.askAgain"), { class: "small", onclick: () => void loadPve().then(loadTree) }, "refresh");
   const title = page ? h("a", { href: page }, g.name) : t("tree.others");
   const columns = [{ label: t("tree.col.name") }, { label: t("tree.col.what") }, { label: t("tree.col.state") }, { label: t("tree.col.load") }, { label: "" }];
   return uiCard(
     {
       title,
       marks: [head.chip && uiTag(head.chip), head.state],
-      lead: head.what,
+      lead: [head.what, load].filter(Boolean).join(" · "),
       flush: true,
       cls: "tree-host",
       menu,
-      actions: [load, action, menu && h("button", { type: "button", class: "btn small square ui-more", "aria-label": t("app.more"), onclick: (e) => menu(underButton(e.currentTarget)) }, icon("more")), g.kind === "here" && hasModule("containers") && h("a", { class: "ui-link", href: "#/machines/this/containers/settings" }, t("tree.containersSettings"), icon("chevron"))].filter(Boolean),
+      actions: [action, menu && h("button", { type: "button", class: "btn small square ui-more", "aria-label": t("app.more"), onclick: (e) => menu(underButton(e.currentTarget)) }, icon("more"))].filter(Boolean),
     },
-    g.rows.length ? uiTable(columns, g.rows.map(treeRow), { height: 44 }) : uiEmpty({ text: t(g.kind === "here" ? "tree.hereNone" : "tree.none"), action: g.kind === "here" && button(t("machines.addAny"), { class: "quiet small", onclick: (e) => addToMachinesMenu(e.currentTarget) }, "plus") }),
+    g.rows.length ? uiTable(columns, g.rows.map(treeRow), { height: 44 }) : uiEmpty({ text: t(g.kind === "here" ? "server.containersNone" : "tree.none") }),
   );
 }
 

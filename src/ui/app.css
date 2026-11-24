@@ -2092,7 +2092,7 @@ tr.warn-row .load-line path { stroke: var(--warn); }
 .area-name .meta { line-height: 1.35; }
 /* A card whose list or table reaches its edges: the head carries the padding, the list starts --gap-small under it */
 .card:not(.pad) > :is(.pad-head, .section-head.pad) { padding: var(--pad) var(--pad) var(--gap-small); margin: 0; }
-.card:not(.pad) > .section-head.pad + p.muted.pad { padding-top: 0; margin-top: calc(var(--gap-tight) - var(--gap-small)); padding-bottom: var(--gap-small); }
+.card:not(.pad) > .section-head.pad + p.muted.pad { padding: 0 var(--pad) var(--gap-small); margin-top: calc(var(--gap-tight) - var(--gap-small)); }
 .card.module-card { gap: var(--gap-small); }
 :where(.card:not(.pad)) { gap: 0; }
 /* the sign-in and setup forms are a card of their own padding: blocks --gap apart, a field's label --gap-tight over it */
